@@ -44,3 +44,11 @@ Thumbs.db
 temp/
 cache/
 checkpoints/
+
+# Setup tools
+*.egg-info/
+.eggs/
+
+# Build artifacts
+build/
+dist/
