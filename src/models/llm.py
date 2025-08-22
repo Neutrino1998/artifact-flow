@@ -8,7 +8,7 @@ from typing import Optional, Dict, Any
 from dotenv import load_dotenv
 
 from langchain_openai import ChatOpenAI
-from ..utils.logger import get_logger
+from utils.logger import get_logger
 
 # 加载环境变量
 load_dotenv()
@@ -29,16 +29,6 @@ MODEL_CONFIGS = {
     },
     
     # Qwen (通义千问) - 根据测试结果更新
-    "qwen-max": {
-        "model": "qwen-max",
-        "api_key": os.getenv("DASHSCOPE_API_KEY"),
-        "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-    },
-    "qwen-plus": {
-        "model": "qwen-plus",
-        "api_key": os.getenv("DASHSCOPE_API_KEY"),
-        "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-    },
     "qwen-turbo": {
         "model": "qwen-turbo",
         "api_key": os.getenv("DASHSCOPE_API_KEY"),
@@ -167,7 +157,7 @@ if __name__ == "__main__":
     test_question = "一个圆的半径是5，另一个圆的半径是3，如果这两个圆外切，求它们圆心之间的距离。"
     
     # 测试可用的模型 (包含两个30B模型对比)
-    test_models = ["qwen-turbo", "qwen3-30b-thinking", "qwen3-30b-instruct"]
+    test_models = ["qwen3-30b-thinking", "qwen3-30b-instruct"]
     
     for model_name in test_models:
         print(f"\n🤖 测试模型: {model_name}")
