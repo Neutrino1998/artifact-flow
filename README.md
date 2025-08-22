@@ -249,8 +249,8 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ## 📞 Support
 
 - 📖 [Documentation](docs/)
-- 🐛 [Issue Tracker](https://github.com/yourusername/artifact-flow/issues)
-- 💬 [Discussions](https://github.com/yourusername/artifact-flow/discussions)
+- 🐛 [Issue Tracker](https://github.com/Neutrino1998/artifact-flow/issues)
+- 💬 [Discussions](https://github.com/Neutrino1998/artifact-flow/discussions)
 
 ---
 
