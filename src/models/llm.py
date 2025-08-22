@@ -28,21 +28,35 @@ MODEL_CONFIGS = {
         "api_key": os.getenv("OPENAI_API_KEY"),
     },
     
-    # Qwen (通义千问)
+    # Qwen (通义千问) - 根据测试结果更新
     "qwen-max": {
         "model": "qwen-max",
-        "api_key": os.getenv("QWEN_API_KEY"),
+        "api_key": os.getenv("DASHSCOPE_API_KEY"),
         "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
     },
     "qwen-plus": {
         "model": "qwen-plus",
-        "api_key": os.getenv("QWEN_API_KEY"),
+        "api_key": os.getenv("DASHSCOPE_API_KEY"),
         "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
     },
     "qwen-turbo": {
         "model": "qwen-turbo",
-        "api_key": os.getenv("QWEN_API_KEY"),
+        "api_key": os.getenv("DASHSCOPE_API_KEY"),
         "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    },
+    
+    # Qwen3-30B 系列模型 (2507版本)
+    "qwen3-30b-thinking": {
+        "model": "qwen3-30b-a3b-thinking-2507",
+        "api_key": os.getenv("DASHSCOPE_API_KEY"),
+        "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        "description": "Qwen3-30B思考模型，支持深度推理和逐步分析"
+    },
+    "qwen3-30b-instruct": {
+        "model": "qwen3-30b-a3b-instruct-2507",
+        "api_key": os.getenv("DASHSCOPE_API_KEY"),
+        "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        "description": "Qwen3-30B指令模型，快速直接回答"
     },
     
     # DeepSeek
@@ -55,6 +69,7 @@ MODEL_CONFIGS = {
         "model": "deepseek-reasoner",
         "api_key": os.getenv("DEEPSEEK_API_KEY"),
         "base_url": "https://api.deepseek.com/v1",
+        "description": "DeepSeek推理模型，支持复杂逻辑"
     },
 }
 
@@ -84,12 +99,9 @@ def create_llm(
         llm = create_llm("qwen-plus")
         response = llm.invoke("Hello!")
         
-        # 使用自定义配置
-        llm = create_llm(
-            model="gpt-4",
-            api_key="your-key",
-            temperature=0.5
-        )
+        # 使用思考模型
+        llm = create_llm("qwen3-30b-thinking", temperature=0.1)
+        response = llm.invoke("解释量子纠缠")
         
         # 流式输出
         llm = create_llm("deepseek-chat", streaming=True)
@@ -100,6 +112,9 @@ def create_llm(
     if model in MODEL_CONFIGS:
         config = MODEL_CONFIGS[model].copy()
         model_name = config.pop("model")
+        
+        # 移除description字段（如果存在）
+        config.pop("description", None)
         
         # 合并用户提供的参数（用户参数优先）
         config.update(kwargs)
@@ -131,43 +146,61 @@ def get_available_models() -> list[str]:
     return list(MODEL_CONFIGS.keys())
 
 
+def get_model_info(model: str) -> Dict[str, Any]:
+    """获取模型信息"""
+    if model in MODEL_CONFIGS:
+        config = MODEL_CONFIGS[model].copy()
+        return {
+            "model_id": config["model"],
+            "description": config.get("description", ""),
+            "provider": "Qwen" if "qwen" in model else "OpenAI" if "gpt" in model else "DeepSeek"
+        }
+    return {"model_id": model, "description": "", "provider": "Unknown"}
+
+
 if __name__ == "__main__":
-    # 测试代码
-    import asyncio
+    # 简化的测试代码
+    print("🧪 LLM模块测试")
+    print("=" * 40)
     
-    print("可用模型:", get_available_models())
+    # 测试问题 - 使用需要推理的数学题来对比两个30B模型
+    test_question = "一个圆的半径是5，另一个圆的半径是3，如果这两个圆外切，求它们圆心之间的距离。"
     
-    # 创建模型
-    llm = create_llm("gpt-4o-mini", temperature=0.5)
+    # 测试可用的模型 (包含两个30B模型对比)
+    test_models = ["qwen-turbo", "qwen3-30b-thinking", "qwen3-30b-instruct"]
     
-    # 简单调用
-    print("\n测试调用:")
-    response = llm.invoke("What's 2+2?")
-    print(f"Response: {response.content}")
+    for model_name in test_models:
+        print(f"\n🤖 测试模型: {model_name}")
+        print("-" * 30)
+        
+        try:
+            # 检查API Key
+            config = MODEL_CONFIGS.get(model_name, {})
+            api_key = config.get("api_key")
+            
+            if not api_key:
+                print(f"❌ 跳过: 未设置API Key")
+                continue
+            
+            # 创建模型并测试
+            llm = create_llm(model_name, temperature=0.3)
+            response = llm.invoke(test_question)
+            
+            print(f"✅ 调用成功")
+            print(f"📝 问题: {test_question}")
+            print(f"💬 回答: \n{response.content}")
+            
+            print(f"📊 回答长度: {len(response.content)} 字符")
+            
+        except Exception as e:
+            print(f"❌ 调用失败: {str(e)}")
     
-    # 使用消息列表
-    print("\n测试消息列表:")
-    from langchain_core.messages import SystemMessage, HumanMessage
+    # 显示所有可用模型
+    print(f"\n📋 预定义模型列表:")
+    for model in get_available_models():
+        info = get_model_info(model)
+        print(f"   {model}: {info['model_id']} ({info['provider']})")
+        if info['description']:
+            print(f"      {info['description']}")
     
-    messages = [
-        SystemMessage(content="You are a helpful assistant."),
-        HumanMessage(content="What's the capital of France?")
-    ]
-    response = llm.invoke(messages)
-    print(f"Response: {response.content}")
-    
-    # 流式输出
-    print("\n测试流式输出:")
-    llm_stream = create_llm("gpt-4o-mini", streaming=True)
-    for chunk in llm_stream.stream("Count from 1 to 5"):
-        if chunk.content:
-            print(chunk.content, end="", flush=True)
-    print()
-    
-    # 异步调用
-    async def test_async():
-        print("\n测试异步调用:")
-        response = await llm.ainvoke("What's the weather like?")
-        print(f"Async Response: {response.content}")
-    
-    asyncio.run(test_async())
+    print(f"\n✅ 测试完成")
