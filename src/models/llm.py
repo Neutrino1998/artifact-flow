@@ -239,8 +239,10 @@ if __name__ == "__main__":
             
             print(f"📝 问题: {test_question}")
             print("-"*60)
-            print(f"💭 思考: {response.additional_kwargs.get('reasoning_content', '')}")
+            if 'reasoning_content' in response.additional_kwargs:
+                print("💭 思考:", response.additional_kwargs.get('reasoning_content', ''))
+                print("-"*60)
             print(f"💬 回答: {response.content}")
-            
+            print(response)
         except Exception as e:
             print(f"❌ 调用失败: {str(e)}")

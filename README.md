@@ -178,10 +178,15 @@ from src.models.llm import create_llm
 llm = create_llm("qwen3-30b-thinking", temperature=0.3)
 response = llm.invoke("解释量子计算的基本原理")
 
-# 获取思考过程（如果支持）
-if hasattr(response, 'reasoning_content'):
-    print("思考过程:", response.reasoning_content)
+# 获取思考过程（在 additional_kwargs 中）
+if 'reasoning_content' in response.additional_kwargs:
+    print("思考过程:", response.additional_kwargs['reasoning_content'])
 print("最终回答:", response.content)
+
+# 创建普通对话模型
+llm_chat = create_llm("qwen-plus", temperature=0.7)
+response = llm_chat.invoke("你好！")
+print("回答:", response.content)
 ```
 
 ## 📞 支持与反馈
