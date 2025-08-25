@@ -10,11 +10,15 @@ langgraph>=0.2.0  # 工作流编排
 langgraph-checkpoint>=2.0.0  # 状态管理
 
 # ========================================
-# 模型提供商 (可选，按需安装)
+# 模型提供商
 # ========================================
 
-# langchain-anthropic>=0.2.0  # Claude 支持 (如需要请取消注释)
-# langchain-community>=0.3.0  # 其他社区集成 (如需要请取消注释)
+# Qwen (通义千问) - ChatTongyi
+dashscope>=1.14.0  # 阿里云SDK，ChatTongyi依赖
+langchain-community>=0.3.0  # 包含ChatTongyi
+
+# DeepSeek - ChatDeepSeek  
+langchain-deepseek>=0.1.0  # DeepSeek专用包
 
 # ========================================
 # 工具依赖
