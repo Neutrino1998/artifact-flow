@@ -103,6 +103,14 @@ DEEPSEEK_API_KEY=sk-xxx
 # ------ Anthropic (Claude) ------
 # 获取地址: https://console.anthropic.com/settings/keys
 ANTHROPIC_API_KEY=sk-ant-xxx
+
+# ========================================
+# 工具 API 配置
+# ========================================
+
+# ------ 博查AI (Web搜索) ------
+# 获取地址: https://open.bochaai.com
+BOCHA_API_KEY=sk-xxx
 ```
 
 ## 💡 支持的模型
