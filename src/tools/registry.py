@@ -1,133 +1,79 @@
 """
 工具注册和管理系统
-负责工具的注册、查找、权限检查等
+支持Agent级别的工具集管理
 """
 
 from typing import Dict, List, Optional, Type, Set
-from .base import BaseTool, ToolPermission, ToolResult
+from tools.base import BaseTool, ToolPermission, ToolResult
 from utils.logger import get_logger
 
 logger = get_logger("ToolRegistry")
 
 
-class ToolRegistry:
+class AgentToolkit:
     """
-    工具注册中心
-    管理所有可用的工具
+    Agent工具包
+    每个Agent拥有自己的工具集
     """
     
-    def __init__(self):
-        """初始化注册中心"""
-        self._tools: Dict[str, BaseTool] = {}
-        self._tool_classes: Dict[str, Type[BaseTool]] = {}
-        
-    def register(self, tool: BaseTool) -> None:
+    def __init__(self, agent_name: str):
         """
-        注册工具实例
+        初始化Agent工具包
+        
+        Args:
+            agent_name: Agent名称
+        """
+        self.agent_name = agent_name
+        self.tools: Dict[str, BaseTool] = {}
+        self.allowed_permissions: Set[ToolPermission] = {
+            ToolPermission.PUBLIC,
+            ToolPermission.NOTIFY
+        }
+    
+    def add_tool(self, tool: BaseTool) -> None:
+        """
+        添加工具到工具包
         
         Args:
             tool: 工具实例
         """
-        if tool.name in self._tools:
-            logger.warning(f"Tool '{tool.name}' already registered, overwriting")
+        # 检查权限
+        if tool.permission not in self.allowed_permissions:
+            logger.warning(
+                f"Tool '{tool.name}' requires {tool.permission.value} permission, "
+                f"which is not allowed for agent '{self.agent_name}'"
+            )
+            return
         
-        self._tools[tool.name] = tool
-        logger.info(f"Registered tool: {tool.name} (permission: {tool.permission.value})")
+        self.tools[tool.name] = tool
+        logger.info(f"Added tool '{tool.name}' to {self.agent_name}'s toolkit")
     
-    def register_class(self, name: str, tool_class: Type[BaseTool]) -> None:
-        """
-        注册工具类（延迟实例化）
-        
-        Args:
-            name: 工具名称
-            tool_class: 工具类
-        """
-        self._tool_classes[name] = tool_class
-        logger.debug(f"Registered tool class: {name}")
+    def add_tools(self, tools: List[BaseTool]) -> None:
+        """批量添加工具"""
+        for tool in tools:
+            self.add_tool(tool)
     
-    def get(self, name: str) -> Optional[BaseTool]:
-        """
-        获取工具实例
-        
-        Args:
-            name: 工具名称
-            
-        Returns:
-            工具实例，不存在则返回None
-        """
-        # 先查找已实例化的工具
-        if name in self._tools:
-            return self._tools[name]
-        
-        # 尝试从类创建实例
-        if name in self._tool_classes:
-            tool_class = self._tool_classes[name]
-            tool = tool_class(name=name, description=f"Auto-created {name}")
-            self.register(tool)
-            return tool
-        
-        logger.warning(f"Tool '{name}' not found")
-        return None
+    def get_tool(self, name: str) -> Optional[BaseTool]:
+        """获取工具"""
+        return self.tools.get(name)
     
-    def list_tools(
-        self,
-        permission: Optional[ToolPermission] = None,
-        names_only: bool = False
-    ) -> List:
-        """
-        列出工具
-        
-        Args:
-            permission: 筛选指定权限级别的工具
-            names_only: 是否只返回名称列表
-            
-        Returns:
-            工具列表或名称列表
-        """
-        tools = list(self._tools.values())
-        
-        # 权限筛选
-        if permission:
-            tools = [t for t in tools if t.permission == permission]
-        
-        # 返回格式
-        if names_only:
-            return [t.name for t in tools]
-        return tools
+    def list_tools(self) -> List[BaseTool]:
+        """列出所有工具"""
+        return list(self.tools.values())
     
-    def get_tools_for_agent(
-        self,
-        agent_name: str,
-        allowed_permissions: Optional[Set[ToolPermission]] = None
-    ) -> List[BaseTool]:
-        """
-        获取Agent可用的工具列表
-        
-        Args:
-            agent_name: Agent名称
-            allowed_permissions: 允许的权限级别集合
-            
-        Returns:
-            工具列表
-        """
-        if allowed_permissions is None:
-            # 默认权限：PUBLIC和NOTIFY
-            allowed_permissions = {ToolPermission.PUBLIC, ToolPermission.NOTIFY}
-        
-        tools = []
-        for tool in self._tools.values():
-            if tool.permission in allowed_permissions:
-                tools.append(tool)
-        
-        logger.debug(f"Agent '{agent_name}' has access to {len(tools)} tools")
-        return tools
+    def set_allowed_permissions(self, permissions: Set[ToolPermission]) -> None:
+        """设置允许的权限级别"""
+        self.allowed_permissions = permissions
+        logger.info(
+            f"Set allowed permissions for {self.agent_name}: "
+            f"{[p.value for p in permissions]}"
+        )
     
     async def execute_tool(
         self,
         name: str,
         params: Dict,
-        check_permission: bool = True,
-        user_confirmed: bool = False
+        check_permission: bool = True
     ) -> ToolResult:
         """
         执行工具
@@ -136,70 +82,104 @@ class ToolRegistry:
             name: 工具名称
             params: 工具参数
             check_permission: 是否检查权限
-            user_confirmed: 用户是否已确认（对于CONFIRM级别）
             
         Returns:
             执行结果
         """
-        # 获取工具
-        tool = self.get(name)
+        tool = self.get_tool(name)
         if not tool:
             return ToolResult(
                 success=False,
-                error=f"Tool '{name}' not found"
+                error=f"Tool '{name}' not available in {self.agent_name}'s toolkit"
             )
         
         # 权限检查
-        if check_permission:
-            if tool.permission == ToolPermission.RESTRICTED:
-                return ToolResult(
-                    success=False,
-                    error=f"Tool '{name}' requires special authorization"
-                )
-            
-            if tool.permission == ToolPermission.CONFIRM and not user_confirmed:
-                return ToolResult(
-                    success=False,
-                    error=f"Tool '{name}' requires user confirmation",
-                    metadata={"needs_confirmation": True}
-                )
+        if check_permission and tool.permission not in self.allowed_permissions:
+            return ToolResult(
+                success=False,
+                error=f"Tool '{name}' requires {tool.permission.value} permission"
+            )
         
         # 执行工具
-        logger.debug(f"Executing tool '{name}' with params: {params}")
+        logger.debug(f"{self.agent_name} executing tool '{name}' with params: {params}")
         result = await tool(**params)
         
-        # 记录结果
         if result.success:
-            logger.info(f"Tool '{name}' executed successfully")
+            logger.info(f"{self.agent_name} successfully executed '{name}'")
         else:
-            logger.error(f"Tool '{name}' failed: {result.error}")
+            logger.error(f"{self.agent_name} failed to execute '{name}': {result.error}")
         
         return result
+
+
+class ToolRegistry:
+    """
+    工具注册中心
+    管理不同Agent的工具包
+    """
     
-    def clear(self) -> None:
-        """清空所有注册的工具"""
-        self._tools.clear()
-        self._tool_classes.clear()
-        logger.info("Cleared all registered tools")
-    
-    def get_registry_info(self) -> Dict:
-        """
-        获取注册中心信息
+    def __init__(self):
+        """初始化注册中心"""
+        # Agent工具包
+        self.agent_toolkits: Dict[str, AgentToolkit] = {}
         
+        # 工具库（所有可用的工具实例）
+        self.tool_library: Dict[str, BaseTool] = {}
+    
+    def register_tool_to_library(self, tool: BaseTool) -> None:
+        """
+        注册工具到工具库
+        
+        Args:
+            tool: 工具实例
+        """
+        self.tool_library[tool.name] = tool
+        logger.info(f"Registered tool '{tool.name}' to library")
+    
+    def create_agent_toolkit(
+        self,
+        agent_name: str,
+        tool_names: List[str] = None,
+        permissions: Set[ToolPermission] = None
+    ) -> AgentToolkit:
+        """
+        为Agent创建工具包
+        
+        Args:
+            agent_name: Agent名称
+            tool_names: 工具名称列表
+            permissions: 允许的权限级别
+            
         Returns:
-            注册信息字典
+            Agent工具包
         """
-        permission_stats = {}
-        for tool in self._tools.values():
-            perm = tool.permission.value
-            permission_stats[perm] = permission_stats.get(perm, 0) + 1
+        # 创建工具包
+        toolkit = AgentToolkit(agent_name)
         
-        return {
-            "total_tools": len(self._tools),
-            "total_classes": len(self._tool_classes),
-            "permission_distribution": permission_stats,
-            "tools": [tool.get_info() for tool in self._tools.values()]
-        }
+        # 设置权限
+        if permissions:
+            toolkit.set_allowed_permissions(permissions)
+        
+        # 添加工具
+        if tool_names:
+            for tool_name in tool_names:
+                if tool_name in self.tool_library:
+                    toolkit.add_tool(self.tool_library[tool_name])
+                else:
+                    logger.warning(f"Tool '{tool_name}' not found in library")
+        
+        # 保存工具包
+        self.agent_toolkits[agent_name] = toolkit
+        
+        logger.info(
+            f"Created toolkit for {agent_name} with {len(toolkit.tools)} tools"
+        )
+        
+        return toolkit
+    
+    def get_agent_toolkit(self, agent_name: str) -> Optional[AgentToolkit]:
+        """获取Agent的工具包"""
+        return self.agent_toolkits.get(agent_name)
 
 
 # 全局注册中心实例
@@ -207,26 +187,21 @@ _global_registry = ToolRegistry()
 
 
 # 便捷函数
-def register_tool(tool: BaseTool) -> None:
-    """注册工具到全局注册中心"""
-    _global_registry.register(tool)
-
-
-def get_tool(name: str) -> Optional[BaseTool]:
-    """从全局注册中心获取工具"""
-    return _global_registry.get(name)
-
-
-def list_tools(**kwargs) -> List:
-    """列出全局注册中心的工具"""
-    return _global_registry.list_tools(**kwargs)
-
-
 def get_registry() -> ToolRegistry:
-    """获取全局注册中心实例"""
+    """获取全局注册中心"""
     return _global_registry
 
 
-async def execute_tool(name: str, params: Dict, **kwargs) -> ToolResult:
-    """使用全局注册中心执行工具"""
-    return await _global_registry.execute_tool(name, params, **kwargs)
+def register_tool(tool: BaseTool) -> None:
+    """注册工具到工具库"""
+    _global_registry.register_tool_to_library(tool)
+
+
+def create_agent_toolkit(agent_name: str, **kwargs) -> AgentToolkit:
+    """创建Agent工具包"""
+    return _global_registry.create_agent_toolkit(agent_name, **kwargs)
+
+
+def get_agent_toolkit(agent_name: str) -> Optional[AgentToolkit]:
+    """获取Agent工具包"""
+    return _global_registry.get_agent_toolkit(agent_name)
