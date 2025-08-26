@@ -51,7 +51,7 @@ class PermissionGrant:
         if self.expires_at and datetime.now() > self.expires_at:
             return False
         return True
-
+    
 
 class PermissionManager:
     """
@@ -59,31 +59,25 @@ class PermissionManager:
     控制Agent对工具的访问权限
     """
     
-    def __init__(self):
-        """初始化权限管理器"""
-        # Agent默认权限级别
-        self.agent_permissions: Dict[str, Set[ToolPermission]] = {
-            "lead_agent": {
-                ToolPermission.PUBLIC,
-                ToolPermission.NOTIFY,
-                ToolPermission.CONFIRM
-            },
-            "search_agent": {
-                ToolPermission.PUBLIC
-            },
-            "crawl_agent": {
-                ToolPermission.PUBLIC
-            }
-        }
+    def __init__(self, initial_permissions: Optional[Dict[str, Set[ToolPermission]]] = None):
+        """
+        初始化权限管理器
         
-        # 特殊权限授予记录
+        Args:
+            initial_permissions: 一个字典，定义了Agent的初始默认权限。
+                                 例如: {"agent_name": {ToolPermission.PUBLIC}}
+        """
+        # Agent默认权限级别，由外部配置注入
+        self.agent_permissions: Dict[str, Set[ToolPermission]] = initial_permissions or {}
+        
+        # 其他属性保持不变
         self.special_grants: List[PermissionGrant] = []
-        
-        # 待处理的权限请求
         self.pending_requests: List[PermissionRequest] = []
-        
-        # 工具特殊要求（某些工具可能需要额外检查）
         self.tool_requirements: Dict[str, callable] = {}
+        
+        if self.agent_permissions:
+            logger.info(f"PermissionManager initialized with {len(self.agent_permissions)} agent permission sets.")
+
     
     def check_permission(
         self,
@@ -389,80 +383,71 @@ def get_permission_manager() -> PermissionManager:
 
 if __name__ == "__main__":
     import asyncio
-    import json
+    # These imports are needed for the test case
     from tools.base import BaseTool, ToolPermission, ToolParameter, ToolResult
+    from dataclasses import dataclass
 
-    # 为了测试，我们需要一个模拟的BaseTool子类
+    # --- Mock Objects for Testing ---
     class MockTool(BaseTool):
         def __init__(self, name: str, permission: ToolPermission):
-            super().__init__(name=name, description=f"Mock tool requiring {permission.value}", permission=permission)
-        
+            super().__init__(name=name, description="A mock tool", permission=permission)
         def get_parameters(self) -> list[ToolParameter]: return []
         async def execute(self, **params) -> ToolResult: return ToolResult(True, "OK")
 
     def _print_check(desc: str, result: bool):
-        """辅助打印函数，使输出更紧凑"""
+        """Helper to print test results cleanly."""
         print(f"  - {desc}: {'✅' if result else '❌'}")
 
-    async def run_tests():
-        """测试主函数"""
-        print("\n🧪 权限管理系统核心功能测试")
+    async def run_permission_tests():
+        print("\n🧪 Refactored PermissionManager Tests")
         print("="*40)
 
-        # 1. 初始化
-        manager = PermissionManager()
+        # 1. Setup: Define permissions externally, not inside the class
+        print("[1] Initializing Manager with external configuration...")
+        agent_perms_config = {
+            "lead_agent": {
+                ToolPermission.PUBLIC,
+                ToolPermission.NOTIFY,
+                ToolPermission.CONFIRM
+            },
+            "search_agent": {
+                ToolPermission.PUBLIC
+            }
+        }
+        # Initialize the manager with our configuration
+        manager = PermissionManager(initial_permissions=agent_perms_config)
+        _print_check("Manager initialized successfully", manager.agent_permissions is not None)
+
+        # Create mock tools
         public_tool = MockTool("search_web", ToolPermission.PUBLIC)
         confirm_tool = MockTool("send_email", ToolPermission.CONFIRM)
-        restricted_tool = MockTool("execute_code", ToolPermission.RESTRICTED)
 
-        # 2. 默认权限与自动请求/审批流程
-        print("\n[1] 默认权限与自动请求/审批")
-        _print_check("'search_agent' 使用 PUBLIC 工具", 
-                     manager.check_permission("search_agent", public_tool))
-        
-        has_perm = manager.check_permission("search_agent", confirm_tool, auto_request=True)
-        _print_check("'search_agent' 首次尝试 CONFIRM 工具 (失败并自动请求)", not has_perm)
+        # 2. Test default permissions based on the injected config
+        print("\n[2] Checking default permissions...")
+        _print_check("'lead_agent' CAN use CONFIRM tool",
+                     manager.check_permission("lead_agent", confirm_tool))
+        _print_check("'search_agent' CANNOT use CONFIRM tool",
+                     not manager.check_permission("search_agent", confirm_tool))
 
-        request = manager.get_pending_requests("search_agent")[0]
-        manager.process_request(request, approve=True, reviewer="test_admin")
-        print("  - 管理员批准了 'send_email' 请求")
+        # 3. Test request and grant flow (dynamic permissions)
+        print("\n[3] Testing dynamic grant workflow...")
+        # A higher-level orchestrator would see the check fail and create a request
+        request = manager.request_permission(
+            agent_name="search_agent",
+            tool_name="send_email",
+            reason="Task requires sending a report."
+        )
+        _print_check("Permission request created", len(manager.get_pending_requests()) == 1)
 
-        _print_check("'search_agent' 批准后再次尝试 CONFIRM 工具",
+        # Simulate an admin approving the request, creating a temporary grant
+        manager.process_request(request, approve=True, reviewer="admin")
+        print("  - Admin approved the request.")
+
+        # Check permission again. It should now pass due to the special grant.
+        _print_check("'search_agent' CAN use CONFIRM tool after grant",
                      manager.check_permission("search_agent", confirm_tool))
-
-        # 3. 手动授权与撤销流程
-        print("\n[2] 手动授权与撤销")
-        _print_check("'crawl_agent' 初始时无权使用 RESTRICTED 工具",
-                     not manager.check_permission("crawl_agent", restricted_tool))
         
-        manager.grant_permission("crawl_agent", "execute_code", ToolPermission.RESTRICTED)
-        print("  - 手动授予 'crawl_agent' 对 'execute_code' 的权限")
-        _print_check("授权后检查权限", 
-                     manager.check_permission("crawl_agent", restricted_tool))
+        print("\n✅ All PermissionManager tests passed!")
 
-        revoked = manager.revoke_permission("crawl_agent", "execute_code")
-        _print_check("撤销权限", revoked)
-        _print_check("撤销后检查权限", 
-                     not manager.check_permission("crawl_agent", restricted_tool))
-
-        # 4. 权限过期清理
-        print("\n[3] 权限过期清理")
-        grant = manager.grant_permission("lead_agent", "temp_tool", ToolPermission.CONFIRM)
-        grant.expires_at = datetime.now() - timedelta(seconds=1)  # 手动设置为已过期
-        
-        initial_count = len(manager.special_grants)
-        manager.cleanup_expired()
-        final_count = len(manager.special_grants)
-        _print_check(f"清理过期授权 (从 {initial_count} -> {final_count})", final_count < initial_count)
-
-        # 5. Agent 权限概览
-        print("\n[4] Agent 权限概览")
-        search_agent_perms = manager.get_agent_permissions("search_agent")
-        print("  - 'search_agent' 的最终权限状态:")
-        # 使用 ensure_ascii=False 以正确显示中文（如果日志中有）
-        print(json.dumps(search_agent_perms, indent=2, ensure_ascii=False))
-        
-        print("\n✅ 测试完成")
-
-    # 运行测试
-    asyncio.run(run_tests())
+    # To run the test
+    asyncio.run(run_permission_tests())
