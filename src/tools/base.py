@@ -216,38 +216,69 @@ class SyncBaseTool(BaseTool):
         """异步包装器"""
         return self.execute_sync(**params)
     
+
 if __name__ == "__main__":
-    # 1. 创建工具
-    from tools import BaseTool, ToolResult, ToolParameter, ToolPermission
-
-    class MyTool(BaseTool):
-        def __init__(self):
-            super().__init__(
-                name="my_tool",
-                description="My custom tool",
-                permission=ToolPermission.PUBLIC
-            )
-        
-        def get_parameters(self):
-            return [ToolParameter("param1", "string", "Description", True)]
-        
-        async def execute(self, **params):
-            return ToolResult(success=True, data="Result")
-
-    # 2. 注册工具
-    from tools import register_tool
-    register_tool(MyTool())
-
-    # 3. 生成提示词
-    from tools import generate_tool_prompt, list_tools
-    prompt = generate_tool_prompt(list_tools())
-
-    # 4. 执行工具
-    from tools import execute_tool
     import asyncio
-
-    async def main():
-        result = await execute_tool("my_tool", {"param1": "value"})
-        print(result)
-
-    asyncio.run(main())
+    
+    # 简单测试用例
+    async def test():
+        print("\n🧪 工具系统基础测试")
+        print("="*50)
+        
+        # 1. 创建简单工具
+        class TestTool(SyncBaseTool):
+            def __init__(self):
+                super().__init__(
+                    name="test_tool",
+                    description="A test tool",
+                    permission=ToolPermission.PUBLIC
+                )
+            
+            def get_parameters(self):
+                return [
+                    ToolParameter("input", "string", "Test input", True),
+                    ToolParameter("count", "integer", "Repeat count", False, 1)
+                ]
+            
+            def execute_sync(self, **params):
+                input_str = params.get("input", "")
+                count = params.get("count", 1)
+                result = input_str * count
+                return ToolResult(
+                    success=True,
+                    data={"output": result, "length": len(result)}
+                )
+        
+        # 2. 测试工具基本功能
+        tool = TestTool()
+        
+        print(f"\n✅ 创建工具: {tool.name}")
+        print(f"   描述: {tool.description}")
+        print(f"   权限: {tool.permission.value}")
+        
+        # 3. 测试工具执行
+        print("\n🚀 测试工具执行...")
+        
+        # 正常执行
+        result = await tool(input="Hello ", count=3)
+        print(f"   正常执行: {'✅' if result.success else '❌'}")
+        print(f"   结果: {result.data}")
+        
+        # 缺少参数执行
+        result = await tool(count=2)
+        print(f"   缺少参数: {'✅' if result.success else '❌'}")
+        print(f"   错误: {result.error}")
+        
+        # 4. 测试XML示例生成
+        print("\n📄 XML调用示例:")
+        print(tool.to_xml_example())
+        
+        # 5. 测试工具信息
+        print("\n📊 工具信息:")
+        info = tool.get_info()
+        print(f"   名称: {info['name']}")
+        print(f"   权限: {info['permission']}")
+        print(f"   参数数量: {len(info['parameters'])}")
+    
+    # 运行测试
+    asyncio.run(test())
