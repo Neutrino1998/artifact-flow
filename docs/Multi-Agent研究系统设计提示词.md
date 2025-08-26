@@ -190,6 +190,45 @@ class RobustXMLParser:
 
 - 针对每个工具设置权限级别：PUBLIC(直接执行如搜索)、NOTIFY(执行后通知如保存文件)、CONFIRM(需用户确认如发邮件)、RESTRICTED(需特殊授权如执行代码)
 - 敏感操作需要用户审批，普通查询类工具自动执行
+- 代码细节：
+
+1.  **Setup Phase:**
+    
+    *   创建 `ToolRegistry` 实例。
+    *   注册所有可用工具到 `registry.tool_library`。
+    *   定义 agent 的默认权限 `default_perms = {"lead_agent": {...}, "search_agent": {...}}`。
+    *   创建 `PermissionManager` 实例，传入配置：`permission_manager = PermissionManager(default_perms)`。
+    *   为每个 agent 创建工具包：`registry.create_agent_toolkit("search_agent", tool_names=["search_web", "send_email"])`。
+    
+2.  **Execution Phase (Agent wants to use "send_email"):**
+    
+    *   **Step 1 (Availability):** 从 Registry 获取工具。
+        ```python
+        toolkit = registry.get_agent_toolkit("search_agent")
+        tool_to_use = toolkit.get_tool("send_email")
+        if not tool_to_use:
+            # 失败：Agent 甚至没有这个工具
+            return "Error: Tool not available."
+        ```
+    *   **Step 2 (Authorization):** 询问 Permission Manager。
+        ```python
+        if not permission_manager.check_permission("search_agent", tool_to_use, auto_request=True):
+            # 失败：Agent 有这个工具，但当前没有权限使用它。
+            # (一个权限请求可能已被自动创建)
+            return "Waiting for permission to use send_email."
+        ```
+    *   **Step 3 (User Confirmation, if needed):**
+        ```python
+        if tool_to_use.permission == ToolPermission.CONFIRM:
+            # 暂停并向用户请求执行许可
+            user_approval = ask_user_for_confirmation(...)
+            if not user_approval:
+                return "Execution cancelled by user."
+        ```
+    *   **Step 4 (Execution):** 调用工具。
+        ```python
+        result = await toolkit.execute_tool("send_email", params={...})
+        ```
 
 ### 3. 分级日志系统
 
