@@ -4,7 +4,7 @@ XML提示词生成器
 """
 
 from typing import List, Optional, Dict, Any
-from .base import BaseTool, ToolParameter
+from tools.base import BaseTool, ToolParameter
 
 
 class ToolPromptGenerator:
