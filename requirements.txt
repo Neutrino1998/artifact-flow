@@ -26,3 +26,7 @@ langchain-deepseek>=0.1.0  # DeepSeek专用包
 
 # 环境变量管理
 python-dotenv>=1.0.0
+
+# 网络爬虫
+crawl4ai>=0.3.0  # 主要爬虫框架
+beautifulsoup4>=4.11.0  # HTML解析器：备用爬虫方案
