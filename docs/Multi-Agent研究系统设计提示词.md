@@ -177,6 +177,26 @@ class RobustXMLParser:
 - 历史对话压缩为摘要
 - 基于任务相关性筛选
 
+### 6. Agent路由机制 (伪装工具路由)
+
+```python
+class CallSubagentTool(BaseTool):
+    async def execute(agent_type, instruction): 
+        # 🎭 不实际执行，返回路由标记
+        return ToolResult(data={"_route_to": agent_type, ...})
+
+def route_after_lead_agent(state):
+    if state.waiting_for_subagent:
+        return state.next_agent  # "search_agent" or "crawl_agent"
+    return "lead_agent" if state.continue_processing else END
+```
+通过"伪装工具"实现Agent间路由
+
+- Lead Agent以为自己在调用工具（认知简单）
+- 实际触发LangGraph节点路由（架构优雅）
+- 复用现有工具提示词生成系统
+
+
 
 
 ## 核心特性
@@ -202,33 +222,39 @@ class RobustXMLParser:
     
 2.  **Execution Phase (Agent wants to use "send_email"):**
     
-    *   **Step 1 (Availability):** 从 Registry 获取工具。
-        ```python
-        toolkit = registry.get_agent_toolkit("search_agent")
-        tool_to_use = toolkit.get_tool("send_email")
-        if not tool_to_use:
-            # 失败：Agent 甚至没有这个工具
-            return "Error: Tool not available."
-        ```
-    *   **Step 2 (Authorization):** 询问 Permission Manager。
-        ```python
-        if not permission_manager.check_permission("search_agent", tool_to_use, auto_request=True):
-            # 失败：Agent 有这个工具，但当前没有权限使用它。
-            # (一个权限请求可能已被自动创建)
-            return "Waiting for permission to use send_email."
-        ```
-    *   **Step 3 (User Confirmation, if needed):**
-        ```python
-        if tool_to_use.permission == ToolPermission.CONFIRM:
-            # 暂停并向用户请求执行许可
-            user_approval = ask_user_for_confirmation(...)
-            if not user_approval:
-                return "Execution cancelled by user."
-        ```
-    *   **Step 4 (Execution):** 调用工具。
-        ```python
-        result = await toolkit.execute_tool("send_email", params={...})
-        ```
+    * **Step 1 (Availability):** 从 Registry 获取工具。
+    
+      ```python
+      toolkit = registry.get_agent_toolkit("search_agent")
+      tool_to_use = toolkit.get_tool("send_email")
+      if not tool_to_use:
+          # 失败：Agent 甚至没有这个工具
+          return "Error: Tool not available."
+      ```
+    * **Step 2 (Authorization):** 询问 Permission Manager。
+    
+      ```python
+      if not permission_manager.check_permission("search_agent", tool_to_use, auto_request=True):
+          # 失败：Agent 有这个工具，但当前没有权限使用它。
+          # (一个权限请求可能已被自动创建)
+          return "Waiting for permission to use send_email."
+      ```
+    * **Step 3 (User Confirmation, if needed):**
+    
+      ```python
+      if tool_to_use.permission == ToolPermission.CONFIRM:
+          # 暂停并向用户请求执行许可
+          user_approval = ask_user_for_confirmation(...)
+          if not user_approval:
+              return "Execution cancelled by user."
+      ```
+    * **Step 4 (Execution):** 调用工具。
+    
+      ```python
+      result = await toolkit.execute_tool("send_email", params={...})
+      ```
+    
+      
 
 ### 3. 分级日志系统
 
@@ -289,7 +315,8 @@ artifact-flow/
 │   │       ├── 📄 __init__.py
 │   │       ├── 📄 web_search.py
 │   │       ├── 📄 web_fetch.py
-│   │       └── 📄 artifact_ops.py    # Artifact操作工具
+│   │       ├── 📄 artifact_ops.py    # Artifact操作工具
+│   │       └── 📄 call_subagent.py   # Subagent调用工具（伪装路由工具）
 │   │
 │   ├── 📁 models/                    # 模型接口
 │   │   ├── 📄 __init__.py
@@ -317,21 +344,6 @@ artifact-flow/
 ├── 📁 logs/                          # 日志目录
 ├── 📁 examples/                      # 示例代码
 └── 📁 docs/                          # 文档
-```
-
-
-
-### 关键配置 (config.yaml)
-
-```yaml
-models:
-  lead_agent:
-    provider: "anthropic"
-    model: "claude-3-opus"
-    supports_thinking: true
-  search_agent:
-    provider: "openai"
-    model: "gpt-4-turbo"
 ```
 
 
