@@ -10,6 +10,7 @@ from datetime import datetime
 from tools.base import BaseTool, ToolResult, ToolParameter, ToolPermission
 from utils.logger import get_logger
 from utils.retry import api_retry
+import random
 
 # 导入crawl4ai组件
 try:
@@ -46,13 +47,20 @@ class WebFetchTool(BaseTool):
         
         if not CRAWL4AI_AVAILABLE:
             logger.error("crawl4ai is not available")
+            return
         
-        # 初始化浏览器配置（精简版）
+        # 新增：User-Agent 池
+        self.user_agents = [
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36"
+        ]
+        
+        # 初始化浏览器配置
         self.browser_config = BrowserConfig(
-            headless=True,        # 无头模式，减少资源消耗
-            verbose=False,        # 禁用详细日志
-            # 注意：不使用text_mode，避免PDF页面错误
-            # 注意：不使用随机user_agent，保持稳定性
+            headless=True,
+            verbose=False,
+            user_agent=random.choice(self.user_agents)  # 随机 User-Agent
         )
         
         # 内容过滤器配置
@@ -469,7 +477,7 @@ if __name__ == "__main__":
         
         # 测试1: 单个URL
         print("\n📍 测试1: 单个URL抓取")
-        test_urls = ["https://docs.crawl4ai.com/advanced/undetected-browser/"]
+        test_urls = ["https://github.com/Neutrino1998/artifact-flow"]
         
         result = await tool(urls=test_urls)
         
