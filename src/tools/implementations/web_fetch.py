@@ -251,17 +251,11 @@ class WebFetchTool(BaseTool):
                     if len(content) > max_content_length:
                         content = content[:max_content_length] + "..."
                     
-                    # 提取摘要（前500字符作为摘要）
-                    summary = content[:500] if content else ""
-                    if "..." in summary:
-                        summary = summary.replace("...", "")
-                    
                     results.append({
                         "success": True,
                         "url": url,
                         "title": result.metadata.get("title", "No Title"),
                         "content": content,
-                        "summary": summary,
                         "word_count": len(content.split()),
                         "fetched_at": datetime.now().isoformat()
                     })
@@ -282,6 +276,17 @@ class WebFetchTool(BaseTool):
         """
         将抓取结果格式化为XML
         
+        格式示例:
+        <fetch_results>
+          <fetch_result>
+            <url>...</url>
+            <title>...</title>
+            <content>...</content>
+            <word_count>...</word_count>
+            <fetched_at>...</fetched_at>
+          </fetch_result>
+        </fetch_results>
+        
         Args:
             results: 抓取结果列表
             
@@ -299,7 +304,6 @@ class WebFetchTool(BaseTool):
                 xml_parts.append("  <fetch_result>")
                 xml_parts.append(f"    <url>{self._escape_xml(result['url'])}</url>")
                 xml_parts.append(f"    <title>{self._escape_xml(result['title'])}</title>")
-                xml_parts.append(f"    <summary>{self._escape_xml(result['summary'])}</summary>")
                 xml_parts.append(f"    <content>{self._escape_xml(result['content'])}</content>")
                 xml_parts.append(f"    <word_count>{result['word_count']}</word_count>")
                 xml_parts.append(f"    <fetched_at>{result['fetched_at']}</fetched_at>")
@@ -465,15 +469,15 @@ if __name__ == "__main__":
         
         # 测试1: 单个URL
         print("\n📍 测试1: 单个URL抓取")
-        test_urls = ["https://github.com/Neutrino1998/artifact-flow"]
+        test_urls = ["https://docs.crawl4ai.com/advanced/undetected-browser/"]
         
         result = await tool(urls=test_urls)
         
         if result.success:
             print(f"✅ 抓取成功")
             print(f"   成功: {result.metadata['success_count']}/{result.metadata['total_urls']}")
-            print("\nXML结果（前1000字符）:")
-            print(result.data[:1000] + "...")
+            print("\nXML结果（前2000字符）:")
+            print(result.data[:2000] + "...")
         else:
             print(f"❌ 抓取失败: {result.error}")
         
