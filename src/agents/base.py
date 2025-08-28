@@ -4,8 +4,10 @@ Base Agent抽象类
 """
 
 from abc import ABC, abstractmethod
-from typing import Dict, Any, List, Optional, AsyncGenerator
+from typing import Dict, Any, List, Optional, AsyncGenerator, Union
 from dataclasses import dataclass, field
+from datetime import datetime
+from enum import Enum
 
 from utils.logger import get_logger
 from utils.xml_parser import parse_tool_calls
@@ -14,6 +16,26 @@ from tools.registry import AgentToolkit
 from tools.base import ToolResult
 
 logger = get_logger("BaseAgent")
+
+
+class StreamEventType(Enum):
+    """流式事件类型"""
+    START = "start"                # 开始执行
+    LLM_CHUNK = "llm_chunk"        # LLM输出片段
+    LLM_COMPLETE = "llm_complete"  # LLM输出完成
+    TOOL_START = "tool_start"      # 工具调用开始
+    TOOL_RESULT = "tool_result"    # 工具调用结果
+    COMPLETE = "complete"          # 执行完成
+    ERROR = "error"                # 错误
+
+
+@dataclass
+class StreamEvent:
+    """流式事件"""
+    type: StreamEventType
+    agent: str
+    timestamp: datetime = field(default_factory=datetime.now)
+    data: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -240,6 +262,268 @@ class BaseAgent(ABC):
                 "completed": True
             }
         )
+    
+    async def execute_stream(
+        self,
+        user_input: str,
+        context: Optional[Dict[str, Any]] = None
+    ) -> AsyncGenerator[StreamEvent, None]:
+        """
+        流式执行Agent任务（用于LangGraph节点）
+        
+        Yields不同类型的事件，支持实时流式输出
+        
+        事件类型：
+        - START: 执行开始
+        - LLM_CHUNK: LLM输出片段
+        - LLM_COMPLETE: LLM输出完成
+        - TOOL_START: 工具调用开始
+        - TOOL_RESULT: 工具调用结果
+        - COMPLETE: 执行完成
+        - ERROR: 错误
+        
+        Args:
+            user_input: 用户输入/任务指令
+            context: 执行上下文
+            
+        Yields:
+            StreamEvent: 流式事件
+        """
+        # Yield开始事件
+        yield StreamEvent(
+            type=StreamEventType.START,
+            agent=self.config.name,
+            data={"user_input": user_input[:100], "has_context": context is not None}
+        )
+        
+        # 重置状态
+        self.tool_call_count = 0
+        tool_history = []
+        
+        try:
+            # 构建系统提示词
+            system_prompt = self.build_system_prompt(context)
+            
+            # 添加工具使用说明（如果有工具）
+            if self.toolkit and self.toolkit.list_tools():
+                tools_instruction = ToolPromptGenerator.generate_tool_instruction(
+                    self.toolkit.list_tools()
+                )
+                system_prompt += f"\n\n{tools_instruction}"
+            
+            # 准备消息
+            messages = [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_input}
+            ]
+            
+            # 工具调用循环
+            final_content = ""
+            reasoning_content = None
+            
+            for round_num in range(self.config.max_tool_rounds + 1):
+                # 检查是否超过工具调用限制
+                if round_num == self.config.max_tool_rounds:
+                    messages.append({
+                        "role": "system",
+                        "content": "⚠️ You have reached the maximum tool call limit. Please summarize your findings and provide the final response."
+                    })
+                
+                # LLM流式调用
+                response_content = ""
+                chunk_count = 0
+                
+                if self.config.streaming:
+                    # 流式输出
+                    async for chunk in self.llm.astream(messages):
+                        if hasattr(chunk, 'content') and chunk.content:
+                            response_content += chunk.content
+                            chunk_count += 1
+                            
+                            # Yield LLM chunk事件
+                            yield StreamEvent(
+                                type=StreamEventType.LLM_CHUNK,
+                                agent=self.config.name,
+                                data={
+                                    "content": chunk.content,
+                                    "round": round_num + 1,
+                                    "chunk_index": chunk_count
+                                }
+                            )
+                        
+                        # 记录思考过程（如果有）
+                        if hasattr(chunk, 'additional_kwargs'):
+                            if 'reasoning_content' in chunk.additional_kwargs:
+                                reasoning_content = chunk.additional_kwargs['reasoning_content']
+                                # 可选：yield思考内容
+                                if self.config.debug:
+                                    yield StreamEvent(
+                                        type=StreamEventType.LLM_CHUNK,
+                                        agent=self.config.name,
+                                        data={
+                                            "thinking": reasoning_content,
+                                            "is_thinking": True
+                                        }
+                                    )
+                else:
+                    # 批量输出（非流式）
+                    response = await self.llm.ainvoke(messages)
+                    response_content = response.content
+                    
+                    # Yield完整的LLM响应作为单个chunk
+                    yield StreamEvent(
+                        type=StreamEventType.LLM_CHUNK,
+                        agent=self.config.name,
+                        data={
+                            "content": response_content,
+                            "round": round_num + 1,
+                            "is_complete": True
+                        }
+                    )
+                    
+                    # 记录思考过程
+                    if hasattr(response, 'additional_kwargs'):
+                        if 'reasoning_content' in response.additional_kwargs:
+                            reasoning_content = response.additional_kwargs['reasoning_content']
+                
+                # Yield LLM完成事件
+                yield StreamEvent(
+                    type=StreamEventType.LLM_COMPLETE,
+                    agent=self.config.name,
+                    data={
+                        "round": round_num + 1,
+                        "content_length": len(response_content)
+                    }
+                )
+                
+                # 调试模式记录
+                if self.config.debug:
+                    logger.debug(f"[Round {round_num + 1}] LLM Response: {response_content[:500]}...")
+                    if reasoning_content:
+                        logger.debug(f"[Round {round_num + 1}] Reasoning: {reasoning_content[:500]}...")
+                
+                # 解析工具调用
+                tool_calls = parse_tool_calls(response_content)
+                
+                # 判断是否完成（无工具调用即完成）
+                if not tool_calls or round_num >= self.config.max_tool_rounds:
+                    final_content = response_content
+                    break
+                
+                # 执行工具调用
+                tool_results = []
+                for tool_call in tool_calls:
+                    self.tool_call_count += 1
+                    
+                    # Yield工具开始事件
+                    yield StreamEvent(
+                        type=StreamEventType.TOOL_START,
+                        agent=self.config.name,
+                        data={
+                            "tool": tool_call.name,
+                            "params": tool_call.params,
+                            "round": round_num + 1,
+                            "call_index": self.tool_call_count
+                        }
+                    )
+                    
+                    logger.info(f"{self.config.name} calling tool: {tool_call.name}")
+                    
+                    # 执行工具
+                    if self.toolkit:
+                        result = await self.toolkit.execute_tool(
+                            tool_call.name,
+                            tool_call.params
+                        )
+                        
+                        # 记录工具调用历史
+                        tool_history.append({
+                            "tool": tool_call.name,
+                            "params": tool_call.params,
+                            "result": result.to_dict()
+                        })
+                        
+                        # Yield工具结果事件
+                        yield StreamEvent(
+                            type=StreamEventType.TOOL_RESULT,
+                            agent=self.config.name,
+                            data={
+                                "tool": tool_call.name,
+                                "success": result.success,
+                                "result": result.to_dict(),
+                                "round": round_num + 1
+                            }
+                        )
+                        
+                        # 格式化工具结果为XML
+                        xml_result = format_result(tool_call.name, result.to_dict())
+                        tool_results.append(xml_result)
+                    else:
+                        # 没有工具包，返回错误
+                        error_result = {
+                            "success": False,
+                            "error": "No toolkit available"
+                        }
+                        
+                        yield StreamEvent(
+                            type=StreamEventType.TOOL_RESULT,
+                            agent=self.config.name,
+                            data={
+                                "tool": tool_call.name,
+                                "success": False,
+                                "error": "No toolkit available"
+                            }
+                        )
+                        
+                        tool_results.append(
+                            f"<tool_result><name>{tool_call.name}</name>"
+                            f"<success>false</success>"
+                            f"<error>No toolkit available</error></tool_result>"
+                        )
+                
+                # 将工具结果添加到对话历史
+                messages.append({"role": "assistant", "content": response_content})
+                messages.append({"role": "user", "content": "\n".join(tool_results)})
+            
+            # 格式化最终响应
+            formatted_response = self.format_final_response(final_content, tool_history)
+            
+            # 构建最终响应对象
+            final_response = AgentResponse(
+                content=formatted_response,
+                tool_calls=tool_history,
+                reasoning_content=reasoning_content,
+                metadata={
+                    "agent": self.config.name,
+                    "model": self.config.model,
+                    "tool_rounds": self.tool_call_count,
+                    "completed": True
+                }
+            )
+            
+            # Yield完成事件
+            yield StreamEvent(
+                type=StreamEventType.COMPLETE,
+                agent=self.config.name,
+                data={
+                    "response": final_response,
+                    "tool_calls_count": len(tool_history),
+                    "final_content_length": len(formatted_response)
+                }
+            )
+            
+        except Exception as e:
+            # Yield错误事件
+            logger.exception(f"Agent execution error: {str(e)}")
+            yield StreamEvent(
+                type=StreamEventType.ERROR,
+                agent=self.config.name,
+                data={
+                    "error": str(e),
+                    "error_type": type(e).__name__
+                }
+            )
+            raise
     
     async def reset(self):
         """重置Agent状态"""
