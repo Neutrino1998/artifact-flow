@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 
 from utils.logger import get_logger
 from utils.xml_parser import parse_tool_calls
-from utils.prompt_generator import ToolPromptGenerator, format_result
+from tools.prompt_generator import ToolPromptGenerator, format_result
 from tools.registry import AgentToolkit
 from tools.base import ToolResult
 
