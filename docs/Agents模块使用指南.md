@@ -2,7 +2,7 @@
 
 ## 概述
 
-Agents模块实现了多智能体研究系统的核心Agent逻辑。每个Agent都有特定的职责和工具集，通过协作完成复杂的研究任务。
+Agents模块实现了多智能体系统的核心Agent逻辑。每个Agent都有特定的职责和工具集，通过协作完成复杂任务。
 
 ## 核心设计原则
 
@@ -23,10 +23,14 @@ Agents模块实现了多智能体研究系统的核心Agent逻辑。每个Agent�
 - Artifact操作工具（create/update/rewrite/read）
 - CallSubagentTool（路由到其他Agent）
 
+**特色功能**：
+
+- **动态SubAgent注册**：可以灵活注册和管理子Agent
+
 **使用示例**：
 
 ```python
-from agents import create_lead_agent
+from agents.lead_agent import LeadAgent, SubAgent
 from tools.registry import create_agent_toolkit
 
 # 创建工具包
@@ -36,11 +40,32 @@ toolkit = create_agent_toolkit("lead_agent", tool_names=[
 ])
 
 # 创建Lead Agent
-agent = create_lead_agent(toolkit=toolkit)
+lead_agent = LeadAgent(toolkit=toolkit)
+
+# 注册SubAgent
+lead_agent.register_subagent(SubAgent(
+    name="search_agent",
+    description="Searches the web for information",
+    capabilities=[
+        "Web search with various filters",
+        "Search refinement and optimization",
+        "Information extraction from search results"
+    ]
+))
+
+lead_agent.register_subagent(SubAgent(
+    name="crawl_agent",
+    description="Extracts content from specific web pages",
+    capabilities=[
+        "Deep content extraction from URLs",
+        "Content cleaning and filtering",
+        "Anti-crawling detection"
+    ]
+))
 
 # 执行任务
-response = await agent.execute(
-    "Create a research plan for AI safety",
+response = await lead_agent.execute(
+    "Create a task plan for analyzing market trends",
     context={"task_complexity": "high"}
 )
 
@@ -60,12 +85,12 @@ print(response.tool_calls)  # 工具调用历史
 
 - 自主优化搜索词
 - 多轮迭代搜索
-- XML格式结构化输出
+- 简化XML格式输出
 
 **使用示例**：
 
 ```python
-from agents import create_search_agent
+from agents.search_agent import create_search_agent
 
 # 创建Search Agent
 agent = create_search_agent(toolkit=search_toolkit)
@@ -73,19 +98,23 @@ agent = create_search_agent(toolkit=search_toolkit)
 # 执行搜索
 context = {
     "instruction": "Find recent AI breakthroughs",
-    "requirements": ["Focus on 2024", "Include commercial applications"]
+    "task_plan": "Current research context..."
 }
 
 response = await agent.execute(
-    "Search for AI breakthroughs",
+    "Search for AI breakthroughs and summarize findings",
     context=context
 )
 
-# 响应为XML格式
-# <search_findings>
-#   <summary>...</summary>
-#   <search_results>...</search_results>
-# </search_findings>
+# 响应为简化的XML格式
+# <search_results>
+#   <r>
+#     <title>...</title>
+#     <url>...</url>
+#     <content>...</content>
+#   </r>
+#   <!-- More results -->
+# </search_results>
 ```
 
 ### 3. Crawl Agent
@@ -100,12 +129,13 @@ response = await agent.execute(
 
 - 深度内容提取
 - 智能内容清洗
-- 结构化信息组织
+- 反爬检测和处理
+- 简化结构化输出
 
 **使用示例**：
 
 ```python
-from agents import create_crawl_agent
+from agents.crawl_agent import create_crawl_agent
 
 # 创建Crawl Agent
 agent = create_crawl_agent(toolkit=crawl_toolkit)
@@ -113,58 +143,78 @@ agent = create_crawl_agent(toolkit=crawl_toolkit)
 # 执行抓取
 context = {
     "urls": ["https://example.com/article"],
-    "focus_areas": ["Key findings", "Data points"]
+    "task_plan": "Extract key findings from articles"
 }
 
 response = await agent.execute(
-    "Extract content from URLs",
+    "Extract and clean content from URLs",
     context=context
 )
 
-# 响应为XML格式
-# <extraction_results>
-#   <summary>...</summary>
-#   <pages>...</pages>
-# </extraction_results>
+# 响应为简化的XML格式
+# <extracted_pages>
+#   <page>
+#     <url>...</url>
+#     <title>...</title>
+#     <content>...</content>
+#   </page>
+# </extracted_pages>
 ```
 
-## 工具集成
+## 完整系统示例
 
-### 1. 设置工具注册表
-
-```python
-from tools.registry import get_registry
-from tools.implementations import *
-
-# 获取全局注册表
-registry = get_registry()
-
-# 注册工具到库
-registry.register_tool_to_library(CreateArtifactTool())
-registry.register_tool_to_library(WebSearchTool())
-# ... 更多工具
-```
-
-### 2. 创建Agent工具包
+### 多Agent系统集成
 
 ```python
-# 为特定Agent创建工具包
-toolkit = registry.create_agent_toolkit(
-    agent_name="lead_agent",
-    tool_names=["create_artifact", "call_subagent"]
-)
-```
+from agents.lead_agent import LeadAgent, SubAgent
+from agents.search_agent import SearchAgent
+from agents.crawl_agent import CrawlAgent
+from tools.registry import ToolRegistry
 
-### 3. 权限控制（可选）
-
-```python
-from tools.permissions import PermissionManager, ToolPermission
-
-# 设置Agent权限
-manager = PermissionManager({
-    "lead_agent": {ToolPermission.PUBLIC, ToolPermission.CONFIRM},
-    "search_agent": {ToolPermission.PUBLIC}
-})
+class MultiAgentSystem:
+    """多Agent系统的简单封装"""
+    
+    def __init__(self):
+        # 创建工具注册中心
+        self.registry = ToolRegistry()
+        
+        # 注册所有工具
+        self._register_all_tools()
+        
+        # 创建各Agent
+        self.lead_agent = self._setup_lead_agent()
+        self.search_agent = self._setup_search_agent()
+        self.crawl_agent = self._setup_crawl_agent()
+        
+        # 在Lead Agent中注册子Agent
+        self._register_subagents()
+    
+    def _register_subagents(self):
+        """动态注册子Agent到Lead Agent"""
+        # 注册Search Agent
+        self.lead_agent.register_subagent(SubAgent(
+            name="search_agent",
+            description="Information retrieval specialist",
+            capabilities=[
+                "Web search optimization",
+                "Multi-round search refinement",
+                "Structured result extraction"
+            ]
+        ))
+        
+        # 注册Crawl Agent  
+        self.lead_agent.register_subagent(SubAgent(
+            name="crawl_agent",
+            description="Content extraction specialist",
+            capabilities=[
+                "Deep content extraction",
+                "Content quality assessment",
+                "Anti-crawling handling"
+            ]
+        ))
+        
+        # 可以继续注册更多专门的Agent
+        # self.lead_agent.register_subagent(SubAgent(...))
 ```
 
 ## 执行流程
@@ -180,17 +230,17 @@ graph TD
     G -->|否| D
     G -->|是| H[返回最终响应]
     E -->|否| H
-    H --> I[格式化输出]
+    H --> I[Agent自行格式化输出]
 ```
 
 ## AgentConfig配置
 
 ```python
-from agents import AgentConfig
+from agents.base import AgentConfig
 
 config = AgentConfig(
     name="custom_agent",
-    description="Custom research agent",
+    description="Custom task agent",
     model="qwen-plus",  # 或其他模型
     temperature=0.7,
     max_tool_rounds=3,  # 最大工具调用轮数
@@ -205,24 +255,46 @@ config = AgentConfig(
 
 - **简单问题**：直接回答，无需artifact
 - **中等复杂**：可选创建task_plan
-- **复杂研究**：必须创建task_plan进行系统化执行
+- **复杂任务**：必须创建task_plan进行系统化执行
 
 ### 2. Agent协作模式
 
 ```python
-# Lead Agent协调示例
+# Lead Agent自动协调
 lead_response = await lead_agent.execute(
-    "Research quantum computing applications"
+    "Analyze the impact of AI on education"
 )
 
-# Lead自动调用sub agents
-# 路由通过CallSubagentTool触发
-if "call_subagent" in [c["tool"] for c in lead_response.tool_calls]:
-    # Graph会自动路由到相应的sub agent
-    pass
+# Lead通过CallSubagentTool自动调用sub agents
+# 路由决策由Lead Agent自主完成
 ```
 
-### 3. 错误处理
+### 3. SubAgent注册最佳实践
+
+```python
+# 为不同任务类型注册专门的Agent
+lead_agent.register_subagent(SubAgent(
+    name="data_agent",
+    description="Data analysis and visualization",
+    capabilities=[
+        "Statistical analysis",
+        "Data cleaning and preprocessing",
+        "Visualization generation"
+    ]
+))
+
+lead_agent.register_subagent(SubAgent(
+    name="code_agent",
+    description="Code generation and review",
+    capabilities=[
+        "Code synthesis",
+        "Bug detection",
+        "Performance optimization"
+    ]
+))
+```
+
+### 4. 错误处理
 
 ```python
 try:
@@ -232,12 +304,12 @@ except Exception as e:
     # 降级处理或重试
 ```
 
-### 4. 调试技巧
+### 5. 调试技巧
 
 ```python
 # 开启调试模式
 config = AgentConfig(debug=True)
-agent = BaseAgent(config, toolkit)
+agent = SomeAgent(config, toolkit)
 
 # 查看工具调用详情
 for call in response.tool_calls:
@@ -261,25 +333,33 @@ workflow = StateGraph(AgentState)
 # 添加节点
 workflow.add_node("lead_agent", lead_agent_node)
 workflow.add_node("search_agent", search_agent_node)
+workflow.add_node("crawl_agent", crawl_agent_node)
 
 # 条件路由
 def route_after_lead(state):
-    # 检查是否需要路由到sub agent
-    if state.get("route_to"):
-        return state["route_to"]
+    # 从Lead Agent的工具调用中提取路由决策
+    routing_decision = lead_agent.extract_routing_decision(
+        state["tool_calls"]
+    )
+    if routing_decision:
+        return routing_decision
     return END
 
 workflow.add_conditional_edges(
     "lead_agent",
     route_after_lead,
-    {"search_agent": "search_agent", END: END}
+    {
+        "search_agent": "search_agent",
+        "crawl_agent": "crawl_agent",
+        END: END
+    }
 )
 ```
 
 ### 流式模式（使用execute_stream）
 
 ```python
-from agents import StreamEvent, StreamEventType
+from agents.base import StreamEvent, StreamEventType
 
 async def lead_agent_node(state: AgentState):
     """使用execute_stream的节点实现"""
@@ -372,40 +452,6 @@ async def agent_websocket(websocket: WebSocket, agent_id: str):
         })
 ```
 
-### 前端处理示例
-
-```javascript
-// 连接WebSocket
-const ws = new WebSocket('ws://localhost:8000/ws/agent/lead_agent');
-
-// 处理流式事件
-ws.onmessage = (event) => {
-    const data = JSON.parse(event.data);
-    
-    switch(data.type) {
-        case 'llm_chunk':
-            // 追加到聊天界面
-            appendToChat(data.data.content);
-            break;
-            
-        case 'tool_start':
-            // 显示工具调用动画
-            showToolLoading(data.data.tool);
-            break;
-            
-        case 'tool_result':
-            // 更新工具状态
-            updateToolStatus(data.data.tool, data.data.success);
-            break;
-            
-        case 'complete':
-            // 显示最终结果
-            displayFinalResponse(data.data.response);
-            break;
-    }
-};
-```
-
 ### execute vs execute_stream对比
 
 | 特性      | execute()       | execute_stream()              |
@@ -420,32 +466,15 @@ ws.onmessage = (event) => {
 
 ### 1. Agent工具循环控制机制
 
-设置统一的工具调用次数限制（最大3轮），超过限制后在提示词中明确指示Agent："你已达到工具调用上限，请总结你的发现并返回最终结果给Lead Agent"，防止无限循环并确保任务收敛。
-
-```python
-# 在BaseAgent中已实现
-if round_num == self.config.max_tool_rounds:
-    messages.append({
-        "role": "system",
-        "content": "⚠️ You have reached the maximum tool call limit..."
-    })
-```
+设置统一的工具调用次数限制（最大3轮），超过限制后在提示词中明确指示Agent："你已达到工具调用上限，请总结你的发现并返回最终结果"，防止无限循环并确保任务收敛。
 
 ### 2. 任务完成状态判断统一原则
 
-所有Agent（Lead/Sub）采用相同的完成信号：当LLM响应中不包含工具调用时，即视为任务完成。Sub Agent完成后自动返回Lead Agent，Lead Agent无工具调用时结束整个流程。
-
-```python
-# 统一的完成判断逻辑
-tool_calls = parse_tool_calls(response_content)
-if not tool_calls or round_num >= self.config.max_tool_rounds:
-    final_content = response_content
-    break  # 任务完成
-```
+所有Agent（Lead/Sub）采用相同的完成信号：当LLM响应中不包含工具调用时，即视为任务完成。Sub Agent完成后自动返回结果，Lead Agent无工具调用时结束整个流程。
 
 ### 3. 单线程顺序执行架构
 
-不考虑Agent并发执行，采用简化设计：同一时间只有一个节点运行，Lead Agent和Sub Agent使用相同的执行策略和代码框架，降低系统复杂度，提高开发效率和调试友好性。
+不考虑Agent并发执行，采用简化设计：同一时间只有一个节点运行，Lead Agent和Sub Agent使用相同的执行策略和代码框架，降低系统复杂度。
 
 ### 4. 统一流式输出体验
 
@@ -459,44 +488,31 @@ Lead Agent和Sub Agent采用相同的构造模式：
 
 采用统一的LangGraph工作流，包含Lead Agent节点和多个Sub Agent节点，所有工具调用在节点内部循环执行而非独立节点。通过CallSubagentTool伪工具触发节点间路由。
 
-```python
-# CallSubagentTool返回路由指令而非执行结果
-if data.get("_is_routing_instruction"):
-    return data.get("_route_to")  # 触发LangGraph路由
-```
-
 ### 6. 模块职责分工明确
 
-- **agents/模块**：实现具体Agent的业务逻辑，包括提示词构建、工具调用循环、结果格式化等Agent内部行为
-- **core/模块**：负责LangGraph工作流定义、节点路由逻辑、状态管理、执行控制等系统级调度
-- **tools/模块**：提供工具实现和注册管理，不涉及Agent逻辑
+- **agents/模块**：实现具体Agent的业务逻辑
+- **core/模块**：负责LangGraph工作流定义、节点路由、状态管理
+- **tools/模块**：提供工具实现和注册管理
 
 ### 7. 思考模型兼容性设计
 
-Agent兼容思考模型和非思考模型，对于思考模型可以记录`additional_kwargs`中的`reasoning_content`用于调试，但核心逻辑始终基于`response.content`。
-
-```python
-# 记录思考过程但不依赖它
-if 'reasoning_content' in chunk.additional_kwargs:
-    reasoning_content = chunk.additional_kwargs['reasoning_content']
-    # 仅用于调试，核心逻辑使用response.content
-```
+Agent兼容思考模型和非思考模型，记录`reasoning_content`用于调试，但核心逻辑始终基于`response.content`。
 
 ### 8. Lead Agent工具配置策略
 
-Lead Agent只配置artifact操作工具和CallSubagentTool伪工具：
+Lead Agent只配置artifact操作工具和CallSubagentTool：
 
 - Artifact工具：create/update/rewrite/read_artifact
 - CallSubagentTool：触发路由到sub agents
-- 无工具调用时表示直接回复用户，结束流程
+- 无工具调用时表示直接回复用户
 
 ### 9. Lead Agent任务规划逻辑
 
 Lead Agent提示词明确task_plan管理策略：
 
 - **简单问答**：直接回答，无需artifact
-- **中等复杂**（1-2个搜索）：可选择创建task_plan
-- **复杂研究**：必须先创建task_plan，然后逐步更新
+- **中等复杂**（1-2个子任务）：可选择创建task_plan
+- **复杂任务**：必须先创建task_plan，然后逐步更新
 
 ### 10. Search Agent自主优化机制
 
@@ -504,25 +520,18 @@ Search Agent具备自主搜索能力：
 
 - 根据结果质量自行refine搜索词
 - 进行多轮搜索优化（最多3轮）
-- 返回XML格式结构化结果
-- 模仿搜索工具的标准输出格式
+- 返回简化XML格式结构化结果
+- 自行整理和总结搜索信息
 
-```xml
-<search_findings>
-  <summary>...</summary>
-  <search_results>...</search_results>
-  <search_strategy>...</search_strategy>
-</search_findings>
-```
+### 11. Crawl Agent内容处理模式
 
-### 11. Fetch Agent内容处理模式
-
-Fetch Agent（Crawl Agent）职责相对简单：
+Crawl Agent职责明确且简单：
 
 - 接收URL列表
 - 爬取内容后清洗提取
-- 返回XML格式的有用信息
-- 重点关注内容质量而非搜索策略
+- 检测反爬、paywall等问题
+- 返回简化XML格式的有用信息
+- 由Agent自己判断内容质量
 
 ### 12. 动态Context注入机制
 
@@ -532,9 +541,21 @@ Fetch Agent（Crawl Agent）职责相对简单：
 def build_system_prompt(self, context: Optional[Dict[str, Any]] = None):
     prompt = "基础提示词..."
     if context:
-        if context.get("task_plan_content"):
-            prompt += f"\n\n## Current Task Plan\n{context['task_plan_content']}"
+        if context.get("task_plan"):
+            prompt += f"\n\n## Task Context\n{context['task_plan']}"
     return prompt
+```
+
+### 13. 动态SubAgent扩展能力
+
+Lead Agent支持动态注册新的SubAgent，使系统能够适应不同类型的任务需求：
+
+```python
+# 根据任务需求动态添加专门的Agent
+if task_type == "data_analysis":
+    lead_agent.register_subagent(data_analysis_agent)
+elif task_type == "code_review":
+    lead_agent.register_subagent(code_review_agent)
 ```
 
 ## 其他注意事项
@@ -543,6 +564,7 @@ def build_system_prompt(self, context: Optional[Dict[str, Any]] = None):
 2. **工具可用性**：运行前确认所需工具已注册并分配给Agent
 3. **内存管理**：注意工具调用历史会占用内存，长时间运行需要清理
 4. **并发限制**：当前设计为单线程顺序执行，不支持Agent并发
+5. **模型选择**：Crawl Agent可以使用更便宜的模型以节省成本
 
 ## 下一步
 
