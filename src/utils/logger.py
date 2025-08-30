@@ -29,13 +29,25 @@ class ColoredFormatter(logging.Formatter):
         'RESET': '\033[0m',       # 重置
     }
     
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._for_console = False  # 默认不启用颜色
+    
     def format(self, record):
-        if sys.stdout.isatty():  # 只在终端中使用颜色
-            levelname = record.levelname
+        # 只有明确标记为控制台输出时才使用颜色
+        if self._for_console and sys.stdout.isatty():
+            # 创建record的副本，避免修改原始record影响其他handler
+            import copy
+            colored_record = copy.copy(record)
+            
+            levelname = colored_record.levelname
             if levelname in self.COLORS:
-                record.levelname = f"{self.COLORS[levelname]}{levelname}{self.COLORS['RESET']}"
-                record.msg = f"{self.COLORS[levelname]}{record.msg}{self.COLORS['RESET']}"
-        return super().format(record)
+                colored_record.levelname = f"{self.COLORS[levelname]}{levelname}{self.COLORS['RESET']}"
+                colored_record.msg = f"{self.COLORS[levelname]}{colored_record.msg}{self.COLORS['RESET']}"
+            
+            return super().format(colored_record)
+        else:
+            return super().format(record)
 
 
 class Logger:
@@ -75,12 +87,14 @@ class Logger:
         # 添加控制台输出
         if console:
             console_handler = logging.StreamHandler(sys.stdout)
-            console_handler.setFormatter(ColoredFormatter(
+            console_formatter = ColoredFormatter(
                 '%(asctime)s [%(levelname)s] %(filename)s:%(funcName)s:%(lineno)d - %(message)s',
                 datefmt='%H:%M:%S'
-            ))
+            )
+            console_formatter._for_console = True  # 启用颜色
+            console_handler.setFormatter(console_formatter)
             self.logger.addHandler(console_handler)
-        
+
         # 添加文件输出
         if file:
             # 常规日志
@@ -90,9 +104,11 @@ class Logger:
                 backupCount=5,
                 encoding='utf-8'
             )
-            file_handler.setFormatter(logging.Formatter(
+            # 文件使用无颜色的普通formatter
+            file_formatter = logging.Formatter(
                 '%(asctime)s - %(name)s - %(levelname)s - %(filename)s:%(funcName)s:%(lineno)d - %(message)s'
-            ))
+            )
+            file_handler.setFormatter(file_formatter)
             self.logger.addHandler(file_handler)
             
             # 错误日志（单独文件）
@@ -103,9 +119,7 @@ class Logger:
                 encoding='utf-8'
             )
             error_handler.setLevel(logging.ERROR)
-            error_handler.setFormatter(logging.Formatter(
-                '%(asctime)s - %(name)s - %(levelname)s - %(filename)s:%(funcName)s:%(lineno)d - %(message)s'
-            ))
+            error_handler.setFormatter(file_formatter)  # 同样使用无颜色formatter
             self.logger.addHandler(error_handler)
     
     def set_debug(self, enabled: bool):
