@@ -17,7 +17,7 @@ class SearchAgent(BaseAgent):
     核心能力：
     1. 自主搜索优化：根据结果质量调整搜索策略
     2. 多轮迭代搜索：通过refine关键词提高搜索质量
-    3. 结构化输出：返回标准XML格式的搜索结果
+    3. 结构化输出：返回简洁的搜索结果
     4. 智能判断：知道何时停止搜索
     
     工具配置：
@@ -58,62 +58,39 @@ class SearchAgent(BaseAgent):
 
 ## Your Mission
 
-Execute targeted web searches to gather relevant, high-quality information for research tasks.
+Execute targeted web searches to gather relevant, high-quality information.
 
 ## Core Capabilities
 
-### 1. Smart Search Strategy
-- Start with broad searches to understand the landscape
-- Refine queries based on initial results
-- Use specific terms and filters when needed
-- Know when you have sufficient information
+1. **Smart Search Strategy**
+   - Start with broad searches to understand the landscape
+   - Refine queries based on initial results
+   - Use specific terms and filters when needed
+   - Know when you have sufficient information
 
-### 2. Search Refinement Techniques
-- Add specific keywords for precision
-- Use date filters for recent information (freshness parameter)
-- Combine related concepts
-- Try alternative phrasings if results are poor
+2. **Search Refinement Techniques**
+   - Add specific keywords for precision
+   - Use date filters for recent information (freshness parameter)
+   - Try alternative phrasings if results are poor
 
-### 3. Quality Assessment
-Evaluate search results based on:
-- Relevance to the research question
-- Source credibility
-- Information recency
-- Content depth and detail
-
-## Search Execution Process
-
-1. **Analyze Task**: Understand what information is needed
-2. **Initial Search**: Start with core keywords
-3. **Evaluate Results**: Assess quality and coverage
-4. **Refine if Needed**: Adjust search terms for better results
-5. **Compile Findings**: Organize results in structured format
+3. **Quality Assessment**
+   - Relevance to the task
+   - Source credibility
+   - Information recency
 
 ## Output Format
 
-Return your findings in this XML structure:
+Return your findings in this simple XML structure:
 
 ```xml
-<search_findings>
-  <summary>Brief overview of what was found</summary>
-  <search_results>
-    <result>
-      <title>Page Title</title>
-      <url>https://...</url>
-      <snippet>Key information excerpt</snippet>
-      <relevance>High/Medium/Low</relevance>
-      <key_points>
-        <point>Important finding 1</point>
-        <point>Important finding 2</point>
-      </key_points>
-    </result>
-    <!-- More results -->
-  </search_results>
-  <search_strategy>
-    <queries_used>List of search queries attempted</queries_used>
-    <refinements>Any query refinements made</refinements>
-  </search_strategy>
-</search_findings>
+<search_results>
+  <result>
+    <title>Page Title</title>
+    <url>https://...</url>
+    <content>Key information and summary</content>
+  </result>
+  <!-- More results -->
+</search_results>
 ```
 
 ## Search Guidelines
@@ -122,7 +99,7 @@ Return your findings in this XML structure:
 - Start broad, then narrow down
 - Maximum 3 search iterations (tool rounds)
 - Focus on quality over quantity
-- Stop when you have sufficient relevant information
+- Extract and summarize key information from search results
 
 ## Tool Usage
 
@@ -137,89 +114,17 @@ You have access to the web_search tool with these parameters:
                 prompt += f"\n\n## Current Task\n{context['instruction']}"
             
             if context.get("task_plan"):
-                prompt += f"\n\n## Research Context\n{context['task_plan']}"
-            
-            if context.get("requirements"):
-                prompt += "\n\n## Specific Requirements"
-                for req in context["requirements"]:
-                    prompt += f"\n- {req}"
+                prompt += f"\n\n## Task Context\n{context['task_plan']}"
         
         return prompt
     
     def format_final_response(self, content: str, tool_history: List[Dict]) -> str:
         """
-        格式化Search Agent的最终响应为XML
+        格式化Search Agent的最终响应
         
-        Args:
-            content: LLM的分析和总结
-            tool_history: 搜索工具调用历史
-            
-        Returns:
-            XML格式的搜索结果
+        Search Agent自己负责整理信息，直接返回其输出
         """
-        # 如果content已经是XML格式，直接返回
-        if "<search_findings>" in content:
-            return content
-        
-        # 否则构建标准XML响应
-        xml_parts = ["<search_findings>"]
-        
-        # 添加摘要
-        xml_parts.append(f"  <summary>{self._extract_summary(content)}</summary>")
-        
-        # 添加搜索结果（从工具历史中提取）
-        xml_parts.append("  <search_results>")
-        
-        for call in tool_history:
-            if call["tool"] == "web_search" and call["result"]["success"]:
-                # 解析搜索结果
-                search_data = call["result"].get("data", "")
-                xml_parts.append(self._format_search_data(search_data))
-        
-        xml_parts.append("  </search_results>")
-        
-        # 添加搜索策略信息
-        xml_parts.append("  <search_strategy>")
-        xml_parts.append("    <queries_used>")
-        
-        for call in tool_history:
-            if call["tool"] == "web_search":
-                query = call["params"].get("query", "")
-                xml_parts.append(f"      <query>{query}</query>")
-        
-        xml_parts.append("    </queries_used>")
-        xml_parts.append("    <total_searches>{}</total_searches>".format(
-            len([c for c in tool_history if c["tool"] == "web_search"])
-        ))
-        xml_parts.append("  </search_strategy>")
-        
-        xml_parts.append("</search_findings>")
-        
-        return "\n".join(xml_parts)
-    
-    def _extract_summary(self, content: str) -> str:
-        """从内容中提取摘要"""
-        # 简单实现：取前200个字符或第一段
-        lines = content.strip().split('\n')
-        summary = lines[0] if lines else content
-        
-        if len(summary) > 200:
-            summary = summary[:197] + "..."
-        
-        return summary
-    
-    def _format_search_data(self, search_data: str) -> str:
-        """格式化搜索数据为XML片段"""
-        # 这里应该解析search_data中的XML并重新格式化
-        # 简化实现：直接返回相关部分
-        if isinstance(search_data, str) and "<search_result>" in search_data:
-            # 提取search_result标签内容
-            import re
-            results = re.findall(r'<search_result>.*?</search_result>', 
-                                search_data, re.DOTALL)
-            return '\n'.join(f"    {r}" for r in results[:5])  # 最多5个结果
-        
-        return "    <!-- No structured results available -->"
+        return content
     
     async def search_with_refinement(
         self,
@@ -243,9 +148,8 @@ You have access to the web_search tool with these parameters:
             "requirements": requirements or []
         }
         
-        # 使用基类的execute方法，它会处理工具调用循环
         response = await self.execute(
-            f"Please search for: {initial_query}",
+            f"Please search for: {initial_query}. Extract and summarize the key findings in the XML format.",
             context
         )
         
@@ -270,44 +174,3 @@ def create_search_agent(toolkit=None) -> SearchAgent:
         配置好的Search Agent实例
     """
     return SearchAgent(toolkit=toolkit)
-
-
-if __name__ == "__main__":
-    import asyncio
-    
-    async def test_search_agent():
-        """测试Search Agent基础功能"""
-        print("\n🧪 Testing Search Agent")
-        print("="*50)
-        
-        # 创建Search Agent
-        agent = create_search_agent()
-        
-        # 测试1: 系统提示词
-        print("\n📝 System Prompt (excerpt):")
-        context = {
-            "instruction": "Find recent developments in quantum computing",
-            "requirements": ["Focus on 2024 breakthroughs", "Include commercial applications"]
-        }
-        prompt = agent.build_system_prompt(context)
-        print(prompt[:800] + "...")
-        
-        # 测试2: 响应格式化
-        print("\n📝 Response Formatting:")
-        mock_tool_history = [
-            {
-                "tool": "web_search",
-                "params": {"query": "quantum computing 2024"},
-                "result": {
-                    "success": True,
-                    "data": "<search_result><title>Test</title></search_result>"
-                }
-            }
-        ]
-        formatted = agent.format_final_response("Found information about quantum computing", mock_tool_history)
-        print(formatted[:500])
-        
-        print("\n✅ Search Agent tests completed")
-    
-    # 运行测试
-    asyncio.run(test_search_agent())
