@@ -9,7 +9,7 @@ from datetime import datetime
 from agents.base import BaseAgent, AgentConfig, AgentResponse
 from utils.logger import get_logger
 
-logger = get_logger("LeadAgent")
+logger = get_logger("Agents")
 
 
 class SubAgent:

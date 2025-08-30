@@ -7,7 +7,7 @@ from typing import Dict, Any, Optional, List
 from agents.base import BaseAgent, AgentConfig
 from utils.logger import get_logger
 
-logger = get_logger("SearchAgent")
+logger = get_logger("Agents")
 
 
 class SearchAgent(BaseAgent):

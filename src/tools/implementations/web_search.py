@@ -18,7 +18,7 @@ from utils.retry import api_retry
 # 加载环境变量
 load_dotenv()
 
-logger = get_logger("WebSearch")
+logger = get_logger("Tools")
 
 # 博查AI配置
 BOCHA_API_KEY = os.getenv("BOCHA_API_KEY")

@@ -24,7 +24,7 @@ from tools.implementations.web_fetch import WebFetchTool
 # 工具相关
 from utils.logger import get_logger
 
-logger = get_logger("AgentSystem")
+logger = get_logger("AgentSystemTest")
 
 
 class MultiAgentSystem:

@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from tools.base import BaseTool, ToolResult, ToolParameter, ToolPermission
 from utils.logger import get_logger
 
-logger = get_logger("ArtifactOps")
+logger = get_logger("Tools")
 
 
 @dataclass

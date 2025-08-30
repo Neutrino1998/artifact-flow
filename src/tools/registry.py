@@ -7,7 +7,7 @@ from typing import Dict, List, Optional
 from tools.base import BaseTool, ToolResult
 from utils.logger import get_logger
 
-logger = get_logger("ToolRegistry")
+logger = get_logger("Tools")
 
 
 class AgentToolkit:

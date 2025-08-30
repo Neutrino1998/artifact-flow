@@ -15,7 +15,7 @@ from tools.prompt_generator import ToolPromptGenerator, format_result
 from tools.registry import AgentToolkit
 from tools.base import ToolResult
 
-logger = get_logger("BaseAgent")
+logger = get_logger("Agents")
 
 
 class StreamEventType(Enum):

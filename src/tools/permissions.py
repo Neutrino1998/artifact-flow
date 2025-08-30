@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 from tools.base import ToolPermission, BaseTool
 from utils.logger import get_logger
 
-logger = get_logger("ToolPermissions")
+logger = get_logger("Tools")
 
 
 @dataclass
