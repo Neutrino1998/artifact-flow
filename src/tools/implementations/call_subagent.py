@@ -114,11 +114,6 @@ class CallSubagentTool(BaseTool):
   <params>
     <agent_type>search_agent</agent_type>
     <instruction>Search for recent developments in AI safety research, focusing on alignment techniques published in 2024</instruction>
-    <priority>high</priority>
-    <context>
-      <keywords>AI safety, alignment, 2024</keywords>
-      <max_results>10</max_results>
-    </context>
   </params>
 </tool_call>"""
 
