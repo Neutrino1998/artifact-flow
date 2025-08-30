@@ -3,7 +3,7 @@ Lead Agent实现
 负责任务协调、信息整合、用户交互
 """
 
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Tuple
 from datetime import datetime
 
 from agents.base import BaseAgent, AgentConfig, AgentResponse
@@ -12,9 +12,17 @@ from utils.logger import get_logger
 logger = get_logger("LeadAgent")
 
 
+class SubAgent:
+    """子Agent注册信息"""
+    def __init__(self, name: str, description: str, capabilities: List[str]):
+        self.name = name
+        self.description = description
+        self.capabilities = capabilities
+
+
 class LeadAgent(BaseAgent):
     """
-    Lead Agent - 研究系统的指挥者
+    Lead Agent - 任务协调者
     
     核心职责：
     1. 任务规划：根据复杂度创建task_plan
@@ -51,6 +59,19 @@ class LeadAgent(BaseAgent):
         self.current_task_plan_id = None
         self.current_result_id = None
         
+        # 注册的子Agent列表
+        self.sub_agents: Dict[str, SubAgent] = {}
+    
+    def register_subagent(self, agent: SubAgent):
+        """
+        注册子Agent
+        
+        Args:
+            agent: SubAgent实例
+        """
+        self.sub_agents[agent.name] = agent
+        logger.info(f"Registered sub-agent: {agent.name}")
+    
     def build_system_prompt(self, context: Optional[Dict[str, Any]] = None) -> str:
         """
         构建Lead Agent的系统提示词
@@ -62,34 +83,34 @@ class LeadAgent(BaseAgent):
             系统提示词
         """
         # 基础角色定义
-        prompt = f"""You are {self.config.name}, the Lead Research Agent coordinating a multi-agent research system.
+        prompt = f"""You are {self.config.name}, the Lead Agent coordinating a multi-agent system.
 
 ## Your Role and Responsibilities
 
-You are the orchestra conductor of our research system. Your core responsibilities:
+You are the orchestra conductor. Your core responsibilities:
 1. **Task Planning**: Analyze user requests and create structured task plans
 2. **Coordination**: Delegate specific tasks to specialized sub-agents
 3. **Integration**: Synthesize information from various sources into coherent results
-4. **Quality Control**: Ensure research quality and completeness
+4. **Quality Control**: Ensure quality and completeness
 
 ## Task Planning Strategy
 
 Based on request complexity, choose your approach:
 
-### Simple Questions (Direct Answer)
+### Simple Tasks (Direct Answer)
 - Basic factual questions
-- Single-step queries
-- No external research needed
+- Single-step operations
+- No delegation needed
 → Answer directly without creating artifacts
 
-### Moderate Research (Optional Task Plan)
-- 1-2 specific search queries needed
-- Limited scope investigation
+### Moderate Tasks (Optional Task Plan)
+- 1-2 specific sub-tasks needed
+- Limited scope
 → Optionally create task_plan for better tracking
 
-### Complex Research (Required Task Plan)
+### Complex Tasks (Required Task Plan)
 - Multi-faceted investigation
-- Multiple information sources needed
+- Multiple sub-agents needed
 - Iterative refinement required
 → MUST create task_plan first, then execute systematically
 
@@ -99,10 +120,10 @@ You manage two types of artifacts:
 
 ### Task Plan Artifact (ID: "task_plan")
 ```markdown
-# Research Task: [Title]
+# Task: [Title]
 
 ## Objective
-[Clear research objective]
+[Clear objective]
 
 ## Tasks
 1. [✓/✗] Task description
@@ -115,37 +136,49 @@ You manage two types of artifacts:
 - Last Updated: [timestamp]
 ```
 
-### Result Artifact (ID: "research_result")
+### Result Artifact (ID: "result")
 ```markdown
-# Research Results: [Title]
+# Results: [Title]
 
-## Executive Summary
+## Summary
 [Key findings overview]
 
-## Detailed Findings
-[Structured research results]
+## Details
+[Structured results]
 
-## Sources and References
-[Citations and links]
+## References
+[Sources and links]
 ```
-
-## Working with Sub-Agents
-
-Use the call_subagent tool to delegate tasks:
-- **search_agent**: For web searches and information gathering
-- **crawl_agent**: For deep content extraction from specific URLs
-
-When calling sub-agents:
+"""
+        
+        # 动态添加可用的sub-agents
+        if self.sub_agents:
+            prompt += "\n## Available Sub-Agents\n\n"
+            prompt += "Use the call_subagent tool to delegate tasks to:\n\n"
+            
+            for name, agent in self.sub_agents.items():
+                prompt += f"### {name}\n"
+                prompt += f"- Description: {agent.description}\n"
+                prompt += f"- Capabilities:\n"
+                for cap in agent.capabilities:
+                    prompt += f"  - {cap}\n"
+                prompt += "\n"
+            
+            prompt += """When calling sub-agents:
 1. Provide clear, specific instructions
 2. Include relevant context from task_plan
 3. Wait for their results before proceeding
 4. Update task_plan based on their findings
-
+"""
+        else:
+            prompt += "\n## Note\n\nNo sub-agents are currently registered. Work independently.\n"
+        
+        prompt += """
 ## Execution Flow
 
 1. **Analyze Request** → Determine complexity
 2. **Plan Tasks** → Create task_plan if needed
-3. **Execute** → Call sub-agents or answer directly
+3. **Execute** → Call sub-agents or work directly
 4. **Integrate** → Update result artifact with findings
 5. **Iterate** → Refine based on progress and feedback
 
@@ -154,8 +187,8 @@ When calling sub-agents:
 - Keep responses focused and actionable
 - Update task status after each sub-agent call
 - Consolidate information incrementally in result artifact
-- Be transparent about research progress
-- Know when to stop: avoid over-researching"""
+- Be transparent about progress
+- Know when to stop: avoid over-processing"""
         
         # 添加当前上下文
         if context:
@@ -174,71 +207,26 @@ When calling sub-agents:
         """
         格式化Lead Agent的最终响应
         
-        Args:
-            content: LLM的最终回复
-            tool_history: 工具调用历史
-            
-        Returns:
-            格式化后的响应
+        Lead Agent的响应就是其原始内容，不需要额外格式化
         """
-        # Lead Agent直接返回内容，因为已经在LLM中格式化
-        # 工具调用历史可用于日志或调试
-        
-        if self.config.debug and tool_history:
-            logger.debug(f"Lead Agent completed with {len(tool_history)} tool calls")
-            for i, call in enumerate(tool_history, 1):
-                logger.debug(f"  Tool {i}: {call['tool']} - Success: {call['result']['success']}")
-        
         return content
     
-    async def handle_user_feedback(
+    async def create_task_plan(
         self,
-        feedback: str,
-        context: Optional[Dict[str, Any]] = None
-    ) -> AgentResponse:
-        """
-        处理用户反馈并调整研究方向
-        
-        Args:
-            feedback: 用户反馈内容
-            context: 当前上下文（包含task_plan和result）
-            
-        Returns:
-            更新后的响应
-        """
-        # 构建带反馈的提示
-        enhanced_context = context or {}
-        enhanced_context["user_feedback"] = feedback
-        
-        # 构建指令
-        instruction = f"""Based on the user feedback, please:
-1. Review and adjust the task plan if needed
-2. Identify what additional research is required
-3. Execute the necessary updates
-4. Provide a summary of changes made
-
-User Feedback: {feedback}"""
-        
-        # 执行更新
-        return await self.execute(instruction, enhanced_context)
-    
-    async def create_research_plan(
-        self,
-        research_topic: str,
+        task_description: str,
         requirements: Optional[List[str]] = None
     ) -> AgentResponse:
         """
-        创建研究计划的便捷方法
+        创建任务计划
         
         Args:
-            research_topic: 研究主题
+            task_description: 任务描述
             requirements: 具体要求列表
             
         Returns:
             包含task_plan的响应
         """
-        # 构建创建计划的指令
-        instruction = f"Create a comprehensive research plan for: {research_topic}"
+        instruction = f"Create a comprehensive task plan for: {task_description}"
         
         if requirements:
             instruction += "\n\nSpecific Requirements:\n"
@@ -247,8 +235,35 @@ User Feedback: {feedback}"""
         
         instruction += "\nPlease create a task_plan artifact with clear objectives and task breakdown."
         
-        # 执行
         return await self.execute(instruction)
+    
+    async def handle_user_feedback(
+        self,
+        feedback: str,
+        context: Optional[Dict[str, Any]] = None
+    ) -> AgentResponse:
+        """
+        处理用户反馈并调整任务方向
+        
+        Args:
+            feedback: 用户反馈内容
+            context: 当前上下文（包含task_plan和result）
+            
+        Returns:
+            更新后的响应
+        """
+        enhanced_context = context or {}
+        enhanced_context["user_feedback"] = feedback
+        
+        instruction = f"""Based on the user feedback, please:
+1. Review and adjust the task plan if needed
+2. Identify what additional work is required
+3. Execute the necessary updates
+4. Provide a summary of changes made
+
+User Feedback: {feedback}"""
+        
+        return await self.execute(instruction, enhanced_context)
     
     def extract_routing_decision(self, tool_calls: List[Dict]) -> Optional[str]:
         """
@@ -268,14 +283,13 @@ User Feedback: {feedback}"""
                     data = result["data"]
                     if data.get("_is_routing_instruction"):
                         return data.get("_route_to")
-        
         return None
 
 
 # 工厂函数
 def create_lead_agent(toolkit=None) -> LeadAgent:
     """
-    创建Lead Agent实例的工厂函数
+    创建Lead Agent实例
     
     Args:
         toolkit: 工具包
@@ -284,34 +298,3 @@ def create_lead_agent(toolkit=None) -> LeadAgent:
         配置好的Lead Agent实例
     """
     return LeadAgent(toolkit=toolkit)
-
-
-if __name__ == "__main__":
-    import asyncio
-    
-    async def test_lead_agent():
-        """测试Lead Agent基础功能"""
-        print("\n🧪 Testing Lead Agent")
-        print("="*50)
-        
-        # 创建Lead Agent（不带工具，仅测试提示词生成）
-        agent = create_lead_agent()
-        
-        # 测试1: 系统提示词生成
-        print("\n📝 System Prompt (excerpt):")
-        prompt = agent.build_system_prompt()
-        print(prompt[:500] + "...")
-        
-        # 测试2: 带上下文的提示词
-        print("\n📝 System Prompt with Context:")
-        context = {
-            "task_plan_content": "# Research Task: AI Safety\n## Tasks\n1. [✓] Literature review",
-            "user_feedback": "Need more focus on alignment techniques"
-        }
-        prompt_with_context = agent.build_system_prompt(context)
-        print(prompt_with_context[-500:])
-        
-        print("\n✅ Lead Agent tests completed")
-    
-    # 运行测试
-    asyncio.run(test_lead_agent())
