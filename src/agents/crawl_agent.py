@@ -36,7 +36,7 @@ class CrawlAgent(BaseAgent):
             config = AgentConfig(
                 name="crawl_agent",
                 description="Web content extraction and cleaning specialist",
-                model="qwen-plus",  # 可以换成更便宜的模型
+                model="qwen-flash",  # 可以换成更便宜的模型
                 temperature=0.3,  # 更低温度for精确提取
                 max_tool_rounds=2,  # 通常1-2轮即可
                 streaming=True
