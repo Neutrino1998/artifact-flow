@@ -48,9 +48,9 @@ MODEL_CONFIGS = {
     },
     
     # Qwen (通义千问) - 使用ChatTongyi
-    "qwen-turbo": {
+    "qwen-flash": {
         "provider": "dashscope",
-        "model": "qwen-turbo",
+        "model": "qwen-flash",
         "api_key": os.getenv("DASHSCOPE_API_KEY"),
     },
     "qwen-plus": {
