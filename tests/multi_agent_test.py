@@ -23,17 +23,21 @@ from tools.implementations.web_fetch import WebFetchTool
 
 # 工具相关
 from utils.logger import get_logger
+from utils.logger import set_global_debug
 
 logger = get_logger("AgentSystemTest")
-
+# 一行代码启用所有logger的debug模式
+set_global_debug(True)
 
 class MultiAgentSystem:
     """
     多Agent系统的简单封装
     """
     
-    def __init__(self):
+    def __init__(self, debug: bool = False):  # 添加debug参数
         """初始化多Agent系统"""
+        self.debug = debug  # 保存debug设置
+        
         # 创建工具注册中心
         self.registry = ToolRegistry()
         
@@ -79,8 +83,20 @@ class MultiAgentSystem:
             ]
         )
         
+        # 创建带debug的配置
+        from agents.base import AgentConfig
+        config = AgentConfig(
+            name="lead_agent",
+            description="Task coordinator and information integrator",
+            model="qwen-plus",
+            temperature=0.7,
+            max_tool_rounds=5,
+            streaming=True,
+            debug=self.debug  # 使用系统的debug设置
+        )
+        
         # 创建Lead Agent
-        lead = LeadAgent(toolkit=toolkit)
+        lead = LeadAgent(config=config, toolkit=toolkit)
         return lead
     
     def _setup_search_agent(self) -> SearchAgent:
@@ -91,8 +107,20 @@ class MultiAgentSystem:
             tool_names=["web_search"]
         )
         
+        # 创建带debug的配置
+        from agents.base import AgentConfig
+        config = AgentConfig(
+            name="search_agent",
+            description="Web search and information retrieval specialist",
+            model="qwen-plus",
+            temperature=0.5,
+            max_tool_rounds=3,
+            streaming=True,
+            debug=self.debug  # 使用系统的debug设置
+        )
+        
         # 创建Search Agent
-        search = SearchAgent(toolkit=toolkit)
+        search = SearchAgent(config=config, toolkit=toolkit)
         return search
     
     def _setup_crawl_agent(self) -> CrawlAgent:
@@ -103,8 +131,20 @@ class MultiAgentSystem:
             tool_names=["web_fetch"]
         )
         
+        # 创建带debug的配置
+        from agents.base import AgentConfig
+        config = AgentConfig(
+            name="crawl_agent",
+            description="Web content extraction and cleaning specialist",
+            model="qwen-plus",
+            temperature=0.3,
+            max_tool_rounds=2,
+            streaming=True,
+            debug=self.debug  # 使用系统的debug设置
+        )
+        
         # 创建Crawl Agent
-        crawl = CrawlAgent(toolkit=toolkit)
+        crawl = CrawlAgent(config=config, toolkit=toolkit)
         return crawl
     
     def _register_subagents(self):
@@ -179,8 +219,10 @@ async def main():
     print("🤖 Multi-Agent System Demo")
     print("="*60)
     
-    # 初始化系统
-    system = MultiAgentSystem()
+    # 初始化系统（开启debug模式）
+    system = MultiAgentSystem(debug=True)  # 👈 设置debug=True
+    
+    print("🔧 Debug mode: ENABLED")  # 提示debug模式已开启
     
     # 测试不同复杂度的任务
     test_tasks = [
