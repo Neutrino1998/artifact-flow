@@ -8,7 +8,6 @@ from typing import Dict, Any, List, Optional, AsyncGenerator, Union
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-import json  # 用于美化打印messages
 
 from utils.logger import get_logger
 from utils.xml_parser import parse_tool_calls
@@ -93,6 +92,27 @@ class BaseAgent(ABC):
         )
         
         logger.info(f"Initialized {config.name} with model {config.model}")
+
+    def _format_messages_for_debug(self, messages: List[Dict], max_content_len: int = 100000) -> str:
+        """将messages格式化为简洁的聊天记录格式"""
+        formatted_lines = []
+        
+        for msg in messages:
+            role = msg["role"]
+            content = msg["content"]
+            
+            # 截断长内容
+            if len(content) > max_content_len:
+                content = content[:max_content_len] + "..."
+            
+            # 格式化为聊天记录格式
+            formatted_lines.append(f"> {role}:")
+            # 添加缩进
+            for line in content.split('\n'):
+                formatted_lines.append(f"  {line}")
+            formatted_lines.append("")  # 空行分隔
+        
+        return "\n".join(formatted_lines)
     
     @abstractmethod
     def build_system_prompt(self, context: Optional[Dict[str, Any]] = None) -> str:
@@ -176,10 +196,9 @@ class BaseAgent(ABC):
                 })
             # 调试模式：记录完整的messages
             if self.config.debug:
-                logger.debug(f"[Round {round_num + 1}] =================")
-                logger.debug(f"[Round {round_num + 1}] Messages being sent to LLM:")
-                logger.debug(json.dumps(messages, indent=2, ensure_ascii=False))
-                logger.debug(f"[Round {round_num + 1}] =================")
+                logger.debug(f"[{self.config.name} Round {round_num + 1}] =================")
+                logger.debug(f"[{self.config.name} Round {round_num + 1}] Messages being sent to LLM:\n{self._format_messages_for_debug(messages)}")
+                logger.debug(f"[{self.config.name} Round {round_num + 1}] =================")
 
             # 调用LLM
             if self.config.streaming:
@@ -206,12 +225,10 @@ class BaseAgent(ABC):
             
             # 调试模式：记录完整对话
             if self.config.debug:
-                logger.debug(f"[Round {round_num + 1}] LLM Response (complete):")
-                logger.debug(response_content)  # 去掉[:500]限制
                 if reasoning_content:
-                    logger.debug(f"[Round {round_num + 1}] Reasoning (complete):")
-                    logger.debug(reasoning_content)  # 去掉[:500]限制
-            
+                    logger.debug(f"[{self.config.name} Round {round_num + 1}] Reasoning (complete):\n{reasoning_content}")
+                logger.debug(f"[{self.config.name} Round {round_num + 1}] LLM Response (complete):\n{response_content}")
+
             # 解析工具调用
             tool_calls = parse_tool_calls(response_content)
             
@@ -339,10 +356,9 @@ class BaseAgent(ABC):
                     })
                 # 调试模式：记录完整的messages
                 if self.config.debug:
-                    logger.debug(f"[Round {round_num + 1}] =================")
-                    logger.debug(f"[Round {round_num + 1}] Messages being sent to LLM:")
-                    logger.debug(json.dumps(messages, indent=2, ensure_ascii=False))
-                    logger.debug(f"[Round {round_num + 1}] =================")                
+                    logger.debug(f"[{self.config.name} Round {round_num + 1}] =================")
+                    logger.debug(f"[{self.config.name} Round {round_num + 1}] Messages being sent to LLM:\n{self._format_messages_for_debug(messages)}")
+                    logger.debug(f"[{self.config.name} Round {round_num + 1}] =================")
 
                 # LLM流式调用
                 response_content = ""
@@ -413,12 +429,10 @@ class BaseAgent(ABC):
                 
                 # 调试模式记录
                 if self.config.debug:
-                    logger.debug(f"[Round {round_num + 1}] LLM Response (complete):")
-                    logger.debug(response_content)  # 去掉[:500]限制
                     if reasoning_content:
-                        logger.debug(f"[Round {round_num + 1}] Reasoning (complete):")
-                        logger.debug(reasoning_content)  # 去掉[:500]限制
-                
+                        logger.debug(f"[{self.config.name} Round {round_num + 1}] Reasoning (complete):\n{reasoning_content}")
+                    logger.debug(f"[{self.config.name} Round {round_num + 1}] LLM Response (complete):\n{response_content}")
+
                 # 解析工具调用
                 tool_calls = parse_tool_calls(response_content)
                 
