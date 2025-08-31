@@ -8,6 +8,7 @@ from typing import Dict, Any, List, Optional, AsyncGenerator, Union
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
+import json  # 用于美化打印messages
 
 from utils.logger import get_logger
 from utils.xml_parser import parse_tool_calls
@@ -173,7 +174,13 @@ class BaseAgent(ABC):
                     "role": "system",
                     "content": "⚠️ You have reached the maximum tool call limit. Please summarize your findings and provide the final response."
                 })
-            
+            # 调试模式：记录完整的messages
+            if self.config.debug:
+                logger.debug(f"[Round {round_num + 1}] =================")
+                logger.debug(f"[Round {round_num + 1}] Messages being sent to LLM:")
+                logger.debug(json.dumps(messages, indent=2, ensure_ascii=False))
+                logger.debug(f"[Round {round_num + 1}] =================")
+
             # 调用LLM
             if self.config.streaming:
                 # 流式输出（用户可实时看到）
@@ -199,9 +206,11 @@ class BaseAgent(ABC):
             
             # 调试模式：记录完整对话
             if self.config.debug:
-                logger.debug(f"[Round {round_num + 1}] LLM Response: {response_content[:500]}...")
+                logger.debug(f"[Round {round_num + 1}] LLM Response (complete):")
+                logger.debug(response_content)  # 去掉[:500]限制
                 if reasoning_content:
-                    logger.debug(f"[Round {round_num + 1}] Reasoning: {reasoning_content[:500]}...")
+                    logger.debug(f"[Round {round_num + 1}] Reasoning (complete):")
+                    logger.debug(reasoning_content)  # 去掉[:500]限制
             
             # 解析工具调用
             tool_calls = parse_tool_calls(response_content)
@@ -328,7 +337,13 @@ class BaseAgent(ABC):
                         "role": "system",
                         "content": "⚠️ You have reached the maximum tool call limit. Please summarize your findings and provide the final response."
                     })
-                
+                # 调试模式：记录完整的messages
+                if self.config.debug:
+                    logger.debug(f"[Round {round_num + 1}] =================")
+                    logger.debug(f"[Round {round_num + 1}] Messages being sent to LLM:")
+                    logger.debug(json.dumps(messages, indent=2, ensure_ascii=False))
+                    logger.debug(f"[Round {round_num + 1}] =================")                
+
                 # LLM流式调用
                 response_content = ""
                 chunk_count = 0
@@ -398,9 +413,11 @@ class BaseAgent(ABC):
                 
                 # 调试模式记录
                 if self.config.debug:
-                    logger.debug(f"[Round {round_num + 1}] LLM Response: {response_content[:500]}...")
+                    logger.debug(f"[Round {round_num + 1}] LLM Response (complete):")
+                    logger.debug(response_content)  # 去掉[:500]限制
                     if reasoning_content:
-                        logger.debug(f"[Round {round_num + 1}] Reasoning: {reasoning_content[:500]}...")
+                        logger.debug(f"[Round {round_num + 1}] Reasoning (complete):")
+                        logger.debug(reasoning_content)  # 去掉[:500]限制
                 
                 # 解析工具调用
                 tool_calls = parse_tool_calls(response_content)
