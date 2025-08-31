@@ -13,7 +13,7 @@ import json
 import logging
 from pathlib import Path
 from datetime import datetime
-from typing import Optional, Union
+from typing import Optional, Union, Dict
 from logging.handlers import RotatingFileHandler
 
 
@@ -147,14 +147,16 @@ class Logger:
         """记录异常信息（自动包含堆栈）"""
         self.logger.exception(msg, *args, **kwargs)
 
-
 # 默认logger实例
 _default_logger = None
 
+# 添加全局logger缓存
+_logger_cache: Dict[str, Logger] = {}
+_global_debug = False  # 全局debug开关
 
 def get_logger(name: Optional[str] = None, **kwargs) -> Logger:
     """
-    获取日志记录器
+    获取日志记录器（带缓存）
     
     Args:
         name: 日志记录器名称，None则返回默认logger
@@ -163,16 +165,52 @@ def get_logger(name: Optional[str] = None, **kwargs) -> Logger:
     Returns:
         Logger实例
     """
-    global _default_logger
+    global _default_logger, _logger_cache, _global_debug
     
     if name is None:
         if _default_logger is None:
-            # 从环境变量读取配置
-            debug = os.getenv('DEBUG', 'false').lower() == 'true'
+            debug = _global_debug or os.getenv('DEBUG', 'false').lower() == 'true'
             _default_logger = Logger(debug=debug, **kwargs)
         return _default_logger
     
-    return Logger(name=name, **kwargs)
+    # 从缓存获取或创建新实例
+    if name not in _logger_cache:
+        debug = _global_debug or os.getenv('DEBUG', 'false').lower() == 'true'
+        _logger_cache[name] = Logger(name=name, debug=debug, **kwargs)
+    
+    return _logger_cache[name]
+
+
+def set_global_debug(enabled: bool):
+    """
+    设置全局debug模式
+    
+    Args:
+        enabled: 是否启用debug模式
+    """
+    global _global_debug, _default_logger, _logger_cache
+    _global_debug = enabled
+    
+    # 更新默认logger
+    if _default_logger:
+        _default_logger.set_debug(enabled)
+    
+    # 更新所有已创建的logger
+    for logger in _logger_cache.values():
+        logger.set_debug(enabled)
+    
+    # 记录变更
+    if _default_logger:
+        _default_logger.info(f"Global debug mode: {'ENABLED' if enabled else 'DISABLED'}")
+
+
+def get_all_loggers() -> Dict[str, Logger]:
+    """获取所有已创建的logger"""
+    result = {}
+    if _default_logger:
+        result['_default'] = _default_logger
+    result.update(_logger_cache)
+    return result
 
 
 # 全局便捷函数
