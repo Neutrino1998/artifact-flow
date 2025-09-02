@@ -247,7 +247,7 @@ def exception(msg: str, *args, **kwargs):
 
 if __name__ == "__main__":
     # 测试代码
-    logger = get_logger("TestLogger", debug=True)
+    logger = get_logger("TestLogger")
     
     logger.debug("Debug message")
     logger.info("Info message")
