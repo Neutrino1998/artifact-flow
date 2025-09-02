@@ -25,7 +25,7 @@ from tools.implementations.web_fetch import WebFetchTool
 from utils.logger import get_logger
 from utils.logger import set_global_debug
 
-logger = get_logger("AgentSystemTest")
+logger = get_logger("Agents")
 # 一行代码启用所有logger的debug模式
 set_global_debug(True)
 
@@ -200,14 +200,63 @@ class MultiAgentSystem:
         else:  # auto
             instruction = f"Please analyze and handle this task appropriately: {task}"
         
-        # 执行任务
-        response = await self.lead_agent.execute(instruction)
+        # 🔄 主执行循环（支持多轮路由）
+        max_routing_rounds = 5  # 防止无限循环
+        routing_count = 0
+        all_responses = []  # 收集所有响应用于最终总结
+        
+        current_instruction = instruction
+        current_agent = self.lead_agent
+        
+        while routing_count < max_routing_rounds:
+            # 执行当前agent
+            response = await current_agent.execute(current_instruction)
+            all_responses.append(response)
+            
+            # 检查是否需要路由
+            if response.routing:
+                routing_count += 1
+                target = response.routing["target"]
+                sub_instruction = response.routing["instruction"]
+                
+                logger.info(f"Routing to {target}: {sub_instruction[:100]}...")
+                
+                # 🎯 调用目标sub-agent
+                if target == "search_agent":
+                    sub_response = await self.search_agent.execute(sub_instruction)
+                elif target == "crawl_agent":
+                    sub_response = await self.crawl_agent.execute(sub_instruction)
+                else:
+                    logger.error(f"Unknown routing target: {target}")
+                    break
+                
+                # 🔙 将sub-agent的结果格式化为工具结果，回传给lead_agent
+                tool_result_xml = f"""<tool_result>
+    <name>call_subagent</name>
+    <agent>{target}</agent>
+    <success>true</success>
+    <data>
+        {sub_response.content}
+    </data>
+</tool_result>"""
+                
+                # 继续让lead_agent处理结果
+                current_instruction = tool_result_xml
+                current_agent = self.lead_agent
+                
+            else:
+                # 没有路由，执行完成
+                break
+        
+        # 返回最终结果
+        final_response = all_responses[-1] if all_responses else None
         
         return {
             "success": True,
-            "response": response.content,
-            "tool_calls": len(response.tool_calls),
-            "metadata": response.metadata
+            "response": final_response.content if final_response else "",
+            "tool_calls": sum(r.tool_calls for r in all_responses),
+            "routing_count": routing_count,
+            "metadata": final_response.metadata if final_response else {}
         }
 
 
@@ -215,14 +264,13 @@ async def main():
     """
     测试Multi-Agent系统
     """
-    print("\n" + "="*60)
-    print("🤖 Multi-Agent System Demo")
-    print("="*60)
+    logger.info("="*60)
+    logger.info("🤖 Multi-Agent System Demo")
+    logger.info("="*60)
     
     # 初始化系统（开启debug模式）
     system = MultiAgentSystem(debug=True)  # 👈 设置debug=True
-    
-    print("🔧 Debug mode: ENABLED")  # 提示debug模式已开启
+    logger.info("🔧 Debug mode: ENABLED")  # 提示debug模式已开启
     
     # 测试不同复杂度的任务
     test_tasks = [
@@ -247,11 +295,11 @@ async def main():
     ]
     
     for i, test in enumerate(test_tasks, 1):
-        print(f"\n{'='*60}")
-        print(f"Test {i}: {test['description']}")
-        print(f"Task: {test['task'][:100]}...")
-        print(f"Complexity: {test['complexity']}")
-        print("-"*60)
+        logger.info("="*60)
+        logger.info(f"Test {i}: {test['description']}")
+        logger.info(f"Task: {test['task'][:100]}...")
+        logger.info(f"Complexity: {test['complexity']}")
+        logger.info("-"*60)
         
         try:
             result = await system.process_task(
@@ -259,17 +307,17 @@ async def main():
                 complexity=test["complexity"]
             )
             
-            print(f"✅ Task completed successfully")
-            print(f"Tool calls: {result['tool_calls']}")
-            print(f"Response preview:")
-            print(result["response"][:500] + "..." if len(result["response"]) > 500 else result["response"])
+            logger.info(f"✅ Task completed successfully")
+            logger.info(f"Tool calls: {result['tool_calls']}")
+            logger.info(f"Response preview:")
+            logger.info(result["response"][:500] + "..." if len(result["response"]) > 500 else result["response"])
             
         except Exception as e:
-            print(f"❌ Task failed: {e}")
+            logger.error(f"❌ Task failed: {e}")
     
-    print("\n" + "="*60)
-    print("Demo completed!")
-    print("="*60)
+    logger.info("="*60)
+    logger.info("Demo completed!")
+    logger.info("="*60)
 
 
 if __name__ == "__main__":
