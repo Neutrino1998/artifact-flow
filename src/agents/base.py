@@ -57,7 +57,7 @@ class AgentResponse:
     tool_calls: List[Dict[str, Any]] = field(default_factory=list)  # 工具调用记录
     reasoning_content: Optional[str] = None  # 思考过程（如果有）
     metadata: Dict[str, Any] = field(default_factory=dict)  # 元数据
-
+    routing: Optional[Dict[str, Any]] = None  # 新增：路由信息
 
 class BaseAgent(ABC):
     """
@@ -258,6 +258,27 @@ class BaseAgent(ABC):
                         "result": result.to_dict()
                     })
                     
+                    # 🔍 检查是否是路由指令
+                    if tool_call.name == "call_subagent" and result.success:
+                        result_data = result.to_dict().get("data", {})
+                        if result_data.get("_is_routing_instruction"):
+                            # 立即返回，带上路由信息
+                            return AgentResponse(
+                                content=response_content,  # 当前的响应内容
+                                tool_calls=tool_history,
+                                reasoning_content=reasoning_content,
+                                routing={  # 路由信息
+                                    "target": result_data.get("_route_to"),
+                                    "instruction": result_data.get("instruction"),
+                                    "from_agent": self.config.name
+                                },
+                                metadata={
+                                    "agent": self.config.name,
+                                    "model": self.config.model,
+                                    "needs_routing": True
+                                }
+                            )
+
                     # 格式化工具结果为XML
                     xml_result = format_result(tool_call.name, result.to_dict())
                     tool_results.append(xml_result)
