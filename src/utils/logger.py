@@ -129,22 +129,28 @@ class Logger:
     
     # 基础日志方法
     def debug(self, msg: str, *args, **kwargs):
+        kwargs['stacklevel'] = kwargs.get('stacklevel', 2)  # 默认为2，但允许覆盖
         self.logger.debug(msg, *args, **kwargs)
-    
+
     def info(self, msg: str, *args, **kwargs):
+        kwargs['stacklevel'] = kwargs.get('stacklevel', 2)
         self.logger.info(msg, *args, **kwargs)
-    
+
     def warning(self, msg: str, *args, **kwargs):
+        kwargs['stacklevel'] = kwargs.get('stacklevel', 2)
         self.logger.warning(msg, *args, **kwargs)
-    
+
     def error(self, msg: str, *args, **kwargs):
+        kwargs['stacklevel'] = kwargs.get('stacklevel', 2)
         self.logger.error(msg, *args, **kwargs)
-    
+
     def critical(self, msg: str, *args, **kwargs):
+        kwargs['stacklevel'] = kwargs.get('stacklevel', 2)
         self.logger.critical(msg, *args, **kwargs)
-    
+
     def exception(self, msg: str, *args, **kwargs):
         """记录异常信息（自动包含堆栈）"""
+        kwargs['stacklevel'] = kwargs.get('stacklevel', 2)
         self.logger.exception(msg, *args, **kwargs)
 
 # 默认logger实例
@@ -215,21 +221,27 @@ def get_all_loggers() -> Dict[str, Logger]:
 
 # 全局便捷函数
 def debug(msg: str, *args, **kwargs):
+    kwargs['stacklevel'] = kwargs.get('stacklevel', 2)
     get_logger().debug(msg, *args, **kwargs)
 
 def info(msg: str, *args, **kwargs):
+    kwargs['stacklevel'] = kwargs.get('stacklevel', 2)
     get_logger().info(msg, *args, **kwargs)
 
 def warning(msg: str, *args, **kwargs):
+    kwargs['stacklevel'] = kwargs.get('stacklevel', 2)
     get_logger().warning(msg, *args, **kwargs)
 
 def error(msg: str, *args, **kwargs):
+    kwargs['stacklevel'] = kwargs.get('stacklevel', 2)
     get_logger().error(msg, *args, **kwargs)
 
 def critical(msg: str, *args, **kwargs):
+    kwargs['stacklevel'] = kwargs.get('stacklevel', 2)
     get_logger().critical(msg, *args, **kwargs)
 
 def exception(msg: str, *args, **kwargs):
+    kwargs['stacklevel'] = kwargs.get('stacklevel', 2)
     get_logger().exception(msg, *args, **kwargs)
 
 
