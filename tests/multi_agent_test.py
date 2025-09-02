@@ -254,7 +254,7 @@ class MultiAgentSystem:
         return {
             "success": True,
             "response": final_response.content if final_response else "",
-            "tool_calls": sum(r.tool_calls for r in all_responses),
+            "tool_calls": sum(r.metadata.get("tool_rounds", 0) for r in all_responses),
             "routing_count": routing_count,
             "metadata": final_response.metadata if final_response else {}
         }
@@ -279,19 +279,19 @@ async def main():
             "complexity": "simple",
             "description": "Simple factual question"
         },
-        {
-            "task": "Find recent information about quantum computing breakthroughs in 2024",
-            "complexity": "moderate",
-            "description": "Moderate search task"
-        },
-        {
-            "task": (
-                "Research and analyze the impact of AI on healthcare in 2024. "
-                "Include recent developments, key players, and future trends."
-            ),
-            "complexity": "complex",
-            "description": "Complex research task"
-        }
+        # {
+        #     "task": "Find recent information about quantum computing breakthroughs in 2024",
+        #     "complexity": "moderate",
+        #     "description": "Moderate search task"
+        # },
+        # {
+        #     "task": (
+        #         "Research and analyze the impact of AI on healthcare in 2024. "
+        #         "Include recent developments, key players, and future trends."
+        #     ),
+        #     "complexity": "complex",
+        #     "description": "Complex research task"
+        # }
     ]
     
     for i, test in enumerate(test_tasks, 1):
@@ -313,7 +313,7 @@ async def main():
             logger.info(result["response"][:500] + "..." if len(result["response"]) > 500 else result["response"])
             
         except Exception as e:
-            logger.error(f"❌ Task failed: {e}")
+            logger.exception(f"❌ Task failed: {e}")
     
     logger.info("="*60)
     logger.info("Demo completed!")
