@@ -114,6 +114,38 @@ class BaseAgent(ABC):
         
         return "\n".join(formatted_lines)
     
+    async def _prepare_context_with_task_plan(self, user_context: Optional[Dict]) -> Dict:
+        """
+        准备context：
+        1. 所有agent都注入task_plan（如果存在）
+        2. Lead Agent额外注入artifacts列表
+        """
+        context = user_context or {}
+        
+        try:
+            from tools.implementations.artifact_ops import _artifact_store
+            
+            # 1. 注入task_plan（所有agent都需要）
+            task_plan = _artifact_store.get("task_plan")
+            if task_plan:
+                context["task_plan_content"] = task_plan.content
+                context["task_plan_version"] = task_plan.current_version
+                context["task_plan_updated"] = task_plan.updated_at.isoformat()
+                logger.debug(f"{self.config.name} loaded task_plan (v{task_plan.current_version})")
+            
+            # 2. 🌟 Lead Agent专属：注入完整的artifacts列表
+            if self.config.name == "lead_agent":
+                artifacts_list = _artifact_store.list_artifacts()
+                if artifacts_list:
+                    context["artifacts_inventory"] = artifacts_list
+                    context["artifacts_count"] = len(artifacts_list)
+                    logger.debug(f"Lead Agent loaded {len(artifacts_list)} artifacts inventory")
+                        
+        except Exception as e:
+            logger.debug(f"{self.config.name} context preparation partial failure: {e}")
+        
+        return context
+
     @abstractmethod
     def build_system_prompt(self, context: Optional[Dict[str, Any]] = None) -> str:
         """
@@ -166,9 +198,12 @@ class BaseAgent(ABC):
         self.tool_call_count = 0
         tool_history = []
         
-        # 构建系统提示词
-        system_prompt = self.build_system_prompt(context)
+        # 🌟 自动注入task_plan到context
+        task_plan_context = await self._prepare_context_with_task_plan(context)
         
+        # 构建系统提示词（现在包含了task_plan）
+        system_prompt = self.build_system_prompt(task_plan_context)  # 👈 使用task_plan_context
+
         # 添加工具使用说明（如果有工具）
         if self.toolkit and self.toolkit.list_tools():
             tools_instruction = ToolPromptGenerator.generate_tool_instruction(

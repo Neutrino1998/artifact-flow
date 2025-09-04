@@ -119,6 +119,8 @@ Based on request complexity, choose your approach:
 You manage two types of artifacts:
 
 ### Task Plan Artifact (ID: "task_plan")
+⚠️ IMPORTANT: Always use the exact ID "task_plan" for the task plan artifact.
+This is a special system artifact that all team members can access.
 ```markdown
 # Task: [Title]
 
@@ -192,12 +194,32 @@ You manage two types of artifacts:
         
         # 添加当前上下文
         if context:
-            if context.get("task_plan_content"):
+            if context.get("task_plan_content"): 
                 prompt += f"\n\n## Current Task Plan\n{context['task_plan_content']}"
+                prompt += f"\n(Version {context.get('task_plan_version', 1)}, Updated: {context.get('task_plan_updated', 'unknown')})"
             
-            if context.get("result_content"):
-                prompt += f"\n\n## Current Result Draft\n{context['result_content'][:1000]}..."
-            
+            # 🌟 新增：显示当前artifacts状态
+            if context.get("artifacts_inventory"):
+                prompt += f"""
+
+## Current Artifacts Status
+
+You currently have {context['artifacts_count']} artifact(s) in this session:
+"""
+                for artifact in context["artifacts_inventory"]:
+                    status_icon = "📝" if artifact["content_type"] == "markdown" else "📄"
+                    prompt += f"\n{status_icon} **{artifact['id']}** (v{artifact['version']})"
+                    prompt += f"\n   - Type: {artifact['content_type']}"
+                    prompt += f"\n   - Title: {artifact['title']}"
+                    prompt += f"\n   - Last updated: {artifact['updated_at']}"
+                
+                prompt += """
+
+Based on the existing artifacts:
+- Update existing artifacts rather than creating duplicates
+- Use 'update_artifact' for small changes
+- Use 'rewrite_artifact' for major restructuring"""
+
             if context.get("user_feedback"):
                 prompt += f"\n\n## User Feedback\n{context['user_feedback']}"
         

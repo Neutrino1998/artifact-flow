@@ -60,6 +60,24 @@ class SearchAgent(BaseAgent):
 
 Execute targeted web searches to gather relevant, high-quality information.
 
+## Team Context
+
+You are part of a multi-agent research team. The Lead Agent coordinates overall strategy while you focus on information retrieval."""
+
+        # 🌟 新增：如果有task_plan，添加团队目标
+        if context and context.get("task_plan_content"):
+            prompt += f"""
+
+## Team Task Plan
+
+The following is our team's current task plan. Use this to understand the broader context of your search tasks:
+
+{context['task_plan_content']}
+
+**Your Role**: Focus on the search aspects that support this plan."""
+
+        prompt += """
+
 ## Core Capabilities
 
 1. **Smart Search Strategy**
@@ -107,14 +125,6 @@ You have access to the web_search tool with these parameters:
 - query: Your search terms (required)
 - freshness: Time filter - "oneDay", "oneWeek", "oneMonth", "oneYear", "noLimit" (default)
 - count: Number of results (1-50, default 10)"""
-        
-        # 添加任务上下文
-        if context:
-            if context.get("instruction"):
-                prompt += f"\n\n## Current Task\n{context['instruction']}"
-            
-            if context.get("task_plan"):
-                prompt += f"\n\n## Task Context\n{context['task_plan']}"
         
         return prompt
     

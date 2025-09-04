@@ -60,6 +60,24 @@ class CrawlAgent(BaseAgent):
 
 Extract and clean valuable information from web pages.
 
+## Team Context
+
+You are part of a multi-agent research team. The Lead Agent coordinates overall strategy while you focus on deep content extraction."""
+
+        # 🌟 新增：如果有task_plan，添加团队目标
+        if context and context.get("task_plan_content"):
+            prompt += f"""
+
+## Team Task Plan
+
+The following is our team's current task plan. Use this to understand what information is most valuable to extract:
+
+{context['task_plan_content']}
+
+**Your Role**: Extract detailed content that supports this plan, focusing on relevant sections."""
+
+        prompt += """
+
 ## Core Capabilities
 
 1. **Content Extraction**: Fetch and identify main content
@@ -102,16 +120,6 @@ You have access to the web_fetch tool with these parameters:
 - urls: Single URL or list of URLs (required)
 - max_content_length: Maximum content per page (default 5000)
 - max_concurrent: Concurrent fetches (default 3, max 5)"""
-        
-        # 添加任务上下文
-        if context:
-            if context.get("urls"):
-                prompt += "\n\n## URLs to Process"
-                for url in context["urls"]:
-                    prompt += f"\n- {url}"
-            
-            if context.get("task_plan"):
-                prompt += f"\n\n## Task Context\n{context['task_plan']}"
         
         return prompt
     
