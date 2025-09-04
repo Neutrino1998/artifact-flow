@@ -102,7 +102,7 @@ class WebFetchTool(BaseTool):
         return [
             ToolParameter(
                 name="urls",
-                type="array",
+                type="array[string]",
                 description="URL or list of URLs to fetch",
                 required=True
             ),

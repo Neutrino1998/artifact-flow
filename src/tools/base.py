@@ -177,20 +177,38 @@ class BaseTool(ABC):
         Returns:
             XML格式的调用示例
         """
+        import re
+        
         params = self.get_parameters()
         param_lines = []
         
         for param in params:
-            if param.default is not None:
-                value = str(param.default)
-            elif param.type == "string":
-                value = f"your_{param.name}_here"
-            elif param.type == "integer":
-                value = "123"
-            elif param.type == "boolean":
-                value = "true"
+            param_type = param.type.lower()
+            
+            # 处理数组类型
+            if param_type.startswith("array"):
+                # 用正则提取[]中的元素类型
+                match = re.search(r'array\[(\w+)\]', param_type)
+                element_type = match.group(1) if match else "string"
+                
+                # 根据元素类型生成示例
+                if element_type == "string":
+                    value = '["item1", "item2"]'  # 字符串用引号
+                else:
+                    value = '[item1, item2]'      # 其他类型不用引号
+            
+            # 处理普通类型
             else:
-                value = "..."
+                if param.default is not None:
+                    value = str(param.default)
+                elif param_type == "string":
+                    value = f"your_{param.name}_here"
+                elif param_type == "integer":
+                    value = "123"
+                elif param_type == "boolean":
+                    value = "true"
+                else:
+                    value = "..."
             
             param_lines.append(f"    <{param.name}>{value}</{param.name}>")
         
