@@ -4,7 +4,7 @@ Multi-Agent系统使用示例
 """
 
 import asyncio
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 # Agent相关
 from agents.lead_agent import LeadAgent, SubAgent
@@ -52,6 +52,10 @@ class MultiAgentSystem:
         # 在Lead Agent中注册子Agent
         self._register_subagents()
         
+        # 获取全局artifact store
+        from tools.implementations.artifact_ops import _artifact_store
+        self.artifact_store = _artifact_store
+
         logger.info("Multi-Agent System initialized")
     
     def _register_all_tools(self):
@@ -112,7 +116,7 @@ class MultiAgentSystem:
         config = AgentConfig(
             name="search_agent",
             description="Web search and information retrieval specialist",
-            model="qwen-plus",
+            model="qwen-flash",
             temperature=0.5,
             max_tool_rounds=3,
             streaming=True,
@@ -136,7 +140,7 @@ class MultiAgentSystem:
         config = AgentConfig(
             name="crawl_agent",
             description="Web content extraction and cleaning specialist",
-            model="qwen-plus",
+            model="qwen-flash",
             temperature=0.3,
             max_tool_rounds=2,
             streaming=True,
@@ -163,11 +167,12 @@ class MultiAgentSystem:
         # 注册Crawl Agent
         self.lead_agent.register_subagent(SubAgent(
             name="crawl_agent",
-            description="Extracts content from specific web pages",
+            description="Extracts detailed content from specific web pages. Requires explicit URL lists in instructions.",
             capabilities=[
                 "Deep content extraction from URLs",
                 "Content cleaning and filtering",
-                "Anti-crawling detection"
+                "Anti-crawling detection",
+                "⚠️ IMPORTANT: Instructions must include specific URLs to crawl"
             ]
         ))
         
@@ -176,7 +181,8 @@ class MultiAgentSystem:
     async def process_task(
         self,
         task: str,
-        complexity: str = "auto"
+        complexity: str = "auto",
+        session_id: Optional[str] = None  # 👈 新增参数
     ) -> Dict[str, Any]:
         """
         处理任务
@@ -184,11 +190,18 @@ class MultiAgentSystem:
         Args:
             task: 任务描述
             complexity: 复杂度提示（simple/moderate/complex/auto）
+            session_id: 会话ID（可选，不提供则自动创建）
             
         Returns:
             处理结果
         """
-        logger.info(f"Processing task: {task[:100]}...")
+        # 创建或切换到指定session
+        if session_id:
+            self.artifact_store.set_session(session_id)
+        else:
+            session_id = self.artifact_store.create_session()
+        
+        logger.info(f"Processing task in session {session_id}: {task[:100]}...")
         
         # 根据复杂度构建不同的指令
         if complexity == "simple":
@@ -253,10 +266,12 @@ class MultiAgentSystem:
         
         return {
             "success": True,
+            "session_id": session_id,  # 👈 新增
             "response": final_response.content if final_response else "",
             "tool_calls": sum(r.metadata.get("tool_rounds", 0) for r in all_responses),
             "routing_count": routing_count,
-            "metadata": final_response.metadata if final_response else {}
+            "metadata": final_response.metadata if final_response else {},
+            "artifacts": self.artifact_store.list_artifacts()  # 👈 新增，返回创建的artifacts
         }
 
 
@@ -279,19 +294,19 @@ async def main():
             "complexity": "simple",
             "description": "Simple factual question"
         },
-        # {
-        #     "task": "Find recent information about quantum computing breakthroughs in 2024",
-        #     "complexity": "moderate",
-        #     "description": "Moderate search task"
-        # },
-        # {
-        #     "task": (
-        #         "Research and analyze the impact of AI on healthcare in 2024. "
-        #         "Include recent developments, key players, and future trends."
-        #     ),
-        #     "complexity": "complex",
-        #     "description": "Complex research task"
-        # }
+        {
+            "task": "Find recent information about quantum computing breakthroughs in 2024",
+            "complexity": "moderate",
+            "description": "Moderate search task"
+        },
+        {
+            "task": (
+                "Research and analyze the impact of AI on healthcare in 2024. "
+                "Include recent developments, key players, and future trends."
+            ),
+            "complexity": "complex",
+            "description": "Complex research task"
+        }
     ]
     
     for i, test in enumerate(test_tasks, 1):
@@ -302,16 +317,23 @@ async def main():
         logger.info("-"*60)
         
         try:
+            # 每个任务使用独立的session
             result = await system.process_task(
                 test["task"],
                 complexity=test["complexity"]
+                # session_id 自动生成
             )
             
             logger.info(f"✅ Task completed successfully")
+            logger.info(f"Session ID: {result['session_id']}")  # 👈 显示session
             logger.info(f"Tool calls: {result['tool_calls']}")
-            logger.info(f"Response preview:")
-            logger.info(result["response"][:500] + "..." if len(result["response"]) > 500 else result["response"])
+            logger.info(f"Response preview:\n{result['response'][:500] + '...' if len(result['response']) > 500 else result['response']}")
+            logger.info(f"Artifacts created: {len(result.get('artifacts', []))}")  # 👈 显示artifacts
             
+            # 打印创建的artifacts
+            for artifact in result.get('artifacts', []):
+                logger.info(f"  - {artifact['id']} ({artifact['content_type']}): {artifact['title']}")
+
         except Exception as e:
             logger.exception(f"❌ Task failed: {e}")
     
