@@ -196,9 +196,7 @@ class BaseAgent(ABC):
                 })
             # 调试模式：记录完整的messages
             if self.config.debug:
-                logger.debug(f"[{self.config.name} Round {round_num + 1}] =================")
                 logger.debug(f"[{self.config.name} Round {round_num + 1}] Messages being sent to LLM:\n{self._format_messages_for_debug(messages)}")
-                logger.debug(f"[{self.config.name} Round {round_num + 1}] =================")
 
             # 调用LLM
             if self.config.streaming:
@@ -377,9 +375,7 @@ class BaseAgent(ABC):
                     })
                 # 调试模式：记录完整的messages
                 if self.config.debug:
-                    logger.debug(f"[{self.config.name} Round {round_num + 1}] =================")
                     logger.debug(f"[{self.config.name} Round {round_num + 1}] Messages being sent to LLM:\n{self._format_messages_for_debug(messages)}")
-                    logger.debug(f"[{self.config.name} Round {round_num + 1}] =================")
 
                 # LLM流式调用
                 response_content = ""
