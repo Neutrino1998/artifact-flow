@@ -5,6 +5,7 @@ Artifact操作工具
 
 from typing import Dict, Any, Optional, List, Tuple
 from datetime import datetime
+import uuid  # 新增，用于生成session_id
 from dataclasses import dataclass, field
 from tools.base import BaseTool, ToolResult, ToolParameter, ToolPermission
 from utils.logger import get_logger
@@ -31,13 +32,13 @@ class Artifact:
     def __init__(
         self,
         artifact_id: str,
-        artifact_type: str,
+        content_type: str,  # 👈 从 artifact_type 改为 content_type
         title: str,
         initial_content: str,
         metadata: Dict = None
     ):
         self.id = artifact_id
-        self.type = artifact_type  # "task_plan" or "result"
+        self.content_type = content_type  # 👈 从 self.type 改为 self.content_type
         self.title = title
         self.content = initial_content
         self.metadata = metadata or {}
@@ -144,48 +145,101 @@ class Artifact:
         }
 
 
+@dataclass
+class ArtifactSession:
+    """单个会话的artifact容器"""
+    session_id: str
+    artifacts: Dict[str, Artifact] = field(default_factory=dict)
+    created_at: datetime = field(default_factory=datetime.now)
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+
 class ArtifactStore:
-    """Artifact存储管理"""
+    """Artifact存储管理（支持session）"""
     
     def __init__(self):
-        self.artifacts: Dict[str, Artifact] = {}
+        self.sessions: Dict[str, ArtifactSession] = {}
+        self.current_session_id: Optional[str] = None
+    
+    def create_session(self, session_id: Optional[str] = None) -> str:
+        """创建新session并设为当前session"""
+        if session_id is None:
+            session_id = f"session_{uuid.uuid4().hex[:8]}"
+        
+        self.sessions[session_id] = ArtifactSession(session_id=session_id)
+        self.current_session_id = session_id
+        logger.info(f"Created new session: {session_id}")
+        return session_id
+    
+    def set_session(self, session_id: Optional[str]):
+        """切换当前session"""
+        if session_id and session_id not in self.sessions:
+            logger.warning(f"Session {session_id} not found, creating new one")
+            self.create_session(session_id)
+        else:
+            self.current_session_id = session_id
+            logger.debug(f"Switched to session: {session_id}")
+    
+    def get_current_session(self) -> Optional[ArtifactSession]:
+        """获取当前session，如果没有则创建默认session"""
+        if self.current_session_id is None:
+            self.create_session("default")
+        return self.sessions.get(self.current_session_id)
+    
+    def clear_session(self, session_id: Optional[str] = None):
+        """清空指定session的artifacts"""
+        sid = session_id or self.current_session_id
+        if sid and sid in self.sessions:
+            self.sessions[sid].artifacts.clear()
+            logger.info(f"Cleared session: {sid}")
     
     def create(
         self,
         artifact_id: str,
-        artifact_type: str,
+        content_type: str,  # 👈 从 artifact_type 改为 content_type
         title: str,
         content: str,
         metadata: Dict = None
     ) -> Tuple[bool, str]:
-        """创建新的Artifact"""
-        if artifact_id in self.artifacts:
-            return False, f"Artifact '{artifact_id}' already exists"
+        """创建新的Artifact（在当前session中）"""
+        session = self.get_current_session()
+        if not session:
+            return False, "No active session"
+        
+        if artifact_id in session.artifacts:
+            return False, f"Artifact '{artifact_id}' already exists in session"
         
         artifact = Artifact(
             artifact_id=artifact_id,
-            artifact_type=artifact_type,
+            content_type=content_type,  # 👈 参数名改变
             title=title,
             initial_content=content,
             metadata=metadata
         )
         
-        self.artifacts[artifact_id] = artifact
-        return True, f"Created artifact '{artifact_id}'"
+        session.artifacts[artifact_id] = artifact
+        return True, f"Created artifact '{artifact_id}' in session '{session.session_id}'"
     
     def get(self, artifact_id: str) -> Optional[Artifact]:
-        """获取Artifact对象"""
-        return self.artifacts.get(artifact_id)
+        """获取Artifact对象（从当前session）"""
+        session = self.get_current_session()
+        if not session:
+            return None
+        return session.artifacts.get(artifact_id)
     
-    def list_artifacts(self, artifact_type: str = None) -> List[Dict]:
-        """列出所有Artifacts"""
+    def list_artifacts(self, content_type: str = None) -> List[Dict]:  # 👈 参数名改变
+        """列出当前session的所有Artifacts"""
+        session = self.get_current_session()
+        if not session:
+            return []
+        
         artifacts = []
-        for artifact in self.artifacts.values():
-            if artifact_type and artifact.type != artifact_type:
+        for artifact in session.artifacts.values():
+            if content_type and artifact.content_type != content_type:  # 👈 属性名改变
                 continue
             artifacts.append({
                 "id": artifact.id,
-                "type": artifact.type,
+                "content_type": artifact.content_type,  # 👈 返回字段名改变
                 "title": artifact.title,
                 "version": artifact.current_version,
                 "updated_at": artifact.updated_at.isoformat()
@@ -216,10 +270,11 @@ class CreateArtifactTool(BaseTool):
                 required=True
             ),
             ToolParameter(
-                name="type",
+                name="content_type",  # 👈 从 type 改为 content_type
                 type="string",
-                description="Type: 'task_plan' or 'result'",
-                required=True
+                description="Content format: 'markdown', 'txt', 'python', 'html', 'json'",  # 👈 描述更清晰
+                required=False,
+                default="markdown"  # 👈 添加默认值
             ),
             ToolParameter(
                 name="title",
@@ -238,7 +293,7 @@ class CreateArtifactTool(BaseTool):
     async def execute(self, **params) -> ToolResult:
         success, message = _artifact_store.create(
             artifact_id=params["id"],
-            artifact_type=params["type"],
+            content_type=params.get("content_type", "markdown"),  # 👈 参数名改变，使用默认值
             title=params["title"],
             content=params["content"]
         )
@@ -406,7 +461,7 @@ class ReadArtifactTool(BaseTool):
             success=True,
             data={
                 "id": artifact.id,
-                "type": artifact.type,
+                "content_type": artifact.content_type,  # 👈 从 type 改为 content_type
                 "title": artifact.title,
                 "content": content,
                 "version": artifact.current_version,
