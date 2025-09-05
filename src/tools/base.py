@@ -185,17 +185,17 @@ class BaseTool(ABC):
         for param in params:
             param_type = param.type.lower()
             
-            # 处理数组类型
+            # 处理数组类型 - 使用嵌套XML结构
             if param_type.startswith("array"):
                 # 用正则提取[]中的元素类型
                 match = re.search(r'array\[(\w+)\]', param_type)
                 element_type = match.group(1) if match else "string"
                 
-                # 根据元素类型生成示例
-                if element_type == "string":
-                    value = '["item1", "item2"]'  # 字符串用引号
-                else:
-                    value = '[item1, item2]'      # 其他类型不用引号
+                # 生成嵌套的XML示例
+                param_lines.append(f"    <{param.name}>")
+                param_lines.append(f"      <item>value1</item>")
+                param_lines.append(f"      <item>value2</item>")
+                param_lines.append(f"    </{param.name}>")
             
             # 处理普通类型
             else:
@@ -209,8 +209,8 @@ class BaseTool(ABC):
                     value = "true"
                 else:
                     value = "..."
-            
-            param_lines.append(f"    <{param.name}>{value}</{param.name}>")
+                
+                param_lines.append(f"    <{param.name}>{value}</{param.name}>")
         
         return f"""<tool_call>
   <name>{self.name}</name>

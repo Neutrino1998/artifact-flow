@@ -91,11 +91,30 @@ class RobustXMLParser:
             if params_elem is not None:
                 for param in params_elem:
                     key = param.tag
-                    value = param.text
-                    if value:
-                        # 尝试解析为合适的类型
-                        value = RobustXMLParser._parse_value(value.strip())
-                    params[key] = value
+                    
+                    # 检查是否有子元素（嵌套结构，可能是数组）
+                    if len(param) > 0:
+                        # 有子元素，可能是数组格式
+                        items = []
+                        for child in param:
+                            if child.text:
+                                # 解析每个子元素的值
+                                items.append(RobustXMLParser._parse_value(child.text.strip()))
+                        
+                        # 如果所有子元素都成功解析，使用列表；否则保持原始结构
+                        if items:
+                            params[key] = items
+                        else:
+                            # 降级处理：尝试提取所有文本内容
+                            value = ET.tostring(param, encoding='unicode', method='text')
+                            params[key] = RobustXMLParser._parse_value(value.strip())
+                    else:
+                        # 没有子元素，普通参数
+                        value = param.text
+                        if value:
+                            params[key] = RobustXMLParser._parse_value(value.strip())
+                        else:
+                            params[key] = None
             
             return ToolCall(name=name, params=params, raw_text=xml_text)
             
@@ -170,17 +189,41 @@ class RobustXMLParser:
     
     @staticmethod
     def _parse_params_text(text: str) -> Dict[str, Any]:
-        """从文本中解析参数"""
+        """从文本中解析参数（增强版）"""
         params = {}
         
-        # 尝试XML格式 <key>value</key>
-        xml_params = re.findall(r'<(\w+)>(.*?)</\1>', text, re.DOTALL)
-        for key, value in xml_params:
-            params[key] = RobustXMLParser._parse_value(value.strip())
+        # 方法1: 尝试XML格式 - 包括嵌套结构
+        # 查找所有参数标签
+        import re
         
-        # 如果没有找到XML格式，尝试key:value或key=value格式
+        # 查找所有的参数标签（不包括嵌套的item）
+        param_pattern = r'<(\w+)>(.*?)</\1>'
+        matches = re.findall(param_pattern, text, re.DOTALL)
+        
+        for key, value in matches:
+            # 检查是否包含嵌套的item标签
+            if '<item>' in value and '</item>' in value:
+                # 这是一个数组，提取所有item
+                item_pattern = r'<item>(.*?)</item>'
+                items = re.findall(item_pattern, value, re.DOTALL)
+                params[key] = [RobustXMLParser._parse_value(item.strip()) for item in items]
+            elif '<' in value and '>' in value:
+                # 可能有其他嵌套标签（不是item），尝试通用解析
+                nested_pattern = r'<(\w+)>(.*?)</\1>'
+                nested_matches = re.findall(nested_pattern, value, re.DOTALL)
+                if nested_matches:
+                    # 有嵌套元素，解析为列表
+                    params[key] = [RobustXMLParser._parse_value(v.strip()) for _, v in nested_matches]
+                else:
+                    # 无法解析嵌套，作为普通文本
+                    params[key] = RobustXMLParser._parse_value(value.strip())
+            else:
+                # 普通值
+                params[key] = RobustXMLParser._parse_value(value.strip())
+        
+        # 如果没有找到XML格式参数，降级到其他解析方法
         if not params:
-            # key: value 格式
+            # 方法2: 尝试key:value或key=value格式
             kv_params = re.findall(r'(\w+)\s*[:=]\s*([^,\n]+)', text)
             for key, value in kv_params:
                 value = value.strip().strip('"\'')
@@ -257,18 +300,22 @@ def extract_tag(text: str, tag: str) -> Optional[str]:
 if __name__ == "__main__":
     # 测试代码
     test_cases = [
-        # 正常格式
+        # 1. 混合格式（数组和普通参数）
         """
         <tool_call>
-            <name>web_search</name>
+            <name>analyze_data</name>
             <params>
-                <query>AI medical FDA approval</query>
-                <limit>10</limit>
+                <datasets>
+                    <item>dataset1.csv</item>
+                    <item>dataset2.csv</item>
+                </datasets>
+                <method>regression</method>
+                <confidence>0.95</confidence>
             </params>
         </tool_call>
         """,
         
-        # 缺少闭标签
+        # 2. 缺少闭标签（错误恢复测试）
         """
         <tool_call>
             <name>web_search
@@ -277,33 +324,80 @@ if __name__ == "__main__":
         </tool_call>
         """,
         
-        # 特殊字符
+        # 3. 特殊字符（URL参数）
         """
         <tool_call>
             <name>web_fetch</name>
             <params>
-                <url>https://example.com?a=1&b=2</url>
+                <urls>
+                    <item>https://example.com?a=1&b=2</item>
+                    <item>https://test.com/path?key=value&foo=bar</item>
+                </urls>
             </params>
         </tool_call>
         """,
         
-        # 多个调用
+        # 4. 旧格式数组（向后兼容性测试）
+        """
+        <tool_call>
+            <name>web_fetch</name>
+            <params>
+                <urls>["https://old-format1.com", "https://old-format2.com"]</urls>
+                <count>2</count>
+            </params>
+        </tool_call>
+        """,
+        
+        # 5. 多个工具调用
         """
         <tool_call>
             <name>search</name>
-            <params><query>first</query></params>
+            <params>
+                <query>first search</query>
+            </params>
         </tool_call>
         
         <tool_call>
             <name>fetch</name>
-            <params><url>http://test.com</url></params>
+            <params>
+                <urls>
+                    <item>http://test1.com</item>
+                    <item>http://test2.com</item>
+                </urls>
+            </params>
         </tool_call>
+        """,
+        
+        # 6. 空数组测试
         """
+        <tool_call>
+            <name>process</name>
+            <params>
+                <files></files>
+                <output>result.txt</output>
+            </params>
+        </tool_call>
+        """,
+        
+        # 7. 不同标签名的嵌套（不是item）
+        """
+        <tool_call>
+            <name>configure</name>
+            <params>
+                <servers>
+                    <server>server1.com</server>
+                    <server>server2.com</server>
+                    <server>server3.com</server>
+                </servers>
+                <port>8080</port>
+            </params>
+        </tool_call>
+        """,
     ]
     
     for i, test in enumerate(test_cases, 1):
         print(f"\n测试用例 {i}:")
-        print("> 输入:", test[:100] + "..." if len(test) > 100 else test)
+        print("> 输入:", test[:1000] + "..." if len(test) > 1000 else test)
         
         results = parse_tool_calls(test)
         for result in results:
