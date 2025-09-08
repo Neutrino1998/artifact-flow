@@ -274,7 +274,7 @@ class Artifact:
             use_fuzzy: 是否启用模糊匹配（默认启用）
             
         Returns:
-            (成功与否, 消息)
+            (成功与否, 消息, 额外信息字典)  # 👈 新增第三个返回值
         """
         # 1. 先尝试精确匹配
         count = self.content.count(old_str)
@@ -298,10 +298,13 @@ class Artifact:
             self.content = new_content
             self.updated_at = datetime.now()
             
-            return True, f"Successfully updated artifact (v{self.current_version})"
+            return True, f"Successfully updated artifact (v{self.current_version})", {
+                "match_type": "exact",
+                "similarity": 1.0
+            }
         
         elif count > 1:
-            return False, f"Text '{old_str[:50]}...' appears {count} times (must be unique)"
+            return False, f"Text '{old_str[:50]}...' appears {count} times (must be unique)", None
         
         # 2. 如果精确匹配失败且启用模糊匹配
         if use_fuzzy:
@@ -344,10 +347,17 @@ class Artifact:
                 self.content = new_content
                 self.updated_at = datetime.now()
                 
-                return True, f"Successfully updated artifact (v{self.current_version}) with {similarity:.1%} match"
+                # 👇 返回详细的匹配信息
+                return True, f"Successfully updated artifact (v{self.current_version}) with {similarity:.1%} match", {
+                    "match_type": "fuzzy",
+                    "similarity": similarity,
+                    "expected_text": old_str,  # 用户提供的文本
+                    "matched_text": matched_text,  # 实际匹配到的文本
+                    "position": {"start": start, "end": end}
+                }
         
         # 3. 完全找不到匹配
-        return False, f"Text '{old_str[:50]}...' not found in artifact"
+        return False, f"Text '{old_str[:50]}...' not found in artifact", None
     
     def rewrite(self, new_content: str) -> Tuple[bool, str]:
         """
@@ -568,7 +578,7 @@ class UpdateArtifactTool(BaseTool):
     def __init__(self):
         super().__init__(
             name="update_artifact",
-            description="Update artifact content by replacing old text with new text",
+            description="Update artifact content by replacing old text with new text (Support fuzzy matching)",
             permission=ToolPermission.PUBLIC
         )
     
@@ -602,19 +612,33 @@ class UpdateArtifactTool(BaseTool):
                 error=f"Artifact '{params['id']}' not found"
             )
         
-        success, message = artifact.update(
+        success, message, match_info = artifact.update(
             old_str=params["old_str"],
             new_str=params["new_str"]
         )
         
         if success:
             logger.info(message)
+            
+            # 👇 构建返回数据，包含匹配详情
+            result_data = {
+                "message": message,
+                "version": artifact.current_version
+            }
+            
+            # 如果是模糊匹配，添加详细信息
+            if match_info and match_info.get("match_type") == "fuzzy":
+                result_data["fuzzy_match_details"] = {
+                    "similarity": f"{match_info['similarity']:.1%}",
+                    "expected": match_info["expected_text"][:200] + "..." if len(match_info["expected_text"]) > 200 else match_info["expected_text"],
+                    "found": match_info["matched_text"][:200] + "..." if len(match_info["matched_text"]) > 200 else match_info["matched_text"],
+                    "note": "Used fuzzy matching because exact text was not found"
+                }
+            
             return ToolResult(
                 success=True,
-                data={
-                    "message": message,
-                    "version": artifact.current_version
-                }
+                data=result_data,
+                metadata=match_info  # 👈 完整信息放在metadata中
             )
         else:
             return ToolResult(success=False, error=message)
