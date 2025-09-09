@@ -52,3 +52,6 @@ checkpoints/
 # Build artifacts
 build/
 dist/
+
+# VSCode Counter
+.VSCodeCounter/
