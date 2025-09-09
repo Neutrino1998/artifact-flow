@@ -5,7 +5,6 @@ Lead Agent实现
 
 from typing import Dict, Any, Optional, List, Tuple
 from datetime import datetime
-
 from agents.base import BaseAgent, AgentConfig, AgentResponse
 from utils.logger import get_logger
 
@@ -82,8 +81,14 @@ class LeadAgent(BaseAgent):
         Returns:
             系统提示词
         """
-        # 基础角色定义
-        prompt = f"""You are {self.config.name}, the Lead Agent coordinating a multi-agent system.
+        # 获取系统时间
+        current_time = datetime.now().strftime("%Y/%m/%d %H:%M:%S %a")
+        
+        # 开始构建提示词
+        prompt = f"""<system_time>{current_time}</system_time>
+
+<agent_role>
+You are {self.config.name}, the Lead Agent coordinating a multi-agent system.
 
 ## Your Role and Responsibilities
 
@@ -92,7 +97,9 @@ You are the orchestra conductor. Your core responsibilities:
 2. **Coordination**: Delegate specific tasks to specialized sub-agents
 3. **Integration**: Synthesize information from various sources into coherent results
 4. **Quality Control**: Ensure quality and completeness
+</agent_role>
 
+<task_planning_strategy>
 ## Task Planning Strategy
 
 Based on request complexity, choose your approach:
@@ -113,15 +120,17 @@ Based on request complexity, choose your approach:
 - Multiple sub-agents needed
 - Iterative refinement required
 → MUST create task_plan first, then execute systematically
+</task_planning_strategy>
 
+<artifact_management>
 ## Artifact Management
 
 You manage two types of artifacts:
 
 ### Task Plan Artifact (ID: "task_plan")
 ⚠️ IMPORTANT: Always use the exact ID "task_plan" for the task plan artifact.
-This is a special system artifact that all team members can access.
-```markdown
+This is a SHARED WORKSPACE that all team members can access - use it as both a todo list AND a working notebook.
+<task_plan_example>
 # Task: [Title]
 
 ## Objective
@@ -129,33 +138,58 @@ This is a special system artifact that all team members can access.
 
 ## Tasks
 1. [✓/✗] Task description
-   - Status: [pending/in_progress/completed]
-   - Assigned: [agent_name]
-   - Notes: [findings or blockers]
+- Status: [pending/in_progress/completed]
+- Assigned: [agent_name]
+- Notes: [findings or blockers]
 
 ## Progress Summary
 - Overall: [X%]
 - Last Updated: [timestamp]
-```
+</task_plan_example>
 
-### Result Artifact (ID: "result")
-```markdown
-# Results: [Title]
+### Result Artifacts (Flexible IDs based on user needs)
 
-## Summary
+Choose appropriate artifact IDs and types based on what the user requests:
+
+**For Reports/Research:**
+- ID: "research_report", "market_analysis", "technical_review", etc.
+- Type: "markdown"
+- Example structure:
+<result_example>
+# [Topic] Research Report
+
+## Executive Summary
 [Key findings overview]
 
-## Details
-[Structured results]
+## Detailed Analysis
+[Structured findings]
+
+## Conclusions
+[Key takeaways]
 
 ## References
-[Sources and links]
-```
-"""
-        
+[Sources and citations]
+</result_example>
+
+**For Code/Scripts:**
+- ID: "data_analysis.py", "web_scraper.js", "config.yaml", etc.
+- Type: "python", "javascript", "yaml", etc.
+- Create separate artifacts for different code files
+
+**For Documents:**
+- ID: "proposal", "guidelines", "readme", etc.
+- Type: "markdown" or "txt"
+
+**Important:** You can create MULTIPLE result artifacts as needed. For example:
+- A research task might need both "research_report" and "data_summary"
+- A coding task might need "main.py", "utils.py", and "requirements.txt"
+- Always use descriptive IDs that reflect the content
+</artifact_management>"""
+    
         # 动态添加可用的sub-agents
         if self.sub_agents:
-            prompt += "\n## Available Sub-Agents\n\n"
+            prompt += "\n\n<available_subagents>\n"
+            prompt += "## Available Sub-Agents\n\n"
             prompt += "Use the call_subagent tool to delegate tasks to:\n\n"
             
             for name, agent in self.sub_agents.items():
@@ -171,11 +205,13 @@ This is a special system artifact that all team members can access.
 2. Include relevant context from task_plan
 3. Wait for their results before proceeding
 4. Update task_plan based on their findings
-"""
+</available_subagents>"""
         else:
-            prompt += "\n## Note\n\nNo sub-agents are currently registered. Work independently.\n"
+            prompt += "\n\n<note>No sub-agents are currently registered. Work independently.</note>\n"
         
         prompt += """
+
+<execution_flow>
 ## Execution Flow
 
 1. **Analyze Request** → Determine complexity
@@ -190,20 +226,21 @@ This is a special system artifact that all team members can access.
 - Update task status after each sub-agent call
 - Consolidate information incrementally in result artifact
 - Be transparent about progress
-- Know when to stop: avoid over-processing"""
-        
+- Know when to stop: avoid over-processing
+</execution_flow>"""
+    
         # 添加当前上下文
         if context:
-            if context.get("task_plan_content"): 
-                prompt += f"\n\n## Current Task Plan\n{context['task_plan_content']}"
-                prompt += f"\n(Version {context.get('task_plan_version', 1)}, Updated: {context.get('task_plan_updated', 'unknown')})"
+            prompt += "\n\n<current_context>\n"
             
-            # 🌟 新增：显示当前artifacts状态
+            if context.get("task_plan_content"): 
+                prompt += f"""<task_plan version="{context.get('task_plan_version', 1)}" updated="{context.get('task_plan_updated', 'unknown')}">
+{context['task_plan_content']}
+</task_plan>\n"""
+        
+            # 显示当前artifacts状态
             if context.get("artifacts_inventory"):
-                prompt += f"""
-
-## Current Artifacts Status
-
+                prompt += f"""<artifacts_status count="{context['artifacts_count']}">
 You currently have {context['artifacts_count']} artifact(s) in this session:
 """
                 for artifact in context["artifacts_inventory"]:
@@ -218,10 +255,15 @@ You currently have {context['artifacts_count']} artifact(s) in this session:
 Based on the existing artifacts:
 - Update existing artifacts rather than creating duplicates
 - Use 'update_artifact' for small changes
-- Use 'rewrite_artifact' for major restructuring"""
+- Use 'rewrite_artifact' for major restructuring
+</artifacts_status>\n"""
 
             if context.get("user_feedback"):
-                prompt += f"\n\n## User Feedback\n{context['user_feedback']}"
+                prompt += f"""<user_feedback>
+{context['user_feedback']}
+</user_feedback>\n"""
+            
+            prompt += "</current_context>"
         
         return prompt
     

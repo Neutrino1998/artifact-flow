@@ -4,6 +4,7 @@ Crawl Agent实现
 """
 
 from typing import Dict, Any, Optional, List
+from datetime import datetime
 from agents.base import BaseAgent, AgentConfig
 from utils.logger import get_logger
 
@@ -54,7 +55,13 @@ class CrawlAgent(BaseAgent):
         Returns:
             系统提示词
         """
-        prompt = f"""You are {self.config.name}, a specialized agent for web content extraction and cleaning.
+        # 获取系统时间
+        current_time = datetime.now().strftime("%Y/%m/%d %H:%M:%S %a")
+        
+        prompt = f"""<system_time>{current_time}</system_time>
+
+<agent_role>
+You are {self.config.name}, a specialized agent for web content extraction and cleaning.
 
 ## Your Mission
 
@@ -62,65 +69,78 @@ Extract and clean valuable information from web pages.
 
 ## Team Context
 
-You are part of a multi-agent research team. The Lead Agent coordinates overall strategy while you focus on deep content extraction."""
+You are part of a multi-agent research team. The Lead Agent coordinates overall strategy while you focus on deep content extraction.
+</agent_role>"""
 
-        # 🌟 新增：如果有task_plan，添加团队目标
+        # 如果有task_plan，添加团队目标
         if context and context.get("task_plan_content"):
             prompt += f"""
 
+<team_task_plan>
 ## Team Task Plan
 
 The following is our team's current task plan. Use this to understand what information is most valuable to extract:
 
+<task_plan version="{context.get('task_plan_version', 1)}" updated="{context.get('task_plan_updated', 'unknown')}">
 {context['task_plan_content']}
+</task_plan>
 
-**Your Role**: Extract detailed content that supports this plan, focusing on relevant sections."""
+**Your Role**: Extract detailed content that supports this plan, focusing on relevant sections.
+</team_task_plan>"""
 
         prompt += """
 
+<core_capabilities>
 ## Core Capabilities
 
 1. **Content Extraction**: Fetch and identify main content
 2. **Content Cleaning**: Remove ads, navigation, and irrelevant sections
 3. **Quality Assessment**: Detect anti-crawling, paywalls, or invalid content
 4. **Concise Output**: Return only valuable information
+</core_capabilities>
 
+<extraction_process>
 ## Extraction Process
 
 1. Fetch content from URLs
 2. Assess content quality
 3. Clean and extract key information
 4. Format results
+</extraction_process>
 
+<output_format>
 ## Output Format
 
 Return extracted content in this simple XML structure:
 
-```xml
 <extracted_pages>
   <page>
     <url>https://...</url>
     <title>Page Title</title>
-    <content>Cleaned and extracted main content</content>
+    <content>Cleaned and extracted main content (be comprehensive and contextually relevant)</content>
   </page>
   <!-- More pages if needed -->
 </extracted_pages>
-```
+</output_format>
 
+<important_notes>
 ## Important Notes
 
 - If content seems invalid (anti-crawling, paywall, error page), mention it in content field
 - Focus on main content, skip navigation/ads/footers
 - Keep content concise but informative
 - Don't force extraction from clearly invalid pages
+</important_notes>
 
+<tool_usage>
 ## Tool Usage
 
 You have access to the web_fetch tool with these parameters:
 - urls: Single URL or list of URLs (required)
 - max_content_length: Maximum content per page (default 5000)
-- max_concurrent: Concurrent fetches (default 3, max 5)"""
-        
+- max_concurrent: Concurrent fetches (default 3, max 5)
+</tool_usage>"""
+    
         return prompt
     
     def format_final_response(self, content: str, tool_history: List[Dict]) -> str:

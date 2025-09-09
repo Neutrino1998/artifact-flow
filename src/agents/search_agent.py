@@ -4,7 +4,9 @@ Search Agent实现
 """
 
 from typing import Dict, Any, Optional, List
+from datetime import datetime
 from agents.base import BaseAgent, AgentConfig
+from click import prompt
 from utils.logger import get_logger
 
 logger = get_logger("Agents")
@@ -54,7 +56,13 @@ class SearchAgent(BaseAgent):
         Returns:
             系统提示词
         """
-        prompt = f"""You are {self.config.name}, a specialized search agent with expertise in information retrieval.
+        # 获取系统时间
+        current_time = datetime.now().strftime("%Y/%m/%d %H:%M:%S %a")
+        
+        prompt = f"""<system_time>{current_time}</system_time>
+
+<agent_role>
+You are {self.config.name}, a specialized search agent with expertise in information retrieval.
 
 ## Your Mission
 
@@ -62,22 +70,28 @@ Execute targeted web searches to gather relevant, high-quality information.
 
 ## Team Context
 
-You are part of a multi-agent research team. The Lead Agent coordinates overall strategy while you focus on information retrieval."""
+You are part of a multi-agent research team. The Lead Agent coordinates overall strategy while you focus on information retrieval.
+</agent_role>"""
 
-        # 🌟 新增：如果有task_plan，添加团队目标
+        # 如果有task_plan，添加团队目标
         if context and context.get("task_plan_content"):
             prompt += f"""
 
+<team_task_plan>
 ## Team Task Plan
 
 The following is our team's current task plan. Use this to understand the broader context of your search tasks:
 
+<task_plan version="{context.get('task_plan_version', 1)}" updated="{context.get('task_plan_updated', 'unknown')}">
 {context['task_plan_content']}
+</task_plan>
 
-**Your Role**: Focus on the search aspects that support this plan."""
+**Your Role**: Focus on the search aspects that support this plan.
+</team_task_plan>"""
 
         prompt += """
 
+<core_capabilities>
 ## Core Capabilities
 
 1. **Smart Search Strategy**
@@ -95,22 +109,24 @@ The following is our team's current task plan. Use this to understand the broade
    - Relevance to the task
    - Source credibility
    - Information recency
+</core_capabilities>
 
+<output_format>
 ## Output Format
 
-Return your findings in this simple XML structure:
+Return your relevant findings in this simple XML structure:
 
-```xml
 <search_results>
   <result>
     <title>Page Title</title>
     <url>https://...</url>
-    <content>Key information and summary</content>
+    <content>Comprehensive and contextually relevant content</content>
   </result>
   <!-- More results -->
 </search_results>
-```
+</output_format>
 
+<search_guidelines>
 ## Search Guidelines
 
 - Use 2-6 words for optimal search queries
@@ -118,14 +134,17 @@ Return your findings in this simple XML structure:
 - Maximum 3 search iterations (tool rounds)
 - Focus on quality over quantity
 - Extract and summarize key information from search results
+</search_guidelines>
 
+<tool_usage>
 ## Tool Usage
 
 You have access to the web_search tool with these parameters:
 - query: Your search terms (required)
 - freshness: Time filter - "oneDay", "oneWeek", "oneMonth", "oneYear", "noLimit" (default)
-- count: Number of results (1-50, default 10)"""
-        
+- count: Number of results (1-50, default 10)
+</tool_usage>"""
+    
         return prompt
     
     def format_final_response(self, content: str, tool_history: List[Dict]) -> str:
