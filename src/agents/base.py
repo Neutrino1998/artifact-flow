@@ -259,8 +259,11 @@ class BaseAgent(ABC):
             # 调试模式：记录完整对话
             if self.config.debug:
                 if reasoning_content:
-                    logger.debug(f"[{self.config.name} Round {round_num + 1}] Reasoning (complete):\n{reasoning_content}")
-                logger.debug(f"[{self.config.name} Round {round_num + 1}] LLM Response (complete):\n{response_content}")
+                    logger.debug(f"[{self.config.name} Round {round_num + 1}] Reasoning:\n{reasoning_content}")
+                token_usage = response.response_metadata.get('token_usage', {})
+                input_tokens = token_usage.get('input_tokens', 0)
+                output_tokens = token_usage.get('output_tokens', 0)
+                logger.debug(f"[{self.config.name} Round {round_num + 1}] LLM Response (input: {input_tokens}, output: {output_tokens}):\n{response_content}")
 
             # 解析工具调用
             tool_calls = parse_tool_calls(response_content)
@@ -283,7 +286,12 @@ class BaseAgent(ABC):
                         tool_call.name,
                         tool_call.params
                     )
-                    
+                
+                    if result.success:
+                        logger.info(f"{self.config.name} tool '{tool_call.name}': SUCCESS")
+                    else:
+                        logger.warning(f"{self.config.name} tool '{tool_call.name}': FAILED - {result.error}")
+
                     # 记录工具调用历史
                     tool_history.append({
                         "tool": tool_call.name,
