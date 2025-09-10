@@ -236,6 +236,7 @@ class BaseAgent(ABC):
             # 调用LLM
             if self.config.streaming:
                 # 流式输出（用户可实时看到）
+                reasoning_content = ""
                 response_content = ""
                 async for chunk in self.llm.astream(messages):
                     if hasattr(chunk, 'content'):
@@ -245,7 +246,10 @@ class BaseAgent(ABC):
                     # 记录思考过程（如果有）
                     if hasattr(chunk, 'additional_kwargs'):
                         if 'reasoning_content' in chunk.additional_kwargs:
-                            reasoning_content = chunk.additional_kwargs['reasoning_content']
+                            reasoning_content += chunk.additional_kwargs['reasoning_content']
+                    if hasattr(chunk, 'response_metadata'):
+                        if 'token_usage' in chunk.response_metadata:
+                            token_usage = chunk.response_metadata['token_usage']
             else:
                 # 批量输出
                 response = await self.llm.ainvoke(messages)
@@ -255,15 +259,18 @@ class BaseAgent(ABC):
                 if hasattr(response, 'additional_kwargs'):
                     if 'reasoning_content' in response.additional_kwargs:
                         reasoning_content = response.additional_kwargs['reasoning_content']
-            
+                if hasattr(response, 'response_metadata'):
+                    if 'token_usage' in response.response_metadata:
+                        token_usage = response.response_metadata['token_usage']
+
             # 调试模式：记录完整对话
             if self.config.debug:
                 if reasoning_content:
                     logger.debug(f"[{self.config.name} Round {round_num + 1}] Reasoning:\n{reasoning_content}")
-                token_usage = response.response_metadata.get('token_usage', {})
                 input_tokens = token_usage.get('input_tokens', 0)
                 output_tokens = token_usage.get('output_tokens', 0)
                 logger.debug(f"[{self.config.name} Round {round_num + 1}] LLM Response (input: {input_tokens}, output: {output_tokens}):\n{response_content}")
+                logger.debug(f"[{self.config.name} Round {round_num + 1}] LLM Raw Response (input: {input_tokens}, output: {output_tokens}):\n{repr(response_content)}")
 
             # 解析工具调用
             tool_calls = parse_tool_calls(response_content)
