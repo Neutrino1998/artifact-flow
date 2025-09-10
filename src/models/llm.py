@@ -236,7 +236,8 @@ if __name__ == "__main__":
             # 创建模型并测试
             llm = create_llm(model_name, temperature=0.3)
             response = llm.invoke(test_question)
-            
+            # for chunk in llm.stream(test_question):
+            #     print(chunk)
             print(f"📝 问题: {test_question}")
             print("-"*60)
             if 'reasoning_content' in response.additional_kwargs:
