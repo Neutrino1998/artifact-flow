@@ -578,7 +578,7 @@ class UpdateArtifactTool(BaseTool):
     def __init__(self):
         super().__init__(
             name="update_artifact",
-            description="Update artifact content by replacing old text with new text (Support fuzzy matching)",
+            description="Update artifact content by replacing old text with new text (Support line-by-line fuzzy matching if exact text not found).",
             permission=ToolPermission.PUBLIC
         )
     
@@ -593,7 +593,7 @@ class UpdateArtifactTool(BaseTool):
             ToolParameter(
                 name="old_str",
                 type="string",
-                description="Exact text to be replaced (must appear exactly once)",
+                description="Text to be replaced. For best results, select complete lines including any numbering (e.g., '1. [✗] Task description').",
                 required=True
             ),
             ToolParameter(
@@ -642,6 +642,32 @@ class UpdateArtifactTool(BaseTool):
             )
         else:
             return ToolResult(success=False, error=message)
+
+    def to_xml_example(self) -> str:
+        """
+        生成更清晰的XML调用示例，强调正确的换行处理
+        """
+        # 使用实际的换行符，不是\n字符串
+        return """<tool_call>
+<name>update_artifact</name>
+  <params>
+    <id>task_plan</id>
+    <old_str>1. [✗] Search for recent developments
+   - Status: pending
+   - Assigned: search_agent
+   - Notes: N/A</old_str>
+    <new_str>1. [✓] Search for recent developments
+   - Status: completed
+   - Assigned: search_agent
+   - Notes: Found 5 key breakthroughs</new_str>
+  </params>
+</tool_call>
+
+IMPORTANT NOTES:
+1. Use ACTUAL line breaks in XML, not \\n escape sequences
+2. Include complete lines with their numbering (e.g., "1. ", "2. ")
+3. For multi-line updates, include all related lines as a unit
+4. The fuzzy matcher can handle minor whitespace differences (85% similarity threshold)"""
 
 
 class RewriteArtifactTool(BaseTool):
