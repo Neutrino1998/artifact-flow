@@ -295,14 +295,15 @@ async def main():
             "description": "Simple factual question"
         },
         {
-            "task": "Find recent information about quantum computing breakthroughs in 2024",
+            "task": "Find recent information about quantum computing breakthroughs in this year",
             "complexity": "moderate",
             "description": "Moderate search task"
         },
         {
             "task": (
-                "Research and analyze the impact of AI on healthcare in 2024. "
-                "Include recent developments, key players, and future trends."
+                "Research and analyze the news of AI on healthcare this month. "
+                "Compile into a report that include 4~5 news articles."
+                "Write in coherent paragraphs with citations. Do not use bullet points."
             ),
             "complexity": "complex",
             "description": "Complex research task"
