@@ -426,10 +426,8 @@ class BaseAgent(ABC):
         
         # 更新最终响应
         current_response.content = formatted_response
-        # metadata只保留真正有用的信息
-        current_response.metadata = {
-            "tool_rounds": self.tool_call_count  # 实际执行的工具调用次数
-        }
+        # 只更新或添加有用的metadata字段，保留原有信息
+        current_response.metadata["tool_rounds"] = self.tool_call_count  # 实际执行的工具调用次数
         
         # Yield完成事件
         yield StreamEvent(
@@ -485,7 +483,11 @@ class BaseAgent(ABC):
             yield event
     
     async def reset(self):
-        """重置Agent状态"""
+        """
+        重置Agent状态
+
+        注意: 此方法不会重置LLM实例或toolkit的内部状态，仅重置Agent自身的计数和对话历史。
+        """
         self.tool_call_count = 0
         self.conversation_history.clear()
         logger.debug(f"{self.config.name} state reset")
