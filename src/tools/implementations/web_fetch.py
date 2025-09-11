@@ -264,7 +264,7 @@ class WebFetchTool(BaseTool):
                         "url": url,
                         "title": result.metadata.get("title", "No Title"),
                         "content": content,
-                        "word_count": len(content.split()),
+                        "word_count": len(content),
                         "fetched_at": datetime.now().isoformat()
                     })
                     
