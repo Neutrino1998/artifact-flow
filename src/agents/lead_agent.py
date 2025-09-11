@@ -168,7 +168,7 @@ Choose appropriate artifact IDs and types based on what the user requests:
 [Key takeaways]
 
 ## References
-[Sources and citations]
+[Sources and citations - Use markdown link format: [Source Title](URL)]
 </result_example>
 
 **For Code/Scripts:**
