@@ -92,7 +92,7 @@ class MultiAgentSystem:
         config = AgentConfig(
             name="lead_agent",
             description="Task coordinator and information integrator",
-            model="qwen-plus",
+            model="qwen3-30b-thinking",
             temperature=0.7,
             max_tool_rounds=5,
             streaming=True,
@@ -116,7 +116,7 @@ class MultiAgentSystem:
         config = AgentConfig(
             name="search_agent",
             description="Web search and information retrieval specialist",
-            model="qwen-flash",
+            model="qwen3-30b-instruct",
             temperature=0.5,
             max_tool_rounds=3,
             streaming=True,
@@ -140,7 +140,7 @@ class MultiAgentSystem:
         config = AgentConfig(
             name="crawl_agent",
             description="Web content extraction and cleaning specialist",
-            model="qwen-flash",
+            model="qwen3-30b-instruct",
             temperature=0.3,
             max_tool_rounds=2,
             streaming=True,
