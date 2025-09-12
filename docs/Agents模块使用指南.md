@@ -1,4 +1,4 @@
-# Agents模块使用指南
+# Agents模块使用指南 (v2.0)
 
 ## 概述
 
@@ -10,7 +10,8 @@ Agents模块实现了多智能体系统的核心Agent逻辑。每个Agent都有�
 2. **工具调用限制**：每个Agent最多进行3轮工具调用，防止无限循环
 3. **完成判断统一**：当LLM响应中不包含工具调用时，即视为任务完成
 4. **模型兼容性**：支持思考模型和非思考模型，核心逻辑基于`response.content`
-5. **双执行模式**：提供`execute()`(传统)和`execute_stream()`(流式)两种执行方法
+5. **双执行模式**：提供`execute()`(批量)和`stream()`(流式)两种执行方法
+6. **简单错误处理**：通过`success`字段标识执行状态，错误信息直接放在`content`中
 
 ## Agent类型
 
@@ -26,12 +27,26 @@ Agents模块实现了多智能体系统的核心Agent逻辑。每个Agent都有�
 **特色功能**：
 
 - **动态SubAgent注册**：可以灵活注册和管理子Agent
+- **智能任务规划**：根据复杂度自动选择是否创建task_plan
 
 **使用示例**：
 
 ```python
 from agents.lead_agent import LeadAgent, SubAgent
 from tools.registry import create_agent_toolkit
+from agents.base import AgentConfig
+
+# 配置Lead Agent
+config = AgentConfig(
+    name="lead_agent",
+    description="Task coordinator and information integrator",
+    model="qwen-plus",
+    temperature=0.7,
+    max_tool_rounds=5,  # Lead需要更多轮次
+    streaming=True,
+    llm_max_retries=3,  # 新增：LLM重试次数
+    llm_retry_delay=1.0  # 新增：重试延迟
+)
 
 # 创建工具包
 toolkit = create_agent_toolkit("lead_agent", tool_names=[
@@ -40,7 +55,7 @@ toolkit = create_agent_toolkit("lead_agent", tool_names=[
 ])
 
 # 创建Lead Agent
-lead_agent = LeadAgent(toolkit=toolkit)
+lead_agent = LeadAgent(config=config, toolkit=toolkit)
 
 # 注册SubAgent
 lead_agent.register_subagent(SubAgent(
@@ -53,24 +68,18 @@ lead_agent.register_subagent(SubAgent(
     ]
 ))
 
-lead_agent.register_subagent(SubAgent(
-    name="crawl_agent",
-    description="Extracts content from specific web pages",
-    capabilities=[
-        "Deep content extraction from URLs",
-        "Content cleaning and filtering",
-        "Anti-crawling detection"
-    ]
-))
-
 # 执行任务
 response = await lead_agent.execute(
     "Create a task plan for analyzing market trends",
     context={"task_complexity": "high"}
 )
 
-print(response.content)  # 最终响应
-print(response.tool_calls)  # 工具调用历史
+# 检查执行状态（新增）
+if response.success:
+    print(response.content)  # 最终响应
+    print(response.tool_calls)  # 工具调用历史
+else:
+    print(f"Execution failed: {response.content}")  # 错误信息
 ```
 
 ### 2. Search Agent
@@ -85,7 +94,7 @@ print(response.tool_calls)  # 工具调用历史
 
 - 自主优化搜索词
 - 多轮迭代搜索
-- 简化XML格式输出
+- 结构化XML输出
 
 **使用示例**：
 
@@ -97,8 +106,9 @@ agent = create_search_agent(toolkit=search_toolkit)
 
 # 执行搜索
 context = {
-    "instruction": "Find recent AI breakthroughs",
-    "task_plan": "Current research context..."
+    "task_plan_content": "Research AI breakthroughs...",  # 新：自动注入的task_plan
+    "task_plan_version": 1,
+    "task_plan_updated": "2024-01-01T00:00:00"
 }
 
 response = await agent.execute(
@@ -106,15 +116,9 @@ response = await agent.execute(
     context=context
 )
 
-# 响应为简化的XML格式
-# <search_results>
-#   <r>
-#     <title>...</title>
-#     <url>...</url>
-#     <content>...</content>
-#   </r>
-#   <!-- More results -->
-# </search_results>
+if response.success:
+    # 响应为XML格式
+    print(response.content)
 ```
 
 ### 3. Crawl Agent
@@ -130,92 +134,6 @@ response = await agent.execute(
 - 深度内容提取
 - 智能内容清洗
 - 反爬检测和处理
-- 简化结构化输出
-
-**使用示例**：
-
-```python
-from agents.crawl_agent import create_crawl_agent
-
-# 创建Crawl Agent
-agent = create_crawl_agent(toolkit=crawl_toolkit)
-
-# 执行抓取
-context = {
-    "urls": ["https://example.com/article"],
-    "task_plan": "Extract key findings from articles"
-}
-
-response = await agent.execute(
-    "Extract and clean content from URLs",
-    context=context
-)
-
-# 响应为简化的XML格式
-# <extracted_pages>
-#   <page>
-#     <url>...</url>
-#     <title>...</title>
-#     <content>...</content>
-#   </page>
-# </extracted_pages>
-```
-
-## 完整系统示例
-
-### 多Agent系统集成
-
-```python
-from agents.lead_agent import LeadAgent, SubAgent
-from agents.search_agent import SearchAgent
-from agents.crawl_agent import CrawlAgent
-from tools.registry import ToolRegistry
-
-class MultiAgentSystem:
-    """多Agent系统的简单封装"""
-    
-    def __init__(self):
-        # 创建工具注册中心
-        self.registry = ToolRegistry()
-        
-        # 注册所有工具
-        self._register_all_tools()
-        
-        # 创建各Agent
-        self.lead_agent = self._setup_lead_agent()
-        self.search_agent = self._setup_search_agent()
-        self.crawl_agent = self._setup_crawl_agent()
-        
-        # 在Lead Agent中注册子Agent
-        self._register_subagents()
-    
-    def _register_subagents(self):
-        """动态注册子Agent到Lead Agent"""
-        # 注册Search Agent
-        self.lead_agent.register_subagent(SubAgent(
-            name="search_agent",
-            description="Information retrieval specialist",
-            capabilities=[
-                "Web search optimization",
-                "Multi-round search refinement",
-                "Structured result extraction"
-            ]
-        ))
-        
-        # 注册Crawl Agent  
-        self.lead_agent.register_subagent(SubAgent(
-            name="crawl_agent",
-            description="Content extraction specialist",
-            capabilities=[
-                "Deep content extraction",
-                "Content quality assessment",
-                "Anti-crawling handling"
-            ]
-        ))
-        
-        # 可以继续注册更多专门的Agent
-        # self.lead_agent.register_subagent(SubAgent(...))
-```
 
 ## 执行流程
 
@@ -233,7 +151,7 @@ graph TD
     H --> I[Agent自行格式化输出]
 ```
 
-## AgentConfig配置
+## AgentConfig配置（更新）
 
 ```python
 from agents.base import AgentConfig
@@ -241,159 +159,116 @@ from agents.base import AgentConfig
 config = AgentConfig(
     name="custom_agent",
     description="Custom task agent",
-    model="qwen-plus",  # 或其他模型
+    model="qwen-plus",
     temperature=0.7,
-    max_tool_rounds=3,  # 最大工具调用轮数
-    streaming=True,  # 流式输出
-    debug=False  # 调试模式
+    max_tool_rounds=3,      # 最大工具调用轮数
+    streaming=True,         # 流式输出
+    debug=False,           # 调试模式
+    # 新增配置项
+    llm_max_retries=3,     # LLM调用最大重试次数
+    llm_retry_delay=1.0    # 初始重试延迟（秒）
 )
 ```
 
-## 最佳实践
-
-### 1. 任务规划策略
-
-- **简单问题**：直接回答，无需artifact
-- **中等复杂**：可选创建task_plan
-- **复杂任务**：必须创建task_plan进行系统化执行
-
-### 2. Agent协作模式
+## AgentResponse结构（更新）
 
 ```python
-# Lead Agent自动协调
-lead_response = await lead_agent.execute(
-    "Analyze the impact of AI on education"
-)
-
-# Lead通过CallSubagentTool自动调用sub agents
-# 路由决策由Lead Agent自主完成
+@dataclass
+class AgentResponse:
+    success: bool = True           # 新增：执行是否成功
+    content: str = ""              # 成功时为响应内容，失败时为错误信息
+    tool_calls: List[Dict]         # 工具调用历史
+    reasoning_content: Optional[str]  # 思考过程（思考模型）
+    metadata: Dict                 # 元数据
+    routing: Optional[Dict]        # 路由信息
+    token_usage: Optional[Dict]    # Token使用统计
 ```
 
-### 3. SubAgent注册最佳实践
+## 错误处理（新增）
+
+### 三层错误处理机制
 
 ```python
-# 为不同任务类型注册专门的Agent
-lead_agent.register_subagent(SubAgent(
-    name="data_agent",
-    description="Data analysis and visualization",
-    capabilities=[
-        "Statistical analysis",
-        "Data cleaning and preprocessing",
-        "Visualization generation"
-    ]
-))
-
-lead_agent.register_subagent(SubAgent(
-    name="code_agent",
-    description="Code generation and review",
-    capabilities=[
-        "Code synthesis",
-        "Bug detection",
-        "Performance optimization"
-    ]
-))
-```
-
-### 4. 错误处理
-
-```python
+# 1. 最外层：捕获未预期错误
 try:
     response = await agent.execute(user_input)
+    if not response.success:
+        # Agent执行失败但返回了响应
+        logger.error(f"Agent failed: {response.content}")
+        # 可以根据agent类型决定是否致命
+        if agent.config.name == "lead_agent":
+            raise CriticalError("Lead agent failure")
+        else:
+            # Sub-agent失败，可以继续
+            return handle_partial_result(response)
 except Exception as e:
-    logger.error(f"Agent execution failed: {e}")
-    # 降级处理或重试
+    # 完全失败
+    logger.exception(f"Unexpected error: {e}")
+    raise
+
+# 2. LLM调用层：自动重试
+# BaseAgent内置重试机制，根据错误类型：
+# - Rate limit: 指数退避重试
+# - Timeout: 快速重试
+# - Auth error: 不重试，直接失败
+
+# 3. 工具执行层：容错处理
+# 工具失败不会终止执行，错误会记录在tool_calls中
 ```
 
-### 5. 调试技巧
+### 错误类型识别
 
 ```python
-# 开启调试模式
-config = AgentConfig(debug=True)
-agent = SomeAgent(config, toolkit)
+# 通过response判断错误类型
+response = await agent.execute(user_input)
 
-# 查看工具调用详情
-for call in response.tool_calls:
-    print(f"Tool: {call['tool']}")
-    print(f"Params: {call['params']}")
-    print(f"Result: {call['result']}")
+if not response.success:
+    error_msg = response.content.lower()
+    
+    if "llm call failed" in error_msg:
+        # LLM调用失败（致命）
+        handle_llm_failure()
+    elif "tool execution error" in error_msg:
+        # 工具执行失败（可恢复）
+        handle_tool_failure()
+    else:
+        # 其他错误
+        handle_general_error()
 ```
 
-## 与LangGraph集成
+## 流式执行（更新）
 
-Agents模块设计为与LangGraph无缝集成：
-
-### 传统模式（使用execute）
+### 使用stream()方法（原execute_stream）
 
 ```python
-from langgraph.graph import StateGraph
+# 创建Agent
+agent = create_lead_agent(toolkit=toolkit)
 
-# 定义工作流
-workflow = StateGraph(AgentState)
-
-# 添加节点
-workflow.add_node("lead_agent", lead_agent_node)
-workflow.add_node("search_agent", search_agent_node)
-workflow.add_node("crawl_agent", crawl_agent_node)
-
-# 条件路由
-def route_after_lead(state):
-    # 从Lead Agent的工具调用中提取路由决策
-    routing_decision = lead_agent.extract_routing_decision(
-        state["tool_calls"]
-    )
-    if routing_decision:
-        return routing_decision
-    return END
-
-workflow.add_conditional_edges(
-    "lead_agent",
-    route_after_lead,
-    {
-        "search_agent": "search_agent",
-        "crawl_agent": "crawl_agent",
-        END: END
-    }
-)
+# 流式执行
+async for event in agent.stream(user_input, context):
+    # 处理不同类型的事件
+    if event.type == StreamEventType.LLM_CHUNK:
+        # 实时显示LLM输出
+        print(event.data.content, end="")
+    
+    elif event.type == StreamEventType.TOOL_START:
+        print(f"\n🔧 Calling {event.data.metadata['current_tool']}...")
+    
+    elif event.type == StreamEventType.ERROR:
+        # 新增：处理错误事件
+        print(f"\n❌ Error: {event.data.content}")
+        if not event.data.success:
+            # 决定是否继续
+            break
+    
+    elif event.type == StreamEventType.COMPLETE:
+        if event.data.success:
+            print(f"\n✅ Completed successfully")
+        else:
+            print(f"\n⚠️ Completed with errors")
 ```
 
-### 流式模式（使用execute_stream）
-
-```python
-from agents.base import StreamEvent, StreamEventType
-
-async def lead_agent_node(state: AgentState):
-    """使用execute_stream的节点实现"""
-    agent = get_lead_agent()
-    
-    # 收集流式事件
-    events = []
-    final_response = None
-    
-    # 流式执行
-    async for event in agent.execute_stream(state["input"]):
-        events.append(event)
-        
-        # 实时处理不同类型的事件
-        if event.type == StreamEventType.LLM_CHUNK:
-            # 发送到WebSocket或其他流式通道
-            await send_to_frontend(event.data["content"])
-        
-        elif event.type == StreamEventType.TOOL_START:
-            # 显示工具调用状态
-            await notify_tool_start(event.data["tool"])
-        
-        elif event.type == StreamEventType.COMPLETE:
-            final_response = event.data["response"]
-    
-    return {
-        "agent_response": final_response,
-        "stream_events": events
-    }
-```
-
-## 流式执行详解
-
-### StreamEvent类型
+### StreamEvent类型（简化）
 
 ```python
 class StreamEventType(Enum):
@@ -403,175 +278,193 @@ class StreamEventType(Enum):
     TOOL_START = "tool_start"    # 工具调用开始
     TOOL_RESULT = "tool_result"  # 工具调用结果
     COMPLETE = "complete"        # 执行完成
-    ERROR = "error"              # 错误
+    ERROR = "error"              # 错误（新增活跃使用）
+
+# StreamEvent.data始终是AgentResponse对象
+# 通过response.success判断状态
 ```
 
-### 使用execute_stream
+### execute vs stream对比（更新）
+
+| 特性       | execute()                 | stream()                      |
+| ---------- | ------------------------- | ----------------------------- |
+| 返回类型   | `AgentResponse`           | `AsyncGenerator[StreamEvent]` |
+| 使用场景   | 批量处理、测试            | 实时交互、WebSocket           |
+| 输出时机   | 完成后一次性              | 实时流式                      |
+| 错误处理   | 返回带success=False的响应 | yield ERROR事件               |
+| 方法名变化 | 保持不变                  | 原execute_stream改为stream    |
+
+## 与LangGraph集成（更新）
+
+### 批量模式节点
 
 ```python
-# 创建Agent
-agent = create_lead_agent(toolkit=toolkit)
-
-# 流式执行
-async for event in agent.execute_stream(user_input, context):
-    # 处理不同类型的事件
-    if event.type == StreamEventType.LLM_CHUNK:
-        # 实时显示LLM输出
-        print(event.data["content"], end="")
+async def agent_node(state: AgentState):
+    """使用execute的节点实现"""
+    agent = get_agent(state["agent_name"])
     
-    elif event.type == StreamEventType.TOOL_START:
-        print(f"\n🔧 Calling {event.data['tool']}...")
+    # 执行agent
+    response = await agent.execute(
+        state["input"],
+        context=state.get("context", {})
+    )
     
-    elif event.type == StreamEventType.COMPLETE:
-        response = event.data["response"]
-        print(f"\n✅ Completed with {len(response.tool_calls)} tool calls")
+    # 根据success字段处理
+    if response.success:
+        # 成功，更新状态
+        return {
+            "agent_response": response.content,
+            "tool_calls": response.tool_calls,
+            "status": "success"
+        }
+    else:
+        # 失败，决定如何处理
+        if state["agent_name"] == "lead_agent":
+            # Lead失败是致命的
+            raise GraphExecutionError(f"Lead failed: {response.content}")
+        else:
+            # Sub-agent失败，返回错误信息给Lead
+            return {
+                "agent_response": response.content,
+                "status": "failed",
+                "error": response.content
+            }
 ```
 
-### WebSocket集成示例
+### 流式模式节点
 
 ```python
-# FastAPI WebSocket endpoint
-@app.websocket("/ws/agent/{agent_id}")
-async def agent_websocket(websocket: WebSocket, agent_id: str):
-    await websocket.accept()
+async def streaming_agent_node(state: AgentState):
+    """使用stream的节点实现"""
+    agent = get_agent(state["agent_name"])
     
-    # 获取Agent
-    agent = get_agent(agent_id)
+    final_response = None
+    error_occurred = False
     
-    # 接收用户输入
+    # 流式执行
+    async for event in agent.stream(state["input"], state.get("context")):
+        # 实时处理事件
+        if event.type == StreamEventType.LLM_CHUNK:
+            await send_to_frontend({
+                "type": "chunk",
+                "content": event.data.content
+            })
+        
+        elif event.type == StreamEventType.ERROR:
+            error_occurred = True
+            await send_to_frontend({
+                "type": "error",
+                "message": event.data.content
+            })
+        
+        elif event.type == StreamEventType.COMPLETE:
+            final_response = event.data
+    
+    # 返回最终状态
+    if final_response and final_response.success:
+        return {"status": "success", "response": final_response}
+    else:
+        return {"status": "failed", "error": final_response.content if final_response else "Unknown error"}
+```
+
+## Context自动注入机制（新增）
+
+所有Agent在执行时会自动注入task_plan（如果存在）：
+
+```python
+# BaseAgent._prepare_context_with_task_plan 自动处理
+# 1. 所有agent都会获得task_plan内容
+context = {
+    "task_plan_content": "...",      # task_plan的内容
+    "task_plan_version": 1,           # 版本号
+    "task_plan_updated": "2024-..."   # 更新时间
+}
+
+# 2. Lead Agent额外获得artifacts清单
+if agent.config.name == "lead_agent":
+    context["artifacts_inventory"] = [...]  # 所有artifacts列表
+    context["artifacts_count"] = 3          # artifacts数量
+```
+
+## 最佳实践（更新）
+
+### 1. 错误处理策略
+
+```python
+# 推荐的错误处理模式
+async def safe_execute(agent, input_text, context=None):
+    """安全执行Agent任务"""
+    try:
+        response = await agent.execute(input_text, context)
+        
+        if response.success:
+            return response
+        else:
+            # 根据agent类型决定处理策略
+            if isinstance(agent, LeadAgent):
+                # Lead失败通常是致命的
+                raise CriticalError(f"Lead agent failed: {response.content}")
+            else:
+                # Sub-agent失败可以恢复
+                logger.warning(f"Sub-agent failed: {response.content}")
+                return response  # 返回部分结果
+                
+    except Exception as e:
+        logger.exception(f"Agent execution error: {e}")
+        # 创建失败响应
+        return AgentResponse(
+            success=False,
+            content=f"Execution error: {str(e)}"
+        )
+```
+
+### 2. 流式交互最佳实践
+
+```python
+# WebSocket + 流式执行
+async def handle_websocket(websocket, agent):
     user_input = await websocket.receive_text()
     
-    # 流式执行并发送事件
-    async for event in agent.execute_stream(user_input):
-        # 转换为JSON并发送
+    async for event in agent.stream(user_input):
+        # 简化的事件处理
         await websocket.send_json({
             "type": event.type.value,
-            "agent": event.agent,
-            "timestamp": event.timestamp.isoformat(),
-            "data": event.data
+            "success": event.data.success,
+            "content": event.data.content,
+            "timestamp": event.timestamp.isoformat()
         })
+        
+        # 错误时可选择终止
+        if event.type == StreamEventType.ERROR and not event.data.success:
+            if "llm call failed" in event.data.content.lower():
+                break  # LLM失败，终止流
 ```
 
-### execute vs execute_stream对比
-
-| 特性      | execute()       | execute_stream()              |
-| --------- | --------------- | ----------------------------- |
-| 返回类型  | `AgentResponse` | `AsyncGenerator[StreamEvent]` |
-| 使用场景  | 批量处理、测试  | 实时交互、LangGraph           |
-| 输出时机  | 完成后一次性    | 实时流式                      |
-| 事件粒度  | 无              | 细粒度事件                    |
-| WebSocket | 需要轮询        | 原生支持                      |
-
-## 🔧 工程实践要点
-
-### 1. Agent工具循环控制机制
-
-设置统一的工具调用次数限制（最大3轮），超过限制后在提示词中明确指示Agent："你已达到工具调用上限，请总结你的发现并返回最终结果"，防止无限循环并确保任务收敛。
-
-### 2. 任务完成状态判断统一原则
-
-所有Agent（Lead/Sub）采用相同的完成信号：当LLM响应中不包含工具调用时，即视为任务完成。Sub Agent完成后自动返回结果，Lead Agent无工具调用时结束整个流程。
-
-### 3. 单线程顺序执行架构
-
-不考虑Agent并发执行，采用简化设计：同一时间只有一个节点运行，Lead Agent和Sub Agent使用相同的执行策略和代码框架，降低系统复杂度。
-
-### 4. 统一流式输出体验
-
-Lead Agent和Sub Agent采用相同的构造模式：
-
-- LLM输出支持流式返回（用户实时看到思考过程）
-- 工具执行为同步批量返回结果
-- 使用`execute_stream()`提供统一的流式体验
-
-### 5. 单一LangGraph架构设计
-
-采用统一的LangGraph工作流，包含Lead Agent节点和多个Sub Agent节点，所有工具调用在节点内部循环执行而非独立节点。通过CallSubagentTool伪工具触发节点间路由。
-
-### 6. 模块职责分工明确
-
-- **agents/模块**：实现具体Agent的业务逻辑
-- **core/模块**：负责LangGraph工作流定义、节点路由、状态管理
-- **tools/模块**：提供工具实现和注册管理
-
-### 7. 思考模型兼容性设计
-
-Agent兼容思考模型和非思考模型，记录`reasoning_content`用于调试，但核心逻辑始终基于`response.content`。
-
-### 8. Lead Agent工具配置策略
-
-Lead Agent只配置artifact操作工具和CallSubagentTool：
-
-- Artifact工具：create/update/rewrite/read_artifact
-- CallSubagentTool：触发路由到sub agents
-- 无工具调用时表示直接回复用户
-
-### 9. Lead Agent任务规划逻辑
-
-Lead Agent提示词明确task_plan管理策略：
-
-- **简单问答**：直接回答，无需artifact
-- **中等复杂**（1-2个子任务）：可选择创建task_plan
-- **复杂任务**：必须先创建task_plan，然后逐步更新
-
-### 10. Search Agent自主优化机制
-
-Search Agent具备自主搜索能力：
-
-- 根据结果质量自行refine搜索词
-- 进行多轮搜索优化（最多3轮）
-- 返回简化XML格式结构化结果
-- 自行整理和总结搜索信息
-
-### 11. Crawl Agent内容处理模式
-
-Crawl Agent职责明确且简单：
-
-- 接收URL列表
-- 爬取内容后清洗提取
-- 检测反爬、paywall等问题
-- 返回简化XML格式的有用信息
-- 由Agent自己判断内容质量
-
-### 12. 动态Context注入机制
-
-所有Agent的提示词构建都支持context参数传入，特别是将task_plan artifact内容作为任务上下文传递给sub agent。
+### 3. 调试技巧（增强）
 
 ```python
-def build_system_prompt(self, context: Optional[Dict[str, Any]] = None):
-    prompt = "基础提示词..."
-    if context:
-        if context.get("task_plan"):
-            prompt += f"\n\n## Task Context\n{context['task_plan']}"
-    return prompt
+# 开启调试模式查看详细信息
+config = AgentConfig(
+    name="debug_agent",
+    debug=True,  # 开启调试
+    llm_max_retries=5,  # 增加重试次数便于调试
+)
+
+# 检查响应详情
+if not response.success:
+    print(f"Failed at: {response.metadata.get('failed_at')}")
+    print(f"Error: {response.content}")
+    print(f"Tool calls before failure: {response.tool_calls}")
 ```
 
-### 13. 动态SubAgent扩展能力
+## 重要变更说明
 
-Lead Agent支持动态注册新的SubAgent，使系统能够适应不同类型的任务需求：
-
-```python
-# 根据任务需求动态添加专门的Agent
-if task_type == "data_analysis":
-    lead_agent.register_subagent(data_analysis_agent)
-elif task_type == "code_review":
-    lead_agent.register_subagent(code_review_agent)
-```
-
-## 其他注意事项
-
-1. **API密钥配置**：确保在`.env`文件中配置了必要的API密钥
-2. **工具可用性**：运行前确认所需工具已注册并分配给Agent
-3. **内存管理**：注意工具调用历史会占用内存，长时间运行需要清理
-4. **并发限制**：当前设计为单线程顺序执行，不支持Agent并发
-5. **模型选择**：Crawl Agent可以使用更便宜的模型以节省成本
+1. **方法重命名**：`execute_stream()` → `stream()` (更简洁)
+2. **错误处理简化**：移除ErrorLevel，使用success字段
+3. **自动重试**：LLM调用内置重试机制
+4. **Context自动注入**：task_plan自动传递给所有Agent
+5. **错误信息位置**：失败时错误信息直接放在content中
 
 ## 下一步
 
-完成agents模块后，下一步是实现`core/`模块：
-
-- `graph.py` - LangGraph工作流定义
-- `state.py` - 状态管理
-- `controller.py` - 执行控制（pause/resume）
-
-这些模块将把Agent组装成完整的多智能体系统。
+完成agents模块后，下一步是实现`core/`模块，利用Agent的success字段进行工作流控制和错误处理。
