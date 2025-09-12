@@ -303,6 +303,7 @@ async def main():
             "task": (
                 "Research and analyze the news of AI on healthcare this month. "
                 "Compile into a report that include 4~5 news articles."
+                "Each article should include its own subtitle and content (~500 words)."
                 "Write in coherent paragraphs with citations. Do not use bullet points."
             ),
             "complexity": "complex",
