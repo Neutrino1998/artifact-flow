@@ -109,9 +109,9 @@ class WebFetchTool(BaseTool):
             ToolParameter(
                 name="max_content_length",
                 type="integer",
-                description="Maximum content length per page in characters (default: 5000)",
+                description="Maximum content length per page in characters (default: 10000)",
                 required=False,
-                default=5000
+                default=10000
             ),
             ToolParameter(
                 name="max_concurrent",
@@ -153,7 +153,7 @@ class WebFetchTool(BaseTool):
         else:
             return ToolResult(success=False, error="urls must be string or list")
         
-        max_content_length = params.get("max_content_length", 5000)
+        max_content_length = params.get("max_content_length", 10000)
         max_concurrent = min(params.get("max_concurrent", 3), 5)  # 限制最大5个
         
         logger.info(f"Fetching {len(urls)} URL(s) with max {max_concurrent} concurrent browsers")
@@ -420,7 +420,7 @@ class SimpleFetchTool(BaseTool):
                     title = soup.title.string if soup.title else "No Title"
                     
                     # 限制长度
-                    max_length = 5000
+                    max_length = 10000
                     if len(text) > max_length:
                         text = text[:max_length] + "..."
                     
