@@ -1,7 +1,7 @@
 """
 Base Agent抽象类
 提供Agent的基础功能：工具调用循环、流式输出、统一完成判断等
-增强：简单的错误处理和重试机制
+增强功能：错误处理和重试机制、messages返回、权限检查
 """
 
 from abc import ABC, abstractmethod
@@ -15,7 +15,7 @@ from utils.logger import get_logger
 from utils.xml_parser import parse_tool_calls
 from tools.prompt_generator import ToolPromptGenerator, format_result
 from tools.registry import AgentToolkit
-from tools.base import ToolResult
+from tools.base import ToolResult, ToolPermission
 
 logger = get_logger("Agents")
 
@@ -27,6 +27,7 @@ class StreamEventType(Enum):
     LLM_COMPLETE = "llm_complete"  # LLM输出完成
     TOOL_START = "tool_start"      # 工具调用开始
     TOOL_RESULT = "tool_result"    # 工具调用结果
+    PERMISSION_REQUIRED = "permission_required"  # 需要权限确认
     COMPLETE = "complete"          # 执行完成
     ERROR = "error"                # 错误
 
@@ -51,7 +52,6 @@ class AgentConfig:
     streaming: bool = False  # 是否默认流式输出
     debug: bool = False  # 是否开启调试模式
     
-    # 新增：重试配置
     llm_max_retries: int = 3  # LLM调用最大重试次数
     llm_retry_delay: float = 1.0  # 初始重试延迟（秒）
 
@@ -59,13 +59,15 @@ class AgentConfig:
 @dataclass
 class AgentResponse:
     """Agent响应"""
-    success: bool = True  # 新增：执行是否成功
+    success: bool = True  # 执行是否成功
     content: str = ""  # 回复内容或错误信息
     tool_calls: List[Dict[str, Any]] = field(default_factory=list)  # 工具调用记录
     reasoning_content: Optional[str] = None  # 思考过程（如果有）
     metadata: Dict[str, Any] = field(default_factory=dict)  # 元数据
     routing: Optional[Dict[str, Any]] = None  # 路由信息
     token_usage: Optional[Dict[str, Any]] = None  # Token使用统计
+    messages: List[Dict] = field(default_factory=list)  # 新增：完整对话历史
+    pending_confirmation: Optional[Dict] = None  # 新增：待确认的工具调用
 
 
 class BaseAgent(ABC):
@@ -184,17 +186,33 @@ class BaseAgent(ABC):
         pass
 
     async def _execute_single_tool(self, tool_call) -> ToolResult:
-        """执行单个工具调用"""
-        if self.toolkit:
-            return await self.toolkit.execute_tool(
-                tool_call.name,
-                tool_call.params
-            )
-        else:
+        """执行单个工具调用（增强：权限检查）"""
+        if not self.toolkit:
+            return ToolResult(success=False, error="No toolkit available")
+        
+        tool = self.toolkit.get_tool(tool_call.name)
+        if not tool:
+            return ToolResult(success=False, error=f"Tool '{tool_call.name}' not found")
+        
+        # 权限检查：CONFIRM和RESTRICTED级别需要确认
+        if tool.permission in [ToolPermission.CONFIRM, ToolPermission.RESTRICTED]:
+            logger.info(f"Tool '{tool_call.name}' requires {tool.permission.value} permission")
+            
+            # 返回特殊的"需要确认"信号
             return ToolResult(
-                success=False,
-                error="No toolkit available"
+                success=True,
+                data={
+                    "_needs_confirmation": True,
+                    "_tool_name": tool_call.name,
+                    "_params": tool_call.params,
+                    "_permission_level": tool.permission.value,
+                    "_reason": f"Tool '{tool_call.name}' requires {tool.permission.value} permission"
+                },
+                metadata={"is_permission_request": True}
             )
+        
+        # PUBLIC和NOTIFY级别直接执行
+        return await self.toolkit.execute_tool(tool_call.name, tool_call.params)
 
     async def _call_llm_with_retry(
         self, 
@@ -269,7 +287,7 @@ class BaseAgent(ABC):
         self,
         user_input: str,
         context: Optional[Dict[str, Any]] = None,
-        streaming_tokens: bool = False  # 是否流式输出LLM tokens
+        streaming_tokens: bool = False
     ) -> AsyncGenerator[StreamEvent, None]:
         """
         核心执行生成器，统一的执行逻辑（带错误处理）
@@ -288,6 +306,7 @@ class BaseAgent(ABC):
             content="",
             tool_calls=[],
             reasoning_content=None,
+            messages=[],  # 初始化messages
             metadata={
                 "agent": self.config.name,
                 "model": self.config.model,
@@ -307,13 +326,13 @@ class BaseAgent(ABC):
             self.tool_call_count = 0
             tool_history = []
             
-            # 准备context（包含task_plan）
+            # 准备context
             enhanced_context = await self._prepare_context_with_task_plan(context)
             
             # 构建系统提示词
             system_prompt = self.build_system_prompt(enhanced_context)
-
-            # 添加工具使用说明（如果有工具）
+            
+            # 添加工具使用说明
             if self.toolkit and self.toolkit.list_tools():
                 tools_instruction = ToolPromptGenerator.generate_tool_instruction(
                     self.toolkit.list_tools()
@@ -326,7 +345,7 @@ class BaseAgent(ABC):
                 {"role": "user", "content": user_input}
             ]
             
-            # 主循环
+            # 主循环开始
             final_content = ""
             accumulated_token_usage = {
                 "input_tokens": 0,
@@ -342,11 +361,10 @@ class BaseAgent(ABC):
                         "content": "⚠️ You have reached the maximum tool call limit. Please summarize your findings and provide the final response."
                     })
                 
-                # 调试模式：记录完整的messages
                 if self.config.debug:
-                    logger.debug(f"[{self.config.name} Round {round_num + 1}] Messages being sent to LLM:\n{self._format_messages_for_debug(messages)}")
+                    logger.debug(f"[{self.config.name} Round {round_num + 1}] Messages:\n{self._format_messages_for_debug(messages)}")
                 
-                # LLM调用（带错误处理）
+                # LLM调用
                 try:
                     if streaming_tokens:
                         # 流式模式：逐token处理
@@ -354,7 +372,6 @@ class BaseAgent(ABC):
                         reasoning_content = None
                         token_usage = {}
                         
-                        # 获取流生成器（带重试）
                         stream = await self._call_llm_with_retry(messages, streaming=True)
                         
                         async for chunk in stream:
@@ -394,7 +411,7 @@ class BaseAgent(ABC):
                             current_response.token_usage = accumulated_token_usage.copy()
                         
                     else:
-                        # 批量模式：一次性获取完整响应（带重试）
+                        # 批量模式：一次性获取完整响应
                         response = await self._call_llm_with_retry(messages, streaming=False)
                         
                         response_content = response.content
@@ -442,7 +459,6 @@ class BaseAgent(ABC):
                     # LLM调用失败是致命的，终止执行
                     return
                 
-                # Debug输出
                 if self.config.debug:
                     if reasoning_content:
                         logger.debug(f"[{self.config.name} Round {round_num + 1}] Reasoning:\n{reasoning_content}")
@@ -459,7 +475,7 @@ class BaseAgent(ABC):
                     final_content = response_content
                     break
                 
-                # 执行工具调用（带错误处理）
+                # 执行工具调用
                 tool_results = []
                 for tool_call in tool_calls:
                     self.tool_call_count += 1
@@ -480,9 +496,31 @@ class BaseAgent(ABC):
                         data=current_response
                     )
                     
-                    # 执行工具（带错误处理）
+                    # 执行工具
                     try:
                         result = await self._execute_single_tool(tool_call)
+                        
+                        # 检查是否需要权限确认
+                        if result.success and result.data and result.data.get("_needs_confirmation"):
+                            logger.info(f"Tool '{tool_call.name}' requires permission confirmation")
+                            
+                            # 设置待确认信息
+                            current_response.pending_confirmation = {
+                                "tool_name": tool_call.name,
+                                "params": tool_call.params,
+                                "permission_level": result.data.get("_permission_level"),
+                                "reason": result.data.get("_reason")
+                            }
+                            
+                            # Yield权限确认事件
+                            yield StreamEvent(
+                                type=StreamEventType.PERMISSION_REQUIRED,
+                                agent=self.config.name,
+                                data=current_response
+                            )
+                            
+                            # 这里应该暂停等待确认，但为了向后兼容，我们继续执行
+                            # 在实际的graph中会处理这个中断
                         
                         if result.success:
                             logger.info(f"{self.config.name} tool '{tool_call.name}': SUCCESS")
@@ -515,6 +553,8 @@ class BaseAgent(ABC):
                                 current_response.metadata["needs_routing"] = True
                                 current_response.metadata["rounds_completed"] = round_num + 1
                                 
+                                # 返回完整的messages历史
+                                current_response.messages = messages.copy()
                                 # Yield完成事件（带路由）
                                 yield StreamEvent(
                                     type=StreamEventType.COMPLETE,
@@ -525,7 +565,7 @@ class BaseAgent(ABC):
                         
                     except Exception as tool_error:
                         # 工具执行异常
-                        logger.error(f"Tool {tool_call.name} exception: {tool_error}")
+                        logger.exception(f"Tool {tool_call.name} exception: {tool_error}")
                         
                         # 创建失败结果
                         result = ToolResult(
@@ -542,7 +582,7 @@ class BaseAgent(ABC):
                 
                 # 更新消息历史
                 messages.append({"role": "assistant", "content": response_content})
-                if tool_results:  # 只有有工具结果时才添加
+                if tool_results:
                     messages.append({"role": "user", "content": "\n".join(tool_results)})
             
             # 格式化最终响应
@@ -551,8 +591,8 @@ class BaseAgent(ABC):
             # 更新最终响应
             current_response.content = formatted_response
             current_response.metadata["tool_rounds"] = self.tool_call_count
+            current_response.messages = messages.copy()  # 返回完整对话历史
             
-            # Yield完成事件
             yield StreamEvent(
                 type=StreamEventType.COMPLETE,
                 agent=self.config.name,
@@ -562,10 +602,9 @@ class BaseAgent(ABC):
         except Exception as e:
             # 最外层异常捕获（未预期的错误）
             logger.exception(f"Unexpected error in {self.config.name}: {e}")
-            
-            # 设置失败响应
             current_response.success = False
             current_response.content = f"Agent execution failed: {str(e)}"
+            current_response.messages = messages.copy() if 'messages' in locals() else []
             
             # Yield错误事件
             yield StreamEvent(
@@ -606,7 +645,8 @@ class BaseAgent(ABC):
         # 异常情况：没有COMPLETE或ERROR事件
         return AgentResponse(
             success=False,
-            content=f"Execution interrupted, last response: \n{last_response}"
+            content=f"Execution interrupted, last response: \n{last_response}",
+            messages=[]
         )
     
     async def stream(
@@ -630,17 +670,12 @@ class BaseAgent(ABC):
             yield event
     
     async def reset(self):
-        """
-        重置Agent状态
-
-        注意: 此方法不会重置LLM实例或toolkit的内部状态，仅重置Agent自身的计数和对话历史。
-        """
+        """重置Agent状态"""
         self.tool_call_count = 0
         self.conversation_history.clear()
         logger.debug(f"{self.config.name} state reset")
 
 
-# 便捷函数
 def create_agent_config(
     name: str,
     description: str,
