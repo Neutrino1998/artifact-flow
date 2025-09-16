@@ -239,7 +239,7 @@ class WebFetchTool(BaseTool):
                         )
                         crawl_results.append(result)
                     except Exception as e:
-                        logger.error(f"Failed to crawl {url}: {e}")
+                        logger.exception(f"Failed to crawl {url}: {e}")
                         # 创建一个失败的结果对象
                         class FailedResult:
                             success = False
@@ -435,7 +435,7 @@ class SimpleFetchTool(BaseTool):
                     )
                     
         except Exception as e:
-            logger.error(f"Simple fetch failed: {str(e)}")
+            logger.exception(f"Simple fetch failed: {str(e)}")
             return ToolResult(success=False, error=str(e))
 
 
