@@ -5,7 +5,7 @@ Base Agent抽象类
 """
 
 from abc import ABC, abstractmethod
-from typing import Dict, Any, List, Optional, AsyncGenerator, Union
+from typing import Dict, Any, List, Optional, AsyncGenerator, Union, Tuple
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
@@ -67,7 +67,6 @@ class AgentResponse:
     routing: Optional[Dict[str, Any]] = None  # 路由信息
     token_usage: Optional[Dict[str, Any]] = None  # Token使用统计
     messages: List[Dict] = field(default_factory=list)  # 新增：完整对话历史
-    pending_confirmation: Optional[Dict] = None  # 新增：待确认的工具调用
 
 
 class BaseAgent(ABC):
@@ -106,7 +105,7 @@ class BaseAgent(ABC):
         logger.info(f"Initialized {config.name} with model {config.model}")
     
     def _format_messages_for_debug(self, messages: List[Dict], max_content_len: int = 100000) -> str:
-        """将messages格式化为简洁的聊天记录格式"""
+        """格式化消息用于调试输出"""
         formatted_lines = []
         
         for msg in messages:
@@ -137,7 +136,7 @@ class BaseAgent(ABC):
         try:
             from tools.implementations.artifact_ops import _artifact_store
             
-            # 1. 注入task_plan（所有agent都需要）
+            # 注入task_plan
             task_plan = _artifact_store.get("task_plan")
             if task_plan:
                 context["task_plan_content"] = task_plan.content
@@ -145,7 +144,7 @@ class BaseAgent(ABC):
                 context["task_plan_updated"] = task_plan.updated_at.isoformat()
                 logger.debug(f"{self.config.name} loaded task_plan (v{task_plan.current_version})")
             
-            # 2. Lead Agent专属：注入完整的artifacts列表
+            # Lead Agent专属：注入artifacts列表
             if self.config.name == "lead_agent":
                 artifacts_list = _artifact_store.list_artifacts()
                 if artifacts_list:
@@ -198,17 +197,16 @@ class BaseAgent(ABC):
         if tool.permission in [ToolPermission.CONFIRM, ToolPermission.RESTRICTED]:
             logger.info(f"Tool '{tool_call.name}' requires {tool.permission.value} permission")
             
-            # 返回特殊的"需要确认"信号
+            # 返回特殊的"需要确认"信号（确认信息放在metadata中）
             return ToolResult(
                 success=True,
-                data={
-                    "_needs_confirmation": True,
-                    "_tool_name": tool_call.name,
-                    "_params": tool_call.params,
-                    "_permission_level": tool.permission.value,
-                    "_reason": f"Tool '{tool_call.name}' requires {tool.permission.value} permission"
-                },
-                metadata={"is_permission_request": True}
+                data=f"Permission required: Tool '{tool_call.name}' requires {tool.permission.value} permission to execute.",
+                metadata={
+                    "needs_confirmation": True,
+                    "tool_name": tool_call.name,
+                    "params": tool_call.params,
+                    "permission_level": tool.permission.value,
+                }
             )
         
         # PUBLIC和NOTIFY级别直接执行
@@ -500,16 +498,16 @@ class BaseAgent(ABC):
                     try:
                         result = await self._execute_single_tool(tool_call)
                         
-                        # 检查是否需要权限确认
-                        if result.success and result.data and result.data.get("_needs_confirmation"):
+                        # 检查是否需要权限确认（从metadata中检查）
+                        if result.success and result.metadata and result.metadata.get("needs_confirmation"):
                             logger.info(f"Tool '{tool_call.name}' requires permission confirmation")
                             
                             # 设置待确认信息
                             current_response.pending_confirmation = {
-                                "tool_name": tool_call.name,
-                                "params": tool_call.params,
-                                "permission_level": result.data.get("_permission_level"),
-                                "reason": result.data.get("_reason")
+                                "tool_name": result.metadata.get("tool_name"),
+                                "params": result.metadata.get("params"),
+                                "permission_level": result.metadata.get("permission_level"),
+                                "reason": str(result.data)  # data字段包含原因描述
                             }
                             
                             # Yield权限确认事件
@@ -542,9 +540,11 @@ class BaseAgent(ABC):
                         
                         # 检查路由（特殊工具）
                         if tool_call.name == "call_subagent" and result.success:
-                            result_data = result.to_dict().get("data", {})
-                            if result_data.get("_is_routing_instruction"):
-                                # 设置路由信息
+                            result_dict = result.to_dict()
+                            result_data = result_dict.get("data", {})
+                            
+                            # 如果data是字典且包含路由信息
+                            if isinstance(result_data, dict) and result_data.get("_is_routing_instruction"):
                                 current_response.routing = {
                                     "target": result_data.get("_route_to"),
                                     "instruction": result_data.get("instruction"),
