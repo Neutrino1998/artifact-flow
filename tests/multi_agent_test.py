@@ -172,7 +172,7 @@ class MultiAgentSystem:
                 "Deep content extraction from URLs",
                 "Content cleaning and filtering",
                 "Anti-crawling detection",
-                "⚠️ IMPORTANT: Instructions must include specific URLs to crawl"
+                "⚠️ IMPORTANT: Instructions must include specific URLs (1~3 urls) to crawl"
             ]
         ))
         
