@@ -1,457 +1,521 @@
-# ArtifactFlow Core模块设计与实施指南
+# ArtifactFlow Core模块设计与实施指南 V3
 
-## 🏗️ 核心设计原则
+## 🎯 核心架构理念
 
-### 📋 核心理念
-**充分利用LangGraph能力，避免重复造轮子，保持简单直接**
+### 三层历史管理架构
+```
+┌─────────────────────────────────────────┐
+│  Layer 1: User ↔ Graph 对话历史          │ ← 支持分支/回滚/编辑
+├─────────────────────────────────────────┤
+│  Layer 2: Graph State (AgentState)      │ ← 节点间共享状态
+├─────────────────────────────────────────┤
+│  Layer 3: Agent Internal Messages       │ ← 工具调用循环
+└─────────────────────────────────────────┘
+```
+
+### 消息组成结构（Agent内部）
+```
+┌─────────────────────────────────────────┐
+│         系统提示词 (动态生成)             │ ← build_system_prompt()
+├─────────────────────────────────────────┤
+│       初始用户请求 (持久存储)             │ ← NodeMemory存储
+├─────────────────────────────────────────┤
+│    LLM与工具交互历史 (可压缩)            │ ← Context Manager作用域
+└─────────────────────────────────────────┘
+```
 
 ---
 
-## 🎯 五大设计原则
+## 🔄 分支对话管理
 
-### 1️⃣ **工具权限控制 - 伪装路由模式**
+### 对话树结构
 ```
-原则：复用"伪装工具"模式，权限检查产生路由信号
-```
-- **BaseAgent层**：执行权限检查，对于需要确认的工具（CONFIRM/RESTRICTED），返回特殊的"路由信号"
-- **特殊信号格式**：类似`call_subagent`，返回包含`_needs_confirmation: true`的ToolResult
-- **Graph层路由**：识别特殊信号，路由到`user_confirmation`节点
-- **保持一致性**：Agent认为自己在调用工具，实际触发了权限确认流程
-
-```python
-# 示例：需要确认的工具返回
-ToolResult(
-    success=True,
-    data={
-        "_needs_confirmation": True,
-        "_tool_name": "send_email",
-        "_params": {...},
-        "_permission_level": "CONFIRM"
-    }
-)
-```
-
-### 2️⃣ **错误处理 - 自然流转原则**
-```
-原则：错误即数据，让其自然流转，由接收节点决定处理方式
-```
-- **不过度设计**：BaseAgent的错误已封装为AgentResponse，包含`success=False`
-- **正常路由**：错误响应像正常响应一样被路由和处理
-- **节点自主决策**：接收节点（通常是Lead Agent）根据错误内容决定：
-  - 重试其他策略
-  - 路由到其他Agent
-  - 向用户报告
-- **简单直接**：避免复杂的错误级别分类，让系统自然演化
-
-### 3️⃣ **执行控制 - LangGraph原生能力**
-```
-原则：最大化利用LangGraph的checkpoint和interrupt机制
-```
-- **Checkpoint**：使用MemorySaver自动管理状态快照
-- **Interrupt**：利用`interrupt_before/after`实现暂停点
-- **Thread管理**：通过`thread_id`实现多会话并行
-- **Controller职责**：
-  - 薄封装LangGraph API
-  - 管理thread生命周期
-  - 处理用户确认请求
-
-### 4️⃣ **Context管理 - 即时压缩策略**
-```
-原则：在需要时压缩，保持历史完整性
-```
-- **历史存储**：完整messages（`BaseAgent`中`_execute_generator`的`messages`，注意这个是一个node自己的messages，一个node不需要另外一个node完整的历史记录，只需要他的return agent response就行）历史存储在Graph State中
-- **压缩时机**：在每个节点`build_system_prompt`前触发
-- **压缩策略**：
-  - Phase 1：简单字符长度截断（MVP）
-  - Phase 2：智能总结和关键点提取（优化）
-- **实现位置**：`context_manager.prepare_context()`在节点执行前调用
-
-```python
-# 工作流程
-Graph State (完整历史) 
+user_msg_1 → graph_response_1
     ↓
-ContextManager.prepare_context()  # 压缩
-    ↓
-build_system_prompt(compressed_context)  # 使用压缩后的
-    ↓
-Agent.execute()
+user_msg_2 → graph_response_2  ← 编辑点
+    ├──→ user_msg_3 → graph_response_3 (原分支)
+    │         ↓
+    │    user_msg_4 → graph_response_4
+    │
+    └──→ user_msg_2_edited → graph_response_2_edited (新分支)
+              ↓
+         user_msg_5 → graph_response_5
 ```
 
-### 5️⃣ **流式输出 - 事件驱动架构**
-```
-原则：利用LangGraph的astream_events，统一事件格式
-```
-- **使用原生API**：`graph.astream_events()`获取所有节点事件
-- **事件类型映射**：
-  - `on_chain_start` → 节点开始
-  - `on_chain_stream` → 节点输出
-  - `on_chain_end` → 节点完成
-- **保持BaseAgent流式能力**：节点内部仍可使用Agent的stream方法
+### 实现机制
+- 每个用户消息创建新的thread_id
+- 编辑消息时fork当前thread，创建新分支
+- 保存分支关系树，支持切换和追溯
 
 ---
 
-## 📁 Core模块文件职责
+## 📊 Graph State设计（支持扩展）
 
-### **state.py**
-- 定义`AgentState` (TypedDict)
-- 包含：messages、current_task、artifacts、routing信息
-- 状态更新reducer函数
-- 不包含复杂逻辑，只是数据结构
-
-### **graph.py**
-- 节点定义（lead_agent_node、search_agent_node等）
-- 条件路由函数（route_after_lead、route_after_search）
-- Graph编译和checkpointer配置
-- Interrupt points设置
-
-### **controller.py**
-- Thread生命周期管理（start/pause/resume/rollback）
-- 用户确认处理（confirm_tool、reject_tool）
-- 执行状态查询
-- 薄封装LangGraph API，不做过多抽象
-
-### **context_manager.py**
-- `prepare_context()` - 主入口，被节点调用
-- 压缩策略实现（字符截断 → 智能总结）
-- Token计数工具
-- 关键信息提取（未来优化）
-
----
-
-## 🚫 反模式警示
-
-1. **不要**在BaseAgent中处理graph级别的逻辑
-2. **不要**创建复杂的错误分类系统（至少现在不要）
-3. **不要**重新实现LangGraph已有的功能
-4. **不要**过早优化Context压缩（先用简单截断）
-5. **不要**在State中存储临时数据（只存储需要跨节点共享的）
-
----
-
-## 🚀 编码实施顺序
-
-### 📝 Phase 1: BaseAgent增强（保持向后兼容）
-
-#### 1.1 修改 AgentResponse - 增加messages字段
-```python
-# agents/base.py
-@dataclass
-class AgentResponse:
-    success: bool = True
-    content: str = ""
-    tool_calls: List[Dict[str, Any]] = field(default_factory=list)
-    reasoning_content: Optional[str] = None
-    metadata: Dict[str, Any] = field(default_factory=dict)
-    routing: Optional[Dict[str, Any]] = None
-    token_usage: Optional[Dict[str, Any]] = None
-    messages: List[Dict] = field(default_factory=list)  # 新增：完整对话历史
-```
-
-#### 1.2 修改 _execute_generator - 返回messages
-```python
-# 在生成器最后，完成事件之前
-current_response.messages = messages.copy()  # 返回完整对话历史
-```
-
-#### 1.3 修改工具执行 - 增加权限检查
-```python
-# agents/base.py - _execute_single_tool方法
-async def _execute_single_tool(self, tool_call) -> ToolResult:
-    if self.toolkit:
-        tool = self.toolkit.get_tool(tool_call.name)
-        
-        # 检查权限级别
-        if tool and tool.permission in [ToolPermission.CONFIRM, ToolPermission.RESTRICTED]:
-            # 返回特殊的"需要确认"信号
-            return ToolResult(
-                success=True,
-                data={
-                    "_needs_confirmation": True,
-                    "_tool_name": tool_call.name,
-                    "_params": tool_call.params,
-                    "_permission_level": tool.permission.value,
-                    "_reason": f"Tool '{tool_call.name}' requires {tool.permission.value} permission"
-                },
-                metadata={"is_permission_request": True}
-            )
-        
-        # PUBLIC工具直接执行
-        return await self.toolkit.execute_tool(tool_call.name, tool_call.params)
-```
-
-**测试点**：运行 `multi_agent_test.py`，确保向后兼容
-
----
-
-### 📝 Phase 2: Core基础设施
-
-#### 2.1 创建 state.py - 定义数据结构
 ```python
 # core/state.py
-from typing import TypedDict, List, Dict, Optional, Annotated
+from typing import TypedDict, Dict, List, Optional, Annotated
 from langgraph.graph.message import add_messages
 
-class AgentState(TypedDict):
-    """LangGraph的状态定义"""
-    # 使用Annotated和reducer函数管理messages
-    messages: Annotated[List[Dict], add_messages]
+class NodeMemory(TypedDict):
+    """单个节点的记忆"""
+    initial_instruction: str           # 初始用户请求
+    messages: List[Dict]               # LLM与工具交互历史(不含system)
+    last_response: Optional[Dict]      # 最后的AgentResponse
+    tool_rounds: int                   # 工具调用轮次
     
-    # 基础字段
+class AgentState(TypedDict):
+    """LangGraph全局状态（可扩展）"""
+    # 基础信息
     current_task: str
-    session_id: Optional[str]
+    session_id: str
+    thread_id: str
+    parent_thread_id: Optional[str]    # 分支父节点
+    
+    # 🔑 可扩展的节点记忆（支持动态添加Agent）
+    agent_memories: Dict[str, NodeMemory]  # key: agent_name
     
     # 路由控制
     next_agent: Optional[str]
     last_agent: Optional[str]
+    routing_info: Optional[Dict]
     
-    # 工具确认
-    pending_confirmation: Optional[Dict]
+    # 权限确认
+    pending_tool_confirmation: Optional[Dict]
     
     # Artifacts
     task_plan_id: Optional[str]
     result_artifact_ids: List[str]
     
-    # 错误信息
-    last_error: Optional[str]
-    
     # Context管理
-    context_level: str  # "full", "normal", "compact", "minimal"
+    compression_level: str  # "full", "normal", "compact"
+    
+    # 用户对话层
+    user_message_id: str               # 当前用户消息ID
+    graph_response: Optional[str]      # Graph最终响应
+
+class ConversationTree(TypedDict):
+    """用户对话树（Layer 1）"""
+    conversation_id: str
+    branches: Dict[str, List[str]]      # parent_msg_id -> [child_msg_ids]
+    messages: Dict[str, UserMessage]    # msg_id -> message
+    active_branch: str                  # 当前活跃分支
+
+class UserMessage(TypedDict):
+    """用户消息节点"""
+    message_id: str
+    parent_id: Optional[str]
+    content: str
+    thread_id: str                      # 关联的Graph执行线程
+    timestamp: str
+    graph_response: Optional[str]
+    metadata: Dict
 ```
-
-#### 2.2 创建最小化 graph.py
-```python
-# core/graph.py - 第一版
-from langgraph.graph import StateGraph, END
-from langgraph.checkpoint.memory import MemorySaver
-
-def create_simple_graph():
-    """创建最简单的工作流：Lead→Search→END"""
-    workflow = StateGraph(AgentState)
-    
-    # 节点定义
-    workflow.add_node("lead_agent", lead_agent_node)
-    workflow.add_node("search_agent", search_agent_node)
-    
-    # 设置入口
-    workflow.set_entry_point("lead_agent")
-    
-    # 简单路由
-    workflow.add_edge("lead_agent", "search_agent")
-    workflow.add_edge("search_agent", END)
-    
-    # 编译（带checkpoint）
-    checkpointer = MemorySaver()
-    return workflow.compile(checkpointer=checkpointer)
-```
-
-**测试点**：创建 `test_simple_graph.py`，测试基本流程
 
 ---
 
-### 📝 Phase 3: 增加权限控制流程
+## 🏗️ 可扩展的Graph设计
 
-#### 3.1 扩展 graph.py - 增加确认节点
+### 动态Agent注册机制
 ```python
-# core/graph.py - 增加权限控制
-def create_graph_with_confirmation():
-    workflow = StateGraph(AgentState)
-    
-    # 所有节点
-    workflow.add_node("lead_agent", lead_agent_node)
-    workflow.add_node("search_agent", search_agent_node)
-    workflow.add_node("crawl_agent", crawl_agent_node)
-    workflow.add_node("user_confirmation", user_confirmation_node)
-    
-    # 条件路由
-    workflow.add_conditional_edges(
-        "lead_agent",
-        route_after_lead,
-        {
-            "search": "search_agent",
-            "crawl": "crawl_agent",
-            "confirm": "user_confirmation",
-            "end": END
-        }
-    )
-    
-    # 设置interrupt
-    workflow.add_edge("user_confirmation", "lead_agent", interrupt_before=True)
-    
-    return workflow.compile(checkpointer=MemorySaver())
+# core/graph.py
+from typing import Dict, Callable
+from langgraph.graph import StateGraph, END
 
-def route_after_lead(state: AgentState) -> str:
-    """Lead Agent之后的路由逻辑"""
-    last_message = state["messages"][-1] if state["messages"] else {}
-    content = str(last_message.get("content", ""))
+class ExtendableGraph:
+    """可扩展的Graph构建器"""
     
-    # 检查是否需要确认
-    if "_needs_confirmation" in content:
-        state["pending_confirmation"] = extract_confirmation_info(content)
-        return "confirm"
+    def __init__(self):
+        self.workflow = StateGraph(AgentState)
+        self.agents: Dict[str, BaseAgent] = {}
+        self.node_functions: Dict[str, Callable] = {}
+        
+        # 注册核心节点
+        self._register_core_nodes()
     
-    # 检查是否要路由到subagent
-    if "_route_to" in content:
-        if "search_agent" in content:
-            return "search"
-        elif "crawl_agent" in content:
-            return "crawl"
+    def register_agent(self, agent: BaseAgent):
+        """注册新Agent（支持运行时添加）"""
+        agent_name = agent.config.name
+        self.agents[agent_name] = agent
+        
+        # 创建节点函数
+        node_func = self._create_node_function(agent_name)
+        self.node_functions[agent_name] = node_func
+        
+        # 添加到workflow
+        self.workflow.add_node(agent_name, node_func)
+        
+        # 添加通用路由规则
+        self._add_routing_rules(agent_name)
+        
+        print(f"✅ Registered agent: {agent_name}")
     
-    return "end"
+    def _create_node_function(self, agent_name: str):
+        """为Agent创建通用节点函数"""
+        async def agent_node(state: AgentState) -> AgentState:
+            agent = self.agents[agent_name]
+            
+            # 获取或创建节点记忆
+            if agent_name not in state.get("agent_memories", {}):
+                state.setdefault("agent_memories", {})[agent_name] = None
+            
+            memory = state["agent_memories"].get(agent_name)
+            
+            # 判断是恢复执行还是新任务
+            if state.get("pending_tool_confirmation") and \
+               state.get("last_agent") == agent_name:
+                # 恢复执行
+                response = await agent.execute(
+                    instruction="",
+                    external_history=memory["messages"] if memory else [],
+                    pending_tool_result=state["pending_tool_confirmation"]["result"]
+                )
+            else:
+                # 新任务或子任务
+                if agent_name == "lead_agent":
+                    instruction = state["current_task"]
+                else:
+                    # 子Agent从routing_info获取指令
+                    instruction = state.get("routing_info", {}).get("instruction", "")
+                
+                response = await agent.execute(instruction)
+            
+            # 保存记忆
+            state["agent_memories"][agent_name] = NodeMemory(
+                initial_instruction=instruction if instruction else memory.get("initial_instruction", ""),
+                messages=response.messages,
+                last_response=response.to_dict(),
+                tool_rounds=response.metadata.get("tool_rounds", 0)
+            )
+            
+            # 处理路由
+            self._handle_routing(state, response, agent_name)
+            
+            return state
+        
+        return agent_node
+    
+    def _add_routing_rules(self, agent_name: str):
+        """添加Agent的路由规则"""
+        # 所有Agent都可以路由到user_confirmation
+        def route_func(state: AgentState) -> str:
+            if state.get("next_agent"):
+                next_node = state["next_agent"]
+                state["next_agent"] = None  # 清空
+                return next_node
+            return END
+        
+        self.workflow.add_conditional_edges(
+            agent_name,
+            route_func,
+            {
+                "user_confirmation": "user_confirmation",
+                "lead_agent": "lead_agent",
+                "search_agent": "search_agent", 
+                "crawl_agent": "crawl_agent",
+                END: END
+            }
+        )
+    
+    def _handle_routing(self, state: AgentState, response, agent_name: str):
+        """统一的路由处理"""
+        state["last_agent"] = agent_name
+        
+        if response.routing:
+            routing = response.routing
+            
+            if routing["type"] == "permission_confirmation":
+                state["next_agent"] = "user_confirmation"
+                state["pending_tool_confirmation"] = {
+                    "tool_name": routing["tool_name"],
+                    "params": routing["params"],
+                    "from_agent": agent_name,
+                    "permission_level": routing.get("permission_level")
+                }
+            elif routing["type"] == "subagent":
+                state["next_agent"] = routing["target"]
+                state["routing_info"] = routing
+            else:
+                # 可扩展其他路由类型
+                state["routing_info"] = routing
+    
+    def compile(self):
+        """编译Graph"""
+        from langgraph.checkpoint import MemorySaver
+        checkpointer = MemorySaver()
+        return self.workflow.compile(
+            checkpointer=checkpointer,
+            interrupt_before=["user_confirmation"]  # 用户确认前中断
+        )
 ```
 
-#### 3.2 实现基础 controller.py
+---
+
+## 🎭 对话管理器（支持分支）
+
+```python
+# core/conversation_manager.py
+from uuid import uuid4
+from typing import Optional, Dict, List
+
+class ConversationManager:
+    """用户对话管理器（Layer 1）"""
+    
+    def __init__(self, graph):
+        self.graph = graph
+        self.conversations: Dict[str, ConversationTree] = {}
+    
+    def start_conversation(self) -> str:
+        """开始新对话"""
+        conv_id = str(uuid4())
+        self.conversations[conv_id] = ConversationTree(
+            conversation_id=conv_id,
+            branches={},
+            messages={},
+            active_branch=""
+        )
+        return conv_id
+    
+    async def send_message(
+        self,
+        conv_id: str,
+        user_content: str,
+        parent_msg_id: Optional[str] = None
+    ) -> UserMessage:
+        """发送用户消息（可能创建分支）"""
+        conversation = self.conversations[conv_id]
+        msg_id = str(uuid4())
+        thread_id = str(uuid4())
+        
+        # 如果有parent，检查是否创建分支
+        if parent_msg_id and parent_msg_id in conversation["messages"]:
+            parent = conversation["messages"][parent_msg_id]
+            # 检查parent是否已有子消息（需要分支）
+            if parent_msg_id in conversation["branches"]:
+                print(f"🌿 Creating new branch from message {parent_msg_id}")
+        
+        # 创建消息
+        user_msg = UserMessage(
+            message_id=msg_id,
+            parent_id=parent_msg_id,
+            content=user_content,
+            thread_id=thread_id,
+            timestamp=datetime.now().isoformat(),
+            graph_response=None,
+            metadata={}
+        )
+        
+        # 保存消息和分支关系
+        conversation["messages"][msg_id] = user_msg
+        if parent_msg_id:
+            conversation["branches"].setdefault(parent_msg_id, []).append(msg_id)
+        
+        # 执行Graph
+        initial_state = {
+            "current_task": user_content,
+            "session_id": conv_id,
+            "thread_id": thread_id,
+            "parent_thread_id": parent.get("thread_id") if parent_msg_id else None,
+            "user_message_id": msg_id,
+            "agent_memories": {},
+            "compression_level": "normal"
+        }
+        
+        # 如果是从某个分支继续，复制父节点的状态
+        if parent_msg_id and parent_msg_id in conversation["messages"]:
+            parent_thread = conversation["messages"][parent_msg_id]["thread_id"]
+            parent_state = await self._get_thread_state(parent_thread)
+            if parent_state:
+                # 复制关键状态（artifacts等）
+                initial_state["task_plan_id"] = parent_state.get("task_plan_id")
+                initial_state["result_artifact_ids"] = parent_state.get("result_artifact_ids", [])
+        
+        # 运行Graph
+        config = {"configurable": {"thread_id": thread_id}}
+        final_state = await self.graph.ainvoke(initial_state, config)
+        
+        # 保存响应
+        user_msg["graph_response"] = final_state.get("graph_response", "")
+        conversation["active_branch"] = msg_id
+        
+        return user_msg
+    
+    def get_conversation_history(
+        self,
+        conv_id: str,
+        branch_path: Optional[List[str]] = None
+    ) -> List[UserMessage]:
+        """获取对话历史（可指定分支路径）"""
+        conversation = self.conversations[conv_id]
+        
+        if branch_path:
+            # 返回指定路径的消息
+            return [conversation["messages"][msg_id] for msg_id in branch_path
+                   if msg_id in conversation["messages"]]
+        else:
+            # 返回当前活跃分支的消息
+            return self._get_active_branch(conversation)
+    
+    def _get_active_branch(self, conversation: ConversationTree) -> List[UserMessage]:
+        """获取当前活跃分支的完整路径"""
+        if not conversation["active_branch"]:
+            return []
+        
+        path = []
+        current = conversation["messages"][conversation["active_branch"]]
+        
+        # 向上追溯到根
+        while current:
+            path.insert(0, current)
+            if current["parent_id"]:
+                current = conversation["messages"].get(current["parent_id"])
+            else:
+                break
+        
+        return path
+```
+
+---
+
+## 🚀 简化的Controller（聚焦权限处理）
+
 ```python
 # core/controller.py
-from uuid import uuid4
-from typing import Optional, Dict, Any
-
 class ExecutionController:
-    def __init__(self, graph, checkpointer=None):
+    """执行控制器（简化版）"""
+    
+    def __init__(self, graph):
         self.graph = graph
-        self.checkpointer = checkpointer
-        self.active_threads = {}
+        self.conversation_manager = ConversationManager(graph)
     
-    async def start_task(self, task: str, session_id: Optional[str] = None) -> str:
-        """启动新任务"""
-        thread_id = str(uuid4())
+    async def handle_user_message(
+        self,
+        conv_id: str,
+        user_content: str,
+        parent_msg_id: Optional[str] = None
+    ) -> Dict:
+        """处理用户消息（主入口）"""
+        # 委托给对话管理器
+        user_msg = await self.conversation_manager.send_message(
+            conv_id, user_content, parent_msg_id
+        )
+        
+        return {
+            "message_id": user_msg["message_id"],
+            "response": user_msg["graph_response"],
+            "thread_id": user_msg["thread_id"]
+        }
+    
+    async def handle_permission_request(
+        self,
+        thread_id: str,
+        approved: bool,
+        reason: Optional[str] = None
+    ):
+        """处理权限请求（中断恢复）"""
+        # 获取当前状态
         config = {"configurable": {"thread_id": thread_id}}
+        state = await self.graph.aget_state(config)
         
-        initial_state = {
-            "current_task": task,
-            "session_id": session_id or str(uuid4()),
-            "messages": [],
-            "context_level": "normal"
+        pending = state.values.get("pending_tool_confirmation")
+        if not pending:
+            raise ValueError("No pending confirmation")
+        
+        # 模拟工具执行或创建拒绝结果
+        if approved:
+            # 获取对应Agent的toolkit
+            from_agent = pending["from_agent"]
+            # 这里需要访问agent registry获取toolkit
+            # 简化：直接创建成功结果
+            result = ToolResult(
+                success=True,
+                data={"message": "Tool execution approved and completed"}
+            )
+        else:
+            result = ToolResult(
+                success=False,
+                error=f"Permission denied: {reason or 'User rejected'}"
+            )
+        
+        # 更新状态，准备恢复
+        update = {
+            "pending_tool_confirmation": {
+                **pending,
+                "result": (pending["tool_name"], result)
+            },
+            "next_agent": pending["from_agent"]  # 返回原Agent
         }
         
-        self.active_threads[thread_id] = {
-            "status": "running",
-            "task": task
-        }
+        # 恢复执行
+        await self.graph.aupdate_state(config, update)
+        final_state = await self.graph.ainvoke(None, config)
         
-        return thread_id, config, initial_state
-    
-    async def confirm_tool(self, thread_id: str, approved: bool, reason: Optional[str] = None):
-        """处理工具确认"""
-        if thread_id not in self.active_threads:
-            raise ValueError(f"Thread {thread_id} not found")
-        
-        # 更新状态，恢复执行
-        update_data = {
-            "tool_confirmation": {
-                "approved": approved,
-                "reason": reason
-            }
-        }
-        
-        config = {"configurable": {"thread_id": thread_id}}
-        return await self.graph.aupdate(config, update_data)
-```
-
-**测试点**：测试工具确认流程
-
----
-
-### 📝 Phase 4: Context管理（可延后）
-
-#### 4.1 实现 context_manager.py
-```python
-# core/context_manager.py
-class ContextManager:
-    """Context压缩管理器"""
-    
-    COMPRESSION_LEVELS = {
-        'full': 50000,      # 完整上下文
-        'normal': 20000,    # 标准压缩
-        'compact': 10000,   # 紧凑模式
-        'minimal': 5000     # 最小化
-    }
-    
-    def prepare_context(self, messages: List[Dict], level: str = "normal") -> List[Dict]:
-        """准备上下文（Phase 1: 简单截断）"""
-        max_length = self.COMPRESSION_LEVELS.get(level, 20000)
-        total_length = sum(len(m.get("content", "")) for m in messages)
-        
-        if total_length <= max_length:
-            return messages
-        
-        # 保留最新的消息
-        truncated = []
-        current_length = 0
-        
-        for msg in reversed(messages):
-            msg_length = len(msg.get("content", ""))
-            if current_length + msg_length > max_length:
-                # 添加截断提示
-                truncated.insert(0, {
-                    "role": "system",
-                    "content": f"[Earlier messages truncated due to length limit]"
-                })
-                break
-            truncated.insert(0, msg)
-            current_length += msg_length
-        
-        return truncated
-    
-    def estimate_tokens(self, text: str) -> int:
-        """估算token数（简单实现）"""
-        # 粗略估算：平均每4个字符一个token
-        return len(text) // 4
+        return final_state.get("graph_response")
 ```
 
 ---
 
-## 📊 实施时间表
+## 🎯 实施优先级
 
-### Week 1: BaseAgent增强 ✅
-- [ ] 修改AgentResponse，增加messages字段
-- [ ] 修改_execute_generator，返回对话历史
-- [ ] 增加工具权限检查逻辑
-- [ ] 测试向后兼容性
+### Phase 1: 核心流程 ✅
+- [x] BaseAgent支持中断恢复
+- [ ] ExtendableGraph基础实现
+- [ ] 单Agent流程测试
 
-### Week 2: Core基础 🏗️
-- [ ] 编写state.py定义
-- [ ] 实现最简单的graph.py
-- [ ] 创建基础测试脚本
-- [ ] 验证Lead→Search流程
+### Phase 2: 多Agent协作 🔧
+- [ ] 注册所有现有Agent
+- [ ] 测试Lead → SubAgent → Lead流程
+- [ ] 权限中断与恢复
 
-### Week 3: 权限控制 🔐
-- [ ] 增加user_confirmation节点
-- [ ] 实现条件路由逻辑
-- [ ] 编写controller.py基础版
-- [ ] 测试工具确认流程
+### Phase 3: 对话管理 📝
+- [ ] ConversationManager实现
+- [ ] 分支对话支持
+- [ ] 历史回溯功能
 
-### Week 4: 优化完善 ⚡
-- [ ] 实现context_manager.py
-- [ ] 增加错误处理
-- [ ] 完善路由逻辑
-- [ ] 端到端集成测试
+### Phase 4: 优化 🚀
+- [ ] Context压缩
+- [ ] 流式输出
+- [ ] 性能优化
 
 ---
 
-## ✅ MVP检查清单
+## 💡 关键设计决策
 
-**第一版必须实现的核心功能：**
-- [ ] Graph能完成Lead→Search→Lead的简单流程
-- [ ] 工具确认能触发interrupt并等待用户输入
-- [ ] Context在超长时能自动截断
-- [ ] Thread可以暂停和恢复
-- [ ] 错误能正常传递给Lead Agent处理
+### 1. 可扩展性
+- 使用`Dict[str, NodeMemory]`而非硬编码的agent memories
+- 动态Agent注册机制
+- 通用的节点函数生成器
+- 统一的路由规则
+
+### 2. 分支对话
+- 每个用户消息独立thread_id
+- parent_thread_id追踪分支关系
+- 状态复制机制保证分支独立性
+
+### 3. 简化Controller
+- 移除复杂的生命周期管理
+- 聚焦于权限处理和对话管理
+- 利用LangGraph原生能力
+
+### 4. 三层历史分离
+- Layer 1: ConversationManager管理
+- Layer 2: AgentState自动保存
+- Layer 3: NodeMemory独立存储
 
 ---
 
-## 🎯 核心原则提醒
+## ⚠️ 注意事项
 
-1. **Make it work → Make it right → Make it fast**
-2. **每一步都要可测试**
-3. **保持向后兼容**
-4. **从简单到复杂**
-5. **充分利用LangGraph，不重造轮子**
+1. **Agent注册顺序**：先注册被依赖的Agent（如SubAgents），最后注册Lead Agent
+2. **Memory初始化**：首次访问agent_memories时需要初始化
+3. **分支状态隔离**：创建分支时要复制必要状态，避免相互影响
+4. **权限处理一致性**：所有Agent使用相同的权限中断机制
+5. **Thread ID管理**：确保每个用户消息对应唯一的thread_id
 
 ---
 
-## 📚 参考资源
+## 🎯 MVP核心目标
 
-- [LangGraph Documentation](https://python.langchain.com/docs/langgraph)
-- [LangGraph Checkpointing](https://langchain-ai.github.io/langgraph/how-tos/persistence/)
-- [LangGraph Streaming](https://langchain-ai.github.io/langgraph/how-tos/streaming/)
-- 项目文档：`Multi-Agent研究系统设计提示词.md`
+1. **可扩展架构**：支持动态添加Agent和工具
+2. **分支对话**：支持消息编辑和多分支管理
+3. **权限控制**：统一的工具权限中断机制
+4. **基本流程**：User → Graph → Agent → Tool → User

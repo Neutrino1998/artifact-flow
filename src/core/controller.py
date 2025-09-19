@@ -1,477 +1,482 @@
 """
-执行控制器
-管理LangGraph工作流的执行、暂停、恢复等操作
+执行控制器和对话管理器
+支持分支对话和权限处理
 """
 
-from typing import Dict, Any, Optional, List, AsyncGenerator
+from typing import Dict, List, Optional, Any, Tuple
 from uuid import uuid4
 from datetime import datetime
-import asyncio
 
-from core.state import create_initial_state, AgentState
-from core.graph import create_default_graph
+from core.state import (
+    AgentState, UserMessage, ConversationTree, 
+    create_initial_state
+)
+from tools.base import ToolResult
 from utils.logger import get_logger
-from tools.implementations.artifact_ops import _artifact_store
 
-logger = get_logger("Controller")
+logger = get_logger("Core")
+
+
+class ConversationManager:
+    """
+    用户对话管理器（Layer 1）
+    管理对话树和分支
+    """
+    
+    def __init__(self):
+        """初始化对话管理器"""
+        self.conversations: Dict[str, ConversationTree] = {}
+        logger.info("ConversationManager initialized")
+    
+    def start_conversation(self, conversation_id: Optional[str] = None) -> str:
+        """
+        开始新对话
+        
+        Args:
+            conversation_id: 指定的对话ID（可选）
+            
+        Returns:
+            对话ID
+        """
+        conv_id = conversation_id or str(uuid4())
+        
+        self.conversations[conv_id] = {
+            "conversation_id": conv_id,
+            "branches": {},
+            "messages": {},
+            "active_branch": "",
+            "created_at": datetime.now().isoformat(),
+            "updated_at": datetime.now().isoformat()
+        }
+        
+        logger.info(f"Started new conversation: {conv_id}")
+        return conv_id
+    
+    def add_message(
+        self,
+        conv_id: str,
+        message_id: str,
+        content: str,
+        thread_id: str,
+        parent_id: Optional[str] = None,
+        graph_response: Optional[str] = None
+    ) -> UserMessage:
+        """
+        添加消息到对话树
+        
+        Args:
+            conv_id: 对话ID
+            message_id: 消息ID
+            content: 消息内容
+            thread_id: 关联的线程ID
+            parent_id: 父消息ID
+            graph_response: Graph响应
+            
+        Returns:
+            用户消息对象
+        """
+        if conv_id not in self.conversations:
+            raise ValueError(f"Conversation {conv_id} not found")
+        
+        conversation = self.conversations[conv_id]
+        
+        # 创建消息
+        user_msg: UserMessage = {
+            "message_id": message_id,
+            "parent_id": parent_id,
+            "content": content,
+            "thread_id": thread_id,
+            "timestamp": datetime.now().isoformat(),
+            "graph_response": graph_response,
+            "metadata": {}
+        }
+        
+        # 保存消息
+        conversation["messages"][message_id] = user_msg
+        
+        # 更新分支关系
+        if parent_id:
+            if parent_id not in conversation["branches"]:
+                conversation["branches"][parent_id] = []
+            conversation["branches"][parent_id].append(message_id)
+            
+            # 检查是否创建了新分支
+            if len(conversation["branches"][parent_id]) > 1:
+                logger.info(f"🌿 Created new branch from message {parent_id}")
+        
+        # 更新活跃分支
+        conversation["active_branch"] = message_id
+        conversation["updated_at"] = datetime.now().isoformat()
+        
+        return user_msg
+    
+    def update_response(
+        self, 
+        conv_id: str, 
+        message_id: str, 
+        response: str
+    ) -> None:
+        """
+        更新消息的Graph响应
+        
+        Args:
+            conv_id: 对话ID
+            message_id: 消息ID
+            response: Graph响应
+        """
+        if conv_id in self.conversations:
+            if message_id in self.conversations[conv_id]["messages"]:
+                self.conversations[conv_id]["messages"][message_id]["graph_response"] = response
+                self.conversations[conv_id]["updated_at"] = datetime.now().isoformat()
+    
+    def get_conversation_path(
+        self, 
+        conv_id: str,
+        to_message_id: Optional[str] = None
+    ) -> List[UserMessage]:
+        """
+        获取对话路径（从根到指定消息）
+        
+        Args:
+            conv_id: 对话ID
+            to_message_id: 目标消息ID（None则使用活跃分支）
+            
+        Returns:
+            消息路径列表
+        """
+        if conv_id not in self.conversations:
+            return []
+        
+        conversation = self.conversations[conv_id]
+        target_id = to_message_id or conversation.get("active_branch")
+        
+        if not target_id or target_id not in conversation["messages"]:
+            return []
+        
+        # 向上追溯到根
+        path = []
+        current = conversation["messages"][target_id]
+        
+        while current:
+            path.insert(0, current)
+            if current["parent_id"] and current["parent_id"] in conversation["messages"]:
+                current = conversation["messages"][current["parent_id"]]
+            else:
+                break
+        
+        return path
+    
+    def get_branches(self, conv_id: str, from_message_id: str) -> List[str]:
+        """
+        获取某个消息的所有分支
+        
+        Args:
+            conv_id: 对话ID
+            from_message_id: 消息ID
+            
+        Returns:
+            子消息ID列表
+        """
+        if conv_id not in self.conversations:
+            return []
+        
+        return self.conversations[conv_id]["branches"].get(from_message_id, [])
 
 
 class ExecutionController:
     """
     执行控制器
-    
-    负责管理Multi-Agent系统的执行生命周期
+    管理Graph执行和权限处理
     """
     
-    def __init__(self, graph=None):
+    def __init__(self, compiled_graph):
         """
         初始化控制器
         
         Args:
-            graph: LangGraph编译后的工作流（可选）
+            compiled_graph: 编译后的LangGraph
         """
-        self.graph = graph or create_default_graph()
-        self.active_threads = {}  # 活跃的执行线程
-        self.execution_history = []  # 执行历史
+        self.graph = compiled_graph
+        self.conversation_manager = ConversationManager()
+        
+        # 线程状态缓存（用于权限恢复）
+        self.thread_states: Dict[str, Dict] = {}
         
         logger.info("ExecutionController initialized")
     
-    async def start_task(
+    async def process_message(
         self,
-        task: str,
-        session_id: Optional[str] = None,
-        context_level: str = "normal"
+        content: str,
+        conversation_id: Optional[str] = None,
+        parent_message_id: Optional[str] = None,
+        session_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """
-        启动新任务
+        处理用户消息（主入口）
         
         Args:
-            task: 任务描述
-            session_id: 会话ID（可选）
-            context_level: 上下文级别
+            content: 用户消息内容
+            conversation_id: 对话ID（None则创建新对话）
+            parent_message_id: 父消息ID（用于分支）
+            session_id: Artifact会话ID
             
         Returns:
-            包含thread_id和初始状态的字典
+            包含响应的字典
         """
-        # 生成IDs
-        thread_id = str(uuid4())
-        if not session_id:
-            session_id = str(uuid4())
+        # 确保对话存在
+        if not conversation_id:
+            conversation_id = self.conversation_manager.start_conversation()
+        elif conversation_id not in self.conversation_manager.conversations:
+            self.conversation_manager.start_conversation(conversation_id)
         
-        # 设置artifact store的session
-        _artifact_store.set_session(session_id)
+        # 生成ID
+        message_id = str(uuid4())
+        thread_id = str(uuid4())
+        
+        # 如果从Artifact store获取session
+        if not session_id:
+            from tools.implementations.artifact_ops import _artifact_store
+            session_id = _artifact_store.current_session_id or _artifact_store.create_session()
         
         # 创建初始状态
+        parent_thread_id = None
+        if parent_message_id:
+            # 获取父消息的thread_id
+            parent_msg = self.conversation_manager.conversations.get(
+                conversation_id, {}
+            ).get("messages", {}).get(parent_message_id)
+            if parent_msg:
+                parent_thread_id = parent_msg.get("thread_id")
+        
         initial_state = create_initial_state(
-            task=task,
+            task=content,
             session_id=session_id,
             thread_id=thread_id,
-            context_level=context_level
+            parent_thread_id=parent_thread_id
+        )
+        initial_state["user_message_id"] = message_id
+        
+        # 如果有父线程，尝试继承一些状态
+        if parent_thread_id and parent_thread_id in self.thread_states:
+            parent_state = self.thread_states[parent_thread_id]
+            # 继承artifacts
+            initial_state["task_plan_id"] = parent_state.get("task_plan_id")
+            initial_state["result_artifact_ids"] = parent_state.get("result_artifact_ids", []).copy()
+        
+        # 添加消息到对话树（先不加response）
+        self.conversation_manager.add_message(
+            conv_id=conversation_id,
+            message_id=message_id,
+            content=content,
+            thread_id=thread_id,
+            parent_id=parent_message_id
         )
         
-        # 记录线程信息
-        self.active_threads[thread_id] = {
-            "status": "running",
-            "task": task,
-            "session_id": session_id,
-            "started_at": datetime.now().isoformat(),
-            "checkpoints": []
-        }
-        
-        # 配置
-        config = {
-            "configurable": {
-                "thread_id": thread_id,
-                "checkpoint_ns": f"session_{session_id}"
-            }
-        }
-        
-        logger.info(f"Starting task: {task[:100]}... (thread: {thread_id})")
-        
-        # 启动执行
         try:
-            # 异步执行graph
-            result = await self.graph.ainvoke(initial_state, config)
+            # 执行Graph
+            config = {"configurable": {"thread_id": thread_id}}
             
-            # 更新线程状态
-            self.active_threads[thread_id]["status"] = "completed"
-            self.active_threads[thread_id]["completed_at"] = datetime.now().isoformat()
+            logger.info(f"Executing graph for message {message_id[:8]}...")
+            final_state = await self.graph.ainvoke(initial_state, config)
             
-            # 记录历史
-            self.execution_history.append({
-                "thread_id": thread_id,
-                "task": task,
-                "status": "completed",
-                "timestamp": datetime.now().isoformat()
-            })
+            # 保存线程状态（用于分支）
+            self.thread_states[thread_id] = final_state
             
-            logger.info(f"Task completed: {thread_id}")
+            # 获取响应
+            response = final_state.get("graph_response", "")
+            
+            # 更新消息的响应
+            self.conversation_manager.update_response(
+                conversation_id, message_id, response
+            )
             
             return {
+                "success": True,
+                "conversation_id": conversation_id,
+                "message_id": message_id,
                 "thread_id": thread_id,
+                "response": response,
                 "session_id": session_id,
-                "status": "completed",
-                "final_state": result,
-                "artifacts": _artifact_store.list_artifacts()
+                "artifacts": {
+                    "task_plan_id": final_state.get("task_plan_id"),
+                    "result_ids": final_state.get("result_artifact_ids", [])
+                }
             }
             
         except Exception as e:
-            logger.error(f"Task execution failed: {e}")
+            logger.exception(f"Error processing message: {e}")
             
-            # 更新线程状态
-            self.active_threads[thread_id]["status"] = "failed"
-            self.active_threads[thread_id]["error"] = str(e)
+            # 更新错误响应
+            error_msg = f"Error: {str(e)}"
+            self.conversation_manager.update_response(
+                conversation_id, message_id, error_msg
+            )
             
             return {
-                "thread_id": thread_id,
-                "session_id": session_id,
-                "status": "failed",
+                "success": False,
+                "conversation_id": conversation_id,
+                "message_id": message_id,
                 "error": str(e)
             }
     
-    async def stream_task(
-        self,
-        task: str,
-        session_id: Optional[str] = None,
-        context_level: str = "normal"
-    ) -> AsyncGenerator[Dict[str, Any], None]:
-        """
-        流式执行任务
-        
-        Args:
-            task: 任务描述
-            session_id: 会话ID
-            context_level: 上下文级别
-            
-        Yields:
-            执行事件
-        """
-        # 生成IDs
-        thread_id = str(uuid4())
-        if not session_id:
-            session_id = str(uuid4())
-        
-        # 设置artifact store的session
-        _artifact_store.set_session(session_id)
-        
-        # 创建初始状态
-        initial_state = create_initial_state(
-            task=task,
-            session_id=session_id,
-            thread_id=thread_id,
-            context_level=context_level
-        )
-        
-        # 记录线程信息
-        self.active_threads[thread_id] = {
-            "status": "running",
-            "task": task,
-            "session_id": session_id,
-            "started_at": datetime.now().isoformat()
-        }
-        
-        # 配置
-        config = {
-            "configurable": {
-                "thread_id": thread_id,
-                "checkpoint_ns": f"session_{session_id}"
-            },
-            "stream_mode": "values"  # 流式输出模式
-        }
-        
-        logger.info(f"Starting streaming task: {task[:100]}... (thread: {thread_id})")
-        
-        # Yield开始事件
-        yield {
-            "type": "start",
-            "thread_id": thread_id,
-            "session_id": session_id,
-            "task": task,
-            "timestamp": datetime.now().isoformat()
-        }
-        
-        try:
-            # 流式执行
-            async for chunk in self.graph.astream(initial_state, config):
-                # Yield中间状态
-                yield {
-                    "type": "state_update",
-                    "thread_id": thread_id,
-                    "state": chunk,
-                    "timestamp": datetime.now().isoformat()
-                }
-                
-                # 检查是否需要中断
-                if chunk.get("interrupt_before"):
-                    yield {
-                        "type": "interrupt",
-                        "thread_id": thread_id,
-                        "reason": "confirmation_required",
-                        "pending": chunk.get("pending_confirmation"),
-                        "timestamp": datetime.now().isoformat()
-                    }
-                    
-                    # 等待确认
-                    self.active_threads[thread_id]["status"] = "paused"
-                    break
-            
-            # 检查最终状态
-            if self.active_threads[thread_id]["status"] != "paused":
-                self.active_threads[thread_id]["status"] = "completed"
-                
-                # Yield完成事件
-                yield {
-                    "type": "complete",
-                    "thread_id": thread_id,
-                    "session_id": session_id,
-                    "artifacts": _artifact_store.list_artifacts(),
-                    "timestamp": datetime.now().isoformat()
-                }
-            
-        except Exception as e:
-            logger.error(f"Streaming task failed: {e}")
-            
-            # 更新状态
-            self.active_threads[thread_id]["status"] = "failed"
-            self.active_threads[thread_id]["error"] = str(e)
-            
-            # Yield错误事件
-            yield {
-                "type": "error",
-                "thread_id": thread_id,
-                "error": str(e),
-                "timestamp": datetime.now().isoformat()
-            }
-    
-    async def confirm_tool(
+    async def handle_permission_confirmation(
         self,
         thread_id: str,
         approved: bool,
         reason: Optional[str] = None
     ) -> Dict[str, Any]:
         """
-        处理工具确认
+        处理工具权限确认
         
         Args:
             thread_id: 线程ID
             approved: 是否批准
-            reason: 批准/拒绝原因
+            reason: 原因说明
             
         Returns:
-            确认结果
+            执行结果
         """
-        if thread_id not in self.active_threads:
-            return {
-                "success": False,
-                "error": f"Thread {thread_id} not found"
-            }
-        
-        thread_info = self.active_threads[thread_id]
-        if thread_info["status"] != "paused":
-            return {
-                "success": False,
-                "error": f"Thread {thread_id} is not paused"
-            }
-        
-        logger.info(f"Tool confirmation for thread {thread_id}: approved={approved}")
-        
-        # 更新状态
-        update_data = {
-            "tool_confirmation": {
-                "approved": approved,
-                "reason": reason,
-                "timestamp": datetime.now().isoformat()
-            },
-            "pending_confirmation": None,  # 清除待确认
-            "interrupt_before": None  # 清除中断标记
-        }
-        
-        # 配置
-        config = {
-            "configurable": {
-                "thread_id": thread_id,
-                "checkpoint_ns": f"session_{thread_info['session_id']}"
-            }
-        }
-        
-        # 恢复执行
         try:
-            # 更新graph状态并继续执行
-            await self.graph.aupdate(update_data, config)
+            # 获取当前状态
+            config = {"configurable": {"thread_id": thread_id}}
+            snapshot = await self.graph.aget_state(config)
             
-            # 更新线程状态
-            thread_info["status"] = "running"
+            if not snapshot or not snapshot.values:
+                raise ValueError(f"Thread {thread_id} not found or has no state")
+            
+            state = snapshot.values
+            pending = state.get("pending_tool_confirmation")
+            
+            if not pending:
+                raise ValueError("No pending tool confirmation")
+            
+            # 准备工具执行结果
+            tool_name = pending["tool_name"]
+            from_agent = pending["from_agent"]
+            
+            if approved:
+                # 模拟执行工具（实际应该从registry获取toolkit）
+                logger.info(f"Tool {tool_name} approved, executing...")
+                
+                # 这里简化处理，实际应该调用真实的工具
+                # toolkit = self.get_agent_toolkit(from_agent)
+                # result = await toolkit.execute_tool(tool_name, pending["params"])
+                
+                result = ToolResult(
+                    success=True,
+                    data={"message": f"Tool {tool_name} executed successfully (simulated)"}
+                )
+            else:
+                # 创建拒绝结果
+                result = ToolResult(
+                    success=False,
+                    error=f"Permission denied: {reason or 'User rejected'}"
+                )
+            
+            # 更新状态
+            update_values = {
+                "pending_tool_confirmation": {
+                    **pending,
+                    "result": (tool_name, result)  # 添加结果
+                },
+                "next_agent": from_agent  # 返回原Agent继续执行
+            }
+            
+            # 更新状态
+            await self.graph.aupdate_state(config, update_values)
+            
+            # 继续执行
+            logger.info(f"Resuming execution for thread {thread_id}")
+            final_state = await self.graph.ainvoke(None, config)
+            
+            # 保存最终状态
+            self.thread_states[thread_id] = final_state
             
             return {
                 "success": True,
                 "thread_id": thread_id,
-                "action": "approved" if approved else "rejected"
+                "response": final_state.get("graph_response", ""),
+                "tool_executed": tool_name,
+                "approved": approved
             }
             
         except Exception as e:
-            logger.error(f"Failed to confirm tool: {e}")
+            logger.exception(f"Error handling permission: {e}")
             return {
                 "success": False,
+                "thread_id": thread_id,
                 "error": str(e)
             }
     
-    async def pause_task(self, thread_id: str) -> Dict[str, Any]:
-        """
-        暂停任务执行
-        
-        Args:
-            thread_id: 线程ID
-            
-        Returns:
-            暂停结果
-        """
-        if thread_id not in self.active_threads:
-            return {
-                "success": False,
-                "error": f"Thread {thread_id} not found"
-            }
-        
-        thread_info = self.active_threads[thread_id]
-        if thread_info["status"] != "running":
-            return {
-                "success": False,
-                "error": f"Thread {thread_id} is not running"
-            }
-        
-        # 设置暂停标记
-        thread_info["status"] = "paused"
-        thread_info["paused_at"] = datetime.now().isoformat()
-        
-        logger.info(f"Task paused: {thread_id}")
-        
-        return {
-            "success": True,
-            "thread_id": thread_id,
-            "status": "paused"
-        }
-    
-    async def resume_task(
+    def get_conversation_history(
         self,
-        thread_id: str,
-        additional_context: Optional[Dict] = None
-    ) -> Dict[str, Any]:
+        conversation_id: str,
+        branch_path: Optional[List[str]] = None
+    ) -> List[Dict[str, Any]]:
         """
-        恢复任务执行
+        获取对话历史
         
         Args:
-            thread_id: 线程ID
-            additional_context: 额外的上下文
+            conversation_id: 对话ID
+            branch_path: 分支路径（消息ID列表）
             
         Returns:
-            恢复结果
+            对话历史列表
         """
-        if thread_id not in self.active_threads:
-            return {
-                "success": False,
-                "error": f"Thread {thread_id} not found"
-            }
-        
-        thread_info = self.active_threads[thread_id]
-        if thread_info["status"] != "paused":
-            return {
-                "success": False,
-                "error": f"Thread {thread_id} is not paused"
-            }
-        
-        logger.info(f"Resuming task: {thread_id}")
-        
-        # 配置
-        config = {
-            "configurable": {
-                "thread_id": thread_id,
-                "checkpoint_ns": f"session_{thread_info['session_id']}"
-            }
-        }
-        
-        # 准备更新数据
-        update_data = {
-            "execution_status": "running"
-        }
-        
-        if additional_context:
-            update_data["metadata"] = additional_context
-        
-        # 恢复执行
-        try:
-            await self.graph.aupdate(update_data, config)
-            
-            # 更新线程状态
-            thread_info["status"] = "running"
-            thread_info["resumed_at"] = datetime.now().isoformat()
-            
-            return {
-                "success": True,
-                "thread_id": thread_id,
-                "status": "running"
-            }
-            
-        except Exception as e:
-            logger.error(f"Failed to resume task: {e}")
-            return {
-                "success": False,
-                "error": str(e)
-            }
-    
-    def get_thread_status(self, thread_id: str) -> Optional[Dict]:
-        """
-        获取线程状态
-        
-        Args:
-            thread_id: 线程ID
-            
-        Returns:
-            线程状态信息
-        """
-        return self.active_threads.get(thread_id)
-    
-    def list_active_threads(self) -> List[Dict]:
-        """
-        列出所有活跃线程
-        
-        Returns:
-            活跃线程列表
-        """
-        active = []
-        for thread_id, info in self.active_threads.items():
-            if info["status"] in ["running", "paused"]:
-                active.append({
-                    "thread_id": thread_id,
-                    "task": info["task"][:100] + "..." if len(info["task"]) > 100 else info["task"],
-                    "status": info["status"],
-                    "started_at": info["started_at"]
+        if branch_path:
+            # 指定路径
+            messages = []
+            for msg_id in branch_path:
+                msg = self.conversation_manager.conversations.get(
+                    conversation_id, {}
+                ).get("messages", {}).get(msg_id)
+                if msg:
+                    messages.append({
+                        "role": "user",
+                        "content": msg["content"],
+                        "message_id": msg["message_id"],
+                        "timestamp": msg["timestamp"]
+                    })
+                    if msg["graph_response"]:
+                        messages.append({
+                            "role": "assistant",
+                            "content": msg["graph_response"],
+                            "timestamp": msg["timestamp"]
+                        })
+            return messages
+        else:
+            # 活跃分支
+            path = self.conversation_manager.get_conversation_path(conversation_id)
+            messages = []
+            for msg in path:
+                messages.append({
+                    "role": "user",
+                    "content": msg["content"],
+                    "message_id": msg["message_id"],
+                    "timestamp": msg["timestamp"]
                 })
-        return active
+                if msg["graph_response"]:
+                    messages.append({
+                        "role": "assistant",
+                        "content": msg["graph_response"],
+                        "timestamp": msg["timestamp"]
+                    })
+            return messages
     
-    def cleanup_completed_threads(self, older_than_hours: int = 24):
+    def list_conversations(self) -> List[Dict[str, Any]]:
         """
-        清理已完成的线程
+        列出所有对话
         
-        Args:
-            older_than_hours: 清理多少小时前的线程
+        Returns:
+            对话列表
         """
-        from datetime import datetime, timedelta
-        
-        cutoff_time = datetime.now() - timedelta(hours=older_than_hours)
-        threads_to_remove = []
-        
-        for thread_id, info in self.active_threads.items():
-            if info["status"] in ["completed", "failed"]:
-                # 检查完成时间
-                completed_at = info.get("completed_at", info.get("started_at"))
-                if completed_at:
-                    completed_time = datetime.fromisoformat(completed_at)
-                    if completed_time < cutoff_time:
-                        threads_to_remove.append(thread_id)
-        
-        for thread_id in threads_to_remove:
-            del self.active_threads[thread_id]
-        
-        if threads_to_remove:
-            logger.info(f"Cleaned up {len(threads_to_remove)} completed threads")
-        
-        return len(threads_to_remove)
+        conversations = []
+        for conv_id, conv in self.conversation_manager.conversations.items():
+            conversations.append({
+                "conversation_id": conv_id,
+                "created_at": conv["created_at"],
+                "updated_at": conv["updated_at"],
+                "message_count": len(conv["messages"]),
+                "branch_count": len(conv["branches"])
+            })
+        return conversations

@@ -1,201 +1,165 @@
 """
-LangGraph状态定义
-管理Multi-Agent系统的共享状态
+Graph状态定义
+包含AgentState和相关数据结构
 """
 
-from typing import TypedDict, List, Dict, Optional, Annotated, Any
-from langgraph.graph.message import add_messages
+from typing import TypedDict, Dict, List, Optional, Any
+from datetime import datetime
+
+
+class NodeMemory(TypedDict):
+    """单个节点的记忆"""
+    initial_instruction: str           # 初始用户请求
+    messages: List[Dict]               # LLM与工具交互历史(不含system)
+    last_response: Optional[Dict]      # 最后的AgentResponse
+    tool_rounds: int                   # 工具调用轮次
 
 
 class AgentState(TypedDict):
     """
-    LangGraph的状态定义
-    
-    使用TypedDict定义状态结构，确保类型安全
+    LangGraph全局状态（可扩展）
+    支持动态添加Agent
     """
-    # 核心消息历史（使用reducer函数管理）
-    messages: Annotated[List[Dict], add_messages]
+    # 基础信息
+    current_task: str                      # 当前任务
+    session_id: str                        # 会话ID（对应artifact session）
+    thread_id: str                         # 线程ID（LangGraph checkpoint）
+    parent_thread_id: Optional[str]        # 分支父节点
     
-    # 任务管理
-    current_task: str  # 当前任务描述
-    session_id: Optional[str]  # 会话ID
-    thread_id: Optional[str]  # 线程ID（用于checkpoint）
+    # Agent记忆（可扩展）
+    agent_memories: Dict[str, NodeMemory]  # key: agent_name, value: memory
     
-    # Agent路由控制
-    next_agent: Optional[str]  # 下一个要执行的agent
-    last_agent: Optional[str]  # 上一个执行的agent
-    current_agent: Optional[str]  # 当前正在执行的agent
+    # 路由控制
+    next_agent: Optional[str]              # 下一个要执行的agent
+    last_agent: Optional[str]              # 上一个执行的agent
+    routing_info: Optional[Dict]           # 路由附加信息
     
-    # 工具权限控制
-    pending_confirmation: Optional[Dict[str, Any]]  # 待确认的工具调用
-    tool_confirmation: Optional[Dict[str, Any]]  # 工具确认结果
+    # 权限确认
+    pending_tool_confirmation: Optional[Dict]  # 待确认的工具调用
     
-    # Artifacts管理
-    task_plan_id: Optional[str]  # 任务计划artifact ID
-    result_artifact_ids: List[str]  # 结果artifact ID列表
-    artifacts_created: List[Dict[str, str]]  # 已创建的artifacts信息
-    
-    # 执行控制
-    execution_status: str  # "running", "paused", "completed", "failed"
-    interrupt_before: Optional[str]  # 在哪个节点前中断
-    
-    # 错误处理
-    last_error: Optional[str]  # 最后的错误信息
-    error_count: int  # 错误计数
+    # Artifacts
+    task_plan_id: Optional[str]            # 任务计划artifact ID
+    result_artifact_ids: List[str]         # 结果artifact ID列表
     
     # Context管理
-    context_level: str  # "full", "normal", "compact", "minimal"
-    total_tokens_used: int  # 总token使用量
+    compression_level: str                 # "full", "normal", "compact"
     
-    # 元数据
-    metadata: Dict[str, Any]  # 额外的元数据存储
+    # 用户对话层
+    user_message_id: str                   # 当前用户消息ID
+    graph_response: Optional[str]          # Graph最终响应
+
+
+class UserMessage(TypedDict):
+    """用户消息节点（对话树节点）"""
+    message_id: str
+    parent_id: Optional[str]               # 父消息ID（用于分支）
+    content: str                           # 用户消息内容
+    thread_id: str                         # 关联的Graph执行线程
+    timestamp: str                         # 时间戳
+    graph_response: Optional[str]          # Graph的响应
+    metadata: Dict[str, Any]               # 额外元数据
+
+
+class ConversationTree(TypedDict):
+    """用户对话树（Layer 1）"""
+    conversation_id: str
+    branches: Dict[str, List[str]]         # parent_msg_id -> [child_msg_ids]
+    messages: Dict[str, UserMessage]       # msg_id -> message
+    active_branch: str                     # 当前活跃分支的叶子节点ID
+    created_at: str
+    updated_at: str
 
 
 def create_initial_state(
     task: str,
     session_id: Optional[str] = None,
     thread_id: Optional[str] = None,
-    context_level: str = "normal"
-) -> Dict:
+    parent_thread_id: Optional[str] = None,
+    compression_level: str = "normal"
+) -> AgentState:
     """
-    创建初始状态
+    创建初始状态的辅助函数
     
     Args:
-        task: 任务描述
+        task: 用户任务
         session_id: 会话ID
         thread_id: 线程ID
-        context_level: 上下文级别
+        parent_thread_id: 父线程ID（用于分支）
+        compression_level: 压缩级别
         
     Returns:
-        初始化的状态字典
+        初始化的AgentState
     """
+    from uuid import uuid4
+    
     return {
-        "messages": [],
         "current_task": task,
-        "session_id": session_id or "",
-        "thread_id": thread_id or "",
-        "next_agent": "lead_agent",  # 默认从lead_agent开始
+        "session_id": session_id or str(uuid4()),
+        "thread_id": thread_id or str(uuid4()),
+        "parent_thread_id": parent_thread_id,
+        "agent_memories": {},
+        "next_agent": None,
         "last_agent": None,
-        "current_agent": None,
-        "pending_confirmation": None,
-        "tool_confirmation": None,
+        "routing_info": None,
+        "pending_tool_confirmation": None,
         "task_plan_id": None,
         "result_artifact_ids": [],
-        "artifacts_created": [],
-        "execution_status": "running",
-        "interrupt_before": None,
-        "last_error": None,
-        "error_count": 0,
-        "context_level": context_level,
-        "total_tokens_used": 0,
-        "metadata": {}
+        "compression_level": compression_level,
+        "user_message_id": str(uuid4()),
+        "graph_response": None
     }
 
 
-def update_state_for_routing(
+def merge_agent_response_to_state(
     state: AgentState,
-    target_agent: str,
-    from_agent: str
+    agent_name: str,
+    response: Any,  # AgentResponse
+    instruction: str = ""
 ) -> None:
     """
-    更新状态以进行agent路由
+    将Agent响应合并到状态中
     
     Args:
         state: 当前状态
-        target_agent: 目标agent
-        from_agent: 来源agent
+        agent_name: Agent名称
+        response: AgentResponse对象
+        instruction: 初始指令
     """
-    state["last_agent"] = from_agent
-    state["next_agent"] = target_agent
-    state["current_agent"] = None
-
-
-def update_state_for_confirmation(
-    state: AgentState,
-    tool_name: str,
-    params: Dict,
-    permission_level: str
-) -> None:
-    """
-    更新状态以进行工具确认
-    
-    Args:
-        state: 当前状态
-        tool_name: 工具名称
-        params: 工具参数
-        permission_level: 权限级别
-    """
-    state["pending_confirmation"] = {
-        "tool_name": tool_name,
-        "params": params,
-        "permission_level": permission_level,
-        "from_agent": state.get("current_agent"),
-        "timestamp": __import__("datetime").datetime.now().isoformat()
+    # 保存Agent记忆
+    state["agent_memories"][agent_name] = {
+        "initial_instruction": instruction or state["agent_memories"].get(
+            agent_name, {}
+        ).get("initial_instruction", ""),
+        "messages": response.messages,
+        "last_response": {
+            "success": response.success,
+            "content": response.content,
+            "tool_calls": response.tool_calls,
+            "metadata": response.metadata
+        },
+        "tool_rounds": response.metadata.get("tool_rounds", 0)
     }
-    state["execution_status"] = "paused"
-    state["interrupt_before"] = "tool_execution"
-
-
-def extract_routing_from_response(response: Dict) -> Optional[Dict]:
-    """
-    从Agent响应中提取路由信息
     
-    Args:
-        response: Agent响应
+    # 更新last_agent
+    state["last_agent"] = agent_name
+    
+    # 处理路由
+    if response.routing:
+        routing = response.routing
         
-    Returns:
-        路由信息字典或None
-    """
-    if not response:
-        return None
-    
-    # 检查routing字段
-    if "routing" in response and response["routing"]:
-        return response["routing"]
-    
-    # 检查tool_calls中的路由信息
-    for tool_call in response.get("tool_calls", []):
-        result = tool_call.get("result", {})
-        if result.get("success"):
-            data = result.get("data", {})
-            if data.get("_is_routing_instruction"):
-                return {
-                    "target": data.get("_route_to"),
-                    "instruction": data.get("instruction"),
-                    "from_agent": response.get("metadata", {}).get("agent")
-                }
-    
-    return None
-
-
-def extract_confirmation_from_response(response: Dict) -> Optional[Dict]:
-    """
-    从Agent响应中提取权限确认需求
-    
-    Args:
-        response: Agent响应
-        
-    Returns:
-        确认信息字典或None
-    """
-    if not response:
-        return None
-    
-    # 检查pending_confirmation字段
-    if "pending_confirmation" in response and response["pending_confirmation"]:
-        return response["pending_confirmation"]
-    
-    # 检查tool_calls中的确认需求
-    for tool_call in response.get("tool_calls", []):
-        result = tool_call.get("result", {})
-        data = result.get("data", {})
-        # 确保data是字典类型
-        if isinstance(data, dict) and data.get("_needs_confirmation"):
-            return {
-                "tool_name": data.get("_tool_name"),
-                "params": data.get("_params"),
-                "permission_level": data.get("_permission_level"),
-                "reason": data.get("_reason")
+        if routing.get("type") == "permission_confirmation":
+            # 需要权限确认
+            state["next_agent"] = "user_confirmation"
+            state["pending_tool_confirmation"] = {
+                "tool_name": routing.get("tool_name"),
+                "params": routing.get("params"),
+                "from_agent": agent_name,
+                "permission_level": routing.get("permission_level")
             }
-    
-    return None
+        elif routing.get("type") == "subagent":
+            # 路由到子Agent
+            state["next_agent"] = routing.get("target")
+            state["routing_info"] = routing
+        else:
+            # 其他路由类型
+            state["routing_info"] = routing
