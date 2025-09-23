@@ -18,9 +18,9 @@ class ContextManager:
     
     # 压缩级别对应的最大字符数
     COMPRESSION_LEVELS = {
-        'full': 50000,      # 完整上下文
-        'normal': 20000,    # 标准压缩
-        'compact': 10000,   # 紧凑模式
+        'full': 100000,      # 完整上下文
+        'normal': 40000,    # 标准压缩
+        'compact': 20000,   # 紧凑模式
         'minimal': 5000     # 最小化
     }
     
