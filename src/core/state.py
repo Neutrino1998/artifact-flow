@@ -9,42 +9,44 @@ from datetime import datetime
 
 class NodeMemory(TypedDict):
     """单个节点的记忆"""
-    initial_instruction: str           # 初始用户请求
+    tool_interactions: List[Dict]      # 只包含assistant-tool交互历史
     messages: List[Dict]               # LLM与工具交互历史(不含system)
     last_response: Optional[Dict]      # 最后的AgentResponse
     tool_rounds: int                   # 工具调用轮次
 
 
 class AgentState(TypedDict):
-    """
-    LangGraph全局状态（可扩展）
-    支持动态添加Agent
-    """
+    """LangGraph全局状态"""
     # 基础信息
-    current_task: str                      # 当前任务
-    session_id: str                        # 会话ID（对应artifact session）
-    thread_id: str                         # 线程ID（LangGraph checkpoint）
-    parent_thread_id: Optional[str]        # 分支父节点
+    current_task: str                      # 当前任务（始终保持）
+    session_id: str                        # Artifact会话ID
+    thread_id: str                         # LangGraph线程ID
+    parent_thread_id: Optional[str]        # 父线程（用于分支）
     
-    # Agent记忆（可扩展）
-    agent_memories: Dict[str, NodeMemory]  # key: agent_name, value: memory
+    # Agent记忆（新结构）
+    agent_memories: Dict[str, NodeMemory]  # 每个agent的记忆
     
     # 路由控制
     next_agent: Optional[str]              # 下一个要执行的agent
     last_agent: Optional[str]              # 上一个执行的agent
-    routing_info: Optional[Dict]           # 路由附加信息
+    routing_info: Optional[Dict]           # 路由信息（主要是instruction）
     
-    # 权限确认
-    pending_tool_confirmation: Optional[Dict]  # 待确认的工具调用
+    # 统一的待处理结果
+    pending_result: Optional[Dict]         
+    # {
+    #   "type": "tool_permission" | "subagent_response",
+    #   "from_agent": str,  # 需要处理结果的agent
+    #   "data": Any
+    # }
     
     # Artifacts
     task_plan_id: Optional[str]            # 任务计划artifact ID
     result_artifact_ids: List[str]         # 结果artifact ID列表
     
     # Context管理
-    compression_level: str                 # "full", "normal", "compact"
+    compression_level: str                 # 压缩级别： "full", "normal", "compact"
     
-    # 用户对话层
+    # 用户交互层
     user_message_id: str                   # 当前用户消息ID
     graph_response: Optional[str]          # Graph最终响应
 
@@ -114,7 +116,6 @@ def merge_agent_response_to_state(
     state: AgentState,
     agent_name: str,
     response: Any,  # AgentResponse
-    instruction: str = ""
 ) -> None:
     """
     将Agent响应合并到状态中
@@ -123,22 +124,34 @@ def merge_agent_response_to_state(
         state: 当前状态
         agent_name: Agent名称
         response: AgentResponse对象
-        instruction: 初始指令
     """
-    # 保存Agent记忆
-    state["agent_memories"][agent_name] = {
-        "initial_instruction": instruction or state["agent_memories"].get(
-            agent_name, {}
-        ).get("initial_instruction", ""),
-        "messages": response.messages,
-        "last_response": {
-            "success": response.success,
-            "content": response.content,
-            "tool_calls": response.tool_calls,
-            "metadata": response.metadata
-        },
-        "tool_rounds": response.metadata.get("tool_rounds", 0)
+    # 获取或创建agent记忆
+    memory = state["agent_memories"].get(agent_name, {
+        "tool_interactions": [],
+        "last_response": None,
+        "tool_rounds": 0,
+        "completed_at": None
+    })
+    
+    # 合并工具交互历史（追加新的交互）
+    if hasattr(response, "tool_interactions"):
+        memory["tool_interactions"].extend(response.tool_interactions)
+    
+    # 更新最后的响应
+    memory["last_response"] = {
+        "success": response.success,
+        "content": response.content,
+        "tool_calls": response.tool_calls,  # 用于展示
+        "metadata": response.metadata,
+        "reasoning": response.reasoning_content
     }
+    
+    # 更新轮次和时间
+    memory["tool_rounds"] = response.metadata.get("tool_rounds", 0)
+    memory["completed_at"] = datetime.now().isoformat()
+    
+    # 保存回state
+    state["agent_memories"][agent_name] = memory
     
     # 更新last_agent
     state["last_agent"] = agent_name
@@ -150,16 +163,23 @@ def merge_agent_response_to_state(
         if routing.get("type") == "permission_confirmation":
             # 需要权限确认
             state["next_agent"] = "user_confirmation"
-            state["pending_tool_confirmation"] = {
-                "tool_name": routing.get("tool_name"),
-                "params": routing.get("params"),
+            state["pending_result"] = {
+                "type": "tool_permission",
                 "from_agent": agent_name,
-                "permission_level": routing.get("permission_level")
+                "data": {
+                    "tool_name": routing.get("tool_name"),
+                    "params": routing.get("params"),
+                    "permission_level": routing.get("permission_level"),
+                    "result": None  # 将在权限确认后填充
+                }
             }
+            logger.info(f"Permission required for {routing.get('tool_name')}")
+            
         elif routing.get("type") == "subagent":
             # 路由到子Agent
             state["next_agent"] = routing.get("target")
             state["routing_info"] = routing
-        else:
-            # 其他路由类型
-            state["routing_info"] = routing
+            logger.info(f"Routing to {routing.get('target')}")
+    else:
+        # 没有路由，清理routing_info
+        state["routing_info"] = None

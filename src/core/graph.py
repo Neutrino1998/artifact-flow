@@ -93,78 +93,95 @@ class ExtendableGraph:
             memory = state.get("agent_memories", {}).get(agent_name)
             
             try:
-                # 准备上下文
-                context = ContextManager.prepare_context_for_agent(
-                    agent_name, state
-                )
+                # 准备context
+                context = ContextManager.prepare_context_for_agent(agent_name, state)
                 
-                # 判断执行模式
-                if (state.get("pending_tool_confirmation") and 
-                    state.get("pending_tool_confirmation", {}).get("from_agent") == agent_name):
-                    # 模式1: 恢复执行（从权限确认返回）
-                    logger.info(f"{agent_name} resuming from permission confirmation")
+                # instruction始终来自current_task（对于lead_agent）或routing_info
+                if agent_name == "lead_agent":
+                    instruction = state["current_task"]
+                else:
+                    # Sub-agent从routing_info获取指令
+                    instruction = state.get("routing_info", {}).get("instruction", "")
+
+                # 准备执行参数
+                execute_kwargs = {
+                    "instruction": instruction,  # 始终传入instruction
+                    "context": context,
+                }
+                
+                # 判断是否是恢复执行
+                if state.get("pending_result") and state["pending_result"].get("from_agent") == agent_name:
+                    logger.info(f"{agent_name} resuming with pending result")
                     
-                    pending = state["pending_tool_confirmation"]
-                    tool_name, tool_result = pending["result"]
+                    pending = state["pending_result"]
+                    result_type = pending["type"]
                     
-                    # 使用保存的历史恢复执行
-                    saved_messages = memory["messages"] if memory else []
-                    
-                    # 如果需要压缩
-                    if ContextManager.should_compress(saved_messages):
-                        saved_messages = ContextManager.compress_messages(
-                            saved_messages, 
-                            level=state.get("compression_level", "normal")
+                    # 添加历史交互记录
+                    execute_kwargs["tool_interactions"] = memory.get("tool_interactions", [])
+                    compression_level = state.get("compression_level", "normal")
+                    compression_threshold = ContextManager.COMPRESSION_LEVELS.get(compression_level, 40000)
+
+                    if ContextManager.should_compress(
+                        execute_kwargs["tool_interactions"], 
+                        threshold=compression_threshold
+                    ):
+                        execute_kwargs["tool_interactions"] = ContextManager.compress_messages(
+                            execute_kwargs["tool_interactions"], 
+                            level=compression_level
                         )
-                    
-                    response = await agent.execute(
-                        instruction="",  # 恢复时不需要新指令
-                        context=context,
-                        external_history=saved_messages,
-                        pending_tool_result=(tool_name, tool_result)
-                    )
+
+                    if result_type == "tool_permission":
+                        # 工具权限确认结果
+                        tool_name, tool_result = pending["data"]["tool_name"], pending["data"]["result"]
+                        execute_kwargs["pending_tool_result"] = (tool_name, tool_result)
+                        
+                    elif result_type == "subagent_response":
+                        # Sub-agent响应结果
+                        subagent_name = pending["data"]["agent"]
+                        subagent_content = pending["data"]["content"]
+                        
+                        # 创建ToolResult对象
+                        from tools.base import ToolResult
+                        tool_result = ToolResult(
+                            success=True,
+                            data={"agent": subagent_name, "response": subagent_content}
+                        )
+                        execute_kwargs["pending_tool_result"] = ("call_subagent", tool_result)
                     
                     # 清除pending状态
-                    state["pending_tool_confirmation"] = None
+                    state["pending_result"] = None
                     
-                elif agent_name != "lead_agent" and state.get("routing_info"):
-                    # 模式2: 被路由到的子Agent
-                    instruction = state["routing_info"].get("instruction", "")
-                    logger.info(f"{agent_name} executing routed task: {instruction[:100]}...")
-                    
-                    response = await agent.execute(instruction, context)
-                    
-                else:
-                    # 模式3: 正常执行（Lead Agent或直接调用）
-                    if agent_name == "lead_agent":
-                        instruction = state["current_task"]
-                    else:
-                        instruction = state.get("routing_info", {}).get("instruction", state["current_task"])
-                    
-                    logger.info(f"{agent_name} executing task: {instruction[:100]}...")
-                    response = await agent.execute(instruction, context)
+                # 执行Agent
+                response = await agent.execute(**execute_kwargs)
+                
+                # 处理响应
+                if agent_name != "lead_agent" and not response.routing:
+                    # Sub-agent完成，需要将结果返回给Lead Agent
+                    state["pending_result"] = {
+                        "type": "subagent_response",
+                        "from_agent": "lead_agent",  # 指定Lead Agent需要处理
+                        "data": {
+                            "agent": agent_name,
+                            "content": response.content,
+                            "tool_calls": len(response.tool_calls)
+                        }
+                    }
+                    state["next_agent"] = "lead_agent"
+                    logger.info(f"{agent_name} completed, returning to lead_agent")
                 
                 # 合并响应到状态
-                merge_agent_response_to_state(
-                    state, 
-                    agent_name, 
-                    response,
-                    instruction if 'instruction' in locals() else ""
-                )
+                merge_agent_response_to_state(state, agent_name, response)
                 
-                # 如果是Lead Agent，保存最终响应
+                # Lead Agent完成时保存最终响应
                 if agent_name == "lead_agent" and not response.routing:
                     state["graph_response"] = response.content
-                
-                logger.info(f"{agent_name} completed successfully")
-                
+                    logger.info(f"Lead Agent completed with final response")
+                    
             except Exception as e:
-                logger.exception(f"Error in {agent_name} node: {e}")
-                # 错误状态
-                state["last_agent"] = agent_name
-                state["next_agent"] = None
+                logger.exception(f"Error in {agent_name}: {e}")
                 state["graph_response"] = f"Error in {agent_name}: {str(e)}"
-            
+                state["next_agent"] = None  # 停止执行
+                
             return state
         
         return agent_node
