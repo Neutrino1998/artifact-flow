@@ -10,9 +10,9 @@ from datetime import datetime
 class NodeMemory(TypedDict):
     """单个节点的记忆"""
     tool_interactions: List[Dict]      # 只包含assistant-tool交互历史
-    messages: List[Dict]               # LLM与工具交互历史(不含system)
-    last_response: Optional[Dict]      # 最后的AgentResponse
+    last_response: Optional[Dict]      # 最后的AgentResponse（用于调试/展示）
     tool_rounds: int                   # 工具调用轮次
+    completed_at: Optional[str]        # 完成时间（用于调试）
 
 
 class AgentState(TypedDict):
@@ -96,18 +96,18 @@ def create_initial_state(
     
     return {
         "current_task": task,
-        "session_id": session_id or str(uuid4()),
-        "thread_id": thread_id or str(uuid4()),
+        "session_id": session_id or f"sess-{uuid4()}",
+        "thread_id": thread_id or f"thd-{uuid4()}",
         "parent_thread_id": parent_thread_id,
         "agent_memories": {},
         "next_agent": None,
         "last_agent": None,
         "routing_info": None,
-        "pending_tool_confirmation": None,
+        "pending_result": None,
         "task_plan_id": None,
         "result_artifact_ids": [],
         "compression_level": compression_level,
-        "user_message_id": str(uuid4()),
+        "user_message_id": f"msg-{uuid4()}",
         "graph_response": None
     }
 
