@@ -1,6 +1,6 @@
 """
 Context管理器
-负责消息压缩和上下文准备
+负责消息压缩和路由上下文准备
 """
 
 from typing import List, Dict, Optional, Any
@@ -98,77 +98,36 @@ class ContextManager:
         return compressed + recent_messages
     
     @classmethod
-    def prepare_context_for_agent(
+    def prepare_routing_context(
         cls,
         agent_name: str,
-        state: Dict[str, Any],
-        additional_context: Optional[Dict[str, Any]] = None
+        state: Dict[str, Any]
     ) -> Dict[str, Any]:
         """
-        为Agent准备上下文
+        为Agent准备路由相关的上下文（BaseAgent无法直接访问的state信息）
         
         Args:
             agent_name: Agent名称
             state: 当前Graph状态
-            additional_context: 额外的上下文信息
             
         Returns:
-            准备好的上下文字典
+            路由上下文字典（会被传递给BaseAgent并合并到其自己准备的context中）
         """
-        context = additional_context or {}
+        context = {}
         
-        # 1. 添加task_plan（如果存在）
-        try:
-            from tools.implementations.artifact_ops import _artifact_store
-            
-            # 所有Agent都能看到task_plan
-            task_plan = _artifact_store.get("task_plan")
-            if task_plan:
-                context["task_plan_content"] = task_plan.content
-                context["task_plan_version"] = task_plan.current_version
-                context["task_plan_updated"] = task_plan.updated_at.isoformat()
-                logger.debug(f"{agent_name} loaded task_plan (v{task_plan.current_version})")
-            
-            # Lead Agent额外获取artifacts列表
-            if agent_name == "lead_agent":
-                artifacts_list = _artifact_store.list_artifacts()
-                if artifacts_list:
-                    context["artifacts_inventory"] = artifacts_list
-                    context["artifacts_count"] = len(artifacts_list)
-                    logger.debug(f"Lead Agent loaded {len(artifacts_list)} artifacts inventory")
-        except Exception as e:
-            logger.debug(f"Context preparation partial failure: {e}")
-        
-        # 2. 添加路由信息（如果是被路由到的Agent）
+        # 1. 添加路由信息（如果是被路由到的Agent）
         if state.get("routing_info") and state.get("last_agent") != agent_name:
             context["routing_from"] = state.get("last_agent")
             context["routing_instruction"] = state["routing_info"].get("instruction", "")
+            logger.debug(f"{agent_name} received routing from {context['routing_from']}")
         
-        # 3. 添加压缩级别
-        context["compression_level"] = state.get("compression_level", "normal")
-        
-        # 4. 添加会话信息
+        # 2. 添加会话标识（用于debug和追踪）
         context["session_id"] = state.get("session_id")
         context["thread_id"] = state.get("thread_id")
-        
+        context["parent_thread_id"] = state.get("parent_thread_id")
+        context["user_message_id"] = state.get("user_message_id")
+
         return context
-    
-    @classmethod
-    def estimate_tokens(cls, text: str) -> int:
-        """
-        估算token数（简单实现）
-        
-        Args:
-            text: 文本内容
-            
-        Returns:
-            估算的token数
-        """
-        # 粗略估算：
-        # 英文：平均每4个字符一个token
-        # 中文：平均每2个字符一个token
-        # 这里用3作为平均值
-        return len(text) // 3
     
     @classmethod
     def should_compress(
@@ -191,3 +150,20 @@ class ContextManager:
         
         total_length = sum(len(msg.get("content", "")) for msg in messages)
         return total_length > threshold
+    
+    @classmethod
+    def estimate_tokens(cls, text: str) -> int:
+        """
+        估算token数（简单实现）
+        
+        Args:
+            text: 文本内容
+            
+        Returns:
+            估算的token数
+        """
+        # 粗略估算：
+        # 英文：平均每4个字符一个token
+        # 中文：平均每2个字符一个token
+        # 这里用3作为平均值
+        return len(text) // 3

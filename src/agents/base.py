@@ -132,11 +132,21 @@ class BaseAgent(ABC):
         准备context：
         1. 所有agent都注入task_plan（如果存在）
         2. Lead Agent额外注入artifacts列表
+        3. 合并外部传入的routing context
         """
+        # 从外部context开始（可能包含routing信息）
         context = user_context or {}
+        
+        # 记录debug信息
+        if context.get("thread_id") and self.config.debug:
+            logger.debug(f"{self.config.name} executing in thread {context['thread_id'][:8]}")
         
         try:
             from tools.implementations.artifact_ops import _artifact_store
+            
+            # 设置会话（如果有）
+            if context.get("session_id"):
+                _artifact_store.set_session(context["session_id"])
             
             task_plan = _artifact_store.get("task_plan")
             if task_plan:
