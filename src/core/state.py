@@ -13,8 +13,7 @@ class NodeMemory(TypedDict):
     """单个节点的记忆"""
     tool_interactions: List[Dict]      # 只包含assistant-tool交互历史
     last_response: Optional[Dict]      # 最后的AgentResponse（用于调试/展示）
-    tool_rounds: int                   # 工具调用轮次
-    completed_at: Optional[str]        # 完成时间（用于调试）
+    metadata: Dict[str, Any]           # 元数据：tool_rounds, completed_at, token_usage等
 
 
 class AgentState(TypedDict):
@@ -142,8 +141,7 @@ def merge_agent_response_to_state(
     memory = state["agent_memories"].get(agent_name, {
         "tool_interactions": [],
         "last_response": None,
-        "tool_rounds": 0,
-        "completed_at": None
+        "metadata": {}
     })
     
     # 合并工具交互历史
@@ -159,9 +157,44 @@ def merge_agent_response_to_state(
         "reasoning": response.reasoning_content if hasattr(response, 'reasoning_content') else None
     }
     
-    # 更新轮次和时间
-    memory["tool_rounds"] = response.metadata.get("tool_rounds", 0)
-    memory["completed_at"] = datetime.now().isoformat()
+    # ========== 更新metadata ==========
+    # 保留已有的metadata，更新新的值
+    if "metadata" not in memory:
+        memory["metadata"] = {}
+    
+    # 更新工具轮次
+    memory["metadata"]["tool_rounds"] = response.metadata.get("tool_rounds", 0)
+    
+    # 更新完成时间
+    memory["metadata"]["completed_at"] = datetime.now().isoformat()
+    
+    # ✅ 累积token使用量
+    if hasattr(response, 'token_usage') and response.token_usage:
+        # 获取已有的token统计
+        existing_usage = memory["metadata"].get("token_usage", {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "total_tokens": 0
+        })
+        
+        # 累加新的使用量
+        new_usage = response.token_usage
+        memory["metadata"]["token_usage"] = {
+            "input_tokens": existing_usage.get("input_tokens", 0) + new_usage.get("input_tokens", 0),
+            "output_tokens": existing_usage.get("output_tokens", 0) + new_usage.get("output_tokens", 0),
+            "total_tokens": existing_usage.get("total_tokens", 0) + new_usage.get("total_tokens", 0)
+        }
+        
+        logger.debug(
+            f"{agent_name} token usage - "
+            f"Input: {new_usage.get('input_tokens', 0)} "
+            f"(total: {memory['metadata']['token_usage']['input_tokens']}), "
+            f"Output: {new_usage.get('output_tokens', 0)} "
+            f"(total: {memory['metadata']['token_usage']['output_tokens']})"
+        )
+    
+    # 记录执行次数（每次调用都+1）
+    memory["metadata"]["execution_count"] = memory["metadata"].get("execution_count", 0) + 1
     
     # 保存回state
     state["agent_memories"][agent_name] = memory
