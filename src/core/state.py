@@ -13,7 +13,7 @@ class NodeMemory(TypedDict):
     """单个节点的记忆"""
     tool_interactions: List[Dict]      # 只包含assistant-tool交互历史
     last_response: Optional[Dict]      # 最后的AgentResponse（用于调试/展示）
-    metadata: Dict[str, Any]           # 元数据：tool_rounds, completed_at, token_usage等
+    metadata: Dict[str, Any]           # 元数据：tool_rounds, completed_at, token_usage, execution_count
 
 
 class AgentState(TypedDict):
