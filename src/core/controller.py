@@ -1,17 +1,17 @@
 """
 执行控制器和对话管理器
-支持分支对话和权限处理
+支持分支对话和interrupt恢复
 """
 
-from typing import Dict, List, Optional, Any, Tuple
+from typing import Dict, List, Optional, Any
 from uuid import uuid4
 from datetime import datetime
+from langgraph.types import Command
 
 from core.state import (
     AgentState, UserMessage, ConversationTree, 
     create_initial_state
 )
-from tools.base import ToolResult
 from utils.logger import get_logger
 
 logger = get_logger("Core")
@@ -38,7 +38,7 @@ class ConversationManager:
         Returns:
             对话ID
         """
-        conv_id = conversation_id or str(uuid4())
+        conv_id = conversation_id or f"conv-{uuid4()}"
         
         self.conversations[conv_id] = {
             "conversation_id": conv_id,
@@ -165,28 +165,12 @@ class ConversationManager:
                 break
         
         return path
-    
-    def get_branches(self, conv_id: str, from_message_id: str) -> List[str]:
-        """
-        获取某个消息的所有分支
-        
-        Args:
-            conv_id: 对话ID
-            from_message_id: 消息ID
-            
-        Returns:
-            子消息ID列表
-        """
-        if conv_id not in self.conversations:
-            return []
-        
-        return self.conversations[conv_id]["branches"].get(from_message_id, [])
 
 
 class ExecutionController:
     """
     执行控制器
-    管理Graph执行和权限处理
+    管理Graph执行和interrupt恢复
     """
     
     def __init__(self, compiled_graph):
@@ -199,8 +183,11 @@ class ExecutionController:
         self.graph = compiled_graph
         self.conversation_manager = ConversationManager()
         
-        # 线程状态缓存（用于权限恢复）
+        # 线程状态缓存（用于分支）
         self.thread_states: Dict[str, Dict] = {}
+        
+        # 保存中断的线程信息
+        self.interrupted_threads: Dict[str, Dict] = {}
         
         logger.info("ExecutionController initialized")
     
@@ -230,9 +217,9 @@ class ExecutionController:
             self.conversation_manager.start_conversation(conversation_id)
         
         # 生成ID
-        message_id = str(uuid4())
-        thread_id = str(uuid4())
-        
+        message_id = f"msg-{uuid4()}"
+        thread_id = f"thd-{uuid4()}"
+
         # 如果从Artifact store获取session
         if not session_id:
             from tools.implementations.artifact_ops import _artifact_store
@@ -277,7 +264,36 @@ class ExecutionController:
             config = {"configurable": {"thread_id": thread_id}}
             
             logger.info(f"Executing graph for message {message_id[:8]}...")
-            final_state = await self.graph.ainvoke(initial_state, config)
+            
+            # 执行可能会被interrupt中断
+            result = await self.graph.ainvoke(initial_state, config)
+            
+            # 检查是否被中断（通过检查返回的interrupt数据）
+            if isinstance(result, dict) and result.get("__interrupt__"):
+                # 保存中断信息
+                interrupt_data = result.get("__interrupt__")
+                self.interrupted_threads[thread_id] = {
+                    "conversation_id": conversation_id,
+                    "message_id": message_id,
+                    "interrupt_data": interrupt_data,
+                    "timestamp": datetime.now().isoformat()
+                }
+                
+                logger.info(f"Execution interrupted: {interrupt_data.get('type')}")
+                
+                return {
+                    "success": True,
+                    "interrupted": True,
+                    "conversation_id": conversation_id,
+                    "message_id": message_id,
+                    "thread_id": thread_id,
+                    "interrupt_type": interrupt_data.get("type"),
+                    "interrupt_data": interrupt_data,
+                    "session_id": session_id
+                }
+            
+            # 正常完成
+            final_state = result
             
             # 保存线程状态（用于分支）
             self.thread_states[thread_id] = final_state
@@ -292,6 +308,7 @@ class ExecutionController:
             
             return {
                 "success": True,
+                "interrupted": False,
                 "conversation_id": conversation_id,
                 "message_id": message_id,
                 "thread_id": thread_id,
@@ -319,89 +336,83 @@ class ExecutionController:
                 "error": str(e)
             }
     
-    async def handle_permission_confirmation(
+    async def resume_with_permission(
         self,
         thread_id: str,
         approved: bool,
         reason: Optional[str] = None
     ) -> Dict[str, Any]:
         """
-        处理工具权限确认
+        恢复被权限中断的执行
         
         Args:
             thread_id: 线程ID
             approved: 是否批准
-            reason: 原因说明
+            reason: 原因说明（拒绝时使用）
             
         Returns:
             执行结果
         """
         try:
-            # 获取当前状态
+            # 检查是否有中断信息
+            if thread_id not in self.interrupted_threads:
+                raise ValueError(f"No interrupted execution for thread {thread_id}")
+            
+            interrupt_info = self.interrupted_threads[thread_id]
             config = {"configurable": {"thread_id": thread_id}}
-            snapshot = await self.graph.aget_state(config)
             
-            if not snapshot or not snapshot.values:
-                raise ValueError(f"Thread {thread_id} not found or has no state")
+            # 使用Command恢复执行
+            logger.info(f"Resuming thread {thread_id} with permission: {approved}")
             
-            state = snapshot.values
-            pending = state.get("pending_tool_confirmation")
+            # Resume时传递用户的决定
+            result = await self.graph.ainvoke(
+                Command(resume=approved),  # True表示批准，False表示拒绝
+                config=config
+            )
             
-            if not pending:
-                raise ValueError("No pending tool confirmation")
-            
-            # 准备工具执行结果
-            tool_name = pending["tool_name"]
-            from_agent = pending["from_agent"]
-            
-            if approved:
-                # 模拟执行工具（实际应该从registry获取toolkit）
-                logger.info(f"Tool {tool_name} approved, executing...")
+            # 检查是否又被中断
+            if isinstance(result, dict) and result.get("__interrupt__"):
+                interrupt_data = result.get("__interrupt__")
+                self.interrupted_threads[thread_id]["interrupt_data"] = interrupt_data
                 
-                # 这里简化处理，实际应该调用真实的工具
-                # toolkit = self.get_agent_toolkit(from_agent)
-                # result = await toolkit.execute_tool(tool_name, pending["params"])
-                
-                result = ToolResult(
-                    success=True,
-                    data={"message": f"Tool {tool_name} executed successfully (simulated)"}
-                )
-            else:
-                # 创建拒绝结果
-                result = ToolResult(
-                    success=False,
-                    error=f"Permission denied: {reason or 'User rejected'}"
-                )
+                return {
+                    "success": True,
+                    "interrupted": True,
+                    "thread_id": thread_id,
+                    "interrupt_type": interrupt_data.get("type"),
+                    "interrupt_data": interrupt_data
+                }
             
-            # 更新状态
-            update_values = {
-                "pending_tool_confirmation": {
-                    **pending,
-                    "result": (tool_name, result)  # 添加结果
-                },
-                "next_agent": from_agent  # 返回原Agent继续执行
-            }
-            
-            # 更新状态
-            await self.graph.aupdate_state(config, update_values)
-            
-            # 继续执行
-            logger.info(f"Resuming execution for thread {thread_id}")
-            final_state = await self.graph.ainvoke(None, config)
+            # 执行完成
+            final_state = result
             
             # 保存最终状态
             self.thread_states[thread_id] = final_state
             
+            # 清除中断信息
+            del self.interrupted_threads[thread_id]
+            
+            # 更新对话响应
+            conv_id = interrupt_info["conversation_id"]
+            msg_id = interrupt_info["message_id"]
+            response = final_state.get("graph_response", "")
+            
+            self.conversation_manager.update_response(conv_id, msg_id, response)
+            
             return {
                 "success": True,
+                "interrupted": False,
                 "thread_id": thread_id,
-                "response": final_state.get("graph_response", ""),
-                "tool_executed": tool_name,
-                "approved": approved
+                "response": response,
+                "approved": approved,
+                "artifacts": {
+                    "task_plan_id": final_state.get("task_plan_id"),
+                    "result_ids": final_state.get("result_artifact_ids", [])
+                }
             }
             
         except Exception as e:
-            logger.exception(f"Error handling permission: {e}")
+            logger.exception(f"Error resuming execution: {e}")
             return {
                 "success": False,
                 "thread_id": thread_id,

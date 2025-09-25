@@ -1,11 +1,12 @@
 """
 可扩展的Graph构建器
-支持动态注册Agent和统一的节点处理
+支持动态注册Agent和独立的权限确认节点
 """
 
-from typing import Dict, Optional, Any, Callable
+from typing import Dict, Optional, Any, Callable, Literal
 from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.memory import MemorySaver
+from langgraph.types import interrupt, Command
 
 from core.state import AgentState, merge_agent_response_to_state
 from core.context_manager import ContextManager
@@ -19,7 +20,7 @@ logger = get_logger("Core")
 class ExtendableGraph:
     """
     可扩展的Graph构建器
-    支持动态注册Agent
+    支持动态注册Agent和权限确认
     """
     
     def __init__(self):
@@ -28,25 +29,93 @@ class ExtendableGraph:
         self.agents: Dict[str, BaseAgent] = {}
         self.node_functions: Dict[str, Callable] = {}
         
-        # 添加核心节点（user_confirmation是特殊节点）
+        # 添加核心节点
         self._add_core_nodes()
         
         logger.info("ExtendableGraph initialized")
     
     def _add_core_nodes(self):
-        """添加核心节点"""
-        # 用户确认节点（特殊处理）
-        async def user_confirmation_node(state: AgentState) -> AgentState:
+        """添加核心节点（权限确认节点）"""
+        
+        async def user_confirmation_node(state: AgentState) -> Any:
             """
-            用户确认节点
-            这是一个interrupt point，实际处理由Controller完成
+            用户权限确认节点
+            专门处理需要用户确认的工具执行
             """
-            logger.info("User confirmation required")
-            # Graph会在这里中断，等待Controller处理
+            logger.info("Entering user_confirmation_node")
+            
+            # 从pending_result获取待确认的信息（复用已有字段）
+            pending = state.get("pending_result")
+            if not pending or pending.get("type") != "tool_permission":
+                logger.error("No pending tool permission found")
+                state["next_agent"] = None
+                return state
+            
+            agent_name = pending["from_agent"]
+            tool_name = pending["data"]["tool_name"]
+            params = pending["data"]["params"]
+            permission_level = pending["data"]["permission_level"]
+            
+            logger.info(f"Permission required for tool '{tool_name}' from {agent_name}")
+            
+            # 使用interrupt机制请求用户确认
+            is_approved = interrupt({
+                "type": "tool_permission",
+                "agent": agent_name,
+                "tool_name": tool_name,
+                "params": params,
+                "permission_level": permission_level,
+                "message": f"Tool '{tool_name}' requires {permission_level} permission"
+            })
+            
+            # 根据用户决定执行工具或创建拒绝结果
+            if is_approved:
+                logger.info(f"Permission approved for tool '{tool_name}'")
+                
+                # 获取agent实例并执行工具
+                agent = self.agents.get(agent_name)
+                if agent and agent.toolkit:
+                    tool_result = await agent.toolkit.execute_tool(tool_name, params)
+                else:
+                    tool_result = ToolResult(
+                        success=False,
+                        error=f"Agent {agent_name} or toolkit not available"
+                    )
+            else:
+                logger.info(f"Permission denied for tool '{tool_name}'")
+                tool_result = ToolResult(
+                    success=False,
+                    error="Permission denied by user"
+                )
+            
+            # 更新pending_result中的result字段（复用同一个对象）
+            state["pending_result"]["data"]["result"] = tool_result
+            
+            # 返回原agent继续执行
+            state["next_agent"] = agent_name
+            
             return state
         
+        # 注册节点
         self.workflow.add_node("user_confirmation", user_confirmation_node)
         self.node_functions["user_confirmation"] = user_confirmation_node
+        
+        # 添加路由规则：确认后返回原agent
+        def confirmation_router(state: AgentState) -> str:
+            next_agent = state.get("next_agent")
+            if next_agent:
+                state["next_agent"] = None
+                logger.info(f"Routing from user_confirmation to {next_agent}")
+                return next_agent
+            return END
+        
+        # 为user_confirmation添加动态路由
+        # 注意：路由映射会在register_agent时更新
+        self.workflow.add_conditional_edges(
+            "user_confirmation",
+            confirmation_router,
+            {END: END}  # 初始只有END，会动态更新
+        )
     
     def register_agent(self, agent: BaseAgent) -> None:
         """
@@ -70,11 +139,14 @@ class ExtendableGraph:
         # 添加路由规则
         self._add_routing_rules(agent_name)
         
+        # 更新user_confirmation的路由映射，使其能路由到新agent
+        self._update_confirmation_routing()
+        
         logger.info(f"✅ Registered agent: {agent_name}")
     
     def _create_node_function(self, agent_name: str) -> Callable:
         """
-        为Agent创建通用节点函数
+        为Agent创建节点函数（简化版，不处理interrupt）
         
         Args:
             agent_name: Agent名称
@@ -90,13 +162,13 @@ class ExtendableGraph:
             agent = self.agents[agent_name]
             
             # 获取或初始化节点记忆
-            memory = state.get("agent_memories", {}).get(agent_name)
+            memory = state.get("agent_memories", {}).get(agent_name, {})
             
             try:
-                # 准备context
-                context = ContextManager.prepare_context_for_agent(agent_name, state)
+                # 准备routing context
+                routing_context = ContextManager.prepare_routing_context(agent_name, state)
                 
-                # instruction始终来自current_task（对于lead_agent）或routing_info
+                # 确定instruction来源
                 if agent_name == "lead_agent":
                     instruction = state["current_task"]
                 else:
@@ -105,8 +177,8 @@ class ExtendableGraph:
 
                 # 准备执行参数
                 execute_kwargs = {
-                    "instruction": instruction,  # 始终传入instruction
-                    "context": context,
+                    "instruction": instruction,
+                    "context": routing_context,
                 }
                 
                 # 判断是否是恢复执行
@@ -118,9 +190,10 @@ class ExtendableGraph:
                     
                     # 添加历史交互记录
                     execute_kwargs["tool_interactions"] = memory.get("tool_interactions", [])
+                    
+                    # 压缩处理
                     compression_level = state.get("compression_level", "normal")
                     compression_threshold = ContextManager.COMPRESSION_LEVELS.get(compression_level, 40000)
-
                     if ContextManager.should_compress(
                         execute_kwargs["tool_interactions"], 
                         threshold=compression_threshold
@@ -132,7 +205,8 @@ class ExtendableGraph:
 
                     if result_type == "tool_permission":
                         # 工具权限确认结果
-                        tool_name, tool_result = pending["data"]["tool_name"], pending["data"]["result"]
+                        tool_name = pending["data"]["tool_name"]
+                        tool_result = pending["data"]["result"]
                         execute_kwargs["pending_tool_result"] = (tool_name, tool_result)
                         
                     elif result_type == "subagent_response":
@@ -141,7 +215,6 @@ class ExtendableGraph:
                         subagent_content = pending["data"]["content"]
                         
                         # 创建ToolResult对象
-                        from tools.base import ToolResult
                         tool_result = ToolResult(
                             success=True,
                             data={"agent": subagent_name, "response": subagent_content}
@@ -154,12 +227,40 @@ class ExtendableGraph:
                 # 执行Agent
                 response = await agent.execute(**execute_kwargs)
                 
-                # 处理响应
-                if agent_name != "lead_agent" and not response.routing:
-                    # Sub-agent完成，需要将结果返回给Lead Agent
+                # 检查是否需要权限确认（直接在pending_result中设置）
+                if response.routing and response.routing.get("type") == "permission_confirmation":
+                    # 设置待确认信息（复用pending_result）
+                    state["pending_result"] = {
+                        "type": "tool_permission",
+                        "from_agent": agent_name,
+                        "data": {
+                            "tool_name": response.routing.get("tool_name"),
+                            "params": response.routing.get("params"),
+                            "permission_level": response.routing.get("permission_level"),
+                            "result": None  # 将在确认后填充
+                        }
+                    }
+                    
+                    # 路由到确认节点
+                    state["next_agent"] = "user_confirmation"
+                    logger.info(f"Routing to user_confirmation for tool '{response.routing.get('tool_name')}'")
+                    
+                    # 保存agent记忆（重要：保留交互历史）
+                    merge_agent_response_to_state(state, agent_name, response)
+                    return state
+                
+                # 处理其他类型的路由
+                if response.routing and response.routing.get("type") == "subagent":
+                    state["next_agent"] = response.routing.get("target")
+                    state["routing_info"] = response.routing
+                    logger.info(f"Routing to subagent: {response.routing.get('target')}")
+                
+                # 处理sub-agent完成
+                elif agent_name != "lead_agent" and not response.routing:
+                    # Sub-agent完成，返回给Lead Agent
                     state["pending_result"] = {
                         "type": "subagent_response",
-                        "from_agent": "lead_agent",  # 指定Lead Agent需要处理
+                        "from_agent": "lead_agent",
                         "data": {
                             "agent": agent_name,
                             "content": response.content,
@@ -180,7 +281,7 @@ class ExtendableGraph:
             except Exception as e:
                 logger.exception(f"Error in {agent_name}: {e}")
                 state["graph_response"] = f"Error in {agent_name}: {str(e)}"
-                state["next_agent"] = None  # 停止执行
+                state["next_agent"] = None
                 
             return state
         
@@ -208,7 +309,6 @@ class ExtendableGraph:
             return END
         
         # 构建路由映射
-        # 包含所有已注册的agent + 特殊节点
         route_map = {
             "user_confirmation": "user_confirmation",
             END: END
@@ -224,6 +324,38 @@ class ExtendableGraph:
             route_func,
             route_map
         )
+    
+    def _update_confirmation_routing(self):
+        """
+        更新user_confirmation节点的路由映射
+        使其能够路由到所有已注册的agent
+        """
+        def confirmation_router(state: AgentState) -> str:
+            next_agent = state.get("next_agent")
+            if next_agent:
+                state["next_agent"] = None
+                logger.info(f"Routing from user_confirmation to {next_agent}")
+                return next_agent
+            return END
+        
+        # 构建包含所有agent的路由映射
+        route_map = {END: END}
+        for agent_name in self.agents.keys():
+            route_map[agent_name] = agent_name
+        
+        # 重新设置条件边
+        # 注意：LangGraph可能不支持动态更新边，这里假设支持
+        # 如果不支持，需要在compile前完成所有注册
+        try:
+            # 尝试更新（如果LangGraph支持）
+            self.workflow.add_conditional_edges(
+                "user_confirmation",
+                confirmation_router,
+                route_map
+            )
+        except:
+            # 如果不支持动态更新，至少记录警告
+            logger.warning("Cannot update confirmation routing dynamically")
     
     def set_entry_point(self, agent_name: str = "lead_agent") -> None:
         """
@@ -254,9 +386,10 @@ class ExtendableGraph:
         if checkpointer is None:
             checkpointer = MemorySaver()
         
-        # 默认在user_confirmation前中断
+        # 默认在user_confirmation节点中断
+        # 注意：由于我们在节点内部使用interrupt()，不需要interrupt_before
         if interrupt_before is None:
-            interrupt_before = ["user_confirmation"]
+            interrupt_before = []
         
         # 编译
         compiled = self.workflow.compile(
@@ -264,11 +397,11 @@ class ExtendableGraph:
             interrupt_before=interrupt_before
         )
         
-        logger.info(f"Graph compiled with {len(self.agents)} agents")
+        logger.info(f"Graph compiled with {len(self.agents)} agents and confirmation node")
         return compiled
 
 
-# 工厂函数
+# 工厂函数保持不变
 def create_multi_agent_graph() -> ExtendableGraph:
     """
     创建多Agent Graph的便捷函数
