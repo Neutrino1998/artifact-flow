@@ -10,7 +10,7 @@ from langgraph.types import interrupt, Command
 
 from core.state import AgentState, merge_agent_response_to_state
 from core.context_manager import ContextManager
-from agents.base import BaseAgent
+from agents.base import BaseAgent, AgentResponse
 from tools.base import ToolResult
 from utils.logger import get_logger
 
@@ -39,12 +39,11 @@ class ExtendableGraph:
         
         async def user_confirmation_node(state: AgentState) -> Any:
             """
-            用户权限确认节点
-            专门处理需要用户确认的工具执行
+            用户权限确认节点（简化版）
             """
             logger.info("Entering user_confirmation_node")
             
-            # 从pending_result获取待确认的信息（复用已有字段）
+            # 从pending_result获取待确认的信息
             pending = state.get("pending_result")
             if not pending or pending.get("type") != "tool_permission":
                 logger.error("No pending tool permission found")
@@ -56,9 +55,9 @@ class ExtendableGraph:
             params = pending["data"]["params"]
             permission_level = pending["data"]["permission_level"]
             
-            logger.info(f"Permission required for tool '{tool_name}' from {agent_name}")
+            logger.info(f"Requesting permission for tool '{tool_name}' from {agent_name}")
             
-            # 使用interrupt机制请求用户确认
+            # 请求用户确认
             is_approved = interrupt({
                 "type": "tool_permission",
                 "agent": agent_name,
@@ -68,31 +67,21 @@ class ExtendableGraph:
                 "message": f"Tool '{tool_name}' requires {permission_level} permission"
             })
             
-            # 根据用户决定执行工具或创建拒绝结果
+            # 执行或拒绝工具
             if is_approved:
                 logger.info(f"Permission approved for tool '{tool_name}'")
-                
-                # 获取agent实例并执行工具
                 agent = self.agents.get(agent_name)
                 if agent and agent.toolkit:
                     tool_result = await agent.toolkit.execute_tool(tool_name, params)
                 else:
-                    tool_result = ToolResult(
-                        success=False,
-                        error=f"Agent {agent_name} or toolkit not available"
-                    )
+                    tool_result = ToolResult(success=False, error=f"Agent or toolkit not available")
             else:
                 logger.info(f"Permission denied for tool '{tool_name}'")
-                tool_result = ToolResult(
-                    success=False,
-                    error="Permission denied by user"
-                )
+                tool_result = ToolResult(success=False, error="Permission denied by user")
             
-            # 更新pending_result中的result字段（复用同一个对象）
+            # 更新结果并设置路由（这里是唯一需要直接修改state的地方）
             state["pending_result"]["data"]["result"] = tool_result
-            
-            # 返回原agent继续执行
-            state["next_agent"] = agent_name
+            state["next_agent"] = agent_name  # 返回原agent
             
             return state
         
@@ -146,7 +135,7 @@ class ExtendableGraph:
     
     def _create_node_function(self, agent_name: str) -> Callable:
         """
-        为Agent创建节点函数（简化版，不处理interrupt）
+        为Agent创建节点函数（只负责执行，不负责状态更新）
         
         Args:
             agent_name: Agent名称
@@ -155,38 +144,37 @@ class ExtendableGraph:
             异步节点函数
         """
         async def agent_node(state: AgentState) -> AgentState:
-            """通用Agent节点函数"""
+            """通用Agent节点函数 - 单一职责：执行Agent"""
             logger.info(f"Executing {agent_name} node")
             
             # 获取Agent实例
             agent = self.agents[agent_name]
             
-            # 获取或初始化节点记忆
+            # 获取节点记忆
             memory = state.get("agent_memories", {}).get(agent_name, {})
             
             try:
-                # 准备routing context
+                # ========== 准备执行参数 ==========
                 routing_context = ContextManager.prepare_routing_context(agent_name, state)
                 
-                # 确定instruction来源
+                # 确定instruction
                 if agent_name == "lead_agent":
                     instruction = state["current_task"]
                 else:
                     # Sub-agent从routing_info获取指令
                     instruction = state.get("routing_info", {}).get("instruction", "")
-
-                # 准备执行参数
+                
                 execute_kwargs = {
                     "instruction": instruction,
                     "context": routing_context,
                 }
                 
-                # 判断是否是恢复执行
-                if state.get("pending_result") and state["pending_result"].get("from_agent") == agent_name:
+                # ========== 检查是否是恢复执行 ==========
+                is_resuming = False
+                pending = state.get("pending_result")
+                if pending and pending.get("from_agent") == agent_name:
+                    is_resuming = True
                     logger.info(f"{agent_name} resuming with pending result")
-                    
-                    pending = state["pending_result"]
-                    result_type = pending["type"]
                     
                     # 添加历史交互记录
                     execute_kwargs["tool_interactions"] = memory.get("tool_interactions", [])
@@ -202,7 +190,10 @@ class ExtendableGraph:
                             execute_kwargs["tool_interactions"], 
                             level=compression_level
                         )
-
+                    
+                    # 根据pending类型准备参数
+                    result_type = pending["type"]
+                    
                     if result_type == "tool_permission":
                         # 工具权限确认结果
                         tool_name = pending["data"]["tool_name"]
@@ -214,74 +205,47 @@ class ExtendableGraph:
                         subagent_name = pending["data"]["agent"]
                         subagent_content = pending["data"]["content"]
                         
-                        # 创建ToolResult对象
+                        # 封装为ToolResult对象
                         tool_result = ToolResult(
                             success=True,
                             data={"agent": subagent_name, "response": subagent_content}
                         )
                         execute_kwargs["pending_tool_result"] = ("call_subagent", tool_result)
-                    
-                    # 清除pending状态
-                    state["pending_result"] = None
-                    
-                # 执行Agent
+                
+                # ========== 执行Agent ==========
                 response = await agent.execute(**execute_kwargs)
                 
-                # 检查是否需要权限确认（直接在pending_result中设置）
-                if response.routing and response.routing.get("type") == "permission_confirmation":
-                    # 设置待确认信息（复用pending_result）
-                    state["pending_result"] = {
-                        "type": "tool_permission",
-                        "from_agent": agent_name,
-                        "data": {
-                            "tool_name": response.routing.get("tool_name"),
-                            "params": response.routing.get("params"),
-                            "permission_level": response.routing.get("permission_level"),
-                            "result": None  # 将在确认后填充
-                        }
-                    }
-                    
-                    # 路由到确认节点
-                    state["next_agent"] = "user_confirmation"
-                    logger.info(f"Routing to user_confirmation for tool '{response.routing.get('tool_name')}'")
-                    
-                    # 保存agent记忆（重要：保留交互历史）
-                    merge_agent_response_to_state(state, agent_name, response)
-                    return state
+                # ========== 判断是否最终完成 ==========
+                is_completing = (
+                    agent_name == "lead_agent" and 
+                    not response.routing # 只要没有路由就是完成
+                )
                 
-                # 处理其他类型的路由
-                if response.routing and response.routing.get("type") == "subagent":
-                    state["next_agent"] = response.routing.get("target")
-                    state["routing_info"] = response.routing
-                    logger.info(f"Routing to subagent: {response.routing.get('target')}")
+                # ========== 统一状态更新 ==========
+                merge_agent_response_to_state(
+                    state, 
+                    agent_name, 
+                    response,
+                    is_resuming=is_resuming,
+                    is_completing=is_completing
+                )
                 
-                # 处理sub-agent完成
-                elif agent_name != "lead_agent" and not response.routing:
-                    # Sub-agent完成，返回给Lead Agent
-                    state["pending_result"] = {
-                        "type": "subagent_response",
-                        "from_agent": "lead_agent",
-                        "data": {
-                            "agent": agent_name,
-                            "content": response.content,
-                            "tool_calls": len(response.tool_calls)
-                        }
-                    }
-                    state["next_agent"] = "lead_agent"
-                    logger.info(f"{agent_name} completed, returning to lead_agent")
-                
-                # 合并响应到状态
-                merge_agent_response_to_state(state, agent_name, response)
-                
-                # Lead Agent完成时保存最终响应
-                if agent_name == "lead_agent" and not response.routing:
-                    state["graph_response"] = response.content
-                    logger.info(f"Lead Agent completed with final response")
-                    
             except Exception as e:
                 logger.exception(f"Error in {agent_name}: {e}")
-                state["graph_response"] = f"Error in {agent_name}: {str(e)}"
-                state["next_agent"] = None
+                # 发生异常，记录错误并完成
+                error_response = AgentResponse(
+                    success=False,
+                    content=f"Graph node error in executing {agent_name}: {str(e)}",
+                    metadata={'error': str(e), 'error_type': type(e).__name__}
+                )
+                
+                merge_agent_response_to_state(
+                    state,
+                    agent_name,
+                    error_response,
+                    is_resuming=is_resuming,
+                    is_completing=True  # 错误时直接完成
+                )
                 
             return state
         

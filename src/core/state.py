@@ -5,7 +5,9 @@ Graph状态定义
 
 from typing import TypedDict, Dict, List, Optional, Any
 from datetime import datetime
+from utils.logger import get_logger
 
+logger = get_logger("Core")
 
 class NodeMemory(TypedDict):
     """单个节点的记忆"""
@@ -112,20 +114,31 @@ def create_initial_state(
     }
 
 
+
 def merge_agent_response_to_state(
     state: AgentState,
     agent_name: str,
     response: Any,  # AgentResponse
+    is_resuming: bool = False,
+    is_completing: bool = False
 ) -> None:
     """
-    将Agent响应合并到状态中
+    统一的状态更新函数 - 所有状态修改都在这里进行
     
     Args:
         state: 当前状态
         agent_name: Agent名称
         response: AgentResponse对象
+        is_resuming: 是否是恢复执行（需要清理pending_result）
+        is_completing: 是否是最终完成（Lead Agent需要设置graph_response）
     """
-    # 获取或创建agent记忆
+    # ========== 1. 清理恢复执行的pending状态 ==========
+    if is_resuming and state.get("pending_result"):
+        if state["pending_result"].get("from_agent") == agent_name:
+            logger.debug(f"Clearing pending_result for {agent_name} after resume")
+            state["pending_result"] = None
+    
+    # ========== 2. 更新agent记忆 ==========
     memory = state["agent_memories"].get(agent_name, {
         "tool_interactions": [],
         "last_response": None,
@@ -133,17 +146,17 @@ def merge_agent_response_to_state(
         "completed_at": None
     })
     
-    # 合并工具交互历史（追加新的交互）
-    if hasattr(response, "tool_interactions"):
+    # 合并工具交互历史
+    if hasattr(response, "tool_interactions") and response.tool_interactions:
         memory["tool_interactions"].extend(response.tool_interactions)
     
     # 更新最后的响应
     memory["last_response"] = {
         "success": response.success,
         "content": response.content,
-        "tool_calls": response.tool_calls,  # 用于展示
+        "tool_calls": response.tool_calls,
         "metadata": response.metadata,
-        "reasoning": response.reasoning_content
+        "reasoning": response.reasoning_content if hasattr(response, 'reasoning_content') else None
     }
     
     # 更新轮次和时间
@@ -153,14 +166,15 @@ def merge_agent_response_to_state(
     # 保存回state
     state["agent_memories"][agent_name] = memory
     
-    # 更新last_agent
+    # ========== 3. 更新追踪字段 ==========
     state["last_agent"] = agent_name
     
-    # 处理路由
+    # ========== 4. 处理路由逻辑 ==========
     if response.routing:
         routing = response.routing
+        routing_type = routing.get("type")
         
-        if routing.get("type") == "permission_confirmation":
+        if routing_type == "permission_confirmation":
             # 需要权限确认
             state["next_agent"] = "user_confirmation"
             state["pending_result"] = {
@@ -170,16 +184,38 @@ def merge_agent_response_to_state(
                     "tool_name": routing.get("tool_name"),
                     "params": routing.get("params"),
                     "permission_level": routing.get("permission_level"),
-                    "result": None  # 将在权限确认后填充
+                    "result": None
                 }
             }
-            logger.info(f"Permission required for {routing.get('tool_name')}")
+            logger.info(f"Setting up permission confirmation for {routing.get('tool_name')}")
             
-        elif routing.get("type") == "subagent":
+        elif routing_type == "subagent":
             # 路由到子Agent
             state["next_agent"] = routing.get("target")
             state["routing_info"] = routing
-            logger.info(f"Routing to {routing.get('target')}")
+            logger.info(f"Setting up routing to {routing.get('target')}")
+            
     else:
         # 没有路由，清理routing_info
         state["routing_info"] = None
+        
+        # ========== 5. 处理完成场景 ==========
+        if agent_name != "lead_agent":
+            # Sub-agent完成，返回给Lead Agent
+            state["pending_result"] = {
+                "type": "subagent_response",
+                "from_agent": "lead_agent",  # Lead Agent需要处理这个结果
+                "data": {
+                    "agent": agent_name,
+                    "content": response.content,
+                    "tool_calls": len(response.tool_calls) if response.tool_calls else 0
+                }
+            }
+            state["next_agent"] = "lead_agent"
+            logger.info(f"{agent_name} completed, setting up return to lead_agent")
+            
+        elif is_completing:
+            # Lead Agent最终完成
+            state["graph_response"] = response.content
+            state["next_agent"] = None  # 结束工作流
+            logger.info(f"Lead Agent completed with final response")
