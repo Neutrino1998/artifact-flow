@@ -316,7 +316,7 @@ class BaseAgent(ABC):
         )
         
         try:
-            # 消息组装
+            # ========== 消息组装 ==========
             messages = []
             
             # Part 1: System prompt
@@ -357,7 +357,7 @@ class BaseAgent(ABC):
             
             accumulated_token_usage = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
 
-            # 工具调用循环
+            # ========== 工具调用循环 ==========
             for round_num in range(self.config.max_tool_rounds + 1):
                 # 检查是否超过工具调用限制
                 if round_num == self.config.max_tool_rounds:
@@ -370,7 +370,7 @@ class BaseAgent(ABC):
                 if self.config.debug:
                     logger.debug(f"[{self.config.name} Round {round_num + 1}] Messages:\n{self._format_messages_for_debug(messages)}")
                 
-                # LLM调用
+                # ========== LLM调用 ========== 
                 response_content = ""
                 reasoning_content = None
                 token_usage = {}
@@ -458,6 +458,7 @@ class BaseAgent(ABC):
                 messages.append({"role": "assistant", "content": response_content})
                 new_tool_interactions.append({"role": "assistant", "content": response_content})
                 
+                # ========== 工具调用 ========== 
                 # 解析工具调用
                 tool_calls = parse_tool_calls(response_content)
                 
@@ -486,7 +487,8 @@ class BaseAgent(ABC):
                         else:
                             logger.warning(f"{self.config.name} tool '{tool_call.name}': FAILED - {result.error}")
                         
-                        # 检查是否需要中断
+                        # ========== 检查是否需要中断 ==========
+                        # 检查是否需要权限确认
                         if result.metadata and result.metadata.get("needs_confirmation"):
                             # 权限确认中断
                             logger.info(f"Execution interrupted for tool '{tool_call.name}' pending permission.")
@@ -506,8 +508,7 @@ class BaseAgent(ABC):
                             )
                             return # 中断执行，等待权限确认
 
-                        
-                        # 检查是否是路由指令
+                        # 检查是否是Subagent路由指令
                         if (tool_call.name == "call_subagent" and 
                             result.success and 
                             isinstance(result.data, dict) and 
