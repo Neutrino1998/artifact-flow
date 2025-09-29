@@ -40,10 +40,6 @@ class AgentState(TypedDict):
     #   "data": Any
     # }
     
-    # Artifacts
-    task_plan_id: Optional[str]            # 任务计划artifact ID
-    result_artifact_ids: List[str]         # 结果artifact ID列表
-    
     # Context管理
     compression_level: str                 # 压缩级别： "full", "normal", "compact"
     
@@ -78,7 +74,8 @@ def create_initial_state(
     session_id: Optional[str] = None,
     thread_id: Optional[str] = None,
     parent_thread_id: Optional[str] = None,
-    compression_level: str = "normal"
+    compression_level: str = "normal",
+    message_id: Optional[str] = None
 ) -> AgentState:
     """
     创建初始状态的辅助函数
@@ -89,6 +86,7 @@ def create_initial_state(
         thread_id: 线程ID
         parent_thread_id: 父线程ID（用于分支）
         compression_level: 压缩级别
+        message_id: 关联的用户消息ID
         
     Returns:
         初始化的AgentState
@@ -105,10 +103,8 @@ def create_initial_state(
         "last_agent": None,
         "routing_info": None,
         "pending_result": None,
-        "task_plan_id": None,
-        "result_artifact_ids": [],
         "compression_level": compression_level,
-        "user_message_id": f"msg-{uuid4()}",
+        "user_message_id": message_id or f"msg-{uuid4()}",
         "graph_response": None
     }
 
