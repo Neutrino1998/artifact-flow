@@ -1,4 +1,25 @@
-# 已知问题清单
+
+
+# Core模块已知问题清单
+
+## 主要问题
+- [ ] `ExtendableGraph`和`ExecutionController`流式输出支持
+- [x] 确认user_confirmation_node在`ExecutionController`层面正确工作，现有代码处理很奇怪：
+一个是`handle_permission_confirmation`没有实现对实际工具的调用，同时没有地方调用了这个`handle_permission_confirmation`。另外观察`ExtendableGraph`的路由也不对，`_add_routing_rules`怎么把`user_confirmation`路由到END去了。
+- [x] `ContextManager`重复设计了`prepare_context_for_agent`方法。应该与`BaseAgent`中就有`_prepare_context_with_task_plan`做出区分。
+- [x] sub agent的response好像不会被lead agent解析。
+- [x] `BaseAgent`的messages的拼接方式修改为：
+system prompt + instruction + history(如果有) + tool result
+
+## 次要问题
+- [x] 各类id加上类型名
+- [ ] controller层的历史记录（User ↔ Graph）和graph层的历史记录是不是也应该分开管理，因为如果都塞到NodeMemory里面的话感觉不太合理，应该是一个context manager管理controller层一个管理graph层，这个context manager可以和前面说的是一个，然后controller层的历史记录以context的形式给graph？
+- [ ] 引入python-diff-match-patch升级一下现有的artifact_ops.py，并增加版本管理功能与controller中的conversation管理对应起来（算球了，太耦合了），提供更完善的功能给未来开发的前端，例如能生成例如git diff的内容展示模型对文档的修改。
+- [ ] lead agent提示词提示result artifact 渐进式完成
+- [ ] graph level轮次太多提示lead agent
+- [ ] agent开启关闭debug模式很费劲：删除agentconfig中debug参数
+
+# Agent模块已知问题清单
 
 ## 重要问题
 
