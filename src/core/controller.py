@@ -191,24 +191,71 @@ class ExecutionController:
         
         logger.info("ExecutionController initialized")
     
-    async def process_message(
+    async def execute(
         self,
-        content: str,
-        conversation_id: Optional[str] = None,
-        parent_message_id: Optional[str] = None,
-        session_id: Optional[str] = None
+        # 核心参数
+        content: Optional[str] = None,           # 新消息内容（新对话时必需）
+        thread_id: Optional[str] = None,         # 线程ID（恢复时必需）
+        
+        # 对话管理
+        conversation_id: Optional[str] = None,   # 对话ID
+        parent_message_id: Optional[str] = None, # 父消息ID（用于分支）
+        session_id: Optional[str] = None,        # Artifact会话ID
+        
+        # 恢复执行参数
+        resume_data: Optional[Dict] = None,      # 恢复数据
+        # resume_data = {
+        #     "approved": bool,                   # 是否批准（权限确认）
+        #     "reason": str,                       # 拒绝原因（可选）
+        #     "type": "permission" | "custom"     # 恢复类型
+        # }
     ) -> Dict[str, Any]:
         """
-        处理用户消息（主入口）
+        统一的执行接口
         
-        Args:
-            content: 用户消息内容
-            conversation_id: 对话ID（None则创建新对话）
-            parent_message_id: 父消息ID（用于分支）
-            session_id: Artifact会话ID
-            
+        支持三种场景：
+        1. 新对话: content必需
+        2. 恢复权限: thread_id + resume_data必需
+        3. 分支对话: content + parent_message_id必需
+        
         Returns:
-            包含响应的字典
+            执行结果字典
+        """
+        # ========== 1. 参数验证和场景识别 ==========
+        is_new_message = content is not None
+        is_resuming = thread_id is not None and resume_data is not None
+        
+        if not is_new_message and not is_resuming:
+            raise ValueError("Either 'content' (new message) or 'thread_id' + 'resume_data' (resume) required")
+        
+        if is_new_message and is_resuming:
+            raise ValueError("Cannot specify both new message and resume parameters")
+        
+        # ========== 2. 处理新消息场景 ==========
+        if is_new_message:
+            return await self._execute_new_message(
+                content=content,
+                conversation_id=conversation_id,
+                parent_message_id=parent_message_id,
+                session_id=session_id
+            )
+        
+        # ========== 3. 处理恢复场景 ==========
+        else:  # is_resuming
+            return await self._resume_execution(
+                thread_id=thread_id,
+                resume_data=resume_data
+            )
+    
+    async def _execute_new_message(
+        self,
+        content: str,
+        conversation_id: Optional[str],
+        parent_message_id: Optional[str],
+        session_id: Optional[str]
+    ) -> Dict[str, Any]:
+        """
+        执行新消息（内部方法）
         """
         # 确保对话存在
         if not conversation_id:
@@ -219,8 +266,8 @@ class ExecutionController:
         # 生成ID
         message_id = f"msg-{uuid4()}"
         thread_id = f"thd-{uuid4()}"
-
-        # 如果从Artifact store获取session
+        
+        # 获取或创建session
         if not session_id:
             from tools.implementations.artifact_ops import _artifact_store
             session_id = _artifact_store.current_session_id or _artifact_store.create_session()
@@ -228,7 +275,6 @@ class ExecutionController:
         # 创建初始状态
         parent_thread_id = None
         if parent_message_id:
-            # 获取父消息的thread_id
             parent_msg = self.conversation_manager.conversations.get(
                 conversation_id, {}
             ).get("messages", {}).get(parent_message_id)
@@ -239,18 +285,11 @@ class ExecutionController:
             task=content,
             session_id=session_id,
             thread_id=thread_id,
-            parent_thread_id=parent_thread_id
+            parent_thread_id=parent_thread_id,
+            message_id=message_id
         )
-        initial_state["user_message_id"] = message_id
-        
-        # 如果有父线程，尝试继承一些状态
-        if parent_thread_id and parent_thread_id in self.thread_states:
-            parent_state = self.thread_states[parent_thread_id]
-            # 继承artifacts
-            initial_state["task_plan_id"] = parent_state.get("task_plan_id")
-            initial_state["result_artifact_ids"] = parent_state.get("result_artifact_ids", []).copy()
-        
-        # 添加消息到对话树（先不加response）
+
+        # 添加消息到对话树
         self.conversation_manager.add_message(
             conv_id=conversation_id,
             message_id=message_id,
@@ -259,22 +298,96 @@ class ExecutionController:
             parent_id=parent_message_id
         )
         
+        # 执行Graph
+        config = {"configurable": {"thread_id": thread_id}}
+        
+        # 保存执行上下文（用于可能的恢复）
+        execution_context = {
+            "conversation_id": conversation_id,
+            "message_id": message_id,
+            "thread_id": thread_id,
+            "session_id": session_id
+        }
+        
+        return await self._execute_graph(
+            input_data=initial_state,
+            config=config,
+            execution_context=execution_context
+        )
+    
+    async def _resume_execution(
+        self,
+        thread_id: str,
+        resume_data: Dict
+    ) -> Dict[str, Any]:
+        """
+        恢复执行（内部方法）
+        """
+        # 检查中断信息
+        if thread_id not in self.interrupted_threads:
+            raise ValueError(f"No interrupted execution for thread {thread_id}")
+        
+        interrupt_info = self.interrupted_threads[thread_id]
+        config = {"configurable": {"thread_id": thread_id}}
+        
+        # 准备恢复命令
+        if resume_data.get("type") == "permission":
+            # 权限恢复：使用Command
+            from langgraph.types import Command
+            input_data = Command(resume=resume_data.get("approved", False))
+        else:
+            # 其他类型的恢复（扩展点）
+            input_data = resume_data.get("data", {})
+        
+        logger.info(f"Resuming thread {thread_id} with type: {resume_data.get('type')}")
+        
+        # 恢复上下文
+        execution_context = {
+            "conversation_id": interrupt_info["conversation_id"],
+            "message_id": interrupt_info["message_id"],
+            "thread_id": thread_id,
+            "session_id": interrupt_info.get("session_id")
+        }
+        
+        return await self._execute_graph(
+            input_data=input_data,
+            config=config,
+            execution_context=execution_context,
+            is_resume=True
+        )
+    
+    async def _execute_graph(
+        self,
+        input_data: Any,
+        config: Dict,
+        execution_context: Dict,
+        is_resume: bool = False
+    ) -> Dict[str, Any]:
+        """
+        核心Graph执行逻辑（共享）
+        
+        Args:
+            input_data: 输入数据（初始状态或Command）
+            config: LangGraph配置
+            execution_context: 执行上下文
+            is_resume: 是否是恢复执行
+            
+        Returns:
+            统一格式的执行结果
+        """
         try:
+            logger.info(f"{'Resuming' if is_resume else 'Starting'} graph execution for thread {execution_context['thread_id'][:8]}...")
+            
             # 执行Graph
-            config = {"configurable": {"thread_id": thread_id}}
+            result = await self.graph.ainvoke(input_data, config)
             
-            logger.info(f"Executing graph for message {message_id[:8]}...")
-            
-            # 执行可能会被interrupt中断
-            result = await self.graph.ainvoke(initial_state, config)
-            
-            # 检查是否被中断（通过检查返回的interrupt数据）
+            # ========== 处理中断 ==========
             if isinstance(result, dict) and result.get("__interrupt__"):
-                # 保存中断信息
                 interrupt_data = result.get("__interrupt__")
-                self.interrupted_threads[thread_id] = {
-                    "conversation_id": conversation_id,
-                    "message_id": message_id,
+                
+                # 保存中断信息
+                self.interrupted_threads[execution_context["thread_id"]] = {
+                    **execution_context,
                     "interrupt_data": interrupt_data,
                     "timestamp": datetime.now().isoformat()
                 }
@@ -284,210 +397,53 @@ class ExecutionController:
                 return {
                     "success": True,
                     "interrupted": True,
-                    "conversation_id": conversation_id,
-                    "message_id": message_id,
-                    "thread_id": thread_id,
-                    "interrupt_type": interrupt_data.get("type"),
-                    "interrupt_data": interrupt_data,
-                    "session_id": session_id
-                }
-            
-            # 正常完成
-            final_state = result
-            
-            # 保存线程状态（用于分支）
-            self.thread_states[thread_id] = final_state
-            
-            # 获取响应
-            response = final_state.get("graph_response", "")
-            
-            # 更新消息的响应
-            self.conversation_manager.update_response(
-                conversation_id, message_id, response
-            )
-            
-            return {
-                "success": True,
-                "interrupted": False,
-                "conversation_id": conversation_id,
-                "message_id": message_id,
-                "thread_id": thread_id,
-                "response": response,
-                "session_id": session_id,
-                "artifacts": {
-                    "task_plan_id": final_state.get("task_plan_id"),
-                    "result_ids": final_state.get("result_artifact_ids", [])
-                }
-            }
-            
-        except Exception as e:
-            logger.exception(f"Error processing message: {e}")
-            
-            # 更新错误响应
-            error_msg = f"Error: {str(e)}"
-            self.conversation_manager.update_response(
-                conversation_id, message_id, error_msg
-            )
-            
-            return {
-                "success": False,
-                "conversation_id": conversation_id,
-                "message_id": message_id,
-                "error": str(e)
-            }
-    
-    async def resume_with_permission(
-        self,
-        thread_id: str,
-        approved: bool,
-        reason: Optional[str] = None
-    ) -> Dict[str, Any]:
-        """
-        恢复被权限中断的执行
-        
-        Args:
-            thread_id: 线程ID
-            approved: 是否批准
-            reason: 原因说明（拒绝时使用）
-            
-        Returns:
-            执行结果
-        """
-        try:
-            # 检查是否有中断信息
-            if thread_id not in self.interrupted_threads:
-                raise ValueError(f"No interrupted execution for thread {thread_id}")
-            
-            interrupt_info = self.interrupted_threads[thread_id]
-            config = {"configurable": {"thread_id": thread_id}}
-            
-            # 使用Command恢复执行
-            logger.info(f"Resuming thread {thread_id} with permission: {approved}")
-            
-            # Resume时传递用户的决定
-            result = await self.graph.ainvoke(
-                Command(resume=approved),  # True表示批准，False表示拒绝
-                config=config
-            )
-            
-            # 检查是否又被中断
-            if isinstance(result, dict) and result.get("__interrupt__"):
-                interrupt_data = result.get("__interrupt__")
-                self.interrupted_threads[thread_id]["interrupt_data"] = interrupt_data
-                
-                return {
-                    "success": True,
-                    "interrupted": True,
-                    "thread_id": thread_id,
+                    **execution_context,
                     "interrupt_type": interrupt_data.get("type"),
                     "interrupt_data": interrupt_data
                 }
             
-            # 执行完成
+            # ========== 正常完成 ==========
             final_state = result
             
-            # 保存最终状态
-            self.thread_states[thread_id] = final_state
+            # 保存线程状态
+            self.thread_states[execution_context["thread_id"]] = final_state
             
-            # 清除中断信息
-            del self.interrupted_threads[thread_id]
+            # 清除中断信息（如果是恢复执行）
+            if is_resume and execution_context["thread_id"] in self.interrupted_threads:
+                del self.interrupted_threads[execution_context["thread_id"]]
             
-            # 更新对话响应
-            conv_id = interrupt_info["conversation_id"]
-            msg_id = interrupt_info["message_id"]
+            # 获取响应
             response = final_state.get("graph_response", "")
             
-            self.conversation_manager.update_response(conv_id, msg_id, response)
+            # 更新对话响应
+            self.conversation_manager.update_response(
+                execution_context["conversation_id"],
+                execution_context["message_id"],
+                response
+            )
             
             return {
                 "success": True,
                 "interrupted": False,
-                "thread_id": thread_id,
+                **execution_context,
                 "response": response,
-                "approved": approved,
-                "artifacts": {
-                    "task_plan_id": final_state.get("task_plan_id"),
-                    "result_ids": final_state.get("result_artifact_ids", [])
-                }
             }
             
         except Exception as e:
-            logger.exception(f"Error resuming execution: {e}")
+            logger.exception(f"Error in graph execution: {e}")
+            
+            # 更新错误响应
+            error_msg = f"Error: {str(e)}"
+            if execution_context.get("conversation_id") and execution_context.get("message_id"):
+                self.conversation_manager.update_response(
+                    execution_context["conversation_id"],
+                    execution_context["message_id"],
+                    error_msg
+                )
+            
             return {
                 "success": False,
-                "thread_id": thread_id,
+                **execution_context,
                 "error": str(e)
             }
     
-    def get_conversation_history(
-        self,
-        conversation_id: str,
-        branch_path: Optional[List[str]] = None
-    ) -> List[Dict[str, Any]]:
-        """
-        获取对话历史
-        
-        Args:
-            conversation_id: 对话ID
-            branch_path: 分支路径（消息ID列表）
-            
-        Returns:
-            对话历史列表
-        """
-        if branch_path:
-            # 指定路径
-            messages = []
-            for msg_id in branch_path:
-                msg = self.conversation_manager.conversations.get(
-                    conversation_id, {}
-                ).get("messages", {}).get(msg_id)
-                if msg:
-                    messages.append({
-                        "role": "user",
-                        "content": msg["content"],
-                        "message_id": msg["message_id"],
-                        "timestamp": msg["timestamp"]
-                    })
-                    if msg["graph_response"]:
-                        messages.append({
-                            "role": "assistant",
-                            "content": msg["graph_response"],
-                            "timestamp": msg["timestamp"]
-                        })
-            return messages
-        else:
-            # 活跃分支
-            path = self.conversation_manager.get_conversation_path(conversation_id)
-            messages = []
-            for msg in path:
-                messages.append({
-                    "role": "user",
-                    "content": msg["content"],
-                    "message_id": msg["message_id"],
-                    "timestamp": msg["timestamp"]
-                })
-                if msg["graph_response"]:
-                    messages.append({
-                        "role": "assistant",
-                        "content": msg["graph_response"],
-                        "timestamp": msg["timestamp"]
-                    })
-            return messages
-    
-    def list_conversations(self) -> List[Dict[str, Any]]:
-        """
-        列出所有对话
-        
-        Returns:
-            对话列表
-        """
-        conversations = []
-        for conv_id, conv in self.conversation_manager.conversations.items():
-            conversations.append({
-                "conversation_id": conv_id,
-                "created_at": conv["created_at"],
-                "updated_at": conv["updated_at"],
-                "message_count": len(conv["messages"]),
-                "branch_count": len(conv["branches"])
-            })
-        return conversations
