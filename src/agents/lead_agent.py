@@ -54,10 +54,6 @@ class LeadAgent(BaseAgent):
         
         super().__init__(config, toolkit)
         
-        # Lead特有的状态
-        self.current_task_plan_id = None
-        self.current_result_id = None
-        
         # 注册的子Agent列表
         self.sub_agents: Dict[str, SubAgent] = {}
     
@@ -300,55 +296,6 @@ Based on the existing artifacts:
         instruction += "\nPlease create a task_plan artifact with clear objectives and task breakdown."
         
         return await self.execute(instruction)
-    
-    async def handle_user_feedback(
-        self,
-        feedback: str,
-        context: Optional[Dict[str, Any]] = None
-    ) -> AgentResponse:
-        """
-        处理用户反馈并调整任务方向
-        
-        Args:
-            feedback: 用户反馈内容
-            context: 当前上下文（包含task_plan和result）
-            
-        Returns:
-            更新后的响应
-        """
-        enhanced_context = context or {}
-        enhanced_context["user_feedback"] = feedback
-        
-        instruction = f"""Based on the user feedback, please:
-1. Review and adjust the task plan if needed
-2. Identify what additional work is required
-3. Execute the necessary updates
-4. Provide a summary of changes made
-
-User Feedback: {feedback}"""
-        
-        return await self.execute(instruction, enhanced_context)
-    
-    def extract_routing_decision(self, tool_calls: List[Dict]) -> Optional[str]:
-        """
-        从工具调用中提取路由决策
-        
-        Args:
-            tool_calls: 工具调用历史
-            
-        Returns:
-            需要路由到的agent名称，None表示不需要路由
-        """
-        for call in tool_calls:
-            if call.get("tool") == "call_subagent":
-                result = call.get("result", {})
-                if result.get("success") and result.get("data"):
-                    # 检查是否是路由指令
-                    data = result["data"]
-                    if data.get("_is_routing_instruction"):
-                        return data.get("_route_to")
-        return None
-
 
 # 工厂函数
 def create_lead_agent(toolkit=None) -> LeadAgent:
