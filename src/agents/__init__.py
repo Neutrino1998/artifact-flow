@@ -1,56 +1,52 @@
 """
-Agents模块
-提供多智能体研究系统的Agent实现
+Core模块导出
+提供核心组件的便捷访问
 """
 
-# 导入基类
-from agents.base import (
-    BaseAgent,
-    AgentConfig,
-    AgentResponse,
-    create_agent_config
+# State相关
+from core.state import (
+    AgentState,
+    UserMessage,
+    ConversationTree,
+    NodeMemory,
+    create_initial_state,
+    merge_agent_response_to_state
 )
 
-# 导入具体Agent实现
-from agents.lead_agent import (
-    LeadAgent,
-    create_lead_agent
+# Graph构建器
+from core.graph import (
+    ExtendableGraph,
+    create_multi_agent_graph
 )
 
-from agents.search_agent import (
-    SearchAgent,
-    create_search_agent
+# 控制器
+from core.controller import (
+    ExecutionController,
+    ConversationManager
 )
 
-from agents.crawl_agent import (
-    CrawlAgent,
-    create_crawl_agent
+# Context管理
+from core.context_manager import (
+    ContextManager
 )
 
-# 版本信息
-__version__ = "0.1.0"
-
-# 公开接口
 __all__ = [
-    # 基类和数据结构
-    "BaseAgent",
-    "AgentConfig",
-    "AgentResponse",
-    "create_agent_config",
+    # State
+    "AgentState",
+    "UserMessage", 
+    "ConversationTree",
+    "NodeMemory",
+    "create_initial_state",
+    "merge_agent_response_to_state",
     
-    # Lead Agent
-    "LeadAgent",
-    "create_lead_agent",
+    # Graph
+    "ExtendableGraph",
+    "create_multi_agent_graph",
     
-    # Search Agent
-    "SearchAgent",
-    "create_search_agent",
+    # Controller
+    "ExecutionController",
+    "ConversationManager",
     
-    # Crawl Agent
-    "CrawlAgent",
-    "create_crawl_agent",
-    
-    # 便捷函数
-    "create_agent",
-    "list_available_agents",
+    # Context
+    "ContextManager"
 ]
