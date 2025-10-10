@@ -154,42 +154,6 @@ You have access to the web_search tool with these parameters:
         Search Agent自己负责整理信息，直接返回其输出
         """
         return content
-    
-    async def search_with_refinement(
-        self,
-        initial_query: str,
-        requirements: Optional[List[str]] = None,
-        max_iterations: int = 3
-    ) -> Dict[str, Any]:
-        """
-        执行带优化的搜索
-        
-        Args:
-            initial_query: 初始搜索查询
-            requirements: 搜索要求
-            max_iterations: 最大搜索迭代次数
-            
-        Returns:
-            搜索结果字典
-        """
-        context = {
-            "instruction": f"Search for information about: {initial_query}",
-            "requirements": requirements or []
-        }
-        
-        response = await self.execute(
-            f"Please search for: {initial_query}. Extract and summarize the key findings in the XML format.",
-            context
-        )
-        
-        return {
-            "success": True,
-            "findings": response.content,
-            "tool_calls": response.tool_calls,
-            "search_count": len([c for c in response.tool_calls 
-                                if c.get("tool") == "web_search"])
-        }
-
 
 # 工厂函数
 def create_search_agent(toolkit=None) -> SearchAgent:

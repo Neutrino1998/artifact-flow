@@ -180,6 +180,7 @@ Choose appropriate artifact IDs and types based on what the user requests:
 - A research task might need both "research_report" and "data_summary"
 - A coding task might need "main.py", "utils.py", and "requirements.txt"
 - Always use descriptive IDs that reflect the content
+- Results can be built incrementally - you don't need to complete everything in one go - create early, update often
 </artifact_management>"""
     
         # 动态添加可用的sub-agents
@@ -270,32 +271,6 @@ Based on the existing artifacts:
         Lead Agent的响应就是其原始内容，不需要额外格式化
         """
         return content
-    
-    async def create_task_plan(
-        self,
-        task_description: str,
-        requirements: Optional[List[str]] = None
-    ) -> AgentResponse:
-        """
-        创建任务计划
-        
-        Args:
-            task_description: 任务描述
-            requirements: 具体要求列表
-            
-        Returns:
-            包含task_plan的响应
-        """
-        instruction = f"Create a comprehensive task plan for: {task_description}"
-        
-        if requirements:
-            instruction += "\n\nSpecific Requirements:\n"
-            for req in requirements:
-                instruction += f"- {req}\n"
-        
-        instruction += "\nPlease create a task_plan artifact with clear objectives and task breakdown."
-        
-        return await self.execute(instruction)
 
 # 工厂函数
 def create_lead_agent(toolkit=None) -> LeadAgent:

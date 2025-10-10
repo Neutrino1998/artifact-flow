@@ -150,42 +150,6 @@ You have access to the web_fetch tool with these parameters:
         Crawl Agent自己负责清洗和整理，直接返回其输出
         """
         return content
-    
-    async def extract_from_urls(
-        self,
-        urls: List[str],
-        focus_areas: Optional[List[str]] = None
-    ) -> Dict[str, Any]:
-        """
-        从URL列表提取内容
-        
-        Args:
-            urls: 要抓取的URL列表
-            focus_areas: 关注的内容领域
-            
-        Returns:
-            提取结果字典
-        """
-        context = {
-            "urls": urls,
-            "focus_areas": focus_areas or []
-        }
-        
-        instruction = f"Please extract and clean content from the following {len(urls)} URL(s)."
-        if focus_areas:
-            instruction += f" Focus on: {', '.join(focus_areas)}"
-        instruction += " Return cleaned content in the XML format."
-        
-        response = await self.execute(instruction, context)
-        
-        return {
-            "success": True,
-            "extracted_content": response.content,
-            "tool_calls": response.tool_calls,
-            "pages_processed": len([c for c in response.tool_calls 
-                                   if c.get("tool") == "web_fetch"])
-        }
-
 
 # 工厂函数
 def create_crawl_agent(toolkit=None) -> CrawlAgent:
