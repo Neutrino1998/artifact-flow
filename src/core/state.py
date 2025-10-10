@@ -64,8 +64,8 @@ class AgentState(TypedDict):
     current_agent: str                     # 当前执行的agent
     
     # ========== 路由数据（按需存在） ==========
-    subagent_route: Optional[Dict]         # {"target": str, "instruction": str}
-    permission_pending: Optional[Dict]     # {"tool_name": str, "params": dict, "permission_level": str, "from_agent": str, "tool_result": ToolResult}
+    subagent_pending: Optional[Dict]         # {"target": str, "instruction": str, "subagent_result": ToolResult}
+    permission_pending: Optional[Dict]       # {"tool_name": str, "params": dict, "permission_level": str, "from_agent": str, "tool_result": ToolResult}
     
     # ========== Agent记忆 ==========
     agent_memories: Dict[str, NodeMemory]
@@ -128,7 +128,7 @@ def create_initial_state(
         "conversation_history": conversation_history,
         "phase": ExecutionPhase.LEAD_EXECUTING,
         "current_agent": "lead_agent",
-        "subagent_route": None,
+        "subagent_pending": None,
         "permission_pending": None,
         "agent_memories": {},
         "compression_level": compression_level,
@@ -225,16 +225,17 @@ def merge_agent_response_to_state(
                 "from_agent": agent_name,  # 记录是哪个agent需要权限
                 "tool_result": None  # 等待user_confirmation_node填充
             }
-            state["subagent_route"] = None  # 清理
+            state["subagent_pending"] = None  # 清理
             
             logger.info(f"{agent_name} requesting permission for '{response.routing['tool_name']}'")
             
         elif routing_type == "subagent":
             # 路由到subagent
             state["phase"] = ExecutionPhase.SUBAGENT_EXECUTING
-            state["subagent_route"] = {
+            state["subagent_pending"] = {
                 "target": response.routing["target"],
-                "instruction": response.routing["instruction"]
+                "instruction": response.routing["instruction"],
+                "subagent_result": None  # 等待subagent填充
             }
             state["permission_pending"] = None  # 清理
             
@@ -243,9 +244,26 @@ def merge_agent_response_to_state(
     else:
         # 没有路由
         if agent_name != "lead_agent":
-            # Subagent完成，返回lead_agent
+            # Subagent完成，封装结果为ToolResult
+            from tools.base import ToolResult
+            
+            tool_result = ToolResult(
+                success=response.success,
+                data=response.content,
+                metadata={
+                    "agent": agent_name,
+                    "tool_calls": response.tool_calls,
+                    "reasoning": response.reasoning_content
+                }
+            )
+            
+            # 保存到subagent_pending
+            if state.get("subagent_pending"):
+                state["subagent_pending"]["subagent_result"] = tool_result
+            
+            # 返回lead_agent
             state["phase"] = ExecutionPhase.LEAD_EXECUTING
-            state["subagent_route"] = None
+            state["subagent_pending"] = None  # 清理
             
             logger.info(f"{agent_name} completed, returning to lead_agent")
             
@@ -255,10 +273,8 @@ def merge_agent_response_to_state(
                 # 初次完成
                 state["phase"] = ExecutionPhase.COMPLETED
                 state["graph_response"] = response.content
-                
                 logger.info("Lead agent completed task")
             else:
                 # 从恢复后继续执行
                 state["phase"] = ExecutionPhase.LEAD_EXECUTING
-                
                 logger.info("Lead agent resumed execution")
