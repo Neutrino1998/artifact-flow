@@ -179,7 +179,7 @@ class ExtendableGraph:
                     
                     # 压缩处理（如果需要）
                     compression_level = state.get("compression_level", "normal")
-                    if ContextManager.should_compress(execute_kwargs["tool_interactions"]):
+                    if ContextManager.should_compress(execute_kwargs["tool_interactions"], level=compression_level):
                         execute_kwargs["tool_interactions"] = ContextManager.compress_messages(
                             execute_kwargs["tool_interactions"],
                             level=compression_level

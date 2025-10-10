@@ -187,9 +187,6 @@ def merge_agent_response_to_state(
     }
     
     # 更新metadata
-    if "metadata" not in memory:
-        memory["metadata"] = {}
-    
     memory["metadata"]["tool_rounds"] = response.metadata.get("tool_rounds", 0)
     memory["metadata"]["completed_at"] = datetime.now().isoformat()
     

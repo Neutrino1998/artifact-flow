@@ -1,9 +1,8 @@
 """
 执行控制器（重构版）
 核心改进：
-1. 简化对话管理
-2. 对话历史从ConversationManager获取
-3. 只为permission保存checkpoint
+1. ConversationManager负责格式化对话历史
+2. 复用ContextManager.compress_messages做智能裁剪
 """
 
 from typing import Dict, List, Optional, Any
@@ -20,8 +19,10 @@ logger = get_logger("Core")
 
 class ConversationManager:
     """
-    对话管理器（简化版）
-    负责维护用户的对话树
+    对话管理器
+    职责：
+    1. 维护用户的对话树
+    2. 格式化对话历史为可读文本
     """
     
     def __init__(self):
@@ -132,7 +133,7 @@ class ConversationManager:
             to_message_id: 目标消息ID（None则使用活跃分支）
             
         Returns:
-            消息路径列表
+            消息路径列表（UserMessage对象）
         """
         if conv_id not in self.conversations:
             return []
@@ -155,16 +156,123 @@ class ConversationManager:
                 break
         
         return path
+    
+    def format_conversation_history(
+        self,
+        conv_id: str,
+        to_message_id: Optional[str] = None,
+        compression_level: str = "normal"
+    ) -> str:
+        """
+        格式化对话历史为可读文本
+        
+        职责：
+        1. 获取对话路径
+        2. 转换为标准消息格式
+        3. 调用ContextManager压缩
+        4. 格式化为Markdown文本
+        
+        Args:
+            conv_id: 对话ID
+            to_message_id: 目标消息ID（None则使用活跃分支）
+            compression_level: 压缩级别
+            
+        Returns:
+            格式化的对话历史文本
+        """
+        # 1. 获取对话路径
+        conversation_path = self.get_conversation_path(conv_id, to_message_id)
+        
+        if not conversation_path:
+            return ""
+        
+        # 2. 转换为标准消息格式（用于压缩）
+        messages = []
+        for msg in conversation_path:
+            # 用户消息
+            messages.append({
+                "role": "user",
+                "content": msg["content"]
+            })
+            
+            # Assistant响应（如果有）
+            if msg.get("graph_response"):
+                messages.append({
+                    "role": "assistant",
+                    "content": msg["graph_response"]
+                })
+        
+        # 3. 使用ContextManager压缩
+        compressed_messages = ContextManager.compress_messages(
+            messages,
+            level=compression_level,
+            preserve_recent=5  # 保留最近5条交互
+        )
+        
+        logger.debug(
+            f"Conversation history: {len(messages)} messages "
+            f"-> {len(compressed_messages)} after compression"
+        )
+        
+        # 4. 格式化为Markdown文本
+        return self._format_messages_as_markdown(compressed_messages)
+    
+    def _format_messages_as_markdown(self, messages: List[Dict]) -> str:
+        """
+        将消息列表格式化为Markdown
+        
+        Args:
+            messages: 消息列表（已压缩）
+            
+        Returns:
+            Markdown格式的文本
+        """
+        lines = ["## Conversation History", ""]
+        
+        turn_number = 0
+        i = 0
+        
+        while i < len(messages):
+            msg = messages[i]
+            
+            # 系统消息（截断提示）
+            if msg.get("role") == "system":
+                lines.append(f"_{msg['content']}_")
+                lines.append("")
+                i += 1
+                continue
+            
+            # 用户+助手配对
+            if msg.get("role") == "user":
+                turn_number += 1
+                lines.append(f"### Turn {turn_number}")
+                lines.append(f"**User**: {msg['content']}")
+                
+                # 检查下一条是否是assistant响应
+                if i + 1 < len(messages) and messages[i + 1].get("role") == "assistant":
+                    assistant_msg = messages[i + 1]
+                    content = assistant_msg["content"]
+                    
+                    # 限制响应长度
+                    if len(content) > 500:
+                        content = content[:500] + "... _(truncated)_"
+                    
+                    lines.append(f"**Assistant**: {content}")
+                    i += 2  # 跳过assistant消息
+                else:
+                    i += 1
+                
+                lines.append("")  # 空行分隔
+            else:
+                i += 1
+        
+        return "\n".join(lines)
 
 
 class ExecutionController:
     """
-    执行控制器（简化版）
-    
-    核心改进：
-    - 对话历史从ConversationManager获取，通过state传入
-    - 每次新消息都是新thread（不复用checkpoint）
-    - 只为permission保存interrupted状态
+    执行控制器
+    使用ConversationManager格式化对话历史
     """
     
     def __init__(self, compiled_graph):
@@ -248,26 +356,21 @@ class ExecutionController:
         elif conversation_id not in self.conversation_manager.conversations:
             self.conversation_manager.start_conversation(conversation_id)
         
-        # 2. 获取对话历史
-        conversation_path = self.conversation_manager.get_conversation_path(
+        # 2. 格式化对话历史（使用ConversationManager的方法）
+        conversation_history = self.conversation_manager.format_conversation_history(
             conv_id=conversation_id,
-            to_message_id=parent_message_id  # 分支时获取到分支点的路径
-        )
-        
-        # 3. 格式化对话历史
-        conversation_history = ContextManager.format_conversation_history(
-            conversation_path,
+            to_message_id=parent_message_id,
             compression_level="normal"
         )
         
-        # 4. 生成新的message和thread ID
+        # 3. 生成ID
         message_id = f"msg-{uuid4().hex[:8]}"
-        thread_id = f"thd-{uuid4().hex[:8]}"  # 每次都是新thread
+        thread_id = f"thd-{uuid4().hex[:8]}"
         
-        # 5. 获取或创建artifact session
+        # 4. 获取session
         session_id = self._get_or_create_session(conversation_id)
         
-        # 6. 创建初始状态（包含对话历史）
+        # 5. 创建初始状态
         initial_state = create_initial_state(
             task=content,
             session_id=session_id,
@@ -278,9 +381,13 @@ class ExecutionController:
         
         logger.info(f"Processing new message in conversation {conversation_id[:8]}")
         if conversation_history:
-            logger.debug(f"With conversation history: {len(conversation_path)} messages")
+            # 计算实际的消息对数
+            path = self.conversation_manager.get_conversation_path(
+                conversation_id, parent_message_id
+            )
+            logger.debug(f"With conversation history: {len(path)} messages in path")
         
-        # 7. 添加消息到conversation
+        # 6. 添加消息到conversation
         self.conversation_manager.add_message(
             conv_id=conversation_id,
             message_id=message_id,
@@ -289,13 +396,13 @@ class ExecutionController:
             parent_id=parent_message_id
         )
         
-        # 8. 执行graph
+        # 7. 执行graph
         config = {"configurable": {"thread_id": thread_id}}
         
         try:
             result = await self.graph.ainvoke(initial_state, config)
             
-            # 9. 处理结果
+            # 8. 处理结果
             if result.get("__interrupt__"):
                 # 权限中断
                 interrupt_data = result["__interrupt__"]
