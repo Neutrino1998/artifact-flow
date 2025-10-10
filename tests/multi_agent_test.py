@@ -7,9 +7,9 @@ import asyncio
 from typing import Dict, Any, Optional
 
 # Agent相关
-from agents.lead_agent import LeadAgent, SubAgent
-from agents.search_agent import SearchAgent
-from agents.crawl_agent import CrawlAgent
+from agents.lead_agent import LeadAgent, SubAgent, create_lead_agent
+from agents.search_agent import SearchAgent, create_search_agent
+from agents.crawl_agent import CrawlAgent, create_crawl_agent
 
 # 工具相关
 from tools.registry import ToolRegistry, AgentToolkit
@@ -87,20 +87,8 @@ class MultiAgentSystem:
             ]
         )
         
-        # 创建带debug的配置
-        from agents.base import AgentConfig
-        config = AgentConfig(
-            name="lead_agent",
-            description="Task coordinator and information integrator",
-            model="qwen3-30b-thinking",
-            temperature=0.7,
-            max_tool_rounds=5,
-            streaming=True,
-            debug=self.debug  # 使用系统的debug设置
-        )
-        
         # 创建Lead Agent
-        lead = LeadAgent(config=config, toolkit=toolkit)
+        lead = create_lead_agent(toolkit)
         return lead
     
     def _setup_search_agent(self) -> SearchAgent:
@@ -111,20 +99,8 @@ class MultiAgentSystem:
             tool_names=["web_search"]
         )
         
-        # 创建带debug的配置
-        from agents.base import AgentConfig
-        config = AgentConfig(
-            name="search_agent",
-            description="Web search and information retrieval specialist",
-            model="qwen3-30b-instruct",
-            temperature=0.5,
-            max_tool_rounds=3,
-            streaming=True,
-            debug=self.debug  # 使用系统的debug设置
-        )
-        
         # 创建Search Agent
-        search = SearchAgent(config=config, toolkit=toolkit)
+        search = create_search_agent(toolkit)
         return search
     
     def _setup_crawl_agent(self) -> CrawlAgent:
@@ -135,20 +111,8 @@ class MultiAgentSystem:
             tool_names=["web_fetch"]
         )
         
-        # 创建带debug的配置
-        from agents.base import AgentConfig
-        config = AgentConfig(
-            name="crawl_agent",
-            description="Web content extraction and cleaning specialist",
-            model="qwen3-30b-instruct",
-            temperature=0.3,
-            max_tool_rounds=2,
-            streaming=True,
-            debug=self.debug  # 使用系统的debug设置
-        )
-        
         # 创建Crawl Agent
-        crawl = CrawlAgent(config=config, toolkit=toolkit)
+        crawl = create_crawl_agent(toolkit)
         return crawl
     
     def _register_subagents(self):
@@ -169,9 +133,8 @@ class MultiAgentSystem:
             name="crawl_agent",
             description="Extracts detailed content from specific web pages. Requires explicit URL lists in instructions.",
             capabilities=[
-                "Deep content extraction from URLs",
+                "Deep content scrapping from URLs",
                 "Content cleaning and filtering",
-                "Anti-crawling detection",
                 "⚠️ IMPORTANT: Instructions must include specific URLs (1~3 urls) to crawl"
             ]
         ))

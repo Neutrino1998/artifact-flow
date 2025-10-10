@@ -50,7 +50,6 @@ class AgentConfig:
     temperature: float = 0.7
     max_tool_rounds: int = 3  # 最大工具调用轮数
     streaming: bool = False  # 是否默认流式输出
-    debug: bool = False  # 是否开启调试模式
     
     llm_max_retries: int = 3  # LLM调用最大重试次数
     llm_retry_delay: float = 1.0  # 初始重试延迟（秒）
@@ -138,7 +137,7 @@ class BaseAgent(ABC):
         context = user_context or {}
         
         # 记录debug信息
-        if context.get("thread_id") and self.config.debug:
+        if context.get("thread_id"):
             logger.debug(f"{self.config.name} executing in thread {context['thread_id'][:8]}")
         
         try:
@@ -367,8 +366,7 @@ class BaseAgent(ABC):
                         "content": "⚠️ You have reached the maximum tool call limit. Please summarize your findings and provide the final response."
                     })
                 
-                if self.config.debug:
-                    logger.debug(f"[{self.config.name} Round {round_num + 1}] Messages:\n{self._format_messages_for_debug(messages)}")
+                logger.debug(f"[{self.config.name} Round {round_num + 1}] Messages:\n{self._format_messages_for_debug(messages)}")
                 
                 # ========== LLM调用 ========== 
                 response_content = ""
@@ -447,13 +445,12 @@ class BaseAgent(ABC):
 
                     return # LLM调用失败是致命的，中断执行
 
-                if self.config.debug:
-                    if reasoning_content:
-                        logger.debug(f"[{self.config.name} Round {round_num + 1}] Reasoning:\n{reasoning_content}")
-                    input_tokens = token_usage.get('input_tokens', 0)
-                    output_tokens = token_usage.get('output_tokens', 0)
-                    logger.debug(f"[{self.config.name} Round {round_num + 1}] LLM Response (input: {input_tokens}, output: {output_tokens}):\n{response_content}")
-                    logger.debug(f"[{self.config.name} Round {round_num + 1}] LLM Raw Response (input: {input_tokens}, output: {output_tokens}):\n{repr(response_content)}")
+                if reasoning_content:
+                    logger.debug(f"[{self.config.name} Round {round_num + 1}] Reasoning:\n{reasoning_content}")
+                input_tokens = token_usage.get('input_tokens', 0)
+                output_tokens = token_usage.get('output_tokens', 0)
+                logger.debug(f"[{self.config.name} Round {round_num + 1}] LLM Response (input: {input_tokens}, output: {output_tokens}):\n{response_content}")
+                logger.debug(f"[{self.config.name} Round {round_num + 1}] LLM Raw Response (input: {input_tokens}, output: {output_tokens}):\n{repr(response_content)}")
                 
                 messages.append({"role": "assistant", "content": response_content})
                 new_tool_interactions.append({"role": "assistant", "content": response_content})
