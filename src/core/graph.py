@@ -157,38 +157,60 @@ class ExtendableGraph:
                 if agent_name == "lead_agent":
                     instruction = state["current_task"]
                 else:
-                    # Subagent从subagent_route获取instruction
-                    instruction = state.get("subagent_route", {}).get("instruction", "")
+                    # Subagent从subagent_pending获取instruction
+                    instruction = state.get("subagent_pending", {}).get("instruction", "")
                 
                 execute_kwargs = {
                     "instruction": instruction,
                     "context": routing_context,
                 }
                 
-                # ========== 检查是否从权限恢复 ==========
+                # ========== 检查是否从中断恢复 ==========
                 is_resuming = False
-                pending = state.get("permission_pending")
                 
-                if pending and pending.get("from_agent") == agent_name and pending.get("tool_result"):
-                    # 从权限中断恢复
-                    is_resuming = True
-                    logger.info(f"{agent_name} resuming after permission")
-                    
-                    # 添加历史交互
-                    execute_kwargs["tool_interactions"] = memory.get("tool_interactions", [])
-                    
-                    # 压缩处理（如果需要）
-                    compression_level = state.get("compression_level", "normal")
-                    if ContextManager.should_compress(execute_kwargs["tool_interactions"], level=compression_level):
-                        execute_kwargs["tool_interactions"] = ContextManager.compress_messages(
-                            execute_kwargs["tool_interactions"],
-                            level=compression_level
-                        )
-                    
-                    # 添加待处理的工具结果
-                    tool_name = pending["tool_name"]
-                    tool_result = pending["tool_result"]
-                    execute_kwargs["pending_tool_result"] = (tool_name, tool_result)
+                # 1. 检查permission恢复
+                if pending := state.get("permission_pending"):
+                    if pending.get("from_agent") == agent_name and pending.get("tool_result"):
+                        is_resuming = True
+                        logger.info(f"{agent_name} resuming after permission")
+                        
+                        # 添加历史交互
+                        execute_kwargs["tool_interactions"] = memory.get("tool_interactions", [])
+                        
+                        # 压缩处理
+                        compression_level = state.get("compression_level", "normal")
+                        if ContextManager.should_compress(execute_kwargs["tool_interactions"], level=compression_level):
+                            execute_kwargs["tool_interactions"] = ContextManager.compress_messages(
+                                execute_kwargs["tool_interactions"],
+                                level=compression_level
+                            )
+                        
+                        # 添加待处理的工具结果
+                        tool_name = pending["tool_name"]
+                        tool_result = pending["tool_result"]
+                        execute_kwargs["pending_tool_result"] = (tool_name, tool_result)
+                
+                # 2. 检查subagent恢复
+                if pending := state.get("subagent_pending"):
+                    if pending.get("from_agent") == "lead_agent" and pending.get("subagent_result"):
+                        is_resuming = True
+                        logger.info(f"{agent_name} resuming after subagent {pending['target']}")
+                        
+                        # 添加历史交互
+                        execute_kwargs["tool_interactions"] = memory.get("tool_interactions", [])
+                        
+                        # 压缩处理
+                        compression_level = state.get("compression_level", "normal")
+                        if ContextManager.should_compress(execute_kwargs["tool_interactions"], level=compression_level):
+                            execute_kwargs["tool_interactions"] = ContextManager.compress_messages(
+                                execute_kwargs["tool_interactions"],
+                                level=compression_level
+                            )
+                        
+                        # 添加待处理的subagent结果（封装为工具调用结果）
+                        tool_name = f"call_{pending['target']}"  # call_search_agent
+                        tool_result = pending["subagent_result"]
+                        execute_kwargs["pending_tool_result"] = (tool_name, tool_result)
                 
                 # ========== 执行Agent ==========
                 response = await agent.execute(**execute_kwargs)
@@ -244,7 +266,7 @@ class ExtendableGraph:
             
             # 2. Subagent执行
             elif phase == ExecutionPhase.SUBAGENT_EXECUTING:
-                target = state["subagent_route"]["target"]
+                target = state["subagent_pending"]["target"]
                 return target
             
             # 3. Lead执行
@@ -291,16 +313,37 @@ class ExtendableGraph:
         checkpointer: Optional[Any] = None,
         interrupt_before: Optional[list] = None
     ) -> Any:
-        """
-        编译Graph
+        """编译Graph"""
         
-        Args:
-            checkpointer: 检查点管理器
-            interrupt_before: 中断点列表
+        # 1. 为user_confirmation添加出边 👈 新增
+        def route_after_confirmation(state: AgentState) -> str:
+            """从权限确认返回原agent"""
+            phase = state["phase"]
             
-        Returns:
-            编译后的Graph
-        """
+            if phase == ExecutionPhase.LEAD_EXECUTING:
+                return "lead_agent"
+            elif phase == ExecutionPhase.SUBAGENT_EXECUTING:
+                # 读取from_agent，返回原agent
+                pending = state.get("permission_pending")
+                if pending:
+                    return pending["from_agent"]
+                return "lead_agent"
+            else:
+                return END
+        
+        # 构建route_map（包含所有agents）
+        route_map = {"lead_agent": "lead_agent", END: END}
+        for agent_name in self.agents.keys():
+            route_map[agent_name] = agent_name
+        
+        # 添加条件边
+        self.workflow.add_conditional_edges(
+            "user_confirmation",
+            route_after_confirmation,
+            route_map
+        )
+        
+        # 2. 编译原有逻辑
         if checkpointer is None:
             checkpointer = MemorySaver()
         
