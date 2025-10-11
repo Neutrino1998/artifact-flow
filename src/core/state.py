@@ -155,16 +155,20 @@ def merge_agent_response_to_state(
         state: 当前状态
         agent_name: Agent名称
         response: AgentResponse对象
-        is_resuming: 是否从中断恢复
+        is_resuming: 是否已从中断恢复
     """
     
     # ========== 1. 更新当前agent ==========
     state["current_agent"] = agent_name
     
     # ========== 2. 清理恢复状态 ==========
-    if is_resuming and state.get("permission_pending"):
-        # 恢复执行后清理permission_pending
-        state["permission_pending"] = None
+    if is_resuming:
+        if state.get("permission_pending"):
+            state["permission_pending"] = None
+            logger.debug(f"{agent_name} resumed from permission, clearing pending state")
+        if agent_name == "lead_agent" and state.get("subagent_pending"):
+            state["subagent_pending"] = None
+            logger.debug(f"{agent_name} resumed from subagent, clearing pending state")
     
     # ========== 3. 更新agent记忆 ==========
     memory = state["agent_memories"].get(agent_name, {
@@ -225,8 +229,6 @@ def merge_agent_response_to_state(
                 "from_agent": agent_name,  # 记录是哪个agent需要权限
                 "tool_result": None  # 等待user_confirmation_node填充
             }
-            state["subagent_pending"] = None  # 清理
-            
             logger.info(f"{agent_name} requesting permission for '{response.routing['tool_name']}'")
             
         elif routing_type == "subagent":
@@ -237,8 +239,6 @@ def merge_agent_response_to_state(
                 "instruction": response.routing["instruction"],
                 "subagent_result": None  # 等待subagent填充
             }
-            state["permission_pending"] = None  # 清理
-            
             logger.info(f"{agent_name} routing to {response.routing['target']}")
     
     else:
@@ -263,18 +263,10 @@ def merge_agent_response_to_state(
             
             # 返回lead_agent
             state["phase"] = ExecutionPhase.LEAD_EXECUTING
-            state["subagent_pending"] = None  # 清理
-            
             logger.info(f"{agent_name} completed, returning to lead_agent")
             
         else:
-            # Lead Agent完成
-            if not is_resuming:
-                # 初次完成
-                state["phase"] = ExecutionPhase.COMPLETED
-                state["graph_response"] = response.content
-                logger.info("Lead agent completed task")
-            else:
-                # 从恢复后继续执行
-                state["phase"] = ExecutionPhase.LEAD_EXECUTING
-                logger.info("Lead agent resumed execution")
+            # Lead agent完成 → 任务结束
+            state["phase"] = ExecutionPhase.COMPLETED
+            state["graph_response"] = response.content
+            logger.info("Lead agent completed task")
