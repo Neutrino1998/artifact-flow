@@ -5,14 +5,14 @@ Artifact操作工具
 
 from typing import Dict, Any, Optional, List, Tuple
 from datetime import datetime
-import uuid 
+from uuid import uuid4
 import difflib
 import re
 from dataclasses import dataclass, field
 from tools.base import BaseTool, ToolResult, ToolParameter, ToolPermission
 from utils.logger import get_logger
 
-logger = get_logger("Tools")
+logger = get_logger("ArtifactFlow")
 
 
 @dataclass
@@ -428,7 +428,7 @@ class ArtifactStore:
     def create_session(self, session_id: Optional[str] = None) -> str:
         """创建新session并设为当前session"""
         if session_id is None:
-            session_id = f"session_{uuid.uuid4().hex[:8]}"
+            session_id = f"sess-{uuid4().hex}"
         
         self.sessions[session_id] = ArtifactSession(session_id=session_id)
         self.current_session_id = session_id
