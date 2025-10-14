@@ -25,7 +25,7 @@ from tools.implementations.web_fetch import WebFetchTool
 from utils.logger import get_logger
 from utils.logger import set_global_debug
 
-logger = get_logger("Agents")
+logger = get_logger("ArtifactFlow")
 # 一行代码启用所有logger的debug模式
 set_global_debug(True)
 

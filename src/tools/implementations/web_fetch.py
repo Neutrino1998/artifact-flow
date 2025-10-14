@@ -21,10 +21,10 @@ try:
     CRAWL4AI_AVAILABLE = True
 except ImportError:
     CRAWL4AI_AVAILABLE = False
-    logger = get_logger("Tools")
+    logger = get_logger("ArtifactFlow")
     logger.warning("crawl4ai not installed. Install with: pip install crawl4ai")
 
-logger = get_logger("Tools")
+logger = get_logger("ArtifactFlow")
 
 
 class WebFetchTool(BaseTool):

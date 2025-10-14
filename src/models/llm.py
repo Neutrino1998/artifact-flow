@@ -30,7 +30,7 @@ from utils.logger import get_logger
 # 加载环境变量
 load_dotenv()
 
-logger = get_logger("Models")
+logger = get_logger("ArtifactFlow")
 
 
 # 预定义模型配置

@@ -7,7 +7,7 @@ from typing import List, Dict, Any, Optional
 from tools.base import BaseTool, ToolResult, ToolParameter, ToolPermission
 from utils.logger import get_logger
 
-logger = get_logger("Tools")
+logger = get_logger("ArtifactFlow")
 
 
 class CallSubagentTool(BaseTool):
