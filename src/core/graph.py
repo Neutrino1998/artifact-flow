@@ -1,5 +1,5 @@
 """
-可扩展的Graph构建器（重构版）
+可扩展的Graph构建器
 核心改进：
 1. 简化agent_node逻辑
 2. 简化route_func逻辑（基于phase）
@@ -17,7 +17,7 @@ from agents.base import BaseAgent, AgentResponse
 from tools.base import ToolResult
 from utils.logger import get_logger
 
-logger = get_logger("Core")
+logger = get_logger("ArtifactFlow")
 
 
 class ExtendableGraph:
@@ -130,11 +130,11 @@ class ExtendableGraph:
         # 添加路由规则
         self._add_routing_rules(agent_name)
         
-        logger.info(f"✅ Registered agent: {agent_name}")
+        logger.info(f"Registered agent: {agent_name}")
     
     def _create_agent_node(self, agent_name: str) -> Callable:
         """
-        为Agent创建节点函数（简化版）
+        为Agent创建节点函数
         
         Args:
             agent_name: Agent名称
@@ -151,69 +151,49 @@ class ExtendableGraph:
             
             try:
                 # ========== 准备执行参数 ==========
-                routing_context = ContextManager.prepare_routing_context(agent_name, state)
-                
                 # 确定instruction
                 if agent_name == "lead_agent":
                     instruction = state["current_task"]
                 else:
-                    # Subagent从subagent_pending获取instruction
+                    # Subagent从subagent_pending获取lead agent instruction
                     instruction = state.get("subagent_pending", {}).get("instruction", "")
                 
-                execute_kwargs = {
-                    "instruction": instruction,
-                    "context": routing_context,
-                }
-                
-                # ========== 检查是否从中断恢复 ==========
+                # 检查是否从中断恢复
+                tool_interactions = None
+                pending_tool_result = None
                 is_resuming = False
                 
                 # 1. 检查permission恢复
                 if pending := state.get("permission_pending"):
                     if pending.get("from_agent") == agent_name and pending.get("tool_result"):
                         is_resuming = True
+                        tool_interactions = memory.get("tool_interactions", [])
+                        pending_tool_result = (pending["tool_name"], pending["tool_result"])
                         logger.info(f"{agent_name} resuming after permission")
-                        
-                        # 添加历史交互
-                        execute_kwargs["tool_interactions"] = memory.get("tool_interactions", [])
-                        
-                        # 压缩处理
-                        compression_level = state.get("compression_level", "normal")
-                        if ContextManager.should_compress(execute_kwargs["tool_interactions"], level=compression_level):
-                            execute_kwargs["tool_interactions"] = ContextManager.compress_messages(
-                                execute_kwargs["tool_interactions"],
-                                level=compression_level
-                            )
-                        
-                        # 添加待处理的工具结果
-                        tool_name = pending["tool_name"]
-                        tool_result = pending["tool_result"]
-                        execute_kwargs["pending_tool_result"] = (tool_name, tool_result)
                 
                 # 2. 检查subagent恢复
-                if pending := state.get("subagent_pending"):
-                    if pending.get("from_agent") == "lead_agent" and pending.get("subagent_result"):
+                elif pending := state.get("subagent_pending"):
+                    if agent_name == "lead_agent" and pending.get("subagent_result"):
                         is_resuming = True
-                        logger.info(f"{agent_name} resuming after subagent {pending['target']}")
-                        
-                        # 添加历史交互
-                        execute_kwargs["tool_interactions"] = memory.get("tool_interactions", [])
-                        
-                        # 压缩处理
-                        compression_level = state.get("compression_level", "normal")
-                        if ContextManager.should_compress(execute_kwargs["tool_interactions"], level=compression_level):
-                            execute_kwargs["tool_interactions"] = ContextManager.compress_messages(
-                                execute_kwargs["tool_interactions"],
-                                level=compression_level
-                            )
-                        
-                        # 添加待处理的subagent结果（封装为工具调用结果）
-                        tool_name = f"call_{pending['target']}"  # call_search_agent
-                        tool_result = pending["subagent_result"]
-                        execute_kwargs["pending_tool_result"] = (tool_name, tool_result)
+                        tool_interactions = memory.get("tool_interactions", [])
+                        tool_name = f"call_{pending['target']}"
+                        pending_tool_result = (tool_name, pending["subagent_result"])
+                        logger.info(f"{agent_name} resuming after {tool_name}")
+                
+                # ========== 构建messages ==========
+                messages = ContextManager.build_agent_messages(
+                    agent=agent,
+                    state=state,
+                    instruction=instruction,
+                    tool_interactions=tool_interactions,
+                    pending_tool_result=pending_tool_result
+                )
                 
                 # ========== 执行Agent ==========
-                response = await agent.execute(**execute_kwargs)
+                response = await agent.execute(
+                    messages=messages,
+                    is_resuming=is_resuming
+                )
                 
                 # ========== 更新状态 ==========
                 merge_agent_response_to_state(
@@ -226,7 +206,6 @@ class ExtendableGraph:
             except Exception as e:
                 logger.exception(f"Error in {agent_name}: {e}")
                 
-                # 发生异常，设置为完成状态
                 error_response = AgentResponse(
                     success=False,
                     content=f"Error in {agent_name}: {str(e)}",
