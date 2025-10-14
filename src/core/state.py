@@ -1,5 +1,5 @@
 """
-Graph状态定义（重构版）
+Graph状态定义
 核心改进：
 1. 引入ExecutionPhase明确执行阶段
 2. 简化状态字段，移除混乱的routing_info/pending_result
@@ -11,7 +11,7 @@ from enum import Enum
 from datetime import datetime
 from utils.logger import get_logger
 
-logger = get_logger("Core")
+logger = get_logger("ArtifactFlow")
 
 
 class ExecutionPhase(str, Enum):
@@ -57,7 +57,7 @@ class AgentState(TypedDict):
     thread_id: str                         # LangGraph线程ID
     
     # ========== 对话上下文 ==========
-    conversation_history: Optional[str]    # 格式化的对话历史（从ConversationManager获取）
+    conversation_history: Optional[List[Dict]]    # 格式化的对话历史（从ConversationManager获取）
     
     # ========== 执行状态 ==========
     phase: ExecutionPhase                  # 当前执行阶段
@@ -104,7 +104,7 @@ def create_initial_state(
     session_id: str,
     thread_id: str,
     message_id: str,
-    conversation_history: Optional[str] = None,
+    conversation_history: Optional[List[Dict]] = None,
     compression_level: str = "normal"
 ) -> AgentState:
     """
