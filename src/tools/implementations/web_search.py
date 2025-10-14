@@ -18,7 +18,7 @@ from utils.retry import api_retry
 # 加载环境变量
 load_dotenv()
 
-logger = get_logger("Tools")
+logger = get_logger("ArtifactFlow")
 
 # 博查AI配置
 BOCHA_API_KEY = os.getenv("BOCHA_API_KEY")
@@ -46,7 +46,10 @@ class WebSearchTool(BaseTool):
             ToolParameter(
                 name="query",
                 type="string",
-                description="Search query string",
+                description=(
+                    "Search query using natural language or keywords. "
+                    "Note: Does not support search operators like 'site:', 'AND', 'OR', quotes, or minus signs."
+                ),
                 required=True
             ),
             ToolParameter(
