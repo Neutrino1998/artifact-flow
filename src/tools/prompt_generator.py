@@ -25,9 +25,10 @@ class ToolPromptGenerator:
             工具使用说明文本
         """
         if not tools:
-            return "No tools available."
+            return "<tool_instructions>\nNo tools available.\n</tool_instructions>"
         
-        instruction = """You have access to the following tools. To use a tool, format your request in XML:
+        instruction = """<tool_instructions>
+You have access to the following tools. To use a tool, format your request in XML:
 
 <tool_call>
   <name>tool_name</name>
@@ -51,7 +52,7 @@ Important guidelines:
 3. Use proper XML formatting with closed tags
 4. You can make multiple tool calls in sequence
 5. Wait for tool results before proceeding with analysis
-"""
+</tool_instructions>"""
         
         return instruction
     
@@ -212,51 +213,6 @@ After receiving tool results, analyze them and continue with your task."""
         """
         indent_str = " " * spaces
         return "\n".join(indent_str + line for line in text.split("\n"))
-    
-    @staticmethod
-    def generate_agent_system_prompt(
-        agent_name: str,
-        agent_role: str,
-        tools: List[BaseTool],
-        additional_instructions: Optional[str] = None
-    ) -> str:
-        """
-        生成Agent的完整系统提示词
-        
-        Args:
-            agent_name: Agent名称
-            agent_role: Agent角色描述
-            tools: 可用工具列表
-            additional_instructions: 额外指令
-            
-        Returns:
-            完整的系统提示词
-        """
-        prompt = f"""You are {agent_name}, {agent_role}
-
-{ToolPromptGenerator.generate_tool_instruction(tools)}
-
-{ToolPromptGenerator.generate_tool_response_format()}
-
-Your workflow:
-1. Analyze the task requirements
-2. Determine which tools to use
-3. Call tools with proper parameters
-4. Analyze tool results
-5. Synthesize information to complete the task
-
-Remember:
-- Use tools when they can help accomplish the task
-- Be precise with tool parameters
-- Handle tool errors gracefully
-- Provide clear and structured responses
-"""
-        
-        if additional_instructions:
-            prompt += f"\nAdditional Instructions:\n{additional_instructions}"
-        
-        return prompt
-
 
 # 便捷函数
 def generate_tool_prompt(tools: List[BaseTool]) -> str:
