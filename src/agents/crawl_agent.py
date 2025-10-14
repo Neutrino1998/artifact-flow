@@ -8,7 +8,7 @@ from datetime import datetime
 from agents.base import BaseAgent, AgentConfig
 from utils.logger import get_logger
 
-logger = get_logger("Agents")
+logger = get_logger("ArtifactFlow")
 
 
 class CrawlAgent(BaseAgent):
@@ -128,18 +128,10 @@ Return extracted content in this simple XML structure:
 
 - If content seems invalid (anti-crawling, paywall, error page), mention it in content field
 - Focus on main content, skip navigation/ads/footers
-- Keep content concise but informative
+- Keep content comprehensive andclose to original text
 - Don't force extraction from clearly invalid pages
 </important_notes>
-
-<tool_usage>
-## Tool Usage
-
-You have access to the web_fetch tool with these parameters:
-- urls: Single URL or list of URLs (required)
-- max_content_length: Maximum content per page (default 5000)
-- max_concurrent: Concurrent fetches (default 3, max 5)
-</tool_usage>"""
+"""
     
         return prompt
     

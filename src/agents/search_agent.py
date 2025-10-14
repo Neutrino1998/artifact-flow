@@ -9,7 +9,7 @@ from agents.base import BaseAgent, AgentConfig
 from click import prompt
 from utils.logger import get_logger
 
-logger = get_logger("Agents")
+logger = get_logger("ArtifactFlow")
 
 
 class SearchAgent(BaseAgent):
@@ -132,18 +132,11 @@ Return your relevant findings in this simple XML structure:
 - Use 2-6 words for optimal search queries
 - Start broad, then narrow down
 - Maximum 3 search iterations (tool rounds)
-- Focus on quality over quantity
-- Extract and summarize key information from search results
+- Quality over quantity: select only credible sources
+- Return comprehensive content close to original text
+- Default to English sources for technical/academic content; prioritize native language sources only when topic is region-specific
 </search_guidelines>
-
-<tool_usage>
-## Tool Usage
-
-You have access to the web_search tool with these parameters:
-- query: Your search terms (required)
-- freshness: Time filter - "oneDay", "oneWeek", "oneMonth", "oneYear", "noLimit" (default)
-- count: Number of results (1-50, default 10)
-</tool_usage>"""
+"""
     
         return prompt
     

@@ -8,7 +8,7 @@ from datetime import datetime
 from agents.base import BaseAgent, AgentConfig, AgentResponse
 from utils.logger import get_logger
 
-logger = get_logger("Agents")
+logger = get_logger("ArtifactFlow")
 
 
 class SubAgent:
@@ -95,6 +95,24 @@ You are the orchestra conductor. Your core responsibilities:
 4. **Quality Control**: Ensure quality and completeness
 </agent_role>
 
+<execution_flow>
+## Execution Flow
+
+1. **Analyze Request** → Determine complexity
+2. **Plan Tasks** → Create task_plan if needed
+3. **Execute** → Call sub-agents or work directly
+4. **Integrate** → Update result artifact with findings
+5. **Iterate** → Refine based on progress and feedback
+
+## Important Guidelines
+
+- Keep responses focused and actionable
+- Update task status after each sub-agent call
+- Consolidate information incrementally in result artifact
+- Be transparent about progress
+- Know when to stop: avoid over-processing
+</execution_flow>
+
 <task_planning_strategy>
 ## Task Planning Strategy
 
@@ -124,7 +142,7 @@ Based on request complexity, choose your approach:
 You manage two types of artifacts:
 
 ### Task Plan Artifact (ID: "task_plan")
-⚠️ IMPORTANT: Always use the exact ID "task_plan" for the task plan artifact.
+IMPORTANT: Always use the exact ID "task_plan" for the task plan artifact.
 This is a SHARED WORKSPACE that all team members can access - use it as both a todo list AND a working notebook.
 <task_plan_example>
 # Task: [Title]
@@ -199,32 +217,10 @@ Choose appropriate artifact IDs and types based on what the user requests:
             
             prompt += """When calling sub-agents:
 1. Provide clear, specific instructions
-2. Include relevant context from task_plan
-3. Wait for their results before proceeding
-4. Update task_plan based on their findings
+2. Update task_plan/result artifacts based on their findings
 </available_subagents>"""
         else:
             prompt += "\n\n<note>No sub-agents are currently registered. Work independently.</note>\n"
-        
-        prompt += """
-
-<execution_flow>
-## Execution Flow
-
-1. **Analyze Request** → Determine complexity
-2. **Plan Tasks** → Create task_plan if needed
-3. **Execute** → Call sub-agents or work directly
-4. **Integrate** → Update result artifact with findings
-5. **Iterate** → Refine based on progress and feedback
-
-## Important Guidelines
-
-- Keep responses focused and actionable
-- Update task status after each sub-agent call
-- Consolidate information incrementally in result artifact
-- Be transparent about progress
-- Know when to stop: avoid over-processing
-</execution_flow>"""
     
         # 添加当前上下文
         if context:
