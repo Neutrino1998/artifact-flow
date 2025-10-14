@@ -17,7 +17,7 @@ from tools.prompt_generator import ToolPromptGenerator, format_result
 from tools.registry import AgentToolkit
 from tools.base import ToolResult, ToolPermission
 
-logger = get_logger("Agents")
+logger = get_logger("ArtifactFlow")
 
 
 class StreamEventType(Enum):
@@ -125,46 +125,29 @@ class BaseAgent(ABC):
             formatted_lines.append("")  # 空行分隔
         
         return "\n".join(formatted_lines)
-    
-    async def _prepare_context_with_task_plan(self, user_context: Optional[Dict]) -> Dict:
+
+    def build_complete_system_prompt(self, context: Optional[Dict[str, Any]] = None) -> str:
         """
-        准备context：
-        1. 所有agent都注入task_plan（如果存在）
-        2. Lead Agent额外注入artifacts列表
-        3. 合并外部传入的routing context
+        构建完整的系统提示词（包含工具说明）
+        
+        Args:
+            context: 动态上下文
+            
+        Returns:
+            完整的系统提示词
         """
-        # 从外部context开始（可能包含routing信息）
-        context = user_context or {}
+        # 调用子类实现的业务逻辑部分
+        prompt = self.build_system_prompt(context)
         
-        # 记录debug信息
-        if context.get("thread_id"):
-            logger.debug(f"{self.config.name} executing in thread {context['thread_id'][:8]}")
+        # 追加工具使用说明
+        if self.toolkit and self.toolkit.list_tools():
+            from tools.prompt_generator import ToolPromptGenerator
+            tools_instruction = ToolPromptGenerator.generate_tool_instruction(
+                self.toolkit.list_tools()
+            )
+            prompt += f"\n\n{tools_instruction}"
         
-        try:
-            from tools.implementations.artifact_ops import _artifact_store
-            
-            # 设置会话（如果有）
-            if context.get("session_id"):
-                _artifact_store.set_session(context["session_id"])
-            
-            task_plan = _artifact_store.get("task_plan")
-            if task_plan:
-                context["task_plan_content"] = task_plan.content
-                context["task_plan_version"] = task_plan.current_version
-                context["task_plan_updated"] = task_plan.updated_at.isoformat()
-                logger.debug(f"{self.config.name} loaded task_plan (v{task_plan.current_version})")
-            
-            if self.config.name == "lead_agent":
-                artifacts_list = _artifact_store.list_artifacts()
-                if artifacts_list:
-                    context["artifacts_inventory"] = artifacts_list
-                    context["artifacts_count"] = len(artifacts_list)
-                    logger.debug(f"Lead Agent loaded {len(artifacts_list)} artifacts inventory")
-                        
-        except Exception as e:
-            logger.debug(f"{self.config.name} context preparation partial failure: {e}")
-        
-        return context
+        return prompt
 
     @abstractmethod
     def build_system_prompt(self, context: Optional[Dict[str, Any]] = None) -> str:
@@ -172,7 +155,7 @@ class BaseAgent(ABC):
         构建系统提示词（子类实现）
         
         Args:
-            context: 动态上下文（如task_plan内容）
+            context: 动态上下文
             
         Returns:
             系统提示词
@@ -284,20 +267,16 @@ class BaseAgent(ABC):
 
     async def _execute_generator(
         self,
-        instruction: str,
-        context: Optional[Dict[str, Any]] = None,
-        tool_interactions: Optional[List[Dict]] = None,
-        pending_tool_result: Optional[Tuple[str, ToolResult]] = None,
+        messages: List[Dict],
+        is_resuming: bool = False,
         streaming_tokens: bool = False
     ) -> AsyncGenerator[StreamEvent, None]:
         """
-        核心执行生成器, 统一的执行逻辑（支持中断和恢复）
+        核心执行生成器
         
         Args:
-            instruction: 用户指令（仅在新执行时使用）
-            context: 执行上下文
-            external_history: 外部提供的历史记录（用于恢复）
-            pending_tool_result: 待处理的工具结果（用于恢复）
+            messages: 完整的消息列表（system + history + instruction + interactions）
+            is_resuming: 是否从中断恢复
             streaming_tokens: 是否流式输出LLM tokens
         """
         current_response = AgentResponse(
@@ -315,47 +294,20 @@ class BaseAgent(ABC):
         )
         
         try:
-            # ========== 消息组装 ==========
-            messages = []
+            # 根据 is_resuming 初始化交互历史
+            if is_resuming:
+                # 恢复时：最后一条消息是 pending_tool_result，需要记录
+                new_tool_interactions = [messages[-1]]
+                logger.debug(f"Resuming: initialized tool_interactions with pending result")
+            else:
+                # 正常执行：从空开始
+                new_tool_interactions = []
+            accumulated_token_usage = {
+                "input_tokens": 0, 
+                "output_tokens": 0, 
+                "total_tokens": 0
+            }
             
-            # Part 1: System prompt
-            # 准备context
-            enhanced_context = await self._prepare_context_with_task_plan(context)
-            
-            # 构建系统提示词
-            system_prompt = self.build_system_prompt(enhanced_context)
-            
-            # 添加工具使用说明
-            if self.toolkit and self.toolkit.list_tools():
-                tools_instruction = ToolPromptGenerator.generate_tool_instruction(self.toolkit.list_tools())
-                system_prompt += f"\n\n{tools_instruction}"
-            messages.append({"role": "system", "content": system_prompt})
-            
-            # Part 2: User instruction
-            messages.append({"role": "user", "content": instruction})
-            
-            # Part 3: Tool interaction history（如果有）
-            if tool_interactions:
-                messages.extend(tool_interactions)
-                logger.debug(f"Added {len(tool_interactions)} historical messages")
-            
-            # Part 4: Pending tool result（如果有）
-            new_tool_interactions = []
-            
-            if pending_tool_result:
-                tool_name, result = pending_tool_result
-                tool_result_text = format_result(tool_name, result.to_dict())
-                
-                # 添加到messages用于LLM
-                messages.append({"role": "user", "content": tool_result_text})
-                
-                # 同时添加到new_tool_interactions，确保历史记录完整
-                new_tool_interactions.append({"role": "user", "content": tool_result_text})
-                
-                logger.info(f"Resuming with tool result for '{tool_name}'")
-            
-            accumulated_token_usage = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
-
             # ========== 工具调用循环 ==========
             for round_num in range(self.config.max_tool_rounds + 1):
                 # 检查是否超过工具调用限制
@@ -363,7 +315,7 @@ class BaseAgent(ABC):
                     # 最后一轮，提示总结
                     messages.append({
                         "role": "system",
-                        "content": "⚠️ You have reached the maximum tool call limit. Please summarize your findings and provide the final response."
+                        "content": "⚠️ Maximum tool calls reached. Please summarize your findings and provide the final response."
                     })
                 
                 logger.debug(f"[{self.config.name} Round {round_num + 1}] Messages:\n{self._format_messages_for_debug(messages)}")
@@ -583,52 +535,44 @@ class BaseAgent(ABC):
 
     async def execute(
         self,
-        instruction: str,
-        context: Optional[Dict[str, Any]] = None,
-        tool_interactions: Optional[List[Dict]] = None,
-        pending_tool_result: Optional[Tuple[str, ToolResult]] = None
+        messages: List[Dict],
+        is_resuming: bool = False
     ) -> AgentResponse:
         """
-        批量执行Agent任务（支持恢复）
+        批量执行Agent任务
         
         Args:
-            instruction: 用户指令
-            context: 上下文信息
-            external_history: 外部提供的历史记录（用于恢复）
-            pending_tool_result: 待处理的工具结果（用于恢复）
+            messages: 完整的消息列表
+            is_resuming: 是否从中断恢复
         """
         final_response = None
-        async for event in self._execute_generator(
-            instruction, context, tool_interactions, pending_tool_result, streaming_tokens=False
-        ):
+        async for event in self._execute_generator(messages, is_resuming, streaming_tokens=False):
             if event.type == StreamEventType.PERMISSION_REQUIRED:
-                return event.data  # Immediately return on permission request
+                return event.data
             
             if event.data:
                 final_response = event.data
 
-        return final_response or AgentResponse(success=False, content="Execution failed to produce a final state.")
-    
+        return final_response or AgentResponse(
+            success=False, 
+            content="Execution failed"
+        )
+
     async def stream(
         self,
-        instruction: str,
-        context: Optional[Dict[str, Any]] = None,
-        tool_interactions: Optional[List[Dict]] = None,
-        pending_tool_result: Optional[Tuple[str, ToolResult]] = None
+        messages: List[Dict],
+        is_resuming: bool = False
     ) -> AsyncGenerator[StreamEvent, None]:
         """
-        流式执行Agent任务（支持恢复）
-
+        流式执行Agent任务
+        
         Args:
-            instruction: 用户指令
-            context: 上下文信息
-            external_history: 外部提供的历史记录（用于恢复）
-            pending_tool_result: 待处理的工具结果（用于恢复）
+            messages: 完整的消息列表
+            is_resuming: 是否从中断恢复
         """
-        async for event in self._execute_generator(
-            instruction, context, tool_interactions, pending_tool_result, streaming_tokens=True
-        ):
+        async for event in self._execute_generator(messages, is_resuming, streaming_tokens=True):
             yield event
+
 
 def create_agent_config(
     name: str,
