@@ -1,5 +1,5 @@
 """
-执行控制器（重构版）
+执行控制器
 核心改进：
 1. ConversationManager负责格式化对话历史
 2. 复用ContextManager.compress_messages做智能裁剪
@@ -14,7 +14,7 @@ from core.state import create_initial_state
 from core.context_manager import ContextManager
 from utils.logger import get_logger
 
-logger = get_logger("Core")
+logger = get_logger("ArtifactFlow")
 
 
 class ConversationManager:
@@ -39,7 +39,7 @@ class ConversationManager:
         Returns:
             对话ID
         """
-        conv_id = conversation_id or f"conv-{uuid4().hex[:8]}"
+        conv_id = conversation_id or f"conv-{uuid4().hex}"
         
         self.conversations[conv_id] = {
             "conversation_id": conv_id,
@@ -100,7 +100,7 @@ class ConversationManager:
             conversation["branches"][parent_id].append(message_id)
             
             if len(conversation["branches"][parent_id]) > 1:
-                logger.info(f"🌿 Created branch from message {parent_id[:8]}")
+                logger.info(f"🌿 Created branch from message {parent_id}")
         
         # 更新活跃分支
         conversation["active_branch"] = message_id
@@ -161,112 +161,39 @@ class ConversationManager:
         self,
         conv_id: str,
         to_message_id: Optional[str] = None,
-        compression_level: str = "normal"
-    ) -> str:
+    ) -> List[Dict]:
         """
-        格式化对话历史为可读文本
-        
-        职责：
-        1. 获取对话路径
-        2. 转换为标准消息格式
-        3. 调用ContextManager压缩
-        4. 格式化为Markdown文本
-        
+        格式化对话历史为消息列表
+
         Args:
             conv_id: 对话ID
             to_message_id: 目标消息ID（None则使用活跃分支）
-            compression_level: 压缩级别
-            
+        
         Returns:
-            格式化的对话历史文本
+            消息列表 [{"role": "user", "content": ...}, {"role": "assistant", ...}, ...]
         """
         # 1. 获取对话路径
         conversation_path = self.get_conversation_path(conv_id, to_message_id)
         
         if not conversation_path:
-            return ""
+            return []
         
-        # 2. 转换为标准消息格式（用于压缩）
+        # 2. 转换为标准消息格式
         messages = []
         for msg in conversation_path:
-            # 用户消息
             messages.append({
                 "role": "user",
                 "content": msg["content"]
             })
             
-            # Assistant响应（如果有）
             if msg.get("graph_response"):
                 messages.append({
                     "role": "assistant",
                     "content": msg["graph_response"]
                 })
         
-        # 3. 使用ContextManager压缩
-        compressed_messages = ContextManager.compress_messages(
-            messages,
-            level=compression_level,
-            preserve_recent=5  # 保留最近5条交互
-        )
-        
-        logger.debug(
-            f"Conversation history: {len(messages)} messages "
-            f"-> {len(compressed_messages)} after compression"
-        )
-        
-        # 4. 格式化为Markdown文本
-        return self._format_messages_as_markdown(compressed_messages)
-    
-    def _format_messages_as_markdown(self, messages: List[Dict]) -> str:
-        """
-        将消息列表格式化为Markdown
-        
-        Args:
-            messages: 消息列表（已压缩）
-            
-        Returns:
-            Markdown格式的文本
-        """
-        lines = ["## Conversation History", ""]
-        
-        turn_number = 0
-        i = 0
-        
-        while i < len(messages):
-            msg = messages[i]
-            
-            # 系统消息（截断提示）
-            if msg.get("role") == "system":
-                lines.append(f"_{msg['content']}_")
-                lines.append("")
-                i += 1
-                continue
-            
-            # 用户+助手配对
-            if msg.get("role") == "user":
-                turn_number += 1
-                lines.append(f"### Turn {turn_number}")
-                lines.append(f"**User**: {msg['content']}")
-                
-                # 检查下一条是否是assistant响应
-                if i + 1 < len(messages) and messages[i + 1].get("role") == "assistant":
-                    assistant_msg = messages[i + 1]
-                    content = assistant_msg["content"]
-                    
-                    # 限制响应长度
-                    if len(content) > 500:
-                        content = content[:500] + "... _(truncated)_"
-                    
-                    lines.append(f"**Assistant**: {content}")
-                    i += 2  # 跳过assistant消息
-                else:
-                    i += 1
-                
-                lines.append("")  # 空行分隔
-            else:
-                i += 1
-        
-        return "\n".join(lines)
+        logger.debug(f"Formatted {len(messages)} messages from conversation history")
+        return messages
 
 
 class ExecutionController:
@@ -359,13 +286,12 @@ class ExecutionController:
         # 2. 格式化对话历史（使用ConversationManager的方法）
         conversation_history = self.conversation_manager.format_conversation_history(
             conv_id=conversation_id,
-            to_message_id=parent_message_id,
-            compression_level="normal"
+            to_message_id=parent_message_id
         )
         
         # 3. 生成ID
-        message_id = f"msg-{uuid4().hex[:8]}"
-        thread_id = f"thd-{uuid4().hex[:8]}"
+        message_id = f"msg-{uuid4().hex}"
+        thread_id = f"thd-{uuid4().hex}"
         
         # 4. 获取session
         session_id = self._get_or_create_session(conversation_id)
@@ -379,7 +305,7 @@ class ExecutionController:
             conversation_history=conversation_history
         )
         
-        logger.info(f"Processing new message in conversation {conversation_id[:8]}")
+        logger.info(f"Processing new message in conversation {conversation_id}")
         if conversation_history:
             # 计算实际的消息对数
             path = self.conversation_manager.get_conversation_path(
@@ -490,7 +416,7 @@ class ExecutionController:
         
         interrupt_info = self.interrupted_threads[thread_id]
         
-        logger.info(f"Resuming thread {thread_id[:8]} after permission")
+        logger.info(f"Resuming thread {thread_id} after permission")
         
         # 2. 恢复执行
         config = {"configurable": {"thread_id": thread_id}}
@@ -541,7 +467,7 @@ class ExecutionController:
         """
         from tools.implementations.artifact_ops import _artifact_store
         
-        session_id = f"sess-{conversation_id[:8]}"
+        session_id = f"sess-{conversation_id}"
         if session_id not in _artifact_store.sessions:
             _artifact_store.create_session(session_id)
         
