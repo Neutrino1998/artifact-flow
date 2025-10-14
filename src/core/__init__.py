@@ -1,52 +1,43 @@
- 
 """
 Core模块
-提供LangGraph工作流和执行控制
+提供Graph、Controller和状态管理
 """
+
+from core.graph import (
+    ExtendableGraph,
+    create_multi_agent_graph
+)
+
+from core.controller import (
+    ExecutionController,
+    ConversationManager
+)
 
 from core.state import (
     AgentState,
+    ExecutionPhase,
     create_initial_state,
-    update_state_for_routing,
-    update_state_for_confirmation,
-    extract_routing_from_response,
-    extract_confirmation_from_response
+    merge_agent_response_to_state
 )
 
-from core.graph import (
-    create_simple_graph,
-    create_graph_with_confirmation,
-    create_default_graph,
-    lead_agent_node,
-    search_agent_node,
-    crawl_agent_node,
-    user_confirmation_node,
-    route_after_lead,
-    route_after_subagent
-)
+from core.context_manager import ContextManager
 
-from core.controller import ExecutionController
 
 __all__ = [
-    # State
-    "AgentState",
-    "create_initial_state",
-    "update_state_for_routing",
-    "update_state_for_confirmation",
-    "extract_routing_from_response",
-    "extract_confirmation_from_response",
-    
     # Graph
-    "create_simple_graph",
-    "create_graph_with_confirmation",
-    "create_default_graph",
-    "lead_agent_node",
-    "search_agent_node",
-    "crawl_agent_node",
-    "user_confirmation_node",
-    "route_after_lead",
-    "route_after_subagent",
+    "ExtendableGraph",
+    "create_multi_agent_graph",
     
     # Controller
-    "ExecutionController"
+    "ExecutionController",
+    "ConversationManager",
+    
+    # State
+    "AgentState",
+    "ExecutionPhase",
+    "create_initial_state",
+    "merge_agent_response_to_state",
+    
+    # Context
+    "ContextManager",
 ]
