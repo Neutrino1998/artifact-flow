@@ -47,7 +47,7 @@ MODEL_CONFIGS = {
         "api_key": os.getenv("OPENAI_API_KEY"),
     },
     
-    # Qwen (通义千问) - 使用ChatTongyi
+    # Qwen (通义千问)
     "qwen-flash": {
         "provider": "dashscope",
         "model": "qwen-flash",
@@ -61,7 +61,7 @@ MODEL_CONFIGS = {
     
     # Qwen3-30B 系列模型
     "qwen3-30b-thinking": {
-        "provider": "dashscope",  # ChatTongyi应该能处理thinking模型
+        "provider": "dashscope", 
         "model": "qwen3-30b-a3b-thinking-2507",
         "api_key": os.getenv("DASHSCOPE_API_KEY"),
         "support_reasoning": True,
@@ -72,6 +72,21 @@ MODEL_CONFIGS = {
         "model": "qwen3-30b-a3b-instruct-2507",
         "api_key": os.getenv("DASHSCOPE_API_KEY"),
         "description": "Qwen3-30B指令模型，快速响应"
+    },
+
+    # Qwen3-Next-80B 系列模型
+    "qwen3-next-80b-thinking": {
+        "provider": "dashscope",  
+        "model": "qwen3-next-80b-a3b-thinking",
+        "api_key": os.getenv("DASHSCOPE_API_KEY"),
+        "support_reasoning": True,
+        "description": "Qwen3-Next-80B思考模型，支持深度推理"
+    },
+    "qwen3-next-80b-instruct": {
+        "provider": "dashscope",
+        "model": "qwen3-next-80b-a3b-instruct",
+        "api_key": os.getenv("DASHSCOPE_API_KEY"),
+        "description": "Qwen3-Next-80B指令模型，快速响应"
     },
     
     # DeepSeek
@@ -228,7 +243,7 @@ if __name__ == "__main__":
     test_question = "一个圆的半径是5，另一个圆的半径是3，如果这两个圆外切，求它们圆心之间的距离。"
     
     # 测试模型
-    test_models = ["qwen3-30b-thinking", "qwen3-30b-instruct", "deepseek-chat", "deepseek-reasoner"]
+    test_models = ["qwen3-next-80b-thinking", "qwen3-next-80b-instruct", "deepseek-chat", "deepseek-reasoner"]
     
     for model_name in test_models:
         print("=" * 60)
