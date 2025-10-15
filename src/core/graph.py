@@ -24,6 +24,12 @@ class ExtendableGraph:
     """
     可扩展的Graph构建器
     支持动态注册Agent和权限确认
+    Workflow:
+    [Start] 
+        → [LeadAgentExecuting]
+            ├→ [WaitingForPermission] → [PermissionApproved/Denied] → [LeadAgentResuming]
+            ├→ [SubagentExecuting] → [SubagentComplete] → [LeadAgentResuming]
+            └→ [LeadAgentComplete] → [End]
     """
     
     def __init__(self):
