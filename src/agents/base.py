@@ -421,7 +421,7 @@ class BaseAgent(ABC):
                 tool_results_xml = []
                 for tool_call in tool_calls:
                     self.tool_call_count += 1
-                    logger.info(f"{self.config.name} calling tool: {tool_call.name}")
+                    logger.info(f"{self.config.name} calling tool: '{tool_call.name}'")
                     
                     yield StreamEvent(
                         type=StreamEventType.TOOL_START, 
