@@ -269,12 +269,13 @@ class ExecutionController:
         
         流程：
         1. 确保conversation存在
-        2. 获取对话历史
-        3. 格式化对话历史
-        4. 创建初始状态（包含对话历史）
-        5. 添加消息到conversation
-        6. 执行graph
-        7. 处理结果（中断或完成）
+        2. 自动设置父消息ID（如果未指定）
+        3. 获取对话历史
+        4. 格式化对话历史
+        5. 创建初始状态（包含对话历史）
+        6. 添加消息到conversation
+        7. 执行graph
+        8. 处理结果（中断或完成）
         """
         
         # 1. 确保conversation存在
@@ -283,20 +284,27 @@ class ExecutionController:
         elif conversation_id not in self.conversation_manager.conversations:
             self.conversation_manager.start_conversation(conversation_id)
         
-        # 2. 格式化对话历史（使用ConversationManager的方法）
+        # 2. 自动设置父消息ID（如果未指定）
+        if not parent_message_id:
+            conversation = self.conversation_manager.conversations[conversation_id]
+            parent_message_id = conversation.get("active_branch") or None
+            if parent_message_id:
+                logger.debug(f"Auto-set parent_message_id to current active_branch: {parent_message_id}")
+
+        # 3. 格式化对话历史（使用ConversationManager的方法）
         conversation_history = self.conversation_manager.format_conversation_history(
             conv_id=conversation_id,
             to_message_id=parent_message_id
         )
         
-        # 3. 生成ID
+        # 4. 生成ID
         message_id = f"msg-{uuid4().hex}"
         thread_id = f"thd-{uuid4().hex}"
         
-        # 4. 获取session
+        # 5. 获取session
         session_id = self._get_or_create_session(conversation_id)
         
-        # 5. 创建初始状态
+        # 6. 创建初始状态
         initial_state = create_initial_state(
             task=content,
             session_id=session_id,
@@ -306,14 +314,8 @@ class ExecutionController:
         )
         
         logger.info(f"Processing new message in conversation {conversation_id}")
-        if conversation_history:
-            # 计算实际的消息对数
-            path = self.conversation_manager.get_conversation_path(
-                conversation_id, parent_message_id
-            )
-            logger.debug(f"With conversation history: {len(path)} messages in path")
         
-        # 6. 添加消息到conversation
+        # 7. 添加消息到conversation
         self.conversation_manager.add_message(
             conv_id=conversation_id,
             message_id=message_id,
@@ -322,7 +324,7 @@ class ExecutionController:
             parent_id=parent_message_id
         )
         
-        # 7. 执行graph
+        # 8. 执行graph
         config = {"configurable": {"thread_id": thread_id}}
         
         try:
