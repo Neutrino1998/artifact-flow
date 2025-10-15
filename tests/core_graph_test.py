@@ -6,16 +6,17 @@
 import asyncio
 from core.graph import create_multi_agent_graph
 from core.controller import ExecutionController
+from utils.logger import get_logger
 from utils.logger import set_global_debug
 
+logger = get_logger("ArtifactFlow")
 set_global_debug(True)
-
 
 async def demo_multi_turn_conversation():
     """演示多轮对话"""
-    print("\n" + "="*60)
-    print("📝 多轮对话演示")
-    print("="*60)
+    logger.debug("\n" + "="*60)
+    logger.debug("📝 多轮对话演示")
+    logger.debug("="*60)
     
     # 创建系统
     compiled_graph = create_multi_agent_graph()
@@ -26,28 +27,28 @@ async def demo_multi_turn_conversation():
         content="什么是量子计算？"
     )
     conv_id = result1["conversation_id"]
-    print(f"\n轮次1: {result1['response'][:200]}...")
+    logger.debug(f"\n轮次1: {result1['response'][:200]}...")
     
     # 第二轮（有对话历史）
     result2 = await controller.execute(
         content="它有哪些应用？",
         conversation_id=conv_id
     )
-    print(f"\n轮次2: {result2['response'][:200]}...")
+    logger.debug(f"\n轮次2: {result2['response'][:200]}...")
     
     # 第三轮
     result3 = await controller.execute(
         content="给我搜索一下最新的研究进展",
         conversation_id=conv_id
     )
-    print(f"\n轮次3: {result3['response'][:200]}...")
+    logger.debug(f"\n轮次3: {result3['response'][:200]}...")
 
 
 async def demo_permission_flow():
     """演示权限确认流程"""
-    print("\n" + "="*60)
-    print("🔐 权限确认演示")
-    print("="*60)
+    logger.debug("\n" + "="*60)
+    logger.debug("🔐 权限确认演示")
+    logger.debug("="*60)
     
     compiled_graph = create_multi_agent_graph()
     controller = ExecutionController(compiled_graph)
@@ -66,9 +67,9 @@ async def demo_permission_flow():
     )
     
     if result.get("interrupted"):
-        print(f"\n⚠️ 需要权限确认:")
-        print(f"   工具: {result['interrupt_data']['tool_name']}")
-        print(f"   Agent: {result['interrupt_data']['agent']}")
+        logger.debug(f"\n⚠️ 需要权限确认:")
+        logger.debug(f"   工具: {result['interrupt_data']['tool_name']}")
+        logger.debug(f"   Agent: {result['interrupt_data']['agent']}")
         
         # 批准
         result = await controller.execute(
@@ -76,14 +77,14 @@ async def demo_permission_flow():
             resume_data={"type": "permission", "approved": True}
         )
         
-        print(f"\n✅ 批准后完成: {result['response'][:200]}...")
+        logger.debug(f"\n✅ 批准后完成: {result['response'][:200]}...")
 
 
 async def demo_branch_conversation():
     """演示分支对话"""
-    print("\n" + "="*60)
-    print("🌿 分支对话演示")
-    print("="*60)
+    logger.debug("\n" + "="*60)
+    logger.debug("🌿 分支对话演示")
+    logger.debug("="*60)
     
     compiled_graph = create_multi_agent_graph()
     controller = ExecutionController(compiled_graph)
@@ -95,7 +96,7 @@ async def demo_branch_conversation():
     conv_id = result1["conversation_id"]
     msg1_id = result1["message_id"]
     
-    print(f"\n主线: {result1['response'][:100]}...")
+    logger.debug(f"\n主线: {result1['response'][:100]}...")
     
     # 继续主线
     result2 = await controller.execute(
@@ -103,7 +104,7 @@ async def demo_branch_conversation():
         conversation_id=conv_id
     )
     
-    print(f"\n主线续: {result2['response'][:100]}...")
+    logger.debug(f"\n主线续: {result2['response'][:100]}...")
     
     # 从msg1创建分支
     result3 = await controller.execute(
@@ -112,11 +113,11 @@ async def demo_branch_conversation():
         parent_message_id=msg1_id  # 从msg1分支
     )
     
-    print(f"\n分支: {result3['response'][:100]}...")
+    logger.debug(f"\n分支: {result3['response'][:100]}...")
 
 
 async def main():
-    print("\n🤖 ArtifactFlow Core模块演示")
+    logger.debug("\n🤖 ArtifactFlow Core模块演示")
     
     # 选择演示
     demos = {
@@ -126,9 +127,9 @@ async def main():
         "4": ("全部演示", None)
     }
     
-    print("\n选择演示:")
+    logger.debug("\n选择演示:")
     for key, (name, _) in demos.items():
-        print(f"{key}. {name}")
+        logger.debug(f"{key}. {name}")
     
     choice = input("\n选择 (1-4): ").strip()
     
@@ -138,7 +139,7 @@ async def main():
     elif choice in demos:
         await demos[choice][1]()
     else:
-        print("无效选择")
+        logger.debug("无效选择")
 
 
 if __name__ == "__main__":
