@@ -46,7 +46,7 @@ class LeadAgent(BaseAgent):
             config = AgentConfig(
                 name="lead_agent",
                 description="Task coordinator and information integrator",
-                model="qwen-plus",
+                model="qwen3-next-80b-thinking",
                 temperature=0.7,
                 max_tool_rounds=5,  # Lead需要更多轮次协调
                 streaming=True

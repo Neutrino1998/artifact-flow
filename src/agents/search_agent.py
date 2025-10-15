@@ -38,7 +38,7 @@ class SearchAgent(BaseAgent):
             config = AgentConfig(
                 name="search_agent",
                 description="Web search and information retrieval specialist",
-                model="qwen-plus",
+                model="qwen3-next-80b-instruct",
                 temperature=0.5,  # 较低温度for精确搜索
                 max_tool_rounds=3,  # 最多3轮搜索优化
                 streaming=True
