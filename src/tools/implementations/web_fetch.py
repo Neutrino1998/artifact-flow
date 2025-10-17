@@ -1,15 +1,16 @@
 """
 Web内容抓取工具
-基于crawl4ai实现网页内容的深度抓取
+基于crawl4ai实现网页内容的深度抓取，支持HTML和PDF文件
 """
 
 import asyncio
-from typing import List, Dict, Any, Optional, Union
+import aiohttp
+from typing import List, Dict, Any, Optional
 from datetime import datetime
+from io import BytesIO
 
 from tools.base import BaseTool, ToolResult, ToolParameter, ToolPermission
 from utils.logger import get_logger
-from utils.retry import api_retry
 import random
 
 # 导入crawl4ai组件
@@ -21,8 +22,13 @@ try:
     CRAWL4AI_AVAILABLE = True
 except ImportError:
     CRAWL4AI_AVAILABLE = False
-    logger = get_logger("ArtifactFlow")
-    logger.warning("crawl4ai not installed. Install with: pip install crawl4ai")
+
+# 导入PDF处理
+try:
+    from pypdf import PdfReader
+    PDF_SUPPORT = True
+except ImportError:
+    PDF_SUPPORT = False
 
 logger = get_logger("ArtifactFlow")
 
@@ -31,17 +37,20 @@ class WebFetchTool(BaseTool):
     """
     Web内容抓取工具
     使用crawl4ai深度抓取网页内容并转换为结构化格式
+    支持HTML和PDF文件的智能检测和处理
     
     特性：
+    - 智能类型检测：自动识别HTML/PDF/其他文件类型
+    - HTML抓取：使用crawl4ai进行深度内容提取和清洗
+    - PDF处理：使用pypdf提取PDF文本内容
     - 内存自适应：通过MemoryAdaptiveDispatcher控制并发浏览器实例数
-    - 防止内存爆炸：每个URL会启动一个浏览器实例，需要严格控制并发
-    - 降级处理：当内存控制器不可用时，降级为顺序抓取
+    - 防止内存爆炸：每个HTML页面会启动一个浏览器实例，严格控制并发保护服务器
     """
     
     def __init__(self):
         super().__init__(
             name="web_fetch",
-            description="Fetch and extract content from web pages",
+            description="Fetch and extract content from web pages and PDF files",
             permission=ToolPermission.PUBLIC
         )
         
@@ -49,14 +58,24 @@ class WebFetchTool(BaseTool):
             logger.error("crawl4ai is not available")
             return
         
-        # 新增：User-Agent 池
+        if not PDF_SUPPORT:
+            logger.warning("pypdf is not installed. PDF support disabled. Install with: pip install pypdf")
+        
+        # User-Agent 池（扩展版）
         self.user_agents = [
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36"
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
+            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0",
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
+            "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:121.0) Gecko/20100101 Firefox/121.0",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36",
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36"
         ]
         
-        # 初始化浏览器配置
+        # 初始化浏览器配置（用于HTML）
         self.browser_config = BrowserConfig(
             headless=True,
             verbose=False,
@@ -103,7 +122,7 @@ class WebFetchTool(BaseTool):
             ToolParameter(
                 name="urls",
                 type="array[string]",
-                description="URL or list of URLs to fetch",
+                description="URL or list of URLs to fetch (supports HTML and PDF)",
                 required=True
             ),
             ToolParameter(
@@ -184,6 +203,211 @@ class WebFetchTool(BaseTool):
             logger.exception(f"Fetch failed: {str(e)}")
             return ToolResult(success=False, error=f"Fetch failed: {str(e)}")
     
+    async def _detect_content_type(self, url: str) -> str:
+        """
+        检测URL的内容类型
+        
+        Args:
+            url: 目标URL
+            
+        Returns:
+            'pdf', 'html', 或 'unknown'
+        """
+        # 1. 先通过URL后缀快速判断
+        url_lower = url.lower()
+        if url_lower.endswith('.pdf'):
+            return 'pdf'
+        elif any(url_lower.endswith(ext) for ext in ['.html', '.htm', '.php', '.asp', '.jsp']):
+            return 'html'
+        
+        # 2. 发送HEAD请求检查Content-Type
+        try:
+            timeout = aiohttp.ClientTimeout(total=10)
+            async with aiohttp.ClientSession() as session:
+                async with session.head(
+                    url, 
+                    timeout=timeout,
+                    allow_redirects=True,
+                    headers={'User-Agent': random.choice(self.user_agents)}
+                ) as response:
+                    content_type = response.headers.get('Content-Type', '').lower()
+                    
+                    if 'pdf' in content_type or 'application/pdf' in content_type:
+                        return 'pdf'
+                    elif any(t in content_type for t in ['html', 'text/html', 'text/plain']):
+                        return 'html'
+                    
+        except Exception as e:
+            logger.debug(f"HEAD request failed for {url}: {e}, assuming HTML")
+        
+        # 3. 默认按HTML处理
+        return 'html'
+    
+    async def _fetch_pdf(self, url: str, max_content_length: int) -> Dict[str, Any]:
+        """
+        抓取并解析PDF文件
+        
+        Args:
+            url: PDF文件URL
+            max_content_length: 最大内容长度
+            
+        Returns:
+            抓取结果字典
+        """
+        if not PDF_SUPPORT:
+            return {
+                "success": False,
+                "url": url,
+                "error": "PDF support not available. Install pypdf: pip install pypdf"
+            }
+        
+        try:
+            logger.info(f"Fetching PDF: {url}")
+            
+            timeout = aiohttp.ClientTimeout(total=60)  # PDF可能较大，60秒超时
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    url,
+                    timeout=timeout,
+                    headers={'User-Agent': random.choice(self.user_agents)}
+                ) as response:
+                    if response.status != 200:
+                        return {
+                            "success": False,
+                            "url": url,
+                            "error": f"HTTP {response.status}"
+                        }
+                    
+                    # 检查Content-Type
+                    content_type = response.headers.get('Content-Type', '').lower()
+                    if 'pdf' not in content_type:
+                        logger.warning(f"Expected PDF but got {content_type}, trying anyway...")
+                    
+                    # 读取PDF内容
+                    pdf_bytes = await response.read()
+                    
+                    # 使用pypdf提取文本
+                    pdf_file = BytesIO(pdf_bytes)
+                    pdf_reader = PdfReader(pdf_file)
+                    
+                    # 提取所有页面文本
+                    text_parts = []
+                    for page_num, page in enumerate(pdf_reader.pages, 1):
+                        try:
+                            page_text = page.extract_text()
+                            if page_text.strip():
+                                text_parts.append(page_text)
+                        except Exception as e:
+                            logger.warning(f"Failed to extract page {page_num}: {e}")
+                    
+                    full_text = "\n\n".join(text_parts)
+                    
+                    # 获取PDF元数据
+                    title = "PDF Document"
+                    if pdf_reader.metadata:
+                        title = pdf_reader.metadata.get('/Title', title)
+                    
+                    # 限制长度
+                    if len(full_text) > max_content_length:
+                        full_text = full_text[:max_content_length] + "\n\n[Content truncated...]"
+                    
+                    logger.info(f"PDF extracted: {len(text_parts)} pages, {len(full_text)} chars")
+                    
+                    return {
+                        "success": True,
+                        "url": url,
+                        "title": title,
+                        "content": full_text,
+                        "word_count": len(full_text.split()),
+                        "fetched_at": datetime.now().isoformat(),
+                        "source_type": "pdf",
+                        "page_count": len(pdf_reader.pages)
+                    }
+                    
+        except Exception as e:
+            logger.exception(f"PDF fetch failed for {url}")
+            return {
+                "success": False,
+                "url": url,
+                "error": f"PDF extraction failed: {str(e)}"
+            }
+    
+    async def _fetch_html_urls(
+        self,
+        urls: List[str],
+        max_content_length: int,
+        max_concurrent: int = 3
+    ) -> List[Dict[str, Any]]:
+        """
+        使用crawl4ai抓取HTML页面（使用MemoryAdaptiveDispatcher保护内存）
+        
+        Args:
+            urls: HTML URL列表
+            max_content_length: 最大内容长度
+            max_concurrent: 最大并发数
+            
+        Returns:
+            抓取结果列表
+        """
+        # 创建内存自适应调度器 - 防止内存爆炸
+        dispatcher = MemoryAdaptiveDispatcher(
+            memory_threshold_percent=70.0,  # 内存使用率超过70%时暂停
+            check_interval=1.0,  # 每秒检查一次内存
+            max_session_permit=max_concurrent,  # 最大并发浏览器实例数
+            memory_wait_timeout=120.0,  # 超时120秒抛出错误
+            rate_limiter=RateLimiter(
+                base_delay=(0.5, 1.0),  # 基础延迟0.5-1秒
+                max_delay=10.0,  # 最大延迟10秒
+                max_retries=2  # 最多重试2次
+            ),
+        )
+        
+        logger.info(f"Using MemoryAdaptiveDispatcher: max {max_concurrent} concurrent sessions, memory threshold 70%")
+        
+        # 使用crawl4ai的批量抓取 + dispatcher
+        async with AsyncWebCrawler(config=self.browser_config) as crawler:
+            # arun_many 会自动使用 dispatcher 控制并发
+            crawl_results = await crawler.arun_many(
+                urls=urls,
+                config=self.run_config,
+                dispatcher=dispatcher  # 传入内存控制器
+            )
+            
+            # 处理结果
+            results = []
+            for i, result in enumerate(crawl_results):
+                url = urls[i]
+                
+                if result.success:
+                    # 提取内容 - 使用新的 markdown 属性
+                    content = result.markdown.fit_markdown or result.markdown.raw_markdown or ""
+                    
+                    # 限制长度
+                    if len(content) > max_content_length:
+                        content = content[:max_content_length] + "\n\n[Content truncated...]"
+                    
+                    results.append({
+                        "success": True,
+                        "url": url,
+                        "title": result.metadata.get("title", "Untitled") if result.metadata else "Untitled",
+                        "content": content,
+                        "word_count": len(content.split()),
+                        "fetched_at": datetime.now().isoformat(),
+                        "source_type": "html"
+                    })
+                    
+                    logger.debug(f"Successfully fetched {url}: {len(content)} chars")
+                else:
+                    results.append({
+                        "success": False,
+                        "url": url,
+                        "error": f"Crawl failed: {result.error_message or 'Unknown error'}"
+                    })
+                    
+                    logger.warning(f"Failed to fetch {url}: {result.error_message}")
+        
+        return results
+    
     async def _fetch_urls(
         self,
         urls: List[str],
@@ -191,7 +415,7 @@ class WebFetchTool(BaseTool):
         max_concurrent: int = 3
     ) -> List[Dict[str, Any]]:
         """
-        抓取多个URL
+        抓取多个URL（智能检测类型并分别处理）
         
         Args:
             urls: URL列表
@@ -201,82 +425,39 @@ class WebFetchTool(BaseTool):
         Returns:
             抓取结果列表
         """
+        # 步骤1: 检测所有URL的类型
+        logger.info("Detecting content types...")
+        content_types = await asyncio.gather(*[
+            self._detect_content_type(url) for url in urls
+        ])
+        
+        # 步骤2: 按类型分类URL
+        pdf_urls = []
+        html_urls = []
+        
+        for url, content_type in zip(urls, content_types):
+            if content_type == 'pdf':
+                pdf_urls.append(url)
+                logger.info(f"Detected as PDF: {url}")
+            else:
+                html_urls.append(url)
+                logger.info(f"Detected as HTML: {url}")
+        
         results = []
         
-        # 创建内存自适应调度器 - 防止内存爆炸
-        dispatcher = None
-        if CRAWL4AI_AVAILABLE and 'MemoryAdaptiveDispatcher' in globals():
-            dispatcher = MemoryAdaptiveDispatcher(
-                memory_threshold_percent=70.0,          # 内存超过70%时暂停
-                check_interval=1.0,                      # 每秒检查一次内存
-                max_session_permit=max_concurrent,      # 最大并发浏览器实例数
-                memory_wait_timeout=120.0,              # 超时120秒抛出错误
-                rate_limiter=RateLimiter(
-                    base_delay=(0.5, 1.0),               # 基础延迟0.5-1秒
-                    max_delay=10.0,                      # 最大延迟10秒
-                    max_retries=2                        # 最多重试2次
-                ),
-            )
-            logger.debug(f"Using MemoryAdaptiveDispatcher with max {max_concurrent} concurrent browsers")
+        # 步骤3: 处理PDF文件（并发）
+        if pdf_urls:
+            logger.info(f"Fetching {len(pdf_urls)} PDF file(s)...")
+            pdf_results = await asyncio.gather(*[
+                self._fetch_pdf(url, max_content_length) for url in pdf_urls
+            ])
+            results.extend(pdf_results)
         
-        async with AsyncWebCrawler(config=self.browser_config) as crawler:
-            # 批量抓取（带内存控制）
-            if dispatcher:
-                crawl_results = await crawler.arun_many(
-                    urls=urls,
-                    config=self.run_config,
-                    dispatcher=dispatcher  # 使用内存控制
-                )
-            else:
-                # 如果没有dispatcher，降级为顺序抓取以避免内存问题
-                logger.warning("MemoryAdaptiveDispatcher not available, using sequential crawling")
-                crawl_results = []
-                for url in urls:
-                    try:
-                        result = await crawler.arun(
-                            url=url,
-                            config=self.run_config
-                        )
-                        crawl_results.append(result)
-                    except Exception as e:
-                        logger.exception(f"Failed to crawl {url}: {e}")
-                        # 创建一个失败的结果对象
-                        class FailedResult:
-                            success = False
-                            error_message = str(e)
-                            metadata = {}
-                            fit_markdown = None
-                            markdown = None
-                        crawl_results.append(FailedResult())
-            
-            # 处理结果
-            for i, result in enumerate(crawl_results):
-                url = urls[i] if i < len(urls) else "unknown"
-                
-                if result.success:
-                    # 截取内容长度
-                    content = result.markdown.fit_markdown or result.markdown or ""
-                    if len(content) > max_content_length:
-                        content = content[:max_content_length] + "..."
-                    
-                    results.append({
-                        "success": True,
-                        "url": url,
-                        "title": result.metadata.get("title", "No Title"),
-                        "content": content,
-                        "word_count": len(content),
-                        "fetched_at": datetime.now().isoformat()
-                    })
-                    
-                    logger.debug(f"Successfully fetched {url}: {len(content)} chars")
-                else:
-                    results.append({
-                        "success": False,
-                        "url": url,
-                        "error": result.error_message or "Unknown error"
-                    })
-                    
-                    logger.warning(f"Failed to fetch {url}: {result.error_message}")
+        # 步骤4: 处理HTML页面（使用crawl4ai + 内存自适应调度）
+        if html_urls:
+            logger.info(f"Fetching {len(html_urls)} HTML page(s)...")
+            html_results = await self._fetch_html_urls(html_urls, max_content_length, max_concurrent)
+            results.extend(html_results)
         
         return results
     
@@ -284,26 +465,12 @@ class WebFetchTool(BaseTool):
         """
         将抓取结果格式化为XML
         
-        格式示例:
-        <fetch_results>
-          <fetch_result>
-            <url>...</url>
-            <title>...</title>
-            <content>...</content>
-            <word_count>...</word_count>
-            <fetched_at>...</fetched_at>
-          </fetch_result>
-        </fetch_results>
-        
         Args:
             results: 抓取结果列表
             
         Returns:
-            XML格式的结果
+            XML格式字符串
         """
-        if not results:
-            return "<fetch_results>\n  <message>No results</message>\n</fetch_results>"
-        
         xml_parts = ["<fetch_results>"]
         
         for result in results:
@@ -311,7 +478,13 @@ class WebFetchTool(BaseTool):
                 # 成功的结果
                 xml_parts.append("  <fetch_result>")
                 xml_parts.append(f"    <url>{self._escape_xml(result['url'])}</url>")
-                xml_parts.append(f"    <title>{self._escape_xml(result['title'])}</title>")
+                xml_parts.append(f"    <title>{self._escape_xml(result.get('title', 'Untitled'))}</title>")
+                xml_parts.append(f"    <source_type>{result.get('source_type', 'unknown')}</source_type>")
+                
+                # PDF特有字段
+                if result.get('page_count'):
+                    xml_parts.append(f"    <page_count>{result['page_count']}</page_count>")
+                
                 xml_parts.append(f"    <content>{self._escape_xml(result['content'])}</content>")
                 xml_parts.append(f"    <word_count>{result['word_count']}</word_count>")
                 xml_parts.append(f"    <fetched_at>{result['fetched_at']}</fetched_at>")
@@ -355,156 +528,75 @@ class WebFetchTool(BaseTool):
         return text
 
 
-# 简化的备用抓取器（当crawl4ai不可用时）
-class SimpleFetchTool(BaseTool):
-    """
-    简单的网页抓取工具（备用方案）
-    使用aiohttp进行基础的HTML抓取
-    """
-    
-    def __init__(self):
-        super().__init__(
-            name="web_fetch_simple",
-            description="Simple web page fetcher (fallback)",
-            permission=ToolPermission.PUBLIC
-        )
-    
-    def get_parameters(self) -> List[ToolParameter]:
-        return [
-            ToolParameter(
-                name="url",
-                type="string",
-                description="URL to fetch",
-                required=True
-            )
-        ]
-    
-    @api_retry()
-    async def execute(self, **params) -> ToolResult:
-        """简单的HTTP GET请求"""
-        import aiohttp
-        from bs4 import BeautifulSoup
-        
-        url = params.get("url")
-        if not url:
-            return ToolResult(success=False, error="URL is required")
-        
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(
-                    url,
-                    timeout=aiohttp.ClientTimeout(total=30)
-                ) as response:
-                    if response.status != 200:
-                        return ToolResult(
-                            success=False,
-                            error=f"HTTP {response.status}"
-                        )
-                    
-                    html = await response.text()
-                    
-                    # 基础HTML解析
-                    soup = BeautifulSoup(html, 'html.parser')
-                    
-                    # 移除script和style标签
-                    for script in soup(["script", "style"]):
-                        script.decompose()
-                    
-                    # 提取文本
-                    text = soup.get_text()
-                    lines = (line.strip() for line in text.splitlines())
-                    chunks = (phrase.strip() for line in lines for phrase in line.split("  "))
-                    text = ' '.join(chunk for chunk in chunks if chunk)
-                    
-                    # 获取标题
-                    title = soup.title.string if soup.title else "No Title"
-                    
-                    # 限制长度
-                    max_length = 10000
-                    if len(text) > max_length:
-                        text = text[:max_length] + "..."
-                    
-                    return ToolResult(
-                        success=True,
-                        data={
-                            "url": url,
-                            "title": title,
-                            "content": text,
-                            "length": len(text)
-                        }
-                    )
-                    
-        except Exception as e:
-            logger.exception(f"Simple fetch failed: {str(e)}")
-            return ToolResult(success=False, error=str(e))
-
-
 # 注册工具的便捷函数
 def register_web_fetch_tool():
     """注册Web抓取工具"""
     from tools.registry import register_tool
     
-    if CRAWL4AI_AVAILABLE:
-        register_tool(WebFetchTool())
-        logger.info("Registered web fetch tool (crawl4ai)")
-    else:
-        register_tool(SimpleFetchTool())
-        logger.info("Registered web fetch tool (simple fallback)")
+    if not CRAWL4AI_AVAILABLE:
+        logger.error("Cannot register web_fetch tool: crawl4ai is not installed")
+        return
+    
+    register_tool(WebFetchTool())
+    logger.info("Registered web fetch tool (crawl4ai with PDF support)")
 
 
 if __name__ == "__main__":
     # 测试代码
     async def test():
-        print("\n🧪 Web抓取工具测试")
-        print("="*50)
+        print("\n🧪 Web抓取工具测试（支持PDF）")
+        print("="*60)
         
         if not CRAWL4AI_AVAILABLE:
-            print("⚠️ crawl4ai未安装，使用简单备用方案")
-            tool = SimpleFetchTool()
-            
-            # 测试简单抓取
-            result = await tool(url="https://github.com/Neutrino1998/artifact-flow")
-            if result.success:
-                print(f"✅ 抓取成功")
-                print(f"   标题: {result.data['title']}")
-                print(f"   内容长度: {result.data['length']} 字符")
-            else:
-                print(f"❌ 抓取失败: {result.error}")
+            print("❌ crawl4ai未安装")
             return
         
-        # 使用完整的crawl4ai工具
         tool = WebFetchTool()
         
-        # 测试1: 单个URL
-        print("\n📍 测试1: 单个URL抓取")
+        # 测试1: HTML页面
+        print("\n📄 测试1: HTML页面抓取")
         test_urls = ["https://github.com/Neutrino1998/artifact-flow"]
         
         result = await tool(urls=test_urls)
         
         if result.success:
-            print(f"✅ 抓取成功")
+            print(f"✅ HTML抓取成功")
             print(f"   成功: {result.metadata['success_count']}/{result.metadata['total_urls']}")
-            print("\nXML结果（前2000字符）:")
-            print(result.data[:2000] + "...")
+            print("\nXML结果（前1000字符）:")
+            print(result.data[:1000] + "...")
         else:
             print(f"❌ 抓取失败: {result.error}")
         
-        # 测试2: 多个URL
-        print("\n📍 测试2: 批量URL抓取（带并发控制）")
-        test_urls = [
-            "https://github.com/Neutrino1998/artifact-flow",
+        # 测试2: PDF文件
+        print("\n📑 测试2: PDF文件抓取")
+        # 使用一个公开的PDF测试
+        pdf_urls = ["https://arxiv.org/pdf/1706.03762.pdf"]  # Attention is All You Need论文
+        
+        result = await tool(urls=pdf_urls, max_content_length=5000)
+        
+        if result.success:
+            print(f"✅ PDF抓取成功")
+            print(f"   成功: {result.metadata['success_count']}/{result.metadata['total_urls']}")
+            print("\nXML结果（前1000字符）:")
+            print(result.data[:1000] + "...")
+        else:
+            print(f"❌ 抓取失败: {result.error}")
+        
+        # 测试3: 混合抓取
+        print("\n🔀 测试3: 混合抓取（HTML + PDF）")
+        mixed_urls = [
             "https://www.python.org",
-            "https://github.com"
+            "https://arxiv.org/pdf/1706.03762.pdf"
         ]
         
         result = await tool(
-            urls=test_urls,
-            max_content_length=2000,
-            max_concurrent=2  # 限制并发数防止内存问题
+            urls=mixed_urls,
+            max_content_length=3000,
+            max_concurrent=2
         )
         
         if result.success:
-            print(f"✅ 批量抓取完成 (并发数: 2)")
+            print(f"✅ 混合抓取完成")
             print(f"   成功: {result.metadata['success_count']}/{result.metadata['total_urls']}")
             print(f"   失败: {result.metadata['failed_count']}")
         else:
