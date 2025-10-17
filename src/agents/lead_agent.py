@@ -81,7 +81,7 @@ class LeadAgent(BaseAgent):
         current_time = datetime.now().strftime("%Y/%m/%d %H:%M:%S %a")
         
         # 开始构建提示词
-        prompt = f"""<system_time>{current_time}</system_time>
+        prompt = f"""<system_time>IMPORTANT: Current time is "{current_time}"</system_time>
 
 <agent_role>
 You are {self.config.name}, the Lead Agent coordinating a multi-agent system.
@@ -111,6 +111,7 @@ You are the orchestra conductor. Your core responsibilities:
 - Consolidate information incrementally in result artifact
 - Be transparent about progress
 - Know when to stop: avoid over-processing
+- Be aware of system_time
 </execution_flow>
 
 <task_planning_strategy>
@@ -127,7 +128,7 @@ Based on request complexity, choose your approach:
 ### Moderate Tasks (Optional Task Plan)
 - 1-2 specific sub-tasks needed
 - Limited scope
-→ Optionally create task_plan for better tracking
+→ Optionally create a simple task_plan for better tracking
 
 ### Complex Tasks (Required Task Plan)
 - Multi-faceted investigation
@@ -155,10 +156,6 @@ This is a SHARED WORKSPACE that all team members can access - use it as both a t
 - Status: [pending/in_progress/completed]
 - Assigned: [agent_name]
 - Notes: [findings or blockers]
-
-## Progress Summary
-- Overall: [X%]
-- Last Updated: [timestamp]
 </task_plan_example>
 
 ### Result Artifacts (Flexible IDs based on user needs)
@@ -168,22 +165,8 @@ Choose appropriate artifact IDs and types based on what the user requests:
 **For Reports/Research:**
 - ID: "research_report", "market_analysis", "technical_review", etc.
 - Type: "markdown"
-- Example structure:
-<result_example>
-# [Topic] Research Report
-
-## Executive Summary
-[Key findings overview]
-
-## Detailed Analysis
-[Structured findings]
-
-## Conclusions
-[Key takeaways]
-
-## References
-[Sources and citations - Use markdown link format: [Source Title](URL)]
-</result_example>
+- Always include a references section using markdown link format: 1. [Source Title](URL)
+- Use inline citations [1], [2], etc. throughout the text, corresponding to numbered references
 
 **For Code/Scripts:**
 - ID: "data_analysis.py", "web_scraper.js", "config.yaml", etc.
@@ -198,7 +181,8 @@ Choose appropriate artifact IDs and types based on what the user requests:
 - A research task might need both "research_report" and "data_summary"
 - A coding task might need "main.py", "utils.py", and "requirements.txt"
 - Always use descriptive IDs that reflect the content
-- Results can be built incrementally - you don't need to complete everything in one go - create early, update often
+- Build your results incrementally - you don't need to complete everything in one go - create early, update often
+- The user get access to ALL artifacts in the session directly
 </artifact_management>"""
     
         # 动态添加可用的sub-agents
@@ -226,30 +210,28 @@ Choose appropriate artifact IDs and types based on what the user requests:
         if context:
             prompt += "\n\n<current_context>\n"
             
-            if context.get("task_plan_content"): 
-                prompt += f"""<task_plan version="{context.get('task_plan_version', 1)}" updated="{context.get('task_plan_updated', 'unknown')}">
-{context['task_plan_content']}
-</task_plan>\n"""
-        
-            # 显示当前artifacts状态
             if context.get("artifacts_inventory"):
-                prompt += f"""<artifacts_status count="{context['artifacts_count']}">
-You currently have {context['artifacts_count']} artifact(s) in this session:
+                prompt += f"""<artifacts_inventory count="{context['artifacts_count']}">
+You currently have {context['artifacts_count']} artifact(s) in this session.
+
+**Note**: Content snippets shown below (first 200 chars). Use `read_artifact` tool for full content.
+
 """
                 for artifact in context["artifacts_inventory"]:
-                    status_icon = "📝" if artifact["content_type"] == "markdown" else "📄"
-                    prompt += f"\n{status_icon} **{artifact['id']}** (v{artifact['version']})"
-                    prompt += f"\n   - Type: {artifact['content_type']}"
-                    prompt += f"\n   - Title: {artifact['title']}"
-                    prompt += f"\n   - Last updated: {artifact['updated_at']}"
+                    prompt += f'<artifact id="{artifact["id"]}" '
+                    prompt += f'content_type="{artifact["content_type"]}" '
+                    prompt += f'title="{artifact["title"]}" '
+                    prompt += f'version="{artifact["version"]}" '
+                    prompt += f'updated="{artifact["updated_at"]}">\n'
+                    prompt += f'{artifact["content"]}\n' 
+                    prompt += '</artifact>\n'
                 
                 prompt += """
-
 Based on the existing artifacts:
 - Update existing artifacts rather than creating duplicates
 - Use 'update_artifact' for small changes
 - Use 'rewrite_artifact' for major restructuring
-</artifacts_status>\n"""
+</artifacts_inventory>\n"""
 
             if context.get("user_feedback"):
                 prompt += f"""<user_feedback>

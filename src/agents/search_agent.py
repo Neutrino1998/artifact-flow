@@ -59,7 +59,8 @@ class SearchAgent(BaseAgent):
         # 获取系统时间
         current_time = datetime.now().strftime("%Y/%m/%d %H:%M:%S %a")
         
-        prompt = f"""<system_time>{current_time}</system_time>
+        # 开始构建提示词
+        prompt = f"""<system_time>IMPORTANT: Current time is "{current_time}"</system_time>
 
 <agent_role>
 You are {self.config.name}, a specialized search agent with expertise in information retrieval.
@@ -74,19 +75,19 @@ You are part of a multi-agent research team. The Lead Agent coordinates overall 
 </agent_role>"""
 
         # 如果有task_plan，添加团队目标
-        if context and context.get("task_plan_content"):
-            prompt += f"""
-
+        if context and context.get("artifacts_inventory"):
+            task_plan_artifact = next(
+                (a for a in context["artifacts_inventory"] if a["id"] == "task_plan"),
+                None
+            )
+            
+            if task_plan_artifact:
+                prompt += f"""
 <team_task_plan>
-## Team Task Plan
-
 The following is our team's current task plan. Use this to understand the broader context of your search tasks:
-
-<task_plan version="{context.get('task_plan_version', 1)}" updated="{context.get('task_plan_updated', 'unknown')}">
-{context['task_plan_content']}
-</task_plan>
-
-**Your Role**: Focus on the search aspects that support this plan.
+<artifact id="task_plan" content_type="{task_plan_artifact['content_type']}" ...>
+{task_plan_artifact['content']}
+</artifact>
 </team_task_plan>"""
 
         prompt += """

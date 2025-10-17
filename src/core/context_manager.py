@@ -116,14 +116,12 @@ class ContextManager:
     @classmethod
     def prepare_agent_context(
         cls,
-        agent_name: str,
         state: Dict[str, Any]
     ) -> Dict[str, Any]:
         """
         为Agent准备路由上下文
         
         Args:
-            agent_name: Agent名称
             state: 当前Graph状态
             
         Returns:
@@ -142,25 +140,17 @@ class ContextManager:
             if context.get("session_id"):
                 _artifact_store.set_session(context["session_id"])
             
-            task_plan = _artifact_store.get("task_plan")
-            if task_plan:
-                context["task_plan_content"] = task_plan.content
-                context["task_plan_version"] = task_plan.current_version
-                context["task_plan_updated"] = task_plan.updated_at.isoformat()
-            
-            if agent_name == "lead_agent":
-                artifacts_list = _artifact_store.list_artifacts()
-                if artifacts_list:
-                    context["artifacts_inventory"] = artifacts_list
-                    context["artifacts_count"] = len(artifacts_list)
+            artifacts_list = _artifact_store.list_artifacts(
+                include_content=True,
+                content_preview_length=200,
+                full_content_for=["task_plan"]  # task_plan显示完整内容
+            )
+            logger.debug(f"Context preparation: \n{artifacts_list}")
+            if artifacts_list:
+                context["artifacts_inventory"] = artifacts_list
+                context["artifacts_count"] = len(artifacts_list)
         except Exception as e:
             logger.debug(f"Context preparation partial failure: {e}")
-        
-        # 添加subagent路由信息
-        if pending := state.get("subagent_pending"):
-            if pending.get("target") == agent_name:
-                context["routing_from"] = "lead_agent"
-                context["routing_instruction"] = pending.get("instruction", "")
         
         return context
     
@@ -183,7 +173,7 @@ class ContextManager:
         compression_level = state.get("compression_level", "normal")
         
         # Part 1: System prompt
-        context = cls.prepare_agent_context(agent.config.name, state)
+        context = cls.prepare_agent_context(state)
         system_prompt = agent.build_complete_system_prompt(context)
         messages.append({"role": "system", "content": system_prompt})
         
