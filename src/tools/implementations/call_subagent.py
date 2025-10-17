@@ -36,13 +36,13 @@ class CallSubagentTool(BaseTool):
             ToolParameter(
                 name="agent_type",
                 type="string", 
-                description="Sub-agent type: 'search_agent' (web search) or 'crawl_agent' (web content extraction)",
+                description="Sub-agent type: check available_subagents section for available agents",
                 required=True
             ),
             ToolParameter(
                 name="instruction",
                 type="string",
-                description="Specific task instruction for the sub-agent. Be clear and detailed about what you need.",
+                description="Specific task instruction for the sub-agent. Be concise about what you need.",
                 required=True
             )
         ]
