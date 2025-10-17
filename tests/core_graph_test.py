@@ -14,7 +14,7 @@ set_global_debug(True)
 
 async def demo_multi_turn_conversation():
     """演示多轮对话"""
-    logger.debug("\n" + "="*60)
+    logger.debug("="*60)
     logger.debug("📝 多轮对话演示")
     logger.debug("="*60)
     
@@ -31,14 +31,14 @@ async def demo_multi_turn_conversation():
     
     # 第二轮（有对话历史）
     result2 = await controller.execute(
-        content="它有哪些应用？",
+        content="帮我整理到artifact中，内容浅显易懂一点",
         conversation_id=conv_id
     )
     logger.debug(f"\n轮次2: {result2['response'][:200]}...")
     
     # 第三轮
     result3 = await controller.execute(
-        content="给我搜索一下最新的研究进展",
+        content="帮我写一份最新的研究进展报告",
         conversation_id=conv_id
     )
     logger.debug(f"\n轮次3: {result3['response'][:200]}...")
@@ -46,20 +46,18 @@ async def demo_multi_turn_conversation():
 
 async def demo_permission_flow():
     """演示权限确认流程"""
-    logger.debug("\n" + "="*60)
+    logger.debug("="*60)
     logger.debug("🔐 权限确认演示")
     logger.debug("="*60)
-    
-    compiled_graph = create_multi_agent_graph()
-    controller = ExecutionController(compiled_graph)
-    
-    # 修改web_fetch为需要确认
+
+    # 配置权限
     from tools.base import ToolPermission
-    for agent in compiled_graph.agents.values():
-        if agent.toolkit:
-            for tool in agent.toolkit.list_tools():
-                if tool.name == "web_fetch":
-                    tool.permission = ToolPermission.CONFIRM
+    tool_permissions = {
+        "web_fetch": ToolPermission.CONFIRM
+    }
+    
+    compiled_graph = create_multi_agent_graph(tool_permissions=tool_permissions)
+    controller = ExecutionController(compiled_graph)
     
     # 发起需要爬虫的任务
     result = await controller.execute(
@@ -67,14 +65,14 @@ async def demo_permission_flow():
     )
     
     if result.get("interrupted"):
-        logger.debug(f"\n⚠️ 需要权限确认:")
+        logger.debug(f"⚠️ 需要权限确认:")
         logger.debug(f"   工具: {result['interrupt_data']['tool_name']}")
         logger.debug(f"   Agent: {result['interrupt_data']['agent']}")
         
         # 批准
         result = await controller.execute(
             thread_id=result["thread_id"],
-            resume_data={"type": "permission", "approved": True}
+            resume_data={"type": "permission", "approved": False}
         )
         
         logger.debug(f"\n✅ 批准后完成: {result['response'][:200]}...")
@@ -82,7 +80,7 @@ async def demo_permission_flow():
 
 async def demo_branch_conversation():
     """演示分支对话"""
-    logger.debug("\n" + "="*60)
+    logger.debug("="*60)
     logger.debug("🌿 分支对话演示")
     logger.debug("="*60)
     
@@ -91,7 +89,7 @@ async def demo_branch_conversation():
     
     # 主线对话
     result1 = await controller.execute(
-        content="帮我研究AI在医疗领域的应用"
+        content="计算 15 + 28 等于多少"
     )
     conv_id = result1["conversation_id"]
     msg1_id = result1["message_id"]
@@ -100,7 +98,7 @@ async def demo_branch_conversation():
     
     # 继续主线
     result2 = await controller.execute(
-        content="重点关注诊断方面",
+        content="再乘以2",
         conversation_id=conv_id
     )
     
@@ -108,7 +106,7 @@ async def demo_branch_conversation():
     
     # 从msg1创建分支
     result3 = await controller.execute(
-        content="换个方向，研究AI在手术辅助方面的应用",
+        content="再减去一万",
         conversation_id=conv_id,
         parent_message_id=msg1_id  # 从msg1分支
     )
@@ -117,7 +115,7 @@ async def demo_branch_conversation():
 
 
 async def main():
-    logger.debug("\n🤖 ArtifactFlow Core模块演示")
+    print("\n🤖 ArtifactFlow Core模块演示")
     
     # 选择演示
     demos = {
@@ -127,9 +125,9 @@ async def main():
         "4": ("全部演示", None)
     }
     
-    logger.debug("\n选择演示:")
+    print("\n选择演示:")
     for key, (name, _) in demos.items():
-        logger.debug(f"{key}. {name}")
+        print(f"{key}. {name}")
     
     choice = input("\n选择 (1-4): ").strip()
     
@@ -139,7 +137,7 @@ async def main():
     elif choice in demos:
         await demos[choice][1]()
     else:
-        logger.debug("无效选择")
+        print("无效选择")
 
 
 if __name__ == "__main__":
