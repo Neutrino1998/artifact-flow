@@ -50,8 +50,7 @@ Important guidelines:
 1. Always use the exact tool name as specified
 2. Include all required parameters
 3. Use proper XML formatting with closed tags
-4. You can make multiple tool calls in sequence
-5. Wait for tool results before proceeding with analysis
+4. Make SINGLE tool call per request for clarity
 </tool_instructions>"""
         
         return instruction
