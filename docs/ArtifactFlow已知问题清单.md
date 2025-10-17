@@ -10,14 +10,25 @@
 - [x] sub agent的response好像不会被lead agent解析。
 - [x] `BaseAgent`的messages的拼接方式修改为：
 system prompt + instruction + history(如果有) + tool result
+- [x] 由于消息拼接被移动到了baseagent外，导致外部调用的工具结果没有被graph记录下来
+- [x] conversation history只能format两条？已定位问题：_execute_new_message没有输入parent_message_id应该自动设置parent_message_id关联
+- [x] `interrupt()` 函数需要在一个正确的 runnable context 中调用，但现在看起来上下文不正确。已定位问题：异步 interrupt 功能需要 Python 3.11+ 才能正常工作,因为 Python 3.11 之前的版本中异步任务无法正确传播上下文 [Asynchronous Graph with interrupts in Python 3.10 seems to be broken · langchain-ai/langgraph · Discussion #3200](https://github.com/langchain-ai/langgraph/discussions/3200)
 
 ## 次要问题
 - [x] 各类id加上类型名
-- [ ] controller层的历史记录（User ↔ Graph）和graph层的历史记录是不是也应该分开管理，因为如果都塞到NodeMemory里面的话感觉不太合理，应该是一个context manager管理controller层一个管理graph层，这个context manager可以和前面说的是一个，然后controller层的历史记录以context的形式给graph？
+- [x] controller层的历史记录（User ↔ Graph）和graph层的历史记录是不是也应该分开管理，因为如果都塞到NodeMemory里面的话感觉不太合理，应该是一个context manager管理controller层一个管理graph层，这个context manager可以和前面说的是一个，然后controller层的历史记录以context的形式给graph？
 - [ ] 引入python-diff-match-patch升级一下现有的artifact_ops.py，并增加版本管理功能与controller中的conversation管理对应起来（算球了，太耦合了），提供更完善的功能给未来开发的前端，例如能生成例如git diff的内容展示模型对文档的修改。
-- [ ] lead agent提示词提示result artifact 渐进式完成
+- [x] lead agent提示词提示result artifact 渐进式完成
 - [ ] graph level轮次太多提示lead agent
-- [ ] agent开启关闭debug模式很费劲：删除agentconfig中debug参数
+- [x] agent开启关闭debug模式很费劲：删除agentconfig中debug参数
+- [ ] Typer + Textual实现简易terminal前端
+- [ ] agent提示词精简一下
+- [x] ToolPromptGenerator中generate_tool_instruction最后return的instruction加上<tool_call_instructions>的tag
+- [x] 博查搜索语法确认
+- [ ] tool permission为NOTIFY的时候也移到confirmation node执行，但是自动允许
+- [x] _execute_new_message在调用graph之前，获取了session_id之后清除已有的task_plan
+- [x] fetch tool 支持pdf
+- [ ] agent logging 加上thread id
 
 # Agent模块已知问题清单
 
