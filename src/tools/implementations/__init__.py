@@ -11,7 +11,6 @@ from .web_search import (
 # Web抓取工具
 from .web_fetch import (
     WebFetchTool,
-    SimpleFetchTool,
     register_web_fetch_tool
 )
 
@@ -40,7 +39,6 @@ __all__ = [
     # Web工具
     "WebSearchTool",
     "WebFetchTool",
-    "SimpleFetchTool",
     
     # Artifact工具
     "Artifact", 

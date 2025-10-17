@@ -74,7 +74,6 @@ __all__ = [
     # 具体工具（从implementations导入）
     "WebSearchTool",
     "WebFetchTool", 
-    "SimpleFetchTool",
     "Artifact",
     "ArtifactStore",
     "CreateArtifactTool",
