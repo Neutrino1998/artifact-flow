@@ -47,7 +47,7 @@ class WebSearchTool(BaseTool):
                 name="query",
                 type="string",
                 description=(
-                    "Search query using natural language or keywords. "
+                    "Search query using keywords."
                     "Note: Does not support search operators like 'site:', 'AND', 'OR', quotes, or minus signs."
                 ),
                 required=True
