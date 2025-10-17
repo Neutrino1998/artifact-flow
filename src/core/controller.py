@@ -303,6 +303,10 @@ class ExecutionController:
         
         # 5. 获取session
         session_id = self._get_or_create_session(conversation_id)
+        # 5.5. 清除上一轮的临时artifacts
+        from tools.implementations.artifact_ops import _artifact_store
+        _artifact_store.set_session(session_id)
+        _artifact_store.clear_temporary_artifacts()
         
         # 6. 创建初始状态
         initial_state = create_initial_state(
@@ -332,8 +336,11 @@ class ExecutionController:
             
             # 8. 处理结果
             if result.get("__interrupt__"):
-                # 权限中断
-                interrupt_data = result["__interrupt__"]
+                # 权限中断 - __interrupt__ 是一个列表，包含 Interrupt 对象
+                interrupts = result["__interrupt__"]
+                
+                # 取第一个 Interrupt 对象的 value 属性
+                interrupt_data = interrupts[0].value
                 
                 # 保存中断信息
                 self.interrupted_threads[thread_id] = {
