@@ -14,7 +14,7 @@ from langgraph.types import interrupt
 from core.state import AgentState, ExecutionPhase, merge_agent_response_to_state
 from core.context_manager import ContextManager
 from agents.base import BaseAgent, AgentResponse
-from tools.base import ToolResult
+from tools.base import ToolPermission, ToolResult
 from utils.logger import get_logger
 
 logger = get_logger("ArtifactFlow")
@@ -182,7 +182,7 @@ class ExtendableGraph:
                     if agent_name == "lead_agent" and pending.get("subagent_result"):
                         is_resuming = True
                         tool_interactions = memory.get("tool_interactions", [])
-                        tool_name = f"call_{pending['target']}"
+                        tool_name = f"call_subagent"
                         pending_tool_result = (tool_name, pending["subagent_result"])
                         logger.info(f"{agent_name} resuming after {tool_name}")
                 
@@ -344,9 +344,16 @@ class ExtendableGraph:
         return compiled
 
 
-def create_multi_agent_graph():
+def create_multi_agent_graph(
+    tool_permissions: Optional[Dict[str, "ToolPermission"]] = None
+):
     """
     创建多Agent Graph的工厂函数
+    
+    Args:
+        tool_permissions: 工具权限配置字典
+            格式: {"tool_name": ToolPermission.LEVEL}
+            例如: {"web_fetch": ToolPermission.CONFIRM}
     
     Returns:
         编译后的Graph
@@ -370,11 +377,24 @@ def create_multi_agent_graph():
     registry = ToolRegistry()
     
     # 注册所有工具
-    for tool in [
-        CreateArtifactTool(), UpdateArtifactTool(),
-        RewriteArtifactTool(), ReadArtifactTool(),
-        CallSubagentTool(), WebSearchTool(), WebFetchTool()
-    ]:
+    tools = [
+        CreateArtifactTool(),
+        UpdateArtifactTool(),
+        RewriteArtifactTool(),
+        ReadArtifactTool(),
+        CallSubagentTool(),
+        WebSearchTool(),
+        WebFetchTool(),
+    ]
+    
+    # 应用权限配置
+    if tool_permissions:
+        for tool in tools:
+            if tool.name in tool_permissions:
+                tool.permission = tool_permissions[tool.name]
+    
+    # 注册所有工具
+    for tool in tools:
         registry.register_tool_to_library(tool)
     
     # 创建Agent工具包
