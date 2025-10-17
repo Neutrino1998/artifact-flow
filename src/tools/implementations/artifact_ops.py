@@ -491,24 +491,73 @@ class ArtifactStore:
             return None
         return session.artifacts.get(artifact_id)
     
-    def list_artifacts(self, content_type: str = None) -> List[Dict]:  # 👈 参数名改变
-        """列出当前session的所有Artifacts"""
+    def list_artifacts(
+        self, 
+        content_type: str = None,
+        include_content: bool = True,
+        content_preview_length: int = 200,
+        full_content_for: List[str] = None
+    ) -> List[Dict]:
+        """
+        列出当前session的所有Artifacts
+        
+        Args:
+            content_type: 过滤特定类型
+            include_content: 是否包含内容字段
+            content_preview_length: 内容预览长度（默认200字符）
+            full_content_for: 需要完整内容的artifact ID列表（如 ["task_plan"]）
+        
+        Returns:
+            Artifact信息列表
+        """
         session = self.get_current_session()
         if not session:
             return []
         
+        if full_content_for is None:
+            full_content_for = []
+        
         artifacts = []
         for artifact in session.artifacts.values():
-            if content_type and artifact.content_type != content_type:  # 👈 属性名改变
+            if content_type and artifact.content_type != content_type:
                 continue
-            artifacts.append({
+            
+            artifact_dict = {
                 "id": artifact.id,
-                "content_type": artifact.content_type,  # 👈 返回字段名改变
+                "content_type": artifact.content_type,
                 "title": artifact.title,
                 "version": artifact.current_version,
                 "updated_at": artifact.updated_at.isoformat()
-            })
+            }
+            
+            # 添加内容字段（带智能截断）
+            if include_content:
+                # 如果在full_content_for列表中，返回完整内容
+                if artifact.id in full_content_for:
+                    artifact_dict["content"] = artifact.content
+                else:
+                    # 否则返回截断的预览
+                    content = artifact.content
+                    if len(content) > content_preview_length:
+                        artifact_dict["content"] = content[:content_preview_length] + "[Content truncated...]"
+                    else:
+                        artifact_dict["content"] = content
+            
+            artifacts.append(artifact_dict)
+        
         return artifacts
+    
+    def clear_temporary_artifacts(self, session_id: Optional[str] = None):
+        """清除临时性的 artifacts（如 task_plan）"""
+        sid = session_id or self.current_session_id
+        if sid and sid in self.sessions:
+            session = self.sessions[sid]
+            # 清除已知的临时 artifacts
+            temporary_ids = ["task_plan"]
+            for artifact_id in temporary_ids:
+                if artifact_id in session.artifacts:
+                    del session.artifacts[artifact_id]
+                    logger.debug(f"Cleared temporary artifact: {artifact_id}")
 
 
 # 全局Artifact存储
