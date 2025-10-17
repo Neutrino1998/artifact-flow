@@ -48,7 +48,8 @@ class RobustXMLParser:
             )
             
             for block in tool_blocks:
-                tool_call = RobustXMLParser._parse_single_tool_call(block)
+                fixed_block = RobustXMLParser._fix_common_errors(block)
+                tool_call = RobustXMLParser._parse_single_tool_call(fixed_block)
                 if tool_call:
                     tool_calls.append(tool_call)
             
