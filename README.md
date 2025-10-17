@@ -2,7 +2,7 @@
 
 > Multi-Agent Research System based on LangGraph and Artifacts
 
-[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![LangGraph](https://img.shields.io/badge/LangGraph-Latest-green.svg)](https://github.com/langchain-ai/langgraph)
 [![Development Status](https://img.shields.io/badge/Status-Alpha%20Development-orange.svg)]()
 
@@ -19,9 +19,10 @@ ArtifactFlow 是一个智能多智能体研究系统，通过协调专门的AI�
 - **⚡ 流式响应**: 实时进度更新和结果生成
 - **🎯 人机协作**: 在任意阶段暂停、恢复并提供反馈
 - **🔧 灵活工具系统**: 可扩展的工具框架，支持权限控制
-- **🕷️ 智能网页抓取**: 基于crawl4ai的深度内容提取和分析
+- **🕷️ 智能网页抓取**: 基于crawl4ai的深度内容提取和分析（支持PDF解析）
 - **📊 进度跟踪**: 可视化任务进度和完成状态
 - **🔄 迭代优化**: 基于用户反馈的持续改进
+- **🌳 分支对话**: 支持从任意历史节点创建新的对话分支
 
 ## 🛠️ 系统架构
 
@@ -44,36 +45,46 @@ ArtifactFlow 是一个智能多智能体研究系统，通过协调专门的AI�
 
 - **🎯 主控智能体 (Lead Agent)**: 任务协调、信息整合、用户交互
 - **🔍 搜索智能体 (Search Agent)**: 信息检索和结构化搜索结果
-- **🕷️ 网页抓取智能体 (Crawl Agent)**: 深度内容提取和分析
+- **🕷️ 网页抓取智能体 (Crawl Agent)**: 深度内容提取和分析（支持HTML和PDF）
 
 ### 🎉 已完成模块
-
-- ✅ **工具系统** (v0.1.5) - **已完成**
-  - [x] 基础工具框架和权限控制
-  - [x] Artifact操作工具 (create/update/rewrite/read)
-  - [x] Web搜索工具 (基于博查AI)
-  - [x] 智能网页抓取工具 (基于crawl4ai)
-  - [x] 工具注册和管理系统
-
-- ✅ **智能体系统** (v0.2.0) - **已完成**
-  - [x] BaseAgent抽象类和统一执行框架
-  - [x] 流式响应和工具调用循环
-  - [x] Lead Agent - 任务协调和信息整合
-  - [x] Search Agent - 信息检索专家
-  - [x] Crawl Agent - 网页内容抓取专家
-  - [x] Agent间协作和路由机制
-  - [x] 多Agent系统集成测试
 
 - ✅ **基础设施** (v0.1.0) - **已完成**
   - [x] 项目结构和配置
   - [x] 核心工具模块（日志、重试、XML解析）
   - [x] 多模型LLM接口统一封装
 
+- ✅ **工具系统** (v0.1.5) - **已完成**
+  - [x] 基础工具框架和权限控制
+  - [x] Artifact操作工具 (create/update/rewrite/read)
+  - [x] Web搜索工具 (基于博查AI)
+  - [x] 智能网页抓取工具 (基于crawl4ai，支持HTML和PDF)
+  - [x] 工具注册和管理系统
+  - [x] XML提示词生成系统
+
+- ✅ **智能体系统** (v0.2.0) - **已完成**
+  - [x] BaseAgent抽象类和统一执行框架
+  - [x] 流式响应和工具调用循环
+  - [x] Lead Agent - 任务协调和信息整合
+  - [x] Search Agent - 信息检索专家
+  - [x] Crawl Agent - 网页内容抓取专家（支持PDF）
+  - [x] Agent间协作和路由机制
+
+- ✅ **工作流编排** (v0.3.0) - **已完成**
+  - [x] Agent状态管理 (core/state.py)
+  - [x] LangGraph工作流 (core/graph.py)
+  - [x] 执行控制器 (core/controller.py)
+  - [x] Context压缩和管理 (core/context_manager.py)
+  - [x] 多轮对话支持
+  - [x] 分支对话功能
+  - [x] 权限确认流程
+  - [x] 完整的核心模块集成测试
+
 ## 🚀 快速开始
 
 ### 环境要求
 
-- Python 3.10+
+- **Python 3.11+** ⚠️ （必需！LangGraph的异步interrupt功能需要Python 3.11+才能正确工作： [Asynchronous Graph with interrupts in Python 3.10 seems to be broken](https://github.com/langchain-ai/langgraph/discussions/3200)）
 - API Keys（OpenAI、通义千问、DeepSeek、博查AI 等）
 - 系统内存 ≥ 8GB（推荐16GB，网页抓取需要启动浏览器）
 
@@ -88,11 +99,11 @@ ArtifactFlow 是一个智能多智能体研究系统，通过协调专门的AI�
 2. **创建虚拟环境**
    ```bash
    # 使用 conda（推荐）
-   conda create -n artifact-flow python=3.10
+   conda create -n artifact-flow python=3.11
    conda activate artifact-flow
    
    # 或使用 venv
-   python -m venv artifact-flow
+   python3.11 -m venv artifact-flow
    # Windows: artifact-flow\Scripts\activate
    # macOS/Linux: source artifact-flow/bin/activate
    ```
@@ -112,7 +123,7 @@ ArtifactFlow 是一个智能多智能体研究系统，通过协调专门的AI�
    这个命令会：
    - 下载必要的浏览器驱动程序
    - 配置Playwright环境
-   
+
 5. **配置环境变量**
    ```bash
    cp .env.example .env
@@ -156,10 +167,12 @@ BOCHA_API_KEY=sk-xxx
 - `gpt-4o-mini` - 轻量级版本
 
 ### 通义千问 (Qwen)
-- `qwen-turbo` - 快速响应版本
+- `qwen-flash` - 快速响应版本
 - `qwen-plus` - 增强版本
 - `qwen3-30b-thinking` - 支持深度推理的思考模型 ⭐
 - `qwen3-30b-instruct` - 快速指令响应模型
+- `qwen3-next-80b-thinking` - 更大规模的思考模型
+- `qwen3-next-80b-instruct` - 更大规模的指令模型
 
 ### DeepSeek
 - `deepseek-chat` - 对话模型
@@ -170,7 +183,11 @@ BOCHA_API_KEY=sk-xxx
 ```
 artifact-flow/
 ├── src/
-│   ├── core/           # 🚧 核心工作流和状态管理 (开发中)
+│   ├── core/ ✅        # 核心工作流和状态管理 (已完成)
+│   │   ├── state.py              # 状态管理和定义
+│   │   ├── graph.py              # LangGraph工作流定义
+│   │   ├── controller.py         # 执行控制器
+│   │   └── context_manager.py    # Context压缩和管理
 │   ├── agents/ ✅      # 智能体实现 (已完成)
 │   │   ├── base.py               # Agent基类和流式执行框架
 │   │   ├── lead_agent.py         # 主控智能体实现
@@ -184,7 +201,8 @@ artifact-flow/
 │   │   └── implementations/      # 具体工具实现
 │   │       ├── artifact_ops.py   # Artifact操作工具
 │   │       ├── web_search.py     # 博查AI搜索
-│   │       └── web_fetch.py      # crawl4ai网页抓取
+│   │       ├── web_fetch.py      # crawl4ai网页抓取(支持PDF)
+│   │       └── call_subagent.py  # Subagent调用工具
 │   ├── models/ ✅      # LLM 接口封装 (已完成)
 │   │   └── llm.py                # 统一的多模型接口
 │   ├── utils/ ✅       # 工具函数和帮助类 (已完成)
@@ -193,7 +211,7 @@ artifact-flow/
 │   │   └── xml_parser.py         # 鲁棒XML解析
 │   └── api/            # 🚧 API 接口层 (计划中)
 ├── test/               # 测试用例
-│   └── multi_agent_test.py       # 多智能体系统集成测试
+│   └── core_graph_test.py        # 核心模块集成测试
 ├── prompts/            # 智能体提示词模板
 ├── examples/           # 使用示例
 ├── logs/               # 日志目录
@@ -237,9 +255,9 @@ async def demo_tools():
     if search_result.success:
         print("🔍 搜索完成:", search_result.metadata['results_count'], "条结果")
     
-    # 2. 深度网页抓取
+    # 2. 深度网页抓取（支持PDF）
     fetch_tool = WebFetchTool()
-    urls = ["https://github.com/langchain-ai/langgraph"]
+    urls = ["https://github.com/langchain-ai/langgraph", "https://arxiv.org/pdf/1706.03762.pdf"]
     fetch_result = await fetch_tool(
         urls=urls,
         max_content_length=3000,
@@ -247,7 +265,7 @@ async def demo_tools():
     )
     
     if fetch_result.success:
-        print("🕷️ 抓取完成:", fetch_result.metadata['success_count'], "个页面")
+        print("🕷️ 抓取完成:", fetch_result.metadata['success_count'], "个页面/文档")
     
     # 3. 创建研究工件
     artifact_tool = CreateArtifactTool()
@@ -265,49 +283,97 @@ async def demo_tools():
 asyncio.run(demo_tools())
 ```
 
-### 3. 测试基础模块
-
-```bash
-# 测试LLM接口
-python -m src.models.llm
-
-# 测试工具系统
-python -m src.tools.implementations.web_search
-python -m src.tools.implementations.web_fetch
-python -m src.tools.implementations.artifact_ops
-
-# 测试工具注册系统
-python -m src.tools.registry
-
-# 测试权限系统
-python -m src.tools.permissions
-```
-
-### 4. 多智能体系统测试
+### 3. 核心模块使用
 
 ```python
-from test.multi_agent_test import MultiAgentSystem
 import asyncio
+from src.core.graph import create_multi_agent_graph
+from src.core.controller import ExecutionController
+from src.utils.logger import set_global_debug
 
-async def demo_multi_agent():
-    # 初始化多智能体系统
-    system = MultiAgentSystem()
-    
-    # 测试复杂研究任务
-    task = "研究并分析AI多智能体系统在2024年的最新进展"
-    result = await system.process_task(task, complexity="complex")
-    
-    print(f"✅ 任务完成")
-    print(f"工具调用次数: {result['tool_calls']}")
-    print(f"结果预览: {result['response'][:200]}...")
+# 开启调试模式
+set_global_debug(True)
 
-# 运行演示
-asyncio.run(demo_multi_agent())
+async def demo_core_system():
+    # 创建系统
+    compiled_graph = create_multi_agent_graph()
+    controller = ExecutionController(compiled_graph)
+    
+    # 第一轮对话
+    result1 = await controller.execute(
+        content="研究一下LangGraph的最新特性"
+    )
+    conv_id = result1["conversation_id"]
+    print(f"回复: {result1['response']}")
+    
+    # 第二轮（自动继续对话历史）
+    result2 = await controller.execute(
+        content="帮我整理成一份技术文档",
+        conversation_id=conv_id
+    )
+    print(f"回复: {result2['response']}")
+    
+    # 如果遇到权限请求
+    if result2.get("interrupted"):
+        print(f"⚠️ 需要权限: {result2['interrupt_data']['tool_name']}")
+        
+        # 批准权限
+        result2 = await controller.execute(
+            thread_id=result2["thread_id"],
+            resume_data={"type": "permission", "approved": True}
+        )
+        print(f"✅ 完成: {result2['response']}")
+
+asyncio.run(demo_core_system())
+```
+
+### 4. 分支对话
+
+```python
+async def demo_branch_conversation():
+    compiled_graph = create_multi_agent_graph()
+    controller = ExecutionController(compiled_graph)
+    
+    # 主线对话
+    result1 = await controller.execute(content="计算 15 + 28")
+    conv_id = result1["conversation_id"]
+    msg1_id = result1["message_id"]
+    
+    # 继续主线
+    result2 = await controller.execute(
+        content="再乘以2",
+        conversation_id=conv_id
+    )
+    
+    # 从msg1创建分支
+    result3 = await controller.execute(
+        content="再减去10",
+        conversation_id=conv_id,
+        parent_message_id=msg1_id  # 从msg1分支
+    )
+    
+    print(f"主线结果: {result2['response']}")
+    print(f"分支结果: {result3['response']}")
+
+asyncio.run(demo_branch_conversation())
+```
+
+### 5. 运行完整测试
+
+```bash
+# 运行核心模块集成测试
+python -m test.core_graph_test
+
+# 测试选项：
+# 1. 多轮对话演示
+# 2. 权限确认演示
+# 3. 分支对话演示
+# 4. 全部演示
 ```
 
 ## 📈 开发路线图
 
-- ✅ **基础设施** (v0.1) - **已完成**
+- ✅ **基础设施** (v0.1.0) - **已完成**
   - [x] 项目结构和配置
   - [x] 核心工具模块（日志、重试、XML解析）
   - [x] 多模型LLM接口统一封装
@@ -315,33 +381,42 @@ asyncio.run(demo_multi_agent())
 - ✅ **工具系统** (v0.1.5) - **已完成**
   - [x] 工具框架和权限控制
   - [x] Artifact操作工具
-  - [x] Web搜索和抓取工具
+  - [x] Web搜索和抓取工具（支持PDF）
   - [x] XML提示词生成系统
 
-- ✅ **智能体系统** (v0.2) - **已完成**
+- ✅ **智能体系统** (v0.2.0) - **已完成**
   - [x] BaseAgent抽象类和统一执行框架
   - [x] Lead Agent 实现 - 任务协调和信息整合
   - [x] Search Agent 实现 - 信息检索专家
   - [x] Crawl Agent 实现 - 网页内容抓取专家
-  - [x] 多Agent系统集成和测试
 
-- 🚧 **工作流编排** (v0.3) - **开发中**
-  - [ ] Agent状态管理 (core/state.py)
-  - [ ] LangGraph工作流 (core/graph.py)
-  - [ ] 执行控制器 (core/controller.py)
-  - [ ] Agent路由和消息传递
+- ✅ **工作流编排** (v0.3.0) - **已完成**
+  - [x] Agent状态管理 (state.py)
+  - [x] LangGraph工作流 (graph.py)
+  - [x] 执行控制器 (controller.py)
+  - [x] Context压缩和管理 (context_manager.py)
+  - [x] 多轮对话支持
+  - [x] 分支对话功能
+  - [x] 权限确认流程
 
-- 🚀 **高级特性** (v0.4) - **计划中**
-  - [ ] 流式响应
-  - [ ] 人机协作控制
-  - [ ] 错误处理和恢复
-  - [ ] 监控和指标
-
-- 🎉 **生产就绪** (v1.0) - **目标**
+- 🚧 **高级特性** (v0.4.0) - **开发中**
+  - [ ] 流式响应优化
+  - [ ] 错误处理和自动恢复
+  - [ ] 监控和指标系统
   - [ ] 性能优化
+
+- 🚀 **API接口** (v0.5.0) - **计划中**
+  - [ ] FastAPI REST接口
+  - [ ] WebSocket实时通信
+  - [ ] 前端界面集成
+  - [ ] API文档
+
+- 🎉 **生产就绪** (v1.0.0) - **目标**
+  - [ ] 完整的错误处理
+  - [ ] 生产级性能优化
   - [ ] 安全增强
-  - [ ] 完整文档
-  - [ ] 部署指南
+  - [ ] 完整文档和示例
+  - [ ] Docker部署支持
 
 
 ## 📞 支持与反馈
