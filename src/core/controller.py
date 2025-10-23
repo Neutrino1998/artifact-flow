@@ -1,20 +1,36 @@
 """
-执行控制器
+执行控制器（支持流式输出）
 核心改进：
 1. ConversationManager负责格式化对话历史
 2. 复用ContextManager.compress_messages做智能裁剪
+3. 🆕 支持流式输出 (stream_execute 方法)
 """
 
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, AsyncGenerator
 from uuid import uuid4
 from datetime import datetime
+from enum import Enum
 from langgraph.types import Command
 
 from core.state import create_initial_state
 from core.context_manager import ContextManager
+from agents.base import StreamEvent, StreamEventType
 from utils.logger import get_logger
 
 logger = get_logger("ArtifactFlow")
+
+
+class ControllerEventType(Enum):
+    """
+    Controller层流式事件类型
+    
+    分层设计：
+    - Controller层：关注会话生命周期（METADATA, STREAM, COMPLETE）
+    - Agent层：关注执行细节（StreamEventType中定义）
+    """
+    METADATA = "metadata"  # 会话元数据（conversation_id, message_id, thread_id等）
+    STREAM = "stream"      # 流式内容（包含Agent的StreamEvent）
+    COMPLETE = "complete"  # 执行完成（成功/失败/中断）
 
 
 class ConversationManager:
@@ -198,8 +214,9 @@ class ConversationManager:
 
 class ExecutionController:
     """
-    执行控制器
+    执行控制器（支持流式输出）
     使用ConversationManager格式化对话历史
+    提供批量和流式两种执行模式
     """
     
     def __init__(self, compiled_graph):
@@ -220,7 +237,7 @@ class ExecutionController:
         resume_data: Optional[Dict] = None,
     ) -> Dict[str, Any]:
         """
-        统一执行接口
+        批量执行接口（保持向后兼容）
         
         场景1：新消息
             - 必需: content
@@ -247,13 +264,65 @@ class ExecutionController:
                 conversation_id=conversation_id,
                 parent_message_id=parent_message_id
             )
-        
         # 场景2：恢复权限
         elif thread_id and resume_data:
             return await self._resume_from_permission(
                 thread_id=thread_id,
                 resume_data=resume_data
             )
+        
+        else:
+            raise ValueError("Either 'content' or 'thread_id + resume_data' required")
+    
+    async def stream_execute(
+        self,
+        content: Optional[str] = None,
+        thread_id: Optional[str] = None,
+        conversation_id: Optional[str] = None,
+        parent_message_id: Optional[str] = None,
+        resume_data: Optional[Dict] = None,
+    ) -> AsyncGenerator[Dict[str, Any], None]:
+        """
+        🆕 流式执行接口
+        
+        场景1：新消息（流式）
+            - 必需: content
+            - 可选: conversation_id, parent_message_id
+            
+        场景2：恢复权限（流式）
+            - 必需: thread_id, resume_data
+        
+        Args:
+            content: 用户消息内容
+            thread_id: 线程ID（恢复时使用）
+            conversation_id: 对话ID
+            parent_message_id: 父消息ID（分支时使用）
+            resume_data: 恢复数据 {"type": "permission", "approved": bool}
+            
+        Yields:
+            流式事件字典:
+            {
+                "event_type": "stream" | "metadata" | "complete",
+                "data": {...}
+            }
+        """
+        
+        # 场景1：新消息
+        if content is not None:
+            async for event in self._stream_new_message(
+                content=content,
+                conversation_id=conversation_id,
+                parent_message_id=parent_message_id
+            ):
+                yield event
+        
+        # 场景2：恢复权限
+        elif thread_id and resume_data:
+            async for event in self._stream_resume_from_permission(
+                thread_id=thread_id,
+                resume_data=resume_data
+            ):
+                yield event
         
         else:
             raise ValueError("Either 'content' or 'thread_id + resume_data' required")
@@ -265,7 +334,7 @@ class ExecutionController:
         parent_message_id: Optional[str]
     ) -> Dict[str, Any]:
         """
-        处理新消息
+        处理新消息（批量模式）
         
         流程：
         1. 确保conversation存在
@@ -336,7 +405,7 @@ class ExecutionController:
             
             # 8. 处理结果
             if result.get("__interrupt__"):
-                # 权限中断 - __interrupt__ 是一个列表，包含 Interrupt 对象
+                # 权限中断: __interrupt__ 是一个列表，包含 Interrupt 对象
                 interrupts = result["__interrupt__"]
                 
                 # 取第一个 Interrupt 对象的 value 属性
@@ -403,13 +472,186 @@ class ExecutionController:
                 "error": str(e)
             }
     
+    async def _stream_new_message(
+        self,
+        content: str,
+        conversation_id: Optional[str],
+        parent_message_id: Optional[str]
+    ) -> AsyncGenerator[Dict[str, Any], None]:
+        """
+        🆕 处理新消息（流式模式）
+        
+        流程：
+        1-6. 准备工作（与批量模式相同）
+        7. 使用 graph.astream() 流式执行
+        8. 实时yield事件
+        """
+        
+        # 1-6. 准备工作（与批量模式相同）
+        if not conversation_id:
+            conversation_id = self.conversation_manager.start_conversation()
+        elif conversation_id not in self.conversation_manager.conversations:
+            self.conversation_manager.start_conversation(conversation_id)
+        
+        if not parent_message_id:
+            conversation = self.conversation_manager.conversations[conversation_id]
+            parent_message_id = conversation.get("active_branch") or None
+            if parent_message_id:
+                logger.debug(f"Auto-set parent_message_id to current active_branch: {parent_message_id}")
+
+        conversation_history = self.conversation_manager.format_conversation_history(
+            conv_id=conversation_id,
+            to_message_id=parent_message_id
+        )
+        
+        message_id = f"msg-{uuid4().hex}"
+        thread_id = f"thd-{uuid4().hex}"
+        
+        session_id = self._get_or_create_session(conversation_id)
+        from tools.implementations.artifact_ops import _artifact_store
+        _artifact_store.set_session(session_id)
+        _artifact_store.clear_temporary_artifacts()
+        
+        initial_state = create_initial_state(
+            task=content,
+            session_id=session_id,
+            thread_id=thread_id,
+            message_id=message_id,
+            conversation_history=conversation_history
+        )
+        
+        logger.info(f"Processing new message (streaming) in conversation {conversation_id}")
+        
+        self.conversation_manager.add_message(
+            conv_id=conversation_id,
+            message_id=message_id,
+            content=content,
+            thread_id=thread_id,
+            parent_id=parent_message_id
+        )
+        
+        # 先发送元数据事件
+        yield {
+            "event_type": ControllerEventType.METADATA,
+            "data": {
+                "conversation_id": conversation_id,
+                "message_id": message_id,
+                "thread_id": thread_id
+            }
+        }
+        
+        # 7-8. 流式执行graph
+        config = {"configurable": {"thread_id": thread_id}}
+        
+        try:
+            # 🔥 关键改动：使用 astream() 替代 ainvoke()，并指定 stream_mode="custom"
+            final_response = None
+            
+            async for chunk in self.graph.astream(
+                initial_state,
+                config,
+                stream_mode="custom"  # 关键：使用 custom 模式
+            ):
+                # chunk 是一个字典，包含我们在 graph 中通过 writer() 发送的数据
+                # 格式: {"type": "...", "agent": "...", "timestamp": "...", "data": {...}}
+                
+                # 直接转发自定义事件
+                yield {
+                    "event_type": ControllerEventType.STREAM,
+                    "data": chunk
+                }
+                
+                # 收集最终响应
+                if chunk.get("type") == "complete" and chunk.get("data"):
+                    final_response = chunk["data"].get("content", "")
+            
+            # 检查是否有中断
+            # 注意：在流式模式下，中断的检测方式可能不同
+            # 这里我们假设最后的状态中会有 __interrupt__
+            final_state = await self.graph.aget_state(config)
+            
+            if final_state.values.get("__interrupt__"):
+                # 权限中断
+                interrupts = final_state.values["__interrupt__"]
+                interrupt_data = interrupts[0].value
+                
+                self.interrupted_threads[thread_id] = {
+                    "conversation_id": conversation_id,
+                    "message_id": message_id,
+                    "interrupt_data": interrupt_data,
+                    "timestamp": datetime.now().isoformat()
+                }
+                
+                logger.info(f"⚠️ Execution interrupted: {interrupt_data['type']}")
+                
+                # 发送中断事件
+                yield {
+                    "event_type": ControllerEventType.COMPLETE,
+                    "data": {
+                        "success": True,
+                        "interrupted": True,
+                        "conversation_id": conversation_id,
+                        "message_id": message_id,
+                        "thread_id": thread_id,
+                        "interrupt_type": interrupt_data["type"],
+                        "interrupt_data": interrupt_data
+                    }
+                }
+            
+            else:
+                # 正常完成
+                response = final_state.values.get("graph_response", final_response or "")
+                
+                self.conversation_manager.update_response(
+                    conv_id=conversation_id,
+                    message_id=message_id,
+                    response=response
+                )
+                
+                logger.info(f"✅ Streaming execution completed")
+                
+                # 发送完成事件
+                yield {
+                    "event_type": ControllerEventType.COMPLETE,
+                    "data": {
+                        "success": True,
+                        "interrupted": False,
+                        "conversation_id": conversation_id,
+                        "message_id": message_id,
+                        "thread_id": thread_id,
+                        "response": response
+                    }
+                }
+        
+        except Exception as e:
+            logger.exception(f"Error in streaming graph execution: {e}")
+            
+            error_msg = f"Error: {str(e)}"
+            self.conversation_manager.update_response(
+                conv_id=conversation_id,
+                message_id=message_id,
+                response=error_msg
+            )
+            
+            # 发送错误事件
+            yield {
+                "event_type": ControllerEventType.COMPLETE,
+                "data": {
+                    "success": False,
+                    "conversation_id": conversation_id,
+                    "message_id": message_id,
+                    "thread_id": thread_id,
+                    "error": str(e)
+                }
+            }
+    
     async def _resume_from_permission(
         self,
         thread_id: str,
         resume_data: Dict
     ) -> Dict[str, Any]:
         """
-        从权限中断恢复
+        从权限中断恢复（批量模式）
         
         Args:
             thread_id: 线程ID
@@ -467,6 +709,98 @@ class ExecutionController:
                 "message_id": interrupt_info["message_id"],
                 "thread_id": thread_id,
                 "error": str(e)
+            }
+    
+    async def _stream_resume_from_permission(
+        self,
+        thread_id: str,
+        resume_data: Dict
+    ) -> AsyncGenerator[Dict[str, Any], None]:
+        """
+        🆕 从权限中断恢复（流式模式）
+        
+        Args:
+            thread_id: 线程ID
+            resume_data: 恢复数据 {"type": "permission", "approved": bool}
+            
+        Yields:
+            流式事件
+        """
+        
+        if thread_id not in self.interrupted_threads:
+            raise ValueError(f"No interrupted execution for thread {thread_id}")
+        
+        interrupt_info = self.interrupted_threads[thread_id]
+        
+        logger.info(f"Resuming thread {thread_id} after permission (streaming)")
+        
+        # 发送元数据
+        yield {
+            "event_type": ControllerEventType.METADATA,
+            "data": {
+                "conversation_id": interrupt_info["conversation_id"],
+                "message_id": interrupt_info["message_id"],
+                "thread_id": thread_id,
+                "resuming": True
+            }
+        }
+        
+        config = {"configurable": {"thread_id": thread_id}}
+        
+        try:
+            final_response = None
+            
+            async for chunk in self.graph.astream(
+                Command(resume=resume_data.get("approved", False)),
+                config,
+                stream_mode="custom"
+            ):
+                yield {
+                    "event_type": ControllerEventType.STREAM,
+                    "data": chunk
+                }
+                
+                if chunk.get("type") == "complete" and chunk.get("data"):
+                    final_response = chunk["data"].get("content", "")
+            
+            del self.interrupted_threads[thread_id]
+            
+            # 获取最终状态
+            final_state = await self.graph.aget_state(config)
+            response = final_state.values.get("graph_response", final_response or "")
+            
+            self.conversation_manager.update_response(
+                conv_id=interrupt_info["conversation_id"],
+                message_id=interrupt_info["message_id"],
+                response=response
+            )
+            
+            logger.info(f"✅ Streaming resumed execution completed")
+            
+            yield {
+                "event_type": ControllerEventType.COMPLETE,
+                "data": {
+                    "success": True,
+                    "interrupted": False,
+                    "conversation_id": interrupt_info["conversation_id"],
+                    "message_id": interrupt_info["message_id"],
+                    "thread_id": thread_id,
+                    "response": response
+                }
+            }
+        
+        except Exception as e:
+            logger.exception(f"Error in streaming resume execution: {e}")
+            
+            yield {
+                "event_type": ControllerEventType.COMPLETE,
+                "data": {
+                    "success": False,
+                    "conversation_id": interrupt_info["conversation_id"],
+                    "message_id": interrupt_info["message_id"],
+                    "thread_id": thread_id,
+                    "error": str(e)
+                }
             }
     
     def _get_or_create_session(self, conversation_id: str) -> str:

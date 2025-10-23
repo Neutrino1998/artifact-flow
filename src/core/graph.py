@@ -1,19 +1,20 @@
 """
-可扩展的Graph构建器
+可扩展的Graph构建器（支持流式输出）
 核心改进：
 1. 简化agent_node逻辑
 2. 简化route_func逻辑（基于phase）
 3. user_confirmation_node支持任何agent
+4. 支持流式输出 (stream_mode="custom")
 """
 
-from typing import Dict, Optional, Any, Callable
+from typing import Dict, Optional, Any, Callable, AsyncGenerator
 from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.memory import MemorySaver
-from langgraph.types import interrupt
+from langgraph.types import interrupt, StreamWriter
 
 from core.state import AgentState, ExecutionPhase, merge_agent_response_to_state
 from core.context_manager import ContextManager
-from agents.base import BaseAgent, AgentResponse
+from agents.base import BaseAgent, AgentResponse, StreamEvent, StreamEventType
 from tools.base import ToolPermission, ToolResult
 from utils.logger import get_logger
 
@@ -24,6 +25,8 @@ class ExtendableGraph:
     """
     可扩展的Graph构建器
     支持动态注册Agent和权限确认
+    支持流式输出 (stream_mode="custom")
+    
     Workflow:
     [Start] 
         → [LeadAgentExecuting]
@@ -140,7 +143,7 @@ class ExtendableGraph:
     
     def _create_agent_node(self, agent_name: str) -> Callable:
         """
-        为Agent创建节点函数
+        为Agent创建节点函数（支持流式输出）
         
         Args:
             agent_name: Agent名称
@@ -148,9 +151,16 @@ class ExtendableGraph:
         Returns:
             异步节点函数
         """
-        async def agent_node(state: AgentState) -> AgentState:
-            """Agent执行节点"""
-            logger.info(f"Executing {agent_name} node")
+        async def agent_node(state: AgentState, writer: StreamWriter) -> AgentState:
+            """
+            Agent执行节点（流式版本）
+            
+            关键改动：
+            1. 接收 StreamWriter 参数
+            2. 使用 agent.stream() 替代 agent.execute()
+            3. 通过 writer() 发送自定义流式事件
+            """
+            logger.info(f"Executing {agent_name} node (streaming)")
             
             agent = self.agents[agent_name]
             memory = state.get("agent_memories", {}).get(agent_name, {})
@@ -195,19 +205,43 @@ class ExtendableGraph:
                     pending_tool_result=pending_tool_result
                 )
                 
-                # ========== 执行Agent ==========
-                response = await agent.execute(
+                # ========== 流式执行Agent ==========
+                final_response = None
+                
+                # 关键改动：使用 agent.stream() 替代 agent.execute()
+                async for event in agent.stream(
                     messages=messages,
                     is_resuming=is_resuming
-                )
+                ):
+                    # 通过 StreamWriter 发送自定义事件
+                    # LangGraph 会将这些事件包装在 custom 事件中
+                    writer({
+                        "type": event.type.value,  # 转换 Enum 为 string
+                        "agent": event.agent,
+                        "timestamp": event.timestamp.isoformat(),
+                        "data": self._serialize_event_data(event.data)
+                    })
+                    
+                    # 保存最终响应
+                    if event.data:
+                        final_response = event.data
                 
                 # ========== 更新状态 ==========
-                merge_agent_response_to_state(
-                    state,
-                    agent_name,
-                    response,
-                    is_resuming=is_resuming
-                )
+                if final_response:
+                    merge_agent_response_to_state(
+                        state,
+                        agent_name,
+                        final_response,
+                        is_resuming=is_resuming
+                    )
+                else:
+                    # 如果没有响应，创建错误响应
+                    error_response = AgentResponse(
+                        success=False,
+                        content=f"{agent_name} failed to produce response"
+                    )
+                    merge_agent_response_to_state(state, agent_name, error_response)
+                    state["phase"] = ExecutionPhase.COMPLETED
                 
             except Exception as e:
                 logger.exception(f"Error in {agent_name}: {e}")
@@ -224,6 +258,33 @@ class ExtendableGraph:
             return state
         
         return agent_node
+    
+    def _serialize_event_data(self, data: Any) -> Dict:
+        """
+        序列化事件数据为可JSON序列化的字典
+        
+        Args:
+            data: AgentResponse 或其他数据
+            
+        Returns:
+            可序列化的字典
+        """
+        if data is None:
+            return None
+        
+        if isinstance(data, AgentResponse):
+            return {
+                "success": data.success,
+                "content": data.content,
+                "tool_calls": data.tool_calls,
+                "reasoning_content": data.reasoning_content,
+                "metadata": data.metadata,
+                "routing": data.routing,
+                "token_usage": data.token_usage
+            }
+        
+        # 其他数据类型直接返回
+        return data
     
     def _add_routing_rules(self, agent_name: str) -> None:
         """
@@ -300,7 +361,7 @@ class ExtendableGraph:
     ) -> Any:
         """编译Graph"""
         
-        # 1. 为user_confirmation添加出边 👈 新增
+        # 1. 为user_confirmation添加出边
         def route_after_confirmation(state: AgentState) -> str:
             """从权限确认返回原agent"""
             phase = state["phase"]
@@ -328,7 +389,7 @@ class ExtendableGraph:
             route_map
         )
         
-        # 2. 编译原有逻辑
+        # 2. 编译（调用时使用 stream_mode="custom"）
         if checkpointer is None:
             checkpointer = MemorySaver()
         
