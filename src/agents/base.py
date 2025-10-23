@@ -353,6 +353,12 @@ class BaseAgent(ABC):
                                 agent=self.config.name, 
                                 data=current_response
                             )
+                        # 流式结束后，yield 完成事件
+                        yield StreamEvent(
+                            type=StreamEventType.LLM_COMPLETE, 
+                            agent=self.config.name, 
+                            data=current_response
+                        )
                     else:
                         # 批量模式：一次性获取完整响应
                         response = await self._call_llm_with_retry(messages, streaming=False)
@@ -433,6 +439,8 @@ class BaseAgent(ABC):
                         result = await self._execute_single_tool(tool_call)
                         if result.success and result.metadata.get("needs_confirmation") is not True:
                             logger.info(f"{self.config.name} tool '{tool_call.name}': SUCCESS")
+                        elif result.metadata.get("needs_confirmation"):
+                            logger.info(f"{self.config.name} tool '{tool_call.name}': PENDING CONFIRMATION")
                         else:
                             logger.warning(f"{self.config.name} tool '{tool_call.name}': FAILED - {result.error}")
                         
@@ -440,7 +448,6 @@ class BaseAgent(ABC):
                         # 检查是否需要权限确认
                         if result.metadata and result.metadata.get("needs_confirmation"):
                             # 权限确认中断
-                            logger.info(f"Execution interrupted for tool '{tool_call.name}' pending permission.")
                             current_response.tool_interactions = new_tool_interactions
                             # 配置工具权限路由
                             current_response.routing = {
