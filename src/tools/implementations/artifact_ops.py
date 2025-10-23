@@ -1,14 +1,14 @@
 """
 Artifact操作工具
-模仿Claude的Artifact系统，支持create/update/rewrite操作
+使用 diff-match-patch 提供鲁棒的文本更新功能
 """
 
 from typing import Dict, Any, Optional, List, Tuple
 from datetime import datetime
 from uuid import uuid4
-import difflib
-import re
 from dataclasses import dataclass, field
+import diff_match_patch as dmp_module  # pip install diff-match-patch
+
 from tools.base import BaseTool, ToolResult, ToolParameter, ToolPermission
 from utils.logger import get_logger
 
@@ -25,228 +25,23 @@ class ArtifactVersion:
     changes: Optional[List[Tuple[str, str]]] = None  # [(old_str, new_str), ...]
 
 
-class FuzzyTextMatcher:
-    """
-    模糊文本匹配器，类似git diff的匹配逻辑
-    """
-    
-    @staticmethod
-    def find_best_match(
-        content: str, 
-        target: str, 
-        threshold: float = 0.85,  # 85%相似度即可
-        context_lines: int = 2     # 上下文行数
-    ) -> Tuple[Optional[str], float, Tuple[int, int]]:
-        """
-        在content中找到与target最相似的文本段
-        
-        Returns:
-            (matched_text, similarity_ratio, (start_pos, end_pos))
-        """
-        
-        # 1. 先尝试精确匹配（最快）
-        if target in content:
-            start = content.index(target)
-            return target, 1.0, (start, start + len(target))
-        
-        # 2. 尝试忽略空白差异的匹配
-        normalized_target = FuzzyTextMatcher._normalize_whitespace(target)
-        normalized_content = FuzzyTextMatcher._normalize_whitespace(content)
-        
-        if normalized_target in normalized_content:
-            # 找到规范化后的位置，然后映射回原始位置
-            norm_start = normalized_content.index(normalized_target)
-            # 这里需要更复杂的映射逻辑，简化处理
-            return FuzzyTextMatcher._extract_original_match(
-                content, target, norm_start
-            )
-        
-        # 3. 基于行的模糊匹配（类似git diff）
-        return FuzzyTextMatcher._line_based_fuzzy_match(
-            content, target, threshold
-        )
-    
-    @staticmethod
-    def _normalize_whitespace(text: str) -> str:
-        """规范化空白字符：多个空白变一个，去除行尾空白"""
-        # 将所有空白序列替换为单个空格
-        text = re.sub(r'\s+', ' ', text)
-        # 去除每行末尾的空白
-        lines = text.split('\n')
-        lines = [line.rstrip() for line in lines]
-        return '\n'.join(lines).strip()
-    
-    @staticmethod
-    def _line_based_fuzzy_match(
-        content: str, 
-        target: str, 
-        threshold: float
-    ) -> Tuple[Optional[str], float, Tuple[int, int]]:
-        """
-        基于行的模糊匹配（git diff风格）
-        将文本分割成行，找到最匹配的连续行序列
-        """
-        content_lines = content.split('\n')
-        target_lines = target.strip().split('\n')
-        
-        if not target_lines:
-            return None, 0.0, (0, 0)
-        
-        best_match = None
-        best_ratio = 0.0
-        best_pos = (0, 0)
-        
-        # 滑动窗口搜索
-        window_size = len(target_lines)
-        
-        for i in range(len(content_lines) - window_size + 1):
-            window = content_lines[i:i + window_size]
-            window_text = '\n'.join(window)
-            
-            # 使用SequenceMatcher计算相似度
-            matcher = difflib.SequenceMatcher(
-                None, 
-                target.strip(), 
-                window_text.strip()
-            )
-            ratio = matcher.ratio()
-            
-            if ratio > best_ratio:
-                best_ratio = ratio
-                best_match = window_text
-                
-                # 计算在原始内容中的位置
-                lines_before = '\n'.join(content_lines[:i])
-                start_pos = len(lines_before) + (1 if i > 0 else 0)
-                end_pos = start_pos + len(window_text)
-                best_pos = (start_pos, end_pos)
-        
-        if best_ratio >= threshold:
-            return best_match, best_ratio, best_pos
-        
-        # 4. 如果行匹配失败，尝试更灵活的块匹配
-        return FuzzyTextMatcher._flexible_block_match(
-            content, target, threshold
-        )
-    
-    @staticmethod
-    def _flexible_block_match(
-        content: str, 
-        target: str, 
-        threshold: float
-    ) -> Tuple[Optional[str], float, Tuple[int, int]]:
-        """
-        灵活的块匹配：在内容中搜索与目标最相似的文本块
-        使用动态规划找最长公共子序列
-        """
-        target_len = len(target)
-        search_window = target_len * 2  # 搜索窗口是目标长度的2倍
-        step = max(1, target_len // 4)  # 步长是目标长度的1/4
-        
-        best_match = None
-        best_ratio = 0.0
-        best_pos = (0, 0)
-        
-        for start in range(0, len(content) - target_len + 1, step):
-            # 尝试不同长度的匹配（±20%）
-            for length_factor in [0.8, 0.9, 1.0, 1.1, 1.2]:
-                end = min(
-                    start + int(target_len * length_factor),
-                    len(content)
-                )
-                
-                candidate = content[start:end]
-                
-                # 快速相似度检查（基于字符集合）
-                if not FuzzyTextMatcher._quick_similarity_check(
-                    candidate, target, 0.5
-                ):
-                    continue
-                
-                # 详细相似度计算
-                matcher = difflib.SequenceMatcher(None, target, candidate)
-                ratio = matcher.ratio()
-                
-                if ratio > best_ratio:
-                    best_ratio = ratio
-                    best_match = candidate
-                    best_pos = (start, end)
-                    
-                    # 如果找到非常好的匹配，提前退出
-                    if ratio > 0.95:
-                        return best_match, best_ratio, best_pos
-        
-        if best_ratio >= threshold:
-            return best_match, best_ratio, best_pos
-        
-        return None, best_ratio, (0, 0)
-    
-    @staticmethod
-    def _quick_similarity_check(text1: str, text2: str, threshold: float) -> bool:
-        """快速检查两个文本的相似度（基于字符集合）"""
-        set1 = set(text1.lower().split())
-        set2 = set(text2.lower().split())
-        
-        if not set1 or not set2:
-            return False
-        
-        intersection = len(set1 & set2)
-        union = len(set1 | set2)
-        
-        return (intersection / union) >= threshold if union > 0 else False
-    
-    @staticmethod
-    def _extract_original_match(
-        content: str, 
-        target: str, 
-        approximate_pos: int
-    ) -> Tuple[str, float, Tuple[int, int]]:
-        """从大概位置提取原始匹配文本"""
-        # 简化实现：在approximate_pos附近搜索
-        search_range = len(target) * 2
-        start = max(0, approximate_pos - search_range)
-        end = min(len(content), approximate_pos + search_range)
-        
-        search_area = content[start:end]
-        
-        # 在搜索区域内找最佳匹配
-        best_match = None
-        best_ratio = 0.0
-        best_pos_in_area = 0
-        
-        for i in range(len(search_area) - len(target) + 1):
-            candidate = search_area[i:i+len(target)]
-            ratio = difflib.SequenceMatcher(None, target, candidate).ratio()
-            
-            if ratio > best_ratio:
-                best_ratio = ratio
-                best_match = candidate
-                best_pos_in_area = i
-        
-        if best_match:
-            actual_start = start + best_pos_in_area
-            actual_end = actual_start + len(best_match)
-            return best_match, best_ratio, (actual_start, actual_end)
-        
-        return None, 0.0, (0, 0)
-    
-
 class Artifact:
     """
     Artifact对象
     支持文本内容的创建、更新和重写
+    使用 diff-match-patch 实现鲁棒的模糊匹配
     """
     
     def __init__(
         self,
         artifact_id: str,
-        content_type: str,  # 👈 从 artifact_type 改为 content_type
+        content_type: str,
         title: str,
         initial_content: str,
         metadata: Dict = None
     ):
         self.id = artifact_id
-        self.content_type = content_type  # 👈 从 self.type 改为 self.content_type
+        self.content_type = content_type
         self.title = title
         self.content = initial_content
         self.metadata = metadata or {}
@@ -264,129 +59,134 @@ class Artifact:
             )
         ]
     
-    def update(self, old_str: str, new_str: str, use_fuzzy: bool = True) -> Tuple[bool, str]:
+    def update(
+        self, 
+        old_str: str, 
+        new_str: str,
+        match_threshold: float = 0.7,  # 匹配阈值：越低越宽松
+        max_diff_ratio: float = 0.3    # 最大差异率：越高越宽松
+    ) -> Tuple[bool, str, Optional[Dict]]:
         """
-        更新内容（支持模糊匹配）
+        使用 diff-match-patch 更新内容
         
         Args:
             old_str: 要替换的原文本
             new_str: 新文本
-            use_fuzzy: 是否启用模糊匹配（默认启用）
+            match_threshold: 匹配阈值 (0.0-1.0)，越高越严格
+            max_diff_ratio: 最大允许的差异率 (相对于 old_str 长度)
             
         Returns:
-            (成功与否, 消息, 额外信息字典)  # 👈 新增第三个返回值
+            (成功与否, 消息, 匹配详情字典)
         """
-        # 1. 先尝试精确匹配
-        count = self.content.count(old_str)
         
-        if count == 1:
-            # 精确匹配成功，执行原有逻辑
-            new_content = self.content.replace(old_str, new_str)
+        # Step 1: 快速精确匹配
+        if old_str in self.content:
+            count = self.content.count(old_str)
             
-            # 保存版本
-            self.current_version += 1
-            self.versions.append(
-                ArtifactVersion(
-                    version=self.current_version,
-                    content=new_content,
-                    updated_at=datetime.now(),
-                    update_type="update",
-                    changes=[(old_str, new_str)]
-                )
-            )
+            if count > 1:
+                return False, f"Text '{old_str[:50]}...' appears {count} times (must be unique)", None
             
-            self.content = new_content
-            self.updated_at = datetime.now()
+            # 精确匹配成功
+            new_content = self.content.replace(old_str, new_str, 1)
+            self._save_version(new_content, "update", [(old_str, new_str)])
             
             return True, f"Successfully updated artifact (v{self.current_version})", {
                 "match_type": "exact",
                 "similarity": 1.0
             }
         
-        elif count > 1:
-            return False, f"Text '{old_str[:50]}...' appears {count} times (must be unique)", None
+        # Step 2: 使用 DMP 进行模糊匹配
+        logger.debug("Exact match failed, attempting fuzzy match...")
         
-        # 2. 如果精确匹配失败且启用模糊匹配
-        if use_fuzzy:
-            logger.debug("Exact match failed, attempting fuzzy match...")
-            
-            matcher = FuzzyTextMatcher()
-            matched_text, similarity, (start, end) = matcher.find_best_match(
-                self.content, 
-                old_str, 
-                threshold=0.85  # 85%相似度阈值
-            )
-            
-            if matched_text:
-                # 记录模糊匹配信息
-                logger.info(
-                    f"Fuzzy match found with {similarity:.1%} similarity\n"
-                    f"Expected: {old_str[:100]}...\n"
-                    f"Found: {matched_text[:100]}..."
-                )
-                
-                # 执行替换
-                new_content = (
-                    self.content[:start] + 
-                    new_str + 
-                    self.content[end:]
-                )
-                
-                # 保存版本
-                self.current_version += 1
-                self.versions.append(
-                    ArtifactVersion(
-                        version=self.current_version,
-                        content=new_content,
-                        updated_at=datetime.now(),
-                        update_type="update_fuzzy",  # 标记为模糊更新
-                        changes=[(matched_text, new_str)]  # 记录实际匹配的文本
-                    )
-                )
-                
-                self.content = new_content
-                self.updated_at = datetime.now()
-                
-                # 👇 返回详细的匹配信息
-                return True, f"Successfully updated artifact (v{self.current_version}) with {similarity:.1%} match", {
-                    "match_type": "fuzzy",
-                    "similarity": similarity,
-                    "expected_text": old_str,  # 用户提供的文本
-                    "matched_text": matched_text,  # 实际匹配到的文本
-                    "position": {"start": start, "end": end}
-                }
+        dmp = dmp_module.diff_match_patch()
+        dmp.Match_Threshold = match_threshold
+        dmp.Match_Distance = len(self.content) # 大距离以覆盖全文本搜索
         
-        # 3. 完全找不到匹配
-        return False, f"Text '{old_str[:50]}...' not found in artifact", None
+        # 2.1 定位起始位置
+        match_pos = dmp.match_main(self.content, old_str, 0)
+        
+        if match_pos == -1:
+            return False, f"Failed to find matching text '{old_str[:50]}...'", None
+        
+        # 2.2 计算精确的结束位置
+        diffs = dmp.diff_main(old_str, self.content[match_pos:])
+        dmp.diff_cleanupSemantic(diffs)
+        
+        # 关键修正: diff_main 比较的是 old_str 和【文档剩余的全部内容】，
+        # 这会导致 diffs 列表的末尾包含一个巨大的“插入”操作（即文档剩余部分），
+        # 这个多余的操作会干扰 diff_xIndex 的计算，导致计算出的长度远超预期。
+        # 因此，我们需要安全地裁剪掉这个多余的尾巴。
+        #
+        # 安全检查：仅当最后一个操作是“插入”(type 1)时才进行裁剪，
+        # 这样可以正确处理 old_str 恰好匹配到文档末尾的边缘情况。
+        if diffs and diffs[-1][0] == 1:
+            diffs = diffs[:-1]
+
+        # 检查相似度
+        levenshtein_distance = dmp.diff_levenshtein(diffs)
+        if levenshtein_distance > len(old_str) * max_diff_ratio:
+            return False, f"Best match difference is too large (edit distance: {levenshtein_distance})", None
+        
+        # 使用 diff_xIndex 计算精确长度
+        exact_len = dmp.diff_xIndex(diffs, len(old_str))
+        end_pos = match_pos + exact_len
+        matched_text = self.content[match_pos:end_pos]
+        
+        # 2.3 生成并应用补丁
+        # 优化：直接从 diff 生成补丁，而不是重新比较整个字符串
+        patches = dmp.patch_make(matched_text, new_str)
+        new_content, results = dmp.patch_apply(patches, self.content)
+
+        # 如果补丁应用失败（例如，由于上下文），则回退到直接替换
+        if not all(results):
+            logger.warning("Patch application failed, falling back to direct replacement.")
+            new_content = self.content[:match_pos] + new_str + self.content[end_pos:]
+            results = [True] # 标记为成功
+        
+        # 2.4 保存版本
+        self._save_version(new_content, "update_fuzzy", [(matched_text, new_str)])
+        
+        similarity = 1.0 - (levenshtein_distance / len(old_str))
+        logger.info(
+            f"Fuzzy match succeeded (similarity: {similarity:.1%})\n"
+            f"Expected: {old_str[:100]}...\n"
+            f"Actual: {matched_text[:100]}..."
+        )
+
+        return True, f"Fuzzy match succeeded {similarity:.1%} (v{self.current_version})", {
+            "match_type": "fuzzy",
+            "similarity": similarity,
+            "expected_text": old_str,
+            "matched_text": matched_text,
+        }
     
     def rewrite(self, new_content: str) -> Tuple[bool, str]:
-        """
-        完全重写内容
-        
-        Args:
-            new_content: 全新的内容
-            
-        Returns:
-            (成功与否, 消息)
-        """
-        # 保存版本
+        """完全重写内容"""
+        self._save_version(new_content, "rewrite")
+        return True, f"Successfully rewritten artifact (v{self.current_version})"
+    
+    def _save_version(
+        self, 
+        content: str, 
+        update_type: str, 
+        changes: Optional[List[Tuple[str, str]]] = None
+    ):
+        """保存新版本（内部方法）"""
         self.current_version += 1
         self.versions.append(
             ArtifactVersion(
                 version=self.current_version,
-                content=new_content,
+                content=content,
                 updated_at=datetime.now(),
-                update_type="rewrite"
+                update_type=update_type,
+                changes=changes
             )
         )
-        
-        self.content = new_content
+        self.content = content
         self.updated_at = datetime.now()
-        
-        return True, f"Successfully rewrote artifact (v{self.current_version})"
     
-    def get_version(self, version: int = None) -> Optional[str]:
-        """获取指定版本的内容"""
+    def get_version(self, version: Optional[int] = None) -> Optional[str]:
+        """获取指定版本的内容（用于前端对比）"""
         if version is None:
             return self.content
         
@@ -395,38 +195,40 @@ class Artifact:
                 return v.content
         return None
     
-    def to_dict(self) -> Dict[str, Any]:
-        """转换为字典格式"""
-        return {
-            "id": self.id,
-            "type": self.type,
-            "title": self.title,
-            "content": self.content,
-            "metadata": self.metadata,
-            "current_version": self.current_version,
-            "created_at": self.created_at.isoformat(),
-            "updated_at": self.updated_at.isoformat()
-        }
+    def list_versions(self) -> List[Dict[str, Any]]:
+        """
+        获取版本历史列表（用于前端时间线展示）
+        返回格式适配 Monaco Editor 的需求
+        """
+        return [
+            {
+                "version": v.version,
+                "update_type": v.update_type,
+                "updated_at": v.updated_at.isoformat(),
+                "has_changes": v.changes is not None,
+                "change_count": len(v.changes) if v.changes else 0
+            }
+            for v in self.versions
+        ]
 
 
 @dataclass
 class ArtifactSession:
-    """单个会话的artifact容器"""
+    """Artifact会话"""
     session_id: str
     artifacts: Dict[str, Artifact] = field(default_factory=dict)
     created_at: datetime = field(default_factory=datetime.now)
-    metadata: Dict[str, Any] = field(default_factory=dict)
 
 
 class ArtifactStore:
-    """Artifact存储管理（支持session）"""
+    """Artifact存储管理器"""
     
     def __init__(self):
         self.sessions: Dict[str, ArtifactSession] = {}
         self.current_session_id: Optional[str] = None
     
     def create_session(self, session_id: Optional[str] = None) -> str:
-        """创建新session并设为当前session"""
+        """创建新session"""
         if session_id is None:
             session_id = f"sess-{uuid4().hex}"
         
@@ -442,30 +244,22 @@ class ArtifactStore:
             self.create_session(session_id)
         else:
             self.current_session_id = session_id
-            logger.debug(f"Switched to session: {session_id}")
     
     def get_current_session(self) -> Optional[ArtifactSession]:
-        """获取当前session，如果没有则创建默认session"""
+        """获取当前session"""
         if self.current_session_id is None:
             self.create_session("default")
         return self.sessions.get(self.current_session_id)
     
-    def clear_session(self, session_id: Optional[str] = None):
-        """清空指定session的artifacts"""
-        sid = session_id or self.current_session_id
-        if sid and sid in self.sessions:
-            self.sessions[sid].artifacts.clear()
-            logger.info(f"Cleared session: {sid}")
-    
     def create(
         self,
         artifact_id: str,
-        content_type: str,  # 👈 从 artifact_type 改为 content_type
+        content_type: str,
         title: str,
         content: str,
         metadata: Dict = None
     ) -> Tuple[bool, str]:
-        """创建新的Artifact（在当前session中）"""
+        """创建新的Artifact"""
         session = self.get_current_session()
         if not session:
             return False, "No active session"
@@ -475,7 +269,7 @@ class ArtifactStore:
         
         artifact = Artifact(
             artifact_id=artifact_id,
-            content_type=content_type,  # 👈 参数名改变
+            content_type=content_type,
             title=title,
             initial_content=content,
             metadata=metadata
@@ -485,7 +279,7 @@ class ArtifactStore:
         return True, f"Created artifact '{artifact_id}' in session '{session.session_id}'"
     
     def get(self, artifact_id: str) -> Optional[Artifact]:
-        """获取Artifact对象（从当前session）"""
+        """获取Artifact对象"""
         session = self.get_current_session()
         if not session:
             return None
@@ -564,8 +358,10 @@ class ArtifactStore:
 _artifact_store = ArtifactStore()
 
 
+# ==================== Tool Classes ====================
+
 class CreateArtifactTool(BaseTool):
-    """创建Artifact工具"""
+    """创建 Artifact 工具"""
     
     def __init__(self):
         super().__init__(
@@ -583,11 +379,11 @@ class CreateArtifactTool(BaseTool):
                 required=True
             ),
             ToolParameter(
-                name="content_type",  # 👈 从 type 改为 content_type
+                name="content_type", 
                 type="string",
-                description="Content format: 'markdown', 'txt', 'python', 'html', 'json'",  # 👈 描述更清晰
+                description="Content format: 'markdown', 'txt', 'python', 'html', 'json'",  
                 required=False,
-                default="markdown"  # 👈 添加默认值
+                default="markdown"  
             ),
             ToolParameter(
                 name="title",
@@ -606,7 +402,7 @@ class CreateArtifactTool(BaseTool):
     async def execute(self, **params) -> ToolResult:
         success, message = _artifact_store.create(
             artifact_id=params["id"],
-            content_type=params.get("content_type", "markdown"),  # 👈 参数名改变，使用默认值
+            content_type=params.get("content_type", "markdown"), 
             title=params["title"],
             content=params["content"]
         )
@@ -614,8 +410,7 @@ class CreateArtifactTool(BaseTool):
         if success:
             logger.info(message)
             return ToolResult(success=True, data={"message": message})
-        else:
-            return ToolResult(success=False, error=message)
+        return ToolResult(success=False, error=message)
 
 
 class UpdateArtifactTool(BaseTool):
@@ -627,7 +422,7 @@ class UpdateArtifactTool(BaseTool):
     def __init__(self):
         super().__init__(
             name="update_artifact",
-            description="Update artifact content by replacing old text with new text (Support line-by-line fuzzy matching if exact text not found).",
+            description="Update artifact content by replacing old text with new text (Attempt fuzzy matching if exact text not found).",
             permission=ToolPermission.PUBLIC
         )
     
@@ -642,7 +437,7 @@ class UpdateArtifactTool(BaseTool):
             ToolParameter(
                 name="old_str",
                 type="string",
-                description="Text to be replaced. For best results, select complete lines including any numbering (e.g., '1. [✗] Task description').",
+                description="Text to be replaced",
                 required=True
             ),
             ToolParameter(
@@ -668,8 +463,7 @@ class UpdateArtifactTool(BaseTool):
         
         if success:
             logger.info(message)
-            
-            # 👇 构建返回数据，包含匹配详情
+
             result_data = {
                 "message": message,
                 "version": artifact.current_version
@@ -677,20 +471,16 @@ class UpdateArtifactTool(BaseTool):
             
             # 如果是模糊匹配，添加详细信息
             if match_info and match_info.get("match_type") == "fuzzy":
-                result_data["fuzzy_match_details"] = {
+                result_data["fuzzy_match"] = {
                     "similarity": f"{match_info['similarity']:.1%}",
-                    "expected": match_info["expected_text"][:200] + "..." if len(match_info["expected_text"]) > 200 else match_info["expected_text"],
-                    "found": match_info["matched_text"][:200] + "..." if len(match_info["matched_text"]) > 200 else match_info["matched_text"],
+                    "expected": match_info["expected_text"][:200],
+                    "matched": match_info["matched_text"][:200],
                     "note": "Used fuzzy matching because exact text was not found"
                 }
             
-            return ToolResult(
-                success=True,
-                data=result_data,
-                metadata=match_info  # 👈 完整信息放在metadata中
-            )
-        else:
-            return ToolResult(success=False, error=message)
+            return ToolResult(success=True, data=result_data, metadata=match_info)
+        
+        return ToolResult(success=False, error=message)
 
     def to_xml_example(self) -> str:
         """
@@ -714,9 +504,8 @@ class UpdateArtifactTool(BaseTool):
 
 IMPORTANT NOTES:
 1. Use ACTUAL line breaks in XML, not \\n escape sequences
-2. Include complete lines with their numbering (e.g., "1. ", "2. ")
-3. For multi-line updates, include all related lines as a unit
-4. The fuzzy matcher can handle minor whitespace differences (85% similarity threshold)"""
+2. For multi-line updates, include all related lines as a unit
+"""
 
 
 class RewriteArtifactTool(BaseTool):
@@ -803,71 +592,28 @@ class ReadArtifactTool(BaseTool):
                 error=f"Artifact '{params['id']}' not found"
             )
         
-        content = artifact.get_version(params.get("version"))
+        version = params.get("version")
+        content = artifact.get_version(version)
+        
         if content is None:
             return ToolResult(
                 success=False,
-                error=f"Version {params['version']} not found"
+                error=f"Version {version} not found"
             )
         
         return ToolResult(
             success=True,
             data={
                 "id": artifact.id,
-                "content_type": artifact.content_type,  # 👈 从 type 改为 content_type
+                "content_type": artifact.content_type, 
                 "title": artifact.title,
                 "content": content,
-                "version": artifact.current_version,
+                "version": version or artifact.current_version,
                 "updated_at": artifact.updated_at.isoformat()
             }
         )
 
 
-# 示例：创建Task Plan Artifact
-TASK_PLAN_TEMPLATE = """# Research Task Plan
-
-## Objective
-{objective}
-
-## Tasks
-1. [ ] Information Gathering
-   - Status: pending
-   - Assigned: search_agent
-   - Details: {task1_details}
-
-2. [ ] Deep Analysis
-   - Status: pending
-   - Assigned: crawl_agent
-   - Details: {task2_details}
-
-3. [ ] Report Generation
-   - Status: pending
-   - Assigned: lead_agent
-   - Details: Compile findings into comprehensive report
-
-## Progress
-- Overall: 0%
-- Last Updated: {timestamp}
-"""
-
-# 示例：创建Result Artifact
-RESULT_TEMPLATE = """# Research Results: {title}
-
-## Executive Summary
-{summary}
-
-## Key Findings
-{findings}
-
-## Detailed Analysis
-{analysis}
-
-## Conclusions
-{conclusions}
-
-## References
-{references}
-"""
 
 
 def register_artifact_tools():

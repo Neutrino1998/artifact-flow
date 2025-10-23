@@ -25,8 +25,6 @@ from .artifact_ops import (
     ReadArtifactTool,
     register_artifact_tools,
     get_artifact_store,
-    TASK_PLAN_TEMPLATE,
-    RESULT_TEMPLATE
 )
 
 # Subagent调用工具（路由机制）
@@ -60,6 +58,4 @@ __all__ = [
     
     # 便捷函数和常量
     "get_artifact_store",
-    "TASK_PLAN_TEMPLATE",
-    "RESULT_TEMPLATE"
 ]
