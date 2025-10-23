@@ -32,3 +32,6 @@ crawl4ai>=0.3.0  # 主要爬虫框架
 beautifulsoup4>=4.11.0  # HTML解析器：备用爬虫方案
 pypdf>=4.0.0  # PDF文本提取
 aiohttp>=3.9.0  # 异步HTTP客户端
+
+# 文本差异对比
+diff-match-patch>=20230430
