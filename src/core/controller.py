@@ -564,16 +564,13 @@ class ExecutionController:
                 # 收集最终响应
                 if chunk.get("type") == "complete" and chunk.get("data"):
                     final_response = chunk["data"].get("content", "")
-            
+
             # 检查是否有中断
-            # 注意：在流式模式下，中断的检测方式可能不同
-            # 这里我们假设最后的状态中会有 __interrupt__
             final_state = await self.graph.aget_state(config)
-            
-            if final_state.values.get("__interrupt__"):
+            # 注意：在流式模式下，中断的检测方式不同。应检查 final_state.interrupts 而不是 values["__interrupt__"]
+            if final_state.interrupts:
                 # 权限中断
-                interrupts = final_state.values["__interrupt__"]
-                interrupt_data = interrupts[0].value
+                interrupt_data = final_state.interrupts[0].value
                 
                 self.interrupted_threads[thread_id] = {
                     "conversation_id": conversation_id,
@@ -767,6 +764,7 @@ class ExecutionController:
             
             # 获取最终状态
             final_state = await self.graph.aget_state(config)
+            
             response = final_state.values.get("graph_response", final_response or "")
             
             self.conversation_manager.update_response(
