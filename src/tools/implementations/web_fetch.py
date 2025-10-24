@@ -120,7 +120,7 @@ class WebFetchTool(BaseTool):
     def get_parameters(self) -> List[ToolParameter]:
         return [
             ToolParameter(
-                name="urls",
+                name="url_list",
                 type="array[string]",
                 description="URL or list of URLs to fetch (supports HTML and PDF)",
                 required=True
