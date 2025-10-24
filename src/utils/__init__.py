@@ -18,10 +18,9 @@ from .logger import (
 
 # XML解析相关
 from .xml_parser import (
-    RobustXMLParser,
+    SimpleXMLParser,
     ToolCall,
     parse_tool_calls,
-    extract_tag,
 )
 
 # 重试机制相关
@@ -46,10 +45,9 @@ __all__ = [
     'exception',
     
     # XML解析
-    'RobustXMLParser',
+    'SimpleXMLParser',
     'ToolCall',
-    'parse_tool_calls',
-    'extract_tag',
+    'parse_tool_calls'
     
     # 重试
     'RetryError',
