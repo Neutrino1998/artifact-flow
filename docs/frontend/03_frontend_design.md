@@ -1,6 +1,8 @@
 # ArtifactFlow 前端实现方案
 
-> 版本: v1.0 | 依赖: API 层完成
+> 版本: v1.1 | 依赖: API 层完成
+> 
+> **v1.1 变更**：整合架构优化建议，增强状态管理、明确渲染策略、规范 SSE 生命周期
 
 ## 1. 设计目标
 
@@ -174,6 +176,26 @@ stores/
 
 **状态字段**：
 ```typescript
+// [v1.1 新增] 消息状态枚举
+type MessageStatus = 'sending' | 'sent' | 'error';
+
+// [v1.1 新增] 增强的消息类型
+interface Message {
+  id: string;
+  conversationId: string;
+  parentId: string | null;
+  content: string;
+  role: 'user' | 'assistant';
+  response?: string;          // assistant 的响应内容
+  createdAt: string;
+  
+  // [v1.1 新增] 状态字段 - 用于乐观更新的安全回滚
+  status: MessageStatus;
+  
+  // [v1.1 新增] 错误信息 - 当 status === 'error' 时存在
+  error?: string;
+}
+
 interface ConversationStore {
   // 对话列表
   conversations: ConversationSummary[]
@@ -193,6 +215,42 @@ interface ConversationStore {
   createConversation(): string
   deleteConversation(id: string): Promise<void>
   switchBranch(messageId: string): void
+  
+  // [v1.1 新增] 乐观更新相关 Actions
+  addOptimisticMessage(message: Omit<Message, 'status'>): string  // 返回临时 ID
+  confirmMessage(tempId: string, realId: string): void            // 确认成功
+  failMessage(tempId: string, error: string): void                // 标记失败
+  retryMessage(messageId: string): Promise<void>                  // 重试发送
+  removeMessage(messageId: string): void                          // 移除失败消息
+}
+```
+
+**[v1.1 新增] 乐观更新安全回滚机制**：
+
+```typescript
+// 发送消息时的乐观更新流程
+async function sendMessage(content: string, parentId?: string) {
+  // 1. 立即添加消息到 UI（status: 'sending'）
+  const tempId = addOptimisticMessage({
+    id: `temp-${Date.now()}`,
+    content,
+    role: 'user',
+    parentId,
+    // ...
+  });
+  
+  try {
+    // 2. 调用 API
+    const response = await api.sendMessage(content, parentId);
+    
+    // 3. 成功：确认消息（status: 'sent'，替换 ID）
+    confirmMessage(tempId, response.messageId);
+    
+  } catch (error) {
+    // 4. 失败：标记错误（status: 'error'）
+    failMessage(tempId, error.message);
+    // UI 显示重试按钮，用户可选择重试或删除
+  }
 }
 ```
 
@@ -213,6 +271,9 @@ interface ArtifactStore {
   // 版本缓存
   versionCache: Map<string, ArtifactVersion>  // `${artifactId}-${version}` -> content
   
+  // [v1.1 新增] 更新指示
+  pendingUpdates: Set<string>  // 有待刷新的 artifact IDs
+  
   // Actions
   fetchArtifacts(sessionId: string): Promise<void>
   fetchArtifact(sessionId: string, artifactId: string): Promise<void>
@@ -221,6 +282,10 @@ interface ArtifactStore {
   selectVersion(version: number): void
   enableDiffMode(baseVersion: number): void
   disableDiffMode(): void
+  
+  // [v1.1 新增] 标记更新
+  markPendingUpdate(artifactId: string): void
+  clearPendingUpdates(): void
 }
 ```
 
@@ -244,6 +309,9 @@ interface StreamStore {
   // 权限请求
   pendingPermission: PermissionRequest | null
   
+  // [v1.1 新增] EventSource 实例引用（用于生命周期管理）
+  eventSourceRef: EventSource | null
+  
   // Actions
   startStream(threadId: string): void
   appendContent(content: string): void
@@ -253,6 +321,10 @@ interface StreamStore {
   resolvePermission(approved: boolean): Promise<void>
   endStream(): void
   reset(): void
+  
+  // [v1.1 新增] EventSource 生命周期管理
+  setEventSource(es: EventSource | null): void
+  destroyEventSource(): void  // 显式销毁
 }
 ```
 
@@ -289,17 +361,25 @@ interface UIStore {
               │
               ▼
         streamStore.reset()
-        conversationStore.createMessage() (乐观更新)
+        conversationStore.addOptimisticMessage() [v1.1: status='sending']
               │
               ▼
         POST /api/v1/chat
               │
-              ▼
+              ├─── 失败 ───→ conversationStore.failMessage() [v1.1: status='error']
+              │                     │
+              │                     ▼
+              │              显示错误状态 + 重试按钮
+              │
+              ▼ 成功
+        conversationStore.confirmMessage() [v1.1: status='sent']
         获取 thread_id, stream_url
               │
               ▼
         streamStore.startStream(threadId)
+        [v1.1] streamStore.destroyEventSource() // 确保清理旧连接
         EventSource 连接 stream_url
+        [v1.1] streamStore.setEventSource(es)
               │
               ▼
         ┌─────────────────────────────────────┐
@@ -314,7 +394,9 @@ interface UIStore {
         └─────────────────────────────────────┘
               │
               ▼
+        [v1.1] 收到终止事件后，服务端关闭连接
         streamStore.endStream()
+        streamStore.destroyEventSource()
         conversationStore.updateMessage()
         artifactStore.fetchArtifacts() (如有更新)
 ```
@@ -346,14 +428,21 @@ interface UIStore {
 
 ### 6.3 权限确认流程
 
+**[v1.1 重要改进] SSE 连接生命周期管理**：
+
 ```
 收到 permission_required 事件
               │
               ▼
+        [v1.1] 服务端主动关闭 SSE 连接
+              │
+              ▼
         streamStore.requestPermission(data)
+        streamStore.destroyEventSource()  // [v1.1] 显式销毁旧实例
               │
               ▼
         显示 PermissionDialog
+        （此时无 SSE 连接，避免长时间挂起）
               │
               ▼
         用户点击 确认/拒绝
@@ -365,10 +454,73 @@ interface UIStore {
         获取新的 stream_url
               │
               ▼
-        重新订阅 SSE
+        [v1.1] 确保旧 EventSource 已销毁
+        创建新 EventSource 连接
+        streamStore.setEventSource(newEs)
               │
               ▼
         继续流式处理
+```
+
+**[v1.1 关键代码示例]**：
+
+```typescript
+// hooks/useSSE.ts
+
+function useSSE(options: SSEOptions) {
+  const { setEventSource, destroyEventSource } = useStreamStore();
+  
+  useEffect(() => {
+    if (!options.url) return;
+    
+    // [v1.1] 创建新连接前，确保销毁旧连接
+    destroyEventSource();
+    
+    const es = new EventSource(options.url);
+    setEventSource(es);
+    
+    es.onmessage = (event) => {
+      const data = JSON.parse(event.data);
+      
+      switch (data.event_type) {
+        case 'complete':
+        case 'interrupt':
+        case 'error':
+          // [v1.1] 终止事件：服务端会关闭连接，前端也显式清理
+          destroyEventSource();
+          break;
+        // ... 其他事件处理
+      }
+    };
+    
+    es.onerror = () => {
+      destroyEventSource();
+    };
+    
+    // [v1.1] 组件卸载时清理
+    return () => {
+      destroyEventSource();
+    };
+  }, [options.url]);
+}
+
+// stores/streamStore.ts
+
+const useStreamStore = create<StreamStore>((set, get) => ({
+  eventSourceRef: null,
+  
+  setEventSource: (es) => set({ eventSourceRef: es }),
+  
+  destroyEventSource: () => {
+    const { eventSourceRef } = get();
+    if (eventSourceRef) {
+      eventSourceRef.close();  // [v1.1] 显式关闭
+      set({ eventSourceRef: null });
+    }
+  },
+  
+  // ... 其他 actions
+}));
 ```
 
 ---
@@ -397,6 +549,35 @@ if (isStreaming) {
   显示 AssistantMessage 组件
   - 只显示最终 response
   - 不显示中间过程
+}
+```
+
+**[v1.1 新增] 消息状态渲染**：
+```typescript
+// 根据消息状态渲染不同 UI
+function MessageItem({ message }: { message: Message }) {
+  if (message.status === 'sending') {
+    return (
+      <div className="opacity-70">
+        {/* 消息内容 + 发送中指示器 */}
+        <Spinner size="sm" />
+      </div>
+    );
+  }
+  
+  if (message.status === 'error') {
+    return (
+      <div className="border-red-500">
+        {/* 消息内容 + 错误提示 */}
+        <span className="text-red-500">{message.error}</span>
+        <Button onClick={() => retryMessage(message.id)}>重试</Button>
+        <Button variant="ghost" onClick={() => removeMessage(message.id)}>删除</Button>
+      </div>
+    );
+  }
+  
+  // status === 'sent'
+  return <NormalMessage message={message} />;
 }
 ```
 
@@ -429,17 +610,56 @@ if (isStreaming) {
 4. 可通过选择器调整对比的版本
 5. 点击「退出对比」返回单版本视图
 
-### 7.4 Artifact 自动更新
+### 7.4 Artifact 更新策略
 
-**设计**：
-- 在流式过程中监听 `tool_result` 事件
-- 如果工具是 `create_artifact`/`update_artifact`/`rewrite_artifact`
-- 标记对应 artifact 为「有更新」
-- 流式结束后刷新 artifact 列表
+**[v1.1 更新] 分阶段渲染策略**：
 
-**UI 反馈**：
-- Tab 上显示更新指示器（小圆点）
-- 自动切换到最新更新的 artifact
+| 阶段 | 触发时机 | 行为 | 说明 |
+|------|----------|------|------|
+| **Phase 1 (MVP)** | 监听 `tool_result` 事件 | 工具执行完成后，标记 artifact 有更新；流式结束后统一刷新 | 简单可靠，避免频繁请求 |
+| **Phase 2 (进阶)** | 监听流中的内容块 | 实时更新 Artifact 内容，实现打字机效果 | 需要后端支持增量推送 |
+
+**Phase 1 实现（当前目标）**：
+```typescript
+// SSE 事件处理
+function handleStreamEvent(event: StreamEvent) {
+  if (event.type === 'tool_result') {
+    const { tool_name, result } = event.data;
+    
+    // 检查是否是 Artifact 操作工具
+    if (['create_artifact', 'update_artifact', 'rewrite_artifact'].includes(tool_name)) {
+      if (result.success) {
+        // 标记该 artifact 有更新（Tab 显示小圆点）
+        artifactStore.markPendingUpdate(result.data.artifact_id);
+      }
+    }
+  }
+  
+  if (event.type === 'complete') {
+    // 流式结束后，刷新有更新的 artifacts
+    if (artifactStore.pendingUpdates.size > 0) {
+      artifactStore.fetchArtifacts(sessionId);
+      artifactStore.clearPendingUpdates();
+    }
+  }
+}
+```
+
+**Phase 2 预留设计**：
+```typescript
+// 未来：后端推送 artifact 内容块
+interface ArtifactContentChunk {
+  artifact_id: string;
+  content_delta: string;  // 增量内容
+  version: number;
+}
+
+// 前端实时拼接
+function handleArtifactChunk(chunk: ArtifactContentChunk) {
+  artifactStore.appendContent(chunk.artifact_id, chunk.content_delta);
+  // Monaco Editor 自动滚动到最新位置
+}
+```
 
 ---
 
@@ -493,7 +713,8 @@ frontend/
 │   │   │   ├── ReasoningBlock.tsx
 │   │   │   ├── ToolCallIndicator.tsx
 │   │   │   ├── ChatInput.tsx
-│   │   │   └── PermissionDialog.tsx
+│   │   │   ├── PermissionDialog.tsx
+│   │   │   └── MessageStatusIndicator.tsx  # [v1.1 新增]
 │   │   │
 │   │   ├── artifact/                 # Artifact 相关组件
 │   │   │   ├── ArtifactPanel.tsx
@@ -515,17 +736,17 @@ frontend/
 │   │   └── uiStore.ts
 │   │
 │   ├── hooks/                        # 自定义 hooks
-│   │   ├── useSSE.ts                 # SSE 连接 hook
+│   │   ├── useSSE.ts                 # SSE 连接 hook [v1.1 增强]
 │   │   ├── useConversation.ts        # 对话相关 hook
 │   │   └── useArtifact.ts            # Artifact 相关 hook
 │   │
 │   ├── lib/                          # 工具库
 │   │   ├── api.ts                    # API 客户端
-│   │   ├── sse.ts                    # SSE 客户端
+│   │   ├── sse.ts                    # SSE 客户端 [v1.1 增强]
 │   │   └── utils.ts                  # 通用工具函数
 │   │
 │   └── types/                        # TypeScript 类型定义
-│       ├── conversation.ts
+│       ├── conversation.ts           # [v1.1 更新: 增加 MessageStatus]
 │       ├── artifact.ts
 │       ├── stream.ts
 │       └── api.ts
@@ -539,9 +760,10 @@ frontend/
 
 ### 9.1 useSSE
 
-**职责**：
+**[v1.1 增强] 职责**：
 - 管理 EventSource 连接
 - 解析 SSE 事件
+- **显式管理连接生命周期**
 - 处理重连逻辑
 
 **接口**：
@@ -551,11 +773,78 @@ function useSSE(options: {
   onMetadata?: (data: any) => void
   onStream?: (data: any) => void
   onComplete?: (data: any) => void
+  onInterrupt?: (data: any) => void  // [v1.1 新增]
   onError?: (error: any) => void
 }): {
   isConnected: boolean
   error: Error | null
-  disconnect: () => void
+  disconnect: () => void  // [v1.1] 显式断开方法
+}
+```
+
+**[v1.1] 实现要点**：
+```typescript
+function useSSE(options: SSEOptions) {
+  const [isConnected, setIsConnected] = useState(false);
+  const eventSourceRef = useRef<EventSource | null>(null);
+  
+  const disconnect = useCallback(() => {
+    if (eventSourceRef.current) {
+      eventSourceRef.current.close();
+      eventSourceRef.current = null;
+      setIsConnected(false);
+    }
+  }, []);
+  
+  useEffect(() => {
+    if (!options.url) {
+      disconnect();  // URL 变为 null 时断开
+      return;
+    }
+    
+    // [v1.1] 创建新连接前先断开旧连接
+    disconnect();
+    
+    const es = new EventSource(options.url);
+    eventSourceRef.current = es;
+    
+    es.onopen = () => setIsConnected(true);
+    
+    es.onmessage = (event) => {
+      const data = JSON.parse(event.data);
+      
+      // 分发事件
+      switch (data.event_type) {
+        case 'metadata':
+          options.onMetadata?.(data.data);
+          break;
+        case 'stream':
+          options.onStream?.(data.data);
+          break;
+        case 'complete':
+          options.onComplete?.(data.data);
+          disconnect();  // [v1.1] 完成后断开
+          break;
+        case 'interrupt':
+          options.onInterrupt?.(data.data);
+          disconnect();  // [v1.1] 中断后断开
+          break;
+        case 'error':
+          options.onError?.(data.data);
+          disconnect();  // [v1.1] 错误后断开
+          break;
+      }
+    };
+    
+    es.onerror = (error) => {
+      options.onError?.(error);
+      disconnect();
+    };
+    
+    return () => disconnect();  // [v1.1] 组件卸载时清理
+  }, [options.url]);
+  
+  return { isConnected, error: null, disconnect };
 }
 ```
 
@@ -582,6 +871,10 @@ function useConversation(conversationId?: string): {
   sendMessage: (content: string, parentId?: string) => Promise<void>
   switchBranch: (messageId: string) => void
   deleteConversation: () => Promise<void>
+  
+  // [v1.1 新增] 消息状态操作
+  retryMessage: (messageId: string) => Promise<void>
+  removeFailedMessage: (messageId: string) => void
 }
 ```
 
@@ -600,6 +893,9 @@ function useArtifact(sessionId: string): {
   currentVersion: number
   isLoading: boolean
   
+  // [v1.1 新增] 更新指示
+  hasPendingUpdates: boolean
+  
   // Diff 状态
   diffMode: boolean
   compareVersion: number | null
@@ -609,6 +905,7 @@ function useArtifact(sessionId: string): {
   selectVersion: (version: number) => Promise<void>
   enableDiff: (baseVersion: number) => void
   disableDiff: () => void
+  refreshArtifacts: () => Promise<void>  // [v1.1 新增]
 }
 ```
 
@@ -630,6 +927,7 @@ function useArtifact(sessionId: string): {
 
 3. **配置 Zustand**
    - 创建基础 stores
+   - **[v1.1] 实现消息状态管理（status 字段）**
    - 配置持久化（localStorage）
 
 ### Phase 2: 对话功能（预计 3-4 天）
@@ -642,15 +940,17 @@ function useArtifact(sessionId: string): {
 2. **消息展示**
    - MessageList 组件
    - UserMessage / AssistantMessage 组件
+   - **[v1.1] MessageStatusIndicator 组件（发送中/错误状态）**
    - 消息树渲染逻辑
 
 3. **消息发送**
    - ChatInput 组件
    - API 集成
-   - 乐观更新
+   - **[v1.1] 乐观更新 + 安全回滚机制**
 
 4. **SSE 流式**
    - useSSE hook
+   - **[v1.1] EventSource 生命周期管理**
    - StreamingMessage 组件
    - 打字机效果
 
@@ -660,6 +960,7 @@ function useArtifact(sessionId: string): {
    - ArtifactPanel 组件
    - ArtifactTabs 组件
    - 版本选择器
+   - **[v1.1] 更新指示器（小圆点）**
 
 2. **Monaco Editor 集成**
    - MonacoViewer 组件
@@ -678,6 +979,7 @@ function useArtifact(sessionId: string): {
 
 2. **权限确认**
    - PermissionDialog 组件
+   - **[v1.1] SSE 连接生命周期管理（销毁旧实例→创建新实例）**
    - 恢复执行流程
 
 3. **工具调用展示**
@@ -697,6 +999,8 @@ function useArtifact(sessionId: string): {
 
 3. **测试**
    - 组件单元测试
+   - **[v1.1] SSE 连接生命周期测试**
+   - **[v1.1] 乐观更新回滚测试**
    - E2E 测试（Playwright）
 
 ---
@@ -793,3 +1097,22 @@ module.exports = {
 # .env.local
 NEXT_PUBLIC_API_URL=http://localhost:8000
 ```
+
+---
+
+## 附录：v1.0 → v1.1 变更摘要
+
+| Section | 变更内容 | 类型 |
+|---------|----------|------|
+| 5.2 conversationStore | 新增 `MessageStatus` 类型和 `status` 字段 | 新增 |
+| 5.2 conversationStore | 新增乐观更新相关 Actions | 新增 |
+| 5.3 artifactStore | 新增 `pendingUpdates` 状态 | 新增 |
+| 5.4 streamStore | 新增 `eventSourceRef` 和生命周期管理方法 | 新增 |
+| 6.1 发送消息流程 | 更新流程图，加入状态管理和连接生命周期 | 更新 |
+| 6.3 权限确认流程 | 重写流程，明确 SSE 连接销毁和重建 | 更新 |
+| 7.1 流式消息渲染 | 新增消息状态渲染逻辑 | 新增 |
+| 7.4 Artifact 更新策略 | 明确分阶段渲染策略（Phase 1/2） | 更新 |
+| 8. 文件结构 | 新增 `MessageStatusIndicator.tsx` | 更新 |
+| 9.1 useSSE | 增强接口，新增 `onInterrupt` 和 `disconnect` | 更新 |
+| 9.1 useSSE | 添加完整实现示例 | 新增 |
+| 10. 实施步骤 | 各阶段加入 v1.1 相关任务 | 更新 |

@@ -1,6 +1,11 @@
 # ArtifactFlow API 层实现方案
 
-> 版本: v1.0 | 依赖: 持久化改造完成
+> 版本: v1.1 | 依赖: 持久化改造完成
+> 
+> **v1.1 更新**：
+> - 新增 Section 2.1：全链路异步 I/O 开发标准
+> - 新增 Section 6.4：事件缓冲队列设计（含 TTL 机制）
+> - 更新 Section 7.2：明确 SSE 连接生命周期管理
 
 ## 1. 设计目标
 
@@ -27,6 +32,42 @@
 - SSE 更轻量，自带重连机制
 - 浏览器原生支持 EventSource API
 - 如果后续需要双向通信（如协作编辑），再引入 WebSocket
+
+### 2.1 全链路异步 I/O 开发标准 🆕
+
+> **核心原则**：防止单个耗时操作（如 LLM 推理、网页爬取）阻塞 Worker 进程，导致高并发下系统假死。
+
+**强制要求**：
+
+| 操作类型 | ✅ 必须使用 | ❌ 禁止使用 |
+|---------|------------|-----------|
+| HTTP 请求 | `httpx.AsyncClient` | `requests` |
+| 数据库 | `aiosqlite` / `asyncpg` | `sqlite3` / `psycopg2` |
+| 文件操作 | `aiofiles` | 内置 `open()` (大文件) |
+| 进程/线程 | `asyncio.to_thread()` | `threading.Thread` 直接调用 |
+
+**代码示例**：
+
+```python
+# ✅ 正确：异步 HTTP 请求
+async def fetch_external_api():
+    async with httpx.AsyncClient() as client:
+        response = await client.get("https://api.example.com/data")
+        return response.json()
+
+# ❌ 错误：同步阻塞
+def fetch_external_api_wrong():
+    response = requests.get("https://api.example.com/data")  # 会阻塞整个 Worker
+    return response.json()
+
+# ✅ 正确：CPU 密集型任务包装
+async def cpu_intensive_task(data):
+    result = await asyncio.to_thread(heavy_computation, data)
+    return result
+```
+
+**Lint 检查建议**：
+- 在 CI 中添加 `flake8-async` 或自定义规则，检测同步阻塞调用
 
 ---
 
@@ -59,6 +100,13 @@
 │  │ - artifact  │  │ - response  │  │ - get_artifact_mgr  │ │
 │  │ - stream    │  │ - event     │  │ - (get_current_user)│ │
 │  └─────────────┘  └─────────────┘  └─────────────────────┘ │
+│                                                             │
+│  ┌─────────────────────────────────────────────────────┐   │
+│  │              StreamManager (新增)                    │   │
+│  │  - 事件缓冲队列 (asyncio.Queue)                      │   │
+│  │  - TTL 管理 (防止内存泄漏)                           │   │
+│  │  - 连接状态追踪                                      │   │
+│  └─────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────┘
                               │
                               ▼
@@ -137,9 +185,13 @@
 **Response**:
 ```json
 {
-  "stream_url": "/api/v1/stream/thd-xxx"
+  "stream_url": "/api/v1/stream/thd-xxx"  // 新的 stream URL
 }
 ```
+
+**🆕 重要说明**：
+- 每次 resume 返回的 `stream_url` 可能相同，但前端应**销毁旧的 EventSource 实例**后再建立新连接
+- 这确保了连接状态的干净切换
 
 #### GET /api/v1/chat
 列出对话列表。
@@ -301,18 +353,28 @@ data: {"type": "permission_required", "agent": "crawl_agent", "data": {"routing"
 event: complete
 data: {"success": true, "interrupted": false, "response": "...", "artifacts_updated": ["research_report"]}
 
-event: complete
+event: interrupt
 data: {"success": true, "interrupted": true, "interrupt_type": "tool_permission", "interrupt_data": {...}}
 
 event: error
 data: {"error": "Something went wrong"}
 ```
 
+**🆕 SSE 连接生命周期**：
+
+| 事件 | 连接状态 | 说明 |
+|------|---------|------|
+| `metadata` | 保持 | 首个事件，确认连接成功 |
+| `stream` | 保持 | 流式内容推送 |
+| `complete` | **关闭** | 正常完成，服务端主动关闭连接 |
+| `interrupt` | **关闭** | 需要用户操作，服务端主动关闭连接 |
+| `error` | **关闭** | 发生错误，服务端主动关闭连接 |
+
 **设计要点**：
 - 使用标准 SSE 格式（`event:` + `data:`）
 - 事件类型与 `ControllerEventType` 对应
 - `stream` 事件的 `data` 直接转发 Graph 的 custom stream 内容
-- `complete` 事件包含执行结果和更新的 artifact 列表
+- `complete` / `interrupt` / `error` 事件后，**服务端主动关闭 SSE 连接**
 
 ---
 
@@ -340,6 +402,10 @@ src/
 │   │   ├── artifact.py              # Artifact 相关 schema
 │   │   └── events.py                # SSE 事件 schema
 │   │
+│   ├── services/                    # 🆕 服务层
+│   │   ├── __init__.py
+│   │   └── stream_manager.py        # 事件缓冲队列管理
+│   │
 │   └── utils/                       # API 工具函数
 │       ├── __init__.py
 │       └── sse.py                   # SSE 响应构建器
@@ -352,7 +418,7 @@ src/
 | 文件 | 改造内容 |
 |------|----------|
 | `controller.py` | 添加获取执行状态的方法（用于 SSE 重连） |
-| `requirements.txt` | 添加 `fastapi`, `uvicorn`, `sse-starlette` |
+| `requirements.txt` | 添加 `fastapi`, `uvicorn`, `sse-starlette`, `aiofiles` |
 
 ---
 
@@ -376,12 +442,35 @@ src/
 **职责**：
 - 提供 `get_controller()` 依赖
 - 提供 `get_artifact_manager()` 依赖
+- 提供 `get_stream_manager()` 依赖 🆕
 - 预留 `get_current_user()` 依赖
 
 **设计要点**：
 - 使用 FastAPI 的 `Depends` 系统
-- Controller 和 Manager 作为单例
+- Controller 和 Manager 通过构造函数注入（参见持久化设计 v1.1）
 - 用户依赖预留为返回 `None`（无认证时）
+
+**示例代码**：
+```python
+# dependencies.py
+from functools import lru_cache
+from fastapi import Depends
+from core.controller import ExecutionController
+from api.services.stream_manager import StreamManager
+
+@lru_cache()
+def get_stream_manager() -> StreamManager:
+    return StreamManager(ttl_seconds=30)
+
+async def get_controller(
+    stream_manager: StreamManager = Depends(get_stream_manager)
+) -> ExecutionController:
+    # 通过构造函数注入，而非全局单例
+    return ExecutionController(
+        compiled_graph=get_compiled_graph(),
+        stream_manager=stream_manager
+    )
+```
 
 ### 6.3 SSE 路由 (stream.py)
 
@@ -394,41 +483,133 @@ src/
 ```
 流程：
 1. 前端 POST /chat 获取 thread_id
-2. 前端 EventSource 连接 /stream/{thread_id}
-3. 后端启动 graph.stream_execute()
-4. 后端将事件通过 SSE 推送
-5. 执行完成后关闭连接
+2. POST 处理器启动任务，事件写入 StreamManager 队列
+3. 前端 EventSource 连接 /stream/{thread_id}
+4. GET 处理器从队列消费事件，通过 SSE 推送
+5. 收到 complete/interrupt/error 事件后关闭连接
 ```
 
-**核心逻辑伪代码**：
+### 6.4 事件缓冲队列设计（StreamManager）🆕
+
+> **解决的问题**：POST /chat 启动任务后，Graph 可能在前端 SSE 连接建立之前就已经开始产生事件，导致 `metadata` / `start` 等早期事件丢失。
+
+**架构设计**：
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                      StreamManager                           │
+│                                                             │
+│  ┌───────────────────────────────────────────────────────┐ │
+│  │  streams: Dict[thread_id, StreamContext]               │ │
+│  │                                                        │ │
+│  │  StreamContext:                                        │ │
+│  │    - queue: asyncio.Queue[SSEEvent]                   │ │
+│  │    - created_at: datetime                             │ │
+│  │    - status: pending | streaming | closed             │ │
+│  │    - ttl_task: asyncio.Task (自动清理)                 │ │
+│  └───────────────────────────────────────────────────────┘ │
+│                                                             │
+│  方法:                                                       │
+│    - create_stream(thread_id) → StreamContext               │
+│    - push_event(thread_id, event)                          │
+│    - consume_events(thread_id) → AsyncGenerator[SSEEvent]  │
+│    - close_stream(thread_id)                               │
+│    - cleanup_expired()  # 定期清理过期队列                   │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**TTL 机制**：
+
 ```python
-async def stream_endpoint(thread_id: str):
-    async def event_generator():
-        # 从 pending_streams 中获取或创建 stream
-        stream = get_or_create_stream(thread_id)
-        
-        async for event in stream:
-            yield format_sse_event(event)
+# stream_manager.py
+
+class StreamContext:
+    queue: asyncio.Queue
+    created_at: datetime
+    status: Literal["pending", "streaming", "closed"]
+    ttl_task: Optional[asyncio.Task]
+
+class StreamManager:
+    def __init__(self, ttl_seconds: int = 30):
+        self.streams: Dict[str, StreamContext] = {}
+        self.ttl_seconds = ttl_seconds
     
-    return EventSourceResponse(event_generator())
+    def create_stream(self, thread_id: str) -> StreamContext:
+        """创建事件队列，并启动 TTL 定时器"""
+        context = StreamContext(
+            queue=asyncio.Queue(),
+            created_at=datetime.now(),
+            status="pending",
+            ttl_task=None
+        )
+        self.streams[thread_id] = context
+        
+        # 启动 TTL 定时器
+        context.ttl_task = asyncio.create_task(
+            self._ttl_cleanup(thread_id)
+        )
+        return context
+    
+    async def _ttl_cleanup(self, thread_id: str):
+        """TTL 到期后自动清理队列（防止内存泄漏）"""
+        await asyncio.sleep(self.ttl_seconds)
+        
+        context = self.streams.get(thread_id)
+        if context and context.status == "pending":
+            # 前端未连接，清理队列
+            logger.warning(f"Stream {thread_id} expired (TTL={self.ttl_seconds}s)")
+            self.close_stream(thread_id)
+    
+    async def consume_events(self, thread_id: str):
+        """消费事件（前端 SSE 连接时调用）"""
+        context = self.streams.get(thread_id)
+        if not context:
+            raise StreamNotFoundError(thread_id)
+        
+        # 取消 TTL 定时器（前端已连接）
+        if context.ttl_task:
+            context.ttl_task.cancel()
+            context.ttl_task = None
+        
+        context.status = "streaming"
+        
+        while True:
+            event = await context.queue.get()
+            yield event
+            
+            # 终结事件后退出
+            if event.type in ("complete", "interrupt", "error"):
+                break
+        
+        self.close_stream(thread_id)
 ```
 
-**并发处理**：
-- 使用 `asyncio.Queue` 作为事件缓冲
-- POST /chat 启动执行并将事件推送到队列
-- GET /stream 从队列消费事件
+**交互时序**：
 
-### 6.4 Schemas (chat.py, artifact.py)
+```
+时间轴 →
 
-**职责**：
-- 定义请求/响应模型
-- 数据验证
-- 自动生成 OpenAPI 文档
-
-**设计要点**：
-- 使用 Pydantic v2 的 `model_validator` 处理复杂验证
-- 使用 `Field` 添加描述和示例
-- 定义清晰的嵌套模型结构
+POST /chat                          GET /stream/{thread_id}
+    │                                      │
+    ▼                                      │
+[创建 StreamContext]                       │
+[启动 TTL 定时器 (30s)]                    │
+    │                                      │
+    ▼                                      │
+[启动 graph.astream()]                     │
+    │                                      │
+    ▼                                      ▼
+[push metadata 事件到队列]         [连接建立, 取消 TTL 定时器]
+    │                                      │
+    ▼                                      ▼
+[push stream 事件到队列]  ────────► [消费并推送 SSE]
+    │                                      │
+    ▼                                      ▼
+[push complete 事件]      ────────► [推送后关闭连接]
+    │                                      │
+    ▼                                      │
+[close_stream()]                           │
+```
 
 ---
 
@@ -437,64 +618,83 @@ async def stream_endpoint(thread_id: str):
 ### 7.1 发送消息流程
 
 ```
-┌────────────┐     ┌────────────┐     ┌────────────┐     ┌────────────┐
-│  Frontend  │     │  API Layer │     │ Controller │     │   Graph    │
-└─────┬──────┘     └─────┬──────┘     └─────┬──────┘     └─────┬──────┘
-      │                  │                  │                  │
-      │  POST /chat      │                  │                  │
-      │─────────────────►│                  │                  │
-      │                  │                  │                  │
-      │                  │  创建 stream queue                  │
-      │                  │─────────┐       │                  │
-      │                  │◄────────┘       │                  │
-      │                  │                  │                  │
-      │  返回 stream_url │                  │                  │
-      │◄─────────────────│                  │                  │
-      │                  │                  │                  │
-      │  GET /stream     │                  │                  │
-      │─────────────────►│                  │                  │
-      │                  │                  │                  │
-      │                  │  启动 stream_execute                │
-      │                  │─────────────────►│                  │
-      │                  │                  │                  │
-      │                  │                  │  graph.astream   │
-      │                  │                  │─────────────────►│
-      │                  │                  │                  │
-      │                  │                  │  事件流          │
-      │                  │                  │◄─────────────────│
-      │                  │                  │                  │
-      │                  │  事件转发        │                  │
-      │                  │◄─────────────────│                  │
-      │                  │                  │                  │
-      │  SSE events      │                  │                  │
-      │◄─────────────────│                  │                  │
-      │                  │                  │                  │
+┌────────────┐     ┌────────────┐     ┌──────────────┐     ┌────────────┐
+│  Frontend  │     │  API Layer │     │ StreamManager│     │ Controller │
+└─────┬──────┘     └─────┬──────┘     └──────┬───────┘     └─────┬──────┘
+      │                  │                   │                   │
+      │  POST /chat      │                   │                   │
+      │─────────────────►│                   │                   │
+      │                  │                   │                   │
+      │                  │  create_stream    │                   │
+      │                  │──────────────────►│                   │
+      │                  │                   │                   │
+      │                  │  启动后台任务      │                   │
+      │                  │───────────────────│──────────────────►│
+      │                  │                   │                   │
+      │  返回 stream_url │                   │                   │
+      │◄─────────────────│                   │                   │
+      │                  │                   │                   │
+      │  GET /stream     │                   │                   │
+      │─────────────────►│                   │                   │
+      │                  │                   │                   │
+      │                  │  consume_events   │                   │
+      │                  │──────────────────►│                   │
+      │                  │                   │                   │
+      │                  │                   │  事件推送         │
+      │                  │                   │◄──────────────────│
+      │                  │                   │                   │
+      │  SSE events      │◄──────────────────│                   │
+      │◄─────────────────│                   │                   │
+      │                  │                   │                   │
 ```
 
-### 7.2 权限确认流程
+### 7.2 权限确认流程（含 SSE 生命周期）🆕
 
 ```
-┌────────────┐     ┌────────────┐
-│  Frontend  │     │  API Layer │
-└─────┬──────┘     └─────┬──────┘
-      │                  │
-      │  收到 permission_required 事件
-      │◄─────────────────│
-      │                  │
-      │  显示确认对话框   │
-      │                  │
-      │  用户点击确认/拒绝│
-      │                  │
-      │  POST /chat/{id}/resume
-      │─────────────────►│
-      │                  │
-      │  返回新 stream_url│
-      │◄─────────────────│
-      │                  │
-      │  重新订阅 SSE    │
-      │─────────────────►│
-      │                  │
+┌────────────┐     ┌────────────┐     ┌──────────────┐
+│  Frontend  │     │  API Layer │     │ StreamManager│
+└─────┬──────┘     └─────┬──────┘     └──────┬───────┘
+      │                  │                   │
+      │  SSE 连接中...    │                   │
+      │◄────────────────►│                   │
+      │                  │                   │
+      │  收到 interrupt 事件                  │
+      │◄─────────────────│                   │
+      │                  │                   │
+      │                  │  close_stream     │
+      │                  │──────────────────►│
+      │                  │                   │
+      │  SSE 连接关闭 ✂️  │                   │
+      │◄ ─ ─ ─ ─ ─ ─ ─ ─│                   │
+      │                  │                   │
+      │  [显示确认对话框] │                   │
+      │                  │                   │
+      │  用户点击确认/拒绝│                   │
+      │                  │                   │
+      │  POST /resume    │                   │
+      │─────────────────►│                   │
+      │                  │                   │
+      │                  │  create_stream    │
+      │                  │──────────────────►│
+      │                  │                   │
+      │  返回新 stream_url                    │
+      │◄─────────────────│                   │
+      │                  │                   │
+      │  销毁旧 EventSource                   │
+      │  建立新 EventSource                   │
+      │                  │                   │
+      │  GET /stream (新连接)                 │
+      │─────────────────►│                   │
+      │                  │                   │
+      │  继续接收后续事件 │                   │
+      │◄─────────────────│                   │
 ```
+
+**关键点**：
+1. 收到 `interrupt` 事件后，**服务端主动关闭 SSE 连接**
+2. 前端调用 `/resume` 后获得**新的** `stream_url`
+3. 前端必须**销毁旧的 EventSource 实例**后再建立新连接
+4. 这避免了 SSE 连接在等待用户操作期间长时间挂起
 
 ---
 
@@ -510,6 +710,7 @@ async def stream_endpoint(thread_id: str):
 2. **实现依赖注入**
    - `get_controller()`
    - `get_artifact_manager()`
+   - `get_stream_manager()` 🆕
 
 3. **定义 Schemas**
    - 请求模型
@@ -531,32 +732,36 @@ async def stream_endpoint(thread_id: str):
    - GET /artifacts/{session_id}/{id}/versions/{v}
 
 3. **编写 API 测试**
-   - 使用 pytest + httpx
+   - 使用 pytest + httpx (AsyncClient)
 
 ### Phase 3: SSE 流式（预计 2-3 天）
 
-1. **实现 SSE 基础设施**
-   - SSE 响应构建器
-   - 事件队列管理
+1. **实现 StreamManager** 🆕
+   - 事件缓冲队列
+   - TTL 机制
+   - 连接状态追踪
 
 2. **实现 Stream 路由**
    - GET /stream/{thread_id}
    - 与 Controller 集成
+   - 终结事件后主动关闭连接 🆕
 
 3. **处理边缘情况**
    - 连接断开重连
    - 超时处理
+   - TTL 过期清理 🆕
 
 ### Phase 4: 集成测试（预计 1-2 天）
 
 1. **端到端测试**
    - 完整的对话流程
-   - 权限确认流程
+   - 权限确认流程（含连接关闭/重建）🆕
    - 分支对话流程
 
 2. **性能测试**
    - 并发连接数
    - SSE 推送延迟
+   - 内存泄漏检测（TTL 机制验证）🆕
 
 ---
 
@@ -599,6 +804,7 @@ uvicorn[standard]>=0.27.0
 sse-starlette>=1.8.0
 pydantic>=2.5.0
 python-multipart>=0.0.6  # 文件上传支持（预留）
+aiofiles>=23.2.0         # 🆕 异步文件操作
 
 # 测试依赖
 httpx>=0.26.0
@@ -624,8 +830,27 @@ class APIConfig:
     # SSE 配置
     SSE_PING_INTERVAL: int = 15  # 秒，保持连接活跃
     STREAM_TIMEOUT: int = 300    # 秒，最大执行时间
+    STREAM_TTL: int = 30         # 🆕 秒，队列 TTL（前端未连接时自动清理）
     
     # 分页默认值
     DEFAULT_PAGE_SIZE: int = 20
     MAX_PAGE_SIZE: int = 100
 ```
+
+---
+
+## 附录：v1.0 → v1.1 变更摘要
+
+| 章节 | 变更类型 | 说明 |
+|------|---------|------|
+| 2.1 | 🆕 新增 | 全链路异步 I/O 开发标准 |
+| 3.1 | 更新 | 架构图增加 StreamManager |
+| 4.1 | 更新 | resume 接口说明增强 |
+| 4.3 | 更新 | SSE 连接生命周期表 |
+| 5.1 | 更新 | 新增 services/stream_manager.py |
+| 6.2 | 更新 | 依赖注入示例代码 |
+| 6.4 | 🆕 新增 | StreamManager 详细设计 |
+| 7.2 | 🆕 重写 | 权限确认流程含 SSE 生命周期 |
+| 8 | 更新 | 实施步骤增加 StreamManager 相关任务 |
+| 10 | 更新 | 依赖增加 aiofiles |
+| 11 | 更新 | 配置增加 STREAM_TTL |
