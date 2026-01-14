@@ -8,6 +8,7 @@ langchain-core>=0.3.0
 langchain-openai>=0.2.0  # OpenAI/兼容接口支持
 langgraph>=0.2.0  # 工作流编排
 langgraph-checkpoint>=2.0.0  # 状态管理
+langgraph-checkpoint-sqlite>=2.0.0  # SQLite 持久化（AsyncSqliteSaver）
 
 # ========================================
 # 模型提供商
@@ -35,3 +36,11 @@ aiohttp>=3.9.0  # 异步HTTP客户端
 
 # 文本差异对比
 diff-match-patch>=20230430
+
+# ========================================
+# 数据库
+# ========================================
+
+# SQLAlchemy ORM（异步支持）
+sqlalchemy[asyncio]>=2.0.0
+aiosqlite>=0.19.0  # SQLite 异步驱动
