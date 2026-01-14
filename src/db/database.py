@@ -188,26 +188,7 @@ class DatabaseManager:
             raise
         finally:
             await session.close()
-    
-    @asynccontextmanager
-    async def transaction(self) -> AsyncGenerator[AsyncSession, None]:
-        """
-        显式事务上下文管理器
-        
-        与 session() 的区别：
-        - 更明确的事务边界
-        - 适用于需要跨多个操作的原子性保证
-        
-        使用方式：
-            async with db_manager.transaction() as session:
-                await session.execute(insert(User).values(...))
-                await session.execute(insert(Profile).values(...))
-                # 只有两个操作都成功才会提交
-        """
-        async with self.session() as session:
-            async with session.begin():
-                yield session
-    
+
     async def close(self) -> None:
         """关闭数据库连接"""
         if self._engine:
@@ -311,12 +292,7 @@ if __name__ == "__main__":
                 value = result.scalar()
                 assert value == 1
                 print("✅ Session 工作正常")
-            
-            # 测试 transaction
-            async with db.transaction() as session:
-                await session.execute(text("SELECT 1"))
-                print("✅ Transaction 工作正常")
-            
+
             print("\n✅ 所有测试通过!")
             
         finally:
