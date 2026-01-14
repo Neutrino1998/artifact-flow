@@ -18,6 +18,7 @@ from sqlalchemy import (
     Integer,
     DateTime,
     ForeignKey,
+    ForeignKeyConstraint,
     JSON,
     UniqueConstraint,
     Index,
@@ -329,7 +330,7 @@ class ArtifactVersion(Base):
             name="uq_artifact_version"
         ),
         # 外键约束（复合外键）
-        ForeignKey(
+        ForeignKeyConstraint(
             ["artifact_id", "session_id"],
             ["artifacts.id", "artifacts.session_id"],
             ondelete="CASCADE"
