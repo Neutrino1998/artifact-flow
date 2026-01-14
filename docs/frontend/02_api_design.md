@@ -1,7 +1,11 @@
 # ArtifactFlow API 层实现方案
 
-> 版本: v1.1 | 依赖: 持久化改造完成
-> 
+> 版本: v1.2 | 依赖: 持久化改造完成
+>
+> **v1.2 更新**：
+> - 新增 Section 6.5：数据库会话与事务管理（并发安全设计）
+> - 更新 Section 6.2：完整的依赖注入示例（含请求级别 session 隔离）
+>
 > **v1.1 更新**：
 > - 新增 Section 2.1：全链路异步 I/O 开发标准
 > - 新增 Section 6.4：事件缓冲队列设计（含 TTL 机制）
@@ -440,35 +444,101 @@ src/
 ### 6.2 依赖注入 (dependencies.py)
 
 **职责**：
+- 提供 `get_db_session()` 依赖（请求级别的数据库会话）🆕
 - 提供 `get_controller()` 依赖
 - 提供 `get_artifact_manager()` 依赖
-- 提供 `get_stream_manager()` 依赖 🆕
+- 提供 `get_stream_manager()` 依赖
 - 预留 `get_current_user()` 依赖
 
 **设计要点**：
 - 使用 FastAPI 的 `Depends` 系统
-- Controller 和 Manager 通过构造函数注入（参见持久化设计 v1.1）
+- **每个请求获得独立的数据库 session**（请求结束时自动 commit/rollback）🆕
+- Controller 和 Manager 通过构造函数注入，绑定到请求的 session
 - 用户依赖预留为返回 `None`（无认证时）
 
 **示例代码**：
 ```python
 # dependencies.py
 from functools import lru_cache
+from typing import AsyncGenerator
 from fastapi import Depends
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from core.controller import ExecutionController
+from core.conversation_manager import ConversationManager
+from core.graph import create_multi_agent_graph
+from tools.implementations.artifact_ops import ArtifactManager
+from db.database import DatabaseManager
+from repositories.artifact_repo import ArtifactRepository
+from repositories.conversation_repo import ConversationRepository
 from api.services.stream_manager import StreamManager
+
+# ============================================================
+# 全局单例（跨请求共享）
+# ============================================================
+
+_db_manager: DatabaseManager = None
+
+async def init_db_manager():
+    """应用启动时初始化"""
+    global _db_manager
+    _db_manager = DatabaseManager()
+    await _db_manager.initialize()
+
+async def close_db_manager():
+    """应用关闭时清理"""
+    global _db_manager
+    if _db_manager:
+        await _db_manager.close()
 
 @lru_cache()
 def get_stream_manager() -> StreamManager:
     return StreamManager(ttl_seconds=30)
 
+# ============================================================
+# 请求级别依赖（每个请求独立）
+# ============================================================
+
+async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
+    """
+    每个请求获得独立的数据库 session
+
+    请求成功 → 自动 commit
+    请求失败 → 自动 rollback
+    """
+    async with _db_manager.session() as session:
+        yield session
+
+async def get_artifact_manager(
+    session: AsyncSession = Depends(get_db_session)
+) -> ArtifactManager:
+    """每个请求获得独立的 ArtifactManager（绑定到请求的 session）"""
+    repo = ArtifactRepository(session)
+    return ArtifactManager(repo)
+
+async def get_conversation_manager(
+    session: AsyncSession = Depends(get_db_session)
+) -> ConversationManager:
+    """每个请求获得独立的 ConversationManager（绑定到请求的 session）"""
+    repo = ConversationRepository(session)
+    return ConversationManager(repo)
+
 async def get_controller(
-    stream_manager: StreamManager = Depends(get_stream_manager)
+    artifact_manager: ArtifactManager = Depends(get_artifact_manager),
+    conversation_manager: ConversationManager = Depends(get_conversation_manager),
 ) -> ExecutionController:
-    # 通过构造函数注入，而非全局单例
+    """
+    每个请求获得独立的 Controller
+
+    注意：Graph 每次创建新实例，因为它持有 artifact_manager 引用
+    """
+    compiled_graph = create_multi_agent_graph(
+        artifact_manager=artifact_manager
+    )
     return ExecutionController(
-        compiled_graph=get_compiled_graph(),
-        stream_manager=stream_manager
+        compiled_graph,
+        artifact_manager=artifact_manager,
+        conversation_manager=conversation_manager
     )
 ```
 
@@ -610,6 +680,59 @@ POST /chat                          GET /stream/{thread_id}
     ▼                                      │
 [close_stream()]                           │
 ```
+
+### 6.5 数据库会话与事务管理 🆕
+
+> **核心原则**：每个 HTTP 请求使用独立的数据库 session，请求结束时自动 commit 或 rollback。
+
+**为什么需要请求级别的 Session 隔离**：
+
+1. **并发安全**：多个并发请求不会共享 session，避免数据竞争
+2. **事务边界清晰**：一个请求 = 一个事务，要么全部成功，要么全部回滚
+3. **资源及时释放**：请求结束后 session 自动关闭，避免连接泄漏
+
+**依赖注入链路**：
+
+```
+HTTP Request
+    │
+    ▼
+get_db_session()        # 创建独立的 AsyncSession
+    │
+    ├──► get_artifact_manager()     # 创建 ArtifactRepository → ArtifactManager
+    │
+    ├──► get_conversation_manager() # 创建 ConversationRepository → ConversationManager
+    │
+    └──► get_controller()           # 创建 Graph → ExecutionController
+             │
+             ▼
+        执行请求处理
+             │
+             ▼
+        请求成功 → session.commit()
+        请求失败 → session.rollback()
+             │
+             ▼
+        session.close()
+```
+
+**并发安全保证**：
+
+| 组件 | 共享方式 | 说明 |
+|------|---------|------|
+| `DatabaseManager` | 全局单例 | 只管理连接池，不持有 session 状态 |
+| `AsyncSession` | 请求独立 | 每个请求创建新的数据库会话 |
+| `Repository` | 请求独立 | 绑定到请求的 session |
+| `Manager` | 请求独立 | 绑定到请求的 repository |
+| `Graph` | 请求独立 | 持有 manager 引用，每个请求创建新实例 |
+| `Controller` | 请求独立 | 绑定到请求的 managers |
+| `StreamManager` | 全局单例 | 无数据库操作，可安全共享 |
+
+**注意事项**：
+
+1. **Graph 每次请求创建新实例**：因为 Graph 内的工具持有 `artifact_manager` 引用，如果共享 Graph 实例，并发请求会互相覆盖 manager 的 repository
+2. **Graph 创建开销**：每次请求创建 Graph 有一定开销，但相比 LLM 推理时间可以忽略
+3. **如需优化**：可以考虑使用 `contextvars` 实现请求上下文隔离，但会增加复杂度
 
 ---
 
@@ -836,6 +959,21 @@ class APIConfig:
     DEFAULT_PAGE_SIZE: int = 20
     MAX_PAGE_SIZE: int = 100
 ```
+
+---
+
+## 附录：v1.1 → v1.2 变更摘要
+
+| 章节 | 变更类型 | 说明 |
+|------|---------|------|
+| 6.2 | 🔄 重写 | 完整的依赖注入示例，包含请求级别 session 隔离 |
+| 6.5 | 🆕 新增 | 数据库会话与事务管理（并发安全设计） |
+
+**关键变更说明**：
+
+1. **Controller 不再管理事务**：事务边界由 API 层的依赖注入管理
+2. **每个请求独立的组件链**：Session → Repository → Manager → Graph → Controller
+3. **Graph 每次请求创建新实例**：因为 Graph 持有 artifact_manager 引用，共享会导致并发问题
 
 ---
 
