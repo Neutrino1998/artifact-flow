@@ -1,0 +1,640 @@
+"""
+对话管理器
+
+改造说明（v2.0）：
+- 从 controller.py 抽离为独立模块
+- 使用 ConversationRepository 进行持久化
+- 维护内存缓存以提高性能
+- 支持依赖注入
+
+职责：
+1. 维护用户的对话树
+2. 格式化对话历史为可读文本
+3. 协调内存缓存和数据库持久化
+"""
+
+from typing import Dict, List, Optional, Any
+from datetime import datetime
+from dataclasses import dataclass, field
+
+from repositories.conversation_repo import ConversationRepository
+from repositories.base import NotFoundError, DuplicateError
+from utils.logger import get_logger
+
+logger = get_logger("ArtifactFlow")
+
+
+# ============================================================
+# 内存缓存对象
+# ============================================================
+
+@dataclass
+class MessageCache:
+    """消息缓存对象"""
+    message_id: str
+    parent_id: Optional[str]
+    content: str
+    thread_id: str
+    timestamp: str
+    graph_response: Optional[str] = None
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class ConversationCache:
+    """对话缓存对象"""
+    conversation_id: str
+    branches: Dict[str, List[str]] = field(default_factory=dict)  # parent_id -> [child_ids]
+    messages: Dict[str, MessageCache] = field(default_factory=dict)  # message_id -> MessageCache
+    active_branch: str = ""
+    created_at: str = ""
+    updated_at: str = ""
+
+
+# ============================================================
+# ConversationManager
+# ============================================================
+
+class ConversationManager:
+    """
+    对话管理器
+
+    职责：
+    - 管理对话和消息的生命周期
+    - 维护内存缓存
+    - 通过 Repository 进行持久化
+    - 格式化对话历史
+
+    使用方式：
+        async with db_manager.session() as session:
+            repo = ConversationRepository(session)
+            manager = ConversationManager(repo)
+            await manager.start_conversation(...)
+
+    向后兼容：
+        如果不提供 repository，则仅使用内存存储（无持久化）
+    """
+
+    def __init__(self, repository: Optional[ConversationRepository] = None):
+        """
+        初始化 ConversationManager
+
+        Args:
+            repository: ConversationRepository 实例（可选）
+                       如果为 None，则仅使用内存存储
+        """
+        self.repository = repository
+        self._cache: Dict[str, ConversationCache] = {}
+
+        logger.info("ConversationManager initialized")
+
+    def set_repository(self, repository: ConversationRepository) -> None:
+        """
+        设置/更新 Repository
+
+        Args:
+            repository: ConversationRepository 实例
+        """
+        self.repository = repository
+
+    def _ensure_repository(self) -> ConversationRepository:
+        """确保 Repository 已设置"""
+        if self.repository is None:
+            raise RuntimeError("ConversationManager: repository not configured")
+        return self.repository
+
+    @property
+    def conversations(self) -> Dict[str, Dict]:
+        """
+        向后兼容属性：返回内存中的对话字典
+
+        注意：这是为了兼容旧代码，新代码应使用异步方法
+        """
+        result = {}
+        for conv_id, cache in self._cache.items():
+            result[conv_id] = {
+                "conversation_id": cache.conversation_id,
+                "branches": cache.branches,
+                "messages": {
+                    msg_id: {
+                        "message_id": msg.message_id,
+                        "parent_id": msg.parent_id,
+                        "content": msg.content,
+                        "thread_id": msg.thread_id,
+                        "timestamp": msg.timestamp,
+                        "graph_response": msg.graph_response,
+                        "metadata": msg.metadata
+                    }
+                    for msg_id, msg in cache.messages.items()
+                },
+                "active_branch": cache.active_branch,
+                "created_at": cache.created_at,
+                "updated_at": cache.updated_at
+            }
+        return result
+
+    # ========================================
+    # 对话操作
+    # ========================================
+
+    async def start_conversation_async(
+        self,
+        conversation_id: Optional[str] = None
+    ) -> str:
+        """
+        开始新对话（异步版本，支持持久化）
+
+        Args:
+            conversation_id: 指定的对话ID
+
+        Returns:
+            对话ID
+        """
+        from uuid import uuid4
+
+        conv_id = conversation_id or f"conv-{uuid4().hex}"
+        now = datetime.now().isoformat()
+
+        # 创建内存缓存
+        self._cache[conv_id] = ConversationCache(
+            conversation_id=conv_id,
+            created_at=now,
+            updated_at=now
+        )
+
+        # 持久化到数据库
+        if self.repository:
+            try:
+                await self.repository.create_conversation(
+                    conversation_id=conv_id,
+                    title=None,
+                    metadata={}
+                )
+            except DuplicateError:
+                # 如果已存在，从数据库加载
+                logger.debug(f"Conversation {conv_id} already exists, loading from DB")
+                await self._load_conversation_from_db(conv_id)
+            except Exception as e:
+                logger.warning(f"Failed to persist conversation: {e}")
+
+        logger.info(f"Started conversation: {conv_id}")
+        return conv_id
+
+    def start_conversation(self, conversation_id: Optional[str] = None) -> str:
+        """
+        开始新对话（同步版本，仅内存存储）
+
+        向后兼容方法：不进行数据库持久化
+
+        Args:
+            conversation_id: 指定的对话ID
+
+        Returns:
+            对话ID
+        """
+        from uuid import uuid4
+
+        conv_id = conversation_id or f"conv-{uuid4().hex}"
+        now = datetime.now().isoformat()
+
+        self._cache[conv_id] = ConversationCache(
+            conversation_id=conv_id,
+            created_at=now,
+            updated_at=now
+        )
+
+        logger.info(f"Started conversation: {conv_id}")
+        return conv_id
+
+    async def _load_conversation_from_db(self, conversation_id: str) -> None:
+        """从数据库加载对话到缓存"""
+        if not self.repository:
+            return
+
+        conversation = await self.repository.get_conversation(
+            conversation_id,
+            load_messages=True
+        )
+
+        if not conversation:
+            return
+
+        # 创建缓存对象
+        cache = ConversationCache(
+            conversation_id=conversation_id,
+            active_branch=conversation.active_branch or "",
+            created_at=conversation.created_at.isoformat(),
+            updated_at=conversation.updated_at.isoformat()
+        )
+
+        # 加载消息
+        for msg in conversation.messages:
+            cache.messages[msg.id] = MessageCache(
+                message_id=msg.id,
+                parent_id=msg.parent_id,
+                content=msg.content,
+                thread_id=msg.thread_id,
+                timestamp=msg.created_at.isoformat(),
+                graph_response=msg.graph_response,
+                metadata=msg.metadata_ or {}
+            )
+
+            # 更新分支关系
+            if msg.parent_id:
+                if msg.parent_id not in cache.branches:
+                    cache.branches[msg.parent_id] = []
+                cache.branches[msg.parent_id].append(msg.id)
+
+        self._cache[conversation_id] = cache
+
+    async def ensure_conversation_exists(self, conversation_id: str) -> None:
+        """确保对话存在（异步版本）"""
+        if conversation_id not in self._cache:
+            # 尝试从数据库加载
+            if self.repository:
+                await self._load_conversation_from_db(conversation_id)
+
+            # 如果仍不存在，创建新的
+            if conversation_id not in self._cache:
+                await self.start_conversation_async(conversation_id)
+
+    # ========================================
+    # 消息操作
+    # ========================================
+
+    async def add_message_async(
+        self,
+        conv_id: str,
+        message_id: str,
+        content: str,
+        thread_id: str,
+        parent_id: Optional[str] = None
+    ) -> Dict:
+        """
+        添加消息到对话（异步版本，支持持久化）
+
+        Args:
+            conv_id: 对话ID
+            message_id: 消息ID
+            content: 消息内容
+            thread_id: 关联的Graph线程ID
+            parent_id: 父消息ID（分支时使用）
+
+        Returns:
+            用户消息对象
+        """
+        # 确保对话存在
+        await self.ensure_conversation_exists(conv_id)
+
+        cache = self._cache[conv_id]
+        now = datetime.now().isoformat()
+
+        # 创建消息缓存
+        msg_cache = MessageCache(
+            message_id=message_id,
+            parent_id=parent_id,
+            content=content,
+            thread_id=thread_id,
+            timestamp=now
+        )
+
+        # 保存到缓存
+        cache.messages[message_id] = msg_cache
+
+        # 更新分支关系
+        if parent_id:
+            if parent_id not in cache.branches:
+                cache.branches[parent_id] = []
+            cache.branches[parent_id].append(message_id)
+
+            if len(cache.branches[parent_id]) > 1:
+                logger.info(f"Created branch from message {parent_id}")
+
+        # 更新活跃分支
+        cache.active_branch = message_id
+        cache.updated_at = now
+
+        # 持久化到数据库
+        if self.repository:
+            try:
+                await self.repository.add_message(
+                    conversation_id=conv_id,
+                    message_id=message_id,
+                    content=content,
+                    thread_id=thread_id,
+                    parent_id=parent_id
+                )
+            except Exception as e:
+                logger.warning(f"Failed to persist message: {e}")
+
+        return {
+            "message_id": message_id,
+            "parent_id": parent_id,
+            "content": content,
+            "thread_id": thread_id,
+            "timestamp": now,
+            "graph_response": None,
+            "metadata": {}
+        }
+
+    def add_message(
+        self,
+        conv_id: str,
+        message_id: str,
+        content: str,
+        thread_id: str,
+        parent_id: Optional[str] = None
+    ) -> Dict:
+        """
+        添加消息到对话（同步版本，仅内存存储）
+
+        向后兼容方法：不进行数据库持久化
+
+        Args:
+            conv_id: 对话ID
+            message_id: 消息ID
+            content: 消息内容
+            thread_id: 关联的Graph线程ID
+            parent_id: 父消息ID（分支时使用）
+
+        Returns:
+            用户消息对象
+        """
+        if conv_id not in self._cache:
+            raise ValueError(f"Conversation {conv_id} not found")
+
+        cache = self._cache[conv_id]
+        now = datetime.now().isoformat()
+
+        # 创建消息
+        msg_cache = MessageCache(
+            message_id=message_id,
+            parent_id=parent_id,
+            content=content,
+            thread_id=thread_id,
+            timestamp=now
+        )
+
+        # 保存消息
+        cache.messages[message_id] = msg_cache
+
+        # 更新分支关系
+        if parent_id:
+            if parent_id not in cache.branches:
+                cache.branches[parent_id] = []
+            cache.branches[parent_id].append(message_id)
+
+            if len(cache.branches[parent_id]) > 1:
+                logger.info(f"Created branch from message {parent_id}")
+
+        # 更新活跃分支
+        cache.active_branch = message_id
+        cache.updated_at = now
+
+        return {
+            "message_id": message_id,
+            "parent_id": parent_id,
+            "content": content,
+            "thread_id": thread_id,
+            "timestamp": now,
+            "graph_response": None,
+            "metadata": {}
+        }
+
+    async def update_response_async(
+        self,
+        conv_id: str,
+        message_id: str,
+        response: str
+    ) -> None:
+        """
+        更新消息的Graph响应（异步版本，支持持久化）
+
+        Args:
+            conv_id: 对话ID
+            message_id: 消息ID
+            response: Graph响应内容
+        """
+        if conv_id in self._cache:
+            cache = self._cache[conv_id]
+            if message_id in cache.messages:
+                cache.messages[message_id].graph_response = response
+                cache.updated_at = datetime.now().isoformat()
+
+        # 持久化到数据库
+        if self.repository:
+            try:
+                await self.repository.update_graph_response(message_id, response)
+            except Exception as e:
+                logger.warning(f"Failed to persist response: {e}")
+
+    def update_response(
+        self,
+        conv_id: str,
+        message_id: str,
+        response: str
+    ) -> None:
+        """
+        更新消息的Graph响应（同步版本，仅内存存储）
+
+        Args:
+            conv_id: 对话ID
+            message_id: 消息ID
+            response: Graph响应内容
+        """
+        if conv_id in self._cache:
+            cache = self._cache[conv_id]
+            if message_id in cache.messages:
+                cache.messages[message_id].graph_response = response
+                cache.updated_at = datetime.now().isoformat()
+
+    # ========================================
+    # 查询操作
+    # ========================================
+
+    def get_conversation_path(
+        self,
+        conv_id: str,
+        to_message_id: Optional[str] = None
+    ) -> List[Dict]:
+        """
+        获取对话路径（从根到指定消息）
+
+        Args:
+            conv_id: 对话ID
+            to_message_id: 目标消息ID（None则使用活跃分支）
+
+        Returns:
+            消息路径列表（UserMessage对象）
+        """
+        if conv_id not in self._cache:
+            return []
+
+        cache = self._cache[conv_id]
+        target_id = to_message_id or cache.active_branch
+
+        if not target_id or target_id not in cache.messages:
+            return []
+
+        # 向上追溯到根
+        path = []
+        current_id: Optional[str] = target_id
+
+        while current_id and current_id in cache.messages:
+            msg = cache.messages[current_id]
+            path.insert(0, {
+                "message_id": msg.message_id,
+                "parent_id": msg.parent_id,
+                "content": msg.content,
+                "thread_id": msg.thread_id,
+                "timestamp": msg.timestamp,
+                "graph_response": msg.graph_response,
+                "metadata": msg.metadata
+            })
+            current_id = msg.parent_id
+
+        return path
+
+    async def get_conversation_path_async(
+        self,
+        conv_id: str,
+        to_message_id: Optional[str] = None
+    ) -> List[Dict]:
+        """
+        获取对话路径（异步版本，支持从数据库加载）
+
+        Args:
+            conv_id: 对话ID
+            to_message_id: 目标消息ID
+
+        Returns:
+            消息路径列表
+        """
+        # 确保对话已加载到缓存
+        await self.ensure_conversation_exists(conv_id)
+
+        # 使用同步方法获取路径
+        return self.get_conversation_path(conv_id, to_message_id)
+
+    def format_conversation_history(
+        self,
+        conv_id: str,
+        to_message_id: Optional[str] = None,
+    ) -> List[Dict]:
+        """
+        格式化对话历史为消息列表
+
+        Args:
+            conv_id: 对话ID
+            to_message_id: 目标消息ID（None则使用活跃分支）
+
+        Returns:
+            消息列表 [{"role": "user", "content": ...}, {"role": "assistant", ...}, ...]
+        """
+        # 1. 获取对话路径
+        conversation_path = self.get_conversation_path(conv_id, to_message_id)
+
+        if not conversation_path:
+            return []
+
+        # 2. 转换为标准消息格式
+        messages = []
+        for msg in conversation_path:
+            messages.append({
+                "role": "user",
+                "content": msg["content"]
+            })
+
+            if msg.get("graph_response"):
+                messages.append({
+                    "role": "assistant",
+                    "content": msg["graph_response"]
+                })
+
+        logger.debug(f"Formatted {len(messages)} messages from conversation history")
+        return messages
+
+    async def format_conversation_history_async(
+        self,
+        conv_id: str,
+        to_message_id: Optional[str] = None
+    ) -> List[Dict]:
+        """
+        格式化对话历史（异步版本）
+
+        Args:
+            conv_id: 对话ID
+            to_message_id: 目标消息ID
+
+        Returns:
+            格式化的消息列表
+        """
+        # 确保对话已加载
+        await self.ensure_conversation_exists(conv_id)
+
+        # 使用同步方法格式化
+        return self.format_conversation_history(conv_id, to_message_id)
+
+    # ========================================
+    # 列表操作
+    # ========================================
+
+    async def list_conversations_async(
+        self,
+        limit: int = 50,
+        offset: int = 0
+    ) -> List[Dict]:
+        """
+        列出所有对话（异步版本）
+
+        Args:
+            limit: 限制数量
+            offset: 跳过数量
+
+        Returns:
+            对话列表
+        """
+        if self.repository:
+            try:
+                conversations = await self.repository.list_conversations(
+                    limit=limit,
+                    offset=offset
+                )
+                return [
+                    {
+                        "conversation_id": conv.id,
+                        "title": conv.title,
+                        "message_count": len(conv.messages) if conv.messages else 0,
+                        "created_at": conv.created_at.isoformat(),
+                        "updated_at": conv.updated_at.isoformat()
+                    }
+                    for conv in conversations
+                ]
+            except Exception as e:
+                logger.warning(f"Failed to list conversations from DB: {e}")
+
+        # 回退到内存数据
+        conversations = []
+        for conv_id, cache in self._cache.items():
+            conversations.append({
+                "conversation_id": conv_id,
+                "title": None,
+                "message_count": len(cache.messages),
+                "branch_count": len(cache.branches),
+                "created_at": cache.created_at,
+                "updated_at": cache.updated_at
+            })
+        return conversations
+
+    def clear_cache(self, conversation_id: Optional[str] = None) -> None:
+        """
+        清除缓存
+
+        Args:
+            conversation_id: 对话ID（None则清除所有）
+        """
+        if conversation_id:
+            if conversation_id in self._cache:
+                del self._cache[conversation_id]
+        else:
+            self._cache.clear()
