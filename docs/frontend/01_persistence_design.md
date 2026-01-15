@@ -66,7 +66,7 @@
 # ExecutionController._execute_new_message() 中的逻辑
 async def _execute_new_message(self, content, conversation_id, parent_message_id):
     # 1. 从 App DB 获取对话历史（真相来源）
-    conversation_history = self.conversation_manager.format_conversation_history(
+    conversation_history = await self.conversation_manager.format_conversation_history_async(
         conv_id=conversation_id,
         to_message_id=parent_message_id
     )
