@@ -326,7 +326,7 @@ class ConversationManager:
             return self._cache[conv_id].active_branch or None
         return None
 
-    def get_conversation_path(
+    async def get_conversation_path_async(
         self,
         conv_id: str,
         to_message_id: Optional[str] = None
@@ -339,61 +339,28 @@ class ConversationManager:
             to_message_id: 目标消息ID（None则使用活跃分支）
 
         Returns:
-            消息路径列表（UserMessage对象）
+            消息路径列表
         """
-        if conv_id not in self._cache:
-            return []
+        repo = self._ensure_repository()
+        messages = await repo.get_conversation_path(conv_id, to_message_id)
 
-        cache = self._cache[conv_id]
-        target_id = to_message_id or cache.active_branch
-
-        if not target_id or target_id not in cache.messages:
-            return []
-
-        # 向上追溯到根
-        path = []
-        current_id: Optional[str] = target_id
-
-        while current_id and current_id in cache.messages:
-            msg = cache.messages[current_id]
-            path.insert(0, {
-                "message_id": msg.message_id,
+        return [
+            {
+                "message_id": msg.id,
                 "parent_id": msg.parent_id,
                 "content": msg.content,
                 "thread_id": msg.thread_id,
-                "timestamp": msg.timestamp,
+                "timestamp": msg.created_at.isoformat(),
                 "graph_response": msg.graph_response,
-                "metadata": msg.metadata
-            })
-            current_id = msg.parent_id
+                "metadata": msg.metadata_ or {}
+            }
+            for msg in messages
+        ]
 
-        return path
-
-    async def get_conversation_path_async(
+    async def format_conversation_history_async(
         self,
         conv_id: str,
         to_message_id: Optional[str] = None
-    ) -> List[Dict]:
-        """
-        获取对话路径（异步版本，支持从数据库加载）
-
-        Args:
-            conv_id: 对话ID
-            to_message_id: 目标消息ID
-
-        Returns:
-            消息路径列表
-        """
-        # 确保对话已加载到缓存
-        await self.ensure_conversation_exists(conv_id)
-
-        # 使用同步方法获取路径
-        return self.get_conversation_path(conv_id, to_message_id)
-
-    def format_conversation_history(
-        self,
-        conv_id: str,
-        to_message_id: Optional[str] = None,
     ) -> List[Dict]:
         """
         格式化对话历史为消息列表
@@ -405,49 +372,11 @@ class ConversationManager:
         Returns:
             消息列表 [{"role": "user", "content": ...}, {"role": "assistant", ...}, ...]
         """
-        # 1. 获取对话路径
-        conversation_path = self.get_conversation_path(conv_id, to_message_id)
-
-        if not conversation_path:
-            return []
-
-        # 2. 转换为标准消息格式
-        messages = []
-        for msg in conversation_path:
-            messages.append({
-                "role": "user",
-                "content": msg["content"]
-            })
-
-            if msg.get("graph_response"):
-                messages.append({
-                    "role": "assistant",
-                    "content": msg["graph_response"]
-                })
+        repo = self._ensure_repository()
+        messages = await repo.format_conversation_history(conv_id, to_message_id)
 
         logger.debug(f"Formatted {len(messages)} messages from conversation history")
         return messages
-
-    async def format_conversation_history_async(
-        self,
-        conv_id: str,
-        to_message_id: Optional[str] = None
-    ) -> List[Dict]:
-        """
-        格式化对话历史（异步版本）
-
-        Args:
-            conv_id: 对话ID
-            to_message_id: 目标消息ID
-
-        Returns:
-            格式化的消息列表
-        """
-        # 确保对话已加载
-        await self.ensure_conversation_exists(conv_id)
-
-        # 使用同步方法格式化
-        return self.format_conversation_history(conv_id, to_message_id)
 
     # ========================================
     # 列表操作
