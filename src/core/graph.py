@@ -9,7 +9,6 @@
 
 from typing import Dict, Optional, Any, Callable, AsyncGenerator
 from langgraph.graph import StateGraph, END
-from langgraph.checkpoint.memory import MemorySaver
 from langgraph.types import interrupt, StreamWriter
 
 from core.state import AgentState, ExecutionPhase, merge_agent_response_to_state
@@ -354,18 +353,30 @@ class ExtendableGraph:
         self.workflow.set_entry_point(agent_name)
         logger.info(f"Entry point set to {agent_name}")
     
-    def compile(
+    async def compile(
         self,
         checkpointer: Optional[Any] = None,
-        interrupt_before: Optional[list] = None
+        interrupt_before: Optional[list] = None,
+        db_path: str = "data/langgraph.db"
     ) -> Any:
-        """编译Graph"""
-        
+        """
+        编译Graph
+
+        Args:
+            checkpointer: LangGraph checkpointer 实例（用于状态持久化）
+                如果为 None，使用 AsyncSqliteSaver 进行持久化
+            interrupt_before: 中断前节点列表
+            db_path: SQLite 数据库文件路径（仅当 checkpointer 为 None 时使用）
+
+        Returns:
+            编译后的Graph
+        """
+
         # 1. 为user_confirmation添加出边
         def route_after_confirmation(state: AgentState) -> str:
             """从权限确认返回原agent"""
             phase = state["phase"]
-            
+
             if phase == ExecutionPhase.LEAD_EXECUTING:
                 return "lead_agent"
             elif phase == ExecutionPhase.SUBAGENT_EXECUTING:
@@ -376,46 +387,55 @@ class ExtendableGraph:
                 return "lead_agent"
             else:
                 return END
-        
+
         # 构建route_map（包含所有agents）
         route_map = {"lead_agent": "lead_agent", END: END}
         for agent_name in self.agents.keys():
             route_map[agent_name] = agent_name
-        
+
         # 添加条件边
         self.workflow.add_conditional_edges(
             "user_confirmation",
             route_after_confirmation,
             route_map
         )
-        
+
         # 2. 编译（调用时使用 stream_mode="custom"）
         if checkpointer is None:
-            checkpointer = MemorySaver()
-        
+            # 使用 AsyncSqliteSaver 进行持久化
+            checkpointer = await create_async_sqlite_checkpointer(db_path)
+
         if interrupt_before is None:
             interrupt_before = []
-        
+
         compiled = self.workflow.compile(
             checkpointer=checkpointer,
             interrupt_before=interrupt_before
         )
-        
-        logger.info(f"Graph compiled with {len(self.agents)} agents")
+
+        logger.info(f"Graph compiled with {len(self.agents)} agents (using AsyncSqliteSaver)")
         return compiled
 
 
-def create_multi_agent_graph(
-    tool_permissions: Optional[Dict[str, "ToolPermission"]] = None
+async def create_multi_agent_graph(
+    tool_permissions: Optional[Dict[str, "ToolPermission"]] = None,
+    artifact_manager: Optional["ArtifactManager"] = None,
+    checkpointer: Optional[Any] = None,
+    db_path: str = "data/langgraph.db"
 ):
     """
     创建多Agent Graph的工厂函数
-    
+
     Args:
         tool_permissions: 工具权限配置字典
             格式: {"tool_name": ToolPermission.LEVEL}
             例如: {"web_fetch": ToolPermission.CONFIRM}
-    
+        artifact_manager: ArtifactManager 实例（用于持久化）
+            如果为 None，artifact 工具将不可用
+        checkpointer: LangGraph checkpointer 实例（用于状态持久化）
+            如果为 None，使用 AsyncSqliteSaver 进行持久化
+        db_path: SQLite 数据库文件路径（仅当 checkpointer 为 None 时使用）
+
     Returns:
         编译后的Graph
     """
@@ -425,7 +445,8 @@ def create_multi_agent_graph(
     from tools.registry import ToolRegistry
     from tools.implementations.artifact_ops import (
         CreateArtifactTool, UpdateArtifactTool,
-        RewriteArtifactTool, ReadArtifactTool
+        RewriteArtifactTool, ReadArtifactTool,
+        ArtifactManager, create_artifact_tools
     )
     from tools.implementations.call_subagent import CallSubagentTool
     from tools.implementations.web_search import WebSearchTool
@@ -436,24 +457,36 @@ def create_multi_agent_graph(
     
     # 创建工具注册中心
     registry = ToolRegistry()
-    
-    # 注册所有工具
-    tools = [
-        CreateArtifactTool(),
-        UpdateArtifactTool(),
-        RewriteArtifactTool(),
-        ReadArtifactTool(),
+
+    # 创建工具列表
+    tools = []
+
+    # Artifact 工具（如果有 manager）
+    if artifact_manager:
+        artifact_tools = create_artifact_tools(artifact_manager)
+        tools.extend(artifact_tools)
+    else:
+        # 兼容模式：创建不带 manager 的工具（会返回错误）
+        tools.extend([
+            CreateArtifactTool(),
+            UpdateArtifactTool(),
+            RewriteArtifactTool(),
+            ReadArtifactTool(),
+        ])
+
+    # 其他工具
+    tools.extend([
         CallSubagentTool(),
         WebSearchTool(),
         WebFetchTool(),
-    ]
-    
+    ])
+
     # 应用权限配置
     if tool_permissions:
         for tool in tools:
             if tool.name in tool_permissions:
                 tool.permission = tool_permissions[tool.name]
-    
+
     # 注册所有工具
     for tool in tools:
         registry.register_tool_to_library(tool)
@@ -499,6 +532,57 @@ def create_multi_agent_graph(
     
     # 设置入口点
     graph_builder.set_entry_point("lead_agent")
-    
-    # 编译
-    return graph_builder.compile()
+
+    # 编译（传入 checkpointer）
+    return await graph_builder.compile(checkpointer=checkpointer, db_path=db_path)
+
+
+async def create_async_sqlite_checkpointer(db_path: str = "data/langgraph.db"):
+    """
+    创建 AsyncSqliteSaver checkpointer
+
+    用于 LangGraph 状态持久化，支持中断恢复和对话历史。
+
+    Args:
+        db_path: SQLite 数据库文件路径
+
+    Returns:
+        AsyncSqliteSaver 实例
+
+    使用示例:
+        ```python
+        from core.graph import create_multi_agent_graph, create_async_sqlite_checkpointer
+
+        # 创建 checkpointer
+        checkpointer = await create_async_sqlite_checkpointer("data/langgraph.db")
+
+        # 创建 graph
+        graph = await create_multi_agent_graph(checkpointer=checkpointer)
+        ```
+
+    注意：
+        - 需要安装 langgraph-checkpoint-sqlite 和 aiosqlite 包
+        - 数据库文件会自动创建
+        - 建议与应用数据库使用不同的文件（LangGraph 有自己的 schema）
+        - 调用方负责在程序结束时关闭连接（可选）
+    """
+    import os
+    import aiosqlite
+    from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+
+    # 确保目录存在
+    db_dir = os.path.dirname(db_path)
+    if db_dir and not os.path.exists(db_dir):
+        os.makedirs(db_dir, exist_ok=True)
+
+    # 创建 aiosqlite 连接
+    conn = await aiosqlite.connect(db_path)
+
+    # 创建 AsyncSqliteSaver
+    checkpointer = AsyncSqliteSaver(conn)
+
+    # 初始化表结构
+    await checkpointer.setup()
+
+    logger.info(f"Created AsyncSqliteSaver checkpointer: {db_path}")
+    return checkpointer
