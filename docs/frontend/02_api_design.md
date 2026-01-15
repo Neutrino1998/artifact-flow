@@ -1,6 +1,14 @@
 # ArtifactFlow API 层实现方案
 
-> 版本: v1.2 | 依赖: 持久化改造完成
+> 版本: v1.4 | 依赖: 持久化改造完成
+>
+> **v1.4 更新**：
+> - 更新 Section 6.2：Checkpointer 从 MemorySaver 改为 AsyncSqliteSaver
+> - 更新 Section 6.5：并发安全表更新 Checkpointer 说明
+> - `create_multi_agent_graph` 改为 async 函数
+>
+> **v1.3 更新**：
+> - 更新 Section 4.1：Resume 接口改为无状态设计（需要传入 `message_id`）
 >
 > **v1.2 更新**：
 > - 新增 Section 6.5：数据库会话与事务管理（并发安全设计）
@@ -182,6 +190,7 @@ async def cpu_intensive_task(data):
 ```json
 {
   "thread_id": "thd-xxx",
+  "message_id": "msg-xxx",
   "approved": true
 }
 ```
@@ -193,7 +202,9 @@ async def cpu_intensive_task(data):
 }
 ```
 
-**🆕 重要说明**：
+**重要说明**：
+- **必须参数**：`thread_id`、`message_id`、`approved`（这三个参数都可以从中断事件的返回数据中获取）
+- **无状态设计**：Controller 不保存中断状态，resume 时必须传入完整参数
 - 每次 resume 返回的 `stream_url` 可能相同，但前端应**销毁旧的 EventSource 实例**后再建立新连接
 - 这确保了连接状态的干净切换
 
@@ -460,13 +471,13 @@ src/
 ```python
 # dependencies.py
 from functools import lru_cache
-from typing import AsyncGenerator
+from typing import AsyncGenerator, Any
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.controller import ExecutionController
 from core.conversation_manager import ConversationManager
-from core.graph import create_multi_agent_graph
+from core.graph import create_multi_agent_graph, create_async_sqlite_checkpointer
 from tools.implementations.artifact_ops import ArtifactManager
 from db.database import DatabaseManager
 from repositories.artifact_repo import ArtifactRepository
@@ -478,22 +489,32 @@ from api.services.stream_manager import StreamManager
 # ============================================================
 
 _db_manager: DatabaseManager = None
+_checkpointer: Any = None  # AsyncSqliteSaver，LangGraph 状态持久化
 
-async def init_db_manager():
+async def init_globals():
     """应用启动时初始化"""
-    global _db_manager
+    global _db_manager, _checkpointer
     _db_manager = DatabaseManager()
     await _db_manager.initialize()
+    # 创建共享的 checkpointer（用于 interrupt/resume）
+    # 使用 AsyncSqliteSaver 持久化到 SQLite
+    _checkpointer = await create_async_sqlite_checkpointer("data/langgraph.db")
 
-async def close_db_manager():
+async def close_globals():
     """应用关闭时清理"""
-    global _db_manager
+    global _db_manager, _checkpointer
+    # 关闭 checkpointer 的 aiosqlite 连接
+    if _checkpointer and hasattr(_checkpointer, 'conn'):
+        await _checkpointer.conn.close()
     if _db_manager:
         await _db_manager.close()
 
 @lru_cache()
 def get_stream_manager() -> StreamManager:
     return StreamManager(ttl_seconds=30)
+
+def get_checkpointer() -> Any:
+    return _checkpointer
 
 # ============================================================
 # 请求级别依赖（每个请求独立）
@@ -530,10 +551,14 @@ async def get_controller(
     """
     每个请求获得独立的 Controller
 
-    注意：Graph 每次创建新实例，因为它持有 artifact_manager 引用
+    注意：
+    - Graph 每次创建新实例，因为它持有 artifact_manager 引用
+    - 但 checkpointer 是共享的，以支持跨请求的 interrupt/resume
+    - create_multi_agent_graph 是 async 函数
     """
-    compiled_graph = create_multi_agent_graph(
-        artifact_manager=artifact_manager
+    compiled_graph = await create_multi_agent_graph(
+        artifact_manager=artifact_manager,
+        checkpointer=get_checkpointer()  # 使用共享的 checkpointer
     )
     return ExecutionController(
         compiled_graph,
@@ -721,10 +746,11 @@ get_db_session()        # 创建独立的 AsyncSession
 | 组件 | 共享方式 | 说明 |
 |------|---------|------|
 | `DatabaseManager` | 全局单例 | 只管理连接池，不持有 session 状态 |
+| `Checkpointer` | 全局单例 | AsyncSqliteSaver，LangGraph 状态持久化，支持 interrupt/resume |
 | `AsyncSession` | 请求独立 | 每个请求创建新的数据库会话 |
 | `Repository` | 请求独立 | 绑定到请求的 session |
 | `Manager` | 请求独立 | 绑定到请求的 repository |
-| `Graph` | 请求独立 | 持有 manager 引用，每个请求创建新实例 |
+| `Graph` | 请求独立 | 持有 manager 引用，每个请求创建新实例（但共享 checkpointer） |
 | `Controller` | 请求独立 | 绑定到请求的 managers |
 | `StreamManager` | 全局单例 | 无数据库操作，可安全共享 |
 
@@ -959,6 +985,38 @@ class APIConfig:
     DEFAULT_PAGE_SIZE: int = 20
     MAX_PAGE_SIZE: int = 100
 ```
+
+---
+
+## 附录：v1.3 → v1.4 变更摘要
+
+| 章节 | 变更类型 | 说明 |
+|------|---------|------|
+| 6.2 | 🔄 更新 | Checkpointer 从 MemorySaver 改为 AsyncSqliteSaver |
+| 6.5 | 🔄 更新 | 并发安全表更新 Checkpointer 说明 |
+
+**关键变更说明**：
+
+1. **Checkpointer 持久化**：从内存存储 (`MemorySaver`) 改为 SQLite 持久化 (`AsyncSqliteSaver`)，服务重启后 interrupt/resume 状态不丢失
+2. **`create_multi_agent_graph` 改为 async**：因为创建 checkpointer 需要异步初始化
+3. **连接清理**：`close_globals()` 需要关闭 checkpointer 的 aiosqlite 连接，避免程序无法正常退出
+
+---
+
+## 附录：v1.2 → v1.3 变更摘要
+
+| 章节 | 变更类型 | 说明 |
+|------|---------|------|
+| 4.1 | 🔄 更新 | Resume 接口增加 `message_id` 参数，改为无状态设计 |
+| 6.2 | 🔄 更新 | 依赖注入示例增加共享 checkpointer |
+| 6.5 | 🔄 更新 | 并发安全表增加 Checkpointer 组件 |
+
+**关键变更说明**：
+
+1. **Controller 无状态设计**：Controller 不再保存 `interrupted_threads` 状态
+2. **Resume 接口变更**：必须传入 `thread_id`、`message_id`、`approved` 三个参数
+3. **参数来源**：所有 resume 所需参数都可以从中断事件（`interrupt`）的返回数据中获取
+4. **Checkpointer 共享**：LangGraph 的 checkpointer 必须跨请求共享，否则 interrupt/resume 无法正常工作
 
 ---
 
