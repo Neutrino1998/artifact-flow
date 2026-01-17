@@ -43,4 +43,8 @@ diff-match-patch>=20230430
 
 # SQLAlchemy ORM（异步支持）
 sqlalchemy[asyncio]>=2.0.0
-aiosqlite>=0.19.0  # SQLite 异步驱动
+# ⚠️ aiosqlite 必须锁定 0.21.0
+# 0.22.0 移除了 Connection 对 threading.Thread 的继承，导致 is_alive() 方法丢失
+# langgraph-checkpoint-sqlite 在初始化时调用 conn.is_alive() 会引发 AttributeError
+# 详见: https://github.com/omnilib/aiosqlite/releases/tag/v0.22.0
+aiosqlite==0.21.0
