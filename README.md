@@ -90,49 +90,6 @@ ArtifactFlow 是一个智能多智能体研究系统，通过协调专门的AI�
 - **🔍 搜索智能体 (Search Agent)**: 信息检索和结构化搜索结果
 - **🕷️ 网页抓取智能体 (Crawl Agent)**: 深度内容提取和分析（支持HTML和PDF）
 
-### 🎉 已完成模块
-
-- ✅ **基础设施** (v0.1.0) - **已完成**
-  - [x] 项目结构和配置
-  - [x] 核心工具模块（日志、重试、XML解析）
-  - [x] 多模型LLM接口统一封装
-
-- ✅ **工具系统** (v0.1.5) - **已完成**
-  - [x] 基础工具框架和权限控制
-  - [x] Artifact操作工具 (create/update/rewrite/read)
-  - [x] Web搜索工具 (基于博查AI)
-  - [x] 智能网页抓取工具 (基于crawl4ai，支持HTML和PDF)
-  - [x] 工具注册和管理系统
-  - [x] XML提示词生成系统
-
-- ✅ **智能体系统** (v0.2.0) - **已完成**
-  - [x] BaseAgent抽象类和统一执行框架
-  - [x] 流式响应和工具调用循环
-  - [x] Lead Agent - 任务协调和信息整合
-  - [x] Search Agent - 信息检索专家
-  - [x] Crawl Agent - 网页内容抓取专家（支持PDF）
-  - [x] Agent间协作和路由机制
-
-- ✅ **工作流编排** (v0.3.0) - **已完成**
-  - [x] Agent状态管理 (core/state.py)
-  - [x] LangGraph工作流 (core/graph.py)
-  - [x] 执行控制器 (core/controller.py)
-  - [x] Context压缩和管理 (core/context_manager.py)
-  - [x] 多轮对话支持
-  - [x] 分支对话功能
-  - [x] 权限确认流程
-  - [x] 流式执行模式（支持实时响应和进度更新）
-  - [x] 完整的核心模块集成测试
-
-- ✅ **数据持久化** (v0.3.5) - **已完成**
-  - [x] SQLite 数据库 + WAL 模式（高并发读写）
-  - [x] SQLAlchemy ORM 模型（Conversation, Message, Artifact, ArtifactVersion）
-  - [x] Repository 模式数据访问层
-  - [x] ConversationManager / ArtifactManager 缓存层
-  - [x] 乐观锁并发控制
-  - [x] LangGraph AsyncSqliteSaver 状态持久化
-  - [x] 依赖注入设计，支持容器化水平扩展
-
 ## 🚀 快速开始
 
 ### 环境要求
