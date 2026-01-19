@@ -34,7 +34,7 @@ class CallSubagentTool(BaseTool):
     def get_parameters(self) -> List[ToolParameter]:
         return [
             ToolParameter(
-                name="agent_type",
+                name="agent_name",
                 type="string", 
                 description="Sub-agent type: check available_subagents section for available agents",
                 required=True
@@ -52,20 +52,20 @@ class CallSubagentTool(BaseTool):
         "执行"工具调用（实际是生成路由指令）
         
         Args:
-            agent_type: 目标Agent类型
+            agent_name: 目标Agent类型
             instruction: 任务指令
             
         Returns:
             包含路由信息的ToolResult
         """
-        # 验证agent_type
+        # 验证agent_name
         valid_agents = ["search_agent", "crawl_agent"]
-        agent_type = params.get("agent_type")
+        agent_name = params.get("agent_name")
         
-        if agent_type not in valid_agents:
+        if agent_name not in valid_agents:
             return ToolResult(
                 success=False,
-                error=f"Invalid agent_type '{agent_type}'. Must be one of: {', '.join(valid_agents)}"
+                error=f"Invalid agent_name '{agent_name}'. Must be one of: {', '.join(valid_agents)}"
             )
         
         instruction = params.get("instruction", "").strip()
@@ -76,14 +76,14 @@ class CallSubagentTool(BaseTool):
             )
         
         # 记录路由请求
-        logger.info(f"Routing request: {agent_type} - {instruction[:100]}...")
+        logger.info(f"Routing request: {agent_name} - {instruction[:100]}...")
         
         # 🎭 返回特殊的路由指令（不是真正的工具执行结果）
         return ToolResult(
             success=True,
             data={
                 # 🚦 路由控制信息
-                "_route_to": agent_type,
+                "_route_to": agent_name,
                 "_is_routing_instruction": True,  # 特殊标记
                 
                 # 📋 任务信息
@@ -95,7 +95,7 @@ class CallSubagentTool(BaseTool):
             },
             metadata={
                 "tool_type": "routing",
-                "target_agent": agent_type,
+                "target_agent": agent_name,
                 "instruction_length": len(instruction)
             }
         )
@@ -112,7 +112,7 @@ class CallSubagentTool(BaseTool):
         return """<tool_call>
   <name>call_subagent</name>
   <params>
-    <agent_type>search_agent</agent_type>
+    <agent_name>search_agent</agent_name>
     <instruction>Search for recent developments in AI safety research, focusing on alignment techniques published in 2024</instruction>
   </params>
 </tool_call>"""

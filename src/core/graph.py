@@ -1,9 +1,10 @@
 """
 可扩展的Graph构建器（支持流式输出）
-核心改进：
-1. 简化agent_node逻辑
-2. 简化route_func逻辑（基于phase）
-3. user_confirmation_node支持任何agent
+
+架构说明：
+1. Agent 只做单轮 LLM 调用，工具执行由 Graph 控制
+2. tool_execution_node 统一处理所有工具调用（PUBLIC/NOTIFY/CONFIRM/RESTRICTED）
+3. 工具调用循环由 Graph 路由实现（agent → tool_exec → agent → ...）
 4. 支持流式输出 (stream_mode="custom")
 """
 
@@ -23,99 +24,142 @@ logger = get_logger("ArtifactFlow")
 class ExtendableGraph:
     """
     可扩展的Graph构建器
-    支持动态注册Agent和权限确认
+
+    支持动态注册Agent，统一的工具执行节点
     支持流式输出 (stream_mode="custom")
-    
+
     Workflow:
-    [Start] 
-        → [LeadAgentExecuting]
-            ├→ [WaitingForPermission] → [PermissionApproved/Denied] → [LeadAgentResuming]
-            ├→ [SubagentExecuting] → [SubagentComplete] → [LeadAgentResuming]
-            └→ [LeadAgentComplete] → [End]
+    [Start]
+        → [agent_node] (单轮 LLM 调用)
+            ├→ [TOOL_EXECUTING] → [tool_execution_node] → [agent_node] (继续)
+            ├→ [SUBAGENT_EXECUTING] → [subagent_node] → [agent_node] (lead 恢复)
+            └→ [COMPLETED] → [End]
+
+    工具执行流程:
+    [tool_execution_node]
+        ├→ PUBLIC/NOTIFY → 直接执行 → 返回原 agent
+        └→ CONFIRM/RESTRICTED → interrupt() → 确认后执行 → 返回原 agent
     """
-    
+
     def __init__(self):
         """初始化Graph构建器"""
         self.workflow = StateGraph(AgentState)
         self.agents: Dict[str, BaseAgent] = {}
-        
-        # 添加核心节点（权限确认）
-        self._add_confirmation_node()
-        
+
+        # 添加核心节点（工具执行）
+        self._add_tool_execution_node()
+
         logger.info("ExtendableGraph initialized")
     
-    def _add_confirmation_node(self):
-        """添加权限确认节点"""
-        
-        async def user_confirmation_node(state: AgentState) -> AgentState:
+    def _add_tool_execution_node(self):
+        """添加统一的工具执行节点"""
+
+        async def tool_execution_node(state: AgentState) -> AgentState:
             """
-            权限确认节点（支持任何agent）
-            
+            统一的工具执行节点
+
+            处理所有权限级别的工具调用：
+            - PUBLIC/NOTIFY → 直接执行
+            - CONFIRM/RESTRICTED → interrupt() 请求确认后执行
+
             工作流程：
-            1. 从permission_pending读取待确认信息
-            2. 使用interrupt()请求用户确认
-            3. 执行或拒绝工具
-            4. 保存工具结果到permission_pending
-            5. 设置phase返回原agent
+            1. 从 pending_tool_call 读取待执行信息
+            2. 获取工具并检查权限
+            3. 根据权限级别决定是否需要确认
+            4. 执行工具
+            5. 保存结果到 pending_tool_call
+            6. 设置 phase 返回原 agent
             """
-            logger.info("Entering user_confirmation_node")
-            
-            pending = state.get("permission_pending")
+            logger.info("Entering tool_execution_node")
+
+            pending = state.get("pending_tool_call")
             if not pending:
-                logger.error("No permission_pending found")
+                logger.error("No pending_tool_call found")
                 state["phase"] = ExecutionPhase.COMPLETED
                 return state
-            
+
             from_agent = pending["from_agent"]
             tool_name = pending["tool_name"]
             params = pending["params"]
-            permission_level = pending["permission_level"]
-            
-            logger.info(f"Requesting permission for '{tool_name}' from {from_agent}")
-            
-            # 请求用户确认
-            is_approved = interrupt({
-                "type": "tool_permission",
-                "agent": from_agent,
-                "tool_name": tool_name,
-                "params": params,
-                "permission_level": permission_level,
-                "message": f"Tool '{tool_name}' requires {permission_level} permission"
-            })
-            
-            # 执行或拒绝工具
-            if is_approved:
-                logger.info(f"Permission approved for '{tool_name}'")
-                agent = self.agents.get(from_agent)
-                if agent and agent.toolkit:
-                    tool_result = await agent.toolkit.execute_tool(tool_name, params)
-                else:
-                    tool_result = ToolResult(
-                        success=False,
-                        error=f"Agent '{from_agent}' or toolkit not available"
-                    )
-            else:
-                logger.info(f"Permission denied for '{tool_name}'")
+
+            logger.info(f"Executing tool '{tool_name}' for {from_agent}")
+
+            # 获取 agent 和工具
+            agent = self.agents.get(from_agent)
+            if not agent or not agent.toolkit:
                 tool_result = ToolResult(
                     success=False,
-                    error="Permission denied by user"
+                    error=f"Agent '{from_agent}' or toolkit not available"
                 )
-            
-            # 保存工具结果到permission_pending
+                pending["tool_result"] = tool_result
+                state["phase"] = self._get_return_phase(from_agent)
+                return state
+
+            tool = agent.toolkit.get_tool(tool_name)
+            if not tool:
+                tool_result = ToolResult(
+                    success=False,
+                    error=f"Tool '{tool_name}' not found"
+                )
+                pending["tool_result"] = tool_result
+                state["phase"] = self._get_return_phase(from_agent)
+                return state
+
+            # 根据权限级别处理
+            if tool.permission in [ToolPermission.CONFIRM, ToolPermission.RESTRICTED]:
+                # 需要用户确认
+                logger.info(f"Tool '{tool_name}' requires {tool.permission.value} permission")
+
+                is_approved = interrupt({
+                    "type": "tool_permission",
+                    "agent": from_agent,
+                    "tool_name": tool_name,
+                    "params": params,
+                    "permission_level": tool.permission.value,
+                    "message": f"Tool '{tool_name}' requires {tool.permission.value} permission"
+                })
+
+                if not is_approved:
+                    logger.info(f"Permission denied for '{tool_name}'")
+                    tool_result = ToolResult(
+                        success=False,
+                        error="Permission denied by user. You do not have permission to use this tool."
+                    )
+                    pending["tool_result"] = tool_result
+                    state["phase"] = self._get_return_phase(from_agent)
+                    return state
+
+                logger.info(f"Permission approved for '{tool_name}'")
+
+            # 执行工具（PUBLIC/NOTIFY 直接执行，CONFIRM/RESTRICTED 确认后执行）
+            try:
+                tool_result = await agent.toolkit.execute_tool(tool_name, params)
+                logger.info(f"Tool '{tool_name}' executed: {'SUCCESS' if tool_result.success else 'FAILED'}")
+            except Exception as e:
+                logger.exception(f"Tool '{tool_name}' execution error: {e}")
+                tool_result = ToolResult(
+                    success=False,
+                    error=str(e)
+                )
+
+            # 保存结果
             pending["tool_result"] = tool_result
-            
-            # 设置phase：返回原agent继续执行
-            if from_agent == "lead_agent":
-                state["phase"] = ExecutionPhase.LEAD_EXECUTING
-            else:
-                state["phase"] = ExecutionPhase.SUBAGENT_EXECUTING
-            
-            logger.info(f"Returning to {from_agent} after permission resolution")
-            
+
+            # 返回原 agent 继续
+            state["phase"] = self._get_return_phase(from_agent)
+            logger.info(f"Returning to {from_agent} after tool execution")
+
             return state
-        
+
         # 注册节点
-        self.workflow.add_node("user_confirmation", user_confirmation_node)
+        self.workflow.add_node("tool_execution", tool_execution_node)
+
+    def _get_return_phase(self, agent_name: str) -> ExecutionPhase:
+        """根据 agent 名称获取返回的 phase"""
+        if agent_name == "lead_agent":
+            return ExecutionPhase.LEAD_EXECUTING
+        else:
+            return ExecutionPhase.SUBAGENT_EXECUTING
     
     def register_agent(self, agent: BaseAgent) -> None:
         """
@@ -152,18 +196,26 @@ class ExtendableGraph:
         """
         async def agent_node(state: AgentState, writer: StreamWriter) -> AgentState:
             """
-            Agent执行节点（流式版本）
-            
-            关键改动：
-            1. 接收 StreamWriter 参数
-            2. 使用 agent.stream() 替代 agent.execute()
-            3. 通过 writer() 发送自定义流式事件
+            Agent执行节点（单轮 LLM 调用，流式版本）
+
+            职责：
+            1. 准备消息（包括工具结果恢复）
+            2. 执行单轮 LLM 调用
+            3. 更新状态和路由
             """
             logger.info(f"Executing {agent_name} node (streaming)")
-            
+
             agent = self.agents[agent_name]
             memory = state.get("agent_memories", {}).get(agent_name, {})
-            
+
+            # 检查是否达到工具轮数上限
+            tool_round_count = memory.get("tool_round_count", 0)
+            max_tool_rounds = agent.config.max_tool_rounds
+            hit_tool_limit = tool_round_count >= max_tool_rounds
+
+            if hit_tool_limit:
+                logger.warning(f"{agent_name} reached max tool rounds ({max_tool_rounds})")
+
             try:
                 # ========== 准备执行参数 ==========
                 # 确定instruction
@@ -172,29 +224,28 @@ class ExtendableGraph:
                 else:
                     # Subagent从subagent_pending获取lead agent instruction
                     instruction = state.get("subagent_pending", {}).get("instruction", "")
-                
+
                 # 检查是否从中断恢复
                 tool_interactions = None
                 pending_tool_result = None
                 is_resuming = False
-                
-                # 1. 检查permission恢复
-                if pending := state.get("permission_pending"):
+
+                # 1. 检查工具执行恢复
+                if pending := state.get("pending_tool_call"):
                     if pending.get("from_agent") == agent_name and pending.get("tool_result"):
                         is_resuming = True
                         tool_interactions = memory.get("tool_interactions", [])
                         pending_tool_result = (pending["tool_name"], pending["tool_result"])
-                        logger.info(f"{agent_name} resuming after permission")
-                
+                        logger.info(f"{agent_name} resuming after tool '{pending['tool_name']}'")
+
                 # 2. 检查subagent恢复
                 elif pending := state.get("subagent_pending"):
                     if agent_name == "lead_agent" and pending.get("subagent_result"):
                         is_resuming = True
                         tool_interactions = memory.get("tool_interactions", [])
-                        tool_name = f"call_subagent"
-                        pending_tool_result = (tool_name, pending["subagent_result"])
-                        logger.info(f"{agent_name} resuming after {tool_name}")
-                
+                        pending_tool_result = ("call_subagent", pending["subagent_result"])
+                        logger.info(f"{agent_name} resuming after subagent")
+
                 # ========== 构建messages ==========
                 messages = ContextManager.build_agent_messages(
                     agent=agent,
@@ -203,28 +254,33 @@ class ExtendableGraph:
                     tool_interactions=tool_interactions,
                     pending_tool_result=pending_tool_result
                 )
-                
+
+                # 如果达到工具轮数上限，添加系统消息提醒总结
+                if hit_tool_limit:
+                    messages.append({
+                        "role": "system",
+                        "content": "⚠️ You have reached the maximum number of tool calls. Please summarize your findings and provide a final response."
+                    })
+
                 # ========== 流式执行Agent ==========
                 final_response = None
-                
-                # 关键改动：使用 agent.stream() 替代 agent.execute()
+
                 async for event in agent.stream(
                     messages=messages,
                     is_resuming=is_resuming
                 ):
                     # 通过 StreamWriter 发送自定义事件
-                    # LangGraph 会将这些事件包装在 custom 事件中
                     writer({
-                        "type": event.type.value,  # 转换 Enum 为 string
+                        "type": event.type.value,
                         "agent": event.agent,
                         "timestamp": event.timestamp.isoformat(),
                         "data": self._serialize_event_data(event.data)
                     })
-                    
+
                     # 保存最终响应
                     if event.data:
                         final_response = event.data
-                
+
                 # ========== 更新状态 ==========
                 if final_response:
                     merge_agent_response_to_state(
@@ -241,19 +297,19 @@ class ExtendableGraph:
                     )
                     merge_agent_response_to_state(state, agent_name, error_response)
                     state["phase"] = ExecutionPhase.COMPLETED
-                
+
             except Exception as e:
                 logger.exception(f"Error in {agent_name}: {e}")
-                
+
                 error_response = AgentResponse(
                     success=False,
                     content=f"Error in {agent_name}: {str(e)}",
                     metadata={'error': str(e)}
                 )
-                
+
                 merge_agent_response_to_state(state, agent_name, error_response)
                 state["phase"] = ExecutionPhase.COMPLETED
-            
+
             return state
         
         return agent_node
@@ -294,45 +350,43 @@ class ExtendableGraph:
         """
         def route_func(state: AgentState) -> str:
             """
-            基于phase的简化路由逻辑
-            
+            基于phase的路由逻辑
+
             路由规则：
-            1. WAITING_PERMISSION → user_confirmation
+            1. TOOL_EXECUTING → tool_execution
             2. SUBAGENT_EXECUTING → 目标subagent
-            3. LEAD_EXECUTING → lead_agent（如果current_agent不是lead）
+            3. LEAD_EXECUTING → lead_agent（subagent完成后返回）
             4. COMPLETED → END
             """
             phase = state["phase"]
             current_agent = state.get("current_agent")
-            
-            # 1. 权限确认（优先级最高）
-            if phase == ExecutionPhase.WAITING_PERMISSION:
-                return "user_confirmation"
-            
+
+            # 1. 工具执行
+            if phase == ExecutionPhase.TOOL_EXECUTING:
+                return "tool_execution"
+
             # 2. Subagent执行
             elif phase == ExecutionPhase.SUBAGENT_EXECUTING:
                 target = state["subagent_pending"]["target"]
                 return target
-            
-            # 3. Lead执行
+
+            # 3. Lead执行（subagent完成后返回）
             elif phase == ExecutionPhase.LEAD_EXECUTING:
-                # 如果current_agent不是lead，说明需要返回lead
                 if current_agent != "lead_agent":
                     return "lead_agent"
-                # 否则不应该到这里（merge会设置其他phase）
                 return END
-            
+
             # 4. 完成
             elif phase == ExecutionPhase.COMPLETED:
                 return END
-            
+
             else:
                 logger.error(f"Unexpected routing in phase: {phase}")
                 return END
-        
+
         # 构建路由映射（包含所有可能的目标）
         route_map = {
-            "user_confirmation": "user_confirmation",
+            "tool_execution": "tool_execution",
             "lead_agent": "lead_agent",
             END: END
         }
@@ -372,16 +426,16 @@ class ExtendableGraph:
             编译后的Graph
         """
 
-        # 1. 为user_confirmation添加出边
-        def route_after_confirmation(state: AgentState) -> str:
-            """从权限确认返回原agent"""
+        # 1. 为 tool_execution 添加出边
+        def route_after_tool_execution(state: AgentState) -> str:
+            """从工具执行返回原agent"""
             phase = state["phase"]
 
             if phase == ExecutionPhase.LEAD_EXECUTING:
                 return "lead_agent"
             elif phase == ExecutionPhase.SUBAGENT_EXECUTING:
                 # 读取from_agent，返回原agent
-                pending = state.get("permission_pending")
+                pending = state.get("pending_tool_call")
                 if pending:
                     return pending["from_agent"]
                 return "lead_agent"
@@ -395,8 +449,8 @@ class ExtendableGraph:
 
         # 添加条件边
         self.workflow.add_conditional_edges(
-            "user_confirmation",
-            route_after_confirmation,
+            "tool_execution",
+            route_after_tool_execution,
             route_map
         )
 

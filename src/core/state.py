@@ -17,18 +17,20 @@ logger = get_logger("ArtifactFlow")
 class ExecutionPhase(str, Enum):
     """
     执行阶段枚举
-    
+
     状态转换规则：
-    - LEAD_EXECUTING → WAITING_PERMISSION（需要权限）
+    - LEAD_EXECUTING → TOOL_EXECUTING（有工具调用）
     - LEAD_EXECUTING → SUBAGENT_EXECUTING（调用subagent）
     - LEAD_EXECUTING → COMPLETED（任务完成）
-    - SUBAGENT_EXECUTING → WAITING_PERMISSION（需要权限）
+    - SUBAGENT_EXECUTING → TOOL_EXECUTING（有工具调用）
     - SUBAGENT_EXECUTING → LEAD_EXECUTING（subagent完成）
-    - WAITING_PERMISSION → LEAD_EXECUTING（从lead的权限恢复）
-    - WAITING_PERMISSION → SUBAGENT_EXECUTING（从subagent的权限恢复）
+    - TOOL_EXECUTING → WAITING_PERMISSION（需要确认）
+    - TOOL_EXECUTING → LEAD_EXECUTING/SUBAGENT_EXECUTING（执行完成，返回原agent）
+    - WAITING_PERMISSION → LEAD_EXECUTING/SUBAGENT_EXECUTING（确认后返回原agent）
     """
     LEAD_EXECUTING = "lead_executing"
     SUBAGENT_EXECUTING = "subagent_executing"
+    TOOL_EXECUTING = "tool_executing"
     WAITING_PERMISSION = "waiting_permission"
     COMPLETED = "completed"
 
@@ -65,7 +67,7 @@ class AgentState(TypedDict):
     
     # ========== 路由数据（按需存在） ==========
     subagent_pending: Optional[Dict]         # {"target": str, "instruction": str, "subagent_result": ToolResult}
-    permission_pending: Optional[Dict]       # {"tool_name": str, "params": dict, "permission_level": str, "from_agent": str, "tool_result": ToolResult}
+    pending_tool_call: Optional[Dict]        # {"tool_name": str, "params": dict, "from_agent": str, "tool_result": ToolResult}
     
     # ========== Agent记忆 ==========
     agent_memories: Dict[str, NodeMemory]
@@ -129,7 +131,7 @@ def create_initial_state(
         "phase": ExecutionPhase.LEAD_EXECUTING,
         "current_agent": "lead_agent",
         "subagent_pending": None,
-        "permission_pending": None,
+        "pending_tool_call": None,
         "agent_memories": {},
         "compression_level": compression_level,
         "user_message_id": message_id,
@@ -144,43 +146,44 @@ def merge_agent_response_to_state(
     is_resuming: bool = False
 ) -> None:
     """
-    统一的状态更新函数（重构版）
-    
-    核心改进：
-    - 直接设置phase，不做复杂验证
-    - 清晰的字段职责划分
-    - 支持任何agent的权限请求
-    
+    统一的状态更新函数
+
+    处理 Agent 执行后的状态更新和路由：
+    - tool_call → TOOL_EXECUTING，设置 pending_tool_call
+    - subagent → SUBAGENT_EXECUTING，设置 subagent_pending
+    - 无路由 → COMPLETED（lead）或返回 LEAD_EXECUTING（subagent）
+
     Args:
         state: 当前状态
         agent_name: Agent名称
         response: AgentResponse对象
-        is_resuming: 是否已从中断恢复
+        is_resuming: 是否从工具执行恢复
     """
-    
+
     # ========== 1. 更新当前agent ==========
     state["current_agent"] = agent_name
-    
+
     # ========== 2. 清理恢复状态 ==========
     if is_resuming:
-        if state.get("permission_pending"):
-            state["permission_pending"] = None
-            logger.debug(f"{agent_name} resumed from permission, clearing pending state")
+        if state.get("pending_tool_call"):
+            state["pending_tool_call"] = None
+            logger.debug(f"{agent_name} resumed from tool execution, clearing pending state")
         if agent_name == "lead_agent" and state.get("subagent_pending"):
             state["subagent_pending"] = None
             logger.debug(f"{agent_name} resumed from subagent, clearing pending state")
-    
+
     # ========== 3. 更新agent记忆 ==========
     memory = state["agent_memories"].get(agent_name, {
         "tool_interactions": [],
         "last_response": None,
-        "metadata": {}
+        "metadata": {},
+        "tool_round_count": 0
     })
-    
+
     # 合并工具交互历史
     if hasattr(response, "tool_interactions") and response.tool_interactions:
         memory["tool_interactions"].extend(response.tool_interactions)
-    
+
     # 更新最后的响应
     memory["last_response"] = {
         "success": response.success,
@@ -189,11 +192,10 @@ def merge_agent_response_to_state(
         "metadata": response.metadata,
         "reasoning": getattr(response, 'reasoning_content', None)
     }
-    
+
     # 更新metadata
-    memory["metadata"]["tool_rounds"] = response.metadata.get("tool_rounds", 0)
     memory["metadata"]["completed_at"] = datetime.now().isoformat()
-    
+
     # 累积token使用量
     if hasattr(response, 'token_usage') and response.token_usage:
         existing_usage = memory["metadata"].get("token_usage", {
@@ -201,38 +203,40 @@ def merge_agent_response_to_state(
             "output_tokens": 0,
             "total_tokens": 0
         })
-        
+
         new_usage = response.token_usage
         memory["metadata"]["token_usage"] = {
             "input_tokens": existing_usage["input_tokens"] + new_usage.get("input_tokens", 0),
             "output_tokens": existing_usage["output_tokens"] + new_usage.get("output_tokens", 0),
             "total_tokens": existing_usage["total_tokens"] + new_usage.get("total_tokens", 0)
         }
-    
+
     # 记录执行次数
     memory["metadata"]["execution_count"] = memory["metadata"].get("execution_count", 0) + 1
-    
+
     # 保存回state
     state["agent_memories"][agent_name] = memory
-    
+
     # ========== 4. 处理路由逻辑 ==========
     if response.routing:
         routing_type = response.routing.get("type")
-        
-        if routing_type == "permission_confirmation":
-            # 需要权限确认
-            state["phase"] = ExecutionPhase.WAITING_PERMISSION
-            state["permission_pending"] = {
+
+        if routing_type == "tool_call":
+            # 路由到工具执行节点
+            state["phase"] = ExecutionPhase.TOOL_EXECUTING
+            state["pending_tool_call"] = {
                 "tool_name": response.routing["tool_name"],
                 "params": response.routing["params"],
-                "permission_level": response.routing["permission_level"],
-                "from_agent": agent_name,  # 记录是哪个agent需要权限
-                "tool_result": None  # 等待user_confirmation_node填充
+                "from_agent": agent_name,
+                "tool_result": None  # 等待 tool_execution_node 填充
             }
-            logger.info(f"{agent_name} requesting permission for '{response.routing['tool_name']}'")
-            
+            # 增加工具轮数计数
+            memory["tool_round_count"] = memory.get("tool_round_count", 0) + 1
+            logger.info(f"{agent_name} requesting tool '{response.routing['tool_name']}' (round {memory['tool_round_count']})")
+
         elif routing_type == "subagent":
-            # 路由到subagent
+            # 路由到subagent（清零当前agent的tool_round_count）
+            memory["tool_round_count"] = 0
             state["phase"] = ExecutionPhase.SUBAGENT_EXECUTING
             state["subagent_pending"] = {
                 "target": response.routing["target"],
@@ -240,13 +244,16 @@ def merge_agent_response_to_state(
                 "subagent_result": None  # 等待subagent填充
             }
             logger.info(f"{agent_name} routing to {response.routing['target']}")
-    
+
     else:
-        # 没有路由
+        # 没有路由 → Agent 完成
+        # 清零 tool_round_count
+        memory["tool_round_count"] = 0
+
         if agent_name != "lead_agent":
             # Subagent完成，封装结果为ToolResult
             from tools.base import ToolResult
-            
+
             tool_result = ToolResult(
                 success=response.success,
                 data=response.content,
@@ -256,15 +263,15 @@ def merge_agent_response_to_state(
                     "reasoning": response.reasoning_content
                 }
             )
-            
+
             # 保存到subagent_pending
             if state.get("subagent_pending"):
                 state["subagent_pending"]["subagent_result"] = tool_result
-            
+
             # 返回lead_agent
             state["phase"] = ExecutionPhase.LEAD_EXECUTING
             logger.info(f"{agent_name} completed, returning to lead_agent")
-            
+
         else:
             # Lead agent完成 → 任务结束
             state["phase"] = ExecutionPhase.COMPLETED

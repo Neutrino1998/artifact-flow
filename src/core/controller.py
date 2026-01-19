@@ -251,7 +251,10 @@ class ExecutionController:
         )
         
         # 8. 执行graph
-        config = {"configurable": {"thread_id": thread_id}}
+        config = {
+            "configurable": {"thread_id": thread_id},
+            "recursion_limit": 100  # 工具循环在 graph 层，需要更高限制
+        }
         
         try:
             result = await self.graph.ainvoke(initial_state, config)
@@ -389,7 +392,10 @@ class ExecutionController:
         }
         
         # 7-8. 流式执行graph
-        config = {"configurable": {"thread_id": thread_id}}
+        config = {
+            "configurable": {"thread_id": thread_id},
+            "recursion_limit": 100  # 工具循环在 graph 层，需要更高限制
+        }
         
         try:
             # 🔥 关键改动：使用 astream() 替代 ainvoke()，并指定 stream_mode="custom"
@@ -510,7 +516,10 @@ class ExecutionController:
             self.artifact_manager.set_session(conversation_id)
 
         # 恢复执行
-        config = {"configurable": {"thread_id": thread_id}}
+        config = {
+            "configurable": {"thread_id": thread_id},
+            "recursion_limit": 100
+        }
 
         try:
             result = await self.graph.ainvoke(
@@ -585,7 +594,10 @@ class ExecutionController:
             }
         }
 
-        config = {"configurable": {"thread_id": thread_id}}
+        config = {
+            "configurable": {"thread_id": thread_id},
+            "recursion_limit": 100
+        }
 
         try:
             final_response = None

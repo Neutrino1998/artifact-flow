@@ -1,3 +1,7 @@
+# 工具模块已知问题清单
+
+## 次要问题
+- [ ] 使用标准xml解析方式（xml.etree.ElementTree），string字段统一用cdata字段，所有参数Tag平铺，如有下级标签则为list
 
 
 # Core模块已知问题清单
@@ -13,6 +17,9 @@ system prompt + instruction + history(如果有) + tool result
 - [x] 由于消息拼接被移动到了baseagent外，导致外部调用的工具结果没有被graph记录下来
 - [x] conversation history只能format两条？已定位问题：_execute_new_message没有输入parent_message_id应该自动设置parent_message_id关联
 - [x] `interrupt()` 函数需要在一个正确的 runnable context 中调用，但现在看起来上下文不正确。已定位问题：异步 interrupt 功能需要 Python 3.11+ 才能正常工作,因为 Python 3.11 之前的版本中异步任务无法正确传播上下文 [Asynchronous Graph with interrupts in Python 3.10 seems to be broken · langchain-ai/langgraph · Discussion #3200](https://github.com/langchain-ai/langgraph/discussions/3200)
+- [ ] `langgraph`使用的`AsyncSqliteSaver`需要一个定时清理脚本避免缓存线程无限堆积/或者切换为拥有ttl管理的redis管理
+- [x] Agent基类去掉自己的工具调用处理，将工具调用处理全权交给graph的工具节点`user_confirmation_node`(这个node可以改个名字)。例如tool permission为NOTIFY/PUBLIC的时候也交给confirmation node执行，但是自动允许。
+- [ ] 可观测性设计：仔细设计graph state包含可观测性字段，记录token使用以及工具调用等信息
 
 ## 次要问题
 - [x] 各类id加上类型名
@@ -25,11 +32,11 @@ system prompt + instruction + history(如果有) + tool result
 - [ ] agent提示词精简一下
 - [x] ToolPromptGenerator中generate_tool_instruction最后return的instruction加上<tool_call_instructions>的tag
 - [x] 博查搜索语法确认
-- [ ] tool permission为NOTIFY的时候也移到confirmation node执行，但是自动允许
 - [x] _execute_new_message在调用graph之前，获取了session_id之后清除已有的task_plan
 - [x] fetch tool 支持pdf
 - [ ] agent logging 加上thread id
 - [ ] 区分conversation history和tool interactions的compression level
+
 
 # Agent模块已知问题清单
 

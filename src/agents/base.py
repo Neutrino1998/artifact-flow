@@ -15,7 +15,6 @@ from utils.logger import get_logger
 from utils.xml_parser import parse_tool_calls
 from tools.prompt_generator import ToolPromptGenerator, format_result
 from tools.registry import AgentToolkit
-from tools.base import ToolResult, ToolPermission
 
 logger = get_logger("ArtifactFlow")
 
@@ -71,14 +70,18 @@ class AgentResponse:
 class BaseAgent(ABC):
     """
     所有Agent的基类
-    
+
     核心功能：
-    1. 统一的工具调用循环（最多N轮）
-    2. 流式输出支持（LLM流式，工具批量）
-    3. 统一的完成判断（无工具调用即完成）
+    1. 单轮 LLM 调用（工具循环由 Graph 控制）
+    2. 流式输出支持
+    3. 解析响应（工具调用 / subagent 路由 / 完成）
     4. 思考模型兼容（记录reasoning_content）
     5. 错误处理和重试机制
-    6. 权限管理和执行中断/恢复
+
+    职责边界：
+    - Agent 只负责 LLM 调用和响应解析
+    - 工具执行由 Graph 的 tool_execution_node 处理
+    - 工具轮数限制由 Graph 层面控制（读取 agent.config.max_tool_rounds）
     """
     
     def __init__(self, config: AgentConfig, toolkit: Optional[AgentToolkit] = None):
@@ -91,7 +94,6 @@ class BaseAgent(ABC):
         """
         self.config = config
         self.toolkit = toolkit
-        self.tool_call_count = 0  # 工具调用计数
         
         # 创建LLM实例
         from models.llm import create_llm
@@ -176,32 +178,6 @@ class BaseAgent(ABC):
         """
         pass
 
-    async def _execute_single_tool(self, tool_call) -> ToolResult:
-        """执行单个工具调用（带权限检查）"""
-        if not self.toolkit:
-            return ToolResult(success=False, error="No toolkit available")
-        
-        tool = self.toolkit.get_tool(tool_call.name)
-        if not tool:
-            return ToolResult(success=False, error=f"Tool '{tool_call.name}' not found")
-        
-        # 权限检查：CONFIRM和RESTRICTED级别需要确认
-        if tool.permission in [ToolPermission.CONFIRM, ToolPermission.RESTRICTED]:
-            logger.info(f"Tool '{tool_call.name}' requires {tool.permission.value} permission")
-            return ToolResult(
-                success=True,
-                data=f"Tool '{tool_call.name}' requires {tool.permission.value} permission to execute.",
-                metadata={
-                    "needs_confirmation": True,
-                    "tool_name": tool_call.name,
-                    "params": tool_call.params,
-                    "permission_level": tool.permission.value
-                }
-            )
-        
-        # PUBLIC和NOTIFY级别直接执行
-        return await self.toolkit.execute_tool(tool_call.name, tool_call.params)
-
     async def _call_llm_with_retry(
         self, 
         messages: List[Dict],
@@ -272,11 +248,16 @@ class BaseAgent(ABC):
         streaming_tokens: bool = False
     ) -> AsyncGenerator[StreamEvent, None]:
         """
-        核心执行生成器
-        
+        单轮 LLM 调用生成器
+
+        职责简化：
+        1. 调用 LLM
+        2. 解析响应（工具调用 / subagent 路由 / 完成）
+        3. 设置 routing 返回，由 graph 处理工具执行
+
         Args:
-            messages: 完整的消息列表（system + history + instruction + interactions）
-            is_resuming: 是否从中断恢复
+            messages: 完整的消息列表（system + history + instruction + tool_result）
+            is_resuming: 是否从工具执行恢复
             streaming_tokens: 是否流式输出LLM tokens
         """
         current_response = AgentResponse(
@@ -286,257 +267,176 @@ class BaseAgent(ABC):
                 "started_at": datetime.now().isoformat()
             }
         )
-        
+
         yield StreamEvent(
-            type=StreamEventType.START, 
-            agent=self.config.name, 
+            type=StreamEventType.START,
+            agent=self.config.name,
             data=current_response
         )
-        
+
         try:
             # 根据 is_resuming 初始化交互历史
             if is_resuming:
-                # 恢复时：最后一条消息是 pending_tool_result，需要记录
+                # 恢复时：最后一条消息是 tool_result，需要记录
                 new_tool_interactions = [messages[-1]]
-                logger.debug(f"Resuming: initialized tool_interactions with pending result")
+                logger.debug(f"Resuming: initialized tool_interactions with tool result")
             else:
                 # 正常执行：从空开始
                 new_tool_interactions = []
-            accumulated_token_usage = {
-                "input_tokens": 0, 
-                "output_tokens": 0, 
-                "total_tokens": 0
-            }
-            
-            # ========== 工具调用循环 ==========
-            for round_num in range(self.config.max_tool_rounds + 1):
-                # 检查是否超过工具调用限制
-                if round_num == self.config.max_tool_rounds:
-                    # 最后一轮，提示总结
-                    messages.append({
-                        "role": "system",
-                        "content": "⚠️ Maximum tool calls reached. Please summarize your findings and provide the final response."
-                    })
-                
-                logger.debug(f"[{self.config.name} Round {round_num + 1}] Messages:\n{self._format_messages_for_debug(messages)}")
-                
-                # ========== LLM调用 ========== 
-                response_content = ""
-                reasoning_content = None
-                token_usage = {}
-                
-                try:
-                    if streaming_tokens:
-                        # 流式模式：逐token处理
-                        stream = await self._call_llm_with_retry(messages, streaming=True)
-                        async for chunk in stream:
-                            # 累积content
-                            if hasattr(chunk, 'content') and chunk.content:
-                                response_content += chunk.content
-                                current_response.content = response_content
-                            
-                            # 累积reasoning_content（如果有）
-                            if hasattr(chunk, 'additional_kwargs') and 'reasoning_content' in chunk.additional_kwargs:
-                                # 第一次出现reasoning_content时初始化为空字符串
-                                if reasoning_content is None: 
-                                    reasoning_content = ""
-                                reasoning_content += chunk.additional_kwargs['reasoning_content']
-                                current_response.reasoning_content = reasoning_content
-                            
-                            # 获取token_usage（通常在最后一个chunk）
-                            if hasattr(chunk, 'response_metadata') and 'token_usage' in chunk.response_metadata:
-                                token_usage = chunk.response_metadata['token_usage']
 
-                            # Yield LLM chunk事件
-                            yield StreamEvent(
-                                type=StreamEventType.LLM_CHUNK, 
-                                agent=self.config.name, 
-                                data=current_response
-                            )
-                        # 流式结束后，yield 完成事件
+            logger.debug(f"[{self.config.name}] Messages:\n{self._format_messages_for_debug(messages)}")
+
+            # ========== 单轮 LLM 调用 ==========
+            response_content = ""
+            reasoning_content = None
+            token_usage = {}
+
+            try:
+                if streaming_tokens:
+                    # 流式模式：逐token处理
+                    stream = await self._call_llm_with_retry(messages, streaming=True)
+                    async for chunk in stream:
+                        # 累积content
+                        if hasattr(chunk, 'content') and chunk.content:
+                            response_content += chunk.content
+                            current_response.content = response_content
+
+                        # 累积reasoning_content（如果有）
+                        if hasattr(chunk, 'additional_kwargs') and 'reasoning_content' in chunk.additional_kwargs:
+                            if reasoning_content is None:
+                                reasoning_content = ""
+                            reasoning_content += chunk.additional_kwargs['reasoning_content']
+                            current_response.reasoning_content = reasoning_content
+
+                        # 获取token_usage（通常在最后一个chunk）
+                        if hasattr(chunk, 'response_metadata') and 'token_usage' in chunk.response_metadata:
+                            token_usage = chunk.response_metadata['token_usage']
+
+                        # Yield LLM chunk事件
                         yield StreamEvent(
-                            type=StreamEventType.LLM_COMPLETE, 
-                            agent=self.config.name, 
-                            data=current_response
-                        )
-                    else:
-                        # 批量模式：一次性获取完整响应
-                        response = await self._call_llm_with_retry(messages, streaming=False)
-                        response_content = response.content
-                        current_response.content = response_content
-                        # 获取reasoning_content（如果有）
-                        if hasattr(response, 'additional_kwargs'):
-                            reasoning_content = response.additional_kwargs.get('reasoning_content')
-                            if reasoning_content:
-                                current_response.reasoning_content = reasoning_content
-                        # 获取token_usage
-                        if hasattr(response, 'response_metadata'):
-                            token_usage = response.response_metadata.get('token_usage', {})
-                        # Yield完整LLM响应事件
-                        yield StreamEvent(
-                            type=StreamEventType.LLM_COMPLETE, 
-                            agent=self.config.name, 
+                            type=StreamEventType.LLM_CHUNK,
+                            agent=self.config.name,
                             data=current_response
                         )
 
-                    # 更新token统计
-                    if token_usage:
-                        # input_tokens, output_tokens, total_tokens
-                        for key in accumulated_token_usage:
-                            accumulated_token_usage[key] += token_usage.get(key, 0)
-                        current_response.token_usage = accumulated_token_usage.copy()
-                
-                except Exception as llm_error:
-                    # LLM调用失败
-                    logger.error(f"LLM call failed after retries: {llm_error}")
-                    
-                    # 设置失败响应
-                    current_response.success = False
-                    current_response.content = f"LLM call failed: {str(llm_error)}"
-
-                    # Yield错误事件
+                    # 流式结束后，yield 完成事件
                     yield StreamEvent(
-                        type=StreamEventType.ERROR, 
-                        agent=self.config.name, 
+                        type=StreamEventType.LLM_COMPLETE,
+                        agent=self.config.name,
                         data=current_response
                     )
-
-                    return # LLM调用失败是致命的，中断执行
-
-                if reasoning_content:
-                    logger.debug(f"[{self.config.name} Round {round_num + 1}] Reasoning:\n{reasoning_content}")
-                input_tokens = token_usage.get('input_tokens', 0)
-                output_tokens = token_usage.get('output_tokens', 0)
-                logger.debug(f"[{self.config.name} Round {round_num + 1}] LLM Response (input: {input_tokens}, output: {output_tokens}):\n{response_content}")
-                logger.debug(f"[{self.config.name} Round {round_num + 1}] LLM Raw Response (input: {input_tokens}, output: {output_tokens}):\n{repr(response_content)}")
-                
-                messages.append({"role": "assistant", "content": response_content})
-                new_tool_interactions.append({"role": "assistant", "content": response_content})
-                
-                # ========== 工具调用 ========== 
-                # 解析工具调用
-                tool_calls = parse_tool_calls(response_content)
-                
-                # 判断工具循环是否完成
-                if not tool_calls or round_num >= self.config.max_tool_rounds:
-                    # 没有工具调用或达到上限，结束
+                else:
+                    # 批量模式：一次性获取完整响应
+                    response = await self._call_llm_with_retry(messages, streaming=False)
+                    response_content = response.content
                     current_response.content = response_content
-                    break
-                
-                # 执行工具调用
-                tool_results_xml = []
-                for tool_call in tool_calls:
-                    self.tool_call_count += 1
-                    logger.info(f"{self.config.name} calling tool: '{tool_call.name}'")
-                    
+
+                    # 获取reasoning_content（如果有）
+                    if hasattr(response, 'additional_kwargs'):
+                        reasoning_content = response.additional_kwargs.get('reasoning_content')
+                        if reasoning_content:
+                            current_response.reasoning_content = reasoning_content
+
+                    # 获取token_usage
+                    if hasattr(response, 'response_metadata'):
+                        token_usage = response.response_metadata.get('token_usage', {})
+
+                    # Yield完整LLM响应事件
                     yield StreamEvent(
-                        type=StreamEventType.TOOL_START, 
-                        agent=self.config.name, 
+                        type=StreamEventType.LLM_COMPLETE,
+                        agent=self.config.name,
                         data=current_response
                     )
-                    
-                    try:
-                        result = await self._execute_single_tool(tool_call)
-                        if result.success and result.metadata.get("needs_confirmation") is not True:
-                            logger.info(f"{self.config.name} tool '{tool_call.name}': SUCCESS")
-                        elif result.metadata.get("needs_confirmation"):
-                            logger.info(f"{self.config.name} tool '{tool_call.name}': PENDING CONFIRMATION")
-                        else:
-                            logger.warning(f"{self.config.name} tool '{tool_call.name}': FAILED - {result.error}")
-                        
-                        # ========== 检查是否需要中断 ==========
-                        # 检查是否需要权限确认
-                        if result.metadata and result.metadata.get("needs_confirmation"):
-                            # 权限确认中断
-                            current_response.tool_interactions = new_tool_interactions
-                            # 配置工具权限路由
-                            current_response.routing = {
-                                "type": "permission_confirmation",
-                                "tool_name": tool_call.name,
-                                "params": tool_call.params,
-                                "permission_level": result.metadata["permission_level"]
-                            }
-                            # Yield权限确认事件
-                            yield StreamEvent(
-                                type=StreamEventType.PERMISSION_REQUIRED, 
-                                agent=self.config.name, 
-                                data=current_response
-                            )
-                            return # 中断执行，等待权限确认
 
-                        # 检查是否是Subagent路由指令
-                        if (tool_call.name == "call_subagent" and 
-                            result.success and 
-                            isinstance(result.data, dict) and 
-                            result.data.get("_is_routing_instruction")):
-                            # Agent路由中断
-                            current_response.tool_interactions = new_tool_interactions
-                            current_response.routing = {
-                                "type": "subagent",
-                                "target": result.data.get("_route_to"),
-                                "instruction": result.data.get("instruction")
-                            }
-                            # Yield Agent路由事件
-                            yield StreamEvent(
-                                type=StreamEventType.COMPLETE, 
-                                agent=self.config.name, 
-                                data=current_response
-                            )
-                            return # 中断执行，进行Agent路由
-                        
-                        # 更新工具调用记录（用于展示）
-                        tool_history_entry = {
-                            "tool": tool_call.name,
-                            "params": tool_call.params,
-                            "result": result.to_dict(),
-                            "round": round_num + 1
-                        }
-                        current_response.tool_calls.append(tool_history_entry)
-                        
-                        yield StreamEvent(
-                            type=StreamEventType.TOOL_RESULT, 
-                            agent=self.config.name, 
-                            data=current_response
-                        )
-                        
-                    except Exception as tool_error:
-                        logger.exception(f"Tool {tool_call.name} error: {tool_error}")
-                        result = ToolResult(success=False, error=str(tool_error))
-                    
-                    # 格式化工具结果
-                    tool_results_xml.append(format_result(tool_call.name, result.to_dict()))
-                
-                # 添加工具结果到消息
-                if tool_results_xml:
-                    tool_result_msg = "\n".join(tool_results_xml)
-                    messages.append({"role": "user", "content": tool_result_msg})
-                    new_tool_interactions.append({"role": "user", "content": tool_result_msg})
-            
-            # 保存完整的工具交互历史
+                # 更新token统计
+                if token_usage:
+                    current_response.token_usage = token_usage.copy()
+
+            except Exception as llm_error:
+                # LLM调用失败
+                logger.error(f"LLM call failed after retries: {llm_error}")
+                current_response.success = False
+                current_response.content = f"LLM call failed: {str(llm_error)}"
+                yield StreamEvent(
+                    type=StreamEventType.ERROR,
+                    agent=self.config.name,
+                    data=current_response
+                )
+                return
+
+            # 日志
+            if reasoning_content:
+                logger.debug(f"[{self.config.name}] Reasoning:\n{reasoning_content}")
+            input_tokens = token_usage.get('input_tokens', 0)
+            output_tokens = token_usage.get('output_tokens', 0)
+            logger.debug(f"[{self.config.name}] LLM Response (input: {input_tokens}, output: {output_tokens}):\n{response_content}")
+
+            # 记录 assistant 响应到交互历史
+            new_tool_interactions.append({"role": "assistant", "content": response_content})
+
+            # ========== 解析响应 ==========
+            tool_calls = parse_tool_calls(response_content)
+
+            if tool_calls:
+                # 有工具调用（只取第一个，因为限制单工具调用）
+                tool_call = tool_calls[0]
+                logger.info(f"{self.config.name} requesting tool: '{tool_call.name}'")
+
+                # 检查是否是 subagent 路由
+                if tool_call.name == "call_subagent":
+                    # Subagent 路由：直接设置路由信息
+                    current_response.tool_interactions = new_tool_interactions
+                    current_response.routing = {
+                        "type": "subagent",
+                        "target": tool_call.params.get("agent_name"),
+                        "instruction": tool_call.params.get("instruction")
+                    }
+                    yield StreamEvent(
+                        type=StreamEventType.COMPLETE,
+                        agent=self.config.name,
+                        data=current_response
+                    )
+                    return
+
+                # 普通工具调用：设置 tool_call 路由
+                current_response.tool_interactions = new_tool_interactions
+                current_response.routing = {
+                    "type": "tool_call",
+                    "tool_name": tool_call.name,
+                    "params": tool_call.params
+                }
+
+                yield StreamEvent(
+                    type=StreamEventType.TOOL_START,
+                    agent=self.config.name,
+                    data=current_response
+                )
+                return
+
+            # ========== 无工具调用 → 完成 ==========
             current_response.tool_interactions = new_tool_interactions
-            current_response.metadata["tool_rounds"] = self.tool_call_count
-            
+
             # 格式化最终响应
             final_response = self.format_final_response(
                 current_response.content,
                 current_response.tool_calls
             )
             current_response.content = final_response
-            
+
             yield StreamEvent(
-                type=StreamEventType.COMPLETE, 
-                agent=self.config.name, 
+                type=StreamEventType.COMPLETE,
+                agent=self.config.name,
                 data=current_response
             )
-            
+
         except Exception as e:
             logger.exception(f"Unexpected error in {self.config.name}: {e}")
             current_response.success = False
             current_response.content = f"Agent execution failed: {str(e)}"
-            current_response.tool_interactions = new_tool_interactions  # 保存已有的交互
+            current_response.tool_interactions = new_tool_interactions if 'new_tool_interactions' in locals() else []
             yield StreamEvent(
-                type=StreamEventType.ERROR, 
-                agent=self.config.name, 
+                type=StreamEventType.ERROR,
+                agent=self.config.name,
                 data=current_response
             )
 
@@ -546,22 +446,19 @@ class BaseAgent(ABC):
         is_resuming: bool = False
     ) -> AgentResponse:
         """
-        批量执行Agent任务
-        
+        批量执行Agent任务（单轮 LLM 调用）
+
         Args:
             messages: 完整的消息列表
-            is_resuming: 是否从中断恢复
+            is_resuming: 是否从工具执行恢复
         """
         final_response = None
         async for event in self._execute_generator(messages, is_resuming, streaming_tokens=False):
-            if event.type == StreamEventType.PERMISSION_REQUIRED:
-                return event.data
-            
             if event.data:
                 final_response = event.data
 
         return final_response or AgentResponse(
-            success=False, 
+            success=False,
             content="Execution failed"
         )
 
@@ -571,11 +468,11 @@ class BaseAgent(ABC):
         is_resuming: bool = False
     ) -> AsyncGenerator[StreamEvent, None]:
         """
-        流式执行Agent任务
-        
+        流式执行Agent任务（单轮 LLM 调用）
+
         Args:
             messages: 完整的消息列表
-            is_resuming: 是否从中断恢复
+            is_resuming: 是否从工具执行恢复
         """
         async for event in self._execute_generator(messages, is_resuming, streaming_tokens=True):
             yield event
