@@ -19,7 +19,7 @@ system prompt + instruction + history(如果有) + tool result
 - [x] `interrupt()` 函数需要在一个正确的 runnable context 中调用，但现在看起来上下文不正确。已定位问题：异步 interrupt 功能需要 Python 3.11+ 才能正常工作,因为 Python 3.11 之前的版本中异步任务无法正确传播上下文 [Asynchronous Graph with interrupts in Python 3.10 seems to be broken · langchain-ai/langgraph · Discussion #3200](https://github.com/langchain-ai/langgraph/discussions/3200)
 - [ ] `langgraph`使用的`AsyncSqliteSaver`需要一个定时清理脚本避免缓存线程无限堆积/或者切换为拥有ttl管理的redis管理
 - [x] Agent基类去掉自己的工具调用处理，将工具调用处理全权交给graph的工具节点`user_confirmation_node`(这个node可以改个名字)。例如tool permission为NOTIFY/PUBLIC的时候也交给confirmation node执行，但是自动允许。
-- [ ] 可观测性设计：仔细设计graph state包含可观测性字段，记录token使用以及工具调用等信息
+- [x] 可观测性设计：仔细设计graph state包含可观测性字段，记录token使用以及工具调用等信息
 
 ## 次要问题
 - [x] 各类id加上类型名

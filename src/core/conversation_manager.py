@@ -24,6 +24,9 @@ from utils.logger import get_logger
 
 logger = get_logger("ArtifactFlow")
 
+# Title 生成配置
+TITLE_MAX_LENGTH = 50  # 最大标题长度
+
 
 # ============================================================
 # 内存缓存对象
@@ -100,6 +103,27 @@ class ConversationManager:
         if self.repository is None:
             raise RuntimeError("ConversationManager: repository not configured")
         return self.repository
+
+    @staticmethod
+    def _generate_title(content: str) -> str:
+        """
+        从消息内容生成对话标题
+
+        策略：取第一行内容，截断到最大长度
+
+        Args:
+            content: 用户消息内容
+
+        Returns:
+            生成的标题
+        """
+        # 取第一行，去除首尾空白
+        first_line = content.strip().split('\n')[0].strip()
+
+        # 截断到最大长度
+        if len(first_line) > TITLE_MAX_LENGTH:
+            return first_line[:TITLE_MAX_LENGTH] + "..."
+        return first_line
 
     # ========================================
     # 对话操作
@@ -266,6 +290,13 @@ class ConversationManager:
                     thread_id=thread_id,
                     parent_id=parent_id
                 )
+
+                # 如果是第一条消息（无 parent），自动生成 title
+                if parent_id is None:
+                    title = self._generate_title(content)
+                    await self.repository.update_title(conv_id, title)
+                    logger.debug(f"Auto-generated title for conversation {conv_id}: {title}")
+
             except Exception as e:
                 logger.warning(f"Failed to persist message: {e}")
 
