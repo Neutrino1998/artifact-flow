@@ -4,12 +4,14 @@ Graph状态定义
 1. 引入ExecutionPhase明确执行阶段
 2. 简化状态字段，移除混乱的routing_info/pending_result
 3. 统一的状态更新函数
+4. 新增 ExecutionMetrics 可观测性字段
 """
 
 from typing import TypedDict, Dict, List, Optional, Any
 from enum import Enum
 from datetime import datetime
 from utils.logger import get_logger
+from core.events import ExecutionMetrics, create_initial_metrics
 
 logger = get_logger("ArtifactFlow")
 
@@ -71,13 +73,16 @@ class AgentState(TypedDict):
     
     # ========== Agent记忆 ==========
     agent_memories: Dict[str, NodeMemory]
-    
+
     # ========== Context管理 ==========
     compression_level: str                 # 压缩级别
-    
+
     # ========== 用户交互层 ==========
     user_message_id: str                   # 当前用户消息ID
     graph_response: Optional[str]          # Graph最终响应
+
+    # ========== 可观测性 ==========
+    execution_metrics: ExecutionMetrics    # 执行指标（token使用、工具调用、耗时等）
 
 
 class UserMessage(TypedDict):
@@ -135,7 +140,8 @@ def create_initial_state(
         "agent_memories": {},
         "compression_level": compression_level,
         "user_message_id": message_id,
-        "graph_response": None
+        "graph_response": None,
+        "execution_metrics": create_initial_metrics()
     }
 
 
@@ -196,23 +202,10 @@ def merge_agent_response_to_state(
     # 更新metadata
     memory["metadata"]["completed_at"] = datetime.now().isoformat()
 
-    # 累积token使用量
-    if hasattr(response, 'token_usage') and response.token_usage:
-        existing_usage = memory["metadata"].get("token_usage", {
-            "input_tokens": 0,
-            "output_tokens": 0,
-            "total_tokens": 0
-        })
-
-        new_usage = response.token_usage
-        memory["metadata"]["token_usage"] = {
-            "input_tokens": existing_usage["input_tokens"] + new_usage.get("input_tokens", 0),
-            "output_tokens": existing_usage["output_tokens"] + new_usage.get("output_tokens", 0),
-            "total_tokens": existing_usage["total_tokens"] + new_usage.get("total_tokens", 0)
-        }
-
     # 记录执行次数
     memory["metadata"]["execution_count"] = memory["metadata"].get("execution_count", 0) + 1
+
+    # 注意：token 统计已移至 execution_metrics，由 graph 层的 agent_node 负责追加
 
     # 保存回state
     state["agent_memories"][agent_name] = memory

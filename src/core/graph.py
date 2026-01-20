@@ -9,12 +9,17 @@
 """
 
 from typing import Dict, Optional, Any, Callable, AsyncGenerator
+from datetime import datetime
 from langgraph.graph import StateGraph, END
 from langgraph.types import interrupt, StreamWriter
 
 from core.state import AgentState, ExecutionPhase, merge_agent_response_to_state
 from core.context_manager import ContextManager
-from agents.base import BaseAgent, AgentResponse, StreamEvent, StreamEventType
+from core.events import (
+    StreamEventType, StreamEvent,
+    append_agent_execution, append_tool_call, TokenUsage
+)
+from agents.base import BaseAgent, AgentResponse
 from tools.base import ToolPermission, ToolResult
 from utils.logger import get_logger
 
@@ -54,7 +59,7 @@ class ExtendableGraph:
     def _add_tool_execution_node(self):
         """添加统一的工具执行节点"""
 
-        async def tool_execution_node(state: AgentState) -> AgentState:
+        async def tool_execution_node(state: AgentState, writer: StreamWriter) -> AgentState:
             """
             统一的工具执行节点
 
@@ -65,10 +70,11 @@ class ExtendableGraph:
             工作流程：
             1. 从 pending_tool_call 读取待执行信息
             2. 获取工具并检查权限
-            3. 根据权限级别决定是否需要确认
-            4. 执行工具
-            5. 保存结果到 pending_tool_call
-            6. 设置 phase 返回原 agent
+            3. 根据权限级别决定是否需要确认（发送 PERMISSION_REQUEST/PERMISSION_RESULT）
+            4. 执行工具（发送 TOOL_START/TOOL_COMPLETE）
+            5. 更新 execution_metrics
+            6. 保存结果到 pending_tool_call
+            7. 设置 phase 返回原 agent
             """
             logger.info("Entering tool_execution_node")
 
@@ -110,6 +116,18 @@ class ExtendableGraph:
                 # 需要用户确认
                 logger.info(f"Tool '{tool_name}' requires {tool.permission.value} permission")
 
+                # 发送 PERMISSION_REQUEST 事件
+                writer({
+                    "type": StreamEventType.PERMISSION_REQUEST.value,
+                    "agent": from_agent,
+                    "tool": tool_name,
+                    "timestamp": datetime.now().isoformat(),
+                    "data": {
+                        "permission_level": tool.permission.value,
+                        "params": params
+                    }
+                })
+
                 is_approved = interrupt({
                     "type": "tool_permission",
                     "agent": from_agent,
@@ -117,6 +135,17 @@ class ExtendableGraph:
                     "params": params,
                     "permission_level": tool.permission.value,
                     "message": f"Tool '{tool_name}' requires {tool.permission.value} permission"
+                })
+
+                # 发送 PERMISSION_RESULT 事件
+                writer({
+                    "type": StreamEventType.PERMISSION_RESULT.value,
+                    "agent": from_agent,
+                    "tool": tool_name,
+                    "timestamp": datetime.now().isoformat(),
+                    "data": {
+                        "approved": is_approved
+                    }
                 })
 
                 if not is_approved:
@@ -131,6 +160,18 @@ class ExtendableGraph:
 
                 logger.info(f"Permission approved for '{tool_name}'")
 
+            # 发送 TOOL_START 事件
+            tool_start_time = datetime.now()
+            writer({
+                "type": StreamEventType.TOOL_START.value,
+                "agent": from_agent,
+                "tool": tool_name,
+                "timestamp": tool_start_time.isoformat(),
+                "data": {
+                    "params": params
+                }
+            })
+
             # 执行工具（PUBLIC/NOTIFY 直接执行，CONFIRM/RESTRICTED 确认后执行）
             try:
                 tool_result = await agent.toolkit.execute_tool(tool_name, params)
@@ -141,6 +182,34 @@ class ExtendableGraph:
                     success=False,
                     error=str(e)
                 )
+
+            # 计算工具执行耗时
+            tool_end_time = datetime.now()
+            tool_duration_ms = int((tool_end_time - tool_start_time).total_seconds() * 1000)
+
+            # 发送 TOOL_COMPLETE 事件
+            writer({
+                "type": StreamEventType.TOOL_COMPLETE.value,
+                "agent": from_agent,
+                "tool": tool_name,
+                "timestamp": tool_end_time.isoformat(),
+                "data": {
+                    "success": tool_result.success,
+                    "duration_ms": tool_duration_ms,
+                    "error": tool_result.error if not tool_result.success else None
+                }
+            })
+
+            # 更新 execution_metrics
+            append_tool_call(
+                metrics=state["execution_metrics"],
+                tool_name=tool_name,
+                success=tool_result.success,
+                duration_ms=tool_duration_ms,
+                called_at=tool_start_time.isoformat(),
+                completed_at=tool_end_time.isoformat(),
+                agent=from_agent
+            )
 
             # 保存结果
             pending["tool_result"] = tool_result
@@ -264,6 +333,7 @@ class ExtendableGraph:
 
                 # ========== 流式执行Agent ==========
                 final_response = None
+                llm_start_time = datetime.now()
 
                 async for event in agent.stream(
                     messages=messages,
@@ -281,6 +351,9 @@ class ExtendableGraph:
                     if event.data:
                         final_response = event.data
 
+                llm_end_time = datetime.now()
+                llm_duration_ms = int((llm_end_time - llm_start_time).total_seconds() * 1000)
+
                 # ========== 更新状态 ==========
                 if final_response:
                     merge_agent_response_to_state(
@@ -288,6 +361,22 @@ class ExtendableGraph:
                         agent_name,
                         final_response,
                         is_resuming=is_resuming
+                    )
+
+                    # ========== 更新 execution_metrics ==========
+                    token_usage = final_response.token_usage or {}
+                    append_agent_execution(
+                        metrics=state["execution_metrics"],
+                        agent_name=agent_name,
+                        model=agent.config.model,
+                        token_usage={
+                            "input_tokens": token_usage.get("input_tokens", 0),
+                            "output_tokens": token_usage.get("output_tokens", 0),
+                            "total_tokens": token_usage.get("input_tokens", 0) + token_usage.get("output_tokens", 0)
+                        },
+                        started_at=llm_start_time.isoformat(),
+                        completed_at=llm_end_time.isoformat(),
+                        llm_duration_ms=llm_duration_ms
                     )
                 else:
                     # 如果没有响应，创建错误响应

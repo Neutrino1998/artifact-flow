@@ -1,6 +1,11 @@
 # ArtifactFlow API 层实现方案
 
-> 版本: v1.4 | 依赖: 持久化改造完成
+> 版本: v1.5 | 依赖: 持久化改造完成
+>
+> **v1.5 更新**：
+> - 新增 Section 4.4：统一的 StreamEventType 事件类型设计
+> - 新增 Section 4.5：ExecutionMetrics 可观测性指标设计
+> - 更新 Section 4.3：流式接口事件格式更新
 >
 > **v1.4 更新**：
 > - 更新 Section 6.2：Checkpointer 从 MemorySaver 改为 AsyncSqliteSaver
@@ -341,55 +346,212 @@ async def cpu_intensive_task(data):
 #### GET /api/v1/stream/{thread_id}
 SSE 端点，推送 Graph 执行过程。
 
-**Event Types**:
+**Event Format（统一格式）**:
+
+所有事件使用统一的 `StreamEventType` 格式：
+
+```json
+{
+  "type": "agent_start | llm_chunk | llm_complete | agent_complete | tool_start | tool_complete | permission_request | permission_result | metadata | complete | error",
+  "timestamp": "2024-01-19T10:00:00.000Z",
+  "agent": "lead_agent",       // 可选，agent 相关事件
+  "tool": "web_search",        // 可选，tool 相关事件
+  "data": {...}                // 事件数据
+}
+```
+
+**完整事件流示例**:
 
 ```
-event: metadata
-data: {"conversation_id": "...", "message_id": "...", "thread_id": "..."}
+// 1. 会话开始（Controller 层）
+data: {"type": "metadata", "timestamp": "...", "data": {"conversation_id": "conv-xxx", "message_id": "msg-xxx", "thread_id": "thd-xxx"}}
 
-event: stream
-data: {"type": "start", "agent": "lead_agent", "timestamp": "..."}
+// 2. Agent 开始执行（Agent 层）
+data: {"type": "agent_start", "timestamp": "...", "agent": "lead_agent", "data": {...}}
 
-event: stream
-data: {"type": "llm_chunk", "agent": "lead_agent", "data": {"content": "...", "reasoning_content": "..."}}
+// 3. LLM 流式输出（Agent 层）
+data: {"type": "llm_chunk", "timestamp": "...", "agent": "lead_agent", "data": {"content": "我需要", "reasoning_content": "..."}}
+data: {"type": "llm_chunk", "timestamp": "...", "agent": "lead_agent", "data": {"content": "我需要搜索", "reasoning_content": "..."}}
 
-event: stream
-data: {"type": "llm_complete", "agent": "lead_agent", "data": {"token_usage": {...}}}
+// 4. LLM 完成（Agent 层）
+data: {"type": "llm_complete", "timestamp": "...", "agent": "lead_agent", "data": {"token_usage": {"input_tokens": 100, "output_tokens": 50}}}
 
-event: stream
-data: {"type": "tool_start", "agent": "lead_agent", "data": {"tool_name": "web_search"}}
+// 5. Agent 完成（可能带 routing）（Agent 层）
+data: {"type": "agent_complete", "timestamp": "...", "agent": "lead_agent", "data": {"routing": {"type": "subagent", "target": "search_agent"}}}
 
-event: stream
-data: {"type": "tool_result", "agent": "lead_agent", "data": {"success": true}}
+// 6. 工具开始执行（Graph 层）
+data: {"type": "tool_start", "timestamp": "...", "agent": "search_agent", "tool": "web_search", "data": {"params": {...}}}
 
-event: stream
-data: {"type": "permission_required", "agent": "crawl_agent", "data": {"routing": {...}}}
+// 7. 工具执行完成（Graph 层）
+data: {"type": "tool_complete", "timestamp": "...", "agent": "search_agent", "tool": "web_search", "data": {"success": true, "duration_ms": 450}}
 
-event: complete
-data: {"success": true, "interrupted": false, "response": "...", "artifacts_updated": ["research_report"]}
+// 8. 权限请求（Graph 层，如果需要）
+data: {"type": "permission_request", "timestamp": "...", "agent": "crawl_agent", "tool": "web_fetch", "data": {"permission_level": "confirm", "params": {...}}}
 
-event: interrupt
-data: {"success": true, "interrupted": true, "interrupt_type": "tool_permission", "interrupt_data": {...}}
-
-event: error
-data: {"error": "Something went wrong"}
+// 9. 最终完成（Controller 层，包含 execution_metrics）
+data: {"type": "complete", "timestamp": "...", "data": {"success": true, "interrupted": false, "response": "...", "execution_metrics": {...}}}
 ```
 
 **🆕 SSE 连接生命周期**：
 
-| 事件 | 连接状态 | 说明 |
-|------|---------|------|
-| `metadata` | 保持 | 首个事件，确认连接成功 |
-| `stream` | 保持 | 流式内容推送 |
-| `complete` | **关闭** | 正常完成，服务端主动关闭连接 |
-| `interrupt` | **关闭** | 需要用户操作，服务端主动关闭连接 |
-| `error` | **关闭** | 发生错误，服务端主动关闭连接 |
+| 事件类型 | 连接状态 | 产生位置 | 说明 |
+|---------|---------|---------|------|
+| `metadata` | 保持 | Controller | 首个事件，确认连接成功 |
+| `agent_start` | 保持 | Agent | Agent 开始执行 |
+| `llm_chunk` | 保持 | Agent | LLM 流式输出 |
+| `llm_complete` | 保持 | Agent | LLM 单次调用完成 |
+| `agent_complete` | 保持 | Agent | Agent 本轮完成（可能带 routing） |
+| `tool_start` | 保持 | Graph | 工具开始执行 |
+| `tool_complete` | 保持 | Graph | 工具执行完成 |
+| `permission_request` | 保持 | Graph | 请求权限确认 |
+| `permission_result` | 保持 | Graph | 权限确认结果 |
+| `complete` | **关闭** | Controller | 正常完成/中断，服务端主动关闭连接 |
+| `error` | **关闭** | Controller | 发生错误，服务端主动关闭连接 |
 
 **设计要点**：
-- 使用标准 SSE 格式（`event:` + `data:`）
-- 事件类型与 `ControllerEventType` 对应
-- `stream` 事件的 `data` 直接转发 Graph 的 custom stream 内容
-- `complete` / `interrupt` / `error` 事件后，**服务端主动关闭 SSE 连接**
+- 使用统一的 `StreamEventType`，各层（Agent/Graph/Controller）共用
+- 事件直接透传，不再包装为 `stream` 事件
+- `complete` / `error` 事件后，**服务端主动关闭 SSE 连接**
+- `complete` 事件包含完整的 `execution_metrics` 可观测性数据
+
+### 4.4 统一事件类型（StreamEventType）🆕
+
+所有层使用统一的事件类型枚举：
+
+```python
+class StreamEventType(Enum):
+    """
+    统一的执行事件类型
+
+    产生位置：
+    - [Controller] 会话级别元数据和最终结果
+    - [Agent]      LLM 执行相关事件
+    - [Graph]      工具执行和权限相关事件
+    """
+
+    # ========== Controller 层 ==========
+    METADATA = "metadata"                # 会话元数据
+    COMPLETE = "complete"                # 整体完成（含 execution_metrics）
+    ERROR = "error"                      # 错误
+
+    # ========== Agent 层 ==========
+    AGENT_START = "agent_start"          # agent 开始执行
+    LLM_CHUNK = "llm_chunk"              # LLM token 流
+    LLM_COMPLETE = "llm_complete"        # LLM 单次调用完成
+    AGENT_COMPLETE = "agent_complete"    # agent 本轮完成
+
+    # ========== Graph 层 ==========
+    TOOL_START = "tool_start"            # 工具开始执行
+    TOOL_COMPLETE = "tool_complete"      # 工具执行完成
+    PERMISSION_REQUEST = "permission_request"  # 请求权限确认
+    PERMISSION_RESULT = "permission_result"    # 权限确认结果
+```
+
+**前端状态推断**：
+
+| 收到事件 | 前端显示 |
+|---------|---------|
+| `agent_start` | "Agent X 正在思考..." |
+| `llm_chunk` | 流式显示 LLM 输出内容 |
+| `tool_start` | "正在执行 web_search..." |
+| `tool_complete` | 显示工具执行结果 |
+| `permission_request` | 弹出权限确认对话框 |
+| `complete` | 显示最终结果和 metrics |
+
+### 4.5 ExecutionMetrics 可观测性指标 🆕
+
+`complete` 事件包含完整的执行指标，用于前端展示执行统计信息。
+
+**数据结构**：
+
+```typescript
+interface ExecutionMetrics {
+  started_at: string;                    // ISO timestamp
+  completed_at: string;                  // ISO timestamp
+  total_duration_ms: number;             // 总耗时（毫秒）
+
+  agent_executions: AgentExecutionRecord[];  // Agent 执行记录列表
+  tool_calls: ToolCallRecord[];              // 工具调用记录列表
+}
+
+interface AgentExecutionRecord {
+  agent_name: string;                    // Agent 名称
+  model: string;                         // 使用的模型
+  token_usage: {
+    input_tokens: number;
+    output_tokens: number;
+    total_tokens: number;
+  };
+  llm_duration_ms: number;               // LLM 响应耗时
+  started_at: string;
+  completed_at: string;
+}
+
+interface ToolCallRecord {
+  tool_name: string;                     // 工具名称
+  success: boolean;                      // 是否成功
+  duration_ms: number;                   // 执行耗时
+  called_at: string;
+  completed_at: string;
+  agent: string;                         // 调用方 Agent
+}
+```
+
+**示例数据**：
+
+```json
+{
+  "execution_metrics": {
+    "started_at": "2024-01-19T10:00:00.000Z",
+    "completed_at": "2024-01-19T10:00:03.500Z",
+    "total_duration_ms": 3500,
+
+    "agent_executions": [
+      {
+        "agent_name": "lead_agent",
+        "model": "qwen-plus",
+        "token_usage": {"input_tokens": 1200, "output_tokens": 350, "total_tokens": 1550},
+        "llm_duration_ms": 1200,
+        "started_at": "2024-01-19T10:00:00.100Z",
+        "completed_at": "2024-01-19T10:00:01.300Z"
+      },
+      {
+        "agent_name": "search_agent",
+        "model": "qwen-plus",
+        "token_usage": {"input_tokens": 800, "output_tokens": 200, "total_tokens": 1000},
+        "llm_duration_ms": 900,
+        "started_at": "2024-01-19T10:00:01.400Z",
+        "completed_at": "2024-01-19T10:00:02.300Z"
+      },
+      {
+        "agent_name": "lead_agent",
+        "model": "qwen-plus",
+        "token_usage": {"input_tokens": 1500, "output_tokens": 400, "total_tokens": 1900},
+        "llm_duration_ms": 600,
+        "started_at": "2024-01-19T10:00:02.800Z",
+        "completed_at": "2024-01-19T10:00:03.400Z"
+      }
+    ],
+
+    "tool_calls": [
+      {
+        "tool_name": "web_search",
+        "success": true,
+        "duration_ms": 450,
+        "called_at": "2024-01-19T10:00:02.350Z",
+        "completed_at": "2024-01-19T10:00:02.800Z",
+        "agent": "search_agent"
+      }
+    ]
+  }
+}
+```
+
+**前端使用建议**：
+
+1. **Token 统计**：遍历 `agent_executions` 聚合各 Agent 的 token 使用量
+2. **耗时分析**：展示 `total_duration_ms` 和各步骤耗时
+3. **工具调用**：展示 `tool_calls` 中的成功/失败状态
 
 ---
 
@@ -985,6 +1147,28 @@ class APIConfig:
     DEFAULT_PAGE_SIZE: int = 20
     MAX_PAGE_SIZE: int = 100
 ```
+
+---
+
+## 附录：v1.4 → v1.5 变更摘要
+
+| 章节 | 变更类型 | 说明 |
+|------|---------|------|
+| 4.3 | 🔄 更新 | 流式接口事件格式更新为统一的 StreamEventType |
+| 4.4 | 🆕 新增 | 统一事件类型（StreamEventType）设计 |
+| 4.5 | 🆕 新增 | ExecutionMetrics 可观测性指标设计 |
+
+**关键变更说明**：
+
+1. **统一事件类型**：移除 `ControllerEventType`，所有层（Agent/Graph/Controller）使用统一的 `StreamEventType`
+2. **事件直接透传**：Controller 不再将事件包装为 `stream` 类型，直接透传 graph 的事件
+3. **ExecutionMetrics**：新增可观测性指标，在 `complete` 事件中返回完整的执行统计信息
+4. **事件命名变更**：
+   - `start` → `agent_start`
+   - `complete`（Agent 层）→ `agent_complete`
+   - `tool_result` → `tool_complete`
+   - `permission_required` → `permission_request`
+5. **新增事件**：`tool_start`（工具开始执行）、`permission_result`（权限确认结果）
 
 ---
 

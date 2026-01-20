@@ -19,7 +19,8 @@ from datetime import datetime
 from contextlib import asynccontextmanager
 
 from core.graph import create_multi_agent_graph
-from core.controller import ExecutionController, ControllerEventType
+from core.controller import ExecutionController
+from core.events import StreamEventType
 from core.conversation_manager import ConversationManager
 from tools.implementations.artifact_ops import ArtifactManager
 from db.database import DatabaseManager
@@ -154,11 +155,11 @@ class StreamEventHandler:
             print(f"状态: 从中断恢复")
         print("-" * 80)
 
-    def handle_stream(self, data: Dict):
-        """处理流式内容事件"""
-        stream_type = data["type"]
-        agent = data["agent"]
-        event_data = data.get("data")
+    def handle_stream_event(self, event: Dict):
+        """处理流式内容事件（统一事件格式）"""
+        event_type = event.get("type")
+        agent = event.get("agent", "unknown")
+        event_data = event.get("data")
 
         # Agent 切换
         if agent != self.current_agent:
@@ -168,10 +169,10 @@ class StreamEventHandler:
             self.llm_buffer = ""
             self.reasoning_buffer = ""
 
-        if stream_type == "start":
+        if event_type == StreamEventType.AGENT_START.value:
             print(f"\n[{agent}] 开始执行...")
 
-        elif stream_type == "llm_chunk":
+        elif event_type == StreamEventType.LLM_CHUNK.value:
             if event_data:
                 # 处理 reasoning_content（思考内容）
                 reasoning = event_data.get("reasoning_content")
@@ -206,7 +207,7 @@ class StreamEventHandler:
                         print(content, end="", flush=True)
                         self.llm_buffer = content
 
-        elif stream_type == "llm_complete":
+        elif event_type == StreamEventType.LLM_COMPLETE.value:
             if self.llm_buffer or self.reasoning_buffer:
                 print()
             print(f"[{agent}] LLM 输出完成")
@@ -220,49 +221,53 @@ class StreamEventHandler:
                     output_tokens = token_usage.get("output_tokens", 0)
                     print(f"[{agent}] Token: {input_tokens} in / {output_tokens} out")
 
-        elif stream_type == "tool_start":
+        elif event_type == StreamEventType.TOOL_START.value:
+            tool_name = event.get("tool", "unknown")
             if self.llm_buffer or self.reasoning_buffer:
                 print()
-            print(f"[{agent}] 调用工具...")
+            print(f"[{agent}] 调用工具: {tool_name}...")
             self.llm_buffer = ""
             self.reasoning_buffer = ""
 
-        elif stream_type == "tool_result":
-            print(f"[{agent}] 工具调用完成")
+        elif event_type == StreamEventType.TOOL_COMPLETE.value:
+            tool_name = event.get("tool", "unknown")
+            success = event_data.get("success", False) if event_data else False
+            duration = event_data.get("duration_ms", 0) if event_data else 0
+            status = "OK" if success else "FAIL"
+            print(f"[{agent}] 工具 {tool_name} 完成: {status} ({duration}ms)")
 
-            if self.verbose and event_data:
-                tool_calls = event_data.get("tool_calls", [])
-                if tool_calls:
-                    last_call = tool_calls[-1]
-                    print(f"[{agent}]    工具: {last_call['tool']}")
-                    success = last_call['result']['success']
-                    status = "OK" if success else "FAIL"
-                    print(f"[{agent}]    结果: {status}")
-
-        elif stream_type == "permission_required":
+        elif event_type == StreamEventType.PERMISSION_REQUEST.value:
+            tool_name = event.get("tool", "unknown")
             if self.llm_buffer or self.reasoning_buffer:
                 print()
             print(f"\n[{agent}] 需要权限确认")
-            if event_data and event_data.get("routing"):
-                routing = event_data["routing"]
-                print(f"[{agent}]    工具: {routing['tool_name']}")
-                print(f"[{agent}]    权限级别: {routing['permission_level']}")
+            if event_data:
+                print(f"[{agent}]    工具: {tool_name}")
+                print(f"[{agent}]    权限级别: {event_data.get('permission_level')}")
             self.llm_buffer = ""
             self.reasoning_buffer = ""
 
-        elif stream_type == "complete":
+        elif event_type == StreamEventType.AGENT_COMPLETE.value:
             if self.llm_buffer or self.reasoning_buffer:
                 print()
-            print(f"[{agent}] 执行完成")
+            routing = event_data.get("routing") if event_data else None
+            if routing:
+                routing_type = routing.get("type")
+                if routing_type == "tool_call":
+                    print(f"[{agent}] 请求工具: {routing.get('tool_name')}")
+                elif routing_type == "subagent":
+                    print(f"[{agent}] 路由到: {routing.get('target')}")
+            else:
+                print(f"[{agent}] 执行完成")
             self.llm_buffer = ""
             self.reasoning_buffer = ""
 
-        elif stream_type == "error":
+        elif event_type == StreamEventType.ERROR.value:
             if self.llm_buffer or self.reasoning_buffer:
                 print()
             print(f"\n[{agent}] 执行错误")
             if event_data:
-                print(f"[{agent}]    错误: {event_data.get('content')}")
+                print(f"[{agent}]    错误: {event_data.get('content') or event_data.get('error')}")
             self.llm_buffer = ""
             self.reasoning_buffer = ""
 
@@ -282,6 +287,19 @@ class StreamEventHandler:
             else:
                 print(f"执行成功完成")
                 print(f"   耗时: {elapsed:.2f}s")
+
+                # 显示 execution_metrics
+                if self.verbose and data.get("execution_metrics"):
+                    metrics = data["execution_metrics"]
+                    print(f"   总耗时: {metrics.get('total_duration_ms', 0)}ms")
+                    print(f"   Agent 执行次数: {len(metrics.get('agent_executions', []))}")
+                    print(f"   工具调用次数: {len(metrics.get('tool_calls', []))}")
+
+                    # 汇总 token 使用
+                    total_input = sum(e.get("token_usage", {}).get("input_tokens", 0) for e in metrics.get("agent_executions", []))
+                    total_output = sum(e.get("token_usage", {}).get("output_tokens", 0) for e in metrics.get("agent_executions", []))
+                    print(f"   总 Token: {total_input} in / {total_output} out")
+
                 if not self.verbose and data.get("response"):
                     response = data["response"]
                     preview = response[:150] + "..." if len(response) > 150 else response
@@ -300,16 +318,20 @@ class StreamEventHandler:
         result_data = None
 
         async for event in stream_generator:
-            event_type = event["event_type"]
-            data = event["data"]
+            event_type = event.get("type")
 
-            if event_type == ControllerEventType.METADATA:
-                self.handle_metadata(data)
-            elif event_type == ControllerEventType.STREAM:
-                self.handle_stream(data)
-            elif event_type == ControllerEventType.COMPLETE:
-                self.handle_complete(data)
-                result_data = data
+            # 根据事件类型分发处理
+            if event_type == StreamEventType.METADATA.value:
+                self.handle_metadata(event.get("data", {}))
+            elif event_type == StreamEventType.COMPLETE.value:
+                self.handle_complete(event.get("data", {}))
+                result_data = event.get("data", {})
+            elif event_type == StreamEventType.ERROR.value:
+                self.handle_stream_event(event)
+                result_data = event.get("data", {})
+            else:
+                # 其他事件（agent/tool 相关）统一处理
+                self.handle_stream_event(event)
 
         return result_data
 

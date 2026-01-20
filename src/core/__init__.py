@@ -1,6 +1,6 @@
 """
 Core模块
-提供Graph、Controller和状态管理
+提供Graph、Controller、状态管理和事件定义
 """
 
 from core.graph import (
@@ -22,6 +22,19 @@ from core.state import (
 
 from core.context_manager import ContextManager
 
+from core.events import (
+    StreamEventType,
+    StreamEvent,
+    ExecutionMetrics,
+    TokenUsage,
+    AgentExecutionRecord,
+    ToolCallRecord,
+    create_initial_metrics,
+    finalize_metrics,
+    append_agent_execution,
+    append_tool_call
+)
+
 
 __all__ = [
     # Graph
@@ -41,4 +54,16 @@ __all__ = [
 
     # Context
     "ContextManager",
+
+    # Events & Metrics
+    "StreamEventType",
+    "StreamEvent",
+    "ExecutionMetrics",
+    "TokenUsage",
+    "AgentExecutionRecord",
+    "ToolCallRecord",
+    "create_initial_metrics",
+    "finalize_metrics",
+    "append_agent_execution",
+    "append_tool_call",
 ]

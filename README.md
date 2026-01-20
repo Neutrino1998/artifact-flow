@@ -235,6 +235,7 @@ artifact-flow/
 │   │   ├── state.py              # 状态管理和定义
 │   │   ├── graph.py              # LangGraph工作流定义
 │   │   ├── controller.py         # 执行控制器 (支持流式和批量模式)
+│   │   ├── events.py             # 统一事件类型和ExecutionMetrics定义
 │   │   ├── context_manager.py    # Context压缩和管理
 │   │   └── conversation_manager.py  # 对话管理器（缓存+持久化）
 │   ├── agents/ ✅      # 智能体实现 (已完成)
@@ -393,50 +394,58 @@ asyncio.run(demo_core_system())
 ```python
 import asyncio
 from src.core.graph import create_multi_agent_graph
-from src.core.controller import ExecutionController, ControllerEventType
+from src.core.controller import ExecutionController
+from src.core.events import StreamEventType
 
 async def demo_streaming():
     """演示流式执行 - 实时查看AI的思考和输出过程"""
     compiled_graph = create_multi_agent_graph()
     controller = ExecutionController(compiled_graph)
-    
+
     # 使用 stream_execute 进行流式执行
     async for event in controller.stream_execute(
         content="研究一下LangGraph的最新特性"
     ):
-        event_type = event["event_type"]
-        data = event["data"]
-        
-        if event_type == ControllerEventType.METADATA:
+        event_type = event.get("type")
+        data = event.get("data", {})
+        agent = event.get("agent", "")
+
+        if event_type == StreamEventType.METADATA.value:
             print(f"🚀 开始执行: {data['conversation_id']}")
-        
-        elif event_type == ControllerEventType.STREAM:
-            # 流式事件包含：agent名称、事件类型、实时数据
-            stream_type = data["type"]
-            agent = data["agent"]
-            
-            if stream_type == "llm_chunk":
-                # 实时输出LLM响应
-                content = data["data"].get("content", "")
-                reasoning = data["data"].get("reasoning_content", "")
-                
-                if reasoning:
-                    print(f"💭 [{agent}] 思考: {reasoning}", end="", flush=True)
-                if content:
-                    print(f"💬 [{agent}] 回答: {content}", end="", flush=True)
-            
-            elif stream_type == "tool_start":
-                print(f"\n🔧 [{agent}] 调用工具...")
-            
-            elif stream_type == "permission_required":
-                routing = data["data"]["routing"]
-                print(f"\n⚠️ [{agent}] 需要权限: {routing['tool_name']}")
-        
-        elif event_type == ControllerEventType.COMPLETE:
+
+        elif event_type == StreamEventType.LLM_CHUNK.value:
+            # 实时输出LLM响应
+            content = data.get("content", "")
+            reasoning = data.get("reasoning_content", "")
+
+            if reasoning:
+                print(f"💭 [{agent}] 思考: {reasoning}", end="", flush=True)
+            if content:
+                print(f"💬 [{agent}] 回答: {content}", end="", flush=True)
+
+        elif event_type == StreamEventType.TOOL_START.value:
+            tool = event.get("tool", "")
+            print(f"\n🔧 [{agent}] 调用工具: {tool}...")
+
+        elif event_type == StreamEventType.TOOL_COMPLETE.value:
+            tool = event.get("tool", "")
+            success = data.get("success", False)
+            duration = data.get("duration_ms", 0)
+            print(f"🔧 [{agent}] 工具 {tool} 完成: {'OK' if success else 'FAIL'} ({duration}ms)")
+
+        elif event_type == StreamEventType.PERMISSION_REQUEST.value:
+            tool = event.get("tool", "")
+            print(f"\n⚠️ [{agent}] 需要权限: {tool}")
+
+        elif event_type == StreamEventType.COMPLETE.value:
             if data["success"]:
                 print(f"\n✅ 执行完成")
                 if not data.get("interrupted"):
                     print(f"回复: {data['response']}")
+                # 显示执行指标
+                metrics = data.get("execution_metrics", {})
+                if metrics:
+                    print(f"📊 总耗时: {metrics.get('total_duration_ms', 0)}ms")
 
 asyncio.run(demo_streaming())
 ```
@@ -484,50 +493,53 @@ asyncio.run(demo_permission())
 ```python
 async def demo_permission_stream():
     from src.tools.base import ToolPermission
-    
+    from src.core.events import StreamEventType
+
     tool_permissions = {
         "web_fetch": ToolPermission.CONFIRM
     }
-    
+
     compiled_graph = create_multi_agent_graph(tool_permissions=tool_permissions)
     controller = ExecutionController(compiled_graph)
-    
+
     # 流式模式 - 支持多次权限确认
     result = None
     max_retries = 3
     retry_count = 0
-    
+
     # 第一次执行
     stream = controller.stream_execute(
         content="抓取 https://github.com/langchain-ai/langgraph"
     )
-    
+
     async for event in stream:
+        event_type = event.get("type")
         # 处理流式事件
-        if event["event_type"] == ControllerEventType.STREAM:
-            stream_type = event["data"]["type"]
-            if stream_type == "permission_required":
-                print(f"⚠️ 需要权限确认")
-        
-        elif event["event_type"] == ControllerEventType.COMPLETE:
-            result = event["data"]
-    
+        if event_type == StreamEventType.PERMISSION_REQUEST.value:
+            tool = event.get("tool", "")
+            print(f"⚠️ 需要权限确认: {tool}")
+
+        elif event_type == StreamEventType.COMPLETE.value:
+            result = event.get("data", {})
+
     # 处理多次权限确认
     while result.get("interrupted") and retry_count < max_retries:
         retry_count += 1
         user_input = input(f"是否批准工具 '{result['interrupt_data']['tool_name']}'? (y/n): ")
         approved = user_input.lower() == 'y'
-        
+
         # 继续执行
         stream = controller.stream_execute(
             thread_id=result["thread_id"],
+            conversation_id=result["conversation_id"],
+            message_id=result["message_id"],
             resume_data={"type": "permission", "approved": approved}
         )
-        
+
         async for event in stream:
             # 处理流式事件
-            if event["event_type"] == ControllerEventType.COMPLETE:
-                result = event["data"]
+            if event.get("type") == StreamEventType.COMPLETE.value:
+                result = event.get("data", {})
 
 asyncio.run(demo_permission_stream())
 ```
@@ -618,8 +630,8 @@ python core_graph_test_with_stream.py
 - ✅ **高级特性** (v0.4.0) - **已完成**
   - [x] 流式执行支持（实时响应、思考内容、工具调用状态）
   - [x] 流式权限确认（支持多次中断处理）
+  - [x] 可观测性指标系统（ExecutionMetrics：Token使用、工具调用、执行耗时）
   - [ ] 错误处理和自动恢复
-  - [ ] 监控和指标系统
   - [ ] 性能优化
 
 - 🚀 **API接口** (v0.5.0) - **计划中**

@@ -4,6 +4,7 @@
 1. ConversationManager负责格式化对话历史
 2. 复用ContextManager.compress_messages做智能裁剪
 3. 支持流式输出 (stream_execute 方法)
+4. 统一使用 StreamEventType 事件类型
 
 注意：数据库事务管理由 API 层负责，Controller 不管理 session 生命周期。
 API 层应通过依赖注入为每个请求创建独立的 Manager 实例。
@@ -11,30 +12,17 @@ API 层应通过依赖注入为每个请求创建独立的 Manager 实例。
 
 from typing import Dict, List, Optional, Any, AsyncGenerator
 from uuid import uuid4
-from enum import Enum
+from datetime import datetime
 from langgraph.types import Command
 
 from core.state import create_initial_state
 from core.context_manager import ContextManager
 from core.conversation_manager import ConversationManager
-from agents.base import StreamEvent, StreamEventType
+from core.events import StreamEventType, finalize_metrics
 from tools.implementations.artifact_ops import ArtifactManager
 from utils.logger import get_logger
 
 logger = get_logger("ArtifactFlow")
-
-
-class ControllerEventType(Enum):
-    """
-    Controller层流式事件类型
-    
-    分层设计：
-    - Controller层：关注会话生命周期（METADATA, STREAM, COMPLETE）
-    - Agent层：关注执行细节（StreamEventType中定义）
-    """
-    METADATA = "metadata"  # 会话元数据（conversation_id, message_id, thread_id等）
-    STREAM = "stream"      # 流式内容（包含Agent的StreamEvent）
-    COMPLETE = "complete"  # 执行完成（成功/失败/中断）
 
 
 class ExecutionController:
@@ -383,24 +371,25 @@ class ExecutionController:
         
         # 先发送元数据事件
         yield {
-            "event_type": ControllerEventType.METADATA,
+            "type": StreamEventType.METADATA.value,
+            "timestamp": datetime.now().isoformat(),
             "data": {
                 "conversation_id": conversation_id,
                 "message_id": message_id,
                 "thread_id": thread_id
             }
         }
-        
+
         # 7-8. 流式执行graph
         config = {
             "configurable": {"thread_id": thread_id},
             "recursion_limit": 100  # 工具循环在 graph 层，需要更高限制
         }
-        
+
         try:
-            # 🔥 关键改动：使用 astream() 替代 ainvoke()，并指定 stream_mode="custom"
+            # 使用 astream() 替代 ainvoke()，并指定 stream_mode="custom"
             final_response = None
-            
+
             async for chunk in self.graph.astream(
                 initial_state,
                 config,
@@ -408,19 +397,21 @@ class ExecutionController:
             ):
                 # chunk 是一个字典，包含我们在 graph 中通过 writer() 发送的数据
                 # 格式: {"type": "...", "agent": "...", "timestamp": "...", "data": {...}}
-                
-                # 直接转发自定义事件
-                yield {
-                    "event_type": ControllerEventType.STREAM,
-                    "data": chunk
-                }
-                
-                # 收集最终响应
-                if chunk.get("type") == "complete" and chunk.get("data"):
+
+                # 直接透传事件（已经是统一的 StreamEventType 格式）
+                yield chunk
+
+                # 收集最终响应（从 AGENT_COMPLETE 事件）
+                if chunk.get("type") == StreamEventType.AGENT_COMPLETE.value and chunk.get("data"):
                     final_response = chunk["data"].get("content", "")
 
             # 检查是否有中断
             final_state = await self.graph.aget_state(config)
+
+            # 完成 execution_metrics
+            execution_metrics = final_state.values.get("execution_metrics", {})
+            finalize_metrics(execution_metrics)
+
             # 注意：在流式模式下，中断的检测方式不同。应检查 final_state.interrupts 而不是 values["__interrupt__"]
             if final_state.interrupts:
                 # 权限中断
@@ -430,7 +421,8 @@ class ExecutionController:
 
                 # 发送中断事件，前端需保存 conversation_id, message_id, thread_id 用于后续 resume
                 yield {
-                    "event_type": ControllerEventType.COMPLETE,
+                    "type": StreamEventType.COMPLETE.value,
+                    "timestamp": datetime.now().isoformat(),
                     "data": {
                         "success": True,
                         "interrupted": True,
@@ -438,10 +430,11 @@ class ExecutionController:
                         "message_id": message_id,
                         "thread_id": thread_id,
                         "interrupt_type": interrupt_data["type"],
-                        "interrupt_data": interrupt_data
+                        "interrupt_data": interrupt_data,
+                        "execution_metrics": execution_metrics
                     }
                 }
-            
+
             else:
                 # 正常完成
                 response = final_state.values.get("graph_response", final_response or "")
@@ -454,16 +447,18 @@ class ExecutionController:
 
                 logger.info(f"✅ Streaming execution completed")
 
-                # 发送完成事件
+                # 发送完成事件（包含 execution_metrics）
                 yield {
-                    "event_type": ControllerEventType.COMPLETE,
+                    "type": StreamEventType.COMPLETE.value,
+                    "timestamp": datetime.now().isoformat(),
                     "data": {
                         "success": True,
                         "interrupted": False,
                         "conversation_id": conversation_id,
                         "message_id": message_id,
                         "thread_id": thread_id,
-                        "response": response
+                        "response": response,
+                        "execution_metrics": execution_metrics
                     }
                 }
 
@@ -476,10 +471,11 @@ class ExecutionController:
                 message_id=message_id,
                 response=error_msg
             )
-            
+
             # 发送错误事件
             yield {
-                "event_type": ControllerEventType.COMPLETE,
+                "type": StreamEventType.ERROR.value,
+                "timestamp": datetime.now().isoformat(),
                 "data": {
                     "success": False,
                     "conversation_id": conversation_id,
@@ -585,7 +581,8 @@ class ExecutionController:
 
         # 发送元数据
         yield {
-            "event_type": ControllerEventType.METADATA,
+            "type": StreamEventType.METADATA.value,
+            "timestamp": datetime.now().isoformat(),
             "data": {
                 "conversation_id": conversation_id,
                 "message_id": message_id,
@@ -607,16 +604,18 @@ class ExecutionController:
                 config,
                 stream_mode="custom"
             ):
-                yield {
-                    "event_type": ControllerEventType.STREAM,
-                    "data": chunk
-                }
+                # 直接透传事件
+                yield chunk
 
-                if chunk.get("type") == "complete" and chunk.get("data"):
+                if chunk.get("type") == StreamEventType.AGENT_COMPLETE.value and chunk.get("data"):
                     final_response = chunk["data"].get("content", "")
 
             # 获取最终状态
             final_state = await self.graph.aget_state(config)
+
+            # 完成 execution_metrics
+            execution_metrics = final_state.values.get("execution_metrics", {})
+            finalize_metrics(execution_metrics)
 
             response = final_state.values.get("graph_response", final_response or "")
 
@@ -629,14 +628,16 @@ class ExecutionController:
             logger.info(f"✅ Streaming resumed execution completed")
 
             yield {
-                "event_type": ControllerEventType.COMPLETE,
+                "type": StreamEventType.COMPLETE.value,
+                "timestamp": datetime.now().isoformat(),
                 "data": {
                     "success": True,
                     "interrupted": False,
                     "conversation_id": conversation_id,
                     "message_id": message_id,
                     "thread_id": thread_id,
-                    "response": response
+                    "response": response,
+                    "execution_metrics": execution_metrics
                 }
             }
 
@@ -644,7 +645,8 @@ class ExecutionController:
             logger.exception(f"Error in streaming resume execution: {e}")
 
             yield {
-                "event_type": ControllerEventType.COMPLETE,
+                "type": StreamEventType.ERROR.value,
+                "timestamp": datetime.now().isoformat(),
                 "data": {
                     "success": False,
                     "conversation_id": conversation_id,

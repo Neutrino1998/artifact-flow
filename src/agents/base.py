@@ -8,36 +8,15 @@ from abc import ABC, abstractmethod
 from typing import Dict, Any, List, Optional, AsyncGenerator, Union, Tuple
 from dataclasses import dataclass, field
 from datetime import datetime
-from enum import Enum
 import asyncio
 
 from utils.logger import get_logger
 from utils.xml_parser import parse_tool_calls
 from tools.prompt_generator import ToolPromptGenerator, format_result
 from tools.registry import AgentToolkit
+from core.events import StreamEventType, StreamEvent
 
 logger = get_logger("ArtifactFlow")
-
-
-class StreamEventType(Enum):
-    """流式事件类型"""
-    START = "start"                # 开始执行
-    LLM_CHUNK = "llm_chunk"        # LLM输出片段
-    LLM_COMPLETE = "llm_complete"  # LLM输出完成
-    TOOL_START = "tool_start"      # 工具调用开始
-    TOOL_RESULT = "tool_result"    # 工具调用结果
-    PERMISSION_REQUIRED = "permission_required"  # 需要权限确认
-    COMPLETE = "complete"          # 执行完成
-    ERROR = "error"                # 错误
-
-
-@dataclass
-class StreamEvent:
-    """流式事件"""
-    type: StreamEventType
-    agent: str
-    timestamp: datetime = field(default_factory=datetime.now)
-    data: Any = None  # 统一为AgentResponse或None
 
 
 @dataclass
@@ -269,7 +248,7 @@ class BaseAgent(ABC):
         )
 
         yield StreamEvent(
-            type=StreamEventType.START,
+            type=StreamEventType.AGENT_START,
             agent=self.config.name,
             data=current_response
         )
@@ -392,7 +371,7 @@ class BaseAgent(ABC):
                         "instruction": tool_call.params.get("instruction")
                     }
                     yield StreamEvent(
-                        type=StreamEventType.COMPLETE,
+                        type=StreamEventType.AGENT_COMPLETE,
                         agent=self.config.name,
                         data=current_response
                     )
@@ -406,8 +385,9 @@ class BaseAgent(ABC):
                     "params": tool_call.params
                 }
 
+                # Agent 本轮完成（带工具路由），实际工具执行由 graph 层处理
                 yield StreamEvent(
-                    type=StreamEventType.TOOL_START,
+                    type=StreamEventType.AGENT_COMPLETE,
                     agent=self.config.name,
                     data=current_response
                 )
@@ -424,7 +404,7 @@ class BaseAgent(ABC):
             current_response.content = final_response
 
             yield StreamEvent(
-                type=StreamEventType.COMPLETE,
+                type=StreamEventType.AGENT_COMPLETE,
                 agent=self.config.name,
                 data=current_response
             )
