@@ -3,16 +3,10 @@
 """
 
 # Web搜索工具
-from .web_search import (
-    WebSearchTool,
-    register_web_search_tool
-)
+from .web_search import WebSearchTool
 
 # Web抓取工具
-from .web_fetch import (
-    WebFetchTool,
-    register_web_fetch_tool
-)
+from .web_fetch import WebFetchTool
 
 # Artifact操作工具
 from .artifact_ops import (
@@ -27,10 +21,7 @@ from .artifact_ops import (
 )
 
 # Subagent调用工具（路由机制）
-from .call_subagent import (
-    CallSubagentTool,
-    register_call_subagent_tool
-)
+from .call_subagent import CallSubagentTool
 
 __all__ = [
     # Web工具
@@ -49,9 +40,4 @@ __all__ = [
 
     # Subagent调用工具
     "CallSubagentTool",
-
-    # 注册函数
-    "register_web_search_tool",
-    "register_web_fetch_tool",
-    "register_call_subagent_tool",
 ]

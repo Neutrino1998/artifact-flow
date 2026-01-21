@@ -266,15 +266,6 @@ class WebSearchTool(BaseTool):
         return text
 
 
-# 注册工具的便捷函数
-def register_web_search_tool():
-    """注册Web搜索工具"""
-    from tools.registry import register_tool
-    
-    register_tool(WebSearchTool())
-    logger.info("Registered web search tool")
-
-
 if __name__ == "__main__":
     # 测试代码
     async def test():

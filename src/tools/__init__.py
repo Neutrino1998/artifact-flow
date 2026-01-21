@@ -16,10 +16,6 @@ from .base import (
 from .registry import (
     AgentToolkit,
     ToolRegistry,
-    get_registry,
-    register_tool,
-    create_agent_toolkit,
-    get_agent_toolkit
 )
 
 # 权限控制
@@ -45,43 +41,36 @@ from .implementations import *
 __all__ = [
     # 基础类
     "ToolPermission",
-    "ToolResult", 
+    "ToolResult",
     "ToolParameter",
     "BaseTool",
     "SyncBaseTool",
-    
+
     # 注册管理
     "AgentToolkit",
     "ToolRegistry",
-    "get_registry",
-    "register_tool",
-    "create_agent_toolkit",
-    "get_agent_toolkit",
-    
+
     # 权限控制
     "PermissionRequest",
-    "PermissionGrant", 
+    "PermissionGrant",
     "PermissionManager",
     "check_permission",
     "grant_permission",
     "get_permission_manager",
-    
+
     # 提示词生成
     "ToolPromptGenerator",
     "generate_tool_prompt",
     "format_result",
-    
+
     # 具体工具（从implementations导入）
     "WebSearchTool",
-    "WebFetchTool", 
-    "Artifact",
-    "ArtifactStore",
+    "WebFetchTool",
+    "ArtifactMemory",
+    "ArtifactManager",
     "CreateArtifactTool",
     "UpdateArtifactTool",
-    "RewriteArtifactTool", 
+    "RewriteArtifactTool",
     "ReadArtifactTool",
-    "register_web_search_tool",
-    "register_web_fetch_tool",
-    "register_artifact_tools",
-    "get_artifact_store",
+    "create_artifact_tools",
 ]

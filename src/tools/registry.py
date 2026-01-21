@@ -101,31 +101,6 @@ class ToolRegistry:
         return self.agent_toolkits.get(agent_name)
 
 
-# 全局注册中心实例
-_global_registry = ToolRegistry()
-
-
-# 便捷函数
-def get_registry() -> ToolRegistry:
-    """获取全局注册中心"""
-    return _global_registry
-
-
-def register_tool(tool: BaseTool) -> None:
-    """注册工具到工具库"""
-    _global_registry.register_tool_to_library(tool)
-
-
-def create_agent_toolkit(agent_name: str, **kwargs) -> AgentToolkit:
-    """创建Agent工具包"""
-    return _global_registry.create_agent_toolkit(agent_name, **kwargs)
-
-
-def get_agent_toolkit(agent_name: str) -> Optional[AgentToolkit]:
-    """获取Agent工具包"""
-    return _global_registry.get_agent_toolkit(agent_name)
-
-
 if __name__ == "__main__":
     import asyncio
     # These imports are needed for the test case

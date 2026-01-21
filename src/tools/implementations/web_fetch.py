@@ -528,19 +528,6 @@ class WebFetchTool(BaseTool):
         return text
 
 
-# 注册工具的便捷函数
-def register_web_fetch_tool():
-    """注册Web抓取工具"""
-    from tools.registry import register_tool
-    
-    if not CRAWL4AI_AVAILABLE:
-        logger.error("Cannot register web_fetch tool: crawl4ai is not installed")
-        return
-    
-    register_tool(WebFetchTool())
-    logger.info("Registered web fetch tool (crawl4ai with PDF support)")
-
-
 if __name__ == "__main__":
     # 测试代码
     async def test():

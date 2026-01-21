@@ -424,11 +424,11 @@ async def demo_permission_flow():
         result = None
 
         # 第一个请求：发起需要爬虫的任务
-        print("\n" + "用户: 请抓取并分析 https://github.com/langchain-ai/langgraph 的内容")
+        print("\n" + "用户: 请抓取并告诉我 https://github.com/langchain-ai/langgraph 的内容")
         async with env.request_scope() as controller:
             result = await handler.process_stream(
                 controller.stream_execute(
-                    content="请抓取并分析 https://github.com/langchain-ai/langgraph 的内容"
+                    content="请抓取并告诉我 https://github.com/langchain-ai/langgraph 的内容"
                 )
             )
             if result.get("interrupted"):

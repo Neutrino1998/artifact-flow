@@ -117,11 +117,3 @@ class CallSubagentTool(BaseTool):
   </params>
 </tool_call>"""
 
-
-def register_call_subagent_tool():
-    """注册Subagent调用工具"""
-    from tools.registry import register_tool
-    
-    register_tool(CallSubagentTool())
-    logger.info("Registered call_subagent tool (routing mechanism)")
-
