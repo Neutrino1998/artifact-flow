@@ -1,3 +1,23 @@
+# Redis迁移清单
+
+## Phase 1 - 核心（多Worker部署前必须完成）
+- [ ] ConversationManager._cache → Redis Hash
+- [ ] Streaming Events → Redis Pub/Sub
+
+## Phase 2 - 扩展（并发量上升后）
+- [ ] AsyncSqliteSaver → langgraph-checkpoint-redis
+- [ ] Redis Key TTL 自动清理
+
+## Phase 3 - 可选优化
+- [ ] ArtifactManager 缓存加 TTL（或直接移除）  ← 优先级低
+- [ ] API Rate Limit / Session / 分布式锁
+
+
+# 模型模块已知问题清单
+
+## 次要问题
+- [ ] 将langchain模型接入改为专门的万能接口去适应不同provider，例如LiteLLM。尤其要注意reasoning和token usage等字段如何获取
+
 # 工具模块已知问题清单
 
 ## 次要问题
