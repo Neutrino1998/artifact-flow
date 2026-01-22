@@ -14,7 +14,6 @@ from agents.base import (
 
 from agents.lead_agent import (
     LeadAgent,
-    SubAgent,
     create_lead_agent
 )
 
@@ -40,7 +39,6 @@ __all__ = [
     
     # Lead
     "LeadAgent",
-    "SubAgent",
     "create_lead_agent",
     
     # Search

@@ -29,7 +29,7 @@ class SearchAgent(BaseAgent):
     def __init__(self, config: Optional[AgentConfig] = None, toolkit=None):
         """
         初始化Search Agent
-        
+
         Args:
             config: Agent配置
             toolkit: 工具包（应包含web_search工具）
@@ -38,12 +38,14 @@ class SearchAgent(BaseAgent):
             config = AgentConfig(
                 name="search_agent",
                 description="Web search and information retrieval specialist",
+                capabilities=["Web search", "Information retrieval"],
+                required_tools=["web_search"],
                 model="qwen3-next-80b-instruct",
                 temperature=0.5,  # 较低温度for精确搜索
                 max_tool_rounds=3,  # 最多3轮搜索优化
                 streaming=True
             )
-        
+
         super().__init__(config, toolkit)
     
     def build_system_prompt(self, context: Optional[Dict[str, Any]] = None) -> str:

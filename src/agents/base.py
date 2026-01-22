@@ -24,11 +24,17 @@ class AgentConfig:
     """Agent配置"""
     name: str
     description: str
+
+    # 元信息（用于注册到Lead、创建toolkit）
+    capabilities: List[str] = field(default_factory=list)
+    required_tools: List[str] = field(default_factory=list)
+
+    # LLM配置
     model: str = "qwen-plus"
     temperature: float = 0.7
     max_tool_rounds: int = 3  # 最大工具调用轮数
     streaming: bool = False  # 是否默认流式输出
-    
+
     llm_max_retries: int = 3  # LLM调用最大重试次数
     llm_retry_delay: float = 1.0  # 初始重试延迟（秒）
 

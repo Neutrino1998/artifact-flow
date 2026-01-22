@@ -28,7 +28,7 @@ class CrawlAgent(BaseAgent):
     def __init__(self, config: Optional[AgentConfig] = None, toolkit=None):
         """
         初始化Crawl Agent
-        
+
         Args:
             config: Agent配置
             toolkit: 工具包（应包含web_fetch工具）
@@ -37,12 +37,18 @@ class CrawlAgent(BaseAgent):
             config = AgentConfig(
                 name="crawl_agent",
                 description="Web content extraction and cleaning specialist",
+                capabilities=[
+                    "Deep content extraction",
+                    "Web scraping",
+                    "IMPORTANT: Instructions must include a specific URL to crawl"
+                ],
+                required_tools=["web_fetch"],
                 model="qwen3-next-80b-instruct",  # 可以换成更便宜的模型
                 temperature=0.3,  # 更低温度for精确提取
                 max_tool_rounds=2,  # 通常1-2轮即可
                 streaming=True
             )
-        
+
         super().__init__(config, toolkit)
     
     def build_system_prompt(self, context: Optional[Dict[str, Any]] = None) -> str:

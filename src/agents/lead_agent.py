@@ -11,14 +11,6 @@ from utils.logger import get_logger
 logger = get_logger("ArtifactFlow")
 
 
-class SubAgent:
-    """子Agent注册信息"""
-    def __init__(self, name: str, description: str, capabilities: List[str]):
-        self.name = name
-        self.description = description
-        self.capabilities = capabilities
-
-
 class LeadAgent(BaseAgent):
     """
     Lead Agent - 任务协调者
@@ -37,7 +29,7 @@ class LeadAgent(BaseAgent):
     def __init__(self, config: Optional[AgentConfig] = None, toolkit=None):
         """
         初始化Lead Agent
-        
+
         Args:
             config: Agent配置
             toolkit: 工具包（应包含artifact工具和call_subagent工具）
@@ -46,26 +38,30 @@ class LeadAgent(BaseAgent):
             config = AgentConfig(
                 name="lead_agent",
                 description="Task coordinator and information integrator",
+                required_tools=[
+                    "create_artifact", "update_artifact",
+                    "rewrite_artifact", "read_artifact", "call_subagent"
+                ],
                 model="qwen3-next-80b-thinking",
                 temperature=0.7,
                 max_tool_rounds=5,  # Lead需要更多轮次协调
                 streaming=True
             )
-        
+
         super().__init__(config, toolkit)
-        
-        # 注册的子Agent列表
-        self.sub_agents: Dict[str, SubAgent] = {}
-    
-    def register_subagent(self, agent: SubAgent):
+
+        # 注册的子Agent配置（用于生成system prompt）
+        self.sub_agents: Dict[str, AgentConfig] = {}
+
+    def register_subagent(self, config: AgentConfig):
         """
         注册子Agent
-        
+
         Args:
-            agent: SubAgent实例
+            config: 子Agent的配置
         """
-        self.sub_agents[agent.name] = agent
-        logger.info(f"Registered sub-agent: {agent.name}")
+        self.sub_agents[config.name] = config
+        logger.info(f"Registered sub-agent: {config.name}")
     
     def build_system_prompt(self, context: Optional[Dict[str, Any]] = None) -> str:
         """
@@ -191,11 +187,11 @@ Choose appropriate artifact IDs and types based on what the user requests:
             prompt += "## Available Sub-Agents\n\n"
             prompt += "Use the call_subagent tool to delegate tasks to:\n\n"
             
-            for name, agent in self.sub_agents.items():
+            for name, config in self.sub_agents.items():
                 prompt += f"### {name}\n"
-                prompt += f"- Description: {agent.description}\n"
+                prompt += f"- Description: {config.description}\n"
                 prompt += f"- Capabilities:\n"
-                for cap in agent.capabilities:
+                for cap in config.capabilities:
                     prompt += f"  - {cap}\n"
                 prompt += "\n"
             

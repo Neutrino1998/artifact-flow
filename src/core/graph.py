@@ -582,47 +582,31 @@ async def create_multi_agent_graph(
     Returns:
         编译后的Graph
     """
-    from agents.lead_agent import create_lead_agent, SubAgent
+    from agents.lead_agent import create_lead_agent
     from agents.search_agent import create_search_agent
     from agents.crawl_agent import create_crawl_agent
     from tools.registry import ToolRegistry
-    from tools.implementations.artifact_ops import (
-        CreateArtifactTool, UpdateArtifactTool,
-        RewriteArtifactTool, ReadArtifactTool,
-        ArtifactManager, create_artifact_tools
-    )
+    from tools.implementations.artifact_ops import create_artifact_tools
     from tools.implementations.call_subagent import CallSubagentTool
     from tools.implementations.web_search import WebSearchTool
     from tools.implementations.web_fetch import WebFetchTool
-    
+
     # 创建Graph构建器
     graph_builder = ExtendableGraph()
-    
+
     # 创建工具注册中心
     registry = ToolRegistry()
 
     # 创建工具列表
-    tools = []
-
-    # Artifact 工具（如果有 manager）
-    if artifact_manager:
-        artifact_tools = create_artifact_tools(artifact_manager)
-        tools.extend(artifact_tools)
-    else:
-        # 兼容模式：创建不带 manager 的工具（会返回错误）
-        tools.extend([
-            CreateArtifactTool(),
-            UpdateArtifactTool(),
-            RewriteArtifactTool(),
-            ReadArtifactTool(),
-        ])
-
-    # 其他工具
-    tools.extend([
+    tools = [
         CallSubagentTool(),
         WebSearchTool(),
         WebFetchTool(),
-    ])
+    ]
+
+    # Artifact 工具（需要 manager）
+    if artifact_manager:
+        tools.extend(create_artifact_tools(artifact_manager))
 
     # 应用权限配置
     if tool_permissions:
@@ -633,40 +617,24 @@ async def create_multi_agent_graph(
     # 注册所有工具
     for tool in tools:
         registry.register_tool_to_library(tool)
-    
-    # 创建Agent工具包
-    lead_toolkit = registry.create_agent_toolkit(
-        "lead_agent",
-        tool_names=["create_artifact", "update_artifact", "rewrite_artifact",
-                   "read_artifact", "call_subagent"]
-    )
-    
-    search_toolkit = registry.create_agent_toolkit(
-        "search_agent",
-        tool_names=["web_search"]
-    )
-    
-    crawl_toolkit = registry.create_agent_toolkit(
-        "crawl_agent",
-        tool_names=["web_fetch"]
-    )
-    
-    # 创建Agent
-    lead = create_lead_agent(lead_toolkit)
-    search = create_search_agent(search_toolkit)
-    crawl = create_crawl_agent(crawl_toolkit)
-    
-    # 注册子Agent到Lead
-    lead.register_subagent(SubAgent(
-        name="search_agent",
-        description="Web search specialist",
-        capabilities=["Web search", "Information retrieval"]
-    ))
-    lead.register_subagent(SubAgent(
-        name="crawl_agent",
-        description="Web content extraction specialist",
-        capabilities=["Deep content extraction", "Web scraping", "IMPORTANT: Instructions must include a specific URL to crawl"]
-    ))
+
+    # 创建Agent（不带toolkit，后续根据config.required_tools创建并绑定）
+    lead = create_lead_agent()
+    search = create_search_agent()
+    crawl = create_crawl_agent()
+
+    # 为每个Agent创建toolkit并绑定（从config.required_tools读取）
+    for agent in [lead, search, crawl]:
+        if agent.config.required_tools:
+            toolkit = registry.create_agent_toolkit(
+                agent.config.name,
+                tool_names=agent.config.required_tools
+            )
+            agent.toolkit = toolkit
+
+    # 注册子Agent到Lead（从config读取元信息）
+    lead.register_subagent(search.config)
+    lead.register_subagent(crawl.config)
     
     # 注册到Graph（顺序重要：先注册subagent）
     graph_builder.register_agent(search)
