@@ -365,7 +365,7 @@ class BaseAgent(ABC):
             if tool_calls:
                 # 有工具调用（只取第一个，因为限制单工具调用）
                 tool_call = tool_calls[0]
-                logger.info(f"{self.config.name} requesting tool: '{tool_call.name}'")
+                logger.debug(f"{self.config.name} requesting tool: '{tool_call.name}'")
 
                 # 检查是否是 subagent 路由
                 if tool_call.name == "call_subagent":

@@ -377,7 +377,7 @@ class ArtifactManager:
             memory.lock_version = db_artifact.lock_version
             memory.updated_at = datetime.now()
 
-            return True, f"Successfully updated artifact (v{memory.current_version})", match_info
+            return True, f"Successfully updated artifact '{artifact_id}' (v{memory.current_version})", match_info
 
         except VersionConflictError as e:
             # 版本冲突，需要重新加载
@@ -428,7 +428,7 @@ class ArtifactManager:
             memory.lock_version = db_artifact.lock_version
             memory.updated_at = datetime.now()
 
-            return True, f"Successfully rewritten artifact (v{memory.current_version})"
+            return True, f"Successfully rewritten artifact '{artifact_id}' (v{memory.current_version})"
 
         except VersionConflictError:
             if session_id in self._cache and artifact_id in self._cache[session_id]:
