@@ -95,6 +95,7 @@ async def send_message(
     request: ChatRequest,
     background_tasks: BackgroundTasks,
     controller: ExecutionController = Depends(get_controller),
+    conversation_manager: ConversationManager = Depends(get_conversation_manager),
     stream_manager: StreamManager = Depends(get_stream_manager),
 ):
     """
@@ -103,9 +104,10 @@ async def send_message(
     启动 Graph 执行，返回 stream_url 供前端订阅。
 
     流程：
-    1. 创建 StreamContext（开始缓冲事件）
-    2. 启动后台任务执行 Graph
-    3. 返回 stream_url 给前端
+    1. 同步创建/获取 conversation（确保 GET 请求能立即看到）
+    2. 创建 StreamContext（开始缓冲事件）
+    3. 启动后台任务执行 Graph
+    4. 返回 stream_url 给前端
     """
     # 生成 thread_id
     from uuid import uuid4
@@ -118,10 +120,14 @@ async def send_message(
 
     message_id = f"msg-{uuid4().hex}"
 
-    # 创建 stream
+    # 1. 同步创建/确保 conversation 存在（在请求的 session 中，会自动 commit）
+    # 这确保后续的 GET 请求能立即看到这个 conversation
+    await conversation_manager.ensure_conversation_exists(conversation_id)
+
+    # 2. 创建 stream
     await stream_manager.create_stream(thread_id)
 
-    # 启动后台任务
+    # 3. 启动后台任务
     # 注意：不能直接用 BackgroundTasks，因为依赖（controller）会在请求结束后失效
     # 需要创建一个独立的任务
     async def execute_and_push():
@@ -180,7 +186,7 @@ async def send_message(
                     "data": {"success": False, "error": str(e)}
                 })
 
-    # 创建独立任务
+    # 4. 创建独立任务
     asyncio.create_task(execute_and_push())
 
     return ChatResponse(
