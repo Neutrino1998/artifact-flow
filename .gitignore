@@ -1,16 +1,45 @@
-# Environment files
+# ==========================
+# 1. 项目特定配置 (Project Specific)
+# ==========================
+# 敏感环境配置
 .env
 .env.local
 
-# Python
+# 运行时数据与数据库 (刚才讨论的 data 目录)
+data/
+*.db
+*.db-shm
+*.db-wal
+
+# AI 辅助文件
+CLAUDE.md
+
+# 日志与临时文件
+logs/
+*.log
+temp/
+cache/
+checkpoints/
+
+# ==========================
+# 2. Python 开发环境 (Python Standard)
+# ==========================
+# 字节码与缓存
 __pycache__/
 *.py[cod]
 *$py.class
-*.so
 .Python
+
+# 虚拟环境 (增加了一些常见命名)
+venv/
+env/
+ENV/
+.venv/
+
+# 包分发与构建产物 (Build & Distribution)
 build/
-develop-eggs/
 dist/
+develop-eggs/
 downloads/
 eggs/
 .eggs/
@@ -20,38 +49,28 @@ parts/
 sdist/
 var/
 wheels/
+*.egg-info/
+*.so
 
-# Virtual environments
-venv/
-env/
-ENV/
-
-# IDE
+# ==========================
+# 3. 编辑器与 IDE (Editor / IDE)
+# ==========================
+# VS Code (通常个人配置不提交)
 .vscode/
+.VSCodeCounter/
+
+# JetBrains / PyCharm
 .idea/
+
+# Vim / Emacs 临时文件
 *.swp
 *.swo
 
-# Logs
-logs/*.log
-*.log
-
-# OS
+# ==========================
+# 4. 操作系统文件 (OS Files)
+# ==========================
+# macOS
 .DS_Store
+
+# Windows
 Thumbs.db
-
-# Project specific
-temp/
-cache/
-checkpoints/
-
-# Setup tools
-*.egg-info/
-.eggs/
-
-# Build artifacts
-build/
-dist/
-
-# VSCode Counter
-.VSCodeCounter/
