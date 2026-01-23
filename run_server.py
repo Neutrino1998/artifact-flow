@@ -9,6 +9,13 @@ ArtifactFlow API 服务器启动脚本
 """
 
 import argparse
+import sys
+from pathlib import Path
+
+# 将 src 目录添加到 Python 路径
+SRC_DIR = Path(__file__).parent / "src"
+sys.path.insert(0, str(SRC_DIR))
+
 import uvicorn
 from dotenv import load_dotenv
 
@@ -63,14 +70,20 @@ def main():
 ╚══════════════════════════════════════════════════════════════╝
 """)
 
-    uvicorn.run(
-        "api.main:app",
-        host=args.host,
-        port=args.port,
-        reload=args.reload,
-        workers=args.workers if not args.reload else 1,  # reload 模式只能用单 worker
-        log_level=args.log_level,
-    )
+    # 配置 uvicorn
+    uvicorn_kwargs = {
+        "host": args.host,
+        "port": args.port,
+        "log_level": args.log_level,
+    }
+
+    if args.reload:
+        uvicorn_kwargs["reload"] = True
+        uvicorn_kwargs["reload_dirs"] = [str(SRC_DIR)]
+    else:
+        uvicorn_kwargs["workers"] = args.workers
+
+    uvicorn.run("api.main:app", **uvicorn_kwargs)
 
 
 if __name__ == "__main__":
