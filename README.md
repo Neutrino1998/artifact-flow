@@ -11,26 +11,25 @@ ArtifactFlow 是一个智能多智能体研究系统，通过协调专门的AI�
 
 ## ✨ 核心特性
 
-- **🗂️ 双Artifact架构**: 分离任务计划和结果工件，实现清晰的工作流管理
-- **🤝 多智能体协作**: 专门的智能体（主控、搜索、网页抓取）协调工作
-- **🤖 统一Agent框架**: 基于BaseAgent的一致性执行模式，支持流式响应和工具调用
-- **🎯 智能任务分解**: Lead Agent根据任务复杂度自动选择执行策略
-- **🔍 专业化智能体**: Search和Crawl智能体各司其职，提供专业化服务
-- **🔄 无缝协作**: Agent间通过统一接口协作，支持复杂工作流编排
-- **⚡ 流式响应**: 实时查看AI思考过程、LLM输出和工具调用状态，支持类ChatGPT的打字机效果
-- **🎯 人机协作**: 在任意阶段暂停、恢复并提供反馈
-- **🔧 灵活工具系统**: 可扩展的工具框架，支持权限控制
-- **🕷️ 智能网页抓取**: 基于crawl4ai的深度内容提取和分析（支持PDF解析）
-- **📊 进度跟踪**: 可视化任务进度和完成状态
-- **🔄 迭代优化**: 基于用户反馈的持续改进
-- **🌳 分支对话**: 支持从任意历史节点创建新的对话分支
-- **💾 SQLite持久化**: 数据持久化存储，服务重启后数据不丢失，支持乐观锁并发控制
+- **🗂️ 双Artifact架构**: 任务计划与结果工件分离，支持版本追溯
+- **🤝 多智能体协作**: Lead/Search/Crawl 专业分工，LangGraph 编排
+- **⚡ 流式响应**: 实时输出思考过程和工具调用，SSE 推送
+- **🔧 权限控制**: 工具分级权限，支持中断确认后恢复执行
+- **🌳 分支对话**: 从任意历史节点创建新分支
+- **💾 持久化存储**: SQLite + 乐观锁，服务重启数据不丢失
+- **🌐 REST API**: FastAPI 接口，支持前端集成
 
 ## 🛠️ 系统架构
 
 ### 整体架构
 
 ```
+┌─────────────────────────────────────────────────────────────┐
+│                        API Layer                            │
+│      (FastAPI, SSE Stream, Routers, StreamManager)          │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
 ┌─────────────────────────────────────────────────────────────┐
 │                     Application Layer                       │
 │           (ExecutionController, Agents, Tools)              │
@@ -141,6 +140,22 @@ ArtifactFlow 是一个智能多智能体研究系统，通过协调专门的AI�
    # 编辑 .env 文件，添加你的 API Keys
    ```
 
+6. **启动 API 服务器**
+   ```bash
+   # 启动服务器
+   python run_server.py
+
+   # 开发模式（自动重载）
+   python run_server.py --reload
+
+   # 指定端口
+   python run_server.py --port 8080
+
+   # 服务启动后访问:
+   # - API 文档: http://localhost:8000/docs
+   # - ReDoc 文档: http://localhost:8000/redoc
+   ```
+
 ## 🔑 配置指南
 
 创建 `.env` 文件并配置以下 API Keys：
@@ -230,6 +245,7 @@ rm data/artifactflow.db
 
 ```
 artifact-flow/
+├── run_server.py       # API 服务器启动脚本
 ├── src/
 │   ├── core/ ✅        # 核心工作流和状态管理 (已完成)
 │   │   ├── state.py              # 状态管理和定义
@@ -269,7 +285,22 @@ artifact-flow/
 │   │   ├── logger.py             # 分级日志系统
 │   │   ├── retry.py              # 指数退避重试
 │   │   └── xml_parser.py         # 鲁棒XML解析
-│   └── api/            # 🚧 API 接口层 (计划中)
+│   └── api/ ✅         # API 接口层 (已完成)
+│       ├── main.py               # FastAPI 应用入口
+│       ├── config.py             # API 配置（CORS、SSE、分页等）
+│       ├── dependencies.py       # 依赖注入（Controller、Manager等）
+│       ├── routers/              # 路由模块
+│       │   ├── chat.py           # /api/v1/chat 对话接口
+│       │   ├── artifacts.py      # /api/v1/artifacts Artifact接口
+│       │   └── stream.py         # /api/v1/stream SSE流式接口
+│       ├── schemas/              # Pydantic 模型
+│       │   ├── chat.py           # 对话相关 schema
+│       │   ├── artifact.py       # Artifact 相关 schema
+│       │   └── events.py         # SSE 事件 schema
+│       ├── services/             # 服务层
+│       │   └── stream_manager.py # 事件缓冲队列管理
+│       └── utils/
+│           └── sse.py            # SSE 响应构建器
 ├── data/               # 数据目录 (SQLite数据库文件)
 ├── tests/              # 测试用例
 │   ├── core_graph_test.py             # 核心模块批量测试
@@ -634,11 +665,13 @@ python core_graph_test_with_stream.py
   - [ ] 错误处理和自动恢复
   - [ ] 性能优化
 
-- 🚀 **API接口** (v0.5.0) - **计划中**
-  - [ ] FastAPI REST接口
-  - [ ] WebSocket实时通信
+- ✅ **API接口** (v0.5.0) - **已完成**
+  - [x] FastAPI REST 接口（对话管理、Artifact管理）
+  - [x] SSE 流式传输（实时推送执行过程）
+  - [x] 依赖注入设计（请求级别 session 隔离）
+  - [x] StreamManager 事件缓冲队列（TTL 机制）
+  - [x] OpenAPI 自动文档（访问 /docs）
   - [ ] 前端界面集成
-  - [ ] API文档
 
 - 🎉 **生产就绪** (v1.0.0) - **目标**
   - [ ] 完整的错误处理
