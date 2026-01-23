@@ -55,7 +55,15 @@ async def init_globals() -> None:
 
     在 FastAPI lifespan 中调用。
     """
+    import os
+    from pathlib import Path
+
     global _db_manager, _checkpointer, _stream_manager
+
+    # 0. 确保 data 目录存在
+    data_dir = Path("data")
+    data_dir.mkdir(parents=True, exist_ok=True)
+    logger.info(f"Data directory ensured: {data_dir.absolute()}")
 
     # 1. 初始化数据库管理器
     _db_manager = DatabaseManager(config.DATABASE_URL)
