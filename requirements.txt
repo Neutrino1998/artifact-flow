@@ -48,3 +48,25 @@ sqlalchemy[asyncio]>=2.0.0
 # langgraph-checkpoint-sqlite 在初始化时调用 conn.is_alive() 会引发 AttributeError
 # 详见: https://github.com/omnilib/aiosqlite/releases/tag/v0.22.0
 aiosqlite==0.21.0
+
+# ========================================
+# API 依赖
+# ========================================
+
+# Web 框架
+fastapi>=0.109.0
+uvicorn[standard]>=0.27.0
+
+# 配置管理
+pydantic-settings>=2.0.0
+
+# 异步文件操作（预留）
+aiofiles>=23.2.0
+
+# ========================================
+# 测试依赖
+# ========================================
+
+# API 测试
+httpx>=0.26.0
+pytest-asyncio>=0.23.0
