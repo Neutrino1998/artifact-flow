@@ -185,30 +185,35 @@ class ConversationRepository(BaseRepository[Conversation]):
         user_id: Optional[str] = None,
         limit: int = 50,
         offset: int = 0,
-        order_by_updated: bool = True
+        order_by_updated: bool = True,
+        load_messages: bool = False
     ) -> List[Conversation]:
         """
         列出对话
-        
+
         Args:
             user_id: 按用户ID筛选（预留）
             limit: 限制数量
             offset: 跳过数量
             order_by_updated: 是否按更新时间降序排列
-            
+            load_messages: 是否预加载消息（用于计算消息数量）
+
         Returns:
             对话列表
         """
         query = select(Conversation)
-        
+
+        if load_messages:
+            query = query.options(selectinload(Conversation.messages))
+
         if user_id:
             query = query.where(Conversation.user_id == user_id)
-        
+
         if order_by_updated:
             query = query.order_by(Conversation.updated_at.desc())
-        
+
         query = query.offset(offset).limit(limit)
-        
+
         result = await self._session.execute(query)
         return list(result.scalars().all())
     

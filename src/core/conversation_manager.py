@@ -432,7 +432,8 @@ class ConversationManager:
             try:
                 conversations = await self.repository.list_conversations(
                     limit=limit,
-                    offset=offset
+                    offset=offset,
+                    load_messages=True
                 )
                 return [
                     {

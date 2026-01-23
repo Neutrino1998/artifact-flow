@@ -238,53 +238,42 @@ async def get_conversation(
     获取对话详情（含消息树）
     """
     try:
-        # 确保对话存在并加载
-        await conversation_manager.ensure_conversation_exists(conv_id)
+        repo = conversation_manager._ensure_repository()
 
-        # 获取对话基本信息
-        conversations = await conversation_manager.list_conversations_async(limit=1000)
-        conv_info = None
-        for conv in conversations:
-            if conv["conversation_id"] == conv_id:
-                conv_info = conv
-                break
-
-        if not conv_info:
+        # 直接从数据库获取对话（不尝试创建）
+        conversation = await repo.get_conversation(conv_id, load_messages=True)
+        if not conversation:
             raise HTTPException(status_code=404, detail=f"Conversation '{conv_id}' not found")
 
         # 获取所有消息
-        messages = await conversation_manager.get_conversation_path_async(conv_id)
+        messages = await repo.get_conversation_messages(conv_id)
 
         # 构建子消息关系
         children_map = {}
         for msg in messages:
-            parent_id = msg.get("parent_id")
-            if parent_id:
-                if parent_id not in children_map:
-                    children_map[parent_id] = []
-                children_map[parent_id].append(msg["message_id"])
-
-        # 获取 active_branch
-        active_branch = await conversation_manager.get_active_branch(conv_id)
+            if msg.parent_id:
+                if msg.parent_id not in children_map:
+                    children_map[msg.parent_id] = []
+                children_map[msg.parent_id].append(msg.id)
 
         return ConversationDetailResponse(
             id=conv_id,
-            title=conv_info.get("title"),
-            active_branch=active_branch,
+            title=conversation.title,
+            active_branch=conversation.active_branch,
             messages=[
                 MessageResponse(
-                    id=msg["message_id"],
-                    parent_id=msg.get("parent_id"),
-                    content=msg["content"],
-                    response=msg.get("graph_response"),
-                    created_at=datetime.fromisoformat(msg["timestamp"]) if isinstance(msg["timestamp"], str) else msg["timestamp"],
-                    children=children_map.get(msg["message_id"], []),
+                    id=msg.id,
+                    parent_id=msg.parent_id,
+                    content=msg.content,
+                    response=msg.graph_response,
+                    created_at=msg.created_at,
+                    children=children_map.get(msg.id, []),
                 )
                 for msg in messages
             ],
             session_id=conv_id,  # session_id 与 conversation_id 相同
-            created_at=datetime.fromisoformat(conv_info["created_at"]) if isinstance(conv_info["created_at"], str) else conv_info["created_at"],
-            updated_at=datetime.fromisoformat(conv_info["updated_at"]) if isinstance(conv_info["updated_at"], str) else conv_info["updated_at"],
+            created_at=conversation.created_at,
+            updated_at=conversation.updated_at,
         )
 
     except NotFoundError:
