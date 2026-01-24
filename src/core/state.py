@@ -243,6 +243,14 @@ def merge_agent_response_to_state(
         # 清零 tool_round_count
         memory["tool_round_count"] = 0
 
+        # 检查是否执行失败
+        if not response.success:
+            # Agent执行失败 → 终止执行
+            state["phase"] = ExecutionPhase.COMPLETED
+            state["graph_response"] = response.content
+            logger.error(f"{agent_name} failed, terminating execution: {response.content}")
+            return
+
         if agent_name != "lead_agent":
             # Subagent完成，封装结果为ToolResult
             from tools.base import ToolResult
