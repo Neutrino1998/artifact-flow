@@ -144,12 +144,12 @@ class WebFetchTool(BaseTool):
     async def execute(self, **params) -> ToolResult:
         """
         执行网页抓取
-        
+
         Args:
-            urls: URL字符串或URL列表
+            url_list: URL字符串或URL列表
             max_content_length: 每页最大内容长度
             max_concurrent: 最大并发浏览器实例数
-            
+
         Returns:
             ToolResult: 包含XML格式的抓取结果
         """
@@ -160,9 +160,9 @@ class WebFetchTool(BaseTool):
             )
         
         # 参数处理
-        urls_param = params.get("urls")
+        urls_param = params.get("url_list")
         if not urls_param:
-            return ToolResult(success=False, error="urls parameter is required")
+            return ToolResult(success=False, error="url_list parameter is required")
         
         # 确保urls是列表
         if isinstance(urls_param, str):
@@ -170,7 +170,7 @@ class WebFetchTool(BaseTool):
         elif isinstance(urls_param, list):
             urls = urls_param
         else:
-            return ToolResult(success=False, error="urls must be string or list")
+            return ToolResult(success=False, error="url_list must be string or list")
         
         max_content_length = params.get("max_content_length", 10000)
         max_concurrent = min(params.get("max_concurrent", 3), 5)  # 限制最大5个
@@ -544,7 +544,7 @@ if __name__ == "__main__":
         print("\n📄 测试1: HTML页面抓取")
         test_urls = ["https://github.com/Neutrino1998/artifact-flow"]
         
-        result = await tool(urls=test_urls)
+        result = await tool(url_list=test_urls)
         
         if result.success:
             print(f"✅ HTML抓取成功")
@@ -559,7 +559,7 @@ if __name__ == "__main__":
         # 使用一个公开的PDF测试
         pdf_urls = ["https://arxiv.org/pdf/1706.03762.pdf"]  # Attention is All You Need论文
         
-        result = await tool(urls=pdf_urls, max_content_length=5000)
+        result = await tool(url_list=pdf_urls, max_content_length=5000)
         
         if result.success:
             print(f"✅ PDF抓取成功")
@@ -577,7 +577,7 @@ if __name__ == "__main__":
         ]
         
         result = await tool(
-            urls=mixed_urls,
+            url_list=mixed_urls,
             max_content_length=3000,
             max_concurrent=2
         )
