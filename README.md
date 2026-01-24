@@ -120,7 +120,6 @@ ArtifactFlow 是一个智能多智能体研究系统，通过协调专门的AI�
 
 3. **安装依赖**
    ```bash
-   pip install -r requirements.txt
    pip install -e .
    ```
 
