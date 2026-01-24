@@ -98,7 +98,51 @@ ArtifactFlow 是一个智能多智能体研究系统，通过协调专门的AI�
 - 推荐系统内存 ≥ 4GB（网页抓取需要启动浏览器）
 - **⚠️ 依赖版本注意**: `aiosqlite` 必须使用 **0.21.0** 版本。0.22.0 版本移除了 `Connection` 对 `threading.Thread` 的继承，导致 `is_alive()` 方法丢失，与 `langgraph-checkpoint-sqlite` 不兼容。requirements.txt 已锁定正确版本。
 
-### 安装步骤
+### 方式一：Docker 部署（推荐）
+
+最简单的部署方式，无需配置 Python 环境。
+
+1. **克隆项目**
+   ```bash
+   git clone https://github.com/yourusername/artifact-flow.git
+   cd artifact-flow
+   ```
+
+2. **配置环境变量**
+   ```bash
+   cp .env.example .env
+   # 编辑 .env 文件，添加你的 API Keys
+   ```
+
+3. **启动服务**
+   ```bash
+   docker-compose up -d
+   ```
+
+4. **查看日志**
+   ```bash
+   docker-compose logs -f
+   ```
+
+5. **访问服务**
+   - API 文档: http://localhost:8000/docs
+   - ReDoc 文档: http://localhost:8000/redoc
+
+**停止服务：**
+```bash
+docker-compose down
+```
+
+**重新构建（代码更新后）：**
+```bash
+docker-compose up -d --build
+```
+
+> **注意：** Docker 镜像约 1.5GB+，主要是 Playwright 浏览器占用。首次构建需要下载较多依赖。
+
+### 方式二：本地安装
+
+适合需要修改代码或进行开发的场景。
 
 1. **克隆项目**
    ```bash
@@ -434,7 +478,7 @@ python -m tests.core_graph_test_with_stream
   - [ ] PostgreSQL 迁移支持
   - [ ] 安全增强
   - [ ] 完整文档和示例
-  - [ ] Docker部署支持
+  - [x] Docker部署支持
 
 
 ## 📞 支持与反馈
