@@ -216,7 +216,7 @@ async def demo_permission_flow():
                     thread_id=thread_id,
                     conversation_id=conv_id,
                     message_id=msg_id,
-                    resume_data={"type": "permission", "approved": False}
+                    resume_data={"type": "permission", "approved": True}
                 )
                 logger.debug(f"\n批准后完成: {result['response'][:200]}...")
 

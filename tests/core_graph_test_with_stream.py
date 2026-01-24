@@ -449,7 +449,7 @@ async def demo_permission_flow():
             print("\n用户思考中...")
             await asyncio.sleep(2)
 
-            approved = False
+            approved = True
 
             if approved:
                 print("\n用户批准，继续执行...")
