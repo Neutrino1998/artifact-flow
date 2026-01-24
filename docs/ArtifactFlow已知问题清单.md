@@ -48,7 +48,7 @@ system prompt + instruction + history(如果有) + tool result
 - [x] lead agent提示词提示result artifact 渐进式完成
 - [ ] graph level轮次太多提示lead agent
 - [x] agent开启关闭debug模式很费劲：删除agentconfig中debug参数
-- [ ] Typer + Rich实现简易terminal前端
+- [x] Typer + Rich实现简易terminal前端
 - [ ] agent提示词精简一下
 - [x] ToolPromptGenerator中generate_tool_instruction最后return的instruction加上<tool_call_instructions>的tag
 - [x] 博查搜索语法确认
@@ -73,4 +73,4 @@ system prompt + instruction + history(如果有) + tool result
 - [x] task_plan artifact没有及时加载：工具循环中的操作未及时更新到系统提示词
 - [x] search agent结果返回方式：考虑直接返回工具结果而非复述
 - [x] 精简提示词：简化合并提示词内容
-- [ ] Agent文件，例如lead_agent.py是不是应该以@property或者别的形式定义工具列表，`create_multi_agent_graph`在`registry.create_agent_toolkit`的时候可以直接传入这个`tool_names`。类似的感觉lead.register_subagent使用的信息应该也通过search和crawl的property获取，而不是编码在`create_multi_agent_graph`中
+- [x] Agent文件，例如lead_agent.py是不是应该以@property或者别的形式定义工具列表，`create_multi_agent_graph`在`registry.create_agent_toolkit`的时候可以直接传入这个`tool_names`。类似的感觉lead.register_subagent使用的信息应该也通过search和crawl的property获取，而不是编码在`create_multi_agent_graph`中
