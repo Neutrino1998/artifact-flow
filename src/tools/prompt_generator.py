@@ -50,7 +50,7 @@ Important guidelines:
 1. Always use the exact tool name as specified
 2. Include all required parameters
 3. Use proper XML formatting with closed tags
-4. Make SINGLE tool call per request for clarity
+4. You can only make a SINGLE tool call every turn
 </tool_instructions>"""
         
         return instruction
