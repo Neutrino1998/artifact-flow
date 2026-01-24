@@ -140,20 +140,26 @@ ArtifactFlow 是一个智能多智能体研究系统，通过协调专门的AI�
    # 编辑 .env 文件，添加你的 API Keys
    ```
 
-6. **启动 API 服务器**
+6. **启动服务**
    ```bash
-   # 启动服务器
+   # 启动 API 服务器
    python run_server.py
 
    # 开发模式（自动重载）
    python run_server.py --reload
 
-   # 指定端口
-   python run_server.py --port 8080
-
    # 服务启动后访问:
    # - API 文档: http://localhost:8000/docs
    # - ReDoc 文档: http://localhost:8000/redoc
+   ```
+
+7. **使用 CLI 交互**
+   ```bash
+   # 进入交互式聊天（需先启动服务器）
+   python run_cli.py chat
+
+   # 或直接发送消息
+   python run_cli.py chat "研究一下 LangGraph 的最新特性"
    ```
 
 ## 🔑 配置指南
@@ -246,6 +252,12 @@ rm data/artifactflow.db
 ```
 artifact-flow/
 ├── run_server.py       # API 服务器启动脚本
+├── run_cli.py          # CLI 启动脚本
+├── cli/                # CLI 命令行工具 (Typer + Rich)
+│   ├── main.py                  # CLI 主入口和命令定义
+│   ├── api_client.py            # API 客户端封装
+│   ├── config.py                # CLI 配置和状态管理
+│   └── ui.py                    # Rich 终端 UI 组件
 ├── src/
 │   ├── core/ ✅        # 核心工作流和状态管理 (已完成)
 │   │   ├── state.py              # 状态管理和定义
@@ -302,325 +314,68 @@ artifact-flow/
 │       └── utils/
 │           └── sse.py            # SSE 响应构建器
 ├── data/               # 数据目录 (SQLite数据库文件)
-├── tests/              # 测试用例
-│   ├── core_graph_test.py             # 核心模块批量测试
-│   └── core_graph_test_with_stream.py # 核心模块流式测试
+├── tests/              # 测试脚本
+│   ├── core_graph_test.py             # 批量模式测试（多轮对话、权限、分支）
+│   ├── core_graph_test_with_stream.py # 流式模式测试（实时输出）
+│   └── api_smoke_test.py              # API 烟雾测试
 ├── prompts/            # 智能体提示词模板
 ├── examples/           # 使用示例
 ├── logs/               # 日志目录
 └── docs/               # 文档
 ```
 
-## 🧪 使用示例
+## 🧪 使用方式
 
-### 1. 基础LLM调用
+### CLI 命令行工具
 
-```python
-from src.models.llm import create_llm
-
-# 创建思考模型
-llm = create_llm("qwen3-30b-thinking", temperature=0.3)
-response = llm.invoke("解释量子计算的基本原理")
-
-# 获取思考过程
-if 'reasoning_content' in response.additional_kwargs:
-    print("💭 思考过程:", response.additional_kwargs['reasoning_content'])
-print("💬 最终回答:", response.content)
-```
-
-### 2. 工具系统使用
-
-```python
-import asyncio
-from src.tools.implementations.web_search import WebSearchTool
-from src.tools.implementations.web_fetch import WebFetchTool
-from src.tools.implementations.artifact_ops import CreateArtifactTool
-
-async def demo_tools():
-    # 1. 网页搜索
-    search_tool = WebSearchTool()
-    search_result = await search_tool(
-        query="AI多智能体系统最新研究",
-        count=5,
-        freshness="oneMonth"
-    )
-    
-    if search_result.success:
-        print("🔍 搜索完成:", search_result.metadata['results_count'], "条结果")
-    
-    # 2. 深度网页抓取（支持PDF）
-    fetch_tool = WebFetchTool()
-    urls = ["https://github.com/langchain-ai/langgraph", "https://arxiv.org/pdf/1706.03762.pdf"]
-    fetch_result = await fetch_tool(
-        urls=urls,
-        max_content_length=3000,
-        max_concurrent=2
-    )
-    
-    if fetch_result.success:
-        print("🕷️ 抓取完成:", fetch_result.metadata['success_count'], "个页面/文档")
-    
-    # 3. 创建研究工件
-    artifact_tool = CreateArtifactTool()
-    create_result = await artifact_tool(
-        id="research_plan",
-        type="task_plan",
-        title="Multi-Agent系统研究计划",
-        content="# 研究目标\n\n1. 分析当前技术现状\n2. 设计系统架构"
-    )
-    
-    if create_result.success:
-        print("📄 工件创建成功")
-
-# 运行演示
-asyncio.run(demo_tools())
-```
-
-### 3. 核心模块使用（批量模式）
-
-```python
-import asyncio
-from src.core.graph import create_multi_agent_graph
-from src.core.controller import ExecutionController
-from src.utils.logger import set_global_debug
-
-# 开启调试模式
-set_global_debug(True)
-
-async def demo_core_system():
-    # 创建系统
-    compiled_graph = create_multi_agent_graph()
-    controller = ExecutionController(compiled_graph)
-    
-    # 第一轮对话
-    result1 = await controller.execute(
-        content="研究一下LangGraph的最新特性"
-    )
-    conv_id = result1["conversation_id"]
-    print(f"回复: {result1['response']}")
-    
-    # 第二轮（自动继续对话历史）
-    result2 = await controller.execute(
-        content="帮我整理成一份技术文档",
-        conversation_id=conv_id
-    )
-    print(f"回复: {result2['response']}")
-    
-    # 如果遇到权限请求
-    if result2.get("interrupted"):
-        print(f"⚠️ 需要权限: {result2['interrupt_data']['tool_name']}")
-        
-        # 批准权限
-        result2 = await controller.execute(
-            thread_id=result2["thread_id"],
-            resume_data={"type": "permission", "approved": True}
-        )
-        print(f"✅ 完成: {result2['response']}")
-
-asyncio.run(demo_core_system())
-```
-
-### 4. 流式执行（实时响应）🆕
-
-```python
-import asyncio
-from src.core.graph import create_multi_agent_graph
-from src.core.controller import ExecutionController
-from src.core.events import StreamEventType
-
-async def demo_streaming():
-    """演示流式执行 - 实时查看AI的思考和输出过程"""
-    compiled_graph = create_multi_agent_graph()
-    controller = ExecutionController(compiled_graph)
-
-    # 使用 stream_execute 进行流式执行
-    async for event in controller.stream_execute(
-        content="研究一下LangGraph的最新特性"
-    ):
-        event_type = event.get("type")
-        data = event.get("data", {})
-        agent = event.get("agent", "")
-
-        if event_type == StreamEventType.METADATA.value:
-            print(f"🚀 开始执行: {data['conversation_id']}")
-
-        elif event_type == StreamEventType.LLM_CHUNK.value:
-            # 实时输出LLM响应
-            content = data.get("content", "")
-            reasoning = data.get("reasoning_content", "")
-
-            if reasoning:
-                print(f"💭 [{agent}] 思考: {reasoning}", end="", flush=True)
-            if content:
-                print(f"💬 [{agent}] 回答: {content}", end="", flush=True)
-
-        elif event_type == StreamEventType.TOOL_START.value:
-            tool = event.get("tool", "")
-            print(f"\n🔧 [{agent}] 调用工具: {tool}...")
-
-        elif event_type == StreamEventType.TOOL_COMPLETE.value:
-            tool = event.get("tool", "")
-            success = data.get("success", False)
-            duration = data.get("duration_ms", 0)
-            print(f"🔧 [{agent}] 工具 {tool} 完成: {'OK' if success else 'FAIL'} ({duration}ms)")
-
-        elif event_type == StreamEventType.PERMISSION_REQUEST.value:
-            tool = event.get("tool", "")
-            print(f"\n⚠️ [{agent}] 需要权限: {tool}")
-
-        elif event_type == StreamEventType.COMPLETE.value:
-            if data["success"]:
-                print(f"\n✅ 执行完成")
-                if not data.get("interrupted"):
-                    print(f"回复: {data['response']}")
-                # 显示执行指标
-                metrics = data.get("execution_metrics", {})
-                if metrics:
-                    print(f"📊 总耗时: {metrics.get('total_duration_ms', 0)}ms")
-
-asyncio.run(demo_streaming())
-```
-
-#### 流式执行的优势
-
-- **实时反馈**: 立即看到AI的思考过程和输出，无需等待完整响应
-- **用户体验**: 类似ChatGPT的打字机效果，提升交互感
-- **进度透明**: 清晰了解当前执行状态（思考中、调用工具、等待权限等）
-- **调试友好**: 实时查看每个Agent的工作流程
-
-### 5. 权限确认（批量模式）
-
-```python
-async def demo_permission():
-    from src.tools.base import ToolPermission
-    
-    # 配置需要确认的工具
-    tool_permissions = {
-        "web_fetch": ToolPermission.CONFIRM
-    }
-    
-    compiled_graph = create_multi_agent_graph(tool_permissions=tool_permissions)
-    controller = ExecutionController(compiled_graph)
-    
-    # 批量模式
-    result = await controller.execute(
-        content="抓取 https://github.com/langchain-ai/langgraph"
-    )
-    
-    if result.get("interrupted"):
-        print(f"⚠️ 需要权限: {result['interrupt_data']['tool_name']}")
-        
-        # 批准或拒绝
-        result = await controller.execute(
-            thread_id=result["thread_id"],
-            resume_data={"type": "permission", "approved": True}
-        )
-
-asyncio.run(demo_permission())
-```
-
-### 6. 权限确认（流式模式）🆕
-
-```python
-async def demo_permission_stream():
-    from src.tools.base import ToolPermission
-    from src.core.events import StreamEventType
-
-    tool_permissions = {
-        "web_fetch": ToolPermission.CONFIRM
-    }
-
-    compiled_graph = create_multi_agent_graph(tool_permissions=tool_permissions)
-    controller = ExecutionController(compiled_graph)
-
-    # 流式模式 - 支持多次权限确认
-    result = None
-    max_retries = 3
-    retry_count = 0
-
-    # 第一次执行
-    stream = controller.stream_execute(
-        content="抓取 https://github.com/langchain-ai/langgraph"
-    )
-
-    async for event in stream:
-        event_type = event.get("type")
-        # 处理流式事件
-        if event_type == StreamEventType.PERMISSION_REQUEST.value:
-            tool = event.get("tool", "")
-            print(f"⚠️ 需要权限确认: {tool}")
-
-        elif event_type == StreamEventType.COMPLETE.value:
-            result = event.get("data", {})
-
-    # 处理多次权限确认
-    while result.get("interrupted") and retry_count < max_retries:
-        retry_count += 1
-        user_input = input(f"是否批准工具 '{result['interrupt_data']['tool_name']}'? (y/n): ")
-        approved = user_input.lower() == 'y'
-
-        # 继续执行
-        stream = controller.stream_execute(
-            thread_id=result["thread_id"],
-            conversation_id=result["conversation_id"],
-            message_id=result["message_id"],
-            resume_data={"type": "permission", "approved": approved}
-        )
-
-        async for event in stream:
-            # 处理流式事件
-            if event.get("type") == StreamEventType.COMPLETE.value:
-                result = event.get("data", {})
-
-asyncio.run(demo_permission_stream())
-```
-
-### 7. 分支对话
-
-```python
-async def demo_branch_conversation():
-    compiled_graph = create_multi_agent_graph()
-    controller = ExecutionController(compiled_graph)
-    
-    # 主线对话
-    result1 = await controller.execute(content="计算 15 + 28")
-    conv_id = result1["conversation_id"]
-    msg1_id = result1["message_id"]
-    
-    # 继续主线
-    result2 = await controller.execute(
-        content="再乘以2",
-        conversation_id=conv_id
-    )
-    
-    # 从msg1创建分支
-    result3 = await controller.execute(
-        content="再减去10",
-        conversation_id=conv_id,
-        parent_message_id=msg1_id  # 从msg1分支
-    )
-    
-    print(f"主线结果: {result2['response']}")
-    print(f"分支结果: {result3['response']}")
-
-asyncio.run(demo_branch_conversation())
-```
-
-### 8. 运行完整测试
+基于 Typer + Rich 的终端交互界面，需要先启动 API 服务器：
 
 ```bash
-# 运行核心模块集成测试（批量模式）
-python -m test.core_graph_test
+# 1. 启动 API 服务器
+python run_server.py
 
-# 运行流式输出测试 🆕
-python core_graph_test_with_stream.py
-
-# 测试选项：
-# 1. 多轮对话演示
-# 2. 权限确认演示（支持多次确认）
-# 3. 分支对话演示
-# 4. 批量 vs 流式对比演示
+# 2. 使用 CLI（另开终端）
+python run_cli.py chat              # 进入交互式聊天
+python run_cli.py chat "你好"       # 发送单条消息
+python run_cli.py chat -n           # 开始新对话
 ```
+
+#### CLI 完整命令
+
+| 命令 | 说明 |
+|------|------|
+| `chat [message]` | 发送消息，无参数时进入交互模式 |
+| `chat -n/--new` | 开始新对话 |
+| `list` | 列出最近对话 |
+| `show <id>` | 查看对话详情 |
+| `use <id>` | 切换到指定对话 |
+| `artifacts [session_id]` | 列出 Artifacts |
+| `artifact <id>` | 查看 Artifact 内容 |
+| `status` | 显示当前 CLI 状态 |
+| `clear` | 清除会话状态 |
+
+交互模式内置命令：
+- `/new` - 开始新对话
+- `/status` - 查看当前状态
+- `quit` / `exit` - 退出
+
+### 测试脚本
+
+`tests/` 目录下提供了核心模块的测试脚本：
+
+```bash
+# 批量模式测试 - 多轮对话、权限确认、分支对话
+python -m tests.core_graph_test
+
+# 流式模式测试 - 实时输出、思考过程展示
+python -m tests.core_graph_test_with_stream
+```
+
+测试脚本提供交互式菜单：
+1. **多轮对话** - 演示多轮上下文保持
+2. **权限确认** - 演示工具权限中断/恢复流程
+3. **分支对话** - 演示从历史消息创建分支
+4. **批量 vs 流式对比** - 对比两种执行模式（仅流式测试）
 
 ## 📈 开发路线图
 
@@ -671,6 +426,7 @@ python core_graph_test_with_stream.py
   - [x] 依赖注入设计（请求级别 session 隔离）
   - [x] StreamManager 事件缓冲队列（TTL 机制）
   - [x] OpenAPI 自动文档（访问 /docs）
+  - [x] CLI 命令行工具（Typer + Rich）
   - [ ] 前端界面集成
 
 - 🎉 **生产就绪** (v1.0.0) - **目标**
