@@ -3,26 +3,26 @@ Core模块
 提供Graph、Controller、状态管理和事件定义
 """
 
-from core.graph import (
+from .graph import (
     ExtendableGraph,
     create_multi_agent_graph,
     create_async_sqlite_checkpointer
 )
 
-from core.controller import ExecutionController
+from .controller import ExecutionController
 
-from core.conversation_manager import ConversationManager
+from .conversation_manager import ConversationManager
 
-from core.state import (
+from .state import (
     AgentState,
     ExecutionPhase,
     create_initial_state,
     merge_agent_response_to_state
 )
 
-from core.context_manager import ContextManager
+from .context_manager import ContextManager
 
-from core.events import (
+from .events import (
     StreamEventType,
     StreamEvent,
     ExecutionMetrics,

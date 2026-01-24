@@ -3,8 +3,8 @@
 提供数据库连接管理和 ORM 模型定义
 """
 
-from db.database import DatabaseManager, get_database_manager
-from db.models import (
+from .database import DatabaseManager, get_database_manager
+from .models import (
     Base,
     Conversation,
     Message,

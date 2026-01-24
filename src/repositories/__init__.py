@@ -5,9 +5,9 @@
 所有数据库操作必须通过 ORM 进行，禁止原生 SQL。
 """
 
-from repositories.base import BaseRepository
-from repositories.conversation_repo import ConversationRepository
-from repositories.artifact_repo import ArtifactRepository
+from .base import BaseRepository
+from .conversation_repo import ConversationRepository
+from .artifact_repo import ArtifactRepository
 
 __all__ = [
     "BaseRepository",

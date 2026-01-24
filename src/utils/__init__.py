@@ -47,8 +47,8 @@ __all__ = [
     # XML解析
     'SimpleXMLParser',
     'ToolCall',
-    'parse_tool_calls'
-    
+    'parse_tool_calls',
+
     # 重试
     'RetryError',
     'exponential_backoff',

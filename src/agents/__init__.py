@@ -3,7 +3,7 @@ Agent模块
 提供BaseAgent和具体Agent实现
 """
 
-from agents.base import (
+from .base import (
     BaseAgent,
     AgentConfig,
     AgentResponse,
@@ -12,17 +12,17 @@ from agents.base import (
     create_agent_config
 )
 
-from agents.lead_agent import (
+from .lead_agent import (
     LeadAgent,
     create_lead_agent
 )
 
-from agents.search_agent import (
+from .search_agent import (
     SearchAgent,
     create_search_agent
 )
 
-from agents.crawl_agent import (
+from .crawl_agent import (
     CrawlAgent,
     create_crawl_agent
 )

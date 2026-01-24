@@ -4,7 +4,7 @@ Pydantic Schemas
 Request and response models for the API.
 """
 
-from api.schemas.chat import (
+from .chat import (
     ChatRequest,
     ChatResponse,
     ResumeRequest,
@@ -14,7 +14,7 @@ from api.schemas.chat import (
     ConversationSummary,
     MessageResponse,
 )
-from api.schemas.artifact import (
+from .artifact import (
     ArtifactListResponse,
     ArtifactDetailResponse,
     ArtifactSummary,
@@ -22,7 +22,7 @@ from api.schemas.artifact import (
     VersionDetailResponse,
     VersionSummary,
 )
-from api.schemas.events import SSEEvent
+from .events import SSEEvent
 
 __all__ = [
     # Chat schemas
