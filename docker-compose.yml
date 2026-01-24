@@ -1,0 +1,25 @@
+version: '3.8'
+
+services:
+  artifactflow:
+    build: .
+    container_name: artifactflow
+    ports:
+      - "8000:8000"
+    volumes:
+      # 数据持久化：SQLite 数据库
+      - ./data:/app/data
+    env_file:
+      # 环境变量：API Keys 等配置
+      - .env
+    environment:
+      # 可覆盖 .env 中的配置
+      - PYTHONUNBUFFERED=1
+    restart: unless-stopped
+    # 资源限制（可选，根据需要调整）
+    # deploy:
+    #   resources:
+    #     limits:
+    #       memory: 4G
+    #     reservations:
+    #       memory: 2G

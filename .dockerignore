@@ -1,0 +1,44 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info
+*.egg
+.eggs
+dist
+build
+.venv
+venv
+env
+
+# 环境变量（敏感信息）
+.env
+
+# 本地数据（应通过 volume 挂载）
+data/
+
+# 测试日志
+tests/logs/
+
+# IDE
+.idea
+.vscode
+*.swp
+*.swo
+
+# macOS
+.DS_Store
+
+# 文档（可选，如需要可移除此行）
+# docs/
+
+# 临时文件
+*.tmp
+*.temp
+*.log
