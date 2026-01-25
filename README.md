@@ -378,9 +378,10 @@ artifact-flow/
 │           └── sse.py            # SSE 响应构建器
 ├── data/               # 数据目录 (SQLite数据库文件)
 ├── tests/              # 测试脚本
-│   ├── core_graph_test.py             # 批量模式测试（多轮对话、权限、分支）
-│   ├── core_graph_test_with_stream.py # 流式模式测试（实时输出）
-│   └── api_smoke_test.py              # API 烟雾测试
+│   ├── test_core_graph.py             # 批量模式测试（多轮对话、权限、分支）
+│   ├── test_core_graph_stream.py      # 流式模式测试（实时输出）
+│   ├── test_api_smoke.py              # API 烟雾测试
+│   └── test_litellm_providers.py      # LiteLLM 提供商兼容性测试
 ├── prompts/            # 智能体提示词模板
 ├── examples/           # 使用示例
 ├── logs/               # 日志目录
@@ -428,10 +429,10 @@ python run_cli.py chat -n           # 开始新对话
 
 ```bash
 # 批量模式测试 - 多轮对话、权限确认、分支对话
-python -m tests.core_graph_test
+python -m tests.test_core_graph
 
 # 流式模式测试 - 实时输出、思考过程展示
-python -m tests.core_graph_test_with_stream
+python -m tests.test_core_graph_stream
 ```
 
 测试脚本提供交互式菜单：
