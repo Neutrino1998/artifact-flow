@@ -2,7 +2,7 @@
 # ArtifactFlow Docker Image
 # ========================================
 # 基于 Python 3.11，包含 Playwright 浏览器（crawl4ai 依赖）
-# 构建镜像约 1.5GB+，主要是浏览器占用
+# 构建镜像约 2GB+，主要是浏览器占用
 
 FROM python:3.11-slim
 

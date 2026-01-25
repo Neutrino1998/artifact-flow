@@ -138,7 +138,7 @@ docker-compose down
 docker-compose up -d --build
 ```
 
-> **注意：** Docker 镜像约 1.5GB+，主要是 Playwright 浏览器占用。首次构建需要下载较多依赖。
+> **注意：** Docker 镜像约 2GB+，主要是 Playwright 浏览器占用。首次构建需要下载较多依赖。
 
 ### 方式二：本地安装
 
