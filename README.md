@@ -237,21 +237,41 @@ BOCHA_API_KEY=sk-xxx
 
 ## 💡 支持的模型
 
-### OpenAI
-- `gpt-4o` - 最新的 GPT-4 模型
-- `gpt-4o-mini` - 轻量级版本
+基于 [LiteLLM](https://github.com/BerriAI/litellm) 统一接口，支持 100+ 模型提供商。
 
-### 通义千问 (Qwen)
-- `qwen-flash` - 快速响应版本
-- `qwen-plus` - 增强版本
-- `qwen3-30b-thinking` - 支持深度推理的思考模型 ⭐
-- `qwen3-30b-instruct` - 快速指令响应模型
-- `qwen3-next-80b-thinking` - 更大规模的思考模型
-- `qwen3-next-80b-instruct` - 更大规模的指令模型
+### 预定义模型
 
-### DeepSeek
-- `deepseek-chat` - 对话模型
-- `deepseek-reasoner` - 推理模型 ⭐
+| 模型名称 | 提供商 | 说明 |
+|---------|--------|------|
+| `gpt-4o` | OpenAI | GPT-4o |
+| `gpt-4o-mini` | OpenAI | GPT-4o Mini |
+| `qwen-turbo` | 通义千问 | 快速响应 |
+| `qwen-plus` | 通义千问 | 增强版本 |
+| `qwen3-30b-thinking` | 通义千问 | 思考模型 ⭐ |
+| `deepseek-chat` | DeepSeek | 对话模型 |
+| `deepseek-reasoner` | DeepSeek | 推理模型 ⭐ |
+
+### 自定义模型
+
+支持 Ollama、vLLM 等自部署服务：
+
+```python
+from models.llm import create_llm
+
+# Ollama 本地模型
+llm = create_llm(
+    model="llama3",
+    base_url="http://localhost:11434/v1",
+    api_key="ollama"
+)
+
+# vLLM 部署
+llm = create_llm(
+    model="Qwen/Qwen2-7B-Instruct",
+    base_url="http://localhost:8000/v1",
+    api_key="token-abc123"
+)
+```
 
 ## 💾 数据持久化
 
@@ -335,7 +355,7 @@ artifact-flow/
 │   │   ├── conversation_repo.py  # ConversationRepository
 │   │   └── artifact_repo.py      # ArtifactRepository (含乐观锁)
 │   ├── models/ ✅      # LLM 接口封装 (已完成)
-│   │   └── llm.py                # 统一的多模型接口
+│   │   └── llm.py                # 基于 LiteLLM 的统一接口，支持 100+ 提供商
 │   ├── utils/ ✅       # 工具函数和帮助类 (已完成)
 │   │   ├── logger.py             # 分级日志系统
 │   │   ├── retry.py              # 指数退避重试

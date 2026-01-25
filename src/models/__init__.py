@@ -8,8 +8,8 @@ from .llm import (
     get_available_models,
     get_model_info,
     MODEL_CONFIGS,
-    TONGYI_AVAILABLE,
-    DEEPSEEK_AVAILABLE,
+    UnifiedLLM,
+    LLMResponse,
 )
 
 __all__ = [
@@ -17,6 +17,6 @@ __all__ = [
     "get_available_models",
     "get_model_info",
     "MODEL_CONFIGS",
-    "TONGYI_AVAILABLE", 
-    "DEEPSEEK_AVAILABLE",
+    "UnifiedLLM",
+    "LLMResponse",
 ]

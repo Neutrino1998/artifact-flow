@@ -279,30 +279,55 @@ class BaseAgent(ABC):
             try:
                 if streaming_tokens:
                     # 流式模式：逐token处理
+                    # 新的 astream 返回 dict 格式：
+                    # {"type": "content", "content": "..."}
+                    # {"type": "reasoning", "content": "..."}
+                    # {"type": "usage", "token_usage": {...}}
+                    # {"type": "final", "content": "...", "reasoning_content": "...", "token_usage": {...}}
                     stream = await self._call_llm_with_retry(messages, streaming=True)
                     async for chunk in stream:
-                        # 累积content
-                        if hasattr(chunk, 'content') and chunk.content:
-                            response_content += chunk.content
+                        chunk_type = chunk.get("type")
+
+                        if chunk_type == "content":
+                            # 累积 content
+                            response_content += chunk["content"]
                             current_response.content = response_content
 
-                        # 累积reasoning_content（如果有）
-                        if hasattr(chunk, 'additional_kwargs') and 'reasoning_content' in chunk.additional_kwargs:
+                            # Yield LLM chunk事件
+                            yield StreamEvent(
+                                type=StreamEventType.LLM_CHUNK,
+                                agent=self.config.name,
+                                data=current_response
+                            )
+
+                        elif chunk_type == "reasoning":
+                            # 累积 reasoning_content
                             if reasoning_content is None:
                                 reasoning_content = ""
-                            reasoning_content += chunk.additional_kwargs['reasoning_content']
+                            reasoning_content += chunk["content"]
                             current_response.reasoning_content = reasoning_content
 
-                        # 获取token_usage（通常在最后一个chunk）
-                        if hasattr(chunk, 'response_metadata') and 'token_usage' in chunk.response_metadata:
-                            token_usage = chunk.response_metadata['token_usage']
+                            # Yield LLM chunk事件（reasoning 也需要流式输出）
+                            yield StreamEvent(
+                                type=StreamEventType.LLM_CHUNK,
+                                agent=self.config.name,
+                                data=current_response
+                            )
 
-                        # Yield LLM chunk事件
-                        yield StreamEvent(
-                            type=StreamEventType.LLM_CHUNK,
-                            agent=self.config.name,
-                            data=current_response
-                        )
+                        elif chunk_type == "usage":
+                            # 获取 token_usage
+                            token_usage = chunk["token_usage"]
+
+                        elif chunk_type == "final":
+                            # 最终响应（用于确保数据完整性）
+                            if not response_content and chunk.get("content"):
+                                response_content = chunk["content"]
+                                current_response.content = response_content
+                            if not reasoning_content and chunk.get("reasoning_content"):
+                                reasoning_content = chunk["reasoning_content"]
+                                current_response.reasoning_content = reasoning_content
+                            if not token_usage and chunk.get("token_usage"):
+                                token_usage = chunk["token_usage"]
 
                     # 流式结束后，yield 完成事件
                     yield StreamEvent(

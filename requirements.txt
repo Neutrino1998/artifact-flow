@@ -2,10 +2,9 @@
 # 核心依赖
 # ========================================
 
-# LangChain 核心组件
+# LangChain 核心组件（消息格式、Graph 编排）
 langchain>=0.3.0
 langchain-core>=0.3.0
-langchain-openai>=0.2.0  # OpenAI/兼容接口支持
 langgraph>=0.2.0  # 工作流编排
 langgraph-checkpoint>=2.0.0  # 状态管理
 langgraph-checkpoint-sqlite>=2.0.0  # SQLite 持久化（AsyncSqliteSaver）
@@ -14,12 +13,9 @@ langgraph-checkpoint-sqlite>=2.0.0  # SQLite 持久化（AsyncSqliteSaver）
 # 模型提供商
 # ========================================
 
-# Qwen (通义千问) - ChatTongyi
-dashscope>=1.14.0  # 阿里云SDK，ChatTongyi依赖
-langchain-community>=0.3.0  # 包含ChatTongyi
-
-# DeepSeek - ChatDeepSeek  
-langchain-deepseek>=0.1.0  # DeepSeek专用包
+# LiteLLM - 统一 LLM 接口
+# 支持 OpenAI/DeepSeek/Qwen/Ollama/vLLM 等 100+ 提供商
+litellm>=1.40.0
 
 # ========================================
 # 工具依赖
