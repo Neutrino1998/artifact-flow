@@ -343,11 +343,11 @@ def print_artifacts_table(artifacts: list):
     table.add_column("Updated", style="dim")
 
     for art in artifacts:
-        art_id = art["id"][:8] + "..."
+        art_id = art["id"]  # Show full ID for copying
         title = art.get("title", "(No title)")
         if len(title) > 30:
             title = title[:27] + "..."
-        art_type = art.get("artifact_type", "-")
+        art_type = art.get("content_type", "-")  # API uses content_type, not artifact_type
         version = f"v{art.get('current_version', 1)}"
         updated = art.get("updated_at", "-")[:16]
 
@@ -361,7 +361,7 @@ def print_artifact_content(artifact: dict):
     console.print(Panel(
         f"[cyan]ID:[/cyan] {artifact['id']}\n"
         f"[cyan]Title:[/cyan] {artifact.get('title', '(No title)')}\n"
-        f"[cyan]Type:[/cyan] {artifact.get('artifact_type', '-')}\n"
+        f"[cyan]Type:[/cyan] {artifact.get('content_type', '-')}\n"
         f"[cyan]Version:[/cyan] v{artifact.get('current_version', 1)}",
         title="Artifact",
         border_style="cyan",
