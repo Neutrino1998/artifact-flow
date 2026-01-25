@@ -1,8 +1,7 @@
-version: '3.8'
-
 services:
   artifactflow:
     build: .
+    image: artifactflow:latest
     container_name: artifactflow
     ports:
       - "8000:8000"
