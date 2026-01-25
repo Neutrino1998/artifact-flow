@@ -104,16 +104,4 @@ class CallSubagentTool(BaseTool):
         """获取当前时间戳"""
         from datetime import datetime
         return datetime.now().isoformat()
-    
-    def to_xml_example(self) -> str:
-        """
-        生成更详细的XML调用示例
-        """
-        return """<tool_call>
-  <name>call_subagent</name>
-  <params>
-    <agent_name>search_agent</agent_name>
-    <instruction>Search for recent developments in AI safety research, focusing on alignment techniques published in 2024</instruction>
-  </params>
-</tool_call>"""
 

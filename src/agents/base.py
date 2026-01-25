@@ -11,7 +11,7 @@ from datetime import datetime
 import asyncio
 
 from utils.logger import get_logger
-from utils.xml_parser import parse_tool_calls
+from tools.xml_parser import parse_tool_calls
 from tools.prompt_generator import ToolPromptGenerator, format_result
 from tools.registry import AgentToolkit
 from core.events import StreamEventType, StreamEvent

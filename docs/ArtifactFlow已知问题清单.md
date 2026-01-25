@@ -16,12 +16,12 @@
 # 模型模块已知问题清单
 
 ## 次要问题
-- [ ] 将langchain模型接入改为专门的万能接口去适应不同provider，例如LiteLLM。尤其要注意reasoning和token usage等字段如何获取
+- [x] 将langchain模型接入改为专门的万能接口去适应不同provider，例如LiteLLM。尤其要注意reasoning和token usage等字段如何获取
 
 # 工具模块已知问题清单
 
 ## 次要问题
-- [ ] 使用标准xml解析方式（xml.etree.ElementTree），string字段统一用cdata字段，所有参数Tag平铺，如有下级标签则为list
+- [x] 使用标准xml解析方式（xml.etree.ElementTree），string字段统一用cdata字段，所有参数Tag平铺，如有下级标签则为list
 
 
 # Core模块已知问题清单

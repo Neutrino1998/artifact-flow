@@ -724,19 +724,19 @@ class UpdateArtifactTool(BaseTool):
         return ToolResult(success=False, error=message)
 
     def to_xml_example(self) -> str:
-        """生成 XML 调用示例"""
+        """生成 XML 调用示例（使用CDATA）"""
         return """<tool_call>
-<name>update_artifact</name>
+  <name>update_artifact</name>
   <params>
-    <id>task_plan</id>
-    <old_str>1. [✗] Search for recent developments
+    <id><![CDATA[task_plan]]></id>
+    <old_str><![CDATA[1. [✗] Search for recent developments
    - Status: pending
    - Assigned: search_agent
-   - Notes: N/A</old_str>
-    <new_str>1. [✓] Search for recent developments
+   - Notes: N/A]]></old_str>
+    <new_str><![CDATA[1. [✓] Search for recent developments
    - Status: completed
    - Assigned: search_agent
-   - Notes: Found 5 key breakthroughs</new_str>
+   - Notes: Found 5 key breakthroughs]]></new_str>
   </params>
 </tool_call>
 

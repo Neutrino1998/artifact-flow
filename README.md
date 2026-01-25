@@ -337,7 +337,7 @@ artifact-flow/
 │   ├── tools/ ✅       # 工具系统和实现 (已完成)
 │   │   ├── base.py               # 工具基类和权限定义
 │   │   ├── registry.py           # 工具注册和管理
-│   │   ├── permissions.py        # 权限控制系统
+│   │   ├── xml_parser.py         # XML工具调用解析（CDATA格式）
 │   │   ├── prompt_generator.py   # XML提示词生成
 │   │   └── implementations/      # 具体工具实现
 │   │       ├── artifact_ops.py   # Artifact操作工具 (ArtifactManager)
@@ -358,8 +358,7 @@ artifact-flow/
 │   │   └── llm.py                # 基于 LiteLLM 的统一接口，支持 100+ 提供商
 │   ├── utils/ ✅       # 工具函数和帮助类 (已完成)
 │   │   ├── logger.py             # 分级日志系统
-│   │   ├── retry.py              # 指数退避重试
-│   │   └── xml_parser.py         # 鲁棒XML解析
+│   │   └── retry.py              # 指数退避重试
 │   └── api/ ✅         # API 接口层 (已完成)
 │       ├── main.py               # FastAPI 应用入口
 │       ├── config.py             # API 配置（CORS、SSE、分页等）

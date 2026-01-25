@@ -1,6 +1,6 @@
 """
 工具系统模块
-提供工具基类、注册、权限控制和提示词生成功能
+提供工具基类、注册、XML解析和提示词生成功能
 """
 
 # 基础类和枚举
@@ -9,7 +9,6 @@ from .base import (
     ToolResult,
     ToolParameter,
     BaseTool,
-    SyncBaseTool
 )
 
 # 工具注册和管理
@@ -18,21 +17,17 @@ from .registry import (
     ToolRegistry,
 )
 
-# 权限控制
-from .permissions import (
-    PermissionRequest,
-    PermissionGrant,
-    PermissionManager,
-    check_permission,
-    grant_permission,
-    get_permission_manager
+# XML工具调用解析
+from .xml_parser import (
+    ToolCall,
+    XMLToolCallParser,
+    parse_tool_calls,
 )
 
 # 提示词生成
 from .prompt_generator import (
     ToolPromptGenerator,
-    generate_tool_prompt,
-    format_result
+    format_result,
 )
 
 # 具体工具实现
@@ -44,23 +39,18 @@ __all__ = [
     "ToolResult",
     "ToolParameter",
     "BaseTool",
-    "SyncBaseTool",
 
     # 注册管理
     "AgentToolkit",
     "ToolRegistry",
 
-    # 权限控制
-    "PermissionRequest",
-    "PermissionGrant",
-    "PermissionManager",
-    "check_permission",
-    "grant_permission",
-    "get_permission_manager",
+    # XML解析
+    "ToolCall",
+    "XMLToolCallParser",
+    "parse_tool_calls",
 
     # 提示词生成
     "ToolPromptGenerator",
-    "generate_tool_prompt",
     "format_result",
 
     # 具体工具（从implementations导入）

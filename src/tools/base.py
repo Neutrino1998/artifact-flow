@@ -156,48 +156,27 @@ class BaseTool(ABC):
                 error=f"Tool execution failed: {str(e)}"
             )
     
-    def get_info(self) -> Dict[str, Any]:
-        """
-        获取工具信息（用于注册和文档）
-        
-        Returns:
-            工具信息字典
-        """
-        return {
-            "name": self.name,
-            "description": self.description,
-            "permission": self.permission.value,
-            "parameters": [p.to_dict() for p in self.get_parameters()]
-        }
-    
     def to_xml_example(self) -> str:
         """
-        生成XML调用示例
-        
+        生成XML调用示例（使用CDATA包装所有值）
+
         Returns:
             XML格式的调用示例
         """
-        import re
-        
         params = self.get_parameters()
         param_lines = []
-        
+
         for param in params:
             param_type = param.type.lower()
-            
+
             # 处理数组类型 - 使用嵌套XML结构
             if param_type.startswith("array"):
-                # 用正则提取[]中的元素类型
-                match = re.search(r'array\[(\w+)\]', param_type)
-                element_type = match.group(1) if match else "string"
-                
-                # 生成嵌套的XML示例
                 param_lines.append(f"    <{param.name}>")
-                param_lines.append(f"      <item>value1</item>")
-                param_lines.append(f"      <item>value2</item>")
+                param_lines.append(f"      <item><![CDATA[value1]]></item>")
+                param_lines.append(f"      <item><![CDATA[value2]]></item>")
                 param_lines.append(f"    </{param.name}>")
-            
-            # 处理普通类型
+
+            # 处理普通类型 - 统一使用CDATA
             else:
                 if param.default is not None:
                     value = str(param.default)
@@ -209,94 +188,12 @@ class BaseTool(ABC):
                     value = "true"
                 else:
                     value = "..."
-                
-                param_lines.append(f"    <{param.name}>{value}</{param.name}>")
-        
+
+                param_lines.append(f"    <{param.name}><![CDATA[{value}]]></{param.name}>")
+
         return f"""<tool_call>
   <name>{self.name}</name>
   <params>
 {chr(10).join(param_lines)}
   </params>
 </tool_call>"""
-
-
-class SyncBaseTool(BaseTool):
-    """
-    同步工具基类（对于不需要异步的工具）
-    """
-    
-    @abstractmethod
-    def execute_sync(self, **params) -> ToolResult:
-        """同步执行方法（子类实现）"""
-        pass
-    
-    async def execute(self, **params) -> ToolResult:
-        """异步包装器"""
-        return self.execute_sync(**params)
-    
-
-if __name__ == "__main__":
-    import asyncio
-    
-    # 简单测试用例
-    async def test():
-        print("\n🧪 工具系统基础测试")
-        print("="*50)
-        
-        # 1. 创建简单工具
-        class TestTool(SyncBaseTool):
-            def __init__(self):
-                super().__init__(
-                    name="test_tool",
-                    description="A test tool",
-                    permission=ToolPermission.PUBLIC
-                )
-            
-            def get_parameters(self):
-                return [
-                    ToolParameter("input", "string", "Test input", True),
-                    ToolParameter("count", "integer", "Repeat count", False, 1)
-                ]
-            
-            def execute_sync(self, **params):
-                input_str = params.get("input", "")
-                count = params.get("count", 1)
-                result = input_str * count
-                return ToolResult(
-                    success=True,
-                    data={"output": result, "length": len(result)}
-                )
-        
-        # 2. 测试工具基本功能
-        tool = TestTool()
-        
-        print(f"\n✅ 创建工具: {tool.name}")
-        print(f"   描述: {tool.description}")
-        print(f"   权限: {tool.permission.value}")
-        
-        # 3. 测试工具执行
-        print("\n🚀 测试工具执行...")
-        
-        # 正常执行
-        result = await tool(input="Hello ", count=3)
-        print(f"   正常执行: {'✅' if result.success else '❌'}")
-        print(f"   结果: {result.data}")
-        
-        # 缺少参数执行
-        result = await tool(count=2)
-        print(f"   缺少参数: {'✅' if result.success else '❌'}")
-        print(f"   错误: {result.error}")
-        
-        # 4. 测试XML示例生成
-        print("\n📄 XML调用示例:")
-        print(tool.to_xml_example())
-        
-        # 5. 测试工具信息
-        print("\n📊 工具信息:")
-        info = tool.get_info()
-        print(f"   名称: {info['name']}")
-        print(f"   权限: {info['permission']}")
-        print(f"   参数数量: {len(info['parameters'])}")
-    
-    # 运行测试
-    asyncio.run(test())

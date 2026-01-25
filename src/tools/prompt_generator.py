@@ -33,9 +33,16 @@ You have access to the following tools. To use a tool, format your request in XM
 <tool_call>
   <name>tool_name</name>
   <params>
-    <param_name>param_value</param_name>
+    <param_name><![CDATA[param_value]]></param_name>
+    <list_param>
+      <item><![CDATA[value1]]></item>
+      <item><![CDATA[value2]]></item>
+    </list_param>
   </params>
 </tool_call>
+
+IMPORTANT: Always wrap ALL parameter values in <![CDATA[...]]> to ensure proper XML parsing.
+This prevents issues with special characters like <, >, &, quotes, or nested code/JSON.
 
 Available tools:
 """
@@ -49,7 +56,7 @@ Available tools:
 Important guidelines:
 1. Always use the exact tool name as specified
 2. Include all required parameters
-3. Use proper XML formatting with closed tags
+3. Always wrap ALL parameter values in <![CDATA[...]]>
 4. You can only make a SINGLE tool call every turn
 </tool_instructions>"""
         
@@ -214,11 +221,6 @@ After receiving tool results, analyze them and continue with your task."""
         return "\n".join(indent_str + line for line in text.split("\n"))
 
 # 便捷函数
-def generate_tool_prompt(tools: List[BaseTool]) -> str:
-    """生成工具提示词的便捷函数"""
-    return ToolPromptGenerator.generate_tool_instruction(tools)
-
-
 def format_result(name: str, result: Dict[str, Any]) -> str:
     """格式化工具结果的便捷函数"""
     return ToolPromptGenerator.format_tool_result(name, result)
