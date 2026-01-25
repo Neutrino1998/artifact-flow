@@ -7,7 +7,7 @@
 FROM python:3.11-slim
 
 LABEL maintainer="1998neutrino@gmail.com"
-LABEL description="ArtifactFlow - Multi-Agent Research System"
+LABEL description="ArtifactFlow - Multi-Agent System"
 
 # 设置工作目录
 WORKDIR /app
@@ -43,7 +43,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# 复制依赖文件
+# 复制依赖文件（单独复制以利用 Docker 缓存）
+# 只要 requirements.txt 不变，下面的依赖安装层就会使用缓存
 COPY requirements.txt .
 
 # 安装 Python 依赖
@@ -57,7 +58,8 @@ RUN crawl4ai-setup
 COPY . .
 
 # 安装项目（editable mode）
-RUN pip install -e .
+# --no-deps: 依赖已在上面安装，跳过依赖检查
+RUN pip install -e . --no-deps
 
 # 创建数据目录
 RUN mkdir -p /app/data
