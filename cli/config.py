@@ -7,8 +7,8 @@ from pathlib import Path
 DEFAULT_BASE_URL = "http://localhost:8000"
 DEFAULT_TIMEOUT = 120  # SSE 需要较长时间
 
-# 状态文件（保存当前会话）
-STATE_FILE = Path.home() / ".artifactflow_cli_state"
+# 状态文件（保存当前会话，存储在项目目录下）
+STATE_FILE = Path(__file__).parent.parent / ".cli_state"
 
 
 @dataclass

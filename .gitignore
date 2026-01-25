@@ -21,6 +21,9 @@ temp/
 cache/
 checkpoints/
 
+# CLI 状态文件
+.cli_state
+
 # ==========================
 # 2. Python 开发环境 (Python Standard)
 # ==========================
