@@ -35,44 +35,63 @@ LangGraph 全局状态，贯穿整个执行流程：
 
 ```python
 class AgentState(TypedDict):
-    # 任务相关
-    current_task: str              # 当前任务描述
-    session_id: str                # Artifact 会话 ID
-    thread_id: str                 # LangGraph 线程 ID
-    conversation_history: str      # 格式化的对话历史
+    # 基础信息
+    current_task: str                           # 当前任务描述
+    session_id: str                             # Artifact 会话 ID
+    thread_id: str                              # LangGraph 线程 ID
+
+    # 对话上下文
+    conversation_history: Optional[List[Dict]]  # 格式化的对话历史
 
     # 执行控制
-    phase: ExecutionPhase          # 当前执行阶段
-    current_agent: str             # 当前 Agent 名称
-    tool_round_count: int          # 工具调用轮数计数
+    phase: ExecutionPhase                       # 当前执行阶段
+    current_agent: str                          # 当前 Agent 名称
 
     # 路由信息
-    subagent_pending: dict | None  # 待执行的 subagent 信息
-    pending_tool_call: dict | None # 待执行的工具调用
+    subagent_pending: Optional[Dict]            # {"target", "instruction", "subagent_result"}
+    pending_tool_call: Optional[Dict]           # {"tool_name", "params", "from_agent", "tool_result"}
 
     # 记忆系统
-    agent_memories: dict[str, str] # 各 Agent 的记忆
+    agent_memories: Dict[str, NodeMemory]       # 各 Agent 的记忆（含 tool_round_count）
+
+    # Context 管理
+    compression_level: str                      # 压缩级别
+
+    # 用户交互层
+    user_message_id: str                        # 当前用户消息 ID
+    graph_response: Optional[str]               # Graph 最终响应
 
     # 可观测性
-    execution_metrics: ExecutionMetrics
+    execution_metrics: ExecutionMetrics         # 执行指标
+```
+
+其中 `NodeMemory` 结构：
+
+```python
+class NodeMemory(TypedDict):
+    tool_interactions: List[Dict]      # assistant-tool 交互历史
+    last_response: Optional[Dict]      # 最后的 AgentResponse
+    metadata: Dict[str, Any]           # 元数据
+    tool_round_count: int              # 工具调用轮数计数
 ```
 
 ### 状态转换函数
 
-`merge_agent_response_to_state()` 是状态更新的统一入口：
+`merge_agent_response_to_state()` 是状态更新的统一入口（原地修改 state）：
 
 ```python
 def merge_agent_response_to_state(
     state: AgentState,
+    agent_name: str,
     response: AgentResponse,
-    agent_name: str
-) -> AgentState:
+    is_resuming: bool = False
+) -> None:
     """
-    处理 Agent 响应，更新状态
-    - 解析 routing 信息
-    - 更新执行阶段
-    - 保存 Agent 记忆
-    - 记录执行指标
+    处理 Agent 响应，更新状态（原地修改）
+    - 更新 current_agent
+    - 清理恢复状态（如果 is_resuming）
+    - 更新 agent_memories（tool_interactions, last_response, tool_round_count）
+    - 解析 routing 信息，设置 phase 和路由数据
     """
 ```
 
@@ -81,12 +100,13 @@ def merge_agent_response_to_state(
 ```mermaid
 flowchart TD
     A[Agent 返回 Response] --> B{检查 routing.type}
-    B -->|tool| C[phase = TOOL_EXECUTING]
+    B -->|tool_call| C[phase = TOOL_EXECUTING]
     B -->|subagent| D[phase = SUBAGENT_EXECUTING]
-    B -->|complete| E[phase = COMPLETED]
-    B -->|continue| F[phase 不变，继续当前 Agent]
-    C --> G[设置 pending_tool_call]
-    D --> H[设置 subagent_pending]
+    B -->|无 routing| E{是 Lead Agent?}
+    E -->|是| F[phase = COMPLETED]
+    E -->|否| G[phase = LEAD_EXECUTING]
+    C --> H[设置 pending_tool_call]
+    D --> I[设置 subagent_pending]
 ```
 
 ## 事件系统 (events.py)
@@ -117,36 +137,57 @@ class StreamEventType(Enum):
 
 ### ExecutionMetrics
 
-可观测性指标，记录执行过程：
+可观测性指标，记录执行过程（使用 TypedDict）：
 
 ```python
-@dataclass
-class ExecutionMetrics:
-    agent_executions: list[AgentExecutionRecord]  # Agent 执行记录
-    tool_calls: list[ToolCallRecord]              # 工具调用记录
-    started_at: datetime | None
-    completed_at: datetime | None
-    total_duration_ms: int | None
+class ExecutionMetrics(TypedDict):
+    started_at: str                               # ISO timestamp
+    completed_at: Optional[str]                   # ISO timestamp
+    total_duration_ms: Optional[int]
+    agent_executions: List[AgentExecutionRecord]  # append-only
+    tool_calls: List[ToolCallRecord]              # append-only
+
+class AgentExecutionRecord(TypedDict):
+    agent_name: str
+    model: str
+    token_usage: TokenUsage
+    llm_duration_ms: int
+    started_at: str
+    completed_at: str
+
+class ToolCallRecord(TypedDict):
+    tool_name: str
+    success: bool
+    duration_ms: int
+    called_at: str
+    completed_at: str
+    agent: str  # 调用方 agent
 ```
 
 使用示例：
 
 ```python
 # 记录 Agent 执行
-append_agent_execution(state, AgentExecutionRecord(
-    agent="lead",
-    started_at=start_time,
-    completed_at=end_time,
-    token_usage={"input": 1000, "output": 500}
-))
+append_agent_execution(
+    metrics=state["execution_metrics"],
+    agent_name="lead_agent",
+    model="qwen-plus",
+    token_usage={"input_tokens": 1000, "output_tokens": 500, "total_tokens": 1500},
+    started_at=start_time.isoformat(),
+    completed_at=end_time.isoformat(),
+    llm_duration_ms=1200
+)
 
 # 记录工具调用
-append_tool_call(state, ToolCallRecord(
-    tool="web_search",
-    params={"query": "..."},
+append_tool_call(
+    metrics=state["execution_metrics"],
+    tool_name="web_search",
     success=True,
-    duration_ms=1500
-))
+    duration_ms=1500,
+    called_at=start_time.isoformat(),
+    completed_at=end_time.isoformat(),
+    agent="search_agent"
+)
 ```
 
 ## 工作流引擎 (graph.py)
@@ -158,14 +199,18 @@ append_tool_call(state, ToolCallRecord(
 ```python
 class ExtendableGraph:
     def __init__(self):
-        self.builder = StateGraph(AgentState)
-        self.agents: dict[str, BaseAgent] = {}
-        self.tool_registry: ToolRegistry = None
+        self.workflow = StateGraph(AgentState)
+        self.agents: Dict[str, BaseAgent] = {}
 
     def register_agent(self, agent: BaseAgent):
         """注册 Agent 并创建对应节点"""
 
-    def compile(self, checkpointer) -> CompiledGraph:
+    async def compile(
+        self,
+        checkpointer: Optional[Any] = None,
+        interrupt_before: Optional[list] = None,
+        db_path: str = "data/langgraph.db"
+    ) -> CompiledGraph:
         """编译 Graph，注入 Checkpointer"""
 ```
 
@@ -174,65 +219,97 @@ class ExtendableGraph:
 **Agent 节点**：执行单轮 LLM 调用
 
 ```python
-async def _create_agent_node(self, agent: BaseAgent):
-    async def node(state: AgentState, writer: StreamWriter):
-        # 准备上下文
-        context = ContextManager.prepare_agent_context(state, agent.name)
+def _create_agent_node(self, agent_name: str) -> Callable:
+    async def agent_node(state: AgentState, writer: StreamWriter) -> AgentState:
+        agent = self.agents[agent_name]
+
+        # 构建 messages
+        messages = ContextManager.build_agent_messages(
+            agent=agent,
+            state=state,
+            instruction=instruction,
+            tool_interactions=tool_interactions,
+            pending_tool_result=pending_tool_result
+        )
 
         # 流式执行 Agent
-        async for event in agent.stream(context):
-            writer(event)
+        async for event in agent.stream(messages, is_resuming):
+            writer({
+                "type": event.type.value,
+                "agent": event.agent,
+                "timestamp": event.timestamp.isoformat(),
+                "data": self._serialize_event_data(event.data)
+            })
 
-        # 更新状态
-        return merge_agent_response_to_state(state, response, agent.name)
+        # 更新状态（原地修改）
+        merge_agent_response_to_state(state, agent_name, final_response, is_resuming)
+        return state
 
-    return node
+    return agent_node
 ```
 
 **工具执行节点**：统一处理工具调用
 
 ```python
-async def tool_execution_node(state: AgentState, writer: StreamWriter):
-    tool_call = state["pending_tool_call"]
-    tool = self.tool_registry.get_tool(tool_call["name"])
+async def tool_execution_node(state: AgentState, writer: StreamWriter) -> AgentState:
+    pending = state.get("pending_tool_call")
+    from_agent = pending["from_agent"]
+    tool_name = pending["tool_name"]
+    params = pending["params"]
+
+    # 获取工具（通过 agent 的 toolkit）
+    agent = self.agents.get(from_agent)
+    tool = agent.toolkit.get_tool(tool_name)
 
     # 权限检查
     if tool.permission in [ToolPermission.CONFIRM, ToolPermission.RESTRICTED]:
-        writer(StreamEvent(type=PERMISSION_REQUEST, ...))
-        result = interrupt({"tool": tool_call["name"], ...})
-        if not result:
-            return state  # 用户拒绝
+        writer({...})  # PERMISSION_REQUEST
+        is_approved = interrupt({...})
+        if not is_approved:
+            pending["tool_result"] = ToolResult(success=False, error="Permission denied")
+            state["phase"] = self._get_return_phase(from_agent)
+            return state
 
     # 执行工具
-    writer(StreamEvent(type=TOOL_START, ...))
-    result = await tool.execute(**tool_call["params"])
-    writer(StreamEvent(type=TOOL_COMPLETE, ...))
+    writer({...})  # TOOL_START
+    tool_result = await agent.toolkit.execute_tool(tool_name, params)
+    writer({...})  # TOOL_COMPLETE
 
-    # 返回原 Agent
-    return {**state, "pending_tool_result": result, "phase": ..., "pending_tool_call": None}
+    # 保存结果并返回原 Agent
+    pending["tool_result"] = tool_result
+    state["phase"] = self._get_return_phase(from_agent)
+    return state
 ```
 
 ### 路由规则
 
 ```python
-def _add_routing_rules(self):
+def _add_routing_rules(self, agent_name: str):
+    def route_func(state: AgentState) -> str:
+        phase = state["phase"]
+        if phase == ExecutionPhase.TOOL_EXECUTING:
+            return "tool_execution"
+        elif phase == ExecutionPhase.SUBAGENT_EXECUTING:
+            return state["subagent_pending"]["target"]
+        elif phase == ExecutionPhase.LEAD_EXECUTING:
+            if state.get("current_agent") != "lead_agent":
+                return "lead_agent"
+            return END
+        elif phase == ExecutionPhase.COMPLETED:
+            return END
+        return END
+
     # Agent 节点后的路由
-    self.builder.add_conditional_edges(
-        "lead",
-        self._route_after_agent,
+    self.workflow.add_conditional_edges(
+        agent_name,
+        route_func,
         {
             "tool_execution": "tool_execution",
-            "search": "search",
-            "crawl": "crawl",
+            "lead_agent": "lead_agent",
+            "search_agent": "search_agent",
+            "crawl_agent": "crawl_agent",
             END: END
         }
-    )
-
-    # 工具执行后返回原 Agent
-    self.builder.add_conditional_edges(
-        "tool_execution",
-        lambda s: s["current_agent"],
-        {"lead": "lead", "search": "search", "crawl": "crawl"}
     )
 ```
 
@@ -242,20 +319,20 @@ def _add_routing_rules(self):
 
 ```mermaid
 stateDiagram-v2
-    [*] --> lead: START
+    [*] --> lead_agent: START
 
-    lead --> tool_execution: 工具调用
-    lead --> search: 调用 SubAgent
-    lead --> [*]: COMPLETED
+    lead_agent --> tool_execution: 工具调用
+    lead_agent --> search_agent: 调用 SubAgent
+    lead_agent --> [*]: COMPLETED
 
-    search --> tool_execution: 工具调用
-    search --> lead: 返回结果
+    search_agent --> tool_execution: 工具调用
+    search_agent --> lead_agent: 返回结果
 
-    tool_execution --> lead: 返回原 Agent
-    tool_execution --> search: 返回原 Agent
+    tool_execution --> lead_agent: 返回原 Agent
+    tool_execution --> search_agent: 返回原 Agent
 ```
 
-> 其他 SubAgent（如 Crawl）的流程与 Search 相同。
+> 其他 SubAgent（如 crawl_agent）的流程与 search_agent 相同。
 
 ## 执行控制器 (controller.py)
 
@@ -267,81 +344,92 @@ stateDiagram-v2
 class ExecutionController:
     def __init__(
         self,
-        graph: CompiledGraph,
-        conversation_manager: ConversationManager,
-        artifact_manager: ArtifactManager,
-        stream_manager: StreamManager
+        compiled_graph,
+        artifact_manager: Optional[ArtifactManager] = None,
+        conversation_manager: Optional[ConversationManager] = None
     ):
-        ...
+        self.graph = compiled_graph
+        self.conversation_manager = conversation_manager or ConversationManager()
+        self.artifact_manager = artifact_manager or ArtifactManager()
 
     async def stream_execute(
         self,
-        content: str,
-        conversation_id: str | None,
-        parent_message_id: str | None
-    ) -> AsyncGenerator[StreamEvent, None]:
-        """流式执行，yield 事件"""
+        content: Optional[str] = None,
+        thread_id: Optional[str] = None,
+        conversation_id: Optional[str] = None,
+        parent_message_id: Optional[str] = None,
+        message_id: Optional[str] = None,
+        resume_data: Optional[Dict] = None
+    ) -> AsyncGenerator[Dict[str, Any], None]:
+        """流式执行，yield 事件字典"""
 
-    async def execute(self, ...) -> ExecutionResult:
+    async def execute(self, ...) -> Dict[str, Any]:
         """批量执行，等待完成"""
 ```
 
 ### 执行流程
 
 ```python
-async def stream_execute(self, content, conversation_id, parent_message_id):
+async def _stream_new_message(self, content, conversation_id, parent_message_id):
     # 1. 确保 conversation 存在
-    conversation_id = await self._ensure_conversation(conversation_id)
+    if not conversation_id:
+        conversation_id = await self.conversation_manager.start_conversation_async()
+    else:
+        await self.conversation_manager.ensure_conversation_exists(conversation_id)
 
     # 2. 自动设置 parent_message_id（如果未指定）
     if not parent_message_id:
-        parent_message_id = await self._get_latest_message_id(conversation_id)
+        parent_message_id = await self.conversation_manager.get_active_branch(conversation_id)
 
     # 3. 格式化对话历史
-    history = await self.conversation_manager.format_conversation_history_async(
-        conversation_id, parent_message_id
+    conversation_history = await self.conversation_manager.format_conversation_history_async(
+        conv_id=conversation_id,
+        to_message_id=parent_message_id
     )
 
     # 4. 生成 ID
-    message_id = str(uuid.uuid4())
-    thread_id = str(uuid.uuid4())
-    session_id = conversation_id  # Artifact session 与 conversation 对应
+    message_id = f"msg-{uuid4().hex}"
+    thread_id = f"thd-{uuid4().hex}"
+    session_id = self._get_or_create_session(conversation_id)
 
     # 5. 创建初始状态
     initial_state = create_initial_state(
-        current_task=content,
+        task=content,
         session_id=session_id,
         thread_id=thread_id,
-        conversation_history=history
+        message_id=message_id,
+        conversation_history=conversation_history
     )
 
     # 6. 添加消息到 conversation
     await self.conversation_manager.add_message_async(
-        conversation_id, message_id, content, parent_message_id, thread_id
+        conv_id=conversation_id,
+        message_id=message_id,
+        content=content,
+        thread_id=thread_id,
+        parent_id=parent_message_id
     )
 
     # 7. 发送元数据事件
-    yield StreamEvent(type=METADATA, data={
-        "conversation_id": conversation_id,
-        "thread_id": thread_id,
-        "message_id": message_id
-    })
+    yield {
+        "type": StreamEventType.METADATA.value,
+        "timestamp": datetime.now().isoformat(),
+        "data": {"conversation_id": conversation_id, "message_id": message_id, "thread_id": thread_id}
+    }
 
     # 8. 执行 Graph
-    async for event in self.graph.astream(
-        initial_state,
-        config={"configurable": {"thread_id": thread_id}},
-        stream_mode="custom"
-    ):
-        yield event
+    async for chunk in self.graph.astream(initial_state, config, stream_mode="custom"):
+        yield chunk
 
     # 9. 保存响应
     await self.conversation_manager.update_response_async(
-        conversation_id, message_id, final_response
+        conv_id=conversation_id,
+        message_id=message_id,
+        response=response
     )
 
     # 10. 发送完成事件
-    yield StreamEvent(type=COMPLETE, data={...})
+    yield {"type": StreamEventType.COMPLETE.value, "data": {...}}
 ```
 
 ## 上下文管理 (context_manager.py)
@@ -352,39 +440,57 @@ async def stream_execute(self, content, conversation_id, parent_message_id):
 
 ```python
 class ContextManager:
-    @staticmethod
-    def prepare_agent_context(state: AgentState, agent_name: str) -> AgentContext:
+    @classmethod
+    def prepare_agent_context(cls, state: Dict[str, Any]) -> Dict[str, Any]:
         """
-        构建 Agent 执行所需的上下文：
-        - 对话历史
-        - 当前任务
-        - Agent 记忆
-        - 工具交互历史
-        - 待处理的工具结果
+        构建路由上下文（用于系统提示注入）：
+        - session_id, thread_id, user_message_id
+        - artifacts_inventory（Artifact 列表）
         """
 
-    @staticmethod
-    def build_agent_messages(context: AgentContext) -> list[dict]:
+    @classmethod
+    def build_agent_messages(
+        cls,
+        agent: Any,  # BaseAgent 实例
+        state: Dict[str, Any],
+        instruction: str,
+        tool_interactions: Optional[List[Dict]] = None,
+        pending_tool_result: Optional[Tuple[str, Any]] = None
+    ) -> List[Dict]:
         """
-        构建 LLM 调用的 messages 列表：
-        - system: Agent 系统提示
-        - user: 对话历史 + 任务 + 记忆
-        - assistant/tool: 工具交互历史（如果有）
+        统一构建 Agent messages，拼接顺序：
+        system → conversation_history → instruction → tool_interactions → tool_result
         """
 ```
 
 ### 消息压缩
 
-当消息历史过长时自动压缩：
+基于字符数限制的消息压缩：
 
 ```python
-@staticmethod
-def should_compress(messages: list, threshold: int = 50000) -> bool:
+COMPRESSION_LEVELS = {
+    'full': 160000,
+    'normal': 80000,
+    'compact': 40000,
+    'minimal': 20000
+}
+
+@classmethod
+def should_compress(cls, messages: List[Dict], level: str = "normal") -> bool:
     """判断是否需要压缩"""
 
-@staticmethod
-async def compress_messages(messages: list, llm) -> list:
-    """使用 LLM 压缩消息历史"""
+@classmethod
+def compress_messages(
+    cls,
+    messages: List[Dict],
+    level: str = "normal",
+    preserve_recent: int = 5
+) -> List[Dict]:
+    """
+    压缩消息历史（同步方法，基于字符数截断）
+    - 保留最近 N 条完整消息
+    - 超出部分添加截断标记
+    """
 ```
 
 ## 对话管理 (conversation_manager.py)
@@ -395,28 +501,38 @@ async def compress_messages(messages: list, llm) -> list:
 
 ```python
 class ConversationManager:
-    def __init__(self, repo: ConversationRepository):
-        self._cache: dict[str, ConversationCache] = {}
+    def __init__(self, repository: Optional[ConversationRepository] = None):
+        self.repository = repository
+        self._cache: Dict[str, ConversationCache] = {}
 
-    async def start_conversation_async(self, conversation_id: str):
-        """创建新对话"""
+    async def start_conversation_async(
+        self,
+        conversation_id: Optional[str] = None
+    ) -> str:
+        """创建新对话，返回对话 ID"""
 
     async def add_message_async(
         self,
-        conversation_id: str,
+        conv_id: str,
         message_id: str,
         content: str,
-        parent_id: str | None,
-        thread_id: str
-    ):
+        thread_id: str,
+        parent_id: Optional[str] = None
+    ) -> Dict:
         """添加消息到对话树"""
 
     async def format_conversation_history_async(
         self,
-        conversation_id: str,
-        leaf_message_id: str
-    ) -> str:
-        """格式化从 root 到指定消息的对话历史"""
+        conv_id: str,
+        to_message_id: Optional[str] = None
+    ) -> List[Dict]:
+        """
+        格式化从 root 到指定消息的对话历史
+        返回: [{"role": "user", "content": ...}, {"role": "assistant", ...}, ...]
+        """
+
+    async def get_active_branch(self, conv_id: str) -> Optional[str]:
+        """获取对话的活跃分支（当前最新消息 ID）"""
 ```
 
 ### 树状消息结构

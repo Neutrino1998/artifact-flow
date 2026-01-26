@@ -94,25 +94,20 @@ sequenceDiagram
 
 @dataclass
 class StreamContext:
-    queue: asyncio.Queue[dict]
-    created_at: datetime
-    status: str  # pending | streaming | closed
-    ttl_task: asyncio.Task | None
+    queue: asyncio.Queue = field(default_factory=asyncio.Queue)
+    created_at: datetime = field(default_factory=datetime.now)
+    status: Literal["pending", "streaming", "closed"] = "pending"
+    ttl_task: Optional[asyncio.Task] = None
 
 class StreamManager:
     def __init__(self, ttl_seconds: int = 30):
-        self._streams: dict[str, StreamContext] = {}
-        self._ttl_seconds = ttl_seconds
+        self.streams: Dict[str, StreamContext] = {}
+        self.ttl_seconds = ttl_seconds
 
     async def create_stream(self, thread_id: str) -> StreamContext:
         """创建新的事件流"""
-        context = StreamContext(
-            queue=asyncio.Queue(),
-            created_at=datetime.utcnow(),
-            status="pending",
-            ttl_task=None
-        )
-        self._streams[thread_id] = context
+        context = StreamContext()
+        self.streams[thread_id] = context
 
         # 启动 TTL 计时器
         context.ttl_task = asyncio.create_task(
@@ -121,45 +116,49 @@ class StreamManager:
 
         return context
 
-    async def push_event(self, thread_id: str, event: dict):
+    async def push_event(self, thread_id: str, event: Dict[str, Any]) -> bool:
         """推送事件到队列"""
-        if thread_id in self._streams:
-            await self._streams[thread_id].queue.put(event)
+        context = self.streams.get(thread_id)
+        if not context or context.status == "closed":
+            return False
+        await context.queue.put(event)
+        return True
 
-    async def consume_stream(
+    async def consume_events(
         self,
         thread_id: str
-    ) -> AsyncGenerator[dict, None]:
+    ) -> AsyncGenerator[Dict[str, Any], None]:
         """消费事件流"""
-        context = self._streams.get(thread_id)
+        context = self.streams.get(thread_id)
         if not context:
-            return
+            raise StreamNotFoundError(thread_id)
 
         # 取消 TTL 计时器
         if context.ttl_task:
             context.ttl_task.cancel()
+            context.ttl_task = None
 
         context.status = "streaming"
 
-        while True:
-            event = await context.queue.get()
-            yield event
+        try:
+            while True:
+                event = await context.queue.get()
+                yield event
 
-            # 检查是否结束
-            if event.get("type") in ["complete", "error"]:
-                break
-
-        context.status = "closed"
-        del self._streams[thread_id]
+                # 检查是否结束
+                if event.get("type") in ("complete", "error"):
+                    break
+        finally:
+            await self.close_stream(thread_id)
 
     async def _ttl_cleanup(self, thread_id: str):
         """TTL 超时清理"""
-        await asyncio.sleep(self._ttl_seconds)
+        await asyncio.sleep(self.ttl_seconds)
 
-        context = self._streams.get(thread_id)
+        context = self.streams.get(thread_id)
         if context and context.status == "pending":
             # 前端未连接，清理队列
-            del self._streams[thread_id]
+            await self._close_stream_internal(thread_id)
 ```
 
 ### 时序图

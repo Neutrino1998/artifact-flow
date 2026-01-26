@@ -42,32 +42,38 @@ erDiagram
         string parent_id
         text content
         string thread_id
-        datetime timestamp
+        datetime created_at
         text graph_response
-        json metadata
+        json metadata_
     }
 
     ArtifactSession {
-        string id PK
-        string conversation_id FK
-    }
-
-    Artifact {
-        string id PK
-        string session_id FK
-        string type
-        string title
-        text content
-        int version
+        string id PK_FK
         datetime created_at
         datetime updated_at
     }
 
-    ArtifactVersion {
+    Artifact {
         string id PK
+        string session_id PK_FK
+        string content_type
+        string title
+        text content
+        int current_version
+        int lock_version
+        datetime created_at
+        datetime updated_at
+        json metadata_
+    }
+
+    ArtifactVersion {
+        int id PK
         string artifact_id FK
+        string session_id FK
         int version
         text content
+        string update_type
+        json changes
         datetime created_at
     }
 ```
@@ -101,16 +107,18 @@ class Conversation(Base):
 class Message(Base):
     __tablename__ = "messages"
 
-    id = Column(String(64), primary_key=True)
-    conversation_id = Column(String(64), ForeignKey("conversations.id"))
-    parent_id = Column(String(64), nullable=True)  # None = 根消息
-    content = Column(Text)                          # 用户消息
-    thread_id = Column(String(64))                  # LangGraph 线程 ID
-    timestamp = Column(DateTime, default=datetime.utcnow)
-    graph_response = Column(Text)                   # Agent 回复
-    metadata = Column(JSON)
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    conversation_id: Mapped[str] = mapped_column(
+        String(64), ForeignKey("conversations.id", ondelete="CASCADE")
+    )
+    parent_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)  # None = 根消息
+    content: Mapped[str] = mapped_column(Text)                      # 用户消息
+    thread_id: Mapped[str] = mapped_column(String(64))              # LangGraph 线程 ID
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+    graph_response: Mapped[Optional[str]] = mapped_column(Text)     # Agent 回复
+    metadata_: Mapped[Optional[Dict]] = mapped_column("metadata", JSON)  # 扩展元数据
 
-    conversation = relationship("Conversation", back_populates="messages")
+    conversation: Mapped["Conversation"] = relationship("Conversation", back_populates="messages")
 ```
 
 **树状结构说明**：
@@ -127,22 +135,33 @@ msg_1 (parent_id=None)     ← 根消息
 
 ### Artifact
 
-工件实体（带乐观锁）：
+工件实体（复合主键 + 乐观锁）：
 
 ```python
 class Artifact(Base):
     __tablename__ = "artifacts"
 
-    id = Column(String(128), primary_key=True)
-    session_id = Column(String(64), ForeignKey("artifact_sessions.id"))
-    type = Column(String(32))       # task_plan, result, etc.
-    title = Column(String(256))
-    content = Column(Text)
-    version = Column(Integer, default=1)  # 乐观锁版本号
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, onupdate=datetime.utcnow)
+    # 复合主键
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    session_id: Mapped[str] = mapped_column(
+        String(64), ForeignKey("artifact_sessions.id", ondelete="CASCADE"), primary_key=True
+    )
 
-    versions = relationship("ArtifactVersion", back_populates="artifact")
+    content_type: Mapped[str] = mapped_column(String(32))  # markdown/python/etc
+    title: Mapped[str] = mapped_column(String(256))
+    content: Mapped[str] = mapped_column(Text, default="")
+
+    # 版本控制
+    current_version: Mapped[int] = mapped_column(Integer, default=1)
+    lock_version: Mapped[int] = mapped_column(Integer, default=1)  # 乐观锁
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, onupdate=datetime.now)
+    metadata_: Mapped[Optional[Dict]] = mapped_column("metadata", JSON)
+
+    versions: Mapped[List["ArtifactVersion"]] = relationship(
+        "ArtifactVersion", back_populates="artifact", cascade="all, delete-orphan"
+    )
 ```
 
 ### ArtifactVersion
@@ -153,13 +172,28 @@ class Artifact(Base):
 class ArtifactVersion(Base):
     __tablename__ = "artifact_versions"
 
-    id = Column(String(128), primary_key=True)
-    artifact_id = Column(String(128), ForeignKey("artifacts.id"))
-    version = Column(Integer)
-    content = Column(Text)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
 
-    artifact = relationship("Artifact", back_populates="versions")
+    # 复合外键
+    artifact_id: Mapped[str] = mapped_column(String(64))
+    session_id: Mapped[str] = mapped_column(String(64))
+
+    version: Mapped[int] = mapped_column(Integer)
+    content: Mapped[str] = mapped_column(Text)
+    update_type: Mapped[str] = mapped_column(String(32))  # create/update/update_fuzzy/rewrite
+    changes: Mapped[Optional[List]] = mapped_column(JSON)  # [(old, new), ...]
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+
+    artifact: Mapped["Artifact"] = relationship("Artifact", back_populates="versions")
+
+    __table_args__ = (
+        UniqueConstraint("artifact_id", "session_id", "version"),
+        ForeignKeyConstraint(
+            ["artifact_id", "session_id"],
+            ["artifacts.id", "artifacts.session_id"],
+            ondelete="CASCADE"
+        ),
+    )
 ```
 
 ## 数据库管理 (database.py)
@@ -211,34 +245,47 @@ async with db_manager.session() as session:
 通用 CRUD 操作：
 
 ```python
-class BaseRepository(Generic[T]):
+class BaseRepository(ABC, Generic[T]):
     def __init__(self, session: AsyncSession, model_class: Type[T]):
-        self.session = session
-        self.model_class = model_class
+        self._session = session
+        self._model_class = model_class
 
-    async def get_by_id(self, id: str) -> T | None:
-        return await self.session.get(self.model_class, id)
+    async def get_by_id(self, id: Any) -> Optional[T]:
+        return await self._session.get(self._model_class, id)
 
-    async def get_all(self, limit: int = 100, offset: int = 0) -> list[T]:
-        stmt = select(self.model_class).limit(limit).offset(offset)
-        result = await self.session.execute(stmt)
+    async def get_all(self, *, limit: Optional[int] = None, offset: Optional[int] = None) -> List[T]:
+        query = select(self._model_class)
+        if offset: query = query.offset(offset)
+        if limit: query = query.limit(limit)
+        result = await self._session.execute(query)
         return list(result.scalars().all())
 
-    async def create(self, obj: T) -> T:
-        self.session.add(obj)
-        await self.session.flush()
-        return obj
+    async def count(self) -> int:
+        """获取实体总数"""
 
-    async def update(self, obj: T) -> T:
-        await self.session.flush()
-        return obj
+    async def exists(self, id: Any) -> bool:
+        """检查实体是否存在"""
 
-    async def delete(self, id: str) -> bool:
-        obj = await self.get_by_id(id)
-        if obj:
-            await self.session.delete(obj)
-            return True
-        return False
+    async def add(self, entity: T) -> T:
+        """添加新实体"""
+        self._session.add(entity)
+        await self._session.flush()
+        await self._session.refresh(entity)
+        return entity
+
+    async def update(self, entity: T) -> T:
+        """更新实体（需已在 Session 中）"""
+        await self._session.flush()
+        await self._session.refresh(entity)
+        return entity
+
+    async def delete(self, entity: T) -> None:
+        """删除实体"""
+        await self._session.delete(entity)
+        await self._session.flush()
+
+    async def delete_by_id(self, id: Any) -> bool:
+        """根据主键删除"""
 ```
 
 ### ConversationRepository
@@ -250,31 +297,33 @@ class ConversationRepository(BaseRepository[Conversation]):
     def __init__(self, session: AsyncSession):
         super().__init__(session, Conversation)
 
-    async def get_with_messages(self, id: str) -> Conversation | None:
-        """获取对话及其所有消息"""
-        stmt = (
-            select(Conversation)
-            .options(selectinload(Conversation.messages))
-            .where(Conversation.id == id)
-        )
-        result = await self.session.execute(stmt)
-        return result.scalar_one_or_none()
+    async def create_conversation(
+        self, conversation_id: str, title: Optional[str] = None, ...
+    ) -> Conversation:
+        """创建新对话（同时创建关联的 ArtifactSession）"""
 
-    async def add_message(self, conversation_id: str, message: Message) -> Message:
-        """添加消息到对话"""
-        message.conversation_id = conversation_id
-        self.session.add(message)
-        await self.session.flush()
-        return message
+    async def get_conversation(
+        self, conversation_id: str, *, load_messages: bool = False, load_artifacts: bool = False
+    ) -> Optional[Conversation]:
+        """获取对话（可选预加载消息和 Artifacts）"""
 
-    async def get_message_path(
-        self,
-        conversation_id: str,
-        leaf_message_id: str
-    ) -> list[Message]:
-        """获取从根到指定消息的路径"""
-        # 递归查询实现
-        ...
+    async def add_message(
+        self, conversation_id: str, message_id: str, content: str, thread_id: str, ...
+    ) -> Message:
+        """添加消息到对话（自动更新 active_branch）"""
+
+    async def update_graph_response(self, message_id: str, response: str) -> Message:
+        """更新消息的 Graph 响应"""
+
+    async def get_conversation_path(
+        self, conversation_id: str, to_message_id: Optional[str] = None
+    ) -> List[Message]:
+        """获取从根到指定消息的路径（向上追溯）"""
+
+    async def format_conversation_history(
+        self, conversation_id: str, to_message_id: Optional[str] = None
+    ) -> List[Dict[str, str]]:
+        """格式化对话历史为 [{"role": "user", ...}, {"role": "assistant", ...}, ...]"""
 ```
 
 ### ArtifactRepository
@@ -286,51 +335,46 @@ class ArtifactRepository(BaseRepository[Artifact]):
     def __init__(self, session: AsyncSession):
         super().__init__(session, Artifact)
 
-    async def update_with_version_check(
+    async def create_artifact(
+        self, session_id: str, artifact_id: str, content_type: str, title: str, content: str, ...
+    ) -> Artifact:
+        """创建 Artifact（同时创建初始版本）"""
+
+    async def get_artifact(
+        self, session_id: str, artifact_id: str, *, load_versions: bool = False
+    ) -> Optional[Artifact]:
+        """获取 Artifact（复合主键查询）"""
+
+    async def update_artifact_content(
         self,
+        session_id: str,
         artifact_id: str,
         new_content: str,
-        expected_version: int
+        update_type: str,
+        expected_lock_version: int,
+        changes: Optional[List[Tuple[str, str]]] = None
     ) -> Artifact:
         """
-        乐观锁更新
+        乐观锁更新（原子操作）
 
-        如果 expected_version 与数据库中的 version 不匹配，
-        抛出 OptimisticLockError
+        使用 UPDATE ... WHERE lock_version = ? 实现乐观锁。
+        如果 lock_version 不匹配，抛出 VersionConflictError。
         """
-        artifact = await self.get_by_id(artifact_id)
-
-        if artifact.version != expected_version:
-            raise OptimisticLockError(
-                f"Version mismatch: expected {expected_version}, "
-                f"got {artifact.version}"
-            )
-
-        # 保存旧版本
-        version_record = ArtifactVersion(
-            id=f"{artifact_id}_v{artifact.version}",
-            artifact_id=artifact_id,
-            version=artifact.version,
-            content=artifact.content
+        result = await self._session.execute(
+            update(Artifact)
+            .where(and_(
+                Artifact.id == artifact_id,
+                Artifact.session_id == session_id,
+                Artifact.lock_version == expected_lock_version  # 乐观锁检查
+            ))
+            .values(content=new_content, current_version=..., lock_version=...)
+            .returning(...)
         )
-        self.session.add(version_record)
+        # 如果更新失败，检查是不存在还是版本冲突
+        ...
 
-        # 更新 artifact
-        artifact.content = new_content
-        artifact.version += 1
-
-        await self.session.flush()
-        return artifact
-
-    async def get_versions(self, artifact_id: str) -> list[ArtifactVersion]:
-        """获取版本历史"""
-        stmt = (
-            select(ArtifactVersion)
-            .where(ArtifactVersion.artifact_id == artifact_id)
-            .order_by(ArtifactVersion.version.desc())
-        )
-        result = await self.session.execute(stmt)
-        return list(result.scalars().all())
+    async def list_versions(self, session_id: str, artifact_id: str) -> List[Dict[str, Any]]:
+        """列出版本历史（不含完整内容）"""
 ```
 
 ## 乐观锁机制
@@ -355,18 +399,19 @@ sequenceDiagram
     participant Repo
     participant DB
 
-    Agent->>Tool: update_artifact(id, content, version=1)
-    Tool->>Repo: update_with_version_check()
-    Repo->>DB: SELECT version FROM artifacts WHERE id=?
-    DB->>Repo: version=1
+    Agent->>Tool: update_artifact(id, content, lock_version=1)
+    Tool->>Repo: update_artifact_content(expected_lock_version=1)
+    Repo->>DB: UPDATE ... WHERE lock_version=1 RETURNING ...
 
-    alt 版本匹配
-        Repo->>DB: 保存旧版本到 artifact_versions
-        Repo->>DB: UPDATE SET content=?, version=2
-        Repo->>Tool: 成功
+    alt 更新成功（lock_version 匹配）
+        DB->>Repo: new_version, new_lock_version
+        Repo->>DB: INSERT INTO artifact_versions ...
+        Repo->>Tool: 返回更新后的 Artifact
         Tool->>Agent: ToolResult(success=True)
-    else 版本不匹配
-        Repo->>Tool: OptimisticLockError
+    else 更新失败（lock_version 不匹配）
+        DB->>Repo: 0 rows affected
+        Repo->>Repo: 检查是不存在还是版本冲突
+        Repo->>Tool: VersionConflictError
         Tool->>Agent: ToolResult(success=False, error="Version conflict")
     end
 ```

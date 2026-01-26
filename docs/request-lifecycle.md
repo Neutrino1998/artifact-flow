@@ -76,19 +76,18 @@ flowchart LR
 
 ### Conversation 创建
 
-如果 `conversation_id` 为空，系统会：
+如果 `conversation_id` 为空，Controller 会在 `_stream_new_message()` 中：
 
-1. 生成新的 `conversation_id`（UUID）
+1. 调用 `conversation_manager.start_conversation_async()` 生成新 ID
 2. 在数据库创建 `Conversation` 记录
-3. 自动关联 `ArtifactSession`
+3. Artifact session ID 与 conversation ID 相同
 
 ```python
-# src/core/controller.py
-async def _ensure_conversation(self, conversation_id: str | None) -> str:
-    if not conversation_id:
-        conversation_id = str(uuid.uuid4())
-        await self.conversation_manager.start_conversation_async(conversation_id)
-    return conversation_id
+# src/core/controller.py - _stream_new_message() 中的逻辑
+if not conversation_id:
+    conversation_id = await self.conversation_manager.start_conversation_async()
+else:
+    await self.conversation_manager.ensure_conversation_exists(conversation_id)
 ```
 
 ## Phase 2: 状态准备
@@ -106,28 +105,33 @@ async def _ensure_conversation(self, conversation_id: str | None) -> str:
 #   msg_4 (current)
 
 # 格式化结果（从 root 到 current 的路径）
-conversation_history = """
-[User]: 第一条消息
-[Assistant]: 第一条回复
-[User]: 第二条消息
-[Assistant]: 第二条回复
-"""
+# 返回 List[Dict]，用于后续构建 LLM messages
+conversation_history = [
+    {"role": "user", "content": "第一条消息"},
+    {"role": "assistant", "content": "第一条回复"},
+    {"role": "user", "content": "第二条消息"},
+    {"role": "assistant", "content": "第二条回复"}
+]
 ```
 
 ### 初始状态构建
 
 ```python
-# src/core/state.py
+# src/core/state.py - create_initial_state()
 initial_state = {
     "current_task": "帮我分析一下 Python 异步编程的最佳实践",
     "session_id": "artifact-session-uuid",
     "thread_id": "langgraph-thread-uuid",
-    "conversation_history": "...",  # 格式化的历史
+    "conversation_history": [...],  # List[Dict]，格式化的对话历史
     "phase": ExecutionPhase.LEAD_EXECUTING,
-    "current_agent": "lead",
+    "current_agent": "lead_agent",
     "agent_memories": {},
-    "execution_metrics": ExecutionMetrics(),
-    # ...
+    "execution_metrics": create_initial_metrics(),
+    "subagent_pending": None,
+    "pending_tool_call": None,
+    "compression_level": "normal",
+    "user_message_id": "msg-xxx",
+    "graph_response": None
 }
 ```
 
@@ -165,43 +169,51 @@ flowchart TD
 
 **消息构建**（`src/core/context_manager.py`）：
 
+`ContextManager.build_agent_messages()` 按顺序拼装 messages 列表：
+
 ```python
-messages = [
-    {"role": "system", "content": system_prompt},
-    {"role": "user", "content": f"""
-## 对话历史
-{conversation_history}
+# Part 1: System prompt
+messages = [{"role": "system", "content": system_prompt}]
 
-## 当前任务
-{current_task}
+# Part 2: Conversation history（仅 Lead Agent）
+# 自动压缩，保留最近 4 条（2 轮对话）
+if agent.config.name == "lead_agent" and conversation_history:
+    messages.extend(compressed_history)
 
-## Agent 记忆
-{agent_memory}
-"""}
-]
+# Part 3: Current instruction
+messages.append({"role": "user", "content": instruction})
 
-# 如果有工具交互历史，追加到 messages
+# Part 4: Tool interactions（如果有）
+# assistant/user 交替的工具调用历史
 if tool_interactions:
-    messages.extend(tool_interactions)
+    messages.extend(compressed_tool_interactions)
+
+# Part 5: Pending tool result（如果有）
+if pending_tool_result:
+    messages.append({"role": "user", "content": formatted_result})
 ```
 
 ### 状态路由
 
-路由基于 `ExecutionPhase` 决定下一个节点：
+路由基于 `ExecutionPhase` 决定下一个节点（定义在 `_add_routing_rules()` 中）：
 
 ```python
-# src/core/graph.py
-def _route_after_agent(state: AgentState) -> str:
+# src/core/graph.py - route_func 内部函数
+def route_func(state: AgentState) -> str:
     phase = state["phase"]
 
     if phase == ExecutionPhase.TOOL_EXECUTING:
         return "tool_execution"
     elif phase == ExecutionPhase.SUBAGENT_EXECUTING:
         return state["subagent_pending"]["target"]
+    elif phase == ExecutionPhase.LEAD_EXECUTING:
+        if state.get("current_agent") != "lead_agent":
+            return "lead_agent"
+        return END
     elif phase == ExecutionPhase.COMPLETED:
         return END
     else:
-        return state["current_agent"]
+        return END
 ```
 
 ### 工具执行节点
@@ -279,13 +291,13 @@ event: metadata
 data: {"conversation_id": "xxx", "thread_id": "yyy", "message_id": "zzz"}
 
 event: agent_start
-data: {"agent": "lead"}
+data: {"agent": "lead_agent"}
 
 event: llm_chunk
-data: {"content": "让我", "agent": "lead"}
+data: {"content": "让我", "agent": "lead_agent"}
 
 event: llm_chunk
-data: {"content": "来分析", "agent": "lead"}
+data: {"content": "来分析", "agent": "lead_agent"}
 
 event: tool_start
 data: {"tool": "web_search", "params": {"query": "Python async best practices"}}
@@ -305,18 +317,27 @@ data: {"response": "...", "metrics": {...}}
 
 ```python
 # src/core/graph.py - tool_execution_node
-if permission in [ToolPermission.CONFIRM, ToolPermission.RESTRICTED]:
+if tool.permission in [ToolPermission.CONFIRM, ToolPermission.RESTRICTED]:
     # 发送权限请求事件
-    writer(StreamEvent(
-        type=StreamEventType.PERMISSION_REQUEST,
-        data={"tool": tool_name, "params": params, "permission": permission}
-    ))
+    writer({
+        "type": StreamEventType.PERMISSION_REQUEST.value,
+        "agent": from_agent,
+        "tool": tool_name,
+        "timestamp": datetime.now().isoformat(),
+        "data": {
+            "permission_level": tool.permission.value,
+            "params": params
+        }
+    })
 
     # 暂停执行，等待用户确认
-    result = interrupt({
-        "tool": tool_name,
+    is_approved = interrupt({
+        "type": "tool_permission",
+        "agent": from_agent,
+        "tool_name": tool_name,
         "params": params,
-        "requires_permission": permission.value
+        "permission_level": tool.permission.value,
+        "message": f"Tool '{tool_name}' requires {tool.permission.value} permission"
     })
 ```
 
@@ -343,7 +364,7 @@ await graph.ainvoke(
 ```python
 # 更新消息的 graph_response
 await self.conversation_manager.update_response_async(
-    conversation_id=conversation_id,
+    conv_id=conversation_id,
     message_id=message_id,
     response=final_response
 )

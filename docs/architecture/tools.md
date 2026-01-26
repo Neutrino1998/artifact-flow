@@ -69,10 +69,13 @@ class ToolParameter:
 ```python
 @dataclass
 class ToolResult:
-    success: bool                # 执行是否成功
-    data: Any                    # 结果数据
-    error: str | None = None     # 错误信息
-    metadata: dict | None = None # 元数据
+    success: bool                              # 执行是否成功
+    data: Any = None                           # 结果数据
+    error: Optional[str] = None                # 错误信息
+    metadata: Dict[str, Any] = field(default_factory=dict)  # 元数据
+
+    def to_dict(self) -> Dict[str, Any]:
+        """转换为字典格式"""
 ```
 
 ## BaseTool 基类
@@ -81,12 +84,20 @@ class ToolResult:
 
 ```python
 class BaseTool(ABC):
-    name: str                    # 工具名称（唯一标识）
-    description: str             # 工具描述
-    permission: ToolPermission   # 权限级别
+    def __init__(
+        self,
+        name: str,
+        description: str,
+        permission: ToolPermission = ToolPermission.PUBLIC,
+        **kwargs
+    ):
+        self.name = name
+        self.description = description
+        self.permission = permission
+        self.config = kwargs
 
     @abstractmethod
-    def get_parameters(self) -> list[ToolParameter]:
+    def get_parameters(self) -> List[ToolParameter]:
         """返回参数定义列表"""
         pass
 
@@ -95,21 +106,32 @@ class BaseTool(ABC):
         """执行工具"""
         pass
 
-    def validate_params(self, params: dict) -> tuple[bool, str]:
-        """验证参数（可选覆盖）"""
-        # 默认实现：检查必需参数
+    def validate_params(self, params: Dict[str, Any]) -> Optional[str]:
+        """
+        验证参数（可选覆盖）
+
+        Returns:
+            None 表示验证通过，字符串表示错误信息
+        """
+        # 默认实现：检查必需参数和未知参数
         ...
+
+    async def __call__(self, **params) -> ToolResult:
+        """使工具可调用（内部调用 validate_params 和 execute）"""
 ```
 
 ### 示例：WebSearchTool
 
 ```python
 class WebSearchTool(BaseTool):
-    name = "web_search"
-    description = "搜索互联网获取信息"
-    permission = ToolPermission.PUBLIC
+    def __init__(self):
+        super().__init__(
+            name="web_search",
+            description="搜索互联网获取信息",
+            permission=ToolPermission.PUBLIC
+        )
 
-    def get_parameters(self) -> list[ToolParameter]:
+    def get_parameters(self) -> List[ToolParameter]:
         return [
             ToolParameter(
                 name="query",
@@ -126,7 +148,7 @@ class WebSearchTool(BaseTool):
             )
         ]
 
-    async def execute(self, query: str, max_results: int = 10) -> ToolResult:
+    async def execute(self, query: str, max_results: int = 10, **kwargs) -> ToolResult:
         try:
             results = await self._do_search(query, max_results)
             return ToolResult(success=True, data=results)
@@ -143,27 +165,30 @@ class WebSearchTool(BaseTool):
 ```python
 class ToolRegistry:
     def __init__(self):
-        self._library: dict[str, BaseTool] = {}
-        self._agent_toolkits: dict[str, AgentToolkit] = {}
+        self.tool_library: Dict[str, BaseTool] = {}
+        self.agent_toolkits: Dict[str, AgentToolkit] = {}
 
-    def register_tool_to_library(self, tool: BaseTool):
+    def register_tool_to_library(self, tool: BaseTool) -> None:
         """注册工具到全局库"""
-        self._library[tool.name] = tool
+        self.tool_library[tool.name] = tool
 
     def create_agent_toolkit(
         self,
         agent_name: str,
-        tool_names: list[str]
+        tool_names: List[str] = None
     ) -> AgentToolkit:
         """为 Agent 创建专属工具集"""
-        tools = [self._library[name] for name in tool_names]
-        toolkit = AgentToolkit(agent_name, tools)
-        self._agent_toolkits[agent_name] = toolkit
+        toolkit = AgentToolkit(agent_name)
+        if tool_names:
+            for tool_name in tool_names:
+                if tool_name in self.tool_library:
+                    toolkit.add_tool(self.tool_library[tool_name])
+        self.agent_toolkits[agent_name] = toolkit
         return toolkit
 
-    def get_tool(self, tool_name: str) -> BaseTool:
-        """获取工具实例"""
-        return self._library[tool_name]
+    def get_agent_toolkit(self, agent_name: str) -> Optional[AgentToolkit]:
+        """获取 Agent 的工具包"""
+        return self.agent_toolkits.get(agent_name)
 ```
 
 ### AgentToolkit
@@ -172,27 +197,38 @@ Agent 专属工具集：
 
 ```python
 class AgentToolkit:
-    def __init__(self, agent_name: str, tools: list[BaseTool]):
+    def __init__(self, agent_name: str):
         self.agent_name = agent_name
-        self._tools: dict[str, BaseTool] = {t.name: t for t in tools}
+        self.tools: Dict[str, BaseTool] = {}
 
-    def get_tool(self, name: str) -> BaseTool | None:
-        return self._tools.get(name)
+    def add_tool(self, tool: BaseTool) -> None:
+        """添加工具到工具包"""
+        self.tools[tool.name] = tool
 
-    def list_tools(self) -> list[str]:
-        return list(self._tools.keys())
+    def add_tools(self, tools: List[BaseTool]) -> None:
+        """批量添加工具"""
+        for tool in tools:
+            self.add_tool(tool)
 
-    async def execute_tool(self, name: str, params: dict) -> ToolResult:
-        """执行工具（权限检查由 Graph 层负责）"""
+    def get_tool(self, name: str) -> Optional[BaseTool]:
+        return self.tools.get(name)
+
+    def list_tools(self) -> List[BaseTool]:
+        """返回工具实例列表"""
+        return list(self.tools.values())
+
+    async def execute_tool(self, name: str, params: Dict) -> ToolResult:
+        """
+        执行工具（权限检查由 Graph 层负责）
+        参数验证在 tool.__call__ 内部处理
+        """
         tool = self.get_tool(name)
         if not tool:
-            return ToolResult(success=False, error=f"Tool not found: {name}")
-
-        valid, error = tool.validate_params(params)
-        if not valid:
-            return ToolResult(success=False, error=error)
-
-        return await tool.execute(**params)
+            return ToolResult(
+                success=False,
+                error=f"Tool '{name}' not available in {self.agent_name}'s toolkit"
+            )
+        return await tool(**params)
 ```
 
 ### 初始化流程
@@ -244,18 +280,30 @@ Agent 使用 XML 格式发起工具调用，所有参数值使用 CDATA 包裹�
 ### XMLToolCallParser
 
 ```python
+@dataclass
+class ToolCall:
+    """工具调用数据结构"""
+    name: str
+    params: Dict[str, Any]
+    raw_text: str = ""
+
 class XMLToolCallParser:
     @staticmethod
-    def parse(content: str) -> list[dict]:
+    def parse_tool_calls(text: str) -> List[ToolCall]:
         """
         解析 XML 工具调用
 
         Returns:
-            [{"name": "tool_name", "params": {...}}, ...]
+            ToolCall 对象列表
         """
         # 使用 xml.etree.ElementTree 解析
         # 自动处理 CDATA
         # 自动类型转换（bool, int, float, string）
+        # 支持 fallback 正则解析（处理 LLM 格式不严格的情况）
+
+# 便捷函数
+def parse_tool_calls(text: str) -> List[ToolCall]:
+    return XMLToolCallParser.parse_tool_calls(text)
 ```
 
 **类型转换规则**：
@@ -276,16 +324,23 @@ class XMLToolCallParser:
 ```python
 class ToolPromptGenerator:
     @staticmethod
-    def generate_tool_instruction(toolkit: AgentToolkit) -> str:
+    def generate_tool_instruction(tools: List[BaseTool]) -> str:
         """
         生成完整的工具使用说明
+
+        Args:
+            tools: 工具实例列表（通常来自 toolkit.list_tools()）
 
         包含：
         - 可用工具列表
         - 每个工具的参数说明
-        - XML 调用格式示例
+        - XML 调用格式示例（使用 CDATA）
         - 注意事项
         """
+
+    @staticmethod
+    def format_tool_result(name: str, result: Dict[str, Any]) -> str:
+        """格式化工具执行结果为 XML"""
 ```
 
 **生成示例**：
@@ -320,19 +375,39 @@ class ToolPromptGenerator:
 
 ### call_subagent
 
-Lead Agent 调用 SubAgent：
+Lead Agent 调用 SubAgent（伪装路由工具）：
 
 ```python
 class CallSubagentTool(BaseTool):
-    name = "call_subagent"
-    description = "调用其他 Agent 执行任务"
-    permission = ToolPermission.PUBLIC
+    def __init__(self):
+        super().__init__(
+            name="call_subagent",
+            description="Call a specialized sub-agent to handle specific tasks",
+            permission=ToolPermission.PUBLIC
+        )
 
-    def get_parameters(self):
+    def get_parameters(self) -> List[ToolParameter]:
         return [
-            ToolParameter("target", "string", "目标 Agent 名称"),
-            ToolParameter("instruction", "string", "执行指令")
+            ToolParameter(
+                name="agent_name",
+                type="string",
+                description="Sub-agent type: check available_subagents section",
+                required=True
+            ),
+            ToolParameter(
+                name="instruction",
+                type="string",
+                description="Specific task instruction for the sub-agent",
+                required=True
+            )
         ]
+
+    async def execute(self, **params) -> ToolResult:
+        # 实际不执行操作，返回路由指令供 Graph 识别
+        return ToolResult(
+            success=True,
+            data={"_route_to": agent_name, "_is_routing_instruction": True, ...}
+        )
 ```
 
 ### web_search
