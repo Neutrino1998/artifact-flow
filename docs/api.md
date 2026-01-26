@@ -21,14 +21,14 @@ sequenceDiagram
     participant API
 
     Frontend->>API: POST /chat {content}
-    API->>Frontend: {conversation_id, thread_id, message_id}
+    API->>Frontend: {conversation_id, thread_id, message_id, stream_url}
 
     Frontend->>API: GET /stream/{thread_id}
     loop SSE Events
-        API->>Frontend: event: llm_chunk
-        API->>Frontend: event: tool_complete
+        API->>Frontend: data: {type: "llm_chunk", ...}
+        API->>Frontend: data: {type: "tool_complete", ...}
     end
-    API->>Frontend: event: complete
+    API->>Frontend: data: {type: "complete", ...}
 
     Frontend->>API: GET /chat/{conversation_id}
     API->>Frontend: 对话详情
@@ -64,13 +64,14 @@ POST /chat
 
 ```json
 {
-  "conversation_id": "550e8400-e29b-41d4-a716-446655440000",
-  "thread_id": "660e8400-e29b-41d4-a716-446655440001",
-  "message_id": "770e8400-e29b-41d4-a716-446655440002"
+  "conversation_id": "conv-550e8400e29b41d4a716446655440000",
+  "message_id": "msg-770e8400e29b41d4a716446655440002",
+  "thread_id": "thd-660e8400e29b41d4a716446655440001",
+  "stream_url": "/api/v1/stream/thd-660e8400e29b41d4a716446655440001"
 }
 ```
 
-**说明：** 请求立即返回，实际执行在后台进行。使用 `thread_id` 连接 SSE 获取执行事件。
+**说明：** 请求立即返回，实际执行在后台进行。使用 `stream_url` 连接 SSE 获取执行事件。
 
 ---
 
@@ -93,14 +94,15 @@ GET /chat
 {
   "conversations": [
     {
-      "id": "550e8400-e29b-41d4-a716-446655440000",
+      "id": "conv-550e8400e29b41d4a716446655440000",
       "title": "Python 异步编程分析",
+      "message_count": 5,
       "created_at": "2024-01-15T10:30:00Z",
-      "updated_at": "2024-01-15T11:00:00Z",
-      "message_count": 5
+      "updated_at": "2024-01-15T11:00:00Z"
     }
   ],
-  "total": 42
+  "total": 42,
+  "has_more": true
 }
 ```
 
@@ -116,27 +118,34 @@ GET /chat/{conversation_id}
 
 ```json
 {
-  "id": "550e8400-e29b-41d4-a716-446655440000",
+  "id": "conv-550e8400e29b41d4a716446655440000",
   "title": "Python 异步编程分析",
-  "created_at": "2024-01-15T10:30:00Z",
+  "active_branch": "msg-002",
   "messages": [
     {
-      "id": "msg_001",
+      "id": "msg-001",
       "parent_id": null,
       "content": "帮我分析一下 Python 异步编程",
       "response": "好的，让我来分析...",
-      "timestamp": "2024-01-15T10:30:00Z"
+      "created_at": "2024-01-15T10:30:00Z",
+      "children": ["msg-002"]
     },
     {
-      "id": "msg_002",
-      "parent_id": "msg_001",
+      "id": "msg-002",
+      "parent_id": "msg-001",
       "content": "能详细说说 asyncio 吗？",
       "response": "asyncio 是...",
-      "timestamp": "2024-01-15T10:35:00Z"
+      "created_at": "2024-01-15T10:35:00Z",
+      "children": []
     }
-  ]
+  ],
+  "session_id": "conv-550e8400e29b41d4a716446655440000",
+  "created_at": "2024-01-15T10:30:00Z",
+  "updated_at": "2024-01-15T10:35:00Z"
 }
 ```
+
+**说明：** `messages` 是扁平数组，通过 `parent_id` 和 `children` 构建树状结构。`session_id` 与 `conversation_id` 相同。
 
 ---
 
@@ -150,7 +159,8 @@ DELETE /chat/{conversation_id}
 
 ```json
 {
-  "success": true
+  "success": true,
+  "message": "Conversation 'conv-xxx' deleted"
 }
 ```
 
@@ -168,7 +178,8 @@ POST /chat/{conversation_id}/resume
 
 ```json
 {
-  "thread_id": "660e8400-e29b-41d4-a716-446655440001",
+  "thread_id": "thd-660e8400e29b41d4a716446655440001",
+  "message_id": "msg-770e8400e29b41d4a716446655440002",
   "approved": true
 }
 ```
@@ -176,16 +187,18 @@ POST /chat/{conversation_id}/resume
 | 字段 | 类型 | 必需 | 说明 |
 |------|------|------|------|
 | `thread_id` | string | 是 | 中断时的 thread_id |
+| `message_id` | string | 是 | 要更新的消息 ID |
 | `approved` | boolean | 是 | 是否批准执行 |
 
 **响应：**
 
 ```json
 {
-  "thread_id": "660e8400-e29b-41d4-a716-446655440001",
-  "resumed": true
+  "stream_url": "/api/v1/stream/thd-660e8400e29b41d4a716446655440001"
 }
 ```
+
+**说明：** 返回新的 SSE 端点 URL，前端需重新连接以接收后续事件。
 
 ---
 
@@ -203,6 +216,16 @@ GET /stream/{thread_id}
 const eventSource = new EventSource('/api/v1/stream/{thread_id}');
 ```
 
+**事件格式说明：**
+
+所有事件以 SSE `data:` 形式发送，事件类型包含在 JSON 的 `type` 字段中：
+
+```
+data: {"type":"event_type","timestamp":"...","agent":"...","data":{...}}
+```
+
+前端使用 `onmessage` 处理并根据 `type` 分发。
+
 **事件类型：**
 
 #### metadata
@@ -211,9 +234,13 @@ const eventSource = new EventSource('/api/v1/stream/{thread_id}');
 
 ```json
 {
-  "conversation_id": "xxx",
-  "thread_id": "yyy",
-  "message_id": "zzz"
+  "type": "metadata",
+  "timestamp": "2024-01-15T10:30:00.000Z",
+  "data": {
+    "conversation_id": "conv-xxx",
+    "thread_id": "thd-yyy",
+    "message_id": "msg-zzz"
+  }
 }
 ```
 
@@ -223,7 +250,9 @@ Agent 开始执行。
 
 ```json
 {
-  "agent": "lead"
+  "type": "agent_start",
+  "timestamp": "2024-01-15T10:30:00.000Z",
+  "agent": "lead_agent"
 }
 ```
 
@@ -233,8 +262,12 @@ LLM 流式输出片段。
 
 ```json
 {
-  "content": "让我",
-  "agent": "lead"
+  "type": "llm_chunk",
+  "timestamp": "2024-01-15T10:30:00.000Z",
+  "agent": "lead_agent",
+  "data": {
+    "content": "让我"
+  }
 }
 ```
 
@@ -244,11 +277,16 @@ LLM 输出完成。
 
 ```json
 {
-  "content": "完整的输出内容...",
-  "agent": "lead",
-  "token_usage": {
-    "input_tokens": 1000,
-    "output_tokens": 500
+  "type": "llm_complete",
+  "timestamp": "2024-01-15T10:30:00.000Z",
+  "agent": "lead_agent",
+  "data": {
+    "content": "完整的输出内容...",
+    "token_usage": {
+      "input_tokens": 1000,
+      "output_tokens": 500,
+      "total_tokens": 1500
+    }
   }
 }
 ```
@@ -259,8 +297,12 @@ Agent 执行完成。
 
 ```json
 {
-  "agent": "lead",
-  "response": "Agent 的完整响应"
+  "type": "agent_complete",
+  "timestamp": "2024-01-15T10:30:00.000Z",
+  "agent": "lead_agent",
+  "data": {
+    "response": "Agent 的完整响应"
+  }
 }
 ```
 
@@ -270,9 +312,14 @@ Agent 执行完成。
 
 ```json
 {
+  "type": "tool_start",
+  "timestamp": "2024-01-15T10:30:00.000Z",
+  "agent": "search_agent",
   "tool": "web_search",
-  "params": {
-    "query": "Python async programming"
+  "data": {
+    "params": {
+      "query": "Python async programming"
+    }
   }
 }
 ```
@@ -283,10 +330,15 @@ Agent 执行完成。
 
 ```json
 {
+  "type": "tool_complete",
+  "timestamp": "2024-01-15T10:30:00.000Z",
+  "agent": "search_agent",
   "tool": "web_search",
-  "success": true,
   "data": {
-    "results": [...]
+    "success": true,
+    "data": {
+      "results": [...]
+    }
   }
 }
 ```
@@ -297,12 +349,16 @@ Agent 执行完成。
 
 ```json
 {
+  "type": "permission_request",
+  "timestamp": "2024-01-15T10:30:00.000Z",
+  "agent": "crawl_agent",
   "tool": "read_file",
-  "params": {
-    "path": "/etc/config"
-  },
-  "permission": "confirm",
-  "message": "工具 read_file 需要您的确认才能执行"
+  "data": {
+    "permission_level": "confirm",
+    "params": {
+      "path": "/etc/config"
+    }
+  }
 }
 ```
 
@@ -314,8 +370,13 @@ Agent 执行完成。
 
 ```json
 {
+  "type": "permission_result",
+  "timestamp": "2024-01-15T10:30:00.000Z",
+  "agent": "crawl_agent",
   "tool": "read_file",
-  "approved": true
+  "data": {
+    "approved": true
+  }
 }
 ```
 
@@ -325,11 +386,17 @@ Agent 执行完成。
 
 ```json
 {
-  "response": "最终响应内容",
-  "metrics": {
-    "total_duration_ms": 5000,
-    "agent_executions": [...],
-    "tool_calls": [...]
+  "type": "complete",
+  "timestamp": "2024-01-15T10:30:00.000Z",
+  "data": {
+    "response": "最终响应内容",
+    "metrics": {
+      "started_at": "2024-01-15T10:30:00.000Z",
+      "completed_at": "2024-01-15T10:30:05.000Z",
+      "total_duration_ms": 5000,
+      "agent_executions": [...],
+      "tool_calls": [...]
+    }
   }
 }
 ```
@@ -340,8 +407,12 @@ Agent 执行完成。
 
 ```json
 {
-  "error": "错误信息",
-  "traceback": "..."
+  "type": "error",
+  "timestamp": "2024-01-15T10:30:00.000Z",
+  "data": {
+    "success": false,
+    "error": "错误信息"
+  }
 }
 ```
 
@@ -349,30 +420,31 @@ Agent 执行完成。
 
 ## Artifact API
 
+**说明：** Artifact 使用 `(session_id, artifact_id)` 复合键标识。`session_id` 与 `conversation_id` 相同。
+
 ### 获取 Artifact 列表
 
 ```
-GET /artifacts
+GET /artifacts/{session_id}
 ```
 
-**查询参数：**
+**路径参数：**
 
 | 参数 | 类型 | 说明 |
 |------|------|------|
-| `session_id` | string | 按会话筛选 |
-| `type` | string | 按类型筛选 |
+| `session_id` | string | 会话 ID（与 conversation_id 相同） |
 
 **响应：**
 
 ```json
 {
+  "session_id": "conv-550e8400e29b41d4a716446655440000",
   "artifacts": [
     {
-      "id": "artifact_001",
-      "session_id": "session_001",
-      "type": "task_plan",
+      "id": "task_plan",
+      "content_type": "markdown",
       "title": "任务计划",
-      "version": 3,
+      "current_version": 3,
       "created_at": "2024-01-15T10:30:00Z",
       "updated_at": "2024-01-15T11:00:00Z"
     }
@@ -385,19 +457,19 @@ GET /artifacts
 ### 获取 Artifact 详情
 
 ```
-GET /artifacts/{artifact_id}
+GET /artifacts/{session_id}/{artifact_id}
 ```
 
 **响应：**
 
 ```json
 {
-  "id": "artifact_001",
-  "session_id": "session_001",
-  "type": "task_plan",
+  "id": "task_plan",
+  "session_id": "conv-550e8400e29b41d4a716446655440000",
+  "content_type": "markdown",
   "title": "任务计划",
   "content": "# 任务计划\n\n## 步骤 1\n...",
-  "version": 3,
+  "current_version": 3,
   "created_at": "2024-01-15T10:30:00Z",
   "updated_at": "2024-01-15T11:00:00Z"
 }
@@ -408,30 +480,52 @@ GET /artifacts/{artifact_id}
 ### 获取版本历史
 
 ```
-GET /artifacts/{artifact_id}/versions
+GET /artifacts/{session_id}/{artifact_id}/versions
 ```
 
 **响应：**
 
 ```json
 {
+  "artifact_id": "task_plan",
+  "session_id": "conv-550e8400e29b41d4a716446655440000",
   "versions": [
     {
       "version": 3,
-      "content": "最新版本内容...",
+      "update_type": "update",
       "created_at": "2024-01-15T11:00:00Z"
     },
     {
       "version": 2,
-      "content": "第二版内容...",
+      "update_type": "update",
       "created_at": "2024-01-15T10:45:00Z"
     },
     {
       "version": 1,
-      "content": "初始版本...",
+      "update_type": "create",
       "created_at": "2024-01-15T10:30:00Z"
     }
   ]
+}
+```
+
+---
+
+### 获取特定版本
+
+```
+GET /artifacts/{session_id}/{artifact_id}/versions/{version}
+```
+
+**响应：**
+
+```json
+{
+  "version": 2,
+  "content": "第二版内容...",
+  "update_type": "update",
+  "changes": [["旧内容", "新内容"]],
+  "created_at": "2024-01-15T10:45:00Z"
 }
 ```
 
@@ -475,7 +569,7 @@ interface Message {
   id: string;
   role: 'user' | 'assistant';
   content: string;
-  timestamp: Date;
+  createdAt: Date;
 }
 
 interface ChatState {
@@ -484,6 +578,8 @@ interface ChatState {
   isStreaming: boolean;
   currentContent: string;
   pendingPermission: PermissionRequest | null;
+  currentThreadId: string | null;
+  currentMessageId: string | null;
 }
 
 async function sendMessage(
@@ -500,8 +596,10 @@ async function sendMessage(
     })
   });
 
-  const { conversation_id, thread_id, message_id } = await res.json();
+  const { conversation_id, thread_id, message_id, stream_url } = await res.json();
   state.conversationId = conversation_id;
+  state.currentThreadId = thread_id;
+  state.currentMessageId = message_id;
   state.isStreaming = true;
   state.currentContent = '';
 
@@ -510,43 +608,56 @@ async function sendMessage(
     id: message_id,
     role: 'user',
     content,
-    timestamp: new Date()
+    createdAt: new Date()
   });
 
-  // 2. 连接 SSE
-  const eventSource = new EventSource(`/api/v1/stream/${thread_id}`);
+  // 2. 连接 SSE（使用返回的 stream_url）
+  const eventSource = new EventSource(stream_url);
 
-  eventSource.addEventListener('llm_chunk', (e) => {
-    const { content } = JSON.parse(e.data);
-    state.currentContent += content;
-  });
+  // 3. 统一处理消息，根据 type 分发
+  eventSource.onmessage = (e) => {
+    const event = JSON.parse(e.data);
+    const { type, data, agent, tool } = event;
 
-  eventSource.addEventListener('permission_request', (e) => {
-    const data = JSON.parse(e.data);
-    state.pendingPermission = {
-      threadId: thread_id,
-      ...data
-    };
-  });
+    switch (type) {
+      case 'llm_chunk':
+        state.currentContent += data.content;
+        break;
 
-  eventSource.addEventListener('complete', (e) => {
-    const { response } = JSON.parse(e.data);
-    state.messages.push({
-      id: `${message_id}_response`,
-      role: 'assistant',
-      content: response,
-      timestamp: new Date()
-    });
-    state.currentContent = '';
+      case 'permission_request':
+        state.pendingPermission = {
+          threadId: thread_id,
+          messageId: message_id,
+          tool,
+          params: data.params,
+          permissionLevel: data.permission_level
+        };
+        break;
+
+      case 'complete':
+        state.messages.push({
+          id: `${message_id}_response`,
+          role: 'assistant',
+          content: data.response,
+          createdAt: new Date()
+        });
+        state.currentContent = '';
+        state.isStreaming = false;
+        eventSource.close();
+        break;
+
+      case 'error':
+        console.error('Execution error:', data.error);
+        state.isStreaming = false;
+        eventSource.close();
+        break;
+    }
+  };
+
+  eventSource.onerror = () => {
     state.isStreaming = false;
     eventSource.close();
-  });
-
-  eventSource.addEventListener('error', (e) => {
-    console.error('SSE Error:', e);
-    state.isStreaming = false;
-    eventSource.close();
-  });
+  };
 }
 
 async function handlePermission(
@@ -555,16 +666,22 @@ async function handlePermission(
 ): Promise<void> {
   if (!state.pendingPermission) return;
 
-  await fetch(`/api/v1/chat/${state.conversationId}/resume`, {
+  const res = await fetch(`/api/v1/chat/${state.conversationId}/resume`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       thread_id: state.pendingPermission.threadId,
+      message_id: state.pendingPermission.messageId,
       approved
     })
   });
 
+  const { stream_url } = await res.json();
   state.pendingPermission = null;
+
+  // 重新连接 SSE 获取后续事件
+  const eventSource = new EventSource(stream_url);
+  // ... 处理后续事件（同上）
 }
 ```
 
@@ -572,22 +689,32 @@ async function handlePermission(
 
 ```typescript
 async function loadArtifacts(sessionId: string): Promise<Artifact[]> {
-  const res = await fetch(`/api/v1/artifacts?session_id=${sessionId}`);
+  const res = await fetch(`/api/v1/artifacts/${sessionId}`);
   const { artifacts } = await res.json();
   return artifacts;
 }
 
 async function loadArtifactWithHistory(
+  sessionId: string,
   artifactId: string
 ): Promise<{ artifact: Artifact; versions: Version[] }> {
   const [artifactRes, versionsRes] = await Promise.all([
-    fetch(`/api/v1/artifacts/${artifactId}`),
-    fetch(`/api/v1/artifacts/${artifactId}/versions`)
+    fetch(`/api/v1/artifacts/${sessionId}/${artifactId}`),
+    fetch(`/api/v1/artifacts/${sessionId}/${artifactId}/versions`)
   ]);
 
   return {
     artifact: await artifactRes.json(),
     versions: (await versionsRes.json()).versions
   };
+}
+
+async function loadSpecificVersion(
+  sessionId: string,
+  artifactId: string,
+  version: number
+): Promise<VersionDetail> {
+  const res = await fetch(`/api/v1/artifacts/${sessionId}/${artifactId}/versions/${version}`);
+  return await res.json();
 }
 ```

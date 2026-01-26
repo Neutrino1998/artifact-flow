@@ -86,17 +86,21 @@ erDiagram
 class Conversation(Base):
     __tablename__ = "conversations"
 
-    id = Column(String(64), primary_key=True)
-    active_branch = Column(String(64))  # 当前活跃分支的叶子 message_id
-    title = Column(String(256))
-    user_id = Column(String(64))        # 预留字段
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, onupdate=datetime.utcnow)
-    metadata_ = Column(JSON)
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    active_branch: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    title: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
+    user_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now)
+    metadata_: Mapped[Optional[Dict[str, Any]]] = mapped_column("metadata", JSON, nullable=True)
 
     # 关系
-    messages = relationship("Message", back_populates="conversation")
-    artifact_session = relationship("ArtifactSession", uselist=False)
+    messages: Mapped[List["Message"]] = relationship(
+        "Message", back_populates="conversation", cascade="all, delete-orphan", lazy="selectin"
+    )
+    artifact_session: Mapped[Optional["ArtifactSession"]] = relationship(
+        "ArtifactSession", back_populates="conversation", uselist=False, cascade="all, delete-orphan"
+    )
 ```
 
 ### Message
@@ -202,29 +206,68 @@ class ArtifactVersion(Base):
 
 ```python
 class DatabaseManager:
-    def __init__(self, database_url: str):
-        self._engine = create_async_engine(database_url)
-        self._session_factory = async_sessionmaker(self._engine)
+    def __init__(
+        self,
+        database_url: Optional[str] = None,
+        echo: bool = False,
+    ):
+        """
+        Args:
+            database_url: 数据库连接 URL，默认为 SQLite
+            echo: 是否打印 SQL 语句（调试用）
+        """
+        if database_url is None:
+            database_url = "sqlite+aiosqlite:///data/artifactflow.db"
+        self.database_url = database_url
+        self.echo = echo
+        self._engine: Optional[AsyncEngine] = None
+        self._session_factory: Optional[async_sessionmaker] = None
+        self._initialized = False
 
     async def initialize(self):
-        """初始化数据库（创建表）"""
+        """初始化数据库（创建引擎、配置 WAL、创建表）"""
+        self._engine = create_async_engine(self.database_url, echo=self.echo)
+
+        # SQLite WAL 模式配置（提高并发性能）
+        if "sqlite" in self.database_url:
+            async with self._engine.begin() as conn:
+                await conn.execute(text("PRAGMA journal_mode=WAL"))
+                await conn.execute(text("PRAGMA foreign_keys=ON"))
+
+        self._session_factory = async_sessionmaker(
+            bind=self._engine,
+            class_=AsyncSession,
+            expire_on_commit=False,
+            autoflush=False,
+        )
+
+        # 创建所有表
         async with self._engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
+
+        self._initialized = True
 
     @asynccontextmanager
     async def session(self) -> AsyncGenerator[AsyncSession, None]:
         """获取数据库会话"""
-        async with self._session_factory() as session:
-            try:
-                yield session
-                await session.commit()
-            except Exception:
-                await session.rollback()
-                raise
+        if not self._initialized:
+            await self.initialize()
+
+        session = self._session_factory()
+        try:
+            yield session
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
+        finally:
+            await session.close()
 
     async def close(self):
         """关闭数据库连接"""
-        await self._engine.dispose()
+        if self._engine:
+            await self._engine.dispose()
+            self._initialized = False
 ```
 
 **使用示例**：
@@ -272,6 +315,14 @@ class BaseRepository(ABC, Generic[T]):
         await self._session.flush()
         await self._session.refresh(entity)
         return entity
+
+    async def add_all(self, entities: List[T]) -> List[T]:
+        """批量添加实体"""
+        self._session.add_all(entities)
+        await self._session.flush()
+        for entity in entities:
+            await self._session.refresh(entity)
+        return entities
 
     async def update(self, entity: T) -> T:
         """更新实体（需已在 Session 中）"""

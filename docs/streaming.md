@@ -61,7 +61,7 @@ sequenceDiagram
     participant C as Client
 
     S->>C: metadata
-    S->>C: agent_start (lead)
+    S->>C: agent_start (lead_agent)
     S->>C: llm_chunk "让我"
     S->>C: llm_chunk "来分析"
     S->>C: llm_chunk "这个问题"
@@ -72,7 +72,7 @@ sequenceDiagram
     Note over S: 执行工具
     S->>C: tool_complete
 
-    S->>C: agent_start (lead)
+    S->>C: agent_start (lead_agent)
     S->>C: llm_chunk "..."
     S->>C: agent_complete
 
@@ -182,7 +182,7 @@ sequenceDiagram
     Graph->>StreamManager: push_event(llm_chunk)
 
     Client->>GET /stream: 连接 SSE
-    GET /stream->>StreamManager: consume_stream(thread_id)
+    GET /stream->>StreamManager: consume_events(thread_id)
     Note over StreamManager: 取消 TTL 计时器
 
     StreamManager->>GET /stream: yield agent_start
@@ -204,11 +204,20 @@ sequenceDiagram
 @router.get("/{thread_id}")
 async def stream_events(
     thread_id: str,
-    stream_manager: StreamManager = Depends(get_stream_manager)
-):
-    async def event_generator():
-        async for event in stream_manager.consume_stream(thread_id):
-            yield format_sse_event(event)
+    stream_manager: StreamManager = Depends(get_stream_manager),
+) -> StreamingResponse:
+    async def event_generator() -> AsyncGenerator[str, None]:
+        try:
+            async for event in stream_manager.consume_events(thread_id):
+                yield format_sse_event(event)
+
+                # 检查是否是终结事件
+                if event.get("type") in ("complete", "error"):
+                    break
+
+        except StreamNotFoundError:
+            error_event = {"type": "error", "data": {"error": f"Stream not found"}}
+            yield format_sse_event(error_event)
 
     return StreamingResponse(
         event_generator(),
@@ -216,45 +225,55 @@ async def stream_events(
         headers={
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
-            "X-Accel-Buffering": "no"  # 禁用 nginx 缓冲
+            "X-Accel-Buffering": "no",  # 禁用 nginx 缓冲
         }
     )
 
-def format_sse_event(event: dict) -> str:
-    """格式化为 SSE 协议"""
-    event_type = event.get("type", "message")
-    data = json.dumps(event.get("data", event))
-    return f"event: {event_type}\ndata: {data}\n\n"
+# src/api/utils/sse.py
+def format_sse_event(data: Dict[str, Any], event: str = None) -> str:
+    """
+    格式化为 SSE 协议
+
+    Args:
+        data: 事件数据（整个事件字典，包含 type 字段）
+        event: SSE event 名称（可选，通常不使用）
+
+    Returns:
+        格式化的 SSE 字符串
+    """
+    lines = []
+    if event:
+        lines.append(f"event: {event}")
+    json_data = json.dumps(data, ensure_ascii=False)
+    lines.append(f"data: {json_data}")
+    return "\n".join(lines) + "\n\n"
 ```
 
 ### SSE 协议格式
 
+事件类型包含在 `data` 的 JSON 对象内（`type` 字段），而非使用 SSE 的 `event:` 字段：
+
 ```
-event: metadata
-data: {"conversation_id":"abc","thread_id":"xyz","message_id":"123"}
+data: {"type":"metadata","timestamp":"...","data":{"conversation_id":"abc","thread_id":"xyz","message_id":"123"}}
 
-event: agent_start
-data: {"agent":"lead"}
+data: {"type":"agent_start","timestamp":"...","agent":"lead_agent"}
 
-event: llm_chunk
-data: {"content":"让我","agent":"lead"}
+data: {"type":"llm_chunk","timestamp":"...","agent":"lead_agent","data":{"content":"让我"}}
 
-event: llm_chunk
-data: {"content":"来分析","agent":"lead"}
+data: {"type":"llm_chunk","timestamp":"...","agent":"lead_agent","data":{"content":"来分析"}}
 
-event: tool_start
-data: {"tool":"web_search","params":{"query":"Python async"}}
+data: {"type":"tool_start","timestamp":"...","tool":"web_search","data":{"params":{"query":"Python async"}}}
 
-event: tool_complete
-data: {"tool":"web_search","success":true,"data":[...]}
+data: {"type":"tool_complete","timestamp":"...","tool":"web_search","data":{"success":true,"data":[...]}}
 
-event: complete
-data: {"response":"...","metrics":{...}}
+data: {"type":"complete","timestamp":"...","data":{"response":"...","metrics":{...}}}
 ```
 
 ## 前端集成
 
 ### JavaScript 示例
+
+由于事件类型在 `data` JSON 内部，前端使用 `onmessage` 统一处理后根据 `type` 分发：
 
 ```javascript
 async function chat(content) {
@@ -269,46 +288,49 @@ async function chat(content) {
   // 2. 连接 SSE
   const eventSource = new EventSource(`/api/v1/stream/${thread_id}`);
 
-  // 3. 处理各类事件
-  eventSource.addEventListener('metadata', (e) => {
-    console.log('Started:', JSON.parse(e.data));
-  });
+  // 3. 统一处理消息，根据 type 分发
+  eventSource.onmessage = (e) => {
+    const event = JSON.parse(e.data);
+    const { type, data, agent, tool } = event;
 
-  eventSource.addEventListener('llm_chunk', (e) => {
-    const { content } = JSON.parse(e.data);
-    appendToOutput(content);  // 流式显示
-  });
+    switch (type) {
+      case 'metadata':
+        console.log('Started:', data);
+        break;
 
-  eventSource.addEventListener('tool_start', (e) => {
-    const { tool, params } = JSON.parse(e.data);
-    showToolIndicator(tool, params);
-  });
+      case 'llm_chunk':
+        appendToOutput(data.content);  // 流式显示
+        break;
 
-  eventSource.addEventListener('tool_complete', (e) => {
-    const { tool, success, data } = JSON.parse(e.data);
-    hideToolIndicator(tool);
-    if (!success) showError(data.error);
-  });
+      case 'tool_start':
+        showToolIndicator(tool, data.params);
+        break;
 
-  eventSource.addEventListener('permission_request', (e) => {
-    const { tool, params, permission } = JSON.parse(e.data);
-    showPermissionDialog(tool, params, permission);
-  });
+      case 'tool_complete':
+        hideToolIndicator(tool);
+        if (!data.success) showError(data.error);
+        break;
 
-  eventSource.addEventListener('complete', (e) => {
-    const { response, metrics } = JSON.parse(e.data);
-    finalizeOutput(response);
-    showMetrics(metrics);
-    eventSource.close();
-  });
+      case 'permission_request':
+        showPermissionDialog(tool, data.params, data.permission);
+        break;
 
-  eventSource.addEventListener('error', (e) => {
-    if (e.data) {
-      const { error } = JSON.parse(e.data);
-      showError(error);
+      case 'complete':
+        finalizeOutput(data.response);
+        showMetrics(data.metrics);
+        eventSource.close();
+        break;
+
+      case 'error':
+        showError(data.error);
+        eventSource.close();
+        break;
     }
+  };
+
+  eventSource.onerror = () => {
     eventSource.close();
-  });
+  };
 }
 ```
 
@@ -329,24 +351,28 @@ function useChat() {
 
     const res = await fetch('/api/v1/chat', {
       method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ content })
     });
     const { thread_id } = await res.json();
 
     const eventSource = new EventSource(`/api/v1/stream/${thread_id}`);
 
-    eventSource.addEventListener('llm_chunk', (e) => {
-      const { content } = JSON.parse(e.data);
-      setCurrentContent(prev => prev + content);
-    });
+    eventSource.onmessage = (e) => {
+      const event = JSON.parse(e.data);
 
-    eventSource.addEventListener('complete', (e) => {
-      const { response } = JSON.parse(e.data);
-      setMessages(prev => [...prev, { role: 'assistant', content: response }]);
-      setCurrentContent('');
-      setIsStreaming(false);
-      eventSource.close();
-    });
+      if (event.type === 'llm_chunk') {
+        setCurrentContent(prev => prev + event.data.content);
+      } else if (event.type === 'complete') {
+        setMessages(prev => [...prev, { role: 'assistant', content: event.data.response }]);
+        setCurrentContent('');
+        setIsStreaming(false);
+        eventSource.close();
+      } else if (event.type === 'error') {
+        setIsStreaming(false);
+        eventSource.close();
+      }
+    };
   };
 
   return { messages, currentContent, isStreaming, sendMessage };
@@ -362,49 +388,67 @@ function useChat() {
 ```python
 # tool_execution_node 中
 if tool.permission in [ToolPermission.CONFIRM, ToolPermission.RESTRICTED]:
-    # 发送权限请求事件
-    writer(StreamEvent(
-        type=StreamEventType.PERMISSION_REQUEST,
-        data={
-            "tool": tool_name,
-            "params": params,
-            "permission": tool.permission.value,
-            "message": f"工具 {tool_name} 需要您的确认才能执行"
-        }
-    ))
-
-    # 中断执行
-    result = interrupt({
-        "type": "permission_request",
+    # 发送 PERMISSION_REQUEST 事件
+    writer({
+        "type": StreamEventType.PERMISSION_REQUEST.value,
+        "agent": from_agent,
         "tool": tool_name,
-        "params": params
+        "timestamp": datetime.now().isoformat(),
+        "data": {
+            "permission_level": tool.permission.value,
+            "params": params
+        }
     })
 
-    # 恢复后继续...
+    # 中断执行，等待用户确认
+    is_approved = interrupt({
+        "type": "tool_permission",
+        "agent": from_agent,
+        "tool_name": tool_name,
+        "params": params,
+        "permission_level": tool.permission.value,
+        "message": f"Tool '{tool_name}' requires {tool.permission.value} permission"
+    })
+
+    # 发送 PERMISSION_RESULT 事件
+    writer({
+        "type": StreamEventType.PERMISSION_RESULT.value,
+        "agent": from_agent,
+        "tool": tool_name,
+        "timestamp": datetime.now().isoformat(),
+        "data": {"approved": is_approved}
+    })
+
+    if not is_approved:
+        # 用户拒绝，返回错误结果
+        ...
 ```
 
 ### 前端处理
 
 ```javascript
-eventSource.addEventListener('permission_request', async (e) => {
-  const { tool, params, message } = JSON.parse(e.data);
+// 在 onmessage 处理器中
+if (event.type === 'permission_request') {
+  const { tool, data } = event;
+  const { permission_level, params } = data;
 
   // 显示确认对话框
   const approved = await showConfirmDialog({
     title: `确认执行 ${tool}`,
-    message,
+    message: `工具 '${tool}' 需要 ${permission_level} 权限`,
     details: params
   });
 
   // 发送恢复请求
   await fetch(`/api/v1/chat/${conversationId}/resume`, {
     method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       thread_id: threadId,
       approved
     })
   });
-});
+}
 ```
 
 ## 配置选项
@@ -412,11 +456,14 @@ eventSource.addEventListener('permission_request', async (e) => {
 ```python
 # src/api/config.py
 
-class APIConfig:
+class APIConfig(BaseSettings):
     # SSE 配置
     SSE_PING_INTERVAL: int = 15      # 心跳间隔（秒）
     STREAM_TIMEOUT: int = 300        # 流超时（秒）
     STREAM_TTL: int = 30             # 队列 TTL（秒）
+
+    class Config:
+        env_prefix = "ARTIFACTFLOW_"
 ```
 
 ## 错误处理

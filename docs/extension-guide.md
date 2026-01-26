@@ -18,42 +18,47 @@
 ```python
 # src/agents/code_agent.py
 
+from typing import Dict, Any, List, Optional
 from agents.base import BaseAgent, AgentConfig
 
 class CodeAgent(BaseAgent):
     """代码分析 Agent"""
 
-    def __init__(self):
-        super().__init__(AgentConfig(
-            name="code",
-            description="代码分析与审查",
-            capabilities=[
-                "代码结构分析",
-                "代码质量评估",
-                "重构建议"
-            ],
-            required_tools=[
-                "read_file",      # 需要先创建这些工具
-                "analyze_code"
-            ],
-            model="qwen3-next-80b-instruct",
-            temperature=0.3,  # 代码分析需要精确
-            max_tool_rounds=5
-        ))
+    def __init__(self, config: Optional[AgentConfig] = None, toolkit=None):
+        if not config:
+            config = AgentConfig(
+                name="code_agent",  # 命名规范：xxx_agent
+                description="代码分析与审查",
+                capabilities=[
+                    "代码结构分析",
+                    "代码质量评估",
+                    "重构建议"
+                ],
+                required_tools=[
+                    "read_file",      # 需要先创建这些工具
+                    "analyze_code"
+                ],
+                model="qwen3-next-80b-instruct",
+                temperature=0.3,  # 代码分析需要精确
+                max_tool_rounds=5,
+                streaming=True
+            )
+        super().__init__(config, toolkit)
 
-    def build_system_prompt(self, toolkit) -> str:
-        tool_docs = toolkit.generate_tool_docs()
+    def build_system_prompt(self, context: Optional[Dict[str, Any]] = None) -> str:
+        """
+        构建系统提示词
 
-        return f"""# 角色
+        Args:
+            context: 动态上下文（如 artifacts_inventory）
+        """
+        return """# 角色
 你是一个专业的代码分析 Agent，负责分析代码结构、评估代码质量、提供重构建议。
 
 # 能力
 - 理解多种编程语言的代码结构
 - 识别代码中的问题和改进点
 - 提供具体的重构建议
-
-# 可用工具
-{tool_docs}
 
 # 工作流程
 1. 接收代码分析指令
@@ -66,9 +71,16 @@ class CodeAgent(BaseAgent):
 - 指出问题时给出改进建议
 - 使用代码示例说明
 """
+        # 注意：工具说明由 build_complete_system_prompt() 自动追加
 
-    def format_final_response(self, content: str, state) -> str:
-        """格式化最终响应"""
+    def format_final_response(self, content: str, tool_history: List[Dict]) -> str:
+        """
+        格式化最终响应
+
+        Args:
+            content: LLM 的最终回复
+            tool_history: 工具调用历史
+        """
         return f"""## 代码分析报告
 
 {content}
@@ -82,36 +94,54 @@ class CodeAgent(BaseAgent):
 
 from agents.code_agent import CodeAgent
 
-def create_multi_agent_graph(tool_registry: ToolRegistry) -> ExtendableGraph:
-    graph = ExtendableGraph()
+async def create_multi_agent_graph(
+    tool_permissions: Optional[Dict[str, ToolPermission]] = None,
+    artifact_manager: Optional[ArtifactManager] = None,
+    checkpointer: Optional[Any] = None,
+    db_path: str = "data/langgraph.db"
+):
+    graph_builder = ExtendableGraph()
 
-    # 注册现有 Agent
-    graph.register_agent(LeadAgent())
-    graph.register_agent(SearchAgent())
-    graph.register_agent(CrawlAgent())
+    # 创建 Agent 实例
+    lead = LeadAgent()
+    search = SearchAgent()
+    crawl = CrawlAgent()
+    code = CodeAgent()  # 新增
 
-    # 注册新 Agent
-    graph.register_agent(CodeAgent())  # 添加这行
+    # 创建工具包并绑定到 Agent
+    # （toolkit 创建逻辑，见 create_multi_agent_graph 完整实现）
 
-    # 设置工具注册中心
-    graph.set_tool_registry(tool_registry)
+    # 注册子 Agent 到 Lead（使其出现在 Lead 的 system prompt 中）
+    lead.register_subagent(search.config)
+    lead.register_subagent(crawl.config)
+    lead.register_subagent(code.config)  # 新增
 
-    return graph
+    # 注册到 Graph（顺序：先 subagent，再 lead）
+    graph_builder.register_agent(search)
+    graph_builder.register_agent(crawl)
+    graph_builder.register_agent(code)  # 新增
+    graph_builder.register_agent(lead)
+
+    # 设置入口点
+    graph_builder.set_entry_point("lead_agent")
+
+    # 编译
+    return graph_builder.compile(checkpointer=checkpointer)
 ```
 
-### 更新 Lead Agent 提示词
+### Lead Agent 自动感知
 
-让 Lead Agent 知道可以调用新的 Agent：
+通过 `lead.register_subagent(code.config)` 注册后，Lead Agent 的系统提示词会自动包含新 Agent：
 
-```python
-# 在 Lead Agent 的系统提示词中添加
-"""
+```
 # 可调用的 SubAgent
 
-- **search**: 信息检索，用于搜索互联网
-- **crawl**: 内容采集，用于抓取网页内容
-- **code**: 代码分析，用于分析和审查代码  # 新增
-"""
+- **search_agent**: Web search and information retrieval specialist
+  - Capabilities: Web search, Information retrieval
+- **crawl_agent**: Web content extraction and cleaning specialist
+  - Capabilities: Deep content extraction, Web scraping
+- **code_agent**: 代码分析与审查
+  - Capabilities: 代码结构分析, 代码质量评估, 重构建议
 ```
 
 ## 添加新工具 {#添加新工具}
@@ -129,16 +159,20 @@ def create_multi_agent_graph(tool_registry: ToolRegistry) -> ExtendableGraph:
 # src/tools/implementations/file_ops.py
 
 from pathlib import Path
+from typing import List
 from tools.base import BaseTool, ToolParameter, ToolResult, ToolPermission
 
 class ReadFileTool(BaseTool):
     """读取文件内容"""
 
-    name = "read_file"
-    description = "读取指定路径的文件内容"
-    permission = ToolPermission.CONFIRM  # 需要用户确认
+    def __init__(self):
+        super().__init__(
+            name="read_file",
+            description="读取指定路径的文件内容",
+            permission=ToolPermission.CONFIRM  # 需要用户确认
+        )
 
-    def get_parameters(self) -> list[ToolParameter]:
+    def get_parameters(self) -> List[ToolParameter]:
         return [
             ToolParameter(
                 name="path",
@@ -248,18 +282,25 @@ def create_tool_registry() -> ToolRegistry:
 
 ### 为 Agent 分配工具
 
+在 Agent 配置中通过 `required_tools` 指定所需工具：
+
 ```python
 # 在 Agent 配置中添加工具名称
 class CodeAgent(BaseAgent):
-    def __init__(self):
-        super().__init__(AgentConfig(
-            # ...
-            required_tools=[
-                "read_file",      # 新工具
-                "analyze_code"
-            ]
-        ))
+    def __init__(self, config=None, toolkit=None):
+        if not config:
+            config = AgentConfig(
+                name="code_agent",
+                # ...
+                required_tools=[
+                    "read_file",      # 新工具
+                    "analyze_code"
+                ]
+            )
+        super().__init__(config, toolkit)
 ```
+
+`create_multi_agent_graph` 会根据 `required_tools` 自动创建对应的 `AgentToolkit` 并绑定到 Agent。
 
 ## 权限级别选择指南
 
@@ -285,28 +326,38 @@ class CodeAgent(BaseAgent):
 
 ## 添加新 Artifact 类型
 
-Artifact 类型通过 `type` 字段区分，可以自由扩展：
+Artifact 类型通过 `content_type` 字段区分，可以自由扩展：
 
 ```python
 # 创建自定义类型的 Artifact
 await artifact_manager.create_artifact(
     session_id=session_id,
-    artifact_type="code_review",  # 自定义类型
+    artifact_id="code_review_report",
+    content_type="markdown",  # 内容类型：markdown, python, json 等
     title="Code Review Report",
     content="..."
 )
 ```
 
-### 建议的类型命名
+### 建议的 content_type
 
 | 类型 | 用途 |
 |------|------|
+| `markdown` | Markdown 文档（任务计划、报告等） |
+| `python` | Python 代码 |
+| `javascript` | JavaScript 代码 |
+| `json` | JSON 数据 |
+| `yaml` | YAML 配置 |
+| `text` | 纯文本 |
+
+### 建议的 artifact_id 命名
+
+| ID | 用途 |
+|------|------|
 | `task_plan` | 任务计划（系统保留） |
-| `result` | 执行结果（系统保留） |
+| `research_report` | 研究报告 |
 | `code_review` | 代码审查报告 |
-| `analysis` | 分析报告 |
-| `draft` | 草稿文档 |
-| `data` | 数据集 |
+| `main.py` | 代码文件（使用文件名） |
 
 ## 自定义 LLM 模型
 
@@ -374,15 +425,22 @@ from agents.code_agent import CodeAgent
 
 def test_code_agent_config():
     agent = CodeAgent()
-    assert agent.name == "code"
+    assert agent.config.name == "code_agent"
     assert "read_file" in agent.config.required_tools
 
 def test_code_agent_system_prompt():
     agent = CodeAgent()
-    # 创建 mock toolkit
-    toolkit = MockToolkit(["read_file", "analyze_code"])
-    prompt = agent.build_system_prompt(toolkit)
+    # build_system_prompt 接受 context 参数（可选）
+    prompt = agent.build_system_prompt(context=None)
     assert "代码分析" in prompt
+
+def test_code_agent_format_response():
+    agent = CodeAgent()
+    result = agent.format_final_response(
+        content="分析结果...",
+        tool_history=[]
+    )
+    assert "代码分析报告" in result
 ```
 
 ## 最佳实践

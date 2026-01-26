@@ -156,12 +156,26 @@ sqlite3 data/langgraph.db "SELECT thread_id FROM checkpoints LIMIT 5"
 **确保 thread_id 一致：**
 
 ```python
-# 恢复时的 thread_id 必须与中断时相同
-await controller.resume(
+# 通过 API 恢复执行
+# POST /api/v1/chat/{conversation_id}/resume
+{
+    "thread_id": "thd-original-thread-id",  # 使用原始 thread_id
+    "message_id": "msg-original-message-id",
+    "approved": True
+}
+```
+
+或通过 Controller：
+
+```python
+async for event in controller.stream_execute(
+    thread_id=original_thread_id,
     conversation_id=conversation_id,
-    thread_id=original_thread_id,  # 使用原始 thread_id
-    approved=True
-)
+    message_id=message_id,
+    resume_data={"type": "permission", "approved": True}
+):
+    # 处理事件
+    pass
 ```
 
 ---
@@ -211,7 +225,7 @@ result = await tool.execute(
 错误信息：
 
 ```
-OptimisticLockError: Version mismatch: expected 2, got 3
+VersionConflictError: Version mismatch for artifact 'xxx': expected lock_version 2, current is 3
 ```
 
 **原因：** 多个 Agent 同时更新同一个 Artifact。
@@ -249,9 +263,12 @@ AgentConfig(
 **检查 StreamManager 队列：**
 
 ```python
-# 添加监控
-stream_manager.get_stats()
-# {"active_streams": 5, "total_events": 1000}
+# 获取活跃流数量
+print(f"Active streams: {stream_manager.active_stream_count}")
+
+# 检查特定流状态
+status = stream_manager.get_stream_status(thread_id)
+print(f"Stream status: {status}")  # pending | streaming | closed | None
 ```
 
 **调整 TTL：**
@@ -269,16 +286,19 @@ stream_manager = StreamManager(ttl_seconds=15)
 
 ```sql
 -- 删除 30 天前的对话
-DELETE FROM messages WHERE timestamp < datetime('now', '-30 days');
+DELETE FROM messages WHERE created_at < datetime('now', '-30 days');
 DELETE FROM conversations WHERE updated_at < datetime('now', '-30 days');
 
--- 清理 Artifact 历史版本（保留最近 10 个）
+-- 清理 Artifact 历史版本（保留每个 artifact 最近 10 个版本）
 DELETE FROM artifact_versions
 WHERE id NOT IN (
-    SELECT id FROM artifact_versions
-    GROUP BY artifact_id
-    ORDER BY version DESC
-    LIMIT 10
+    SELECT id FROM (
+        SELECT id, ROW_NUMBER() OVER (
+            PARTITION BY artifact_id, session_id
+            ORDER BY version DESC
+        ) as rn
+        FROM artifact_versions
+    ) WHERE rn <= 10
 );
 
 -- 重建索引
@@ -293,15 +313,20 @@ VACUUM;
 
 ```python
 from agents.lead_agent import LeadAgent
-from tools.registry import ToolRegistry
 
 agent = LeadAgent()
-registry = ToolRegistry()
-# ... 注册工具
 
-toolkit = registry.get_agent_toolkit("lead")
-prompt = agent.build_system_prompt(toolkit)
-print(prompt)
+# build_system_prompt 只返回角色定义部分
+base_prompt = agent.build_system_prompt(context=None)
+print("=== Base Prompt ===")
+print(base_prompt)
+
+# build_complete_system_prompt 返回包含工具说明的完整提示词
+# 需要先绑定 toolkit
+if agent.toolkit:
+    complete_prompt = agent.build_complete_system_prompt(context=None)
+    print("=== Complete Prompt ===")
+    print(complete_prompt)
 ```
 
 ---
