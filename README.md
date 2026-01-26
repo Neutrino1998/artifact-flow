@@ -501,10 +501,19 @@ python -m tests.test_core_graph_stream
   - [x] Docker部署支持
 
 
+## 📖 文档
+
+详细的架构设计和开发指南请参阅 **[Wiki 文档](https://neutrino1998.github.io/artifact-flow/)**：
+
+- [Request Lifecycle](https://neutrino1998.github.io/artifact-flow/request-lifecycle/) - 请求完整生命周期
+- [Architecture](https://neutrino1998.github.io/artifact-flow/architecture/core/) - 模块深度解析
+- [Extension Guide](https://neutrino1998.github.io/artifact-flow/extension-guide/) - 如何扩展 Agent 和 Tool
+- [API Reference](https://neutrino1998.github.io/artifact-flow/api/) - 前端集成接口文档
+- [FAQ](https://neutrino1998.github.io/artifact-flow/faq/) - 常见问题与排查
+
 ## 📞 支持与反馈
 
 - 🐛 [问题反馈](https://github.com/Neutrino1998/artifact-flow/issues)
 - 💬 [讨论交流](https://github.com/Neutrino1998/artifact-flow/discussions)
-- 📖 [开发文档](docs/)
 - 📫 [联系作者](mailto:1998neutrino@gmail.com)
 
