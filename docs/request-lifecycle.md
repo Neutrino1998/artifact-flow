@@ -52,17 +52,26 @@ sequenceDiagram
 
 **依赖注入链**（`src/api/dependencies.py`）：
 
-```
-HTTP Request
-    │
-    ├─► get_db_session()        → AsyncSession（请求级别）
-    │       │
-    │       ├─► get_artifact_manager()
-    │       ├─► get_conversation_manager()
-    │       └─► get_controller()
-    │
-    ├─► get_checkpointer()      → AsyncSqliteSaver（全局单例）
-    └─► get_stream_manager()    → StreamManager（全局单例）
+```mermaid
+flowchart LR
+    subgraph Request["请求级别"]
+        Session["get_db_session()<br/>AsyncSession"]
+        AM["get_artifact_manager()"]
+        CM["get_conversation_manager()"]
+        Ctrl["get_controller()"]
+    end
+
+    subgraph Global["全局单例"]
+        CP["get_checkpointer()<br/>AsyncSqliteSaver"]
+        SM["get_stream_manager()<br/>StreamManager"]
+    end
+
+    HTTP["HTTP Request"] --> Session
+    Session --> AM
+    Session --> CM
+    Session --> Ctrl
+    HTTP --> CP
+    HTTP --> SM
 ```
 
 ### Conversation 创建
@@ -241,22 +250,26 @@ class StreamEventType(Enum):
 
 由于 POST 请求立即返回，SSE 连接稍后建立，需要缓冲中间事件：
 
-```
-POST /chat ──────────────────────────────────────────►
-    │
-    │  创建 StreamContext
-    │  启动 TTL 计时器 (30s)
-    │        │
-    │        ▼
-    │  ┌─────────────┐
-    │  │ Event Queue │ ◄── Graph 执行产生事件
-    │  └─────────────┘
-    │        │
-    └────────│────────────────────────────────────────►
-             │
-GET /stream ─┼────────────────────────────────────────►
-             │
-             └──► 消费队列 ──► SSE 推送 ──► 客户端
+```mermaid
+sequenceDiagram
+    participant Client
+    participant POST as POST /chat
+    participant Queue as Event Queue
+    participant Graph
+    participant GET as GET /stream
+
+    Client->>POST: 发送消息
+    POST->>Queue: 创建 StreamContext
+    Note over Queue: TTL 计时器启动 (30s)
+    POST->>Client: 返回 thread_id
+
+    Graph->>Queue: push(agent_start)
+    Graph->>Queue: push(llm_chunk)
+
+    Client->>GET: 连接 SSE
+    Note over Queue: 取消 TTL 计时器
+    Queue->>GET: yield events
+    GET->>Client: SSE 推送
 ```
 
 ### SSE 格式
@@ -341,50 +354,43 @@ await self.conversation_manager.update_response_async(
 
 ## 数据流总结
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                         Request Flow                             │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│  HTTP Request                                                    │
-│       │                                                          │
-│       ▼                                                          │
-│  ┌─────────┐    ┌────────────┐    ┌─────────┐                   │
-│  │ FastAPI │───►│ Controller │───►│  Graph  │                   │
-│  └─────────┘    └────────────┘    └─────────┘                   │
-│       │               │                │                         │
-│       │               │                ▼                         │
-│       │               │         ┌─────────────┐                  │
-│       │               │         │   Agents    │                  │
-│       │               │         │ ┌─────────┐ │                  │
-│       │               │         │ │  Lead   │ │                  │
-│       │               │         │ ├─────────┤ │                  │
-│       │               │         │ │ Search  │ │                  │
-│       │               │         │ ├─────────┤ │                  │
-│       │               │         │ │  Crawl  │ │                  │
-│       │               │         │ └─────────┘ │                  │
-│       │               │         └─────────────┘                  │
-│       │               │                │                         │
-│       │               │                ▼                         │
-│       │               │         ┌─────────────┐                  │
-│       │               │         │    Tools    │                  │
-│       │               │         └─────────────┘                  │
-│       │               │                │                         │
-│       │               ▼                ▼                         │
-│       │         ┌──────────────────────────┐                    │
-│       │         │        Database          │                    │
-│       │         │  ┌────────┐ ┌─────────┐  │                    │
-│       │         │  │ Convos │ │Artifacts│  │                    │
-│       │         │  └────────┘ └─────────┘  │                    │
-│       │         └──────────────────────────┘                    │
-│       │                                                          │
-│       ▼                                                          │
-│  ┌─────────────┐                                                │
-│  │ SSE Stream  │ ◄── StreamManager ◄── Graph Events            │
-│  └─────────────┘                                                │
-│       │                                                          │
-│       ▼                                                          │
-│    Client                                                        │
-│                                                                  │
-└─────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    Client["Client"]
+
+    subgraph API["API Layer"]
+        FastAPI["FastAPI"]
+        SSE["SSE Stream"]
+    end
+
+    subgraph Core["Core Layer"]
+        Controller["Controller"]
+        Graph["Graph"]
+        SM["StreamManager"]
+    end
+
+    subgraph Agents["Agents"]
+        Lead["Lead"]
+        Search["Search"]
+        Crawl["Crawl"]
+    end
+
+    Tools["Tools"]
+
+    subgraph DB["Database"]
+        Convos["Conversations"]
+        Artifacts["Artifacts"]
+    end
+
+    Client -->|HTTP Request| FastAPI
+    FastAPI --> Controller
+    Controller --> Graph
+    Graph --> Agents
+    Agents --> Tools
+    Tools --> DB
+    Controller --> DB
+
+    Graph -->|Events| SM
+    SM --> SSE
+    SSE -->|SSE| Client
 ```
