@@ -1,0 +1,61 @@
+site_name: ArtifactFlow
+site_description: Multi-Agent Research System Built on LangGraph
+site_url: https://neutrino.github.io/artifact-flow/
+repo_url: https://github.com/neutrino/artifact-flow
+repo_name: neutrino/artifact-flow
+
+theme:
+  name: material
+  language: zh
+  palette:
+    - scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - search.highlight
+    - content.code.copy
+
+plugins:
+  - search
+
+markdown_extensions:
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+  - admonition
+  - pymdownx.details
+  - attr_list
+  - md_in_html
+  - tables
+
+nav:
+  - Home: index.md
+  - Request Lifecycle: request-lifecycle.md
+  - Architecture:
+      - Core: architecture/core.md
+      - Agents: architecture/agents.md
+      - Tools: architecture/tools.md
+      - Data Layer: architecture/data-layer.md
+  - Streaming: streaming.md
+  - Extension Guide: extension-guide.md
+  - API Reference: api.md
+  - FAQ: faq.md

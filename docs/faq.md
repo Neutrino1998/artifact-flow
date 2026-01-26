@@ -1,0 +1,341 @@
+# FAQ
+
+常见问题与排查指南。
+
+## 环境与安装
+
+### 为什么需要 Python 3.11+？
+
+LangGraph 的 `interrupt()` 功能依赖 Python 3.11 引入的异步特性。低版本 Python 会导致：
+
+- `interrupt()` 无法正确暂停执行
+- 权限确认流程失效
+- 状态恢复异常
+
+**检查版本：**
+
+```bash
+python --version
+# 需要 Python 3.11.0 或更高
+```
+
+---
+
+### crawl4ai-setup 失败
+
+常见错误：
+
+```
+Error: Playwright browsers not installed
+```
+
+**解决方案：**
+
+```bash
+# 安装 playwright 浏览器
+playwright install chromium
+
+# 重新运行 setup
+crawl4ai-setup
+```
+
+如果仍然失败，尝试：
+
+```bash
+# 完整安装
+pip uninstall crawl4ai
+pip install crawl4ai[all]
+crawl4ai-setup
+```
+
+---
+
+### aiosqlite 版本冲突
+
+错误信息：
+
+```
+ERROR: pip's dependency resolver does not currently take into account all the packages...
+```
+
+**原因：** LangGraph 和其他包对 aiosqlite 版本要求不一致。
+
+**解决方案：**
+
+```bash
+# 使用 requirements.txt 中锁定的版本
+pip install -r requirements.txt --force-reinstall
+```
+
+---
+
+## 运行问题
+
+### API 服务启动失败
+
+**检查端口占用：**
+
+```bash
+lsof -i :8000
+# 如果有进程占用，kill 或换端口
+python run_server.py --port 8001
+```
+
+**检查数据库目录：**
+
+```bash
+# 确保 data 目录存在且可写
+mkdir -p data
+chmod 755 data
+```
+
+---
+
+### SSE 连接立即断开
+
+可能原因：
+
+1. **thread_id 不存在**：检查 POST /chat 返回的 thread_id
+2. **TTL 超时**：POST 后超过 30 秒未连接 SSE
+3. **反向代理缓冲**：Nginx 等代理可能缓冲 SSE
+
+**Nginx 配置：**
+
+```nginx
+location /api/v1/stream/ {
+    proxy_pass http://backend;
+    proxy_buffering off;
+    proxy_cache off;
+    proxy_set_header Connection '';
+    proxy_http_version 1.1;
+    chunked_transfer_encoding off;
+}
+```
+
+---
+
+### Agent 执行卡住
+
+**启用调试日志：**
+
+```python
+from utils.logger import set_global_debug
+set_global_debug(True)
+```
+
+**检查 LLM API：**
+
+```bash
+# 测试 API 连接
+curl -X POST https://your-llm-api/v1/chat/completions \
+  -H "Authorization: Bearer $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"model": "your-model", "messages": [{"role": "user", "content": "test"}]}'
+```
+
+**检查环境变量：**
+
+```bash
+# 确保 API Key 已设置
+echo $OPENAI_API_KEY
+echo $DASHSCOPE_API_KEY
+```
+
+---
+
+### 权限中断后无法恢复
+
+**检查 Checkpointer 状态：**
+
+```bash
+# 查看 LangGraph 数据库
+sqlite3 data/langgraph.db ".tables"
+sqlite3 data/langgraph.db "SELECT thread_id FROM checkpoints LIMIT 5"
+```
+
+**确保 thread_id 一致：**
+
+```python
+# 恢复时的 thread_id 必须与中断时相同
+await controller.resume(
+    conversation_id=conversation_id,
+    thread_id=original_thread_id,  # 使用原始 thread_id
+    approved=True
+)
+```
+
+---
+
+## 工具问题
+
+### web_search 返回空结果
+
+**检查搜索 API 配置：**
+
+```bash
+# DuckDuckGo 可能被限流，检查日志
+tail -f logs/app.log | grep "web_search"
+```
+
+**切换搜索后端：**
+
+```python
+# 在工具配置中指定
+SEARCH_BACKEND = "google"  # 或 "bing"
+```
+
+---
+
+### web_fetch 超时
+
+**调整超时时间：**
+
+```python
+# 工具调用时指定
+result = await tool.execute(
+    url="https://example.com",
+    timeout=60  # 秒
+)
+```
+
+**检查目标网站：**
+
+- 是否需要 JavaScript 渲染
+- 是否有反爬虫机制
+- 是否需要代理
+
+---
+
+### Artifact 更新版本冲突
+
+错误信息：
+
+```
+OptimisticLockError: Version mismatch: expected 2, got 3
+```
+
+**原因：** 多个 Agent 同时更新同一个 Artifact。
+
+**解决方案：** Agent 应该：
+
+1. 重新读取最新版本
+2. 合并变更
+3. 重试更新
+
+这是正常的并发控制机制，不是 bug。
+
+---
+
+## 性能问题
+
+### LLM 响应慢
+
+**使用流式输出：** 确保前端使用 SSE 接收 `llm_chunk` 事件，而不是等待完整响应。
+
+**调整模型：**
+
+```python
+# 对于简单任务，使用更快的模型
+AgentConfig(
+    model="qwen-turbo",  # 比 thinking 模型快
+    # ...
+)
+```
+
+---
+
+### 内存使用过高
+
+**检查 StreamManager 队列：**
+
+```python
+# 添加监控
+stream_manager.get_stats()
+# {"active_streams": 5, "total_events": 1000}
+```
+
+**调整 TTL：**
+
+```python
+# 减少未消费队列的存活时间
+stream_manager = StreamManager(ttl_seconds=15)
+```
+
+---
+
+### 数据库变慢
+
+**清理历史数据：**
+
+```sql
+-- 删除 30 天前的对话
+DELETE FROM messages WHERE timestamp < datetime('now', '-30 days');
+DELETE FROM conversations WHERE updated_at < datetime('now', '-30 days');
+
+-- 清理 Artifact 历史版本（保留最近 10 个）
+DELETE FROM artifact_versions
+WHERE id NOT IN (
+    SELECT id FROM artifact_versions
+    GROUP BY artifact_id
+    ORDER BY version DESC
+    LIMIT 10
+);
+
+-- 重建索引
+VACUUM;
+```
+
+---
+
+## 开发问题
+
+### 如何查看完整的 Agent 提示词？
+
+```python
+from agents.lead_agent import LeadAgent
+from tools.registry import ToolRegistry
+
+agent = LeadAgent()
+registry = ToolRegistry()
+# ... 注册工具
+
+toolkit = registry.get_agent_toolkit("lead")
+prompt = agent.build_system_prompt(toolkit)
+print(prompt)
+```
+
+---
+
+### 如何调试工具执行？
+
+```python
+# 直接测试工具
+from tools.implementations.web_search import WebSearchTool
+
+tool = WebSearchTool()
+result = await tool.execute(query="test query")
+print(result)
+```
+
+---
+
+### 如何查看 Graph 状态？
+
+```python
+# 获取当前状态快照
+from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+
+checkpointer = AsyncSqliteSaver.from_conn_string("data/langgraph.db")
+state = await checkpointer.aget({"configurable": {"thread_id": "your-thread-id"}})
+print(state)
+```
+
+---
+
+## 获取帮助
+
+如果以上都无法解决问题：
+
+1. **检查日志**：`tail -f logs/app.log`
+2. **启用调试模式**：`set_global_debug(True)`
+3. **提交 Issue**：附上错误日志和复现步骤
