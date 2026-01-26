@@ -1,0 +1,2236 @@
+
+<!doctype html>
+<html lang="zh" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Multi-Agent Research System Built on LangGraph">
+      
+      
+      
+        <link rel="canonical" href="https://neutrino.github.io/artifact-flow/_archive/frontend/01_persistence_design/">
+      
+      
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.1">
+    
+    
+      
+        <title>ArtifactFlow 持久化改造方案 - ArtifactFlow</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#artifactflow" class="md-skip">
+          跳转至
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="页眉">
+    <a href="../../.." title="ArtifactFlow" class="md-header__button md-logo" aria-label="ArtifactFlow" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            ArtifactFlow
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              ArtifactFlow 持久化改造方案
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="搜索" placeholder="搜索" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="查找">
+        
+        <button type="reset" class="md-search__icon md-icon" title="清空当前内容" aria-label="清空当前内容" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            正在初始化搜索引擎
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/neutrino/artifact-flow" title="前往仓库" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    neutrino/artifact-flow
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="标签" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../../request-lifecycle/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Request Lifecycle
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../../architecture/core/" class="md-tabs__link">
+          
+  
+  
+  Architecture
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../../streaming/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Streaming
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../../extension-guide/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Extension Guide
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../../api/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  API Reference
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../../faq/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  FAQ
+
+      </a>
+    </li>
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="导航栏" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../../.." title="ArtifactFlow" class="md-nav__button md-logo" aria-label="ArtifactFlow" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    ArtifactFlow
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/neutrino/artifact-flow" title="前往仓库" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    neutrino/artifact-flow
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../request-lifecycle/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Request Lifecycle
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Architecture
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../architecture/core/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Core
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../architecture/agents/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Agents
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../architecture/tools/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tools
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../architecture/data-layer/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data Layer
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../streaming/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Streaming
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../extension-guide/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Extension Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../faq/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    FAQ
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="目录">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      目录
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. 改造目标
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-dual-storage-strategy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. 🆕 双层存储策略 (Dual Storage Strategy)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2. 🆕 双层存储策略 (Dual Storage Strategy)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#21" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.1 核心概念
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#22-state-injection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.2 状态注入机制 (State Injection)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#23-thread" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.3 分支对话的 Thread 策略
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. 🆕 开发规范
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="3. 🆕 开发规范">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#31" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.1 依赖注入与无状态化
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#32-orm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.2 ORM 规范
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-schema" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. 数据库 Schema 设计
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="4. 数据库 Schema 设计">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#41" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.1 核心原则
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#42" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.2 表结构设计
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="4.2 表结构设计">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-conversations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        表1: conversations
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-messages" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        表2: messages
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3-artifact_sessions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        表3: artifact_sessions
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#4-artifacts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        表4: artifacts 🆕 增加乐观锁字段
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#5-artifact_versions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        表5: artifact_versions
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#43" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.3 🆕 乐观锁机制
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-langgraph-checkpointer" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. 🆕 LangGraph Checkpointer 配置
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="5. 🆕 LangGraph Checkpointer 配置">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#51-memorysaver" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.1 替换 MemorySaver
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#52" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.2 配置建议
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. 架构设计
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="6. 架构设计">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#61" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.1 分层架构
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#62" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.2 缓存策略
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. 文件结构规划
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="7. 文件结构规划">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#71" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.1 新增文件
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#72" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.2 改造文件
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#8" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8. 核心类设计要点
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="8. 核心类设计要点">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#81-databasemanager" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8.1 DatabaseManager
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#82-conversationrepository" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8.2 ConversationRepository
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#83-artifactrepository" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8.3 ArtifactRepository
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#84-conversationmanager" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8.4 ConversationManager（改造）
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#85-artifactmanager-artifactstore" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8.5 ArtifactManager（原 ArtifactStore 改造）
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#9" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9. 实施步骤
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="9. 实施步骤">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#phase-1-2-3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phase 1: 基础设施（预计 2-3 天）
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#phase-2-manager-2-3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phase 2: Manager 层改造（预计 2-3 天）
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#phase-3-1-2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phase 3: 优化和清理（预计 1-2 天）
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#10" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10. 后续扩展预留
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="10. 后续扩展预留">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#101-phase-2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10.1 用户系统（Phase 2）
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#102-postgresql" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10.2 PostgreSQL 迁移
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#11" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11. 注意事项
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="11. 注意事项">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#111" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11.1 并发安全
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#112" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11.2 数据一致性
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#113" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11.3 向后兼容
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#12" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        12. 依赖清单
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        附录：架构演进路线图
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="artifactflow">ArtifactFlow 持久化改造方案</h1>
+<blockquote>
+<p>版本: v1.1 | 优先级: P0（API和前端的前置依赖）</p>
+<p>变更记录：
+- v1.1: 新增双层存储策略、依赖注入规范、乐观锁机制、Checkpointer替换方案</p>
+</blockquote>
+<h2 id="1">1. 改造目标</h2>
+<p>将当前基于内存的 <code>ConversationManager</code> 和 <code>ArtifactStore</code> 改造为 SQLite 持久化存储，实现：</p>
+<ol>
+<li><strong>数据持久化</strong>：服务重启后数据不丢失</li>
+<li><strong>解耦存储</strong>：Conversation 和 Artifact 独立存储，通过 ID 关联</li>
+<li><strong>可扩展性</strong>：为后续 PostgreSQL 迁移和用户系统预留接口</li>
+<li><strong>性能平衡</strong>：热数据内存缓存 + 冷数据数据库存储</li>
+<li><strong>🆕 无状态化</strong>：支持容器化水平扩展</li>
+</ol>
+<hr />
+<h2 id="2-dual-storage-strategy">2. 🆕 双层存储策略 (Dual Storage Strategy)</h2>
+<h3 id="21">2.1 核心概念</h3>
+<p>系统采用<strong>双层存储架构</strong>，明确区分两类存储的职责：</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>┌─────────────────────────────────────────────────────────────────┐
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>│                      双层存储架构                                │
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>│                                                                 │
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>│  ┌─────────────────────────┐    ┌─────────────────────────┐    │
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>│  │    Application DB       │    │  LangGraph Checkpointer │    │
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>│  │    (SQLite/Postgres)    │    │   (AsyncSqliteSaver)    │    │
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>│  ├─────────────────────────┤    ├─────────────────────────┤    │
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>│  │ 角色: &quot;长期记忆&quot;         │    │ 角色: &quot;短期工作台&quot;       │    │
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>│  │ 真相来源 (Source of Truth)│   │ 执行状态暂存            │    │
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>│  ├─────────────────────────┤    ├─────────────────────────┤    │
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>│  │ 职责:                   │    │ 职责:                   │    │
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>│  │ - UI 展示               │    │ - 执行栈保存            │    │
+<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>│  │ - 搜索和历史回溯         │    │ - 中断/恢复状态         │    │
+<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>│  │ - 跨会话持久化          │    │ - Agent 变量状态        │    │
+<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a>│  ├─────────────────────────┤    ├─────────────────────────┤    │
+<a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a>│  │ 数据:                   │    │ 数据:                   │    │
+<a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a>│  │ - conversations         │    │ - thread states        │    │
+<a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a>│  │ - messages              │    │ - interrupt values     │    │
+<a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a>│  │ - artifacts             │    │ - agent memories       │    │
+<a id="__codelineno-0-20" name="__codelineno-0-20" href="#__codelineno-0-20"></a>│  │ - artifact_versions     │    │                         │    │
+<a id="__codelineno-0-21" name="__codelineno-0-21" href="#__codelineno-0-21"></a>│  └─────────────────────────┘    └─────────────────────────┘    │
+<a id="__codelineno-0-22" name="__codelineno-0-22" href="#__codelineno-0-22"></a>│              │                              │                   │
+<a id="__codelineno-0-23" name="__codelineno-0-23" href="#__codelineno-0-23"></a>│              └──────────┬───────────────────┘                   │
+<a id="__codelineno-0-24" name="__codelineno-0-24" href="#__codelineno-0-24"></a>│                         │                                       │
+<a id="__codelineno-0-25" name="__codelineno-0-25" href="#__codelineno-0-25"></a>│              ExecutionController                                │
+<a id="__codelineno-0-26" name="__codelineno-0-26" href="#__codelineno-0-26"></a>│              (状态注入 &amp; 同步)                                   │
+<a id="__codelineno-0-27" name="__codelineno-0-27" href="#__codelineno-0-27"></a>└─────────────────────────────────────────────────────────────────┘
+</code></pre></div>
+<h3 id="22-state-injection">2.2 状态注入机制 (State Injection)</h3>
+<p><strong>关键原则</strong>：App DB 是真相来源，LangGraph Checkpointer 仅用于执行过程。</p>
+<p><strong>实现要点</strong>：
+1. 每次启动新对话时，<strong>强制</strong>从 App DB 拉取清洗过的历史记录
+2. 将历史记录注入到 Agent State 的 <code>conversation_history</code> 字段
+3. 覆盖 LangGraph Checkpointer 可能残留的旧数据</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="c1"># ExecutionController._execute_new_message() 中的逻辑</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">_execute_new_message</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">content</span><span class="p">,</span> <span class="n">conversation_id</span><span class="p">,</span> <span class="n">parent_message_id</span><span class="p">):</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>    <span class="c1"># 1. 从 App DB 获取对话历史（真相来源）</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>    <span class="n">conversation_history</span> <span class="o">=</span> <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">conversation_manager</span><span class="o">.</span><span class="n">format_conversation_history_async</span><span class="p">(</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>        <span class="n">conv_id</span><span class="o">=</span><span class="n">conversation_id</span><span class="p">,</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>        <span class="n">to_message_id</span><span class="o">=</span><span class="n">parent_message_id</span>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>    <span class="p">)</span>
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>    <span class="c1"># 2. 创建新的 thread_id（每次执行都是新线程）</span>
+<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a>    <span class="n">thread_id</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;thd-</span><span class="si">{</span><span class="n">uuid4</span><span class="p">()</span><span class="o">.</span><span class="n">hex</span><span class="si">}</span><span class="s2">&quot;</span>
+<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a>
+<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a>    <span class="c1"># 3. 构建初始状态，注入历史记录</span>
+<a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a>    <span class="n">initial_state</span> <span class="o">=</span> <span class="n">create_initial_state</span><span class="p">(</span>
+<a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a>        <span class="n">task</span><span class="o">=</span><span class="n">content</span><span class="p">,</span>
+<a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a>        <span class="n">conversation_history</span><span class="o">=</span><span class="n">conversation_history</span><span class="p">,</span>  <span class="c1"># 注入历史</span>
+<a id="__codelineno-1-16" name="__codelineno-1-16" href="#__codelineno-1-16"></a>        <span class="n">thread_id</span><span class="o">=</span><span class="n">thread_id</span><span class="p">,</span>
+<a id="__codelineno-1-17" name="__codelineno-1-17" href="#__codelineno-1-17"></a>        <span class="c1"># ...</span>
+<a id="__codelineno-1-18" name="__codelineno-1-18" href="#__codelineno-1-18"></a>    <span class="p">)</span>
+<a id="__codelineno-1-19" name="__codelineno-1-19" href="#__codelineno-1-19"></a>
+<a id="__codelineno-1-20" name="__codelineno-1-20" href="#__codelineno-1-20"></a>    <span class="c1"># 4. 执行图（Checkpointer 只保存本次执行状态）</span>
+<a id="__codelineno-1-21" name="__codelineno-1-21" href="#__codelineno-1-21"></a>    <span class="n">result</span> <span class="o">=</span> <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">graph</span><span class="o">.</span><span class="n">ainvoke</span><span class="p">(</span><span class="n">initial_state</span><span class="p">,</span> <span class="n">config</span><span class="p">)</span>
+</code></pre></div>
+<h3 id="23-thread">2.3 分支对话的 Thread 策略</h3>
+<p>当用户创建分支时：</p>
+<ol>
+<li><strong>App DB 层</strong>：记录树状结构（<code>messages.parent_id</code> 指向分支点）</li>
+<li><strong>LangGraph 层</strong>：创建<strong>新的</strong> <code>thread_id</code></li>
+<li><strong>状态注入</strong>：将分支点之前的历史作为初始状态注入</li>
+</ol>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="c1"># 分支创建流程</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="k">def</span><span class="w"> </span><span class="nf">create_branch</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">conv_id</span><span class="p">,</span> <span class="n">parent_message_id</span><span class="p">,</span> <span class="n">new_content</span><span class="p">):</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>    <span class="c1"># 1. 获取从根到分支点的历史</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>    <span class="n">history</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">conversation_manager</span><span class="o">.</span><span class="n">get_message_path</span><span class="p">(</span><span class="n">conv_id</span><span class="p">,</span> <span class="n">parent_message_id</span><span class="p">)</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>    <span class="c1"># 2. 创建新的 thread_id（不复用旧分支的）</span>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>    <span class="n">new_thread_id</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;thd-</span><span class="si">{</span><span class="n">uuid4</span><span class="p">()</span><span class="o">.</span><span class="n">hex</span><span class="si">}</span><span class="s2">&quot;</span>
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>    <span class="c1"># 3. 注入历史到新执行</span>
+<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a>    <span class="c1"># ...</span>
+</code></pre></div>
+<hr />
+<h2 id="3">3. 🆕 开发规范</h2>
+<h3 id="31">3.1 依赖注入与无状态化</h3>
+<p><strong>强制要求</strong>：废弃所有模块级全局单例变量。</p>
+<p><strong>废弃模式</strong>（不再使用）：
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="c1"># ❌ 旧代码 - artifact_ops.py</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="n">_artifact_store</span> <span class="o">=</span> <span class="n">ArtifactStore</span><span class="p">()</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="k">def</span><span class="w"> </span><span class="nf">get_artifact_store</span><span class="p">():</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>    <span class="k">return</span> <span class="n">_artifact_store</span>
+</code></pre></div></p>
+<p><strong>新模式</strong>：
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="c1"># ✅ 新代码 - 通过构造函数注入</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="k">class</span><span class="w"> </span><span class="nc">ArtifactManager</span><span class="p">:</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">repository</span><span class="p">:</span> <span class="n">ArtifactRepository</span><span class="p">):</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">repository</span> <span class="o">=</span> <span class="n">repository</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">_cache</span> <span class="o">=</span> <span class="p">{}</span>  <span class="c1"># 实例级缓存</span>
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>
+<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="c1"># ✅ API 层使用 FastAPI Depends</span>
+<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a><span class="kn">from</span><span class="w"> </span><span class="nn">fastapi</span><span class="w"> </span><span class="kn">import</span> <span class="n">Depends</span>
+<a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a>
+<a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a><span class="k">def</span><span class="w"> </span><span class="nf">get_artifact_manager</span><span class="p">(</span>
+<a id="__codelineno-4-11" name="__codelineno-4-11" href="#__codelineno-4-11"></a>    <span class="n">db</span><span class="p">:</span> <span class="n">AsyncSession</span> <span class="o">=</span> <span class="n">Depends</span><span class="p">(</span><span class="n">get_db_session</span><span class="p">)</span>
+<a id="__codelineno-4-12" name="__codelineno-4-12" href="#__codelineno-4-12"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">ArtifactManager</span><span class="p">:</span>
+<a id="__codelineno-4-13" name="__codelineno-4-13" href="#__codelineno-4-13"></a>    <span class="n">repo</span> <span class="o">=</span> <span class="n">ArtifactRepository</span><span class="p">(</span><span class="n">db</span><span class="p">)</span>
+<a id="__codelineno-4-14" name="__codelineno-4-14" href="#__codelineno-4-14"></a>    <span class="k">return</span> <span class="n">ArtifactManager</span><span class="p">(</span><span class="n">repo</span><span class="p">)</span>
+</code></pre></div></p>
+<p><strong>目的</strong>：
+- 确保内存中不残留用户状态
+- 支持容器化水平扩展 (Horizontal Scaling)
+- 便于单元测试（可注入 Mock）</p>
+<h3 id="32-orm">3.2 ORM 规范</h3>
+<p><strong>强制要求</strong>：所有数据库操作必须通过 SQLAlchemy ORM 模型进行，禁止原生 SQL。</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="c1"># ❌ 禁止</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="n">result</span> <span class="o">=</span> <span class="k">await</span> <span class="n">session</span><span class="o">.</span><span class="n">execute</span><span class="p">(</span><span class="n">text</span><span class="p">(</span><span class="s2">&quot;SELECT * FROM conversations WHERE id = :id&quot;</span><span class="p">),</span> <span class="p">{</span><span class="s2">&quot;id&quot;</span><span class="p">:</span> <span class="n">conv_id</span><span class="p">})</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="c1"># ✅ 必须使用 ORM</span>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="n">result</span> <span class="o">=</span> <span class="k">await</span> <span class="n">session</span><span class="o">.</span><span class="n">execute</span><span class="p">(</span>
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a>    <span class="n">select</span><span class="p">(</span><span class="n">Conversation</span><span class="p">)</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">Conversation</span><span class="o">.</span><span class="n">id</span> <span class="o">==</span> <span class="n">conv_id</span><span class="p">)</span>
+<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="p">)</span>
+</code></pre></div>
+<p><strong>目的</strong>：确保从 SQLite 迁移到 PostgreSQL 时只需更改连接字符串，无需重写查询逻辑。</p>
+<hr />
+<h2 id="4-schema">4. 数据库 Schema 设计</h2>
+<h3 id="41">4.1 核心原则</h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>┌─────────────────────────────────────────────────────────────┐
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>│                      关系设计原则                            │
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>│                                                             │
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a>│  Conversation ◄──1:1──► ArtifactSession                    │
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a>│       │                        │                            │
+<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a>│       │ 1:N                    │ 1:N                        │
+<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a>│       ▼                        ▼                            │
+<a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a>│   Messages                 Artifacts                        │
+<a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a>│       │                        │                            │
+<a id="__codelineno-6-10" name="__codelineno-6-10" href="#__codelineno-6-10"></a>│       │ tree structure         │ 1:N                        │
+<a id="__codelineno-6-11" name="__codelineno-6-11" href="#__codelineno-6-11"></a>│       ▼                        ▼                            │
+<a id="__codelineno-6-12" name="__codelineno-6-12" href="#__codelineno-6-12"></a>│   (parent_id)           ArtifactVersions                    │
+<a id="__codelineno-6-13" name="__codelineno-6-13" href="#__codelineno-6-13"></a>└─────────────────────────────────────────────────────────────┘
+</code></pre></div>
+<h3 id="42">4.2 表结构设计</h3>
+<h4 id="1-conversations">表1: <code>conversations</code></h4>
+<table>
+<thead>
+<tr>
+<th>字段</th>
+<th>类型</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>id</td>
+<td>TEXT PRIMARY KEY</td>
+<td>conversation_id，同时也是关联的 session_id</td>
+</tr>
+<tr>
+<td>active_branch</td>
+<td>TEXT</td>
+<td>当前活跃的叶子节点 message_id</td>
+</tr>
+<tr>
+<td>created_at</td>
+<td>TIMESTAMP</td>
+<td>创建时间</td>
+</tr>
+<tr>
+<td>updated_at</td>
+<td>TIMESTAMP</td>
+<td>最后更新时间</td>
+</tr>
+<tr>
+<td>user_id</td>
+<td>TEXT NULLABLE</td>
+<td>预留：用户ID（Phase 2）</td>
+</tr>
+<tr>
+<td>title</td>
+<td>TEXT NULLABLE</td>
+<td>对话标题（可由首条消息自动生成）</td>
+</tr>
+<tr>
+<td>metadata</td>
+<td>JSON</td>
+<td>扩展元数据</td>
+</tr>
+</tbody>
+</table>
+<h4 id="2-messages">表2: <code>messages</code></h4>
+<table>
+<thead>
+<tr>
+<th>字段</th>
+<th>类型</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>id</td>
+<td>TEXT PRIMARY KEY</td>
+<td>message_id</td>
+</tr>
+<tr>
+<td>conversation_id</td>
+<td>TEXT FK</td>
+<td>所属对话</td>
+</tr>
+<tr>
+<td>parent_id</td>
+<td>TEXT NULLABLE</td>
+<td>父消息ID（实现树结构）</td>
+</tr>
+<tr>
+<td>content</td>
+<td>TEXT</td>
+<td>用户消息内容</td>
+</tr>
+<tr>
+<td>thread_id</td>
+<td>TEXT</td>
+<td>关联的 LangGraph 线程ID</td>
+</tr>
+<tr>
+<td>graph_response</td>
+<td>TEXT NULLABLE</td>
+<td>Graph 最终响应</td>
+</tr>
+<tr>
+<td>created_at</td>
+<td>TIMESTAMP</td>
+<td>创建时间</td>
+</tr>
+<tr>
+<td>metadata</td>
+<td>JSON</td>
+<td>扩展元数据（可存储简化的执行摘要）</td>
+</tr>
+</tbody>
+</table>
+<h4 id="3-artifact_sessions">表3: <code>artifact_sessions</code></h4>
+<table>
+<thead>
+<tr>
+<th>字段</th>
+<th>类型</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>id</td>
+<td>TEXT PRIMARY KEY</td>
+<td>session_id（与 conversation_id 相同）</td>
+</tr>
+<tr>
+<td>created_at</td>
+<td>TIMESTAMP</td>
+<td>创建时间</td>
+</tr>
+<tr>
+<td>updated_at</td>
+<td>TIMESTAMP</td>
+<td>最后更新时间</td>
+</tr>
+</tbody>
+</table>
+<h4 id="4-artifacts">表4: <code>artifacts</code> 🆕 增加乐观锁字段</h4>
+<table>
+<thead>
+<tr>
+<th>字段</th>
+<th>类型</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>id</td>
+<td>TEXT</td>
+<td>artifact_id</td>
+</tr>
+<tr>
+<td>session_id</td>
+<td>TEXT FK</td>
+<td>所属会话</td>
+</tr>
+<tr>
+<td>content_type</td>
+<td>TEXT</td>
+<td>内容类型 (markdown/python/etc)</td>
+</tr>
+<tr>
+<td>title</td>
+<td>TEXT</td>
+<td>标题</td>
+</tr>
+<tr>
+<td>content</td>
+<td>TEXT</td>
+<td>🆕 当前内容（冗余存储，避免每次查版本表）</td>
+</tr>
+<tr>
+<td>current_version</td>
+<td>INTEGER</td>
+<td>当前版本号</td>
+</tr>
+<tr>
+<td><strong>lock_version</strong></td>
+<td><strong>INTEGER DEFAULT 1</strong></td>
+<td>🆕 <strong>乐观锁版本号</strong></td>
+</tr>
+<tr>
+<td>created_at</td>
+<td>TIMESTAMP</td>
+<td>创建时间</td>
+</tr>
+<tr>
+<td>updated_at</td>
+<td>TIMESTAMP</td>
+<td>最后更新时间</td>
+</tr>
+<tr>
+<td>metadata</td>
+<td>JSON</td>
+<td>扩展元数据</td>
+</tr>
+<tr>
+<td>PRIMARY KEY (id, session_id)</td>
+<td></td>
+<td>复合主键</td>
+</tr>
+</tbody>
+</table>
+<h4 id="5-artifact_versions">表5: <code>artifact_versions</code></h4>
+<table>
+<thead>
+<tr>
+<th>字段</th>
+<th>类型</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>id</td>
+<td>INTEGER PRIMARY KEY AUTOINCREMENT</td>
+<td>自增ID</td>
+</tr>
+<tr>
+<td>artifact_id</td>
+<td>TEXT</td>
+<td>所属 artifact</td>
+</tr>
+<tr>
+<td>session_id</td>
+<td>TEXT</td>
+<td>所属会话</td>
+</tr>
+<tr>
+<td>version</td>
+<td>INTEGER</td>
+<td>版本号</td>
+</tr>
+<tr>
+<td>content</td>
+<td>TEXT</td>
+<td>版本内容</td>
+</tr>
+<tr>
+<td>update_type</td>
+<td>TEXT</td>
+<td>更新类型 (create/update/rewrite)</td>
+</tr>
+<tr>
+<td>changes</td>
+<td>JSON NULLABLE</td>
+<td>变更记录 [(old, new), ...]</td>
+</tr>
+<tr>
+<td>created_at</td>
+<td>TIMESTAMP</td>
+<td>创建时间</td>
+</tr>
+<tr>
+<td>UNIQUE (artifact_id, session_id, version)</td>
+<td></td>
+<td>唯一约束</td>
+</tr>
+</tbody>
+</table>
+<h3 id="43">4.3 🆕 乐观锁机制</h3>
+<p><strong>实现方式</strong>：
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="k">class</span><span class="w"> </span><span class="nc">ArtifactRepository</span><span class="p">:</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">update_artifact</span><span class="p">(</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>        <span class="bp">self</span><span class="p">,</span> 
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>        <span class="n">session_id</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> 
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a>        <span class="n">artifact_id</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> 
+<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a>        <span class="n">content</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a>        <span class="n">expected_lock_version</span><span class="p">:</span> <span class="nb">int</span>
+<a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a>    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Artifact</span><span class="p">:</span>
+<a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<a id="__codelineno-7-10" name="__codelineno-7-10" href="#__codelineno-7-10"></a><span class="sd">        更新 Artifact 内容（带乐观锁）</span>
+<a id="__codelineno-7-11" name="__codelineno-7-11" href="#__codelineno-7-11"></a>
+<a id="__codelineno-7-12" name="__codelineno-7-12" href="#__codelineno-7-12"></a><span class="sd">        Raises:</span>
+<a id="__codelineno-7-13" name="__codelineno-7-13" href="#__codelineno-7-13"></a><span class="sd">            VersionConflictError: 版本冲突时抛出</span>
+<a id="__codelineno-7-14" name="__codelineno-7-14" href="#__codelineno-7-14"></a><span class="sd">        &quot;&quot;&quot;</span>
+<a id="__codelineno-7-15" name="__codelineno-7-15" href="#__codelineno-7-15"></a>        <span class="n">result</span> <span class="o">=</span> <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">session</span><span class="o">.</span><span class="n">execute</span><span class="p">(</span>
+<a id="__codelineno-7-16" name="__codelineno-7-16" href="#__codelineno-7-16"></a>            <span class="n">update</span><span class="p">(</span><span class="n">Artifact</span><span class="p">)</span>
+<a id="__codelineno-7-17" name="__codelineno-7-17" href="#__codelineno-7-17"></a>            <span class="o">.</span><span class="n">where</span><span class="p">(</span>
+<a id="__codelineno-7-18" name="__codelineno-7-18" href="#__codelineno-7-18"></a>                <span class="n">Artifact</span><span class="o">.</span><span class="n">id</span> <span class="o">==</span> <span class="n">artifact_id</span><span class="p">,</span>
+<a id="__codelineno-7-19" name="__codelineno-7-19" href="#__codelineno-7-19"></a>                <span class="n">Artifact</span><span class="o">.</span><span class="n">session_id</span> <span class="o">==</span> <span class="n">session_id</span><span class="p">,</span>
+<a id="__codelineno-7-20" name="__codelineno-7-20" href="#__codelineno-7-20"></a>                <span class="n">Artifact</span><span class="o">.</span><span class="n">lock_version</span> <span class="o">==</span> <span class="n">expected_lock_version</span>  <span class="c1"># 乐观锁检查</span>
+<a id="__codelineno-7-21" name="__codelineno-7-21" href="#__codelineno-7-21"></a>            <span class="p">)</span>
+<a id="__codelineno-7-22" name="__codelineno-7-22" href="#__codelineno-7-22"></a>            <span class="o">.</span><span class="n">values</span><span class="p">(</span>
+<a id="__codelineno-7-23" name="__codelineno-7-23" href="#__codelineno-7-23"></a>                <span class="n">content</span><span class="o">=</span><span class="n">content</span><span class="p">,</span>
+<a id="__codelineno-7-24" name="__codelineno-7-24" href="#__codelineno-7-24"></a>                <span class="n">current_version</span><span class="o">=</span><span class="n">Artifact</span><span class="o">.</span><span class="n">current_version</span> <span class="o">+</span> <span class="mi">1</span><span class="p">,</span>
+<a id="__codelineno-7-25" name="__codelineno-7-25" href="#__codelineno-7-25"></a>                <span class="n">lock_version</span><span class="o">=</span><span class="n">Artifact</span><span class="o">.</span><span class="n">lock_version</span> <span class="o">+</span> <span class="mi">1</span><span class="p">,</span>  <span class="c1"># 递增锁版本</span>
+<a id="__codelineno-7-26" name="__codelineno-7-26" href="#__codelineno-7-26"></a>                <span class="n">updated_at</span><span class="o">=</span><span class="n">datetime</span><span class="o">.</span><span class="n">now</span><span class="p">()</span>
+<a id="__codelineno-7-27" name="__codelineno-7-27" href="#__codelineno-7-27"></a>            <span class="p">)</span>
+<a id="__codelineno-7-28" name="__codelineno-7-28" href="#__codelineno-7-28"></a>        <span class="p">)</span>
+<a id="__codelineno-7-29" name="__codelineno-7-29" href="#__codelineno-7-29"></a>
+<a id="__codelineno-7-30" name="__codelineno-7-30" href="#__codelineno-7-30"></a>        <span class="k">if</span> <span class="n">result</span><span class="o">.</span><span class="n">rowcount</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+<a id="__codelineno-7-31" name="__codelineno-7-31" href="#__codelineno-7-31"></a>            <span class="k">raise</span> <span class="n">VersionConflictError</span><span class="p">(</span>
+<a id="__codelineno-7-32" name="__codelineno-7-32" href="#__codelineno-7-32"></a>                <span class="sa">f</span><span class="s2">&quot;Artifact </span><span class="si">{</span><span class="n">artifact_id</span><span class="si">}</span><span class="s2"> has been modified by another process&quot;</span>
+<a id="__codelineno-7-33" name="__codelineno-7-33" href="#__codelineno-7-33"></a>            <span class="p">)</span>
+<a id="__codelineno-7-34" name="__codelineno-7-34" href="#__codelineno-7-34"></a>
+<a id="__codelineno-7-35" name="__codelineno-7-35" href="#__codelineno-7-35"></a>        <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">session</span><span class="o">.</span><span class="n">commit</span><span class="p">()</span>
+<a id="__codelineno-7-36" name="__codelineno-7-36" href="#__codelineno-7-36"></a>        <span class="k">return</span> <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_artifact</span><span class="p">(</span><span class="n">session_id</span><span class="p">,</span> <span class="n">artifact_id</span><span class="p">)</span>
+</code></pre></div></p>
+<p><strong>冲突处理策略</strong>：
+- Agent 工具调用失败时，返回错误信息让 Agent 决定重试或读取最新版
+- 前端可展示冲突提示，让用户选择保留哪个版本</p>
+<hr />
+<h2 id="5-langgraph-checkpointer">5. 🆕 LangGraph Checkpointer 配置</h2>
+<h3 id="51-memorysaver">5.1 替换 MemorySaver</h3>
+<p><strong>当前代码</strong>（需要修改）：
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="c1"># graph.py</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">langgraph.checkpoint.memory</span><span class="w"> </span><span class="kn">import</span> <span class="n">MemorySaver</span>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="k">def</span><span class="w"> </span><span class="nf">compile</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">...</span><span class="p">):</span>
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>    <span class="k">if</span> <span class="n">checkpointer</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a>        <span class="n">checkpointer</span> <span class="o">=</span> <span class="n">MemorySaver</span><span class="p">()</span>  <span class="c1"># ❌ 内存存储，重启丢失</span>
+</code></pre></div></p>
+<p><strong>改造后</strong>：
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="c1"># graph.py</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">langgraph.checkpoint.sqlite.aio</span><span class="w"> </span><span class="kn">import</span> <span class="n">AsyncSqliteSaver</span>
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>
+<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">compile</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">db_path</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;data/artifactflow.db&quot;</span><span class="p">,</span> <span class="o">...</span><span class="p">):</span>
+<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a>    <span class="k">if</span> <span class="n">checkpointer</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a>        <span class="c1"># ✅ 使用 SQLite 持久化，与 App DB 共享同一文件</span>
+<a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a>        <span class="n">checkpointer</span> <span class="o">=</span> <span class="n">AsyncSqliteSaver</span><span class="o">.</span><span class="n">from_conn_string</span><span class="p">(</span>
+<a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a>            <span class="sa">f</span><span class="s2">&quot;sqlite+aiosqlite:///</span><span class="si">{</span><span class="n">db_path</span><span class="si">}</span><span class="s2">&quot;</span>
+<a id="__codelineno-9-9" name="__codelineno-9-9" href="#__codelineno-9-9"></a>        <span class="p">)</span>
+</code></pre></div></p>
+<h3 id="52">5.2 配置建议</h3>
+<table>
+<thead>
+<tr>
+<th>配置项</th>
+<th>推荐值</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>数据库文件</td>
+<td><code>data/artifactflow.db</code></td>
+<td>与 App DB 共享，简化部署</td>
+</tr>
+<tr>
+<td>连接池大小</td>
+<td>5</td>
+<td>SQLite 有写锁限制，不宜过大</td>
+</tr>
+<tr>
+<td>WAL 模式</td>
+<td>启用</td>
+<td>提高并发读性能</td>
+</tr>
+</tbody>
+</table>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="c1"># database.py</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">sqlalchemy.ext.asyncio</span><span class="w"> </span><span class="kn">import</span> <span class="n">create_async_engine</span>
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="n">engine</span> <span class="o">=</span> <span class="n">create_async_engine</span><span class="p">(</span>
+<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a>    <span class="s2">&quot;sqlite+aiosqlite:///data/artifactflow.db&quot;</span><span class="p">,</span>
+<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a>    <span class="n">echo</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+<a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a>    <span class="n">pool_size</span><span class="o">=</span><span class="mi">5</span><span class="p">,</span>
+<a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a>    <span class="n">connect_args</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;check_same_thread&quot;</span><span class="p">:</span> <span class="kc">False</span><span class="p">}</span>
+<a id="__codelineno-10-9" name="__codelineno-10-9" href="#__codelineno-10-9"></a><span class="p">)</span>
+<a id="__codelineno-10-10" name="__codelineno-10-10" href="#__codelineno-10-10"></a>
+<a id="__codelineno-10-11" name="__codelineno-10-11" href="#__codelineno-10-11"></a><span class="c1"># 启用 WAL 模式</span>
+<a id="__codelineno-10-12" name="__codelineno-10-12" href="#__codelineno-10-12"></a><span class="nd">@event</span><span class="o">.</span><span class="n">listens_for</span><span class="p">(</span><span class="n">engine</span><span class="o">.</span><span class="n">sync_engine</span><span class="p">,</span> <span class="s2">&quot;connect&quot;</span><span class="p">)</span>
+<a id="__codelineno-10-13" name="__codelineno-10-13" href="#__codelineno-10-13"></a><span class="k">def</span><span class="w"> </span><span class="nf">set_sqlite_pragma</span><span class="p">(</span><span class="n">dbapi_connection</span><span class="p">,</span> <span class="n">connection_record</span><span class="p">):</span>
+<a id="__codelineno-10-14" name="__codelineno-10-14" href="#__codelineno-10-14"></a>    <span class="n">cursor</span> <span class="o">=</span> <span class="n">dbapi_connection</span><span class="o">.</span><span class="n">cursor</span><span class="p">()</span>
+<a id="__codelineno-10-15" name="__codelineno-10-15" href="#__codelineno-10-15"></a>    <span class="n">cursor</span><span class="o">.</span><span class="n">execute</span><span class="p">(</span><span class="s2">&quot;PRAGMA journal_mode=WAL&quot;</span><span class="p">)</span>
+<a id="__codelineno-10-16" name="__codelineno-10-16" href="#__codelineno-10-16"></a>    <span class="n">cursor</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
+</code></pre></div>
+<hr />
+<h2 id="6">6. 架构设计</h2>
+<h3 id="61">6.1 分层架构</h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>┌─────────────────────────────────────────────────────────────┐
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>│                     Application Layer                        │
+<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>│         (ExecutionController, Agents, Tools)                │
+<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a>└─────────────────────────────────────────────────────────────┘
+<a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a>                              │
+<a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a>                              ▼
+<a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a>┌─────────────────────────────────────────────────────────────┐
+<a id="__codelineno-11-8" name="__codelineno-11-8" href="#__codelineno-11-8"></a>│                     Manager Layer (改造重点)                 │
+<a id="__codelineno-11-9" name="__codelineno-11-9" href="#__codelineno-11-9"></a>│   ┌─────────────────────┐   ┌─────────────────────────┐    │
+<a id="__codelineno-11-10" name="__codelineno-11-10" href="#__codelineno-11-10"></a>│   │ ConversationManager │   │    ArtifactManager      │    │
+<a id="__codelineno-11-11" name="__codelineno-11-11" href="#__codelineno-11-11"></a>│   │  - 内存缓存热数据     │   │  - 内存缓存热数据        │    │
+<a id="__codelineno-11-12" name="__codelineno-11-12" href="#__codelineno-11-12"></a>│   │  - 调用 Repository    │   │  - 调用 Repository       │    │
+<a id="__codelineno-11-13" name="__codelineno-11-13" href="#__codelineno-11-13"></a>│   │  - 🆕 依赖注入        │   │  - 🆕 依赖注入           │    │
+<a id="__codelineno-11-14" name="__codelineno-11-14" href="#__codelineno-11-14"></a>│   └─────────────────────┘   └─────────────────────────┘    │
+<a id="__codelineno-11-15" name="__codelineno-11-15" href="#__codelineno-11-15"></a>└─────────────────────────────────────────────────────────────┘
+<a id="__codelineno-11-16" name="__codelineno-11-16" href="#__codelineno-11-16"></a>                              │
+<a id="__codelineno-11-17" name="__codelineno-11-17" href="#__codelineno-11-17"></a>                              ▼
+<a id="__codelineno-11-18" name="__codelineno-11-18" href="#__codelineno-11-18"></a>┌─────────────────────────────────────────────────────────────┐
+<a id="__codelineno-11-19" name="__codelineno-11-19" href="#__codelineno-11-19"></a>│                    Repository Layer (新增)                   │
+<a id="__codelineno-11-20" name="__codelineno-11-20" href="#__codelineno-11-20"></a>│   ┌─────────────────────┐   ┌─────────────────────────┐    │
+<a id="__codelineno-11-21" name="__codelineno-11-21" href="#__codelineno-11-21"></a>│   │ConversationRepository│   │  ArtifactRepository    │    │
+<a id="__codelineno-11-22" name="__codelineno-11-22" href="#__codelineno-11-22"></a>│   │  - CRUD 操作         │   │  - CRUD 操作            │    │
+<a id="__codelineno-11-23" name="__codelineno-11-23" href="#__codelineno-11-23"></a>│   │  - 树结构查询        │   │  - 版本管理             │    │
+<a id="__codelineno-11-24" name="__codelineno-11-24" href="#__codelineno-11-24"></a>│   │  - 🆕 ORM Only       │   │  - 🆕 乐观锁            │    │
+<a id="__codelineno-11-25" name="__codelineno-11-25" href="#__codelineno-11-25"></a>│   └─────────────────────┘   └─────────────────────────┘    │
+<a id="__codelineno-11-26" name="__codelineno-11-26" href="#__codelineno-11-26"></a>└─────────────────────────────────────────────────────────────┘
+<a id="__codelineno-11-27" name="__codelineno-11-27" href="#__codelineno-11-27"></a>                              │
+<a id="__codelineno-11-28" name="__codelineno-11-28" href="#__codelineno-11-28"></a>                              ▼
+<a id="__codelineno-11-29" name="__codelineno-11-29" href="#__codelineno-11-29"></a>┌─────────────────────────────────────────────────────────────┐
+<a id="__codelineno-11-30" name="__codelineno-11-30" href="#__codelineno-11-30"></a>│                     Database Layer (新增)                    │
+<a id="__codelineno-11-31" name="__codelineno-11-31" href="#__codelineno-11-31"></a>│   ┌─────────────────────────────────────────────────────┐  │
+<a id="__codelineno-11-32" name="__codelineno-11-32" href="#__codelineno-11-32"></a>│   │                   DatabaseManager                    │  │
+<a id="__codelineno-11-33" name="__codelineno-11-33" href="#__codelineno-11-33"></a>│   │  - 连接池管理                                        │  │
+<a id="__codelineno-11-34" name="__codelineno-11-34" href="#__codelineno-11-34"></a>│   │  - 事务管理                                          │  │
+<a id="__codelineno-11-35" name="__codelineno-11-35" href="#__codelineno-11-35"></a>│   │  - 🆕 WAL 模式                                       │  │
+<a id="__codelineno-11-36" name="__codelineno-11-36" href="#__codelineno-11-36"></a>│   └─────────────────────────────────────────────────────┘  │
+<a id="__codelineno-11-37" name="__codelineno-11-37" href="#__codelineno-11-37"></a>│                           │                                  │
+<a id="__codelineno-11-38" name="__codelineno-11-38" href="#__codelineno-11-38"></a>│              ┌────────────┴────────────┐                    │
+<a id="__codelineno-11-39" name="__codelineno-11-39" href="#__codelineno-11-39"></a>│              ▼                         ▼                    │
+<a id="__codelineno-11-40" name="__codelineno-11-40" href="#__codelineno-11-40"></a>│     App DB (SQLite)          LangGraph Checkpointer        │
+<a id="__codelineno-11-41" name="__codelineno-11-41" href="#__codelineno-11-41"></a>│     (conversations,          (AsyncSqliteSaver)            │
+<a id="__codelineno-11-42" name="__codelineno-11-42" href="#__codelineno-11-42"></a>│      messages, artifacts)    (thread states)               │
+<a id="__codelineno-11-43" name="__codelineno-11-43" href="#__codelineno-11-43"></a>└─────────────────────────────────────────────────────────────┘
+</code></pre></div>
+<h3 id="62">6.2 缓存策略</h3>
+<p><strong>热数据定义</strong>：
+- 当前活跃的 Conversation（最近访问的 N 个）
+- 当前活跃的 ArtifactSession
+- 最近修改的 Artifact 内容</p>
+<p><strong>缓存失效策略</strong>：
+- LRU 淘汰：缓存容量达到阈值时淘汰最久未使用的数据
+- 写穿透：写操作同时更新缓存和数据库
+- 延迟加载：首次访问时从数据库加载到缓存</p>
+<hr />
+<h2 id="7">7. 文件结构规划</h2>
+<h3 id="71">7.1 新增文件</h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>src/
+<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>├── db/                          # 新增：数据库层
+<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a>│   ├── __init__.py
+<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a>│   ├── database.py              # DatabaseManager：连接池、事务管理
+<a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a>│   ├── models.py                # SQLAlchemy ORM 模型定义
+<a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a>│   └── migrations/              # 数据库迁移脚本
+<a id="__codelineno-12-7" name="__codelineno-12-7" href="#__codelineno-12-7"></a>│       ├── __init__.py
+<a id="__codelineno-12-8" name="__codelineno-12-8" href="#__codelineno-12-8"></a>│       └── versions/
+<a id="__codelineno-12-9" name="__codelineno-12-9" href="#__codelineno-12-9"></a>│           └── 001_initial_schema.py
+<a id="__codelineno-12-10" name="__codelineno-12-10" href="#__codelineno-12-10"></a>│
+<a id="__codelineno-12-11" name="__codelineno-12-11" href="#__codelineno-12-11"></a>├── repositories/                # 新增：数据访问层
+<a id="__codelineno-12-12" name="__codelineno-12-12" href="#__codelineno-12-12"></a>│   ├── __init__.py
+<a id="__codelineno-12-13" name="__codelineno-12-13" href="#__codelineno-12-13"></a>│   ├── base.py                  # BaseRepository 抽象类
+<a id="__codelineno-12-14" name="__codelineno-12-14" href="#__codelineno-12-14"></a>│   ├── conversation_repo.py     # ConversationRepository
+<a id="__codelineno-12-15" name="__codelineno-12-15" href="#__codelineno-12-15"></a>│   └── artifact_repo.py         # ArtifactRepository
+<a id="__codelineno-12-16" name="__codelineno-12-16" href="#__codelineno-12-16"></a>│
+<a id="__codelineno-12-17" name="__codelineno-12-17" href="#__codelineno-12-17"></a>├── core/
+<a id="__codelineno-12-18" name="__codelineno-12-18" href="#__codelineno-12-18"></a>│   ├── conversation_manager.py  # 改造：从 controller.py 分离
+<a id="__codelineno-12-19" name="__codelineno-12-19" href="#__codelineno-12-19"></a>│   └── ... (其他文件)
+<a id="__codelineno-12-20" name="__codelineno-12-20" href="#__codelineno-12-20"></a>│
+<a id="__codelineno-12-21" name="__codelineno-12-21" href="#__codelineno-12-21"></a>└── tools/implementations/
+<a id="__codelineno-12-22" name="__codelineno-12-22" href="#__codelineno-12-22"></a>    └── artifact_ops.py          # 改造：ArtifactStore → ArtifactManager
+</code></pre></div>
+<h3 id="72">7.2 改造文件</h3>
+<table>
+<thead>
+<tr>
+<th>文件</th>
+<th>改造内容</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>controller.py</code></td>
+<td>将 <code>ConversationManager</code> 类移出到独立文件，改为使用 Repository</td>
+</tr>
+<tr>
+<td><code>artifact_ops.py</code></td>
+<td>将 <code>ArtifactStore</code> 改造为 <code>ArtifactManager</code>，底层使用 Repository，🆕 移除全局单例</td>
+</tr>
+<tr>
+<td><code>graph.py</code></td>
+<td>🆕 更新 Checkpointer 为 AsyncSqliteSaver</td>
+</tr>
+<tr>
+<td><code>requirements.txt</code></td>
+<td>添加 <code>sqlalchemy&gt;=2.0</code>, <code>aiosqlite</code></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="8">8. 核心类设计要点</h2>
+<h3 id="81-databasemanager">8.1 DatabaseManager</h3>
+<p><strong>职责</strong>：
+- 管理数据库连接（支持异步）
+- 提供事务上下文管理器
+- 初始化数据库 schema
+- 🆕 配置 WAL 模式</p>
+<p><strong>设计要点</strong>：
+- 使用 <code>aiosqlite</code> 实现异步 SQLite 访问
+- 提供同步和异步两种接口（兼容现有代码）
+- 数据库路径可配置（默认 <code>data/artifactflow.db</code>）</p>
+<h3 id="82-conversationrepository">8.2 ConversationRepository</h3>
+<p><strong>职责</strong>：
+- Conversation CRUD
+- Message CRUD
+- 树结构查询（获取从根到指定节点的路径）</p>
+<p><strong>关键方法</strong>：
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="o">-</span> <span class="n">create_conversation</span><span class="p">(</span><span class="n">conv_id</span><span class="p">)</span> <span class="err">→</span> <span class="n">Conversation</span>
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="o">-</span> <span class="n">get_conversation</span><span class="p">(</span><span class="n">conv_id</span><span class="p">)</span> <span class="err">→</span> <span class="n">Optional</span><span class="p">[</span><span class="n">Conversation</span><span class="p">]</span>
+<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="o">-</span> <span class="n">add_message</span><span class="p">(</span><span class="n">conv_id</span><span class="p">,</span> <span class="n">message</span><span class="p">)</span> <span class="err">→</span> <span class="n">Message</span>
+<a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a><span class="o">-</span> <span class="n">get_message_path</span><span class="p">(</span><span class="n">conv_id</span><span class="p">,</span> <span class="n">to_message_id</span><span class="p">)</span> <span class="err">→</span> <span class="n">List</span><span class="p">[</span><span class="n">Message</span><span class="p">]</span>
+<a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a><span class="o">-</span> <span class="n">update_response</span><span class="p">(</span><span class="n">conv_id</span><span class="p">,</span> <span class="n">message_id</span><span class="p">,</span> <span class="n">response</span><span class="p">)</span>
+<a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a><span class="o">-</span> <span class="n">list_conversations</span><span class="p">(</span><span class="n">user_id</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">limit</span><span class="p">,</span> <span class="n">offset</span><span class="p">)</span> <span class="err">→</span> <span class="n">List</span><span class="p">[</span><span class="n">Conversation</span><span class="p">]</span>
+</code></pre></div></p>
+<h3 id="83-artifactrepository">8.3 ArtifactRepository</h3>
+<p><strong>职责</strong>：
+- ArtifactSession CRUD
+- Artifact CRUD
+- 版本管理
+- 🆕 乐观锁并发控制</p>
+<p><strong>关键方法</strong>：
+<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="o">-</span> <span class="n">create_session</span><span class="p">(</span><span class="n">session_id</span><span class="p">)</span> <span class="err">→</span> <span class="n">ArtifactSession</span>
+<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="o">-</span> <span class="n">get_session</span><span class="p">(</span><span class="n">session_id</span><span class="p">)</span> <span class="err">→</span> <span class="n">Optional</span><span class="p">[</span><span class="n">ArtifactSession</span><span class="p">]</span>
+<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a><span class="o">-</span> <span class="n">create_artifact</span><span class="p">(</span><span class="n">session_id</span><span class="p">,</span> <span class="n">artifact_data</span><span class="p">)</span> <span class="err">→</span> <span class="n">Artifact</span>
+<a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a><span class="o">-</span> <span class="n">get_artifact</span><span class="p">(</span><span class="n">session_id</span><span class="p">,</span> <span class="n">artifact_id</span><span class="p">)</span> <span class="err">→</span> <span class="n">Optional</span><span class="p">[</span><span class="n">Artifact</span><span class="p">]</span>
+<a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a><span class="o">-</span> <span class="n">update_artifact</span><span class="p">(</span><span class="n">session_id</span><span class="p">,</span> <span class="n">artifact_id</span><span class="p">,</span> <span class="n">content</span><span class="p">,</span> <span class="n">expected_lock_version</span><span class="p">)</span> <span class="err">→</span> <span class="n">Artifact</span>  <span class="c1"># 🆕 乐观锁</span>
+<a id="__codelineno-14-6" name="__codelineno-14-6" href="#__codelineno-14-6"></a><span class="o">-</span> <span class="n">save_version</span><span class="p">(</span><span class="n">session_id</span><span class="p">,</span> <span class="n">artifact_id</span><span class="p">,</span> <span class="n">version_data</span><span class="p">)</span> <span class="err">→</span> <span class="n">ArtifactVersion</span>
+<a id="__codelineno-14-7" name="__codelineno-14-7" href="#__codelineno-14-7"></a><span class="o">-</span> <span class="n">get_version</span><span class="p">(</span><span class="n">session_id</span><span class="p">,</span> <span class="n">artifact_id</span><span class="p">,</span> <span class="n">version</span><span class="p">)</span> <span class="err">→</span> <span class="n">Optional</span><span class="p">[</span><span class="n">ArtifactVersion</span><span class="p">]</span>
+<a id="__codelineno-14-8" name="__codelineno-14-8" href="#__codelineno-14-8"></a><span class="o">-</span> <span class="n">list_artifacts</span><span class="p">(</span><span class="n">session_id</span><span class="p">)</span> <span class="err">→</span> <span class="n">List</span><span class="p">[</span><span class="n">Artifact</span><span class="p">]</span>
+</code></pre></div></p>
+<h3 id="84-conversationmanager">8.4 ConversationManager（改造）</h3>
+<p><strong>改造要点</strong>：
+- 保持现有 API 不变（向后兼容）
+- 内部增加 <code>ConversationRepository</code> 依赖
+- 增加内存缓存层（<code>Dict[str, Conversation]</code>）
+- 写操作：同时更新缓存和数据库
+- 读操作：优先从缓存读取，miss 时从数据库加载
+- 🆕 <strong>通过构造函数注入依赖，不使用全局单例</strong></p>
+<p><strong>缓存管理</strong>：
+<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a>- 最大缓存 conversation 数量：100（可配置）
+<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a>- 淘汰策略：LRU
+<a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a>- 提供 `load_conversation(conv_id)` 方法显式加载到缓存
+<a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a>- 提供 `evict_conversation(conv_id)` 方法手动淘汰
+</code></pre></div></p>
+<h3 id="85-artifactmanager-artifactstore">8.5 ArtifactManager（原 ArtifactStore 改造）</h3>
+<p><strong>改造要点</strong>：
+- 保持现有工具调用 API 不变
+- 内部增加 <code>ArtifactRepository</code> 依赖
+- 增加内存缓存（当前活跃 session 的 artifacts）
+- <code>Artifact.update()</code> 中的 diff-match-patch 逻辑保持不变
+- 版本保存时同步写入数据库
+- 🆕 <strong>通过构造函数注入依赖，不使用全局单例</strong>
+- 🆕 <strong>更新操作使用乐观锁</strong></p>
+<hr />
+<h2 id="9">9. 实施步骤</h2>
+<h3 id="phase-1-2-3">Phase 1: 基础设施（预计 2-3 天）</h3>
+<ol>
+<li><strong>创建 <code>db/</code> 模块</strong></li>
+<li>实现 <code>DatabaseManager</code>（含 WAL 配置）</li>
+<li>编写 SQLAlchemy ORM 模型（含 <code>lock_version</code> 字段）</li>
+<li>编写初始化 migration</li>
+<li>
+<p>🆕 配置 AsyncSqliteSaver 与 App DB 共享</p>
+</li>
+<li>
+<p><strong>创建 <code>repositories/</code> 模块</strong></p>
+</li>
+<li>实现 <code>BaseRepository</code></li>
+<li>实现 <code>ConversationRepository</code></li>
+<li>
+<p>实现 <code>ArtifactRepository</code>（含乐观锁）</p>
+</li>
+<li>
+<p><strong>编写单元测试</strong></p>
+</li>
+<li>Repository 层的 CRUD 测试</li>
+<li>树结构查询测试</li>
+<li>🆕 乐观锁冲突测试</li>
+</ol>
+<h3 id="phase-2-manager-2-3">Phase 2: Manager 层改造（预计 2-3 天）</h3>
+<ol>
+<li><strong>分离 ConversationManager</strong></li>
+<li>从 <code>controller.py</code> 移出到独立文件</li>
+<li>添加 Repository 依赖注入</li>
+<li>实现缓存逻辑</li>
+<li>
+<p>🆕 移除全局单例模式</p>
+</li>
+<li>
+<p><strong>改造 ArtifactStore → ArtifactManager</strong></p>
+</li>
+<li>重构为使用 Repository</li>
+<li>保持 <code>Artifact</code> 类的核心逻辑不变</li>
+<li>实现缓存逻辑</li>
+<li>🆕 移除全局单例 <code>_artifact_store</code></li>
+<li>
+<p>🆕 集成乐观锁</p>
+</li>
+<li>
+<p><strong>更新依赖方</strong></p>
+</li>
+<li><code>controller.py</code> 使用新的 ConversationManager</li>
+<li><code>graph.py</code> 使用新的 ArtifactManager</li>
+<li>
+<p>🆕 <code>graph.py</code> 替换 MemorySaver 为 AsyncSqliteSaver</p>
+</li>
+<li>
+<p><strong>集成测试</strong></p>
+</li>
+<li>运行现有的 <code>core_graph_test.py</code> 确保功能正常</li>
+<li>添加持久化相关的测试用例</li>
+</ol>
+<h3 id="phase-3-1-2">Phase 3: 优化和清理（预计 1-2 天）</h3>
+<ol>
+<li><strong>性能优化</strong></li>
+<li>添加数据库索引</li>
+<li>
+<p>优化批量查询</p>
+</li>
+<li>
+<p><strong>配置外部化</strong></p>
+</li>
+<li>数据库路径配置</li>
+<li>
+<p>缓存大小配置</p>
+</li>
+<li>
+<p><strong>清理工作</strong></p>
+</li>
+<li>移除旧的内存存储代码</li>
+<li>更新文档</li>
+</ol>
+<hr />
+<h2 id="10">10. 后续扩展预留</h2>
+<h3 id="101-phase-2">10.1 用户系统（Phase 2）</h3>
+<p><strong>预留设计</strong>：
+- <code>conversations</code> 表的 <code>user_id</code> 字段
+- <code>artifact_sessions</code> 表添加 <code>user_id</code> 字段
+- Repository 方法支持 <code>user_id</code> 过滤</p>
+<p><strong>迁移路径</strong>：
+1. 添加 <code>users</code> 表
+2. 为现有数据添加默认 user_id
+3. 更新 Repository 查询方法
+4. 更新 Manager 层传递 user_id</p>
+<h3 id="102-postgresql">10.2 PostgreSQL 迁移</h3>
+<p><strong>预留设计</strong>：
+- 使用 SQLAlchemy ORM（数据库无关）
+- Repository 层抽象数据库操作
+- 使用 Alembic 管理 migrations
+- 🆕 ORM Only 规范确保迁移无痛</p>
+<p><strong>迁移路径</strong>：
+1. 修改 <code>DatabaseManager</code> 连接字符串
+2. 运行 migration
+3. 数据迁移脚本</p>
+<hr />
+<h2 id="11">11. 注意事项</h2>
+<h3 id="111">11.1 并发安全</h3>
+<ul>
+<li>SQLite 在写入时有锁，需要注意并发场景</li>
+<li>建议使用 WAL 模式提高并发性能</li>
+<li>🆕 使用乐观锁处理 Artifact 并发更新</li>
+<li>对于高并发场景，考虑直接使用 PostgreSQL</li>
+</ul>
+<h3 id="112">11.2 数据一致性</h3>
+<ul>
+<li>缓存和数据库可能出现不一致</li>
+<li>关键写操作使用事务</li>
+<li>提供强制刷新缓存的接口</li>
+<li>🆕 App DB 是真相来源，LangGraph Checkpointer 仅用于执行</li>
+</ul>
+<h3 id="113">11.3 向后兼容</h3>
+<ul>
+<li>所有 public API 保持不变</li>
+<li>现有测试应该全部通过</li>
+<li>通过依赖注入支持测试时使用内存数据库</li>
+</ul>
+<hr />
+<h2 id="12">12. 依赖清单</h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a># 新增依赖
+<a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a>sqlalchemy&gt;=2.0.0
+<a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a>aiosqlite&gt;=0.19.0
+<a id="__codelineno-16-4" name="__codelineno-16-4" href="#__codelineno-16-4"></a>alembic&gt;=1.12.0  # 可选：用于生产环境的数据库迁移管理
+<a id="__codelineno-16-5" name="__codelineno-16-5" href="#__codelineno-16-5"></a>langgraph-checkpoint-sqlite&gt;=1.0.0  # 🆕 LangGraph SQLite Checkpointer
+</code></pre></div>
+<hr />
+<h2 id="_1">附录：架构演进路线图</h2>
+<ol>
+<li><strong>Phase 1 (当前目标)</strong>：单机 Docker + SQLite</li>
+<li>实现双层存储，确保数据不丢失</li>
+<li>实现乐观锁，确保 Artifact 数据一致</li>
+<li>
+<p>代码全异步化，使用依赖注入</p>
+</li>
+<li>
+<p><strong>Phase 2 (少量并发)</strong>：分离数据库</p>
+</li>
+<li>SQLite → PostgreSQL 容器</li>
+<li>
+<p>利用 ORM 优势平滑迁移</p>
+</li>
+<li>
+<p><strong>Phase 3 (生产并发)</strong>：水平扩展</p>
+</li>
+<li>Nginx 负载均衡 + 多实例 API 容器</li>
+<li>引入 Redis 做分布式缓存和锁</li>
+</ol>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  回到页面顶部
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../../..", "features": ["navigation.tabs", "navigation.sections", "navigation.expand", "navigation.top", "search.highlight", "content.code.copy"], "search": "../../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "\u5df2\u590d\u5236", "clipboard.copy": "\u590d\u5236", "search.result.more.one": "\u5728\u8be5\u9875\u4e0a\u8fd8\u6709 1 \u4e2a\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.more.other": "\u5728\u8be5\u9875\u4e0a\u8fd8\u6709 # \u4e2a\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.none": "\u6ca1\u6709\u627e\u5230\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.one": "\u627e\u5230 1 \u4e2a\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.other": "# \u4e2a\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.placeholder": "\u952e\u5165\u4ee5\u5f00\u59cb\u641c\u7d22", "search.result.term.missing": "\u7f3a\u5c11", "select.version": "\u9009\u62e9\u5f53\u524d\u7248\u672c"}, "version": null}</script>
+    
+    
+      <script src="../../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>

@@ -1,0 +1,2104 @@
+
+<!doctype html>
+<html lang="zh" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Multi-Agent Research System Built on LangGraph">
+      
+      
+      
+        <link rel="canonical" href="https://neutrino.github.io/artifact-flow/_archive/%E5%9F%BA%E4%BA%8EArtifact%E7%9A%84Multi-Agent%E7%A0%94%E7%A9%B6%E7%B3%BB%E7%BB%9F%E8%AE%BE%E8%AE%A1%E6%96%B9%E6%A1%88/">
+      
+      
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.1">
+    
+    
+      
+        <title>🤖 基于Artifact的Multi-Agent研究系统设计方案 - ArtifactFlow</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#artifactmulti-agent" class="md-skip">
+          跳转至
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="页眉">
+    <a href="../.." title="ArtifactFlow" class="md-header__button md-logo" aria-label="ArtifactFlow" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            ArtifactFlow
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              🤖 基于Artifact的Multi-Agent研究系统设计方案
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="搜索" placeholder="搜索" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="查找">
+        
+        <button type="reset" class="md-search__icon md-icon" title="清空当前内容" aria-label="清空当前内容" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            正在初始化搜索引擎
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/neutrino/artifact-flow" title="前往仓库" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    neutrino/artifact-flow
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="标签" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../request-lifecycle/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Request Lifecycle
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../architecture/core/" class="md-tabs__link">
+          
+  
+  
+  Architecture
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../streaming/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Streaming
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../extension-guide/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Extension Guide
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../api/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  API Reference
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../faq/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  FAQ
+
+      </a>
+    </li>
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="导航栏" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="ArtifactFlow" class="md-nav__button md-logo" aria-label="ArtifactFlow" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    ArtifactFlow
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/neutrino/artifact-flow" title="前往仓库" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    neutrino/artifact-flow
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../request-lifecycle/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Request Lifecycle
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Architecture
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../architecture/core/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Core
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../architecture/agents/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Agents
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../architecture/tools/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tools
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../architecture/data-layer/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data Layer
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../streaming/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Streaming
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../extension-guide/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Extension Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../faq/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    FAQ
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="目录">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      目录
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        💡 核心理念
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        🏗️ 系统架构
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="🏗️ 系统架构">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        🧩 核心组件
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        🔄 工作流程
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="🔄 工作流程">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        阶段1: 研究规划
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        阶段2: 信息收集
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        阶段3: 协作优化
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        📚 详细示例
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="📚 详细示例">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-ai" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        示例1: AI医疗应用研究报告
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        示例2: 用户干预场景
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="示例2: 用户干预场景">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        场景: 用户想要添加新的研究方向
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        场景: 用户对信息质量不满意
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_8" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ⚙️ 功能设计要点
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_9" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        🎯 系统优势
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_10" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        🚀 实现路径
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_11" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ✨ 关键创新点
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="artifactmulti-agent">🤖 基于Artifact的Multi-Agent研究系统设计方案</h1>
+<h2 id="_1">💡 核心理念</h2>
+<p>采用<strong>Collaborative Authoring</strong>模式，通过Artifact作为共享记忆载体。摒弃传统黑盒式一次性生成，转向透明、可控、渐进式的研究过程。相比传统「一次性生成」或「长对话上下文」，Artifact机制能<strong>持续积累和组织信息</strong>，避免上下文混乱，让用户和AI真正协作构建研究成果。</p>
+<h2 id="_2">🏗️ 系统架构</h2>
+<p>系统采用分层设计，以Artifact作为核心记忆载体，Lead Agent负责任务协调，多个Subagent专门处理具体任务。通过明确的权限控制和单向信息流，确保系统运行的稳定性和可控性。</p>
+<h3 id="_3">🧩 核心组件</h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a> ┌────────────────────────────────────────────────────────────┐
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a> │                       ARTIFACT LAYER                       │
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a> │                                                            │
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a> │  ┌───────────────────────────────┐  ┌────────────────────┐ │
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a> │  │       Task Plan Artifact      │  │    Result Artifact │ │
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a> │  │  - 任务分解 &amp; 进度跟踪          │  │  - 最终产出文档     │ │
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a> │  │  - 共享给所有Agent 有权限控制   │  │   - 共享给用户      │ │
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a> │  └───────────────────────────────┘  └────────────────────┘ │
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a> │                                                            │
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a> └────────────────────────────────────────────────────────────┘
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>           ↑                     ↑                    ↑
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>           │                     │                    │
+<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>           │ (读写)              │ (只读)              │ (读写)
+<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>           │                     │                    │
+<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a> ┌───────────────┐      ┌───────────────┐      ┌──────────────┐
+<a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a> │   Lead Agent  │      │   Subagents   │      │    User      │
+<a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a> │  - 管理任务    │      │ - Search Agent│      │ - 可浏览编辑  │
+<a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a> │  - 协调执行    │      │ - Web Crawl   │      │ - 可给反馈    │
+<a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a> │  - 整合结果    │      │ - Others...   │      │              │
+<a id="__codelineno-0-20" name="__codelineno-0-20" href="#__codelineno-0-20"></a> └───────────────┘      └───────────────┘      └──────────────┘
+</code></pre></div>
+<p><strong>Lead Agent</strong></p>
+<ul>
+<li><strong>职责</strong>: 任务规划、信息整合、用户交互</li>
+<li><strong>工具:</strong></li>
+<li>Artifact操作 (create/update/rewrite)</li>
+<li>Subagent调用接口</li>
+<li><strong>特点</strong>: 保持上下文简洁，专注于高层决策</li>
+</ul>
+<p><strong>Subagents</strong></p>
+<ul>
+<li><strong>Search Agent</strong>: 信息检索，返回结构化搜索结果</li>
+<li><strong>Web Crawl Agent</strong>: 深度内容抓取，提取关键信息</li>
+<li><strong>独立性</strong>: 每个agent独立完成分配任务，自主判断完成标准</li>
+</ul>
+<p><strong>双Artifact机制</strong></p>
+<ul>
+<li><strong>Task Plan Artifact:</strong></li>
+<li><strong>Lead Agent权限</strong>: 读写 (更新任务状态、添加新任务、修改优先级)</li>
+<li><strong>Subagent权限</strong>: 只读 (了解任务需求、查看上下文信息)</li>
+<li><strong>用户权限</strong>: 只读 (查看研究进度和任务状态)</li>
+<li><strong>Result Artifact:</strong></li>
+<li><strong>Lead Agent权限</strong>: 读写 (整合信息、更新内容、调整结构)</li>
+<li><strong>Subagent权限</strong>: 无访问权限 (保持职责清晰，避免直接修改最终结果)</li>
+<li><strong>用户权限</strong>: 读写 (编辑内容、调整格式、添加批注)</li>
+</ul>
+<h3 id="_4">🔄 工作流程</h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>   用户提出需求
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>        │
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>        │ (对话交互)
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>        ↓
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>   Lead Agent创建Task Plan
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>        │
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>        │ (分析并派发任务)
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>        ↓
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>   ┌─── Search Agent ←── (读取Task Plan获取完整上下文)
+<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a>   │         │
+<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a>   │         └──→ 返回搜索结果
+<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a>   │
+<a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a>   ├─── Crawl Agent ←── (读取Task Plan获取完整上下文)  
+<a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a>   │         │
+<a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a>   │         └──→ 返回抓取结果
+<a id="__codelineno-1-16" name="__codelineno-1-16" href="#__codelineno-1-16"></a>   │
+<a id="__codelineno-1-17" name="__codelineno-1-17" href="#__codelineno-1-17"></a>   └─── Other Agents...
+<a id="__codelineno-1-18" name="__codelineno-1-18" href="#__codelineno-1-18"></a>        │
+<a id="__codelineno-1-19" name="__codelineno-1-19" href="#__codelineno-1-19"></a>        ↓
+<a id="__codelineno-1-20" name="__codelineno-1-20" href="#__codelineno-1-20"></a>Lead Agent整合信息
+<a id="__codelineno-1-21" name="__codelineno-1-21" href="#__codelineno-1-21"></a>        │
+<a id="__codelineno-1-22" name="__codelineno-1-22" href="#__codelineno-1-22"></a>        │ (更新Task Plan状态)
+<a id="__codelineno-1-23" name="__codelineno-1-23" href="#__codelineno-1-23"></a>        │ (更新Result Artifact内容)
+<a id="__codelineno-1-24" name="__codelineno-1-24" href="#__codelineno-1-24"></a>        ↓
+<a id="__codelineno-1-25" name="__codelineno-1-25" href="#__codelineno-1-25"></a>   用户查看结果
+<a id="__codelineno-1-26" name="__codelineno-1-26" href="#__codelineno-1-26"></a>        │
+<a id="__codelineno-1-27" name="__codelineno-1-27" href="#__codelineno-1-27"></a>        │ (编辑Artifact或对话反馈)
+<a id="__codelineno-1-28" name="__codelineno-1-28" href="#__codelineno-1-28"></a>        ↓
+<a id="__codelineno-1-29" name="__codelineno-1-29" href="#__codelineno-1-29"></a>   Lead Agent根据反馈调整
+<a id="__codelineno-1-30" name="__codelineno-1-30" href="#__codelineno-1-30"></a>        │
+<a id="__codelineno-1-31" name="__codelineno-1-31" href="#__codelineno-1-31"></a>        │ (循环执行直到满意)
+<a id="__codelineno-1-32" name="__codelineno-1-32" href="#__codelineno-1-32"></a>        ↓
+<a id="__codelineno-1-33" name="__codelineno-1-33" href="#__codelineno-1-33"></a>      任务完成
+</code></pre></div>
+<h4 id="1">阶段1: 研究规划</h4>
+<ol>
+<li>用户提出研究需求</li>
+<li>Lead Agent分析需求，创建Task Plan Artifact和初始Result Artifact框架</li>
+<li>系统进入执行阶段</li>
+</ol>
+<h4 id="2">阶段2: 信息收集</h4>
+<ol>
+<li>Lead Agent根据Task Plan派发搜索任务</li>
+<li><strong>Search Agent读取Task Plan</strong>，了解具体搜索需求和上下文</li>
+<li>Search Agent独立执行搜索，<strong>返回结果给Lead Agent</strong>（不直接修改任何Artifact）</li>
+<li>Lead Agent接收结果后：</li>
+<li>更新Task Plan中的任务状态</li>
+<li>将信息整合到Result Artifact</li>
+<li>评估是否需要进一步抓取</li>
+<li>必要时派发URL给Web Crawl Agent，重复上述流程</li>
+</ol>
+<h4 id="3">阶段3: 协作优化</h4>
+<ol>
+<li><strong>任务完成后的交互</strong>：Lead Agent完成一轮任务执行，向用户展示更新后的Result Artifact</li>
+<li><strong>用户反馈方式：</strong></li>
+<li>直接编辑Result Artifact（修改内容、调整结构、添加要求）</li>
+<li>通过对话向Lead Agent提出改进要求（"需要更多临床数据"、"增加市场分析章节"）</li>
+<li><strong>Lead Agent响应</strong>：根据用户反馈调整Task Plan，派发新的任务或优化现有内容</li>
+<li><strong>迭代循环</strong>：重复执行直到用户满意</li>
+</ol>
+<h2 id="_5">📚 详细示例</h2>
+<h3 id="1-ai">示例1: AI医疗应用研究报告</h3>
+<p>Task Plan Artifact</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="gh"># AI医疗应用研究进度</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="gu">## 项目状态: 🔄 进行中</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="gu">## 当前执行: Search Agent - 搜索FDA批准的AI医疗设备</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="gu">### 研究大纲</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="gu">#### 1. AI医疗应用概述</span>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="k">-</span><span class="w"> </span>状态: ✅ 已完成 (信息充分度: 85%)
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="k">-</span><span class="w"> </span>来源: 12篇权威文献, 3个官方报告
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="k">-</span><span class="w"> </span>质量评估: 高质量，涵盖主要应用领域
+<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a>
+<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="gu">#### 2. 临床试验现状</span>
+<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a><span class="k">-</span><span class="w"> </span>状态: 🔄 进行中 (60%)
+<a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a><span class="k">-</span><span class="w"> </span>当前任务: 搜索2024年FDA批准的AI医疗设备清单
+<a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a><span class="k">-</span><span class="w"> </span>已收集: 15个批准设备，8个临床试验案例
+<a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a><span class="k">-</span><span class="w"> </span>下一步: 深度抓取具体产品信息和临床数据
+<a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a><span class="k">-</span><span class="w"> </span>[暂停此任务] [调整搜索策略]
+<a id="__codelineno-2-17" name="__codelineno-2-17" href="#__codelineno-2-17"></a>
+<a id="__codelineno-2-18" name="__codelineno-2-18" href="#__codelineno-2-18"></a><span class="gu">#### 3. 市场分析</span>
+<a id="__codelineno-2-19" name="__codelineno-2-19" href="#__codelineno-2-19"></a><span class="k">-</span><span class="w"> </span>状态: ⏳ 等待中
+<a id="__codelineno-2-20" name="__codelineno-2-20" href="#__codelineno-2-20"></a><span class="k">-</span><span class="w"> </span>依赖: 需要第2章完成后启动
+<a id="__codelineno-2-21" name="__codelineno-2-21" href="#__codelineno-2-21"></a><span class="k">-</span><span class="w"> </span>预计信息需求: 市场规模、主要厂商、投资趋势
+<a id="__codelineno-2-22" name="__codelineno-2-22" href="#__codelineno-2-22"></a>
+<a id="__codelineno-2-23" name="__codelineno-2-23" href="#__codelineno-2-23"></a><span class="gu">#### 4. 未来展望</span>
+<a id="__codelineno-2-24" name="__codelineno-2-24" href="#__codelineno-2-24"></a><span class="k">-</span><span class="w"> </span>状态: ⏳ 计划中
+<a id="__codelineno-2-25" name="__codelineno-2-25" href="#__codelineno-2-25"></a><span class="k">-</span><span class="w"> </span>用户备注: 重点关注监管政策变化
+</code></pre></div>
+<p>对应的Result Artifact (部分)</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="gh"># AI医疗应用研究报告</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="gu">## 1. AI医疗应用概述</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>人工智能在医疗领域的应用正在快速发展，主要集中在医学影像分析、药物发现、临床决策支持等领域。根据最新统计，截至2024年...
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="gu">### 1.1 医学影像AI</span>
+<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="k">-</span><span class="w"> </span><span class="gs">**应用领域**</span>: 放射学、病理学、眼科等
+<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a><span class="k">-</span><span class="w"> </span><span class="gs">**技术成熟度**</span>: 商业化程度较高
+<a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a><span class="k">-</span><span class="w"> </span><span class="gs">**代表产品**</span>: [具体产品列表]
+<a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a>
+<a id="__codelineno-3-12" name="__codelineno-3-12" href="#__codelineno-3-12"></a><span class="gu">### 1.2 临床决策支持</span>
+<a id="__codelineno-3-13" name="__codelineno-3-13" href="#__codelineno-3-13"></a><span class="k">-</span><span class="w"> </span><span class="gs">**应用场景**</span>: 疾病诊断、治疗方案推荐
+<a id="__codelineno-3-14" name="__codelineno-3-14" href="#__codelineno-3-14"></a><span class="k">-</span><span class="w"> </span><span class="gs">**技术挑战**</span>: 数据质量、模型可解释性
+<a id="__codelineno-3-15" name="__codelineno-3-15" href="#__codelineno-3-15"></a><span class="k">-</span><span class="w"> </span><span class="gs">**监管现状**</span>: FDA已批准多款产品
+<a id="__codelineno-3-16" name="__codelineno-3-16" href="#__codelineno-3-16"></a>
+<a id="__codelineno-3-17" name="__codelineno-3-17" href="#__codelineno-3-17"></a><span class="gu">## 2. 临床试验现状 [正在更新中...]</span>
+<a id="__codelineno-3-18" name="__codelineno-3-18" href="#__codelineno-3-18"></a>
+<a id="__codelineno-3-19" name="__codelineno-3-19" href="#__codelineno-3-19"></a><span class="gu">### 2.1 FDA批准设备统计</span>
+<a id="__codelineno-3-20" name="__codelineno-3-20" href="#__codelineno-3-20"></a>[正在收集最新数据...]
+<a id="__codelineno-3-21" name="__codelineno-3-21" href="#__codelineno-3-21"></a>
+<a id="__codelineno-3-22" name="__codelineno-3-22" href="#__codelineno-3-22"></a><span class="gu">### 2.2 临床试验分析</span>
+<a id="__codelineno-3-23" name="__codelineno-3-23" href="#__codelineno-3-23"></a>[等待Search Agent返回结果...]
+<a id="__codelineno-3-24" name="__codelineno-3-24" href="#__codelineno-3-24"></a>
+<a id="__codelineno-3-25" name="__codelineno-3-25" href="#__codelineno-3-25"></a>---
+<a id="__codelineno-3-26" name="__codelineno-3-26" href="#__codelineno-3-26"></a><span class="ge">*本报告由AI系统协助生成，用户可随时编辑修改*</span>
+</code></pre></div>
+<h3 id="2_1">示例2: 用户干预场景</h3>
+<h4 id="_6">场景: 用户想要添加新的研究方向</h4>
+<p><strong>用户操作方式1</strong>: 在Result Artifact中添加新章节框架</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="gu">## 5. 数据隐私与安全 [用户新增]</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="gu">### 5.1 HIPAA合规要求</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>[请补充相关信息]
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="gu">### 5.2 数据泄露案例分析</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>[需要收集近期案例]
+</code></pre></div>
+<p><strong>用户操作方式2</strong>: 通过对话向Lead Agent提出要求</p>
+<blockquote>
+<p>"我发现数据隐私是AI医疗的重要挑战，需要增加一个专门章节来分析HIPAA合规和安全技术方案"</p>
+</blockquote>
+<p><strong>系统响应</strong>: Lead Agent识别用户需求，自动更新Task Plan添加相应搜索任务</p>
+<h4 id="_7">场景: 用户对信息质量不满意</h4>
+<p><strong>用户操作方式1</strong>: 在Result Artifact中添加批注</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="gu">## 2. 临床试验现状</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>[当前内容多为新闻报道，缺少学术论文支撑，请补充更权威的研究数据]
+</code></pre></div>
+<p><strong>用户操作方式2</strong>: 通过对话提出具体要求</p>
+<blockquote>
+<p>"第2章的信息质量不够好，多是新闻报道，能不能重新搜索一些学术论文和FDA的官方数据？"</p>
+</blockquote>
+<p><strong>系统响应</strong>: Lead Agent理解反馈，更新Task Plan重新执行搜索任务</p>
+<h2 id="_8">⚙️ 功能设计要点</h2>
+<p>系统采用Lead Agent统一协调的方式，通过Task Plan展示进度，Subagent独立执行具体任务并返回结构化结果。Lead Agent负责质量评估和信息整合，用户通过编辑Result Artifact或对话来表达改进需求。整个过程实现多层质量控制，从Subagent的初步筛选到Lead Agent的综合评估，最终由用户进行质量把关。</p>
+<h2 id="_9">🎯 系统优势</h2>
+<p>相比传统的多层嵌套架构，这种设计具有更好的透明度和可控性。Task Plan提供完整的进度可视化，用户能清楚了解系统工作状态。通过简化交互模式，用户只需要编辑文档和正常对话，避免了复杂的任务管理界面。系统易于扩展新的Agent类型，支持不同研究场景的复用。</p>
+<h2 id="_10">🚀 实现路径</h2>
+<p>建议分四个阶段实施：首先实现Lead Agent和基础Artifact机制，开发核心的Search Agent和Web Crawl Agent；然后完善用户交互界面，支持实时进度跟踪和编辑反馈；接着增强信息质量评估和智能任务调度；最后扩展到更多研究场景，建立提示词模板库和最佳实践。</p>
+<h2 id="_11">✨ 关键创新点</h2>
+<ol>
+<li><strong>Artifact作为记忆载体</strong>: 解决了传统multi-agent系统的上下文管理问题</li>
+<li><strong>分层权限控制</strong>: Lead Agent全权限，Subagent只读Task Plan，用户只读Task Plan但可编辑Result</li>
+<li><strong>简化交互模式</strong>: 避免复杂的任务管理界面，用户通过编辑文档和对话来表达需求</li>
+<li><strong>双Artifact分离</strong>: Task Plan专注进度展示，Result Doc专注内容协作</li>
+<li><strong>渐进式协作</strong>: 从一次性生成转向迭代优化</li>
+<li><strong>透明化执行</strong>: 每个步骤都可追踪但不干扰执行</li>
+<li><strong>信息流单向性</strong>: Subagent → Lead Agent → Artifact，避免并发冲突</li>
+</ol>
+<p>这种设计让研究过程变成了一个真正的人机协作过程，充分发挥了人类的创造力和AI的信息处理能力。</p>
+<h1 id="multi-agent-">Multi-Agent研究系统 - 后端实施细节</h1>
+<h2 id="_12">🎯 核心功能模块</h2>
+<h3 id="1-human-in-the-loop">1. Human in the Loop 机制</h3>
+<p><strong>原始需求</strong>: 允许用户通过对话介入/打断agent执行的任务</p>
+<p><strong>实施细节</strong>:</p>
+<ul>
+<li><strong>基础控制接口</strong>:</li>
+</ul>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="k">class</span><span class="w"> </span><span class="nc">ExecutionController</span><span class="p">:</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">graph</span><span class="p">,</span> <span class="n">checkpointer</span><span class="p">):</span>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">graph</span> <span class="o">=</span> <span class="n">graph</span>
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">checkpointer</span> <span class="o">=</span> <span class="n">checkpointer</span>
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">is_paused</span> <span class="o">=</span> <span class="kc">False</span>
+<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">additional_context</span> <span class="o">=</span> <span class="p">[]</span>
+<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a>
+<a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a>    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">pause</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">thread_id</span><span class="p">):</span>
+<a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;暂停执行&quot;&quot;&quot;</span>
+<a id="__codelineno-6-10" name="__codelineno-6-10" href="#__codelineno-6-10"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">is_paused</span> <span class="o">=</span> <span class="kc">True</span>
+<a id="__codelineno-6-11" name="__codelineno-6-11" href="#__codelineno-6-11"></a>        <span class="c1"># LangGraph会在下个节点前自动保存checkpoint</span>
+<a id="__codelineno-6-12" name="__codelineno-6-12" href="#__codelineno-6-12"></a>
+<a id="__codelineno-6-13" name="__codelineno-6-13" href="#__codelineno-6-13"></a>    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">resume</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">thread_id</span><span class="p">):</span>
+<a id="__codelineno-6-14" name="__codelineno-6-14" href="#__codelineno-6-14"></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;恢复执行，带入用户补充的context&quot;&quot;&quot;</span>
+<a id="__codelineno-6-15" name="__codelineno-6-15" href="#__codelineno-6-15"></a>        <span class="n">config</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;configurable&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;thread_id&quot;</span><span class="p">:</span> <span class="n">thread_id</span><span class="p">}}</span>
+<a id="__codelineno-6-16" name="__codelineno-6-16" href="#__codelineno-6-16"></a>        <span class="n">state</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">graph</span><span class="o">.</span><span class="n">get_state</span><span class="p">(</span><span class="n">config</span><span class="p">)</span>
+<a id="__codelineno-6-17" name="__codelineno-6-17" href="#__codelineno-6-17"></a>
+<a id="__codelineno-6-18" name="__codelineno-6-18" href="#__codelineno-6-18"></a>        <span class="c1"># 将补充的context加入state</span>
+<a id="__codelineno-6-19" name="__codelineno-6-19" href="#__codelineno-6-19"></a>        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">additional_context</span><span class="p">:</span>
+<a id="__codelineno-6-20" name="__codelineno-6-20" href="#__codelineno-6-20"></a>            <span class="n">state</span><span class="o">.</span><span class="n">values</span><span class="p">[</span><span class="s2">&quot;user_context&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">additional_context</span><span class="p">)</span>
+<a id="__codelineno-6-21" name="__codelineno-6-21" href="#__codelineno-6-21"></a>            <span class="bp">self</span><span class="o">.</span><span class="n">additional_context</span> <span class="o">=</span> <span class="p">[]</span>
+<a id="__codelineno-6-22" name="__codelineno-6-22" href="#__codelineno-6-22"></a>
+<a id="__codelineno-6-23" name="__codelineno-6-23" href="#__codelineno-6-23"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">is_paused</span> <span class="o">=</span> <span class="kc">False</span>
+<a id="__codelineno-6-24" name="__codelineno-6-24" href="#__codelineno-6-24"></a>        <span class="k">return</span> <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">graph</span><span class="o">.</span><span class="n">invoke</span><span class="p">(</span><span class="kc">None</span><span class="p">,</span> <span class="n">config</span><span class="p">)</span>
+<a id="__codelineno-6-25" name="__codelineno-6-25" href="#__codelineno-6-25"></a>
+<a id="__codelineno-6-26" name="__codelineno-6-26" href="#__codelineno-6-26"></a>    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">rollback</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">thread_id</span><span class="p">,</span> <span class="n">checkpoint_id</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+<a id="__codelineno-6-27" name="__codelineno-6-27" href="#__codelineno-6-27"></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;回滚到指定checkpoint&quot;&quot;&quot;</span>
+<a id="__codelineno-6-28" name="__codelineno-6-28" href="#__codelineno-6-28"></a>        <span class="n">config</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;configurable&quot;</span><span class="p">:</span> <span class="p">{</span>
+<a id="__codelineno-6-29" name="__codelineno-6-29" href="#__codelineno-6-29"></a>            <span class="s2">&quot;thread_id&quot;</span><span class="p">:</span> <span class="n">thread_id</span><span class="p">,</span>
+<a id="__codelineno-6-30" name="__codelineno-6-30" href="#__codelineno-6-30"></a>            <span class="s2">&quot;checkpoint_id&quot;</span><span class="p">:</span> <span class="n">checkpoint_id</span>  <span class="c1"># 如果None则回滚到上一个</span>
+<a id="__codelineno-6-31" name="__codelineno-6-31" href="#__codelineno-6-31"></a>        <span class="p">}}</span>
+<a id="__codelineno-6-32" name="__codelineno-6-32" href="#__codelineno-6-32"></a>        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">graph</span><span class="o">.</span><span class="n">get_state</span><span class="p">(</span><span class="n">config</span><span class="p">)</span>
+<a id="__codelineno-6-33" name="__codelineno-6-33" href="#__codelineno-6-33"></a>
+<a id="__codelineno-6-34" name="__codelineno-6-34" href="#__codelineno-6-34"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">add_context</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">user_query</span><span class="p">):</span>
+<a id="__codelineno-6-35" name="__codelineno-6-35" href="#__codelineno-6-35"></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;暂停状态下，用户输入会被添加为补充context&quot;&quot;&quot;</span>
+<a id="__codelineno-6-36" name="__codelineno-6-36" href="#__codelineno-6-36"></a>        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">is_paused</span><span class="p">:</span>
+<a id="__codelineno-6-37" name="__codelineno-6-37" href="#__codelineno-6-37"></a>            <span class="bp">self</span><span class="o">.</span><span class="n">additional_context</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">user_query</span><span class="p">)</span>
+</code></pre></div>
+<ul>
+<li><strong>Lead Agent处理补充context</strong>:</li>
+</ul>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="k">def</span><span class="w"> </span><span class="nf">lead_agent_node</span><span class="p">(</span><span class="n">state</span><span class="p">):</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>    <span class="c1"># 检查是否有用户补充的context</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>    <span class="n">user_context</span> <span class="o">=</span> <span class="n">state</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;user_context&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">)</span>
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a>    <span class="c1"># 构建prompt时包含用户补充信息</span>
+<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a>    <span class="n">prompt</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;&quot;&quot;</span>
+<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a><span class="s2">    原始任务: </span><span class="si">{</span><span class="n">state</span><span class="p">[</span><span class="s2">&quot;original_task&quot;</span><span class="p">]</span><span class="si">}</span>
+<a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a><span class="s2">    当前进度: </span><span class="si">{</span><span class="n">state</span><span class="p">[</span><span class="s2">&quot;progress&quot;</span><span class="p">]</span><span class="si">}</span>
+<a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a>
+<a id="__codelineno-7-10" name="__codelineno-7-10" href="#__codelineno-7-10"></a><span class="s2">    </span><span class="si">{</span><span class="sa">f</span><span class="s2">&quot;用户补充要求: </span><span class="si">{</span><span class="n">user_context</span><span class="si">}</span><span class="s2">&quot;</span><span class="w"> </span><span class="k">if</span><span class="w"> </span><span class="n">user_context</span><span class="w"> </span><span class="k">else</span><span class="w"> </span><span class="s2">&quot;&quot;</span><span class="si">}</span>
+<a id="__codelineno-7-11" name="__codelineno-7-11" href="#__codelineno-7-11"></a>
+<a id="__codelineno-7-12" name="__codelineno-7-12" href="#__codelineno-7-12"></a><span class="s2">    请继续执行任务...</span>
+<a id="__codelineno-7-13" name="__codelineno-7-13" href="#__codelineno-7-13"></a><span class="s2">    &quot;&quot;&quot;</span>
+<a id="__codelineno-7-14" name="__codelineno-7-14" href="#__codelineno-7-14"></a>
+<a id="__codelineno-7-15" name="__codelineno-7-15" href="#__codelineno-7-15"></a>    <span class="c1"># 清空已使用的user_context</span>
+<a id="__codelineno-7-16" name="__codelineno-7-16" href="#__codelineno-7-16"></a>    <span class="n">state</span><span class="p">[</span><span class="s2">&quot;user_context&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span>
+<a id="__codelineno-7-17" name="__codelineno-7-17" href="#__codelineno-7-17"></a>    <span class="k">return</span> <span class="n">state</span>
+</code></pre></div>
+<ul>
+<li><strong>使用示例</strong>:</li>
+</ul>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="c1"># 用户发起任务</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="n">controller</span> <span class="o">=</span> <span class="n">ExecutionController</span><span class="p">(</span><span class="n">graph</span><span class="p">,</span> <span class="n">checkpointer</span><span class="p">)</span>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="n">task</span> <span class="o">=</span> <span class="n">controller</span><span class="o">.</span><span class="n">start</span><span class="p">(</span><span class="s2">&quot;研究AI医疗应用&quot;</span><span class="p">)</span>
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="c1"># 用户暂停</span>
+<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a><span class="k">await</span> <span class="n">controller</span><span class="o">.</span><span class="n">pause</span><span class="p">(</span><span class="s2">&quot;thread_123&quot;</span><span class="p">)</span>
+<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a>
+<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a><span class="c1"># 用户补充信息（在暂停状态下）</span>
+<a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a><span class="n">controller</span><span class="o">.</span><span class="n">add_context</span><span class="p">(</span><span class="s2">&quot;重点关注FDA批准的产品&quot;</span><span class="p">)</span>
+<a id="__codelineno-8-10" name="__codelineno-8-10" href="#__codelineno-8-10"></a><span class="n">controller</span><span class="o">.</span><span class="n">add_context</span><span class="p">(</span><span class="s2">&quot;需要包含2024年的最新数据&quot;</span><span class="p">)</span>
+<a id="__codelineno-8-11" name="__codelineno-8-11" href="#__codelineno-8-11"></a>
+<a id="__codelineno-8-12" name="__codelineno-8-12" href="#__codelineno-8-12"></a><span class="c1"># 恢复执行（自动带入补充的context）</span>
+<a id="__codelineno-8-13" name="__codelineno-8-13" href="#__codelineno-8-13"></a><span class="k">await</span> <span class="n">controller</span><span class="o">.</span><span class="n">resume</span><span class="p">(</span><span class="s2">&quot;thread_123&quot;</span><span class="p">)</span>
+<a id="__codelineno-8-14" name="__codelineno-8-14" href="#__codelineno-8-14"></a>
+<a id="__codelineno-8-15" name="__codelineno-8-15" href="#__codelineno-8-15"></a><span class="c1"># 如需回滚</span>
+<a id="__codelineno-8-16" name="__codelineno-8-16" href="#__codelineno-8-16"></a><span class="k">await</span> <span class="n">controller</span><span class="o">.</span><span class="n">rollback</span><span class="p">(</span><span class="s2">&quot;thread_123&quot;</span><span class="p">)</span>
+</code></pre></div>
+<h3 id="2-context-compression">2. Context Compression 策略</h3>
+<p><strong>原始需求</strong>: 智能判断对context进行压缩（初期2w字符截断）</p>
+<p><strong>实施细节</strong>:</p>
+<ul>
+<li><strong>分级压缩策略</strong>:</li>
+</ul>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="c1"># 伪代码示例</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="k">class</span><span class="w"> </span><span class="nc">ContextManager</span><span class="p">:</span>
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>    <span class="n">LEVELS</span> <span class="o">=</span> <span class="p">{</span>
+<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a>        <span class="s1">&#39;full&#39;</span><span class="p">:</span> <span class="mi">50000</span><span class="p">,</span>      <span class="c1"># 完整上下文</span>
+<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a>        <span class="s1">&#39;normal&#39;</span><span class="p">:</span> <span class="mi">20000</span><span class="p">,</span>    <span class="c1"># 标准压缩</span>
+<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a>        <span class="s1">&#39;compact&#39;</span><span class="p">:</span> <span class="mi">10000</span><span class="p">,</span>   <span class="c1"># 紧凑模式</span>
+<a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a>        <span class="s1">&#39;minimal&#39;</span><span class="p">:</span> <span class="mi">5000</span>     <span class="c1"># 最小化</span>
+<a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a>    <span class="p">}</span>
+</code></pre></div>
+<ul>
+<li>
+<p><strong>智能压缩算法</strong>:</p>
+</li>
+<li>
+<p><strong>优先级保留</strong>: 保留最近N轮对话 + 关键决策点</p>
+</li>
+<li><strong>摘要替换</strong>: 将历史对话压缩为摘要</li>
+<li><strong>结构化压缩</strong>: 保留JSON/XML结构，压缩描述性文本</li>
+<li>
+<p><strong>相关性筛选</strong>: 基于当前任务筛选相关上下文</p>
+</li>
+<li>
+<p><strong>压缩触发条件</strong>:</p>
+</li>
+<li>
+<p>Token数超过阈值</p>
+</li>
+<li>内存使用超限</li>
+<li>特定任务类型（如简单搜索）自动使用紧凑模式</li>
+</ul>
+<h3 id="3_1">3. 非阻塞式响应机制</h3>
+<p><strong>原始需求</strong>: Lead Agent流式返回，Subagent批量返回</p>
+<p><strong>实施细节</strong>:</p>
+<ul>
+<li><strong>流式处理架构</strong>:</li>
+</ul>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="c1"># Lead Agent 流式返回</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">lead_agent_stream</span><span class="p">():</span>
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>    <span class="k">async</span> <span class="k">for</span> <span class="n">chunk</span> <span class="ow">in</span> <span class="n">model</span><span class="o">.</span><span class="n">astream</span><span class="p">():</span>
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a>        <span class="k">yield</span> <span class="n">chunk</span>
+<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a>        <span class="k">await</span> <span class="n">update_artifact_realtime</span><span class="p">(</span><span class="n">chunk</span><span class="p">)</span>
+<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a>
+<a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a><span class="c1"># Subagent 批量返回</span>
+<a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">subagent_execute</span><span class="p">():</span>
+<a id="__codelineno-10-9" name="__codelineno-10-9" href="#__codelineno-10-9"></a>    <span class="n">result</span> <span class="o">=</span> <span class="k">await</span> <span class="n">model</span><span class="o">.</span><span class="n">ainvoke</span><span class="p">()</span>
+<a id="__codelineno-10-10" name="__codelineno-10-10" href="#__codelineno-10-10"></a>    <span class="k">return</span> <span class="n">parse_complete_result</span><span class="p">(</span><span class="n">result</span><span class="p">)</span>
+</code></pre></div>
+<ul>
+<li>
+<p><strong>并发执行管理</strong>:</p>
+</li>
+<li>
+<p>使用asyncio管理多个Subagent并发</p>
+</li>
+<li>实现任务队列和线程池</li>
+<li>
+<p>支持动态调整并发数</p>
+</li>
+<li>
+<p><strong>结果缓冲策略</strong>:</p>
+</li>
+<li>
+<p>Lead Agent: 逐字符/逐词流式输出</p>
+</li>
+<li>Subagent: 结果完成后批量返回</li>
+<li>支持部分结果预览（如搜索结果实时显示前N条）</li>
+</ul>
+<h3 id="4-langchainlanggraph">4. LangChain/LangGraph 集成</h3>
+<p><strong>原始需求</strong>: 使用成熟框架避免造轮子</p>
+<p><strong>实施细节</strong>:</p>
+<ul>
+<li><strong>Graph设计</strong>:</li>
+</ul>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="c1"># 使用LangGraph构建工作流</span>
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">langgraph.graph</span><span class="w"> </span><span class="kn">import</span> <span class="n">StateGraph</span>
+<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="kn">from</span><span class="w"> </span><span class="nn">langgraph.checkpoint.memory</span><span class="w"> </span><span class="kn">import</span> <span class="n">MemorySaver</span>
+<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a>
+<a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a><span class="c1"># 配置checkpoint</span>
+<a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a><span class="n">memory</span> <span class="o">=</span> <span class="n">MemorySaver</span><span class="p">()</span>
+<a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a>
+<a id="__codelineno-11-8" name="__codelineno-11-8" href="#__codelineno-11-8"></a><span class="n">workflow</span> <span class="o">=</span> <span class="n">StateGraph</span><span class="p">(</span><span class="n">AgentState</span><span class="p">)</span>
+<a id="__codelineno-11-9" name="__codelineno-11-9" href="#__codelineno-11-9"></a><span class="n">workflow</span><span class="o">.</span><span class="n">add_node</span><span class="p">(</span><span class="s2">&quot;lead_agent&quot;</span><span class="p">,</span> <span class="n">lead_agent_node</span><span class="p">)</span>
+<a id="__codelineno-11-10" name="__codelineno-11-10" href="#__codelineno-11-10"></a><span class="n">workflow</span><span class="o">.</span><span class="n">add_node</span><span class="p">(</span><span class="s2">&quot;search_agent&quot;</span><span class="p">,</span> <span class="n">search_agent_node</span><span class="p">)</span>
+<a id="__codelineno-11-11" name="__codelineno-11-11" href="#__codelineno-11-11"></a><span class="n">workflow</span><span class="o">.</span><span class="n">add_node</span><span class="p">(</span><span class="s2">&quot;crawl_agent&quot;</span><span class="p">,</span> <span class="n">crawl_agent_node</span><span class="p">)</span>
+<a id="__codelineno-11-12" name="__codelineno-11-12" href="#__codelineno-11-12"></a>
+<a id="__codelineno-11-13" name="__codelineno-11-13" href="#__codelineno-11-13"></a><span class="c1"># 配置条件边</span>
+<a id="__codelineno-11-14" name="__codelineno-11-14" href="#__codelineno-11-14"></a><span class="n">workflow</span><span class="o">.</span><span class="n">add_conditional_edges</span><span class="p">(</span>
+<a id="__codelineno-11-15" name="__codelineno-11-15" href="#__codelineno-11-15"></a>    <span class="s2">&quot;lead_agent&quot;</span><span class="p">,</span>
+<a id="__codelineno-11-16" name="__codelineno-11-16" href="#__codelineno-11-16"></a>    <span class="n">route_to_subagent</span><span class="p">,</span>
+<a id="__codelineno-11-17" name="__codelineno-11-17" href="#__codelineno-11-17"></a>    <span class="p">{</span>
+<a id="__codelineno-11-18" name="__codelineno-11-18" href="#__codelineno-11-18"></a>        <span class="s2">&quot;search&quot;</span><span class="p">:</span> <span class="s2">&quot;search_agent&quot;</span><span class="p">,</span>
+<a id="__codelineno-11-19" name="__codelineno-11-19" href="#__codelineno-11-19"></a>        <span class="s2">&quot;crawl&quot;</span><span class="p">:</span> <span class="s2">&quot;crawl_agent&quot;</span><span class="p">,</span>
+<a id="__codelineno-11-20" name="__codelineno-11-20" href="#__codelineno-11-20"></a>        <span class="s2">&quot;continue&quot;</span><span class="p">:</span> <span class="s2">&quot;lead_agent&quot;</span>
+<a id="__codelineno-11-21" name="__codelineno-11-21" href="#__codelineno-11-21"></a>    <span class="p">}</span>
+<a id="__codelineno-11-22" name="__codelineno-11-22" href="#__codelineno-11-22"></a><span class="p">)</span>
+<a id="__codelineno-11-23" name="__codelineno-11-23" href="#__codelineno-11-23"></a>
+<a id="__codelineno-11-24" name="__codelineno-11-24" href="#__codelineno-11-24"></a><span class="c1"># 编译带checkpoint的graph</span>
+<a id="__codelineno-11-25" name="__codelineno-11-25" href="#__codelineno-11-25"></a><span class="n">app</span> <span class="o">=</span> <span class="n">workflow</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="n">checkpointer</span><span class="o">=</span><span class="n">memory</span><span class="p">)</span>
+</code></pre></div>
+<ul>
+<li>
+<p><strong>自定义组件</strong>:</p>
+</li>
+<li>
+<p>继承BaseAgent实现自定义Agent逻辑</p>
+</li>
+<li>自定义Tool包装器支持权限控制</li>
+<li>
+<p>实现自定义Memory组件管理Artifact</p>
+</li>
+<li>
+<p><strong>状态管理</strong>:</p>
+</li>
+<li>
+<p>使用LangGraph的State机制管理任务状态</p>
+</li>
+<li>利用内置Checkpointer支持断点续传</li>
+</ul>
+<h3 id="5">5. 多模型支持与思考模型集成</h3>
+<p><strong>原始需求</strong>: 支持不同agent调用不同模型，正确解析think部分</p>
+<p><strong>实施细节</strong>:</p>
+<ul>
+<li><strong>模型配置管理</strong>:</li>
+</ul>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="nt">models</span><span class="p">:</span>
+<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="w">  </span><span class="nt">lead_agent</span><span class="p">:</span>
+<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="w">    </span><span class="nt">provider</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;anthropic&quot;</span>
+<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a><span class="w">    </span><span class="nt">model</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;claude-3-opus&quot;</span>
+<a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a><span class="w">    </span><span class="nt">temperature</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.7</span>
+<a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a><span class="w">    </span><span class="nt">supports_thinking</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+<a id="__codelineno-12-7" name="__codelineno-12-7" href="#__codelineno-12-7"></a>
+<a id="__codelineno-12-8" name="__codelineno-12-8" href="#__codelineno-12-8"></a><span class="w">  </span><span class="nt">search_agent</span><span class="p">:</span>
+<a id="__codelineno-12-9" name="__codelineno-12-9" href="#__codelineno-12-9"></a><span class="w">    </span><span class="nt">provider</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;openai&quot;</span>
+<a id="__codelineno-12-10" name="__codelineno-12-10" href="#__codelineno-12-10"></a><span class="w">    </span><span class="nt">model</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;gpt-4-turbo&quot;</span>
+<a id="__codelineno-12-11" name="__codelineno-12-11" href="#__codelineno-12-11"></a><span class="w">    </span><span class="nt">temperature</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.3</span>
+<a id="__codelineno-12-12" name="__codelineno-12-12" href="#__codelineno-12-12"></a><span class="w">    </span><span class="nt">supports_thinking</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span>
+</code></pre></div>
+<ul>
+<li><strong>思考模型处理</strong>:</li>
+</ul>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="k">class</span><span class="w"> </span><span class="nc">ThinkingModelParser</span><span class="p">:</span>
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">parse_response</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">response</span><span class="p">):</span>
+<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a>        <span class="n">thinking</span> <span class="o">=</span> <span class="n">extract_thinking_tags</span><span class="p">(</span><span class="n">response</span><span class="p">)</span>
+<a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a>        <span class="n">answer</span> <span class="o">=</span> <span class="n">extract_answer_tags</span><span class="p">(</span><span class="n">response</span><span class="p">)</span>
+<a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a>        <span class="k">return</span> <span class="p">{</span>
+<a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a>            <span class="s1">&#39;thinking&#39;</span><span class="p">:</span> <span class="n">thinking</span><span class="p">,</span>  <span class="c1"># 内部推理过程</span>
+<a id="__codelineno-13-7" name="__codelineno-13-7" href="#__codelineno-13-7"></a>            <span class="s1">&#39;answer&#39;</span><span class="p">:</span> <span class="n">answer</span><span class="p">,</span>      <span class="c1"># 实际响应</span>
+<a id="__codelineno-13-8" name="__codelineno-13-8" href="#__codelineno-13-8"></a>            <span class="s1">&#39;metadata&#39;</span><span class="p">:</span> <span class="p">{</span><span class="o">...</span><span class="p">}</span>      <span class="c1"># 其他元数据</span>
+<a id="__codelineno-13-9" name="__codelineno-13-9" href="#__codelineno-13-9"></a>        <span class="p">}</span>
+</code></pre></div>
+<ul>
+<li>
+<p><strong>模型切换策略</strong>:</p>
+</li>
+<li>
+<p>基于任务类型自动选择模型</p>
+</li>
+<li>支持fallback机制（主模型失败切换备用）</li>
+<li>成本优化（简单任务用小模型）</li>
+</ul>
+<h3 id="6-xml">6. XML工具调用系统</h3>
+<p><strong>原始需求</strong>: 不用tool call接口，自己设计XML形式的函数调用</p>
+<p><strong>实施细节</strong>:</p>
+<ul>
+<li><strong>统一的XML Schema</strong>:</li>
+</ul>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="cm">&lt;!-- 工具定义 --&gt;</span>
+<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="nt">&lt;tool&gt;</span>
+<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a><span class="w">  </span><span class="nt">&lt;name&gt;</span>web_search<span class="nt">&lt;/name&gt;</span>
+<a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a><span class="w">  </span><span class="nt">&lt;description&gt;</span>Search<span class="w"> </span>the<span class="w"> </span>web<span class="w"> </span>for<span class="w"> </span>information<span class="nt">&lt;/description&gt;</span>
+<a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a><span class="w">  </span><span class="nt">&lt;parameters&gt;</span>
+<a id="__codelineno-14-6" name="__codelineno-14-6" href="#__codelineno-14-6"></a><span class="w">    </span><span class="nt">&lt;param</span><span class="w"> </span><span class="na">name=</span><span class="s">&quot;query&quot;</span><span class="w"> </span><span class="na">type=</span><span class="s">&quot;string&quot;</span><span class="w"> </span><span class="na">required=</span><span class="s">&quot;true&quot;</span><span class="nt">/&gt;</span>
+<a id="__codelineno-14-7" name="__codelineno-14-7" href="#__codelineno-14-7"></a><span class="w">    </span><span class="nt">&lt;param</span><span class="w"> </span><span class="na">name=</span><span class="s">&quot;max_results&quot;</span><span class="w"> </span><span class="na">type=</span><span class="s">&quot;int&quot;</span><span class="w"> </span><span class="na">default=</span><span class="s">&quot;10&quot;</span><span class="nt">/&gt;</span>
+<a id="__codelineno-14-8" name="__codelineno-14-8" href="#__codelineno-14-8"></a><span class="w">  </span><span class="nt">&lt;/parameters&gt;</span>
+<a id="__codelineno-14-9" name="__codelineno-14-9" href="#__codelineno-14-9"></a><span class="w">  </span><span class="nt">&lt;permissions&gt;</span>
+<a id="__codelineno-14-10" name="__codelineno-14-10" href="#__codelineno-14-10"></a><span class="w">    </span><span class="nt">&lt;require_approval&gt;</span>false<span class="nt">&lt;/require_approval&gt;</span>
+<a id="__codelineno-14-11" name="__codelineno-14-11" href="#__codelineno-14-11"></a><span class="w">  </span><span class="nt">&lt;/permissions&gt;</span>
+<a id="__codelineno-14-12" name="__codelineno-14-12" href="#__codelineno-14-12"></a><span class="nt">&lt;/tool&gt;</span>
+<a id="__codelineno-14-13" name="__codelineno-14-13" href="#__codelineno-14-13"></a>
+<a id="__codelineno-14-14" name="__codelineno-14-14" href="#__codelineno-14-14"></a><span class="cm">&lt;!-- 工具调用 --&gt;</span>
+<a id="__codelineno-14-15" name="__codelineno-14-15" href="#__codelineno-14-15"></a><span class="nt">&lt;tool_call&gt;</span>
+<a id="__codelineno-14-16" name="__codelineno-14-16" href="#__codelineno-14-16"></a><span class="w">  </span><span class="nt">&lt;name&gt;</span>web_search<span class="nt">&lt;/name&gt;</span>
+<a id="__codelineno-14-17" name="__codelineno-14-17" href="#__codelineno-14-17"></a><span class="w">  </span><span class="nt">&lt;params&gt;</span>
+<a id="__codelineno-14-18" name="__codelineno-14-18" href="#__codelineno-14-18"></a><span class="w">    </span><span class="nt">&lt;query&gt;</span>AI<span class="w"> </span>medical<span class="w"> </span>applications<span class="w"> </span>FDA<span class="w"> </span>approval<span class="nt">&lt;/query&gt;</span>
+<a id="__codelineno-14-19" name="__codelineno-14-19" href="#__codelineno-14-19"></a><span class="w">    </span><span class="nt">&lt;max_results&gt;</span>20<span class="nt">&lt;/max_results&gt;</span>
+<a id="__codelineno-14-20" name="__codelineno-14-20" href="#__codelineno-14-20"></a><span class="w">  </span><span class="nt">&lt;/params&gt;</span>
+<a id="__codelineno-14-21" name="__codelineno-14-21" href="#__codelineno-14-21"></a><span class="nt">&lt;/tool_call&gt;</span>
+</code></pre></div>
+<ul>
+<li><strong>提示词生成器</strong>:</li>
+</ul>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="k">class</span><span class="w"> </span><span class="nc">ToolPromptGenerator</span><span class="p">:</span>
+<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">generate_system_prompt</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">tools</span><span class="p">):</span>
+<a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a>        <span class="c1"># 自动生成工具使用说明</span>
+<a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a>        <span class="k">return</span> <span class="sa">f</span><span class="s2">&quot;&quot;&quot;</span>
+<a id="__codelineno-15-5" name="__codelineno-15-5" href="#__codelineno-15-5"></a><span class="s2">        Available tools:</span>
+<a id="__codelineno-15-6" name="__codelineno-15-6" href="#__codelineno-15-6"></a><span class="s2">        </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">format_tools_xml</span><span class="p">(</span><span class="n">tools</span><span class="p">)</span><span class="si">}</span>
+<a id="__codelineno-15-7" name="__codelineno-15-7" href="#__codelineno-15-7"></a>
+<a id="__codelineno-15-8" name="__codelineno-15-8" href="#__codelineno-15-8"></a><span class="s2">        To use a tool, wrap your call in &lt;tool_call&gt; tags...</span>
+<a id="__codelineno-15-9" name="__codelineno-15-9" href="#__codelineno-15-9"></a><span class="s2">        &quot;&quot;&quot;</span>
+</code></pre></div>
+<ul>
+<li>
+<p><strong>动态工具注册</strong>:</p>
+</li>
+<li>
+<p>支持运行时注册新工具</p>
+</li>
+<li>自动生成对应的XML schema和提示词</li>
+<li>工具版本管理</li>
+</ul>
+<h3 id="7-robust-xml">7. Robust XML解析</h3>
+<p><strong>原始需求</strong>: 健壮的XML解析函数</p>
+<p><strong>实施细节</strong>:</p>
+<ul>
+<li><strong>多层解析策略</strong>:</li>
+</ul>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="k">class</span><span class="w"> </span><span class="nc">RobustXMLParser</span><span class="p">:</span>
+<a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">parse</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">text</span><span class="p">):</span>
+<a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a>        <span class="c1"># 1. 尝试标准XML解析</span>
+<a id="__codelineno-16-4" name="__codelineno-16-4" href="#__codelineno-16-4"></a>        <span class="k">try</span><span class="p">:</span>
+<a id="__codelineno-16-5" name="__codelineno-16-5" href="#__codelineno-16-5"></a>            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">standard_parse</span><span class="p">(</span><span class="n">text</span><span class="p">)</span>
+<a id="__codelineno-16-6" name="__codelineno-16-6" href="#__codelineno-16-6"></a>        <span class="k">except</span><span class="p">:</span>
+<a id="__codelineno-16-7" name="__codelineno-16-7" href="#__codelineno-16-7"></a>            <span class="k">pass</span>
+<a id="__codelineno-16-8" name="__codelineno-16-8" href="#__codelineno-16-8"></a>
+<a id="__codelineno-16-9" name="__codelineno-16-9" href="#__codelineno-16-9"></a>        <span class="c1"># 2. 尝试修复常见错误</span>
+<a id="__codelineno-16-10" name="__codelineno-16-10" href="#__codelineno-16-10"></a>        <span class="n">fixed</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">fix_common_issues</span><span class="p">(</span><span class="n">text</span><span class="p">)</span>
+<a id="__codelineno-16-11" name="__codelineno-16-11" href="#__codelineno-16-11"></a>        <span class="k">try</span><span class="p">:</span>
+<a id="__codelineno-16-12" name="__codelineno-16-12" href="#__codelineno-16-12"></a>            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">standard_parse</span><span class="p">(</span><span class="n">fixed</span><span class="p">)</span>
+<a id="__codelineno-16-13" name="__codelineno-16-13" href="#__codelineno-16-13"></a>        <span class="k">except</span><span class="p">:</span>
+<a id="__codelineno-16-14" name="__codelineno-16-14" href="#__codelineno-16-14"></a>            <span class="k">pass</span>
+<a id="__codelineno-16-15" name="__codelineno-16-15" href="#__codelineno-16-15"></a>
+<a id="__codelineno-16-16" name="__codelineno-16-16" href="#__codelineno-16-16"></a>        <span class="c1"># 3. 使用正则提取</span>
+<a id="__codelineno-16-17" name="__codelineno-16-17" href="#__codelineno-16-17"></a>        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">regex_fallback</span><span class="p">(</span><span class="n">text</span><span class="p">)</span>
+<a id="__codelineno-16-18" name="__codelineno-16-18" href="#__codelineno-16-18"></a>
+<a id="__codelineno-16-19" name="__codelineno-16-19" href="#__codelineno-16-19"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">fix_common_issues</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">text</span><span class="p">):</span>
+<a id="__codelineno-16-20" name="__codelineno-16-20" href="#__codelineno-16-20"></a>        <span class="c1"># 修复未闭合标签</span>
+<a id="__codelineno-16-21" name="__codelineno-16-21" href="#__codelineno-16-21"></a>        <span class="c1"># 转义特殊字符</span>
+<a id="__codelineno-16-22" name="__codelineno-16-22" href="#__codelineno-16-22"></a>        <span class="c1"># 处理嵌套错误</span>
+<a id="__codelineno-16-23" name="__codelineno-16-23" href="#__codelineno-16-23"></a>        <span class="k">pass</span>
+</code></pre></div>
+<ul>
+<li>
+<p><strong>错误恢复机制</strong>:</p>
+</li>
+<li>
+<p>部分解析成功时返回可用部分</p>
+</li>
+<li>记录解析失败的详细信息</li>
+<li>
+<p>提供修复建议</p>
+</li>
+<li>
+<p><strong>验证层</strong>:</p>
+</li>
+<li>
+<p>Schema验证</p>
+</li>
+<li>业务逻辑验证</li>
+<li>安全性检查（防止注入）</li>
+</ul>
+<h3 id="8-logging">8. 完善的Logging系统</h3>
+<p><strong>原始需求</strong>: 跟踪所有行为：模型I/O、token count、工具调用</p>
+<p><strong>实施细节</strong>:</p>
+<ul>
+<li><strong>分层日志架构</strong>:</li>
+</ul>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a><span class="k">class</span><span class="w"> </span><span class="nc">MultiAgentLogger</span><span class="p">:</span>
+<a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a>    <span class="n">LEVELS</span> <span class="o">=</span> <span class="p">{</span>
+<a id="__codelineno-17-3" name="__codelineno-17-3" href="#__codelineno-17-3"></a>        <span class="s1">&#39;SYSTEM&#39;</span><span class="p">:</span> <span class="n">logging</span><span class="o">.</span><span class="n">CRITICAL</span><span class="p">,</span>     <span class="c1"># 系统级事件</span>
+<a id="__codelineno-17-4" name="__codelineno-17-4" href="#__codelineno-17-4"></a>        <span class="s1">&#39;AGENT&#39;</span><span class="p">:</span> <span class="n">logging</span><span class="o">.</span><span class="n">INFO</span><span class="p">,</span>          <span class="c1"># Agent决策</span>
+<a id="__codelineno-17-5" name="__codelineno-17-5" href="#__codelineno-17-5"></a>        <span class="s1">&#39;TOOL&#39;</span><span class="p">:</span> <span class="n">logging</span><span class="o">.</span><span class="n">INFO</span><span class="p">,</span>           <span class="c1"># 工具调用</span>
+<a id="__codelineno-17-6" name="__codelineno-17-6" href="#__codelineno-17-6"></a>        <span class="s1">&#39;MODEL&#39;</span><span class="p">:</span> <span class="n">logging</span><span class="o">.</span><span class="n">DEBUG</span><span class="p">,</span>         <span class="c1"># 模型交互</span>
+<a id="__codelineno-17-7" name="__codelineno-17-7" href="#__codelineno-17-7"></a>        <span class="s1">&#39;TOKEN&#39;</span><span class="p">:</span> <span class="n">logging</span><span class="o">.</span><span class="n">DEBUG</span>          <span class="c1"># Token统计</span>
+<a id="__codelineno-17-8" name="__codelineno-17-8" href="#__codelineno-17-8"></a>    <span class="p">}</span>
+</code></pre></div>
+<ul>
+<li><strong>结构化日志格式</strong>:</li>
+</ul>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a><span class="p">{</span>
+<a id="__codelineno-18-2" name="__codelineno-18-2" href="#__codelineno-18-2"></a><span class="w">  </span><span class="nt">&quot;timestamp&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;2024-01-20T10:30:00Z&quot;</span><span class="p">,</span>
+<a id="__codelineno-18-3" name="__codelineno-18-3" href="#__codelineno-18-3"></a><span class="w">  </span><span class="nt">&quot;session_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;sess_123&quot;</span><span class="p">,</span>
+<a id="__codelineno-18-4" name="__codelineno-18-4" href="#__codelineno-18-4"></a><span class="w">  </span><span class="nt">&quot;agent&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;lead_agent&quot;</span><span class="p">,</span>
+<a id="__codelineno-18-5" name="__codelineno-18-5" href="#__codelineno-18-5"></a><span class="w">  </span><span class="nt">&quot;event_type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;model_call&quot;</span><span class="p">,</span>
+<a id="__codelineno-18-6" name="__codelineno-18-6" href="#__codelineno-18-6"></a><span class="w">  </span><span class="nt">&quot;model&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;claude-3-opus&quot;</span><span class="p">,</span>
+<a id="__codelineno-18-7" name="__codelineno-18-7" href="#__codelineno-18-7"></a><span class="w">  </span><span class="nt">&quot;tokens&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-18-8" name="__codelineno-18-8" href="#__codelineno-18-8"></a><span class="w">    </span><span class="nt">&quot;input&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">1500</span><span class="p">,</span>
+<a id="__codelineno-18-9" name="__codelineno-18-9" href="#__codelineno-18-9"></a><span class="w">    </span><span class="nt">&quot;output&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">800</span><span class="p">,</span>
+<a id="__codelineno-18-10" name="__codelineno-18-10" href="#__codelineno-18-10"></a><span class="w">    </span><span class="nt">&quot;total&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">2300</span>
+<a id="__codelineno-18-11" name="__codelineno-18-11" href="#__codelineno-18-11"></a><span class="w">  </span><span class="p">},</span>
+<a id="__codelineno-18-12" name="__codelineno-18-12" href="#__codelineno-18-12"></a><span class="w">  </span><span class="nt">&quot;cost&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">0.023</span><span class="p">,</span>
+<a id="__codelineno-18-13" name="__codelineno-18-13" href="#__codelineno-18-13"></a><span class="w">  </span><span class="nt">&quot;duration_ms&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">2500</span><span class="p">,</span>
+<a id="__codelineno-18-14" name="__codelineno-18-14" href="#__codelineno-18-14"></a><span class="w">  </span><span class="nt">&quot;metadata&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="err">...</span><span class="p">}</span>
+<a id="__codelineno-18-15" name="__codelineno-18-15" href="#__codelineno-18-15"></a><span class="p">}</span>
+</code></pre></div>
+<ul>
+<li>
+<p><strong>监控指标</strong>:</p>
+</li>
+<li>
+<p>实时Token消耗统计</p>
+</li>
+<li>API调用延迟监控</li>
+<li>错误率和重试统计</li>
+<li>
+<p>任务完成时间分析</p>
+</li>
+<li>
+<p><strong>日志存储策略</strong>:</p>
+</li>
+<li>
+<p>使用文件系统存储所有日志</p>
+</li>
+<li>按日期分割日志文件（如：<code>logs/2024-01-20.json</code>）</li>
+<li>可选的日志轮转（如：保留最近30天）</li>
+</ul>
+<h3 id="9">9. 工具权限控制系统</h3>
+<p><strong>原始需求</strong>: 工具包含可选的permission接口</p>
+<p><strong>实施细节</strong>:</p>
+<ul>
+<li><strong>权限级别定义</strong>:</li>
+</ul>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a><span class="k">class</span><span class="w"> </span><span class="nc">PermissionLevel</span><span class="p">(</span><span class="n">Enum</span><span class="p">):</span>
+<a id="__codelineno-19-2" name="__codelineno-19-2" href="#__codelineno-19-2"></a>    <span class="n">PUBLIC</span> <span class="o">=</span> <span class="mi">0</span>      <span class="c1"># 无需审批</span>
+<a id="__codelineno-19-3" name="__codelineno-19-3" href="#__codelineno-19-3"></a>    <span class="n">NOTIFY</span> <span class="o">=</span> <span class="mi">1</span>      <span class="c1"># 执行后通知</span>
+<a id="__codelineno-19-4" name="__codelineno-19-4" href="#__codelineno-19-4"></a>    <span class="n">CONFIRM</span> <span class="o">=</span> <span class="mi">2</span>     <span class="c1"># 执行前确认</span>
+<a id="__codelineno-19-5" name="__codelineno-19-5" href="#__codelineno-19-5"></a>    <span class="n">RESTRICTED</span> <span class="o">=</span> <span class="mi">3</span>  <span class="c1"># 需要特殊授权</span>
+</code></pre></div>
+<ul>
+<li><strong>审批流程</strong>:</li>
+</ul>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a><span class="k">class</span><span class="w"> </span><span class="nc">ToolPermissionManager</span><span class="p">:</span>
+<a id="__codelineno-20-2" name="__codelineno-20-2" href="#__codelineno-20-2"></a>    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">check_permission</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">tool</span><span class="p">,</span> <span class="n">params</span><span class="p">,</span> <span class="n">user</span><span class="p">):</span>
+<a id="__codelineno-20-3" name="__codelineno-20-3" href="#__codelineno-20-3"></a>        <span class="n">level</span> <span class="o">=</span> <span class="n">tool</span><span class="o">.</span><span class="n">permission_level</span>
+<a id="__codelineno-20-4" name="__codelineno-20-4" href="#__codelineno-20-4"></a>
+<a id="__codelineno-20-5" name="__codelineno-20-5" href="#__codelineno-20-5"></a>        <span class="k">if</span> <span class="n">level</span> <span class="o">==</span> <span class="n">PermissionLevel</span><span class="o">.</span><span class="n">CONFIRM</span><span class="p">:</span>
+<a id="__codelineno-20-6" name="__codelineno-20-6" href="#__codelineno-20-6"></a>            <span class="n">approval</span> <span class="o">=</span> <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">request_approval</span><span class="p">(</span>
+<a id="__codelineno-20-7" name="__codelineno-20-7" href="#__codelineno-20-7"></a>                <span class="n">user</span><span class="p">,</span> <span class="n">tool</span><span class="p">,</span> <span class="n">params</span>
+<a id="__codelineno-20-8" name="__codelineno-20-8" href="#__codelineno-20-8"></a>            <span class="p">)</span>
+<a id="__codelineno-20-9" name="__codelineno-20-9" href="#__codelineno-20-9"></a>            <span class="k">if</span> <span class="ow">not</span> <span class="n">approval</span><span class="p">:</span>
+<a id="__codelineno-20-10" name="__codelineno-20-10" href="#__codelineno-20-10"></a>                <span class="k">raise</span> <span class="n">PermissionDeniedError</span><span class="p">()</span>
+<a id="__codelineno-20-11" name="__codelineno-20-11" href="#__codelineno-20-11"></a>
+<a id="__codelineno-20-12" name="__codelineno-20-12" href="#__codelineno-20-12"></a>        <span class="c1"># 记录审批日志</span>
+<a id="__codelineno-20-13" name="__codelineno-20-13" href="#__codelineno-20-13"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">log_permission_check</span><span class="p">(</span><span class="o">...</span><span class="p">)</span>
+</code></pre></div>
+<ul>
+<li>
+<p><strong>细粒度控制</strong>:</p>
+</li>
+<li>
+<p>基于用户角色的权限</p>
+</li>
+<li>基于参数的权限（如文件路径限制）</li>
+<li>时间窗口限制（如每小时最多N次）</li>
+</ul>
+<h3 id="10-checkpoint">10. Checkpoint机制</h3>
+<p><strong>原始需求</strong>: 支持checkpoint断点续传</p>
+<p><strong>实施细节</strong>:</p>
+<ul>
+<li><strong>使用LangGraph内存Checkpoint</strong>:</li>
+</ul>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">langgraph.checkpoint.memory</span><span class="w"> </span><span class="kn">import</span> <span class="n">MemorySaver</span>
+<a id="__codelineno-21-2" name="__codelineno-21-2" href="#__codelineno-21-2"></a>
+<a id="__codelineno-21-3" name="__codelineno-21-3" href="#__codelineno-21-3"></a><span class="c1"># 使用内存存储checkpoint</span>
+<a id="__codelineno-21-4" name="__codelineno-21-4" href="#__codelineno-21-4"></a><span class="n">memory</span> <span class="o">=</span> <span class="n">MemorySaver</span><span class="p">()</span>
+<a id="__codelineno-21-5" name="__codelineno-21-5" href="#__codelineno-21-5"></a>
+<a id="__codelineno-21-6" name="__codelineno-21-6" href="#__codelineno-21-6"></a><span class="c1"># 编译时指定checkpointer</span>
+<a id="__codelineno-21-7" name="__codelineno-21-7" href="#__codelineno-21-7"></a><span class="n">app</span> <span class="o">=</span> <span class="n">workflow</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="n">checkpointer</span><span class="o">=</span><span class="n">memory</span><span class="p">)</span>
+<a id="__codelineno-21-8" name="__codelineno-21-8" href="#__codelineno-21-8"></a>
+<a id="__codelineno-21-9" name="__codelineno-21-9" href="#__codelineno-21-9"></a><span class="c1"># 恢复checkpoint</span>
+<a id="__codelineno-21-10" name="__codelineno-21-10" href="#__codelineno-21-10"></a><span class="n">config</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;configurable&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;thread_id&quot;</span><span class="p">:</span> <span class="s2">&quot;session_123&quot;</span><span class="p">}}</span>
+<a id="__codelineno-21-11" name="__codelineno-21-11" href="#__codelineno-21-11"></a><span class="n">state</span> <span class="o">=</span> <span class="n">app</span><span class="o">.</span><span class="n">get_state</span><span class="p">(</span><span class="n">config</span><span class="p">)</span>
+<a id="__codelineno-21-12" name="__codelineno-21-12" href="#__codelineno-21-12"></a>
+<a id="__codelineno-21-13" name="__codelineno-21-13" href="#__codelineno-21-13"></a><span class="c1"># 从checkpoint继续执行</span>
+<a id="__codelineno-21-14" name="__codelineno-21-14" href="#__codelineno-21-14"></a><span class="n">result</span> <span class="o">=</span> <span class="n">app</span><span class="o">.</span><span class="n">invoke</span><span class="p">(</span><span class="kc">None</span><span class="p">,</span> <span class="n">config</span><span class="p">)</span>
+</code></pre></div>
+<ul>
+<li><strong>简单的状态管理</strong>:</li>
+</ul>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-22-1" name="__codelineno-22-1" href="#__codelineno-22-1"></a><span class="k">class</span><span class="w"> </span><span class="nc">SimpleCheckpointManager</span><span class="p">:</span>
+<a id="__codelineno-22-2" name="__codelineno-22-2" href="#__codelineno-22-2"></a>    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<a id="__codelineno-22-3" name="__codelineno-22-3" href="#__codelineno-22-3"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">checkpoints</span> <span class="o">=</span> <span class="p">{}</span>  <span class="c1"># 内存中的checkpoint存储</span>
+<a id="__codelineno-22-4" name="__codelineno-22-4" href="#__codelineno-22-4"></a>
+<a id="__codelineno-22-5" name="__codelineno-22-5" href="#__codelineno-22-5"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">save</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">thread_id</span><span class="p">,</span> <span class="n">state</span><span class="p">):</span>
+<a id="__codelineno-22-6" name="__codelineno-22-6" href="#__codelineno-22-6"></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;保存checkpoint到内存&quot;&quot;&quot;</span>
+<a id="__codelineno-22-7" name="__codelineno-22-7" href="#__codelineno-22-7"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">checkpoints</span><span class="p">[</span><span class="n">thread_id</span><span class="p">]</span> <span class="o">=</span> <span class="p">{</span>
+<a id="__codelineno-22-8" name="__codelineno-22-8" href="#__codelineno-22-8"></a>            <span class="s1">&#39;timestamp&#39;</span><span class="p">:</span> <span class="n">datetime</span><span class="o">.</span><span class="n">now</span><span class="p">(),</span>
+<a id="__codelineno-22-9" name="__codelineno-22-9" href="#__codelineno-22-9"></a>            <span class="s1">&#39;state&#39;</span><span class="p">:</span> <span class="n">state</span><span class="p">,</span>
+<a id="__codelineno-22-10" name="__codelineno-22-10" href="#__codelineno-22-10"></a>            <span class="s1">&#39;version&#39;</span><span class="p">:</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">checkpoints</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">thread_id</span><span class="p">,</span> <span class="p">[]))</span>
+<a id="__codelineno-22-11" name="__codelineno-22-11" href="#__codelineno-22-11"></a>        <span class="p">}</span>
+<a id="__codelineno-22-12" name="__codelineno-22-12" href="#__codelineno-22-12"></a>
+<a id="__codelineno-22-13" name="__codelineno-22-13" href="#__codelineno-22-13"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">load</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">thread_id</span><span class="p">):</span>
+<a id="__codelineno-22-14" name="__codelineno-22-14" href="#__codelineno-22-14"></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;从内存加载checkpoint&quot;&quot;&quot;</span>
+<a id="__codelineno-22-15" name="__codelineno-22-15" href="#__codelineno-22-15"></a>        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">checkpoints</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">thread_id</span><span class="p">)</span>
+<a id="__codelineno-22-16" name="__codelineno-22-16" href="#__codelineno-22-16"></a>
+<a id="__codelineno-22-17" name="__codelineno-22-17" href="#__codelineno-22-17"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">clear</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">thread_id</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+<a id="__codelineno-22-18" name="__codelineno-22-18" href="#__codelineno-22-18"></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;清理checkpoint&quot;&quot;&quot;</span>
+<a id="__codelineno-22-19" name="__codelineno-22-19" href="#__codelineno-22-19"></a>        <span class="k">if</span> <span class="n">thread_id</span><span class="p">:</span>
+<a id="__codelineno-22-20" name="__codelineno-22-20" href="#__codelineno-22-20"></a>            <span class="bp">self</span><span class="o">.</span><span class="n">checkpoints</span><span class="o">.</span><span class="n">pop</span><span class="p">(</span><span class="n">thread_id</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+<a id="__codelineno-22-21" name="__codelineno-22-21" href="#__codelineno-22-21"></a>        <span class="k">else</span><span class="p">:</span>
+<a id="__codelineno-22-22" name="__codelineno-22-22" href="#__codelineno-22-22"></a>            <span class="bp">self</span><span class="o">.</span><span class="n">checkpoints</span><span class="o">.</span><span class="n">clear</span><span class="p">()</span>
+</code></pre></div>
+<ul>
+<li>
+<p><strong>注意事项</strong>:</p>
+</li>
+<li>
+<p>内存存储适合开发和测试环境</p>
+</li>
+<li>重启服务会丢失所有checkpoint</li>
+<li>可根据需要后续升级到持久化存储</li>
+</ul>
+<h3 id="11">11. 错误处理与重试机制</h3>
+<ul>
+<li><strong>智能重试策略</strong>:</li>
+</ul>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-23-1" name="__codelineno-23-1" href="#__codelineno-23-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">tenacity</span><span class="w"> </span><span class="kn">import</span> <span class="n">retry</span><span class="p">,</span> <span class="n">stop_after_attempt</span><span class="p">,</span> <span class="n">wait_exponential</span>
+<a id="__codelineno-23-2" name="__codelineno-23-2" href="#__codelineno-23-2"></a>
+<a id="__codelineno-23-3" name="__codelineno-23-3" href="#__codelineno-23-3"></a><span class="nd">@retry</span><span class="p">(</span>
+<a id="__codelineno-23-4" name="__codelineno-23-4" href="#__codelineno-23-4"></a>    <span class="n">stop</span><span class="o">=</span><span class="n">stop_after_attempt</span><span class="p">(</span><span class="mi">3</span><span class="p">),</span>
+<a id="__codelineno-23-5" name="__codelineno-23-5" href="#__codelineno-23-5"></a>    <span class="n">wait</span><span class="o">=</span><span class="n">wait_exponential</span><span class="p">(</span><span class="n">multiplier</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="nb">min</span><span class="o">=</span><span class="mi">4</span><span class="p">,</span> <span class="nb">max</span><span class="o">=</span><span class="mi">10</span><span class="p">)</span>
+<a id="__codelineno-23-6" name="__codelineno-23-6" href="#__codelineno-23-6"></a><span class="p">)</span>
+<a id="__codelineno-23-7" name="__codelineno-23-7" href="#__codelineno-23-7"></a><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">call_model_with_retry</span><span class="p">(</span><span class="n">prompt</span><span class="p">):</span>
+<a id="__codelineno-23-8" name="__codelineno-23-8" href="#__codelineno-23-8"></a>    <span class="k">return</span> <span class="k">await</span> <span class="n">model</span><span class="o">.</span><span class="n">ainvoke</span><span class="p">(</span><span class="n">prompt</span><span class="p">)</span>
+</code></pre></div>
+<ul>
+<li>
+<p><strong>错误分类处理</strong>:</p>
+</li>
+<li>
+<p>API限流: 指数退避重试</p>
+</li>
+<li>网络错误: 快速重试</li>
+<li>解析错误: 降级到备用解析器</li>
+<li>
+<p>业务错误: 记录并跳过</p>
+</li>
+<li>
+<p><strong>降级方案</strong>:</p>
+</li>
+<li>
+<p>主模型失败切换备用模型</p>
+</li>
+<li>复杂工具失败降级到简单版本</li>
+<li>完整搜索失败降级到快速搜索</li>
+</ul>
+<h1 id="multi-agent-_1">Multi-Agent研究系统 - 项目文件结构</h1>
+<h2 id="_13">📁 完整目录树</h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-24-1" name="__codelineno-24-1" href="#__codelineno-24-1"></a>multi-agent-research/
+<a id="__codelineno-24-2" name="__codelineno-24-2" href="#__codelineno-24-2"></a>├── 📄 README.md
+<a id="__codelineno-24-3" name="__codelineno-24-3" href="#__codelineno-24-3"></a>├── 📄 requirements.txt
+<a id="__codelineno-24-4" name="__codelineno-24-4" href="#__codelineno-24-4"></a>├── 📄 .env.example
+<a id="__codelineno-24-5" name="__codelineno-24-5" href="#__codelineno-24-5"></a>├── 📄 .gitignore
+<a id="__codelineno-24-6" name="__codelineno-24-6" href="#__codelineno-24-6"></a>├── 📄 Dockerfile                     # Docker镜像定义
+<a id="__codelineno-24-7" name="__codelineno-24-7" href="#__codelineno-24-7"></a>├── 📄 docker-compose.yml             # Docker Compose配置
+<a id="__codelineno-24-8" name="__codelineno-24-8" href="#__codelineno-24-8"></a>├── 📄 config.yaml                    # ⭐ 全局配置文件
+<a id="__codelineno-24-9" name="__codelineno-24-9" href="#__codelineno-24-9"></a>│
+<a id="__codelineno-24-10" name="__codelineno-24-10" href="#__codelineno-24-10"></a>├── 📁 src/
+<a id="__codelineno-24-11" name="__codelineno-24-11" href="#__codelineno-24-11"></a>│   ├── 📄 __init__.py
+<a id="__codelineno-24-12" name="__codelineno-24-12" href="#__codelineno-24-12"></a>│   │
+<a id="__codelineno-24-13" name="__codelineno-24-13" href="#__codelineno-24-13"></a>│   ├── 📁 core/                      # ⭐ 核心模块
+<a id="__codelineno-24-14" name="__codelineno-24-14" href="#__codelineno-24-14"></a>│   │   ├── 📄 __init__.py
+<a id="__codelineno-24-15" name="__codelineno-24-15" href="#__codelineno-24-15"></a>│   │   ├── 📄 graph.py               # LangGraph工作流定义
+<a id="__codelineno-24-16" name="__codelineno-24-16" href="#__codelineno-24-16"></a>│   │   ├── 📄 state.py               # 状态管理和定义
+<a id="__codelineno-24-17" name="__codelineno-24-17" href="#__codelineno-24-17"></a>│   │   ├── 📄 controller.py          # 执行控制器(pause/resume/rollback)
+<a id="__codelineno-24-18" name="__codelineno-24-18" href="#__codelineno-24-18"></a>│   │   └── 📄 context_manager.py     # Context压缩和管理
+<a id="__codelineno-24-19" name="__codelineno-24-19" href="#__codelineno-24-19"></a>│   │
+<a id="__codelineno-24-20" name="__codelineno-24-20" href="#__codelineno-24-20"></a>│   ├── 📁 agents/                    # ⭐ Agent实现
+<a id="__codelineno-24-21" name="__codelineno-24-21" href="#__codelineno-24-21"></a>│   │   ├── 📄 __init__.py
+<a id="__codelineno-24-22" name="__codelineno-24-22" href="#__codelineno-24-22"></a>│   │   ├── 📄 base.py                # BaseAgent抽象类
+<a id="__codelineno-24-23" name="__codelineno-24-23" href="#__codelineno-24-23"></a>│   │   ├── 📄 lead_agent.py          # Lead Agent实现
+<a id="__codelineno-24-24" name="__codelineno-24-24" href="#__codelineno-24-24"></a>│   │   ├── 📄 search_agent.py        # Search Agent实现
+<a id="__codelineno-24-25" name="__codelineno-24-25" href="#__codelineno-24-25"></a>│   │   └── 📄 crawl_agent.py         # Web Crawl Agent实现
+<a id="__codelineno-24-26" name="__codelineno-24-26" href="#__codelineno-24-26"></a>│   │
+<a id="__codelineno-24-27" name="__codelineno-24-27" href="#__codelineno-24-27"></a>│   ├── 📁 tools/                     # 工具系统
+<a id="__codelineno-24-28" name="__codelineno-24-28" href="#__codelineno-24-28"></a>│   │   ├── 📄 __init__.py
+<a id="__codelineno-24-29" name="__codelineno-24-29" href="#__codelineno-24-29"></a>│   │   ├── 📄 base.py                # BaseTool抽象类
+<a id="__codelineno-24-30" name="__codelineno-24-30" href="#__codelineno-24-30"></a>│   │   ├── 📄 registry.py            # 工具注册和管理
+<a id="__codelineno-24-31" name="__codelineno-24-31" href="#__codelineno-24-31"></a>│   │   ├── 📄 prompt_generator.py    # XML提示词生成器
+<a id="__codelineno-24-32" name="__codelineno-24-32" href="#__codelineno-24-32"></a>│   │   ├── 📄 permissions.py         # 权限控制
+<a id="__codelineno-24-33" name="__codelineno-24-33" href="#__codelineno-24-33"></a>│   │   └── 📁 implementations/       # 具体工具实现
+<a id="__codelineno-24-34" name="__codelineno-24-34" href="#__codelineno-24-34"></a>│   │       ├── 📄 __init__.py
+<a id="__codelineno-24-35" name="__codelineno-24-35" href="#__codelineno-24-35"></a>│   │       ├── 📄 web_search.py
+<a id="__codelineno-24-36" name="__codelineno-24-36" href="#__codelineno-24-36"></a>│   │       ├── 📄 web_fetch.py
+<a id="__codelineno-24-37" name="__codelineno-24-37" href="#__codelineno-24-37"></a>│   │       └── 📄 artifact_ops.py    # Artifact操作工具
+<a id="__codelineno-24-38" name="__codelineno-24-38" href="#__codelineno-24-38"></a>│   │
+<a id="__codelineno-24-39" name="__codelineno-24-39" href="#__codelineno-24-39"></a>│   ├── 📁 models/                    # 模型接口
+<a id="__codelineno-24-40" name="__codelineno-24-40" href="#__codelineno-24-40"></a>│   │   ├── 📄 __init__.py
+<a id="__codelineno-24-41" name="__codelineno-24-41" href="#__codelineno-24-41"></a>│   │   └── 📄 llm.py                 # ⭐ 统一的LLM接口(基于LangChain)
+<a id="__codelineno-24-42" name="__codelineno-24-42" href="#__codelineno-24-42"></a>│   │
+<a id="__codelineno-24-43" name="__codelineno-24-43" href="#__codelineno-24-43"></a>│   ├── 📁 utils/                     # 工具函数
+<a id="__codelineno-24-44" name="__codelineno-24-44" href="#__codelineno-24-44"></a>│   │   ├── 📄 __init__.py
+<a id="__codelineno-24-45" name="__codelineno-24-45" href="#__codelineno-24-45"></a>│   │   ├── 📄 xml_parser.py          # ⭐ Robust XML解析
+<a id="__codelineno-24-46" name="__codelineno-24-46" href="#__codelineno-24-46"></a>│   │   ├── 📄 logger.py              # 日志系统
+<a id="__codelineno-24-47" name="__codelineno-24-47" href="#__codelineno-24-47"></a>│   │   └── 📄 retry.py               # 重试机制
+<a id="__codelineno-24-48" name="__codelineno-24-48" href="#__codelineno-24-48"></a>│   │
+<a id="__codelineno-24-49" name="__codelineno-24-49" href="#__codelineno-24-49"></a>│   └── 📁 api/                       # API接口层
+<a id="__codelineno-24-50" name="__codelineno-24-50" href="#__codelineno-24-50"></a>│       ├── 📄 __init__.py
+<a id="__codelineno-24-51" name="__codelineno-24-51" href="#__codelineno-24-51"></a>│       ├── 📄 server.py              # FastAPI/Flask服务器
+<a id="__codelineno-24-52" name="__codelineno-24-52" href="#__codelineno-24-52"></a>│       ├── 📄 websocket.py          # WebSocket处理
+<a id="__codelineno-24-53" name="__codelineno-24-53" href="#__codelineno-24-53"></a>│       ├── 📄 routes.py              # API路由定义
+<a id="__codelineno-24-54" name="__codelineno-24-54" href="#__codelineno-24-54"></a>│       └── 📄 schemas.py             # Pydantic模型定义
+<a id="__codelineno-24-55" name="__codelineno-24-55" href="#__codelineno-24-55"></a>│
+<a id="__codelineno-24-56" name="__codelineno-24-56" href="#__codelineno-24-56"></a>├── 📁 prompts/                       # 提示词模板
+<a id="__codelineno-24-57" name="__codelineno-24-57" href="#__codelineno-24-57"></a>│   ├── 📄 lead_agent.xml
+<a id="__codelineno-24-58" name="__codelineno-24-58" href="#__codelineno-24-58"></a>│   ├── 📄 search_agent.xml
+<a id="__codelineno-24-59" name="__codelineno-24-59" href="#__codelineno-24-59"></a>│   └── 📄 tools_instruction.xml
+<a id="__codelineno-24-60" name="__codelineno-24-60" href="#__codelineno-24-60"></a>│
+<a id="__codelineno-24-61" name="__codelineno-24-61" href="#__codelineno-24-61"></a>├── 📁 tests/                         # 测试文件
+<a id="__codelineno-24-62" name="__codelineno-24-62" href="#__codelineno-24-62"></a>│   ├── 📄 __init__.py
+<a id="__codelineno-24-63" name="__codelineno-24-63" href="#__codelineno-24-63"></a>│   ├── 📄 conftest.py               # Pytest配置
+<a id="__codelineno-24-64" name="__codelineno-24-64" href="#__codelineno-24-64"></a>│   ├── 📁 unit/
+<a id="__codelineno-24-65" name="__codelineno-24-65" href="#__codelineno-24-65"></a>│   │   ├── 📄 test_xml_parser.py
+<a id="__codelineno-24-66" name="__codelineno-24-66" href="#__codelineno-24-66"></a>│   │   ├── 📄 test_context_manager.py
+<a id="__codelineno-24-67" name="__codelineno-24-67" href="#__codelineno-24-67"></a>│   │   └── 📄 test_tools.py
+<a id="__codelineno-24-68" name="__codelineno-24-68" href="#__codelineno-24-68"></a>│   ├── 📁 integration/
+<a id="__codelineno-24-69" name="__codelineno-24-69" href="#__codelineno-24-69"></a>│   │   ├── 📄 test_workflow.py
+<a id="__codelineno-24-70" name="__codelineno-24-70" href="#__codelineno-24-70"></a>│   │   └── 📄 test_agents.py
+<a id="__codelineno-24-71" name="__codelineno-24-71" href="#__codelineno-24-71"></a>│   └── 📁 fixtures/                  # 测试数据
+<a id="__codelineno-24-72" name="__codelineno-24-72" href="#__codelineno-24-72"></a>│       ├── 📄 sample_responses.json
+<a id="__codelineno-24-73" name="__codelineno-24-73" href="#__codelineno-24-73"></a>│       └── 📄 mock_data.yaml
+<a id="__codelineno-24-74" name="__codelineno-24-74" href="#__codelineno-24-74"></a>│
+<a id="__codelineno-24-75" name="__codelineno-24-75" href="#__codelineno-24-75"></a>├── 📁 logs/                          # 日志目录
+<a id="__codelineno-24-76" name="__codelineno-24-76" href="#__codelineno-24-76"></a>│   └── 📄 .gitkeep
+<a id="__codelineno-24-77" name="__codelineno-24-77" href="#__codelineno-24-77"></a>│
+<a id="__codelineno-24-78" name="__codelineno-24-78" href="#__codelineno-24-78"></a>├── 📁 examples/                      # 示例代码
+<a id="__codelineno-24-79" name="__codelineno-24-79" href="#__codelineno-24-79"></a>│   ├── 📄 basic_research.py         # 基础研究任务示例
+<a id="__codelineno-24-80" name="__codelineno-24-80" href="#__codelineno-24-80"></a>│   ├── 📄 with_interruption.py      # 带中断的示例
+<a id="__codelineno-24-81" name="__codelineno-24-81" href="#__codelineno-24-81"></a>│   └── 📄 custom_agent.py            # 自定义Agent示例
+<a id="__codelineno-24-82" name="__codelineno-24-82" href="#__codelineno-24-82"></a>│
+<a id="__codelineno-24-83" name="__codelineno-24-83" href="#__codelineno-24-83"></a>└── 📁 docs/                          # 文档
+<a id="__codelineno-24-84" name="__codelineno-24-84" href="#__codelineno-24-84"></a>    ├── 📄 architecture.md            # 架构说明
+<a id="__codelineno-24-85" name="__codelineno-24-85" href="#__codelineno-24-85"></a>    ├── 📄 api.md                     # API文档
+<a id="__codelineno-24-86" name="__codelineno-24-86" href="#__codelineno-24-86"></a>    └── 📄 deployment.md              # 部署指南
+</code></pre></div>
+<h2 id="_14">📝 模块说明</h2>
+<h3 id="srccore">🎯 核心模块 (<code>src/core/</code>)</h3>
+<p>核心工作流和状态管理，是整个系统的骨架。</p>
+<ul>
+<li><strong>graph.py</strong>: LangGraph工作流定义，包含节点、边、条件路由的配置</li>
+<li><strong>state.py</strong>: 定义AgentState数据结构，管理全局状态</li>
+<li><strong>controller.py</strong>: 实现pause/resume/rollback等控制功能</li>
+<li><strong>context_manager.py</strong>: 负责context压缩、截断、智能筛选</li>
+</ul>
+<h3 id="agent-srcagents">🤖 Agent模块 (<code>src/agents/</code>)</h3>
+<p>所有Agent的实现，遵循统一的BaseAgent接口。</p>
+<ul>
+<li><strong>base.py</strong>: 定义BaseAgent抽象类，规范Agent接口</li>
+<li><strong>lead_agent.py</strong>: 协调者，负责任务分解、派发、结果整合</li>
+<li><strong>search_agent.py</strong>: 信息搜索专家，返回结构化搜索结果</li>
+<li><strong>crawl_agent.py</strong>: 深度内容抓取，提取网页详细信息</li>
+</ul>
+<h3 id="srctools">🔧 工具系统 (<code>src/tools/</code>)</h3>
+<p>可扩展的工具注册和调用系统。</p>
+<ul>
+<li><strong>registry.py</strong>: 动态注册工具，管理工具生命周期</li>
+<li><strong>prompt_generator.py</strong>: 根据工具定义自动生成XML格式的提示词</li>
+<li><strong>permissions.py</strong>: 实现工具权限控制（PUBLIC/NOTIFY/CONFIRM/RESTRICTED）</li>
+<li><strong>implementations/</strong>: 具体工具实现，每个工具都是独立模块</li>
+</ul>
+<h3 id="srcmodels">🧠 模型接口 (<code>src/models/</code>)</h3>
+<p>统一的模型调用接口，基于LangChain实现。</p>
+<ul>
+<li>llm.py</li>
+</ul>
+<p>: 使用LangChain封装，支持OpenAI通用接口、Qwen、DeepSeek等模型</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-25-1" name="__codelineno-25-1" href="#__codelineno-25-1"></a><span class="c1"># 示例代码结构</span>
+<a id="__codelineno-25-2" name="__codelineno-25-2" href="#__codelineno-25-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">langchain_openai</span><span class="w"> </span><span class="kn">import</span> <span class="n">ChatOpenAI</span>
+<a id="__codelineno-25-3" name="__codelineno-25-3" href="#__codelineno-25-3"></a>
+<a id="__codelineno-25-4" name="__codelineno-25-4" href="#__codelineno-25-4"></a><span class="k">def</span><span class="w"> </span><span class="nf">get_model</span><span class="p">(</span><span class="n">model_type</span><span class="o">=</span><span class="s2">&quot;openai&quot;</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+<a id="__codelineno-25-5" name="__codelineno-25-5" href="#__codelineno-25-5"></a>    <span class="k">if</span> <span class="n">model_type</span> <span class="o">==</span> <span class="s2">&quot;openai&quot;</span><span class="p">:</span>
+<a id="__codelineno-25-6" name="__codelineno-25-6" href="#__codelineno-25-6"></a>        <span class="k">return</span> <span class="n">ChatOpenAI</span><span class="p">(</span><span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
+<a id="__codelineno-25-7" name="__codelineno-25-7" href="#__codelineno-25-7"></a>    <span class="k">elif</span> <span class="n">model_type</span> <span class="o">==</span> <span class="s2">&quot;qwen&quot;</span><span class="p">:</span>
+<a id="__codelineno-25-8" name="__codelineno-25-8" href="#__codelineno-25-8"></a>        <span class="k">return</span> <span class="n">ChatOpenAI</span><span class="p">(</span>
+<a id="__codelineno-25-9" name="__codelineno-25-9" href="#__codelineno-25-9"></a>            <span class="n">base_url</span><span class="o">=</span><span class="s2">&quot;https://dashscope.aliyuncs.com/compatible-mode/v1&quot;</span><span class="p">,</span>
+<a id="__codelineno-25-10" name="__codelineno-25-10" href="#__codelineno-25-10"></a>            <span class="o">**</span><span class="n">kwargs</span>
+<a id="__codelineno-25-11" name="__codelineno-25-11" href="#__codelineno-25-11"></a>        <span class="p">)</span>
+<a id="__codelineno-25-12" name="__codelineno-25-12" href="#__codelineno-25-12"></a>    <span class="k">elif</span> <span class="n">model_type</span> <span class="o">==</span> <span class="s2">&quot;deepseek&quot;</span><span class="p">:</span>
+<a id="__codelineno-25-13" name="__codelineno-25-13" href="#__codelineno-25-13"></a>        <span class="k">return</span> <span class="n">ChatOpenAI</span><span class="p">(</span>
+<a id="__codelineno-25-14" name="__codelineno-25-14" href="#__codelineno-25-14"></a>            <span class="n">base_url</span><span class="o">=</span><span class="s2">&quot;https://api.deepseek.com/v1&quot;</span><span class="p">,</span>
+<a id="__codelineno-25-15" name="__codelineno-25-15" href="#__codelineno-25-15"></a>            <span class="o">**</span><span class="n">kwargs</span>
+<a id="__codelineno-25-16" name="__codelineno-25-16" href="#__codelineno-25-16"></a>        <span class="p">)</span>
+</code></pre></div>
+<h3 id="srcutils">🛠 工具函数 (<code>src/utils/</code>)</h3>
+<p>通用工具函数，被其他模块复用。</p>
+<ul>
+<li><strong>xml_parser.py</strong>: 三层解析策略（标准解析→修复常见错误→正则提取）</li>
+<li><strong>logger.py</strong>: 结构化日志，支持不同级别和模块的日志记录</li>
+<li><strong>retry.py</strong>: 智能重试机制，支持指数退避</li>
+<li><strong>streaming.py</strong>: 处理流式响应，支持Lead Agent的实时输出</li>
+</ul>
+<h3 id="api-srcapi">🌐 API层 (<code>src/api/</code>)</h3>
+<p>对外接口，支持REST API和WebSocket。</p>
+<ul>
+<li><strong>server.py</strong>: 主服务器入口，可选FastAPI或Flask</li>
+<li><strong>websocket.py</strong>: 实时推送任务状态、支持双向通信</li>
+<li><strong>routes.py</strong>: 定义所有API端点</li>
+<li><strong>schemas.py</strong>: 请求/响应的数据模型验证</li>
+</ul>
+<h3 id="_15">📋 配置和模板</h3>
+<ul>
+<li><strong>config.yaml</strong>: 集中管理所有配置（模型配置、工具配置、日志级别等）</li>
+<li><strong>prompts/</strong>: XML格式的提示词模板，便于维护和版本控制</li>
+</ul>
+<h2 id="_16">🚀 快速开始</h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-26-1" name="__codelineno-26-1" href="#__codelineno-26-1"></a><span class="c1"># 1. 安装依赖</span>
+<a id="__codelineno-26-2" name="__codelineno-26-2" href="#__codelineno-26-2"></a>pip<span class="w"> </span>install<span class="w"> </span>-r<span class="w"> </span>requirements.txt
+<a id="__codelineno-26-3" name="__codelineno-26-3" href="#__codelineno-26-3"></a>
+<a id="__codelineno-26-4" name="__codelineno-26-4" href="#__codelineno-26-4"></a><span class="c1"># 2. 配置环境变量</span>
+<a id="__codelineno-26-5" name="__codelineno-26-5" href="#__codelineno-26-5"></a>cp<span class="w"> </span>.env.example<span class="w"> </span>.env
+<a id="__codelineno-26-6" name="__codelineno-26-6" href="#__codelineno-26-6"></a><span class="c1"># 编辑.env添加API keys</span>
+<a id="__codelineno-26-7" name="__codelineno-26-7" href="#__codelineno-26-7"></a>
+<a id="__codelineno-26-8" name="__codelineno-26-8" href="#__codelineno-26-8"></a><span class="c1"># 3. 修改配置</span>
+<a id="__codelineno-26-9" name="__codelineno-26-9" href="#__codelineno-26-9"></a><span class="c1"># 编辑config.yaml设置模型和工具</span>
+<a id="__codelineno-26-10" name="__codelineno-26-10" href="#__codelineno-26-10"></a>
+<a id="__codelineno-26-11" name="__codelineno-26-11" href="#__codelineno-26-11"></a><span class="c1"># 4. 运行示例</span>
+<a id="__codelineno-26-12" name="__codelineno-26-12" href="#__codelineno-26-12"></a>python<span class="w"> </span>examples/basic_research.py
+<a id="__codelineno-26-13" name="__codelineno-26-13" href="#__codelineno-26-13"></a>
+<a id="__codelineno-26-14" name="__codelineno-26-14" href="#__codelineno-26-14"></a><span class="c1"># 5. 启动API服务</span>
+<a id="__codelineno-26-15" name="__codelineno-26-15" href="#__codelineno-26-15"></a>python<span class="w"> </span>-m<span class="w"> </span>src.api.server
+</code></pre></div>
+<h2 id="_17">💡 设计原则</h2>
+<ol>
+<li><strong>模块化</strong>: 每个模块职责单一，便于测试和维护</li>
+<li><strong>可扩展</strong>: 通过继承BaseAgent/BaseTool轻松添加新功能</li>
+<li><strong>配置驱动</strong>: 主要行为通过配置文件控制，无需修改代码</li>
+<li><strong>类型安全</strong>: 使用Pydantic和类型提示确保数据正确性</li>
+<li><strong>易于测试</strong>: 清晰的依赖注入，便于Mock和单元测试</li>
+</ol>
+<h2 id="_18">🔑 关键文件标注说明</h2>
+<ul>
+<li>⭐ 标记的是系统核心文件，优先实现</li>
+<li>其他文件根据需要逐步添加</li>
+<li>tests/和docs/可以随开发进度完善</li>
+</ul>
+<h2 id="_19">📝 文件创建步骤</h2>
+<h3 id="phase-1-1-2">Phase 1: 基础设施 (第1-2天)</h3>
+<p><strong>目标</strong>: 搭建项目骨架和基础工具</p>
+<ol>
+<li><strong>项目初始化</strong></li>
+</ol>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-27-1" name="__codelineno-27-1" href="#__codelineno-27-1"></a><span class="c1"># 创建目录结构</span>
+<a id="__codelineno-27-2" name="__codelineno-27-2" href="#__codelineno-27-2"></a>mkdir<span class="w"> </span>-p<span class="w"> </span>src/<span class="o">{</span>core,agents,tools,models,utils,api<span class="o">}</span>
+<a id="__codelineno-27-3" name="__codelineno-27-3" href="#__codelineno-27-3"></a>mkdir<span class="w"> </span>-p<span class="w"> </span><span class="o">{</span>tests,logs,examples,docs,prompts<span class="o">}</span>
+<a id="__codelineno-27-4" name="__codelineno-27-4" href="#__codelineno-27-4"></a>
+<a id="__codelineno-27-5" name="__codelineno-27-5" href="#__codelineno-27-5"></a><span class="c1"># 初始化文件</span>
+<a id="__codelineno-27-6" name="__codelineno-27-6" href="#__codelineno-27-6"></a>touch<span class="w"> </span>requirements.txt<span class="w"> </span>.env.example<span class="w"> </span>.gitignore
+<a id="__codelineno-27-7" name="__codelineno-27-7" href="#__codelineno-27-7"></a>touch<span class="w"> </span>Dockerfile<span class="w"> </span>docker-compose.yml<span class="w"> </span>config.yaml
+</code></pre></div>
+<ol>
+<li>
+<p><strong>Utils模块</strong> (最先完成)</p>
+</li>
+<li>
+<p><code>utils/logger.py</code> - 设置日志格式和文件输出</p>
+</li>
+<li><code>utils/xml_parser.py</code> - 实现robust的XML解析</li>
+<li><code>utils/retry.py</code> - 基于tenacity的重试装饰器</li>
+<li><code>utils/streaming.py</code> - 异步流处理工具</li>
+</ol>
+<h3 id="phase-2-2-3">Phase 2: 模型层 (第2-3天)</h3>
+<p><strong>目标</strong>: 实现统一的LLM调用接口</p>
+<ol>
+<li>
+<p>Models模块</p>
+</li>
+<li>
+<p><code>models/llm.py</code> - 基于LangChain封装多模型支持</p>
+</li>
+</ol>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-28-1" name="__codelineno-28-1" href="#__codelineno-28-1"></a><span class="c1"># 关键实现点：</span>
+<a id="__codelineno-28-2" name="__codelineno-28-2" href="#__codelineno-28-2"></a><span class="o">-</span> <span class="n">配置化的模型初始化</span>
+<a id="__codelineno-28-3" name="__codelineno-28-3" href="#__codelineno-28-3"></a><span class="o">-</span> <span class="n">统一的调用接口</span> <span class="p">(</span><span class="n">invoke</span><span class="o">/</span><span class="n">stream</span><span class="p">)</span>
+<a id="__codelineno-28-4" name="__codelineno-28-4" href="#__codelineno-28-4"></a><span class="o">-</span> <span class="n">思考模型的响应解析</span>
+<a id="__codelineno-28-5" name="__codelineno-28-5" href="#__codelineno-28-5"></a><span class="o">-</span> <span class="n">Token计数和成本统计</span>
+</code></pre></div>
+<h3 id="phase-3-3-4">Phase 3: 工具系统 (第3-4天)</h3>
+<p><strong>目标</strong>: 实现XML工具调用框架</p>
+<ol>
+<li><strong>Tools基础框架</strong></li>
+<li><code>tools/base.py</code> - BaseTool抽象类</li>
+<li><code>tools/registry.py</code> - 工具注册器</li>
+<li><code>tools/prompt_generator.py</code> - XML提示词生成</li>
+<li><code>tools/permissions.py</code> - 权限控制系统</li>
+<li><strong>具体工具实现</strong></li>
+<li><code>tools/implementations/web_search.py</code></li>
+<li><code>tools/implementations/artifact_ops.py</code></li>
+</ol>
+<h3 id="phase-4-4-5">Phase 4: 核心工作流 (第4-5天)</h3>
+<p><strong>目标</strong>: 搭建LangGraph工作流</p>
+<ol>
+<li>Core模块</li>
+<li><code>core/state.py</code> - 定义AgentState</li>
+<li><code>core/graph.py</code> - LangGraph工作流配置</li>
+<li><code>core/controller.py</code> - 执行控制器</li>
+<li><code>core/context_manager.py</code> - Context管理</li>
+</ol>
+<h3 id="phase-5-agent-5-6">Phase 5: Agent实现 (第5-6天)</h3>
+<p><strong>目标</strong>: 实现各类Agent</p>
+<ol>
+<li>Agents模块</li>
+<li><code>agents/base.py</code> - BaseAgent接口</li>
+<li><code>agents/lead_agent.py</code> - 主协调Agent</li>
+<li><code>agents/search_agent.py</code> - 搜索Agent</li>
+<li><code>agents/crawl_agent.py</code> - 抓取Agent</li>
+</ol>
+<h3 id="phase-6-api-6-7">Phase 6: API接口 (第6-7天)</h3>
+<p><strong>目标</strong>: 对外服务接口</p>
+<ol>
+<li>API模块</li>
+<li><code>api/schemas.py</code> - Pydantic数据模型</li>
+<li><code>api/server.py</code> - FastAPI应用</li>
+<li><code>api/routes.py</code> - 路由定义</li>
+<li><code>api/websocket.py</code> - WebSocket支持</li>
+</ol>
+<h3 id="phase-7-7-8">Phase 7: 测试和文档 (第7-8天)</h3>
+<p><strong>目标</strong>: 完善测试和文档</p>
+<ol>
+<li><strong>测试用例</strong></li>
+<li>单元测试 (utils, tools)</li>
+<li>集成测试 (workflow, agents)</li>
+<li><strong>运行环境</strong></li>
+<li>完善Dockerfile</li>
+<li>编写examples</li>
+<li>更新README</li>
+</ol>
+<h2 id="_20">🚀 快速验证每个阶段</h2>
+<h3 id="phase-1">Phase 1 验证</h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-29-1" name="__codelineno-29-1" href="#__codelineno-29-1"></a><span class="c1"># 测试logger</span>
+<a id="__codelineno-29-2" name="__codelineno-29-2" href="#__codelineno-29-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">src.utils.logger</span><span class="w"> </span><span class="kn">import</span> <span class="n">get_logger</span>
+<a id="__codelineno-29-3" name="__codelineno-29-3" href="#__codelineno-29-3"></a><span class="n">logger</span> <span class="o">=</span> <span class="n">get_logger</span><span class="p">(</span><span class="s2">&quot;test&quot;</span><span class="p">)</span>
+<a id="__codelineno-29-4" name="__codelineno-29-4" href="#__codelineno-29-4"></a><span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;Logger working!&quot;</span><span class="p">)</span>
+<a id="__codelineno-29-5" name="__codelineno-29-5" href="#__codelineno-29-5"></a>
+<a id="__codelineno-29-6" name="__codelineno-29-6" href="#__codelineno-29-6"></a><span class="c1"># 测试XML解析</span>
+<a id="__codelineno-29-7" name="__codelineno-29-7" href="#__codelineno-29-7"></a><span class="kn">from</span><span class="w"> </span><span class="nn">src.utils.xml_parser</span><span class="w"> </span><span class="kn">import</span> <span class="n">parse_xml</span>
+<a id="__codelineno-29-8" name="__codelineno-29-8" href="#__codelineno-29-8"></a><span class="n">result</span> <span class="o">=</span> <span class="n">parse_xml</span><span class="p">(</span><span class="s2">&quot;&lt;tool&gt;&lt;name&gt;test&lt;/name&gt;&lt;/tool&gt;&quot;</span><span class="p">)</span>
+</code></pre></div>
+<h3 id="phase-2">Phase 2 验证</h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-30-1" name="__codelineno-30-1" href="#__codelineno-30-1"></a><span class="c1"># 测试模型调用</span>
+<a id="__codelineno-30-2" name="__codelineno-30-2" href="#__codelineno-30-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">src.models.llm</span><span class="w"> </span><span class="kn">import</span> <span class="n">get_model</span>
+<a id="__codelineno-30-3" name="__codelineno-30-3" href="#__codelineno-30-3"></a><span class="n">model</span> <span class="o">=</span> <span class="n">get_model</span><span class="p">(</span><span class="s2">&quot;openai&quot;</span><span class="p">,</span> <span class="n">model</span><span class="o">=</span><span class="s2">&quot;gpt-4&quot;</span><span class="p">)</span>
+<a id="__codelineno-30-4" name="__codelineno-30-4" href="#__codelineno-30-4"></a><span class="n">response</span> <span class="o">=</span> <span class="n">model</span><span class="o">.</span><span class="n">invoke</span><span class="p">(</span><span class="s2">&quot;Hello&quot;</span><span class="p">)</span>
+</code></pre></div>
+<h3 id="phase-3">Phase 3 验证</h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-31-1" name="__codelineno-31-1" href="#__codelineno-31-1"></a><span class="c1"># 测试工具注册和调用</span>
+<a id="__codelineno-31-2" name="__codelineno-31-2" href="#__codelineno-31-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">src.tools.registry</span><span class="w"> </span><span class="kn">import</span> <span class="n">ToolRegistry</span>
+<a id="__codelineno-31-3" name="__codelineno-31-3" href="#__codelineno-31-3"></a><span class="n">registry</span> <span class="o">=</span> <span class="n">ToolRegistry</span><span class="p">()</span>
+<a id="__codelineno-31-4" name="__codelineno-31-4" href="#__codelineno-31-4"></a><span class="n">registry</span><span class="o">.</span><span class="n">register</span><span class="p">(</span><span class="n">my_tool</span><span class="p">)</span>
+<a id="__codelineno-31-5" name="__codelineno-31-5" href="#__codelineno-31-5"></a><span class="n">prompt</span> <span class="o">=</span> <span class="n">registry</span><span class="o">.</span><span class="n">generate_prompt</span><span class="p">()</span>
+</code></pre></div>
+<h3 id="phase-4">Phase 4 验证</h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-32-1" name="__codelineno-32-1" href="#__codelineno-32-1"></a><span class="c1"># 测试基础工作流</span>
+<a id="__codelineno-32-2" name="__codelineno-32-2" href="#__codelineno-32-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">src.core.graph</span><span class="w"> </span><span class="kn">import</span> <span class="n">create_workflow</span>
+<a id="__codelineno-32-3" name="__codelineno-32-3" href="#__codelineno-32-3"></a><span class="n">app</span> <span class="o">=</span> <span class="n">create_workflow</span><span class="p">()</span>
+<a id="__codelineno-32-4" name="__codelineno-32-4" href="#__codelineno-32-4"></a><span class="n">result</span> <span class="o">=</span> <span class="n">app</span><span class="o">.</span><span class="n">invoke</span><span class="p">({</span><span class="s2">&quot;task&quot;</span><span class="p">:</span> <span class="s2">&quot;test&quot;</span><span class="p">})</span>
+</code></pre></div>
+<h3 id="phase-5">Phase 5 验证</h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-33-1" name="__codelineno-33-1" href="#__codelineno-33-1"></a><span class="c1"># 端到端测试</span>
+<a id="__codelineno-33-2" name="__codelineno-33-2" href="#__codelineno-33-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">src.agents.lead_agent</span><span class="w"> </span><span class="kn">import</span> <span class="n">LeadAgent</span>
+<a id="__codelineno-33-3" name="__codelineno-33-3" href="#__codelineno-33-3"></a><span class="n">agent</span> <span class="o">=</span> <span class="n">LeadAgent</span><span class="p">()</span>
+<a id="__codelineno-33-4" name="__codelineno-33-4" href="#__codelineno-33-4"></a><span class="n">result</span> <span class="o">=</span> <span class="k">await</span> <span class="n">agent</span><span class="o">.</span><span class="n">execute</span><span class="p">(</span><span class="s2">&quot;研究AI医疗&quot;</span><span class="p">)</span>
+</code></pre></div>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  回到页面顶部
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.tabs", "navigation.sections", "navigation.expand", "navigation.top", "search.highlight", "content.code.copy"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "\u5df2\u590d\u5236", "clipboard.copy": "\u590d\u5236", "search.result.more.one": "\u5728\u8be5\u9875\u4e0a\u8fd8\u6709 1 \u4e2a\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.more.other": "\u5728\u8be5\u9875\u4e0a\u8fd8\u6709 # \u4e2a\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.none": "\u6ca1\u6709\u627e\u5230\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.one": "\u627e\u5230 1 \u4e2a\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.other": "# \u4e2a\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.placeholder": "\u952e\u5165\u4ee5\u5f00\u59cb\u641c\u7d22", "search.result.term.missing": "\u7f3a\u5c11", "select.version": "\u9009\u62e9\u5f53\u524d\u7248\u672c"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>
