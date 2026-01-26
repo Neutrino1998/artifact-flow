@@ -17,16 +17,16 @@ ArtifactFlow 通过**专业化分工 + 结构化协作**解决这些问题。
 ### 双 Artifact 架构
 
 ```mermaid
-flowchart TB
-    subgraph Artifacts["Artifacts"]
-        TaskPlan["📋 Task Plan Artifact<br/>- 任务分解<br/>- 进度追踪<br/>- 依赖关系"]
-        Result["📄 Result Artifact<br/>- 执行产出<br/>- 版本历史<br/>- 增量更新"]
-    end
-
+flowchart BT
     subgraph Agents["Agent System"]
         Lead["🎯 Lead Agent"]
         Search["🔍 Search Agent"]
         Crawl["🌐 Crawl Agent"]
+    end
+
+    subgraph Artifacts["Artifacts"]
+        TaskPlan["📋 Task Plan Artifact<br/>- 任务分解<br/>- 进度追踪<br/>- 依赖关系"]
+        Result["📄 Result Artifact<br/>- 执行产出<br/>- 版本历史<br/>- 增量更新"]
     end
 
     Lead -->|读取/更新| TaskPlan

@@ -238,25 +238,24 @@ def _add_routing_rules(self):
 
 ### 状态机图示
 
+以 Lead → Search 调用为例：
+
 ```mermaid
 stateDiagram-v2
     [*] --> lead: START
 
-    lead --> tool_execution: TOOL_EXECUTING
-    lead --> search: SUBAGENT (search)
-    lead --> crawl: SUBAGENT (crawl)
+    lead --> tool_execution: 工具调用
+    lead --> search: 调用 SubAgent
     lead --> [*]: COMPLETED
 
-    search --> tool_execution: TOOL_EXECUTING
-    search --> lead: 返回 Lead
-
-    crawl --> tool_execution: TOOL_EXECUTING
-    crawl --> lead: 返回 Lead
+    search --> tool_execution: 工具调用
+    search --> lead: 返回结果
 
     tool_execution --> lead: 返回原 Agent
     tool_execution --> search: 返回原 Agent
-    tool_execution --> crawl: 返回原 Agent
 ```
+
+> 其他 SubAgent（如 Crawl）的流程与 Search 相同。
 
 ## 执行控制器 (controller.py)
 

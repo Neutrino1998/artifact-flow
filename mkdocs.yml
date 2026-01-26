@@ -1,8 +1,8 @@
 site_name: ArtifactFlow
 site_description: Multi-Agent Research System Built on LangGraph
 site_url: https://neutrino.github.io/artifact-flow/
-repo_url: https://github.com/neutrino/artifact-flow
-repo_name: neutrino/artifact-flow
+repo_url: https://github.com/Neutrino1998/artifact-flow
+repo_name: Neutrino1998/artifact-flow
 
 theme:
   name: material
