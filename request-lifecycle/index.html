@@ -1391,17 +1391,25 @@
 <a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="p">}</span>
 </code></pre></div>
 <p><strong>依赖注入链</strong>（<code>src/api/dependencies.py</code>）：</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>HTTP Request
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>    │
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>    ├─► get_db_session()        → AsyncSession（请求级别）
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>    │       │
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>    │       ├─► get_artifact_manager()
-<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>    │       ├─► get_conversation_manager()
-<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>    │       └─► get_controller()
-<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>    │
-<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>    ├─► get_checkpointer()      → AsyncSqliteSaver（全局单例）
-<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a>    └─► get_stream_manager()    → StreamManager（全局单例）
-</code></pre></div>
+<pre class="mermaid"><code>flowchart LR
+    subgraph Request["请求级别"]
+        Session["get_db_session()&lt;br/&gt;AsyncSession"]
+        AM["get_artifact_manager()"]
+        CM["get_conversation_manager()"]
+        Ctrl["get_controller()"]
+    end
+
+    subgraph Global["全局单例"]
+        CP["get_checkpointer()&lt;br/&gt;AsyncSqliteSaver"]
+        SM["get_stream_manager()&lt;br/&gt;StreamManager"]
+    end
+
+    HTTP["HTTP Request"] --&gt; Session
+    Session --&gt; AM
+    Session --&gt; CM
+    Session --&gt; Ctrl
+    HTTP --&gt; CP
+    HTTP --&gt; SM</code></pre>
 <h3 id="conversation">Conversation 创建</h3>
 <p>如果 <code>conversation_id</code> 为空，系统会：</p>
 <ol>
@@ -1409,55 +1417,55 @@
 <li>在数据库创建 <code>Conversation</code> 记录</li>
 <li>自动关联 <code>ArtifactSession</code></li>
 </ol>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="c1"># src/core/controller.py</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">_ensure_conversation</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">conversation_id</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>    <span class="k">if</span> <span class="ow">not</span> <span class="n">conversation_id</span><span class="p">:</span>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>        <span class="n">conversation_id</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">uuid</span><span class="o">.</span><span class="n">uuid4</span><span class="p">())</span>
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>        <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">conversation_manager</span><span class="o">.</span><span class="n">start_conversation_async</span><span class="p">(</span><span class="n">conversation_id</span><span class="p">)</span>
-<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>    <span class="k">return</span> <span class="n">conversation_id</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="c1"># src/core/controller.py</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">_ensure_conversation</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">conversation_id</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>    <span class="k">if</span> <span class="ow">not</span> <span class="n">conversation_id</span><span class="p">:</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>        <span class="n">conversation_id</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">uuid</span><span class="o">.</span><span class="n">uuid4</span><span class="p">())</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>        <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">conversation_manager</span><span class="o">.</span><span class="n">start_conversation_async</span><span class="p">(</span><span class="n">conversation_id</span><span class="p">)</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>    <span class="k">return</span> <span class="n">conversation_id</span>
 </code></pre></div>
 <h2 id="phase-2">Phase 2: 状态准备</h2>
 <h3 id="_2">对话历史格式化</h3>
 <p><code>ConversationManager</code> 从消息树中提取当前分支的历史：</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="c1"># 树状结构示例</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="c1">#       msg_1 (root)</span>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="c1">#      /      \</span>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="c1">#   msg_2    msg_3</span>
-<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="c1">#     |</span>
-<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="c1">#   msg_4 (current)</span>
-<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a>
-<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="c1"># 格式化结果（从 root 到 current 的路径）</span>
-<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a><span class="n">conversation_history</span> <span class="o">=</span> <span class="s2">&quot;&quot;&quot;</span>
-<a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a><span class="s2">[User]: 第一条消息</span>
-<a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a><span class="s2">[Assistant]: 第一条回复</span>
-<a id="__codelineno-3-12" name="__codelineno-3-12" href="#__codelineno-3-12"></a><span class="s2">[User]: 第二条消息</span>
-<a id="__codelineno-3-13" name="__codelineno-3-13" href="#__codelineno-3-13"></a><span class="s2">[Assistant]: 第二条回复</span>
-<a id="__codelineno-3-14" name="__codelineno-3-14" href="#__codelineno-3-14"></a><span class="s2">&quot;&quot;&quot;</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="c1"># 树状结构示例</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="c1">#       msg_1 (root)</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="c1">#      /      \</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="c1">#   msg_2    msg_3</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="c1">#     |</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="c1">#   msg_4 (current)</span>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="c1"># 格式化结果（从 root 到 current 的路径）</span>
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="n">conversation_history</span> <span class="o">=</span> <span class="s2">&quot;&quot;&quot;</span>
+<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="s2">[User]: 第一条消息</span>
+<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="s2">[Assistant]: 第一条回复</span>
+<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a><span class="s2">[User]: 第二条消息</span>
+<a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a><span class="s2">[Assistant]: 第二条回复</span>
+<a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a><span class="s2">&quot;&quot;&quot;</span>
 </code></pre></div>
 <h3 id="_3">初始状态构建</h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="c1"># src/core/state.py</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="n">initial_state</span> <span class="o">=</span> <span class="p">{</span>
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>    <span class="s2">&quot;current_task&quot;</span><span class="p">:</span> <span class="s2">&quot;帮我分析一下 Python 异步编程的最佳实践&quot;</span><span class="p">,</span>
-<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>    <span class="s2">&quot;session_id&quot;</span><span class="p">:</span> <span class="s2">&quot;artifact-session-uuid&quot;</span><span class="p">,</span>
-<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>    <span class="s2">&quot;thread_id&quot;</span><span class="p">:</span> <span class="s2">&quot;langgraph-thread-uuid&quot;</span><span class="p">,</span>
-<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>    <span class="s2">&quot;conversation_history&quot;</span><span class="p">:</span> <span class="s2">&quot;...&quot;</span><span class="p">,</span>  <span class="c1"># 格式化的历史</span>
-<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a>    <span class="s2">&quot;phase&quot;</span><span class="p">:</span> <span class="n">ExecutionPhase</span><span class="o">.</span><span class="n">LEAD_EXECUTING</span><span class="p">,</span>
-<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a>    <span class="s2">&quot;current_agent&quot;</span><span class="p">:</span> <span class="s2">&quot;lead&quot;</span><span class="p">,</span>
-<a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a>    <span class="s2">&quot;agent_memories&quot;</span><span class="p">:</span> <span class="p">{},</span>
-<a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a>    <span class="s2">&quot;execution_metrics&quot;</span><span class="p">:</span> <span class="n">ExecutionMetrics</span><span class="p">(),</span>
-<a id="__codelineno-4-11" name="__codelineno-4-11" href="#__codelineno-4-11"></a>    <span class="c1"># ...</span>
-<a id="__codelineno-4-12" name="__codelineno-4-12" href="#__codelineno-4-12"></a><span class="p">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="c1"># src/core/state.py</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="n">initial_state</span> <span class="o">=</span> <span class="p">{</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>    <span class="s2">&quot;current_task&quot;</span><span class="p">:</span> <span class="s2">&quot;帮我分析一下 Python 异步编程的最佳实践&quot;</span><span class="p">,</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>    <span class="s2">&quot;session_id&quot;</span><span class="p">:</span> <span class="s2">&quot;artifact-session-uuid&quot;</span><span class="p">,</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>    <span class="s2">&quot;thread_id&quot;</span><span class="p">:</span> <span class="s2">&quot;langgraph-thread-uuid&quot;</span><span class="p">,</span>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>    <span class="s2">&quot;conversation_history&quot;</span><span class="p">:</span> <span class="s2">&quot;...&quot;</span><span class="p">,</span>  <span class="c1"># 格式化的历史</span>
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a>    <span class="s2">&quot;phase&quot;</span><span class="p">:</span> <span class="n">ExecutionPhase</span><span class="o">.</span><span class="n">LEAD_EXECUTING</span><span class="p">,</span>
+<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a>    <span class="s2">&quot;current_agent&quot;</span><span class="p">:</span> <span class="s2">&quot;lead&quot;</span><span class="p">,</span>
+<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a>    <span class="s2">&quot;agent_memories&quot;</span><span class="p">:</span> <span class="p">{},</span>
+<a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a>    <span class="s2">&quot;execution_metrics&quot;</span><span class="p">:</span> <span class="n">ExecutionMetrics</span><span class="p">(),</span>
+<a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a>    <span class="c1"># ...</span>
+<a id="__codelineno-3-12" name="__codelineno-3-12" href="#__codelineno-3-12"></a><span class="p">}</span>
 </code></pre></div>
 <h2 id="phase-3-graph">Phase 3: Graph 执行</h2>
 <h3 id="_4">执行模式</h3>
 <p>ArtifactFlow 使用 LangGraph 的 <code>stream_mode="custom"</code> 实现流式输出：</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="c1"># src/core/controller.py</span>
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="k">async</span> <span class="k">for</span> <span class="n">event</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">graph</span><span class="o">.</span><span class="n">astream</span><span class="p">(</span>
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>    <span class="n">initial_state</span><span class="p">,</span>
-<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>    <span class="n">config</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;configurable&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;thread_id&quot;</span><span class="p">:</span> <span class="n">thread_id</span><span class="p">}},</span>
-<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>    <span class="n">stream_mode</span><span class="o">=</span><span class="s2">&quot;custom&quot;</span>
-<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="p">):</span>
-<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a>    <span class="k">yield</span> <span class="n">event</span>  <span class="c1"># StreamEvent</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="c1"># src/core/controller.py</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="k">async</span> <span class="k">for</span> <span class="n">event</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">graph</span><span class="o">.</span><span class="n">astream</span><span class="p">(</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>    <span class="n">initial_state</span><span class="p">,</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>    <span class="n">config</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;configurable&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;thread_id&quot;</span><span class="p">:</span> <span class="n">thread_id</span><span class="p">}},</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>    <span class="n">stream_mode</span><span class="o">=</span><span class="s2">&quot;custom&quot;</span>
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="p">):</span>
+<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a>    <span class="k">yield</span> <span class="n">event</span>  <span class="c1"># StreamEvent</span>
 </code></pre></div>
 <h3 id="agent">Agent 节点执行</h3>
 <p>每个 Agent 节点执行单轮 LLM 调用：</p>
@@ -1471,38 +1479,38 @@
     E --&gt; G
     F --&gt; G</code></pre>
 <p><strong>消息构建</strong>（<code>src/core/context_manager.py</code>）：</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="n">messages</span> <span class="o">=</span> <span class="p">[</span>
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>    <span class="p">{</span><span class="s2">&quot;role&quot;</span><span class="p">:</span> <span class="s2">&quot;system&quot;</span><span class="p">,</span> <span class="s2">&quot;content&quot;</span><span class="p">:</span> <span class="n">system_prompt</span><span class="p">},</span>
-<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>    <span class="p">{</span><span class="s2">&quot;role&quot;</span><span class="p">:</span> <span class="s2">&quot;user&quot;</span><span class="p">,</span> <span class="s2">&quot;content&quot;</span><span class="p">:</span> <span class="sa">f</span><span class="s2">&quot;&quot;&quot;</span>
-<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="s2">## 对话历史</span>
-<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="si">{</span><span class="n">conversation_history</span><span class="si">}</span>
-<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a>
-<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a><span class="s2">## 当前任务</span>
-<a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a><span class="si">{</span><span class="n">current_task</span><span class="si">}</span>
-<a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a>
-<a id="__codelineno-6-10" name="__codelineno-6-10" href="#__codelineno-6-10"></a><span class="s2">## Agent 记忆</span>
-<a id="__codelineno-6-11" name="__codelineno-6-11" href="#__codelineno-6-11"></a><span class="si">{</span><span class="n">agent_memory</span><span class="si">}</span>
-<a id="__codelineno-6-12" name="__codelineno-6-12" href="#__codelineno-6-12"></a><span class="s2">&quot;&quot;&quot;</span><span class="p">}</span>
-<a id="__codelineno-6-13" name="__codelineno-6-13" href="#__codelineno-6-13"></a><span class="p">]</span>
-<a id="__codelineno-6-14" name="__codelineno-6-14" href="#__codelineno-6-14"></a>
-<a id="__codelineno-6-15" name="__codelineno-6-15" href="#__codelineno-6-15"></a><span class="c1"># 如果有工具交互历史，追加到 messages</span>
-<a id="__codelineno-6-16" name="__codelineno-6-16" href="#__codelineno-6-16"></a><span class="k">if</span> <span class="n">tool_interactions</span><span class="p">:</span>
-<a id="__codelineno-6-17" name="__codelineno-6-17" href="#__codelineno-6-17"></a>    <span class="n">messages</span><span class="o">.</span><span class="n">extend</span><span class="p">(</span><span class="n">tool_interactions</span><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="n">messages</span> <span class="o">=</span> <span class="p">[</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>    <span class="p">{</span><span class="s2">&quot;role&quot;</span><span class="p">:</span> <span class="s2">&quot;system&quot;</span><span class="p">,</span> <span class="s2">&quot;content&quot;</span><span class="p">:</span> <span class="n">system_prompt</span><span class="p">},</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>    <span class="p">{</span><span class="s2">&quot;role&quot;</span><span class="p">:</span> <span class="s2">&quot;user&quot;</span><span class="p">,</span> <span class="s2">&quot;content&quot;</span><span class="p">:</span> <span class="sa">f</span><span class="s2">&quot;&quot;&quot;</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="s2">## 对话历史</span>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="si">{</span><span class="n">conversation_history</span><span class="si">}</span>
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a>
+<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="s2">## 当前任务</span>
+<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a><span class="si">{</span><span class="n">current_task</span><span class="si">}</span>
+<a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a>
+<a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a><span class="s2">## Agent 记忆</span>
+<a id="__codelineno-5-11" name="__codelineno-5-11" href="#__codelineno-5-11"></a><span class="si">{</span><span class="n">agent_memory</span><span class="si">}</span>
+<a id="__codelineno-5-12" name="__codelineno-5-12" href="#__codelineno-5-12"></a><span class="s2">&quot;&quot;&quot;</span><span class="p">}</span>
+<a id="__codelineno-5-13" name="__codelineno-5-13" href="#__codelineno-5-13"></a><span class="p">]</span>
+<a id="__codelineno-5-14" name="__codelineno-5-14" href="#__codelineno-5-14"></a>
+<a id="__codelineno-5-15" name="__codelineno-5-15" href="#__codelineno-5-15"></a><span class="c1"># 如果有工具交互历史，追加到 messages</span>
+<a id="__codelineno-5-16" name="__codelineno-5-16" href="#__codelineno-5-16"></a><span class="k">if</span> <span class="n">tool_interactions</span><span class="p">:</span>
+<a id="__codelineno-5-17" name="__codelineno-5-17" href="#__codelineno-5-17"></a>    <span class="n">messages</span><span class="o">.</span><span class="n">extend</span><span class="p">(</span><span class="n">tool_interactions</span><span class="p">)</span>
 </code></pre></div>
 <h3 id="_5">状态路由</h3>
 <p>路由基于 <code>ExecutionPhase</code> 决定下一个节点：</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="c1"># src/core/graph.py</span>
-<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="k">def</span><span class="w"> </span><span class="nf">_route_after_agent</span><span class="p">(</span><span class="n">state</span><span class="p">:</span> <span class="n">AgentState</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
-<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>    <span class="n">phase</span> <span class="o">=</span> <span class="n">state</span><span class="p">[</span><span class="s2">&quot;phase&quot;</span><span class="p">]</span>
-<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>
-<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a>    <span class="k">if</span> <span class="n">phase</span> <span class="o">==</span> <span class="n">ExecutionPhase</span><span class="o">.</span><span class="n">TOOL_EXECUTING</span><span class="p">:</span>
-<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a>        <span class="k">return</span> <span class="s2">&quot;tool_execution&quot;</span>
-<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a>    <span class="k">elif</span> <span class="n">phase</span> <span class="o">==</span> <span class="n">ExecutionPhase</span><span class="o">.</span><span class="n">SUBAGENT_EXECUTING</span><span class="p">:</span>
-<a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a>        <span class="k">return</span> <span class="n">state</span><span class="p">[</span><span class="s2">&quot;subagent_pending&quot;</span><span class="p">][</span><span class="s2">&quot;target&quot;</span><span class="p">]</span>
-<a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a>    <span class="k">elif</span> <span class="n">phase</span> <span class="o">==</span> <span class="n">ExecutionPhase</span><span class="o">.</span><span class="n">COMPLETED</span><span class="p">:</span>
-<a id="__codelineno-7-10" name="__codelineno-7-10" href="#__codelineno-7-10"></a>        <span class="k">return</span> <span class="n">END</span>
-<a id="__codelineno-7-11" name="__codelineno-7-11" href="#__codelineno-7-11"></a>    <span class="k">else</span><span class="p">:</span>
-<a id="__codelineno-7-12" name="__codelineno-7-12" href="#__codelineno-7-12"></a>        <span class="k">return</span> <span class="n">state</span><span class="p">[</span><span class="s2">&quot;current_agent&quot;</span><span class="p">]</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="c1"># src/core/graph.py</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="k">def</span><span class="w"> </span><span class="nf">_route_after_agent</span><span class="p">(</span><span class="n">state</span><span class="p">:</span> <span class="n">AgentState</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>    <span class="n">phase</span> <span class="o">=</span> <span class="n">state</span><span class="p">[</span><span class="s2">&quot;phase&quot;</span><span class="p">]</span>
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a>
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a>    <span class="k">if</span> <span class="n">phase</span> <span class="o">==</span> <span class="n">ExecutionPhase</span><span class="o">.</span><span class="n">TOOL_EXECUTING</span><span class="p">:</span>
+<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a>        <span class="k">return</span> <span class="s2">&quot;tool_execution&quot;</span>
+<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a>    <span class="k">elif</span> <span class="n">phase</span> <span class="o">==</span> <span class="n">ExecutionPhase</span><span class="o">.</span><span class="n">SUBAGENT_EXECUTING</span><span class="p">:</span>
+<a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a>        <span class="k">return</span> <span class="n">state</span><span class="p">[</span><span class="s2">&quot;subagent_pending&quot;</span><span class="p">][</span><span class="s2">&quot;target&quot;</span><span class="p">]</span>
+<a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a>    <span class="k">elif</span> <span class="n">phase</span> <span class="o">==</span> <span class="n">ExecutionPhase</span><span class="o">.</span><span class="n">COMPLETED</span><span class="p">:</span>
+<a id="__codelineno-6-10" name="__codelineno-6-10" href="#__codelineno-6-10"></a>        <span class="k">return</span> <span class="n">END</span>
+<a id="__codelineno-6-11" name="__codelineno-6-11" href="#__codelineno-6-11"></a>    <span class="k">else</span><span class="p">:</span>
+<a id="__codelineno-6-12" name="__codelineno-6-12" href="#__codelineno-6-12"></a>        <span class="k">return</span> <span class="n">state</span><span class="p">[</span><span class="s2">&quot;current_agent&quot;</span><span class="p">]</span>
 </code></pre></div>
 <h3 id="_6">工具执行节点</h3>
 <p>统一处理所有工具调用，包括权限检查：</p>
@@ -1518,155 +1526,150 @@
     H --&gt; I[返回原 Agent]</code></pre>
 <h2 id="phase-4-sse">Phase 4: 事件流与 SSE</h2>
 <h3 id="_7">事件类型</h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="c1"># src/core/events.py</span>
-<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="k">class</span><span class="w"> </span><span class="nc">StreamEventType</span><span class="p">(</span><span class="n">Enum</span><span class="p">):</span>
-<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>    <span class="c1"># Controller 层</span>
-<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>    <span class="n">METADATA</span> <span class="o">=</span> <span class="s2">&quot;metadata&quot;</span>
-<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>    <span class="n">COMPLETE</span> <span class="o">=</span> <span class="s2">&quot;complete&quot;</span>
-<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a>    <span class="n">ERROR</span> <span class="o">=</span> <span class="s2">&quot;error&quot;</span>
-<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a>
-<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a>    <span class="c1"># Agent 层</span>
-<a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a>    <span class="n">AGENT_START</span> <span class="o">=</span> <span class="s2">&quot;agent_start&quot;</span>
-<a id="__codelineno-8-10" name="__codelineno-8-10" href="#__codelineno-8-10"></a>    <span class="n">LLM_CHUNK</span> <span class="o">=</span> <span class="s2">&quot;llm_chunk&quot;</span>
-<a id="__codelineno-8-11" name="__codelineno-8-11" href="#__codelineno-8-11"></a>    <span class="n">LLM_COMPLETE</span> <span class="o">=</span> <span class="s2">&quot;llm_complete&quot;</span>
-<a id="__codelineno-8-12" name="__codelineno-8-12" href="#__codelineno-8-12"></a>    <span class="n">AGENT_COMPLETE</span> <span class="o">=</span> <span class="s2">&quot;agent_complete&quot;</span>
-<a id="__codelineno-8-13" name="__codelineno-8-13" href="#__codelineno-8-13"></a>
-<a id="__codelineno-8-14" name="__codelineno-8-14" href="#__codelineno-8-14"></a>    <span class="c1"># Graph 层</span>
-<a id="__codelineno-8-15" name="__codelineno-8-15" href="#__codelineno-8-15"></a>    <span class="n">TOOL_START</span> <span class="o">=</span> <span class="s2">&quot;tool_start&quot;</span>
-<a id="__codelineno-8-16" name="__codelineno-8-16" href="#__codelineno-8-16"></a>    <span class="n">TOOL_COMPLETE</span> <span class="o">=</span> <span class="s2">&quot;tool_complete&quot;</span>
-<a id="__codelineno-8-17" name="__codelineno-8-17" href="#__codelineno-8-17"></a>    <span class="n">PERMISSION_REQUEST</span> <span class="o">=</span> <span class="s2">&quot;permission_request&quot;</span>
-<a id="__codelineno-8-18" name="__codelineno-8-18" href="#__codelineno-8-18"></a>    <span class="n">PERMISSION_RESULT</span> <span class="o">=</span> <span class="s2">&quot;permission_result&quot;</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="c1"># src/core/events.py</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="k">class</span><span class="w"> </span><span class="nc">StreamEventType</span><span class="p">(</span><span class="n">Enum</span><span class="p">):</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>    <span class="c1"># Controller 层</span>
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>    <span class="n">METADATA</span> <span class="o">=</span> <span class="s2">&quot;metadata&quot;</span>
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a>    <span class="n">COMPLETE</span> <span class="o">=</span> <span class="s2">&quot;complete&quot;</span>
+<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a>    <span class="n">ERROR</span> <span class="o">=</span> <span class="s2">&quot;error&quot;</span>
+<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a>
+<a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a>    <span class="c1"># Agent 层</span>
+<a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a>    <span class="n">AGENT_START</span> <span class="o">=</span> <span class="s2">&quot;agent_start&quot;</span>
+<a id="__codelineno-7-10" name="__codelineno-7-10" href="#__codelineno-7-10"></a>    <span class="n">LLM_CHUNK</span> <span class="o">=</span> <span class="s2">&quot;llm_chunk&quot;</span>
+<a id="__codelineno-7-11" name="__codelineno-7-11" href="#__codelineno-7-11"></a>    <span class="n">LLM_COMPLETE</span> <span class="o">=</span> <span class="s2">&quot;llm_complete&quot;</span>
+<a id="__codelineno-7-12" name="__codelineno-7-12" href="#__codelineno-7-12"></a>    <span class="n">AGENT_COMPLETE</span> <span class="o">=</span> <span class="s2">&quot;agent_complete&quot;</span>
+<a id="__codelineno-7-13" name="__codelineno-7-13" href="#__codelineno-7-13"></a>
+<a id="__codelineno-7-14" name="__codelineno-7-14" href="#__codelineno-7-14"></a>    <span class="c1"># Graph 层</span>
+<a id="__codelineno-7-15" name="__codelineno-7-15" href="#__codelineno-7-15"></a>    <span class="n">TOOL_START</span> <span class="o">=</span> <span class="s2">&quot;tool_start&quot;</span>
+<a id="__codelineno-7-16" name="__codelineno-7-16" href="#__codelineno-7-16"></a>    <span class="n">TOOL_COMPLETE</span> <span class="o">=</span> <span class="s2">&quot;tool_complete&quot;</span>
+<a id="__codelineno-7-17" name="__codelineno-7-17" href="#__codelineno-7-17"></a>    <span class="n">PERMISSION_REQUEST</span> <span class="o">=</span> <span class="s2">&quot;permission_request&quot;</span>
+<a id="__codelineno-7-18" name="__codelineno-7-18" href="#__codelineno-7-18"></a>    <span class="n">PERMISSION_RESULT</span> <span class="o">=</span> <span class="s2">&quot;permission_result&quot;</span>
 </code></pre></div>
 <h3 id="_8">事件缓冲</h3>
 <p>由于 POST 请求立即返回，SSE 连接稍后建立，需要缓冲中间事件：</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>POST /chat ──────────────────────────────────────────►
-<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>    │
-<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>    │  创建 StreamContext
-<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a>    │  启动 TTL 计时器 (30s)
-<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a>    │        │
-<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a>    │        ▼
-<a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a>    │  ┌─────────────┐
-<a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a>    │  │ Event Queue │ ◄── Graph 执行产生事件
-<a id="__codelineno-9-9" name="__codelineno-9-9" href="#__codelineno-9-9"></a>    │  └─────────────┘
-<a id="__codelineno-9-10" name="__codelineno-9-10" href="#__codelineno-9-10"></a>    │        │
-<a id="__codelineno-9-11" name="__codelineno-9-11" href="#__codelineno-9-11"></a>    └────────│────────────────────────────────────────►
-<a id="__codelineno-9-12" name="__codelineno-9-12" href="#__codelineno-9-12"></a>             │
-<a id="__codelineno-9-13" name="__codelineno-9-13" href="#__codelineno-9-13"></a>GET /stream ─┼────────────────────────────────────────►
-<a id="__codelineno-9-14" name="__codelineno-9-14" href="#__codelineno-9-14"></a>             │
-<a id="__codelineno-9-15" name="__codelineno-9-15" href="#__codelineno-9-15"></a>             └──► 消费队列 ──► SSE 推送 ──► 客户端
-</code></pre></div>
+<pre class="mermaid"><code>sequenceDiagram
+    participant Client
+    participant POST as POST /chat
+    participant Queue as Event Queue
+    participant Graph
+    participant GET as GET /stream
+
+    Client-&gt;&gt;POST: 发送消息
+    POST-&gt;&gt;Queue: 创建 StreamContext
+    Note over Queue: TTL 计时器启动 (30s)
+    POST-&gt;&gt;Client: 返回 thread_id
+
+    Graph-&gt;&gt;Queue: push(agent_start)
+    Graph-&gt;&gt;Queue: push(llm_chunk)
+
+    Client-&gt;&gt;GET: 连接 SSE
+    Note over Queue: 取消 TTL 计时器
+    Queue-&gt;&gt;GET: yield events
+    GET-&gt;&gt;Client: SSE 推送</code></pre>
 <h3 id="sse">SSE 格式</h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>event: metadata
-<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>data: {&quot;conversation_id&quot;: &quot;xxx&quot;, &quot;thread_id&quot;: &quot;yyy&quot;, &quot;message_id&quot;: &quot;zzz&quot;}
-<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>
-<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a>event: agent_start
-<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a>data: {&quot;agent&quot;: &quot;lead&quot;}
-<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a>
-<a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a>event: llm_chunk
-<a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a>data: {&quot;content&quot;: &quot;让我&quot;, &quot;agent&quot;: &quot;lead&quot;}
-<a id="__codelineno-10-9" name="__codelineno-10-9" href="#__codelineno-10-9"></a>
-<a id="__codelineno-10-10" name="__codelineno-10-10" href="#__codelineno-10-10"></a>event: llm_chunk
-<a id="__codelineno-10-11" name="__codelineno-10-11" href="#__codelineno-10-11"></a>data: {&quot;content&quot;: &quot;来分析&quot;, &quot;agent&quot;: &quot;lead&quot;}
-<a id="__codelineno-10-12" name="__codelineno-10-12" href="#__codelineno-10-12"></a>
-<a id="__codelineno-10-13" name="__codelineno-10-13" href="#__codelineno-10-13"></a>event: tool_start
-<a id="__codelineno-10-14" name="__codelineno-10-14" href="#__codelineno-10-14"></a>data: {&quot;tool&quot;: &quot;web_search&quot;, &quot;params&quot;: {&quot;query&quot;: &quot;Python async best practices&quot;}}
-<a id="__codelineno-10-15" name="__codelineno-10-15" href="#__codelineno-10-15"></a>
-<a id="__codelineno-10-16" name="__codelineno-10-16" href="#__codelineno-10-16"></a>event: tool_complete
-<a id="__codelineno-10-17" name="__codelineno-10-17" href="#__codelineno-10-17"></a>data: {&quot;tool&quot;: &quot;web_search&quot;, &quot;success&quot;: true, &quot;data&quot;: {...}}
-<a id="__codelineno-10-18" name="__codelineno-10-18" href="#__codelineno-10-18"></a>
-<a id="__codelineno-10-19" name="__codelineno-10-19" href="#__codelineno-10-19"></a>event: complete
-<a id="__codelineno-10-20" name="__codelineno-10-20" href="#__codelineno-10-20"></a>data: {&quot;response&quot;: &quot;...&quot;, &quot;metrics&quot;: {...}}
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>event: metadata
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>data: {&quot;conversation_id&quot;: &quot;xxx&quot;, &quot;thread_id&quot;: &quot;yyy&quot;, &quot;message_id&quot;: &quot;zzz&quot;}
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>event: agent_start
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>data: {&quot;agent&quot;: &quot;lead&quot;}
+<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a>
+<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a>event: llm_chunk
+<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a>data: {&quot;content&quot;: &quot;让我&quot;, &quot;agent&quot;: &quot;lead&quot;}
+<a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a>
+<a id="__codelineno-8-10" name="__codelineno-8-10" href="#__codelineno-8-10"></a>event: llm_chunk
+<a id="__codelineno-8-11" name="__codelineno-8-11" href="#__codelineno-8-11"></a>data: {&quot;content&quot;: &quot;来分析&quot;, &quot;agent&quot;: &quot;lead&quot;}
+<a id="__codelineno-8-12" name="__codelineno-8-12" href="#__codelineno-8-12"></a>
+<a id="__codelineno-8-13" name="__codelineno-8-13" href="#__codelineno-8-13"></a>event: tool_start
+<a id="__codelineno-8-14" name="__codelineno-8-14" href="#__codelineno-8-14"></a>data: {&quot;tool&quot;: &quot;web_search&quot;, &quot;params&quot;: {&quot;query&quot;: &quot;Python async best practices&quot;}}
+<a id="__codelineno-8-15" name="__codelineno-8-15" href="#__codelineno-8-15"></a>
+<a id="__codelineno-8-16" name="__codelineno-8-16" href="#__codelineno-8-16"></a>event: tool_complete
+<a id="__codelineno-8-17" name="__codelineno-8-17" href="#__codelineno-8-17"></a>data: {&quot;tool&quot;: &quot;web_search&quot;, &quot;success&quot;: true, &quot;data&quot;: {...}}
+<a id="__codelineno-8-18" name="__codelineno-8-18" href="#__codelineno-8-18"></a>
+<a id="__codelineno-8-19" name="__codelineno-8-19" href="#__codelineno-8-19"></a>event: complete
+<a id="__codelineno-8-20" name="__codelineno-8-20" href="#__codelineno-8-20"></a>data: {&quot;response&quot;: &quot;...&quot;, &quot;metrics&quot;: {...}}
 </code></pre></div>
 <h2 id="phase-5">Phase 5: 权限中断与恢复</h2>
 <p>当工具需要用户确认时：</p>
 <h3 id="_9">中断流程</h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="c1"># src/core/graph.py - tool_execution_node</span>
-<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="k">if</span> <span class="n">permission</span> <span class="ow">in</span> <span class="p">[</span><span class="n">ToolPermission</span><span class="o">.</span><span class="n">CONFIRM</span><span class="p">,</span> <span class="n">ToolPermission</span><span class="o">.</span><span class="n">RESTRICTED</span><span class="p">]:</span>
-<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>    <span class="c1"># 发送权限请求事件</span>
-<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a>    <span class="n">writer</span><span class="p">(</span><span class="n">StreamEvent</span><span class="p">(</span>
-<a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a>        <span class="nb">type</span><span class="o">=</span><span class="n">StreamEventType</span><span class="o">.</span><span class="n">PERMISSION_REQUEST</span><span class="p">,</span>
-<a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a>        <span class="n">data</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;tool&quot;</span><span class="p">:</span> <span class="n">tool_name</span><span class="p">,</span> <span class="s2">&quot;params&quot;</span><span class="p">:</span> <span class="n">params</span><span class="p">,</span> <span class="s2">&quot;permission&quot;</span><span class="p">:</span> <span class="n">permission</span><span class="p">}</span>
-<a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a>    <span class="p">))</span>
-<a id="__codelineno-11-8" name="__codelineno-11-8" href="#__codelineno-11-8"></a>
-<a id="__codelineno-11-9" name="__codelineno-11-9" href="#__codelineno-11-9"></a>    <span class="c1"># 暂停执行，等待用户确认</span>
-<a id="__codelineno-11-10" name="__codelineno-11-10" href="#__codelineno-11-10"></a>    <span class="n">result</span> <span class="o">=</span> <span class="n">interrupt</span><span class="p">({</span>
-<a id="__codelineno-11-11" name="__codelineno-11-11" href="#__codelineno-11-11"></a>        <span class="s2">&quot;tool&quot;</span><span class="p">:</span> <span class="n">tool_name</span><span class="p">,</span>
-<a id="__codelineno-11-12" name="__codelineno-11-12" href="#__codelineno-11-12"></a>        <span class="s2">&quot;params&quot;</span><span class="p">:</span> <span class="n">params</span><span class="p">,</span>
-<a id="__codelineno-11-13" name="__codelineno-11-13" href="#__codelineno-11-13"></a>        <span class="s2">&quot;requires_permission&quot;</span><span class="p">:</span> <span class="n">permission</span><span class="o">.</span><span class="n">value</span>
-<a id="__codelineno-11-14" name="__codelineno-11-14" href="#__codelineno-11-14"></a>    <span class="p">})</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="c1"># src/core/graph.py - tool_execution_node</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="k">if</span> <span class="n">permission</span> <span class="ow">in</span> <span class="p">[</span><span class="n">ToolPermission</span><span class="o">.</span><span class="n">CONFIRM</span><span class="p">,</span> <span class="n">ToolPermission</span><span class="o">.</span><span class="n">RESTRICTED</span><span class="p">]:</span>
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>    <span class="c1"># 发送权限请求事件</span>
+<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a>    <span class="n">writer</span><span class="p">(</span><span class="n">StreamEvent</span><span class="p">(</span>
+<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a>        <span class="nb">type</span><span class="o">=</span><span class="n">StreamEventType</span><span class="o">.</span><span class="n">PERMISSION_REQUEST</span><span class="p">,</span>
+<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a>        <span class="n">data</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;tool&quot;</span><span class="p">:</span> <span class="n">tool_name</span><span class="p">,</span> <span class="s2">&quot;params&quot;</span><span class="p">:</span> <span class="n">params</span><span class="p">,</span> <span class="s2">&quot;permission&quot;</span><span class="p">:</span> <span class="n">permission</span><span class="p">}</span>
+<a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a>    <span class="p">))</span>
+<a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a>
+<a id="__codelineno-9-9" name="__codelineno-9-9" href="#__codelineno-9-9"></a>    <span class="c1"># 暂停执行，等待用户确认</span>
+<a id="__codelineno-9-10" name="__codelineno-9-10" href="#__codelineno-9-10"></a>    <span class="n">result</span> <span class="o">=</span> <span class="n">interrupt</span><span class="p">({</span>
+<a id="__codelineno-9-11" name="__codelineno-9-11" href="#__codelineno-9-11"></a>        <span class="s2">&quot;tool&quot;</span><span class="p">:</span> <span class="n">tool_name</span><span class="p">,</span>
+<a id="__codelineno-9-12" name="__codelineno-9-12" href="#__codelineno-9-12"></a>        <span class="s2">&quot;params&quot;</span><span class="p">:</span> <span class="n">params</span><span class="p">,</span>
+<a id="__codelineno-9-13" name="__codelineno-9-13" href="#__codelineno-9-13"></a>        <span class="s2">&quot;requires_permission&quot;</span><span class="p">:</span> <span class="n">permission</span><span class="o">.</span><span class="n">value</span>
+<a id="__codelineno-9-14" name="__codelineno-9-14" href="#__codelineno-9-14"></a>    <span class="p">})</span>
 </code></pre></div>
 <h3 id="_10">恢复流程</h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="c1"># POST /api/v1/chat/{conversation_id}/resume</span>
-<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="p">{</span>
-<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a>    <span class="s2">&quot;thread_id&quot;</span><span class="p">:</span> <span class="s2">&quot;xxx&quot;</span><span class="p">,</span>
-<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a>    <span class="s2">&quot;approved&quot;</span><span class="p">:</span> <span class="n">true</span>
-<a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a><span class="p">}</span>
-<a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a>
-<a id="__codelineno-12-7" name="__codelineno-12-7" href="#__codelineno-12-7"></a><span class="c1"># Controller 恢复执行</span>
-<a id="__codelineno-12-8" name="__codelineno-12-8" href="#__codelineno-12-8"></a><span class="k">await</span> <span class="n">graph</span><span class="o">.</span><span class="n">ainvoke</span><span class="p">(</span>
-<a id="__codelineno-12-9" name="__codelineno-12-9" href="#__codelineno-12-9"></a>    <span class="n">Command</span><span class="p">(</span><span class="n">resume</span><span class="o">=</span><span class="n">approved</span><span class="p">),</span>
-<a id="__codelineno-12-10" name="__codelineno-12-10" href="#__codelineno-12-10"></a>    <span class="n">config</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;configurable&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;thread_id&quot;</span><span class="p">:</span> <span class="n">thread_id</span><span class="p">}}</span>
-<a id="__codelineno-12-11" name="__codelineno-12-11" href="#__codelineno-12-11"></a><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="c1"># POST /api/v1/chat/{conversation_id}/resume</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="p">{</span>
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>    <span class="s2">&quot;thread_id&quot;</span><span class="p">:</span> <span class="s2">&quot;xxx&quot;</span><span class="p">,</span>
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a>    <span class="s2">&quot;approved&quot;</span><span class="p">:</span> <span class="n">true</span>
+<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="p">}</span>
+<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a>
+<a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a><span class="c1"># Controller 恢复执行</span>
+<a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a><span class="k">await</span> <span class="n">graph</span><span class="o">.</span><span class="n">ainvoke</span><span class="p">(</span>
+<a id="__codelineno-10-9" name="__codelineno-10-9" href="#__codelineno-10-9"></a>    <span class="n">Command</span><span class="p">(</span><span class="n">resume</span><span class="o">=</span><span class="n">approved</span><span class="p">),</span>
+<a id="__codelineno-10-10" name="__codelineno-10-10" href="#__codelineno-10-10"></a>    <span class="n">config</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;configurable&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;thread_id&quot;</span><span class="p">:</span> <span class="n">thread_id</span><span class="p">}}</span>
+<a id="__codelineno-10-11" name="__codelineno-10-11" href="#__codelineno-10-11"></a><span class="p">)</span>
 </code></pre></div>
 <h2 id="phase-6">Phase 6: 结果持久化</h2>
 <p>执行完成后，Controller 保存结果：</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="c1"># 更新消息的 graph_response</span>
-<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">conversation_manager</span><span class="o">.</span><span class="n">update_response_async</span><span class="p">(</span>
-<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a>    <span class="n">conversation_id</span><span class="o">=</span><span class="n">conversation_id</span><span class="p">,</span>
-<a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a>    <span class="n">message_id</span><span class="o">=</span><span class="n">message_id</span><span class="p">,</span>
-<a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a>    <span class="n">response</span><span class="o">=</span><span class="n">final_response</span>
-<a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a><span class="p">)</span>
-<a id="__codelineno-13-7" name="__codelineno-13-7" href="#__codelineno-13-7"></a>
-<a id="__codelineno-13-8" name="__codelineno-13-8" href="#__codelineno-13-8"></a><span class="c1"># Artifact 变更已在执行过程中通过工具保存</span>
-<a id="__codelineno-13-9" name="__codelineno-13-9" href="#__codelineno-13-9"></a><span class="c1"># 版本历史自动记录</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="c1"># 更新消息的 graph_response</span>
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">conversation_manager</span><span class="o">.</span><span class="n">update_response_async</span><span class="p">(</span>
+<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>    <span class="n">conversation_id</span><span class="o">=</span><span class="n">conversation_id</span><span class="p">,</span>
+<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a>    <span class="n">message_id</span><span class="o">=</span><span class="n">message_id</span><span class="p">,</span>
+<a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a>    <span class="n">response</span><span class="o">=</span><span class="n">final_response</span>
+<a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a><span class="p">)</span>
+<a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a>
+<a id="__codelineno-11-8" name="__codelineno-11-8" href="#__codelineno-11-8"></a><span class="c1"># Artifact 变更已在执行过程中通过工具保存</span>
+<a id="__codelineno-11-9" name="__codelineno-11-9" href="#__codelineno-11-9"></a><span class="c1"># 版本历史自动记录</span>
 </code></pre></div>
 <h2 id="_11">数据流总结</h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a>┌─────────────────────────────────────────────────────────────────┐
-<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a>│                         Request Flow                             │
-<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a>├─────────────────────────────────────────────────────────────────┤
-<a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a>│                                                                  │
-<a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a>│  HTTP Request                                                    │
-<a id="__codelineno-14-6" name="__codelineno-14-6" href="#__codelineno-14-6"></a>│       │                                                          │
-<a id="__codelineno-14-7" name="__codelineno-14-7" href="#__codelineno-14-7"></a>│       ▼                                                          │
-<a id="__codelineno-14-8" name="__codelineno-14-8" href="#__codelineno-14-8"></a>│  ┌─────────┐    ┌────────────┐    ┌─────────┐                   │
-<a id="__codelineno-14-9" name="__codelineno-14-9" href="#__codelineno-14-9"></a>│  │ FastAPI │───►│ Controller │───►│  Graph  │                   │
-<a id="__codelineno-14-10" name="__codelineno-14-10" href="#__codelineno-14-10"></a>│  └─────────┘    └────────────┘    └─────────┘                   │
-<a id="__codelineno-14-11" name="__codelineno-14-11" href="#__codelineno-14-11"></a>│       │               │                │                         │
-<a id="__codelineno-14-12" name="__codelineno-14-12" href="#__codelineno-14-12"></a>│       │               │                ▼                         │
-<a id="__codelineno-14-13" name="__codelineno-14-13" href="#__codelineno-14-13"></a>│       │               │         ┌─────────────┐                  │
-<a id="__codelineno-14-14" name="__codelineno-14-14" href="#__codelineno-14-14"></a>│       │               │         │   Agents    │                  │
-<a id="__codelineno-14-15" name="__codelineno-14-15" href="#__codelineno-14-15"></a>│       │               │         │ ┌─────────┐ │                  │
-<a id="__codelineno-14-16" name="__codelineno-14-16" href="#__codelineno-14-16"></a>│       │               │         │ │  Lead   │ │                  │
-<a id="__codelineno-14-17" name="__codelineno-14-17" href="#__codelineno-14-17"></a>│       │               │         │ ├─────────┤ │                  │
-<a id="__codelineno-14-18" name="__codelineno-14-18" href="#__codelineno-14-18"></a>│       │               │         │ │ Search  │ │                  │
-<a id="__codelineno-14-19" name="__codelineno-14-19" href="#__codelineno-14-19"></a>│       │               │         │ ├─────────┤ │                  │
-<a id="__codelineno-14-20" name="__codelineno-14-20" href="#__codelineno-14-20"></a>│       │               │         │ │  Crawl  │ │                  │
-<a id="__codelineno-14-21" name="__codelineno-14-21" href="#__codelineno-14-21"></a>│       │               │         │ └─────────┘ │                  │
-<a id="__codelineno-14-22" name="__codelineno-14-22" href="#__codelineno-14-22"></a>│       │               │         └─────────────┘                  │
-<a id="__codelineno-14-23" name="__codelineno-14-23" href="#__codelineno-14-23"></a>│       │               │                │                         │
-<a id="__codelineno-14-24" name="__codelineno-14-24" href="#__codelineno-14-24"></a>│       │               │                ▼                         │
-<a id="__codelineno-14-25" name="__codelineno-14-25" href="#__codelineno-14-25"></a>│       │               │         ┌─────────────┐                  │
-<a id="__codelineno-14-26" name="__codelineno-14-26" href="#__codelineno-14-26"></a>│       │               │         │    Tools    │                  │
-<a id="__codelineno-14-27" name="__codelineno-14-27" href="#__codelineno-14-27"></a>│       │               │         └─────────────┘                  │
-<a id="__codelineno-14-28" name="__codelineno-14-28" href="#__codelineno-14-28"></a>│       │               │                │                         │
-<a id="__codelineno-14-29" name="__codelineno-14-29" href="#__codelineno-14-29"></a>│       │               ▼                ▼                         │
-<a id="__codelineno-14-30" name="__codelineno-14-30" href="#__codelineno-14-30"></a>│       │         ┌──────────────────────────┐                    │
-<a id="__codelineno-14-31" name="__codelineno-14-31" href="#__codelineno-14-31"></a>│       │         │        Database          │                    │
-<a id="__codelineno-14-32" name="__codelineno-14-32" href="#__codelineno-14-32"></a>│       │         │  ┌────────┐ ┌─────────┐  │                    │
-<a id="__codelineno-14-33" name="__codelineno-14-33" href="#__codelineno-14-33"></a>│       │         │  │ Convos │ │Artifacts│  │                    │
-<a id="__codelineno-14-34" name="__codelineno-14-34" href="#__codelineno-14-34"></a>│       │         │  └────────┘ └─────────┘  │                    │
-<a id="__codelineno-14-35" name="__codelineno-14-35" href="#__codelineno-14-35"></a>│       │         └──────────────────────────┘                    │
-<a id="__codelineno-14-36" name="__codelineno-14-36" href="#__codelineno-14-36"></a>│       │                                                          │
-<a id="__codelineno-14-37" name="__codelineno-14-37" href="#__codelineno-14-37"></a>│       ▼                                                          │
-<a id="__codelineno-14-38" name="__codelineno-14-38" href="#__codelineno-14-38"></a>│  ┌─────────────┐                                                │
-<a id="__codelineno-14-39" name="__codelineno-14-39" href="#__codelineno-14-39"></a>│  │ SSE Stream  │ ◄── StreamManager ◄── Graph Events            │
-<a id="__codelineno-14-40" name="__codelineno-14-40" href="#__codelineno-14-40"></a>│  └─────────────┘                                                │
-<a id="__codelineno-14-41" name="__codelineno-14-41" href="#__codelineno-14-41"></a>│       │                                                          │
-<a id="__codelineno-14-42" name="__codelineno-14-42" href="#__codelineno-14-42"></a>│       ▼                                                          │
-<a id="__codelineno-14-43" name="__codelineno-14-43" href="#__codelineno-14-43"></a>│    Client                                                        │
-<a id="__codelineno-14-44" name="__codelineno-14-44" href="#__codelineno-14-44"></a>│                                                                  │
-<a id="__codelineno-14-45" name="__codelineno-14-45" href="#__codelineno-14-45"></a>└─────────────────────────────────────────────────────────────────┘
-</code></pre></div>
+<pre class="mermaid"><code>flowchart TB
+    Client["Client"]
+
+    subgraph API["API Layer"]
+        FastAPI["FastAPI"]
+        SSE["SSE Stream"]
+    end
+
+    subgraph Core["Core Layer"]
+        Controller["Controller"]
+        Graph["Graph"]
+        SM["StreamManager"]
+    end
+
+    subgraph Agents["Agents"]
+        Lead["Lead"]
+        Search["Search"]
+        Crawl["Crawl"]
+    end
+
+    Tools["Tools"]
+
+    subgraph DB["Database"]
+        Convos["Conversations"]
+        Artifacts["Artifacts"]
+    end
+
+    Client --&gt;|HTTP Request| FastAPI
+    FastAPI --&gt; Controller
+    Controller --&gt; Graph
+    Graph --&gt; Agents
+    Agents --&gt; Tools
+    Tools --&gt; DB
+    Controller --&gt; DB
+
+    Graph --&gt;|Events| SM
+    SM --&gt; SSE
+    SSE --&gt;|SSE| Client</code></pre>
 
 
 
