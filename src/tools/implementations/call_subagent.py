@@ -27,7 +27,7 @@ class CallSubagentTool(BaseTool):
     def __init__(self):
         super().__init__(
             name="call_subagent",
-            description="Call a specialized sub-agent to handle specific research tasks",
+            description="Call a specialized sub-agent to handle specific tasks",
             permission=ToolPermission.PUBLIC
         )
     

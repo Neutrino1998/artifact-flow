@@ -48,7 +48,7 @@ def create_app() -> FastAPI:
     """
     app = FastAPI(
         title="ArtifactFlow API",
-        description="Multi-agent research system API",
+        description="Multi-agent system API",
         version="1.0.0",
         lifespan=lifespan,
         docs_url="/docs" if config.DEBUG else None,

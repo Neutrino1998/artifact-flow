@@ -174,7 +174,6 @@ Choose appropriate artifact IDs and types based on what the user requests:
 - Type: "markdown" or "txt"
 
 **Important:** You can create MULTIPLE result artifacts as needed. For example:
-- A research task might need both "research_report" and "data_summary"
 - A coding task might need "main.py", "utils.py", and "requirements.txt"
 - Always use descriptive IDs that reflect the content
 - Build your results incrementally - you don't need to complete everything in one go - create early, update often

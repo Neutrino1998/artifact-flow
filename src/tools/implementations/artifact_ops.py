@@ -601,7 +601,7 @@ class CreateArtifactTool(BaseTool):
             ToolParameter(
                 name="id",
                 type="string",
-                description="Unique identifier (e.g., 'task_plan', 'research_results')",
+                description="Unique identifier (e.g., 'task_plan', 'research_report')",
                 required=True
             ),
             ToolParameter(

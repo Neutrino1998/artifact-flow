@@ -73,7 +73,7 @@ Execute targeted web searches to gather relevant, high-quality information.
 
 ## Team Context
 
-You are part of a multi-agent research team. The Lead Agent coordinates overall strategy while you focus on information retrieval.
+You are part of a multi-agent team. The Lead Agent coordinates overall strategy while you focus on information retrieval.
 </agent_role>"""
 
         # 如果有task_plan，添加团队目标

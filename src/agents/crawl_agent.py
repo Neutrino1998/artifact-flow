@@ -76,7 +76,7 @@ Extract and clean valuable information from web pages.
 
 ## Team Context
 
-You are part of a multi-agent research team. The Lead Agent coordinates overall strategy while you focus on deep content extraction.
+You are part of a multi-agent team. The Lead Agent coordinates overall strategy while you focus on deep content extraction.
 </agent_role>"""
 
         # 如果有task_plan，添加团队目标
