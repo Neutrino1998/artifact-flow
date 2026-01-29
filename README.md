@@ -7,7 +7,7 @@
 [![SQLite](https://img.shields.io/badge/SQLite-Persistent-blue.svg)]()
 [![Development Status](https://img.shields.io/badge/Status-Alpha%20Development-orange.svg)]()
 
-ArtifactFlow 是一个智能多智能体研究系统，通过协调专门的AI智能体来执行综合性研究任务。基于 LangGraph 构建，采用独特的双 Artifact 架构，实现 AI 协作研究和人工监督的迭代优化。
+ArtifactFlow 是一个智能多智能体系统，通过协调专门的AI智能体来执行综合性任务。基于 LangGraph 构建，采用独特的双 Artifact 架构，实现 AI 协作和人工监督的迭代优化。
 
 ## ✨ 核心特性
 
@@ -94,9 +94,10 @@ ArtifactFlow 是一个智能多智能体研究系统，通过协调专门的AI�
 ### 环境要求
 
 - **Python 3.11+** （⚠️必需！LangGraph的异步interrupt功能需要Python 3.11+才能正确工作，详见： [Asynchronous Graph with interrupts in Python 3.10 seems to be broken](https://github.com/langchain-ai/langgraph/discussions/3200)）
+- **aiosqlite==0.21.0** （⚠️必需！0.22.0 版本移除了 `Connection` 对 `threading.Thread` 的继承，导致 `is_alive()` 方法丢失，与 `langgraph-checkpoint-sqlite` [不兼容](https://github.com/langchain-ai/langgraph/issues/6583)。requirements.txt 已锁定正确版本。）
 - API Keys（OpenAI、通义千问、DeepSeek、博查AI 等）
 - 推荐系统内存 ≥ 4GB（网页抓取需要启动浏览器）
-- **⚠️ 依赖版本注意**: `aiosqlite` 必须使用 **0.21.0** 版本。0.22.0 版本移除了 `Connection` 对 `threading.Thread` 的继承，导致 `is_alive()` 方法丢失，与 `langgraph-checkpoint-sqlite` 不兼容。requirements.txt 已锁定正确版本。
+
 
 ### 方式一：Docker 部署（推荐）
 
