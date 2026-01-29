@@ -238,7 +238,7 @@ class WebFetchTool(BaseTool):
                         return 'html'
                     
         except Exception as e:
-            logger.debug(f"HEAD request failed for {url}: {e}, assuming HTML")
+            logger.warning(f"HEAD request failed for {url}: {e}, assuming HTML")
         
         # 3. 默认按HTML处理
         return 'html'

@@ -150,7 +150,7 @@ class ContextManager:
                 context["artifacts_inventory"] = artifacts_list
                 context["artifacts_count"] = len(artifacts_list)
         except Exception as e:
-            logger.debug(f"Context preparation partial failure: {e}")
+            logger.exception(f"Context preparation partial failure: {e}")
         
         return context
     
@@ -179,7 +179,7 @@ class ContextManager:
         
         # Part 2: Conversation history
         # 重要：保留偶数条消息以确保完整的 [user, assistant] 对话对
-        # 例如: preserve_recent=4 保留最近2轮完整对话
+        # 例如: preserve_recent=4 至少保留最近2轮完整对话
         if agent.config.name == "lead_agent":   # 仅Lead Agent需要
             if history := state.get("conversation_history"):
                 compressed = cls.compress_messages(
