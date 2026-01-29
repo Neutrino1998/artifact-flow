@@ -58,6 +58,12 @@ def main():
 
     args = parser.parse_args()
 
+    # 构造友好的显示 URL
+    # 如果绑定 0.0.0.0，显示 localhost 方便点击，否则显示实际 host
+    display_host = "localhost" if args.host == "0.0.0.0" else args.host
+    docs_url = f"http://{display_host}:{args.port}/docs"
+    redoc_url = f"http://{display_host}:{args.port}/redoc"
+
     print(f"""
 ╔══════════════════════════════════════════════════════════════╗
 ║                    ArtifactFlow API Server                   ║
@@ -67,6 +73,9 @@ def main():
 ║  Workers: {args.workers:<50} ║
 ║  Reload: {str(args.reload):<51} ║
 ║  Log Level: {args.log_level:<48} ║
+╠══════════════════════════════════════════════════════════════╣
+║  Swagger UI: {docs_url:<47} ║
+║  ReDoc:      {redoc_url:<47} ║
 ╚══════════════════════════════════════════════════════════════╝
 """)
 
