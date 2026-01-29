@@ -71,7 +71,6 @@ class AgentState(TypedDict):
 class NodeMemory(TypedDict):
     tool_interactions: List[Dict]      # assistant-tool 交互历史
     last_response: Optional[Dict]      # 最后的 AgentResponse
-    metadata: Dict[str, Any]           # 元数据
     tool_round_count: int              # 当前节点工具调用计数
 ```
 

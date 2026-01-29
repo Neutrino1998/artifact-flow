@@ -9,7 +9,6 @@ Graph状态定义
 
 from typing import TypedDict, Dict, List, Optional, Any
 from enum import Enum
-from datetime import datetime
 from utils.logger import get_logger
 from core.events import ExecutionMetrics, create_initial_metrics
 
@@ -41,7 +40,6 @@ class NodeMemory(TypedDict):
     """单个节点的记忆"""
     tool_interactions: List[Dict]      # assistant-tool交互历史
     last_response: Optional[Dict]      # 最后的AgentResponse
-    metadata: Dict[str, Any]           # 元数据
     tool_round_count: int              # 当前节点工具调用计数
 
 
@@ -183,7 +181,6 @@ def merge_agent_response_to_state(
     memory = state["agent_memories"].get(agent_name, {
         "tool_interactions": [],
         "last_response": None,
-        "metadata": {},
         "tool_round_count": 0
     })
 
@@ -199,14 +196,6 @@ def merge_agent_response_to_state(
         "metadata": response.metadata,
         "reasoning": getattr(response, 'reasoning_content', None)
     }
-
-    # 更新metadata
-    memory["metadata"]["completed_at"] = datetime.now().isoformat()
-
-    # 记录执行次数
-    memory["metadata"]["execution_count"] = memory["metadata"].get("execution_count", 0) + 1
-
-    # 注意：token 统计已移至 execution_metrics，由 graph 层的 agent_node 负责追加
 
     # 保存回state
     state["agent_memories"][agent_name] = memory

@@ -406,10 +406,6 @@ sequenceDiagram
     "lead_agent": {
         "tool_interactions": [...],    # assistant-tool 交互历史
         "last_response": {...},        # 最后的 AgentResponse
-        "metadata": {
-            "completed_at": "...",
-            "execution_count": 3
-        },
         "tool_round_count": 2          # 当前工具调用轮数
     },
     "search_agent": {...},
@@ -432,10 +428,9 @@ memory["last_response"] = {
     "metadata": response.metadata,
     "reasoning": response.reasoning_content
 }
-
-# 自动递增 execution_count
-memory["metadata"]["execution_count"] += 1
 ```
+
+**注意**：可观测性指标（执行时间、token 统计等）已移至 `ExecutionMetrics`，由 Graph 层记录。
 
 ## 添加新 Agent
 
