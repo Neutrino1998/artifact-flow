@@ -22,11 +22,11 @@ src/core/
 
 ```python
 class ExecutionPhase(Enum):
-    LEAD_EXECUTING = "lead_executing"       # Lead Agent 执行中
+    LEAD_EXECUTING = "lead_executing"          # Lead Agent 执行中
     SUBAGENT_EXECUTING = "subagent_executing"  # SubAgent 执行中
-    TOOL_EXECUTING = "tool_executing"       # 工具执行中
+    TOOL_EXECUTING = "tool_executing"          # 工具执行中
     WAITING_PERMISSION = "waiting_permission"  # 等待权限确认
-    COMPLETED = "completed"                 # 任务完成
+    COMPLETED = "completed"                    # 任务完成
 ```
 
 ### AgentState
@@ -72,7 +72,7 @@ class NodeMemory(TypedDict):
     tool_interactions: List[Dict]      # assistant-tool 交互历史
     last_response: Optional[Dict]      # 最后的 AgentResponse
     metadata: Dict[str, Any]           # 元数据
-    tool_round_count: int              # 工具调用轮数计数
+    tool_round_count: int              # 当前节点工具调用计数
 ```
 
 ### 状态转换函数
@@ -129,7 +129,7 @@ class StreamEventType(Enum):
     AGENT_COMPLETE = "agent_complete"  # Agent 执行完成
 
     # Graph 层事件
-    TOOL_START = "tool_start"      # 工具开始执行
+    TOOL_START = "tool_start"        # 工具开始执行
     TOOL_COMPLETE = "tool_complete"  # 工具执行完成
     PERMISSION_REQUEST = "permission_request"  # 请求权限确认
     PERMISSION_RESULT = "permission_result"    # 权限确认结果
@@ -292,9 +292,7 @@ def _add_routing_rules(self, agent_name: str):
         elif phase == ExecutionPhase.SUBAGENT_EXECUTING:
             return state["subagent_pending"]["target"]
         elif phase == ExecutionPhase.LEAD_EXECUTING:
-            if state.get("current_agent") != "lead_agent":
-                return "lead_agent"
-            return END
+            return "lead_agent"
         elif phase == ExecutionPhase.COMPLETED:
             return END
         return END
@@ -533,6 +531,13 @@ class ConversationManager:
 
     async def get_active_branch(self, conv_id: str) -> Optional[str]:
         """获取对话的活跃分支（当前最新消息 ID）"""
+
+    async def list_conversations_async(
+        self,
+        limit: int = 50,
+        offset: int = 0
+    ) -> List[Dict]:
+        """列出所有对话"""
 ```
 
 ### 树状消息结构

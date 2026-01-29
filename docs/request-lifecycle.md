@@ -120,18 +120,18 @@ conversation_history = [
 # src/core/state.py - create_initial_state()
 initial_state = {
     "current_task": "帮我分析一下 Python 异步编程的最佳实践",
-    "session_id": "artifact-session-uuid",
-    "thread_id": "langgraph-thread-uuid",
+    "session_id": conversation_id, # session_id 与 conversation_id 相同，用于对话与Artifact映射
+    "thread_id": f"thd-{uuid4().hex}",
     "conversation_history": [...],  # List[Dict]，格式化的对话历史
     "phase": ExecutionPhase.LEAD_EXECUTING,
     "current_agent": "lead_agent",
-    "agent_memories": {},
-    "execution_metrics": create_initial_metrics(),
     "subagent_pending": None,
     "pending_tool_call": None,
+    "agent_memories": {},
     "compression_level": "normal",
-    "user_message_id": "msg-xxx",
-    "graph_response": None
+    "user_message_id": f"msg-{uuid4().hex}",
+    "graph_response": None,
+    "execution_metrics": create_initial_metrics()
 }
 ```
 
@@ -176,7 +176,7 @@ flowchart TD
 messages = [{"role": "system", "content": system_prompt}]
 
 # Part 2: Conversation history（仅 Lead Agent）
-# 自动压缩，保留最近 4 条（2 轮对话）
+# 自动压缩，至少保留最近 4 条（2 轮对话）
 if agent.config.name == "lead_agent" and conversation_history:
     messages.extend(compressed_history)
 
@@ -207,9 +207,7 @@ def route_func(state: AgentState) -> str:
     elif phase == ExecutionPhase.SUBAGENT_EXECUTING:
         return state["subagent_pending"]["target"]
     elif phase == ExecutionPhase.LEAD_EXECUTING:
-        if state.get("current_agent") != "lead_agent":
-            return "lead_agent"
-        return END
+        return "lead_agent"
     elif phase == ExecutionPhase.COMPLETED:
         return END
     else:
