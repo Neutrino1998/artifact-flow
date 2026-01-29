@@ -39,8 +39,11 @@ class LeadAgent(BaseAgent):
                 name="lead_agent",
                 description="Task coordinator and information integrator",
                 required_tools=[
-                    "create_artifact", "update_artifact",
-                    "rewrite_artifact", "read_artifact", "call_subagent"
+                    "create_artifact", 
+                    "update_artifact",
+                    "rewrite_artifact", 
+                    "read_artifact", 
+                    "call_subagent"
                 ],
                 model="qwen3-next-80b-thinking",
                 temperature=0.7,
