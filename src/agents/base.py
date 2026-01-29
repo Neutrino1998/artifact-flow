@@ -392,31 +392,22 @@ class BaseAgent(ABC):
                 tool_call = tool_calls[0]
                 logger.debug(f"{self.config.name} requesting tool: '{tool_call.name}'")
 
-                # 检查是否是 subagent 路由
+                # 设置路由信息
                 if tool_call.name == "call_subagent":
-                    # Subagent 路由：直接设置路由信息
-                    current_response.tool_interactions = new_tool_interactions
                     current_response.routing = {
                         "type": "subagent",
                         "target": tool_call.params.get("agent_name"),
                         "instruction": tool_call.params.get("instruction")
                     }
-                    yield StreamEvent(
-                        type=StreamEventType.AGENT_COMPLETE,
-                        agent=self.config.name,
-                        data=current_response
-                    )
-                    return
+                else:
+                    current_response.routing = {
+                        "type": "tool_call",
+                        "tool_name": tool_call.name,
+                        "params": tool_call.params
+                    }
 
-                # 普通工具调用：设置 tool_call 路由
+                # Agent 本轮完成（带路由），实际执行由 graph 层处理
                 current_response.tool_interactions = new_tool_interactions
-                current_response.routing = {
-                    "type": "tool_call",
-                    "tool_name": tool_call.name,
-                    "params": tool_call.params
-                }
-
-                # Agent 本轮完成（带工具路由），实际工具执行由 graph 层处理
                 yield StreamEvent(
                     type=StreamEventType.AGENT_COMPLETE,
                     agent=self.config.name,
