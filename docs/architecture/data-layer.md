@@ -48,14 +48,14 @@ erDiagram
     }
 
     ArtifactSession {
-        string id PK_FK
+        string id PK "FK"
         datetime created_at
         datetime updated_at
     }
 
     Artifact {
         string id PK
-        string session_id PK_FK
+        string session_id PK "FK"
         string content_type
         string title
         text content
