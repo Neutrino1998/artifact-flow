@@ -42,8 +42,8 @@ erDiagram
         string parent_id
         text content
         string thread_id
-        datetime created_at
         text graph_response
+        datetime created_at
         json metadata_
     }
 
