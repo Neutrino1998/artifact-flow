@@ -51,7 +51,7 @@ class WebFetchTool(BaseTool):
         super().__init__(
             name="web_fetch",
             description="Fetch and extract content from web pages and PDF files",
-            permission=ToolPermission.PUBLIC
+            permission=ToolPermission.AUTO
         )
         
         if not CRAWL4AI_AVAILABLE:

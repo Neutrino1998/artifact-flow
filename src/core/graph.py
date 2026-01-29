@@ -69,9 +69,9 @@ class ExtendableGraph:
             """
             统一的工具执行节点
 
-            处理所有权限级别的工具调用：
-            - PUBLIC/NOTIFY → 直接执行
-            - CONFIRM/RESTRICTED → interrupt() 请求确认后执行
+            处理两级权限的工具调用：
+            - AUTO → 直接执行
+            - CONFIRM → interrupt() 请求用户确认后执行
 
             工作流程：
             1. 从 pending_tool_call 读取待执行信息
@@ -118,7 +118,7 @@ class ExtendableGraph:
                 return state
 
             # 根据权限级别处理
-            if tool.permission in [ToolPermission.CONFIRM, ToolPermission.RESTRICTED]:
+            if tool.permission == ToolPermission.CONFIRM:
                 # 需要用户确认
                 logger.info(f"Tool '{tool_name}' requires {tool.permission.value} permission")
 
@@ -577,7 +577,7 @@ async def create_multi_agent_graph(
     Args:
         tool_permissions: 工具权限配置字典
             格式: {"tool_name": ToolPermission.LEVEL}
-            例如: {"web_fetch": ToolPermission.CONFIRM}
+            例如: {"send_email": ToolPermission.CONFIRM}
         artifact_manager: ArtifactManager 实例（用于持久化）
             如果为 None，artifact 工具将不可用
         checkpointer: LangGraph checkpointer 实例（用于状态持久化）

@@ -35,7 +35,7 @@ class WebSearchTool(BaseTool):
         super().__init__(
             name="web_search",
             description="Search the web for information using Bocha AI search engine",
-            permission=ToolPermission.PUBLIC
+            permission=ToolPermission.AUTO
         )
         
         if not BOCHA_API_KEY:

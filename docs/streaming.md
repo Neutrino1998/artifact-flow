@@ -387,7 +387,7 @@ function useChat() {
 
 ```python
 # tool_execution_node 中
-if tool.permission in [ToolPermission.CONFIRM, ToolPermission.RESTRICTED]:
+if tool.permission == ToolPermission.CONFIRM:
     # 发送 PERMISSION_REQUEST 事件
     writer({
         "type": StreamEventType.PERMISSION_REQUEST.value,

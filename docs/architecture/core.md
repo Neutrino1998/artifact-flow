@@ -261,7 +261,7 @@ async def tool_execution_node(state: AgentState, writer: StreamWriter) -> AgentS
     tool = agent.toolkit.get_tool(tool_name)
 
     # 权限检查
-    if tool.permission in [ToolPermission.CONFIRM, ToolPermission.RESTRICTED]:
+    if tool.permission == ToolPermission.CONFIRM:
         writer({...})  # PERMISSION_REQUEST
         is_approved = interrupt({...})
         if not is_approved:

@@ -222,8 +222,8 @@ def route_func(state: AgentState) -> str:
 flowchart TD
     A[获取 pending_tool_call] --> B[查找工具]
     B --> C{检查权限}
-    C -->|PUBLIC/NOTIFY| D[直接执行]
-    C -->|CONFIRM/RESTRICTED| E[interrupt 请求确认]
+    C -->|AUTO| D[直接执行]
+    C -->|CONFIRM| E[interrupt 请求确认]
     E --> F{用户响应}
     F -->|approved| D
     F -->|denied| G[返回拒绝结果]
@@ -315,7 +315,7 @@ data: {"response": "...", "metrics": {...}}
 
 ```python
 # src/core/graph.py - tool_execution_node
-if tool.permission in [ToolPermission.CONFIRM, ToolPermission.RESTRICTED]:
+if tool.permission == ToolPermission.CONFIRM:
     # 发送权限请求事件
     writer({
         "type": StreamEventType.PERMISSION_REQUEST.value,

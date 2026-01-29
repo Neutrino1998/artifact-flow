@@ -125,31 +125,28 @@ if __name__ == "__main__":
         # 1. Setup: Create registry and register all available tools
         print("[1] Initializing Registry and Tool Library...")
         registry = ToolRegistry()
-        public_tool = MockTool("search_web", ToolPermission.PUBLIC)
+        auto_tool = MockTool("search_web", ToolPermission.AUTO)
         confirm_tool = MockTool("send_email", ToolPermission.CONFIRM)
-        restricted_tool = MockTool("execute_code", ToolPermission.RESTRICTED)
         
-        registry.register_tool_to_library(public_tool)
+        registry.register_tool_to_library(auto_tool)
         registry.register_tool_to_library(confirm_tool)
-        registry.register_tool_to_library(restricted_tool)
-        _print_check("Tools registered to library", len(registry.tool_library) == 3)
+        _print_check("Tools registered to library", len(registry.tool_library) == 2)
 
         # 2. Test Toolkit Creation and Tool Assignment
         print("\n[2] Creating AgentToolkit and assigning tools...")
-        # Note: We are adding a high-permission tool. This should now work without warnings.
         agent_name = "test_agent"
         toolkit = registry.create_agent_toolkit(
             agent_name,
-            tool_names=["search_web", "send_email"] # Assign a PUBLIC and a CONFIRM tool
+            tool_names=["search_web", "send_email"]  # Assign an AUTO and a CONFIRM tool
         )
-        
-        # Verify that tools were added successfully, regardless of their permission level
+
+        # Verify that tools were added successfully
         _print_check("Toolkit created", toolkit is not None)
         _print_check("Correct number of tools in toolkit", len(toolkit.tools) == 2)
+        _print_check("Tool 'search_web' (AUTO) was added successfully",
+                     toolkit.get_tool("search_web") is not None)
         _print_check("Tool 'send_email' (CONFIRM) was added successfully",
                      toolkit.get_tool("send_email") is not None)
-        _print_check("Tool not assigned ('execute_code') is not in toolkit",
-                     toolkit.get_tool("execute_code") is None)
 
         # 3. Test Tool Execution
         print("\n[3] Testing tool execution via toolkit...")

@@ -10,11 +10,14 @@ from enum import Enum
 
 
 class ToolPermission(Enum):
-    """工具权限级别"""
-    PUBLIC = "public"        # 直接执行（如搜索）
-    NOTIFY = "notify"        # 执行后通知（如保存文件）
-    CONFIRM = "confirm"      # 需用户确认（如发邮件）
-    RESTRICTED = "restricted"  # 需特殊授权（如执行代码）
+    """
+    工具权限级别（两级模型）
+
+    - AUTO: 自动执行，无需用户确认
+    - CONFIRM: 执行前需用户确认（通过 interrupt 暂停）
+    """
+    AUTO = "auto"            # 自动执行（搜索、抓取、artifact 操作等）
+    CONFIRM = "confirm"      # 需用户确认（敏感操作如发邮件、执行代码等）
 
 
 @dataclass
@@ -68,7 +71,7 @@ class BaseTool(ABC):
         self,
         name: str,
         description: str,
-        permission: ToolPermission = ToolPermission.PUBLIC,
+        permission: ToolPermission = ToolPermission.AUTO,
         **kwargs
     ):
         """

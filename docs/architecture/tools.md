@@ -21,14 +21,12 @@ src/tools/
 
 ### ToolPermission
 
-四级权限模型：
+两级权限模型：
 
 ```python
 class ToolPermission(Enum):
-    PUBLIC = "public"          # 直接执行，无需确认
-    NOTIFY = "notify"          # 执行后通知用户
-    CONFIRM = "confirm"        # 执行前需用户确认
-    RESTRICTED = "restricted"  # 需特殊授权
+    AUTO = "auto"        # 自动执行，无需用户确认
+    CONFIRM = "confirm"  # 执行前需用户确认（通过 interrupt 暂停）
 ```
 
 **权限处理流程**（在 `graph.py` 的 `tool_execution_node` 中）：
@@ -36,16 +34,13 @@ class ToolPermission(Enum):
 ```mermaid
 flowchart TD
     A[获取工具权限] --> B{权限级别}
-    B -->|PUBLIC| C[直接执行]
-    B -->|NOTIFY| D[执行后发送通知事件]
-    B -->|CONFIRM| E[发送 PERMISSION_REQUEST]
-    B -->|RESTRICTED| E
-    E --> F[interrupt 暂停]
-    F --> G{用户响应}
-    G -->|approved| C
-    G -->|denied| H[返回拒绝结果]
-    C --> I[发送 TOOL_COMPLETE]
-    D --> I
+    B -->|AUTO| C[直接执行]
+    B -->|CONFIRM| D[发送 PERMISSION_REQUEST]
+    D --> E[interrupt 暂停]
+    E --> F{用户响应}
+    F -->|approved| C
+    F -->|denied| G[返回拒绝结果]
+    C --> H[发送 TOOL_COMPLETE]
 ```
 
 ### ToolParameter
@@ -88,7 +83,7 @@ class BaseTool(ABC):
         self,
         name: str,
         description: str,
-        permission: ToolPermission = ToolPermission.PUBLIC,
+        permission: ToolPermission = ToolPermission.AUTO,
         **kwargs
     ):
         self.name = name
@@ -128,7 +123,7 @@ class WebSearchTool(BaseTool):
         super().__init__(
             name="web_search",
             description="搜索互联网获取信息",
-            permission=ToolPermission.PUBLIC
+            permission=ToolPermission.AUTO
         )
 
     def get_parameters(self) -> List[ToolParameter]:
@@ -383,7 +378,7 @@ class CallSubagentTool(BaseTool):
         super().__init__(
             name="call_subagent",
             description="Call a specialized sub-agent to handle specific tasks",
-            permission=ToolPermission.PUBLIC
+            permission=ToolPermission.AUTO
         )
 
     def get_parameters(self) -> List[ToolParameter]:
@@ -418,7 +413,7 @@ class CallSubagentTool(BaseTool):
 class WebSearchTool(BaseTool):
     name = "web_search"
     description = "搜索互联网"
-    permission = ToolPermission.PUBLIC
+    permission = ToolPermission.AUTO
 ```
 
 ### web_fetch
@@ -429,7 +424,7 @@ class WebSearchTool(BaseTool):
 class WebFetchTool(BaseTool):
     name = "web_fetch"
     description = "获取网页内容"
-    permission = ToolPermission.PUBLIC
+    permission = ToolPermission.AUTO
 ```
 
 ### Artifact 操作

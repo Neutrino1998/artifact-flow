@@ -588,7 +588,7 @@ class CreateArtifactTool(BaseTool):
         super().__init__(
             name="create_artifact",
             description="Create a new artifact (like Claude's artifact creation)",
-            permission=ToolPermission.NOTIFY
+            permission=ToolPermission.AUTO
         )
         self._manager = manager
 
@@ -657,7 +657,7 @@ class UpdateArtifactTool(BaseTool):
         super().__init__(
             name="update_artifact",
             description="Update artifact content by replacing old text with new text (Attempt fuzzy matching if exact text not found).",
-            permission=ToolPermission.PUBLIC
+            permission=ToolPermission.AUTO
         )
         self._manager = manager
 
@@ -753,7 +753,7 @@ class RewriteArtifactTool(BaseTool):
         super().__init__(
             name="rewrite_artifact",
             description="Completely rewrite the artifact content",
-            permission=ToolPermission.PUBLIC
+            permission=ToolPermission.AUTO
         )
         self._manager = manager
 
@@ -812,7 +812,7 @@ class ReadArtifactTool(BaseTool):
         super().__init__(
             name="read_artifact",
             description="Read artifact content",
-            permission=ToolPermission.PUBLIC
+            permission=ToolPermission.AUTO
         )
         self._manager = manager
 
