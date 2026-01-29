@@ -46,10 +46,16 @@ class ExtendableGraph:
         └→ CONFIRM/RESTRICTED → interrupt() → 确认后执行 → 返回原 agent
     """
 
-    def __init__(self):
-        """初始化Graph构建器"""
+    def __init__(self, artifact_manager: Optional["ArtifactManager"] = None):
+        """
+        初始化Graph构建器
+
+        Args:
+            artifact_manager: ArtifactManager 实例，用于在 agent 上下文中注入 artifacts 清单
+        """
         self.workflow = StateGraph(AgentState)
         self.agents: Dict[str, BaseAgent] = {}
+        self.artifact_manager = artifact_manager
 
         # 添加核心节点（工具执行）
         self._add_tool_execution_node()
@@ -316,12 +322,13 @@ class ExtendableGraph:
                         logger.info(f"{agent_name} resuming after subagent")
 
                 # ========== 构建messages ==========
-                messages = ContextManager.build_agent_messages(
+                messages = await ContextManager.build_agent_messages(
                     agent=agent,
                     state=state,
                     instruction=instruction,
                     tool_interactions=tool_interactions,
-                    pending_tool_result=pending_tool_result
+                    pending_tool_result=pending_tool_result,
+                    artifact_manager=self.artifact_manager
                 )
 
                 # 如果达到工具轮数上限，添加系统消息提醒总结
@@ -589,8 +596,8 @@ async def create_multi_agent_graph(
     from tools.implementations.web_search import WebSearchTool
     from tools.implementations.web_fetch import WebFetchTool
 
-    # 创建Graph构建器
-    graph_builder = ExtendableGraph()
+    # 创建Graph构建器（传入 artifact_manager 用于上下文注入）
+    graph_builder = ExtendableGraph(artifact_manager=artifact_manager)
 
     # 创建工具注册中心
     registry = ToolRegistry()

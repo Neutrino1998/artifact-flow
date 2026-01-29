@@ -114,16 +114,18 @@ class ContextManager:
         return result
     
     @classmethod
-    def prepare_agent_context(
+    async def prepare_agent_context(
         cls,
-        state: Dict[str, Any]
+        state: Dict[str, Any],
+        artifact_manager: Optional[Any] = None
     ) -> Dict[str, Any]:
         """
         为Agent准备路由上下文
-        
+
         Args:
             state: 当前Graph状态
-            
+            artifact_manager: ArtifactManager 实例（通过依赖注入）
+
         Returns:
             路由上下文字典
         """
@@ -132,48 +134,56 @@ class ContextManager:
             "thread_id": state.get("thread_id"),
             "user_message_id": state.get("user_message_id"),
         }
-        
-        # 注入task_plan和artifacts
-        try:
-            from tools.implementations.artifact_ops import _artifact_store
-            
-            if context.get("session_id"):
-                _artifact_store.set_session(context["session_id"])
-            
-            artifacts_list = _artifact_store.list_artifacts(
-                include_content=True,
-                content_preview_length=200,
-                full_content_for=["task_plan"]  # task_plan显示完整内容
-            )
-            logger.debug(f"Context preparation: \n{artifacts_list}")
-            if artifacts_list:
-                context["artifacts_inventory"] = artifacts_list
-                context["artifacts_count"] = len(artifacts_list)
-        except Exception as e:
-            logger.exception(f"Context preparation partial failure: {e}")
-        
+
+        # 注入task_plan和artifacts（需要 artifact_manager）
+        if artifact_manager and context.get("session_id"):
+            try:
+                artifact_manager.set_session(context["session_id"])
+
+                artifacts_list = await artifact_manager.list_artifacts(
+                    session_id=context["session_id"],
+                    include_content=True,
+                    content_preview_length=200,
+                    full_content_for=["task_plan"]  # task_plan显示完整内容
+                )
+                logger.debug(f"Context preparation: \n{artifacts_list}")
+                if artifacts_list:
+                    context["artifacts_inventory"] = artifacts_list
+                    context["artifacts_count"] = len(artifacts_list)
+            except Exception as e:
+                logger.warning(f"Context preparation partial failure: {e}")
+
         return context
     
     @classmethod
-    def build_agent_messages(
+    async def build_agent_messages(
         cls,
         agent: Any,  # BaseAgent实例
         state: Dict[str, Any],
         instruction: str,
         tool_interactions: Optional[List[Dict]] = None,
         pending_tool_result: Optional[Tuple[str, Any]] = None,
+        artifact_manager: Optional[Any] = None,
     ) -> List[Dict]:
         """
         统一构建Agent messages
-        
+
         拼接顺序：
         system → conversation_history → instruction → tool_interactions → tool_result
+
+        Args:
+            agent: BaseAgent实例
+            state: 当前Graph状态
+            instruction: 当前指令
+            tool_interactions: 工具交互历史
+            pending_tool_result: 待处理的工具结果
+            artifact_manager: ArtifactManager 实例（通过依赖注入）
         """
         messages = []
         compression_level = state.get("compression_level", "normal")
-        
+
         # Part 1: System prompt
-        context = cls.prepare_agent_context(state)
+        context = await cls.prepare_agent_context(state, artifact_manager)
         system_prompt = agent.build_complete_system_prompt(context)
         messages.append({"role": "system", "content": system_prompt})
         
