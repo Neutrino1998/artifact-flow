@@ -694,6 +694,10 @@ async def create_async_sqlite_checkpointer(db_path: str = "data/langgraph.db"):
     # 创建 aiosqlite 连接
     conn = await aiosqlite.connect(db_path)
 
+    # 配置 SQLite 以提高并发性能
+    await conn.execute("PRAGMA journal_mode=WAL")
+    await conn.execute("PRAGMA busy_timeout=5000")  # 5 秒忙等待
+
     # 创建 AsyncSqliteSaver
     checkpointer = AsyncSqliteSaver(conn)
 

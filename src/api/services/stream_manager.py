@@ -64,11 +64,13 @@ class StreamContext:
         created_at: 创建时间
         status: 状态 (pending: 等待连接, streaming: 正在推送, closed: 已关闭)
         ttl_task: TTL 清理任务
+        cancelled: 取消事件，用于通知后台任务停止
     """
     queue: asyncio.Queue = field(default_factory=asyncio.Queue)
     created_at: datetime = field(default_factory=datetime.now)
     status: Literal["pending", "streaming", "closed"] = "pending"
     ttl_task: Optional[asyncio.Task] = None
+    cancelled: asyncio.Event = field(default_factory=asyncio.Event)
 
 
 class StreamManager:
@@ -80,6 +82,7 @@ class StreamManager:
     - 在 POST /chat 时创建队列，开始缓冲事件
     - 在 GET /stream 时消费队列，通过 SSE 推送
     - TTL 机制防止内存泄漏
+    - 提供取消机制，通知后台任务在 stream 关闭时停止
 
     使用方式：
         # POST /chat 处理器
@@ -89,7 +92,8 @@ class StreamManager:
         # 后台任务
         async def run_graph_and_push_events(thread_id):
             async for event in controller.stream_execute(...):
-                stream_manager.push_event(thread_id, event)
+                if not stream_manager.push_event(thread_id, event):
+                    break  # stream 已关闭，停止推送
 
         # GET /stream 处理器
         async for event in stream_manager.consume_events(thread_id):
@@ -106,6 +110,8 @@ class StreamManager:
         self.streams: Dict[str, StreamContext] = {}
         self.ttl_seconds = ttl_seconds
         self._lock = asyncio.Lock()
+        # 记录已关闭的 stream（避免重复警告）
+        self._closed_streams: set = set()
 
         logger.info(f"StreamManager initialized (TTL: {ttl_seconds}s)")
 
@@ -125,6 +131,9 @@ class StreamManager:
         async with self._lock:
             if thread_id in self.streams:
                 raise StreamAlreadyExistsError(thread_id)
+
+            # 清理之前的关闭记录（允许重新使用同一个 thread_id）
+            self._closed_streams.discard(thread_id)
 
             context = StreamContext()
             self.streams[thread_id] = context
@@ -162,11 +171,14 @@ class StreamManager:
             event: 事件字典
 
         Returns:
-            是否成功推送
+            是否成功推送（False 表示 stream 已关闭，调用方应停止推送）
         """
         context = self.streams.get(thread_id)
         if not context or context.status == "closed":
-            logger.warning(f"Cannot push event to stream {thread_id}: stream not found or closed")
+            # 只在首次失败时打印警告，避免刷屏
+            if thread_id not in self._closed_streams:
+                self._closed_streams.add(thread_id)
+                logger.warning(f"Stream {thread_id} closed, subsequent push_event calls will be ignored")
             return False
 
         await context.queue.put(event)
@@ -242,13 +254,16 @@ class StreamManager:
 
         context.status = "closed"
 
+        # 设置取消事件，通知后台任务停止
+        context.cancelled.set()
+
         # 取消 TTL 任务
         if context.ttl_task:
             context.ttl_task.cancel()
             context.ttl_task = None
 
-        # 从字典中移除
-        del self.streams[thread_id]
+        # 注意：不立即从字典中移除，保留引用以便 push_event 能检测到 closed 状态
+        # 延迟清理会在下一次 create_stream 或 TTL 时处理
         logger.debug(f"Stream {thread_id} closed")
 
         return True

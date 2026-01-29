@@ -136,7 +136,7 @@ class DatabaseManager:
     async def _configure_sqlite_wal(self) -> None:
         """
         配置 SQLite WAL 模式
-        
+
         WAL (Write-Ahead Logging) 模式的优势：
         - 读写可以并发进行
         - 写操作不会阻塞读操作
@@ -151,7 +151,9 @@ class DatabaseManager:
             await conn.execute(text("PRAGMA cache_size=-64000"))  # 64MB
             # 启用外键约束
             await conn.execute(text("PRAGMA foreign_keys=ON"))
-            
+            # 设置忙等待超时（毫秒），避免 database is locked 错误
+            await conn.execute(text("PRAGMA busy_timeout=5000"))  # 5 秒
+
         logger.info("SQLite WAL mode configured")
     
     async def _create_tables(self) -> None:

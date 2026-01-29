@@ -176,7 +176,10 @@ async def send_message(
                     conversation_id=conversation_id,
                     parent_message_id=request.parent_message_id,
                 ):
-                    await stream_manager.push_event(thread_id, event)
+                    # push_event 返回 False 表示 stream 已关闭，停止执行
+                    if not await stream_manager.push_event(thread_id, event):
+                        logger.info(f"Stream {thread_id} closed, stopping graph execution")
+                        break
 
             except Exception as e:
                 logger.exception(f"Error in graph execution: {e}")
@@ -382,7 +385,10 @@ async def resume_execution(
                     message_id=request.message_id,
                     resume_data=resume_data,
                 ):
-                    await stream_manager.push_event(thread_id, event)
+                    # push_event 返回 False 表示 stream 已关闭，停止执行
+                    if not await stream_manager.push_event(thread_id, event):
+                        logger.info(f"Stream {thread_id} closed, stopping resume execution")
+                        break
 
             except Exception as e:
                 logger.exception(f"Error in resume execution: {e}")
