@@ -33,7 +33,7 @@ class AgentConfig:
     model: str = "qwen-plus"
     temperature: float = 0.7
     max_tool_rounds: int = 3  # 最大工具调用轮数
-    streaming: bool = False  # 是否默认流式输出
+    streaming: bool = True  # 是否默认流式输出
 
     llm_max_retries: int = 3  # LLM调用最大重试次数
     llm_retry_delay: float = 1.0  # 初始重试延迟（秒）
