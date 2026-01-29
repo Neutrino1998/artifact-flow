@@ -461,9 +461,7 @@ class ExtendableGraph:
 
             # 3. Lead执行（subagent完成后返回）
             elif phase == ExecutionPhase.LEAD_EXECUTING:
-                if current_agent != "lead_agent":
-                    return "lead_agent"
-                return END
+                return "lead_agent"
 
             # 4. 完成
             elif phase == ExecutionPhase.COMPLETED:
