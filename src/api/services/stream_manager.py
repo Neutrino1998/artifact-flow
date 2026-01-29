@@ -7,13 +7,13 @@ POST /chat 启动任务后，Graph 可能在前端 SSE 连接建立之前
 
 架构设计：
     ┌───────────────────────────────────────────────────────┐
-    │  streams: Dict[thread_id, StreamContext]               │
-    │                                                        │
-    │  StreamContext:                                        │
+    │  streams: Dict[thread_id, StreamContext]              │
+    │                                                       │
+    │  StreamContext:                                       │
     │    - queue: asyncio.Queue[Dict]                       │
     │    - created_at: datetime                             │
     │    - status: pending | streaming | closed             │
-    │    - ttl_task: asyncio.Task (自动清理)                 │
+    │    - ttl_task: asyncio.Task (Auto-clean-up)           │
     └───────────────────────────────────────────────────────┘
 
 交互时序：
@@ -21,7 +21,7 @@ POST /chat 启动任务后，Graph 可能在前端 SSE 连接建立之前
         │                                      │
         ▼                                      │
     [创建 StreamContext]                       │
-    [启动 TTL 定时器 (30s)]                    │
+    [启动 TTL 定时器 (30s)]                     │
         │                                      │
         ▼                                      ▼
     [push 事件到队列]  ──────────────► [消费并推送 SSE]
