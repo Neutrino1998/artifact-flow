@@ -1594,18 +1594,27 @@
 <p>事件类型包含在 <code>data</code> 的 JSON 对象内（<code>type</code> 字段），而非使用 SSE 的 <code>event:</code> 字段：</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>data: {&quot;type&quot;:&quot;metadata&quot;,&quot;timestamp&quot;:&quot;...&quot;,&quot;data&quot;:{&quot;conversation_id&quot;:&quot;xxx&quot;,&quot;thread_id&quot;:&quot;yyy&quot;,&quot;message_id&quot;:&quot;zzz&quot;}}
 <a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>
-<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>data: {&quot;type&quot;:&quot;agent_start&quot;,&quot;timestamp&quot;:&quot;...&quot;,&quot;agent&quot;:&quot;lead_agent&quot;}
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>data: {&quot;type&quot;:&quot;agent_start&quot;,&quot;timestamp&quot;:&quot;...&quot;,&quot;agent&quot;:&quot;lead_agent&quot;,&quot;data&quot;:{&quot;success&quot;:true,&quot;content&quot;:&quot;&quot;,&quot;metadata&quot;:{...}}}
 <a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>
-<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>data: {&quot;type&quot;:&quot;llm_chunk&quot;,&quot;timestamp&quot;:&quot;...&quot;,&quot;agent&quot;:&quot;lead_agent&quot;,&quot;data&quot;:{&quot;content&quot;:&quot;让我&quot;}}
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>data: {&quot;type&quot;:&quot;llm_chunk&quot;,&quot;timestamp&quot;:&quot;...&quot;,&quot;agent&quot;:&quot;lead_agent&quot;,&quot;data&quot;:{&quot;success&quot;:true,&quot;content&quot;:&quot;让我&quot;,&quot;metadata&quot;:{...}}}
 <a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a>
-<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a>data: {&quot;type&quot;:&quot;llm_chunk&quot;,&quot;timestamp&quot;:&quot;...&quot;,&quot;agent&quot;:&quot;lead_agent&quot;,&quot;data&quot;:{&quot;content&quot;:&quot;来分析&quot;}}
+<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a>data: {&quot;type&quot;:&quot;llm_chunk&quot;,&quot;timestamp&quot;:&quot;...&quot;,&quot;agent&quot;:&quot;lead_agent&quot;,&quot;data&quot;:{&quot;success&quot;:true,&quot;content&quot;:&quot;让我来分析&quot;,&quot;metadata&quot;:{...}}}
 <a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a>
-<a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a>data: {&quot;type&quot;:&quot;tool_start&quot;,&quot;timestamp&quot;:&quot;...&quot;,&quot;tool&quot;:&quot;web_search&quot;,&quot;data&quot;:{&quot;params&quot;:{&quot;query&quot;:&quot;Python async best practices&quot;}}}
+<a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a>data: {&quot;type&quot;:&quot;llm_complete&quot;,&quot;timestamp&quot;:&quot;...&quot;,&quot;agent&quot;:&quot;lead_agent&quot;,&quot;data&quot;:{&quot;success&quot;:true,&quot;content&quot;:&quot;...&quot;,&quot;token_usage&quot;:{...}}}
 <a id="__codelineno-8-10" name="__codelineno-8-10" href="#__codelineno-8-10"></a>
-<a id="__codelineno-8-11" name="__codelineno-8-11" href="#__codelineno-8-11"></a>data: {&quot;type&quot;:&quot;tool_complete&quot;,&quot;timestamp&quot;:&quot;...&quot;,&quot;tool&quot;:&quot;web_search&quot;,&quot;data&quot;:{&quot;success&quot;:true,&quot;data&quot;:{...}}}
+<a id="__codelineno-8-11" name="__codelineno-8-11" href="#__codelineno-8-11"></a>data: {&quot;type&quot;:&quot;agent_complete&quot;,&quot;timestamp&quot;:&quot;...&quot;,&quot;agent&quot;:&quot;lead_agent&quot;,&quot;data&quot;:{&quot;success&quot;:true,&quot;content&quot;:&quot;...&quot;,&quot;routing&quot;:{&quot;type&quot;:&quot;tool_call&quot;,...}}}
 <a id="__codelineno-8-12" name="__codelineno-8-12" href="#__codelineno-8-12"></a>
-<a id="__codelineno-8-13" name="__codelineno-8-13" href="#__codelineno-8-13"></a>data: {&quot;type&quot;:&quot;complete&quot;,&quot;timestamp&quot;:&quot;...&quot;,&quot;data&quot;:{&quot;response&quot;:&quot;...&quot;,&quot;metrics&quot;:{...}}}
+<a id="__codelineno-8-13" name="__codelineno-8-13" href="#__codelineno-8-13"></a>data: {&quot;type&quot;:&quot;tool_start&quot;,&quot;timestamp&quot;:&quot;...&quot;,&quot;agent&quot;:&quot;lead_agent&quot;,&quot;tool&quot;:&quot;web_search&quot;,&quot;data&quot;:{&quot;params&quot;:{&quot;query&quot;:&quot;Python async best practices&quot;}}}
+<a id="__codelineno-8-14" name="__codelineno-8-14" href="#__codelineno-8-14"></a>
+<a id="__codelineno-8-15" name="__codelineno-8-15" href="#__codelineno-8-15"></a>data: {&quot;type&quot;:&quot;tool_complete&quot;,&quot;timestamp&quot;:&quot;...&quot;,&quot;agent&quot;:&quot;lead_agent&quot;,&quot;tool&quot;:&quot;web_search&quot;,&quot;data&quot;:{&quot;success&quot;:true,&quot;duration_ms&quot;:1234,&quot;error&quot;:null}}
+<a id="__codelineno-8-16" name="__codelineno-8-16" href="#__codelineno-8-16"></a>
+<a id="__codelineno-8-17" name="__codelineno-8-17" href="#__codelineno-8-17"></a>data: {&quot;type&quot;:&quot;complete&quot;,&quot;timestamp&quot;:&quot;...&quot;,&quot;data&quot;:{&quot;success&quot;:true,&quot;interrupted&quot;:false,&quot;response&quot;:&quot;...&quot;,&quot;execution_metrics&quot;:{...}}}
 </code></pre></div>
+<p><strong>关键点：</strong>
+- <code>llm_chunk.data.content</code> 是<strong>累积</strong>内容，每次事件包含从头开始的完整文本
+- <code>tool_complete</code> 不包含工具返回的实际数据（出于性能考虑）
+- <code>complete</code> 事件的 <code>interrupted</code> 字段指示是否需要用户确认权限</p>
+<p>详细字段说明见 <a href="../api/#stream-api">API Reference</a>。</p>
 <h2 id="phase-5">Phase 5: 权限中断与恢复</h2>
 <p>当工具需要用户确认时：</p>
 <h3 id="_9">中断流程</h3>
@@ -1636,15 +1645,17 @@
 <h3 id="_10">恢复流程</h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="c1"># POST /api/v1/chat/{conversation_id}/resume</span>
 <a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="p">{</span>
-<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>    <span class="s2">&quot;thread_id&quot;</span><span class="p">:</span> <span class="s2">&quot;xxx&quot;</span><span class="p">,</span>
-<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a>    <span class="s2">&quot;approved&quot;</span><span class="p">:</span> <span class="n">true</span>
-<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="p">}</span>
-<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a>
-<a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a><span class="c1"># Controller 恢复执行</span>
-<a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a><span class="k">await</span> <span class="n">graph</span><span class="o">.</span><span class="n">ainvoke</span><span class="p">(</span>
-<a id="__codelineno-10-9" name="__codelineno-10-9" href="#__codelineno-10-9"></a>    <span class="n">Command</span><span class="p">(</span><span class="n">resume</span><span class="o">=</span><span class="n">approved</span><span class="p">),</span>
-<a id="__codelineno-10-10" name="__codelineno-10-10" href="#__codelineno-10-10"></a>    <span class="n">config</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;configurable&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;thread_id&quot;</span><span class="p">:</span> <span class="n">thread_id</span><span class="p">}}</span>
-<a id="__codelineno-10-11" name="__codelineno-10-11" href="#__codelineno-10-11"></a><span class="p">)</span>
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>    <span class="s2">&quot;thread_id&quot;</span><span class="p">:</span> <span class="s2">&quot;thd-xxx&quot;</span><span class="p">,</span>
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a>    <span class="s2">&quot;message_id&quot;</span><span class="p">:</span> <span class="s2">&quot;msg-yyy&quot;</span><span class="p">,</span>  <span class="c1"># 要更新的消息 ID</span>
+<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a>    <span class="s2">&quot;approved&quot;</span><span class="p">:</span> <span class="n">true</span>
+<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a><span class="p">}</span>
+<a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a>
+<a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a><span class="c1"># Controller 恢复执行</span>
+<a id="__codelineno-10-9" name="__codelineno-10-9" href="#__codelineno-10-9"></a><span class="k">await</span> <span class="n">graph</span><span class="o">.</span><span class="n">astream</span><span class="p">(</span>
+<a id="__codelineno-10-10" name="__codelineno-10-10" href="#__codelineno-10-10"></a>    <span class="n">Command</span><span class="p">(</span><span class="n">resume</span><span class="o">=</span><span class="n">approved</span><span class="p">),</span>
+<a id="__codelineno-10-11" name="__codelineno-10-11" href="#__codelineno-10-11"></a>    <span class="n">config</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;configurable&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;thread_id&quot;</span><span class="p">:</span> <span class="n">thread_id</span><span class="p">}},</span>
+<a id="__codelineno-10-12" name="__codelineno-10-12" href="#__codelineno-10-12"></a>    <span class="n">stream_mode</span><span class="o">=</span><span class="s2">&quot;custom&quot;</span>
+<a id="__codelineno-10-13" name="__codelineno-10-13" href="#__codelineno-10-13"></a><span class="p">)</span>
 </code></pre></div>
 <h2 id="phase-6">Phase 6: 结果持久化</h2>
 <p>执行完成后，Controller 保存结果：</p>
