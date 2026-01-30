@@ -3,7 +3,7 @@
 提供数据库连接管理和 ORM 模型定义
 """
 
-from .database import DatabaseManager, get_database_manager
+from .database import DatabaseManager
 from .models import (
     Base,
     Conversation,
@@ -16,7 +16,6 @@ from .models import (
 __all__ = [
     # Database Manager
     "DatabaseManager",
-    "get_database_manager",
     # ORM Models
     "Base",
     "Conversation",

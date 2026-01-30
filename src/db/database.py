@@ -212,48 +212,6 @@ class DatabaseManager:
 
 
 # ============================================================
-# 全局管理器（仅用于向后兼容和测试）
-# 生产环境应通过依赖注入使用
-# ============================================================
-
-_default_manager: Optional[DatabaseManager] = None
-
-
-async def get_database_manager(
-    database_url: Optional[str] = None,
-    echo: bool = False,
-) -> DatabaseManager:
-    """
-    获取数据库管理器实例
-    
-    注意：此函数仅用于向后兼容和简单场景。
-    在生产环境中，应通过依赖注入创建和传递 DatabaseManager 实例。
-    
-    Args:
-        database_url: 数据库连接 URL
-        echo: 是否打印 SQL
-        
-    Returns:
-        DatabaseManager 实例
-    """
-    global _default_manager
-    
-    if _default_manager is None:
-        _default_manager = DatabaseManager(database_url, echo)
-        await _default_manager.initialize()
-    
-    return _default_manager
-
-
-async def close_database() -> None:
-    """关闭全局数据库连接"""
-    global _default_manager
-    
-    if _default_manager:
-        await _default_manager.close()
-        _default_manager = None
-
-
 # ============================================================
 # 测试支持
 # ============================================================
