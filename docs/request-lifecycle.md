@@ -8,6 +8,7 @@
 sequenceDiagram
     participant Client
     participant FastAPI
+    participant StreamManager
     participant Controller
     participant Graph
     participant Agent
@@ -15,26 +16,33 @@ sequenceDiagram
     participant DB
 
     Client->>FastAPI: POST /api/v1/chat
-    FastAPI->>Controller: stream_execute()
-    Controller->>DB: 创建/获取 Conversation
+    FastAPI->>DB: 确保 Conversation 存在
+    FastAPI->>StreamManager: create_stream(thread_id)
+    FastAPI->>Client: 返回 {thread_id, stream_url}
+
+    FastAPI->>Controller: 后台启动 stream_execute()
     Controller->>Graph: astream(initial_state)
 
     loop Agent Execution
-        Graph->>Agent: 执行节点
+        Graph->>Agent: agent.stream(messages)
         Agent->>Agent: LLM 调用
-        Agent-->>Client: SSE: llm_chunk
-        Agent->>Graph: AgentResponse
+        Agent->>Graph: yield StreamEvent
+        Graph->>StreamManager: push(llm_chunk)
 
         opt Tool Call
-            Graph->>Tool: 执行工具
-            Tool-->>Client: SSE: tool_complete
+            Graph->>Tool: execute_tool()
             Tool->>Graph: ToolResult
+            Graph->>StreamManager: push(tool_complete)
         end
     end
 
     Graph->>Controller: 最终状态
     Controller->>DB: 保存响应
-    Controller-->>Client: SSE: complete
+    Controller->>StreamManager: push(complete)
+
+    Client->>FastAPI: GET /stream/{thread_id}
+    FastAPI->>StreamManager: consume_events()
+    StreamManager-->>Client: SSE 事件流
 ```
 
 ## Phase 1: 请求接收与初始化
@@ -264,47 +272,49 @@ class StreamEventType(Enum):
 sequenceDiagram
     participant Client
     participant POST as POST /chat
-    participant Queue as Event Queue
+    participant Queue as StreamManager
     participant Graph
     participant GET as GET /stream
 
     Client->>POST: 发送消息
-    POST->>Queue: 创建 StreamContext
+    POST->>Queue: create_stream(thread_id)
     Note over Queue: TTL 计时器启动 (30s)
     POST->>Client: 返回 thread_id
 
+    POST->>Graph: 后台执行
     Graph->>Queue: push(agent_start)
     Graph->>Queue: push(llm_chunk)
 
     Client->>GET: 连接 SSE
+    GET->>Queue: consume_events(thread_id)
     Note over Queue: 取消 TTL 计时器
     Queue->>GET: yield events
     GET->>Client: SSE 推送
+
+    Graph->>Queue: push(complete)
+    Queue->>GET: yield complete
+    GET->>Client: SSE: complete
+    Note over Queue: 清理队列
 ```
 
 ### SSE 格式
 
+事件类型包含在 `data` 的 JSON 对象内（`type` 字段），而非使用 SSE 的 `event:` 字段：
+
 ```
-event: metadata
-data: {"conversation_id": "xxx", "thread_id": "yyy", "message_id": "zzz"}
+data: {"type":"metadata","timestamp":"...","data":{"conversation_id":"xxx","thread_id":"yyy","message_id":"zzz"}}
 
-event: agent_start
-data: {"agent": "lead_agent"}
+data: {"type":"agent_start","timestamp":"...","agent":"lead_agent"}
 
-event: llm_chunk
-data: {"content": "让我", "agent": "lead_agent"}
+data: {"type":"llm_chunk","timestamp":"...","agent":"lead_agent","data":{"content":"让我"}}
 
-event: llm_chunk
-data: {"content": "来分析", "agent": "lead_agent"}
+data: {"type":"llm_chunk","timestamp":"...","agent":"lead_agent","data":{"content":"来分析"}}
 
-event: tool_start
-data: {"tool": "web_search", "params": {"query": "Python async best practices"}}
+data: {"type":"tool_start","timestamp":"...","tool":"web_search","data":{"params":{"query":"Python async best practices"}}}
 
-event: tool_complete
-data: {"tool": "web_search", "success": true, "data": {...}}
+data: {"type":"tool_complete","timestamp":"...","tool":"web_search","data":{"success":true,"data":{...}}}
 
-event: complete
-data: {"response": "...", "metrics": {...}}
+data: {"type":"complete","timestamp":"...","data":{"response":"...","metrics":{...}}}
 ```
 
 ## Phase 5: 权限中断与恢复

@@ -173,9 +173,8 @@ sequenceDiagram
 
     Client->>POST /chat: 发送消息
     POST /chat->>StreamManager: create_stream(thread_id)
-    POST /chat->>Client: 返回 {thread_id, ...}
-
     Note over StreamManager: TTL 计时器启动 (30s)
+    POST /chat->>Client: 返回 {thread_id, ...}
 
     POST /chat->>Graph: 后台执行
     Graph->>StreamManager: push_event(agent_start)
