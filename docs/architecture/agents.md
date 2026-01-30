@@ -47,7 +47,6 @@ Agent 单轮执行的响应：
 class AgentResponse:
     success: bool = True                     # 执行是否成功
     content: str = ""                        # 回复内容或错误信息
-    tool_calls: List[Dict[str, Any]] = []    # 本轮工具调用记录
     tool_interactions: List[Dict] = []       # assistant-tool 交互历史（用于恢复）
     reasoning_content: Optional[str] = None  # 思考过程（支持 reasoning model）
     metadata: Dict[str, Any] = {}            # 元数据
@@ -209,7 +208,7 @@ if tool_calls:
 
 # 无工具调用 → Agent 完成
 # routing 为 None，由 Graph 层决定是 COMPLETED 还是返回 Lead
-final_response = self.format_final_response(content, tool_calls)
+final_response = self.format_final_response(content)
 current_response.content = final_response
 
 yield StreamEvent(type=AGENT_COMPLETE, ...)
@@ -438,7 +437,6 @@ if response.tool_interactions:
 memory["last_response"] = {
     "success": response.success,
     "content": response.content,
-    "tool_calls": response.tool_calls,
     "metadata": response.metadata,
     "reasoning": response.reasoning_content
 }

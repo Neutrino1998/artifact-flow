@@ -304,18 +304,29 @@ sequenceDiagram
 ```
 data: {"type":"metadata","timestamp":"...","data":{"conversation_id":"xxx","thread_id":"yyy","message_id":"zzz"}}
 
-data: {"type":"agent_start","timestamp":"...","agent":"lead_agent"}
+data: {"type":"agent_start","timestamp":"...","agent":"lead_agent","data":{"success":true,"content":"","metadata":{...}}}
 
-data: {"type":"llm_chunk","timestamp":"...","agent":"lead_agent","data":{"content":"让我"}}
+data: {"type":"llm_chunk","timestamp":"...","agent":"lead_agent","data":{"success":true,"content":"让我","metadata":{...}}}
 
-data: {"type":"llm_chunk","timestamp":"...","agent":"lead_agent","data":{"content":"来分析"}}
+data: {"type":"llm_chunk","timestamp":"...","agent":"lead_agent","data":{"success":true,"content":"让我来分析","metadata":{...}}}
 
-data: {"type":"tool_start","timestamp":"...","tool":"web_search","data":{"params":{"query":"Python async best practices"}}}
+data: {"type":"llm_complete","timestamp":"...","agent":"lead_agent","data":{"success":true,"content":"...","token_usage":{...}}}
 
-data: {"type":"tool_complete","timestamp":"...","tool":"web_search","data":{"success":true,"data":{...}}}
+data: {"type":"agent_complete","timestamp":"...","agent":"lead_agent","data":{"success":true,"content":"...","routing":{"type":"tool_call",...}}}
 
-data: {"type":"complete","timestamp":"...","data":{"response":"...","metrics":{...}}}
+data: {"type":"tool_start","timestamp":"...","agent":"lead_agent","tool":"web_search","data":{"params":{"query":"Python async best practices"}}}
+
+data: {"type":"tool_complete","timestamp":"...","agent":"lead_agent","tool":"web_search","data":{"success":true,"duration_ms":1234,"error":null}}
+
+data: {"type":"complete","timestamp":"...","data":{"success":true,"interrupted":false,"response":"...","execution_metrics":{...}}}
 ```
+
+**关键点：**
+- `llm_chunk.data.content` 是**累积**内容，每次事件包含从头开始的完整文本
+- `tool_complete` 不包含工具返回的实际数据（出于性能考虑）
+- `complete` 事件的 `interrupted` 字段指示是否需要用户确认权限
+
+详细字段说明见 [API Reference](./api.md#stream-api)。
 
 ## Phase 5: 权限中断与恢复
 
@@ -354,14 +365,16 @@ if tool.permission == ToolPermission.CONFIRM:
 ```python
 # POST /api/v1/chat/{conversation_id}/resume
 {
-    "thread_id": "xxx",
+    "thread_id": "thd-xxx",
+    "message_id": "msg-yyy",  # 要更新的消息 ID
     "approved": true
 }
 
 # Controller 恢复执行
-await graph.ainvoke(
+await graph.astream(
     Command(resume=approved),
-    config={"configurable": {"thread_id": thread_id}}
+    config={"configurable": {"thread_id": thread_id}},
+    stream_mode="custom"
 )
 ```
 

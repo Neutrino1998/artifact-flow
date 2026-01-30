@@ -260,20 +260,39 @@ Agent 开始执行。
 
 LLM 流式输出片段。
 
+**注意：** `content` 是**累积**的内容（从本轮 LLM 调用开始到当前的所有输出），而非增量 delta。前端如需增量显示，应自行计算差值。
+
 ```json
 {
   "type": "llm_chunk",
   "timestamp": "2024-01-15T10:30:00.000Z",
   "agent": "lead_agent",
   "data": {
-    "content": "让我"
+    "success": true,
+    "content": "让我来分析",
+    "reasoning_content": null,
+    "metadata": {
+      "agent": "lead_agent",
+      "model": "claude-sonnet-4-20250514",
+      "started_at": "2024-01-15T10:30:00.000Z"
+    },
+    "routing": null,
+    "token_usage": null
   }
 }
 ```
 
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `content` | string | 累积的 LLM 输出内容 |
+| `reasoning_content` | string\|null | 推理内容（如使用 extended thinking） |
+| `metadata` | object | Agent 元数据 |
+| `routing` | object\|null | 路由信息（仅在解析出工具调用时有值） |
+| `token_usage` | object\|null | Token 统计（仅在 LLM 完成后有值） |
+
 #### llm_complete
 
-LLM 输出完成。
+LLM 单次调用完成（流式结束）。
 
 ```json
 {
@@ -281,19 +300,28 @@ LLM 输出完成。
   "timestamp": "2024-01-15T10:30:00.000Z",
   "agent": "lead_agent",
   "data": {
+    "success": true,
     "content": "完整的输出内容...",
+    "reasoning_content": null,
+    "metadata": {
+      "agent": "lead_agent",
+      "model": "claude-sonnet-4-20250514",
+      "started_at": "2024-01-15T10:30:00.000Z"
+    },
+    "routing": null,
     "token_usage": {
       "input_tokens": 1000,
-      "output_tokens": 500,
-      "total_tokens": 1500
+      "output_tokens": 500
     }
   }
 }
 ```
 
+**说明：** 此时 `token_usage` 已填充，后续 `agent_complete` 事件会携带完整的路由信息。
+
 #### agent_complete
 
-Agent 执行完成。
+Agent 单轮执行完成（可能携带工具调用路由）。
 
 ```json
 {
@@ -301,10 +329,34 @@ Agent 执行完成。
   "timestamp": "2024-01-15T10:30:00.000Z",
   "agent": "lead_agent",
   "data": {
-    "response": "Agent 的完整响应"
+    "success": true,
+    "content": "Agent 的完整响应内容",
+    "reasoning_content": null,
+    "metadata": {
+      "agent": "lead_agent",
+      "model": "claude-sonnet-4-20250514",
+      "started_at": "2024-01-15T10:30:00.000Z"
+    },
+    "routing": {
+      "type": "tool_call",
+      "tool_name": "web_search",
+      "params": {"query": "..."}
+    },
+    "token_usage": {
+      "input_tokens": 1000,
+      "output_tokens": 500
+    }
   }
 }
 ```
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `content` | string | Agent 的完整输出内容 |
+| `routing` | object\|null | 路由信息：`null` 表示完成，否则包含工具调用或子 agent 调用 |
+| `routing.type` | string | `"tool_call"` 或 `"subagent"` |
+| `routing.tool_name` | string | 工具名称（tool_call 时） |
+| `routing.target` | string | 子 agent 名称（subagent 时） |
 
 #### tool_start
 
@@ -328,6 +380,8 @@ Agent 执行完成。
 
 工具执行完成。
 
+**注意：** 出于性能考虑，工具返回的实际数据不包含在此事件中（避免大量数据通过 SSE 传输）。工具结果会直接注入到 Agent 上下文，由 Agent 处理后在响应中体现。
+
 ```json
 {
   "type": "tool_complete",
@@ -336,12 +390,17 @@ Agent 执行完成。
   "tool": "web_search",
   "data": {
     "success": true,
-    "data": {
-      "results": [...]
-    }
+    "duration_ms": 1234,
+    "error": null
   }
 }
 ```
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `success` | boolean | 工具是否执行成功 |
+| `duration_ms` | int | 工具执行耗时（毫秒） |
+| `error` | string\|null | 错误信息（失败时） |
 
 #### permission_request
 
@@ -382,15 +441,20 @@ Agent 执行完成。
 
 #### complete
 
-执行完成。
+执行完成（正常完成或权限中断）。
 
 ```json
 {
   "type": "complete",
   "timestamp": "2024-01-15T10:30:00.000Z",
   "data": {
+    "success": true,
+    "interrupted": false,
+    "conversation_id": "conv-xxx",
+    "message_id": "msg-yyy",
+    "thread_id": "thd-zzz",
     "response": "最终响应内容",
-    "metrics": {
+    "execution_metrics": {
       "started_at": "2024-01-15T10:30:00.000Z",
       "completed_at": "2024-01-15T10:30:05.000Z",
       "total_duration_ms": 5000,
@@ -400,6 +464,45 @@ Agent 执行完成。
   }
 }
 ```
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `success` | boolean | 执行是否成功 |
+| `interrupted` | boolean | 是否因权限中断（需要用户确认） |
+| `conversation_id` | string | 对话 ID |
+| `message_id` | string | 消息 ID |
+| `thread_id` | string | LangGraph 线程 ID |
+| `response` | string | 最终响应内容（`interrupted=false` 时） |
+| `interrupt_type` | string | 中断类型（`interrupted=true` 时） |
+| `interrupt_data` | object | 中断数据（`interrupted=true` 时） |
+| `execution_metrics` | object | 执行指标 |
+
+**权限中断时的响应示例：**
+
+```json
+{
+  "type": "complete",
+  "timestamp": "2024-01-15T10:30:00.000Z",
+  "data": {
+    "success": true,
+    "interrupted": true,
+    "conversation_id": "conv-xxx",
+    "message_id": "msg-yyy",
+    "thread_id": "thd-zzz",
+    "interrupt_type": "tool_permission",
+    "interrupt_data": {
+      "type": "tool_permission",
+      "tool_name": "read_file",
+      "params": {"path": "/etc/config"},
+      "permission_level": "confirm",
+      "message": "Tool 'read_file' requires confirm permission"
+    },
+    "execution_metrics": {...}
+  }
+}
+```
+
+**处理方式：** 当 `interrupted=true` 时，前端应显示确认对话框，用户确认后调用 `POST /chat/{id}/resume`。
 
 #### error
 
@@ -411,10 +514,21 @@ Agent 执行完成。
   "timestamp": "2024-01-15T10:30:00.000Z",
   "data": {
     "success": false,
+    "conversation_id": "conv-xxx",
+    "message_id": "msg-yyy",
+    "thread_id": "thd-zzz",
     "error": "错误信息"
   }
 }
 ```
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `success` | boolean | 始终为 `false` |
+| `conversation_id` | string | 对话 ID |
+| `message_id` | string | 消息 ID |
+| `thread_id` | string | LangGraph 线程 ID |
+| `error` | string | 错误信息 |
 
 ---
 
@@ -572,6 +686,14 @@ interface Message {
   createdAt: Date;
 }
 
+interface PermissionRequest {
+  threadId: string;
+  messageId: string;
+  tool: string;
+  params: Record<string, any>;
+  permissionLevel: string;
+}
+
 interface ChatState {
   conversationId: string | null;
   messages: Message[];
@@ -621,7 +743,16 @@ async function sendMessage(
 
     switch (type) {
       case 'llm_chunk':
-        state.currentContent += data.content;
+        // 注意：data.content 是累积内容，直接使用
+        state.currentContent = data.content;
+        break;
+
+      case 'agent_complete':
+        // Agent 单轮完成，如有后续工具调用会继续
+        // 重置 currentContent 准备下一轮
+        if (data.routing) {
+          state.currentContent = '';
+        }
         break;
 
       case 'permission_request':
@@ -635,12 +766,20 @@ async function sendMessage(
         break;
 
       case 'complete':
-        state.messages.push({
-          id: `${message_id}_response`,
-          role: 'assistant',
-          content: data.response,
-          createdAt: new Date()
-        });
+        if (data.interrupted) {
+          // 权限中断，等待用户确认
+          // pendingPermission 已在 permission_request 中设置
+          // 或者从 interrupt_data 中获取信息
+          console.log('Interrupted:', data.interrupt_data);
+        } else {
+          // 正常完成
+          state.messages.push({
+            id: `${message_id}_response`,
+            role: 'assistant',
+            content: data.response,
+            createdAt: new Date()
+          });
+        }
         state.currentContent = '';
         state.isStreaming = false;
         eventSource.close();
@@ -678,6 +817,7 @@ async function handlePermission(
 
   const { stream_url } = await res.json();
   state.pendingPermission = null;
+  state.isStreaming = true;
 
   // 重新连接 SSE 获取后续事件
   const eventSource = new EventSource(stream_url);

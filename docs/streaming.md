@@ -39,19 +39,21 @@ flowchart TB
 
 ### 完整事件列表
 
-| 事件类型 | 来源 | 说明 | 数据结构 |
+| 事件类型 | 来源 | 说明 | data 主要字段 |
 |----------|------|------|----------|
 | `metadata` | Controller | 初始元数据 | `{conversation_id, thread_id, message_id}` |
-| `agent_start` | Agent | Agent 开始执行 | `{agent}` |
-| `llm_chunk` | Agent | LLM 流式输出片段 | `{content, agent}` |
-| `llm_complete` | Agent | LLM 输出完成 | `{content, agent, token_usage}` |
-| `agent_complete` | Agent | Agent 执行完成 | `{agent, response}` |
-| `tool_start` | Graph | 工具开始执行 | `{tool, params}` |
-| `tool_complete` | Graph | 工具执行完成 | `{tool, success, data, error}` |
-| `permission_request` | Graph | 请求权限确认 | `{tool, params, permission}` |
-| `permission_result` | Graph | 权限确认结果 | `{tool, approved}` |
-| `complete` | Controller | 执行完成 | `{response, metrics}` |
-| `error` | Controller | 执行错误 | `{error, traceback}` |
+| `agent_start` | Agent | Agent 开始执行 | `{success, content, metadata}` |
+| `llm_chunk` | Agent | LLM 流式输出片段 | `{success, content*, reasoning_content, metadata, token_usage}` |
+| `llm_complete` | Agent | LLM 单次调用完成 | `{success, content, reasoning_content, metadata, token_usage}` |
+| `agent_complete` | Agent | Agent 单轮完成 | `{success, content, routing, metadata, token_usage}` |
+| `tool_start` | Graph | 工具开始执行 | `{params}` |
+| `tool_complete` | Graph | 工具执行完成 | `{success, duration_ms, error}` |
+| `permission_request` | Graph | 请求权限确认 | `{permission_level, params}` |
+| `permission_result` | Graph | 权限确认结果 | `{approved}` |
+| `complete` | Controller | 执行完成 | `{success, interrupted, response, execution_metrics, ...}` |
+| `error` | Controller | 执行错误 | `{success, error, conversation_id, ...}` |
+
+**注意：** `llm_chunk.content` 是**累积**内容，非增量 delta。详细字段说明见 [API Reference](./api.md#stream-api)。
 
 ### 事件时序示例
 
@@ -62,21 +64,24 @@ sequenceDiagram
 
     S->>C: metadata
     S->>C: agent_start (lead_agent)
-    S->>C: llm_chunk "让我"
-    S->>C: llm_chunk "来分析"
-    S->>C: llm_chunk "这个问题"
-    S->>C: llm_chunk "<tool_call>..."
+    Note right of C: content 是累积的
+    S->>C: llm_chunk {content: "让我"}
+    S->>C: llm_chunk {content: "让我来分析"}
+    S->>C: llm_chunk {content: "让我来分析这个问题"}
     S->>C: llm_complete
+    S->>C: agent_complete {routing: tool_call}
 
     S->>C: tool_start (web_search)
     Note over S: 执行工具
-    S->>C: tool_complete
+    S->>C: tool_complete {success, duration_ms}
 
     S->>C: agent_start (lead_agent)
-    S->>C: llm_chunk "..."
-    S->>C: agent_complete
+    Note right of C: 新一轮，content 重新开始
+    S->>C: llm_chunk {content: "根据搜索结果..."}
+    S->>C: llm_complete
+    S->>C: agent_complete {routing: null}
 
-    S->>C: complete
+    S->>C: complete {response, execution_metrics}
 ```
 
 ## StreamManager
@@ -255,18 +260,27 @@ def format_sse_event(data: Dict[str, Any], event: str = None) -> str:
 ```
 data: {"type":"metadata","timestamp":"...","data":{"conversation_id":"abc","thread_id":"xyz","message_id":"123"}}
 
-data: {"type":"agent_start","timestamp":"...","agent":"lead_agent"}
+data: {"type":"agent_start","timestamp":"...","agent":"lead_agent","data":{"success":true,"content":"","metadata":{...}}}
 
-data: {"type":"llm_chunk","timestamp":"...","agent":"lead_agent","data":{"content":"让我"}}
+data: {"type":"llm_chunk","timestamp":"...","agent":"lead_agent","data":{"success":true,"content":"让我","metadata":{...}}}
 
-data: {"type":"llm_chunk","timestamp":"...","agent":"lead_agent","data":{"content":"来分析"}}
+data: {"type":"llm_chunk","timestamp":"...","agent":"lead_agent","data":{"success":true,"content":"让我来分析","metadata":{...}}}
 
-data: {"type":"tool_start","timestamp":"...","tool":"web_search","data":{"params":{"query":"Python async"}}}
+data: {"type":"llm_complete","timestamp":"...","agent":"lead_agent","data":{"success":true,"content":"让我来分析...","token_usage":{...}}}
 
-data: {"type":"tool_complete","timestamp":"...","tool":"web_search","data":{"success":true,"data":[...]}}
+data: {"type":"agent_complete","timestamp":"...","agent":"lead_agent","data":{"success":true,"content":"...","routing":{"type":"tool_call","tool_name":"web_search","params":{...}}}}
 
-data: {"type":"complete","timestamp":"...","data":{"response":"...","metrics":{...}}}
+data: {"type":"tool_start","timestamp":"...","agent":"lead_agent","tool":"web_search","data":{"params":{"query":"Python async"}}}
+
+data: {"type":"tool_complete","timestamp":"...","agent":"lead_agent","tool":"web_search","data":{"success":true,"duration_ms":1234,"error":null}}
+
+data: {"type":"complete","timestamp":"...","data":{"success":true,"interrupted":false,"response":"...","execution_metrics":{...}}}
 ```
+
+**关键点：**
+- `llm_chunk.data.content` 是累积内容，每次事件包含从头开始的完整文本
+- `tool_complete` 不包含工具返回的实际数据（出于性能考虑）
+- `complete` 事件的 `interrupted` 字段指示是否需要用户确认权限
 
 ## 前端集成
 
@@ -282,12 +296,15 @@ async function chat(content) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ content })
   });
-  const { thread_id, conversation_id, message_id } = await response.json();
+  const { thread_id, conversation_id, message_id, stream_url } = await response.json();
 
-  // 2. 连接 SSE
-  const eventSource = new EventSource(`/api/v1/stream/${thread_id}`);
+  // 2. 连接 SSE（使用返回的 stream_url）
+  const eventSource = new EventSource(stream_url);
 
-  // 3. 统一处理消息，根据 type 分发
+  // 3. 追踪状态
+  let lastContent = '';  // 用于计算增量
+
+  // 4. 统一处理消息，根据 type 分发
   eventSource.onmessage = (e) => {
     const event = JSON.parse(e.data);
     const { type, data, agent, tool } = event;
@@ -298,7 +315,24 @@ async function chat(content) {
         break;
 
       case 'llm_chunk':
-        appendToOutput(data.content);  // 流式显示
+        // data.content 是累积内容，计算增量
+        const delta = data.content.slice(lastContent.length);
+        lastContent = data.content;
+        appendToOutput(delta);  // 流式显示增量
+        break;
+
+      case 'llm_complete':
+        // LLM 单次调用完成，可以获取 token 统计
+        console.log('Token usage:', data.token_usage);
+        break;
+
+      case 'agent_complete':
+        // Agent 单轮完成，检查是否有后续操作
+        if (data.routing) {
+          console.log('Agent routing:', data.routing);
+        }
+        // 重置累积内容（下一轮 LLM 调用会重新开始）
+        lastContent = '';
         break;
 
       case 'tool_start':
@@ -311,12 +345,18 @@ async function chat(content) {
         break;
 
       case 'permission_request':
-        showPermissionDialog(tool, data.params, data.permission);
+        showPermissionDialog(tool, data.params, data.permission_level);
         break;
 
       case 'complete':
-        finalizeOutput(data.response);
-        showMetrics(data.metrics);
+        if (data.interrupted) {
+          // 权限中断，需要用户确认
+          showInterruptDialog(data.interrupt_data);
+        } else {
+          // 正常完成
+          finalizeOutput(data.response);
+          showMetrics(data.execution_metrics);
+        }
         eventSource.close();
         break;
 
@@ -336,14 +376,22 @@ async function chat(content) {
 ### React Hook 示例
 
 ```typescript
+interface Message {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
 function useChat() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
   const [currentContent, setCurrentContent] = useState('');
+  const [pendingPermission, setPendingPermission] = useState<any>(null);
+  const lastContentRef = useRef('');  // 追踪累积内容
 
   const sendMessage = async (content: string) => {
     setIsStreaming(true);
     setCurrentContent('');
+    lastContentRef.current = '';
 
     // 添加用户消息
     setMessages(prev => [...prev, { role: 'user', content }]);
@@ -353,17 +401,33 @@ function useChat() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ content })
     });
-    const { thread_id } = await res.json();
+    const { stream_url, conversation_id, message_id, thread_id } = await res.json();
 
-    const eventSource = new EventSource(`/api/v1/stream/${thread_id}`);
+    const eventSource = new EventSource(stream_url);
 
     eventSource.onmessage = (e) => {
       const event = JSON.parse(e.data);
 
       if (event.type === 'llm_chunk') {
-        setCurrentContent(prev => prev + event.data.content);
+        // data.content 是累积内容，直接使用
+        setCurrentContent(event.data.content);
+        lastContentRef.current = event.data.content;
+      } else if (event.type === 'agent_complete') {
+        // Agent 单轮完成，重置累积追踪
+        lastContentRef.current = '';
       } else if (event.type === 'complete') {
-        setMessages(prev => [...prev, { role: 'assistant', content: event.data.response }]);
+        if (event.data.interrupted) {
+          // 权限中断
+          setPendingPermission({
+            conversationId: conversation_id,
+            threadId: thread_id,
+            messageId: message_id,
+            interruptData: event.data.interrupt_data
+          });
+        } else {
+          // 正常完成
+          setMessages(prev => [...prev, { role: 'assistant', content: event.data.response }]);
+        }
         setCurrentContent('');
         setIsStreaming(false);
         eventSource.close();
@@ -374,7 +438,29 @@ function useChat() {
     };
   };
 
-  return { messages, currentContent, isStreaming, sendMessage };
+  const handlePermission = async (approved: boolean) => {
+    if (!pendingPermission) return;
+
+    const res = await fetch(`/api/v1/chat/${pendingPermission.conversationId}/resume`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        thread_id: pendingPermission.threadId,
+        message_id: pendingPermission.messageId,
+        approved
+      })
+    });
+
+    const { stream_url } = await res.json();
+    setPendingPermission(null);
+    setIsStreaming(true);
+
+    // 重新连接 SSE 继续流式处理...
+    const eventSource = new EventSource(stream_url);
+    // ... (同上处理逻辑)
+  };
+
+  return { messages, currentContent, isStreaming, pendingPermission, sendMessage, handlePermission };
 }
 ```
 
@@ -425,28 +511,50 @@ if tool.permission == ToolPermission.CONFIRM:
 
 ### 前端处理
 
+权限中断有两种通知方式：
+1. `permission_request` 事件 - 在中断前发送，包含工具信息
+2. `complete` 事件 (`interrupted=true`) - 执行暂停，包含完整中断数据
+
 ```javascript
 // 在 onmessage 处理器中
+let pendingPermission = null;
+
+// 方式1：收到 permission_request 时保存信息
 if (event.type === 'permission_request') {
   const { tool, data } = event;
-  const { permission_level, params } = data;
+  pendingPermission = {
+    tool,
+    permissionLevel: data.permission_level,
+    params: data.params
+  };
+}
+
+// 方式2：收到 complete 且 interrupted=true 时处理
+if (event.type === 'complete' && event.data.interrupted) {
+  const { interrupt_data, thread_id, message_id, conversation_id } = event.data;
 
   // 显示确认对话框
   const approved = await showConfirmDialog({
-    title: `确认执行 ${tool}`,
-    message: `工具 '${tool}' 需要 ${permission_level} 权限`,
-    details: params
+    title: `确认执行 ${interrupt_data.tool_name}`,
+    message: interrupt_data.message,
+    details: interrupt_data.params
   });
 
   // 发送恢复请求
-  await fetch(`/api/v1/chat/${conversationId}/resume`, {
+  const res = await fetch(`/api/v1/chat/${conversation_id}/resume`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      thread_id: threadId,
+      thread_id,
+      message_id,
       approved
     })
   });
+
+  // 重新连接 SSE 继续接收事件
+  const { stream_url } = await res.json();
+  const newEventSource = new EventSource(stream_url);
+  // ... 绑定事件处理器
 }
 ```
 
