@@ -636,7 +636,7 @@ class CreateArtifactTool(BaseTool):
         success, message = await self._manager.create_artifact(
             session_id=session_id,
             artifact_id=params["id"],
-            content_type=params.get("content_type", "markdown"),
+            content_type=params["content_type"],  # 默认值已由 _apply_defaults 填充
             title=params["title"],
             content=params["content"]
         )

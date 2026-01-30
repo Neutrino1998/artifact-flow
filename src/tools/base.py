@@ -135,21 +135,40 @@ class BaseTool(ABC):
         
         return None
     
+    def _apply_defaults(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        应用参数默认值
+
+        Args:
+            params: 原始参数
+
+        Returns:
+            填充默认值后的参数
+        """
+        result = dict(params)
+        for param_def in self.get_parameters():
+            if param_def.name not in result and param_def.default is not None:
+                result[param_def.name] = param_def.default
+        return result
+
     async def __call__(self, **params) -> ToolResult:
         """
         使工具可调用
-        
+
         Args:
             **params: 工具参数
-            
+
         Returns:
             ToolResult: 执行结果
         """
+        # 应用默认值
+        params = self._apply_defaults(params)
+
         # 验证参数
         error = self.validate_params(params)
         if error:
             return ToolResult(success=False, error=error)
-        
+
         # 执行工具
         try:
             return await self.execute(**params)

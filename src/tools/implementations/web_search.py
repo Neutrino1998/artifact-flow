@@ -81,10 +81,10 @@ class WebSearchTool(BaseTool):
         Returns:
             ToolResult: 包含XML格式的搜索结果
         """
-        # 获取参数
+        # 获取参数（默认值已由 _apply_defaults 填充）
         query = params.get("query")
-        freshness = params.get("freshness", "noLimit")
-        count = min(params.get("count", 10), 50)  # 限制最大50条
+        freshness = params["freshness"]
+        count = min(params["count"], 50)  # 限制最大50条
         
         if not query:
             return ToolResult(success=False, error="Query parameter is required")

@@ -172,8 +172,9 @@ class WebFetchTool(BaseTool):
         else:
             return ToolResult(success=False, error="url_list must be string or list")
         
-        max_content_length = params.get("max_content_length", 10000)
-        max_concurrent = min(params.get("max_concurrent", 3), 5)  # 限制最大5个
+        # 默认值已由 _apply_defaults 填充
+        max_content_length = params["max_content_length"]
+        max_concurrent = min(params["max_concurrent"], 5)  # 限制最大5个
         
         logger.info(f"Fetching {len(urls)} URL(s) with max {max_concurrent} concurrent browsers")
         
