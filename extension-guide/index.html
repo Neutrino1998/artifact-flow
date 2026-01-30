@@ -1692,40 +1692,36 @@
 <a id="__codelineno-3-101" name="__codelineno-3-101" href="#__codelineno-3-101"></a>            <span class="p">)</span>
 </code></pre></div>
 <h3 id="_4">注册工具</h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="c1"># src/tools/registry.py 或初始化代码中</span>
+<p>在 <code>create_default_graph()</code> 函数中（<code>core/graph.py</code>）添加新工具：</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">tools.implementations.file_ops</span><span class="w"> </span><span class="kn">import</span> <span class="n">ReadFileTool</span>
 <a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="kn">from</span><span class="w"> </span><span class="nn">tools.implementations.file_ops</span><span class="w"> </span><span class="kn">import</span> <span class="n">ReadFileTool</span>
-<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>
-<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="k">def</span><span class="w"> </span><span class="nf">create_tool_registry</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="n">ToolRegistry</span><span class="p">:</span>
-<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>    <span class="n">registry</span> <span class="o">=</span> <span class="n">ToolRegistry</span><span class="p">()</span>
-<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a>
-<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a>    <span class="c1"># 注册现有工具</span>
-<a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a>    <span class="n">registry</span><span class="o">.</span><span class="n">register_tool_to_library</span><span class="p">(</span><span class="n">WebSearchTool</span><span class="p">())</span>
-<a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a>    <span class="n">registry</span><span class="o">.</span><span class="n">register_tool_to_library</span><span class="p">(</span><span class="n">WebFetchTool</span><span class="p">())</span>
-<a id="__codelineno-4-11" name="__codelineno-4-11" href="#__codelineno-4-11"></a>    <span class="c1"># ...</span>
-<a id="__codelineno-4-12" name="__codelineno-4-12" href="#__codelineno-4-12"></a>
-<a id="__codelineno-4-13" name="__codelineno-4-13" href="#__codelineno-4-13"></a>    <span class="c1"># 注册新工具</span>
-<a id="__codelineno-4-14" name="__codelineno-4-14" href="#__codelineno-4-14"></a>    <span class="n">registry</span><span class="o">.</span><span class="n">register_tool_to_library</span><span class="p">(</span><span class="n">ReadFileTool</span><span class="p">())</span>
-<a id="__codelineno-4-15" name="__codelineno-4-15" href="#__codelineno-4-15"></a>
-<a id="__codelineno-4-16" name="__codelineno-4-16" href="#__codelineno-4-16"></a>    <span class="k">return</span> <span class="n">registry</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="c1"># 在 tools 列表中添加新工具</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="n">tools</span> <span class="o">=</span> <span class="p">[</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>    <span class="n">CallSubagentTool</span><span class="p">(),</span>
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>    <span class="n">WebSearchTool</span><span class="p">(),</span>
+<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a>    <span class="n">WebFetchTool</span><span class="p">(),</span>
+<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a>    <span class="n">ReadFileTool</span><span class="p">(),</span>  <span class="c1"># 添加新工具</span>
+<a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a><span class="p">]</span>
+<a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a>
+<a id="__codelineno-4-11" name="__codelineno-4-11" href="#__codelineno-4-11"></a><span class="c1"># 注册到 registry</span>
+<a id="__codelineno-4-12" name="__codelineno-4-12" href="#__codelineno-4-12"></a><span class="k">for</span> <span class="n">tool</span> <span class="ow">in</span> <span class="n">tools</span><span class="p">:</span>
+<a id="__codelineno-4-13" name="__codelineno-4-13" href="#__codelineno-4-13"></a>    <span class="n">registry</span><span class="o">.</span><span class="n">register_tool_to_library</span><span class="p">(</span><span class="n">tool</span><span class="p">)</span>
 </code></pre></div>
 <h3 id="agent">为 Agent 分配工具</h3>
 <p>在 Agent 配置中通过 <code>required_tools</code> 指定所需工具：</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="c1"># 在 Agent 配置中添加工具名称</span>
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="k">class</span><span class="w"> </span><span class="nc">CodeAgent</span><span class="p">(</span><span class="n">BaseAgent</span><span class="p">):</span>
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">config</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">toolkit</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
-<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>        <span class="k">if</span> <span class="ow">not</span> <span class="n">config</span><span class="p">:</span>
-<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>            <span class="n">config</span> <span class="o">=</span> <span class="n">AgentConfig</span><span class="p">(</span>
-<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a>                <span class="n">name</span><span class="o">=</span><span class="s2">&quot;code_agent&quot;</span><span class="p">,</span>
-<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a>                <span class="c1"># ...</span>
-<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a>                <span class="n">required_tools</span><span class="o">=</span><span class="p">[</span>
-<a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a>                    <span class="s2">&quot;read_file&quot;</span><span class="p">,</span>      <span class="c1"># 新工具</span>
-<a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a>                    <span class="s2">&quot;analyze_code&quot;</span>
-<a id="__codelineno-5-11" name="__codelineno-5-11" href="#__codelineno-5-11"></a>                <span class="p">]</span>
-<a id="__codelineno-5-12" name="__codelineno-5-12" href="#__codelineno-5-12"></a>            <span class="p">)</span>
-<a id="__codelineno-5-13" name="__codelineno-5-13" href="#__codelineno-5-13"></a>        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="n">config</span><span class="p">,</span> <span class="n">toolkit</span><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="c1"># 在 agents/factories.py 中定义 Agent 时指定</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="k">def</span><span class="w"> </span><span class="nf">create_code_agent</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="n">BaseAgent</span><span class="p">:</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>    <span class="n">config</span> <span class="o">=</span> <span class="n">AgentConfig</span><span class="p">(</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>        <span class="n">name</span><span class="o">=</span><span class="s2">&quot;code_agent&quot;</span><span class="p">,</span>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>        <span class="c1"># ...</span>
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a>        <span class="n">required_tools</span><span class="o">=</span><span class="p">[</span>
+<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a>            <span class="s2">&quot;read_file&quot;</span><span class="p">,</span>      <span class="c1"># 新工具</span>
+<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a>            <span class="s2">&quot;analyze_code&quot;</span>
+<a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a>        <span class="p">]</span>
+<a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a>    <span class="p">)</span>
+<a id="__codelineno-5-11" name="__codelineno-5-11" href="#__codelineno-5-11"></a>    <span class="k">return</span> <span class="n">CodeAgent</span><span class="p">(</span><span class="n">config</span><span class="p">)</span>
 </code></pre></div>
-<p><code>create_multi_agent_graph</code> 会根据 <code>required_tools</code> 自动创建对应的 <code>AgentToolkit</code> 并绑定到 Agent。</p>
+<p><code>create_default_graph()</code> 会根据 <code>required_tools</code> 自动创建对应的 <code>AgentToolkit</code> 并绑定到 Agent。</p>
 <h2 id="_5">权限级别选择指南</h2>
 <table>
 <thead>
@@ -1737,24 +1733,14 @@
 </thead>
 <tbody>
 <tr>
-<td><code>PUBLIC</code></td>
-<td>只读、无副作用的操作</td>
-<td>搜索、查询</td>
-</tr>
-<tr>
-<td><code>NOTIFY</code></td>
-<td>有副作用但低风险</td>
-<td>保存到临时文件</td>
+<td><code>AUTO</code></td>
+<td>无需确认的操作</td>
+<td>搜索、查询、Artifact 操作</td>
 </tr>
 <tr>
 <td><code>CONFIRM</code></td>
-<td>访问敏感数据或有副作用</td>
-<td>读取文件、发送请求</td>
-</tr>
-<tr>
-<td><code>RESTRICTED</code></td>
-<td>高风险操作</td>
-<td>删除文件、执行代码</td>
+<td>敏感或高风险操作</td>
+<td>读取文件、发送邮件、执行代码</td>
 </tr>
 </tbody>
 </table>

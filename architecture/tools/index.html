@@ -857,56 +857,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="内置工具">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#call_subagent" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        call_subagent
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#web_search" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        web_search
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#web_fetch" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        web_fetch
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#artifact" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Artifact 操作
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1324,56 +1274,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="内置工具">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#call_subagent" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        call_subagent
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#web_search" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        web_search
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#web_fetch" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        web_fetch
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#artifact" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Artifact 操作
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1423,26 +1323,21 @@
 </code></pre></div>
 <h2 id="basepy">权限系统 (base.py)</h2>
 <h3 id="toolpermission">ToolPermission</h3>
-<p>四级权限模型：</p>
+<p>两级权限模型：</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="k">class</span><span class="w"> </span><span class="nc">ToolPermission</span><span class="p">(</span><span class="n">Enum</span><span class="p">):</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>    <span class="n">PUBLIC</span> <span class="o">=</span> <span class="s2">&quot;public&quot;</span>          <span class="c1"># 直接执行，无需确认</span>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>    <span class="n">NOTIFY</span> <span class="o">=</span> <span class="s2">&quot;notify&quot;</span>          <span class="c1"># 执行后通知用户</span>
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>    <span class="n">CONFIRM</span> <span class="o">=</span> <span class="s2">&quot;confirm&quot;</span>        <span class="c1"># 执行前需用户确认</span>
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>    <span class="n">RESTRICTED</span> <span class="o">=</span> <span class="s2">&quot;restricted&quot;</span>  <span class="c1"># 需特殊授权</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>    <span class="n">AUTO</span> <span class="o">=</span> <span class="s2">&quot;auto&quot;</span>        <span class="c1"># 自动执行，无需用户确认</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>    <span class="n">CONFIRM</span> <span class="o">=</span> <span class="s2">&quot;confirm&quot;</span>  <span class="c1"># 执行前需用户确认（通过 interrupt 暂停）</span>
 </code></pre></div>
 <p><strong>权限处理流程</strong>（在 <code>graph.py</code> 的 <code>tool_execution_node</code> 中）：</p>
 <pre class="mermaid"><code>flowchart TD
     A[获取工具权限] --&gt; B{权限级别}
-    B --&gt;|PUBLIC| C[直接执行]
-    B --&gt;|NOTIFY| D[执行后发送通知事件]
-    B --&gt;|CONFIRM| E[发送 PERMISSION_REQUEST]
-    B --&gt;|RESTRICTED| E
-    E --&gt; F[interrupt 暂停]
-    F --&gt; G{用户响应}
-    G --&gt;|approved| C
-    G --&gt;|denied| H[返回拒绝结果]
-    C --&gt; I[发送 TOOL_COMPLETE]
-    D --&gt; I</code></pre>
+    B --&gt;|AUTO| C[直接执行]
+    B --&gt;|CONFIRM| D[发送 PERMISSION_REQUEST]
+    D --&gt; E[interrupt 暂停]
+    E --&gt; F{用户响应}
+    F --&gt;|approved| C
+    F --&gt;|denied| G[返回拒绝结果]
+    C --&gt; H[发送 TOOL_COMPLETE]</code></pre>
 <h3 id="toolparameter">ToolParameter</h3>
 <p>工具参数定义：</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="nd">@dataclass</span>
@@ -1472,7 +1367,7 @@
 <a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>        <span class="bp">self</span><span class="p">,</span>
 <a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>        <span class="n">name</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
 <a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>        <span class="n">description</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
-<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>        <span class="n">permission</span><span class="p">:</span> <span class="n">ToolPermission</span> <span class="o">=</span> <span class="n">ToolPermission</span><span class="o">.</span><span class="n">PUBLIC</span><span class="p">,</span>
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>        <span class="n">permission</span><span class="p">:</span> <span class="n">ToolPermission</span> <span class="o">=</span> <span class="n">ToolPermission</span><span class="o">.</span><span class="n">AUTO</span><span class="p">,</span>
 <a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a>        <span class="o">**</span><span class="n">kwargs</span>
 <a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a>    <span class="p">):</span>
 <a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">name</span> <span class="o">=</span> <span class="n">name</span>
@@ -1509,7 +1404,7 @@
 <a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span>
 <a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>            <span class="n">name</span><span class="o">=</span><span class="s2">&quot;web_search&quot;</span><span class="p">,</span>
 <a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>            <span class="n">description</span><span class="o">=</span><span class="s2">&quot;搜索互联网获取信息&quot;</span><span class="p">,</span>
-<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a>            <span class="n">permission</span><span class="o">=</span><span class="n">ToolPermission</span><span class="o">.</span><span class="n">PUBLIC</span>
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a>            <span class="n">permission</span><span class="o">=</span><span class="n">ToolPermission</span><span class="o">.</span><span class="n">AUTO</span>
 <a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a>        <span class="p">)</span>
 <a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a>
 <a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">get_parameters</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">List</span><span class="p">[</span><span class="n">ToolParameter</span><span class="p">]:</span>
@@ -1603,25 +1498,33 @@
 <a id="__codelineno-7-33" name="__codelineno-7-33" href="#__codelineno-7-33"></a>        <span class="k">return</span> <span class="k">await</span> <span class="n">tool</span><span class="p">(</span><span class="o">**</span><span class="n">params</span><span class="p">)</span>
 </code></pre></div>
 <h3 id="_3">初始化流程</h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="c1"># 在应用启动时</span>
-<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="k">def</span><span class="w"> </span><span class="nf">create_tool_registry</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="n">ToolRegistry</span><span class="p">:</span>
-<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>    <span class="n">registry</span> <span class="o">=</span> <span class="n">ToolRegistry</span><span class="p">()</span>
-<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>
-<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>    <span class="c1"># 注册所有工具到库</span>
-<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a>    <span class="n">registry</span><span class="o">.</span><span class="n">register_tool_to_library</span><span class="p">(</span><span class="n">WebSearchTool</span><span class="p">())</span>
-<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a>    <span class="n">registry</span><span class="o">.</span><span class="n">register_tool_to_library</span><span class="p">(</span><span class="n">WebFetchTool</span><span class="p">())</span>
-<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a>    <span class="n">registry</span><span class="o">.</span><span class="n">register_tool_to_library</span><span class="p">(</span><span class="n">CreateArtifactTool</span><span class="p">())</span>
-<a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a>    <span class="c1"># ...</span>
+<p>工具初始化在 <code>create_default_graph()</code> 函数中完成（<code>core/graph.py</code>）：</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="c1"># 1. 创建工具注册中心</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="n">registry</span> <span class="o">=</span> <span class="n">ToolRegistry</span><span class="p">()</span>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="c1"># 2. 创建工具列表</span>
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="n">tools</span> <span class="o">=</span> <span class="p">[</span>
+<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a>    <span class="n">CallSubagentTool</span><span class="p">(),</span>
+<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a>    <span class="n">WebSearchTool</span><span class="p">(),</span>
+<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a>    <span class="n">WebFetchTool</span><span class="p">(),</span>
+<a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a><span class="p">]</span>
 <a id="__codelineno-8-10" name="__codelineno-8-10" href="#__codelineno-8-10"></a>
-<a id="__codelineno-8-11" name="__codelineno-8-11" href="#__codelineno-8-11"></a>    <span class="k">return</span> <span class="n">registry</span>
-<a id="__codelineno-8-12" name="__codelineno-8-12" href="#__codelineno-8-12"></a>
-<a id="__codelineno-8-13" name="__codelineno-8-13" href="#__codelineno-8-13"></a><span class="c1"># 为每个 Agent 创建 Toolkit</span>
-<a id="__codelineno-8-14" name="__codelineno-8-14" href="#__codelineno-8-14"></a><span class="k">def</span><span class="w"> </span><span class="nf">setup_agent_toolkits</span><span class="p">(</span><span class="n">registry</span><span class="p">:</span> <span class="n">ToolRegistry</span><span class="p">,</span> <span class="n">agents</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="n">BaseAgent</span><span class="p">]):</span>
-<a id="__codelineno-8-15" name="__codelineno-8-15" href="#__codelineno-8-15"></a>    <span class="k">for</span> <span class="n">agent</span> <span class="ow">in</span> <span class="n">agents</span><span class="p">:</span>
-<a id="__codelineno-8-16" name="__codelineno-8-16" href="#__codelineno-8-16"></a>        <span class="n">registry</span><span class="o">.</span><span class="n">create_agent_toolkit</span><span class="p">(</span>
-<a id="__codelineno-8-17" name="__codelineno-8-17" href="#__codelineno-8-17"></a>            <span class="n">agent</span><span class="o">.</span><span class="n">name</span><span class="p">,</span>
-<a id="__codelineno-8-18" name="__codelineno-8-18" href="#__codelineno-8-18"></a>            <span class="n">agent</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">required_tools</span>
-<a id="__codelineno-8-19" name="__codelineno-8-19" href="#__codelineno-8-19"></a>        <span class="p">)</span>
+<a id="__codelineno-8-11" name="__codelineno-8-11" href="#__codelineno-8-11"></a><span class="c1"># Artifact 工具需要 manager 依赖注入</span>
+<a id="__codelineno-8-12" name="__codelineno-8-12" href="#__codelineno-8-12"></a><span class="k">if</span> <span class="n">artifact_manager</span><span class="p">:</span>
+<a id="__codelineno-8-13" name="__codelineno-8-13" href="#__codelineno-8-13"></a>    <span class="n">tools</span><span class="o">.</span><span class="n">extend</span><span class="p">(</span><span class="n">create_artifact_tools</span><span class="p">(</span><span class="n">artifact_manager</span><span class="p">))</span>
+<a id="__codelineno-8-14" name="__codelineno-8-14" href="#__codelineno-8-14"></a>
+<a id="__codelineno-8-15" name="__codelineno-8-15" href="#__codelineno-8-15"></a><span class="c1"># 3. 注册所有工具到库</span>
+<a id="__codelineno-8-16" name="__codelineno-8-16" href="#__codelineno-8-16"></a><span class="k">for</span> <span class="n">tool</span> <span class="ow">in</span> <span class="n">tools</span><span class="p">:</span>
+<a id="__codelineno-8-17" name="__codelineno-8-17" href="#__codelineno-8-17"></a>    <span class="n">registry</span><span class="o">.</span><span class="n">register_tool_to_library</span><span class="p">(</span><span class="n">tool</span><span class="p">)</span>
+<a id="__codelineno-8-18" name="__codelineno-8-18" href="#__codelineno-8-18"></a>
+<a id="__codelineno-8-19" name="__codelineno-8-19" href="#__codelineno-8-19"></a><span class="c1"># 4. 为每个 Agent 创建 toolkit 并绑定</span>
+<a id="__codelineno-8-20" name="__codelineno-8-20" href="#__codelineno-8-20"></a><span class="k">for</span> <span class="n">agent</span> <span class="ow">in</span> <span class="p">[</span><span class="n">lead</span><span class="p">,</span> <span class="n">search</span><span class="p">,</span> <span class="n">crawl</span><span class="p">]:</span>
+<a id="__codelineno-8-21" name="__codelineno-8-21" href="#__codelineno-8-21"></a>    <span class="k">if</span> <span class="n">agent</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">required_tools</span><span class="p">:</span>
+<a id="__codelineno-8-22" name="__codelineno-8-22" href="#__codelineno-8-22"></a>        <span class="n">toolkit</span> <span class="o">=</span> <span class="n">registry</span><span class="o">.</span><span class="n">create_agent_toolkit</span><span class="p">(</span>
+<a id="__codelineno-8-23" name="__codelineno-8-23" href="#__codelineno-8-23"></a>            <span class="n">agent</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">name</span><span class="p">,</span>
+<a id="__codelineno-8-24" name="__codelineno-8-24" href="#__codelineno-8-24"></a>            <span class="n">tool_names</span><span class="o">=</span><span class="n">agent</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">required_tools</span>
+<a id="__codelineno-8-25" name="__codelineno-8-25" href="#__codelineno-8-25"></a>        <span class="p">)</span>
+<a id="__codelineno-8-26" name="__codelineno-8-26" href="#__codelineno-8-26"></a>        <span class="n">agent</span><span class="o">.</span><span class="n">toolkit</span> <span class="o">=</span> <span class="n">toolkit</span>
 </code></pre></div>
 <h2 id="xml-xml_parserpy">XML 解析器 (xml_parser.py)</h2>
 <h3 id="_4">工具调用格式</h3>
@@ -1716,93 +1619,81 @@
 <a id="__codelineno-11-18" name="__codelineno-11-18" href="#__codelineno-11-18"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">format_tool_result</span><span class="p">(</span><span class="n">name</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">result</span><span class="p">:</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
 <a id="__codelineno-11-19" name="__codelineno-11-19" href="#__codelineno-11-19"></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;格式化工具执行结果为 XML&quot;&quot;&quot;</span>
 </code></pre></div>
-<p><strong>生成示例</strong>：</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="gh"># 可用工具</span>
-<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>
-<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="gu">## web_search</span>
-<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a>搜索互联网获取信息
-<a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a>
-<a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a><span class="gs">**参数：**</span>
-<a id="__codelineno-12-7" name="__codelineno-12-7" href="#__codelineno-12-7"></a><span class="k">-</span><span class="w"> </span><span class="sb">`query`</span> (string, 必需): 搜索查询词
-<a id="__codelineno-12-8" name="__codelineno-12-8" href="#__codelineno-12-8"></a><span class="k">-</span><span class="w"> </span><span class="sb">`max_results`</span> (integer, 可选, 默认: 10): 最大结果数量
-<a id="__codelineno-12-9" name="__codelineno-12-9" href="#__codelineno-12-9"></a>
-<a id="__codelineno-12-10" name="__codelineno-12-10" href="#__codelineno-12-10"></a><span class="gs">**调用示例：**</span>
-<a id="__codelineno-12-11" name="__codelineno-12-11" href="#__codelineno-12-11"></a>\`\`\`xml
-<a id="__codelineno-12-12" name="__codelineno-12-12" href="#__codelineno-12-12"></a>&lt;tool_call&gt;
-<a id="__codelineno-12-13" name="__codelineno-12-13" href="#__codelineno-12-13"></a>  &lt;name&gt;web_search&lt;/name&gt;
-<a id="__codelineno-12-14" name="__codelineno-12-14" href="#__codelineno-12-14"></a>  &lt;params&gt;
-<a id="__codelineno-12-15" name="__codelineno-12-15" href="#__codelineno-12-15"></a>    &lt;query&gt;&lt;![CDATA[your search query]]&gt;&lt;/query&gt;
+<p><strong>生成示例</strong>（实际输出格式）：</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>### web_search
+<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>Description: Search the web for information using Bocha AI search engine
+<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a>Parameters:
+<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a>  - query: string (required) - Search query using keywords.
+<a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a>  - freshness: string (optional) - Time range filter: &#39;noLimit&#39;, &#39;oneDay&#39;, ...
+<a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a>    Default: noLimit
+<a id="__codelineno-12-7" name="__codelineno-12-7" href="#__codelineno-12-7"></a>  - count: integer (optional) - Number of results to return (1-50)
+<a id="__codelineno-12-8" name="__codelineno-12-8" href="#__codelineno-12-8"></a>    Default: 10
+<a id="__codelineno-12-9" name="__codelineno-12-9" href="#__codelineno-12-9"></a>Example:
+<a id="__codelineno-12-10" name="__codelineno-12-10" href="#__codelineno-12-10"></a>&lt;tool_call&gt;
+<a id="__codelineno-12-11" name="__codelineno-12-11" href="#__codelineno-12-11"></a>  &lt;name&gt;web_search&lt;/name&gt;
+<a id="__codelineno-12-12" name="__codelineno-12-12" href="#__codelineno-12-12"></a>  &lt;params&gt;
+<a id="__codelineno-12-13" name="__codelineno-12-13" href="#__codelineno-12-13"></a>    &lt;query&gt;&lt;![CDATA[your_query_here]]&gt;&lt;/query&gt;
+<a id="__codelineno-12-14" name="__codelineno-12-14" href="#__codelineno-12-14"></a>    &lt;freshness&gt;&lt;![CDATA[noLimit]]&gt;&lt;/freshness&gt;
+<a id="__codelineno-12-15" name="__codelineno-12-15" href="#__codelineno-12-15"></a>    &lt;count&gt;&lt;![CDATA[10]]&gt;&lt;/count&gt;
 <a id="__codelineno-12-16" name="__codelineno-12-16" href="#__codelineno-12-16"></a>  &lt;/params&gt;
 <a id="__codelineno-12-17" name="__codelineno-12-17" href="#__codelineno-12-17"></a>&lt;/tool_call&gt;
-<a id="__codelineno-12-18" name="__codelineno-12-18" href="#__codelineno-12-18"></a>\`\`\`
-<a id="__codelineno-12-19" name="__codelineno-12-19" href="#__codelineno-12-19"></a>
-<a id="__codelineno-12-20" name="__codelineno-12-20" href="#__codelineno-12-20"></a><span class="gu">## create_artifact</span>
-<a id="__codelineno-12-21" name="__codelineno-12-21" href="#__codelineno-12-21"></a>创建新的 Artifact
-<a id="__codelineno-12-22" name="__codelineno-12-22" href="#__codelineno-12-22"></a>
-<a id="__codelineno-12-23" name="__codelineno-12-23" href="#__codelineno-12-23"></a>...
 </code></pre></div>
 <h2 id="_5">内置工具</h2>
-<h3 id="call_subagent">call_subagent</h3>
-<p>Lead Agent 调用 SubAgent（伪装路由工具）：</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="k">class</span><span class="w"> </span><span class="nc">CallSubagentTool</span><span class="p">(</span><span class="n">BaseTool</span><span class="p">):</span>
-<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a>    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
-<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a>        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span>
-<a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a>            <span class="n">name</span><span class="o">=</span><span class="s2">&quot;call_subagent&quot;</span><span class="p">,</span>
-<a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a>            <span class="n">description</span><span class="o">=</span><span class="s2">&quot;Call a specialized sub-agent to handle specific tasks&quot;</span><span class="p">,</span>
-<a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a>            <span class="n">permission</span><span class="o">=</span><span class="n">ToolPermission</span><span class="o">.</span><span class="n">PUBLIC</span>
-<a id="__codelineno-13-7" name="__codelineno-13-7" href="#__codelineno-13-7"></a>        <span class="p">)</span>
-<a id="__codelineno-13-8" name="__codelineno-13-8" href="#__codelineno-13-8"></a>
-<a id="__codelineno-13-9" name="__codelineno-13-9" href="#__codelineno-13-9"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">get_parameters</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">List</span><span class="p">[</span><span class="n">ToolParameter</span><span class="p">]:</span>
-<a id="__codelineno-13-10" name="__codelineno-13-10" href="#__codelineno-13-10"></a>        <span class="k">return</span> <span class="p">[</span>
-<a id="__codelineno-13-11" name="__codelineno-13-11" href="#__codelineno-13-11"></a>            <span class="n">ToolParameter</span><span class="p">(</span>
-<a id="__codelineno-13-12" name="__codelineno-13-12" href="#__codelineno-13-12"></a>                <span class="n">name</span><span class="o">=</span><span class="s2">&quot;agent_name&quot;</span><span class="p">,</span>
-<a id="__codelineno-13-13" name="__codelineno-13-13" href="#__codelineno-13-13"></a>                <span class="nb">type</span><span class="o">=</span><span class="s2">&quot;string&quot;</span><span class="p">,</span>
-<a id="__codelineno-13-14" name="__codelineno-13-14" href="#__codelineno-13-14"></a>                <span class="n">description</span><span class="o">=</span><span class="s2">&quot;Sub-agent type: check available_subagents section&quot;</span><span class="p">,</span>
-<a id="__codelineno-13-15" name="__codelineno-13-15" href="#__codelineno-13-15"></a>                <span class="n">required</span><span class="o">=</span><span class="kc">True</span>
-<a id="__codelineno-13-16" name="__codelineno-13-16" href="#__codelineno-13-16"></a>            <span class="p">),</span>
-<a id="__codelineno-13-17" name="__codelineno-13-17" href="#__codelineno-13-17"></a>            <span class="n">ToolParameter</span><span class="p">(</span>
-<a id="__codelineno-13-18" name="__codelineno-13-18" href="#__codelineno-13-18"></a>                <span class="n">name</span><span class="o">=</span><span class="s2">&quot;instruction&quot;</span><span class="p">,</span>
-<a id="__codelineno-13-19" name="__codelineno-13-19" href="#__codelineno-13-19"></a>                <span class="nb">type</span><span class="o">=</span><span class="s2">&quot;string&quot;</span><span class="p">,</span>
-<a id="__codelineno-13-20" name="__codelineno-13-20" href="#__codelineno-13-20"></a>                <span class="n">description</span><span class="o">=</span><span class="s2">&quot;Specific task instruction for the sub-agent&quot;</span><span class="p">,</span>
-<a id="__codelineno-13-21" name="__codelineno-13-21" href="#__codelineno-13-21"></a>                <span class="n">required</span><span class="o">=</span><span class="kc">True</span>
-<a id="__codelineno-13-22" name="__codelineno-13-22" href="#__codelineno-13-22"></a>            <span class="p">)</span>
-<a id="__codelineno-13-23" name="__codelineno-13-23" href="#__codelineno-13-23"></a>        <span class="p">]</span>
-<a id="__codelineno-13-24" name="__codelineno-13-24" href="#__codelineno-13-24"></a>
-<a id="__codelineno-13-25" name="__codelineno-13-25" href="#__codelineno-13-25"></a>    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">execute</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">**</span><span class="n">params</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">ToolResult</span><span class="p">:</span>
-<a id="__codelineno-13-26" name="__codelineno-13-26" href="#__codelineno-13-26"></a>        <span class="c1"># 实际不执行操作，返回路由指令供 Graph 识别</span>
-<a id="__codelineno-13-27" name="__codelineno-13-27" href="#__codelineno-13-27"></a>        <span class="k">return</span> <span class="n">ToolResult</span><span class="p">(</span>
-<a id="__codelineno-13-28" name="__codelineno-13-28" href="#__codelineno-13-28"></a>            <span class="n">success</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
-<a id="__codelineno-13-29" name="__codelineno-13-29" href="#__codelineno-13-29"></a>            <span class="n">data</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;_route_to&quot;</span><span class="p">:</span> <span class="n">agent_name</span><span class="p">,</span> <span class="s2">&quot;_is_routing_instruction&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span> <span class="o">...</span><span class="p">}</span>
-<a id="__codelineno-13-30" name="__codelineno-13-30" href="#__codelineno-13-30"></a>        <span class="p">)</span>
-</code></pre></div>
-<h3 id="web_search">web_search</h3>
-<p>互联网搜索：</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="k">class</span><span class="w"> </span><span class="nc">WebSearchTool</span><span class="p">(</span><span class="n">BaseTool</span><span class="p">):</span>
-<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a>    <span class="n">name</span> <span class="o">=</span> <span class="s2">&quot;web_search&quot;</span>
-<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a>    <span class="n">description</span> <span class="o">=</span> <span class="s2">&quot;搜索互联网&quot;</span>
-<a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a>    <span class="n">permission</span> <span class="o">=</span> <span class="n">ToolPermission</span><span class="o">.</span><span class="n">PUBLIC</span>
-</code></pre></div>
-<h3 id="web_fetch">web_fetch</h3>
-<p>网页内容抓取：</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="k">class</span><span class="w"> </span><span class="nc">WebFetchTool</span><span class="p">(</span><span class="n">BaseTool</span><span class="p">):</span>
-<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a>    <span class="n">name</span> <span class="o">=</span> <span class="s2">&quot;web_fetch&quot;</span>
-<a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a>    <span class="n">description</span> <span class="o">=</span> <span class="s2">&quot;获取网页内容&quot;</span>
-<a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a>    <span class="n">permission</span> <span class="o">=</span> <span class="n">ToolPermission</span><span class="o">.</span><span class="n">PUBLIC</span>
-</code></pre></div>
-<h3 id="artifact">Artifact 操作</h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="c1"># 创建</span>
-<a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a><span class="n">CreateArtifactTool</span>   <span class="c1"># create_artifact</span>
-<a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a><span class="c1"># 读取</span>
-<a id="__codelineno-16-4" name="__codelineno-16-4" href="#__codelineno-16-4"></a><span class="n">ReadArtifactTool</span>     <span class="c1"># read_artifact</span>
-<a id="__codelineno-16-5" name="__codelineno-16-5" href="#__codelineno-16-5"></a><span class="c1"># 更新（增量）</span>
-<a id="__codelineno-16-6" name="__codelineno-16-6" href="#__codelineno-16-6"></a><span class="n">UpdateArtifactTool</span>   <span class="c1"># update_artifact</span>
-<a id="__codelineno-16-7" name="__codelineno-16-7" href="#__codelineno-16-7"></a><span class="c1"># 重写（完全覆盖）</span>
-<a id="__codelineno-16-8" name="__codelineno-16-8" href="#__codelineno-16-8"></a><span class="n">RewriteArtifactTool</span>  <span class="c1"># rewrite_artifact</span>
-<a id="__codelineno-16-9" name="__codelineno-16-9" href="#__codelineno-16-9"></a><span class="c1"># 删除</span>
-<a id="__codelineno-16-10" name="__codelineno-16-10" href="#__codelineno-16-10"></a><span class="n">DeleteArtifactTool</span>   <span class="c1"># delete_artifact</span>
-<a id="__codelineno-16-11" name="__codelineno-16-11" href="#__codelineno-16-11"></a><span class="c1"># 列表</span>
-<a id="__codelineno-16-12" name="__codelineno-16-12" href="#__codelineno-16-12"></a><span class="n">ListArtifactsTool</span>    <span class="c1"># list_artifacts</span>
-</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>工具名</th>
+<th>类</th>
+<th>说明</th>
+<th>权限</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>call_subagent</code></td>
+<td>CallSubagentTool</td>
+<td>路由到 SubAgent（验证参数后设置路由）</td>
+<td>AUTO</td>
+</tr>
+<tr>
+<td><code>web_search</code></td>
+<td>WebSearchTool</td>
+<td>互联网搜索（博查 AI）</td>
+<td>AUTO</td>
+</tr>
+<tr>
+<td><code>web_fetch</code></td>
+<td>WebFetchTool</td>
+<td>网页/PDF 内容抓取（crawl4ai）</td>
+<td>AUTO</td>
+</tr>
+<tr>
+<td><code>create_artifact</code></td>
+<td>CreateArtifactTool</td>
+<td>创建新 Artifact</td>
+<td>AUTO</td>
+</tr>
+<tr>
+<td><code>read_artifact</code></td>
+<td>ReadArtifactTool</td>
+<td>读取内容（支持历史版本）</td>
+<td>AUTO</td>
+</tr>
+<tr>
+<td><code>update_artifact</code></td>
+<td>UpdateArtifactTool</td>
+<td>增量更新（支持模糊匹配）</td>
+<td>AUTO</td>
+</tr>
+<tr>
+<td><code>rewrite_artifact</code></td>
+<td>RewriteArtifactTool</td>
+<td>完全重写内容</td>
+<td>AUTO</td>
+</tr>
+</tbody>
+</table>
+<p><strong>注意</strong>：<code>call_subagent</code> 是特殊的路由工具。Agent 在 <code>base.py</code> 中检测到此工具时，会先调用 <code>execute()</code> 验证参数（如 agent_name 是否有效），验证通过后再设置路由信息，由 Graph 路由到目标 SubAgent。</p>
 <h2 id="_6">添加新工具</h2>
 <p>参见 <a href="../../extension-guide/#添加新工具">Extension Guide</a>。</p>
 

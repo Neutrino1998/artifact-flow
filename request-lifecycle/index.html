@@ -1526,8 +1526,8 @@
 <pre class="mermaid"><code>flowchart TD
     A[获取 pending_tool_call] --&gt; B[查找工具]
     B --&gt; C{检查权限}
-    C --&gt;|PUBLIC/NOTIFY| D[直接执行]
-    C --&gt;|CONFIRM/RESTRICTED| E[interrupt 请求确认]
+    C --&gt;|AUTO| D[直接执行]
+    C --&gt;|CONFIRM| E[interrupt 请求确认]
     E --&gt; F{用户响应}
     F --&gt;|approved| D
     F --&gt;|denied| G[返回拒绝结果]
@@ -1601,7 +1601,7 @@
 <p>当工具需要用户确认时：</p>
 <h3 id="_9">中断流程</h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="c1"># src/core/graph.py - tool_execution_node</span>
-<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="k">if</span> <span class="n">tool</span><span class="o">.</span><span class="n">permission</span> <span class="ow">in</span> <span class="p">[</span><span class="n">ToolPermission</span><span class="o">.</span><span class="n">CONFIRM</span><span class="p">,</span> <span class="n">ToolPermission</span><span class="o">.</span><span class="n">RESTRICTED</span><span class="p">]:</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="k">if</span> <span class="n">tool</span><span class="o">.</span><span class="n">permission</span> <span class="o">==</span> <span class="n">ToolPermission</span><span class="o">.</span><span class="n">CONFIRM</span><span class="p">:</span>
 <a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>    <span class="c1"># 发送权限请求事件</span>
 <a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a>    <span class="n">writer</span><span class="p">({</span>
 <a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a>        <span class="s2">&quot;type&quot;</span><span class="p">:</span> <span class="n">StreamEventType</span><span class="o">.</span><span class="n">PERMISSION_REQUEST</span><span class="o">.</span><span class="n">value</span><span class="p">,</span>
