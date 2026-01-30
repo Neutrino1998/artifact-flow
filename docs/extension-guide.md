@@ -261,23 +261,22 @@ class ReadFileTool(BaseTool):
 
 ### 注册工具
 
-```python
-# src/tools/registry.py 或初始化代码中
+在 `create_default_graph()` 函数中（`core/graph.py`）添加新工具：
 
+```python
 from tools.implementations.file_ops import ReadFileTool
 
-def create_tool_registry() -> ToolRegistry:
-    registry = ToolRegistry()
+# 在 tools 列表中添加新工具
+tools = [
+    CallSubagentTool(),
+    WebSearchTool(),
+    WebFetchTool(),
+    ReadFileTool(),  # 添加新工具
+]
 
-    # 注册现有工具
-    registry.register_tool_to_library(WebSearchTool())
-    registry.register_tool_to_library(WebFetchTool())
-    # ...
-
-    # 注册新工具
-    registry.register_tool_to_library(ReadFileTool())
-
-    return registry
+# 注册到 registry
+for tool in tools:
+    registry.register_tool_to_library(tool)
 ```
 
 ### 为 Agent 分配工具
@@ -285,22 +284,20 @@ def create_tool_registry() -> ToolRegistry:
 在 Agent 配置中通过 `required_tools` 指定所需工具：
 
 ```python
-# 在 Agent 配置中添加工具名称
-class CodeAgent(BaseAgent):
-    def __init__(self, config=None, toolkit=None):
-        if not config:
-            config = AgentConfig(
-                name="code_agent",
-                # ...
-                required_tools=[
-                    "read_file",      # 新工具
-                    "analyze_code"
-                ]
-            )
-        super().__init__(config, toolkit)
+# 在 agents/factories.py 中定义 Agent 时指定
+def create_code_agent() -> BaseAgent:
+    config = AgentConfig(
+        name="code_agent",
+        # ...
+        required_tools=[
+            "read_file",      # 新工具
+            "analyze_code"
+        ]
+    )
+    return CodeAgent(config)
 ```
 
-`create_multi_agent_graph` 会根据 `required_tools` 自动创建对应的 `AgentToolkit` 并绑定到 Agent。
+`create_default_graph()` 会根据 `required_tools` 自动创建对应的 `AgentToolkit` 并绑定到 Agent。
 
 ## 权限级别选择指南
 

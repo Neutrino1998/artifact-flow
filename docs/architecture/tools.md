@@ -228,26 +228,35 @@ class AgentToolkit:
 
 ### 初始化流程
 
+工具初始化在 `create_default_graph()` 函数中完成（`core/graph.py`）：
+
 ```python
-# 在应用启动时
-def create_tool_registry() -> ToolRegistry:
-    registry = ToolRegistry()
+# 1. 创建工具注册中心
+registry = ToolRegistry()
 
-    # 注册所有工具到库
-    registry.register_tool_to_library(WebSearchTool())
-    registry.register_tool_to_library(WebFetchTool())
-    registry.register_tool_to_library(CreateArtifactTool())
-    # ...
+# 2. 创建工具列表
+tools = [
+    CallSubagentTool(),
+    WebSearchTool(),
+    WebFetchTool(),
+]
 
-    return registry
+# Artifact 工具需要 manager 依赖注入
+if artifact_manager:
+    tools.extend(create_artifact_tools(artifact_manager))
 
-# 为每个 Agent 创建 Toolkit
-def setup_agent_toolkits(registry: ToolRegistry, agents: list[BaseAgent]):
-    for agent in agents:
-        registry.create_agent_toolkit(
-            agent.name,
-            agent.config.required_tools
+# 3. 注册所有工具到库
+for tool in tools:
+    registry.register_tool_to_library(tool)
+
+# 4. 为每个 Agent 创建 toolkit 并绑定
+for agent in [lead, search, crawl]:
+    if agent.config.required_tools:
+        toolkit = registry.create_agent_toolkit(
+            agent.config.name,
+            tool_names=agent.config.required_tools
         )
+        agent.toolkit = toolkit
 ```
 
 ## XML 解析器 (xml_parser.py)
