@@ -439,11 +439,22 @@ sequenceDiagram
 
 ```python
 # src/core/graph.py
-async def create_async_sqlite_checkpointer(db_path: str):
+async def create_async_sqlite_checkpointer(db_path: str = "data/langgraph.db"):
     """创建 LangGraph 状态检查点"""
+    import aiosqlite
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
-    checkpointer = AsyncSqliteSaver.from_conn_string(db_path)
+    # 确保目录存在
+    db_dir = os.path.dirname(db_path)
+    if db_dir and not os.path.exists(db_dir):
+        os.makedirs(db_dir, exist_ok=True)
+
+    # 手动创建连接以便配置 PRAGMA
+    conn = await aiosqlite.connect(db_path)
+    await conn.execute("PRAGMA journal_mode=WAL")      # WAL 模式提高并发
+    await conn.execute("PRAGMA busy_timeout=5000")     # 5 秒忙等待
+
+    checkpointer = AsyncSqliteSaver(conn)
     await checkpointer.setup()
     return checkpointer
 ```
