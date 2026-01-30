@@ -204,44 +204,20 @@ class WebFetchTool(BaseTool):
             logger.exception(f"Fetch failed: {str(e)}")
             return ToolResult(success=False, error=f"Fetch failed: {str(e)}")
     
-    async def _detect_content_type(self, url: str) -> str:
+    def _detect_content_type(self, url: str) -> str:
         """
-        检测URL的内容类型
-        
+        通过 URL 后缀检测内容类型
+
         Args:
             url: 目标URL
-            
+
         Returns:
-            'pdf', 'html', 或 'unknown'
+            'pdf' 或 'html'
         """
-        # 1. 先通过URL后缀快速判断
-        url_lower = url.lower()
+        url_lower = url.lower().split('?')[0]  # 去掉查询参数
         if url_lower.endswith('.pdf'):
             return 'pdf'
-        elif any(url_lower.endswith(ext) for ext in ['.html', '.htm', '.php', '.asp', '.jsp']):
-            return 'html'
-        
-        # 2. 发送HEAD请求检查Content-Type
-        try:
-            timeout = aiohttp.ClientTimeout(total=10)
-            async with aiohttp.ClientSession() as session:
-                async with session.head(
-                    url, 
-                    timeout=timeout,
-                    allow_redirects=True,
-                    headers={'User-Agent': random.choice(self.user_agents)}
-                ) as response:
-                    content_type = response.headers.get('Content-Type', '').lower()
-                    
-                    if 'pdf' in content_type or 'application/pdf' in content_type:
-                        return 'pdf'
-                    elif any(t in content_type for t in ['html', 'text/html', 'text/plain']):
-                        return 'html'
-                    
-        except Exception as e:
-            logger.warning(f"HEAD request failed for {url}: {e}, assuming HTML")
-        
-        # 3. 默认按HTML处理
+        # 其他情况默认 HTML，让 crawl4ai 处理
         return 'html'
     
     async def _fetch_pdf(self, url: str, max_content_length: int) -> Dict[str, Any]:
@@ -426,23 +402,17 @@ class WebFetchTool(BaseTool):
         Returns:
             抓取结果列表
         """
-        # 步骤1: 检测所有URL的类型
-        logger.info("Detecting content types...")
-        content_types = await asyncio.gather(*[
-            self._detect_content_type(url) for url in urls
-        ])
-        
-        # 步骤2: 按类型分类URL
+        # 步骤1: 按 URL 后缀分类
         pdf_urls = []
         html_urls = []
-        
-        for url, content_type in zip(urls, content_types):
-            if content_type == 'pdf':
+
+        for url in urls:
+            if self._detect_content_type(url) == 'pdf':
                 pdf_urls.append(url)
-                logger.info(f"Detected as PDF: {url}")
+                logger.debug(f"Detected as PDF: {url}")
             else:
                 html_urls.append(url)
-                logger.info(f"Detected as HTML: {url}")
+                logger.debug(f"Detected as HTML: {url}")
         
         results = []
         
