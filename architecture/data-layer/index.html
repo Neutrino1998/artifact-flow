@@ -1741,29 +1741,37 @@
 <pre class="mermaid"><code>sequenceDiagram
     participant Agent
     participant Tool
+    participant Manager
     participant Repo
     participant DB
 
-    Agent-&gt;&gt;Tool: update_artifact(id, content, lock_version=1)
-    Tool-&gt;&gt;Repo: update_artifact_content(expected_lock_version=1)
-    Repo-&gt;&gt;DB: UPDATE ... WHERE lock_version=1 RETURNING ...
+    Agent-&gt;&gt;Tool: update_artifact(id, old_str, new_str)
+    Tool-&gt;&gt;Manager: update_artifact(...)
+    Manager-&gt;&gt;Manager: 从缓存获取 lock_version
+    Manager-&gt;&gt;Repo: update_artifact_content(expected_lock_version)
+    Repo-&gt;&gt;DB: UPDATE ... WHERE lock_version=X RETURNING ...
 
     alt 更新成功（lock_version 匹配）
         DB-&gt;&gt;Repo: new_version, new_lock_version
         Repo-&gt;&gt;DB: INSERT INTO artifact_versions ...
-        Repo-&gt;&gt;Tool: 返回更新后的 Artifact
+        Repo-&gt;&gt;Manager: 返回更新后的 Artifact
+        Manager-&gt;&gt;Manager: 更新缓存中的 lock_version
+        Manager-&gt;&gt;Tool: (success, message, match_info)
         Tool-&gt;&gt;Agent: ToolResult(success=True)
     else 更新失败（lock_version 不匹配）
         DB-&gt;&gt;Repo: 0 rows affected
         Repo-&gt;&gt;Repo: 检查是不存在还是版本冲突
-        Repo-&gt;&gt;Tool: VersionConflictError
+        Repo-&gt;&gt;Manager: VersionConflictError
+        Manager-&gt;&gt;Manager: 清除缓存
+        Manager-&gt;&gt;Tool: (False, "Version conflict", None)
         Tool-&gt;&gt;Agent: ToolResult(success=False, error="Version conflict")
     end</code></pre>
+<p><strong>说明</strong>：<code>lock_version</code> 由 <code>ArtifactManager</code> 在内存缓存中自动管理，Agent 无需感知版本号。</p>
 <h3 id="agent">Agent 处理冲突</h3>
 <p>当收到版本冲突错误时，Agent 应该：</p>
 <ol>
-<li>重新读取最新版本</li>
-<li>合并变更</li>
+<li>重新调用 <code>read_artifact</code> 获取最新内容（Manager 会重新加载缓存）</li>
+<li>基于最新内容重新计算变更</li>
 <li>重试更新</li>
 </ol>
 <h2 id="langgraph-checkpointer">LangGraph Checkpointer</h2>
