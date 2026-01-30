@@ -347,32 +347,26 @@ class ToolPromptGenerator:
         """格式化工具执行结果为 XML"""
 ```
 
-**生成示例**：
+**生成示例**（实际输出格式）：
 
-```markdown
-# 可用工具
-
-## web_search
-搜索互联网获取信息
-
-**参数：**
-- `query` (string, 必需): 搜索查询词
-- `max_results` (integer, 可选, 默认: 10): 最大结果数量
-
-**调用示例：**
-\`\`\`xml
+```
+### web_search
+Description: Search the web for information using Bocha AI search engine
+Parameters:
+  - query: string (required) - Search query using keywords.
+  - freshness: string (optional) - Time range filter: 'noLimit', 'oneDay', ...
+    Default: noLimit
+  - count: integer (optional) - Number of results to return (1-50)
+    Default: 10
+Example:
 <tool_call>
   <name>web_search</name>
   <params>
-    <query><![CDATA[your search query]]></query>
+    <query><![CDATA[your_query_here]]></query>
+    <freshness><![CDATA[noLimit]]></freshness>
+    <count><![CDATA[10]]></count>
   </params>
 </tool_call>
-\`\`\`
-
-## create_artifact
-创建新的 Artifact
-
-...
 ```
 
 ## 内置工具
