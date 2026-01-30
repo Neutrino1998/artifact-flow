@@ -341,92 +341,50 @@ class BaseRepository(ABC, Generic[T]):
 
 ### ConversationRepository
 
-对话相关操作：
+对话和消息操作：
 
-```python
-class ConversationRepository(BaseRepository[Conversation]):
-    def __init__(self, session: AsyncSession):
-        super().__init__(session, Conversation)
-
-    async def create_conversation(
-        self, conversation_id: str, title: Optional[str] = None, ...
-    ) -> Conversation:
-        """创建新对话（同时创建关联的 ArtifactSession）"""
-
-    async def get_conversation(
-        self, conversation_id: str, *, load_messages: bool = False, load_artifacts: bool = False
-    ) -> Optional[Conversation]:
-        """获取对话（可选预加载消息和 Artifacts）"""
-
-    async def add_message(
-        self, conversation_id: str, message_id: str, content: str, thread_id: str, ...
-    ) -> Message:
-        """添加消息到对话（自动更新 active_branch）"""
-
-    async def update_graph_response(self, message_id: str, response: str) -> Message:
-        """更新消息的 Graph 响应"""
-
-    async def get_conversation_path(
-        self, conversation_id: str, to_message_id: Optional[str] = None
-    ) -> List[Message]:
-        """获取从根到指定消息的路径（向上追溯）"""
-
-    async def format_conversation_history(
-        self, conversation_id: str, to_message_id: Optional[str] = None
-    ) -> List[Dict[str, str]]:
-        """格式化对话历史为 [{"role": "user", ...}, {"role": "assistant", ...}, ...]"""
-```
+| 方法 | 说明 |
+|------|------|
+| `create_conversation` | 创建新对话（同时创建关联的 ArtifactSession） |
+| `get_conversation` | 获取对话（可选预加载消息和 Artifacts） |
+| `get_conversation_or_raise` | 获取对话，不存在则抛出 NotFoundError |
+| `update_active_branch` | 更新对话的活动分支 |
+| `update_title` | 更新对话标题 |
+| `list_conversations` | 列出所有对话（支持分页） |
+| `delete_conversation` | 删除对话 |
+| `add_message` | 添加消息到对话（自动更新 active_branch） |
+| `get_message` | 获取单条消息 |
+| `get_message_or_raise` | 获取消息，不存在则抛出 NotFoundError |
+| `update_graph_response` | 更新消息的 Graph 响应 |
+| `get_conversation_messages` | 获取对话的所有消息 |
+| `get_conversation_path` | 获取从根到指定消息的路径（向上追溯） |
+| `get_branch_children` | 获取消息的子分支 |
+| `format_conversation_history` | 格式化为 `[{"role": "user"}, {"role": "assistant"}, ...]` |
+| `get_branch_structure` | 获取对话的完整分支结构 |
 
 ### ArtifactRepository
 
 Artifact 操作（含乐观锁）：
 
-```python
-class ArtifactRepository(BaseRepository[Artifact]):
-    def __init__(self, session: AsyncSession):
-        super().__init__(session, Artifact)
-
-    async def create_artifact(
-        self, session_id: str, artifact_id: str, content_type: str, title: str, content: str, ...
-    ) -> Artifact:
-        """创建 Artifact（同时创建初始版本）"""
-
-    async def get_artifact(
-        self, session_id: str, artifact_id: str, *, load_versions: bool = False
-    ) -> Optional[Artifact]:
-        """获取 Artifact（复合主键查询）"""
-
-    async def update_artifact_content(
-        self,
-        session_id: str,
-        artifact_id: str,
-        new_content: str,
-        update_type: str,
-        expected_lock_version: int,
-        changes: Optional[List[Tuple[str, str]]] = None
-    ) -> Artifact:
-        """
-        乐观锁更新（原子操作）
-
-        使用 UPDATE ... WHERE lock_version = ? 实现乐观锁。
-        如果 lock_version 不匹配，抛出 VersionConflictError。
-        """
-        result = await self._session.execute(
-            update(Artifact)
-            .where(and_(
-                Artifact.id == artifact_id,
-                Artifact.session_id == session_id,
-                Artifact.lock_version == expected_lock_version  # 乐观锁检查
-            ))
-            .values(content=new_content, current_version=..., lock_version=...)
-            .returning(...)
-        )
-        # 如果更新失败，检查是不存在还是版本冲突
-        ...
-
-    async def list_versions(self, session_id: str, artifact_id: str) -> List[Dict[str, Any]]:
-        """列出版本历史（不含完整内容）"""
-```
+| 方法 | 说明 |
+|------|------|
+| `get_session` | 获取 ArtifactSession |
+| `get_session_or_raise` | 获取 Session，不存在则抛出 NotFoundError |
+| `ensure_session_exists` | 确保 Session 存在（不存在则创建） |
+| `create_artifact` | 创建 Artifact（同时创建初始版本） |
+| `get_artifact` | 获取 Artifact（复合主键查询） |
+| `get_artifact_or_raise` | 获取 Artifact，不存在则抛出 NotFoundError |
+| `list_artifacts` | 列出 Session 下所有 Artifacts |
+| `delete_artifact` | 删除 Artifact |
+| `update_artifact_content` | 乐观锁更新内容（版本冲突抛出 VersionConflictError） |
+| `rewrite_artifact` | 完全重写内容（乐观锁） |
+| `update_artifact_title` | 更新标题 |
+| `get_version` | 获取指定版本记录 |
+| `get_version_content` | 获取指定版本的内容 |
+| `list_versions` | 列出版本历史（不含完整内容） |
+| `get_version_diff` | 获取两个版本间的差异 |
+| `clear_temporary_artifacts` | 清除临时 Artifacts（如 task_plan） |
+| `get_artifacts_with_full_content` | 批量获取完整内容 |
 
 ## 乐观锁机制
 

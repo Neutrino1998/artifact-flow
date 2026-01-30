@@ -371,58 +371,17 @@ Example:
 
 ## 内置工具
 
-### call_subagent
+| 工具名 | 类 | 说明 | 权限 |
+|--------|-----|------|------|
+| `call_subagent` | CallSubagentTool | 路由到 SubAgent（特殊工具，不实际执行）| AUTO |
+| `web_search` | WebSearchTool | 互联网搜索（博查 AI） | AUTO |
+| `web_fetch` | WebFetchTool | 网页/PDF 内容抓取（crawl4ai） | AUTO |
+| `create_artifact` | CreateArtifactTool | 创建新 Artifact | AUTO |
+| `read_artifact` | ReadArtifactTool | 读取内容（支持历史版本） | AUTO |
+| `update_artifact` | UpdateArtifactTool | 增量更新（支持模糊匹配） | AUTO |
+| `rewrite_artifact` | RewriteArtifactTool | 完全重写内容 | AUTO |
 
-Lead Agent 调用 SubAgent（特殊路由工具）：
-
-```python
-class CallSubagentTool(BaseTool):
-    def __init__(self):
-        super().__init__(
-            name="call_subagent",
-            description="Call a specialized sub-agent to handle specific tasks",
-            permission=ToolPermission.AUTO
-        )
-
-    def get_parameters(self) -> List[ToolParameter]:
-        return [
-            ToolParameter(name="agent_name", type="string", ...),
-            ToolParameter(name="instruction", type="string", ...)
-        ]
-```
-
-**注意**：`call_subagent` 的 `execute()` 方法通常不会被调用。Agent 在 `base.py` 中检测到此工具调用时，会直接从 `tool_call.params` 提取路由信息并设置 `response.routing`，然后由 Graph 路由到目标 SubAgent。
-
-### web_search
-
-互联网搜索：
-
-```python
-class WebSearchTool(BaseTool):
-    name = "web_search"
-    description = "搜索互联网"
-    permission = ToolPermission.AUTO
-```
-
-### web_fetch
-
-网页内容抓取：
-
-```python
-class WebFetchTool(BaseTool):
-    name = "web_fetch"
-    description = "获取网页内容"
-    permission = ToolPermission.AUTO
-```
-
-### Artifact 操作
-
-```python
-CreateArtifactTool   # create_artifact - 创建新 Artifact
-ReadArtifactTool     # read_artifact - 读取内容（支持历史版本）
-UpdateArtifactTool   # update_artifact - 增量更新（支持模糊匹配）
-RewriteArtifactTool  # rewrite_artifact - 完全重写
-```
+**注意**：`call_subagent` 是特殊的路由工具。Agent 在 `base.py` 中检测到此工具时，会先调用 `execute()` 验证参数（如 agent_name 是否有效），验证通过后再设置路由信息，由 Graph 路由到目标 SubAgent。
 
 ## 添加新工具
 
