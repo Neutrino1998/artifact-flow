@@ -49,59 +49,39 @@ class CallSubagentTool(BaseTool):
     
     async def execute(self, **params) -> ToolResult:
         """
-        "执行"工具调用（实际是生成路由指令）
-        
-        Args:
-            agent_name: 目标Agent类型
-            instruction: 任务指令
-            
-        Returns:
-            包含路由信息的ToolResult
+        注意：此方法通常不会被调用。
+
+        Agent 在 base.py 中检测到 call_subagent 时，会直接从 tool_call.params
+        提取路由信息并设置 response.routing，不经过工具执行。
+
+        保留此实现是为了：
+        1. 参数验证（虽然目前在 base.py 中处理）
+        2. 架构变化时的兼容性
         """
-        # 验证agent_name
-        valid_agents = ["search_agent", "crawl_agent"]
         agent_name = params.get("agent_name")
-        
+        instruction = params.get("instruction", "").strip()
+
+        # 基本验证
+        valid_agents = ["search_agent", "crawl_agent"]
         if agent_name not in valid_agents:
             return ToolResult(
                 success=False,
                 error=f"Invalid agent_name '{agent_name}'. Must be one of: {', '.join(valid_agents)}"
             )
-        
-        instruction = params.get("instruction", "").strip()
+
         if not instruction:
             return ToolResult(
                 success=False,
                 error="instruction parameter cannot be empty"
             )
-        
-        # 记录路由请求
-        logger.info(f"Routing request: {agent_name} - {instruction[:100]}...")
-        
-        # 🎭 返回特殊的路由指令（不是真正的工具执行结果）
+
+        logger.info(f"Routing to {agent_name}: {instruction[:100]}...")
+
         return ToolResult(
             success=True,
             data={
-                # 🚦 路由控制信息
-                "_route_to": agent_name,
-                "_is_routing_instruction": True,  # 特殊标记
-                
-                # 📋 任务信息
-                "instruction": instruction,
-                
-                # 📊 元数据
-                "requested_at": self._get_timestamp(),
-                "requested_by": "lead_agent"
-            },
-            metadata={
-                "tool_type": "routing",
-                "target_agent": agent_name,
-                "instruction_length": len(instruction)
+                "agent_name": agent_name,
+                "instruction": instruction
             }
         )
-    
-    def _get_timestamp(self) -> str:
-        """获取当前时间戳"""
-        from datetime import datetime
-        return datetime.now().isoformat()
 

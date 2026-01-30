@@ -373,7 +373,7 @@ Example:
 
 ### call_subagent
 
-Lead Agent 调用 SubAgent（伪装路由工具）：
+Lead Agent 调用 SubAgent（特殊路由工具）：
 
 ```python
 class CallSubagentTool(BaseTool):
@@ -386,27 +386,12 @@ class CallSubagentTool(BaseTool):
 
     def get_parameters(self) -> List[ToolParameter]:
         return [
-            ToolParameter(
-                name="agent_name",
-                type="string",
-                description="Sub-agent type: check available_subagents section",
-                required=True
-            ),
-            ToolParameter(
-                name="instruction",
-                type="string",
-                description="Specific task instruction for the sub-agent",
-                required=True
-            )
+            ToolParameter(name="agent_name", type="string", ...),
+            ToolParameter(name="instruction", type="string", ...)
         ]
-
-    async def execute(self, **params) -> ToolResult:
-        # 实际不执行操作，返回路由指令供 Graph 识别
-        return ToolResult(
-            success=True,
-            data={"_route_to": agent_name, "_is_routing_instruction": True, ...}
-        )
 ```
+
+**注意**：`call_subagent` 的 `execute()` 方法通常不会被调用。Agent 在 `base.py` 中检测到此工具调用时，会直接从 `tool_call.params` 提取路由信息并设置 `response.routing`，然后由 Graph 路由到目标 SubAgent。
 
 ### web_search
 
