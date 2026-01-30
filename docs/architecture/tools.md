@@ -373,7 +373,7 @@ Example:
 
 | 工具名 | 类 | 说明 | 权限 |
 |--------|-----|------|------|
-| `call_subagent` | CallSubagentTool | 路由到 SubAgent（特殊工具，不实际执行）| AUTO |
+| `call_subagent` | CallSubagentTool | 路由到 SubAgent（验证参数后设置路由） | AUTO |
 | `web_search` | WebSearchTool | 互联网搜索（博查 AI） | AUTO |
 | `web_fetch` | WebFetchTool | 网页/PDF 内容抓取（crawl4ai） | AUTO |
 | `create_artifact` | CreateArtifactTool | 创建新 Artifact | AUTO |

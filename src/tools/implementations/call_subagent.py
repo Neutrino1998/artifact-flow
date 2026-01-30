@@ -1,6 +1,6 @@
 """
-Subagent调用工具（伪装路由工具）
-这是一个特殊的工具，实际不执行操作，而是生成LangGraph路由指令
+Subagent 调用工具
+用于 Lead Agent 路由到 SubAgent，执行时验证参数有效性
 """
 
 from typing import List, Dict, Any, Optional
@@ -12,16 +12,14 @@ logger = get_logger("ArtifactFlow")
 
 class CallSubagentTool(BaseTool):
     """
-    Subagent调用工具（伪装工具）
-    
-    这个工具实际上不执行任何操作，而是返回路由指令，
-    供LangGraph的条件路由识别并转发到相应的Subagent节点。
-    
+    Subagent 调用工具
+
     工作原理：
-    1. Lead Agent通过XML格式"调用"这个工具
-    2. 工具解析参数并返回特殊的路由标记
-    3. Graph的条件路由识别标记，路由到对应Subagent
-    4. Subagent处理完成后，结果通过AgentState回传给Lead Agent
+    1. Lead Agent 通过 XML 格式调用此工具
+    2. base.py 检测到后调用 execute() 验证参数（agent_name、instruction）
+    3. 验证通过 → 设置 subagent 路由，Graph 转发到目标 SubAgent
+    4. 验证失败 → 当作普通 tool_call，返回错误让 Lead 修正
+    5. SubAgent 完成后，结果通过 AgentState 回传给 Lead Agent
     """
     
     def __init__(self):
@@ -49,14 +47,10 @@ class CallSubagentTool(BaseTool):
     
     async def execute(self, **params) -> ToolResult:
         """
-        注意：此方法通常不会被调用。
+        验证参数并返回路由信息。
 
-        Agent 在 base.py 中检测到 call_subagent 时，会直接从 tool_call.params
-        提取路由信息并设置 response.routing，不经过工具执行。
-
-        保留此实现是为了：
-        1. 参数验证（虽然目前在 base.py 中处理）
-        2. 架构变化时的兼容性
+        Agent 在 base.py 中检测到 call_subagent 时会调用此方法进行验证，
+        验证通过后再设置 response.routing 进行路由。
         """
         agent_name = params.get("agent_name")
         instruction = params.get("instruction", "").strip()

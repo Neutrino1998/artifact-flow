@@ -157,7 +157,11 @@ async def stream(
     if tool_calls:
         tool_call = tool_calls[0]  # 每轮只处理一个
         if tool_call.name == "call_subagent":
-            current_response.routing = {"type": "subagent", ...}
+            result = await self.toolkit.execute_tool("call_subagent", tool_call.params)
+            if result.success:
+                current_response.routing = {"type": "subagent", ...}
+            else:
+                current_response.routing = {"type": "tool_call", ...}  # 验证失败
         else:
             current_response.routing = {"type": "tool_call", ...}
 
@@ -176,13 +180,23 @@ tool_calls = parse_tool_calls(response_content)
 if tool_calls:
     tool_call = tool_calls[0]  # 每轮只处理一个工具调用
 
-    # 判断是 subagent 调用还是普通工具
     if tool_call.name == "call_subagent":
-        current_response.routing = {
-            "type": "subagent",
-            "target": tool_call.params.get("agent_name"),
-            "instruction": tool_call.params.get("instruction")
-        }
+        # 先调用 execute() 验证参数
+        result = await self.toolkit.execute_tool("call_subagent", tool_call.params)
+        if result.success:
+            # 验证通过，设置 subagent 路由
+            current_response.routing = {
+                "type": "subagent",
+                "target": result.data["agent_name"],
+                "instruction": result.data["instruction"]
+            }
+        else:
+            # 验证失败，当作普通 tool_call 让 graph 返回错误
+            current_response.routing = {
+                "type": "tool_call",
+                "tool_name": tool_call.name,
+                "params": tool_call.params
+            }
     else:
         current_response.routing = {
             "type": "tool_call",
