@@ -427,7 +427,6 @@ class ExtendableGraph:
             return {
                 "success": data.success,
                 "content": data.content,
-                "tool_calls": data.tool_calls,
                 "reasoning_content": data.reasoning_content,
                 "metadata": data.metadata,
                 "routing": data.routing,

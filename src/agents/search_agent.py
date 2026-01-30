@@ -143,10 +143,10 @@ Return your relevant findings in this simple XML structure:
     
         return prompt
     
-    def format_final_response(self, content: str, tool_history: List[Dict]) -> str:
+    def format_final_response(self, content: str) -> str:
         """
         格式化Search Agent的最终响应
-        
+
         Search Agent自己负责整理信息，直接返回其输出
         """
         return content

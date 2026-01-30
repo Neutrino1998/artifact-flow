@@ -240,10 +240,10 @@ Based on the existing artifacts:
         
         return prompt
     
-    def format_final_response(self, content: str, tool_history: List[Dict]) -> str:
+    def format_final_response(self, content: str) -> str:
         """
         格式化Lead Agent的最终响应
-        
+
         Lead Agent的响应就是其原始内容，不需要额外格式化
         """
         return content

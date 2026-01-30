@@ -142,10 +142,10 @@ Return extracted content in this simple XML structure:
     
         return prompt
     
-    def format_final_response(self, content: str, tool_history: List[Dict]) -> str:
+    def format_final_response(self, content: str) -> str:
         """
         格式化Crawl Agent的最终响应
-        
+
         Crawl Agent自己负责清洗和整理，直接返回其输出
         """
         return content

@@ -44,7 +44,6 @@ class AgentResponse:
     """Agent响应"""
     success: bool = True  # 执行是否成功
     content: str = ""  # 回复内容或错误信息
-    tool_calls: List[Dict[str, Any]] = field(default_factory=list)  # 工具调用记录
     tool_interactions: List[Dict] = field(default_factory=list)  # assistant-tool交互历史（用于恢复）
     reasoning_content: Optional[str] = None  # 思考过程（如果有）
     metadata: Dict[str, Any] = field(default_factory=dict)  # 元数据
@@ -150,14 +149,13 @@ class BaseAgent(ABC):
         pass
     
     @abstractmethod
-    def format_final_response(self, content: str, tool_history: List[Dict]) -> str:
+    def format_final_response(self, content: str) -> str:
         """
         格式化最终响应（子类实现）
-        
+
         Args:
             content: LLM的最终回复
-            tool_history: 工具调用历史
-            
+
         Returns:
             格式化后的响应
         """
@@ -430,10 +428,7 @@ class BaseAgent(ABC):
             current_response.tool_interactions = new_tool_interactions
 
             # 格式化最终响应
-            final_response = self.format_final_response(
-                current_response.content,
-                current_response.tool_calls
-            )
+            final_response = self.format_final_response(current_response.content)
             current_response.content = final_response
 
             yield StreamEvent(

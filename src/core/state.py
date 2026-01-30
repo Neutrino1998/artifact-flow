@@ -192,7 +192,6 @@ def merge_agent_response_to_state(
     memory["last_response"] = {
         "success": response.success,
         "content": response.content,
-        "tool_calls": response.tool_calls,
         "metadata": response.metadata,
         "reasoning": getattr(response, 'reasoning_content', None)
     }
@@ -250,7 +249,6 @@ def merge_agent_response_to_state(
                 data=response.content,
                 metadata={
                     "agent": agent_name,
-                    "tool_calls": response.tool_calls,
                     "reasoning": response.reasoning_content
                 }
             )
