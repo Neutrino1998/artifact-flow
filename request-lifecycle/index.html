@@ -1354,6 +1354,7 @@
 <pre class="mermaid"><code>sequenceDiagram
     participant Client
     participant FastAPI
+    participant StreamManager
     participant Controller
     participant Graph
     participant Agent
@@ -1361,26 +1362,33 @@
     participant DB
 
     Client-&gt;&gt;FastAPI: POST /api/v1/chat
-    FastAPI-&gt;&gt;Controller: stream_execute()
-    Controller-&gt;&gt;DB: 创建/获取 Conversation
+    FastAPI-&gt;&gt;DB: 确保 Conversation 存在
+    FastAPI-&gt;&gt;StreamManager: create_stream(thread_id)
+    FastAPI-&gt;&gt;Client: 返回 {thread_id, stream_url}
+
+    FastAPI-&gt;&gt;Controller: 后台启动 stream_execute()
     Controller-&gt;&gt;Graph: astream(initial_state)
 
     loop Agent Execution
-        Graph-&gt;&gt;Agent: 执行节点
+        Graph-&gt;&gt;Agent: agent.stream(messages)
         Agent-&gt;&gt;Agent: LLM 调用
-        Agent--&gt;&gt;Client: SSE: llm_chunk
-        Agent-&gt;&gt;Graph: AgentResponse
+        Agent-&gt;&gt;Graph: yield StreamEvent
+        Graph-&gt;&gt;StreamManager: push(llm_chunk)
 
         opt Tool Call
-            Graph-&gt;&gt;Tool: 执行工具
-            Tool--&gt;&gt;Client: SSE: tool_complete
+            Graph-&gt;&gt;Tool: execute_tool()
             Tool-&gt;&gt;Graph: ToolResult
+            Graph-&gt;&gt;StreamManager: push(tool_complete)
         end
     end
 
     Graph-&gt;&gt;Controller: 最终状态
     Controller-&gt;&gt;DB: 保存响应
-    Controller--&gt;&gt;Client: SSE: complete</code></pre>
+    Controller-&gt;&gt;StreamManager: push(complete)
+
+    Client-&gt;&gt;FastAPI: GET /stream/{thread_id}
+    FastAPI-&gt;&gt;StreamManager: consume_events()
+    StreamManager--&gt;&gt;Client: SSE 事件流</code></pre>
 <h2 id="phase-1">Phase 1: 请求接收与初始化</h2>
 <h3 id="api">API 层处理</h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1"># POST /api/v1/chat</span>
@@ -1559,43 +1567,44 @@
 <pre class="mermaid"><code>sequenceDiagram
     participant Client
     participant POST as POST /chat
-    participant Queue as Event Queue
+    participant Queue as StreamManager
     participant Graph
     participant GET as GET /stream
 
     Client-&gt;&gt;POST: 发送消息
-    POST-&gt;&gt;Queue: 创建 StreamContext
+    POST-&gt;&gt;Queue: create_stream(thread_id)
     Note over Queue: TTL 计时器启动 (30s)
     POST-&gt;&gt;Client: 返回 thread_id
 
+    POST-&gt;&gt;Graph: 后台执行
     Graph-&gt;&gt;Queue: push(agent_start)
     Graph-&gt;&gt;Queue: push(llm_chunk)
 
     Client-&gt;&gt;GET: 连接 SSE
+    GET-&gt;&gt;Queue: consume_events(thread_id)
     Note over Queue: 取消 TTL 计时器
     Queue-&gt;&gt;GET: yield events
-    GET-&gt;&gt;Client: SSE 推送</code></pre>
+    GET-&gt;&gt;Client: SSE 推送
+
+    Graph-&gt;&gt;Queue: push(complete)
+    Queue-&gt;&gt;GET: yield complete
+    GET-&gt;&gt;Client: SSE: complete
+    Note over Queue: 清理队列</code></pre>
 <h3 id="sse">SSE 格式</h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>event: metadata
-<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>data: {&quot;conversation_id&quot;: &quot;xxx&quot;, &quot;thread_id&quot;: &quot;yyy&quot;, &quot;message_id&quot;: &quot;zzz&quot;}
-<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>
-<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>event: agent_start
-<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>data: {&quot;agent&quot;: &quot;lead_agent&quot;}
+<p>事件类型包含在 <code>data</code> 的 JSON 对象内（<code>type</code> 字段），而非使用 SSE 的 <code>event:</code> 字段：</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>data: {&quot;type&quot;:&quot;metadata&quot;,&quot;timestamp&quot;:&quot;...&quot;,&quot;data&quot;:{&quot;conversation_id&quot;:&quot;xxx&quot;,&quot;thread_id&quot;:&quot;yyy&quot;,&quot;message_id&quot;:&quot;zzz&quot;}}
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>data: {&quot;type&quot;:&quot;agent_start&quot;,&quot;timestamp&quot;:&quot;...&quot;,&quot;agent&quot;:&quot;lead_agent&quot;}
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>data: {&quot;type&quot;:&quot;llm_chunk&quot;,&quot;timestamp&quot;:&quot;...&quot;,&quot;agent&quot;:&quot;lead_agent&quot;,&quot;data&quot;:{&quot;content&quot;:&quot;让我&quot;}}
 <a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a>
-<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a>event: llm_chunk
-<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a>data: {&quot;content&quot;: &quot;让我&quot;, &quot;agent&quot;: &quot;lead_agent&quot;}
-<a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a>
-<a id="__codelineno-8-10" name="__codelineno-8-10" href="#__codelineno-8-10"></a>event: llm_chunk
-<a id="__codelineno-8-11" name="__codelineno-8-11" href="#__codelineno-8-11"></a>data: {&quot;content&quot;: &quot;来分析&quot;, &quot;agent&quot;: &quot;lead_agent&quot;}
+<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a>data: {&quot;type&quot;:&quot;llm_chunk&quot;,&quot;timestamp&quot;:&quot;...&quot;,&quot;agent&quot;:&quot;lead_agent&quot;,&quot;data&quot;:{&quot;content&quot;:&quot;来分析&quot;}}
+<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a>
+<a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a>data: {&quot;type&quot;:&quot;tool_start&quot;,&quot;timestamp&quot;:&quot;...&quot;,&quot;tool&quot;:&quot;web_search&quot;,&quot;data&quot;:{&quot;params&quot;:{&quot;query&quot;:&quot;Python async best practices&quot;}}}
+<a id="__codelineno-8-10" name="__codelineno-8-10" href="#__codelineno-8-10"></a>
+<a id="__codelineno-8-11" name="__codelineno-8-11" href="#__codelineno-8-11"></a>data: {&quot;type&quot;:&quot;tool_complete&quot;,&quot;timestamp&quot;:&quot;...&quot;,&quot;tool&quot;:&quot;web_search&quot;,&quot;data&quot;:{&quot;success&quot;:true,&quot;data&quot;:{...}}}
 <a id="__codelineno-8-12" name="__codelineno-8-12" href="#__codelineno-8-12"></a>
-<a id="__codelineno-8-13" name="__codelineno-8-13" href="#__codelineno-8-13"></a>event: tool_start
-<a id="__codelineno-8-14" name="__codelineno-8-14" href="#__codelineno-8-14"></a>data: {&quot;tool&quot;: &quot;web_search&quot;, &quot;params&quot;: {&quot;query&quot;: &quot;Python async best practices&quot;}}
-<a id="__codelineno-8-15" name="__codelineno-8-15" href="#__codelineno-8-15"></a>
-<a id="__codelineno-8-16" name="__codelineno-8-16" href="#__codelineno-8-16"></a>event: tool_complete
-<a id="__codelineno-8-17" name="__codelineno-8-17" href="#__codelineno-8-17"></a>data: {&quot;tool&quot;: &quot;web_search&quot;, &quot;success&quot;: true, &quot;data&quot;: {...}}
-<a id="__codelineno-8-18" name="__codelineno-8-18" href="#__codelineno-8-18"></a>
-<a id="__codelineno-8-19" name="__codelineno-8-19" href="#__codelineno-8-19"></a>event: complete
-<a id="__codelineno-8-20" name="__codelineno-8-20" href="#__codelineno-8-20"></a>data: {&quot;response&quot;: &quot;...&quot;, &quot;metrics&quot;: {...}}
+<a id="__codelineno-8-13" name="__codelineno-8-13" href="#__codelineno-8-13"></a>data: {&quot;type&quot;:&quot;complete&quot;,&quot;timestamp&quot;:&quot;...&quot;,&quot;data&quot;:{&quot;response&quot;:&quot;...&quot;,&quot;metrics&quot;:{...}}}
 </code></pre></div>
 <h2 id="phase-5">Phase 5: 权限中断与恢复</h2>
 <p>当工具需要用户确认时：</p>

@@ -1581,9 +1581,8 @@
 
     Client-&gt;&gt;POST /chat: 发送消息
     POST /chat-&gt;&gt;StreamManager: create_stream(thread_id)
-    POST /chat-&gt;&gt;Client: 返回 {thread_id, ...}
-
     Note over StreamManager: TTL 计时器启动 (30s)
+    POST /chat-&gt;&gt;Client: 返回 {thread_id, ...}
 
     POST /chat-&gt;&gt;Graph: 后台执行
     Graph-&gt;&gt;StreamManager: push_event(agent_start)
