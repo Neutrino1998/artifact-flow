@@ -418,18 +418,10 @@ class WebFetchTool(BaseTool):
 ### Artifact 操作
 
 ```python
-# 创建
-CreateArtifactTool   # create_artifact
-# 读取
-ReadArtifactTool     # read_artifact
-# 更新（增量）
-UpdateArtifactTool   # update_artifact
-# 重写（完全覆盖）
-RewriteArtifactTool  # rewrite_artifact
-# 删除
-DeleteArtifactTool   # delete_artifact
-# 列表
-ListArtifactsTool    # list_artifacts
+CreateArtifactTool   # create_artifact - 创建新 Artifact
+ReadArtifactTool     # read_artifact - 读取内容（支持历史版本）
+UpdateArtifactTool   # update_artifact - 增量更新（支持模糊匹配）
+RewriteArtifactTool  # rewrite_artifact - 完全重写
 ```
 
 ## 添加新工具
