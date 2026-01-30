@@ -405,32 +405,41 @@ Agent B: 更新 Artifact → 冲突！
 sequenceDiagram
     participant Agent
     participant Tool
+    participant Manager
     participant Repo
     participant DB
 
-    Agent->>Tool: update_artifact(id, content, lock_version=1)
-    Tool->>Repo: update_artifact_content(expected_lock_version=1)
-    Repo->>DB: UPDATE ... WHERE lock_version=1 RETURNING ...
+    Agent->>Tool: update_artifact(id, old_str, new_str)
+    Tool->>Manager: update_artifact(...)
+    Manager->>Manager: 从缓存获取 lock_version
+    Manager->>Repo: update_artifact_content(expected_lock_version)
+    Repo->>DB: UPDATE ... WHERE lock_version=X RETURNING ...
 
     alt 更新成功（lock_version 匹配）
         DB->>Repo: new_version, new_lock_version
         Repo->>DB: INSERT INTO artifact_versions ...
-        Repo->>Tool: 返回更新后的 Artifact
+        Repo->>Manager: 返回更新后的 Artifact
+        Manager->>Manager: 更新缓存中的 lock_version
+        Manager->>Tool: (success, message, match_info)
         Tool->>Agent: ToolResult(success=True)
     else 更新失败（lock_version 不匹配）
         DB->>Repo: 0 rows affected
         Repo->>Repo: 检查是不存在还是版本冲突
-        Repo->>Tool: VersionConflictError
+        Repo->>Manager: VersionConflictError
+        Manager->>Manager: 清除缓存
+        Manager->>Tool: (False, "Version conflict", None)
         Tool->>Agent: ToolResult(success=False, error="Version conflict")
     end
 ```
+
+**说明**：`lock_version` 由 `ArtifactManager` 在内存缓存中自动管理，Agent 无需感知版本号。
 
 ### Agent 处理冲突
 
 当收到版本冲突错误时，Agent 应该：
 
-1. 重新读取最新版本
-2. 合并变更
+1. 重新调用 `read_artifact` 获取最新内容（Manager 会重新加载缓存）
+2. 基于最新内容重新计算变更
 3. 重试更新
 
 ## LangGraph Checkpointer
