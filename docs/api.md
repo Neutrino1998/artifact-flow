@@ -378,9 +378,7 @@ Agent 单轮执行完成（可能携带工具调用路由）。
 
 #### tool_complete
 
-工具执行完成。
-
-**注意：** 出于性能考虑，工具返回的实际数据不包含在此事件中（避免大量数据通过 SSE 传输）。工具结果会直接注入到 Agent 上下文，由 Agent 处理后在响应中体现。
+工具执行完成。包含工具调用参数和返回数据，前端可用于追踪工具执行详情（如 Artifact 操作的 `params.id`）。
 
 ```json
 {
@@ -391,7 +389,11 @@ Agent 单轮执行完成（可能携带工具调用路由）。
   "data": {
     "success": true,
     "duration_ms": 1234,
-    "error": null
+    "error": null,
+    "params": {
+      "query": "Python async programming"
+    },
+    "result_data": "<search_results>...</search_results>"
   }
 }
 ```
@@ -401,6 +403,18 @@ Agent 单轮执行完成（可能携带工具调用路由）。
 | `success` | boolean | 工具是否执行成功 |
 | `duration_ms` | int | 工具执行耗时（毫秒） |
 | `error` | string\|null | 错误信息（失败时） |
+| `params` | object | 工具调用参数（与 `tool_start` 中的 `params` 相同） |
+| `result_data` | any\|null | 工具返回的业务数据（成功时），失败时为 `null` |
+
+**`result_data` 示例（按工具类型）：**
+
+| 工具 | result_data |
+|------|-------------|
+| `web_search` | XML 字符串（搜索结果） |
+| `web_fetch` | XML 字符串（抓取内容） |
+| `create_artifact` | `{"message": "Created artifact 'plan'"}` |
+| `update_artifact` | `{"message": "...", "version": 2}` |
+| `rewrite_artifact` | `{"message": "...", "version": 3}` |
 
 #### permission_request
 
