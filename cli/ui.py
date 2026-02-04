@@ -132,6 +132,44 @@ class StreamDisplay:
                 border_style="blue",
             )
 
+    @staticmethod
+    def _format_result_data(tool_name: str | None, result_data) -> str:
+        """
+        格式化工具返回数据的摘要（用于 tool_complete 显示）
+
+        Args:
+            tool_name: 工具名称
+            result_data: 工具返回的 data 字段
+
+        Returns:
+            摘要字符串，空字符串表示无需显示
+        """
+        if result_data is None:
+            return ""
+
+        if isinstance(result_data, dict):
+            # Artifact 工具：显示 message 和 version
+            if tool_name in ("create_artifact", "update_artifact", "rewrite_artifact"):
+                msg = result_data.get("message", "")
+                version = result_data.get("version")
+                if version is not None:
+                    return f"{msg} (v{version})"
+                return msg
+
+            # 其他返回 dict 的工具：显示 key 列表
+            keys = list(result_data.keys())
+            if len(keys) <= 3:
+                return ", ".join(f"{k}: {repr(result_data[k])[:30]}" for k in keys)
+            return f"{len(keys)} fields returned"
+
+        if isinstance(result_data, str):
+            # 搜索/抓取工具：返回的是 XML 字符串，显示长度摘要
+            if len(result_data) > 100:
+                return f"{len(result_data)} chars returned"
+            return result_data
+
+        return str(result_data)[:80]
+
     def _render_tool_executing(self) -> Panel:
         """渲染正在执行的工具"""
         # 格式化参数显示
@@ -226,8 +264,9 @@ class StreamDisplay:
             success = event.data.get("success", True)
             duration_ms = event.data.get("duration_ms", 0)
             error = event.data.get("error")
+            result_data = event.data.get("result_data")
 
-            # 构建显示内容：参数 + 耗时/错误
+            # 构建显示内容：参数 + 耗时/错误 + 返回数据摘要
             parts = []
             if self.current_tool_params:
                 params_str = ", ".join(f"{k}={repr(v)[:30]}" for k, v in self.current_tool_params.items())
@@ -239,6 +278,11 @@ class StreamDisplay:
                 parts.append(f"[{duration_ms}ms]")
             else:
                 parts.append(f"Error: {error or 'unknown'}")
+
+            # 展示 result_data 摘要
+            result_summary = self._format_result_data(self.current_tool, result_data)
+            if result_summary:
+                parts.append(f"\n→ {result_summary}")
 
             content = " ".join(parts)
 

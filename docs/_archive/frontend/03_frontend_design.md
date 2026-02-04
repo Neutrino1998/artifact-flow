@@ -1,8 +1,10 @@
 # ArtifactFlow 前端实现方案
 
-> 版本: v1.1 | 依赖: API 层完成
-> 
+> 版本: v1.2 | 依赖: API 层完成
+>
 > **v1.1 变更**：整合架构优化建议，增强状态管理、明确渲染策略、规范 SSE 生命周期
+>
+> **v1.2 变更**：对齐后端 StreamEventType 事件协议，修正 SSE 事件分发、streamStore 更新语义、权限流程、Artifact 更新检测、折叠逻辑
 
 ## 1. 设计目标
 
@@ -291,37 +293,73 @@ interface ArtifactStore {
 
 ### 5.4 streamStore
 
+**[v1.2 更新] 与后端 StreamEventType 对齐**
+
+后端通过 SSE 发送的事件类型（`src/core/events.py` StreamEventType）：
+
+| 层级 | 事件类型 | 说明 |
+|------|----------|------|
+| Controller | `metadata` | 会话元数据（conversation_id, thread_id） |
+| Controller | `complete` | 整体完成（含 execution_metrics，interrupted 标记中断） |
+| Controller | `error` | 错误 |
+| Agent | `agent_start` | agent 开始执行 |
+| Agent | `llm_chunk` | LLM token 流（**累积值，非增量**） |
+| Agent | `llm_complete` | LLM 单次调用完成 |
+| Agent | `agent_complete` | agent 本轮完成 |
+| Graph | `tool_start` | 工具开始执行 |
+| Graph | `tool_complete` | 工具执行完成（含 result.data） |
+| Graph | `permission_request` | 请求权限确认 |
+| Graph | `permission_result` | 权限确认结果 |
+
+**[v1.2 重要] LLM_CHUNK 数据语义**：后端 `llm_chunk` 事件的 `data.content` 和 `data.reasoning_content` 是**累积值**（到当前为止的完整内容），不是增量 delta。前端必须使用 `setContent()` / `setReasoning()` 直接替换，而非 `append`。
+
+**ToolCallInfo 类型定义**：
+```typescript
+// [v1.2 新增] 工具调用信息（匹配 tool_start / tool_complete 事件）
+interface ToolCallInfo {
+  toolName: string;
+  agent: string;
+  status: 'running' | 'success' | 'failed';
+  params?: Record<string, any>;
+  resultData?: any;       // [v1.2] 工具返回的实际数据（来自 tool_complete 事件）
+  error?: string;
+  durationMs?: number;
+}
+```
+
 **状态字段**：
 ```typescript
 interface StreamStore {
   // 当前流式状态
   isStreaming: boolean
   currentThreadId: string | null
-  
-  // 流式内容累积
+
+  // [v1.2 更新] 流式内容（累积值，直接替换）
   streamContent: string
   reasoningContent: string
-  
+
   // Agent 执行状态
   currentAgent: string | null
   toolCalls: ToolCallInfo[]
-  
+
   // 权限请求
   pendingPermission: PermissionRequest | null
-  
+
   // [v1.1 新增] EventSource 实例引用（用于生命周期管理）
   eventSourceRef: EventSource | null
-  
+
   // Actions
   startStream(threadId: string): void
-  appendContent(content: string): void
-  appendReasoning(reasoning: string): void
-  addToolCall(toolCall: ToolCallInfo): void
+  setContent(content: string): void          // [v1.2 更新] 替换（非 append），因后端发送累积值
+  setReasoning(reasoning: string): void      // [v1.2 更新] 替换（非 append），因后端发送累积值
+  setCurrentAgent(agent: string): void       // [v1.2 新增] 从 agent_start 事件设置
+  addToolStart(info: ToolCallInfo): void     // [v1.2 新增] 从 tool_start 事件添加 running 状态
+  updateToolComplete(toolName: string, result: Partial<ToolCallInfo>): void  // [v1.2 新增] 从 tool_complete 更新状态
   requestPermission(request: PermissionRequest): void
   resolvePermission(approved: boolean): Promise<void>
   endStream(): void
   reset(): void
-  
+
   // [v1.1 新增] EventSource 生命周期管理
   setEventSource(es: EventSource | null): void
   destroyEventSource(): void  // 显式销毁
@@ -382,16 +420,25 @@ interface UIStore {
         [v1.1] streamStore.setEventSource(es)
               │
               ▼
-        ┌─────────────────────────────────────┐
-        │         SSE 事件处理循环             │
-        │                                     │
-        │  metadata → 更新 conversation state │
-        │  llm_chunk → streamStore.append*   │
-        │  tool_* → streamStore.addToolCall  │
-        │  permission → streamStore.request  │
-        │  complete → 完成处理               │
-        │  error → 错误处理                  │
-        └─────────────────────────────────────┘
+        ┌──────────────────────────────────────────────────────────────────┐
+        │  [v1.2 更新] SSE 事件处理循环（对齐后端 StreamEventType）       │
+        │                                                              │
+        │  metadata         → 更新 conversation state                 │
+        │  agent_start      → streamStore.setCurrentAgent(agent)       │
+        │  llm_chunk        → streamStore.setContent(data.content)     │
+        │                     streamStore.setReasoning(data.reasoning) │
+        │                     （注意：后端发送的是累积值，直接替换）      │
+        │  llm_complete     → （可忽略，单次 LLM 调用完成标记）          │
+        │  agent_complete   → （agent 本轮完成，可用于 UI 分隔标记）     │
+        │  tool_start       → streamStore.addToolStart({running})      │
+        │  tool_complete    → streamStore.updateToolComplete(result)    │
+        │                     若 artifact 工具 → markPendingUpdate     │
+        │  permission_request → streamStore.requestPermission(data)    │
+        │  complete         → 检查 data.interrupted:                   │
+        │                     true → 中断处理（权限确认）               │
+        │                     false → 正常完成                         │
+        │  error            → 错误处理                                 │
+        └──────────────────────────────────────────────────────────────┘
               │
               ▼
         [v1.1] 收到终止事件后，服务端关闭连接
@@ -428,76 +475,106 @@ interface UIStore {
 
 ### 6.3 权限确认流程
 
-**[v1.1 重要改进] SSE 连接生命周期管理**：
+**[v1.2 更新] SSE 连接生命周期管理（对齐后端事件协议）**：
+
+后端权限中断的事件序列：`permission_request` → `interrupt()` → `complete(interrupted=true)`。
+注意：不存在独立的 `interrupt` 事件类型，中断信息通过 `complete` 事件的 `data.interrupted=true` 传递。
 
 ```
-收到 permission_required 事件
-              │
-              ▼
-        [v1.1] 服务端主动关闭 SSE 连接
+收到 permission_request 事件
               │
               ▼
         streamStore.requestPermission(data)
-        streamStore.destroyEventSource()  // [v1.1] 显式销毁旧实例
+        （此时 SSE 连接仍然存在，等待后续 complete 事件）
+              │
+              ▼
+收到 complete 事件（data.interrupted = true）
+              │
+              ▼
+        [v1.2] 服务端关闭 SSE 连接
+        streamStore.destroyEventSource()  // 显式销毁
               │
               ▼
         显示 PermissionDialog
         （此时无 SSE 连接，避免长时间挂起）
+        （dialog 中展示 data.interrupt_data 中的工具信息）
               │
               ▼
         用户点击 确认/拒绝
               │
               ▼
         POST /api/v1/chat/{id}/resume
+        （body: { thread_id, conversation_id, message_id, approved: bool }）
               │
               ▼
         获取新的 stream_url
               │
               ▼
-        [v1.1] 确保旧 EventSource 已销毁
+        确保旧 EventSource 已销毁
         创建新 EventSource 连接
         streamStore.setEventSource(newEs)
               │
               ▼
-        继续流式处理
+        继续流式处理（新的 SSE 流中会包含 permission_result → tool_start → ...）
 ```
 
-**[v1.1 关键代码示例]**：
+**[v1.2 更新] 关键代码示例**：
 
 ```typescript
 // hooks/useSSE.ts
+// [v1.2] 重写事件分发，对齐后端 StreamEventType
 
 function useSSE(options: SSEOptions) {
   const { setEventSource, destroyEventSource } = useStreamStore();
-  
+
   useEffect(() => {
     if (!options.url) return;
-    
-    // [v1.1] 创建新连接前，确保销毁旧连接
+
+    // 创建新连接前，确保销毁旧连接
     destroyEventSource();
-    
+
     const es = new EventSource(options.url);
     setEventSource(es);
-    
+
     es.onmessage = (event) => {
       const data = JSON.parse(event.data);
-      
-      switch (data.event_type) {
-        case 'complete':
-        case 'interrupt':
-        case 'error':
-          // [v1.1] 终止事件：服务端会关闭连接，前端也显式清理
-          destroyEventSource();
+
+      // [v1.2] 使用 data.type（后端 StreamEventType.value）分发事件
+      switch (data.type) {
+        // === Controller 层 ===
+        case 'metadata':
+          options.onEvent?.(data);
           break;
-        // ... 其他事件处理
+
+        // === Agent 层 ===
+        case 'agent_start':
+        case 'llm_chunk':
+        case 'llm_complete':
+        case 'agent_complete':
+          options.onEvent?.(data);
+          break;
+
+        // === Graph 层 ===
+        case 'tool_start':
+        case 'tool_complete':
+        case 'permission_request':
+        case 'permission_result':
+          options.onEvent?.(data);
+          break;
+
+        // === 终止事件 ===
+        case 'complete':
+        case 'error':
+          options.onEvent?.(data);
+          destroyEventSource();  // 终止事件后关闭连接
+          break;
       }
     };
-    
+
     es.onerror = () => {
       destroyEventSource();
     };
-    
-    // [v1.1] 组件卸载时清理
+
     return () => {
       destroyEventSource();
     };
@@ -508,17 +585,41 @@ function useSSE(options: SSEOptions) {
 
 const useStreamStore = create<StreamStore>((set, get) => ({
   eventSourceRef: null,
-  
+  streamContent: '',
+  reasoningContent: '',
+  currentAgent: null,
+  toolCalls: [],
+
   setEventSource: (es) => set({ eventSourceRef: es }),
-  
+
   destroyEventSource: () => {
     const { eventSourceRef } = get();
     if (eventSourceRef) {
-      eventSourceRef.close();  // [v1.1] 显式关闭
+      eventSourceRef.close();
       set({ eventSourceRef: null });
     }
   },
-  
+
+  // [v1.2] 直接替换（后端发送累积值）
+  setContent: (content) => set({ streamContent: content }),
+  setReasoning: (reasoning) => set({ reasoningContent: reasoning }),
+
+  setCurrentAgent: (agent) => set({ currentAgent: agent }),
+
+  // [v1.2] tool_start → 添加 running 状态
+  addToolStart: (info) => set((state) => ({
+    toolCalls: [...state.toolCalls, info]
+  })),
+
+  // [v1.2] tool_complete → 更新最后一个匹配的 toolCall
+  updateToolComplete: (toolName, result) => set((state) => ({
+    toolCalls: state.toolCalls.map((tc) =>
+      tc.toolName === toolName && tc.status === 'running'
+        ? { ...tc, ...result }
+        : tc
+    )
+  })),
+
   // ... 其他 actions
 }));
 ```
@@ -535,15 +636,51 @@ const useStreamStore = create<StreamStore>((set, get) => ({
 - 工具调用显示为内联指示器（图标 + 名称 + 状态）
 - Agent 切换时显示分隔标记
 
+**[v1.2 新增] 折叠逻辑规范**：
+
+| UI 元素 | 默认状态 | 可否折叠 | 说明 |
+|---------|---------|---------|------|
+| Agent output (content) | 展开 | 不可折叠 | 核心输出，始终可见 |
+| Reasoning/Thinking | 折叠 | 可折叠展开 | 默认折叠，点击展开查看思考过程 |
+| Tool calls (组) | 折叠 | 可折叠展开 | 折叠时显示简要状态，展开查看参数和返回结果 |
+| Agent 切换标记 | 折叠 | 可折叠展开 | 只显示 agent 名称标签，展开查看详情 |
+| Permission dialog | 展开 | 不可折叠 | 需要用户操作，始终可见 |
+
+**[v1.2 新增] Thinking vs Output 实时区分**：
+
+后端 `llm_chunk` 事件中 `data.content` 和 `data.reasoning_content` 是两个独立的累积字段。前端通过对比前后状态来确定当前增量属于哪个区域：
+
+```typescript
+// 在 onEvent 处理 llm_chunk 时
+const prevContent = streamStore.streamContent;
+const prevReasoning = streamStore.reasoningContent;
+const newContent = data.data?.content || '';
+const newReasoning = data.data?.reasoning_content || '';
+
+// 判断哪个字段发生了变化
+if (newReasoning !== prevReasoning) {
+  // reasoning 增长 → 当前正在 thinking
+  // UI: 更新 ReasoningBlock（如果已折叠，可显示 "thinking..." 指示器）
+}
+if (newContent !== prevContent) {
+  // content 增长 → 当前正在 output
+  // UI: 更新 StreamingContent（打字机效果）
+}
+
+// 替换累积值（非 append）
+streamStore.setContent(newContent);
+streamStore.setReasoning(newReasoning);
+```
+
 **渲染策略**：
 ```
 if (isStreaming) {
   // 实时渲染模式
   显示 StreamingMessage 组件
-  - 显示 Agent 名称
-  - 显示思考过程（可折叠）
-  - 显示工具调用状态
-  - 显示实时输出（打字机效果）
+  - 显示 Agent 名称（来自 agent_start 事件）
+  - 显示思考过程（可折叠，来自 llm_chunk.reasoning_content）
+  - 显示工具调用状态（来自 tool_start / tool_complete 事件）
+  - 显示实时输出（打字机效果，来自 llm_chunk.content）
 } else {
   // 历史模式
   显示 AssistantMessage 组件
@@ -612,29 +749,50 @@ function MessageItem({ message }: { message: Message }) {
 
 ### 7.4 Artifact 更新策略
 
-**[v1.1 更新] 分阶段渲染策略**：
+**[v1.2 更新] 分阶段渲染策略**：
 
 | 阶段 | 触发时机 | 行为 | 说明 |
 |------|----------|------|------|
-| **Phase 1 (MVP)** | 监听 `tool_result` 事件 | 工具执行完成后，标记 artifact 有更新；流式结束后统一刷新 | 简单可靠，避免频繁请求 |
+| **Phase 1 (MVP)** | 监听 `tool_complete` 事件 | 工具执行完成后，标记 artifact 有更新；流式结束后统一刷新 | 简单可靠，避免频繁请求 |
+| **Phase 1+ (增强)** | `tool_complete` 事件后 | 允许用户点击 tab 主动触发单个 artifact 刷新 | 不必等全部完成 |
 | **Phase 2 (进阶)** | 监听流中的内容块 | 实时更新 Artifact 内容，实现打字机效果 | 需要后端支持增量推送 |
 
 **Phase 1 实现（当前目标）**：
+
+> [v1.2 修正] 后端事件类型为 `tool_complete`（非 `tool_result`）。
+> `tool_complete` 事件的 data 结构为：
+> ```json
+> {
+>   "type": "tool_complete",
+>   "agent": "lead_agent",
+>   "tool": "create_artifact",
+>   "timestamp": "...",
+>   "data": {
+>     "success": true,
+>     "duration_ms": 123,
+>     "error": null,
+>     "params": { "id": "my_artifact", "title": "..." },
+>     "result_data": { "message": "Created artifact 'my_artifact'" }
+>   }
+> }
+> ```
+> 注意：`params` 包含工具调用参数（`params.id` 即 artifact_id），`result_data` 包含工具返回的业务数据。
+
 ```typescript
 // SSE 事件处理
 function handleStreamEvent(event: StreamEvent) {
-  if (event.type === 'tool_result') {
-    const { tool_name, result } = event.data;
-    
-    // 检查是否是 Artifact 操作工具
-    if (['create_artifact', 'update_artifact', 'rewrite_artifact'].includes(tool_name)) {
-      if (result.success) {
-        // 标记该 artifact 有更新（Tab 显示小圆点）
-        artifactStore.markPendingUpdate(result.data.artifact_id);
-      }
+  if (event.type === 'tool_complete') {
+    const toolName = event.tool;
+    const { success, params, result_data } = event.data;
+
+    // 检查是否是 Artifact 操作工具（通过 params.id 获取 artifact_id）
+    const ARTIFACT_TOOLS = ['create_artifact', 'update_artifact', 'rewrite_artifact'];
+    if (ARTIFACT_TOOLS.includes(toolName) && success && params?.id) {
+      // 标记该 artifact 有更新（Tab 显示小圆点）
+      artifactStore.markPendingUpdate(params.id);
     }
   }
-  
+
   if (event.type === 'complete') {
     // 流式结束后，刷新有更新的 artifacts
     if (artifactStore.pendingUpdates.size > 0) {
@@ -760,34 +918,41 @@ frontend/
 
 ### 9.1 useSSE
 
-**[v1.1 增强] 职责**：
+**[v1.2 重写] 职责**：
 - 管理 EventSource 连接
-- 解析 SSE 事件
+- 解析 SSE 事件（**对齐后端 11 种 StreamEventType**）
 - **显式管理连接生命周期**
-- 处理重连逻辑
+- 统一的事件回调接口
 
 **接口**：
 ```typescript
+// [v1.2] SSE 事件（对应后端 StreamEventType）
+interface SSEEvent {
+  type: 'metadata' | 'agent_start' | 'llm_chunk' | 'llm_complete' | 'agent_complete'
+        | 'tool_start' | 'tool_complete' | 'permission_request' | 'permission_result'
+        | 'complete' | 'error';
+  agent?: string;
+  tool?: string;
+  timestamp: string;
+  data?: any;
+}
+
 function useSSE(options: {
   url: string | null
-  onMetadata?: (data: any) => void
-  onStream?: (data: any) => void
-  onComplete?: (data: any) => void
-  onInterrupt?: (data: any) => void  // [v1.1 新增]
-  onError?: (error: any) => void
+  onEvent: (event: SSEEvent) => void  // [v1.2] 统一事件回调，替代分散的 onMetadata/onStream/...
+  onConnectionError?: (error: Event) => void
 }): {
   isConnected: boolean
-  error: Error | null
-  disconnect: () => void  // [v1.1] 显式断开方法
+  disconnect: () => void
 }
 ```
 
-**[v1.1] 实现要点**：
+**[v1.2] 实现要点**：
 ```typescript
 function useSSE(options: SSEOptions) {
   const [isConnected, setIsConnected] = useState(false);
   const eventSourceRef = useRef<EventSource | null>(null);
-  
+
   const disconnect = useCallback(() => {
     if (eventSourceRef.current) {
       eventSourceRef.current.close();
@@ -795,57 +960,130 @@ function useSSE(options: SSEOptions) {
       setIsConnected(false);
     }
   }, []);
-  
+
   useEffect(() => {
     if (!options.url) {
-      disconnect();  // URL 变为 null 时断开
+      disconnect();
       return;
     }
-    
-    // [v1.1] 创建新连接前先断开旧连接
-    disconnect();
-    
+
+    disconnect();  // 创建新连接前先断开旧连接
+
     const es = new EventSource(options.url);
     eventSourceRef.current = es;
-    
+
     es.onopen = () => setIsConnected(true);
-    
+
     es.onmessage = (event) => {
-      const data = JSON.parse(event.data);
-      
-      // 分发事件
-      switch (data.event_type) {
-        case 'metadata':
-          options.onMetadata?.(data.data);
-          break;
-        case 'stream':
-          options.onStream?.(data.data);
-          break;
-        case 'complete':
-          options.onComplete?.(data.data);
-          disconnect();  // [v1.1] 完成后断开
-          break;
-        case 'interrupt':
-          options.onInterrupt?.(data.data);
-          disconnect();  // [v1.1] 中断后断开
-          break;
-        case 'error':
-          options.onError?.(data.data);
-          disconnect();  // [v1.1] 错误后断开
-          break;
+      const data: SSEEvent = JSON.parse(event.data);
+
+      // [v1.2] 使用 data.type 分发（后端 StreamEventType.value）
+      // 所有事件统一回调，由调用方在 onEvent 中处理各种类型
+      options.onEvent(data);
+
+      // 终止事件后关闭连接
+      if (data.type === 'complete' || data.type === 'error') {
+        disconnect();
       }
     };
-    
+
     es.onerror = (error) => {
-      options.onError?.(error);
+      options.onConnectionError?.(error);
       disconnect();
     };
-    
-    return () => disconnect();  // [v1.1] 组件卸载时清理
+
+    return () => disconnect();
   }, [options.url]);
-  
-  return { isConnected, error: null, disconnect };
+
+  return { isConnected, disconnect };
 }
+```
+
+**[v1.2] 调用方事件处理示例**：
+```typescript
+// 在 ChatPanel 或 useConversation 中使用
+useSSE({
+  url: streamUrl,
+  onEvent: (event) => {
+    switch (event.type) {
+      // === Agent 生命周期 ===
+      case 'agent_start':
+        streamStore.setCurrentAgent(event.agent!);
+        break;
+
+      case 'llm_chunk':
+        // 注意：data.content 和 data.reasoning_content 是累积值
+        streamStore.setContent(event.data?.content || '');
+        streamStore.setReasoning(event.data?.reasoning_content || '');
+        break;
+
+      case 'llm_complete':
+        // 单次 LLM 调用完成，可选：更新 token 统计
+        break;
+
+      case 'agent_complete':
+        // agent 本轮完成，可用于 UI 分隔标记
+        break;
+
+      // === 工具调用 ===
+      case 'tool_start':
+        streamStore.addToolStart({
+          toolName: event.tool!,
+          agent: event.agent!,
+          status: 'running',
+          params: event.data?.params,
+        });
+        break;
+
+      case 'tool_complete':
+        streamStore.updateToolComplete(event.tool!, {
+          status: event.data?.success ? 'success' : 'failed',
+          error: event.data?.error,
+          durationMs: event.data?.duration_ms,
+          resultData: event.data?.result_data,
+        });
+        // 检查是否是 Artifact 操作（通过 params.id 获取 artifact_id）
+        const ARTIFACT_TOOLS = ['create_artifact', 'update_artifact', 'rewrite_artifact'];
+        if (ARTIFACT_TOOLS.includes(event.tool!) && event.data?.success && event.data?.params?.id) {
+          artifactStore.markPendingUpdate(event.data.params.id);
+        }
+        break;
+
+      // === 权限 ===
+      case 'permission_request':
+        streamStore.requestPermission(event.data);
+        break;
+
+      case 'permission_result':
+        // 恢复后收到，可用于 UI 更新
+        break;
+
+      // === 会话 ===
+      case 'metadata':
+        conversationStore.updateMetadata(event.data);
+        break;
+
+      case 'complete':
+        if (event.data?.interrupted) {
+          // 中断：显示 PermissionDialog（连接已在 useSSE 中关闭）
+        } else {
+          // 正常完成
+          streamStore.endStream();
+          conversationStore.updateMessage(event.data);
+          if (artifactStore.pendingUpdates.size > 0) {
+            artifactStore.fetchArtifacts(sessionId);
+            artifactStore.clearPendingUpdates();
+          }
+        }
+        break;
+
+      case 'error':
+        streamStore.endStream();
+        // 显示错误提示
+        break;
+    }
+  },
+});
 ```
 
 ### 9.2 useConversation
@@ -1100,7 +1338,7 @@ NEXT_PUBLIC_API_URL=http://localhost:8000
 
 ---
 
-## 附录：v1.0 → v1.1 变更摘要
+## 附录 A：v1.0 → v1.1 变更摘要
 
 | Section | 变更内容 | 类型 |
 |---------|----------|------|
@@ -1116,3 +1354,25 @@ NEXT_PUBLIC_API_URL=http://localhost:8000
 | 9.1 useSSE | 增强接口，新增 `onInterrupt` 和 `disconnect` | 更新 |
 | 9.1 useSSE | 添加完整实现示例 | 新增 |
 | 10. 实施步骤 | 各阶段加入 v1.1 相关任务 | 更新 |
+
+## 附录 B：v1.1 → v1.2 变更摘要
+
+> **核心改动**：对齐后端 `StreamEventType` 事件协议，修正前端设计文档中所有与后端实现不一致的地方。
+
+| Section | 变更内容 | 类型 | 优先级 |
+|---------|----------|------|--------|
+| 5.4 streamStore | 新增后端 StreamEventType 事件对照表 | 新增 | P0 |
+| 5.4 streamStore | 说明 `llm_chunk` 是累积值非 delta | 新增 | P0 |
+| 5.4 streamStore | `appendContent/appendReasoning` → `setContent/setReasoning` | 修正 | P0 |
+| 5.4 streamStore | 新增 `ToolCallInfo` 类型定义 | 新增 | P1 |
+| 5.4 streamStore | 新增 `setCurrentAgent/addToolStart/updateToolComplete` actions | 新增 | P1 |
+| 6.1 发送消息流程 | SSE 事件处理循环对齐全部 11 种后端事件类型 | 修正 | P0 |
+| 6.3 权限确认流程 | 修正事件序列：`permission_request` → `complete(interrupted=true)` | 修正 | P1 |
+| 6.3 代码示例 | 重写 useSSE 使用 `data.type` 分发，重写 streamStore actions | 修正 | P0 |
+| 7.1 流式消息渲染 | 新增折叠逻辑规范表 | 新增 | P2 |
+| 7.1 流式消息渲染 | 新增 Thinking vs Output 实时区分机制 | 新增 | P2 |
+| 7.4 Artifact 更新策略 | `tool_result` → `tool_complete`，修正事件 data 结构 | 修正 | P0 |
+| 7.4 Artifact 更新策略 | 使用 `event.tool` 和 `event.data.result_data` 匹配实际后端 | 修正 | P0 |
+| 9.1 useSSE | 重写接口：`onMetadata/onStream/...` → 统一 `onEvent(SSEEvent)` | 修正 | P0 |
+| 9.1 useSSE | `data.event_type` → `data.type`（匹配后端字段名） | 修正 | P0 |
+| 9.1 useSSE | 新增调用方事件处理完整示例 | 新增 | P1 |

@@ -193,17 +193,20 @@ class ExtendableGraph:
             tool_end_time = datetime.now()
             tool_duration_ms = int((tool_end_time - tool_start_time).total_seconds() * 1000)
 
-            # 发送 TOOL_COMPLETE 事件
+            # 发送 TOOL_COMPLETE 事件（含 params 和 result_data 供前端追踪）
+            tool_complete_data = {
+                "success": tool_result.success,
+                "duration_ms": tool_duration_ms,
+                "error": tool_result.error if not tool_result.success else None,
+                "params": params,
+                "result_data": tool_result.data if tool_result.success else None,
+            }
             writer({
                 "type": StreamEventType.TOOL_COMPLETE.value,
                 "agent": from_agent,
                 "tool": tool_name,
                 "timestamp": tool_end_time.isoformat(),
-                "data": {
-                    "success": tool_result.success,
-                    "duration_ms": tool_duration_ms,
-                    "error": tool_result.error if not tool_result.success else None
-                }
+                "data": tool_complete_data
             })
 
             # 更新 execution_metrics
