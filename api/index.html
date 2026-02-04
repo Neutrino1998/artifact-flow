@@ -2062,8 +2062,7 @@
 <a id="__codelineno-20-11" name="__codelineno-20-11" href="#__codelineno-20-11"></a><span class="p">}</span>
 </code></pre></div>
 <h4 id="tool_complete">tool_complete</h4>
-<p>工具执行完成。</p>
-<p><strong>注意：</strong> 出于性能考虑，工具返回的实际数据不包含在此事件中（避免大量数据通过 SSE 传输）。工具结果会直接注入到 Agent 上下文，由 Agent 处理后在响应中体现。</p>
+<p>工具执行完成。包含工具调用参数和返回数据，前端可用于追踪工具执行详情（如 Artifact 操作的 <code>params.id</code>）。</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a><span class="p">{</span>
 <a id="__codelineno-21-2" name="__codelineno-21-2" href="#__codelineno-21-2"></a><span class="w">  </span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;tool_complete&quot;</span><span class="p">,</span>
 <a id="__codelineno-21-3" name="__codelineno-21-3" href="#__codelineno-21-3"></a><span class="w">  </span><span class="nt">&quot;timestamp&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;2024-01-15T10:30:00.000Z&quot;</span><span class="p">,</span>
@@ -2072,9 +2071,13 @@
 <a id="__codelineno-21-6" name="__codelineno-21-6" href="#__codelineno-21-6"></a><span class="w">  </span><span class="nt">&quot;data&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
 <a id="__codelineno-21-7" name="__codelineno-21-7" href="#__codelineno-21-7"></a><span class="w">    </span><span class="nt">&quot;success&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
 <a id="__codelineno-21-8" name="__codelineno-21-8" href="#__codelineno-21-8"></a><span class="w">    </span><span class="nt">&quot;duration_ms&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">1234</span><span class="p">,</span>
-<a id="__codelineno-21-9" name="__codelineno-21-9" href="#__codelineno-21-9"></a><span class="w">    </span><span class="nt">&quot;error&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span>
-<a id="__codelineno-21-10" name="__codelineno-21-10" href="#__codelineno-21-10"></a><span class="w">  </span><span class="p">}</span>
-<a id="__codelineno-21-11" name="__codelineno-21-11" href="#__codelineno-21-11"></a><span class="p">}</span>
+<a id="__codelineno-21-9" name="__codelineno-21-9" href="#__codelineno-21-9"></a><span class="w">    </span><span class="nt">&quot;error&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span><span class="p">,</span>
+<a id="__codelineno-21-10" name="__codelineno-21-10" href="#__codelineno-21-10"></a><span class="w">    </span><span class="nt">&quot;params&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-21-11" name="__codelineno-21-11" href="#__codelineno-21-11"></a><span class="w">      </span><span class="nt">&quot;query&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Python async programming&quot;</span>
+<a id="__codelineno-21-12" name="__codelineno-21-12" href="#__codelineno-21-12"></a><span class="w">    </span><span class="p">},</span>
+<a id="__codelineno-21-13" name="__codelineno-21-13" href="#__codelineno-21-13"></a><span class="w">    </span><span class="nt">&quot;result_data&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;&lt;search_results&gt;...&lt;/search_results&gt;&quot;</span>
+<a id="__codelineno-21-14" name="__codelineno-21-14" href="#__codelineno-21-14"></a><span class="w">  </span><span class="p">}</span>
+<a id="__codelineno-21-15" name="__codelineno-21-15" href="#__codelineno-21-15"></a><span class="p">}</span>
 </code></pre></div>
 <table>
 <thead>
@@ -2099,6 +2102,47 @@
 <td><code>error</code></td>
 <td>string|null</td>
 <td>错误信息（失败时）</td>
+</tr>
+<tr>
+<td><code>params</code></td>
+<td>object</td>
+<td>工具调用参数（与 <code>tool_start</code> 中的 <code>params</code> 相同）</td>
+</tr>
+<tr>
+<td><code>result_data</code></td>
+<td>any|null</td>
+<td>工具返回的业务数据（成功时），失败时为 <code>null</code></td>
+</tr>
+</tbody>
+</table>
+<p><strong><code>result_data</code> 示例（按工具类型）：</strong></p>
+<table>
+<thead>
+<tr>
+<th>工具</th>
+<th>result_data</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>web_search</code></td>
+<td>XML 字符串（搜索结果）</td>
+</tr>
+<tr>
+<td><code>web_fetch</code></td>
+<td>XML 字符串（抓取内容）</td>
+</tr>
+<tr>
+<td><code>create_artifact</code></td>
+<td><code>{"message": "Created artifact 'plan'"}</code></td>
+</tr>
+<tr>
+<td><code>update_artifact</code></td>
+<td><code>{"message": "...", "version": 2}</code></td>
+</tr>
+<tr>
+<td><code>rewrite_artifact</code></td>
+<td><code>{"message": "...", "version": 3}</code></td>
 </tr>
 </tbody>
 </table>
