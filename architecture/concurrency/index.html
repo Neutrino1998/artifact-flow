@@ -1570,6 +1570,9 @@
 - <strong>StreamManager</strong>: 全局单例，使用 <code>asyncio.Lock</code> 保护 stream 创建/关闭操作
 - <strong>AsyncSession</strong>: 请求独立，每个请求（或 background task）创建新的数据库会话</p>
 <h3 id="post-chat">POST /chat 执行流程</h3>
+<blockquote>
+<p>此图侧重并发与生命周期视角，完整的端到端流程见 <a href="../../request-lifecycle/#整体流程">Request Lifecycle — 整体流程</a>。</p>
+</blockquote>
 <pre class="mermaid"><code>sequenceDiagram
     participant Client as Frontend
     participant POST as POST /chat

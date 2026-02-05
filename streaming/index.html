@@ -1604,33 +1604,9 @@
 <a id="__codelineno-0-69" name="__codelineno-0-69" href="#__codelineno-0-69"></a>            <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">_close_stream_internal</span><span class="p">(</span><span class="n">thread_id</span><span class="p">)</span>
 </code></pre></div>
 <h3 id="_8">时序图</h3>
-<pre class="mermaid"><code>sequenceDiagram
-    participant Client
-    participant POST /chat
-    participant StreamManager
-    participant Graph
-    participant GET /stream
-
-    Client-&gt;&gt;POST /chat: 发送消息
-    POST /chat-&gt;&gt;StreamManager: create_stream(thread_id)
-    Note over StreamManager: TTL 计时器启动 (30s)
-    POST /chat-&gt;&gt;Client: 返回 {thread_id, ...}
-
-    POST /chat-&gt;&gt;Graph: 后台执行
-    Graph-&gt;&gt;StreamManager: push_event(agent_start)
-    Graph-&gt;&gt;StreamManager: push_event(llm_chunk)
-
-    Client-&gt;&gt;GET /stream: 连接 SSE
-    GET /stream-&gt;&gt;StreamManager: consume_events(thread_id)
-    Note over StreamManager: 取消 TTL 计时器
-
-    StreamManager-&gt;&gt;GET /stream: yield agent_start
-    StreamManager-&gt;&gt;GET /stream: yield llm_chunk
-
-    Graph-&gt;&gt;StreamManager: push_event(complete)
-    StreamManager-&gt;&gt;GET /stream: yield complete
-    GET /stream-&gt;&gt;Client: SSE: complete
-    Note over StreamManager: 清理队列</code></pre>
+<blockquote>
+<p>完整的事件缓冲时序图见 <a href="../request-lifecycle/#phase-4-事件流与-sse">Request Lifecycle — 事件缓冲</a>。</p>
+</blockquote>
 <h2 id="sse">SSE 端点</h2>
 <h3 id="_9">实现</h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="c1"># src/api/routers/stream.py</span>
