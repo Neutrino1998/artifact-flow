@@ -55,6 +55,7 @@ nav:
       - Agents: architecture/agents.md
       - Tools: architecture/tools.md
       - Data Layer: architecture/data-layer.md
+      - Concurrency: architecture/concurrency.md
   - Streaming: streaming.md
   - Extension Guide: extension-guide.md
   - API Reference: api.md
