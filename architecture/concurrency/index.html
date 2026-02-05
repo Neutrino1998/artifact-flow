@@ -1,0 +1,1503 @@
+
+<!doctype html>
+<html lang="zh" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Multi-Agent Research System Built on LangGraph">
+      
+      
+      
+        <link rel="canonical" href="https://neutrino.github.io/artifact-flow/architecture/concurrency/">
+      
+      
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.1">
+    
+    
+      
+        <title>Concurrency Architecture - ArtifactFlow</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#concurrency-architecture" class="md-skip">
+          跳转至
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="页眉">
+    <a href="../.." title="ArtifactFlow" class="md-header__button md-logo" aria-label="ArtifactFlow" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            ArtifactFlow
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Concurrency Architecture
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="搜索" placeholder="搜索" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="查找">
+        
+        <button type="reset" class="md-search__icon md-icon" title="清空当前内容" aria-label="清空当前内容" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            正在初始化搜索引擎
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/Neutrino1998/artifact-flow" title="前往仓库" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    Neutrino1998/artifact-flow
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="标签" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../request-lifecycle/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Request Lifecycle
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../core/" class="md-tabs__link">
+          
+  
+  
+  Architecture
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../streaming/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Streaming
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../extension-guide/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Extension Guide
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../api/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  API Reference
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../faq/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  FAQ
+
+      </a>
+    </li>
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="导航栏" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="ArtifactFlow" class="md-nav__button md-logo" aria-label="ArtifactFlow" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    ArtifactFlow
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/Neutrino1998/artifact-flow" title="前往仓库" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    Neutrino1998/artifact-flow
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../request-lifecycle/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Request Lifecycle
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Architecture
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../core/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Core
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../agents/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Agents
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tools/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tools
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../data-layer/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data Layer
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../streaming/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Streaming
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../extension-guide/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Extension Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../faq/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    FAQ
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="目录">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      目录
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        当前设计
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="当前设计">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        资源分层模型
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        依赖注入链路
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#post-chat" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        POST /chat 执行流程
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        数据库并发配置
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        已知局限
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="已知局限">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#p0" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        P0: 严重 — 多用户并发时会出问题
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="P0: 严重 — 多用户并发时会出问题">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-checkpointer" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Checkpointer 单连接瓶颈
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-background-task" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Background Task 无生命周期管理
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3-sqlite" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. SQLite 主数据库写并发限制
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#p1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        P1: 重要 — 会导致资源泄漏
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="P1: 重要 — 会导致资源泄漏">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#4-streammanager" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. StreamManager 内存泄漏
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#5-graph" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Graph 重复编译
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#p2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        P2: 可接受 — 生产环境应解决
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="P2: 可接受 — 生产环境应解决">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. 没有请求级超时
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. 错误信息泄露
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#8-sse-heartbeat" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8. SSE 无 Heartbeat
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#9" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9. 无认证鉴权
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        演进路线
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="演进路线">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#phase-0" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phase 0: 应用层加固（当前单进程部署即可受益）
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Phase 0: 应用层加固（当前单进程部署即可受益）">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#task-manager-background-task" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Task Manager — 管理 background task 生命周期
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        其他加固项
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#phase-1-redis-worker" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phase 1: Redis 引入 — 支持多 Worker 部署
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#phase-2-checkpointer-ttl" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phase 2: Checkpointer 迁移 + TTL 管理
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#phase-25" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phase 2.5: 主数据库迁移（按需）
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#phase-3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phase 3: 生产化完善
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_8" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        参考
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="concurrency-architecture">Concurrency Architecture</h1>
+<p>本文档描述 ArtifactFlow 的并发模型：当前设计、已知局限、以及面向生产环境的演进路线。</p>
+<h2 id="_1">当前设计</h2>
+<h3 id="_2">资源分层模型</h3>
+<pre class="mermaid"><code>graph TB
+    subgraph Global["全局单例（跨请求共享，应用启动时初始化）"]
+        DM["DatabaseManager&lt;br/&gt;&lt;i&gt;SQLAlchemy async engine + 连接池&lt;/i&gt;"]
+        CP["Checkpointer&lt;br/&gt;&lt;i&gt;AsyncSqliteSaver（单 aiosqlite 连接）&lt;/i&gt;"]
+        SM["StreamManager&lt;br/&gt;&lt;i&gt;事件缓冲队列 + TTL 清理&lt;/i&gt;"]
+    end
+
+    subgraph PerReq["请求级实例（请求结束后释放）"]
+        Session["AsyncSession"]
+        Repo["Repository"]
+        Mgr["Manager"]
+        Ctrl["Controller"]
+        Session --&gt; Repo --&gt; Mgr --&gt; Ctrl
+    end
+
+    Global -- "每个请求创建" --&gt; PerReq
+
+    note["POST /chat 的 background task&lt;br/&gt;会创建自己的请求级实例，&lt;br/&gt;独立于 HTTP 请求的依赖生命周期"]</code></pre>
+<h3 id="_3">依赖注入链路</h3>
+<pre class="mermaid"><code>graph TD
+    Req["HTTP Request"] --&gt; GDS["get_db_session()&lt;br/&gt;&lt;i&gt;从 DatabaseManager 连接池获取 AsyncSession&lt;/i&gt;"]
+    GDS --&gt; AR["ArtifactRepository → ArtifactManager"]
+    GDS --&gt; CR["ConversationRepository → ConversationManager"]
+    GDS --&gt; Graph["create_multi_agent_graph() + Controller"]
+    Graph -. "共享单例" .-&gt; CP["Checkpointer&lt;br/&gt;&lt;i&gt;支持跨请求 interrupt/resume&lt;/i&gt;"]</code></pre>
+<p>并发安全保证：
+- <strong>DatabaseManager</strong>: 全局单例，内部维护 SQLAlchemy 连接池，天然支持并发
+- <strong>Checkpointer</strong>: 全局单例，所有 graph 执行共享同一个 checkpoint 存储
+- <strong>StreamManager</strong>: 全局单例，使用 <code>asyncio.Lock</code> 保护 stream 创建/关闭操作
+- <strong>AsyncSession</strong>: 请求独立，每个请求（或 background task）创建新的数据库会话</p>
+<h3 id="post-chat">POST /chat 执行流程</h3>
+<pre class="mermaid"><code>sequenceDiagram
+    participant Client as Frontend
+    participant POST as POST /chat
+    participant SM as StreamManager
+    participant BG as Background Task
+    participant SSE as GET /stream/{thread_id}
+
+    Client-&gt;&gt;POST: 发送消息
+    POST-&gt;&gt;POST: 1. ensure_conversation_exists()
+    POST-&gt;&gt;SM: 2. create_stream(thread_id)
+    POST-&gt;&gt;BG: 3. asyncio.create_task(execute_and_push())
+    POST--&gt;&gt;Client: 4. 返回 { stream_url }
+
+    Note over BG: 创建独立的&lt;br/&gt;db session / manager / controller
+
+    Client-&gt;&gt;SSE: 订阅 SSE
+
+    loop Graph 执行
+        BG-&gt;&gt;SM: push_event(event)
+        SM-&gt;&gt;SSE: consume_events()
+        SSE--&gt;&gt;Client: data: {event}
+    end
+
+    BG-&gt;&gt;SM: push_event({ type: "complete" })
+    SM-&gt;&gt;SSE: 终结事件
+    SSE--&gt;&gt;Client: data: {complete}
+    SSE-&gt;&gt;SM: close_stream()</code></pre>
+<p>关键设计决策：
+- Background task 创建<strong>独立的</strong>依赖实例，不复用 HTTP 请求的 session（避免请求结束后 session 失效）
+- StreamManager 作为中间缓冲层，解耦 POST（生产事件）和 GET（消费事件）的时序
+- TTL 机制防止前端不连接时队列无限增长</p>
+<h3 id="_4">数据库并发配置</h3>
+<p>当前使用 SQLite + WAL 模式：</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="n">PRAGMA</span> <span class="n">journal_mode</span><span class="o">=</span><span class="n">WAL</span>       <span class="c1"># 读写可并发</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="n">PRAGMA</span> <span class="n">synchronous</span><span class="o">=</span><span class="n">NORMAL</span>     <span class="c1"># 平衡性能和安全</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="n">PRAGMA</span> <span class="n">busy_timeout</span><span class="o">=</span><span class="mi">5000</span>      <span class="c1"># 写锁等待 5 秒</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="n">PRAGMA</span> <span class="n">foreign_keys</span><span class="o">=</span><span class="n">ON</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="n">PRAGMA</span> <span class="n">cache_size</span><span class="o">=-</span><span class="mi">64000</span>      <span class="c1"># 64MB 缓存</span>
+</code></pre></div>
+<p>WAL 模式允许多个读操作并发执行，但<strong>写操作仍然是串行的</strong>（单写者模型）。</p>
+<hr />
+<h2 id="_5">已知局限</h2>
+<h3 id="p0">P0: 严重 — 多用户并发时会出问题</h3>
+<h4 id="1-checkpointer">1. Checkpointer 单连接瓶颈</h4>
+<p><code>AsyncSqliteSaver</code> 使用单个 <code>aiosqlite.connect()</code> 连接，作为全局单例被所有并发请求共享：</p>
+<blockquote>
+<p><code>core/graph.py:701</code> — 单连接创建
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="n">conn</span> <span class="o">=</span> <span class="k">await</span> <span class="n">aiosqlite</span><span class="o">.</span><span class="n">connect</span><span class="p">(</span><span class="n">db_path</span><span class="p">)</span>
+</code></pre></div></p>
+<p><code>api/dependencies.py:74</code> — 作为全局单例初始化
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="n">_checkpointer</span> <span class="o">=</span> <span class="k">await</span> <span class="n">create_async_sqlite_checkpointer</span><span class="p">(</span><span class="n">config</span><span class="o">.</span><span class="n">LANGGRAPH_DB_PATH</span><span class="p">)</span>
+</code></pre></div></p>
+</blockquote>
+<ul>
+<li><code>aiosqlite</code> 内部只有一个后台线程 + 队列，所有操作串行执行</li>
+<li>LangGraph 每个 node 执行完都要写 checkpoint</li>
+<li>N 个并发用户 = N 个 graph 同时跑 = 所有 checkpoint 读写排队</li>
+<li>并发量上去后会成为全局延迟瓶颈</li>
+</ul>
+<h4 id="2-background-task">2. Background Task 无生命周期管理</h4>
+<blockquote>
+<p><code>api/routers/chat.py:193</code> — send_message 中 fire-and-forget
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="n">asyncio</span><span class="o">.</span><span class="n">create_task</span><span class="p">(</span><span class="n">execute_and_push</span><span class="p">())</span>
+</code></pre></div></p>
+<p><code>api/routers/chat.py:401</code> — resume_execution 中同样的问题
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="n">asyncio</span><span class="o">.</span><span class="n">create_task</span><span class="p">(</span><span class="n">execute_resume</span><span class="p">())</span>
+</code></pre></div></p>
+</blockquote>
+<ul>
+<li>任务没有被持有引用，可能被 GC 回收（<a href="https://docs.python.org/3/library/asyncio-task.html#creating-tasks">Python 文档明确警告</a>）</li>
+<li>没有并发数量限制 — N 个用户同时发消息 = N 个并发 LLM 调用</li>
+<li>服务器 shutdown 时运行中任务被直接 cancel，数据库可能处于不一致状态</li>
+</ul>
+<h4 id="3-sqlite">3. SQLite 主数据库写并发限制</h4>
+<p>Background task 中的 session 生命周期覆盖整个 graph 执行期间（可能持续数分钟），期间的写操作会触发 SQLite 写锁竞争：</p>
+<blockquote>
+<p><code>api/routers/chat.py:152</code> — session 从 graph 开始持有到结束
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="k">async</span> <span class="k">with</span> <span class="n">db_manager</span><span class="o">.</span><span class="n">session</span><span class="p">()</span> <span class="k">as</span> <span class="n">session</span><span class="p">:</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>    <span class="c1"># ... 创建 controller，执行整个 graph（可能几分钟）...</span>
+</code></pre></div></p>
+<p><code>db/database.py:155</code> — busy_timeout 只能缓解，不能根治
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="k">await</span> <span class="n">conn</span><span class="o">.</span><span class="n">execute</span><span class="p">(</span><span class="n">text</span><span class="p">(</span><span class="s2">&quot;PRAGMA busy_timeout=5000&quot;</span><span class="p">))</span>
+</code></pre></div></p>
+</blockquote>
+<p>即使配了 <code>busy_timeout=5000</code>：
+- 多个并发写操作排队等锁，最多等 5 秒
+- 超过 5 秒抛出 <code>database is locked</code> 错误
+- 长事务加剧锁持有时间</p>
+<h3 id="p1">P1: 重要 — 会导致资源泄漏</h3>
+<h4 id="4-streammanager">4. StreamManager 内存泄漏</h4>
+<p>关闭的 stream 不会从 <code>streams</code> 字典中移除，<code>_closed_streams</code> set 也只增不减：</p>
+<blockquote>
+<p><code>api/services/stream_manager.py:110</code> — streams dict 只增不减
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="bp">self</span><span class="o">.</span><span class="n">streams</span><span class="p">:</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">StreamContext</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
+</code></pre></div></p>
+<p><code>api/services/stream_manager.py:114</code> — closed 记录集合只增不减
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="bp">self</span><span class="o">.</span><span class="n">_closed_streams</span><span class="p">:</span> <span class="nb">set</span> <span class="o">=</span> <span class="nb">set</span><span class="p">()</span>
+</code></pre></div></p>
+<p><code>api/services/stream_manager.py:265</code> — 注释说"延迟清理"但没有实际清理逻辑
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="c1"># 注意：不立即从字典中移除，保留引用以便 push_event 能检测到 closed 状态</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="c1"># 延迟清理会在下一次 create_stream 或 TTL 时处理</span>
+</code></pre></div></p>
+</blockquote>
+<p>长时间运行后内存会持续增长。</p>
+<h4 id="5-graph">5. Graph 重复编译</h4>
+<p>每个请求都会执行：创建 3 个 Agent → 创建所有 Tool → 注册到 Registry → 编译 StateGraph：</p>
+<blockquote>
+<p><code>api/dependencies.py:212</code> — 每个请求都重新创建 graph
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="n">compiled_graph</span> <span class="o">=</span> <span class="k">await</span> <span class="n">create_multi_agent_graph</span><span class="p">(</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>    <span class="n">artifact_manager</span><span class="o">=</span><span class="n">artifact_manager</span><span class="p">,</span>
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>    <span class="n">checkpointer</span><span class="o">=</span><span class="n">get_checkpointer</span><span class="p">()</span>
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="p">)</span>
+</code></pre></div></p>
+</blockquote>
+<p>Graph 结构本身是无状态的（状态存在 checkpointer 里），理论上可以编译一次后复用。当前设计是因为 <code>artifact_manager</code> 通过闭包绑定到 graph 节点中，导致 graph 与请求级实例耦合。</p>
+<h3 id="p2">P2: 可接受 — 生产环境应解决</h3>
+<h4 id="6">6. 没有请求级超时</h4>
+<blockquote>
+<p><code>api/config.py:31</code> — 定义了但未使用
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="n">STREAM_TIMEOUT</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">300</span>    <span class="c1"># 秒，最大执行时间</span>
+</code></pre></div></p>
+</blockquote>
+<p>Graph 执行可能因 LLM 调用卡住而永远不返回。<code>chat.py</code> 中的 <code>execute_and_push()</code> 和 <code>execute_resume()</code> 均没有 timeout 保护。</p>
+<h4 id="7">7. 错误信息泄露</h4>
+<p>Background task 的异常直接通过 <code>str(e)</code> 推送给前端，可能包含内部文件路径、数据库信息等：</p>
+<blockquote>
+<p><code>api/routers/chat.py:189</code>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="s2">&quot;data&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;success&quot;</span><span class="p">:</span> <span class="kc">False</span><span class="p">,</span> <span class="s2">&quot;error&quot;</span><span class="p">:</span> <span class="nb">str</span><span class="p">(</span><span class="n">e</span><span class="p">)}</span>
+</code></pre></div></p>
+<p><code>api/routers/chat.py:398</code> — resume 路径同样的问题
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="s2">&quot;data&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;success&quot;</span><span class="p">:</span> <span class="kc">False</span><span class="p">,</span> <span class="s2">&quot;error&quot;</span><span class="p">:</span> <span class="nb">str</span><span class="p">(</span><span class="n">e</span><span class="p">)}</span>
+</code></pre></div></p>
+</blockquote>
+<h4 id="8-sse-heartbeat">8. SSE 无 Heartbeat</h4>
+<blockquote>
+<p><code>api/routers/stream.py:93-101</code> — 没有 heartbeat 机制
+<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="k">return</span> <span class="n">StreamingResponse</span><span class="p">(</span>
+<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a>    <span class="n">event_generator</span><span class="p">(),</span>
+<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a>    <span class="n">media_type</span><span class="o">=</span><span class="s2">&quot;text/event-stream&quot;</span><span class="p">,</span>
+<a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a>    <span class="o">...</span>
+<a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a><span class="p">)</span>
+</code></pre></div></p>
+</blockquote>
+<p>LLM 调用可能耗时 30 秒以上，期间 SSE 连接无数据传输，可能被中间的 proxy/load balancer 超时断开。需要定期发送 <code>:ping\n\n</code> 注释保持连接。</p>
+<h4 id="9">9. 无认证鉴权</h4>
+<blockquote>
+<p><code>api/dependencies.py:227</code> — 预留了但未实现
+<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">get_current_user</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">]:</span>
+<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a>    <span class="k">return</span> <span class="kc">None</span>
+</code></pre></div></p>
+</blockquote>
+<p>任何人可以读写任何 conversation。</p>
+<hr />
+<h2 id="_6">演进路线</h2>
+<h3 id="phase-0">Phase 0: 应用层加固（当前单进程部署即可受益）</h3>
+<p><strong>目标</strong>: 不引入新依赖，修复当前架构中最危险的问题。</p>
+<h4 id="task-manager-background-task">Task Manager — 管理 background task 生命周期</h4>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="k">class</span><span class="w"> </span><span class="nc">TaskManager</span><span class="p">:</span>
+<a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a><span class="sd">    管理 graph 执行的后台任务</span>
+<a id="__codelineno-16-4" name="__codelineno-16-4" href="#__codelineno-16-4"></a>
+<a id="__codelineno-16-5" name="__codelineno-16-5" href="#__codelineno-16-5"></a><span class="sd">    职责：</span>
+<a id="__codelineno-16-6" name="__codelineno-16-6" href="#__codelineno-16-6"></a><span class="sd">    - 持有任务引用，防止 GC</span>
+<a id="__codelineno-16-7" name="__codelineno-16-7" href="#__codelineno-16-7"></a><span class="sd">    - Semaphore 限制并发数</span>
+<a id="__codelineno-16-8" name="__codelineno-16-8" href="#__codelineno-16-8"></a><span class="sd">    - Graceful shutdown 支持</span>
+<a id="__codelineno-16-9" name="__codelineno-16-9" href="#__codelineno-16-9"></a><span class="sd">    &quot;&quot;&quot;</span>
+<a id="__codelineno-16-10" name="__codelineno-16-10" href="#__codelineno-16-10"></a>
+<a id="__codelineno-16-11" name="__codelineno-16-11" href="#__codelineno-16-11"></a>    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">max_concurrent</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">10</span><span class="p">):</span>
+<a id="__codelineno-16-12" name="__codelineno-16-12" href="#__codelineno-16-12"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">_tasks</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">Task</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
+<a id="__codelineno-16-13" name="__codelineno-16-13" href="#__codelineno-16-13"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">_semaphore</span> <span class="o">=</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">Semaphore</span><span class="p">(</span><span class="n">max_concurrent</span><span class="p">)</span>
+<a id="__codelineno-16-14" name="__codelineno-16-14" href="#__codelineno-16-14"></a>
+<a id="__codelineno-16-15" name="__codelineno-16-15" href="#__codelineno-16-15"></a>    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">submit</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">task_id</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">coro</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">Task</span><span class="p">:</span>
+<a id="__codelineno-16-16" name="__codelineno-16-16" href="#__codelineno-16-16"></a>        <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">_wrapped</span><span class="p">():</span>
+<a id="__codelineno-16-17" name="__codelineno-16-17" href="#__codelineno-16-17"></a>            <span class="k">async</span> <span class="k">with</span> <span class="bp">self</span><span class="o">.</span><span class="n">_semaphore</span><span class="p">:</span>
+<a id="__codelineno-16-18" name="__codelineno-16-18" href="#__codelineno-16-18"></a>                <span class="k">try</span><span class="p">:</span>
+<a id="__codelineno-16-19" name="__codelineno-16-19" href="#__codelineno-16-19"></a>                    <span class="k">await</span> <span class="n">coro</span>
+<a id="__codelineno-16-20" name="__codelineno-16-20" href="#__codelineno-16-20"></a>                <span class="k">finally</span><span class="p">:</span>
+<a id="__codelineno-16-21" name="__codelineno-16-21" href="#__codelineno-16-21"></a>                    <span class="bp">self</span><span class="o">.</span><span class="n">_tasks</span><span class="o">.</span><span class="n">pop</span><span class="p">(</span><span class="n">task_id</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+<a id="__codelineno-16-22" name="__codelineno-16-22" href="#__codelineno-16-22"></a>        <span class="n">task</span> <span class="o">=</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">create_task</span><span class="p">(</span><span class="n">_wrapped</span><span class="p">())</span>
+<a id="__codelineno-16-23" name="__codelineno-16-23" href="#__codelineno-16-23"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">_tasks</span><span class="p">[</span><span class="n">task_id</span><span class="p">]</span> <span class="o">=</span> <span class="n">task</span>
+<a id="__codelineno-16-24" name="__codelineno-16-24" href="#__codelineno-16-24"></a>        <span class="k">return</span> <span class="n">task</span>
+<a id="__codelineno-16-25" name="__codelineno-16-25" href="#__codelineno-16-25"></a>
+<a id="__codelineno-16-26" name="__codelineno-16-26" href="#__codelineno-16-26"></a>    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">shutdown</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">timeout</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mi">30</span><span class="p">):</span>
+<a id="__codelineno-16-27" name="__codelineno-16-27" href="#__codelineno-16-27"></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;等待所有运行中任务完成或超时后 cancel&quot;&quot;&quot;</span>
+<a id="__codelineno-16-28" name="__codelineno-16-28" href="#__codelineno-16-28"></a>        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_tasks</span><span class="p">:</span>
+<a id="__codelineno-16-29" name="__codelineno-16-29" href="#__codelineno-16-29"></a>            <span class="n">_</span><span class="p">,</span> <span class="n">pending</span> <span class="o">=</span> <span class="k">await</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">wait</span><span class="p">(</span>
+<a id="__codelineno-16-30" name="__codelineno-16-30" href="#__codelineno-16-30"></a>                <span class="bp">self</span><span class="o">.</span><span class="n">_tasks</span><span class="o">.</span><span class="n">values</span><span class="p">(),</span> <span class="n">timeout</span><span class="o">=</span><span class="n">timeout</span>
+<a id="__codelineno-16-31" name="__codelineno-16-31" href="#__codelineno-16-31"></a>            <span class="p">)</span>
+<a id="__codelineno-16-32" name="__codelineno-16-32" href="#__codelineno-16-32"></a>            <span class="k">for</span> <span class="n">task</span> <span class="ow">in</span> <span class="n">pending</span><span class="p">:</span>
+<a id="__codelineno-16-33" name="__codelineno-16-33" href="#__codelineno-16-33"></a>                <span class="n">task</span><span class="o">.</span><span class="n">cancel</span><span class="p">()</span>
+</code></pre></div>
+<p>集成方式：
+- 作为全局单例在 <code>init_globals()</code> 中初始化
+- <code>chat.py</code> 中 <code>asyncio.create_task()</code> 改为 <code>task_manager.submit(thread_id, ...)</code>
+- <code>close_globals()</code> 中调用 <code>task_manager.shutdown()</code></p>
+<h4 id="_7">其他加固项</h4>
+<ul>
+<li>给 graph 执行加 <code>asyncio.timeout(config.STREAM_TIMEOUT)</code> 保护</li>
+<li>StreamManager 关闭 stream 时从字典中移除（延迟几秒后清理）</li>
+<li>SSE 加 heartbeat（每 15 秒发送 <code>:ping\n\n</code>）</li>
+</ul>
+<h3 id="phase-1-redis-worker">Phase 1: Redis 引入 — 支持多 Worker 部署</h3>
+<p><strong>目标</strong>: 将进程内状态迁移到 Redis，支持多 worker 实例。</p>
+<table>
+<thead>
+<tr>
+<th>组件</th>
+<th>当前</th>
+<th>迁移到</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>ConversationManager._cache</td>
+<td>Python dict</td>
+<td>Redis Hash</td>
+</tr>
+<tr>
+<td>StreamManager 事件队列</td>
+<td>asyncio.Queue</td>
+<td>Redis Pub/Sub (或 Redis Streams)</td>
+</tr>
+</tbody>
+</table>
+<p>迁移后的架构：</p>
+<pre class="mermaid"><code>graph LR
+    W1["Worker 1"] --&gt; Redis["Redis Pub/Sub"]
+    W2["Worker 2"] --&gt; Redis
+    W3["Worker 3"] --&gt; Redis
+    Redis --&gt; C1["SSE Client A"]
+    Redis --&gt; C2["SSE Client B"]
+    Redis --&gt; C3["SSE Client C"]</code></pre>
+<p>注意事项：
+- Redis Pub/Sub 是"发后即忘"的，如果消费者不在线则消息丢失。如果需要可靠投递，考虑 Redis Streams（支持消费者组 + ACK）
+- ConversationManager cache 迁移后，需要处理 cache invalidation 策略</p>
+<h3 id="phase-2-checkpointer-ttl">Phase 2: Checkpointer 迁移 + TTL 管理</h3>
+<p><strong>目标</strong>: 解决 checkpoint 单连接瓶颈。</p>
+<table>
+<thead>
+<tr>
+<th>组件</th>
+<th>当前</th>
+<th>迁移到</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>LangGraph Checkpointer</td>
+<td>AsyncSqliteSaver（单 aiosqlite 连接）</td>
+<td>langgraph-checkpoint-redis</td>
+</tr>
+</tbody>
+</table>
+<p>Redis 作为 checkpointer 的优势：
+- 天然支持并发读写（无写锁竞争）
+- 内置 TTL，checkpoint 数据自动过期清理
+- 读写延迟远低于 SQLite</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a><span class="c1"># 迁移示例</span>
+<a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">langgraph.checkpoint.redis.aio</span><span class="w"> </span><span class="kn">import</span> <span class="n">AsyncRedisSaver</span>
+<a id="__codelineno-17-3" name="__codelineno-17-3" href="#__codelineno-17-3"></a>
+<a id="__codelineno-17-4" name="__codelineno-17-4" href="#__codelineno-17-4"></a><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">create_redis_checkpointer</span><span class="p">(</span><span class="n">redis_url</span><span class="p">:</span> <span class="nb">str</span><span class="p">):</span>
+<a id="__codelineno-17-5" name="__codelineno-17-5" href="#__codelineno-17-5"></a>    <span class="n">checkpointer</span> <span class="o">=</span> <span class="n">AsyncRedisSaver</span><span class="o">.</span><span class="n">from_conn_string</span><span class="p">(</span><span class="n">redis_url</span><span class="p">)</span>
+<a id="__codelineno-17-6" name="__codelineno-17-6" href="#__codelineno-17-6"></a>    <span class="k">await</span> <span class="n">checkpointer</span><span class="o">.</span><span class="n">setup</span><span class="p">()</span>
+<a id="__codelineno-17-7" name="__codelineno-17-7" href="#__codelineno-17-7"></a>    <span class="k">return</span> <span class="n">checkpointer</span>
+</code></pre></div>
+<h3 id="phase-25">Phase 2.5: 主数据库迁移（按需）</h3>
+<p><strong>触发条件</strong>: 当并发写入导致 <code>database is locked</code> 错误频繁出现时。</p>
+<p><strong>方案 A</strong> — 迁移到 PostgreSQL：
+- 彻底解决写并发问题
+- SQLAlchemy 切换只需改 <code>DATABASE_URL</code> 和 driver</p>
+<p><strong>方案 B</strong> — 短事务重构（继续使用 SQLite）：
+- 将 background task 中的长事务拆分为多个短事务
+- 每次数据库写操作单独开 session，而不是一个 session 贯穿整个 graph 执行
+- 适合用户量不大但需要改善稳定性的场景</p>
+<h3 id="phase-3">Phase 3: 生产化完善</h3>
+<ul>
+<li>API Rate Limiting（per-user 限流）</li>
+<li>认证鉴权（JWT / OAuth）</li>
+<li>分布式锁（防止同一 conversation 的并发写入冲突）</li>
+<li>错误信息脱敏（生产环境不暴露内部异常）</li>
+<li>Structured Logging + Metrics（可观测性）</li>
+<li>Graph 编译缓存（编译一次，通过 state 传递 <code>artifact_manager</code> 而非闭包捕获）</li>
+</ul>
+<hr />
+<h2 id="_8">参考</h2>
+<ul>
+<li><a href="https://docs.python.org/3/library/asyncio-task.html#creating-tasks">Python asyncio.create_task — 关于任务引用的警告</a></li>
+<li><a href="https://langchain-ai.github.io/langgraph/reference/checkpoints/#langgraph.checkpoint.redis">langgraph-checkpoint-redis</a></li>
+<li><a href="https://www.sqlite.org/wal.html">SQLite WAL Mode</a></li>
+<li><a href="https://fastapi.tiangolo.com/advanced/events/">FastAPI Lifespan Events</a></li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  回到页面顶部
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.tabs", "navigation.sections", "navigation.expand", "navigation.top", "search.highlight", "content.code.copy"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "\u5df2\u590d\u5236", "clipboard.copy": "\u590d\u5236", "search.result.more.one": "\u5728\u8be5\u9875\u4e0a\u8fd8\u6709 1 \u4e2a\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.more.other": "\u5728\u8be5\u9875\u4e0a\u8fd8\u6709 # \u4e2a\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.none": "\u6ca1\u6709\u627e\u5230\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.one": "\u627e\u5230 1 \u4e2a\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.other": "# \u4e2a\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.placeholder": "\u952e\u5165\u4ee5\u5f00\u59cb\u641c\u7d22", "search.result.term.missing": "\u7f3a\u5c11", "select.version": "\u9009\u62e9\u5f53\u524d\u7248\u672c"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>
