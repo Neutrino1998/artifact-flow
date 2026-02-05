@@ -8,8 +8,12 @@
 4. 支持流式输出 (stream_mode="custom")
 """
 
-from typing import Dict, Optional, Any, Callable, AsyncGenerator
+from __future__ import annotations
+from typing import Dict, Optional, Any, Callable, AsyncGenerator, TYPE_CHECKING
 from datetime import datetime
+
+if TYPE_CHECKING:
+    from tools.implementations.artifact_ops import ArtifactManager
 from langgraph.graph import StateGraph, END
 from langgraph.types import interrupt, StreamWriter
 
