@@ -92,6 +92,7 @@ python run_cli.py chat
 
 - [Request Lifecycle](request-lifecycle.md) - 理解一个请求的完整生命周期
 - [Architecture](architecture/core.md) - 深入了解各模块实现
+- [Concurrency](architecture/concurrency.md) - 并发模型、已知局限与演进路线
 - [Streaming](streaming.md) - 流式事件系统详解
 - [Extension Guide](extension-guide.md) - 如何扩展 Agent 和 Tool
 - [API Reference](api.md) - 前端集成接口文档
