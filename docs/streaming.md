@@ -168,35 +168,7 @@ class StreamManager:
 
 ### 时序图
 
-```mermaid
-sequenceDiagram
-    participant Client
-    participant POST /chat
-    participant StreamManager
-    participant Graph
-    participant GET /stream
-
-    Client->>POST /chat: 发送消息
-    POST /chat->>StreamManager: create_stream(thread_id)
-    Note over StreamManager: TTL 计时器启动 (30s)
-    POST /chat->>Client: 返回 {thread_id, ...}
-
-    POST /chat->>Graph: 后台执行
-    Graph->>StreamManager: push_event(agent_start)
-    Graph->>StreamManager: push_event(llm_chunk)
-
-    Client->>GET /stream: 连接 SSE
-    GET /stream->>StreamManager: consume_events(thread_id)
-    Note over StreamManager: 取消 TTL 计时器
-
-    StreamManager->>GET /stream: yield agent_start
-    StreamManager->>GET /stream: yield llm_chunk
-
-    Graph->>StreamManager: push_event(complete)
-    StreamManager->>GET /stream: yield complete
-    GET /stream->>Client: SSE: complete
-    Note over StreamManager: 清理队列
-```
+> 完整的事件缓冲时序图见 [Request Lifecycle — 事件缓冲](request-lifecycle.md#phase-4-事件流与-sse)。
 
 ## SSE 端点
 

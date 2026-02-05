@@ -46,6 +46,8 @@ graph TD
 
 ### POST /chat 执行流程
 
+> 此图侧重并发与生命周期视角，完整的端到端流程见 [Request Lifecycle — 整体流程](../request-lifecycle.md#整体流程)。
+
 ```mermaid
 sequenceDiagram
     participant Client as Frontend

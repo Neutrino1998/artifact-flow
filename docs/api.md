@@ -15,6 +15,8 @@ ArtifactFlow API 文档，供前端集成使用。
 
 ### 典型调用流程
 
+> 此图为前端集成视角的简化版，完整的内部流程见 [Request Lifecycle — 整体流程](request-lifecycle.md#整体流程)。
+
 ```mermaid
 sequenceDiagram
     participant Frontend
