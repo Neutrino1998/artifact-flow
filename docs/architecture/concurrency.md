@@ -14,7 +14,7 @@ graph TB
         SM["StreamManager<br/><i>事件缓冲队列 + TTL 清理</i>"]
     end
 
-    subgraph PerReq["请求级实例（请求结束后释放）"]
+    subgraph PerReq["请求级实例（AsyncSession → Repository → Manager → Controller）"]
         Session["AsyncSession"]
         Repo["Repository"]
         Mgr["Manager"]
@@ -22,10 +22,10 @@ graph TB
         Session --> Repo --> Mgr --> Ctrl
     end
 
-    Global -- "每个请求创建" --> PerReq
-
-    note["POST /chat 的 background task<br/>会创建自己的请求级实例，<br/>独立于 HTTP 请求的依赖生命周期"]
+    Global -- "Depends() 注入 / background task 创建" --> PerReq
 ```
+
+> **Note**: HTTP 请求（POST /chat）只做轻量同步操作（`ensure_conversation` + `create_stream`），然后立即返回。Graph 执行由 background task（`asyncio.create_task`）独立管理，task 内部创建自己的 session / manager / controller 实例（因为 HTTP 请求的依赖在返回后即释放）。
 
 ### 依赖注入链路
 
@@ -82,6 +82,7 @@ sequenceDiagram
 - Background task 创建**独立的**依赖实例，不复用 HTTP 请求的 session（避免请求结束后 session 失效）
 - StreamManager 作为中间缓冲层，解耦 POST（生产事件）和 GET（消费事件）的时序
 - TTL 机制防止前端不连接时队列无限增长
+- **Graph 执行独立于 SSE 连接**：前端断开 SSE 后，graph 仍继续运行到完成，结果持久化到数据库，用户刷新页面后可查看
 
 ### 数据库并发配置
 

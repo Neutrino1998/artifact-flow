@@ -47,7 +47,7 @@ flowchart TB
 | `llm_complete` | Agent | LLM 单次调用完成 | `{success, content, reasoning_content, metadata, token_usage}` |
 | `agent_complete` | Agent | Agent 单轮完成 | `{success, content, routing, metadata, token_usage}` |
 | `tool_start` | Graph | 工具开始执行 | `{params}` |
-| `tool_complete` | Graph | 工具执行完成 | `{success, duration_ms, error}` |
+| `tool_complete` | Graph | 工具执行完成 | `{success, duration_ms, error, params, result_data}` |
 | `permission_request` | Graph | 请求权限确认 | `{permission_level, params}` |
 | `permission_result` | Graph | 权限确认结果 | `{approved}` |
 | `complete` | Controller | 执行完成 | `{success, interrupted, response, execution_metrics, ...}` |
@@ -73,7 +73,7 @@ sequenceDiagram
 
     S->>C: tool_start (web_search)
     Note over S: 执行工具
-    S->>C: tool_complete {success, duration_ms}
+    S->>C: tool_complete {success, duration_ms, params, result_data}
 
     S->>C: agent_start (lead_agent)
     Note right of C: 新一轮，content 重新开始
@@ -252,7 +252,7 @@ event: tool_start
 data: {"type":"tool_start","timestamp":"...","agent":"lead_agent","tool":"web_search","data":{"params":{"query":"Python async"}}}
 
 event: tool_complete
-data: {"type":"tool_complete","timestamp":"...","agent":"lead_agent","tool":"web_search","data":{"success":true,"duration_ms":1234,"error":null}}
+data: {"type":"tool_complete","timestamp":"...","agent":"lead_agent","tool":"web_search","data":{"success":true,"duration_ms":1234,"error":null,"params":{"query":"Python async"},"result_data":"<search_results>...</search_results>"}}
 
 event: complete
 data: {"type":"complete","timestamp":"...","data":{"success":true,"interrupted":false,"response":"...","execution_metrics":{...}}}
@@ -260,7 +260,7 @@ data: {"type":"complete","timestamp":"...","data":{"success":true,"interrupted":
 
 **关键点：**
 - `llm_chunk.data.content` 是累积内容，每次事件包含从头开始的完整文本
-- `tool_complete` 不包含工具返回的实际数据（出于性能考虑）
+- `tool_complete` 包含 `params`（工具调用参数）和 `result_data`（工具返回的业务数据）
 - `complete` 事件的 `interrupted` 字段指示是否需要用户确认权限
 
 ## 前端集成
@@ -508,24 +508,18 @@ if tool.permission == ToolPermission.CONFIRM:
 
 ### 前端处理
 
-权限中断有两种通知方式：
-1. `permission_request` 事件 - 在中断前发送，包含工具信息
-2. `complete` 事件 (`interrupted=true`) - 执行暂停，包含完整中断数据
+权限中断是一个两步流程，前端会依次收到两个事件：
+1. `permission_request` 事件 - 在 `interrupt()` 前发送，提前通知前端即将中断（可用于显示等待状态）
+2. `complete` 事件 (`interrupted=true`) - 执行已暂停，包含完整中断数据，前端据此弹出确认对话框并发起 resume 请求
 
 ```javascript
-let pendingPermission = null;
-
-// 方式1：收到 permission_request 时保存信息
+// 步骤1：收到 permission_request 时，可提前显示等待状态
 eventSource.addEventListener('permission_request', (e) => {
   const { tool, data } = JSON.parse(e.data);
-  pendingPermission = {
-    tool,
-    permissionLevel: data.permission_level,
-    params: data.params
-  };
+  showPendingPermission(tool, data.permission_level, data.params);
 });
 
-// 方式2：收到 complete 且 interrupted=true 时处理
+// 步骤2：收到 complete 且 interrupted=true 时，触发确认流程
 eventSource.addEventListener('complete', async (e) => {
   const { data } = JSON.parse(e.data);
   if (!data.interrupted) return;

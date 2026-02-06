@@ -13,11 +13,10 @@ import asyncio
 from typing import Optional
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from api.config import config
 from api.dependencies import (
-    get_controller,
     get_conversation_manager,
     get_stream_manager,
 )
@@ -32,7 +31,6 @@ from api.schemas.chat import (
     MessageResponse,
 )
 from api.services.stream_manager import StreamManager
-from core.controller import ExecutionController
 from core.conversation_manager import ConversationManager
 from repositories.base import NotFoundError
 from utils.logger import get_logger
@@ -42,59 +40,9 @@ logger = get_logger("ArtifactFlow")
 router = APIRouter()
 
 
-async def _run_graph_execution(
-    controller: ExecutionController,
-    stream_manager: StreamManager,
-    thread_id: str,
-    content: Optional[str] = None,
-    conversation_id: Optional[str] = None,
-    parent_message_id: Optional[str] = None,
-    message_id: Optional[str] = None,
-    resume_data: Optional[dict] = None,
-) -> None:
-    """
-    后台任务：执行 Graph 并推送事件到 StreamManager
-
-    Args:
-        controller: ExecutionController 实例
-        stream_manager: StreamManager 实例
-        thread_id: 线程 ID
-        content: 用户消息（新消息场景）
-        conversation_id: 对话 ID
-        parent_message_id: 父消息 ID
-        message_id: 消息 ID（恢复场景）
-        resume_data: 恢复数据（恢复场景）
-    """
-    try:
-        async for event in controller.stream_execute(
-            content=content,
-            thread_id=thread_id if resume_data else None,  # 新消息时 thread_id 由 controller 生成
-            conversation_id=conversation_id,
-            parent_message_id=parent_message_id,
-            message_id=message_id,
-            resume_data=resume_data,
-        ):
-            # 推送事件到队列
-            await stream_manager.push_event(thread_id, event)
-
-    except Exception as e:
-        logger.exception(f"Error in graph execution for thread {thread_id}: {e}")
-        # 推送错误事件
-        await stream_manager.push_event(thread_id, {
-            "type": "error",
-            "timestamp": datetime.now().isoformat(),
-            "data": {
-                "success": False,
-                "error": str(e)
-            }
-        })
-
-
 @router.post("", response_model=ChatResponse)
 async def send_message(
     request: ChatRequest,
-    background_tasks: BackgroundTasks,
-    controller: ExecutionController = Depends(get_controller),
     conversation_manager: ConversationManager = Depends(get_conversation_manager),
     stream_manager: StreamManager = Depends(get_stream_manager),
 ):
@@ -170,16 +118,19 @@ async def send_message(
             )
 
             # 执行并推送事件
+            # Graph 执行独立于 SSE 连接：即使前端断开，graph 仍运行到完成，结果持久化到数据库
+            stream_closed = False
             try:
                 async for event in ctrl.stream_execute(
                     content=request.content,
                     conversation_id=conversation_id,
                     parent_message_id=request.parent_message_id,
                 ):
-                    # push_event 返回 False 表示 stream 已关闭，停止执行
+                    if stream_closed:
+                        continue
                     if not await stream_manager.push_event(thread_id, event):
-                        logger.info(f"Stream {thread_id} closed, stopping graph execution")
-                        break
+                        logger.info(f"Stream {thread_id} closed, graph will continue to completion")
+                        stream_closed = True
 
             except Exception as e:
                 logger.exception(f"Error in graph execution: {e}")
@@ -378,6 +329,8 @@ async def resume_execution(
                 conversation_manager=conv_manager
             )
 
+            # Graph 执行独立于 SSE 连接：即使前端断开，graph 仍运行到完成，结果持久化到数据库
+            stream_closed = False
             try:
                 async for event in ctrl.stream_execute(
                     thread_id=thread_id,
@@ -385,10 +338,11 @@ async def resume_execution(
                     message_id=request.message_id,
                     resume_data=resume_data,
                 ):
-                    # push_event 返回 False 表示 stream 已关闭，停止执行
+                    if stream_closed:
+                        continue
                     if not await stream_manager.push_event(thread_id, event):
-                        logger.info(f"Stream {thread_id} closed, stopping resume execution")
-                        break
+                        logger.info(f"Stream {thread_id} closed, graph will continue to completion")
+                        stream_closed = True
 
             except Exception as e:
                 logger.exception(f"Error in resume execution: {e}")
