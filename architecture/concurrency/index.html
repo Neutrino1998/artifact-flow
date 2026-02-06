@@ -1559,10 +1559,10 @@
     note["POST /chat 的 background task&lt;br/&gt;会创建自己的请求级实例，&lt;br/&gt;独立于 HTTP 请求的依赖生命周期"]</code></pre>
 <h3 id="_3">依赖注入链路</h3>
 <pre class="mermaid"><code>graph TD
-    Req["HTTP Request"] --&gt; GDS["get_db_session()&lt;br/&gt;&lt;i&gt;从 DatabaseManager 连接池获取 AsyncSession&lt;/i&gt;"]
+    Req["HTTP Request"] --&gt; GDS["get_db_session()&lt;i&gt;&lt;br/&gt;从 DatabaseManager 连接池&lt;br/&gt;获取 AsyncSession&lt;/i&gt;"]
     GDS --&gt; AR["ArtifactRepository → ArtifactManager"]
-    GDS --&gt; CR["ConversationRepository → ConversationManager"]
-    GDS --&gt; Graph["create_multi_agent_graph() + Controller"]
+    GDS --&gt; CR["ConversationRepository → &lt;br/&gt;ConversationManager"]
+    GDS --&gt; Graph["create_multi_agent_graph() + &lt;br/&gt;Controller"]
     Graph -. "共享单例" .-&gt; CP["Checkpointer&lt;br/&gt;&lt;i&gt;支持跨请求 interrupt/resume&lt;/i&gt;"]</code></pre>
 <p>并发安全保证：
 - <strong>DatabaseManager</strong>: 全局单例，内部维护 SQLAlchemy 连接池，天然支持并发
