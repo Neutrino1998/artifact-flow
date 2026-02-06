@@ -31,10 +31,10 @@ graph TB
 
 ```mermaid
 graph TD
-    Req["HTTP Request"] --> GDS["get_db_session()<br/><i>从 DatabaseManager 连接池获取 AsyncSession</i>"]
+    Req["HTTP Request"] --> GDS["get_db_session()<i><br/>从 DatabaseManager 连接池<br/>获取 AsyncSession</i>"]
     GDS --> AR["ArtifactRepository → ArtifactManager"]
-    GDS --> CR["ConversationRepository → ConversationManager"]
-    GDS --> Graph["create_multi_agent_graph() + Controller"]
+    GDS --> CR["ConversationRepository → <br/>ConversationManager"]
+    GDS --> Graph["create_multi_agent_graph() + <br/>Controller"]
     Graph -. "共享单例" .-> CP["Checkpointer<br/><i>支持跨请求 interrupt/resume</i>"]
 ```
 
