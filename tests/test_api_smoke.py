@@ -108,7 +108,12 @@ async def test_sse_stream(thread_id: str, max_events: int = 50):
     async with httpx.AsyncClient(base_url=BASE_URL, timeout=TIMEOUT) as client:
         try:
             async with client.stream("GET", f"/api/v1/stream/{thread_id}") as response:
+                current_event_name = None
                 async for line in response.aiter_lines():
+                    if line.startswith("event:"):
+                        current_event_name = line[6:].strip()
+                        continue
+
                     if not line.startswith("data:"):
                         continue
 
@@ -117,7 +122,9 @@ async def test_sse_stream(thread_id: str, max_events: int = 50):
                     # 解析事件
                     try:
                         event_data = json.loads(line[5:].strip())  # 去掉 "data:" 前缀
-                        event_type = event_data.get("type", "unknown")
+                        # 优先使用 SSE event: 字段，回退到 data.type
+                        event_type = current_event_name or event_data.get("type", "unknown")
+                        current_event_name = None
 
                         # 统计事件类型
                         event_types[event_type] = event_types.get(event_type, 0) + 1

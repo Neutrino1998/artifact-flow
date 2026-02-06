@@ -72,21 +72,30 @@ class APIClient:
         """流式接收响应"""
         async with httpx.AsyncClient(base_url=self.base_url, timeout=self.timeout) as client:
             async with client.stream("GET", f"/api/v1/stream/{thread_id}") as response:
+                current_event_name: str | None = None
                 async for line in response.aiter_lines():
+                    if line.startswith("event:"):
+                        current_event_name = line[6:].strip()
+                        continue
+
                     if not line.startswith("data:"):
                         continue
 
                     try:
                         event_data = json.loads(line[5:].strip())
+                        # 优先使用 SSE event: 字段，回退到 data.type
+                        event_type = current_event_name or event_data.get("type", "unknown")
+                        current_event_name = None
+
                         yield SSEEvent(
-                            type=event_data.get("type", "unknown"),
+                            type=event_type,
                             data=event_data.get("data", {}),
                             agent=event_data.get("agent"),
                             tool=event_data.get("tool"),
                         )
 
                         # 终结事件
-                        if event_data.get("type") in ("complete", "error"):
+                        if event_type in ("complete", "error"):
                             break
                     except json.JSONDecodeError:
                         continue

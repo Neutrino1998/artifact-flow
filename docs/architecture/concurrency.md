@@ -69,12 +69,12 @@ sequenceDiagram
     loop Graph 执行
         BG->>SM: push_event(event)
         SM->>SSE: consume_events()
-        SSE-->>Client: data: {event}
+        SSE-->>Client: event: {type} + data: {event}
     end
 
     BG->>SM: push_event({ type: "complete" })
     SM->>SSE: 终结事件
-    SSE-->>Client: data: {complete}
+    SSE-->>Client: event: complete + data: {complete}
     SSE->>SM: close_stream()
 ```
 

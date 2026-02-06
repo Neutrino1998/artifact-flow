@@ -185,7 +185,7 @@ async def stream_events(
     async def event_generator() -> AsyncGenerator[str, None]:
         try:
             async for event in stream_manager.consume_events(thread_id):
-                yield format_sse_event(event)
+                yield format_sse_event(event, event=event.get("type"))
 
                 # 检查是否是终结事件
                 if event.get("type") in ("complete", "error"):
@@ -193,7 +193,7 @@ async def stream_events(
 
         except StreamNotFoundError:
             error_event = {"type": "error", "data": {"error": f"Stream not found"}}
-            yield format_sse_event(error_event)
+            yield format_sse_event(error_event, event="error")
 
     return StreamingResponse(
         event_generator(),
@@ -212,7 +212,7 @@ def format_sse_event(data: Dict[str, Any], event: str = None) -> str:
 
     Args:
         data: 事件数据（整个事件字典，包含 type 字段）
-        event: SSE event 名称（可选，通常不使用）
+        event: SSE event 名称（从事件 type 字段提取）
 
     Returns:
         格式化的 SSE 字符串
@@ -227,25 +227,34 @@ def format_sse_event(data: Dict[str, Any], event: str = None) -> str:
 
 ### SSE 协议格式
 
-事件类型包含在 `data` 的 JSON 对象内（`type` 字段），而非使用 SSE 的 `event:` 字段：
+使用标准 SSE `event:` 字段区分事件类型，`data:` JSON 内同时保留 `type` 字段以便统一解析：
 
 ```
+event: metadata
 data: {"type":"metadata","timestamp":"...","data":{"conversation_id":"abc","thread_id":"xyz","message_id":"123"}}
 
+event: agent_start
 data: {"type":"agent_start","timestamp":"...","agent":"lead_agent","data":{"success":true,"content":"","metadata":{...}}}
 
+event: llm_chunk
 data: {"type":"llm_chunk","timestamp":"...","agent":"lead_agent","data":{"success":true,"content":"让我","metadata":{...}}}
 
+event: llm_chunk
 data: {"type":"llm_chunk","timestamp":"...","agent":"lead_agent","data":{"success":true,"content":"让我来分析","metadata":{...}}}
 
+event: llm_complete
 data: {"type":"llm_complete","timestamp":"...","agent":"lead_agent","data":{"success":true,"content":"让我来分析...","token_usage":{...}}}
 
+event: agent_complete
 data: {"type":"agent_complete","timestamp":"...","agent":"lead_agent","data":{"success":true,"content":"...","routing":{"type":"tool_call","tool_name":"web_search","params":{...}}}}
 
+event: tool_start
 data: {"type":"tool_start","timestamp":"...","agent":"lead_agent","tool":"web_search","data":{"params":{"query":"Python async"}}}
 
+event: tool_complete
 data: {"type":"tool_complete","timestamp":"...","agent":"lead_agent","tool":"web_search","data":{"success":true,"duration_ms":1234,"error":null}}
 
+event: complete
 data: {"type":"complete","timestamp":"...","data":{"success":true,"interrupted":false,"response":"...","execution_metrics":{...}}}
 ```
 
@@ -258,7 +267,7 @@ data: {"type":"complete","timestamp":"...","data":{"success":true,"interrupted":
 
 ### JavaScript 示例
 
-由于事件类型在 `data` JSON 内部，前端使用 `onmessage` 统一处理后根据 `type` 分发：
+前端使用 `addEventListener` 按事件类型独立监听：
 
 ```javascript
 async function chat(content) {
@@ -276,68 +285,76 @@ async function chat(content) {
   // 3. 追踪状态
   let lastContent = '';  // 用于计算增量
 
-  // 4. 统一处理消息，根据 type 分发
-  eventSource.onmessage = (e) => {
-    const event = JSON.parse(e.data);
-    const { type, data, agent, tool } = event;
+  // 4. 辅助函数：解析事件数据
+  const parse = (e) => JSON.parse(e.data);
 
-    switch (type) {
-      case 'metadata':
-        console.log('Started:', data);
-        break;
+  // 5. 按事件类型独立监听
+  eventSource.addEventListener('metadata', (e) => {
+    const { data } = parse(e);
+    console.log('Started:', data);
+  });
 
-      case 'llm_chunk':
-        // data.content 是累积内容，计算增量
-        const delta = data.content.slice(lastContent.length);
-        lastContent = data.content;
-        appendToOutput(delta);  // 流式显示增量
-        break;
+  eventSource.addEventListener('llm_chunk', (e) => {
+    const { data } = parse(e);
+    // data.content 是累积内容，计算增量
+    const delta = data.content.slice(lastContent.length);
+    lastContent = data.content;
+    appendToOutput(delta);  // 流式显示增量
+  });
 
-      case 'llm_complete':
-        // LLM 单次调用完成，可以获取 token 统计
-        console.log('Token usage:', data.token_usage);
-        break;
+  eventSource.addEventListener('llm_complete', (e) => {
+    const { data } = parse(e);
+    // LLM 单次调用完成，可以获取 token 统计
+    console.log('Token usage:', data.token_usage);
+  });
 
-      case 'agent_complete':
-        // Agent 单轮完成，检查是否有后续操作
-        if (data.routing) {
-          console.log('Agent routing:', data.routing);
-        }
-        // 重置累积内容（下一轮 LLM 调用会重新开始）
-        lastContent = '';
-        break;
-
-      case 'tool_start':
-        showToolIndicator(tool, data.params);
-        break;
-
-      case 'tool_complete':
-        hideToolIndicator(tool);
-        if (!data.success) showError(data.error);
-        break;
-
-      case 'permission_request':
-        showPermissionDialog(tool, data.params, data.permission_level);
-        break;
-
-      case 'complete':
-        if (data.interrupted) {
-          // 权限中断，需要用户确认
-          showInterruptDialog(data.interrupt_data);
-        } else {
-          // 正常完成
-          finalizeOutput(data.response);
-          showMetrics(data.execution_metrics);
-        }
-        eventSource.close();
-        break;
-
-      case 'error':
-        showError(data.error);
-        eventSource.close();
-        break;
+  eventSource.addEventListener('agent_complete', (e) => {
+    const { data } = parse(e);
+    // Agent 单轮完成，检查是否有后续操作
+    if (data.routing) {
+      console.log('Agent routing:', data.routing);
     }
-  };
+    // 重置累积内容（下一轮 LLM 调用会重新开始）
+    lastContent = '';
+  });
+
+  eventSource.addEventListener('tool_start', (e) => {
+    const { tool, data } = parse(e);
+    showToolIndicator(tool, data.params);
+  });
+
+  eventSource.addEventListener('tool_complete', (e) => {
+    const { tool, data } = parse(e);
+    hideToolIndicator(tool);
+    if (!data.success) showError(data.error);
+  });
+
+  eventSource.addEventListener('permission_request', (e) => {
+    const { tool, data } = parse(e);
+    showPermissionDialog(tool, data.params, data.permission_level);
+  });
+
+  eventSource.addEventListener('complete', (e) => {
+    const { data } = parse(e);
+    if (data.interrupted) {
+      // 权限中断，需要用户确认
+      showInterruptDialog(data.interrupt_data);
+    } else {
+      // 正常完成
+      finalizeOutput(data.response);
+      showMetrics(data.execution_metrics);
+    }
+    eventSource.close();
+  });
+
+  eventSource.addEventListener('error', (e) => {
+    // 注意：SSE 原生 error 事件（连接断开）也会触发，需要区分
+    if (e.data) {
+      const { data } = parse(e);
+      showError(data.error);
+    }
+    eventSource.close();
+  });
 
   eventSource.onerror = () => {
     eventSource.close();
@@ -376,38 +393,46 @@ function useChat() {
     const { stream_url, conversation_id, message_id, thread_id } = await res.json();
 
     const eventSource = new EventSource(stream_url);
+    const parse = (e: MessageEvent) => JSON.parse(e.data);
 
-    eventSource.onmessage = (e) => {
-      const event = JSON.parse(e.data);
+    eventSource.addEventListener('llm_chunk', (e) => {
+      const { data } = parse(e);
+      // data.content 是累积内容，直接使用
+      setCurrentContent(data.content);
+      lastContentRef.current = data.content;
+    });
 
-      if (event.type === 'llm_chunk') {
-        // data.content 是累积内容，直接使用
-        setCurrentContent(event.data.content);
-        lastContentRef.current = event.data.content;
-      } else if (event.type === 'agent_complete') {
-        // Agent 单轮完成，重置累积追踪
-        lastContentRef.current = '';
-      } else if (event.type === 'complete') {
-        if (event.data.interrupted) {
-          // 权限中断
-          setPendingPermission({
-            conversationId: conversation_id,
-            threadId: thread_id,
-            messageId: message_id,
-            interruptData: event.data.interrupt_data
-          });
-        } else {
-          // 正常完成
-          setMessages(prev => [...prev, { role: 'assistant', content: event.data.response }]);
-        }
-        setCurrentContent('');
-        setIsStreaming(false);
-        eventSource.close();
-      } else if (event.type === 'error') {
-        setIsStreaming(false);
-        eventSource.close();
+    eventSource.addEventListener('agent_complete', () => {
+      // Agent 单轮完成，重置累积追踪
+      lastContentRef.current = '';
+    });
+
+    eventSource.addEventListener('complete', (e) => {
+      const { data } = parse(e);
+      if (data.interrupted) {
+        // 权限中断
+        setPendingPermission({
+          conversationId: conversation_id,
+          threadId: thread_id,
+          messageId: message_id,
+          interruptData: data.interrupt_data
+        });
+      } else {
+        // 正常完成
+        setMessages(prev => [...prev, { role: 'assistant', content: data.response }]);
       }
-    };
+      setCurrentContent('');
+      setIsStreaming(false);
+      eventSource.close();
+    });
+
+    eventSource.addEventListener('error', (e) => {
+      if ((e as MessageEvent).data) {
+        // 服务端 error 事件
+      }
+      setIsStreaming(false);
+      eventSource.close();
+    });
   };
 
   const handlePermission = async (approved: boolean) => {
@@ -488,22 +513,24 @@ if tool.permission == ToolPermission.CONFIRM:
 2. `complete` 事件 (`interrupted=true`) - 执行暂停，包含完整中断数据
 
 ```javascript
-// 在 onmessage 处理器中
 let pendingPermission = null;
 
 // 方式1：收到 permission_request 时保存信息
-if (event.type === 'permission_request') {
-  const { tool, data } = event;
+eventSource.addEventListener('permission_request', (e) => {
+  const { tool, data } = JSON.parse(e.data);
   pendingPermission = {
     tool,
     permissionLevel: data.permission_level,
     params: data.params
   };
-}
+});
 
 // 方式2：收到 complete 且 interrupted=true 时处理
-if (event.type === 'complete' && event.data.interrupted) {
-  const { interrupt_data, thread_id, message_id, conversation_id } = event.data;
+eventSource.addEventListener('complete', async (e) => {
+  const { data } = JSON.parse(e.data);
+  if (!data.interrupted) return;
+
+  const { interrupt_data, thread_id, message_id, conversation_id } = data;
 
   // 显示确认对话框
   const approved = await showConfirmDialog({

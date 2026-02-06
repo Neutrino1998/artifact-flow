@@ -32,11 +32,14 @@ async def stream_events(
 
     前端通过 EventSource 连接此端点，接收实时事件流。
 
-    事件格式（统一的 StreamEventType）：
+    事件格式（使用标准 SSE event: 字段区分事件类型）：
+        event: metadata
         data: {"type": "metadata", "timestamp": "...", "data": {...}}
-        data: {"type": "agent_start", "timestamp": "...", "agent": "lead_agent", ...}
+
+        event: llm_chunk
         data: {"type": "llm_chunk", "timestamp": "...", "agent": "lead_agent", "data": {"content": "..."}}
-        ...
+
+        event: complete
         data: {"type": "complete", "timestamp": "...", "data": {...}}
 
     连接生命周期：
@@ -52,7 +55,7 @@ async def stream_events(
         try:
             # 消费事件
             async for event in stream_manager.consume_events(thread_id):
-                yield format_sse_event(event)
+                yield format_sse_event(event, event=event.get("type"))
 
                 # 检查是否是终结事件
                 event_type = event.get("type", "")
@@ -70,7 +73,7 @@ async def stream_events(
                     "error": f"Stream '{thread_id}' not found or expired"
                 }
             }
-            yield format_sse_event(error_event)
+            yield format_sse_event(error_event, event="error")
 
         except asyncio.CancelledError:
             # 客户端断开连接
@@ -88,7 +91,7 @@ async def stream_events(
                     "error": str(e)
                 }
             }
-            yield format_sse_event(error_event)
+            yield format_sse_event(error_event, event="error")
 
     return StreamingResponse(
         event_generator(),

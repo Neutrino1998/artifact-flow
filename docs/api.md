@@ -27,10 +27,10 @@ sequenceDiagram
 
     Frontend->>API: GET /stream/{thread_id}
     loop SSE Events
-        API->>Frontend: data: {type: "llm_chunk", ...}
-        API->>Frontend: data: {type: "tool_complete", ...}
+        API->>Frontend: event: llm_chunk + data: {...}
+        API->>Frontend: event: tool_complete + data: {...}
     end
-    API->>Frontend: data: {type: "complete", ...}
+    API->>Frontend: event: complete + data: {...}
 
     Frontend->>API: GET /chat/{conversation_id}
     API->>Frontend: 对话详情
@@ -220,13 +220,14 @@ const eventSource = new EventSource('/api/v1/stream/{thread_id}');
 
 **事件格式说明：**
 
-所有事件以 SSE `data:` 形式发送，事件类型包含在 JSON 的 `type` 字段中：
+使用标准 SSE `event:` 字段区分事件类型，`data:` JSON 内同时保留 `type` 字段：
 
 ```
+event: event_type
 data: {"type":"event_type","timestamp":"...","agent":"...","data":{...}}
 ```
 
-前端使用 `onmessage` 处理并根据 `type` 分发。
+前端使用 `addEventListener` 按事件类型独立监听。
 
 **事件类型：**
 
@@ -751,68 +752,64 @@ async function sendMessage(
 
   // 2. 连接 SSE（使用返回的 stream_url）
   const eventSource = new EventSource(stream_url);
+  const parse = (e: MessageEvent) => JSON.parse(e.data);
 
-  // 3. 统一处理消息，根据 type 分发
-  eventSource.onmessage = (e) => {
-    const event = JSON.parse(e.data);
-    const { type, data, agent, tool } = event;
+  // 3. 按事件类型独立监听
+  eventSource.addEventListener('llm_chunk', (e) => {
+    const { data } = parse(e);
+    // 注意：data.content 是累积内容，直接使用
+    state.currentContent = data.content;
+  });
 
-    switch (type) {
-      case 'llm_chunk':
-        // 注意：data.content 是累积内容，直接使用
-        state.currentContent = data.content;
-        break;
-
-      case 'agent_complete':
-        // Agent 单轮完成，如有后续工具调用会继续
-        // 重置 currentContent 准备下一轮
-        if (data.routing) {
-          state.currentContent = '';
-        }
-        break;
-
-      case 'permission_request':
-        state.pendingPermission = {
-          threadId: thread_id,
-          messageId: message_id,
-          tool,
-          params: data.params,
-          permissionLevel: data.permission_level
-        };
-        break;
-
-      case 'complete':
-        if (data.interrupted) {
-          // 权限中断，等待用户确认
-          // pendingPermission 已在 permission_request 中设置
-          // 或者从 interrupt_data 中获取信息
-          console.log('Interrupted:', data.interrupt_data);
-        } else {
-          // 正常完成
-          state.messages.push({
-            id: `${message_id}_response`,
-            role: 'assistant',
-            content: data.response,
-            createdAt: new Date()
-          });
-        }
-        state.currentContent = '';
-        state.isStreaming = false;
-        eventSource.close();
-        break;
-
-      case 'error':
-        console.error('Execution error:', data.error);
-        state.isStreaming = false;
-        eventSource.close();
-        break;
+  eventSource.addEventListener('agent_complete', (e) => {
+    const { data } = parse(e);
+    // Agent 单轮完成，如有后续工具调用会继续
+    // 重置 currentContent 准备下一轮
+    if (data.routing) {
+      state.currentContent = '';
     }
-  };
+  });
 
-  eventSource.onerror = () => {
+  eventSource.addEventListener('permission_request', (e) => {
+    const { tool, data } = parse(e);
+    state.pendingPermission = {
+      threadId: thread_id,
+      messageId: message_id,
+      tool,
+      params: data.params,
+      permissionLevel: data.permission_level
+    };
+  });
+
+  eventSource.addEventListener('complete', (e) => {
+    const { data } = parse(e);
+    if (data.interrupted) {
+      // 权限中断，等待用户确认
+      // pendingPermission 已在 permission_request 中设置
+      // 或者从 interrupt_data 中获取信息
+      console.log('Interrupted:', data.interrupt_data);
+    } else {
+      // 正常完成
+      state.messages.push({
+        id: `${message_id}_response`,
+        role: 'assistant',
+        content: data.response,
+        createdAt: new Date()
+      });
+    }
+    state.currentContent = '';
     state.isStreaming = false;
     eventSource.close();
-  };
+  });
+
+  eventSource.addEventListener('error', (e) => {
+    if ((e as MessageEvent).data) {
+      const { data } = parse(e as MessageEvent);
+      console.error('Execution error:', data.error);
+    }
+    state.isStreaming = false;
+    eventSource.close();
+  });
 }
 
 async function handlePermission(
