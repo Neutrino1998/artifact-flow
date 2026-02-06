@@ -79,3 +79,10 @@ wheels/
 Thumbs.db
 # MkDocs build output
 site/
+
+# ==========================
+# 5. Frontend (Node.js / Next.js)
+# ==========================
+frontend/node_modules/
+frontend/.next/
+frontend/out/

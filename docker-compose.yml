@@ -1,8 +1,10 @@
 services:
-  artifactflow:
-    build: .
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
     image: artifactflow:latest
-    container_name: artifactflow
+    container_name: artifactflow-backend
     ports:
       - "8000:8000"
     volumes:
@@ -15,10 +17,16 @@ services:
       # 可覆盖 .env 中的配置
       - PYTHONUNBUFFERED=1
     restart: unless-stopped
-    # 资源限制（可选，根据需要调整）
-    # deploy:
-    #   resources:
-    #     limits:
-    #       memory: 4G
-    #     reservations:
-    #       memory: 2G
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        - NEXT_PUBLIC_API_URL=http://backend:8000
+    container_name: artifactflow-frontend
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+    restart: unless-stopped
