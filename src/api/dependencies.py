@@ -21,8 +21,14 @@ FastAPI 依赖注入
     - Repository/Manager/Controller: 请求独立，绑定到请求的 session
 """
 
+from __future__ import annotations
+
 from functools import lru_cache
-from typing import AsyncGenerator, Any, Optional
+from typing import AsyncGenerator, Any, Optional, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from api.services.stream_manager import StreamManager
+    from api.services.task_manager import TaskManager
 
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -47,6 +53,7 @@ logger = get_logger("ArtifactFlow")
 _db_manager: Optional[DatabaseManager] = None
 _checkpointer: Any = None  # AsyncSqliteSaver，LangGraph 状态持久化
 _stream_manager: Optional["StreamManager"] = None
+_task_manager: Optional["TaskManager"] = None
 
 
 async def init_globals() -> None:
@@ -58,7 +65,7 @@ async def init_globals() -> None:
     import os
     from pathlib import Path
 
-    global _db_manager, _checkpointer, _stream_manager
+    global _db_manager, _checkpointer, _stream_manager, _task_manager
 
     # 0. 确保 data 目录存在
     data_dir = Path("data")
@@ -79,6 +86,11 @@ async def init_globals() -> None:
     _stream_manager = StreamManager(ttl_seconds=config.STREAM_TTL)
     logger.info("Stream manager initialized")
 
+    # 4. 创建 TaskManager
+    from api.services.task_manager import TaskManager
+    _task_manager = TaskManager(max_concurrent=config.MAX_CONCURRENT_TASKS)
+    logger.info("Task manager initialized")
+
 
 async def close_globals() -> None:
     """
@@ -86,21 +98,39 @@ async def close_globals() -> None:
 
     在 FastAPI lifespan 中调用。
     """
-    global _db_manager, _checkpointer, _stream_manager
+    global _db_manager, _checkpointer, _stream_manager, _task_manager
 
-    # 关闭 checkpointer 的 aiosqlite 连接
+    # 1. 先关闭 TaskManager（等待运行中的 graph 任务完成）
+    if _task_manager:
+        await _task_manager.shutdown()
+        logger.info("Task manager shut down")
+
+    # 2. 关闭 checkpointer 的 aiosqlite 连接
     if _checkpointer and hasattr(_checkpointer, 'conn'):
         await _checkpointer.conn.close()
         logger.info("Checkpointer connection closed")
 
-    # 关闭数据库管理器
+    # 3. 关闭数据库管理器
     if _db_manager:
         await _db_manager.close()
         logger.info("Database manager closed")
 
+    _task_manager = None
     _checkpointer = None
     _db_manager = None
     _stream_manager = None
+
+
+def get_task_manager() -> "TaskManager":
+    """
+    获取 TaskManager 单例
+
+    Returns:
+        TaskManager 实例
+    """
+    if _task_manager is None:
+        raise RuntimeError("TaskManager not initialized. Call init_globals() first.")
+    return _task_manager
 
 
 def get_stream_manager() -> "StreamManager":

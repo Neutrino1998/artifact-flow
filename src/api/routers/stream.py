@@ -53,8 +53,15 @@ async def stream_events(
         从 StreamManager 消费事件，格式化为 SSE 并 yield。
         """
         try:
-            # 消费事件
-            async for event in stream_manager.consume_events(thread_id):
+            # 消费事件（带心跳支持）
+            async for event in stream_manager.consume_events(
+                thread_id, heartbeat_interval=config.SSE_PING_INTERVAL
+            ):
+                # 心跳哨兵事件 → SSE 注释
+                if event.get("type") == "__ping__":
+                    yield format_sse_comment("ping")
+                    continue
+
                 yield format_sse_event(event, event=event.get("type"))
 
                 # 检查是否是终结事件

@@ -123,21 +123,9 @@ WAL 模式允许多个读操作并发执行，但**写操作仍然是串行的**
 - N 个并发用户 = N 个 graph 同时跑 = 所有 checkpoint 读写排队
 - 并发量上去后会成为全局延迟瓶颈
 
-#### 2. Background Task 无生命周期管理
+#### 2. ~~Background Task 无生命周期管理~~ ✅ 已修复
 
-> `api/routers/chat.py:193` — send_message 中 fire-and-forget
-> ```python
-> asyncio.create_task(execute_and_push())
-> ```
->
-> `api/routers/chat.py:401` — resume_execution 中同样的问题
-> ```python
-> asyncio.create_task(execute_resume())
-> ```
-
-- 任务没有被持有引用，可能被 GC 回收（[Python 文档明确警告](https://docs.python.org/3/library/asyncio-task.html#creating-tasks)）
-- 没有并发数量限制 — N 个用户同时发消息 = N 个并发 LLM 调用
-- 服务器 shutdown 时运行中任务被直接 cancel，数据库可能处于不一致状态
+> **修复方案**: `TaskManager`（`api/services/task_manager.py`）— 持有任务引用防 GC、Semaphore 限制并发数（`MAX_CONCURRENT_TASKS`）、graceful shutdown 支持。`chat.py` 中 `asyncio.create_task()` 已替换为 `task_manager.submit()`。
 
 #### 3. SQLite 主数据库写并发限制
 
@@ -161,27 +149,9 @@ Background task 中的 session 生命周期覆盖整个 graph 执行期间（可
 
 ### P1: 重要 — 会导致资源泄漏
 
-#### 4. StreamManager 内存泄漏
+#### 4. ~~StreamManager 内存泄漏~~ ✅ 已修复
 
-关闭的 stream 不会从 `streams` 字典中移除，`_closed_streams` set 也只增不减：
-
-> `api/services/stream_manager.py:110` — streams dict 只增不减
-> ```python
-> self.streams: Dict[str, StreamContext] = {}
-> ```
->
-> `api/services/stream_manager.py:114` — closed 记录集合只增不减
-> ```python
-> self._closed_streams: set = set()
-> ```
->
-> `api/services/stream_manager.py:265` — 注释说"延迟清理"但没有实际清理逻辑
-> ```python
-> # 注意：不立即从字典中移除，保留引用以便 push_event 能检测到 closed 状态
-> # 延迟清理会在下一次 create_stream 或 TTL 时处理
-> ```
-
-长时间运行后内存会持续增长。
+> **修复方案**: `_close_stream_internal()` 关闭后启动延迟清理任务（5 秒后从 `streams` 字典和 `_closed_streams` 中移除）。`push_event` 在关闭后短时间内仍能检测到 closed 状态，但不会无限积累。
 
 #### 5. Graph 重复编译
 
@@ -199,14 +169,9 @@ Graph 结构本身是无状态的（状态存在 checkpointer 里），理论上
 
 ### P2: 可接受 — 生产环境应解决
 
-#### 6. 没有请求级超时
+#### 6. ~~没有请求级超时~~ ✅ 已修复
 
-> `api/config.py:31` — 定义了但未使用
-> ```python
-> STREAM_TIMEOUT: int = 300    # 秒，最大执行时间
-> ```
-
-Graph 执行可能因 LLM 调用卡住而永远不返回。`chat.py` 中的 `execute_and_push()` 和 `execute_resume()` 均没有 timeout 保护。
+> **修复方案**: `chat.py` 中 `execute_and_push()` 和 `execute_resume()` 的 `async for` 循环外层包裹 `async with asyncio.timeout(config.STREAM_TIMEOUT)`，超时后推送 error 事件到 stream。
 
 #### 7. 错误信息泄露
 
@@ -222,18 +187,9 @@ Background task 的异常直接通过 `str(e)` 推送给前端，可能包含内
 > "data": {"success": False, "error": str(e)}
 > ```
 
-#### 8. SSE 无 Heartbeat
+#### 8. ~~SSE 无 Heartbeat~~ ✅ 已修复
 
-> `api/routers/stream.py:93-101` — 没有 heartbeat 机制
-> ```python
-> return StreamingResponse(
->     event_generator(),
->     media_type="text/event-stream",
->     ...
-> )
-> ```
-
-LLM 调用可能耗时 30 秒以上，期间 SSE 连接无数据传输，可能被中间的 proxy/load balancer 超时断开。需要定期发送 `:ping\n\n` 注释保持连接。
+> **修复方案**: `StreamManager.consume_events()` 新增 `heartbeat_interval` 参数，使用 `asyncio.wait_for` 包装 `queue.get()`，超时时 yield `{"type": "__ping__"}` 哨兵事件。`stream.py` 检测到 `__ping__` 时输出 `: ping\n\n` SSE 注释。间隔由 `config.SSE_PING_INTERVAL`（默认 15 秒）控制。
 
 #### 9. 无认证鉴权
 
@@ -249,58 +205,15 @@ LLM 调用可能耗时 30 秒以上，期间 SSE 连接无数据传输，可能�
 
 ## 演进路线
 
-### Phase 0: 应用层加固（当前单进程部署即可受益）
+### Phase 0: 应用层加固 ✅ 已完成
 
 **目标**: 不引入新依赖，修复当前架构中最危险的问题。
 
-#### Task Manager — 管理 background task 生命周期
-
-```python
-class TaskManager:
-    """
-    管理 graph 执行的后台任务
-
-    职责：
-    - 持有任务引用，防止 GC
-    - Semaphore 限制并发数
-    - Graceful shutdown 支持
-    """
-
-    def __init__(self, max_concurrent: int = 10):
-        self._tasks: dict[str, asyncio.Task] = {}
-        self._semaphore = asyncio.Semaphore(max_concurrent)
-
-    async def submit(self, task_id: str, coro) -> asyncio.Task:
-        async def _wrapped():
-            async with self._semaphore:
-                try:
-                    await coro
-                finally:
-                    self._tasks.pop(task_id, None)
-        task = asyncio.create_task(_wrapped())
-        self._tasks[task_id] = task
-        return task
-
-    async def shutdown(self, timeout: float = 30):
-        """等待所有运行中任务完成或超时后 cancel"""
-        if self._tasks:
-            _, pending = await asyncio.wait(
-                self._tasks.values(), timeout=timeout
-            )
-            for task in pending:
-                task.cancel()
-```
-
-集成方式：
-- 作为全局单例在 `init_globals()` 中初始化
-- `chat.py` 中 `asyncio.create_task()` 改为 `task_manager.submit(thread_id, ...)`
-- `close_globals()` 中调用 `task_manager.shutdown()`
-
-#### 其他加固项
-
-- 给 graph 执行加 `asyncio.timeout(config.STREAM_TIMEOUT)` 保护
-- StreamManager 关闭 stream 时从字典中移除（延迟几秒后清理）
-- SSE 加 heartbeat（每 15 秒发送 `:ping\n\n`）
+已实现：
+- **TaskManager**（`api/services/task_manager.py`）：持有任务引用防 GC、Semaphore 限制并发数、graceful shutdown
+- **执行超时**：`asyncio.timeout(config.STREAM_TIMEOUT)` 保护 graph 执行
+- **StreamManager 延迟清理**：关闭后 5 秒自动从字典移除，防止内存泄漏
+- **SSE Heartbeat**：每 `SSE_PING_INTERVAL` 秒发送 `: ping\n\n` 注释保持连接
 
 ### Phase 1: Redis 引入 — 支持多 Worker 部署
 

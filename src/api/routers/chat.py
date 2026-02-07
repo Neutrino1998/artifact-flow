@@ -19,6 +19,7 @@ from api.config import config
 from api.dependencies import (
     get_conversation_manager,
     get_stream_manager,
+    get_task_manager,
 )
 from api.schemas.chat import (
     ChatRequest,
@@ -31,6 +32,7 @@ from api.schemas.chat import (
     MessageResponse,
 )
 from api.services.stream_manager import StreamManager
+from api.services.task_manager import TaskManager
 from core.conversation_manager import ConversationManager
 from repositories.base import NotFoundError
 from utils.logger import get_logger
@@ -45,6 +47,7 @@ async def send_message(
     request: ChatRequest,
     conversation_manager: ConversationManager = Depends(get_conversation_manager),
     stream_manager: StreamManager = Depends(get_stream_manager),
+    task_manager: TaskManager = Depends(get_task_manager),
 ):
     """
     发送新消息
@@ -121,16 +124,25 @@ async def send_message(
             # Graph 执行独立于 SSE 连接：即使前端断开，graph 仍运行到完成，结果持久化到数据库
             stream_closed = False
             try:
-                async for event in ctrl.stream_execute(
-                    content=request.content,
-                    conversation_id=conversation_id,
-                    parent_message_id=request.parent_message_id,
-                ):
-                    if stream_closed:
-                        continue
-                    if not await stream_manager.push_event(thread_id, event):
-                        logger.info(f"Stream {thread_id} closed, graph will continue to completion")
-                        stream_closed = True
+                async with asyncio.timeout(config.STREAM_TIMEOUT):
+                    async for event in ctrl.stream_execute(
+                        content=request.content,
+                        conversation_id=conversation_id,
+                        parent_message_id=request.parent_message_id,
+                    ):
+                        if stream_closed:
+                            continue
+                        if not await stream_manager.push_event(thread_id, event):
+                            logger.info(f"Stream {thread_id} closed, graph will continue to completion")
+                            stream_closed = True
+
+            except TimeoutError:
+                logger.error(f"Graph execution timed out after {config.STREAM_TIMEOUT}s for thread {thread_id}")
+                await stream_manager.push_event(thread_id, {
+                    "type": "error",
+                    "timestamp": datetime.now().isoformat(),
+                    "data": {"success": False, "error": f"Execution timed out after {config.STREAM_TIMEOUT}s"}
+                })
 
             except Exception as e:
                 logger.exception(f"Error in graph execution: {e}")
@@ -140,8 +152,8 @@ async def send_message(
                     "data": {"success": False, "error": str(e)}
                 })
 
-    # 4. 创建独立任务
-    asyncio.create_task(execute_and_push())
+    # 4. 提交到 TaskManager（持有引用 + 并发控制）
+    await task_manager.submit(thread_id, execute_and_push())
 
     return ChatResponse(
         conversation_id=conversation_id,
@@ -271,6 +283,7 @@ async def resume_execution(
     conv_id: str,
     request: ResumeRequest,
     stream_manager: StreamManager = Depends(get_stream_manager),
+    task_manager: TaskManager = Depends(get_task_manager),
 ):
     """
     恢复中断的执行（权限确认后）
@@ -332,17 +345,26 @@ async def resume_execution(
             # Graph 执行独立于 SSE 连接：即使前端断开，graph 仍运行到完成，结果持久化到数据库
             stream_closed = False
             try:
-                async for event in ctrl.stream_execute(
-                    thread_id=thread_id,
-                    conversation_id=conv_id,
-                    message_id=request.message_id,
-                    resume_data=resume_data,
-                ):
-                    if stream_closed:
-                        continue
-                    if not await stream_manager.push_event(thread_id, event):
-                        logger.info(f"Stream {thread_id} closed, graph will continue to completion")
-                        stream_closed = True
+                async with asyncio.timeout(config.STREAM_TIMEOUT):
+                    async for event in ctrl.stream_execute(
+                        thread_id=thread_id,
+                        conversation_id=conv_id,
+                        message_id=request.message_id,
+                        resume_data=resume_data,
+                    ):
+                        if stream_closed:
+                            continue
+                        if not await stream_manager.push_event(thread_id, event):
+                            logger.info(f"Stream {thread_id} closed, graph will continue to completion")
+                            stream_closed = True
+
+            except TimeoutError:
+                logger.error(f"Resume execution timed out after {config.STREAM_TIMEOUT}s for thread {thread_id}")
+                await stream_manager.push_event(thread_id, {
+                    "type": "error",
+                    "timestamp": datetime.now().isoformat(),
+                    "data": {"success": False, "error": f"Execution timed out after {config.STREAM_TIMEOUT}s"}
+                })
 
             except Exception as e:
                 logger.exception(f"Error in resume execution: {e}")
@@ -352,7 +374,7 @@ async def resume_execution(
                     "data": {"success": False, "error": str(e)}
                 })
 
-    asyncio.create_task(execute_resume())
+    await task_manager.submit(thread_id, execute_resume())
 
     return ResumeResponse(
         stream_url=f"/api/v1/stream/{thread_id}"

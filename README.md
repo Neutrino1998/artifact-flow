@@ -374,7 +374,8 @@ artifact-flow/
 │       │   ├── artifact.py       # Artifact 相关 schema
 │       │   └── events.py         # SSE 事件 schema
 │       ├── services/             # 服务层
-│       │   └── stream_manager.py # 事件缓冲队列管理
+│       │   ├── stream_manager.py # 事件缓冲队列管理
+│       │   └── task_manager.py   # 后台任务生命周期管理
 │       └── utils/
 │           └── sse.py            # SSE 响应构建器
 ├── frontend/           # Next.js 前端（详见 frontend/README.md）

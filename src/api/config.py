@@ -31,6 +31,9 @@ class APIConfig(BaseSettings):
     STREAM_TIMEOUT: int = 300    # 秒，最大执行时间
     STREAM_TTL: int = 30         # 秒，队列 TTL（前端未连接时自动清理）
 
+    # 并发控制
+    MAX_CONCURRENT_TASKS: int = 10  # 最大并发 Graph 执行数
+
     # 分页默认值
     DEFAULT_PAGE_SIZE: int = 20
     MAX_PAGE_SIZE: int = 100

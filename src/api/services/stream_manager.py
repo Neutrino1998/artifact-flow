@@ -184,17 +184,22 @@ class StreamManager:
         await context.queue.put(event)
         return True
 
-    async def consume_events(self, thread_id: str) -> AsyncGenerator[Dict[str, Any], None]:
+    async def consume_events(
+        self, thread_id: str, heartbeat_interval: Optional[float] = None
+    ) -> AsyncGenerator[Dict[str, Any], None]:
         """
         消费事件（前端 SSE 连接时调用）
 
         从队列中取出事件并 yield。遇到终结事件（complete/error）后退出。
+        当设置 heartbeat_interval 时，在等待事件超时后会 yield 一个
+        ``{"type": "__ping__"}`` 哨兵事件，调用方应将其转换为 SSE 注释。
 
         Args:
             thread_id: 线程 ID
+            heartbeat_interval: 心跳间隔（秒），None 表示不发送心跳
 
         Yields:
-            事件字典
+            事件字典（或 __ping__ 哨兵事件）
 
         Raises:
             StreamNotFoundError: 如果 stream 不存在
@@ -214,7 +219,17 @@ class StreamManager:
 
         try:
             while True:
-                event = await context.queue.get()
+                if heartbeat_interval is not None:
+                    try:
+                        event = await asyncio.wait_for(
+                            context.queue.get(), timeout=heartbeat_interval
+                        )
+                    except asyncio.TimeoutError:
+                        yield {"type": "__ping__"}
+                        continue
+                else:
+                    event = await context.queue.get()
+
                 yield event
 
                 # 终结事件后退出
@@ -242,6 +257,9 @@ class StreamManager:
         """
         内部关闭方法（需要在锁内调用）
 
+        关闭后启动延迟清理任务：5 秒后从 streams 字典和 _closed_streams 中移除。
+        这样 push_event 在关闭后短时间内仍能检测到 closed 状态，但不会无限积累。
+
         Args:
             thread_id: 线程 ID
 
@@ -262,11 +280,29 @@ class StreamManager:
             context.ttl_task.cancel()
             context.ttl_task = None
 
-        # 注意：不立即从字典中移除，保留引用以便 push_event 能检测到 closed 状态
-        # 延迟清理会在下一次 create_stream 或 TTL 时处理
-        logger.debug(f"Stream {thread_id} closed")
+        # 启动延迟清理任务（5 秒后从字典中移除）
+        asyncio.create_task(self._delayed_cleanup(thread_id, delay=5.0))
+
+        logger.debug(f"Stream {thread_id} closed (delayed cleanup scheduled)")
 
         return True
+
+    async def _delayed_cleanup(self, thread_id: str, delay: float = 5.0) -> None:
+        """
+        延迟清理：从 streams 字典和 _closed_streams 中移除已关闭的 stream
+
+        Args:
+            thread_id: 线程 ID
+            delay: 延迟时间（秒）
+        """
+        await asyncio.sleep(delay)
+
+        async with self._lock:
+            context = self.streams.get(thread_id)
+            if context and context.status == "closed":
+                del self.streams[thread_id]
+                self._closed_streams.discard(thread_id)
+                logger.debug(f"Stream {thread_id} cleaned up from memory")
 
     def get_stream_status(self, thread_id: str) -> Optional[str]:
         """
