@@ -70,6 +70,7 @@ class StreamContext:
     created_at: datetime = field(default_factory=datetime.now)
     status: Literal["pending", "streaming", "closed"] = "pending"
     ttl_task: Optional[asyncio.Task] = None
+    cleanup_task: Optional[asyncio.Task] = None
     cancelled: asyncio.Event = field(default_factory=asyncio.Event)
 
 
@@ -280,8 +281,10 @@ class StreamManager:
             context.ttl_task.cancel()
             context.ttl_task = None
 
-        # 启动延迟清理任务（5 秒后从字典中移除）
-        asyncio.create_task(self._delayed_cleanup(thread_id, delay=5.0))
+        # 启动延迟清理任务（5 秒后从字典中移除），持有引用防 GC
+        context.cleanup_task = asyncio.create_task(
+            self._delayed_cleanup(thread_id, delay=5.0)
+        )
 
         logger.debug(f"Stream {thread_id} closed (delayed cleanup scheduled)")
 

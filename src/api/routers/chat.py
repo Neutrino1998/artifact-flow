@@ -35,7 +35,7 @@ from api.services.stream_manager import StreamManager
 from api.services.task_manager import TaskManager
 from core.conversation_manager import ConversationManager
 from repositories.base import NotFoundError
-from utils.logger import get_logger
+from utils.logger import get_logger, set_request_context
 
 logger = get_logger("ArtifactFlow")
 
@@ -78,7 +78,10 @@ async def send_message(
     # 2. 创建 stream
     await stream_manager.create_stream(thread_id)
 
-    # 3. 启动后台任务
+    # 3. 设置请求上下文（background task 通过 asyncio context 继承自动获取）
+    set_request_context(thread_id=thread_id, conv_id=conversation_id)
+
+    # 4. 启动后台任务
     # 注意：不能直接用 BackgroundTasks，因为依赖（controller）会在请求结束后失效
     # 需要创建一个独立的任务
     async def execute_and_push():
@@ -152,7 +155,7 @@ async def send_message(
                     "data": {"success": False, "error": str(e)}
                 })
 
-    # 4. 提交到 TaskManager（持有引用 + 并发控制）
+    # 5. 提交到 TaskManager（持有引用 + 并发控制）
     await task_manager.submit(thread_id, execute_and_push())
 
     return ChatResponse(
@@ -308,6 +311,9 @@ async def resume_execution(
         "type": "permission",
         "approved": request.approved
     }
+
+    # 设置请求上下文（background task 通过 asyncio context 继承自动获取）
+    set_request_context(thread_id=thread_id, conv_id=conv_id)
 
     # 启动后台任务
     async def execute_resume():

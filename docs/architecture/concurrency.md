@@ -149,26 +149,9 @@ Background task 中的 session 生命周期覆盖整个 graph 执行期间（可
 
 ### P1: 重要 — 影响并发调试和运行可靠性
 
-#### 4. 日志无请求上下文（可观测性缺失）
+#### 4. ~~日志无请求上下文（可观测性缺失）~~ ✅ 已修复
 
-所有模块共享同一个 Logger 实例（`get_logger("ArtifactFlow")`），日志格式中没有任何请求级标识符：
-
-> `utils/logger.py:91` — 无 request_id / thread_id / conversation_id
-> ```python
-> '%(asctime)s [%(levelname)s] %(filename)s:%(funcName)s:%(lineno)d - %(message)s'
-> ```
-
-并发请求的日志完全无法区分：
-
-```
-14:23:05 [INFO] graph.py:execute:142 - Starting graph execution   # 用户 A？用户 B？
-14:23:05 [INFO] graph.py:execute:142 - Starting graph execution   # 无从判断
-14:23:06 [ERROR] base.py:call_llm:89 - LLM call failed            # 属于哪个请求？
-```
-
-部分代码（如 `StreamManager`）手动在消息中包含 `thread_id`，但这不一致且不可靠。没有统一的请求追踪能力，并发环境下排查问题几乎不可能。
-
-详细方案见 [演进路线 — Phase 0.5: 可观测性基础](#phase-05-可观测性基础--多用户日志追踪)。
+> **修复方案**: 使用 `contextvars` 实现请求级日志上下文。`utils/logger.py` 新增 `RequestContextFilter`，从 `ContextVar` 读取 `thread_id` / `conv_id` 自动注入到每条日志。请求入口（`chat.py` 的 `send_message` / `resume_execution`）调用 `set_request_context()` 设置上下文，background task 通过 `asyncio.create_task` 自动继承。日志格式更新为 `[conv_id|thread_id]`，无上下文时显示 `[no-ctx|no-ctx]`。详见 [Phase 0.5](#phase-05-可观测性基础--多用户日志追踪-✅-已完成)。
 
 ### P2: 可接受 — 资源泄漏风险
 
@@ -236,47 +219,108 @@ Background task 的异常直接通过 `str(e)` 推送给前端，可能包含内
 - **TaskManager**（`api/services/task_manager.py`）：持有任务引用防 GC、Semaphore 限制并发数、graceful shutdown
 - **执行超时**：`asyncio.timeout(config.STREAM_TIMEOUT)` 保护 graph 执行
 - **StreamManager 延迟清理**：关闭后 5 秒自动从字典移除，防止内存泄漏
+- **StreamManager cleanup_task 引用**：`_delayed_cleanup` 的 `asyncio.create_task` 引用保存到 `StreamContext.cleanup_task`，防止 GC 回收
 - **SSE Heartbeat**：每 `SSE_PING_INTERVAL` 秒发送 `: ping\n\n` 注释保持连接
 
-### Phase 0.5: 可观测性基础 — 多用户日志追踪
+### Phase 0.5: 可观测性基础 — 多用户日志追踪 ✅ 已完成
 
 **目标**: 让并发请求的日志可追踪、可区分，为后续所有并发改进提供调试基础。
 
-**核心方案**: 使用 `contextvars` 实现请求级日志上下文。`contextvars` 天然支持 asyncio —— 每个 `asyncio.Task` 自动继承创建时的 context 副本，background task 中的日志会自动携带创建时设置的 `thread_id`。
+**核心方案**: 使用 `contextvars` 实现请求级日志上下文。`contextvars` 天然支持 asyncio —— 每个 `asyncio.Task` 自动继承创建时的 context 副本，background task 中的日志会自动携带创建时设置的 `thread_id` / `conv_id`。
+
+已实现：
+
+- **`RequestContextFilter`**（`utils/logger.py`）：从 `ContextVar` 读取 `thread_id` / `conv_id`，自动注入到每条日志记录
+- **`set_request_context()`**（`utils/logger.py`）：在请求入口设置上下文的辅助函数
+- **请求入口集成**（`api/routers/chat.py`）：`send_message()` 和 `resume_execution()` 在启动 background task 前调用 `set_request_context()`
+- **日志格式**：控制台和文件格式均更新为 `[conv_id|thread_id]`，无上下文时显示 `[no-ctx|no-ctx]`
 
 ```python
-# 1. 定义 context var
-import contextvars
+# utils/logger.py — 核心实现
 _request_ctx: contextvars.ContextVar[dict] = contextvars.ContextVar('request_ctx', default={})
 
-# 2. 在请求入口设置（chat.py send_message / resume_execution）
-_request_ctx.set({"thread_id": thread_id, "conv_id": conversation_id})
+def set_request_context(*, thread_id: str = "", conv_id: str = "") -> None:
+    _request_ctx.set({"thread_id": thread_id, "conv_id": conv_id})
 
-# 3. 自定义 logging.Filter 自动注入到每条日志
 class RequestContextFilter(logging.Filter):
     def filter(self, record):
         ctx = _request_ctx.get({})
-        record.thread_id = ctx.get("thread_id", "-")
-        record.conv_id = ctx.get("conv_id", "-")
+        record.thread_id = ctx.get("thread_id", "no-ctx")
+        record.conv_id = ctx.get("conv_id", "no-ctx")
         return True
 
-# 4. 更新日志格式
-'%(asctime)s [%(levelname)s] [%(thread_id)s] %(filename)s:%(funcName)s:%(lineno)d - %(message)s'
+# 日志格式（控制台）
+'%(asctime)s [%(levelname)s] [%(conv_id)s|%(thread_id)s] %(filename)s:%(funcName)s:%(lineno)d - %(message)s'
 ```
 
 改造后的日志效果：
 
 ```
-14:23:05 [INFO] [thd-abc123] graph.py:execute:142 - Starting graph execution
-14:23:05 [INFO] [thd-def456] graph.py:execute:142 - Starting graph execution
-14:23:06 [ERROR] [thd-abc123] base.py:call_llm:89 - LLM call failed    # 立即可定位到用户 A 的请求
+14:23:05 [INFO] [no-ctx|no-ctx] main.py:startup:10 - Server starting               # 非请求上下文
+14:23:05 [INFO] [conv-abc|thd-abc123] graph.py:execute:142 - Starting graph execution  # 用户 A
+14:23:05 [INFO] [conv-abc|thd-def456] graph.py:execute:142 - Starting graph execution  # 用户 A 的第二次消息
+14:23:05 [INFO] [conv-xyz|thd-ghi789] graph.py:execute:142 - Starting graph execution  # 用户 B
+14:23:06 [ERROR] [conv-abc|thd-abc123] base.py:call_llm:89 - LLM call failed           # 立即可定位
 ```
 
-实施要点：
-- 改动集中在 `utils/logger.py`（添加 Filter + 更新 Formatter）和请求入口（设置 context）
-- 不需要修改任何 agent / tool / manager 代码中的 `logger.xxx()` 调用
-- `asyncio.create_task()` 创建的 background task 自动继承 context，无需额外处理
-- 同时修复 StreamManager `_delayed_cleanup` 中 fire-and-forget 的 `asyncio.create_task`（应保存引用，与 TaskManager 设计理念一致）
+原理：为什么 `set_request_context` 只需在入口设置一次，所有层级的日志都能自动携带上下文？
+
+**1) Filter 挂在 Handler 上，所有 `logger.info()` 调用共享同一条输出路径：**
+
+```mermaid
+graph TB
+    subgraph Callers["各模块调用 logger.info()"]
+        G["graph.py<br/><code>logger.info('Starting graph')</code>"]
+        B["base.py<br/><code>logger.info('LLM call failed')</code>"]
+        C["controller.py<br/><code>logger.info('Execute done')</code>"]
+    end
+
+    L["Logger('ArtifactFlow')<br/><i>同一个实例，缓存在 _logger_cache</i>"]
+
+    G --> L
+    B --> L
+    C --> L
+
+    subgraph Handlers["Handler + Filter（输出时动态读取 context）"]
+        H1["Console Handler<br/>+ RequestContextFilter ✂<br/><i>读 contextvars → 注入字段</i>"]
+        H2["File Handler<br/>+ RequestContextFilter ✂<br/><i>读 contextvars → 注入字段</i>"]
+        H3["Error File Handler<br/>+ RequestContextFilter ✂<br/><i>读 contextvars → 注入字段</i>"]
+    end
+
+    L --> H1
+    L --> H2
+    L --> H3
+```
+
+不管哪个文件调用 `logger.info()`，日志都会经过 Filter —— Filter 在**输出时**动态读取当前 context。
+
+**2) `contextvars` 跟着执行流走，`create_task` 自动继承：**
+
+```
+send_message()                              ← HTTP 请求协程
+  │
+  ├─ set_request_context(thd=A, conv=X)     ← 设置一次
+  │
+  └─ task_manager.submit()
+       └─ asyncio.create_task()             ← ★ 自动拷贝父协程的 context 快照
+            │
+            └─ execute_and_push()
+                 └─ ctrl.stream_execute()
+                      └─ graph.execute()
+                           └─ lead_agent.run()
+                                └─ logger.info("...")
+                                     │
+                                     ▼
+                                   Filter 读 _request_ctx
+                                     → 拿到 thd=A, conv=X ✅
+```
+
+`asyncio.create_task()` 创建新 task 时，自动复制当前协程的 context 副本。因此从 `execute_and_push` 到最深层的 agent/tool 代码，都能读到同一份上下文，**不需要层层传参**。
+
+设计要点：
+- 改动集中在 `utils/logger.py` 和 `api/routers/chat.py`，不需要修改任何 agent / tool / manager 代码中的 `logger.xxx()` 调用
+- `TaskManager.submit()` 内部直接调用 `asyncio.create_task()`，context 从调用方继承，链路完整
+- 后续 Phase 3 可升级为 JSON 结构化日志格式，便于对接 OpenTelemetry trace/span
 
 ### Phase 1: Redis 引入 — 支持多 Worker 部署
 
@@ -345,7 +389,7 @@ async def create_redis_checkpointer(redis_url: str):
 - 认证鉴权（JWT / OAuth）
 - 分布式锁（防止同一 conversation 的并发写入冲突）
 - 错误信息脱敏（生产环境不暴露内部异常）
-- Metrics 采集（Prometheus / OpenTelemetry，基于 Phase 0.5 的请求上下文扩展 trace/span）
+- Metrics 采集（Prometheus / OpenTelemetry，基于 Phase 0.5 已实现的 `contextvars` 请求上下文扩展 trace/span，升级为 JSON 结构化日志）
 - Graph 编译缓存（编译一次，通过 state 传递 `artifact_manager` 而非闭包捕获）
 
 ---

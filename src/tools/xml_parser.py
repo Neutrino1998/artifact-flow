@@ -54,8 +54,17 @@ class XMLToolCallParser:
         except ET.ParseError:
             pass
 
+        # 修复 LLM 常见错误：CDATA 后漏掉闭合标签
+        # 例如 <content><![CDATA[...]]></params> → <content><![CDATA[...]]></content></params>
+        repaired = XMLToolCallParser._repair_unclosed_cdata_tags(content)
+        if repaired != content:
+            try:
+                return XMLToolCallParser._parse_with_etree(repaired)
+            except ET.ParseError:
+                pass
+
         # Fallback: 正则解析（处理 LLM 格式不严格的情况）
-        return XMLToolCallParser._fallback_parse(content)
+        return XMLToolCallParser._fallback_parse(repaired)
 
     @staticmethod
     def _parse_with_etree(content: str) -> Optional[ToolCall]:
@@ -124,6 +133,33 @@ class XMLToolCallParser:
             pass
 
         return text
+
+    @staticmethod
+    def _repair_unclosed_cdata_tags(content: str) -> str:
+        """
+        修复 CDATA 后缺失闭合标签的问题
+
+        LLM 生成长内容时容易漏掉 CDATA 之后的闭合标签，例如：
+            <content><![CDATA[...long text...]]>
+            </params>
+        修复为：
+            <content><![CDATA[...long text...]]></content>
+            </params>
+        """
+        # 匹配 <tag><![CDATA[...]]> 后面不是 </tag> 的情况
+        def _repair_match(m):
+            tag = m.group(1)
+            cdata = m.group(2)
+            after = m.group(3)
+            return f'<{tag}><![CDATA[{cdata}]]></{tag}>{after}'
+
+        # CDATA 内容用 (?:(?!\]\]>).)* 匹配，防止跨越 ]]> 边界回溯
+        return re.sub(
+            r'<(\w+)>\s*<!\[CDATA\[((?:(?!\]\]>).)*)\]\]>(?!\s*</\1>)(\s*<[/\w])',
+            _repair_match,
+            content,
+            flags=re.DOTALL,
+        )
 
     @staticmethod
     def _fallback_parse(content: str) -> Optional[ToolCall]:
