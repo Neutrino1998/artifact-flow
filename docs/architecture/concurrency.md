@@ -147,13 +147,36 @@ Background task 中的 session 生命周期覆盖整个 graph 执行期间（可
 - 超过 5 秒抛出 `database is locked` 错误
 - 长事务加剧锁持有时间
 
-### P1: 重要 — 会导致资源泄漏
+### P1: 重要 — 影响并发调试和运行可靠性
 
-#### 4. ~~StreamManager 内存泄漏~~ ✅ 已修复
+#### 4. 日志无请求上下文（可观测性缺失）
+
+所有模块共享同一个 Logger 实例（`get_logger("ArtifactFlow")`），日志格式中没有任何请求级标识符：
+
+> `utils/logger.py:91` — 无 request_id / thread_id / conversation_id
+> ```python
+> '%(asctime)s [%(levelname)s] %(filename)s:%(funcName)s:%(lineno)d - %(message)s'
+> ```
+
+并发请求的日志完全无法区分：
+
+```
+14:23:05 [INFO] graph.py:execute:142 - Starting graph execution   # 用户 A？用户 B？
+14:23:05 [INFO] graph.py:execute:142 - Starting graph execution   # 无从判断
+14:23:06 [ERROR] base.py:call_llm:89 - LLM call failed            # 属于哪个请求？
+```
+
+部分代码（如 `StreamManager`）手动在消息中包含 `thread_id`，但这不一致且不可靠。没有统一的请求追踪能力，并发环境下排查问题几乎不可能。
+
+详细方案见 [演进路线 — Phase 0.5: 可观测性基础](#phase-05-可观测性基础--多用户日志追踪)。
+
+### P2: 可接受 — 资源泄漏风险
+
+#### 6. ~~StreamManager 内存泄漏~~ ✅ 已修复
 
 > **修复方案**: `_close_stream_internal()` 关闭后启动延迟清理任务（5 秒后从 `streams` 字典和 `_closed_streams` 中移除）。`push_event` 在关闭后短时间内仍能检测到 closed 状态，但不会无限积累。
 
-#### 5. Graph 重复编译
+#### 7. Graph 重复编译
 
 每个请求都会执行：创建 3 个 Agent → 创建所有 Tool → 注册到 Registry → 编译 StateGraph：
 
@@ -167,13 +190,13 @@ Background task 中的 session 生命周期覆盖整个 graph 执行期间（可
 
 Graph 结构本身是无状态的（状态存在 checkpointer 里），理论上可以编译一次后复用。当前设计是因为 `artifact_manager` 通过闭包绑定到 graph 节点中，导致 graph 与请求级实例耦合。
 
-### P2: 可接受 — 生产环境应解决
+### P3: 可接受 — 生产环境应解决
 
-#### 6. ~~没有请求级超时~~ ✅ 已修复
+#### 8. ~~没有请求级超时~~ ✅ 已修复
 
 > **修复方案**: `chat.py` 中 `execute_and_push()` 和 `execute_resume()` 的 `async for` 循环外层包裹 `async with asyncio.timeout(config.STREAM_TIMEOUT)`，超时后推送 error 事件到 stream。
 
-#### 7. 错误信息泄露
+#### 9. 错误信息泄露
 
 Background task 的异常直接通过 `str(e)` 推送给前端，可能包含内部文件路径、数据库信息等：
 
@@ -187,11 +210,11 @@ Background task 的异常直接通过 `str(e)` 推送给前端，可能包含内
 > "data": {"success": False, "error": str(e)}
 > ```
 
-#### 8. ~~SSE 无 Heartbeat~~ ✅ 已修复
+#### 10. ~~SSE 无 Heartbeat~~ ✅ 已修复
 
 > **修复方案**: `StreamManager.consume_events()` 新增 `heartbeat_interval` 参数，使用 `asyncio.wait_for` 包装 `queue.get()`，超时时 yield `{"type": "__ping__"}` 哨兵事件。`stream.py` 检测到 `__ping__` 时输出 `: ping\n\n` SSE 注释。间隔由 `config.SSE_PING_INTERVAL`（默认 15 秒）控制。
 
-#### 9. 无认证鉴权
+#### 11. 无认证鉴权
 
 > `api/dependencies.py:227` — 预留了但未实现
 > ```python
@@ -214,6 +237,46 @@ Background task 的异常直接通过 `str(e)` 推送给前端，可能包含内
 - **执行超时**：`asyncio.timeout(config.STREAM_TIMEOUT)` 保护 graph 执行
 - **StreamManager 延迟清理**：关闭后 5 秒自动从字典移除，防止内存泄漏
 - **SSE Heartbeat**：每 `SSE_PING_INTERVAL` 秒发送 `: ping\n\n` 注释保持连接
+
+### Phase 0.5: 可观测性基础 — 多用户日志追踪
+
+**目标**: 让并发请求的日志可追踪、可区分，为后续所有并发改进提供调试基础。
+
+**核心方案**: 使用 `contextvars` 实现请求级日志上下文。`contextvars` 天然支持 asyncio —— 每个 `asyncio.Task` 自动继承创建时的 context 副本，background task 中的日志会自动携带创建时设置的 `thread_id`。
+
+```python
+# 1. 定义 context var
+import contextvars
+_request_ctx: contextvars.ContextVar[dict] = contextvars.ContextVar('request_ctx', default={})
+
+# 2. 在请求入口设置（chat.py send_message / resume_execution）
+_request_ctx.set({"thread_id": thread_id, "conv_id": conversation_id})
+
+# 3. 自定义 logging.Filter 自动注入到每条日志
+class RequestContextFilter(logging.Filter):
+    def filter(self, record):
+        ctx = _request_ctx.get({})
+        record.thread_id = ctx.get("thread_id", "-")
+        record.conv_id = ctx.get("conv_id", "-")
+        return True
+
+# 4. 更新日志格式
+'%(asctime)s [%(levelname)s] [%(thread_id)s] %(filename)s:%(funcName)s:%(lineno)d - %(message)s'
+```
+
+改造后的日志效果：
+
+```
+14:23:05 [INFO] [thd-abc123] graph.py:execute:142 - Starting graph execution
+14:23:05 [INFO] [thd-def456] graph.py:execute:142 - Starting graph execution
+14:23:06 [ERROR] [thd-abc123] base.py:call_llm:89 - LLM call failed    # 立即可定位到用户 A 的请求
+```
+
+实施要点：
+- 改动集中在 `utils/logger.py`（添加 Filter + 更新 Formatter）和请求入口（设置 context）
+- 不需要修改任何 agent / tool / manager 代码中的 `logger.xxx()` 调用
+- `asyncio.create_task()` 创建的 background task 自动继承 context，无需额外处理
+- 同时修复 StreamManager `_delayed_cleanup` 中 fire-and-forget 的 `asyncio.create_task`（应保存引用，与 TaskManager 设计理念一致）
 
 ### Phase 1: Redis 引入 — 支持多 Worker 部署
 
@@ -282,7 +345,7 @@ async def create_redis_checkpointer(redis_url: str):
 - 认证鉴权（JWT / OAuth）
 - 分布式锁（防止同一 conversation 的并发写入冲突）
 - 错误信息脱敏（生产环境不暴露内部异常）
-- Structured Logging + Metrics（可观测性）
+- Metrics 采集（Prometheus / OpenTelemetry，基于 Phase 0.5 的请求上下文扩展 trace/span）
 - Graph 编译缓存（编译一次，通过 state 传递 `artifact_manager` 而非闭包捕获）
 
 ---
