@@ -389,17 +389,17 @@ await graph.astream(
 
 ## Phase 6: 结果持久化
 
-执行完成后，Controller 保存结果：
+数据持久化采用**短事务模式**：每次写操作在 Repository 层立即 `flush() + commit()`，而非在 session 退出时统一提交。这避免了长事务持有 SQLite 写锁导致的 `database is locked` 错误。
 
 ```python
-# 更新消息的 graph_response
+# 更新消息的 graph_response（Repository 内部立即 commit）
 await self.conversation_manager.update_response_async(
     conv_id=conversation_id,
     message_id=message_id,
     response=final_response
 )
 
-# Artifact 变更已在执行过程中通过工具保存
+# Artifact 变更已在执行过程中通过工具保存（每次工具调用独立 commit）
 # 版本历史自动记录
 ```
 

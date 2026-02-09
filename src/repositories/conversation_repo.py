@@ -279,14 +279,15 @@ class ConversationRepository(BaseRepository[Conversation]):
         )
         
         self._session.add(message)
-        await self._session.flush()
-        await self._session.refresh(message)
-        
+
         # 更新对话的活跃分支
         conversation.active_branch = message_id
         conversation.updated_at = datetime.now()
+
         await self._session.flush()
-        
+        await self._session.commit()
+        await self._session.refresh(message)
+
         return message
     
     async def get_message(self, message_id: str) -> Optional[Message]:
@@ -336,14 +337,15 @@ class ConversationRepository(BaseRepository[Conversation]):
         """
         message = await self.get_message_or_raise(message_id)
         message.graph_response = response
-        await self._session.flush()
-        
+
         # 同时更新对话的 updated_at
         conversation = await self.get_conversation(message.conversation_id)
         if conversation:
             conversation.updated_at = datetime.now()
-            await self._session.flush()
-        
+
+        await self._session.flush()
+        await self._session.commit()
+
         return message
     
     async def get_conversation_messages(

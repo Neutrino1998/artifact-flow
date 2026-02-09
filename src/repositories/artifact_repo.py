@@ -77,6 +77,7 @@ class ArtifactRepository(BaseRepository[Artifact]):
             art_session = ArtifactSession(id=session_id)
             self._session.add(art_session)
             await self._session.flush()
+            await self._session.commit()
         return art_session
     
     # ========================================
@@ -131,8 +132,7 @@ class ArtifactRepository(BaseRepository[Artifact]):
         )
         
         self._session.add(artifact)
-        await self._session.flush()
-        
+
         # 创建初始版本
         version = ArtifactVersion(
             artifact_id=artifact_id,
@@ -142,11 +142,12 @@ class ArtifactRepository(BaseRepository[Artifact]):
             update_type="create",
             changes=None
         )
-        
+
         self._session.add(version)
         await self._session.flush()
+        await self._session.commit()
         await self._session.refresh(artifact)
-        
+
         return artifact
     
     async def get_artifact(
@@ -267,6 +268,7 @@ class ArtifactRepository(BaseRepository[Artifact]):
         
         await self._session.delete(artifact)
         await self._session.flush()
+        await self._session.commit()
         return True
     
     # ========================================
@@ -350,7 +352,8 @@ class ArtifactRepository(BaseRepository[Artifact]):
         
         self._session.add(version)
         await self._session.flush()
-        
+        await self._session.commit()
+
         # 重新加载 Artifact
         artifact = await self.get_artifact(session_id, artifact_id)
         return artifact
@@ -404,6 +407,7 @@ class ArtifactRepository(BaseRepository[Artifact]):
         artifact.title = new_title
         artifact.updated_at = datetime.now()
         await self._session.flush()
+        await self._session.commit()
         await self._session.refresh(artifact)
         return artifact
     

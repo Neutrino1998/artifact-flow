@@ -91,7 +91,7 @@ sequenceDiagram
 ```python
 PRAGMA journal_mode=WAL       # 读写可并发
 PRAGMA synchronous=NORMAL     # 平衡性能和安全
-PRAGMA busy_timeout=5000      # 写锁等待 5 秒
+PRAGMA busy_timeout=15000     # 写锁等待 15 秒
 PRAGMA foreign_keys=ON
 PRAGMA cache_size=-64000      # 64MB 缓存
 ```
@@ -127,25 +127,9 @@ WAL 模式允许多个读操作并发执行，但**写操作仍然是串行的**
 
 > **修复方案**: `TaskManager`（`api/services/task_manager.py`）— 持有任务引用防 GC、Semaphore 限制并发数（`MAX_CONCURRENT_TASKS`）、graceful shutdown 支持。`chat.py` 中 `asyncio.create_task()` 已替换为 `task_manager.submit()`。
 
-#### 3. SQLite 主数据库写并发限制
+#### 3. ~~SQLite 主数据库写并发限制~~ ✅ 已修复
 
-Background task 中的 session 生命周期覆盖整个 graph 执行期间（可能持续数分钟），期间的写操作会触发 SQLite 写锁竞争：
-
-> `api/routers/chat.py:152` — session 从 graph 开始持有到结束
-> ```python
-> async with db_manager.session() as session:
->     # ... 创建 controller，执行整个 graph（可能几分钟）...
-> ```
->
-> `db/database.py:155` — busy_timeout 只能缓解，不能根治
-> ```python
-> await conn.execute(text("PRAGMA busy_timeout=5000"))
-> ```
-
-即使配了 `busy_timeout=5000`：
-- 多个并发写操作排队等锁，最多等 5 秒
-- 超过 5 秒抛出 `database is locked` 错误
-- 长事务加剧锁持有时间
+> **修复方案**: 短事务模式 — 每次数据库写操作在 Repository 层立即 `flush() + commit()`，将写锁持有时间从"整个 graph 执行期间（数分钟）"缩短到"单次写操作（微秒级）"。`DatabaseManager.session()` 简化为纯生命周期管理（只负责 create + close），不再自动 commit/rollback，事务控制权完全交给 Repository 层。配合 `busy_timeout=15000` 和 `expire_on_commit=False`（允许中间 commit 后对象仍可用），并发写入不再触发 `database is locked` 错误。
 
 ### P1: 重要 — 影响并发调试和运行可靠性
 
@@ -372,16 +356,13 @@ async def create_redis_checkpointer(redis_url: str):
 
 ### Phase 2.5: 主数据库迁移（按需）
 
-**触发条件**: 当并发写入导致 `database is locked` 错误频繁出现时。
+**触发条件**: 当短事务模式仍无法满足并发需求时（例如极高写入频率）。
+
+> **注意**: 短事务重构（方案 B）已在 Phase 0 中实现，见 [已知局限 #3](#3-sqlite-主数据库写并发限制--已修复)。当前 SQLite + 短事务模式可满足中等并发场景。
 
 **方案 A** — 迁移到 PostgreSQL：
-- 彻底解决写并发问题
+- 彻底解决写并发问题（MVCC 支持真正的多写者）
 - SQLAlchemy 切换只需改 `DATABASE_URL` 和 driver
-
-**方案 B** — 短事务重构（继续使用 SQLite）：
-- 将 background task 中的长事务拆分为多个短事务
-- 每次数据库写操作单独开 session，而不是一个 session 贯穿整个 graph 执行
-- 适合用户量不大但需要改善稳定性的场景
 
 ### Phase 3: 生产化完善
 

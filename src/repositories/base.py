@@ -124,60 +124,64 @@ class BaseRepository(ABC, Generic[T]):
     async def add(self, entity: T) -> T:
         """
         添加新实体
-        
+
         Args:
             entity: 实体对象
-            
+
         Returns:
             添加后的实体（含自动生成的字段）
         """
         self._session.add(entity)
         await self._session.flush()
+        await self._session.commit()
         await self._session.refresh(entity)
         return entity
-    
+
     async def add_all(self, entities: List[T]) -> List[T]:
         """
         批量添加实体
-        
+
         Args:
             entities: 实体列表
-            
+
         Returns:
             添加后的实体列表
         """
         self._session.add_all(entities)
         await self._session.flush()
+        await self._session.commit()
         for entity in entities:
             await self._session.refresh(entity)
         return entities
-    
+
     async def update(self, entity: T) -> T:
         """
         更新实体
-        
+
         注意：此方法假设实体已在 Session 中。
         如果需要乐观锁，请使用子类的特定方法。
-        
+
         Args:
             entity: 实体对象
-            
+
         Returns:
             更新后的实体
         """
         await self._session.flush()
+        await self._session.commit()
         await self._session.refresh(entity)
         return entity
-    
+
     async def delete(self, entity: T) -> None:
         """
         删除实体
-        
+
         Args:
             entity: 实体对象
         """
         await self._session.delete(entity)
         await self._session.flush()
+        await self._session.commit()
     
     async def delete_by_id(self, id: Any) -> bool:
         """
@@ -200,8 +204,9 @@ class BaseRepository(ABC, Generic[T]):
     # ========================================
     
     async def flush(self) -> None:
-        """刷新 Session（将更改写入数据库但不提交）"""
+        """刷新并提交 Session（立即释放 SQLite write lock）"""
         await self._session.flush()
+        await self._session.commit()
     
     async def refresh(self, entity: T) -> T:
         """刷新实体（从数据库重新加载）"""

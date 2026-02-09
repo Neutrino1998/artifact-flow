@@ -249,17 +249,13 @@ class DatabaseManager:
 
     @asynccontextmanager
     async def session(self) -> AsyncGenerator[AsyncSession, None]:
-        """获取数据库会话"""
+        """获取数据库会话（纯生命周期管理，不自动 commit/rollback）"""
         if not self._initialized:
             await self.initialize()
 
         session = self._session_factory()
         try:
             yield session
-            await session.commit()
-        except Exception:
-            await session.rollback()
-            raise
         finally:
             await session.close()
 
@@ -310,9 +306,10 @@ class BaseRepository(ABC, Generic[T]):
         """检查实体是否存在"""
 
     async def add(self, entity: T) -> T:
-        """添加新实体"""
+        """添加新实体（flush + commit 立即释放写锁）"""
         self._session.add(entity)
         await self._session.flush()
+        await self._session.commit()
         await self._session.refresh(entity)
         return entity
 
@@ -320,6 +317,7 @@ class BaseRepository(ABC, Generic[T]):
         """批量添加实体"""
         self._session.add_all(entities)
         await self._session.flush()
+        await self._session.commit()
         for entity in entities:
             await self._session.refresh(entity)
         return entities
@@ -327,6 +325,7 @@ class BaseRepository(ABC, Generic[T]):
     async def update(self, entity: T) -> T:
         """更新实体（需已在 Session 中）"""
         await self._session.flush()
+        await self._session.commit()
         await self._session.refresh(entity)
         return entity
 
@@ -334,6 +333,7 @@ class BaseRepository(ABC, Generic[T]):
         """删除实体"""
         await self._session.delete(entity)
         await self._session.flush()
+        await self._session.commit()
 
     async def delete_by_id(self, id: Any) -> bool:
         """根据主键删除"""
