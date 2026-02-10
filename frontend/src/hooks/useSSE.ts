@@ -20,16 +20,14 @@ export function useSSE() {
   const abortRef = useRef<AbortController | null>(null);
 
   // Stream store actions
-  const setCurrentAgent = useStreamStore((s) => s.setCurrentAgent);
-  const setLastEventType = useStreamStore((s) => s.setLastEventType);
-  const addToolCall = useStreamStore((s) => s.addToolCall);
-  const updateToolCall = useStreamStore((s) => s.updateToolCall);
+  const pushSegment = useStreamStore((s) => s.pushSegment);
+  const updateCurrentSegment = useStreamStore((s) => s.updateCurrentSegment);
+  const addToolCallToSegment = useStreamStore((s) => s.addToolCallToSegment);
+  const updateToolCallInSegment = useStreamStore((s) => s.updateToolCallInSegment);
+  const snapshotSegments = useStreamStore((s) => s.snapshotSegments);
   const setPermissionRequest = useStreamStore((s) => s.setPermissionRequest);
   const setError = useStreamStore((s) => s.setError);
   const endStream = useStreamStore((s) => s.endStream);
-  const setReasoningContent = useStreamStore((s) => s.setReasoningContent);
-  const setIsThinking = useStreamStore((s) => s.setIsThinking);
-  const setStreamContent = useStreamStore((s) => s.setStreamContent);
 
   // Conversation store actions
   const setCurrent = useConversationStore((s) => s.setCurrent);
@@ -46,7 +44,6 @@ export function useSSE() {
   const refreshAfterComplete = useCallback(
     async (conversationId: string) => {
       try {
-        // Refresh conversation detail + list in parallel
         const [detail, list] = await Promise.all([
           api.getConversation(conversationId),
           api.listConversations(20, 0),
@@ -54,7 +51,6 @@ export function useSSE() {
         setCurrent(detail);
         setConversations(list.conversations, list.total, list.has_more);
 
-        // Refresh artifacts if session exists
         if (detail.session_id) {
           try {
             const artifacts = await api.listArtifacts(detail.session_id);
@@ -74,57 +70,54 @@ export function useSSE() {
   const handleEvent = useCallback(
     (event: SSEEvent, conversationId: string) => {
       const { type, data } = event;
-      setLastEventType(type);
 
       switch (type) {
         case StreamEventType.METADATA:
-          // Metadata already captured in startStream
           break;
 
-        case StreamEventType.AGENT_START:
-          setCurrentAgent(data?.agent_name as string ?? event.agent ?? null);
+        case StreamEventType.AGENT_START: {
+          const agentName = data?.agent_name as string ?? event.agent ?? 'Agent';
+          pushSegment(agentName);
           break;
+        }
 
         case StreamEventType.LLM_CHUNK: {
-          // Handle reasoning_content (thinking)
           const reasoning = data?.reasoning_content as string | undefined;
           if (reasoning !== undefined) {
-            setReasoningContent(reasoning);
-            if (!useStreamStore.getState().isThinking) {
-              setIsThinking(true);
-            }
+            updateCurrentSegment({ reasoningContent: reasoning, isThinking: true });
           }
 
-          // content is CUMULATIVE from backend
           const content = data?.content as string | undefined;
           if (content !== undefined) {
-            // Auto-fold thinking when content starts
-            if (useStreamStore.getState().isThinking) {
-              setIsThinking(false);
+            // Auto-fold thinking when content starts arriving
+            const currentSeg = useStreamStore.getState().segments;
+            const last = currentSeg[currentSeg.length - 1];
+            if (last?.isThinking) {
+              updateCurrentSegment({ isThinking: false });
             }
-            // Use RAF-throttled update
+            // Use RAF-throttled update for segment content
             scheduleContentUpdate(content);
           }
           break;
         }
 
         case StreamEventType.LLM_COMPLETE:
-          // Final content — set the full content (bypass throttle)
           if (data?.content) {
-            setStreamContent(data.content as string);
+            updateCurrentSegment({ content: data.content as string, isThinking: false });
+          } else {
+            updateCurrentSegment({ isThinking: false });
           }
-          setIsThinking(false);
           break;
 
         case StreamEventType.AGENT_COMPLETE:
-          // Agent round done — may loop for more tool calls
+          updateCurrentSegment({ status: 'complete' });
           break;
 
         case StreamEventType.TOOL_START: {
           const toolName = data?.tool_name as string ?? event.tool ?? '';
           const params = data?.params as Record<string, unknown> ?? {};
           const agent = data?.agent as string ?? event.agent ?? '';
-          addToolCall({
+          addToolCallToSegment({
             id: `${toolName}-${Date.now()}`,
             toolName,
             params,
@@ -132,7 +125,7 @@ export function useSSE() {
             status: 'running',
           });
           // Clear streaming content when entering tool phase
-          setStreamContent('');
+          updateCurrentSegment({ content: '' });
           break;
         }
 
@@ -144,13 +137,20 @@ export function useSSE() {
             : JSON.stringify(data?.result_data ?? data?.result ?? '');
           const durationMs = data?.duration_ms as number | undefined;
 
-          // Find the matching running tool call to update
-          const toolCalls = useStreamStore.getState().toolCalls;
-          const running = toolCalls.find(
-            (tc) => tc.toolName === toolName && tc.status === 'running'
-          );
-          if (running) {
-            updateToolCall(running.id, {
+          // Find the matching running tool call across all segments
+          const segments = useStreamStore.getState().segments;
+          let runningId: string | undefined;
+          for (const seg of segments) {
+            const running = seg.toolCalls.find(
+              (tc) => tc.toolName === toolName && tc.status === 'running'
+            );
+            if (running) {
+              runningId = running.id;
+              break;
+            }
+          }
+          if (runningId) {
+            updateToolCallInSegment(runningId, {
               status: success ? 'success' : 'error',
               result,
               durationMs,
@@ -160,7 +160,6 @@ export function useSSE() {
           // Auto-open artifact panel on artifact tool completion
           if (ARTIFACT_TOOLS.has(toolName) && success) {
             setArtifactPanelVisible(true);
-            // Track pending update for refresh on complete
             const artifactId = data?.artifact_id as string | undefined;
             if (artifactId) {
               addPendingUpdate(artifactId);
@@ -183,8 +182,11 @@ export function useSSE() {
           break;
 
         case StreamEventType.COMPLETE: {
+          const messageId = useStreamStore.getState().messageId;
+          if (messageId) {
+            snapshotSegments(messageId);
+          }
           endStream();
-          // Refresh conversation to get final response from DB
           refreshAfterComplete(conversationId);
           break;
         }
@@ -199,8 +201,8 @@ export function useSSE() {
       }
     },
     [
-      setLastEventType, setCurrentAgent, setStreamContent, setReasoningContent,
-      setIsThinking, addToolCall, updateToolCall, setPermissionRequest,
+      pushSegment, updateCurrentSegment, addToolCallToSegment,
+      updateToolCallInSegment, snapshotSegments, setPermissionRequest,
       setError, endStream, refreshAfterComplete, setArtifactPanelVisible,
       addPendingUpdate,
     ]
@@ -208,7 +210,6 @@ export function useSSE() {
 
   const connect = useCallback(
     (streamUrl: string, conversationId: string, _messageId: string) => {
-      // Abort any existing connection
       if (abortRef.current) {
         abortRef.current.abort();
       }

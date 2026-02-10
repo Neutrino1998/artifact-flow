@@ -10,6 +10,7 @@ export default function ChatPanel() {
   const current = useConversationStore((s) => s.current);
   const currentLoading = useConversationStore((s) => s.currentLoading);
   const isStreaming = useStreamStore((s) => s.isStreaming);
+  const pendingUserMessage = useStreamStore((s) => s.pendingUserMessage);
 
   if (currentLoading) {
     return (
@@ -29,7 +30,14 @@ export default function ChatPanel() {
       ) : isStreaming ? (
         // New conversation: no history yet, but stream is active
         <div className="flex-1 overflow-y-auto">
-          <div className="max-w-3xl mx-auto px-4 py-6">
+          <div className="max-w-3xl mx-auto px-4 py-6 space-y-6">
+            {pendingUserMessage && (
+              <div className="flex justify-end">
+                <div className="max-w-[80%] bg-surface dark:bg-surface-dark border border-border dark:border-border-dark rounded-bubble px-4 py-3 text-sm text-text-primary dark:text-text-primary-dark whitespace-pre-wrap break-words">
+                  {pendingUserMessage}
+                </div>
+              </div>
+            )}
             <StreamingMessage />
           </div>
         </div>

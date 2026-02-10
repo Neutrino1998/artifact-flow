@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useCallback } from 'react';
 import { useConversationStore } from '@/stores/conversationStore';
-import { useStreamStore } from '@/stores/streamStore';
+import { useStreamStore, selectStreamContent } from '@/stores/streamStore';
 import UserMessage from './UserMessage';
 import AssistantMessage from './AssistantMessage';
 import StreamingMessage from './StreamingMessage';
@@ -11,7 +11,7 @@ import BranchNavigator from './BranchNavigator';
 export default function MessageList() {
   const branchPath = useConversationStore((s) => s.branchPath);
   const isStreaming = useStreamStore((s) => s.isStreaming);
-  const streamContent = useStreamStore((s) => s.streamContent);
+  const lastContent = useStreamStore(selectStreamContent);
   const scrollRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const userScrolledUp = useRef(false);
@@ -36,7 +36,7 @@ export default function MessageList() {
       bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
     });
     return () => cancelAnimationFrame(id);
-  }, [isStreaming, streamContent]);
+  }, [isStreaming, lastContent]);
 
   return (
     <div ref={scrollRef} onScroll={handleScroll} className="flex-1 overflow-y-auto">

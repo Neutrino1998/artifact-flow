@@ -4,14 +4,19 @@ import { memo, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
+import { useStreamStore } from '@/stores/streamStore';
+import AgentSegmentBlock from './AgentSegmentBlock';
 
 interface AssistantMessageProps {
   content: string;
   messageId?: string;
 }
 
-function AssistantMessage({ content, messageId: _messageId }: AssistantMessageProps) {
+function AssistantMessage({ content, messageId }: AssistantMessageProps) {
   const [copied, setCopied] = useState(false);
+  const completedSegs = useStreamStore(
+    (s) => messageId ? s.completedSegments.get(messageId) : undefined
+  );
 
   const handleCopy = async () => {
     await navigator.clipboard.writeText(content);
@@ -21,6 +26,15 @@ function AssistantMessage({ content, messageId: _messageId }: AssistantMessagePr
 
   return (
     <div className="group relative">
+      {/* Completed execution segments (session-only, collapsible) */}
+      {completedSegs && completedSegs.length > 0 && (
+        <div className="mb-3 space-y-2">
+          {completedSegs.map((seg) => (
+            <AgentSegmentBlock key={seg.id} segment={seg} isActive={false} defaultExpanded={false} />
+          ))}
+        </div>
+      )}
+
       <div className="prose prose-sm dark:prose-invert max-w-none text-text-primary dark:text-text-primary-dark prose-headings:text-text-primary dark:prose-headings:text-text-primary-dark prose-a:text-accent prose-code:text-accent prose-pre:bg-surface dark:prose-pre:bg-bg-dark prose-pre:border prose-pre:border-border dark:prose-pre:border-border-dark">
         <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]}>
           {content}
