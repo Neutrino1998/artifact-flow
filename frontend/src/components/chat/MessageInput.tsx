@@ -42,9 +42,9 @@ export default function MessageInput() {
   );
 
   return (
-    <div className="border-t border-border dark:border-border-dark bg-bg dark:bg-bg-dark px-4 py-3">
+    <div className="px-4 pt-4 pb-5">
       <div className="max-w-3xl mx-auto">
-        <div className="flex items-end gap-2 bg-surface dark:bg-surface-dark border border-border dark:border-border-dark rounded-card px-3 py-2">
+        <div className="flex items-center gap-2 bg-surface dark:bg-surface-dark border border-border dark:border-border-dark rounded-2xl shadow-float px-4 py-3">
           <textarea
             ref={textareaRef}
             value={content}
@@ -59,7 +59,7 @@ export default function MessageInput() {
             }
             disabled={isStreaming}
             rows={1}
-            className="flex-1 resize-none bg-transparent text-sm text-text-primary dark:text-text-primary-dark placeholder:text-text-tertiary dark:placeholder:text-text-tertiary-dark outline-none disabled:opacity-40 disabled:cursor-not-allowed"
+            className="flex-1 resize-none bg-transparent text-sm leading-5 text-text-primary dark:text-text-primary-dark placeholder:text-text-tertiary dark:placeholder:text-text-tertiary-dark outline-none disabled:opacity-40 disabled:cursor-not-allowed"
           />
 
           {/* Artifact panel toggle */}
@@ -78,7 +78,7 @@ export default function MessageInput() {
           {isStreaming ? (
             <button
               onClick={handleStop}
-              className="flex-shrink-0 p-1.5 rounded-lg bg-red-500 text-white hover:bg-red-600 transition-colors"
+              className="flex-shrink-0 w-8 h-8 flex items-center justify-center rounded-full bg-red-500 text-white hover:bg-red-600 transition-colors"
               aria-label="Stop generation"
             >
               <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
@@ -89,18 +89,20 @@ export default function MessageInput() {
             <button
               onClick={handleSend}
               disabled={!content.trim()}
-              className="flex-shrink-0 p-1.5 rounded-lg bg-accent text-white hover:bg-accent-hover disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              className="flex-shrink-0 w-8 h-8 flex items-center justify-center rounded-full bg-accent text-white hover:bg-accent-hover disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
               aria-label="Send message"
             >
               <svg
                 width="16"
                 height="16"
-                viewBox="0 0 16 16"
+                viewBox="0 0 24 24"
                 fill="none"
                 stroke="currentColor"
-                strokeWidth="1.5"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
               >
-                <path d="M14 2 2 8.5l4.5 1.8L14 2zM6.5 10.3V14l2.3-2.8" />
+                <path d="M12 19V5M5 12l7-7 7 7" />
               </svg>
             </button>
           )}

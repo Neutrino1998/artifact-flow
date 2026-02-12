@@ -42,9 +42,12 @@ export default function ChatPanel() {
           </div>
         </div>
       ) : (
-        <div className="flex-1 flex items-center justify-center">
+        <div className="flex-1 flex flex-col items-center justify-center gap-2">
+          <div className="text-text-secondary dark:text-text-secondary-dark text-lg font-medium">
+            What can I help with?
+          </div>
           <div className="text-text-tertiary dark:text-text-tertiary-dark text-sm">
-            Start a new conversation
+            Start a conversation to begin researching
           </div>
         </div>
       )}

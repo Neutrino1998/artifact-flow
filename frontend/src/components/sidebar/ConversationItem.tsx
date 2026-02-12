@@ -31,16 +31,16 @@ function ConversationItem({ conversation, isActive, onSelect }: ConversationItem
 
   return (
     <div
-      className={`group relative px-3 py-2.5 cursor-pointer transition-colors ${
+      className={`group relative cursor-pointer transition-colors rounded-lg mx-2 ${
         isActive
-          ? 'bg-accent/10 border-r-2 border-accent'
-          : 'hover:bg-bg dark:hover:bg-bg-dark'
+          ? 'bg-bg dark:bg-bg-dark px-3 py-2.5'
+          : 'hover:bg-bg/60 dark:hover:bg-bg-dark/60 px-3 py-2.5'
       }`}
       onClick={() => onSelect(conversation.id)}
       onMouseEnter={() => setShowMenu(true)}
       onMouseLeave={() => setShowMenu(false)}
     >
-      <div className="text-sm truncate text-text-primary dark:text-text-primary-dark">
+      <div className={`text-sm truncate text-text-primary dark:text-text-primary-dark ${showMenu ? 'pr-7' : ''}`}>
         {title}
       </div>
       <div className="flex items-center gap-2 mt-0.5 text-xs text-text-tertiary dark:text-text-tertiary-dark">
@@ -52,11 +52,11 @@ function ConversationItem({ conversation, isActive, onSelect }: ConversationItem
       {showMenu && (
         <button
           onClick={handleDelete}
-          className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded text-text-tertiary dark:text-text-tertiary-dark hover:text-status-error hover:bg-status-error/10 transition-colors"
+          className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-md text-text-tertiary dark:text-text-tertiary-dark hover:text-status-error hover:bg-status-error/10 transition-colors"
           aria-label="Delete conversation"
         >
-          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5">
-            <path d="M2 3.5h10M5.5 3.5V2.5a1 1 0 0 1 1-1h1a1 1 0 0 1 1 1v1M9 6v4.5M5 6v4.5M3.5 3.5l.5 8a1 1 0 0 0 1 1h4a1 1 0 0 0 1-1l.5-8" />
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6M10 11v6M14 11v6" />
           </svg>
         </button>
       )}
