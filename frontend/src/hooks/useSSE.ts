@@ -34,7 +34,10 @@ export function useSSE() {
   const setConversations = useConversationStore((s) => s.setConversations);
 
   // Artifact store
+  const setArtifactSessionId = useArtifactStore((s) => s.setSessionId);
   const setArtifacts = useArtifactStore((s) => s.setArtifacts);
+  const setArtifactCurrent = useArtifactStore((s) => s.setCurrent);
+  const setArtifactVersions = useArtifactStore((s) => s.setVersions);
   const addPendingUpdate = useArtifactStore((s) => s.addPendingUpdate);
   const clearPendingUpdates = useArtifactStore((s) => s.clearPendingUpdates);
 
@@ -157,12 +160,28 @@ export function useSSE() {
             });
           }
 
-          // Auto-open artifact panel on artifact tool completion
+          // Auto-open artifact panel and fetch content on artifact tool completion
           if (ARTIFACT_TOOLS.has(toolName) && success) {
             setArtifactPanelVisible(true);
-            const artifactId = data?.artifact_id as string | undefined;
+            const params = data?.params as Record<string, unknown> | undefined;
+            const artifactId = params?.id as string | undefined;
             if (artifactId) {
               addPendingUpdate(artifactId);
+              // session_id == conversation_id in the backend;
+              // store it so useArtifacts can use it even before conversation loads
+              const sessionId = conversationId;
+              setArtifactSessionId(sessionId);
+              Promise.all([
+                api.getArtifact(sessionId, artifactId),
+                api.listArtifacts(sessionId),
+                api.listVersions(sessionId, artifactId),
+              ]).then(([detail, list, versions]) => {
+                setArtifactCurrent(detail);
+                setArtifacts(list.artifacts);
+                setArtifactVersions(versions.versions);
+              }).catch(() => {
+                // Artifact may not be persisted yet; will retry on stream complete
+              });
             }
           }
           break;
@@ -204,7 +223,8 @@ export function useSSE() {
       pushSegment, updateCurrentSegment, addToolCallToSegment,
       updateToolCallInSegment, snapshotSegments, setPermissionRequest,
       setError, endStream, refreshAfterComplete, setArtifactPanelVisible,
-      addPendingUpdate,
+      addPendingUpdate, setArtifactSessionId, setArtifactCurrent, setArtifacts,
+      setArtifactVersions,
     ]
   );
 

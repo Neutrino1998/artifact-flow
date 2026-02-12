@@ -6,6 +6,19 @@ import { useConversationStore } from '@/stores/conversationStore';
 import { useUIStore } from '@/stores/uiStore';
 import * as api from '@/lib/api';
 
+/**
+ * Resolve session ID at call time.
+ * During streaming for new conversations, conversation store may not have
+ * session_id yet; fall back to the one stored by the SSE handler.
+ */
+function resolveSessionId(): string | null {
+  return (
+    useConversationStore.getState().current?.session_id ??
+    useArtifactStore.getState().sessionId ??
+    null
+  );
+}
+
 export function useArtifacts() {
   const sessionId = useConversationStore((s) => s.current?.session_id);
   const setArtifacts = useArtifactStore((s) => s.setArtifacts);
@@ -16,6 +29,7 @@ export function useArtifacts() {
   const setSelectedVersion = useArtifactStore((s) => s.setSelectedVersion);
   const setArtifactPanelVisible = useUIStore((s) => s.setArtifactPanelVisible);
 
+  // loadArtifacts only depends on conversation store's sessionId (stable during streaming)
   const loadArtifacts = useCallback(async () => {
     if (!sessionId) return;
     setArtifactsLoading(true);
@@ -29,15 +43,17 @@ export function useArtifacts() {
     }
   }, [sessionId, setArtifacts, setArtifactsLoading]);
 
+  // selectArtifact resolves sessionId at call time via getState()
   const selectArtifact = useCallback(
     async (artifactId: string) => {
-      if (!sessionId) return;
+      const sid = resolveSessionId();
+      if (!sid) return;
       setCurrentLoading(true);
       setArtifactPanelVisible(true);
       try {
         const [detail, versions] = await Promise.all([
-          api.getArtifact(sessionId, artifactId),
-          api.listVersions(sessionId, artifactId),
+          api.getArtifact(sid, artifactId),
+          api.listVersions(sid, artifactId),
         ]);
         setCurrent(detail);
         setVersions(versions.versions);
@@ -48,20 +64,21 @@ export function useArtifacts() {
         setCurrentLoading(false);
       }
     },
-    [sessionId, setCurrent, setCurrentLoading, setVersions, setSelectedVersion, setArtifactPanelVisible]
+    [setCurrent, setCurrentLoading, setVersions, setSelectedVersion, setArtifactPanelVisible]
   );
 
   const selectVersion = useCallback(
     async (artifactId: string, version: number) => {
-      if (!sessionId) return;
+      const sid = resolveSessionId();
+      if (!sid) return;
       try {
-        const detail = await api.getVersion(sessionId, artifactId, version);
+        const detail = await api.getVersion(sid, artifactId, version);
         setSelectedVersion(detail);
       } catch (err) {
         console.error('Failed to load version:', err);
       }
     },
-    [sessionId, setSelectedVersion]
+    [setSelectedVersion]
   );
 
   return { loadArtifacts, selectArtifact, selectVersion };

@@ -3,6 +3,7 @@
 import { useUIStore } from '@/stores/uiStore';
 import { useConversationStore } from '@/stores/conversationStore';
 import { useStreamStore } from '@/stores/streamStore';
+import { useArtifactStore } from '@/stores/artifactStore';
 import ConversationList from './ConversationList';
 
 function IconButton({
@@ -36,10 +37,14 @@ export default function Sidebar() {
   const toggleArtifactPanel = useUIStore((s) => s.toggleArtifactPanel);
   const setCurrent = useConversationStore((s) => s.setCurrent);
   const reset = useStreamStore((s) => s.reset);
+  const resetArtifacts = useArtifactStore((s) => s.reset);
+  const setArtifactPanelVisible = useUIStore((s) => s.setArtifactPanelVisible);
 
   const handleNewChat = () => {
     setCurrent(null);
     reset();
+    resetArtifacts();
+    setArtifactPanelVisible(false);
   };
 
   // ── Collapsed: 48px icon bar ──

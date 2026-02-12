@@ -4,6 +4,9 @@ import type { ArtifactSummary, ArtifactDetail, VersionSummary, VersionDetail } f
 export type ArtifactViewMode = 'preview' | 'source' | 'diff';
 
 interface ArtifactState {
+  // Session context (set during streaming when conversation store may not have it yet)
+  sessionId: string | null;
+
   // List
   artifacts: ArtifactSummary[];
   artifactsLoading: boolean;
@@ -23,6 +26,7 @@ interface ArtifactState {
   pendingUpdates: string[];
 
   // Actions
+  setSessionId: (sessionId: string | null) => void;
   setArtifacts: (artifacts: ArtifactSummary[]) => void;
   setArtifactsLoading: (loading: boolean) => void;
   setCurrent: (artifact: ArtifactDetail | null) => void;
@@ -36,6 +40,8 @@ interface ArtifactState {
 }
 
 export const useArtifactStore = create<ArtifactState>((set) => ({
+  sessionId: null,
+
   artifacts: [],
   artifactsLoading: false,
 
@@ -49,6 +55,7 @@ export const useArtifactStore = create<ArtifactState>((set) => ({
 
   pendingUpdates: [],
 
+  setSessionId: (sessionId) => set({ sessionId }),
   setArtifacts: (artifacts) => set({ artifacts }),
   setArtifactsLoading: (loading) => set({ artifactsLoading: loading }),
   setCurrent: (artifact) => set({ current: artifact }),
@@ -65,6 +72,7 @@ export const useArtifactStore = create<ArtifactState>((set) => ({
   clearPendingUpdates: () => set({ pendingUpdates: [] }),
   reset: () =>
     set({
+      sessionId: null,
       artifacts: [],
       current: null,
       versions: [],

@@ -19,12 +19,16 @@ export default function ArtifactPanel() {
   const sessionId = useConversationStore((s) => s.current?.session_id);
   const { loadArtifacts } = useArtifacts();
 
-  // Load artifacts when session changes
+  const setCurrent_ = useArtifactStore((s) => s.setCurrent);
+
+  // Reload artifacts when conversation session changes
   useEffect(() => {
+    // Clear stale artifact detail from previous session
+    setCurrent_(null);
     if (sessionId) {
       loadArtifacts();
     }
-  }, [sessionId, loadArtifacts]);
+  }, [sessionId, setCurrent_, loadArtifacts]);
 
   if (currentLoading) {
     return (

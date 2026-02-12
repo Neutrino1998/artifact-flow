@@ -8,6 +8,19 @@ import type { ExecutionSegment } from '@/stores/streamStore';
 import ThinkingBlock from './ThinkingBlock';
 import ToolCallCard from './ToolCallCard';
 
+/**
+ * Strip complete and partial XML tool_call blocks from streaming content.
+ * Complete: <tool_call>...</tool_call>
+ * Partial (trailing): <tool_call>... (no closing tag yet)
+ */
+function stripToolCallXml(text: string): string {
+  // Remove complete blocks
+  let cleaned = text.replace(/<tool_call>[\s\S]*?<\/tool_call>/g, '');
+  // Remove trailing partial block (opening tag without closing)
+  cleaned = cleaned.replace(/<tool_call>[\s\S]*$/g, '');
+  return cleaned.trimEnd();
+}
+
 interface AgentSegmentBlockProps {
   segment: ExecutionSegment;
   isActive: boolean;       // true = currently executing segment (last + isStreaming)
@@ -82,13 +95,17 @@ function AgentSegmentBlock({ segment, isActive, defaultExpanded }: AgentSegmentB
           ))}
 
           {/* Content — markdown when complete or active streaming */}
-          {segment.content && (
-            <div className={`prose prose-sm dark:prose-invert max-w-none text-text-primary dark:text-text-primary-dark prose-headings:text-text-primary dark:prose-headings:text-text-primary-dark prose-a:text-accent prose-code:text-accent prose-pre:bg-surface dark:prose-pre:bg-bg-dark prose-pre:border prose-pre:border-border dark:prose-pre:border-border-dark ${isActive ? 'streaming-cursor' : ''}`}>
-              <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]}>
-                {segment.content}
-              </ReactMarkdown>
-            </div>
-          )}
+          {segment.content && (() => {
+            const displayContent = stripToolCallXml(segment.content);
+            if (!displayContent) return null;
+            return (
+              <div className={`prose prose-sm dark:prose-invert max-w-none text-text-primary dark:text-text-primary-dark prose-headings:text-text-primary dark:prose-headings:text-text-primary-dark prose-a:text-accent prose-code:text-accent prose-pre:bg-surface dark:prose-pre:bg-bg-dark prose-pre:border prose-pre:border-border dark:prose-pre:border-border-dark ${isActive ? 'streaming-cursor' : ''}`}>
+                <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]}>
+                  {displayContent}
+                </ReactMarkdown>
+              </div>
+            );
+          })()}
         </div>
       )}
     </div>
