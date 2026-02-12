@@ -50,6 +50,7 @@ system prompt + instruction + history(如果有) + tool result
 - [x] agent开启关闭debug模式很费劲：删除agentconfig中debug参数
 - [x] Typer + Rich实现简易terminal前端
 - [ ] agent提示词精简一下
+- [ ] subagent应该也利用好artifact
 - [x] ToolPromptGenerator中generate_tool_instruction最后return的instruction加上<tool_call_instructions>的tag
 - [x] 博查搜索语法确认
 - [x] _execute_new_message在调用graph之前，获取了session_id之后清除已有的task_plan
