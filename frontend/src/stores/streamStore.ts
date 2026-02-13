@@ -40,6 +40,10 @@ interface StreamState {
   // Pending user message (shown before conversation loads)
   pendingUserMessage: string | null;
 
+  // Parent ID for rerun/edit branching (controls branchPath truncation)
+  // undefined = normal send, null = root rerun, string = rerun from specific parent
+  streamParentId: string | null | undefined;
+
   // Completed segments cache (session-only, keyed by messageId)
   completedSegments: Map<string, ExecutionSegment[]>;
 
@@ -63,6 +67,7 @@ interface StreamState {
 
   // Pending user message
   setPendingUserMessage: (msg: string | null) => void;
+  setStreamParentId: (id: string | null | undefined) => void;
 
   // Snapshot segments for completed messages
   snapshotSegments: (messageId: string) => void;
@@ -108,6 +113,7 @@ export const useStreamStore = create<StreamState>((set, get) => {
     messageId: null,
     segments: [],
     pendingUserMessage: null,
+    streamParentId: undefined,
     completedSegments: new Map(),
     permissionRequest: null,
     error: null,
@@ -124,7 +130,7 @@ export const useStreamStore = create<StreamState>((set, get) => {
       }),
 
     endStream: () =>
-      set({ isStreaming: false, streamUrl: null, permissionRequest: null }),
+      set({ isStreaming: false, streamUrl: null, permissionRequest: null, streamParentId: undefined }),
 
     reset: () =>
       set({
@@ -134,6 +140,7 @@ export const useStreamStore = create<StreamState>((set, get) => {
         messageId: null,
         segments: [],
         pendingUserMessage: null,
+        streamParentId: undefined,
         permissionRequest: null,
         error: null,
       }),
@@ -203,6 +210,7 @@ export const useStreamStore = create<StreamState>((set, get) => {
       }),
 
     setPendingUserMessage: (msg) => set({ pendingUserMessage: msg }),
+    setStreamParentId: (id) => set({ streamParentId: id }),
 
     snapshotSegments: (messageId) => {
       const state = get();

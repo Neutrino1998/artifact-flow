@@ -14,6 +14,7 @@ export function useChat() {
   const setConversations = useConversationStore((s) => s.setConversations);
   const startStream = useStreamStore((s) => s.startStream);
   const setPendingUserMessage = useStreamStore((s) => s.setPendingUserMessage);
+  const setStreamParentId = useStreamStore((s) => s.setStreamParentId);
   const setError = useStreamStore((s) => s.setError);
   const { connect, disconnect } = useSSE();
 
@@ -43,6 +44,10 @@ export function useChat() {
 
         const res = await api.sendMessage(body);
         setPendingUserMessage(content);
+        // Track rerun/edit parent for branchPath truncation
+        if (parentMessageId !== undefined) {
+          setStreamParentId(parentMessageId);
+        }
         startStream(res.stream_url, res.thread_id, res.message_id);
 
         // Connect SSE for streaming
@@ -51,7 +56,7 @@ export function useChat() {
         setError((err as Error).message);
       }
     },
-    [current?.id, lastMessageId, startStream, setPendingUserMessage, connect, setError]
+    [current?.id, lastMessageId, startStream, setPendingUserMessage, setStreamParentId, connect, setError]
   );
 
   const refreshConversation = useCallback(

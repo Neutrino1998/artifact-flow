@@ -3,14 +3,17 @@
 import { memo, useState, useRef, useEffect, useCallback } from 'react';
 import { useChat } from '@/hooks/useChat';
 import { useStreamStore } from '@/stores/streamStore';
+import BranchNavigator from './BranchNavigator';
 
 interface UserMessageProps {
   content: string;
   messageId: string;
   parentId: string | null;
+  siblingIndex: number;
+  siblingCount: number;
 }
 
-function UserMessage({ content, messageId: _messageId, parentId }: UserMessageProps) {
+function UserMessage({ content, messageId, parentId, siblingIndex, siblingCount }: UserMessageProps) {
   const [copied, setCopied] = useState(false);
   const [editing, setEditing] = useState(false);
   const [editContent, setEditContent] = useState(content);
@@ -111,7 +114,7 @@ function UserMessage({ content, messageId: _messageId, parentId }: UserMessagePr
         <div className="bg-surface dark:bg-surface-dark border border-border dark:border-border-dark rounded-bubble px-4 py-3 text-sm text-text-primary dark:text-text-primary-dark whitespace-pre-wrap break-words">
           {content}
         </div>
-        {/* Action buttons on hover */}
+        {/* Action buttons and branch navigator on hover */}
         <div className="absolute -bottom-7 right-2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
           <button
             onClick={handleEdit}
@@ -153,6 +156,16 @@ function UserMessage({ content, messageId: _messageId, parentId }: UserMessagePr
               </svg>
             )}
           </button>
+          {siblingCount > 1 && (
+            <>
+              <div className="w-px h-3 bg-border dark:bg-border-dark mx-0.5" />
+              <BranchNavigator
+                messageId={messageId}
+                currentIndex={siblingIndex}
+                totalSiblings={siblingCount}
+              />
+            </>
+          )}
         </div>
       </div>
     </div>
