@@ -20,31 +20,32 @@
 **改动**:
 - Router 层生成 `message_id` + `thread_id` 作为唯一权威源
 - Controller 的 `stream_execute()` / `execute()` 接受外部传入的 `message_id` + `thread_id` 参数
-- 删除 Controller 内部的 ID 生成逻辑
+- 删除 Controller 内部 `_execute_new_message()` / `_stream_new_message()` 中的 ID 生成逻辑
+- 测试适配：`tests/test_core_graph.py` 和 `tests/test_core_graph_stream.py` 中所有直接调用 `controller.execute(content=...)` / `controller.stream_execute(content=...)` 的地方需补传 `thread_id` + `message_id`；在 `TestEnvironment` 上新增 `generate_ids()` helper 封装 ID 生成，模拟 Router 层职责
 
-### 1.2 permission_request 事件补齐 thread_id / message_id
+### 1.2 前端 PermissionModal 从 streamStore 读取 ID
 
-**问题**: Graph 发出的 `permission_request` 事件只有 `permission_level` + `params`，前端需要 `thread_id` + `message_id` 来发起 resume 请求。
+**问题**: `useSSE.ts` 的 `permission_request` handler 尝试从 SSE 事件 payload 读取 `thread_id`/`message_id`，但后端 `graph.py` 的 `permission_request` 事件根本不包含这两个字段，导致前端拿到空字符串。实际上，permission request 必然发生在当前活跃 stream 内，`streamStore` 中已通过 `startStream()` 持有正确的 `threadId`/`messageId`。
 
 **涉及文件**:
-- `src/core/graph.py` — `tool_execution_node` 中的 `permission_request` 事件构造（~L130-139）
-- `src/core/state.py` — AgentState 中是否已有 thread_id/message_id 字段
+- `frontend/src/hooks/useSSE.ts` — `PERMISSION_REQUEST` case（~L213-219）
+- `frontend/src/components/layout/PermissionModal.tsx` — 已从 `permissionRequest` 对象读取 ID（~L23-24）
 
 **改动**:
-- 在 `permission_request` 事件的 `data` 中补充 `thread_id` 和 `message_id`（从 state 或 config 中获取）
-- 确认 graph 执行时 state/config 中可获取这两个值（可能需要在 invoke 时通过 config 传入）
+- `useSSE.ts` 的 `permission_request` handler 不再从 `data` 中读取 `thread_id`/`message_id`，改为存储 `toolName` + `params` 即可
+- `PermissionModal` 的 `handleResponse()` 直接从 `streamStore` 读取 `threadId`/`messageId`（与读取 `streamUrl` 同源）
+- `PermissionRequest` 类型定义中移除 `messageId`/`threadId` 字段
+- 后端 `permission_request` 事件无需改动
 
 ### 1.3 前端处理 metadata 事件
 
-**问题**: `useSSE.ts` 对 METADATA 事件直接 `break`，未提取真实执行 ID。
+**问题**: `useSSE.ts` 对 METADATA 事件直接 `break`，未提取真实执行 ID。配合 1.1 的 ID 统一后，metadata 事件中的 ID 可作为防御性校验。
 
 **涉及文件**:
-- `frontend/src/hooks/useSSE.ts` — METADATA case（~L75）
-- `frontend/src/stores/streamStore.ts` — 可能需要增加 threadId/messageId 字段
+- `frontend/src/hooks/useSSE.ts` — METADATA case（~L78）
 
 **改动**:
-- METADATA 事件中提取 `conversation_id`、`message_id`、`thread_id` 并更新到 streamStore
-- permission_request handler 从 store 中读取这些 ID（作为 1.2 的 fallback）
+- METADATA 事件中提取 `conversation_id`、`message_id`、`thread_id`，与 `streamStore` 中已有值做一致性校验（dev 环境 console.warn 不一致情况）
 
 ### 1.4 resume 归属校验
 
