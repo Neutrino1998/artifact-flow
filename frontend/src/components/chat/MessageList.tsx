@@ -35,7 +35,7 @@ export default function MessageList() {
         {displayPath.map((node, idx) => {
           const isLastBeforeStream = isStreaming && streamParentId !== undefined && idx === displayPath.length - 1;
           return (
-            <div key={node.id} className="space-y-6">
+            <div key={node.id} className="space-y-10">
               {/* User message */}
               <UserMessage
                 content={node.content}
