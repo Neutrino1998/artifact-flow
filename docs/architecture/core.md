@@ -354,7 +354,7 @@ class ExecutionController:
         content: Optional[str] = None,
         thread_id: Optional[str] = None,
         conversation_id: Optional[str] = None,
-        parent_message_id: Optional[str] = None,
+        parent_message_id: Any = _UNSET,  # _UNSET=auto-detect, None=root, str=specific parent
         message_id: Optional[str] = None,
         resume_data: Optional[Dict] = None
     ) -> AsyncGenerator[Dict[str, Any], None]:
@@ -374,9 +374,11 @@ async def _stream_new_message(self, content, conversation_id, parent_message_id)
     else:
         await self.conversation_manager.ensure_conversation_exists(conversation_id)
 
-    # 2. 自动设置 parent_message_id（如果未指定）
-    if not parent_message_id:
+    # 2. 自动设置 parent_message_id（仅当未显式提供时）
+    # _UNSET = 未传，自动检测；None = 显式创建根消息；str = 指定父消息
+    if parent_message_id is _UNSET:
         parent_message_id = await self.conversation_manager.get_active_branch(conversation_id)
+    resolved_parent = parent_message_id if isinstance(parent_message_id, str) else None
 
     # 3. 格式化对话历史
     conversation_history = await self.conversation_manager.format_conversation_history_async(

@@ -128,10 +128,15 @@ async def send_message(
             stream_closed = False
             try:
                 async with asyncio.timeout(config.STREAM_TIMEOUT):
+                    # Pass parent_message_id only when explicitly provided in request;
+                    # otherwise let controller auto-detect via active_branch
+                    parent_kwargs = {}
+                    if 'parent_message_id' in request.model_fields_set:
+                        parent_kwargs['parent_message_id'] = request.parent_message_id
                     async for event in ctrl.stream_execute(
                         content=request.content,
                         conversation_id=conversation_id,
-                        parent_message_id=request.parent_message_id,
+                        **parent_kwargs,
                     ):
                         if stream_closed:
                             continue

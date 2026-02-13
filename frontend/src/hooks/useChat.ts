@@ -4,6 +4,7 @@ import { useCallback } from 'react';
 import { useConversationStore } from '@/stores/conversationStore';
 import { useStreamStore } from '@/stores/streamStore';
 import { useSSE } from '@/hooks/useSSE';
+import type { ChatRequest } from '@/types';
 import * as api from '@/lib/api';
 
 export function useChat() {
@@ -22,13 +23,23 @@ export function useChat() {
   const lastMessageId = branchPath.length > 0 ? branchPath[branchPath.length - 1].id : null;
 
   const sendMessage = useCallback(
-    async (content: string, parentMessageId?: string) => {
+    async (content: string, parentMessageId?: string | null) => {
       try {
-        const body = {
+        // undefined = use default (last message in branch), omit from body
+        // null = explicitly no parent (create new root), send as null
+        // string = explicit parent ID
+        const body: ChatRequest = {
           content,
           conversation_id: current?.id ?? undefined,
-          parent_message_id: parentMessageId ?? lastMessageId ?? undefined,
         };
+
+        if (parentMessageId === undefined) {
+          // Default: use last message in current branch
+          if (lastMessageId) body.parent_message_id = lastMessageId;
+        } else {
+          // Explicit: null (root) or string (specific parent)
+          body.parent_message_id = parentMessageId;
+        }
 
         const res = await api.sendMessage(body);
         setPendingUserMessage(content);

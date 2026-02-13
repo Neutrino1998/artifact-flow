@@ -24,6 +24,9 @@ from utils.logger import get_logger
 
 logger = get_logger("ArtifactFlow")
 
+# Sentinel to distinguish "not provided" from "explicitly None"
+_UNSET = object()
+
 
 class ExecutionController:
     """
@@ -60,7 +63,7 @@ class ExecutionController:
         content: Optional[str] = None,
         thread_id: Optional[str] = None,
         conversation_id: Optional[str] = None,
-        parent_message_id: Optional[str] = None,
+        parent_message_id: Any = _UNSET,
         message_id: Optional[str] = None,
         resume_data: Optional[Dict] = None,
     ) -> Dict[str, Any]:
@@ -112,7 +115,7 @@ class ExecutionController:
         content: Optional[str] = None,
         thread_id: Optional[str] = None,
         conversation_id: Optional[str] = None,
-        parent_message_id: Optional[str] = None,
+        parent_message_id: Any = _UNSET,
         message_id: Optional[str] = None,
         resume_data: Optional[Dict] = None,
     ) -> AsyncGenerator[Dict[str, Any], None]:
@@ -170,7 +173,7 @@ class ExecutionController:
         self,
         content: str,
         conversation_id: Optional[str],
-        parent_message_id: Optional[str]
+        parent_message_id: Any = _UNSET
     ) -> Dict[str, Any]:
         """
         处理新消息（批量模式）
@@ -191,23 +194,26 @@ class ExecutionController:
             conversation_id = await self.conversation_manager.start_conversation_async()
         else:
             await self.conversation_manager.ensure_conversation_exists(conversation_id)
-        
-        # 2. 自动设置父消息ID（如果未指定）
-        if not parent_message_id:
+
+        # 2. Auto-detect parent only when not explicitly provided
+        if parent_message_id is _UNSET:
             parent_message_id = await self.conversation_manager.get_active_branch(conversation_id)
             if parent_message_id:
                 logger.debug(f"Auto-set parent_message_id to current active_branch: {parent_message_id}")
 
+        # Normalize to Optional[str]
+        resolved_parent: Optional[str] = parent_message_id if isinstance(parent_message_id, str) else None
+
         # 3. 格式化对话历史（使用ConversationManager的方法）
         conversation_history = await self.conversation_manager.format_conversation_history_async(
             conv_id=conversation_id,
-            to_message_id=parent_message_id
+            to_message_id=resolved_parent
         )
-        
+
         # 4. 生成ID
         message_id = f"msg-{uuid4().hex}"
         thread_id = f"thd-{uuid4().hex}"
-        
+
         # 5. 获取session
         session_id = self._get_or_create_session(conversation_id)
         # 5.5. 设置 artifact session 并清除上一轮的临时 artifacts
@@ -217,7 +223,7 @@ class ExecutionController:
                 await self.artifact_manager.clear_temporary_artifacts(session_id)
             except Exception as e:
                 logger.warning(f"Failed to clear temporary artifacts: {e}")
-        
+
         # 6. 创建初始状态
         initial_state = create_initial_state(
             task=content,
@@ -226,16 +232,16 @@ class ExecutionController:
             message_id=message_id,
             conversation_history=conversation_history
         )
-        
+
         logger.info(f"Processing new message in conversation {conversation_id}")
-        
+
         # 7. 添加消息到conversation
         await self.conversation_manager.add_message_async(
             conv_id=conversation_id,
             message_id=message_id,
             content=content,
             thread_id=thread_id,
-            parent_id=parent_message_id
+            parent_id=resolved_parent
         )
         
         # 8. 执行graph
@@ -313,7 +319,7 @@ class ExecutionController:
         self,
         content: str,
         conversation_id: Optional[str],
-        parent_message_id: Optional[str]
+        parent_message_id: Any = _UNSET
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """
         🆕 处理新消息（流式模式）
@@ -330,19 +336,23 @@ class ExecutionController:
         else:
             await self.conversation_manager.ensure_conversation_exists(conversation_id)
 
-        if not parent_message_id:
+        # Auto-detect parent only when not explicitly provided
+        if parent_message_id is _UNSET:
             parent_message_id = await self.conversation_manager.get_active_branch(conversation_id)
             if parent_message_id:
                 logger.debug(f"Auto-set parent_message_id to current active_branch: {parent_message_id}")
 
+        # Normalize to Optional[str]
+        resolved_parent: Optional[str] = parent_message_id if isinstance(parent_message_id, str) else None
+
         conversation_history = await self.conversation_manager.format_conversation_history_async(
             conv_id=conversation_id,
-            to_message_id=parent_message_id
+            to_message_id=resolved_parent
         )
-        
+
         message_id = f"msg-{uuid4().hex}"
         thread_id = f"thd-{uuid4().hex}"
-        
+
         session_id = self._get_or_create_session(conversation_id)
         if self.artifact_manager:
             self.artifact_manager.set_session(session_id)
@@ -350,7 +360,7 @@ class ExecutionController:
                 await self.artifact_manager.clear_temporary_artifacts(session_id)
             except Exception as e:
                 logger.warning(f"Failed to clear temporary artifacts: {e}")
-        
+
         initial_state = create_initial_state(
             task=content,
             session_id=session_id,
@@ -358,7 +368,7 @@ class ExecutionController:
             message_id=message_id,
             conversation_history=conversation_history
         )
-        
+
         logger.info(f"Processing new message (streaming) in conversation {conversation_id}")
 
         await self.conversation_manager.add_message_async(
@@ -366,7 +376,7 @@ class ExecutionController:
             message_id=message_id,
             content=content,
             thread_id=thread_id,
-            parent_id=parent_message_id
+            parent_id=resolved_parent
         )
         
         # 先发送元数据事件

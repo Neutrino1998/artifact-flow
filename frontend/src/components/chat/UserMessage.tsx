@@ -49,12 +49,12 @@ function UserMessage({ content, messageId: _messageId, parentId }: UserMessagePr
     if (!trimmed || isStreaming) return;
     setEditing(false);
     // Send as a new branch from the parent of this message
-    await sendMessage(trimmed, parentId ?? undefined);
+    await sendMessage(trimmed, parentId);
   }, [editContent, isStreaming, sendMessage, parentId]);
 
   const handleRerun = useCallback(async () => {
     if (isStreaming) return;
-    await sendMessage(content, parentId ?? undefined);
+    await sendMessage(content, parentId);
   }, [content, isStreaming, sendMessage, parentId]);
 
   const handleEditKeyDown = (e: React.KeyboardEvent) => {
@@ -89,14 +89,14 @@ function UserMessage({ content, messageId: _messageId, parentId }: UserMessagePr
                 onClick={handleCancelEdit}
                 className="px-3 py-1 text-xs text-text-secondary dark:text-text-secondary-dark hover:text-text-primary dark:hover:text-text-primary-dark transition-colors"
               >
-                Cancel
+                取消
               </button>
               <button
                 onClick={handleSubmitEdit}
                 disabled={!editContent.trim() || isStreaming}
                 className="px-3 py-1 text-xs bg-accent text-white rounded hover:bg-accent-hover disabled:opacity-40 transition-colors"
               >
-                Send
+                发送
               </button>
             </div>
           </div>
@@ -112,29 +112,46 @@ function UserMessage({ content, messageId: _messageId, parentId }: UserMessagePr
           {content}
         </div>
         {/* Action buttons on hover */}
-        <div className="absolute -bottom-6 right-2 flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+        <div className="absolute -bottom-7 right-2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
           <button
             onClick={handleEdit}
             disabled={isStreaming}
-            className="text-xs text-text-tertiary dark:text-text-tertiary-dark hover:text-text-secondary dark:hover:text-text-secondary-dark disabled:opacity-40"
+            className="p-1 rounded text-text-tertiary dark:text-text-tertiary-dark hover:text-text-secondary dark:hover:text-text-secondary-dark hover:bg-bg dark:hover:bg-bg-dark disabled:opacity-40 transition-colors"
             aria-label="Edit message"
+            title="编辑"
           >
-            Edit
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" />
+            </svg>
           </button>
           <button
             onClick={handleRerun}
             disabled={isStreaming}
-            className="text-xs text-text-tertiary dark:text-text-tertiary-dark hover:text-text-secondary dark:hover:text-text-secondary-dark disabled:opacity-40"
+            className="p-1 rounded text-text-tertiary dark:text-text-tertiary-dark hover:text-text-secondary dark:hover:text-text-secondary-dark hover:bg-bg dark:hover:bg-bg-dark disabled:opacity-40 transition-colors"
             aria-label="Rerun message"
+            title="重新生成"
           >
-            Rerun
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8" />
+              <path d="M21 3v5h-5" />
+            </svg>
           </button>
           <button
             onClick={handleCopy}
-            className="text-xs text-text-tertiary dark:text-text-tertiary-dark hover:text-text-secondary dark:hover:text-text-secondary-dark"
+            className="p-1 rounded text-text-tertiary dark:text-text-tertiary-dark hover:text-text-secondary dark:hover:text-text-secondary-dark hover:bg-bg dark:hover:bg-bg-dark transition-colors"
             aria-label="Copy message"
+            title={copied ? '已复制' : '复制'}
           >
-            {copied ? 'Copied' : 'Copy'}
+            {copied ? (
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M20 6 9 17l-5-5" />
+              </svg>
+            ) : (
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+              </svg>
+            )}
           </button>
         </div>
       </div>

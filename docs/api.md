@@ -62,7 +62,7 @@ POST /chat
 |------|------|------|------|
 | `content` | string | 是 | 用户消息内容 |
 | `conversation_id` | string | 否 | 对话 ID，null 则创建新对话 |
-| `parent_message_id` | string | 否 | 父消息 ID，用于分支对话 |
+| `parent_message_id` | string \| null | 否 | 父消息 ID，用于分支对话。显式传 `null` 创建新的根消息；不传则自动追加到当前活跃分支 |
 
 **响应：**
 
