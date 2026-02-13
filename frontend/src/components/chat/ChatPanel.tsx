@@ -1,10 +1,19 @@
 'use client';
 
+import { useMemo } from 'react';
 import { useConversationStore } from '@/stores/conversationStore';
 import { useStreamStore } from '@/stores/streamStore';
 import MessageList from './MessageList';
 import MessageInput from './MessageInput';
 import StreamingMessage from './StreamingMessage';
+
+function getGreeting(): string {
+  const hour = new Date().getHours();
+  if (hour < 6) return '夜深了，还在忙呀';
+  if (hour < 12) return '早上好';
+  if (hour < 18) return '下午好';
+  return '晚上好';
+}
 
 export default function ChatPanel() {
   const current = useConversationStore((s) => s.current);
@@ -43,11 +52,11 @@ export default function ChatPanel() {
         </div>
       ) : (
         <div className="flex-1 flex flex-col items-center justify-center gap-2">
-          <div className="text-text-secondary dark:text-text-secondary-dark text-lg font-medium">
-            What can I help with?
+          <div className="text-text-secondary dark:text-text-secondary-dark text-3xl font-semibold">
+            {getGreeting()}，有什么可以帮你的？
           </div>
           <div className="text-text-tertiary dark:text-text-tertiary-dark text-sm">
-            Start a conversation to begin researching
+            开始对话，探索更多可能
           </div>
         </div>
       )}

@@ -64,12 +64,7 @@ export default function ArtifactToolbar() {
     (e: React.ChangeEvent<HTMLSelectElement>) => {
       if (!current) return;
       const v = parseInt(e.target.value, 10);
-      if (v === current.current_version) {
-        // Current version — clear selected version to show latest
-        useArtifactStore.getState().setSelectedVersion(null);
-      } else {
-        selectVersion(current.id, v);
-      }
+      selectVersion(current.id, v);
     },
     [current, selectVersion]
   );
