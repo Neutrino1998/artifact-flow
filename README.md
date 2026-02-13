@@ -9,6 +9,16 @@
 
 ArtifactFlow 是一个智能多智能体系统，通过协调专门的AI智能体来执行综合性任务。基于 LangGraph 构建，采用独特的双 Artifact 架构，实现 AI 协作和人工监督的迭代优化。
 
+## 📸 预览
+
+**Web UI** — 三栏布局：侧边栏对话列表、聊天面板（流式渲染 + 分支导航）、Artifact 面板（Markdown/Source/Diff）
+
+![Frontend](docs/assets/frontend_screenshot.png)
+
+**CLI** — 终端交互模式，实时展示 Agent 协作过程和工具调用
+
+![CLI](docs/assets/cli_screenshot.png)
+
 ## ✨ 核心特性
 
 - **🗂️ 双Artifact架构**: 任务计划与结果文稿分离，支持版本追溯
@@ -505,7 +515,7 @@ python -m tests.test_core_graph_stream
   - [x] StreamManager 事件缓冲队列（TTL 机制）
   - [x] OpenAPI 自动文档（访问 /docs）
   - [x] CLI 命令行工具（Typer + Rich）
-  - [ ] 前端界面集成（项目结构已就绪，待实现）
+  - [x] 前端界面（Next.js 15 + React 19 + Zustand + Tailwind CSS）
 
 - 🎉 **生产就绪** (v1.0.0) - **目标**
   - [ ] 完整的错误处理

@@ -94,21 +94,34 @@ type Conversation = components['schemas']['ConversationDetailResponse']
 
 ```
 components/
+├── layout/
+│   ├── ThreeColumnLayout.tsx    # 三栏主布局
+│   └── PermissionModal.tsx      # 工具权限确认弹窗
 ├── chat/
-│   ├── MessageList.tsx
-│   ├── UserMessage.tsx
-│   ├── AssistantMessage.tsx
-│   ├── ThinkingBlock.tsx
-│   ├── ToolCallCard.tsx
-│   └── BranchNavigator.tsx
+│   ├── ChatPanel.tsx            # 聊天面板容器
+│   ├── MessageList.tsx          # 消息列表
+│   ├── MessageInput.tsx         # 输入框
+│   ├── UserMessage.tsx          # 用户消息气泡
+│   ├── AssistantMessage.tsx     # 助手消息（含 Agent 分段）
+│   ├── StreamingMessage.tsx     # 流式渲染中的消息
+│   ├── AgentSegmentBlock.tsx    # Agent 执行段落
+│   ├── AgentBadge.tsx           # Agent 名称标签
+│   ├── ThinkingBlock.tsx        # 思考过程折叠块
+│   ├── ToolCallCard.tsx         # 工具调用卡片
+│   └── BranchNavigator.tsx      # 分支导航器
 ├── artifact/
-│   ├── ArtifactPanel.tsx
-│   ├── MarkdownPreview.tsx
-│   ├── DiffView.tsx
-│   └── VersionSelector.tsx
-└── sidebar/
-    ├── Sidebar.tsx
-    └── ConversationList.tsx
+│   ├── ArtifactPanel.tsx        # Artifact 面板容器
+│   ├── ArtifactList.tsx         # Artifact 列表
+│   ├── ArtifactTabs.tsx         # Preview/Source/Diff 标签页
+│   ├── ArtifactToolbar.tsx      # Artifact 工具栏
+│   ├── MarkdownPreview.tsx      # Markdown 预览
+│   ├── SourceView.tsx           # 源码视图
+│   └── DiffView.tsx             # Diff 对比视图
+├── sidebar/
+│   ├── Sidebar.tsx              # 侧边栏容器
+│   ├── ConversationList.tsx     # 对话列表
+│   └── ConversationItem.tsx     # 对话列表项
+└── ErrorBoundary.tsx            # 错误边界
 ```
 
 ### Store 设计
@@ -119,8 +132,12 @@ Zustand store 只放状态和简单 setter。业务逻辑放到 hooks 和 lib：
 |------|------|
 | `stores/` | 状态定义、简单 setter |
 | `hooks/useSSE.ts` | SSE 连接管理、事件分发 |
-| `hooks/useBranchNavigation.ts` | 消息树遍历、分支路径切换 |
+| `hooks/useChat.ts` | 发送消息、编辑、重跑等交互逻辑 |
+| `hooks/useArtifacts.ts` | Artifact 加载与版本切换 |
+| `hooks/useMediaQuery.ts` | 响应式断点检测 |
 | `lib/api.ts` | API 调用封装 |
+| `lib/sse.ts` | SSE 连接、事件解析 |
+| `lib/messageTree.ts` | 消息树构建、分支路径提取 |
 
 ### 错误边界
 

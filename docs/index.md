@@ -70,6 +70,7 @@ ArtifactFlow 是一个通用框架，可适配多种复杂任务场景：
 | 数据存储 | SQLAlchemy + aiosqlite | 对话历史、Artifact 持久化 |
 | LLM 接口 | LiteLLM | 统一接口支持 100+ 模型提供商 |
 | 内容采集 | crawl4ai | 网页内容抓取与解析 |
+| 前端 | Next.js 15 / React 19 / Zustand / Tailwind CSS | Web UI、SSE 流式渲染 |
 
 ## 快速开始
 
