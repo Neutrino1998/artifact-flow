@@ -25,7 +25,7 @@ export default function ChatPanel() {
     return (
       <div className="flex-1 flex items-center justify-center">
         <div className="text-text-tertiary dark:text-text-tertiary-dark text-sm">
-          Loading conversation...
+          加载对话中...
         </div>
       </div>
     );

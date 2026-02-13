@@ -101,6 +101,7 @@ export default function ArtifactToolbar() {
           onClick={handleRefresh}
           className="p-1.5 rounded text-text-secondary dark:text-text-secondary-dark hover:bg-bg dark:hover:bg-bg-dark transition-colors"
           aria-label="Refresh artifact"
+          title="刷新"
         >
           <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5">
             <path d="M1.5 7a5.5 5.5 0 0 1 9.37-3.9M12.5 7a5.5 5.5 0 0 1-9.37 3.9" />
@@ -113,6 +114,7 @@ export default function ArtifactToolbar() {
           onClick={handleCopy}
           className="p-1.5 rounded text-text-secondary dark:text-text-secondary-dark hover:bg-bg dark:hover:bg-bg-dark transition-colors"
           aria-label="Copy content"
+          title={copied ? '已复制' : '复制内容'}
         >
           {copied ? (
             <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5">
@@ -131,6 +133,7 @@ export default function ArtifactToolbar() {
           onClick={handleDownload}
           className="p-1.5 rounded text-text-secondary dark:text-text-secondary-dark hover:bg-bg dark:hover:bg-bg-dark transition-colors"
           aria-label="Download artifact"
+          title="下载"
         >
           <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5">
             <path d="M7 2v7.5M4 7l3 3 3-3M2.5 11.5h9" />
@@ -142,6 +145,7 @@ export default function ArtifactToolbar() {
           onClick={() => setCurrent(null)}
           className="p-1.5 rounded text-text-secondary dark:text-text-secondary-dark hover:bg-bg dark:hover:bg-bg-dark transition-colors"
           aria-label="Back to artifact list"
+          title="返回列表"
         >
           <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5">
             <path d="M2 3.5h10M2 7h10M2 10.5h10" />
@@ -153,6 +157,7 @@ export default function ArtifactToolbar() {
           onClick={handleClose}
           className="p-1.5 rounded text-text-secondary dark:text-text-secondary-dark hover:bg-bg dark:hover:bg-bg-dark transition-colors"
           aria-label="Close artifact panel"
+          title="关闭面板"
         >
           <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5">
             <path d="M3 3l8 8M11 3l-8 8" />

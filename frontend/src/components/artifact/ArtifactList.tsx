@@ -13,7 +13,7 @@ export default function ArtifactList() {
     return (
       <div className="h-full flex items-center justify-center bg-surface dark:bg-surface-dark">
         <span className="text-sm text-text-tertiary dark:text-text-tertiary-dark">
-          Loading artifacts...
+          加载文稿中...
         </span>
       </div>
     );
@@ -23,7 +23,7 @@ export default function ArtifactList() {
     return (
       <div className="h-full flex items-center justify-center bg-surface dark:bg-surface-dark">
         <span className="text-sm text-text-tertiary dark:text-text-tertiary-dark">
-          No artifacts yet
+          暂无文稿
         </span>
       </div>
     );
@@ -33,7 +33,7 @@ export default function ArtifactList() {
     <div className="h-full bg-surface dark:bg-surface-dark">
       <div className="px-4 py-3 border-b border-border dark:border-border-dark">
         <h3 className="text-sm font-semibold text-text-primary dark:text-text-primary-dark">
-          Artifacts
+          文稿
         </h3>
       </div>
       <div className="overflow-y-auto">

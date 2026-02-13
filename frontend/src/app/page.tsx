@@ -21,7 +21,7 @@ export default function Home() {
           </ErrorBoundary>
         }
         artifact={
-          <ErrorBoundary fallbackLabel="Artifact panel encountered an error">
+          <ErrorBoundary fallbackLabel="文稿面板出错了">
             <ArtifactPanel />
           </ErrorBoundary>
         }

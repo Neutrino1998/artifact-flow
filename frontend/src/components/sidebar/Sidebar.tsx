@@ -18,13 +18,11 @@ function IconButton({
   return (
     <button
       onClick={onClick}
-      className="w-10 h-10 flex items-center justify-center rounded-lg text-text-secondary dark:text-text-secondary-dark hover:bg-bg dark:hover:bg-bg-dark transition-colors group relative"
+      className="w-10 h-10 flex items-center justify-center rounded-lg text-text-secondary dark:text-text-secondary-dark hover:bg-bg dark:hover:bg-bg-dark transition-colors"
       aria-label={label}
+      title={label}
     >
       {children}
-      <span className="absolute left-full ml-2 px-2 py-1 text-xs bg-surface-dark dark:bg-surface text-text-primary-dark dark:text-text-primary rounded shadow-md whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-50">
-        {label}
-      </span>
     </button>
   );
 }
@@ -52,14 +50,14 @@ export default function Sidebar() {
     return (
       <div className="flex flex-col items-center h-full bg-surface dark:bg-surface-dark py-3 gap-1 w-12">
         {/* New chat */}
-        <IconButton onClick={handleNewChat} label="New chat">
+        <IconButton onClick={handleNewChat} label="新建对话">
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
             <path d="M8 3v10M3 8h10" />
           </svg>
         </IconButton>
 
         {/* Artifacts */}
-        <IconButton onClick={toggleArtifactPanel} label="Artifacts">
+        <IconButton onClick={toggleArtifactPanel} label="文稿面板">
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
             <rect x="2" y="2" width="12" height="12" rx="1.5" />
             <path d="M5 6h6M5 8.5h4" />
@@ -67,7 +65,7 @@ export default function Sidebar() {
         </IconButton>
 
         {/* Theme toggle */}
-        <IconButton onClick={toggleTheme} label={theme === 'light' ? 'Dark mode' : 'Light mode'}>
+        <IconButton onClick={toggleTheme} label={theme === 'light' ? '深色模式' : '浅色模式'}>
           {theme === 'light' ? (
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
               <path d="M8 1v1m0 12v1m7-7h-1M2 8H1m12.07-4.07-.71.71M3.64 12.36l-.71.71m10.14 0-.71-.71M3.64 3.64l-.71-.71M11 8a3 3 0 1 1-6 0 3 3 0 0 1 6 0z" />
@@ -83,7 +81,7 @@ export default function Sidebar() {
         <div className="flex-1" />
 
         {/* Expand */}
-        <IconButton onClick={toggleSidebar} label="Expand sidebar">
+        <IconButton onClick={toggleSidebar} label="展开侧栏">
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
             <path d="M6 3l5 5-5 5" />
           </svg>
@@ -105,6 +103,7 @@ export default function Sidebar() {
             onClick={toggleTheme}
             className="p-1.5 rounded-lg text-text-secondary dark:text-text-secondary-dark hover:bg-bg dark:hover:bg-bg-dark transition-colors"
             aria-label="Toggle theme"
+            title={theme === 'light' ? '切换深色模式' : '切换浅色模式'}
           >
             {theme === 'light' ? (
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
@@ -120,6 +119,7 @@ export default function Sidebar() {
             onClick={toggleSidebar}
             className="p-1.5 rounded-lg text-text-secondary dark:text-text-secondary-dark hover:bg-bg dark:hover:bg-bg-dark transition-colors"
             aria-label="Collapse sidebar"
+            title="收起侧栏"
           >
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
               <path d="M2 4h12M2 8h12M2 12h12" />

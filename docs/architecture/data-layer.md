@@ -139,7 +139,7 @@ msg_1 (parent_id=None)     ← 根消息
 
 ### Artifact
 
-工件实体（复合主键 + 乐观锁）：
+文稿实体（复合主键 + 乐观锁）：
 
 ```python
 class Artifact(Base):

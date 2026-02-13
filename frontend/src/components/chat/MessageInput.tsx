@@ -67,6 +67,7 @@ export default function MessageInput() {
             onClick={toggleArtifactPanel}
             className="flex-shrink-0 p-1.5 rounded-lg text-text-secondary dark:text-text-secondary-dark hover:bg-bg dark:hover:bg-bg-dark transition-colors"
             aria-label="Toggle artifact panel"
+            title="切换文稿面板"
           >
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
               <rect x="1.5" y="2" width="13" height="12" rx="1.5" />
@@ -80,6 +81,7 @@ export default function MessageInput() {
               onClick={handleStop}
               className="flex-shrink-0 w-8 h-8 flex items-center justify-center rounded-full bg-red-500 text-white hover:bg-red-600 transition-colors"
               aria-label="Stop generation"
+              title="停止生成"
             >
               <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
                 <rect x="4" y="4" width="8" height="8" rx="1" />
@@ -91,6 +93,7 @@ export default function MessageInput() {
               disabled={!content.trim()}
               className="flex-shrink-0 w-8 h-8 flex items-center justify-center rounded-full bg-accent text-white hover:bg-accent-hover disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
               aria-label="Send message"
+              title="发送消息"
             >
               <svg
                 width="16"

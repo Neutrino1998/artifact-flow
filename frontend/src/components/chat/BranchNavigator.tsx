@@ -36,6 +36,7 @@ function BranchNavigator({
         disabled={currentIndex === 0}
         className="p-0.5 rounded hover:bg-bg dark:hover:bg-bg-dark disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
         aria-label="Previous branch"
+        title="上一个分支"
       >
         <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5">
           <path d="M7.5 2.5 4 6l3.5 3.5" />
@@ -49,6 +50,7 @@ function BranchNavigator({
         disabled={currentIndex === totalSiblings - 1}
         className="p-0.5 rounded hover:bg-bg dark:hover:bg-bg-dark disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
         aria-label="Next branch"
+        title="下一个分支"
       >
         <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5">
           <path d="M4.5 2.5 8 6l-3.5 3.5" />
