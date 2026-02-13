@@ -91,6 +91,7 @@ python run_cli.py chat
 
 ## 文档导航
 
+- [Frontend Guide](frontend.md) - 前端架构、文件详解与数据流
 - [Request Lifecycle](request-lifecycle.md) - 理解一个请求的完整生命周期
 - [Architecture](architecture/core.md) - 深入了解各模块实现
 - [Concurrency](architecture/concurrency.md) - 并发模型、已知局限与演进路线
