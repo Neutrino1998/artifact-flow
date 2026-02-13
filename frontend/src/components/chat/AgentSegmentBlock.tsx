@@ -82,18 +82,25 @@ function AgentSegmentBlock({ segment, isActive, defaultExpanded }: AgentSegmentB
       {isExpanded && hasBody && (
         <div className="px-3 pb-3 space-y-3">
           {/* Thinking block */}
-          {segment.reasoningContent && (
-            <ThinkingBlock
-              content={segment.reasoningContent}
-              defaultExpanded={segment.isThinking}
-              isLive={segment.isThinking}
-            />
-          )}
+          {segment.reasoningContent && (() => {
+            const isThinkingLive = isActive && !segment.content && !segment.llmOutput && segment.toolCalls.length === 0;
+            return (
+              <ThinkingBlock
+                content={segment.reasoningContent}
+                defaultExpanded={isThinkingLive}
+                isLive={isThinkingLive}
+              />
+            );
+          })()}
 
-          {/* Raw LLM output (shown when tools were called) */}
-          {segment.llmOutput && (
-            <AgentOutputBlock content={segment.llmOutput} />
-          )}
+          {/* Raw LLM output (shown when tools were called, or live during XML streaming) */}
+          {(() => {
+            const streamingXml = isActive && !segment.isThinking && !segment.llmOutput
+              && segment.content.includes('<tool_call');
+            const output = segment.llmOutput || (streamingXml ? segment.content : '');
+            if (!output) return null;
+            return <AgentOutputBlock content={output} defaultExpanded={streamingXml} isLive={streamingXml} />;
+          })()}
 
           {/* Tool calls */}
           {segment.toolCalls.map((tc) => (

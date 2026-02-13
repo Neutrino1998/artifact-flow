@@ -1,6 +1,7 @@
 'use client';
 
 import { memo, useState, useEffect } from 'react';
+import CyclingDots from './CyclingDots';
 
 interface ThinkingBlockProps {
   content: string;
@@ -37,21 +38,12 @@ function ThinkingBlock({ content, defaultExpanded = false, isLive = false }: Thi
         >
           <path d="M4.5 2.5 8 6l-3.5 3.5" />
         </svg>
-        {isLive ? (
-          <span className="flex items-center gap-1.5">
-            Thinking
-            <span className="inline-flex gap-0.5">
-              <span className="w-1 h-1 rounded-full bg-current animate-bounce [animation-delay:0ms]" />
-              <span className="w-1 h-1 rounded-full bg-current animate-bounce [animation-delay:150ms]" />
-              <span className="w-1 h-1 rounded-full bg-current animate-bounce [animation-delay:300ms]" />
-            </span>
-          </span>
-        ) : (
-          'Thinking'
-        )}
+        <span>
+          Thinking{isLive && <CyclingDots />}
+        </span>
       </button>
       {expanded && (
-        <div className="px-3 pb-3 text-xs text-text-tertiary dark:text-text-tertiary-dark whitespace-pre-wrap font-mono leading-relaxed max-h-60 overflow-y-auto">
+        <div className="px-3 pb-3 pt-2 text-xs text-text-tertiary dark:text-text-tertiary-dark whitespace-pre-wrap font-mono leading-relaxed max-h-60 overflow-y-auto border-t border-border dark:border-border-dark">
           {content}
         </div>
       )}

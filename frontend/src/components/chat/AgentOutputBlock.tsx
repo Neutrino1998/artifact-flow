@@ -1,14 +1,20 @@
 'use client';
 
-import { memo, useState } from 'react';
+import { memo, useState, useEffect } from 'react';
+import CyclingDots from './CyclingDots';
 
 interface AgentOutputBlockProps {
   content: string;
   defaultExpanded?: boolean;
+  isLive?: boolean;
 }
 
-function AgentOutputBlock({ content, defaultExpanded = false }: AgentOutputBlockProps) {
+function AgentOutputBlock({ content, defaultExpanded = false, isLive = false }: AgentOutputBlockProps) {
   const [expanded, setExpanded] = useState(defaultExpanded);
+
+  useEffect(() => {
+    setExpanded(isLive);
+  }, [isLive]);
 
   if (!content) return null;
 
@@ -29,10 +35,12 @@ function AgentOutputBlock({ content, defaultExpanded = false }: AgentOutputBlock
         >
           <path d="M4.5 2.5 8 6l-3.5 3.5" />
         </svg>
-        Agent Output
+        <span>
+          Agent Output{isLive && <CyclingDots />}
+        </span>
       </button>
       {expanded && (
-        <div className="px-3 pb-3 text-xs text-text-tertiary dark:text-text-tertiary-dark whitespace-pre-wrap font-mono leading-relaxed max-h-60 overflow-y-auto">
+        <div className="px-3 pb-3 pt-2 text-xs text-text-tertiary dark:text-text-tertiary-dark whitespace-pre-wrap font-mono leading-relaxed max-h-60 overflow-y-auto border-t border-border dark:border-border-dark">
           {content}
         </div>
       )}

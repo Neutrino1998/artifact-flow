@@ -104,13 +104,28 @@ export function useSSE() {
           break;
         }
 
-        case StreamEventType.LLM_COMPLETE:
-          if (data?.content) {
-            updateCurrentSegment({ content: data.content as string, isThinking: false });
-          } else {
-            updateCurrentSegment({ isThinking: false });
-          }
+        case StreamEventType.LLM_COMPLETE: {
+          const finalContent = data?.content as string | undefined;
+
+          // Determine the definitive content (from event data or accumulated chunks)
+          const segs = useStreamStore.getState().segments;
+          const lastSeg = segs[segs.length - 1];
+          const effectiveContent = finalContent || lastSeg?.content || '';
+
+          // Preserve raw LLM output when it contains XML tool calls.
+          // This covers call_subagent (no TOOL_START event) and acts as
+          // an early save for regular tools (TOOL_START won't overwrite).
+          const llmOutputUpdate = effectiveContent.includes('<tool_call>') && !lastSeg?.llmOutput
+            ? { llmOutput: effectiveContent }
+            : {};
+
+          updateCurrentSegment({
+            ...(finalContent ? { content: finalContent } : {}),
+            isThinking: false,
+            ...llmOutputUpdate,
+          });
           break;
+        }
 
         case StreamEventType.AGENT_COMPLETE:
           updateCurrentSegment({ status: 'complete' });
