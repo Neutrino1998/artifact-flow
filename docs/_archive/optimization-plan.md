@@ -4,9 +4,11 @@
 
 ---
 
-## Phase 1: 核心流程 Bug 修复（ID 一致性 + Permission Resume）
+## Phase 1: 核心流程 Bug 修复（ID 一致性 + Permission Resume） ✅ DONE
 
 **目标**: 修复 permission resume 端到端链路断裂问题。当前 permission 确认流程无法正常工作。
+
+> **完成于**: commit `c24fdb8` — 1.1~1.4 全部完成。Controller 接受外部传入 ID 并 fallback 自动生成，测试无需强制适配（向后兼容）。
 
 ### 1.1 统一 ID 生成源
 
@@ -352,7 +354,7 @@
 ## 各 Phase 依赖关系
 
 ```
-Phase 1 (核心 Bug)     ← 无依赖，立即可做
+Phase 1 (核心 Bug)     ✅ 已完成
 Phase 2 (安全加固)     ← 无依赖，可与 Phase 1 并行
 Phase 3 (数据质量)     ← 无依赖，可与 Phase 1/2 并行
 Phase 4 (认证框架)     ← 建议在 Phase 1 之后（ID 一致性修好后再加认证）
