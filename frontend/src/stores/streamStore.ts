@@ -25,6 +25,7 @@ export interface ExecutionSegment {
   isThinking: boolean;
   toolCalls: ToolCallInfo[];
   content: string;
+  llmOutput: string;             // raw LLM output preserved before content is cleared at tool_start
 }
 
 interface StreamState {
@@ -157,6 +158,7 @@ export const useStreamStore = create<StreamState>((set, get) => {
             isThinking: false,
             toolCalls: [],
             content: '',
+            llmOutput: '',
           },
         ],
       })),

@@ -120,6 +120,14 @@ export function useSSE() {
           const toolName = data?.tool_name as string ?? event.tool ?? '';
           const params = data?.params as Record<string, unknown> ?? {};
           const agent = data?.agent as string ?? event.agent ?? '';
+
+          // Preserve LLM output before clearing content (only on first tool_start)
+          const segs = useStreamStore.getState().segments;
+          const lastSeg = segs[segs.length - 1];
+          const preserveLlmOutput = lastSeg?.content && !lastSeg.llmOutput
+            ? { llmOutput: lastSeg.content }
+            : {};
+
           addToolCallToSegment({
             id: `${toolName}-${Date.now()}`,
             toolName,
@@ -128,7 +136,7 @@ export function useSSE() {
             status: 'running',
           });
           // Clear streaming content when entering tool phase
-          updateCurrentSegment({ content: '' });
+          updateCurrentSegment({ content: '', ...preserveLlmOutput });
           break;
         }
 

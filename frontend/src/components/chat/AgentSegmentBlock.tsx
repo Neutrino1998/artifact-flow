@@ -6,6 +6,7 @@ import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
 import type { ExecutionSegment } from '@/stores/streamStore';
 import ThinkingBlock from './ThinkingBlock';
+import AgentOutputBlock from './AgentOutputBlock';
 import ToolCallCard from './ToolCallCard';
 
 /**
@@ -31,7 +32,7 @@ function AgentSegmentBlock({ segment, isActive, defaultExpanded }: AgentSegmentB
   const [expanded, setExpanded] = useState(defaultExpanded);
 
   const isExpanded = isActive || expanded;
-  const hasBody = !!(segment.reasoningContent || segment.toolCalls.length > 0 || segment.content);
+  const hasBody = !!(segment.reasoningContent || segment.llmOutput || segment.toolCalls.length > 0 || segment.content);
 
   return (
     <div className="border border-border dark:border-border-dark rounded-card overflow-hidden">
@@ -87,6 +88,11 @@ function AgentSegmentBlock({ segment, isActive, defaultExpanded }: AgentSegmentB
               defaultExpanded={segment.isThinking}
               isLive={segment.isThinking}
             />
+          )}
+
+          {/* Raw LLM output (shown when tools were called) */}
+          {segment.llmOutput && (
+            <AgentOutputBlock content={segment.llmOutput} />
           )}
 
           {/* Tool calls */}
