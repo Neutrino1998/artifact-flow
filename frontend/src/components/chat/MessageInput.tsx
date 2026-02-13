@@ -62,6 +62,18 @@ export default function MessageInput() {
             className="flex-1 resize-none bg-transparent text-sm leading-5 text-text-primary dark:text-text-primary-dark placeholder:text-text-tertiary dark:placeholder:text-text-tertiary-dark outline-none disabled:opacity-40 disabled:cursor-not-allowed"
           />
 
+          {/* Upload file */}
+          <button
+            onClick={() => {/* TODO: implement file upload */}}
+            className="flex-shrink-0 p-1.5 rounded-lg text-text-secondary dark:text-text-secondary-dark hover:bg-bg dark:hover:bg-bg-dark transition-colors"
+            aria-label="Upload file"
+            title="上传文件"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+            </svg>
+          </button>
+
           {/* Artifact panel toggle */}
           <button
             onClick={toggleArtifactPanel}
