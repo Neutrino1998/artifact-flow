@@ -93,7 +93,9 @@ class ExecutionController:
             return await self._execute_new_message(
                 content=content,
                 conversation_id=conversation_id,
-                parent_message_id=parent_message_id
+                parent_message_id=parent_message_id,
+                thread_id=thread_id,
+                message_id=message_id,
             )
         # 场景2：恢复权限
         elif thread_id and resume_data and conversation_id and message_id:
@@ -149,7 +151,9 @@ class ExecutionController:
             async for event in self._stream_new_message(
                 content=content,
                 conversation_id=conversation_id,
-                parent_message_id=parent_message_id
+                parent_message_id=parent_message_id,
+                thread_id=thread_id,
+                message_id=message_id,
             ):
                 yield event
 
@@ -173,7 +177,9 @@ class ExecutionController:
         self,
         content: str,
         conversation_id: Optional[str],
-        parent_message_id: Any = _UNSET
+        parent_message_id: Any = _UNSET,
+        thread_id: Optional[str] = None,
+        message_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         处理新消息（批量模式）
@@ -210,9 +216,9 @@ class ExecutionController:
             to_message_id=resolved_parent
         )
 
-        # 4. 生成ID
-        message_id = f"msg-{uuid4().hex}"
-        thread_id = f"thd-{uuid4().hex}"
+        # 4. 生成ID（优先使用外部传入的值，fallback 自动生成）
+        message_id = message_id or f"msg-{uuid4().hex}"
+        thread_id = thread_id or f"thd-{uuid4().hex}"
 
         # 5. 获取session
         session_id = self._get_or_create_session(conversation_id)
@@ -319,7 +325,9 @@ class ExecutionController:
         self,
         content: str,
         conversation_id: Optional[str],
-        parent_message_id: Any = _UNSET
+        parent_message_id: Any = _UNSET,
+        thread_id: Optional[str] = None,
+        message_id: Optional[str] = None,
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """
         🆕 处理新消息（流式模式）
@@ -350,8 +358,9 @@ class ExecutionController:
             to_message_id=resolved_parent
         )
 
-        message_id = f"msg-{uuid4().hex}"
-        thread_id = f"thd-{uuid4().hex}"
+        # 生成ID（优先使用外部传入的值，fallback 自动生成）
+        message_id = message_id or f"msg-{uuid4().hex}"
+        thread_id = thread_id or f"thd-{uuid4().hex}"
 
         session_id = self._get_or_create_session(conversation_id)
         if self.artifact_manager:

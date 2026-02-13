@@ -75,8 +75,21 @@ export function useSSE() {
       const { type, data } = event;
 
       switch (type) {
-        case StreamEventType.METADATA:
+        case StreamEventType.METADATA: {
+          // Dev-only consistency check: verify IDs from metadata match streamStore
+          if (process.env.NODE_ENV === 'development') {
+            const metaThreadId = data?.thread_id as string | undefined;
+            const metaMsgId = data?.message_id as string | undefined;
+            const store = useStreamStore.getState();
+            if (metaThreadId && store.threadId && metaThreadId !== store.threadId) {
+              console.warn('[SSE] thread_id mismatch:', { meta: metaThreadId, store: store.threadId });
+            }
+            if (metaMsgId && store.messageId && metaMsgId !== store.messageId) {
+              console.warn('[SSE] message_id mismatch:', { meta: metaMsgId, store: store.messageId });
+            }
+          }
           break;
+        }
 
         case StreamEventType.AGENT_START: {
           const agentName = data?.agent_name as string ?? event.agent ?? 'Agent';
@@ -214,8 +227,6 @@ export function useSSE() {
           setPermissionRequest({
             toolName: data?.tool_name as string ?? event.tool ?? '',
             params: data?.params as Record<string, unknown> ?? {},
-            messageId: data?.message_id as string ?? '',
-            threadId: data?.thread_id as string ?? '',
           });
           break;
 

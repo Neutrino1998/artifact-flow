@@ -13,8 +13,6 @@ export interface ToolCallInfo {
 export interface PermissionRequest {
   toolName: string;
   params: Record<string, unknown>;
-  messageId: string;
-  threadId: string;
 }
 
 export interface ExecutionSegment {

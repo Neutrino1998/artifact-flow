@@ -10,32 +10,34 @@ export default function PermissionModal() {
   const permissionRequest = useStreamStore((s) => s.permissionRequest);
   const setPermissionRequest = useStreamStore((s) => s.setPermissionRequest);
   const startStream = useStreamStore((s) => s.startStream);
+  const threadId = useStreamStore((s) => s.threadId);
+  const messageId = useStreamStore((s) => s.messageId);
   const conversationId = useConversationStore((s) => s.current?.id);
   const { connect } = useSSE();
   const [loading, setLoading] = useState(false);
 
   const handleResponse = useCallback(
     async (approved: boolean) => {
-      if (!permissionRequest || !conversationId) return;
+      if (!permissionRequest || !conversationId || !threadId || !messageId) return;
       setLoading(true);
       try {
         const res = await api.resumeExecution(conversationId, {
-          thread_id: permissionRequest.threadId,
-          message_id: permissionRequest.messageId,
+          thread_id: threadId,
+          message_id: messageId,
           approved,
         });
         setPermissionRequest(null);
 
         // Reconnect SSE to new stream
-        startStream(res.stream_url, permissionRequest.threadId, permissionRequest.messageId);
-        connect(res.stream_url, conversationId, permissionRequest.messageId);
+        startStream(res.stream_url, threadId, messageId);
+        connect(res.stream_url, conversationId, messageId);
       } catch (err) {
         console.error('Failed to resume:', err);
       } finally {
         setLoading(false);
       }
     },
-    [permissionRequest, conversationId, setPermissionRequest, startStream, connect]
+    [permissionRequest, conversationId, threadId, messageId, setPermissionRequest, startStream, connect]
   );
 
   if (!permissionRequest) return null;

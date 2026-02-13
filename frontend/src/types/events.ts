@@ -69,8 +69,6 @@ export interface ToolCompleteData {
 export interface PermissionRequestData {
   tool_name: string;
   params: Record<string, unknown>;
-  message_id: string;
-  thread_id: string;
 }
 
 export interface PermissionResultData {

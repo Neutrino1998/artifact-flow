@@ -136,6 +136,8 @@ async def send_message(
                     async for event in ctrl.stream_execute(
                         content=request.content,
                         conversation_id=conversation_id,
+                        thread_id=thread_id,
+                        message_id=message_id,
                         **parent_kwargs,
                     ):
                         if stream_closed:
@@ -290,6 +292,7 @@ async def delete_conversation(
 async def resume_execution(
     conv_id: str,
     request: ResumeRequest,
+    conversation_manager: ConversationManager = Depends(get_conversation_manager),
     stream_manager: StreamManager = Depends(get_stream_manager),
     task_manager: TaskManager = Depends(get_task_manager),
 ):
@@ -297,13 +300,22 @@ async def resume_execution(
     恢复中断的执行（权限确认后）
 
     流程：
-    1. 创建新的 StreamContext
-    2. 启动后台任务恢复执行
-    3. 返回新的 stream_url
+    1. 校验 thread_id 归属
+    2. 创建新的 StreamContext
+    3. 启动后台任务恢复执行
+    4. 返回新的 stream_url
     """
     thread_id = request.thread_id
 
-    # 创建新的 stream（可能使用相同的 thread_id）
+    # 1. 校验 thread_id 归属当前 conversation
+    repo = conversation_manager._ensure_repository()
+    message = await repo.get_message(request.message_id)
+    if not message:
+        raise HTTPException(status_code=404, detail="Message not found")
+    if message.thread_id != thread_id or message.conversation_id != conv_id:
+        raise HTTPException(status_code=403, detail="Thread does not belong to this conversation")
+
+    # 2. 创建新的 stream（可能使用相同的 thread_id）
     try:
         await stream_manager.create_stream(thread_id)
     except Exception:
