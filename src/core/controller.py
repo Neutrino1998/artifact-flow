@@ -305,14 +305,13 @@ class ExecutionController:
         except Exception as e:
             logger.exception(f"Error in graph execution: {e}")
 
-            # 更新错误响应
-            error_msg = f"Error: {str(e)}"
+            # 更新错误响应（不写入内部异常详情）
             await self.conversation_manager.update_response_async(
                 conv_id=conversation_id,
                 message_id=message_id,
-                response=error_msg
+                response="An error occurred during execution."
             )
-            
+
             return {
                 "success": False,
                 "conversation_id": conversation_id,
@@ -484,11 +483,11 @@ class ExecutionController:
         except Exception as e:
             logger.exception(f"Error in streaming graph execution: {e}")
 
-            error_msg = f"Error: {str(e)}"
+            # 更新错误响应（不写入内部异常详情）
             await self.conversation_manager.update_response_async(
                 conv_id=conversation_id,
                 message_id=message_id,
-                response=error_msg
+                response="An error occurred during execution."
             )
 
             # 发送错误事件

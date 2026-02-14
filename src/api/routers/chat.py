@@ -157,11 +157,11 @@ async def send_message(
 
             except TimeoutError:
                 logger.error(f"Graph execution timed out after {config.STREAM_TIMEOUT}s for thread {thread_id}")
-                await stream_manager.push_event(thread_id, {
+                await stream_manager.push_event(thread_id, _sanitize_error_event({
                     "type": "error",
                     "timestamp": datetime.now().isoformat(),
                     "data": {"success": False, "error": f"Execution timed out after {config.STREAM_TIMEOUT}s"}
-                })
+                }))
 
             except Exception as e:
                 logger.exception(f"Error in graph execution: {e}")
@@ -392,11 +392,11 @@ async def resume_execution(
 
             except TimeoutError:
                 logger.error(f"Resume execution timed out after {config.STREAM_TIMEOUT}s for thread {thread_id}")
-                await stream_manager.push_event(thread_id, {
+                await stream_manager.push_event(thread_id, _sanitize_error_event({
                     "type": "error",
                     "timestamp": datetime.now().isoformat(),
                     "data": {"success": False, "error": f"Execution timed out after {config.STREAM_TIMEOUT}s"}
-                })
+                }))
 
             except Exception as e:
                 logger.exception(f"Error in resume execution: {e}")
