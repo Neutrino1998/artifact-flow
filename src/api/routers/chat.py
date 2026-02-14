@@ -156,10 +156,11 @@ async def send_message(
 
             except Exception as e:
                 logger.exception(f"Error in graph execution: {e}")
+                error_msg = str(e) if config.DEBUG else "Internal server error"
                 await stream_manager.push_event(thread_id, {
                     "type": "error",
                     "timestamp": datetime.now().isoformat(),
-                    "data": {"success": False, "error": str(e)}
+                    "data": {"success": False, "error": error_msg}
                 })
 
     # 5. 提交到 TaskManager（持有引用 + 并发控制）
@@ -391,10 +392,11 @@ async def resume_execution(
 
             except Exception as e:
                 logger.exception(f"Error in resume execution: {e}")
+                error_msg = str(e) if config.DEBUG else "Internal server error"
                 await stream_manager.push_event(thread_id, {
                     "type": "error",
                     "timestamp": datetime.now().isoformat(),
-                    "data": {"success": False, "error": str(e)}
+                    "data": {"success": False, "error": error_msg}
                 })
 
     await task_manager.submit(thread_id, execute_resume())

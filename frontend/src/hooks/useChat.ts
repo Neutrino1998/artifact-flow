@@ -48,7 +48,7 @@ export function useChat() {
         if (parentMessageId !== undefined) {
           setStreamParentId(parentMessageId);
         }
-        startStream(res.stream_url, res.thread_id, res.message_id);
+        startStream(res.stream_url, res.thread_id, res.message_id, res.conversation_id);
 
         // Connect SSE for streaming
         connect(res.stream_url, res.conversation_id, res.message_id);

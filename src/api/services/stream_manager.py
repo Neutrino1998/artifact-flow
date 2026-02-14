@@ -130,8 +130,15 @@ class StreamManager:
             StreamAlreadyExistsError: 如果 stream 已存在
         """
         async with self._lock:
-            if thread_id in self.streams:
-                raise StreamAlreadyExistsError(thread_id)
+            existing = self.streams.get(thread_id)
+            if existing:
+                if existing.status == "closed":
+                    # 已关闭的 stream（延迟清理未完成），立即清理并允许重建
+                    if existing.cleanup_task:
+                        existing.cleanup_task.cancel()
+                    del self.streams[thread_id]
+                else:
+                    raise StreamAlreadyExistsError(thread_id)
 
             # 清理之前的关闭记录（允许重新使用同一个 thread_id）
             self._closed_streams.discard(thread_id)

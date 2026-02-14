@@ -51,7 +51,7 @@ class WebFetchTool(BaseTool):
         super().__init__(
             name="web_fetch",
             description="Fetch and extract content from web pages and PDF files",
-            permission=ToolPermission.AUTO
+            permission=ToolPermission.CONFIRM
         )
         
         if not CRAWL4AI_AVAILABLE:
@@ -171,7 +171,15 @@ class WebFetchTool(BaseTool):
             urls = urls_param
         else:
             return ToolResult(success=False, error="url_list must be string or list")
-        
+
+        # SSRF 防护：仅允许 http/https 协议
+        for url in urls:
+            if not url.lower().startswith(("http://", "https://")):
+                return ToolResult(
+                    success=False,
+                    error=f"Unsupported URL scheme: {url}. Only http:// and https:// are allowed."
+                )
+
         # 默认值已由 _apply_defaults 填充
         max_content_length = params["max_content_length"]
         max_concurrent = min(params["max_concurrent"], 5)  # 限制最大5个

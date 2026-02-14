@@ -235,6 +235,14 @@ export function useSSE() {
           break;
 
         case StreamEventType.COMPLETE: {
+          const interrupted = data?.interrupted as boolean | undefined;
+          if (interrupted) {
+            // Permission interrupt: preserve full stream state (isStreaming,
+            // segments, threadId, messageId, permissionRequest) so the UI
+            // stays in streaming mode and PermissionModal can function.
+            // SSE connection closes naturally; resumeStream reconnects later.
+            break;
+          }
           const messageId = useStreamStore.getState().messageId;
           if (messageId) {
             snapshotSegments(messageId);

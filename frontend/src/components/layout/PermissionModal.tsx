@@ -2,23 +2,20 @@
 
 import { useState, useCallback } from 'react';
 import { useStreamStore } from '@/stores/streamStore';
-import { useConversationStore } from '@/stores/conversationStore';
 import { useSSE } from '@/hooks/useSSE';
 import * as api from '@/lib/api';
 
 export default function PermissionModal() {
   const permissionRequest = useStreamStore((s) => s.permissionRequest);
-  const setPermissionRequest = useStreamStore((s) => s.setPermissionRequest);
-  const startStream = useStreamStore((s) => s.startStream);
-  const threadId = useStreamStore((s) => s.threadId);
-  const messageId = useStreamStore((s) => s.messageId);
-  const conversationId = useConversationStore((s) => s.current?.id);
   const { connect } = useSSE();
   const [loading, setLoading] = useState(false);
 
   const handleResponse = useCallback(
     async (approved: boolean) => {
-      if (!permissionRequest || !conversationId || !threadId || !messageId) return;
+      // Read current values from store to avoid stale closure issues
+      const { permissionRequest: req, conversationId, threadId, messageId } =
+        useStreamStore.getState();
+      if (!req || !conversationId || !threadId || !messageId) return;
       setLoading(true);
       try {
         const res = await api.resumeExecution(conversationId, {
@@ -26,18 +23,18 @@ export default function PermissionModal() {
           message_id: messageId,
           approved,
         });
-        setPermissionRequest(null);
 
-        // Reconnect SSE to new stream
-        startStream(res.stream_url, threadId, messageId);
+        // Reconnect SSE first, then clear permission (clearing unmounts this component)
+        useStreamStore.getState().resumeStream(res.stream_url);
         connect(res.stream_url, conversationId, messageId);
+        useStreamStore.getState().setPermissionRequest(null);
       } catch (err) {
         console.error('Failed to resume:', err);
       } finally {
         setLoading(false);
       }
     },
-    [permissionRequest, conversationId, threadId, messageId, setPermissionRequest, startStream, connect]
+    [connect]
   );
 
   if (!permissionRequest) return null;

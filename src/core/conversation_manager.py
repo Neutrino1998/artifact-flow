@@ -282,23 +282,19 @@ class ConversationManager:
 
         # 持久化到数据库
         if self.repository:
-            try:
-                await self.repository.add_message(
-                    conversation_id=conv_id,
-                    message_id=message_id,
-                    content=content,
-                    thread_id=thread_id,
-                    parent_id=parent_id
-                )
+            await self.repository.add_message(
+                conversation_id=conv_id,
+                message_id=message_id,
+                content=content,
+                thread_id=thread_id,
+                parent_id=parent_id
+            )
 
-                # 如果是第一条消息（无 parent），自动生成 title
-                if parent_id is None:
-                    title = self._generate_title(content)
-                    await self.repository.update_title(conv_id, title)
-                    logger.debug(f"Auto-generated title for conversation {conv_id}: {title}")
-
-            except Exception as e:
-                logger.warning(f"Failed to persist message: {e}")
+            # 如果是第一条消息（无 parent），自动生成 title
+            if parent_id is None:
+                title = self._generate_title(content)
+                await self.repository.update_title(conv_id, title)
+                logger.debug(f"Auto-generated title for conversation {conv_id}: {title}")
 
         return {
             "message_id": message_id,
@@ -332,10 +328,7 @@ class ConversationManager:
 
         # 持久化到数据库
         if self.repository:
-            try:
-                await self.repository.update_graph_response(message_id, response)
-            except Exception as e:
-                logger.warning(f"Failed to persist response: {e}")
+            await self.repository.update_graph_response(message_id, response)
 
     # ========================================
     # 查询操作

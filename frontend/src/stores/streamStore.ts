@@ -32,6 +32,7 @@ interface StreamState {
   streamUrl: string | null;
   threadId: string | null;
   messageId: string | null;
+  conversationId: string | null;
 
   // Segment-based timeline
   segments: ExecutionSegment[];
@@ -53,7 +54,8 @@ interface StreamState {
   error: string | null;
 
   // Actions
-  startStream: (url: string, threadId: string, messageId: string) => void;
+  startStream: (url: string, threadId: string, messageId: string, conversationId: string) => void;
+  resumeStream: (url: string) => void;
   endStream: () => void;
   reset: () => void;
 
@@ -110,6 +112,7 @@ export const useStreamStore = create<StreamState>((set, get) => {
     streamUrl: null,
     threadId: null,
     messageId: null,
+    conversationId: null,
     segments: [],
     pendingUserMessage: null,
     streamParentId: undefined,
@@ -117,19 +120,28 @@ export const useStreamStore = create<StreamState>((set, get) => {
     permissionRequest: null,
     error: null,
 
-    startStream: (url, threadId, messageId) =>
+    startStream: (url, threadId, messageId, conversationId) =>
       set({
         isStreaming: true,
         streamUrl: url,
         threadId,
         messageId,
+        conversationId,
         segments: [],
         permissionRequest: null,
         error: null,
       }),
 
+    resumeStream: (url) =>
+      set({
+        isStreaming: true,
+        streamUrl: url,
+        permissionRequest: null,
+        error: null,
+      }),
+
     endStream: () =>
-      set({ isStreaming: false, streamUrl: null, permissionRequest: null, streamParentId: undefined }),
+      set({ isStreaming: false, streamUrl: null, conversationId: null, permissionRequest: null, streamParentId: undefined }),
 
     reset: () =>
       set({
@@ -137,6 +149,7 @@ export const useStreamStore = create<StreamState>((set, get) => {
         streamUrl: null,
         threadId: null,
         messageId: null,
+        conversationId: null,
         segments: [],
         pendingUserMessage: null,
         streamParentId: undefined,
