@@ -100,17 +100,6 @@ export default function Sidebar() {
         </h1>
         <div className="flex items-center gap-1">
           <button
-            onClick={toggleArtifactPanel}
-            className="p-1.5 rounded-lg text-text-secondary dark:text-text-secondary-dark hover:bg-bg dark:hover:bg-bg-dark transition-colors"
-            aria-label="Toggle artifact panel"
-            title="文稿面板"
-          >
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
-              <rect x="2" y="2" width="12" height="12" rx="1.5" />
-              <path d="M5 6h6M5 8.5h4" />
-            </svg>
-          </button>
-          <button
             onClick={toggleTheme}
             className="p-1.5 rounded-lg text-text-secondary dark:text-text-secondary-dark hover:bg-bg dark:hover:bg-bg-dark transition-colors"
             aria-label="Toggle theme"
@@ -139,11 +128,21 @@ export default function Sidebar() {
         </div>
       </div>
 
-      {/* New chat button */}
-      <div className="px-3 pt-3 pb-3">
+      {/* Artifact panel + New chat buttons */}
+      <div className="px-3 pt-3 pb-3 space-y-2">
+        <button
+          onClick={toggleArtifactPanel}
+          className="w-full flex items-center gap-2 px-3 py-2 text-sm text-text-primary dark:text-text-primary-dark bg-bg dark:bg-bg-dark border border-border dark:border-border-dark rounded-card hover:bg-surface dark:hover:bg-surface-dark transition-colors"
+        >
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+            <rect x="2" y="2" width="12" height="12" rx="1.5" />
+            <path d="M5 6h6M5 8.5h4" />
+          </svg>
+          文稿面板
+        </button>
         <button
           onClick={handleNewChat}
-          className="w-full flex items-center gap-2 px-3 py-2 text-sm text-white bg-accent hover:bg-accent-hover rounded-card transition-colors"
+          className="w-full flex items-center gap-2 px-3 py-2 text-sm text-text-primary dark:text-text-primary-dark bg-bg dark:bg-bg-dark border border-border dark:border-border-dark rounded-card hover:bg-surface dark:hover:bg-surface-dark transition-colors"
         >
           <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5">
             <path d="M7 2v10M2 7h10" />
