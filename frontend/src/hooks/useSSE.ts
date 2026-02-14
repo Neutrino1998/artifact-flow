@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useRef } from 'react';
+import { useCallback } from 'react';
 import { useStreamStore, scheduleContentUpdate } from '@/stores/streamStore';
 import { useConversationStore } from '@/stores/conversationStore';
 import { useArtifactStore } from '@/stores/artifactStore';
@@ -16,8 +16,12 @@ const ARTIFACT_TOOLS = new Set([
   'rewrite_artifact',
 ]);
 
+// Module-level AbortController shared across all useSSE() instances.
+// This ensures that PermissionModal.connect() and useChat.disconnect()
+// operate on the same controller, preventing orphaned SSE connections.
+let _sharedAbortController: AbortController | null = null;
+
 export function useSSE() {
-  const abortRef = useRef<AbortController | null>(null);
 
   // Stream store actions
   const pushSegment = useStreamStore((s) => s.pushSegment);
@@ -272,17 +276,20 @@ export function useSSE() {
 
   const connect = useCallback(
     (streamUrl: string, conversationId: string, _messageId: string) => {
-      if (abortRef.current) {
-        abortRef.current.abort();
+      if (_sharedAbortController) {
+        _sharedAbortController.abort();
       }
 
       const controller = new AbortController();
-      abortRef.current = controller;
+      _sharedAbortController = controller;
 
       connectSSE(
         streamUrl,
         {
-          onEvent: (event) => handleEvent(event, conversationId),
+          onEvent: (event) => {
+            if (controller.signal.aborted) return;
+            handleEvent(event, conversationId);
+          },
           onError: (err) => {
             setError(err.message);
             endStream();
@@ -298,9 +305,9 @@ export function useSSE() {
   );
 
   const disconnect = useCallback(() => {
-    if (abortRef.current) {
-      abortRef.current.abort();
-      abortRef.current = null;
+    if (_sharedAbortController) {
+      _sharedAbortController.abort();
+      _sharedAbortController = null;
     }
     endStream();
   }, [endStream]);

@@ -91,6 +91,15 @@ function flushContent() {
   _rafId = null;
 }
 
+/** Cancel any pending RAF flush and clear buffered content. */
+export function cancelPendingFlush() {
+  if (_rafId !== null && typeof cancelAnimationFrame !== 'undefined') {
+    cancelAnimationFrame(_rafId);
+  }
+  _rafId = null;
+  _pendingContent = null;
+}
+
 export function scheduleContentUpdate(content: string) {
   _pendingContent = content;
   if (_rafId === null && typeof requestAnimationFrame !== 'undefined') {
@@ -120,7 +129,8 @@ export const useStreamStore = create<StreamState>((set, get) => {
     permissionRequest: null,
     error: null,
 
-    startStream: (url, threadId, messageId, conversationId) =>
+    startStream: (url, threadId, messageId, conversationId) => {
+      cancelPendingFlush();
       set({
         isStreaming: true,
         streamUrl: url,
@@ -130,7 +140,8 @@ export const useStreamStore = create<StreamState>((set, get) => {
         segments: [],
         permissionRequest: null,
         error: null,
-      }),
+      });
+    },
 
     resumeStream: (url) =>
       set({
@@ -140,8 +151,10 @@ export const useStreamStore = create<StreamState>((set, get) => {
         error: null,
       }),
 
-    endStream: () =>
-      set({ isStreaming: false, streamUrl: null, conversationId: null, permissionRequest: null, streamParentId: undefined }),
+    endStream: () => {
+      cancelPendingFlush();
+      set({ isStreaming: false, streamUrl: null, conversationId: null, permissionRequest: null, streamParentId: undefined });
+    },
 
     reset: () =>
       set({
