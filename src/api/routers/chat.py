@@ -42,6 +42,15 @@ logger = get_logger("ArtifactFlow")
 router = APIRouter()
 
 
+def _sanitize_error_event(event: dict) -> dict:
+    """Strip internal error details from error events in production."""
+    if config.DEBUG:
+        return event
+    if event.get("type") == "error" and isinstance(event.get("data"), dict):
+        event = {**event, "data": {**event["data"], "error": "Internal server error"}}
+    return event
+
+
 @router.post("", response_model=ChatResponse)
 async def send_message(
     request: ChatRequest,
@@ -142,7 +151,7 @@ async def send_message(
                     ):
                         if stream_closed:
                             continue
-                        if not await stream_manager.push_event(thread_id, event):
+                        if not await stream_manager.push_event(thread_id, _sanitize_error_event(event)):
                             logger.info(f"Stream {thread_id} closed, graph will continue to completion")
                             stream_closed = True
 
@@ -156,12 +165,11 @@ async def send_message(
 
             except Exception as e:
                 logger.exception(f"Error in graph execution: {e}")
-                error_msg = str(e) if config.DEBUG else "Internal server error"
-                await stream_manager.push_event(thread_id, {
+                await stream_manager.push_event(thread_id, _sanitize_error_event({
                     "type": "error",
                     "timestamp": datetime.now().isoformat(),
-                    "data": {"success": False, "error": error_msg}
-                })
+                    "data": {"success": False, "error": str(e)}
+                }))
 
     # 5. 提交到 TaskManager（持有引用 + 并发控制）
     await task_manager.submit(thread_id, execute_and_push())
@@ -378,7 +386,7 @@ async def resume_execution(
                     ):
                         if stream_closed:
                             continue
-                        if not await stream_manager.push_event(thread_id, event):
+                        if not await stream_manager.push_event(thread_id, _sanitize_error_event(event)):
                             logger.info(f"Stream {thread_id} closed, graph will continue to completion")
                             stream_closed = True
 
@@ -392,12 +400,11 @@ async def resume_execution(
 
             except Exception as e:
                 logger.exception(f"Error in resume execution: {e}")
-                error_msg = str(e) if config.DEBUG else "Internal server error"
-                await stream_manager.push_event(thread_id, {
+                await stream_manager.push_event(thread_id, _sanitize_error_event({
                     "type": "error",
                     "timestamp": datetime.now().isoformat(),
-                    "data": {"success": False, "error": error_msg}
-                })
+                    "data": {"success": False, "error": str(e)}
+                }))
 
     await task_manager.submit(thread_id, execute_resume())
 
