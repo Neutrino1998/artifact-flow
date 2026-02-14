@@ -54,10 +54,10 @@ export default function MessageInput() {
             onKeyDown={handleKeyDown}
             placeholder={
               isStreaming
-                ? 'Waiting for response...'
+                ? '等待回复中...'
                 : isNewConversation
-                  ? 'Start a new conversation...'
-                  : 'Type a message...'
+                  ? '开始新的对话...'
+                  : '输入消息...'
             }
             disabled={isStreaming}
             rows={1}

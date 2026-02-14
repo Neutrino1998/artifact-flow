@@ -44,10 +44,10 @@ export default function PermissionModal() {
       <div className="bg-surface dark:bg-surface-dark border border-border dark:border-border-dark rounded-card shadow-modal max-w-md w-full mx-4 p-6">
         {/* Header */}
         <h2 className="text-lg font-semibold text-text-primary dark:text-text-primary-dark mb-1">
-          Permission Required
+          需要授权
         </h2>
         <p className="text-sm text-text-secondary dark:text-text-secondary-dark mb-4">
-          The agent wants to execute a tool that requires your approval.
+          智能体请求执行以下工具，需要您的确认。
         </p>
 
         {/* Tool info */}
@@ -69,14 +69,14 @@ export default function PermissionModal() {
             disabled={loading}
             className="px-4 py-2 text-sm rounded-lg border border-border dark:border-border-dark text-text-primary dark:text-text-primary-dark hover:bg-bg dark:hover:bg-bg-dark disabled:opacity-40 transition-colors"
           >
-            Deny
+            拒绝
           </button>
           <button
             onClick={() => handleResponse(true)}
             disabled={loading}
             className="px-4 py-2 text-sm rounded-lg bg-accent text-white hover:bg-accent-hover disabled:opacity-40 transition-colors"
           >
-            {loading ? 'Approving...' : 'Approve'}
+            {loading ? '授权中...' : '授权'}
           </button>
         </div>
       </div>
