@@ -375,7 +375,7 @@ Example:
 |--------|-----|------|------|
 | `call_subagent` | CallSubagentTool | 路由到 SubAgent（验证参数后设置路由） | AUTO |
 | `web_search` | WebSearchTool | 互联网搜索（博查 AI） | AUTO |
-| `web_fetch` | WebFetchTool | 网页/PDF 内容抓取（crawl4ai） | AUTO |
+| `web_fetch` | WebFetchTool | 网页/PDF 内容抓取（crawl4ai） | CONFIRM |
 | `create_artifact` | CreateArtifactTool | 创建新 Artifact | AUTO |
 | `read_artifact` | ReadArtifactTool | 读取内容（支持历史版本） | AUTO |
 | `update_artifact` | UpdateArtifactTool | 增量更新（支持模糊匹配） | AUTO |

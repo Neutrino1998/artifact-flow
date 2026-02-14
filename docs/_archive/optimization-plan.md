@@ -64,9 +64,11 @@
 
 ---
 
-## Phase 2: 安全加固
+## Phase 2: 安全加固 ✅ DONE
 
 **目标**: 修复 SSRF 风险、持久化静默失败、生产环境配置问题。
+
+> **完成于**: 2.1 web_fetch SSRF 防护（协议校验 + permission AUTO→CONFIRM）、2.2 持久化 fail fast（移除静默吞异常）、2.3 Docker healthcheck（/docs→/health）、2.4 错误信息脱敏（`_sanitize_error_event` 统一拦截所有 push 出口 + controller 不再向 graph_response 写入内部异常）。附带修复 permission 前端确认流程（interrupted COMPLETE 保留 stream 状态、streamStore 新增 conversationId/resumeStream、StreamManager 允许重建已关闭 stream）。
 
 ### 2.1 web_fetch SSRF 防护
 
@@ -355,7 +357,7 @@
 
 ```
 Phase 1 (核心 Bug)     ✅ 已完成
-Phase 2 (安全加固)     ← 无依赖，可与 Phase 1 并行
+Phase 2 (安全加固)     ✅ 已完成
 Phase 3 (数据质量)     ← 无依赖，可与 Phase 1/2 并行
 Phase 4 (认证框架)     ← 建议在 Phase 1 之后（ID 一致性修好后再加认证）
 Phase 5 (PostgreSQL)   ← 建议在 Phase 4 之后（认证需要的 User 模型一起迁移）
