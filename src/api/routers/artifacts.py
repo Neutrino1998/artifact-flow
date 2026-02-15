@@ -11,8 +11,11 @@ Artifacts Router
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from api.dependencies import get_artifact_manager
+from api.dependencies import get_artifact_manager, get_current_user, get_db_session
+from api.services.auth import TokenPayload
+from repositories.conversation_repo import ConversationRepository
 from api.schemas.artifact import (
     ArtifactListResponse,
     ArtifactDetailResponse,
@@ -29,14 +32,28 @@ logger = get_logger("ArtifactFlow")
 router = APIRouter()
 
 
+async def _verify_session_ownership(
+    session_id: str, user: TokenPayload, session: AsyncSession
+) -> None:
+    """校验 session（= conversation）归属当前用户"""
+    repo = ConversationRepository(session)
+    conv = await repo.get_conversation(session_id)
+    if not conv or conv.user_id != user.user_id:
+        raise HTTPException(status_code=404, detail=f"Session '{session_id}' not found")
+
+
 @router.get("/{session_id}", response_model=ArtifactListResponse)
 async def list_artifacts(
     session_id: str,
+    current_user: TokenPayload = Depends(get_current_user),
+    db_session: AsyncSession = Depends(get_db_session),
     artifact_manager: ArtifactManager = Depends(get_artifact_manager),
 ):
     """
     列出 session 下所有 artifacts
     """
+    await _verify_session_ownership(session_id, current_user, db_session)
+
     try:
         artifacts = await artifact_manager.list_artifacts(
             session_id=session_id,
@@ -67,11 +84,14 @@ async def list_artifacts(
 async def get_artifact(
     session_id: str,
     artifact_id: str,
+    current_user: TokenPayload = Depends(get_current_user),
+    db_session: AsyncSession = Depends(get_db_session),
     artifact_manager: ArtifactManager = Depends(get_artifact_manager),
 ):
     """
     获取 artifact 详情（包含当前版本内容）
     """
+    await _verify_session_ownership(session_id, current_user, db_session)
     result = await artifact_manager.read_artifact(
         session_id=session_id,
         artifact_id=artifact_id
@@ -99,11 +119,14 @@ async def get_artifact(
 async def list_versions(
     session_id: str,
     artifact_id: str,
+    current_user: TokenPayload = Depends(get_current_user),
+    db_session: AsyncSession = Depends(get_db_session),
     artifact_manager: ArtifactManager = Depends(get_artifact_manager),
 ):
     """
     获取版本历史列表
     """
+    await _verify_session_ownership(session_id, current_user, db_session)
     repo = artifact_manager._ensure_repository()
 
     # 先检查 artifact 是否存在
@@ -135,11 +158,14 @@ async def get_version(
     session_id: str,
     artifact_id: str,
     version: int,
+    current_user: TokenPayload = Depends(get_current_user),
+    db_session: AsyncSession = Depends(get_db_session),
     artifact_manager: ArtifactManager = Depends(get_artifact_manager),
 ):
     """
     获取特定版本的完整内容
     """
+    await _verify_session_ownership(session_id, current_user, db_session)
     repo = artifact_manager._ensure_repository()
 
     # 获取版本

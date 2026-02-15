@@ -65,6 +65,7 @@ class StreamContext:
         status: 状态 (pending: 等待连接, streaming: 正在推送, closed: 已关闭)
         ttl_task: TTL 清理任务
         cancelled: 取消事件，用于通知后台任务停止
+        owner_user_id: 创建此 stream 的用户 ID（用于消费时校验）
     """
     queue: asyncio.Queue = field(default_factory=asyncio.Queue)
     created_at: datetime = field(default_factory=datetime.now)
@@ -72,6 +73,7 @@ class StreamContext:
     ttl_task: Optional[asyncio.Task] = None
     cleanup_task: Optional[asyncio.Task] = None
     cancelled: asyncio.Event = field(default_factory=asyncio.Event)
+    owner_user_id: Optional[str] = None
 
 
 class StreamManager:
@@ -116,12 +118,15 @@ class StreamManager:
 
         logger.info(f"StreamManager initialized (TTL: {ttl_seconds}s)")
 
-    async def create_stream(self, thread_id: str) -> StreamContext:
+    async def create_stream(
+        self, thread_id: str, owner_user_id: Optional[str] = None
+    ) -> StreamContext:
         """
         创建事件队列，并启动 TTL 定时器
 
         Args:
             thread_id: LangGraph 线程 ID
+            owner_user_id: 创建此 stream 的用户 ID（消费时校验）
 
         Returns:
             StreamContext 实例
@@ -143,7 +148,7 @@ class StreamManager:
             # 清理之前的关闭记录（允许重新使用同一个 thread_id）
             self._closed_streams.discard(thread_id)
 
-            context = StreamContext()
+            context = StreamContext(owner_user_id=owner_user_id)
             self.streams[thread_id] = context
 
             # 启动 TTL 定时器
@@ -193,7 +198,10 @@ class StreamManager:
         return True
 
     async def consume_events(
-        self, thread_id: str, heartbeat_interval: Optional[float] = None
+        self,
+        thread_id: str,
+        heartbeat_interval: Optional[float] = None,
+        user_id: Optional[str] = None,
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """
         消费事件（前端 SSE 连接时调用）
@@ -205,16 +213,21 @@ class StreamManager:
         Args:
             thread_id: 线程 ID
             heartbeat_interval: 心跳间隔（秒），None 表示不发送心跳
+            user_id: 消费者用户 ID（校验 owner 匹配）
 
         Yields:
             事件字典（或 __ping__ 哨兵事件）
 
         Raises:
-            StreamNotFoundError: 如果 stream 不存在
+            StreamNotFoundError: 如果 stream 不存在或用户不匹配
         """
         async with self._lock:
             context = self.streams.get(thread_id)
             if not context:
+                raise StreamNotFoundError(thread_id)
+
+            # 校验 owner
+            if context.owner_user_id and user_id and context.owner_user_id != user_id:
                 raise StreamNotFoundError(thread_id)
 
             # 取消 TTL 定时器（前端已连接）

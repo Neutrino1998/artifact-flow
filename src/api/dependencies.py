@@ -30,7 +30,8 @@ if TYPE_CHECKING:
     from api.services.stream_manager import StreamManager
     from api.services.task_manager import TaskManager
 
-from fastapi import Depends
+from fastapi import Depends, HTTPException
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.config import config
@@ -251,17 +252,57 @@ async def get_controller(
 
 
 # ============================================================
-# 预留：用户认证依赖
+# 用户认证依赖
 # ============================================================
 
-async def get_current_user() -> Optional[str]:
-    """
-    获取当前用户（预留）
+_bearer_scheme = HTTPBearer(auto_error=False)
 
-    当前返回 None，表示未认证。
-    后续可实现 JWT Token 认证。
+
+async def get_current_user(
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(_bearer_scheme),
+    session: AsyncSession = Depends(get_db_session),
+) -> "TokenPayload":
+    """
+    获取当前已认证用户
+
+    每次请求查 DB 校验 is_active 和最新 role，
+    确保禁用/降权即时生效（不仅依赖 JWT payload）。
 
     Returns:
-        用户ID 或 None
+        TokenPayload（user_id, username, role）
     """
-    return None
+    from api.services.auth import decode_access_token, TokenPayload
+    from repositories.user_repo import UserRepository
+
+    if credentials is None:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    payload = decode_access_token(credentials.credentials)
+    if payload is None:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+
+    # 查 DB 校验用户当前状态
+    user_repo = UserRepository(session)
+    user = await user_repo.get_by_id(payload.user_id)
+    if not user or not user.is_active:
+        raise HTTPException(status_code=401, detail="User disabled or not found")
+
+    # 用 DB 中的最新 role 覆盖 JWT 中的 role
+    return TokenPayload(user_id=user.id, username=user.username, role=user.role)
+
+
+async def require_admin(
+    user: "TokenPayload" = Depends(get_current_user),
+) -> "TokenPayload":
+    """要求管理员权限"""
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    return user
+
+
+async def get_user_repository(
+    session: AsyncSession = Depends(get_db_session),
+) -> "UserRepository":
+    """获取 UserRepository 实例"""
+    from repositories.user_repo import UserRepository
+    return UserRepository(session)

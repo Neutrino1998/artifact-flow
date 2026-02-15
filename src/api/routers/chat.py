@@ -18,9 +18,12 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from api.config import config
 from api.dependencies import (
     get_conversation_manager,
+    get_current_user,
+    get_db_session,
     get_stream_manager,
     get_task_manager,
 )
+from api.services.auth import TokenPayload
 from api.schemas.chat import (
     ChatRequest,
     ChatResponse,
@@ -35,11 +38,21 @@ from api.services.stream_manager import StreamManager
 from api.services.task_manager import TaskManager
 from core.conversation_manager import ConversationManager
 from repositories.base import NotFoundError
+from repositories.conversation_repo import ConversationRepository
 from utils.logger import get_logger, set_request_context
 
 logger = get_logger("ArtifactFlow")
 
 router = APIRouter()
+
+
+async def _verify_ownership(
+    conv_id: str, user: TokenPayload, repo: ConversationRepository
+) -> None:
+    """校验 conversation 归属当前用户，不匹配返回 404"""
+    conv = await repo.get_conversation(conv_id)
+    if not conv or conv.user_id != user.user_id:
+        raise HTTPException(status_code=404, detail=f"Conversation '{conv_id}' not found")
 
 
 def _sanitize_error_event(event: dict) -> dict:
@@ -54,6 +67,7 @@ def _sanitize_error_event(event: dict) -> dict:
 @router.post("", response_model=ChatResponse)
 async def send_message(
     request: ChatRequest,
+    current_user: TokenPayload = Depends(get_current_user),
     conversation_manager: ConversationManager = Depends(get_conversation_manager),
     stream_manager: StreamManager = Depends(get_stream_manager),
     task_manager: TaskManager = Depends(get_task_manager),
@@ -79,13 +93,19 @@ async def send_message(
         conversation_id = f"conv-{uuid4().hex}"
 
     message_id = f"msg-{uuid4().hex}"
+    user_id = current_user.user_id
+
+    # 已有会话：校验归属
+    if request.conversation_id:
+        repo = conversation_manager._ensure_repository()
+        await _verify_ownership(conversation_id, current_user, repo)
 
     # 1. 同步创建/确保 conversation 存在（在请求的 session 中，会自动 commit）
     # 这确保后续的 GET 请求能立即看到这个 conversation
-    await conversation_manager.ensure_conversation_exists(conversation_id)
+    await conversation_manager.ensure_conversation_exists(conversation_id, user_id=user_id)
 
-    # 2. 创建 stream
-    await stream_manager.create_stream(thread_id)
+    # 2. 创建 stream（绑定 owner）
+    await stream_manager.create_stream(thread_id, owner_user_id=user_id)
 
     # 3. 设置请求上下文（background task 通过 asyncio context 继承自动获取）
     set_request_context(thread_id=thread_id, conv_id=conversation_id)
@@ -186,6 +206,7 @@ async def send_message(
 async def list_conversations(
     limit: int = Query(default=20, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
+    current_user: TokenPayload = Depends(get_current_user),
     conversation_manager: ConversationManager = Depends(get_conversation_manager),
 ):
     """
@@ -195,8 +216,11 @@ async def list_conversations(
         limit: 每页数量
         offset: 偏移量
     """
-    total = await conversation_manager.count_conversations_async()
-    conversations = await conversation_manager.list_conversations_async(limit=limit, offset=offset)
+    user_id = current_user.user_id
+    total = await conversation_manager.count_conversations_async(user_id=user_id)
+    conversations = await conversation_manager.list_conversations_async(
+        limit=limit, offset=offset, user_id=user_id
+    )
 
     return ConversationListResponse(
         conversations=[
@@ -217,6 +241,7 @@ async def list_conversations(
 @router.get("/{conv_id}", response_model=ConversationDetailResponse)
 async def get_conversation(
     conv_id: str,
+    current_user: TokenPayload = Depends(get_current_user),
     conversation_manager: ConversationManager = Depends(get_conversation_manager),
 ):
     """
@@ -224,6 +249,9 @@ async def get_conversation(
     """
     try:
         repo = conversation_manager._ensure_repository()
+
+        # 校验归属
+        await _verify_ownership(conv_id, current_user, repo)
 
         # 直接从数据库获取对话（不尝试创建）
         conversation = await repo.get_conversation(conv_id, load_messages=True)
@@ -268,6 +296,7 @@ async def get_conversation(
 @router.delete("/{conv_id}")
 async def delete_conversation(
     conv_id: str,
+    current_user: TokenPayload = Depends(get_current_user),
     conversation_manager: ConversationManager = Depends(get_conversation_manager),
 ):
     """
@@ -277,6 +306,10 @@ async def delete_conversation(
     """
     try:
         repo = conversation_manager._ensure_repository()
+
+        # 校验归属
+        await _verify_ownership(conv_id, current_user, repo)
+
         success = await repo.delete_conversation(conv_id)
 
         if not success:
@@ -295,6 +328,7 @@ async def delete_conversation(
 async def resume_execution(
     conv_id: str,
     request: ResumeRequest,
+    current_user: TokenPayload = Depends(get_current_user),
     conversation_manager: ConversationManager = Depends(get_conversation_manager),
     stream_manager: StreamManager = Depends(get_stream_manager),
     task_manager: TaskManager = Depends(get_task_manager),
@@ -309,22 +343,26 @@ async def resume_execution(
     4. 返回新的 stream_url
     """
     thread_id = request.thread_id
+    user_id = current_user.user_id
+
+    # 0. 校验 conversation 归属当前用户
+    repo = conversation_manager._ensure_repository()
+    await _verify_ownership(conv_id, current_user, repo)
 
     # 1. 校验 thread_id 归属当前 conversation
-    repo = conversation_manager._ensure_repository()
     message = await repo.get_message(request.message_id)
     if not message:
         raise HTTPException(status_code=404, detail="Message not found")
     if message.thread_id != thread_id or message.conversation_id != conv_id:
         raise HTTPException(status_code=403, detail="Thread does not belong to this conversation")
 
-    # 2. 创建新的 stream（可能使用相同的 thread_id）
+    # 2. 创建新的 stream（可能使用相同的 thread_id，绑定 owner）
     try:
-        await stream_manager.create_stream(thread_id)
+        await stream_manager.create_stream(thread_id, owner_user_id=user_id)
     except Exception:
         # 如果 stream 已存在，先关闭再创建
         await stream_manager.close_stream(thread_id)
-        await stream_manager.create_stream(thread_id)
+        await stream_manager.create_stream(thread_id, owner_user_id=user_id)
 
     # 准备恢复数据
     resume_data = {

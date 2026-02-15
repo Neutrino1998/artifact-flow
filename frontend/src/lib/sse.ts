@@ -1,4 +1,5 @@
 import type { SSEEvent } from '@/types/events';
+import { useAuthStore } from '@/stores/authStore';
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
@@ -17,11 +18,20 @@ export function connectSSE(
     ? streamUrl
     : `${BASE_URL}${streamUrl}`;
 
-  fetch(url, {
-    headers: { Accept: 'text/event-stream' },
-    signal,
-  })
+  const headers: Record<string, string> = { Accept: 'text/event-stream' };
+  const token = useAuthStore.getState().token;
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+
+  fetch(url, { headers, signal })
     .then(async (res) => {
+      if (res.status === 401) {
+        useAuthStore.getState().logout();
+        handlers.onError?.(new Error('Session expired'));
+        return;
+      }
+
       if (!res.ok || !res.body) {
         handlers.onError?.(new Error(`SSE connection failed: ${res.status}`));
         return;

@@ -42,6 +42,11 @@ class APIConfig(BaseSettings):
     DATABASE_URL: str = "sqlite+aiosqlite:///data/artifactflow.db"
     LANGGRAPH_DB_PATH: str = "data/langgraph.db"
 
+    # JWT 认证配置
+    JWT_SECRET: str = "CHANGE-ME-IN-PRODUCTION"
+    JWT_ALGORITHM: str = "HS256"
+    JWT_EXPIRY_DAYS: int = 7
+
     class Config:
         env_prefix = "ARTIFACTFLOW_"
         case_sensitive = False

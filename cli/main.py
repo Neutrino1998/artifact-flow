@@ -25,8 +25,48 @@ def get_client(base_url: str = DEFAULT_BASE_URL) -> APIClient:
     """获取或创建 API 客户端"""
     global client
     if client is None:
-        client = APIClient(base_url=base_url)
+        client = APIClient(base_url=base_url, token=state.token)
     return client
+
+
+# ============================================================
+# 认证命令
+# ============================================================
+
+@app.command("login")
+def login(
+    base_url: str = typer.Option(DEFAULT_BASE_URL, "--url", "-u", help="API base URL"),
+):
+    """Login to ArtifactFlow API."""
+    global client
+
+    username = Prompt.ask("Username")
+    password = Prompt.ask("Password", password=True)
+
+    # 登录不需要 token，直接创建临时 client
+    api = APIClient(base_url=base_url)
+
+    try:
+        result = asyncio.run(api.login(username, password))
+        state.token = result["access_token"]
+        state.save()
+
+        # 重置 client 以使用新 token
+        client = None
+
+        user = result.get("user", {})
+        ui.print_success(f"Logged in as {user.get('username', username)} (role={user.get('role', '?')})")
+
+    except Exception as e:
+        ui.print_error(f"Login failed: {e}")
+        raise typer.Exit(1)
+
+
+@app.command("logout")
+def logout():
+    """Logout and clear saved token."""
+    state.logout()
+    ui.print_success("Logged out")
 
 
 # ============================================================

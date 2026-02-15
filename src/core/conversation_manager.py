@@ -131,13 +131,15 @@ class ConversationManager:
 
     async def start_conversation_async(
         self,
-        conversation_id: Optional[str] = None
+        conversation_id: Optional[str] = None,
+        user_id: Optional[str] = None,
     ) -> str:
         """
         开始新对话（异步版本，支持持久化）
 
         Args:
             conversation_id: 指定的对话ID
+            user_id: 用户ID（认证隔离）
 
         Returns:
             对话ID
@@ -160,6 +162,7 @@ class ConversationManager:
                 await self.repository.create_conversation(
                     conversation_id=conv_id,
                     title=None,
+                    user_id=user_id,
                     metadata={}
                 )
             except DuplicateError:
@@ -213,7 +216,9 @@ class ConversationManager:
 
         self._cache[conversation_id] = cache
 
-    async def ensure_conversation_exists(self, conversation_id: str) -> None:
+    async def ensure_conversation_exists(
+        self, conversation_id: str, user_id: Optional[str] = None
+    ) -> None:
         """确保对话存在（异步版本）"""
         if conversation_id not in self._cache:
             # 尝试从数据库加载
@@ -222,7 +227,7 @@ class ConversationManager:
 
             # 如果仍不存在，创建新的
             if conversation_id not in self._cache:
-                await self.start_conversation_async(conversation_id)
+                await self.start_conversation_async(conversation_id, user_id=user_id)
 
     # ========================================
     # 消息操作
@@ -409,7 +414,8 @@ class ConversationManager:
     async def list_conversations_async(
         self,
         limit: int = 50,
-        offset: int = 0
+        offset: int = 0,
+        user_id: Optional[str] = None,
     ) -> List[Dict]:
         """
         列出所有对话（异步版本）
@@ -417,6 +423,7 @@ class ConversationManager:
         Args:
             limit: 限制数量
             offset: 跳过数量
+            user_id: 按用户ID筛选
 
         Returns:
             对话列表
@@ -426,6 +433,7 @@ class ConversationManager:
                 conversations = await self.repository.list_conversations(
                     limit=limit,
                     offset=offset,
+                    user_id=user_id,
                     load_messages=True
                 )
                 return [
@@ -454,15 +462,18 @@ class ConversationManager:
             })
         return conversations
 
-    async def count_conversations_async(self) -> int:
+    async def count_conversations_async(self, user_id: Optional[str] = None) -> int:
         """
         统计对话总数（异步版本）
+
+        Args:
+            user_id: 按用户ID筛选
 
         Returns:
             对话总数
         """
         if self.repository:
-            return await self.repository.count_conversations()
+            return await self.repository.count_conversations(user_id=user_id)
         return len(self._cache)
 
     def clear_cache(self, conversation_id: Optional[str] = None) -> None:

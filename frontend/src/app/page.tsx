@@ -5,6 +5,7 @@ import Sidebar from '@/components/sidebar/Sidebar';
 import ChatPanel from '@/components/chat/ChatPanel';
 import ArtifactPanel from '@/components/artifact/ArtifactPanel';
 import ErrorBoundary from '@/components/ErrorBoundary';
+import AuthGuard from '@/components/AuthGuard';
 import { useStreamStore } from '@/stores/streamStore';
 import PermissionModal from '@/components/layout/PermissionModal';
 
@@ -12,7 +13,7 @@ export default function Home() {
   const permissionRequest = useStreamStore((s) => s.permissionRequest);
 
   return (
-    <>
+    <AuthGuard>
       <ThreeColumnLayout
         sidebar={<Sidebar />}
         chat={
@@ -27,6 +28,6 @@ export default function Home() {
         }
       />
       {permissionRequest && <PermissionModal />}
-    </>
+    </AuthGuard>
   );
 }

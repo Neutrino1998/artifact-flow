@@ -17,6 +17,7 @@ class CLIState:
     conversation_id: str | None = None
     session_id: str | None = None
     parent_message_id: str | None = None
+    token: str | None = None
 
     def save(self):
         """保存状态到文件"""
@@ -25,6 +26,7 @@ class CLIState:
             "conversation_id": self.conversation_id,
             "session_id": self.session_id,
             "parent_message_id": self.parent_message_id,
+            "token": self.token,
         }
         STATE_FILE.write_text(json.dumps(data))
 
@@ -41,9 +43,17 @@ class CLIState:
         return cls()
 
     def clear(self):
-        """清除状态"""
+        """清除会话状态（保留 token）"""
         self.conversation_id = None
         self.session_id = None
         self.parent_message_id = None
+        self.save()
+
+    def logout(self):
+        """清除所有状态（含 token）"""
+        self.conversation_id = None
+        self.session_id = None
+        self.parent_message_id = None
+        self.token = None
         if STATE_FILE.exists():
             STATE_FILE.unlink()

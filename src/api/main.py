@@ -12,7 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from api.config import config
 from api.dependencies import init_globals, close_globals
-from api.routers import chat, artifacts, stream
+from api.routers import auth, chat, artifacts, stream
 from utils.logger import get_logger
 
 logger = get_logger("ArtifactFlow")
@@ -65,6 +65,11 @@ def create_app() -> FastAPI:
     )
 
     # 注册路由
+    app.include_router(
+        auth.router,
+        prefix="/api/v1/auth",
+        tags=["auth"]
+    )
     app.include_router(
         chat.router,
         prefix="/api/v1/chat",

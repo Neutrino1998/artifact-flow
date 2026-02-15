@@ -13,6 +13,7 @@ from datetime import datetime
 from typing import Optional, List, Dict, Any
 
 from sqlalchemy import (
+    Boolean,
     String,
     Text,
     Integer,
@@ -36,6 +37,44 @@ class Base(DeclarativeBase):
     pass
 
 
+class User(Base):
+    """
+    用户表
+
+    存储用户认证信息和角色。
+    """
+    __tablename__ = "users"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    username: Mapped[str] = mapped_column(String(64), unique=True, index=True, nullable=False)
+    hashed_password: Mapped[str] = mapped_column(String(256), nullable=False)
+    display_name: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    role: Mapped[str] = mapped_column(String(16), nullable=False, default="user")
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=datetime.now,
+        nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=datetime.now,
+        onupdate=datetime.now,
+        nullable=False
+    )
+
+    # 关系：一对多 -> conversations
+    conversations: Mapped[List["Conversation"]] = relationship(
+        "Conversation",
+        back_populates="owner",
+        lazy="selectin"
+    )
+
+    def __repr__(self) -> str:
+        return f"<User(id={self.id}, username={self.username}, role={self.role})>"
+
+
 class Conversation(Base):
     """
     对话表
@@ -54,8 +93,19 @@ class Conversation(Base):
     # 对话标题（可由首条消息自动生成）
     title: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
     
-    # 预留：用户ID（Phase 2）
-    user_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
+    # 用户ID（认证隔离）
+    user_id: Mapped[Optional[str]] = mapped_column(
+        String(64),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True
+    )
+
+    # 关系：多对一 -> user
+    owner: Mapped[Optional["User"]] = relationship(
+        "User",
+        back_populates="conversations"
+    )
     
     # 时间戳
     created_at: Mapped[datetime] = mapped_column(

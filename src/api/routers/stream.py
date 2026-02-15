@@ -12,7 +12,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from starlette.responses import StreamingResponse
 
 from api.config import config
-from api.dependencies import get_stream_manager
+from api.dependencies import get_current_user, get_stream_manager
+from api.services.auth import TokenPayload
 from api.services.stream_manager import StreamManager, StreamNotFoundError
 from api.utils.sse import format_sse_event, format_sse_comment
 from utils.logger import get_logger
@@ -25,6 +26,7 @@ router = APIRouter()
 @router.get("/{thread_id}")
 async def stream_events(
     thread_id: str,
+    current_user: TokenPayload = Depends(get_current_user),
     stream_manager: StreamManager = Depends(get_stream_manager),
 ) -> StreamingResponse:
     """
@@ -53,9 +55,11 @@ async def stream_events(
         从 StreamManager 消费事件，格式化为 SSE 并 yield。
         """
         try:
-            # 消费事件（带心跳支持）
+            # 消费事件（带心跳支持 + 用户校验）
             async for event in stream_manager.consume_events(
-                thread_id, heartbeat_interval=config.SSE_PING_INTERVAL
+                thread_id,
+                heartbeat_interval=config.SSE_PING_INTERVAL,
+                user_id=current_user.user_id,
             ):
                 # 心跳哨兵事件 → SSE 注释
                 if event.get("type") == "__ping__":

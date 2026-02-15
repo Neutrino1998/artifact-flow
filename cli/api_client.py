@@ -30,9 +30,21 @@ class SSEEvent:
 class APIClient:
     """ArtifactFlow API 客户端"""
 
-    def __init__(self, base_url: str = DEFAULT_BASE_URL, timeout: float = DEFAULT_TIMEOUT):
+    def __init__(
+        self,
+        base_url: str = DEFAULT_BASE_URL,
+        timeout: float = DEFAULT_TIMEOUT,
+        token: str | None = None,
+    ):
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
+        self.token = token
+
+    def _auth_headers(self) -> dict:
+        """返回认证 header"""
+        if self.token:
+            return {"Authorization": f"Bearer {self.token}"}
+        return {}
 
     async def health_check(self) -> bool:
         """健康检查"""
@@ -42,6 +54,16 @@ class APIClient:
                 return resp.status_code == 200
             except Exception:
                 return False
+
+    async def login(self, username: str, password: str) -> dict:
+        """登录获取 token"""
+        async with httpx.AsyncClient(base_url=self.base_url, timeout=10) as client:
+            resp = await client.post(
+                "/api/v1/auth/login",
+                json={"username": username, "password": password},
+            )
+            resp.raise_for_status()
+            return resp.json()
 
     async def send_message(
         self,
@@ -57,7 +79,7 @@ class APIClient:
             if parent_message_id:
                 payload["parent_message_id"] = parent_message_id
 
-            resp = await client.post("/api/v1/chat", json=payload)
+            resp = await client.post("/api/v1/chat", json=payload, headers=self._auth_headers())
             resp.raise_for_status()
             data = resp.json()
 
@@ -71,7 +93,7 @@ class APIClient:
     async def stream_response(self, thread_id: str) -> AsyncIterator[SSEEvent]:
         """流式接收响应"""
         async with httpx.AsyncClient(base_url=self.base_url, timeout=self.timeout) as client:
-            async with client.stream("GET", f"/api/v1/stream/{thread_id}") as response:
+            async with client.stream("GET", f"/api/v1/stream/{thread_id}", headers=self._auth_headers()) as response:
                 current_event_name: str | None = None
                 async for line in response.aiter_lines():
                     if line.startswith("event:"):
@@ -105,7 +127,8 @@ class APIClient:
         async with httpx.AsyncClient(base_url=self.base_url, timeout=10) as client:
             resp = await client.get(
                 "/api/v1/chat",
-                params={"limit": limit, "offset": offset}
+                params={"limit": limit, "offset": offset},
+                headers=self._auth_headers(),
             )
             resp.raise_for_status()
             return resp.json()
@@ -114,14 +137,21 @@ class APIClient:
         """获取对话详情"""
         async with httpx.AsyncClient(base_url=self.base_url, timeout=10) as client:
             params = {"load_messages": load_messages}
-            resp = await client.get(f"/api/v1/chat/{conversation_id}", params=params)
+            resp = await client.get(
+                f"/api/v1/chat/{conversation_id}",
+                params=params,
+                headers=self._auth_headers(),
+            )
             resp.raise_for_status()
             return resp.json()
 
     async def list_artifacts(self, session_id: str) -> dict:
         """列出 Artifacts"""
         async with httpx.AsyncClient(base_url=self.base_url, timeout=10) as client:
-            resp = await client.get(f"/api/v1/artifacts/{session_id}")
+            resp = await client.get(
+                f"/api/v1/artifacts/{session_id}",
+                headers=self._auth_headers(),
+            )
             if resp.status_code == 404:
                 return {"session_id": session_id, "artifacts": []}
             resp.raise_for_status()
@@ -130,6 +160,9 @@ class APIClient:
     async def get_artifact(self, session_id: str, artifact_id: str) -> dict:
         """获取单个 Artifact"""
         async with httpx.AsyncClient(base_url=self.base_url, timeout=10) as client:
-            resp = await client.get(f"/api/v1/artifacts/{session_id}/{artifact_id}")
+            resp = await client.get(
+                f"/api/v1/artifacts/{session_id}/{artifact_id}",
+                headers=self._auth_headers(),
+            )
             resp.raise_for_status()
             return resp.json()
