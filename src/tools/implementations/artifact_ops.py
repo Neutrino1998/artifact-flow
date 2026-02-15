@@ -269,7 +269,8 @@ class ArtifactManager:
                 content=content,
                 current_version=db_artifact.current_version,
                 lock_version=db_artifact.lock_version,
-                metadata=metadata
+                metadata=metadata,
+                created_at=db_artifact.created_at,
             )
 
             if session_id not in self._cache:

@@ -195,10 +195,8 @@ async def list_conversations(
         limit: 每页数量
         offset: 偏移量
     """
-    total, conversations = await asyncio.gather(
-        conversation_manager.count_conversations_async(),
-        conversation_manager.list_conversations_async(limit=limit, offset=offset),
-    )
+    total = await conversation_manager.count_conversations_async()
+    conversations = await conversation_manager.list_conversations_async(limit=limit, offset=offset)
 
     return ConversationListResponse(
         conversations=[
