@@ -119,11 +119,14 @@
 
 ---
 
-## Phase 3: 数据质量改善
+## Phase 3: 数据质量改善 (3.1 ✅, 3.2 ✅, 3.3 ⏸️)
 
 **目标**: 修复数据准确性问题。
 
-### 3.1 分页 total 真实计数
+> **3.1 & 3.2 完成于**: commit `14f44e6` — Repository 层新增 count 查询，Router 层返回准确 total；ArtifactMemory 增加 created_at 字段，使用 DB 真实时间。
+> **补丁**: commit `925ce9f` — code review 修复：list_conversations 去掉 asyncio.gather 避免共享 AsyncSession；create_artifact 缓存构造传入 db_artifact.created_at。
+
+### 3.1 分页 total 真实计数 ✅
 
 **问题**: `total` 使用 `offset + len + (1 if has_more else 0)` 估算。
 
@@ -135,7 +138,7 @@
 - Repository 层新增 `count_conversations()` 方法（`SELECT COUNT(*) FROM conversations`）
 - Router 层并行执行 count 查询和分页查询，返回准确 total
 
-### 3.2 Artifact created_at 返回真实时间
+### 3.2 Artifact created_at 返回真实时间 ✅
 
 **问题**: `artifacts.py` 用 `datetime.now()` 代替真实创建时间。
 
