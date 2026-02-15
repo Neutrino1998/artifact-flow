@@ -11,7 +11,7 @@ Auth Router
 
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from api.config import config
 from api.dependencies import get_current_user, require_admin, get_user_repository
@@ -70,12 +70,14 @@ async def login(
 @router.get("/me", response_model=UserInfo)
 async def get_me(
     current_user: TokenPayload = Depends(get_current_user),
+    user_repo: UserRepository = Depends(get_user_repository),
 ):
     """获取当前用户信息"""
+    user = await user_repo.get_by_id(current_user.user_id)
     return UserInfo(
         id=current_user.user_id,
         username=current_user.username,
-        display_name=None,
+        display_name=user.display_name if user else None,
         role=current_user.role,
     )
 
@@ -119,11 +121,13 @@ async def create_user(
 
 @router.get("/users", response_model=UserListResponse)
 async def list_users(
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
     _admin: TokenPayload = Depends(require_admin),
     user_repo: UserRepository = Depends(get_user_repository),
 ):
     """列出所有用户（仅 Admin）"""
-    users = await user_repo.list_users(include_inactive=True)
+    users = await user_repo.list_users(limit=limit, offset=offset, include_inactive=True)
     total = await user_repo.count_users(include_inactive=True)
 
     return UserListResponse(

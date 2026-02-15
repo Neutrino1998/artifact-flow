@@ -43,7 +43,7 @@ class APIConfig(BaseSettings):
     LANGGRAPH_DB_PATH: str = "data/langgraph.db"
 
     # JWT 认证配置
-    JWT_SECRET: str = "CHANGE-ME-IN-PRODUCTION"
+    JWT_SECRET: str = ""
     JWT_ALGORITHM: str = "HS256"
     JWT_EXPIRY_DAYS: int = 7
 
@@ -54,3 +54,10 @@ class APIConfig(BaseSettings):
 
 # 全局配置实例
 config = APIConfig()
+
+# Fail-fast: JWT secret 必须显式配置
+if not config.JWT_SECRET:
+    raise RuntimeError(
+        "ARTIFACTFLOW_JWT_SECRET environment variable is not set. "
+        "Generate one with: python -c \"import secrets; print(secrets.token_urlsafe(32))\""
+    )

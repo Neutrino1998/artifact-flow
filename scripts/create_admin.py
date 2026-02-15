@@ -41,8 +41,20 @@ async def main(username: str, password: str, no_claim: bool) -> None:
             # 检查用户名是否已存在
             existing = await user_repo.get_by_username(username)
             if existing:
-                print(f"User '{username}' already exists (id={existing.id})")
                 user_id = existing.id
+                # 确保是 admin 且已激活
+                changed = []
+                if existing.role != "admin":
+                    existing.role = "admin"
+                    changed.append("role → admin")
+                if not existing.is_active:
+                    existing.is_active = True
+                    changed.append("is_active → True")
+                if changed:
+                    await user_repo.update(existing)
+                    print(f"User '{username}' already exists (id={user_id}), upgraded: {', '.join(changed)}")
+                else:
+                    print(f"User '{username}' already exists (id={user_id}), already admin")
             else:
                 user_id = f"user-{uuid4().hex}"
                 user = User(
