@@ -233,6 +233,7 @@ class ArtifactRepository(BaseRepository[Artifact]):
                 "title": artifact.title,
                 "version": artifact.current_version,
                 "lock_version": artifact.lock_version,
+                "created_at": artifact.created_at.isoformat(),
                 "updated_at": artifact.updated_at.isoformat()
             }
             

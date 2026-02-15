@@ -52,7 +52,8 @@ class ArtifactMemory:
         content: str,
         current_version: int = 1,
         lock_version: int = 1,
-        metadata: Dict = None
+        metadata: Dict = None,
+        created_at: Optional[datetime] = None
     ):
         self.id = artifact_id
         self.content_type = content_type
@@ -61,6 +62,7 @@ class ArtifactMemory:
         self.metadata = metadata or {}
         self.current_version = current_version
         self.lock_version = lock_version
+        self.created_at = created_at or datetime.now()
         self.updated_at = datetime.now()
 
     def compute_update(
@@ -318,7 +320,8 @@ class ArtifactManager:
             content=db_artifact.content,
             current_version=db_artifact.current_version,
             lock_version=db_artifact.lock_version,
-            metadata=db_artifact.metadata_
+            metadata=db_artifact.metadata_,
+            created_at=db_artifact.created_at
         )
 
         if session_id not in self._cache:
@@ -467,6 +470,7 @@ class ArtifactManager:
                 "title": memory.title,
                 "content": memory.content,
                 "version": memory.current_version,
+                "created_at": memory.created_at.isoformat(),
                 "updated_at": memory.updated_at.isoformat()
             }
         else:
@@ -483,6 +487,7 @@ class ArtifactManager:
                 "title": memory.title if memory else "Unknown",
                 "content": content,
                 "version": version,
+                "created_at": memory.created_at.isoformat() if memory else None,
                 "updated_at": None
             }
 

@@ -454,6 +454,17 @@ class ConversationManager:
             })
         return conversations
 
+    async def count_conversations_async(self) -> int:
+        """
+        统计对话总数（异步版本）
+
+        Returns:
+            对话总数
+        """
+        if self.repository:
+            return await self.repository.count_conversations()
+        return len(self._cache)
+
     def clear_cache(self, conversation_id: Optional[str] = None) -> None:
         """
         清除缓存

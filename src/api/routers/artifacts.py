@@ -51,7 +51,7 @@ async def list_artifacts(
                     content_type=art["content_type"],
                     title=art["title"],
                     current_version=art["version"],
-                    created_at=datetime.now(),  # list_artifacts 不返回 created_at
+                    created_at=datetime.fromisoformat(art["created_at"]) if isinstance(art["created_at"], str) else art["created_at"],
                     updated_at=datetime.fromisoformat(art["updated_at"]) if isinstance(art["updated_at"], str) else art["updated_at"],
                 )
                 for art in artifacts
@@ -90,7 +90,7 @@ async def get_artifact(
         title=result["title"],
         content=result["content"],
         current_version=result["version"],
-        created_at=datetime.now(),  # ArtifactMemory 不持有 created_at
+        created_at=datetime.fromisoformat(result["created_at"]) if isinstance(result["created_at"], str) else result["created_at"],
         updated_at=datetime.fromisoformat(result["updated_at"]) if isinstance(result["updated_at"], str) else result["updated_at"],
     )
 

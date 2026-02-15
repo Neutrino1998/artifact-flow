@@ -7,7 +7,7 @@
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 
-from sqlalchemy import select, and_
+from sqlalchemy import select, func, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -217,6 +217,22 @@ class ConversationRepository(BaseRepository[Conversation]):
         result = await self._session.execute(query)
         return list(result.scalars().all())
     
+    async def count_conversations(self, *, user_id: Optional[str] = None) -> int:
+        """
+        统计对话总数
+
+        Args:
+            user_id: 按用户ID筛选（预留）
+
+        Returns:
+            对话总数
+        """
+        query = select(func.count()).select_from(Conversation)
+        if user_id:
+            query = query.where(Conversation.user_id == user_id)
+        result = await self._session.execute(query)
+        return result.scalar_one()
+
     async def delete_conversation(self, conversation_id: str) -> bool:
         """
         删除对话（级联删除消息和 Artifacts）

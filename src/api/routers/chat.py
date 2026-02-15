@@ -195,14 +195,10 @@ async def list_conversations(
         limit: 每页数量
         offset: 偏移量
     """
-    conversations = await conversation_manager.list_conversations_async(
-        limit=limit + 1,  # 多取一条用于判断 has_more
-        offset=offset
+    total, conversations = await asyncio.gather(
+        conversation_manager.count_conversations_async(),
+        conversation_manager.list_conversations_async(limit=limit, offset=offset),
     )
-
-    has_more = len(conversations) > limit
-    if has_more:
-        conversations = conversations[:limit]
 
     return ConversationListResponse(
         conversations=[
@@ -215,8 +211,8 @@ async def list_conversations(
             )
             for conv in conversations
         ],
-        total=offset + len(conversations) + (1 if has_more else 0),
-        has_more=has_more,
+        total=total,
+        has_more=offset + len(conversations) < total,
     )
 
 
