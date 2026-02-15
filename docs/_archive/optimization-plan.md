@@ -148,18 +148,68 @@
 - 如果 artifact 尚未持久化到 DB，使用内存中的创建时间（在 ArtifactMemory 中增加 `created_at` 字段）
 - Router 层使用真实时间构造响应
 
-### 3.3 Graph 编译缓存（来自 concurrency.md Phase 3）
+### 3.3 Graph 编译缓存（来自 concurrency.md Phase 3） ⏸️ Deferred
 
-**问题**: 每个请求都重新创建 Agent → Tool → Registry → 编译 StateGraph，浪费资源。
+**当前状态**: 暂不实施，先保持“每请求编译 graph”现状，后续在有明确性能瓶颈数据后再推进。
 
-**涉及文件**:
-- `src/api/dependencies.py` — `create_multi_agent_graph()`（~L212）
-- `src/core/graph.py` — graph 创建逻辑
+**背景问题**: 当前每个请求都会创建 Agent/Tool/Registry 并编译 StateGraph，存在固定 CPU 开销，影响吞吐。
 
-**改动**:
-- 将 `artifact_manager` 从闭包捕获改为通过 state 传递
-- Graph 编译一次后缓存为全局单例
-- 每次请求只需传入不同的 state（包含 artifact_manager）
+**现有实现特征（2026-02）**:
+- `src/api/dependencies.py` 和 `src/api/routers/chat.py` 的后台任务路径中，均会按请求调用 `create_multi_agent_graph()`
+- `artifact_manager`（请求级对象，绑定请求级 DB session）当前通过闭包/实例字段参与 graph 构建
+- 该设计在“每请求编译”前提下并发正确性可接受（不会跨请求复用 session），但吞吐较差
+
+**候选改造方案（已调研，未落地）**:
+- 目标：启动时编译一次 graph 并缓存为全局单例；请求级 `artifact_manager` 通过 runtime context 注入
+- 对齐 LangGraph 推荐模式：`context_schema` + `runtime.context`（context 不进入 checkpoint，resume 时需重新传入）
+
+1. 新增 `GraphContext`
+- 新建 `src/core/graph_context.py`
+- 定义 dataclass：`GraphContext(artifact_manager: Optional[ArtifactManager])`
+- 作用：承载请求级依赖，避免 graph 闭包捕获 request-scoped 对象
+
+2. 改造 `core/graph.py`
+- `ExtendableGraph` 移除 `artifact_manager` 构造参数
+- `StateGraph` 增加 `context_schema=GraphContext`
+- 节点执行时通过 runtime 读取 `artifact_manager`，传入 `ContextManager.build_agent_messages(...)`
+- `create_multi_agent_graph()` 改为不接收 `artifact_manager`
+
+3. 改造 `tools/implementations/artifact_ops.py`
+- Artifact 工具不再在 `__init__` 持有 manager
+- 执行时从 runtime context 获取 manager
+- `create_artifact_tools()` 改为无参工厂
+
+4. 改造 `api/dependencies.py`
+- 增加 `_compiled_graph` 全局变量
+- 在 `init_globals()` 中编译并缓存 graph
+- 增加 `get_compiled_graph()` 访问器
+- `get_controller()` 改为复用缓存 graph，仅注入请求级 manager
+
+5. 改造 `core/controller.py`
+- 所有 graph 调用点（`ainvoke`/`astream`、new/resume）统一传入 `context=GraphContext(...)`
+
+6. 改造 `api/routers/chat.py`
+- 两个后台任务（`execute_and_push` / `execute_resume`）改为复用 `get_compiled_graph()`
+- 删除任务内重复编译 graph 的逻辑
+
+7. 测试适配
+- `tests/test_core_graph.py` / `tests/test_core_graph_stream.py`：测试环境改为“graph 编译一次 + 请求级 manager 复用 graph”
+
+**关键注意事项（必须满足）**:
+- `compiled_graph` 绝不能持有 request-scoped 对象（尤其 `ArtifactManager` / `AsyncSession`）
+- 开启 graph 缓存后，graph 内绑定的 tool/agent 实例会跨请求复用；所有工具需保证无状态或并发安全
+- `web_fetch` 等工具若持有可变实例状态（配置/运行对象），应改为执行期局部创建，避免跨请求状态污染
+- 需锁定支持 runtime context 的 LangGraph 版本，避免环境解析到旧版本导致运行时错误
+- context 不会持久化到 checkpoint，resume 路径必须每次重新传入 context
+
+**为何先 defer**:
+- 当前更关注并发正确性与稳定性，优先避免一次性引入“缓存 + 依赖注入模型切换 + tool 生命周期变化”的复合改动风险
+- Phase 5（PostgreSQL 迁移）完成后再结合压测数据评估，收益/风险比更清晰
+
+**后续触发条件（再开启本项）**:
+- 有明确数据表明 graph 编译耗时显著影响 p95/p99 或吞吐
+- 完成工具无状态化审计（至少 `artifact_ops`、`web_fetch`）
+- 有可自动化回归覆盖 new/resume/streaming/并发双会话
 
 ---
 
