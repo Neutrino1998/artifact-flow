@@ -32,7 +32,7 @@ export default function LoginPage() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-bg dark:bg-bg-dark">
       <div className="w-full max-w-sm rounded-card bg-surface dark:bg-surface-dark p-8 shadow-modal">
-        <h1 className="mb-6 text-center text-xl font-semibold text-text-primary dark:text-text-primary-dark">
+        <h1 className="mb-6 text-center text-3xl font-semibold text-text-primary dark:text-text-primary-dark">
           ArtifactFlow
         </h1>
 

@@ -52,11 +52,11 @@ export default function PermissionModal() {
 
         {/* Tool info */}
         <div className="bg-bg dark:bg-bg-dark border border-border dark:border-border-dark rounded-lg p-3 mb-4">
-          <div className="text-sm font-medium text-text-primary dark:text-text-primary-dark mb-2">
+          <div className="text-sm font-medium text-text-primary dark:text-text-primary-dark">
             {permissionRequest.toolName}
           </div>
           {Object.keys(permissionRequest.params).length > 0 && (
-            <pre className="text-xs text-text-secondary dark:text-text-secondary-dark font-mono overflow-x-auto max-h-40 overflow-y-auto">
+            <pre className="text-xs text-text-secondary dark:text-text-secondary-dark font-mono overflow-x-auto max-h-40 overflow-y-auto pt-2 mt-2 border-t border-border dark:border-border-dark">
               {JSON.stringify(permissionRequest.params, null, 2)}
             </pre>
           )}
