@@ -365,7 +365,7 @@ if tool.permission == ToolPermission.CONFIRM:
 ```javascript
 // SSE 事件解析回调中，按 event 字段分发处理：
 
-function handleSSEEvent(eventType, parsed) {
+async function handleSSEEvent(eventType, parsed) {
   if (eventType === 'permission_request') {
     // 步骤1：提前显示等待状态
     const { tool, data } = parsed;
