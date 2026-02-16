@@ -216,11 +216,13 @@
 
 ---
 
-## Phase 4: 认证框架
+## Phase 4: 认证框架 ✅ DONE
 
 **目标**: 实现用户认证和租户隔离，所有 API 路由强制 `current_user`。
 
-### 4.1 后端认证
+> **完成于**: commit `8d367ae` — JWT 认证框架全面实现。后端：JWT 签发/验证、User 模型、get_current_user 依赖注入、所有路由 user_id 过滤、SSE 连接认证、resume 归属校验、admin 用户管理 API。前端：登录页、authStore（Zustand + localStorage）、AuthGuard 路由保护、API 请求自动附加 token、401 全局拦截跳转登录页、UserMenu + 管理员用户管理 UI。CLI：login/logout 命令、token 持久化。附带 code review 修复（`821f20a`）、用户管理 UI（`b573be1`）、logout 状态清理（`0a06643`）等。
+
+### 4.1 后端认证 ✅
 
 **涉及文件**:
 - `src/api/dependencies.py` — `get_current_user()` 改为真实实现
@@ -238,7 +240,7 @@
 - SSE 端点支持 query param 传 token（因为 EventSource 不支持自定义 header，但我们用 fetch 所以可以用 header）
 - resume 流程增加用户归属校验
 
-### 4.2 前端认证
+### 4.2 前端认证 ✅
 
 **涉及文件**:
 - `frontend/src/` — 新增登录页面组件
@@ -412,7 +414,7 @@
 Phase 1 (核心 Bug)     ✅ 已完成
 Phase 2 (安全加固)     ✅ 已完成
 Phase 3 (数据质量)     ← 无依赖，可与 Phase 1/2 并行
-Phase 4 (认证框架)     ← 建议在 Phase 1 之后（ID 一致性修好后再加认证）
+Phase 4 (认证框架)     ✅ 已完成
 Phase 5 (PostgreSQL)   ← 建议在 Phase 4 之后（认证需要的 User 模型一起迁移）
 Phase 6 (Redis)        ← 建议在 Phase 5 之后（基础设施逐步升级）
 Phase 7 (文件上传)     ← 建议在 Phase 4 之后（需要认证知道上传者是谁）
