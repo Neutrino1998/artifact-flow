@@ -135,8 +135,10 @@ ArtifactFlow 是一个智能多智能体系统，通过协调专门的AI智能�
 
 4. **创建管理员账号**
    ```bash
+   # "admin" 是用户名，密码会交互式提示输入
    docker-compose exec backend python scripts/create_admin.py admin
    ```
+   管理员登录后可在侧边栏底部的用户菜单中打开「管理用户」面板，创建和管理其他用户账号。
 
 5. **查看日志**
    ```bash
@@ -210,8 +212,10 @@ docker-compose up -d --build
 
 7. **创建管理员账号**（首次使用前必须）
    ```bash
+   # "admin" 是用户名，密码会交互式提示输入；也可以用 --password 指定
    python scripts/create_admin.py admin
    ```
+   管理员登录后可在侧边栏底部的用户菜单中打开「管理用户」面板，创建和管理其他用户账号。
 
 8. **启动服务**
    ```bash
