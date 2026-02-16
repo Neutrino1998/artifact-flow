@@ -27,6 +27,7 @@ import httpx
 # 配置
 BASE_URL = "http://localhost:8000"
 TIMEOUT = 120  # SSE 可能需要较长时间
+AUTH_TOKEN: Optional[str] = None  # JWT token，login 后设置
 
 
 def log(msg: str, level: str = "INFO"):
@@ -42,6 +43,47 @@ def log(msg: str, level: str = "INFO"):
     color = colors.get(level, "")
     reset = colors["RESET"]
     print(f"{color}[{timestamp}] [{level}] {msg}{reset}")
+
+
+# ============================================================
+# 认证辅助
+# ============================================================
+
+def auth_headers() -> dict:
+    """返回包含 JWT token 的 Authorization header"""
+    if AUTH_TOKEN:
+        return {"Authorization": f"Bearer {AUTH_TOKEN}"}
+    return {}
+
+
+async def login(username: str, password: str) -> bool:
+    """
+    登录获取 JWT token
+
+    Args:
+        username: 用户名
+        password: 密码
+
+    Returns:
+        是否登录成功
+    """
+    global AUTH_TOKEN
+    log(f"Logging in as '{username}'...")
+
+    async with httpx.AsyncClient(base_url=BASE_URL) as client:
+        resp = await client.post("/api/v1/auth/login", json={
+            "username": username,
+            "password": password,
+        })
+
+        if resp.status_code == 200:
+            data = resp.json()
+            AUTH_TOKEN = data["access_token"]
+            log(f"Login successful: user={data['user']['username']}, role={data['user']['role']}", "OK")
+            return True
+        else:
+            log(f"Login failed: {resp.status_code} - {resp.text}", "ERROR")
+            return False
 
 
 # ============================================================
@@ -72,7 +114,7 @@ async def test_chat_send_message() -> Optional[dict]:
     """
     log("Testing POST /api/v1/chat...")
 
-    async with httpx.AsyncClient(base_url=BASE_URL, timeout=TIMEOUT) as client:
+    async with httpx.AsyncClient(base_url=BASE_URL, timeout=TIMEOUT, headers=auth_headers()) as client:
         resp = await client.post("/api/v1/chat", json={
             "content": "你好，请简单介绍一下你自己"
         })
@@ -105,7 +147,7 @@ async def test_sse_stream(thread_id: str, max_events: int = 50):
     event_types = {}
     final_response = None
 
-    async with httpx.AsyncClient(base_url=BASE_URL, timeout=TIMEOUT) as client:
+    async with httpx.AsyncClient(base_url=BASE_URL, timeout=TIMEOUT, headers=auth_headers()) as client:
         try:
             async with client.stream("GET", f"/api/v1/stream/{thread_id}") as response:
                 current_event_name = None
@@ -181,7 +223,7 @@ async def test_list_conversations():
     """测试列出对话"""
     log("Testing GET /api/v1/chat...")
 
-    async with httpx.AsyncClient(base_url=BASE_URL) as client:
+    async with httpx.AsyncClient(base_url=BASE_URL, headers=auth_headers()) as client:
         resp = await client.get("/api/v1/chat", params={"limit": 10})
 
         if resp.status_code == 200:
@@ -201,7 +243,7 @@ async def test_get_conversation(conv_id: str):
     """测试获取对话详情"""
     log(f"Testing GET /api/v1/chat/{conv_id}...")
 
-    async with httpx.AsyncClient(base_url=BASE_URL) as client:
+    async with httpx.AsyncClient(base_url=BASE_URL, headers=auth_headers()) as client:
         resp = await client.get(f"/api/v1/chat/{conv_id}")
 
         if resp.status_code == 200:
@@ -221,7 +263,7 @@ async def test_list_artifacts(session_id: str):
     """测试列出 Artifacts"""
     log(f"Testing GET /api/v1/artifacts/{session_id}...")
 
-    async with httpx.AsyncClient(base_url=BASE_URL) as client:
+    async with httpx.AsyncClient(base_url=BASE_URL, headers=auth_headers()) as client:
         resp = await client.get(f"/api/v1/artifacts/{session_id}")
 
         if resp.status_code == 200:
@@ -244,7 +286,7 @@ async def test_list_artifacts(session_id: str):
 # 测试套件
 # ============================================================
 
-async def run_full_test():
+async def run_full_test(username: str = "admin", password: str = "admin"):
     """运行完整测试流程"""
     log("=" * 60)
     log("ArtifactFlow API Smoke Test")
@@ -260,31 +302,39 @@ async def run_full_test():
 
     print()
 
-    # 2. 发送消息
+    # 2. 登录
+    results['login'] = await login(username, password)
+    if not results['login']:
+        log("Login failed, aborting tests", "ERROR")
+        return results
+
+    print()
+
+    # 3. 发送消息
     chat_data = await test_chat_send_message()
     results['chat_send'] = chat_data is not None
 
     if chat_data:
         print()
 
-        # 3. SSE 流式输出
+        # 4. SSE 流式输出
         results['sse_stream'] = await test_sse_stream(chat_data['thread_id'])
 
         print()
 
-        # 4. 列出对话
+        # 5. 列出对话
         conversations = await test_list_conversations()
         results['list_conversations'] = len(conversations) > 0
 
         print()
 
-        # 5. 获取对话详情
+        # 6. 获取对话详情
         conv_detail = await test_get_conversation(chat_data['conversation_id'])
         results['get_conversation'] = conv_detail is not None
 
         print()
 
-        # 6. 列出 Artifacts
+        # 7. 列出 Artifacts
         artifacts = await test_list_artifacts(chat_data['conversation_id'])
         results['list_artifacts'] = True  # 即使为空也算成功
 
@@ -306,11 +356,18 @@ async def run_full_test():
     return results
 
 
-async def run_single_test(test_name: str):
+async def run_single_test(test_name: str, username: str = "admin", password: str = "admin"):
     """运行单个测试"""
     if test_name == "health":
         await test_health()
-    elif test_name == "chat":
+        return
+
+    # 非 health 测试需要先登录
+    if not await login(username, password):
+        log("Login failed, aborting test", "ERROR")
+        return
+
+    if test_name == "chat":
         data = await test_chat_send_message()
         if data:
             await test_sse_stream(data['thread_id'])
@@ -344,6 +401,18 @@ def main():
         default="http://localhost:8000",
         help="API base URL"
     )
+    parser.add_argument(
+        "--username",
+        type=str,
+        default="admin",
+        help="Login username (default: admin)"
+    )
+    parser.add_argument(
+        "--password",
+        type=str,
+        default="admin",
+        help="Login password (default: admin)"
+    )
 
     args = parser.parse_args()
 
@@ -351,9 +420,9 @@ def main():
     BASE_URL = args.base_url
 
     if args.test:
-        asyncio.run(run_single_test(args.test))
+        asyncio.run(run_single_test(args.test, args.username, args.password))
     else:
-        asyncio.run(run_full_test())
+        asyncio.run(run_full_test(args.username, args.password))
 
 
 if __name__ == "__main__":
