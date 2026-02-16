@@ -61,7 +61,7 @@ async def main(username: str, password: str, no_claim: bool) -> None:
                     id=user_id,
                     username=username,
                     hashed_password=hash_password(password),
-                    display_name=username,
+                    display_name=None,
                     role="admin",
                     is_active=True,
                 )

@@ -22,6 +22,39 @@ export interface LoginResponse {
 }
 
 // ============================================================
+// User Management Types (Admin)
+// ============================================================
+
+export interface CreateUserRequest {
+  username: string;
+  password: string;
+  display_name?: string;
+  role: string;
+}
+
+export interface UpdateUserRequest {
+  display_name?: string;
+  password?: string;
+  role?: string;
+  is_active?: boolean;
+}
+
+export interface UserResponse {
+  id: string;
+  username: string;
+  display_name: string | null;
+  role: string;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface UserListResponse {
+  users: UserResponse[];
+  total: number;
+}
+
+// ============================================================
 // Chat Types
 // ============================================================
 

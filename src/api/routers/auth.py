@@ -160,7 +160,7 @@ async def update_user(
         raise HTTPException(status_code=404, detail="User not found")
 
     if request.display_name is not None:
-        user.display_name = request.display_name
+        user.display_name = request.display_name or None
     if request.password is not None:
         user.hashed_password = hash_password(request.password)
     if request.role is not None:

@@ -11,6 +11,10 @@ import type {
   VersionDetail,
   LoginRequest,
   LoginResponse,
+  CreateUserRequest,
+  UpdateUserRequest,
+  UserResponse,
+  UserListResponse,
 } from '@/types';
 import { useAuthStore } from '@/stores/authStore';
 
@@ -114,4 +118,25 @@ export function getVersion(
   return request<VersionDetail>(
     `/api/v1/artifacts/${sessionId}/${artifactId}/versions/${version}`
   );
+}
+
+// User Management (Admin)
+export function listUsers(limit = 50, offset = 0) {
+  return request<UserListResponse>(
+    `/api/v1/auth/users?limit=${limit}&offset=${offset}`
+  );
+}
+
+export function createUser(body: CreateUserRequest) {
+  return request<UserResponse>('/api/v1/auth/users', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export function updateUser(userId: string, body: UpdateUserRequest) {
+  return request<UserResponse>(`/api/v1/auth/users/${userId}`, {
+    method: 'PUT',
+    body: JSON.stringify(body),
+  });
 }

@@ -5,6 +5,7 @@ import { useConversationStore } from '@/stores/conversationStore';
 import { useStreamStore } from '@/stores/streamStore';
 import { useArtifactStore } from '@/stores/artifactStore';
 import ConversationList from './ConversationList';
+import UserMenu from './UserMenu';
 
 function IconButton({
   onClick,
@@ -30,8 +31,6 @@ function IconButton({
 export default function Sidebar() {
   const sidebarCollapsed = useUIStore((s) => s.sidebarCollapsed);
   const toggleSidebar = useUIStore((s) => s.toggleSidebar);
-  const toggleTheme = useUIStore((s) => s.toggleTheme);
-  const theme = useUIStore((s) => s.theme);
   const toggleArtifactPanel = useUIStore((s) => s.toggleArtifactPanel);
   const setCurrent = useConversationStore((s) => s.setCurrent);
   const reset = useStreamStore((s) => s.reset);
@@ -64,21 +63,11 @@ export default function Sidebar() {
           </svg>
         </IconButton>
 
-        {/* Theme toggle */}
-        <IconButton onClick={toggleTheme} label={theme === 'light' ? '深色模式' : '浅色模式'}>
-          {theme === 'light' ? (
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
-              <path d="M8 1v1m0 12v1m7-7h-1M2 8H1m12.07-4.07-.71.71M3.64 12.36l-.71.71m10.14 0-.71-.71M3.64 3.64l-.71-.71M11 8a3 3 0 1 1-6 0 3 3 0 0 1 6 0z" />
-            </svg>
-          ) : (
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
-              <path d="M14 9.27A6 6 0 0 1 6.73 2 6 6 0 1 0 14 9.27z" />
-            </svg>
-          )}
-        </IconButton>
-
         {/* Spacer */}
         <div className="flex-1" />
+
+        {/* User menu */}
+        <UserMenu collapsed />
 
         {/* Expand */}
         <IconButton onClick={toggleSidebar} label="展开侧栏">
@@ -98,34 +87,16 @@ export default function Sidebar() {
         <h1 className="text-lg font-semibold text-text-primary dark:text-text-primary-dark">
           ArtifactFlow
         </h1>
-        <div className="flex items-center gap-1">
-          <button
-            onClick={toggleTheme}
-            className="p-1.5 rounded-lg text-text-secondary dark:text-text-secondary-dark hover:bg-bg dark:hover:bg-bg-dark transition-colors"
-            aria-label="Toggle theme"
-            title={theme === 'light' ? '切换深色模式' : '切换浅色模式'}
-          >
-            {theme === 'light' ? (
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
-                <path d="M8 1v1m0 12v1m7-7h-1M2 8H1m12.07-4.07-.71.71M3.64 12.36l-.71.71m10.14 0-.71-.71M3.64 3.64l-.71-.71M11 8a3 3 0 1 1-6 0 3 3 0 0 1 6 0z" />
-              </svg>
-            ) : (
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
-                <path d="M14 9.27A6 6 0 0 1 6.73 2 6 6 0 1 0 14 9.27z" />
-              </svg>
-            )}
-          </button>
-          <button
-            onClick={toggleSidebar}
-            className="p-1.5 rounded-lg text-text-secondary dark:text-text-secondary-dark hover:bg-bg dark:hover:bg-bg-dark transition-colors"
-            aria-label="Collapse sidebar"
-            title="收起侧栏"
-          >
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
-              <path d="M2 4h12M2 8h12M2 12h12" />
-            </svg>
-          </button>
-        </div>
+        <button
+          onClick={toggleSidebar}
+          className="p-1.5 rounded-lg text-text-secondary dark:text-text-secondary-dark hover:bg-bg dark:hover:bg-bg-dark transition-colors"
+          aria-label="Collapse sidebar"
+          title="收起侧栏"
+        >
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+            <path d="M2 4h12M2 8h12M2 12h12" />
+          </svg>
+        </button>
       </div>
 
       {/* Artifact panel + New chat buttons */}
@@ -153,6 +124,9 @@ export default function Sidebar() {
 
       {/* Conversation list */}
       <ConversationList />
+
+      {/* User menu at bottom */}
+      <UserMenu />
     </div>
   );
 }
