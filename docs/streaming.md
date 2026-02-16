@@ -363,16 +363,19 @@ if tool.permission == ToolPermission.CONFIRM:
 2. `complete` 事件 (`interrupted=true`) - 执行已暂停，包含完整中断数据，前端据此弹出确认对话框并发起 resume 请求
 
 ```javascript
-// 步骤1：收到 permission_request 时，可提前显示等待状态
-eventSource.addEventListener('permission_request', (e) => {
-  const { tool, data } = JSON.parse(e.data);
-  showPendingPermission(tool, data.permission_level, data.params);
-});
+// SSE 事件解析回调中，按 event 字段分发处理：
 
-// 步骤2：收到 complete 且 interrupted=true 时，触发确认流程
-eventSource.addEventListener('complete', async (e) => {
-  const { data } = JSON.parse(e.data);
-  if (!data.interrupted) return;
+function handleSSEEvent(eventType, parsed) {
+  if (eventType === 'permission_request') {
+    // 步骤1：提前显示等待状态
+    const { tool, data } = parsed;
+    showPendingPermission(tool, data.permission_level, data.params);
+  }
+
+  if (eventType === 'complete') {
+    // 步骤2：检查是否权限中断
+    const { data } = parsed;
+    if (!data.interrupted) return;
 
   const { interrupt_data, thread_id, message_id, conversation_id } = data;
 
@@ -403,6 +406,7 @@ eventSource.addEventListener('complete', async (e) => {
     headers: { Accept: 'text/event-stream', ...authHeaders },
   });
   // ... 用 ReadableStream 处理后续事件
+  }
 }
 ```
 
@@ -425,29 +429,38 @@ class APIConfig(BaseSettings):
 
 ### 连接断开
 
-前端应处理连接断开情况：
+当前使用 `fetch + ReadableStream`，没有 `EventSource` 的自动重连语义。前端需显式处理连接异常：
 
 ```javascript
-eventSource.onerror = (e) => {
-  if (eventSource.readyState === EventSource.CLOSED) {
-    // 连接已关闭
-    handleDisconnect();
+// connectSSE() 的 onError 回调中处理
+function onError(error) {
+  if (error.message === 'Session expired') {
+    // 401：token 过期，触发登出
+    authStore.logout();
   } else {
-    // 尝试重连（浏览器自动）
-    showReconnecting();
+    // 网络错误或服务端异常，提示用户
+    showError('连接断开，请刷新页面重试');
   }
-};
+}
 ```
+
+> **注意**：ArtifactFlow 的 SSE 连接是一次性的（一次请求对应一个 stream），不需要自动重连。如果连接中断，graph 执行仍会继续完成并将结果持久化到数据库，用户刷新页面即可查看。
 
 ### 超时处理
 
 ```javascript
+// 服务端已有 STREAM_TIMEOUT（默认 300 秒）保护，超时后会推送 error 事件。
+// 前端可额外设置客户端超时作为兜底：
+const controller = new AbortController();
 const timeout = setTimeout(() => {
-  eventSource.close();
+  controller.abort();
   showTimeout();
 }, 5 * 60 * 1000);  // 5 分钟超时
 
-eventSource.addEventListener('complete', () => {
-  clearTimeout(timeout);
-});
+// fetch 时传入 signal
+fetch(streamUrl, { signal: controller.signal, headers: authHeaders });
+
+// 收到 complete 时清除超时
+// （在 handleSSEEvent 的 complete 分支中）
+clearTimeout(timeout);
 ```

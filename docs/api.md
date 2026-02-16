@@ -293,7 +293,7 @@ event: event_type
 data: {"type":"event_type","timestamp":"...","agent":"...","data":{...}}
 ```
 
-前端使用 `addEventListener` 按事件类型独立监听。
+前端使用 `fetch + ReadableStream` 逐行解析 SSE，按 `event:` 字段分发处理。
 
 **事件类型：**
 
