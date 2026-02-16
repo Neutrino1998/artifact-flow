@@ -53,8 +53,8 @@ export default function MessageList() {
           );
         })}
 
-        {/* Rerun/edit: show pending user message inline */}
-        {isStreaming && streamParentId !== undefined && pendingUserMessage && (
+        {/* Show pending user message during streaming (before conversation refresh) */}
+        {isStreaming && pendingUserMessage && (
           <div className="flex justify-end">
             <div className="max-w-[80%] bg-surface dark:bg-surface-dark border border-border dark:border-border-dark rounded-bubble px-4 py-3 text-sm text-text-primary dark:text-text-primary-dark whitespace-pre-wrap break-words">
               {pendingUserMessage}
