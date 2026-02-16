@@ -1,4 +1,7 @@
 import { create } from 'zustand';
+import { useConversationStore } from './conversationStore';
+import { useArtifactStore } from './artifactStore';
+import { useStreamStore } from './streamStore';
 
 export interface UserInfo {
   id: string;
@@ -33,6 +36,9 @@ export const useAuthStore = create<AuthState>((set) => ({
   logout: () => {
     localStorage.removeItem('af_token');
     localStorage.removeItem('af_user');
+    useConversationStore.getState().reset();
+    useArtifactStore.getState().reset();
+    useStreamStore.getState().reset();
     set({ token: null, user: null, isAuthenticated: false });
   },
 
