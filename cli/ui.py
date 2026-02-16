@@ -39,6 +39,22 @@ def print_warning(message: str):
     console.print(f"[yellow]{message}[/yellow]")
 
 
+def print_permission_request(tool_name: str, level: str, params: dict):
+    """打印权限请求详情"""
+    parts = [f"[bold]Tool:[/bold] {tool_name}", f"[bold]Level:[/bold] {level}"]
+    if params:
+        params_str = ", ".join(f"{k}={repr(v)[:50]}" for k, v in params.items())
+        parts.append(f"[bold]Params:[/bold] {params_str}")
+
+    content = "\n".join(parts)
+    console.print(Panel(
+        content,
+        title="[yellow]Permission Required[/yellow]",
+        border_style="yellow",
+        padding=(0, 1),
+    ))
+
+
 class StreamDisplay:
     """
     流式输出显示器
@@ -297,11 +313,10 @@ class StreamDisplay:
             self.current_agent = None
 
         elif event.type == "permission_request":
-            # 权限请求 - 暂时用打印处理
-            tool = event.tool
-            level = event.data.get("permission_level", "unknown")
-            # 这里可以考虑添加到 history 或特殊处理
-            print_warning(f"Permission required: {tool} ({level})")
+            # 权限请求 - 暂停当前 agent 渲染
+            # 实际的用户交互在 main.py 中通过 Prompt 处理
+            self._finalize_current_agent()
+            self.current_tool = None
 
         # 更新显示
         if self.live:

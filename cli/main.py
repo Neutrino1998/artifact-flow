@@ -109,6 +109,46 @@ def send_single_message(api: APIClient, message: str):
     asyncio.run(_send_message_async(api, message))
 
 
+async def _stream_events(api: APIClient, display: ui.StreamDisplay, thread_id: str) -> dict:
+    """
+    消费 SSE 事件流，返回结果信息。
+
+    Returns:
+        dict with keys:
+        - success: bool
+        - interrupted: bool (权限中断)
+        - permission_event: SSEEvent | None (权限请求事件)
+        - message_id: str | None
+    """
+    result = {"success": False, "interrupted": False, "permission_event": None, "message_id": None}
+
+    async for event in api.stream_response(thread_id):
+        display.handle_event(event)
+
+        if event.type == "metadata":
+            # 保存 metadata 中的 thread_id/message_id 用于 resume
+            if "thread_id" in event.data:
+                result["thread_id"] = event.data["thread_id"]
+            if "message_id" in event.data:
+                result["message_id"] = event.data["message_id"]
+
+        elif event.type == "permission_request":
+            result["permission_event"] = event
+
+        elif event.type == "complete":
+            result["success"] = event.data.get("success", False)
+            if event.data.get("interrupted"):
+                result["interrupted"] = True
+            if "message_id" in event.data:
+                result["message_id"] = event.data["message_id"]
+
+        elif event.type == "error":
+            result["success"] = False
+            ui.print_error(event.data.get("error", "Unknown error"))
+
+    return result
+
+
 async def _send_message_async(api: APIClient, message: str):
     """异步发送消息并显示流式响应"""
     global state
@@ -128,35 +168,60 @@ async def _send_message_async(api: APIClient, message: str):
         state.conversation_id = resp.conversation_id
         state.parent_message_id = resp.message_id
 
-        # 流式接收响应
-        display = ui.StreamDisplay()
-        display.start()
+        thread_id = resp.thread_id
+        conversation_id = resp.conversation_id
+        message_id = resp.message_id
 
-        final_response = None
-        success = False
+        # 流式接收响应（可能因权限中断而多次循环）
+        while True:
+            display = ui.StreamDisplay()
+            display.start()
 
-        try:
-            async for event in api.stream_response(resp.thread_id):
-                display.handle_event(event)
+            try:
+                result = await _stream_events(api, display, thread_id)
+            finally:
+                display.stop()
 
-                if event.type == "complete":
-                    success = event.data.get("success", False)
-                    final_response = event.data.get("response")
-                    # 更新 parent_message_id 为助手消息
-                    if "message_id" in event.data:
-                        state.parent_message_id = event.data["message_id"]
-                elif event.type == "error":
-                    success = False
-                    ui.print_error(event.data.get("error", "Unknown error"))
-        finally:
-            display.stop()
+            # 更新 message_id
+            if result.get("message_id"):
+                message_id = result["message_id"]
+                state.parent_message_id = message_id
+
+            # 如果被权限中断，提示用户做决定，然后 resume
+            if result["interrupted"] and result["permission_event"]:
+                perm = result["permission_event"]
+                tool_name = perm.tool or "unknown"
+                level = perm.data.get("permission_level", "unknown")
+                params = perm.data.get("params", {})
+
+                # 显示权限请求详情
+                ui.print_permission_request(tool_name, level, params)
+
+                # 提示用户
+                answer = Prompt.ask(
+                    "[yellow]Approve?[/yellow]",
+                    choices=["y", "n"],
+                    default="y",
+                )
+                approved = answer.lower() == "y"
+
+                # 调用 resume API，获取新的 stream thread_id
+                thread_id = await api.resume_execution(
+                    conversation_id=conversation_id,
+                    thread_id=thread_id,
+                    message_id=message_id,
+                    approved=approved,
+                )
+                # 继续循环，消费 resume 后的事件流
+                continue
+
+            # 正常完成或失败
+            if not result["success"]:
+                ui.print_error("Execution failed")
+            break
 
         # 保存状态
         state.save()
-
-        # 只在失败时打印错误（成功时 StreamDisplay 已经显示了内容）
-        if not success:
-            ui.print_error("Execution failed")
 
     except Exception as e:
         ui.print_error(f"Failed to send message: {e}")

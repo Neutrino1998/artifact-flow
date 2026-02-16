@@ -122,6 +122,30 @@ class APIClient:
                     except json.JSONDecodeError:
                         continue
 
+    async def resume_execution(
+        self,
+        conversation_id: str,
+        thread_id: str,
+        message_id: str,
+        approved: bool,
+    ) -> str:
+        """恢复中断的执行（权限确认后），返回 stream_url 中的 thread_id"""
+        async with httpx.AsyncClient(base_url=self.base_url, timeout=self.timeout) as client:
+            resp = await client.post(
+                f"/api/v1/chat/{conversation_id}/resume",
+                json={
+                    "thread_id": thread_id,
+                    "message_id": message_id,
+                    "approved": approved,
+                },
+                headers=self._auth_headers(),
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            # stream_url 格式: /api/v1/stream/{thread_id}
+            stream_url = data["stream_url"]
+            return stream_url.rsplit("/", 1)[-1]
+
     async def list_conversations(self, limit: int = 20, offset: int = 0) -> dict:
         """列出对话"""
         async with httpx.AsyncClient(base_url=self.base_url, timeout=10) as client:
