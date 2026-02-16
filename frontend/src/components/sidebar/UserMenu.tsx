@@ -1,7 +1,6 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
 import { useAuthStore } from '@/stores/authStore';
 import { useUIStore } from '@/stores/uiStore';
 import UserManagementModal from './UserManagementModal';
@@ -11,8 +10,6 @@ export default function UserMenu({ collapsed }: { collapsed?: boolean }) {
   const logout = useAuthStore((s) => s.logout);
   const toggleTheme = useUIStore((s) => s.toggleTheme);
   const theme = useUIStore((s) => s.theme);
-  const router = useRouter();
-
   const [popoverOpen, setPopoverOpen] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -35,7 +32,7 @@ export default function UserMenu({ collapsed }: { collapsed?: boolean }) {
   const handleLogout = () => {
     setPopoverOpen(false);
     logout();
-    router.push('/login');
+    // AuthGuard handles the redirect to /login when isAuthenticated becomes false
   };
 
   const handleManageUsers = () => {
