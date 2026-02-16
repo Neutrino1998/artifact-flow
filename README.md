@@ -290,9 +290,15 @@ BOCHA_API_KEY=sk-xxx
 | `gpt-4o-mini` | OpenAI | GPT-4o Mini |
 | `qwen-turbo` | 通义千问 | 快速响应 |
 | `qwen-plus` | 通义千问 | 增强版本 |
+| `qwen-max` | 通义千问 | 高能力通用模型 |
 | `qwen3-30b-thinking` | 通义千问 | 思考模型 ⭐ |
+| `qwen3-30b-instruct` | 通义千问 | 指令模型 |
+| `qwen3-next-80b-thinking` | 通义千问 | Next 80B 思考模型（Lead 默认） ⭐ |
+| `qwen3-next-80b-instruct` | 通义千问 | Next 80B 指令模型（Search/Crawl 默认） |
 | `deepseek-chat` | DeepSeek | 对话模型 |
 | `deepseek-reasoner` | DeepSeek | 推理模型 ⭐ |
+
+默认 Agent 模型映射：`lead_agent` 使用 `qwen3-next-80b-thinking`，`search_agent`/`crawl_agent` 使用 `qwen3-next-80b-instruct`。
 
 ### 自定义模型
 
@@ -580,4 +586,3 @@ python -m tests.test_core_graph_stream
 - 🐛 [问题反馈](https://github.com/Neutrino1998/artifact-flow/issues)
 - 💬 [讨论交流](https://github.com/Neutrino1998/artifact-flow/discussions)
 - 📫 [联系作者](mailto:1998neutrino@gmail.com)
-

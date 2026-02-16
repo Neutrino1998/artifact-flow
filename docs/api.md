@@ -342,7 +342,7 @@ LLM 流式输出片段。
     "reasoning_content": null,
     "metadata": {
       "agent": "lead_agent",
-      "model": "claude-sonnet-4-20250514",
+      "model": "qwen3-next-80b-thinking",
       "started_at": "2024-01-15T10:30:00.000Z"
     },
     "routing": null,
@@ -374,7 +374,7 @@ LLM 单次调用完成（流式结束）。
     "reasoning_content": null,
     "metadata": {
       "agent": "lead_agent",
-      "model": "claude-sonnet-4-20250514",
+      "model": "qwen3-next-80b-thinking",
       "started_at": "2024-01-15T10:30:00.000Z"
     },
     "routing": null,
@@ -403,7 +403,7 @@ Agent 单轮执行完成（可能携带工具调用路由）。
     "reasoning_content": null,
     "metadata": {
       "agent": "lead_agent",
-      "model": "claude-sonnet-4-20250514",
+      "model": "qwen3-next-80b-thinking",
       "started_at": "2024-01-15T10:30:00.000Z"
     },
     "routing": {
