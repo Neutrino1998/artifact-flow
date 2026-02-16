@@ -271,8 +271,17 @@ GET /stream/{thread_id}
 
 **连接方式：**
 
+SSE 端点需要认证，必须使用 `fetch`（而非 `EventSource`）以携带 `Authorization` header：
+
 ```javascript
-const eventSource = new EventSource('/api/v1/stream/{thread_id}');
+const token = localStorage.getItem('af_token');
+const res = await fetch('/api/v1/stream/{thread_id}', {
+  headers: {
+    Accept: 'text/event-stream',
+    Authorization: `Bearer ${token}`,
+  },
+});
+// 用 ReadableStream 解析 SSE 事件流
 ```
 
 **事件格式说明：**
@@ -723,30 +732,38 @@ GET /artifacts/{session_id}/{artifact_id}/versions/{version}
 
 ### 错误响应格式
 
+使用 FastAPI 默认格式：
+
 ```json
 {
-  "error": {
-    "code": "CONVERSATION_NOT_FOUND",
-    "message": "对话不存在",
-    "details": {
-      "conversation_id": "xxx"
-    }
-  }
+  "detail": "Invalid username or password"
 }
 ```
 
-### 错误码
+验证错误（422）使用 Pydantic 格式：
 
-| 错误码 | HTTP 状态 | 说明 |
-|--------|----------|------|
-| `UNAUTHORIZED` | 401 | 未认证或 token 过期 |
-| `FORBIDDEN` | 403 | 权限不足（如非 Admin 访问管理端点） |
-| `VALIDATION_ERROR` | 400 | 请求参数验证失败 |
-| `CONVERSATION_NOT_FOUND` | 404 | 对话不存在（或无权访问） |
-| `ARTIFACT_NOT_FOUND` | 404 | Artifact 不存在 |
-| `THREAD_NOT_FOUND` | 404 | 线程不存在（SSE） |
-| `VERSION_CONFLICT` | 409 | Artifact 版本冲突 |
-| `INTERNAL_ERROR` | 500 | 服务器内部错误 |
+```json
+{
+  "detail": [
+    {
+      "loc": ["body", "content"],
+      "msg": "Field required",
+      "type": "missing"
+    }
+  ]
+}
+```
+
+### 常见错误状态码
+
+| HTTP 状态 | 场景 |
+|----------|------|
+| 401 | 未认证或 token 过期 |
+| 403 | 权限不足（如非 Admin 访问管理端点） |
+| 404 | 资源不存在（或无权访问，跨用户访问统一返回 404） |
+| 409 | 冲突（如用户名已存在、Artifact 版本冲突） |
+| 422 | 请求参数验证失败 |
+| 500 | 服务器内部错误 |
 
 ---
 

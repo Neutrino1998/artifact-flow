@@ -302,7 +302,6 @@ async function chat(content) {
 ```
 
 > **注意**：浏览器原生的 `EventSource` 不支持自定义 Header，无法传递 `Authorization`。ArtifactFlow 前端使用 `fetch()` + `ReadableStream` 手动解析 SSE 协议，详见 [前端架构 — sse.ts](frontend.md#ssets--sse-连接)。
-```
 
 ### React Hook 示例
 

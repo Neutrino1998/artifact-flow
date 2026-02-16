@@ -97,19 +97,21 @@ flowchart LR
 
 如果 `conversation_id` 为空，Controller 会在 `_stream_new_message()` 中：
 
-1. 调用 `conversation_manager.start_conversation_async(user_id=user_id)` 生成新 ID
-2. 在数据库创建 `Conversation` 记录（绑定 `user_id`）
+1. 调用 `conversation_manager.start_conversation_async()` 生成新 ID
+2. 在数据库创建 `Conversation` 记录
 3. Artifact session ID 与 conversation ID 相同
 
 ```python
 # src/core/controller.py - _stream_new_message() 中的逻辑
 if not conversation_id:
-    conversation_id = await self.conversation_manager.start_conversation_async(user_id=user_id)
+    conversation_id = await self.conversation_manager.start_conversation_async()
 else:
-    await self.conversation_manager.ensure_conversation_exists(conversation_id, user_id=user_id)
+    await self.conversation_manager.ensure_conversation_exists(conversation_id)
 ```
 
-**注意**：在 API 层（`chat.py`），如果用户指定了已有的 `conversation_id`，会先校验 ownership（`conv.user_id == current_user.user_id`），不匹配返回 404。
+**注意**：用户归属由 API 层（`chat.py`）负责，不在 Controller 中处理。Router 层在进入 Controller 之前完成：
+- 新建会话时，`ensure_conversation_exists(conversation_id, user_id=user_id)` 绑定 owner
+- 已有会话时，`_verify_ownership()` 校验 `conv.user_id == current_user.user_id`，不匹配返回 404
 
 ## Phase 2: 状态准备
 

@@ -183,7 +183,7 @@ Background task 的异常直接通过 `str(e)` 推送给前端，可能包含内
 
 #### 11. ~~无认证鉴权~~ ✅ 已修复
 
-> **修复方案**: JWT 认证框架 — `get_current_user()` 依赖注入实现 JWT 验证 + DB 状态校验（每次请求查 DB 确保 `is_active` 和最新 `role`），所有受保护端点强制认证。数据隔离双层保障：API 层 ownership 校验 + Repository 层 `user_id` 过滤。StreamManager 绑定 `owner_user_id` 防止跨用户消费 SSE 事件。管理员通过 `scripts/create_admin.py` 引导创建。
+> **修复方案**: JWT 认证框架 — `get_current_user()` 依赖注入实现 JWT 验证 + DB 状态校验（每次请求查 DB 确保 `is_active` 和最新 `role`），所有受保护端点强制认证。数据隔离主要由 API 层 ownership 校验保障（`_verify_ownership()`），list/count 查询通过 Repository 层 `user_id` 参数过滤。StreamManager 绑定 `owner_user_id` 防止跨用户消费 SSE 事件。管理员通过 `scripts/create_admin.py` 引导创建。
 
 ---
 

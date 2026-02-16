@@ -134,7 +134,7 @@ getVersion(sessionId, id, version)  // GET  /api/v1/artifacts/:sessionId/:id/ver
 
 新增认证相关函数：
 ```tsx
-login(username, password)              // POST /api/v1/auth/login（无需 token）
+login(body: LoginRequest)              // POST /api/v1/auth/login（无需 token）
 ```
 
 #### `sse.ts` — SSE 连接
