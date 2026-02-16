@@ -80,7 +80,7 @@ startStream(url, threadId, messageId);
 └──────────┴──────────────────────┴──────────────┘
 ```
 
-- **Sidebar**：对话列表、新建对话、主题切换
+- **Sidebar**：对话列表、新建对话、底部用户菜单（主题切换、退出登录、Admin 用户管理）
 - **Chat Panel**：消息历史 + 流式响应 + 输入框
 - **Artifact Panel**：文稿预览（Markdown）/ 源码 / Diff 对比
 
@@ -325,9 +325,11 @@ interface ExecutionSegment {
 
 | 组件 | 作用 |
 |------|------|
-| `Sidebar` | 侧边栏容器：新建对话按钮、对话列表、文稿切换、主题切换 |
+| `Sidebar` | 侧边栏容器：新建对话按钮、对话列表、文稿切换、底部用户菜单 |
 | `ConversationList` | 对话列表，支持分页 |
 | `ConversationItem` | 单条对话项（标题、时间、删除按钮） |
+| `UserMenu` | 底部用户组件：头像 + 用户名，点击弹出 Popover（主题切换、退出登录、Admin 管理入口） |
+| `UserManagementModal` | Admin 用户管理弹窗：用户列表、新建用户、编辑显示名称、启用/禁用 |
 
 #### 聊天组件 (`chat/`)
 
