@@ -29,6 +29,7 @@ export default function UserManagementModal({ open, onClose }: Props) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState('');
   const editRef = useRef<HTMLInputElement>(null);
+  const savingRef = useRef(false);
 
   const fetchUsers = useCallback(async () => {
     setLoading(true);
@@ -88,10 +89,12 @@ export default function UserManagementModal({ open, onClose }: Props) {
   };
 
   const saveDisplayName = async (user: UserResponse) => {
+    if (savingRef.current) return;
+    savingRef.current = true;
     setEditingId(null);
     const trimmed = editValue.trim();
     const newValue = trimmed || null;
-    if (newValue === (user.display_name || null)) return;
+    if (newValue === (user.display_name || null)) { savingRef.current = false; return; }
     try {
       // Send empty string to clear, non-empty to set (backend: `is not None` check)
       await api.updateUser(user.id, { display_name: trimmed });
@@ -106,6 +109,8 @@ export default function UserManagementModal({ open, onClose }: Props) {
       fetchUsers();
     } catch (err) {
       setError(err instanceof Error ? err.message : '更新显示名称失败');
+    } finally {
+      savingRef.current = false;
     }
   };
 
@@ -237,7 +242,7 @@ export default function UserManagementModal({ open, onClose }: Props) {
                           onBlur={() => saveDisplayName(user)}
                           onKeyDown={(e) => {
                             if (e.key === 'Enter') saveDisplayName(user);
-                            if (e.key === 'Escape') setEditingId(null);
+                            if (e.key === 'Escape') { savingRef.current = true; setEditingId(null); queueMicrotask(() => { savingRef.current = false; }); }
                           }}
                           placeholder={user.username}
                           className="w-full px-1.5 py-0.5 text-sm rounded border border-accent bg-surface dark:bg-surface-dark text-text-primary dark:text-text-primary-dark outline-none"
