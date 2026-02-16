@@ -132,9 +132,14 @@ getVersion(sessionId, id, version)  // GET  /api/v1/artifacts/:sessionId/:id/ver
 
 内部用一个通用的 `request<T>()` 函数处理 fetch + 错误处理 + JSON 解析。所有请求自动从 `authStore` 读取 token 注入 `Authorization: Bearer <token>` header，401 响应自动触发登出。
 
-新增认证相关函数：
+新增认证与用户管理函数：
 ```tsx
 login(body: LoginRequest)              // POST /api/v1/auth/login（无需 token）
+
+// 用户管理（Admin）
+listUsers(limit, offset)               // GET  /api/v1/auth/users
+createUser(body: CreateUserRequest)     // POST /api/v1/auth/users
+updateUser(userId, body: UpdateUserRequest) // PUT  /api/v1/auth/users/:userId
 ```
 
 #### `sse.ts` — SSE 连接

@@ -122,7 +122,7 @@ components/
 │   ├── Sidebar.tsx              # 侧边栏容器
 │   ├── ConversationList.tsx     # 对话列表
 │   ├── ConversationItem.tsx     # 对话列表项
-│   ├── UserMenu.tsx             # 用户菜单（头像、主题切换、退出登录）
+│   ├── UserMenu.tsx             # 用户菜单（头像、主题切换、管理用户[Admin]、退出登录）
 │   └── UserManagementModal.tsx  # 用户管理弹窗（仅 Admin）
 └── ErrorBoundary.tsx            # 错误边界
 ```
