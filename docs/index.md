@@ -82,10 +82,17 @@ pip install -e .
 # 初始化 crawl4ai（首次使用前必须）
 crawl4ai-setup
 
+# 设置 JWT 密钥（写入 .env，必须，否则服务无法启动）
+echo "ARTIFACTFLOW_JWT_SECRET=$(python -c 'import secrets; print(secrets.token_urlsafe(32))')" >> .env
+
+# 创建管理员账号（首次使用前必须）
+python scripts/create_admin.py admin
+
 # 启动 API 服务
 python run_server.py
 
-# CLI 交互
+# CLI 交互（首次需要登录）
+python run_cli.py login
 python run_cli.py chat
 ```
 

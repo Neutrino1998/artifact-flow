@@ -12,6 +12,61 @@ ArtifactFlow API 文档，供前端集成使用。
 | 协议 | HTTP/HTTPS |
 | 数据格式 | JSON |
 | 流式推送 | Server-Sent Events (SSE) |
+| 认证方式 | Bearer Token (JWT) |
+
+## 认证
+
+所有 API 端点（除 `/health` 和 `/auth/login`）均需要 JWT 认证。
+
+### 获取 Token
+
+```
+POST /auth/login
+```
+
+```json
+{
+  "username": "admin",
+  "password": "your_password"
+}
+```
+
+**响应：**
+
+```json
+{
+  "access_token": "eyJhbGciOiJIUzI1NiJ9...",
+  "token_type": "bearer",
+  "expires_in": 604800,
+  "user": {
+    "id": "user-xxx",
+    "username": "admin",
+    "display_name": "admin",
+    "role": "admin"
+  }
+}
+```
+
+### 使用 Token
+
+所有后续请求需携带 `Authorization` header：
+
+```
+Authorization: Bearer eyJhbGciOiJIUzI1NiJ9...
+```
+
+未携带或 token 过期返回 `401 Unauthorized`。访问其他用户的资源返回 `404 Not Found`（不暴露存在性）。
+
+### 用户管理（仅 Admin）
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/auth/me` | 当前用户信息 |
+| POST | `/auth/users` | 创建用户 |
+| GET | `/auth/users` | 用户列表 |
+| PUT | `/auth/users/{id}` | 更新/禁用用户 |
+
+---
 
 ## 快速开始
 
@@ -684,8 +739,10 @@ GET /artifacts/{session_id}/{artifact_id}/versions/{version}
 
 | 错误码 | HTTP 状态 | 说明 |
 |--------|----------|------|
+| `UNAUTHORIZED` | 401 | 未认证或 token 过期 |
+| `FORBIDDEN` | 403 | 权限不足（如非 Admin 访问管理端点） |
 | `VALIDATION_ERROR` | 400 | 请求参数验证失败 |
-| `CONVERSATION_NOT_FOUND` | 404 | 对话不存在 |
+| `CONVERSATION_NOT_FOUND` | 404 | 对话不存在（或无权访问） |
 | `ARTIFACT_NOT_FOUND` | 404 | Artifact 不存在 |
 | `THREAD_NOT_FOUND` | 404 | 线程不存在（SSE） |
 | `VERSION_CONFLICT` | 409 | Artifact 版本冲突 |
@@ -727,10 +784,13 @@ async function sendMessage(
   state: ChatState,
   content: string
 ): Promise<void> {
+  const token = localStorage.getItem('af_token');
+  const authHeaders = token ? { Authorization: `Bearer ${token}` } : {};
+
   // 1. 发送消息
   const res = await fetch('/api/v1/chat', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...authHeaders },
     body: JSON.stringify({
       content,
       conversation_id: state.conversationId
@@ -752,66 +812,91 @@ async function sendMessage(
     createdAt: new Date()
   });
 
-  // 2. 连接 SSE（使用返回的 stream_url）
-  const eventSource = new EventSource(stream_url);
-  const parse = (e: MessageEvent) => JSON.parse(e.data);
-
-  // 3. 按事件类型独立监听
-  eventSource.addEventListener('llm_chunk', (e) => {
-    const { data } = parse(e);
-    // 注意：data.content 是累积内容，直接使用
-    state.currentContent = data.content;
+  // 2. 连接 SSE（使用 fetch 以支持自定义 Authorization header）
+  const sseRes = await fetch(stream_url, {
+    headers: { Accept: 'text/event-stream', ...authHeaders },
   });
 
-  eventSource.addEventListener('agent_complete', (e) => {
-    const { data } = parse(e);
-    // Agent 单轮完成，如有后续工具调用会继续
-    // 重置 currentContent 准备下一轮
-    if (data.routing) {
+  if (sseRes.status === 401) {
+    // Token 过期或无效，需重新登录
+    console.error('Session expired');
+    return;
+  }
+
+  const reader = sseRes.body!.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  // 3. 逐块读取 SSE 事件
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() || '';
+
+    let eventType = '';
+    for (const line of lines) {
+      if (line.startsWith('event: ')) {
+        eventType = line.slice(7);
+      } else if (line.startsWith('data: ') && eventType) {
+        const parsed = JSON.parse(line.slice(6));
+        handleSSEEvent(state, eventType, parsed, thread_id, message_id);
+        eventType = '';
+      }
+    }
+  }
+}
+
+function handleSSEEvent(
+  state: ChatState,
+  eventType: string,
+  parsed: any,
+  threadId: string,
+  messageId: string
+): void {
+  const { data } = parsed;
+
+  switch (eventType) {
+    case 'llm_chunk':
+      // data.content 是累积内容，直接使用
+      state.currentContent = data.content;
+      break;
+
+    case 'agent_complete':
+      if (data.routing) state.currentContent = '';
+      break;
+
+    case 'permission_request':
+      state.pendingPermission = {
+        threadId, messageId,
+        tool: parsed.tool,
+        params: data.params,
+        permissionLevel: data.permission_level,
+      };
+      break;
+
+    case 'complete':
+      if (data.interrupted) {
+        console.log('Interrupted:', data.interrupt_data);
+      } else {
+        state.messages.push({
+          id: `${messageId}_response`,
+          role: 'assistant',
+          content: data.response,
+          createdAt: new Date(),
+        });
+      }
       state.currentContent = '';
-    }
-  });
+      state.isStreaming = false;
+      break;
 
-  eventSource.addEventListener('permission_request', (e) => {
-    const { tool, data } = parse(e);
-    state.pendingPermission = {
-      threadId: thread_id,
-      messageId: message_id,
-      tool,
-      params: data.params,
-      permissionLevel: data.permission_level
-    };
-  });
-
-  eventSource.addEventListener('complete', (e) => {
-    const { data } = parse(e);
-    if (data.interrupted) {
-      // 权限中断，等待用户确认
-      // pendingPermission 已在 permission_request 中设置
-      // 或者从 interrupt_data 中获取信息
-      console.log('Interrupted:', data.interrupt_data);
-    } else {
-      // 正常完成
-      state.messages.push({
-        id: `${message_id}_response`,
-        role: 'assistant',
-        content: data.response,
-        createdAt: new Date()
-      });
-    }
-    state.currentContent = '';
-    state.isStreaming = false;
-    eventSource.close();
-  });
-
-  eventSource.addEventListener('error', (e) => {
-    if ((e as MessageEvent).data) {
-      const { data } = parse(e as MessageEvent);
+    case 'error':
       console.error('Execution error:', data.error);
-    }
-    state.isStreaming = false;
-    eventSource.close();
-  });
+      state.isStreaming = false;
+      break;
+  }
 }
 
 async function handlePermission(
@@ -820,9 +905,12 @@ async function handlePermission(
 ): Promise<void> {
   if (!state.pendingPermission) return;
 
+  const token = localStorage.getItem('af_token');
+  const authHeaders = token ? { Authorization: `Bearer ${token}` } : {};
+
   const res = await fetch(`/api/v1/chat/${state.conversationId}/resume`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...authHeaders },
     body: JSON.stringify({
       thread_id: state.pendingPermission.threadId,
       message_id: state.pendingPermission.messageId,
@@ -834,17 +922,26 @@ async function handlePermission(
   state.pendingPermission = null;
   state.isStreaming = true;
 
-  // 重新连接 SSE 获取后续事件
-  const eventSource = new EventSource(stream_url);
-  // ... 处理后续事件（同上）
+  // 重新连接 SSE（同样使用 fetch + auth header）
+  const sseRes = await fetch(stream_url, {
+    headers: { Accept: 'text/event-stream', ...authHeaders },
+  });
+  // ... 用 ReadableStream 处理后续事件（同 sendMessage）
 }
 ```
 
 ### Artifact 查看组件
 
 ```typescript
+function getAuthHeaders(): Record<string, string> {
+  const token = localStorage.getItem('af_token');
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
 async function loadArtifacts(sessionId: string): Promise<Artifact[]> {
-  const res = await fetch(`/api/v1/artifacts/${sessionId}`);
+  const res = await fetch(`/api/v1/artifacts/${sessionId}`, {
+    headers: getAuthHeaders(),
+  });
   const { artifacts } = await res.json();
   return artifacts;
 }
@@ -853,9 +950,10 @@ async function loadArtifactWithHistory(
   sessionId: string,
   artifactId: string
 ): Promise<{ artifact: Artifact; versions: Version[] }> {
+  const headers = getAuthHeaders();
   const [artifactRes, versionsRes] = await Promise.all([
-    fetch(`/api/v1/artifacts/${sessionId}/${artifactId}`),
-    fetch(`/api/v1/artifacts/${sessionId}/${artifactId}/versions`)
+    fetch(`/api/v1/artifacts/${sessionId}/${artifactId}`, { headers }),
+    fetch(`/api/v1/artifacts/${sessionId}/${artifactId}/versions`, { headers })
   ]);
 
   return {
@@ -869,7 +967,10 @@ async function loadSpecificVersion(
   artifactId: string,
   version: number
 ): Promise<VersionDetail> {
-  const res = await fetch(`/api/v1/artifacts/${sessionId}/${artifactId}/versions/${version}`);
+  const res = await fetch(
+    `/api/v1/artifacts/${sessionId}/${artifactId}/versions/${version}`,
+    { headers: getAuthHeaders() }
+  );
   return await res.json();
 }
 ```

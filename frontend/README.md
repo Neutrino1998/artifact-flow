@@ -24,8 +24,9 @@ npm run lint    # Lint 检查
 ```
 src/
 ├── app/            # App Router 页面和布局
-├── components/     # UI 组件
-├── stores/         # Zustand stores（conversation / artifact / stream / ui）
+│   └── login/     # 登录页
+├── components/     # UI 组件（含 AuthGuard 路由保护）
+├── stores/         # Zustand stores（conversation / artifact / stream / ui / auth）
 ├── hooks/          # 自定义 hooks（SSE 连接、分支导航等）
 ├── lib/            # 工具函数、API client
 └── types/          # TypeScript 类型定义（含自动生成的 api.d.ts）
@@ -84,7 +85,7 @@ type Conversation = components['schemas']['ConversationDetailResponse']
 
 ### SSE 连接管理
 
-- **用 `fetch` + `ReadableStream` 而不是原生 `EventSource`**。原生 EventSource 不支持自定义 header，未来加用户认证时无法传 Bearer token。fetch 方式从一开始就没有这个限制
+- **用 `fetch` + `ReadableStream` 而不是原生 `EventSource`**。原生 EventSource 不支持自定义 header，无法传 `Authorization: Bearer` token。`sse.ts` 从 `authStore` 读取 token 自动注入 auth header，401 响应触发登出
 - 组件卸载时必须 abort fetch / close 连接，否则连接泄漏（浏览器同域 6 连接上限）
 - 高频事件考虑批处理：攒几十毫秒的事件一次性更新 state
 
@@ -130,7 +131,7 @@ Zustand store 只放状态和简单 setter。业务逻辑放到 hooks 和 lib：
 
 | 位置 | 职责 |
 |------|------|
-| `stores/` | 状态定义、简单 setter |
+| `stores/` | 状态定义、简单 setter（含 `authStore` 管理登录态） |
 | `hooks/useSSE.ts` | SSE 连接管理、事件分发 |
 | `hooks/useChat.ts` | 发送消息、编辑、重跑等交互逻辑 |
 | `hooks/useArtifacts.ts` | Artifact 加载与版本切换 |

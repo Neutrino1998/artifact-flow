@@ -69,6 +69,76 @@ pip install -r requirements.txt --force-reinstall
 
 ---
 
+## 认证问题
+
+### 服务启动报 `ARTIFACTFLOW_JWT_SECRET` 未设置
+
+服务启动时会检查 JWT 密钥，未设置则拒绝启动：
+
+```
+RuntimeError: ARTIFACTFLOW_JWT_SECRET environment variable is not set.
+```
+
+**解决方案：**
+
+```bash
+# 生成并设置 JWT 密钥
+export ARTIFACTFLOW_JWT_SECRET=$(python -c "import secrets; print(secrets.token_urlsafe(32))")
+
+# 或写入 .env 文件（推荐）
+echo "ARTIFACTFLOW_JWT_SECRET=$(python -c 'import secrets; print(secrets.token_urlsafe(32))')" >> .env
+```
+
+---
+
+### 如何创建第一个管理员账号？
+
+```bash
+python scripts/create_admin.py admin
+# 按提示输入密码
+
+# 或直接指定密码
+python scripts/create_admin.py admin --password your_password
+```
+
+该脚本会：
+1. 创建 admin 角色的用户
+2. 将所有 `user_id` 为空的历史对话归属到该用户（可用 `--no-claim` 跳过）
+
+---
+
+### CLI 报 401 / "Not authenticated"
+
+CLI 需要先登录获取 token：
+
+```bash
+python run_cli.py login
+# 输入用户名和密码
+
+# 验证登录状态
+python run_cli.py status
+```
+
+如果 token 过期，重新执行 `login` 即可。
+
+---
+
+### 前端跳转到登录页 / 频繁登出
+
+可能原因：
+
+1. **Token 过期**：默认有效期 7 天，重新登录即可
+2. **用户被禁用**：管理员通过 `PUT /auth/users/{id}` 禁用了账号（`is_active=false`），联系管理员
+3. **JWT 密钥变更**：服务端重启后使用了不同的 `ARTIFACTFLOW_JWT_SECRET`，所有旧 token 失效
+
+---
+
+### SSE 连接返回 401
+
+SSE 端点同样需要认证。确保前端使用 `fetch`（而非 `EventSource`）连接 SSE，以便携带 `Authorization` header。ArtifactFlow 前端已正确处理（`frontend/src/lib/sse.ts`）。
+
+---
+
 ## 运行问题
 
 ### API 服务启动失败

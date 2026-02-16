@@ -17,6 +17,7 @@
 ```
 frontend/src/
 ├── app/                  # Next.js 入口（路由 + 全局样式）
+│   └── login/           # 登录页
 ├── components/           # React 组件
 │   ├── layout/          # 页面布局
 │   ├── sidebar/         # 左侧栏（对话列表）
@@ -24,7 +25,7 @@ frontend/src/
 │   └── artifact/        # 右侧栏（文稿面板）
 ├── hooks/                # 自定义 Hook
 ├── lib/                  # 工具函数（API 客户端、SSE、消息树）
-├── stores/               # Zustand 状态仓库
+├── stores/               # Zustand 状态仓库（含 authStore）
 └── types/                # TypeScript 类型定义
 ```
 
@@ -94,14 +95,15 @@ Artifact Panel 默认隐藏，当 Agent 创建/更新文稿时自动弹出。
 | 文件 | 作用 |
 |------|------|
 | `layout.tsx` | 根布局，设置 HTML metadata、字体、全局样式 |
-| `page.tsx` | 首页，组装三栏布局 + 权限确认弹窗 |
+| `page.tsx` | 首页，组装三栏布局 + 权限确认弹窗（被 `AuthGuard` 包裹） |
+| `login/page.tsx` | 登录页，username/password 表单 |
 | `globals.css` | 全局 CSS（Tailwind 指令 + 自定义样式） |
 
 ### `types/` — 类型定义
 
 | 文件 | 作用 |
 |------|------|
-| `index.ts` | 手写的业务类型：`ChatRequest`、`ConversationDetail`、`ArtifactDetail` 等 |
+| `index.ts` | 手写的业务类型：`ChatRequest`、`ConversationDetail`、`ArtifactDetail`、`LoginRequest`、`UserInfo` 等 |
 | `events.ts` | SSE 事件类型：`StreamEventType` 枚举 + 每种事件的数据结构 |
 | `api.d.ts` | 从后端 OpenAPI schema 自动生成的类型（`npm run generate-types`） |
 
@@ -128,11 +130,16 @@ listVersions(sessionId, artifactId) // GET  /api/v1/artifacts/:sessionId/:id/ver
 getVersion(sessionId, id, version)  // GET  /api/v1/artifacts/:sessionId/:id/versions/:v
 ```
 
-内部用一个通用的 `request<T>()` 函数处理 fetch + 错误处理 + JSON 解析。
+内部用一个通用的 `request<T>()` 函数处理 fetch + 错误处理 + JSON 解析。所有请求自动从 `authStore` 读取 token 注入 `Authorization: Bearer <token>` header，401 响应自动触发登出。
+
+新增认证相关函数：
+```tsx
+login(username, password)              // POST /api/v1/auth/login（无需 token）
+```
 
 #### `sse.ts` — SSE 连接
 
-**为什么不用浏览器原生的 `EventSource`？** 因为 `EventSource` 不支持自定义 Header，也无法用 `AbortController` 精确取消连接。
+**为什么不用浏览器原生的 `EventSource`？** 因为 `EventSource` 不支持自定义 Header（无法传 `Authorization`），也无法用 `AbortController` 精确取消连接。SSE 连接同样从 `authStore` 读取 token 注入 auth header，401 响应触发登出。
 
 实现方式是 `fetch()` + `ReadableStream` 手动解析 SSE 协议：
 
@@ -224,6 +231,24 @@ interface ExecutionSegment {
 | `viewMode` | 查看模式：`preview` / `source` / `diff` |
 | `pendingUpdates` | 流式过程中正在更新的文稿 ID |
 
+#### `authStore.ts` — 认证状态
+
+管理用户登录态：
+
+| 状态 | 说明 |
+|------|------|
+| `token` | JWT access token |
+| `user` | 当前用户信息（UserInfo） |
+| `isAuthenticated` | 是否已登录 |
+| `isHydrated` | 是否已从 localStorage 恢复状态 |
+
+关键动作：
+- `login(token, user)` — 登录成功后存储 token 和用户信息到 state + localStorage
+- `logout()` — 清除所有认证状态和 localStorage
+- `hydrate()` — 从 localStorage 同步恢复认证状态（应用启动时调用）
+
+持久化 key：`af_token`、`af_user`（localStorage）。
+
 #### `uiStore.ts` — UI 状态
 
 最简单的 store，管理三个 UI 开关：
@@ -282,6 +307,12 @@ interface ExecutionSegment {
 检测屏幕宽度，用于响应式布局（比如小屏自动折叠侧边栏）。
 
 ### `components/` — UI 组件
+
+#### 认证组件
+
+| 组件 | 作用 |
+|------|------|
+| `AuthGuard` | 路由保护组件，包裹需认证的页面。等待 `hydrate()` 完成后检查登录态，未登录则重定向到 `/login` |
 
 #### 布局组件 (`layout/`)
 

@@ -181,15 +181,9 @@ Background task 的异常直接通过 `str(e)` 推送给前端，可能包含内
 
 > **修复方案**: `StreamManager.consume_events()` 新增 `heartbeat_interval` 参数，使用 `asyncio.wait_for` 包装 `queue.get()`，超时时 yield `{"type": "__ping__"}` 哨兵事件。`stream.py` 检测到 `__ping__` 时输出 `: ping\n\n` SSE 注释。间隔由 `config.SSE_PING_INTERVAL`（默认 15 秒）控制。
 
-#### 11. 无认证鉴权
+#### 11. ~~无认证鉴权~~ ✅ 已修复
 
-> `api/dependencies.py:227` — 预留了但未实现
-> ```python
-> async def get_current_user() -> Optional[str]:
->     return None
-> ```
-
-任何人可以读写任何 conversation。
+> **修复方案**: JWT 认证框架 — `get_current_user()` 依赖注入实现 JWT 验证 + DB 状态校验（每次请求查 DB 确保 `is_active` 和最新 `role`），所有受保护端点强制认证。数据隔离双层保障：API 层 ownership 校验 + Repository 层 `user_id` 过滤。StreamManager 绑定 `owner_user_id` 防止跨用户消费 SSE 事件。管理员通过 `scripts/create_admin.py` 引导创建。
 
 ---
 
@@ -367,7 +361,7 @@ async def create_redis_checkpointer(redis_url: str):
 ### Phase 3: 生产化完善
 
 - API Rate Limiting（per-user 限流）
-- 认证鉴权（JWT / OAuth）
+- ~~认证鉴权（JWT / OAuth）~~ ✅ 已完成
 - 分布式锁（防止同一 conversation 的并发写入冲突）
 - 错误信息脱敏（生产环境不暴露内部异常）
 - Metrics 采集（Prometheus / OpenTelemetry，基于 Phase 0.5 已实现的 `contextvars` 请求上下文扩展 trace/span，升级为 JSON 结构化日志）

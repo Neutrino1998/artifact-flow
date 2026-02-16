@@ -27,6 +27,7 @@ ArtifactFlow 是一个智能多智能体系统，通过协调专门的AI智能�
 - **🔧 权限控制**: 工具分级权限，支持中断确认后恢复执行
 - **🌳 分支对话**: 从任意历史节点创建新分支
 - **💾 持久化存储**: SQLite + 乐观锁，服务重启数据不丢失
+- **🔐 JWT 认证**: 多用户支持，数据按用户隔离，管理员创建账号
 - **🌐 REST API**: FastAPI 接口，支持前端集成
 
 ## 🛠️ 系统架构
@@ -123,6 +124,8 @@ ArtifactFlow 是一个智能多智能体系统，通过协调专门的AI智能�
    ```bash
    cp .env.example .env
    # 编辑 .env 文件，添加你的 API Keys
+   # 设置 JWT 密钥（必须）
+   echo "ARTIFACTFLOW_JWT_SECRET=$(python -c 'import secrets; print(secrets.token_urlsafe(32))')" >> .env
    ```
 
 3. **启动服务**
@@ -130,12 +133,17 @@ ArtifactFlow 是一个智能多智能体系统，通过协调专门的AI智能�
    docker-compose up -d
    ```
 
-4. **查看日志**
+4. **创建管理员账号**
+   ```bash
+   docker-compose exec backend python scripts/create_admin.py admin
+   ```
+
+5. **查看日志**
    ```bash
    docker-compose logs -f
    ```
 
-5. **访问服务**
+6. **访问服务**
    - 前端界面: http://localhost:3000
    - API 文档: http://localhost:8000/docs
    - ReDoc 文档: http://localhost:8000/redoc
@@ -195,7 +203,17 @@ docker-compose up -d --build
    # 编辑 .env 文件，添加你的 API Keys
    ```
 
-6. **启动服务**
+6. **设置 JWT 密钥**（必须，否则服务无法启动）
+   ```bash
+   echo "ARTIFACTFLOW_JWT_SECRET=$(python -c 'import secrets; print(secrets.token_urlsafe(32))')" >> .env
+   ```
+
+7. **创建管理员账号**（首次使用前必须）
+   ```bash
+   python scripts/create_admin.py admin
+   ```
+
+8. **启动服务**
    ```bash
    # 启动 API 服务器
    python run_server.py
@@ -208,8 +226,11 @@ docker-compose up -d --build
    # - ReDoc 文档: http://localhost:8000/redoc
    ```
 
-7. **使用 CLI 交互**
+9. **使用 CLI 交互**
    ```bash
+   # 登录（首次使用需要）
+   python run_cli.py login
+
    # 进入交互式聊天（需先启动服务器）
    python run_cli.py chat
 
@@ -222,6 +243,12 @@ docker-compose up -d --build
 创建 `.env` 文件并配置以下 API Keys：
 
 ```env
+# ========================================
+# 认证配置（必须）
+# ========================================
+# 生成方式: python -c "import secrets; print(secrets.token_urlsafe(32))"
+ARTIFACTFLOW_JWT_SECRET=your-secret-here
+
 # ========================================
 # 模型 API 配置
 # ========================================
@@ -300,7 +327,8 @@ data/
 
 | 表名 | 说明 |
 |------|------|
-| `conversations` | 对话元信息（ID、标题、活跃分支、时间戳） |
+| `users` | 用户信息（用户名、密码哈希、角色） |
+| `conversations` | 对话元信息（ID、标题、活跃分支、所属用户） |
 | `messages` | 消息记录（树结构，支持分支对话） |
 | `artifact_sessions` | Artifact 会话（与对话 1:1 关联） |
 | `artifacts` | Artifact 内容（含乐观锁版本控制） |
@@ -365,7 +393,8 @@ artifact-flow/
 │   ├── repositories/ ✅ # 数据访问层 (已完成)
 │   │   ├── base.py               # BaseRepository 抽象类
 │   │   ├── conversation_repo.py  # ConversationRepository
-│   │   └── artifact_repo.py      # ArtifactRepository (含乐观锁)
+│   │   ├── artifact_repo.py      # ArtifactRepository (含乐观锁)
+│   │   └── user_repo.py          # UserRepository
 │   ├── models/ ✅      # LLM 接口封装 (已完成)
 │   │   └── llm.py                # 基于 LiteLLM 的统一接口，支持 100+ 提供商
 │   ├── utils/ ✅       # 工具函数和帮助类 (已完成)
@@ -378,14 +407,17 @@ artifact-flow/
 │       ├── routers/              # 路由模块
 │       │   ├── chat.py           # /api/v1/chat 对话接口
 │       │   ├── artifacts.py      # /api/v1/artifacts Artifact接口
-│       │   └── stream.py         # /api/v1/stream SSE流式接口
+│       │   ├── stream.py         # /api/v1/stream SSE流式接口
+│       │   └── auth.py           # /api/v1/auth 认证接口
 │       ├── schemas/              # Pydantic 模型
 │       │   ├── chat.py           # 对话相关 schema
 │       │   ├── artifact.py       # Artifact 相关 schema
-│       │   └── events.py         # SSE 事件 schema
+│       │   ├── events.py         # SSE 事件 schema
+│       │   └── auth.py           # 认证相关 schema
 │       ├── services/             # 服务层
 │       │   ├── stream_manager.py # 事件缓冲队列管理
-│       │   └── task_manager.py   # 后台任务生命周期管理
+│       │   ├── task_manager.py   # 后台任务生命周期管理
+│       │   └── auth.py           # JWT + 密码哈希服务
 │       └── utils/
 │           └── sse.py            # SSE 响应构建器
 ├── frontend/           # Next.js 前端（详见 frontend/README.md）
@@ -399,7 +431,8 @@ artifact-flow/
 │       ├── lib/                 # 工具函数、API client
 │       └── types/               # TypeScript 类型（含自动生成的 API 类型）
 ├── scripts/            # 工具脚本
-│   └── export_openapi.py        # 导出 OpenAPI schema 供前端类型生成
+│   ├── export_openapi.py        # 导出 OpenAPI schema 供前端类型生成
+│   └── create_admin.py          # 创建管理员账号
 ├── data/               # 数据目录 (SQLite数据库文件)
 ├── tests/              # 测试脚本
 │   ├── test_core_graph.py             # 批量模式测试（多轮对话、权限、分支）
@@ -432,6 +465,8 @@ python run_cli.py chat -n           # 开始新对话
 
 | 命令 | 说明 |
 |------|------|
+| `login` | 登录（首次使用前必须） |
+| `logout` | 登出 |
 | `chat [message]` | 发送消息，无参数时进入交互模式 |
 | `chat -n/--new` | 开始新对话 |
 | `list` | 列出最近对话 |
@@ -521,7 +556,7 @@ python -m tests.test_core_graph_stream
   - [ ] 完整的错误处理
   - [ ] 生产级性能优化
   - [ ] PostgreSQL 迁移支持
-  - [ ] 安全增强
+  - [x] 安全增强（JWT 认证 + 多用户数据隔离）
   - [ ] 完整文档和示例
   - [x] Docker部署支持
 

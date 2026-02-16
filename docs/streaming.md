@@ -103,15 +103,16 @@ class StreamContext:
     created_at: datetime = field(default_factory=datetime.now)
     status: Literal["pending", "streaming", "closed"] = "pending"
     ttl_task: Optional[asyncio.Task] = None
+    owner_user_id: Optional[str] = None  # 绑定创建者，消费时校验
 
 class StreamManager:
     def __init__(self, ttl_seconds: int = 30):
         self.streams: Dict[str, StreamContext] = {}
         self.ttl_seconds = ttl_seconds
 
-    async def create_stream(self, thread_id: str) -> StreamContext:
+    async def create_stream(self, thread_id: str, owner_user_id: str = None) -> StreamContext:
         """创建新的事件流"""
-        context = StreamContext()
+        context = StreamContext(owner_user_id=owner_user_id)
         self.streams[thread_id] = context
 
         # 启动 TTL 计时器
@@ -131,11 +132,16 @@ class StreamManager:
 
     async def consume_events(
         self,
-        thread_id: str
+        thread_id: str,
+        user_id: str = None
     ) -> AsyncGenerator[Dict[str, Any], None]:
-        """消费事件流"""
+        """消费事件流（校验 owner）"""
         context = self.streams.get(thread_id)
         if not context:
+            raise StreamNotFoundError(thread_id)
+
+        # 校验 ownership：非创建者不能消费
+        if context.owner_user_id and user_id != context.owner_user_id:
             raise StreamNotFoundError(thread_id)
 
         # 取消 TTL 计时器
@@ -180,11 +186,12 @@ class StreamManager:
 @router.get("/{thread_id}")
 async def stream_events(
     thread_id: str,
+    current_user: TokenPayload = Depends(get_current_user),
     stream_manager: StreamManager = Depends(get_stream_manager),
 ) -> StreamingResponse:
     async def event_generator() -> AsyncGenerator[str, None]:
         try:
-            async for event in stream_manager.consume_events(thread_id):
+            async for event in stream_manager.consume_events(thread_id, user_id=current_user.user_id):
                 yield format_sse_event(event, event=event.get("type"))
 
                 # 检查是否是终结事件
@@ -267,199 +274,43 @@ data: {"type":"complete","timestamp":"...","data":{"success":true,"interrupted":
 
 ### JavaScript 示例
 
-前端使用 `addEventListener` 按事件类型独立监听：
+前端使用 `fetch` + `ReadableStream`（而非 `EventSource`）连接 SSE，以便携带 `Authorization` header：
 
 ```javascript
 async function chat(content) {
+  const token = localStorage.getItem('af_token');
+  const authHeaders = token ? { Authorization: `Bearer ${token}` } : {};
+
   // 1. 发送消息
   const response = await fetch('/api/v1/chat', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...authHeaders },
     body: JSON.stringify({ content })
   });
   const { thread_id, conversation_id, message_id, stream_url } = await response.json();
 
-  // 2. 连接 SSE（使用返回的 stream_url）
-  const eventSource = new EventSource(stream_url);
-
-  // 3. 追踪状态
-  let lastContent = '';  // 用于计算增量
-
-  // 4. 辅助函数：解析事件数据
-  const parse = (e) => JSON.parse(e.data);
-
-  // 5. 按事件类型独立监听
-  eventSource.addEventListener('metadata', (e) => {
-    const { data } = parse(e);
-    console.log('Started:', data);
+  // 2. 连接 SSE（使用 fetch 以支持 Authorization header）
+  const sseRes = await fetch(stream_url, {
+    headers: { Accept: 'text/event-stream', ...authHeaders },
   });
 
-  eventSource.addEventListener('llm_chunk', (e) => {
-    const { data } = parse(e);
-    // data.content 是累积内容，计算增量
-    const delta = data.content.slice(lastContent.length);
-    lastContent = data.content;
-    appendToOutput(delta);  // 流式显示增量
-  });
+  // 解析 SSE 流...
+  // 实际实现参考 frontend/src/lib/sse.ts
 
-  eventSource.addEventListener('llm_complete', (e) => {
-    const { data } = parse(e);
-    // LLM 单次调用完成，可以获取 token 统计
-    console.log('Token usage:', data.token_usage);
-  });
-
-  eventSource.addEventListener('agent_complete', (e) => {
-    const { data } = parse(e);
-    // Agent 单轮完成，检查是否有后续操作
-    if (data.routing) {
-      console.log('Agent routing:', data.routing);
-    }
-    // 重置累积内容（下一轮 LLM 调用会重新开始）
-    lastContent = '';
-  });
-
-  eventSource.addEventListener('tool_start', (e) => {
-    const { tool, data } = parse(e);
-    showToolIndicator(tool, data.params);
-  });
-
-  eventSource.addEventListener('tool_complete', (e) => {
-    const { tool, data } = parse(e);
-    hideToolIndicator(tool);
-    if (!data.success) showError(data.error);
-  });
-
-  eventSource.addEventListener('permission_request', (e) => {
-    const { tool, data } = parse(e);
-    showPermissionDialog(tool, data.params, data.permission_level);
-  });
-
-  eventSource.addEventListener('complete', (e) => {
-    const { data } = parse(e);
-    if (data.interrupted) {
-      // 权限中断，需要用户确认
-      showInterruptDialog(data.interrupt_data);
-    } else {
-      // 正常完成
-      finalizeOutput(data.response);
-      showMetrics(data.execution_metrics);
-    }
-    eventSource.close();
-  });
-
-  eventSource.addEventListener('error', (e) => {
-    // 注意：SSE 原生 error 事件（连接断开）也会触发，需要区分
-    if (e.data) {
-      const { data } = parse(e);
-      showError(data.error);
-    }
-    eventSource.close();
-  });
-
-  eventSource.onerror = () => {
-    eventSource.close();
-  };
+  // 具体的 SSE 流解析和事件分发逻辑详见 API Reference 的前端集成示例
 }
+```
+
+> **注意**：浏览器原生的 `EventSource` 不支持自定义 Header，无法传递 `Authorization`。ArtifactFlow 前端使用 `fetch()` + `ReadableStream` 手动解析 SSE 协议，详见 [前端架构 — sse.ts](frontend.md#ssets--sse-连接)。
 ```
 
 ### React Hook 示例
 
-```typescript
-interface Message {
-  role: 'user' | 'assistant';
-  content: string;
-}
-
-function useChat() {
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [isStreaming, setIsStreaming] = useState(false);
-  const [currentContent, setCurrentContent] = useState('');
-  const [pendingPermission, setPendingPermission] = useState<any>(null);
-  const lastContentRef = useRef('');  // 追踪累积内容
-
-  const sendMessage = async (content: string) => {
-    setIsStreaming(true);
-    setCurrentContent('');
-    lastContentRef.current = '';
-
-    // 添加用户消息
-    setMessages(prev => [...prev, { role: 'user', content }]);
-
-    const res = await fetch('/api/v1/chat', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ content })
-    });
-    const { stream_url, conversation_id, message_id, thread_id } = await res.json();
-
-    const eventSource = new EventSource(stream_url);
-    const parse = (e: MessageEvent) => JSON.parse(e.data);
-
-    eventSource.addEventListener('llm_chunk', (e) => {
-      const { data } = parse(e);
-      // data.content 是累积内容，直接使用
-      setCurrentContent(data.content);
-      lastContentRef.current = data.content;
-    });
-
-    eventSource.addEventListener('agent_complete', () => {
-      // Agent 单轮完成，重置累积追踪
-      lastContentRef.current = '';
-    });
-
-    eventSource.addEventListener('complete', (e) => {
-      const { data } = parse(e);
-      if (data.interrupted) {
-        // 权限中断
-        setPendingPermission({
-          conversationId: conversation_id,
-          threadId: thread_id,
-          messageId: message_id,
-          interruptData: data.interrupt_data
-        });
-      } else {
-        // 正常完成
-        setMessages(prev => [...prev, { role: 'assistant', content: data.response }]);
-      }
-      setCurrentContent('');
-      setIsStreaming(false);
-      eventSource.close();
-    });
-
-    eventSource.addEventListener('error', (e) => {
-      if ((e as MessageEvent).data) {
-        // 服务端 error 事件
-      }
-      setIsStreaming(false);
-      eventSource.close();
-    });
-  };
-
-  const handlePermission = async (approved: boolean) => {
-    if (!pendingPermission) return;
-
-    const res = await fetch(`/api/v1/chat/${pendingPermission.conversationId}/resume`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        thread_id: pendingPermission.threadId,
-        message_id: pendingPermission.messageId,
-        approved
-      })
-    });
-
-    const { stream_url } = await res.json();
-    setPendingPermission(null);
-    setIsStreaming(true);
-
-    // 重新连接 SSE 继续流式处理...
-    const eventSource = new EventSource(stream_url);
-    // ... (同上处理逻辑)
-  };
-
-  return { messages, currentContent, isStreaming, pendingPermission, sendMessage, handlePermission };
-}
-```
+ArtifactFlow 前端的实际实现使用 Zustand store 管理认证和流式状态，详见：
+- `frontend/src/stores/authStore.ts` — 认证状态管理
+- `frontend/src/hooks/useSSE.ts` — SSE 事件处理
+- `frontend/src/hooks/useChat.ts` — 聊天操作封装
+- `frontend/src/lib/sse.ts` — SSE 连接（fetch + auth header）
 
 ## 权限中断处理
 
@@ -533,10 +384,13 @@ eventSource.addEventListener('complete', async (e) => {
     details: interrupt_data.params
   });
 
+  const token = localStorage.getItem('af_token');
+  const authHeaders = token ? { Authorization: `Bearer ${token}` } : {};
+
   // 发送恢复请求
   const res = await fetch(`/api/v1/chat/${conversation_id}/resume`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...authHeaders },
     body: JSON.stringify({
       thread_id,
       message_id,
@@ -544,10 +398,12 @@ eventSource.addEventListener('complete', async (e) => {
     })
   });
 
-  // 重新连接 SSE 继续接收事件
+  // 重新连接 SSE 继续接收事件（同样使用 fetch + auth header）
   const { stream_url } = await res.json();
-  const newEventSource = new EventSource(stream_url);
-  // ... 绑定事件处理器
+  const sseRes = await fetch(stream_url, {
+    headers: { Accept: 'text/event-stream', ...authHeaders },
+  });
+  // ... 用 ReadableStream 处理后续事件
 }
 ```
 

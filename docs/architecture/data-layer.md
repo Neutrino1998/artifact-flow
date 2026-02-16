@@ -12,7 +12,8 @@ src/
 └── repositories/
     ├── base.py        # Repository 基类
     ├── conversation_repo.py
-    └── artifact_repo.py
+    ├── artifact_repo.py
+    └── user_repo.py   # 用户数据访问
 ```
 
 ## 数据模型 (models.py)
@@ -21,16 +22,28 @@ src/
 
 ```mermaid
 erDiagram
+    User ||--o{ Conversation : owns
     Conversation ||--o{ Message : contains
     Conversation ||--o| ArtifactSession : has
     ArtifactSession ||--o{ Artifact : contains
     Artifact ||--o{ ArtifactVersion : versions
 
+    User {
+        string id PK
+        string username UK
+        string hashed_password
+        string display_name
+        string role
+        bool is_active
+        datetime created_at
+        datetime updated_at
+    }
+
     Conversation {
         string id PK
         string active_branch
         string title
-        string user_id
+        string user_id FK
         datetime created_at
         datetime updated_at
         json metadata_
@@ -78,6 +91,30 @@ erDiagram
     }
 ```
 
+### User
+
+用户实体（认证与数据隔离）：
+
+```python
+class User(Base):
+    __tablename__ = "users"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)       # "user-{uuid}"
+    username: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    hashed_password: Mapped[str] = mapped_column(String(256))
+    display_name: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    role: Mapped[str] = mapped_column(String(16), default="user")       # "admin" | "user"
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+    conversations: Mapped[List["Conversation"]] = relationship("Conversation", back_populates="owner")
+```
+
+角色说明：
+- `admin`：可创建/管理用户、查看所有用户列表
+- `user`：普通用户，只能访问自己的对话和 Artifact
+
 ### Conversation
 
 对话实体：
@@ -89,12 +126,15 @@ class Conversation(Base):
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
     active_branch: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     title: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
-    user_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
+    user_id: Mapped[Optional[str]] = mapped_column(
+        String(64), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now)
     metadata_: Mapped[Optional[Dict[str, Any]]] = mapped_column("metadata", JSON, nullable=True)
 
     # 关系
+    owner: Mapped[Optional["User"]] = relationship("User", back_populates="conversations")
     messages: Mapped[List["Message"]] = relationship(
         "Message", back_populates="conversation", cascade="all, delete-orphan", lazy="selectin"
     )
@@ -102,6 +142,8 @@ class Conversation(Base):
         "ArtifactSession", back_populates="conversation", uselist=False, cascade="all, delete-orphan"
     )
 ```
+
+**数据隔离**：`user_id` 外键关联 `users.id`，API 层通过 ownership 校验确保用户只能访问自己的对话。跨用户访问统一返回 404（不暴露存在性）。
 
 ### Message
 
@@ -350,7 +392,7 @@ class BaseRepository(ABC, Generic[T]):
 | `get_conversation_or_raise` | 获取对话，不存在则抛出 NotFoundError |
 | `update_active_branch` | 更新对话的活动分支 |
 | `update_title` | 更新对话标题 |
-| `list_conversations` | 列出所有对话（支持分页） |
+| `list_conversations` | 列出对话（支持分页、按 `user_id` 过滤） |
 | `delete_conversation` | 删除对话 |
 | `add_message` | 添加消息到对话（自动更新 active_branch） |
 | `get_message` | 获取单条消息 |
@@ -385,6 +427,17 @@ Artifact 操作（含乐观锁）：
 | `get_version_diff` | 获取两个版本间的差异 |
 | `clear_temporary_artifacts` | 清除临时 Artifacts（如 task_plan） |
 | `get_artifacts_with_full_content` | 批量获取完整内容 |
+
+### UserRepository
+
+用户操作：
+
+| 方法 | 说明 |
+|------|------|
+| `get_by_username` | 按用户名查询（登录） |
+| `get_by_id` | 按 ID 查询（继承自 BaseRepository） |
+| `list_users` | 列出用户（支持分页、可选包含已禁用用户） |
+| `count_users` | 用户总数 |
 
 ## 乐观锁机制
 

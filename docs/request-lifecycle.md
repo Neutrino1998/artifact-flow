@@ -15,9 +15,10 @@ sequenceDiagram
     participant Tool
     participant DB
 
-    Client->>FastAPI: POST /api/v1/chat
-    FastAPI->>DB: 确保 Conversation 存在
-    FastAPI->>StreamManager: create_stream(thread_id)
+    Client->>FastAPI: POST /api/v1/chat (+ Bearer Token)
+    FastAPI->>FastAPI: JWT 验证 + DB 校验用户状态
+    FastAPI->>DB: 确保 Conversation 存在（校验 ownership）
+    FastAPI->>StreamManager: create_stream(thread_id, owner_user_id)
     FastAPI->>Client: 返回 {thread_id, stream_url}
 
     FastAPI->>Controller: 后台启动 stream_execute()
@@ -40,8 +41,9 @@ sequenceDiagram
     Controller->>DB: 保存响应
     Controller->>StreamManager: push(complete)
 
-    Client->>FastAPI: GET /stream/{thread_id}
-    FastAPI->>StreamManager: consume_events()
+    Client->>FastAPI: GET /stream/{thread_id} (+ Bearer Token)
+    FastAPI->>FastAPI: JWT 验证
+    FastAPI->>StreamManager: consume_events(thread_id, user_id)
     StreamManager-->>Client: SSE 事件流
 ```
 
@@ -62,6 +64,11 @@ sequenceDiagram
 
 ```mermaid
 flowchart LR
+    subgraph Auth["认证"]
+        Bearer["HTTPBearer"]
+        CU["get_current_user()<br/>JWT 解码 + DB 校验"]
+    end
+
     subgraph Request["请求级别"]
         Session["get_db_session()<br/>AsyncSession"]
         AM["get_artifact_manager()"]
@@ -74,7 +81,9 @@ flowchart LR
         SM["get_stream_manager()<br/>StreamManager"]
     end
 
-    HTTP["HTTP Request"] --> Session
+    HTTP["HTTP Request"] --> Bearer --> CU
+    HTTP --> Session
+    CU --> Session
     Session --> AM
     Session --> CM
     Session --> Ctrl
@@ -82,21 +91,25 @@ flowchart LR
     HTTP --> SM
 ```
 
+`get_current_user()` 在每个受保护端点的入口执行：解码 JWT → 查 DB 校验 `is_active` 和最新 `role`（确保禁用/降权即时生效）。`/health` 和 `/auth/login` 不需要认证。
+
 ### Conversation 创建
 
 如果 `conversation_id` 为空，Controller 会在 `_stream_new_message()` 中：
 
-1. 调用 `conversation_manager.start_conversation_async()` 生成新 ID
-2. 在数据库创建 `Conversation` 记录
+1. 调用 `conversation_manager.start_conversation_async(user_id=user_id)` 生成新 ID
+2. 在数据库创建 `Conversation` 记录（绑定 `user_id`）
 3. Artifact session ID 与 conversation ID 相同
 
 ```python
 # src/core/controller.py - _stream_new_message() 中的逻辑
 if not conversation_id:
-    conversation_id = await self.conversation_manager.start_conversation_async()
+    conversation_id = await self.conversation_manager.start_conversation_async(user_id=user_id)
 else:
-    await self.conversation_manager.ensure_conversation_exists(conversation_id)
+    await self.conversation_manager.ensure_conversation_exists(conversation_id, user_id=user_id)
 ```
+
+**注意**：在 API 层（`chat.py`），如果用户指定了已有的 `conversation_id`，会先校验 ownership（`conv.user_id == current_user.user_id`），不匹配返回 404。
 
 ## Phase 2: 状态准备
 
