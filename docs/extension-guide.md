@@ -431,8 +431,7 @@ def test_code_agent_system_prompt():
 def test_code_agent_format_response():
     agent = CodeAgent()
     result = agent.format_final_response(
-        content="分析结果...",
-        tool_history=[]
+        content="分析结果..."
     )
     assert "代码分析报告" in result
 ```

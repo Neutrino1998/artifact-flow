@@ -114,11 +114,9 @@ WAL 模式允许多个读操作并发执行，但**写操作仍然是串行的**
 
 **缓解**: 演进路线 Phase 3 — 通过 state 传递 `artifact_manager` 而非闭包捕获，实现 graph 编译缓存。
 
-### 错误信息泄露
+### 错误信息泄露（已部分缓解）
 
-Background task 的异常直接通过 `str(e)` 推送给前端，可能包含内部文件路径、数据库信息等。
-
-**缓解**: 演进路线 Phase 3 — 错误信息脱敏。
+`_sanitize_error_event()`（`api/routers/chat.py`）在非 DEBUG 模式下将 error 事件的详情替换为 `"Internal server error"`，开发模式保留原始 `str(e)` 便于调试。当前脱敏仅覆盖 SSE error 事件，HTTP 异常（如 500）的响应体尚未统一处理。
 
 ### 已解决的问题
 
@@ -196,7 +194,7 @@ async def create_redis_checkpointer(redis_url: str):
 
 - API Rate Limiting（per-user 限流）
 - 分布式锁（防止同一 conversation 的并发写入冲突）
-- 错误信息脱敏（生产环境不暴露内部异常）
+- 错误信息脱敏补全（SSE 已脱敏，HTTP 500 响应体待统一）
 - Metrics 采集（Prometheus / OpenTelemetry，基于已有的 `contextvars` 请求上下文扩展 trace/span）
 - Graph 编译缓存（编译一次，通过 state 传递 `artifact_manager` 而非闭包捕获）
 
