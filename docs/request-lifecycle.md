@@ -339,7 +339,7 @@ event: tool_start
 data: {"type":"tool_start","timestamp":"...","agent":"lead_agent","tool":"web_search","data":{"params":{"query":"Python async best practices"}}}
 
 event: tool_complete
-data: {"type":"tool_complete","timestamp":"...","agent":"lead_agent","tool":"web_search","data":{"success":true,"duration_ms":1234,"error":null}}
+data: {"type":"tool_complete","timestamp":"...","agent":"lead_agent","tool":"web_search","data":{"success":true,"duration_ms":1234,"error":null,"params":{"query":"Python async best practices"},"result_data":{...}}}
 
 event: complete
 data: {"type":"complete","timestamp":"...","data":{"success":true,"interrupted":false,"response":"...","execution_metrics":{...}}}
@@ -347,7 +347,7 @@ data: {"type":"complete","timestamp":"...","data":{"success":true,"interrupted":
 
 **关键点：**
 - `llm_chunk.data.content` 是**累积**内容，每次事件包含从头开始的完整文本
-- `tool_complete` 不包含工具返回的实际数据（出于性能考虑）
+- `tool_complete` 包含 `params`（工具调用参数）和 `result_data`（工具返回的业务数据），前端可用于追踪工具执行详情
 - `complete` 事件的 `interrupted` 字段指示是否需要用户确认权限
 
 详细字段说明见 [API Reference](./api.md#stream-api)。

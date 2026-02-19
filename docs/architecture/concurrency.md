@@ -100,205 +100,41 @@ WAL 模式允许多个读操作并发执行，但**写操作仍然是串行的**
 
 ---
 
-## 已知局限
+## 运行边界与已知局限
 
-### P0: 严重 — 多用户并发时会出问题
+### Checkpointer 单连接瓶颈
 
-#### 1. Checkpointer 单连接瓶颈
+`AsyncSqliteSaver` 使用单个 `aiosqlite.connect()` 连接，作为全局单例被所有并发请求共享。`aiosqlite` 内部只有一个后台线程 + 队列，所有操作串行执行。LangGraph 每个 node 执行完都要写 checkpoint，N 个并发用户 = 所有 checkpoint 读写排队，高并发时成为全局延迟瓶颈。
 
-`AsyncSqliteSaver` 使用单个 `aiosqlite.connect()` 连接，作为全局单例被所有并发请求共享：
+**缓解**: 演进路线 Phase 2 迁移到 `langgraph-checkpoint-redis`。
 
-> `core/graph.py:701` — 单连接创建
-> ```python
-> conn = await aiosqlite.connect(db_path)
-> ```
->
-> `api/dependencies.py:74` — 作为全局单例初始化
-> ```python
-> _checkpointer = await create_async_sqlite_checkpointer(config.LANGGRAPH_DB_PATH)
-> ```
+### Graph 重复编译
 
-- `aiosqlite` 内部只有一个后台线程 + 队列，所有操作串行执行
-- LangGraph 每个 node 执行完都要写 checkpoint
-- N 个并发用户 = N 个 graph 同时跑 = 所有 checkpoint 读写排队
-- 并发量上去后会成为全局延迟瓶颈
+每个请求都会执行：创建 3 个 Agent → 创建所有 Tool → 注册到 Registry → 编译 StateGraph。Graph 结构本身是无状态的（状态存在 checkpointer 里），理论上可编译一次后复用。当前设计是因为 `artifact_manager` 通过闭包绑定到 graph 节点中，导致 graph 与请求级实例耦合。
 
-#### 2. ~~Background Task 无生命周期管理~~ ✅ 已修复
+**缓解**: 演进路线 Phase 3 — 通过 state 传递 `artifact_manager` 而非闭包捕获，实现 graph 编译缓存。
 
-> **修复方案**: `TaskManager`（`api/services/task_manager.py`）— 持有任务引用防 GC、Semaphore 限制并发数（`MAX_CONCURRENT_TASKS`）、graceful shutdown 支持。`chat.py` 中 `asyncio.create_task()` 已替换为 `task_manager.submit()`。
+### 错误信息泄露
 
-#### 3. ~~SQLite 主数据库写并发限制~~ ✅ 已修复
+Background task 的异常直接通过 `str(e)` 推送给前端，可能包含内部文件路径、数据库信息等。
 
-> **修复方案**: 短事务模式 — 每次数据库写操作在 Repository 层立即 `flush() + commit()`，将写锁持有时间从"整个 graph 执行期间（数分钟）"缩短到"单次写操作（微秒级）"。`DatabaseManager.session()` 简化为纯生命周期管理（只负责 create + close），不再自动 commit/rollback，事务控制权完全交给 Repository 层。配合 `busy_timeout=15000` 和 `expire_on_commit=False`（允许中间 commit 后对象仍可用），并发写入不再触发 `database is locked` 错误。
+**缓解**: 演进路线 Phase 3 — 错误信息脱敏。
 
-### P1: 重要 — 影响并发调试和运行可靠性
+### 已解决的问题
 
-#### 4. ~~日志无请求上下文（可观测性缺失）~~ ✅ 已修复
+以下问题已在历次迭代中修复，详细修复记录见 [optimization-plan.md](../_archive/optimization-plan.md)：
 
-> **修复方案**: 使用 `contextvars` 实现请求级日志上下文。`utils/logger.py` 新增 `RequestContextFilter`，从 `ContextVar` 读取 `thread_id` / `conv_id` 自动注入到每条日志。请求入口（`chat.py` 的 `send_message` / `resume_execution`）调用 `set_request_context()` 设置上下文，background task 通过 `asyncio.create_task` 自动继承。日志格式更新为 `[conv_id|thread_id]`，无上下文时显示 `[no-ctx|no-ctx]`。详见 [Phase 0.5](#phase-05-可观测性基础--多用户日志追踪-✅-已完成)。
-
-### P2: 可接受 — 资源泄漏风险
-
-#### 6. ~~StreamManager 内存泄漏~~ ✅ 已修复
-
-> **修复方案**: `_close_stream_internal()` 关闭后启动延迟清理任务（5 秒后从 `streams` 字典和 `_closed_streams` 中移除）。`push_event` 在关闭后短时间内仍能检测到 closed 状态，但不会无限积累。
-
-#### 7. Graph 重复编译
-
-每个请求都会执行：创建 3 个 Agent → 创建所有 Tool → 注册到 Registry → 编译 StateGraph：
-
-> `api/dependencies.py:212` — 每个请求都重新创建 graph
-> ```python
-> compiled_graph = await create_multi_agent_graph(
->     artifact_manager=artifact_manager,
->     checkpointer=get_checkpointer()
-> )
-> ```
-
-Graph 结构本身是无状态的（状态存在 checkpointer 里），理论上可以编译一次后复用。当前设计是因为 `artifact_manager` 通过闭包绑定到 graph 节点中，导致 graph 与请求级实例耦合。
-
-### P3: 可接受 — 生产环境应解决
-
-#### 8. ~~没有请求级超时~~ ✅ 已修复
-
-> **修复方案**: `chat.py` 中 `execute_and_push()` 和 `execute_resume()` 的 `async for` 循环外层包裹 `async with asyncio.timeout(config.STREAM_TIMEOUT)`，超时后推送 error 事件到 stream。
-
-#### 9. 错误信息泄露
-
-Background task 的异常直接通过 `str(e)` 推送给前端，可能包含内部文件路径、数据库信息等：
-
-> `api/routers/chat.py:189`
-> ```python
-> "data": {"success": False, "error": str(e)}
-> ```
->
-> `api/routers/chat.py:398` — resume 路径同样的问题
-> ```python
-> "data": {"success": False, "error": str(e)}
-> ```
-
-#### 10. ~~SSE 无 Heartbeat~~ ✅ 已修复
-
-> **修复方案**: `StreamManager.consume_events()` 新增 `heartbeat_interval` 参数，使用 `asyncio.wait_for` 包装 `queue.get()`，超时时 yield `{"type": "__ping__"}` 哨兵事件。`stream.py` 检测到 `__ping__` 时输出 `: ping\n\n` SSE 注释。间隔由 `config.SSE_PING_INTERVAL`（默认 15 秒）控制。
-
-#### 11. ~~无认证鉴权~~ ✅ 已修复
-
-> **修复方案**: JWT 认证框架 — `get_current_user()` 依赖注入实现 JWT 验证 + DB 状态校验（每次请求查 DB 确保 `is_active` 和最新 `role`），所有受保护端点强制认证。数据隔离主要由 API 层 ownership 校验保障（`_verify_ownership()`），list/count 查询通过 Repository 层 `user_id` 参数过滤。StreamManager 绑定 `owner_user_id` 防止跨用户消费 SSE 事件。管理员通过 `scripts/create_admin.py` 引导创建。
+- **Background Task 生命周期管理** — `TaskManager` 持有任务引用防 GC、Semaphore 限制并发数、graceful shutdown
+- **SQLite 写并发** — 短事务模式，Repository 层立即 `flush() + commit()`
+- **请求级日志上下文** — `contextvars` + `RequestContextFilter` 实现 `[conv_id|thread_id]` 日志追踪
+- **StreamManager 内存泄漏** — 延迟清理任务，关闭后 5 秒自动移除
+- **请求级超时** — `asyncio.timeout(config.STREAM_TIMEOUT)`
+- **SSE Heartbeat** — `SSE_PING_INTERVAL` 秒发送 `: ping` 注释
+- **认证鉴权** — JWT 认证框架 + 数据隔离
 
 ---
 
-## 演进路线
-
-### Phase 0: 应用层加固 ✅ 已完成
-
-**目标**: 不引入新依赖，修复当前架构中最危险的问题。
-
-已实现：
-- **TaskManager**（`api/services/task_manager.py`）：持有任务引用防 GC、Semaphore 限制并发数、graceful shutdown
-- **执行超时**：`asyncio.timeout(config.STREAM_TIMEOUT)` 保护 graph 执行
-- **StreamManager 延迟清理**：关闭后 5 秒自动从字典移除，防止内存泄漏
-- **StreamManager cleanup_task 引用**：`_delayed_cleanup` 的 `asyncio.create_task` 引用保存到 `StreamContext.cleanup_task`，防止 GC 回收
-- **SSE Heartbeat**：每 `SSE_PING_INTERVAL` 秒发送 `: ping\n\n` 注释保持连接
-
-### Phase 0.5: 可观测性基础 — 多用户日志追踪 ✅ 已完成
-
-**目标**: 让并发请求的日志可追踪、可区分，为后续所有并发改进提供调试基础。
-
-**核心方案**: 使用 `contextvars` 实现请求级日志上下文。`contextvars` 天然支持 asyncio —— 每个 `asyncio.Task` 自动继承创建时的 context 副本，background task 中的日志会自动携带创建时设置的 `thread_id` / `conv_id`。
-
-已实现：
-
-- **`RequestContextFilter`**（`utils/logger.py`）：从 `ContextVar` 读取 `thread_id` / `conv_id`，自动注入到每条日志记录
-- **`set_request_context()`**（`utils/logger.py`）：在请求入口设置上下文的辅助函数
-- **请求入口集成**（`api/routers/chat.py`）：`send_message()` 和 `resume_execution()` 在启动 background task 前调用 `set_request_context()`
-- **日志格式**：控制台和文件格式均更新为 `[conv_id|thread_id]`，无上下文时显示 `[no-ctx|no-ctx]`
-
-```python
-# utils/logger.py — 核心实现
-_request_ctx: contextvars.ContextVar[dict] = contextvars.ContextVar('request_ctx', default={})
-
-def set_request_context(*, thread_id: str = "", conv_id: str = "") -> None:
-    _request_ctx.set({"thread_id": thread_id, "conv_id": conv_id})
-
-class RequestContextFilter(logging.Filter):
-    def filter(self, record):
-        ctx = _request_ctx.get({})
-        record.thread_id = ctx.get("thread_id", "no-ctx")
-        record.conv_id = ctx.get("conv_id", "no-ctx")
-        return True
-
-# 日志格式（控制台）
-'%(asctime)s [%(levelname)s] [%(conv_id)s|%(thread_id)s] %(filename)s:%(funcName)s:%(lineno)d - %(message)s'
-```
-
-改造后的日志效果：
-
-```
-14:23:05 [INFO] [no-ctx|no-ctx] main.py:startup:10 - Server starting               # 非请求上下文
-14:23:05 [INFO] [conv-abc|thd-abc123] graph.py:execute:142 - Starting graph execution  # 用户 A
-14:23:05 [INFO] [conv-abc|thd-def456] graph.py:execute:142 - Starting graph execution  # 用户 A 的第二次消息
-14:23:05 [INFO] [conv-xyz|thd-ghi789] graph.py:execute:142 - Starting graph execution  # 用户 B
-14:23:06 [ERROR] [conv-abc|thd-abc123] base.py:call_llm:89 - LLM call failed           # 立即可定位
-```
-
-原理：为什么 `set_request_context` 只需在入口设置一次，所有层级的日志都能自动携带上下文？
-
-**1) Filter 挂在 Handler 上，所有 `logger.info()` 调用共享同一条输出路径：**
-
-```mermaid
-graph TB
-    subgraph Callers["各模块调用 logger.info()"]
-        G["graph.py<br/><code>logger.info('Starting graph')</code>"]
-        B["base.py<br/><code>logger.info('LLM call failed')</code>"]
-        C["controller.py<br/><code>logger.info('Execute done')</code>"]
-    end
-
-    L["Logger('ArtifactFlow')<br/><i>同一个实例，缓存在 _logger_cache</i>"]
-
-    G --> L
-    B --> L
-    C --> L
-
-    subgraph Handlers["Handler + Filter（输出时动态读取 context）"]
-        H1["Console Handler<br/>+ RequestContextFilter ✂<br/><i>读 contextvars → 注入字段</i>"]
-        H2["File Handler<br/>+ RequestContextFilter ✂<br/><i>读 contextvars → 注入字段</i>"]
-        H3["Error File Handler<br/>+ RequestContextFilter ✂<br/><i>读 contextvars → 注入字段</i>"]
-    end
-
-    L --> H1
-    L --> H2
-    L --> H3
-```
-
-不管哪个文件调用 `logger.info()`，日志都会经过 Filter —— Filter 在**输出时**动态读取当前 context。
-
-**2) `contextvars` 跟着执行流走，`create_task` 自动继承：**
-
-```
-send_message()                              ← HTTP 请求协程
-  │
-  ├─ set_request_context(thd=A, conv=X)     ← 设置一次
-  │
-  └─ task_manager.submit()
-       └─ asyncio.create_task()             ← ★ 自动拷贝父协程的 context 快照
-            │
-            └─ execute_and_push()
-                 └─ ctrl.stream_execute()
-                      └─ graph.execute()
-                           └─ lead_agent.run()
-                                └─ logger.info("...")
-                                     │
-                                     ▼
-                                   Filter 读 _request_ctx
-                                     → 拿到 thd=A, conv=X ✅
-```
-
-`asyncio.create_task()` 创建新 task 时，自动复制当前协程的 context 副本。因此从 `execute_and_push` 到最深层的 agent/tool 代码，都能读到同一份上下文，**不需要层层传参**。
-
-设计要点：
-- 改动集中在 `utils/logger.py` 和 `api/routers/chat.py`，不需要修改任何 agent / tool / manager 代码中的 `logger.xxx()` 调用
-- `TaskManager.submit()` 内部直接调用 `asyncio.create_task()`，context 从调用方继承，链路完整
-- 后续 Phase 3 可升级为 JSON 结构化日志格式，便于对接 OpenTelemetry trace/span
+## 演进方向
 
 ### Phase 1: Redis 引入 — 支持多 Worker 部署
 
@@ -350,21 +186,18 @@ async def create_redis_checkpointer(redis_url: str):
 
 ### Phase 2.5: 主数据库迁移（按需）
 
-**触发条件**: 当短事务模式仍无法满足并发需求时（例如极高写入频率）。
+**触发条件**: 当短事务模式仍无法满足并发需求时（例如极高写入频率）。当前 SQLite + 短事务模式可满足中等并发场景。
 
-> **注意**: 短事务重构（方案 B）已在 Phase 0 中实现，见 [已知局限 #3](#3-sqlite-主数据库写并发限制--已修复)。当前 SQLite + 短事务模式可满足中等并发场景。
-
-**方案 A** — 迁移到 PostgreSQL：
+**方案** — 迁移到 PostgreSQL：
 - 彻底解决写并发问题（MVCC 支持真正的多写者）
 - SQLAlchemy 切换只需改 `DATABASE_URL` 和 driver
 
 ### Phase 3: 生产化完善
 
 - API Rate Limiting（per-user 限流）
-- ~~认证鉴权（JWT / OAuth）~~ ✅ 已完成
 - 分布式锁（防止同一 conversation 的并发写入冲突）
 - 错误信息脱敏（生产环境不暴露内部异常）
-- Metrics 采集（Prometheus / OpenTelemetry，基于 Phase 0.5 已实现的 `contextvars` 请求上下文扩展 trace/span，升级为 JSON 结构化日志）
+- Metrics 采集（Prometheus / OpenTelemetry，基于已有的 `contextvars` 请求上下文扩展 trace/span）
 - Graph 编译缓存（编译一次，通过 state 传递 `artifact_manager` 而非闭包捕获）
 
 ---

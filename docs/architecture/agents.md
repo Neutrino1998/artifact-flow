@@ -104,13 +104,12 @@ class BaseAgent(ABC):
         pass
 
     @abstractmethod
-    def format_final_response(self, content: str, tool_history: List[Dict]) -> str:
+    def format_final_response(self, content: str) -> str:
         """
         格式化最终响应
 
         Args:
             content: LLM 的最终回复
-            tool_history: 工具调用历史
 
         Returns:
             格式化后的响应

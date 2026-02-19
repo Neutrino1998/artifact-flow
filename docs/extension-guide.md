@@ -73,13 +73,12 @@ class CodeAgent(BaseAgent):
 """
         # 注意：工具说明由 build_complete_system_prompt() 自动追加
 
-    def format_final_response(self, content: str, tool_history: List[Dict]) -> str:
+    def format_final_response(self, content: str) -> str:
         """
         格式化最终响应
 
         Args:
             content: LLM 的最终回复
-            tool_history: 工具调用历史
         """
         return f"""## 代码分析报告
 
@@ -261,7 +260,7 @@ class ReadFileTool(BaseTool):
 
 ### 注册工具
 
-在 `create_default_graph()` 函数中（`core/graph.py`）添加新工具：
+在 `create_multi_agent_graph()` 函数中（`core/graph.py`）添加新工具：
 
 ```python
 from tools.implementations.file_ops import ReadFileTool
@@ -284,7 +283,7 @@ for tool in tools:
 在 Agent 配置中通过 `required_tools` 指定所需工具：
 
 ```python
-# 在 agents/factories.py 中定义 Agent 时指定
+# 在 Agent 模块中定义（如 agents/code_agent.py）
 def create_code_agent() -> BaseAgent:
     config = AgentConfig(
         name="code_agent",
@@ -297,7 +296,7 @@ def create_code_agent() -> BaseAgent:
     return CodeAgent(config)
 ```
 
-`create_default_graph()` 会根据 `required_tools` 自动创建对应的 `AgentToolkit` 并绑定到 Agent。
+`create_multi_agent_graph()` 会根据 `required_tools` 自动创建对应的 `AgentToolkit` 并绑定到 Agent。
 
 ## 权限级别选择指南
 

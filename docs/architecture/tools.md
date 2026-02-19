@@ -228,7 +228,7 @@ class AgentToolkit:
 
 ### 初始化流程
 
-工具初始化在 `create_default_graph()` 函数中完成（`core/graph.py`）：
+工具初始化在 `create_multi_agent_graph()` 函数中完成（`core/graph.py`）：
 
 ```python
 # 1. 创建工具注册中心

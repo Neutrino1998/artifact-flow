@@ -256,29 +256,28 @@ async for event in controller.stream_execute(
 
 **检查搜索 API 配置：**
 
+搜索后端使用博查 AI（Bocha API），确保 `.env` 中配置了 `BOCHA_API_KEY`：
+
 ```bash
-# DuckDuckGo 可能被限流，检查日志
+# 检查环境变量
+echo $BOCHA_API_KEY
+
+# 检查日志
 tail -f logs/app.log | grep "web_search"
-```
-
-**切换搜索后端：**
-
-```python
-# 在工具配置中指定
-SEARCH_BACKEND = "google"  # 或 "bing"
 ```
 
 ---
 
-### web_fetch 超时
+### web_fetch 抓取失败
 
-**调整超时时间：**
+**调整抓取参数：**
 
 ```python
-# 工具调用时指定
+# web_fetch 工具支持的参数
 result = await tool.execute(
-    url="https://example.com",
-    timeout=60  # 秒
+    url_list=["https://example.com"],      # URL 列表（必填）
+    max_content_length=10000,              # 单页最大字符数（默认 10000）
+    max_concurrent=3                       # 最大并发浏览器数（默认 3，上限 5）
 )
 ```
 
