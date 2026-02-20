@@ -2,7 +2,7 @@
 
 ArtifactFlow API 文档，供前端集成使用。
 
-> **注意：** 修改 `src/api/schemas/` 下的 Pydantic model 后，需要同步更新前端 TypeScript 类型。详见 [frontend/README.md — API 类型同步](../frontend/README.md#api-类型同步)。
+> **注意：** 修改 `src/api/schemas/` 下的 Pydantic model 后，需要同步更新前端 TypeScript 类型。详见 [frontend/README.md — API 类型同步](https://github.com/Neutrino1998/artifact-flow/blob/main/frontend/README.md#api-类型同步)。
 
 ## 基础信息
 
