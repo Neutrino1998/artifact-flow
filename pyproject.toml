@@ -4,3 +4,6 @@ testpaths = ["tests"]
 markers = [
     "slow: tests that take more than 5 seconds",
 ]
+filterwarnings = [
+    "ignore::DeprecationWarning:crawl4ai",
+]

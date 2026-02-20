@@ -6,6 +6,7 @@ API 配置
 
 from typing import List
 from pydantic_settings import BaseSettings
+from pydantic import ConfigDict
 
 
 class APIConfig(BaseSettings):
@@ -14,6 +15,8 @@ class APIConfig(BaseSettings):
 
     可通过环境变量覆盖配置项。
     """
+
+    model_config = ConfigDict(env_prefix="ARTIFACTFLOW_", case_sensitive=False)
 
     # 服务器配置
     HOST: str = "0.0.0.0"
@@ -46,10 +49,6 @@ class APIConfig(BaseSettings):
     JWT_SECRET: str = ""
     JWT_ALGORITHM: str = "HS256"
     JWT_EXPIRY_DAYS: int = 7
-
-    class Config:
-        env_prefix = "ARTIFACTFLOW_"
-        case_sensitive = False
 
 
 # 全局配置实例
