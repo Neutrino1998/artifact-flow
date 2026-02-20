@@ -1039,22 +1039,22 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#phase-5-postgresql-迁移" class="md-nav__link">
+  <a href="#phase-5-redis-引入--数据库可移植性基线" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Phase 5: PostgreSQL 迁移
+        Phase 5: Redis 引入 + 数据库可移植性基线
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Phase 5: PostgreSQL 迁移">
+    <nav class="md-nav" aria-label="Phase 5: Redis 引入 + 数据库可移植性基线">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#51-数据库引擎切换" class="md-nav__link">
+  <a href="#51-数据库可移植性基线" class="md-nav__link">
     <span class="md-ellipsis">
       
-        5.1 数据库引擎切换
+        5.1 数据库可移植性基线
       
     </span>
   </a>
@@ -1062,10 +1062,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#52-schema-迁移" class="md-nav__link">
+  <a href="#52-redis-基础设施--checkpointer-迁移" class="md-nav__link">
     <span class="md-ellipsis">
       
-        5.2 Schema 迁移
+        5.2 Redis 基础设施 + Checkpointer 迁移
       
     </span>
   </a>
@@ -1073,10 +1073,32 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#53-checkpointer-迁移" class="md-nav__link">
+  <a href="#53-streammanager-迁移到-redis-streams" class="md-nav__link">
     <span class="md-ellipsis">
       
-        5.3 Checkpointer 迁移
+        5.3 StreamManager 迁移到 Redis Streams
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#54-manager-缓存决策" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.4 Manager 缓存决策
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#55-taskmanager-多-worker-适配" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.5 TaskManager 多 Worker 适配
       
     </span>
   </a>
@@ -1089,22 +1111,22 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#phase-6-redis-引入多-worker-支持" class="md-nav__link">
+  <a href="#phase-6-postgresql-迁移" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Phase 6: Redis 引入（多 Worker 支持）
+        Phase 6: PostgreSQL 迁移
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Phase 6: Redis 引入（多 Worker 支持）">
+    <nav class="md-nav" aria-label="Phase 6: PostgreSQL 迁移">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#61-streammanager-迁移到-redis" class="md-nav__link">
+  <a href="#61-数据库引擎切换" class="md-nav__link">
     <span class="md-ellipsis">
       
-        6.1 StreamManager 迁移到 Redis
+        6.1 数据库引擎切换
       
     </span>
   </a>
@@ -1112,10 +1134,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#62-conversationmanager-缓存迁移" class="md-nav__link">
+  <a href="#62-schema-迁移与类型适配" class="md-nav__link">
     <span class="md-ellipsis">
       
-        6.2 ConversationManager 缓存迁移
+        6.2 Schema 迁移与类型适配
       
     </span>
   </a>
@@ -1123,10 +1145,38 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#63-checkpointer-迁移到-redis可选" class="md-nav__link">
+  <a href="#63-性能优化--复合索引" class="md-nav__link">
     <span class="md-ellipsis">
       
-        6.3 Checkpointer 迁移到 Redis（可选）
+        6.3 性能优化 — 复合索引
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#测试策略贯穿-phase-5--phase-6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        测试策略（贯穿 Phase 5 / Phase 6）
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="测试策略（贯穿 Phase 5 / Phase 6）">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#测试基础设施改造" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        测试基础设施改造
       
     </span>
   </a>
@@ -1298,7 +1348,7 @@
 <p><strong>涉及文件</strong>:
 - <code>src/api/routers/chat.py</code> — <code>resume_execution()</code>（~L284-299）
 - <code>src/db/models.py</code> — <code>Message</code> 模型已有 <code>thread_id</code> 和 <code>conversation_id</code> 字段
-- <code>src/core/repositories/</code> — 可能需要新增查询方法</p>
+- <code>src/repositories/</code> — 可能需要新增查询方法</p>
 <p><strong>改动</strong>:
 - resume 前查询 DB 校验 <code>message.thread_id == request.thread_id AND message.conversation_id == conv_id</code>
 - 校验失败返回 403/404</p>
@@ -1350,7 +1400,7 @@
 <p><strong>问题</strong>: <code>total</code> 使用 <code>offset + len + (1 if has_more else 0)</code> 估算。</p>
 <p><strong>涉及文件</strong>:
 - <code>src/api/routers/chat.py</code> — list conversations（~L202-207）
-- <code>src/core/repositories/</code> — 可能需要新增 count 查询</p>
+- <code>src/repositories/</code> — 可能需要新增 count 查询</p>
 <p><strong>改动</strong>:
 - Repository 层新增 <code>count_conversations()</code> 方法（<code>SELECT COUNT(*) FROM conversations</code>）
 - Router 层并行执行 count 查询和分页查询，返回准确 total</p>
@@ -1358,7 +1408,7 @@
 <p><strong>问题</strong>: <code>artifacts.py</code> 用 <code>datetime.now()</code> 代替真实创建时间。</p>
 <p><strong>涉及文件</strong>:
 - <code>src/api/routers/artifacts.py</code> — 响应构造（~L54, ~L93）
-- <code>src/core/artifact_manager.py</code> 或 <code>src/tools/implementations/artifact_ops.py</code> — ArtifactMemory 数据结构</p>
+- <code>src/tools/implementations/artifact_ops.py</code> — ArtifactMemory 数据结构</p>
 <p><strong>改动</strong>:
 - 检查 ArtifactMemory 是否持有 <code>created_at</code>，如果没有则从 DB 查询
 - 如果 artifact 尚未持久化到 DB，使用内存中的创建时间（在 ArtifactMemory 中增加 <code>created_at</code> 字段）
@@ -1432,7 +1482,7 @@
 - context 不会持久化到 checkpoint，resume 路径必须每次重新传入 context</p>
 <p><strong>为何先 defer</strong>:
 - 当前更关注并发正确性与稳定性，优先避免一次性引入“缓存 + 依赖注入模型切换 + tool 生命周期变化”的复合改动风险
-- Phase 5（PostgreSQL 迁移）完成后再结合压测数据评估，收益/风险比更清晰</p>
+- Phase 5/6（Redis + PostgreSQL 迁移）完成后再结合压测数据评估，收益/风险比更清晰</p>
 <p><strong>后续触发条件（再开启本项）</strong>:
 - 有明确数据表明 graph 编译耗时显著影响 p95/p99 或吞吐
 - 完成工具无状态化审计（至少 <code>artifact_ops</code>、<code>web_fetch</code>）
@@ -1451,7 +1501,7 @@
 - <code>src/api/routers/artifacts.py</code> — 所有路由注入 <code>current_user</code>
 - <code>src/api/routers/stream.py</code> — SSE 连接认证
 - <code>src/db/models.py</code> — <code>Conversation.user_id</code> 已预留，需要新增 User 模型或依赖外部 IdP
-- <code>src/core/repositories/</code> — 所有查询增加 <code>user_id</code> 过滤条件</p>
+- <code>src/repositories/</code> — 所有查询增加 <code>user_id</code> 过滤条件</p>
 <p><strong>改动</strong>:
 - 选择认证方案：JWT（自签发）或 OAuth2（接入外部 IdP）
 - 实现 <code>get_current_user()</code> 从 <code>Authorization: Bearer &lt;token&gt;</code> 解析用户
@@ -1471,66 +1521,391 @@
 - 401 响应全局拦截，跳转登录页
 - token 持久化到 localStorage，刷新页面不丢失</p>
 <hr />
-<h2 id="phase-5-postgresql-迁移">Phase 5: PostgreSQL 迁移</h2>
-<p><strong>目标</strong>: 主数据库从 SQLite 迁移到 PostgreSQL，为多用户/多 worker 打好基础。对应 concurrency.md Phase 2.5。</p>
-<h3 id="51-数据库引擎切换">5.1 数据库引擎切换</h3>
+<h2 id="phase-5-redis-引入--数据库可移植性基线">Phase 5: Redis 引入 + 数据库可移植性基线</h2>
+<p><strong>目标</strong>: 解决最紧迫的并发瓶颈（checkpointer 单连接串行），建立数据库可移植性抽象层，为 Phase 6 PostgreSQL 迁移铺路。</p>
+<blockquote>
+<p><strong>执行顺序调整说明</strong>: 原计划 Phase 5 PostgreSQL → Phase 6 Redis，但当前最明确的并发瓶颈是 checkpointer 单连接串行（<code>concurrency.md</code> L105-108），应优先解决。Redis 前置可更快获得并发收益，PostgreSQL 迁移改为 Phase 6。</p>
+</blockquote>
+<h3 id="51-数据库可移植性基线">5.1 数据库可移植性基线</h3>
+<p><strong>动机</strong>: 在进行任何数据库迁移之前，确保 Repository 层不绑定特定 SQL 方言。未来切换数据库（PostgreSQL → MySQL/TDSQL）只需调整连接配置和迁移脚本，不改业务逻辑。</p>
 <p><strong>涉及文件</strong>:
-- <code>src/db/database.py</code> — <code>DatabaseManager</code> 引擎配置
-- <code>src/config.py</code> — DATABASE_URL 配置
-- <code>requirements.txt</code> — 增加 <code>asyncpg</code>（PostgreSQL 异步驱动）
-- <code>docker-compose.yml</code> — 增加 PostgreSQL 服务</p>
-<p><strong>改动</strong>:
-- <code>DatabaseManager</code> 移除 SQLite 专属配置（WAL PRAGMA 等），改为根据 URL scheme 自动适配
-- 配置 PostgreSQL 连接池参数（<code>pool_size</code>, <code>max_overflow</code>）
-- 更新 <code>DATABASE_URL</code> 默认值或环境变量</p>
-<h3 id="52-schema-迁移">5.2 Schema 迁移</h3>
-<p><strong>涉及文件</strong>:
-- <code>src/db/models.py</code> — 检查 SQLite 特有的类型/约束是否兼容 PostgreSQL
-- <code>src/db/migrations/</code> — Alembic 迁移脚本
-- <code>src/core/repositories/</code> — 检查是否有 SQLite 特有 SQL</p>
-<p><strong>改动</strong>:
-- 审查所有 model 字段类型的 PostgreSQL 兼容性（<code>JSON</code> → <code>JSONB</code>, <code>DateTime</code> → <code>TIMESTAMP WITH TIME ZONE</code> 等）
-- 编写数据迁移脚本（从 SQLite 导出 → PostgreSQL 导入）
-- 移除所有 SQLite PRAGMA 调用（<code>_configure_sqlite_wal</code> 改为条件执行或删除）</p>
-<h3 id="53-checkpointer-迁移">5.3 Checkpointer 迁移</h3>
-<p><strong>涉及文件</strong>:
-- <code>src/core/graph.py</code> — <code>create_async_sqlite_checkpointer</code> 改为 PostgreSQL
-- <code>src/api/dependencies.py</code> — checkpointer 初始化
-- <code>requirements.txt</code> — 增加 <code>langgraph-checkpoint-postgres</code></p>
-<p><strong>改动</strong>:
-- 使用 <code>langgraph-checkpoint-postgres</code> 的 <code>AsyncPostgresSaver</code> 替换 <code>AsyncSqliteSaver</code>
-- Checkpointer 使用独立连接池（与主数据库分开），解决单连接瓶颈
-- 配置 checkpoint TTL 自动过期</p>
+- <code>src/repositories/base.py</code> — 新增方言适配工具方法
+- <code>src/repositories/artifact_repo.py</code> — RETURNING 子句适配（L309-325，当前唯一的 RETURNING 用法）
+- <code>src/db/database.py</code> — 提取方言检测能力（L86-88 <code>_is_sqlite()</code>），暴露给 Repository 层
+- <code>src/db/migrations/</code> — Alembic 初始化</p>
+<p><strong>改动</strong>:</p>
+<p><strong>5.1.1 RETURNING 子句可移植适配</strong></p>
+<p><code>artifact_repo.py:324</code> 的乐观锁更新使用了 <code>.returning()</code>，MySQL 不支持。设计可移植方案：</p>
+<ul>
+<li><code>BaseRepository</code> 新增 <code>_supports_returning() -&gt; bool</code> 方法，基于引擎方言判断</li>
+<li><code>ArtifactRepository.update_artifact_content()</code> 改为：</li>
+<li>支持 RETURNING（PostgreSQL, SQLite 3.35+）→ 原子 <code>UPDATE...RETURNING</code>（当前行为）</li>
+<li>不支持 RETURNING（MySQL）→ fallback 为 <code>UPDATE</code> + <code>SELECT</code> 两步操作</li>
+<li>两条路径在功能上等价，仅性能差异（一次 vs 两次 DB 调用）</li>
+</ul>
+<p><strong>5.1.2 Alembic 迁移框架</strong></p>
+<p>替换手写 SQL 迁移（<code>001_initial_schema.py</code> 使用原生 SQL 含 <code>AUTOINCREMENT</code>、<code>INSERT OR IGNORE</code> 等 SQLite 方言）：</p>
+<ul>
+<li><code>alembic init</code> 初始化，<code>env.py</code> 配置 async engine</li>
+<li>从当前 ORM models 生成初始迁移（<code>alembic revision --autogenerate</code>）</li>
+<li>迁移脚本中使用 SQLAlchemy DDL API，不写方言专属 SQL</li>
+<li>迁移执行策略：<strong>部署前单次执行</strong>（CLI 命令或 init container），不在应用启动时自动 <code>upgrade head</code>（多 worker 同时启动会导致并发迁移竞态）</li>
+<li><code>DatabaseManager.initialize()</code> 改为 <strong>schema version 校验</strong>：启动时检查当前 DB 版本是否匹配预期，不匹配则 fail fast 并提示运行迁移命令</li>
+<li>旧迁移脚本 <code>001_initial_schema.py</code> 保留，标记为 archived</li>
+</ul>
+<p><strong>5.1.3 Repository 层方言审计</strong></p>
+<p>确认所有 Repository 仅使用 SQLAlchemy 通用 ORM 能力（当前状态扫描结果）：
+- ✅ 无原生 SQL（除 PRAGMA，已在 <code>database.py</code> 条件控制）
+- ✅ 无 SQLite 特有函数（ROWID、typeof 等）
+- ✅ JSON 类型使用 SQLAlchemy <code>JSON</code>（PostgreSQL 自动映射 JSONB）
+- ✅ 所有查询通过 ORM 构造，无字符串拼接 SQL
+- ⚠️ RETURNING 子句（artifact_repo.py L324）→ 5.1.1 已处理</p>
+<p><strong>退出标准</strong>:
+- RETURNING 适配层有单元测试覆盖两条路径（RETURNING / fallback）
+  - 注意：CI 仅 SQLite + PostgreSQL，两者都支持 RETURNING，fallback 路径不会被自然触发。需增加<strong>强制 fallback 模式</strong>的单测：mock <code>_supports_returning()</code> 返回 False，验证 UPDATE + SELECT 路径的正确性
+- Alembic 迁移可在 SQLite 上正常执行
+- 现有回归测试全部通过</p>
 <hr />
-<h2 id="phase-6-redis-引入多-worker-支持">Phase 6: Redis 引入（多 Worker 支持）</h2>
-<p><strong>目标</strong>: 将进程内状态迁移到 Redis，支持多 worker 部署。对应 concurrency.md Phase 1 + Phase 2。</p>
-<h3 id="61-streammanager-迁移到-redis">6.1 StreamManager 迁移到 Redis</h3>
+<h3 id="52-redis-基础设施--checkpointer-迁移">5.2 Redis 基础设施 + Checkpointer 迁移</h3>
+<p><strong>动机</strong>: <code>AsyncSqliteSaver</code> 使用单个 <code>aiosqlite.connect()</code> 连接，内部只有一个后台线程 + 队列，所有 checkpoint 操作串行执行。N 个并发用户的所有 checkpoint 读写排队，是当前最大的全局延迟瓶颈。迁移到 Redis 可立即获得并发读写能力。</p>
+<p><strong>基础设施前置条件</strong>:
+- Redis 必须使用 <strong>Redis Stack</strong>（<code>redis/redis-stack</code> Docker 镜像），因为 <code>langgraph-checkpoint-redis</code> 依赖 RedisJSON + RediSearch 模块
+- 验证：<code>redis-cli MODULE LIST</code> 输出中需包含 <code>ReJSON</code> 和 <code>search</code></p>
+<p><strong>涉及文件</strong>:
+- <code>docker-compose.yml</code> — 新增 Redis Stack 服务
+- <code>src/api/config.py</code> — 新增 <code>REDIS_URL</code>、<code>CHECKPOINT_TTL</code>
+- <code>src/core/graph.py</code> — 替换 <code>create_async_sqlite_checkpointer()</code>（L662-713）
+- <code>src/api/dependencies.py</code> — 替换 checkpointer 初始化/清理（L60-93, L96-122）
+- <code>requirements.txt</code> — 新增 <code>langgraph-checkpoint-redis</code>、<code>redis[hiredis]</code></p>
+<p><strong>改动</strong>:</p>
+<p><strong>5.2.1 Redis Stack Docker 配置</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nt">redis</span><span class="p">:</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="w">  </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">redis/redis-stack:7.4.0-v3</span><span class="w">    </span><span class="c1"># 版本 pin，不用 latest</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="w">  </span><span class="nt">ports</span><span class="p">:</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="s">&quot;6379:6379&quot;</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="s">&quot;8001:8001&quot;</span><span class="w">    </span><span class="c1"># RedisInsight（开发调试用，生产可移除）</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="w">  </span><span class="nt">volumes</span><span class="p">:</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">redis_data:/data</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="w">  </span><span class="nt">command</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">&gt;</span>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="w">    </span><span class="no">redis-stack-server</span>
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="w">    </span><span class="no">--appendonly yes</span>
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="w">    </span><span class="no">--appendfsync everysec</span>
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a><span class="w">    </span><span class="no">--save 900 1</span>
+<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a><span class="w">    </span><span class="no">--save 300 10</span>
+<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a><span class="w">    </span><span class="no">--maxmemory 512mb</span>
+<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a><span class="w">    </span><span class="no">--maxmemory-policy noeviction</span>
+<a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a><span class="w">  </span><span class="nt">healthcheck</span><span class="p">:</span>
+<a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a><span class="w">    </span><span class="nt">test</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="s">&quot;CMD&quot;</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">&quot;redis-cli&quot;</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">&quot;ping&quot;</span><span class="p p-Indicator">]</span>
+<a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a><span class="w">    </span><span class="nt">interval</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">10s</span>
+<a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a><span class="w">    </span><span class="nt">timeout</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">5s</span>
+<a id="__codelineno-0-20" name="__codelineno-0-20" href="#__codelineno-0-20"></a><span class="w">    </span><span class="nt">retries</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">3</span>
+</code></pre></div>
+<p>关键配置说明：
+- <strong>版本 pin</strong>: <code>7.4.0-v3</code>（或当时最新稳定版），避免 <code>latest</code> 导致不可预期变更
+- <strong>AOF 持久化</strong>: <code>appendonly yes</code> + <code>appendfsync everysec</code>（平衡性能与数据安全）
+- <strong>RDB 快照</strong>: <code>save 900 1</code> / <code>save 300 10</code>（兜底恢复）
+- <strong>内存策略</strong>: <code>noeviction</code> — checkpoint 是核心状态，不允许被 LRU 淘汰；内存满时返回 OOM 错误，由应用层返回 503
+- <strong>单节点部署</strong>: 当前阶段不引入 Sentinel/Cluster。单节点限制：无自动故障转移，Redis 进程挂掉需手动重启。后续如需 HA，升级路径为 Redis Sentinel（主从 + 自动故障转移）或云托管 Redis</p>
+<p><strong>5.2.2 Checkpointer 迁移</strong></p>
+<p><code>src/core/graph.py</code> — 新增 <code>create_redis_checkpointer()</code> 替换 <code>create_async_sqlite_checkpointer()</code>：</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">create_redis_checkpointer</span><span class="p">(</span><span class="n">redis_url</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">ttl</span><span class="p">:</span> <span class="nb">dict</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">):</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>    <span class="kn">from</span><span class="w"> </span><span class="nn">langgraph.checkpoint.redis.aio</span><span class="w"> </span><span class="kn">import</span> <span class="n">AsyncRedisSaver</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>    <span class="n">checkpointer</span> <span class="o">=</span> <span class="n">AsyncRedisSaver</span><span class="o">.</span><span class="n">from_conn_string</span><span class="p">(</span><span class="n">redis_url</span><span class="p">,</span> <span class="n">ttl</span><span class="o">=</span><span class="n">ttl</span><span class="p">)</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>    <span class="k">await</span> <span class="n">checkpointer</span><span class="o">.</span><span class="n">setup</span><span class="p">()</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>    <span class="k">return</span> <span class="n">checkpointer</span>
+</code></pre></div>
+<p><code>src/api/config.py</code> 新增：
+- <code>REDIS_URL: str = "redis://localhost:6379"</code>
+- <code>CHECKPOINT_TTL: int = 86400</code>（24 小时，秒）</p>
+<p><code>src/api/dependencies.py</code> 改动：
+- <code>init_globals()</code>: <code>create_redis_checkpointer(config.REDIS_URL, ttl={"checkpoint_ns": config.CHECKPOINT_TTL})</code> 替换 <code>create_async_sqlite_checkpointer()</code>
+- <code>close_globals()</code>: 替换 <code>checkpointer.conn.close()</code> 为 Redis 连接关闭
+- 移除 <code>LANGGRAPH_DB_PATH</code> 配置项和 <code>data/langgraph.db</code> 文件依赖</p>
+<p><strong>5.2.3 故障处理</strong></p>
+<p>当前执行路径是 <code>POST /chat</code> → <code>task_manager.submit()</code> → 立即返回 200 → background task 执行 graph。Redis 故障如果发生在 background task 阶段，HTTP 响应已经返回，无法追溯改为 503。因此需要区分两种场景：</p>
+<ul>
+<li><strong>启动时</strong> Redis 不可用 → <code>init_globals()</code> 抛异常，应用启动失败（fail fast），不对外提供服务</li>
+<li><strong>请求时</strong> Redis 已知不可用 → <strong>submit 前健康门控</strong>：在 <code>POST /chat</code> 和 <code>resume</code> 的 router 入口处，调用 <code>redis.ping()</code> 探活；失败则直接返回 HTTP 503 + <code>{"detail": "Checkpoint service unavailable"}</code>，不提交 background task</li>
+<li>涉及文件：<code>src/api/routers/chat.py</code> L195, L441（<code>task_manager.submit()</code> 调用前）</li>
+<li>实现方式：新增 FastAPI 依赖 <code>require_redis_healthy()</code> 或在 router 函数入口显式检查</li>
+<li><strong>执行中</strong> Redis 断连（已通过健康门控但执行过程中断连）→ background task 捕获异常，推送 SSE error 事件 <code>{"type": "error", "data": {"error": "Checkpoint service unavailable"}}</code>，前端展示错误提示</li>
+<li><strong>TTL 过期</strong> → resume 时 checkpointer 查无数据 → HTTP 410 Gone + <code>{"detail": "会话状态已过期，请重新发送消息"}</code></li>
+<li>日志记录 Redis 连接状态变化，便于运维监控</li>
+</ul>
+<p><strong>退出标准</strong>:
+- <code>checkpointer.setup()</code> 成功，interrupt/resume 端到端通过
+- TTL 自动过期验证（设短 TTL → 等待 → resume 得到 410）
+- 启动时 Redis 不可用 → 应用启动失败（fail fast 验证）
+- 请求时 Redis 不可用 → 健康门控返回 503（submit 前拦截验证）
+- 执行中 Redis 断连 → SSE error 事件推送到前端
+- 现有回归测试全部通过（checkpointer 替换对上层透明）</p>
+<hr />
+<h3 id="53-streammanager-迁移到-redis-streams">5.3 StreamManager 迁移到 Redis Streams</h3>
+<p><strong>动机</strong>: 当前 <code>asyncio.Queue</code> 仅支持单进程部署。Pub/Sub 断线不可回放，与"断线重连不丢消息"目标冲突。Redis Streams 是唯一满足可靠投递需求的方案。</p>
 <p><strong>涉及文件</strong>:
 - <code>src/api/services/stream_manager.py</code> — 核心重构
-- <code>src/api/dependencies.py</code> — Redis 连接初始化
-- <code>src/config.py</code> — REDIS_URL 配置
-- <code>requirements.txt</code> — 增加 <code>redis[hiredis]</code>
-- <code>docker-compose.yml</code> — 增加 Redis 服务</p>
-<p><strong>改动</strong>:
-- <code>asyncio.Queue</code> → Redis Pub/Sub 或 Redis Streams
-- 事件缓冲：POST /chat push 事件到 Redis channel，GET /stream subscribe 消费
-- TTL/清理逻辑迁移到 Redis key 过期机制
-- 如果需要可靠投递（断线重连不丢消息），使用 Redis Streams + consumer group</p>
-<h3 id="62-conversationmanager-缓存迁移">6.2 ConversationManager 缓存迁移</h3>
+- <code>src/api/dependencies.py</code> — Redis 连接复用（5.2 已建立）
+- <code>src/api/routers/stream.py</code> — 支持 <code>Last-Event-ID</code> header</p>
+<p><strong>改动</strong>:</p>
+<p><strong>5.3.1 为什么选 Redis Streams（非 Pub/Sub）</strong></p>
+<table>
+<thead>
+<tr>
+<th>特性</th>
+<th>Pub/Sub</th>
+<th>Redis Streams</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>断线重放</td>
+<td>❌ 消费者不在线则消息丢失</td>
+<td>✅ 基于 ID 从断点重放</td>
+</tr>
+<tr>
+<td>消息持久化</td>
+<td>❌ 内存中即时投递</td>
+<td>✅ 持久化到 AOF/RDB</td>
+</tr>
+<tr>
+<td>消费者组</td>
+<td>❌</td>
+<td>✅ 支持多消费者 + ACK</td>
+</tr>
+<tr>
+<td>历史消息查询</td>
+<td>❌</td>
+<td>✅ XRANGE / XREAD</td>
+</tr>
+<tr>
+<td>背压控制</td>
+<td>❌</td>
+<td>✅ MAXLEN / XTRIM</td>
+</tr>
+</tbody>
+</table>
+<p><strong>5.3.2 StreamManager 重构设计</strong></p>
+<p>核心模型：
+- 每个 <code>thread_id</code> 对应一个 Redis Stream key: <code>stream:{thread_id}</code>
+- 事件写入: <code>XADD stream:{thread_id} MAXLEN ~1000 * event_type {type} data {json}</code>
+- 事件消费: <code>XREAD BLOCK {timeout} STREAMS stream:{thread_id} {last_id}</code>
+- 断线重连: 前端通过 <code>Last-Event-ID</code> header 传入上次收到的 event ID → 从该 ID 之后读取
+- 清理: Stream key 设置 TTL（<code>EXPIRE stream:{thread_id} {config.STREAM_TTL}</code>），终结事件后到期自动删除
+- 所有权隔离: Stream metadata 中存储 <code>owner_user_id</code>，消费时校验</p>
+<p>StreamManager 对外 API 保持不变（对上层透明）：
+- <code>create_stream(thread_id, owner_user_id)</code> → 创建 Stream key + 存储 owner + 设置 TTL
+- <code>push_event(thread_id, event)</code> → <code>XADD</code>，返回 False 当 stream 已关闭（信号 background task 停止）
+- <code>consume_events(thread_id, last_event_id?)</code> → <code>XREAD BLOCK</code> async generator，支持心跳
+- <code>close_stream(thread_id)</code> → 推送终结事件 + 标记关闭（保留 TTL 窗口供断线重连）</p>
+<p>内部移除：
+- <code>_streams: dict</code> → 不再需要内存字典
+- <code>asyncio.Queue</code> → 替换为 Redis Streams
+- <code>asyncio.Lock</code> → Redis 原子操作天然并发安全
+- TTL asyncio.Task → Redis <code>EXPIRE</code> 原生支持</p>
+<p><strong>5.3.3 SSE 端点支持断线重连</strong></p>
+<p><code>src/api/routers/stream.py</code> 改动：
+- 读取 <code>Last-Event-ID</code> request header
+- 传入 <code>consume_events(thread_id, last_event_id=...)</code>
+- SSE 响应中每个事件附带 <code>id:</code> 字段（使用 Redis Stream entry ID，如 <code>1234567890-0</code>）
+- <strong>前端需改动</strong>：我们使用 fetch + ReadableStream（非 EventSource），浏览器不会自动处理 <code>Last-Event-ID</code>。需在 <code>frontend/src/lib/sse.ts</code> 中手动维护 <code>last_event_id</code>（从每个 SSE 事件的 <code>id:</code> 字段提取），断线重连时通过 <code>Last-Event-ID</code> request header 携带</p>
+<p><strong>Redis 故障下 <code>GET /stream</code> 的行为约定</strong>（补充 5.2.3 仅覆盖 POST/resume 的缺口）：</p>
+<ul>
+<li><strong>连接建立时</strong> Redis 不可用（<code>XREAD</code> 失败）→ 返回 HTTP 503（SSE 连接未建立，可用 HTTP 状态码）</li>
+<li><strong>流传输中</strong> Redis 断连 → 发送 SSE error 事件 <code>{"type": "error", "data": {"error": "Stream service unavailable"}}</code>，关闭 SSE 连接。前端可用 <code>last_event_id</code> 尝试重连</li>
+<li>与 5.2.3 的语义一致：请求入口可拦截时用 HTTP 状态码，已进入流传输则用 SSE error 事件</li>
+</ul>
+<p><strong>退出标准</strong>:
+- 跨请求事件投递成功（POST push → GET consume）
+- 断线重连测试：消费中断 → 用 <code>last_event_id</code> 重连 → 不丢消息
+- TTL 自动清理验证（Stream key 过期后被删除）
+- 多 worker 场景测试（两个进程，一个 push 一个 consume）
+- 所有权隔离测试（非 owner 消费被拒绝）
+- Redis 故障测试：<code>GET /stream</code> 连接建立时 503 + 流中断时 SSE error
+- 现有回归测试全部通过</p>
+<hr />
+<h3 id="54-manager-缓存决策">5.4 Manager 缓存决策</h3>
+<p><strong>决策: ConversationManager 和 ArtifactManager 均保持 request-local 内存缓存，不迁移到 Redis。</strong></p>
+<p><strong>覆盖范围</strong>:
+- <code>ConversationManager._cache</code>（<code>conversation_manager.py</code> L88）— <code>Dict[str, ConversationCache]</code>
+- <code>ArtifactManager._cache</code>（<code>artifact_ops.py</code> L187）— <code>Dict[str, Dict[str, ArtifactMemory]]</code></p>
+<p>两者是同构模式：都是请求级实例内的 Python dict，生命周期与请求绑定。</p>
+<p><strong>理由</strong>:
+- 两个 Manager 都是请求级实例（<code>dependencies.py</code> L192 ArtifactManager, L208 ConversationManager），每次请求创建新实例
+- <code>_cache</code> dict 天然短生命周期（随请求结束 GC），不存在跨请求状态共享问题
+- 迁移到 Redis 会增加每次读操作的网络 RTT（~0.1ms local dict → ~1ms Redis），无实际收益
+- Phase 6 PostgreSQL 迁移后，数据库查询性能足以支撑无缓存场景</p>
+<p><strong>不做改动</strong>。后续若出现热点查询性能问题，再考虑 Redis 缓存，但仅对特定热点路径，不全量迁移。</p>
+<hr />
+<h3 id="55-taskmanager-多-worker-适配">5.5 TaskManager 多 Worker 适配</h3>
+<p><strong>动机</strong>: 当前 <code>TaskManager</code> 是纯进程内实现（<code>_tasks: dict</code> + <code>asyncio.Semaphore</code>），只能管理单 worker 内的任务。多 worker 部署下无法防止同一 <code>thread_id</code> 被不同 worker 重复执行，也无法做全局并发控制。</p>
+<p><strong>设计原则</strong>: 两层架构 — 保留本地 <code>TaskManager</code>（生命周期管理、优雅停机），新增 Redis 分布式协调层。</p>
 <p><strong>涉及文件</strong>:
-- <code>src/core/conversation_manager.py</code> — <code>_cache</code> dict → Redis Hash</p>
-<p><strong>改动</strong>:
-- <code>_cache</code>（Python dict）替换为 Redis Hash
-- 实现 cache invalidation 策略（TTL + 写穿）
-- 或者简化：移除内存缓存层，全部走 DB（PostgreSQL 足够快），仅在热点路径用 Redis 缓存</p>
-<h3 id="63-checkpointer-迁移到-redis可选">6.3 Checkpointer 迁移到 Redis（可选）</h3>
+- <code>src/api/services/task_manager.py</code> — 新增分布式锁集成
+- <code>src/api/routers/chat.py</code> — <code>submit</code> 前加锁（L195, L441）
+- <code>src/api/dependencies.py</code> — Redis 连接注入（复用 5.2 的连接）</p>
+<p><strong>改动</strong>:</p>
+<p><strong>5.5.1 [P1] 分布式锁 — 防重复执行</strong></p>
+<p>在 <code>task_manager.submit()</code> 前，对 <code>thread_id</code> 加 Redis 分布式锁，防止同一任务被多个 worker 同时执行：</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="c1"># 伪代码 — chat.py submit 前</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="n">lock_key</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;task_lock:</span><span class="si">{</span><span class="n">thread_id</span><span class="si">}</span><span class="s2">&quot;</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="n">lock_token</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">uuid4</span><span class="p">())</span>  <span class="c1"># 唯一 token，标识本次加锁者</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="n">acquired</span> <span class="o">=</span> <span class="k">await</span> <span class="n">redis</span><span class="o">.</span><span class="n">set</span><span class="p">(</span><span class="n">lock_key</span><span class="p">,</span> <span class="n">lock_token</span><span class="p">,</span> <span class="n">nx</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">ex</span><span class="o">=</span><span class="n">config</span><span class="o">.</span><span class="n">STREAM_TIMEOUT</span><span class="p">)</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="k">if</span> <span class="ow">not</span> <span class="n">acquired</span><span class="p">:</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>    <span class="k">raise</span> <span class="n">HTTPException</span><span class="p">(</span><span class="mi">409</span><span class="p">,</span> <span class="s2">&quot;Task already running for this thread&quot;</span><span class="p">)</span>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="c1"># submit 后在 background task finally 中释放锁（必须校验 token）</span>
+</code></pre></div>
+<ul>
+<li>锁的 TTL = <code>STREAM_TIMEOUT</code>（兜底超时释放，防止 worker 崩溃后死锁）</li>
+<li><strong>释放时必须校验 token</strong>：使用 Lua 脚本 compare-and-del，防止误删其他 worker 的锁（场景：任务超时 → 锁过期 → 被新 worker 抢占 → 旧任务 finally 不能直接 <code>DEL</code>）</li>
+</ul>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="c1">-- Lua compare-and-del（原子操作）</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="kr">if</span><span class="w"> </span><span class="nv">redis</span><span class="p">.</span><span class="nf">call</span><span class="p">(</span><span class="s2">&quot;GET&quot;</span><span class="p">,</span><span class="w"> </span><span class="nv">KEYS</span><span class="p">[</span><span class="mi">1</span><span class="p">])</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="nv">ARGV</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span><span class="w"> </span><span class="kr">then</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="w">    </span><span class="kr">return</span><span class="w"> </span><span class="nv">redis</span><span class="p">.</span><span class="nf">call</span><span class="p">(</span><span class="s2">&quot;DEL&quot;</span><span class="p">,</span><span class="w"> </span><span class="nv">KEYS</span><span class="p">[</span><span class="mi">1</span><span class="p">])</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="kr">else</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="w">    </span><span class="kr">return</span><span class="w"> </span><span class="mi">0</span>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="kr">end</span>
+</code></pre></div>
+<ul>
+<li>resume 端点同理（L441）</li>
+</ul>
+<p><strong>注意</strong>：<code>thread_id</code> 锁解决的是"同一任务被多 worker 重复执行"的问题。它<strong>不覆盖</strong>客户端重试幂等性（因为每次 <code>POST /chat</code> 会生成新 <code>thread_id</code>）。如需防止客户端重试导致重复执行，需额外设计 idempotency key（如前端生成请求级 UUID 通过 header 传入，后端用 Redis <code>SET NX</code> 去重）。当前阶段不做，作为后续 Phase 可选项记录。</p>
+<p><strong>5.5.2 [P2] 全局并发上限 ⏸️ Deferred</strong></p>
+<p>当前阶段<strong>保留本地 <code>Semaphore</code></strong> 做 per-worker 并发控制，不做 Redis 全局限流。</p>
+<p><strong>理由</strong>：本地 Semaphore 已能防止单 worker 过载；全局限流（ZSET 信号量 + Lua）增加复杂度但在当前部署规模下收益不明确。</p>
+<p><strong>触发条件</strong>（再开启本项）：
+- 压测数据表明多 worker 间并发总量需要全局控制
+- 出现过因缺少全局限流导致的资源争抢问题</p>
+<p><strong>候选方案</strong>（已调研，未落地）：ZSET 信号量 + Lua 原子 acquire/release（member=thread_id, score=过期时间戳），acquire 时 ZREMRANGEBYSCORE 清理过期租约 → ZCARD 检查 → ZADD 登记。避免裸 INCR/DECR（崩溃泄漏）、DBSIZE（统计无关 key）、SCAN（O(N) 热路径）。</p>
+<p><strong>5.5.3 [P2] 任务状态登记 ⏸️ Deferred</strong></p>
+<p>将运行中的任务注册到 Redis Hash 提升可观测性。同样等压测或运维需求驱动再实施。</p>
+<p><strong>退出标准</strong>（本轮仅覆盖 5.5.1）:
+- 同一 <code>thread_id</code> 并发提交到不同 worker → 第二个被拒绝（409）
+- Worker 崩溃后锁自动释放（TTL 兜底）
+- 本地生命周期管理（引用持有、优雅停机）不受影响</p>
+<hr />
+<h2 id="phase-6-postgresql-迁移">Phase 6: PostgreSQL 迁移</h2>
+<p><strong>目标</strong>: 主数据库从 SQLite 迁移到 PostgreSQL，获得真正的多写者并发（MVCC）、复合索引性能、生产级连接池管理。</p>
+<p><strong>前置依赖</strong>: Phase 5.1（可移植性基线 + Alembic）已完成。</p>
+<h3 id="61-数据库引擎切换">6.1 数据库引擎切换</h3>
 <p><strong>涉及文件</strong>:
-- <code>src/core/graph.py</code> — checkpointer 创建
-- <code>src/api/dependencies.py</code> — checkpointer 初始化</p>
-<p><strong>改动</strong>:
-- 如果 Phase 5.3 已迁移到 PostgreSQL checkpointer 且性能满足，此步可跳过
-- 如需进一步优化：使用 <code>langgraph-checkpoint-redis</code> 的 <code>AsyncRedisSaver</code>
-- Redis checkpointer 天然支持 TTL，checkpoint 数据自动过期</p>
+- <code>src/db/database.py</code> — <code>DatabaseManager</code> 多引擎适配
+- <code>src/api/config.py</code> — <code>DATABASE_URL</code> 默认值更新
+- <code>requirements.txt</code> — 新增 <code>asyncpg</code>
+- <code>docker-compose.yml</code> — 新增 PostgreSQL 服务</p>
+<p><strong>改动</strong>:</p>
+<p><strong>6.1.1 DatabaseManager 多引擎适配</strong></p>
+<ul>
+<li>保留 <code>_is_sqlite()</code>，新增 <code>_get_dialect() -&gt; str</code>（返回 <code>"sqlite"</code> / <code>"postgresql"</code> / <code>"mysql"</code> 等）</li>
+<li>SQLite 保留 WAL 配置（<code>_configure_sqlite_wal()</code> 条件调用，当前已实现 ✅），仍可用于开发/测试</li>
+<li>PostgreSQL 连接池参数：</li>
+</ul>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_dialect</span><span class="p">()</span> <span class="o">==</span> <span class="s2">&quot;postgresql&quot;</span><span class="p">:</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>    <span class="n">engine_kwargs</span><span class="o">.</span><span class="n">update</span><span class="p">({</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>        <span class="s2">&quot;pool_size&quot;</span><span class="p">:</span> <span class="mi">10</span><span class="p">,</span>          <span class="c1"># 基础连接数</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>        <span class="s2">&quot;max_overflow&quot;</span><span class="p">:</span> <span class="mi">20</span><span class="p">,</span>       <span class="c1"># 峰值溢出连接</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>        <span class="s2">&quot;pool_timeout&quot;</span><span class="p">:</span> <span class="mi">30</span><span class="p">,</span>       <span class="c1"># 等待连接超时</span>
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>        <span class="s2">&quot;pool_recycle&quot;</span><span class="p">:</span> <span class="mi">1800</span><span class="p">,</span>     <span class="c1"># 连接最大存活 30 分钟</span>
+<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a>        <span class="s2">&quot;pool_pre_ping&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>    <span class="c1"># 取连接前 ping 验活，防止使用已断开的连接</span>
+<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a>    <span class="p">})</span>
+</code></pre></div>
+<ul>
+<li>可选：PostgreSQL 单语句超时 <code>connect_args={"server_settings": {"statement_timeout": "30000"}}</code></li>
+</ul>
+<p><strong>6.1.2 Docker PostgreSQL 服务</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="nt">postgres</span><span class="p">:</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="w">  </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">postgres:16-alpine</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="w">  </span><span class="nt">environment</span><span class="p">:</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="w">    </span><span class="nt">POSTGRES_DB</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">artifactflow</span>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="w">    </span><span class="nt">POSTGRES_USER</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">artifactflow</span>
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="w">    </span><span class="nt">POSTGRES_PASSWORD</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">${POSTGRES_PASSWORD:-changeme}</span>
+<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="w">  </span><span class="nt">ports</span><span class="p">:</span>
+<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="s">&quot;5432:5432&quot;</span>
+<a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a><span class="w">  </span><span class="nt">volumes</span><span class="p">:</span>
+<a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">postgres_data:/var/lib/postgresql/data</span>
+<a id="__codelineno-5-11" name="__codelineno-5-11" href="#__codelineno-5-11"></a><span class="w">  </span><span class="nt">healthcheck</span><span class="p">:</span>
+<a id="__codelineno-5-12" name="__codelineno-5-12" href="#__codelineno-5-12"></a><span class="w">    </span><span class="nt">test</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="s">&quot;CMD-SHELL&quot;</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">&quot;pg_isready</span><span class="nv"> </span><span class="s">-U</span><span class="nv"> </span><span class="s">artifactflow&quot;</span><span class="p p-Indicator">]</span>
+<a id="__codelineno-5-13" name="__codelineno-5-13" href="#__codelineno-5-13"></a><span class="w">    </span><span class="nt">interval</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">10s</span>
+<a id="__codelineno-5-14" name="__codelineno-5-14" href="#__codelineno-5-14"></a><span class="w">    </span><span class="nt">timeout</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">5s</span>
+<a id="__codelineno-5-15" name="__codelineno-5-15" href="#__codelineno-5-15"></a><span class="w">    </span><span class="nt">retries</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">5</span>
+</code></pre></div>
+<p>backend 服务 <code>depends_on</code> 增加 <code>postgres</code> 和 <code>redis</code>（含 health condition）。</p>
+<h3 id="62-schema-迁移与类型适配">6.2 Schema 迁移与类型适配</h3>
+<p><strong>涉及文件</strong>:
+- <code>src/db/models.py</code> — 类型审查
+- <code>src/db/migrations/</code> — Alembic 迁移脚本（5.1.2 已初始化）
+- <code>scripts/</code> — 数据迁移脚本</p>
+<p><strong>改动</strong>:</p>
+<p><strong>6.2.1 ORM 模型类型审查</strong></p>
+<p>当前模型已基本兼容 PostgreSQL，需确认的点：
+- <code>JSON</code> → SQLAlchemy 在 PostgreSQL 上自动映射为 <code>JSONB</code>（兼容 ✅，可显式标注提升可读性）
+- <code>DateTime</code> → PostgreSQL <code>TIMESTAMP</code>（兼容 ✅）
+- <code>String(N)</code> → <code>VARCHAR(N)</code>（兼容 ✅）
+- <code>Text</code> → <code>TEXT</code>（兼容 ✅）
+- <code>Integer</code> + <code>autoincrement=True</code>（<code>artifact_versions.id</code>）→ PostgreSQL <code>SERIAL</code>（SQLAlchemy 自动处理 ✅）</p>
+<p><strong>6.2.2 数据迁移工具</strong></p>
+<p>编写 <code>scripts/migrate_sqlite_to_pg.py</code>：
+- 从 SQLite 按 FK 依赖顺序读取所有表数据
+- 写入 PostgreSQL（批量 INSERT）
+- 校验每张表的记录数一致性
+- 支持 <code>--dry-run</code> 模式（只读不写，输出迁移计划）</p>
+<h3 id="63-性能优化--复合索引">6.3 性能优化 — 复合索引</h3>
+<p><strong>涉及文件</strong>:
+- <code>src/db/models.py</code> — 新增复合索引定义
+- Alembic 迁移脚本</p>
+<p><strong>改动</strong>:</p>
+<p>基于热点查询分析新增复合索引：</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="c1"># conversations 表</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="c1"># 热点查询：list_conversations() — WHERE user_id=? ORDER BY updated_at DESC</span>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="c1"># 文件：conversation_repo.py L210, L213</span>
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="n">Index</span><span class="p">(</span><span class="s2">&quot;ix_conversations_user_updated&quot;</span><span class="p">,</span> <span class="s2">&quot;user_id&quot;</span><span class="p">,</span> <span class="s2">&quot;updated_at&quot;</span><span class="p">)</span>
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a>
+<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a><span class="c1"># messages 表</span>
+<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a><span class="c1"># 热点查询：conversation 内消息加载 — WHERE conversation_id=? ORDER BY created_at</span>
+<a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a><span class="c1"># 文件：conversation_repo.py L386</span>
+<a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a><span class="n">Index</span><span class="p">(</span><span class="s2">&quot;ix_messages_conv_created&quot;</span><span class="p">,</span> <span class="s2">&quot;conversation_id&quot;</span><span class="p">,</span> <span class="s2">&quot;created_at&quot;</span><span class="p">)</span>
+<a id="__codelineno-6-10" name="__codelineno-6-10" href="#__codelineno-6-10"></a>
+<a id="__codelineno-6-11" name="__codelineno-6-11" href="#__codelineno-6-11"></a><span class="c1"># artifact_versions 表</span>
+<a id="__codelineno-6-12" name="__codelineno-6-12" href="#__codelineno-6-12"></a><span class="c1"># 热点查询：版本历史 — WHERE artifact_id=? AND session_id=? ORDER BY version</span>
+<a id="__codelineno-6-13" name="__codelineno-6-13" href="#__codelineno-6-13"></a><span class="c1"># 已有 UniqueConstraint(artifact_id, session_id, version) 可复用 ✅</span>
+</code></pre></div>
+<p>注意：这些索引在 SQLite 上同样有效（SQLAlchemy 统一创建），不影响可移植性。</p>
+<p><strong>退出标准</strong>:
+- PostgreSQL 上所有回归测试通过
+- PostgreSQL 并发写入测试通过（模拟多请求同时写入 conversation/message/artifact）
+- SQLite 模式仍可正常工作（开发/测试场景）
+- 数据迁移脚本执行成功 + 记录数校验通过
+- 复合索引在 EXPLAIN 中被正确使用</p>
+<hr />
+<h2 id="测试策略贯穿-phase-5--phase-6">测试策略（贯穿 Phase 5 / Phase 6）</h2>
+<p>当前测试基座是内存 SQLite（<code>tests/conftest.py</code> L50-60），无法覆盖 PostgreSQL/Redis 行为差异。需要建立多数据库测试基础设施。</p>
+<h3 id="测试基础设施改造">测试基础设施改造</h3>
+<p><strong>涉及文件</strong>:
+- <code>tests/conftest.py</code> — 多数据库 fixture
+- <code>tests/integration/</code> — 新增集成测试目录
+- CI 配置 — 多数据库 matrix</p>
+<p><strong>改动</strong>:</p>
+<p><strong>环境变量驱动的数据库选择</strong>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="c1"># tests/conftest.py</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="nd">@pytest</span><span class="o">.</span><span class="n">fixture</span><span class="p">(</span><span class="n">scope</span><span class="o">=</span><span class="s2">&quot;session&quot;</span><span class="p">)</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="k">def</span><span class="w"> </span><span class="nf">db_manager</span><span class="p">():</span>
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>    <span class="n">db_url</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;TEST_DATABASE_URL&quot;</span><span class="p">,</span> <span class="s2">&quot;sqlite+aiosqlite:///:memory:&quot;</span><span class="p">)</span>
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a>    <span class="n">manager</span> <span class="o">=</span> <span class="n">DatabaseManager</span><span class="p">(</span><span class="n">db_url</span><span class="p">)</span>
+<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a>    <span class="o">...</span>
+</code></pre></div>
+<p><strong>CI Matrix</strong>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="nt">strategy</span><span class="p">:</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="w">  </span><span class="nt">matrix</span><span class="p">:</span>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="w">    </span><span class="nt">database</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">sqlite</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">postgres</span><span class="p p-Indicator">]</span>
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="w">    </span><span class="c1"># MySQL 可选，后续按需加入</span>
+</code></pre></div>
+<p><strong>Redis 集成测试</strong>（<code>tests/integration/</code>）:
+- <code>test_redis_checkpointer.py</code> — checkpoint CRUD / TTL 过期 / interrupt-resume
+- <code>test_redis_stream_manager.py</code> — 事件推送/消费/断线重连/TTL 清理
+- <code>test_redis_fault.py</code> — Redis 断连后 503 响应、Redis 恢复后自动重连
+- <code>test_returning_adapter.py</code> — RETURNING 适配层测试：SQLite / PostgreSQL 行为一致性 + <strong>mock <code>_supports_returning()=False</code> 强制 fallback 路径</strong>（CI 的两种数据库都支持 RETURNING，不 mock 则 fallback 永远不被执行）</p>
+<p><strong>并发测试增强</strong>:
+- 多请求并发写入 conversation/message/artifact（验证 PostgreSQL MVCC 优于 SQLite 单写者）
+- 多 worker stream push/consume（验证 Redis Streams 跨进程投递）</p>
 <hr />
 <h2 id="phase-7-文件上传--artifact">Phase 7: 文件上传 → Artifact</h2>
 <p><strong>目标</strong>: 支持用户上传文档，解析为 Artifact 供 Agent 操作。</p>
@@ -1538,7 +1913,7 @@
 <p><strong>涉及文件</strong>:
 - <code>src/api/routers/artifacts.py</code> — 新增 <code>POST /api/v1/artifacts/{session_id}/upload</code>
 - <code>src/api/schemas/</code> — 新增上传请求/响应 schema
-- <code>src/core/artifact_manager.py</code> — 新增 <code>create_from_upload()</code> 方法</p>
+- <code>src/tools/implementations/artifact_ops.py</code> — 新增 <code>create_from_upload()</code> 方法</p>
 <p><strong>改动</strong>:
 - 新增上传端点，接受 <code>UploadFile</code>（multipart/form-data）
 - 支持文件类型：<code>.txt</code>, <code>.md</code>, <code>.pdf</code>, <code>.csv</code>, <code>.json</code> 等
@@ -1562,7 +1937,7 @@
 <p><strong>涉及文件</strong>:
 - <code>src/api/routers/artifacts.py</code> — 新增 PUT/PATCH 端点
 - <code>src/api/schemas/</code> — 新增更新请求 schema（含 <code>lock_version</code> 乐观锁）
-- <code>src/core/artifact_manager.py</code> — 新增 <code>update_by_user()</code> 方法
+- <code>src/tools/implementations/artifact_ops.py</code> — 新增 <code>update_by_user()</code> 方法
 - <code>src/db/models.py</code> — Artifact 模型已有 <code>lock_version</code> 字段</p>
 <p><strong>改动</strong>:
 - <code>PUT /api/v1/artifacts/{session_id}/{artifact_id}</code> — 全量更新内容
@@ -1581,23 +1956,35 @@
 - 乐观更新：保存后立即更新本地状态，失败时回滚</p>
 <hr />
 <h2 id="各-phase-依赖关系">各 Phase 依赖关系</h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>Phase 1 (核心 Bug)     ✅ 已完成
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>Phase 2 (安全加固)     ✅ 已完成
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>Phase 3 (数据质量)     ← 无依赖，可与 Phase 1/2 并行
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>Phase 4 (认证框架)     ✅ 已完成
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>Phase 5 (PostgreSQL)   ← 建议在 Phase 4 之后（认证需要的 User 模型一起迁移）
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>Phase 6 (Redis)        ← 建议在 Phase 5 之后（基础设施逐步升级）
-<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>Phase 7 (文件上传)     ← 建议在 Phase 4 之后（需要认证知道上传者是谁）
-<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>Phase 8 (编辑 Artifact) ← 建议在 Phase 7 之后（上传和编辑共享写接口模式）
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>Phase 1 (核心 Bug)          ✅ 已完成
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>Phase 2 (安全加固)          ✅ 已完成
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>Phase 3 (数据质量)          ← 3.1/3.2 ✅, 3.3 ⏸️
+<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a>Phase 4 (认证框架)          ✅ 已完成
+<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a>Phase 5 (Redis + 可移植性)   ← Phase 4 之后
+<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a>  5.1 可移植性基线            ← 无依赖
+<a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a>  5.2 Redis Checkpointer     ← 无依赖（可与 5.1 并行）
+<a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a>  5.3 Redis StreamManager    ← 可与 5.2 并行（共用 Redis 连接）
+<a id="__codelineno-9-9" name="__codelineno-9-9" href="#__codelineno-9-9"></a>  5.4 缓存决策               ← 不做改动（保持 request-local）
+<a id="__codelineno-9-10" name="__codelineno-9-10" href="#__codelineno-9-10"></a>  5.5 TaskManager 适配       ← 依赖 5.2（需要 Redis 连接）
+<a id="__codelineno-9-11" name="__codelineno-9-11" href="#__codelineno-9-11"></a>Phase 6 (PostgreSQL)         ← 依赖 5.1（可移植性基线 + Alembic）
+<a id="__codelineno-9-12" name="__codelineno-9-12" href="#__codelineno-9-12"></a>  6.1 引擎切换
+<a id="__codelineno-9-13" name="__codelineno-9-13" href="#__codelineno-9-13"></a>  6.2 Schema 迁移             ← 依赖 6.1
+<a id="__codelineno-9-14" name="__codelineno-9-14" href="#__codelineno-9-14"></a>  6.3 复合索引                ← 依赖 6.2
+<a id="__codelineno-9-15" name="__codelineno-9-15" href="#__codelineno-9-15"></a>Phase 7 (文件上传)           ← Phase 4 之后（需要认证知道上传者是谁）
+<a id="__codelineno-9-16" name="__codelineno-9-16" href="#__codelineno-9-16"></a>Phase 8 (编辑 Artifact)      ← Phase 7 之后（上传和编辑共享写接口模式）
 </code></pre></div>
+<p>关键路径: <strong>5.1 ∥ 5.2/5.3 → 5.5 → 6.1 → 6.2 → 6.3</strong>（5.1 与 5.2 可并行）。5.2 完成后即可获得最大的并发性能提升（checkpointer 瓶颈解除）。</p>
 <hr />
 <h2 id="备注">备注</h2>
 <ul>
 <li>Phase 1-3 是纯修复，不引入新依赖，风险最低</li>
 <li>Phase 4 是第一个需要前端大改的阶段（登录页 + token 管理）</li>
-<li>Phase 5-6 是基础设施升级，需要 docker-compose 和部署配置变更</li>
+<li>Phase 5 优先 Redis（解决并发瓶颈）+ 可移植性基线（为 Phase 6 铺路），5.1 和 5.2 可并行推进</li>
+<li>Phase 6 PostgreSQL 迁移依赖 5.1 的 Alembic 框架和方言适配层</li>
 <li>Phase 7-8 是功能增强，可根据产品需求调整优先级</li>
-<li>concurrency.md 中已标记 ✅ 的项目（TaskManager、短事务、日志上下文、SSE Heartbeat 等）不在此计划中</li>
+<li>数据库可移植性 CI 范围：当前只跑 SQLite + PostgreSQL；MySQL/TDSQL 等有实际切库需求时再加入 matrix</li>
+<li>concurrency.md 中已标记 ✅ 的项目（短事务、日志上下文、SSE Heartbeat 等）不在此计划中。TaskManager 多 worker 适配已纳入 5.5</li>
+<li>Phase 5/6 完成后需同步更新 <code>docs/architecture/concurrency.md</code>（演进路线、资源分层图）和 <code>CLAUDE.md</code>（命令、架构描述）</li>
 </ul>
 
 
