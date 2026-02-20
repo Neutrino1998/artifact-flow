@@ -263,7 +263,7 @@ async for event in controller.stream_execute(
 echo $BOCHA_API_KEY
 
 # 检查日志
-tail -f logs/app.log | grep "web_search"
+tail -f logs/artifactflow.log | grep "web_search"
 ```
 
 ---
@@ -407,7 +407,7 @@ if agent.toolkit:
 from tools.implementations.web_search import WebSearchTool
 
 tool = WebSearchTool()
-result = await tool.execute(query="test query")
+result = await tool(query="test query")  # 使用 __call__，会自动填充默认参数
 print(result)
 ```
 
@@ -430,6 +430,6 @@ print(state)
 
 如果以上都无法解决问题：
 
-1. **检查日志**：`tail -f logs/app.log`
+1. **检查日志**：`tail -f logs/artifactflow.log`
 2. **启用调试模式**：`set_global_debug(True)`
 3. **提交 Issue**：附上错误日志和复现步骤

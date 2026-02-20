@@ -99,7 +99,7 @@ async def create_multi_agent_graph(
     checkpointer: Optional[Any] = None,
     db_path: str = "data/langgraph.db"
 ):
-    graph_builder = ExtendableGraph()
+    graph_builder = ExtendableGraph(artifact_manager=artifact_manager)
 
     # 创建 Agent 实例
     lead = LeadAgent()
@@ -125,7 +125,7 @@ async def create_multi_agent_graph(
     graph_builder.set_entry_point("lead_agent")
 
     # 编译
-    return graph_builder.compile(checkpointer=checkpointer)
+    return await graph_builder.compile(checkpointer=checkpointer)
 ```
 
 ### Lead Agent 自动感知
@@ -315,8 +315,7 @@ def create_code_agent() -> BaseAgent:
 | `integer` | `int` | `<param><![CDATA[42]]></param>` |
 | `number` | `float` | `<param><![CDATA[3.14]]></param>` |
 | `boolean` | `bool` | `<param><![CDATA[true]]></param>` |
-| `array` | `list` | `<param><![CDATA[["a", "b"]]]></param>` |
-| `object` | `dict` | `<param><![CDATA[{"key": "value"}]]></param>` |
+| `array` | `list` | `<param><item><![CDATA[a]]></item><item><![CDATA[b]]></item></param>` |
 
 ## 添加新 Artifact 类型
 
@@ -363,12 +362,12 @@ await artifact_manager.create_artifact(
 MODEL_CONFIGS = {
     # 现有配置...
 
-    # 添加新模型
+    # 添加新模型（预定义配置只支持 model 和 reasoning 标志）
     "my-custom-model": {
-        "provider": "openai",  # 或其他 LiteLLM 支持的 provider
-        "model": "my-model-name",
-        "api_base": "https://my-api.example.com/v1",
-        "api_key_env": "MY_API_KEY"
+        "model": "dashscope/my-model-name",  # LiteLLM 格式：provider/model
+        "support_reasoning": False,           # 是否支持推理模式
+        "auto_reasoning": False,              # 模型是否自带推理（如 DeepSeek R1）
+        "description": "My custom model"
     }
 }
 ```
@@ -380,8 +379,22 @@ class MyAgent(BaseAgent):
     def __init__(self):
         super().__init__(AgentConfig(
             # ...
-            model="my-custom-model"
+            model="my-custom-model"  # 使用预定义配置中的 key
         ))
+```
+
+### 自部署模型（Ollama/vLLM）
+
+对于自部署的 OpenAI 兼容接口，使用 `create_llm()` 的 `base_url` 和 `api_key` 参数：
+
+```python
+from models.llm import create_llm
+
+llm = create_llm(
+    model="llama3",
+    base_url="http://localhost:11434/v1",
+    api_key="ollama"
+)
 ```
 
 ## 测试新组件
