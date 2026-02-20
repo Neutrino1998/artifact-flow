@@ -498,10 +498,10 @@ python run_cli.py chat -n           # 开始新对话
 
 ```bash
 # 批量模式测试 - 多轮对话、权限确认、分支对话
-python -m tests.test_core_graph
+python -m tests.manual.core_graph
 
 # 流式模式测试 - 实时输出、思考过程展示
-python -m tests.test_core_graph_stream
+python -m tests.manual.core_graph_stream
 ```
 
 测试脚本提供交互式菜单：

@@ -8,7 +8,7 @@ LiteLLM Provider 兼容性测试
 4. 流式输出
 
 运行方式：
-    python -m tests.test_litellm_providers
+    python -m tests.manual.litellm_providers
 """
 
 import asyncio
