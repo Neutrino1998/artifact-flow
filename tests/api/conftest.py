@@ -6,23 +6,26 @@ in-process via ASGITransport (no server needed).
 
 Dependency overrides:
 - get_db_manager    → test db_manager (session-scoped in-memory SQLite)
-- get_db_session    → test db_session (function-scoped with cleanup)
 - get_stream_manager → fresh StreamManager per test
 - get_task_manager   → fresh TaskManager per test
 
-get_current_user is NOT overridden — real JWT verification is used.
-get_checkpointer is NOT overridden — tests involving LangGraph execution
-are not yet supported and will be added later.
+NOT overridden (by design):
+- get_db_session: uses the real implementation, which creates a fresh
+  AsyncSession per request from the overridden db_manager. This preserves
+  the "one session per request" production semantics.
+- get_current_user: real JWT verification is used. Fixtures sign tokens
+  with the same JWT_SECRET set in tests/conftest.py.
+- get_checkpointer: LangGraph execution endpoints (POST /chat, resume)
+  are NOT testable with this fixture set. Override will be added when
+  chat/stream integration tests are implemented.
 """
 
 import pytest
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.main import create_app
 from api.dependencies import (
     get_db_manager,
-    get_db_session,
     get_stream_manager,
     get_task_manager,
 )
@@ -34,7 +37,7 @@ from db.models import User
 
 
 @pytest.fixture
-async def app(db_manager: DatabaseManager, db_session: AsyncSession):
+async def app(db_manager: DatabaseManager):
     """
     FastAPI app with dependency overrides pointing to test instances.
 
@@ -47,13 +50,13 @@ async def app(db_manager: DatabaseManager, db_session: AsyncSession):
     task_manager = TaskManager(max_concurrent=5)
 
     application.dependency_overrides[get_db_manager] = lambda: db_manager
-    application.dependency_overrides[get_db_session] = lambda: db_session
     application.dependency_overrides[get_stream_manager] = lambda: stream_manager
     application.dependency_overrides[get_task_manager] = lambda: task_manager
 
     yield application
 
     application.dependency_overrides.clear()
+    await task_manager.shutdown()
 
 
 @pytest.fixture

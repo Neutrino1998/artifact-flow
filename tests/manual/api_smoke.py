@@ -7,12 +7,12 @@ ArtifactFlow API 冒烟测试
        cd src && python run_server.py
 
     2. 运行测试 (新开终端):
-       python -m tests.api_smoke_test
+       python -m tests.manual.api_smoke
 
     3. 运行单个测试:
-       python -m tests.api_smoke_test --test chat
-       python -m tests.api_smoke_test --test stream
-       python -m tests.api_smoke_test --test artifacts
+       python -m tests.manual.api_smoke --test chat
+       python -m tests.manual.api_smoke --test stream
+       python -m tests.manual.api_smoke --test artifacts
 """
 
 import asyncio
