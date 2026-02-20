@@ -133,9 +133,14 @@ class TestConversationCRUD:
     async def test_update_title(
         self, conversation_repo: ConversationRepository, sample_conversation: Conversation
     ):
+        # Pin updated_at to a known past value
+        old_time = datetime(2000, 1, 1)
+        sample_conversation.updated_at = old_time
+        await conversation_repo.update(sample_conversation)
+
         updated = await conversation_repo.update_title(sample_conversation.id, "New Title")
         assert updated.title == "New Title"
-        assert updated.updated_at is not None
+        assert updated.updated_at > old_time
 
     async def test_update_active_branch(
         self, conversation_repo: ConversationRepository, sample_conversation: Conversation
@@ -299,11 +304,17 @@ class TestMessageCRUD:
             sample_conversation.id, msg_id, "hello", "thd-x"
         )
 
+        # Pin updated_at to a known past value
+        old_time = datetime(2000, 1, 1)
+        conv = await conversation_repo.get_conversation(sample_conversation.id)
+        conv.updated_at = old_time
+        await conversation_repo.update(conv)
+
         updated_msg = await conversation_repo.update_graph_response(msg_id, "world")
         assert updated_msg.graph_response == "world"
 
         conv = await conversation_repo.get_conversation(sample_conversation.id)
-        assert conv.updated_at is not None
+        assert conv.updated_at > old_time
 
     async def test_get_conversation_messages_ordered(
         self, conversation_repo: ConversationRepository, sample_conversation: Conversation
