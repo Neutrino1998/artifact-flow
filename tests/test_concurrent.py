@@ -10,6 +10,7 @@ import uuid
 import asyncio
 
 import pytest
+from sqlalchemy.exc import IntegrityError
 
 from db.database import DatabaseManager
 from db.models import User, VersionConflictError
@@ -212,7 +213,7 @@ class TestConcurrent:
                 try:
                     await repo.create_conversation(conv_id, user_id=user.id)
                     results.append(("success", worker_id))
-                except (DuplicateError, Exception):
+                except (DuplicateError, IntegrityError):
                     results.append(("error", worker_id))
 
         await asyncio.gather(create_worker(1), create_worker(2))

@@ -15,8 +15,8 @@ from repositories.user_repo import UserRepository
 
 class TestLogin:
 
-    async def test_login_success(self, client: AsyncClient, test_user: User):
-        resp = await client.post(
+    async def test_login_success(self, anon_client: AsyncClient, test_user: User):
+        resp = await anon_client.post(
             "/api/v1/auth/login",
             json={"username": "testuser", "password": "testpass"},
         )
@@ -26,15 +26,15 @@ class TestLogin:
         assert body["token_type"] == "bearer"
         assert body["user"]["username"] == "testuser"
 
-    async def test_login_wrong_password(self, client: AsyncClient, test_user: User):
-        resp = await client.post(
+    async def test_login_wrong_password(self, anon_client: AsyncClient, test_user: User):
+        resp = await anon_client.post(
             "/api/v1/auth/login",
             json={"username": "testuser", "password": "wrongpass"},
         )
         assert resp.status_code == 401
 
-    async def test_login_unknown_username(self, client: AsyncClient):
-        resp = await client.post(
+    async def test_login_unknown_username(self, anon_client: AsyncClient):
+        resp = await anon_client.post(
             "/api/v1/auth/login",
             json={"username": "nobody", "password": "whatever"},
         )

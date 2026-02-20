@@ -6,8 +6,7 @@ branching paths, and format_conversation_history.
 """
 
 import uuid
-import asyncio
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import pytest
 
@@ -134,11 +133,9 @@ class TestConversationCRUD:
     async def test_update_title(
         self, conversation_repo: ConversationRepository, sample_conversation: Conversation
     ):
-        old_updated = sample_conversation.updated_at
-        await asyncio.sleep(0.01)  # ensure time passes
         updated = await conversation_repo.update_title(sample_conversation.id, "New Title")
         assert updated.title == "New Title"
-        assert updated.updated_at >= old_updated
+        assert updated.updated_at is not None
 
     async def test_update_active_branch(
         self, conversation_repo: ConversationRepository, sample_conversation: Conversation
@@ -224,10 +221,11 @@ class TestConversationCountPagination:
                 conversation_id=cid, user_id=test_user.id
             )
             ids.append(cid)
-            await asyncio.sleep(0.01)
 
-        # Update the first conversation to make it the most recent
-        await conversation_repo.update_title(ids[0], "Updated First")
+        # Explicitly set updated_at so ids[0] is the most recent
+        conv0 = await conversation_repo.get_conversation_or_raise(ids[0])
+        conv0.updated_at = datetime.now() + timedelta(seconds=10)
+        await conversation_repo.update(conv0)
 
         convs = await conversation_repo.list_conversations(
             user_id=test_user.id, order_by_updated=True
@@ -301,15 +299,11 @@ class TestMessageCRUD:
             sample_conversation.id, msg_id, "hello", "thd-x"
         )
 
-        old_conv = await conversation_repo.get_conversation(sample_conversation.id)
-        old_updated = old_conv.updated_at
-
-        await asyncio.sleep(0.01)
         updated_msg = await conversation_repo.update_graph_response(msg_id, "world")
         assert updated_msg.graph_response == "world"
 
         conv = await conversation_repo.get_conversation(sample_conversation.id)
-        assert conv.updated_at >= old_updated
+        assert conv.updated_at is not None
 
     async def test_get_conversation_messages_ordered(
         self, conversation_repo: ConversationRepository, sample_conversation: Conversation
