@@ -1009,6 +1009,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#自部署模型ollamavllm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        自部署模型（Ollama/vLLM）
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1408,6 +1419,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#自部署模型ollamavllm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        自部署模型（Ollama/vLLM）
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1614,7 +1636,7 @@
 <a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>    <span class="n">checkpointer</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">Any</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
 <a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>    <span class="n">db_path</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;data/langgraph.db&quot;</span>
 <a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a><span class="p">):</span>
-<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a>    <span class="n">graph_builder</span> <span class="o">=</span> <span class="n">ExtendableGraph</span><span class="p">()</span>
+<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a>    <span class="n">graph_builder</span> <span class="o">=</span> <span class="n">ExtendableGraph</span><span class="p">(</span><span class="n">artifact_manager</span><span class="o">=</span><span class="n">artifact_manager</span><span class="p">)</span>
 <a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a>
 <a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a>    <span class="c1"># 创建 Agent 实例</span>
 <a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a>    <span class="n">lead</span> <span class="o">=</span> <span class="n">LeadAgent</span><span class="p">()</span>
@@ -1640,7 +1662,7 @@
 <a id="__codelineno-1-34" name="__codelineno-1-34" href="#__codelineno-1-34"></a>    <span class="n">graph_builder</span><span class="o">.</span><span class="n">set_entry_point</span><span class="p">(</span><span class="s2">&quot;lead_agent&quot;</span><span class="p">)</span>
 <a id="__codelineno-1-35" name="__codelineno-1-35" href="#__codelineno-1-35"></a>
 <a id="__codelineno-1-36" name="__codelineno-1-36" href="#__codelineno-1-36"></a>    <span class="c1"># 编译</span>
-<a id="__codelineno-1-37" name="__codelineno-1-37" href="#__codelineno-1-37"></a>    <span class="k">return</span> <span class="n">graph_builder</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="n">checkpointer</span><span class="o">=</span><span class="n">checkpointer</span><span class="p">)</span>
+<a id="__codelineno-1-37" name="__codelineno-1-37" href="#__codelineno-1-37"></a>    <span class="k">return</span> <span class="k">await</span> <span class="n">graph_builder</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="n">checkpointer</span><span class="o">=</span><span class="n">checkpointer</span><span class="p">)</span>
 </code></pre></div>
 <h3 id="lead-agent-自动感知">Lead Agent 自动感知</h3>
 <p>通过 <code>lead.register_subagent(code.config)</code> 注册后，Lead Agent 的系统提示词会自动包含新 Agent：</p>
@@ -1851,12 +1873,7 @@
 <tr>
 <td><code>array</code></td>
 <td><code>list</code></td>
-<td><code>&lt;param&gt;&lt;![CDATA[["a", "b"]]]&gt;&lt;/param&gt;</code></td>
-</tr>
-<tr>
-<td><code>object</code></td>
-<td><code>dict</code></td>
-<td><code>&lt;param&gt;&lt;![CDATA[{"key": "value"}]]&gt;&lt;/param&gt;</code></td>
+<td><code>&lt;param&gt;&lt;item&gt;&lt;![CDATA[a]]&gt;&lt;/item&gt;&lt;item&gt;&lt;![CDATA[b]]&gt;&lt;/item&gt;&lt;/param&gt;</code></td>
 </tr>
 </tbody>
 </table>
@@ -1940,12 +1957,12 @@
 <a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="n">MODEL_CONFIGS</span> <span class="o">=</span> <span class="p">{</span>
 <a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>    <span class="c1"># 现有配置...</span>
 <a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a>
-<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a>    <span class="c1"># 添加新模型</span>
+<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a>    <span class="c1"># 添加新模型（预定义配置只支持 model 和 reasoning 标志）</span>
 <a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a>    <span class="s2">&quot;my-custom-model&quot;</span><span class="p">:</span> <span class="p">{</span>
-<a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a>        <span class="s2">&quot;provider&quot;</span><span class="p">:</span> <span class="s2">&quot;openai&quot;</span><span class="p">,</span>  <span class="c1"># 或其他 LiteLLM 支持的 provider</span>
-<a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a>        <span class="s2">&quot;model&quot;</span><span class="p">:</span> <span class="s2">&quot;my-model-name&quot;</span><span class="p">,</span>
-<a id="__codelineno-7-10" name="__codelineno-7-10" href="#__codelineno-7-10"></a>        <span class="s2">&quot;api_base&quot;</span><span class="p">:</span> <span class="s2">&quot;https://my-api.example.com/v1&quot;</span><span class="p">,</span>
-<a id="__codelineno-7-11" name="__codelineno-7-11" href="#__codelineno-7-11"></a>        <span class="s2">&quot;api_key_env&quot;</span><span class="p">:</span> <span class="s2">&quot;MY_API_KEY&quot;</span>
+<a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a>        <span class="s2">&quot;model&quot;</span><span class="p">:</span> <span class="s2">&quot;dashscope/my-model-name&quot;</span><span class="p">,</span>  <span class="c1"># LiteLLM 格式：provider/model</span>
+<a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a>        <span class="s2">&quot;support_reasoning&quot;</span><span class="p">:</span> <span class="kc">False</span><span class="p">,</span>           <span class="c1"># 是否支持推理模式</span>
+<a id="__codelineno-7-10" name="__codelineno-7-10" href="#__codelineno-7-10"></a>        <span class="s2">&quot;auto_reasoning&quot;</span><span class="p">:</span> <span class="kc">False</span><span class="p">,</span>              <span class="c1"># 模型是否自带推理（如 DeepSeek R1）</span>
+<a id="__codelineno-7-11" name="__codelineno-7-11" href="#__codelineno-7-11"></a>        <span class="s2">&quot;description&quot;</span><span class="p">:</span> <span class="s2">&quot;My custom model&quot;</span>
 <a id="__codelineno-7-12" name="__codelineno-7-12" href="#__codelineno-7-12"></a>    <span class="p">}</span>
 <a id="__codelineno-7-13" name="__codelineno-7-13" href="#__codelineno-7-13"></a><span class="p">}</span>
 </code></pre></div>
@@ -1954,53 +1971,63 @@
 <a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
 <a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="n">AgentConfig</span><span class="p">(</span>
 <a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>            <span class="c1"># ...</span>
-<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>            <span class="n">model</span><span class="o">=</span><span class="s2">&quot;my-custom-model&quot;</span>
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>            <span class="n">model</span><span class="o">=</span><span class="s2">&quot;my-custom-model&quot;</span>  <span class="c1"># 使用预定义配置中的 key</span>
 <a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a>        <span class="p">))</span>
+</code></pre></div>
+<h3 id="自部署模型ollamavllm">自部署模型（Ollama/vLLM）</h3>
+<p>对于自部署的 OpenAI 兼容接口，使用 <code>create_llm()</code> 的 <code>base_url</code> 和 <code>api_key</code> 参数：</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">models.llm</span><span class="w"> </span><span class="kn">import</span> <span class="n">create_llm</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="n">llm</span> <span class="o">=</span> <span class="n">create_llm</span><span class="p">(</span>
+<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a>    <span class="n">model</span><span class="o">=</span><span class="s2">&quot;llama3&quot;</span><span class="p">,</span>
+<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a>    <span class="n">base_url</span><span class="o">=</span><span class="s2">&quot;http://localhost:11434/v1&quot;</span><span class="p">,</span>
+<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a>    <span class="n">api_key</span><span class="o">=</span><span class="s2">&quot;ollama&quot;</span>
+<a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a><span class="p">)</span>
 </code></pre></div>
 <h2 id="测试新组件">测试新组件</h2>
 <h3 id="测试工具">测试工具</h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="c1"># tests/test_tools.py</span>
-<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>
-<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="kn">import</span><span class="w"> </span><span class="nn">pytest</span>
-<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="kn">from</span><span class="w"> </span><span class="nn">tools.implementations.file_ops</span><span class="w"> </span><span class="kn">import</span> <span class="n">ReadFileTool</span>
-<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a>
-<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a><span class="nd">@pytest</span><span class="o">.</span><span class="n">mark</span><span class="o">.</span><span class="n">asyncio</span>
-<a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">test_read_file_tool</span><span class="p">():</span>
-<a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a>    <span class="n">tool</span> <span class="o">=</span> <span class="n">ReadFileTool</span><span class="p">()</span>
-<a id="__codelineno-9-9" name="__codelineno-9-9" href="#__codelineno-9-9"></a>
-<a id="__codelineno-9-10" name="__codelineno-9-10" href="#__codelineno-9-10"></a>    <span class="c1"># 测试正常读取</span>
-<a id="__codelineno-9-11" name="__codelineno-9-11" href="#__codelineno-9-11"></a>    <span class="n">result</span> <span class="o">=</span> <span class="k">await</span> <span class="n">tool</span><span class="o">.</span><span class="n">execute</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s2">&quot;test.txt&quot;</span><span class="p">)</span>
-<a id="__codelineno-9-12" name="__codelineno-9-12" href="#__codelineno-9-12"></a>    <span class="k">assert</span> <span class="n">result</span><span class="o">.</span><span class="n">success</span>
-<a id="__codelineno-9-13" name="__codelineno-9-13" href="#__codelineno-9-13"></a>    <span class="k">assert</span> <span class="s2">&quot;content&quot;</span> <span class="ow">in</span> <span class="n">result</span><span class="o">.</span><span class="n">data</span>
-<a id="__codelineno-9-14" name="__codelineno-9-14" href="#__codelineno-9-14"></a>
-<a id="__codelineno-9-15" name="__codelineno-9-15" href="#__codelineno-9-15"></a>    <span class="c1"># 测试文件不存在</span>
-<a id="__codelineno-9-16" name="__codelineno-9-16" href="#__codelineno-9-16"></a>    <span class="n">result</span> <span class="o">=</span> <span class="k">await</span> <span class="n">tool</span><span class="o">.</span><span class="n">execute</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s2">&quot;nonexistent.txt&quot;</span><span class="p">)</span>
-<a id="__codelineno-9-17" name="__codelineno-9-17" href="#__codelineno-9-17"></a>    <span class="k">assert</span> <span class="ow">not</span> <span class="n">result</span><span class="o">.</span><span class="n">success</span>
-<a id="__codelineno-9-18" name="__codelineno-9-18" href="#__codelineno-9-18"></a>    <span class="k">assert</span> <span class="s2">&quot;不存在&quot;</span> <span class="ow">in</span> <span class="n">result</span><span class="o">.</span><span class="n">error</span>
-</code></pre></div>
-<h3 id="测试-agent">测试 Agent</h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="c1"># tests/test_agents.py</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="c1"># tests/test_tools.py</span>
 <a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>
 <a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="kn">import</span><span class="w"> </span><span class="nn">pytest</span>
-<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agents.code_agent</span><span class="w"> </span><span class="kn">import</span> <span class="n">CodeAgent</span>
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="kn">from</span><span class="w"> </span><span class="nn">tools.implementations.file_ops</span><span class="w"> </span><span class="kn">import</span> <span class="n">ReadFileTool</span>
 <a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a>
-<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a><span class="k">def</span><span class="w"> </span><span class="nf">test_code_agent_config</span><span class="p">():</span>
-<a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a>    <span class="n">agent</span> <span class="o">=</span> <span class="n">CodeAgent</span><span class="p">()</span>
-<a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a>    <span class="k">assert</span> <span class="n">agent</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">name</span> <span class="o">==</span> <span class="s2">&quot;code_agent&quot;</span>
-<a id="__codelineno-10-9" name="__codelineno-10-9" href="#__codelineno-10-9"></a>    <span class="k">assert</span> <span class="s2">&quot;read_file&quot;</span> <span class="ow">in</span> <span class="n">agent</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">required_tools</span>
-<a id="__codelineno-10-10" name="__codelineno-10-10" href="#__codelineno-10-10"></a>
-<a id="__codelineno-10-11" name="__codelineno-10-11" href="#__codelineno-10-11"></a><span class="k">def</span><span class="w"> </span><span class="nf">test_code_agent_system_prompt</span><span class="p">():</span>
-<a id="__codelineno-10-12" name="__codelineno-10-12" href="#__codelineno-10-12"></a>    <span class="n">agent</span> <span class="o">=</span> <span class="n">CodeAgent</span><span class="p">()</span>
-<a id="__codelineno-10-13" name="__codelineno-10-13" href="#__codelineno-10-13"></a>    <span class="c1"># build_system_prompt 接受 context 参数（可选）</span>
-<a id="__codelineno-10-14" name="__codelineno-10-14" href="#__codelineno-10-14"></a>    <span class="n">prompt</span> <span class="o">=</span> <span class="n">agent</span><span class="o">.</span><span class="n">build_system_prompt</span><span class="p">(</span><span class="n">context</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span>
-<a id="__codelineno-10-15" name="__codelineno-10-15" href="#__codelineno-10-15"></a>    <span class="k">assert</span> <span class="s2">&quot;代码分析&quot;</span> <span class="ow">in</span> <span class="n">prompt</span>
-<a id="__codelineno-10-16" name="__codelineno-10-16" href="#__codelineno-10-16"></a>
-<a id="__codelineno-10-17" name="__codelineno-10-17" href="#__codelineno-10-17"></a><span class="k">def</span><span class="w"> </span><span class="nf">test_code_agent_format_response</span><span class="p">():</span>
-<a id="__codelineno-10-18" name="__codelineno-10-18" href="#__codelineno-10-18"></a>    <span class="n">agent</span> <span class="o">=</span> <span class="n">CodeAgent</span><span class="p">()</span>
-<a id="__codelineno-10-19" name="__codelineno-10-19" href="#__codelineno-10-19"></a>    <span class="n">result</span> <span class="o">=</span> <span class="n">agent</span><span class="o">.</span><span class="n">format_final_response</span><span class="p">(</span>
-<a id="__codelineno-10-20" name="__codelineno-10-20" href="#__codelineno-10-20"></a>        <span class="n">content</span><span class="o">=</span><span class="s2">&quot;分析结果...&quot;</span>
-<a id="__codelineno-10-21" name="__codelineno-10-21" href="#__codelineno-10-21"></a>    <span class="p">)</span>
-<a id="__codelineno-10-22" name="__codelineno-10-22" href="#__codelineno-10-22"></a>    <span class="k">assert</span> <span class="s2">&quot;代码分析报告&quot;</span> <span class="ow">in</span> <span class="n">result</span>
+<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a><span class="nd">@pytest</span><span class="o">.</span><span class="n">mark</span><span class="o">.</span><span class="n">asyncio</span>
+<a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">test_read_file_tool</span><span class="p">():</span>
+<a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a>    <span class="n">tool</span> <span class="o">=</span> <span class="n">ReadFileTool</span><span class="p">()</span>
+<a id="__codelineno-10-9" name="__codelineno-10-9" href="#__codelineno-10-9"></a>
+<a id="__codelineno-10-10" name="__codelineno-10-10" href="#__codelineno-10-10"></a>    <span class="c1"># 测试正常读取</span>
+<a id="__codelineno-10-11" name="__codelineno-10-11" href="#__codelineno-10-11"></a>    <span class="n">result</span> <span class="o">=</span> <span class="k">await</span> <span class="n">tool</span><span class="o">.</span><span class="n">execute</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s2">&quot;test.txt&quot;</span><span class="p">)</span>
+<a id="__codelineno-10-12" name="__codelineno-10-12" href="#__codelineno-10-12"></a>    <span class="k">assert</span> <span class="n">result</span><span class="o">.</span><span class="n">success</span>
+<a id="__codelineno-10-13" name="__codelineno-10-13" href="#__codelineno-10-13"></a>    <span class="k">assert</span> <span class="s2">&quot;content&quot;</span> <span class="ow">in</span> <span class="n">result</span><span class="o">.</span><span class="n">data</span>
+<a id="__codelineno-10-14" name="__codelineno-10-14" href="#__codelineno-10-14"></a>
+<a id="__codelineno-10-15" name="__codelineno-10-15" href="#__codelineno-10-15"></a>    <span class="c1"># 测试文件不存在</span>
+<a id="__codelineno-10-16" name="__codelineno-10-16" href="#__codelineno-10-16"></a>    <span class="n">result</span> <span class="o">=</span> <span class="k">await</span> <span class="n">tool</span><span class="o">.</span><span class="n">execute</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s2">&quot;nonexistent.txt&quot;</span><span class="p">)</span>
+<a id="__codelineno-10-17" name="__codelineno-10-17" href="#__codelineno-10-17"></a>    <span class="k">assert</span> <span class="ow">not</span> <span class="n">result</span><span class="o">.</span><span class="n">success</span>
+<a id="__codelineno-10-18" name="__codelineno-10-18" href="#__codelineno-10-18"></a>    <span class="k">assert</span> <span class="s2">&quot;不存在&quot;</span> <span class="ow">in</span> <span class="n">result</span><span class="o">.</span><span class="n">error</span>
+</code></pre></div>
+<h3 id="测试-agent">测试 Agent</h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="c1"># tests/test_agents.py</span>
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>
+<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="kn">import</span><span class="w"> </span><span class="nn">pytest</span>
+<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agents.code_agent</span><span class="w"> </span><span class="kn">import</span> <span class="n">CodeAgent</span>
+<a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a>
+<a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a><span class="k">def</span><span class="w"> </span><span class="nf">test_code_agent_config</span><span class="p">():</span>
+<a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a>    <span class="n">agent</span> <span class="o">=</span> <span class="n">CodeAgent</span><span class="p">()</span>
+<a id="__codelineno-11-8" name="__codelineno-11-8" href="#__codelineno-11-8"></a>    <span class="k">assert</span> <span class="n">agent</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">name</span> <span class="o">==</span> <span class="s2">&quot;code_agent&quot;</span>
+<a id="__codelineno-11-9" name="__codelineno-11-9" href="#__codelineno-11-9"></a>    <span class="k">assert</span> <span class="s2">&quot;read_file&quot;</span> <span class="ow">in</span> <span class="n">agent</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">required_tools</span>
+<a id="__codelineno-11-10" name="__codelineno-11-10" href="#__codelineno-11-10"></a>
+<a id="__codelineno-11-11" name="__codelineno-11-11" href="#__codelineno-11-11"></a><span class="k">def</span><span class="w"> </span><span class="nf">test_code_agent_system_prompt</span><span class="p">():</span>
+<a id="__codelineno-11-12" name="__codelineno-11-12" href="#__codelineno-11-12"></a>    <span class="n">agent</span> <span class="o">=</span> <span class="n">CodeAgent</span><span class="p">()</span>
+<a id="__codelineno-11-13" name="__codelineno-11-13" href="#__codelineno-11-13"></a>    <span class="c1"># build_system_prompt 接受 context 参数（可选）</span>
+<a id="__codelineno-11-14" name="__codelineno-11-14" href="#__codelineno-11-14"></a>    <span class="n">prompt</span> <span class="o">=</span> <span class="n">agent</span><span class="o">.</span><span class="n">build_system_prompt</span><span class="p">(</span><span class="n">context</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span>
+<a id="__codelineno-11-15" name="__codelineno-11-15" href="#__codelineno-11-15"></a>    <span class="k">assert</span> <span class="s2">&quot;代码分析&quot;</span> <span class="ow">in</span> <span class="n">prompt</span>
+<a id="__codelineno-11-16" name="__codelineno-11-16" href="#__codelineno-11-16"></a>
+<a id="__codelineno-11-17" name="__codelineno-11-17" href="#__codelineno-11-17"></a><span class="k">def</span><span class="w"> </span><span class="nf">test_code_agent_format_response</span><span class="p">():</span>
+<a id="__codelineno-11-18" name="__codelineno-11-18" href="#__codelineno-11-18"></a>    <span class="n">agent</span> <span class="o">=</span> <span class="n">CodeAgent</span><span class="p">()</span>
+<a id="__codelineno-11-19" name="__codelineno-11-19" href="#__codelineno-11-19"></a>    <span class="n">result</span> <span class="o">=</span> <span class="n">agent</span><span class="o">.</span><span class="n">format_final_response</span><span class="p">(</span>
+<a id="__codelineno-11-20" name="__codelineno-11-20" href="#__codelineno-11-20"></a>        <span class="n">content</span><span class="o">=</span><span class="s2">&quot;分析结果...&quot;</span>
+<a id="__codelineno-11-21" name="__codelineno-11-21" href="#__codelineno-11-21"></a>    <span class="p">)</span>
+<a id="__codelineno-11-22" name="__codelineno-11-22" href="#__codelineno-11-22"></a>    <span class="k">assert</span> <span class="s2">&quot;代码分析报告&quot;</span> <span class="ow">in</span> <span class="n">result</span>
 </code></pre></div>
 <h2 id="最佳实践">最佳实践</h2>
 <h3 id="agent-设计">Agent 设计</h3>

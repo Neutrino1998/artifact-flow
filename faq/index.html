@@ -1757,7 +1757,7 @@
 <a id="__codelineno-19-2" name="__codelineno-19-2" href="#__codelineno-19-2"></a><span class="nb">echo</span><span class="w"> </span><span class="nv">$BOCHA_API_KEY</span>
 <a id="__codelineno-19-3" name="__codelineno-19-3" href="#__codelineno-19-3"></a>
 <a id="__codelineno-19-4" name="__codelineno-19-4" href="#__codelineno-19-4"></a><span class="c1"># 检查日志</span>
-<a id="__codelineno-19-5" name="__codelineno-19-5" href="#__codelineno-19-5"></a>tail<span class="w"> </span>-f<span class="w"> </span>logs/app.log<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span><span class="s2">&quot;web_search&quot;</span>
+<a id="__codelineno-19-5" name="__codelineno-19-5" href="#__codelineno-19-5"></a>tail<span class="w"> </span>-f<span class="w"> </span>logs/artifactflow.log<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span><span class="s2">&quot;web_search&quot;</span>
 </code></pre></div>
 <hr />
 <h3 id="web_fetch-抓取失败">web_fetch 抓取失败</h3>
@@ -1860,7 +1860,7 @@
 <a id="__codelineno-27-2" name="__codelineno-27-2" href="#__codelineno-27-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">tools.implementations.web_search</span><span class="w"> </span><span class="kn">import</span> <span class="n">WebSearchTool</span>
 <a id="__codelineno-27-3" name="__codelineno-27-3" href="#__codelineno-27-3"></a>
 <a id="__codelineno-27-4" name="__codelineno-27-4" href="#__codelineno-27-4"></a><span class="n">tool</span> <span class="o">=</span> <span class="n">WebSearchTool</span><span class="p">()</span>
-<a id="__codelineno-27-5" name="__codelineno-27-5" href="#__codelineno-27-5"></a><span class="n">result</span> <span class="o">=</span> <span class="k">await</span> <span class="n">tool</span><span class="o">.</span><span class="n">execute</span><span class="p">(</span><span class="n">query</span><span class="o">=</span><span class="s2">&quot;test query&quot;</span><span class="p">)</span>
+<a id="__codelineno-27-5" name="__codelineno-27-5" href="#__codelineno-27-5"></a><span class="n">result</span> <span class="o">=</span> <span class="k">await</span> <span class="n">tool</span><span class="p">(</span><span class="n">query</span><span class="o">=</span><span class="s2">&quot;test query&quot;</span><span class="p">)</span>  <span class="c1"># 使用 __call__，会自动填充默认参数</span>
 <a id="__codelineno-27-6" name="__codelineno-27-6" href="#__codelineno-27-6"></a><span class="nb">print</span><span class="p">(</span><span class="n">result</span><span class="p">)</span>
 </code></pre></div>
 <hr />
@@ -1876,7 +1876,7 @@
 <h2 id="获取帮助">获取帮助</h2>
 <p>如果以上都无法解决问题：</p>
 <ol>
-<li><strong>检查日志</strong>：<code>tail -f logs/app.log</code></li>
+<li><strong>检查日志</strong>：<code>tail -f logs/artifactflow.log</code></li>
 <li><strong>启用调试模式</strong>：<code>set_global_debug(True)</code></li>
 <li><strong>提交 Issue</strong>：附上错误日志和复现步骤</li>
 </ol>
