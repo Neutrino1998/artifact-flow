@@ -444,11 +444,23 @@ artifact-flow/
 │   ├── export_openapi.py        # 导出 OpenAPI schema 供前端类型生成
 │   └── create_admin.py          # 创建管理员账号
 ├── data/               # 数据目录 (SQLite数据库文件)
-├── tests/              # 测试脚本
-│   ├── test_core_graph.py             # 批量模式测试（多轮对话、权限、分支）
-│   ├── test_core_graph_stream.py      # 流式模式测试（实时输出）
-│   ├── test_api_smoke.py              # API 烟雾测试
-│   └── test_litellm_providers.py      # LiteLLM 提供商兼容性测试
+├── tests/              # 测试
+│   ├── conftest.py                    # 全局 fixtures（db_manager, repos, test_user）
+│   ├── repositories/                  # Repository 合约测试（pytest）
+│   │   ├── test_user_repo.py          # 用户 CRUD / 分页 / 唯一约束
+│   │   ├── test_conversation_repo.py  # 对话 CRUD / 消息树 / 分支路径
+│   │   └── test_artifact_repo.py      # Artifact CRUD / 乐观锁 / 版本历史
+│   ├── api/                           # API 集成测试（pytest）
+│   │   ├── conftest.py                # httpx AsyncClient + 依赖覆盖
+│   │   ├── test_auth.py               # 登录 / /me / 管理员 CRUD
+│   │   ├── test_chat.py               # 会话列表 / 详情 / 删除 / 权限隔离
+│   │   └── test_artifacts.py          # Artifact 列表 / 详情 / 版本 / 权限隔离
+│   ├── test_concurrent.py             # 并发测试（file SQLite + Barrier + gather）
+│   └── manual/                        # 手动 / 交互式测试（需要 LLM 后端）
+│       ├── core_graph.py              # 批量模式（多轮对话、权限、分支）
+│       ├── core_graph_stream.py       # 流式模式（实时输出）
+│       ├── api_smoke.py               # API 烟雾测试
+│       └── litellm_providers.py       # LiteLLM 提供商兼容性测试
 ├── prompts/            # 智能体提示词模板
 ├── examples/           # 使用示例
 ├── logs/               # 日志目录
@@ -492,9 +504,33 @@ python run_cli.py chat -n           # 开始新对话
 - `/status` - 查看当前状态
 - `quit` / `exit` - 退出
 
-### 测试脚本
+### 自动化测试
 
-`tests/` 目录下提供了核心模块的测试脚本：
+项目使用 pytest，覆盖三层：
+
+```bash
+# 运行全部测试
+pytest
+
+# 按层运行
+pytest tests/repositories/      # Repository 合约测试
+pytest tests/api/               # API 集成测试
+pytest tests/test_concurrent.py # 并发测试
+
+# 常用选项
+pytest -x                      # 遇到首个失败即停止
+pytest -k "test_name"          # 按名称匹配运行
+```
+
+| 层 | 覆盖范围 |
+|---|---------|
+| **Repository** | CRUD / count+pagination / 唯一约束 / 消息树分支路径 / 乐观锁 VersionConflictError / 版本历史 |
+| **API** | 登录（anon_client）/ JWT 鉴权 / 管理员 CRUD / 会话列表+详情+删除 / Artifact 版本 / 跨用户 404 隔离 |
+| **并发** | file SQLite + WAL + asyncio.Barrier + gather：乐观锁冲突、并行写消息、重复创建、WAL 读隔离 |
+
+### 手动 / 交互式测试
+
+需要 LLM 后端运行：
 
 ```bash
 # 批量模式测试 - 多轮对话、权限确认、分支对话
