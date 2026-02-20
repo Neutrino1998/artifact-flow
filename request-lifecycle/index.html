@@ -13,7 +13,7 @@
         <link rel="canonical" href="https://neutrino.github.io/artifact-flow/request-lifecycle/">
       
       
-        <link rel="prev" href="..">
+        <link rel="prev" href="../frontend/">
       
       
         <link rel="next" href="../architecture/core/">
@@ -23,7 +23,7 @@
       
       
       <link rel="icon" href="../assets/images/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.1">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.2">
     
     
       
@@ -240,6 +240,25 @@
   
   
   
+  
+    <li class="md-tabs__item">
+      <a href="../frontend/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Frontend Guide
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
     
   
   
@@ -429,6 +448,33 @@
       
   
   
+  
+  
+    <li class="md-nav__item">
+      <a href="../frontend/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Frontend Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
     
   
   
@@ -492,7 +538,7 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#_1" class="md-nav__link">
+  <a href="#整体流程" class="md-nav__link">
     <span class="md-ellipsis">
       
         整体流程
@@ -503,7 +549,7 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#phase-1" class="md-nav__link">
+  <a href="#phase-1-请求接收与初始化" class="md-nav__link">
     <span class="md-ellipsis">
       
         Phase 1: 请求接收与初始化
@@ -515,7 +561,7 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#api" class="md-nav__link">
+  <a href="#api-层处理" class="md-nav__link">
     <span class="md-ellipsis">
       
         API 层处理
@@ -526,7 +572,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#conversation" class="md-nav__link">
+  <a href="#conversation-创建" class="md-nav__link">
     <span class="md-ellipsis">
       
         Conversation 创建
@@ -542,7 +588,7 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#phase-2" class="md-nav__link">
+  <a href="#phase-2-状态准备" class="md-nav__link">
     <span class="md-ellipsis">
       
         Phase 2: 状态准备
@@ -554,7 +600,7 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#_2" class="md-nav__link">
+  <a href="#对话历史格式化" class="md-nav__link">
     <span class="md-ellipsis">
       
         对话历史格式化
@@ -565,7 +611,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#_3" class="md-nav__link">
+  <a href="#初始状态构建" class="md-nav__link">
     <span class="md-ellipsis">
       
         初始状态构建
@@ -581,7 +627,7 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#phase-3-graph" class="md-nav__link">
+  <a href="#phase-3-graph-执行" class="md-nav__link">
     <span class="md-ellipsis">
       
         Phase 3: Graph 执行
@@ -593,7 +639,7 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#_4" class="md-nav__link">
+  <a href="#执行模式" class="md-nav__link">
     <span class="md-ellipsis">
       
         执行模式
@@ -604,7 +650,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#agent" class="md-nav__link">
+  <a href="#agent-节点执行" class="md-nav__link">
     <span class="md-ellipsis">
       
         Agent 节点执行
@@ -615,7 +661,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#_5" class="md-nav__link">
+  <a href="#状态路由" class="md-nav__link">
     <span class="md-ellipsis">
       
         状态路由
@@ -626,7 +672,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#_6" class="md-nav__link">
+  <a href="#工具执行节点" class="md-nav__link">
     <span class="md-ellipsis">
       
         工具执行节点
@@ -642,7 +688,7 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#phase-4-sse" class="md-nav__link">
+  <a href="#phase-4-事件流与-sse" class="md-nav__link">
     <span class="md-ellipsis">
       
         Phase 4: 事件流与 SSE
@@ -654,7 +700,7 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#_7" class="md-nav__link">
+  <a href="#事件类型" class="md-nav__link">
     <span class="md-ellipsis">
       
         事件类型
@@ -665,7 +711,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#_8" class="md-nav__link">
+  <a href="#事件缓冲" class="md-nav__link">
     <span class="md-ellipsis">
       
         事件缓冲
@@ -676,7 +722,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#sse" class="md-nav__link">
+  <a href="#sse-格式" class="md-nav__link">
     <span class="md-ellipsis">
       
         SSE 格式
@@ -692,7 +738,7 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#phase-5" class="md-nav__link">
+  <a href="#phase-5-权限中断与恢复" class="md-nav__link">
     <span class="md-ellipsis">
       
         Phase 5: 权限中断与恢复
@@ -704,7 +750,7 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#_9" class="md-nav__link">
+  <a href="#中断流程" class="md-nav__link">
     <span class="md-ellipsis">
       
         中断流程
@@ -715,7 +761,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#_10" class="md-nav__link">
+  <a href="#恢复流程" class="md-nav__link">
     <span class="md-ellipsis">
       
         恢复流程
@@ -731,7 +777,7 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#phase-6" class="md-nav__link">
+  <a href="#phase-6-结果持久化" class="md-nav__link">
     <span class="md-ellipsis">
       
         Phase 6: 结果持久化
@@ -742,7 +788,7 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#_11" class="md-nav__link">
+  <a href="#数据流总结" class="md-nav__link">
     <span class="md-ellipsis">
       
         数据流总结
@@ -782,10 +828,10 @@
         
           
         
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
         
           
-          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
             
   
   
@@ -803,8 +849,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_3">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -1096,7 +1142,7 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#_1" class="md-nav__link">
+  <a href="#整体流程" class="md-nav__link">
     <span class="md-ellipsis">
       
         整体流程
@@ -1107,7 +1153,7 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#phase-1" class="md-nav__link">
+  <a href="#phase-1-请求接收与初始化" class="md-nav__link">
     <span class="md-ellipsis">
       
         Phase 1: 请求接收与初始化
@@ -1119,7 +1165,7 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#api" class="md-nav__link">
+  <a href="#api-层处理" class="md-nav__link">
     <span class="md-ellipsis">
       
         API 层处理
@@ -1130,7 +1176,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#conversation" class="md-nav__link">
+  <a href="#conversation-创建" class="md-nav__link">
     <span class="md-ellipsis">
       
         Conversation 创建
@@ -1146,7 +1192,7 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#phase-2" class="md-nav__link">
+  <a href="#phase-2-状态准备" class="md-nav__link">
     <span class="md-ellipsis">
       
         Phase 2: 状态准备
@@ -1158,7 +1204,7 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#_2" class="md-nav__link">
+  <a href="#对话历史格式化" class="md-nav__link">
     <span class="md-ellipsis">
       
         对话历史格式化
@@ -1169,7 +1215,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#_3" class="md-nav__link">
+  <a href="#初始状态构建" class="md-nav__link">
     <span class="md-ellipsis">
       
         初始状态构建
@@ -1185,7 +1231,7 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#phase-3-graph" class="md-nav__link">
+  <a href="#phase-3-graph-执行" class="md-nav__link">
     <span class="md-ellipsis">
       
         Phase 3: Graph 执行
@@ -1197,7 +1243,7 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#_4" class="md-nav__link">
+  <a href="#执行模式" class="md-nav__link">
     <span class="md-ellipsis">
       
         执行模式
@@ -1208,7 +1254,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#agent" class="md-nav__link">
+  <a href="#agent-节点执行" class="md-nav__link">
     <span class="md-ellipsis">
       
         Agent 节点执行
@@ -1219,7 +1265,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#_5" class="md-nav__link">
+  <a href="#状态路由" class="md-nav__link">
     <span class="md-ellipsis">
       
         状态路由
@@ -1230,7 +1276,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#_6" class="md-nav__link">
+  <a href="#工具执行节点" class="md-nav__link">
     <span class="md-ellipsis">
       
         工具执行节点
@@ -1246,7 +1292,7 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#phase-4-sse" class="md-nav__link">
+  <a href="#phase-4-事件流与-sse" class="md-nav__link">
     <span class="md-ellipsis">
       
         Phase 4: 事件流与 SSE
@@ -1258,7 +1304,7 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#_7" class="md-nav__link">
+  <a href="#事件类型" class="md-nav__link">
     <span class="md-ellipsis">
       
         事件类型
@@ -1269,7 +1315,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#_8" class="md-nav__link">
+  <a href="#事件缓冲" class="md-nav__link">
     <span class="md-ellipsis">
       
         事件缓冲
@@ -1280,7 +1326,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#sse" class="md-nav__link">
+  <a href="#sse-格式" class="md-nav__link">
     <span class="md-ellipsis">
       
         SSE 格式
@@ -1296,7 +1342,7 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#phase-5" class="md-nav__link">
+  <a href="#phase-5-权限中断与恢复" class="md-nav__link">
     <span class="md-ellipsis">
       
         Phase 5: 权限中断与恢复
@@ -1308,7 +1354,7 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#_9" class="md-nav__link">
+  <a href="#中断流程" class="md-nav__link">
     <span class="md-ellipsis">
       
         中断流程
@@ -1319,7 +1365,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#_10" class="md-nav__link">
+  <a href="#恢复流程" class="md-nav__link">
     <span class="md-ellipsis">
       
         恢复流程
@@ -1335,7 +1381,7 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#phase-6" class="md-nav__link">
+  <a href="#phase-6-结果持久化" class="md-nav__link">
     <span class="md-ellipsis">
       
         Phase 6: 结果持久化
@@ -1346,7 +1392,7 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#_11" class="md-nav__link">
+  <a href="#数据流总结" class="md-nav__link">
     <span class="md-ellipsis">
       
         数据流总结
@@ -1378,7 +1424,7 @@
 
 <h1 id="request-lifecycle">Request Lifecycle</h1>
 <p>本文档详细描述一个请求从进入 API 到返回结果的完整生命周期。</p>
-<h2 id="_1">整体流程</h2>
+<h2 id="整体流程">整体流程</h2>
 <pre class="mermaid"><code>sequenceDiagram
     participant Client
     participant FastAPI
@@ -1389,9 +1435,10 @@
     participant Tool
     participant DB
 
-    Client-&gt;&gt;FastAPI: POST /api/v1/chat
-    FastAPI-&gt;&gt;DB: 确保 Conversation 存在
-    FastAPI-&gt;&gt;StreamManager: create_stream(thread_id)
+    Client-&gt;&gt;FastAPI: POST /api/v1/chat (+ Bearer Token)
+    FastAPI-&gt;&gt;FastAPI: JWT 验证 + DB 校验用户状态
+    FastAPI-&gt;&gt;DB: 确保 Conversation 存在（校验 ownership）
+    FastAPI-&gt;&gt;StreamManager: create_stream(thread_id, owner_user_id)
     FastAPI-&gt;&gt;Client: 返回 {thread_id, stream_url}
 
     FastAPI-&gt;&gt;Controller: 后台启动 stream_execute()
@@ -1414,11 +1461,12 @@
     Controller-&gt;&gt;DB: 保存响应
     Controller-&gt;&gt;StreamManager: push(complete)
 
-    Client-&gt;&gt;FastAPI: GET /stream/{thread_id}
-    FastAPI-&gt;&gt;StreamManager: consume_events()
+    Client-&gt;&gt;FastAPI: GET /stream/{thread_id} (+ Bearer Token)
+    FastAPI-&gt;&gt;FastAPI: JWT 验证
+    FastAPI-&gt;&gt;StreamManager: consume_events(thread_id, user_id)
     StreamManager--&gt;&gt;Client: SSE 事件流</code></pre>
-<h2 id="phase-1">Phase 1: 请求接收与初始化</h2>
-<h3 id="api">API 层处理</h3>
+<h2 id="phase-1-请求接收与初始化">Phase 1: 请求接收与初始化</h2>
+<h3 id="api-层处理">API 层处理</h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1"># POST /api/v1/chat</span>
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="p">{</span>
 <a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>    <span class="s2">&quot;content&quot;</span><span class="p">:</span> <span class="s2">&quot;帮我分析一下 Python 异步编程的最佳实践&quot;</span><span class="p">,</span>
@@ -1428,6 +1476,11 @@
 </code></pre></div>
 <p><strong>依赖注入链</strong>（<code>src/api/dependencies.py</code>）：</p>
 <pre class="mermaid"><code>flowchart LR
+    subgraph Auth["认证"]
+        Bearer["HTTPBearer"]
+        CU["get_current_user()&lt;br/&gt;JWT 解码 + DB 校验"]
+    end
+
     subgraph Request["请求级别"]
         Session["get_db_session()&lt;br/&gt;AsyncSession"]
         AM["get_artifact_manager()"]
@@ -1440,13 +1493,16 @@
         SM["get_stream_manager()&lt;br/&gt;StreamManager"]
     end
 
-    HTTP["HTTP Request"] --&gt; Session
+    HTTP["HTTP Request"] --&gt; Bearer --&gt; CU
+    HTTP --&gt; Session
+    CU --&gt; Session
     Session --&gt; AM
     Session --&gt; CM
     Session --&gt; Ctrl
     HTTP --&gt; CP
     HTTP --&gt; SM</code></pre>
-<h3 id="conversation">Conversation 创建</h3>
+<p><code>get_current_user()</code> 在每个受保护端点的入口执行：解码 JWT → 查 DB 校验 <code>is_active</code> 和最新 <code>role</code>（确保禁用/降权即时生效）。<code>/health</code> 和 <code>/auth/login</code> 不需要认证。</p>
+<h3 id="conversation-创建">Conversation 创建</h3>
 <p>如果 <code>conversation_id</code> 为空，Controller 会在 <code>_stream_new_message()</code> 中：</p>
 <ol>
 <li>调用 <code>conversation_manager.start_conversation_async()</code> 生成新 ID</li>
@@ -1459,8 +1515,11 @@
 <a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="k">else</span><span class="p">:</span>
 <a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>    <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">conversation_manager</span><span class="o">.</span><span class="n">ensure_conversation_exists</span><span class="p">(</span><span class="n">conversation_id</span><span class="p">)</span>
 </code></pre></div>
-<h2 id="phase-2">Phase 2: 状态准备</h2>
-<h3 id="_2">对话历史格式化</h3>
+<p><strong>注意</strong>：用户归属由 API 层（<code>chat.py</code>）负责，不在 Controller 中处理。Router 层在进入 Controller 之前完成：
+- 新建会话时，<code>ensure_conversation_exists(conversation_id, user_id=user_id)</code> 绑定 owner
+- 已有会话时，<code>_verify_ownership()</code> 校验 <code>conv.user_id == current_user.user_id</code>，不匹配返回 404</p>
+<h2 id="phase-2-状态准备">Phase 2: 状态准备</h2>
+<h3 id="对话历史格式化">对话历史格式化</h3>
 <p><code>ConversationManager</code> 从消息树中提取当前分支的历史：</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="c1"># 树状结构示例</span>
 <a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="c1">#       msg_1 (root)</span>
@@ -1478,7 +1537,7 @@
 <a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a>    <span class="p">{</span><span class="s2">&quot;role&quot;</span><span class="p">:</span> <span class="s2">&quot;assistant&quot;</span><span class="p">,</span> <span class="s2">&quot;content&quot;</span><span class="p">:</span> <span class="s2">&quot;第二条回复&quot;</span><span class="p">}</span>
 <a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a><span class="p">]</span>
 </code></pre></div>
-<h3 id="_3">初始状态构建</h3>
+<h3 id="初始状态构建">初始状态构建</h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="c1"># src/core/state.py - create_initial_state()</span>
 <a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="n">initial_state</span> <span class="o">=</span> <span class="p">{</span>
 <a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>    <span class="s2">&quot;current_task&quot;</span><span class="p">:</span> <span class="s2">&quot;帮我分析一下 Python 异步编程的最佳实践&quot;</span><span class="p">,</span>
@@ -1496,8 +1555,8 @@
 <a id="__codelineno-3-15" name="__codelineno-3-15" href="#__codelineno-3-15"></a>    <span class="s2">&quot;execution_metrics&quot;</span><span class="p">:</span> <span class="n">create_initial_metrics</span><span class="p">()</span>
 <a id="__codelineno-3-16" name="__codelineno-3-16" href="#__codelineno-3-16"></a><span class="p">}</span>
 </code></pre></div>
-<h2 id="phase-3-graph">Phase 3: Graph 执行</h2>
-<h3 id="_4">执行模式</h3>
+<h2 id="phase-3-graph-执行">Phase 3: Graph 执行</h2>
+<h3 id="执行模式">执行模式</h3>
 <p>ArtifactFlow 使用 LangGraph 的 <code>stream_mode="custom"</code> 实现流式输出：</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="c1"># src/core/controller.py</span>
 <a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="k">async</span> <span class="k">for</span> <span class="n">event</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">graph</span><span class="o">.</span><span class="n">astream</span><span class="p">(</span>
@@ -1507,7 +1566,7 @@
 <a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="p">):</span>
 <a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a>    <span class="k">yield</span> <span class="n">event</span>  <span class="c1"># StreamEvent</span>
 </code></pre></div>
-<h3 id="agent">Agent 节点执行</h3>
+<h3 id="agent-节点执行">Agent 节点执行</h3>
 <p>每个 Agent 节点执行单轮 LLM 调用：</p>
 <pre class="mermaid"><code>flowchart TD
     A[准备 Messages] --&gt; B[LLM 调用]
@@ -1540,7 +1599,7 @@
 <a id="__codelineno-5-18" name="__codelineno-5-18" href="#__codelineno-5-18"></a><span class="k">if</span> <span class="n">pending_tool_result</span><span class="p">:</span>
 <a id="__codelineno-5-19" name="__codelineno-5-19" href="#__codelineno-5-19"></a>    <span class="n">messages</span><span class="o">.</span><span class="n">append</span><span class="p">({</span><span class="s2">&quot;role&quot;</span><span class="p">:</span> <span class="s2">&quot;user&quot;</span><span class="p">,</span> <span class="s2">&quot;content&quot;</span><span class="p">:</span> <span class="n">formatted_result</span><span class="p">})</span>
 </code></pre></div>
-<h3 id="_5">状态路由</h3>
+<h3 id="状态路由">状态路由</h3>
 <p>路由基于 <code>ExecutionPhase</code> 决定下一个节点（定义在 <code>_add_routing_rules()</code> 中）：</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="c1"># src/core/graph.py - route_func 内部函数</span>
 <a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="k">def</span><span class="w"> </span><span class="nf">route_func</span><span class="p">(</span><span class="n">state</span><span class="p">:</span> <span class="n">AgentState</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
@@ -1557,7 +1616,7 @@
 <a id="__codelineno-6-13" name="__codelineno-6-13" href="#__codelineno-6-13"></a>    <span class="k">else</span><span class="p">:</span>
 <a id="__codelineno-6-14" name="__codelineno-6-14" href="#__codelineno-6-14"></a>        <span class="k">return</span> <span class="n">END</span>
 </code></pre></div>
-<h3 id="_6">工具执行节点</h3>
+<h3 id="工具执行节点">工具执行节点</h3>
 <p>统一处理所有工具调用，包括权限检查：</p>
 <pre class="mermaid"><code>flowchart TD
     A[获取 pending_tool_call] --&gt; B[查找工具]
@@ -1569,8 +1628,8 @@
     F --&gt;|denied| G[返回拒绝结果]
     D --&gt; H[记录 metrics]
     H --&gt; I[返回原 Agent]</code></pre>
-<h2 id="phase-4-sse">Phase 4: 事件流与 SSE</h2>
-<h3 id="_7">事件类型</h3>
+<h2 id="phase-4-事件流与-sse">Phase 4: 事件流与 SSE</h2>
+<h3 id="事件类型">事件类型</h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="c1"># src/core/events.py</span>
 <a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="k">class</span><span class="w"> </span><span class="nc">StreamEventType</span><span class="p">(</span><span class="n">Enum</span><span class="p">):</span>
 <a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>    <span class="c1"># Controller 层</span>
@@ -1590,7 +1649,7 @@
 <a id="__codelineno-7-17" name="__codelineno-7-17" href="#__codelineno-7-17"></a>    <span class="n">PERMISSION_REQUEST</span> <span class="o">=</span> <span class="s2">&quot;permission_request&quot;</span>
 <a id="__codelineno-7-18" name="__codelineno-7-18" href="#__codelineno-7-18"></a>    <span class="n">PERMISSION_RESULT</span> <span class="o">=</span> <span class="s2">&quot;permission_result&quot;</span>
 </code></pre></div>
-<h3 id="_8">事件缓冲</h3>
+<h3 id="事件缓冲">事件缓冲</h3>
 <p>由于 POST 请求立即返回，SSE 连接稍后建立，需要缓冲中间事件：</p>
 <pre class="mermaid"><code>sequenceDiagram
     participant Client
@@ -1618,34 +1677,43 @@
     Queue-&gt;&gt;GET: yield complete
     GET-&gt;&gt;Client: SSE: complete
     Note over Queue: 清理队列</code></pre>
-<h3 id="sse">SSE 格式</h3>
-<p>事件类型包含在 <code>data</code> 的 JSON 对象内（<code>type</code> 字段），而非使用 SSE 的 <code>event:</code> 字段：</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>data: {&quot;type&quot;:&quot;metadata&quot;,&quot;timestamp&quot;:&quot;...&quot;,&quot;data&quot;:{&quot;conversation_id&quot;:&quot;xxx&quot;,&quot;thread_id&quot;:&quot;yyy&quot;,&quot;message_id&quot;:&quot;zzz&quot;}}
-<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>
-<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>data: {&quot;type&quot;:&quot;agent_start&quot;,&quot;timestamp&quot;:&quot;...&quot;,&quot;agent&quot;:&quot;lead_agent&quot;,&quot;data&quot;:{&quot;success&quot;:true,&quot;content&quot;:&quot;&quot;,&quot;metadata&quot;:{...}}}
-<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>
-<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>data: {&quot;type&quot;:&quot;llm_chunk&quot;,&quot;timestamp&quot;:&quot;...&quot;,&quot;agent&quot;:&quot;lead_agent&quot;,&quot;data&quot;:{&quot;success&quot;:true,&quot;content&quot;:&quot;让我&quot;,&quot;metadata&quot;:{...}}}
+<h3 id="sse-格式">SSE 格式</h3>
+<p>使用标准 SSE <code>event:</code> 字段区分事件类型，<code>data:</code> JSON 内同时保留 <code>type</code> 字段以便统一解析：</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>event: metadata
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>data: {&quot;type&quot;:&quot;metadata&quot;,&quot;timestamp&quot;:&quot;...&quot;,&quot;data&quot;:{&quot;conversation_id&quot;:&quot;xxx&quot;,&quot;thread_id&quot;:&quot;yyy&quot;,&quot;message_id&quot;:&quot;zzz&quot;}}
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>event: agent_start
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>data: {&quot;type&quot;:&quot;agent_start&quot;,&quot;timestamp&quot;:&quot;...&quot;,&quot;agent&quot;:&quot;lead_agent&quot;,&quot;data&quot;:{&quot;success&quot;:true,&quot;content&quot;:&quot;&quot;,&quot;metadata&quot;:{...}}}
 <a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a>
-<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a>data: {&quot;type&quot;:&quot;llm_chunk&quot;,&quot;timestamp&quot;:&quot;...&quot;,&quot;agent&quot;:&quot;lead_agent&quot;,&quot;data&quot;:{&quot;success&quot;:true,&quot;content&quot;:&quot;让我来分析&quot;,&quot;metadata&quot;:{...}}}
-<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a>
-<a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a>data: {&quot;type&quot;:&quot;llm_complete&quot;,&quot;timestamp&quot;:&quot;...&quot;,&quot;agent&quot;:&quot;lead_agent&quot;,&quot;data&quot;:{&quot;success&quot;:true,&quot;content&quot;:&quot;...&quot;,&quot;token_usage&quot;:{...}}}
-<a id="__codelineno-8-10" name="__codelineno-8-10" href="#__codelineno-8-10"></a>
-<a id="__codelineno-8-11" name="__codelineno-8-11" href="#__codelineno-8-11"></a>data: {&quot;type&quot;:&quot;agent_complete&quot;,&quot;timestamp&quot;:&quot;...&quot;,&quot;agent&quot;:&quot;lead_agent&quot;,&quot;data&quot;:{&quot;success&quot;:true,&quot;content&quot;:&quot;...&quot;,&quot;routing&quot;:{&quot;type&quot;:&quot;tool_call&quot;,...}}}
+<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a>event: llm_chunk
+<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a>data: {&quot;type&quot;:&quot;llm_chunk&quot;,&quot;timestamp&quot;:&quot;...&quot;,&quot;agent&quot;:&quot;lead_agent&quot;,&quot;data&quot;:{&quot;success&quot;:true,&quot;content&quot;:&quot;让我&quot;,&quot;metadata&quot;:{...}}}
+<a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a>
+<a id="__codelineno-8-10" name="__codelineno-8-10" href="#__codelineno-8-10"></a>event: llm_chunk
+<a id="__codelineno-8-11" name="__codelineno-8-11" href="#__codelineno-8-11"></a>data: {&quot;type&quot;:&quot;llm_chunk&quot;,&quot;timestamp&quot;:&quot;...&quot;,&quot;agent&quot;:&quot;lead_agent&quot;,&quot;data&quot;:{&quot;success&quot;:true,&quot;content&quot;:&quot;让我来分析&quot;,&quot;metadata&quot;:{...}}}
 <a id="__codelineno-8-12" name="__codelineno-8-12" href="#__codelineno-8-12"></a>
-<a id="__codelineno-8-13" name="__codelineno-8-13" href="#__codelineno-8-13"></a>data: {&quot;type&quot;:&quot;tool_start&quot;,&quot;timestamp&quot;:&quot;...&quot;,&quot;agent&quot;:&quot;lead_agent&quot;,&quot;tool&quot;:&quot;web_search&quot;,&quot;data&quot;:{&quot;params&quot;:{&quot;query&quot;:&quot;Python async best practices&quot;}}}
-<a id="__codelineno-8-14" name="__codelineno-8-14" href="#__codelineno-8-14"></a>
-<a id="__codelineno-8-15" name="__codelineno-8-15" href="#__codelineno-8-15"></a>data: {&quot;type&quot;:&quot;tool_complete&quot;,&quot;timestamp&quot;:&quot;...&quot;,&quot;agent&quot;:&quot;lead_agent&quot;,&quot;tool&quot;:&quot;web_search&quot;,&quot;data&quot;:{&quot;success&quot;:true,&quot;duration_ms&quot;:1234,&quot;error&quot;:null}}
-<a id="__codelineno-8-16" name="__codelineno-8-16" href="#__codelineno-8-16"></a>
-<a id="__codelineno-8-17" name="__codelineno-8-17" href="#__codelineno-8-17"></a>data: {&quot;type&quot;:&quot;complete&quot;,&quot;timestamp&quot;:&quot;...&quot;,&quot;data&quot;:{&quot;success&quot;:true,&quot;interrupted&quot;:false,&quot;response&quot;:&quot;...&quot;,&quot;execution_metrics&quot;:{...}}}
+<a id="__codelineno-8-13" name="__codelineno-8-13" href="#__codelineno-8-13"></a>event: llm_complete
+<a id="__codelineno-8-14" name="__codelineno-8-14" href="#__codelineno-8-14"></a>data: {&quot;type&quot;:&quot;llm_complete&quot;,&quot;timestamp&quot;:&quot;...&quot;,&quot;agent&quot;:&quot;lead_agent&quot;,&quot;data&quot;:{&quot;success&quot;:true,&quot;content&quot;:&quot;...&quot;,&quot;token_usage&quot;:{...}}}
+<a id="__codelineno-8-15" name="__codelineno-8-15" href="#__codelineno-8-15"></a>
+<a id="__codelineno-8-16" name="__codelineno-8-16" href="#__codelineno-8-16"></a>event: agent_complete
+<a id="__codelineno-8-17" name="__codelineno-8-17" href="#__codelineno-8-17"></a>data: {&quot;type&quot;:&quot;agent_complete&quot;,&quot;timestamp&quot;:&quot;...&quot;,&quot;agent&quot;:&quot;lead_agent&quot;,&quot;data&quot;:{&quot;success&quot;:true,&quot;content&quot;:&quot;...&quot;,&quot;routing&quot;:{&quot;type&quot;:&quot;tool_call&quot;,...}}}
+<a id="__codelineno-8-18" name="__codelineno-8-18" href="#__codelineno-8-18"></a>
+<a id="__codelineno-8-19" name="__codelineno-8-19" href="#__codelineno-8-19"></a>event: tool_start
+<a id="__codelineno-8-20" name="__codelineno-8-20" href="#__codelineno-8-20"></a>data: {&quot;type&quot;:&quot;tool_start&quot;,&quot;timestamp&quot;:&quot;...&quot;,&quot;agent&quot;:&quot;lead_agent&quot;,&quot;tool&quot;:&quot;web_search&quot;,&quot;data&quot;:{&quot;params&quot;:{&quot;query&quot;:&quot;Python async best practices&quot;}}}
+<a id="__codelineno-8-21" name="__codelineno-8-21" href="#__codelineno-8-21"></a>
+<a id="__codelineno-8-22" name="__codelineno-8-22" href="#__codelineno-8-22"></a>event: tool_complete
+<a id="__codelineno-8-23" name="__codelineno-8-23" href="#__codelineno-8-23"></a>data: {&quot;type&quot;:&quot;tool_complete&quot;,&quot;timestamp&quot;:&quot;...&quot;,&quot;agent&quot;:&quot;lead_agent&quot;,&quot;tool&quot;:&quot;web_search&quot;,&quot;data&quot;:{&quot;success&quot;:true,&quot;duration_ms&quot;:1234,&quot;error&quot;:null,&quot;params&quot;:{&quot;query&quot;:&quot;Python async best practices&quot;},&quot;result_data&quot;:{...}}}
+<a id="__codelineno-8-24" name="__codelineno-8-24" href="#__codelineno-8-24"></a>
+<a id="__codelineno-8-25" name="__codelineno-8-25" href="#__codelineno-8-25"></a>event: complete
+<a id="__codelineno-8-26" name="__codelineno-8-26" href="#__codelineno-8-26"></a>data: {&quot;type&quot;:&quot;complete&quot;,&quot;timestamp&quot;:&quot;...&quot;,&quot;data&quot;:{&quot;success&quot;:true,&quot;interrupted&quot;:false,&quot;response&quot;:&quot;...&quot;,&quot;execution_metrics&quot;:{...}}}
 </code></pre></div>
 <p><strong>关键点：</strong>
 - <code>llm_chunk.data.content</code> 是<strong>累积</strong>内容，每次事件包含从头开始的完整文本
-- <code>tool_complete</code> 不包含工具返回的实际数据（出于性能考虑）
+- <code>tool_complete</code> 包含 <code>params</code>（工具调用参数）和 <code>result_data</code>（工具返回的业务数据），前端可用于追踪工具执行详情
 - <code>complete</code> 事件的 <code>interrupted</code> 字段指示是否需要用户确认权限</p>
 <p>详细字段说明见 <a href="../api/#stream-api">API Reference</a>。</p>
-<h2 id="phase-5">Phase 5: 权限中断与恢复</h2>
+<h2 id="phase-5-权限中断与恢复">Phase 5: 权限中断与恢复</h2>
 <p>当工具需要用户确认时：</p>
-<h3 id="_9">中断流程</h3>
+<h3 id="中断流程">中断流程</h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="c1"># src/core/graph.py - tool_execution_node</span>
 <a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="k">if</span> <span class="n">tool</span><span class="o">.</span><span class="n">permission</span> <span class="o">==</span> <span class="n">ToolPermission</span><span class="o">.</span><span class="n">CONFIRM</span><span class="p">:</span>
 <a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>    <span class="c1"># 发送权限请求事件</span>
@@ -1670,7 +1738,7 @@
 <a id="__codelineno-9-22" name="__codelineno-9-22" href="#__codelineno-9-22"></a>        <span class="s2">&quot;message&quot;</span><span class="p">:</span> <span class="sa">f</span><span class="s2">&quot;Tool &#39;</span><span class="si">{</span><span class="n">tool_name</span><span class="si">}</span><span class="s2">&#39; requires </span><span class="si">{</span><span class="n">tool</span><span class="o">.</span><span class="n">permission</span><span class="o">.</span><span class="n">value</span><span class="si">}</span><span class="s2"> permission&quot;</span>
 <a id="__codelineno-9-23" name="__codelineno-9-23" href="#__codelineno-9-23"></a>    <span class="p">})</span>
 </code></pre></div>
-<h3 id="_10">恢复流程</h3>
+<h3 id="恢复流程">恢复流程</h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="c1"># POST /api/v1/chat/{conversation_id}/resume</span>
 <a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="p">{</span>
 <a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>    <span class="s2">&quot;thread_id&quot;</span><span class="p">:</span> <span class="s2">&quot;thd-xxx&quot;</span><span class="p">,</span>
@@ -1685,19 +1753,19 @@
 <a id="__codelineno-10-12" name="__codelineno-10-12" href="#__codelineno-10-12"></a>    <span class="n">stream_mode</span><span class="o">=</span><span class="s2">&quot;custom&quot;</span>
 <a id="__codelineno-10-13" name="__codelineno-10-13" href="#__codelineno-10-13"></a><span class="p">)</span>
 </code></pre></div>
-<h2 id="phase-6">Phase 6: 结果持久化</h2>
-<p>执行完成后，Controller 保存结果：</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="c1"># 更新消息的 graph_response</span>
+<h2 id="phase-6-结果持久化">Phase 6: 结果持久化</h2>
+<p>数据持久化采用<strong>短事务模式</strong>：每次写操作在 Repository 层立即 <code>flush() + commit()</code>，而非在 session 退出时统一提交。这避免了长事务持有 SQLite 写锁导致的 <code>database is locked</code> 错误。</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="c1"># 更新消息的 graph_response（Repository 内部立即 commit）</span>
 <a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">conversation_manager</span><span class="o">.</span><span class="n">update_response_async</span><span class="p">(</span>
 <a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>    <span class="n">conv_id</span><span class="o">=</span><span class="n">conversation_id</span><span class="p">,</span>
 <a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a>    <span class="n">message_id</span><span class="o">=</span><span class="n">message_id</span><span class="p">,</span>
 <a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a>    <span class="n">response</span><span class="o">=</span><span class="n">final_response</span>
 <a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a><span class="p">)</span>
 <a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a>
-<a id="__codelineno-11-8" name="__codelineno-11-8" href="#__codelineno-11-8"></a><span class="c1"># Artifact 变更已在执行过程中通过工具保存</span>
+<a id="__codelineno-11-8" name="__codelineno-11-8" href="#__codelineno-11-8"></a><span class="c1"># Artifact 变更已在执行过程中通过工具保存（每次工具调用独立 commit）</span>
 <a id="__codelineno-11-9" name="__codelineno-11-9" href="#__codelineno-11-9"></a><span class="c1"># 版本历史自动记录</span>
 </code></pre></div>
-<h2 id="_11">数据流总结</h2>
+<h2 id="数据流总结">数据流总结</h2>
 <pre class="mermaid"><code>flowchart TB
     Client["Client"]
 

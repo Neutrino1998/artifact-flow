@@ -19,7 +19,7 @@
       
       
       <link rel="icon" href="../../assets/images/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.1">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.2">
     
     
       
@@ -74,7 +74,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#redis" class="md-skip">
+        <a href="#redis迁移清单" class="md-skip">
           跳转至
         </a>
       
@@ -226,6 +226,25 @@
     
   
   Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../frontend/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Frontend Guide
 
       </a>
     </li>
@@ -426,6 +445,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../../frontend/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Frontend Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../request-lifecycle/" class="md-nav__link">
         
   
@@ -468,10 +514,10 @@
         
           
         
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
         
           
-          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
             
   
   
@@ -489,8 +535,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_3">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -782,7 +828,7 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#phase-1-worker" class="md-nav__link">
+  <a href="#phase-1---核心多worker部署前必须完成" class="md-nav__link">
     <span class="md-ellipsis">
       
         Phase 1 - 核心（多Worker部署前必须完成）
@@ -793,7 +839,7 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#phase-2-" class="md-nav__link">
+  <a href="#phase-2---扩展并发量上升后" class="md-nav__link">
     <span class="md-ellipsis">
       
         Phase 2 - 扩展（并发量上升后）
@@ -804,7 +850,7 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#phase-3-" class="md-nav__link">
+  <a href="#phase-3---可选优化" class="md-nav__link">
     <span class="md-ellipsis">
       
         Phase 3 - 可选优化
@@ -834,34 +880,34 @@
   
 
 
-<h1 id="redis">Redis迁移清单</h1>
-<h2 id="phase-1-worker">Phase 1 - 核心（多Worker部署前必须完成）</h2>
+<h1 id="redis迁移清单">Redis迁移清单</h1>
+<h2 id="phase-1---核心多worker部署前必须完成">Phase 1 - 核心（多Worker部署前必须完成）</h2>
 <ul>
 <li>[ ] ConversationManager._cache → Redis Hash</li>
 <li>[ ] Streaming Events → Redis Pub/Sub</li>
 </ul>
-<h2 id="phase-2-">Phase 2 - 扩展（并发量上升后）</h2>
+<h2 id="phase-2---扩展并发量上升后">Phase 2 - 扩展（并发量上升后）</h2>
 <ul>
 <li>[ ] AsyncSqliteSaver → langgraph-checkpoint-redis</li>
 <li>[ ] Redis Key TTL 自动清理</li>
 </ul>
-<h2 id="phase-3-">Phase 3 - 可选优化</h2>
+<h2 id="phase-3---可选优化">Phase 3 - 可选优化</h2>
 <ul>
 <li>[ ] ArtifactManager 缓存加 TTL（或直接移除）  ← 优先级低</li>
 <li>[ ] API Rate Limit / Session / 分布式锁</li>
 </ul>
-<h1 id="_1">模型模块已知问题清单</h1>
-<h2 id="_2">次要问题</h2>
+<h1 id="模型模块已知问题清单">模型模块已知问题清单</h1>
+<h2 id="次要问题">次要问题</h2>
 <ul>
 <li>[x] 将langchain模型接入改为专门的万能接口去适应不同provider，例如LiteLLM。尤其要注意reasoning和token usage等字段如何获取</li>
 </ul>
-<h1 id="_3">工具模块已知问题清单</h1>
-<h2 id="_4">次要问题</h2>
+<h1 id="工具模块已知问题清单">工具模块已知问题清单</h1>
+<h2 id="次要问题_1">次要问题</h2>
 <ul>
 <li>[x] 使用标准xml解析方式（xml.etree.ElementTree），string字段统一用cdata字段，所有参数Tag平铺，如有下级标签则为list</li>
 </ul>
-<h1 id="core">Core模块已知问题清单</h1>
-<h2 id="_5">主要问题</h2>
+<h1 id="core模块已知问题清单">Core模块已知问题清单</h1>
+<h2 id="主要问题">主要问题</h2>
 <ul>
 <li>[x] <code>ExtendableGraph</code>和<code>ExecutionController</code>流式输出支持</li>
 <li>[x] 确认user_confirmation_node在<code>ExecutionController</code>层面正确工作，现有代码处理很奇怪：
@@ -877,7 +923,7 @@ system prompt + instruction + history(如果有) + tool result</li>
 <li>[x] Agent基类去掉自己的工具调用处理，将工具调用处理全权交给graph的工具节点<code>user_confirmation_node</code>(这个node可以改个名字)。例如tool permission为NOTIFY/PUBLIC的时候也交给confirmation node执行，但是自动允许。</li>
 <li>[x] 可观测性设计：仔细设计graph state包含可观测性字段，记录token使用以及工具调用等信息</li>
 </ul>
-<h2 id="_6">次要问题</h2>
+<h2 id="次要问题_2">次要问题</h2>
 <ul>
 <li>[x] 各类id加上类型名</li>
 <li>[x] controller层的历史记录（User ↔ Graph）和graph层的历史记录是不是也应该分开管理，因为如果都塞到NodeMemory里面的话感觉不太合理，应该是一个context manager管理controller层一个管理graph层，这个context manager可以和前面说的是一个，然后controller层的历史记录以context的形式给graph？</li>
@@ -887,6 +933,7 @@ system prompt + instruction + history(如果有) + tool result</li>
 <li>[x] agent开启关闭debug模式很费劲：删除agentconfig中debug参数</li>
 <li>[x] Typer + Rich实现简易terminal前端</li>
 <li>[ ] agent提示词精简一下</li>
+<li>[ ] subagent应该也利用好artifact</li>
 <li>[x] ToolPromptGenerator中generate_tool_instruction最后return的instruction加上<tool_call_instructions>的tag</li>
 <li>[x] 博查搜索语法确认</li>
 <li>[x] _execute_new_message在调用graph之前，获取了session_id之后清除已有的task_plan</li>
@@ -894,15 +941,15 @@ system prompt + instruction + history(如果有) + tool result</li>
 <li>[ ] agent logging 加上thread id</li>
 <li>[ ] 区分conversation history和tool interactions的compression level</li>
 </ul>
-<h1 id="agent">Agent模块已知问题清单</h1>
-<h2 id="_7">重要问题</h2>
+<h1 id="agent模块已知问题清单">Agent模块已知问题清单</h1>
+<h2 id="重要问题">重要问题</h2>
 <ul>
 <li>[x] revisit xml工具解析系统：参数类型转换（str → int/List[str]）应由工具自行处理</li>
 <li>[x] artifact rewrite准确度：update_artifact的old_str匹配失败，需检查read后的格式或正则解析：artifact提供模糊匹配功能</li>
 <li>[x] 优化agent提示词格式：用xml标签规整（如<code>&lt;task_plan&gt;</code>），各agent统一</li>
 <li>[x] crawl agent无法正确调用web_fetch：list格式解析问题（JSON数组 vs 多行格式）</li>
 </ul>
-<h2 id="_8">次要问题</h2>
+<h2 id="次要问题_3">次要问题</h2>
 <ul>
 <li>[x] agent提示词增加系统时间感知</li>
 <li>[x] artifact通用化描述：result artifact的id应根据用户需求动态确定，task_plan支持笔记功能</li>

@@ -1,0 +1,1664 @@
+
+<!doctype html>
+<html lang="zh" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Multi-Agent Research System Built on LangGraph">
+      
+      
+      
+        <link rel="canonical" href="https://neutrino.github.io/artifact-flow/_archive/optimization-plan/">
+      
+      
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.2">
+    
+    
+      
+        <title>ArtifactFlow 分阶段优化计划 - ArtifactFlow</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#artifactflow-分阶段优化计划" class="md-skip">
+          跳转至
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="页眉">
+    <a href="../.." title="ArtifactFlow" class="md-header__button md-logo" aria-label="ArtifactFlow" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            ArtifactFlow
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              ArtifactFlow 分阶段优化计划
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="搜索" placeholder="搜索" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="查找">
+        
+        <button type="reset" class="md-search__icon md-icon" title="清空当前内容" aria-label="清空当前内容" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            正在初始化搜索引擎
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/Neutrino1998/artifact-flow" title="前往仓库" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    Neutrino1998/artifact-flow
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="标签" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../frontend/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Frontend Guide
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../request-lifecycle/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Request Lifecycle
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../architecture/core/" class="md-tabs__link">
+          
+  
+  
+  Architecture
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../streaming/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Streaming
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../extension-guide/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Extension Guide
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../api/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  API Reference
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../faq/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  FAQ
+
+      </a>
+    </li>
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="导航栏" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="ArtifactFlow" class="md-nav__button md-logo" aria-label="ArtifactFlow" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    ArtifactFlow
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/Neutrino1998/artifact-flow" title="前往仓库" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    Neutrino1998/artifact-flow
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../frontend/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Frontend Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../request-lifecycle/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Request Lifecycle
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Architecture
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../architecture/core/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Core
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../architecture/agents/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Agents
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../architecture/tools/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tools
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../architecture/data-layer/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data Layer
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../architecture/concurrency/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Concurrency
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../streaming/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Streaming
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../extension-guide/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Extension Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../faq/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    FAQ
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="目录">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      目录
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#phase-1-核心流程-bug-修复id-一致性--permission-resume--done" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phase 1: 核心流程 Bug 修复（ID 一致性 + Permission Resume） ✅ DONE
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Phase 1: 核心流程 Bug 修复（ID 一致性 + Permission Resume） ✅ DONE">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#11-统一-id-生成源" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1.1 统一 ID 生成源
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#12-前端-permissionmodal-从-streamstore-读取-id" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1.2 前端 PermissionModal 从 streamStore 读取 ID
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#13-前端处理-metadata-事件" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1.3 前端处理 metadata 事件
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#14-resume-归属校验" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1.4 resume 归属校验
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#phase-2-安全加固--done" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phase 2: 安全加固 ✅ DONE
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Phase 2: 安全加固 ✅ DONE">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#21-web_fetch-ssrf-防护" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.1 web_fetch SSRF 防护
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#22-持久化异常-fail-fast" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.2 持久化异常 fail fast
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#23-docker-健康检查修复" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.3 Docker 健康检查修复
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#24-错误信息脱敏" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.4 错误信息脱敏
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#phase-3-数据质量改善-31--32--33-" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phase 3: 数据质量改善 (3.1 ✅, 3.2 ✅, 3.3 ⏸️)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Phase 3: 数据质量改善 (3.1 ✅, 3.2 ✅, 3.3 ⏸️)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#31-分页-total-真实计数-" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.1 分页 total 真实计数 ✅
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#32-artifact-created_at-返回真实时间-" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.2 Artifact created_at 返回真实时间 ✅
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#33-graph-编译缓存来自-concurrencymd-phase-3--deferred" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.3 Graph 编译缓存（来自 concurrency.md Phase 3） ⏸️ Deferred
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#phase-4-认证框架--done" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phase 4: 认证框架 ✅ DONE
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Phase 4: 认证框架 ✅ DONE">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#41-后端认证-" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.1 后端认证 ✅
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#42-前端认证-" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.2 前端认证 ✅
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#phase-5-postgresql-迁移" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phase 5: PostgreSQL 迁移
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Phase 5: PostgreSQL 迁移">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#51-数据库引擎切换" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.1 数据库引擎切换
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#52-schema-迁移" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.2 Schema 迁移
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#53-checkpointer-迁移" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.3 Checkpointer 迁移
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#phase-6-redis-引入多-worker-支持" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phase 6: Redis 引入（多 Worker 支持）
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Phase 6: Redis 引入（多 Worker 支持）">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#61-streammanager-迁移到-redis" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.1 StreamManager 迁移到 Redis
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#62-conversationmanager-缓存迁移" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.2 ConversationManager 缓存迁移
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#63-checkpointer-迁移到-redis可选" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.3 Checkpointer 迁移到 Redis（可选）
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#phase-7-文件上传--artifact" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phase 7: 文件上传 → Artifact
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Phase 7: 文件上传 → Artifact">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#71-后端上传-api" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.1 后端上传 API
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#72-前端上传-ui" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.2 前端上传 UI
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#phase-8-用户直接编辑-artifact" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phase 8: 用户直接编辑 Artifact
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Phase 8: 用户直接编辑 Artifact">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#81-后端-artifact-写接口" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8.1 后端 Artifact 写接口
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#82-前端编辑-ui" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8.2 前端编辑 UI
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#各-phase-依赖关系" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        各 Phase 依赖关系
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#备注" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        备注
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="artifactflow-分阶段优化计划">ArtifactFlow 分阶段优化计划</h1>
+<p>基于 code review 反馈和 <code>docs/architecture/concurrency.md</code> 演进路线整合。</p>
+<hr />
+<h2 id="phase-1-核心流程-bug-修复id-一致性--permission-resume--done">Phase 1: 核心流程 Bug 修复（ID 一致性 + Permission Resume） ✅ DONE</h2>
+<p><strong>目标</strong>: 修复 permission resume 端到端链路断裂问题。当前 permission 确认流程无法正常工作。</p>
+<blockquote>
+<p><strong>完成于</strong>: commit <code>c24fdb8</code> — 1.1~1.4 全部完成。Controller 接受外部传入 ID 并 fallback 自动生成，测试无需强制适配（向后兼容）。</p>
+</blockquote>
+<h3 id="11-统一-id-生成源">1.1 统一 ID 生成源</h3>
+<p><strong>问题</strong>: Router 层生成 <code>message_id</code>/<code>thread_id</code>，Controller 层又重新生成，导致前端持有的 ID 与实际执行 ID 不一致。</p>
+<p><strong>涉及文件</strong>:
+- <code>src/api/routers/chat.py</code> — ID 生成点（~L65-72）
+- <code>src/core/controller.py</code> — <code>_execute_new_message()</code>（~L214）和 <code>_stream_new_message()</code>（~L353）中的重复 ID 生成
+- <code>src/core/controller.py</code> — <code>ExecutionController.stream_execute()</code> / <code>execute()</code> 方法签名</p>
+<p><strong>改动</strong>:
+- Router 层生成 <code>message_id</code> + <code>thread_id</code> 作为唯一权威源
+- Controller 的 <code>stream_execute()</code> / <code>execute()</code> 接受外部传入的 <code>message_id</code> + <code>thread_id</code> 参数
+- 删除 Controller 内部 <code>_execute_new_message()</code> / <code>_stream_new_message()</code> 中的 ID 生成逻辑
+- 测试适配：<code>tests/test_core_graph.py</code> 和 <code>tests/test_core_graph_stream.py</code> 中所有直接调用 <code>controller.execute(content=...)</code> / <code>controller.stream_execute(content=...)</code> 的地方需补传 <code>thread_id</code> + <code>message_id</code>；在 <code>TestEnvironment</code> 上新增 <code>generate_ids()</code> helper 封装 ID 生成，模拟 Router 层职责</p>
+<h3 id="12-前端-permissionmodal-从-streamstore-读取-id">1.2 前端 PermissionModal 从 streamStore 读取 ID</h3>
+<p><strong>问题</strong>: <code>useSSE.ts</code> 的 <code>permission_request</code> handler 尝试从 SSE 事件 payload 读取 <code>thread_id</code>/<code>message_id</code>，但后端 <code>graph.py</code> 的 <code>permission_request</code> 事件根本不包含这两个字段，导致前端拿到空字符串。实际上，permission request 必然发生在当前活跃 stream 内，<code>streamStore</code> 中已通过 <code>startStream()</code> 持有正确的 <code>threadId</code>/<code>messageId</code>。</p>
+<p><strong>涉及文件</strong>:
+- <code>frontend/src/hooks/useSSE.ts</code> — <code>PERMISSION_REQUEST</code> case（~L213-219）
+- <code>frontend/src/components/layout/PermissionModal.tsx</code> — 已从 <code>permissionRequest</code> 对象读取 ID（~L23-24）</p>
+<p><strong>改动</strong>:
+- <code>useSSE.ts</code> 的 <code>permission_request</code> handler 不再从 <code>data</code> 中读取 <code>thread_id</code>/<code>message_id</code>，改为存储 <code>toolName</code> + <code>params</code> 即可
+- <code>PermissionModal</code> 的 <code>handleResponse()</code> 直接从 <code>streamStore</code> 读取 <code>threadId</code>/<code>messageId</code>（与读取 <code>streamUrl</code> 同源）
+- <code>PermissionRequest</code> 类型定义中移除 <code>messageId</code>/<code>threadId</code> 字段
+- 后端 <code>permission_request</code> 事件无需改动</p>
+<h3 id="13-前端处理-metadata-事件">1.3 前端处理 metadata 事件</h3>
+<p><strong>问题</strong>: <code>useSSE.ts</code> 对 METADATA 事件直接 <code>break</code>，未提取真实执行 ID。配合 1.1 的 ID 统一后，metadata 事件中的 ID 可作为防御性校验。</p>
+<p><strong>涉及文件</strong>:
+- <code>frontend/src/hooks/useSSE.ts</code> — METADATA case（~L78）</p>
+<p><strong>改动</strong>:
+- METADATA 事件中提取 <code>conversation_id</code>、<code>message_id</code>、<code>thread_id</code>，与 <code>streamStore</code> 中已有值做一致性校验（dev 环境 console.warn 不一致情况）</p>
+<h3 id="14-resume-归属校验">1.4 resume 归属校验</h3>
+<p><strong>问题</strong>: resume 端点完全信任客户端传入的 <code>thread_id</code>，未校验其与 <code>conversation_id</code> 的绑定关系。</p>
+<p><strong>涉及文件</strong>:
+- <code>src/api/routers/chat.py</code> — <code>resume_execution()</code>（~L284-299）
+- <code>src/db/models.py</code> — <code>Message</code> 模型已有 <code>thread_id</code> 和 <code>conversation_id</code> 字段
+- <code>src/core/repositories/</code> — 可能需要新增查询方法</p>
+<p><strong>改动</strong>:
+- resume 前查询 DB 校验 <code>message.thread_id == request.thread_id AND message.conversation_id == conv_id</code>
+- 校验失败返回 403/404</p>
+<hr />
+<h2 id="phase-2-安全加固--done">Phase 2: 安全加固 ✅ DONE</h2>
+<p><strong>目标</strong>: 修复 SSRF 风险、持久化静默失败、生产环境配置问题。</p>
+<blockquote>
+<p><strong>完成于</strong>: 2.1 web_fetch SSRF 防护（协议校验 + permission AUTO→CONFIRM）、2.2 持久化 fail fast（移除静默吞异常）、2.3 Docker healthcheck（/docs→/health）、2.4 错误信息脱敏（<code>_sanitize_error_event</code> 统一拦截所有 push 出口 + controller 不再向 graph_response 写入内部异常）。附带修复 permission 前端确认流程（interrupted COMPLETE 保留 stream 状态、streamStore 新增 conversationId/resumeStream、StreamManager 允许重建已关闭 stream）。</p>
+</blockquote>
+<h3 id="21-web_fetch-ssrf-防护">2.1 web_fetch SSRF 防护</h3>
+<p><strong>问题</strong>: <code>web_fetch</code> 工具 permission 为 AUTO，且无 URL 校验，可访问内网/元数据地址。</p>
+<p><strong>涉及文件</strong>:
+- <code>src/tools/implementations/web_fetch.py</code> — permission 定义（~L54）和 fetch 逻辑（~L246）</p>
+<p><strong>改动</strong>:
+- 新增 URL 校验函数：拒绝私网 IP（10.x, 172.16-31.x, 192.168.x, 127.x, 169.254.x）、拒绝 <code>file://</code> 等非 HTTP 协议
+- 对解析后的 IP 做二次校验（防 DNS rebinding：resolve 后检查 IP）
+- Permission 从 <code>AUTO</code> 改为 <code>CONFIRM</code>（需用户确认）或至少对非白名单域名 CONFIRM</p>
+<h3 id="22-持久化异常-fail-fast">2.2 持久化异常 fail fast</h3>
+<p><strong>问题</strong>: <code>conversation_manager.py</code> 三处 DB 写入失败被 <code>except Exception: logger.warning()</code> 吞掉。</p>
+<p><strong>涉及文件</strong>:
+- <code>src/core/conversation_manager.py</code> — <code>_persist_conversation()</code>（~L170）、<code>_persist_message()</code>（~L300）、<code>_persist_response()</code>（~L337）</p>
+<p><strong>改动</strong>:
+- 核心路径（persist_message、persist_response）的异常向上抛出，让 API 层返回错误
+- 可降级路径（如 persist_conversation 的 DuplicateError）保留当前行为
+- 在 <code>chat.py</code> 的 <code>execute_and_push()</code> 中捕获持久化异常，推送 error 事件到 stream</p>
+<h3 id="23-docker-健康检查修复">2.3 Docker 健康检查修复</h3>
+<p><strong>问题</strong>: Healthcheck 依赖 <code>/docs</code>，生产环境 <code>DEBUG=False</code> 时 <code>/docs</code> 被禁用。</p>
+<p><strong>涉及文件</strong>:
+- <code>src/api/main.py</code> — 需新增 <code>/health</code> 端点
+- <code>Dockerfile</code> — healthcheck 命令（~L71）</p>
+<p><strong>改动</strong>:
+- <code>main.py</code> 新增 <code>GET /health</code> 端点，返回 <code>{"status": "ok"}</code>
+- Dockerfile healthcheck 改为 <code>curl -f http://localhost:8000/health</code></p>
+<h3 id="24-错误信息脱敏">2.4 错误信息脱敏</h3>
+<p><strong>问题</strong>: Background task 异常通过 <code>str(e)</code> 直接推送前端，可能泄露内部路径/DB 信息。</p>
+<p><strong>涉及文件</strong>:
+- <code>src/api/routers/chat.py</code> — error 事件推送（~L189, ~L398）</p>
+<p><strong>改动</strong>:
+- 生产环境（<code>DEBUG=False</code>）：推送通用错误消息 "Internal server error"，详细信息仅写日志
+- 开发环境（<code>DEBUG=True</code>）：保持当前行为，推送完整错误信息</p>
+<hr />
+<h2 id="phase-3-数据质量改善-31--32--33-">Phase 3: 数据质量改善 (3.1 ✅, 3.2 ✅, 3.3 ⏸️)</h2>
+<p><strong>目标</strong>: 修复数据准确性问题。</p>
+<blockquote>
+<p><strong>3.1 &amp; 3.2 完成于</strong>: commit <code>14f44e6</code> — Repository 层新增 count 查询，Router 层返回准确 total；ArtifactMemory 增加 created_at 字段，使用 DB 真实时间。
+<strong>补丁</strong>: commit <code>925ce9f</code> — code review 修复：list_conversations 去掉 asyncio.gather 避免共享 AsyncSession；create_artifact 缓存构造传入 db_artifact.created_at。</p>
+</blockquote>
+<h3 id="31-分页-total-真实计数-">3.1 分页 total 真实计数 ✅</h3>
+<p><strong>问题</strong>: <code>total</code> 使用 <code>offset + len + (1 if has_more else 0)</code> 估算。</p>
+<p><strong>涉及文件</strong>:
+- <code>src/api/routers/chat.py</code> — list conversations（~L202-207）
+- <code>src/core/repositories/</code> — 可能需要新增 count 查询</p>
+<p><strong>改动</strong>:
+- Repository 层新增 <code>count_conversations()</code> 方法（<code>SELECT COUNT(*) FROM conversations</code>）
+- Router 层并行执行 count 查询和分页查询，返回准确 total</p>
+<h3 id="32-artifact-created_at-返回真实时间-">3.2 Artifact created_at 返回真实时间 ✅</h3>
+<p><strong>问题</strong>: <code>artifacts.py</code> 用 <code>datetime.now()</code> 代替真实创建时间。</p>
+<p><strong>涉及文件</strong>:
+- <code>src/api/routers/artifacts.py</code> — 响应构造（~L54, ~L93）
+- <code>src/core/artifact_manager.py</code> 或 <code>src/tools/implementations/artifact_ops.py</code> — ArtifactMemory 数据结构</p>
+<p><strong>改动</strong>:
+- 检查 ArtifactMemory 是否持有 <code>created_at</code>，如果没有则从 DB 查询
+- 如果 artifact 尚未持久化到 DB，使用内存中的创建时间（在 ArtifactMemory 中增加 <code>created_at</code> 字段）
+- Router 层使用真实时间构造响应</p>
+<h3 id="33-graph-编译缓存来自-concurrencymd-phase-3--deferred">3.3 Graph 编译缓存（来自 concurrency.md Phase 3） ⏸️ Deferred</h3>
+<p><strong>当前状态</strong>: 暂不实施，先保持“每请求编译 graph”现状，后续在有明确性能瓶颈数据后再推进。</p>
+<p><strong>背景问题</strong>: 当前每个请求都会创建 Agent/Tool/Registry 并编译 StateGraph，存在固定 CPU 开销，影响吞吐。</p>
+<p><strong>现有实现特征（2026-02）</strong>:
+- <code>src/api/dependencies.py</code> 和 <code>src/api/routers/chat.py</code> 的后台任务路径中，均会按请求调用 <code>create_multi_agent_graph()</code>
+- <code>artifact_manager</code>（请求级对象，绑定请求级 DB session）当前通过闭包/实例字段参与 graph 构建
+- 该设计在“每请求编译”前提下并发正确性可接受（不会跨请求复用 session），但吞吐较差</p>
+<p><strong>候选改造方案（已调研，未落地）</strong>:
+- 目标：启动时编译一次 graph 并缓存为全局单例；请求级 <code>artifact_manager</code> 通过 runtime context 注入
+- 对齐 LangGraph 推荐模式：<code>context_schema</code> + <code>runtime.context</code>（context 不进入 checkpoint，resume 时需重新传入）</p>
+<ol>
+<li>新增 <code>GraphContext</code></li>
+<li>新建 <code>src/core/graph_context.py</code></li>
+<li>定义 dataclass：<code>GraphContext(artifact_manager: Optional[ArtifactManager])</code></li>
+<li>
+<p>作用：承载请求级依赖，避免 graph 闭包捕获 request-scoped 对象</p>
+</li>
+<li>
+<p>改造 <code>core/graph.py</code></p>
+</li>
+<li><code>ExtendableGraph</code> 移除 <code>artifact_manager</code> 构造参数</li>
+<li><code>StateGraph</code> 增加 <code>context_schema=GraphContext</code></li>
+<li>节点执行时通过 runtime 读取 <code>artifact_manager</code>，传入 <code>ContextManager.build_agent_messages(...)</code></li>
+<li>
+<p><code>create_multi_agent_graph()</code> 改为不接收 <code>artifact_manager</code></p>
+</li>
+<li>
+<p>改造 <code>tools/implementations/artifact_ops.py</code></p>
+</li>
+<li>Artifact 工具不再在 <code>__init__</code> 持有 manager</li>
+<li>执行时从 runtime context 获取 manager</li>
+<li>
+<p><code>create_artifact_tools()</code> 改为无参工厂</p>
+</li>
+<li>
+<p>改造 <code>api/dependencies.py</code></p>
+</li>
+<li>增加 <code>_compiled_graph</code> 全局变量</li>
+<li>在 <code>init_globals()</code> 中编译并缓存 graph</li>
+<li>增加 <code>get_compiled_graph()</code> 访问器</li>
+<li>
+<p><code>get_controller()</code> 改为复用缓存 graph，仅注入请求级 manager</p>
+</li>
+<li>
+<p>改造 <code>core/controller.py</code></p>
+</li>
+<li>
+<p>所有 graph 调用点（<code>ainvoke</code>/<code>astream</code>、new/resume）统一传入 <code>context=GraphContext(...)</code></p>
+</li>
+<li>
+<p>改造 <code>api/routers/chat.py</code></p>
+</li>
+<li>两个后台任务（<code>execute_and_push</code> / <code>execute_resume</code>）改为复用 <code>get_compiled_graph()</code></li>
+<li>
+<p>删除任务内重复编译 graph 的逻辑</p>
+</li>
+<li>
+<p>测试适配</p>
+</li>
+<li><code>tests/test_core_graph.py</code> / <code>tests/test_core_graph_stream.py</code>：测试环境改为“graph 编译一次 + 请求级 manager 复用 graph”</li>
+</ol>
+<p><strong>关键注意事项（必须满足）</strong>:
+- <code>compiled_graph</code> 绝不能持有 request-scoped 对象（尤其 <code>ArtifactManager</code> / <code>AsyncSession</code>）
+- 开启 graph 缓存后，graph 内绑定的 tool/agent 实例会跨请求复用；所有工具需保证无状态或并发安全
+- <code>web_fetch</code> 等工具若持有可变实例状态（配置/运行对象），应改为执行期局部创建，避免跨请求状态污染
+- 需锁定支持 runtime context 的 LangGraph 版本，避免环境解析到旧版本导致运行时错误
+- context 不会持久化到 checkpoint，resume 路径必须每次重新传入 context</p>
+<p><strong>为何先 defer</strong>:
+- 当前更关注并发正确性与稳定性，优先避免一次性引入“缓存 + 依赖注入模型切换 + tool 生命周期变化”的复合改动风险
+- Phase 5（PostgreSQL 迁移）完成后再结合压测数据评估，收益/风险比更清晰</p>
+<p><strong>后续触发条件（再开启本项）</strong>:
+- 有明确数据表明 graph 编译耗时显著影响 p95/p99 或吞吐
+- 完成工具无状态化审计（至少 <code>artifact_ops</code>、<code>web_fetch</code>）
+- 有可自动化回归覆盖 new/resume/streaming/并发双会话</p>
+<hr />
+<h2 id="phase-4-认证框架--done">Phase 4: 认证框架 ✅ DONE</h2>
+<p><strong>目标</strong>: 实现用户认证和租户隔离，所有 API 路由强制 <code>current_user</code>。</p>
+<blockquote>
+<p><strong>完成于</strong>: commit <code>8d367ae</code> — JWT 认证框架全面实现。后端：JWT 签发/验证、User 模型、get_current_user 依赖注入、所有路由 user_id 过滤、SSE 连接认证、resume 归属校验、admin 用户管理 API。前端：登录页、authStore（Zustand + localStorage）、AuthGuard 路由保护、API 请求自动附加 token、401 全局拦截跳转登录页、UserMenu + 管理员用户管理 UI。CLI：login/logout 命令、token 持久化。附带 code review 修复（<code>821f20a</code>）、用户管理 UI（<code>b573be1</code>）、logout 状态清理（<code>0a06643</code>）等。</p>
+</blockquote>
+<h3 id="41-后端认证-">4.1 后端认证 ✅</h3>
+<p><strong>涉及文件</strong>:
+- <code>src/api/dependencies.py</code> — <code>get_current_user()</code> 改为真实实现
+- <code>src/api/main.py</code> — 可能需要认证中间件
+- <code>src/api/routers/chat.py</code> — 所有路由注入 <code>current_user</code>
+- <code>src/api/routers/artifacts.py</code> — 所有路由注入 <code>current_user</code>
+- <code>src/api/routers/stream.py</code> — SSE 连接认证
+- <code>src/db/models.py</code> — <code>Conversation.user_id</code> 已预留，需要新增 User 模型或依赖外部 IdP
+- <code>src/core/repositories/</code> — 所有查询增加 <code>user_id</code> 过滤条件</p>
+<p><strong>改动</strong>:
+- 选择认证方案：JWT（自签发）或 OAuth2（接入外部 IdP）
+- 实现 <code>get_current_user()</code> 从 <code>Authorization: Bearer &lt;token&gt;</code> 解析用户
+- 所有 conversation/artifact 查询增加 <code>WHERE user_id = :current_user</code> 过滤
+- SSE 端点支持 query param 传 token（因为 EventSource 不支持自定义 header，但我们用 fetch 所以可以用 header）
+- resume 流程增加用户归属校验</p>
+<h3 id="42-前端认证-">4.2 前端认证 ✅</h3>
+<p><strong>涉及文件</strong>:
+- <code>frontend/src/</code> — 新增登录页面组件
+- <code>frontend/src/lib/api.ts</code> — 所有请求附加 Authorization header
+- <code>frontend/src/lib/sse.ts</code> — SSE 连接附加 token
+- <code>frontend/src/stores/</code> — 新增 authStore（token 存储、登录状态）
+- <code>frontend/src/app/</code> — 路由保护（未登录跳转登录页）</p>
+<p><strong>改动</strong>:
+- 新增登录/注册页面
+- api.ts 封装请求拦截器，自动附加 token
+- 401 响应全局拦截，跳转登录页
+- token 持久化到 localStorage，刷新页面不丢失</p>
+<hr />
+<h2 id="phase-5-postgresql-迁移">Phase 5: PostgreSQL 迁移</h2>
+<p><strong>目标</strong>: 主数据库从 SQLite 迁移到 PostgreSQL，为多用户/多 worker 打好基础。对应 concurrency.md Phase 2.5。</p>
+<h3 id="51-数据库引擎切换">5.1 数据库引擎切换</h3>
+<p><strong>涉及文件</strong>:
+- <code>src/db/database.py</code> — <code>DatabaseManager</code> 引擎配置
+- <code>src/config.py</code> — DATABASE_URL 配置
+- <code>requirements.txt</code> — 增加 <code>asyncpg</code>（PostgreSQL 异步驱动）
+- <code>docker-compose.yml</code> — 增加 PostgreSQL 服务</p>
+<p><strong>改动</strong>:
+- <code>DatabaseManager</code> 移除 SQLite 专属配置（WAL PRAGMA 等），改为根据 URL scheme 自动适配
+- 配置 PostgreSQL 连接池参数（<code>pool_size</code>, <code>max_overflow</code>）
+- 更新 <code>DATABASE_URL</code> 默认值或环境变量</p>
+<h3 id="52-schema-迁移">5.2 Schema 迁移</h3>
+<p><strong>涉及文件</strong>:
+- <code>src/db/models.py</code> — 检查 SQLite 特有的类型/约束是否兼容 PostgreSQL
+- <code>src/db/migrations/</code> — Alembic 迁移脚本
+- <code>src/core/repositories/</code> — 检查是否有 SQLite 特有 SQL</p>
+<p><strong>改动</strong>:
+- 审查所有 model 字段类型的 PostgreSQL 兼容性（<code>JSON</code> → <code>JSONB</code>, <code>DateTime</code> → <code>TIMESTAMP WITH TIME ZONE</code> 等）
+- 编写数据迁移脚本（从 SQLite 导出 → PostgreSQL 导入）
+- 移除所有 SQLite PRAGMA 调用（<code>_configure_sqlite_wal</code> 改为条件执行或删除）</p>
+<h3 id="53-checkpointer-迁移">5.3 Checkpointer 迁移</h3>
+<p><strong>涉及文件</strong>:
+- <code>src/core/graph.py</code> — <code>create_async_sqlite_checkpointer</code> 改为 PostgreSQL
+- <code>src/api/dependencies.py</code> — checkpointer 初始化
+- <code>requirements.txt</code> — 增加 <code>langgraph-checkpoint-postgres</code></p>
+<p><strong>改动</strong>:
+- 使用 <code>langgraph-checkpoint-postgres</code> 的 <code>AsyncPostgresSaver</code> 替换 <code>AsyncSqliteSaver</code>
+- Checkpointer 使用独立连接池（与主数据库分开），解决单连接瓶颈
+- 配置 checkpoint TTL 自动过期</p>
+<hr />
+<h2 id="phase-6-redis-引入多-worker-支持">Phase 6: Redis 引入（多 Worker 支持）</h2>
+<p><strong>目标</strong>: 将进程内状态迁移到 Redis，支持多 worker 部署。对应 concurrency.md Phase 1 + Phase 2。</p>
+<h3 id="61-streammanager-迁移到-redis">6.1 StreamManager 迁移到 Redis</h3>
+<p><strong>涉及文件</strong>:
+- <code>src/api/services/stream_manager.py</code> — 核心重构
+- <code>src/api/dependencies.py</code> — Redis 连接初始化
+- <code>src/config.py</code> — REDIS_URL 配置
+- <code>requirements.txt</code> — 增加 <code>redis[hiredis]</code>
+- <code>docker-compose.yml</code> — 增加 Redis 服务</p>
+<p><strong>改动</strong>:
+- <code>asyncio.Queue</code> → Redis Pub/Sub 或 Redis Streams
+- 事件缓冲：POST /chat push 事件到 Redis channel，GET /stream subscribe 消费
+- TTL/清理逻辑迁移到 Redis key 过期机制
+- 如果需要可靠投递（断线重连不丢消息），使用 Redis Streams + consumer group</p>
+<h3 id="62-conversationmanager-缓存迁移">6.2 ConversationManager 缓存迁移</h3>
+<p><strong>涉及文件</strong>:
+- <code>src/core/conversation_manager.py</code> — <code>_cache</code> dict → Redis Hash</p>
+<p><strong>改动</strong>:
+- <code>_cache</code>（Python dict）替换为 Redis Hash
+- 实现 cache invalidation 策略（TTL + 写穿）
+- 或者简化：移除内存缓存层，全部走 DB（PostgreSQL 足够快），仅在热点路径用 Redis 缓存</p>
+<h3 id="63-checkpointer-迁移到-redis可选">6.3 Checkpointer 迁移到 Redis（可选）</h3>
+<p><strong>涉及文件</strong>:
+- <code>src/core/graph.py</code> — checkpointer 创建
+- <code>src/api/dependencies.py</code> — checkpointer 初始化</p>
+<p><strong>改动</strong>:
+- 如果 Phase 5.3 已迁移到 PostgreSQL checkpointer 且性能满足，此步可跳过
+- 如需进一步优化：使用 <code>langgraph-checkpoint-redis</code> 的 <code>AsyncRedisSaver</code>
+- Redis checkpointer 天然支持 TTL，checkpoint 数据自动过期</p>
+<hr />
+<h2 id="phase-7-文件上传--artifact">Phase 7: 文件上传 → Artifact</h2>
+<p><strong>目标</strong>: 支持用户上传文档，解析为 Artifact 供 Agent 操作。</p>
+<h3 id="71-后端上传-api">7.1 后端上传 API</h3>
+<p><strong>涉及文件</strong>:
+- <code>src/api/routers/artifacts.py</code> — 新增 <code>POST /api/v1/artifacts/{session_id}/upload</code>
+- <code>src/api/schemas/</code> — 新增上传请求/响应 schema
+- <code>src/core/artifact_manager.py</code> — 新增 <code>create_from_upload()</code> 方法</p>
+<p><strong>改动</strong>:
+- 新增上传端点，接受 <code>UploadFile</code>（multipart/form-data）
+- 支持文件类型：<code>.txt</code>, <code>.md</code>, <code>.pdf</code>, <code>.csv</code>, <code>.json</code> 等
+- 文件解析 pipeline：检测类型 → 提取文本 → 创建 Artifact（<code>metadata.source = "user_upload"</code>）
+- 文件大小限制 + 类型白名单校验
+- PDF 解析可复用 <code>web_fetch</code> 中的 PDF 处理逻辑（如有）</p>
+<h3 id="72-前端上传-ui">7.2 前端上传 UI</h3>
+<p><strong>涉及文件</strong>:
+- <code>frontend/src/components/chat/</code> — 已有上传按钮（<code>d122b01</code> commit 提到 "add upload file button"）
+- <code>frontend/src/lib/api.ts</code> — 新增上传 API 调用
+- <code>frontend/src/stores/artifactStore.ts</code> — 上传状态管理</p>
+<p><strong>改动</strong>:
+- 连接已有的上传按钮到实际上传逻辑
+- 上传进度展示（进度条或 spinner）
+- 上传完成后自动刷新 artifact 列表
+- 拖拽上传支持（可选）</p>
+<hr />
+<h2 id="phase-8-用户直接编辑-artifact">Phase 8: 用户直接编辑 Artifact</h2>
+<p><strong>目标</strong>: 允许用户通过前端直接编辑 Artifact 内容，与 Agent 协作修订。</p>
+<h3 id="81-后端-artifact-写接口">8.1 后端 Artifact 写接口</h3>
+<p><strong>涉及文件</strong>:
+- <code>src/api/routers/artifacts.py</code> — 新增 PUT/PATCH 端点
+- <code>src/api/schemas/</code> — 新增更新请求 schema（含 <code>lock_version</code> 乐观锁）
+- <code>src/core/artifact_manager.py</code> — 新增 <code>update_by_user()</code> 方法
+- <code>src/db/models.py</code> — Artifact 模型已有 <code>lock_version</code> 字段</p>
+<p><strong>改动</strong>:
+- <code>PUT /api/v1/artifacts/{session_id}/{artifact_id}</code> — 全量更新内容
+- 请求体包含 <code>content</code> + <code>lock_version</code>，乐观锁防止并发冲突
+- 更新时创建新 version 记录（<code>update_type = "user_edit"</code>）
+- 返回新的 <code>lock_version</code> 供前端下次提交使用</p>
+<h3 id="82-前端编辑-ui">8.2 前端编辑 UI</h3>
+<p><strong>涉及文件</strong>:
+- <code>frontend/src/components/artifact/</code> — ArtifactPanel 中增加编辑模式
+- <code>frontend/src/lib/api.ts</code> — 新增更新 API 调用
+- <code>frontend/src/stores/artifactStore.ts</code> — 编辑状态管理</p>
+<p><strong>改动</strong>:
+- Artifact 预览面板增加"编辑"按钮，切换到编辑模式
+- 编辑模式：代码类型用 code editor（monaco-editor 或 CodeMirror），文本类型用 textarea
+- 保存时带 <code>lock_version</code>，冲突时提示用户（409 Conflict → 显示 diff 让用户选择）
+- 乐观更新：保存后立即更新本地状态，失败时回滚</p>
+<hr />
+<h2 id="各-phase-依赖关系">各 Phase 依赖关系</h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>Phase 1 (核心 Bug)     ✅ 已完成
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>Phase 2 (安全加固)     ✅ 已完成
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>Phase 3 (数据质量)     ← 无依赖，可与 Phase 1/2 并行
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>Phase 4 (认证框架)     ✅ 已完成
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>Phase 5 (PostgreSQL)   ← 建议在 Phase 4 之后（认证需要的 User 模型一起迁移）
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>Phase 6 (Redis)        ← 建议在 Phase 5 之后（基础设施逐步升级）
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>Phase 7 (文件上传)     ← 建议在 Phase 4 之后（需要认证知道上传者是谁）
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>Phase 8 (编辑 Artifact) ← 建议在 Phase 7 之后（上传和编辑共享写接口模式）
+</code></pre></div>
+<hr />
+<h2 id="备注">备注</h2>
+<ul>
+<li>Phase 1-3 是纯修复，不引入新依赖，风险最低</li>
+<li>Phase 4 是第一个需要前端大改的阶段（登录页 + token 管理）</li>
+<li>Phase 5-6 是基础设施升级，需要 docker-compose 和部署配置变更</li>
+<li>Phase 7-8 是功能增强，可根据产品需求调整优先级</li>
+<li>concurrency.md 中已标记 ✅ 的项目（TaskManager、短事务、日志上下文、SSE Heartbeat 等）不在此计划中</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  回到页面顶部
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.tabs", "navigation.sections", "navigation.expand", "navigation.top", "search.highlight", "content.code.copy"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "\u5df2\u590d\u5236", "clipboard.copy": "\u590d\u5236", "search.result.more.one": "\u5728\u8be5\u9875\u4e0a\u8fd8\u6709 1 \u4e2a\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.more.other": "\u5728\u8be5\u9875\u4e0a\u8fd8\u6709 # \u4e2a\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.none": "\u6ca1\u6709\u627e\u5230\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.one": "\u627e\u5230 1 \u4e2a\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.other": "# \u4e2a\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.placeholder": "\u952e\u5165\u4ee5\u5f00\u59cb\u641c\u7d22", "search.result.term.missing": "\u7f3a\u5c11", "select.version": "\u9009\u62e9\u5f53\u524d\u7248\u672c"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>
