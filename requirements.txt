@@ -24,9 +24,8 @@ litellm>=1.40.0
 # 环境变量管理
 python-dotenv>=1.0.0
 
-# 网络爬虫
-crawl4ai>=0.3.0  # 主要爬虫框架
-beautifulsoup4>=4.11.0  # HTML解析器：备用爬虫方案
+# 网络抓取
+beautifulsoup4>=4.11.0  # HTML解析器：Jina Reader API fallback
 pypdf>=4.0.0  # PDF文本提取
 aiohttp>=3.9.0  # 异步HTTP客户端
 
