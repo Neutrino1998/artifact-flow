@@ -130,7 +130,7 @@ class WebFetchTool(BaseTool):
 
         # 默认值已由 _apply_defaults 填充
         max_content_length = params["max_content_length"]
-        max_concurrent = min(params["max_concurrent"], 5)  # 限制最大5个
+        max_concurrent = max(1, min(params["max_concurrent"], 5))  # 限制1-5
 
         logger.info(f"Fetching {len(urls)} URL(s) with max {max_concurrent} concurrent requests")
 
