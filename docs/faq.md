@@ -21,32 +21,18 @@ python --version
 
 ---
 
-### crawl4ai-setup 失败
+### web_fetch 抓取限额 (Jina 429)
 
-常见错误：
+Jina Reader API 免费 tier 有请求限额。命中限额时工具会自动等待 30 秒重试（最多 2 次），重试耗尽后降级到 BeautifulSoup（HTML）或 pypdf（PDF）。
 
-```
-Error: Playwright browsers not installed
-```
-
-**解决方案：**
+**提升限额：**
 
 ```bash
-# 安装 playwright 浏览器
-playwright install chromium
-
-# 重新运行 setup
-crawl4ai-setup
+# 在 .env 中配置 Jina API Key（免费注册即可获取）
+JINA_API_KEY=jina_xxx
 ```
 
-如果仍然失败，尝试：
-
-```bash
-# 完整安装
-pip uninstall crawl4ai
-pip install crawl4ai[all]
-crawl4ai-setup
-```
+**已知限制：** PDF 降级路径通过 URL 后缀（`.pdf`）判断类型。签名下载链接（如 `download?file=xxx`）在 Jina 失败后会走 HTML 降级路径
 
 ---
 
@@ -276,15 +262,14 @@ tail -f logs/artifactflow.log | grep "web_search"
 # web_fetch 工具支持的参数
 result = await tool.execute(
     url_list=["https://example.com"],      # URL 列表（必填）
-    max_content_length=10000,              # 单页最大字符数（默认 10000）
-    max_concurrent=3                       # 最大并发浏览器数（默认 3，上限 5）
+    max_content_length=20000,              # 单页最大字符数（默认 20000）
+    max_concurrent=3                       # 最大并发请求数（默认 3，范围 1-5）
 )
 ```
 
 **检查目标网站：**
 
-- 是否需要 JavaScript 渲染
-- 是否有反爬虫机制
+- 是否有反爬虫机制（Jina Reader 通常能处理，但部分站点可能拦截）
 - 是否需要代理
 
 ---

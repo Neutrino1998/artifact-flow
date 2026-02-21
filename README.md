@@ -107,7 +107,7 @@ ArtifactFlow 是一个智能多智能体系统，通过协调专门的AI智能�
 - **Python 3.11+** （⚠️必需！LangGraph的异步interrupt功能需要Python 3.11+才能正确工作，详见： [Asynchronous Graph with interrupts in Python 3.10 seems to be broken](https://github.com/langchain-ai/langgraph/discussions/3200)）
 - **aiosqlite==0.21.0** （⚠️必需！0.22.0 版本移除了 `Connection` 对 `threading.Thread` 的继承，导致 `is_alive()` 方法丢失，与 `langgraph-checkpoint-sqlite` [不兼容](https://github.com/langchain-ai/langgraph/issues/6583)。requirements.txt 已锁定正确版本。）
 - API Keys（OpenAI、通义千问、DeepSeek、博查AI 等）
-- 推荐系统内存 ≥ 4GB（网页抓取需要启动浏览器）
+- 推荐系统内存 ≥ 2GB
 
 
 ### 方式一：Docker 部署（推荐）
@@ -160,7 +160,7 @@ docker-compose down
 docker-compose up -d --build
 ```
 
-> **注意：** Docker 镜像约 2GB+，主要是 Playwright 浏览器占用。首次构建需要下载较多依赖。
+> **注意：** Docker 镜像约 0.9GB。首次构建需要下载较多依赖。
 
 ### 方式二：本地安装
 
@@ -189,35 +189,25 @@ docker-compose up -d --build
    pip install -e .
    ```
 
-4. **⚠️ 重要：初始化crawl4ai**
-   ```bash
-   # crawl4ai 需要额外的初始化步骤
-   crawl4ai-setup
-   ```
-   
-   这个命令会：
-   - 下载必要的浏览器驱动程序
-   - 配置Playwright环境
-
-5. **配置环境变量**
+4. **配置环境变量**
    ```bash
    cp .env.example .env
    # 编辑 .env 文件，添加你的 API Keys
    ```
 
-6. **设置 JWT 密钥**（必须，否则服务无法启动）
+5. **设置 JWT 密钥**（必须，否则服务无法启动）
    ```bash
    echo "ARTIFACTFLOW_JWT_SECRET=$(python -c 'import secrets; print(secrets.token_urlsafe(32))')" >> .env
    ```
 
-7. **创建管理员账号**（首次使用前必须）
+6. **创建管理员账号**（首次使用前必须）
    ```bash
    # "admin" 是用户名，--password 指定密码（不加则交互式提示输入）
    python scripts/create_admin.py admin --password admin
    ```
    管理员登录后可在侧边栏底部的用户菜单中打开「管理用户」面板，创建和管理其他用户账号。
 
-8. **启动服务**
+7. **启动服务**
    ```bash
    # 启动 API 服务器
    python run_server.py
@@ -230,7 +220,7 @@ docker-compose up -d --build
    # - ReDoc 文档: http://localhost:8000/redoc
    ```
 
-9. **使用 CLI 交互**
+8. **使用 CLI 交互**
    ```bash
    # 登录（首次使用需要）
    python run_cli.py login
@@ -276,6 +266,10 @@ DEEPSEEK_API_KEY=sk-xxx
 # ------ 博查AI (Web搜索) ------
 # 获取地址: https://open.bochaai.com
 BOCHA_API_KEY=sk-xxx
+
+# ------ Jina Reader API (网页抓取) ------
+# 获取地址: https://jina.ai/reader（免费 tier 可用，设置后提升限额）
+# JINA_API_KEY=jina_xxx
 ```
 
 ## 💡 支持的模型
@@ -392,7 +386,7 @@ artifact-flow/
 │   │   └── implementations/      # 具体工具实现
 │   │       ├── artifact_ops.py   # Artifact操作工具 (ArtifactManager)
 │   │       ├── web_search.py     # 博查AI搜索
-│   │       ├── web_fetch.py      # crawl4ai网页抓取(支持PDF)
+│   │       ├── web_fetch.py      # Jina Reader API网页抓取(支持PDF，BS4/pypdf降级)
 │   │       └── call_subagent.py  # Subagent调用工具
 │   ├── db/ ✅          # 数据库层 (已完成)
 │   │   ├── database.py           # DatabaseManager：连接池、WAL模式

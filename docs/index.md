@@ -69,7 +69,7 @@ ArtifactFlow 是一个通用框架，可适配多种复杂任务场景：
 | API 服务 | FastAPI | REST API、SSE 流式推送 |
 | 数据存储 | SQLAlchemy + aiosqlite | 对话历史、Artifact 持久化 |
 | LLM 接口 | LiteLLM | 统一接口支持 100+ 模型提供商 |
-| 内容采集 | crawl4ai | 网页内容抓取与解析 |
+| 内容采集 | Jina Reader API + BeautifulSoup | 网页内容抓取与解析 |
 | 前端 | Next.js 15 / React 19 / Zustand / Tailwind CSS | Web UI、SSE 流式渲染 |
 
 ## 快速开始
@@ -78,9 +78,6 @@ ArtifactFlow 是一个通用框架，可适配多种复杂任务场景：
 # 安装依赖
 pip install -r requirements.txt
 pip install -e .
-
-# 初始化 crawl4ai（首次使用前必须）
-crawl4ai-setup
 
 # 设置 JWT 密钥（写入 .env，必须，否则服务无法启动）
 echo "ARTIFACTFLOW_JWT_SECRET=$(python -c 'import secrets; print(secrets.token_urlsafe(32))')" >> .env
