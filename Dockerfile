@@ -2,7 +2,7 @@
 # ArtifactFlow Docker Image
 # ========================================
 # 基于 Python 3.11，使用 Jina Reader API 进行网页抓取
-# 无需浏览器依赖，镜像体积 ~0.9GB
+# 无需浏览器依赖，镜像体积 <1GB
 
 FROM python:3.11-slim
 

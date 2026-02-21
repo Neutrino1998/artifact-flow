@@ -160,7 +160,7 @@ docker-compose down
 docker-compose up -d --build
 ```
 
-> **注意：** Docker 镜像约 0.9GB。首次构建需要下载较多依赖。
+> **注意：** Docker 镜像 <1GB（约 430MB）。首次构建需要下载较多依赖。
 
 ### 方式二：本地安装
 
