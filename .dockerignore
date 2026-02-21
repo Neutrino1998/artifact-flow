@@ -35,6 +35,9 @@ tests/logs/
 # macOS
 .DS_Store
 
+# 前端（前端有独立的 Dockerfile，不需要打进后端镜像）
+frontend/
+
 # 文档（可选，如需要可移除此行）
 # docs/
 
