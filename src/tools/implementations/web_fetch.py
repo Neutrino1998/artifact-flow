@@ -82,9 +82,9 @@ class WebFetchTool(BaseTool):
             ToolParameter(
                 name="max_content_length",
                 type="integer",
-                description="Maximum content length per page in characters (default: 10000)",
+                description="Maximum content length per page in characters (default: 20000)",
                 required=False,
-                default=10000
+                default=20000
             ),
             ToolParameter(
                 name="max_concurrent",
