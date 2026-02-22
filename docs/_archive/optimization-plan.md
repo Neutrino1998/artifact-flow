@@ -824,12 +824,11 @@ strategy:
   - `metadata`: `{"original_filename": "xxx.pdf", "original_type": "application/pdf", "converter_used": "pymupdf", "page_count": 42}`
 - 错误处理：转换失败返回 422（Unprocessable Entity）+ 具体错误信息
 
-**新增 `source` 字段**: 仅在 `Artifact` 模型上新增 `source` 列（`String(32)`, default `"agent"`），表示 artifact 的诞生来源，写入后不再变更：
-- `"agent"` — Agent 创建（默认值）
-- `"user_upload"` — 用户上传文件
-- 只追踪"这个 artifact 是怎么来的"，不追踪每个版本的编辑者。用户上传后 agent 重写内容，artifact 的 source 仍为 `"user_upload"`
+**新增 `source` 字段**: 仅在 `Artifact` 模型上新增 `source` 列（`String(32)`, default `"agent"`），表示当前内容的最近编辑来源，**可变更新**：
+- `"agent"` — Agent 创建或最近一次由 Agent 修改（默认值）
+- `"user_upload"` — 用户上传文件且 Agent 尚未修改过
+- 更新规则：Agent 修改 artifact 时覆盖为 `"agent"`，用户上传时写入 `"user_upload"`。即 `source` 始终反映"最近一次重大编辑者"
 - `ArtifactVersion` 不加 `source` 列，版本级别的动作类型由已有 `update_type`（`create / update / update_fuzzy / rewrite`）表达
-- `source` 作为独立列便于 DB 查询过滤和建索引（如列出 artifact 时排除用户上传的内容）
 - 此变更为轻量 schema 变更（新增一列）。开发阶段直接删库重建：`rm data/artifactflow.db && python run_server.py`
 
 #### 7A.4 前端渲染策略修正
