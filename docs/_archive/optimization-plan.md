@@ -275,15 +275,9 @@
 
 **改动**:
 
-**5.1.1 RETURNING 子句可移植适配**
+**5.1.1 RETURNING 子句确认**
 
-`artifact_repo.py:324` 的乐观锁更新使用了 `.returning()`，MySQL 不支持。设计可移植方案：
-
-- `BaseRepository` 新增 `_supports_returning() -> bool` 方法，基于引擎方言判断
-- `ArtifactRepository.update_artifact_content()` 改为：
-  - 支持 RETURNING（PostgreSQL, SQLite 3.35+）→ 原子 `UPDATE...RETURNING`（当前行为）
-  - 不支持 RETURNING（MySQL）→ fallback 为 `UPDATE` + `SELECT` 两步操作
-- 两条路径在功能上等价，仅性能差异（一次 vs 两次 DB 调用）
+`artifact_repo.py:324` 的乐观锁更新使用了 `.returning()`。SQLite 3.35+ 和 PostgreSQL 均原生支持，无需适配。MySQL 不支持 RETURNING，但当前不在目标数据库范围内，等有实际需求时再加适配层。
 
 **5.1.2 Alembic 迁移框架**
 
@@ -303,11 +297,9 @@
 - ✅ 无 SQLite 特有函数（ROWID、typeof 等）
 - ✅ JSON 类型使用 SQLAlchemy `JSON`（PostgreSQL 自动映射 JSONB）
 - ✅ 所有查询通过 ORM 构造，无字符串拼接 SQL
-- ⚠️ RETURNING 子句（artifact_repo.py L324）→ 5.1.1 已处理
+- ✅ RETURNING 子句（artifact_repo.py L324）→ SQLite/PostgreSQL 均支持，无需适配
 
 **退出标准**:
-- RETURNING 适配层有单元测试覆盖两条路径（RETURNING / fallback）
-  - 注意：CI 仅 SQLite + PostgreSQL，两者都支持 RETURNING，fallback 路径不会被自然触发。需增加**强制 fallback 模式**的单测：mock `_supports_returning()` 返回 False，验证 UPDATE + SELECT 路径的正确性
 - Alembic 迁移可在 SQLite 上正常执行
 - 现有回归测试全部通过
 
@@ -708,8 +700,6 @@ strategy:
 - `test_redis_checkpointer.py` — checkpoint CRUD / TTL 过期 / interrupt-resume
 - `test_redis_stream_manager.py` — 事件推送/消费/断线重连/TTL 清理
 - `test_redis_fault.py` — Redis 断连后 503 响应、Redis 恢复后自动重连
-- `test_returning_adapter.py` — RETURNING 适配层测试：SQLite / PostgreSQL 行为一致性 + **mock `_supports_returning()=False` 强制 fallback 路径**（CI 的两种数据库都支持 RETURNING，不 mock 则 fallback 永远不被执行）
-
 **并发测试增强**:
 - 多请求并发写入 conversation/message/artifact（验证 PostgreSQL MVCC 优于 SQLite 单写者）
 - 多 worker stream push/consume（验证 Redis Streams 跨进程投递）
