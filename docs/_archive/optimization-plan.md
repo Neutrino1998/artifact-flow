@@ -728,7 +728,7 @@ strategy:
 
 **目标**: 支持用户上传文档，解析为 Artifact 供 Agent 操作。拆分为两个子阶段：
 
-- **7A**（可在 Phase 5/6 之前执行）：文档类上传（txt / md / docx / pdf → markdown artifact）+ content_type 统一 + 前端渲染策略修正
+- **7A**（可在 Phase 5/6 之前执行）：文档类上传（docx / pdf → markdown artifact，txt / md 保持原格式）+ content_type 统一 + 前端渲染策略修正
 - **7B**（建议在 Phase 5/6 之后执行）：结构化数据（csv / json）+ 原始文件存储 + 代码沙盒联动
 
 ---
@@ -792,9 +792,11 @@ strategy:
 - Response header: `Content-Disposition: attachment; filename="{title}.docx"`
 - pandoc 不可用时返回 501 Not Implemented
 
+**能力探测**: 前端需要知道后端哪些导出格式可用。通过现有 `GET /health` 端点扩展返回 `capabilities` 字段（如 `{"export_formats": ["docx"]}`），前端启动时拉取一次并缓存。pandoc 不可用时 `export_formats` 为空数组，前端据此隐藏导出选项。
+
 前端 `ArtifactToolbar.tsx` 改动：
 - 下载按钮改为带下拉的 split button（或 hover/click 展开菜单）
-- 菜单项："下载"（原格式直出）+ "导出为 Word"（仅 `text/markdown` 时显示，调后端端点）
+- 菜单项："下载"（原格式直出）+ "导出为 Word"（仅 `text/markdown` 且 capabilities 含 `docx` 时显示，调后端端点）
 
 **实现细节**:
 - `DocConverter` 类，提供：
@@ -834,6 +836,7 @@ strategy:
   - `metadata`: `{"source": "user_upload", "original_filename": "xxx.pdf", "original_type": "application/pdf", "converter_used": "pymupdf", "page_count": 42}`
   - `update_type`: `"user_upload"`（新增枚举值，与现有 `create / update / update_fuzzy / rewrite` 并列）
 - 错误处理：转换失败返回 422（Unprocessable Entity）+ 具体错误信息
+- **同步更新**：`VersionSummary` schema 的 `update_type` description 补充 `user_upload`（当前为 `"create, update, update_fuzzy, rewrite"`），相关测试断言同步更新
 
 #### 7A.4 前端渲染策略修正
 
@@ -865,6 +868,8 @@ strategy:
 - `frontend/src/stores/artifactStore.ts` — 上传状态（`uploading: boolean`, `uploadError: string | null`）
 - `frontend/src/hooks/useChat.ts` 或新增 `frontend/src/hooks/useUpload.ts` — 上传逻辑封装
 
+**会话时序策略**: 上传 API 依赖 `session_id`，但新建对话尚无 session（首条消息发送时才创建）。采用**禁用策略**：新对话时上传按钮置灰（tooltip 提示"请先发送消息创建对话"），有 `session_id` 后启用。拖拽区域同理，无 session 时拖入文件给出提示而非触发上传。避免引入"空会话"的边界情况。
+
 **改动**:
 - **按钮上传**: 连接 `MessageInput.tsx` 已有按钮 → 打开文件选择器（`<input type="file" accept=".txt,.md,.docx,.pdf">`）→ 调用上传 API
 - **拖拽上传**: 在 chat 区域（或整个主面板）添加 `onDragOver` + `onDrop` 处理
@@ -873,6 +878,7 @@ strategy:
 - **上传状态**: 上传中显示 spinner / 进度提示，成功后自动刷新 artifact 列表并打开 artifact 面板
 - **错误处理**: 文件过大、类型不支持、转换失败等场景给出用户友好的 toast 提示
 - 按钮上传和拖拽上传共用同一个上传 handler（`handleFileUpload(file: File)`）
+- **禁用态**: 无 `session_id` 时上传按钮 `disabled`，拖拽区域不响应 drop 事件
 
 ---
 
