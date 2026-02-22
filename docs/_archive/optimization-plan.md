@@ -621,7 +621,6 @@ backend 服务 `depends_on` 增加 `postgres` 和 `redis`（含 health condition
 **涉及文件**:
 - `src/db/models.py` — 类型审查
 - `src/db/migrations/` — Alembic 迁移脚本（5.1.2 已初始化）
-- `scripts/` — 数据迁移脚本
 
 **改动**:
 
@@ -634,13 +633,7 @@ backend 服务 `depends_on` 增加 `postgres` 和 `redis`（含 health condition
 - `Text` → `TEXT`（兼容 ✅）
 - `Integer` + `autoincrement=True`（`artifact_versions.id`）→ PostgreSQL `SERIAL`（SQLAlchemy 自动处理 ✅）
 
-**6.2.2 数据迁移工具**
-
-编写 `scripts/migrate_sqlite_to_pg.py`：
-- 从 SQLite 按 FK 依赖顺序读取所有表数据
-- 写入 PostgreSQL（批量 INSERT）
-- 校验每张表的记录数一致性
-- 支持 `--dry-run` 模式（只读不写，输出迁移计划）
+~~**6.2.2 数据迁移工具** — 不需要。系统处于开发阶段，切换 PostgreSQL 时直接用 Alembic 建表，不迁移旧 SQLite 数据。~~
 
 ### 6.3 性能优化 — 复合索引
 
@@ -674,7 +667,6 @@ Index("ix_messages_conv_created", "conversation_id", "created_at")
 - PostgreSQL 上所有回归测试通过
 - PostgreSQL 并发写入测试通过（模拟多请求同时写入 conversation/message/artifact）
 - SQLite 模式仍可正常工作（开发/测试场景）
-- 数据迁移脚本执行成功 + 记录数校验通过
 - 复合索引在 EXPLAIN 中被正确使用
 
 ---
