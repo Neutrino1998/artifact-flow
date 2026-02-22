@@ -760,12 +760,12 @@ strategy:
 
 **导入转换策略**（文件上传 → artifact）:
 
-| 格式 | 首选方案 | Fallback | 说明 |
-|------|---------|----------|------|
-| `.txt` | 直接读取 | — | UTF-8 解码，保留原文 |
-| `.md` | 直接读取 | — | 已是 markdown，保留原文 |
-| `.docx` | pandoc | `python-docx` | pandoc 保留格式最好；`python-docx` 只提取文本段落，丢失表格/图片 |
-| `.pdf` | `pymupdf`（PyMuPDF） | `pypdf`（现有） | `pymupdf` 提取质量显著优于 `pypdf`，支持表格/图片区域识别 |
+| 格式 | 方案 | 说明 |
+|------|------|------|
+| `.txt` | 直接读取 | UTF-8 解码，保留原文 |
+| `.md` | 直接读取 | 已是 markdown，保留原文 |
+| `.docx` | pandoc | `pandoc -f docx -t markdown` |
+| `.pdf` | `pymupdf`（PyMuPDF） | 文本提取 + 简单 markdown 格式化 |
 
 **导出转换策略**（artifact → 文件下载）:
 
@@ -789,20 +789,20 @@ strategy:
   - `async def convert(file_bytes: bytes, filename: str) -> ConvertResult` — 导入
   - `async def export_docx(markdown_content: str) -> bytes` — 导出
 - `ConvertResult`: `dataclass(content: str, content_type: str, metadata: dict)` — metadata 含 `page_count`、`word_count`、`original_filename`、`converter_used` 等
-- 运行时检测 pandoc 可用性：`shutil.which("pandoc")`，不可用时导入 fallback 到 Python 库，导出功能不可用
-- PDF 转换统一：`web_fetch.py` 的 `_fetch_pdf()` 改为调用 `DocConverter`，消除重复代码
+- pandoc 和 pymupdf 均为必需依赖，缺失时启动报错（fail fast），不做 fallback
+- PDF 转换统一：`web_fetch.py` 的 `_fetch_pdf()` 改为调用 `DocConverter`，消除重复代码，同时移除 `web_fetch.py` 中的 `pypdf` 条件导入逻辑
 - 文件大小限制：上传端点限制 20MB（可配置），PDF 页数限制 200 页
 - 编码检测：非 UTF-8 文件尝试 `chardet` / `charset-normalizer` 自动检测
 
 **新增依赖**:
 - `python-multipart>=0.0.9` — FastAPI `UploadFile` 必需（当前 `requirements.txt` 未包含）
-- `pymupdf>=1.24.0` — 替换 `pypdf` 作为 PDF 首选（保留 `pypdf` 作为 fallback）
-- `python-docx>=1.1.0` — docx fallback（pandoc 不可用时）
+- `pymupdf>=1.24.0` — PDF 解析（替换 `pypdf`，可从 `requirements.txt` 移除 `pypdf`）
 - `charset-normalizer>=3.0.0` — 文本编码检测（如未通过其他依赖已引入）
+- 系统依赖：`pandoc` — docx 转换和 markdown 导出为 Word 均依赖
 
 **Docker / 部署注意**:
 - Dockerfile 需新增 `pandoc` 系统包（`apt-get install -y pandoc`）
-- pandoc 不可用时：导入功能降级到 Python 库，导出为 Word 返回 501（前端 toast 提示），日志输出 warning
+- pandoc 和 pymupdf 均为必需依赖，缺失时应用启动报错或上传/导出端点返回明确错误，不做静默降级
 
 #### 7A.3 后端上传 API
 
