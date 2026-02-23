@@ -59,7 +59,7 @@ export default function UserManagementModal({ open, onClose }: Props) {
       await api.createUser({
         username: createForm.username,
         password: createForm.password,
-        display_name: createForm.display_name || undefined,
+        display_name: createForm.display_name || null,
         role: createForm.role,
       });
       setCreateForm({ username: '', password: '', display_name: '', role: 'user' });

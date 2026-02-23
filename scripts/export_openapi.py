@@ -13,12 +13,24 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from api.main import app
 
+schema = app.openapi()
+
+# Pydantic marks Optional[T]=None fields as not-required in OpenAPI,
+# causing openapi-typescript to emit `field?: T | null | undefined`.
+# In practice these fields are always present in responses (just nullable),
+# so we mark all properties as required to generate `field: T | null`.
+# Request schemas with genuinely optional fields are excluded.
+_SKIP_REQUIRED = {"ChatRequest", "CreateUserRequest", "UpdateUserRequest"}
+for name, obj in schema.get("components", {}).get("schemas", {}).items():
+    if "properties" in obj and name not in _SKIP_REQUIRED:
+        obj["required"] = list(obj["properties"].keys())
+
 output_path = os.path.join(
     os.path.dirname(__file__), "..", "frontend", "src", "types", "openapi.json"
 )
 os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
 with open(output_path, "w") as f:
-    json.dump(app.openapi(), f, indent=2)
+    json.dump(schema, f, indent=2)
 
 print(f"OpenAPI schema exported to {output_path}")

@@ -103,11 +103,12 @@ Artifact Panel 默认隐藏，当 Agent 创建/更新文稿时自动弹出。
 
 | 文件 | 作用 |
 |------|------|
-| `index.ts` | 手写的业务类型：`ChatRequest`、`ConversationDetail`、`ArtifactDetail`、`LoginRequest`、`UserInfo` 等 |
-| `events.ts` | SSE 事件类型：`StreamEventType` 枚举 + 每种事件的数据结构 |
+| `index.ts` | 从 `api.d.ts` re-export 的业务类型别名（`ChatRequest`、`ConversationDetail` 等），保持简短的 import 路径 |
+| `events.ts` | SSE 事件类型：`StreamEventType` 枚举 + 每种事件的数据结构（手写，不在 REST schema 里） |
 | `api.d.ts` | 从后端 OpenAPI schema 自动生成的类型（`npm run generate-types`） |
+| `openapi.json` | 后端导出的 OpenAPI schema（`python scripts/export_openapi.py`） |
 
-`index.ts` 里的类型是前端自己定义的别名，比 `api.d.ts` 更易用。当后端 API 改了字段时，需要重新跑 `generate-types` 再手动更新 `index.ts`。
+`index.ts` 从 `api.d.ts` re-export 类型并做必要的 alias（如 `ConversationDetail` → `ConversationDetailResponse`）。当后端 API 改了字段时，重新跑 `export_openapi.py` + `npm run generate-types` 即可自动同步。
 
 ### `lib/` — 工具函数
 

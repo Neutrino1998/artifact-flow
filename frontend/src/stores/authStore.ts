@@ -2,13 +2,9 @@ import { create } from 'zustand';
 import { useConversationStore } from './conversationStore';
 import { useArtifactStore } from './artifactStore';
 import { useStreamStore } from './streamStore';
+import type { UserInfo } from '@/types';
 
-export interface UserInfo {
-  id: string;
-  username: string;
-  display_name: string | null;
-  role: string;
-}
+export type { UserInfo };
 
 interface AuthState {
   token: string | null;

@@ -1,0 +1,1971 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "ArtifactFlow API",
+    "description": "Multi-agent system API",
+    "version": "1.0.0"
+  },
+  "paths": {
+    "/api/v1/auth/login": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Login",
+        "description": "\u7528\u6237\u767b\u5f55\uff0c\u8fd4\u56de JWT Token",
+        "operationId": "login_api_v1_auth_login_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LoginResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/me": {
+      "get": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Get Me",
+        "description": "\u83b7\u53d6\u5f53\u524d\u7528\u6237\u4fe1\u606f",
+        "operationId": "get_me_api_v1_auth_me_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserInfo"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/auth/users": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Create User",
+        "description": "\u521b\u5efa\u7528\u6237\uff08\u4ec5 Admin\uff09",
+        "operationId": "create_user_api_v1_auth_users_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateUserRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "List Users",
+        "description": "\u5217\u51fa\u6240\u6709\u7528\u6237\uff08\u4ec5 Admin\uff09",
+        "operationId": "list_users_api_v1_auth_users_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/users/{user_id}": {
+      "put": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Update User",
+        "description": "\u66f4\u65b0\u7528\u6237\uff08\u4ec5 Admin\uff09",
+        "operationId": "update_user_api_v1_auth_users__user_id__put",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "User Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateUserRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/chat": {
+      "post": {
+        "tags": [
+          "chat"
+        ],
+        "summary": "Send Message",
+        "description": "\u53d1\u9001\u65b0\u6d88\u606f\n\n\u542f\u52a8 Graph \u6267\u884c\uff0c\u8fd4\u56de stream_url \u4f9b\u524d\u7aef\u8ba2\u9605\u3002\n\n\u6d41\u7a0b\uff1a\n1. \u540c\u6b65\u521b\u5efa/\u83b7\u53d6 conversation\uff08\u786e\u4fdd GET \u8bf7\u6c42\u80fd\u7acb\u5373\u770b\u5230\uff09\n2. \u521b\u5efa StreamContext\uff08\u5f00\u59cb\u7f13\u51b2\u4e8b\u4ef6\uff09\n3. \u542f\u52a8\u540e\u53f0\u4efb\u52a1\u6267\u884c Graph\n4. \u8fd4\u56de stream_url \u7ed9\u524d\u7aef",
+        "operationId": "send_message_api_v1_chat_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "chat"
+        ],
+        "summary": "List Conversations",
+        "description": "\u5217\u51fa\u5bf9\u8bdd\u5217\u8868\n\nArgs:\n    limit: \u6bcf\u9875\u6570\u91cf\n    offset: \u504f\u79fb\u91cf",
+        "operationId": "list_conversations_api_v1_chat_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 20,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConversationListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/chat/{conv_id}": {
+      "get": {
+        "tags": [
+          "chat"
+        ],
+        "summary": "Get Conversation",
+        "description": "\u83b7\u53d6\u5bf9\u8bdd\u8be6\u60c5\uff08\u542b\u6d88\u606f\u6811\uff09",
+        "operationId": "get_conversation_api_v1_chat__conv_id__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "conv_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Conv Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConversationDetailResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "chat"
+        ],
+        "summary": "Delete Conversation",
+        "description": "\u5220\u9664\u5bf9\u8bdd\n\n\u7ea7\u8054\u5220\u9664\u6d88\u606f\u548c\u5173\u8054\u7684 Artifacts\u3002",
+        "operationId": "delete_conversation_api_v1_chat__conv_id__delete",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "conv_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Conv Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/chat/{conv_id}/resume": {
+      "post": {
+        "tags": [
+          "chat"
+        ],
+        "summary": "Resume Execution",
+        "description": "\u6062\u590d\u4e2d\u65ad\u7684\u6267\u884c\uff08\u6743\u9650\u786e\u8ba4\u540e\uff09\n\n\u6d41\u7a0b\uff1a\n1. \u6821\u9a8c thread_id \u5f52\u5c5e\n2. \u521b\u5efa\u65b0\u7684 StreamContext\n3. \u542f\u52a8\u540e\u53f0\u4efb\u52a1\u6062\u590d\u6267\u884c\n4. \u8fd4\u56de\u65b0\u7684 stream_url",
+        "operationId": "resume_execution_api_v1_chat__conv_id__resume_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "conv_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Conv Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResumeRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResumeResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/artifacts/upload": {
+      "post": {
+        "tags": [
+          "artifacts"
+        ],
+        "summary": "Upload File New Session",
+        "description": "Upload a file and create a new conversation for it.\nUse this when no session/conversation exists yet.",
+        "operationId": "upload_file_new_session_api_v1_artifacts_upload_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_upload_file_new_session_api_v1_artifacts_upload_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/artifacts/{session_id}": {
+      "get": {
+        "tags": [
+          "artifacts"
+        ],
+        "summary": "List Artifacts",
+        "description": "\u5217\u51fa session \u4e0b\u6240\u6709 artifacts",
+        "operationId": "list_artifacts_api_v1_artifacts__session_id__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/artifacts/{session_id}/upload": {
+      "post": {
+        "tags": [
+          "artifacts"
+        ],
+        "summary": "Upload File",
+        "description": "Upload a file and create an artifact from it.\nSupports text files, markdown, code, PDF, and Word documents.",
+        "operationId": "upload_file_api_v1_artifacts__session_id__upload_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_upload_file_api_v1_artifacts__session_id__upload_post"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/artifacts/{session_id}/{artifact_id}/export": {
+      "get": {
+        "tags": [
+          "artifacts"
+        ],
+        "summary": "Export Artifact",
+        "description": "Export an artifact to a different format.\nCurrently supports exporting text/markdown artifacts to docx.",
+        "operationId": "export_artifact_api_v1_artifacts__session_id___artifact_id__export_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          },
+          {
+            "name": "artifact_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Artifact Id"
+            }
+          },
+          {
+            "name": "format",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Export format (docx)",
+              "title": "Format"
+            },
+            "description": "Export format (docx)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/artifacts/{session_id}/{artifact_id}": {
+      "get": {
+        "tags": [
+          "artifacts"
+        ],
+        "summary": "Get Artifact",
+        "description": "\u83b7\u53d6 artifact \u8be6\u60c5\uff08\u5305\u542b\u5f53\u524d\u7248\u672c\u5185\u5bb9\uff09",
+        "operationId": "get_artifact_api_v1_artifacts__session_id___artifact_id__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          },
+          {
+            "name": "artifact_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Artifact Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactDetailResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/artifacts/{session_id}/{artifact_id}/versions": {
+      "get": {
+        "tags": [
+          "artifacts"
+        ],
+        "summary": "List Versions",
+        "description": "\u83b7\u53d6\u7248\u672c\u5386\u53f2\u5217\u8868",
+        "operationId": "list_versions_api_v1_artifacts__session_id___artifact_id__versions_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          },
+          {
+            "name": "artifact_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Artifact Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VersionListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/artifacts/{session_id}/{artifact_id}/versions/{version}": {
+      "get": {
+        "tags": [
+          "artifacts"
+        ],
+        "summary": "Get Version",
+        "description": "\u83b7\u53d6\u7279\u5b9a\u7248\u672c\u7684\u5b8c\u6574\u5185\u5bb9",
+        "operationId": "get_version_api_v1_artifacts__session_id___artifact_id__versions__version__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          },
+          {
+            "name": "artifact_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Artifact Id"
+            }
+          },
+          {
+            "name": "version",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Version"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VersionDetailResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/stream/{thread_id}": {
+      "get": {
+        "tags": [
+          "stream"
+        ],
+        "summary": "Stream Events",
+        "description": "SSE \u7aef\u70b9\uff0c\u8ba2\u9605 Graph \u6267\u884c\u8fc7\u7a0b\n\n\u524d\u7aef\u901a\u8fc7 EventSource \u8fde\u63a5\u6b64\u7aef\u70b9\uff0c\u63a5\u6536\u5b9e\u65f6\u4e8b\u4ef6\u6d41\u3002\n\n\u4e8b\u4ef6\u683c\u5f0f\uff08\u4f7f\u7528\u6807\u51c6 SSE event: \u5b57\u6bb5\u533a\u5206\u4e8b\u4ef6\u7c7b\u578b\uff09\uff1a\n    event: metadata\n    data: {\"type\": \"metadata\", \"timestamp\": \"...\", \"data\": {...}}\n\n    event: llm_chunk\n    data: {\"type\": \"llm_chunk\", \"timestamp\": \"...\", \"agent\": \"lead_agent\", \"data\": {\"content\": \"...\"}}\n\n    event: complete\n    data: {\"type\": \"complete\", \"timestamp\": \"...\", \"data\": {...}}\n\n\u8fde\u63a5\u751f\u547d\u5468\u671f\uff1a\n    - \u6536\u5230 complete/error \u4e8b\u4ef6\u540e\uff0c\u670d\u52a1\u7aef\u4e3b\u52a8\u5173\u95ed\u8fde\u63a5\n    - \u524d\u7aef\u5e94\u9500\u6bc1 EventSource \u5b9e\u4f8b",
+        "operationId": "stream_events_api_v1_stream__thread_id__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "thread_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Thread Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health": {
+      "get": {
+        "summary": "Health Check",
+        "operationId": "health_check_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ArtifactDetailResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id",
+            "description": "Artifact ID"
+          },
+          "session_id": {
+            "type": "string",
+            "title": "Session Id",
+            "description": "Session ID"
+          },
+          "content_type": {
+            "type": "string",
+            "title": "Content Type",
+            "description": "Content type"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title",
+            "description": "Artifact title"
+          },
+          "content": {
+            "type": "string",
+            "title": "Content",
+            "description": "Current version content"
+          },
+          "current_version": {
+            "type": "integer",
+            "title": "Current Version",
+            "description": "Current version number"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source",
+            "description": "Source (agent, user_upload)"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At",
+            "description": "Creation time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At",
+            "description": "Last update time"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "session_id",
+          "content_type",
+          "title",
+          "content",
+          "current_version",
+          "source",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "ArtifactDetailResponse",
+        "description": "GET /api/v1/artifacts/{session_id}/{artifact_id} response"
+      },
+      "ArtifactListResponse": {
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "title": "Session Id",
+            "description": "Session ID"
+          },
+          "artifacts": {
+            "items": {
+              "$ref": "#/components/schemas/ArtifactSummary"
+            },
+            "type": "array",
+            "title": "Artifacts",
+            "description": "Artifact list"
+          }
+        },
+        "type": "object",
+        "required": [
+          "session_id",
+          "artifacts"
+        ],
+        "title": "ArtifactListResponse",
+        "description": "GET /api/v1/artifacts/{session_id} response"
+      },
+      "ArtifactSummary": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id",
+            "description": "Artifact ID"
+          },
+          "content_type": {
+            "type": "string",
+            "title": "Content Type",
+            "description": "Content type (MIME type, e.g. text/markdown, text/x-python)"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title",
+            "description": "Artifact title"
+          },
+          "current_version": {
+            "type": "integer",
+            "title": "Current Version",
+            "description": "Current version number"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source",
+            "description": "Source (agent, user_upload)"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At",
+            "description": "Creation time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At",
+            "description": "Last update time"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "content_type",
+          "title",
+          "current_version",
+          "source",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "ArtifactSummary",
+        "description": "Artifact summary in list response"
+      },
+      "Body_upload_file_api_v1_artifacts__session_id__upload_post": {
+        "properties": {
+          "file": {
+            "type": "string",
+            "format": "binary",
+            "title": "File"
+          }
+        },
+        "type": "object",
+        "required": [
+          "file"
+        ],
+        "title": "Body_upload_file_api_v1_artifacts__session_id__upload_post"
+      },
+      "Body_upload_file_new_session_api_v1_artifacts_upload_post": {
+        "properties": {
+          "file": {
+            "type": "string",
+            "format": "binary",
+            "title": "File"
+          }
+        },
+        "type": "object",
+        "required": [
+          "file"
+        ],
+        "title": "Body_upload_file_new_session_api_v1_artifacts_upload_post"
+      },
+      "ChatRequest": {
+        "properties": {
+          "content": {
+            "type": "string",
+            "title": "Content",
+            "description": "User message content"
+          },
+          "conversation_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conversation Id",
+            "description": "Continue existing conversation"
+          },
+          "parent_message_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Message Id",
+            "description": "Branch from specific message"
+          }
+        },
+        "type": "object",
+        "required": [
+          "content"
+        ],
+        "title": "ChatRequest",
+        "description": "POST /api/v1/chat request body"
+      },
+      "ChatResponse": {
+        "properties": {
+          "conversation_id": {
+            "type": "string",
+            "title": "Conversation Id",
+            "description": "Conversation ID"
+          },
+          "message_id": {
+            "type": "string",
+            "title": "Message Id",
+            "description": "New message ID"
+          },
+          "thread_id": {
+            "type": "string",
+            "title": "Thread Id",
+            "description": "LangGraph thread ID"
+          },
+          "stream_url": {
+            "type": "string",
+            "title": "Stream Url",
+            "description": "SSE endpoint URL for streaming"
+          }
+        },
+        "type": "object",
+        "required": [
+          "conversation_id",
+          "message_id",
+          "thread_id",
+          "stream_url"
+        ],
+        "title": "ChatResponse",
+        "description": "POST /api/v1/chat response"
+      },
+      "ConversationDetailResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id",
+            "description": "Conversation ID"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title",
+            "description": "Conversation title"
+          },
+          "active_branch": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Active Branch",
+            "description": "Current active branch message ID"
+          },
+          "messages": {
+            "items": {
+              "$ref": "#/components/schemas/MessageResponse"
+            },
+            "type": "array",
+            "title": "Messages",
+            "description": "All messages (flat array with tree structure)"
+          },
+          "session_id": {
+            "type": "string",
+            "title": "Session Id",
+            "description": "Associated artifact session ID"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At",
+            "description": "Creation time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At",
+            "description": "Last update time"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "title",
+          "active_branch",
+          "messages",
+          "session_id",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "ConversationDetailResponse",
+        "description": "GET /api/v1/chat/{conv_id} response"
+      },
+      "ConversationListResponse": {
+        "properties": {
+          "conversations": {
+            "items": {
+              "$ref": "#/components/schemas/ConversationSummary"
+            },
+            "type": "array",
+            "title": "Conversations",
+            "description": "Conversation list"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total",
+            "description": "Total count"
+          },
+          "has_more": {
+            "type": "boolean",
+            "title": "Has More",
+            "description": "Whether more results exist"
+          }
+        },
+        "type": "object",
+        "required": [
+          "conversations",
+          "total",
+          "has_more"
+        ],
+        "title": "ConversationListResponse",
+        "description": "GET /api/v1/chat response"
+      },
+      "ConversationSummary": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id",
+            "description": "Conversation ID"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title",
+            "description": "Conversation title"
+          },
+          "message_count": {
+            "type": "integer",
+            "title": "Message Count",
+            "description": "Number of messages",
+            "default": 0
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At",
+            "description": "Creation time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At",
+            "description": "Last update time"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "title",
+          "message_count",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "ConversationSummary",
+        "description": "Conversation summary in list response"
+      },
+      "CreateUserRequest": {
+        "properties": {
+          "username": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 2,
+            "title": "Username",
+            "description": "Username"
+          },
+          "password": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 4,
+            "title": "Password",
+            "description": "Password"
+          },
+          "display_name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Name",
+            "description": "Display name"
+          },
+          "role": {
+            "type": "string",
+            "title": "Role",
+            "description": "Role (admin or user)",
+            "default": "user"
+          }
+        },
+        "type": "object",
+        "required": [
+          "username",
+          "password"
+        ],
+        "title": "CreateUserRequest",
+        "description": "POST /api/v1/auth/users request body"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError",
+        "required": [
+          "detail"
+        ]
+      },
+      "LoginRequest": {
+        "properties": {
+          "username": {
+            "type": "string",
+            "title": "Username",
+            "description": "Username"
+          },
+          "password": {
+            "type": "string",
+            "title": "Password",
+            "description": "Password"
+          }
+        },
+        "type": "object",
+        "required": [
+          "username",
+          "password"
+        ],
+        "title": "LoginRequest",
+        "description": "POST /api/v1/auth/login request body"
+      },
+      "LoginResponse": {
+        "properties": {
+          "access_token": {
+            "type": "string",
+            "title": "Access Token",
+            "description": "JWT access token"
+          },
+          "token_type": {
+            "type": "string",
+            "title": "Token Type",
+            "description": "Token type",
+            "default": "bearer"
+          },
+          "expires_in": {
+            "type": "integer",
+            "title": "Expires In",
+            "description": "Token expiry in seconds"
+          },
+          "user": {
+            "$ref": "#/components/schemas/UserInfo",
+            "description": "User info"
+          }
+        },
+        "type": "object",
+        "required": [
+          "access_token",
+          "token_type",
+          "expires_in",
+          "user"
+        ],
+        "title": "LoginResponse",
+        "description": "POST /api/v1/auth/login response"
+      },
+      "MessageResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id",
+            "description": "Message ID"
+          },
+          "parent_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Id",
+            "description": "Parent message ID"
+          },
+          "content": {
+            "type": "string",
+            "title": "Content",
+            "description": "User message content"
+          },
+          "response": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Response",
+            "description": "Assistant response"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At",
+            "description": "Message creation time"
+          },
+          "children": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Children",
+            "description": "Child message IDs"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "parent_id",
+          "content",
+          "response",
+          "created_at",
+          "children"
+        ],
+        "title": "MessageResponse",
+        "description": "Message in conversation detail response"
+      },
+      "ResumeRequest": {
+        "properties": {
+          "thread_id": {
+            "type": "string",
+            "title": "Thread Id",
+            "description": "LangGraph thread ID"
+          },
+          "message_id": {
+            "type": "string",
+            "title": "Message Id",
+            "description": "Message ID to update"
+          },
+          "approved": {
+            "type": "boolean",
+            "title": "Approved",
+            "description": "Whether the permission was approved"
+          }
+        },
+        "type": "object",
+        "required": [
+          "thread_id",
+          "message_id",
+          "approved"
+        ],
+        "title": "ResumeRequest",
+        "description": "POST /api/v1/chat/{conv_id}/resume request body"
+      },
+      "ResumeResponse": {
+        "properties": {
+          "stream_url": {
+            "type": "string",
+            "title": "Stream Url",
+            "description": "New SSE endpoint URL"
+          }
+        },
+        "type": "object",
+        "required": [
+          "stream_url"
+        ],
+        "title": "ResumeResponse",
+        "description": "POST /api/v1/chat/{conv_id}/resume response"
+      },
+      "UpdateUserRequest": {
+        "properties": {
+          "display_name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Name",
+            "description": "Display name"
+          },
+          "password": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128,
+                "minLength": 4
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Password",
+            "description": "New password"
+          },
+          "role": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Role",
+            "description": "Role (admin or user)"
+          },
+          "is_active": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Active",
+            "description": "Whether user is active"
+          }
+        },
+        "type": "object",
+        "title": "UpdateUserRequest",
+        "description": "PUT /api/v1/auth/users/{id} request body"
+      },
+      "UploadResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id",
+            "description": "Artifact ID"
+          },
+          "session_id": {
+            "type": "string",
+            "title": "Session Id",
+            "description": "Session ID"
+          },
+          "content_type": {
+            "type": "string",
+            "title": "Content Type",
+            "description": "MIME type (after conversion)"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title",
+            "description": "Artifact title"
+          },
+          "current_version": {
+            "type": "integer",
+            "title": "Current Version",
+            "description": "Current version number"
+          },
+          "source": {
+            "type": "string",
+            "title": "Source",
+            "description": "Source (user_upload)"
+          },
+          "original_filename": {
+            "type": "string",
+            "title": "Original Filename",
+            "description": "Original uploaded filename"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At",
+            "description": "Creation time"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "session_id",
+          "content_type",
+          "title",
+          "current_version",
+          "source",
+          "original_filename",
+          "created_at"
+        ],
+        "title": "UploadResponse",
+        "description": "POST /api/v1/artifacts/{session_id}/upload response"
+      },
+      "UserInfo": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id",
+            "description": "User ID"
+          },
+          "username": {
+            "type": "string",
+            "title": "Username",
+            "description": "Username"
+          },
+          "display_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Name",
+            "description": "Display name"
+          },
+          "role": {
+            "type": "string",
+            "title": "Role",
+            "description": "Role"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "username",
+          "display_name",
+          "role"
+        ],
+        "title": "UserInfo",
+        "description": "User info in responses"
+      },
+      "UserListResponse": {
+        "properties": {
+          "users": {
+            "items": {
+              "$ref": "#/components/schemas/UserResponse"
+            },
+            "type": "array",
+            "title": "Users"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          }
+        },
+        "type": "object",
+        "required": [
+          "users",
+          "total"
+        ],
+        "title": "UserListResponse",
+        "description": "GET /api/v1/auth/users response"
+      },
+      "UserResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "username": {
+            "type": "string",
+            "title": "Username"
+          },
+          "display_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Name"
+          },
+          "role": {
+            "type": "string",
+            "title": "Role"
+          },
+          "is_active": {
+            "type": "boolean",
+            "title": "Is Active"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "username",
+          "display_name",
+          "role",
+          "is_active",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "UserResponse",
+        "description": "Single user response (admin)"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      },
+      "VersionDetailResponse": {
+        "properties": {
+          "version": {
+            "type": "integer",
+            "title": "Version",
+            "description": "Version number"
+          },
+          "content": {
+            "type": "string",
+            "title": "Content",
+            "description": "Version content"
+          },
+          "update_type": {
+            "type": "string",
+            "title": "Update Type",
+            "description": "Update type"
+          },
+          "changes": {
+            "anyOf": [
+              {
+                "items": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Changes",
+            "description": "Changes [[old, new], ...]"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At",
+            "description": "Version creation time"
+          }
+        },
+        "type": "object",
+        "required": [
+          "version",
+          "content",
+          "update_type",
+          "changes",
+          "created_at"
+        ],
+        "title": "VersionDetailResponse",
+        "description": "GET /api/v1/artifacts/{session_id}/{artifact_id}/versions/{version} response"
+      },
+      "VersionListResponse": {
+        "properties": {
+          "artifact_id": {
+            "type": "string",
+            "title": "Artifact Id",
+            "description": "Artifact ID"
+          },
+          "session_id": {
+            "type": "string",
+            "title": "Session Id",
+            "description": "Session ID"
+          },
+          "versions": {
+            "items": {
+              "$ref": "#/components/schemas/VersionSummary"
+            },
+            "type": "array",
+            "title": "Versions",
+            "description": "Version list"
+          }
+        },
+        "type": "object",
+        "required": [
+          "artifact_id",
+          "session_id",
+          "versions"
+        ],
+        "title": "VersionListResponse",
+        "description": "GET /api/v1/artifacts/{session_id}/{artifact_id}/versions response"
+      },
+      "VersionSummary": {
+        "properties": {
+          "version": {
+            "type": "integer",
+            "title": "Version",
+            "description": "Version number"
+          },
+          "update_type": {
+            "type": "string",
+            "title": "Update Type",
+            "description": "Update type (create, update, update_fuzzy, rewrite)"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At",
+            "description": "Version creation time"
+          }
+        },
+        "type": "object",
+        "required": [
+          "version",
+          "update_type",
+          "created_at"
+        ],
+        "title": "VersionSummary",
+        "description": "Version summary in version list response"
+      }
+    },
+    "securitySchemes": {
+      "HTTPBearer": {
+        "type": "http",
+        "scheme": "bearer"
+      }
+    }
+  }
+}
