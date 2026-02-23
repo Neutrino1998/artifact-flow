@@ -40,7 +40,7 @@ class CodeAgent(BaseAgent):
                 ],
                 model="qwen3-next-80b-instruct",
                 temperature=0.3,  # 代码分析需要精确
-                max_tool_rounds=5,
+                max_tool_rounds=100,
                 streaming=True
             )
         super().__init__(config, toolkit)

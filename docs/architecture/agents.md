@@ -245,7 +245,7 @@ class LeadAgent(BaseAgent):
                 ],
                 model="qwen3-next-80b-thinking",  # 使用思考模型
                 temperature=0.7,
-                max_tool_rounds=5,    # 需要更多轮次协调
+                max_tool_rounds=100,  # 需要更多轮次协调
                 streaming=True
             )
         super().__init__(config, toolkit)
