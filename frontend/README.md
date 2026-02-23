@@ -50,9 +50,11 @@ src/
 前端 TypeScript 类型从后端 FastAPI OpenAPI schema 自动生成，避免手动维护导致前后端类型不一致。
 
 ```bash
-# 在项目根目录执行：导出 schema → 生成 TS 类型
+# 在项目根目录执行：导出 schema
 python scripts/export_openapi.py
-npm run generate-types
+
+# 在 frontend/ 目录执行：生成 TS 类型
+cd frontend && npm run generate-types
 ```
 
 - 生成的文件：`src/types/openapi.json`（schema）、`src/types/api.d.ts`（TS 类型）
