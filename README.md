@@ -184,30 +184,39 @@ docker-compose up -d --build
    # macOS/Linux: source artifact-flow/bin/activate
    ```
 
-3. **安装依赖**
+3. **安装系统依赖**
+   ```bash
+   # macOS
+   brew install pandoc
+
+   # Ubuntu/Debian
+   sudo apt-get install -y pandoc
+   ```
+
+4. **安装 Python 依赖**
    ```bash
    pip install -e .
    ```
 
-4. **配置环境变量**
+5. **配置环境变量**
    ```bash
    cp .env.example .env
    # 编辑 .env 文件，添加你的 API Keys
    ```
 
-5. **设置 JWT 密钥**（必须，否则服务无法启动）
+6. **设置 JWT 密钥**（必须，否则服务无法启动）
    ```bash
    echo "ARTIFACTFLOW_JWT_SECRET=$(python -c 'import secrets; print(secrets.token_urlsafe(32))')" >> .env
    ```
 
-6. **创建管理员账号**（首次使用前必须）
+7. **创建管理员账号**（首次使用前必须）
    ```bash
    # "admin" 是用户名，--password 指定密码（不加则交互式提示输入）
    python scripts/create_admin.py admin --password admin
    ```
    管理员登录后可在侧边栏底部的用户菜单中打开「管理用户」面板，创建和管理其他用户账号。
 
-7. **启动服务**
+8. **启动服务**
    ```bash
    # 启动 API 服务器
    python run_server.py
@@ -220,7 +229,7 @@ docker-compose up -d --build
    # - ReDoc 文档: http://localhost:8000/redoc
    ```
 
-8. **使用 CLI 交互**
+9. **使用 CLI 交互**
    ```bash
    # 登录（首次使用需要）
    python run_cli.py login
