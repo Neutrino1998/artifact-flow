@@ -6,7 +6,7 @@ import { useStreamStore } from '@/stores/streamStore';
 import { useUIStore } from '@/stores/uiStore';
 import { useArtifactStore } from '@/stores/artifactStore';
 import { useConversationStore } from '@/stores/conversationStore';
-import { uploadFile } from '@/lib/api';
+import { uploadFile, uploadFileNewSession, listConversations, getConversation } from '@/lib/api';
 import { useArtifacts } from '@/hooks/useArtifacts';
 
 export default function MessageInput() {
@@ -53,17 +53,31 @@ export default function MessageInput() {
     [handleSend]
   );
 
-  const handleUpload = useCallback(async (file: File) => {
-    if (!sessionId) {
-      window.alert('请先发送消息创建对话');
-      return;
-    }
+  const setCurrent = useConversationStore((s) => s.setCurrent);
+  const setConversations = useConversationStore((s) => s.setConversations);
 
+  const handleUpload = useCallback(async (file: File) => {
     setUploading(true);
     setUploadError(null);
 
     try {
-      const result = await uploadFile(sessionId, file);
+      let result;
+      if (sessionId) {
+        // Upload to existing session
+        result = await uploadFile(sessionId, file);
+      } else {
+        // No session — auto-create conversation via new endpoint
+        result = await uploadFileNewSession(file);
+
+        // Load the new conversation into stores
+        const [detail, list] = await Promise.all([
+          getConversation(result.session_id),
+          listConversations(20, 0),
+        ]);
+        setCurrent(detail);
+        setConversations(list.conversations, list.total, list.has_more);
+      }
+
       // Refresh artifact list and open the new artifact
       await loadArtifacts();
       setArtifactPanelVisible(true);
@@ -75,7 +89,7 @@ export default function MessageInput() {
     } finally {
       setUploading(false);
     }
-  }, [sessionId, setUploading, setUploadError, loadArtifacts, setArtifactPanelVisible, selectArtifact]);
+  }, [sessionId, setUploading, setUploadError, loadArtifacts, setArtifactPanelVisible, selectArtifact, setCurrent, setConversations]);
 
   const handleFileSelect = useCallback(() => {
     fileInputRef.current?.click();
@@ -90,7 +104,7 @@ export default function MessageInput() {
     e.target.value = '';
   }, [handleUpload]);
 
-  const uploadDisabled = !sessionId || uploading || isStreaming;
+  const uploadDisabled = uploading || isStreaming;
 
   return (
     <div className="relative px-4 pt-4 pb-5">
@@ -131,7 +145,7 @@ export default function MessageInput() {
                 disabled={uploadDisabled}
                 className="p-1.5 rounded-lg text-text-secondary dark:text-text-secondary-dark hover:bg-bg dark:hover:bg-bg-dark transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                 aria-label="Upload file"
-                title={sessionId ? '上传文件' : '请先发送消息创建对话'}
+                title="上传文件"
               >
                 {uploading ? (
                   <svg width="16" height="16" viewBox="0 0 16 16" className="animate-spin">

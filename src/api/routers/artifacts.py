@@ -15,8 +15,9 @@ from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.config import config
-from api.dependencies import get_artifact_manager, get_current_user, get_db_session
+from api.dependencies import get_artifact_manager, get_conversation_manager, get_current_user, get_db_session
 from api.services.auth import TokenPayload
+from core.conversation_manager import ConversationManager
 from repositories.conversation_repo import ConversationRepository
 from api.schemas.artifact import (
     ArtifactListResponse,
@@ -44,6 +45,70 @@ async def _verify_session_ownership(
     conv = await repo.get_conversation(session_id)
     if not conv or conv.user_id != user.user_id:
         raise HTTPException(status_code=404, detail=f"Session '{session_id}' not found")
+
+
+@router.post("/upload", response_model=UploadResponse)
+async def upload_file_new_session(
+    file: UploadFile = File(...),
+    current_user: TokenPayload = Depends(get_current_user),
+    db_session: AsyncSession = Depends(get_db_session),
+    artifact_manager: ArtifactManager = Depends(get_artifact_manager),
+    conversation_manager: ConversationManager = Depends(get_conversation_manager),
+):
+    """
+    Upload a file and create a new conversation for it.
+    Use this when no session/conversation exists yet.
+    """
+    from uuid import uuid4
+
+    # Read and validate file
+    file_bytes = await file.read()
+    if len(file_bytes) > config.MAX_UPLOAD_SIZE:
+        raise HTTPException(
+            status_code=422,
+            detail=f"File too large: {len(file_bytes) / 1024 / 1024:.1f}MB "
+                   f"(max {config.MAX_UPLOAD_SIZE / 1024 / 1024:.0f}MB)"
+        )
+
+    # Convert
+    converter = DocConverter()
+    try:
+        result = await converter.convert(file_bytes, file.filename or "untitled")
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    except RuntimeError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    # Create conversation (auto-creates ArtifactSession)
+    conversation_id = f"conv-{uuid4().hex}"
+    await conversation_manager.ensure_conversation_exists(
+        conversation_id, user_id=current_user.user_id
+    )
+
+    # Create artifact
+    success, message, info = await artifact_manager.create_from_upload(
+        session_id=conversation_id,
+        filename=file.filename or "untitled",
+        content=result.content,
+        content_type=result.content_type,
+        metadata=result.metadata,
+    )
+
+    if not success:
+        raise HTTPException(status_code=500, detail=message)
+
+    memory = await artifact_manager.get_artifact(conversation_id, info["id"])
+
+    return UploadResponse(
+        id=info["id"],
+        session_id=conversation_id,
+        content_type=info["content_type"],
+        title=info["title"],
+        current_version=info["current_version"],
+        source=info["source"],
+        original_filename=info["original_filename"],
+        created_at=memory.created_at if memory else datetime.now(),
+    )
 
 
 @router.get("/{session_id}", response_model=ArtifactListResponse)
@@ -218,6 +283,7 @@ async def get_artifact(
         title=result["title"],
         content=result["content"],
         current_version=result["version"],
+        source=result.get("source"),
         created_at=datetime.fromisoformat(result["created_at"]) if isinstance(result["created_at"], str) else result["created_at"],
         updated_at=datetime.fromisoformat(result["updated_at"]) if isinstance(result["updated_at"], str) else result["updated_at"],
     )

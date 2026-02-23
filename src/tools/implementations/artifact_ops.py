@@ -552,6 +552,7 @@ class ArtifactManager:
                 "title": memory.title,
                 "content": memory.content,
                 "version": memory.current_version,
+                "source": memory.source,
                 "created_at": memory.created_at.isoformat(),
                 "updated_at": memory.updated_at.isoformat()
             }
@@ -569,6 +570,7 @@ class ArtifactManager:
                 "title": memory.title if memory else "Unknown",
                 "content": content,
                 "version": version,
+                "source": memory.source if memory else "agent",
                 "created_at": memory.created_at.isoformat() if memory else None,
                 "updated_at": None
             }

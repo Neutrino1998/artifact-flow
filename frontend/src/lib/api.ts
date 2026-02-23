@@ -142,6 +142,27 @@ export async function uploadFile(sessionId: string, file: File): Promise<UploadR
   return res.json();
 }
 
+export async function uploadFileNewSession(file: File): Promise<UploadResponse> {
+  const formData = new FormData();
+  formData.append('file', file);
+
+  const res = await fetch(`${BASE_URL}/api/v1/artifacts/upload`, {
+    method: 'POST',
+    headers: authHeaders(),
+    body: formData,
+  });
+
+  if (res.status === 401) {
+    useAuthStore.getState().logout();
+    throw new Error('Session expired');
+  }
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    throw new Error(`Upload failed: ${body}`);
+  }
+  return res.json();
+}
+
 export async function exportArtifact(
   sessionId: string,
   artifactId: string,

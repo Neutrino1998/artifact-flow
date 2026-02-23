@@ -6,7 +6,7 @@ import { useStreamStore } from '@/stores/streamStore';
 import { useArtifactStore } from '@/stores/artifactStore';
 import { useUIStore } from '@/stores/uiStore';
 import { useArtifacts } from '@/hooks/useArtifacts';
-import { uploadFile } from '@/lib/api';
+import { uploadFile, uploadFileNewSession, getConversation, listConversations } from '@/lib/api';
 import MessageList from './MessageList';
 import MessageInput from './MessageInput';
 import StreamingMessage from './StreamingMessage';
@@ -26,6 +26,8 @@ export default function ChatPanel() {
   const pendingUserMessage = useStreamStore((s) => s.pendingUserMessage);
 
   const sessionId = useConversationStore((s) => s.current?.session_id);
+  const setCurrent = useConversationStore((s) => s.setCurrent);
+  const setConversations = useConversationStore((s) => s.setConversations);
   const setUploading = useArtifactStore((s) => s.setUploading);
   const setUploadError = useArtifactStore((s) => s.setUploadError);
   const setArtifactPanelVisible = useUIStore((s) => s.setArtifactPanelVisible);
@@ -37,11 +39,6 @@ export default function ChatPanel() {
     e.preventDefault();
     setIsDragOver(false);
 
-    if (!sessionId) {
-      window.alert('请先发送消息创建对话');
-      return;
-    }
-
     const file = e.dataTransfer.files[0];
     if (!file) return;
 
@@ -49,7 +46,19 @@ export default function ChatPanel() {
     setUploadError(null);
 
     try {
-      const result = await uploadFile(sessionId, file);
+      let result;
+      if (sessionId) {
+        result = await uploadFile(sessionId, file);
+      } else {
+        result = await uploadFileNewSession(file);
+        const [detail, list] = await Promise.all([
+          getConversation(result.session_id),
+          listConversations(20, 0),
+        ]);
+        setCurrent(detail);
+        setConversations(list.conversations, list.total, list.has_more);
+      }
+
       await loadArtifacts();
       setArtifactPanelVisible(true);
       selectArtifact(result.id);
@@ -60,7 +69,7 @@ export default function ChatPanel() {
     } finally {
       setUploading(false);
     }
-  }, [sessionId, setUploading, setUploadError, loadArtifacts, setArtifactPanelVisible, selectArtifact]);
+  }, [sessionId, setUploading, setUploadError, loadArtifacts, setArtifactPanelVisible, selectArtifact, setCurrent, setConversations]);
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
