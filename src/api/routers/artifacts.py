@@ -246,10 +246,19 @@ async def export_artifact(
         raise HTTPException(status_code=500, detail=str(e))
 
     filename = result["title"].replace("/", "-").replace("\\", "-") + ".docx"
+    # RFC 5987: use filename* for non-ASCII names, with ASCII fallback
+    from urllib.parse import quote
+    ascii_fallback = filename.encode("ascii", errors="replace").decode("ascii")
+    utf8_encoded = quote(filename, safe="")
     return Response(
         content=docx_bytes,
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="{ascii_fallback}"; '
+                f"filename*=UTF-8''{utf8_encoded}"
+            )
+        },
     )
 
 

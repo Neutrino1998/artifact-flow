@@ -42,6 +42,7 @@ export function useSSE() {
   const setArtifacts = useArtifactStore((s) => s.setArtifacts);
   const setArtifactCurrent = useArtifactStore((s) => s.setCurrent);
   const setArtifactVersions = useArtifactStore((s) => s.setVersions);
+  const setSelectedVersion = useArtifactStore((s) => s.setSelectedVersion);
   const addPendingUpdate = useArtifactStore((s) => s.addPendingUpdate);
   const clearPendingUpdates = useArtifactStore((s) => s.clearPendingUpdates);
 
@@ -211,6 +212,8 @@ export function useSSE() {
               // store it so useArtifacts can use it even before conversation loads
               const sessionId = conversationId;
               setArtifactSessionId(sessionId);
+              // Clear selectedVersion so the panel shows the latest current.content
+              setSelectedVersion(null);
               Promise.all([
                 api.getArtifact(sessionId, artifactId),
                 api.listArtifacts(sessionId),
@@ -270,7 +273,7 @@ export function useSSE() {
       updateToolCallInSegment, snapshotSegments, setPermissionRequest,
       setError, endStream, refreshAfterComplete, setArtifactPanelVisible,
       addPendingUpdate, setArtifactSessionId, setArtifactCurrent, setArtifacts,
-      setArtifactVersions,
+      setArtifactVersions, setSelectedVersion,
     ]
   );
 
