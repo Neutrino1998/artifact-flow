@@ -91,34 +91,36 @@ class ArtifactRepository(BaseRepository[Artifact]):
         content_type: str,
         title: str,
         content: str,
-        metadata: Optional[Dict[str, Any]] = None
+        metadata: Optional[Dict[str, Any]] = None,
+        source: str = "agent"
     ) -> Artifact:
         """
         创建 Artifact（同时创建初始版本）
-        
+
         Args:
             session_id: Session ID
             artifact_id: Artifact ID
-            content_type: 内容类型 (markdown/python/etc)
+            content_type: 内容类型 (MIME type)
             title: 标题
             content: 初始内容
             metadata: 扩展元数据
-            
+            source: 来源 (agent, user_upload)
+
         Returns:
             创建的 Artifact
-            
+
         Raises:
             NotFoundError: Session 不存在
             DuplicateError: Artifact 已存在
         """
         # 确保 Session 存在
         await self.get_session_or_raise(session_id)
-        
+
         # 检查 Artifact 是否已存在
         existing = await self.get_artifact(session_id, artifact_id)
         if existing:
             raise DuplicateError("Artifact", f"{session_id}/{artifact_id}")
-        
+
         # 创建 Artifact
         artifact = Artifact(
             id=artifact_id,
@@ -128,7 +130,8 @@ class ArtifactRepository(BaseRepository[Artifact]):
             content=content,
             current_version=1,
             lock_version=1,
-            metadata_=metadata or {}
+            metadata_=metadata or {},
+            source=source
         )
         
         self._session.add(artifact)
@@ -233,6 +236,7 @@ class ArtifactRepository(BaseRepository[Artifact]):
                 "title": artifact.title,
                 "version": artifact.current_version,
                 "lock_version": artifact.lock_version,
+                "source": artifact.source,
                 "created_at": artifact.created_at.isoformat(),
                 "updated_at": artifact.updated_at.isoformat()
             }
@@ -283,13 +287,14 @@ class ArtifactRepository(BaseRepository[Artifact]):
         new_content: str,
         update_type: str,
         expected_lock_version: int,
-        changes: Optional[List[Tuple[str, str]]] = None
+        changes: Optional[List[Tuple[str, str]]] = None,
+        source: Optional[str] = None
     ) -> Artifact:
         """
         更新 Artifact 内容（带乐观锁）
-        
+
         这是核心的更新方法，使用乐观锁防止并发冲突。
-        
+
         Args:
             session_id: Session ID
             artifact_id: Artifact ID
@@ -297,14 +302,25 @@ class ArtifactRepository(BaseRepository[Artifact]):
             update_type: 更新类型 (update/update_fuzzy/rewrite)
             expected_lock_version: 预期的锁版本（用于乐观锁检查）
             changes: 变更记录 [(old, new), ...]
-            
+            source: 可选，更新来源（传入时同步更新 artifact.source）
+
         Returns:
             更新后的 Artifact
-            
+
         Raises:
             NotFoundError: Artifact 不存在
             VersionConflictError: 版本冲突
         """
+        # 构建更新值
+        update_values: Dict[str, Any] = {
+            "content": new_content,
+            "current_version": Artifact.current_version + 1,
+            "lock_version": Artifact.lock_version + 1,
+            "updated_at": datetime.now(),
+        }
+        if source is not None:
+            update_values["source"] = source
+
         # 使用原子更新操作
         result = await self._session.execute(
             update(Artifact)
@@ -315,12 +331,7 @@ class ArtifactRepository(BaseRepository[Artifact]):
                     Artifact.lock_version == expected_lock_version  # 乐观锁检查
                 )
             )
-            .values(
-                content=new_content,
-                current_version=Artifact.current_version + 1,
-                lock_version=Artifact.lock_version + 1,
-                updated_at=datetime.now()
-            )
+            .values(**update_values)
             .returning(Artifact.current_version, Artifact.lock_version)
         )
         
@@ -364,17 +375,19 @@ class ArtifactRepository(BaseRepository[Artifact]):
         session_id: str,
         artifact_id: str,
         new_content: str,
-        expected_lock_version: int
+        expected_lock_version: int,
+        source: Optional[str] = None
     ) -> Artifact:
         """
         完全重写 Artifact 内容
-        
+
         Args:
             session_id: Session ID
             artifact_id: Artifact ID
             new_content: 新内容
             expected_lock_version: 预期的锁版本
-            
+            source: 可选，更新来源
+
         Returns:
             更新后的 Artifact
         """
@@ -384,7 +397,8 @@ class ArtifactRepository(BaseRepository[Artifact]):
             new_content=new_content,
             update_type="rewrite",
             expected_lock_version=expected_lock_version,
-            changes=None
+            changes=None,
+            source=source
         )
     
     async def update_artifact_title(

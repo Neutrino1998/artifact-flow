@@ -45,7 +45,7 @@ async def seed_artifacts(
         await art_repo.create_artifact(
             session_id=conv_id,
             artifact_id=artifact_id,
-            content_type="markdown",
+            content_type="text/markdown",
             title="Test Artifact",
             content="# Version 1",
         )

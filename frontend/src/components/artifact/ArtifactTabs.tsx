@@ -1,8 +1,9 @@
 'use client';
 
+import { useMemo } from 'react';
 import { useArtifactStore, type ArtifactViewMode } from '@/stores/artifactStore';
 
-const tabs: { mode: ArtifactViewMode; label: string }[] = [
+const allTabs: { mode: ArtifactViewMode; label: string }[] = [
   { mode: 'preview', label: 'Preview' },
   { mode: 'source', label: 'Source' },
   { mode: 'diff', label: 'Diff' },
@@ -11,6 +12,12 @@ const tabs: { mode: ArtifactViewMode; label: string }[] = [
 export default function ArtifactTabs() {
   const viewMode = useArtifactStore((s) => s.viewMode);
   const setViewMode = useArtifactStore((s) => s.setViewMode);
+  const contentType = useArtifactStore((s) => s.current?.content_type);
+
+  const tabs = useMemo(() => {
+    if (contentType === 'text/markdown') return allTabs;
+    return allTabs.filter((t) => t.mode !== 'preview');
+  }, [contentType]);
 
   return (
     <div className="flex border-b border-border dark:border-border-dark">

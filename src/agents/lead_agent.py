@@ -163,18 +163,18 @@ Choose appropriate artifact IDs and types based on what the user requests:
 
 **For Reports/Research:**
 - ID: "research_report", "market_analysis", "technical_review", etc.
-- Type: "markdown"
+- Type: "text/markdown"
 - Always include a references section using markdown link format: 1. [Source Title](URL)
 - Use inline citations [1], [2], etc. throughout the text, corresponding to numbered references
 
 **For Code/Scripts:**
 - ID: "data_analysis.py", "web_scraper.js", "config.yaml", etc.
-- Type: "python", "javascript", "yaml", etc.
+- Type: "text/x-python", "text/javascript", "text/yaml", etc.
 - Create separate artifacts for different code files
 
 **For Documents:**
 - ID: "proposal", "guidelines", "readme", etc.
-- Type: "markdown" or "txt"
+- Type: "text/markdown" or "text/plain"
 
 **Important:** You can create MULTIPLE result artifacts as needed. For example:
 - A coding task might need "main.py", "utils.py", and "requirements.txt"
@@ -220,15 +220,17 @@ You currently have {context['artifacts_count']} artifact(s) in this session.
                     prompt += f'content_type="{artifact["content_type"]}" '
                     prompt += f'title="{artifact["title"]}" '
                     prompt += f'version="{artifact["version"]}" '
+                    prompt += f'source="{artifact.get("source", "agent")}" '
                     prompt += f'updated="{artifact["updated_at"]}">\n'
-                    prompt += f'{artifact["content"]}\n' 
+                    prompt += f'{artifact["content"]}\n'
                     prompt += '</artifact>\n'
-                
+
                 prompt += """
 Based on the existing artifacts:
 - Update existing artifacts rather than creating duplicates
 - Use 'update_artifact' for small changes
 - Use 'rewrite_artifact' for major restructuring
+- Artifacts with source="user_upload" are documents uploaded by the user. Assess whether they are relevant to the current task and use `read_artifact` to access full content if needed.
 </artifacts_inventory>\n"""
 
             if context.get("user_feedback"):

@@ -10,7 +10,6 @@ import re
 import aiohttp
 from typing import List, Dict, Any, Optional
 from datetime import datetime
-from io import BytesIO
 
 from tools.base import BaseTool, ToolResult, ToolParameter, ToolPermission
 from utils.logger import get_logger
@@ -18,12 +17,7 @@ import random
 
 from bs4 import BeautifulSoup
 
-# 导入PDF处理
-try:
-    from pypdf import PdfReader
-    PDF_SUPPORT = True
-except ImportError:
-    PDF_SUPPORT = False
+from tools.utils.doc_converter import DocConverter
 
 logger = get_logger("ArtifactFlow")
 
@@ -53,9 +47,6 @@ class WebFetchTool(BaseTool):
             description="Fetch and extract content from web pages and PDF files",
             permission=ToolPermission.CONFIRM
         )
-
-        if not PDF_SUPPORT:
-            logger.warning("pypdf is not installed. PDF fallback disabled. Install with: pip install pypdf")
 
         # User-Agent 池
         self.user_agents = [
@@ -378,7 +369,7 @@ class WebFetchTool(BaseTool):
 
     async def _fetch_pdf(self, url: str, max_content_length: int) -> Dict[str, Any]:
         """
-        降级路径：抓取并解析PDF文件（pypdf）
+        降级路径：抓取并解析PDF文件（DocConverter / pymupdf）
 
         Args:
             url: PDF文件URL
@@ -387,17 +378,10 @@ class WebFetchTool(BaseTool):
         Returns:
             抓取结果字典
         """
-        if not PDF_SUPPORT:
-            return {
-                "success": False,
-                "url": url,
-                "error": "PDF support not available. Install pypdf: pip install pypdf"
-            }
-
         try:
             logger.info(f"Fetching PDF: {url}")
 
-            timeout = aiohttp.ClientTimeout(total=60)  # PDF可能较大，60秒超时
+            timeout = aiohttp.ClientTimeout(total=60)
             async with aiohttp.ClientSession() as session:
                 async with session.get(
                     url,
@@ -411,50 +395,27 @@ class WebFetchTool(BaseTool):
                             "error": f"HTTP {response.status}"
                         }
 
-                    # 检查Content-Type
-                    content_type = response.headers.get('Content-Type', '').lower()
-                    if 'pdf' not in content_type:
-                        logger.warning(f"Expected PDF but got {content_type}, trying anyway...")
-
-                    # 读取PDF内容
                     pdf_bytes = await response.read()
 
-                    # 使用pypdf提取文本
-                    pdf_file = BytesIO(pdf_bytes)
-                    pdf_reader = PdfReader(pdf_file)
+                    converter = DocConverter()
+                    result = await converter.convert(pdf_bytes, "document.pdf")
 
-                    # 提取所有页面文本
-                    text_parts = []
-                    for page_num, page in enumerate(pdf_reader.pages, 1):
-                        try:
-                            page_text = page.extract_text()
-                            if page_text.strip():
-                                text_parts.append(page_text)
-                        except Exception as e:
-                            logger.warning(f"Failed to extract page {page_num}: {e}")
+                    content = result.content
+                    if len(content) > max_content_length:
+                        content = content[:max_content_length] + "\n\n[Content truncated...]"
 
-                    full_text = "\n\n".join(text_parts)
-
-                    # 获取PDF元数据
-                    title = "PDF Document"
-                    if pdf_reader.metadata:
-                        title = pdf_reader.metadata.get('/Title', title)
-
-                    # 限制长度
-                    if len(full_text) > max_content_length:
-                        full_text = full_text[:max_content_length] + "\n\n[Content truncated...]"
-
-                    logger.info(f"PDF extracted: {len(text_parts)} pages, {len(full_text)} chars")
+                    page_count = result.metadata.get("page_count", 0)
+                    logger.info(f"PDF extracted: {page_count} pages, {len(content)} chars")
 
                     return {
                         "success": True,
                         "url": url,
-                        "title": title,
-                        "content": full_text,
-                        "word_count": len(full_text.split()),
+                        "title": "PDF Document",
+                        "content": content,
+                        "word_count": len(content.split()),
                         "fetched_at": datetime.now().isoformat(),
                         "source_type": "pdf",
-                        "page_count": len(pdf_reader.pages)
+                        "page_count": page_count,
                     }
 
         except Exception as e:

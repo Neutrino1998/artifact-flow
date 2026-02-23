@@ -13,6 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from api.config import config
 from api.dependencies import init_globals, close_globals
 from api.routers import auth, chat, artifacts, stream
+from tools.utils.doc_converter import DocConverter
 from utils.logger import get_logger
 
 logger = get_logger("ArtifactFlow")
@@ -28,6 +29,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """
     # 启动
     logger.info("Starting ArtifactFlow API...")
+    DocConverter.check_pandoc()
+    DocConverter.check_pymupdf()
     await init_globals()
     logger.info("ArtifactFlow API started successfully")
 

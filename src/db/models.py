@@ -275,9 +275,12 @@ class Artifact(Base):
         primary_key=True
     )
     
-    # 内容类型 (markdown/python/etc)
-    content_type: Mapped[str] = mapped_column(String(32), nullable=False)
-    
+    # 内容类型 (MIME type, e.g. text/markdown, text/x-python)
+    content_type: Mapped[str] = mapped_column(String(64), nullable=False)
+
+    # 来源 (agent, user_upload)
+    source: Mapped[str] = mapped_column(String(32), nullable=False, default="agent")
+
     # 标题
     title: Mapped[str] = mapped_column(String(256), nullable=False)
     
@@ -456,7 +459,7 @@ if __name__ == "__main__":
                 artifact = Artifact(
                     id="task_plan",
                     session_id=art_session.id,
-                    content_type="markdown",
+                    content_type="text/markdown",
                     title="任务计划",
                     content="# Task Plan\n\n- Step 1"
                 )

@@ -4,13 +4,25 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import { useChat } from '@/hooks/useChat';
 import { useStreamStore } from '@/stores/streamStore';
 import { useUIStore } from '@/stores/uiStore';
+import { useArtifactStore } from '@/stores/artifactStore';
+import { useConversationStore } from '@/stores/conversationStore';
+import { uploadFile } from '@/lib/api';
+import { useArtifacts } from '@/hooks/useArtifacts';
 
 export default function MessageInput() {
   const [content, setContent] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const { sendMessage, disconnect, isNewConversation } = useChat();
   const isStreaming = useStreamStore((s) => s.isStreaming);
   const toggleArtifactPanel = useUIStore((s) => s.toggleArtifactPanel);
+  const setArtifactPanelVisible = useUIStore((s) => s.setArtifactPanelVisible);
+
+  const uploading = useArtifactStore((s) => s.uploading);
+  const setUploading = useArtifactStore((s) => s.setUploading);
+  const setUploadError = useArtifactStore((s) => s.setUploadError);
+  const sessionId = useConversationStore((s) => s.current?.session_id);
+  const { loadArtifacts, selectArtifact } = useArtifacts();
 
   // Auto-resize textarea
   useEffect(() => {
@@ -41,6 +53,45 @@ export default function MessageInput() {
     [handleSend]
   );
 
+  const handleUpload = useCallback(async (file: File) => {
+    if (!sessionId) {
+      window.alert('请先发送消息创建对话');
+      return;
+    }
+
+    setUploading(true);
+    setUploadError(null);
+
+    try {
+      const result = await uploadFile(sessionId, file);
+      // Refresh artifact list and open the new artifact
+      await loadArtifacts();
+      setArtifactPanelVisible(true);
+      selectArtifact(result.id);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Upload failed';
+      setUploadError(message);
+      window.alert(message);
+    } finally {
+      setUploading(false);
+    }
+  }, [sessionId, setUploading, setUploadError, loadArtifacts, setArtifactPanelVisible, selectArtifact]);
+
+  const handleFileSelect = useCallback(() => {
+    fileInputRef.current?.click();
+  }, []);
+
+  const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      handleUpload(file);
+    }
+    // Reset input so the same file can be selected again
+    e.target.value = '';
+  }, [handleUpload]);
+
+  const uploadDisabled = !sessionId || uploading || isStreaming;
+
   return (
     <div className="relative px-4 pt-4 pb-5">
       {/* Gradient fade above input */}
@@ -66,16 +117,31 @@ export default function MessageInput() {
 
           <div className="flex items-center justify-between mt-2">
             <div className="flex items-center gap-1">
+              {/* Hidden file input */}
+              <input
+                ref={fileInputRef}
+                type="file"
+                onChange={handleFileChange}
+                className="hidden"
+              />
+
               {/* Upload file */}
               <button
-                onClick={() => {/* TODO: implement file upload */}}
-                className="p-1.5 rounded-lg text-text-secondary dark:text-text-secondary-dark hover:bg-bg dark:hover:bg-bg-dark transition-colors"
+                onClick={handleFileSelect}
+                disabled={uploadDisabled}
+                className="p-1.5 rounded-lg text-text-secondary dark:text-text-secondary-dark hover:bg-bg dark:hover:bg-bg-dark transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                 aria-label="Upload file"
-                title="上传文件"
+                title={sessionId ? '上传文件' : '请先发送消息创建对话'}
               >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
-                </svg>
+                {uploading ? (
+                  <svg width="16" height="16" viewBox="0 0 16 16" className="animate-spin">
+                    <circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" strokeWidth="2" strokeDasharray="28" strokeDashoffset="8" />
+                  </svg>
+                ) : (
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+                  </svg>
+                )}
               </button>
 
               {/* Artifact panel toggle */}

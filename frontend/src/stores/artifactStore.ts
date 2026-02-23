@@ -25,6 +25,10 @@ interface ArtifactState {
   // Pending updates from streaming
   pendingUpdates: string[];
 
+  // Upload state
+  uploading: boolean;
+  uploadError: string | null;
+
   // Actions
   setSessionId: (sessionId: string | null) => void;
   setArtifacts: (artifacts: ArtifactSummary[]) => void;
@@ -36,7 +40,14 @@ interface ArtifactState {
   setViewMode: (mode: ArtifactViewMode) => void;
   addPendingUpdate: (identifier: string) => void;
   clearPendingUpdates: () => void;
+  setUploading: (uploading: boolean) => void;
+  setUploadError: (error: string | null) => void;
   reset: () => void;
+}
+
+function defaultViewMode(contentType?: string): ArtifactViewMode {
+  if (contentType === 'text/markdown') return 'preview';
+  return 'source';
 }
 
 export const useArtifactStore = create<ArtifactState>((set) => ({
@@ -55,10 +66,17 @@ export const useArtifactStore = create<ArtifactState>((set) => ({
 
   pendingUpdates: [],
 
+  uploading: false,
+  uploadError: null,
+
   setSessionId: (sessionId) => set({ sessionId }),
   setArtifacts: (artifacts) => set({ artifacts }),
   setArtifactsLoading: (loading) => set({ artifactsLoading: loading }),
-  setCurrent: (artifact) => set({ current: artifact }),
+  setCurrent: (artifact) =>
+    set({
+      current: artifact,
+      viewMode: artifact ? defaultViewMode(artifact.content_type) : 'preview',
+    }),
   setCurrentLoading: (loading) => set({ currentLoading: loading }),
   setVersions: (versions) => set({ versions }),
   setSelectedVersion: (version) => set({ selectedVersion: version }),
@@ -70,6 +88,8 @@ export const useArtifactStore = create<ArtifactState>((set) => ({
         : [...s.pendingUpdates, identifier],
     })),
   clearPendingUpdates: () => set({ pendingUpdates: [] }),
+  setUploading: (uploading) => set({ uploading }),
+  setUploadError: (error) => set({ uploadError: error }),
   reset: () =>
     set({
       sessionId: null,
@@ -79,5 +99,7 @@ export const useArtifactStore = create<ArtifactState>((set) => ({
       selectedVersion: null,
       viewMode: 'preview',
       pendingUpdates: [],
+      uploading: false,
+      uploadError: null,
     }),
 }));

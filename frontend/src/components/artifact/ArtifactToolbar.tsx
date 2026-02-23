@@ -1,9 +1,10 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import { useArtifactStore } from '@/stores/artifactStore';
 import { useUIStore } from '@/stores/uiStore';
 import { useArtifacts } from '@/hooks/useArtifacts';
+import { exportArtifact } from '@/lib/api';
 
 function getFileExtension(contentType: string): string {
   const map: Record<string, string> = {
@@ -14,6 +15,7 @@ function getFileExtension(contentType: string): string {
     'text/csv': '.csv',
     'application/json': '.json',
     'application/javascript': '.js',
+    'text/javascript': '.js',
     'text/x-python': '.py',
     'text/x-typescript': '.ts',
   };
@@ -28,6 +30,20 @@ export default function ArtifactToolbar() {
   const setArtifactPanelVisible = useUIStore((s) => s.setArtifactPanelVisible);
   const { selectVersion, selectArtifact } = useArtifacts();
   const [copied, setCopied] = useState(false);
+  const [showDownloadMenu, setShowDownloadMenu] = useState(false);
+  const downloadMenuRef = useRef<HTMLDivElement>(null);
+
+  // Close download menu on outside click
+  useEffect(() => {
+    if (!showDownloadMenu) return;
+    const handler = (e: MouseEvent) => {
+      if (downloadMenuRef.current && !downloadMenuRef.current.contains(e.target as Node)) {
+        setShowDownloadMenu(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [showDownloadMenu]);
 
   const handleCopy = useCallback(async () => {
     const content = selectedVersion?.content ?? current?.content ?? '';
@@ -48,7 +64,26 @@ export default function ArtifactToolbar() {
     a.download = filename;
     a.click();
     URL.revokeObjectURL(url);
+    setShowDownloadMenu(false);
   }, [current, selectedVersion]);
+
+  const handleExportDocx = useCallback(async () => {
+    if (!current) return;
+    setShowDownloadMenu(false);
+
+    try {
+      const blob = await exportArtifact(current.session_id, current.id, 'docx');
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = current.title.replace(/[/\\?%*:|"<>]/g, '-') + '.docx';
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Export failed';
+      window.alert(message);
+    }
+  }, [current]);
 
   const handleRefresh = useCallback(() => {
     if (!current) return;
@@ -72,6 +107,7 @@ export default function ArtifactToolbar() {
   if (!current) return null;
 
   const displayVersion = selectedVersion?.version ?? current.current_version;
+  const isMarkdown = current.content_type === 'text/markdown';
 
   return (
     <div className="flex items-center justify-between px-4 py-2 border-b border-border dark:border-border-dark">
@@ -128,17 +164,38 @@ export default function ArtifactToolbar() {
           )}
         </button>
 
-        {/* Download */}
-        <button
-          onClick={handleDownload}
-          className="p-1.5 rounded text-text-secondary dark:text-text-secondary-dark hover:bg-bg dark:hover:bg-bg-dark transition-colors"
-          aria-label="Download artifact"
-          title="下载"
-        >
-          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5">
-            <path d="M7 2v7.5M4 7l3 3 3-3M2.5 11.5h9" />
-          </svg>
-        </button>
+        {/* Download (dropdown) */}
+        <div className="relative" ref={downloadMenuRef}>
+          <button
+            onClick={() => setShowDownloadMenu((v) => !v)}
+            className="p-1.5 rounded text-text-secondary dark:text-text-secondary-dark hover:bg-bg dark:hover:bg-bg-dark transition-colors"
+            aria-label="Download artifact"
+            title="下载"
+          >
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5">
+              <path d="M7 2v7.5M4 7l3 3 3-3M2.5 11.5h9" />
+            </svg>
+          </button>
+
+          {showDownloadMenu && (
+            <div className="absolute right-0 top-full mt-1 bg-surface dark:bg-surface-dark border border-border dark:border-border-dark rounded-lg shadow-float py-1 z-50 min-w-[160px]">
+              <button
+                onClick={handleDownload}
+                className="w-full text-left px-3 py-1.5 text-xs text-text-primary dark:text-text-primary-dark hover:bg-bg dark:hover:bg-bg-dark transition-colors"
+              >
+                下载原格式
+              </button>
+              {isMarkdown && (
+                <button
+                  onClick={handleExportDocx}
+                  className="w-full text-left px-3 py-1.5 text-xs text-text-primary dark:text-text-primary-dark hover:bg-bg dark:hover:bg-bg-dark transition-colors"
+                >
+                  导出为 Word (.docx)
+                </button>
+              )}
+            </div>
+          )}
+        </div>
 
         {/* Back to list */}
         <button

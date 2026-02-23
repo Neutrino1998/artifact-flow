@@ -26,8 +26,12 @@ python-dotenv>=1.0.0
 
 # 网络抓取
 beautifulsoup4>=4.11.0  # HTML解析器：Jina Reader API fallback
-pypdf>=4.0.0  # PDF文本提取
 aiohttp>=3.9.0  # 异步HTTP客户端
+
+# 文档转换
+pymupdf>=1.24.0  # PDF文本提取
+charset-normalizer>=3.0.0  # 文本编码检测
+python-multipart>=0.0.9  # 文件上传支持
 
 # 文本差异对比
 diff-match-patch>=20230430

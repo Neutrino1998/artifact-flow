@@ -75,7 +75,7 @@ async def _create_test_artifact(
         await repo.create_artifact(
             session_id=session_id,
             artifact_id=artifact_id,
-            content_type="markdown",
+            content_type="text/markdown",
             title="Test",
             content="initial content",
         )

@@ -45,7 +45,7 @@ async def sample_artifact(artifact_session: str, artifact_repo: ArtifactReposito
     artifact = await artifact_repo.create_artifact(
         session_id=artifact_session,
         artifact_id=artifact_id,
-        content_type="markdown",
+        content_type="text/markdown",
         title="Sample Artifact",
         content="# Hello World",
     )
@@ -100,7 +100,7 @@ class TestArtifactCRUD:
         artifact = await artifact_repo.create_artifact(
             session_id=artifact_session,
             artifact_id=artifact_id,
-            content_type="python",
+            content_type="text/x-python",
             title="My Script",
             content="print('hello')",
         )
@@ -124,7 +124,7 @@ class TestArtifactCRUD:
             await artifact_repo.create_artifact(
                 session_id=session_id,
                 artifact_id=artifact_id,
-                content_type="markdown",
+                content_type="text/markdown",
                 title="Dup",
                 content="dup",
             )
@@ -136,7 +136,7 @@ class TestArtifactCRUD:
             await artifact_repo.create_artifact(
                 session_id="nonexistent",
                 artifact_id="art-x",
-                content_type="markdown",
+                content_type="text/markdown",
                 title="X",
                 content="x",
             )
@@ -157,20 +157,20 @@ class TestArtifactCRUD:
         self, artifact_repo: ArtifactRepository, artifact_session: str
     ):
         await artifact_repo.create_artifact(
-            artifact_session, f"art-md-{uuid.uuid4().hex[:8]}", "markdown", "MD", "# md"
+            artifact_session, f"art-md-{uuid.uuid4().hex[:8]}", "text/markdown", "MD", "# md"
         )
         await artifact_repo.create_artifact(
-            artifact_session, f"art-py-{uuid.uuid4().hex[:8]}", "python", "PY", "x=1"
+            artifact_session, f"art-py-{uuid.uuid4().hex[:8]}", "text/x-python", "PY", "x=1"
         )
 
         all_arts = await artifact_repo.list_artifacts(artifact_session)
         assert len(all_arts) == 2
 
         md_only = await artifact_repo.list_artifacts(
-            artifact_session, content_type="markdown"
+            artifact_session, content_type="text/markdown"
         )
         assert len(md_only) == 1
-        assert md_only[0]["content_type"] == "markdown"
+        assert md_only[0]["content_type"] == "text/markdown"
 
     async def test_list_artifacts_content_preview(
         self, artifact_repo: ArtifactRepository, artifact_session: str
@@ -179,7 +179,7 @@ class TestArtifactCRUD:
         await artifact_repo.create_artifact(
             artifact_session,
             f"art-{uuid.uuid4().hex[:8]}",
-            "markdown",
+            "text/markdown",
             "Long",
             long_content,
         )
@@ -388,12 +388,12 @@ class TestBatchOperations:
     ):
         # Create a task_plan (temporary) and a result (permanent)
         await artifact_repo.create_artifact(
-            artifact_session, "task_plan", "markdown", "Plan", "plan content"
+            artifact_session, "task_plan", "text/markdown", "Plan", "plan content"
         )
         await artifact_repo.create_artifact(
             artifact_session,
             f"result-{uuid.uuid4().hex[:8]}",
-            "markdown",
+            "text/markdown",
             "Result",
             "result content",
         )
@@ -413,7 +413,7 @@ class TestBatchOperations:
         for i in range(3):
             aid = f"art-{uuid.uuid4().hex[:8]}"
             await artifact_repo.create_artifact(
-                artifact_session, aid, "markdown", f"Art {i}", f"content {i}"
+                artifact_session, aid, "text/markdown", f"Art {i}", f"content {i}"
             )
             ids.append(aid)
 

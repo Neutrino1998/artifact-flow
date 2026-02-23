@@ -11,6 +11,7 @@ Artifact 操作工具和管理器
 from typing import Dict, Any, Optional, List, Tuple
 from datetime import datetime
 from dataclasses import dataclass, field
+import re
 import diff_match_patch as dmp_module
 
 from tools.base import BaseTool, ToolResult, ToolParameter, ToolPermission
@@ -53,7 +54,8 @@ class ArtifactMemory:
         current_version: int = 1,
         lock_version: int = 1,
         metadata: Dict = None,
-        created_at: Optional[datetime] = None
+        created_at: Optional[datetime] = None,
+        source: str = "agent"
     ):
         self.id = artifact_id
         self.content_type = content_type
@@ -64,6 +66,7 @@ class ArtifactMemory:
         self.lock_version = lock_version
         self.created_at = created_at or datetime.now()
         self.updated_at = datetime.now()
+        self.source = source
 
     def compute_update(
         self,
@@ -229,7 +232,8 @@ class ArtifactManager:
         content_type: str,
         title: str,
         content: str,
-        metadata: Optional[Dict] = None
+        metadata: Optional[Dict] = None,
+        source: str = "agent"
     ) -> Tuple[bool, str]:
         """
         创建新的 Artifact
@@ -241,6 +245,7 @@ class ArtifactManager:
             title: 标题
             content: 初始内容
             metadata: 元数据
+            source: 来源 (agent, user_upload)
 
         Returns:
             (成功与否, 消息)
@@ -258,7 +263,8 @@ class ArtifactManager:
                 content_type=content_type,
                 title=title,
                 content=content,
-                metadata=metadata
+                metadata=metadata,
+                source=source
             )
 
             # 3. 创建内存缓存
@@ -271,6 +277,7 @@ class ArtifactManager:
                 lock_version=db_artifact.lock_version,
                 metadata=metadata,
                 created_at=db_artifact.created_at,
+                source=source,
             )
 
             if session_id not in self._cache:
@@ -287,6 +294,75 @@ class ArtifactManager:
         except Exception as e:
             logger.exception(f"Failed to create artifact: {e}")
             return False, f"Failed to create artifact: {str(e)}"
+
+    async def create_from_upload(
+        self,
+        session_id: str,
+        filename: str,
+        content: str,
+        content_type: str,
+        metadata: Optional[Dict] = None
+    ) -> Tuple[bool, str, Optional[Dict]]:
+        """
+        Create artifact from user-uploaded file.
+
+        Args:
+            session_id: Session ID
+            filename: Original filename
+            content: Converted text content
+            content_type: MIME type (after conversion)
+            metadata: Conversion metadata
+
+        Returns:
+            (success, message, artifact_info dict or None)
+        """
+        # Generate artifact_id from filename
+        base = re.sub(r'[^a-zA-Z0-9_\-.]', '_', filename)
+        artifact_id = base.lower()
+
+        # Deduplicate: if ID already exists, append suffix
+        repo = self._ensure_repository()
+        suffix = 0
+        original_id = artifact_id
+        while True:
+            existing = await repo.get_artifact(session_id, artifact_id)
+            if not existing:
+                break
+            suffix += 1
+            name_part, _, ext_part = original_id.rpartition('.')
+            if name_part:
+                artifact_id = f"{name_part}_{suffix}.{ext_part}"
+            else:
+                artifact_id = f"{original_id}_{suffix}"
+
+        # Title from filename (without extension)
+        import os
+        title = os.path.splitext(filename)[0]
+
+        upload_metadata = metadata or {}
+        upload_metadata["original_filename"] = filename
+
+        success, message = await self.create_artifact(
+            session_id=session_id,
+            artifact_id=artifact_id,
+            content_type=content_type,
+            title=title,
+            content=content,
+            metadata=upload_metadata,
+            source="user_upload"
+        )
+
+        if success:
+            return True, message, {
+                "id": artifact_id,
+                "session_id": session_id,
+                "content_type": content_type,
+                "title": title,
+                "current_version": 1,
+                "source": "user_upload",
+                "original_filename": filename,
+            }
+        return False, message, None
 
     async def get_artifact(
         self,
@@ -322,7 +398,8 @@ class ArtifactManager:
             current_version=db_artifact.current_version,
             lock_version=db_artifact.lock_version,
             metadata=db_artifact.metadata_,
-            created_at=db_artifact.created_at
+            created_at=db_artifact.created_at,
+            source=db_artifact.source,
         )
 
         if session_id not in self._cache:
@@ -372,7 +449,8 @@ class ArtifactManager:
                 new_content=new_content,
                 update_type=update_type,
                 expected_lock_version=memory.lock_version,
-                changes=match_info.get("changes")
+                changes=match_info.get("changes"),
+                source="agent"
             )
 
             # 4. 更新内存缓存
@@ -380,6 +458,7 @@ class ArtifactManager:
             memory.current_version = db_artifact.current_version
             memory.lock_version = db_artifact.lock_version
             memory.updated_at = datetime.now()
+            memory.source = "agent"
 
             return True, f"Successfully updated artifact '{artifact_id}' (v{memory.current_version})", match_info
 
@@ -423,7 +502,8 @@ class ArtifactManager:
                 session_id=session_id,
                 artifact_id=artifact_id,
                 new_content=new_content,
-                expected_lock_version=memory.lock_version
+                expected_lock_version=memory.lock_version,
+                source="agent"
             )
 
             # 3. 更新内存缓存
@@ -431,6 +511,7 @@ class ArtifactManager:
             memory.current_version = db_artifact.current_version
             memory.lock_version = db_artifact.lock_version
             memory.updated_at = datetime.now()
+            memory.source = "agent"
 
             return True, f"Successfully rewritten artifact '{artifact_id}' (v{memory.current_version})"
 
@@ -613,9 +694,9 @@ class CreateArtifactTool(BaseTool):
             ToolParameter(
                 name="content_type",
                 type="string",
-                description="Content format: 'markdown', 'txt', 'python', 'html', 'json'",
+                description="MIME type: 'text/markdown', 'text/plain', 'text/x-python', 'text/html', 'application/json', 'text/javascript', 'text/yaml'",
                 required=False,
-                default="markdown"
+                default="text/markdown"
             ),
             ToolParameter(
                 name="title",
@@ -923,7 +1004,7 @@ if __name__ == "__main__":
                 success, msg = await manager.create_artifact(
                     session_id=session_id,
                     artifact_id="task_plan",
-                    content_type="markdown",
+                    content_type="text/markdown",
                     title="Test Plan",
                     content="# Task Plan\n\n1. [✗] Step 1\n2. [✗] Step 2"
                 )

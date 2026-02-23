@@ -162,3 +162,14 @@ export interface VersionDetail {
   changes: [string, string][] | null;
   created_at: string;
 }
+
+export interface UploadResponse {
+  id: string;
+  session_id: string;
+  content_type: string;
+  title: string;
+  current_version: number;
+  source: string;
+  original_filename: string;
+  created_at: string;
+}
