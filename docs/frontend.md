@@ -128,6 +128,11 @@ listArtifacts(sessionId)            // GET  /api/v1/artifacts/:sessionId
 getArtifact(sessionId, artifactId)  // GET  /api/v1/artifacts/:sessionId/:id
 listVersions(sessionId, artifactId) // GET  /api/v1/artifacts/:sessionId/:id/versions
 getVersion(sessionId, id, version)  // GET  /api/v1/artifacts/:sessionId/:id/versions/:v
+
+// 文件上传与导出
+uploadFile(sessionId, file)         // POST /api/v1/artifacts/:sessionId/upload (multipart)
+uploadFileNewSession(file)          // POST /api/v1/artifacts/upload (multipart, 自动创建对话)
+exportArtifact(sessionId, id, fmt)  // GET  /api/v1/artifacts/:sessionId/:id/export?format=
 ```
 
 内部用一个通用的 `request<T>()` 函数处理 fetch + 错误处理 + JSON 解析。所有请求自动从 `authStore` 读取 token 注入 `Authorization: Bearer <token>` header，401 响应自动触发登出。

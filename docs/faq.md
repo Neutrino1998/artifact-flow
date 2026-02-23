@@ -23,7 +23,7 @@ python --version
 
 ### web_fetch 抓取限额 (Jina 429)
 
-Jina Reader API 免费 tier 有请求限额。命中限额时工具会自动等待 30 秒重试（最多 2 次），重试耗尽后降级到 BeautifulSoup（HTML）或 pypdf（PDF）。
+Jina Reader API 免费 tier 有请求限额。命中限额时工具会自动等待 30 秒重试（最多 2 次），重试耗尽后降级到 BeautifulSoup（HTML）或 DocConverter + pymupdf（PDF）。
 
 **提升限额：**
 

@@ -193,9 +193,10 @@ class Artifact(Base):
         String(64), ForeignKey("artifact_sessions.id", ondelete="CASCADE"), primary_key=True
     )
 
-    content_type: Mapped[str] = mapped_column(String(32))  # markdown/python/etc
+    content_type: Mapped[str] = mapped_column(String(64))  # MIME type (text/markdown, text/x-python, etc)
     title: Mapped[str] = mapped_column(String(256))
     content: Mapped[str] = mapped_column(Text, default="")
+    source: Mapped[str] = mapped_column(String(32), default="agent")  # agent / user_upload
 
     # 版本控制
     current_version: Mapped[int] = mapped_column(Integer, default=1)

@@ -383,10 +383,12 @@ artifact-flow/
 │   │   ├── registry.py           # 工具注册和管理
 │   │   ├── xml_parser.py         # XML工具调用解析（CDATA格式）
 │   │   ├── prompt_generator.py   # XML提示词生成
+│   │   ├── utils/                # 工具辅助模块
+│   │   │   └── doc_converter.py  # 文档转换（pandoc/pymupdf，支持导入导出）
 │   │   └── implementations/      # 具体工具实现
 │   │       ├── artifact_ops.py   # Artifact操作工具 (ArtifactManager)
 │   │       ├── web_search.py     # 博查AI搜索
-│   │       ├── web_fetch.py      # Jina Reader API网页抓取(支持PDF，BS4/pypdf降级)
+│   │       ├── web_fetch.py      # Jina Reader API网页抓取(支持PDF，DocConverter+pymupdf降级)
 │   │       └── call_subagent.py  # Subagent调用工具
 │   ├── db/ ✅          # 数据库层 (已完成)
 │   │   ├── database.py           # DatabaseManager：连接池、WAL模式

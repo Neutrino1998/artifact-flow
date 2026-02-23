@@ -617,7 +617,56 @@ Agent 单轮执行完成（可能携带工具调用路由）。
 
 ## Artifact API
 
-**说明：** Artifact 使用 `(session_id, artifact_id)` 复合键标识。`session_id` 与 `conversation_id` 相同。
+**说明：** Artifact 使用 `(session_id, artifact_id)` 复合键标识。`session_id` 与 `conversation_id` 相同。`content_type` 使用 MIME type（如 `text/markdown`, `text/x-python`）。
+
+### 上传文件（新建对话）
+
+```
+POST /artifacts/upload
+```
+
+上传文件并自动创建对话。用于用户在无对话状态下上传文件。
+
+**请求：** `multipart/form-data`
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `file` | file | 上传的文件 |
+
+**响应：**
+
+```json
+{
+  "id": "report.docx",
+  "session_id": "conv-550e8400e29b41d4a716446655440000",
+  "content_type": "text/markdown",
+  "title": "report",
+  "current_version": 1,
+  "source": "user_upload",
+  "original_filename": "report.docx",
+  "created_at": "2024-01-15T10:30:00Z"
+}
+```
+
+---
+
+### 上传文件（已有对话）
+
+```
+POST /artifacts/{session_id}/upload
+```
+
+上传文件到已有对话中，创建对应 artifact。
+
+**请求：** `multipart/form-data`
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `file` | file | 上传的文件 |
+
+**响应：** 同上。
+
+---
 
 ### 获取 Artifact 列表
 
@@ -639,9 +688,10 @@ GET /artifacts/{session_id}
   "artifacts": [
     {
       "id": "task_plan",
-      "content_type": "markdown",
+      "content_type": "text/markdown",
       "title": "任务计划",
       "current_version": 3,
+      "source": "agent",
       "created_at": "2024-01-15T10:30:00Z",
       "updated_at": "2024-01-15T11:00:00Z"
     }
@@ -663,14 +713,31 @@ GET /artifacts/{session_id}/{artifact_id}
 {
   "id": "task_plan",
   "session_id": "conv-550e8400e29b41d4a716446655440000",
-  "content_type": "markdown",
+  "content_type": "text/markdown",
   "title": "任务计划",
   "content": "# 任务计划\n\n## 步骤 1\n...",
   "current_version": 3,
+  "source": "agent",
   "created_at": "2024-01-15T10:30:00Z",
   "updated_at": "2024-01-15T11:00:00Z"
 }
 ```
+
+---
+
+### 导出 Artifact
+
+```
+GET /artifacts/{session_id}/{artifact_id}/export?format=docx
+```
+
+将 `text/markdown` 类型的 artifact 导出为 Word 文档。返回二进制流 + `Content-Disposition` header。
+
+**查询参数：**
+
+| 参数 | 类型 | 说明 |
+|------|------|------|
+| `format` | string | 导出格式，目前仅支持 `docx` |
 
 ---
 
