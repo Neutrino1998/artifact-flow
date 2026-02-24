@@ -541,7 +541,24 @@ class ExecutionController:
                 config
             )
 
-            # 更新conversation response
+            # 检查是否再次中断（resume 过程中可能触发新的权限请求）
+            if result.get("__interrupt__"):
+                interrupts = result["__interrupt__"]
+                interrupt_data = interrupts[0].value
+
+                logger.info(f"⚠️ Resumed execution interrupted again: {interrupt_data['type']}")
+
+                return {
+                    "success": True,
+                    "interrupted": True,
+                    "conversation_id": conversation_id,
+                    "message_id": message_id,
+                    "thread_id": thread_id,
+                    "interrupt_type": interrupt_data["type"],
+                    "interrupt_data": interrupt_data
+                }
+
+            # 正常完成
             response = result.get("graph_response", "")
             await self.conversation_manager.update_response_async(
                 conv_id=conversation_id,
@@ -570,7 +587,7 @@ class ExecutionController:
                 "thread_id": thread_id,
                 "error": str(e)
             }
-    
+
     async def _stream_resume_from_permission(
         self,
         thread_id: str,
@@ -635,29 +652,51 @@ class ExecutionController:
             execution_metrics = final_state.values.get("execution_metrics", {})
             finalize_metrics(execution_metrics)
 
-            response = final_state.values.get("graph_response", final_response or "")
+            # 检查是否再次中断（resume 过程中可能触发新的权限请求）
+            if final_state.interrupts:
+                interrupt_data = final_state.interrupts[0].value
 
-            await self.conversation_manager.update_response_async(
-                conv_id=conversation_id,
-                message_id=message_id,
-                response=response
-            )
+                logger.info(f"⚠️ Resumed execution interrupted again: {interrupt_data['type']}")
 
-            logger.info(f"✅ Streaming resumed execution completed")
-
-            yield {
-                "type": StreamEventType.COMPLETE.value,
-                "timestamp": datetime.now().isoformat(),
-                "data": {
-                    "success": True,
-                    "interrupted": False,
-                    "conversation_id": conversation_id,
-                    "message_id": message_id,
-                    "thread_id": thread_id,
-                    "response": response,
-                    "execution_metrics": execution_metrics
+                yield {
+                    "type": StreamEventType.COMPLETE.value,
+                    "timestamp": datetime.now().isoformat(),
+                    "data": {
+                        "success": True,
+                        "interrupted": True,
+                        "conversation_id": conversation_id,
+                        "message_id": message_id,
+                        "thread_id": thread_id,
+                        "interrupt_type": interrupt_data["type"],
+                        "interrupt_data": interrupt_data,
+                        "execution_metrics": execution_metrics
+                    }
                 }
-            }
+
+            else:
+                response = final_state.values.get("graph_response", final_response or "")
+
+                await self.conversation_manager.update_response_async(
+                    conv_id=conversation_id,
+                    message_id=message_id,
+                    response=response
+                )
+
+                logger.info(f"✅ Streaming resumed execution completed")
+
+                yield {
+                    "type": StreamEventType.COMPLETE.value,
+                    "timestamp": datetime.now().isoformat(),
+                    "data": {
+                        "success": True,
+                        "interrupted": False,
+                        "conversation_id": conversation_id,
+                        "message_id": message_id,
+                        "thread_id": thread_id,
+                        "response": response,
+                        "execution_metrics": execution_metrics
+                    }
+                }
 
         except Exception as e:
             logger.exception(f"Error in streaming resume execution: {e}")
