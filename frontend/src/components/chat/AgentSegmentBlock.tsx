@@ -43,9 +43,10 @@ interface AgentSegmentBlockProps {
   segment: ExecutionSegment;
   isActive: boolean;       // true = currently executing segment (last + isStreaming)
   defaultExpanded: boolean;
+  stepNumber?: number;
 }
 
-function AgentSegmentBlock({ segment, isActive, defaultExpanded }: AgentSegmentBlockProps) {
+function AgentSegmentBlock({ segment, isActive, defaultExpanded, stepNumber }: AgentSegmentBlockProps) {
   const [expanded, setExpanded] = useState(defaultExpanded);
 
   const isExpanded = isActive || expanded;
@@ -124,6 +125,12 @@ function AgentSegmentBlock({ segment, isActive, defaultExpanded }: AgentSegmentB
           )}
           {segment.agent}
         </span>
+
+        {stepNumber != null && (
+          <span className="ml-auto text-text-tertiary dark:text-text-tertiary-dark font-mono">
+            #{stepNumber}
+          </span>
+        )}
       </button>
 
       {/* Body — always shown when active, togglable when collapsed */}

@@ -2,6 +2,7 @@
 
 import { useStreamStore } from '@/stores/streamStore';
 import AgentSegmentBlock from './AgentSegmentBlock';
+import ProcessingFlow from './ProcessingFlow';
 
 export default function StreamingMessage() {
   const segments = useStreamStore((s) => s.segments);
@@ -10,15 +11,16 @@ export default function StreamingMessage() {
   if (segments.length === 0) return null;
 
   return (
-    <div className="space-y-3">
+    <ProcessingFlow segments={segments} isActive={isStreaming} defaultExpanded={true}>
       {segments.map((seg, idx) => (
         <AgentSegmentBlock
           key={seg.id}
           segment={seg}
           isActive={isStreaming && idx === segments.length - 1}
           defaultExpanded={idx === segments.length - 1}
+          stepNumber={idx + 1}
         />
       ))}
-    </div>
+    </ProcessingFlow>
   );
 }
