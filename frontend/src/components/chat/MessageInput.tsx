@@ -15,6 +15,7 @@ export default function MessageInput() {
   const [dragOver, setDragOver] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const isComposingRef = useRef(false);
   const { sendMessage, disconnect, isNewConversation } = useChat();
   const isStreaming = useStreamStore((s) => s.isStreaming);
   const toggleArtifactPanel = useUIStore((s) => s.toggleArtifactPanel);
@@ -45,9 +46,21 @@ export default function MessageInput() {
     disconnect();
   }, [disconnect]);
 
+  const handleCompositionStart = useCallback(() => {
+    isComposingRef.current = true;
+  }, []);
+
+  const handleCompositionEnd = useCallback(() => {
+    // Chrome fires compositionend BEFORE keydown, so delay the reset
+    // to ensure the Enter keydown that confirms composition is still blocked
+    requestAnimationFrame(() => {
+      isComposingRef.current = false;
+    });
+  }, []);
+
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
-      if (e.key === 'Enter' && !e.shiftKey) {
+      if (e.key === 'Enter' && !e.shiftKey && !isComposingRef.current) {
         e.preventDefault();
         handleSend();
       }
@@ -164,6 +177,8 @@ export default function MessageInput() {
             value={content}
             onChange={(e) => setContent(e.target.value)}
             onKeyDown={handleKeyDown}
+            onCompositionStart={handleCompositionStart}
+            onCompositionEnd={handleCompositionEnd}
             placeholder={
               isStreaming
                 ? '等待回复中...'
