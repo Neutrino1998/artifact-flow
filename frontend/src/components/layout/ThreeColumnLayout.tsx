@@ -104,7 +104,7 @@ export default function ThreeColumnLayout({
             className="fixed inset-0 z-40 bg-black/40"
             onClick={() => setMobileMenuOpen(false)}
           />
-          <div className="fixed inset-y-0 left-0 z-40 w-64 bg-panel dark:bg-panel-dark border-r border-border dark:border-border-dark">
+          <div className="fixed inset-y-0 left-0 z-40 w-64 bg-panel dark:bg-panel-dark shadow-sidebar">
             {sidebar}
           </div>
         </>
@@ -113,7 +113,7 @@ export default function ThreeColumnLayout({
       {/* Sidebar — hidden below md, icon-bar when collapsed */}
       {showSidebar && (
         <div
-          className={`flex-shrink-0 transition-[width] duration-150 ease-out overflow-hidden border-r border-border dark:border-border-dark ${
+          className={`flex-shrink-0 transition-[width] duration-150 ease-out overflow-hidden shadow-sidebar relative z-10 ${
             sidebarCollapsed ? 'w-12' : 'w-64'
           }`}
         >

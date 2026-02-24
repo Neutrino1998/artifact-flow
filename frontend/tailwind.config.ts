@@ -67,6 +67,7 @@ const config: Config = {
         hover: '0 1px 2px rgba(0,0,0,0.05)',
         modal: '0 4px 12px rgba(0,0,0,0.08)',
         float: '0 2px 12px rgba(0,0,0,0.08), 0 0 1px rgba(0,0,0,0.05)',
+        sidebar: '2px 0 12px rgba(0,0,0,0.06)',
       },
     },
   },
