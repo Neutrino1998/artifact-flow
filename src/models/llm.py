@@ -41,40 +41,38 @@ MODEL_CONFIGS = {
         "description": "OpenAI GPT-4o Mini",
     },
 
-    # Qwen (通义千问) - 通过 dashscope
-    "qwen-turbo": {
-        "model": "dashscope/qwen-turbo",
-        "description": "Qwen Turbo (快速)",
+    # Qwen3.5 系列（混合思考模型，通过 enable_thinking 控制）
+    # 闭源
+    "qwen3.5-plus": {
+        "model": "dashscope/qwen3.5-plus",
+        "extra_params": {"enable_thinking": True},
+        "description": "Qwen3.5 Plus（思考模式）",
     },
-    "qwen-plus": {
-        "model": "dashscope/qwen-plus",
-        "description": "Qwen Plus",
+    "qwen3.5-plus-no-thinking": {
+        "model": "dashscope/qwen3.5-plus",
+        "extra_params": {"enable_thinking": False},
+        "description": "Qwen3.5 Plus（非思考模式）",
     },
-    "qwen-max": {
-        "model": "dashscope/qwen-max",
-        "description": "Qwen Max",
+    "qwen3.5-flash": {
+        "model": "dashscope/qwen3.5-flash",
+        "extra_params": {"enable_thinking": True},
+        "description": "Qwen3.5 Flash（思考模式）",
     },
-
-    # Qwen3 系列
-    "qwen3-30b-thinking": {
-        "model": "dashscope/qwen3-30b-a3b-thinking-2507",
-        "support_reasoning": True,
-        "auto_reasoning": True,  # 模型本身自带推理
-        "description": "Qwen3-30B 思考模型",
+    "qwen3.5-flash-no-thinking": {
+        "model": "dashscope/qwen3.5-flash",
+        "extra_params": {"enable_thinking": False},
+        "description": "Qwen3.5 Flash（非思考模式）",
     },
-    "qwen3-30b-instruct": {
-        "model": "dashscope/qwen3-30b-a3b-instruct-2507",
-        "description": "Qwen3-30B 指令模型",
+    # 开源
+    "qwen3.5-35b-a3b": {
+        "model": "dashscope/qwen3.5-35b-a3b",
+        "extra_params": {"enable_thinking": True},
+        "description": "Qwen3.5 35B-A3B（思考模式）",
     },
-    "qwen3-next-80b-thinking": {
-        "model": "dashscope/qwen3-next-80b-a3b-thinking",
-        "support_reasoning": True,
-        "auto_reasoning": True,  # 模型本身自带推理
-        "description": "Qwen3-Next-80B 思考模型",
-    },
-    "qwen3-next-80b-instruct": {
-        "model": "dashscope/qwen3-next-80b-a3b-instruct",
-        "description": "Qwen3-Next-80B 指令模型",
+    "qwen3.5-35b-a3b-no-thinking": {
+        "model": "dashscope/qwen3.5-35b-a3b",
+        "extra_params": {"enable_thinking": False},
+        "description": "Qwen3.5 35B-A3B（非思考模式）",
     },
 
     # DeepSeek
@@ -84,8 +82,6 @@ MODEL_CONFIGS = {
     },
     "deepseek-reasoner": {
         "model": "deepseek/deepseek-reasoner",
-        "support_reasoning": True,
-        "auto_reasoning": True,  # 模型本身自带推理，不需要 thinking 参数
         "description": "DeepSeek Reasoner (R1)",
     },
 }
@@ -152,14 +148,12 @@ class UnifiedLLM:
         if model in MODEL_CONFIGS:
             config = MODEL_CONFIGS[model]
             self.model_name = config["model"]
-            self.support_reasoning = config.get("support_reasoning", False)
-            # auto_reasoning: 模型本身就是推理模型，不需要额外的 thinking 参数
-            self.auto_reasoning = config.get("auto_reasoning", False)
+            # 从预定义配置中合并 extra_params（如 enable_thinking）
+            config_extra = config.get("extra_params", {})
+            kwargs = {**config_extra, **kwargs}  # 调用方的 kwargs 优先
         else:
             # 直接使用传入的模型名（LiteLLM 格式或自定义）
             self.model_name = model
-            self.support_reasoning = kwargs.pop("support_reasoning", False)
-            self.auto_reasoning = kwargs.pop("auto_reasoning", False)
 
         self.temperature = temperature
         self.max_tokens = max_tokens
@@ -200,11 +194,6 @@ class UnifiedLLM:
         # 自定义 API key
         if self.api_key:
             params["api_key"] = self.api_key
-
-        # 对支持推理的模型启用 thinking 模式
-        # 但跳过 auto_reasoning 的模型（如 DeepSeek reasoner 本身就是推理模型）
-        if self.support_reasoning and not self.auto_reasoning:
-            params["thinking"] = {"type": "enabled"}
 
         return params
 
@@ -386,8 +375,8 @@ def create_llm(
 
     Args:
         model: 模型名称，支持三种格式：
-            - 预定义名称: "deepseek-chat", "qwen-plus" 等
-            - LiteLLM 格式: "deepseek/deepseek-chat", "dashscope/qwen-turbo" 等
+            - 预定义名称: "qwen3.5-plus", "deepseek-chat" 等
+            - LiteLLM 格式: "deepseek/deepseek-chat", "dashscope/qwen3.5-plus" 等
             - 自定义模型: 配合 base_url 使用
         temperature: 温度参数
         max_tokens: 最大 token 数
@@ -439,10 +428,9 @@ def get_model_info(model: str) -> Dict[str, Any]:
         config = MODEL_CONFIGS[model]
         return {
             "model_id": config["model"],
-            "support_reasoning": config.get("support_reasoning", False),
             "description": config.get("description", ""),
         }
-    return {"model_id": model, "support_reasoning": False, "description": "Custom model"}
+    return {"model_id": model, "description": "Custom model"}
 
 
 # ========================================

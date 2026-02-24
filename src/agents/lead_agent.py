@@ -45,7 +45,7 @@ class LeadAgent(BaseAgent):
                     "read_artifact", 
                     "call_subagent"
                 ],
-                model="qwen3-next-80b-thinking",
+                model="qwen3.5-plus",
                 temperature=0.7,
                 max_tool_rounds=100,  # Lead需要更多轮次协调
                 streaming=True

@@ -43,7 +43,7 @@ class CrawlAgent(BaseAgent):
                     "IMPORTANT: Instructions must include a specific URL to crawl"
                 ],
                 required_tools=["web_fetch"],
-                model="qwen3-next-80b-instruct",  # 可以换成更便宜的模型
+                model="qwen3.5-flash-no-thinking",
                 temperature=0.3,  # 更低温度for精确提取
                 max_tool_rounds=2,  # 通常1-2轮即可
                 streaming=True

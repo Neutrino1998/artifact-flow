@@ -28,13 +28,13 @@ from models.llm import create_llm, get_available_models
 # 基础测试模型（用于验证 token usage）
 BASIC_MODELS = [
     "deepseek-chat",
-    "qwen-plus",
+    "qwen3.5-flash-no-thinking",
 ]
 
 # 推理模型（用于验证 reasoning content）
 REASONING_MODELS = [
     "deepseek-reasoner",
-    "qwen3-30b-thinking",  # 可选，取消注释以测试
+    "qwen3.5-plus",
 ]
 
 # 测试问题
