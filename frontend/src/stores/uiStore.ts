@@ -1,5 +1,11 @@
 import { create } from 'zustand';
 
+function applyTheme(theme: 'light' | 'dark') {
+  if (typeof document !== 'undefined') {
+    document.documentElement.classList.toggle('dark', theme === 'dark');
+  }
+}
+
 interface UIState {
   sidebarCollapsed: boolean;
   artifactPanelVisible: boolean;
@@ -27,17 +33,14 @@ export const useUIStore = create<UIState>((set) => ({
   setArtifactPanelVisible: (visible) => set({ artifactPanelVisible: visible }),
 
   setTheme: (theme) => {
-    if (typeof document !== 'undefined') {
-      document.documentElement.classList.toggle('dark', theme === 'dark');
-    }
+    applyTheme(theme);
     set({ theme });
   },
   toggleTheme: () =>
     set((s) => {
       const next = s.theme === 'light' ? 'dark' : 'light';
-      if (typeof document !== 'undefined') {
-        document.documentElement.classList.toggle('dark', next === 'dark');
-      }
+      localStorage.setItem('theme', next);
+      applyTheme(next);
       return { theme: next };
     }),
 }));
