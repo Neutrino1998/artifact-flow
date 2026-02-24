@@ -1602,7 +1602,7 @@
 </code></pre></div>
 <hr />
 <h3 id="web_fetch-抓取限额-jina-429">web_fetch 抓取限额 (Jina 429)</h3>
-<p>Jina Reader API 免费 tier 有请求限额。命中限额时工具会自动等待 30 秒重试（最多 2 次），重试耗尽后降级到 BeautifulSoup（HTML）或 pypdf（PDF）。</p>
+<p>Jina Reader API 免费 tier 有请求限额。命中限额时工具会自动等待 30 秒重试（最多 2 次），重试耗尽后降级到 BeautifulSoup（HTML）或 DocConverter + pymupdf（PDF）。</p>
 <p><strong>提升限额：</strong></p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="c1"># 在 .env 中配置 Jina API Key（免费注册即可获取）</span>
 <a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="nv">JINA_API_KEY</span><span class="o">=</span>jina_xxx

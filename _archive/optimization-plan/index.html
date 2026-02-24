@@ -1201,10 +1201,22 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#71-后端上传-api" class="md-nav__link">
+  <a href="#phase-7a-文档上传--content_type-统一--前端渲染修正" class="md-nav__link">
     <span class="md-ellipsis">
       
-        7.1 后端上传 API
+        Phase 7A: 文档上传 + content_type 统一 + 前端渲染修正
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Phase 7A: 文档上传 + content_type 统一 + 前端渲染修正">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#7a1-content_type-统一为-mime-type" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7A.1 content_type 统一为 MIME type
       
     </span>
   </a>
@@ -1212,13 +1224,112 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#72-前端上传-ui" class="md-nav__link">
+  <a href="#7a2-文档转换层" class="md-nav__link">
     <span class="md-ellipsis">
       
-        7.2 前端上传 UI
+        7A.2 文档转换层
       
     </span>
   </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#7a3-后端上传-api" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7A.3 后端上传 API
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#7a4-前端渲染策略修正" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7A.4 前端渲染策略修正
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#7a5-前端上传-ui" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7A.5 前端上传 UI
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#7a6-prompt-设计-review" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7A.6 Prompt 设计 Review
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#phase-7b-结构化数据--原始文件存储建议-phase-56-之后" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phase 7B: 结构化数据 + 原始文件存储（建议 Phase 5/6 之后）
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Phase 7B: 结构化数据 + 原始文件存储（建议 Phase 5/6 之后）">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#7b1-结构化数据上传" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7B.1 结构化数据上传
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#7b2-原始文件存储待定" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7B.2 原始文件存储（待定）
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#7b3-代码沙盒联动前置调研" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7B.3 代码沙盒联动（前置调研）
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
         
@@ -1255,6 +1366,45 @@
     <span class="md-ellipsis">
       
         8.2 前端编辑 UI
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#phase-9-skill-系统前置调研--建模" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phase 9: Skill 系统（前置调研 + 建模）
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Phase 9: Skill 系统（前置调研 + 建模）">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#91-调研业界-skill-设计模式" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9.1 调研：业界 Skill 设计模式
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#92-数据建模调研后" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9.2 数据建模（调研后）
       
     </span>
   </a>
@@ -1534,15 +1684,8 @@
 - <code>src/db/database.py</code> — 提取方言检测能力（L86-88 <code>_is_sqlite()</code>），暴露给 Repository 层
 - <code>src/db/migrations/</code> — Alembic 初始化</p>
 <p><strong>改动</strong>:</p>
-<p><strong>5.1.1 RETURNING 子句可移植适配</strong></p>
-<p><code>artifact_repo.py:324</code> 的乐观锁更新使用了 <code>.returning()</code>，MySQL 不支持。设计可移植方案：</p>
-<ul>
-<li><code>BaseRepository</code> 新增 <code>_supports_returning() -&gt; bool</code> 方法，基于引擎方言判断</li>
-<li><code>ArtifactRepository.update_artifact_content()</code> 改为：</li>
-<li>支持 RETURNING（PostgreSQL, SQLite 3.35+）→ 原子 <code>UPDATE...RETURNING</code>（当前行为）</li>
-<li>不支持 RETURNING（MySQL）→ fallback 为 <code>UPDATE</code> + <code>SELECT</code> 两步操作</li>
-<li>两条路径在功能上等价，仅性能差异（一次 vs 两次 DB 调用）</li>
-</ul>
+<p><strong>5.1.1 RETURNING 子句确认</strong></p>
+<p><code>artifact_repo.py:324</code> 的乐观锁更新使用了 <code>.returning()</code>。SQLite 3.35+ 和 PostgreSQL 均原生支持，无需适配。MySQL 不支持 RETURNING，但当前不在目标数据库范围内，等有实际需求时再加适配层。</p>
 <p><strong>5.1.2 Alembic 迁移框架</strong></p>
 <p>替换手写 SQL 迁移（<code>001_initial_schema.py</code> 使用原生 SQL 含 <code>AUTOINCREMENT</code>、<code>INSERT OR IGNORE</code> 等 SQLite 方言）：</p>
 <ul>
@@ -1559,10 +1702,8 @@
 - ✅ 无 SQLite 特有函数（ROWID、typeof 等）
 - ✅ JSON 类型使用 SQLAlchemy <code>JSON</code>（PostgreSQL 自动映射 JSONB）
 - ✅ 所有查询通过 ORM 构造，无字符串拼接 SQL
-- ⚠️ RETURNING 子句（artifact_repo.py L324）→ 5.1.1 已处理</p>
+- ✅ RETURNING 子句（artifact_repo.py L324）→ SQLite/PostgreSQL 均支持，无需适配</p>
 <p><strong>退出标准</strong>:
-- RETURNING 适配层有单元测试覆盖两条路径（RETURNING / fallback）
-  - 注意：CI 仅 SQLite + PostgreSQL，两者都支持 RETURNING，fallback 路径不会被自然触发。需增加<strong>强制 fallback 模式</strong>的单测：mock <code>_supports_returning()</code> 返回 False，验证 UPDATE + SELECT 路径的正确性
 - Alembic 迁移可在 SQLite 上正常执行
 - 现有回归测试全部通过</p>
 <hr />
@@ -1832,8 +1973,7 @@
 <h3 id="62-schema-迁移与类型适配">6.2 Schema 迁移与类型适配</h3>
 <p><strong>涉及文件</strong>:
 - <code>src/db/models.py</code> — 类型审查
-- <code>src/db/migrations/</code> — Alembic 迁移脚本（5.1.2 已初始化）
-- <code>scripts/</code> — 数据迁移脚本</p>
+- <code>src/db/migrations/</code> — Alembic 迁移脚本（5.1.2 已初始化）</p>
 <p><strong>改动</strong>:</p>
 <p><strong>6.2.1 ORM 模型类型审查</strong></p>
 <p>当前模型已基本兼容 PostgreSQL，需确认的点：
@@ -1842,12 +1982,7 @@
 - <code>String(N)</code> → <code>VARCHAR(N)</code>（兼容 ✅）
 - <code>Text</code> → <code>TEXT</code>（兼容 ✅）
 - <code>Integer</code> + <code>autoincrement=True</code>（<code>artifact_versions.id</code>）→ PostgreSQL <code>SERIAL</code>（SQLAlchemy 自动处理 ✅）</p>
-<p><strong>6.2.2 数据迁移工具</strong></p>
-<p>编写 <code>scripts/migrate_sqlite_to_pg.py</code>：
-- 从 SQLite 按 FK 依赖顺序读取所有表数据
-- 写入 PostgreSQL（批量 INSERT）
-- 校验每张表的记录数一致性
-- 支持 <code>--dry-run</code> 模式（只读不写，输出迁移计划）</p>
+<p>~~<strong>6.2.2 数据迁移工具</strong> — 不需要。系统处于开发阶段，切换 PostgreSQL 时直接用 Alembic 建表，不迁移旧 SQLite 数据。~~</p>
 <h3 id="63-性能优化--复合索引">6.3 性能优化 — 复合索引</h3>
 <p><strong>涉及文件</strong>:
 - <code>src/db/models.py</code> — 新增复合索引定义
@@ -1873,7 +2008,6 @@
 - PostgreSQL 上所有回归测试通过
 - PostgreSQL 并发写入测试通过（模拟多请求同时写入 conversation/message/artifact）
 - SQLite 模式仍可正常工作（开发/测试场景）
-- 数据迁移脚本执行成功 + 记录数校验通过
 - 复合索引在 EXPLAIN 中被正确使用</p>
 <hr />
 <h2 id="测试策略贯穿-phase-5--phase-6">测试策略（贯穿 Phase 5 / Phase 6）</h2>
@@ -1902,34 +2036,227 @@
 - <code>test_redis_checkpointer.py</code> — checkpoint CRUD / TTL 过期 / interrupt-resume
 - <code>test_redis_stream_manager.py</code> — 事件推送/消费/断线重连/TTL 清理
 - <code>test_redis_fault.py</code> — Redis 断连后 503 响应、Redis 恢复后自动重连
-- <code>test_returning_adapter.py</code> — RETURNING 适配层测试：SQLite / PostgreSQL 行为一致性 + <strong>mock <code>_supports_returning()=False</code> 强制 fallback 路径</strong>（CI 的两种数据库都支持 RETURNING，不 mock 则 fallback 永远不被执行）</p>
-<p><strong>并发测试增强</strong>:
+<strong>并发测试增强</strong>:
 - 多请求并发写入 conversation/message/artifact（验证 PostgreSQL MVCC 优于 SQLite 单写者）
 - 多 worker stream push/consume（验证 Redis Streams 跨进程投递）</p>
 <hr />
 <h2 id="phase-7-文件上传--artifact">Phase 7: 文件上传 → Artifact</h2>
-<p><strong>目标</strong>: 支持用户上传文档，解析为 Artifact 供 Agent 操作。</p>
-<h3 id="71-后端上传-api">7.1 后端上传 API</h3>
+<p><strong>目标</strong>: 支持用户上传文档，解析为 Artifact 供 Agent 操作。拆分为两个子阶段：</p>
+<ul>
+<li><strong>7A</strong>（可在 Phase 5/6 之前执行）：文档类上传（docx / pdf → markdown artifact，txt / md 保持原格式）+ content_type 统一 + 前端渲染策略修正</li>
+<li><strong>7B</strong>（建议在 Phase 5/6 之后执行）：结构化数据（csv / json）+ 原始文件存储 + 代码沙盒联动</li>
+</ul>
+<hr />
+<h3 id="phase-7a-文档上传--content_type-统一--前端渲染修正">Phase 7A: 文档上传 + content_type 统一 + 前端渲染修正</h3>
+<p><strong>依赖</strong>: Phase 4（认证）✅ 已完成。不依赖 Phase 5/6，可提前执行。</p>
+<h4 id="7a1-content_type-统一为-mime-type">7A.1 content_type 统一为 MIME type</h4>
+<p><strong>背景</strong>: 当前后端 agent 创建 artifact 时使用简写值（<code>"markdown"</code>, <code>"python"</code> 等），前端下载时 <code>getFileExtension()</code> 查的是 MIME type（<code>"text/markdown"</code>, <code>"text/plain"</code> 等），两边不一致导致下载扩展名 fallback 到 <code>.txt</code>。</p>
+<p><strong>涉及文件</strong>:
+- <code>src/tools/implementations/artifact_ops.py</code> — <code>CreateArtifactTool.get_parameters()</code> 的 <code>content_type</code> description 和 default
+- <code>src/agents/lead_agent.py</code> — system prompt 中的 artifact type 说明
+- <code>frontend/src/components/artifact/ArtifactToolbar.tsx</code> — <code>getFileExtension()</code> 映射表
+- <code>frontend/src/components/artifact/ArtifactTabs.tsx</code> — tab 可见性逻辑（见 7A.4）
+- <code>src/db/models.py</code> — <code>Artifact.content_type</code> 字段（<code>String(32)</code> 足够存 MIME type，无需改表）</p>
+<p><strong>改动</strong>:
+- 后端统一使用 MIME type：<code>text/markdown</code>, <code>text/plain</code>, <code>text/x-python</code>, <code>application/json</code>, <code>text/html</code>, <code>text/javascript</code>, <code>text/yaml</code> 等
+- <code>CreateArtifactTool</code> 的 default 改为 <code>"text/markdown"</code>，description 更新
+- Lead Agent system prompt 更新 artifact type 说明为 MIME type
+- 前端 <code>getFileExtension()</code> 保持 MIME type 为 key（已正确），无需改动
+- 测试用例中的 <code>content_type</code> 值同步更新
+- 不需要兼容旧数据：系统处于开发阶段，旧数据可丢弃</p>
+<h4 id="7a2-文档转换层">7A.2 文档转换层</h4>
+<p><strong>目标</strong>: 统一的文档转换 pipeline（双向：导入 + 导出），同时替换 <code>web_fetch.py</code> 中的 <code>pypdf</code> PDF 解析。</p>
+<p><strong>涉及文件</strong>:
+- 新增 <code>src/tools/utils/doc_converter.py</code> — 文档转换模块
+- <code>src/tools/implementations/web_fetch.py</code> — <code>_fetch_pdf()</code> 改用新转换模块
+- <code>src/api/routers/artifacts.py</code> — 新增导出端点（见下方导出部分）
+- <code>requirements.txt</code> — 新增依赖</p>
+<p><strong>导入转换策略</strong>（文件上传 → artifact）:</p>
+<table>
+<thead>
+<tr>
+<th>格式</th>
+<th>方案</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>.txt</code></td>
+<td>直接读取</td>
+<td>UTF-8 解码，保留原文</td>
+</tr>
+<tr>
+<td><code>.md</code></td>
+<td>直接读取</td>
+<td>已是 markdown，保留原文</td>
+</tr>
+<tr>
+<td><code>.docx</code></td>
+<td>pandoc</td>
+<td><code>pandoc -f docx -t markdown</code></td>
+</tr>
+<tr>
+<td><code>.pdf</code></td>
+<td><code>pymupdf</code>（PyMuPDF）</td>
+<td>文本提取 + 简单 markdown 格式化</td>
+</tr>
+</tbody>
+</table>
+<p><strong>导出转换策略</strong>（artifact → 文件下载）:</p>
+<table>
+<thead>
+<tr>
+<th>操作</th>
+<th>实现方式</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>下载原格式（<code>.md</code>, <code>.py</code>, <code>.txt</code> 等）</td>
+<td>前端直出 <code>Blob</code></td>
+<td>纯文本，不经后端，零延迟（保持现有逻辑）</td>
+</tr>
+<tr>
+<td>导出为 Word（<code>.docx</code>）</td>
+<td>后端 pandoc <code>markdown → docx</code></td>
+<td>仅 <code>text/markdown</code> 类型可用；pandoc 不可用时返回 501</td>
+</tr>
+</tbody>
+</table>
+<p>导出端点：<code>GET /api/v1/artifacts/{session_id}/{artifact_id}/export?format=docx</code>
+- 读取 artifact content → <code>pandoc -f markdown -t docx</code> → 返回 <code>application/vnd.openxmlformats-officedocument.wordprocessingml.document</code> 二进制流
+- Response header: <code>Content-Disposition: attachment; filename="{title}.docx"</code>
+- pandoc 不可用时返回 501 Not Implemented</p>
+<p>前端 <code>ArtifactToolbar.tsx</code> 改动：
+- 下载按钮改为带下拉的 split button（或 hover/click 展开菜单）
+- 菜单项："下载"（原格式直出）+ "导出为 Word"（仅 <code>text/markdown</code> 时显示）
+- 无需预先探测后端能力：前端直接调导出端点，成功则下载，501 则 toast 提示"当前服务端不支持导出 Word"</p>
+<p><strong>实现细节</strong>:
+- <code>DocConverter</code> 类，提供：
+  - <code>async def convert(file_bytes: bytes, filename: str) -&gt; ConvertResult</code> — 导入
+  - <code>async def export_docx(markdown_content: str) -&gt; bytes</code> — 导出
+- <code>ConvertResult</code>: <code>dataclass(content: str, content_type: str, metadata: dict)</code> — metadata 含 <code>page_count</code>、<code>word_count</code>、<code>original_filename</code>、<code>converter_used</code> 等
+- pandoc 和 pymupdf 均为必需依赖，缺失时启动报错（fail fast），不做 fallback
+- PDF 转换统一：<code>web_fetch.py</code> 的 <code>_fetch_pdf()</code> 改为调用 <code>DocConverter</code>，消除重复代码，同时移除 <code>web_fetch.py</code> 中的 <code>pypdf</code> 条件导入逻辑
+- 文件大小限制：上传端点限制 20MB（可配置），PDF 页数限制 200 页
+- 编码检测：非 UTF-8 文件尝试 <code>chardet</code> / <code>charset-normalizer</code> 自动检测</p>
+<p><strong>新增依赖</strong>:
+- <code>python-multipart&gt;=0.0.9</code> — FastAPI <code>UploadFile</code> 必需（当前 <code>requirements.txt</code> 未包含）
+- <code>pymupdf&gt;=1.24.0</code> — PDF 解析（替换 <code>pypdf</code>，可从 <code>requirements.txt</code> 移除 <code>pypdf</code>）
+- <code>charset-normalizer&gt;=3.0.0</code> — 文本编码检测（如未通过其他依赖已引入）
+- 系统依赖：<code>pandoc</code> — docx 转换和 markdown 导出为 Word 均依赖</p>
+<p><strong>Docker / 部署注意</strong>:
+- Dockerfile 需新增 <code>pandoc</code> 系统包（<code>apt-get install -y pandoc</code>）
+- pandoc 和 pymupdf 均为必需依赖，缺失时应用启动报错或上传/导出端点返回明确错误，不做静默降级</p>
+<h4 id="7a3-后端上传-api">7A.3 后端上传 API</h4>
 <p><strong>涉及文件</strong>:
 - <code>src/api/routers/artifacts.py</code> — 新增 <code>POST /api/v1/artifacts/{session_id}/upload</code>
-- <code>src/api/schemas/</code> — 新增上传请求/响应 schema
+- <code>src/api/schemas/artifact.py</code> — 新增 <code>UploadResponse</code> schema
 - <code>src/tools/implementations/artifact_ops.py</code> — 新增 <code>create_from_upload()</code> 方法</p>
+<p><strong>路由注册顺序注意</strong>: <code>POST /{session_id}/upload</code> 与现有 <code>GET /{session_id}/{artifact_id}</code> HTTP method 不同，不会冲突。但 <code>GET /{session_id}/{artifact_id}/export</code> 需确保在 <code>/{session_id}/{artifact_id}</code> 之后注册（FastAPI 按前缀匹配，更具体的路径不受影响，但保持显式顺序为佳）。</p>
 <p><strong>改动</strong>:
 - 新增上传端点，接受 <code>UploadFile</code>（multipart/form-data）
-- 支持文件类型：<code>.txt</code>, <code>.md</code>, <code>.pdf</code>, <code>.csv</code>, <code>.json</code> 等
-- 文件解析 pipeline：检测类型 → 提取文本 → 创建 Artifact（<code>metadata.source = "user_upload"</code>）
-- 文件大小限制 + 类型白名单校验
-- PDF 解析可复用 <code>web_fetch</code> 中的 PDF 处理逻辑（如有）</p>
-<h3 id="72-前端上传-ui">7.2 前端上传 UI</h3>
+- 7A 阶段白名单：<code>.txt</code>, <code>.md</code>, <code>.docx</code>, <code>.pdf</code>（csv/json 留给 7B）
+- 处理流程：校验文件类型/大小 → <code>DocConverter.convert()</code> → <code>ArtifactManager.create_from_upload()</code>
+- Artifact 创建参数：
+  - <code>content_type</code>: 统一为 <code>"text/markdown"</code>（docx/pdf 转换后的结果）或 <code>"text/plain"</code>（txt 保持原样时）
+  - <code>source</code>: <code>"user_upload"</code>（见下方 source 字段说明）
+  - <code>update_type</code>: <code>"create"</code>（保持动作语义，上传即创建）
+  - <code>metadata</code>: <code>{"original_filename": "xxx.pdf", "original_type": "application/pdf", "converter_used": "pymupdf", "page_count": 42}</code>
+- 错误处理：转换失败返回 422（Unprocessable Entity）+ 具体错误信息</p>
+<p><strong>新增 <code>source</code> 字段</strong>: 仅在 <code>Artifact</code> 模型上新增 <code>source</code> 列（<code>String(32)</code>, default <code>"agent"</code>），表示当前内容的最近编辑来源，<strong>可变更新</strong>：
+- <code>"agent"</code> — Agent 创建或最近一次由 Agent 修改（默认值）
+- <code>"user_upload"</code> — 用户上传文件且 Agent 尚未修改过
+- 更新规则：Agent 修改 artifact 时覆盖为 <code>"agent"</code>，用户上传时写入 <code>"user_upload"</code>。即 <code>source</code> 始终反映"最近一次重大编辑者"
+- <code>ArtifactVersion</code> 不加 <code>source</code> 列，版本级别的动作类型由已有 <code>update_type</code>（<code>create / update / update_fuzzy / rewrite</code>）表达
+- 此变更为轻量 schema 变更（新增一列）。开发阶段直接删库重建：<code>rm data/artifactflow.db &amp;&amp; python run_server.py</code></p>
+<h4 id="7a4-前端渲染策略修正">7A.4 前端渲染策略修正</h4>
+<p><strong>背景</strong>: 当前 <code>ArtifactPanel.tsx</code> 对所有内容都显示 Preview + Source + Diff 三个 tab，Preview 始终按 markdown 渲染。非 markdown 内容（如 Python 代码）被 markdown 引擎错误解析。</p>
 <p><strong>涉及文件</strong>:
-- <code>frontend/src/components/chat/</code> — 已有上传按钮（<code>d122b01</code> commit 提到 "add upload file button"）
-- <code>frontend/src/lib/api.ts</code> — 新增上传 API 调用
-- <code>frontend/src/stores/artifactStore.ts</code> — 上传状态管理</p>
+- <code>frontend/src/components/artifact/ArtifactTabs.tsx</code> — tab 过滤逻辑
+- <code>frontend/src/components/artifact/ArtifactPanel.tsx</code> — 默认 tab 选择
+- <code>frontend/src/stores/artifactStore.ts</code> — <code>viewMode</code> 默认值逻辑</p>
+<p><strong>改动</strong>:</p>
+<p>渲染策略表：</p>
+<table>
+<thead>
+<tr>
+<th>content_type</th>
+<th>可见 Tab</th>
+<th>默认 Tab</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>text/markdown</code></td>
+<td>Preview + Source + Diff</td>
+<td>Preview</td>
+</tr>
+<tr>
+<td>其他所有类型</td>
+<td>Source + Diff</td>
+<td>Source</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li><code>ArtifactTabs.tsx</code>：根据当前 artifact 的 <code>content_type</code> 过滤 tabs 数组，非 <code>text/markdown</code> 时隐藏 Preview tab</li>
+<li><code>ArtifactPanel.tsx</code> / <code>artifactStore.ts</code>：设置 current artifact 时，根据 <code>content_type</code> 自动切换 <code>viewMode</code>（markdown → <code>'preview'</code>，其他 → <code>'source'</code>）</li>
+</ul>
+<h4 id="7a5-前端上传-ui">7A.5 前端上传 UI</h4>
+<p><strong>涉及文件</strong>:
+- <code>frontend/src/components/chat/MessageInput.tsx</code> — 已有上传按钮（当前为 TODO）
+- <code>frontend/src/lib/api.ts</code> — 新增 <code>uploadFile()</code> API 调用
+- <code>frontend/src/stores/artifactStore.ts</code> — 上传状态（<code>uploading: boolean</code>, <code>uploadError: string | null</code>）
+- <code>frontend/src/hooks/useChat.ts</code> 或新增 <code>frontend/src/hooks/useUpload.ts</code> — 上传逻辑封装</p>
+<p><strong>会话时序策略</strong>: 上传 API 依赖 <code>session_id</code>，但新建对话尚无 session（首条消息发送时才创建）。采用<strong>禁用策略</strong>：新对话时上传按钮置灰（tooltip 提示"请先发送消息创建对话"），有 <code>session_id</code> 后启用。拖拽区域同理，无 session 时拖入文件给出提示而非触发上传。避免引入"空会话"的边界情况。</p>
 <p><strong>改动</strong>:
-- 连接已有的上传按钮到实际上传逻辑
-- 上传进度展示（进度条或 spinner）
-- 上传完成后自动刷新 artifact 列表
-- 拖拽上传支持（可选）</p>
+- <strong>按钮上传</strong>: 连接 <code>MessageInput.tsx</code> 已有按钮 → 打开文件选择器（<code>&lt;input type="file" accept=".txt,.md,.docx,.pdf"&gt;</code>）→ 调用上传 API
+- <strong>拖拽上传</strong>: 在 chat 区域（或整个主面板）添加 <code>onDragOver</code> + <code>onDrop</code> 处理
+  - 拖入时显示半透明遮罩 + 提示文字（"拖放文件上传"）
+  - 校验文件类型，不支持的类型给出提示
+- <strong>上传状态</strong>: 上传中显示 spinner / 进度提示，成功后自动刷新 artifact 列表并打开 artifact 面板
+- <strong>错误处理</strong>: 文件过大、类型不支持、转换失败等场景给出用户友好的 toast 提示
+- 按钮上传和拖拽上传共用同一个上传 handler（<code>handleFileUpload(file: File)</code>）
+- <strong>禁用态</strong>: 无 <code>session_id</code> 时上传按钮 <code>disabled</code>，拖拽区域不响应 drop 事件</p>
+<h4 id="7a6-prompt-设计-review">7A.6 Prompt 设计 Review</h4>
+<p><strong>背景</strong>: 7A 引入了用户上传 artifact 的概念，需要让 Agent 理解这些 artifact 的来源和性质。当前 artifact 注入只包含 <code>id</code>, <code>content_type</code>, <code>title</code>, <code>version</code>, <code>updated</code>，没有 <code>source</code> 和 <code>metadata</code> 信息。</p>
+<p><strong>涉及文件</strong>:
+- <code>src/core/context_manager.py</code> — <code>prepare_agent_context()</code> 中 artifact 列表的字段选择
+- <code>src/agents/lead_agent.py</code> — artifact inventory XML 格式化 + 行为指引
+- <code>src/agents/search_agent.py</code> / <code>crawl_agent.py</code> — 子 agent 是否需要感知用户上传的 artifact</p>
+<p><strong>需 Review 的内容</strong>:
+1. <strong>artifact inventory 注入格式</strong>：<code>&lt;artifact&gt;</code> 标签需新增 <code>source</code> 属性，让 Agent 区分 <code>agent</code> 和 <code>user_upload</code> 来源
+2. <strong>用户上传 artifact 的行为指引</strong>：Lead Agent system prompt 需补充指引——用户上传的文档是用户提供的参考资料，不是 Agent 自己之前创建的，应优先阅读理解而非直接覆盖
+3. <strong>metadata 信息是否注入</strong>：上传 artifact 的 <code>original_filename</code>、<code>original_type</code> 等信息是否对 Agent 有价值（例如知道原文件是 PDF 可能影响 Agent 对内容质量的判断）
+4. <strong>子 Agent 可见性</strong>：当前 Search/Crawl Agent 只看到 <code>task_plan</code>，用户上传的参考资料是否也需要对子 Agent 可见（或按需读取）
+5. <strong>task_plan 全文注入策略</strong>：当前 <code>task_plan</code> 总是注入全文，其他 artifact 只注入 200 字预览。用户上传的文档可能很长，需确认预览长度是否合适</p>
+<p><strong>产出</strong>: Review 后输出 prompt 改动方案，在 7A 实现时一并落地。</p>
+<hr />
+<h3 id="phase-7b-结构化数据--原始文件存储建议-phase-56-之后">Phase 7B: 结构化数据 + 原始文件存储（建议 Phase 5/6 之后）</h3>
+<p><strong>依赖</strong>: Phase 7A + Phase 5/6（PostgreSQL 大字段支持 + 可能需要对象存储）</p>
+<p><strong>目标</strong>: 支持 csv / json 等结构化数据上传，保留原始内容供代码沙盒处理，不强制转 markdown。</p>
+<h4 id="7b1-结构化数据上传">7B.1 结构化数据上传</h4>
+<p><strong>涉及文件</strong>:
+- <code>src/api/routers/artifacts.py</code> — 上传白名单扩展
+- <code>src/tools/utils/doc_converter.py</code> — 新增 csv / json 处理
+- <code>frontend/src/components/artifact/</code> — 可能需要表格预览组件</p>
+<p><strong>改动</strong>:
+- 新增支持：<code>.csv</code>, <code>.json</code>（后续可扩展 <code>.xlsx</code> 等）
+- csv / json <strong>不强制转 markdown</strong>：<code>content_type</code> 保持 <code>"text/csv"</code> / <code>"application/json"</code>，<code>content</code> 存原始文本
+- 可选生成 markdown 摘要预览（如 csv 前 20 行转 markdown 表格），存到 <code>metadata.preview_markdown</code>
+- 前端对 <code>text/csv</code> 可后续实现表格渲染组件（不在 7B 范围内，可作为独立增强）</p>
+<h4 id="7b2-原始文件存储待定">7B.2 原始文件存储（待定）</h4>
+<p><strong>说明</strong>: 7A 阶段 docx / pdf 转换后只存 markdown 文本，原始文件不保留。7B 评估是否需要：
+- 原始文件 BLOB 存储（数据库）或对象存储（S3 / MinIO）
+- 原始文件下载功能
+- 取决于是否有"重新转换"或"下载原始文件"的需求</p>
+<h4 id="7b3-代码沙盒联动前置调研">7B.3 代码沙盒联动（前置调研）</h4>
+<p><strong>说明</strong>: Agent 使用 Python 工具处理 csv / json 的能力依赖独立的代码沙盒功能（sandbox execution），不在 Phase 7 范围内。7B 需确保 artifact 数据格式兼容未来沙盒读取：
+- csv artifact 保持原始文本，沙盒可直接 <code>pd.read_csv(StringIO(content))</code>
+- json artifact 保持原始文本，沙盒可直接 <code>json.loads(content)</code></p>
 <hr />
 <h2 id="phase-8-用户直接编辑-artifact">Phase 8: 用户直接编辑 Artifact</h2>
 <p><strong>目标</strong>: 允许用户通过前端直接编辑 Artifact 内容，与 Agent 协作修订。</p>
@@ -1942,7 +2269,7 @@
 <p><strong>改动</strong>:
 - <code>PUT /api/v1/artifacts/{session_id}/{artifact_id}</code> — 全量更新内容
 - 请求体包含 <code>content</code> + <code>lock_version</code>，乐观锁防止并发冲突
-- 更新时创建新 version 记录（<code>update_type = "user_edit"</code>）
+- 更新时创建新 version 记录（<code>update_type = "rewrite"</code> 或 <code>"update"</code>，取决于编辑范围）
 - 返回新的 <code>lock_version</code> 供前端下次提交使用</p>
 <h3 id="82-前端编辑-ui">8.2 前端编辑 UI</h3>
 <p><strong>涉及文件</strong>:
@@ -1955,24 +2282,84 @@
 - 保存时带 <code>lock_version</code>，冲突时提示用户（409 Conflict → 显示 diff 让用户选择）
 - 乐观更新：保存后立即更新本地状态，失败时回滚</p>
 <hr />
+<h2 id="phase-9-skill-系统前置调研--建模">Phase 9: Skill 系统（前置调研 + 建模）</h2>
+<p><strong>目标</strong>: 调研并设计基于 Artifact 的 Skill 功能，允许用户在 conversation session 之外管理可复用的知识/技能片段，Agent 在会话中可选择性读取。</p>
+<p><strong>状态</strong>: 调研阶段，不急于实现。需先明确设计方向再排入开发计划。</p>
+<h3 id="91-调研业界-skill-设计模式">9.1 调研：业界 Skill 设计模式</h3>
+<p><strong>调研对象</strong>:
+- Cursor Rules（<code>.cursor/rules/</code>）— 静态知识注入，项目级 + 用户级
+- Claude CLAUDE.md — 项目级指令注入
+- OpenAI Custom Instructions / GPTs — 用户级持久化 prompt
+- Coze / Dify Plugin — 可执行技能包，含工具调用能力
+- Windsurf Rules — 类似 Cursor，分 global / project / file 级别</p>
+<p><strong>需明确的设计决策</strong>:
+1. <strong>Skill 本质是什么</strong>：静态知识注入（system prompt 片段）vs 可执行技能包（含 tool/script）vs 两者兼有
+2. <strong>Skill 的 scope</strong>：用户级（跨所有会话）vs 会话级（单个 conversation 挂载）vs 全局（管理员配置）
+3. <strong>主 skill vs reference skill</strong>：是否区分"主指令"和"引用资料"，引用资料按需加载还是全量注入
+4. <strong>存储模型</strong>：复用 Artifact 表（加 <code>type = "skill"</code> 标记）vs 独立数据模型
+5. <strong>Agent 集成方式</strong>：system prompt 静态拼接 vs 检索增强（embedding + 相似度）vs 显式工具调用（<code>read_skill</code>）
+6. <strong>管理入口</strong>：conversation 之外的独立页面 / 设置面板</p>
+<h3 id="92-数据建模调研后">9.2 数据建模（调研后）</h3>
+<p><strong>待定方案对比</strong>:</p>
+<table>
+<thead>
+<tr>
+<th>方案</th>
+<th>优点</th>
+<th>缺点</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>复用 Artifact 表 + 标记</td>
+<td>零 schema 变更，版本管理免费</td>
+<td>Artifact 语义被污染，skill 的 scope/挂载关系难表达</td>
+</tr>
+<tr>
+<td>独立 Skill 实体</td>
+<td>语义清晰，可扩展</td>
+<td>新表 + 新 API + 新前端页面</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Skill 结构草案</strong>（参考常见模式）:
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>skill/
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>├── SKILL.md          # 主指令（必须）
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>├── references/       # 引用资料（可选，按需加载）
+<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a>│   ├── api-spec.md
+<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a>│   └── coding-style.md
+<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a>├── scripts/          # 可执行脚本（可选，需沙盒）
+<a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a>└── assets/           # 静态资源（可选）
+</code></pre></div></p>
+<p><strong>依赖</strong>: 独立于 Phase 7/8，但如果选择复用 Artifact 表则需 7A 先完成（MIME type 统一）。</p>
+<hr />
 <h2 id="各-phase-依赖关系">各 Phase 依赖关系</h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>Phase 1 (核心 Bug)          ✅ 已完成
-<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>Phase 2 (安全加固)          ✅ 已完成
-<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>Phase 3 (数据质量)          ← 3.1/3.2 ✅, 3.3 ⏸️
-<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a>Phase 4 (认证框架)          ✅ 已完成
-<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a>Phase 5 (Redis + 可移植性)   ← Phase 4 之后
-<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a>  5.1 可移植性基线            ← 无依赖
-<a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a>  5.2 Redis Checkpointer     ← 无依赖（可与 5.1 并行）
-<a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a>  5.3 Redis StreamManager    ← 可与 5.2 并行（共用 Redis 连接）
-<a id="__codelineno-9-9" name="__codelineno-9-9" href="#__codelineno-9-9"></a>  5.4 缓存决策               ← 不做改动（保持 request-local）
-<a id="__codelineno-9-10" name="__codelineno-9-10" href="#__codelineno-9-10"></a>  5.5 TaskManager 适配       ← 依赖 5.2（需要 Redis 连接）
-<a id="__codelineno-9-11" name="__codelineno-9-11" href="#__codelineno-9-11"></a>Phase 6 (PostgreSQL)         ← 依赖 5.1（可移植性基线 + Alembic）
-<a id="__codelineno-9-12" name="__codelineno-9-12" href="#__codelineno-9-12"></a>  6.1 引擎切换
-<a id="__codelineno-9-13" name="__codelineno-9-13" href="#__codelineno-9-13"></a>  6.2 Schema 迁移             ← 依赖 6.1
-<a id="__codelineno-9-14" name="__codelineno-9-14" href="#__codelineno-9-14"></a>  6.3 复合索引                ← 依赖 6.2
-<a id="__codelineno-9-15" name="__codelineno-9-15" href="#__codelineno-9-15"></a>Phase 7 (文件上传)           ← Phase 4 之后（需要认证知道上传者是谁）
-<a id="__codelineno-9-16" name="__codelineno-9-16" href="#__codelineno-9-16"></a>Phase 8 (编辑 Artifact)      ← Phase 7 之后（上传和编辑共享写接口模式）
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>Phase 1 (核心 Bug)          ✅ 已完成
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>Phase 2 (安全加固)          ✅ 已完成
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>Phase 3 (数据质量)          ← 3.1/3.2 ✅, 3.3 ⏸️
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a>Phase 4 (认证框架)          ✅ 已完成
+<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a>Phase 5 (Redis + 可移植性)   ← Phase 4 之后
+<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a>  5.1 可移植性基线            ← 无依赖
+<a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a>  5.2 Redis Checkpointer     ← 无依赖（可与 5.1 并行）
+<a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a>  5.3 Redis StreamManager    ← 可与 5.2 并行（共用 Redis 连接）
+<a id="__codelineno-10-9" name="__codelineno-10-9" href="#__codelineno-10-9"></a>  5.4 缓存决策               ← 不做改动（保持 request-local）
+<a id="__codelineno-10-10" name="__codelineno-10-10" href="#__codelineno-10-10"></a>  5.5 TaskManager 适配       ← 依赖 5.2（需要 Redis 连接）
+<a id="__codelineno-10-11" name="__codelineno-10-11" href="#__codelineno-10-11"></a>Phase 6 (PostgreSQL)         ← 依赖 5.1（可移植性基线 + Alembic）
+<a id="__codelineno-10-12" name="__codelineno-10-12" href="#__codelineno-10-12"></a>  6.1 引擎切换
+<a id="__codelineno-10-13" name="__codelineno-10-13" href="#__codelineno-10-13"></a>  6.2 Schema 迁移             ← 依赖 6.1
+<a id="__codelineno-10-14" name="__codelineno-10-14" href="#__codelineno-10-14"></a>  6.3 复合索引                ← 依赖 6.2
+<a id="__codelineno-10-15" name="__codelineno-10-15" href="#__codelineno-10-15"></a>Phase 7A (文档上传)          ← Phase 4 之后（需要认证知道上传者是谁）
+<a id="__codelineno-10-16" name="__codelineno-10-16" href="#__codelineno-10-16"></a>  7A.1 content_type 统一      ← 无额外依赖
+<a id="__codelineno-10-17" name="__codelineno-10-17" href="#__codelineno-10-17"></a>  7A.2 文档转换层              ← 无额外依赖（可与 7A.1 并行）
+<a id="__codelineno-10-18" name="__codelineno-10-18" href="#__codelineno-10-18"></a>  7A.3 后端上传 API            ← 依赖 7A.1 + 7A.2
+<a id="__codelineno-10-19" name="__codelineno-10-19" href="#__codelineno-10-19"></a>  7A.4 前端渲染策略修正        ← 依赖 7A.1（需要 MIME type 判断）
+<a id="__codelineno-10-20" name="__codelineno-10-20" href="#__codelineno-10-20"></a>  7A.5 前端上传 UI             ← 依赖 7A.3
+<a id="__codelineno-10-21" name="__codelineno-10-21" href="#__codelineno-10-21"></a>  7A.6 Prompt 设计 Review      ← 依赖 7A.1（需要 source 字段定义），可与 7A.2-7A.5 并行
+<a id="__codelineno-10-22" name="__codelineno-10-22" href="#__codelineno-10-22"></a>Phase 7B (结构化数据)        ← 依赖 7A + Phase 5/6（PostgreSQL 大字段 / 对象存储）
+<a id="__codelineno-10-23" name="__codelineno-10-23" href="#__codelineno-10-23"></a>Phase 8 (编辑 Artifact)      ← Phase 7A 之后（上传和编辑共享写接口模式）
+<a id="__codelineno-10-24" name="__codelineno-10-24" href="#__codelineno-10-24"></a>Phase 9 (Skill 系统)         ← 9.1 调研无依赖；9.2 建模视方案可能依赖 7A
 </code></pre></div>
+<p>建议执行顺序: <strong>Phase 4 ✅ → 7A → 5/6 → 7B → 8</strong>。7A 包含轻量 schema 变更（新增 <code>source</code> 列），开发阶段删库重建即可，不影响后续 Phase 6 迁移。Phase 9 调研可与任意阶段并行推进。</p>
 <p>关键路径: <strong>5.1 ∥ 5.2/5.3 → 5.5 → 6.1 → 6.2 → 6.3</strong>（5.1 与 5.2 可并行）。5.2 完成后即可获得最大的并发性能提升（checkpointer 瓶颈解除）。</p>
 <hr />
 <h2 id="备注">备注</h2>
@@ -1981,7 +2368,10 @@
 <li>Phase 4 是第一个需要前端大改的阶段（登录页 + token 管理）</li>
 <li>Phase 5 优先 Redis（解决并发瓶颈）+ 可移植性基线（为 Phase 6 铺路），5.1 和 5.2 可并行推进</li>
 <li>Phase 6 PostgreSQL 迁移依赖 5.1 的 Alembic 框架和方言适配层</li>
-<li>Phase 7-8 是功能增强，可根据产品需求调整优先级</li>
+<li>Phase 7A 可在 Phase 5/6 之前执行（只依赖 Phase 4），优先交付用户可感知的功能</li>
+<li>Phase 7B 建议在 Phase 5/6 之后，因为 csv / json 原始文件存储可能需要 PostgreSQL 大字段或对象存储支持</li>
+<li>Phase 9 Skill 系统处于调研阶段，调研可与其他 Phase 并行，实现排期取决于调研结论</li>
+<li><strong>数据迁移</strong>: 系统处于开发阶段，所有 Phase（包括 5/6 数据库改造）均不需要考虑旧数据迁移，已有数据可丢弃。涉及 schema 变更时直接 <code>rm data/artifactflow.db</code> 后重启，<code>create_all</code> 会按新模型建表</li>
 <li>数据库可移植性 CI 范围：当前只跑 SQLite + PostgreSQL；MySQL/TDSQL 等有实际切库需求时再加入 matrix</li>
 <li>concurrency.md 中已标记 ✅ 的项目（短事务、日志上下文、SSE Heartbeat 等）不在此计划中。TaskManager 多 worker 适配已纳入 5.5</li>
 <li>Phase 5/6 完成后需同步更新 <code>docs/architecture/concurrency.md</code>（演进路线、资源分层图）和 <code>CLAUDE.md</code>（命令、架构描述）</li>

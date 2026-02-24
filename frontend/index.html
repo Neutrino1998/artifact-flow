@@ -1888,19 +1888,23 @@
 <tbody>
 <tr>
 <td><code>index.ts</code></td>
-<td>手写的业务类型：<code>ChatRequest</code>、<code>ConversationDetail</code>、<code>ArtifactDetail</code>、<code>LoginRequest</code>、<code>UserInfo</code> 等</td>
+<td>从 <code>api.d.ts</code> re-export 的业务类型别名（<code>ChatRequest</code>、<code>ConversationDetail</code> 等），保持简短的 import 路径</td>
 </tr>
 <tr>
 <td><code>events.ts</code></td>
-<td>SSE 事件类型：<code>StreamEventType</code> 枚举 + 每种事件的数据结构</td>
+<td>SSE 事件类型：<code>StreamEventType</code> 枚举 + 每种事件的数据结构（手写，不在 REST schema 里）</td>
 </tr>
 <tr>
 <td><code>api.d.ts</code></td>
 <td>从后端 OpenAPI schema 自动生成的类型（<code>npm run generate-types</code>）</td>
 </tr>
+<tr>
+<td><code>openapi.json</code></td>
+<td>后端导出的 OpenAPI schema（<code>python scripts/export_openapi.py</code>）</td>
+</tr>
 </tbody>
 </table>
-<p><code>index.ts</code> 里的类型是前端自己定义的别名，比 <code>api.d.ts</code> 更易用。当后端 API 改了字段时，需要重新跑 <code>generate-types</code> 再手动更新 <code>index.ts</code>。</p>
+<p><code>index.ts</code> 从 <code>api.d.ts</code> re-export 类型并做必要的 alias（如 <code>ConversationDetail</code> → <code>ConversationDetailResponse</code>）。当后端 API 改了字段时，重新跑 <code>export_openapi.py</code> + <code>npm run generate-types</code> 即可自动同步。</p>
 <h3 id="lib--工具函数"><code>lib/</code> — 工具函数</h3>
 <h4 id="apits--api-客户端"><code>api.ts</code> — API 客户端</h4>
 <p>封装了所有后端 HTTP 请求，提供类型安全的函数：</p>
@@ -1916,6 +1920,11 @@
 <a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a><span class="nx">getArtifact</span><span class="p">(</span><span class="nx">sessionId</span><span class="p">,</span><span class="w"> </span><span class="nx">artifactId</span><span class="p">)</span><span class="w">  </span><span class="c1">// GET  /api/v1/artifacts/:sessionId/:id</span>
 <a id="__codelineno-4-11" name="__codelineno-4-11" href="#__codelineno-4-11"></a><span class="nx">listVersions</span><span class="p">(</span><span class="nx">sessionId</span><span class="p">,</span><span class="w"> </span><span class="nx">artifactId</span><span class="p">)</span><span class="w"> </span><span class="c1">// GET  /api/v1/artifacts/:sessionId/:id/versions</span>
 <a id="__codelineno-4-12" name="__codelineno-4-12" href="#__codelineno-4-12"></a><span class="nx">getVersion</span><span class="p">(</span><span class="nx">sessionId</span><span class="p">,</span><span class="w"> </span><span class="nx">id</span><span class="p">,</span><span class="w"> </span><span class="nx">version</span><span class="p">)</span><span class="w">  </span><span class="c1">// GET  /api/v1/artifacts/:sessionId/:id/versions/:v</span>
+<a id="__codelineno-4-13" name="__codelineno-4-13" href="#__codelineno-4-13"></a>
+<a id="__codelineno-4-14" name="__codelineno-4-14" href="#__codelineno-4-14"></a><span class="c1">// 文件上传与导出</span>
+<a id="__codelineno-4-15" name="__codelineno-4-15" href="#__codelineno-4-15"></a><span class="nx">uploadFile</span><span class="p">(</span><span class="nx">sessionId</span><span class="p">,</span><span class="w"> </span><span class="nx">file</span><span class="p">)</span><span class="w">         </span><span class="c1">// POST /api/v1/artifacts/:sessionId/upload (multipart)</span>
+<a id="__codelineno-4-16" name="__codelineno-4-16" href="#__codelineno-4-16"></a><span class="nx">uploadFileNewSession</span><span class="p">(</span><span class="nx">file</span><span class="p">)</span><span class="w">          </span><span class="c1">// POST /api/v1/artifacts/upload (multipart, 自动创建对话)</span>
+<a id="__codelineno-4-17" name="__codelineno-4-17" href="#__codelineno-4-17"></a><span class="nx">exportArtifact</span><span class="p">(</span><span class="nx">sessionId</span><span class="p">,</span><span class="w"> </span><span class="nx">id</span><span class="p">,</span><span class="w"> </span><span class="nx">fmt</span><span class="p">)</span><span class="w">  </span><span class="c1">// GET  /api/v1/artifacts/:sessionId/:id/export?format=</span>
 </code></pre></div>
 <p>内部用一个通用的 <code>request&lt;T&gt;()</code> 函数处理 fetch + 错误处理 + JSON 解析。所有请求自动从 <code>authStore</code> 读取 token 注入 <code>Authorization: Bearer &lt;token&gt;</code> header，401 响应自动触发登出。</p>
 <p>新增认证与用户管理函数：
