@@ -109,7 +109,7 @@ export default function MessageInput() {
   return (
     <div className="relative px-4 pt-4 pb-5">
       {/* Gradient fade above input */}
-      <div className="absolute inset-x-0 -top-6 h-6 bg-gradient-to-t from-bg dark:from-bg-dark to-transparent pointer-events-none" />
+      <div className="absolute inset-x-0 -top-6 h-6 bg-gradient-to-t from-chat dark:from-chat-dark to-transparent pointer-events-none" />
       <div className="max-w-3xl mx-auto">
         <div className="bg-surface dark:bg-surface-dark border border-border dark:border-border-dark rounded-2xl shadow-float px-4 py-3">
           <textarea

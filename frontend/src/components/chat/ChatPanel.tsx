@@ -84,7 +84,7 @@ export default function ChatPanel() {
 
   if (currentLoading) {
     return (
-      <div className="flex-1 flex items-center justify-center">
+      <div className="flex-1 flex items-center justify-center bg-chat dark:bg-chat-dark">
         <div className="text-text-tertiary dark:text-text-tertiary-dark text-sm">
           加载对话中...
         </div>
@@ -95,7 +95,7 @@ export default function ChatPanel() {
   // Show input even when no conversation — allows starting new conversations
   return (
     <div
-      className="flex-1 flex flex-col min-h-0 relative"
+      className="flex-1 flex flex-col min-h-0 relative bg-chat dark:bg-chat-dark"
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
@@ -108,7 +108,7 @@ export default function ChatPanel() {
           <div className="max-w-3xl mx-auto px-4 py-6 space-y-6">
             {pendingUserMessage && (
               <div className="flex justify-end">
-                <div className="max-w-[80%] bg-surface dark:bg-surface-dark border border-border dark:border-border-dark rounded-bubble px-4 py-3 text-sm text-text-primary dark:text-text-primary-dark whitespace-pre-wrap break-words">
+                <div className="max-w-[80%] bg-panel dark:bg-surface-dark border border-border dark:border-border-dark rounded-bubble px-4 py-3 text-sm text-text-primary dark:text-text-primary-dark whitespace-pre-wrap break-words">
                   {pendingUserMessage}
                 </div>
               </div>

@@ -73,7 +73,7 @@ function UserMessage({ content, messageId, parentId, siblingIndex, siblingCount 
     return (
       <div className="flex justify-end">
         <div className="max-w-[80%] w-full">
-          <div className="bg-surface dark:bg-surface-dark border border-accent rounded-bubble overflow-hidden">
+          <div className="bg-panel dark:bg-surface-dark border border-accent rounded-bubble overflow-hidden">
             <textarea
               ref={textareaRef}
               value={editContent}
@@ -111,7 +111,7 @@ function UserMessage({ content, messageId, parentId, siblingIndex, siblingCount 
   return (
     <div className="flex justify-end group">
       <div className="relative max-w-[80%]">
-        <div className="bg-surface dark:bg-surface-dark border border-border dark:border-border-dark rounded-bubble px-4 py-3 text-sm text-text-primary dark:text-text-primary-dark whitespace-pre-wrap break-words">
+        <div className="bg-panel dark:bg-surface-dark border border-border dark:border-border-dark rounded-bubble px-4 py-3 text-sm text-text-primary dark:text-text-primary-dark whitespace-pre-wrap break-words">
           {content}
         </div>
         {/* Action buttons and branch navigator on hover */}

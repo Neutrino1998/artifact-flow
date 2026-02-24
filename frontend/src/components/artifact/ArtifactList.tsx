@@ -11,7 +11,7 @@ export default function ArtifactList() {
 
   if (artifactsLoading) {
     return (
-      <div className="h-full flex items-center justify-center bg-surface dark:bg-surface-dark">
+      <div className="h-full flex items-center justify-center bg-chat dark:bg-chat-dark">
         <span className="text-sm text-text-tertiary dark:text-text-tertiary-dark">
           加载文稿中...
         </span>
@@ -21,7 +21,7 @@ export default function ArtifactList() {
 
   if (artifacts.length === 0) {
     return (
-      <div className="h-full flex items-center justify-center bg-surface dark:bg-surface-dark">
+      <div className="h-full flex items-center justify-center bg-chat dark:bg-chat-dark">
         <span className="text-sm text-text-tertiary dark:text-text-tertiary-dark">
           暂无文稿
         </span>
@@ -30,7 +30,7 @@ export default function ArtifactList() {
   }
 
   return (
-    <div className="h-full bg-surface dark:bg-surface-dark">
+    <div className="h-full bg-chat dark:bg-chat-dark">
       <div className="px-4 py-3 border-b border-border dark:border-border-dark">
         <h3 className="text-sm font-semibold text-text-primary dark:text-text-primary-dark">
           文稿

@@ -32,7 +32,7 @@ export default function ArtifactPanel() {
 
   if (currentLoading) {
     return (
-      <div className="h-full flex items-center justify-center bg-surface dark:bg-surface-dark">
+      <div className="h-full flex items-center justify-center bg-chat dark:bg-chat-dark">
         <span className="text-sm text-text-tertiary dark:text-text-tertiary-dark">
           加载文稿中...
         </span>
@@ -47,7 +47,7 @@ export default function ArtifactPanel() {
   const content = selectedVersion?.content ?? current.content;
 
   return (
-    <div className="h-full flex flex-col bg-surface dark:bg-surface-dark">
+    <div className="h-full flex flex-col bg-chat dark:bg-chat-dark">
       <ArtifactToolbar />
       <ArtifactTabs />
       <div className="flex-1 overflow-auto">

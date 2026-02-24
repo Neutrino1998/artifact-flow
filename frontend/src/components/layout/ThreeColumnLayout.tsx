@@ -82,7 +82,7 @@ export default function ThreeColumnLayout({
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   return (
-    <div ref={containerRef} className="flex h-screen overflow-hidden">
+    <div ref={containerRef} className="flex h-screen overflow-hidden bg-chat dark:bg-chat-dark">
       {/* Mobile menu button — visible below md */}
       {!isMd && (
         <button
@@ -104,7 +104,7 @@ export default function ThreeColumnLayout({
             className="fixed inset-0 z-40 bg-black/40"
             onClick={() => setMobileMenuOpen(false)}
           />
-          <div className="fixed inset-y-0 left-0 z-40 w-64 bg-surface dark:bg-surface-dark border-r border-border dark:border-border-dark">
+          <div className="fixed inset-y-0 left-0 z-40 w-64 bg-panel dark:bg-panel-dark border-r border-border dark:border-border-dark">
             {sidebar}
           </div>
         </>
@@ -136,7 +136,7 @@ export default function ThreeColumnLayout({
                 className="fixed inset-0 z-30 bg-black/40"
                 onClick={() => setArtifactPanelVisible(false)}
               />
-              <div className="fixed inset-y-0 right-0 z-30 w-[85vw] max-w-lg bg-surface dark:bg-surface-dark border-l border-border dark:border-border-dark overflow-auto">
+              <div className="fixed inset-y-0 right-0 z-30 w-[85vw] max-w-lg bg-chat dark:bg-chat-dark border-l border-border dark:border-border-dark overflow-auto">
                 {artifact}
               </div>
             </>

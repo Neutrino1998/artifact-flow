@@ -112,7 +112,7 @@ function AgentSegmentBlock({ segment, isActive, defaultExpanded }: AgentSegmentB
             const displayContent = stripToolCallXml(segment.content);
             if (!displayContent) return null;
             return (
-              <div className={`prose prose-sm dark:prose-invert max-w-none text-text-primary dark:text-text-primary-dark prose-headings:text-text-primary dark:prose-headings:text-text-primary-dark prose-a:text-accent prose-code:text-accent prose-pre:bg-surface dark:prose-pre:bg-bg-dark prose-pre:border prose-pre:border-border dark:prose-pre:border-border-dark ${isActive ? 'streaming-cursor' : ''}`}>
+              <div className={`prose prose-sm dark:prose-invert max-w-none text-text-primary dark:text-text-primary-dark prose-headings:text-text-primary dark:prose-headings:text-text-primary-dark prose-a:text-accent prose-code:text-accent prose-pre:bg-panel dark:prose-pre:bg-bg-dark prose-pre:text-text-primary dark:prose-pre:text-text-primary-dark prose-pre:border prose-pre:border-border dark:prose-pre:border-border-dark prose-blockquote:border-l-accent dark:prose-blockquote:border-l-accent prose-li:marker:text-text-primary dark:prose-li:marker:text-text-primary-dark ${isActive ? 'streaming-cursor' : ''}`}>
                 <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]}>
                   {displayContent}
                 </ReactMarkdown>
