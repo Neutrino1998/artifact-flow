@@ -316,8 +316,8 @@ class ArtifactManager:
         Returns:
             (success, message, artifact_info dict or None)
         """
-        # Generate artifact_id from filename
-        base = re.sub(r'[^a-zA-Z0-9_\-.]', '_', filename)
+        # Generate artifact_id from filename (allow Unicode letters/digits)
+        base = re.sub(r'[^\w\-.]', '_', filename)
         artifact_id = base.lower()
 
         # Deduplicate: if ID already exists, append suffix

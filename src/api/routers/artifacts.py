@@ -248,7 +248,10 @@ async def export_artifact(
     filename = result["title"].replace("/", "-").replace("\\", "-") + ".docx"
     # RFC 5987: use filename* for non-ASCII names, with ASCII fallback
     from urllib.parse import quote
+    import re as _re
     ascii_fallback = filename.encode("ascii", errors="replace").decode("ascii")
+    # Sanitize quotes and control characters for safe Content-Disposition
+    ascii_fallback = _re.sub(r'["\x00-\x1f\x7f]', "_", ascii_fallback)
     utf8_encoded = quote(filename, safe="")
     return Response(
         content=docx_bytes,
