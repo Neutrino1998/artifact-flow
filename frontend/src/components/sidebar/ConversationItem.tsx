@@ -40,7 +40,7 @@ function ConversationItem({ conversation, isActive, onSelect }: ConversationItem
       onMouseEnter={() => setShowMenu(true)}
       onMouseLeave={() => setShowMenu(false)}
     >
-      <div className={`text-sm truncate text-text-primary dark:text-text-primary-dark ${showMenu ? 'pr-7' : ''}`}>
+      <div className={`text-sm font-medium truncate text-text-primary dark:text-text-primary-dark ${showMenu ? 'pr-7' : ''}`}>
         {title}
       </div>
       <div className="flex items-center gap-2 mt-0.5 text-xs text-text-tertiary dark:text-text-tertiary-dark">

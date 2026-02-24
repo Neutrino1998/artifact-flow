@@ -46,7 +46,7 @@ export default function ArtifactList() {
               className="w-full text-left px-4 py-3 border-b border-border dark:border-border-dark hover:bg-bg dark:hover:bg-bg-dark transition-colors"
             >
               <div className="flex items-center gap-2">
-                <span className="text-sm text-text-primary dark:text-text-primary-dark flex-1 truncate">
+                <span className="text-sm font-medium text-text-primary dark:text-text-primary-dark flex-1 truncate">
                   {artifact.title}
                 </span>
                 {hasPending && (
