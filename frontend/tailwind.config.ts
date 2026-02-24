@@ -12,7 +12,7 @@ const config: Config = {
         },
         panel: {
           DEFAULT: '#ddd5c8',
-          dark: '#222120',
+          dark: '#21201c',
         },
         action: {
           DEFAULT: '#1f1e1b',
