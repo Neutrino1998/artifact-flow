@@ -84,7 +84,7 @@ function AgentSegmentBlock({ segment, isActive, defaultExpanded, stepNumber }: A
   }
 
   return (
-    <div className="border border-border dark:border-border-dark rounded-card overflow-hidden">
+    <div className="bg-chat dark:bg-chat-dark border border-border dark:border-border-dark rounded-card overflow-hidden">
       {/* Collapsible header */}
       <button
         onClick={() => { if (!isActive) setExpanded(!expanded); }}

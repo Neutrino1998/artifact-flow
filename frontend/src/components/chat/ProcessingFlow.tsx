@@ -63,8 +63,12 @@ function ProcessingFlow({ segments, isActive, defaultExpanded, children }: Proce
 
       {/* Body */}
       {expanded && (
-        <div className="border-t border-border dark:border-border-dark px-3 py-3 space-y-2">
-          {children}
+        <div className="relative border-t border-border dark:border-border-dark px-3 py-3">
+          {/* Vertical connector line — aligned with AgentSegmentBlock chevron center */}
+          <div className="absolute left-[31px] top-5 bottom-5 w-px bg-border dark:bg-border-dark" />
+          <div className="relative space-y-2">
+            {children}
+          </div>
         </div>
       )}
     </div>
