@@ -121,7 +121,7 @@ export default function UserManagementModal({ open, onClose }: Props) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30">
-      <div className="bg-surface dark:bg-surface-dark border border-border dark:border-border-dark rounded-card shadow-modal max-w-lg w-full mx-4 p-6 max-h-[80vh] flex flex-col">
+      <div className="bg-surface dark:bg-surface-dark border border-border dark:border-border-dark rounded-2xl shadow-float max-w-lg w-full mx-4 p-6 max-h-[80vh] flex flex-col">
         {/* Header */}
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-semibold text-text-primary dark:text-text-primary-dark">
@@ -148,7 +148,7 @@ export default function UserManagementModal({ open, onClose }: Props) {
         {!showCreate ? (
           <button
             onClick={() => setShowCreate(true)}
-            className="mb-4 flex items-center gap-2 px-3 py-2 text-sm text-accent hover:text-accent-hover transition-colors"
+            className="w-full mb-4 flex items-center gap-2 px-3 py-2 text-sm text-accent bg-bg dark:bg-bg-dark rounded-lg hover:bg-bg/70 dark:hover:bg-bg-dark/70 transition-colors"
           >
             <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5">
               <path d="M7 2v10M2 7h10" />
