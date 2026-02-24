@@ -59,13 +59,13 @@ export default function UserMenu({ collapsed }: { collapsed?: boolean }) {
         ) : (
           <button
             onClick={() => setPopoverOpen((o) => !o)}
-            className="w-full flex items-center gap-3 px-3 py-2.5 bg-action dark:bg-bg-dark rounded-card hover:bg-action-hover dark:hover:bg-surface-dark transition-colors text-left"
+            className="w-full flex items-center gap-3 px-3 py-2.5 bg-bg dark:bg-bg-dark rounded-card hover:bg-surface dark:hover:bg-surface-dark transition-colors text-left"
           >
             <div className="w-8 h-8 rounded-full bg-accent/15 text-accent flex items-center justify-center text-sm font-medium shrink-0">
               {initial}
             </div>
             <div className="min-w-0 flex-1">
-              <div className="text-sm font-medium text-action-contrast dark:text-text-primary-dark truncate flex items-center gap-1.5">
+              <div className="text-sm font-medium text-text-primary dark:text-text-primary-dark truncate flex items-center gap-1.5">
                 <span className="truncate">{user.display_name || user.username}</span>
                 {isAdmin && (
                   <span className="inline-block px-1 py-px text-[10px] rounded bg-accent/10 text-accent shrink-0">
@@ -73,7 +73,7 @@ export default function UserMenu({ collapsed }: { collapsed?: boolean }) {
                   </span>
                 )}
               </div>
-              <div className="text-xs text-action-contrast/70 dark:text-text-secondary-dark truncate">
+              <div className="text-xs text-text-secondary dark:text-text-secondary-dark truncate">
                 @{user.username}
               </div>
             </div>
@@ -84,7 +84,7 @@ export default function UserMenu({ collapsed }: { collapsed?: boolean }) {
               fill="none"
               stroke="currentColor"
               strokeWidth="1.5"
-              className="text-action-contrast/70 dark:text-text-secondary-dark shrink-0"
+              className="text-text-secondary dark:text-text-secondary-dark shrink-0"
             >
               <path d="M3 5l3-3 3 3M3 7l3 3 3-3" />
             </svg>
@@ -96,7 +96,7 @@ export default function UserMenu({ collapsed }: { collapsed?: boolean }) {
           <div
             className={`absolute z-40 bottom-full mb-1 ${
               collapsed ? 'left-0' : 'left-0 right-0'
-            } min-w-[180px] bg-action dark:bg-bg-dark border-none rounded-card shadow-modal p-1.5`}
+            } min-w-[180px] bg-bg dark:bg-bg-dark border-none rounded-card shadow-modal p-1.5`}
           >
             {/* Theme toggle */}
             <button
@@ -104,7 +104,7 @@ export default function UserMenu({ collapsed }: { collapsed?: boolean }) {
                 toggleTheme();
                 setPopoverOpen(false);
               }}
-              className="w-full flex items-center gap-2 px-2.5 py-2 text-sm text-action-contrast dark:text-text-primary-dark hover:bg-action-hover dark:hover:bg-surface-dark rounded-lg transition-colors"
+              className="w-full flex items-center gap-2 px-2.5 py-2 text-sm text-text-primary dark:text-text-primary-dark hover:bg-surface dark:hover:bg-surface-dark rounded-lg transition-colors"
             >
               {theme === 'light' ? (
                 <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
@@ -122,7 +122,7 @@ export default function UserMenu({ collapsed }: { collapsed?: boolean }) {
             {isAdmin && (
               <button
                 onClick={handleManageUsers}
-                className="w-full flex items-center gap-2 px-2.5 py-2 text-sm text-action-contrast dark:text-text-primary-dark hover:bg-action-hover dark:hover:bg-surface-dark rounded-lg transition-colors"
+                className="w-full flex items-center gap-2 px-2.5 py-2 text-sm text-text-primary dark:text-text-primary-dark hover:bg-surface dark:hover:bg-surface-dark rounded-lg transition-colors"
               >
                 <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
                   <circle cx="8" cy="5" r="3" />
@@ -133,12 +133,12 @@ export default function UserMenu({ collapsed }: { collapsed?: boolean }) {
             )}
 
             {/* Divider */}
-            <div className="my-1 border-t border-white/15 dark:border-border-dark" />
+            <div className="my-1 border-t border-border dark:border-border-dark" />
 
             {/* Logout */}
             <button
               onClick={handleLogout}
-              className="w-full flex items-center gap-2 px-2.5 py-2 text-sm text-red-500 hover:bg-action-hover dark:hover:bg-bg-dark rounded-lg transition-colors"
+              className="w-full flex items-center gap-2 px-2.5 py-2 text-sm text-red-500 hover:bg-surface dark:hover:bg-surface-dark rounded-lg transition-colors"
             >
               <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
                 <path d="M6 2H3a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3M11 11l3-3-3-3M6 8h8" />
