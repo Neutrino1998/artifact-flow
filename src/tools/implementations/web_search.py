@@ -129,10 +129,13 @@ class WebSearchTool(BaseTool):
         logger.error(f"Search failed after {self._MAX_RETRIES + 1} attempts: {last_error}")
         return ToolResult(success=False, error=f"Search failed after retries: {last_error}")
 
+    # HTTP status codes that are transient and worth retrying
+    _RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
+
     async def _do_search(
         self, headers: Dict[str, str], payload: Dict[str, Any], query: str
     ) -> ToolResult:
-        """Execute a single search request. Raises on network-level errors."""
+        """Execute a single search request. Raises on retryable errors."""
         async with aiohttp.ClientSession() as session:
             async with session.post(
                 BOCHA_API_URL,
@@ -144,6 +147,15 @@ class WebSearchTool(BaseTool):
                 if response.status != 200:
                     error_text = await response.text()
                     logger.error(f"Search API error: {response.status} - {error_text}")
+
+                    # Retryable HTTP errors — raise to trigger retry loop
+                    if response.status in self._RETRYABLE_STATUS_CODES:
+                        raise aiohttp.ClientResponseError(
+                            response.request_info,
+                            response.history,
+                            status=response.status,
+                            message=f"Search API error: {response.status}",
+                        )
 
                     # Non-retryable HTTP errors — return immediately
                     if response.status == 403:

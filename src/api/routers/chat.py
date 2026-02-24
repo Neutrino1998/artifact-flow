@@ -191,23 +191,31 @@ async def send_message(
     # 4. 启动后台任务
     # 注意：不能直接用 BackgroundTasks，因为依赖（controller）会在请求结束后失效
     async def execute_and_push():
-        async with _create_controller() as ctrl:
-            # Pass parent_message_id only when explicitly provided in request;
-            # otherwise let controller auto-detect via active_branch
-            parent_kwargs = {}
-            if 'parent_message_id' in request.model_fields_set:
-                parent_kwargs['parent_message_id'] = request.parent_message_id
-            await _run_and_push(
-                stream_manager,
-                thread_id,
-                ctrl.stream_execute(
-                    content=request.content,
-                    conversation_id=conversation_id,
-                    thread_id=thread_id,
-                    message_id=message_id,
-                    **parent_kwargs,
-                ),
-            )
+        try:
+            async with _create_controller() as ctrl:
+                # Pass parent_message_id only when explicitly provided in request;
+                # otherwise let controller auto-detect via active_branch
+                parent_kwargs = {}
+                if 'parent_message_id' in request.model_fields_set:
+                    parent_kwargs['parent_message_id'] = request.parent_message_id
+                await _run_and_push(
+                    stream_manager,
+                    thread_id,
+                    ctrl.stream_execute(
+                        content=request.content,
+                        conversation_id=conversation_id,
+                        thread_id=thread_id,
+                        message_id=message_id,
+                        **parent_kwargs,
+                    ),
+                )
+        except Exception as e:
+            logger.exception(f"Failed to initialize graph execution: {e}")
+            await stream_manager.push_event(thread_id, _sanitize_error_event({
+                "type": "error",
+                "timestamp": datetime.now().isoformat(),
+                "data": {"success": False, "error": str(e)}
+            }))
 
     # 5. 提交到 TaskManager（持有引用 + 并发控制）
     await task_manager.submit(thread_id, execute_and_push())
@@ -393,17 +401,25 @@ async def resume_execution(
 
     # 启动后台任务
     async def execute_resume():
-        async with _create_controller() as ctrl:
-            await _run_and_push(
-                stream_manager,
-                thread_id,
-                ctrl.stream_execute(
-                    thread_id=thread_id,
-                    conversation_id=conv_id,
-                    message_id=request.message_id,
-                    resume_data=resume_data,
-                ),
-            )
+        try:
+            async with _create_controller() as ctrl:
+                await _run_and_push(
+                    stream_manager,
+                    thread_id,
+                    ctrl.stream_execute(
+                        thread_id=thread_id,
+                        conversation_id=conv_id,
+                        message_id=request.message_id,
+                        resume_data=resume_data,
+                    ),
+                )
+        except Exception as e:
+            logger.exception(f"Failed to initialize resume execution: {e}")
+            await stream_manager.push_event(thread_id, _sanitize_error_event({
+                "type": "error",
+                "timestamp": datetime.now().isoformat(),
+                "data": {"success": False, "error": str(e)}
+            }))
 
     await task_manager.submit(thread_id, execute_resume())
 

@@ -96,7 +96,8 @@ async def upload_file_new_session(
     )
 
     if not success:
-        raise HTTPException(status_code=500, detail=message)
+        error_detail = message if config.DEBUG else "Internal server error"
+        raise HTTPException(status_code=500, detail=error_detail)
 
     memory = await artifact_manager.get_artifact(conversation_id, info["id"])
 
@@ -197,7 +198,8 @@ async def upload_file(
     )
 
     if not success:
-        raise HTTPException(status_code=500, detail=message)
+        error_detail = message if config.DEBUG else "Internal server error"
+        raise HTTPException(status_code=500, detail=error_detail)
 
     # Get created_at from DB
     memory = await artifact_manager.get_artifact(session_id, info["id"])
