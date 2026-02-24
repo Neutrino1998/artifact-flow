@@ -23,7 +23,7 @@
       
       
       <link rel="icon" href="../../assets/images/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.2">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.3">
     
     
       
@@ -1491,7 +1491,7 @@
 <a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>    <span class="n">required_tools</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="p">[]</span>   <span class="c1"># 所需工具名称列表</span>
 <a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>
 <a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a>    <span class="c1"># LLM 配置</span>
-<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a>    <span class="n">model</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;qwen-plus&quot;</span>         <span class="c1"># LLM 模型</span>
+<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a>    <span class="n">model</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;qwen3.5-flash-no-thinking&quot;</span>  <span class="c1"># LLM 模型</span>
 <a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a>    <span class="n">temperature</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">0.7</span>         <span class="c1"># 生成温度</span>
 <a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a>    <span class="n">max_tool_rounds</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">3</span>         <span class="c1"># 单次执行最大工具调用轮数</span>
 <a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a>    <span class="n">streaming</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span>          <span class="c1"># 是否默认流式输出</span>
@@ -1679,7 +1679,7 @@
 <a id="__codelineno-7-11" name="__codelineno-7-11" href="#__codelineno-7-11"></a>                    <span class="s2">&quot;read_artifact&quot;</span><span class="p">,</span>
 <a id="__codelineno-7-12" name="__codelineno-7-12" href="#__codelineno-7-12"></a>                    <span class="s2">&quot;call_subagent&quot;</span>
 <a id="__codelineno-7-13" name="__codelineno-7-13" href="#__codelineno-7-13"></a>                <span class="p">],</span>
-<a id="__codelineno-7-14" name="__codelineno-7-14" href="#__codelineno-7-14"></a>                <span class="n">model</span><span class="o">=</span><span class="s2">&quot;qwen3-next-80b-thinking&quot;</span><span class="p">,</span>  <span class="c1"># 使用思考模型</span>
+<a id="__codelineno-7-14" name="__codelineno-7-14" href="#__codelineno-7-14"></a>                <span class="n">model</span><span class="o">=</span><span class="s2">&quot;qwen3.5-plus&quot;</span><span class="p">,</span>  <span class="c1"># 使用思考模型</span>
 <a id="__codelineno-7-15" name="__codelineno-7-15" href="#__codelineno-7-15"></a>                <span class="n">temperature</span><span class="o">=</span><span class="mf">0.7</span><span class="p">,</span>
 <a id="__codelineno-7-16" name="__codelineno-7-16" href="#__codelineno-7-16"></a>                <span class="n">max_tool_rounds</span><span class="o">=</span><span class="mi">100</span><span class="p">,</span>  <span class="c1"># 需要更多轮次协调</span>
 <a id="__codelineno-7-17" name="__codelineno-7-17" href="#__codelineno-7-17"></a>                <span class="n">streaming</span><span class="o">=</span><span class="kc">True</span>
@@ -1754,7 +1754,7 @@
 <a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a>                <span class="n">description</span><span class="o">=</span><span class="s2">&quot;Web search and information retrieval specialist&quot;</span><span class="p">,</span>
 <a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a>                <span class="n">capabilities</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;Web search&quot;</span><span class="p">,</span> <span class="s2">&quot;Information retrieval&quot;</span><span class="p">],</span>
 <a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a>                <span class="n">required_tools</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;web_search&quot;</span><span class="p">],</span>
-<a id="__codelineno-10-9" name="__codelineno-10-9" href="#__codelineno-10-9"></a>                <span class="n">model</span><span class="o">=</span><span class="s2">&quot;qwen3-next-80b-instruct&quot;</span><span class="p">,</span>
+<a id="__codelineno-10-9" name="__codelineno-10-9" href="#__codelineno-10-9"></a>                <span class="n">model</span><span class="o">=</span><span class="s2">&quot;qwen3.5-flash-no-thinking&quot;</span><span class="p">,</span>
 <a id="__codelineno-10-10" name="__codelineno-10-10" href="#__codelineno-10-10"></a>                <span class="n">temperature</span><span class="o">=</span><span class="mf">0.5</span><span class="p">,</span>      <span class="c1"># 较低温度 for 精确搜索</span>
 <a id="__codelineno-10-11" name="__codelineno-10-11" href="#__codelineno-10-11"></a>                <span class="n">max_tool_rounds</span><span class="o">=</span><span class="mi">3</span><span class="p">,</span>    <span class="c1"># 最多 3 轮搜索优化</span>
 <a id="__codelineno-10-12" name="__codelineno-10-12" href="#__codelineno-10-12"></a>                <span class="n">streaming</span><span class="o">=</span><span class="kc">True</span>
@@ -1792,7 +1792,7 @@
 <a id="__codelineno-11-10" name="__codelineno-11-10" href="#__codelineno-11-10"></a>                    <span class="s2">&quot;IMPORTANT: Instructions must include a specific URL to crawl&quot;</span>
 <a id="__codelineno-11-11" name="__codelineno-11-11" href="#__codelineno-11-11"></a>                <span class="p">],</span>
 <a id="__codelineno-11-12" name="__codelineno-11-12" href="#__codelineno-11-12"></a>                <span class="n">required_tools</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;web_fetch&quot;</span><span class="p">],</span>
-<a id="__codelineno-11-13" name="__codelineno-11-13" href="#__codelineno-11-13"></a>                <span class="n">model</span><span class="o">=</span><span class="s2">&quot;qwen3-next-80b-instruct&quot;</span><span class="p">,</span>
+<a id="__codelineno-11-13" name="__codelineno-11-13" href="#__codelineno-11-13"></a>                <span class="n">model</span><span class="o">=</span><span class="s2">&quot;qwen3.5-flash-no-thinking&quot;</span><span class="p">,</span>
 <a id="__codelineno-11-14" name="__codelineno-11-14" href="#__codelineno-11-14"></a>                <span class="n">temperature</span><span class="o">=</span><span class="mf">0.3</span><span class="p">,</span>      <span class="c1"># 更低温度 for 精确提取</span>
 <a id="__codelineno-11-15" name="__codelineno-11-15" href="#__codelineno-11-15"></a>                <span class="n">max_tool_rounds</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span>    <span class="c1"># 通常 1-2 轮即可</span>
 <a id="__codelineno-11-16" name="__codelineno-11-16" href="#__codelineno-11-16"></a>                <span class="n">streaming</span><span class="o">=</span><span class="kc">True</span>
