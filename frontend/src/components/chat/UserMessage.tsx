@@ -111,7 +111,7 @@ function UserMessage({ content, messageId, parentId, siblingIndex, siblingCount 
   return (
     <div className="flex justify-end group">
       <div className="relative max-w-[80%]">
-        <div className="bg-panel dark:bg-surface-dark rounded-bubble px-4 py-3 text-sm text-text-primary dark:text-text-primary-dark whitespace-pre-wrap break-words">
+        <div className="bg-action dark:bg-surface-dark rounded-bubble px-4 py-3 text-sm text-action-contrast dark:text-text-primary-dark whitespace-pre-wrap break-words">
           {content}
         </div>
         {/* Action buttons and branch navigator on hover */}

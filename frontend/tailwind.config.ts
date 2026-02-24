@@ -7,7 +7,7 @@ const config: Config = {
     extend: {
       colors: {
         chat: {
-          DEFAULT: '#efede5',
+          DEFAULT: '#f5f0e8',
           dark: '#1a1915',
         },
         panel: {
