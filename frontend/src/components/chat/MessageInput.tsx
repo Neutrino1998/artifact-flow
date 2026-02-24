@@ -11,6 +11,8 @@ import { useArtifacts } from '@/hooks/useArtifacts';
 
 export default function MessageInput() {
   const [content, setContent] = useState('');
+  const [uploadProgress, setUploadProgress] = useState<{ current: number; total: number } | null>(null);
+  const [dragOver, setDragOver] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { sendMessage, disconnect, isNewConversation } = useChat();
@@ -56,38 +58,52 @@ export default function MessageInput() {
   const setCurrent = useConversationStore((s) => s.setCurrent);
   const setConversations = useConversationStore((s) => s.setConversations);
 
-  const handleUpload = useCallback(async (file: File) => {
+  const handleUploadFiles = useCallback(async (files: File[]) => {
+    if (files.length === 0) return;
+
     setUploading(true);
     setUploadError(null);
 
-    try {
-      let result;
-      if (sessionId) {
-        // Upload to existing session
-        result = await uploadFile(sessionId, file);
-      } else {
-        // No session — auto-create conversation via new endpoint
-        result = await uploadFileNewSession(file);
+    let currentSessionId = sessionId;
+    let lastResultId: string | null = null;
+    const total = files.length;
 
-        // Load the new conversation into stores
-        const [detail, list] = await Promise.all([
-          getConversation(result.session_id),
-          listConversations(20, 0),
-        ]);
-        setCurrent(detail);
-        setConversations(list.conversations, list.total, list.has_more);
+    try {
+      for (let i = 0; i < files.length; i++) {
+        if (total > 1) setUploadProgress({ current: i + 1, total });
+        const file = files[i];
+        let result;
+
+        if (currentSessionId) {
+          result = await uploadFile(currentSessionId, file);
+        } else {
+          // First file with no session — auto-create
+          result = await uploadFileNewSession(file);
+          currentSessionId = result.session_id;
+
+          const [detail, list] = await Promise.all([
+            getConversation(result.session_id),
+            listConversations(20, 0),
+          ]);
+          setCurrent(detail);
+          setConversations(list.conversations, list.total, list.has_more);
+        }
+
+        lastResultId = result.id;
       }
 
-      // Refresh artifact list and open the new artifact
       await loadArtifacts();
       setArtifactPanelVisible(true);
-      selectArtifact(result.id);
+      if (lastResultId) selectArtifact(lastResultId);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Upload failed';
       setUploadError(message);
       window.alert(message);
+      // Refresh artifacts for any successful uploads before the error
+      if (lastResultId) await loadArtifacts();
     } finally {
       setUploading(false);
+      setUploadProgress(null);
     }
   }, [sessionId, setUploading, setUploadError, loadArtifacts, setArtifactPanelVisible, selectArtifact, setCurrent, setConversations]);
 
@@ -96,22 +112,53 @@ export default function MessageInput() {
   }, []);
 
   const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      handleUpload(file);
+    const files = e.target.files;
+    if (files && files.length > 0) {
+      handleUploadFiles(Array.from(files));
     }
-    // Reset input so the same file can be selected again
+    // Reset input so the same files can be selected again
     e.target.value = '';
-  }, [handleUpload]);
+  }, [handleUploadFiles]);
 
   const uploadDisabled = uploading || isStreaming;
+
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!uploadDisabled) setDragOver(true);
+  }, [uploadDisabled]);
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOver(false);
+  }, []);
+
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOver(false);
+    if (uploadDisabled) return;
+    const files = Array.from(e.dataTransfer.files);
+    if (files.length > 0) handleUploadFiles(files);
+  }, [uploadDisabled, handleUploadFiles]);
 
   return (
     <div className="relative px-4 pt-4 pb-5">
       {/* Gradient fade above input */}
       <div className="absolute inset-x-0 -top-6 h-6 bg-gradient-to-t from-chat dark:from-chat-dark to-transparent pointer-events-none" />
       <div className="max-w-3xl mx-auto">
-        <div className="bg-surface dark:bg-surface-dark border border-border dark:border-border-dark rounded-2xl shadow-float px-4 py-3">
+        <div
+          className={`bg-surface dark:bg-surface-dark border rounded-2xl shadow-float px-4 py-3 transition-colors ${
+            dragOver
+              ? 'border-accent ring-2 ring-accent/30'
+              : 'border-border dark:border-border-dark'
+          }`}
+          onDragOver={handleDragOver}
+          onDragEnter={handleDragOver}
+          onDragLeave={handleDragLeave}
+          onDrop={handleDrop}
+        >
           <textarea
             ref={textareaRef}
             value={content}
@@ -135,6 +182,7 @@ export default function MessageInput() {
               <input
                 ref={fileInputRef}
                 type="file"
+                multiple
                 onChange={handleFileChange}
                 className="hidden"
               />
@@ -145,12 +193,17 @@ export default function MessageInput() {
                 disabled={uploadDisabled}
                 className="p-1.5 rounded-lg text-text-secondary dark:text-text-secondary-dark hover:bg-bg dark:hover:bg-bg-dark transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                 aria-label="Upload file"
-                title="上传文件"
+                title="上传文件（支持多选）"
               >
                 {uploading ? (
-                  <svg width="16" height="16" viewBox="0 0 16 16" className="animate-spin">
-                    <circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" strokeWidth="2" strokeDasharray="28" strokeDashoffset="8" />
-                  </svg>
+                  <span className="flex items-center gap-1">
+                    <svg width="16" height="16" viewBox="0 0 16 16" className="animate-spin">
+                      <circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" strokeWidth="2" strokeDasharray="28" strokeDashoffset="8" />
+                    </svg>
+                    {uploadProgress && (
+                      <span className="text-xs tabular-nums">{uploadProgress.current}/{uploadProgress.total}</span>
+                    )}
+                  </span>
                 ) : (
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
