@@ -6,6 +6,7 @@ Web搜索工具
 import os
 import json
 import asyncio
+import random
 import aiohttp
 from typing import List, Dict, Any, Optional
 from datetime import datetime
@@ -13,7 +14,6 @@ from dotenv import load_dotenv
 
 from tools.base import BaseTool, ToolResult, ToolParameter, ToolPermission
 from utils.logger import get_logger
-from utils.retry import api_retry
 
 # 加载环境变量
 load_dotenv()
@@ -68,16 +68,18 @@ class WebSearchTool(BaseTool):
             )
         ]
     
-    @api_retry()  # 使用重试装饰器处理网络错误
+    _MAX_RETRIES = 3
+    _BASE_DELAY = 2.0
+
     async def execute(self, **params) -> ToolResult:
         """
         执行搜索
-        
+
         Args:
             query: 搜索查询
             freshness: 时间范围过滤
             count: 返回结果数量
-            
+
         Returns:
             ToolResult: 包含XML格式的搜索结果
         """
@@ -85,100 +87,112 @@ class WebSearchTool(BaseTool):
         query = params.get("query")
         freshness = params["freshness"]
         count = min(params["count"], 50)  # 限制最大50条
-        
+
         if not query:
             return ToolResult(success=False, error="Query parameter is required")
-        
+
         if not BOCHA_API_KEY:
             return ToolResult(
                 success=False,
                 error="BOCHA_API_KEY not configured. Please set it in .env file"
             )
-        
+
         # 准备请求
         headers = {
             "Authorization": f"Bearer {BOCHA_API_KEY}",
             "Content-Type": "application/json"
         }
-        
+
         payload = {
             "query": query,
             "freshness": freshness,
             "summary": True,  # 启用摘要
             "count": count
         }
-        
+
         logger.info(f"Searching for: {query} (freshness: {freshness}, count: {count})")
-        
-        try:
-            # 执行搜索请求
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    BOCHA_API_URL,
-                    headers=headers,
-                    json=payload,
-                    timeout=aiohttp.ClientTimeout(total=30)
-                ) as response:
-                    
-                    if response.status != 200:
-                        error_text = await response.text()
-                        logger.error(f"Search API error: {response.status} - {error_text}")
-                        
-                        # 处理特定错误
-                        if response.status == 403:
-                            return ToolResult(
-                                success=False,
-                                error="API quota exceeded or insufficient balance"
-                            )
-                        elif response.status == 401:
-                            return ToolResult(
-                                success=False,
-                                error="Invalid API key"
-                            )
-                        else:
-                            return ToolResult(
-                                success=False,
-                                error=f"Search API error: {response.status}"
-                            )
-                    
-                    # 解析响应
-                    result = await response.json()
-                    
-                    if result.get("code") != 200:
+
+        last_error: str = ""
+        for attempt in range(self._MAX_RETRIES + 1):
+            try:
+                return await self._do_search(headers, payload, query)
+            except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+                last_error = str(e)
+                if attempt < self._MAX_RETRIES:
+                    delay = self._BASE_DELAY * (2 ** attempt) * (0.5 + random.random())
+                    logger.warning(
+                        f"Search attempt {attempt + 1} failed ({type(e).__name__}), "
+                        f"retrying in {delay:.1f}s..."
+                    )
+                    await asyncio.sleep(delay)
+
+        logger.error(f"Search failed after {self._MAX_RETRIES + 1} attempts: {last_error}")
+        return ToolResult(success=False, error=f"Search failed after retries: {last_error}")
+
+    async def _do_search(
+        self, headers: Dict[str, str], payload: Dict[str, Any], query: str
+    ) -> ToolResult:
+        """Execute a single search request. Raises on network-level errors."""
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                BOCHA_API_URL,
+                headers=headers,
+                json=payload,
+                timeout=aiohttp.ClientTimeout(total=30)
+            ) as response:
+
+                if response.status != 200:
+                    error_text = await response.text()
+                    logger.error(f"Search API error: {response.status} - {error_text}")
+
+                    # Non-retryable HTTP errors — return immediately
+                    if response.status == 403:
                         return ToolResult(
                             success=False,
-                            error=f"Search failed: {result.get('message', 'Unknown error')}"
+                            error="API quota exceeded or insufficient balance"
                         )
-                    
-                    # 格式化结果为XML
-                    xml_result = self._format_results_to_xml(result.get("data", {}))
-                    
-                    # 记录统计
-                    web_pages = result.get("data", {}).get("webPages", {})
-                    total_matches = web_pages.get("totalEstimatedMatches", 0)
-                    actual_results = len(web_pages.get("value", []))
-                    
-                    logger.info(
-                        f"Search completed: {actual_results} results from ~{total_matches:,} matches"
-                    )
-                    
+                    elif response.status == 401:
+                        return ToolResult(
+                            success=False,
+                            error="Invalid API key"
+                        )
+                    else:
+                        return ToolResult(
+                            success=False,
+                            error=f"Search API error: {response.status}"
+                        )
+
+                # 解析响应
+                result = await response.json()
+
+                if result.get("code") != 200:
                     return ToolResult(
-                        success=True,
-                        data=xml_result,
-                        metadata={
-                            "query": query,
-                            "total_matches": total_matches,
-                            "results_count": actual_results,
-                            "log_id": result.get("log_id")
-                        }
+                        success=False,
+                        error=f"Search failed: {result.get('message', 'Unknown error')}"
                     )
-                    
-        except asyncio.TimeoutError:
-            logger.error("Search request timeout")
-            return ToolResult(success=False, error="Search request timeout")
-        except Exception as e:
-            logger.exception(f"Search failed: {str(e)}")
-            return ToolResult(success=False, error=f"Search failed: {str(e)}")
+
+                # 格式化结果为XML
+                xml_result = self._format_results_to_xml(result.get("data", {}))
+
+                # 记录统计
+                web_pages = result.get("data", {}).get("webPages", {})
+                total_matches = web_pages.get("totalEstimatedMatches", 0)
+                actual_results = len(web_pages.get("value", []))
+
+                logger.info(
+                    f"Search completed: {actual_results} results from ~{total_matches:,} matches"
+                )
+
+                return ToolResult(
+                    success=True,
+                    data=xml_result,
+                    metadata={
+                        "query": query,
+                        "total_matches": total_matches,
+                        "results_count": actual_results,
+                        "log_id": result.get("log_id")
+                    }
+                )
     
     def _format_results_to_xml(self, data: Dict[str, Any]) -> str:
         """

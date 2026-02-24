@@ -94,12 +94,13 @@ async def stream_events(
         except Exception as e:
             # 其他错误
             logger.exception(f"Stream {thread_id}: unexpected error: {e}")
+            error_detail = str(e) if config.DEBUG else "Internal server error"
             error_event = {
                 "type": "error",
                 "timestamp": __import__("datetime").datetime.now().isoformat(),
                 "data": {
                     "success": False,
-                    "error": str(e)
+                    "error": error_detail
                 }
             }
             yield format_sse_event(error_event, event="error")

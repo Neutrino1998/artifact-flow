@@ -77,7 +77,8 @@ async def upload_file_new_session(
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
     except RuntimeError as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        error_detail = str(e) if config.DEBUG else "Internal server error"
+        raise HTTPException(status_code=500, detail=error_detail)
 
     # Create conversation (auto-creates ArtifactSession)
     conversation_id = f"conv-{uuid4().hex}"
@@ -147,7 +148,8 @@ async def list_artifacts(
 
     except Exception as e:
         logger.exception(f"Error listing artifacts: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        error_detail = str(e) if config.DEBUG else "Internal server error"
+        raise HTTPException(status_code=500, detail=error_detail)
 
 
 @router.post("/{session_id}/upload", response_model=UploadResponse)
@@ -182,7 +184,8 @@ async def upload_file(
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
     except RuntimeError as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        error_detail = str(e) if config.DEBUG else "Internal server error"
+        raise HTTPException(status_code=500, detail=error_detail)
 
     # Create artifact
     success, message, info = await artifact_manager.create_from_upload(
@@ -243,7 +246,8 @@ async def export_artifact(
     try:
         docx_bytes = await converter.export_docx(result["content"])
     except RuntimeError as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        error_detail = str(e) if config.DEBUG else "Internal server error"
+        raise HTTPException(status_code=500, detail=error_detail)
 
     filename = result["title"].replace("/", "-").replace("\\", "-") + ".docx"
     # RFC 5987: use filename* for non-ASCII names, with ASCII fallback

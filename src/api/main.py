@@ -32,6 +32,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     DocConverter.check_pandoc()
     DocConverter.check_pymupdf()
     await init_globals()
+
+    # Sync logger debug level from API config (single source of truth)
+    from utils.logger import set_global_debug
+    set_global_debug(config.DEBUG)
+
     logger.info("ArtifactFlow API started successfully")
 
     yield

@@ -428,39 +428,23 @@ class ConversationManager:
         Returns:
             对话列表
         """
-        if self.repository:
-            try:
-                conversations = await self.repository.list_conversations(
-                    limit=limit,
-                    offset=offset,
-                    user_id=user_id,
-                    load_messages=True
-                )
-                return [
-                    {
-                        "conversation_id": conv.id,
-                        "title": conv.title,
-                        "message_count": len(conv.messages) if conv.messages else 0,
-                        "created_at": conv.created_at.isoformat(),
-                        "updated_at": conv.updated_at.isoformat()
-                    }
-                    for conv in conversations
-                ]
-            except Exception as e:
-                logger.warning(f"Failed to list conversations from DB: {e}")
-
-        # 回退到内存数据
-        conversations = []
-        for conv_id, cache in self._cache.items():
-            conversations.append({
-                "conversation_id": conv_id,
-                "title": None,
-                "message_count": len(cache.messages),
-                "branch_count": len(cache.branches),
-                "created_at": cache.created_at,
-                "updated_at": cache.updated_at
-            })
-        return conversations
+        repo = self._ensure_repository()
+        conversations = await repo.list_conversations(
+            limit=limit,
+            offset=offset,
+            user_id=user_id,
+            load_messages=True
+        )
+        return [
+            {
+                "conversation_id": conv.id,
+                "title": conv.title,
+                "message_count": len(conv.messages) if conv.messages else 0,
+                "created_at": conv.created_at.isoformat(),
+                "updated_at": conv.updated_at.isoformat()
+            }
+            for conv in conversations
+        ]
 
     async def count_conversations_async(self, user_id: Optional[str] = None) -> int:
         """
@@ -472,9 +456,8 @@ class ConversationManager:
         Returns:
             对话总数
         """
-        if self.repository:
-            return await self.repository.count_conversations(user_id=user_id)
-        return len(self._cache)
+        repo = self._ensure_repository()
+        return await repo.count_conversations(user_id=user_id)
 
     def clear_cache(self, conversation_id: Optional[str] = None) -> None:
         """

@@ -10,7 +10,8 @@ Chat Router
 """
 
 import asyncio
-from typing import Optional
+from contextlib import asynccontextmanager
+from typing import AsyncGenerator, AsyncIterator, Optional
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -34,7 +35,7 @@ from api.schemas.chat import (
     ConversationSummary,
     MessageResponse,
 )
-from api.services.stream_manager import StreamManager
+from api.services.stream_manager import StreamAlreadyExistsError, StreamManager
 from api.services.task_manager import TaskManager
 from core.conversation_manager import ConversationManager
 from repositories.base import NotFoundError
@@ -62,6 +63,83 @@ def _sanitize_error_event(event: dict) -> dict:
     if event.get("type") == "error" and isinstance(event.get("data"), dict):
         event = {**event, "data": {**event["data"], "error": "Internal server error"}}
     return event
+
+
+@asynccontextmanager
+async def _create_controller() -> AsyncGenerator:
+    """
+    Build a fresh ExecutionController with its own DB session.
+
+    Usage:
+        async with _create_controller() as ctrl:
+            async for event in ctrl.stream_execute(...):
+                ...
+    """
+    from api.dependencies import get_db_manager, get_checkpointer
+    from core.graph import create_multi_agent_graph
+    from core.controller import ExecutionController
+    from core.conversation_manager import ConversationManager as CM
+    from tools.implementations.artifact_ops import ArtifactManager
+    from repositories.artifact_repo import ArtifactRepository
+    from repositories.conversation_repo import ConversationRepository as CR
+
+    db_manager = get_db_manager()
+
+    async with db_manager.session() as session:
+        artifact_repo = ArtifactRepository(session)
+        artifact_manager = ArtifactManager(artifact_repo)
+
+        conv_repo = CR(session)
+        conv_manager = CM(conv_repo)
+
+        compiled_graph = await create_multi_agent_graph(
+            artifact_manager=artifact_manager,
+            checkpointer=get_checkpointer()
+        )
+
+        yield ExecutionController(
+            compiled_graph,
+            artifact_manager=artifact_manager,
+            conversation_manager=conv_manager
+        )
+
+
+async def _run_and_push(
+    stream_manager: StreamManager,
+    thread_id: str,
+    event_stream: AsyncIterator[dict],
+) -> None:
+    """
+    Consume events from a controller stream and push them to the StreamManager.
+
+    Handles timeout and unexpected errors, pushing sanitized error events.
+    Graph execution runs to completion even if the SSE client disconnects.
+    """
+    stream_closed = False
+    try:
+        async with asyncio.timeout(config.STREAM_TIMEOUT):
+            async for event in event_stream:
+                if stream_closed:
+                    continue
+                if not await stream_manager.push_event(thread_id, _sanitize_error_event(event)):
+                    logger.info(f"Stream {thread_id} closed, graph will continue to completion")
+                    stream_closed = True
+
+    except TimeoutError:
+        logger.error(f"Graph execution timed out after {config.STREAM_TIMEOUT}s for thread {thread_id}")
+        await stream_manager.push_event(thread_id, _sanitize_error_event({
+            "type": "error",
+            "timestamp": datetime.now().isoformat(),
+            "data": {"success": False, "error": f"Execution timed out after {config.STREAM_TIMEOUT}s"}
+        }))
+
+    except Exception as e:
+        logger.exception(f"Error in graph execution: {e}")
+        await stream_manager.push_event(thread_id, _sanitize_error_event({
+            "type": "error",
+            "timestamp": datetime.now().isoformat(),
+            "data": {"success": False, "error": str(e)}
+        }))
 
 
 @router.post("", response_model=ChatResponse)
@@ -112,84 +190,24 @@ async def send_message(
 
     # 4. 启动后台任务
     # 注意：不能直接用 BackgroundTasks，因为依赖（controller）会在请求结束后失效
-    # 需要创建一个独立的任务
     async def execute_and_push():
-        """
-        独立的执行任务
-
-        重新获取 controller 以避免依赖生命周期问题
-        """
-        from api.dependencies import (
-            get_db_manager,
-            get_checkpointer,
-        )
-        from core.graph import create_multi_agent_graph
-        from core.controller import ExecutionController
-        from core.conversation_manager import ConversationManager
-        from tools.implementations.artifact_ops import ArtifactManager
-        from repositories.artifact_repo import ArtifactRepository
-        from repositories.conversation_repo import ConversationRepository
-
-        db_manager = get_db_manager()
-
-        async with db_manager.session() as session:
-            # 创建请求级别的依赖
-            artifact_repo = ArtifactRepository(session)
-            artifact_manager = ArtifactManager(artifact_repo)
-
-            conv_repo = ConversationRepository(session)
-            conv_manager = ConversationManager(conv_repo)
-
-            # 创建 Graph 和 Controller
-            compiled_graph = await create_multi_agent_graph(
-                artifact_manager=artifact_manager,
-                checkpointer=get_checkpointer()
+        async with _create_controller() as ctrl:
+            # Pass parent_message_id only when explicitly provided in request;
+            # otherwise let controller auto-detect via active_branch
+            parent_kwargs = {}
+            if 'parent_message_id' in request.model_fields_set:
+                parent_kwargs['parent_message_id'] = request.parent_message_id
+            await _run_and_push(
+                stream_manager,
+                thread_id,
+                ctrl.stream_execute(
+                    content=request.content,
+                    conversation_id=conversation_id,
+                    thread_id=thread_id,
+                    message_id=message_id,
+                    **parent_kwargs,
+                ),
             )
-
-            ctrl = ExecutionController(
-                compiled_graph,
-                artifact_manager=artifact_manager,
-                conversation_manager=conv_manager
-            )
-
-            # 执行并推送事件
-            # Graph 执行独立于 SSE 连接：即使前端断开，graph 仍运行到完成，结果持久化到数据库
-            stream_closed = False
-            try:
-                async with asyncio.timeout(config.STREAM_TIMEOUT):
-                    # Pass parent_message_id only when explicitly provided in request;
-                    # otherwise let controller auto-detect via active_branch
-                    parent_kwargs = {}
-                    if 'parent_message_id' in request.model_fields_set:
-                        parent_kwargs['parent_message_id'] = request.parent_message_id
-                    async for event in ctrl.stream_execute(
-                        content=request.content,
-                        conversation_id=conversation_id,
-                        thread_id=thread_id,
-                        message_id=message_id,
-                        **parent_kwargs,
-                    ):
-                        if stream_closed:
-                            continue
-                        if not await stream_manager.push_event(thread_id, _sanitize_error_event(event)):
-                            logger.info(f"Stream {thread_id} closed, graph will continue to completion")
-                            stream_closed = True
-
-            except TimeoutError:
-                logger.error(f"Graph execution timed out after {config.STREAM_TIMEOUT}s for thread {thread_id}")
-                await stream_manager.push_event(thread_id, _sanitize_error_event({
-                    "type": "error",
-                    "timestamp": datetime.now().isoformat(),
-                    "data": {"success": False, "error": f"Execution timed out after {config.STREAM_TIMEOUT}s"}
-                }))
-
-            except Exception as e:
-                logger.exception(f"Error in graph execution: {e}")
-                await stream_manager.push_event(thread_id, _sanitize_error_event({
-                    "type": "error",
-                    "timestamp": datetime.now().isoformat(),
-                    "data": {"success": False, "error": str(e)}
-                }))
 
     # 5. 提交到 TaskManager（持有引用 + 并发控制）
     await task_manager.submit(thread_id, execute_and_push())
@@ -359,7 +377,7 @@ async def resume_execution(
     # 2. 创建新的 stream（可能使用相同的 thread_id，绑定 owner）
     try:
         await stream_manager.create_stream(thread_id, owner_user_id=user_id)
-    except Exception:
+    except StreamAlreadyExistsError:
         # 如果 stream 已存在，先关闭再创建
         await stream_manager.close_stream(thread_id)
         await stream_manager.create_stream(thread_id, owner_user_id=user_id)
@@ -375,68 +393,17 @@ async def resume_execution(
 
     # 启动后台任务
     async def execute_resume():
-        from api.dependencies import (
-            get_db_manager,
-            get_checkpointer,
-        )
-        from core.graph import create_multi_agent_graph
-        from core.controller import ExecutionController
-        from core.conversation_manager import ConversationManager
-        from tools.implementations.artifact_ops import ArtifactManager
-        from repositories.artifact_repo import ArtifactRepository
-        from repositories.conversation_repo import ConversationRepository
-
-        db_manager = get_db_manager()
-
-        async with db_manager.session() as session:
-            artifact_repo = ArtifactRepository(session)
-            artifact_manager = ArtifactManager(artifact_repo)
-
-            conv_repo = ConversationRepository(session)
-            conv_manager = ConversationManager(conv_repo)
-
-            compiled_graph = await create_multi_agent_graph(
-                artifact_manager=artifact_manager,
-                checkpointer=get_checkpointer()
+        async with _create_controller() as ctrl:
+            await _run_and_push(
+                stream_manager,
+                thread_id,
+                ctrl.stream_execute(
+                    thread_id=thread_id,
+                    conversation_id=conv_id,
+                    message_id=request.message_id,
+                    resume_data=resume_data,
+                ),
             )
-
-            ctrl = ExecutionController(
-                compiled_graph,
-                artifact_manager=artifact_manager,
-                conversation_manager=conv_manager
-            )
-
-            # Graph 执行独立于 SSE 连接：即使前端断开，graph 仍运行到完成，结果持久化到数据库
-            stream_closed = False
-            try:
-                async with asyncio.timeout(config.STREAM_TIMEOUT):
-                    async for event in ctrl.stream_execute(
-                        thread_id=thread_id,
-                        conversation_id=conv_id,
-                        message_id=request.message_id,
-                        resume_data=resume_data,
-                    ):
-                        if stream_closed:
-                            continue
-                        if not await stream_manager.push_event(thread_id, _sanitize_error_event(event)):
-                            logger.info(f"Stream {thread_id} closed, graph will continue to completion")
-                            stream_closed = True
-
-            except TimeoutError:
-                logger.error(f"Resume execution timed out after {config.STREAM_TIMEOUT}s for thread {thread_id}")
-                await stream_manager.push_event(thread_id, _sanitize_error_event({
-                    "type": "error",
-                    "timestamp": datetime.now().isoformat(),
-                    "data": {"success": False, "error": f"Execution timed out after {config.STREAM_TIMEOUT}s"}
-                }))
-
-            except Exception as e:
-                logger.exception(f"Error in resume execution: {e}")
-                await stream_manager.push_event(thread_id, _sanitize_error_event({
-                    "type": "error",
-                    "timestamp": datetime.now().isoformat(),
-                    "data": {"success": False, "error": str(e)}
-                }))
 
     await task_manager.submit(thread_id, execute_resume())
 
