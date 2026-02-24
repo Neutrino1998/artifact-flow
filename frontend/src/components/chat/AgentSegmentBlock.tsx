@@ -23,6 +23,22 @@ function stripToolCallXml(text: string): string {
   return cleaned.trimEnd();
 }
 
+/**
+ * Extract only <tool_call> XML blocks (complete and partial) from text.
+ * Inverse of stripToolCallXml — returns only the XML parts.
+ */
+function extractToolCallXml(text: string): string {
+  const parts: string[] = [];
+  for (const m of text.matchAll(/<tool_call>[\s\S]*?<\/tool_call>/g)) {
+    parts.push(m[0]);
+  }
+  // Trailing partial block (opening without closing)
+  const afterComplete = text.replace(/<tool_call>[\s\S]*?<\/tool_call>/g, '');
+  const partial = afterComplete.match(/<tool_call>[\s\S]*$/);
+  if (partial) parts.push(partial[0]);
+  return parts.join('\n');
+}
+
 interface AgentSegmentBlockProps {
   segment: ExecutionSegment;
   isActive: boolean;       // true = currently executing segment (last + isStreaming)
@@ -34,6 +50,37 @@ function AgentSegmentBlock({ segment, isActive, defaultExpanded }: AgentSegmentB
 
   const isExpanded = isActive || expanded;
   const hasBody = !!(segment.reasoningContent || segment.llmOutput || segment.toolCalls.length > 0 || segment.content);
+
+  // --- Compute display values upfront ---
+  // Whether this segment involves tool calls (past or in-progress)
+  const hasTool = !!segment.llmOutput || segment.content.includes('<tool_call');
+
+  // Source for pre-tool text and XML: prefer llmOutput (stable), fall back to streaming content
+  const toolSource = segment.llmOutput || segment.content;
+
+  // Pre-tool text: text before <tool_call>, rendered as markdown in a stable position.
+  // When no tool calls, this is empty and mainContent handles everything.
+  const preToolText = hasTool ? stripToolCallXml(toolSource) : '';
+
+  // XML tool call blocks only (for AgentOutputBlock)
+  const toolCallXml = hasTool ? extractToolCallXml(toolSource) : '';
+
+  // Whether XML is currently being streamed (live indicator in AgentOutputBlock)
+  const isStreamingXml = isActive && !segment.isThinking && !segment.llmOutput
+    && segment.content.includes('<tool_call');
+
+  // Main content: post-tool text from a new LLM round, or normal content when no tools involved.
+  // - No tool calls: show content as-is
+  // - Tool calls present but content still has XML (between LLM_COMPLETE and TOOL_START): empty (pre-tool text already shown above)
+  // - Tool calls present, content cleared or has new text: show the new text
+  let mainContent = '';
+  if (hasTool) {
+    if (segment.llmOutput && segment.content && !segment.content.includes('<tool_call')) {
+      mainContent = segment.content;
+    }
+  } else {
+    mainContent = segment.content;
+  }
 
   return (
     <div className="border border-border dark:border-border-dark rounded-card overflow-hidden">
@@ -94,32 +141,35 @@ function AgentSegmentBlock({ segment, isActive, defaultExpanded }: AgentSegmentB
             );
           })()}
 
-          {/* Raw LLM output (shown when tools were called, or live during XML streaming) */}
-          {(() => {
-            const streamingXml = isActive && !segment.isThinking && !segment.llmOutput
-              && segment.content.includes('<tool_call');
-            const output = segment.llmOutput || (streamingXml ? segment.content : '');
-            if (!output) return null;
-            return <AgentOutputBlock content={output} defaultExpanded={streamingXml} isLive={streamingXml} />;
-          })()}
+          {/* Pre-tool text — stable position; text before <tool_call> rendered as markdown.
+              Appears in the same DOM slot whether sourced from streaming content or llmOutput,
+              so new elements (AgentOutput, ToolCards) appear BELOW without layout shift. */}
+          {preToolText && (
+            <div className={PROSE_CLASSES}>
+              <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]}>
+                {preToolText}
+              </ReactMarkdown>
+            </div>
+          )}
+
+          {/* Agent Output — only XML tool_call blocks */}
+          {toolCallXml && (
+            <AgentOutputBlock content={toolCallXml} defaultExpanded={isStreamingXml} isLive={isStreamingXml} />
+          )}
 
           {/* Tool calls */}
           {segment.toolCalls.map((tc) => (
             <ToolCallCard key={tc.id} toolCall={tc} />
           ))}
 
-          {/* Content — markdown when complete or active streaming */}
-          {segment.content && (() => {
-            const displayContent = stripToolCallXml(segment.content);
-            if (!displayContent) return null;
-            return (
-              <div className={`${PROSE_CLASSES} ${isActive ? 'streaming-cursor' : ''}`}>
-                <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]}>
-                  {displayContent}
-                </ReactMarkdown>
-              </div>
-            );
-          })()}
+          {/* Main content — normal streaming text or post-tool text from new LLM round */}
+          {mainContent && (
+            <div className={`${PROSE_CLASSES} ${isActive ? 'streaming-cursor' : ''}`}>
+              <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]}>
+                {mainContent}
+              </ReactMarkdown>
+            </div>
+          )}
         </div>
       )}
     </div>
