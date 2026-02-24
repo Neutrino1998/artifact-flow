@@ -52,7 +52,7 @@ export default function UserMenu({ collapsed }: { collapsed?: boolean }) {
             className="w-10 h-10 flex items-center justify-center rounded-lg text-text-secondary dark:text-text-secondary-dark hover:bg-bg dark:hover:bg-bg-dark transition-colors"
             title={user.display_name || user.username}
           >
-            <div className="w-7 h-7 rounded-full bg-accent/15 text-accent flex items-center justify-center text-xs font-medium">
+            <div className="w-7 h-7 rounded-lg bg-accent/15 text-accent flex items-center justify-center text-xs font-medium">
               {initial}
             </div>
           </button>
@@ -61,7 +61,7 @@ export default function UserMenu({ collapsed }: { collapsed?: boolean }) {
             onClick={() => setPopoverOpen((o) => !o)}
             className="w-full flex items-center gap-3 px-3 py-2.5 bg-bg dark:bg-bg-dark rounded-card hover:bg-surface dark:hover:bg-surface-dark transition-colors text-left"
           >
-            <div className="w-8 h-8 rounded-full bg-accent/15 text-accent flex items-center justify-center text-sm font-medium shrink-0">
+            <div className="w-8 h-8 rounded-lg bg-accent/15 text-accent flex items-center justify-center text-sm font-medium shrink-0">
               {initial}
             </div>
             <div className="min-w-0 flex-1">
