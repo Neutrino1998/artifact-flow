@@ -23,6 +23,14 @@ from utils.logger import get_logger
 logger = get_logger("ArtifactFlow")
 
 
+def _truncate_middle(text: str, max_len: int = 200) -> str:
+    """Truncate long text keeping head and tail with '...' in between."""
+    if len(text) <= max_len:
+        return text
+    half = (max_len - 5) // 2  # 5 chars for "\n...\n"
+    return text[:half] + "\n...\n" + text[-half:]
+
+
 # ============================================================
 # 内存对象（用于 diff-match-patch 处理）
 # ============================================================
@@ -803,8 +811,8 @@ class UpdateArtifactTool(BaseTool):
             if match_info and match_info.get("match_type") == "fuzzy":
                 result_data["fuzzy_match"] = {
                     "similarity": f"{match_info['similarity']:.1%}",
-                    "expected": match_info["expected_text"][:200],
-                    "matched": match_info["matched_text"][:200],
+                    "expected": _truncate_middle(match_info["expected_text"], 200),
+                    "matched": _truncate_middle(match_info["matched_text"], 200),
                     "note": "Used fuzzy matching because exact text was not found"
                 }
 
