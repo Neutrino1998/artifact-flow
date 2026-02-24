@@ -12,7 +12,7 @@ const config: Config = {
         },
         panel: {
           DEFAULT: '#ddd5c8',
-          dark: '#262520',
+          dark: '#222120',
         },
         bg: {
           DEFAULT: '#f5f0e8',
@@ -20,7 +20,7 @@ const config: Config = {
         },
         surface: {
           DEFAULT: '#ffffff',
-          dark: '#262520',
+          dark: '#2c2b28',
         },
         text: {
           primary: '#1a1a1a',
@@ -59,10 +59,10 @@ const config: Config = {
         bubble: '16px',
       },
       boxShadow: {
-        hover: '0 1px 2px rgba(0,0,0,0.05)',
-        modal: '0 4px 12px rgba(0,0,0,0.08)',
-        float: '0 2px 12px rgba(0,0,0,0.08), 0 0 1px rgba(0,0,0,0.05)',
-        sidebar: '2px 0 12px rgba(0,0,0,0.06)',
+        hover: 'var(--shadow-hover)',
+        modal: 'var(--shadow-modal)',
+        float: 'var(--shadow-float)',
+        sidebar: 'var(--shadow-sidebar)',
       },
     },
   },

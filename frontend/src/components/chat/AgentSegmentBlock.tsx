@@ -5,6 +5,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
 import type { ExecutionSegment } from '@/stores/streamStore';
+import { PROSE_CLASSES } from '@/lib/styles';
 import ThinkingBlock from './ThinkingBlock';
 import AgentOutputBlock from './AgentOutputBlock';
 import ToolCallCard from './ToolCallCard';
@@ -112,7 +113,7 @@ function AgentSegmentBlock({ segment, isActive, defaultExpanded }: AgentSegmentB
             const displayContent = stripToolCallXml(segment.content);
             if (!displayContent) return null;
             return (
-              <div className={`prose prose-sm dark:prose-invert max-w-none text-text-primary dark:text-text-primary-dark prose-headings:text-text-primary dark:prose-headings:text-text-primary-dark prose-a:text-accent prose-code:text-accent prose-pre:bg-chat dark:prose-pre:bg-bg-dark prose-pre:text-text-primary dark:prose-pre:text-text-primary-dark prose-pre:border prose-pre:border-panel dark:prose-pre:border-border-dark prose-hr:border-panel dark:prose-hr:border-panel-dark prose-thead:border-panel dark:prose-thead:border-panel-dark prose-tr:border-panel dark:prose-tr:border-panel-dark prose-th:border-panel dark:prose-th:border-panel-dark prose-td:border-panel dark:prose-td:border-panel-dark prose-blockquote:border-l-accent dark:prose-blockquote:border-l-accent prose-li:marker:text-text-primary dark:prose-li:marker:text-text-primary-dark ${isActive ? 'streaming-cursor' : ''}`}>
+              <div className={`${PROSE_CLASSES} ${isActive ? 'streaming-cursor' : ''}`}>
                 <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]}>
                   {displayContent}
                 </ReactMarkdown>

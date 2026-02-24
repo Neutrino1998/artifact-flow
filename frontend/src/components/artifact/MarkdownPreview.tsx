@@ -4,6 +4,7 @@ import { memo } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
+import { PROSE_CLASSES } from '@/lib/styles';
 
 interface MarkdownPreviewProps {
   content: string;
@@ -12,7 +13,7 @@ interface MarkdownPreviewProps {
 function MarkdownPreview({ content }: MarkdownPreviewProps) {
   return (
     <div className="p-5">
-      <div className="prose prose-sm dark:prose-invert max-w-none text-text-primary dark:text-text-primary-dark prose-headings:text-text-primary dark:prose-headings:text-text-primary-dark prose-a:text-accent prose-code:text-accent prose-pre:bg-chat dark:prose-pre:bg-bg-dark prose-pre:text-text-primary dark:prose-pre:text-text-primary-dark prose-pre:border prose-pre:border-panel dark:prose-pre:border-border-dark prose-hr:border-panel dark:prose-hr:border-panel-dark prose-thead:border-panel dark:prose-thead:border-panel-dark prose-tr:border-panel dark:prose-tr:border-panel-dark prose-th:border-panel dark:prose-th:border-panel-dark prose-td:border-panel dark:prose-td:border-panel-dark prose-blockquote:border-l-accent dark:prose-blockquote:border-l-accent prose-li:marker:text-text-primary dark:prose-li:marker:text-text-primary-dark">
+      <div className={PROSE_CLASSES}>
         <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]}>
           {content}
         </ReactMarkdown>
