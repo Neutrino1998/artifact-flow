@@ -21,7 +21,7 @@ class APIConfig(BaseSettings):
     # 服务器配置
     HOST: str = "0.0.0.0"
     PORT: int = 8000
-    DEBUG: bool = True
+    DEBUG: bool = False
 
     # CORS 配置
     CORS_ORIGINS: List[str] = ["http://localhost:3000"]  # Next.js 开发服务器

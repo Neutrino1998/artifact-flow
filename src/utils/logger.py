@@ -8,7 +8,6 @@
 - 请求级上下文追踪（contextvars）
 """
 
-import os
 import sys
 import json
 import logging
@@ -244,14 +243,12 @@ def get_logger(name: Optional[str] = None, **kwargs) -> Logger:
     
     if name is None:
         if _default_logger is None:
-            debug = _global_debug or os.getenv('DEBUG', 'false').lower() == 'true'
-            _default_logger = Logger(debug=debug, **kwargs)
+            _default_logger = Logger(debug=_global_debug, **kwargs)
         return _default_logger
-    
+
     # 从缓存获取或创建新实例
     if name not in _logger_cache:
-        debug = _global_debug or os.getenv('DEBUG', 'false').lower() == 'true'
-        _logger_cache[name] = Logger(name=name, debug=debug, **kwargs)
+        _logger_cache[name] = Logger(name=name, debug=_global_debug, **kwargs)
     
     return _logger_cache[name]
 
