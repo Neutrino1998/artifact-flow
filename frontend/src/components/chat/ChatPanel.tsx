@@ -108,7 +108,7 @@ export default function ChatPanel() {
           <div className="max-w-3xl mx-auto px-4 py-6 space-y-6">
             {pendingUserMessage && (
               <div className="flex justify-end">
-                <div className="max-w-[80%] bg-panel dark:bg-surface-dark border border-border dark:border-border-dark rounded-bubble px-4 py-3 text-sm text-text-primary dark:text-text-primary-dark whitespace-pre-wrap break-words">
+                <div className="max-w-[80%] bg-panel dark:bg-surface-dark rounded-bubble px-4 py-3 text-sm text-text-primary dark:text-text-primary-dark whitespace-pre-wrap break-words">
                   {pendingUserMessage}
                 </div>
               </div>

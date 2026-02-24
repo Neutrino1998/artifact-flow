@@ -14,6 +14,11 @@ const config: Config = {
           DEFAULT: '#ddd5c8',
           dark: '#222120',
         },
+        action: {
+          DEFAULT: '#1f1e1b',
+          hover: '#151412',
+          contrast: '#f3eee3',
+        },
         bg: {
           DEFAULT: '#f5f0e8',
           dark: '#1a1915',
