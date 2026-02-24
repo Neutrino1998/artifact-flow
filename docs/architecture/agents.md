@@ -29,7 +29,7 @@ class AgentConfig:
     required_tools: List[str] = []   # 所需工具名称列表
 
     # LLM 配置
-    model: str = "qwen-plus"         # LLM 模型
+    model: str = "qwen3.5-flash-no-thinking"  # LLM 模型
     temperature: float = 0.7         # 生成温度
     max_tool_rounds: int = 3         # 单次执行最大工具调用轮数
     streaming: bool = False          # 是否默认流式输出
@@ -243,7 +243,7 @@ class LeadAgent(BaseAgent):
                     "read_artifact",
                     "call_subagent"
                 ],
-                model="qwen3-next-80b-thinking",  # 使用思考模型
+                model="qwen3.5-plus",  # 使用思考模型
                 temperature=0.7,
                 max_tool_rounds=100,  # 需要更多轮次协调
                 streaming=True
@@ -329,7 +329,7 @@ class SearchAgent(BaseAgent):
                 description="Web search and information retrieval specialist",
                 capabilities=["Web search", "Information retrieval"],
                 required_tools=["web_search"],
-                model="qwen3-next-80b-instruct",
+                model="qwen3.5-flash-no-thinking",
                 temperature=0.5,      # 较低温度 for 精确搜索
                 max_tool_rounds=3,    # 最多 3 轮搜索优化
                 streaming=True
@@ -376,7 +376,7 @@ class CrawlAgent(BaseAgent):
                     "IMPORTANT: Instructions must include a specific URL to crawl"
                 ],
                 required_tools=["web_fetch"],
-                model="qwen3-next-80b-instruct",
+                model="qwen3.5-flash-no-thinking",
                 temperature=0.3,      # 更低温度 for 精确提取
                 max_tool_rounds=2,    # 通常 1-2 轮即可
                 streaming=True

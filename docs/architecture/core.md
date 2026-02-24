@@ -170,7 +170,7 @@ class ToolCallRecord(TypedDict):
 append_agent_execution(
     metrics=state["execution_metrics"],
     agent_name="lead_agent",
-    model="qwen-plus",
+    model="qwen3.5-plus",
     token_usage={"input_tokens": 1000, "output_tokens": 500, "total_tokens": 1500},
     started_at=start_time.isoformat(),
     completed_at=end_time.isoformat(),

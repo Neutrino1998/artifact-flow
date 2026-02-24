@@ -291,17 +291,16 @@ BOCHA_API_KEY=sk-xxx
 |---------|--------|------|
 | `gpt-4o` | OpenAI | GPT-4o |
 | `gpt-4o-mini` | OpenAI | GPT-4o Mini |
-| `qwen-turbo` | 通义千问 | 快速响应 |
-| `qwen-plus` | 通义千问 | 增强版本 |
-| `qwen-max` | 通义千问 | 高能力通用模型 |
-| `qwen3-30b-thinking` | 通义千问 | 思考模型 ⭐ |
-| `qwen3-30b-instruct` | 通义千问 | 指令模型 |
-| `qwen3-next-80b-thinking` | 通义千问 | Next 80B 思考模型（Lead 默认） ⭐ |
-| `qwen3-next-80b-instruct` | 通义千问 | Next 80B 指令模型（Search/Crawl 默认） |
+| `qwen3.5-plus` | 通义千问 | Qwen3.5 Plus 思考模式（Lead 默认） ⭐ |
+| `qwen3.5-plus-no-thinking` | 通义千问 | Qwen3.5 Plus 非思考模式 |
+| `qwen3.5-flash` | 通义千问 | Qwen3.5 Flash 思考模式 |
+| `qwen3.5-flash-no-thinking` | 通义千问 | Qwen3.5 Flash 非思考模式（Search/Crawl 默认） |
+| `qwen3.5-35b-a3b` | 通义千问 | Qwen3.5 35B 开源 思考模式 |
+| `qwen3.5-35b-a3b-no-thinking` | 通义千问 | Qwen3.5 35B 开源 非思考模式 |
 | `deepseek-chat` | DeepSeek | 对话模型 |
 | `deepseek-reasoner` | DeepSeek | 推理模型 ⭐ |
 
-默认 Agent 模型映射：`lead_agent` 使用 `qwen3-next-80b-thinking`，`search_agent`/`crawl_agent` 使用 `qwen3-next-80b-instruct`。
+默认 Agent 模型映射：`lead_agent` 使用 `qwen3.5-plus`，`search_agent`/`crawl_agent` 使用 `qwen3.5-flash-no-thinking`。
 
 ### 自定义模型
 

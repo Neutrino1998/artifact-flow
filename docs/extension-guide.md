@@ -38,7 +38,7 @@ class CodeAgent(BaseAgent):
                     "read_file",      # 需要先创建这些工具
                     "analyze_code"
                 ],
-                model="qwen3-next-80b-instruct",
+                model="qwen3.5-flash-no-thinking",
                 temperature=0.3,  # 代码分析需要精确
                 max_tool_rounds=100,
                 streaming=True
@@ -362,11 +362,10 @@ await artifact_manager.create_artifact(
 MODEL_CONFIGS = {
     # 现有配置...
 
-    # 添加新模型（预定义配置只支持 model 和 reasoning 标志）
+    # 添加新模型
     "my-custom-model": {
         "model": "dashscope/my-model-name",  # LiteLLM 格式：provider/model
-        "support_reasoning": False,           # 是否支持推理模式
-        "auto_reasoning": False,              # 模型是否自带推理（如 DeepSeek R1）
+        "extra_params": {},                   # 额外参数（如 enable_thinking）
         "description": "My custom model"
     }
 }

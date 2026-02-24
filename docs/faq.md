@@ -305,7 +305,7 @@ VersionConflictError: Version mismatch for artifact 'xxx': expected lock_version
 ```python
 # 对于简单任务，使用更快的模型
 AgentConfig(
-    model="qwen-turbo",  # 比 thinking 模型快
+    model="qwen3.5-flash-no-thinking",  # 比思考模型快
     # ...
 )
 ```
