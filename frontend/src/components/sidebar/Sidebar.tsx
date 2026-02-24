@@ -126,7 +126,9 @@ export default function Sidebar() {
       <ConversationList />
 
       {/* User menu at bottom */}
-      <UserMenu />
+      <div className="px-3 pb-3 pt-2">
+        <UserMenu />
+      </div>
     </div>
   );
 }
