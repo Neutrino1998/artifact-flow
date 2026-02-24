@@ -20,6 +20,39 @@ import type {
 import { useAuthStore } from '@/stores/authStore';
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+const CONVERSATION_DETAIL_TTL_MS = 20_000;
+
+type ConversationCacheItem = {
+  data: ConversationDetail;
+  expiresAt: number;
+};
+
+const conversationDetailCache = new Map<string, ConversationCacheItem>();
+const conversationDetailInFlight = new Map<string, Promise<ConversationDetail>>();
+const conversationCacheEpoch = new Map<string, number>();
+
+type GetConversationOptions = {
+  force?: boolean;
+};
+
+function nextConversationEpoch(convId: string): number {
+  const next = (conversationCacheEpoch.get(convId) ?? 0) + 1;
+  conversationCacheEpoch.set(convId, next);
+  return next;
+}
+
+export function invalidateConversationCache(convId?: string): void {
+  if (convId) {
+    nextConversationEpoch(convId);
+    conversationDetailCache.delete(convId);
+    conversationDetailInFlight.delete(convId);
+    return;
+  }
+
+  conversationDetailCache.clear();
+  conversationDetailInFlight.clear();
+  conversationCacheEpoch.clear();
+}
 
 function authHeaders(): Record<string, string> {
   const token = useAuthStore.getState().token;
@@ -72,26 +105,67 @@ export function listConversations(limit = 20, offset = 0) {
   );
 }
 
-export function getConversation(convId: string) {
-  return request<ConversationDetail>(`/api/v1/chat/${convId}`);
+export function getConversation(convId: string, options?: GetConversationOptions) {
+  const force = options?.force ?? false;
+  const now = Date.now();
+
+  if (!force) {
+    const cached = conversationDetailCache.get(convId);
+    if (cached && cached.expiresAt > now) {
+      return Promise.resolve(cached.data);
+    }
+  }
+
+  const inFlight = conversationDetailInFlight.get(convId);
+  if (inFlight) {
+    return inFlight;
+  }
+
+  const requestEpoch = conversationCacheEpoch.get(convId) ?? 0;
+  const req = request<ConversationDetail>(`/api/v1/chat/${convId}`)
+    .then((detail) => {
+      // Skip cache write if cache was invalidated while request was in-flight.
+      if ((conversationCacheEpoch.get(convId) ?? 0) === requestEpoch) {
+        conversationDetailCache.set(convId, {
+          data: detail,
+          expiresAt: Date.now() + CONVERSATION_DETAIL_TTL_MS,
+        });
+      }
+      return detail;
+    })
+    .finally(() => {
+      if (conversationDetailInFlight.get(convId) === req) {
+        conversationDetailInFlight.delete(convId);
+      }
+    });
+
+  conversationDetailInFlight.set(convId, req);
+  return req;
 }
 
-export function sendMessage(body: ChatRequest) {
-  return request<ChatResponse>('/api/v1/chat', {
+export async function sendMessage(body: ChatRequest) {
+  const res = await request<ChatResponse>('/api/v1/chat', {
     method: 'POST',
     body: JSON.stringify(body),
   });
+  // Message/branch updates make cached conversation detail stale.
+  invalidateConversationCache(body.conversation_id ?? res.conversation_id);
+  return res;
 }
 
-export function deleteConversation(convId: string) {
-  return request(`/api/v1/chat/${convId}`, { method: 'DELETE' });
+export async function deleteConversation(convId: string) {
+  const res = await request(`/api/v1/chat/${convId}`, { method: 'DELETE' });
+  invalidateConversationCache(convId);
+  return res;
 }
 
-export function resumeExecution(convId: string, body: ResumeRequest) {
-  return request<ResumeResponse>(`/api/v1/chat/${convId}/resume`, {
+export async function resumeExecution(convId: string, body: ResumeRequest) {
+  const res = await request<ResumeResponse>(`/api/v1/chat/${convId}/resume`, {
     method: 'POST',
     body: JSON.stringify(body),
   });
+  invalidateConversationCache(convId);
+  return res;
 }
 
 // Artifacts

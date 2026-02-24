@@ -53,7 +53,7 @@ export function useSSE() {
     async (conversationId: string) => {
       try {
         const [detail, list] = await Promise.all([
-          api.getConversation(conversationId),
+          api.getConversation(conversationId, { force: true }),
           api.listConversations(20, 0),
         ]);
         setCurrent(detail);
