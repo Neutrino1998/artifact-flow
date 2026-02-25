@@ -39,33 +39,41 @@ export default function ChatPanel() {
     e.preventDefault();
     setIsDragOver(false);
 
-    const file = e.dataTransfer.files[0];
-    if (!file) return;
+    const files = Array.from(e.dataTransfer.files);
+    if (files.length === 0) return;
 
     setUploading(true);
     setUploadError(null);
 
+    let currentSessionId = sessionId;
+    let lastResultId: string | null = null;
+
     try {
-      let result;
-      if (sessionId) {
-        result = await uploadFile(sessionId, file);
-      } else {
-        result = await uploadFileNewSession(file);
-        const [detail, list] = await Promise.all([
-          getConversation(result.session_id),
-          listConversations(20, 0),
-        ]);
-        setCurrent(detail);
-        setConversations(list.conversations, list.total, list.has_more);
+      for (const file of files) {
+        let result;
+        if (currentSessionId) {
+          result = await uploadFile(currentSessionId, file);
+        } else {
+          result = await uploadFileNewSession(file);
+          currentSessionId = result.session_id;
+          const [detail, list] = await Promise.all([
+            getConversation(result.session_id),
+            listConversations(20, 0),
+          ]);
+          setCurrent(detail);
+          setConversations(list.conversations, list.total, list.has_more);
+        }
+        lastResultId = result.id;
       }
 
       await loadArtifacts();
       setArtifactPanelVisible(true);
-      selectArtifact(result.id);
+      if (lastResultId) selectArtifact(lastResultId);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Upload failed';
       setUploadError(message);
       window.alert(message);
+      if (lastResultId) await loadArtifacts();
     } finally {
       setUploading(false);
     }
