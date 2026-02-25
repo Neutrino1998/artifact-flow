@@ -183,7 +183,7 @@ export default function UserManagementModal({ open, onClose }: Props) {
             新建用户
           </button>
         ) : (
-          <div className="mb-4 p-3 bg-bg dark:bg-bg-dark border border-border dark:border-border-dark rounded-lg space-y-2">
+          <div className="mb-4 p-3 bg-bg dark:bg-bg-dark rounded-lg space-y-2">
             <div className="grid grid-cols-2 gap-2">
               <input
                 type="text"
