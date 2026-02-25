@@ -31,7 +31,6 @@ class AgentConfig:
 
     # LLM配置
     model: str = "qwen3.5-flash-no-thinking"
-    temperature: float = 0.7
     max_tool_rounds: int = 3  # 最大工具调用轮数
     streaming: bool = True  # 是否默认流式输出
 
@@ -83,7 +82,6 @@ class BaseAgent(ABC):
         from models.llm import create_llm
         self.llm = create_llm(
             model=config.model,
-            temperature=config.temperature,
             streaming=config.streaming
         )
         

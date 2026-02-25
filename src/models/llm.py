@@ -42,36 +42,37 @@ MODEL_CONFIGS = {
     },
 
     # Qwen3.5 系列（混合思考模型，通过 enable_thinking 控制）
+    # 官方推荐采样参数：思考模式 temp=0.6/top_p=0.95/top_k=20，非思考模式 temp=0.7/top_p=0.8/top_k=20
     # 闭源
     "qwen3.5-plus": {
         "model": "dashscope/qwen3.5-plus",
-        "extra_params": {"enable_thinking": True},
+        "extra_params": {"enable_thinking": True, "temperature": 0.6, "top_p": 0.95, "top_k": 20},
         "description": "Qwen3.5 Plus（思考模式）",
     },
     "qwen3.5-plus-no-thinking": {
         "model": "dashscope/qwen3.5-plus",
-        "extra_params": {"enable_thinking": False},
+        "extra_params": {"enable_thinking": False, "temperature": 0.7, "top_p": 0.8, "top_k": 20, "presence_penalty": 1.5},
         "description": "Qwen3.5 Plus（非思考模式）",
     },
     "qwen3.5-flash": {
         "model": "dashscope/qwen3.5-flash",
-        "extra_params": {"enable_thinking": True},
+        "extra_params": {"enable_thinking": True, "temperature": 0.6, "top_p": 0.95, "top_k": 20},
         "description": "Qwen3.5 Flash（思考模式）",
     },
     "qwen3.5-flash-no-thinking": {
         "model": "dashscope/qwen3.5-flash",
-        "extra_params": {"enable_thinking": False},
+        "extra_params": {"enable_thinking": False, "temperature": 0.7, "top_p": 0.8, "top_k": 20, "presence_penalty": 1.5},
         "description": "Qwen3.5 Flash（非思考模式）",
     },
     # 开源
     "qwen3.5-35b-a3b": {
         "model": "dashscope/qwen3.5-35b-a3b",
-        "extra_params": {"enable_thinking": True},
+        "extra_params": {"enable_thinking": True, "temperature": 0.6, "top_p": 0.95, "top_k": 20},
         "description": "Qwen3.5 35B-A3B（思考模式）",
     },
     "qwen3.5-35b-a3b-no-thinking": {
         "model": "dashscope/qwen3.5-35b-a3b",
-        "extra_params": {"enable_thinking": False},
+        "extra_params": {"enable_thinking": False, "temperature": 0.7, "top_p": 0.8, "top_k": 20, "presence_penalty": 1.5},
         "description": "Qwen3.5 35B-A3B（非思考模式）",
     },
 

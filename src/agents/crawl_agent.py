@@ -44,7 +44,6 @@ class CrawlAgent(BaseAgent):
                 ],
                 required_tools=["web_fetch"],
                 model="qwen3.5-flash-no-thinking",
-                temperature=0.3,  # 更低温度for精确提取
                 max_tool_rounds=2,  # 通常1-2轮即可
                 streaming=True
             )

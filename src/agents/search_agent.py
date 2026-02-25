@@ -40,7 +40,6 @@ class SearchAgent(BaseAgent):
                 capabilities=["Web search", "Information retrieval"],
                 required_tools=["web_search"],
                 model="qwen3.5-flash-no-thinking",
-                temperature=0.5,  # 较低温度for精确搜索
                 max_tool_rounds=3,  # 最多3轮搜索优化
                 streaming=True
             )

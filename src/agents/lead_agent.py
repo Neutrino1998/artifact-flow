@@ -46,7 +46,6 @@ class LeadAgent(BaseAgent):
                     "call_subagent"
                 ],
                 model="qwen3.5-plus",
-                temperature=0.7,
                 max_tool_rounds=100,  # Lead需要更多轮次协调
                 streaming=True
             )
