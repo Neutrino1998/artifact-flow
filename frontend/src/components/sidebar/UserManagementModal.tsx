@@ -31,6 +31,12 @@ export default function UserManagementModal({ open, onClose }: Props) {
   const editRef = useRef<HTMLInputElement>(null);
   const savingRef = useRef(false);
 
+  // Reset password
+  const [resetPasswordId, setResetPasswordId] = useState<string | null>(null);
+  const [resetPasswordValue, setResetPasswordValue] = useState('');
+  const [resetting, setResetting] = useState(false);
+  const resetRef = useRef<HTMLInputElement>(null);
+
   const fetchUsers = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -111,6 +117,27 @@ export default function UserManagementModal({ open, onClose }: Props) {
       setError(err instanceof Error ? err.message : '更新显示名称失败');
     } finally {
       savingRef.current = false;
+    }
+  };
+
+  const startResetPassword = (user: UserResponse) => {
+    setResetPasswordId(user.id);
+    setResetPasswordValue('');
+    setTimeout(() => resetRef.current?.focus(), 0);
+  };
+
+  const handleResetPassword = async (user: UserResponse) => {
+    if (!resetPasswordValue.trim() || resetPasswordValue.length < 4) return;
+    setResetting(true);
+    setError(null);
+    try {
+      await api.updateUser(user.id, { password: resetPasswordValue });
+      setResetPasswordId(null);
+      setResetPasswordValue('');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '重置密码失败');
+    } finally {
+      setResetting(false);
     }
   };
 
@@ -286,17 +313,53 @@ export default function UserManagementModal({ open, onClose }: Props) {
                         <span className="text-xs text-text-secondary dark:text-text-secondary-dark">
                           当前用户
                         </span>
+                      ) : resetPasswordId === user.id ? (
+                        <div className="flex items-center gap-1.5 justify-end">
+                          <input
+                            ref={resetRef}
+                            type="password"
+                            value={resetPasswordValue}
+                            onChange={(e) => setResetPasswordValue(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') handleResetPassword(user);
+                              if (e.key === 'Escape') setResetPasswordId(null);
+                            }}
+                            placeholder="新密码（≥4位）"
+                            className="w-28 px-1.5 py-1 text-xs rounded border border-accent bg-surface dark:bg-surface-dark text-text-primary dark:text-text-primary-dark outline-none placeholder:text-text-secondary/50"
+                          />
+                          <button
+                            onClick={() => handleResetPassword(user)}
+                            disabled={resetting || resetPasswordValue.length < 4}
+                            className="px-2 py-1 text-xs rounded bg-accent text-white hover:bg-accent-hover disabled:opacity-40 transition-colors"
+                          >
+                            {resetting ? '...' : '确认'}
+                          </button>
+                          <button
+                            onClick={() => setResetPasswordId(null)}
+                            className="px-1.5 py-1 text-xs rounded border border-border dark:border-border-dark text-text-secondary dark:text-text-secondary-dark hover:bg-bg dark:hover:bg-bg-dark transition-colors"
+                          >
+                            取消
+                          </button>
+                        </div>
                       ) : (
-                        <button
-                          onClick={() => handleToggleActive(user)}
-                          className={`px-2 py-1 text-xs rounded border transition-colors ${
-                            user.is_active
-                              ? 'border-red-300 dark:border-red-700 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20'
-                              : 'border-green-300 dark:border-green-700 text-green-600 hover:bg-green-50 dark:hover:bg-green-900/20'
-                          }`}
-                        >
-                          {user.is_active ? '禁用' : '启用'}
-                        </button>
+                        <div className="flex items-center gap-1.5 justify-end">
+                          <button
+                            onClick={() => startResetPassword(user)}
+                            className="px-2 py-1 text-xs rounded border border-border dark:border-border-dark text-text-secondary dark:text-text-secondary-dark hover:text-accent hover:border-accent transition-colors"
+                          >
+                            重置密码
+                          </button>
+                          <button
+                            onClick={() => handleToggleActive(user)}
+                            className={`px-2 py-1 text-xs rounded border transition-colors ${
+                              user.is_active
+                                ? 'border-red-300 dark:border-red-700 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20'
+                                : 'border-green-300 dark:border-green-700 text-green-600 hover:bg-green-50 dark:hover:bg-green-900/20'
+                            }`}
+                          >
+                            {user.is_active ? '禁用' : '启用'}
+                          </button>
+                        </div>
                       )}
                     </td>
                   </tr>
