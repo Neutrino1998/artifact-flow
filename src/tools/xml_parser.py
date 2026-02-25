@@ -50,13 +50,17 @@ class XMLToolCallParser:
         """解析单个 tool_call 块"""
         # 先尝试标准 XML 解析
         try:
-            return XMLToolCallParser._parse_with_etree(content)
+            result = XMLToolCallParser._parse_with_etree(content)
+            if result and result.params:
+                return result
+            # params 为空但可能有散落的参数标签 → 继续尝试修复
         except ET.ParseError:
             pass
 
         # 修复 LLM 常见错误后重试
         repaired = XMLToolCallParser._repair_tag_equals_syntax(content)
         repaired = XMLToolCallParser._repair_unclosed_cdata_tags(repaired)
+        repaired = XMLToolCallParser._repair_scattered_params(repaired)
         repaired = XMLToolCallParser._repair_missing_closing_tags(repaired)
         if repaired != content:
             try:
@@ -177,6 +181,75 @@ class XMLToolCallParser:
             content,
             flags=re.DOTALL,
         )
+
+    @staticmethod
+    def _repair_scattered_params(content: str) -> str:
+        """
+        修复参数散落在多处的问题：
+        1. 多个 <params> 块（如第一个是垃圾纯文本、第二个才有结构化内容）
+        2. 参数标签出现在 <params> 外面（作为 <name> 的兄弟标签）
+
+        例如：
+            <name>create_artifact</name>
+            <params><![CDATA[content]]></params>
+            <content_type><![CDATA[text/markdown]]></content_type>
+            <id><![CDATA[xxx]]></id>
+            <params>
+              <content><![CDATA[...]]></content>
+              <title><![CDATA[...]]></title>
+            </params>
+        修复为：
+            <name>create_artifact</name>
+            <params>
+              <content_type><![CDATA[text/markdown]]></content_type>
+              <id><![CDATA[xxx]]></id>
+              <content><![CDATA[...]]></content>
+              <title><![CDATA[...]]></title>
+            </params>
+        """
+        # 找到所有 <params>...</params> 块
+        params_blocks = list(re.finditer(
+            r'<params\s*>(.*?)</params\s*>', content, re.DOTALL
+        ))
+
+        # 提取 <name>...</name>
+        name_match = re.search(r'<name[^>]*>.*?</name>', content, re.DOTALL)
+        if not name_match:
+            return content
+
+        # 移除 name 和所有 params 块，检查是否有孤立标签
+        remainder = content
+        remainder = re.sub(
+            r'<name[^>]*>.*?</name>', '', remainder, count=1, flags=re.DOTALL
+        )
+        for block in params_blocks:
+            remainder = remainder.replace(block.group(0), '', 1)
+
+        has_orphans = bool(re.search(r'<\w+\s*>', remainder))
+
+        # 如果只有一个 params 块且没有孤立标签，无需修复
+        if len(params_blocks) <= 1 and not has_orphans:
+            return content
+
+        # 收集参数内容
+        all_children = []
+
+        # 先收集孤立标签（放前面，后面 params 块中的同名 key 会覆盖）
+        if has_orphans:
+            for m in re.finditer(r'(<(\w+)>.*?</\2>)', remainder, re.DOTALL):
+                all_children.append(m.group(1).strip())
+
+        # 再收集有子元素的 params 块内容（跳过纯文本/CDATA 的垃圾块）
+        for block in params_blocks:
+            inner = block.group(1).strip()
+            if re.search(r'<\w+\s*>', inner):
+                all_children.append(inner)
+
+        if not all_children:
+            return content
+
+        merged = '\n'.join(all_children)
+        return f"{name_match.group(0)}\n<params>\n{merged}\n</params>"
 
     @staticmethod
     def _repair_missing_closing_tags(content: str) -> str:
@@ -341,6 +414,31 @@ def hello():
 ## 任务目标
 撰写本月金融领域AI科技新闻稿件
 ]]></content>
+</tool_call>
+"""),
+
+        ("重复params块+孤立参数+name等号语法", """
+<tool_call>
+<name=create_artifact</name>
+<params><![CDATA[content]]></params>
+<content_type><![CDATA[text/markdown]]></content_type>
+<id><![CDATA[总结报告-研究背景与范围]]></id>
+<params>
+  <content><![CDATA[# 总结报告
+
+## 一、研究背景
+当今时代正经历前所未有的知识爆炸。]]></content>
+  <id><![CDATA[总结报告 - 研究背景与范围]]></id>
+  <title><![CDATA[总结报告 - 研究背景与范围]]></title>
+</params>
+</tool_call>
+"""),
+
+        ("孤立参数无params包裹", """
+<tool_call>
+<name>web_search</name>
+<query><![CDATA[人工智能研究报告]]></query>
+<max_results><![CDATA[5]]></max_results>
 </tool_call>
 """),
     ]
