@@ -54,9 +54,9 @@ class XMLToolCallParser:
         except ET.ParseError:
             pass
 
-        # 修复 LLM 常见错误：CDATA 后漏掉闭合标签
-        # 例如 <content><![CDATA[...]]></params> → <content><![CDATA[...]]></content></params>
+        # 修复 LLM 常见错误后重试
         repaired = XMLToolCallParser._repair_unclosed_cdata_tags(content)
+        repaired = XMLToolCallParser._repair_missing_closing_tags(repaired)
         if repaired != content:
             try:
                 return XMLToolCallParser._parse_with_etree(repaired)
@@ -162,6 +162,23 @@ class XMLToolCallParser:
         )
 
     @staticmethod
+    def _repair_missing_closing_tags(content: str) -> str:
+        """
+        修复缺失的结构性闭合标签
+
+        LLM 有时会忘记写 </params> 闭合标签，例如：
+            <name>create_artifact</name>
+            <params>
+                <id><![CDATA[task_plan]]></id>
+                <content><![CDATA[...]]></content>
+            （缺少 </params>）
+        """
+        if re.search(r'<params\s*>', content) and not re.search(r'</params\s*>', content):
+            content = content.rstrip() + '\n</params>'
+
+        return content
+
+    @staticmethod
     def _fallback_parse(content: str) -> Optional[ToolCall]:
         """
         Fallback：正则解析
@@ -174,9 +191,9 @@ class XMLToolCallParser:
 
         name = name_match.group(1).strip()
 
-        # 提取 params
+        # 提取 params（兼容缺失 </params> 的情况）
         params = {}
-        params_match = re.search(r'<params>(.*?)</params>', content, re.DOTALL)
+        params_match = re.search(r'<params>(.*?)(?:</params>|$)', content, re.DOTALL)
 
         if params_match:
             params_content = params_match.group(1)
@@ -282,6 +299,21 @@ def hello():
         <query>simple query</query>
         <count>5</count>
     </params>
+</tool_call>
+"""),
+
+        ("缺失</params>闭合标签", """
+<tool_call>
+    <name>create_artifact</name>
+    <params>
+        <id><![CDATA[task_plan]]></id>
+        <content_type><![CDATA[text/markdown]]></content_type>
+        <title><![CDATA[金融AI新闻稿件撰写任务计划]]></title>
+        <content><![CDATA[# Task: 金融AI新闻稿件撰写
+
+## 任务目标
+撰写本月金融领域AI科技新闻稿件
+]]></content>
 </tool_call>
 """),
     ]
