@@ -55,7 +55,8 @@ class XMLToolCallParser:
             pass
 
         # 修复 LLM 常见错误后重试
-        repaired = XMLToolCallParser._repair_unclosed_cdata_tags(content)
+        repaired = XMLToolCallParser._repair_tag_equals_syntax(content)
+        repaired = XMLToolCallParser._repair_unclosed_cdata_tags(repaired)
         repaired = XMLToolCallParser._repair_missing_closing_tags(repaired)
         if repaired != content:
             try:
@@ -133,6 +134,22 @@ class XMLToolCallParser:
             pass
 
         return text
+
+    @staticmethod
+    def _repair_tag_equals_syntax(content: str) -> str:
+        """
+        修复 <tag=value</tag> → <tag>value</tag>
+
+        小模型容易把 <tag>value</tag> 写成 <tag=value</tag>，例如：
+            <name=call_subagent</name>
+        修复为：
+            <name>call_subagent</name>
+        """
+        return re.sub(
+            r'<(\w+)=([^<>]+)</\1>',
+            r'<\1>\2</\1>',
+            content,
+        )
 
     @staticmethod
     def _repair_unclosed_cdata_tags(content: str) -> str:
@@ -299,6 +316,16 @@ def hello():
         <query>simple query</query>
         <count>5</count>
     </params>
+</tool_call>
+"""),
+
+        ("标签等号语法 <name=value</name>", """
+<tool_call>
+<name=call_subagent</name>
+<params>
+<agent_name><![CDATA[crawl_agent]]></agent_name>
+<instruction><![CDATA[爬取文章内容]]></instruction>
+  </params>
 </tool_call>
 """),
 
