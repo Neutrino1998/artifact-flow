@@ -72,7 +72,7 @@ class BaseTool(ABC):
         name: str,
         description: str,
         permission: ToolPermission = ToolPermission.AUTO,
-        show_example: bool = False,
+        show_example: bool = True,
         **kwargs
     ):
         """

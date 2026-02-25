@@ -38,20 +38,10 @@ IMPORTANT: You can only make a SINGLE tool call per turn.
             instruction += f"\n{ToolPromptGenerator._format_tool_doc(tool)}"
 
         instruction += """
-**Call Format:**
-
-<tool_call>
-  <name>tool_name</name>
-  <params>
-    <param_name><![CDATA[param_value]]></param_name>
-    <list_param>
-      <item><![CDATA[value1]]></item>
-      <item><![CDATA[value2]]></item>
-    </list_param>
-  </params>
-</tool_call>
-
-Always wrap ALL parameter values in <![CDATA[...]]>.
+**Call Rules:**
+- One tool call per turn.
+- Wrap ALL parameter values in `<![CDATA[...]]>`.
+- For list parameters, wrap each `<item>` value in `<![CDATA[...]]>`.
 </tool_instructions>"""
         
         return instruction
