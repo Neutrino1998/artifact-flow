@@ -69,178 +69,113 @@ class LeadAgent(BaseAgent):
     def build_system_prompt(self, context: Optional[Dict[str, Any]] = None) -> str:
         """
         构建Lead Agent的系统提示词
-        
+
         Args:
             context: 包含task_plan等上下文信息
-            
+
         Returns:
             系统提示词
         """
-        # 获取系统时间
         current_time = datetime.now().strftime("%Y/%m/%d %H:%M:%S %a")
-        
-        # 开始构建提示词
-        prompt = f"""<system_time>IMPORTANT: Current time is "{current_time}"</system_time>
 
-<agent_role>
+        sections = [
+            self._build_system_time(current_time),
+            self._build_role_section(),
+            self._build_task_plan_section(),
+            self._build_artifacts_section(),
+            self._build_subagents_section(),
+            self._build_context_section(context),
+        ]
+
+        return "\n\n".join(s for s in sections if s)
+
+    def _build_system_time(self, current_time: str) -> str:
+        return f'<system_time>Current time: {current_time}</system_time>'
+
+    def _build_role_section(self) -> str:
+        return f"""<role>
 You are {self.config.name}, the Lead Agent coordinating a multi-agent system.
 
-## Your Role and Responsibilities
+**Execution Flow:**
+1. **Analyze Request** — Determine complexity
+2. **Plan Tasks** — Create task_plan if needed
+3. **Execute** — Call sub-agents or work directly
+4. **Integrate** — Update result artifact with findings
+5. **Iterate** — Refine based on progress and feedback
 
-You are the orchestra conductor. Your core responsibilities:
-1. **Task Planning**: Analyze user requests and create structured task plans
-2. **Coordination**: Delegate specific tasks to specialized sub-agents
-3. **Integration**: Synthesize information from various sources into coherent results
-4. **Quality Control**: Ensure quality and completeness
-</agent_role>
-
-<execution_flow>
-## Execution Flow
-
-1. **Analyze Request** → Determine complexity
-2. **Plan Tasks** → Create task_plan if needed
-3. **Execute** → Call sub-agents or work directly
-4. **Integrate** → Update result artifact with findings
-5. **Iterate** → Refine based on progress and feedback
-
-## Important Guidelines
-
+**Guidelines:**
 - Keep responses focused and actionable
-- Update task status after each sub-agent call
-- Consolidate information incrementally in result artifact
-- Be transparent about progress
-- Know when to stop: avoid over-processing
-- Be aware of system_time
-</execution_flow>
+- Know when to stop — avoid over-processing
+</role>"""
 
-<task_planning_strategy>
-## Task Planning Strategy
+    def _build_task_plan_section(self) -> str:
+        return """<task_plan>
+For tasks requiring multiple steps or sub-agent calls, create a task_plan artifact (ID: `task_plan`).
 
-Based on request complexity, choose your approach:
+This is a shared workspace — use it as both a todo list and a working notebook. Conversation history may be compacted over long sessions, so note down important details and findings here.
 
-### Simple Tasks (Direct Answer)
-- Basic factual questions
-- Single-step operations
-- No delegation needed
-→ Answer directly without creating artifacts
-
-### Moderate Tasks (Optional Task Plan)
-- 1-2 specific sub-tasks needed
-- Limited scope
-→ Optionally create a simple task_plan for better tracking
-
-### Complex Tasks (Required Task Plan)
-- Multi-faceted investigation
-- Multiple sub-agents needed
-- Iterative refinement required
-→ MUST create task_plan first, then execute systematically
-</task_planning_strategy>
-
-<artifact_management>
-## Artifact Management
-
-You manage two types of artifacts:
-
-### Task Plan Artifact (ID: "task_plan")
-IMPORTANT: Always use the exact ID "task_plan" for the task plan artifact.
-This is a SHARED WORKSPACE that all team members can access - use it as both a todo list AND a working notebook.
 <task_plan_example>
 # Task: [Title]
 
-## Objective
-[Clear objective]
-
 ## Tasks
-1. [✓/✗] Task description
-- Status: [pending/in_progress/completed]
-- Assigned: [agent_name]
-- Notes: [findings or blockers]
+1. [✓/✗] Task description — agent_name — [findings or blockers]
+2. [✓/✗] Task description — agent_name — [findings or blockers]
 </task_plan_example>
+</task_plan>"""
 
-### Result Artifacts (Flexible IDs based on user needs)
+    def _build_artifacts_section(self) -> str:
+        return """<artifacts>
+You can create MULTIPLE result artifacts. Use descriptive IDs that reflect the content.
 
-Choose appropriate artifact IDs and types based on what the user requests:
+- **Reports/Research** (`text/markdown`): "research_report", "market_analysis", etc. Include a references section with `[Source Title](URL)` and inline citations `[1]`, `[2]`.
+- **Code/Scripts** (`text/x-python`, `text/javascript`, etc.): "data_analysis.py", "web_scraper.js", etc. Create separate artifacts for different files.
+- **Documents** (`text/markdown` or `text/plain`): "proposal", "guidelines", "readme", etc.
+</artifacts>"""
 
-**For Reports/Research:**
-- ID: "research_report", "market_analysis", "technical_review", etc.
-- Type: "text/markdown"
-- Always include a references section using markdown link format: 1. [Source Title](URL)
-- Use inline citations [1], [2], etc. throughout the text, corresponding to numbered references
+    def _build_subagents_section(self) -> str:
+        if not self.sub_agents:
+            return "<note>No sub-agents are currently registered. Work independently.</note>"
 
-**For Code/Scripts:**
-- ID: "data_analysis.py", "web_scraper.js", "config.yaml", etc.
-- Type: "text/x-python", "text/javascript", "text/yaml", etc.
-- Create separate artifacts for different code files
+        lines = ["<available_subagents>"]
+        lines.append("Use the `call_subagent` tool to delegate tasks. Provide clear, specific instructions.\n")
 
-**For Documents:**
-- ID: "proposal", "guidelines", "readme", etc.
-- Type: "text/markdown" or "text/plain"
+        for name, config in self.sub_agents.items():
+            lines.append(f"**{name}**: {config.description}")
+            for cap in config.capabilities:
+                lines.append(f"  - {cap}")
+            lines.append("")
 
-**Important:** You can create MULTIPLE result artifacts as needed. For example:
-- A coding task might need "main.py", "utils.py", and "requirements.txt"
-- Always use descriptive IDs that reflect the content
-- Build your results incrementally - you don't need to complete everything in one go - create early, update often
-- The user get access to ALL artifacts in the session directly
-</artifact_management>"""
-    
-        # 动态添加可用的sub-agents
-        if self.sub_agents:
-            prompt += "\n\n<available_subagents>\n"
-            prompt += "## Available Sub-Agents\n\n"
-            prompt += "Use the call_subagent tool to delegate tasks to:\n\n"
-            
-            for name, config in self.sub_agents.items():
-                prompt += f"### {name}\n"
-                prompt += f"- Description: {config.description}\n"
-                prompt += f"- Capabilities:\n"
-                for cap in config.capabilities:
-                    prompt += f"  - {cap}\n"
-                prompt += "\n"
-            
-            prompt += """When calling sub-agents:
-1. Provide clear, specific instructions
-2. Update task_plan/result artifacts based on their findings
-</available_subagents>"""
-        else:
-            prompt += "\n\n<note>No sub-agents are currently registered. Work independently.</note>\n"
-    
-        # 添加当前上下文
-        if context:
-            prompt += "\n\n<current_context>\n"
-            
-            if context.get("artifacts_inventory"):
-                prompt += f"""<artifacts_inventory count="{context['artifacts_count']}">
-You currently have {context['artifacts_count']} artifact(s) in this session.
+        lines.append("</available_subagents>")
+        return "\n".join(lines)
 
-**Note**: Content snippets shown below (first 200 chars). Use `read_artifact` tool for full content.
+    def _build_context_section(self, context: Optional[Dict[str, Any]]) -> Optional[str]:
+        if not context:
+            return None
 
-"""
-                for artifact in context["artifacts_inventory"]:
-                    prompt += f'<artifact id="{artifact["id"]}" '
-                    prompt += f'content_type="{artifact["content_type"]}" '
-                    prompt += f'title="{artifact["title"]}" '
-                    prompt += f'version="{artifact["version"]}" '
-                    prompt += f'source="{artifact.get("source", "agent")}" '
-                    prompt += f'updated="{artifact["updated_at"]}">\n'
-                    prompt += f'{artifact["content"]}\n'
-                    prompt += '</artifact>\n'
+        parts: List[str] = []
 
-                prompt += """
-Based on the existing artifacts:
-- Update existing artifacts rather than creating duplicates
-- Use 'update_artifact' for small changes
-- Use 'rewrite_artifact' for major restructuring
-- Artifacts with source="user_upload" are documents uploaded by the user. Assess whether they are relevant to the current task and use `read_artifact` to access full content if needed.
-</artifacts_inventory>\n"""
+        if context.get("artifacts_inventory"):
+            count = context["artifacts_count"]
+            inv = f'{count} artifact(s) in this session.\n'
+            inv += '<artifacts_inventory>\n'
+            for artifact in context["artifacts_inventory"]:
+                source = artifact.get("source", "agent")
+                inv += '<artifact>\n'
+                inv += f'<meta>id: {artifact["id"]} | type: {artifact["content_type"]} | title: {artifact["title"]} | version: {artifact["version"]} | source: {source} | updated: {artifact["updated_at"]}</meta>\n'
+                inv += f'{artifact["content"]}\n'
+                inv += '</artifact>\n'
+            # Keep user_upload note (context-specific, needed for uploaded docs)
+            inv += '\nArtifacts with source: user_upload are documents uploaded by the user — use `read_artifact` for full content if relevant.\n'
+            inv += '</artifacts_inventory>'
+            parts.append(inv)
 
-            if context.get("user_feedback"):
-                prompt += f"""<user_feedback>
-{context['user_feedback']}
-</user_feedback>\n"""
-            
-            prompt += "</current_context>"
-        
-        return prompt
+        if context.get("user_feedback"):
+            parts.append(f"<user_feedback>\n{context['user_feedback']}\n</user_feedback>")
+
+        if not parts:
+            return None
+
+        return "<current_context>\n" + "\n".join(parts) + "\n</current_context>"
     
     def format_final_response(self, content: str) -> str:
         """

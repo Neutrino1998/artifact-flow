@@ -211,10 +211,15 @@ class ExecutionController:
         resolved_parent: Optional[str] = parent_message_id if isinstance(parent_message_id, str) else None
 
         # 3. 格式化对话历史（使用ConversationManager的方法）
-        conversation_history = await self.conversation_manager.format_conversation_history_async(
-            conv_id=conversation_id,
-            to_message_id=resolved_parent
-        )
+        # When parent was explicitly set to None (e.g. regenerating root message),
+        # history should be empty — don't fall back to active_branch.
+        if parent_message_id is not _UNSET and resolved_parent is None:
+            conversation_history = []
+        else:
+            conversation_history = await self.conversation_manager.format_conversation_history_async(
+                conv_id=conversation_id,
+                to_message_id=resolved_parent
+            )
 
         # 4. 生成ID（优先使用外部传入的值，fallback 自动生成）
         message_id = message_id or f"msg-{uuid4().hex}"
@@ -352,10 +357,15 @@ class ExecutionController:
         # Normalize to Optional[str]
         resolved_parent: Optional[str] = parent_message_id if isinstance(parent_message_id, str) else None
 
-        conversation_history = await self.conversation_manager.format_conversation_history_async(
-            conv_id=conversation_id,
-            to_message_id=resolved_parent
-        )
+        # When parent was explicitly set to None (e.g. regenerating root message),
+        # history should be empty — don't fall back to active_branch.
+        if parent_message_id is not _UNSET and resolved_parent is None:
+            conversation_history = []
+        else:
+            conversation_history = await self.conversation_manager.format_conversation_history_async(
+                conv_id=conversation_id,
+                to_message_id=resolved_parent
+            )
 
         # 生成ID（优先使用外部传入的值，fallback 自动生成）
         message_id = message_id or f"msg-{uuid4().hex}"

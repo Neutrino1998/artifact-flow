@@ -28,7 +28,17 @@ class ToolPromptGenerator:
             return "<tool_instructions>\nNo tools available.\n</tool_instructions>"
         
         instruction = """<tool_instructions>
-You have access to the following tools. To use a tool, format your request in XML:
+IMPORTANT: You can only make a SINGLE tool call per turn.
+
+**Available Tools:**
+"""
+
+        # 添加每个工具的说明
+        for tool in tools:
+            instruction += f"\n{ToolPromptGenerator._format_tool_doc(tool)}"
+
+        instruction += """
+**Call Format:**
 
 <tool_call>
   <name>tool_name</name>
@@ -36,28 +46,11 @@ You have access to the following tools. To use a tool, format your request in XM
     <param_name><![CDATA[param_value]]></param_name>
     <list_param>
       <item><![CDATA[value1]]></item>
-      <item><![CDATA[value2]]></item>
     </list_param>
   </params>
 </tool_call>
 
-IMPORTANT: Always wrap ALL parameter values in <![CDATA[...]]> to ensure proper XML parsing.
-This prevents issues with special characters like <, >, &, quotes, or nested code/JSON.
-
-Available tools:
-"""
-        
-        # 添加每个工具的说明
-        for tool in tools:
-            instruction += f"\n{ToolPromptGenerator._format_tool_doc(tool)}"
-        
-        instruction += """
-
-Important guidelines:
-1. Always use the exact tool name as specified
-2. Include all required parameters
-3. Always wrap ALL parameter values in <![CDATA[...]]>
-4. You can only make a SINGLE tool call every turn
+Always wrap ALL parameter values in <![CDATA[...]]>.
 </tool_instructions>"""
         
         return instruction
@@ -75,7 +68,7 @@ Important guidelines:
         """
         doc = f"### {tool.name}\n"
         doc += f"Description: {tool.description}\n"
-        
+
         # 参数说明
         params = tool.get_parameters()
         if params:
@@ -87,10 +80,11 @@ Important guidelines:
                     doc += f"    Default: {param.default}\n"
         else:
             doc += "Parameters: None\n"
-        
-        # 添加示例
-        doc += f"Example:\n{tool.to_xml_example()}\n"
-        
+
+        # 条件性添加示例
+        if tool.show_example:
+            doc += f"Example:\n{tool.to_xml_example()}\n"
+
         return doc
     
     @staticmethod

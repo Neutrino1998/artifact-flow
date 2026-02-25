@@ -684,7 +684,7 @@ class CreateArtifactTool(BaseTool):
     def __init__(self, manager: Optional[ArtifactManager] = None):
         super().__init__(
             name="create_artifact",
-            description="Create a new artifact (like Claude's artifact creation)",
+            description="Create a new artifact. Check existing artifacts first to avoid duplicates.",
             permission=ToolPermission.AUTO
         )
         self._manager = manager
@@ -753,8 +753,9 @@ class UpdateArtifactTool(BaseTool):
     def __init__(self, manager: Optional[ArtifactManager] = None):
         super().__init__(
             name="update_artifact",
-            description="Update artifact content by replacing old text with new text (Attempt fuzzy matching if exact text not found).",
-            permission=ToolPermission.AUTO
+            description="Update artifact content by replacing old text with new text (supports fuzzy matching). Use for targeted changes.",
+            permission=ToolPermission.AUTO,
+            show_example=True
         )
         self._manager = manager
 
@@ -835,12 +836,7 @@ class UpdateArtifactTool(BaseTool):
    - Assigned: search_agent
    - Notes: Found 5 key breakthroughs]]></new_str>
   </params>
-</tool_call>
-
-IMPORTANT NOTES:
-1. Use ACTUAL line breaks in XML, not \\n escape sequences
-2. For multi-line updates, include all related lines as a unit
-"""
+</tool_call>"""
 
 
 class RewriteArtifactTool(BaseTool):
@@ -849,7 +845,7 @@ class RewriteArtifactTool(BaseTool):
     def __init__(self, manager: Optional[ArtifactManager] = None):
         super().__init__(
             name="rewrite_artifact",
-            description="Completely rewrite the artifact content",
+            description="Completely replace artifact content. Use when changes are too extensive for update_artifact.",
             permission=ToolPermission.AUTO
         )
         self._manager = manager
@@ -908,7 +904,7 @@ class ReadArtifactTool(BaseTool):
     def __init__(self, manager: Optional[ArtifactManager] = None):
         super().__init__(
             name="read_artifact",
-            description="Read artifact content",
+            description="Read full artifact content. Artifact inventory only shows previews — use this for complete content.",
             permission=ToolPermission.AUTO
         )
         self._manager = manager

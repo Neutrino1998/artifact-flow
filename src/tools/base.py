@@ -72,20 +72,23 @@ class BaseTool(ABC):
         name: str,
         description: str,
         permission: ToolPermission = ToolPermission.AUTO,
+        show_example: bool = False,
         **kwargs
     ):
         """
         初始化工具
-        
+
         Args:
             name: 工具名称（唯一标识）
             description: 工具描述
             permission: 权限级别
+            show_example: 是否在工具文档中显示XML调用示例
             **kwargs: 其他配置参数
         """
         self.name = name
         self.description = description
         self.permission = permission
+        self.show_example = show_example
         self.config = kwargs
     
     @abstractmethod
