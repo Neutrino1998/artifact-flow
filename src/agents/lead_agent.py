@@ -160,8 +160,7 @@ You can create MULTIPLE result artifacts. Use descriptive IDs that reflect the c
             inv += '<artifacts_inventory>\n'
             for artifact in context["artifacts_inventory"]:
                 source = artifact.get("source", "agent")
-                inv += '<artifact>\n'
-                inv += f'<meta>id: {artifact["id"]} | type: {artifact["content_type"]} | title: {artifact["title"]} | version: {artifact["version"]} | source: {source} | updated: {artifact["updated_at"]}</meta>\n'
+                inv += f'<artifact id="{artifact["id"]}" type="{artifact["content_type"]}" title="{artifact["title"]}" version="{artifact["version"]}" source="{source}" updated="{artifact["updated_at"]}">\n'
                 inv += f'{artifact["content"]}\n'
                 inv += '</artifact>\n'
             # Keep user_upload note (context-specific, needed for uploaded docs)

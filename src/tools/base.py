@@ -127,14 +127,16 @@ class BaseTool(ABC):
         param_defs = {p.name: p for p in self.get_parameters()}
         
         # 检查必需参数
-        for param_def in param_defs.values():
-            if param_def.required and param_def.name not in params:
-                return f"Missing required parameter: {param_def.name}"
-        
+        missing = [p.name for p in param_defs.values() if p.required and p.name not in params]
+        if missing:
+            expected = [p.name for p in param_defs.values() if p.required]
+            received = list(params.keys()) or ["(none)"]
+            return f"Missing required parameter(s): {', '.join(missing)}. Required: {expected}. Received: {received}"
+
         # 检查未知参数
-        for param_name in params:
-            if param_name not in param_defs:
-                return f"Unknown parameter: {param_name}"
+        unknown = [name for name in params if name not in param_defs]
+        if unknown:
+            return f"Unknown parameter(s): {', '.join(unknown)}. Valid: {list(param_defs.keys())}"
         
         return None
     

@@ -178,7 +178,9 @@ export function useSSE() {
           const success = data?.success as boolean ?? true;
           const result = typeof data?.result_data === 'string'
             ? data.result_data as string
-            : JSON.stringify(data?.result_data ?? data?.result ?? '');
+            : !success && typeof data?.error === 'string'
+              ? data.error as string
+              : JSON.stringify(data?.result_data ?? data?.result ?? '');
           const durationMs = data?.duration_ms as number | undefined;
 
           // Find the matching running tool call across all segments
