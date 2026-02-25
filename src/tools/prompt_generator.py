@@ -46,6 +46,7 @@ IMPORTANT: You can only make a SINGLE tool call per turn.
     <param_name><![CDATA[param_value]]></param_name>
     <list_param>
       <item><![CDATA[value1]]></item>
+      <item><![CDATA[value2]]></item>
     </list_param>
   </params>
 </tool_call>
