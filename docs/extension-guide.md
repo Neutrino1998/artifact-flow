@@ -39,7 +39,6 @@ class CodeAgent(BaseAgent):
                     "analyze_code"
                 ],
                 model="qwen3.5-flash-no-thinking",
-                temperature=0.3,  # 代码分析需要精确
                 max_tool_rounds=100,
                 streaming=True
             )
