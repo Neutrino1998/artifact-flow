@@ -43,6 +43,17 @@ class XMLToolCallParser:
                 tool_call.raw_text = f"<tool_call>{match}</tool_call>"
                 results.append(tool_call)
 
+        # 检查末尾是否有未闭合的 <tool_call>（小模型容易漏掉 </tool_call>）
+        all_opens = [m.start() for m in re.finditer(r'<tool_call>', text, re.IGNORECASE)]
+        all_closes = [m.start() for m in re.finditer(r'</tool_call>', text, re.IGNORECASE)]
+        if all_opens and (not all_closes or all_opens[-1] > all_closes[-1]):
+            start = all_opens[-1] + len('<tool_call>')
+            unclosed_content = text[start:]
+            tool_call = XMLToolCallParser._parse_single_block(unclosed_content)
+            if tool_call:
+                tool_call.raw_text = text[all_opens[-1]:]
+                results.append(tool_call)
+
         return results
 
     @staticmethod
@@ -440,6 +451,16 @@ def hello():
 <query><![CDATA[人工智能研究报告]]></query>
 <max_results><![CDATA[5]]></max_results>
 </tool_call>
+"""),
+
+        ("缺失</tool_call>闭合+name等号语法+孤立参数", """
+<tool_call>
+<name=create_artifact</name>
+<params><![CDATA[content]]></params>
+<content_type>text/markdown</content_type>
+<id><![CDATA[总结报告 - 研究背景与范围]]></id>
+<title><![CDATA[总结报告 - 研究背景与范围]]></title>
+</params>
 """),
     ]
 
