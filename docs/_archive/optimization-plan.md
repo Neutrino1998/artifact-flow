@@ -710,14 +710,16 @@ strategy:
 
 **目标**: 支持用户上传文档，解析为 Artifact 供 Agent 操作。拆分为两个子阶段：
 
-- **7A**（可在 Phase 5/6 之前执行）：文档类上传（docx / pdf → markdown artifact，txt / md 保持原格式）+ content_type 统一 + 前端渲染策略修正
+- **7A** ✅（可在 Phase 5/6 之前执行）：文档类上传（docx / pdf → markdown artifact，txt / md 保持原格式）+ content_type 统一 + 前端渲染策略修正
 - **7B**（建议在 Phase 5/6 之后执行）：结构化数据（csv / json）+ 原始文件存储 + 代码沙盒联动
 
 ---
 
-### Phase 7A: 文档上传 + content_type 统一 + 前端渲染修正
+### Phase 7A: 文档上传 + content_type 统一 + 前端渲染修正 ✅ DONE
 
 **依赖**: Phase 4（认证）✅ 已完成。不依赖 Phase 5/6，可提前执行。
+
+> **完成于**: 7A.1~7A.6 全部完成。content_type 统一为 MIME type、文档转换层（pandoc + pymupdf）、上传 API + source 字段、前端渲染策略修正（Preview tab 仅 markdown）、前端上传 UI（按钮 + 拖拽）、Prompt 设计 Review。
 
 #### 7A.1 content_type 统一为 MIME type
 
@@ -1126,19 +1128,13 @@ Phase 6 (PostgreSQL)         ← 依赖 5.1（可移植性基线 + Alembic）
   6.1 引擎切换
   6.2 Schema 迁移             ← 依赖 6.1
   6.3 复合索引                ← 依赖 6.2
-Phase 7A (文档上传)          ← Phase 4 之后（需要认证知道上传者是谁）
-  7A.1 content_type 统一      ← 无额外依赖
-  7A.2 文档转换层              ← 无额外依赖（可与 7A.1 并行）
-  7A.3 后端上传 API            ← 依赖 7A.1 + 7A.2
-  7A.4 前端渲染策略修正        ← 依赖 7A.1（需要 MIME type 判断）
-  7A.5 前端上传 UI             ← 依赖 7A.3
-  7A.6 Prompt 设计 Review      ← 依赖 7A.1（需要 source 字段定义），可与 7A.2-7A.5 并行
-Phase 7B (结构化数据)        ← 依赖 7A + Phase 5/6（PostgreSQL 大字段 / 对象存储）
-Phase 8 (编辑 Artifact)      ← Phase 7A 之后（上传和编辑共享写接口模式）
+Phase 7A (文档上传)          ✅ 已完成
+Phase 7B (结构化数据)        ← 依赖 7A ✅ + Phase 5/6（PostgreSQL 大字段 / 对象存储）
+Phase 8 (编辑 Artifact)      ← 依赖 7A ✅（上传和编辑共享写接口模式）
 Phase 9 (Skill 系统)         ← 仅依赖 Phase 4（认证），独立于 Phase 7/8，可随时实施
 ```
 
-建议执行顺序: **Phase 4 ✅ → 7A → 5/6 → 7B → 8**。7A 包含轻量 schema 变更（新增 `source` 列），开发阶段删库重建即可，不影响后续 Phase 6 迁移。Phase 9 调研可与任意阶段并行推进。
+建议执行顺序: **Phase 4 ✅ → 7A ✅ → 5/6 → 7B → 8**。Phase 9 可随时排入开发。
 
 关键路径: **5.1 ∥ 5.2/5.3 → 5.5 → 6.1 → 6.2 → 6.3**（5.1 与 5.2 可并行）。5.2 完成后即可获得最大的并发性能提升（checkpointer 瓶颈解除）。
 
@@ -1150,7 +1146,7 @@ Phase 9 (Skill 系统)         ← 仅依赖 Phase 4（认证），独立于 Pha
 - Phase 4 是第一个需要前端大改的阶段（登录页 + token 管理）
 - Phase 5 优先 Redis（解决并发瓶颈）+ 可移植性基线（为 Phase 6 铺路），5.1 和 5.2 可并行推进
 - Phase 6 PostgreSQL 迁移依赖 5.1 的 Alembic 框架和方言适配层
-- Phase 7A 可在 Phase 5/6 之前执行（只依赖 Phase 4），优先交付用户可感知的功能
+- Phase 7A ✅ 已完成（content_type 统一、文档转换、上传 API/UI、渲染策略修正、Prompt Review）
 - Phase 7B 建议在 Phase 5/6 之后，因为 csv / json 原始文件存储可能需要 PostgreSQL 大字段或对象存储支持
 - Phase 9 Skill 系统调研已完成，方案已确定（轻量独立 `skills` 表），仅依赖 Phase 4（已完成），可随时排入开发
 - **数据迁移**: 系统处于开发阶段，所有 Phase（包括 5/6 数据库改造）均不需要考虑旧数据迁移，已有数据可丢弃。涉及 schema 变更时直接 `rm data/artifactflow.db` 后重启，`create_all` 会按新模型建表
