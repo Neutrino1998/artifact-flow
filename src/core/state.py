@@ -80,6 +80,9 @@ class AgentState(TypedDict):
     user_message_id: str                   # 当前用户消息ID
     graph_response: Optional[str]          # Graph最终响应
 
+    # ========== 权限管理 ==========
+    always_allowed_tools: List[str]        # 本 thread 内已"始终允许"的工具名列表
+
     # ========== 可观测性 ==========
     execution_metrics: ExecutionMetrics    # 执行指标（token使用、工具调用、耗时等）
 
@@ -140,6 +143,7 @@ def create_initial_state(
         "compression_level": compression_level,
         "user_message_id": message_id,
         "graph_response": None,
+        "always_allowed_tools": [],
         "execution_metrics": create_initial_metrics()
     }
 

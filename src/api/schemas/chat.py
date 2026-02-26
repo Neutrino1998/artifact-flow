@@ -25,6 +25,7 @@ class ResumeRequest(BaseModel):
     thread_id: str = Field(..., description="LangGraph thread ID")
     message_id: str = Field(..., description="Message ID to update")
     approved: bool = Field(..., description="Whether the permission was approved")
+    always_allow: bool = Field(False, description="Always allow this tool for the rest of this thread")
 
 
 # ============================================================

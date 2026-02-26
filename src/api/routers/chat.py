@@ -393,7 +393,8 @@ async def resume_execution(
     # 准备恢复数据
     resume_data = {
         "type": "permission",
-        "approved": request.approved
+        "approved": request.approved,
+        "always_allow": request.always_allow,
     }
 
     # 设置请求上下文（background task 通过 asyncio context 继承自动获取）

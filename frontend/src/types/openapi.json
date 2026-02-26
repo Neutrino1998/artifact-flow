@@ -1559,6 +1559,12 @@
             "type": "boolean",
             "title": "Approved",
             "description": "Whether the permission was approved"
+          },
+          "always_allow": {
+            "type": "boolean",
+            "title": "Always Allow",
+            "description": "Always allow this tool for the rest of this thread",
+            "default": false
           }
         },
         "type": "object",

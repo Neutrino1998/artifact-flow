@@ -547,7 +547,10 @@ class ExecutionController:
 
         try:
             result = await self.graph.ainvoke(
-                Command(resume=resume_data.get("approved", False)),
+                Command(resume={
+                    "approved": resume_data.get("approved", False),
+                    "always_allow": resume_data.get("always_allow", False),
+                }),
                 config
             )
 
@@ -645,7 +648,10 @@ class ExecutionController:
             final_response = None
 
             async for chunk in self.graph.astream(
-                Command(resume=resume_data.get("approved", False)),
+                Command(resume={
+                    "approved": resume_data.get("approved", False),
+                    "always_allow": resume_data.get("always_allow", False),
+                }),
                 config,
                 stream_mode="custom"
             ):

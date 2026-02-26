@@ -11,7 +11,7 @@ export default function PermissionModal() {
   const [loading, setLoading] = useState(false);
 
   const handleResponse = useCallback(
-    async (approved: boolean) => {
+    async (approved: boolean, alwaysAllow: boolean = false) => {
       // Read current values from store to avoid stale closure issues
       const { permissionRequest: req, conversationId, threadId, messageId } =
         useStreamStore.getState();
@@ -22,6 +22,7 @@ export default function PermissionModal() {
           thread_id: threadId,
           message_id: messageId,
           approved,
+          always_allow: alwaysAllow,
         });
 
         // Reconnect SSE first, then clear permission (clearing unmounts this component)
@@ -72,11 +73,18 @@ export default function PermissionModal() {
             拒绝
           </button>
           <button
+            onClick={() => handleResponse(true, true)}
+            disabled={loading}
+            className="px-4 py-2 text-sm rounded-lg border border-accent text-accent hover:bg-accent/10 disabled:opacity-40 transition-colors"
+          >
+            始终允许
+          </button>
+          <button
             onClick={() => handleResponse(true)}
             disabled={loading}
             className="px-4 py-2 text-sm rounded-lg bg-accent text-white hover:bg-accent-hover disabled:opacity-40 transition-colors"
           >
-            {loading ? '授权中...' : '授权'}
+            {loading ? '允许中...' : '允许'}
           </button>
         </div>
       </div>

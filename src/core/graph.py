@@ -123,52 +123,68 @@ class ExtendableGraph:
 
             # 根据权限级别处理
             if tool.permission == ToolPermission.CONFIRM:
-                # 需要用户确认
-                logger.info(f"Tool '{tool_name}' requires {tool.permission.value} permission")
+                # 检查是否已在 always_allowed_tools 中（跳过 interrupt）
+                if tool_name in state.get("always_allowed_tools", []):
+                    is_approved = True
+                    logger.info(f"Tool '{tool_name}' auto-approved (always allowed in this thread)")
+                else:
+                    # 需要用户确认
+                    logger.info(f"Tool '{tool_name}' requires {tool.permission.value} permission")
 
-                # 发送 PERMISSION_REQUEST 事件
-                writer({
-                    "type": StreamEventType.PERMISSION_REQUEST.value,
-                    "agent": from_agent,
-                    "tool": tool_name,
-                    "timestamp": datetime.now().isoformat(),
-                    "data": {
+                    # 发送 PERMISSION_REQUEST 事件
+                    writer({
+                        "type": StreamEventType.PERMISSION_REQUEST.value,
+                        "agent": from_agent,
+                        "tool": tool_name,
+                        "timestamp": datetime.now().isoformat(),
+                        "data": {
+                            "permission_level": tool.permission.value,
+                            "params": params
+                        }
+                    })
+
+                    resume_value = interrupt({
+                        "type": "tool_permission",
+                        "agent": from_agent,
+                        "tool_name": tool_name,
+                        "params": params,
                         "permission_level": tool.permission.value,
-                        "params": params
-                    }
-                })
+                        "message": f"Tool '{tool_name}' requires {tool.permission.value} permission"
+                    })
 
-                is_approved = interrupt({
-                    "type": "tool_permission",
-                    "agent": from_agent,
-                    "tool_name": tool_name,
-                    "params": params,
-                    "permission_level": tool.permission.value,
-                    "message": f"Tool '{tool_name}' requires {tool.permission.value} permission"
-                })
+                    # resume_value is a dict: {"approved": bool, "always_allow": bool}
+                    is_approved = resume_value.get("approved", False)
 
-                # 发送 PERMISSION_RESULT 事件
-                writer({
-                    "type": StreamEventType.PERMISSION_RESULT.value,
-                    "agent": from_agent,
-                    "tool": tool_name,
-                    "timestamp": datetime.now().isoformat(),
-                    "data": {
-                        "approved": is_approved
-                    }
-                })
+                    # 发送 PERMISSION_RESULT 事件
+                    writer({
+                        "type": StreamEventType.PERMISSION_RESULT.value,
+                        "agent": from_agent,
+                        "tool": tool_name,
+                        "timestamp": datetime.now().isoformat(),
+                        "data": {
+                            "approved": is_approved
+                        }
+                    })
 
-                if not is_approved:
-                    logger.info(f"Permission denied for '{tool_name}'")
-                    tool_result = ToolResult(
-                        success=False,
-                        error="Permission denied by user. You do not have permission to use this tool."
-                    )
-                    pending["tool_result"] = tool_result
-                    state["phase"] = self._get_return_phase(from_agent)
-                    return state
+                    if not is_approved:
+                        logger.info(f"Permission denied for '{tool_name}'")
+                        tool_result = ToolResult(
+                            success=False,
+                            error="Permission denied by user. You do not have permission to use this tool."
+                        )
+                        pending["tool_result"] = tool_result
+                        state["phase"] = self._get_return_phase(from_agent)
+                        return state
 
-                logger.info(f"Permission approved for '{tool_name}'")
+                    # 如果用户选了"始终允许"，把工具名加入列表
+                    if resume_value.get("always_allow", False):
+                        allowed = list(state.get("always_allowed_tools", []))
+                        if tool_name not in allowed:
+                            allowed.append(tool_name)
+                        state["always_allowed_tools"] = allowed
+                        logger.info(f"Tool '{tool_name}' added to always_allowed_tools for this thread")
+
+                    logger.info(f"Permission approved for '{tool_name}'")
 
             # 发送 TOOL_START 事件
             tool_start_time = datetime.now()

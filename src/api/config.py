@@ -57,9 +57,11 @@ class APIConfig(BaseSettings):
 # 全局配置实例
 config = APIConfig()
 
-# Fail-fast: JWT secret 必须显式配置
-if not config.JWT_SECRET:
-    raise RuntimeError(
-        "ARTIFACTFLOW_JWT_SECRET environment variable is not set. "
-        "Generate one with: python -c \"import secrets; print(secrets.token_urlsafe(32))\""
-    )
+
+def validate_config() -> None:
+    """Validate required config values. Called during app lifespan startup."""
+    if not config.JWT_SECRET:
+        raise RuntimeError(
+            "ARTIFACTFLOW_JWT_SECRET environment variable is not set. "
+            "Generate one with: python -c \"import secrets; print(secrets.token_urlsafe(32))\""
+        )

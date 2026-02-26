@@ -778,6 +778,12 @@ export interface components {
              * @description Whether the permission was approved
              */
             approved: boolean;
+            /**
+             * Always Allow
+             * @description Always allow this tool for the rest of this thread
+             * @default false
+             */
+            always_allow: boolean;
         };
         /**
          * ResumeResponse
