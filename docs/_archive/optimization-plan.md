@@ -12,7 +12,7 @@
 
 ## Phase 2: 安全加固 ✅ DONE
 
-> **完成于**: web_fetch SSRF 防护（协议校验 + 私网 IP 拒绝 + permission AUTO→CONFIRM）、持久化 fail fast（移除静默吞异常）、Docker healthcheck（/docs→/health）、错误信息脱敏（`_sanitize_error_event`）。附带修复 permission 前端确认流程。
+> **完成于**: commit `0e0eb23` — web_fetch SSRF 防护（协议校验 + 私网 IP 拒绝 + permission AUTO→CONFIRM）、持久化 fail fast（移除静默吞异常）、Docker healthcheck（/docs→/health）、错误信息脱敏（`_sanitize_error_event`）。附带修复 permission 前端确认流程。补丁：`65a78f1`、`b1fe826`。
 
 ---
 
