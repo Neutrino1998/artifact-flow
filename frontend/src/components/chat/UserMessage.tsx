@@ -17,6 +17,7 @@ function UserMessage({ content, messageId, parentId, siblingIndex, siblingCount 
   const [copied, setCopied] = useState(false);
   const [editing, setEditing] = useState(false);
   const [editContent, setEditContent] = useState(content);
+  const isComposingRef = useRef(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const { sendMessage } = useChat();
   const isStreaming = useStreamStore((s) => s.isStreaming);
@@ -61,7 +62,7 @@ function UserMessage({ content, messageId, parentId, siblingIndex, siblingCount 
   }, [content, isStreaming, sendMessage, parentId]);
 
   const handleEditKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
+    if (e.key === 'Enter' && !e.shiftKey && !isComposingRef.current) {
       e.preventDefault();
       handleSubmitEdit();
     } else if (e.key === 'Escape') {
@@ -84,6 +85,8 @@ function UserMessage({ content, messageId, parentId, siblingIndex, siblingCount 
                 el.style.height = Math.min(el.scrollHeight, 300) + 'px';
               }}
               onKeyDown={handleEditKeyDown}
+              onCompositionStart={() => { isComposingRef.current = true; }}
+              onCompositionEnd={() => { requestAnimationFrame(() => { isComposingRef.current = false; }); }}
               rows={1}
               className="w-full px-4 py-3 text-sm bg-transparent text-text-primary dark:text-text-primary-dark outline-none resize-none"
             />
