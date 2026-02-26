@@ -776,6 +776,118 @@ ContextManager.prepare_agent_context()
 
 ---
 
+## Phase 10: 内网离线部署
+
+**目标**: 实现"外网构建 + 内网运行"的标准化发布流程，支持无外网环境下的镜像交付和离线部署。适用场景：企业私有知识库、对接内网数据库做数据分析/报表等。
+
+**前置依赖**: Phase 5/6（4-service 栈定型后统一改造，避免 compose 反复修改）。
+
+**背景**: 当前 `docker-compose.yml` 是"源码构建部署"模式（service 定义包含 `build`，前端 API 地址通过构建参数写入，默认 Agent 模型指向公网服务）。外网环境可直接构建运行，但在无外网、无内网镜像仓的环境中，`docker compose up` 会遇到：构建依赖无法下载、前端回源地址不匹配、模型调用出网失败。需要把"构建时联网"与"运行时离线"彻底解耦。
+
+### 10.1 应用配置改造 — 模型配置外部化
+
+**目标**: Agent 使用的模型名、推理服务地址、API Key 全部通过环境变量注入，支持运行时从前端切换 Lead Agent 模型。
+
+**设计决策**:
+- **单 Provider**：所有模型共享一个推理服务地址（内网典型场景），不做多 Provider
+- **手动声明可用模型**（不做自动发现）
+- **env var default + per-message override**：管理员通过 env var 设默认模型，用户发消息时可从前端切换 Lead Agent 模型
+- **向后兼容**：`LLM_BASE_URL` 不设时保持当前公网 API 行为
+
+**新增配置项**（`config.py`，`ARTIFACTFLOW_` 前缀）:
+
+| 配置项 | 说明 | 默认值 |
+|--------|------|--------|
+| `LLM_BASE_URL` | 推理服务地址（空 = litellm 默认路由） | `""` |
+| `LLM_API_KEY` | 推理服务 API Key | `""` |
+| `LLM_AVAILABLE_MODELS` | 逗号分隔的可用模型 ID（空 = 用 `MODEL_CONFIGS` 预设） | `""` |
+| `LEAD_MODEL` | Lead Agent 默认模型 | `"qwen3.5-plus"` |
+| `WORKER_MODEL` | Search/Crawl Agent 默认模型 | `"qwen3.5-flash-no-thinking"` |
+
+**两种运行模式**（由 `LLM_BASE_URL` 是否设置自动切换）：
+
+| | 公网模式（当前行为） | 内网模式 |
+|---|---|---|
+| 可用模型来源 | `MODEL_CONFIGS` 预设 keys | `LLM_AVAILABLE_MODELS` 配置 |
+| 模型路由 | litellm 按 provider 前缀路由 | 全部走 `LLM_BASE_URL` |
+| API Key | 各 provider 独立 env var | 统一 `LLM_API_KEY` |
+
+**改造链路**（从底向上穿透）:
+
+1. **`models/llm.py`** — `create_llm()` 自动注入全局 Provider（调用方未指定 `base_url` 时）；`get_available_models()` 按模式返回不同来源；保留 `MODEL_CONFIGS` 不动（公网模式的 extra_params 仍需要）
+2. **Agent 工厂** — `create_lead_agent(model=)` 参数化，默认值改为 `config.LEAD_MODEL`；Search/Crawl 同理用 `config.WORKER_MODEL`
+3. **`graph.py`** — `create_multi_agent_graph(lead_model=)` 新增参数，传入 lead agent 工厂。Search/Crawl 不暴露 override（执行层模型由管理员统一配置）
+4. **API 层** — `ChatRequest` 增加可选 `model` 字段；router 校验 model 在可用列表中后传入 graph；新增 `GET /api/v1/models` 端点返回可用模型列表 + 当前默认值
+5. **前端** — Chat 输入区域增加模型选择下拉，页面加载时从 `/models` 获取列表，发送消息时附带选中的 model
+
+**涉及文件**:
+
+- **修改**: `config.py`, `models/llm.py`, `lead_agent.py`, `search_agent.py`, `crawl_agent.py`, `graph.py`, `schemas/chat.py`, `routers/chat.py`, `main.py`, `frontend/src/lib/api.ts`, `frontend/src/components/chat/`, `.env.example`
+- **新增**: `routers/models.py`, `schemas/model.py`
+
+**退出标准**:
+- 内网模式：设置 `LLM_BASE_URL` + `LLM_AVAILABLE_MODELS` → agent 调用走指定推理服务
+- 公网模式：不设 `LLM_BASE_URL` → 行为与改造前完全一致
+- 前端可选模型、per-message override 生效
+- `validate_config()` 在内网模式下校验默认模型在可用列表中
+
+---
+
+### 10.2 外网构建发布流程
+
+**目标**: `scripts/release.sh` 一键完成版本化构建 → 冒烟验证 → 镜像导出 → sha256 校验。
+
+**流程**: 版本号传入 → 构建 backend/frontend 双镜像（带 version label）→ 启动全栈跑健康检查 → `docker save` 导出四个 tar（含 postgres + redis-stack 基础设施镜像）→ 生成 `checksums.sha256`。
+
+**前端 `NEXT_PUBLIC_API_URL` 处理**: 推荐每个部署环境单独构建前端镜像（方案 C）——前端镜像轻量（~50MB），`NEXT_PUBLIC_*` 是 Next.js 编译时变量，运行时替换都是 workaround。
+
+**退出标准**:
+- `release.sh` 一键完成全流程
+- 导出的 tar 可在全新机器上 `docker load` 成功
+
+---
+
+### 10.3 内网 Compose + 配置模板
+
+**目标**: `deploy/docker-compose.intranet.yml`（纯 `image`，无 `build`）+ `deploy/.env.intranet.example`（配置模板）。
+
+**关键设计**:
+- 四个 service：backend / frontend / postgres / redis-stack，全部仅 `image` 引用
+- 健康检查链：redis/postgres healthy → backend healthy → frontend 启动
+- 三个 named volume 持久化（backend_data / postgres_data / redis_data）
+- DB 连接串在 compose 内拼接，敏感值（JWT secret、PG password、LLM key）从 `.env` 读取
+- 端口可配（`BACKEND_PORT` / `FRONTEND_PORT`）
+
+**`.env.intranet.example` 必填项**: VERSION、JWT_SECRET、POSTGRES_PASSWORD、LLM_BASE_URL、LLM_API_KEY、LLM_AVAILABLE_MODELS、LEAD_MODEL、WORKER_MODEL。
+
+**退出标准**:
+- 纯离线环境（镜像已 load）`docker compose up -d` 四个 service 全部 healthy
+- 前端可访问且能正常登录
+
+---
+
+### 10.4 内网部署 SOP
+
+**目标**: `deploy/deployment-guide.md`，运维人员无需理解技术栈即可完成部署。
+
+**大纲**: 前置要求（Docker 24+ / 4C8G / OpenAI 兼容推理服务已部署）→ 镜像导入（sha256 校验 + docker load）→ 配置（复制 .env 模板 + 修改必填项）→ 启动 → 创建管理员 → 验证。附日常运维（日志 / 备份 / 升级）。
+
+**退出标准**: 按手册操作可在全新机器上完成完整部署。
+
+---
+
+### 10.5 交付物清单
+
+```
+artifactflow-release-${VERSION}/
+├── images/          # 四个 tar + checksums.sha256
+├── compose/         # docker-compose.intranet.yml + .env.intranet.example
+├── scripts/         # load-images.sh（docker load 一键脚本）
+└── docs/            # deployment-guide.md
+```
+
+---
+
 ## 各 Phase 依赖关系
 
 ```
@@ -797,11 +909,17 @@ Phase 7A (文档上传)          ✅ 已完成
 Phase 7B (结构化数据)        ← 依赖 7A ✅ + Phase 5/6（PostgreSQL 大字段 / 对象存储）
 Phase 8 (编辑 Artifact)      ← 依赖 7A ✅（上传和编辑共享写接口模式）
 Phase 9 (Skill 系统)         ← 仅依赖 Phase 4（认证），独立于 Phase 7/8，可随时实施
+Phase 10 (内网离线部署)      ← 依赖 Phase 5/6（4-service 栈定型）
+  10.1 模型配置外部化          ← 无外部依赖，可独立于 5/6 先行（仅改 LLM/Agent/API 层）
+  10.2 外网构建发布流程        ← 依赖 10.1 + Phase 5/6
+  10.3 内网 Compose            ← 依赖 10.2
+  10.4 内网部署 SOP            ← 依赖 10.3
+  10.5 交付物清单              ← 依赖 10.2 + 10.3 + 10.4
 ```
 
-建议执行顺序: **Phase 4 ✅ → 7A ✅ → 5/6 → 7B → 8**。Phase 9 可随时排入开发。
+建议执行顺序: **Phase 4 ✅ → 7A ✅ → 5/6 → 10 → 7B → 8**。Phase 9 可随时排入开发。
 
-关键路径: **5.1 ∥ 5.2/5.3 → 5.5 → 6.1 → 6.2 → 6.3**（5.1 与 5.2 可并行）。5.2 完成后即可获得最大的并发性能提升（checkpointer 瓶颈解除）。
+关键路径: **5.1 ∥ 5.2/5.3 → 5.5 → 6.1 → 6.2 → 6.3 → 10.1 → 10.2 → 10.3**。其中 10.1（模型配置外部化）可在 Phase 5/6 期间并行推进。
 
 ---
 
@@ -814,6 +932,7 @@ Phase 9 (Skill 系统)         ← 仅依赖 Phase 4（认证），独立于 Pha
 - Phase 7A ✅ 已完成（content_type 统一、文档转换、上传 API/UI、渲染策略修正、Prompt Review）
 - Phase 7B 建议在 Phase 5/6 之后，因为 csv / json 原始文件存储可能需要 PostgreSQL 大字段或对象存储支持
 - Phase 9 Skill 系统调研已完成，方案已确定（轻量独立 `skills` 表），仅依赖 Phase 4（已完成），可随时排入开发
+- Phase 10 内网部署改造建议在 Phase 5/6 之后统一做，避免 compose 文件改两遍。10.1 模型配置外部化是最关键的子项，可提前讨论方案
 - **数据迁移**: 系统处于开发阶段，所有 Phase（包括 5/6 数据库改造）均不需要考虑旧数据迁移，已有数据可丢弃。涉及 schema 变更时直接 `rm data/artifactflow.db` 后重启，`create_all` 会按新模型建表
 - 数据库可移植性 CI 范围：当前只跑 SQLite + PostgreSQL；MySQL/TDSQL 等有实际切库需求时再加入 matrix
 - concurrency.md 中已标记 ✅ 的项目（短事务、日志上下文、SSE Heartbeat 等）不在此计划中。TaskManager 多 worker 适配已纳入 5.5
