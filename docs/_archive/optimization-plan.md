@@ -123,7 +123,7 @@
 - 迁移脚本中使用 SQLAlchemy DDL API，不写方言专属 SQL
 - 迁移执行策略：**部署前单次执行**（CLI 命令或 init container），不在应用启动时自动 `upgrade head`（多 worker 同时启动会导致并发迁移竞态）
 - `DatabaseManager.initialize()` 改为 **schema version 校验**：启动时检查当前 DB 版本是否匹配预期，不匹配则 fail fast 并提示运行迁移命令
-- 旧迁移脚本 `001_initial_schema.py` 保留，标记为 archived
+- 旧迁移脚本 `001_initial_schema.py` 直接删除（Alembic 不识别 archived 概念，留着无意义）
 
 **5.1.3 Repository 层方言审计**
 
