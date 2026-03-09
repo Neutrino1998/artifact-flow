@@ -10,7 +10,8 @@
 
 ## Phase 3 - 可选优化
 - [ ] ArtifactManager 缓存加 TTL（或直接移除）  ← 优先级低
-- [ ] API Rate Limit / Session / 分布式锁
+- [ ] API Rate Limit（per-user token bucket，基于 Redis 计数器，P5 Redis 引入后实施）
+- [ ] 用户消息输入长度限制（ChatRequest max length 校验，防超长输入浪费 LLM token）
 
 
 # 模型模块已知问题清单
