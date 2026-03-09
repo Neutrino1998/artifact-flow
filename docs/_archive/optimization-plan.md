@@ -219,7 +219,7 @@ async def create_redis_checkpointer(redis_url: str, ttl: dict | None = None):
 - 请求时 Redis 不可用 → 健康门控返回 503（submit 前拦截验证）
 - 执行中 Redis 断连 → SSE error 事件推送到前端
 - 现有回归测试全部通过（checkpointer 替换对上层透明）
-- `/health` 端点增强：检查 Redis 连通性（后续 P6 再加 PostgreSQL），返回各组件状态
+- `/health` 端点增强：检查 Redis 连通性，返回各组件状态
 
 ---
 
@@ -494,6 +494,7 @@ Index("ix_messages_conv_created", "conversation_id", "created_at")
 - PostgreSQL 并发写入测试通过（模拟多请求同时写入 conversation/message/artifact）
 - SQLite 专属代码已全部移除（WAL、PRAGMA、`_is_sqlite()`、`aiosqlite` 依赖）
 - 复合索引在 EXPLAIN 中被正确使用
+- `/health` 端点增加 PostgreSQL 连通性检查
 
 ---
 
