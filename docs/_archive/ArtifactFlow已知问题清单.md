@@ -58,6 +58,7 @@ system prompt + instruction + history(如果有) + tool result
 - [x] fetch tool 支持pdf
 - [x] agent logging 加上thread id
 - [ ] 区分conversation history和tool interactions的compression level
+- [ ] Graph 流程自动化测试：mock `BaseAgent._call_llm()` 返回预设 response（含 XML tool call），覆盖 graph 路由/状态流转/事件推送，不依赖真实 LLM
 
 
 # Agent模块已知问题清单
