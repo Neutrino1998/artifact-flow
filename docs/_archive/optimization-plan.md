@@ -92,27 +92,25 @@
 
 ---
 
-## Phase 5: Redis 引入 + 数据库可移植性基线
+## Phase 5: Redis 引入 + Alembic 迁移框架
 
-**目标**: 解决最紧迫的并发瓶颈（checkpointer 单连接串行），建立数据库可移植性抽象层，为 Phase 6 PostgreSQL 迁移铺路。
+**目标**: 解决最紧迫的并发瓶颈（checkpointer 单连接串行），引入 Alembic 迁移框架为 Phase 6 PostgreSQL 切换铺路。
 
 > **执行顺序调整说明**: 原计划 Phase 5 PostgreSQL → Phase 6 Redis，但当前最明确的并发瓶颈是 checkpointer 单连接串行（`concurrency.md` L105-108），应优先解决。Redis 前置可更快获得并发收益，PostgreSQL 迁移改为 Phase 6。
 
-### 5.1 数据库可移植性基线
+### 5.1 RETURNING 移除 + Alembic 迁移框架
 
-**动机**: 在进行任何数据库迁移之前，确保 Repository 层不绑定特定 SQL 方言。未来切换数据库（PostgreSQL → MySQL/TDSQL）只需调整连接配置和迁移脚本，不改业务逻辑。
+**动机**: 消除唯一的方言依赖（RETURNING 子句），引入 Alembic 管理 schema 变更。不建方言适配层 — Repository 层已全部通过 ORM 构造查询，天然方言无关。
 
 **涉及文件**:
-- `src/repositories/base.py` — 新增方言适配工具方法
-- `src/repositories/artifact_repo.py` — RETURNING 子句适配（L309-325，当前唯一的 RETURNING 用法）
-- `src/db/database.py` — 提取方言检测能力（L86-88 `_is_sqlite()`），暴露给 Repository 层
+- `src/repositories/artifact_repo.py` — 移除 `.returning()` 调用
 - `src/db/migrations/` — Alembic 初始化
 
 **改动**:
 
-**5.1.1 RETURNING 子句确认**
+**5.1.1 移除 RETURNING 子句**
 
-`artifact_repo.py:324` 的乐观锁更新使用了 `.returning()`。SQLite 3.35+ 和 PostgreSQL 均原生支持，无需适配。MySQL 不支持 RETURNING，但当前不在目标数据库范围内，等有实际需求时再加适配层。
+`artifact_repo.py:324` 的乐观锁更新使用了 `.returning()`，MySQL/TDSQL 不支持。改为 `rowcount` 判断 + 计算新版本号。改动量极小（全项目仅此一处）。
 
 **5.1.2 Alembic 迁移框架**
 
@@ -123,19 +121,11 @@
 - 迁移脚本中使用 SQLAlchemy DDL API，不写方言专属 SQL
 - 迁移执行策略：**部署前单次执行**（CLI 命令或 init container），不在应用启动时自动 `upgrade head`（多 worker 同时启动会导致并发迁移竞态）
 - `DatabaseManager.initialize()` 改为 **schema version 校验**：启动时检查当前 DB 版本是否匹配预期，不匹配则 fail fast 并提示运行迁移命令
-- 旧迁移脚本 `001_initial_schema.py` 直接删除（Alembic 不识别 archived 概念，留着无意义）
-
-**5.1.3 Repository 层方言审计**
-
-确认所有 Repository 仅使用 SQLAlchemy 通用 ORM 能力（当前状态扫描结果）：
-- ✅ 无原生 SQL（除 PRAGMA，已在 `database.py` 条件控制）
-- ✅ 无 SQLite 特有函数（ROWID、typeof 等）
-- ✅ JSON 类型使用 SQLAlchemy `JSON`（PostgreSQL 自动映射 JSONB）
-- ✅ 所有查询通过 ORM 构造，无字符串拼接 SQL
-- ✅ RETURNING 子句（artifact_repo.py L324）→ SQLite/PostgreSQL 均支持，无需适配
+- 旧迁移脚本 `001_initial_schema.py` 直接删除
 
 **退出标准**:
-- Alembic 迁移可在 SQLite 上正常执行
+- RETURNING 已移除，Repository 层零方言依赖
+- Alembic 迁移正常执行
 - 现有回归测试全部通过
 
 ---
@@ -388,38 +378,48 @@ end
 
 ## Phase 6: PostgreSQL 迁移
 
-**目标**: 主数据库从 SQLite 迁移到 PostgreSQL，获得真正的多写者并发（MVCC）、复合索引性能、生产级连接池管理。
+**目标**: 主数据库从 SQLite 切换到 PostgreSQL，获得多写者并发（MVCC）、复合索引性能、生产级连接池。同时移除所有 SQLite 专属代码。
 
-**前置依赖**: Phase 5.1（可移植性基线 + Alembic）已完成。
+**前置依赖**: Phase 5.1（Alembic）已完成。
 
 ### 6.1 数据库引擎切换
 
 **涉及文件**:
-- `src/db/database.py` — `DatabaseManager` 多引擎适配
-- `src/api/config.py` — `DATABASE_URL` 默认值更新
-- `requirements.txt` — 新增 `asyncpg`
+- `src/db/database.py` — `DatabaseManager` 简化（移除 SQLite 分支）
+- `src/api/config.py` — `DATABASE_URL` 默认值更新 + 连接池参数外部化
+- `requirements.txt` — 新增 `asyncpg`，移除 `aiosqlite`
 - `docker-compose.yml` — 新增 PostgreSQL 服务
 
 **改动**:
 
-**6.1.1 DatabaseManager 多引擎适配**
+**6.1.1 DatabaseManager 简化 + 连接池外部化**
 
-- 保留 `_is_sqlite()`，新增 `_get_dialect() -> str`（返回 `"sqlite"` / `"postgresql"` / `"mysql"` 等）
-- SQLite 保留 WAL 配置（`_configure_sqlite_wal()` 条件调用，当前已实现 ✅），仍可用于开发/测试
-- PostgreSQL 连接池参数：
+- 移除 `_is_sqlite()`、`_configure_sqlite_wal()`、PRAGMA 等 SQLite 专属代码
+- `DatabaseManager` 只接收 `DATABASE_URL` + 通用连接池参数，零方言分支
+- 连接池参数通过 env var 注入（`config.py`），不硬编码：
 
 ```python
-if self._get_dialect() == "postgresql":
-    engine_kwargs.update({
-        "pool_size": 10,          # 基础连接数
-        "max_overflow": 20,       # 峰值溢出连接
-        "pool_timeout": 30,       # 等待连接超时
-        "pool_recycle": 1800,     # 连接最大存活 30 分钟
-        "pool_pre_ping": True,    # 取连接前 ping 验活，防止使用已断开的连接
-    })
+# config.py
+DATABASE_URL: str = "postgresql+asyncpg://artifactflow:changeme@localhost:5432/artifactflow"
+DB_POOL_SIZE: int = 10
+DB_MAX_OVERFLOW: int = 20
+DB_POOL_TIMEOUT: int = 30
+DB_POOL_RECYCLE: int = 1800
 ```
 
-- 可选：PostgreSQL 单语句超时 `connect_args={"server_settings": {"statement_timeout": "30000"}}`
+```python
+# database.py — 无方言判断
+self._engine = create_async_engine(
+    url,
+    pool_size=config.DB_POOL_SIZE,
+    max_overflow=config.DB_MAX_OVERFLOW,
+    pool_timeout=config.DB_POOL_TIMEOUT,
+    pool_recycle=config.DB_POOL_RECYCLE,
+    pool_pre_ping=True,
+)
+```
+
+未来切库只需换 `DATABASE_URL` + 调整池参数，代码零改动。数据库服务端配置（`statement_timeout`、`work_mem` 等）放在 PostgreSQL 配置侧，不在应用代码中管理。
 
 **6.1.2 Docker PostgreSQL 服务**
 
@@ -460,7 +460,7 @@ backend 服务 `depends_on` 增加 `postgres` 和 `redis`（含 health condition
 - `Text` → `TEXT`（兼容 ✅）
 - `Integer` + `autoincrement=True`（`artifact_versions.id`）→ PostgreSQL `SERIAL`（SQLAlchemy 自动处理 ✅）
 
-~~**6.2.2 数据迁移工具** — 不需要。系统处于开发阶段，切换 PostgreSQL 时直接用 Alembic 建表，不迁移旧 SQLite 数据。~~
+数据迁移不需要 — 开发阶段，直接用 Alembic 建表。
 
 ### 6.3 性能优化 — 复合索引
 
@@ -488,55 +488,42 @@ Index("ix_messages_conv_created", "conversation_id", "created_at")
 # 已有 UniqueConstraint(artifact_id, session_id, version) 可复用 ✅
 ```
 
-注意：这些索引在 SQLite 上同样有效（SQLAlchemy 统一创建），不影响可移植性。
-
 **退出标准**:
 - PostgreSQL 上所有回归测试通过
 - PostgreSQL 并发写入测试通过（模拟多请求同时写入 conversation/message/artifact）
-- SQLite 模式仍可正常工作（开发/测试场景）
+- SQLite 专属代码已全部移除（WAL、PRAGMA、`_is_sqlite()`、`aiosqlite` 依赖）
 - 复合索引在 EXPLAIN 中被正确使用
 
 ---
 
 ## 测试策略（贯穿 Phase 5 / Phase 6）
 
-当前测试基座是内存 SQLite（`tests/conftest.py` L50-60），无法覆盖 PostgreSQL/Redis 行为差异。需要建立多数据库测试基础设施。
+当前测试基座是内存 SQLite（`tests/conftest.py` L50-60）。Phase 6 完成后统一切到 PostgreSQL，测试环境与生产一致。
 
 ### 测试基础设施改造
 
 **涉及文件**:
-- `tests/conftest.py` — 多数据库 fixture
+- `tests/conftest.py` — fixture 改用 PostgreSQL（本地 `docker-compose.dev.yml` 或 CI service container）
 - `tests/integration/` — 新增集成测试目录
-- CI 配置 — 多数据库 matrix
 
 **改动**:
-
-**环境变量驱动的数据库选择**:
 
 ```python
 # tests/conftest.py
 @pytest.fixture(scope="session")
 def db_manager():
-    db_url = os.environ.get("TEST_DATABASE_URL", "sqlite+aiosqlite:///:memory:")
+    db_url = os.environ.get("TEST_DATABASE_URL", "postgresql+asyncpg://...")
     manager = DatabaseManager(db_url)
     ...
-```
-
-**CI Matrix**:
-
-```yaml
-strategy:
-  matrix:
-    database: [sqlite, postgres]
-    # MySQL 可选，后续按需加入
 ```
 
 **Redis 集成测试**（`tests/integration/`）:
 - `test_redis_checkpointer.py` — checkpoint CRUD / TTL 过期 / interrupt-resume
 - `test_redis_stream_manager.py` — 事件推送/消费/断线重连/TTL 清理
 - `test_redis_fault.py` — Redis 断连后 503 响应、Redis 恢复后自动重连
+
 **并发测试增强**:
-- 多请求并发写入 conversation/message/artifact（验证 PostgreSQL MVCC 优于 SQLite 单写者）
+- 多请求并发写入 conversation/message/artifact（验证 PostgreSQL MVCC）
 - 多 worker stream push/consume（验证 Redis Streams 跨进程投递）
 
 ---
@@ -784,6 +771,8 @@ ContextManager.prepare_agent_context()
 
 **背景**: 当前 `docker-compose.yml` 是"源码构建部署"模式（service 定义包含 `build`，前端 API 地址通过构建参数写入，默认 Agent 模型指向公网服务）。外网环境可直接构建运行，但在无外网、无内网镜像仓的环境中，`docker compose up` 会遇到：构建依赖无法下载、前端回源地址不匹配、模型调用出网失败。需要把"构建时联网"与"运行时离线"彻底解耦。
 
+**开发者模式**: Phase 5/6 完成后砍掉 SQLite 支持，只保留 PostgreSQL。本地开发采用"基础设施 Docker + 应用本地跑"模式：`docker-compose.dev.yml` 仅包含 PostgreSQL + Redis 两个 service，后端和前端本地直接运行（保留热重载和调试体验）。
+
 ### 10.1 应用配置改造 — 模型配置外部化
 
 **目标**: Agent 使用的模型名、推理服务地址、API Key 全部通过环境变量注入，支持运行时从前端切换 Lead Agent 模型。
@@ -792,7 +781,7 @@ ContextManager.prepare_agent_context()
 - **单 Provider**：所有模型共享一个推理服务地址（内网典型场景），不做多 Provider
 - **手动声明可用模型**（不做自动发现）
 - **env var default + per-message override**：管理员通过 env var 设默认模型，用户发消息时可从前端切换 Lead Agent 模型
-- **向后兼容**：`LLM_BASE_URL` 不设时保持当前公网 API 行为
+- **公网模式不受影响**：`LLM_BASE_URL` 不设时走 litellm 默认路由（当前行为）
 
 **新增配置项**（`config.py`，`ARTIFACTFLOW_` 前缀）:
 
@@ -895,13 +884,13 @@ Phase 1 (核心 Bug)          ✅ 已完成
 Phase 2 (安全加固)          ✅ 已完成
 Phase 3 (数据质量)          ← 3.1/3.2 ✅, 3.3 ⏸️
 Phase 4 (认证框架)          ✅ 已完成
-Phase 5 (Redis + 可移植性)   ← Phase 4 之后
-  5.1 可移植性基线            ← 无依赖
+Phase 5 (Redis + Alembic)    ← Phase 4 之后
+  5.1 RETURNING 移除 + Alembic ← 无依赖
   5.2 Redis Checkpointer     ← 无依赖（可与 5.1 并行）
   5.3 Redis StreamManager    ← 可与 5.2 并行（共用 Redis 连接）
   5.4 缓存决策               ← 不做改动（保持 request-local）
   5.5 TaskManager 适配       ← 依赖 5.2（需要 Redis 连接）
-Phase 6 (PostgreSQL)         ← 依赖 5.1（可移植性基线 + Alembic）
+Phase 6 (PostgreSQL)         ← 依赖 5.1（Alembic）
   6.1 引擎切换
   6.2 Schema 迁移             ← 依赖 6.1
   6.3 复合索引                ← 依赖 6.2
@@ -919,7 +908,7 @@ Phase 10 (内网离线部署)      ← 依赖 Phase 5/6（4-service 栈定型）
 
 建议执行顺序: **Phase 4 ✅ → 7A ✅ → 5/6 → 10 → 7B → 8**。Phase 9 可随时排入开发。
 
-关键路径: **5.1 ∥ 5.2/5.3 → 5.5 → 6.1 → 6.2 → 6.3 → 10.1 → 10.2 → 10.3**。其中 10.1（模型配置外部化）可在 Phase 5/6 期间并行推进。
+关键路径: **5.1 ∥ 5.2/5.3 → 5.5 → 6.1 → 6.2 → 6.3 → 10.1 → 10.2 → 10.3**。10.1（模型配置外部化）可在 Phase 5/6 期间并行推进。
 
 ---
 
@@ -927,13 +916,13 @@ Phase 10 (内网离线部署)      ← 依赖 Phase 5/6（4-service 栈定型）
 
 - Phase 1-3 是纯修复，不引入新依赖，风险最低
 - Phase 4 是第一个需要前端大改的阶段（登录页 + token 管理）
-- Phase 5 优先 Redis（解决并发瓶颈）+ 可移植性基线（为 Phase 6 铺路），5.1 和 5.2 可并行推进
-- Phase 6 PostgreSQL 迁移依赖 5.1 的 Alembic 框架和方言适配层
+- Phase 5 优先 Redis（解决并发瓶颈）+ Alembic（为 Phase 6 铺路），5.1 和 5.2 可并行推进
+- Phase 6 PostgreSQL 迁移依赖 5.1 的 Alembic 框架。DatabaseManager 不做方言适配 — 只认 `DATABASE_URL` + 通用连接池参数，切库改连接串即可
 - Phase 7A ✅ 已完成（content_type 统一、文档转换、上传 API/UI、渲染策略修正、Prompt Review）
 - Phase 7B 建议在 Phase 5/6 之后，因为 csv / json 原始文件存储可能需要 PostgreSQL 大字段或对象存储支持
 - Phase 9 Skill 系统调研已完成，方案已确定（轻量独立 `skills` 表），仅依赖 Phase 4（已完成），可随时排入开发
 - Phase 10 内网部署改造建议在 Phase 5/6 之后统一做，避免 compose 文件改两遍。10.1 模型配置外部化是最关键的子项，可提前讨论方案
-- **数据迁移**: 系统处于开发阶段，所有 Phase（包括 5/6 数据库改造）均不需要考虑旧数据迁移，已有数据可丢弃。涉及 schema 变更时直接 `rm data/artifactflow.db` 后重启，`create_all` 会按新模型建表
-- 数据库可移植性 CI 范围：当前只跑 SQLite + PostgreSQL；MySQL/TDSQL 等有实际切库需求时再加入 matrix
+- **数据迁移**: 系统处于开发阶段，所有 Phase（包括 5/6 数据库改造）均不需要考虑旧数据迁移，已有数据可丢弃
+- **SQLite 退役**: Phase 6 中移除 SQLite 支持（Redis 已是必需依赖，本地开发必须跑 Docker，再多一个 PostgreSQL 容器成本为零）。测试统一跑 PostgreSQL
 - concurrency.md 中已标记 ✅ 的项目（短事务、日志上下文、SSE Heartbeat 等）不在此计划中。TaskManager 多 worker 适配已纳入 5.5
 - Phase 5/6 完成后需同步更新 `docs/architecture/concurrency.md`（演进路线、资源分层图）和 `CLAUDE.md`（命令、架构描述）
