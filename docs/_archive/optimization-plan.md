@@ -877,6 +877,54 @@ artifactflow-release-${VERSION}/
 
 ---
 
+## Phase 11: 可观测性 — 结构化日志 + 运维界面
+
+**目标**: 完整记录 Agent 执行链路（类似 LangSmith 的 trace 能力），支持按对话回溯完整的 prompt → response → tool call → tool result 链路。数据自托管，不依赖外部服务。
+
+### 设计思路
+
+**双通道日志架构**:
+
+| 通道 | 内容 | 存储 | 用途 |
+|------|------|------|------|
+| stdout / 文件 | ERROR、启动/关闭、关键状态变更 | 本地文件（永远可用） | 兜底排障，数据库挂了也能看 |
+| DB LogEntry | 完整执行链路（system prompt、LLM 原始输出、tool 入参/返回、token usage、耗时） | PostgreSQL | 可查询、可视化、按 conv_id 回溯 |
+
+DB 写入失败时静默忽略，绝不影响主流程。现有 `utils/logger.py` 保留并输出到 stdout，DB handler 作为附加通道。
+
+**数据模型**（一张表）:
+
+```sql
+CREATE TABLE execution_logs (
+    id BIGSERIAL PRIMARY KEY,
+    ts TIMESTAMPTZ DEFAULT now(),
+    level VARCHAR(10),          -- INFO / WARN / ERROR
+    conv_id UUID,
+    request_id VARCHAR(64),     -- 请求链路追踪
+    user_id UUID,
+    agent VARCHAR(32),          -- lead / search / crawl
+    tool VARCHAR(64),
+    message TEXT,
+    extra JSONB                 -- duration_ms, token_count, 原始 prompt/response 等
+);
+CREATE INDEX idx_logs_conv_id ON execution_logs(conv_id, ts);
+```
+
+**记录的关键节点**: agent_start（system prompt 全文）、llm_complete（模型原始输出、token usage）、tool_start（工具名 + 完整入参）、tool_complete（原始返回 + 耗时）、error（完整 traceback）。与现有 `ExecutionMetrics`（摘要统计）互补 — metrics 记"调了几次花了多久"，LogEntry 记"具体输入了什么输出了什么"。
+
+**运维界面**: 复用现有前端技术栈和布局模式，不引入独立运维系统。核心思路 — 现有三栏布局的"管理员视图"：
+
+- **左栏**: 对话列表（复用 Sidebar 组件，增加用户名/状态筛选）
+- **中栏**: 点击对话后展示日志流而非聊天气泡 — `LogEntry` 组件替代 `MessageBubble`，每条日志显示时间戳 + level + agent/tool + message，level 颜色区分（INFO 灰、WARN 黄、ERROR 红）
+- **右栏**: 点击某条日志展开详情（完整 prompt、LLM 原始输出、tool 入参/返回的 JSON 展开）
+- **顶部**: level 过滤器 + 时间范围选择 + conv_id / user_id 搜索
+
+API: `GET /api/v1/logs?conv_id=xxx&level=ERROR&user_id=xxx`，admin 权限。
+
+**注意事项**: 日志写入用 fire-and-forget 或批量 insert，不阻塞主流程；设 retention 定期清理（如 30 天）；开发时 console 人类可读格式，生产时同时写表。
+
+---
+
 ## 各 Phase 依赖关系
 
 ```
@@ -904,9 +952,10 @@ Phase 10 (内网离线部署)      ← 依赖 Phase 5/6（4-service 栈定型）
   10.3 内网 Compose            ← 依赖 10.2
   10.4 内网部署 SOP            ← 依赖 10.3
   10.5 交付物清单              ← 依赖 10.2 + 10.3 + 10.4
+Phase 11 (可观测性)            ← 依赖 Phase 6（PostgreSQL 存储日志）
 ```
 
-建议执行顺序: **Phase 4 ✅ → 7A ✅ → 5/6 → 10 → 7B → 8**。Phase 9 可随时排入开发。
+建议执行顺序: **Phase 4 ✅ → 7A ✅ → 5/6 → 10 → 11 → 7B → 8**。Phase 9 可随时排入开发。
 
 关键路径: **5.1 ∥ 5.2/5.3 → 5.5 → 6.1 → 6.2 → 6.3 → 10.1 → 10.2 → 10.3**。10.1（模型配置外部化）可在 Phase 5/6 期间并行推进。
 
