@@ -19,7 +19,7 @@
       
       
       <link rel="icon" href="../../assets/images/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.3">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.4">
     
     
       
@@ -889,22 +889,22 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#phase-5-redis-引入--数据库可移植性基线" class="md-nav__link">
+  <a href="#phase-5-redis-引入--alembic-迁移框架" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Phase 5: Redis 引入 + 数据库可移植性基线
+        Phase 5: Redis 引入 + Alembic 迁移框架
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Phase 5: Redis 引入 + 数据库可移植性基线">
+    <nav class="md-nav" aria-label="Phase 5: Redis 引入 + Alembic 迁移框架">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#51-数据库可移植性基线" class="md-nav__link">
+  <a href="#51-returning-移除--alembic-迁移框架" class="md-nav__link">
     <span class="md-ellipsis">
       
-        5.1 数据库可移植性基线
+        5.1 RETURNING 移除 + Alembic 迁移框架
       
     </span>
   </a>
@@ -1322,6 +1322,34 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#phase-11-可观测性--结构化日志--运维界面" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phase 11: 可观测性 — 结构化日志 + 运维界面
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Phase 11: 可观测性 — 结构化日志 + 运维界面">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#设计思路" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        设计思路
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#各-phase-依赖关系" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1461,21 +1489,19 @@
 <p><strong>完成于</strong>: commit <code>8d367ae</code> — JWT 认证框架（签发/验证、User 模型、get_current_user 依赖注入、所有路由 user_id 过滤、SSE 认证、resume 归属校验、admin 用户管理 API）。前端：登录页、authStore、AuthGuard、401 拦截。CLI：login/logout + token 持久化。补丁：<code>821f20a</code>、<code>b573be1</code>、<code>0a06643</code>。</p>
 </blockquote>
 <hr />
-<h2 id="phase-5-redis-引入--数据库可移植性基线">Phase 5: Redis 引入 + 数据库可移植性基线</h2>
-<p><strong>目标</strong>: 解决最紧迫的并发瓶颈（checkpointer 单连接串行），建立数据库可移植性抽象层，为 Phase 6 PostgreSQL 迁移铺路。</p>
+<h2 id="phase-5-redis-引入--alembic-迁移框架">Phase 5: Redis 引入 + Alembic 迁移框架</h2>
+<p><strong>目标</strong>: 解决最紧迫的并发瓶颈（checkpointer 单连接串行），引入 Alembic 迁移框架为 Phase 6 PostgreSQL 切换铺路。</p>
 <blockquote>
 <p><strong>执行顺序调整说明</strong>: 原计划 Phase 5 PostgreSQL → Phase 6 Redis，但当前最明确的并发瓶颈是 checkpointer 单连接串行（<code>concurrency.md</code> L105-108），应优先解决。Redis 前置可更快获得并发收益，PostgreSQL 迁移改为 Phase 6。</p>
 </blockquote>
-<h3 id="51-数据库可移植性基线">5.1 数据库可移植性基线</h3>
-<p><strong>动机</strong>: 在进行任何数据库迁移之前，确保 Repository 层不绑定特定 SQL 方言。未来切换数据库（PostgreSQL → MySQL/TDSQL）只需调整连接配置和迁移脚本，不改业务逻辑。</p>
+<h3 id="51-returning-移除--alembic-迁移框架">5.1 RETURNING 移除 + Alembic 迁移框架</h3>
+<p><strong>动机</strong>: 消除唯一的方言依赖（RETURNING 子句），引入 Alembic 管理 schema 变更。不建方言适配层 — Repository 层已全部通过 ORM 构造查询，天然方言无关。</p>
 <p><strong>涉及文件</strong>:
-- <code>src/repositories/base.py</code> — 新增方言适配工具方法
-- <code>src/repositories/artifact_repo.py</code> — RETURNING 子句适配（L309-325，当前唯一的 RETURNING 用法）
-- <code>src/db/database.py</code> — 提取方言检测能力（L86-88 <code>_is_sqlite()</code>），暴露给 Repository 层
+- <code>src/repositories/artifact_repo.py</code> — 移除 <code>.returning()</code> 调用
 - <code>src/db/migrations/</code> — Alembic 初始化</p>
 <p><strong>改动</strong>:</p>
-<p><strong>5.1.1 RETURNING 子句确认</strong></p>
-<p><code>artifact_repo.py:324</code> 的乐观锁更新使用了 <code>.returning()</code>。SQLite 3.35+ 和 PostgreSQL 均原生支持，无需适配。MySQL 不支持 RETURNING，但当前不在目标数据库范围内，等有实际需求时再加适配层。</p>
+<p><strong>5.1.1 移除 RETURNING 子句</strong></p>
+<p><code>artifact_repo.py:324</code> 的乐观锁更新使用了 <code>.returning()</code>，MySQL/TDSQL 不支持。改为 <code>rowcount</code> 判断 + 计算新版本号。改动量极小（全项目仅此一处）。</p>
 <p><strong>5.1.2 Alembic 迁移框架</strong></p>
 <p>替换手写 SQL 迁移（<code>001_initial_schema.py</code> 使用原生 SQL 含 <code>AUTOINCREMENT</code>、<code>INSERT OR IGNORE</code> 等 SQLite 方言）：</p>
 <ul>
@@ -1484,17 +1510,11 @@
 <li>迁移脚本中使用 SQLAlchemy DDL API，不写方言专属 SQL</li>
 <li>迁移执行策略：<strong>部署前单次执行</strong>（CLI 命令或 init container），不在应用启动时自动 <code>upgrade head</code>（多 worker 同时启动会导致并发迁移竞态）</li>
 <li><code>DatabaseManager.initialize()</code> 改为 <strong>schema version 校验</strong>：启动时检查当前 DB 版本是否匹配预期，不匹配则 fail fast 并提示运行迁移命令</li>
-<li>旧迁移脚本 <code>001_initial_schema.py</code> 保留，标记为 archived</li>
+<li>旧迁移脚本 <code>001_initial_schema.py</code> 直接删除</li>
 </ul>
-<p><strong>5.1.3 Repository 层方言审计</strong></p>
-<p>确认所有 Repository 仅使用 SQLAlchemy 通用 ORM 能力（当前状态扫描结果）：
-- ✅ 无原生 SQL（除 PRAGMA，已在 <code>database.py</code> 条件控制）
-- ✅ 无 SQLite 特有函数（ROWID、typeof 等）
-- ✅ JSON 类型使用 SQLAlchemy <code>JSON</code>（PostgreSQL 自动映射 JSONB）
-- ✅ 所有查询通过 ORM 构造，无字符串拼接 SQL
-- ✅ RETURNING 子句（artifact_repo.py L324）→ SQLite/PostgreSQL 均支持，无需适配</p>
 <p><strong>退出标准</strong>:
-- Alembic 迁移可在 SQLite 上正常执行
+- RETURNING 已移除，Repository 层零方言依赖
+- Alembic 迁移正常执行
 - 现有回归测试全部通过</p>
 <hr />
 <h3 id="52-redis-基础设施--checkpointer-迁移">5.2 Redis 基础设施 + Checkpointer 迁移</h3>
@@ -1569,7 +1589,8 @@
 - 启动时 Redis 不可用 → 应用启动失败（fail fast 验证）
 - 请求时 Redis 不可用 → 健康门控返回 503（submit 前拦截验证）
 - 执行中 Redis 断连 → SSE error 事件推送到前端
-- 现有回归测试全部通过（checkpointer 替换对上层透明）</p>
+- 现有回归测试全部通过（checkpointer 替换对上层透明）
+- <code>/health</code> 端点增强：检查 Redis 连通性，返回各组件状态</p>
 <hr />
 <h3 id="53-streammanager-迁移到-redis-streams">5.3 StreamManager 迁移到 Redis Streams</h3>
 <p><strong>动机</strong>: 当前 <code>asyncio.Queue</code> 仅支持单进程部署。Pub/Sub 断线不可回放，与"断线重连不丢消息"目标冲突。Redis Streams 是唯一满足可靠投递需求的方案。</p>
@@ -1715,49 +1736,55 @@
 - 本地生命周期管理（引用持有、优雅停机）不受影响</p>
 <hr />
 <h2 id="phase-6-postgresql-迁移">Phase 6: PostgreSQL 迁移</h2>
-<p><strong>目标</strong>: 主数据库从 SQLite 迁移到 PostgreSQL，获得真正的多写者并发（MVCC）、复合索引性能、生产级连接池管理。</p>
-<p><strong>前置依赖</strong>: Phase 5.1（可移植性基线 + Alembic）已完成。</p>
+<p><strong>目标</strong>: 主数据库从 SQLite 切换到 PostgreSQL，获得多写者并发（MVCC）、复合索引性能、生产级连接池。同时移除所有 SQLite 专属代码。</p>
+<p><strong>前置依赖</strong>: Phase 5.1（Alembic）已完成。</p>
 <h3 id="61-数据库引擎切换">6.1 数据库引擎切换</h3>
 <p><strong>涉及文件</strong>:
-- <code>src/db/database.py</code> — <code>DatabaseManager</code> 多引擎适配
-- <code>src/api/config.py</code> — <code>DATABASE_URL</code> 默认值更新
-- <code>requirements.txt</code> — 新增 <code>asyncpg</code>
+- <code>src/db/database.py</code> — <code>DatabaseManager</code> 简化（移除 SQLite 分支）
+- <code>src/api/config.py</code> — <code>DATABASE_URL</code> 默认值更新 + 连接池参数外部化
+- <code>requirements.txt</code> — 新增 <code>asyncpg</code>，移除 <code>aiosqlite</code>
 - <code>docker-compose.yml</code> — 新增 PostgreSQL 服务</p>
 <p><strong>改动</strong>:</p>
-<p><strong>6.1.1 DatabaseManager 多引擎适配</strong></p>
+<p><strong>6.1.1 DatabaseManager 简化 + 连接池外部化</strong></p>
 <ul>
-<li>保留 <code>_is_sqlite()</code>，新增 <code>_get_dialect() -&gt; str</code>（返回 <code>"sqlite"</code> / <code>"postgresql"</code> / <code>"mysql"</code> 等）</li>
-<li>SQLite 保留 WAL 配置（<code>_configure_sqlite_wal()</code> 条件调用，当前已实现 ✅），仍可用于开发/测试</li>
-<li>PostgreSQL 连接池参数：</li>
+<li>移除 <code>_is_sqlite()</code>、<code>_configure_sqlite_wal()</code>、PRAGMA 等 SQLite 专属代码</li>
+<li><code>DatabaseManager</code> 只接收 <code>DATABASE_URL</code> + 通用连接池参数，零方言分支</li>
+<li>连接池参数通过 env var 注入（<code>config.py</code>），不硬编码：</li>
 </ul>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_dialect</span><span class="p">()</span> <span class="o">==</span> <span class="s2">&quot;postgresql&quot;</span><span class="p">:</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>    <span class="n">engine_kwargs</span><span class="o">.</span><span class="n">update</span><span class="p">({</span>
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>        <span class="s2">&quot;pool_size&quot;</span><span class="p">:</span> <span class="mi">10</span><span class="p">,</span>          <span class="c1"># 基础连接数</span>
-<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>        <span class="s2">&quot;max_overflow&quot;</span><span class="p">:</span> <span class="mi">20</span><span class="p">,</span>       <span class="c1"># 峰值溢出连接</span>
-<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>        <span class="s2">&quot;pool_timeout&quot;</span><span class="p">:</span> <span class="mi">30</span><span class="p">,</span>       <span class="c1"># 等待连接超时</span>
-<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>        <span class="s2">&quot;pool_recycle&quot;</span><span class="p">:</span> <span class="mi">1800</span><span class="p">,</span>     <span class="c1"># 连接最大存活 30 分钟</span>
-<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a>        <span class="s2">&quot;pool_pre_ping&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>    <span class="c1"># 取连接前 ping 验活，防止使用已断开的连接</span>
-<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a>    <span class="p">})</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="c1"># config.py</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="n">DATABASE_URL</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;postgresql+asyncpg://artifactflow:changeme@localhost:5432/artifactflow&quot;</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="n">DB_POOL_SIZE</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">10</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="n">DB_MAX_OVERFLOW</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">20</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="n">DB_POOL_TIMEOUT</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">30</span>
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="n">DB_POOL_RECYCLE</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">1800</span>
 </code></pre></div>
-<ul>
-<li>可选：PostgreSQL 单语句超时 <code>connect_args={"server_settings": {"statement_timeout": "30000"}}</code></li>
-</ul>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="c1"># database.py — 无方言判断</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="bp">self</span><span class="o">.</span><span class="n">_engine</span> <span class="o">=</span> <span class="n">create_async_engine</span><span class="p">(</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>    <span class="n">url</span><span class="p">,</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>    <span class="n">pool_size</span><span class="o">=</span><span class="n">config</span><span class="o">.</span><span class="n">DB_POOL_SIZE</span><span class="p">,</span>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>    <span class="n">max_overflow</span><span class="o">=</span><span class="n">config</span><span class="o">.</span><span class="n">DB_MAX_OVERFLOW</span><span class="p">,</span>
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a>    <span class="n">pool_timeout</span><span class="o">=</span><span class="n">config</span><span class="o">.</span><span class="n">DB_POOL_TIMEOUT</span><span class="p">,</span>
+<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a>    <span class="n">pool_recycle</span><span class="o">=</span><span class="n">config</span><span class="o">.</span><span class="n">DB_POOL_RECYCLE</span><span class="p">,</span>
+<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a>    <span class="n">pool_pre_ping</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+<a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a><span class="p">)</span>
+</code></pre></div>
+<p>未来切库只需换 <code>DATABASE_URL</code> + 调整池参数，代码零改动。数据库服务端配置（<code>statement_timeout</code>、<code>work_mem</code> 等）放在 PostgreSQL 配置侧，不在应用代码中管理。</p>
 <p><strong>6.1.2 Docker PostgreSQL 服务</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="nt">postgres</span><span class="p">:</span>
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="w">  </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">postgres:16-alpine</span>
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="w">  </span><span class="nt">environment</span><span class="p">:</span>
-<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="w">    </span><span class="nt">POSTGRES_DB</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">artifactflow</span>
-<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="w">    </span><span class="nt">POSTGRES_USER</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">artifactflow</span>
-<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="w">    </span><span class="nt">POSTGRES_PASSWORD</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">${POSTGRES_PASSWORD:-changeme}</span>
-<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="w">  </span><span class="nt">ports</span><span class="p">:</span>
-<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="s">&quot;5432:5432&quot;</span>
-<a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a><span class="w">  </span><span class="nt">volumes</span><span class="p">:</span>
-<a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">postgres_data:/var/lib/postgresql/data</span>
-<a id="__codelineno-5-11" name="__codelineno-5-11" href="#__codelineno-5-11"></a><span class="w">  </span><span class="nt">healthcheck</span><span class="p">:</span>
-<a id="__codelineno-5-12" name="__codelineno-5-12" href="#__codelineno-5-12"></a><span class="w">    </span><span class="nt">test</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="s">&quot;CMD-SHELL&quot;</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">&quot;pg_isready</span><span class="nv"> </span><span class="s">-U</span><span class="nv"> </span><span class="s">artifactflow&quot;</span><span class="p p-Indicator">]</span>
-<a id="__codelineno-5-13" name="__codelineno-5-13" href="#__codelineno-5-13"></a><span class="w">    </span><span class="nt">interval</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">10s</span>
-<a id="__codelineno-5-14" name="__codelineno-5-14" href="#__codelineno-5-14"></a><span class="w">    </span><span class="nt">timeout</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">5s</span>
-<a id="__codelineno-5-15" name="__codelineno-5-15" href="#__codelineno-5-15"></a><span class="w">    </span><span class="nt">retries</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">5</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="nt">postgres</span><span class="p">:</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="w">  </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">postgres:16-alpine</span>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="w">  </span><span class="nt">environment</span><span class="p">:</span>
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="w">    </span><span class="nt">POSTGRES_DB</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">artifactflow</span>
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="w">    </span><span class="nt">POSTGRES_USER</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">artifactflow</span>
+<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a><span class="w">    </span><span class="nt">POSTGRES_PASSWORD</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">${POSTGRES_PASSWORD:-changeme}</span>
+<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a><span class="w">  </span><span class="nt">ports</span><span class="p">:</span>
+<a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="s">&quot;5432:5432&quot;</span>
+<a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a><span class="w">  </span><span class="nt">volumes</span><span class="p">:</span>
+<a id="__codelineno-6-10" name="__codelineno-6-10" href="#__codelineno-6-10"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">postgres_data:/var/lib/postgresql/data</span>
+<a id="__codelineno-6-11" name="__codelineno-6-11" href="#__codelineno-6-11"></a><span class="w">  </span><span class="nt">healthcheck</span><span class="p">:</span>
+<a id="__codelineno-6-12" name="__codelineno-6-12" href="#__codelineno-6-12"></a><span class="w">    </span><span class="nt">test</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="s">&quot;CMD-SHELL&quot;</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">&quot;pg_isready</span><span class="nv"> </span><span class="s">-U</span><span class="nv"> </span><span class="s">artifactflow&quot;</span><span class="p p-Indicator">]</span>
+<a id="__codelineno-6-13" name="__codelineno-6-13" href="#__codelineno-6-13"></a><span class="w">    </span><span class="nt">interval</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">10s</span>
+<a id="__codelineno-6-14" name="__codelineno-6-14" href="#__codelineno-6-14"></a><span class="w">    </span><span class="nt">timeout</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">5s</span>
+<a id="__codelineno-6-15" name="__codelineno-6-15" href="#__codelineno-6-15"></a><span class="w">    </span><span class="nt">retries</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">5</span>
 </code></pre></div>
 <p>backend 服务 <code>depends_on</code> 增加 <code>postgres</code> 和 <code>redis</code>（含 health condition）。</p>
 <h3 id="62-schema-迁移与类型适配">6.2 Schema 迁移与类型适配</h3>
@@ -1772,62 +1799,54 @@
 - <code>String(N)</code> → <code>VARCHAR(N)</code>（兼容 ✅）
 - <code>Text</code> → <code>TEXT</code>（兼容 ✅）
 - <code>Integer</code> + <code>autoincrement=True</code>（<code>artifact_versions.id</code>）→ PostgreSQL <code>SERIAL</code>（SQLAlchemy 自动处理 ✅）</p>
-<p>~~<strong>6.2.2 数据迁移工具</strong> — 不需要。系统处于开发阶段，切换 PostgreSQL 时直接用 Alembic 建表，不迁移旧 SQLite 数据。~~</p>
+<p>数据迁移不需要 — 开发阶段，直接用 Alembic 建表。</p>
 <h3 id="63-性能优化--复合索引">6.3 性能优化 — 复合索引</h3>
 <p><strong>涉及文件</strong>:
 - <code>src/db/models.py</code> — 新增复合索引定义
 - Alembic 迁移脚本</p>
 <p><strong>改动</strong>:</p>
 <p>基于热点查询分析新增复合索引：</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="c1"># conversations 表</span>
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="c1"># 热点查询：list_conversations() — WHERE user_id=? ORDER BY updated_at DESC</span>
-<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="c1"># 文件：conversation_repo.py L210, L213</span>
-<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="n">Index</span><span class="p">(</span><span class="s2">&quot;ix_conversations_user_updated&quot;</span><span class="p">,</span> <span class="s2">&quot;user_id&quot;</span><span class="p">,</span> <span class="s2">&quot;updated_at&quot;</span><span class="p">)</span>
-<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a>
-<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a><span class="c1"># messages 表</span>
-<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a><span class="c1"># 热点查询：conversation 内消息加载 — WHERE conversation_id=? ORDER BY created_at</span>
-<a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a><span class="c1"># 文件：conversation_repo.py L386</span>
-<a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a><span class="n">Index</span><span class="p">(</span><span class="s2">&quot;ix_messages_conv_created&quot;</span><span class="p">,</span> <span class="s2">&quot;conversation_id&quot;</span><span class="p">,</span> <span class="s2">&quot;created_at&quot;</span><span class="p">)</span>
-<a id="__codelineno-6-10" name="__codelineno-6-10" href="#__codelineno-6-10"></a>
-<a id="__codelineno-6-11" name="__codelineno-6-11" href="#__codelineno-6-11"></a><span class="c1"># artifact_versions 表</span>
-<a id="__codelineno-6-12" name="__codelineno-6-12" href="#__codelineno-6-12"></a><span class="c1"># 热点查询：版本历史 — WHERE artifact_id=? AND session_id=? ORDER BY version</span>
-<a id="__codelineno-6-13" name="__codelineno-6-13" href="#__codelineno-6-13"></a><span class="c1"># 已有 UniqueConstraint(artifact_id, session_id, version) 可复用 ✅</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="c1"># conversations 表</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="c1"># 热点查询：list_conversations() — WHERE user_id=? ORDER BY updated_at DESC</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="c1"># 文件：conversation_repo.py L210, L213</span>
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="n">Index</span><span class="p">(</span><span class="s2">&quot;ix_conversations_user_updated&quot;</span><span class="p">,</span> <span class="s2">&quot;user_id&quot;</span><span class="p">,</span> <span class="s2">&quot;updated_at&quot;</span><span class="p">)</span>
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a>
+<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="c1"># messages 表</span>
+<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a><span class="c1"># 热点查询：conversation 内消息加载 — WHERE conversation_id=? ORDER BY created_at</span>
+<a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a><span class="c1"># 文件：conversation_repo.py L386</span>
+<a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a><span class="n">Index</span><span class="p">(</span><span class="s2">&quot;ix_messages_conv_created&quot;</span><span class="p">,</span> <span class="s2">&quot;conversation_id&quot;</span><span class="p">,</span> <span class="s2">&quot;created_at&quot;</span><span class="p">)</span>
+<a id="__codelineno-7-10" name="__codelineno-7-10" href="#__codelineno-7-10"></a>
+<a id="__codelineno-7-11" name="__codelineno-7-11" href="#__codelineno-7-11"></a><span class="c1"># artifact_versions 表</span>
+<a id="__codelineno-7-12" name="__codelineno-7-12" href="#__codelineno-7-12"></a><span class="c1"># 热点查询：版本历史 — WHERE artifact_id=? AND session_id=? ORDER BY version</span>
+<a id="__codelineno-7-13" name="__codelineno-7-13" href="#__codelineno-7-13"></a><span class="c1"># 已有 UniqueConstraint(artifact_id, session_id, version) 可复用 ✅</span>
 </code></pre></div>
-<p>注意：这些索引在 SQLite 上同样有效（SQLAlchemy 统一创建），不影响可移植性。</p>
 <p><strong>退出标准</strong>:
 - PostgreSQL 上所有回归测试通过
 - PostgreSQL 并发写入测试通过（模拟多请求同时写入 conversation/message/artifact）
-- SQLite 模式仍可正常工作（开发/测试场景）
-- 复合索引在 EXPLAIN 中被正确使用</p>
+- SQLite 专属代码已全部移除（WAL、PRAGMA、<code>_is_sqlite()</code>、<code>aiosqlite</code> 依赖）
+- 复合索引在 EXPLAIN 中被正确使用
+- <code>/health</code> 端点增加 PostgreSQL 连通性检查</p>
 <hr />
 <h2 id="测试策略贯穿-phase-5--phase-6">测试策略（贯穿 Phase 5 / Phase 6）</h2>
-<p>当前测试基座是内存 SQLite（<code>tests/conftest.py</code> L50-60），无法覆盖 PostgreSQL/Redis 行为差异。需要建立多数据库测试基础设施。</p>
+<p>当前测试基座是内存 SQLite（<code>tests/conftest.py</code> L50-60）。Phase 6 完成后统一切到 PostgreSQL，测试环境与生产一致。</p>
 <h3 id="测试基础设施改造">测试基础设施改造</h3>
 <p><strong>涉及文件</strong>:
-- <code>tests/conftest.py</code> — 多数据库 fixture
-- <code>tests/integration/</code> — 新增集成测试目录
-- CI 配置 — 多数据库 matrix</p>
+- <code>tests/conftest.py</code> — fixture 改用 PostgreSQL（本地 <code>docker-compose.dev.yml</code> 或 CI service container）
+- <code>tests/integration/</code> — 新增集成测试目录</p>
 <p><strong>改动</strong>:</p>
-<p><strong>环境变量驱动的数据库选择</strong>:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="c1"># tests/conftest.py</span>
-<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="nd">@pytest</span><span class="o">.</span><span class="n">fixture</span><span class="p">(</span><span class="n">scope</span><span class="o">=</span><span class="s2">&quot;session&quot;</span><span class="p">)</span>
-<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="k">def</span><span class="w"> </span><span class="nf">db_manager</span><span class="p">():</span>
-<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>    <span class="n">db_url</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;TEST_DATABASE_URL&quot;</span><span class="p">,</span> <span class="s2">&quot;sqlite+aiosqlite:///:memory:&quot;</span><span class="p">)</span>
-<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a>    <span class="n">manager</span> <span class="o">=</span> <span class="n">DatabaseManager</span><span class="p">(</span><span class="n">db_url</span><span class="p">)</span>
-<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a>    <span class="o">...</span>
-</code></pre></div>
-<p><strong>CI Matrix</strong>:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="nt">strategy</span><span class="p">:</span>
-<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="w">  </span><span class="nt">matrix</span><span class="p">:</span>
-<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="w">    </span><span class="nt">database</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">sqlite</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">postgres</span><span class="p p-Indicator">]</span>
-<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="w">    </span><span class="c1"># MySQL 可选，后续按需加入</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="c1"># tests/conftest.py</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="nd">@pytest</span><span class="o">.</span><span class="n">fixture</span><span class="p">(</span><span class="n">scope</span><span class="o">=</span><span class="s2">&quot;session&quot;</span><span class="p">)</span>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="k">def</span><span class="w"> </span><span class="nf">db_manager</span><span class="p">():</span>
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>    <span class="n">db_url</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;TEST_DATABASE_URL&quot;</span><span class="p">,</span> <span class="s2">&quot;postgresql+asyncpg://...&quot;</span><span class="p">)</span>
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>    <span class="n">manager</span> <span class="o">=</span> <span class="n">DatabaseManager</span><span class="p">(</span><span class="n">db_url</span><span class="p">)</span>
+<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a>    <span class="o">...</span>
 </code></pre></div>
 <p><strong>Redis 集成测试</strong>（<code>tests/integration/</code>）:
 - <code>test_redis_checkpointer.py</code> — checkpoint CRUD / TTL 过期 / interrupt-resume
 - <code>test_redis_stream_manager.py</code> — 事件推送/消费/断线重连/TTL 清理
-- <code>test_redis_fault.py</code> — Redis 断连后 503 响应、Redis 恢复后自动重连
-<strong>并发测试增强</strong>:
-- 多请求并发写入 conversation/message/artifact（验证 PostgreSQL MVCC 优于 SQLite 单写者）
+- <code>test_redis_fault.py</code> — Redis 断连后 503 响应、Redis 恢复后自动重连</p>
+<p><strong>并发测试增强</strong>:
+- 多请求并发写入 conversation/message/artifact（验证 PostgreSQL MVCC）
 - 多 worker stream push/consume（验证 Redis Streams 跨进程投递）</p>
 <hr />
 <h2 id="phase-7-文件上传--artifact">Phase 7: 文件上传 → Artifact</h2>
@@ -2100,13 +2119,14 @@
 <p><strong>目标</strong>: 实现"外网构建 + 内网运行"的标准化发布流程，支持无外网环境下的镜像交付和离线部署。适用场景：企业私有知识库、对接内网数据库做数据分析/报表等。</p>
 <p><strong>前置依赖</strong>: Phase 5/6（4-service 栈定型后统一改造，避免 compose 反复修改）。</p>
 <p><strong>背景</strong>: 当前 <code>docker-compose.yml</code> 是"源码构建部署"模式（service 定义包含 <code>build</code>，前端 API 地址通过构建参数写入，默认 Agent 模型指向公网服务）。外网环境可直接构建运行，但在无外网、无内网镜像仓的环境中，<code>docker compose up</code> 会遇到：构建依赖无法下载、前端回源地址不匹配、模型调用出网失败。需要把"构建时联网"与"运行时离线"彻底解耦。</p>
+<p><strong>开发者模式</strong>: Phase 5/6 完成后砍掉 SQLite 支持，只保留 PostgreSQL。本地开发采用"基础设施 Docker + 应用本地跑"模式：<code>docker-compose.dev.yml</code> 仅包含 PostgreSQL + Redis 两个 service，后端和前端本地直接运行（保留热重载和调试体验）。</p>
 <h3 id="101-应用配置改造--模型配置外部化">10.1 应用配置改造 — 模型配置外部化</h3>
 <p><strong>目标</strong>: Agent 使用的模型名、推理服务地址、API Key 全部通过环境变量注入，支持运行时从前端切换 Lead Agent 模型。</p>
 <p><strong>设计决策</strong>:
 - <strong>单 Provider</strong>：所有模型共享一个推理服务地址（内网典型场景），不做多 Provider
 - <strong>手动声明可用模型</strong>（不做自动发现）
 - <strong>env var default + per-message override</strong>：管理员通过 env var 设默认模型，用户发消息时可从前端切换 Lead Agent 模型
-- <strong>向后兼容</strong>：<code>LLM_BASE_URL</code> 不设时保持当前公网 API 行为</p>
+- <strong>公网模式不受影响</strong>：<code>LLM_BASE_URL</code> 不设时走 litellm 默认路由（当前行为）</p>
 <p><strong>新增配置项</strong>（<code>config.py</code>，<code>ARTIFACTFLOW_</code> 前缀）:</p>
 <table>
 <thead>
@@ -2224,47 +2244,103 @@
 <a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a>└── docs/            # deployment-guide.md
 </code></pre></div>
 <hr />
-<h2 id="各-phase-依赖关系">各 Phase 依赖关系</h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a>Phase 1 (核心 Bug)          ✅ 已完成
-<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a>Phase 2 (安全加固)          ✅ 已完成
-<a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a>Phase 3 (数据质量)          ← 3.1/3.2 ✅, 3.3 ⏸️
-<a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a>Phase 4 (认证框架)          ✅ 已完成
-<a id="__codelineno-15-5" name="__codelineno-15-5" href="#__codelineno-15-5"></a>Phase 5 (Redis + 可移植性)   ← Phase 4 之后
-<a id="__codelineno-15-6" name="__codelineno-15-6" href="#__codelineno-15-6"></a>  5.1 可移植性基线            ← 无依赖
-<a id="__codelineno-15-7" name="__codelineno-15-7" href="#__codelineno-15-7"></a>  5.2 Redis Checkpointer     ← 无依赖（可与 5.1 并行）
-<a id="__codelineno-15-8" name="__codelineno-15-8" href="#__codelineno-15-8"></a>  5.3 Redis StreamManager    ← 可与 5.2 并行（共用 Redis 连接）
-<a id="__codelineno-15-9" name="__codelineno-15-9" href="#__codelineno-15-9"></a>  5.4 缓存决策               ← 不做改动（保持 request-local）
-<a id="__codelineno-15-10" name="__codelineno-15-10" href="#__codelineno-15-10"></a>  5.5 TaskManager 适配       ← 依赖 5.2（需要 Redis 连接）
-<a id="__codelineno-15-11" name="__codelineno-15-11" href="#__codelineno-15-11"></a>Phase 6 (PostgreSQL)         ← 依赖 5.1（可移植性基线 + Alembic）
-<a id="__codelineno-15-12" name="__codelineno-15-12" href="#__codelineno-15-12"></a>  6.1 引擎切换
-<a id="__codelineno-15-13" name="__codelineno-15-13" href="#__codelineno-15-13"></a>  6.2 Schema 迁移             ← 依赖 6.1
-<a id="__codelineno-15-14" name="__codelineno-15-14" href="#__codelineno-15-14"></a>  6.3 复合索引                ← 依赖 6.2
-<a id="__codelineno-15-15" name="__codelineno-15-15" href="#__codelineno-15-15"></a>Phase 7A (文档上传)          ✅ 已完成
-<a id="__codelineno-15-16" name="__codelineno-15-16" href="#__codelineno-15-16"></a>Phase 7B (结构化数据)        ← 依赖 7A ✅ + Phase 5/6（PostgreSQL 大字段 / 对象存储）
-<a id="__codelineno-15-17" name="__codelineno-15-17" href="#__codelineno-15-17"></a>Phase 8 (编辑 Artifact)      ← 依赖 7A ✅（上传和编辑共享写接口模式）
-<a id="__codelineno-15-18" name="__codelineno-15-18" href="#__codelineno-15-18"></a>Phase 9 (Skill 系统)         ← 仅依赖 Phase 4（认证），独立于 Phase 7/8，可随时实施
-<a id="__codelineno-15-19" name="__codelineno-15-19" href="#__codelineno-15-19"></a>Phase 10 (内网离线部署)      ← 依赖 Phase 5/6（4-service 栈定型）
-<a id="__codelineno-15-20" name="__codelineno-15-20" href="#__codelineno-15-20"></a>  10.1 模型配置外部化          ← 无外部依赖，可独立于 5/6 先行（仅改 LLM/Agent/API 层）
-<a id="__codelineno-15-21" name="__codelineno-15-21" href="#__codelineno-15-21"></a>  10.2 外网构建发布流程        ← 依赖 10.1 + Phase 5/6
-<a id="__codelineno-15-22" name="__codelineno-15-22" href="#__codelineno-15-22"></a>  10.3 内网 Compose            ← 依赖 10.2
-<a id="__codelineno-15-23" name="__codelineno-15-23" href="#__codelineno-15-23"></a>  10.4 内网部署 SOP            ← 依赖 10.3
-<a id="__codelineno-15-24" name="__codelineno-15-24" href="#__codelineno-15-24"></a>  10.5 交付物清单              ← 依赖 10.2 + 10.3 + 10.4
+<h2 id="phase-11-可观测性--结构化日志--运维界面">Phase 11: 可观测性 — 结构化日志 + 运维界面</h2>
+<p><strong>目标</strong>: 完整记录 Agent 执行链路（类似 LangSmith 的 trace 能力），支持按对话回溯完整的 prompt → response → tool call → tool result 链路。数据自托管，不依赖外部服务。</p>
+<h3 id="设计思路">设计思路</h3>
+<p><strong>双通道日志架构</strong>:</p>
+<table>
+<thead>
+<tr>
+<th>通道</th>
+<th>内容</th>
+<th>存储</th>
+<th>用途</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>stdout / 文件</td>
+<td>ERROR、启动/关闭、关键状态变更</td>
+<td>本地文件（永远可用）</td>
+<td>兜底排障，数据库挂了也能看</td>
+</tr>
+<tr>
+<td>DB LogEntry</td>
+<td>完整执行链路（system prompt、LLM 原始输出、tool 入参/返回、token usage、耗时）</td>
+<td>PostgreSQL</td>
+<td>可查询、可视化、按 conv_id 回溯</td>
+</tr>
+</tbody>
+</table>
+<p>DB 写入失败时静默忽略，绝不影响主流程。现有 <code>utils/logger.py</code> 保留并输出到 stdout，DB handler 作为附加通道。</p>
+<p><strong>数据模型</strong>（一张表）:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="k">CREATE</span><span class="w"> </span><span class="k">TABLE</span><span class="w"> </span><span class="n">execution_logs</span><span class="w"> </span><span class="p">(</span>
+<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a><span class="w">    </span><span class="n">id</span><span class="w"> </span><span class="n">BIGSERIAL</span><span class="w"> </span><span class="k">PRIMARY</span><span class="w"> </span><span class="k">KEY</span><span class="p">,</span>
+<a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a><span class="w">    </span><span class="n">ts</span><span class="w"> </span><span class="n">TIMESTAMPTZ</span><span class="w"> </span><span class="k">DEFAULT</span><span class="w"> </span><span class="n">now</span><span class="p">(),</span>
+<a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a><span class="w">    </span><span class="k">level</span><span class="w"> </span><span class="nb">VARCHAR</span><span class="p">(</span><span class="mi">10</span><span class="p">),</span><span class="w">          </span><span class="c1">-- INFO / WARN / ERROR</span>
+<a id="__codelineno-15-5" name="__codelineno-15-5" href="#__codelineno-15-5"></a><span class="w">    </span><span class="n">conv_id</span><span class="w"> </span><span class="n">UUID</span><span class="p">,</span>
+<a id="__codelineno-15-6" name="__codelineno-15-6" href="#__codelineno-15-6"></a><span class="w">    </span><span class="n">request_id</span><span class="w"> </span><span class="nb">VARCHAR</span><span class="p">(</span><span class="mi">64</span><span class="p">),</span><span class="w">     </span><span class="c1">-- 请求链路追踪</span>
+<a id="__codelineno-15-7" name="__codelineno-15-7" href="#__codelineno-15-7"></a><span class="w">    </span><span class="n">user_id</span><span class="w"> </span><span class="n">UUID</span><span class="p">,</span>
+<a id="__codelineno-15-8" name="__codelineno-15-8" href="#__codelineno-15-8"></a><span class="w">    </span><span class="n">agent</span><span class="w"> </span><span class="nb">VARCHAR</span><span class="p">(</span><span class="mi">32</span><span class="p">),</span><span class="w">          </span><span class="c1">-- lead / search / crawl</span>
+<a id="__codelineno-15-9" name="__codelineno-15-9" href="#__codelineno-15-9"></a><span class="w">    </span><span class="n">tool</span><span class="w"> </span><span class="nb">VARCHAR</span><span class="p">(</span><span class="mi">64</span><span class="p">),</span>
+<a id="__codelineno-15-10" name="__codelineno-15-10" href="#__codelineno-15-10"></a><span class="w">    </span><span class="n">message</span><span class="w"> </span><span class="nb">TEXT</span><span class="p">,</span>
+<a id="__codelineno-15-11" name="__codelineno-15-11" href="#__codelineno-15-11"></a><span class="w">    </span><span class="n">extra</span><span class="w"> </span><span class="n">JSONB</span><span class="w">                 </span><span class="c1">-- duration_ms, token_count, 原始 prompt/response 等</span>
+<a id="__codelineno-15-12" name="__codelineno-15-12" href="#__codelineno-15-12"></a><span class="p">);</span>
+<a id="__codelineno-15-13" name="__codelineno-15-13" href="#__codelineno-15-13"></a><span class="k">CREATE</span><span class="w"> </span><span class="k">INDEX</span><span class="w"> </span><span class="n">idx_logs_conv_id</span><span class="w"> </span><span class="k">ON</span><span class="w"> </span><span class="n">execution_logs</span><span class="p">(</span><span class="n">conv_id</span><span class="p">,</span><span class="w"> </span><span class="n">ts</span><span class="p">);</span>
 </code></pre></div>
-<p>建议执行顺序: <strong>Phase 4 ✅ → 7A ✅ → 5/6 → 10 → 7B → 8</strong>。Phase 9 可随时排入开发。</p>
-<p>关键路径: <strong>5.1 ∥ 5.2/5.3 → 5.5 → 6.1 → 6.2 → 6.3 → 10.1 → 10.2 → 10.3</strong>。其中 10.1（模型配置外部化）可在 Phase 5/6 期间并行推进。</p>
+<p><strong>记录的关键节点</strong>: agent_start（system prompt 全文）、llm_complete（模型原始输出、token usage）、tool_start（工具名 + 完整入参）、tool_complete（原始返回 + 耗时）、error（完整 traceback）。与现有 <code>ExecutionMetrics</code>（摘要统计）互补 — metrics 记"调了几次花了多久"，LogEntry 记"具体输入了什么输出了什么"。</p>
+<p><strong>运维界面</strong>: 复用现有前端技术栈和布局模式，不引入独立运维系统。核心思路 — 现有三栏布局的"管理员视图"：</p>
+<ul>
+<li><strong>左栏</strong>: 对话列表（复用 Sidebar 组件，增加用户名/状态筛选）</li>
+<li><strong>中栏</strong>: 点击对话后展示日志流而非聊天气泡 — <code>LogEntry</code> 组件替代 <code>MessageBubble</code>，每条日志显示时间戳 + level + agent/tool + message，level 颜色区分（INFO 灰、WARN 黄、ERROR 红）</li>
+<li><strong>右栏</strong>: 点击某条日志展开详情（完整 prompt、LLM 原始输出、tool 入参/返回的 JSON 展开）</li>
+<li><strong>顶部</strong>: level 过滤器 + 时间范围选择 + conv_id / user_id 搜索</li>
+</ul>
+<p>API: <code>GET /api/v1/logs?conv_id=xxx&amp;level=ERROR&amp;user_id=xxx</code>，admin 权限。</p>
+<p><strong>注意事项</strong>: 日志写入用 fire-and-forget 或批量 insert，不阻塞主流程；设 retention 定期清理（如 30 天）；开发时 console 人类可读格式，生产时同时写表。</p>
+<hr />
+<h2 id="各-phase-依赖关系">各 Phase 依赖关系</h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a>Phase 1 (核心 Bug)          ✅ 已完成
+<a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a>Phase 2 (安全加固)          ✅ 已完成
+<a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a>Phase 3 (数据质量)          ← 3.1/3.2 ✅, 3.3 ⏸️
+<a id="__codelineno-16-4" name="__codelineno-16-4" href="#__codelineno-16-4"></a>Phase 4 (认证框架)          ✅ 已完成
+<a id="__codelineno-16-5" name="__codelineno-16-5" href="#__codelineno-16-5"></a>Phase 5 (Redis + Alembic)    ← Phase 4 之后
+<a id="__codelineno-16-6" name="__codelineno-16-6" href="#__codelineno-16-6"></a>  5.1 RETURNING 移除 + Alembic ← 无依赖
+<a id="__codelineno-16-7" name="__codelineno-16-7" href="#__codelineno-16-7"></a>  5.2 Redis Checkpointer     ← 无依赖（可与 5.1 并行）
+<a id="__codelineno-16-8" name="__codelineno-16-8" href="#__codelineno-16-8"></a>  5.3 Redis StreamManager    ← 可与 5.2 并行（共用 Redis 连接）
+<a id="__codelineno-16-9" name="__codelineno-16-9" href="#__codelineno-16-9"></a>  5.4 缓存决策               ← 不做改动（保持 request-local）
+<a id="__codelineno-16-10" name="__codelineno-16-10" href="#__codelineno-16-10"></a>  5.5 TaskManager 适配       ← 依赖 5.2（需要 Redis 连接）
+<a id="__codelineno-16-11" name="__codelineno-16-11" href="#__codelineno-16-11"></a>Phase 6 (PostgreSQL)         ← 依赖 5.1（Alembic）
+<a id="__codelineno-16-12" name="__codelineno-16-12" href="#__codelineno-16-12"></a>  6.1 引擎切换
+<a id="__codelineno-16-13" name="__codelineno-16-13" href="#__codelineno-16-13"></a>  6.2 Schema 迁移             ← 依赖 6.1
+<a id="__codelineno-16-14" name="__codelineno-16-14" href="#__codelineno-16-14"></a>  6.3 复合索引                ← 依赖 6.2
+<a id="__codelineno-16-15" name="__codelineno-16-15" href="#__codelineno-16-15"></a>Phase 7A (文档上传)          ✅ 已完成
+<a id="__codelineno-16-16" name="__codelineno-16-16" href="#__codelineno-16-16"></a>Phase 7B (结构化数据)        ← 依赖 7A ✅ + Phase 5/6（PostgreSQL 大字段 / 对象存储）
+<a id="__codelineno-16-17" name="__codelineno-16-17" href="#__codelineno-16-17"></a>Phase 8 (编辑 Artifact)      ← 依赖 7A ✅（上传和编辑共享写接口模式）
+<a id="__codelineno-16-18" name="__codelineno-16-18" href="#__codelineno-16-18"></a>Phase 9 (Skill 系统)         ← 仅依赖 Phase 4（认证），独立于 Phase 7/8，可随时实施
+<a id="__codelineno-16-19" name="__codelineno-16-19" href="#__codelineno-16-19"></a>Phase 10 (内网离线部署)      ← 依赖 Phase 5/6（4-service 栈定型）
+<a id="__codelineno-16-20" name="__codelineno-16-20" href="#__codelineno-16-20"></a>  10.1 模型配置外部化          ← 无外部依赖，可独立于 5/6 先行（仅改 LLM/Agent/API 层）
+<a id="__codelineno-16-21" name="__codelineno-16-21" href="#__codelineno-16-21"></a>  10.2 外网构建发布流程        ← 依赖 10.1 + Phase 5/6
+<a id="__codelineno-16-22" name="__codelineno-16-22" href="#__codelineno-16-22"></a>  10.3 内网 Compose            ← 依赖 10.2
+<a id="__codelineno-16-23" name="__codelineno-16-23" href="#__codelineno-16-23"></a>  10.4 内网部署 SOP            ← 依赖 10.3
+<a id="__codelineno-16-24" name="__codelineno-16-24" href="#__codelineno-16-24"></a>  10.5 交付物清单              ← 依赖 10.2 + 10.3 + 10.4
+<a id="__codelineno-16-25" name="__codelineno-16-25" href="#__codelineno-16-25"></a>Phase 11 (可观测性)            ← 依赖 Phase 6（PostgreSQL 存储日志）
+</code></pre></div>
+<p>建议执行顺序: <strong>Phase 4 ✅ → 7A ✅ → 5/6 → 10 → 11 → 7B → 8</strong>。Phase 9 可随时排入开发。</p>
+<p>关键路径: <strong>5.1 ∥ 5.2/5.3 → 5.5 → 6.1 → 6.2 → 6.3 → 10.1 → 10.2 → 10.3</strong>。10.1（模型配置外部化）可在 Phase 5/6 期间并行推进。</p>
 <hr />
 <h2 id="备注">备注</h2>
 <ul>
 <li>Phase 1-3 是纯修复，不引入新依赖，风险最低</li>
 <li>Phase 4 是第一个需要前端大改的阶段（登录页 + token 管理）</li>
-<li>Phase 5 优先 Redis（解决并发瓶颈）+ 可移植性基线（为 Phase 6 铺路），5.1 和 5.2 可并行推进</li>
-<li>Phase 6 PostgreSQL 迁移依赖 5.1 的 Alembic 框架和方言适配层</li>
+<li>Phase 5 优先 Redis（解决并发瓶颈）+ Alembic（为 Phase 6 铺路），5.1 和 5.2 可并行推进</li>
+<li>Phase 6 PostgreSQL 迁移依赖 5.1 的 Alembic 框架。DatabaseManager 不做方言适配 — 只认 <code>DATABASE_URL</code> + 通用连接池参数，切库改连接串即可</li>
 <li>Phase 7A ✅ 已完成（content_type 统一、文档转换、上传 API/UI、渲染策略修正、Prompt Review）</li>
 <li>Phase 7B 建议在 Phase 5/6 之后，因为 csv / json 原始文件存储可能需要 PostgreSQL 大字段或对象存储支持</li>
 <li>Phase 9 Skill 系统调研已完成，方案已确定（轻量独立 <code>skills</code> 表），仅依赖 Phase 4（已完成），可随时排入开发</li>
 <li>Phase 10 内网部署改造建议在 Phase 5/6 之后统一做，避免 compose 文件改两遍。10.1 模型配置外部化是最关键的子项，可提前讨论方案</li>
-<li><strong>数据迁移</strong>: 系统处于开发阶段，所有 Phase（包括 5/6 数据库改造）均不需要考虑旧数据迁移，已有数据可丢弃。涉及 schema 变更时直接 <code>rm data/artifactflow.db</code> 后重启，<code>create_all</code> 会按新模型建表</li>
-<li>数据库可移植性 CI 范围：当前只跑 SQLite + PostgreSQL；MySQL/TDSQL 等有实际切库需求时再加入 matrix</li>
+<li><strong>数据迁移</strong>: 系统处于开发阶段，所有 Phase（包括 5/6 数据库改造）均不需要考虑旧数据迁移，已有数据可丢弃</li>
+<li><strong>SQLite 退役</strong>: Phase 6 中移除 SQLite 支持（Redis 已是必需依赖，本地开发必须跑 Docker，再多一个 PostgreSQL 容器成本为零）。测试统一跑 PostgreSQL</li>
 <li>concurrency.md 中已标记 ✅ 的项目（短事务、日志上下文、SSE Heartbeat 等）不在此计划中。TaskManager 多 worker 适配已纳入 5.5</li>
 <li>Phase 5/6 完成后需同步更新 <code>docs/architecture/concurrency.md</code>（演进路线、资源分层图）和 <code>CLAUDE.md</code>（命令、架构描述）</li>
 </ul>
