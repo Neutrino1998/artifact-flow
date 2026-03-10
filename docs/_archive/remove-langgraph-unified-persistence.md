@@ -66,6 +66,7 @@ LangGraph/LangChain 在项目中的使用范围很小：
 Message (现有，扩展)
   ├── content              用户输入
   ├── response             最终回复（冗余，方便列表查询）
+  ├── summary (nullable)   compaction 后的摘要（优先用于构建 LLM context）
   ├── execution_id         执行标识（原 thread_id，改名）
   ├── metadata (JSON)      执行级状态：always_allowed_tools, execution_metrics 汇总
   │
@@ -92,7 +93,7 @@ Message (现有，扩展)
 | `agent_complete` | agent 执行结束 | `{agent, summary}` | - | 写库 |
 | `interrupt_pending` | 需要用户确认 | `{tool, params, execution_context}` | - | 写库 |
 | `interrupt_resolved` | 用户确认结果 | `{approved, always_allow}` | → interrupt_pending | 写库 |
-| `execution_complete` | 整个请求执行完成 | `{response, execution_metrics}` | - | 写库 |
+| `execution_complete` | 整个请求执行完成 | `{response, execution_metrics, context_usage}` | - | 写库 |
 | `error` | 执行异常 | `{error, phase, agent}` | - | 写库 |
 
 `llm_chunk` 是唯一不写库的事件 — 高频逐 token 流式，写库无意义。其余所有事件完整持久化。
@@ -172,20 +173,52 @@ WHERE id = :pending_event_id
 
 ### 执行引擎设计方向
 
-参考 [Pi coding agent](https://github.com/badlogic/pi-mono) 的极简架构：**简单 while loop + hook 回调**，不搞 middleware 框架。
+参考 [Pi coding agent](https://github.com/badlogic/pi-mono) 的极简架构：**简单 while loop，唯一的抽象是 context 构建**，不搞 middleware 框架。
 
 Pi 的核心设计：while loop 循环直到 LLM 不再调用工具为止，扩展点通过 config 上的回调注入（`transformContext`、`convertToLlm`、`getSteeringMessages`）。没有状态机、没有图、没有 middleware 链、没有 max-step 限制。
 
-ArtifactFlow 的 hook 点直接对应现有代码：
+#### 唯一的抽象：`ContextManager.build()`
 
-| Hook 点 | 现有实现 | 作用 |
-|---------|---------|------|
-| `prepare_context` | `ContextManager.build_agent_messages()` | 构建消息、注入 artifact 上下文 |
-| `retry_policy` | `BaseAgent._call_llm_with_retry()` | LLM 调用重试 |
-| `check_tool_limit` | `agent.config.max_tool_rounds` | 工具轮数上限 |
-| `route` | `merge_agent_response_to_state()` + `ExecutionPhase` | 多 agent 路由决策 |
+Loop 中只有一个真正需要抽象的扩展点 — **context 构建**。每轮 LLM 调用前，ContextManager 负责：
 
-需要新增能力（如 API call limit）时，在对应 hook 点加逻辑即可，不需要抽象出中间件协议。
+- 构建 system prompt（注入 artifact 清单）
+- 注入对话历史（优先使用 `Message.summary`，无则用原文）
+- 截断当前轮 tool interactions（保留最近 N 条）
+- 追踪 context usage（token 计数、使用率）
+- 触发跨轮 compaction（见 Compaction 设计）
+
+```python
+# 伪代码：执行循环
+async def execute_loop(state, context_manager, emit):
+    while state.phase != COMPLETED:
+        # 唯一的抽象点
+        context = context_manager.build(state)
+
+        # 以下全是 loop 本体的固定逻辑，不是 hook
+        response = await agent.call_llm(context.messages)  # 内含 retry
+        tool_calls = parse_tool_calls(response)
+
+        for tool in tool_calls:                   # 串行执行
+            if needs_confirm(tool):               # 权限检查
+                emit(interrupt_pending)            # 写库 + 推 SSE
+                await wait_for_user()              # 暂停
+            result = await execute(tool)
+
+        route(state, response)                    # phase switch
+
+    emit(execution_complete, context.usage)       # context_usage 随 metrics 写入
+```
+
+#### 不需要抽象为 hook 的部分
+
+| 关注点 | 为什么不是 hook | 实际位置 |
+|--------|----------------|----------|
+| **Retry** | 基础设施代码，每个 agent 同样的 exponential backoff，没有定制需求 | `BaseAgent._call_llm_with_retry()` 内部逻辑 |
+| **Tool limit** | 配置值 + loop 里一个 if 判断 | `agent.config.max_tool_rounds`，超限则注入 system message 提醒总结 |
+| **Routing** | phase switch 就是 loop 本体，不是插件 | `merge_agent_response_to_state()` + `ExecutionPhase` enum |
+| **Event emission** | 固定行为：写库 → 推 SSE，所有事件走同一条路径 | loop 内直接调用 `emit()` |
+
+需要新增能力时（如 API call budget、cost tracking），直接在 loop 对应位置加代码即可，不需要中间件协议。
 
 ### 替代 LangGraph 的实现
 
@@ -220,6 +253,56 @@ agent 单轮 LLM 调用
 - **统一持久化**：所有数据在同一个 DB，每事件独立 commit
 - **依赖极简**：技术栈收敛为 FastAPI + LiteLLM + SQLAlchemy
 - **多工具支持**：agent 单轮可调多个工具，串行执行，interrupt 自然嵌入
+
+---
+
+## Compaction 设计
+
+两层数据模型对应两层 compaction 机制：跨轮 compaction（Message 层）和轮内 truncation（tool interaction 层）。
+
+### 跨轮 Compaction
+
+**触发时机：** 用户新消息进来，ContextManager 构建 history 时发现 token 数超阈值，自动对最老的消息对做摘要。只在轮次边界触发，执行 loop 内部不做 compaction。
+
+**形式：逐对摘要。** 每对 (User Q, AI A) 独立压缩为短版摘要，保持消息记录的独立性。不合并为单个 summary 块 — 合并会破坏消息结构，影响对话分支场景。
+
+**摘要存储：`Message.summary` 字段。** 原始 `content` / `response` 保留不变，新增 `summary` 字段存摘要文本。ContextManager 构建 history 时优先读 `summary`，无则读原文。好处：原始数据不丢，UI 可选择展示原文或摘要。
+
+**MessageEvent 清理：** Compaction 时删除已摘要消息的 MessageEvent 记录。此时执行已完成（不需要 resume），Message 保留摘要（不影响 history 构建），事件数据可安全清除。
+
+```
+新用户消息进来
+  → context_manager.build() 构建 history
+  → 计算 token count
+  → 超阈值？→ 对最老的 N 对消息：
+      1. LLM 生成逐对摘要 → 写入 Message.summary
+      2. 删除对应 MessageEvent 记录
+  → 重新 build（用 summary），直到 fit
+  → 正常执行 loop
+  → execution_complete metrics 带 context_usage
+```
+
+### 轮内 Truncation
+
+执行 loop 中 agent 可能调多轮工具，`agent_memories.tool_interactions` 越来越长。不做 compaction（太复杂），直接 truncation：保留最近 N 条 tool interaction 在 context 里（现有 `compress_messages(preserve_recent=5)` 机制）。超出的交互已写到 MessageEvent，不影响持久化，只是不再注入 context。
+
+### Context Usage
+
+作为 `execution_complete` 事件 metrics 的一部分，不需要每轮推送：
+
+```
+context_usage: {
+  total_tokens: 45000,
+  capacity: 128000,
+  usage_percent: 35.2,
+  history_tokens: 12000,
+  system_prompt_tokens: 3000,
+  current_round_tokens: 30000,
+  compacted_messages: 4
+}
+```
+
+前端展示为消息级指标，如 "Context: 35% | 4 messages compacted"。不存在 100% 的情况 — 每轮开头自动 compact 到 fit。
 
 ---
 
