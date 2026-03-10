@@ -16,7 +16,7 @@ LangGraph/LangChain 在项目中的使用范围很小：
 | `interrupt`, `StreamWriter` | `core/graph.py` | 权限确认中断 + 流式事件 |
 | `Command` | `core/controller.py` | 恢复中断执行 |
 | `AsyncSqliteSaver` | `core/graph.py` | Checkpoint 持久化 |
-| `AIMessage` 等 | `models/llm.py` | 消息类型（纯数据结构） |
+| `AIMessage` 等 | `models/llm.py` | 消息类型（包装后供 base.py 读取） |
 
 实际 LLM 调用走 LiteLLM，状态管理用自定义 `AgentState`，事件系统用自定义 `StreamEvent`。LangGraph 本质上只提供了一层状态机壳子。
 
@@ -60,32 +60,49 @@ LangGraph/LangChain 在项目中的使用范围很小：
 Message (现有，扩展 metadata)
   ├── content              用户输入
   ├── response             最终回复
+  ├── execution_id         执行标识（原 thread_id，改名）
   ├── metadata (JSON)      execution_metrics 汇总
   │
   └── MessageEvent (新表，append-only)
-        ├── message_id     关联消息
-        ├── sequence       顺序号
-        ├── event_type     agent_start / llm_complete / tool_start / tool_complete / interrupt_pending / interrupt_resolved / ...
+        ├── id (PK)        自增主键，天然有序，兼做 sequence
+        ├── message_id     FK → Message
+        ├── event_type     agent_start / llm_complete / tool_start / tool_complete
+        │                  / interrupt_pending / interrupt_resolved / ...
         ├── agent_name     产生事件的 agent
         ├── data (JSON)    工具参数与结果、token 用量、reasoning 等
         └── created_at     时间戳
 ```
 
+### 关键设计约束
+
+**Durability：每事件独立 commit。** 事件是 append-only 的，每条写入后立即提交（与现有 Repository 模式一致）。不搞长事务 — 进程中途崩溃时已写入的事件仍然保留，恢复时可从最后一条事件继续。"统一持久化"指的是同一个 DB，不是同一个 transaction。
+
+**Interrupt 幂等性：基于 event_id 的乐观锁。** resume 请求携带 `event_id`，处理时 CAS 更新：
+
+```sql
+UPDATE message_events
+SET event_type = 'interrupt_resolved', data = :resume_data
+WHERE id = :event_id AND event_type = 'interrupt_pending'
+-- affected_rows == 0 → 已处理过，拒绝重复执行
+```
+
+**data 字段大小控制：** 工具返回结果（如 web_fetch 抓取内容）需做截断，设定单条 data 上限（如 64KB）。大结果存摘要 + 引用，避免 DB 膨胀。与 LangGraph checkpoint 的本质区别：checkpoint 每节点存全量 state 快照（~1MB+），MessageEvent 只存增量事件数据（~1-5KB）。
+
 ### 执行流程
 
 ```
 请求进入
-  → 创建 Message 记录
-  → 启动执行循环 (async coroutine)
+  → 创建 Message 记录（生成 execution_id）
+  → 启动执行循环 (async coroutine, 由 TaskManager 管理)
       → while phase != COMPLETED:
           → 根据 phase 执行 agent / tool
           → 每个事件同时：
               ├── 推 SSE 队列（实时前端展示）
-              └── 写 MessageEvent（持久化）
+              └── 写 MessageEvent + commit（持久化）
           → 遇到需要确认的工具：
-              → 写 event_type=interrupt_pending（含序列化 state）
+              → 写 event_type=interrupt_pending（含序列化 state）+ commit
               → 返回前端等待确认
-              → 用户确认后：读出 state，写 interrupt_resolved，继续循环
+              → 用户确认后：CAS 更新为 interrupt_resolved，读出 state 继续循环
       → 执行完成
           → 汇总 metrics 写入 Message.metadata
 ```
@@ -95,10 +112,10 @@ Message (现有，扩展 metadata)
 | LangGraph 功能 | 替代方案 |
 |---|---|
 | `StateGraph` + 路由 | `while phase != COMPLETED` + phase switch（`ExecutionPhase` enum 已存在） |
-| `interrupt()` / `Command(resume=)` | `MessageEvent` 中 `interrupt_pending` 事件存 state，恢复时读出继续 |
+| `interrupt()` / `Command(resume=)` | `MessageEvent` 中 `interrupt_pending` 事件存 state，CAS 乐观锁保证幂等 |
 | `StreamWriter` | 自定义 callback / async generator，复用现有 `StreamManager` |
 | `AsyncSqliteSaver` (checkpoint) | 不需要通用 checkpoint，interrupt state 就是一条事件记录 |
-| `langchain_core.messages` | 直接用 dict `{"role": ..., "content": ...}`，`llm.py` 已在做转换 |
+| `langchain_core.messages` | `llm.py` 的 `invoke`/`ainvoke` 改为返回 `LLMResponse`（已有 dataclass），删除 `to_langchain_message()` 中间层，`base.py` 直接读 `.reasoning_content` / `.token_usage` |
 
 ### 多工具并行执行
 
@@ -122,10 +139,26 @@ agent 单轮 LLM 调用
 
 - **前端历史回看**：加载消息时附带完整事件链，展示工具调用、agent 协作过程
 - **可观测性**：结构化事件日志，可查询、可统计（token 消耗、工具成功率、响应耗时）
-- **checkpoint 透明**：从 304MB 黑盒 BLOB → 按需存一条事件记录
-- **一套事务**：所有数据在同一个 DB、同一个 session，不存在跨库不一致
+- **checkpoint 透明**：从 304MB 黑盒 BLOB → 按需存一条增量事件记录
+- **统一持久化**：所有数据在同一个 DB，不存在跨库不一致（每事件独立 commit，非长事务）
 - **依赖极简**：技术栈收敛为 FastAPI + LiteLLM + SQLAlchemy
 - **多工具并行**：agent 单轮可调多个工具，混合权限自然支持
+
+---
+
+## 命名变更
+
+| 现有 | 改为 | 原因 |
+|------|------|------|
+| `thread_id` | `execution_id` | 去掉 LangGraph 后不再有 "thread" 概念，实际语义是一次执行的标识 |
+
+影响范围：`Message.thread_id` 字段、API schema (`chat.py`)、前端 SSE 连接 URL、controller 参数。
+
+---
+
+## 旧数据处理
+
+不做迁移。`langgraph.db`（checkpoint 数据）直接删除，旧会话历史消息（Messages 表）保留但不补充事件数据。
 
 ---
 
@@ -134,5 +167,6 @@ agent 单轮 LLM 调用
 1. **先完成持久化改造（P5/P6）** — 稳定应用数据层
 2. **实现 MessageEvent 表 + 写入逻辑** — 在现有 LangGraph 基础上先加事件持久化
 3. **替换执行引擎** — 用自己的 async 循环替代 StateGraph，interrupt 改写为事件记录
-4. **移除 LangGraph/LangChain 依赖** — 清理代码和 requirements
-5. **前端适配** — 历史消息加载事件链，展示执行过程
+4. **改造 LLM 接口** — `llm.py` 返回 `LLMResponse`，删除 `AIMessage` 依赖
+5. **移除 LangGraph/LangChain 依赖** — 清理代码和 requirements，删除 `langgraph.db`
+6. **前端适配** — 历史消息加载事件链，展示执行过程
