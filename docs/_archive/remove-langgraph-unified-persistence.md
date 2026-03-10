@@ -68,6 +68,9 @@ Message (现有，扩展 metadata)
         ├── message_id     FK → Message
         ├── event_type     agent_start / llm_complete / tool_start / tool_complete
         │                  / interrupt_pending / interrupt_resolved / ...
+        ├── ref_event_id   可选，引用关联事件（nullable, UNIQUE）
+        │                  用途：interrupt_resolved 引用 interrupt_pending，
+        │                       tool_complete 引用 tool_start 等
         ├── agent_name     产生事件的 agent
         ├── data (JSON)    工具参数与结果、token 用量、reasoning 等
         └── created_at     时间戳
@@ -80,20 +83,20 @@ Message (现有，扩展 metadata)
 **Interrupt 幂等性：append-only + 唯一约束。** 不修改 `interrupt_pending` 行，而是插入一条新的 `interrupt_resolved` 事件，通过 `pending_event_id` 唯一约束防止重复 resolve：
 
 ```
-EventID  Type                 Data
-  42     interrupt_pending    {state: ..., tool: "web_fetch"}      ← 保持不变
-  43     interrupt_resolved   {pending_event_id: 42, approved: true}  ← 新插入，UNIQUE(pending_event_id)
+EventID  Type                 ref_event_id  Data
+  42     interrupt_pending    NULL          {state: ..., tool: "web_fetch"}
+  43     interrupt_resolved   42            {approved: true}   ← UNIQUE(ref_event_id) 防重
 ```
 
 ```sql
-INSERT INTO message_events (message_id, event_type, data)
-VALUES (:msg_id, 'interrupt_resolved', :resolve_data)
--- pending_event_id 唯一约束 → 重复插入直接失败，天然幂等
+INSERT INTO message_events (message_id, event_type, ref_event_id, data)
+VALUES (:msg_id, 'interrupt_resolved', :pending_event_id, :resolve_data)
+-- ref_event_id UNIQUE 约束 → 重复插入直接失败，天然幂等
 ```
 
 崩溃恢复：只要存在引用某 `interrupt_pending` 的 `interrupt_resolved` 行，就知道应继续执行，不存在"CAS 成功但未执行"的卡死窗口。
 
-**data 字段大小控制：** 工具返回结果（如 web_fetch 抓取内容）需做截断，设定单条 data 上限（如 64KB）。大结果存摘要 + 引用，避免 DB 膨胀。与 LangGraph checkpoint 的本质区别：checkpoint 每节点存全量 state 快照（~1MB+），MessageEvent 只存增量事件数据（~1-5KB）。
+**data 字段大小控制：** 工具返回结果（如 web_fetch 抓取内容）需做截断，设定单条 data 上限（如 64KB）。大结果存摘要 + 引用，避免 DB 膨胀。**例外：`interrupt_pending` 的 state 数据为恢复执行必需，不可截断。** 与 LangGraph checkpoint 的本质区别：checkpoint 每节点存全量 state 快照（~1MB+），MessageEvent 只存增量事件数据（~1-5KB）。
 
 ### 执行流程
 
@@ -103,9 +106,9 @@ VALUES (:msg_id, 'interrupt_resolved', :resolve_data)
   → 启动执行循环 (async coroutine, 由 TaskManager 管理)
       → while phase != COMPLETED:
           → 根据 phase 执行 agent / tool
-          → 每个事件同时：
-              ├── 推 SSE 队列（实时前端展示）
-              └── 写 MessageEvent + commit（持久化）
+          → 每个事件：
+              1. 写 MessageEvent + commit（持久化，获得 event_id）
+              2. 推 SSE 队列（携带 event_id，支持断线重放）
           → 遇到需要确认的工具：
               → 写 event_type=interrupt_pending（含序列化 state）+ commit
               → 返回前端等待确认
