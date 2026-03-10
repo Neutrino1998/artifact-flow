@@ -31,6 +31,17 @@ LangGraph/LangChain 在项目中的使用范围很小：
 
 前端刷新页面只能看到一问一答，整个执行过程（agent 调用链、工具参数与结果、token 用量、耗时）全部丢失。
 
+### 单工具调用限制
+
+当前架构下 agent 每轮只能调用一个工具：
+
+- `pending_tool_call` 是单值字段（`Optional[Dict]`），不支持多个待执行工具
+- `base.py:387` 解析工具调用后只取 `tool_calls[0]`，其余直接丢弃
+- `tool_execution_node` 一次只处理一个工具，然后路由回 agent
+- 通过 prompt 约束 agent "单轮只调用一个工具"来规避
+
+当 LLM 想并行调多个工具时（如同时搜索+抓取），被迫拆成多轮串行调用，增加了延迟和 token 消耗。混合权限场景（部分工具需要确认，部分不需要）更是无法处理。
+
 ---
 
 ## 方案：统一事件模型
@@ -89,6 +100,24 @@ Message (现有，扩展 metadata)
 | `AsyncSqliteSaver` (checkpoint) | 不需要通用 checkpoint，interrupt state 就是一条事件记录 |
 | `langchain_core.messages` | 直接用 dict `{"role": ..., "content": ...}`，`llm.py` 已在做转换 |
 
+### 多工具并行执行
+
+自建执行循环后，`pending_tool_call` 从单值变为列表，支持一轮处理多个工具调用：
+
+```
+agent 单轮 LLM 调用
+  → 解析出 [tool_a, tool_b, tool_c]
+  → 按权限分组：
+      ├── 无需确认 (PUBLIC/NOTIFY): [tool_a, tool_c] → 并发执行
+      └── 需要确认 (CONFIRM):       [tool_b] → 批量发送权限请求，等待用户确认后执行
+  → 所有工具结果合并，注入下一轮 agent context
+  → agent 继续（一轮完成，而非三轮串行）
+```
+
+- 减少不必要的 LLM 往返（省 token、降延迟）
+- 混合权限场景自然支持：无需确认的先跑，需要确认的等批准后再跑
+- 前端可一次性展示多个权限请求（而非逐个弹窗）
+
 ### 收益
 
 - **前端历史回看**：加载消息时附带完整事件链，展示工具调用、agent 协作过程
@@ -96,6 +125,7 @@ Message (现有，扩展 metadata)
 - **checkpoint 透明**：从 304MB 黑盒 BLOB → 按需存一条事件记录
 - **一套事务**：所有数据在同一个 DB、同一个 session，不存在跨库不一致
 - **依赖极简**：技术栈收敛为 FastAPI + LiteLLM + SQLAlchemy
+- **多工具并行**：agent 单轮可调多个工具，混合权限自然支持
 
 ---
 
