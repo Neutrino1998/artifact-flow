@@ -3,7 +3,7 @@
 
 架构说明：
 1. Agent 只做单轮 LLM 调用，工具执行由 Graph 控制
-2. tool_execution_node 统一处理所有工具调用（PUBLIC/NOTIFY/CONFIRM/RESTRICTED）
+2. tool_execution_node 统一处理所有工具调用（AUTO/CONFIRM）
 3. 工具调用循环由 Graph 路由实现（agent → tool_exec → agent → ...）
 4. 支持流式输出 (stream_mode="custom")
 """
@@ -46,8 +46,8 @@ class ExtendableGraph:
 
     工具执行流程:
     [tool_execution_node]
-        ├→ PUBLIC/NOTIFY → 直接执行 → 返回原 agent
-        └→ CONFIRM/RESTRICTED → interrupt() → 确认后执行 → 返回原 agent
+        ├→ AUTO → 直接执行 → 返回原 agent
+        └→ CONFIRM → interrupt() → 确认后执行 → 返回原 agent
     """
 
     def __init__(self, artifact_manager: Optional["ArtifactManager"] = None):
@@ -198,7 +198,7 @@ class ExtendableGraph:
                 }
             })
 
-            # 执行工具（PUBLIC/NOTIFY 直接执行，CONFIRM/RESTRICTED 确认后执行）
+            # 执行工具（AUTO 直接执行，CONFIRM 确认后执行）
             try:
                 tool_result = await agent.toolkit.execute_tool(tool_name, params)
                 logger.info(f"Tool '{tool_name}' executed: {'SUCCESS' if tool_result.success else 'FAILED'}")

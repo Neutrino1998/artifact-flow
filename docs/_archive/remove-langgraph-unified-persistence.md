@@ -77,14 +77,21 @@ Message (现有，扩展 metadata)
 
 **Durability：每事件独立 commit。** 事件是 append-only 的，每条写入后立即提交（与现有 Repository 模式一致）。不搞长事务 — 进程中途崩溃时已写入的事件仍然保留，恢复时可从最后一条事件继续。"统一持久化"指的是同一个 DB，不是同一个 transaction。
 
-**Interrupt 幂等性：基于 event_id 的乐观锁。** resume 请求携带 `event_id`，处理时 CAS 更新：
+**Interrupt 幂等性：append-only + 唯一约束。** 不修改 `interrupt_pending` 行，而是插入一条新的 `interrupt_resolved` 事件，通过 `pending_event_id` 唯一约束防止重复 resolve：
+
+```
+EventID  Type                 Data
+  42     interrupt_pending    {state: ..., tool: "web_fetch"}      ← 保持不变
+  43     interrupt_resolved   {pending_event_id: 42, approved: true}  ← 新插入，UNIQUE(pending_event_id)
+```
 
 ```sql
-UPDATE message_events
-SET event_type = 'interrupt_resolved', data = :resume_data
-WHERE id = :event_id AND event_type = 'interrupt_pending'
--- affected_rows == 0 → 已处理过，拒绝重复执行
+INSERT INTO message_events (message_id, event_type, data)
+VALUES (:msg_id, 'interrupt_resolved', :resolve_data)
+-- pending_event_id 唯一约束 → 重复插入直接失败，天然幂等
 ```
+
+崩溃恢复：只要存在引用某 `interrupt_pending` 的 `interrupt_resolved` 行，就知道应继续执行，不存在"CAS 成功但未执行"的卡死窗口。
 
 **data 字段大小控制：** 工具返回结果（如 web_fetch 抓取内容）需做截断，设定单条 data 上限（如 64KB）。大结果存摘要 + 引用，避免 DB 膨胀。与 LangGraph checkpoint 的本质区别：checkpoint 每节点存全量 state 快照（~1MB+），MessageEvent 只存增量事件数据（~1-5KB）。
 
@@ -102,7 +109,7 @@ WHERE id = :event_id AND event_type = 'interrupt_pending'
           → 遇到需要确认的工具：
               → 写 event_type=interrupt_pending（含序列化 state）+ commit
               → 返回前端等待确认
-              → 用户确认后：CAS 更新为 interrupt_resolved，读出 state 继续循环
+              → 用户确认后：插入 interrupt_resolved 事件（唯一约束保证幂等），读出 state 继续循环
       → 执行完成
           → 汇总 metrics 写入 Message.metadata
 ```
@@ -112,28 +119,29 @@ WHERE id = :event_id AND event_type = 'interrupt_pending'
 | LangGraph 功能 | 替代方案 |
 |---|---|
 | `StateGraph` + 路由 | `while phase != COMPLETED` + phase switch（`ExecutionPhase` enum 已存在） |
-| `interrupt()` / `Command(resume=)` | `MessageEvent` 中 `interrupt_pending` 事件存 state，CAS 乐观锁保证幂等 |
+| `interrupt()` / `Command(resume=)` | `interrupt_pending` 事件存 state，插入 `interrupt_resolved` 恢复（唯一约束保证幂等） |
 | `StreamWriter` | 自定义 callback / async generator，复用现有 `StreamManager` |
 | `AsyncSqliteSaver` (checkpoint) | 不需要通用 checkpoint，interrupt state 就是一条事件记录 |
 | `langchain_core.messages` | `llm.py` 的 `invoke`/`ainvoke` 改为返回 `LLMResponse`（已有 dataclass），删除 `to_langchain_message()` 中间层，`base.py` 直接读 `.reasoning_content` / `.token_usage` |
 
-### 多工具并行执行
+### 多工具调用支持
 
-自建执行循环后，`pending_tool_call` 从单值变为列表，支持一轮处理多个工具调用：
+自建执行循环后，`pending_tool_call` 从单值变为列表，支持 agent 单轮返回多个工具调用。**默认串行执行**，依次处理每个工具，遇到 CONFIRM 权限的工具正常 interrupt 等待确认：
 
 ```
 agent 单轮 LLM 调用
-  → 解析出 [tool_a, tool_b, tool_c]
-  → 按权限分组：
-      ├── 无需确认 (PUBLIC/NOTIFY): [tool_a, tool_c] → 并发执行
-      └── 需要确认 (CONFIRM):       [tool_b] → 批量发送权限请求，等待用户确认后执行
+  → 解析出 [tool_a, tool_b(CONFIRM), tool_c]
+  → 串行执行：
+      1. tool_a (AUTO) → 直接执行
+      2. tool_b (CONFIRM) → interrupt，等待用户确认后执行
+      3. tool_c (AUTO) → 直接执行
   → 所有工具结果合并，注入下一轮 agent context
-  → agent 继续（一轮完成，而非三轮串行）
+  → agent 继续（一轮完成，而非三轮 LLM 往返）
 ```
 
 - 减少不必要的 LLM 往返（省 token、降延迟）
-- 混合权限场景自然支持：无需确认的先跑，需要确认的等批准后再跑
-- 前端可一次性展示多个权限请求（而非逐个弹窗）
+- 串行保证工具执行顺序与 LLM 意图一致，interrupt 处理简单可靠
+- 解除 prompt 中"单轮只能调一个工具"的人为限制
 
 ### 收益
 
@@ -142,7 +150,7 @@ agent 单轮 LLM 调用
 - **checkpoint 透明**：从 304MB 黑盒 BLOB → 按需存一条增量事件记录
 - **统一持久化**：所有数据在同一个 DB，不存在跨库不一致（每事件独立 commit，非长事务）
 - **依赖极简**：技术栈收敛为 FastAPI + LiteLLM + SQLAlchemy
-- **多工具并行**：agent 单轮可调多个工具，混合权限自然支持
+- **多工具支持**：agent 单轮可调多个工具，串行执行，interrupt 自然嵌入
 
 ---
 
