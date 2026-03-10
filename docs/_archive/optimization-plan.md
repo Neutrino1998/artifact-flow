@@ -828,7 +828,7 @@ ContextManager.prepare_agent_context()
 
 **目标**: `scripts/release.sh` 一键完成版本化构建 → 冒烟验证 → 镜像导出 → sha256 校验。
 
-**流程**: 版本号传入 → 构建 backend/frontend 双镜像（带 version label）→ 启动全栈跑健康检查 → `docker save` 导出四个 tar（含 postgres + redis-stack 基础设施镜像）→ 生成 `checksums.sha256`。
+**流程**: 版本号传入 → 构建 backend/frontend/nginx 三镜像（带 version label）→ 启动全栈跑健康检查 → `docker save` 导出五个 tar（含 postgres + redis-stack 基础设施镜像）→ 生成 `checksums.sha256`。
 
 **前端 `NEXT_PUBLIC_API_URL` 处理**: 推荐每个部署环境单独构建前端镜像（方案 C）——前端镜像轻量（~50MB），`NEXT_PUBLIC_*` 是 Next.js 编译时变量，运行时替换都是 workaround。
 
@@ -843,17 +843,28 @@ ContextManager.prepare_agent_context()
 **目标**: `deploy/docker-compose.intranet.yml`（纯 `image`，无 `build`）+ `deploy/.env.intranet.example`（配置模板）。
 
 **关键设计**:
-- 四个 service：backend / frontend / postgres / redis-stack，全部仅 `image` 引用
-- 健康检查链：redis/postgres healthy → backend healthy → frontend 启动
+- 五个 service：nginx / backend / frontend / postgres / redis-stack，全部仅 `image` 引用
+- Nginx 作为唯一对外入口，按路径分流：`/api/*` → backend:8000，`/*` → frontend:3000
+- backend 和 frontend **不映射端口到宿主机**，仅通过 Docker 内部网络与 Nginx 通信
+- 健康检查链：redis/postgres healthy → backend healthy → frontend 启动 → nginx 启动
 - 三个 named volume 持久化（backend_data / postgres_data / redis_data）
 - DB 连接串在 compose 内拼接，敏感值（JWT secret、PG password、LLM key）从 `.env` 读取
-- 端口可配（`BACKEND_PORT` / `FRONTEND_PORT`）
+- 对外端口可配（`HTTP_PORT`，默认 80）
+
+**Nginx 配置要点**:
+- 路径分流：`/api/` 和 `/health` → backend，其余 → frontend
+- SSE 支持：`/api/v1/stream/` 路径关闭 `proxy_buffering`，设长超时
+- 安全：屏蔽 `/docs` 和 `/redoc`（Swagger UI），仅内部访问
+- 可选限流：`limit_req_zone` 按 IP 限制 API 请求频率
+- 后续加 HTTPS：只需在 Nginx 配置中增加 SSL 证书，后端零改动
 
 **`.env.intranet.example` 必填项**: VERSION、JWT_SECRET、POSTGRES_PASSWORD、LLM_BASE_URL、LLM_API_KEY、LLM_AVAILABLE_MODELS、LEAD_MODEL、WORKER_MODEL。
 
 **退出标准**:
-- 纯离线环境（镜像已 load）`docker compose up -d` 四个 service 全部 healthy
-- 前端可访问且能正常登录
+- 纯离线环境（镜像已 load）`docker compose up -d` 五个 service 全部 healthy
+- 通过 Nginx 端口访问前端可正常登录，API 请求正确转发
+- 直接访问 backend/frontend 端口不可达（未映射到宿主机）
+- `/docs` 路径被 Nginx 拦截，返回 403/404
 
 ---
 
@@ -871,8 +882,8 @@ ContextManager.prepare_agent_context()
 
 ```
 artifactflow-release-${VERSION}/
-├── images/          # 四个 tar + checksums.sha256
-├── compose/         # docker-compose.intranet.yml + .env.intranet.example
+├── images/          # 五个 tar + checksums.sha256（nginx / backend / frontend / postgres / redis-stack）
+├── compose/         # docker-compose.intranet.yml + .env.intranet.example + nginx.conf
 ├── scripts/         # load-images.sh（docker load 一键脚本）
 └── docs/            # deployment-guide.md
 ```
