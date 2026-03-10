@@ -67,7 +67,7 @@ Message (现有，扩展)
   ├── content              用户输入
   ├── response             最终回复（冗余，方便列表查询）
   ├── execution_id         执行标识（原 thread_id，改名）
-  ├── metadata (JSON)      execution_metrics 汇总（冗余，方便统计）
+  ├── metadata (JSON)      执行级状态：always_allowed_tools, execution_metrics 汇总
   │
   └── MessageEvent (新表，append-only，不可变)
         ├── id (PK)        自增主键，天然有序，兼做 sequence
@@ -91,7 +91,7 @@ Message (现有，扩展)
 | `tool_complete` | 工具执行完成 | `{tool, result, success, duration_ms}` | → tool_start | 写库 |
 | `agent_complete` | agent 执行结束 | `{agent, summary}` | - | 写库 |
 | `interrupt_pending` | 需要用户确认 | `{tool, params, execution_context}` | - | 写库 |
-| `interrupt_resolved` | 用户确认结果 | `{approved}` | → interrupt_pending | 写库 |
+| `interrupt_resolved` | 用户确认结果 | `{approved, always_allow}` | → interrupt_pending | 写库 |
 | `execution_complete` | 整个请求执行完成 | `{response, execution_metrics}` | - | 写库 |
 | `error` | 执行异常 | `{error, phase, agent}` | - | 写库 |
 
@@ -109,8 +109,9 @@ Message (现有，扩展)
 #3   tool_start           {tool: "web_fetch", params: {url: "..."}}
 #4   interrupt_pending    {tool: "web_fetch", params: {url: "..."}, phase: "TOOL_EXECUTING", current_agent: "lead_agent"}
      ← 暂停，等用户确认（interrupt_pending.data 只有几百字节）
-#5   interrupt_resolved   {ref_event_id: 4, approved: true}
-     ← 恢复：从 #1-#4 重建 agent memories / tool interactions，继续执行
+#5   interrupt_resolved   {ref_event_id: 4, approved: true, always_allow: true}
+     ← always_allow=true → 将 "web_fetch" 追加到 Message.metadata.always_allowed_tools
+     ← 后续同工具直接读 metadata 跳过 interrupt，无需遍历事件流
 #6   tool_complete        {ref_event_id: 3, tool: "web_fetch", result: {...}, success: true, duration_ms: 1200}
 #7   llm_complete         {content: "根据抓取结果...", token_usage: {...}}
 #8   agent_complete       {agent: "lead_agent"}
