@@ -50,7 +50,9 @@ LangGraph/LangChain 在项目中的使用范围很小：
 
 **执行过程本身就是数据，事件流就是真相源（event sourcing）。**
 
-一张 `MessageEvent` 表记录执行过程中的所有事件，不截断、不丢弃。agent 的完整 response、tool 的完整 result、token 用量、reasoning — 全部作为事件数据持久化。任何时刻的执行状态都可以从事件序列重建。
+一张 `MessageEvent` 表记录执行过程中每一步的完整结果。agent 的完整 response、tool 的完整 result、token 用量、reasoning — 全部作为事件数据持久化。任何时刻的执行状态都可以从事件序列重建。
+
+注意：这里的"完整"指每个逻辑步骤的最终结果，而非传输过程的中间态。例如 `llm_complete` 记录完整 response，但逐 token 的 `llm_chunk`（仅为流式传输的拆包）不入库。
 
 一张表同时承担三个角色：
 
@@ -139,7 +141,9 @@ WHERE id = :pending_event_id
 
 **先写库，再推流。** 持久化成功获得 `event_id` 后再推 SSE 队列。前端收到的每个事件都携带 `event_id`，支持断线重连后从指定位置重放。
 
-**data 不截断。** 事件存完整数据（完整 agent response、完整 tool result）。这是与 LangGraph checkpoint 的本质区别：checkpoint 每节点存全量 state 快照导致膨胀（304MB），事件流是增量追加，每条只存该事件自身的数据。一个请求的全部事件通常 ~20-50KB。
+**data 存完整结果。** 事件如实记录每步的完整数据（agent response、tool result）。与 LangGraph checkpoint 的本质区别：checkpoint 每节点存全量 state 快照导致膨胀（304MB），事件流是增量追加，每条只存该事件自身的数据。
+
+体积评估：一个普通请求 ~20-50KB。工具返回大数据（如 `web_fetch` 单 URL 最多 20K 字符）时单条事件可能较大，但这与工具返回给 agent 的数据量一致 — 数据体积应在工具层治理（调整 `max_content_length`、限制 `url_list` 数量），而非在事件层截断，否则会丢失 agent 实际接收的上下文，影响调试和重放。
 
 ### 执行流程
 
@@ -222,6 +226,7 @@ agent 单轮 LLM 调用
 1. **先完成持久化改造（P5/P6）** — 稳定应用数据层
 2. **实现 MessageEvent 表 + 写入逻辑** — 在现有 LangGraph 基础上先加事件持久化
 3. **替换执行引擎** — 用自己的 async 循环替代 StateGraph，interrupt 改为事件流模式
-4. **改造 LLM 接口** — `llm.py` 返回 `LLMResponse`，删除 `AIMessage` 依赖
-5. **移除 LangGraph/LangChain 依赖** — 清理代码和 requirements，删除 `langgraph.db`
-6. **前端适配** — 历史消息加载事件链，展示执行过程
+4. **改造 TaskManager** — 增加 `execution_id` 去重（当前实现允许同 task_id 覆盖提交），resume 时拒绝重复执行
+5. **改造 LLM 接口** — `llm.py` 返回 `LLMResponse`，删除 `AIMessage` 依赖
+6. **移除 LangGraph/LangChain 依赖** — 清理代码和 requirements，删除 `langgraph.db`
+7. **前端适配** — 历史消息加载事件链，展示执行过程
