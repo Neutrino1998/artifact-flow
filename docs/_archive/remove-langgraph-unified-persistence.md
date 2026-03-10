@@ -170,6 +170,23 @@ WHERE id = :pending_event_id
       → 更新 Message.response 和 Message.metadata（冗余写入，方便查询）
 ```
 
+### 执行引擎设计方向
+
+参考 [Pi coding agent](https://github.com/badlogic/pi-mono) 的极简架构：**简单 while loop + hook 回调**，不搞 middleware 框架。
+
+Pi 的核心设计：while loop 循环直到 LLM 不再调用工具为止，扩展点通过 config 上的回调注入（`transformContext`、`convertToLlm`、`getSteeringMessages`）。没有状态机、没有图、没有 middleware 链、没有 max-step 限制。
+
+ArtifactFlow 的 hook 点直接对应现有代码：
+
+| Hook 点 | 现有实现 | 作用 |
+|---------|---------|------|
+| `prepare_context` | `ContextManager.build_agent_messages()` | 构建消息、注入 artifact 上下文 |
+| `retry_policy` | `BaseAgent._call_llm_with_retry()` | LLM 调用重试 |
+| `check_tool_limit` | `agent.config.max_tool_rounds` | 工具轮数上限 |
+| `route` | `merge_agent_response_to_state()` + `ExecutionPhase` | 多 agent 路由决策 |
+
+需要新增能力（如 API call limit）时，在对应 hook 点加逻辑即可，不需要抽象出中间件协议。
+
 ### 替代 LangGraph 的实现
 
 | LangGraph 功能 | 替代方案 |
