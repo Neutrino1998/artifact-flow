@@ -68,9 +68,10 @@ Message (现有，扩展 metadata)
         ├── message_id     FK → Message
         ├── event_type     agent_start / llm_complete / tool_start / tool_complete
         │                  / interrupt_pending / interrupt_resolved / ...
-        ├── ref_event_id   可选，引用关联事件（nullable, UNIQUE）
+        ├── ref_event_id   可选，引用关联事件（nullable）
         │                  用途：interrupt_resolved 引用 interrupt_pending，
         │                       tool_complete 引用 tool_start 等
+        │                  约束：partial unique index on (ref_event_id) WHERE event_type='interrupt_resolved'
         ├── agent_name     产生事件的 agent
         ├── data (JSON)    工具参数与结果、token 用量、reasoning 等
         └── created_at     时间戳
@@ -80,18 +81,25 @@ Message (现有，扩展 metadata)
 
 **Durability：每事件独立 commit。** 事件是 append-only 的，每条写入后立即提交（与现有 Repository 模式一致）。不搞长事务 — 进程中途崩溃时已写入的事件仍然保留，恢复时可从最后一条事件继续。"统一持久化"指的是同一个 DB，不是同一个 transaction。
 
-**Interrupt 幂等性：append-only + 唯一约束。** 不修改 `interrupt_pending` 行，而是插入一条新的 `interrupt_resolved` 事件，通过 `pending_event_id` 唯一约束防止重复 resolve：
+**Interrupt 幂等性：append-only + partial unique index。** 不修改 `interrupt_pending` 行，而是插入一条新的 `interrupt_resolved` 事件。`ref_event_id` 上的 partial unique index（仅对 `interrupt_resolved` 生效）防止重复 resolve，不影响其他事件类型复用该字段：
 
 ```
 EventID  Type                 ref_event_id  Data
   42     interrupt_pending    NULL          {state: ..., tool: "web_fetch"}
-  43     interrupt_resolved   42            {approved: true}   ← UNIQUE(ref_event_id) 防重
+  43     interrupt_resolved   42            {approved: true}   ← partial unique 防重
 ```
 
 ```sql
+-- 校验 ref 目标确实是同一 message 的 interrupt_pending
 INSERT INTO message_events (message_id, event_type, ref_event_id, data)
-VALUES (:msg_id, 'interrupt_resolved', :pending_event_id, :resolve_data)
--- ref_event_id UNIQUE 约束 → 重复插入直接失败，天然幂等
+SELECT :msg_id, 'interrupt_resolved', id, :resolve_data
+FROM message_events
+WHERE id = :pending_event_id
+  AND message_id = :msg_id
+  AND event_type = 'interrupt_pending'
+-- 1. SELECT 为空 → 目标不存在或类型不匹配，插入 0 行
+-- 2. partial unique 冲突 → 已处理过，插入失败
+-- 两种情况都天然幂等
 ```
 
 崩溃恢复：只要存在引用某 `interrupt_pending` 的 `interrupt_resolved` 行，就知道应继续执行，不存在"CAS 成功但未执行"的卡死窗口。
