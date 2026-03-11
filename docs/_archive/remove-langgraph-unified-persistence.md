@@ -54,11 +54,10 @@ LangGraph/LangChain 在项目中的使用范围很小：
 
 注意：这里的"完整"指每个逻辑步骤的最终结果，而非传输过程的中间态。例如 `llm_complete` 记录完整 response，但逐 token 的 `llm_chunk`（仅为流式传输的拆包）不入库。
 
-一张表同时承担三个角色：
+一张表同时承担两个角色：
 
 1. **历史记录** — 按 message_id 查所有事件，重建完整执行过程
 2. **可观测性** — 按 event_type / agent / tool 聚合查询、统计分析
-3. **interrupt/resume** — interrupt 是事件流中的一个状态，恢复时从事件流重建上下文
 
 ### 数据模型
 
@@ -81,57 +80,73 @@ Message (现有，扩展)
 
 ### 事件类型清单
 
-| event_type | 时机 | data 内容 | 持久化 |
-|---|---|---|---|
-| `agent_start` | agent 开始执行 | `{agent}` | 写库 |
-| `llm_chunk` | LLM 流式 token | `{token}` | **仅推 SSE，不写库** |
-| `llm_complete` | 单轮 LLM 调用完成 | `{content, reasoning_content, token_usage}` | 写库 |
-| `tool_start` | 工具开始执行 | `{tool, params}` | 写库 |
-| `tool_complete` | 工具执行完成 | `{tool, result, success, duration_ms}` | 写库 |
-| `agent_complete` | agent 执行结束 | `{agent, summary}` | 写库 |
-| `interrupt_pending` | 需要用户确认 | `{tool, params, execution_context}` | 写库 |
-| `interrupt_resolved` | 用户确认结果 | `{approved, always_allow}` | 写库 |
-| `execution_complete` | 整个请求执行完成 | `{response, execution_metrics, context_usage}` | 写库 |
-| `error` | 执行异常 | `{error, phase, agent}` | 写库 |
+| event_type | 时机 | data 内容 |
+|---|---|---|
+| `agent_start` | agent 开始执行 | `{agent}` |
+| `llm_chunk` | LLM 流式 token | `{token}` |
+| `llm_complete` | 单轮 LLM 调用完成 | `{content, reasoning_content, token_usage}` |
+| `tool_start` | 工具开始执行 | `{tool, params}` |
+| `tool_complete` | 工具执行完成 | `{tool, result, success, duration_ms}` |
+| `agent_complete` | agent 执行结束 | `{agent, summary}` |
+| `interrupt_pending` | 需要用户确认 | `{tool, params, execution_context}` |
+| `interrupt_resolved` | 用户确认结果 | `{approved, always_allow}` |
+| `execution_complete` | 整个请求执行完成 | `{response, execution_metrics, context_usage}` |
+| `error` | 执行异常 | `{error, phase, agent}` |
 
-事件间的关联关系通过序列顺序自然推导（串行执行），不需要显式引用字段。
-
-`llm_chunk` 是唯一不写库的事件 — 高频逐 token 流式，写库无意义。其余所有事件完整持久化。
+所有事件执行期间在内存中累积，推 SSE 实时消费。`llm_chunk` 仅推 SSE 不入内存列表（流式传输拆包，无持久化价值）。其余事件在执行完成（或 error）时 batch write 到 DB。事件间关联通过序列顺序自然推导。
 
 ### Interrupt 设计
 
-**关键简化：事件流完整 → interrupt state 极轻。**
+**Interrupt 是内存中的短暂暂停，不是持久化边界。**
 
-因为事件流记录了所有 agent response 和 tool result，interrupt 不需要序列化整个 AgentState。恢复时从事件流重建上下文，`interrupt_pending` 只存最小的执行位置：
+执行 coroutine 遇到 CONFIRM 工具时 `await` 等待用户确认。整个过程在内存中完成，不涉及 DB 读写：
+
+```
+执行 loop（内存）
+  → tool_b 需要 CONFIRM
+  → 推 interrupt_pending 事件到 StreamManager（SSE 通知前端）
+  → await asyncio.Event()              ← coroutine 暂停，等用户点确认
+  → 用户点确认 → API 层 set event       ← coroutine 恢复
+  → 更新内存 state.always_allowed_tools（如果 always_allow=true）
+  → 继续执行 tool_b
+```
+
+**不持久化的理由：**
+- Interrupt 是秒级到分钟级的短暂暂停，不是长期挂起
+- 用户刷新页面 → 重连 SSE，StreamManager 有缓冲，仍能看到 interrupt 状态并确认
+- 用户彻底离开 → coroutine 超时，当 error 处理并 flush 事件
+- 服务器重启 → coroutine 丢失，用户重新提问
+
+**幂等性：TaskManager 去重。** 用户连点两次 approve，coroutine 已经在跑（第一次 approve 后 event 已 set），第二次 API 请求被 TaskManager 通过 `execution_id` 拒绝，返回 `409 Conflict`。
+
+**事件流示例：**
 
 ```
 #1   agent_start          {agent: "lead_agent"}
 #2   llm_complete         {content: "我需要抓取...", reasoning_content: "...", token_usage: {...}}
 #3   tool_start           {tool: "web_fetch", params: {url: "..."}}
-#4   interrupt_pending    {tool: "web_fetch", params: {url: "..."}, phase: "TOOL_EXECUTING", current_agent: "lead_agent"}
-     ← 暂停，等用户确认（interrupt_pending.data 只有几百字节）
+#4   interrupt_pending    {tool: "web_fetch", params: {url: "..."}}
+     ← coroutine 暂停（内存 await）
 #5   interrupt_resolved   {approved: true, always_allow: true}
-     ← always_allow=true → 将 "web_fetch" 追加到 Message.metadata.always_allowed_tools
-     ← 后续同工具直接读 metadata 跳过 interrupt，无需遍历事件流
+     ← always_allow=true → 更新内存 state.always_allowed_tools
 #6   tool_complete        {tool: "web_fetch", result: {...}, success: true, duration_ms: 1200}
 #7   llm_complete         {content: "根据抓取结果...", token_usage: {...}}
 #8   agent_complete       {agent: "lead_agent"}
 #9   execution_complete   {response: "...", execution_metrics: {...}}
+     ← 此时全部事件 batch write 到 DB
 ```
-
-**幂等性：串行执行 + TaskManager 去重。**
-
-工具串行执行，同一时刻最多一个未解决的 interrupt，不存在"resolve 哪一个"的歧义。`interrupt_resolved` 与前面的 `interrupt_pending` 通过事件序列自然配对。
-
-**Resume 并发控制：** API 层收到 resume 请求后，插入 `interrupt_resolved` 事件并启动执行 coroutine。`TaskManager` 通过 `execution_id` 去重 — 已有运行中任务则拒绝重复提交，返回 `409 Conflict`。用户连点两次 approve，第二次直接被 TaskManager 拒绝。
 
 ### 关键设计约束
 
-**Append-only，不可变。** 事件一旦写入不做 UPDATE/DELETE。状态通过事件序列推导。
+**执行期间全内存。** Loop 运行时，状态（phase、current_agent、always_allowed_tools 等）和事件列表都在内存中。Loop 不读 DB，不写 DB，直到遇到持久化边界。
 
-**每事件独立 commit。** 写入后立即提交（与现有 Repository 模式一致）。进程崩溃时已写入的事件保留，恢复时从最后一条事件继续。
+**两个持久化边界。** 只在以下时刻将内存中的事件列表 batch write 到 MessageEvent 表：
+1. `execution_complete` — 成功，全量 flush
+2. `error`（含 interrupt 超时）— 失败，flush 已有事件 + 错误信息
 
-**先写库，再推流。** 持久化成功获得 `event_id` 后再推 SSE 队列。前端收到的每个事件都携带 `event_id`，支持断线重连后从指定位置重放。
+**SSE 与持久化分离。** 事件生成后走两条独立路径：推给 StreamManager（SSE 实时消费 + 断线重连缓冲）；追加到内存事件列表（等边界 flush 到 DB）。两者互不依赖。
+
+**Append-only，不可变。** 事件写入 DB 后不做 UPDATE/DELETE。历史状态通过事件序列推导。
 
 **data 存完整结果。** 事件如实记录每步的完整数据（agent response、tool result）。与 LangGraph checkpoint 的本质区别：checkpoint 每节点存全量 state 快照导致膨胀（304MB），事件流是增量追加，每条只存该事件自身的数据。
 
@@ -143,22 +158,24 @@ Message (现有，扩展)
 请求进入
   → 创建 Message 记录（生成 execution_id）
   → 启动执行循环 (async coroutine, 由 TaskManager 管理)
+      state = 内存状态 (phase, current_agent, always_allowed_tools, ...)
+      events = 内存事件列表
+
       → while phase != COMPLETED:
-          → 执行 agent（单轮 LLM 调用）
-              → 写 agent_start 事件
-              → LLM 流式调用：llm_chunk 仅推 SSE
-              → LLM 完成：写 llm_complete 事件（含完整 response + token_usage）
+          → context_manager.build(state)          ← 全内存，读 state 不读 DB
+          → agent LLM 调用（流式）
+              → llm_chunk 推 StreamManager（SSE）
+              → llm_complete 追加到 events
           → 解析工具调用列表，串行执行每个工具：
-              → 写 tool_start 事件
-              → 检查权限：
+              → tool_start / tool_complete 追加到 events
+              → 检查权限（读内存 always_allowed_tools）：
                   ├── AUTO → 直接执行
-                  └── CONFIRM → 写 interrupt_pending + 暂停等待
-                      → 用户确认 → 插入 interrupt_resolved → 从事件流重建上下文 → 继续
-              → 写 tool_complete 事件（含完整 result）
-          → 写 agent_complete 事件
+                  └── CONFIRM → 追加 interrupt_pending → 推 SSE → await（内存暂停）
+                      → 用户确认 → 追加 interrupt_resolved → 继续
           → 路由：根据 phase 决定继续/切换 agent/结束
-      → 写 execution_complete 事件（含汇总 metrics）
-      → 更新 Message.response 和 Message.metadata（冗余写入，方便查询）
+
+      → batch_write(events)                       ← 执行完成，全量 flush
+      → 更新 Message.response 和 Message.metadata
 ```
 
 ### 执行引擎设计方向
@@ -190,8 +207,8 @@ async def execute_loop(state, context_manager, emit):
 
         for tool in tool_calls:                   # 串行执行
             if needs_confirm(tool):               # 权限检查
-                emit(interrupt_pending)            # 写库 + 推 SSE
-                await wait_for_user()              # 暂停
+                emit(interrupt_pending)            # 推 SSE（不写库）
+                await wait_for_user()              # 内存暂停
             result = await execute(tool)
 
         route(state, response)                    # phase switch
@@ -206,7 +223,7 @@ async def execute_loop(state, context_manager, emit):
 | **Retry** | 基础设施代码，每个 agent 同样的 exponential backoff，没有定制需求 | `BaseAgent._call_llm_with_retry()` 内部逻辑 |
 | **Tool limit** | 配置值 + loop 里一个 if 判断 | `agent.config.max_tool_rounds`，超限则注入 system message 提醒总结 |
 | **Routing** | phase switch 就是 loop 本体，不是插件 | `merge_agent_response_to_state()` + `ExecutionPhase` enum |
-| **Event emission** | 固定行为：写库 → 推 SSE，所有事件走同一条路径 | loop 内直接调用 `emit()` |
+| **Event emission** | 固定行为：追加内存列表 + 推 SSE，完成时 batch write | loop 内直接调用 `emit()` |
 
 需要新增能力时（如 API call budget、cost tracking），直接在 loop 对应位置加代码即可，不需要中间件协议。
 
@@ -215,7 +232,7 @@ async def execute_loop(state, context_manager, emit):
 | LangGraph 功能 | 替代方案 |
 |---|---|
 | `StateGraph` + 路由 | `while phase != COMPLETED` + phase switch（`ExecutionPhase` enum 已存在） |
-| `interrupt()` / `Command(resume=)` | `interrupt_pending` 事件 + `interrupt_resolved` 恢复，从事件流重建上下文 |
+| `interrupt()` / `Command(resume=)` | 内存 `asyncio.Event` await/set，不涉及 DB 持久化 |
 | `StreamWriter` | 自定义 callback / async generator，复用现有 `StreamManager` |
 | `AsyncSqliteSaver` (checkpoint) | 不需要 checkpoint，事件流本身就是持久化的执行历史 |
 | `langchain_core.messages` | `llm.py` 的 `invoke`/`ainvoke` 改为返回 `LLMResponse`（已有 dataclass），删除 `to_langchain_message()` 中间层 |
@@ -239,8 +256,8 @@ agent 单轮 LLM 调用
 
 - **完整历史**：加载消息时附带完整事件链，展示 agent response、tool 调用与结果、执行过程
 - **可观测性**：结构化事件日志，可查询、可统计（token 消耗、工具成功率、响应耗时）
-- **轻量 interrupt**：事件流完整 → interrupt state 只需执行位置，不再序列化整个 AgentState
-- **统一持久化**：所有数据在同一个 DB，每事件独立 commit
+- **轻量 interrupt**：内存 await/set，不涉及 DB，超时自动 error
+- **统一持久化**：执行完成时 batch write 到同一个 DB
 - **依赖极简**：技术栈收敛为 FastAPI + LiteLLM + SQLAlchemy
 - **多工具支持**：agent 单轮可调多个工具，串行执行，interrupt 自然嵌入
 
