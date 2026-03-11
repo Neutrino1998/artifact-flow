@@ -74,8 +74,6 @@ Message (现有，扩展)
         ├── id (PK)        自增主键，天然有序，兼做 sequence
         ├── message_id     FK → Message
         ├── event_type     见下方事件类型清单
-        ├── ref_event_id   可选，引用关联事件（nullable）
-        │                  约束：partial unique index WHERE event_type='interrupt_resolved'
         ├── agent_name     产生事件的 agent（nullable）
         ├── data (JSON)    事件完整数据，不截断
         └── created_at     时间戳
@@ -83,18 +81,20 @@ Message (现有，扩展)
 
 ### 事件类型清单
 
-| event_type | 时机 | data 内容 | ref_event_id | 持久化 |
-|---|---|---|---|---|
-| `agent_start` | agent 开始执行 | `{agent}` | - | 写库 |
-| `llm_chunk` | LLM 流式 token | `{token}` | - | **仅推 SSE，不写库** |
-| `llm_complete` | 单轮 LLM 调用完成 | `{content, reasoning_content, token_usage}` | - | 写库 |
-| `tool_start` | 工具开始执行 | `{tool, params}` | - | 写库 |
-| `tool_complete` | 工具执行完成 | `{tool, result, success, duration_ms}` | → tool_start | 写库 |
-| `agent_complete` | agent 执行结束 | `{agent, summary}` | - | 写库 |
-| `interrupt_pending` | 需要用户确认 | `{tool, params, execution_context}` | - | 写库 |
-| `interrupt_resolved` | 用户确认结果 | `{approved, always_allow}` | → interrupt_pending | 写库 |
-| `execution_complete` | 整个请求执行完成 | `{response, execution_metrics, context_usage}` | - | 写库 |
-| `error` | 执行异常 | `{error, phase, agent}` | - | 写库 |
+| event_type | 时机 | data 内容 | 持久化 |
+|---|---|---|---|
+| `agent_start` | agent 开始执行 | `{agent}` | 写库 |
+| `llm_chunk` | LLM 流式 token | `{token}` | **仅推 SSE，不写库** |
+| `llm_complete` | 单轮 LLM 调用完成 | `{content, reasoning_content, token_usage}` | 写库 |
+| `tool_start` | 工具开始执行 | `{tool, params}` | 写库 |
+| `tool_complete` | 工具执行完成 | `{tool, result, success, duration_ms}` | 写库 |
+| `agent_complete` | agent 执行结束 | `{agent, summary}` | 写库 |
+| `interrupt_pending` | 需要用户确认 | `{tool, params, execution_context}` | 写库 |
+| `interrupt_resolved` | 用户确认结果 | `{approved, always_allow}` | 写库 |
+| `execution_complete` | 整个请求执行完成 | `{response, execution_metrics, context_usage}` | 写库 |
+| `error` | 执行异常 | `{error, phase, agent}` | 写库 |
+
+事件间的关联关系通过序列顺序自然推导（串行执行），不需要显式引用字段。
 
 `llm_chunk` 是唯一不写库的事件 — 高频逐 token 流式，写库无意义。其余所有事件完整持久化。
 
@@ -110,30 +110,20 @@ Message (现有，扩展)
 #3   tool_start           {tool: "web_fetch", params: {url: "..."}}
 #4   interrupt_pending    {tool: "web_fetch", params: {url: "..."}, phase: "TOOL_EXECUTING", current_agent: "lead_agent"}
      ← 暂停，等用户确认（interrupt_pending.data 只有几百字节）
-#5   interrupt_resolved   {ref_event_id: 4, approved: true, always_allow: true}
+#5   interrupt_resolved   {approved: true, always_allow: true}
      ← always_allow=true → 将 "web_fetch" 追加到 Message.metadata.always_allowed_tools
      ← 后续同工具直接读 metadata 跳过 interrupt，无需遍历事件流
-#6   tool_complete        {ref_event_id: 3, tool: "web_fetch", result: {...}, success: true, duration_ms: 1200}
+#6   tool_complete        {tool: "web_fetch", result: {...}, success: true, duration_ms: 1200}
 #7   llm_complete         {content: "根据抓取结果...", token_usage: {...}}
 #8   agent_complete       {agent: "lead_agent"}
 #9   execution_complete   {response: "...", execution_metrics: {...}}
 ```
 
-**幂等性：append-only + partial unique index。**
+**幂等性：串行执行 + TaskManager 去重。**
 
-```sql
--- 插入 interrupt_resolved，校验 ref 目标是同一 message 的 interrupt_pending
-INSERT INTO message_events (message_id, event_type, ref_event_id, data)
-SELECT :msg_id, 'interrupt_resolved', id, :resolve_data
-FROM message_events
-WHERE id = :pending_event_id
-  AND message_id = :msg_id
-  AND event_type = 'interrupt_pending'
--- SELECT 为空 → 目标不存在或类型不匹配，插入 0 行
--- partial unique 冲突 → 已处理过，插入失败
-```
+工具串行执行，同一时刻最多一个未解决的 interrupt，不存在"resolve 哪一个"的歧义。`interrupt_resolved` 与前面的 `interrupt_pending` 通过事件序列自然配对。
 
-**Resume 并发控制：** `interrupt_resolved` 插入成功后，由 API 层启动执行 coroutine。`TaskManager` 通过 `execution_id` 去重 — 已有运行中任务则拒绝重复提交，返回 `409 Conflict`。
+**Resume 并发控制：** API 层收到 resume 请求后，插入 `interrupt_resolved` 事件并启动执行 coroutine。`TaskManager` 通过 `execution_id` 去重 — 已有运行中任务则拒绝重复提交，返回 `409 Conflict`。用户连点两次 approve，第二次直接被 TaskManager 拒绝。
 
 ### 关键设计约束
 
