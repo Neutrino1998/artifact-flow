@@ -6,6 +6,7 @@ directly via repository methods through db_manager.session().
 After commit, API's independent session can see the data.
 """
 
+import asyncio
 import uuid
 from typing import Tuple, List
 
@@ -15,6 +16,7 @@ from httpx import AsyncClient
 from db.models import User
 from db.database import DatabaseManager
 from repositories.conversation_repo import ConversationRepository
+from api.services.task_manager import TaskManager
 
 
 # ============================================================
@@ -237,3 +239,63 @@ class TestDeleteConversation:
     async def test_delete_unauthenticated(self, anon_client: AsyncClient):
         resp = await anon_client.delete("/api/v1/chat/some-conv-id")
         assert resp.status_code == 401
+
+
+# ============================================================
+# Resume interrupt idempotency
+# ============================================================
+
+
+class TestResumeInterrupt:
+
+    async def test_resume_already_resolved_returns_409(
+        self,
+        client: AsyncClient,
+        app,
+        seed_conversation: Tuple[str, List[str]],
+    ):
+        """Second resume on the same interrupt should return 409, not 404."""
+        conv_id, msg_ids = seed_conversation
+        message_id = msg_ids[0]
+
+        # Get the TaskManager injected into the app
+        from api.dependencies import get_task_manager
+        task_manager: TaskManager = app.dependency_overrides[get_task_manager]()
+
+        # Simulate an interrupt that the engine would create
+        task_manager.create_interrupt(message_id, {
+            "tool": "web_search",
+            "params": {"query": "test"},
+        })
+
+        # First resume — should succeed (resolve the interrupt)
+        resp = await client.post(f"/api/v1/chat/{conv_id}/resume", json={
+            "message_id": message_id,
+            "approved": True,
+            "always_allow": False,
+        })
+        assert resp.status_code == 200
+
+        # Second resume — same interrupt already resolved → 409
+        resp = await client.post(f"/api/v1/chat/{conv_id}/resume", json={
+            "message_id": message_id,
+            "approved": True,
+            "always_allow": False,
+        })
+        assert resp.status_code == 409
+
+    async def test_resume_no_interrupt_returns_404(
+        self,
+        client: AsyncClient,
+        seed_conversation: Tuple[str, List[str]],
+    ):
+        """Resume with no pending interrupt should return 404."""
+        conv_id, msg_ids = seed_conversation
+        message_id = msg_ids[0]
+
+        resp = await client.post(f"/api/v1/chat/{conv_id}/resume", json={
+            "message_id": message_id,
+            "approved": True,
+            "always_allow": False,
+        })
+        assert resp.status_code == 404
