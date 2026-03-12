@@ -51,6 +51,7 @@ class ContextManager:
         tool_registry: Any,  # ToolRegistry
         artifact_manager: Optional[Any] = None,
         artifacts_inventory: Optional[List[Dict]] = None,
+        request_tools: Optional[Dict[str, Any]] = None,
     ) -> Context:
         """
         构建 LLM 调用所需的完整 messages
@@ -64,6 +65,7 @@ class ContextManager:
             tool_registry: 工具注册中心
             artifact_manager: ArtifactManager（用于 artifacts 清单）
             artifacts_inventory: 预加载的 artifacts 清单
+            request_tools: 请求级工具 {name: BaseTool}，优先于 tool_registry
 
         Returns:
             Context（含 messages 列表）
@@ -97,11 +99,11 @@ class ContextManager:
         if "call_subagent" in agent_config.tools:
             system_parts.append(cls._build_available_agents(agents, agent_config.name))
 
-        # 6. 工具说明
+        # 6. 工具说明（先查 request_tools，再查 tool_registry）
         tool_names = list(agent_config.tools.keys())
         tools = []
         for name in tool_names:
-            tool = tool_registry.get_tool(name)
+            tool = (request_tools or {}).get(name) or tool_registry.get_tool(name)
             if tool:
                 tools.append(tool)
         if tools:

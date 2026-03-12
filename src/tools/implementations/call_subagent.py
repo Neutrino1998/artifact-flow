@@ -21,13 +21,14 @@ class CallSubagentTool(BaseTool):
     4. 验证失败 → 当作普通 tool_call，返回错误让 Lead 修正
     5. SubAgent 完成后，结果通过 AgentState 回传给 Lead Agent
     """
-    
-    def __init__(self):
+
+    def __init__(self, valid_agents: Optional[List[str]] = None):
         super().__init__(
             name="call_subagent",
             description="Call a specialized sub-agent to handle specific tasks",
             permission=ToolPermission.AUTO
         )
+        self._valid_agents = valid_agents
     
     def get_parameters(self) -> List[ToolParameter]:
         return [
@@ -56,11 +57,10 @@ class CallSubagentTool(BaseTool):
         instruction = params.get("instruction", "").strip()
 
         # 基本验证
-        valid_agents = ["search_agent", "crawl_agent"]
-        if agent_name not in valid_agents:
+        if self._valid_agents and agent_name not in self._valid_agents:
             return ToolResult(
                 success=False,
-                error=f"Invalid agent_name '{agent_name}'. Must be one of: {', '.join(valid_agents)}"
+                error=f"Invalid agent_name '{agent_name}'. Must be one of: {', '.join(self._valid_agents)}"
             )
 
         if not instruction:

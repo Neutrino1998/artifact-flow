@@ -108,9 +108,12 @@ def _create_tool_registry():
 
     registry = ToolRegistry()
 
+    # 从已加载的 agents 推导有效 subagent 列表
+    valid_agents = [n for n in _agents.keys() if n != "lead_agent"] if _agents else None
+
     # 注册全局工具
     tools = [
-        CallSubagentTool(),
+        CallSubagentTool(valid_agents=valid_agents),
         WebSearchTool(),
         WebFetchTool(),
     ]
@@ -219,19 +222,19 @@ async def get_controller(
     from repositories.message_event_repo import MessageEventRepository
     from tools.implementations.artifact_ops import create_artifact_tools
 
-    # 注册 artifact 工具到 tool_registry（每次请求需要绑定当前 artifact_manager）
-    registry = get_tool_registry()
+    # 构建请求级工具（不污染全局 registry）
     artifact_tools = create_artifact_tools(artifact_manager)
-    for tool in artifact_tools:
-        registry.register_tool_to_library(tool)
+    request_tools = {t.name: t for t in artifact_tools}
 
     return ExecutionController(
         agents=get_agents(),
-        tool_registry=registry,
+        tool_registry=get_tool_registry(),
         task_manager=get_task_manager(),
         artifact_manager=artifact_manager,
         conversation_manager=conversation_manager,
         message_event_repo=MessageEventRepository(session),
+        request_tools=request_tools,
+        permission_timeout=config.PERMISSION_TIMEOUT,
     )
 
 

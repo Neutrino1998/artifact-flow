@@ -7,13 +7,14 @@
 3. 对话管理复用 ConversationManager
 """
 
+import asyncio
 from typing import Dict, Optional, Any, AsyncGenerator
 from uuid import uuid4
 from datetime import datetime
 
 from core.state import create_initial_state
 from core.engine import execute_loop
-from core.events import StreamEventType
+from core.events import StreamEventType, ExecutionEvent
 from core.conversation_manager import ConversationManager
 from tools.implementations.artifact_ops import ArtifactManager
 from utils.logger import get_logger
@@ -22,6 +23,9 @@ logger = get_logger("ArtifactFlow")
 
 # Sentinel to distinguish "not provided" from "explicitly None"
 _UNSET = object()
+
+# Sentinel to signal end of event queue
+_SENTINEL = object()
 
 
 class ExecutionController:
@@ -42,6 +46,8 @@ class ExecutionController:
         artifact_manager: Optional[ArtifactManager] = None,
         conversation_manager: Optional[ConversationManager] = None,
         message_event_repo: Optional[Any] = None,  # MessageEventRepository
+        request_tools: Optional[Dict[str, Any]] = None,  # {name: BaseTool}
+        permission_timeout: int = 300,
     ):
         self.agents = agents
         self.tool_registry = tool_registry
@@ -49,6 +55,8 @@ class ExecutionController:
         self.artifact_manager = artifact_manager
         self.conversation_manager = conversation_manager or ConversationManager()
         self.message_event_repo = message_event_repo
+        self.request_tools = request_tools
+        self.permission_timeout = permission_timeout
 
         logger.info("ExecutionController v2 initialized")
 
@@ -147,35 +155,68 @@ class ExecutionController:
         }
 
         # ========== 执行引擎 ==========
-        # 收集所有事件用于最后推送 complete
-        collected_events = []
+        event_queue: asyncio.Queue = asyncio.Queue()
+        final_state = None
 
-        async def emit_and_yield(event_dict):
-            """emit callback: 收集事件并标记为可 yield"""
-            collected_events.append(event_dict)
+        async def emit_to_queue(event_dict):
+            """emit callback: 实时推送事件到 queue"""
+            await event_queue.put(event_dict)
+
+        async def run_engine():
+            nonlocal final_state
+            try:
+                final_state = await execute_loop(
+                    state=initial_state,
+                    agents=self.agents,
+                    tool_registry=self.tool_registry,
+                    task_manager=self.task_manager,
+                    artifact_manager=self.artifact_manager,
+                    emit=emit_to_queue,
+                    permission_timeout=self.permission_timeout,
+                    request_tools=self.request_tools,
+                )
+            except Exception as e:
+                logger.exception(f"Engine error: {e}")
+                await event_queue.put({
+                    "type": StreamEventType.ERROR.value,
+                    "timestamp": datetime.now().isoformat(),
+                    "data": {
+                        "success": False,
+                        "conversation_id": conversation_id,
+                        "message_id": message_id,
+                        "error": str(e),
+                    }
+                })
+            finally:
+                await event_queue.put(_SENTINEL)
+
+        engine_task = asyncio.create_task(run_engine())
 
         try:
-            final_state = await execute_loop(
-                state=initial_state,
-                agents=self.agents,
-                tool_registry=self.tool_registry,
-                task_manager=self.task_manager,
-                artifact_manager=self.artifact_manager,
-                emit=emit_and_yield,
-            )
-
-            # yield 所有收集的事件
-            for event in collected_events:
+            # Yield events in real-time as they arrive
+            while True:
+                event = await event_queue.get()
+                if event is _SENTINEL:
+                    break
                 yield event
+        finally:
+            if not engine_task.done():
+                await engine_task
 
-            # 检查最终状态
+        # ========== Post-processing ==========
+        # Use initial_state as fallback if engine crashed before setting final_state
+        if final_state is None:
+            final_state = initial_state
+
+        try:
             response = final_state.get("response", "")
+            has_error = final_state.get("error", False)
 
             # 更新 conversation response
             await self.conversation_manager.update_response_async(
                 conv_id=conversation_id,
                 message_id=message_id,
-                response=response,
+                response=response if not has_error else (response or "An error occurred during execution."),
             )
 
             logger.info("Streaming execution completed")
@@ -189,37 +230,47 @@ class ExecutionController:
                     metadata={"always_allowed_tools": always_allowed},
                 )
 
+            # 构建终态事件
+            if has_error:
+                terminal_event_dict = {
+                    "type": StreamEventType.ERROR.value,
+                    "timestamp": datetime.now().isoformat(),
+                    "data": {
+                        "success": False,
+                        "conversation_id": conversation_id,
+                        "message_id": message_id,
+                        "error": response or "Execution failed",
+                    }
+                }
+            else:
+                terminal_event_dict = {
+                    "type": StreamEventType.COMPLETE.value,
+                    "timestamp": datetime.now().isoformat(),
+                    "data": {
+                        "success": True,
+                        "interrupted": False,
+                        "conversation_id": conversation_id,
+                        "message_id": message_id,
+                        "response": response,
+                        "execution_metrics": final_state.get("execution_metrics", {}),
+                    }
+                }
+
+            # 终态事件入库（Fix 6: 在 _persist_events 之前追加）
+            final_state["events"].append(ExecutionEvent(
+                event_type=terminal_event_dict["type"],
+                agent_name=None,
+                data=terminal_event_dict["data"],
+            ))
+
             # 持久化事件（batch write — 设计文档 §关键设计约束）
             await self._persist_events(message_id, final_state)
 
-            # 发送完成事件
-            yield {
-                "type": StreamEventType.COMPLETE.value,
-                "timestamp": datetime.now().isoformat(),
-                "data": {
-                    "success": True,
-                    "interrupted": False,
-                    "conversation_id": conversation_id,
-                    "message_id": message_id,
-                    "response": response,
-                    "execution_metrics": final_state.get("execution_metrics", {}),
-                }
-            }
+            # 发送终态事件到 SSE
+            yield terminal_event_dict
 
         except Exception as e:
-            logger.exception(f"Error in streaming execution: {e}")
-
-            # yield 已收集的事件
-            for event in collected_events:
-                yield event
-
-            # 更新错误响应
-            await self.conversation_manager.update_response_async(
-                conv_id=conversation_id,
-                message_id=message_id,
-                response="An error occurred during execution.",
-            )
-
+            logger.exception(f"Error in post-processing: {e}")
             yield {
                 "type": StreamEventType.ERROR.value,
                 "timestamp": datetime.now().isoformat(),

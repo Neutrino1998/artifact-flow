@@ -100,10 +100,9 @@ async def _create_controller() -> AsyncGenerator:
         artifact_repo = ArtifactRepository(session)
         artifact_manager = ArtifactManager(artifact_repo)
 
-        # 注册 artifact 工具
+        # 构建请求级工具（不污染全局 registry）
         artifact_tools = create_artifact_tools(artifact_manager)
-        for tool in artifact_tools:
-            tool_registry.register_tool_to_library(tool)
+        request_tools = {t.name: t for t in artifact_tools}
 
         conv_repo = CR(session)
         conv_manager = CM(conv_repo)
@@ -116,6 +115,8 @@ async def _create_controller() -> AsyncGenerator:
             artifact_manager=artifact_manager,
             conversation_manager=conv_manager,
             message_event_repo=event_repo,
+            request_tools=request_tools,
+            permission_timeout=config.PERMISSION_TIMEOUT,
         )
 
 

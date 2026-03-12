@@ -37,6 +37,7 @@ def create_initial_state(
         "message_id": message_id,
         "conversation_history": conversation_history,
         "completed": False,
+        "error": False,            # 执行是否以错误终止
         "current_agent": "lead_agent",
         "always_allowed_tools": list(always_allowed_tools) if always_allowed_tools else [],
         "events": [],             # 内存事件列表，执行完 batch write

@@ -28,7 +28,7 @@ class ToolPromptGenerator:
             return "<tool_instructions>\nNo tools available.\n</tool_instructions>"
         
         instruction = """<tool_instructions>
-IMPORTANT: You can only make a SINGLE tool call per turn.
+You may make one or more tool calls per turn. They will be executed sequentially.
 
 **Available Tools:**
 """
@@ -39,7 +39,7 @@ IMPORTANT: You can only make a SINGLE tool call per turn.
 
         instruction += """
 **Call Rules:**
-- One tool call per turn.
+- You may include multiple tool calls; they execute in order.
 - Wrap ALL parameter values in `<![CDATA[...]]>`.
 - For list parameters, wrap each `<item>` value in `<![CDATA[...]]>`.
 </tool_instructions>"""

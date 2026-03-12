@@ -31,8 +31,9 @@ class APIConfig(BaseSettings):
 
     # SSE 配置
     SSE_PING_INTERVAL: int = 15  # 秒，保持连接活跃
-    STREAM_TIMEOUT: int = 300    # 秒，最大执行时间
+    STREAM_TIMEOUT: int = 1800   # 秒，总执行上限（含 permission 等待）
     STREAM_TTL: int = 30         # 秒，队列 TTL（前端未连接时自动清理）
+    PERMISSION_TIMEOUT: int = 300  # 秒，单次 permission 等待超时
 
     # 并发控制
     MAX_CONCURRENT_TASKS: int = 10  # 最大并发 Graph 执行数

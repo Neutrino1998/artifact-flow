@@ -38,6 +38,8 @@ async def execute_loop(
     task_manager: Any,        # TaskManager
     artifact_manager: Optional[Any] = None,
     emit: Optional[EmitFn] = None,
+    permission_timeout: int = 300,
+    request_tools: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Pi-style 扁平 while loop 执行引擎
@@ -49,6 +51,8 @@ async def execute_loop(
         task_manager: TaskManager 实例（用于 interrupt 和 message queue）
         artifact_manager: ArtifactManager 实例（用于 artifacts 清单）
         emit: 事件推送回调（推 SSE）
+        permission_timeout: 单次 permission 确认等待超时（秒），默认 300
+        request_tools: 请求级工具 {name: BaseTool}，优先于 tool_registry
 
     Returns:
         最终执行状态
@@ -86,6 +90,12 @@ async def execute_loop(
         # 推 SSE
         if emit:
             await emit(event_dict)
+
+    def _resolve_tool(name: str):
+        """先查 request_tools，再查 tool_registry"""
+        if request_tools and name in request_tools:
+            return request_tools[name]
+        return tool_registry.get_tool(name)
 
     try:
         while not state["completed"]:
@@ -125,6 +135,7 @@ async def execute_loop(
                 tool_registry=tool_registry,
                 artifact_manager=artifact_manager,
                 artifacts_inventory=artifacts_inventory,
+                request_tools=request_tools,
             )
 
             messages = context.messages
@@ -186,6 +197,7 @@ async def execute_loop(
                     "agent": current_agent_name,
                 })
                 state["completed"] = True
+                state["error"] = True
                 state["response"] = f"LLM call failed: {str(llm_error)}"
                 break
 
@@ -249,10 +261,22 @@ async def execute_loop(
                 tool_name = tool_call.name
                 params = tool_call.params
 
+                # Agent 工具白名单校验
+                if tool_name not in agent_config.tools:
+                    await _emit(StreamEventType.TOOL_START.value, current_agent_name, {
+                        "tool": tool_name, "params": params,
+                    })
+                    await _emit(StreamEventType.TOOL_COMPLETE.value, current_agent_name, {
+                        "tool": tool_name, "success": False,
+                        "error": f"Tool '{tool_name}' not available for '{current_agent_name}'",
+                        "duration_ms": 0,
+                    })
+                    continue
+
                 # call_subagent 特殊处理
                 if tool_name == "call_subagent":
                     # 验证参数
-                    tool = tool_registry.get_tool("call_subagent")
+                    tool = _resolve_tool("call_subagent")
                     if tool:
                         result = await tool(**params)
                         if result.success:
@@ -278,7 +302,7 @@ async def execute_loop(
                     # 如果验证失败，继续作为普通工具处理
 
                 # 获取工具
-                tool = tool_registry.get_tool(tool_name)
+                tool = _resolve_tool(tool_name)
                 if not tool:
                     # 工具不存在，记录错误结果
                     await _emit(StreamEventType.TOOL_START.value, current_agent_name, {
@@ -291,8 +315,10 @@ async def execute_loop(
                     })
                     continue
 
-                # 权限检查
-                if tool.permission == ToolPermission.CONFIRM:
+                # 权限检查（per-agent 权限覆盖）
+                agent_perm_str = agent_config.tools.get(tool_name, tool.permission.value)
+                effective_permission = ToolPermission(agent_perm_str)
+                if effective_permission == ToolPermission.CONFIRM:
                     if tool_name not in state.get("always_allowed_tools", []):
                         # 需要用户确认 → interrupt
                         await _emit(StreamEventType.PERMISSION_REQUEST.value, current_agent_name, {
@@ -311,9 +337,9 @@ async def execute_loop(
                             "message": f"Tool '{tool_name}' requires {tool.permission.value} permission",
                         })
 
-                        # 等待用户确认（30 分钟超时，超时自动拒绝）
+                        # 等待用户确认（超时自动拒绝）
                         try:
-                            await asyncio.wait_for(interrupt.event.wait(), timeout=1800)
+                            await asyncio.wait_for(interrupt.event.wait(), timeout=permission_timeout)
                         except asyncio.TimeoutError:
                             logger.warning(f"Interrupt timed out for tool '{tool_name}', auto-denying")
                             interrupt.resume_data = {"approved": False, "reason": "timeout"}
@@ -396,6 +422,7 @@ async def execute_loop(
             "error": str(e),
             "agent": state.get("current_agent"),
         })
+        state["error"] = True
         state["response"] = f"Execution failed: {str(e)}"
 
     # 完成 metrics
