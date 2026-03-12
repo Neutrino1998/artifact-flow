@@ -150,7 +150,7 @@ async def execute_loop(
                 if chunk_type == "content":
                     response_content += chunk["content"]
                     await _emit(StreamEventType.LLM_CHUNK.value, agent_name, {
-                        "content": chunk["content"],
+                        "content": response_content,
                     }, sse_only=True)
 
                 elif chunk_type == "reasoning":
@@ -158,7 +158,7 @@ async def execute_loop(
                         reasoning_content = ""
                     reasoning_content += chunk["content"]
                     await _emit(StreamEventType.LLM_CHUNK.value, agent_name, {
-                        "reasoning_content": chunk["content"],
+                        "reasoning_content": reasoning_content,
                     }, sse_only=True)
 
                 elif chunk_type == "usage":
