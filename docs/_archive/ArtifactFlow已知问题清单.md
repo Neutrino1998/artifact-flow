@@ -18,12 +18,14 @@
 
 ## 次要问题
 - [x] 将langchain模型接入改为专门的万能接口去适应不同provider，例如LiteLLM。尤其要注意reasoning和token usage等字段如何获取
+- [ ] 增加私有化部署模型测试接入脚本
 
 # 工具模块已知问题清单
 
 ## 次要问题
 - [x] 使用标准xml解析方式（xml.etree.ElementTree），string字段统一用cdata字段，所有参数Tag平铺，如有下级标签则为list
-
+- [ ] pydantic参数验证
+- [ ] 工具返回结果/subagent提示词使用xml attribute
 
 # Core模块已知问题清单
 
