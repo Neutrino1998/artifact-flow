@@ -103,9 +103,15 @@ async def execute_loop(
             agent_config = agents.get(current_agent_name)
             if not agent_config:
                 logger.error(f"Agent '{current_agent_name}' not found")
-                await _emit(StreamEventType.ERROR.value, current_agent_name, {
-                    "error": f"Agent '{current_agent_name}' not found"
-                })
+                state["error"] = True
+                state["response"] = f"Agent '{current_agent_name}' not found"
+                error_data = {"error": f"Agent '{current_agent_name}' not found"}
+                state["events"].append(ExecutionEvent(
+                    event_type=StreamEventType.ERROR.value,
+                    agent_name=current_agent_name,
+                    data=error_data,
+                ))
+                await _emit(StreamEventType.ERROR.value, current_agent_name, error_data)
                 break
 
             # drain queued messages（非阻塞）
@@ -430,10 +436,16 @@ async def execute_loop(
 
     except Exception as e:
         logger.exception(f"Execution loop error: {e}")
-        await _emit(StreamEventType.ERROR.value, state.get("current_agent"), {
+        error_data = {
             "error": str(e),
             "agent": state.get("current_agent"),
-        })
+        }
+        state["events"].append(ExecutionEvent(
+            event_type=StreamEventType.ERROR.value,
+            agent_name=state.get("current_agent"),
+            data=error_data,
+        ))
+        await _emit(StreamEventType.ERROR.value, state.get("current_agent"), error_data)
         state["error"] = True
         state["response"] = f"Execution failed: {str(e)}"
 

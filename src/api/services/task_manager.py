@@ -12,7 +12,7 @@ TaskManager - Background Task 生命周期管理 + Interrupt + Message Queue
 
 import asyncio
 from dataclasses import dataclass, field
-from typing import Coroutine, Optional, Dict, Any, List
+from typing import Coroutine, Literal, Optional, Dict, Any, List
 
 from utils.logger import get_logger
 
@@ -119,7 +119,9 @@ class TaskManager:
         logger.info(f"Interrupt created for {message_id}")
         return interrupt
 
-    async def resolve_interrupt(self, message_id: str, resume_data: Dict[str, Any]) -> bool:
+    async def resolve_interrupt(
+        self, message_id: str, resume_data: Dict[str, Any]
+    ) -> Literal["resolved", "not_found", "already_resolved"]:
         """
         解决中断（用户确认后调用）
 
@@ -128,21 +130,23 @@ class TaskManager:
             resume_data: 用户确认结果（approved, always_allow 等）
 
         Returns:
-            True 如果成功唤醒，False 如果找不到中断
+            "resolved": 成功唤醒
+            "not_found": 找不到中断
+            "already_resolved": 中断已被处理过
         """
         interrupt = self._interrupts.get(message_id)
         if not interrupt:
             logger.warning(f"No interrupt found for {message_id}")
-            return False
+            return "not_found"
 
         if interrupt.event.is_set():
             logger.warning(f"Interrupt for {message_id} already resolved")
-            return False
+            return "already_resolved"
 
         interrupt.resume_data = resume_data
         interrupt.event.set()
         logger.info(f"Interrupt resolved for {message_id}: {resume_data}")
-        return True
+        return "resolved"
 
     def get_interrupt(self, message_id: str) -> Optional[InterruptState]:
         """获取中断状态"""

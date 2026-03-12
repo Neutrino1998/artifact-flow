@@ -2,12 +2,12 @@
 StreamManager - 事件缓冲队列管理
 
 解决的问题：
-POST /chat 启动任务后，Graph 可能在前端 SSE 连接建立之前
+POST /chat 启动任务后，Engine 可能在前端 SSE 连接建立之前
 就已经开始产生事件，导致 metadata / start 等早期事件丢失。
 
 架构设计：
     ┌───────────────────────────────────────────────────────┐
-    │  streams: Dict[thread_id, StreamContext]              │
+    │  streams: Dict[message_id, StreamContext]             │
     │                                                       │
     │  StreamContext:                                       │
     │    - queue: asyncio.Queue[Dict]                       │
@@ -17,7 +17,7 @@ POST /chat 启动任务后，Graph 可能在前端 SSE 连接建立之前
     └───────────────────────────────────────────────────────┘
 
 交互时序：
-    POST /chat                          GET /stream/{thread_id}
+    POST /chat                          GET /stream/{message_id}
         │                                      │
         ▼                                      │
     [创建 StreamContext]                       │
@@ -42,16 +42,16 @@ logger = get_logger("ArtifactFlow")
 
 class StreamNotFoundError(Exception):
     """Stream 不存在异常"""
-    def __init__(self, thread_id: str):
-        self.thread_id = thread_id
-        super().__init__(f"Stream '{thread_id}' not found")
+    def __init__(self, message_id: str):
+        self.message_id = message_id
+        super().__init__(f"Stream '{message_id}' not found")
 
 
 class StreamAlreadyExistsError(Exception):
     """Stream 已存在异常"""
-    def __init__(self, thread_id: str):
-        self.thread_id = thread_id
-        super().__init__(f"Stream '{thread_id}' already exists")
+    def __init__(self, message_id: str):
+        self.message_id = message_id
+        super().__init__(f"Stream '{message_id}' already exists")
 
 
 @dataclass
@@ -81,7 +81,7 @@ class StreamManager:
     事件缓冲队列管理器
 
     职责：
-    - 为每个 thread_id 创建独立的事件队列
+    - 为每个 message_id 创建独立的事件队列
     - 在 POST /chat 时创建队列，开始缓冲事件
     - 在 GET /stream 时消费队列，通过 SSE 推送
     - TTL 机制防止内存泄漏
@@ -89,17 +89,17 @@ class StreamManager:
 
     使用方式：
         # POST /chat 处理器
-        context = stream_manager.create_stream(thread_id)
-        asyncio.create_task(run_graph_and_push_events(thread_id))
+        context = stream_manager.create_stream(message_id)
+        asyncio.create_task(run_engine_and_push_events(message_id))
 
         # 后台任务
-        async def run_graph_and_push_events(thread_id):
+        async def run_engine_and_push_events(message_id):
             async for event in controller.stream_execute(...):
-                if not stream_manager.push_event(thread_id, event):
+                if not stream_manager.push_event(message_id, event):
                     break  # stream 已关闭，停止推送
 
         # GET /stream 处理器
-        async for event in stream_manager.consume_events(thread_id):
+        async for event in stream_manager.consume_events(message_id):
             yield f"data: {json.dumps(event)}\\n\\n"
     """
 
@@ -119,13 +119,13 @@ class StreamManager:
         logger.info(f"StreamManager initialized (TTL: {ttl_seconds}s)")
 
     async def create_stream(
-        self, thread_id: str, owner_user_id: Optional[str] = None
+        self, message_id: str, owner_user_id: Optional[str] = None
     ) -> StreamContext:
         """
         创建事件队列，并启动 TTL 定时器
 
         Args:
-            thread_id: LangGraph 线程 ID
+            message_id: 执行标识（message ID）
             owner_user_id: 创建此 stream 的用户 ID（消费时校验）
 
         Returns:
@@ -135,63 +135,63 @@ class StreamManager:
             StreamAlreadyExistsError: 如果 stream 已存在
         """
         async with self._lock:
-            existing = self.streams.get(thread_id)
+            existing = self.streams.get(message_id)
             if existing:
                 if existing.status == "closed":
                     # 已关闭的 stream（延迟清理未完成），立即清理并允许重建
                     if existing.cleanup_task:
                         existing.cleanup_task.cancel()
-                    del self.streams[thread_id]
+                    del self.streams[message_id]
                 else:
-                    raise StreamAlreadyExistsError(thread_id)
+                    raise StreamAlreadyExistsError(message_id)
 
-            # 清理之前的关闭记录（允许重新使用同一个 thread_id）
-            self._closed_streams.discard(thread_id)
+            # 清理之前的关闭记录（允许重新使用同一个 message_id）
+            self._closed_streams.discard(message_id)
 
             context = StreamContext(owner_user_id=owner_user_id)
-            self.streams[thread_id] = context
+            self.streams[message_id] = context
 
             # 启动 TTL 定时器
             context.ttl_task = asyncio.create_task(
-                self._ttl_cleanup(thread_id)
+                self._ttl_cleanup(message_id)
             )
 
-            logger.debug(f"Created stream: {thread_id}")
+            logger.debug(f"Created stream: {message_id}")
             return context
 
-    async def _ttl_cleanup(self, thread_id: str) -> None:
+    async def _ttl_cleanup(self, message_id: str) -> None:
         """
         TTL 到期后自动清理队列（防止内存泄漏）
 
         Args:
-            thread_id: 线程 ID
+            message_id: 执行标识
         """
         await asyncio.sleep(self.ttl_seconds)
 
         async with self._lock:
-            context = self.streams.get(thread_id)
+            context = self.streams.get(message_id)
             if context and context.status == "pending":
                 # 前端未连接，清理队列
-                logger.warning(f"Stream {thread_id} expired (TTL={self.ttl_seconds}s, status=pending)")
-                await self._close_stream_internal(thread_id)
+                logger.warning(f"Stream {message_id} expired (TTL={self.ttl_seconds}s, status=pending)")
+                await self._close_stream_internal(message_id)
 
-    async def push_event(self, thread_id: str, event: Dict[str, Any]) -> bool:
+    async def push_event(self, message_id: str, event: Dict[str, Any]) -> bool:
         """
         推送事件到队列
 
         Args:
-            thread_id: 线程 ID
+            message_id: 执行标识
             event: 事件字典
 
         Returns:
             是否成功推送（False 表示 stream 已关闭，调用方应停止推送）
         """
-        context = self.streams.get(thread_id)
+        context = self.streams.get(message_id)
         if not context or context.status == "closed":
             # 只在首次失败时打印警告，避免刷屏
-            if thread_id not in self._closed_streams:
-                self._closed_streams.add(thread_id)
-                logger.warning(f"Stream {thread_id} closed, subsequent push_event calls will be ignored")
+            if message_id not in self._closed_streams:
+                self._closed_streams.add(message_id)
+                logger.warning(f"Stream {message_id} closed, subsequent push_event calls will be ignored")
             return False
 
         await context.queue.put(event)
@@ -199,7 +199,7 @@ class StreamManager:
 
     async def consume_events(
         self,
-        thread_id: str,
+        message_id: str,
         heartbeat_interval: Optional[float] = None,
         user_id: Optional[str] = None,
     ) -> AsyncGenerator[Dict[str, Any], None]:
@@ -211,7 +211,7 @@ class StreamManager:
         ``{"type": "__ping__"}`` 哨兵事件，调用方应将其转换为 SSE 注释。
 
         Args:
-            thread_id: 线程 ID
+            message_id: 执行标识
             heartbeat_interval: 心跳间隔（秒），None 表示不发送心跳
             user_id: 消费者用户 ID（校验 owner 匹配）
 
@@ -222,13 +222,13 @@ class StreamManager:
             StreamNotFoundError: 如果 stream 不存在或用户不匹配
         """
         async with self._lock:
-            context = self.streams.get(thread_id)
+            context = self.streams.get(message_id)
             if not context:
-                raise StreamNotFoundError(thread_id)
+                raise StreamNotFoundError(message_id)
 
             # 校验 owner
             if context.owner_user_id and user_id and context.owner_user_id != user_id:
-                raise StreamNotFoundError(thread_id)
+                raise StreamNotFoundError(message_id)
 
             # 取消 TTL 定时器（前端已连接）
             if context.ttl_task:
@@ -236,7 +236,7 @@ class StreamManager:
                 context.ttl_task = None
 
             context.status = "streaming"
-            logger.debug(f"Stream {thread_id} started consuming")
+            logger.debug(f"Stream {message_id} started consuming")
 
         try:
             while True:
@@ -256,25 +256,25 @@ class StreamManager:
                 # 终结事件后退出
                 event_type = event.get("type", "")
                 if event_type in ("complete", "error"):
-                    logger.debug(f"Stream {thread_id} received terminal event: {event_type}")
+                    logger.debug(f"Stream {message_id} received terminal event: {event_type}")
                     break
         finally:
-            await self.close_stream(thread_id)
+            await self.close_stream(message_id)
 
-    async def close_stream(self, thread_id: str) -> bool:
+    async def close_stream(self, message_id: str) -> bool:
         """
         关闭并清理 stream
 
         Args:
-            thread_id: 线程 ID
+            message_id: 执行标识
 
         Returns:
             是否成功关闭
         """
         async with self._lock:
-            return await self._close_stream_internal(thread_id)
+            return await self._close_stream_internal(message_id)
 
-    async def _close_stream_internal(self, thread_id: str) -> bool:
+    async def _close_stream_internal(self, message_id: str) -> bool:
         """
         内部关闭方法（需要在锁内调用）
 
@@ -282,12 +282,12 @@ class StreamManager:
         这样 push_event 在关闭后短时间内仍能检测到 closed 状态，但不会无限积累。
 
         Args:
-            thread_id: 线程 ID
+            message_id: 执行标识
 
         Returns:
             是否成功关闭
         """
-        context = self.streams.get(thread_id)
+        context = self.streams.get(message_id)
         if not context:
             return False
 
@@ -303,41 +303,41 @@ class StreamManager:
 
         # 启动延迟清理任务（5 秒后从字典中移除），持有引用防 GC
         context.cleanup_task = asyncio.create_task(
-            self._delayed_cleanup(thread_id, delay=5.0)
+            self._delayed_cleanup(message_id, delay=5.0)
         )
 
-        logger.debug(f"Stream {thread_id} closed (delayed cleanup scheduled)")
+        logger.debug(f"Stream {message_id} closed (delayed cleanup scheduled)")
 
         return True
 
-    async def _delayed_cleanup(self, thread_id: str, delay: float = 5.0) -> None:
+    async def _delayed_cleanup(self, message_id: str, delay: float = 5.0) -> None:
         """
         延迟清理：从 streams 字典和 _closed_streams 中移除已关闭的 stream
 
         Args:
-            thread_id: 线程 ID
+            message_id: 执行标识
             delay: 延迟时间（秒）
         """
         await asyncio.sleep(delay)
 
         async with self._lock:
-            context = self.streams.get(thread_id)
+            context = self.streams.get(message_id)
             if context and context.status == "closed":
-                del self.streams[thread_id]
-                self._closed_streams.discard(thread_id)
-                logger.debug(f"Stream {thread_id} cleaned up from memory")
+                del self.streams[message_id]
+                self._closed_streams.discard(message_id)
+                logger.debug(f"Stream {message_id} cleaned up from memory")
 
-    def get_stream_status(self, thread_id: str) -> Optional[str]:
+    def get_stream_status(self, message_id: str) -> Optional[str]:
         """
         获取 stream 状态
 
         Args:
-            thread_id: 线程 ID
+            message_id: 执行标识
 
         Returns:
             状态字符串或 None
         """
-        context = self.streams.get(thread_id)
+        context = self.streams.get(message_id)
         return context.status if context else None
 
     @property

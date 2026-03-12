@@ -406,9 +406,11 @@ async def resume_execution(
         "always_allow": request.always_allow,
     }
 
-    success = await task_manager.resolve_interrupt(message_id, resume_data)
-    if not success:
+    result = await task_manager.resolve_interrupt(message_id, resume_data)
+    if result == "not_found":
         raise HTTPException(status_code=404, detail="No pending interrupt found for this message")
+    if result == "already_resolved":
+        raise HTTPException(status_code=409, detail="Interrupt already resolved for this message")
 
     # 不需要创建新 stream — 原来的 coroutine 继续执行，
     # 事件会继续推送到原来的 stream（使用 message_id 作为 stream key）
