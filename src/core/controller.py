@@ -177,6 +177,9 @@ class ExecutionController:
                 )
             except Exception as e:
                 logger.exception(f"Engine error: {e}")
+                # Mark error on initial_state (final_state is still None at this point)
+                initial_state["error"] = True
+                initial_state["response"] = f"Engine error: {str(e)}"
                 await event_queue.put({
                     "type": StreamEventType.ERROR.value,
                     "timestamp": datetime.now().isoformat(),

@@ -322,7 +322,7 @@ async def execute_loop(
                     if tool_name not in state.get("always_allowed_tools", []):
                         # 需要用户确认 → interrupt
                         await _emit(StreamEventType.PERMISSION_REQUEST.value, current_agent_name, {
-                            "permission_level": tool.permission.value,
+                            "permission_level": effective_permission.value,
                             "tool": tool_name,
                             "params": params,
                         })
@@ -333,16 +333,28 @@ async def execute_loop(
                             "agent": current_agent_name,
                             "tool_name": tool_name,
                             "params": params,
-                            "permission_level": tool.permission.value,
-                            "message": f"Tool '{tool_name}' requires {tool.permission.value} permission",
+                            "permission_level": effective_permission.value,
+                            "message": f"Tool '{tool_name}' requires {effective_permission.value} permission",
                         })
 
-                        # 等待用户确认（超时自动拒绝）
+                        # 等待用户确认（超时 → error 终态）
                         try:
                             await asyncio.wait_for(interrupt.event.wait(), timeout=permission_timeout)
                         except asyncio.TimeoutError:
-                            logger.warning(f"Interrupt timed out for tool '{tool_name}', auto-denying")
-                            interrupt.resume_data = {"approved": False, "reason": "timeout"}
+                            logger.error(f"Permission timeout for tool '{tool_name}' after {permission_timeout}s")
+                            await _emit(StreamEventType.PERMISSION_RESULT.value, current_agent_name, {
+                                "approved": False,
+                                "tool": tool_name,
+                                "reason": "timeout",
+                            })
+                            await _emit(StreamEventType.ERROR.value, current_agent_name, {
+                                "error": f"Permission confirmation timed out after {permission_timeout}s for tool '{tool_name}'",
+                                "agent": current_agent_name,
+                            })
+                            state["completed"] = True
+                            state["error"] = True
+                            state["response"] = f"Permission confirmation timed out for tool '{tool_name}'"
+                            break
                         resume_data = interrupt.resume_data or {}
                         is_approved = resume_data.get("approved", False)
 

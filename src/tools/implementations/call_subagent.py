@@ -57,7 +57,7 @@ class CallSubagentTool(BaseTool):
         instruction = params.get("instruction", "").strip()
 
         # 基本验证
-        if self._valid_agents and agent_name not in self._valid_agents:
+        if self._valid_agents is not None and agent_name not in self._valid_agents:
             return ToolResult(
                 success=False,
                 error=f"Invalid agent_name '{agent_name}'. Must be one of: {', '.join(self._valid_agents)}"
