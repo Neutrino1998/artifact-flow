@@ -180,15 +180,22 @@ class ExecutionController:
                 # Mark error on initial_state (final_state is still None at this point)
                 initial_state["error"] = True
                 initial_state["response"] = f"Engine error: {str(e)}"
+                error_data = {
+                    "success": False,
+                    "conversation_id": conversation_id,
+                    "message_id": message_id,
+                    "error": str(e),
+                }
+                # Persist error event (will be written via _persist_events on initial_state)
+                initial_state["events"].append(ExecutionEvent(
+                    event_type=StreamEventType.ERROR.value,
+                    agent_name=None,
+                    data=error_data,
+                ))
                 await event_queue.put({
                     "type": StreamEventType.ERROR.value,
                     "timestamp": datetime.now().isoformat(),
-                    "data": {
-                        "success": False,
-                        "conversation_id": conversation_id,
-                        "message_id": message_id,
-                        "error": str(e),
-                    }
+                    "data": error_data,
                 })
             finally:
                 await event_queue.put(_SENTINEL)
