@@ -19,7 +19,7 @@
       
       
       <link rel="icon" href="../../assets/images/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.4">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.5">
     
     
       
@@ -901,11 +901,14 @@
 <h2 id="次要问题">次要问题</h2>
 <ul>
 <li>[x] 将langchain模型接入改为专门的万能接口去适应不同provider，例如LiteLLM。尤其要注意reasoning和token usage等字段如何获取</li>
+<li>[ ] 增加私有化部署模型测试接入脚本</li>
 </ul>
 <h1 id="工具模块已知问题清单">工具模块已知问题清单</h1>
 <h2 id="次要问题_1">次要问题</h2>
 <ul>
 <li>[x] 使用标准xml解析方式（xml.etree.ElementTree），string字段统一用cdata字段，所有参数Tag平铺，如有下级标签则为list</li>
+<li>[ ] pydantic参数验证</li>
+<li>[ ] 工具返回结果/subagent提示词使用xml attribute</li>
 </ul>
 <h1 id="core模块已知问题清单">Core模块已知问题清单</h1>
 <h2 id="主要问题">主要问题</h2>

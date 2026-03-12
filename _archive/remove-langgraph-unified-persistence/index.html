@@ -1,0 +1,1937 @@
+
+<!doctype html>
+<html lang="zh" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Multi-Agent Research System Built on LangGraph">
+      
+      
+      
+        <link rel="canonical" href="https://neutrino.github.io/artifact-flow/_archive/remove-langgraph-unified-persistence/">
+      
+      
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.5">
+    
+    
+      
+        <title>去除 LangGraph/LangChain 依赖 + 统一持久化设计 - ArtifactFlow</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#去除-langgraphlangchain-依赖--统一持久化设计" class="md-skip">
+          跳转至
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="页眉">
+    <a href="../.." title="ArtifactFlow" class="md-header__button md-logo" aria-label="ArtifactFlow" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            ArtifactFlow
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              去除 LangGraph/LangChain 依赖 + 统一持久化设计
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="搜索" placeholder="搜索" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="查找">
+        
+        <button type="reset" class="md-search__icon md-icon" title="清空当前内容" aria-label="清空当前内容" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            正在初始化搜索引擎
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/Neutrino1998/artifact-flow" title="前往仓库" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    Neutrino1998/artifact-flow
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="标签" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../frontend/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Frontend Guide
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../request-lifecycle/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Request Lifecycle
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../architecture/core/" class="md-tabs__link">
+          
+  
+  
+  Architecture
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../streaming/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Streaming
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../extension-guide/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Extension Guide
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../api/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  API Reference
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../faq/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  FAQ
+
+      </a>
+    </li>
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="导航栏" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="ArtifactFlow" class="md-nav__button md-logo" aria-label="ArtifactFlow" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    ArtifactFlow
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/Neutrino1998/artifact-flow" title="前往仓库" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    Neutrino1998/artifact-flow
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../frontend/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Frontend Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../request-lifecycle/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Request Lifecycle
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Architecture
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../architecture/core/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Core
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../architecture/agents/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Agents
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../architecture/tools/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tools
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../architecture/data-layer/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data Layer
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../architecture/concurrency/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Concurrency
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../streaming/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Streaming
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../extension-guide/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Extension Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../faq/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    FAQ
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="目录">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      目录
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#背景" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        背景
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="背景">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#当前依赖程度" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        当前依赖程度
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#当前持久化问题两套独立机制各丢各的数据" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        当前持久化问题：两套独立机制，各丢各的数据
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#单工具调用限制" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        单工具调用限制
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#方案完整事件流模型" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        方案：完整事件流模型
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="方案：完整事件流模型">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#核心思想" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        核心思想
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#数据模型" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        数据模型
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#事件类型清单" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        事件类型清单
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#interrupt-设计" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Interrupt 设计
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#关键设计约束" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        关键设计约束
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#执行流程" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        执行流程
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#执行引擎设计方向" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        执行引擎设计方向
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="执行引擎设计方向">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#唯一的抽象contextmanagerbuild" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        唯一的抽象：ContextManager.build()
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#不需要抽象为-hook-的部分" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        不需要抽象为 hook 的部分
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agent-定义数据而非类" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Agent 定义：数据而非类
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#替代-langgraph-的实现" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        替代 LangGraph 的实现
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#执行中消息注入message-queue" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        执行中消息注入（Message Queue）
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#多工具调用支持" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        多工具调用支持
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#收益" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        收益
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#compaction-设计" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Compaction 设计
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Compaction 设计">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#跨轮-compaction" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        跨轮 Compaction
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#轮内-truncation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        轮内 Truncation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#context-usage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Context Usage
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#命名变更" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        命名变更
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#旧数据处理" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        旧数据处理
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#部署假设单-worker" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        部署假设：单 Worker
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#与优化计划的交叉影响" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        与优化计划的交叉影响
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="与优化计划的交叉影响">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#phase-52redis-checkpointer-不再需要" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phase 5.2（Redis Checkpointer）→ 不再需要
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#phase-53streammanager--redis-streams" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phase 5.3（StreamManager → Redis Streams）
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#phase-55taskmanager-多-worker" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phase 5.5（TaskManager 多 Worker）
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#实施顺序" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        实施顺序
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="去除-langgraphlangchain-依赖--统一持久化设计">去除 LangGraph/LangChain 依赖 + 统一持久化设计</h1>
+<blockquote>
+<p>状态：设计阶段，优先于 <a href="../optimization-plan/">optimization-plan.md</a> 持久化改造实施</p>
+</blockquote>
+<hr />
+<h2 id="背景">背景</h2>
+<h3 id="当前依赖程度">当前依赖程度</h3>
+<p>LangGraph/LangChain 在项目中的使用范围很小：</p>
+<table>
+<thead>
+<tr>
+<th>依赖</th>
+<th>文件</th>
+<th>用途</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>StateGraph</code>, <code>END</code></td>
+<td><code>core/graph.py</code></td>
+<td>图定义与路由</td>
+</tr>
+<tr>
+<td><code>interrupt</code>, <code>StreamWriter</code></td>
+<td><code>core/graph.py</code></td>
+<td>权限确认中断 + 流式事件</td>
+</tr>
+<tr>
+<td><code>Command</code></td>
+<td><code>core/controller.py</code></td>
+<td>恢复中断执行</td>
+</tr>
+<tr>
+<td><code>AsyncSqliteSaver</code></td>
+<td><code>core/graph.py</code></td>
+<td>Checkpoint 持久化</td>
+</tr>
+<tr>
+<td><code>AIMessage</code> 等</td>
+<td><code>models/llm.py</code></td>
+<td>消息类型（包装后供 base.py 读取）</td>
+</tr>
+</tbody>
+</table>
+<p>实际 LLM 调用走 LiteLLM，状态管理用自定义 <code>AgentState</code>，事件系统用自定义 <code>StreamEvent</code>。LangGraph 本质上只提供了一层状态机壳子。</p>
+<h3 id="当前持久化问题两套独立机制各丢各的数据">当前持久化问题：两套独立机制，各丢各的数据</h3>
+<table>
+<thead>
+<tr>
+<th>层</th>
+<th>存了什么</th>
+<th>丢了什么</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Messages 表</strong></td>
+<td>用户问题 + 最终 response 文本</td>
+<td>中间执行过程全丢</td>
+</tr>
+<tr>
+<td><strong>LangGraph checkpoint</strong> (304MB)</td>
+<td>每个节点的全量 state BLOB</td>
+<td>执行完就没用，无法查询</td>
+</tr>
+<tr>
+<td><strong>SSE 事件流</strong></td>
+<td>内存队列，30s TTL</td>
+<td>连接断了就没了</td>
+</tr>
+<tr>
+<td><strong>execution_metrics</strong></td>
+<td>内存中累积，只发前端一次</td>
+<td>服务端不持久化</td>
+</tr>
+</tbody>
+</table>
+<p>前端刷新页面只能看到一问一答，整个执行过程（agent 调用链、工具参数与结果、token 用量、耗时）全部丢失。</p>
+<h3 id="单工具调用限制">单工具调用限制</h3>
+<p>当前架构下 agent 每轮只能调用一个工具：</p>
+<ul>
+<li><code>pending_tool_call</code> 是单值字段（<code>Optional[Dict]</code>），不支持多个待执行工具</li>
+<li><code>base.py:387</code> 解析工具调用后只取 <code>tool_calls[0]</code>，其余直接丢弃</li>
+<li><code>tool_execution_node</code> 一次只处理一个工具，然后路由回 agent</li>
+<li>通过 prompt 约束 agent "单轮只调用一个工具"来规避</li>
+</ul>
+<p>当 LLM 想并行调多个工具时（如同时搜索+抓取），被迫拆成多轮串行调用，增加了延迟和 token 消耗。混合权限场景（部分工具需要确认，部分不需要）更是无法处理。</p>
+<hr />
+<h2 id="方案完整事件流模型">方案：完整事件流模型</h2>
+<h3 id="核心思想">核心思想</h3>
+<p><strong>执行过程本身就是数据，事件流就是真相源（event sourcing）。</strong></p>
+<p>一张 <code>MessageEvent</code> 表记录执行过程中每一步的完整结果。agent 的完整 response、tool 的完整 result、token 用量、reasoning — 全部作为事件数据持久化。任何时刻的执行状态都可以从事件序列重建。</p>
+<p>注意：这里的"完整"指每个逻辑步骤的最终结果，而非传输过程的中间态。例如 <code>llm_complete</code> 记录完整 response，但逐 token 的 <code>llm_chunk</code>（仅为流式传输的拆包）不入库。</p>
+<p>一张表同时承担两个角色：</p>
+<ol>
+<li><strong>历史记录</strong> — 按 message_id 查所有事件，重建完整执行过程</li>
+<li><strong>可观测性</strong> — 按 event_type / agent / tool 聚合查询、统计分析</li>
+</ol>
+<h3 id="数据模型">数据模型</h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>Message (现有，扩展)
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>  ├── content              用户输入
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>  ├── response             最终回复（冗余，方便列表查询）
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>  ├── content_summary (nullable)    用户问题的 compaction 摘要
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>  ├── response_summary (nullable)   AI 回答的 compaction 摘要
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>  ├── execution_id         执行标识（原 thread_id，改名）
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>  ├── metadata (JSON)      执行级状态：always_allowed_tools, execution_metrics 汇总, last_input_tokens
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>  │
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>  └── MessageEvent (新表，append-only，不可变)
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>        ├── id (PK)        自增主键，天然有序，兼做 sequence
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>        ├── message_id     FK → Message
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>        ├── event_type     见下方事件类型清单
+<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>        ├── agent_name     产生事件的 agent（nullable）
+<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>        ├── data (JSON)    事件完整数据，不截断
+<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a>        └── created_at     时间戳
+</code></pre></div>
+<h3 id="事件类型清单">事件类型清单</h3>
+<table>
+<thead>
+<tr>
+<th>event_type</th>
+<th>时机</th>
+<th>data 内容</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>agent_start</code></td>
+<td>agent 开始执行</td>
+<td><code>{agent}</code></td>
+</tr>
+<tr>
+<td><code>llm_chunk</code></td>
+<td>LLM 流式 token</td>
+<td><code>{token}</code></td>
+</tr>
+<tr>
+<td><code>llm_complete</code></td>
+<td>单轮 LLM 调用完成</td>
+<td><code>{content, reasoning_content, token_usage}</code></td>
+</tr>
+<tr>
+<td><code>tool_start</code></td>
+<td>工具开始执行</td>
+<td><code>{tool, params}</code></td>
+</tr>
+<tr>
+<td><code>tool_complete</code></td>
+<td>工具执行完成</td>
+<td><code>{tool, result, success, duration_ms}</code></td>
+</tr>
+<tr>
+<td><code>agent_complete</code></td>
+<td>agent 执行结束</td>
+<td><code>{agent, summary}</code></td>
+</tr>
+<tr>
+<td><code>interrupt_pending</code></td>
+<td>需要用户确认</td>
+<td><code>{tool, params, execution_context}</code></td>
+</tr>
+<tr>
+<td><code>interrupt_resolved</code></td>
+<td>用户确认结果</td>
+<td><code>{approved, always_allow}</code></td>
+</tr>
+<tr>
+<td><code>execution_complete</code></td>
+<td>整个请求执行完成</td>
+<td><code>{response, execution_metrics, context_usage}</code></td>
+</tr>
+<tr>
+<td><code>error</code></td>
+<td>执行异常</td>
+<td><code>{error, agent, context}</code></td>
+</tr>
+</tbody>
+</table>
+<p>所有事件执行期间在内存中累积，推 SSE 实时消费。<code>llm_chunk</code> 仅推 SSE 不入内存列表（流式传输拆包，无持久化价值）。其余事件在执行完成（或 error）时 batch write 到 DB。事件间关联通过序列顺序自然推导。</p>
+<h3 id="interrupt-设计">Interrupt 设计</h3>
+<p><strong>Interrupt 是内存中的短暂暂停，不是持久化边界。</strong></p>
+<p>执行 coroutine 遇到 CONFIRM 工具时 <code>await</code> 等待用户确认。整个过程在内存中完成，不涉及 DB 读写：</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>执行 loop（内存）
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>  → tool_b 需要 CONFIRM
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>  → 推 interrupt_pending 事件到 StreamManager（SSE 通知前端）
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>  → await asyncio.Event()              ← coroutine 暂停，等用户点确认
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>  → 用户点确认 → API 层 set event       ← coroutine 恢复
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>  → 更新内存 state.always_allowed_tools（如果 always_allow=true）
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>  → 继续执行 tool_b
+</code></pre></div>
+<p><strong>不持久化的理由：</strong>
+- Interrupt 是秒级到分钟级的短暂暂停，不是长期挂起
+- 用户刷新页面 → 重连 SSE：
+  - 迁移前（asyncio.Queue）：已消费事件丢失，用户需重新提问
+  - 迁移后（Redis Streams，见 <a href="../optimization-plan/">optimization-plan.md</a> Phase 5.3）：支持 Last-Event-ID 重放，可恢复到 interrupt 状态继续确认
+- 用户彻底离开 → coroutine 超时，当 error 处理并 flush 事件
+- 服务器重启 → coroutine 丢失，用户重新提问</p>
+<p><strong>幂等性：TaskManager 去重。</strong> 用户连点两次 approve，coroutine 已经在跑（第一次 approve 后 event 已 set），第二次 API 请求被 TaskManager 通过 <code>execution_id</code> 拒绝，返回 <code>409 Conflict</code>。</p>
+<p><strong>事件流示例（含 agent 切换）：</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>#1   agent_start          {agent: &quot;lead_agent&quot;}
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>#2   llm_complete         {agent: &quot;lead_agent&quot;, content: &quot;需要搜索...&quot;, token_usage: {...}}
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>#3   tool_start           {agent: &quot;lead_agent&quot;, tool: &quot;call_subagent&quot;, params: {target: &quot;search_agent&quot;, instruction: &quot;搜索...&quot;}}
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>     ← loop 识别 call_subagent → 切换 current_agent = search_agent
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>#4   agent_start          {agent: &quot;search_agent&quot;}
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>#5   llm_complete         {agent: &quot;search_agent&quot;, content: &quot;找到以下结果...&quot;, token_usage: {...}}
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>#6   tool_start           {agent: &quot;search_agent&quot;, tool: &quot;web_fetch&quot;, params: {url: &quot;...&quot;}}
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>#7   interrupt_pending    {tool: &quot;web_fetch&quot;, params: {url: &quot;...&quot;}}
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>     ← coroutine 暂停（内存 await）
+<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a>#8   interrupt_resolved   {approved: true, always_allow: true}
+<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a>#9   tool_complete        {agent: &quot;search_agent&quot;, tool: &quot;web_fetch&quot;, result: {...}, duration_ms: 1200}
+<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a>#10  llm_complete         {agent: &quot;search_agent&quot;, content: &quot;搜索结果汇总...&quot;, token_usage: {...}}
+<a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a>#11  agent_complete       {agent: &quot;search_agent&quot;}
+<a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a>     ← complete_agent() 检测 non-lead 完成 → 打包结果为 lead 的 tool_result，切回 lead
+<a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a>#12  tool_complete        {agent: &quot;lead_agent&quot;, tool: &quot;call_subagent&quot;, result: {data: &quot;搜索结果汇总...&quot;}}
+<a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a>#13  llm_complete         {agent: &quot;lead_agent&quot;, content: &quot;根据搜索结果...&quot;, token_usage: {...}}
+<a id="__codelineno-2-17" name="__codelineno-2-17" href="#__codelineno-2-17"></a>#14  agent_complete       {agent: &quot;lead_agent&quot;}
+<a id="__codelineno-2-18" name="__codelineno-2-18" href="#__codelineno-2-18"></a>#15  execution_complete   {response: &quot;...&quot;, execution_metrics: {...}}
+<a id="__codelineno-2-19" name="__codelineno-2-19" href="#__codelineno-2-19"></a>     ← 此时全部事件 batch write 到 DB
+</code></pre></div>
+<p>Context 构建时按 <code>agent_name</code> 过滤：lead 看到 #2, #3, #12, #13（call_subagent 是普通的 tool_start → tool_complete 对）；search 看到 #4, #5, #6, #9, #10（instruction 从 lead 的 #3 tool_start params 获取）。</p>
+<h3 id="关键设计约束">关键设计约束</h3>
+<p><strong>执行期间全内存。</strong> Loop 运行时，状态（completed、current_agent、always_allowed_tools 等）和事件列表都在内存中。Loop 不读 DB，不写 DB，直到遇到持久化边界。</p>
+<p><strong>两个持久化边界。</strong> 只在以下时刻将内存中的事件列表 batch write 到 MessageEvent 表：
+1. <code>execution_complete</code> — 成功，全量 flush
+2. <code>error</code>（含 interrupt 超时）— 失败，flush 已有事件 + 错误信息</p>
+<p><strong>SSE 与持久化分离。</strong> 事件生成后走两条独立路径：推给 StreamManager（SSE 实时消费 + 断线重连缓冲）；追加到内存事件列表（等边界 flush 到 DB）。两者互不依赖。</p>
+<p><strong>Append-only，不可变。</strong> 事件写入 DB 后不做 UPDATE/DELETE。历史状态通过事件序列推导。</p>
+<p><strong>data 存完整结果。</strong> 事件如实记录每步的完整数据（agent response、tool result）。与 LangGraph checkpoint 的本质区别：checkpoint 每节点存全量 state 快照导致膨胀（304MB），事件流是增量追加，每条只存该事件自身的数据。</p>
+<p>体积评估：一个普通请求 ~20-50KB。工具返回大数据（如 <code>web_fetch</code> 单 URL 最多 20K 字符）时单条事件可能较大，但这与工具返回给 agent 的数据量一致 — 数据体积应在工具层治理（调整 <code>max_content_length</code>、限制 <code>url_list</code> 数量），而非在事件层截断，否则会丢失 agent 实际接收的上下文，影响调试和重放。</p>
+<h3 id="执行流程">执行流程</h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>请求进入
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>  → 创建 Message 记录（生成 execution_id）
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>  → 启动执行循环 (async coroutine, 由 TaskManager 管理)
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>      state = 内存状态 (completed, current_agent, always_allowed_tools, ...)
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>      events = 内存事件列表
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a>      → while not completed:
+<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a>          → agent_config = agents[state.current_agent]      ← 从预加载的 dict 取
+<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a>          → drain message queue → state.queued_messages（非阻塞）
+<a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a>          → context_manager.build(state, agent_config)      ← 按 current_agent 过滤事件，拼接 system prompt，含 queued messages 合并
+<a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a>          → call_llm(agent_config, messages, emit)（流式，retry 在 llm.py）→ llm_chunk 推 SSE，llm_complete 追加到 events
+<a id="__codelineno-3-12" name="__codelineno-3-12" href="#__codelineno-3-12"></a>          → 解析工具调用列表，串行执行每个工具：
+<a id="__codelineno-3-13" name="__codelineno-3-13" href="#__codelineno-3-13"></a>              → call_subagent → emit tool_start + 切换 current_agent → break
+<a id="__codelineno-3-14" name="__codelineno-3-14" href="#__codelineno-3-14"></a>              → tool_start / tool_complete 追加到 events
+<a id="__codelineno-3-15" name="__codelineno-3-15" href="#__codelineno-3-15"></a>              → 检查权限（读内存 always_allowed_tools）：
+<a id="__codelineno-3-16" name="__codelineno-3-16" href="#__codelineno-3-16"></a>                  ├── AUTO → 直接执行
+<a id="__codelineno-3-17" name="__codelineno-3-17" href="#__codelineno-3-17"></a>                  └── CONFIRM → 追加 interrupt_pending → 推 SSE → await（内存暂停）
+<a id="__codelineno-3-18" name="__codelineno-3-18" href="#__codelineno-3-18"></a>                      → 用户确认 → 追加 interrupt_resolved → 继续
+<a id="__codelineno-3-19" name="__codelineno-3-19" href="#__codelineno-3-19"></a>          → complete_agent()：lead 无工具调用 → completed（跳出 loop，持久化）
+<a id="__codelineno-3-20" name="__codelineno-3-20" href="#__codelineno-3-20"></a>                     sub 无工具调用 → 打包 tool_result 切回 lead，继续 loop
+<a id="__codelineno-3-21" name="__codelineno-3-21" href="#__codelineno-3-21"></a>
+<a id="__codelineno-3-22" name="__codelineno-3-22" href="#__codelineno-3-22"></a>      → batch_write(events)                       ← 执行完成，全量 flush
+<a id="__codelineno-3-23" name="__codelineno-3-23" href="#__codelineno-3-23"></a>      → 更新 Message.response 和 Message.metadata
+</code></pre></div>
+<h3 id="执行引擎设计方向">执行引擎设计方向</h3>
+<p>参考 <a href="https://github.com/badlogic/pi-mono">Pi coding agent</a> 的极简架构：<strong>简单 while loop，唯一的抽象是 context 构建</strong>，不搞 middleware 框架。</p>
+<p>Pi 的核心设计：while loop 循环直到 LLM 不再调用工具为止，扩展点通过 config 上的回调注入（<code>transformContext</code>、<code>convertToLlm</code>、<code>getSteeringMessages</code>）。没有状态机、没有图、没有 middleware 链、没有 max-step 限制。</p>
+<h4 id="唯一的抽象contextmanagerbuild">唯一的抽象：<code>ContextManager.build()</code></h4>
+<p>Loop 中只有一个真正需要抽象的扩展点 — <strong>context 构建</strong>。每轮 LLM 调用前，<code>context_manager.build(state, agent_config)</code> 负责：</p>
+<ul>
+<li>拼接 system prompt — agent MD 的 role prompt + 根据 agent config 自动拼接（system info、task plan、artifact inventory、available agents、tool instructions），无模板变量</li>
+<li>注入对话历史（优先使用 <code>content_summary</code>/<code>response_summary</code>，无则用原文）</li>
+<li>合并 queued messages 到当前轮 user message（文本拼接）</li>
+<li>截断当前轮 tool interactions（保留最近 N 条）</li>
+<li>追踪 context usage（token 计数、使用率）</li>
+<li>触发跨轮 compaction（仅在新用户消息进来的首次 build 时，loop 内后续 build 不触发。见 Compaction 设计）</li>
+</ul>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="c1"># 伪代码：执行循环（扁平 loop，lead/sub 共享同一个循环）</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">execute_loop</span><span class="p">(</span><span class="n">state</span><span class="p">,</span> <span class="n">context_manager</span><span class="p">,</span> <span class="n">emit</span><span class="p">):</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>    <span class="k">while</span> <span class="ow">not</span> <span class="n">state</span><span class="o">.</span><span class="n">completed</span><span class="p">:</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>        <span class="n">agent_config</span> <span class="o">=</span> <span class="n">agent_registry</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">state</span><span class="o">.</span><span class="n">current_agent</span><span class="p">)</span>  <span class="c1"># 全局，启动时加载</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>        <span class="c1"># drain 用户追加消息（非阻塞）</span>
+<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a>        <span class="n">queued</span> <span class="o">=</span> <span class="n">drain_queue</span><span class="p">(</span><span class="n">state</span><span class="o">.</span><span class="n">execution_id</span><span class="p">)</span>
+<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a>        <span class="k">if</span> <span class="n">queued</span><span class="p">:</span>
+<a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a>            <span class="n">state</span><span class="o">.</span><span class="n">queued_messages</span> <span class="o">=</span> <span class="n">queued</span>
+<a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a>
+<a id="__codelineno-4-11" name="__codelineno-4-11" href="#__codelineno-4-11"></a>        <span class="c1"># 唯一的抽象点（按 current_agent 过滤事件，含 queued messages 合并 + 渲染 system prompt）</span>
+<a id="__codelineno-4-12" name="__codelineno-4-12" href="#__codelineno-4-12"></a>        <span class="n">context</span> <span class="o">=</span> <span class="n">context_manager</span><span class="o">.</span><span class="n">build</span><span class="p">(</span><span class="n">state</span><span class="p">,</span> <span class="n">agent_config</span><span class="p">)</span>
+<a id="__codelineno-4-13" name="__codelineno-4-13" href="#__codelineno-4-13"></a>
+<a id="__codelineno-4-14" name="__codelineno-4-14" href="#__codelineno-4-14"></a>        <span class="c1"># 以下全是 loop 本体的固定逻辑，不是 hook</span>
+<a id="__codelineno-4-15" name="__codelineno-4-15" href="#__codelineno-4-15"></a>        <span class="n">response</span> <span class="o">=</span> <span class="k">await</span> <span class="n">call_llm</span><span class="p">(</span><span class="n">agent_config</span><span class="p">,</span> <span class="n">context</span><span class="o">.</span><span class="n">messages</span><span class="p">,</span> <span class="n">emit</span><span class="p">)</span>  <span class="c1"># retry 在 llm.py</span>
+<a id="__codelineno-4-16" name="__codelineno-4-16" href="#__codelineno-4-16"></a>        <span class="n">tool_calls</span> <span class="o">=</span> <span class="n">parse_tool_calls</span><span class="p">(</span><span class="n">response</span><span class="p">)</span>
+<a id="__codelineno-4-17" name="__codelineno-4-17" href="#__codelineno-4-17"></a>
+<a id="__codelineno-4-18" name="__codelineno-4-18" href="#__codelineno-4-18"></a>        <span class="k">for</span> <span class="n">tool</span> <span class="ow">in</span> <span class="n">tool_calls</span><span class="p">:</span>                   <span class="c1"># 串行执行</span>
+<a id="__codelineno-4-19" name="__codelineno-4-19" href="#__codelineno-4-19"></a>            <span class="k">if</span> <span class="n">tool</span><span class="o">.</span><span class="n">name</span> <span class="o">==</span> <span class="s2">&quot;call_subagent&quot;</span><span class="p">:</span>      <span class="c1"># 特殊路由：切换 agent</span>
+<a id="__codelineno-4-20" name="__codelineno-4-20" href="#__codelineno-4-20"></a>                <span class="n">state</span><span class="o">.</span><span class="n">current_agent</span> <span class="o">=</span> <span class="n">tool</span><span class="o">.</span><span class="n">params</span><span class="o">.</span><span class="n">target</span>
+<a id="__codelineno-4-21" name="__codelineno-4-21" href="#__codelineno-4-21"></a>                <span class="n">emit</span><span class="p">(</span><span class="n">tool_start</span><span class="p">,</span> <span class="n">agent</span><span class="o">=</span><span class="n">lead</span><span class="p">,</span> <span class="n">tool</span><span class="o">=</span><span class="n">call_subagent</span><span class="p">)</span>
+<a id="__codelineno-4-22" name="__codelineno-4-22" href="#__codelineno-4-22"></a>                <span class="k">break</span>                             <span class="c1"># 下一轮 iteration 由 sub 执行</span>
+<a id="__codelineno-4-23" name="__codelineno-4-23" href="#__codelineno-4-23"></a>            <span class="k">if</span> <span class="n">needs_confirm</span><span class="p">(</span><span class="n">tool</span><span class="p">):</span>               <span class="c1"># 权限检查</span>
+<a id="__codelineno-4-24" name="__codelineno-4-24" href="#__codelineno-4-24"></a>                <span class="n">emit</span><span class="p">(</span><span class="n">interrupt_pending</span><span class="p">)</span>            <span class="c1"># 推 SSE（不写库）</span>
+<a id="__codelineno-4-25" name="__codelineno-4-25" href="#__codelineno-4-25"></a>                <span class="k">await</span> <span class="n">wait_for_user</span><span class="p">()</span>              <span class="c1"># 内存暂停</span>
+<a id="__codelineno-4-26" name="__codelineno-4-26" href="#__codelineno-4-26"></a>            <span class="n">result</span> <span class="o">=</span> <span class="k">await</span> <span class="n">execute</span><span class="p">(</span><span class="n">tool</span><span class="p">)</span>
+<a id="__codelineno-4-27" name="__codelineno-4-27" href="#__codelineno-4-27"></a>
+<a id="__codelineno-4-28" name="__codelineno-4-28" href="#__codelineno-4-28"></a>        <span class="k">if</span> <span class="ow">not</span> <span class="n">tool_calls</span><span class="p">:</span>                        <span class="c1"># agent 无工具调用 → 完成</span>
+<a id="__codelineno-4-29" name="__codelineno-4-29" href="#__codelineno-4-29"></a>            <span class="n">complete_agent</span><span class="p">(</span><span class="n">state</span><span class="p">,</span> <span class="n">response</span><span class="p">,</span> <span class="n">emit</span><span class="p">)</span>
+<a id="__codelineno-4-30" name="__codelineno-4-30" href="#__codelineno-4-30"></a>
+<a id="__codelineno-4-31" name="__codelineno-4-31" href="#__codelineno-4-31"></a>    <span class="n">emit</span><span class="p">(</span><span class="n">execution_complete</span><span class="p">,</span> <span class="n">context</span><span class="o">.</span><span class="n">usage</span><span class="p">)</span>       <span class="c1"># context_usage 随 metrics 写入</span>
+</code></pre></div>
+<p><strong><code>complete_agent()</code> — 仅在 agent 无工具调用时触发：</strong></p>
+<table>
+<thead>
+<tr>
+<th>当前 agent</th>
+<th>行为</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>lead</td>
+<td><strong><code>state.completed = True</code>，loop 跳出</strong> → 持久化</td>
+</tr>
+<tr>
+<td>sub</td>
+<td><strong>打包 sub 的 response 为 lead 的 <code>call_subagent</code> tool_result event</strong> → <code>state.current_agent = lead_agent</code> → 继续 loop</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li><code>call_subagent</code> 的切出在 for 循环里（<code>break</code>），切回在 <code>complete_agent()</code> 里 — 入口和出口分离但都在同一个 loop 内</li>
+<li>一个 loop、一条事件流 — events 按 <code>agent_name</code> 过滤，<code>context_manager.build(state, agent_config)</code> 只为当前 agent 构建 context</li>
+<li>Interrupt/resume 天然正确：恢复时只看 <code>current_agent</code>，loop 从哪断从哪续</li>
+</ul>
+<h4 id="不需要抽象为-hook-的部分">不需要抽象为 hook 的部分</h4>
+<table>
+<thead>
+<tr>
+<th>关注点</th>
+<th>为什么不是 hook</th>
+<th>实际位置</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Retry</strong></td>
+<td>基础设施代码，所有 agent 同样的 exponential backoff，没有定制需求</td>
+<td><code>llm.call_with_retry()</code> 内部逻辑</td>
+</tr>
+<tr>
+<td><strong>Tool limit</strong></td>
+<td>配置值 + loop 里一个 if 判断</td>
+<td><code>agent_config.max_tool_rounds</code>，超限则注入 system message 提醒总结</td>
+</tr>
+<tr>
+<td><strong>Agent completion</strong></td>
+<td>仅在无工具调用时触发，不是插件</td>
+<td><code>complete_agent()</code>：lead → <code>completed = True</code>；sub → 打包 tool_result + 切回 lead</td>
+</tr>
+<tr>
+<td><strong>Event emission</strong></td>
+<td>固定行为：追加内存列表 + 推 SSE，完成时 batch write</td>
+<td>loop 内直接调用 <code>emit()</code></td>
+</tr>
+</tbody>
+</table>
+<p>需要新增能力时（如 API call budget、cost tracking），直接在 loop 对应位置加代码即可，不需要中间件协议。</p>
+<h3 id="agent-定义数据而非类">Agent 定义：数据而非类</h3>
+<p>执行引擎简化后，Agent 不再需要类（<code>BaseAgent</code> / <code>LeadAgent</code> / <code>SearchAgent</code>）。Agent 的全部实质内容是：</p>
+<ol>
+<li><strong>配置</strong> — 模型、max_tool_rounds、允许的工具及权限</li>
+<li><strong>系统提示词</strong> — 身份、行为规则、输出格式</li>
+</ol>
+<p>两者都是静态数据，用 MD 文件（YAML frontmatter + role prompt body）即可表达：</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>---
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>model: deepseek/deepseek-chat
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>max_tool_rounds: 15
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>tools:
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>  web_search: auto
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a>  web_fetch: confirm
+<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a>  call_subagent: auto
+<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a>  create_artifact: auto
+<a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a><span class="gu">  update_artifact: auto</span>
+<a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a><span class="gu">---</span>
+<a id="__codelineno-5-11" name="__codelineno-5-11" href="#__codelineno-5-11"></a>
+<a id="__codelineno-5-12" name="__codelineno-5-12" href="#__codelineno-5-12"></a>你是 ArtifactFlow 的主控 agent...
+<a id="__codelineno-5-13" name="__codelineno-5-13" href="#__codelineno-5-13"></a>
+<a id="__codelineno-5-14" name="__codelineno-5-14" href="#__codelineno-5-14"></a>（纯角色定义：身份、行为规则、输出格式。无模板变量。）
+</code></pre></div>
+<p><strong><code>load_agent()</code> 返回纯数据结构（config + role prompt），不是类实例。</strong> Loop 中调用 <code>call_llm(agent_config, messages, emit)</code> — retry 逻辑在 <code>llm.py</code> 中，与 agent 无关。</p>
+<p><strong>System prompt 自动拼接：</strong> MD 文件只包含角色定义（role prompt），<code>ContextManager.build()</code> 根据 agent config 自动拼接完整 system prompt：</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="n">system_prompt</span> <span class="o">=</span> <span class="n">concat</span><span class="p">(</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>    <span class="n">agent_config</span><span class="o">.</span><span class="n">role_prompt</span><span class="p">,</span>                                    <span class="c1"># MD body，纯文本</span>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>    <span class="n">build_system_info</span><span class="p">(),</span>                                         <span class="c1"># 系统时间等</span>
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a>    <span class="n">build_task_plan</span><span class="p">(</span><span class="n">state</span><span class="p">),</span>                                      <span class="c1"># 当前任务计划（所有 agent）</span>
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a>    <span class="n">build_artifact_inventory</span><span class="p">(</span><span class="n">state</span><span class="p">)</span>  <span class="k">if</span> <span class="n">has_artifact_tools</span><span class="p">(</span><span class="n">agent_config</span><span class="p">),</span>   <span class="c1"># 有 artifact 工具才注入</span>
+<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a>    <span class="n">build_available_agents</span><span class="p">()</span>         <span class="k">if</span> <span class="n">has_subagent_tool</span><span class="p">(</span><span class="n">agent_config</span><span class="p">),</span>    <span class="c1"># 有 call_subagent 才注入</span>
+<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a>    <span class="n">generate_tool_instructions</span><span class="p">(</span><span class="n">agent_config</span><span class="o">.</span><span class="n">tools</span><span class="p">),</span>              <span class="c1"># 从 ToolRegistry 生成</span>
+<a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a><span class="p">)</span>
+</code></pre></div>
+<p>拼接规则由 ContextManager 控制，agent MD 文件不需要知道。条件注入替代了原来 LeadAgent 和 SubAgent 的类继承差异。</p>
+<p><strong>移除的内容：</strong></p>
+<table>
+<thead>
+<tr>
+<th>原有</th>
+<th>处理方式</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>BaseAgent</code> 类</td>
+<td>删除。retry 移到 <code>llm.py</code>，streaming 由 <code>emit</code> callback 处理</td>
+</tr>
+<tr>
+<td><code>LeadAgent</code> / <code>SearchAgent</code> / <code>CrawlAgent</code> 子类</td>
+<td>各自变为一个 MD 文件</td>
+</tr>
+<tr>
+<td><code>build_system_prompt()</code></td>
+<td>MD body 提供 role prompt，ContextManager 根据 agent config 自动拼接其余部分</td>
+</tr>
+<tr>
+<td><code>format_final_response()</code></td>
+<td>不需要。loop 跳出时直接取 <code>response.content</code></td>
+</tr>
+<tr>
+<td><code>AgentToolkit</code> 绑定</td>
+<td>agent config 的 <code>tools</code> 字段声明，ContextManager 读取生成 prompt</td>
+</tr>
+</tbody>
+</table>
+<p><strong>用户自定义 agent：</strong> 只需新建一个 MD 文件，在 lead agent 的 <code>call_subagent</code> 工具中即可调用。无需写 Python 代码。</p>
+<h3 id="替代-langgraph-的实现">替代 LangGraph 的实现</h3>
+<table>
+<thead>
+<tr>
+<th>LangGraph 功能</th>
+<th>替代方案</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>StateGraph</code> + 路由 + <code>ExecutionPhase</code> 枚举</td>
+<td>扁平 <code>while not completed</code> loop + <code>current_agent</code> 字符串。旧 5 值枚举（<code>LEAD_EXECUTING</code> / <code>SUBAGENT_EXECUTING</code> / <code>TOOL_EXECUTING</code> / <code>WAITING_PERMISSION</code> / <code>COMPLETED</code>）简化为一个布尔值，agent 切换靠 <code>current_agent</code>，其余是 loop 内顺序逻辑</td>
+</tr>
+<tr>
+<td><code>interrupt()</code> / <code>Command(resume=)</code></td>
+<td>内存 <code>asyncio.Event</code> await/set，不涉及 DB 持久化</td>
+</tr>
+<tr>
+<td><code>StreamWriter</code></td>
+<td>自定义 callback / async generator，复用现有 <code>StreamManager</code></td>
+</tr>
+<tr>
+<td><code>AsyncSqliteSaver</code> (checkpoint)</td>
+<td>不需要 checkpoint，事件流本身就是持久化的执行历史</td>
+</tr>
+<tr>
+<td><code>langchain_core.messages</code></td>
+<td><code>llm.py</code> 的 <code>invoke</code>/<code>ainvoke</code> 改为返回 <code>LLMResponse</code>（已有 dataclass），删除 <code>to_langchain_message()</code> 中间层</td>
+</tr>
+<tr>
+<td><code>BaseAgent</code> 类继承体系</td>
+<td>Agent 定义为 MD 文件（YAML frontmatter + role prompt），<code>load_agent()</code> 返回纯数据，retry 移到 <code>llm.py</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="执行中消息注入message-queue">执行中消息注入（Message Queue）</h3>
+<p>参考 <a href="https://mariozechner.at/posts/2025-11-30-pi-coding-agent/">Pi coding agent</a> 的 message queuing 机制：用户可以在执行过程中追加指令，loop 在 turn boundary 非阻塞 drain。</p>
+<p><strong>数据流：</strong> TaskManager 持有每个执行的 <code>asyncio.Queue</code> → 用户通过 API inject → loop 在下一轮 LLM 调用前 drain 到 <code>state.queued_messages</code> → <code>ContextManager.build()</code> 合并到 user message。</p>
+<p><strong>合并方式：</strong> 工具结果已经标准化为 XML 文本注入 user message，queued message 同理 — 直接作为文本拼接到当前 user message 末尾，不依赖任何 provider 特定的消息格式（如 Anthropic multi content block），确保通过 LiteLLM 接入各类模型时兼容：</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>&lt;tool_result name=&quot;web_fetch&quot; success=&quot;true&quot;&gt;...&lt;/tool_result&gt;
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>&lt;user_message&gt;重点关注性能方面&lt;/user_message&gt;
+</code></pre></div>
+<p>这是 <code>ContextManager.build()</code> 内部的一步（构建当前轮 user message 时检查 <code>state.queued_messages</code>），不是独立的 hook。</p>
+<p><strong>与 interrupt 的对比：</strong></p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>Interrupt</th>
+<th>Message Queue</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>触发</strong></td>
+<td>loop 主动暂停等用户</td>
+<td>用户主动追加</td>
+</tr>
+<tr>
+<td><strong>阻塞</strong></td>
+<td>是（<code>await Event</code>）</td>
+<td>否（drain 检查）</td>
+</tr>
+<tr>
+<td><strong>注入时机</strong></td>
+<td>工具执行前</td>
+<td>下一轮 LLM 调用前</td>
+</tr>
+<tr>
+<td><strong>数据结构</strong></td>
+<td><code>asyncio.Event</code>（二值信号）</td>
+<td><code>asyncio.Queue</code>（消息通道）</td>
+</tr>
+</tbody>
+</table>
+<p>两者共存在 TaskManager，互不干扰。单 worker 下 <code>asyncio.Queue</code> 天然工作，多 worker 时换 Redis List，接口不变（见 <a href="../optimization-plan/">optimization-plan.md</a> Phase 5.5）。</p>
+<h3 id="多工具调用支持">多工具调用支持</h3>
+<p>新 loop 中 <code>parse_tool_calls(response)</code> 直接返回列表，<strong>默认串行执行</strong>，遇到 CONFIRM 权限正常 interrupt：</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>agent 单轮 LLM 调用
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>  → 解析出 [tool_a, tool_b(CONFIRM), tool_c]
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>  → 串行执行：
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>      1. tool_a (AUTO) → 直接执行
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>      2. tool_b (CONFIRM) → interrupt，等待用户确认后执行
+<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a>      3. tool_c (AUTO) → 直接执行
+<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a>  → 所有工具结果合并，注入下一轮 agent context
+<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a>  → 一轮完成，而非三轮 LLM 往返
+</code></pre></div>
+<h3 id="收益">收益</h3>
+<ul>
+<li><strong>完整历史</strong>：加载消息时附带完整事件链，展示 agent response、tool 调用与结果、执行过程</li>
+<li><strong>可观测性</strong>：结构化事件日志，可查询、可统计（token 消耗、工具成功率、响应耗时）</li>
+<li><strong>轻量 interrupt</strong>：内存 await/set，不涉及 DB，超时自动 error</li>
+<li><strong>统一持久化</strong>：执行完成时 batch write 到同一个 DB</li>
+<li><strong>依赖极简</strong>：技术栈收敛为 FastAPI + LiteLLM + SQLAlchemy，无 Agent 类继承体系</li>
+<li><strong>Agent 可配置</strong>：Agent 定义为 MD 文件，用户可自定义 agent（模型、工具、提示词），无需写 Python 代码</li>
+<li><strong>多工具支持</strong>：agent 单轮可调多个工具，串行执行，interrupt 自然嵌入</li>
+<li><strong>执行中交互</strong>：message queue 支持用户在执行过程中追加指令，turn boundary 非阻塞注入</li>
+</ul>
+<hr />
+<h2 id="compaction-设计">Compaction 设计</h2>
+<p>两层数据模型对应两层 compaction 机制：跨轮 compaction（Message 层）和轮内 truncation（tool interaction 层）。</p>
+<h3 id="跨轮-compaction">跨轮 Compaction</h3>
+<p><strong>触发时机：</strong> 用户新消息进来，ContextManager 构建 history 时发现 token 数超阈值。只在轮次边界触发，执行 loop 内部不做 compaction。</p>
+<p><strong>范围：</strong> 保留最近 <code>preserve_recent_pairs</code>（可配置，默认 N）对不动，其余全部 compact。一次性处理，不逐对试探。</p>
+<p><strong>形式：逐对摘要。</strong> 每对 (User Q, AI A) 独立压缩为短版摘要，保持消息记录的独立性。不合并为单个 summary 块 — 合并会破坏消息结构，影响对话分支场景。已有摘要的消息对不会被二次摘要。</p>
+<p><strong>摘要存储：<code>content_summary</code> + <code>response_summary</code> 字段。</strong> 原始 <code>content</code> / <code>response</code> 保留不变，分别新增摘要字段。ContextManager 构建 history 时优先读摘要，无则读原文（<code>msg.content_summary or msg.content</code>、<code>msg.response_summary or msg.response</code>）。分两个字段是为了保持 user/assistant 角色交替结构。好处：原始数据不丢，UI 可选择展示原文或摘要。</p>
+<p><strong>MessageEvent 保留：</strong> Compaction 不删除 MessageEvent 记录。ContextManager 构建 history 只读 Message 层（summary 或原文），不读 MessageEvent。保留事件数据方便查看历史执行细节。</p>
+<p><strong>阈值判断：</strong> 不自己估算 token 数。每轮执行结束时，将最后一次 LLM 调用的 <code>prompt_tokens</code>（模型返回的精确值）存入 <code>Message.metadata.last_input_tokens</code>。下一轮新消息进来时读取此值，作为 context 大小的 baseline — 新一轮只会更大（多了一对 Q/A 历史），如果已接近红线就先 compact 再执行。</p>
+<p><strong>渐进式实现：</strong></p>
+<ul>
+<li><strong>Phase 1（随 LangGraph 移除）</strong>：超限时直接从 context 中移除最老消息对（不写 summary，不调 LLM）</li>
+<li><strong>Phase 2（后续优化）</strong>：异步调用配置的模型生成逐对摘要，写入 <code>content_summary</code> + <code>response_summary</code></li>
+</ul>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>轮次 N 执行完成
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>  → Message.metadata.last_input_tokens = prompt_tokens（模型返回的精确值）
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>
+<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a>轮次 N+1 新消息进来
+<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a>  → 读上一条 Message.metadata.last_input_tokens
+<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a>  → 超阈值？→ 保留最近 N 对（preserve_recent_pairs，可配置），其余全部 compact：
+<a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a>      Phase 1: 直接从 context 中移除（不生成摘要）
+<a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a>      Phase 2: LLM 逐对生成摘要 → 写入 content_summary + response_summary
+<a id="__codelineno-9-9" name="__codelineno-9-9" href="#__codelineno-9-9"></a>  → 正常执行 loop
+<a id="__codelineno-9-10" name="__codelineno-9-10" href="#__codelineno-9-10"></a>  → execution_complete metrics 带 context_usage
+</code></pre></div>
+<h3 id="轮内-truncation">轮内 Truncation</h3>
+<p>执行 loop 中 agent 可能调多轮工具，tool interactions 越来越长。不做 compaction（太复杂），直接 truncation：保留最近 N 条 tool interaction 在 context 里（现有 <code>compress_messages(preserve_recent=5)</code> 机制）。超出的交互仍在内存事件列表中（执行完成时 batch write 到 MessageEvent），只是不再注入 LLM context。</p>
+<h3 id="context-usage">Context Usage</h3>
+<p><code>last_input_tokens</code> 已存入 <code>Message.metadata</code>（用于 compaction 阈值判断），前端可直接用它展示 context 使用率：</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>usage_percent = last_input_tokens / model_context_limit
+</code></pre></div>
+<p>不需要细分（history、system prompt、当轮工具交互等），模型不返回这些拆分，自己估算没意义。</p>
+<hr />
+<h2 id="命名变更">命名变更</h2>
+<table>
+<thead>
+<tr>
+<th>现有</th>
+<th>改为</th>
+<th>原因</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>thread_id</code></td>
+<td><code>execution_id</code></td>
+<td>去掉 LangGraph 后不再有 "thread" 概念，实际语义是一次执行的标识</td>
+</tr>
+</tbody>
+</table>
+<p>影响范围：<code>Message.thread_id</code> 字段、API schema (<code>chat.py</code>)、前端 SSE 连接 URL、controller 参数。内部项目同步发版，直接改名，不需要兼容窗口。</p>
+<hr />
+<h2 id="旧数据处理">旧数据处理</h2>
+<p>不做迁移，全部清理。<code>langgraph.db</code>（checkpoint 数据）直接删除。Messages 表涉及字段重命名（<code>thread_id</code> → <code>execution_id</code>）和新增字段（<code>content_summary</code>、<code>response_summary</code>、<code>metadata.last_input_tokens</code>），旧数据结构不兼容，连同关联的 Conversations、Artifacts 等一起清空，重建 schema。内部项目无外部用户，一步到位。</p>
+<hr />
+<h2 id="部署假设单-worker">部署假设：单 Worker</h2>
+<p>初始设计只考虑单 worker（一个 uvicorn 进程，一个 event loop）。多 worker 部署（gunicorn 多进程）属于后续优化范围（见 <a href="../optimization-plan/">optimization-plan.md</a> Phase 5.5）。</p>
+<p><strong>单 worker 下的简化：</strong></p>
+<table>
+<thead>
+<tr>
+<th>组件</th>
+<th>单 worker</th>
+<th>多 worker</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>TaskManager interrupt</strong></td>
+<td><code>asyncio.Event</code> await/set，同进程内直接通信</td>
+<td>Redis pub/sub 跨进程通知</td>
+</tr>
+<tr>
+<td><strong>TaskManager message queue</strong></td>
+<td><code>asyncio.Queue</code> 每执行一个</td>
+<td>Redis List</td>
+</tr>
+<tr>
+<td><strong>TaskManager 去重</strong></td>
+<td>内存 <code>dict</code> 查 <code>execution_id</code></td>
+<td>Redis 分布式锁</td>
+</tr>
+<tr>
+<td><strong>StreamManager</strong></td>
+<td><code>asyncio.Queue</code> 内存缓冲</td>
+<td>Redis Streams</td>
+</tr>
+<tr>
+<td><strong>always_allowed_tools</strong></td>
+<td>内存 state 直接读写</td>
+<td>不变（执行在单进程内完成）</td>
+</tr>
+</tbody>
+</table>
+<p>单 worker 意味着执行 coroutine 和 API 请求在同一个 event loop 中，<code>asyncio.Event</code> 天然工作，不需要跨进程协调。</p>
+<hr />
+<h2 id="与优化计划的交叉影响">与优化计划的交叉影响</h2>
+<blockquote>
+<p>以下 Phase 编号引用自 <a href="../optimization-plan/">optimization-plan.md</a>。</p>
+</blockquote>
+<h3 id="phase-52redis-checkpointer-不再需要">Phase 5.2（Redis Checkpointer）→ 不再需要</h3>
+<p>LangGraph 移除后不再有 checkpoint 概念，Phase 5.2 的 <code>AsyncSqliteSaver → AsyncRedisSaver</code> 迁移变为无效工作。LangGraph 移除已调整为优先实施，Phase 5.2 直接跳过。</p>
+<h3 id="phase-53streammanager--redis-streams">Phase 5.3（StreamManager → Redis Streams）</h3>
+<p>Phase 5.3 迁移后，事件存储形成三层架构：</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>内存事件列表（执行期间累积）
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>  ↓ 实时推送
+<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>Redis Streams / StreamManager（SSE 传输 + 断线重连缓冲）
+<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a>  ↓ 边界 flush
+<a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a>MessageEvent 表（永久历史）
+</code></pre></div>
+<ul>
+<li><strong>迁移前（当前）</strong>：用户刷新页面，<code>asyncio.Queue</code> 中已消费事件丢失。Interrupt 期间刷新 → 丢失 interrupt_pending 事件，但 coroutine 仍在等待，用户需重新发送消息。</li>
+<li><strong>迁移后</strong>：Redis Streams 支持 <code>Last-Event-ID</code> 重放，刷新后可恢复到 interrupt 状态继续确认。</li>
+</ul>
+<p>本设计不依赖 Phase 5.3 — 当前 asyncio.Queue 能工作，只是刷新体验较差。Phase 5.3 是增强，不是前置条件。</p>
+<h3 id="phase-55taskmanager-多-worker">Phase 5.5（TaskManager 多 Worker）</h3>
+<p>多 worker 下 TaskManager 需要：
+- Redis 分布式锁做 <code>execution_id</code> 去重
+- Redis pub/sub 做跨进程 interrupt 通知（API 请求可能落在 worker A，执行 coroutine 在 worker B）</p>
+<p>当前设计的 <code>asyncio.Event</code> 方案在单 worker 下完备，多 worker 扩展时替换为 Redis 实现，接口不变。</p>
+<hr />
+<h2 id="实施顺序">实施顺序</h2>
+<p>LangGraph 移除优先于 <a href="../optimization-plan/">optimization-plan.md</a> 中的持久化改造，避免在即将废弃的 checkpoint 机制上做无用投入（Phase 5.2 Redis Checkpointer 直接跳过）。</p>
+<ol>
+<li><strong>替换执行引擎</strong> — 用 async while loop 替代 StateGraph，interrupt 改为内存 asyncio.Event</li>
+<li><strong>改造 TaskManager</strong> — 增加 <code>execution_id</code> 去重（当前实现允许同 task_id 覆盖提交），增加 interrupt Event 管理 + message queue</li>
+<li><strong>改造 LLM 接口</strong> — <code>llm.py</code> 返回 <code>LLMResponse</code> + <code>call_with_retry()</code>，删除 <code>AIMessage</code> 依赖</li>
+<li><strong>Agent 类 → MD 文件</strong> — <code>BaseAgent</code>/<code>LeadAgent</code>/<code>SearchAgent</code>/<code>CrawlAgent</code> 类删除，各自转为 MD 文件（YAML frontmatter + role prompt），新增 <code>load_agent()</code> 加载器</li>
+<li><strong>移除 LangGraph/LangChain 依赖</strong> — 清理代码和 requirements，删除 <code>langgraph.db</code></li>
+<li><strong>实现 MessageEvent 表 + 写入逻辑</strong> — 事件持久化（此时执行引擎已是新 loop）</li>
+<li><strong>继续 optimization-plan.md 中的持久化改造（跳过 Phase 5.2）</strong> — Redis 迁移、StreamManager 升级等</li>
+<li><strong>前端适配</strong> — 历史消息加载事件链，展示执行过程</li>
+</ol>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  回到页面顶部
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.tabs", "navigation.sections", "navigation.expand", "navigation.top", "search.highlight", "content.code.copy"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "\u5df2\u590d\u5236", "clipboard.copy": "\u590d\u5236", "search.result.more.one": "\u5728\u8be5\u9875\u4e0a\u8fd8\u6709 1 \u4e2a\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.more.other": "\u5728\u8be5\u9875\u4e0a\u8fd8\u6709 # \u4e2a\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.none": "\u6ca1\u6709\u627e\u5230\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.one": "\u627e\u5230 1 \u4e2a\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.other": "# \u4e2a\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.placeholder": "\u952e\u5165\u4ee5\u5f00\u59cb\u641c\u7d22", "search.result.term.missing": "\u7f3a\u5c11", "select.version": "\u9009\u62e9\u5f53\u524d\u7248\u672c"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>

@@ -19,7 +19,7 @@
       
       
       <link rel="icon" href="../../assets/images/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.4">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.5">
     
     
       
@@ -2212,7 +2212,7 @@
 <hr />
 <h3 id="102-外网构建发布流程">10.2 外网构建发布流程</h3>
 <p><strong>目标</strong>: <code>scripts/release.sh</code> 一键完成版本化构建 → 冒烟验证 → 镜像导出 → sha256 校验。</p>
-<p><strong>流程</strong>: 版本号传入 → 构建 backend/frontend 双镜像（带 version label）→ 启动全栈跑健康检查 → <code>docker save</code> 导出四个 tar（含 postgres + redis-stack 基础设施镜像）→ 生成 <code>checksums.sha256</code>。</p>
+<p><strong>流程</strong>: 版本号传入 → 构建 backend/frontend/nginx 三镜像（带 version label）→ 启动全栈跑健康检查 → <code>docker save</code> 导出五个 tar（含 postgres + redis-stack 基础设施镜像）→ 生成 <code>checksums.sha256</code>。</p>
 <p><strong>前端 <code>NEXT_PUBLIC_API_URL</code> 处理</strong>: 推荐每个部署环境单独构建前端镜像（方案 C）——前端镜像轻量（~50MB），<code>NEXT_PUBLIC_*</code> 是 Next.js 编译时变量，运行时替换都是 workaround。</p>
 <p><strong>退出标准</strong>:
 - <code>release.sh</code> 一键完成全流程
@@ -2221,15 +2221,25 @@
 <h3 id="103-内网-compose--配置模板">10.3 内网 Compose + 配置模板</h3>
 <p><strong>目标</strong>: <code>deploy/docker-compose.intranet.yml</code>（纯 <code>image</code>，无 <code>build</code>）+ <code>deploy/.env.intranet.example</code>（配置模板）。</p>
 <p><strong>关键设计</strong>:
-- 四个 service：backend / frontend / postgres / redis-stack，全部仅 <code>image</code> 引用
-- 健康检查链：redis/postgres healthy → backend healthy → frontend 启动
+- 五个 service：nginx / backend / frontend / postgres / redis-stack，全部仅 <code>image</code> 引用
+- Nginx 作为唯一对外入口，按路径分流：<code>/api/*</code> → backend:8000，<code>/*</code> → frontend:3000
+- backend 和 frontend <strong>不映射端口到宿主机</strong>，仅通过 Docker 内部网络与 Nginx 通信
+- 健康检查链：redis/postgres healthy → backend healthy → frontend 启动 → nginx 启动
 - 三个 named volume 持久化（backend_data / postgres_data / redis_data）
 - DB 连接串在 compose 内拼接，敏感值（JWT secret、PG password、LLM key）从 <code>.env</code> 读取
-- 端口可配（<code>BACKEND_PORT</code> / <code>FRONTEND_PORT</code>）</p>
+- 对外端口可配（<code>HTTP_PORT</code>，默认 80）</p>
+<p><strong>Nginx 配置要点</strong>:
+- 路径分流：<code>/api/</code> 和 <code>/health</code> → backend，其余 → frontend
+- SSE 支持：<code>/api/v1/stream/</code> 路径关闭 <code>proxy_buffering</code>，设长超时
+- 安全：屏蔽 <code>/docs</code> 和 <code>/redoc</code>（Swagger UI），仅内部访问
+- 可选限流：<code>limit_req_zone</code> 按 IP 限制 API 请求频率
+- 后续加 HTTPS：只需在 Nginx 配置中增加 SSL 证书，后端零改动</p>
 <p><strong><code>.env.intranet.example</code> 必填项</strong>: VERSION、JWT_SECRET、POSTGRES_PASSWORD、LLM_BASE_URL、LLM_API_KEY、LLM_AVAILABLE_MODELS、LEAD_MODEL、WORKER_MODEL。</p>
 <p><strong>退出标准</strong>:
-- 纯离线环境（镜像已 load）<code>docker compose up -d</code> 四个 service 全部 healthy
-- 前端可访问且能正常登录</p>
+- 纯离线环境（镜像已 load）<code>docker compose up -d</code> 五个 service 全部 healthy
+- 通过 Nginx 端口访问前端可正常登录，API 请求正确转发
+- 直接访问 backend/frontend 端口不可达（未映射到宿主机）
+- <code>/docs</code> 路径被 Nginx 拦截，返回 403/404</p>
 <hr />
 <h3 id="104-内网部署-sop">10.4 内网部署 SOP</h3>
 <p><strong>目标</strong>: <code>deploy/deployment-guide.md</code>，运维人员无需理解技术栈即可完成部署。</p>
@@ -2238,8 +2248,8 @@
 <hr />
 <h3 id="105-交付物清单">10.5 交付物清单</h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a>artifactflow-release-${VERSION}/
-<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a>├── images/          # 四个 tar + checksums.sha256
-<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a>├── compose/         # docker-compose.intranet.yml + .env.intranet.example
+<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a>├── images/          # 五个 tar + checksums.sha256（nginx / backend / frontend / postgres / redis-stack）
+<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a>├── compose/         # docker-compose.intranet.yml + .env.intranet.example + nginx.conf
 <a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a>├── scripts/         # load-images.sh（docker load 一键脚本）
 <a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a>└── docs/            # deployment-guide.md
 </code></pre></div>
