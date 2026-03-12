@@ -46,8 +46,9 @@ CREATE TABLE IF NOT EXISTS messages (
     conversation_id TEXT NOT NULL,
     parent_id TEXT,
     content TEXT NOT NULL,
-    thread_id TEXT NOT NULL,
-    graph_response TEXT,
+    response TEXT,
+    content_summary TEXT,
+    response_summary TEXT,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     metadata JSON,
     FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
@@ -55,6 +56,21 @@ CREATE TABLE IF NOT EXISTS messages (
 
 CREATE INDEX IF NOT EXISTS ix_messages_conversation_id ON messages(conversation_id);
 CREATE INDEX IF NOT EXISTS ix_messages_parent_id ON messages(parent_id);
+
+-- ============================================================
+-- 消息事件表（事件溯源）
+-- ============================================================
+CREATE TABLE IF NOT EXISTS message_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    message_id TEXT NOT NULL,
+    event_type TEXT NOT NULL,
+    agent_name TEXT,
+    data JSON,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS ix_message_events_message ON message_events(message_id);
 
 -- ============================================================
 -- Artifact 会话表

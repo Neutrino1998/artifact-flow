@@ -50,16 +50,16 @@ async def branched_conversation(conversation_repo: ConversationRepository, test_
     msg_c_id = f"msg-c-{uuid.uuid4().hex[:8]}"
 
     root = await conversation_repo.add_message(
-        conv_id, root_id, "root content", "thd-1", parent_id=None
+        conv_id, root_id, "root content", parent_id=None
     )
     msg_a = await conversation_repo.add_message(
-        conv_id, msg_a_id, "msg_a content", "thd-1", parent_id=root_id
+        conv_id, msg_a_id, "msg_a content", parent_id=root_id
     )
     msg_b = await conversation_repo.add_message(
-        conv_id, msg_b_id, "msg_b content", "thd-1", parent_id=msg_a_id
+        conv_id, msg_b_id, "msg_b content", parent_id=msg_a_id
     )
     msg_c = await conversation_repo.add_message(
-        conv_id, msg_c_id, "msg_c content", "thd-1", parent_id=root_id
+        conv_id, msg_c_id, "msg_c content", parent_id=root_id
     )
 
     # Set active_branch to msg_b (linear chain tip)
@@ -121,7 +121,6 @@ class TestConversationCRUD:
             conv_id,
             f"msg-{uuid.uuid4().hex}",
             "hello",
-            "thd-x",
         )
         # Expire cached Conversation so selectinload re-fires within same session
         conversation_repo.session.expire(sample_conversation)
@@ -146,7 +145,7 @@ class TestConversationCRUD:
         self, conversation_repo: ConversationRepository, sample_conversation: Conversation
     ):
         msg = await conversation_repo.add_message(
-            sample_conversation.id, f"msg-{uuid.uuid4().hex}", "hi", "thd-x"
+            sample_conversation.id, f"msg-{uuid.uuid4().hex}", "hi"
         )
         updated = await conversation_repo.update_active_branch(
             sample_conversation.id, msg.id
@@ -166,7 +165,7 @@ class TestConversationCRUD:
         conv = await conversation_repo.create_conversation(
             conversation_id=conv_id, user_id=test_user.id
         )
-        await conversation_repo.add_message(conv_id, f"msg-{uuid.uuid4().hex}", "hi", "thd-x")
+        await conversation_repo.add_message(conv_id, f"msg-{uuid.uuid4().hex}", "hi")
 
         result = await conversation_repo.delete_conversation(conv_id)
         assert result is True
@@ -250,7 +249,7 @@ class TestMessageCRUD:
     ):
         msg_id = f"msg-{uuid.uuid4().hex}"
         msg = await conversation_repo.add_message(
-            sample_conversation.id, msg_id, "hello", "thd-x"
+            sample_conversation.id, msg_id, "hello"
         )
 
         conv = await conversation_repo.get_conversation(sample_conversation.id)
@@ -261,7 +260,7 @@ class TestMessageCRUD:
     ):
         with pytest.raises(NotFoundError):
             await conversation_repo.add_message(
-                "nonexistent", f"msg-{uuid.uuid4().hex}", "hello", "thd-x"
+                "nonexistent", f"msg-{uuid.uuid4().hex}", "hello"
             )
 
     async def test_add_message_duplicate_raises(
@@ -269,11 +268,11 @@ class TestMessageCRUD:
     ):
         msg_id = f"msg-{uuid.uuid4().hex}"
         await conversation_repo.add_message(
-            sample_conversation.id, msg_id, "hello", "thd-x"
+            sample_conversation.id, msg_id, "hello"
         )
         with pytest.raises(DuplicateError):
             await conversation_repo.add_message(
-                sample_conversation.id, msg_id, "duplicate", "thd-x"
+                sample_conversation.id, msg_id, "duplicate"
             )
 
     async def test_get_message_and_or_raise(
@@ -281,7 +280,7 @@ class TestMessageCRUD:
     ):
         msg_id = f"msg-{uuid.uuid4().hex}"
         await conversation_repo.add_message(
-            sample_conversation.id, msg_id, "hello", "thd-x"
+            sample_conversation.id, msg_id, "hello"
         )
 
         # get_message returns the message
@@ -296,12 +295,12 @@ class TestMessageCRUD:
         with pytest.raises(NotFoundError):
             await conversation_repo.get_message_or_raise("nonexistent")
 
-    async def test_update_graph_response(
+    async def test_update_response(
         self, conversation_repo: ConversationRepository, sample_conversation: Conversation
     ):
         msg_id = f"msg-{uuid.uuid4().hex}"
         await conversation_repo.add_message(
-            sample_conversation.id, msg_id, "hello", "thd-x"
+            sample_conversation.id, msg_id, "hello"
         )
 
         # Pin updated_at to a known past value
@@ -310,8 +309,8 @@ class TestMessageCRUD:
         conv.updated_at = old_time
         await conversation_repo.update(conv)
 
-        updated_msg = await conversation_repo.update_graph_response(msg_id, "world")
-        assert updated_msg.graph_response == "world"
+        updated_msg = await conversation_repo.update_response(msg_id, "world")
+        assert updated_msg.response == "world"
 
         conv = await conversation_repo.get_conversation(sample_conversation.id)
         assert conv.updated_at > old_time
@@ -323,7 +322,7 @@ class TestMessageCRUD:
         for i in range(3):
             mid = f"msg-{uuid.uuid4().hex}"
             await conversation_repo.add_message(
-                sample_conversation.id, mid, f"msg-{i}", "thd-x"
+                sample_conversation.id, mid, f"msg-{i}"
             )
             ids.append(mid)
 
@@ -353,9 +352,9 @@ class TestBranchPath:
         msg2_id = f"msg-{uuid.uuid4().hex}"
         msg3_id = f"msg-{uuid.uuid4().hex}"
 
-        await conversation_repo.add_message(conv_id, msg1_id, "m1", "thd-1")
-        await conversation_repo.add_message(conv_id, msg2_id, "m2", "thd-1", parent_id=msg1_id)
-        await conversation_repo.add_message(conv_id, msg3_id, "m3", "thd-1", parent_id=msg2_id)
+        await conversation_repo.add_message(conv_id, msg1_id, "m1")
+        await conversation_repo.add_message(conv_id, msg2_id, "m2", parent_id=msg1_id)
+        await conversation_repo.add_message(conv_id, msg3_id, "m3", parent_id=msg2_id)
 
         path = await conversation_repo.get_conversation_path(conv_id, msg3_id)
         assert len(path) == 3
@@ -423,13 +422,13 @@ class TestBranchPath:
         msg1_id = f"msg-{uuid.uuid4().hex}"
         msg2_id = f"msg-{uuid.uuid4().hex}"
 
-        await conversation_repo.add_message(conv_id, msg1_id, "hello", "thd-1")
-        await conversation_repo.update_graph_response(msg1_id, "hi there")
+        await conversation_repo.add_message(conv_id, msg1_id, "hello")
+        await conversation_repo.update_response(msg1_id, "hi there")
 
         await conversation_repo.add_message(
-            conv_id, msg2_id, "how are you", "thd-1", parent_id=msg1_id
+            conv_id, msg2_id, "how are you", parent_id=msg1_id
         )
-        await conversation_repo.update_graph_response(msg2_id, "doing great")
+        await conversation_repo.update_response(msg2_id, "doing great")
 
         history = await conversation_repo.format_conversation_history(conv_id, msg2_id)
         assert len(history) == 4  # 2 user + 2 assistant
@@ -447,8 +446,8 @@ class TestBranchPath:
         )
 
         msg_id = f"msg-{uuid.uuid4().hex}"
-        await conversation_repo.add_message(conv_id, msg_id, "hello", "thd-1")
-        # No graph_response set
+        await conversation_repo.add_message(conv_id, msg_id, "hello")
+        # No response set
 
         history = await conversation_repo.format_conversation_history(conv_id, msg_id)
         assert len(history) == 1  # only user turn

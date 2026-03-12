@@ -77,6 +77,10 @@ class ToolRegistry:
     def register_tool_to_library(self, tool: BaseTool) -> None:
         self.tool_library[tool.name] = tool
         logger.info(f"Registered tool '{tool.name}' to library")
+
+    def get_tool(self, name: str) -> Optional[BaseTool]:
+        """从全局工具库获取工具"""
+        return self.tool_library.get(name)
     
     def create_agent_toolkit(self, agent_name: str, tool_names: List[str] = None) -> AgentToolkit:
         """

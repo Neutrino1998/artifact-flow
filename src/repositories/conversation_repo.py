@@ -254,43 +254,40 @@ class ConversationRepository(BaseRepository[Conversation]):
         conversation_id: str,
         message_id: str,
         content: str,
-        thread_id: str,
         parent_id: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None
     ) -> Message:
         """
         添加消息到对话
-        
+
         Args:
             conversation_id: 对话ID
             message_id: 消息ID
             content: 消息内容
-            thread_id: LangGraph 线程ID
             parent_id: 父消息ID（用于分支）
             metadata: 扩展元数据
-            
+
         Returns:
             创建的消息
-            
+
         Raises:
             NotFoundError: 对话不存在
             DuplicateError: 消息ID已存在
         """
         # 确保对话存在
         conversation = await self.get_conversation_or_raise(conversation_id)
-        
+
         # 检查消息是否已存在
         existing_msg = await self.get_message(message_id)
         if existing_msg:
             raise DuplicateError("Message", message_id)
-        
+
         # 创建消息
         message = Message(
             id=message_id,
             conversation_id=conversation_id,
             parent_id=parent_id,
             content=content,
-            thread_id=thread_id,
             metadata_=metadata or {}
         )
         
@@ -336,23 +333,23 @@ class ConversationRepository(BaseRepository[Conversation]):
             raise NotFoundError("Message", message_id)
         return message
     
-    async def update_graph_response(
+    async def update_response(
         self,
         message_id: str,
         response: str
     ) -> Message:
         """
-        更新消息的 Graph 响应
-        
+        更新消息的助手响应
+
         Args:
             message_id: 消息ID
-            response: Graph 响应内容
-            
+            response: 助手响应内容
+
         Returns:
             更新后的消息
         """
         message = await self.get_message_or_raise(message_id)
-        message.graph_response = response
+        message.response = response
 
         # 同时更新对话的 updated_at
         conversation = await self.get_conversation(message.conversation_id)
@@ -487,19 +484,20 @@ class ConversationRepository(BaseRepository[Conversation]):
         
         messages = []
         for msg in path:
-            # 添加用户消息
+            # 添加用户消息（优先使用摘要）
             messages.append({
                 "role": "user",
-                "content": msg.content
+                "content": msg.content_summary or msg.content
             })
-            
-            # 添加 assistant 响应（如果有）
-            if msg.graph_response:
+
+            # 添加 assistant 响应（如果有，优先使用摘要）
+            response = msg.response
+            if response:
                 messages.append({
                     "role": "assistant",
-                    "content": msg.graph_response
+                    "content": msg.response_summary or response
                 })
-        
+
         return messages
     
     async def get_branch_structure(
@@ -566,7 +564,8 @@ class MessagePath:
         """转换为格式化的对话历史"""
         history = []
         for msg in self.messages:
-            history.append({"role": "user", "content": msg.content})
-            if msg.graph_response:
-                history.append({"role": "assistant", "content": msg.graph_response})
+            history.append({"role": "user", "content": msg.content_summary or msg.content})
+            response = msg.response
+            if response:
+                history.append({"role": "assistant", "content": msg.response_summary or response})
         return history

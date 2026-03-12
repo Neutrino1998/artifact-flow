@@ -174,7 +174,7 @@ class TestConcurrent:
                 await barrier.wait()
                 try:
                     await repo.add_message(
-                        conv_id, msg_id, f"message {worker_id}", f"thd-{worker_id}"
+                        conv_id, msg_id, f"message {worker_id}"
                     )
                 except Exception as e:
                     errors.append(e)
@@ -238,7 +238,7 @@ class TestConcurrent:
         msg_id = f"msg-{uuid.uuid4().hex}"
         async with file_db.session() as session_a:
             repo_a = ConversationRepository(session_a)
-            await repo_a.add_message(conv_id, msg_id, "committed data", "thd-1")
+            await repo_a.add_message(conv_id, msg_id, "committed data")
 
         # Session B: should see committed data
         async with file_db.session() as session_b:

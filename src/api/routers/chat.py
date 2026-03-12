@@ -18,11 +18,14 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from api.config import config
 from api.dependencies import (
+    get_agents,
     get_conversation_manager,
     get_current_user,
+    get_db_manager,
     get_db_session,
     get_stream_manager,
     get_task_manager,
+    get_tool_registry,
 )
 from api.services.auth import TokenPayload
 from api.schemas.chat import (
@@ -36,7 +39,7 @@ from api.schemas.chat import (
     MessageResponse,
 )
 from api.services.stream_manager import StreamAlreadyExistsError, StreamManager
-from api.services.task_manager import TaskManager
+from api.services.task_manager import TaskManager, DuplicateExecutionError
 from core.conversation_manager import ConversationManager
 from repositories.base import NotFoundError
 from repositories.conversation_repo import ConversationRepository
@@ -75,45 +78,51 @@ async def _create_controller() -> AsyncGenerator:
             async for event in ctrl.stream_execute(...):
                 ...
     """
-    from api.dependencies import get_db_manager, get_checkpointer
-    from core.graph import create_multi_agent_graph
     from core.controller import ExecutionController
     from core.conversation_manager import ConversationManager as CM
-    from tools.implementations.artifact_ops import ArtifactManager
+    from tools.implementations.artifact_ops import ArtifactManager, create_artifact_tools
     from repositories.artifact_repo import ArtifactRepository
     from repositories.conversation_repo import ConversationRepository as CR
+    from repositories.message_event_repo import MessageEventRepository
 
     db_manager = get_db_manager()
+    task_manager = get_task_manager()
+    agents = get_agents()
+    tool_registry = get_tool_registry()
 
     async with db_manager.session() as session:
         artifact_repo = ArtifactRepository(session)
         artifact_manager = ArtifactManager(artifact_repo)
 
+        # 注册 artifact 工具
+        artifact_tools = create_artifact_tools(artifact_manager)
+        for tool in artifact_tools:
+            tool_registry.register_tool_to_library(tool)
+
         conv_repo = CR(session)
         conv_manager = CM(conv_repo)
-
-        compiled_graph = await create_multi_agent_graph(
-            artifact_manager=artifact_manager,
-            checkpointer=get_checkpointer()
-        )
+        event_repo = MessageEventRepository(session)
 
         yield ExecutionController(
-            compiled_graph,
+            agents=agents,
+            tool_registry=tool_registry,
+            task_manager=task_manager,
             artifact_manager=artifact_manager,
-            conversation_manager=conv_manager
+            conversation_manager=conv_manager,
+            message_event_repo=event_repo,
         )
 
 
 async def _run_and_push(
     stream_manager: StreamManager,
-    thread_id: str,
+    stream_id: str,
     event_stream: AsyncIterator[dict],
 ) -> None:
     """
     Consume events from a controller stream and push them to the StreamManager.
 
     Handles timeout and unexpected errors, pushing sanitized error events.
-    Graph execution runs to completion even if the SSE client disconnects.
+    Execution runs to completion even if the SSE client disconnects.
     """
     stream_closed = False
     try:
@@ -121,21 +130,21 @@ async def _run_and_push(
             async for event in event_stream:
                 if stream_closed:
                     continue
-                if not await stream_manager.push_event(thread_id, _sanitize_error_event(event)):
-                    logger.info(f"Stream {thread_id} closed, graph will continue to completion")
+                if not await stream_manager.push_event(stream_id, _sanitize_error_event(event)):
+                    logger.info(f"Stream {stream_id} closed, execution will continue to completion")
                     stream_closed = True
 
     except TimeoutError:
-        logger.error(f"Graph execution timed out after {config.STREAM_TIMEOUT}s for thread {thread_id}")
-        await stream_manager.push_event(thread_id, _sanitize_error_event({
+        logger.error(f"Execution timed out after {config.STREAM_TIMEOUT}s for {stream_id}")
+        await stream_manager.push_event(stream_id, _sanitize_error_event({
             "type": "error",
             "timestamp": datetime.now().isoformat(),
             "data": {"success": False, "error": f"Execution timed out after {config.STREAM_TIMEOUT}s"}
         }))
 
     except Exception as e:
-        logger.exception(f"Error in graph execution: {e}")
-        await stream_manager.push_event(thread_id, _sanitize_error_event({
+        logger.exception(f"Error in execution: {e}")
+        await stream_manager.push_event(stream_id, _sanitize_error_event({
             "type": "error",
             "timestamp": datetime.now().isoformat(),
             "data": {"success": False, "error": str(e)}
@@ -153,19 +162,11 @@ async def send_message(
     """
     发送新消息
 
-    启动 Graph 执行，返回 stream_url 供前端订阅。
-
-    流程：
-    1. 同步创建/获取 conversation（确保 GET 请求能立即看到）
-    2. 创建 StreamContext（开始缓冲事件）
-    3. 启动后台任务执行 Graph
-    4. 返回 stream_url 给前端
+    启动执行，返回 stream_url 供前端订阅。
     """
-    # 生成 thread_id
     from uuid import uuid4
-    thread_id = f"thd-{uuid4().hex}"
 
-    # 为新消息准备 conversation_id 和 message_id
+    # 为新消息准备 ID
     conversation_id = request.conversation_id
     if not conversation_id:
         conversation_id = f"conv-{uuid4().hex}"
@@ -178,53 +179,46 @@ async def send_message(
         repo = conversation_manager._ensure_repository()
         await _verify_ownership(conversation_id, current_user, repo)
 
-    # 1. 同步创建/确保 conversation 存在（在请求的 session 中，会自动 commit）
-    # 这确保后续的 GET 请求能立即看到这个 conversation
+    # 确保 conversation 存在
     await conversation_manager.ensure_conversation_exists(conversation_id, user_id=user_id)
 
-    # 2. 创建 stream（绑定 owner）
-    await stream_manager.create_stream(thread_id, owner_user_id=user_id)
+    # 创建 stream（使用 message_id 作为 stream key）
+    await stream_manager.create_stream(message_id, owner_user_id=user_id)
 
-    # 3. 设置请求上下文（background task 通过 asyncio context 继承自动获取）
-    set_request_context(thread_id=thread_id, conv_id=conversation_id)
+    # 设置请求上下文
+    set_request_context(thread_id=message_id, conv_id=conversation_id)
 
-    # 4. 启动后台任务
-    # 注意：不能直接用 BackgroundTasks，因为依赖（controller）会在请求结束后失效
+    # 启动后台任务
     async def execute_and_push():
         try:
             async with _create_controller() as ctrl:
-                # Pass parent_message_id only when explicitly provided in request;
-                # otherwise let controller auto-detect via active_branch
                 parent_kwargs = {}
                 if 'parent_message_id' in request.model_fields_set:
                     parent_kwargs['parent_message_id'] = request.parent_message_id
                 await _run_and_push(
                     stream_manager,
-                    thread_id,
+                    message_id,
                     ctrl.stream_execute(
                         content=request.content,
                         conversation_id=conversation_id,
-                        thread_id=thread_id,
                         message_id=message_id,
                         **parent_kwargs,
                     ),
                 )
         except Exception as e:
-            logger.exception(f"Failed to initialize graph execution: {e}")
-            await stream_manager.push_event(thread_id, _sanitize_error_event({
+            logger.exception(f"Failed to initialize execution: {e}")
+            await stream_manager.push_event(message_id, _sanitize_error_event({
                 "type": "error",
                 "timestamp": datetime.now().isoformat(),
                 "data": {"success": False, "error": str(e)}
             }))
 
-    # 5. 提交到 TaskManager（持有引用 + 并发控制）
-    await task_manager.submit(thread_id, execute_and_push())
+    await task_manager.submit(message_id, execute_and_push())
 
     return ChatResponse(
         conversation_id=conversation_id,
         message_id=message_id,
-        thread_id=thread_id,
-        stream_url=f"/api/v1/stream/{thread_id}"
+        stream_url=f"/api/v1/stream/{message_id}"
     )
 
 
@@ -235,13 +229,7 @@ async def list_conversations(
     current_user: TokenPayload = Depends(get_current_user),
     conversation_manager: ConversationManager = Depends(get_conversation_manager),
 ):
-    """
-    列出对话列表
-
-    Args:
-        limit: 每页数量
-        offset: 偏移量
-    """
+    """列出对话列表"""
     user_id = current_user.user_id
     total = await conversation_manager.count_conversations_async(user_id=user_id)
     conversations = await conversation_manager.list_conversations_async(
@@ -270,24 +258,17 @@ async def get_conversation(
     current_user: TokenPayload = Depends(get_current_user),
     conversation_manager: ConversationManager = Depends(get_conversation_manager),
 ):
-    """
-    获取对话详情（含消息树）
-    """
+    """获取对话详情（含消息树）"""
     try:
         repo = conversation_manager._ensure_repository()
-
-        # 校验归属
         await _verify_ownership(conv_id, current_user, repo)
 
-        # 直接从数据库获取对话（不尝试创建）
         conversation = await repo.get_conversation(conv_id, load_messages=True)
         if not conversation:
             raise HTTPException(status_code=404, detail=f"Conversation '{conv_id}' not found")
 
-        # 获取所有消息
         messages = await repo.get_conversation_messages(conv_id)
 
-        # 构建子消息关系
         children_map = {}
         for msg in messages:
             if msg.parent_id:
@@ -304,13 +285,13 @@ async def get_conversation(
                     id=msg.id,
                     parent_id=msg.parent_id,
                     content=msg.content,
-                    response=msg.graph_response,
+                    response=msg.response,
                     created_at=msg.created_at,
                     children=children_map.get(msg.id, []),
                 )
                 for msg in messages
             ],
-            session_id=conv_id,  # session_id 与 conversation_id 相同
+            session_id=conv_id,
             created_at=conversation.created_at,
             updated_at=conversation.updated_at,
         )
@@ -325,29 +306,63 @@ async def delete_conversation(
     current_user: TokenPayload = Depends(get_current_user),
     conversation_manager: ConversationManager = Depends(get_conversation_manager),
 ):
-    """
-    删除对话
-
-    级联删除消息和关联的 Artifacts。
-    """
+    """删除对话"""
     try:
         repo = conversation_manager._ensure_repository()
-
-        # 校验归属
         await _verify_ownership(conv_id, current_user, repo)
 
         success = await repo.delete_conversation(conv_id)
-
         if not success:
             raise HTTPException(status_code=404, detail=f"Conversation '{conv_id}' not found")
 
-        # 清除缓存
         conversation_manager.clear_cache(conv_id)
-
         return {"success": True, "message": f"Conversation '{conv_id}' deleted"}
 
     except NotFoundError:
         raise HTTPException(status_code=404, detail=f"Conversation '{conv_id}' not found")
+
+
+@router.get("/{conv_id}/messages/{msg_id}/events")
+async def get_message_events(
+    conv_id: str,
+    msg_id: str,
+    event_type: Optional[str] = Query(None, description="Filter by event type"),
+    current_user: TokenPayload = Depends(get_current_user),
+    conversation_manager: ConversationManager = Depends(get_conversation_manager),
+):
+    """查询消息的事件链（用于历史回放和可观测性）"""
+    from repositories.message_event_repo import MessageEventRepository
+
+    repo = conversation_manager._ensure_repository()
+    await _verify_ownership(conv_id, current_user, repo)
+
+    # 校验 message 归属
+    message = await repo.get_message(msg_id)
+    if not message or message.conversation_id != conv_id:
+        raise HTTPException(status_code=404, detail="Message not found")
+
+    db_manager = get_db_manager()
+    async with db_manager.session() as session:
+        event_repo = MessageEventRepository(session)
+        if event_type:
+            events = await event_repo.get_by_type(msg_id, event_type)
+        else:
+            events = await event_repo.get_by_message(msg_id)
+
+    return {
+        "message_id": msg_id,
+        "events": [
+            {
+                "id": e.id,
+                "event_type": e.event_type,
+                "agent_name": e.agent_name,
+                "data": e.data,
+                "created_at": e.created_at.isoformat(),
+            }
+            for e in events
+        ],
+        "total": len(events),
+    }
 
 
 @router.post("/{conv_id}/resume", response_model=ResumeResponse)
@@ -362,68 +377,34 @@ async def resume_execution(
     """
     恢复中断的执行（权限确认后）
 
-    流程：
-    1. 校验 thread_id 归属
-    2. 创建新的 StreamContext
-    3. 启动后台任务恢复执行
-    4. 返回新的 stream_url
+    v2: 直接通过 TaskManager.resolve_interrupt() 唤醒暂停的 coroutine，
+    不再创建新的 controller/graph。
     """
-    thread_id = request.thread_id
-    user_id = current_user.user_id
+    message_id = request.message_id
 
-    # 0. 校验 conversation 归属当前用户
+    # 校验 conversation 归属
     repo = conversation_manager._ensure_repository()
     await _verify_ownership(conv_id, current_user, repo)
 
-    # 1. 校验 thread_id 归属当前 conversation
-    message = await repo.get_message(request.message_id)
+    # 校验 message 归属
+    message = await repo.get_message(message_id)
     if not message:
         raise HTTPException(status_code=404, detail="Message not found")
-    if message.thread_id != thread_id or message.conversation_id != conv_id:
-        raise HTTPException(status_code=403, detail="Thread does not belong to this conversation")
+    if message.conversation_id != conv_id:
+        raise HTTPException(status_code=403, detail="Message does not belong to this conversation")
 
-    # 2. 创建新的 stream（可能使用相同的 thread_id，绑定 owner）
-    try:
-        await stream_manager.create_stream(thread_id, owner_user_id=user_id)
-    except StreamAlreadyExistsError:
-        # 如果 stream 已存在，先关闭再创建
-        await stream_manager.close_stream(thread_id)
-        await stream_manager.create_stream(thread_id, owner_user_id=user_id)
-
-    # 准备恢复数据
+    # 解决 interrupt（唤醒 coroutine）
     resume_data = {
-        "type": "permission",
         "approved": request.approved,
         "always_allow": request.always_allow,
     }
 
-    # 设置请求上下文（background task 通过 asyncio context 继承自动获取）
-    set_request_context(thread_id=thread_id, conv_id=conv_id)
+    success = await task_manager.resolve_interrupt(message_id, resume_data)
+    if not success:
+        raise HTTPException(status_code=404, detail="No pending interrupt found for this message")
 
-    # 启动后台任务
-    async def execute_resume():
-        try:
-            async with _create_controller() as ctrl:
-                await _run_and_push(
-                    stream_manager,
-                    thread_id,
-                    ctrl.stream_execute(
-                        thread_id=thread_id,
-                        conversation_id=conv_id,
-                        message_id=request.message_id,
-                        resume_data=resume_data,
-                    ),
-                )
-        except Exception as e:
-            logger.exception(f"Failed to initialize resume execution: {e}")
-            await stream_manager.push_event(thread_id, _sanitize_error_event({
-                "type": "error",
-                "timestamp": datetime.now().isoformat(),
-                "data": {"success": False, "error": str(e)}
-            }))
-
-    await task_manager.submit(thread_id, execute_resume())
-
+    # 不需要创建新 stream — 原来的 coroutine 继续执行，
+    # 事件会继续推送到原来的 stream（使用 message_id 作为 stream key）
     return ResumeResponse(
-        stream_url=f"/api/v1/stream/{thread_id}"
+        stream_url=f"/api/v1/stream/{message_id}"
     )

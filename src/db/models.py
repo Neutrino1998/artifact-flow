@@ -152,14 +152,15 @@ class Conversation(Base):
 class Message(Base):
     """
     消息表
-    
-    存储用户消息和 Graph 响应，通过 parent_id 实现树结构。
+
+    存储用户消息和助手响应，通过 parent_id 实现树结构。
+    message_id 同时作为执行标识（不再需要独立的 thread_id）。
     """
     __tablename__ = "messages"
-    
-    # 主键：message_id
+
+    # 主键：message_id（同时作为执行标识）
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    
+
     # 外键：所属对话
     conversation_id: Mapped[str] = mapped_column(
         String(64),
@@ -167,47 +168,92 @@ class Message(Base):
         nullable=False,
         index=True
     )
-    
+
     # 父消息ID（实现树结构）
     parent_id: Mapped[Optional[str]] = mapped_column(
         String(64),
         nullable=True,
         index=True
     )
-    
+
     # 用户消息内容
     content: Mapped[str] = mapped_column(Text, nullable=False)
-    
-    # 关联的 LangGraph 线程ID
-    thread_id: Mapped[str] = mapped_column(String(64), nullable=False)
-    
-    # Graph 最终响应
-    graph_response: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    
+
+    # 助手最终响应
+    response: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # 内容摘要（跨轮 compaction 用）
+    content_summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    response_summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
     # 时间戳
     created_at: Mapped[datetime] = mapped_column(
         DateTime,
         default=datetime.now,
         nullable=False
     )
-    
-    # 扩展元数据（可存储简化的执行摘要）
+
+    # 扩展元数据（存 always_allowed_tools, execution_metrics 汇总, last_input_tokens）
     metadata_: Mapped[Optional[Dict[str, Any]]] = mapped_column(
         "metadata",
         JSON,
         nullable=True,
         default=dict
     )
-    
+
     # 关系：多对一 -> conversation
     conversation: Mapped["Conversation"] = relationship(
         "Conversation",
         back_populates="messages"
     )
-    
+
     def __repr__(self) -> str:
         content_preview = self.content[:50] + "..." if len(self.content) > 50 else self.content
         return f"<Message(id={self.id}, content={content_preview})>"
+
+
+class MessageEvent(Base):
+    """
+    消息事件表（事件溯源）
+
+    存储执行过程中的完整事件链，用于历史回放和可观测性。
+    llm_chunk 不持久化（SSE-only），其他事件全量存储。
+    在两个持久化边界 batch write：execution_complete 或 error。
+    """
+    __tablename__ = "message_events"
+
+    # 自增主键，天然有序
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+
+    # 外键：所属消息
+    message_id: Mapped[str] = mapped_column(
+        String(64),
+        ForeignKey("messages.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+
+    # 事件类型（StreamEventType.value）
+    event_type: Mapped[str] = mapped_column(String(32), nullable=False)
+
+    # 产生事件的 agent
+    agent_name: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+
+    # JSON 完整数据，不截断
+    data: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
+
+    # 时间戳
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=datetime.now,
+        nullable=False
+    )
+
+    __table_args__ = (
+        Index("ix_message_events_message", "message_id"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<MessageEvent(id={self.id}, type={self.event_type}, agent={self.agent_name})>"
 
 
 class ArtifactSession(Base):
@@ -449,7 +495,6 @@ if __name__ == "__main__":
                     id="msg-test-001",
                     conversation_id=conv.id,
                     content="Hello, World!",
-                    thread_id="thd-test-001"
                 )
                 session.add(msg)
                 await session.flush()

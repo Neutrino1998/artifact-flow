@@ -2,17 +2,6 @@
 # 核心依赖
 # ========================================
 
-# LangChain 核心组件（消息格式、Graph 编排）
-langchain>=0.3.0
-langchain-core>=0.3.0
-langgraph>=0.2.0  # 工作流编排
-langgraph-checkpoint>=2.0.0  # 状态管理
-langgraph-checkpoint-sqlite>=2.0.0  # SQLite 持久化（AsyncSqliteSaver）
-
-# ========================================
-# 模型提供商
-# ========================================
-
 # LiteLLM - 统一 LLM 接口
 # 支持 OpenAI/DeepSeek/Qwen/Ollama/vLLM 等 100+ 提供商
 litellm>=1.40.0
@@ -36,17 +25,16 @@ python-multipart>=0.0.9  # 文件上传支持
 # 文本差异对比
 diff-match-patch>=20230430
 
+# YAML 解析（Agent MD 文件）
+pyyaml>=6.0
+
 # ========================================
 # 数据库
 # ========================================
 
 # SQLAlchemy ORM（异步支持）
 sqlalchemy[asyncio]>=2.0.0
-# ⚠️ aiosqlite 必须锁定 0.21.0
-# 0.22.0 移除了 Connection 对 threading.Thread 的继承，导致 is_alive() 方法丢失
-# langgraph-checkpoint-sqlite 在初始化时调用 conn.is_alive() 会引发 AttributeError
-# 详见: https://github.com/omnilib/aiosqlite/releases/tag/v0.22.0
-aiosqlite==0.21.0
+aiosqlite>=0.20.0
 
 # ========================================
 # API 依赖

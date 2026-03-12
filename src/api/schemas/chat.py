@@ -22,10 +22,9 @@ class ChatRequest(BaseModel):
 
 class ResumeRequest(BaseModel):
     """POST /api/v1/chat/{conv_id}/resume request body"""
-    thread_id: str = Field(..., description="LangGraph thread ID")
-    message_id: str = Field(..., description="Message ID to update")
+    message_id: str = Field(..., description="Message ID to resume")
     approved: bool = Field(..., description="Whether the permission was approved")
-    always_allow: bool = Field(False, description="Always allow this tool for the rest of this thread")
+    always_allow: bool = Field(False, description="Always allow this tool for the rest of this execution")
 
 
 # ============================================================
@@ -36,7 +35,6 @@ class ChatResponse(BaseModel):
     """POST /api/v1/chat response"""
     conversation_id: str = Field(..., description="Conversation ID")
     message_id: str = Field(..., description="New message ID")
-    thread_id: str = Field(..., description="LangGraph thread ID")
     stream_url: str = Field(..., description="SSE endpoint URL for streaming")
 
 

@@ -15,8 +15,8 @@ FastAPI 依赖注入
 
 并发安全保证：
     - DatabaseManager: 全局单例，管理连接池
-    - Checkpointer: 全局单例，LangGraph 状态持久化
     - StreamManager: 全局单例，事件缓冲队列
+    - TaskManager: 全局单例，后台任务 + interrupt 管理
     - AsyncSession: 请求独立，每个请求创建新的数据库会话
     - Repository/Manager/Controller: 请求独立，绑定到请求的 session
 """
@@ -37,7 +37,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api.config import config
 from core.controller import ExecutionController
 from core.conversation_manager import ConversationManager
-from core.graph import create_multi_agent_graph, create_async_sqlite_checkpointer
 from tools.implementations.artifact_ops import ArtifactManager
 from db.database import DatabaseManager
 from repositories.artifact_repo import ArtifactRepository
@@ -52,9 +51,12 @@ logger = get_logger("ArtifactFlow")
 # ============================================================
 
 _db_manager: Optional[DatabaseManager] = None
-_checkpointer: Any = None  # AsyncSqliteSaver，LangGraph 状态持久化
 _stream_manager: Optional["StreamManager"] = None
 _task_manager: Optional["TaskManager"] = None
+
+# Agent configs + tool registry（启动时加载一次）
+_agents: Optional[dict] = None  # {name: AgentConfig}
+_tool_registry: Any = None      # ToolRegistry
 
 
 async def init_globals() -> None:
@@ -63,10 +65,9 @@ async def init_globals() -> None:
 
     在 FastAPI lifespan 中调用。
     """
-    import os
     from pathlib import Path
 
-    global _db_manager, _checkpointer, _stream_manager, _task_manager
+    global _db_manager, _stream_manager, _task_manager, _agents, _tool_registry
 
     # 0. 确保 data 目录存在
     data_dir = Path("data")
@@ -78,19 +79,46 @@ async def init_globals() -> None:
     await _db_manager.initialize()
     logger.info("Database manager initialized")
 
-    # 2. 创建共享的 checkpointer（用于 interrupt/resume）
-    _checkpointer = await create_async_sqlite_checkpointer(config.LANGGRAPH_DB_PATH)
-    logger.info(f"Checkpointer initialized: {config.LANGGRAPH_DB_PATH}")
-
-    # 3. 创建 StreamManager
+    # 2. 创建 StreamManager
     from api.services.stream_manager import StreamManager
     _stream_manager = StreamManager(ttl_seconds=config.STREAM_TTL)
     logger.info("Stream manager initialized")
 
-    # 4. 创建 TaskManager
+    # 3. 创建 TaskManager
     from api.services.task_manager import TaskManager
     _task_manager = TaskManager(max_concurrent=config.MAX_CONCURRENT_TASKS)
     logger.info("Task manager initialized")
+
+    # 4. 加载 Agent 配置
+    from agents.loader import load_all_agents
+    _agents = load_all_agents()
+    logger.info(f"Loaded {len(_agents)} agent configs")
+
+    # 5. 创建 ToolRegistry（全局）
+    _tool_registry = _create_tool_registry()
+    logger.info("Tool registry initialized")
+
+
+def _create_tool_registry():
+    """创建全局 ToolRegistry（工具库）"""
+    from tools.registry import ToolRegistry
+    from tools.implementations.call_subagent import CallSubagentTool
+    from tools.implementations.web_search import WebSearchTool
+    from tools.implementations.web_fetch import WebFetchTool
+
+    registry = ToolRegistry()
+
+    # 注册全局工具
+    tools = [
+        CallSubagentTool(),
+        WebSearchTool(),
+        WebFetchTool(),
+    ]
+
+    for tool in tools:
+        registry.register_tool_to_library(tool)
+
+    return registry
 
 
 async def close_globals() -> None:
@@ -99,75 +127,56 @@ async def close_globals() -> None:
 
     在 FastAPI lifespan 中调用。
     """
-    global _db_manager, _checkpointer, _stream_manager, _task_manager
+    global _db_manager, _stream_manager, _task_manager
 
-    # 1. 先关闭 TaskManager（等待运行中的 graph 任务完成）
+    # 1. 先关闭 TaskManager（等待运行中的任务完成）
     if _task_manager:
         await _task_manager.shutdown()
         logger.info("Task manager shut down")
 
-    # 2. 关闭 checkpointer 的 aiosqlite 连接
-    if _checkpointer and hasattr(_checkpointer, 'conn'):
-        await _checkpointer.conn.close()
-        logger.info("Checkpointer connection closed")
-
-    # 3. 关闭数据库管理器
+    # 2. 关闭数据库管理器
     if _db_manager:
         await _db_manager.close()
         logger.info("Database manager closed")
 
     _task_manager = None
-    _checkpointer = None
     _db_manager = None
     _stream_manager = None
 
 
 def get_task_manager() -> "TaskManager":
-    """
-    获取 TaskManager 单例
-
-    Returns:
-        TaskManager 实例
-    """
+    """获取 TaskManager 单例"""
     if _task_manager is None:
         raise RuntimeError("TaskManager not initialized. Call init_globals() first.")
     return _task_manager
 
 
 def get_stream_manager() -> "StreamManager":
-    """
-    获取 StreamManager 单例
-
-    Returns:
-        StreamManager 实例
-    """
+    """获取 StreamManager 单例"""
     if _stream_manager is None:
         raise RuntimeError("StreamManager not initialized. Call init_globals() first.")
     return _stream_manager
 
 
-def get_checkpointer() -> Any:
-    """
-    获取 Checkpointer 单例
-
-    Returns:
-        AsyncSqliteSaver 实例
-    """
-    if _checkpointer is None:
-        raise RuntimeError("Checkpointer not initialized. Call init_globals() first.")
-    return _checkpointer
-
-
 def get_db_manager() -> DatabaseManager:
-    """
-    获取 DatabaseManager 单例
-
-    Returns:
-        DatabaseManager 实例
-    """
+    """获取 DatabaseManager 单例"""
     if _db_manager is None:
         raise RuntimeError("DatabaseManager not initialized. Call init_globals() first.")
     return _db_manager
+
+
+def get_agents() -> dict:
+    """获取 Agent 配置字典"""
+    if _agents is None:
+        raise RuntimeError("Agents not loaded. Call init_globals() first.")
+    return _agents
+
+
+def get_tool_registry():
+    """获取 ToolRegistry 单例"""
+    if _tool_registry is None:
+        raise RuntimeError("ToolRegistry not initialized. Call init_globals() first.")
+    return _tool_registry
 
 
 # ============================================================
@@ -175,15 +184,7 @@ def get_db_manager() -> DatabaseManager:
 # ============================================================
 
 async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
-    """
-    每个请求获得独立的数据库 session
-
-    请求成功 → 自动 commit
-    请求失败 → 自动 rollback
-
-    Yields:
-        AsyncSession: 数据库会话
-    """
+    """每个请求获得独立的数据库 session"""
     db_manager = get_db_manager()
     async with db_manager.session() as session:
         yield session
@@ -192,15 +193,7 @@ async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
 async def get_artifact_manager(
     session: AsyncSession = Depends(get_db_session)
 ) -> ArtifactManager:
-    """
-    每个请求获得独立的 ArtifactManager（绑定到请求的 session）
-
-    Args:
-        session: 数据库会话（自动注入）
-
-    Returns:
-        ArtifactManager 实例
-    """
+    """每个请求获得独立的 ArtifactManager"""
     repo = ArtifactRepository(session)
     return ArtifactManager(repo)
 
@@ -208,46 +201,37 @@ async def get_artifact_manager(
 async def get_conversation_manager(
     session: AsyncSession = Depends(get_db_session)
 ) -> ConversationManager:
-    """
-    每个请求获得独立的 ConversationManager（绑定到请求的 session）
-
-    Args:
-        session: 数据库会话（自动注入）
-
-    Returns:
-        ConversationManager 实例
-    """
+    """每个请求获得独立的 ConversationManager"""
     repo = ConversationRepository(session)
     return ConversationManager(repo)
 
 
 async def get_controller(
+    session: AsyncSession = Depends(get_db_session),
     artifact_manager: ArtifactManager = Depends(get_artifact_manager),
     conversation_manager: ConversationManager = Depends(get_conversation_manager),
 ) -> ExecutionController:
     """
     每个请求获得独立的 Controller
 
-    注意：
-    - Graph 每次创建新实例，因为它持有 artifact_manager 引用
-    - 但 checkpointer 是共享的，以支持跨请求的 interrupt/resume
-    - create_multi_agent_graph 是 async 函数
-
-    Args:
-        artifact_manager: ArtifactManager 实例（自动注入）
-        conversation_manager: ConversationManager 实例（自动注入）
-
-    Returns:
-        ExecutionController 实例
+    不再需要 checkpointer 或 compiled_graph。
     """
-    compiled_graph = await create_multi_agent_graph(
-        artifact_manager=artifact_manager,
-        checkpointer=get_checkpointer()  # 使用共享的 checkpointer
-    )
+    from repositories.message_event_repo import MessageEventRepository
+    from tools.implementations.artifact_ops import create_artifact_tools
+
+    # 注册 artifact 工具到 tool_registry（每次请求需要绑定当前 artifact_manager）
+    registry = get_tool_registry()
+    artifact_tools = create_artifact_tools(artifact_manager)
+    for tool in artifact_tools:
+        registry.register_tool_to_library(tool)
+
     return ExecutionController(
-        compiled_graph,
+        agents=get_agents(),
+        tool_registry=registry,
+        task_manager=get_task_manager(),
         artifact_manager=artifact_manager,
-        conversation_manager=conversation_manager
+        conversation_manager=conversation_manager,
+        message_event_repo=MessageEventRepository(session),
     )
 
 
@@ -265,11 +249,7 @@ async def get_current_user(
     """
     获取当前已认证用户
 
-    每次请求查 DB 校验 is_active 和最新 role，
-    确保禁用/降权即时生效（不仅依赖 JWT payload）。
-
-    Returns:
-        TokenPayload（user_id, username, role）
+    每次请求查 DB 校验 is_active 和最新 role。
     """
     from api.services.auth import decode_access_token, TokenPayload
     from repositories.user_repo import UserRepository
@@ -281,13 +261,11 @@ async def get_current_user(
     if payload is None:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
 
-    # 查 DB 校验用户当前状态
     user_repo = UserRepository(session)
     user = await user_repo.get_by_id(payload.user_id)
     if not user or not user.is_active:
         raise HTTPException(status_code=401, detail="User disabled or not found")
 
-    # 用 DB 中的最新 role 覆盖 JWT 中的 role
     return TokenPayload(user_id=user.id, username=user.username, role=user.role)
 
 

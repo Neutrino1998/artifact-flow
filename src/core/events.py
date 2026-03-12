@@ -1,10 +1,17 @@
 """
 统一的事件类型定义
 
-各层产生的事件：
-- [Controller] 会话级别元数据和最终结果
-- [Agent]      LLM 执行相关事件
-- [Graph]      工具执行和权限相关事件
+事件类型清单（设计文档 §事件类型清单）：
+- agent_start      — agent 开始
+- llm_chunk        — LLM token 流（仅推 SSE，不入内存事件列表）
+- llm_complete     — LLM 调用完成
+- tool_start       — 工具开始
+- tool_complete    — 工具完成
+- agent_complete   — agent 结束
+- interrupt_pending — 需要用户确认
+- interrupt_resolved — 确认结果
+- execution_complete — 执行完成
+- error            — 异常
 """
 
 from enum import Enum
@@ -17,44 +24,50 @@ class StreamEventType(Enum):
     """
     统一的执行事件类型
 
-    产生位置：
-    - [Controller] 会话级别元数据和最终结果
-    - [Agent]      LLM 执行相关事件
-    - [Graph]      工具执行和权限相关事件
+    兼容旧 SSE 事件格式（value 不变），前端无需修改。
     """
 
     # ========== Controller 层 ==========
-    METADATA = "metadata"                # 会话元数据（conversation_id, thread_id）
+    METADATA = "metadata"                # 会话元数据（conversation_id, message_id）
     COMPLETE = "complete"                # 整体完成（含 execution_metrics）
     ERROR = "error"                      # 错误
 
     # ========== Agent 层 ==========
     AGENT_START = "agent_start"          # agent 开始执行
-    LLM_CHUNK = "llm_chunk"              # LLM token 流
+    LLM_CHUNK = "llm_chunk"              # LLM token 流（仅 SSE，不持久化）
     LLM_COMPLETE = "llm_complete"        # LLM 单次调用完成
     AGENT_COMPLETE = "agent_complete"    # agent 本轮完成
 
-    # ========== Graph 层 ==========
+    # ========== 工具 / 权限层 ==========
     TOOL_START = "tool_start"            # 工具开始执行
     TOOL_COMPLETE = "tool_complete"      # 工具执行完成
     PERMISSION_REQUEST = "permission_request"  # 请求权限确认
     PERMISSION_RESULT = "permission_result"    # 权限确认结果
 
 
-@dataclass
-class StreamEvent:
-    """统一的流式事件"""
-    type: StreamEventType
-    timestamp: datetime = field(default_factory=datetime.now)
+# ============================================================
+# 内存事件（执行过程中累积，最终 batch write）
+# ============================================================
 
-    # 可选字段，根据事件类型存在
-    agent: Optional[str] = None          # agent 名称
-    tool: Optional[str] = None           # 工具名称
-    data: Any = None                     # 事件数据
+@dataclass
+class ExecutionEvent:
+    """内存中的执行事件"""
+    event_type: str          # StreamEventType.value
+    agent_name: Optional[str] = None
+    data: Any = None
+    created_at: datetime = field(default_factory=datetime.now)
+
+    def to_dict(self) -> dict:
+        return {
+            "event_type": self.event_type,
+            "agent_name": self.agent_name,
+            "data": self.data,
+            "created_at": self.created_at.isoformat(),
+        }
 
 
 # ============================================================
-# ExecutionMetrics 相关类型定义
+# ExecutionMetrics 相关类型定义（复用旧 events.py）
 # ============================================================
 
 class TokenUsage(TypedDict):
@@ -85,14 +98,7 @@ class AgentExecutionRecord(TypedDict):
 
 
 class ExecutionMetrics(TypedDict):
-    """
-    请求级别的可观测性指标
-
-    数据流：
-    - Agent 执行完成 → append AgentExecutionRecord
-    - Tool 执行完成 → append ToolCallRecord
-    - 请求完成 → 设置 completed_at 和 total_duration_ms
-    """
+    """请求级别的可观测性指标"""
     started_at: str
     completed_at: Optional[str]
     total_duration_ms: Optional[int]
@@ -112,16 +118,10 @@ def create_initial_metrics() -> ExecutionMetrics:
 
 
 def finalize_metrics(metrics: ExecutionMetrics) -> None:
-    """
-    完成 metrics 记录（设置结束时间和总耗时）
-
-    Args:
-        metrics: 要完成的 ExecutionMetrics（会被原地修改）
-    """
+    """完成 metrics 记录"""
     completed_at = datetime.now()
     metrics["completed_at"] = completed_at.isoformat()
 
-    # 计算总耗时
     started_at = datetime.fromisoformat(metrics["started_at"])
     duration_ms = int((completed_at - started_at).total_seconds() * 1000)
     metrics["total_duration_ms"] = duration_ms
@@ -136,13 +136,7 @@ def append_agent_execution(
     completed_at: str,
     llm_duration_ms: int
 ) -> None:
-    """
-    追加 agent 执行记录
-
-    Args:
-        metrics: ExecutionMetrics（会被原地修改）
-        其他参数: AgentExecutionRecord 的字段
-    """
+    """追加 agent 执行记录"""
     record: AgentExecutionRecord = {
         "agent_name": agent_name,
         "model": model,
@@ -163,13 +157,7 @@ def append_tool_call(
     completed_at: str,
     agent: str
 ) -> None:
-    """
-    追加工具调用记录
-
-    Args:
-        metrics: ExecutionMetrics（会被原地修改）
-        其他参数: ToolCallRecord 的字段
-    """
+    """追加工具调用记录"""
     record: ToolCallRecord = {
         "tool_name": tool_name,
         "success": success,

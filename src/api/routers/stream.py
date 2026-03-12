@@ -2,7 +2,7 @@
 Stream Router
 
 处理 SSE 流式输出端点：
-- GET /api/v1/stream/{thread_id} - SSE 端点，订阅执行过程
+- GET /api/v1/stream/{stream_id} - SSE 端点，订阅执行过程
 """
 
 import asyncio
@@ -23,16 +23,17 @@ logger = get_logger("ArtifactFlow")
 router = APIRouter()
 
 
-@router.get("/{thread_id}")
+@router.get("/{stream_id}")
 async def stream_events(
-    thread_id: str,
+    stream_id: str,
     current_user: TokenPayload = Depends(get_current_user),
     stream_manager: StreamManager = Depends(get_stream_manager),
 ) -> StreamingResponse:
     """
-    SSE 端点，订阅 Graph 执行过程
+    SSE 端点，订阅执行过程
 
     前端通过 EventSource 连接此端点，接收实时事件流。
+    stream_id 即 message_id（消息与执行 1:1）。
 
     事件格式（使用标准 SSE event: 字段区分事件类型）：
         event: metadata
@@ -57,7 +58,7 @@ async def stream_events(
         try:
             # 消费事件（带心跳支持 + 用户校验）
             async for event in stream_manager.consume_events(
-                thread_id,
+                stream_id,
                 heartbeat_interval=config.SSE_PING_INTERVAL,
                 user_id=current_user.user_id,
             ):
@@ -71,7 +72,7 @@ async def stream_events(
                 # 检查是否是终结事件
                 event_type = event.get("type", "")
                 if event_type in ("complete", "error"):
-                    logger.info(f"Stream {thread_id}: terminal event '{event_type}', closing connection")
+                    logger.info(f"Stream {stream_id}: terminal event '{event_type}', closing connection")
                     break
 
         except StreamNotFoundError:
@@ -81,19 +82,19 @@ async def stream_events(
                 "timestamp": __import__("datetime").datetime.now().isoformat(),
                 "data": {
                     "success": False,
-                    "error": f"Stream '{thread_id}' not found or expired"
+                    "error": f"Stream '{stream_id}' not found or expired"
                 }
             }
             yield format_sse_event(error_event, event="error")
 
         except asyncio.CancelledError:
             # 客户端断开连接
-            logger.info(f"Stream {thread_id}: client disconnected")
-            await stream_manager.close_stream(thread_id)
+            logger.info(f"Stream {stream_id}: client disconnected")
+            await stream_manager.close_stream(stream_id)
 
         except Exception as e:
             # 其他错误
-            logger.exception(f"Stream {thread_id}: unexpected error: {e}")
+            logger.exception(f"Stream {stream_id}: unexpected error: {e}")
             error_detail = str(e) if config.DEBUG else "Internal server error"
             error_event = {
                 "type": "error",

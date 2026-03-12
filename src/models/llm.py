@@ -3,13 +3,13 @@
 支持多种模型提供商，包括自部署服务（Ollama/vLLM）
 """
 
+import asyncio
 import os
 from typing import Optional, Dict, Any, AsyncIterator, Union
 from dataclasses import dataclass, field
 from dotenv import load_dotenv
 
 from litellm import completion, acompletion
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 
 from utils.logger import get_logger
 
@@ -99,26 +99,6 @@ class LLMResponse:
     reasoning_content: Optional[str] = None
     token_usage: Optional[Dict[str, int]] = None
     raw_response: Any = None
-
-    def to_langchain_message(self) -> AIMessage:
-        """转换为 LangChain AIMessage，保持与原有代码兼容"""
-        additional_kwargs = {}
-        if self.reasoning_content:
-            additional_kwargs["reasoning_content"] = self.reasoning_content
-
-        response_metadata = {}
-        if self.token_usage:
-            # 转换为原有格式：input_tokens / output_tokens
-            response_metadata["token_usage"] = {
-                "input_tokens": self.token_usage.get("prompt_tokens", 0),
-                "output_tokens": self.token_usage.get("completion_tokens", 0),
-            }
-
-        return AIMessage(
-            content=self.content,
-            additional_kwargs=additional_kwargs,
-            response_metadata=response_metadata,
-        )
 
 
 # ========================================
@@ -224,80 +204,103 @@ class UnifiedLLM:
             raw_response=response,
         )
 
-    def _format_messages(self, messages: Union[list[BaseMessage], list[dict]]) -> list[dict]:
-        """将消息转换为 dict 格式"""
-        if not messages:
-            return []
-
-        # 如果已经是 dict 格式，直接返回
-        if isinstance(messages[0], dict):
-            return messages
-
-        # 转换 LangChain 消息
-        result = []
-        for msg in messages:
-            if isinstance(msg, SystemMessage):
-                role = "system"
-            elif isinstance(msg, HumanMessage):
-                role = "user"
-            elif isinstance(msg, AIMessage):
-                role = "assistant"
-            elif hasattr(msg, "type"):
-                role = {"human": "user", "ai": "assistant", "system": "system"}.get(
-                    msg.type, "user"
-                )
-            else:
-                role = "user"
-            result.append({"role": role, "content": msg.content})
-        return result
-
     # ========================================
     # 同步接口
     # ========================================
 
-    def invoke(self, messages: Union[list[BaseMessage], list[dict], str]) -> AIMessage:
+    def invoke(self, messages: Union[list[dict], str]) -> LLMResponse:
         """
         同步调用
 
         Args:
-            messages: LangChain 消息列表、dict 列表或单个字符串
+            messages: dict 列表或单个字符串
 
         Returns:
-            AIMessage
+            LLMResponse
         """
         if isinstance(messages, str):
             messages = [{"role": "user", "content": messages}]
 
-        formatted = self._format_messages(messages)
-        params = self._build_params(formatted)
+        params = self._build_params(messages)
         response = completion(**params)
-        return self._parse_response(response).to_langchain_message()
+        return self._parse_response(response)
 
     # ========================================
     # 异步接口
     # ========================================
 
-    async def ainvoke(self, messages: Union[list[BaseMessage], list[dict], str]) -> AIMessage:
+    async def ainvoke(self, messages: Union[list[dict], str]) -> LLMResponse:
         """
         异步调用
 
         Args:
-            messages: LangChain 消息列表、dict 列表或单个字符串
+            messages: dict 列表或单个字符串
 
         Returns:
-            AIMessage
+            LLMResponse
         """
         if isinstance(messages, str):
             messages = [{"role": "user", "content": messages}]
 
-        formatted = self._format_messages(messages)
-        params = self._build_params(formatted)
+        params = self._build_params(messages)
         response = await acompletion(**params)
-        return self._parse_response(response).to_langchain_message()
+        return self._parse_response(response)
+
+    async def ainvoke_with_retry(
+        self,
+        messages: Union[list[dict], str],
+        max_retries: int = 3,
+        retry_delay: float = 1.0,
+    ) -> LLMResponse:
+        """
+        带重试的异步调用
+
+        Args:
+            messages: dict 列表或单个字符串
+            max_retries: 最大重试次数
+            retry_delay: 初始重试延迟（秒）
+
+        Returns:
+            LLMResponse
+
+        Raises:
+            Exception: 重试失败后的最后异常
+        """
+        last_error = None
+
+        for attempt in range(max_retries):
+            try:
+                return await self.ainvoke(messages)
+            except Exception as e:
+                last_error = e
+                error_str = str(e).lower()
+
+                # 认证错误不重试
+                if "auth" in error_str or ("api" in error_str and "key" in error_str):
+                    logger.error(f"LLM authentication error: {e}")
+                    raise
+
+                # 计算等待时间
+                if "rate" in error_str or "limit" in error_str:
+                    wait_time = retry_delay * (2 ** attempt)
+                    logger.warning(f"LLM rate limited, retry {attempt+1}/{max_retries} after {wait_time}s")
+                elif "timeout" in error_str:
+                    wait_time = retry_delay
+                    logger.warning(f"LLM timeout, retry {attempt+1}/{max_retries} after {wait_time}s")
+                else:
+                    wait_time = retry_delay * (1.5 ** attempt)
+                    logger.warning(f"LLM error: {e}, retry {attempt+1}/{max_retries} after {wait_time}s")
+
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(wait_time)
+                else:
+                    raise
+
+        raise last_error or RuntimeError("LLM call failed without specific error")
 
     async def astream(
         self,
-        messages: Union[list[BaseMessage], list[dict], str]
+        messages: Union[list[dict], str]
     ) -> AsyncIterator[dict]:
         """
         异步流式调用
@@ -312,8 +315,7 @@ class UnifiedLLM:
         if isinstance(messages, str):
             messages = [{"role": "user", "content": messages}]
 
-        formatted = self._format_messages(messages)
-        params = self._build_params(formatted, stream=True)
+        params = self._build_params(messages, stream=True)
 
         response = await acompletion(**params)
 
@@ -357,6 +359,59 @@ class UnifiedLLM:
             "token_usage": token_usage,
         }
 
+    async def astream_with_retry(
+        self,
+        messages: Union[list[dict], str],
+        max_retries: int = 3,
+        retry_delay: float = 1.0,
+    ) -> AsyncIterator[dict]:
+        """
+        带重试的异步流式调用
+
+        只在建立连接阶段重试，流式传输开始后不重试。
+
+        Args:
+            messages: dict 列表或单个字符串
+            max_retries: 最大重试次数
+            retry_delay: 初始重试延迟（秒）
+
+        Yields:
+            dict: 同 astream() 的 yield 格式
+        """
+        last_error = None
+
+        for attempt in range(max_retries):
+            try:
+                async for chunk in self.astream(messages):
+                    yield chunk
+                return  # 流式完成，正常退出
+            except Exception as e:
+                last_error = e
+                error_str = str(e).lower()
+
+                # 认证错误不重试
+                if "auth" in error_str or ("api" in error_str and "key" in error_str):
+                    logger.error(f"LLM authentication error: {e}")
+                    raise
+
+                # 计算等待时间
+                if "rate" in error_str or "limit" in error_str:
+                    wait_time = retry_delay * (2 ** attempt)
+                    logger.warning(f"LLM stream rate limited, retry {attempt+1}/{max_retries} after {wait_time}s")
+                elif "timeout" in error_str:
+                    wait_time = retry_delay
+                    logger.warning(f"LLM stream timeout, retry {attempt+1}/{max_retries} after {wait_time}s")
+                else:
+                    wait_time = retry_delay * (1.5 ** attempt)
+                    logger.warning(f"LLM stream error: {e}, retry {attempt+1}/{max_retries} after {wait_time}s")
+
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(wait_time)
+                else:
+                    raise
+
+        raise last_error or RuntimeError("LLM stream call failed without specific error")
+
 
 # ========================================
 # 便捷函数
@@ -388,24 +443,6 @@ def create_llm(
 
     Returns:
         UnifiedLLM 实例
-
-    Examples:
-        # 使用预定义模型
-        llm = create_llm("deepseek-chat")
-
-        # 使用 Ollama 本地模型
-        llm = create_llm(
-            model="llama3",
-            base_url="http://localhost:11434/v1",
-            api_key="ollama"
-        )
-
-        # 使用 vLLM 部署的模型
-        llm = create_llm(
-            model="Qwen/Qwen2-7B-Instruct",
-            base_url="http://localhost:8000/v1",
-            api_key="token-abc123"
-        )
     """
     return UnifiedLLM(
         model=model,
@@ -432,43 +469,3 @@ def get_model_info(model: str) -> Dict[str, Any]:
             "description": config.get("description", ""),
         }
     return {"model_id": model, "description": "Custom model"}
-
-
-# ========================================
-# 测试入口
-# ========================================
-
-if __name__ == "__main__":
-    import asyncio
-
-    async def test_basic():
-        """基本功能测试"""
-        print("\n" + "=" * 60)
-        print("Testing basic invoke...")
-        print("=" * 60)
-
-        llm = create_llm("deepseek-chat", temperature=0.3)
-        response = llm.invoke("Say 'Hello LiteLLM!' in exactly 3 words")
-
-        print(f"Content: {response.content}")
-        print(f"Token usage: {response.response_metadata.get('token_usage', {})}")
-
-    async def test_stream():
-        """流式输出测试"""
-        print("\n" + "=" * 60)
-        print("Testing async stream...")
-        print("=" * 60)
-
-        llm = create_llm("deepseek-chat", temperature=0.3)
-
-        print("Streaming: ", end="", flush=True)
-        async for chunk in llm.astream("Count from 1 to 5"):
-            if chunk["type"] == "content":
-                print(chunk["content"], end="", flush=True)
-            elif chunk["type"] == "usage":
-                print(f"\nToken usage: {chunk['token_usage']}")
-        print()
-
-    # 运行测试
-    asyncio.run(test_basic())
-    asyncio.run(test_stream())

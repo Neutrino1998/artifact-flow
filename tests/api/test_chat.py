@@ -44,13 +44,13 @@ async def seed_conversation(
         msg1_id = f"msg-{uuid.uuid4().hex}"
         msg2_id = f"msg-{uuid.uuid4().hex}"
 
-        await repo.add_message(conv_id, msg1_id, "first message", "thd-1")
-        await repo.update_graph_response(msg1_id, "first response")
+        await repo.add_message(conv_id, msg1_id, "first message")
+        await repo.update_response(msg1_id, "first response")
 
         await repo.add_message(
-            conv_id, msg2_id, "second message", "thd-1", parent_id=msg1_id
+            conv_id, msg2_id, "second message", parent_id=msg1_id
         )
-        await repo.update_graph_response(msg2_id, "second response")
+        await repo.update_response(msg2_id, "second response")
 
     return conv_id, [msg1_id, msg2_id]
 
@@ -78,9 +78,9 @@ async def seed_branched_conversation(
         child_a_id = f"msg-{uuid.uuid4().hex}"
         child_b_id = f"msg-{uuid.uuid4().hex}"
 
-        await repo.add_message(conv_id, root_id, "root", "thd-1")
-        await repo.add_message(conv_id, child_a_id, "branch A", "thd-1", parent_id=root_id)
-        await repo.add_message(conv_id, child_b_id, "branch B", "thd-1", parent_id=root_id)
+        await repo.add_message(conv_id, root_id, "root")
+        await repo.add_message(conv_id, child_a_id, "branch A", parent_id=root_id)
+        await repo.add_message(conv_id, child_b_id, "branch B", parent_id=root_id)
 
     return conv_id, [root_id, child_a_id, child_b_id]
 

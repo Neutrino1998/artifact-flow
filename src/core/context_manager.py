@@ -1,22 +1,39 @@
 """
-Context管理器
-职责：通用的消息压缩和路由上下文准备
+ContextManager — 唯一的抽象
+
+设计文档 §唯一的抽象：ContextManager.build()
+
+职责：
+1. 拼接 system prompt（role_prompt + system_info + task_plan + artifacts + agents + tools）
+2. 构建对话历史（含跨轮 compaction）
+3. 构建当前输入（含 queued messages 合并、tool 交互）
+4. 按 agent_name 过滤事件构建 context
 """
 
-from typing import List, Dict, Optional, Any, Tuple
+from typing import Dict, Any, List, Optional
+from dataclasses import dataclass
+from datetime import datetime
+
 from utils.logger import get_logger
 
 logger = get_logger("ArtifactFlow")
 
 
+@dataclass
+class Context:
+    """构建好的 context"""
+    messages: List[Dict[str, str]]
+
+
 class ContextManager:
     """
     上下文管理器
+
     职责：
-    1. 通用的消息压缩（可用于任何消息列表）
-    2. 路由上下文准备
+    1. 为每次 LLM 调用构建完整的 messages
+    2. 通用的消息压缩
     """
-    
+
     # 压缩级别对应的最大字符数
     COMPRESSION_LEVELS = {
         'full': 160000,
@@ -24,20 +41,243 @@ class ContextManager:
         'compact': 40000,
         'minimal': 20000
     }
-    
+
     @classmethod
-    def should_compress(
+    def build(
         cls,
-        messages: List[Dict],
-        level: str = "normal"
-    ) -> bool:
-        """判断是否需要压缩"""
-        if not messages:
-            return False
-        
-        max_length = cls.COMPRESSION_LEVELS.get(level, 40000)
-        total_length = sum(len(msg.get("content", "")) for msg in messages)
-        return total_length > max_length
+        state: Dict[str, Any],
+        agent_config: Any,  # AgentConfig
+        agents: Dict[str, Any],  # {name: AgentConfig} for building available agents section
+        tool_registry: Any,  # ToolRegistry
+        artifact_manager: Optional[Any] = None,
+        artifacts_inventory: Optional[List[Dict]] = None,
+    ) -> Context:
+        """
+        构建 LLM 调用所需的完整 messages
+
+        设计文档 §唯一的抽象：ContextManager.build()
+
+        Args:
+            state: 执行状态
+            agent_config: 当前 agent 的 AgentConfig
+            agents: 所有 agent 配置 {name: AgentConfig}
+            tool_registry: 工具注册中心
+            artifact_manager: ArtifactManager（用于 artifacts 清单）
+            artifacts_inventory: 预加载的 artifacts 清单
+
+        Returns:
+            Context（含 messages 列表）
+        """
+        from tools.prompt_generator import ToolPromptGenerator
+
+        # ========== System Prompt ==========
+        system_parts = []
+
+        # 1. 角色提示词（MD body）
+        if agent_config.role_prompt:
+            system_parts.append(agent_config.role_prompt)
+
+        # 2. 系统时间
+        current_time = datetime.now().strftime("%Y/%m/%d %H:%M:%S %a")
+        system_parts.append(f'<system_time>Current time: {current_time}</system_time>')
+
+        # 3. 任务计划（从 artifacts 注入）
+        task_plan_content = cls._extract_task_plan(artifacts_inventory)
+        if task_plan_content:
+            system_parts.append(f'<team_task_plan>\n{task_plan_content}\n</team_task_plan>')
+
+        # 4. Artifact 清单（条件注入：仅有 artifact 工具的 agent）
+        has_artifact_tools = any(t in agent_config.tools for t in [
+            "create_artifact", "update_artifact", "rewrite_artifact", "read_artifact"
+        ])
+        if has_artifact_tools and artifacts_inventory:
+            system_parts.append(cls._build_artifacts_inventory(artifacts_inventory))
+
+        # 5. 可用 Agent 列表（条件注入：仅有 call_subagent 工具的 agent）
+        if "call_subagent" in agent_config.tools:
+            system_parts.append(cls._build_available_agents(agents, agent_config.name))
+
+        # 6. 工具说明
+        tool_names = list(agent_config.tools.keys())
+        tools = []
+        for name in tool_names:
+            tool = tool_registry.get_tool(name)
+            if tool:
+                tools.append(tool)
+        if tools:
+            system_parts.append(ToolPromptGenerator.generate_tool_instruction(tools))
+
+        system_prompt = "\n\n".join(s for s in system_parts if s)
+
+        # ========== Messages ==========
+        messages = [{"role": "system", "content": system_prompt}]
+
+        # 对话历史（仅 lead_agent）
+        if agent_config.name == "lead_agent":
+            history = state.get("conversation_history", [])
+            if history:
+                compressed = cls.compress_messages(
+                    history,
+                    level="normal",
+                    preserve_recent=4  # 偶数：[user, asst, user, asst]
+                )
+                if len(compressed) < len(history):
+                    compressed = cls._merge_truncation_marker(
+                        compressed,
+                        "_[Earlier conversation truncated]_"
+                    )
+                messages.extend(compressed)
+
+        # 当前输入 + 工具交互历史
+        current_input_messages = cls._build_current_input(state, agent_config)
+        messages.extend(current_input_messages)
+
+        return Context(messages=messages)
+
+    @classmethod
+    def _extract_task_plan(cls, artifacts_inventory: Optional[List[Dict]]) -> Optional[str]:
+        """从 artifacts 清单中提取 task_plan 内容"""
+        if not artifacts_inventory:
+            return None
+
+        for artifact in artifacts_inventory:
+            if artifact.get("id") == "task_plan" and artifact.get("content"):
+                return artifact["content"]
+        return None
+
+    @classmethod
+    def _build_artifacts_inventory(cls, artifacts_inventory: List[Dict]) -> str:
+        """构建 artifacts 清单部分"""
+        count = len(artifacts_inventory)
+        lines = [f'{count} artifact(s) in this session.']
+        lines.append('<artifacts_inventory>')
+        for artifact in artifacts_inventory:
+            source = artifact.get("source", "agent")
+            lines.append(
+                f'<artifact id="{artifact["id"]}" type="{artifact["content_type"]}" '
+                f'title="{artifact["title"]}" version="{artifact["version"]}" '
+                f'source="{source}" updated="{artifact["updated_at"]}">'
+            )
+            lines.append(artifact.get("content", ""))
+            lines.append('</artifact>')
+        lines.append(
+            '\nArtifacts with source: user_upload are documents uploaded by the user '
+            '— use `read_artifact` for full content if relevant.'
+        )
+        lines.append('</artifacts_inventory>')
+        return '\n'.join(lines)
+
+    @classmethod
+    def _build_available_agents(cls, agents: Dict[str, Any], current_agent: str) -> str:
+        """构建可用 agent 列表"""
+        sub_agents = {n: c for n, c in agents.items() if n != current_agent}
+        if not sub_agents:
+            return "<note>No sub-agents are currently registered. Work independently.</note>"
+
+        lines = ["<available_subagents>"]
+        lines.append("Use the `call_subagent` tool to delegate tasks. Provide clear, specific instructions.\n")
+
+        for name, config in sub_agents.items():
+            lines.append(f"**{name}**: {config.description}")
+            for cap in config.capabilities:
+                lines.append(f"  - {cap}")
+            lines.append("")
+
+        lines.append("</available_subagents>")
+        return "\n".join(lines)
+
+    @classmethod
+    def _build_current_input(cls, state: Dict[str, Any], agent_config: Any) -> List[Dict[str, str]]:
+        """
+        构建当前输入消息（含 tool 交互和 queued messages）
+
+        按 agent_name 过滤事件构建 context：
+        - lead 看 current_task + 自己的工具交互
+        - subagent 看 instruction + 自己的工具交互
+        """
+        from tools.prompt_generator import format_result
+
+        messages = []
+        agent_name = agent_config.name
+        events = state.get("events", [])
+
+        if agent_name == "lead_agent":
+            # Lead: 用户输入 + queued messages
+            instruction = state["current_task"]
+            queued = state.get("queued_messages", [])
+            if queued:
+                instruction += "\n\n[Additional messages received during execution]\n"
+                instruction += "\n".join(queued)
+
+            messages.append({"role": "user", "content": instruction})
+        else:
+            # Subagent: 从 lead 的最近 call_subagent tool_start 事件获取 instruction
+            instruction = cls._get_subagent_instruction(events, agent_name)
+            messages.append({"role": "user", "content": instruction})
+
+        # 过滤当前 agent 的工具交互事件
+        tool_interactions = cls._build_tool_interactions(events, agent_name)
+
+        if tool_interactions:
+            compressed = cls.compress_messages(
+                tool_interactions,
+                level="normal",
+                preserve_recent=5  # 奇数：[asst, user, asst, user, asst]
+            )
+            if len(compressed) < len(tool_interactions):
+                compressed = cls._merge_truncation_marker(
+                    compressed,
+                    "_[Earlier tool calls truncated]_"
+                )
+            messages.extend(compressed)
+
+        return messages
+
+    @classmethod
+    def _get_subagent_instruction(cls, events: List, agent_name: str) -> str:
+        """从事件流中获取 subagent 的 instruction"""
+        # 从最近的 call_subagent tool_start 事件获取 instruction
+        for event in reversed(events):
+            if (event.event_type == "tool_start" and
+                event.data and
+                event.data.get("tool") == "call_subagent" and
+                event.data.get("params", {}).get("agent_name") == agent_name):
+                return event.data["params"].get("instruction", "")
+        return "Execute the assigned task."
+
+    @classmethod
+    def _build_tool_interactions(cls, events: List, agent_name: str) -> List[Dict[str, str]]:
+        """从事件流中构建 tool 交互历史"""
+        from tools.prompt_generator import format_result
+
+        interactions = []
+        # 过滤当前 agent 的事件
+        agent_events = [e for e in events if e.agent_name == agent_name]
+
+        for event in agent_events:
+            if event.event_type == "llm_complete":
+                # LLM 响应 → assistant 消息
+                content = event.data.get("content", "") if event.data else ""
+                if content:
+                    interactions.append({"role": "assistant", "content": content})
+
+            elif event.event_type == "tool_complete":
+                # 工具结果 → user 消息
+                if event.data:
+                    tool_name = event.data.get("tool", "unknown")
+                    result_data = {
+                        "success": event.data.get("success", False),
+                        "data": event.data.get("result_data"),
+                        "error": event.data.get("error"),
+                    }
+                    result_text = format_result(tool_name, result_data)
+                    interactions.append({"role": "user", "content": result_text})
+
+        return interactions
+
+    # ============================================================
+    # 消息压缩（复用旧 ContextManager 的逻辑）
+    # ============================================================
 
     @classmethod
     def compress_messages(
@@ -47,59 +287,48 @@ class ContextManager:
         preserve_recent: int = 5
     ) -> List[Dict]:
         """
-        压缩消息历史（通用方法）
-        
-        可用于：
-        - 对话历史压缩
-        - Agent工具交互历史压缩
-        
+        压缩消息历史
+
         Args:
-            messages: 消息列表（需要有"content"字段）
+            messages: 消息列表
             level: 压缩级别
             preserve_recent: 保留最近N条完整消息
-            
+
         Returns:
             压缩后的消息列表
         """
         if not messages or level == "full":
             return messages
-        
+
         max_length = cls.COMPRESSION_LEVELS.get(level, 40000)
-        
-        # 计算总长度
         total_length = sum(len(msg.get("content", "")) for msg in messages)
-        
+
         if total_length <= max_length:
             return messages
-        
+
         logger.debug(f"Compressing {len(messages)} messages: {total_length} chars -> max {max_length}")
-        
-        # 保留最近的N条消息
+
         if len(messages) <= preserve_recent:
             return messages
-        
+
         recent_messages = messages[-preserve_recent:]
         older_messages = messages[:-preserve_recent]
-        
-        # 计算recent消息的长度
+
         recent_length = sum(len(msg.get("content", "")) for msg in recent_messages)
         remaining_length = max_length - recent_length
-        
+
         if remaining_length <= 0:
-            # recent消息已经超过限制，只保留recent + 截断提示
             return [{
                 "role": "system",
                 "content": f"[{len(older_messages)} earlier messages truncated due to length limit]"
             }] + recent_messages
-        
-        # 从后往前保留older消息，直到达到限制
+
         compressed = []
         current_length = 0
-        
+
         for msg in reversed(older_messages):
             msg_length = len(msg.get("content", ""))
             if current_length + msg_length > remaining_length:
-                # 达到限制，添加截断提示
                 if len(older_messages) > len(compressed):
                     compressed.insert(0, {
                         "role": "system",
@@ -108,136 +337,17 @@ class ContextManager:
                 break
             compressed.insert(0, msg)
             current_length += msg_length
-        
+
         result = compressed + recent_messages
         logger.debug(f"Compressed to {len(result)} messages")
         return result
-    
-    @classmethod
-    async def prepare_agent_context(
-        cls,
-        state: Dict[str, Any],
-        artifact_manager: Optional[Any] = None
-    ) -> Dict[str, Any]:
-        """
-        为Agent准备路由上下文
-
-        Args:
-            state: 当前Graph状态
-            artifact_manager: ArtifactManager 实例（通过依赖注入）
-
-        Returns:
-            路由上下文字典
-        """
-        context = {
-            "session_id": state.get("session_id"),
-            "thread_id": state.get("thread_id"),
-            "user_message_id": state.get("user_message_id"),
-        }
-
-        # 注入task_plan和artifacts（需要 artifact_manager）
-        if artifact_manager and context.get("session_id"):
-            try:
-                artifact_manager.set_session(context["session_id"])
-
-                artifacts_list = await artifact_manager.list_artifacts(
-                    session_id=context["session_id"],
-                    include_content=True,
-                    content_preview_length=200,
-                    full_content_for=["task_plan"]  # task_plan显示完整内容
-                )
-                logger.debug(f"Context preparation: \n{artifacts_list}")
-                if artifacts_list:
-                    context["artifacts_inventory"] = artifacts_list
-                    context["artifacts_count"] = len(artifacts_list)
-            except Exception as e:
-                logger.warning(f"Context preparation partial failure: {e}")
-
-        return context
-    
-    @classmethod
-    async def build_agent_messages(
-        cls,
-        agent: Any,  # BaseAgent实例
-        state: Dict[str, Any],
-        instruction: str,
-        tool_interactions: Optional[List[Dict]] = None,
-        pending_tool_result: Optional[Tuple[str, Any]] = None,
-        artifact_manager: Optional[Any] = None,
-    ) -> List[Dict]:
-        """
-        统一构建Agent messages
-
-        拼接顺序：
-        system → conversation_history → instruction → tool_interactions → tool_result
-
-        Args:
-            agent: BaseAgent实例
-            state: 当前Graph状态
-            instruction: 当前指令
-            tool_interactions: 工具交互历史
-            pending_tool_result: 待处理的工具结果
-            artifact_manager: ArtifactManager 实例（通过依赖注入）
-        """
-        messages = []
-        compression_level = state.get("compression_level", "normal")
-
-        # Part 1: System prompt
-        context = await cls.prepare_agent_context(state, artifact_manager)
-        system_prompt = agent.build_complete_system_prompt(context)
-        messages.append({"role": "system", "content": system_prompt})
-        
-        # Part 2: Conversation history
-        # 重要：保留偶数条消息以确保完整的 [user, assistant] 对话对
-        # 例如: preserve_recent=4 至少保留最近2轮完整对话
-        if agent.config.name == "lead_agent":   # 仅Lead Agent需要
-            if history := state.get("conversation_history"):
-                compressed = cls.compress_messages(
-                    history,
-                    level=compression_level,
-                    preserve_recent=4   # 偶数：[user, asst, user, asst]
-                )
-                if len(compressed) < len(history):
-                    compressed = cls._merge_truncation_marker(
-                        compressed,
-                        "_[Earlier conversation truncated]_"
-                    )
-                messages.extend(compressed)
-        
-        # Part 3: Current instruction
-        messages.append({"role": "user", "content": instruction})
-        
-        # Part 4: Tool interactions
-        # 重要：保留奇数条消息以确保开头和结尾都是assistant
-        # 因为前后的user消息会单独组装 (instruction 和 tool_result)
-        if tool_interactions:
-            compressed = cls.compress_messages(
-                tool_interactions,
-                level=compression_level,
-                preserve_recent=5   # 奇数：[asst, user, asst, user, asst]
-            )
-            if len(compressed) < len(tool_interactions):
-                compressed = cls._merge_truncation_marker(
-                    compressed,
-                    "_[Earlier tool calls truncated]_"
-                )
-            messages.extend(compressed)
-        
-        # Part 5: Pending tool result
-        if pending_tool_result:
-            tool_name, result = pending_tool_result
-            from tools.prompt_generator import format_result
-            tool_result_text = format_result(tool_name, result.to_dict())
-            messages.append({"role": "user", "content": tool_result_text})
-        
-        return messages
 
     @classmethod
     def _merge_truncation_marker(cls, messages: List[Dict], marker: str) -> List[Dict]:
         """将截断标记合并到第一条消息，避免破坏角色交替"""
         if not messages:
             return messages
-        
+
         first = messages[0].copy()
         first["content"] = f"{marker}\n\n{first['content']}"
         return [first] + messages[1:]

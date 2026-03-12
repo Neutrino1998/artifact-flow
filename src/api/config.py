@@ -46,7 +46,6 @@ class APIConfig(BaseSettings):
 
     # 数据库配置
     DATABASE_URL: str = "sqlite+aiosqlite:///data/artifactflow.db"
-    LANGGRAPH_DB_PATH: str = "data/langgraph.db"
 
     # JWT 认证配置
     JWT_SECRET: str = ""

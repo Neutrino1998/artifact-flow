@@ -38,9 +38,8 @@ class MessageCache:
     message_id: str
     parent_id: Optional[str]
     content: str
-    thread_id: str
     timestamp: str
-    graph_response: Optional[str] = None
+    response: Optional[str] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
 
 
@@ -202,9 +201,8 @@ class ConversationManager:
                 message_id=msg.id,
                 parent_id=msg.parent_id,
                 content=msg.content,
-                thread_id=msg.thread_id,
                 timestamp=msg.created_at.isoformat(),
-                graph_response=msg.graph_response,
+                response=msg.response,
                 metadata=msg.metadata_ or {}
             )
 
@@ -238,7 +236,6 @@ class ConversationManager:
         conv_id: str,
         message_id: str,
         content: str,
-        thread_id: str,
         parent_id: Optional[str] = None
     ) -> Dict:
         """
@@ -248,7 +245,6 @@ class ConversationManager:
             conv_id: 对话ID
             message_id: 消息ID
             content: 消息内容
-            thread_id: 关联的Graph线程ID
             parent_id: 父消息ID（分支时使用）
 
         Returns:
@@ -265,7 +261,6 @@ class ConversationManager:
             message_id=message_id,
             parent_id=parent_id,
             content=content,
-            thread_id=thread_id,
             timestamp=now
         )
 
@@ -291,7 +286,6 @@ class ConversationManager:
                 conversation_id=conv_id,
                 message_id=message_id,
                 content=content,
-                thread_id=thread_id,
                 parent_id=parent_id
             )
 
@@ -305,9 +299,8 @@ class ConversationManager:
             "message_id": message_id,
             "parent_id": parent_id,
             "content": content,
-            "thread_id": thread_id,
             "timestamp": now,
-            "graph_response": None,
+            "response": None,
             "metadata": {}
         }
 
@@ -318,22 +311,22 @@ class ConversationManager:
         response: str
     ) -> None:
         """
-        更新消息的Graph响应（异步版本，支持持久化）
+        更新消息的助手响应（异步版本，支持持久化）
 
         Args:
             conv_id: 对话ID
             message_id: 消息ID
-            response: Graph响应内容
+            response: 助手响应内容
         """
         if conv_id in self._cache:
             cache = self._cache[conv_id]
             if message_id in cache.messages:
-                cache.messages[message_id].graph_response = response
+                cache.messages[message_id].response = response
                 cache.updated_at = datetime.now().isoformat()
 
         # 持久化到数据库
         if self.repository:
-            await self.repository.update_graph_response(message_id, response)
+            await self.repository.update_response(message_id, response)
 
     # ========================================
     # 查询操作
@@ -378,9 +371,8 @@ class ConversationManager:
                 "message_id": msg.id,
                 "parent_id": msg.parent_id,
                 "content": msg.content,
-                "thread_id": msg.thread_id,
                 "timestamp": msg.created_at.isoformat(),
-                "graph_response": msg.graph_response,
+                "response": msg.response,
                 "metadata": msg.metadata_ or {}
             }
             for msg in messages
