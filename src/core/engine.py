@@ -10,7 +10,7 @@
 """
 
 import asyncio
-from typing import Dict, Any, Optional, Callable, Awaitable, List
+from typing import Dict, Any, Optional, Callable, Awaitable, List, Tuple
 from datetime import datetime
 
 from core.events import (
@@ -62,16 +62,10 @@ async def execute_loop(
     message_id = state["message_id"]
     tool_round_count: Dict[str, int] = {}  # per-agent tool round counter
 
-    async def _emit(event_type: str, agent: Optional[str] = None, data: Any = None, *, sse_only: bool = False) -> None:
-        """
-        推送事件
+    # ── closures ──
 
-        Args:
-            event_type: 事件类型
-            agent: agent 名称
-            data: 事件数据
-            sse_only: 如果 True，仅推 SSE 不入内存事件列表（如 llm_chunk）
-        """
+    async def _emit(event_type: str, agent: Optional[str] = None, data: Any = None, *, sse_only: bool = False) -> None:
+        """推送事件。sse_only=True 仅推 SSE 不入内存事件列表（如 llm_chunk）"""
         event_dict = {
             "type": event_type,
             "agent": agent,
@@ -79,7 +73,6 @@ async def execute_loop(
             "data": data,
         }
 
-        # 入内存事件列表（llm_chunk 除外）
         if not sse_only:
             state["events"].append(ExecutionEvent(
                 event_type=event_type,
@@ -87,7 +80,6 @@ async def execute_loop(
                 data=data,
             ))
 
-        # 推 SSE
         if emit:
             await emit(event_dict)
 
@@ -96,6 +88,296 @@ async def execute_loop(
         if request_tools and name in request_tools:
             return request_tools[name]
         return tool_registry.get_tool(name)
+
+    async def _build_context(agent_name: str, agent_config) -> list:
+        """drain messages → artifacts 清单 → ContextManager.build → tool limit 注入"""
+        queued = task_manager.drain_messages(message_id)
+        if queued:
+            state["queued_messages"].extend(queued)
+
+        artifacts_inventory = None
+        if artifact_manager and state.get("session_id"):
+            try:
+                artifact_manager.set_session(state["session_id"])
+                artifacts_inventory = await artifact_manager.list_artifacts(
+                    session_id=state["session_id"],
+                    include_content=True,
+                    content_preview_length=200,
+                    full_content_for=["task_plan"]
+                )
+            except Exception as e:
+                logger.warning(f"Failed to get artifacts inventory: {e}")
+
+        context = ContextManager.build(
+            state=state,
+            agent_config=agent_config,
+            agents=agents,
+            tool_registry=tool_registry,
+            artifact_manager=artifact_manager,
+            artifacts_inventory=artifacts_inventory,
+            request_tools=request_tools,
+        )
+
+        messages = context.messages
+
+        if tool_round_count.get(agent_name, 0) >= agent_config.max_tool_rounds:
+            messages.append({
+                "role": "system",
+                "content": "You have reached the maximum number of tool calls. "
+                           "Please summarize your findings and provide a final response."
+            })
+
+        return messages
+
+    async def _call_llm(messages: list, agent_name: str, model: str) -> Optional[Tuple[str, Optional[str], dict]]:
+        """
+        流式调用 LLM，推送 llm_chunk / llm_complete，记录 metrics。
+
+        Returns:
+            (response_content, reasoning_content, token_usage) 或 None（LLM 出错，state 已设置）
+        """
+        llm = create_llm(model=model)
+        llm_start_time = datetime.now()
+
+        response_content = ""
+        reasoning_content = None
+        token_usage = {}
+
+        try:
+            async for chunk in llm.astream_with_retry(messages):
+                chunk_type = chunk.get("type")
+
+                if chunk_type == "content":
+                    response_content += chunk["content"]
+                    await _emit(StreamEventType.LLM_CHUNK.value, agent_name, {
+                        "content": chunk["content"],
+                    }, sse_only=True)
+
+                elif chunk_type == "reasoning":
+                    if reasoning_content is None:
+                        reasoning_content = ""
+                    reasoning_content += chunk["content"]
+                    await _emit(StreamEventType.LLM_CHUNK.value, agent_name, {
+                        "reasoning_content": chunk["content"],
+                    }, sse_only=True)
+
+                elif chunk_type == "usage":
+                    token_usage = chunk["token_usage"]
+
+                elif chunk_type == "final":
+                    if not response_content and chunk.get("content"):
+                        response_content = chunk["content"]
+                    if not reasoning_content and chunk.get("reasoning_content"):
+                        reasoning_content = chunk["reasoning_content"]
+                    if not token_usage and chunk.get("token_usage"):
+                        token_usage = chunk["token_usage"]
+
+        except Exception as llm_error:
+            logger.error(f"LLM call failed: {llm_error}")
+            await _emit(StreamEventType.ERROR.value, agent_name, {
+                "error": f"LLM call failed: {str(llm_error)}",
+                "agent": agent_name,
+            })
+            state["completed"] = True
+            state["error"] = True
+            state["response"] = f"LLM call failed: {str(llm_error)}"
+            return None
+
+        llm_end_time = datetime.now()
+        llm_duration_ms = int((llm_end_time - llm_start_time).total_seconds() * 1000)
+
+        await _emit(StreamEventType.LLM_COMPLETE.value, agent_name, {
+            "content": response_content,
+            "reasoning_content": reasoning_content,
+            "token_usage": token_usage,
+        })
+
+        append_agent_execution(
+            metrics=state["execution_metrics"],
+            agent_name=agent_name,
+            model=model,
+            token_usage={
+                "input_tokens": token_usage.get("prompt_tokens", 0),
+                "output_tokens": token_usage.get("completion_tokens", 0),
+                "total_tokens": token_usage.get("total_tokens", 0),
+            },
+            started_at=llm_start_time.isoformat(),
+            completed_at=llm_end_time.isoformat(),
+            llm_duration_ms=llm_duration_ms,
+        )
+
+        input_tokens = token_usage.get("prompt_tokens", 0)
+        output_tokens = token_usage.get("completion_tokens", 0)
+        logger.debug(f"[{agent_name}] LLM Response (input: {input_tokens}, output: {output_tokens}):\n{response_content[:500]}")
+
+        return response_content, reasoning_content, token_usage
+
+    async def _handle_permission(tool_name: str, params: dict, agent_name: str, permission: ToolPermission) -> Optional[bool]:
+        """
+        处理权限中断。
+
+        Returns:
+            True — approved, False — denied, None — timeout（state 已设置 error）
+        """
+        await _emit(StreamEventType.PERMISSION_REQUEST.value, agent_name, {
+            "permission_level": permission.value,
+            "tool": tool_name,
+            "params": params,
+        })
+
+        interrupt = task_manager.create_interrupt(message_id, {
+            "type": "tool_permission",
+            "agent": agent_name,
+            "tool_name": tool_name,
+            "params": params,
+            "permission_level": permission.value,
+            "message": f"Tool '{tool_name}' requires {permission.value} permission",
+        })
+
+        try:
+            await asyncio.wait_for(interrupt.event.wait(), timeout=permission_timeout)
+        except asyncio.TimeoutError:
+            logger.error(f"Permission timeout for tool '{tool_name}' after {permission_timeout}s")
+            await _emit(StreamEventType.PERMISSION_RESULT.value, agent_name, {
+                "approved": False, "tool": tool_name, "reason": "timeout",
+            })
+            await _emit(StreamEventType.ERROR.value, agent_name, {
+                "error": f"Permission confirmation timed out after {permission_timeout}s for tool '{tool_name}'",
+                "agent": agent_name,
+            })
+            state["completed"] = True
+            state["error"] = True
+            state["response"] = f"Permission confirmation timed out for tool '{tool_name}'"
+            return None
+
+        resume_data = interrupt.resume_data or {}
+        is_approved = resume_data.get("approved", False)
+
+        await _emit(StreamEventType.PERMISSION_RESULT.value, agent_name, {
+            "approved": is_approved, "tool": tool_name,
+        })
+
+        if not is_approved:
+            await _emit(StreamEventType.TOOL_START.value, agent_name, {
+                "tool": tool_name, "params": params,
+            })
+            await _emit(StreamEventType.TOOL_COMPLETE.value, agent_name, {
+                "tool": tool_name, "success": False,
+                "error": "Permission denied by user. You do not have permission to use this tool.",
+                "duration_ms": 0,
+            })
+            return False
+
+        if resume_data.get("always_allow", False):
+            allowed = list(state.get("always_allowed_tools", []))
+            if tool_name not in allowed:
+                allowed.append(tool_name)
+            state["always_allowed_tools"] = allowed
+            logger.info(f"Tool '{tool_name}' added to always_allowed_tools")
+
+        return True
+
+    async def _execute_tools(tool_calls: list, agent_name: str, agent_config) -> None:
+        """串行执行工具列表，处理权限中断和 subagent 切换。"""
+        for tool_call in tool_calls:
+            tool_name = tool_call.name
+            params = tool_call.params
+
+            # Agent 工具白名单校验
+            if tool_name not in agent_config.tools:
+                await _emit(StreamEventType.TOOL_START.value, agent_name, {
+                    "tool": tool_name, "params": params,
+                })
+                await _emit(StreamEventType.TOOL_COMPLETE.value, agent_name, {
+                    "tool": tool_name, "success": False,
+                    "error": f"Tool '{tool_name}' not available for '{agent_name}'",
+                    "duration_ms": 0,
+                })
+                continue
+
+            # call_subagent 特殊处理
+            if tool_name == "call_subagent":
+                tool = _resolve_tool("call_subagent")
+                if tool:
+                    result = await tool(**params)
+                    if result.success:
+                        target_agent = result.data["agent_name"]
+                        instruction = result.data["instruction"]
+
+                        await _emit(StreamEventType.TOOL_START.value, agent_name, {
+                            "tool": "call_subagent",
+                            "params": {"agent_name": target_agent, "instruction": instruction},
+                        })
+
+                        # tool_complete 在 subagent 完成后由 _complete_agent 路径追加
+                        state["current_agent"] = target_agent
+                        logger.info(f"Switching to subagent: {target_agent}")
+                        break  # 跳出 tool_calls 循环，继续 while loop
+                    else:
+                        # 验证失败，当作普通工具错误 fall through
+                        params = tool_call.params
+
+            # 获取工具
+            tool = _resolve_tool(tool_name)
+            if not tool:
+                await _emit(StreamEventType.TOOL_START.value, agent_name, {
+                    "tool": tool_name, "params": params,
+                })
+                await _emit(StreamEventType.TOOL_COMPLETE.value, agent_name, {
+                    "tool": tool_name, "success": False,
+                    "error": f"Tool '{tool_name}' not found",
+                    "duration_ms": 0,
+                })
+                continue
+
+            # 权限检查（per-agent 权限覆盖）
+            agent_perm_str = agent_config.tools.get(tool_name, tool.permission.value)
+            effective_permission = ToolPermission(agent_perm_str)
+            if effective_permission == ToolPermission.CONFIRM:
+                if tool_name not in state.get("always_allowed_tools", []):
+                    approved = await _handle_permission(tool_name, params, agent_name, effective_permission)
+                    if approved is None:  # timeout → error state already set
+                        break
+                    if not approved:
+                        continue
+
+            # 执行工具
+            tool_start_time = datetime.now()
+            await _emit(StreamEventType.TOOL_START.value, agent_name, {
+                "tool": tool_name, "params": params,
+            })
+
+            try:
+                tool_result = await tool(**params)
+            except Exception as e:
+                logger.exception(f"Tool '{tool_name}' execution error: {e}")
+                tool_result = ToolResult(success=False, error=str(e))
+
+            tool_end_time = datetime.now()
+            tool_duration_ms = int((tool_end_time - tool_start_time).total_seconds() * 1000)
+
+            await _emit(StreamEventType.TOOL_COMPLETE.value, agent_name, {
+                "tool": tool_name,
+                "success": tool_result.success,
+                "result_data": tool_result.data if tool_result.success else None,
+                "error": tool_result.error if not tool_result.success else None,
+                "duration_ms": tool_duration_ms,
+                "params": params,
+            })
+
+            append_tool_call(
+                metrics=state["execution_metrics"],
+                tool_name=tool_name,
+                success=tool_result.success,
+                duration_ms=tool_duration_ms,
+                called_at=tool_start_time.isoformat(),
+                completed_at=tool_end_time.isoformat(),
+                agent=agent_name,
+            )
+
+            tool_round_count[agent_name] = tool_round_count.get(agent_name, 0) + 1
+
+    # ── main loop ──
 
     try:
         while not state["completed"]:
@@ -110,130 +392,22 @@ async def execute_loop(
                 })
                 break
 
-            # drain queued messages（非阻塞）
-            queued = task_manager.drain_messages(message_id)
-            if queued:
-                state["queued_messages"].extend(queued)
+            messages = await _build_context(current_agent_name, agent_config)
 
-            # ========== 构建 context ==========
-            # 获取 artifacts 清单
-            artifacts_inventory = None
-            if artifact_manager and state.get("session_id"):
-                try:
-                    artifact_manager.set_session(state["session_id"])
-                    artifacts_inventory = await artifact_manager.list_artifacts(
-                        session_id=state["session_id"],
-                        include_content=True,
-                        content_preview_length=200,
-                        full_content_for=["task_plan"]
-                    )
-                except Exception as e:
-                    logger.warning(f"Failed to get artifacts inventory: {e}")
-
-            context = ContextManager.build(
-                state=state,
-                agent_config=agent_config,
-                agents=agents,
-                tool_registry=tool_registry,
-                artifact_manager=artifact_manager,
-                artifacts_inventory=artifacts_inventory,
-                request_tools=request_tools,
-            )
-
-            messages = context.messages
-
-            # Tool limit 检查：注入 system message 提醒总结
-            agent_rounds = tool_round_count.get(current_agent_name, 0)
-            if agent_rounds >= agent_config.max_tool_rounds:
-                messages.append({
-                    "role": "system",
-                    "content": "You have reached the maximum number of tool calls. "
-                               "Please summarize your findings and provide a final response."
-                })
-
-            # ========== Agent start ==========
             await _emit(StreamEventType.AGENT_START.value, current_agent_name, {
                 "agent": current_agent_name,
             })
 
             logger.debug(f"[{current_agent_name}] Messages:\n{_format_messages_for_debug(messages)}")
 
-            # ========== 调用 LLM（流式） ==========
-            llm = create_llm(model=agent_config.model)
-            llm_start_time = datetime.now()
-
-            response_content = ""
-            reasoning_content = None
-            token_usage = {}
-
-            try:
-                async for chunk in llm.astream_with_retry(messages):
-                    chunk_type = chunk.get("type")
-
-                    if chunk_type == "content":
-                        response_content += chunk["content"]
-                        await _emit(StreamEventType.LLM_CHUNK.value, current_agent_name, {
-                            "content": chunk["content"],
-                        }, sse_only=True)
-
-                    elif chunk_type == "reasoning":
-                        if reasoning_content is None:
-                            reasoning_content = ""
-                        reasoning_content += chunk["content"]
-
-                    elif chunk_type == "usage":
-                        token_usage = chunk["token_usage"]
-
-                    elif chunk_type == "final":
-                        if not response_content and chunk.get("content"):
-                            response_content = chunk["content"]
-                        if not reasoning_content and chunk.get("reasoning_content"):
-                            reasoning_content = chunk["reasoning_content"]
-                        if not token_usage and chunk.get("token_usage"):
-                            token_usage = chunk["token_usage"]
-
-            except Exception as llm_error:
-                logger.error(f"LLM call failed: {llm_error}")
-                await _emit(StreamEventType.ERROR.value, current_agent_name, {
-                    "error": f"LLM call failed: {str(llm_error)}",
-                    "agent": current_agent_name,
-                })
-                state["completed"] = True
-                state["error"] = True
-                state["response"] = f"LLM call failed: {str(llm_error)}"
+            # 调用 LLM（流式）
+            llm_result = await _call_llm(messages, current_agent_name, agent_config.model)
+            if llm_result is None:
                 break
 
-            llm_end_time = datetime.now()
-            llm_duration_ms = int((llm_end_time - llm_start_time).total_seconds() * 1000)
+            response_content, reasoning_content, token_usage = llm_result
 
-            # LLM Complete 事件
-            await _emit(StreamEventType.LLM_COMPLETE.value, current_agent_name, {
-                "content": response_content,
-                "reasoning_content": reasoning_content,
-                "token_usage": token_usage,
-            })
-
-            # 更新 execution_metrics
-            append_agent_execution(
-                metrics=state["execution_metrics"],
-                agent_name=current_agent_name,
-                model=agent_config.model,
-                token_usage={
-                    "input_tokens": token_usage.get("prompt_tokens", 0),
-                    "output_tokens": token_usage.get("completion_tokens", 0),
-                    "total_tokens": token_usage.get("total_tokens", 0),
-                },
-                started_at=llm_start_time.isoformat(),
-                completed_at=llm_end_time.isoformat(),
-                llm_duration_ms=llm_duration_ms,
-            )
-
-            # 日志
-            input_tokens = token_usage.get("prompt_tokens", 0)
-            output_tokens = token_usage.get("completion_tokens", 0)
-            logger.debug(f"[{current_agent_name}] LLM Response (input: {input_tokens}, output: {output_tokens}):\n{response_content[:500]}")
-
-            # ========== 解析工具调用 ==========
+            # 解析工具调用
             tool_calls = parse_tool_calls(response_content)
 
             if not tool_calls:
@@ -258,177 +432,8 @@ async def execute_loop(
 
                 continue
 
-            # ========== 串行执行工具 ==========
-            for tool_call in tool_calls:
-                tool_name = tool_call.name
-                params = tool_call.params
-
-                # Agent 工具白名单校验
-                if tool_name not in agent_config.tools:
-                    await _emit(StreamEventType.TOOL_START.value, current_agent_name, {
-                        "tool": tool_name, "params": params,
-                    })
-                    await _emit(StreamEventType.TOOL_COMPLETE.value, current_agent_name, {
-                        "tool": tool_name, "success": False,
-                        "error": f"Tool '{tool_name}' not available for '{current_agent_name}'",
-                        "duration_ms": 0,
-                    })
-                    continue
-
-                # call_subagent 特殊处理
-                if tool_name == "call_subagent":
-                    # 验证参数
-                    tool = _resolve_tool("call_subagent")
-                    if tool:
-                        result = await tool(**params)
-                        if result.success:
-                            target_agent = result.data["agent_name"]
-                            instruction = result.data["instruction"]
-
-                            await _emit(StreamEventType.TOOL_START.value, current_agent_name, {
-                                "tool": "call_subagent",
-                                "params": {"agent_name": target_agent, "instruction": instruction},
-                            })
-
-                            # tool_complete 在 subagent 完成后由 _complete_agent 路径追加
-                            # （包含 subagent 的 response 作为 result）
-
-                            # 切换到 subagent
-                            state["current_agent"] = target_agent
-                            logger.info(f"Switching to subagent: {target_agent}")
-                            break  # 跳出 tool_calls 循环，继续 while loop
-                        else:
-                            # 验证失败，当作普通工具错误
-                            params = tool_call.params  # 重新设置 params
-                            # fall through to normal tool execution below
-                    # 如果验证失败，继续作为普通工具处理
-
-                # 获取工具
-                tool = _resolve_tool(tool_name)
-                if not tool:
-                    # 工具不存在，记录错误结果
-                    await _emit(StreamEventType.TOOL_START.value, current_agent_name, {
-                        "tool": tool_name, "params": params,
-                    })
-                    await _emit(StreamEventType.TOOL_COMPLETE.value, current_agent_name, {
-                        "tool": tool_name, "success": False,
-                        "error": f"Tool '{tool_name}' not found",
-                        "duration_ms": 0,
-                    })
-                    continue
-
-                # 权限检查（per-agent 权限覆盖）
-                agent_perm_str = agent_config.tools.get(tool_name, tool.permission.value)
-                effective_permission = ToolPermission(agent_perm_str)
-                if effective_permission == ToolPermission.CONFIRM:
-                    if tool_name not in state.get("always_allowed_tools", []):
-                        # 需要用户确认 → interrupt
-                        await _emit(StreamEventType.PERMISSION_REQUEST.value, current_agent_name, {
-                            "permission_level": effective_permission.value,
-                            "tool": tool_name,
-                            "params": params,
-                        })
-
-                        # 创建 interrupt，等待用户确认
-                        interrupt = task_manager.create_interrupt(message_id, {
-                            "type": "tool_permission",
-                            "agent": current_agent_name,
-                            "tool_name": tool_name,
-                            "params": params,
-                            "permission_level": effective_permission.value,
-                            "message": f"Tool '{tool_name}' requires {effective_permission.value} permission",
-                        })
-
-                        # 等待用户确认（超时 → error 终态）
-                        try:
-                            await asyncio.wait_for(interrupt.event.wait(), timeout=permission_timeout)
-                        except asyncio.TimeoutError:
-                            logger.error(f"Permission timeout for tool '{tool_name}' after {permission_timeout}s")
-                            await _emit(StreamEventType.PERMISSION_RESULT.value, current_agent_name, {
-                                "approved": False,
-                                "tool": tool_name,
-                                "reason": "timeout",
-                            })
-                            await _emit(StreamEventType.ERROR.value, current_agent_name, {
-                                "error": f"Permission confirmation timed out after {permission_timeout}s for tool '{tool_name}'",
-                                "agent": current_agent_name,
-                            })
-                            state["completed"] = True
-                            state["error"] = True
-                            state["response"] = f"Permission confirmation timed out for tool '{tool_name}'"
-                            break
-                        resume_data = interrupt.resume_data or {}
-                        is_approved = resume_data.get("approved", False)
-
-                        # 发送确认结果
-                        await _emit(StreamEventType.PERMISSION_RESULT.value, current_agent_name, {
-                            "approved": is_approved,
-                            "tool": tool_name,
-                        })
-
-                        if not is_approved:
-                            # 被拒绝，记录结果
-                            await _emit(StreamEventType.TOOL_START.value, current_agent_name, {
-                                "tool": tool_name, "params": params,
-                            })
-                            await _emit(StreamEventType.TOOL_COMPLETE.value, current_agent_name, {
-                                "tool": tool_name, "success": False,
-                                "error": "Permission denied by user. You do not have permission to use this tool.",
-                                "duration_ms": 0,
-                            })
-                            continue
-
-                        # always_allow
-                        if resume_data.get("always_allow", False):
-                            allowed = list(state.get("always_allowed_tools", []))
-                            if tool_name not in allowed:
-                                allowed.append(tool_name)
-                            state["always_allowed_tools"] = allowed
-                            logger.info(f"Tool '{tool_name}' added to always_allowed_tools")
-
-                # 执行工具
-                tool_start_time = datetime.now()
-                await _emit(StreamEventType.TOOL_START.value, current_agent_name, {
-                    "tool": tool_name, "params": params,
-                })
-
-                try:
-                    tool_result = await tool(**params)
-                except Exception as e:
-                    logger.exception(f"Tool '{tool_name}' execution error: {e}")
-                    tool_result = ToolResult(success=False, error=str(e))
-
-                tool_end_time = datetime.now()
-                tool_duration_ms = int((tool_end_time - tool_start_time).total_seconds() * 1000)
-
-                await _emit(StreamEventType.TOOL_COMPLETE.value, current_agent_name, {
-                    "tool": tool_name,
-                    "success": tool_result.success,
-                    "result_data": tool_result.data if tool_result.success else None,
-                    "error": tool_result.error if not tool_result.success else None,
-                    "duration_ms": tool_duration_ms,
-                    "params": params,
-                })
-
-                # 更新 execution_metrics
-                append_tool_call(
-                    metrics=state["execution_metrics"],
-                    tool_name=tool_name,
-                    success=tool_result.success,
-                    duration_ms=tool_duration_ms,
-                    called_at=tool_start_time.isoformat(),
-                    completed_at=tool_end_time.isoformat(),
-                    agent=current_agent_name,
-                )
-
-                # 更新 tool round count
-                tool_round_count[current_agent_name] = tool_round_count.get(current_agent_name, 0) + 1
-
-            # agent_complete 事件（有工具调用的情况，一轮 LLM + tools 完成）
-            # 注意：如果 agent 切换了（call_subagent），不发 agent_complete
-            if state["current_agent"] == current_agent_name and not state["completed"]:
-                # 还在当前 agent，继续 loop（工具调用后需要再次 LLM）
-                pass
+            # 串行执行工具
+            await _execute_tools(tool_calls, current_agent_name, agent_config)
 
     except Exception as e:
         logger.exception(f"Execution loop error: {e}")
