@@ -328,6 +328,47 @@ class ConversationManager:
         if self.repository:
             await self.repository.update_response(message_id, response)
 
+    async def get_message_metadata_async(
+        self,
+        message_id: str,
+    ) -> Dict[str, Any]:
+        """
+        获取消息的 metadata
+
+        Args:
+            message_id: 消息ID
+
+        Returns:
+            metadata 字典（不存在则返回空字典）
+        """
+        if self.repository:
+            msg = await self.repository.get_message(message_id)
+            if msg:
+                return msg.metadata_ or {}
+        return {}
+
+    async def update_message_metadata_async(
+        self,
+        conv_id: str,
+        message_id: str,
+        metadata: Dict[str, Any],
+    ) -> None:
+        """
+        更新消息的 metadata（merge 语义）
+
+        Args:
+            conv_id: 对话ID
+            message_id: 消息ID
+            metadata: 要合并的 metadata 字典
+        """
+        if conv_id in self._cache:
+            cache = self._cache[conv_id]
+            if message_id in cache.messages:
+                cache.messages[message_id].metadata.update(metadata)
+
+        if self.repository:
+            await self.repository.update_message_metadata(message_id, metadata)
+
     # ========================================
     # 查询操作
     # ========================================

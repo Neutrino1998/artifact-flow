@@ -9,6 +9,7 @@
 - Tool limit → 注入 system message 提醒总结
 """
 
+import asyncio
 from typing import Dict, Any, Optional, Callable, Awaitable, List
 from datetime import datetime
 
@@ -25,9 +26,9 @@ from utils.logger import get_logger
 
 logger = get_logger("ArtifactFlow")
 
-# emit callback type: async (event_dict) -> bool
-# returns False if stream is closed (should stop)
-EmitFn = Callable[[Dict[str, Any]], Awaitable[bool]]
+# emit callback type: async (event_dict) -> None
+# Execution always runs to completion regardless of SSE client state.
+EmitFn = Callable[[Dict[str, Any]], Awaitable[None]]
 
 
 async def execute_loop(
@@ -47,7 +48,7 @@ async def execute_loop(
         tool_registry: ToolRegistry 实例
         task_manager: TaskManager 实例（用于 interrupt 和 message queue）
         artifact_manager: ArtifactManager 实例（用于 artifacts 清单）
-        emit: 事件推送回调（推 SSE），返回 False 时停止执行
+        emit: 事件推送回调（推 SSE）
 
     Returns:
         最终执行状态
@@ -57,7 +58,7 @@ async def execute_loop(
     message_id = state["message_id"]
     tool_round_count: Dict[str, int] = {}  # per-agent tool round counter
 
-    async def _emit(event_type: str, agent: Optional[str] = None, data: Any = None, *, sse_only: bool = False) -> bool:
+    async def _emit(event_type: str, agent: Optional[str] = None, data: Any = None, *, sse_only: bool = False) -> None:
         """
         推送事件
 
@@ -84,8 +85,7 @@ async def execute_loop(
 
         # 推 SSE
         if emit:
-            return await emit(event_dict)
-        return True
+            await emit(event_dict)
 
     try:
         while not state["completed"]:
@@ -224,12 +224,24 @@ async def execute_loop(
 
             if not tool_calls:
                 # 无工具调用 → 完成当前 agent
+                previous_agent = state["current_agent"]
                 _complete_agent(state, current_agent_name, response_content)
 
                 await _emit(StreamEventType.AGENT_COMPLETE.value, current_agent_name, {
                     "agent": current_agent_name,
                     "content": response_content,
                 })
+
+                # Subagent 完成 → 追加 call_subagent 的 tool_complete，
+                # 把 subagent 的 response 作为 result 传回给 lead
+                if previous_agent != "lead_agent" and state["current_agent"] == "lead_agent":
+                    await _emit(StreamEventType.TOOL_COMPLETE.value, "lead_agent", {
+                        "tool": "call_subagent",
+                        "success": True,
+                        "result_data": {"agent_name": previous_agent, "response": response_content},
+                        "duration_ms": 0,
+                    })
+
                 continue
 
             # ========== 串行执行工具 ==========
@@ -252,12 +264,8 @@ async def execute_loop(
                                 "params": {"agent_name": target_agent, "instruction": instruction},
                             })
 
-                            await _emit(StreamEventType.TOOL_COMPLETE.value, current_agent_name, {
-                                "tool": "call_subagent",
-                                "success": True,
-                                "result_data": {"agent_name": target_agent},
-                                "duration_ms": 0,
-                            })
+                            # tool_complete 在 subagent 完成后由 _complete_agent 路径追加
+                            # （包含 subagent 的 response 作为 result）
 
                             # 切换到 subagent
                             state["current_agent"] = target_agent
@@ -303,8 +311,12 @@ async def execute_loop(
                             "message": f"Tool '{tool_name}' requires {tool.permission.value} permission",
                         })
 
-                        # 等待用户确认
-                        await interrupt.event.wait()
+                        # 等待用户确认（30 分钟超时，超时自动拒绝）
+                        try:
+                            await asyncio.wait_for(interrupt.event.wait(), timeout=1800)
+                        except asyncio.TimeoutError:
+                            logger.warning(f"Interrupt timed out for tool '{tool_name}', auto-denying")
+                            interrupt.resume_data = {"approved": False, "reason": "timeout"}
                         resume_data = interrupt.resume_data or {}
                         is_approved = resume_data.get("approved", False)
 

@@ -73,6 +73,12 @@ async def _create_controller() -> AsyncGenerator:
     """
     Build a fresh ExecutionController with its own DB session.
 
+    Why not use Depends(get_controller)?
+    send_message() launches a background task whose lifetime exceeds the HTTP request.
+    Depends(get_db_session) closes the session when the request ends, but the background
+    task still needs a live session. This context manager provides an independent session
+    scoped to the background task's lifetime.
+
     Usage:
         async with _create_controller() as ctrl:
             async for event in ctrl.stream_execute(...):

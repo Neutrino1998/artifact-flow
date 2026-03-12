@@ -1,17 +1,18 @@
 """
 统一的事件类型定义
 
-事件类型清单（设计文档 §事件类型清单）：
-- agent_start      — agent 开始
-- llm_chunk        — LLM token 流（仅推 SSE，不入内存事件列表）
-- llm_complete     — LLM 调用完成
-- tool_start       — 工具开始
-- tool_complete    — 工具完成
-- agent_complete   — agent 结束
-- interrupt_pending — 需要用户确认
-- interrupt_resolved — 确认结果
-- execution_complete — 执行完成
-- error            — 异常
+事件类型清单：
+- metadata           — 会话元数据（conversation_id, message_id）
+- agent_start        — agent 开始
+- llm_chunk          — LLM token 流（仅推 SSE，不入内存事件列表）
+- llm_complete       — LLM 调用完成
+- tool_start         — 工具开始
+- tool_complete      — 工具完成
+- agent_complete     — agent 结束
+- permission_request — 需要用户确认
+- permission_result  — 确认结果
+- complete           — 执行完成
+- error              — 异常
 """
 
 from enum import Enum

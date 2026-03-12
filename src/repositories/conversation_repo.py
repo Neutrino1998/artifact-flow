@@ -361,6 +361,31 @@ class ConversationRepository(BaseRepository[Conversation]):
 
         return message
     
+    async def update_message_metadata(
+        self,
+        message_id: str,
+        metadata: Dict[str, Any],
+    ) -> Message:
+        """
+        更新消息的 metadata（merge 语义）
+
+        Args:
+            message_id: 消息ID
+            metadata: 要合并的 metadata 字典
+
+        Returns:
+            更新后的消息
+        """
+        message = await self.get_message_or_raise(message_id)
+        existing = message.metadata_ or {}
+        existing.update(metadata)
+        message.metadata_ = existing
+
+        await self._session.flush()
+        await self._session.commit()
+
+        return message
+
     async def get_conversation_messages(
         self,
         conversation_id: str,

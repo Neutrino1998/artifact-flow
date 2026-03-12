@@ -2,7 +2,7 @@
 测试新执行引擎（Pi-style while loop）
 
 用法：
-    python -m tests.manual.test_engine
+    python -m tests.manual.engine
 """
 
 import asyncio

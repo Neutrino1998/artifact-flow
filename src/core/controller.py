@@ -7,13 +7,13 @@
 3. 对话管理复用 ConversationManager
 """
 
-from typing import Dict, List, Optional, Any, AsyncGenerator
+from typing import Dict, Optional, Any, AsyncGenerator
 from uuid import uuid4
 from datetime import datetime
 
 from core.state import create_initial_state
 from core.engine import execute_loop
-from core.events import StreamEventType, finalize_metrics
+from core.events import StreamEventType
 from core.conversation_manager import ConversationManager
 from tools.implementations.artifact_ops import ArtifactManager
 from utils.logger import get_logger
@@ -111,12 +111,19 @@ class ExecutionController:
             except Exception as e:
                 logger.warning(f"Failed to clear temporary artifacts: {e}")
 
+        # 从父消息 metadata 中恢复 always_allowed_tools
+        parent_always_allowed = []
+        if resolved_parent:
+            parent_meta = await self.conversation_manager.get_message_metadata_async(resolved_parent)
+            parent_always_allowed = parent_meta.get("always_allowed_tools", [])
+
         # 创建初始状态
         initial_state = create_initial_state(
             task=content,
             session_id=session_id,
             message_id=message_id,
             conversation_history=conversation_history,
+            always_allowed_tools=parent_always_allowed,
         )
 
         logger.info(f"Processing new message (streaming) in conversation {conversation_id}")
@@ -146,7 +153,6 @@ class ExecutionController:
         async def emit_and_yield(event_dict):
             """emit callback: 收集事件并标记为可 yield"""
             collected_events.append(event_dict)
-            return True  # 继续执行
 
         try:
             final_state = await execute_loop(
@@ -165,13 +171,6 @@ class ExecutionController:
             # 检查最终状态
             response = final_state.get("response", "")
 
-            # 检查是否有 pending interrupt
-            interrupt = self.task_manager.get_interrupt(message_id)
-            if interrupt and not interrupt.event.is_set():
-                # 有未解决的 interrupt — 这种情况不应该发生
-                # 因为 engine loop 会 await interrupt
-                logger.warning("Unexpected pending interrupt after engine loop")
-
             # 更新 conversation response
             await self.conversation_manager.update_response_async(
                 conv_id=conversation_id,
@@ -180,6 +179,15 @@ class ExecutionController:
             )
 
             logger.info("Streaming execution completed")
+
+            # 持久化 always_allowed_tools 到 message metadata
+            always_allowed = final_state.get("always_allowed_tools", [])
+            if always_allowed:
+                await self.conversation_manager.update_message_metadata_async(
+                    conv_id=conversation_id,
+                    message_id=message_id,
+                    metadata={"always_allowed_tools": always_allowed},
+                )
 
             # 持久化事件（batch write — 设计文档 §关键设计约束）
             await self._persist_events(message_id, final_state)
@@ -252,12 +260,7 @@ class ExecutionController:
             await self.message_event_repo.batch_create(db_events)
             logger.info(f"Persisted {len(db_events)} events for message {message_id}")
         except Exception as e:
+            # TODO: 事件持久化失败导致数据丢失，当前仅打日志。
+            # 考虑重试或将失败事件写入 fallback 存储。
             logger.error(f"Failed to persist events: {e}")
 
-    async def get_conversation_history(self, conversation_id: str) -> List[Dict]:
-        """获取对话历史"""
-        return await self.conversation_manager.get_conversation_path_async(conversation_id)
-
-    async def list_conversations(self) -> List[Dict]:
-        """列出所有对话"""
-        return await self.conversation_manager.list_conversations_async()
