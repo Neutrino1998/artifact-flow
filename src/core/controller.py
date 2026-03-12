@@ -233,19 +233,9 @@ class ExecutionController:
                     metadata={"always_allowed_tools": always_allowed},
                 )
 
-            # 构建终态事件
-            if has_error:
-                terminal_event_dict = {
-                    "type": StreamEventType.ERROR.value,
-                    "timestamp": datetime.now().isoformat(),
-                    "data": {
-                        "success": False,
-                        "conversation_id": conversation_id,
-                        "message_id": message_id,
-                        "error": response or "Execution failed",
-                    }
-                }
-            else:
+            # 终态事件：error 路径由 engine 已发（在 state["events"] 中），
+            # controller 只负责 success 路径的 complete 事件。
+            if not has_error:
                 terminal_event_dict = {
                     "type": StreamEventType.COMPLETE.value,
                     "timestamp": datetime.now().isoformat(),
@@ -259,18 +249,19 @@ class ExecutionController:
                     }
                 }
 
-            # 终态事件入库（Fix 6: 在 _persist_events 之前追加）
-            final_state["events"].append(ExecutionEvent(
-                event_type=terminal_event_dict["type"],
-                agent_name=None,
-                data=terminal_event_dict["data"],
-            ))
+                # 终态事件入库
+                final_state["events"].append(ExecutionEvent(
+                    event_type=terminal_event_dict["type"],
+                    agent_name=None,
+                    data=terminal_event_dict["data"],
+                ))
 
             # 持久化事件（batch write — 设计文档 §关键设计约束）
             await self._persist_events(message_id, final_state)
 
-            # 发送终态事件到 SSE
-            yield terminal_event_dict
+            # 发送 complete 到 SSE（error 已由 engine 实时推送）
+            if not has_error:
+                yield terminal_event_dict
 
         except Exception as e:
             logger.exception(f"Error in post-processing: {e}")
