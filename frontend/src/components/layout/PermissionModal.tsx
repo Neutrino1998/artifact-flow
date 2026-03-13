@@ -13,13 +13,12 @@ export default function PermissionModal() {
   const handleResponse = useCallback(
     async (approved: boolean, alwaysAllow: boolean = false) => {
       // Read current values from store to avoid stale closure issues
-      const { permissionRequest: req, conversationId, threadId, messageId } =
+      const { permissionRequest: req, conversationId, messageId } =
         useStreamStore.getState();
-      if (!req || !conversationId || !threadId || !messageId) return;
+      if (!req || !conversationId || !messageId) return;
       setLoading(true);
       try {
         const res = await api.resumeExecution(conversationId, {
-          thread_id: threadId,
           message_id: messageId,
           approved,
           always_allow: alwaysAllow,

@@ -98,10 +98,6 @@ export interface paths {
         /**
          * List Conversations
          * @description 列出对话列表
-         *
-         *     Args:
-         *         limit: 每页数量
-         *         offset: 偏移量
          */
         get: operations["list_conversations_api_v1_chat_get"];
         put?: never;
@@ -109,13 +105,7 @@ export interface paths {
          * Send Message
          * @description 发送新消息
          *
-         *     启动 Graph 执行，返回 stream_url 供前端订阅。
-         *
-         *     流程：
-         *     1. 同步创建/获取 conversation（确保 GET 请求能立即看到）
-         *     2. 创建 StreamContext（开始缓冲事件）
-         *     3. 启动后台任务执行 Graph
-         *     4. 返回 stream_url 给前端
+         *     启动执行，返回 stream_url 供前端订阅。
          */
         post: operations["send_message_api_v1_chat_post"];
         delete?: never;
@@ -141,10 +131,28 @@ export interface paths {
         /**
          * Delete Conversation
          * @description 删除对话
-         *
-         *     级联删除消息和关联的 Artifacts。
          */
         delete: operations["delete_conversation_api_v1_chat__conv_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/chat/{conv_id}/messages/{msg_id}/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Message Events
+         * @description 查询消息的事件链（用于历史回放和可观测性）
+         */
+        get: operations["get_message_events_api_v1_chat__conv_id__messages__msg_id__events_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -163,11 +171,8 @@ export interface paths {
          * Resume Execution
          * @description 恢复中断的执行（权限确认后）
          *
-         *     流程：
-         *     1. 校验 thread_id 归属
-         *     2. 创建新的 StreamContext
-         *     3. 启动后台任务恢复执行
-         *     4. 返回新的 stream_url
+         *     v2: 直接通过 TaskManager.resolve_interrupt() 唤醒暂停的 coroutine，
+         *     不再创建新的 controller/graph。
          */
         post: operations["resume_execution_api_v1_chat__conv_id__resume_post"];
         delete?: never;
@@ -319,7 +324,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/stream/{thread_id}": {
+    "/api/v1/stream/{stream_id}": {
         parameters: {
             query?: never;
             header?: never;
@@ -328,9 +333,10 @@ export interface paths {
         };
         /**
          * Stream Events
-         * @description SSE 端点，订阅 Graph 执行过程
+         * @description SSE 端点，订阅执行过程
          *
          *     前端通过 EventSource 连接此端点，接收实时事件流。
+         *     stream_id 即 message_id（消息与执行 1:1）。
          *
          *     事件格式（使用标准 SSE event: 字段区分事件类型）：
          *         event: metadata
@@ -346,7 +352,7 @@ export interface paths {
          *         - 收到 complete/error 事件后，服务端主动关闭连接
          *         - 前端应销毁 EventSource 实例
          */
-        get: operations["stream_events_api_v1_stream__thread_id__get"];
+        get: operations["stream_events_api_v1_stream__stream_id__get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -540,11 +546,6 @@ export interface components {
              * @description New message ID
              */
             message_id: string;
-            /**
-             * Thread Id
-             * @description LangGraph thread ID
-             */
-            thread_id: string;
             /**
              * Stream Url
              * @description SSE endpoint URL for streaming
@@ -764,13 +765,8 @@ export interface components {
          */
         ResumeRequest: {
             /**
-             * Thread Id
-             * @description LangGraph thread ID
-             */
-            thread_id: string;
-            /**
              * Message Id
-             * @description Message ID to update
+             * @description Message ID to resume
              */
             message_id: string;
             /**
@@ -780,7 +776,7 @@ export interface components {
             approved: boolean;
             /**
              * Always Allow
-             * @description Always allow this tool for the rest of this thread
+             * @description Always allow this tool for the rest of this execution
              * @default false
              */
             always_allow: boolean;
@@ -1304,6 +1300,41 @@ export interface operations {
             };
         };
     };
+    get_message_events_api_v1_chat__conv_id__messages__msg_id__events_get: {
+        parameters: {
+            query?: {
+                /** @description Filter by event type */
+                event_type?: string | null;
+            };
+            header?: never;
+            path: {
+                conv_id: string;
+                msg_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     resume_execution_api_v1_chat__conv_id__resume_post: {
         parameters: {
             query?: never;
@@ -1570,12 +1601,12 @@ export interface operations {
             };
         };
     };
-    stream_events_api_v1_stream__thread_id__get: {
+    stream_events_api_v1_stream__stream_id__get: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                thread_id: string;
+                stream_id: string;
             };
             cookie?: never;
         };

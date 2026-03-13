@@ -30,7 +30,6 @@ interface StreamState {
   // Connection
   isStreaming: boolean;
   streamUrl: string | null;
-  threadId: string | null;
   messageId: string | null;
   conversationId: string | null;
 
@@ -54,7 +53,7 @@ interface StreamState {
   error: string | null;
 
   // Actions
-  startStream: (url: string, threadId: string, messageId: string, conversationId: string) => void;
+  startStream: (url: string, messageId: string, conversationId: string) => void;
   resumeStream: (url: string) => void;
   endStream: () => void;
   reset: () => void;
@@ -119,7 +118,6 @@ export const useStreamStore = create<StreamState>((set, get) => {
   return {
     isStreaming: false,
     streamUrl: null,
-    threadId: null,
     messageId: null,
     conversationId: null,
     segments: [],
@@ -129,12 +127,11 @@ export const useStreamStore = create<StreamState>((set, get) => {
     permissionRequest: null,
     error: null,
 
-    startStream: (url, threadId, messageId, conversationId) => {
+    startStream: (url, messageId, conversationId) => {
       cancelPendingFlush();
       set({
         isStreaming: true,
         streamUrl: url,
-        threadId,
         messageId,
         conversationId,
         segments: [],
@@ -160,7 +157,6 @@ export const useStreamStore = create<StreamState>((set, get) => {
       set({
         isStreaming: false,
         streamUrl: null,
-        threadId: null,
         messageId: null,
         conversationId: null,
         segments: [],

@@ -81,14 +81,10 @@ export function useSSE() {
 
       switch (type) {
         case StreamEventType.METADATA: {
-          // Dev-only consistency check: verify IDs from metadata match streamStore
+          // Dev-only consistency check: verify message_id from metadata matches streamStore
           if (process.env.NODE_ENV === 'development') {
-            const metaThreadId = data?.thread_id as string | undefined;
             const metaMsgId = data?.message_id as string | undefined;
             const store = useStreamStore.getState();
-            if (metaThreadId && store.threadId && metaThreadId !== store.threadId) {
-              console.warn('[SSE] thread_id mismatch:', { meta: metaThreadId, store: store.threadId });
-            }
             if (metaMsgId && store.messageId && metaMsgId !== store.messageId) {
               console.warn('[SSE] message_id mismatch:', { meta: metaMsgId, store: store.messageId });
             }
@@ -97,8 +93,7 @@ export function useSSE() {
         }
 
         case StreamEventType.AGENT_START: {
-          const agentName = data?.agent_name as string ?? event.agent ?? 'Agent';
-          pushSegment(agentName);
+          pushSegment(event.agent ?? 'Agent');
           break;
         }
 
@@ -150,9 +145,9 @@ export function useSSE() {
           break;
 
         case StreamEventType.TOOL_START: {
-          const toolName = data?.tool_name as string ?? event.tool ?? '';
+          const toolName = data?.tool as string ?? '';
           const params = data?.params as Record<string, unknown> ?? {};
-          const agent = data?.agent as string ?? event.agent ?? '';
+          const agent = event.agent ?? '';
 
           // Preserve LLM output before clearing content (only on first tool_start)
           const segs = useStreamStore.getState().segments;
@@ -174,7 +169,7 @@ export function useSSE() {
         }
 
         case StreamEventType.TOOL_COMPLETE: {
-          const toolName = data?.tool_name as string ?? event.tool ?? '';
+          const toolName = data?.tool as string ?? '';
           const success = data?.success as boolean ?? true;
           const result = typeof data?.result_data === 'string'
             ? data.result_data as string
@@ -247,7 +242,7 @@ export function useSSE() {
 
         case StreamEventType.PERMISSION_REQUEST:
           setPermissionRequest({
-            toolName: data?.tool_name as string ?? event.tool ?? '',
+            toolName: data?.tool as string ?? '',
             params: data?.params as Record<string, unknown> ?? {},
           });
           break;
@@ -260,7 +255,7 @@ export function useSSE() {
           const interrupted = data?.interrupted as boolean | undefined;
           if (interrupted) {
             // Permission interrupt: preserve full stream state (isStreaming,
-            // segments, threadId, messageId, permissionRequest) so the UI
+            // segments, messageId, permissionRequest) so the UI
             // stays in streaming mode and PermissionModal can function.
             // SSE connection closes naturally; resumeStream reconnects later.
             break;

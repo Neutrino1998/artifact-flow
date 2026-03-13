@@ -27,12 +27,11 @@ export enum StreamEventType {
 
 export interface MetadataData {
   conversation_id: string;
-  thread_id: string;
   message_id: string;
 }
 
 export interface AgentStartData {
-  agent_name: string;
+  agent: string;
 }
 
 export interface LLMChunkData {
@@ -54,20 +53,19 @@ export interface AgentCompleteData {
 }
 
 export interface ToolStartData {
-  tool_name: string;
+  tool: string;
   params: Record<string, unknown>;
-  agent: string;
 }
 
 export interface ToolCompleteData {
-  tool_name: string;
+  tool: string;
   success: boolean;
   result: string;
   duration_ms: number;
 }
 
 export interface PermissionRequestData {
-  tool_name: string;
+  tool: string;
   params: Record<string, unknown>;
 }
 
@@ -93,6 +91,5 @@ export interface SSEEvent {
   type: StreamEventType | string;
   timestamp: string;
   agent?: string;
-  tool?: string;
   data?: Record<string, unknown>;
 }

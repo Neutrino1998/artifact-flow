@@ -110,7 +110,7 @@ async def test_chat_send_message() -> Optional[dict]:
     测试发送消息
 
     Returns:
-        响应数据 (conversation_id, message_id, thread_id, stream_url)
+        响应数据 (conversation_id, message_id, stream_url)
     """
     log("Testing POST /api/v1/chat...")
 
@@ -124,7 +124,6 @@ async def test_chat_send_message() -> Optional[dict]:
             log(f"Message sent successfully:", "OK")
             log(f"  conversation_id: {data['conversation_id']}")
             log(f"  message_id: {data['message_id']}")
-            log(f"  thread_id: {data['thread_id']}")
             log(f"  stream_url: {data['stream_url']}")
             return data
         else:
@@ -132,15 +131,15 @@ async def test_chat_send_message() -> Optional[dict]:
             return None
 
 
-async def test_sse_stream(thread_id: str, max_events: int = 50):
+async def test_sse_stream(stream_url: str, max_events: int = 50):
     """
     测试 SSE 流式输出
 
     Args:
-        thread_id: 线程 ID
+        stream_url: SSE stream URL (e.g. /api/v1/stream/{stream_id})
         max_events: 最大接收事件数（防止无限等待）
     """
-    log(f"Testing GET /api/v1/stream/{thread_id}...")
+    log(f"Testing GET {stream_url}...")
     log("Waiting for SSE events (this may take a while)...")
 
     event_count = 0
@@ -149,7 +148,7 @@ async def test_sse_stream(thread_id: str, max_events: int = 50):
 
     async with httpx.AsyncClient(base_url=BASE_URL, timeout=TIMEOUT, headers=auth_headers()) as client:
         try:
-            async with client.stream("GET", f"/api/v1/stream/{thread_id}") as response:
+            async with client.stream("GET", stream_url) as response:
                 current_event_name = None
                 async for line in response.aiter_lines():
                     if line.startswith("event:"):
@@ -184,11 +183,11 @@ async def test_sse_stream(thread_id: str, max_events: int = 50):
                             elif event_types[event_type] == 4:
                                 log(f"  [llm_chunk] ... (more chunks)")
                         elif event_type == "tool_start":
-                            log(f"  [tool_start] tool={event_data.get('tool')}")
+                            log(f"  [tool_start] tool={event_data.get('data', {}).get('tool')}")
                         elif event_type == "tool_complete":
-                            log(f"  [tool_complete] tool={event_data.get('tool')}, success={event_data['data'].get('success')}")
+                            log(f"  [tool_complete] tool={event_data.get('data', {}).get('tool')}, success={event_data['data'].get('success')}")
                         elif event_type == "permission_request":
-                            log(f"  [permission_request] tool={event_data.get('tool')}, level={event_data['data'].get('permission_level')}", "WARN")
+                            log(f"  [permission_request] tool={event_data.get('data', {}).get('tool')}, level={event_data['data'].get('permission_level')}", "WARN")
                         elif event_type == "complete":
                             log(f"  [complete] success={event_data['data'].get('success')}", "OK")
                             final_response = event_data['data'].get('response', '')[:200]
@@ -318,7 +317,7 @@ async def run_full_test(username: str = "admin", password: str = "admin"):
         print()
 
         # 4. SSE 流式输出
-        results['sse_stream'] = await test_sse_stream(chat_data['thread_id'])
+        results['sse_stream'] = await test_sse_stream(chat_data['stream_url'])
 
         print()
 
@@ -370,12 +369,12 @@ async def run_single_test(test_name: str, username: str = "admin", password: str
     if test_name == "chat":
         data = await test_chat_send_message()
         if data:
-            await test_sse_stream(data['thread_id'])
+            await test_sse_stream(data['stream_url'])
     elif test_name == "stream":
         # 需要先发送消息
         data = await test_chat_send_message()
         if data:
-            await test_sse_stream(data['thread_id'], max_events=100)
+            await test_sse_stream(data['stream_url'], max_events=100)
     elif test_name == "list":
         await test_list_conversations()
     elif test_name == "artifacts":
