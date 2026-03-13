@@ -383,17 +383,17 @@ class MyAgent(BaseAgent):
 
 ### 自部署模型（Ollama/vLLM）
 
-对于自部署的 OpenAI 兼容接口，使用 `create_llm()` 的 `base_url` 和 `api_key` 参数：
+对于自部署的 OpenAI 兼容接口，在 `src/models/models.yaml` 中添加配置：
 
-```python
-from models.llm import create_llm
-
-llm = create_llm(
-    model="llama3",
-    base_url="http://localhost:11434/v1",
-    api_key="ollama"
-)
+```yaml
+models:
+  local-llama:
+    model: ollama/llama3
+    base_url: http://localhost:11434/v1
+    api_key: ollama
 ```
+
+然后在 Agent 的 frontmatter 中引用别名 `local-llama` 即可。
 
 ## 测试新组件
 

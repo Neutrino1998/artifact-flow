@@ -1,14 +1,14 @@
 """
 测试 Qwen3.5 系列的推理模式和非推理模式
 
-通过 MODEL_CONFIGS 中的预定义配置，每个模型有 thinking / no-thinking 两种：
+通过 models.yaml 中的预定义配置，每个模型有 thinking / no-thinking 两种：
 - "qwen3.5-plus"               → 思考模式
 - "qwen3.5-plus-no-thinking"   → 非思考模式
 - "qwen3.5-flash"              → 思考模式
 - "qwen3.5-flash-no-thinking"  → 非思考模式
 
 运行方式：
-    python -m tests.manual.test_qwen35_plus
+    python -m tests.manual.qwen35_plus
 """
 
 import asyncio
@@ -17,7 +17,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 
-from models.llm import create_llm, get_model_info
+from models.llm import astream_with_retry, get_model_info
 
 
 QUESTION = "If a train travels 60 km in 1 hour, how far will it travel in 2.5 hours? Think step by step."
@@ -31,66 +31,49 @@ async def test_model(model_name: str, expect_reasoning: bool):
     print(f"Model info: {get_model_info(model_name)}")
     print(f"{'=' * 60}")
 
-    llm = create_llm(model_name, temperature=0.1, max_tokens=2000)
-    print(f"  model_name: {llm.model_name}")
-    print(f"  extra_params: {llm.extra_params}")
+    messages = [{"role": "user", "content": QUESTION}]
 
-    # --- 非流式测试 ---
-    print(f"\n--- 非流式调用 ---")
-    try:
-        response = await llm.ainvoke(QUESTION)
-        content = response.content
-        reasoning = response.additional_kwargs.get("reasoning_content")
-        token_usage = response.response_metadata.get("token_usage", {})
-
-        print(f"Content: {content[:200]}{'...' if len(content) > 200 else ''}")
-        if reasoning:
-            print(f"Reasoning: FOUND ({len(reasoning)} chars)")
-        else:
-            print(f"Reasoning: None")
-        print(f"Token usage: {token_usage}")
-
-        if expect_reasoning and reasoning:
-            print("Result: PASS ✅")
-        elif not expect_reasoning and not reasoning:
-            print("Result: PASS ✅")
-        elif expect_reasoning and not reasoning:
-            print("Result: FAIL ❌ (expected reasoning but not found)")
-        else:
-            print("Result: WARN ⚠️  (unexpected reasoning content)")
-    except Exception as e:
-        print(f"Result: ERROR ❌ {e}")
-
-    # --- 流式测试 ---
-    print(f"\n--- 流式调用 ---")
     try:
         reasoning_chunks = 0
         content_chunks = 0
+        final_content = None
+        final_reasoning = None
 
-        async for chunk in llm.astream(QUESTION):
+        async for chunk in astream_with_retry(messages, model=model_name):
             if chunk["type"] == "reasoning":
                 reasoning_chunks += 1
             elif chunk["type"] == "content":
                 content_chunks += 1
+            elif chunk["type"] == "final":
+                final_content = chunk["content"]
+                final_reasoning = chunk["reasoning_content"]
 
         print(f"Reasoning chunks: {reasoning_chunks}")
         print(f"Content chunks: {content_chunks}")
 
-        if expect_reasoning and reasoning_chunks > 0:
-            print("Result: PASS ✅")
-        elif not expect_reasoning and reasoning_chunks == 0:
-            print("Result: PASS ✅")
-        elif expect_reasoning and reasoning_chunks == 0:
-            print("Result: FAIL ❌ (expected reasoning chunks but got 0)")
+        if final_content:
+            preview = final_content[:200]
+            print(f"Content: {preview}{'...' if len(final_content) > 200 else ''}")
+        if final_reasoning:
+            print(f"Reasoning: FOUND ({len(final_reasoning)} chars)")
         else:
-            print("Result: WARN ⚠️  (unexpected reasoning chunks)")
+            print(f"Reasoning: None")
+
+        if expect_reasoning and reasoning_chunks > 0:
+            print("Result: PASS")
+        elif not expect_reasoning and reasoning_chunks == 0:
+            print("Result: PASS")
+        elif expect_reasoning and reasoning_chunks == 0:
+            print("Result: FAIL (expected reasoning chunks but got 0)")
+        else:
+            print("Result: WARN (unexpected reasoning chunks)")
     except Exception as e:
-        print(f"Result: ERROR ❌ {e}")
+        print(f"Result: ERROR {e}")
 
 
 async def main():
     print("=" * 60)
-    print("Qwen3.5 MODEL_CONFIGS 测试")
+    print("Qwen3.5 models.yaml 测试")
     print("=" * 60)
 
     test_cases = [

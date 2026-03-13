@@ -38,15 +38,12 @@ class _FakeAgentConfig:
     role_prompt: str = ""
 
 
-class _FakeLLM:
-    """Fake LLM that yields pre-configured chunks."""
-
-    def __init__(self, chunks: list[dict]):
-        self._chunks = chunks
-
-    async def astream_with_retry(self, messages, **kwargs):
-        for chunk in self._chunks:
+def _make_fake_stream(chunks: list[dict]):
+    """Create a fake async generator that yields pre-configured chunks."""
+    async def fake(messages, **kwargs):
+        for chunk in chunks:
             yield chunk
+    return fake
 
 
 async def _run_with_fake_llm(chunks: list[dict], agent_config=None):
@@ -67,8 +64,7 @@ async def _run_with_fake_llm(chunks: list[dict], agent_config=None):
     async def capture_emit(event_dict):
         emitted.append(event_dict)
 
-    fake_llm = _FakeLLM(chunks)
-    with patch("models.llm.create_llm", return_value=fake_llm):
+    with patch("models.llm.astream_with_retry", _make_fake_stream(chunks)):
         result = await execute_loop(
             state=state,
             agents={"lead_agent": agent_config},

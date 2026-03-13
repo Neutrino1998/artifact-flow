@@ -307,24 +307,21 @@ BOCHA_API_KEY=sk-xxx
 
 ### 自定义模型
 
-支持 Ollama、vLLM 等自部署服务：
+模型配置在 `src/models/models.yaml`。支持 Ollama、vLLM 等自部署服务，在 YAML 中添加即可：
 
-```python
-from models.llm import create_llm
+```yaml
+models:
+  # Ollama 本地模型
+  local-llama:
+    model: ollama/llama3
+    base_url: http://localhost:11434/v1
+    api_key: ollama
 
-# Ollama 本地模型
-llm = create_llm(
-    model="llama3",
-    base_url="http://localhost:11434/v1",
-    api_key="ollama"
-)
-
-# vLLM 部署
-llm = create_llm(
-    model="Qwen/Qwen2-7B-Instruct",
-    base_url="http://localhost:8000/v1",
-    api_key="token-abc123"
-)
+  # vLLM 部署
+  my-qwen:
+    model: openai/Qwen2-7B-Instruct
+    base_url: http://localhost:8000/v1
+    api_key: token-abc123
 ```
 
 ## 数据持久化

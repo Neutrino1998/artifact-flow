@@ -56,7 +56,7 @@ async def execute_loop(
     Returns:
         最终执行状态
     """
-    from models.llm import create_llm
+    from models.llm import astream_with_retry
 
     message_id = state["message_id"]
     tool_round_count: Dict[str, int] = {}  # per-agent tool round counter
@@ -138,7 +138,6 @@ async def execute_loop(
         Returns:
             (response_content, reasoning_content, token_usage) 或 None（LLM 出错，state 已设置）
         """
-        llm = create_llm(model=model)
         llm_start_time = datetime.now()
 
         response_content = ""
@@ -146,7 +145,7 @@ async def execute_loop(
         token_usage = {}
 
         try:
-            async for chunk in llm.astream_with_retry(messages):
+            async for chunk in astream_with_retry(messages, model=model):
                 chunk_type = chunk.get("type")
 
                 if chunk_type == "content":
