@@ -30,6 +30,9 @@ from api.services.task_manager import TaskManager
 from db.database import DatabaseManager
 from repositories.artifact_repo import ArtifactRepository
 from repositories.conversation_repo import ConversationRepository
+from utils.logger import set_global_debug
+
+set_global_debug(True)
 
 
 # ============================================================
