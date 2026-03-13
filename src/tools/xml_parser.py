@@ -15,6 +15,7 @@ class ToolCall:
     name: str
     params: Dict[str, Any]
     raw_text: str = ""
+    error: Optional[str] = None  # 解析失败时的错误信息
 
 
 class XMLToolCallParser:
@@ -58,7 +59,16 @@ class XMLToolCallParser:
 
     @staticmethod
     def _parse_single_block(content: str) -> Optional[ToolCall]:
-        """解析单个 tool_call 块"""
+        """
+        解析单个 tool_call 块
+
+        返回 None 仅当 content 为空白（无实际内容）。
+        若有内容但无法解析，返回带 error 的 ToolCall（让 engine 反馈给 agent）。
+        """
+        # 空白内容 → 跳过
+        if not content.strip():
+            return None
+
         # 先尝试标准 XML 解析
         try:
             result = XMLToolCallParser._parse_with_etree(content)
@@ -69,7 +79,8 @@ class XMLToolCallParser:
             pass
 
         # 修复 LLM 常见错误后重试
-        repaired = XMLToolCallParser._repair_tag_equals_syntax(content)
+        repaired = XMLToolCallParser._repair_tool_name_as_tag(content)
+        repaired = XMLToolCallParser._repair_tag_equals_syntax(repaired)
         repaired = XMLToolCallParser._repair_unclosed_cdata_tags(repaired)
         repaired = XMLToolCallParser._repair_scattered_params(repaired)
         repaired = XMLToolCallParser._repair_missing_closing_tags(repaired)
@@ -80,7 +91,25 @@ class XMLToolCallParser:
                 pass
 
         # Fallback: 正则解析（处理 LLM 格式不严格的情况）
-        return XMLToolCallParser._fallback_parse(repaired)
+        result = XMLToolCallParser._fallback_parse(repaired)
+        if result:
+            return result
+
+        # 所有解析手段均失败 → 返回 error ToolCall
+        # 保证 engine 知道 agent 尝试了 tool call，而非静默忽略
+        return ToolCall(
+            name="__malformed__",
+            params={},
+            error=(
+                "Your tool call could not be parsed. Please use the correct format:\n"
+                "<tool_call>\n"
+                "<name>tool_name</name>\n"
+                "<params>\n"
+                "<param_name><![CDATA[value]]></param_name>\n"
+                "</params>\n"
+                "</tool_call>"
+            ),
+        )
 
     @staticmethod
     def _parse_with_etree(content: str) -> Optional[ToolCall]:
@@ -149,6 +178,45 @@ class XMLToolCallParser:
             pass
 
         return text
+
+    @staticmethod
+    def _repair_tool_name_as_tag(content: str) -> str:
+        """
+        修复工具名作为 XML 标签包裹 params 的格式
+
+        LLM 有时会把工具名写成标签，例如：
+            <web_fetch>
+            <params>
+                <url_list><![CDATA[...]]></url_list>
+            </params>
+        修复为：
+            <name>web_fetch</name>
+            <params>
+                <url_list><![CDATA[...]]></url_list>
+            </params>
+
+        也处理有闭合标签的情况：<web_fetch>...</web_fetch>
+        """
+        # 已有 <name> 标签 → 无需修复
+        if re.search(r'<name[\s>=]', content) or re.search(r'<name>', content):
+            return content
+
+        # 匹配首个标签（跳过空白）
+        match = re.match(r'\s*<(\w+)>(.*)', content, re.DOTALL)
+        if not match:
+            return content
+
+        tag_name = match.group(1)
+        rest = match.group(2)
+
+        # 如果首标签就是 params → 不是工具名，跳过
+        if tag_name.lower() == 'params':
+            return content
+
+        # 移除对应的闭合标签（如果有）
+        rest = re.sub(rf'</\s*{re.escape(tag_name)}\s*>\s*$', '', rest, flags=re.DOTALL)
+
+        return f'<name>{tag_name}</name>\n{rest}'
 
     @staticmethod
     def _repair_tag_equals_syntax(content: str) -> str:
@@ -462,6 +530,36 @@ def hello():
 <title><![CDATA[总结报告 - 研究背景与范围]]></title>
 </params>
 """),
+
+        ("工具名作为标签（无闭合）", """
+<tool_call>
+<web_fetch>
+<params>
+<url_list>
+<![CDATA[https://k.sina.com.cn/article_7879922977_1d5ae152101901bba2.html]]>
+</url_list>
+<max_content_length><![CDATA[20000]]></max_content_length>
+<max_concurrent><![CDATA[1]]></max_concurrent>
+</params>
+</tool_call>
+"""),
+
+        ("工具名作为标签（有闭合）", """
+<tool_call>
+<web_search>
+<params>
+<query><![CDATA[AI research 2024]]></query>
+<max_results><![CDATA[5]]></max_results>
+</params>
+</web_search>
+</tool_call>
+"""),
+
+        ("完全不可解析的 tool_call 块", """
+<tool_call>
+some random garbage that is not xml at all
+</tool_call>
+"""),
     ]
 
     print("=" * 70)
@@ -476,6 +574,9 @@ def hello():
         results = parse_tool_calls(test)
         for result in results:
             print(f"工具名: {result.name}")
-            print(f"参数:")
-            for k, v in result.params.items():
-                print(f"  {k}: {repr(v)}")
+            if result.error:
+                print(f"错误: {result.error}")
+            else:
+                print(f"参数:")
+                for k, v in result.params.items():
+                    print(f"  {k}: {repr(v)}")
