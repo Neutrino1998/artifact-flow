@@ -51,20 +51,10 @@ export function useArtifacts() {
       setCurrentLoading(true);
       setArtifactPanelVisible(true);
       try {
-        const [detail, versions] = await Promise.all([
-          api.getArtifact(sid, artifactId),
-          api.listVersions(sid, artifactId),
-        ]);
+        const detail = await api.getArtifact(sid, artifactId);
         setCurrent(detail);
-        setVersions(versions.versions);
-        // Load the latest version detail (includes changes for diff view)
-        const latest = versions.versions.at(-1);
-        if (latest) {
-          const versionDetail = await api.getVersion(sid, artifactId, latest.version);
-          setSelectedVersion(versionDetail);
-        } else {
-          setSelectedVersion(null);
-        }
+        setVersions(detail.versions);
+        setSelectedVersion(detail.latest_version ?? null);
       } catch (err) {
         console.error('Failed to load artifact:', err);
       } finally {

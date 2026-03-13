@@ -37,7 +37,12 @@ export type ConversationDetail = S['ConversationDetailResponse'];
 
 export type ArtifactSummary = S['ArtifactSummary'];
 export type ArtifactListResponse = S['ArtifactListResponse'];
-export type ArtifactDetail = S['ArtifactDetailResponse'];
+// Manually extended until next `npm run generate-types` to include
+// versions and latest_version returned by the merged endpoint.
+export type ArtifactDetail = S['ArtifactDetailResponse'] & {
+  versions: VersionSummary[];
+  latest_version: VersionDetail | null;
+};
 export type VersionSummary = S['VersionSummary'];
 export type VersionListResponse = S['VersionListResponse'];
 export type VersionDetail = Omit<S['VersionDetailResponse'], 'changes'> & {

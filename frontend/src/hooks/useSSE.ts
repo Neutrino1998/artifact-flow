@@ -207,24 +207,11 @@ export function useSSE() {
               Promise.all([
                 api.getArtifact(sessionId, artifactId),
                 api.listArtifacts(sessionId),
-                api.listVersions(sessionId, artifactId),
-              ]).then(async ([detail, list, versions]) => {
+              ]).then(([detail, list]) => {
                 setArtifactCurrent(detail);
                 setArtifacts(list.artifacts);
-                setArtifactVersions(versions.versions);
-
-                const latestVersion = detail.current_version;
-                if (latestVersion) {
-                  try {
-                    const latest = await api.getVersion(sessionId, artifactId, latestVersion);
-                    setSelectedVersion(latest);
-                  } catch {
-                    // Version detail may lag behind list/detail briefly
-                    setSelectedVersion(null);
-                  }
-                } else {
-                  setSelectedVersion(null);
-                }
+                setArtifactVersions(detail.versions);
+                setSelectedVersion(detail.latest_version ?? null);
               }).catch(() => {
                 // Artifact may not be persisted yet; will retry on stream complete
               });

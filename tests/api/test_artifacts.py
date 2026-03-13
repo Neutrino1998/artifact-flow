@@ -135,27 +135,22 @@ class TestArtifactDetail:
 
 class TestVersions:
 
-    async def test_list_versions(
+    async def test_detail_includes_versions(
         self, client: AsyncClient, seed_artifacts: Tuple[str, str]
     ):
+        """getArtifact response includes versions list and latest_version detail."""
         session_id, artifact_id = seed_artifacts
         resp = await client.get(
-            f"/api/v1/artifacts/{session_id}/{artifact_id}/versions"
+            f"/api/v1/artifacts/{session_id}/{artifact_id}"
         )
         assert resp.status_code == 200
         body = resp.json()
         assert len(body["versions"]) == 2
         assert body["versions"][0]["version"] == 1
         assert body["versions"][1]["version"] == 2
-
-    async def test_list_versions_artifact_not_found(
-        self, client: AsyncClient, seed_artifacts: Tuple[str, str]
-    ):
-        session_id, _ = seed_artifacts
-        resp = await client.get(
-            f"/api/v1/artifacts/{session_id}/nonexistent-art/versions"
-        )
-        assert resp.status_code == 404
+        # latest_version should match current_version
+        assert body["latest_version"]["version"] == 2
+        assert body["latest_version"]["content"] == "# Version 2"
 
     async def test_get_version_detail(
         self, client: AsyncClient, seed_artifacts: Tuple[str, str]
@@ -179,11 +174,11 @@ class TestVersions:
         )
         assert resp.status_code == 404
 
-    async def test_versions_cross_user(
+    async def test_version_detail_cross_user(
         self, admin_client: AsyncClient, seed_artifacts: Tuple[str, str]
     ):
         session_id, artifact_id = seed_artifacts
         resp = await admin_client.get(
-            f"/api/v1/artifacts/{session_id}/{artifact_id}/versions"
+            f"/api/v1/artifacts/{session_id}/{artifact_id}/versions/1"
         )
         assert resp.status_code == 404

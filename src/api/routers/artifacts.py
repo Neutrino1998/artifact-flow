@@ -3,8 +3,7 @@ Artifacts Router
 
 处理 Artifact 相关的 API 端点：
 - GET /api/v1/artifacts/{session_id} - 列出 artifacts
-- GET /api/v1/artifacts/{session_id}/{artifact_id} - 获取详情
-- GET /api/v1/artifacts/{session_id}/{artifact_id}/versions - 版本列表
+- GET /api/v1/artifacts/{session_id}/{artifact_id} - 获取详情（含版本列表和最新版本）
 - GET /api/v1/artifacts/{session_id}/{artifact_id}/versions/{version} - 特定版本
 """
 
@@ -23,7 +22,6 @@ from api.schemas.artifact import (
     ArtifactListResponse,
     ArtifactDetailResponse,
     ArtifactSummary,
-    VersionListResponse,
     VersionDetailResponse,
     VersionSummary,
     UploadResponse,
@@ -280,9 +278,11 @@ async def get_artifact(
     artifact_manager: ArtifactManager = Depends(get_artifact_manager),
 ):
     """
-    获取 artifact 详情（包含当前版本内容）
+    获取 artifact 详情（包含当前版本内容、版本列表和最新版本详情）
     """
     await _verify_session_ownership(session_id, current_user, db_session)
+
+    repo = artifact_manager._ensure_repository()
     result = await artifact_manager.read_artifact(
         session_id=session_id,
         artifact_id=artifact_id
@@ -294,54 +294,42 @@ async def get_artifact(
             detail=f"Artifact '{artifact_id}' not found in session '{session_id}'"
         )
 
+    # Fetch version list and latest version detail in parallel
+    version_list = await repo.list_versions(session_id, artifact_id)
+    version_summaries = [
+        VersionSummary(
+            version=v["version"],
+            update_type=v["update_type"],
+            created_at=datetime.fromisoformat(v["created_at"]) if isinstance(v["created_at"], str) else v["created_at"],
+        )
+        for v in version_list
+    ]
+
+    latest_version_detail = None
+    current_ver = result["version"]
+    if current_ver:
+        ver = await repo.get_version(session_id, artifact_id, current_ver)
+        if ver:
+            latest_version_detail = VersionDetailResponse(
+                version=ver.version,
+                content=ver.content,
+                update_type=ver.update_type,
+                changes=ver.changes,
+                created_at=ver.created_at,
+            )
+
     return ArtifactDetailResponse(
         id=result["id"],
         session_id=session_id,
         content_type=result["content_type"],
         title=result["title"],
         content=result["content"],
-        current_version=result["version"],
+        current_version=current_ver,
         source=result.get("source"),
         created_at=datetime.fromisoformat(result["created_at"]) if isinstance(result["created_at"], str) else result["created_at"],
         updated_at=datetime.fromisoformat(result["updated_at"]) if isinstance(result["updated_at"], str) else result["updated_at"],
-    )
-
-
-@router.get("/{session_id}/{artifact_id}/versions", response_model=VersionListResponse)
-async def list_versions(
-    session_id: str,
-    artifact_id: str,
-    current_user: TokenPayload = Depends(get_current_user),
-    db_session: AsyncSession = Depends(get_db_session),
-    artifact_manager: ArtifactManager = Depends(get_artifact_manager),
-):
-    """
-    获取版本历史列表
-    """
-    await _verify_session_ownership(session_id, current_user, db_session)
-    repo = artifact_manager._ensure_repository()
-
-    # 先检查 artifact 是否存在
-    artifact = await repo.get_artifact(session_id, artifact_id)
-    if not artifact:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Artifact '{artifact_id}' not found in session '{session_id}'"
-        )
-
-    versions = await repo.list_versions(session_id, artifact_id)
-
-    return VersionListResponse(
-        artifact_id=artifact_id,
-        session_id=session_id,
-        versions=[
-            VersionSummary(
-                version=v["version"],
-                update_type=v["update_type"],
-                created_at=datetime.fromisoformat(v["created_at"]) if isinstance(v["created_at"], str) else v["created_at"],
-            )
-            for v in versions
-        ]
+        versions=version_summaries,
+        latest_version=latest_version_detail,
     )
 
 

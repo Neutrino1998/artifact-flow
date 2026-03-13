@@ -7,7 +7,6 @@ import type {
   ResumeResponse,
   ArtifactListResponse,
   ArtifactDetail,
-  VersionListResponse,
   VersionDetail,
   LoginRequest,
   LoginResponse,
@@ -176,12 +175,6 @@ export function listArtifacts(sessionId: string) {
 export function getArtifact(sessionId: string, artifactId: string) {
   return request<ArtifactDetail>(
     `/api/v1/artifacts/${sessionId}/${artifactId}`
-  );
-}
-
-export function listVersions(sessionId: string, artifactId: string) {
-  return request<VersionListResponse>(
-    `/api/v1/artifacts/${sessionId}/${artifactId}/versions`
   );
 }
 
