@@ -181,9 +181,7 @@ class ContextManager:
 
         for name, config in sub_agents.items():
             lines.append(f'<agent name="{name}">')
-            lines.append(config.description)
-            for cap in config.capabilities:
-                lines.append(f"  - {cap}")
+            lines.append(config.description.rstrip())
             lines.append("</agent>")
 
         lines.append("</available_subagents>")

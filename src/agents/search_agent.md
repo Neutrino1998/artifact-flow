@@ -1,7 +1,7 @@
 ---
 name: search_agent
-description: Web search and information retrieval specialist
-capabilities:
+description: |
+  Web search and information retrieval specialist
   - Web search
   - Information retrieval
 tools:

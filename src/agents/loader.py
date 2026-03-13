@@ -2,7 +2,7 @@
 Agent 加载器 — 从 MD 文件解析 AgentConfig
 
 每个 agent 是一个 MD 文件：
-- YAML frontmatter: name, description, capabilities, tools, model, max_tool_rounds
+- YAML frontmatter: name, description, tools, model, max_tool_rounds
 - MD body: 角色提示词（role_prompt）
 """
 
@@ -21,7 +21,6 @@ class AgentConfig:
     """Agent 配置（从 MD 文件加载）"""
     name: str
     description: str
-    capabilities: list[str] = field(default_factory=list)
     tools: dict[str, str] = field(default_factory=dict)  # {tool_name: permission_level}
     model: str = "qwen3.5-flash-no-thinking"
     max_tool_rounds: int = 3
@@ -68,7 +67,6 @@ def load_agent(md_path: str) -> AgentConfig:
     return AgentConfig(
         name=frontmatter["name"],
         description=frontmatter.get("description", ""),
-        capabilities=frontmatter.get("capabilities", []),
         tools=frontmatter.get("tools", {}),
         model=frontmatter.get("model", "qwen3.5-flash-no-thinking"),
         max_tool_rounds=frontmatter.get("max_tool_rounds", 3),

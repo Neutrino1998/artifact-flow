@@ -1,7 +1,7 @@
 ---
 name: lead_agent
-description: Task coordinator and information integrator
-capabilities:
+description: |
+  Task coordinator and information integrator
   - Task planning
   - Artifact management
   - Agent coordination

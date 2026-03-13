@@ -1,10 +1,10 @@
 ---
 name: crawl_agent
-description: Web content extraction and cleaning specialist
-capabilities:
+description: |
+  Web content extraction and cleaning specialist
   - Deep content extraction
   - Web scraping
-  - "IMPORTANT: Instructions must include a specific URL to crawl"
+  - IMPORTANT: Instructions must include a specific URL to crawl
 tools:
   web_fetch: confirm
 model: qwen3.5-flash-no-thinking
