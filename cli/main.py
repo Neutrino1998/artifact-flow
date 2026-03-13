@@ -109,18 +109,23 @@ def send_single_message(api: APIClient, message: str):
     asyncio.run(_send_message_async(api, message))
 
 
-async def _stream_events(api: APIClient, display: ui.StreamDisplay, stream_url: str) -> dict:
+async def _stream_events(
+    api: APIClient,
+    display: ui.StreamDisplay,
+    stream_url: str,
+    conversation_id: str,
+    message_id: str,
+) -> dict:
     """
     消费 SSE 事件流，返回结果信息。
+    权限中断在流内直接处理（保持 SSE 连接不断开）。
 
     Returns:
         dict with keys:
         - success: bool
-        - interrupted: bool (权限中断)
-        - permission_event: SSEEvent | None (权限请求事件)
         - message_id: str | None
     """
-    result = {"success": False, "interrupted": False, "permission_event": None, "message_id": None}
+    result = {"success": False, "message_id": None}
 
     async for event in api.stream_response(stream_url):
         display.handle_event(event)
@@ -130,12 +135,33 @@ async def _stream_events(api: APIClient, display: ui.StreamDisplay, stream_url: 
                 result["message_id"] = event.data["message_id"]
 
         elif event.type == "permission_request":
-            result["permission_event"] = event
+            # 暂停 Live 显示，在流内直接处理权限确认
+            display.stop()
+
+            tool_name = event.data.get("tool", "unknown")
+            level = event.data.get("permission_level", "unknown")
+            params = event.data.get("params", {})
+
+            ui.print_permission_request(tool_name, level, params)
+
+            # 在线程中执行阻塞式用户输入，避免阻塞事件循环
+            answer = await asyncio.to_thread(
+                Prompt.ask,
+                "[yellow]Approve?[/yellow]",
+                choices=["y", "n"],
+                default="y",
+            )
+            approved = answer.lower() == "y"
+
+            # 解决中断，引擎继续执行，事件继续通过同一 SSE 连接推送
+            msg_id = result.get("message_id") or message_id
+            await api.resume_execution(conversation_id, msg_id, approved)
+
+            # 恢复 Live 显示，继续消费后续 SSE 事件
+            display.start()
 
         elif event.type == "complete":
             result["success"] = event.data.get("success", False)
-            if event.data.get("interrupted"):
-                result["interrupted"] = True
             if "message_id" in event.data:
                 result["message_id"] = event.data["message_id"]
 
@@ -165,56 +191,24 @@ async def _send_message_async(api: APIClient, message: str):
         state.conversation_id = resp.conversation_id
         state.parent_message_id = resp.message_id
 
-        stream_url = resp.stream_url
-        conversation_id = resp.conversation_id
-        message_id = resp.message_id
+        # 流式接收响应（权限中断在 _stream_events 内直接处理）
+        display = ui.StreamDisplay()
+        display.start()
 
-        # 流式接收响应（可能因权限中断而多次循环）
-        while True:
-            display = ui.StreamDisplay()
-            display.start()
+        try:
+            result = await _stream_events(
+                api, display, resp.stream_url,
+                resp.conversation_id, resp.message_id,
+            )
+        finally:
+            display.stop()
 
-            try:
-                result = await _stream_events(api, display, stream_url)
-            finally:
-                display.stop()
+        # 更新 message_id
+        if result.get("message_id"):
+            state.parent_message_id = result["message_id"]
 
-            # 更新 message_id
-            if result.get("message_id"):
-                message_id = result["message_id"]
-                state.parent_message_id = message_id
-
-            # 如果被权限中断，提示用户做决定，然后 resume
-            if result["interrupted"] and result["permission_event"]:
-                perm = result["permission_event"]
-                tool_name = perm.data.get("tool", "unknown")
-                level = perm.data.get("permission_level", "unknown")
-                params = perm.data.get("params", {})
-
-                # 显示权限请求详情
-                ui.print_permission_request(tool_name, level, params)
-
-                # 提示用户
-                answer = Prompt.ask(
-                    "[yellow]Approve?[/yellow]",
-                    choices=["y", "n"],
-                    default="y",
-                )
-                approved = answer.lower() == "y"
-
-                # 调用 resume API，获取新的 stream_url
-                stream_url = await api.resume_execution(
-                    conversation_id=conversation_id,
-                    message_id=message_id,
-                    approved=approved,
-                )
-                # 继续循环，消费 resume 后的事件流
-                continue
-
-            # 正常完成或失败
-            if not result["success"]:
-                ui.print_error("Execution failed")
-            break
+        if not result["success"]:
+            ui.print_error("Execution failed")
 
         # 保存状态
         state.save()

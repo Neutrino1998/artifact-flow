@@ -214,12 +214,12 @@ async def execute_loop(
 
         return response_content, reasoning_content, token_usage
 
-    async def _handle_permission(tool_name: str, params: dict, agent_name: str, permission: ToolPermission) -> Optional[bool]:
+    async def _handle_permission(tool_name: str, params: dict, agent_name: str, permission: ToolPermission) -> bool:
         """
         处理权限中断。
 
         Returns:
-            True — approved, False — denied, None — timeout（state 已设置 error）
+            True — approved, False — denied（含超时和客户端断开）
         """
         await _emit(StreamEventType.PERMISSION_REQUEST.value, agent_name, {
             "permission_level": permission.value,
@@ -239,18 +239,11 @@ async def execute_loop(
         try:
             await asyncio.wait_for(interrupt.event.wait(), timeout=permission_timeout)
         except asyncio.TimeoutError:
-            logger.error(f"Permission timeout for tool '{tool_name}' after {permission_timeout}s")
+            logger.warning(f"Permission timeout for tool '{tool_name}' after {permission_timeout}s, treating as denied")
             await _emit(StreamEventType.PERMISSION_RESULT.value, agent_name, {
                 "approved": False, "tool": tool_name, "reason": "timeout",
             })
-            await _emit(StreamEventType.ERROR.value, agent_name, {
-                "error": f"Permission confirmation timed out after {permission_timeout}s for tool '{tool_name}'",
-                "agent": agent_name,
-            })
-            state["completed"] = True
-            state["error"] = True
-            state["response"] = f"Permission confirmation timed out for tool '{tool_name}'"
-            return None
+            return False
 
         resume_data = interrupt.resume_data or {}
         is_approved = resume_data.get("approved", False)
@@ -338,8 +331,6 @@ async def execute_loop(
             if effective_permission == ToolPermission.CONFIRM:
                 if tool_name not in state.get("always_allowed_tools", []):
                     approved = await _handle_permission(tool_name, params, agent_name, effective_permission)
-                    if approved is None:  # timeout → error state already set
-                        break
                     if not approved:
                         continue
 
