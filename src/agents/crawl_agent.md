@@ -6,7 +6,7 @@ capabilities:
   - Web scraping
   - "IMPORTANT: Instructions must include a specific URL to crawl"
 tools:
-  web_fetch: auto
+  web_fetch: confirm
 model: qwen3.5-flash-no-thinking
 max_tool_rounds: 2
 ---
