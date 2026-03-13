@@ -1220,7 +1220,7 @@
 
 <h1 id="去除-langgraphlangchain-依赖--统一持久化设计">去除 LangGraph/LangChain 依赖 + 统一持久化设计</h1>
 <blockquote>
-<p>状态：设计阶段，优先于 <a href="../optimization-plan/">optimization-plan.md</a> 持久化改造实施</p>
+<p>状态：已实施（commit bc7dbdc）。本文档已与实现对齐。待完成项：Compaction Phase 1/2、execution_metrics 持久化到 Message.metadata。</p>
 </blockquote>
 <hr />
 <h2 id="背景">背景</h2>
@@ -1322,7 +1322,7 @@
 <a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>  ├── response             最终回复（冗余，方便列表查询）
 <a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>  ├── content_summary (nullable)    用户问题的 compaction 摘要
 <a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>  ├── response_summary (nullable)   AI 回答的 compaction 摘要
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>  ├── execution_id         执行标识（原 thread_id，改名）
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>  ├── (message_id = PK)    消息 ID 同时作为执行标识（实现时决定复用 message.id，不另加字段）
 <a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>  ├── metadata (JSON)      执行级状态：always_allowed_tools, execution_metrics 汇总, last_input_tokens
 <a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>  │
 <a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>  └── MessageEvent (新表，append-only，不可变)
@@ -1374,19 +1374,19 @@
 <td><code>{agent, summary}</code></td>
 </tr>
 <tr>
-<td><code>interrupt_pending</code></td>
+<td><code>permission_request</code></td>
 <td>需要用户确认</td>
-<td><code>{tool, params, execution_context}</code></td>
+<td><code>{permission_level, tool, params}</code></td>
 </tr>
 <tr>
-<td><code>interrupt_resolved</code></td>
+<td><code>permission_result</code></td>
 <td>用户确认结果</td>
-<td><code>{approved, always_allow}</code></td>
+<td><code>{approved, tool}</code></td>
 </tr>
 <tr>
-<td><code>execution_complete</code></td>
+<td><code>complete</code></td>
 <td>整个请求执行完成</td>
-<td><code>{response, execution_metrics, context_usage}</code></td>
+<td><code>{response, execution_metrics}</code></td>
 </tr>
 <tr>
 <td><code>error</code></td>
@@ -1401,7 +1401,7 @@
 <p>执行 coroutine 遇到 CONFIRM 工具时 <code>await</code> 等待用户确认。整个过程在内存中完成，不涉及 DB 读写：</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>执行 loop（内存）
 <a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>  → tool_b 需要 CONFIRM
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>  → 推 interrupt_pending 事件到 StreamManager（SSE 通知前端）
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>  → 推 permission_request 事件到 StreamManager（SSE 通知前端）
 <a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>  → await asyncio.Event()              ← coroutine 暂停，等用户点确认
 <a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>  → 用户点确认 → API 层 set event       ← coroutine 恢复
 <a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>  → 更新内存 state.always_allowed_tools（如果 always_allow=true）
@@ -1414,7 +1414,7 @@
   - 迁移后（Redis Streams，见 <a href="../optimization-plan/">optimization-plan.md</a> Phase 5.3）：支持 Last-Event-ID 重放，可恢复到 interrupt 状态继续确认
 - 用户彻底离开 → coroutine 超时，当 error 处理并 flush 事件
 - 服务器重启 → coroutine 丢失，用户重新提问</p>
-<p><strong>幂等性：TaskManager 去重。</strong> 用户连点两次 approve，coroutine 已经在跑（第一次 approve 后 event 已 set），第二次 API 请求被 TaskManager 通过 <code>execution_id</code> 拒绝，返回 <code>409 Conflict</code>。</p>
+<p><strong>幂等性：TaskManager 去重。</strong> 用户连点两次 approve，coroutine 已经在跑（第一次 approve 后 event 已 set），第二次 API 请求被 TaskManager 通过 <code>message_id</code> 拒绝，返回 <code>409 Conflict</code>。</p>
 <p><strong>事件流示例（含 agent 切换）：</strong></p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>#1   agent_start          {agent: &quot;lead_agent&quot;}
 <a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>#2   llm_complete         {agent: &quot;lead_agent&quot;, content: &quot;需要搜索...&quot;, token_usage: {...}}
@@ -1423,9 +1423,9 @@
 <a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>#4   agent_start          {agent: &quot;search_agent&quot;}
 <a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>#5   llm_complete         {agent: &quot;search_agent&quot;, content: &quot;找到以下结果...&quot;, token_usage: {...}}
 <a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>#6   tool_start           {agent: &quot;search_agent&quot;, tool: &quot;web_fetch&quot;, params: {url: &quot;...&quot;}}
-<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>#7   interrupt_pending    {tool: &quot;web_fetch&quot;, params: {url: &quot;...&quot;}}
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>#7   permission_request    {tool: &quot;web_fetch&quot;, params: {url: &quot;...&quot;}}
 <a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>     ← coroutine 暂停（内存 await）
-<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a>#8   interrupt_resolved   {approved: true, always_allow: true}
+<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a>#8   permission_result   {approved: true, always_allow: true}
 <a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a>#9   tool_complete        {agent: &quot;search_agent&quot;, tool: &quot;web_fetch&quot;, result: {...}, duration_ms: 1200}
 <a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a>#10  llm_complete         {agent: &quot;search_agent&quot;, content: &quot;搜索结果汇总...&quot;, token_usage: {...}}
 <a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a>#11  agent_complete       {agent: &quot;search_agent&quot;}
@@ -1433,14 +1433,14 @@
 <a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a>#12  tool_complete        {agent: &quot;lead_agent&quot;, tool: &quot;call_subagent&quot;, result: {data: &quot;搜索结果汇总...&quot;}}
 <a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a>#13  llm_complete         {agent: &quot;lead_agent&quot;, content: &quot;根据搜索结果...&quot;, token_usage: {...}}
 <a id="__codelineno-2-17" name="__codelineno-2-17" href="#__codelineno-2-17"></a>#14  agent_complete       {agent: &quot;lead_agent&quot;}
-<a id="__codelineno-2-18" name="__codelineno-2-18" href="#__codelineno-2-18"></a>#15  execution_complete   {response: &quot;...&quot;, execution_metrics: {...}}
+<a id="__codelineno-2-18" name="__codelineno-2-18" href="#__codelineno-2-18"></a>#15  complete   {response: &quot;...&quot;, execution_metrics: {...}}
 <a id="__codelineno-2-19" name="__codelineno-2-19" href="#__codelineno-2-19"></a>     ← 此时全部事件 batch write 到 DB
 </code></pre></div>
 <p>Context 构建时按 <code>agent_name</code> 过滤：lead 看到 #2, #3, #12, #13（call_subagent 是普通的 tool_start → tool_complete 对）；search 看到 #4, #5, #6, #9, #10（instruction 从 lead 的 #3 tool_start params 获取）。</p>
 <h3 id="关键设计约束">关键设计约束</h3>
 <p><strong>执行期间全内存。</strong> Loop 运行时，状态（completed、current_agent、always_allowed_tools 等）和事件列表都在内存中。Loop 不读 DB，不写 DB，直到遇到持久化边界。</p>
 <p><strong>两个持久化边界。</strong> 只在以下时刻将内存中的事件列表 batch write 到 MessageEvent 表：
-1. <code>execution_complete</code> — 成功，全量 flush
+1. <code>complete</code> — 成功，全量 flush
 2. <code>error</code>（含 interrupt 超时）— 失败，flush 已有事件 + 错误信息</p>
 <p><strong>SSE 与持久化分离。</strong> 事件生成后走两条独立路径：推给 StreamManager（SSE 实时消费 + 断线重连缓冲）；追加到内存事件列表（等边界 flush 到 DB）。两者互不依赖。</p>
 <p><strong>Append-only，不可变。</strong> 事件写入 DB 后不做 UPDATE/DELETE。历史状态通过事件序列推导。</p>
@@ -1448,7 +1448,7 @@
 <p>体积评估：一个普通请求 ~20-50KB。工具返回大数据（如 <code>web_fetch</code> 单 URL 最多 20K 字符）时单条事件可能较大，但这与工具返回给 agent 的数据量一致 — 数据体积应在工具层治理（调整 <code>max_content_length</code>、限制 <code>url_list</code> 数量），而非在事件层截断，否则会丢失 agent 实际接收的上下文，影响调试和重放。</p>
 <h3 id="执行流程">执行流程</h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>请求进入
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>  → 创建 Message 记录（生成 execution_id）
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>  → 创建 Message 记录（生成 message_id）
 <a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>  → 启动执行循环 (async coroutine, 由 TaskManager 管理)
 <a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>      state = 内存状态 (completed, current_agent, always_allowed_tools, ...)
 <a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>      events = 内存事件列表
@@ -1463,8 +1463,8 @@
 <a id="__codelineno-3-14" name="__codelineno-3-14" href="#__codelineno-3-14"></a>              → tool_start / tool_complete 追加到 events
 <a id="__codelineno-3-15" name="__codelineno-3-15" href="#__codelineno-3-15"></a>              → 检查权限（读内存 always_allowed_tools）：
 <a id="__codelineno-3-16" name="__codelineno-3-16" href="#__codelineno-3-16"></a>                  ├── AUTO → 直接执行
-<a id="__codelineno-3-17" name="__codelineno-3-17" href="#__codelineno-3-17"></a>                  └── CONFIRM → 追加 interrupt_pending → 推 SSE → await（内存暂停）
-<a id="__codelineno-3-18" name="__codelineno-3-18" href="#__codelineno-3-18"></a>                      → 用户确认 → 追加 interrupt_resolved → 继续
+<a id="__codelineno-3-17" name="__codelineno-3-17" href="#__codelineno-3-17"></a>                  └── CONFIRM → 追加 permission_request → 推 SSE → await（内存暂停）
+<a id="__codelineno-3-18" name="__codelineno-3-18" href="#__codelineno-3-18"></a>                      → 用户确认 → 追加 permission_result → 继续
 <a id="__codelineno-3-19" name="__codelineno-3-19" href="#__codelineno-3-19"></a>          → complete_agent()：lead 无工具调用 → completed（跳出 loop，持久化）
 <a id="__codelineno-3-20" name="__codelineno-3-20" href="#__codelineno-3-20"></a>                     sub 无工具调用 → 打包 tool_result 切回 lead，继续 loop
 <a id="__codelineno-3-21" name="__codelineno-3-21" href="#__codelineno-3-21"></a>
@@ -1481,7 +1481,6 @@
 <li>注入对话历史（优先使用 <code>content_summary</code>/<code>response_summary</code>，无则用原文）</li>
 <li>合并 queued messages 到当前轮 user message（文本拼接）</li>
 <li>截断当前轮 tool interactions（保留最近 N 条）</li>
-<li>追踪 context usage（token 计数、使用率）</li>
 <li>触发跨轮 compaction（仅在新用户消息进来的首次 build 时，loop 内后续 build 不触发。见 Compaction 设计）</li>
 </ul>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="c1"># 伪代码：执行循环（扁平 loop，lead/sub 共享同一个循环）</span>
@@ -1490,7 +1489,7 @@
 <a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>        <span class="n">agent_config</span> <span class="o">=</span> <span class="n">agent_registry</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">state</span><span class="o">.</span><span class="n">current_agent</span><span class="p">)</span>  <span class="c1"># 全局，启动时加载</span>
 <a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>
 <a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>        <span class="c1"># drain 用户追加消息（非阻塞）</span>
-<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a>        <span class="n">queued</span> <span class="o">=</span> <span class="n">drain_queue</span><span class="p">(</span><span class="n">state</span><span class="o">.</span><span class="n">execution_id</span><span class="p">)</span>
+<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a>        <span class="n">queued</span> <span class="o">=</span> <span class="n">drain_queue</span><span class="p">(</span><span class="n">state</span><span class="o">.</span><span class="n">message_id</span><span class="p">)</span>
 <a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a>        <span class="k">if</span> <span class="n">queued</span><span class="p">:</span>
 <a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a>            <span class="n">state</span><span class="o">.</span><span class="n">queued_messages</span> <span class="o">=</span> <span class="n">queued</span>
 <a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a>
@@ -1507,14 +1506,14 @@
 <a id="__codelineno-4-21" name="__codelineno-4-21" href="#__codelineno-4-21"></a>                <span class="n">emit</span><span class="p">(</span><span class="n">tool_start</span><span class="p">,</span> <span class="n">agent</span><span class="o">=</span><span class="n">lead</span><span class="p">,</span> <span class="n">tool</span><span class="o">=</span><span class="n">call_subagent</span><span class="p">)</span>
 <a id="__codelineno-4-22" name="__codelineno-4-22" href="#__codelineno-4-22"></a>                <span class="k">break</span>                             <span class="c1"># 下一轮 iteration 由 sub 执行</span>
 <a id="__codelineno-4-23" name="__codelineno-4-23" href="#__codelineno-4-23"></a>            <span class="k">if</span> <span class="n">needs_confirm</span><span class="p">(</span><span class="n">tool</span><span class="p">):</span>               <span class="c1"># 权限检查</span>
-<a id="__codelineno-4-24" name="__codelineno-4-24" href="#__codelineno-4-24"></a>                <span class="n">emit</span><span class="p">(</span><span class="n">interrupt_pending</span><span class="p">)</span>            <span class="c1"># 推 SSE（不写库）</span>
+<a id="__codelineno-4-24" name="__codelineno-4-24" href="#__codelineno-4-24"></a>                <span class="n">emit</span><span class="p">(</span><span class="n">permission_request</span><span class="p">)</span>            <span class="c1"># 推 SSE（不写库）</span>
 <a id="__codelineno-4-25" name="__codelineno-4-25" href="#__codelineno-4-25"></a>                <span class="k">await</span> <span class="n">wait_for_user</span><span class="p">()</span>              <span class="c1"># 内存暂停</span>
 <a id="__codelineno-4-26" name="__codelineno-4-26" href="#__codelineno-4-26"></a>            <span class="n">result</span> <span class="o">=</span> <span class="k">await</span> <span class="n">execute</span><span class="p">(</span><span class="n">tool</span><span class="p">)</span>
 <a id="__codelineno-4-27" name="__codelineno-4-27" href="#__codelineno-4-27"></a>
 <a id="__codelineno-4-28" name="__codelineno-4-28" href="#__codelineno-4-28"></a>        <span class="k">if</span> <span class="ow">not</span> <span class="n">tool_calls</span><span class="p">:</span>                        <span class="c1"># agent 无工具调用 → 完成</span>
 <a id="__codelineno-4-29" name="__codelineno-4-29" href="#__codelineno-4-29"></a>            <span class="n">complete_agent</span><span class="p">(</span><span class="n">state</span><span class="p">,</span> <span class="n">response</span><span class="p">,</span> <span class="n">emit</span><span class="p">)</span>
 <a id="__codelineno-4-30" name="__codelineno-4-30" href="#__codelineno-4-30"></a>
-<a id="__codelineno-4-31" name="__codelineno-4-31" href="#__codelineno-4-31"></a>    <span class="n">emit</span><span class="p">(</span><span class="n">execution_complete</span><span class="p">,</span> <span class="n">context</span><span class="o">.</span><span class="n">usage</span><span class="p">)</span>       <span class="c1"># context_usage 随 metrics 写入</span>
+<a id="__codelineno-4-31" name="__codelineno-4-31" href="#__codelineno-4-31"></a>    <span class="n">emit</span><span class="p">(</span><span class="n">complete</span><span class="p">,</span> <span class="n">metrics</span><span class="p">)</span>              <span class="c1"># execution_metrics 随 complete 事件推送</span>
 </code></pre></div>
 <p><strong><code>complete_agent()</code> — 仅在 agent 无工具调用时触发：</strong></p>
 <table>
@@ -1762,7 +1761,7 @@
 <a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a>      Phase 1: 直接从 context 中移除（不生成摘要）
 <a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a>      Phase 2: LLM 逐对生成摘要 → 写入 content_summary + response_summary
 <a id="__codelineno-9-9" name="__codelineno-9-9" href="#__codelineno-9-9"></a>  → 正常执行 loop
-<a id="__codelineno-9-10" name="__codelineno-9-10" href="#__codelineno-9-10"></a>  → execution_complete metrics 带 context_usage
+<a id="__codelineno-9-10" name="__codelineno-9-10" href="#__codelineno-9-10"></a>  → complete 事件带 execution_metrics
 </code></pre></div>
 <h3 id="轮内-truncation">轮内 Truncation</h3>
 <p>执行 loop 中 agent 可能调多轮工具，tool interactions 越来越长。不做 compaction（太复杂），直接 truncation：保留最近 N 条 tool interaction 在 context 里（现有 <code>compress_messages(preserve_recent=5)</code> 机制）。超出的交互仍在内存事件列表中（执行完成时 batch write 到 MessageEvent），只是不再注入 LLM context。</p>
@@ -1784,15 +1783,15 @@
 <tbody>
 <tr>
 <td><code>thread_id</code></td>
-<td><code>execution_id</code></td>
-<td>去掉 LangGraph 后不再有 "thread" 概念，实际语义是一次执行的标识</td>
+<td><code>message_id</code></td>
+<td>去掉 LangGraph 后不再有 "thread" 概念。实现时决定直接复用 <code>message.id</code> 作为执行标识（1:1 关系），不另加 <code>execution_id</code> 字段</td>
 </tr>
 </tbody>
 </table>
-<p>影响范围：<code>Message.thread_id</code> 字段、API schema (<code>chat.py</code>)、前端 SSE 连接 URL、controller 参数。内部项目同步发版，直接改名，不需要兼容窗口。</p>
+<p>影响范围：<code>Message.thread_id</code> 字段删除、API schema (<code>chat.py</code>)、前端 SSE 连接 URL、controller 参数。内部项目同步发版，直接改名，不需要兼容窗口。</p>
 <hr />
 <h2 id="旧数据处理">旧数据处理</h2>
-<p>不做迁移，全部清理。<code>langgraph.db</code>（checkpoint 数据）直接删除。Messages 表涉及字段重命名（<code>thread_id</code> → <code>execution_id</code>）和新增字段（<code>content_summary</code>、<code>response_summary</code>、<code>metadata.last_input_tokens</code>），旧数据结构不兼容，连同关联的 Conversations、Artifacts 等一起清空，重建 schema。内部项目无外部用户，一步到位。</p>
+<p>不做迁移，全部清理。<code>langgraph.db</code>（checkpoint 数据）直接删除。Messages 表涉及字段重命名（<code>thread_id</code> 删除，复用 <code>id</code> 作为执行标识）和新增字段（<code>content_summary</code>、<code>response_summary</code>、<code>metadata</code>），旧数据结构不兼容，连同关联的 Conversations、Artifacts 等一起清空，重建 schema。内部项目无外部用户，一步到位。</p>
 <hr />
 <h2 id="部署假设单-worker">部署假设：单 Worker</h2>
 <p>初始设计只考虑单 worker（一个 uvicorn 进程，一个 event loop）。多 worker 部署（gunicorn 多进程）属于后续优化范围（见 <a href="../optimization-plan/">optimization-plan.md</a> Phase 5.5）。</p>
@@ -1818,7 +1817,7 @@
 </tr>
 <tr>
 <td><strong>TaskManager 去重</strong></td>
-<td>内存 <code>dict</code> 查 <code>execution_id</code></td>
+<td>内存 <code>dict</code> 查 <code>message_id</code></td>
 <td>Redis 分布式锁</td>
 </tr>
 <tr>
@@ -1850,13 +1849,13 @@
 <a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a>MessageEvent 表（永久历史）
 </code></pre></div>
 <ul>
-<li><strong>迁移前（当前）</strong>：用户刷新页面，<code>asyncio.Queue</code> 中已消费事件丢失。Interrupt 期间刷新 → 丢失 interrupt_pending 事件，但 coroutine 仍在等待，用户需重新发送消息。</li>
+<li><strong>迁移前（当前）</strong>：用户刷新页面，<code>asyncio.Queue</code> 中已消费事件丢失。Interrupt 期间刷新 → 丢失 permission_request 事件，但 coroutine 仍在等待，用户需重新发送消息。</li>
 <li><strong>迁移后</strong>：Redis Streams 支持 <code>Last-Event-ID</code> 重放，刷新后可恢复到 interrupt 状态继续确认。</li>
 </ul>
 <p>本设计不依赖 Phase 5.3 — 当前 asyncio.Queue 能工作，只是刷新体验较差。Phase 5.3 是增强，不是前置条件。</p>
 <h3 id="phase-55taskmanager-多-worker">Phase 5.5（TaskManager 多 Worker）</h3>
 <p>多 worker 下 TaskManager 需要：
-- Redis 分布式锁做 <code>execution_id</code> 去重
+- Redis 分布式锁做 <code>message_id</code> 去重
 - Redis pub/sub 做跨进程 interrupt 通知（API 请求可能落在 worker A，执行 coroutine 在 worker B）</p>
 <p>当前设计的 <code>asyncio.Event</code> 方案在单 worker 下完备，多 worker 扩展时替换为 Redis 实现，接口不变。</p>
 <hr />
@@ -1864,7 +1863,7 @@
 <p>LangGraph 移除优先于 <a href="../optimization-plan/">optimization-plan.md</a> 中的持久化改造，避免在即将废弃的 checkpoint 机制上做无用投入（Phase 5.2 Redis Checkpointer 直接跳过）。</p>
 <ol>
 <li><strong>替换执行引擎</strong> — 用 async while loop 替代 StateGraph，interrupt 改为内存 asyncio.Event</li>
-<li><strong>改造 TaskManager</strong> — 增加 <code>execution_id</code> 去重（当前实现允许同 task_id 覆盖提交），增加 interrupt Event 管理 + message queue</li>
+<li><strong>改造 TaskManager</strong> — 增加 <code>message_id</code> 去重（当前实现允许同 task_id 覆盖提交），增加 interrupt Event 管理 + message queue</li>
 <li><strong>改造 LLM 接口</strong> — <code>llm.py</code> 返回 <code>LLMResponse</code> + <code>call_with_retry()</code>，删除 <code>AIMessage</code> 依赖</li>
 <li><strong>Agent 类 → MD 文件</strong> — <code>BaseAgent</code>/<code>LeadAgent</code>/<code>SearchAgent</code>/<code>CrawlAgent</code> 类删除，各自转为 MD 文件（YAML frontmatter + role prompt），新增 <code>load_agent()</code> 加载器</li>
 <li><strong>移除 LangGraph/LangChain 依赖</strong> — 清理代码和 requirements，删除 <code>langgraph.db</code></li>
