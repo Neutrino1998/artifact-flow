@@ -272,7 +272,7 @@ class StreamDisplay:
         elif event.type == "tool_start":
             # 保存当前 agent 内容（如果有）
             self._finalize_current_agent()
-            self.current_tool = event.tool
+            self.current_tool = event.data.get("tool")
             self.current_tool_params = event.data.get("params", {})
 
         elif event.type == "tool_complete":

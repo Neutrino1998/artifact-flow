@@ -14,7 +14,6 @@ class SendMessageResponse:
     """发送消息响应"""
     conversation_id: str
     message_id: str
-    thread_id: str
     stream_url: str
 
 
@@ -24,7 +23,6 @@ class SSEEvent:
     type: str
     data: dict
     agent: str | None = None
-    tool: str | None = None
 
 
 class APIClient:
@@ -86,14 +84,13 @@ class APIClient:
             return SendMessageResponse(
                 conversation_id=data["conversation_id"],
                 message_id=data["message_id"],
-                thread_id=data["thread_id"],
                 stream_url=data["stream_url"],
             )
 
-    async def stream_response(self, thread_id: str) -> AsyncIterator[SSEEvent]:
+    async def stream_response(self, stream_url: str) -> AsyncIterator[SSEEvent]:
         """流式接收响应"""
         async with httpx.AsyncClient(base_url=self.base_url, timeout=self.timeout) as client:
-            async with client.stream("GET", f"/api/v1/stream/{thread_id}", headers=self._auth_headers()) as response:
+            async with client.stream("GET", stream_url, headers=self._auth_headers()) as response:
                 current_event_name: str | None = None
                 async for line in response.aiter_lines():
                     if line.startswith("event:"):
@@ -113,7 +110,6 @@ class APIClient:
                             type=event_type,
                             data=event_data.get("data", {}),
                             agent=event_data.get("agent"),
-                            tool=event_data.get("tool"),
                         )
 
                         # 终结事件
@@ -125,16 +121,14 @@ class APIClient:
     async def resume_execution(
         self,
         conversation_id: str,
-        thread_id: str,
         message_id: str,
         approved: bool,
     ) -> str:
-        """恢复中断的执行（权限确认后），返回 stream_url 中的 thread_id"""
+        """恢复中断的执行（权限确认后），返回 stream_url"""
         async with httpx.AsyncClient(base_url=self.base_url, timeout=self.timeout) as client:
             resp = await client.post(
                 f"/api/v1/chat/{conversation_id}/resume",
                 json={
-                    "thread_id": thread_id,
                     "message_id": message_id,
                     "approved": approved,
                 },
@@ -142,9 +136,7 @@ class APIClient:
             )
             resp.raise_for_status()
             data = resp.json()
-            # stream_url 格式: /api/v1/stream/{thread_id}
-            stream_url = data["stream_url"]
-            return stream_url.rsplit("/", 1)[-1]
+            return data["stream_url"]
 
     async def list_conversations(self, limit: int = 20, offset: int = 0) -> dict:
         """列出对话"""

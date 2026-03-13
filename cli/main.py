@@ -109,7 +109,7 @@ def send_single_message(api: APIClient, message: str):
     asyncio.run(_send_message_async(api, message))
 
 
-async def _stream_events(api: APIClient, display: ui.StreamDisplay, thread_id: str) -> dict:
+async def _stream_events(api: APIClient, display: ui.StreamDisplay, stream_url: str) -> dict:
     """
     消费 SSE 事件流，返回结果信息。
 
@@ -122,13 +122,10 @@ async def _stream_events(api: APIClient, display: ui.StreamDisplay, thread_id: s
     """
     result = {"success": False, "interrupted": False, "permission_event": None, "message_id": None}
 
-    async for event in api.stream_response(thread_id):
+    async for event in api.stream_response(stream_url):
         display.handle_event(event)
 
         if event.type == "metadata":
-            # 保存 metadata 中的 thread_id/message_id 用于 resume
-            if "thread_id" in event.data:
-                result["thread_id"] = event.data["thread_id"]
             if "message_id" in event.data:
                 result["message_id"] = event.data["message_id"]
 
@@ -168,7 +165,7 @@ async def _send_message_async(api: APIClient, message: str):
         state.conversation_id = resp.conversation_id
         state.parent_message_id = resp.message_id
 
-        thread_id = resp.thread_id
+        stream_url = resp.stream_url
         conversation_id = resp.conversation_id
         message_id = resp.message_id
 
@@ -178,7 +175,7 @@ async def _send_message_async(api: APIClient, message: str):
             display.start()
 
             try:
-                result = await _stream_events(api, display, thread_id)
+                result = await _stream_events(api, display, stream_url)
             finally:
                 display.stop()
 
@@ -190,7 +187,7 @@ async def _send_message_async(api: APIClient, message: str):
             # 如果被权限中断，提示用户做决定，然后 resume
             if result["interrupted"] and result["permission_event"]:
                 perm = result["permission_event"]
-                tool_name = perm.tool or "unknown"
+                tool_name = perm.data.get("tool", "unknown")
                 level = perm.data.get("permission_level", "unknown")
                 params = perm.data.get("params", {})
 
@@ -205,10 +202,9 @@ async def _send_message_async(api: APIClient, message: str):
                 )
                 approved = answer.lower() == "y"
 
-                # 调用 resume API，获取新的 stream thread_id
-                thread_id = await api.resume_execution(
+                # 调用 resume API，获取新的 stream_url
+                stream_url = await api.resume_execution(
                     conversation_id=conversation_id,
-                    thread_id=thread_id,
                     message_id=message_id,
                     approved=approved,
                 )
