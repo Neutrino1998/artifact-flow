@@ -26,24 +26,21 @@ class ToolPromptGenerator:
         """
         if not tools:
             return "<tool_instructions>\nNo tools available.\n</tool_instructions>"
-        
-        instruction = """<tool_instructions>
-You may make one or more tool calls per turn. They will be executed sequentially.
 
-**Available Tools:**
+        instruction = """<tool_instructions>
+<format>
+You may make one or more tool calls per turn. They execute sequentially.
+Wrap ALL parameter values in <![CDATA[...]]>.
+For list parameters, wrap each <item> value in <![CDATA[...]]>.
+</format>
 """
 
         # 添加每个工具的说明
         for tool in tools:
             instruction += f"\n{ToolPromptGenerator._format_tool_doc(tool)}"
 
-        instruction += """
-**Call Rules:**
-- You may include multiple tool calls; they execute in order.
-- Wrap ALL parameter values in `<![CDATA[...]]>`.
-- For list parameters, wrap each `<item>` value in `<![CDATA[...]]>`.
-</tool_instructions>"""
-        
+        instruction += "\n</tool_instructions>"
+
         return instruction
     
     @staticmethod
@@ -57,8 +54,8 @@ You may make one or more tool calls per turn. They will be executed sequentially
         Returns:
             工具文档字符串
         """
-        doc = f"### {tool.name}\n"
-        doc += f"Description: {tool.description}\n"
+        doc = f'<tool name="{tool.name}">\n'
+        doc += f"{tool.description}\n"
 
         # 参数说明
         params = tool.get_parameters()
@@ -76,28 +73,9 @@ You may make one or more tool calls per turn. They will be executed sequentially
         if tool.show_example:
             doc += f"Example:\n{tool.to_xml_example()}\n"
 
+        doc += "</tool>"
+
         return doc
-    
-    @staticmethod
-    def generate_tool_response_format() -> str:
-        """
-        生成工具响应格式说明
-        
-        Returns:
-            响应格式说明
-        """
-        return """Tool results will be provided in the following format:
-
-<tool_result>
-  <name>tool_name</name>
-  <success>true/false</success>
-  <data>
-    <!-- Result data here -->
-  </data>
-  <error><!-- Error message if failed --></error>
-</tool_result>
-
-After receiving tool results, analyze them and continue with your task."""
     
     @staticmethod
     def format_tool_result(name: str, result: Dict[str, Any]) -> str:
@@ -123,16 +101,14 @@ After receiving tool results, analyze them and continue with your task."""
         else:
             data_str = str(data) if data else ""
         
-        xml = f"""<tool_result>
-  <name>{name}</name>
-  <success>{'true' if success else 'false'}</success>"""
-        
+        xml = f'<tool_result name="{name}" success="{"true" if success else "false"}">'
+
         if data_str:
             xml += f"\n  <data>\n{ToolPromptGenerator._indent(data_str, 4)}\n  </data>"
-        
+
         if error:
             xml += f"\n  <error>{error}</error>"
-        
+
         xml += "\n</tool_result>"
         
         return xml

@@ -180,10 +180,11 @@ class ContextManager:
         lines.append("Use the `call_subagent` tool to delegate tasks. Provide clear, specific instructions.\n")
 
         for name, config in sub_agents.items():
-            lines.append(f"**{name}**: {config.description}")
+            lines.append(f'<agent name="{name}">')
+            lines.append(config.description)
             for cap in config.capabilities:
                 lines.append(f"  - {cap}")
-            lines.append("")
+            lines.append("</agent>")
 
         lines.append("</available_subagents>")
         return "\n".join(lines)

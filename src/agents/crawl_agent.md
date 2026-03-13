@@ -28,10 +28,8 @@ Extract and clean valuable information from web pages. The Lead Agent coordinate
 Return extracted content in this structure:
 
 <extracted_pages>
-  <page>
-    <url>https://...</url>
-    <title>Page Title</title>
-    <content>Cleaned and extracted main content</content>
+  <page url="https://..." title="Page Title">
+    Cleaned and extracted main content
   </page>
 </extracted_pages>
 </output_format>

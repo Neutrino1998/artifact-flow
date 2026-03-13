@@ -29,10 +29,8 @@ Execute targeted web searches to gather relevant, high-quality information. The 
 Return findings in this structure:
 
 <search_results>
-  <result>
-    <title>Page Title</title>
-    <url>https://...</url>
-    <content>Comprehensive and contextually relevant content</content>
+  <result url="https://..." title="Page Title">
+    Comprehensive and contextually relevant content
   </result>
 </search_results>
 </output_format>
