@@ -465,8 +465,7 @@ artifact-flow/
 │   └── manual/                        # 手动 / 交互式测试（需要 LLM 后端）
 │       ├── engine.py                  # 执行引擎测试（多轮对话、Artifact、权限、分支）
 │       ├── api_smoke.py               # API 烟雾测试
-│       ├── litellm_providers.py       # LiteLLM 提供商兼容性测试
-│       └── llm_playground.py          # LLM 交互式测试（模型选择 + 对话）
+│       └── litellm_providers.py       # LiteLLM 提供商兼容性测试
 ├── logs/               # 日志目录
 └── docs/               # 文档
 ```
@@ -540,12 +539,9 @@ pytest -k "test_name"          # 按名称匹配运行
 # 执行引擎测试 - 多轮对话、Artifact、权限确认、分支对话
 python -m tests.manual.engine
 
-# LLM 提供商兼容性测试 - 自动测试 models.yaml 中所有模型
-python -m tests.manual.litellm_providers
-
-# LLM 交互式测试 - 选择模型进入对话模式
-python -m tests.manual.llm_playground
-python -m tests.manual.llm_playground --model local-llama  # 直接指定模型
+# LLM 提供商兼容性测试
+python -m tests.manual.litellm_providers                    # 测试所有模型
+python -m tests.manual.litellm_providers qwen3.5-plus       # 测试指定模型
 ```
 
 测试脚本提供交互式菜单：

@@ -218,5 +218,12 @@ def get_model_info(model: str) -> Dict[str, Any]:
     config = _load_config()
     models = config.get("models", {})
     if model in models:
-        return {"model_id": models[model]["model"]}
-    return {"model_id": model}
+        model_config = models[model]
+        params = model_config.get("params", {})
+        # 推理模型: enable_thinking=True 或模型名含 reasoner
+        is_reasoning = params.get("enable_thinking", False) or "reasoner" in model_config["model"]
+        return {
+            "model_id": model_config["model"],
+            "is_reasoning": is_reasoning,
+        }
+    return {"model_id": model, "is_reasoning": False}

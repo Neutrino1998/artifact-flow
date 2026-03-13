@@ -1,13 +1,12 @@
 """
 LiteLLM Provider 兼容性测试
 
-测试所有预定义模型的：
-1. 流式输出
-2. Token usage
-3. Reasoning content（推理模型）
+测试模型的流式输出、Token usage、Reasoning content。
 
 运行方式：
-    python -m tests.manual.litellm_providers
+    python -m tests.manual.litellm_providers                    # 测试所有模型
+    python -m tests.manual.litellm_providers qwen3.5-plus       # 测试指定模型
+    python -m tests.manual.litellm_providers deepseek-chat qwen3.5-flash-no-thinking
 """
 
 import asyncio
@@ -16,30 +15,17 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 
-from models.llm import astream_with_retry, get_available_models
+from models.llm import astream_with_retry, get_available_models, get_model_info
 
-
-# ========================================
-# 配置
-# ========================================
-
-# 推理模型（期望有 reasoning content）
-REASONING_MODELS = {
-    "qwen3.5-plus", "qwen3.5-flash", "qwen3.5-35b-a3b",
-    "deepseek-reasoner",
-}
 
 BASIC_QUESTION = "What is 2+2? Answer in one word."
 REASONING_QUESTION = "If a train travels 60 km in 1 hour, how far will it travel in 2.5 hours? Think step by step."
 
 
-# ========================================
-# 核心测试
-# ========================================
-
 async def test_model(model_name: str) -> dict:
     """测试单个模型的流式输出"""
-    expect_reasoning = model_name in REASONING_MODELS
+    info = get_model_info(model_name)
+    expect_reasoning = info["is_reasoning"]
     question = REASONING_QUESTION if expect_reasoning else BASIC_QUESTION
 
     result = {
@@ -55,7 +41,7 @@ async def test_model(model_name: str) -> dict:
     }
 
     print(f"\n{'=' * 60}")
-    print(f"  {model_name}")
+    print(f"  {model_name}  ({info['model_id']})")
     print(f"  expect_reasoning: {expect_reasoning}")
     print(f"{'=' * 60}")
 
@@ -106,16 +92,24 @@ async def test_model(model_name: str) -> dict:
     return result
 
 
-# ========================================
-# 主函数
-# ========================================
-
 async def main():
-    models = get_available_models()
+    all_models = get_available_models()
+
+    # 命令行参数指定模型，否则全跑
+    args = sys.argv[1:]
+    if args:
+        invalid = [m for m in args if m not in all_models]
+        if invalid:
+            print(f"Unknown models: {invalid}")
+            print(f"Available: {all_models}")
+            sys.exit(1)
+        models = args
+    else:
+        models = all_models
 
     print(f"\n{'=' * 60}")
     print(f"  LiteLLM Provider Compatibility Test")
-    print(f"  Models: {len(models)}")
+    print(f"  Testing: {len(models)}/{len(all_models)} models")
     print(f"{'=' * 60}")
 
     all_results = []
