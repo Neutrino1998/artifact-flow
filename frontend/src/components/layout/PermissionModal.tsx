@@ -2,12 +2,10 @@
 
 import { useState, useCallback } from 'react';
 import { useStreamStore } from '@/stores/streamStore';
-import { useSSE } from '@/hooks/useSSE';
 import * as api from '@/lib/api';
 
 export default function PermissionModal() {
   const permissionRequest = useStreamStore((s) => s.permissionRequest);
-  const { connect } = useSSE();
   const [loading, setLoading] = useState(false);
 
   const handleResponse = useCallback(
@@ -18,15 +16,16 @@ export default function PermissionModal() {
       if (!req || !conversationId || !messageId) return;
       setLoading(true);
       try {
-        const res = await api.resumeExecution(conversationId, {
+        await api.resumeExecution(conversationId, {
           message_id: messageId,
           approved,
           always_allow: alwaysAllow,
         });
 
-        // Reconnect SSE first, then clear permission (clearing unmounts this component)
-        useStreamStore.getState().resumeStream(res.stream_url);
-        connect(res.stream_url, conversationId, messageId);
+        // No SSE reconnection needed — the existing connection stays alive
+        // while the engine blocks on asyncio.Event.wait(). Resolving the
+        // interrupt (above) lets the engine continue; events flow on the
+        // same SSE stream.
         useStreamStore.getState().setPermissionRequest(null);
       } catch (err) {
         console.error('Failed to resume:', err);
@@ -34,7 +33,7 @@ export default function PermissionModal() {
         setLoading(false);
       }
     },
-    [connect]
+    []
   );
 
   if (!permissionRequest) return null;

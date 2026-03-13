@@ -54,7 +54,6 @@ interface StreamState {
 
   // Actions
   startStream: (url: string, messageId: string, conversationId: string) => void;
-  resumeStream: (url: string) => void;
   endStream: () => void;
   reset: () => void;
 
@@ -139,14 +138,6 @@ export const useStreamStore = create<StreamState>((set, get) => {
         error: null,
       });
     },
-
-    resumeStream: (url) =>
-      set({
-        isStreaming: true,
-        streamUrl: url,
-        permissionRequest: null,
-        error: null,
-      }),
 
     endStream: () => {
       cancelPendingFlush();
@@ -237,9 +228,10 @@ export const useStreamStore = create<StreamState>((set, get) => {
     snapshotSegments: (messageId) => {
       const state = get();
       // Only snapshot if there are intermediate segments (more than just the final one with content)
-      const segsToSnapshot = state.segments.filter(
-        (seg) => seg.toolCalls.length > 0 || seg.reasoningContent
-      );
+      const segsToSnapshot = state.segments
+        .filter((seg) => seg.toolCalls.length > 0 || seg.reasoningContent)
+        // Execution is done — mark any remaining 'running' segments as 'complete'
+        .map((seg) => seg.status === 'running' ? { ...seg, status: 'complete' as const } : seg);
       if (segsToSnapshot.length > 0) {
         const newMap = new Map(state.completedSegments);
         // Deep copy to prevent stale references

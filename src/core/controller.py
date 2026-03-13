@@ -248,7 +248,6 @@ class ExecutionController:
                     "timestamp": datetime.now().isoformat(),
                     "data": {
                         "success": True,
-                        "interrupted": False,
                         "conversation_id": conversation_id,
                         "message_id": message_id,
                         "response": response,

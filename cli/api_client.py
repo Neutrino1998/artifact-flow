@@ -123,8 +123,8 @@ class APIClient:
         conversation_id: str,
         message_id: str,
         approved: bool,
-    ) -> str:
-        """恢复中断的执行（权限确认后），返回 stream_url"""
+    ) -> None:
+        """恢复中断的执行（权限确认后）。引擎原地继续，事件走同一 SSE 连接。"""
         async with httpx.AsyncClient(base_url=self.base_url, timeout=self.timeout) as client:
             resp = await client.post(
                 f"/api/v1/chat/{conversation_id}/resume",
@@ -135,8 +135,6 @@ class APIClient:
                 headers=self._auth_headers(),
             )
             resp.raise_for_status()
-            data = resp.json()
-            return data["stream_url"]
 
     async def list_conversations(self, limit: int = 20, offset: int = 0) -> dict:
         """列出对话"""

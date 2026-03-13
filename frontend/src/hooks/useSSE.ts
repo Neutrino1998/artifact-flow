@@ -93,6 +93,8 @@ export function useSSE() {
         }
 
         case StreamEventType.AGENT_START: {
+          // Mark previous segment as complete — a new turn implies the prior is done
+          updateCurrentSegment({ status: 'complete' });
           pushSegment(event.agent ?? 'Agent');
           break;
         }
@@ -252,14 +254,6 @@ export function useSSE() {
           break;
 
         case StreamEventType.COMPLETE: {
-          const interrupted = data?.interrupted as boolean | undefined;
-          if (interrupted) {
-            // Permission interrupt: preserve full stream state (isStreaming,
-            // segments, messageId, permissionRequest) so the UI
-            // stays in streaming mode and PermissionModal can function.
-            // SSE connection closes naturally; resumeStream reconnects later.
-            break;
-          }
           const messageId = useStreamStore.getState().messageId;
           if (messageId) {
             snapshotSegments(messageId);
