@@ -58,21 +58,12 @@ export function useSSE() {
         ]);
         setCurrent(detail);
         setConversations(list.conversations, list.total, list.has_more);
-
-        if (detail.session_id) {
-          try {
-            const artifacts = await api.listArtifacts(detail.session_id);
-            setArtifacts(artifacts.artifacts);
-            clearPendingUpdates();
-          } catch {
-            // Artifacts may not exist yet
-          }
-        }
+        clearPendingUpdates();
       } catch (err) {
         console.error('Failed to refresh after complete:', err);
       }
     },
-    [setCurrent, setConversations, setArtifacts, clearPendingUpdates]
+    [setCurrent, setConversations, clearPendingUpdates]
   );
 
   const handleEvent = useCallback(
