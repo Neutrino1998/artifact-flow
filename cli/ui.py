@@ -277,6 +277,9 @@ class StreamDisplay:
 
         elif event.type == "tool_complete":
             # 工具完成，打印结果（不重启 Live）
+            # 优先使用事件 data 中的 tool 名（subagent 返回时 self.current_tool 已被清空）
+            tool_name = event.data.get("tool") or self.current_tool or "unknown"
+            tool_params = event.data.get("params") or self.current_tool_params
             success = event.data.get("success", True)
             duration_ms = event.data.get("duration_ms", 0)
             error = event.data.get("error")
@@ -284,8 +287,8 @@ class StreamDisplay:
 
             # 构建显示内容：参数 + 耗时/错误 + 返回数据摘要
             parts = []
-            if self.current_tool_params:
-                params_str = ", ".join(f"{k}={repr(v)[:30]}" for k, v in self.current_tool_params.items())
+            if tool_params:
+                params_str = ", ".join(f"{k}={repr(v)[:30]}" for k, v in tool_params.items())
                 if len(params_str) > 60:
                     params_str = params_str[:57] + "..."
                 parts.append(f"({params_str})")
@@ -296,14 +299,14 @@ class StreamDisplay:
                 parts.append(f"Error: {error or 'unknown'}")
 
             # 展示 result_data 摘要
-            result_summary = self._format_result_data(self.current_tool, result_data)
+            result_summary = self._format_result_data(tool_name, result_data)
             if result_summary:
                 parts.append(f"\n→ {result_summary}")
 
             content = " ".join(parts)
 
             # 直接打印，Live 会自动处理位置
-            self._print_tool_complete(self.current_tool or "unknown", content, success)
+            self._print_tool_complete(tool_name, content, success)
             self.current_tool = None
             self.current_tool_params = None
 
