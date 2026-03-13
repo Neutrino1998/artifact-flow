@@ -32,9 +32,7 @@ export default function MessageList() {
   return (
     <div className="flex-1 overflow-y-auto">
       <div className="max-w-3xl mx-auto px-4 py-6 space-y-6">
-        {displayPath.map((node, idx) => {
-          const isLastBeforeStream = isStreaming && streamParentId !== undefined && idx === displayPath.length - 1;
-          return (
+        {displayPath.map((node) => (
             <div key={node.id} className="space-y-10">
               {/* User message */}
               <UserMessage
@@ -45,13 +43,12 @@ export default function MessageList() {
                 siblingCount={node.siblingCount}
               />
 
-              {/* Assistant response (hide if this is the truncation point during rerun) */}
-              {node.response && !isLastBeforeStream && (
+              {/* Assistant response */}
+              {node.response && (
                 <AssistantMessage content={node.response} messageId={node.id} />
               )}
             </div>
-          );
-        })}
+          ))}
 
         {/* Show pending user message during streaming (before conversation refresh) */}
         {isStreaming && pendingUserMessage && (
