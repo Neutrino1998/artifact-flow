@@ -304,6 +304,14 @@ async def execute_loop(
                             "params": {"agent_name": target_agent, "instruction": instruction},
                         })
 
+                        # 注入 instruction 到 subagent 的事件流（仅内存，不推 SSE）
+                        # context 构建按 agent_name 过滤时自然拿到 instruction
+                        state["events"].append(ExecutionEvent(
+                            event_type="subagent_instruction",
+                            agent_name=target_agent,
+                            data={"instruction": instruction},
+                        ))
+
                         # tool_complete 在 subagent 完成后由 _complete_agent 路径追加
                         state["current_agent"] = target_agent
                         logger.info(f"Switching to subagent: {target_agent}")

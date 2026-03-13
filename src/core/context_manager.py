@@ -195,7 +195,7 @@ class ContextManager:
 
         按 agent_name 过滤事件构建 context：
         - lead 看 current_task + 自己的工具交互
-        - subagent 看 instruction + 自己的工具交互
+        - subagent 看完整多轮历史（所有 invocation 的 instruction + tool 交互）
         """
         from tools.prompt_generator import format_result
 
@@ -212,52 +212,65 @@ class ContextManager:
                 instruction += "\n".join(queued)
 
             messages.append({"role": "user", "content": instruction})
-        else:
-            # Subagent: 从 lead 的最近 call_subagent tool_start 事件获取 instruction
-            instruction = cls._get_subagent_instruction(events, agent_name)
-            messages.append({"role": "user", "content": instruction})
 
-        # 过滤当前 agent 的工具交互事件
-        tool_interactions = cls._build_tool_interactions(events, agent_name)
+            # 过滤 lead 的工具交互事件
+            tool_interactions = cls._build_tool_interactions(events, agent_name)
 
-        if tool_interactions:
-            compressed = cls.compress_messages(
-                tool_interactions,
-                level="normal",
-                preserve_recent=5  # 奇数：[asst, user, asst, user, asst]
-            )
-            if len(compressed) < len(tool_interactions):
-                compressed = cls._merge_truncation_marker(
-                    compressed,
-                    "_[Earlier tool calls truncated]_"
+            if tool_interactions:
+                compressed = cls.compress_messages(
+                    tool_interactions,
+                    level="normal",
+                    preserve_recent=5  # 奇数：[asst, user, asst, user, asst]
                 )
-            messages.extend(compressed)
+                if len(compressed) < len(tool_interactions):
+                    compressed = cls._merge_truncation_marker(
+                        compressed,
+                        "_[Earlier tool calls truncated]_"
+                    )
+                messages.extend(compressed)
+        else:
+            # Subagent: instruction 已作为 subagent_instruction 事件注入事件流
+            # 按 agent_name 过滤即可拿到完整多轮历史
+            tool_interactions = cls._build_tool_interactions(events, agent_name)
+
+            if tool_interactions:
+                compressed = cls.compress_messages(
+                    tool_interactions,
+                    level="normal",
+                    preserve_recent=5
+                )
+                if len(compressed) < len(tool_interactions):
+                    compressed = cls._merge_truncation_marker(
+                        compressed,
+                        "_[Earlier interactions truncated]_"
+                    )
+                messages.extend(compressed)
 
         return messages
 
     @classmethod
-    def _get_subagent_instruction(cls, events: List, agent_name: str) -> str:
-        """从事件流中获取 subagent 的 instruction"""
-        # 从最近的 call_subagent tool_start 事件获取 instruction
-        for event in reversed(events):
-            if (event.event_type == "tool_start" and
-                event.data and
-                event.data.get("tool") == "call_subagent" and
-                event.data.get("params", {}).get("agent_name") == agent_name):
-                return event.data["params"].get("instruction", "")
-        return "Execute the assigned task."
-
-    @classmethod
     def _build_tool_interactions(cls, events: List, agent_name: str) -> List[Dict[str, str]]:
-        """从事件流中构建 tool 交互历史"""
+        """
+        从事件流中构建 tool 交互历史
+
+        按 agent_name 过滤事件，处理三种事件类型：
+        - subagent_instruction → user 消息（subagent 的 instruction）
+        - llm_complete → assistant 消息
+        - tool_complete → user 消息
+        """
         from tools.prompt_generator import format_result
 
         interactions = []
-        # 过滤当前 agent 的事件
         agent_events = [e for e in events if e.agent_name == agent_name]
 
         for event in agent_events:
-            if event.event_type == "llm_complete":
+            if event.event_type == "subagent_instruction":
+                # Subagent instruction → user 消息
+                instruction = event.data.get("instruction", "") if event.data else ""
+                if instruction:
+                    interactions.append({"role": "user", "content": instruction})
+
+            elif event.event_type == "llm_complete":
                 # LLM 响应 → assistant 消息
                 content = event.data.get("content", "") if event.data else ""
                 if content:
