@@ -497,29 +497,53 @@ async def demo_all():
 # 主程序
 # ============================================================
 
+DEMOS = {
+    "basic": ("基本问答", demo_basic),
+    "multi_turn": ("多轮对话", demo_multi_turn),
+    "artifact": ("Artifact 工具调用", demo_artifact),
+    "permission": ("权限确认流", demo_permission),
+    "branch": ("分支对话", demo_branch),
+    "all": ("全部演示", demo_all),
+}
+
+MENU_KEYS = list(DEMOS.keys())
+
+
 async def main():
+    import argparse
+
+    parser = argparse.ArgumentParser(description="ArtifactFlow 执行引擎手动测试")
+    parser.add_argument(
+        "--test",
+        type=str,
+        default=None,
+        choices=list(DEMOS.keys()),
+        help="Run specific test (basic, multi_turn, artifact, permission, branch, all)",
+    )
+    args = parser.parse_args()
+
     print("\nArtifactFlow 执行引擎手动测试")
 
-    demos = {
-        "1": ("基本问答", demo_basic),
-        "2": ("多轮对话", demo_multi_turn),
-        "3": ("Artifact 工具调用", demo_artifact),
-        "4": ("权限确认流", demo_permission),
-        "5": ("分支对话", demo_branch),
-        "6": ("全部演示", demo_all),
-    }
+    if args.test:
+        choice = args.test
+    else:
+        print("\n选择演示:")
+        for i, key in enumerate(MENU_KEYS, 1):
+            print(f"  {i}. {DEMOS[key][0]}")
 
-    print("\n选择演示:")
-    for key, (name, _) in demos.items():
-        print(f"  {key}. {name}")
+        raw = input(f"\n选择 (1-{len(MENU_KEYS)}): ").strip()
 
-    choice = input("\n选择 (1-6): ").strip()
-
-    try:
-        if choice in demos:
-            await demos[choice][1]()
+        # Accept either number or name
+        if raw.isdigit() and 1 <= int(raw) <= len(MENU_KEYS):
+            choice = MENU_KEYS[int(raw) - 1]
+        elif raw in DEMOS:
+            choice = raw
         else:
             print("无效选择")
+            return
+
+    try:
+        await DEMOS[choice][1]()
     except KeyboardInterrupt:
         print("\n\n用户中断")
     except Exception as e:
