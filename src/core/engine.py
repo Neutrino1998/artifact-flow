@@ -90,9 +90,12 @@ async def execute_loop(
 
     async def _build_context(agent_name: str, agent_config) -> list:
         """drain messages → artifacts 清单 → ContextManager.build → tool limit 注入"""
-        queued = task_manager.drain_messages(message_id)
-        if queued:
-            state["queued_messages"].extend(queued)
+        for msg in task_manager.drain_messages(message_id):
+            state["events"].append(ExecutionEvent(
+                event_type="queued_message",
+                agent_name="lead_agent",
+                data={"content": msg},
+            ))
 
         artifacts_inventory = None
         if artifact_manager and state.get("session_id"):
@@ -273,8 +276,22 @@ async def execute_loop(
         return True
 
     async def _execute_tools(tool_calls: list, agent_name: str, agent_config) -> None:
-        """串行执行工具列表，处理权限中断和 subagent 切换。"""
+        """串行执行工具列表，处理权限中断和 subagent 切换。
+        call_subagent 延后到最后执行，确保同一轮的常规工具不会被 break 跳过。
+        """
+        tool_calls = sorted(tool_calls, key=lambda tc: tc.name == "call_subagent")
         for tool_call in tool_calls:
+            # Parser 返回的解析错误 → 直接反馈给 agent
+            if tool_call.error:
+                await _emit(StreamEventType.TOOL_COMPLETE.value, agent_name, {
+                    "tool": tool_call.name,
+                    "success": False,
+                    "error": tool_call.error,
+                    "duration_ms": 0,
+                })
+                tool_round_count[agent_name] = tool_round_count.get(agent_name, 0) + 1
+                continue
+
             tool_name = tool_call.name
             params = tool_call.params
 

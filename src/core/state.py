@@ -41,7 +41,6 @@ def create_initial_state(
         "current_agent": "lead_agent",
         "always_allowed_tools": list(always_allowed_tools) if always_allowed_tools else [],
         "events": [],             # 内存事件列表，执行完 batch write
-        "queued_messages": [],     # 执行中注入的消息
         "execution_metrics": create_initial_metrics(),
         "response": "",            # 最终响应
     }

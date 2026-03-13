@@ -25,7 +25,7 @@ class CallSubagentTool(BaseTool):
     def __init__(self, valid_agents: Optional[List[str]] = None):
         super().__init__(
             name="call_subagent",
-            description="Call a specialized sub-agent to handle specific tasks",
+            description="Call a specialized sub-agent to handle specific tasks. IMPORTANT: Do NOT combine this tool with other tool calls in the same response — use it alone.",
             permission=ToolPermission.AUTO
         )
         self._valid_agents = valid_agents

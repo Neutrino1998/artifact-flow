@@ -204,14 +204,8 @@ class ContextManager:
         events = state.get("events", [])
 
         if agent_name == "lead_agent":
-            # Lead: 用户输入 + queued messages
-            instruction = state["current_task"]
-            queued = state.get("queued_messages", [])
-            if queued:
-                instruction += "\n\n[Additional messages received during execution]\n"
-                instruction += "\n".join(queued)
-
-            messages.append({"role": "user", "content": instruction})
+            # Lead: 用户输入
+            messages.append({"role": "user", "content": state["current_task"]})
 
             # 过滤 lead 的工具交互事件
             tool_interactions = cls._build_tool_interactions(events, agent_name)
@@ -275,6 +269,12 @@ class ContextManager:
                 content = event.data.get("content", "") if event.data else ""
                 if content:
                     interactions.append({"role": "assistant", "content": content})
+
+            elif event.event_type == "queued_message":
+                # 执行中注入的用户消息 → user 消息
+                content = event.data.get("content", "") if event.data else ""
+                if content:
+                    interactions.append({"role": "user", "content": content})
 
             elif event.event_type == "tool_complete":
                 # 工具结果 → user 消息
