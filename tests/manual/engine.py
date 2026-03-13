@@ -261,7 +261,7 @@ class TestEnvironment:
             # 注册 artifact 工具
             registry = ToolRegistry()
             # 复制 library tools
-            for name, tool in self._registry._library.items():
+            for name, tool in self._registry.tool_library.items():
                 registry.register_tool_to_library(tool)
             for tool in create_artifact_tools(artifact_manager):
                 registry.register_tool_to_library(tool)
