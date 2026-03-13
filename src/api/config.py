@@ -36,7 +36,7 @@ class APIConfig(BaseSettings):
     PERMISSION_TIMEOUT: int = 300  # 秒，单次 permission 等待超时
 
     # 并发控制
-    MAX_CONCURRENT_TASKS: int = 10  # 最大并发 Graph 执行数
+    MAX_CONCURRENT_TASKS: int = 10  # 最大并发引擎执行数
 
     # 上传限制
     MAX_UPLOAD_SIZE: int = 20 * 1024 * 1024  # 20MB

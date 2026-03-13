@@ -21,13 +21,13 @@ from logging.handlers import RotatingFileHandler
 # ── 请求级上下文 ──────────────────────────────────────────────
 # 利用 contextvars 天然的 asyncio 支持：
 # - 每个 asyncio.Task 自动继承创建时的 context 副本
-# - background task 中的日志会自动携带创建时设置的 thread_id / conv_id
+# - background task 中的日志会自动携带创建时设置的 message_id / conv_id
 _request_ctx: contextvars.ContextVar[dict] = contextvars.ContextVar(
     'request_ctx', default={}
 )
 
 
-def set_request_context(*, thread_id: str = "", conv_id: str = "") -> None:
+def set_request_context(*, message_id: str = "", conv_id: str = "") -> None:
     """
     设置当前 async context 的请求级日志上下文
 
@@ -35,8 +35,8 @@ def set_request_context(*, thread_id: str = "", conv_id: str = "") -> None:
     后续由 asyncio.create_task 创建的 background task 会自动继承。
     """
     ctx = {}
-    if thread_id:
-        ctx["thread_id"] = thread_id
+    if message_id:
+        ctx["message_id"] = message_id
     if conv_id:
         ctx["conv_id"] = conv_id
     _request_ctx.set(ctx)
@@ -52,11 +52,11 @@ class RequestContextFilter(logging.Filter):
     从 contextvars 读取请求上下文，自动注入到每条日志记录
 
     注入字段（完整）：
-    - record.thread_id: LangGraph 线程 ID（完整，用于文件日志）
+    - record.message_id: 消息 ID（完整，用于文件日志）
     - record.conv_id: 对话 ID（完整，用于文件日志）
 
     注入字段（截短，前缀 + 8 字符，用于控制台）：
-    - record.thread_id_short
+    - record.message_id_short
     - record.conv_id_short
     """
 
@@ -72,9 +72,9 @@ class RequestContextFilter(logging.Filter):
 
     def filter(self, record):
         ctx = _request_ctx.get({})
-        record.thread_id = ctx.get("thread_id", "no-ctx")
+        record.message_id = ctx.get("message_id", "no-ctx")
         record.conv_id = ctx.get("conv_id", "no-ctx")
-        record.thread_id_short = self._shorten_id(record.thread_id)
+        record.message_id_short = self._shorten_id(record.message_id)
         record.conv_id_short = self._shorten_id(record.conv_id)
         return True
 
@@ -153,7 +153,7 @@ class Logger:
         if console:
             console_handler = logging.StreamHandler(sys.stdout)
             console_formatter = ColoredFormatter(
-                '%(asctime)s [%(levelname)s] [%(conv_id_short)s|%(thread_id_short)s] %(filename)s:%(funcName)s:%(lineno)d - %(message)s',
+                '%(asctime)s [%(levelname)s] [%(conv_id_short)s|%(message_id_short)s] %(filename)s:%(funcName)s:%(lineno)d - %(message)s',
                 datefmt='%H:%M:%S'
             )
             console_formatter._for_console = True  # 启用颜色
@@ -172,7 +172,7 @@ class Logger:
             )
             # 文件使用无颜色的普通formatter
             file_formatter = logging.Formatter(
-                '%(asctime)s - %(name)s - %(levelname)s - [%(conv_id)s|%(thread_id)s] %(filename)s:%(funcName)s:%(lineno)d - %(message)s'
+                '%(asctime)s - %(name)s - %(levelname)s - [%(conv_id)s|%(message_id)s] %(filename)s:%(funcName)s:%(lineno)d - %(message)s'
             )
             file_handler.addFilter(context_filter)
             file_handler.setFormatter(file_formatter)

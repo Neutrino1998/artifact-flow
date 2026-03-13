@@ -154,7 +154,7 @@ class Message(Base):
     消息表
 
     存储用户消息和助手响应，通过 parent_id 实现树结构。
-    message_id 同时作为执行标识（不再需要独立的 thread_id）。
+    message_id 同时作为执行标识。
     """
     __tablename__ = "messages"
 

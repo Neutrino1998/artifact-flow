@@ -17,9 +17,9 @@ NOT overridden (by design):
   call to get_db_manager() resolves correctly without Depends().
 - get_current_user: real JWT verification is used. Fixtures sign tokens
   with the same JWT_SECRET set in tests/conftest.py.
-- get_checkpointer: LangGraph execution endpoints (POST /chat, resume)
-  are NOT testable with this fixture set. Override will be added when
-  chat/stream integration tests are implemented.
+- Execution engine endpoints (POST /chat, resume) require TaskManager
+  and StreamManager. Override will be added when chat/stream integration
+  tests are implemented.
 """
 
 import pytest

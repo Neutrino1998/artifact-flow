@@ -14,7 +14,7 @@ export enum StreamEventType {
   LLM_COMPLETE = 'llm_complete',
   AGENT_COMPLETE = 'agent_complete',
 
-  // Graph layer
+  // Engine layer
   TOOL_START = 'tool_start',
   TOOL_COMPLETE = 'tool_complete',
   PERMISSION_REQUEST = 'permission_request',
@@ -35,7 +35,8 @@ export interface AgentStartData {
 }
 
 export interface LLMChunkData {
-  chunk: string;
+  content?: string;
+  reasoning_content?: string;
 }
 
 export interface LLMCompleteData {
@@ -48,8 +49,8 @@ export interface LLMCompleteData {
 }
 
 export interface AgentCompleteData {
-  agent_name: string;
-  has_tool_calls: boolean;
+  agent: string;
+  content: string;
 }
 
 export interface ToolStartData {
@@ -60,11 +61,14 @@ export interface ToolStartData {
 export interface ToolCompleteData {
   tool: string;
   success: boolean;
-  result: string;
+  result_data?: unknown;
+  error?: string;
   duration_ms: number;
+  params?: Record<string, unknown>;
 }
 
 export interface PermissionRequestData {
+  permission_level: string;
   tool: string;
   params: Record<string, unknown>;
 }

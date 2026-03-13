@@ -18,7 +18,6 @@ from core.events import (
     append_agent_execution, append_tool_call, finalize_metrics,
 )
 from core.context_manager import ContextManager
-from core.state import create_initial_state
 from tools.xml_parser import parse_tool_calls
 from tools.base import ToolPermission, ToolResult
 from tools.prompt_generator import format_result
@@ -186,28 +185,31 @@ async def execute_loop(
         llm_end_time = datetime.now()
         llm_duration_ms = int((llm_end_time - llm_start_time).total_seconds() * 1000)
 
+        # Map LiteLLM keys (prompt_tokens/completion_tokens) to unified keys (input_tokens/output_tokens)
+        normalized_usage = {
+            "input_tokens": token_usage.get("prompt_tokens", 0),
+            "output_tokens": token_usage.get("completion_tokens", 0),
+            "total_tokens": token_usage.get("total_tokens", 0),
+        }
+
         await _emit(StreamEventType.LLM_COMPLETE.value, agent_name, {
             "content": response_content,
             "reasoning_content": reasoning_content,
-            "token_usage": token_usage,
+            "token_usage": normalized_usage,
         })
 
         append_agent_execution(
             metrics=state["execution_metrics"],
             agent_name=agent_name,
             model=model,
-            token_usage={
-                "input_tokens": token_usage.get("prompt_tokens", 0),
-                "output_tokens": token_usage.get("completion_tokens", 0),
-                "total_tokens": token_usage.get("total_tokens", 0),
-            },
+            token_usage=normalized_usage,
             started_at=llm_start_time.isoformat(),
             completed_at=llm_end_time.isoformat(),
             llm_duration_ms=llm_duration_ms,
         )
 
-        input_tokens = token_usage.get("prompt_tokens", 0)
-        output_tokens = token_usage.get("completion_tokens", 0)
+        input_tokens = normalized_usage["input_tokens"]
+        output_tokens = normalized_usage["output_tokens"]
         logger.debug(f"[{agent_name}] LLM Response (input: {input_tokens}, output: {output_tokens}):\n{response_content[:500]}")
 
         return response_content, reasoning_content, token_usage

@@ -193,7 +193,7 @@ async def send_message(
     await stream_manager.create_stream(message_id, owner_user_id=user_id)
 
     # 设置请求上下文
-    set_request_context(thread_id=message_id, conv_id=conversation_id)
+    set_request_context(message_id=message_id, conv_id=conversation_id)
 
     # 启动后台任务
     async def execute_and_push():
@@ -384,8 +384,7 @@ async def resume_execution(
     """
     恢复中断的执行（权限确认后）
 
-    v2: 直接通过 TaskManager.resolve_interrupt() 唤醒暂停的 coroutine，
-    不再创建新的 controller/graph。
+    通过 TaskManager.resolve_interrupt() 唤醒暂停的 coroutine。
     """
     message_id = request.message_id
 

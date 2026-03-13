@@ -1,7 +1,7 @@
 """
 Chat API integration tests.
 
-Data seeding strategy: POST /chat triggers Graph, so we seed data
+Data seeding strategy: POST /chat triggers engine execution, so we seed data
 directly via repository methods through db_manager.session().
 After commit, API's independent session can see the data.
 """

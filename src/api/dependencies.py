@@ -217,7 +217,7 @@ async def get_controller(
     """
     每个请求获得独立的 Controller
 
-    不再需要 checkpointer 或 compiled_graph。
+    Controller 持有 ConversationManager + ToolRegistry + StreamManager。
     """
     from repositories.message_event_repo import MessageEventRepository
     from tools.implementations.artifact_ops import create_artifact_tools
