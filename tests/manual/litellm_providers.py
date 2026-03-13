@@ -65,18 +65,26 @@ async def test_stream(model_name: str, question: str = BASIC_QUESTION, expect_re
 
     try:
         messages = [{"role": "user", "content": question}]
+        in_reasoning = False
 
-        print("Streaming: ", end="", flush=True)
         async for chunk in astream_with_retry(messages, model=model_name):
-            if chunk["type"] == "content":
+            if chunk["type"] == "reasoning":
+                if not in_reasoning:
+                    print("[Reasoning] ", end="", flush=True)
+                    in_reasoning = True
+                print(chunk["content"], end="", flush=True)
+                result["reasoning_chunks"] += 1
+
+            elif chunk["type"] == "content":
+                if in_reasoning:
+                    print("\n[Content]  ", end="", flush=True)
+                    in_reasoning = False
                 print(chunk["content"], end="", flush=True)
                 result["content_chunks"] += 1
-            elif chunk["type"] == "reasoning":
-                result["reasoning_chunks"] += 1
-                if result["reasoning_chunks"] <= 3:
-                    print(f"\n  [reasoning] {chunk['content'][:50]}...", end="", flush=True)
+
             elif chunk["type"] == "usage":
                 result["token_usage"] = chunk["token_usage"]
+
             elif chunk["type"] == "final":
                 result["content"] = chunk["content"]
                 result["reasoning_content"] = chunk["reasoning_content"]

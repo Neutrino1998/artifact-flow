@@ -38,22 +38,31 @@ async def test_model(model_name: str, expect_reasoning: bool):
         content_chunks = 0
         final_content = None
         final_reasoning = None
+        in_reasoning = False
 
         async for chunk in astream_with_retry(messages, model=model_name):
             if chunk["type"] == "reasoning":
+                if not in_reasoning:
+                    print("[Reasoning] ", end="", flush=True)
+                    in_reasoning = True
+                print(chunk["content"], end="", flush=True)
                 reasoning_chunks += 1
+
             elif chunk["type"] == "content":
+                if in_reasoning:
+                    print("\n[Content]  ", end="", flush=True)
+                    in_reasoning = False
+                print(chunk["content"], end="", flush=True)
                 content_chunks += 1
+
             elif chunk["type"] == "final":
                 final_content = chunk["content"]
                 final_reasoning = chunk["reasoning_content"]
 
+        print()
         print(f"Reasoning chunks: {reasoning_chunks}")
         print(f"Content chunks: {content_chunks}")
 
-        if final_content:
-            preview = final_content[:200]
-            print(f"Content: {preview}{'...' if len(final_content) > 200 else ''}")
         if final_reasoning:
             print(f"Reasoning: FOUND ({len(final_reasoning)} chars)")
         else:
