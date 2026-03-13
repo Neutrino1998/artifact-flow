@@ -415,6 +415,8 @@ async def execute_loop(
                 # 无工具调用 → 完成当前 agent
                 previous_agent = state["current_agent"]
                 _complete_agent(state, current_agent_name, response_content)
+                # 重置 tool round count，下次调用该 agent 时从 0 开始
+                tool_round_count.pop(current_agent_name, None)
 
                 await _emit(StreamEventType.AGENT_COMPLETE.value, current_agent_name, {
                     "agent": current_agent_name,
