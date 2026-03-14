@@ -138,8 +138,8 @@ async def list_artifacts(
                     title=art["title"],
                     current_version=art["version"],
                     source=art.get("source"),
-                    created_at=datetime.fromisoformat(art["created_at"]) if isinstance(art["created_at"], str) else art["created_at"],
-                    updated_at=datetime.fromisoformat(art["updated_at"]) if isinstance(art["updated_at"], str) else art["updated_at"],
+                    created_at=datetime.fromisoformat(art["created_at"]),
+                    updated_at=datetime.fromisoformat(art["updated_at"]),
                 )
                 for art in artifacts
             ]
@@ -300,7 +300,7 @@ async def get_artifact(
         VersionSummary(
             version=v["version"],
             update_type=v["update_type"],
-            created_at=datetime.fromisoformat(v["created_at"]) if isinstance(v["created_at"], str) else v["created_at"],
+            created_at=datetime.fromisoformat(v["created_at"]),
         )
         for v in version_list
     ]
@@ -326,8 +326,8 @@ async def get_artifact(
         content=result["content"],
         current_version=current_ver,
         source=result.get("source"),
-        created_at=datetime.fromisoformat(result["created_at"]) if isinstance(result["created_at"], str) else result["created_at"],
-        updated_at=datetime.fromisoformat(result["updated_at"]) if isinstance(result["updated_at"], str) else result["updated_at"],
+        created_at=datetime.fromisoformat(result["created_at"]),
+        updated_at=datetime.fromisoformat(result["updated_at"]),
         versions=version_summaries,
         latest_version=latest_version_detail,
     )

@@ -247,8 +247,8 @@ async def list_conversations(
                 id=conv["conversation_id"],
                 title=conv.get("title"),
                 message_count=conv.get("message_count", 0),
-                created_at=datetime.fromisoformat(conv["created_at"]) if isinstance(conv["created_at"], str) else conv["created_at"],
-                updated_at=datetime.fromisoformat(conv["updated_at"]) if isinstance(conv["updated_at"], str) else conv["updated_at"],
+                created_at=datetime.fromisoformat(conv["created_at"]),
+                updated_at=datetime.fromisoformat(conv["updated_at"]),
             )
             for conv in conversations
         ],
