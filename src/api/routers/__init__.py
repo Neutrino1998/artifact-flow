@@ -1,9 +1,9 @@
 """
 API Routers
 
-Contains route handlers for chat, artifacts, and streaming.
+Contains route handlers for auth, chat, artifacts, and streaming.
 """
 
-from . import chat, artifacts, stream
+from . import auth, chat, artifacts, stream
 
-__all__ = ["chat", "artifacts", "stream"]
+__all__ = ["auth", "chat", "artifacts", "stream"]

@@ -287,6 +287,8 @@ class ExecutionController:
         只在两个时刻调用（设计文档 §关键设计约束）：
         1. execution_complete — 成功
         2. error — 失败
+
+        策略：3 次指数退避重试，最终失败写入 fallback 日志文件（JSON lines）。
         """
         if not self.message_event_repo:
             return
@@ -295,21 +297,51 @@ class ExecutionController:
         if not events:
             return
 
+        db_events = [
+            {
+                "message_id": message_id,
+                "event_type": e.event_type,
+                "agent_name": e.agent_name,
+                "data": e.data,
+                "created_at": e.created_at,
+            }
+            for e in events
+        ]
+
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                await self.message_event_repo.batch_create(db_events)
+                logger.info(f"Persisted {len(db_events)} events for message {message_id}")
+                return
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    wait = 2 ** attempt  # 1s, 2s
+                    logger.warning(f"Event persistence attempt {attempt + 1} failed, retrying in {wait}s: {e}")
+                    await asyncio.sleep(wait)
+                else:
+                    logger.error(f"Event persistence failed after {max_retries} attempts: {e}")
+                    self._write_fallback_events(message_id, db_events)
+
+    @staticmethod
+    def _write_fallback_events(message_id: str, db_events: list) -> None:
+        """将失败事件写入 fallback 日志文件（JSON lines），防止数据丢失。"""
+        import json
+        from pathlib import Path
+
+        fallback_dir = Path("logs")
+        fallback_dir.mkdir(exist_ok=True)
+        fallback_path = fallback_dir / "events_fallback.jsonl"
+
         try:
-            db_events = [
-                {
-                    "message_id": message_id,
-                    "event_type": e.event_type,
-                    "agent_name": e.agent_name,
-                    "data": e.data,
-                    "created_at": e.created_at,
-                }
-                for e in events
-            ]
-            await self.message_event_repo.batch_create(db_events)
-            logger.info(f"Persisted {len(db_events)} events for message {message_id}")
-        except Exception as e:
-            # TODO: 事件持久化失败导致数据丢失，当前仅打日志。
-            # 考虑重试或将失败事件写入 fallback 存储。
-            logger.error(f"Failed to persist events: {e}")
+            with open(fallback_path, "a", encoding="utf-8") as f:
+                for event in db_events:
+                    record = {**event}
+                    # datetime → ISO string for JSON serialization
+                    if hasattr(record.get("created_at"), "isoformat"):
+                        record["created_at"] = record["created_at"].isoformat()
+                    f.write(json.dumps(record, ensure_ascii=False) + "\n")
+            logger.warning(f"Wrote {len(db_events)} fallback events for message {message_id} to {fallback_path}")
+        except Exception as fallback_err:
+            logger.critical(f"Fallback event write also failed for message {message_id}: {fallback_err}")
 

@@ -38,8 +38,8 @@ from api.schemas.chat import (
     ConversationSummary,
     MessageResponse,
 )
-from api.services.stream_manager import StreamAlreadyExistsError, StreamManager
-from api.services.task_manager import TaskManager, DuplicateExecutionError
+from api.services.stream_manager import StreamManager
+from api.services.task_manager import TaskManager
 from core.conversation_manager import ConversationManager
 from repositories.base import NotFoundError
 from repositories.conversation_repo import ConversationRepository

@@ -328,8 +328,18 @@ async def execute_loop(
                         logger.info(f"Switching to subagent: {target_agent}")
                         break  # 跳出 tool_calls 循环，继续 while loop
                     else:
-                        # 验证失败，当作普通工具错误 fall through
-                        params = tool_call.params
+                        # 验证失败（如目标 agent 不存在），返回错误信息给 agent
+                        await _emit(StreamEventType.TOOL_START.value, agent_name, {
+                            "tool": "call_subagent", "params": params,
+                        })
+                        await _emit(StreamEventType.TOOL_COMPLETE.value, agent_name, {
+                            "tool": "call_subagent",
+                            "success": False,
+                            "error": result.error or "call_subagent validation failed",
+                            "duration_ms": 0,
+                        })
+                        tool_round_count[agent_name] = tool_round_count.get(agent_name, 0) + 1
+                        continue
 
             # 获取工具
             tool = _resolve_tool(tool_name)
