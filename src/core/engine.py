@@ -33,12 +33,11 @@ EmitFn = Callable[[Dict[str, Any]], Awaitable[None]]
 async def execute_loop(
     state: Dict[str, Any],
     agents: Dict[str, Any],  # {name: AgentConfig}
-    tool_registry: Any,      # ToolRegistry
+    tools: Dict[str, Any],   # {name: BaseTool}
     task_manager: Any,        # TaskManager
     artifact_manager: Optional[Any] = None,
     emit: Optional[EmitFn] = None,
     permission_timeout: int = 300,
-    request_tools: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Pi-style 扁平 while loop 执行引擎
@@ -46,12 +45,11 @@ async def execute_loop(
     Args:
         state: 执行状态（from create_initial_state）
         agents: {name: AgentConfig} 字典
-        tool_registry: ToolRegistry 实例
+        tools: {name: BaseTool} 字典（全局 + 请求级工具已合并）
         task_manager: TaskManager 实例（用于 interrupt 和 message queue）
         artifact_manager: ArtifactManager 实例（用于 artifacts 清单）
         emit: 事件推送回调（推 SSE）
         permission_timeout: 单次 permission 确认等待超时（秒），默认 300
-        request_tools: 请求级工具 {name: BaseTool}，优先于 tool_registry
 
     Returns:
         最终执行状态
@@ -83,10 +81,8 @@ async def execute_loop(
             await emit(event_dict)
 
     def _resolve_tool(name: str):
-        """先查 request_tools，再查 tool_registry"""
-        if request_tools and name in request_tools:
-            return request_tools[name]
-        return tool_registry.get_tool(name)
+        """从合并后的 tools dict 查找工具"""
+        return tools.get(name)
 
     async def _build_context(agent_name: str, agent_config) -> list:
         """drain messages → artifacts 清单 → ContextManager.build → tool limit 注入"""
@@ -114,10 +110,9 @@ async def execute_loop(
             state=state,
             agent_config=agent_config,
             agents=agents,
-            tool_registry=tool_registry,
+            tools=tools,
             artifact_manager=artifact_manager,
             artifacts_inventory=artifacts_inventory,
-            request_tools=request_tools,
         )
 
         messages = context.messages

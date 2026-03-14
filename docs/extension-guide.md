@@ -149,7 +149,7 @@ async def create_multi_agent_graph(
 1. 创建工具类（继承 `BaseTool`）
 2. 定义参数和权限
 3. 实现执行逻辑
-4. 注册到 ToolRegistry
+4. 注册到 `_load_tools()`（`dependencies.py`）
 
 ### 完整示例：ReadFileTool
 
@@ -295,7 +295,7 @@ def create_code_agent() -> BaseAgent:
     return CodeAgent(config)
 ```
 
-`create_multi_agent_graph()` 会根据 `required_tools` 自动创建对应的 `AgentToolkit` 并绑定到 Agent。
+Agent MD 的 `tools` frontmatter 控制每个 agent 可用的工具白名单，engine 从合并后的 `tools` dict 中查找工具实例。
 
 ## 权限级别选择指南
 

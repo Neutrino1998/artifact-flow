@@ -11,12 +11,6 @@ from .base import (
     BaseTool,
 )
 
-# 工具注册和管理
-from .registry import (
-    AgentToolkit,
-    ToolRegistry,
-)
-
 # XML工具调用解析
 from .xml_parser import (
     ToolCall,
@@ -39,10 +33,6 @@ __all__ = [
     "ToolResult",
     "ToolParameter",
     "BaseTool",
-
-    # 注册管理
-    "AgentToolkit",
-    "ToolRegistry",
 
     # XML解析
     "ToolCall",

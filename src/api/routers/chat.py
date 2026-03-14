@@ -25,7 +25,7 @@ from api.dependencies import (
     get_db_session,
     get_stream_manager,
     get_task_manager,
-    get_tool_registry,
+    get_tools,
 )
 from api.services.auth import TokenPayload
 from api.schemas.chat import (
@@ -94,15 +94,14 @@ async def _create_controller() -> AsyncGenerator:
     db_manager = get_db_manager()
     task_manager = get_task_manager()
     agents = get_agents()
-    tool_registry = get_tool_registry()
 
     async with db_manager.session() as session:
         artifact_repo = ArtifactRepository(session)
         artifact_manager = ArtifactManager(artifact_repo)
 
-        # 构建请求级工具（不污染全局 registry）
+        # 合并全局工具 + 请求级 artifact 工具
         artifact_tools = create_artifact_tools(artifact_manager)
-        request_tools = {t.name: t for t in artifact_tools}
+        all_tools = {**get_tools(), **{t.name: t for t in artifact_tools}}
 
         conv_repo = CR(session)
         conv_manager = CM(conv_repo)
@@ -110,12 +109,11 @@ async def _create_controller() -> AsyncGenerator:
 
         yield ExecutionController(
             agents=agents,
-            tool_registry=tool_registry,
+            tools=all_tools,
             task_manager=task_manager,
             artifact_manager=artifact_manager,
             conversation_manager=conv_manager,
             message_event_repo=event_repo,
-            request_tools=request_tools,
             permission_timeout=config.PERMISSION_TIMEOUT,
         )
 

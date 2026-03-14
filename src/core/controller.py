@@ -16,6 +16,7 @@ from core.state import create_initial_state
 from core.engine import execute_loop
 from core.events import StreamEventType, ExecutionEvent
 from core.conversation_manager import ConversationManager
+from tools.base import BaseTool
 from tools.implementations.artifact_ops import ArtifactManager
 from utils.logger import get_logger
 
@@ -34,28 +35,26 @@ class ExecutionController:
 
     变化点：
     - 不再持有 compiled_graph
-    - 持有 agents（dict[str, AgentConfig]）和 tool_registry
+    - 持有 agents（dict[str, AgentConfig]）和 tools（dict[str, BaseTool]）
     - resume 是唤醒 coroutine 而非重新调用 graph
     """
 
     def __init__(
         self,
         agents: Dict[str, Any],           # {name: AgentConfig}
-        tool_registry: Any,                # ToolRegistry
+        tools: Dict[str, BaseTool],        # {name: BaseTool}
         task_manager: Any,                 # TaskManager
         artifact_manager: Optional[ArtifactManager] = None,
         conversation_manager: Optional[ConversationManager] = None,
         message_event_repo: Optional[Any] = None,  # MessageEventRepository
-        request_tools: Optional[Dict[str, Any]] = None,  # {name: BaseTool}
         permission_timeout: int = 300,
     ):
         self.agents = agents
-        self.tool_registry = tool_registry
+        self.tools = tools
         self.task_manager = task_manager
         self.artifact_manager = artifact_manager
         self.conversation_manager = conversation_manager or ConversationManager()
         self.message_event_repo = message_event_repo
-        self.request_tools = request_tools
         self.permission_timeout = permission_timeout
 
         logger.info("ExecutionController v2 initialized")
@@ -168,12 +167,11 @@ class ExecutionController:
                 final_state = await execute_loop(
                     state=initial_state,
                     agents=self.agents,
-                    tool_registry=self.tool_registry,
+                    tools=self.tools,
                     task_manager=self.task_manager,
                     artifact_manager=self.artifact_manager,
                     emit=emit_to_queue,
                     permission_timeout=self.permission_timeout,
-                    request_tools=self.request_tools,
                 )
             except Exception as e:
                 logger.exception(f"Engine error: {e}")

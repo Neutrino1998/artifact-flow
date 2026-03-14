@@ -21,7 +21,7 @@ from core.controller import ExecutionController
 from core.events import StreamEventType
 from core.conversation_manager import ConversationManager
 from agents.loader import load_all_agents
-from tools.registry import ToolRegistry
+from tools.base import BaseTool
 from tools.implementations.artifact_ops import ArtifactManager, create_artifact_tools
 from tools.implementations.call_subagent import CallSubagentTool
 from tools.implementations.web_search import WebSearchTool
@@ -233,7 +233,7 @@ class TestEnvironment:
         self.db_manager: Optional[DatabaseManager] = None
         self.task_manager: Optional[TaskManager] = None
         self._agents: Optional[Dict] = None
-        self._registry: Optional[ToolRegistry] = None
+        self._tools: Optional[Dict[str, BaseTool]] = None
 
     async def setup(self):
         # 1. 内存数据库
@@ -244,10 +244,8 @@ class TestEnvironment:
         self._agents = load_all_agents()
         print(f"Loaded agents: {list(self._agents.keys())}")
 
-        # 3. Tool registry
-        self._registry = ToolRegistry()
-        for tool in [CallSubagentTool(), WebSearchTool(), WebFetchTool()]:
-            self._registry.register_tool_to_library(tool)
+        # 3. 全局工具
+        self._tools = {t.name: t for t in [CallSubagentTool(), WebSearchTool(), WebFetchTool()]}
 
         # 4. TaskManager
         self.task_manager = TaskManager(max_concurrent=5)
@@ -261,20 +259,15 @@ class TestEnvironment:
             artifact_repo = ArtifactRepository(session)
             artifact_manager = ArtifactManager(artifact_repo)
 
-            # 注册 artifact 工具
-            registry = ToolRegistry()
-            # 复制 library tools
-            for name, tool in self._registry.tool_library.items():
-                registry.register_tool_to_library(tool)
-            for tool in create_artifact_tools(artifact_manager):
-                registry.register_tool_to_library(tool)
+            # 合并全局工具 + 请求级 artifact 工具
+            all_tools = {**self._tools, **{t.name: t for t in create_artifact_tools(artifact_manager)}}
 
             conv_repo = ConversationRepository(session)
             conv_manager = ConversationManager(conv_repo)
 
             controller = ExecutionController(
                 agents=self._agents,
-                tool_registry=registry,
+                tools=all_tools,
                 task_manager=self.task_manager,
                 artifact_manager=artifact_manager,
                 conversation_manager=conv_manager,

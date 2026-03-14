@@ -20,12 +20,6 @@ from api.services.task_manager import TaskManager
 # ============================================================
 
 
-class _FakeRegistry:
-    """Minimal stub for ToolRegistry."""
-    def get_tool(self, name: str):
-        return None
-
-
 @dataclass
 class _FakeAgentConfig:
     """Minimal AgentConfig stub."""
@@ -68,7 +62,7 @@ async def _run_with_fake_llm(chunks: list[dict], agent_config=None):
         result = await execute_loop(
             state=state,
             agents={"lead_agent": agent_config},
-            tool_registry=_FakeRegistry(),
+            tools={},
             task_manager=task_manager,
             emit=capture_emit,
         )
@@ -104,7 +98,7 @@ class TestAgentNotFound:
         result = await execute_loop(
             state=state,
             agents={},  # no agents registered
-            tool_registry=_FakeRegistry(),
+            tools={},
             task_manager=task_manager,
             emit=capture_emit,
         )

@@ -24,7 +24,7 @@ FastAPI 依赖注入
 from __future__ import annotations
 
 from functools import lru_cache
-from typing import AsyncGenerator, Any, Optional, TYPE_CHECKING
+from typing import AsyncGenerator, Any, Dict, Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from api.services.stream_manager import StreamManager
@@ -35,8 +35,8 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.config import config
-from core.controller import ExecutionController
 from core.conversation_manager import ConversationManager
+from tools.base import BaseTool
 from tools.implementations.artifact_ops import ArtifactManager
 from db.database import DatabaseManager
 from repositories.artifact_repo import ArtifactRepository
@@ -54,9 +54,9 @@ _db_manager: Optional[DatabaseManager] = None
 _stream_manager: Optional["StreamManager"] = None
 _task_manager: Optional["TaskManager"] = None
 
-# Agent configs + tool registry（启动时加载一次）
-_agents: Optional[dict] = None  # {name: AgentConfig}
-_tool_registry: Any = None      # ToolRegistry
+# Agent configs + tools（启动时加载一次）
+_agents: Optional[dict] = None                    # {name: AgentConfig}
+_tools: Optional[Dict[str, BaseTool]] = None      # {name: BaseTool}
 
 
 async def init_globals() -> None:
@@ -67,7 +67,7 @@ async def init_globals() -> None:
     """
     from pathlib import Path
 
-    global _db_manager, _stream_manager, _task_manager, _agents, _tool_registry
+    global _db_manager, _stream_manager, _task_manager, _agents, _tools
 
     # 0. 确保 data 目录存在
     data_dir = Path("data")
@@ -94,34 +94,27 @@ async def init_globals() -> None:
     _agents = load_all_agents()
     logger.info(f"Loaded {len(_agents)} agent configs")
 
-    # 5. 创建 ToolRegistry（全局）
-    _tool_registry = _create_tool_registry()
-    logger.info("Tool registry initialized")
+    # 5. 加载全局工具
+    _tools = _load_tools()
+    logger.info(f"Loaded {len(_tools)} global tools")
 
 
-def _create_tool_registry():
-    """创建全局 ToolRegistry（工具库）"""
-    from tools.registry import ToolRegistry
+def _load_tools() -> Dict[str, BaseTool]:
+    """启动时加载全局工具（无状态，跨请求共享）"""
     from tools.implementations.call_subagent import CallSubagentTool
     from tools.implementations.web_search import WebSearchTool
     from tools.implementations.web_fetch import WebFetchTool
 
-    registry = ToolRegistry()
-
     # 从已加载的 agents 推导有效 subagent 列表
     valid_agents = [n for n in _agents.keys() if n != "lead_agent"] if _agents else None
 
-    # 注册全局工具
     tools = [
         CallSubagentTool(valid_agents=valid_agents),
         WebSearchTool(),
         WebFetchTool(),
     ]
 
-    for tool in tools:
-        registry.register_tool_to_library(tool)
-
-    return registry
+    return {t.name: t for t in tools}
 
 
 async def close_globals() -> None:
@@ -175,11 +168,11 @@ def get_agents() -> dict:
     return _agents
 
 
-def get_tool_registry():
-    """获取 ToolRegistry 单例"""
-    if _tool_registry is None:
-        raise RuntimeError("ToolRegistry not initialized. Call init_globals() first.")
-    return _tool_registry
+def get_tools() -> Dict[str, BaseTool]:
+    """获取全局工具字典"""
+    if _tools is None:
+        raise RuntimeError("Tools not loaded. Call init_globals() first.")
+    return _tools
 
 
 # ============================================================
@@ -207,35 +200,6 @@ async def get_conversation_manager(
     """每个请求获得独立的 ConversationManager"""
     repo = ConversationRepository(session)
     return ConversationManager(repo)
-
-
-async def get_controller(
-    session: AsyncSession = Depends(get_db_session),
-    artifact_manager: ArtifactManager = Depends(get_artifact_manager),
-    conversation_manager: ConversationManager = Depends(get_conversation_manager),
-) -> ExecutionController:
-    """
-    每个请求获得独立的 Controller
-
-    Controller 持有 ConversationManager + ToolRegistry + StreamManager。
-    """
-    from repositories.message_event_repo import MessageEventRepository
-    from tools.implementations.artifact_ops import create_artifact_tools
-
-    # 构建请求级工具（不污染全局 registry）
-    artifact_tools = create_artifact_tools(artifact_manager)
-    request_tools = {t.name: t for t in artifact_tools}
-
-    return ExecutionController(
-        agents=get_agents(),
-        tool_registry=get_tool_registry(),
-        task_manager=get_task_manager(),
-        artifact_manager=artifact_manager,
-        conversation_manager=conversation_manager,
-        message_event_repo=MessageEventRepository(session),
-        request_tools=request_tools,
-        permission_timeout=config.PERMISSION_TIMEOUT,
-    )
 
 
 # ============================================================

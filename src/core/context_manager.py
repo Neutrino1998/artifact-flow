@@ -48,10 +48,9 @@ class ContextManager:
         state: Dict[str, Any],
         agent_config: Any,  # AgentConfig
         agents: Dict[str, Any],  # {name: AgentConfig} for building available agents section
-        tool_registry: Any,  # ToolRegistry
+        tools: Dict[str, Any],   # {name: BaseTool}
         artifact_manager: Optional[Any] = None,
         artifacts_inventory: Optional[List[Dict]] = None,
-        request_tools: Optional[Dict[str, Any]] = None,
     ) -> Context:
         """
         构建 LLM 调用所需的完整 messages
@@ -62,10 +61,9 @@ class ContextManager:
             state: 执行状态
             agent_config: 当前 agent 的 AgentConfig
             agents: 所有 agent 配置 {name: AgentConfig}
-            tool_registry: 工具注册中心
+            tools: 所有可用工具 {name: BaseTool}
             artifact_manager: ArtifactManager（用于 artifacts 清单）
             artifacts_inventory: 预加载的 artifacts 清单
-            request_tools: 请求级工具 {name: BaseTool}，优先于 tool_registry
 
         Returns:
             Context（含 messages 列表）
@@ -99,15 +97,11 @@ class ContextManager:
         if "call_subagent" in agent_config.tools:
             system_parts.append(cls._build_available_agents(agents, agent_config.name))
 
-        # 6. 工具说明（先查 request_tools，再查 tool_registry）
+        # 6. 工具说明
         tool_names = list(agent_config.tools.keys())
-        tools = []
-        for name in tool_names:
-            tool = (request_tools or {}).get(name) or tool_registry.get_tool(name)
-            if tool:
-                tools.append(tool)
-        if tools:
-            system_parts.append(ToolPromptGenerator.generate_tool_instruction(tools))
+        agent_tools = [tools[name] for name in tool_names if name in tools]
+        if agent_tools:
+            system_parts.append(ToolPromptGenerator.generate_tool_instruction(agent_tools))
 
         system_prompt = "\n\n".join(s for s in system_parts if s)
 
