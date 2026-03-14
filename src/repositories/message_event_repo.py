@@ -28,6 +28,10 @@ class MessageEventRepository:
     def __init__(self, session: AsyncSession):
         self.session = session
 
+    async def reset(self) -> None:
+        """Rollback 当前事务，使 session 恢复可用状态。"""
+        await self.session.rollback()
+
     async def batch_create(self, events: List[Dict[str, Any]]) -> List[MessageEvent]:
         """
         批量创建事件记录
