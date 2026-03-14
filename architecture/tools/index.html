@@ -778,38 +778,16 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#工具注册中心-registrypy" class="md-nav__link">
+  <a href="#工具管理" class="md-nav__link">
     <span class="md-ellipsis">
       
-        工具注册中心 (registry.py)
+        工具管理
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="工具注册中心 (registry.py)">
+    <nav class="md-nav" aria-label="工具管理">
       <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#toolregistry" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        ToolRegistry
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#agenttoolkit" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        AgentToolkit
-      
-    </span>
-  </a>
-  
-</li>
         
           <li class="md-nav__item">
   <a href="#初始化流程" class="md-nav__link">
@@ -1223,38 +1201,16 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#工具注册中心-registrypy" class="md-nav__link">
+  <a href="#工具管理" class="md-nav__link">
     <span class="md-ellipsis">
       
-        工具注册中心 (registry.py)
+        工具管理
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="工具注册中心 (registry.py)">
+    <nav class="md-nav" aria-label="工具管理">
       <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#toolregistry" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        ToolRegistry
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#agenttoolkit" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        AgentToolkit
-      
-    </span>
-  </a>
-  
-</li>
         
           <li class="md-nav__item">
   <a href="#初始化流程" class="md-nav__link">
@@ -1386,14 +1342,13 @@
 <h2 id="模块结构">模块结构</h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>src/tools/
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>├── base.py              # 工具基类和权限定义
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>├── registry.py          # 工具注册中心
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>├── xml_parser.py        # XML 工具调用解析
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>├── prompt_generator.py  # 工具提示词生成
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>└── implementations/     # 具体工具实现
-<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>    ├── call_subagent.py
-<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>    ├── web_search.py
-<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>    ├── web_fetch.py
-<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>    └── artifact_ops.py
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>├── xml_parser.py        # XML 工具调用解析
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>├── prompt_generator.py  # 工具提示词生成
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>└── implementations/     # 具体工具实现
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>    ├── call_subagent.py
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>    ├── web_search.py
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>    ├── web_fetch.py
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>    └── artifact_ops.py
 </code></pre></div>
 <h2 id="权限系统-basepy">权限系统 (base.py)</h2>
 <h3 id="toolpermission">ToolPermission</h3>
@@ -1402,7 +1357,7 @@
 <a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>    <span class="n">AUTO</span> <span class="o">=</span> <span class="s2">&quot;auto&quot;</span>        <span class="c1"># 自动执行，无需用户确认</span>
 <a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>    <span class="n">CONFIRM</span> <span class="o">=</span> <span class="s2">&quot;confirm&quot;</span>  <span class="c1"># 执行前需用户确认（通过 interrupt 暂停）</span>
 </code></pre></div>
-<p><strong>权限处理流程</strong>（在 <code>graph.py</code> 的 <code>tool_execution_node</code> 中）：</p>
+<p><strong>权限处理流程</strong>（在 <code>engine.py</code> 的 <code>_execute_tools</code> 中）：</p>
 <pre class="mermaid"><code>flowchart TD
     A[获取工具权限] --&gt; B{权限级别}
     B --&gt;|AUTO| C[直接执行]
@@ -1505,111 +1460,29 @@
 <a id="__codelineno-5-30" name="__codelineno-5-30" href="#__codelineno-5-30"></a>        <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
 <a id="__codelineno-5-31" name="__codelineno-5-31" href="#__codelineno-5-31"></a>            <span class="k">return</span> <span class="n">ToolResult</span><span class="p">(</span><span class="n">success</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">error</span><span class="o">=</span><span class="nb">str</span><span class="p">(</span><span class="n">e</span><span class="p">))</span>
 </code></pre></div>
-<h2 id="工具注册中心-registrypy">工具注册中心 (registry.py)</h2>
-<h3 id="toolregistry">ToolRegistry</h3>
-<p>全局工具库管理：</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="k">class</span><span class="w"> </span><span class="nc">ToolRegistry</span><span class="p">:</span>
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
-<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">tool_library</span><span class="p">:</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">BaseTool</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
-<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">agent_toolkits</span><span class="p">:</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">AgentToolkit</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
-<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a>
-<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">register_tool_to_library</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">tool</span><span class="p">:</span> <span class="n">BaseTool</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
-<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;注册工具到全局库&quot;&quot;&quot;</span>
-<a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">tool_library</span><span class="p">[</span><span class="n">tool</span><span class="o">.</span><span class="n">name</span><span class="p">]</span> <span class="o">=</span> <span class="n">tool</span>
-<a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a>
-<a id="__codelineno-6-10" name="__codelineno-6-10" href="#__codelineno-6-10"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">create_agent_toolkit</span><span class="p">(</span>
-<a id="__codelineno-6-11" name="__codelineno-6-11" href="#__codelineno-6-11"></a>        <span class="bp">self</span><span class="p">,</span>
-<a id="__codelineno-6-12" name="__codelineno-6-12" href="#__codelineno-6-12"></a>        <span class="n">agent_name</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
-<a id="__codelineno-6-13" name="__codelineno-6-13" href="#__codelineno-6-13"></a>        <span class="n">tool_names</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span>
-<a id="__codelineno-6-14" name="__codelineno-6-14" href="#__codelineno-6-14"></a>    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">AgentToolkit</span><span class="p">:</span>
-<a id="__codelineno-6-15" name="__codelineno-6-15" href="#__codelineno-6-15"></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;为 Agent 创建专属工具集&quot;&quot;&quot;</span>
-<a id="__codelineno-6-16" name="__codelineno-6-16" href="#__codelineno-6-16"></a>        <span class="n">toolkit</span> <span class="o">=</span> <span class="n">AgentToolkit</span><span class="p">(</span><span class="n">agent_name</span><span class="p">)</span>
-<a id="__codelineno-6-17" name="__codelineno-6-17" href="#__codelineno-6-17"></a>        <span class="k">if</span> <span class="n">tool_names</span><span class="p">:</span>
-<a id="__codelineno-6-18" name="__codelineno-6-18" href="#__codelineno-6-18"></a>            <span class="k">for</span> <span class="n">tool_name</span> <span class="ow">in</span> <span class="n">tool_names</span><span class="p">:</span>
-<a id="__codelineno-6-19" name="__codelineno-6-19" href="#__codelineno-6-19"></a>                <span class="k">if</span> <span class="n">tool_name</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">tool_library</span><span class="p">:</span>
-<a id="__codelineno-6-20" name="__codelineno-6-20" href="#__codelineno-6-20"></a>                    <span class="n">toolkit</span><span class="o">.</span><span class="n">add_tool</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">tool_library</span><span class="p">[</span><span class="n">tool_name</span><span class="p">])</span>
-<a id="__codelineno-6-21" name="__codelineno-6-21" href="#__codelineno-6-21"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">agent_toolkits</span><span class="p">[</span><span class="n">agent_name</span><span class="p">]</span> <span class="o">=</span> <span class="n">toolkit</span>
-<a id="__codelineno-6-22" name="__codelineno-6-22" href="#__codelineno-6-22"></a>        <span class="k">return</span> <span class="n">toolkit</span>
-<a id="__codelineno-6-23" name="__codelineno-6-23" href="#__codelineno-6-23"></a>
-<a id="__codelineno-6-24" name="__codelineno-6-24" href="#__codelineno-6-24"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">get_agent_toolkit</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">agent_name</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Optional</span><span class="p">[</span><span class="n">AgentToolkit</span><span class="p">]:</span>
-<a id="__codelineno-6-25" name="__codelineno-6-25" href="#__codelineno-6-25"></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;获取 Agent 的工具包&quot;&quot;&quot;</span>
-<a id="__codelineno-6-26" name="__codelineno-6-26" href="#__codelineno-6-26"></a>        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">agent_toolkits</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">agent_name</span><span class="p">)</span>
-</code></pre></div>
-<h3 id="agenttoolkit">AgentToolkit</h3>
-<p>Agent 专属工具集：</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="k">class</span><span class="w"> </span><span class="nc">AgentToolkit</span><span class="p">:</span>
-<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">agent_name</span><span class="p">:</span> <span class="nb">str</span><span class="p">):</span>
-<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">agent_name</span> <span class="o">=</span> <span class="n">agent_name</span>
-<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">tools</span><span class="p">:</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">BaseTool</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
-<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a>
-<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">add_tool</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">tool</span><span class="p">:</span> <span class="n">BaseTool</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
-<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;添加工具到工具包&quot;&quot;&quot;</span>
-<a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">tools</span><span class="p">[</span><span class="n">tool</span><span class="o">.</span><span class="n">name</span><span class="p">]</span> <span class="o">=</span> <span class="n">tool</span>
-<a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a>
-<a id="__codelineno-7-10" name="__codelineno-7-10" href="#__codelineno-7-10"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">add_tools</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">tools</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="n">BaseTool</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
-<a id="__codelineno-7-11" name="__codelineno-7-11" href="#__codelineno-7-11"></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;批量添加工具&quot;&quot;&quot;</span>
-<a id="__codelineno-7-12" name="__codelineno-7-12" href="#__codelineno-7-12"></a>        <span class="k">for</span> <span class="n">tool</span> <span class="ow">in</span> <span class="n">tools</span><span class="p">:</span>
-<a id="__codelineno-7-13" name="__codelineno-7-13" href="#__codelineno-7-13"></a>            <span class="bp">self</span><span class="o">.</span><span class="n">add_tool</span><span class="p">(</span><span class="n">tool</span><span class="p">)</span>
-<a id="__codelineno-7-14" name="__codelineno-7-14" href="#__codelineno-7-14"></a>
-<a id="__codelineno-7-15" name="__codelineno-7-15" href="#__codelineno-7-15"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">get_tool</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">name</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Optional</span><span class="p">[</span><span class="n">BaseTool</span><span class="p">]:</span>
-<a id="__codelineno-7-16" name="__codelineno-7-16" href="#__codelineno-7-16"></a>        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">tools</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">name</span><span class="p">)</span>
-<a id="__codelineno-7-17" name="__codelineno-7-17" href="#__codelineno-7-17"></a>
-<a id="__codelineno-7-18" name="__codelineno-7-18" href="#__codelineno-7-18"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">list_tools</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">List</span><span class="p">[</span><span class="n">BaseTool</span><span class="p">]:</span>
-<a id="__codelineno-7-19" name="__codelineno-7-19" href="#__codelineno-7-19"></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;返回工具实例列表&quot;&quot;&quot;</span>
-<a id="__codelineno-7-20" name="__codelineno-7-20" href="#__codelineno-7-20"></a>        <span class="k">return</span> <span class="nb">list</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">tools</span><span class="o">.</span><span class="n">values</span><span class="p">())</span>
-<a id="__codelineno-7-21" name="__codelineno-7-21" href="#__codelineno-7-21"></a>
-<a id="__codelineno-7-22" name="__codelineno-7-22" href="#__codelineno-7-22"></a>    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">execute_tool</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">name</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">params</span><span class="p">:</span> <span class="n">Dict</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">ToolResult</span><span class="p">:</span>
-<a id="__codelineno-7-23" name="__codelineno-7-23" href="#__codelineno-7-23"></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
-<a id="__codelineno-7-24" name="__codelineno-7-24" href="#__codelineno-7-24"></a><span class="sd">        执行工具（权限检查由 Graph 层负责）</span>
-<a id="__codelineno-7-25" name="__codelineno-7-25" href="#__codelineno-7-25"></a><span class="sd">        参数验证在 tool.__call__ 内部处理</span>
-<a id="__codelineno-7-26" name="__codelineno-7-26" href="#__codelineno-7-26"></a><span class="sd">        &quot;&quot;&quot;</span>
-<a id="__codelineno-7-27" name="__codelineno-7-27" href="#__codelineno-7-27"></a>        <span class="n">tool</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_tool</span><span class="p">(</span><span class="n">name</span><span class="p">)</span>
-<a id="__codelineno-7-28" name="__codelineno-7-28" href="#__codelineno-7-28"></a>        <span class="k">if</span> <span class="ow">not</span> <span class="n">tool</span><span class="p">:</span>
-<a id="__codelineno-7-29" name="__codelineno-7-29" href="#__codelineno-7-29"></a>            <span class="k">return</span> <span class="n">ToolResult</span><span class="p">(</span>
-<a id="__codelineno-7-30" name="__codelineno-7-30" href="#__codelineno-7-30"></a>                <span class="n">success</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
-<a id="__codelineno-7-31" name="__codelineno-7-31" href="#__codelineno-7-31"></a>                <span class="n">error</span><span class="o">=</span><span class="sa">f</span><span class="s2">&quot;Tool &#39;</span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2">&#39; not available in </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">agent_name</span><span class="si">}</span><span class="s2">&#39;s toolkit&quot;</span>
-<a id="__codelineno-7-32" name="__codelineno-7-32" href="#__codelineno-7-32"></a>            <span class="p">)</span>
-<a id="__codelineno-7-33" name="__codelineno-7-33" href="#__codelineno-7-33"></a>        <span class="k">return</span> <span class="k">await</span> <span class="n">tool</span><span class="p">(</span><span class="o">**</span><span class="n">params</span><span class="p">)</span>
-</code></pre></div>
+<h2 id="工具管理">工具管理</h2>
+<p>工具以 <code>Dict[str, BaseTool]</code> 管理，和 agents 一样是启动时加载的全局单例。</p>
 <h3 id="初始化流程">初始化流程</h3>
-<p>工具初始化在 <code>create_multi_agent_graph()</code> 函数中完成（<code>core/graph.py</code>）：</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="c1"># 1. 创建工具注册中心</span>
-<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="n">registry</span> <span class="o">=</span> <span class="n">ToolRegistry</span><span class="p">()</span>
-<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>
-<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="c1"># 2. 创建工具列表</span>
-<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="n">tools</span> <span class="o">=</span> <span class="p">[</span>
-<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a>    <span class="n">CallSubagentTool</span><span class="p">(),</span>
-<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a>    <span class="n">WebSearchTool</span><span class="p">(),</span>
-<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a>    <span class="n">WebFetchTool</span><span class="p">(),</span>
-<a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a><span class="p">]</span>
-<a id="__codelineno-8-10" name="__codelineno-8-10" href="#__codelineno-8-10"></a>
-<a id="__codelineno-8-11" name="__codelineno-8-11" href="#__codelineno-8-11"></a><span class="c1"># Artifact 工具需要 manager 依赖注入</span>
-<a id="__codelineno-8-12" name="__codelineno-8-12" href="#__codelineno-8-12"></a><span class="k">if</span> <span class="n">artifact_manager</span><span class="p">:</span>
-<a id="__codelineno-8-13" name="__codelineno-8-13" href="#__codelineno-8-13"></a>    <span class="n">tools</span><span class="o">.</span><span class="n">extend</span><span class="p">(</span><span class="n">create_artifact_tools</span><span class="p">(</span><span class="n">artifact_manager</span><span class="p">))</span>
-<a id="__codelineno-8-14" name="__codelineno-8-14" href="#__codelineno-8-14"></a>
-<a id="__codelineno-8-15" name="__codelineno-8-15" href="#__codelineno-8-15"></a><span class="c1"># 3. 注册所有工具到库</span>
-<a id="__codelineno-8-16" name="__codelineno-8-16" href="#__codelineno-8-16"></a><span class="k">for</span> <span class="n">tool</span> <span class="ow">in</span> <span class="n">tools</span><span class="p">:</span>
-<a id="__codelineno-8-17" name="__codelineno-8-17" href="#__codelineno-8-17"></a>    <span class="n">registry</span><span class="o">.</span><span class="n">register_tool_to_library</span><span class="p">(</span><span class="n">tool</span><span class="p">)</span>
-<a id="__codelineno-8-18" name="__codelineno-8-18" href="#__codelineno-8-18"></a>
-<a id="__codelineno-8-19" name="__codelineno-8-19" href="#__codelineno-8-19"></a><span class="c1"># 4. 为每个 Agent 创建 toolkit 并绑定</span>
-<a id="__codelineno-8-20" name="__codelineno-8-20" href="#__codelineno-8-20"></a><span class="k">for</span> <span class="n">agent</span> <span class="ow">in</span> <span class="p">[</span><span class="n">lead</span><span class="p">,</span> <span class="n">search</span><span class="p">,</span> <span class="n">crawl</span><span class="p">]:</span>
-<a id="__codelineno-8-21" name="__codelineno-8-21" href="#__codelineno-8-21"></a>    <span class="k">if</span> <span class="n">agent</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">required_tools</span><span class="p">:</span>
-<a id="__codelineno-8-22" name="__codelineno-8-22" href="#__codelineno-8-22"></a>        <span class="n">toolkit</span> <span class="o">=</span> <span class="n">registry</span><span class="o">.</span><span class="n">create_agent_toolkit</span><span class="p">(</span>
-<a id="__codelineno-8-23" name="__codelineno-8-23" href="#__codelineno-8-23"></a>            <span class="n">agent</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">name</span><span class="p">,</span>
-<a id="__codelineno-8-24" name="__codelineno-8-24" href="#__codelineno-8-24"></a>            <span class="n">tool_names</span><span class="o">=</span><span class="n">agent</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">required_tools</span>
-<a id="__codelineno-8-25" name="__codelineno-8-25" href="#__codelineno-8-25"></a>        <span class="p">)</span>
-<a id="__codelineno-8-26" name="__codelineno-8-26" href="#__codelineno-8-26"></a>        <span class="n">agent</span><span class="o">.</span><span class="n">toolkit</span> <span class="o">=</span> <span class="n">toolkit</span>
+<p>全局工具在 <code>dependencies.py</code> 的 <code>_load_tools()</code> 中加载，请求级工具（artifact 操作）在 <code>_create_controller()</code> 中合并：</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="c1"># dependencies.py — 启动时加载一次</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="n">_tools</span> <span class="o">=</span> <span class="p">{</span><span class="n">t</span><span class="o">.</span><span class="n">name</span><span class="p">:</span> <span class="n">t</span> <span class="k">for</span> <span class="n">t</span> <span class="ow">in</span> <span class="p">[</span><span class="n">CallSubagentTool</span><span class="p">(</span><span class="o">...</span><span class="p">),</span> <span class="n">WebSearchTool</span><span class="p">(),</span> <span class="n">WebFetchTool</span><span class="p">()]}</span>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="c1"># chat.py — 每次请求合并</span>
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="n">artifact_tools</span> <span class="o">=</span> <span class="n">create_artifact_tools</span><span class="p">(</span><span class="n">artifact_manager</span><span class="p">)</span>
+<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a><span class="n">all_tools</span> <span class="o">=</span> <span class="p">{</span><span class="o">**</span><span class="n">get_tools</span><span class="p">(),</span> <span class="o">**</span><span class="p">{</span><span class="n">t</span><span class="o">.</span><span class="n">name</span><span class="p">:</span> <span class="n">t</span> <span class="k">for</span> <span class="n">t</span> <span class="ow">in</span> <span class="n">artifact_tools</span><span class="p">}}</span>
+<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a><span class="c1"># 传入 ExecutionController → engine → context_manager</span>
 </code></pre></div>
+<p>Engine 通过 <code>tools.get(name)</code> 查找工具，agent 工具白名单由 Agent MD 的 <code>tools</code> frontmatter 控制。</p>
 <h2 id="xml-解析器-xml_parserpy">XML 解析器 (xml_parser.py)</h2>
 <h3 id="工具调用格式">工具调用格式</h3>
 <p>Agent 使用 XML 格式发起工具调用，所有参数值使用 CDATA 包裹：</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="nt">&lt;tool_call&gt;</span>
-<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="w">  </span><span class="nt">&lt;name&gt;</span>web_search<span class="nt">&lt;/name&gt;</span>
-<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="w">  </span><span class="nt">&lt;params&gt;</span>
-<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="w">    </span><span class="nt">&lt;query&gt;</span><span class="cp">&lt;![CDATA[Python async best practices]]&gt;</span><span class="nt">&lt;/query&gt;</span>
-<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a><span class="w">    </span><span class="nt">&lt;max_results&gt;</span><span class="cp">&lt;![CDATA[10]]&gt;</span><span class="nt">&lt;/max_results&gt;</span>
-<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a><span class="w">  </span><span class="nt">&lt;/params&gt;</span>
-<a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a><span class="nt">&lt;/tool_call&gt;</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="nt">&lt;tool_call&gt;</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="w">  </span><span class="nt">&lt;name&gt;</span>web_search<span class="nt">&lt;/name&gt;</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="w">  </span><span class="nt">&lt;params&gt;</span>
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="w">    </span><span class="nt">&lt;query&gt;</span><span class="cp">&lt;![CDATA[Python async best practices]]&gt;</span><span class="nt">&lt;/query&gt;</span>
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="w">    </span><span class="nt">&lt;max_results&gt;</span><span class="cp">&lt;![CDATA[10]]&gt;</span><span class="nt">&lt;/max_results&gt;</span>
+<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="w">  </span><span class="nt">&lt;/params&gt;</span>
+<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a><span class="nt">&lt;/tool_call&gt;</span>
 </code></pre></div>
 <p><strong>为什么使用 CDATA？</strong></p>
 <ul>
@@ -1618,30 +1491,30 @@
 <li>保持内容原样，无需转义</li>
 </ul>
 <h3 id="xmltoolcallparser">XMLToolCallParser</h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="nd">@dataclass</span>
-<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="k">class</span><span class="w"> </span><span class="nc">ToolCall</span><span class="p">:</span>
-<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;工具调用数据结构&quot;&quot;&quot;</span>
-<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a>    <span class="n">name</span><span class="p">:</span> <span class="nb">str</span>
-<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a>    <span class="n">params</span><span class="p">:</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]</span>
-<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a>    <span class="n">raw_text</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span>
-<a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a>
-<a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a><span class="k">class</span><span class="w"> </span><span class="nc">XMLToolCallParser</span><span class="p">:</span>
-<a id="__codelineno-10-9" name="__codelineno-10-9" href="#__codelineno-10-9"></a>    <span class="nd">@staticmethod</span>
-<a id="__codelineno-10-10" name="__codelineno-10-10" href="#__codelineno-10-10"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">parse_tool_calls</span><span class="p">(</span><span class="n">text</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">List</span><span class="p">[</span><span class="n">ToolCall</span><span class="p">]:</span>
-<a id="__codelineno-10-11" name="__codelineno-10-11" href="#__codelineno-10-11"></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
-<a id="__codelineno-10-12" name="__codelineno-10-12" href="#__codelineno-10-12"></a><span class="sd">        解析 XML 工具调用</span>
-<a id="__codelineno-10-13" name="__codelineno-10-13" href="#__codelineno-10-13"></a>
-<a id="__codelineno-10-14" name="__codelineno-10-14" href="#__codelineno-10-14"></a><span class="sd">        Returns:</span>
-<a id="__codelineno-10-15" name="__codelineno-10-15" href="#__codelineno-10-15"></a><span class="sd">            ToolCall 对象列表</span>
-<a id="__codelineno-10-16" name="__codelineno-10-16" href="#__codelineno-10-16"></a><span class="sd">        &quot;&quot;&quot;</span>
-<a id="__codelineno-10-17" name="__codelineno-10-17" href="#__codelineno-10-17"></a>        <span class="c1"># 使用 xml.etree.ElementTree 解析</span>
-<a id="__codelineno-10-18" name="__codelineno-10-18" href="#__codelineno-10-18"></a>        <span class="c1"># 自动处理 CDATA</span>
-<a id="__codelineno-10-19" name="__codelineno-10-19" href="#__codelineno-10-19"></a>        <span class="c1"># 自动类型转换（bool, int, float, string）</span>
-<a id="__codelineno-10-20" name="__codelineno-10-20" href="#__codelineno-10-20"></a>        <span class="c1"># 支持 fallback 正则解析（处理 LLM 格式不严格的情况）</span>
-<a id="__codelineno-10-21" name="__codelineno-10-21" href="#__codelineno-10-21"></a>
-<a id="__codelineno-10-22" name="__codelineno-10-22" href="#__codelineno-10-22"></a><span class="c1"># 便捷函数</span>
-<a id="__codelineno-10-23" name="__codelineno-10-23" href="#__codelineno-10-23"></a><span class="k">def</span><span class="w"> </span><span class="nf">parse_tool_calls</span><span class="p">(</span><span class="n">text</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">List</span><span class="p">[</span><span class="n">ToolCall</span><span class="p">]:</span>
-<a id="__codelineno-10-24" name="__codelineno-10-24" href="#__codelineno-10-24"></a>    <span class="k">return</span> <span class="n">XMLToolCallParser</span><span class="o">.</span><span class="n">parse_tool_calls</span><span class="p">(</span><span class="n">text</span><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="nd">@dataclass</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="k">class</span><span class="w"> </span><span class="nc">ToolCall</span><span class="p">:</span>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;工具调用数据结构&quot;&quot;&quot;</span>
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>    <span class="n">name</span><span class="p">:</span> <span class="nb">str</span>
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>    <span class="n">params</span><span class="p">:</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]</span>
+<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a>    <span class="n">raw_text</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span>
+<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a>
+<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a><span class="k">class</span><span class="w"> </span><span class="nc">XMLToolCallParser</span><span class="p">:</span>
+<a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a>    <span class="nd">@staticmethod</span>
+<a id="__codelineno-8-10" name="__codelineno-8-10" href="#__codelineno-8-10"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">parse_tool_calls</span><span class="p">(</span><span class="n">text</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">List</span><span class="p">[</span><span class="n">ToolCall</span><span class="p">]:</span>
+<a id="__codelineno-8-11" name="__codelineno-8-11" href="#__codelineno-8-11"></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<a id="__codelineno-8-12" name="__codelineno-8-12" href="#__codelineno-8-12"></a><span class="sd">        解析 XML 工具调用</span>
+<a id="__codelineno-8-13" name="__codelineno-8-13" href="#__codelineno-8-13"></a>
+<a id="__codelineno-8-14" name="__codelineno-8-14" href="#__codelineno-8-14"></a><span class="sd">        Returns:</span>
+<a id="__codelineno-8-15" name="__codelineno-8-15" href="#__codelineno-8-15"></a><span class="sd">            ToolCall 对象列表</span>
+<a id="__codelineno-8-16" name="__codelineno-8-16" href="#__codelineno-8-16"></a><span class="sd">        &quot;&quot;&quot;</span>
+<a id="__codelineno-8-17" name="__codelineno-8-17" href="#__codelineno-8-17"></a>        <span class="c1"># 使用 xml.etree.ElementTree 解析</span>
+<a id="__codelineno-8-18" name="__codelineno-8-18" href="#__codelineno-8-18"></a>        <span class="c1"># 自动处理 CDATA</span>
+<a id="__codelineno-8-19" name="__codelineno-8-19" href="#__codelineno-8-19"></a>        <span class="c1"># 自动类型转换（bool, int, float, string）</span>
+<a id="__codelineno-8-20" name="__codelineno-8-20" href="#__codelineno-8-20"></a>        <span class="c1"># 支持 fallback 正则解析（处理 LLM 格式不严格的情况）</span>
+<a id="__codelineno-8-21" name="__codelineno-8-21" href="#__codelineno-8-21"></a>
+<a id="__codelineno-8-22" name="__codelineno-8-22" href="#__codelineno-8-22"></a><span class="c1"># 便捷函数</span>
+<a id="__codelineno-8-23" name="__codelineno-8-23" href="#__codelineno-8-23"></a><span class="k">def</span><span class="w"> </span><span class="nf">parse_tool_calls</span><span class="p">(</span><span class="n">text</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">List</span><span class="p">[</span><span class="n">ToolCall</span><span class="p">]:</span>
+<a id="__codelineno-8-24" name="__codelineno-8-24" href="#__codelineno-8-24"></a>    <span class="k">return</span> <span class="n">XMLToolCallParser</span><span class="o">.</span><span class="n">parse_tool_calls</span><span class="p">(</span><span class="n">text</span><span class="p">)</span>
 </code></pre></div>
 <p><strong>类型转换规则</strong>：</p>
 <table>
@@ -1673,44 +1546,44 @@
 <h2 id="提示词生成器-prompt_generatorpy">提示词生成器 (prompt_generator.py)</h2>
 <h3 id="toolpromptgenerator">ToolPromptGenerator</h3>
 <p>为 Agent 生成工具使用说明：</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="k">class</span><span class="w"> </span><span class="nc">ToolPromptGenerator</span><span class="p">:</span>
-<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>    <span class="nd">@staticmethod</span>
-<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">generate_tool_instruction</span><span class="p">(</span><span class="n">tools</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="n">BaseTool</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
-<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
-<a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a><span class="sd">        生成完整的工具使用说明</span>
-<a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a>
-<a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a><span class="sd">        Args:</span>
-<a id="__codelineno-11-8" name="__codelineno-11-8" href="#__codelineno-11-8"></a><span class="sd">            tools: 工具实例列表（通常来自 toolkit.list_tools()）</span>
-<a id="__codelineno-11-9" name="__codelineno-11-9" href="#__codelineno-11-9"></a>
-<a id="__codelineno-11-10" name="__codelineno-11-10" href="#__codelineno-11-10"></a><span class="sd">        包含：</span>
-<a id="__codelineno-11-11" name="__codelineno-11-11" href="#__codelineno-11-11"></a><span class="sd">        - 可用工具列表</span>
-<a id="__codelineno-11-12" name="__codelineno-11-12" href="#__codelineno-11-12"></a><span class="sd">        - 每个工具的参数说明</span>
-<a id="__codelineno-11-13" name="__codelineno-11-13" href="#__codelineno-11-13"></a><span class="sd">        - XML 调用格式示例（使用 CDATA）</span>
-<a id="__codelineno-11-14" name="__codelineno-11-14" href="#__codelineno-11-14"></a><span class="sd">        - 注意事项</span>
-<a id="__codelineno-11-15" name="__codelineno-11-15" href="#__codelineno-11-15"></a><span class="sd">        &quot;&quot;&quot;</span>
-<a id="__codelineno-11-16" name="__codelineno-11-16" href="#__codelineno-11-16"></a>
-<a id="__codelineno-11-17" name="__codelineno-11-17" href="#__codelineno-11-17"></a>    <span class="nd">@staticmethod</span>
-<a id="__codelineno-11-18" name="__codelineno-11-18" href="#__codelineno-11-18"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">format_tool_result</span><span class="p">(</span><span class="n">name</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">result</span><span class="p">:</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
-<a id="__codelineno-11-19" name="__codelineno-11-19" href="#__codelineno-11-19"></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;格式化工具执行结果为 XML&quot;&quot;&quot;</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="k">class</span><span class="w"> </span><span class="nc">ToolPromptGenerator</span><span class="p">:</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>    <span class="nd">@staticmethod</span>
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">generate_tool_instruction</span><span class="p">(</span><span class="n">tools</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="n">BaseTool</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a><span class="sd">        生成完整的工具使用说明</span>
+<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a>
+<a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a><span class="sd">        Args:</span>
+<a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a><span class="sd">            tools: 工具实例列表（通常来自 toolkit.list_tools()）</span>
+<a id="__codelineno-9-9" name="__codelineno-9-9" href="#__codelineno-9-9"></a>
+<a id="__codelineno-9-10" name="__codelineno-9-10" href="#__codelineno-9-10"></a><span class="sd">        包含：</span>
+<a id="__codelineno-9-11" name="__codelineno-9-11" href="#__codelineno-9-11"></a><span class="sd">        - 可用工具列表</span>
+<a id="__codelineno-9-12" name="__codelineno-9-12" href="#__codelineno-9-12"></a><span class="sd">        - 每个工具的参数说明</span>
+<a id="__codelineno-9-13" name="__codelineno-9-13" href="#__codelineno-9-13"></a><span class="sd">        - XML 调用格式示例（使用 CDATA）</span>
+<a id="__codelineno-9-14" name="__codelineno-9-14" href="#__codelineno-9-14"></a><span class="sd">        - 注意事项</span>
+<a id="__codelineno-9-15" name="__codelineno-9-15" href="#__codelineno-9-15"></a><span class="sd">        &quot;&quot;&quot;</span>
+<a id="__codelineno-9-16" name="__codelineno-9-16" href="#__codelineno-9-16"></a>
+<a id="__codelineno-9-17" name="__codelineno-9-17" href="#__codelineno-9-17"></a>    <span class="nd">@staticmethod</span>
+<a id="__codelineno-9-18" name="__codelineno-9-18" href="#__codelineno-9-18"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">format_tool_result</span><span class="p">(</span><span class="n">name</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">result</span><span class="p">:</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<a id="__codelineno-9-19" name="__codelineno-9-19" href="#__codelineno-9-19"></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;格式化工具执行结果为 XML&quot;&quot;&quot;</span>
 </code></pre></div>
 <p><strong>生成示例</strong>（实际输出格式）：</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>### web_search
-<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>Description: Search the web for information using Bocha AI search engine
-<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a>Parameters:
-<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a>  - query: string (required) - Search query using keywords.
-<a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a>  - freshness: string (optional) - Time range filter: &#39;noLimit&#39;, &#39;oneDay&#39;, ...
-<a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a>    Default: noLimit
-<a id="__codelineno-12-7" name="__codelineno-12-7" href="#__codelineno-12-7"></a>  - count: integer (optional) - Number of results to return (1-50)
-<a id="__codelineno-12-8" name="__codelineno-12-8" href="#__codelineno-12-8"></a>    Default: 10
-<a id="__codelineno-12-9" name="__codelineno-12-9" href="#__codelineno-12-9"></a>Example:
-<a id="__codelineno-12-10" name="__codelineno-12-10" href="#__codelineno-12-10"></a>&lt;tool_call&gt;
-<a id="__codelineno-12-11" name="__codelineno-12-11" href="#__codelineno-12-11"></a>  &lt;name&gt;web_search&lt;/name&gt;
-<a id="__codelineno-12-12" name="__codelineno-12-12" href="#__codelineno-12-12"></a>  &lt;params&gt;
-<a id="__codelineno-12-13" name="__codelineno-12-13" href="#__codelineno-12-13"></a>    &lt;query&gt;&lt;![CDATA[your_query_here]]&gt;&lt;/query&gt;
-<a id="__codelineno-12-14" name="__codelineno-12-14" href="#__codelineno-12-14"></a>    &lt;freshness&gt;&lt;![CDATA[noLimit]]&gt;&lt;/freshness&gt;
-<a id="__codelineno-12-15" name="__codelineno-12-15" href="#__codelineno-12-15"></a>    &lt;count&gt;&lt;![CDATA[10]]&gt;&lt;/count&gt;
-<a id="__codelineno-12-16" name="__codelineno-12-16" href="#__codelineno-12-16"></a>  &lt;/params&gt;
-<a id="__codelineno-12-17" name="__codelineno-12-17" href="#__codelineno-12-17"></a>&lt;/tool_call&gt;
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>### web_search
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>Description: Search the web for information using Bocha AI search engine
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>Parameters:
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a>  - query: string (required) - Search query using keywords.
+<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a>  - freshness: string (optional) - Time range filter: &#39;noLimit&#39;, &#39;oneDay&#39;, ...
+<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a>    Default: noLimit
+<a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a>  - count: integer (optional) - Number of results to return (1-50)
+<a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a>    Default: 10
+<a id="__codelineno-10-9" name="__codelineno-10-9" href="#__codelineno-10-9"></a>Example:
+<a id="__codelineno-10-10" name="__codelineno-10-10" href="#__codelineno-10-10"></a>&lt;tool_call&gt;
+<a id="__codelineno-10-11" name="__codelineno-10-11" href="#__codelineno-10-11"></a>  &lt;name&gt;web_search&lt;/name&gt;
+<a id="__codelineno-10-12" name="__codelineno-10-12" href="#__codelineno-10-12"></a>  &lt;params&gt;
+<a id="__codelineno-10-13" name="__codelineno-10-13" href="#__codelineno-10-13"></a>    &lt;query&gt;&lt;![CDATA[your_query_here]]&gt;&lt;/query&gt;
+<a id="__codelineno-10-14" name="__codelineno-10-14" href="#__codelineno-10-14"></a>    &lt;freshness&gt;&lt;![CDATA[noLimit]]&gt;&lt;/freshness&gt;
+<a id="__codelineno-10-15" name="__codelineno-10-15" href="#__codelineno-10-15"></a>    &lt;count&gt;&lt;![CDATA[10]]&gt;&lt;/count&gt;
+<a id="__codelineno-10-16" name="__codelineno-10-16" href="#__codelineno-10-16"></a>  &lt;/params&gt;
+<a id="__codelineno-10-17" name="__codelineno-10-17" href="#__codelineno-10-17"></a>&lt;/tool_call&gt;
 </code></pre></div>
 <h2 id="内置工具">内置工具</h2>
 <table>

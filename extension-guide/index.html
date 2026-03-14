@@ -1680,7 +1680,7 @@
 <li>创建工具类（继承 <code>BaseTool</code>）</li>
 <li>定义参数和权限</li>
 <li>实现执行逻辑</li>
-<li>注册到 ToolRegistry</li>
+<li>注册到 <code>_load_tools()</code>（<code>dependencies.py</code>）</li>
 </ol>
 <h3 id="完整示例readfiletool">完整示例：ReadFileTool</h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="c1"># src/tools/implementations/file_ops.py</span>
@@ -1815,7 +1815,7 @@
 <a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a>    <span class="p">)</span>
 <a id="__codelineno-5-11" name="__codelineno-5-11" href="#__codelineno-5-11"></a>    <span class="k">return</span> <span class="n">CodeAgent</span><span class="p">(</span><span class="n">config</span><span class="p">)</span>
 </code></pre></div>
-<p><code>create_multi_agent_graph()</code> 会根据 <code>required_tools</code> 自动创建对应的 <code>AgentToolkit</code> 并绑定到 Agent。</p>
+<p>Agent MD 的 <code>tools</code> frontmatter 控制每个 agent 可用的工具白名单，engine 从合并后的 <code>tools</code> dict 中查找工具实例。</p>
 <h2 id="权限级别选择指南">权限级别选择指南</h2>
 <table>
 <thead>
