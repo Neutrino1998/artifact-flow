@@ -315,6 +315,11 @@ class ExecutionController:
                 logger.info(f"Persisted {len(db_events)} events for message {message_id}")
                 return
             except Exception as e:
+                # rollback 使 session 恢复可用状态，否则后续重试会触发 PendingRollbackError
+                try:
+                    await self.message_event_repo.session.rollback()
+                except Exception:
+                    pass
                 if attempt < max_retries - 1:
                     wait = 2 ** attempt  # 1s, 2s
                     logger.warning(f"Event persistence attempt {attempt + 1} failed, retrying in {wait}s: {e}")
