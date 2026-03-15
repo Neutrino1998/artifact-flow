@@ -143,7 +143,7 @@ def load_custom_tools(tools_dir: Optional[str] = None) -> List[BaseTool]:
 
     tools = []
     for filename in sorted(os.listdir(tools_dir)):
-        if not filename.endswith(".md"):
+        if not filename.endswith(".md") or filename.startswith("_"):
             continue
 
         md_path = os.path.join(tools_dir, filename)

@@ -313,45 +313,15 @@ BOCHA_API_KEY=sk-xxx
 # JINA_API_KEY=jina_xxx
 ```
 
-## 支持的模型
+## 自定义配置
 
-基于 [LiteLLM](https://github.com/BerriAI/litellm) 统一接口，支持 100+ 模型提供商。
+所有运行时配置集中在 `config/` 目录，文件本身包含注释和示例：
 
-### 预定义模型
-
-| 模型名称 | 提供商 | 说明 |
-|---------|--------|------|
-| `gpt-4o` | OpenAI | GPT-4o |
-| `gpt-4o-mini` | OpenAI | GPT-4o Mini |
-| `qwen3.5-plus` | 通义千问 | Qwen3.5 Plus 思考模式（Lead 默认） ⭐ |
-| `qwen3.5-plus-no-thinking` | 通义千问 | Qwen3.5 Plus 非思考模式 |
-| `qwen3.5-flash` | 通义千问 | Qwen3.5 Flash 思考模式 |
-| `qwen3.5-flash-no-thinking` | 通义千问 | Qwen3.5 Flash 非思考模式（Search/Crawl 默认） |
-| `qwen3.5-35b-a3b` | 通义千问 | Qwen3.5 35B 开源 思考模式 |
-| `qwen3.5-35b-a3b-no-thinking` | 通义千问 | Qwen3.5 35B 开源 非思考模式 |
-| `deepseek-chat` | DeepSeek | 对话模型 |
-| `deepseek-reasoner` | DeepSeek | 推理模型 ⭐ |
-
-默认 Agent 模型映射：`lead_agent` 使用 `qwen3.5-plus`，`search_agent`/`crawl_agent` 使用 `qwen3.5-flash-no-thinking`。
-
-### 自定义模型
-
-模型配置在 `src/models/models.yaml`。支持 Ollama、vLLM 等自部署服务，在 YAML 中添加即可：
-
-```yaml
-models:
-  # Ollama 本地模型
-  local-llama:
-    model: ollama/llama3
-    base_url: http://localhost:11434/v1
-    api_key: ollama
-
-  # vLLM 部署
-  my-qwen:
-    model: openai/Qwen2-7B-Instruct
-    base_url: http://localhost:8000/v1
-    api_key: token-abc123
-```
+| 配置 | 文件 | 说明 |
+|------|------|------|
+| **模型** | `config/models/models.yaml` | 基于 [LiteLLM](https://github.com/BerriAI/litellm) 支持 100+ 提供商，含 Ollama/vLLM 自部署示例 |
+| **Agent** | `config/agents/*.md` | YAML frontmatter（模型、工具权限）+ 角色提示词 |
+| **自定义工具** | `config/tools/*.md` | YAML frontmatter（HTTP 端点、参数）+ 使用说明，参考 `_example.md` |
 
 ## 数据持久化
 
@@ -404,46 +374,47 @@ artifact-flow/
 │   ├── config.py                # CLI 配置和状态管理
 │   └── ui.py                    # Rich 终端 UI 组件
 ├── src/
-│   ├── core/ ✅        # 核心工作流和状态管理 (已完成)
+│   ├── core/        # 核心工作流和状态管理 (已完成)
 │   │   ├── state.py              # 状态管理和定义
 │   │   ├── engine.py             # Pi-style 执行引擎
 │   │   ├── controller.py         # 执行控制器 (支持流式和批量模式)
 │   │   ├── events.py             # 统一事件类型和ExecutionMetrics定义
 │   │   ├── context_manager.py    # Context压缩和管理
 │   │   └── conversation_manager.py  # 对话管理器（缓存+持久化）
-│   ├── agents/ ✅      # 智能体定义 (已完成)
-│   │   ├── loader.py             # Agent 加载器（解析 YAML frontmatter + role prompt）
-│   │   ├── lead_agent.md         # 主控智能体（模型、工具权限、角色提示词）
-│   │   ├── search_agent.md       # 搜索智能体
-│   │   └── crawl_agent.md        # 网页抓取智能体
-│   ├── tools/ ✅       # 工具系统和实现 (已完成)
+│   ├── agents/      # 智能体系统 (已完成)
+│   │   └── loader.py             # Agent 加载器（解析 YAML frontmatter + role prompt）
+│   ├── tools/       # 工具系统和实现 (已完成)
 │   │   ├── base.py               # 工具基类和权限定义
 │   │   ├── xml_parser.py         # XML工具调用解析（CDATA格式）
 │   │   ├── xml_formatter.py      # XML格式化（工具说明+结果序列化）
-│   │   └── implementations/      # 具体工具实现
-│   │       ├── artifact_ops.py   # Artifact操作工具 (ArtifactManager)
-│   │       ├── web_search.py     # 博查AI搜索
-│   │       ├── web_fetch.py      # Jina Reader API网页抓取(支持PDF，DocConverter+pymupdf降级)
-│   │       └── call_subagent.py  # Subagent调用工具
-│   ├── db/ ✅          # 数据库层 (已完成)
+│   │   ├── builtin/              # 内置工具实现
+│   │   │   ├── artifact_ops.py   # Artifact操作工具 (ArtifactManager)
+│   │   │   ├── web_search.py     # 博查AI搜索
+│   │   │   ├── web_fetch.py      # Jina Reader API网页抓取(支持PDF，DocConverter+pymupdf降级)
+│   │   │   └── call_subagent.py  # Subagent调用工具
+│   │   └── custom/               # 自定义工具系统
+│   │       ├── loader.py         # MD文件加载器（YAML frontmatter → HttpTool）
+│   │       ├── http_tool.py      # HTTP工具实现
+│   │       └── secrets.py        # 环境变量模板解析
+│   ├── db/          # 数据库层 (已完成)
 │   │   ├── database.py           # DatabaseManager：连接池、WAL模式
 │   │   ├── models.py             # SQLAlchemy ORM 模型定义
 │   │   └── migrations/           # 数据库迁移脚本
 │   │       └── versions/
 │   │           └── 001_initial_schema.py
-│   ├── repositories/ ✅ # 数据访问层 (已完成)
+│   ├── repositories/ # 数据访问层 (已完成)
 │   │   ├── base.py               # BaseRepository 抽象类
 │   │   ├── conversation_repo.py  # ConversationRepository
 │   │   ├── artifact_repo.py      # ArtifactRepository (含乐观锁)
 │   │   ├── user_repo.py          # UserRepository
 │   │   └── message_event_repo.py # MessageEventRepository (事件溯源)
-│   ├── models/ ✅      # LLM 接口封装 (已完成)
+│   ├── models/      # LLM 接口封装 (已完成)
 │   │   └── llm.py                # 基于 LiteLLM 的统一接口，支持 100+ 提供商
-│   ├── utils/ ✅       # 工具函数和帮助类 (已完成)
+│   ├── utils/       # 工具函数和帮助类 (已完成)
 │   │   ├── logger.py             # 分级日志系统
 │   │   ├── retry.py              # 指数退避重试
 │   │   └── doc_converter.py      # 文档转换（pandoc/pymupdf，支持导入导出）
-│   └── api/ ✅         # API 接口层 (已完成)
+│   └── api/         # API 接口层 (已完成)
 │       ├── main.py               # FastAPI 应用入口
 │       ├── config.py             # API 配置（CORS、SSE、分页等）
 │       ├── dependencies.py       # 依赖注入（Controller、Manager等）
@@ -473,6 +444,14 @@ artifact-flow/
 │       ├── hooks/               # 自定义 hooks
 │       ├── lib/                 # 工具函数、API client
 │       └── types/               # TypeScript 类型（含自动生成的 API 类型）
+├── config/             # 配置文件（运行时只读）
+│   ├── agents/                    # Agent 定义（MD: YAML frontmatter + role prompt）
+│   │   ├── lead_agent.md          # 主控智能体（模型、工具权限、角色提示词）
+│   │   ├── search_agent.md        # 搜索智能体
+│   │   └── crawl_agent.md         # 网页抓取智能体
+│   ├── models/
+│   │   └── models.yaml            # LLM 模型注册表
+│   └── tools/                     # 自定义工具 MD 定义（可选，目录为空则无自定义工具）
 ├── scripts/            # 工具脚本
 │   ├── export_openapi.py        # 导出 OpenAPI schema 供前端类型生成
 │   └── create_admin.py          # 创建管理员账号
@@ -577,67 +556,6 @@ python -m tests.manual.litellm_providers qwen3.5-plus       # 测试指定模型
 3. **Artifact 工具调用** - 演示 create_artifact 触发
 4. **权限确认流** - 演示工具权限中断/恢复流程
 5. **分支对话** - 演示从历史消息创建分支
-
-## 开发路线图
-
-- ✅ **基础设施** (v0.1.0) - **已完成**
-  - [x] 项目结构和配置
-  - [x] 核心工具模块（日志、重试、XML解析）
-  - [x] 多模型LLM接口统一封装
-
-- ✅ **工具系统** (v0.1.5) - **已完成**
-  - [x] 工具框架和权限控制
-  - [x] Artifact操作工具
-  - [x] Web搜索和抓取工具（支持PDF）
-  - [x] XML提示词生成系统
-
-- ✅ **智能体系统** (v0.2.0) - **已完成**
-  - [x] BaseAgent抽象类和统一执行框架
-  - [x] Lead Agent 实现 - 任务协调和信息整合
-  - [x] Search Agent 实现 - 信息检索专家
-  - [x] Crawl Agent 实现 - 网页内容抓取专家
-
-- ✅ **工作流编排** (v0.3.0) - **已完成**
-  - [x] Agent状态管理 (state.py)
-  - [x] 执行引擎 (engine.py)
-  - [x] 执行控制器 (controller.py)
-  - [x] Context压缩和管理 (context_manager.py)
-  - [x] 多轮对话支持
-  - [x] 分支对话功能
-  - [x] 权限确认流程
-
-- ✅ **数据持久化** (v0.3.5) - **已完成**
-  - [x] SQLite + WAL 模式持久化存储
-  - [x] SQLAlchemy ORM 数据模型
-  - [x] Repository 模式数据访问层
-  - [x] 乐观锁并发控制
-  - [x] 事件流持久化 (MessageEvent)
-  - [x] 依赖注入设计
-
-- ✅ **高级特性** (v0.4.0) - **已完成**
-  - [x] 流式执行支持（实时响应、思考内容、工具调用状态）
-  - [x] 流式权限确认（支持多次中断处理）
-  - [x] 可观测性指标系统（ExecutionMetrics：Token使用、工具调用、执行耗时）
-  - [ ] 错误处理和自动恢复
-  - [ ] 性能优化
-
-- ✅ **API接口** (v0.5.0) - **已完成**
-  - [x] FastAPI REST 接口（对话管理、Artifact管理）
-  - [x] SSE 流式传输（实时推送执行过程）
-  - [x] 依赖注入设计（请求级别 session 隔离）
-  - [x] StreamManager 事件缓冲队列（TTL 机制）
-  - [x] OpenAPI 自动文档（访问 /docs）
-  - [x] CLI 命令行工具（Typer + Rich）
-  - [x] 前端界面（Next.js 15 + React 19 + Zustand + Tailwind CSS）
-
-- 🎉 **生产就绪** (v1.0.0) - **目标**
-  - [ ] 完整的错误处理
-  - [ ] 生产级性能优化
-  - [ ] PostgreSQL 迁移支持
-  - [x] 安全增强（JWT 认证 + 多用户数据隔离）
-  - [ ] 完整文档和示例
-  - [x] Docker部署支持
-
 
 ## 文档
 
