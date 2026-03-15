@@ -740,7 +740,10 @@ class CreateArtifactTool(BaseTool):
 
         if success:
             logger.info(message)
-            return ToolResult(success=True, data=message)
+            return ToolResult(
+                success=True,
+                data=f'<artifact version="1"><id>{params["id"]}</id> {message}</artifact>',
+            )
         return ToolResult(success=False, error=message)
 
 
@@ -806,21 +809,22 @@ class UpdateArtifactTool(BaseTool):
             memory = await self._manager.get_artifact(session_id, params["id"])
             version = memory.current_version if memory else None
 
-            attrs = f'id="{params["id"]}" version="{version}"'
-
             if match_info and match_info.get("match_type") == "fuzzy":
                 similarity = f"{match_info['similarity']:.1%}"
                 expected = _truncate_middle(match_info["expected_text"], 200)
                 matched = _truncate_middle(match_info["matched_text"], 200)
-                attrs += f' fuzzy="{similarity}"'
                 xml = (
-                    f"<artifact {attrs}>"
+                    f'<artifact version="{version}" fuzzy="{similarity}">'
+                    f"\n  <id>{params['id']}</id>"
                     f"\n  {message}"
-                    f"\n  <fuzzy_detail expected=\"{expected}\" matched=\"{matched}\"/>"
+                    f"\n  <fuzzy_detail>"
+                    f"\n    <expected>{expected}</expected>"
+                    f"\n    <matched>{matched}</matched>"
+                    f"\n  </fuzzy_detail>"
                     f"\n</artifact>"
                 )
             else:
-                xml = f'<artifact {attrs}>{message}</artifact>'
+                xml = f'<artifact version="{version}"><id>{params["id"]}</id> {message}</artifact>'
 
             return ToolResult(success=True, data=xml, metadata=match_info)
 
@@ -895,7 +899,7 @@ class RewriteArtifactTool(BaseTool):
             version = memory.current_version if memory else None
             return ToolResult(
                 success=True,
-                data=f'<artifact id="{params["id"]}" version="{version}">{message}</artifact>',
+                data=f'<artifact version="{version}"><id>{params["id"]}</id> {message}</artifact>',
             )
 
         return ToolResult(success=False, error=message)
@@ -958,11 +962,16 @@ class ReadArtifactTool(BaseTool):
         content_type = result.get("content_type", "")
         title = result.get("title", "")
         version_num = result.get("version", "")
+        source = result.get("source", "agent")
+        updated_at = result.get("updated_at", "")
         content = result.get("content", "")
 
+        # 受控值 → attribute; 用户文本 → 子元素（与 inventory 格式一致）
         xml = (
-            f'<artifact id="{artifact_id}" version="{version_num}"'
-            f' type="{content_type}" title="{title}">\n'
+            f'<artifact version="{version_num}" type="{content_type}"'
+            f' source="{source}" updated="{updated_at}">\n'
+            f'<id>{artifact_id}</id>\n'
+            f'<title>{title}</title>\n'
             f'{content}\n'
             f'</artifact>'
         )

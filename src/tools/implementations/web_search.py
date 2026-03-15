@@ -207,7 +207,7 @@ class WebSearchTool(BaseTool):
                 )
     
     def _format_results_to_xml(self, data: Dict[str, Any]) -> str:
-        """将搜索结果格式化为 XML（元数据用 attribute，重内容用子元素）"""
+        """将搜索结果格式化为 XML（受控值用 attribute，外部文本用子元素）"""
         web_pages = data.get("webPages", {})
         results = web_pages.get("value", [])
 
@@ -217,10 +217,6 @@ class WebSearchTool(BaseTool):
         xml_parts = ["<search_results>"]
 
         for result in results:
-            title = result.get("name", "")
-            url = result.get("url", "")
-            site_name = result.get("siteName", "")
-
             # 处理日期（修正时区问题）
             date = result.get("datePublished", "")
             if not date:
@@ -228,19 +224,15 @@ class WebSearchTool(BaseTool):
                 if date and date.endswith("Z"):
                     date = date[:-1] + "+08:00"
 
-            # 元数据 → attributes
-            attrs = f'url="{url}" title="{title}" site="{site_name}"'
+            xml_parts.append("  <result>")
+            xml_parts.append(f"    <url>{result.get('url', '')}</url>")
+            xml_parts.append(f"    <title>{result.get('name', '')}</title>")
+            xml_parts.append(f"    <site>{result.get('siteName', '')}</site>")
             if date:
-                attrs += f' date="{date}"'
-
-            snippet = result.get("snippet", "")
-            summary = result.get("summary", "")
-
-            # 重内容 → 子元素
-            xml_parts.append(f"  <result {attrs}>")
-            xml_parts.append(f"    <snippet>{snippet}</snippet>")
-            if summary:
-                xml_parts.append(f"    <summary>{summary}</summary>")
+                xml_parts.append(f"    <date>{date}</date>")
+            xml_parts.append(f"    <snippet>{result.get('snippet', '')}</snippet>")
+            if result.get("summary"):
+                xml_parts.append(f"    <summary>{result['summary']}</summary>")
             xml_parts.append("  </result>")
 
         xml_parts.append("</search_results>")

@@ -150,10 +150,11 @@ class ContextManager:
         for artifact in artifacts_inventory:
             source = artifact.get("source", "agent")
             lines.append(
-                f'<artifact id="{artifact["id"]}" type="{artifact["content_type"]}" '
-                f'title="{artifact["title"]}" version="{artifact["version"]}" '
+                f'<artifact version="{artifact["version"]}" type="{artifact["content_type"]}" '
                 f'source="{source}" updated="{artifact["updated_at"]}">'
             )
+            lines.append(f'<id>{artifact["id"]}</id>')
+            lines.append(f'<title>{artifact["title"]}</title>')
             lines.append(artifact.get("content", ""))
             lines.append('</artifact>')
         lines.append(

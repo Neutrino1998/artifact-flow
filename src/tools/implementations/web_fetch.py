@@ -427,27 +427,29 @@ class WebFetchTool(BaseTool):
             }
 
     def _format_results_to_xml(self, results: List[Dict[str, Any]]) -> str:
-        """将抓取结果格式化为 XML（元数据用 attribute，重内容用子元素）"""
+        """将抓取结果格式化为 XML（受控值用 attribute，外部文本用子元素）"""
         xml_parts = ["<fetch_results>"]
 
         for result in results:
             if result.get("success"):
-                url = result["url"]
-                title = result.get("title", "Untitled")
+                # type/words/pages 是受控值 → attribute
                 source_type = result.get("source_type", "unknown")
                 words = result["word_count"]
-
-                attrs = f'url="{url}" title="{title}" type="{source_type}" words="{words}"'
+                attrs = f'type="{source_type}" words="{words}"'
                 if result.get("page_count"):
                     attrs += f' pages="{result["page_count"]}"'
 
+                # url/title/content 是外部文本 → 子元素
                 xml_parts.append(f"  <page {attrs}>")
+                xml_parts.append(f"    <url>{result['url']}</url>")
+                xml_parts.append(f"    <title>{result.get('title', 'Untitled')}</title>")
                 xml_parts.append(result["content"])
                 xml_parts.append("  </page>")
             else:
-                url = result["url"]
-                error = result.get("error", "Unknown error")
-                xml_parts.append(f'  <error url="{url}">{error}</error>')
+                xml_parts.append("  <error>")
+                xml_parts.append(f"    <url>{result['url']}</url>")
+                xml_parts.append(f"    {result.get('error', 'Unknown error')}")
+                xml_parts.append("  </error>")
 
         xml_parts.append("</fetch_results>")
 
