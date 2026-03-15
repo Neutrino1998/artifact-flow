@@ -405,3 +405,52 @@ class TestValidateParams:
         tool = self.EnumTool(name="t", description="t")
         # name 没有 enum，任意值都 OK
         assert tool.validate_params({"color": "blue", "name": "anything"}) is None
+
+    def test_invalid_boolean_rejected(self):
+        """非法 boolean 值应被 validate_params 拒绝"""
+
+        class BoolTool(BaseTool):
+            def get_parameters(self):
+                return [ToolParameter(name="flag", type="boolean", description="")]
+            async def execute(self, **params):
+                return ToolResult(success=True, data="ok")
+
+        tool = BoolTool(name="t", description="t")
+        # coerce 保留原值 → validate 应报错
+        coerced = tool._coerce_params({"flag": "maybe"})
+        error = tool.validate_params(coerced)
+        assert error is not None
+        assert "boolean" in error
+
+    def test_invalid_integer_rejected(self):
+        """非法 integer 值应被 validate_params 拒绝"""
+
+        class IntTool(BaseTool):
+            def get_parameters(self):
+                return [ToolParameter(name="count", type="integer", description="")]
+            async def execute(self, **params):
+                return ToolResult(success=True, data="ok")
+
+        tool = IntTool(name="t", description="t")
+        coerced = tool._coerce_params({"count": "abc"})
+        error = tool.validate_params(coerced)
+        assert error is not None
+        assert "integer" in error
+
+    def test_valid_types_pass(self):
+        """正确转换后的类型应通过校验"""
+
+        class TypedTool(BaseTool):
+            def get_parameters(self):
+                return [
+                    ToolParameter(name="n", type="integer", description=""),
+                    ToolParameter(name="f", type="boolean", description=""),
+                ]
+            async def execute(self, **params):
+                return ToolResult(success=True, data="ok")
+
+        tool = TypedTool(name="t", description="t")
+        coerced = tool._coerce_params({"n": "42", "f": "true"})
+        assert tool.validate_params(coerced) is None
+        assert coerced["n"] == 42
+        assert coerced["f"] is True

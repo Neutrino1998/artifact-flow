@@ -118,11 +118,23 @@ def _load_tools() -> Dict[str, BaseTool]:
 
     # 自定义工具（从 config/tools/*.md 加载）
     custom_tools = load_custom_tools()
-    tools.extend(custom_tools)
     if custom_tools:
         logger.info(f"Loaded {len(custom_tools)} custom tool(s): {[t.name for t in custom_tools]}")
 
-    return {t.name: t for t in tools}
+    # 构建 name → tool 映射，检测重名冲突
+    tool_map: Dict[str, BaseTool] = {}
+    for tool in tools:
+        tool_map[tool.name] = tool
+
+    for tool in custom_tools:
+        if tool.name in tool_map:
+            raise ValueError(
+                f"Custom tool '{tool.name}' conflicts with existing tool. "
+                f"Rename it in config/tools/ to avoid shadowing builtin tools."
+            )
+        tool_map[tool.name] = tool
+
+    return tool_map
 
 
 async def close_globals() -> None:

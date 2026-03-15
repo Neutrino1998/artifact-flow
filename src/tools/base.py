@@ -128,6 +128,19 @@ class BaseTool(ABC):
                 if value not in param_def.enum:
                     return f"Invalid value for '{name}': '{value}'. Must be one of: {param_def.enum}"
 
+        # 检查类型（coerce 后仍为 str 说明转换失败）
+        for name, value in params.items():
+            param_def = param_defs.get(name)
+            if param_def is None:
+                continue
+            target = param_def.type.lower()
+            if target == "integer" and not isinstance(value, int):
+                return f"Invalid value for '{name}': '{value}' is not a valid integer"
+            if target == "number" and not isinstance(value, (int, float)):
+                return f"Invalid value for '{name}': '{value}' is not a valid number"
+            if target == "boolean" and not isinstance(value, bool):
+                return f"Invalid value for '{name}': '{value}' is not a valid boolean (use true/false/yes/no/1/0)"
+
         return None
     
     def _coerce_params(self, params: Dict[str, Any]) -> Dict[str, Any]:
