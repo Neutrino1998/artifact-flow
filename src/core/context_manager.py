@@ -68,7 +68,7 @@ class ContextManager:
         Returns:
             Context（含 messages 列表）
         """
-        from tools.prompt_generator import ToolPromptGenerator
+        from tools.xml_formatter import generate_tool_instruction
 
         # ========== System Prompt ==========
         system_parts = []
@@ -101,7 +101,7 @@ class ContextManager:
         tool_names = list(agent_config.tools.keys())
         agent_tools = [tools[name] for name in tool_names if name in tools]
         if agent_tools:
-            system_parts.append(ToolPromptGenerator.generate_tool_instruction(agent_tools))
+            system_parts.append(generate_tool_instruction(agent_tools))
 
         system_prompt = "\n\n".join(s for s in system_parts if s)
 
@@ -190,7 +190,7 @@ class ContextManager:
         - lead 看 current_task + 自己的工具交互
         - subagent 看完整多轮历史（所有 invocation 的 instruction + tool 交互）
         """
-        from tools.prompt_generator import format_result
+        from tools.xml_formatter import format_result
 
         messages = []
         agent_name = agent_config.name
@@ -245,7 +245,7 @@ class ContextManager:
         - llm_complete → assistant 消息
         - tool_complete → user 消息
         """
-        from tools.prompt_generator import format_result
+        from tools.xml_formatter import format_result
 
         interactions = []
         agent_events = [e for e in events if e.agent_name == agent_name]

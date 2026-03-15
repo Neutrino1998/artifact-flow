@@ -20,7 +20,6 @@ from core.events import (
 from core.context_manager import ContextManager
 from tools.xml_parser import parse_tool_calls
 from tools.base import ToolPermission, ToolResult
-from tools.prompt_generator import format_result
 from utils.logger import get_logger
 
 logger = get_logger("ArtifactFlow")

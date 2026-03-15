@@ -17,7 +17,7 @@ import random
 
 from bs4 import BeautifulSoup
 
-from tools.utils.doc_converter import DocConverter
+from utils.doc_converter import DocConverter
 
 logger = get_logger("ArtifactFlow")
 

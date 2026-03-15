@@ -13,7 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from api.config import config, validate_config
 from api.dependencies import init_globals, close_globals
 from api.routers import auth, chat, artifacts, stream
-from tools.utils.doc_converter import DocConverter
+from utils.doc_converter import DocConverter
 from utils.logger import get_logger
 
 logger = get_logger("ArtifactFlow")

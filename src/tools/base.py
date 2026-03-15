@@ -47,15 +47,6 @@ class ToolParameter:
     required: bool = True
     default: Any = None
     
-    def to_dict(self) -> Dict[str, Any]:
-        """转换为字典（用于生成提示）"""
-        return {
-            "name": self.name,
-            "type": self.type,
-            "description": self.description,
-            "required": self.required,
-            "default": self.default
-        }
 
 
 class BaseTool(ABC):

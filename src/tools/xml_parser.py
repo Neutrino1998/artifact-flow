@@ -417,10 +417,6 @@ def parse_tool_calls(text: str) -> List[ToolCall]:
     return XMLToolCallParser.parse_tool_calls(text)
 
 
-# 向后兼容别名
-SimpleXMLParser = XMLToolCallParser
-
-
 if __name__ == "__main__":
     # 测试用例
     test_cases = [

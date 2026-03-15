@@ -1,6 +1,6 @@
 """
 工具系统模块
-提供工具基类、注册、XML解析和提示词生成功能
+提供工具基类、XML解析/格式化和具体工具实现
 """
 
 # 基础类和枚举
@@ -18,9 +18,9 @@ from .xml_parser import (
     parse_tool_calls,
 )
 
-# 提示词生成
-from .prompt_generator import (
-    ToolPromptGenerator,
+# XML格式化（工具说明 + 结果序列化）
+from .xml_formatter import (
+    generate_tool_instruction,
     format_result,
 )
 
@@ -39,8 +39,8 @@ __all__ = [
     "XMLToolCallParser",
     "parse_tool_calls",
 
-    # 提示词生成
-    "ToolPromptGenerator",
+    # XML格式化
+    "generate_tool_instruction",
     "format_result",
 
     # 具体工具（从implementations导入）

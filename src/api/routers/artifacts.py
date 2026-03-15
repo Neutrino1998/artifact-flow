@@ -27,7 +27,7 @@ from api.schemas.artifact import (
     UploadResponse,
 )
 from tools.implementations.artifact_ops import ArtifactManager
-from tools.utils.doc_converter import DocConverter
+from utils.doc_converter import DocConverter
 from utils.logger import get_logger
 
 logger = get_logger("ArtifactFlow")

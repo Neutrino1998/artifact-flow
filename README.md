@@ -419,9 +419,7 @@ artifact-flow/
 │   ├── tools/ ✅       # 工具系统和实现 (已完成)
 │   │   ├── base.py               # 工具基类和权限定义
 │   │   ├── xml_parser.py         # XML工具调用解析（CDATA格式）
-│   │   ├── prompt_generator.py   # XML提示词生成
-│   │   ├── utils/                # 工具辅助模块
-│   │   │   └── doc_converter.py  # 文档转换（pandoc/pymupdf，支持导入导出）
+│   │   ├── xml_formatter.py      # XML格式化（工具说明+结果序列化）
 │   │   └── implementations/      # 具体工具实现
 │   │       ├── artifact_ops.py   # Artifact操作工具 (ArtifactManager)
 │   │       ├── web_search.py     # 博查AI搜索
@@ -443,7 +441,8 @@ artifact-flow/
 │   │   └── llm.py                # 基于 LiteLLM 的统一接口，支持 100+ 提供商
 │   ├── utils/ ✅       # 工具函数和帮助类 (已完成)
 │   │   ├── logger.py             # 分级日志系统
-│   │   └── retry.py              # 指数退避重试
+│   │   ├── retry.py              # 指数退避重试
+│   │   └── doc_converter.py      # 文档转换（pandoc/pymupdf，支持导入导出）
 │   └── api/ ✅         # API 接口层 (已完成)
 │       ├── main.py               # FastAPI 应用入口
 │       ├── config.py             # API 配置（CORS、SSE、分页等）
