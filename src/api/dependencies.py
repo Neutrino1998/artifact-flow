@@ -122,15 +122,18 @@ def _load_tools() -> Dict[str, BaseTool]:
         logger.info(f"Loaded {len(custom_tools)} custom tool(s): {[t.name for t in custom_tools]}")
 
     # 构建 name → tool 映射，检测重名冲突
+    # Artifact 工具是请求级别创建的，但名字固定，需要在启动时排除
+    _RESERVED_TOOL_NAMES = {"create_artifact", "update_artifact", "rewrite_artifact", "read_artifact"}
+
     tool_map: Dict[str, BaseTool] = {}
     for tool in tools:
         tool_map[tool.name] = tool
 
     for tool in custom_tools:
-        if tool.name in tool_map:
+        if tool.name in tool_map or tool.name in _RESERVED_TOOL_NAMES:
             raise ValueError(
-                f"Custom tool '{tool.name}' conflicts with existing tool. "
-                f"Rename it in config/tools/ to avoid shadowing builtin tools."
+                f"Custom tool '{tool.name}' conflicts with a builtin tool. "
+                f"Rename it in config/tools/ to avoid shadowing."
             )
         tool_map[tool.name] = tool
 
