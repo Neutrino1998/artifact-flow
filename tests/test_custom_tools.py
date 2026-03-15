@@ -359,7 +359,49 @@ class TestCoerceParams:
         # 转换失败，保持原值
         assert result["count"] == "not_a_number"
 
+    def test_invalid_boolean_stays_string(self):
+        tool = self.DummyTool(name="t", description="t")
+        # 非法布尔值不应被静默转为 False，应保持原值
+        for val in ["maybe", "tru", "on", "enable"]:
+            result = tool._coerce_params({"flag": val})
+            assert result["flag"] == val, f"'{val}' should stay as string, got {result['flag']}"
+
     def test_unknown_param_passthrough(self):
         tool = self.DummyTool(name="t", description="t")
         result = tool._coerce_params({"unknown_field": "123"})
         assert result["unknown_field"] == "123"
+
+
+# ============================================================
+# validate_params enum 校验
+# ============================================================
+
+class TestValidateParams:
+    """测试 validate_params 的 enum 校验"""
+
+    class EnumTool(BaseTool):
+        def get_parameters(self):
+            return [
+                ToolParameter(name="color", type="string", description="",
+                              enum=["red", "green", "blue"]),
+                ToolParameter(name="name", type="string", description=""),
+            ]
+
+        async def execute(self, **params):
+            return ToolResult(success=True, data="ok")
+
+    def test_valid_enum_value(self):
+        tool = self.EnumTool(name="t", description="t")
+        assert tool.validate_params({"color": "red", "name": "test"}) is None
+
+    def test_invalid_enum_value(self):
+        tool = self.EnumTool(name="t", description="t")
+        error = tool.validate_params({"color": "yellow", "name": "test"})
+        assert error is not None
+        assert "yellow" in error
+        assert "red" in error
+
+    def test_non_enum_param_not_checked(self):
+        tool = self.EnumTool(name="t", description="t")
+        # name 没有 enum，任意值都 OK
+        assert tool.validate_params({"color": "blue", "name": "anything"}) is None

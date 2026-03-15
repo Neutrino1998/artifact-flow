@@ -104,15 +104,23 @@ def _load_tools() -> Dict[str, BaseTool]:
     from tools.builtin.call_subagent import CallSubagentTool
     from tools.builtin.web_search import WebSearchTool
     from tools.builtin.web_fetch import WebFetchTool
+    from tools.custom.loader import load_custom_tools
 
     # 从已加载的 agents 推导有效 subagent 列表
     valid_agents = [n for n in _agents.keys() if n != "lead_agent"] if _agents else None
 
+    # 内置工具
     tools = [
         CallSubagentTool(valid_agents=valid_agents),
         WebSearchTool(),
         WebFetchTool(),
     ]
+
+    # 自定义工具（从 config/tools/*.md 加载）
+    custom_tools = load_custom_tools()
+    tools.extend(custom_tools)
+    if custom_tools:
+        logger.info(f"Loaded {len(custom_tools)} custom tool(s): {[t.name for t in custom_tools]}")
 
     return {t.name: t for t in tools}
 

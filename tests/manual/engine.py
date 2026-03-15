@@ -244,8 +244,14 @@ class TestEnvironment:
         self._agents = load_all_agents()
         print(f"Loaded agents: {list(self._agents.keys())}")
 
-        # 3. 全局工具
-        self._tools = {t.name: t for t in [CallSubagentTool(), WebSearchTool(), WebFetchTool()]}
+        # 3. 全局工具（builtin + custom）
+        from tools.custom.loader import load_custom_tools
+        valid_agents = [n for n in self._agents if n != "lead_agent"]
+        builtin = [CallSubagentTool(valid_agents=valid_agents), WebSearchTool(), WebFetchTool()]
+        custom = load_custom_tools()
+        self._tools = {t.name: t for t in builtin + custom}
+        if custom:
+            print(f"Loaded {len(custom)} custom tool(s): {[t.name for t in custom]}")
 
         # 4. TaskManager
         self.task_manager = TaskManager(max_concurrent=5)

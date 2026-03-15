@@ -120,7 +120,14 @@ class BaseTool(ABC):
         unknown = [name for name in params if name not in param_defs]
         if unknown:
             return f"Unknown parameter(s): {', '.join(unknown)}. Valid: {list(param_defs.keys())}"
-        
+
+        # 检查 enum 约束
+        for name, value in params.items():
+            param_def = param_defs.get(name)
+            if param_def and param_def.enum and isinstance(value, str):
+                if value not in param_def.enum:
+                    return f"Invalid value for '{name}': '{value}'. Must be one of: {param_def.enum}"
+
         return None
     
     def _coerce_params(self, params: Dict[str, Any]) -> Dict[str, Any]:
@@ -148,11 +155,17 @@ class BaseTool(ABC):
                 if target_type == "integer":
                     result[name] = int(value)
                 elif target_type == "boolean":
-                    result[name] = value.lower() in ("true", "1", "yes")
+                    lower = value.lower()
+                    if lower in ("true", "1", "yes"):
+                        result[name] = True
+                    elif lower in ("false", "0", "no"):
+                        result[name] = False
+                    # 其他值保持原始字符串，由 validate_params 报错
                 elif target_type == "number":
                     result[name] = float(value)
                 # "string" and "array[*]" stay as-is
             except (ValueError, TypeError) as e:
+                # 转换失败保持原值，由 validate_params 报错
                 logger.warning(f"Type coercion failed for param '{name}': {value!r} -> {target_type}: {e}")
 
         return result
