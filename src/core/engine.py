@@ -306,8 +306,8 @@ async def execute_loop(
                 if tool:
                     result = await tool(**params)
                     if result.success:
-                        target_agent = result.data["agent_name"]
-                        instruction = result.data["instruction"]
+                        target_agent = params["agent_name"]
+                        instruction = params["instruction"]
 
                         await _emit(StreamEventType.TOOL_START.value, agent_name, {
                             "tool": "call_subagent",
@@ -446,10 +446,15 @@ async def execute_loop(
                 # Subagent 完成 → 追加 call_subagent 的 tool_complete，
                 # 把 subagent 的 response 作为 result 传回给 lead
                 if previous_agent != "lead_agent" and state["current_agent"] == "lead_agent":
+                    subagent_xml = (
+                        f'<subagent_result agent="{previous_agent}">'
+                        f'\n{response_content}'
+                        f'\n</subagent_result>'
+                    )
                     await _emit(StreamEventType.TOOL_COMPLETE.value, "lead_agent", {
                         "tool": "call_subagent",
                         "success": True,
-                        "result_data": {"agent_name": previous_agent, "response": response_content},
+                        "result_data": subagent_xml,
                         "duration_ms": 0,
                     })
 

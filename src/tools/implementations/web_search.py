@@ -207,89 +207,45 @@ class WebSearchTool(BaseTool):
                 )
     
     def _format_results_to_xml(self, data: Dict[str, Any]) -> str:
-        """
-        将搜索结果格式化为XML
-        
-        Args:
-            data: 博查API返回的data字段
-            
-        Returns:
-            XML格式的搜索结果
-        """
-        # 提取网页结果
+        """将搜索结果格式化为 XML（元数据用 attribute，重内容用子元素）"""
         web_pages = data.get("webPages", {})
         results = web_pages.get("value", [])
-        
+
         if not results:
-            return "<search_results>\n  <message>No results found</message>\n</search_results>"
-        
-        # 构建XML
+            return "<search_results>No results found</search_results>"
+
         xml_parts = ["<search_results>"]
-        
+
         for result in results:
-            # 清理和转义XML特殊字符
-            title = self._escape_xml(result.get("name", ""))
-            url = self._escape_xml(result.get("url", ""))
-            snippet = self._escape_xml(result.get("snippet", ""))
-            summary = self._escape_xml(result.get("summary", ""))
-            site_name = self._escape_xml(result.get("siteName", ""))
-            
+            title = result.get("name", "")
+            url = result.get("url", "")
+            site_name = result.get("siteName", "")
+
             # 处理日期（修正时区问题）
-            date_published = result.get("datePublished", "")
-            if not date_published:
-                # 使用dateLastCrawled作为备用
-                date_published = result.get("dateLastCrawled", "")
-                if date_published and date_published.endswith("Z"):
-                    # 修正时区：将Z替换为+08:00
-                    date_published = date_published[:-1] + "+08:00"
-            
-            # 构建单个结果的XML
-            xml_parts.append("  <search_result>")
-            xml_parts.append(f"    <title>{title}</title>")
-            xml_parts.append(f"    <url>{url}</url>")
+            date = result.get("datePublished", "")
+            if not date:
+                date = result.get("dateLastCrawled", "")
+                if date and date.endswith("Z"):
+                    date = date[:-1] + "+08:00"
+
+            # 元数据 → attributes
+            attrs = f'url="{url}" title="{title}" site="{site_name}"'
+            if date:
+                attrs += f' date="{date}"'
+
+            snippet = result.get("snippet", "")
+            summary = result.get("summary", "")
+
+            # 重内容 → 子元素
+            xml_parts.append(f"  <result {attrs}>")
             xml_parts.append(f"    <snippet>{snippet}</snippet>")
-            
-            # 只有当有摘要时才添加
             if summary:
                 xml_parts.append(f"    <summary>{summary}</summary>")
-            
-            xml_parts.append(f"    <site_name>{site_name}</site_name>")
-            
-            if date_published:
-                xml_parts.append(f"    <date_published>{date_published}</date_published>")
-            
-            xml_parts.append("  </search_result>")
-        
+            xml_parts.append("  </result>")
+
         xml_parts.append("</search_results>")
-        
+
         return "\n".join(xml_parts)
-    
-    def _escape_xml(self, text: str) -> str:
-        """
-        转义XML特殊字符
-        
-        Args:
-            text: 原始文本
-            
-        Returns:
-            转义后的文本
-        """
-        if not text:
-            return ""
-        
-        # XML特殊字符转义
-        replacements = {
-            "&": "&amp;",
-            "<": "&lt;",
-            ">": "&gt;",
-            '"': "&quot;",
-            "'": "&apos;"
-        }
-        
-        for char, escaped in replacements.items():
-            text = text.replace(char, escaped)
-        
-        return text
 
 
 if __name__ == "__main__":

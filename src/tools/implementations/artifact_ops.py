@@ -740,7 +740,7 @@ class CreateArtifactTool(BaseTool):
 
         if success:
             logger.info(message)
-            return ToolResult(success=True, data={"message": message})
+            return ToolResult(success=True, data=message)
         return ToolResult(success=False, error=message)
 
 
@@ -804,20 +804,25 @@ class UpdateArtifactTool(BaseTool):
             logger.info(message)
 
             memory = await self._manager.get_artifact(session_id, params["id"])
-            result_data = {
-                "message": message,
-                "version": memory.current_version if memory else None
-            }
+            version = memory.current_version if memory else None
+
+            attrs = f'id="{params["id"]}" version="{version}"'
 
             if match_info and match_info.get("match_type") == "fuzzy":
-                result_data["fuzzy_match"] = {
-                    "similarity": f"{match_info['similarity']:.1%}",
-                    "expected": _truncate_middle(match_info["expected_text"], 200),
-                    "matched": _truncate_middle(match_info["matched_text"], 200),
-                    "note": "Used fuzzy matching because exact text was not found"
-                }
+                similarity = f"{match_info['similarity']:.1%}"
+                expected = _truncate_middle(match_info["expected_text"], 200)
+                matched = _truncate_middle(match_info["matched_text"], 200)
+                attrs += f' fuzzy="{similarity}"'
+                xml = (
+                    f"<artifact {attrs}>"
+                    f"\n  {message}"
+                    f"\n  <fuzzy_detail expected=\"{expected}\" matched=\"{matched}\"/>"
+                    f"\n</artifact>"
+                )
+            else:
+                xml = f'<artifact {attrs}>{message}</artifact>'
 
-            return ToolResult(success=True, data=result_data, metadata=match_info)
+            return ToolResult(success=True, data=xml, metadata=match_info)
 
         return ToolResult(success=False, error=message)
 
@@ -887,12 +892,10 @@ class RewriteArtifactTool(BaseTool):
         if success:
             logger.info(message)
             memory = await self._manager.get_artifact(session_id, params["id"])
+            version = memory.current_version if memory else None
             return ToolResult(
                 success=True,
-                data={
-                    "message": message,
-                    "version": memory.current_version if memory else None
-                }
+                data=f'<artifact id="{params["id"]}" version="{version}">{message}</artifact>',
             )
 
         return ToolResult(success=False, error=message)
@@ -950,7 +953,20 @@ class ReadArtifactTool(BaseTool):
                 return ToolResult(success=False, error=f"Version {version} not found")
             return ToolResult(success=False, error=f"Artifact '{params['id']}' not found")
 
-        return ToolResult(success=True, data=result)
+        # result is a dict from ArtifactManager.read_artifact
+        artifact_id = result.get("id", "")
+        content_type = result.get("content_type", "")
+        title = result.get("title", "")
+        version_num = result.get("version", "")
+        content = result.get("content", "")
+
+        xml = (
+            f'<artifact id="{artifact_id}" version="{version_num}"'
+            f' type="{content_type}" title="{title}">\n'
+            f'{content}\n'
+            f'</artifact>'
+        )
+        return ToolResult(success=True, data=xml)
 
 
 # ============================================================

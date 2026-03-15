@@ -71,11 +71,5 @@ class CallSubagentTool(BaseTool):
 
         logger.info(f"Routing to {agent_name}: {instruction[:100]}...")
 
-        return ToolResult(
-            success=True,
-            data={
-                "agent_name": agent_name,
-                "instruction": instruction
-            }
-        )
+        return ToolResult(success=True)
 

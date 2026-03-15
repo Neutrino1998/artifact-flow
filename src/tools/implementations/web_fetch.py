@@ -427,70 +427,31 @@ class WebFetchTool(BaseTool):
             }
 
     def _format_results_to_xml(self, results: List[Dict[str, Any]]) -> str:
-        """
-        将抓取结果格式化为XML
-
-        Args:
-            results: 抓取结果列表
-
-        Returns:
-            XML格式字符串
-        """
+        """将抓取结果格式化为 XML（元数据用 attribute，重内容用子元素）"""
         xml_parts = ["<fetch_results>"]
 
         for result in results:
             if result.get("success"):
-                # 成功的结果
-                xml_parts.append("  <fetch_result>")
-                xml_parts.append(f"    <url>{self._escape_xml(result['url'])}</url>")
-                xml_parts.append(f"    <title>{self._escape_xml(result.get('title', 'Untitled'))}</title>")
-                xml_parts.append(f"    <source_type>{result.get('source_type', 'unknown')}</source_type>")
+                url = result["url"]
+                title = result.get("title", "Untitled")
+                source_type = result.get("source_type", "unknown")
+                words = result["word_count"]
 
-                # PDF特有字段
-                if result.get('page_count'):
-                    xml_parts.append(f"    <page_count>{result['page_count']}</page_count>")
+                attrs = f'url="{url}" title="{title}" type="{source_type}" words="{words}"'
+                if result.get("page_count"):
+                    attrs += f' pages="{result["page_count"]}"'
 
-                xml_parts.append(f"    <content>{self._escape_xml(result['content'])}</content>")
-                xml_parts.append(f"    <word_count>{result['word_count']}</word_count>")
-                xml_parts.append(f"    <fetched_at>{result['fetched_at']}</fetched_at>")
-                xml_parts.append("  </fetch_result>")
+                xml_parts.append(f"  <page {attrs}>")
+                xml_parts.append(result["content"])
+                xml_parts.append("  </page>")
             else:
-                # 失败的结果
-                xml_parts.append("  <fetch_error>")
-                xml_parts.append(f"    <url>{self._escape_xml(result['url'])}</url>")
-                xml_parts.append(f"    <error>{self._escape_xml(result.get('error', 'Unknown error'))}</error>")
-                xml_parts.append("  </fetch_error>")
+                url = result["url"]
+                error = result.get("error", "Unknown error")
+                xml_parts.append(f'  <error url="{url}">{error}</error>')
 
         xml_parts.append("</fetch_results>")
 
         return "\n".join(xml_parts)
-
-    def _escape_xml(self, text: str) -> str:
-        """
-        转义XML特殊字符
-
-        Args:
-            text: 原始文本
-
-        Returns:
-            转义后的文本
-        """
-        if not text:
-            return ""
-
-        # XML特殊字符转义
-        replacements = {
-            "&": "&amp;",
-            "<": "&lt;",
-            ">": "&gt;",
-            '"': "&quot;",
-            "'": "&apos;"
-        }
-
-        for char, escaped in replacements.items():
-            text = text.replace(char, escaped)
-
-        return text
 
 
 if __name__ == "__main__":
