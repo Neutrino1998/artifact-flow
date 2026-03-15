@@ -845,30 +845,13 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#提示词生成器-prompt_generatorpy" class="md-nav__link">
+  <a href="#xml-格式化器-xml_formatterpy" class="md-nav__link">
     <span class="md-ellipsis">
       
-        提示词生成器 (prompt_generator.py)
+        XML 格式化器 (xml_formatter.py)
       
     </span>
   </a>
-  
-    <nav class="md-nav" aria-label="提示词生成器 (prompt_generator.py)">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#toolpromptgenerator" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        ToolPromptGenerator
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
   
 </li>
       
@@ -1268,30 +1251,13 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#提示词生成器-prompt_generatorpy" class="md-nav__link">
+  <a href="#xml-格式化器-xml_formatterpy" class="md-nav__link">
     <span class="md-ellipsis">
       
-        提示词生成器 (prompt_generator.py)
+        XML 格式化器 (xml_formatter.py)
       
     </span>
   </a>
-  
-    <nav class="md-nav" aria-label="提示词生成器 (prompt_generator.py)">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#toolpromptgenerator" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        ToolPromptGenerator
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
   
 </li>
       
@@ -1343,7 +1309,7 @@
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>src/tools/
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>├── base.py              # 工具基类和权限定义
 <a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>├── xml_parser.py        # XML 工具调用解析
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>├── prompt_generator.py  # 工具提示词生成
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>├── xml_formatter.py     # XML 格式化（工具说明 + 结果序列化）
 <a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>└── implementations/     # 具体工具实现
 <a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>    ├── call_subagent.py
 <a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>    ├── web_search.py
@@ -1543,28 +1509,20 @@
 </tr>
 </tbody>
 </table>
-<h2 id="提示词生成器-prompt_generatorpy">提示词生成器 (prompt_generator.py)</h2>
-<h3 id="toolpromptgenerator">ToolPromptGenerator</h3>
-<p>为 Agent 生成工具使用说明：</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="k">class</span><span class="w"> </span><span class="nc">ToolPromptGenerator</span><span class="p">:</span>
-<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>    <span class="nd">@staticmethod</span>
-<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">generate_tool_instruction</span><span class="p">(</span><span class="n">tools</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="n">BaseTool</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
-<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
-<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a><span class="sd">        生成完整的工具使用说明</span>
-<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a>
-<a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a><span class="sd">        Args:</span>
-<a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a><span class="sd">            tools: 工具实例列表（通常来自 toolkit.list_tools()）</span>
-<a id="__codelineno-9-9" name="__codelineno-9-9" href="#__codelineno-9-9"></a>
-<a id="__codelineno-9-10" name="__codelineno-9-10" href="#__codelineno-9-10"></a><span class="sd">        包含：</span>
-<a id="__codelineno-9-11" name="__codelineno-9-11" href="#__codelineno-9-11"></a><span class="sd">        - 可用工具列表</span>
-<a id="__codelineno-9-12" name="__codelineno-9-12" href="#__codelineno-9-12"></a><span class="sd">        - 每个工具的参数说明</span>
-<a id="__codelineno-9-13" name="__codelineno-9-13" href="#__codelineno-9-13"></a><span class="sd">        - XML 调用格式示例（使用 CDATA）</span>
-<a id="__codelineno-9-14" name="__codelineno-9-14" href="#__codelineno-9-14"></a><span class="sd">        - 注意事项</span>
-<a id="__codelineno-9-15" name="__codelineno-9-15" href="#__codelineno-9-15"></a><span class="sd">        &quot;&quot;&quot;</span>
-<a id="__codelineno-9-16" name="__codelineno-9-16" href="#__codelineno-9-16"></a>
-<a id="__codelineno-9-17" name="__codelineno-9-17" href="#__codelineno-9-17"></a>    <span class="nd">@staticmethod</span>
-<a id="__codelineno-9-18" name="__codelineno-9-18" href="#__codelineno-9-18"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">format_tool_result</span><span class="p">(</span><span class="n">name</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">result</span><span class="p">:</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
-<a id="__codelineno-9-19" name="__codelineno-9-19" href="#__codelineno-9-19"></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;格式化工具执行结果为 XML&quot;&quot;&quot;</span>
+<h2 id="xml-格式化器-xml_formatterpy">XML 格式化器 (xml_formatter.py)</h2>
+<p>与 <code>xml_parser.py</code> 互为 formatter / parser 对。提供两个模块级函数：</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="k">def</span><span class="w"> </span><span class="nf">generate_tool_instruction</span><span class="p">(</span><span class="n">tools</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="n">BaseTool</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="sd">    生成完整的工具使用说明（注入 system prompt）</span>
+<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a>
+<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a><span class="sd">    包含：</span>
+<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a><span class="sd">    - 可用工具列表</span>
+<a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a><span class="sd">    - 每个工具的参数说明</span>
+<a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a><span class="sd">    - XML 调用格式示例（使用 CDATA）</span>
+<a id="__codelineno-9-9" name="__codelineno-9-9" href="#__codelineno-9-9"></a><span class="sd">    &quot;&quot;&quot;</span>
+<a id="__codelineno-9-10" name="__codelineno-9-10" href="#__codelineno-9-10"></a>
+<a id="__codelineno-9-11" name="__codelineno-9-11" href="#__codelineno-9-11"></a><span class="k">def</span><span class="w"> </span><span class="nf">format_result</span><span class="p">(</span><span class="n">name</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">result</span><span class="p">:</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<a id="__codelineno-9-12" name="__codelineno-9-12" href="#__codelineno-9-12"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;格式化工具执行结果为 XML（注入 context 消息）&quot;&quot;&quot;</span>
 </code></pre></div>
 <p><strong>生成示例</strong>（实际输出格式）：</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>### web_search
