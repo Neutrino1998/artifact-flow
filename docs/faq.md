@@ -261,9 +261,8 @@ tail -f logs/artifactflow.log | grep "web_search"
 ```python
 # web_fetch 工具支持的参数
 result = await tool.execute(
-    url_list=["https://example.com"],      # URL 列表（必填）
-    max_content_length=20000,              # 单页最大字符数（默认 20000）
-    max_concurrent=3                       # 最大并发请求数（默认 3，范围 1-5）
+    url="https://example.com",             # URL（必填）
+    max_content_length=20000,              # 最大字符数（默认 20000）
 )
 ```
 

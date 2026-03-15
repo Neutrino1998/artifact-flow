@@ -37,7 +37,7 @@ class ToolResult:
 class ToolParameter:
     """工具参数定义"""
     name: str
-    type: str  # "string", "integer", "boolean", "array[string]"
+    type: str  # "string", "integer", "boolean", "number"
     description: str
     required: bool = True
     default: Any = None
@@ -176,7 +176,7 @@ class BaseTool(ABC):
                     # 其他值保持原始字符串，由 validate_params 报错
                 elif target_type == "number":
                     result[name] = float(value)
-                # "string" and "array[*]" stay as-is
+                # "string" stays as-is
             except (ValueError, TypeError) as e:
                 # 转换失败保持原值，由 validate_params 报错
                 logger.warning(f"Type coercion failed for param '{name}': {value!r} -> {target_type}: {e}")
@@ -242,27 +242,18 @@ class BaseTool(ABC):
         for param in params:
             param_type = param.type.lower()
 
-            # 处理数组类型 - 使用嵌套XML结构
-            if param_type.startswith("array"):
-                param_lines.append(f"    <{param.name}>")
-                param_lines.append(f"      <item><![CDATA[value1]]></item>")
-                param_lines.append(f"      <item><![CDATA[value2]]></item>")
-                param_lines.append(f"    </{param.name}>")
-
-            # 处理普通类型 - 统一使用CDATA
+            if param.default is not None:
+                value = str(param.default)
+            elif param_type == "string":
+                value = f"your_{param.name}_here"
+            elif param_type == "integer":
+                value = "123"
+            elif param_type == "boolean":
+                value = "true"
             else:
-                if param.default is not None:
-                    value = str(param.default)
-                elif param_type == "string":
-                    value = f"your_{param.name}_here"
-                elif param_type == "integer":
-                    value = "123"
-                elif param_type == "boolean":
-                    value = "true"
-                else:
-                    value = "..."
+                value = "..."
 
-                param_lines.append(f"    <{param.name}><![CDATA[{value}]]></{param.name}>")
+            param_lines.append(f"    <{param.name}><![CDATA[{value}]]></{param.name}>")
 
         return f"""<tool_call>
   <name>{self.name}</name>

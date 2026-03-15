@@ -306,7 +306,6 @@ class TestCoerceParams:
                 ToolParameter(name="count", type="integer", description=""),
                 ToolParameter(name="rate", type="number", description=""),
                 ToolParameter(name="flag", type="boolean", description=""),
-                ToolParameter(name="items", type="array[string]", description=""),
             ]
 
         async def execute(self, **params):
@@ -341,11 +340,6 @@ class TestCoerceParams:
         for val in ["false", "False", "0", "no"]:
             result = tool._coerce_params({"flag": val})
             assert result["flag"] is False
-
-    def test_array_stays_as_is(self):
-        tool = self.DummyTool(name="t", description="t")
-        result = tool._coerce_params({"items": ["a", "b"]})
-        assert result["items"] == ["a", "b"]
 
     def test_already_typed_passthrough(self):
         tool = self.DummyTool(name="t", description="t")

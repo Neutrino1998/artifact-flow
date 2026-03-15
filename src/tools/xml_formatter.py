@@ -18,7 +18,6 @@ def generate_tool_instruction(tools: List[BaseTool]) -> str:
 <format>
 You may make one or more tool calls per turn. They execute sequentially.
 Wrap ALL parameter values in <![CDATA[...]]>.
-For list parameters, wrap each <item> value in <![CDATA[...]]>.
 </format>
 """
 

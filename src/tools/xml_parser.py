@@ -138,16 +138,7 @@ class XMLToolCallParser:
         result = {}
 
         for child in elem:
-            tag = child.tag
-
-            # 检查是否有子元素（列表情况）
-            if len(child) > 0:
-                # 有子元素 → 解析为列表
-                items = [XMLToolCallParser._parse_value(item) for item in child]
-                result[tag] = items
-            else:
-                # 无子元素 → 解析值
-                result[tag] = XMLToolCallParser._parse_value(child)
+            result[child.tag] = XMLToolCallParser._parse_value(child)
 
         return result
 
@@ -164,12 +155,12 @@ class XMLToolCallParser:
         LLM 有时会把工具名写成标签，例如：
             <web_fetch>
             <params>
-                <url_list><![CDATA[...]]></url_list>
+                <url><![CDATA[...]]></url>
             </params>
         修复为：
             <name>web_fetch</name>
             <params>
-                <url_list><![CDATA[...]]></url_list>
+                <url><![CDATA[...]]></url>
             </params>
 
         也处理有闭合标签的情况：<web_fetch>...</web_fetch>
@@ -359,19 +350,7 @@ class XMLToolCallParser:
         for match in re.finditer(tag_pattern, params_content, re.DOTALL):
             tag_name = match.group(1)
             tag_content = match.group(2).strip()
-
-            # 检查是否包含子元素（列表）
-            if re.search(r'<\w+>', tag_content):
-                # 解析为列表
-                items = []
-                for item_match in re.finditer(r'<\w+>(.*?)</\w+>', tag_content, re.DOTALL):
-                    item_value = XMLToolCallParser._extract_cdata_or_text(item_match.group(1))
-                    items.append(item_value)
-                params[tag_name] = items
-            else:
-                # 普通值（保持字符串，类型转换由 BaseTool._coerce_params 处理）
-                value = XMLToolCallParser._extract_cdata_or_text(tag_content)
-                params[tag_name] = value
+            params[tag_name] = XMLToolCallParser._extract_cdata_or_text(tag_content)
 
         return params
 
@@ -403,19 +382,6 @@ if __name__ == "__main__":
     <params>
         <query><![CDATA[python async tutorial]]></query>
         <max_results><![CDATA[10]]></max_results>
-    </params>
-</tool_call>
-"""),
-
-        ("列表参数（CDATA）", """
-<tool_call>
-    <name>web_fetch</name>
-    <params>
-        <url_list>
-            <item><![CDATA[https://example.com?a=1&b=2]]></item>
-            <item><![CDATA[https://test.com]]></item>
-        </url_list>
-        <timeout><![CDATA[30]]></timeout>
     </params>
 </tool_call>
 """),
@@ -508,11 +474,8 @@ def hello():
 <tool_call>
 <web_fetch>
 <params>
-<url_list>
-<![CDATA[https://k.sina.com.cn/article_7879922977_1d5ae152101901bba2.html]]>
-</url_list>
+<url><![CDATA[https://k.sina.com.cn/article_7879922977_1d5ae152101901bba2.html]]></url>
 <max_content_length><![CDATA[20000]]></max_content_length>
-<max_concurrent><![CDATA[1]]></max_concurrent>
 </params>
 </tool_call>
 """),

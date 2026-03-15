@@ -8,7 +8,7 @@ import asyncio
 import os
 import re
 import aiohttp
-from typing import List, Dict, Any, Optional
+from typing import Dict, Any, Optional
 from datetime import datetime
 
 from tools.base import BaseTool, ToolResult, ToolParameter, ToolPermission
@@ -38,7 +38,6 @@ class WebFetchTool(BaseTool):
     - Jina Reader API：统一处理HTML和PDF，返回clean markdown
     - 429重试：命中限额时自动等待重试
     - 智能降级：Jina失败后按类型降级（PDF → pypdf，HTML → BeautifulSoup）
-    - 并发控制：Semaphore控制最大并发请求数
     """
 
     def __init__(self):
@@ -62,12 +61,12 @@ class WebFetchTool(BaseTool):
             "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36"
         ]
 
-    def get_parameters(self) -> List[ToolParameter]:
+    def get_parameters(self) -> list[ToolParameter]:
         return [
             ToolParameter(
-                name="url_list",
-                type="array[string]",
-                description="URL or list of URLs to fetch (supports HTML and PDF)",
+                name="url",
+                type="string",
+                description="URL to fetch (supports HTML and PDF)",
                 required=True
             ),
             ToolParameter(
@@ -77,13 +76,6 @@ class WebFetchTool(BaseTool):
                 required=False,
                 default=20000
             ),
-            ToolParameter(
-                name="max_concurrent",
-                type="integer",
-                description="Maximum concurrent fetch requests (default: 3, max: 5)",
-                required=False,
-                default=3
-            )
         ]
 
     async def execute(self, **params) -> ToolResult:
@@ -91,60 +83,38 @@ class WebFetchTool(BaseTool):
         执行网页抓取
 
         Args:
-            url_list: URL字符串或URL列表
-            max_content_length: 每页最大内容长度
-            max_concurrent: 最大并发请求数
+            url: 目标URL
+            max_content_length: 最大内容长度
 
         Returns:
             ToolResult: 包含XML格式的抓取结果
         """
-        # 参数处理
-        urls_param = params.get("url_list")
-        if not urls_param:
-            return ToolResult(success=False, error="url_list parameter is required")
-
-        # 确保urls是列表
-        if isinstance(urls_param, str):
-            urls = [urls_param]
-        elif isinstance(urls_param, list):
-            urls = urls_param
-        else:
-            return ToolResult(success=False, error="url_list must be string or list")
+        url = params.get("url")
+        if not url:
+            return ToolResult(success=False, error="url parameter is required")
 
         # SSRF 防护：仅允许 http/https 协议
-        for url in urls:
-            if not url.lower().startswith(("http://", "https://")):
-                return ToolResult(
-                    success=False,
-                    error=f"Unsupported URL scheme: {url}. Only http:// and https:// are allowed."
-                )
+        if not url.lower().startswith(("http://", "https://")):
+            return ToolResult(
+                success=False,
+                error=f"Unsupported URL scheme: {url}. Only http:// and https:// are allowed."
+            )
 
-        # 默认值已由 _apply_defaults 填充
         max_content_length = params["max_content_length"]
-        max_concurrent = max(1, min(params["max_concurrent"], 5))  # 限制1-5
 
-        logger.info(f"Fetching {len(urls)} URL(s) with max {max_concurrent} concurrent requests")
+        logger.info(f"Fetching URL: {url}")
 
         try:
-            # 执行抓取
-            results = await self._fetch_urls(urls, max_content_length, max_concurrent)
+            result = await self._fetch_single_url(url, max_content_length)
+            xml_result = self._format_result_to_xml(result)
+            success = result.get("success", False)
 
-            # 格式化为XML
-            xml_result = self._format_results_to_xml(results)
-
-            # 统计信息
-            success_count = sum(1 for r in results if r.get("success"))
-
-            logger.info(f"Fetch completed: {success_count}/{len(urls)} successful")
+            logger.info(f"Fetch {'succeeded' if success else 'failed'}: {url}")
 
             return ToolResult(
-                success=True,
+                success=success,
                 data=xml_result,
-                metadata={
-                    "total_urls": len(urls),
-                    "success_count": success_count,
-                    "failed_count": len(urls) - success_count
-                }
+                error=result.get("error") if not success else None,
             )
 
         except Exception as e:
@@ -165,32 +135,6 @@ class WebFetchTool(BaseTool):
         if url_lower.endswith('.pdf'):
             return 'pdf'
         return 'html'
-
-    async def _fetch_urls(
-        self,
-        urls: List[str],
-        max_content_length: int,
-        max_concurrent: int = 3
-    ) -> List[Dict[str, Any]]:
-        """
-        抓取多个URL（统一走Jina，失败后按类型降级）
-
-        Args:
-            urls: URL列表
-            max_content_length: 最大内容长度
-            max_concurrent: 最大并发请求数
-
-        Returns:
-            抓取结果列表
-        """
-        semaphore = asyncio.Semaphore(max_concurrent)
-
-        async def _limited_fetch(url: str) -> Dict[str, Any]:
-            async with semaphore:
-                return await self._fetch_single_url(url, max_content_length)
-
-        results = await asyncio.gather(*[_limited_fetch(url) for url in urls])
-        return list(results)
 
     async def _fetch_single_url(self, url: str, max_content_length: int) -> Dict[str, Any]:
         """
@@ -426,91 +370,52 @@ class WebFetchTool(BaseTool):
                 "error": f"PDF extraction failed: {str(e)}"
             }
 
-    def _format_results_to_xml(self, results: List[Dict[str, Any]]) -> str:
-        """将抓取结果格式化为 XML（受控值用 attribute，外部文本用子元素）"""
-        xml_parts = ["<fetch_results>"]
+    def _format_result_to_xml(self, result: Dict[str, Any]) -> str:
+        """将单个抓取结果格式化为 XML"""
+        if result.get("success"):
+            source_type = result.get("source_type", "unknown")
+            words = result["word_count"]
+            attrs = f'type="{source_type}" words="{words}"'
+            if result.get("page_count"):
+                attrs += f' pages="{result["page_count"]}"'
 
-        for result in results:
-            if result.get("success"):
-                # type/words/pages 是受控值 → attribute
-                source_type = result.get("source_type", "unknown")
-                words = result["word_count"]
-                attrs = f'type="{source_type}" words="{words}"'
-                if result.get("page_count"):
-                    attrs += f' pages="{result["page_count"]}"'
-
-                # url/title/content 是外部文本 → 子元素
-                xml_parts.append(f"  <page {attrs}>")
-                xml_parts.append(f"    <url>{result['url']}</url>")
-                xml_parts.append(f"    <title>{result.get('title', 'Untitled')}</title>")
-                xml_parts.append(result["content"])
-                xml_parts.append("  </page>")
-            else:
-                xml_parts.append("  <error>")
-                xml_parts.append(f"    <url>{result['url']}</url>")
-                xml_parts.append(f"    {result.get('error', 'Unknown error')}")
-                xml_parts.append("  </error>")
-
-        xml_parts.append("</fetch_results>")
-
-        return "\n".join(xml_parts)
+            xml_parts = [f"<page {attrs}>"]
+            xml_parts.append(f"  <url>{result['url']}</url>")
+            xml_parts.append(f"  <title>{result.get('title', 'Untitled')}</title>")
+            xml_parts.append(result["content"])
+            xml_parts.append("</page>")
+            return "\n".join(xml_parts)
+        else:
+            xml_parts = ["<error>"]
+            xml_parts.append(f"  <url>{result['url']}</url>")
+            xml_parts.append(f"  {result.get('error', 'Unknown error')}")
+            xml_parts.append("</error>")
+            return "\n".join(xml_parts)
 
 
 if __name__ == "__main__":
-    # 测试代码
     async def test():
-        print("\n🧪 Web抓取工具测试（Jina Reader API）")
-        print("="*60)
+        print("\nWeb Fetch Tool Test (Jina Reader API)")
+        print("=" * 60)
 
         tool = WebFetchTool()
 
-        # 测试1: HTML页面
-        print("\n📄 测试1: HTML页面抓取")
-        test_urls = ["https://github.com/Neutrino1998/artifact-flow"]
-
-        result = await tool(url_list=test_urls)
-
+        # Test 1: HTML page
+        print("\nTest 1: HTML page")
+        result = await tool(url="https://github.com/Neutrino1998/artifact-flow")
         if result.success:
-            print(f"✅ HTML抓取成功")
-            print(f"   成功: {result.metadata['success_count']}/{result.metadata['total_urls']}")
-            print("\nXML结果（前1000字符）:")
-            print(result.data[:1000] + "...")
+            print(f"OK: {len(result.data)} chars")
+            print(result.data[:500] + "...")
         else:
-            print(f"❌ 抓取失败: {result.error}")
+            print(f"FAIL: {result.error}")
 
-        # 测试2: PDF文件
-        print("\n📑 测试2: PDF文件抓取")
-        pdf_urls = ["https://arxiv.org/pdf/1706.03762.pdf"]
-
-        result = await tool(url_list=pdf_urls, max_content_length=5000)
-
+        # Test 2: PDF file
+        print("\nTest 2: PDF file")
+        result = await tool(url="https://arxiv.org/pdf/1706.03762.pdf", max_content_length=5000)
         if result.success:
-            print(f"✅ PDF抓取成功")
-            print(f"   成功: {result.metadata['success_count']}/{result.metadata['total_urls']}")
-            print("\nXML结果（前1000字符）:")
-            print(result.data[:1000] + "...")
+            print(f"OK: {len(result.data)} chars")
+            print(result.data[:500] + "...")
         else:
-            print(f"❌ 抓取失败: {result.error}")
+            print(f"FAIL: {result.error}")
 
-        # 测试3: 混合抓取
-        print("\n🔀 测试3: 混合抓取（HTML + PDF）")
-        mixed_urls = [
-            "https://www.python.org",
-            "https://arxiv.org/pdf/1706.03762.pdf"
-        ]
-
-        result = await tool(
-            url_list=mixed_urls,
-            max_content_length=3000,
-            max_concurrent=2
-        )
-
-        if result.success:
-            print(f"✅ 混合抓取完成")
-            print(f"   成功: {result.metadata['success_count']}/{result.metadata['total_urls']}")
-            print(f"   失败: {result.metadata['failed_count']}")
-        else:
-            print(f"❌ 抓取失败: {result.error}")
-
-    # 运行测试
     asyncio.run(test())
