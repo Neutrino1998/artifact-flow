@@ -83,11 +83,19 @@ def _build_http_tool(frontmatter: dict, body: str) -> HttpTool:
     """从 frontmatter + body 构建 HttpTool"""
 
     # 解析参数定义
+    _VALID_PARAM_TYPES = {"string", "integer", "number", "boolean"}
+
     param_defs = []
     for p in frontmatter.get("parameters", []):
+        param_type = p.get("type", "string")
+        if param_type not in _VALID_PARAM_TYPES:
+            raise ValueError(
+                f"Unsupported parameter type '{param_type}' for '{p['name']}'. "
+                f"Valid types: {sorted(_VALID_PARAM_TYPES)}"
+            )
         param_defs.append(ToolParameter(
             name=p["name"],
-            type=p.get("type", "string"),
+            type=param_type,
             description=p.get("description", ""),
             required=p.get("required", True),
             default=p.get("default"),

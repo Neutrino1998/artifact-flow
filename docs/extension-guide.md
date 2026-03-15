@@ -314,7 +314,6 @@ Agent MD 的 `tools` frontmatter 控制每个 agent 可用的工具白名单，e
 | `integer` | `int` | `<param><![CDATA[42]]></param>` |
 | `number` | `float` | `<param><![CDATA[3.14]]></param>` |
 | `boolean` | `bool` | `<param><![CDATA[true]]></param>` |
-| `array` | `list` | `<param><item><![CDATA[a]]></item><item><![CDATA[b]]></item></param>` |
 
 ## 添加新 Artifact 类型
 

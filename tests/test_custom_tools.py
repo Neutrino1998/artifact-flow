@@ -214,6 +214,24 @@ type: graphql
             with pytest.raises(ValueError, match="Unsupported tool type"):
                 load_custom_tool(path)
 
+    def test_unsupported_param_type_rejected(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            md = """---
+name: array_tool
+description: "Tool with array param"
+type: http
+endpoint: "https://example.com"
+method: POST
+parameters:
+  - name: items
+    type: "array[string]"
+    description: "List of items"
+---
+"""
+            path = self._write_md(tmpdir, "array.md", md)
+            with pytest.raises(ValueError, match="Unsupported parameter type"):
+                load_custom_tool(path)
+
 
 # ============================================================
 # 批量加载

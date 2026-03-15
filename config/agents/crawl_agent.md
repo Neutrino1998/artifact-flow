@@ -8,7 +8,7 @@ description: |
 tools:
   web_fetch: confirm
 model: qwen3.5-flash-no-thinking
-max_tool_rounds: 2
+max_tool_rounds: 3
 ---
 
 <role>
