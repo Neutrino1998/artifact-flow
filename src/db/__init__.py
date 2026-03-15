@@ -6,11 +6,14 @@
 from .database import DatabaseManager
 from .models import (
     Base,
+    User,
     Conversation,
     Message,
+    MessageEvent,
     ArtifactSession,
     Artifact,
     ArtifactVersion,
+    VersionConflictError,
 )
 
 __all__ = [
@@ -18,9 +21,13 @@ __all__ = [
     "DatabaseManager",
     # ORM Models
     "Base",
+    "User",
     "Conversation",
     "Message",
+    "MessageEvent",
     "ArtifactSession",
     "Artifact",
     "ArtifactVersion",
+    # Exceptions
+    "VersionConflictError",
 ]

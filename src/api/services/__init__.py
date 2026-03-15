@@ -10,10 +10,13 @@ from .stream_manager import (
     StreamNotFoundError,
     StreamAlreadyExistsError,
 )
+from .task_manager import TaskManager, DuplicateExecutionError
 
 __all__ = [
     "StreamManager",
     "StreamContext",
     "StreamNotFoundError",
     "StreamAlreadyExistsError",
+    "TaskManager",
+    "DuplicateExecutionError",
 ]

@@ -22,6 +22,15 @@ from .artifact import (
     VersionDetailResponse,
     VersionSummary,
 )
+from .auth import (
+    LoginRequest,
+    CreateUserRequest,
+    UpdateUserRequest,
+    UserInfo,
+    LoginResponse,
+    UserResponse,
+    UserListResponse,
+)
 from .events import SSEEvent
 
 __all__ = [
@@ -41,6 +50,14 @@ __all__ = [
     "VersionListResponse",
     "VersionDetailResponse",
     "VersionSummary",
+    # Auth schemas
+    "LoginRequest",
+    "CreateUserRequest",
+    "UpdateUserRequest",
+    "UserInfo",
+    "LoginResponse",
+    "UserResponse",
+    "UserListResponse",
     # Event schemas
     "SSEEvent",
 ]

@@ -8,9 +8,13 @@
 from .base import BaseRepository
 from .conversation_repo import ConversationRepository
 from .artifact_repo import ArtifactRepository
+from .message_event_repo import MessageEventRepository
+from .user_repo import UserRepository
 
 __all__ = [
     "BaseRepository",
     "ConversationRepository",
     "ArtifactRepository",
+    "MessageEventRepository",
+    "UserRepository",
 ]
