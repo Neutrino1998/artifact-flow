@@ -4,9 +4,13 @@
 """
 
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional
 from dataclasses import dataclass, field
 from enum import Enum
+
+from utils.logger import get_logger
+
+logger = get_logger("ArtifactFlow")
 
 
 class ToolPermission(Enum):
@@ -24,47 +28,37 @@ class ToolPermission(Enum):
 class ToolResult:
     """工具执行结果"""
     success: bool
-    data: Any = None
+    data: str = ""
     error: Optional[str] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
-    
-    def to_dict(self) -> Dict[str, Any]:
-        """转换为字典格式"""
-        return {
-            "success": self.success,
-            "data": self.data,
-            "error": self.error,
-            "metadata": self.metadata
-        }
 
 
 @dataclass
 class ToolParameter:
     """工具参数定义"""
     name: str
-    type: str  # "string", "integer", "boolean", "array", "object"
+    type: str  # "string", "integer", "boolean", "array[string]"
     description: str
     required: bool = True
     default: Any = None
-    
+    enum: Optional[List[str]] = None
 
 
 class BaseTool(ABC):
     """
     所有工具的基类
-    
+
     子类需要实现:
     - execute(): 执行工具的核心逻辑
     - get_parameters(): 返回工具参数定义
     """
-    
+
     def __init__(
         self,
         name: str,
         description: str,
         permission: ToolPermission = ToolPermission.AUTO,
         show_example: bool = True,
-        **kwargs
     ):
         """
         初始化工具
@@ -74,13 +68,11 @@ class BaseTool(ABC):
             description: 工具描述
             permission: 权限级别
             show_example: 是否在工具文档中显示XML调用示例
-            **kwargs: 其他配置参数
         """
         self.name = name
         self.description = description
         self.permission = permission
         self.show_example = show_example
-        self.config = kwargs
     
     @abstractmethod
     async def execute(self, **params) -> ToolResult:
@@ -131,6 +123,40 @@ class BaseTool(ABC):
         
         return None
     
+    def _coerce_params(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        根据 ToolParameter.type 做确定性类型转换
+
+        XML parser 返回的值统一为 str，此方法将其转为目标类型。
+
+        Args:
+            params: 原始参数（值为 str）
+
+        Returns:
+            类型转换后的参数
+        """
+        param_defs = {p.name: p for p in self.get_parameters()}
+        result = dict(params)
+
+        for name, value in result.items():
+            param_def = param_defs.get(name)
+            if param_def is None or not isinstance(value, str):
+                continue
+
+            target_type = param_def.type.lower()
+            try:
+                if target_type == "integer":
+                    result[name] = int(value)
+                elif target_type == "boolean":
+                    result[name] = value.lower() in ("true", "1", "yes")
+                elif target_type == "number":
+                    result[name] = float(value)
+                # "string" and "array[*]" stay as-is
+            except (ValueError, TypeError) as e:
+                logger.warning(f"Type coercion failed for param '{name}': {value!r} -> {target_type}: {e}")
+
+        return result
+
     def _apply_defaults(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """
         应用参数默认值
@@ -157,6 +183,9 @@ class BaseTool(ABC):
         Returns:
             ToolResult: 执行结果
         """
+        # 类型转换（str → target type）
+        params = self._coerce_params(params)
+
         # 应用默认值
         params = self._apply_defaults(params)
 

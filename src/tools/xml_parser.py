@@ -152,32 +152,9 @@ class XMLToolCallParser:
         return result
 
     @staticmethod
-    def _parse_value(elem: ET.Element) -> Any:
-        """解析单个元素的值，处理类型转换"""
-        text = (elem.text or "").strip()
-        return XMLToolCallParser._convert_type(text)
-
-    @staticmethod
-    def _convert_type(text: str) -> Any:
-        """将字符串转换为合适的类型"""
-        if not text:
-            return text
-
-        # 布尔值
-        if text.lower() == 'true':
-            return True
-        if text.lower() == 'false':
-            return False
-
-        # 数字
-        try:
-            if '.' in text or 'e' in text.lower():
-                return float(text)
-            return int(text)
-        except ValueError:
-            pass
-
-        return text
+    def _parse_value(elem: ET.Element) -> str:
+        """解析单个元素的值（保持原始字符串，类型转换由 BaseTool._coerce_params 处理）"""
+        return (elem.text or "").strip()
 
     @staticmethod
     def _repair_tool_name_as_tag(content: str) -> str:
@@ -389,12 +366,12 @@ class XMLToolCallParser:
                 items = []
                 for item_match in re.finditer(r'<\w+>(.*?)</\w+>', tag_content, re.DOTALL):
                     item_value = XMLToolCallParser._extract_cdata_or_text(item_match.group(1))
-                    items.append(XMLToolCallParser._convert_type(item_value))
+                    items.append(item_value)
                 params[tag_name] = items
             else:
-                # 普通值
+                # 普通值（保持字符串，类型转换由 BaseTool._coerce_params 处理）
                 value = XMLToolCallParser._extract_cdata_or_text(tag_content)
-                params[tag_name] = XMLToolCallParser._convert_type(value)
+                params[tag_name] = value
 
         return params
 

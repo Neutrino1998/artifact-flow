@@ -85,7 +85,9 @@ def load_all_agents(agents_dir: Optional[str] = None) -> dict[str, AgentConfig]:
         {agent_name: AgentConfig} 字典
     """
     if agents_dir is None:
-        agents_dir = os.path.dirname(os.path.abspath(__file__))
+        # 默认从项目根目录 config/agents/ 加载
+        project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        agents_dir = os.path.join(project_root, "config", "agents")
 
     agents = {}
     for filename in sorted(os.listdir(agents_dir)):

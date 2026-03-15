@@ -37,7 +37,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api.config import config
 from core.conversation_manager import ConversationManager
 from tools.base import BaseTool
-from tools.implementations.artifact_ops import ArtifactManager
+from tools.builtin.artifact_ops import ArtifactManager
 from db.database import DatabaseManager
 from repositories.artifact_repo import ArtifactRepository
 from repositories.conversation_repo import ConversationRepository
@@ -101,9 +101,9 @@ async def init_globals() -> None:
 
 def _load_tools() -> Dict[str, BaseTool]:
     """启动时加载全局工具（无状态，跨请求共享）"""
-    from tools.implementations.call_subagent import CallSubagentTool
-    from tools.implementations.web_search import WebSearchTool
-    from tools.implementations.web_fetch import WebFetchTool
+    from tools.builtin.call_subagent import CallSubagentTool
+    from tools.builtin.web_search import WebSearchTool
+    from tools.builtin.web_fetch import WebFetchTool
 
     # 从已加载的 agents 推导有效 subagent 列表
     valid_agents = [n for n in _agents.keys() if n != "lead_agent"] if _agents else None

@@ -60,6 +60,8 @@ def _format_tool_doc(tool: BaseTool) -> str:
         for param in params:
             required = " (required)" if param.required else " (optional)"
             doc += f"  - {param.name}: {param.type}{required} - {param.description}\n"
+            if param.enum:
+                doc += f"    Values: {', '.join(param.enum)}\n"
             if param.default is not None:
                 doc += f"    Default: {param.default}\n"
     else:

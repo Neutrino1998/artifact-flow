@@ -55,9 +55,10 @@ class WebSearchTool(BaseTool):
             ToolParameter(
                 name="freshness",
                 type="string",
-                description="Time range filter: 'noLimit'(default), 'oneDay', 'oneWeek', 'oneMonth', 'oneYear'",
+                description="Time range filter",
                 required=False,
-                default="noLimit"
+                default="noLimit",
+                enum=["noLimit", "oneDay", "oneWeek", "oneMonth", "oneYear"]
             ),
             ToolParameter(
                 name="count",

@@ -86,7 +86,7 @@ async def _create_controller() -> AsyncGenerator:
     """
     from core.controller import ExecutionController
     from core.conversation_manager import ConversationManager as CM
-    from tools.implementations.artifact_ops import ArtifactManager, create_artifact_tools
+    from tools.builtin.artifact_ops import ArtifactManager, create_artifact_tools
     from repositories.artifact_repo import ArtifactRepository
     from repositories.conversation_repo import ConversationRepository as CR
     from repositories.message_event_repo import MessageEventRepository

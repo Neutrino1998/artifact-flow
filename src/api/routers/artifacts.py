@@ -26,7 +26,7 @@ from api.schemas.artifact import (
     VersionSummary,
     UploadResponse,
 )
-from tools.implementations.artifact_ops import ArtifactManager
+from tools.builtin.artifact_ops import ArtifactManager
 from utils.doc_converter import DocConverter
 from utils.logger import get_logger
 

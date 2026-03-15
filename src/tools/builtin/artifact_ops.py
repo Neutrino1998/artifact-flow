@@ -704,9 +704,10 @@ class CreateArtifactTool(BaseTool):
             ToolParameter(
                 name="content_type",
                 type="string",
-                description="MIME type: 'text/markdown', 'text/plain', 'text/x-python', 'text/html', 'application/json', 'text/javascript', 'text/yaml'",
+                description="MIME type of the artifact content",
                 required=False,
-                default="text/markdown"
+                default="text/markdown",
+                enum=["text/markdown", "text/plain", "text/x-python", "text/html", "application/json", "text/javascript", "text/yaml"]
             ),
             ToolParameter(
                 name="title",
@@ -757,8 +758,7 @@ class UpdateArtifactTool(BaseTool):
         super().__init__(
             name="update_artifact",
             description="Update artifact content by replacing old text with new text (supports fuzzy matching). Use for targeted changes.",
-            permission=ToolPermission.AUTO,
-            show_example=True
+            permission=ToolPermission.AUTO
         )
         self._manager = manager
 

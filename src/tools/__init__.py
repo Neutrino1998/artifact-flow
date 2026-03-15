@@ -25,7 +25,7 @@ from .xml_formatter import (
 )
 
 # 具体工具实现
-from .implementations import *
+from .builtin import *
 
 __all__ = [
     # 基础类
@@ -43,7 +43,7 @@ __all__ = [
     "generate_tool_instruction",
     "format_result",
 
-    # 具体工具（从implementations导入）
+    # 内置工具（从builtin导入）
     "WebSearchTool",
     "WebFetchTool",
     "ArtifactMemory",

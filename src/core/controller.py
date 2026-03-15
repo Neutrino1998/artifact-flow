@@ -17,7 +17,7 @@ from core.engine import execute_loop
 from core.events import StreamEventType, ExecutionEvent
 from core.conversation_manager import ConversationManager
 from tools.base import BaseTool
-from tools.implementations.artifact_ops import ArtifactManager
+from tools.builtin.artifact_ops import ArtifactManager
 from utils.logger import get_logger
 
 logger = get_logger("ArtifactFlow")

@@ -31,7 +31,8 @@ def _load_config() -> Dict[str, Any]:
     """加载并缓存 models.yaml"""
     global _config
     if _config is None:
-        config_path = Path(__file__).parent / "models.yaml"
+        # 从项目根目录 config/models/ 加载
+        config_path = Path(__file__).parent.parent.parent / "config" / "models" / "models.yaml"
         with open(config_path, "r", encoding="utf-8") as f:
             _config = yaml.safe_load(f)
     return _config
