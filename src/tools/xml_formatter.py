@@ -39,7 +39,7 @@ def format_result(name: str, result: Dict[str, Any]) -> str:
     xml = f'<tool_result name="{name}" success="{"true" if success else "false"}">'
 
     if data:
-        xml += f"\n  <data>\n    {data}\n  </data>"
+        xml += f"\n<data>\n{data}\n</data>"
 
     if error:
         xml += f"\n  <error>{error}</error>"
