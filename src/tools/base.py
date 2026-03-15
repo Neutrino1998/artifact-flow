@@ -270,3 +270,39 @@ class BaseTool(ABC):
 {chr(10).join(param_lines)}
   </params>
 </tool_call>"""
+
+
+# Artifact 工具名字固定（请求级创建），但需要在启动时排除自定义工具同名冲突
+RESERVED_TOOL_NAMES = {"create_artifact", "update_artifact", "rewrite_artifact", "read_artifact"}
+
+
+def build_tool_map(
+    builtin_tools: List[BaseTool],
+    custom_tools: List[BaseTool],
+) -> Dict[str, BaseTool]:
+    """
+    构建 name → tool 映射，检测自定义工具与内置/保留名的冲突
+
+    Args:
+        builtin_tools: 内置工具列表
+        custom_tools: 自定义工具列表
+
+    Returns:
+        合并后的工具字典
+
+    Raises:
+        ValueError: 自定义工具名与内置工具或保留名冲突
+    """
+    tool_map: Dict[str, BaseTool] = {}
+    for tool in builtin_tools:
+        tool_map[tool.name] = tool
+
+    for tool in custom_tools:
+        if tool.name in tool_map or tool.name in RESERVED_TOOL_NAMES:
+            raise ValueError(
+                f"Custom tool '{tool.name}' conflicts with a builtin tool. "
+                f"Rename it in config/tools/ to avoid shadowing."
+            )
+        tool_map[tool.name] = tool
+
+    return tool_map

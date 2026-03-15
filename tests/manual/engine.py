@@ -21,7 +21,7 @@ from core.controller import ExecutionController
 from core.events import StreamEventType
 from core.conversation_manager import ConversationManager
 from agents.loader import load_all_agents
-from tools.base import BaseTool
+from tools.base import BaseTool, build_tool_map
 from tools.builtin.artifact_ops import ArtifactManager, create_artifact_tools
 from tools.builtin.call_subagent import CallSubagentTool
 from tools.builtin.web_search import WebSearchTool
@@ -244,12 +244,12 @@ class TestEnvironment:
         self._agents = load_all_agents()
         print(f"Loaded agents: {list(self._agents.keys())}")
 
-        # 3. 全局工具（builtin + custom）
+        # 3. 全局工具（builtin + custom，共享碰撞检查）
         from tools.custom.loader import load_custom_tools
         valid_agents = [n for n in self._agents if n != "lead_agent"]
         builtin = [CallSubagentTool(valid_agents=valid_agents), WebSearchTool(), WebFetchTool()]
         custom = load_custom_tools()
-        self._tools = {t.name: t for t in builtin + custom}
+        self._tools = build_tool_map(builtin, custom)
         if custom:
             print(f"Loaded {len(custom)} custom tool(s): {[t.name for t in custom]}")
 
