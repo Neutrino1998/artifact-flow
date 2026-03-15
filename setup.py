@@ -15,11 +15,11 @@ def parse_requirements(filename: str) -> list[str]:
 setup(
     name="artifact-flow",
     version="0.3.0",
-    description="Multi-agent system built on LangGraph",
+    description="Multi-agent system with Pi-style execution engine",
     author="ArtifactFlow Team",
     packages=find_packages(where="src"),
     package_dir={"": "src"},
-    python_requires=">=3.11",
+    python_requires=">=3.10",
     install_requires=parse_requirements("requirements.txt"),
     entry_points={
         "console_scripts": [

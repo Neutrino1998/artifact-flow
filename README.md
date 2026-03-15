@@ -2,7 +2,7 @@
 
 > Artifacts 架构的多智能体系统
 
-[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![SQLite](https://img.shields.io/badge/SQLite-Persistent-blue.svg)]()
 [![Development Status](https://img.shields.io/badge/Status-Alpha%20Development-orange.svg)]()
 
@@ -137,7 +137,7 @@ GET /stream/{id} ← consume_events ← push_event ← execute_loop
 
 ### 环境要求
 
-- **Python 3.11+**
+- **Python 3.10+**
 - API Keys（OpenAI、通义千问、DeepSeek、博查AI 等）
 - 推荐系统内存 ≥ 2GB
 
@@ -207,11 +207,11 @@ docker-compose up -d --build
 2. **创建虚拟环境**
    ```bash
    # 使用 conda（推荐）
-   conda create -n artifact-flow python=3.11
+   conda create -n artifact-flow python=3.10
    conda activate artifact-flow
-   
+
    # 或使用 venv
-   python3.11 -m venv artifact-flow
+   python3 -m venv artifact-flow
    # Windows: artifact-flow\Scripts\activate
    # macOS/Linux: source artifact-flow/bin/activate
    ```

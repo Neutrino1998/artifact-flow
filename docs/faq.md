@@ -4,19 +4,15 @@
 
 ## 环境与安装
 
-### 为什么需要 Python 3.11+？
+### Python 版本要求
 
-LangGraph 的 `interrupt()` 功能依赖 Python 3.11 引入的异步特性。低版本 Python 会导致：
-
-- `interrupt()` 无法正确暂停执行
-- 权限确认流程失效
-- 状态恢复异常
+ArtifactFlow 需要 Python 3.10+，因为代码使用了 `X | Y` union 类型语法（PEP 604）等 3.10 特性。
 
 **检查版本：**
 
 ```bash
 python --version
-# 需要 Python 3.11.0 或更高
+# 需要 Python 3.10.0 或更高
 ```
 
 ---
