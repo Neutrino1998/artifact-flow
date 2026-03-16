@@ -128,12 +128,15 @@ class ContextManager:
                     compressed = cls._merge_truncation_marker(compressed, "...")
                 messages.extend(compressed)
 
-            # tool 交互：仅在超总预算时截断
+            # tool 交互：在超总预算时截断
             if current_input_messages:
                 remaining = context_max_chars - sum(len(m.get("content", "")) for m in messages)
                 tool_total = sum(len(m.get("content", "")) for m in current_input_messages)
-                if tool_total > remaining > 0:
-                    # 第一条是 user input（current_task），预留其占用
+                if tool_total <= remaining:
+                    # 预算内，全量追加
+                    messages.extend(current_input_messages)
+                elif remaining > 0:
+                    # 超预算但还有空间，第一条是 user input（current_task），预留其占用
                     first_msg = current_input_messages[0]
                     first_len = len(first_msg.get("content", ""))
                     tool_budget = max(remaining - first_len, 0)
@@ -150,10 +153,11 @@ class ContextManager:
                     else:
                         # 预算不足以容纳 tool 交互，只保留 user input（截断到 remaining）
                         if first_len > remaining:
-                            first_msg = {**first_msg, "content": first_msg["content"][:remaining] + "..."}
+                            first_msg = {**first_msg, "content": first_msg["content"][:remaining]}
                         messages.append(first_msg)
                 else:
-                    messages.extend(current_input_messages)
+                    # remaining <= 0: 预算已耗尽，只保留 user input（current_task 不可丢弃）
+                    messages.append(current_input_messages[0])
         else:
             # subagent 路径不变（无 conversation history）
             current_input_messages = cls._build_current_input(state, agent_config)
