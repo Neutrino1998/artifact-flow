@@ -105,7 +105,12 @@ class ExecutionController:
 
         resolved_parent: Optional[str] = parent_message_id if isinstance(parent_message_id, str) else None
 
-        # History
+        # Wait for any running compaction before loading history
+        compaction_waited = False
+        if self.compaction_manager:
+            compaction_waited = await self.compaction_manager.wait_if_running(conversation_id)
+
+        # History (reads summaries written by compaction if we waited above)
         if parent_message_id is not _UNSET and resolved_parent is None:
             conversation_history = []
         else:
@@ -163,15 +168,13 @@ class ExecutionController:
             }
         }
 
-        # ========== Wait for compaction ==========
-        if self.compaction_manager:
-            waited = await self.compaction_manager.wait_if_running(conversation_id)
-            if waited:
-                yield {
-                    "type": StreamEventType.COMPACTION_WAIT.value,
-                    "timestamp": datetime.now().isoformat(),
-                    "data": {"conversation_id": conversation_id, "status": "completed"},
-                }
+        # Notify frontend if we waited for compaction
+        if compaction_waited:
+            yield {
+                "type": StreamEventType.COMPACTION_WAIT.value,
+                "timestamp": datetime.now().isoformat(),
+                "data": {"conversation_id": conversation_id, "status": "completed"},
+            }
 
         # ========== 执行引擎 ==========
         event_queue: asyncio.Queue = asyncio.Queue()

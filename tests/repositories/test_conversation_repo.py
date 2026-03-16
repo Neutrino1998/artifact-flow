@@ -286,7 +286,7 @@ class TestMessageCRUD:
         # get_message returns the message
         msg = await conversation_repo.get_message(msg_id)
         assert msg is not None
-        assert msg.content == "hello"
+        assert msg.user_input == "hello"
 
         # get_message returns None for nonexistent
         assert await conversation_repo.get_message("nonexistent") is None

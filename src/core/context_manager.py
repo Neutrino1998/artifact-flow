@@ -133,15 +133,25 @@ class ContextManager:
                 remaining = context_max_chars - sum(len(m.get("content", "")) for m in messages)
                 tool_total = sum(len(m.get("content", "")) for m in current_input_messages)
                 if tool_total > remaining > 0:
-                    # 保留第一条 user input，截断 tool 交互部分
-                    compressed_tools = cls.compress_messages_with_budget(
-                        current_input_messages[1:], remaining,
-                        preserve_recent=tool_interaction_preserve
-                    )
-                    messages.append(current_input_messages[0])
-                    if len(compressed_tools) < len(current_input_messages) - 1:
-                        compressed_tools = cls._merge_truncation_marker(compressed_tools, "...")
-                    messages.extend(compressed_tools)
+                    # 第一条是 user input（current_task），预留其占用
+                    first_msg = current_input_messages[0]
+                    first_len = len(first_msg.get("content", ""))
+                    tool_budget = max(remaining - first_len, 0)
+
+                    if tool_budget > 0 and len(current_input_messages) > 1:
+                        compressed_tools = cls.compress_messages_with_budget(
+                            current_input_messages[1:], tool_budget,
+                            preserve_recent=tool_interaction_preserve
+                        )
+                        messages.append(first_msg)
+                        if len(compressed_tools) < len(current_input_messages) - 1:
+                            compressed_tools = cls._merge_truncation_marker(compressed_tools, "...")
+                        messages.extend(compressed_tools)
+                    else:
+                        # 预算不足以容纳 tool 交互，只保留 user input（截断到 remaining）
+                        if first_len > remaining:
+                            first_msg = {**first_msg, "content": first_msg["content"][:remaining] + "..."}
+                        messages.append(first_msg)
                 else:
                     messages.extend(current_input_messages)
         else:
@@ -334,10 +344,11 @@ class ContextManager:
         if total_length <= max_chars:
             return messages
 
-        logger.debug(f"Compressing {len(messages)} messages: {total_length} chars -> max {max_chars}")
+        logger.debug(f"Compressing {len(messages)} messages: {total_length} chars -> budget {max_chars}")
 
         if len(messages) <= preserve_recent:
-            return messages
+            # Still over budget — hard-truncate older messages from the front
+            return cls._hard_truncate_to_budget(messages, max_chars)
 
         recent_messages = messages[-preserve_recent:]
         older_messages = messages[:-preserve_recent]
@@ -429,6 +440,33 @@ class ContextManager:
 
         result = compressed + recent_messages
         logger.debug(f"Compressed to {len(result)} messages")
+        return result
+
+    @classmethod
+    def _hard_truncate_to_budget(cls, messages: List[Dict], max_chars: int) -> List[Dict]:
+        """
+        硬截断：当消息数 <= preserve_recent 但仍超预算时，
+        从最早的消息开始丢弃，直到总量在预算内。
+        """
+        total = sum(len(m.get("content", "")) for m in messages)
+        if total <= max_chars:
+            return messages
+
+        # 从前向后丢弃，保留尽可能多的最近消息
+        result = list(messages)
+        dropped = 0
+        while len(result) > 1:
+            total -= len(result[0].get("content", ""))
+            result.pop(0)
+            dropped += 1
+            if total <= max_chars:
+                break
+
+        if dropped > 0:
+            result = cls._merge_truncation_marker(
+                result,
+                f"[{dropped} earlier messages truncated due to length limit]"
+            )
         return result
 
     @classmethod
