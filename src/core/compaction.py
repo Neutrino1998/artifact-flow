@@ -2,12 +2,14 @@
 CompactionManager — 跨轮对话摘要压缩
 
 异步后台执行 LLM 摘要生成，逐对处理，带上下文传递。
-每对摘要生成后立即写 DB，不等全部完成。
+每对独立 DB session：读消息 → 关 session → 调 LLM → 开 session → 写 summary。
+LLM 调用期间不持有任何 DB 资源。
 """
 
 import asyncio
 import re
-from typing import Dict, Any, Optional
+from dataclasses import dataclass
+from typing import Dict, Any, List, Optional
 
 from agents.loader import AgentConfig
 from db.database import DatabaseManager
@@ -15,6 +17,16 @@ from repositories.conversation_repo import ConversationRepository
 from utils.logger import get_logger
 
 logger = get_logger("ArtifactFlow")
+
+
+@dataclass
+class _PairInfo:
+    """从 DB 读取后脱离 session 的消息对数据。"""
+    message_id: str
+    user_input: str
+    response: str
+    user_input_summary: Optional[str] = None
+    response_summary: Optional[str] = None
 
 
 class CompactionManager:
@@ -121,10 +133,9 @@ class CompactionManager:
         """
         核心 compaction 逻辑。
 
-        1. 开独立 DB session
-        2. 加载对话路径
-        3. 跳过最后 COMPACTION_PRESERVE_PAIRS 对
-        4. 逐对处理（跳过已有 summary 的，但读取其 summary 作为上下文）
+        数据库交互模式：短事务。
+        1. 短 session: 读取对话路径，提取为纯数据 (_PairInfo)，关闭 session
+        2. 逐对: 调 LLM（无 DB 连接）→ 短 session: 写 summary，关闭 session
         """
         from models.llm import astream_with_retry
 
@@ -133,89 +144,125 @@ class CompactionManager:
             logger.error("compact_agent not found in agents config")
             return
 
+        # ── Phase 1: 短事务读取，脱离 session ──
+        pairs = await self._load_pairs(conv_id, current_message_id, config)
+        if not pairs:
+            return
+
+        # ── Phase 2: 逐对处理 ──
+        prev_summary: Optional[str] = None
+
+        for pair in pairs:
+            # 已有 summary → 读作上下文，跳过生成
+            if pair.user_input_summary and pair.response_summary:
+                prev_summary = (
+                    f"Previous pair summary:\n"
+                    f"User: {pair.user_input_summary}\n"
+                    f"Assistant: {pair.response_summary}"
+                )
+                continue
+
+            # 构建 prompt
+            prompt_parts = []
+            if prev_summary:
+                prompt_parts.append(f"<context>\n{prev_summary}\n</context>")
+
+            prompt_parts.append(
+                f"<user_input>\n{pair.user_input}\n</user_input>\n\n"
+                f"<response>\n{pair.response}\n</response>"
+            )
+
+            messages = [
+                {"role": "system", "content": compact_agent.role_prompt},
+                {"role": "user", "content": "\n\n".join(prompt_parts)},
+            ]
+
+            # 调用 LLM（此时无 DB 连接）
+            response_text = ""
+            try:
+                async for chunk in astream_with_retry(messages, model=compact_agent.model):
+                    chunk_type = chunk.get("type")
+                    if chunk_type == "content":
+                        response_text += chunk["content"]
+                    elif chunk_type == "final" and not response_text:
+                        response_text = chunk.get("content", "")
+            except Exception as e:
+                logger.error(f"Compaction LLM call failed for message {pair.message_id}: {e}")
+                continue
+
+            # 解析 XML tags
+            user_input_summary = self._extract_tag(response_text, "user_input_summary")
+            response_summary = self._extract_tag(response_text, "response_summary")
+
+            if not user_input_summary or not response_summary:
+                logger.warning(f"Failed to parse compaction summary for message {pair.message_id}")
+                continue
+
+            # 短事务写入
+            await self._write_summary(pair.message_id, user_input_summary, response_summary)
+
+            logger.debug(f"Compacted message {pair.message_id}")
+
+            # 更新上下文
+            prev_summary = (
+                f"Previous pair summary:\n"
+                f"User: {user_input_summary}\n"
+                f"Assistant: {response_summary}"
+            )
+
+        logger.info(f"Compaction completed for {conv_id}")
+
+    async def _load_pairs(
+        self,
+        conv_id: str,
+        current_message_id: Optional[str],
+        config: Any,
+    ) -> List[_PairInfo]:
+        """短事务：读取对话路径，提取为脱离 session 的纯数据。"""
         async with self._db_manager.session() as session:
             repo = ConversationRepository(session)
             path = await repo.get_conversation_path(conv_id, current_message_id)
 
             if not path:
                 logger.debug(f"No messages found for compaction in {conv_id}")
-                return
+                return []
 
-            # 跳过最后 N 对（preserve_pairs）
             preserve = config.COMPACTION_PRESERVE_PAIRS
             if len(path) <= preserve:
                 logger.debug(f"Not enough messages to compact in {conv_id}")
-                return
+                return []
 
-            pairs_to_process = path[:-preserve]
-            prev_summary: Optional[str] = None
-
-            for msg in pairs_to_process:
-                # 如果已有 summary，读取作为上下文但跳过生成
-                if msg.user_input_summary and msg.response_summary:
-                    prev_summary = (
-                        f"Previous pair summary:\n"
-                        f"User: {msg.user_input_summary}\n"
-                        f"Assistant: {msg.response_summary}"
-                    )
-                    continue
-
-                # 没有 response 的消息跳过
+            # 提取为纯数据，脱离 ORM session
+            pairs = []
+            for msg in path[:-preserve]:
                 if not msg.response:
                     continue
+                pairs.append(_PairInfo(
+                    message_id=msg.id,
+                    user_input=msg.user_input,
+                    response=msg.response,
+                    user_input_summary=msg.user_input_summary,
+                    response_summary=msg.response_summary,
+                ))
+            return pairs
+        # session 在此关闭
 
-                # 构建 prompt
-                prompt_parts = []
-                if prev_summary:
-                    prompt_parts.append(f"<context>\n{prev_summary}\n</context>")
-
-                prompt_parts.append(
-                    f"<user_input>\n{msg.user_input}\n</user_input>\n\n"
-                    f"<response>\n{msg.response}\n</response>"
-                )
-
-                messages = [
-                    {"role": "system", "content": compact_agent.role_prompt},
-                    {"role": "user", "content": "\n\n".join(prompt_parts)},
-                ]
-
-                # 调用 LLM
-                response_text = ""
-                try:
-                    async for chunk in astream_with_retry(messages, model=compact_agent.model):
-                        chunk_type = chunk.get("type")
-                        if chunk_type == "content":
-                            response_text += chunk["content"]
-                        elif chunk_type == "final" and not response_text:
-                            response_text = chunk.get("content", "")
-                except Exception as e:
-                    logger.error(f"Compaction LLM call failed for message {msg.id}: {e}")
-                    continue
-
-                # 解析 XML tags
-                user_input_summary = self._extract_tag(response_text, "user_input_summary")
-                response_summary = self._extract_tag(response_text, "response_summary")
-
-                if not user_input_summary or not response_summary:
-                    logger.warning(f"Failed to parse compaction summary for message {msg.id}")
-                    continue
-
-                # 写入 DB
+    async def _write_summary(
+        self,
+        message_id: str,
+        user_input_summary: str,
+        response_summary: str,
+    ) -> None:
+        """短事务：写入单条消息的 summary。"""
+        async with self._db_manager.session() as session:
+            repo = ConversationRepository(session)
+            msg = await repo.get_message(message_id)
+            if msg:
                 msg.user_input_summary = user_input_summary
                 msg.response_summary = response_summary
                 await session.flush()
                 await session.commit()
-
-                logger.debug(f"Compacted message {msg.id}")
-
-                # 更新上下文
-                prev_summary = (
-                    f"Previous pair summary:\n"
-                    f"User: {user_input_summary}\n"
-                    f"Assistant: {response_summary}"
-                )
-
-            logger.info(f"Compaction completed for {conv_id}")
+        # session 在此关闭
 
     @staticmethod
     def _extract_tag(text: str, tag: str) -> Optional[str]:
