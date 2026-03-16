@@ -24,6 +24,7 @@ class AgentConfig:
     tools: dict[str, str] = field(default_factory=dict)  # {tool_name: permission_level}
     model: str = "qwen3.5-flash-no-thinking"
     max_tool_rounds: int = 3
+    internal: bool = False
     role_prompt: str = ""  # MD body（纯文本）
 
 
@@ -70,6 +71,7 @@ def load_agent(md_path: str) -> AgentConfig:
         tools=frontmatter.get("tools", {}),
         model=frontmatter.get("model", "qwen3.5-flash-no-thinking"),
         max_tool_rounds=frontmatter.get("max_tool_rounds", 3),
+        internal=frontmatter.get("internal", False),
         role_prompt=body,
     )
 

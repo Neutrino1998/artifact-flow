@@ -48,6 +48,11 @@ class ExecutionController:
         conversation_manager: Optional[ConversationManager] = None,
         message_event_repo: Optional[Any] = None,  # MessageEventRepository
         permission_timeout: int = 300,
+        compaction_manager: Optional[Any] = None,
+        compaction_config: Optional[Any] = None,
+        context_max_chars: int = 80000,
+        compaction_preserve_pairs: int = 2,
+        tool_interaction_preserve: int = 6,
     ):
         self.agents = agents
         self.tools = tools
@@ -56,12 +61,17 @@ class ExecutionController:
         self.conversation_manager = conversation_manager or ConversationManager()
         self.message_event_repo = message_event_repo
         self.permission_timeout = permission_timeout
+        self.compaction_manager = compaction_manager
+        self.compaction_config = compaction_config
+        self.context_max_chars = context_max_chars
+        self.compaction_preserve_pairs = compaction_preserve_pairs
+        self.tool_interaction_preserve = tool_interaction_preserve
 
         logger.info("ExecutionController v2 initialized")
 
     async def stream_execute(
         self,
-        content: Optional[str] = None,
+        user_input: Optional[str] = None,
         conversation_id: Optional[str] = None,
         parent_message_id: Any = _UNSET,
         message_id: Optional[str] = None,
@@ -70,7 +80,7 @@ class ExecutionController:
         流式执行接口（新消息）
 
         Args:
-            content: 用户消息内容
+            user_input: 用户消息内容
             conversation_id: 对话ID
             parent_message_id: 父消息ID
             message_id: 消息ID
@@ -78,8 +88,8 @@ class ExecutionController:
         Yields:
             流式事件字典
         """
-        if content is None:
-            raise ValueError("'content' is required for new message execution")
+        if user_input is None:
+            raise ValueError("'user_input' is required for new message execution")
 
         # ========== 准备工作 ==========
         if not conversation_id:
@@ -126,7 +136,7 @@ class ExecutionController:
 
         # 创建初始状态
         initial_state = create_initial_state(
-            task=content,
+            task=user_input,
             session_id=session_id,
             message_id=message_id,
             conversation_history=conversation_history,
@@ -139,7 +149,7 @@ class ExecutionController:
         await self.conversation_manager.add_message_async(
             conv_id=conversation_id,
             message_id=message_id,
-            content=content,
+            user_input=user_input,
             parent_id=resolved_parent,
         )
 
@@ -152,6 +162,16 @@ class ExecutionController:
                 "message_id": message_id,
             }
         }
+
+        # ========== Wait for compaction ==========
+        if self.compaction_manager:
+            waited = await self.compaction_manager.wait_if_running(conversation_id)
+            if waited:
+                yield {
+                    "type": StreamEventType.COMPACTION_WAIT.value,
+                    "timestamp": datetime.now().isoformat(),
+                    "data": {"conversation_id": conversation_id, "status": "completed"},
+                }
 
         # ========== 执行引擎 ==========
         event_queue: asyncio.Queue = asyncio.Queue()
@@ -172,6 +192,9 @@ class ExecutionController:
                     artifact_manager=self.artifact_manager,
                     emit=emit_to_queue,
                     permission_timeout=self.permission_timeout,
+                    context_max_chars=self.context_max_chars,
+                    compaction_preserve_pairs=self.compaction_preserve_pairs,
+                    tool_interaction_preserve=self.tool_interaction_preserve,
                 )
             except Exception as e:
                 logger.exception(f"Engine error: {e}")
@@ -229,13 +252,28 @@ class ExecutionController:
 
             logger.info("Streaming execution completed")
 
-            # 持久化 always_allowed_tools 到 message metadata
+            # 合并为一次 metadata 写入
+            metadata_updates = {}
             always_allowed = final_state.get("always_allowed_tools", [])
             if always_allowed:
+                metadata_updates["always_allowed_tools"] = always_allowed
+            execution_metrics = final_state.get("execution_metrics", {})
+            if execution_metrics:
+                metadata_updates["execution_metrics"] = execution_metrics
+            if metadata_updates:
                 await self.conversation_manager.update_message_metadata_async(
                     conv_id=conversation_id,
                     message_id=message_id,
-                    metadata={"always_allowed_tools": always_allowed},
+                    metadata=metadata_updates,
+                )
+
+            # 自动触发 compaction
+            if self.compaction_manager and execution_metrics:
+                await self.compaction_manager.maybe_trigger(
+                    conv_id=conversation_id,
+                    message_id=message_id,
+                    execution_metrics=execution_metrics,
+                    config=self.compaction_config,
                 )
 
             # 终态事件：error 路径由 engine 已发（在 state["events"] 中），

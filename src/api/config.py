@@ -35,6 +35,13 @@ class APIConfig(BaseSettings):
     STREAM_TTL: int = 30         # 秒，队列 TTL（前端未连接时自动清理）
     PERMISSION_TIMEOUT: int = 300  # 秒，单次 permission 等待超时
 
+    # Compaction / Context 配置
+    COMPACTION_THRESHOLD: int = 60000        # tokens, 触发跨轮 compaction
+    COMPACTION_PRESERVE_PAIRS: int = 2       # 保留最近 N 对不 compact
+    COMPACTION_TIMEOUT: int = 600            # 秒, compaction 后台任务超时
+    CONTEXT_MAX_CHARS: int = 80000           # context 最大字符数
+    TOOL_INTERACTION_PRESERVE: int = 6       # 偶数, 轮内保留 tool 交互条数
+
     # 并发控制
     MAX_CONCURRENT_TASKS: int = 10  # 最大并发引擎执行数
 

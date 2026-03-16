@@ -253,7 +253,7 @@ class ConversationRepository(BaseRepository[Conversation]):
         self,
         conversation_id: str,
         message_id: str,
-        content: str,
+        user_input: str,
         parent_id: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None
     ) -> Message:
@@ -263,7 +263,7 @@ class ConversationRepository(BaseRepository[Conversation]):
         Args:
             conversation_id: 对话ID
             message_id: 消息ID
-            content: 消息内容
+            user_input: 消息内容
             parent_id: 父消息ID（用于分支）
             metadata: 扩展元数据
 
@@ -287,7 +287,7 @@ class ConversationRepository(BaseRepository[Conversation]):
             id=message_id,
             conversation_id=conversation_id,
             parent_id=parent_id,
-            content=content,
+            user_input=user_input,
             metadata_=metadata or {}
         )
         
@@ -512,7 +512,7 @@ class ConversationRepository(BaseRepository[Conversation]):
             # 添加用户消息（优先使用摘要）
             messages.append({
                 "role": "user",
-                "content": msg.content_summary or msg.content
+                "content": msg.user_input_summary or msg.user_input
             })
 
             # 添加 assistant 响应（如果有，优先使用摘要）
@@ -589,7 +589,7 @@ class MessagePath:
         """转换为格式化的对话历史"""
         history = []
         for msg in self.messages:
-            history.append({"role": "user", "content": msg.content_summary or msg.content})
+            history.append({"role": "user", "content": msg.user_input_summary or msg.user_input})
             response = msg.response
             if response:
                 history.append({"role": "assistant", "content": msg.response_summary or response})

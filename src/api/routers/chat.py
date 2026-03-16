@@ -19,6 +19,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from api.config import config
 from api.dependencies import (
     get_agents,
+    get_compaction_manager,
     get_conversation_manager,
     get_current_user,
     get_db_manager,
@@ -115,6 +116,11 @@ async def _create_controller() -> AsyncGenerator:
             conversation_manager=conv_manager,
             message_event_repo=event_repo,
             permission_timeout=config.PERMISSION_TIMEOUT,
+            compaction_manager=get_compaction_manager(),
+            compaction_config=config,
+            context_max_chars=config.CONTEXT_MAX_CHARS,
+            compaction_preserve_pairs=config.COMPACTION_PRESERVE_PAIRS,
+            tool_interaction_preserve=config.TOOL_INTERACTION_PRESERVE,
         )
 
 
@@ -204,7 +210,7 @@ async def send_message(
                     stream_manager,
                     message_id,
                     ctrl.stream_execute(
-                        content=request.content,
+                        user_input=request.user_input,
                         conversation_id=conversation_id,
                         message_id=message_id,
                         **parent_kwargs,
@@ -289,7 +295,7 @@ async def get_conversation(
                 MessageResponse(
                     id=msg.id,
                     parent_id=msg.parent_id,
-                    content=msg.content,
+                    user_input=msg.user_input,
                     response=msg.response,
                     created_at=msg.created_at,
                     children=children_map.get(msg.id, []),
@@ -414,3 +420,24 @@ async def resume_execution(
     return ResumeResponse(
         stream_url=f"/api/v1/stream/{message_id}"
     )
+
+
+@router.post("/{conv_id}/compact")
+async def trigger_compaction(
+    conv_id: str,
+    current_user: TokenPayload = Depends(get_current_user),
+    conversation_manager: ConversationManager = Depends(get_conversation_manager),
+):
+    """手动触发对话 compaction"""
+    repo = conversation_manager._ensure_repository()
+    await _verify_ownership(conv_id, current_user, repo)
+
+    compaction_manager = get_compaction_manager()
+    if compaction_manager is None:
+        raise HTTPException(status_code=503, detail="Compaction service not available")
+
+    started = await compaction_manager.trigger(conv_id, config)
+    if not started:
+        raise HTTPException(status_code=409, detail="Compaction already in progress for this conversation")
+
+    return {"status": "accepted", "conversation_id": conv_id}

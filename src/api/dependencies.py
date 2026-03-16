@@ -57,6 +57,7 @@ _task_manager: Optional["TaskManager"] = None
 # Agent configs + tools（启动时加载一次）
 _agents: Optional[dict] = None                    # {name: AgentConfig}
 _tools: Optional[Dict[str, BaseTool]] = None      # {name: BaseTool}
+_compaction_manager: Optional[Any] = None         # CompactionManager
 
 
 async def init_globals() -> None:
@@ -67,7 +68,7 @@ async def init_globals() -> None:
     """
     from pathlib import Path
 
-    global _db_manager, _stream_manager, _task_manager, _agents, _tools
+    global _db_manager, _stream_manager, _task_manager, _agents, _tools, _compaction_manager
 
     # 0. 确保 data 目录存在
     data_dir = Path("data")
@@ -98,6 +99,11 @@ async def init_globals() -> None:
     _tools = _load_tools()
     logger.info(f"Loaded {len(_tools)} global tools")
 
+    # 6. 初始化 CompactionManager
+    from core.compaction import CompactionManager
+    _compaction_manager = CompactionManager(_db_manager, _agents)
+    logger.info("Compaction manager initialized")
+
 
 def _load_tools() -> Dict[str, BaseTool]:
     """启动时加载全局工具（无状态，跨请求共享）"""
@@ -107,7 +113,7 @@ def _load_tools() -> Dict[str, BaseTool]:
     from tools.custom.loader import load_custom_tools
 
     # 从已加载的 agents 推导有效 subagent 列表
-    valid_agents = [n for n in _agents.keys() if n != "lead_agent"] if _agents else None
+    valid_agents = [n for n, c in _agents.items() if n != "lead_agent" and not c.internal] if _agents else None
 
     # 内置工具
     tools = [
@@ -130,7 +136,7 @@ async def close_globals() -> None:
 
     在 FastAPI lifespan 中调用。
     """
-    global _db_manager, _stream_manager, _task_manager
+    global _db_manager, _stream_manager, _task_manager, _compaction_manager
 
     # 1. 先关闭 TaskManager（等待运行中的任务完成）
     if _task_manager:
@@ -145,6 +151,7 @@ async def close_globals() -> None:
     _task_manager = None
     _db_manager = None
     _stream_manager = None
+    _compaction_manager = None
 
 
 def get_task_manager() -> "TaskManager":
@@ -166,6 +173,11 @@ def get_db_manager() -> DatabaseManager:
     if _db_manager is None:
         raise RuntimeError("DatabaseManager not initialized. Call init_globals() first.")
     return _db_manager
+
+
+def get_compaction_manager():
+    """获取 CompactionManager 单例"""
+    return _compaction_manager
 
 
 def get_agents() -> dict:

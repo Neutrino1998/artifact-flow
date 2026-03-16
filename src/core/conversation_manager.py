@@ -37,7 +37,7 @@ class MessageCache:
     """消息缓存对象"""
     message_id: str
     parent_id: Optional[str]
-    content: str
+    user_input: str
     timestamp: str
     response: Optional[str] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
@@ -200,7 +200,7 @@ class ConversationManager:
             cache.messages[msg.id] = MessageCache(
                 message_id=msg.id,
                 parent_id=msg.parent_id,
-                content=msg.content,
+                user_input=msg.user_input,
                 timestamp=msg.created_at.isoformat(),
                 response=msg.response,
                 metadata=msg.metadata_ or {}
@@ -235,7 +235,7 @@ class ConversationManager:
         self,
         conv_id: str,
         message_id: str,
-        content: str,
+        user_input: str,
         parent_id: Optional[str] = None
     ) -> Dict:
         """
@@ -244,7 +244,7 @@ class ConversationManager:
         Args:
             conv_id: 对话ID
             message_id: 消息ID
-            content: 消息内容
+            user_input: 消息内容
             parent_id: 父消息ID（分支时使用）
 
         Returns:
@@ -260,7 +260,7 @@ class ConversationManager:
         msg_cache = MessageCache(
             message_id=message_id,
             parent_id=parent_id,
-            content=content,
+            user_input=user_input,
             timestamp=now
         )
 
@@ -285,20 +285,20 @@ class ConversationManager:
             await self.repository.add_message(
                 conversation_id=conv_id,
                 message_id=message_id,
-                content=content,
+                user_input=user_input,
                 parent_id=parent_id
             )
 
             # 如果是第一条消息（无 parent），自动生成 title
             if parent_id is None:
-                title = self._generate_title(content)
+                title = self._generate_title(user_input)
                 await self.repository.update_title(conv_id, title)
                 logger.debug(f"Auto-generated title for conversation {conv_id}: {title}")
 
         return {
             "message_id": message_id,
             "parent_id": parent_id,
-            "content": content,
+            "user_input": user_input,
             "timestamp": now,
             "response": None,
             "metadata": {}
@@ -411,7 +411,7 @@ class ConversationManager:
             {
                 "message_id": msg.id,
                 "parent_id": msg.parent_id,
-                "content": msg.content,
+                "user_input": msg.user_input,
                 "timestamp": msg.created_at.isoformat(),
                 "response": msg.response,
                 "metadata": msg.metadata_ or {}

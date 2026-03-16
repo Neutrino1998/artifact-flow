@@ -44,6 +44,7 @@ class StreamEventType(Enum):
     TOOL_COMPLETE = "tool_complete"      # 工具执行完成
     PERMISSION_REQUEST = "permission_request"  # 请求权限确认
     PERMISSION_RESULT = "permission_result"    # 权限确认结果
+    COMPACTION_WAIT = "compaction_wait"        # 等待 compaction 完成
 
 
 # ============================================================

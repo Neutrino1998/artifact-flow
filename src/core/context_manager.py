@@ -51,6 +51,9 @@ class ContextManager:
         tools: Dict[str, Any],   # {name: BaseTool}
         artifact_manager: Optional[Any] = None,
         artifacts_inventory: Optional[List[Dict]] = None,
+        context_max_chars: int = 80000,
+        compaction_preserve_pairs: int = 2,
+        tool_interaction_preserve: int = 6,
     ) -> Context:
         """
         构建 LLM 调用所需的完整 messages
@@ -108,25 +111,43 @@ class ContextManager:
         # ========== Messages ==========
         messages = [{"role": "system", "content": system_prompt}]
 
-        # 对话历史（仅 lead_agent）
         if agent_config.name == "lead_agent":
             history = state.get("conversation_history", [])
+            current_input_messages = cls._build_current_input(state, agent_config)
+
             if history:
-                compressed = cls.compress_messages(
-                    history,
-                    level="normal",
-                    preserve_recent=4  # 偶数：[user, asst, user, asst]
+                # 先估算 tool 交互占用
+                tool_chars = sum(len(m.get("content", "")) for m in current_input_messages)
+                history_budget = max(context_max_chars - tool_chars, 20000)  # 最低 20K
+
+                preserve_recent = compaction_preserve_pairs * 2  # 对数 → 消息数
+                compressed = cls.compress_messages_with_budget(
+                    history, history_budget, preserve_recent=preserve_recent
                 )
                 if len(compressed) < len(history):
-                    compressed = cls._merge_truncation_marker(
-                        compressed,
-                        "_[Earlier conversation truncated]_"
-                    )
+                    compressed = cls._merge_truncation_marker(compressed, "...")
                 messages.extend(compressed)
 
-        # 当前输入 + 工具交互历史
-        current_input_messages = cls._build_current_input(state, agent_config)
-        messages.extend(current_input_messages)
+            # tool 交互：仅在超总预算时截断
+            if current_input_messages:
+                remaining = context_max_chars - sum(len(m.get("content", "")) for m in messages)
+                tool_total = sum(len(m.get("content", "")) for m in current_input_messages)
+                if tool_total > remaining > 0:
+                    # 保留第一条 user input，截断 tool 交互部分
+                    compressed_tools = cls.compress_messages_with_budget(
+                        current_input_messages[1:], remaining,
+                        preserve_recent=tool_interaction_preserve
+                    )
+                    messages.append(current_input_messages[0])
+                    if len(compressed_tools) < len(current_input_messages) - 1:
+                        compressed_tools = cls._merge_truncation_marker(compressed_tools, "...")
+                    messages.extend(compressed_tools)
+                else:
+                    messages.extend(current_input_messages)
+        else:
+            # subagent 路径不变（无 conversation history）
+            current_input_messages = cls._build_current_input(state, agent_config)
+            messages.extend(current_input_messages)
 
         return Context(messages=messages)
 
@@ -167,7 +188,7 @@ class ContextManager:
     @classmethod
     def _build_available_agents(cls, agents: Dict[str, Any], current_agent: str) -> str:
         """构建可用 agent 列表"""
-        sub_agents = {n: c for n, c in agents.items() if n != current_agent}
+        sub_agents = {n: c for n, c in agents.items() if n != current_agent and not c.internal}
         if not sub_agents:
             return "<note>No sub-agents are currently registered. Work independently.</note>"
 
@@ -287,6 +308,65 @@ class ContextManager:
     # ============================================================
     # 消息压缩（复用旧 ContextManager 的逻辑）
     # ============================================================
+
+    @classmethod
+    def compress_messages_with_budget(
+        cls,
+        messages: List[Dict],
+        max_chars: int,
+        preserve_recent: int = 4
+    ) -> List[Dict]:
+        """
+        按绝对字符预算压缩消息历史
+
+        Args:
+            messages: 消息列表
+            max_chars: 最大字符数预算
+            preserve_recent: 保留最近 N 条完整消息
+
+        Returns:
+            压缩后的消息列表
+        """
+        if not messages:
+            return messages
+
+        total_length = sum(len(msg.get("content", "")) for msg in messages)
+        if total_length <= max_chars:
+            return messages
+
+        logger.debug(f"Compressing {len(messages)} messages: {total_length} chars -> max {max_chars}")
+
+        if len(messages) <= preserve_recent:
+            return messages
+
+        recent_messages = messages[-preserve_recent:]
+        older_messages = messages[:-preserve_recent]
+
+        recent_length = sum(len(msg.get("content", "")) for msg in recent_messages)
+        remaining_length = max_chars - recent_length
+
+        if remaining_length <= 0:
+            return [{
+                "role": "system",
+                "content": f"[{len(older_messages)} earlier messages truncated due to length limit]"
+            }] + recent_messages
+
+        compressed = []
+        current_length = 0
+
+        for msg in reversed(older_messages):
+            msg_length = len(msg.get("content", ""))
+            if current_length + msg_length > remaining_length:
+                if len(older_messages) > len(compressed):
+                    compressed.insert(0, {
+                        "role": "system",
+                        "content": f"[{len(older_messages) - len(compressed)} earlier messages truncated]"
+                    })
+                break
+            compressed.insert(0, msg)
+            current_length += msg_length
+
+        return compressed + recent_messages
 
     @classmethod
     def compress_messages(

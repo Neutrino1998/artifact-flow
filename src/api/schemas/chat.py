@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field
 
 class ChatRequest(BaseModel):
     """POST /api/v1/chat request body"""
-    content: str = Field(..., description="User message content")
+    user_input: str = Field(..., description="User message content")
     conversation_id: Optional[str] = Field(None, description="Continue existing conversation")
     parent_message_id: Optional[str] = Field(None, description="Branch from specific message")
 
@@ -47,7 +47,7 @@ class MessageResponse(BaseModel):
     """Message in conversation detail response"""
     id: str = Field(..., description="Message ID")
     parent_id: Optional[str] = Field(None, description="Parent message ID")
-    content: str = Field(..., description="User message content")
+    user_input: str = Field(..., description="User message content")
     response: Optional[str] = Field(None, description="Assistant response")
     created_at: datetime = Field(..., description="Message creation time")
     children: List[str] = Field(default_factory=list, description="Child message IDs")

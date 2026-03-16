@@ -177,13 +177,13 @@ class Message(Base):
     )
 
     # 用户消息内容
-    content: Mapped[str] = mapped_column(Text, nullable=False)
+    user_input: Mapped[str] = mapped_column(Text, nullable=False)
 
     # 助手最终响应
     response: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     # 内容摘要（跨轮 compaction 用）
-    content_summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    user_input_summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     response_summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     # 时间戳
@@ -208,8 +208,8 @@ class Message(Base):
     )
 
     def __repr__(self) -> str:
-        content_preview = self.content[:50] + "..." if len(self.content) > 50 else self.content
-        return f"<Message(id={self.id}, content={content_preview})>"
+        input_preview = self.user_input[:50] + "..." if len(self.user_input) > 50 else self.user_input
+        return f"<Message(id={self.id}, user_input={input_preview})>"
 
 
 class MessageEvent(Base):
@@ -494,7 +494,7 @@ if __name__ == "__main__":
                 msg = Message(
                     id="msg-test-001",
                     conversation_id=conv.id,
-                    content="Hello, World!",
+                    user_input="Hello, World!",
                 )
                 session.add(msg)
                 await session.flush()
