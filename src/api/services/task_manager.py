@@ -166,12 +166,16 @@ class TaskManager:
         """
         原子地检查并注册 conversation 的活跃执行。
 
+        Reservation 一旦写入即视为有效占位，直到被 unregister_conversation
+        或 task cleanup 显式清除。不检查 _tasks — 因为 reservation 发生在
+        submit 之前，此时任务尚未进入 _tasks。
+
         Returns:
             None — 预留成功
-            str  — 已有活跃 message_id（预留失败）
+            str  — 已有预留的 message_id（预留失败）
         """
         existing = self._active_conversations.get(conversation_id)
-        if existing and existing in self._tasks:
+        if existing:
             return existing
         self._active_conversations[conversation_id] = message_id
         return None
