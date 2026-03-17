@@ -53,6 +53,7 @@ class ContextManager:
         artifacts_inventory: Optional[List[Dict]] = None,
         context_max_chars: int = 80000,
         compaction_preserve_pairs: int = 2,
+        tool_interaction_preserve: int = 6,
     ) -> Context:
         """
         构建 LLM 调用所需的完整 messages
@@ -127,8 +128,23 @@ class ContextManager:
                     compressed = cls._merge_truncation_marker(compressed, "...")
                 messages.extend(compressed)
 
-        # Tool interactions 直接追加（max_tool_rounds 已限制单次交互量）
-        messages.extend(current_input_messages)
+        # Tool interactions — 尾部保留截断
+        # max_tool_rounds 限制轮数但不限体积（read_artifact / web_fetch 等
+        # 单次结果可能很大），所以需要预算兜底。长任务有 task_plan 跟踪上下文，
+        # 丢弃早期轮次不影响当前决策。
+        if current_input_messages:
+            remaining = context_max_chars - sum(len(m.get("content", "")) for m in messages)
+            tool_total = sum(len(m.get("content", "")) for m in current_input_messages)
+            if remaining >= tool_total or remaining <= 0:
+                # 在预算内，或预算已被 system+history 耗尽（至少保留全部 tool interactions）
+                messages.extend(current_input_messages)
+            else:
+                compressed = cls.compress_messages_with_budget(
+                    current_input_messages, remaining, preserve_recent=max(tool_interaction_preserve, 2)
+                )
+                if len(compressed) < len(current_input_messages):
+                    compressed = cls._merge_truncation_marker(compressed, "...")
+                messages.extend(compressed)
 
         return Context(messages=messages)
 

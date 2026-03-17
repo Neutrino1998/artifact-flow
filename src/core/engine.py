@@ -39,6 +39,7 @@ async def execute_loop(
     permission_timeout: int = 300,
     context_max_chars: int = 80000,
     compaction_preserve_pairs: int = 2,
+    tool_interaction_preserve: int = 6,
 ) -> Dict[str, Any]:
     """
     Pi-style 扁平 while loop 执行引擎
@@ -124,6 +125,7 @@ async def execute_loop(
             artifacts_inventory=artifacts_inventory,
             context_max_chars=context_max_chars,
             compaction_preserve_pairs=compaction_preserve_pairs,
+            tool_interaction_preserve=tool_interaction_preserve,
         )
 
         messages = context.messages
