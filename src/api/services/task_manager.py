@@ -162,9 +162,23 @@ class TaskManager:
     # Conversation → Active Execution 映射
     # ========================================
 
-    def register_conversation(self, conversation_id: str, message_id: str) -> None:
-        """注册 conversation 的活跃执行"""
+    def try_reserve_conversation(self, conversation_id: str, message_id: str) -> Optional[str]:
+        """
+        原子地检查并注册 conversation 的活跃执行。
+
+        Returns:
+            None — 预留成功
+            str  — 已有活跃 message_id（预留失败）
+        """
+        existing = self._active_conversations.get(conversation_id)
+        if existing and existing in self._tasks:
+            return existing
         self._active_conversations[conversation_id] = message_id
+        return None
+
+    def unregister_conversation(self, conversation_id: str) -> None:
+        """显式取消 conversation 的活跃执行映射"""
+        self._active_conversations.pop(conversation_id, None)
 
     def get_active_message_id(self, conversation_id: str) -> Optional[str]:
         """获取 conversation 当前活跃的 message_id，无活跃任务返回 None"""

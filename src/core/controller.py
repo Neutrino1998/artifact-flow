@@ -237,6 +237,10 @@ class ExecutionController:
             if not engine_task.done():
                 await engine_task
 
+        # Engine 已退出，不会再 drain 消息 — 立即取消活跃映射，
+        # 使 /inject 端点正确返回 409 而非假装成功入队
+        self.task_manager.unregister_conversation(conversation_id)
+
         # ========== Post-processing ==========
         # Use initial_state as fallback if engine crashed before setting final_state
         if final_state is None:

@@ -188,17 +188,19 @@ async def send_message(
     message_id = f"msg-{uuid4().hex}"
     user_id = current_user.user_id
 
-    # 已有会话：校验归属 + 拒绝并发执行
+    # 已有会话：校验归属
     if request.conversation_id:
         repo = conversation_manager._ensure_repository()
         await _verify_ownership(conversation_id, current_user, repo)
 
-        if task_manager.get_active_message_id(conversation_id):
-            raise HTTPException(
-                status_code=409,
-                detail="An execution is already active for this conversation. "
-                       "Use POST /chat/{conv_id}/inject to send input to the running execution.",
-            )
+    # 原子地预留 conversation — 在任何 await 之前完成，消除竞争窗口
+    active = task_manager.try_reserve_conversation(conversation_id, message_id)
+    if active:
+        raise HTTPException(
+            status_code=409,
+            detail="An execution is already active for this conversation. "
+                   "Use POST /chat/{conv_id}/inject to send input to the running execution.",
+        )
 
     # 确保 conversation 存在
     await conversation_manager.ensure_conversation_exists(conversation_id, user_id=user_id)
@@ -208,9 +210,6 @@ async def send_message(
 
     # 设置请求上下文
     set_request_context(message_id=message_id, conv_id=conversation_id)
-
-    # 注册活跃执行（同步，在 submit 前完成，避免竞争窗口）
-    task_manager.register_conversation(conversation_id, message_id)
 
     # 启动后台任务
     async def execute_and_push():
