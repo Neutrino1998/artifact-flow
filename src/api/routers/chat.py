@@ -209,9 +209,11 @@ async def send_message(
     # 设置请求上下文
     set_request_context(message_id=message_id, conv_id=conversation_id)
 
+    # 注册活跃执行（同步，在 submit 前完成，避免竞争窗口）
+    task_manager.register_conversation(conversation_id, message_id)
+
     # 启动后台任务
     async def execute_and_push():
-        task_manager.register_conversation(conversation_id, message_id)
         try:
             async with _create_controller() as ctrl:
                 parent_kwargs = {}

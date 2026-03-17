@@ -446,10 +446,22 @@ async def execute_loop(
             tool_calls = parse_tool_calls(response_content)
 
             if not tool_calls:
-                # 无工具调用 → 完成当前 agent
+                # Lead 无工具调用但队列中有待处理消息 → 不退出，继续循环
+                # 这处理了 inject 消息在最后一次 LLM 调用期间到达的情况
+                if current_agent_name == "lead_agent":
+                    pending = task_manager.drain_messages(message_id)
+                    if pending:
+                        for msg in pending:
+                            state["events"].append(ExecutionEvent(
+                                event_type=StreamEventType.QUEUED_MESSAGE.value,
+                                agent_name="lead_agent",
+                                data={"content": msg},
+                            ))
+                        continue  # 回到 while loop 顶部，下次 _build_context 会看到新事件
+
+                # 无待处理消息 → 正常完成当前 agent
                 previous_agent = state["current_agent"]
                 _complete_agent(state, current_agent_name, response_content)
-                # 重置 tool round count，下次调用该 agent 时从 0 开始
                 tool_round_count.pop(current_agent_name, None)
 
                 await _emit(StreamEventType.AGENT_COMPLETE.value, current_agent_name, {
