@@ -127,10 +127,6 @@ class ExecutionController:
         # 设置 artifact session
         if self.artifact_manager:
             self.artifact_manager.set_session(session_id)
-            try:
-                await self.artifact_manager.clear_temporary_artifacts(session_id)
-            except Exception as e:
-                logger.warning(f"Failed to clear temporary artifacts: {e}")
 
         # 从父消息 metadata 中恢复 always_allowed_tools
         parent_always_allowed = []

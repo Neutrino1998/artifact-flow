@@ -426,7 +426,6 @@ Artifact 操作（含乐观锁）：
 | `get_version_content` | 获取指定版本的内容 |
 | `list_versions` | 列出版本历史（不含完整内容） |
 | `get_version_diff` | 获取两个版本间的差异 |
-| `clear_temporary_artifacts` | 清除临时 Artifacts（如 task_plan） |
 | `get_artifacts_with_full_content` | 批量获取完整内容 |
 
 ### UserRepository

@@ -562,31 +562,6 @@ class ArtifactRepository(BaseRepository[Artifact]):
     # 批量操作
     # ========================================
     
-    async def clear_temporary_artifacts(
-        self,
-        session_id: str,
-        temporary_ids: Optional[List[str]] = None
-    ) -> int:
-        """
-        清除临时 Artifacts
-        
-        Args:
-            session_id: Session ID
-            temporary_ids: 临时 Artifact ID 列表（默认 ["task_plan"]）
-            
-        Returns:
-            删除的数量
-        """
-        if temporary_ids is None:
-            temporary_ids = ["task_plan"]
-        
-        deleted_count = 0
-        for artifact_id in temporary_ids:
-            if await self.delete_artifact(session_id, artifact_id):
-                deleted_count += 1
-        
-        return deleted_count
-    
     async def get_artifacts_with_full_content(
         self,
         session_id: str,

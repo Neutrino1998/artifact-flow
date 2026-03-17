@@ -628,38 +628,6 @@ class ArtifactManager:
 
         return artifacts
 
-    async def clear_temporary_artifacts(
-        self,
-        session_id: str,
-        temporary_ids: Optional[List[str]] = None
-    ) -> int:
-        """
-        清除临时 Artifacts（如 task_plan）
-
-        Args:
-            session_id: Session ID
-            temporary_ids: 临时 Artifact ID 列表
-
-        Returns:
-            删除的数量
-        """
-        if temporary_ids is None:
-            temporary_ids = ["task_plan"]
-
-        repo = self._ensure_repository()
-
-        # 清除数据库
-        deleted_count = await repo.clear_temporary_artifacts(session_id, temporary_ids)
-
-        # 清除缓存
-        if session_id in self._cache:
-            for artifact_id in temporary_ids:
-                if artifact_id in self._cache[session_id]:
-                    del self._cache[session_id][artifact_id]
-                    logger.debug(f"Cleared temporary artifact from cache: {artifact_id}")
-
-        return deleted_count
-
     def clear_cache(self, session_id: Optional[str] = None) -> None:
         """
         清除缓存

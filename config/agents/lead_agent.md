@@ -35,6 +35,10 @@ For tasks requiring multiple steps or sub-agent calls, create a task_plan artifa
 
 This is a shared workspace — use it as both a todo list and a working notebook. Conversation history may be compacted over long sessions, so note down important details and findings here.
 
+If a task_plan already exists from a previous turn, check its status first:
+- If it relates to the current request, continue from where it left off.
+- If it is irrelevant, rewrite it with the new plan.
+
 <task_plan_example>
 # Task: [Title]
 

@@ -383,29 +383,6 @@ class TestVersionHistory:
 
 class TestBatchOperations:
 
-    async def test_clear_temporary_artifacts(
-        self, artifact_repo: ArtifactRepository, artifact_session: str
-    ):
-        # Create a task_plan (temporary) and a result (permanent)
-        await artifact_repo.create_artifact(
-            artifact_session, "task_plan", "text/markdown", "Plan", "plan content"
-        )
-        await artifact_repo.create_artifact(
-            artifact_session,
-            f"result-{uuid.uuid4().hex[:8]}",
-            "text/markdown",
-            "Result",
-            "result content",
-        )
-
-        count = await artifact_repo.clear_temporary_artifacts(artifact_session)
-        assert count == 1
-
-        # task_plan should be gone, result should remain
-        assert await artifact_repo.get_artifact(artifact_session, "task_plan") is None
-        arts = await artifact_repo.list_artifacts(artifact_session)
-        assert len(arts) == 1
-
     async def test_get_artifacts_with_full_content(
         self, artifact_repo: ArtifactRepository, artifact_session: str
     ):
