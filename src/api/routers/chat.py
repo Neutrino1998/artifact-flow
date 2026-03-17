@@ -123,7 +123,6 @@ async def _create_controller() -> AsyncGenerator:
             compaction_config=config,
             context_max_chars=config.CONTEXT_MAX_CHARS,
             compaction_preserve_pairs=config.COMPACTION_PRESERVE_PAIRS,
-            tool_interaction_preserve=config.TOOL_INTERACTION_PRESERVE,
         )
 
 

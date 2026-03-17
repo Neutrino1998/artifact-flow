@@ -52,7 +52,6 @@ class ExecutionController:
         compaction_config: Optional[Any] = None,
         context_max_chars: int = 80000,
         compaction_preserve_pairs: int = 2,
-        tool_interaction_preserve: int = 6,
     ):
         self.agents = agents
         self.tools = tools
@@ -65,8 +64,6 @@ class ExecutionController:
         self.compaction_config = compaction_config
         self.context_max_chars = context_max_chars
         self.compaction_preserve_pairs = compaction_preserve_pairs
-        self.tool_interaction_preserve = tool_interaction_preserve
-
         logger.info("ExecutionController v2 initialized")
 
     async def stream_execute(
@@ -197,7 +194,6 @@ class ExecutionController:
                     permission_timeout=self.permission_timeout,
                     context_max_chars=self.context_max_chars,
                     compaction_preserve_pairs=self.compaction_preserve_pairs,
-                    tool_interaction_preserve=self.tool_interaction_preserve,
                 )
             except Exception as e:
                 logger.exception(f"Engine error: {e}")

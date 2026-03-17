@@ -53,7 +53,6 @@ class ContextManager:
         artifacts_inventory: Optional[List[Dict]] = None,
         context_max_chars: int = 80000,
         compaction_preserve_pairs: int = 2,
-        tool_interaction_preserve: int = 6,
     ) -> Context:
         """
         构建 LLM 调用所需的完整 messages
@@ -112,7 +111,7 @@ class ContextManager:
         messages = [{"role": "system", "content": system_prompt}]
 
         # 两个 agent 类型共用的输入构建
-        current_input_messages, anchor_idx = cls._build_current_input(state, agent_config)
+        current_input_messages = cls._build_current_input(state, agent_config)
 
         # Lead 独有：conversation history（DB Message 层，含 compaction summaries）
         if agent_config.name == "lead_agent":
@@ -128,62 +127,8 @@ class ContextManager:
                     compressed = cls._merge_truncation_marker(compressed, "...")
                 messages.extend(compressed)
 
-        # 共用：预算感知的 tool interaction 追加
-        #
-        # 不可丢弃的"锚点消息"：
-        # - lead: current_input_messages[0] (user_input，只有一条)
-        # - sub:  最后一个 subagent_instruction（当前正在执行的任务）
-        #         早期的 instruction 及其交互已被后续 llm_complete 消化，可丢弃
-        if current_input_messages:
-            anchor_msg = current_input_messages[anchor_idx]
-
-            remaining = context_max_chars - sum(len(m.get("content", "")) for m in messages)
-            tool_total = sum(len(m.get("content", "")) for m in current_input_messages)
-            if tool_total <= remaining:
-                messages.extend(current_input_messages)
-            elif remaining > 0:
-                anchor_len = len(anchor_msg.get("content", ""))
-                tool_budget = max(remaining - anchor_len, 0)
-
-                # anchor 之前的消息（早期轮次）和 anchor 之后的消息（当前轮工具交互）
-                before_anchor = current_input_messages[:anchor_idx]
-                after_anchor = current_input_messages[anchor_idx + 1:]
-                compressible = before_anchor + after_anchor
-
-                if tool_budget > 0 and compressible:
-                    # after_anchor 是当前轮交互，优先级更高，先分配预算
-                    preserve = max(tool_interaction_preserve, 2)
-                    if after_anchor:
-                        compressed_after = cls.compress_messages_with_budget(
-                            after_anchor, tool_budget, preserve_recent=preserve
-                        )
-                        if len(compressed_after) < len(after_anchor):
-                            compressed_after = cls._merge_truncation_marker(compressed_after, "...")
-                        after_used = sum(len(m.get("content", "")) for m in compressed_after)
-                    else:
-                        compressed_after = []
-                        after_used = 0
-
-                    before_budget = tool_budget - after_used
-                    if before_anchor and before_budget > 0:
-                        compressed_before = cls.compress_messages_with_budget(
-                            before_anchor, before_budget, preserve_recent=preserve
-                        )
-                        if len(compressed_before) < len(before_anchor):
-                            compressed_before = cls._merge_truncation_marker(compressed_before, "...")
-                    else:
-                        compressed_before = []
-
-                    messages.extend(compressed_before)
-                    messages.append(anchor_msg)
-                    messages.extend(compressed_after)
-                else:
-                    if anchor_len > remaining:
-                        anchor_msg = {**anchor_msg, "content": anchor_msg["content"][:remaining]}
-                    messages.append(anchor_msg)
-            else:
-                # remaining <= 0: 预算已耗尽，只保留锚点消息
-                messages.append(anchor_msg)
+        # Tool interactions 直接追加（max_tool_rounds 已限制单次交互量）
+        messages.extend(current_input_messages)
 
         return Context(messages=messages)
 
@@ -240,53 +185,12 @@ class ContextManager:
         return "\n".join(lines)
 
     @classmethod
-    def _build_current_input(cls, state: Dict[str, Any], agent_config: Any) -> tuple:
+    def _build_current_input(cls, state: Dict[str, Any], agent_config: Any) -> List[Dict[str, str]]:
         """
         Build raw messages from events (no compression). Both lead and sub.
-
-        Returns:
-            (messages, anchor_index) — anchor_index 指向不可丢弃的锚点消息：
-            - lead: user_input（只有一条，index 0）
-            - sub:  最后一个 subagent_instruction（当前正在执行的任务）
         """
-        from core.events import StreamEventType
-
         events = state.get("events", [])
-        messages = cls._build_tool_interactions(events, agent_config.name)
-
-        # 从事件流直接定位最后一个 anchor 事件的 index
-        anchor_types = {StreamEventType.USER_INPUT.value, StreamEventType.SUBAGENT_INSTRUCTION.value}
-        agent_events = [e for e in events if e.agent_name == agent_config.name]
-
-        # 映射：哪些事件产出了 messages（跳过空 content 的事件）
-        anchor_idx = 0
-        msg_idx = 0
-        for event in agent_events:
-            produced = cls._event_produces_message(event)
-            if produced:
-                if event.event_type in anchor_types:
-                    anchor_idx = msg_idx
-                msg_idx += 1
-
-        return messages, anchor_idx
-
-    @staticmethod
-    def _event_produces_message(event) -> bool:
-        """判断事件是否会在 _build_tool_interactions 中产出一条消息"""
-        from core.events import StreamEventType
-
-        et = event.event_type
-        if et == StreamEventType.USER_INPUT.value:
-            return bool(event.data and event.data.get("content"))
-        if et == StreamEventType.SUBAGENT_INSTRUCTION.value:
-            return bool(event.data and event.data.get("instruction"))
-        if et == StreamEventType.LLM_COMPLETE.value:
-            return bool(event.data and event.data.get("content"))
-        if et == StreamEventType.QUEUED_MESSAGE.value:
-            return bool(event.data and event.data.get("content"))
-        if et == StreamEventType.TOOL_COMPLETE.value:
-            return bool(event.data)
-        return False
+        return cls._build_tool_interactions(events, agent_config.name)
 
     @classmethod
     def _build_tool_interactions(cls, events: List, agent_name: str) -> List[Dict[str, str]]:
