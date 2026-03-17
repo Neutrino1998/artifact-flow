@@ -9,8 +9,7 @@ import pytest
 from dataclasses import dataclass, field
 from unittest.mock import patch, AsyncMock
 
-from core.state import create_initial_state
-from core.engine import execute_loop
+from core.engine import create_initial_state, execute_loop
 from core.events import StreamEventType
 from api.services.task_manager import TaskManager
 

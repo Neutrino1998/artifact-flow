@@ -7,6 +7,12 @@
 from .events import (
     StreamEventType,
     ExecutionEvent,
+)
+
+# 执行引擎（含 metrics 类型 + 执行状态）
+from .engine import (
+    execute_loop,
+    create_initial_state,
     ExecutionMetrics,
     AgentExecutionRecord,
     ToolCallRecord,
@@ -16,12 +22,6 @@ from .events import (
     append_agent_execution,
     append_tool_call,
 )
-
-# 执行状态
-from .state import create_initial_state
-
-# 执行引擎
-from .engine import execute_loop
 
 # 上下文管理
 from .context_manager import ContextManager, Context
@@ -36,6 +36,9 @@ __all__ = [
     # 事件系统
     "StreamEventType",
     "ExecutionEvent",
+    # 执行引擎
+    "execute_loop",
+    "create_initial_state",
     "ExecutionMetrics",
     "AgentExecutionRecord",
     "ToolCallRecord",
@@ -44,10 +47,6 @@ __all__ = [
     "finalize_metrics",
     "append_agent_execution",
     "append_tool_call",
-    # 执行状态
-    "create_initial_state",
-    # 执行引擎
-    "execute_loop",
     # 上下文管理
     "ContextManager",
     "Context",

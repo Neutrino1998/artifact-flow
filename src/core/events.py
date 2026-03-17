@@ -16,7 +16,7 @@
 """
 
 from enum import Enum
-from typing import TypedDict, Optional, Any, List
+from typing import Optional, Any
 from dataclasses import dataclass, field
 from datetime import datetime
 
@@ -71,106 +71,3 @@ class ExecutionEvent:
             "data": self.data,
             "created_at": self.created_at.isoformat(),
         }
-
-
-# ============================================================
-# ExecutionMetrics 相关类型定义（复用旧 events.py）
-# ============================================================
-
-class TokenUsage(TypedDict):
-    """Token 使用统计"""
-    input_tokens: int
-    output_tokens: int
-    total_tokens: int
-
-
-class ToolCallRecord(TypedDict):
-    """单次工具调用记录"""
-    tool_name: str
-    success: bool
-    duration_ms: int
-    called_at: str      # ISO timestamp
-    completed_at: str   # ISO timestamp
-    agent: str          # 调用方 agent
-
-
-class AgentExecutionRecord(TypedDict):
-    """单次 agent 执行记录（一次 LLM 调用）"""
-    agent_name: str
-    model: str
-    token_usage: TokenUsage
-    llm_duration_ms: int
-    started_at: str
-    completed_at: str
-
-
-class ExecutionMetrics(TypedDict):
-    """请求级别的可观测性指标"""
-    started_at: str
-    completed_at: Optional[str]
-    total_duration_ms: Optional[int]
-    agent_executions: List[AgentExecutionRecord]  # append-only
-    tool_calls: List[ToolCallRecord]              # append-only
-
-
-def create_initial_metrics() -> ExecutionMetrics:
-    """创建初始的 ExecutionMetrics"""
-    return {
-        "started_at": datetime.now().isoformat(),
-        "completed_at": None,
-        "total_duration_ms": None,
-        "agent_executions": [],
-        "tool_calls": []
-    }
-
-
-def finalize_metrics(metrics: ExecutionMetrics) -> None:
-    """完成 metrics 记录"""
-    completed_at = datetime.now()
-    metrics["completed_at"] = completed_at.isoformat()
-
-    started_at = datetime.fromisoformat(metrics["started_at"])
-    duration_ms = int((completed_at - started_at).total_seconds() * 1000)
-    metrics["total_duration_ms"] = duration_ms
-
-
-def append_agent_execution(
-    metrics: ExecutionMetrics,
-    agent_name: str,
-    model: str,
-    token_usage: TokenUsage,
-    started_at: str,
-    completed_at: str,
-    llm_duration_ms: int
-) -> None:
-    """追加 agent 执行记录"""
-    record: AgentExecutionRecord = {
-        "agent_name": agent_name,
-        "model": model,
-        "token_usage": token_usage,
-        "llm_duration_ms": llm_duration_ms,
-        "started_at": started_at,
-        "completed_at": completed_at
-    }
-    metrics["agent_executions"].append(record)
-
-
-def append_tool_call(
-    metrics: ExecutionMetrics,
-    tool_name: str,
-    success: bool,
-    duration_ms: int,
-    called_at: str,
-    completed_at: str,
-    agent: str
-) -> None:
-    """追加工具调用记录"""
-    record: ToolCallRecord = {
-        "tool_name": tool_name,
-        "success": success,
-        "duration_ms": duration_ms,
-        "called_at": called_at,
-        "completed_at": completed_at,
-        "agent": agent
-    }
-    metrics["tool_calls"].append(record)

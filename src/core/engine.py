@@ -10,19 +10,135 @@
 """
 
 import asyncio
-from typing import Dict, Any, Optional, Callable, Awaitable, List, Tuple
+from typing import Dict, Any, Optional, Callable, Awaitable, List, Tuple, TypedDict
 from datetime import datetime
 
-from core.events import (
-    StreamEventType, ExecutionEvent,
-    append_agent_execution, append_tool_call, finalize_metrics,
-)
+from core.events import StreamEventType, ExecutionEvent
 from core.context_manager import ContextManager
 from tools.xml_parser import parse_tool_calls
 from tools.base import ToolPermission, ToolResult
 from utils.logger import get_logger
 
 logger = get_logger("ArtifactFlow")
+
+
+# ============================================================
+# ExecutionMetrics — 请求级可观测性指标
+# ============================================================
+
+class TokenUsage(TypedDict):
+    input_tokens: int
+    output_tokens: int
+    total_tokens: int
+
+
+class ToolCallRecord(TypedDict):
+    tool_name: str
+    success: bool
+    duration_ms: int
+    called_at: str
+    completed_at: str
+    agent: str
+
+
+class AgentExecutionRecord(TypedDict):
+    agent_name: str
+    model: str
+    token_usage: TokenUsage
+    llm_duration_ms: int
+    started_at: str
+    completed_at: str
+
+
+class ExecutionMetrics(TypedDict):
+    started_at: str
+    completed_at: Optional[str]
+    total_duration_ms: Optional[int]
+    agent_executions: List[AgentExecutionRecord]
+    tool_calls: List[ToolCallRecord]
+
+
+def create_initial_metrics() -> ExecutionMetrics:
+    return {
+        "started_at": datetime.now().isoformat(),
+        "completed_at": None,
+        "total_duration_ms": None,
+        "agent_executions": [],
+        "tool_calls": [],
+    }
+
+
+def finalize_metrics(metrics: ExecutionMetrics) -> None:
+    completed_at = datetime.now()
+    metrics["completed_at"] = completed_at.isoformat()
+    started_at = datetime.fromisoformat(metrics["started_at"])
+    metrics["total_duration_ms"] = int((completed_at - started_at).total_seconds() * 1000)
+
+
+def append_agent_execution(
+    metrics: ExecutionMetrics,
+    agent_name: str,
+    model: str,
+    token_usage: TokenUsage,
+    started_at: str,
+    completed_at: str,
+    llm_duration_ms: int,
+) -> None:
+    metrics["agent_executions"].append({
+        "agent_name": agent_name,
+        "model": model,
+        "token_usage": token_usage,
+        "llm_duration_ms": llm_duration_ms,
+        "started_at": started_at,
+        "completed_at": completed_at,
+    })
+
+
+def append_tool_call(
+    metrics: ExecutionMetrics,
+    tool_name: str,
+    success: bool,
+    duration_ms: int,
+    called_at: str,
+    completed_at: str,
+    agent: str,
+) -> None:
+    metrics["tool_calls"].append({
+        "tool_name": tool_name,
+        "success": success,
+        "duration_ms": duration_ms,
+        "called_at": called_at,
+        "completed_at": completed_at,
+        "agent": agent,
+    })
+
+
+# ============================================================
+# 执行状态
+# ============================================================
+
+def create_initial_state(
+    task: str,
+    session_id: str,
+    message_id: str,
+    conversation_history: List[Dict[str, str]],
+    always_allowed_tools: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    """创建初始执行状态"""
+    return {
+        "current_task": task,
+        "session_id": session_id,
+        "message_id": message_id,
+        "conversation_history": conversation_history,
+        "completed": False,
+        "error": False,
+        "current_agent": "lead_agent",
+        "always_allowed_tools": list(always_allowed_tools) if always_allowed_tools else [],
+        "events": [],
+        "execution_metrics": create_initial_metrics(),
+        "response": "",
+    }
+
 
 # emit callback type: async (event_dict) -> None
 # Execution always runs to completion regardless of SSE client state.
