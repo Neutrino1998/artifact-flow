@@ -955,50 +955,11 @@
   
 </li>
         
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#最好满足架构级-review" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        最好满足（架构级 review）
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="最好满足（架构级 review）">
-      <ul class="md-nav__list">
-        
           <li class="md-nav__item">
-  <a href="#可观测性" class="md-nav__link">
+  <a href="#性能反模式" class="md-nav__link">
     <span class="md-ellipsis">
       
-        可观测性
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#可测试性" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        可测试性
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#变更成本可预估" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        变更成本可预估
+        性能反模式
       
     </span>
   </a>
@@ -1101,25 +1062,13 @@
 <li>[ ] 前端 Zustand store 只存跨组件共享状态，局部状态用 <code>useState</code></li>
 <li>[ ] 全局单例有明确理由（StreamManager、TaskManager 等基础设施组件）</li>
 </ul>
-<hr />
-<h2 id="最好满足架构级-review">最好满足（架构级 review）</h2>
-<h3 id="可观测性">可观测性</h3>
+<h3 id="性能反模式">性能反模式</h3>
 <ul>
-<li>[ ] 关键操作有日志 / LogEntry</li>
-<li>[ ] 异步操作有超时，不能无限等待</li>
-<li>[ ] request_id 贯穿一次请求的所有日志</li>
-</ul>
-<h3 id="可测试性">可测试性</h3>
-<ul>
-<li>[ ] 依赖注入而不是硬编码（FastAPI Depends / 构造函数参数）</li>
-<li>[ ] 纯函数优先，副作用推到边界</li>
-<li>[ ] 不可测的代码大概率职责不清晰 — 考虑重构</li>
-</ul>
-<h3 id="变更成本可预估">变更成本可预估</h3>
-<ul>
-<li>[ ] 新增 Agent = 写子类 + 注册到 graph，不改框架</li>
-<li>[ ] 新增 Tool = 继承 BaseTool + 注册到 Registry，不改框架</li>
-<li>[ ] 小功能改 8+ 文件且出现重复改动模式 → 抽象可能有问题，review 时讨论</li>
+<li>[ ] 无依赖的 async 操作用 <code>asyncio.gather</code> / <code>Promise.all</code> 并行，除非有明确的串行理由（如 interrupt 顺序）</li>
+<li>[ ] 不先检查再操作（TOCTOU）— 直接操作 + 异常处理</li>
+<li>[ ] 热路径（per-request / per-event / 主循环）里不做可以在初始化时做的事</li>
+<li>[ ] 循环里没有数据库/API 调用（N+1）— 用 JOIN / eager loading / 批量查询</li>
+<li>[ ] 高频回调（SSE / 轮询 / WebSocket）里写 store 或数据库前先比较，值没变就跳过</li>
 </ul>
 
 
