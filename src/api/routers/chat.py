@@ -3,6 +3,7 @@ Chat Router
 
 处理对话相关的 API 端点：
 - POST /api/v1/chat - 发送消息
+- POST /api/v1/chat/{conv_id}/inject - 向活跃执行注入消息
 - GET /api/v1/chat - 列出对话
 - GET /api/v1/chat/{conv_id} - 获取对话详情
 - DELETE /api/v1/chat/{conv_id} - 删除对话
@@ -32,6 +33,8 @@ from api.services.auth import TokenPayload
 from api.schemas.chat import (
     ChatRequest,
     ChatResponse,
+    InjectRequest,
+    InjectResponse,
     ResumeRequest,
     ResumeResponse,
     ConversationListResponse,
@@ -185,20 +188,10 @@ async def send_message(
     message_id = f"msg-{uuid4().hex}"
     user_id = current_user.user_id
 
-    # 已有会话：校验归属 + 检测活跃执行
+    # 已有会话：校验归属
     if request.conversation_id:
         repo = conversation_manager._ensure_repository()
         await _verify_ownership(conversation_id, current_user, repo)
-
-        active_msg_id = task_manager.get_active_message_id(conversation_id)
-        if active_msg_id:
-            task_manager.inject_message(active_msg_id, request.user_input)
-            return ChatResponse(
-                conversation_id=conversation_id,
-                message_id=active_msg_id,
-                stream_url=f"/api/v1/stream/{active_msg_id}",
-                injected=True,
-            )
 
     # 确保 conversation 存在
     await conversation_manager.ensure_conversation_exists(conversation_id, user_id=user_id)
@@ -241,6 +234,36 @@ async def send_message(
         conversation_id=conversation_id,
         message_id=message_id,
         stream_url=f"/api/v1/stream/{message_id}"
+    )
+
+
+@router.post("/{conv_id}/inject", response_model=InjectResponse)
+async def inject_message(
+    conv_id: str,
+    request: InjectRequest,
+    current_user: TokenPayload = Depends(get_current_user),
+    conversation_manager: ConversationManager = Depends(get_conversation_manager),
+    task_manager: TaskManager = Depends(get_task_manager),
+):
+    """
+    向活跃执行注入消息
+
+    仅当 conversation 有正在运行的执行时可用。
+    注入的消息通过 queued_message 事件进入 lead agent 的 context。
+    前端不应重建 SSE 连接 — 事件仍通过原有 stream 推送。
+    """
+    repo = conversation_manager._ensure_repository()
+    await _verify_ownership(conv_id, current_user, repo)
+
+    active_msg_id = task_manager.get_active_message_id(conv_id)
+    if not active_msg_id:
+        raise HTTPException(status_code=409, detail="No active execution for this conversation")
+
+    task_manager.inject_message(active_msg_id, request.content)
+
+    return InjectResponse(
+        message_id=active_msg_id,
+        stream_url=f"/api/v1/stream/{active_msg_id}",
     )
 
 

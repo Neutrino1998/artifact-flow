@@ -20,6 +20,17 @@ class ChatRequest(BaseModel):
     parent_message_id: Optional[str] = Field(None, description="Branch from specific message")
 
 
+class InjectRequest(BaseModel):
+    """POST /api/v1/chat/{conv_id}/inject request body"""
+    content: str = Field(..., description="Message content to inject into the active execution")
+
+
+class InjectResponse(BaseModel):
+    """POST /api/v1/chat/{conv_id}/inject response"""
+    message_id: str = Field(..., description="Active execution message ID that received the injection")
+    stream_url: str = Field(..., description="Existing SSE stream URL (already connected, do not reconnect)")
+
+
 class ResumeRequest(BaseModel):
     """POST /api/v1/chat/{conv_id}/resume request body"""
     message_id: str = Field(..., description="Message ID to resume")
@@ -36,7 +47,6 @@ class ChatResponse(BaseModel):
     conversation_id: str = Field(..., description="Conversation ID")
     message_id: str = Field(..., description="New message ID")
     stream_url: str = Field(..., description="SSE endpoint URL for streaming")
-    injected: bool = Field(False, description="True if message was injected into active execution")
 
 
 class ResumeResponse(BaseModel):
