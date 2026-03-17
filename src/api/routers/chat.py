@@ -259,9 +259,9 @@ async def inject_message(
     注入的消息通过 queued_message 事件进入 lead agent 的 context。
     前端不应重建 SSE 连接 — 事件仍通过原有 stream 推送。
 
-    TODO: 注入内容当前仅存在于事件流（queued_message event），
-    不会创建 Message 记录。刷新后会话历史不可见此输入。
-    后续需要在 controller post-processing 或此处持久化。
+    注入内容通过 queued_message 事件持久化到 MessageEvent 表，
+    可通过 GET /chat/{conv_id}/messages/{msg_id}/events 查询。
+    不创建独立 Message 记录（注入是同一轮执行的补充输入，非独立对话轮次）。
     """
     repo = conversation_manager._ensure_repository()
     await _verify_ownership(conv_id, current_user, repo)
