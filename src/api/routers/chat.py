@@ -188,10 +188,17 @@ async def send_message(
     message_id = f"msg-{uuid4().hex}"
     user_id = current_user.user_id
 
-    # 已有会话：校验归属
+    # 已有会话：校验归属 + 拒绝并发执行
     if request.conversation_id:
         repo = conversation_manager._ensure_repository()
         await _verify_ownership(conversation_id, current_user, repo)
+
+        if task_manager.get_active_message_id(conversation_id):
+            raise HTTPException(
+                status_code=409,
+                detail="An execution is already active for this conversation. "
+                       "Use POST /chat/{conv_id}/inject to send input to the running execution.",
+            )
 
     # 确保 conversation 存在
     await conversation_manager.ensure_conversation_exists(conversation_id, user_id=user_id)
@@ -251,6 +258,10 @@ async def inject_message(
     仅当 conversation 有正在运行的执行时可用。
     注入的消息通过 queued_message 事件进入 lead agent 的 context。
     前端不应重建 SSE 连接 — 事件仍通过原有 stream 推送。
+
+    TODO: 注入内容当前仅存在于事件流（queued_message event），
+    不会创建 Message 记录。刷新后会话历史不可见此输入。
+    后续需要在 controller post-processing 或此处持久化。
     """
     repo = conversation_manager._ensure_repository()
     await _verify_ownership(conv_id, current_user, repo)
