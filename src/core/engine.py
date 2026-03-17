@@ -61,6 +61,13 @@ async def execute_loop(
     message_id = state["message_id"]
     tool_round_count: Dict[str, int] = {}  # per-agent tool round counter
 
+    # 3a. 记录用户原始输入为事件（统一 context 构建路径）
+    state["events"].append(ExecutionEvent(
+        event_type=StreamEventType.USER_INPUT.value,
+        agent_name="lead_agent",
+        data={"content": state["current_task"]},
+    ))
+
     # ── closures ──
 
     async def _emit(event_type: str, agent: Optional[str] = None, data: Any = None, *, sse_only: bool = False) -> None:
@@ -88,12 +95,13 @@ async def execute_loop(
 
     async def _build_context(agent_name: str, agent_config) -> list:
         """drain messages → artifacts 清单 → ContextManager.build → tool limit 注入"""
-        for msg in task_manager.drain_messages(message_id):
-            state["events"].append(ExecutionEvent(
-                event_type="queued_message",
-                agent_name="lead_agent",
-                data={"content": msg},
-            ))
+        if current_agent_name == "lead_agent":
+            for msg in task_manager.drain_messages(message_id):
+                state["events"].append(ExecutionEvent(
+                    event_type=StreamEventType.QUEUED_MESSAGE.value,
+                    agent_name="lead_agent",
+                    data={"content": msg},
+                ))
 
         artifacts_inventory = None
         if artifact_manager and state.get("session_id"):
@@ -323,7 +331,7 @@ async def execute_loop(
                         # 注入 instruction 到 subagent 的事件流（仅内存，不推 SSE）
                         # context 构建按 agent_name 过滤时自然拿到 instruction
                         state["events"].append(ExecutionEvent(
-                            event_type="subagent_instruction",
+                            event_type=StreamEventType.SUBAGENT_INSTRUCTION.value,
                             agent_name=target_agent,
                             data={"instruction": instruction},
                         ))

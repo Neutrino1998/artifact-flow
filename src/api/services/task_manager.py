@@ -56,6 +56,9 @@ class TaskManager:
         # Message Queue — key = message_id
         self._queues: dict[str, asyncio.Queue] = {}
 
+        # Conversation → active message_id 映射（用于消息注入）
+        self._active_conversations: dict[str, str] = {}
+
         logger.info(f"TaskManager initialized (max_concurrent={max_concurrent})")
 
     # ========================================
@@ -92,6 +95,9 @@ class TaskManager:
                     self._tasks.pop(task_id, None)
                     self._interrupts.pop(task_id, None)
                     self._queues.pop(task_id, None)
+                    self._active_conversations = {
+                        k: v for k, v in self._active_conversations.items() if v != task_id
+                    }
                     logger.debug(f"Task {task_id} completed and cleaned up (active: {len(self._tasks)})")
 
         task = asyncio.create_task(_wrapped(), name=f"exec-{task_id}")
@@ -151,6 +157,22 @@ class TaskManager:
     def get_interrupt(self, message_id: str) -> Optional[InterruptState]:
         """获取中断状态"""
         return self._interrupts.get(message_id)
+
+    # ========================================
+    # Conversation → Active Execution 映射
+    # ========================================
+
+    def register_conversation(self, conversation_id: str, message_id: str) -> None:
+        """注册 conversation 的活跃执行"""
+        self._active_conversations[conversation_id] = message_id
+
+    def get_active_message_id(self, conversation_id: str) -> Optional[str]:
+        """获取 conversation 当前活跃的 message_id，无活跃任务返回 None"""
+        message_id = self._active_conversations.get(conversation_id)
+        if message_id and message_id in self._tasks:
+            return message_id
+        self._active_conversations.pop(conversation_id, None)
+        return None
 
     # ========================================
     # Message Queue（执行中消息注入）
@@ -229,6 +251,7 @@ class TaskManager:
         self._tasks.clear()
         self._interrupts.clear()
         self._queues.clear()
+        self._active_conversations.clear()
         logger.info("TaskManager shutdown complete")
 
     @property

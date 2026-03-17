@@ -46,6 +46,11 @@ class StreamEventType(Enum):
     PERMISSION_RESULT = "permission_result"    # 权限确认结果
     COMPACTION_WAIT = "compaction_wait"        # 等待 compaction 完成
 
+    # ========== 输入 / 消息注入层 ==========
+    USER_INPUT = "user_input"                        # 用户原始输入 → lead 首条消息
+    QUEUED_MESSAGE = "queued_message"                # 执行中注入的用户消息 → lead
+    SUBAGENT_INSTRUCTION = "subagent_instruction"    # lead → sub 的指令
+
 
 # ============================================================
 # 内存事件（执行过程中累积，最终 batch write）

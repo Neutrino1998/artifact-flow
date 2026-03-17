@@ -111,16 +111,16 @@ class ContextManager:
         # ========== Messages ==========
         messages = [{"role": "system", "content": system_prompt}]
 
+        # 两个 agent 类型共用的输入构建
+        current_input_messages, anchor_idx = cls._build_current_input(state, agent_config)
+
+        # Lead 独有：conversation history（DB Message 层，含 compaction summaries）
         if agent_config.name == "lead_agent":
             history = state.get("conversation_history", [])
-            current_input_messages = cls._build_current_input(state, agent_config)
-
             if history:
-                # 先估算 tool 交互占用
                 tool_chars = sum(len(m.get("content", "")) for m in current_input_messages)
-                history_budget = max(context_max_chars - tool_chars, 20000)  # 最低 20K
-
-                preserve_recent = compaction_preserve_pairs * 2  # 对数 → 消息数
+                history_budget = max(context_max_chars - tool_chars, 20000)
+                preserve_recent = compaction_preserve_pairs * 2
                 compressed = cls.compress_messages_with_budget(
                     history, history_budget, preserve_recent=preserve_recent
                 )
@@ -128,40 +128,62 @@ class ContextManager:
                     compressed = cls._merge_truncation_marker(compressed, "...")
                 messages.extend(compressed)
 
-            # tool 交互：在超总预算时截断
-            if current_input_messages:
-                remaining = context_max_chars - sum(len(m.get("content", "")) for m in messages)
-                tool_total = sum(len(m.get("content", "")) for m in current_input_messages)
-                if tool_total <= remaining:
-                    # 预算内，全量追加
-                    messages.extend(current_input_messages)
-                elif remaining > 0:
-                    # 超预算但还有空间，第一条是 user input（current_task），预留其占用
-                    first_msg = current_input_messages[0]
-                    first_len = len(first_msg.get("content", ""))
-                    tool_budget = max(remaining - first_len, 0)
+        # 共用：预算感知的 tool interaction 追加
+        #
+        # 不可丢弃的"锚点消息"：
+        # - lead: current_input_messages[0] (user_input，只有一条)
+        # - sub:  最后一个 subagent_instruction（当前正在执行的任务）
+        #         早期的 instruction 及其交互已被后续 llm_complete 消化，可丢弃
+        if current_input_messages:
+            anchor_msg = current_input_messages[anchor_idx]
 
-                    if tool_budget > 0 and len(current_input_messages) > 1:
-                        compressed_tools = cls.compress_messages_with_budget(
-                            current_input_messages[1:], tool_budget,
-                            preserve_recent=tool_interaction_preserve
+            remaining = context_max_chars - sum(len(m.get("content", "")) for m in messages)
+            tool_total = sum(len(m.get("content", "")) for m in current_input_messages)
+            if tool_total <= remaining:
+                messages.extend(current_input_messages)
+            elif remaining > 0:
+                anchor_len = len(anchor_msg.get("content", ""))
+                tool_budget = max(remaining - anchor_len, 0)
+
+                # anchor 之前的消息（早期轮次）和 anchor 之后的消息（当前轮工具交互）
+                before_anchor = current_input_messages[:anchor_idx]
+                after_anchor = current_input_messages[anchor_idx + 1:]
+                compressible = before_anchor + after_anchor
+
+                if tool_budget > 0 and compressible:
+                    # after_anchor 是当前轮交互，优先级更高，先分配预算
+                    preserve = max(tool_interaction_preserve, 2)
+                    if after_anchor:
+                        compressed_after = cls.compress_messages_with_budget(
+                            after_anchor, tool_budget, preserve_recent=preserve
                         )
-                        messages.append(first_msg)
-                        if len(compressed_tools) < len(current_input_messages) - 1:
-                            compressed_tools = cls._merge_truncation_marker(compressed_tools, "...")
-                        messages.extend(compressed_tools)
+                        if len(compressed_after) < len(after_anchor):
+                            compressed_after = cls._merge_truncation_marker(compressed_after, "...")
+                        after_used = sum(len(m.get("content", "")) for m in compressed_after)
                     else:
-                        # 预算不足以容纳 tool 交互，只保留 user input（截断到 remaining）
-                        if first_len > remaining:
-                            first_msg = {**first_msg, "content": first_msg["content"][:remaining]}
-                        messages.append(first_msg)
+                        compressed_after = []
+                        after_used = 0
+
+                    before_budget = tool_budget - after_used
+                    if before_anchor and before_budget > 0:
+                        compressed_before = cls.compress_messages_with_budget(
+                            before_anchor, before_budget, preserve_recent=preserve
+                        )
+                        if len(compressed_before) < len(before_anchor):
+                            compressed_before = cls._merge_truncation_marker(compressed_before, "...")
+                    else:
+                        compressed_before = []
+
+                    messages.extend(compressed_before)
+                    messages.append(anchor_msg)
+                    messages.extend(compressed_after)
                 else:
-                    # remaining <= 0: 预算已耗尽，只保留 user input（current_task 不可丢弃）
-                    messages.append(current_input_messages[0])
-        else:
-            # subagent 路径不变（无 conversation history）
-            current_input_messages = cls._build_current_input(state, agent_config)
-            messages.extend(current_input_messages)
+                    if anchor_len > remaining:
+                        anchor_msg = {**anchor_msg, "content": anchor_msg["content"][:remaining]}
+                    messages.append(anchor_msg)
+            else:
+                # remaining <= 0: 预算已耗尽，只保留锚点消息
+                messages.append(anchor_msg)
 
         return Context(messages=messages)
 
@@ -218,94 +240,98 @@ class ContextManager:
         return "\n".join(lines)
 
     @classmethod
-    def _build_current_input(cls, state: Dict[str, Any], agent_config: Any) -> List[Dict[str, str]]:
+    def _build_current_input(cls, state: Dict[str, Any], agent_config: Any) -> tuple:
         """
-        构建当前输入消息（含 tool 交互和 queued messages）
+        Build raw messages from events (no compression). Both lead and sub.
 
-        按 agent_name 过滤事件构建 context：
-        - lead 看 current_task + 自己的工具交互
-        - subagent 看完整多轮历史（所有 invocation 的 instruction + tool 交互）
+        Returns:
+            (messages, anchor_index) — anchor_index 指向不可丢弃的锚点消息：
+            - lead: user_input（只有一条，index 0）
+            - sub:  最后一个 subagent_instruction（当前正在执行的任务）
         """
-        from tools.xml_formatter import format_result
+        from core.events import StreamEventType
 
-        messages = []
-        agent_name = agent_config.name
         events = state.get("events", [])
+        messages = cls._build_tool_interactions(events, agent_config.name)
 
-        if agent_name == "lead_agent":
-            # Lead: 用户输入
-            messages.append({"role": "user", "content": state["current_task"]})
+        # 从事件流直接定位最后一个 anchor 事件的 index
+        anchor_types = {StreamEventType.USER_INPUT.value, StreamEventType.SUBAGENT_INSTRUCTION.value}
+        agent_events = [e for e in events if e.agent_name == agent_config.name]
 
-            # 过滤 lead 的工具交互事件
-            tool_interactions = cls._build_tool_interactions(events, agent_name)
+        # 映射：哪些事件产出了 messages（跳过空 content 的事件）
+        anchor_idx = 0
+        msg_idx = 0
+        for event in agent_events:
+            produced = cls._event_produces_message(event)
+            if produced:
+                if event.event_type in anchor_types:
+                    anchor_idx = msg_idx
+                msg_idx += 1
 
-            if tool_interactions:
-                compressed = cls.compress_messages(
-                    tool_interactions,
-                    level="normal",
-                    preserve_recent=5  # 奇数：[asst, user, asst, user, asst]
-                )
-                if len(compressed) < len(tool_interactions):
-                    compressed = cls._merge_truncation_marker(
-                        compressed,
-                        "_[Earlier tool calls truncated]_"
-                    )
-                messages.extend(compressed)
-        else:
-            # Subagent: instruction 已作为 subagent_instruction 事件注入事件流
-            # 按 agent_name 过滤即可拿到完整多轮历史
-            tool_interactions = cls._build_tool_interactions(events, agent_name)
+        return messages, anchor_idx
 
-            if tool_interactions:
-                compressed = cls.compress_messages(
-                    tool_interactions,
-                    level="normal",
-                    preserve_recent=5
-                )
-                if len(compressed) < len(tool_interactions):
-                    compressed = cls._merge_truncation_marker(
-                        compressed,
-                        "_[Earlier interactions truncated]_"
-                    )
-                messages.extend(compressed)
+    @staticmethod
+    def _event_produces_message(event) -> bool:
+        """判断事件是否会在 _build_tool_interactions 中产出一条消息"""
+        from core.events import StreamEventType
 
-        return messages
+        et = event.event_type
+        if et == StreamEventType.USER_INPUT.value:
+            return bool(event.data and event.data.get("content"))
+        if et == StreamEventType.SUBAGENT_INSTRUCTION.value:
+            return bool(event.data and event.data.get("instruction"))
+        if et == StreamEventType.LLM_COMPLETE.value:
+            return bool(event.data and event.data.get("content"))
+        if et == StreamEventType.QUEUED_MESSAGE.value:
+            return bool(event.data and event.data.get("content"))
+        if et == StreamEventType.TOOL_COMPLETE.value:
+            return bool(event.data)
+        return False
 
     @classmethod
     def _build_tool_interactions(cls, events: List, agent_name: str) -> List[Dict[str, str]]:
         """
         从事件流中构建 tool 交互历史
 
-        按 agent_name 过滤事件，处理三种事件类型：
+        按 agent_name 过滤事件，处理事件类型：
+        - user_input → user 消息（用户原始输入，lead only）
         - subagent_instruction → user 消息（subagent 的 instruction）
+        - queued_message → user 消息（执行中注入）
         - llm_complete → assistant 消息
         - tool_complete → user 消息
         """
         from tools.xml_formatter import format_result
+        from core.events import StreamEventType
 
         interactions = []
         agent_events = [e for e in events if e.agent_name == agent_name]
 
         for event in agent_events:
-            if event.event_type == "subagent_instruction":
+            if event.event_type == StreamEventType.USER_INPUT.value:
+                # 用户原始输入 → user 消息
+                content = event.data.get("content", "") if event.data else ""
+                if content:
+                    interactions.append({"role": "user", "content": content})
+
+            elif event.event_type == StreamEventType.SUBAGENT_INSTRUCTION.value:
                 # Subagent instruction → user 消息
                 instruction = event.data.get("instruction", "") if event.data else ""
                 if instruction:
                     interactions.append({"role": "user", "content": instruction})
 
-            elif event.event_type == "llm_complete":
+            elif event.event_type == StreamEventType.LLM_COMPLETE.value:
                 # LLM 响应 → assistant 消息
                 content = event.data.get("content", "") if event.data else ""
                 if content:
                     interactions.append({"role": "assistant", "content": content})
 
-            elif event.event_type == "queued_message":
+            elif event.event_type == StreamEventType.QUEUED_MESSAGE.value:
                 # 执行中注入的用户消息 → user 消息
                 content = event.data.get("content", "") if event.data else ""
                 if content:
                     interactions.append({"role": "user", "content": content})
 
-            elif event.event_type == "tool_complete":
+            elif event.event_type == StreamEventType.TOOL_COMPLETE.value:
                 # 工具结果 → user 消息
                 if event.data:
                     tool_name = event.data.get("tool", "unknown")

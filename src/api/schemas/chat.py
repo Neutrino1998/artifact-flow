@@ -36,6 +36,7 @@ class ChatResponse(BaseModel):
     conversation_id: str = Field(..., description="Conversation ID")
     message_id: str = Field(..., description="New message ID")
     stream_url: str = Field(..., description="SSE endpoint URL for streaming")
+    injected: bool = Field(False, description="True if message was injected into active execution")
 
 
 class ResumeResponse(BaseModel):

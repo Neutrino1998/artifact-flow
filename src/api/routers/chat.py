@@ -185,10 +185,20 @@ async def send_message(
     message_id = f"msg-{uuid4().hex}"
     user_id = current_user.user_id
 
-    # 已有会话：校验归属
+    # 已有会话：校验归属 + 检测活跃执行
     if request.conversation_id:
         repo = conversation_manager._ensure_repository()
         await _verify_ownership(conversation_id, current_user, repo)
+
+        active_msg_id = task_manager.get_active_message_id(conversation_id)
+        if active_msg_id:
+            task_manager.inject_message(active_msg_id, request.user_input)
+            return ChatResponse(
+                conversation_id=conversation_id,
+                message_id=active_msg_id,
+                stream_url=f"/api/v1/stream/{active_msg_id}",
+                injected=True,
+            )
 
     # 确保 conversation 存在
     await conversation_manager.ensure_conversation_exists(conversation_id, user_id=user_id)
@@ -201,6 +211,7 @@ async def send_message(
 
     # 启动后台任务
     async def execute_and_push():
+        task_manager.register_conversation(conversation_id, message_id)
         try:
             async with _create_controller() as ctrl:
                 parent_kwargs = {}
@@ -401,7 +412,7 @@ async def resume_execution(
     if not message:
         raise HTTPException(status_code=404, detail="Message not found")
     if message.conversation_id != conv_id:
-        raise HTTPException(status_code=403, detail="Message does not belong to this conversation")
+        raise HTTPException(status_code=404, detail="Message not found")
 
     # 解决 interrupt（唤醒 coroutine）
     resume_data = {
