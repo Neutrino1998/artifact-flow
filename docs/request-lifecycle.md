@@ -140,7 +140,7 @@ conversation_history = [
 ### 初始状态构建
 
 ```python
-# src/core/state.py - create_initial_state()
+# src/core/engine.py - create_initial_state()
 initial_state = {
     "current_task": "帮我分析一下 Python 异步编程的最佳实践",
     "session_id": conversation_id, # session_id 与 conversation_id 相同，用于对话与Artifact映射

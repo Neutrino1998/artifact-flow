@@ -375,10 +375,9 @@ artifact-flow/
 │   └── ui.py                    # Rich 终端 UI 组件
 ├── src/
 │   ├── core/        # 核心工作流和状态管理 (已完成)
-│   │   ├── state.py              # 状态管理和定义
-│   │   ├── engine.py             # Pi-style 执行引擎
+│   │   ├── engine.py             # Pi-style 执行引擎（含状态创建和ExecutionMetrics）
 │   │   ├── controller.py         # 执行控制器 (支持流式和批量模式)
-│   │   ├── events.py             # 统一事件类型和ExecutionMetrics定义
+│   │   ├── events.py             # 统一事件类型定义（StreamEventType + ExecutionEvent）
 │   │   ├── context_manager.py    # Context压缩和管理
 │   │   └── conversation_manager.py  # 对话管理器（缓存+持久化）
 │   ├── agents/      # 智能体系统 (已完成)
