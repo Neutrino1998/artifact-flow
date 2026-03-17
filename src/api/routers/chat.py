@@ -202,41 +202,46 @@ async def send_message(
                    "Use POST /chat/{conv_id}/inject to send input to the running execution.",
         )
 
-    # 确保 conversation 存在
-    await conversation_manager.ensure_conversation_exists(conversation_id, user_id=user_id)
+    # reserve 之后的所有步骤失败时必须回滚，否则 reservation 永久泄漏
+    try:
+        # 确保 conversation 存在
+        await conversation_manager.ensure_conversation_exists(conversation_id, user_id=user_id)
 
-    # 创建 stream（使用 message_id 作为 stream key）
-    await stream_manager.create_stream(message_id, owner_user_id=user_id)
+        # 创建 stream（使用 message_id 作为 stream key）
+        await stream_manager.create_stream(message_id, owner_user_id=user_id)
 
-    # 设置请求上下文
-    set_request_context(message_id=message_id, conv_id=conversation_id)
+        # 设置请求上下文
+        set_request_context(message_id=message_id, conv_id=conversation_id)
 
-    # 启动后台任务
-    async def execute_and_push():
-        try:
-            async with _create_controller() as ctrl:
-                parent_kwargs = {}
-                if 'parent_message_id' in request.model_fields_set:
-                    parent_kwargs['parent_message_id'] = request.parent_message_id
-                await _run_and_push(
-                    stream_manager,
-                    message_id,
-                    ctrl.stream_execute(
-                        user_input=request.user_input,
-                        conversation_id=conversation_id,
-                        message_id=message_id,
-                        **parent_kwargs,
-                    ),
-                )
-        except Exception as e:
-            logger.exception(f"Failed to initialize execution: {e}")
-            await stream_manager.push_event(message_id, _sanitize_error_event({
-                "type": "error",
-                "timestamp": datetime.now().isoformat(),
-                "data": {"success": False, "error": str(e)}
-            }))
+        # 启动后台任务
+        async def execute_and_push():
+            try:
+                async with _create_controller() as ctrl:
+                    parent_kwargs = {}
+                    if 'parent_message_id' in request.model_fields_set:
+                        parent_kwargs['parent_message_id'] = request.parent_message_id
+                    await _run_and_push(
+                        stream_manager,
+                        message_id,
+                        ctrl.stream_execute(
+                            user_input=request.user_input,
+                            conversation_id=conversation_id,
+                            message_id=message_id,
+                            **parent_kwargs,
+                        ),
+                    )
+            except Exception as e:
+                logger.exception(f"Failed to initialize execution: {e}")
+                await stream_manager.push_event(message_id, _sanitize_error_event({
+                    "type": "error",
+                    "timestamp": datetime.now().isoformat(),
+                    "data": {"success": False, "error": str(e)}
+                }))
 
-    await task_manager.submit(message_id, execute_and_push())
+        await task_manager.submit(message_id, execute_and_push())
+    except Exception:
+        task_manager.unregister_conversation(conversation_id)
+        raise
 
     return ChatResponse(
         conversation_id=conversation_id,
