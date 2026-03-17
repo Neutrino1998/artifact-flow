@@ -71,21 +71,9 @@ Agent → Tool
 - [ ] 前端 Zustand store 只存跨组件共享状态，局部状态用 `useState`
 - [ ] 全局单例有明确理由（StreamManager、TaskManager 等基础设施组件）
 
----
-
-## 最好满足（架构级 review）
-
-### 可观测性
-- [ ] 关键操作有日志 / LogEntry
-- [ ] 异步操作有超时，不能无限等待
-- [ ] request_id 贯穿一次请求的所有日志
-
-### 可测试性
-- [ ] 依赖注入而不是硬编码（FastAPI Depends / 构造函数参数）
-- [ ] 纯函数优先，副作用推到边界
-- [ ] 不可测的代码大概率职责不清晰 — 考虑重构
-
-### 变更成本可预估
-- [ ] 新增 Agent = 写子类 + 注册到 graph，不改框架
-- [ ] 新增 Tool = 继承 BaseTool + 注册到 Registry，不改框架
-- [ ] 小功能改 8+ 文件且出现重复改动模式 → 抽象可能有问题，review 时讨论
+### 性能反模式
+- [ ] 无依赖的 async 操作用 `asyncio.gather` / `Promise.all` 并行，除非有明确的串行理由（如 interrupt 顺序）
+- [ ] 不先检查再操作（TOCTOU）— 直接操作 + 异常处理
+- [ ] 热路径（per-request / per-event / 主循环）里不做可以在初始化时做的事
+- [ ] 循环里没有数据库/API 调用（N+1）— 用 JOIN / eager loading / 批量查询
+- [ ] 高频回调（SSE / 轮询 / WebSocket）里写 store 或数据库前先比较，值没变就跳过
