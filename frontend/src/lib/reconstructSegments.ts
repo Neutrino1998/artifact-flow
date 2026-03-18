@@ -35,6 +35,11 @@ export function reconstructSegments(events: MessageEventItem[]): ExecutionSegmen
         if (!seg) break;
         const content = (data?.content as string) ?? '';
         seg.content = content;
+        const reasoning = (data?.reasoning_content as string) ?? '';
+        if (reasoning) {
+          seg.reasoningContent = reasoning;
+          seg.isThinking = false; // historical — already complete
+        }
         if (content.includes('<tool_call>') && !seg.llmOutput) {
           seg.llmOutput = content;
         }
