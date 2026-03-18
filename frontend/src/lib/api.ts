@@ -264,6 +264,27 @@ export async function exportArtifact(
   return res.blob();
 }
 
+// Message Events (historical replay)
+export interface MessageEventItem {
+  id: string;
+  event_type: string;
+  agent_name: string | null;
+  data: Record<string, unknown> | null;
+  created_at: string;
+}
+
+export interface MessageEventsResponse {
+  message_id: string;
+  events: MessageEventItem[];
+  total: number;
+}
+
+export function getMessageEvents(convId: string, msgId: string) {
+  return request<MessageEventsResponse>(
+    `/api/v1/chat/${convId}/messages/${msgId}/events`
+  );
+}
+
 // User Management (Admin)
 export function listUsers(limit = 50, offset = 0) {
   return request<UserListResponse>(

@@ -1,11 +1,14 @@
 'use client';
 
-import { memo, useState } from 'react';
+import { memo, useState, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
 import { useStreamStore } from '@/stores/streamStore';
+import { useConversationStore } from '@/stores/conversationStore';
 import { PROSE_CLASSES } from '@/lib/styles';
+import { getMessageEvents } from '@/lib/api';
+import { reconstructSegments } from '@/lib/reconstructSegments';
 import AgentSegmentBlock from './AgentSegmentBlock';
 import ProcessingFlow from './ProcessingFlow';
 
@@ -20,6 +23,30 @@ function AssistantMessage({ content, messageId, isSummarized }: AssistantMessage
   const completedSegs = useStreamStore(
     (s) => messageId ? s.completedSegments.get(messageId) : undefined
   );
+  const conversationId = useConversationStore((s) => s.current?.id);
+
+  // Lazy-load historical segments from persisted events when session cache is empty
+  useEffect(() => {
+    if (!messageId || !conversationId || completedSegs !== undefined) return;
+
+    let cancelled = false;
+    getMessageEvents(conversationId, messageId)
+      .then((res) => {
+        if (cancelled || res.events.length === 0) return;
+        const segments = reconstructSegments(res.events);
+        if (segments.length > 0) {
+          const store = useStreamStore.getState();
+          const newMap = new Map(store.completedSegments);
+          newMap.set(messageId, segments);
+          useStreamStore.setState({ completedSegments: newMap });
+        }
+      })
+      .catch(() => {
+        // Silently ignore — historical segments are non-critical
+      });
+
+    return () => { cancelled = true; };
+  }, [messageId, conversationId, completedSegs]);
 
   const handleCopy = async () => {
     await navigator.clipboard.writeText(content);
@@ -29,7 +56,7 @@ function AssistantMessage({ content, messageId, isSummarized }: AssistantMessage
 
   return (
     <div className="group relative">
-      {/* Completed execution segments (session-only, collapsible) */}
+      {/* Completed execution segments (collapsible) */}
       {completedSegs && completedSegs.length > 0 && (
         <div className="mb-3">
           <ProcessingFlow segments={completedSegs} isActive={false} defaultExpanded={false}>
