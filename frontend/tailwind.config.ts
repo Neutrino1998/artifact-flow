@@ -7,12 +7,14 @@ const config: Config = {
     extend: {
       colors: {
         chat: {
-          DEFAULT: '#f5f0e8',
-          dark: '#1a1915',
+          DEFAULT: '#faf7f1',
+          dark: '#1e1e1e',
         },
         panel: {
-          DEFAULT: '#ddd5c8',
-          dark: '#21201c',
+          DEFAULT: '#ffffff',
+          dark: '#222222',
+          accent: '#ebe4d9',
+          'accent-dark': '#1a1a1a',
         },
         action: {
           DEFAULT: '#1f1e1b',
@@ -20,12 +22,12 @@ const config: Config = {
           contrast: '#f3eee3',
         },
         bg: {
-          DEFAULT: '#f5f0e8',
-          dark: '#1a1915',
+          DEFAULT: '#faf7f1',
+          dark: '#1a1a1a',
         },
         surface: {
           DEFAULT: '#ffffff',
-          dark: '#2c2b28',
+          dark: '#2a2a2a',
         },
         text: {
           primary: '#1a1a1a',

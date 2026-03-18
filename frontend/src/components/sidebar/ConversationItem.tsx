@@ -33,8 +33,8 @@ function ConversationItem({ conversation, isActive, onSelect }: ConversationItem
     <div
       className={`group relative cursor-pointer transition-colors rounded-lg mx-2 ${
         isActive
-          ? 'bg-bg dark:bg-bg-dark px-3 py-2.5'
-          : 'hover:bg-bg/60 dark:hover:bg-bg-dark/60 px-3 py-2.5'
+          ? 'bg-panel-accent dark:bg-panel-accent-dark px-3 py-2.5'
+          : 'hover:bg-panel-accent/60 dark:hover:bg-panel-accent-dark/60 px-3 py-2.5'
       }`}
       onClick={() => onSelect(conversation.id)}
       onMouseEnter={() => setShowMenu(true)}

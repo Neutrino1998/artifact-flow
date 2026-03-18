@@ -59,7 +59,7 @@ export default function UserMenu({ collapsed }: { collapsed?: boolean }) {
         ) : (
           <button
             onClick={() => setPopoverOpen((o) => !o)}
-            className="w-full flex items-center gap-3 px-3 py-2.5 bg-bg dark:bg-bg-dark rounded-card hover:bg-surface dark:hover:bg-surface-dark transition-colors text-left"
+            className="w-full flex items-center gap-3 px-3 py-2.5 bg-panel-accent dark:bg-panel-accent-dark rounded-card hover:bg-panel-accent/70 dark:hover:bg-surface-dark transition-colors text-left"
           >
             <div className="w-8 h-8 rounded-lg bg-accent/15 text-accent flex items-center justify-center text-sm font-medium shrink-0">
               {initial}
@@ -96,7 +96,7 @@ export default function UserMenu({ collapsed }: { collapsed?: boolean }) {
           <div
             className={`absolute z-40 bottom-full mb-1 ${
               collapsed ? 'left-0' : 'left-0 right-0'
-            } min-w-[180px] bg-bg dark:bg-bg-dark border-none rounded-card shadow-modal p-1.5`}
+            } min-w-[180px] bg-bg dark:bg-panel-accent-dark border-none rounded-card shadow-modal p-1.5`}
           >
             {/* Theme toggle */}
             <button
