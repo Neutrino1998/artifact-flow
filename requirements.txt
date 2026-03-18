@@ -4,7 +4,7 @@
 
 # LiteLLM - 统一 LLM 接口
 # 支持 OpenAI/DeepSeek/Qwen/Ollama/vLLM 等 100+ 提供商
-litellm>=1.40.0
+litellm>=1.82.4
 
 # ========================================
 # 工具依赖
