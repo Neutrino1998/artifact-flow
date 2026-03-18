@@ -57,13 +57,13 @@ class CompactionManager:
         """
         根据 execution_metrics 判断是否触发 compaction。
 
-        从最后一次 agent_execution 的 input_tokens 判断是否超过阈值。
+        从 last_token_usage 的 input_tokens 判断是否超过阈值。
         """
-        agent_executions = execution_metrics.get("agent_executions", [])
-        if not agent_executions:
+        last_usage = execution_metrics.get("last_token_usage")
+        if not last_usage:
             return
 
-        last_input_tokens = agent_executions[-1].get("token_usage", {}).get("input_tokens", 0)
+        last_input_tokens = last_usage.get("input_tokens", 0)
         if last_input_tokens < config.COMPACTION_THRESHOLD:
             return
 

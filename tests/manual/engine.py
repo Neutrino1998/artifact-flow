@@ -174,13 +174,13 @@ class StreamEventHandler:
             if self.verbose and data.get("execution_metrics"):
                 metrics = data["execution_metrics"]
                 print(f"   总耗时: {metrics.get('total_duration_ms', 0)}ms")
-                print(f"   Agent 执行次数: {len(metrics.get('agent_executions', []))}")
-                print(f"   工具调用次数: {len(metrics.get('tool_calls', []))}")
-                total_in = sum(e.get("token_usage", {}).get("input_tokens", 0)
-                               for e in metrics.get("agent_executions", []))
-                total_out = sum(e.get("token_usage", {}).get("output_tokens", 0)
-                                for e in metrics.get("agent_executions", []))
-                print(f"   总 Token: {total_in} in / {total_out} out")
+                events = metrics.get("events", [])
+                agent_events = [e for e in events if e.get("type") == "agent_complete"]
+                tool_events = [e for e in events if e.get("type") == "tool_complete"]
+                print(f"   Agent 执行次数: {len(agent_events)}")
+                print(f"   工具调用次数: {len(tool_events)}")
+                total_usage = metrics.get("total_token_usage", {})
+                print(f"   总 Token: {total_usage.get('input_tokens', 0)} in / {total_usage.get('output_tokens', 0)} out")
             if not self.verbose and data.get("response"):
                 preview = data["response"][:150]
                 if len(data["response"]) > 150:

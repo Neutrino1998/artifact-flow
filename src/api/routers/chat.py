@@ -348,6 +348,8 @@ async def get_conversation(
                     parent_id=msg.parent_id,
                     user_input=msg.user_input,
                     response=msg.response,
+                    user_input_summary=msg.user_input_summary,
+                    response_summary=msg.response_summary,
                     created_at=msg.created_at,
                     children=children_map.get(msg.id, []),
                 )

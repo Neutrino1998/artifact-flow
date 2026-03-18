@@ -32,30 +32,27 @@ class TokenUsage(TypedDict):
     total_tokens: int
 
 
-class ToolCallRecord(TypedDict):
-    tool_name: str
-    success: bool
-    duration_ms: int
-    called_at: str
-    completed_at: str
+class MetricsEvent(TypedDict, total=False):
+    type: str              # "agent_complete" | "tool_complete"
+    # agent_complete fields
     agent: str
-
-
-class AgentExecutionRecord(TypedDict):
-    agent_name: str
     model: str
     token_usage: TokenUsage
-    llm_duration_ms: int
+    duration_ms: int
     started_at: str
     completed_at: str
+    # tool_complete fields
+    tool: str
+    success: bool
 
 
 class ExecutionMetrics(TypedDict):
     started_at: str
     completed_at: Optional[str]
     total_duration_ms: Optional[int]
-    agent_executions: List[AgentExecutionRecord]
-    tool_calls: List[ToolCallRecord]
+    last_token_usage: Optional[TokenUsage]
+    total_token_usage: TokenUsage
+    events: List[MetricsEvent]
 
 
 def create_initial_metrics() -> ExecutionMetrics:
@@ -63,8 +60,9 @@ def create_initial_metrics() -> ExecutionMetrics:
         "started_at": datetime.now().isoformat(),
         "completed_at": None,
         "total_duration_ms": None,
-        "agent_executions": [],
-        "tool_calls": [],
+        "last_token_usage": None,
+        "total_token_usage": {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0},
+        "events": [],
     }
 
 
@@ -75,42 +73,17 @@ def finalize_metrics(metrics: ExecutionMetrics) -> None:
     metrics["total_duration_ms"] = int((completed_at - started_at).total_seconds() * 1000)
 
 
-def append_agent_execution(
-    metrics: ExecutionMetrics,
-    agent_name: str,
-    model: str,
-    token_usage: TokenUsage,
-    started_at: str,
-    completed_at: str,
-    llm_duration_ms: int,
-) -> None:
-    metrics["agent_executions"].append({
-        "agent_name": agent_name,
-        "model": model,
-        "token_usage": token_usage,
-        "llm_duration_ms": llm_duration_ms,
-        "started_at": started_at,
-        "completed_at": completed_at,
-    })
-
-
-def append_tool_call(
-    metrics: ExecutionMetrics,
-    tool_name: str,
-    success: bool,
-    duration_ms: int,
-    called_at: str,
-    completed_at: str,
-    agent: str,
-) -> None:
-    metrics["tool_calls"].append({
-        "tool_name": tool_name,
-        "success": success,
-        "duration_ms": duration_ms,
-        "called_at": called_at,
-        "completed_at": completed_at,
-        "agent": agent,
-    })
+def append_metrics_event(metrics: ExecutionMetrics, event: MetricsEvent) -> None:
+    """Append a metrics event and update token usage aggregates for agent_complete events."""
+    metrics["events"].append(event)
+    if event.get("type") == "agent_complete":
+        usage = event.get("token_usage")
+        if usage:
+            metrics["last_token_usage"] = usage
+            total = metrics["total_token_usage"]
+            total["input_tokens"] += usage.get("input_tokens", 0)
+            total["output_tokens"] += usage.get("output_tokens", 0)
+            total["total_tokens"] += usage.get("total_tokens", 0)
 
 
 # ============================================================
@@ -322,17 +295,19 @@ async def execute_loop(
             "content": response_content,
             "reasoning_content": reasoning_content,
             "token_usage": normalized_usage,
+            "model": model,
+            "duration_ms": llm_duration_ms,
         })
 
-        append_agent_execution(
-            metrics=state["execution_metrics"],
-            agent_name=agent_name,
-            model=model,
-            token_usage=normalized_usage,
-            started_at=llm_start_time.isoformat(),
-            completed_at=llm_end_time.isoformat(),
-            llm_duration_ms=llm_duration_ms,
-        )
+        append_metrics_event(state["execution_metrics"], {
+            "type": "agent_complete",
+            "agent": agent_name,
+            "model": model,
+            "token_usage": normalized_usage,
+            "duration_ms": llm_duration_ms,
+            "started_at": llm_start_time.isoformat(),
+            "completed_at": llm_end_time.isoformat(),
+        })
 
         input_tokens = normalized_usage["input_tokens"]
         output_tokens = normalized_usage["output_tokens"]
@@ -516,15 +491,15 @@ async def execute_loop(
                 "params": params,
             })
 
-            append_tool_call(
-                metrics=state["execution_metrics"],
-                tool_name=tool_name,
-                success=tool_result.success,
-                duration_ms=tool_duration_ms,
-                called_at=tool_start_time.isoformat(),
-                completed_at=tool_end_time.isoformat(),
-                agent=agent_name,
-            )
+            append_metrics_event(state["execution_metrics"], {
+                "type": "tool_complete",
+                "tool": tool_name,
+                "success": tool_result.success,
+                "duration_ms": tool_duration_ms,
+                "started_at": tool_start_time.isoformat(),
+                "completed_at": tool_end_time.isoformat(),
+                "agent": agent_name,
+            })
 
             tool_round_count[agent_name] = tool_round_count.get(agent_name, 0) + 1
 
