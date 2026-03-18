@@ -1463,12 +1463,11 @@
 <p>Core 模块是 ArtifactFlow 的核心引擎，负责状态管理、工作流编排和执行控制。</p>
 <h2 id="模块结构">模块结构</h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>src/core/
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>├── state.py              # 状态定义与转换
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>├── events.py             # 事件类型与指标
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>├── graph.py              # LangGraph 工作流
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>├── controller.py         # 执行控制器
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>├── context_manager.py    # 上下文管理
-<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>└── conversation_manager.py # 对话管理
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>├── engine.py             # Pi-style 执行引擎（含状态创建和 ExecutionMetrics）
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>├── events.py             # 事件类型定义（StreamEventType + ExecutionEvent）
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>├── controller.py         # 执行控制器
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>├── context_manager.py    # 上下文管理
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>└── conversation_manager.py # 对话管理
 </code></pre></div>
 <h2 id="状态系统-statepy">状态系统 (state.py)</h2>
 <h3 id="executionphase">ExecutionPhase</h3>
