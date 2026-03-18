@@ -30,7 +30,7 @@ export function useChat() {
         // null = explicitly no parent (create new root), send as null
         // string = explicit parent ID
         const body: ChatRequest = {
-          content,
+          user_input: content,
           conversation_id: current?.id ?? undefined,
         };
 

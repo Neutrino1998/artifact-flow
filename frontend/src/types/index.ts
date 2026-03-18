@@ -24,6 +24,7 @@ export type UserListResponse = S['UserListResponse'];
 
 export type ChatRequest = S['ChatRequest'];
 export type ChatResponse = S['ChatResponse'];
+export type InjectResponse = S['InjectResponse'];
 export type ResumeRequest = S['ResumeRequest'];
 export type ResumeResponse = S['ResumeResponse'];
 export type MessageResponse = S['MessageResponse'];
@@ -37,14 +38,12 @@ export type ConversationDetail = S['ConversationDetailResponse'];
 
 export type ArtifactSummary = S['ArtifactSummary'];
 export type ArtifactListResponse = S['ArtifactListResponse'];
-// Manually extended until next `npm run generate-types` to include
-// versions and latest_version returned by the merged endpoint.
-export type ArtifactDetail = S['ArtifactDetailResponse'] & {
-  versions: VersionSummary[];
+// Override latest_version to use narrowed VersionDetail (tuple changes)
+export type ArtifactDetail = Omit<S['ArtifactDetailResponse'], 'latest_version'> & {
   latest_version: VersionDetail | null;
 };
 export type VersionSummary = S['VersionSummary'];
-export type VersionListResponse = S['VersionListResponse'];
+// Narrow changes from string[][] to [string, string][] for tuple precision
 export type VersionDetail = Omit<S['VersionDetailResponse'], 'changes'> & {
   changes: [string, string][] | null;
 };

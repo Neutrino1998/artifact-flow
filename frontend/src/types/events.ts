@@ -19,6 +19,11 @@ export enum StreamEventType {
   TOOL_COMPLETE = 'tool_complete',
   PERMISSION_REQUEST = 'permission_request',
   PERMISSION_RESULT = 'permission_result',
+
+  // Input / injection layer
+  QUEUED_MESSAGE = 'queued_message',
+  COMPACTION_WAIT = 'compaction_wait',
+  SUBAGENT_INSTRUCTION = 'subagent_instruction',
 }
 
 // ============================================================
@@ -77,9 +82,36 @@ export interface PermissionResultData {
   approved: boolean;
 }
 
+export interface TokenUsage {
+  input_tokens: number;
+  output_tokens: number;
+  total_tokens: number;
+}
+
+export interface MetricsEvent {
+  type: 'agent_complete' | 'tool_complete';
+  agent?: string;
+  model?: string;
+  token_usage?: TokenUsage;
+  duration_ms?: number;
+  started_at?: string;
+  completed_at?: string;
+  tool?: string;
+  success?: boolean;
+}
+
+export interface ExecutionMetrics {
+  started_at: string;
+  completed_at?: string;
+  total_duration_ms?: number;
+  last_token_usage?: TokenUsage;
+  total_token_usage: TokenUsage;
+  events: MetricsEvent[];
+}
+
 export interface CompleteData {
   response: string;
-  execution_metrics?: Record<string, unknown>;
+  execution_metrics?: ExecutionMetrics;
 }
 
 export interface ErrorData {

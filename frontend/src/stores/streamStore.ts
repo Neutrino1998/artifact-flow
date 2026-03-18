@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import type { ExecutionMetrics, TokenUsage } from '@/types/events';
 
 export interface ToolCallInfo {
   id: string;
@@ -24,6 +25,9 @@ export interface ExecutionSegment {
   toolCalls: ToolCallInfo[];
   content: string;
   llmOutput: string;             // raw LLM output preserved before content is cleared at tool_start
+  tokenUsage?: TokenUsage;
+  model?: string;
+  llmDurationMs?: number;
 }
 
 interface StreamState {
@@ -46,6 +50,15 @@ interface StreamState {
   // Completed segments cache (session-only, keyed by messageId)
   completedSegments: Map<string, ExecutionSegment[]>;
 
+  // Injected messages (from /inject during streaming)
+  injectedMessages: { content: string; timestamp: string }[];
+
+  // Compaction wait indicator
+  compactionWait: boolean;
+
+  // Execution metrics summary (from COMPLETE event)
+  executionMetrics: ExecutionMetrics | null;
+
   // Permission
   permissionRequest: PermissionRequest | null;
 
@@ -67,6 +80,11 @@ interface StreamState {
   // Pending user message
   setPendingUserMessage: (msg: string | null) => void;
   setStreamParentId: (id: string | null | undefined) => void;
+
+  // Inject / compaction / metrics
+  addInjectedMessage: (msg: { content: string; timestamp: string }) => void;
+  setCompactionWait: (val: boolean) => void;
+  setExecutionMetrics: (metrics: ExecutionMetrics) => void;
 
   // Snapshot segments for completed messages
   snapshotSegments: (messageId: string) => void;
@@ -123,6 +141,9 @@ export const useStreamStore = create<StreamState>((set, get) => {
     pendingUserMessage: null,
     streamParentId: undefined,
     completedSegments: new Map(),
+    injectedMessages: [],
+    compactionWait: false,
+    executionMetrics: null,
     permissionRequest: null,
     error: null,
 
@@ -134,6 +155,9 @@ export const useStreamStore = create<StreamState>((set, get) => {
         messageId,
         conversationId,
         segments: [],
+        injectedMessages: [],
+        compactionWait: false,
+        executionMetrics: null,
         permissionRequest: null,
         error: null,
       });
@@ -159,6 +183,7 @@ export const useStreamStore = create<StreamState>((set, get) => {
 
     pushSegment: (agent) =>
       set((s) => ({
+        compactionWait: false,
         segments: [
           ...s.segments,
           {
@@ -224,6 +249,11 @@ export const useStreamStore = create<StreamState>((set, get) => {
 
     setPendingUserMessage: (msg) => set({ pendingUserMessage: msg }),
     setStreamParentId: (id) => set({ streamParentId: id }),
+
+    addInjectedMessage: (msg) =>
+      set((s) => ({ injectedMessages: [...s.injectedMessages, msg] })),
+    setCompactionWait: (val) => set({ compactionWait: val }),
+    setExecutionMetrics: (metrics) => set({ executionMetrics: metrics }),
 
     snapshotSegments: (messageId) => {
       const state = get();

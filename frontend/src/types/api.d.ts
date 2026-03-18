@@ -114,6 +114,34 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/chat/{conv_id}/inject": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Inject Message
+         * @description 向活跃执行注入消息
+         *
+         *     仅当 conversation 有正在运行的执行时可用。
+         *     注入的消息通过 queued_message 事件进入 lead agent 的 context。
+         *     前端不应重建 SSE 连接 — 事件仍通过原有 stream 推送。
+         *
+         *     注入内容通过 queued_message 事件持久化到 MessageEvent 表，
+         *     可通过 GET /chat/{conv_id}/messages/{msg_id}/events 查询。
+         *     不创建独立 Message 记录（注入是同一轮执行的补充输入，非独立对话轮次）。
+         */
+        post: operations["inject_message_api_v1_chat__conv_id__inject_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/chat/{conv_id}": {
         parameters: {
             query?: never;
@@ -171,10 +199,29 @@ export interface paths {
          * Resume Execution
          * @description 恢复中断的执行（权限确认后）
          *
-         *     v2: 直接通过 TaskManager.resolve_interrupt() 唤醒暂停的 coroutine，
-         *     不再创建新的 controller/graph。
+         *     通过 TaskManager.resolve_interrupt() 唤醒暂停的 coroutine。
          */
         post: operations["resume_execution_api_v1_chat__conv_id__resume_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/chat/{conv_id}/compact": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Trigger Compaction
+         * @description 手动触发对话 compaction
+         */
+        post: operations["trigger_compaction_api_v1_chat__conv_id__compact_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -273,29 +320,9 @@ export interface paths {
         };
         /**
          * Get Artifact
-         * @description 获取 artifact 详情（包含当前版本内容）
+         * @description 获取 artifact 详情（包含当前版本内容、版本列表和最新版本详情）
          */
         get: operations["get_artifact_api_v1_artifacts__session_id___artifact_id__get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/artifacts/{session_id}/{artifact_id}/versions": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List Versions
-         * @description 获取版本历史列表
-         */
-        get: operations["list_versions_api_v1_artifacts__session_id___artifact_id__versions_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -434,6 +461,13 @@ export interface components {
              * @description Last update time
              */
             updated_at: string;
+            /**
+             * Versions
+             * @description All version summaries
+             */
+            versions: components["schemas"]["VersionSummary"][];
+            /** @description Latest version detail (content + changes) */
+            latest_version: components["schemas"]["VersionDetailResponse"] | null;
         };
         /**
          * ArtifactListResponse
@@ -516,10 +550,10 @@ export interface components {
          */
         ChatRequest: {
             /**
-             * Content
+             * User Input
              * @description User message content
              */
-            content: string;
+            user_input: string;
             /**
              * Conversation Id
              * @description Continue existing conversation
@@ -683,6 +717,33 @@ export interface components {
             detail: components["schemas"]["ValidationError"][];
         };
         /**
+         * InjectRequest
+         * @description POST /api/v1/chat/{conv_id}/inject request body
+         */
+        InjectRequest: {
+            /**
+             * Content
+             * @description Message content to inject into the active execution
+             */
+            content: string;
+        };
+        /**
+         * InjectResponse
+         * @description POST /api/v1/chat/{conv_id}/inject response
+         */
+        InjectResponse: {
+            /**
+             * Message Id
+             * @description Active execution message ID that received the injection
+             */
+            message_id: string;
+            /**
+             * Stream Url
+             * @description Existing SSE stream URL (already connected, do not reconnect)
+             */
+            stream_url: string;
+        };
+        /**
          * LoginRequest
          * @description POST /api/v1/auth/login request body
          */
@@ -738,15 +799,25 @@ export interface components {
              */
             parent_id: string | null;
             /**
-             * Content
+             * User Input
              * @description User message content
              */
-            content: string;
+            user_input: string;
             /**
              * Response
              * @description Assistant response
              */
             response: string | null;
+            /**
+             * User Input Summary
+             * @description Compacted summary of user input
+             */
+            user_input_summary: string | null;
+            /**
+             * Response Summary
+             * @description Compacted summary of assistant response
+             */
+            response_summary: string | null;
             /**
              * Created At
              * Format: date-time
@@ -967,27 +1038,6 @@ export interface components {
              * @description Version creation time
              */
             created_at: string;
-        };
-        /**
-         * VersionListResponse
-         * @description GET /api/v1/artifacts/{session_id}/{artifact_id}/versions response
-         */
-        VersionListResponse: {
-            /**
-             * Artifact Id
-             * @description Artifact ID
-             */
-            artifact_id: string;
-            /**
-             * Session Id
-             * @description Session ID
-             */
-            session_id: string;
-            /**
-             * Versions
-             * @description Version list
-             */
-            versions: components["schemas"]["VersionSummary"][];
         };
         /**
          * VersionSummary
@@ -1238,6 +1288,41 @@ export interface operations {
             };
         };
     };
+    inject_message_api_v1_chat__conv_id__inject_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                conv_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InjectRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InjectResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_conversation_api_v1_chat__conv_id__get: {
         parameters: {
             query?: never;
@@ -1357,6 +1442,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ResumeResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    trigger_compaction_api_v1_chat__conv_id__compact_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                conv_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */
@@ -1523,38 +1639,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ArtifactDetailResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    list_versions_api_v1_artifacts__session_id___artifact_id__versions_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                session_id: string;
-                artifact_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["VersionListResponse"];
                 };
             };
             /** @description Validation Error */

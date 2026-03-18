@@ -32,6 +32,9 @@ export function useSSE() {
   const setPermissionRequest = useStreamStore((s) => s.setPermissionRequest);
   const setError = useStreamStore((s) => s.setError);
   const endStream = useStreamStore((s) => s.endStream);
+  const addInjectedMessage = useStreamStore((s) => s.addInjectedMessage);
+  const setCompactionWait = useStreamStore((s) => s.setCompactionWait);
+  const setExecutionMetrics = useStreamStore((s) => s.setExecutionMetrics);
 
   // Conversation store actions
   const setCurrent = useConversationStore((s) => s.setCurrent);
@@ -125,10 +128,17 @@ export function useSSE() {
             ? { llmOutput: effectiveContent }
             : {};
 
+          const tokenUsage = data?.token_usage as { input_tokens: number; output_tokens: number; total_tokens: number } | undefined;
+          const model = data?.model as string | undefined;
+          const durationMs = data?.duration_ms as number | undefined;
+
           updateCurrentSegment({
             ...(finalContent ? { content: finalContent } : {}),
             isThinking: false,
             ...llmOutputUpdate,
+            ...(tokenUsage ? { tokenUsage } : {}),
+            ...(model ? { model } : {}),
+            ...(durationMs != null ? { llmDurationMs: durationMs } : {}),
           });
           break;
         }
@@ -231,7 +241,20 @@ export function useSSE() {
           setPermissionRequest(null);
           break;
 
+        case StreamEventType.QUEUED_MESSAGE:
+          addInjectedMessage({
+            content: data?.content as string ?? '',
+            timestamp: event.timestamp,
+          });
+          break;
+
+        case StreamEventType.COMPACTION_WAIT:
+          setCompactionWait(true);
+          break;
+
         case StreamEventType.COMPLETE: {
+          const metrics = data?.execution_metrics;
+          if (metrics) setExecutionMetrics(metrics as import('@/types/events').ExecutionMetrics);
           const messageId = useStreamStore.getState().messageId;
           if (messageId) {
             snapshotSegments(messageId);
@@ -256,6 +279,7 @@ export function useSSE() {
       setError, endStream, refreshAfterComplete, setArtifactPanelVisible,
       addPendingUpdate, setArtifactSessionId, setArtifactCurrent, setArtifacts,
       setArtifactVersions, setSelectedVersion,
+      addInjectedMessage, setCompactionWait, setExecutionMetrics,
     ]
   );
 

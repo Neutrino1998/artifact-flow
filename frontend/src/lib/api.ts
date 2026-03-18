@@ -3,6 +3,7 @@ import type {
   ConversationDetail,
   ChatRequest,
   ChatResponse,
+  InjectResponse,
   ResumeRequest,
   ResumeResponse,
   ArtifactListResponse,
@@ -156,6 +157,13 @@ export async function deleteConversation(convId: string) {
   const res = await request(`/api/v1/chat/${convId}`, { method: 'DELETE' });
   invalidateConversationCache(convId);
   return res;
+}
+
+export async function injectMessage(convId: string, content: string) {
+  return request<InjectResponse>(`/api/v1/chat/${convId}/inject`, {
+    method: 'POST',
+    body: JSON.stringify({ content }),
+  });
 }
 
 export async function resumeExecution(convId: string, body: ResumeRequest) {

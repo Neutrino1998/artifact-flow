@@ -36,16 +36,21 @@ export default function MessageList() {
             <div key={node.id} className="space-y-10">
               {/* User message */}
               <UserMessage
-                content={node.content}
+                content={node.user_input}
                 messageId={node.id}
                 parentId={node.parent_id}
                 siblingIndex={node.siblingIndex}
                 siblingCount={node.siblingCount}
+                isSummarized={!!node.user_input_summary}
               />
 
               {/* Assistant response */}
               {node.response && (
-                <AssistantMessage content={node.response} messageId={node.id} />
+                <AssistantMessage
+                  content={node.response}
+                  messageId={node.id}
+                  isSummarized={!!node.response_summary}
+                />
               )}
             </div>
           ))}

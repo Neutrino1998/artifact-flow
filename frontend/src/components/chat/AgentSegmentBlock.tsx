@@ -126,6 +126,17 @@ function AgentSegmentBlock({ segment, isActive, defaultExpanded, stepNumber }: A
           {segment.agent}
         </span>
 
+        {/* Compact metadata — only shown when segment is done */}
+        {segment.status === 'complete' && (segment.model || segment.tokenUsage || segment.llmDurationMs) && (
+          <span className="text-xs text-text-tertiary dark:text-text-tertiary-dark font-mono">
+            {[
+              segment.model,
+              segment.tokenUsage && `${((segment.tokenUsage.input_tokens + segment.tokenUsage.output_tokens) / 1000).toFixed(1)}k tokens`,
+              segment.llmDurationMs != null && `${(segment.llmDurationMs / 1000).toFixed(1)}s`,
+            ].filter(Boolean).join(' · ')}
+          </span>
+        )}
+
         {stepNumber != null && (
           <span className="ml-auto text-text-tertiary dark:text-text-tertiary-dark font-mono">
             #{stepNumber}

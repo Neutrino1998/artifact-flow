@@ -6,7 +6,7 @@ import { useStreamStore } from '@/stores/streamStore';
 import { useUIStore } from '@/stores/uiStore';
 import { useArtifactStore } from '@/stores/artifactStore';
 import { useConversationStore } from '@/stores/conversationStore';
-import { uploadFile, uploadFileNewSession, listConversations, getConversation } from '@/lib/api';
+import { uploadFile, uploadFileNewSession, listConversations, getConversation, injectMessage } from '@/lib/api';
 import { useArtifacts } from '@/hooks/useArtifacts';
 
 export default function MessageInput() {
@@ -35,12 +35,30 @@ export default function MessageInput() {
     el.style.height = Math.min(el.scrollHeight, 200) + 'px';
   }, [content]);
 
+  const conversationId = useConversationStore((s) => s.current?.id);
+  const streamConversationId = useStreamStore((s) => s.conversationId);
+
   const handleSend = useCallback(async () => {
     const trimmed = content.trim();
-    if (!trimmed || isStreaming) return;
+    if (!trimmed) return;
+
+    if (isStreaming) {
+      // Inject mode: send to active execution
+      const convId = streamConversationId || conversationId;
+      if (convId) {
+        try {
+          await injectMessage(convId, trimmed);
+          setContent('');
+        } catch (err) {
+          console.error('Inject failed:', err);
+        }
+      }
+      return;
+    }
+
     setContent('');
     await sendMessage(trimmed);
-  }, [content, isStreaming, sendMessage]);
+  }, [content, isStreaming, sendMessage, conversationId, streamConversationId]);
 
   const handleStop = useCallback(() => {
     disconnect();
@@ -133,7 +151,7 @@ export default function MessageInput() {
     e.target.value = '';
   }, [handleUploadFiles]);
 
-  const uploadDisabled = uploading || isStreaming;
+  const uploadDisabled = uploading;
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -181,14 +199,13 @@ export default function MessageInput() {
             onCompositionEnd={handleCompositionEnd}
             placeholder={
               isStreaming
-                ? '等待回复中...'
+                ? '输入追加指令，按 Enter 发送...'
                 : isNewConversation
                   ? '开始新的对话...'
                   : '输入消息...'
             }
-            disabled={isStreaming}
             rows={1}
-            className="w-full resize-none bg-transparent text-sm leading-5 text-text-primary dark:text-text-primary-dark placeholder:text-text-tertiary dark:placeholder:text-text-tertiary-dark outline-none disabled:opacity-40 disabled:cursor-not-allowed"
+            className="w-full resize-none bg-transparent text-sm leading-5 text-text-primary dark:text-text-primary-dark placeholder:text-text-tertiary dark:placeholder:text-text-tertiary-dark outline-none"
           />
 
           <div className="flex items-center justify-between mt-2">
@@ -240,25 +257,30 @@ export default function MessageInput() {
               </button>
             </div>
 
-            {/* Send or Stop button */}
-            {isStreaming ? (
-              <button
-                onClick={handleStop}
-                className="w-8 h-8 flex items-center justify-center rounded-full bg-red-500 text-white hover:bg-red-600 transition-colors"
-                aria-label="Stop generation"
-                title="停止生成"
-              >
-                <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-                  <rect x="4" y="4" width="8" height="8" rx="1" />
-                </svg>
-              </button>
-            ) : (
+            {/* Send + Stop buttons */}
+            <div className="flex items-center gap-1.5">
+              {isStreaming && (
+                <button
+                  onClick={handleStop}
+                  className="w-8 h-8 flex items-center justify-center rounded-full bg-red-500 text-white hover:bg-red-600 transition-colors"
+                  aria-label="Stop generation"
+                  title="停止生成"
+                >
+                  <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                    <rect x="4" y="4" width="8" height="8" rx="1" />
+                  </svg>
+                </button>
+              )}
               <button
                 onClick={handleSend}
                 disabled={!content.trim()}
-                className="w-8 h-8 flex items-center justify-center rounded-full bg-accent text-white hover:bg-accent-hover disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                aria-label="Send message"
-                title="发送消息"
+                className={`w-8 h-8 flex items-center justify-center rounded-full transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+                  isStreaming
+                    ? 'bg-text-tertiary dark:bg-text-tertiary-dark text-white hover:bg-text-secondary dark:hover:bg-text-secondary-dark'
+                    : 'bg-accent text-white hover:bg-accent-hover'
+                }`}
+                aria-label={isStreaming ? 'Inject message' : 'Send message'}
+                title={isStreaming ? '追加指令' : '发送消息'}
               >
                 <svg
                   width="16"
@@ -273,7 +295,7 @@ export default function MessageInput() {
                   <path d="M12 19V5M5 12l7-7 7 7" />
                 </svg>
               </button>
-            )}
+            </div>
           </div>
         </div>
       </div>
