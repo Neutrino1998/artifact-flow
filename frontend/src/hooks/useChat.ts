@@ -42,6 +42,7 @@ export function useChat() {
           body.parent_message_id = parentMessageId;
         }
 
+        const isNew = !current?.id;
         const res = await api.sendMessage(body);
         setPendingUserMessage(content);
         // Track rerun/edit parent for branchPath truncation
@@ -52,6 +53,13 @@ export function useChat() {
 
         // Connect SSE for streaming
         connect(res.stream_url, res.conversation_id, res.message_id);
+
+        // Refresh sidebar immediately so the new conversation appears
+        if (isNew) {
+          api.listConversations(20, 0).then((data) => {
+            setConversations(data.conversations, data.total, data.has_more);
+          });
+        }
       } catch (err) {
         setError((err as Error).message);
       }
