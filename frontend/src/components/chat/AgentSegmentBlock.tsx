@@ -131,7 +131,7 @@ function AgentSegmentBlock({ segment, isActive, defaultExpanded, stepNumber }: A
           <span className="text-xs text-text-tertiary dark:text-text-tertiary-dark font-mono">
             {[
               segment.model,
-              segment.tokenUsage && `${((segment.tokenUsage.input_tokens + segment.tokenUsage.output_tokens) / 1000).toFixed(1)}k tokens`,
+              segment.tokenUsage && `${(segment.tokenUsage.input_tokens / 1000).toFixed(1)}k ↑ · ${(segment.tokenUsage.output_tokens / 1000).toFixed(1)}k ↓`,
               segment.llmDurationMs != null && `${(segment.llmDurationMs / 1000).toFixed(1)}s`,
             ].filter(Boolean).join(' · ')}
           </span>
