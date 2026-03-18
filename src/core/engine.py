@@ -191,6 +191,7 @@ async def execute_loop(
                     agent_name="lead_agent",
                     data={"content": msg},
                 ))
+                await _emit(StreamEventType.QUEUED_MESSAGE.value, "lead_agent", {"content": msg})
 
         artifacts_inventory = None
         if artifact_manager and state.get("session_id"):
@@ -548,6 +549,7 @@ async def execute_loop(
                                 agent_name="lead_agent",
                                 data={"content": msg},
                             ))
+                            await _emit(StreamEventType.QUEUED_MESSAGE.value, "lead_agent", {"content": msg})
                         continue  # 回到 while loop 顶部，下次 _build_context 会看到新事件
 
                 # 无待处理消息 → 正常完成当前 agent

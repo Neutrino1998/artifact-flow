@@ -151,7 +151,7 @@ export default function MessageInput() {
     e.target.value = '';
   }, [handleUploadFiles]);
 
-  const uploadDisabled = uploading;
+  const uploadDisabled = uploading || isStreaming;
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
