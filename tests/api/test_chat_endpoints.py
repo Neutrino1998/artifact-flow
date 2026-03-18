@@ -442,12 +442,14 @@ class TestChatStreamE2E:
                 events = _parse_sse_events(sse_resp.text)
                 event_types = [e.get("type") for e in events]
 
-                # Must have metadata and a terminal event (complete or error)
+                # Happy path: must have metadata → complete (not error)
                 assert "metadata" in event_types
-                assert any(t in event_types for t in ("complete", "error")), \
-                    f"Expected terminal event, got: {event_types}"
+                assert "complete" in event_types, \
+                    f"Expected 'complete' terminal event, got: {event_types}"
+                assert "error" not in event_types, \
+                    f"Unexpected error event in happy path: {event_types}"
 
-                # 3. Verify conversation was persisted
+                # 3. Verify conversation and response were persisted
                 async with db_manager.session() as session:
                     repo = ConversationRepository(session)
                     conv = await repo.get_conversation(conv_id)
@@ -456,11 +458,8 @@ class TestChatStreamE2E:
                     msg = await repo.get_message(message_id)
                     assert msg is not None
                     assert msg.user_input == "Hi there"
-
-                    # If execution succeeded, response should be set
-                    if "complete" in event_types:
-                        assert msg.response is not None
-                        assert "Hello from agent" in msg.response
+                    assert msg.response is not None
+                    assert "Hello from agent" in msg.response
 
                 # 4. Verify events were persisted
                 from repositories.message_event_repo import MessageEventRepository
@@ -468,8 +467,9 @@ class TestChatStreamE2E:
                     event_repo = MessageEventRepository(session)
                     db_events = await event_repo.get_by_message(message_id)
                     db_event_types = [e.event_type for e in db_events]
-                    # At minimum: user_input + agent_start + llm_complete + agent_complete + complete/error
+                    # user_input + agent_start + llm_complete + agent_complete + complete
                     assert len(db_events) >= 4, f"Expected ≥4 persisted events, got: {db_event_types}"
+                    assert "complete" in db_event_types
 
                 # 5. Verify reservation was cleaned up
                 assert tm.get_active_message_id(conv_id) is None
