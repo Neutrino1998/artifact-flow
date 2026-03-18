@@ -255,7 +255,7 @@ class StreamManager:
 
                 # 终结事件后退出
                 event_type = event.get("type", "")
-                if event_type in ("complete", "error"):
+                if event_type in ("complete", "cancelled", "error"):
                     logger.debug(f"Stream {message_id} received terminal event: {event_type}")
                     break
         finally:

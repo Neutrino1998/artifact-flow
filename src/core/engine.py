@@ -548,9 +548,6 @@ async def execute_loop(
 
             response_content, reasoning_content, token_usage = llm_result
 
-            if _check_cancelled():
-                break
-
             # 解析工具调用
             tool_calls = parse_tool_calls(response_content)
 

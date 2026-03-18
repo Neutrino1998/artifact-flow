@@ -73,7 +73,7 @@ async def stream_events(
 
                 # 检查是否是终结事件
                 event_type = event.get("type", "")
-                if event_type in ("complete", "error"):
+                if event_type in ("complete", "cancelled", "error"):
                     logger.info(f"Stream {stream_id}: terminal event '{event_type}', closing connection")
                     break
 
