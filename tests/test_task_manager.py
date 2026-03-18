@@ -60,8 +60,10 @@ class TestSubmit:
         blocker = asyncio.Event()
         await tm.submit("t1", _blocking_coro(blocker))
 
+        dup_coro = _noop_coro()
         with pytest.raises(DuplicateExecutionError):
-            await tm.submit("t1", _noop_coro())
+            await tm.submit("t1", dup_coro)
+        dup_coro.close()  # prevent "coroutine was never awaited" warning
 
         blocker.set()
         await tm.shutdown(timeout=2)

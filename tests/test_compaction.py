@@ -128,9 +128,15 @@ class TestTrigger:
 
     async def test_above_threshold_triggers(self, cm_light, config):
         metrics = {"last_token_usage": {"input_tokens": 2000}}
-        with patch.object(cm_light, "_compact", return_value=None):
+        with patch.object(cm_light, "_compact", return_value=None) as mock_compact:
             await cm_light.maybe_trigger("conv-1", "msg-1", metrics, config)
-            await asyncio.sleep(0.05)
+            # Wait for the background task to finish so the patch stays alive
+            event = cm_light._running.get("conv-1")
+            if event:
+                await event.wait()
+            mock_compact.assert_awaited_once()
+        # _running should be cleaned up after completion
+        assert "conv-1" not in cm_light._running
 
     async def test_already_running_skips(self, cm_light, config):
         cm_light._running["conv-1"] = asyncio.Event()
@@ -139,9 +145,15 @@ class TestTrigger:
         assert "conv-1" in cm_light._running
 
     async def test_manual_trigger_success(self, cm_light, config):
-        with patch.object(cm_light, "_compact", return_value=None):
+        with patch.object(cm_light, "_compact", return_value=None) as mock_compact:
             result = await cm_light.trigger("conv-1", config)
             assert result is True
+            # Wait for the background task to finish within the patch scope
+            event = cm_light._running.get("conv-1")
+            if event:
+                await event.wait()
+            mock_compact.assert_awaited_once()
+        assert "conv-1" not in cm_light._running
 
     async def test_manual_trigger_already_running(self, cm_light, config):
         cm_light._running["conv-1"] = asyncio.Event()

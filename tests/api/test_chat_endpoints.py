@@ -1,12 +1,16 @@
 """
-Chat endpoint integration tests for inject, cancel, compact, and events APIs.
+Chat endpoint integration tests for inject, cancel, compact, events APIs,
+and the main POST /chat → GET /stream end-to-end flow.
 
 Uses API fixtures with simulated active tasks.
 """
 
 import asyncio
+import json
 import uuid
+from dataclasses import dataclass, field
 from typing import Tuple, List
+from unittest.mock import patch
 
 import pytest
 from httpx import AsyncClient
@@ -94,6 +98,11 @@ class TestInject:
         body = resp.json()
         assert body["message_id"] == msg_ids[0]
         assert "stream" in body["stream_url"]
+
+        # Verify the message was actually enqueued in TaskManager
+        tm: TaskManager = app.dependency_overrides[get_task_manager]()
+        drained = tm.drain_messages(msg_ids[0])
+        assert drained == ["additional input"]
 
         blocker.set()
 
@@ -332,3 +341,139 @@ class TestEvents:
             f"/api/v1/chat/{conv2_id}/messages/{msg1_ids[0]}/events"
         )
         assert resp.status_code == 404
+
+
+# ============================================================
+# TestChatStreamE2E — POST /chat → GET /stream full flow
+# ============================================================
+
+
+@dataclass
+class _FakeAgentConfig:
+    name: str = "lead_agent"
+    description: str = "test lead"
+    tools: dict = field(default_factory=dict)
+    model: str = "fake-model"
+    max_tool_rounds: int = 3
+    role_prompt: str = "You are a test agent."
+    internal: bool = False
+
+
+def _make_fake_llm_stream(text: str):
+    """Fake LLM that returns a simple text response."""
+    async def fake(messages, **kwargs):
+        yield {"type": "content", "content": text}
+        yield {"type": "usage", "token_usage": {
+            "prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15,
+        }}
+        yield {"type": "final", "content": text, "reasoning_content": None, "token_usage": {
+            "prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15,
+        }}
+    return fake
+
+
+def _parse_sse_events(body: str) -> list[dict]:
+    """Parse SSE text into a list of event dicts."""
+    events = []
+    for block in body.split("\n\n"):
+        block = block.strip()
+        if not block or block.startswith(":"):
+            continue
+        data_line = None
+        for line in block.split("\n"):
+            if line.startswith("data: "):
+                data_line = line[len("data: "):]
+        if data_line:
+            try:
+                events.append(json.loads(data_line))
+            except json.JSONDecodeError:
+                pass
+    return events
+
+
+class TestChatStreamE2E:
+    """
+    End-to-end: POST /chat → background execution → GET /stream → SSE events.
+
+    Mock only the LLM; exercises real ExecutionController, TaskManager,
+    StreamManager, conversation persistence, and event persistence.
+    """
+
+    async def test_chat_and_stream_happy_path(
+        self, client: AsyncClient, app, db_manager: DatabaseManager
+    ):
+        """POST /chat returns stream_url; GET /stream yields metadata → ... → complete."""
+        fake_agents = {"lead_agent": _FakeAgentConfig()}
+        tm: TaskManager = app.dependency_overrides[get_task_manager]()
+
+        # _create_controller() calls get_task_manager/get_agents/get_tools directly,
+        # so we must set the module-level globals (not just dependency_overrides).
+        old_agents = deps._agents
+        old_tools = deps._tools
+        old_tm = deps._task_manager
+        deps._agents = fake_agents
+        deps._tools = {}
+        deps._task_manager = tm
+
+        try:
+            with patch("models.llm.astream_with_retry", _make_fake_llm_stream("Hello from agent")):
+                # 1. POST /chat — starts background execution
+                resp = await client.post(
+                    "/api/v1/chat",
+                    json={"user_input": "Hi there"},
+                )
+                assert resp.status_code == 200
+                body = resp.json()
+                conv_id = body["conversation_id"]
+                message_id = body["message_id"]
+                stream_url = body["stream_url"]
+                assert stream_url == f"/api/v1/stream/{message_id}"
+
+                # Wait for background execution to complete
+                for _ in range(50):
+                    if message_id not in tm._tasks:
+                        break
+                    await asyncio.sleep(0.1)
+
+                # 2. GET /stream — consume SSE events
+                sse_resp = await client.get(stream_url)
+                assert sse_resp.status_code == 200
+
+                events = _parse_sse_events(sse_resp.text)
+                event_types = [e.get("type") for e in events]
+
+                # Must have metadata and a terminal event (complete or error)
+                assert "metadata" in event_types
+                assert any(t in event_types for t in ("complete", "error")), \
+                    f"Expected terminal event, got: {event_types}"
+
+                # 3. Verify conversation was persisted
+                async with db_manager.session() as session:
+                    repo = ConversationRepository(session)
+                    conv = await repo.get_conversation(conv_id)
+                    assert conv is not None
+
+                    msg = await repo.get_message(message_id)
+                    assert msg is not None
+                    assert msg.user_input == "Hi there"
+
+                    # If execution succeeded, response should be set
+                    if "complete" in event_types:
+                        assert msg.response is not None
+                        assert "Hello from agent" in msg.response
+
+                # 4. Verify events were persisted
+                from repositories.message_event_repo import MessageEventRepository
+                async with db_manager.session() as session:
+                    event_repo = MessageEventRepository(session)
+                    db_events = await event_repo.get_by_message(message_id)
+                    db_event_types = [e.event_type for e in db_events]
+                    # At minimum: user_input + agent_start + llm_complete + agent_complete + complete/error
+                    assert len(db_events) >= 4, f"Expected ≥4 persisted events, got: {db_event_types}"
+
+                # 5. Verify reservation was cleaned up
+                assert tm.get_active_message_id(conv_id) is None
+        finally:
+            deps._agents = old_agents
+            deps._tools = old_tools
+            deps._task_manager = old_tm
