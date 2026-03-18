@@ -186,11 +186,6 @@ async def execute_loop(
         """drain messages → artifacts 清单 → ContextManager.build → tool limit 注入"""
         if current_agent_name == "lead_agent":
             for msg in task_manager.drain_messages(message_id):
-                state["events"].append(ExecutionEvent(
-                    event_type=StreamEventType.QUEUED_MESSAGE.value,
-                    agent_name="lead_agent",
-                    data={"content": msg},
-                ))
                 await _emit(StreamEventType.QUEUED_MESSAGE.value, "lead_agent", {"content": msg})
 
         artifacts_inventory = None
@@ -544,11 +539,6 @@ async def execute_loop(
                     pending = task_manager.drain_messages(message_id)
                     if pending:
                         for msg in pending:
-                            state["events"].append(ExecutionEvent(
-                                event_type=StreamEventType.QUEUED_MESSAGE.value,
-                                agent_name="lead_agent",
-                                data={"content": msg},
-                            ))
                             await _emit(StreamEventType.QUEUED_MESSAGE.value, "lead_agent", {"content": msg})
                         continue  # 回到 while loop 顶部，下次 _build_context 会看到新事件
 
