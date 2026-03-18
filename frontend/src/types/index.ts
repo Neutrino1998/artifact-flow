@@ -25,6 +25,7 @@ export type UserListResponse = S['UserListResponse'];
 export type ChatRequest = S['ChatRequest'];
 export type ChatResponse = S['ChatResponse'];
 export type InjectResponse = S['InjectResponse'];
+export type CancelResponse = S['CancelResponse'];
 export type ResumeRequest = S['ResumeRequest'];
 export type ResumeResponse = S['ResumeResponse'];
 export type MessageResponse = S['MessageResponse'];

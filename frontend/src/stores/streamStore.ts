@@ -62,6 +62,9 @@ interface StreamState {
   // Permission
   permissionRequest: PermissionRequest | null;
 
+  // Cancelled
+  cancelled: boolean;
+
   // Error
   error: string | null;
 
@@ -89,7 +92,8 @@ interface StreamState {
   // Snapshot segments for completed messages
   snapshotSegments: (messageId: string) => void;
 
-  // Permission / error
+  // Cancelled / Permission / error
+  setCancelled: (val: boolean) => void;
   setPermissionRequest: (req: PermissionRequest | null) => void;
   setError: (error: string | null) => void;
 }
@@ -144,6 +148,7 @@ export const useStreamStore = create<StreamState>((set, get) => {
     injectedMessages: [],
     compactionWait: false,
     executionMetrics: null,
+    cancelled: false,
     permissionRequest: null,
     error: null,
 
@@ -158,6 +163,7 @@ export const useStreamStore = create<StreamState>((set, get) => {
         injectedMessages: [],
         compactionWait: false,
         executionMetrics: null,
+        cancelled: false,
         permissionRequest: null,
         error: null,
       });
@@ -165,7 +171,7 @@ export const useStreamStore = create<StreamState>((set, get) => {
 
     endStream: () => {
       cancelPendingFlush();
-      set({ isStreaming: false, streamUrl: null, conversationId: null, permissionRequest: null, streamParentId: undefined });
+      set({ isStreaming: false, streamUrl: null, conversationId: null, cancelled: false, permissionRequest: null, streamParentId: undefined });
     },
 
     reset: () =>
@@ -270,6 +276,7 @@ export const useStreamStore = create<StreamState>((set, get) => {
       }
     },
 
+    setCancelled: (val) => set({ cancelled: val }),
     setPermissionRequest: (req) => set({ permissionRequest: req }),
     setError: (error) => set({ error }),
   };

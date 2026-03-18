@@ -35,6 +35,7 @@ export function useSSE() {
   const addInjectedMessage = useStreamStore((s) => s.addInjectedMessage);
   const setCompactionWait = useStreamStore((s) => s.setCompactionWait);
   const setExecutionMetrics = useStreamStore((s) => s.setExecutionMetrics);
+  const setCancelled = useStreamStore((s) => s.setCancelled);
 
   // Conversation store actions
   const setCurrent = useConversationStore((s) => s.setCurrent);
@@ -252,6 +253,19 @@ export function useSSE() {
           setCompactionWait(true);
           break;
 
+        case StreamEventType.CANCELLED: {
+          const metrics = data?.execution_metrics;
+          if (metrics) setExecutionMetrics(metrics as import('@/types/events').ExecutionMetrics);
+          const messageId = useStreamStore.getState().messageId;
+          if (messageId) {
+            snapshotSegments(messageId);
+          }
+          setCancelled(true);
+          endStream();
+          refreshAfterComplete(conversationId);
+          break;
+        }
+
         case StreamEventType.COMPLETE: {
           const metrics = data?.execution_metrics;
           if (metrics) setExecutionMetrics(metrics as import('@/types/events').ExecutionMetrics);
@@ -279,7 +293,7 @@ export function useSSE() {
       setError, endStream, refreshAfterComplete, setArtifactPanelVisible,
       addPendingUpdate, setArtifactSessionId, setArtifactCurrent, setArtifacts,
       setArtifactVersions, setSelectedVersion,
-      addInjectedMessage, setCompactionWait, setExecutionMetrics,
+      addInjectedMessage, setCompactionWait, setExecutionMetrics, setCancelled,
     ]
   );
 

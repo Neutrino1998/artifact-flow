@@ -53,6 +53,9 @@ class TaskManager:
         # Interrupt 管理 — key = message_id
         self._interrupts: dict[str, InterruptState] = {}
 
+        # Cancellation 管理 — key = message_id
+        self._cancellations: dict[str, asyncio.Event] = {}
+
         # Message Queue — key = message_id
         self._queues: dict[str, asyncio.Queue] = {}
 
@@ -94,6 +97,7 @@ class TaskManager:
                 finally:
                     self._tasks.pop(task_id, None)
                     self._interrupts.pop(task_id, None)
+                    self._cancellations.pop(task_id, None)
                     self._queues.pop(task_id, None)
                     self._active_conversations = {
                         k: v for k, v in self._active_conversations.items() if v != task_id
@@ -157,6 +161,36 @@ class TaskManager:
     def get_interrupt(self, message_id: str) -> Optional[InterruptState]:
         """获取中断状态"""
         return self._interrupts.get(message_id)
+
+    # ========================================
+    # Cancellation 管理
+    # ========================================
+
+    def request_cancel(self, message_id: str) -> bool:
+        """
+        请求取消执行。
+
+        Returns:
+            True — 请求已发出
+            False — 没有活跃任务
+        """
+        if message_id not in self._tasks:
+            return False
+        if message_id not in self._cancellations:
+            self._cancellations[message_id] = asyncio.Event()
+        self._cancellations[message_id].set()
+        # 同时唤醒可能阻塞的 interrupt，使其不阻碍退出
+        interrupt = self._interrupts.get(message_id)
+        if interrupt and not interrupt.event.is_set():
+            interrupt.resume_data = {"approved": False, "reason": "cancelled"}
+            interrupt.event.set()
+        logger.info(f"Cancellation requested for {message_id}")
+        return True
+
+    def is_cancelled(self, message_id: str) -> bool:
+        """检查执行是否已被取消"""
+        event = self._cancellations.get(message_id)
+        return event.is_set() if event else False
 
     # ========================================
     # Conversation → Active Execution 映射
@@ -268,6 +302,7 @@ class TaskManager:
 
         self._tasks.clear()
         self._interrupts.clear()
+        self._cancellations.clear()
         self._queues.clear()
         self._active_conversations.clear()
         logger.info("TaskManager shutdown complete")

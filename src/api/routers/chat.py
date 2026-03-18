@@ -31,6 +31,7 @@ from api.dependencies import (
 )
 from api.services.auth import TokenPayload
 from api.schemas.chat import (
+    CancelResponse,
     ChatRequest,
     ChatResponse,
     InjectRequest,
@@ -282,6 +283,30 @@ async def inject_message(
         message_id=active_msg_id,
         stream_url=f"/api/v1/stream/{active_msg_id}",
     )
+
+
+@router.post("/{conv_id}/cancel", response_model=CancelResponse)
+async def cancel_execution(
+    conv_id: str,
+    current_user: TokenPayload = Depends(get_current_user),
+    conversation_manager: ConversationManager = Depends(get_conversation_manager),
+    task_manager: TaskManager = Depends(get_task_manager),
+):
+    """
+    取消活跃执行
+
+    请求取消 conversation 当前正在运行的执行。引擎会在下一个检查点优雅退出。
+    """
+    repo = conversation_manager._ensure_repository()
+    await _verify_ownership(conv_id, current_user, repo)
+
+    active_msg_id = task_manager.get_active_message_id(conv_id)
+    if not active_msg_id:
+        raise HTTPException(status_code=409, detail="No active execution for this conversation")
+
+    task_manager.request_cancel(active_msg_id)
+
+    return CancelResponse(message_id=active_msg_id)
 
 
 @router.get("", response_model=ConversationListResponse)

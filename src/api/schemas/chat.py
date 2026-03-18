@@ -31,6 +31,11 @@ class InjectResponse(BaseModel):
     stream_url: str = Field(..., description="Existing SSE stream URL (already connected, do not reconnect)")
 
 
+class CancelResponse(BaseModel):
+    """POST /api/v1/chat/{conv_id}/cancel response"""
+    message_id: str = Field(..., description="Cancelled execution message ID")
+
+
 class ResumeRequest(BaseModel):
     """POST /api/v1/chat/{conv_id}/resume request body"""
     message_id: str = Field(..., description="Message ID to resume")

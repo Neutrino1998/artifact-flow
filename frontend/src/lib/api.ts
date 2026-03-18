@@ -3,6 +3,7 @@ import type {
   ConversationDetail,
   ChatRequest,
   ChatResponse,
+  CancelResponse,
   InjectResponse,
   ResumeRequest,
   ResumeResponse,
@@ -157,6 +158,10 @@ export async function deleteConversation(convId: string) {
   const res = await request(`/api/v1/chat/${convId}`, { method: 'DELETE' });
   invalidateConversationCache(convId);
   return res;
+}
+
+export async function cancelExecution(convId: string) {
+  return request<CancelResponse>(`/api/v1/chat/${convId}/cancel`, { method: 'POST' });
 }
 
 export async function injectMessage(convId: string, content: string) {

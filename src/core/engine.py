@@ -186,7 +186,12 @@ async def execute_loop(
         """drain messages → artifacts 清单 → ContextManager.build → tool limit 注入"""
         if current_agent_name == "lead_agent":
             for msg in task_manager.drain_messages(message_id):
-                await _emit(StreamEventType.QUEUED_MESSAGE.value, "lead_agent", {"content": msg})
+                wrapped = (
+                    "[The user has injected a message during execution. "
+                    "Consider this input and adjust your approach as needed.]\n\n"
+                    + msg
+                )
+                await _emit(StreamEventType.QUEUED_MESSAGE.value, "lead_agent", {"content": wrapped})
 
         artifacts_inventory = None
         if artifact_manager and state.get("session_id"):
@@ -375,6 +380,9 @@ async def execute_loop(
         """
         tool_calls = sorted(tool_calls, key=lambda tc: tc.name == "call_subagent")
         for tool_call in tool_calls:
+            if _check_cancelled():
+                break
+
             # Parser 返回的解析错误 → 直接反馈给 agent
             if tool_call.error:
                 await _emit(StreamEventType.TOOL_COMPLETE.value, agent_name, {
@@ -499,10 +507,21 @@ async def execute_loop(
 
             tool_round_count[agent_name] = tool_round_count.get(agent_name, 0) + 1
 
+    def _check_cancelled() -> bool:
+        if task_manager.is_cancelled(message_id):
+            state["completed"] = True
+            state["cancelled"] = True
+            state["response"] = state.get("response", "") or ""
+            return True
+        return False
+
     # ── main loop ──
 
     try:
         while not state["completed"]:
+            if _check_cancelled():
+                break
+
             current_agent_name = state["current_agent"]
             agent_config = agents.get(current_agent_name)
             if not agent_config:
@@ -529,6 +548,9 @@ async def execute_loop(
 
             response_content, reasoning_content, token_usage = llm_result
 
+            if _check_cancelled():
+                break
+
             # 解析工具调用
             tool_calls = parse_tool_calls(response_content)
 
@@ -539,7 +561,12 @@ async def execute_loop(
                     pending = task_manager.drain_messages(message_id)
                     if pending:
                         for msg in pending:
-                            await _emit(StreamEventType.QUEUED_MESSAGE.value, "lead_agent", {"content": msg})
+                            wrapped = (
+                                "[The user has injected a message during execution. "
+                                "Consider this input and adjust your approach as needed.]\n\n"
+                                + msg
+                            )
+                            await _emit(StreamEventType.QUEUED_MESSAGE.value, "lead_agent", {"content": wrapped})
                         continue  # 回到 while loop 顶部，下次 _build_context 会看到新事件
 
                 # 无待处理消息 → 正常完成当前 agent

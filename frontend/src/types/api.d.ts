@@ -142,6 +142,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/chat/{conv_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cancel Execution
+         * @description 取消活跃执行
+         *
+         *     请求取消 conversation 当前正在运行的执行。引擎会在下一个检查点优雅退出。
+         */
+        post: operations["cancel_execution_api_v1_chat__conv_id__cancel_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/chat/{conv_id}": {
         parameters: {
             query?: never;
@@ -543,6 +565,17 @@ export interface components {
              * Format: binary
              */
             file: string;
+        };
+        /**
+         * CancelResponse
+         * @description POST /api/v1/chat/{conv_id}/cancel response
+         */
+        CancelResponse: {
+            /**
+             * Message Id
+             * @description Cancelled execution message ID
+             */
+            message_id: string;
         };
         /**
          * ChatRequest
@@ -1310,6 +1343,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["InjectResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    cancel_execution_api_v1_chat__conv_id__cancel_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                conv_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CancelResponse"];
                 };
             };
             /** @description Validation Error */

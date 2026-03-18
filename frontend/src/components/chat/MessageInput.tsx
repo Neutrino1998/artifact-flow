@@ -6,7 +6,7 @@ import { useStreamStore } from '@/stores/streamStore';
 import { useUIStore } from '@/stores/uiStore';
 import { useArtifactStore } from '@/stores/artifactStore';
 import { useConversationStore } from '@/stores/conversationStore';
-import { uploadFile, uploadFileNewSession, listConversations, getConversation, injectMessage } from '@/lib/api';
+import { uploadFile, uploadFileNewSession, listConversations, getConversation, injectMessage, cancelExecution } from '@/lib/api';
 import { useArtifacts } from '@/hooks/useArtifacts';
 
 export default function MessageInput() {
@@ -16,7 +16,7 @@ export default function MessageInput() {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const isComposingRef = useRef(false);
-  const { sendMessage, disconnect, isNewConversation } = useChat();
+  const { sendMessage, isNewConversation } = useChat();
   const isStreaming = useStreamStore((s) => s.isStreaming);
   const toggleArtifactPanel = useUIStore((s) => s.toggleArtifactPanel);
   const setArtifactPanelVisible = useUIStore((s) => s.setArtifactPanelVisible);
@@ -39,6 +39,19 @@ export default function MessageInput() {
   const streamConversationId = useStreamStore((s) => s.conversationId);
 
   const handleSend = useCallback(async () => {
+    if (isStreaming && !content.trim()) {
+      // Stop: cancel backend execution
+      const convId = streamConversationId || conversationId;
+      if (convId) {
+        try {
+          await cancelExecution(convId);
+        } catch (err) {
+          console.error('Cancel failed:', err);
+        }
+      }
+      return;
+    }
+
     const trimmed = content.trim();
     if (!trimmed) return;
 
@@ -59,10 +72,6 @@ export default function MessageInput() {
     setContent('');
     await sendMessage(trimmed);
   }, [content, isStreaming, sendMessage, conversationId, streamConversationId]);
-
-  const handleStop = useCallback(() => {
-    disconnect();
-  }, [disconnect]);
 
   const handleCompositionStart = useCallback(() => {
     isComposingRef.current = true;
@@ -257,45 +266,42 @@ export default function MessageInput() {
               </button>
             </div>
 
-            {/* Send + Stop buttons */}
-            <div className="flex items-center gap-1.5">
-              {isStreaming && (
+            {/* Unified Send / Stop / Inject button */}
+            {(() => {
+              const isStop = isStreaming && !content.trim();
+              return (
                 <button
-                  onClick={handleStop}
-                  className="w-8 h-8 flex items-center justify-center rounded-full bg-red-500 text-white hover:bg-red-600 transition-colors"
-                  aria-label="Stop generation"
-                  title="停止生成"
+                  onClick={handleSend}
+                  disabled={!isStreaming && !content.trim()}
+                  className={`w-8 h-8 flex items-center justify-center rounded-full transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+                    isStop
+                      ? 'bg-red-500 text-white hover:bg-red-600'
+                      : 'bg-accent text-white hover:bg-accent-hover'
+                  }`}
+                  aria-label={isStop ? 'Stop generation' : isStreaming ? 'Inject message' : 'Send message'}
+                  title={isStop ? '停止生成' : isStreaming ? '追加指令' : '发送消息'}
                 >
-                  <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-                    <rect x="4" y="4" width="8" height="8" rx="1" />
-                  </svg>
+                  {isStop ? (
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                      <rect x="4" y="4" width="8" height="8" rx="1" />
+                    </svg>
+                  ) : (
+                    <svg
+                      width="16"
+                      height="16"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <path d="M12 19V5M5 12l7-7 7 7" />
+                    </svg>
+                  )}
                 </button>
-              )}
-              <button
-                onClick={handleSend}
-                disabled={!content.trim()}
-                className={`w-8 h-8 flex items-center justify-center rounded-full transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
-                  isStreaming
-                    ? 'bg-text-tertiary dark:bg-text-tertiary-dark text-white hover:bg-text-secondary dark:hover:bg-text-secondary-dark'
-                    : 'bg-accent text-white hover:bg-accent-hover'
-                }`}
-                aria-label={isStreaming ? 'Inject message' : 'Send message'}
-                title={isStreaming ? '追加指令' : '发送消息'}
-              >
-                <svg
-                  width="16"
-                  height="16"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <path d="M12 19V5M5 12l7-7 7 7" />
-                </svg>
-              </button>
-            </div>
+              );
+            })()}
           </div>
         </div>
       </div>

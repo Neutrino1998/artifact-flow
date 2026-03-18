@@ -405,6 +405,54 @@
         }
       }
     },
+    "/api/v1/chat/{conv_id}/cancel": {
+      "post": {
+        "tags": [
+          "chat"
+        ],
+        "summary": "Cancel Execution",
+        "description": "\u53d6\u6d88\u6d3b\u8dc3\u6267\u884c\n\n\u8bf7\u6c42\u53d6\u6d88 conversation \u5f53\u524d\u6b63\u5728\u8fd0\u884c\u7684\u6267\u884c\u3002\u5f15\u64ce\u4f1a\u5728\u4e0b\u4e00\u4e2a\u68c0\u67e5\u70b9\u4f18\u96c5\u9000\u51fa\u3002",
+        "operationId": "cancel_execution_api_v1_chat__conv_id__cancel_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "conv_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Conv Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CancelResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/chat/{conv_id}": {
       "get": {
         "tags": [
@@ -1285,6 +1333,21 @@
           "file"
         ],
         "title": "Body_upload_file_new_session_api_v1_artifacts_upload_post"
+      },
+      "CancelResponse": {
+        "properties": {
+          "message_id": {
+            "type": "string",
+            "title": "Message Id",
+            "description": "Cancelled execution message ID"
+          }
+        },
+        "type": "object",
+        "required": [
+          "message_id"
+        ],
+        "title": "CancelResponse",
+        "description": "POST /api/v1/chat/{conv_id}/cancel response"
       },
       "ChatRequest": {
         "properties": {

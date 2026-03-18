@@ -31,6 +31,7 @@ class StreamEventType(Enum):
     # ========== Controller 层 ==========
     METADATA = "metadata"                # 会话元数据（conversation_id, message_id）
     COMPLETE = "complete"                # 整体完成（含 execution_metrics）
+    CANCELLED = "cancelled"              # 用户主动取消执行
     ERROR = "error"                      # 错误
 
     # ========== Agent 层 ==========

@@ -6,6 +6,7 @@ export enum StreamEventType {
   // Controller layer
   METADATA = 'metadata',
   COMPLETE = 'complete',
+  CANCELLED = 'cancelled',
   ERROR = 'error',
 
   // Agent layer

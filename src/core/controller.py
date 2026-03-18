@@ -243,6 +243,7 @@ class ExecutionController:
         try:
             response = final_state.get("response", "")
             has_error = final_state.get("error", False)
+            is_cancelled = final_state.get("cancelled", False)
 
             # 更新 conversation response
             await self.conversation_manager.update_response_async(
@@ -268,8 +269,8 @@ class ExecutionController:
                     metadata=metadata_updates,
                 )
 
-            # 自动触发 compaction
-            if self.compaction_manager and execution_metrics:
+            # 自动触发 compaction（cancelled 不触发）
+            if self.compaction_manager and execution_metrics and not is_cancelled:
                 await self.compaction_manager.maybe_trigger(
                     conv_id=conversation_id,
                     message_id=message_id,
@@ -278,8 +279,22 @@ class ExecutionController:
                 )
 
             # 终态事件：error 路径由 engine 已发（在 state["events"] 中），
-            # controller 只负责 success 路径的 complete 事件。
-            if not has_error:
+            # controller 负责 success 和 cancelled 路径的终态事件。
+            terminal_event_dict = None
+            if is_cancelled:
+                terminal_event_dict = {
+                    "type": StreamEventType.CANCELLED.value,
+                    "timestamp": datetime.now().isoformat(),
+                    "data": {
+                        "success": False,
+                        "cancelled": True,
+                        "conversation_id": conversation_id,
+                        "message_id": message_id,
+                        "response": response,
+                        "execution_metrics": final_state.get("execution_metrics", {}),
+                    }
+                }
+            elif not has_error:
                 terminal_event_dict = {
                     "type": StreamEventType.COMPLETE.value,
                     "timestamp": datetime.now().isoformat(),
@@ -292,6 +307,7 @@ class ExecutionController:
                     }
                 }
 
+            if terminal_event_dict:
                 # 终态事件入库
                 final_state["events"].append(ExecutionEvent(
                     event_type=terminal_event_dict["type"],
@@ -302,8 +318,8 @@ class ExecutionController:
             # 持久化事件（batch write — 设计文档 §关键设计约束）
             await self._persist_events(message_id, final_state)
 
-            # 发送 complete 到 SSE（error 已由 engine 实时推送）
-            if not has_error:
+            # 发送终态到 SSE（error 已由 engine 实时推送）
+            if terminal_event_dict:
                 yield terminal_event_dict
 
         except Exception as e:
