@@ -245,4 +245,4 @@ class TestConcurrent:
             repo_b = ConversationRepository(session_b)
             msg = await repo_b.get_message(msg_id)
             assert msg is not None
-            assert msg.content == "committed data"
+            assert msg.user_input == "committed data"
