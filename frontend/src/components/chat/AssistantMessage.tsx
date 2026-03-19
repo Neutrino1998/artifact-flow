@@ -67,9 +67,10 @@ function AssistantMessage({ content, messageId, responseSummary }: AssistantMess
     setTimeout(() => setCopied(false), 1500);
   };
 
-  const hasFlow = completedSegs && completedSegs.length > 0;
-  const flowItems = hasFlow
-    ? interleaveFlowItems(completedSegs, completedBlocks ?? [])
+  const hasSegs = completedSegs && completedSegs.length > 0;
+  const hasBlocks = completedBlocks && completedBlocks.length > 0;
+  const flowItems = (hasSegs || hasBlocks)
+    ? interleaveFlowItems(completedSegs ?? [], completedBlocks ?? [])
     : null;
 
   return (
@@ -77,7 +78,7 @@ function AssistantMessage({ content, messageId, responseSummary }: AssistantMess
       {/* Completed execution segments (collapsible) */}
       {flowItems && flowItems.length > 0 && (
         <div className="mb-3">
-          <ProcessingFlow agentStepCount={completedSegs!.length} isActive={false} defaultExpanded={false}>
+          <ProcessingFlow agentStepCount={completedSegs?.length ?? 0} isActive={false} defaultExpanded={false}>
             {flowItems.map((item) => {
               if (item.kind === 'agent') {
                 return (
@@ -103,6 +104,11 @@ function AssistantMessage({ content, messageId, responseSummary }: AssistantMess
       )}
 
       <div className={PROSE_CLASSES}>
+        {responseSummary && (
+          <span className="inline-block mr-1 align-text-top">
+            <SummaryPopover summary={responseSummary} />
+          </span>
+        )}
         <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]} components={markdownComponents}>
           {content}
         </ReactMarkdown>
@@ -126,7 +132,6 @@ function AssistantMessage({ content, messageId, responseSummary }: AssistantMess
             </svg>
           )}
         </button>
-        {responseSummary && <SummaryPopover summary={responseSummary} />}
       </div>
     </div>
   );
