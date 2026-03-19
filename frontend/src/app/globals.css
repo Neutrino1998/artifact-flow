@@ -4,6 +4,13 @@
 @tailwind components;
 @tailwind utilities;
 
+::selection {
+  background: rgba(201, 100, 66, 0.25);
+}
+.dark ::selection {
+  background: rgba(201, 100, 66, 0.35);
+}
+
 /* PT Serif — newsprint theme font for markdown/prose areas */
 @font-face {
   font-family: 'PT Serif';
