@@ -36,10 +36,10 @@ class APIConfig(BaseSettings):
     PERMISSION_TIMEOUT: int = 300  # 秒，单次 permission 等待超时
 
     # Compaction / Context 配置
-    COMPACTION_THRESHOLD: int = 60000        # tokens, 触发跨轮 compaction
+    COMPACTION_THRESHOLD: int = 180000       # chars, 触发跨轮 compaction（与 context_manager len() 同口径）
     COMPACTION_PRESERVE_PAIRS: int = 2       # 保留最近 N 对不 compact
     COMPACTION_TIMEOUT: int = 600            # 秒, compaction 后台任务超时
-    CONTEXT_MAX_CHARS: int = 80000           # context 最大字符数
+    CONTEXT_MAX_CHARS: int = 240000          # context 最大字符数
     TOOL_INTERACTION_PRESERVE: int = 6       # 轮内 tool interaction 尾部保留条数
 
     # 并发控制

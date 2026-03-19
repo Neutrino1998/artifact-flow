@@ -51,6 +51,7 @@ class ExecutionMetrics(TypedDict):
     completed_at: Optional[str]
     total_duration_ms: Optional[int]
     last_token_usage: Optional[TokenUsage]
+    last_context_chars: int
     total_token_usage: TokenUsage
     events: List[MetricsEvent]
 
@@ -61,6 +62,7 @@ def create_initial_metrics() -> ExecutionMetrics:
         "completed_at": None,
         "total_duration_ms": None,
         "last_token_usage": None,
+        "last_context_chars": 0,
         "total_token_usage": {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0},
         "events": [],
     }
@@ -126,7 +128,7 @@ async def execute_loop(
     artifact_manager: Optional[Any] = None,
     emit: Optional[EmitFn] = None,
     permission_timeout: int = 300,
-    context_max_chars: int = 80000,
+    context_max_chars: int = 240000,
     compaction_preserve_pairs: int = 2,
     tool_interaction_preserve: int = 6,
 ) -> Dict[str, Any]:
@@ -534,6 +536,10 @@ async def execute_loop(
                 break
 
             messages = await _build_context(current_agent_name, agent_config)
+
+            # 记录 context 字符数（与 context_manager 的 len() 计算方式一致）
+            last_context_chars = sum(len(m.get("content", "")) for m in messages)
+            state["execution_metrics"]["last_context_chars"] = last_context_chars
 
             await _emit(StreamEventType.AGENT_START.value, current_agent_name, {
                 "agent": current_agent_name,

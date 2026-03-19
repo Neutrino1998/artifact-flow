@@ -57,21 +57,17 @@ class CompactionManager:
         """
         根据 execution_metrics 判断是否触发 compaction。
 
-        从 last_token_usage 的 input_tokens 判断是否超过阈值。
+        从 last_context_chars（构建 context 时的 len() 总和）判断是否超过阈值。
         """
-        last_usage = execution_metrics.get("last_token_usage")
-        if not last_usage:
-            return
-
-        last_input_tokens = last_usage.get("input_tokens", 0)
-        if last_input_tokens < config.COMPACTION_THRESHOLD:
+        last_context_chars = execution_metrics.get("last_context_chars", 0)
+        if last_context_chars < config.COMPACTION_THRESHOLD:
             return
 
         if conv_id in self._running:
             logger.debug(f"Compaction already running for {conv_id}, skipping")
             return
 
-        logger.info(f"Triggering compaction for {conv_id} (input_tokens={last_input_tokens})")
+        logger.info(f"Triggering compaction for {conv_id} (context_chars={last_context_chars})")
         done_event = asyncio.Event()
         self._running[conv_id] = done_event
         asyncio.create_task(self._run_compaction(conv_id, message_id, done_event, config))
@@ -166,7 +162,7 @@ class CompactionManager:
                 continue
 
             # 构建 prompt — 从最新往前累积 summary，超出字符预算则丢弃最早的
-            budget = getattr(config, "CONTEXT_MAX_CHARS", 80000)
+            budget = getattr(config, "CONTEXT_MAX_CHARS", 240000)
             recent_summaries = []
             total_len = 0
             for s in reversed(prior_summaries):

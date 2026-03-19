@@ -49,7 +49,7 @@ class ExecutionController:
         permission_timeout: int = 300,
         compaction_manager: Optional[Any] = None,
         compaction_config: Optional[Any] = None,
-        context_max_chars: int = 80000,
+        context_max_chars: int = 240000,
         compaction_preserve_pairs: int = 2,
         tool_interaction_preserve: int = 6,
     ):

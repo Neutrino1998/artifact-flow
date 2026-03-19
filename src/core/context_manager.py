@@ -34,14 +34,6 @@ class ContextManager:
     2. 通用的消息压缩
     """
 
-    # 压缩级别对应的最大字符数
-    COMPRESSION_LEVELS = {
-        'full': 160000,
-        'normal': 80000,
-        'compact': 40000,
-        'minimal': 20000
-    }
-
     @classmethod
     def build(
         cls,
@@ -51,7 +43,7 @@ class ContextManager:
         tools: Dict[str, Any],   # {name: BaseTool}
         artifact_manager: Optional[Any] = None,
         artifacts_inventory: Optional[List[Dict]] = None,
-        context_max_chars: int = 80000,
+        context_max_chars: int = 240000,
         compaction_preserve_pairs: int = 2,
         tool_interaction_preserve: int = 6,
     ) -> Context:
@@ -124,8 +116,6 @@ class ContextManager:
                 compressed = cls.compress_messages_with_budget(
                     history, history_budget, preserve_recent=preserve_recent
                 )
-                if len(compressed) < len(history):
-                    compressed = cls._merge_truncation_marker(compressed, "...")
                 messages.extend(compressed)
 
         # Tool interactions — 尾部保留截断
@@ -142,8 +132,6 @@ class ContextManager:
                 compressed = cls.compress_messages_with_budget(
                     current_input_messages, remaining, preserve_recent=max(tool_interaction_preserve, 2)
                 )
-                if len(compressed) < len(current_input_messages):
-                    compressed = cls._merge_truncation_marker(compressed, "...")
                 messages.extend(compressed)
 
         return Context(messages=messages)
@@ -265,10 +253,6 @@ class ContextManager:
 
         return interactions
 
-    # ============================================================
-    # 消息压缩（复用旧 ContextManager 的逻辑）
-    # ============================================================
-
     @classmethod
     def compress_messages_with_budget(
         cls,
@@ -330,69 +314,6 @@ class ContextManager:
         return compressed + recent_messages
 
     @classmethod
-    def compress_messages(
-        cls,
-        messages: List[Dict],
-        level: str = "normal",
-        preserve_recent: int = 5
-    ) -> List[Dict]:
-        """
-        压缩消息历史
-
-        Args:
-            messages: 消息列表
-            level: 压缩级别
-            preserve_recent: 保留最近N条完整消息
-
-        Returns:
-            压缩后的消息列表
-        """
-        if not messages or level == "full":
-            return messages
-
-        max_length = cls.COMPRESSION_LEVELS.get(level, 40000)
-        total_length = sum(len(msg.get("content", "")) for msg in messages)
-
-        if total_length <= max_length:
-            return messages
-
-        logger.debug(f"Compressing {len(messages)} messages: {total_length} chars -> max {max_length}")
-
-        if len(messages) <= preserve_recent:
-            return messages
-
-        recent_messages = messages[-preserve_recent:]
-        older_messages = messages[:-preserve_recent]
-
-        recent_length = sum(len(msg.get("content", "")) for msg in recent_messages)
-        remaining_length = max_length - recent_length
-
-        if remaining_length <= 0:
-            return [{
-                "role": "system",
-                "content": f"[{len(older_messages)} earlier messages truncated due to length limit]"
-            }] + recent_messages
-
-        compressed = []
-        current_length = 0
-
-        for msg in reversed(older_messages):
-            msg_length = len(msg.get("content", ""))
-            if current_length + msg_length > remaining_length:
-                if len(older_messages) > len(compressed):
-                    compressed.insert(0, {
-                        "role": "system",
-                        "content": f"[{len(older_messages) - len(compressed)} earlier messages truncated]"
-                    })
-                break
-            compressed.insert(0, msg)
-            current_length += msg_length
-
-        result = compressed + recent_messages
-        logger.debug(f"Compressed to {len(result)} messages")
-        return result
-
-    @classmethod
     def _hard_truncate_to_budget(cls, messages: List[Dict], max_chars: int) -> List[Dict]:
         """
         硬截断：当消息数 <= preserve_recent 但仍超预算时，
@@ -413,18 +334,8 @@ class ContextManager:
                 break
 
         if dropped > 0:
-            result = cls._merge_truncation_marker(
-                result,
-                f"[{dropped} earlier messages truncated due to length limit]"
-            )
+            result.insert(0, {
+                "role": "system",
+                "content": f"[{dropped} earlier messages truncated due to length limit]"
+            })
         return result
-
-    @classmethod
-    def _merge_truncation_marker(cls, messages: List[Dict], marker: str) -> List[Dict]:
-        """将截断标记合并到第一条消息，避免破坏角色交替"""
-        if not messages:
-            return messages
-
-        first = messages[0].copy()
-        first["content"] = f"{marker}\n\n{first['content']}"
-        return [first] + messages[1:]

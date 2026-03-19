@@ -122,12 +122,12 @@ def cm_light(agents):
 class TestTrigger:
 
     async def test_below_threshold_no_trigger(self, cm_light, config):
-        metrics = {"last_token_usage": {"input_tokens": 500}}
+        metrics = {"last_context_chars": 500}
         await cm_light.maybe_trigger("conv-1", "msg-1", metrics, config)
         assert "conv-1" not in cm_light._running
 
     async def test_above_threshold_triggers(self, cm_light, config):
-        metrics = {"last_token_usage": {"input_tokens": 2000}}
+        metrics = {"last_context_chars": 2000}
         with patch.object(cm_light, "_compact", return_value=None) as mock_compact:
             await cm_light.maybe_trigger("conv-1", "msg-1", metrics, config)
             # Wait for the background task to finish so the patch stays alive
@@ -140,7 +140,7 @@ class TestTrigger:
 
     async def test_already_running_skips(self, cm_light, config):
         cm_light._running["conv-1"] = asyncio.Event()
-        metrics = {"last_token_usage": {"input_tokens": 2000}}
+        metrics = {"last_context_chars": 2000}
         await cm_light.maybe_trigger("conv-1", "msg-1", metrics, config)
         assert "conv-1" in cm_light._running
 
