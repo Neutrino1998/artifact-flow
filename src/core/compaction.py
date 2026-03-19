@@ -172,10 +172,13 @@ class CompactionManager:
                 f"<response>\n{pair.response}\n</response>"
             )
 
+            prompt_content = "\n\n".join(prompt_parts)
             messages = [
                 {"role": "system", "content": compact_agent.role_prompt},
-                {"role": "user", "content": "\n\n".join(prompt_parts)},
+                {"role": "user", "content": prompt_content},
             ]
+
+            logger.debug(f"[compact_agent] Compacting {pair.message_id}:\n{prompt_content}")
 
             # 调用 LLM（此时无 DB 连接）
             response_text = ""
@@ -197,6 +200,12 @@ class CompactionManager:
             if not user_input_summary or not response_summary:
                 logger.warning(f"Failed to parse compaction summary for message {pair.message_id}")
                 continue
+
+            logger.debug(
+                f"[compact_agent] Result for {pair.message_id}:\n"
+                f"  user: {user_input_summary}\n"
+                f"  assistant: {response_summary}"
+            )
 
             # 短事务写入
             await self._write_summary(pair.message_id, user_input_summary, response_summary)

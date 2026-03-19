@@ -4,6 +4,7 @@ import { memo, useState, useRef, useEffect, useCallback } from 'react';
 import { useChat } from '@/hooks/useChat';
 import { useStreamStore } from '@/stores/streamStore';
 import BranchNavigator from './BranchNavigator';
+import SummaryPopover from './SummaryPopover';
 
 interface UserMessageProps {
   content: string;
@@ -11,10 +12,10 @@ interface UserMessageProps {
   parentId: string | null;
   siblingIndex: number;
   siblingCount: number;
-  isSummarized?: boolean;
+  userInputSummary?: string | null;
 }
 
-function UserMessage({ content, messageId, parentId, siblingIndex, siblingCount, isSummarized }: UserMessageProps) {
+function UserMessage({ content, messageId, parentId, siblingIndex, siblingCount, userInputSummary }: UserMessageProps) {
   const [copied, setCopied] = useState(false);
   const [editing, setEditing] = useState(false);
   const [editContent, setEditContent] = useState(content);
@@ -116,18 +117,11 @@ function UserMessage({ content, messageId, parentId, siblingIndex, siblingCount,
     <div className="flex justify-end group">
       <div className="relative max-w-[80%]">
         <div className="bg-panel-accent dark:bg-surface-dark rounded-bubble px-4 py-3 text-text-primary dark:text-text-primary-dark whitespace-pre-wrap break-words">
-          {isSummarized && (
-            <span className="inline-block mr-1 align-text-top" title="此消息已被压缩摘要">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-text-tertiary dark:text-text-tertiary-dark">
-                <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
-                <path d="M3.27 6.96 12 12.01l8.73-5.05M12 22.08V12" />
-              </svg>
-            </span>
-          )}
           {content}
         </div>
         {/* Action buttons and branch navigator on hover */}
         <div className="absolute -bottom-7 right-2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+          {userInputSummary && <SummaryPopover summary={userInputSummary} />}
           <button
             onClick={handleEdit}
             disabled={isStreaming}

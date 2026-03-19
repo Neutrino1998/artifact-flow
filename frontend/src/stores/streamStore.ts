@@ -16,6 +16,40 @@ export interface PermissionRequest {
   params: Record<string, unknown>;
 }
 
+export interface NonAgentBlock {
+  kind: 'inject' | 'compaction';
+  id: string;
+  content?: string;    // inject only
+  timestamp: string;
+  position: number;    // segments.length at insertion time
+}
+
+export type FlowItem =
+  | { kind: 'agent'; segment: ExecutionSegment; index: number }
+  | NonAgentBlock;
+
+/** Interleave agent segments with non-agent blocks by insertion position. */
+export function interleaveFlowItems(
+  segments: ExecutionSegment[],
+  blocks: NonAgentBlock[],
+): FlowItem[] {
+  const sorted = [...blocks].sort((a, b) => a.position - b.position);
+  const result: FlowItem[] = [];
+  let bIdx = 0;
+  for (let i = 0; i < segments.length; i++) {
+    while (bIdx < sorted.length && sorted[bIdx].position <= i) {
+      result.push(sorted[bIdx]);
+      bIdx++;
+    }
+    result.push({ kind: 'agent', segment: segments[i], index: i });
+  }
+  while (bIdx < sorted.length) {
+    result.push(sorted[bIdx]);
+    bIdx++;
+  }
+  return result;
+}
+
 export interface ExecutionSegment {
   id: string;                    // `${agent}-${timestamp}`
   agent: string;
@@ -50,11 +84,11 @@ interface StreamState {
   // Completed segments cache (session-only, keyed by messageId)
   completedSegments: Map<string, ExecutionSegment[]>;
 
-  // Injected messages (from /inject during streaming)
-  injectedMessages: { content: string; timestamp: string }[];
+  // Non-agent blocks (inject / compaction) interleaved with segments
+  nonAgentBlocks: NonAgentBlock[];
 
-  // Compaction wait indicator
-  compactionWait: boolean;
+  // Completed non-agent blocks cache (session-only, keyed by messageId)
+  completedNonAgentBlocks: Map<string, NonAgentBlock[]>;
 
   // Execution metrics summary (from COMPLETE event)
   executionMetrics: ExecutionMetrics | null;
@@ -84,9 +118,8 @@ interface StreamState {
   setPendingUserMessage: (msg: string | null) => void;
   setStreamParentId: (id: string | null | undefined) => void;
 
-  // Inject / compaction / metrics
-  addInjectedMessage: (msg: { content: string; timestamp: string }) => void;
-  setCompactionWait: (val: boolean) => void;
+  // Non-agent blocks / metrics
+  pushNonAgentBlock: (block: NonAgentBlock) => void;
   setExecutionMetrics: (metrics: ExecutionMetrics) => void;
 
   // Snapshot segments for completed messages
@@ -145,8 +178,8 @@ export const useStreamStore = create<StreamState>((set, get) => {
     pendingUserMessage: null,
     streamParentId: undefined,
     completedSegments: new Map(),
-    injectedMessages: [],
-    compactionWait: false,
+    nonAgentBlocks: [],
+    completedNonAgentBlocks: new Map(),
     executionMetrics: null,
     cancelled: false,
     permissionRequest: null,
@@ -160,8 +193,7 @@ export const useStreamStore = create<StreamState>((set, get) => {
         messageId,
         conversationId,
         segments: [],
-        injectedMessages: [],
-        compactionWait: false,
+        nonAgentBlocks: [],
         executionMetrics: null,
         cancelled: false,
         permissionRequest: null,
@@ -189,7 +221,6 @@ export const useStreamStore = create<StreamState>((set, get) => {
 
     pushSegment: (agent) =>
       set((s) => ({
-        compactionWait: false,
         segments: [
           ...s.segments,
           {
@@ -256,9 +287,8 @@ export const useStreamStore = create<StreamState>((set, get) => {
     setPendingUserMessage: (msg) => set({ pendingUserMessage: msg }),
     setStreamParentId: (id) => set({ streamParentId: id }),
 
-    addInjectedMessage: (msg) =>
-      set((s) => ({ injectedMessages: [...s.injectedMessages, msg] })),
-    setCompactionWait: (val) => set({ compactionWait: val }),
+    pushNonAgentBlock: (block) =>
+      set((s) => ({ nonAgentBlocks: [...s.nonAgentBlocks, block] })),
     setExecutionMetrics: (metrics) => set({ executionMetrics: metrics }),
 
     snapshotSegments: (messageId) => {
@@ -273,6 +303,12 @@ export const useStreamStore = create<StreamState>((set, get) => {
         // Deep copy to prevent stale references
         newMap.set(messageId, JSON.parse(JSON.stringify(segsToSnapshot)));
         set({ completedSegments: newMap });
+      }
+      // Snapshot non-agent blocks
+      if (state.nonAgentBlocks.length > 0) {
+        const nabMap = new Map(state.completedNonAgentBlocks);
+        nabMap.set(messageId, [...state.nonAgentBlocks]);
+        set({ completedNonAgentBlocks: nabMap });
       }
     },
 

@@ -41,7 +41,7 @@ export default function MessageList() {
                 parentId={node.parent_id}
                 siblingIndex={node.siblingIndex}
                 siblingCount={node.siblingCount}
-                isSummarized={!!node.user_input_summary}
+                userInputSummary={node.user_input_summary}
               />
 
               {/* Assistant response */}
@@ -49,7 +49,7 @@ export default function MessageList() {
                 <AssistantMessage
                   content={node.response}
                   messageId={node.id}
-                  isSummarized={!!node.response_summary}
+                  responseSummary={node.response_summary}
                 />
               )}
             </div>

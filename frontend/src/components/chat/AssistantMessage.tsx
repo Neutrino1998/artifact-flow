@@ -4,25 +4,31 @@ import { memo, useState, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
-import { useStreamStore } from '@/stores/streamStore';
+import { useStreamStore, interleaveFlowItems } from '@/stores/streamStore';
 import { useConversationStore } from '@/stores/conversationStore';
 import { PROSE_CLASSES } from '@/lib/styles';
 import { markdownComponents } from '@/components/markdown';
 import { getMessageEvents } from '@/lib/api';
-import { reconstructSegments } from '@/lib/reconstructSegments';
+import { reconstructSegments, reconstructNonAgentBlocks } from '@/lib/reconstructSegments';
 import AgentSegmentBlock from './AgentSegmentBlock';
+import InjectFlowBlock from './InjectFlowBlock';
+import CompactionFlowBlock from './CompactionFlowBlock';
 import ProcessingFlow from './ProcessingFlow';
+import SummaryPopover from './SummaryPopover';
 
 interface AssistantMessageProps {
   content: string;
   messageId?: string;
-  isSummarized?: boolean;
+  responseSummary?: string | null;
 }
 
-function AssistantMessage({ content, messageId, isSummarized }: AssistantMessageProps) {
+function AssistantMessage({ content, messageId, responseSummary }: AssistantMessageProps) {
   const [copied, setCopied] = useState(false);
   const completedSegs = useStreamStore(
     (s) => messageId ? s.completedSegments.get(messageId) : undefined
+  );
+  const completedBlocks = useStreamStore(
+    (s) => messageId ? s.completedNonAgentBlocks.get(messageId) : undefined
   );
   const conversationId = useConversationStore((s) => s.current?.id);
 
@@ -35,11 +41,17 @@ function AssistantMessage({ content, messageId, isSummarized }: AssistantMessage
       .then((res) => {
         if (cancelled || res.events.length === 0) return;
         const segments = reconstructSegments(res.events);
+        const blocks = reconstructNonAgentBlocks(res.events);
+        const store = useStreamStore.getState();
         if (segments.length > 0) {
-          const store = useStreamStore.getState();
           const newMap = new Map(store.completedSegments);
           newMap.set(messageId, segments);
           useStreamStore.setState({ completedSegments: newMap });
+        }
+        if (blocks.length > 0) {
+          const nabMap = new Map(store.completedNonAgentBlocks);
+          nabMap.set(messageId, blocks);
+          useStreamStore.setState({ completedNonAgentBlocks: nabMap });
         }
       })
       .catch(() => {
@@ -55,50 +67,67 @@ function AssistantMessage({ content, messageId, isSummarized }: AssistantMessage
     setTimeout(() => setCopied(false), 1500);
   };
 
+  const hasFlow = completedSegs && completedSegs.length > 0;
+  const flowItems = hasFlow
+    ? interleaveFlowItems(completedSegs, completedBlocks ?? [])
+    : null;
+
   return (
     <div className="group relative">
       {/* Completed execution segments (collapsible) */}
-      {completedSegs && completedSegs.length > 0 && (
+      {flowItems && flowItems.length > 0 && (
         <div className="mb-3">
-          <ProcessingFlow segments={completedSegs} isActive={false} defaultExpanded={false}>
-            {completedSegs.map((seg, idx) => (
-              <AgentSegmentBlock key={seg.id} segment={seg} isActive={false} defaultExpanded={false} stepNumber={idx + 1} />
-            ))}
+          <ProcessingFlow agentStepCount={completedSegs!.length} isActive={false} defaultExpanded={false}>
+            {flowItems.map((item) => {
+              if (item.kind === 'agent') {
+                return (
+                  <AgentSegmentBlock
+                    key={item.segment.id}
+                    segment={item.segment}
+                    isActive={false}
+                    defaultExpanded={false}
+                    stepNumber={item.index + 1}
+                  />
+                );
+              }
+              if (item.kind === 'inject') {
+                return <InjectFlowBlock key={item.id} content={item.content} />;
+              }
+              if (item.kind === 'compaction') {
+                return <CompactionFlowBlock key={item.id} />;
+              }
+              return null;
+            })}
           </ProcessingFlow>
         </div>
       )}
 
       <div className={PROSE_CLASSES}>
-        {isSummarized && (
-          <span className="inline-block mr-1 align-text-top" title="此消息已被压缩摘要">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-text-tertiary dark:text-text-tertiary-dark">
-              <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
-              <path d="M3.27 6.96 12 12.01l8.73-5.05M12 22.08V12" />
-            </svg>
-          </span>
-        )}
         <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]} components={markdownComponents}>
           {content}
         </ReactMarkdown>
       </div>
-      {/* Copy button on hover */}
-      <button
-        onClick={handleCopy}
-        className="absolute -bottom-7 left-0 p-1 rounded opacity-0 group-hover:opacity-100 transition-opacity text-text-tertiary dark:text-text-tertiary-dark hover:text-text-secondary dark:hover:text-text-secondary-dark hover:bg-bg dark:hover:bg-bg-dark transition-colors"
-        aria-label="Copy response"
-        title={copied ? '已复制' : '复制'}
-      >
-        {copied ? (
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M20 6 9 17l-5-5" />
-          </svg>
-        ) : (
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
-            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-          </svg>
-        )}
-      </button>
+      {/* Action bar on hover */}
+      <div className="absolute -bottom-7 left-0 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+        <button
+          onClick={handleCopy}
+          className="p-1 rounded text-text-tertiary dark:text-text-tertiary-dark hover:text-text-secondary dark:hover:text-text-secondary-dark hover:bg-bg dark:hover:bg-bg-dark transition-colors"
+          aria-label="Copy response"
+          title={copied ? '已复制' : '复制'}
+        >
+          {copied ? (
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M20 6 9 17l-5-5" />
+            </svg>
+          ) : (
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+            </svg>
+          )}
+        </button>
+        {responseSummary && <SummaryPopover summary={responseSummary} />}
+      </div>
     </div>
   );
 }

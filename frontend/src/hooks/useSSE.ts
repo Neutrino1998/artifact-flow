@@ -32,8 +32,7 @@ export function useSSE() {
   const setPermissionRequest = useStreamStore((s) => s.setPermissionRequest);
   const setError = useStreamStore((s) => s.setError);
   const endStream = useStreamStore((s) => s.endStream);
-  const addInjectedMessage = useStreamStore((s) => s.addInjectedMessage);
-  const setCompactionWait = useStreamStore((s) => s.setCompactionWait);
+  const pushNonAgentBlock = useStreamStore((s) => s.pushNonAgentBlock);
   const setExecutionMetrics = useStreamStore((s) => s.setExecutionMetrics);
   const setCancelled = useStreamStore((s) => s.setCancelled);
 
@@ -243,14 +242,22 @@ export function useSSE() {
           break;
 
         case StreamEventType.QUEUED_MESSAGE:
-          addInjectedMessage({
+          pushNonAgentBlock({
+            kind: 'inject',
+            id: `inject-${Date.now()}`,
             content: data?.content as string ?? '',
             timestamp: event.timestamp,
+            position: useStreamStore.getState().segments.length,
           });
           break;
 
         case StreamEventType.COMPACTION_WAIT:
-          setCompactionWait(true);
+          pushNonAgentBlock({
+            kind: 'compaction',
+            id: `compact-${Date.now()}`,
+            timestamp: event.timestamp,
+            position: useStreamStore.getState().segments.length,
+          });
           break;
 
         case StreamEventType.CANCELLED: {
@@ -293,7 +300,7 @@ export function useSSE() {
       setError, endStream, refreshAfterComplete, setArtifactPanelVisible,
       addPendingUpdate, setArtifactSessionId, setArtifactCurrent, setArtifacts,
       setArtifactVersions, setSelectedVersion,
-      addInjectedMessage, setCompactionWait, setExecutionMetrics, setCancelled,
+      pushNonAgentBlock, setExecutionMetrics, setCancelled,
     ]
   );
 

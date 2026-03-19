@@ -1,24 +1,21 @@
 'use client';
 
 import { memo, useState, useEffect } from 'react';
-import type { ExecutionSegment } from '@/stores/streamStore';
 import CyclingDots from './CyclingDots';
 
 interface ProcessingFlowProps {
-  segments: ExecutionSegment[];
+  agentStepCount: number;
   isActive: boolean;
   defaultExpanded: boolean;
   children: React.ReactNode;
 }
 
-function ProcessingFlow({ segments, isActive, defaultExpanded, children }: ProcessingFlowProps) {
+function ProcessingFlow({ agentStepCount, isActive, defaultExpanded, children }: ProcessingFlowProps) {
   const [expanded, setExpanded] = useState(defaultExpanded);
 
   useEffect(() => {
     setExpanded(isActive);
   }, [isActive]);
-
-  const stepCount = segments.length;
 
   return (
     <div className="border border-border dark:border-border-dark rounded-card overflow-hidden">
@@ -55,9 +52,9 @@ function ProcessingFlow({ segments, isActive, defaultExpanded, children }: Proce
           </span>
         )}
 
-        {/* Right side: agent path + step count */}
+        {/* Right side: step count */}
         <span className="ml-auto text-text-tertiary dark:text-text-tertiary-dark">
-          {stepCount} {stepCount === 1 ? 'step' : 'steps'}
+          {agentStepCount} {agentStepCount === 1 ? 'step' : 'steps'}
         </span>
       </button>
 

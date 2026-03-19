@@ -1,5 +1,5 @@
 import type { MessageEventItem } from '@/lib/api';
-import type { ExecutionSegment, ToolCallInfo } from '@/stores/streamStore';
+import type { ExecutionSegment, ToolCallInfo, NonAgentBlock } from '@/stores/streamStore';
 
 /**
  * Reconstruct ExecutionSegment[] from persisted MessageEvent records.
@@ -134,4 +134,31 @@ export function reconstructSegments(events: MessageEventItem[]): ExecutionSegmen
   return segments.filter(
     (seg) => seg.toolCalls.length > 0 || seg.reasoningContent
   );
+}
+
+/**
+ * Reconstruct NonAgentBlock[] from persisted MessageEvent records.
+ */
+export function reconstructNonAgentBlocks(events: MessageEventItem[]): NonAgentBlock[] {
+  const blocks: NonAgentBlock[] = [];
+  let agentSegmentCount = 0;
+
+  for (const evt of events) {
+    const { event_type, data } = evt;
+
+    if (event_type === 'agent_start') {
+      agentSegmentCount++;
+    } else if (event_type === 'queued_message') {
+      blocks.push({
+        kind: 'inject',
+        id: `inject-${evt.created_at}`,
+        content: (data?.content as string) ?? '',
+        timestamp: evt.created_at,
+        position: agentSegmentCount,
+      });
+    }
+    // compaction_wait is SSE-only (not persisted), so no reconstruction needed
+  }
+
+  return blocks;
 }
