@@ -7,13 +7,13 @@ const config: Config = {
     extend: {
       colors: {
         chat: {
-          DEFAULT: '#f3f2ee',
+          DEFAULT: '#FAF9F6',
           dark: '#1e1e1e',
         },
         panel: {
           DEFAULT: '#ffffff',
           dark: '#222222',
-          accent: '#e8e7df',
+          accent: '#F0EEE7',
           'accent-dark': '#1a1a1a',
         },
         action: {
@@ -22,7 +22,7 @@ const config: Config = {
           contrast: '#f3eee3',
         },
         bg: {
-          DEFAULT: '#f3f2ee',
+          DEFAULT: '#FAF9F6',
           dark: '#1a1a1a',
         },
         surface: {

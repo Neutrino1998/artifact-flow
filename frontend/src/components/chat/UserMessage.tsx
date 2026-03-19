@@ -115,7 +115,7 @@ function UserMessage({ content, messageId, parentId, siblingIndex, siblingCount,
   return (
     <div className="flex justify-end group">
       <div className="relative max-w-[80%]">
-        <div className="bg-surface dark:bg-surface-dark rounded-bubble px-4 py-3 text-sm text-text-primary dark:text-text-primary-dark whitespace-pre-wrap break-words">
+        <div className="bg-panel-accent dark:bg-surface-dark rounded-bubble px-4 py-3 text-sm text-text-primary dark:text-text-primary-dark whitespace-pre-wrap break-words">
           {isSummarized && (
             <span className="inline-block mr-1 align-text-top" title="此消息已被压缩摘要">
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-text-tertiary dark:text-text-tertiary-dark">
