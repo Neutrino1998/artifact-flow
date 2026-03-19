@@ -145,7 +145,7 @@ async def execute_loop(
     Returns:
         最终执行状态
     """
-    from models.llm import astream_with_retry
+    from models.llm import astream_with_retry, format_messages_for_debug
 
     message_id = state["message_id"]
     tool_round_count: Dict[str, int] = {}  # per-agent tool round counter
@@ -539,7 +539,7 @@ async def execute_loop(
                 "agent": current_agent_name,
             })
 
-            logger.debug(f"[{current_agent_name}] Messages:\n{_format_messages_for_debug(messages)}")
+            logger.debug(f"[{current_agent_name}] Messages:\n{format_messages_for_debug(messages)}")
 
             # 调用 LLM（流式）
             llm_result = await _call_llm(messages, current_agent_name, agent_config.model)
@@ -633,18 +633,3 @@ def _complete_agent(
         logger.info(f"Subagent {agent_name} completed, switching back to lead_agent")
 
 
-def _format_messages_for_debug(messages: list, max_content_len: int = 100000) -> str:
-    """格式化消息用于调试输出"""
-    lines = []
-    for msg in messages:
-        role = msg["role"]
-        content = msg.get("content", "")
-        if not content:
-            continue
-        if len(content) > max_content_len:
-            content = content[:max_content_len] + "..."
-        lines.append(f"> {role}:")
-        for line in content.split('\n'):
-            lines.append(f"  {line}")
-        lines.append("")
-    return "\n".join(lines)

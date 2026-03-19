@@ -141,7 +141,7 @@ class CompactionManager:
         1. 短 session: 读取对话路径，提取为纯数据 (_PairInfo)，关闭 session
         2. 逐对: 调 LLM（无 DB 连接）→ 短 session: 写 summary，关闭 session
         """
-        from models.llm import astream_with_retry
+        from models.llm import astream_with_retry, format_messages_for_debug
 
         compact_agent = self._agents.get("compact_agent")
         if not compact_agent:
@@ -165,11 +165,14 @@ class CompactionManager:
                 )
                 continue
 
-            # 构建 prompt
+            # 构建 prompt — 只保留最近 N 条 summary 作为上下文，避免平方级增长
+            max_context = config.COMPACTION_PRESERVE_PAIRS
+            recent_summaries = prior_summaries[-max_context:] if len(prior_summaries) > max_context else prior_summaries
+
             prompt_parts = []
-            if prior_summaries:
+            if recent_summaries:
                 context_block = "\n\n".join(
-                    f"[Pair {i+1}]\n{s}" for i, s in enumerate(prior_summaries)
+                    f"[Pair {i+1}]\n{s}" for i, s in enumerate(recent_summaries)
                 )
                 prompt_parts.append(f"<context>\n{context_block}\n</context>")
 
@@ -184,7 +187,7 @@ class CompactionManager:
                 {"role": "user", "content": prompt_content},
             ]
 
-            logger.debug(f"[compact_agent] Compacting {pair.message_id}:\n{prompt_content}")
+            logger.debug(f"[compact_agent] Compacting {pair.message_id}:\n{format_messages_for_debug(messages)}")
 
             # 调用 LLM（此时无 DB 连接）
             response_text = ""
@@ -199,6 +202,8 @@ class CompactionManager:
                 logger.error(f"Compaction LLM call failed for message {pair.message_id}: {e}")
                 continue
 
+            logger.debug(f"[compact_agent] Raw response for {pair.message_id}:\n{response_text}")
+
             # 解析 XML tags
             user_input_summary = self._extract_tag(response_text, "user_input_summary")
             response_summary = self._extract_tag(response_text, "response_summary")
@@ -206,8 +211,6 @@ class CompactionManager:
             if not user_input_summary or not response_summary:
                 logger.warning(f"Failed to parse compaction summary for message {pair.message_id}")
                 continue
-
-            logger.debug(f"[compact_agent] Raw response for {pair.message_id}:\n{response_text}")
 
             # 短事务写入
             await self._write_summary(pair.message_id, user_input_summary, response_summary)

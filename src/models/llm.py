@@ -208,6 +208,23 @@ async def astream_with_retry(
 # 查询函数
 # ========================================
 
+def format_messages_for_debug(messages: list, max_content_len: int = 100000) -> str:
+    """格式化消息用于调试输出"""
+    lines = []
+    for msg in messages:
+        role = msg["role"]
+        content = msg.get("content", "")
+        if not content:
+            continue
+        if len(content) > max_content_len:
+            content = content[:max_content_len] + "..."
+        lines.append(f"> {role}:")
+        for line in content.split('\n'):
+            lines.append(f"  {line}")
+        lines.append("")
+    return "\n".join(lines)
+
+
 def get_available_models() -> list[str]:
     """获取所有预定义的模型别名"""
     config = _load_config()
