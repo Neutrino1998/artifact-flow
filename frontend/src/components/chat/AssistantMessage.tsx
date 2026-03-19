@@ -7,6 +7,7 @@ import rehypeHighlight from 'rehype-highlight';
 import { useStreamStore } from '@/stores/streamStore';
 import { useConversationStore } from '@/stores/conversationStore';
 import { PROSE_CLASSES } from '@/lib/styles';
+import { markdownComponents } from '@/components/markdown';
 import { getMessageEvents } from '@/lib/api';
 import { reconstructSegments } from '@/lib/reconstructSegments';
 import AgentSegmentBlock from './AgentSegmentBlock';
@@ -76,7 +77,7 @@ function AssistantMessage({ content, messageId, isSummarized }: AssistantMessage
             </svg>
           </span>
         )}
-        <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]}>
+        <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]} components={markdownComponents}>
           {content}
         </ReactMarkdown>
       </div>

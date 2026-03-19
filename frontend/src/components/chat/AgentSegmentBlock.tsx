@@ -6,6 +6,7 @@ import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
 import type { ExecutionSegment } from '@/stores/streamStore';
 import { PROSE_CLASSES } from '@/lib/styles';
+import { markdownComponents } from '@/components/markdown';
 import ThinkingBlock from './ThinkingBlock';
 import AgentOutputBlock from './AgentOutputBlock';
 import ToolCallCard from './ToolCallCard';
@@ -159,7 +160,7 @@ function AgentSegmentBlock({ segment, isActive, defaultExpanded, stepNumber }: A
               so new elements (AgentOutput, ToolCards) appear BELOW without layout shift. */}
           {preToolText && (
             <div className={PROSE_CLASSES}>
-              <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]}>
+              <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]} components={markdownComponents}>
                 {preToolText}
               </ReactMarkdown>
             </div>
@@ -178,7 +179,7 @@ function AgentSegmentBlock({ segment, isActive, defaultExpanded, stepNumber }: A
           {/* Main content — normal streaming text or post-tool text from new LLM round */}
           {mainContent && (
             <div className={`${PROSE_CLASSES} ${isActive ? 'streaming-cursor' : ''}`}>
-              <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]}>
+              <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]} components={markdownComponents}>
                 {mainContent}
               </ReactMarkdown>
             </div>
