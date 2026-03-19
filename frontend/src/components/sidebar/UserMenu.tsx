@@ -13,9 +13,26 @@ export default function UserMenu({ collapsed }: { collapsed?: boolean }) {
   const [popoverOpen, setPopoverOpen] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const [popoverStyle, setPopoverStyle] = useState<React.CSSProperties>({});
 
   const isAdmin = user?.role === 'admin';
   const initial = (user?.display_name || user?.username || '?')[0].toUpperCase();
+
+  const togglePopover = () => {
+    setPopoverOpen((prev) => {
+      if (!prev && triggerRef.current) {
+        const rect = triggerRef.current.getBoundingClientRect();
+        setPopoverStyle({
+          position: 'fixed',
+          bottom: window.innerHeight - rect.top + 4,
+          left: rect.left,
+          minWidth: collapsed ? 180 : rect.width,
+        });
+      }
+      return !prev;
+    });
+  };
 
   // Close popover on outside click
   useEffect(() => {
@@ -48,7 +65,8 @@ export default function UserMenu({ collapsed }: { collapsed?: boolean }) {
         {/* Trigger */}
         {collapsed ? (
           <button
-            onClick={() => setPopoverOpen((o) => !o)}
+            ref={triggerRef}
+            onClick={togglePopover}
             className="w-10 h-10 flex items-center justify-center rounded-lg text-text-secondary dark:text-text-secondary-dark hover:bg-bg dark:hover:bg-bg-dark transition-colors"
             title={user.display_name || user.username}
           >
@@ -58,7 +76,8 @@ export default function UserMenu({ collapsed }: { collapsed?: boolean }) {
           </button>
         ) : (
           <button
-            onClick={() => setPopoverOpen((o) => !o)}
+            ref={triggerRef}
+            onClick={togglePopover}
             className="w-full flex items-center gap-3 px-3 py-2.5 bg-chat dark:bg-panel-accent-dark rounded-card hover:bg-chat/70 dark:hover:bg-surface-dark transition-colors text-left"
           >
             <div className="w-8 h-8 rounded-lg bg-accent/15 text-accent flex items-center justify-center font-medium shrink-0">
@@ -94,9 +113,8 @@ export default function UserMenu({ collapsed }: { collapsed?: boolean }) {
         {/* Popover (opens upward) */}
         {popoverOpen && (
           <div
-            className={`absolute z-40 bottom-full mb-1 ${
-              collapsed ? 'left-0' : 'left-0 right-0'
-            } min-w-[180px] bg-bg dark:bg-panel-accent-dark border-none rounded-card shadow-modal p-1.5`}
+            className="z-40 bg-bg dark:bg-panel-accent-dark border-none rounded-card shadow-modal p-1.5"
+            style={popoverStyle}
           >
             {/* Theme toggle */}
             <button
