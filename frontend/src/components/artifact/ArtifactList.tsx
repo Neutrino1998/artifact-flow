@@ -12,7 +12,7 @@ export default function ArtifactList() {
   if (artifactsLoading) {
     return (
       <div className="h-full flex items-center justify-center bg-chat dark:bg-chat-dark">
-        <span className="text-sm text-text-tertiary dark:text-text-tertiary-dark">
+        <span className="text-text-tertiary dark:text-text-tertiary-dark">
           加载文稿中...
         </span>
       </div>
@@ -22,7 +22,7 @@ export default function ArtifactList() {
   if (artifacts.length === 0) {
     return (
       <div className="h-full flex items-center justify-center bg-chat dark:bg-chat-dark">
-        <span className="text-sm text-text-tertiary dark:text-text-tertiary-dark">
+        <span className="text-text-tertiary dark:text-text-tertiary-dark">
           暂无文稿
         </span>
       </div>
@@ -32,7 +32,7 @@ export default function ArtifactList() {
   return (
     <div className="h-full bg-chat dark:bg-chat-dark">
       <div className="px-4 py-3 border-b border-border dark:border-border-dark">
-        <h3 className="text-sm font-semibold text-text-primary dark:text-text-primary-dark">
+        <h3 className="font-semibold text-text-primary dark:text-text-primary-dark">
           文稿
         </h3>
       </div>
@@ -46,7 +46,7 @@ export default function ArtifactList() {
               className="w-full text-left px-4 py-3 border-b border-border dark:border-border-dark hover:bg-bg dark:hover:bg-bg-dark transition-colors"
             >
               <div className="flex items-center gap-2">
-                <span className="text-sm font-medium text-text-primary dark:text-text-primary-dark flex-1 truncate">
+                <span className="font-medium text-text-primary dark:text-text-primary-dark flex-1 truncate">
                   {artifact.title}
                 </span>
                 {hasPending && (

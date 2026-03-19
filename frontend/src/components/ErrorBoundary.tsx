@@ -35,7 +35,7 @@ export default class ErrorBoundary extends React.Component<ErrorBoundaryProps, E
       return (
         <div className="flex-1 flex items-center justify-center p-8">
           <div className="text-center space-y-3">
-            <p className="text-sm text-text-secondary dark:text-text-secondary-dark">
+            <p className="text-text-secondary dark:text-text-secondary-dark">
               {this.props.fallbackLabel ?? 'Something went wrong'}
             </p>
             <p className="text-xs text-text-tertiary dark:text-text-tertiary-dark font-mono">

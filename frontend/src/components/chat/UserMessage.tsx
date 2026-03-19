@@ -89,7 +89,7 @@ function UserMessage({ content, messageId, parentId, siblingIndex, siblingCount,
               onCompositionStart={() => { isComposingRef.current = true; }}
               onCompositionEnd={() => { requestAnimationFrame(() => { isComposingRef.current = false; }); }}
               rows={1}
-              className="w-full px-4 py-3 text-sm bg-transparent text-text-primary dark:text-text-primary-dark outline-none resize-none"
+              className="w-full px-4 py-3 bg-transparent text-text-primary dark:text-text-primary-dark outline-none resize-none"
             />
             <div className="flex justify-end gap-2 px-3 pb-2">
               <button
@@ -115,7 +115,7 @@ function UserMessage({ content, messageId, parentId, siblingIndex, siblingCount,
   return (
     <div className="flex justify-end group">
       <div className="relative max-w-[80%]">
-        <div className="bg-panel-accent dark:bg-surface-dark rounded-bubble px-4 py-3 text-sm text-text-primary dark:text-text-primary-dark whitespace-pre-wrap break-words">
+        <div className="bg-panel-accent dark:bg-surface-dark rounded-bubble px-4 py-3 text-text-primary dark:text-text-primary-dark whitespace-pre-wrap break-words">
           {isSummarized && (
             <span className="inline-block mr-1 align-text-top" title="此消息已被压缩摘要">
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-text-tertiary dark:text-text-tertiary-dark">

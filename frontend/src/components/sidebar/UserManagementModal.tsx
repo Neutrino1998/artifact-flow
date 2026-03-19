@@ -166,7 +166,7 @@ export default function UserManagementModal({ open, onClose }: Props) {
 
         {/* Error */}
         {error && (
-          <div className="mb-3 px-3 py-2 text-sm text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 rounded-lg">
+          <div className="mb-3 px-3 py-2 text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 rounded-lg">
             {error}
           </div>
         )}
@@ -175,7 +175,7 @@ export default function UserManagementModal({ open, onClose }: Props) {
         {!showCreate ? (
           <button
             onClick={() => setShowCreate(true)}
-            className="w-full mb-4 flex items-center gap-2 px-3 py-2 text-sm text-accent bg-bg dark:bg-bg-dark rounded-lg hover:bg-bg/70 dark:hover:bg-bg-dark/70 transition-colors"
+            className="w-full mb-4 flex items-center gap-2 px-3 py-2 text-accent bg-bg dark:bg-bg-dark rounded-lg hover:bg-bg/70 dark:hover:bg-bg-dark/70 transition-colors"
           >
             <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5">
               <path d="M7 2v10M2 7h10" />
@@ -190,26 +190,26 @@ export default function UserManagementModal({ open, onClose }: Props) {
                 placeholder="用户名"
                 value={createForm.username}
                 onChange={(e) => setCreateForm((f) => ({ ...f, username: e.target.value }))}
-                className="px-2 py-1.5 text-sm rounded-lg border border-border dark:border-border-dark bg-surface dark:bg-surface-dark text-text-primary dark:text-text-primary-dark placeholder:text-text-secondary/50"
+                className="px-2 py-1.5 rounded-lg border border-border dark:border-border-dark bg-surface dark:bg-surface-dark text-text-primary dark:text-text-primary-dark placeholder:text-text-secondary/50"
               />
               <input
                 type="password"
                 placeholder="密码"
                 value={createForm.password}
                 onChange={(e) => setCreateForm((f) => ({ ...f, password: e.target.value }))}
-                className="px-2 py-1.5 text-sm rounded-lg border border-border dark:border-border-dark bg-surface dark:bg-surface-dark text-text-primary dark:text-text-primary-dark placeholder:text-text-secondary/50"
+                className="px-2 py-1.5 rounded-lg border border-border dark:border-border-dark bg-surface dark:bg-surface-dark text-text-primary dark:text-text-primary-dark placeholder:text-text-secondary/50"
               />
               <input
                 type="text"
                 placeholder="显示名（可选）"
                 value={createForm.display_name}
                 onChange={(e) => setCreateForm((f) => ({ ...f, display_name: e.target.value }))}
-                className="px-2 py-1.5 text-sm rounded-lg border border-border dark:border-border-dark bg-surface dark:bg-surface-dark text-text-primary dark:text-text-primary-dark placeholder:text-text-secondary/50"
+                className="px-2 py-1.5 rounded-lg border border-border dark:border-border-dark bg-surface dark:bg-surface-dark text-text-primary dark:text-text-primary-dark placeholder:text-text-secondary/50"
               />
               <select
                 value={createForm.role}
                 onChange={(e) => setCreateForm((f) => ({ ...f, role: e.target.value }))}
-                className="px-2 py-1.5 text-sm rounded-lg border border-border dark:border-border-dark bg-surface dark:bg-surface-dark text-text-primary dark:text-text-primary-dark"
+                className="px-2 py-1.5 rounded-lg border border-border dark:border-border-dark bg-surface dark:bg-surface-dark text-text-primary dark:text-text-primary-dark"
               >
                 <option value="user">user</option>
                 <option value="admin">admin</option>
@@ -218,14 +218,14 @@ export default function UserManagementModal({ open, onClose }: Props) {
             <div className="flex justify-end gap-2">
               <button
                 onClick={() => setShowCreate(false)}
-                className="px-3 py-1.5 text-sm rounded-lg border border-border dark:border-border-dark text-text-primary dark:text-text-primary-dark hover:bg-surface dark:hover:bg-surface-dark transition-colors"
+                className="px-3 py-1.5 rounded-lg border border-border dark:border-border-dark text-text-primary dark:text-text-primary-dark hover:bg-surface dark:hover:bg-surface-dark transition-colors"
               >
                 取消
               </button>
               <button
                 onClick={handleCreate}
                 disabled={creating || !createForm.username || !createForm.password}
-                className="px-3 py-1.5 text-sm rounded-lg bg-accent text-white hover:bg-accent-hover disabled:opacity-40 transition-colors"
+                className="px-3 py-1.5 rounded-lg bg-accent text-white hover:bg-accent-hover disabled:opacity-40 transition-colors"
               >
                 {creating ? '创建中...' : '创建'}
               </button>
@@ -236,15 +236,15 @@ export default function UserManagementModal({ open, onClose }: Props) {
         {/* User list */}
         <div className="flex-1 overflow-y-auto -mx-6 px-6">
           {loading ? (
-            <div className="text-sm text-text-secondary dark:text-text-secondary-dark text-center py-8">
+            <div className="text-text-secondary dark:text-text-secondary-dark text-center py-8">
               加载中...
             </div>
           ) : users.length === 0 ? (
-            <div className="text-sm text-text-secondary dark:text-text-secondary-dark text-center py-8">
+            <div className="text-text-secondary dark:text-text-secondary-dark text-center py-8">
               暂无用户
             </div>
           ) : (
-            <table className="w-full text-sm">
+            <table className="w-full">
               <thead>
                 <tr className="text-left text-text-secondary dark:text-text-secondary-dark border-b border-border dark:border-border-dark">
                   <th className="pb-2 font-medium">用户名</th>
@@ -272,7 +272,7 @@ export default function UserManagementModal({ open, onClose }: Props) {
                             if (e.key === 'Escape') { savingRef.current = true; setEditingId(null); queueMicrotask(() => { savingRef.current = false; }); }
                           }}
                           placeholder={user.username}
-                          className="w-full px-1.5 py-0.5 text-sm rounded border border-accent bg-surface dark:bg-surface-dark text-text-primary dark:text-text-primary-dark outline-none"
+                          className="w-full px-1.5 py-0.5 rounded border border-accent bg-surface dark:bg-surface-dark text-text-primary dark:text-text-primary-dark outline-none"
                         />
                       ) : (
                         <div

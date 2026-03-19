@@ -61,11 +61,11 @@ export default function UserMenu({ collapsed }: { collapsed?: boolean }) {
             onClick={() => setPopoverOpen((o) => !o)}
             className="w-full flex items-center gap-3 px-3 py-2.5 bg-panel-accent dark:bg-panel-accent-dark rounded-card hover:bg-panel-accent/70 dark:hover:bg-surface-dark transition-colors text-left"
           >
-            <div className="w-8 h-8 rounded-lg bg-accent/15 text-accent flex items-center justify-center text-sm font-medium shrink-0">
+            <div className="w-8 h-8 rounded-lg bg-accent/15 text-accent flex items-center justify-center font-medium shrink-0">
               {initial}
             </div>
             <div className="min-w-0 flex-1">
-              <div className="text-sm font-medium text-text-primary dark:text-text-primary-dark truncate flex items-center gap-1.5">
+              <div className="font-medium text-text-primary dark:text-text-primary-dark truncate flex items-center gap-1.5">
                 <span className="truncate">{user.display_name || user.username}</span>
                 {isAdmin && (
                   <span className="inline-block px-1 py-px text-[10px] rounded bg-accent/10 text-accent shrink-0">
@@ -104,7 +104,7 @@ export default function UserMenu({ collapsed }: { collapsed?: boolean }) {
                 toggleTheme();
                 setPopoverOpen(false);
               }}
-              className="w-full flex items-center gap-2 px-2.5 py-2 text-sm text-text-primary dark:text-text-primary-dark hover:bg-surface dark:hover:bg-surface-dark rounded-lg transition-colors"
+              className="w-full flex items-center gap-2 px-2.5 py-2 text-text-primary dark:text-text-primary-dark hover:bg-surface dark:hover:bg-surface-dark rounded-lg transition-colors"
             >
               {theme === 'light' ? (
                 <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
@@ -122,7 +122,7 @@ export default function UserMenu({ collapsed }: { collapsed?: boolean }) {
             {isAdmin && (
               <button
                 onClick={handleManageUsers}
-                className="w-full flex items-center gap-2 px-2.5 py-2 text-sm text-text-primary dark:text-text-primary-dark hover:bg-surface dark:hover:bg-surface-dark rounded-lg transition-colors"
+                className="w-full flex items-center gap-2 px-2.5 py-2 text-text-primary dark:text-text-primary-dark hover:bg-surface dark:hover:bg-surface-dark rounded-lg transition-colors"
               >
                 <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
                   <circle cx="8" cy="5" r="3" />
@@ -138,7 +138,7 @@ export default function UserMenu({ collapsed }: { collapsed?: boolean }) {
             {/* Logout */}
             <button
               onClick={handleLogout}
-              className="w-full flex items-center gap-2 px-2.5 py-2 text-sm text-red-500 hover:bg-surface dark:hover:bg-surface-dark rounded-lg transition-colors"
+              className="w-full flex items-center gap-2 px-2.5 py-2 text-red-500 hover:bg-surface dark:hover:bg-surface-dark rounded-lg transition-colors"
             >
               <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
                 <path d="M6 2H3a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3M11 11l3-3-3-3M6 8h8" />

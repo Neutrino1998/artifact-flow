@@ -45,13 +45,13 @@ export default function PermissionModal() {
         <h2 className="text-lg font-semibold text-text-primary dark:text-text-primary-dark mb-1">
           需要授权
         </h2>
-        <p className="text-sm text-text-secondary dark:text-text-secondary-dark mb-4">
+        <p className="text-text-secondary dark:text-text-secondary-dark mb-4">
           智能体请求执行以下工具，需要您的确认。
         </p>
 
         {/* Tool info */}
         <div className="bg-bg dark:bg-bg-dark border border-border dark:border-border-dark rounded-lg p-3 mb-4">
-          <div className="text-sm font-medium text-text-primary dark:text-text-primary-dark">
+          <div className="font-medium text-text-primary dark:text-text-primary-dark">
             {permissionRequest.toolName}
           </div>
           {Object.keys(permissionRequest.params).length > 0 && (
@@ -66,21 +66,21 @@ export default function PermissionModal() {
           <button
             onClick={() => handleResponse(false)}
             disabled={loading}
-            className="px-4 py-2 text-sm rounded-lg border border-border dark:border-border-dark text-text-primary dark:text-text-primary-dark hover:bg-bg dark:hover:bg-bg-dark disabled:opacity-40 transition-colors"
+            className="px-4 py-2 rounded-lg border border-border dark:border-border-dark text-text-primary dark:text-text-primary-dark hover:bg-bg dark:hover:bg-bg-dark disabled:opacity-40 transition-colors"
           >
             拒绝
           </button>
           <button
             onClick={() => handleResponse(true, true)}
             disabled={loading}
-            className="px-4 py-2 text-sm rounded-lg border border-accent text-accent hover:bg-accent/10 disabled:opacity-40 transition-colors"
+            className="px-4 py-2 rounded-lg border border-accent text-accent hover:bg-accent/10 disabled:opacity-40 transition-colors"
           >
             始终允许
           </button>
           <button
             onClick={() => handleResponse(true)}
             disabled={loading}
-            className="px-4 py-2 text-sm rounded-lg bg-accent text-white hover:bg-accent-hover disabled:opacity-40 transition-colors"
+            className="px-4 py-2 rounded-lg bg-accent text-white hover:bg-accent-hover disabled:opacity-40 transition-colors"
           >
             {loading ? '允许中...' : '允许'}
           </button>

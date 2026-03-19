@@ -214,7 +214,7 @@ export default function MessageInput() {
                   : '输入消息...'
             }
             rows={1}
-            className="w-full resize-none bg-transparent text-sm leading-5 text-text-primary dark:text-text-primary-dark placeholder:text-text-tertiary dark:placeholder:text-text-tertiary-dark outline-none"
+            className="w-full resize-none bg-transparent leading-5 text-text-primary dark:text-text-primary-dark placeholder:text-text-tertiary dark:placeholder:text-text-tertiary-dark outline-none"
           />
 
           <div className="flex items-center justify-between mt-2">

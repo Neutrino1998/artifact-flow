@@ -9,7 +9,7 @@ interface DiffViewProps {
 function DiffView({ changes }: DiffViewProps) {
   if (!changes || changes.length === 0) {
     return (
-      <div className="p-8 text-center text-sm text-text-tertiary dark:text-text-tertiary-dark">
+      <div className="p-8 text-center text-text-tertiary dark:text-text-tertiary-dark">
         该版本暂无变更记录
       </div>
     );

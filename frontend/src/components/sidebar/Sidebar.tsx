@@ -103,7 +103,7 @@ export default function Sidebar() {
       <div className="px-3 pt-3 pb-3 space-y-2">
         <button
           onClick={toggleArtifactPanel}
-          className="w-full flex items-center gap-2 px-3 py-2 text-sm font-medium text-text-primary bg-panel-accent dark:bg-panel-accent-dark dark:text-text-primary-dark rounded-card hover:bg-panel-accent/70 dark:hover:bg-surface-dark transition-colors"
+          className="w-full flex items-center gap-2 px-3 py-2 font-medium text-text-primary bg-panel-accent dark:bg-panel-accent-dark dark:text-text-primary-dark rounded-card hover:bg-panel-accent/70 dark:hover:bg-surface-dark transition-colors"
         >
           <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
             <rect x="2" y="2" width="12" height="12" rx="1.5" />
@@ -113,7 +113,7 @@ export default function Sidebar() {
         </button>
         <button
           onClick={handleNewChat}
-          className="w-full flex items-center gap-2 px-3 py-2 text-sm font-medium text-text-primary bg-panel-accent dark:bg-panel-accent-dark dark:text-text-primary-dark rounded-card hover:bg-panel-accent/70 dark:hover:bg-surface-dark transition-colors"
+          className="w-full flex items-center gap-2 px-3 py-2 font-medium text-text-primary bg-panel-accent dark:bg-panel-accent-dark dark:text-text-primary-dark rounded-card hover:bg-panel-accent/70 dark:hover:bg-surface-dark transition-colors"
         >
           <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5">
             <path d="M7 2v10M2 7h10" />

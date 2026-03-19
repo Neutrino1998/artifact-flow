@@ -93,7 +93,7 @@ export default function ChatPanel() {
   if (currentLoading) {
     return (
       <div className="flex-1 flex items-center justify-center bg-chat dark:bg-chat-dark">
-        <div className="text-text-tertiary dark:text-text-tertiary-dark text-sm">
+        <div className="text-text-tertiary dark:text-text-tertiary-dark">
           加载对话中...
         </div>
       </div>
@@ -116,7 +116,7 @@ export default function ChatPanel() {
           <div className="max-w-3xl mx-auto pl-8 pr-4 py-6 space-y-6">
             {pendingUserMessage && (
               <div className="flex justify-end">
-                <div className="max-w-[80%] bg-panel dark:bg-surface-dark rounded-bubble px-4 py-3 text-sm text-text-primary dark:text-text-primary-dark whitespace-pre-wrap break-words">
+                <div className="max-w-[80%] bg-panel dark:bg-surface-dark rounded-bubble px-4 py-3 text-text-primary dark:text-text-primary-dark whitespace-pre-wrap break-words">
                   {pendingUserMessage}
                 </div>
               </div>
@@ -129,7 +129,7 @@ export default function ChatPanel() {
           <div className="text-text-secondary dark:text-text-secondary-dark text-3xl font-semibold">
             {getGreeting()}，有什么可以帮你的？
           </div>
-          <div className="text-text-tertiary dark:text-text-tertiary-dark text-sm">
+          <div className="text-text-tertiary dark:text-text-tertiary-dark">
             开始对话，探索更多可能
           </div>
         </div>

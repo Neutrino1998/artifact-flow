@@ -112,7 +112,7 @@ export default function ArtifactToolbar() {
   return (
     <div className="flex items-center justify-between px-4 py-2 border-b border-border dark:border-border-dark">
       <div className="flex items-center gap-3 min-w-0">
-        <h3 className="text-sm font-semibold text-text-primary dark:text-text-primary-dark truncate">
+        <h3 className="font-semibold text-text-primary dark:text-text-primary-dark truncate">
           {current.title}
         </h3>
         {/* Version selector */}

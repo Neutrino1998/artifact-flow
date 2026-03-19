@@ -23,7 +23,7 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
   if (!isHydrated || !isAuthenticated) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-bg dark:bg-bg-dark">
-        <div className="text-sm text-text-tertiary dark:text-text-tertiary-dark">Loading...</div>
+        <div className="text-text-tertiary dark:text-text-tertiary-dark">Loading...</div>
       </div>
     );
   }

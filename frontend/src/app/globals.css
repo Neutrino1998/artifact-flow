@@ -44,7 +44,7 @@
 
   body {
     @apply bg-chat text-text-primary antialiased;
-    @apply leading-relaxed text-sm;
+    @apply leading-relaxed text-base;
   }
 
   .dark body {
