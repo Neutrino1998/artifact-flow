@@ -113,7 +113,7 @@ export default function ChatPanel() {
       ) : isStreaming ? (
         // New conversation: no history yet, but stream is active
         <div className="flex-1 overflow-y-auto">
-          <div className="max-w-3xl mx-auto px-4 py-6 space-y-6">
+          <div className="max-w-3xl mx-auto pl-8 pr-4 py-6 space-y-6">
             {pendingUserMessage && (
               <div className="flex justify-end">
                 <div className="max-w-[80%] bg-panel dark:bg-surface-dark rounded-bubble px-4 py-3 text-sm text-text-primary dark:text-text-primary-dark whitespace-pre-wrap break-words">

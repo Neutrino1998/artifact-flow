@@ -137,11 +137,6 @@ function AgentSegmentBlock({ segment, isActive, defaultExpanded, stepNumber }: A
           </span>
         )}
 
-        {stepNumber != null && (
-          <span className="ml-auto text-text-tertiary dark:text-text-tertiary-dark font-mono">
-            #{stepNumber}
-          </span>
-        )}
       </button>
 
       {/* Body — always shown when active, togglable when collapsed */}

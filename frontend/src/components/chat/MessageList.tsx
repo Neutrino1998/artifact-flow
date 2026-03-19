@@ -31,7 +31,7 @@ export default function MessageList() {
 
   return (
     <div className="flex-1 overflow-y-auto">
-      <div className="max-w-3xl mx-auto px-4 py-6 space-y-6">
+      <div className="max-w-3xl mx-auto pl-8 pr-4 py-6 space-y-6">
         {displayPath.map((node) => (
             <div key={node.id} className="space-y-10">
               {/* User message */}
