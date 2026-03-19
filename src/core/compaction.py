@@ -165,9 +165,16 @@ class CompactionManager:
                 )
                 continue
 
-            # 构建 prompt — 只保留最近 N 条 summary 作为上下文，避免平方级增长
-            max_context = config.COMPACTION_PRESERVE_PAIRS
-            recent_summaries = prior_summaries[-max_context:] if len(prior_summaries) > max_context else prior_summaries
+            # 构建 prompt — 从最新往前累积 summary，超出字符预算则丢弃最早的
+            budget = config.CONTEXT_MAX_CHARS
+            recent_summaries = []
+            total_len = 0
+            for s in reversed(prior_summaries):
+                if total_len + len(s) > budget:
+                    break
+                recent_summaries.append(s)
+                total_len += len(s)
+            recent_summaries.reverse()
 
             prompt_parts = []
             if recent_summaries:
