@@ -76,6 +76,10 @@ class CompactionManager:
         self._running[conv_id] = done_event
         asyncio.create_task(self._run_compaction(conv_id, message_id, done_event, config))
 
+    def is_running(self, conv_id: str) -> bool:
+        """检查 conv_id 是否有正在运行的 compaction。"""
+        return conv_id in self._running
+
     async def wait_if_running(self, conv_id: str) -> bool:
         """
         如果 conv_id 有正在运行的 compaction，等待其完成。

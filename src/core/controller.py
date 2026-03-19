@@ -103,10 +103,36 @@ class ExecutionController:
 
         resolved_parent: Optional[str] = parent_message_id if isinstance(parent_message_id, str) else None
 
+        # 生成 ID
+        message_id = message_id or f"msg-{uuid4().hex}"
+
+        # 添加消息到 conversation (before compaction wait so METADATA can be yielded early)
+        await self.conversation_manager.add_message_async(
+            conv_id=conversation_id,
+            message_id=message_id,
+            user_input=user_input,
+            parent_id=resolved_parent,
+        )
+
+        # 先发送元数据事件 — as early as possible so frontend knows we're alive
+        yield {
+            "type": StreamEventType.METADATA.value,
+            "timestamp": datetime.now().isoformat(),
+            "data": {
+                "conversation_id": conversation_id,
+                "message_id": message_id,
+            }
+        }
+
         # Wait for any running compaction before loading history
-        compaction_waited = False
-        if self.compaction_manager:
-            compaction_waited = await self.compaction_manager.wait_if_running(conversation_id)
+        # Yield COMPACTION_WAIT before blocking so frontend can show the indicator
+        if self.compaction_manager and self.compaction_manager.is_running(conversation_id):
+            yield {
+                "type": StreamEventType.COMPACTION_WAIT.value,
+                "timestamp": datetime.now().isoformat(),
+                "data": {"conversation_id": conversation_id, "status": "waiting"},
+            }
+            await self.compaction_manager.wait_if_running(conversation_id)
 
         # History (reads summaries written by compaction if we waited above)
         if parent_message_id is not _UNSET and resolved_parent is None:
@@ -116,9 +142,6 @@ class ExecutionController:
                 conv_id=conversation_id,
                 to_message_id=resolved_parent
             )
-
-        # 生成 ID
-        message_id = message_id or f"msg-{uuid4().hex}"
 
         # Session
         session_id = conversation_id  # session_id = conversation_id
@@ -143,32 +166,6 @@ class ExecutionController:
         )
 
         logger.info(f"Processing new message (streaming) in conversation {conversation_id}")
-
-        # 添加消息到 conversation
-        await self.conversation_manager.add_message_async(
-            conv_id=conversation_id,
-            message_id=message_id,
-            user_input=user_input,
-            parent_id=resolved_parent,
-        )
-
-        # 先发送元数据事件
-        yield {
-            "type": StreamEventType.METADATA.value,
-            "timestamp": datetime.now().isoformat(),
-            "data": {
-                "conversation_id": conversation_id,
-                "message_id": message_id,
-            }
-        }
-
-        # Notify frontend if we waited for compaction
-        if compaction_waited:
-            yield {
-                "type": StreamEventType.COMPACTION_WAIT.value,
-                "timestamp": datetime.now().isoformat(),
-                "data": {"conversation_id": conversation_id, "status": "completed"},
-            }
 
         # ========== 执行引擎 ==========
         event_queue: asyncio.Queue = asyncio.Queue()
