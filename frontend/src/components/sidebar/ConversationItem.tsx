@@ -52,7 +52,7 @@ function ConversationItem({ conversation, isActive, onSelect }: ConversationItem
       {showMenu && (
         <button
           onClick={handleDelete}
-          className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-md text-text-tertiary dark:text-text-tertiary-dark hover:text-status-error hover:bg-status-error/10 transition-colors"
+          className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-md text-text-tertiary dark:text-text-tertiary-dark hover:text-status-error dark:hover:text-status-error hover:bg-status-error/10 dark:hover:bg-status-error/10 transition-colors"
           aria-label="Delete conversation"
           title="删除对话"
         >
