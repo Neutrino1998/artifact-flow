@@ -154,13 +154,12 @@ class CompactionManager:
             return
 
         # ── Phase 2: 逐对处理 ──
-        prev_summary: Optional[str] = None
+        prior_summaries: List[str] = []
 
         for pair in pairs:
-            # 已有 summary → 读作上下文，跳过生成
+            # 已有 summary → 收集为上下文，跳过生成
             if pair.user_input_summary and pair.response_summary:
-                prev_summary = (
-                    f"Previous pair summary:\n"
+                prior_summaries.append(
                     f"User: {pair.user_input_summary}\n"
                     f"Assistant: {pair.response_summary}"
                 )
@@ -168,8 +167,11 @@ class CompactionManager:
 
             # 构建 prompt
             prompt_parts = []
-            if prev_summary:
-                prompt_parts.append(f"<context>\n{prev_summary}\n</context>")
+            if prior_summaries:
+                context_block = "\n\n".join(
+                    f"[Pair {i+1}]\n{s}" for i, s in enumerate(prior_summaries)
+                )
+                prompt_parts.append(f"<context>\n{context_block}\n</context>")
 
             prompt_parts.append(
                 f"<user_input>\n{pair.user_input}\n</user_input>\n\n"
@@ -205,20 +207,15 @@ class CompactionManager:
                 logger.warning(f"Failed to parse compaction summary for message {pair.message_id}")
                 continue
 
-            logger.debug(
-                f"[compact_agent] Result for {pair.message_id}:\n"
-                f"  user: {user_input_summary}\n"
-                f"  assistant: {response_summary}"
-            )
+            logger.debug(f"[compact_agent] Raw response for {pair.message_id}:\n{response_text}")
 
             # 短事务写入
             await self._write_summary(pair.message_id, user_input_summary, response_summary)
 
             logger.debug(f"Compacted message {pair.message_id}")
 
-            # 更新上下文
-            prev_summary = (
-                f"Previous pair summary:\n"
+            # 累积上下文
+            prior_summaries.append(
                 f"User: {user_input_summary}\n"
                 f"Assistant: {response_summary}"
             )

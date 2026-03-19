@@ -39,3 +39,4 @@ You MUST output exactly two XML tags:
 - Each summary should be 1-3 sentences
 - If previous context is provided, avoid repeating information already captured there
 - Focus on what would be needed to understand subsequent conversation turns
+- Write the summary in the same language as the original content
