@@ -7,13 +7,13 @@ const config: Config = {
     extend: {
       colors: {
         chat: {
-          DEFAULT: '#faf7f1',
+          DEFAULT: '#f3f2ee',
           dark: '#1e1e1e',
         },
         panel: {
           DEFAULT: '#ffffff',
           dark: '#222222',
-          accent: '#ebe4d9',
+          accent: '#e8e7df',
           'accent-dark': '#1a1a1a',
         },
         action: {
@@ -22,7 +22,7 @@ const config: Config = {
           contrast: '#f3eee3',
         },
         bg: {
-          DEFAULT: '#faf7f1',
+          DEFAULT: '#f3f2ee',
           dark: '#1a1a1a',
         },
         surface: {
@@ -30,9 +30,9 @@ const config: Config = {
           dark: '#2a2a2a',
         },
         text: {
-          primary: '#1a1a1a',
-          secondary: '#6b6560',
-          tertiary: '#9b9590',
+          primary: '#1f0909',
+          secondary: '#656565',
+          tertiary: '#999999',
           'primary-dark': '#e8e4dc',
           'secondary-dark': '#9b9590',
           'tertiary-dark': '#6b6560',
@@ -43,7 +43,7 @@ const config: Config = {
           bg: '#fdf4f0',
         },
         border: {
-          DEFAULT: '#e5ddd3',
+          DEFAULT: '#dadada',
           dark: '#3a3530',
         },
         status: {
@@ -58,6 +58,12 @@ const config: Config = {
           'BlinkMacSystemFont',
           'Segoe UI',
           'sans-serif',
+        ],
+        serif: [
+          'PT Serif',
+          'Times New Roman',
+          'Times',
+          'serif',
         ],
         mono: ['SF Mono', 'Fira Code', 'ui-monospace', 'monospace'],
       },
