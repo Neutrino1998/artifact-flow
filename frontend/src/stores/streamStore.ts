@@ -304,10 +304,11 @@ export const useStreamStore = create<StreamState>((set, get) => {
         newMap.set(messageId, JSON.parse(JSON.stringify(segsToSnapshot)));
         set({ completedSegments: newMap });
       }
-      // Snapshot non-agent blocks
-      if (state.nonAgentBlocks.length > 0) {
+      // Snapshot non-agent blocks (exclude compaction — it's a transient wait indicator)
+      const blocksToSnapshot = state.nonAgentBlocks.filter((b) => b.kind !== 'compaction');
+      if (blocksToSnapshot.length > 0) {
         const nabMap = new Map(state.completedNonAgentBlocks);
-        nabMap.set(messageId, [...state.nonAgentBlocks]);
+        nabMap.set(messageId, blocksToSnapshot);
         set({ completedNonAgentBlocks: nabMap });
       }
     },

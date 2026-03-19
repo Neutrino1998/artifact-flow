@@ -106,15 +106,8 @@ class ExecutionController:
         # 生成 ID
         message_id = message_id or f"msg-{uuid4().hex}"
 
-        # 添加消息到 conversation (before compaction wait so METADATA can be yielded early)
-        await self.conversation_manager.add_message_async(
-            conv_id=conversation_id,
-            message_id=message_id,
-            user_input=user_input,
-            parent_id=resolved_parent,
-        )
-
         # 先发送元数据事件 — as early as possible so frontend knows we're alive
+        # Only needs message_id, not a persisted row
         yield {
             "type": StreamEventType.METADATA.value,
             "timestamp": datetime.now().isoformat(),
@@ -166,6 +159,14 @@ class ExecutionController:
         )
 
         logger.info(f"Processing new message (streaming) in conversation {conversation_id}")
+
+        # 添加消息到 conversation (after all pre-engine setup to avoid orphaned rows on failure)
+        await self.conversation_manager.add_message_async(
+            conv_id=conversation_id,
+            message_id=message_id,
+            user_input=user_input,
+            parent_id=resolved_parent,
+        )
 
         # ========== 执行引擎 ==========
         event_queue: asyncio.Queue = asyncio.Queue()
