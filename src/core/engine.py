@@ -188,7 +188,7 @@ async def execute_loop(
             for msg in task_manager.drain_messages(message_id):
                 wrapped = (
                     "[The user has injected a message during execution. "
-                    "Consider this input and adjust your approach as needed.]\n\n"
+                    "Consider this input and adjust your approach as needed.]\n"
                     + msg
                 )
                 await _emit(StreamEventType.QUEUED_MESSAGE.value, "lead_agent", {"content": wrapped})
@@ -560,7 +560,7 @@ async def execute_loop(
                         for msg in pending:
                             wrapped = (
                                 "[The user has injected a message during execution. "
-                                "Consider this input and adjust your approach as needed.]\n\n"
+                                "Consider this input and adjust your approach as needed.]\n"
                                 + msg
                             )
                             await _emit(StreamEventType.QUEUED_MESSAGE.value, "lead_agent", {"content": wrapped})
