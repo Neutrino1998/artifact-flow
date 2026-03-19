@@ -113,7 +113,7 @@ export default function ThreeColumnLayout({
       {/* Sidebar — hidden below md, icon-bar when collapsed */}
       {showSidebar && (
         <div
-          className={`flex-shrink-0 transition-[width] duration-150 ease-out overflow-hidden relative z-10 ${
+          className={`flex-shrink-0 transition-[width] duration-150 ease-out overflow-hidden relative z-10 border-r border-border dark:border-border-dark ${
             sidebarCollapsed ? 'w-12' : 'w-64'
           }`}
         >
