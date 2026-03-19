@@ -166,7 +166,7 @@ class CompactionManager:
                 continue
 
             # 构建 prompt — 从最新往前累积 summary，超出字符预算则丢弃最早的
-            budget = config.CONTEXT_MAX_CHARS
+            budget = getattr(config, "CONTEXT_MAX_CHARS", 80000)
             recent_summaries = []
             total_len = 0
             for s in reversed(prior_summaries):
