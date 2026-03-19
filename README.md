@@ -399,6 +399,7 @@ artifact-flow/
 │   │   ├── engine.py             # Pi-style 执行引擎（含状态创建和ExecutionMetrics）
 │   │   ├── controller.py         # 执行控制器 (支持流式和批量模式)
 │   │   ├── events.py             # 统一事件类型定义（StreamEventType + ExecutionEvent）
+│   │   ├── compaction.py            # CompactionManager（跨轮对话摘要压缩）
 │   │   ├── context_manager.py    # Context压缩和管理
 │   │   └── conversation_manager.py  # 对话管理器（缓存+持久化）
 │   ├── agents/      # 智能体系统 (已完成)
@@ -468,7 +469,8 @@ artifact-flow/
 │   ├── agents/                    # Agent 定义（MD: YAML frontmatter + role prompt）
 │   │   ├── lead_agent.md          # 主控智能体（模型、工具权限、角色提示词）
 │   │   ├── search_agent.md        # 搜索智能体
-│   │   └── crawl_agent.md         # 网页抓取智能体
+│   │   ├── crawl_agent.md         # 网页抓取智能体
+│   │   └── compact_agent.md       # 压缩智能体（对话摘要生成）
 │   ├── models/
 │   │   └── models.yaml            # LLM 模型注册表
 │   └── tools/                     # 自定义工具 MD 定义（可选，目录为空则无自定义工具）
