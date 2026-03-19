@@ -113,7 +113,7 @@ function AgentSegmentBlock({ segment, isActive, defaultExpanded, stepNumber }: A
           className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full font-medium ${
             segment.status === 'running'
               ? 'bg-accent/10 text-accent'
-              : 'bg-bg dark:bg-bg-dark text-text-secondary dark:text-text-secondary-dark'
+              : 'bg-bg dark:bg-transparent text-text-secondary dark:text-text-secondary-dark'
           }`}
         >
           {segment.status === 'running' && (
@@ -129,7 +129,7 @@ function AgentSegmentBlock({ segment, isActive, defaultExpanded, stepNumber }: A
 
         {/* Compact metadata — only shown when segment is done */}
         {segment.status === 'complete' && (segment.model || segment.tokenUsage || segment.llmDurationMs) && (
-          <span className="text-xs text-text-tertiary dark:text-text-tertiary-dark font-mono">
+          <span className="ml-auto text-xs text-text-tertiary dark:text-text-tertiary-dark font-mono">
             {[
               segment.model,
               segment.tokenUsage && `${(segment.tokenUsage.input_tokens / 1000).toFixed(1)}k ↑ · ${(segment.tokenUsage.output_tokens / 1000).toFixed(1)}k ↓`,
