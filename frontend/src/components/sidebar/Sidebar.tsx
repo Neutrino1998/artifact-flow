@@ -47,7 +47,7 @@ export default function Sidebar() {
   // ── Collapsed: 48px icon bar ──
   if (sidebarCollapsed) {
     return (
-      <div className="flex flex-col items-center h-full bg-panel dark:bg-panel-dark py-3 gap-1 w-12">
+      <div className="flex flex-col items-center h-full bg-panel-accent dark:bg-panel-dark py-3 gap-1 w-12">
         {/* New chat */}
         <IconButton onClick={handleNewChat} label="新建对话">
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
@@ -81,7 +81,7 @@ export default function Sidebar() {
 
   // ── Expanded: full sidebar ──
   return (
-    <div className="flex flex-col h-full bg-panel dark:bg-panel-dark">
+    <div className="flex flex-col h-full bg-panel-accent dark:bg-panel-dark">
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-border dark:border-border-dark">
         <h1 className="text-lg font-semibold text-text-primary dark:text-text-primary-dark">
@@ -103,7 +103,7 @@ export default function Sidebar() {
       <div className="px-3 pt-3 pb-3 space-y-2">
         <button
           onClick={toggleArtifactPanel}
-          className="w-full flex items-center gap-2 px-3 py-2 font-medium text-text-primary bg-panel-accent dark:bg-panel-accent-dark dark:text-text-primary-dark rounded-card hover:bg-panel-accent/70 dark:hover:bg-surface-dark transition-colors"
+          className="w-full flex items-center gap-2 px-3 py-2 font-medium text-text-primary bg-chat dark:bg-panel-accent-dark dark:text-text-primary-dark rounded-card hover:bg-chat/70 dark:hover:bg-surface-dark transition-colors"
         >
           <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
             <rect x="2" y="2" width="12" height="12" rx="1.5" />
@@ -113,7 +113,7 @@ export default function Sidebar() {
         </button>
         <button
           onClick={handleNewChat}
-          className="w-full flex items-center gap-2 px-3 py-2 font-medium text-text-primary bg-panel-accent dark:bg-panel-accent-dark dark:text-text-primary-dark rounded-card hover:bg-panel-accent/70 dark:hover:bg-surface-dark transition-colors"
+          className="w-full flex items-center gap-2 px-3 py-2 font-medium text-text-primary bg-chat dark:bg-panel-accent-dark dark:text-text-primary-dark rounded-card hover:bg-chat/70 dark:hover:bg-surface-dark transition-colors"
         >
           <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5">
             <path d="M7 2v10M2 7h10" />

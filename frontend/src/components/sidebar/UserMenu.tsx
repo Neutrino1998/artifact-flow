@@ -59,7 +59,7 @@ export default function UserMenu({ collapsed }: { collapsed?: boolean }) {
         ) : (
           <button
             onClick={() => setPopoverOpen((o) => !o)}
-            className="w-full flex items-center gap-3 px-3 py-2.5 bg-panel-accent dark:bg-panel-accent-dark rounded-card hover:bg-panel-accent/70 dark:hover:bg-surface-dark transition-colors text-left"
+            className="w-full flex items-center gap-3 px-3 py-2.5 bg-chat dark:bg-panel-accent-dark rounded-card hover:bg-chat/70 dark:hover:bg-surface-dark transition-colors text-left"
           >
             <div className="w-8 h-8 rounded-lg bg-accent/15 text-accent flex items-center justify-center font-medium shrink-0">
               {initial}

@@ -43,8 +43,8 @@ const config: Config = {
           bg: '#fdf4f0',
         },
         border: {
-          DEFAULT: '#dadada',
-          dark: '#3a3530',
+          DEFAULT: '#d6d3cb',
+          dark: '#3a3a3a',
         },
         status: {
           success: '#4a8c6f',

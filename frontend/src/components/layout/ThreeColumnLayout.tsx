@@ -113,7 +113,7 @@ export default function ThreeColumnLayout({
       {/* Sidebar — hidden below md, icon-bar when collapsed */}
       {showSidebar && (
         <div
-          className={`flex-shrink-0 transition-[width] duration-150 ease-out overflow-hidden shadow-sidebar relative z-10 ${
+          className={`flex-shrink-0 transition-[width] duration-150 ease-out overflow-hidden relative z-10 ${
             sidebarCollapsed ? 'w-12' : 'w-64'
           }`}
         >
@@ -146,11 +146,8 @@ export default function ThreeColumnLayout({
               <div
                 onMouseDown={handleMouseDown}
                 onDoubleClick={handleDoubleClick}
-                className="group/handle w-4 flex-shrink-0 flex items-center justify-center cursor-col-resize"
-              >
-                <div className="w-px h-full bg-border dark:bg-border-dark group-hover/handle:bg-accent transition-colors" />
-                <div className="absolute w-1.5 h-8 rounded-full bg-border dark:bg-border-dark group-hover/handle:bg-accent transition-colors" />
-              </div>
+                className="w-1 flex-shrink-0 bg-border dark:bg-border-dark hover:bg-accent cursor-col-resize transition-colors"
+              />
               <div
                 className="flex-shrink-0 overflow-hidden"
                 style={{ width: artifactWidth }}

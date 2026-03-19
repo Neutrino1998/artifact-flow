@@ -81,7 +81,14 @@
 }
 
 /* Override highlight.js background to use our theme tokens */
-.hljs { background: transparent; }
+.hljs { background: transparent !important; }
+
+/* Prevent inline code styles from leaking into code blocks */
+pre code {
+  background: transparent !important;
+  padding: 0 !important;
+  border-radius: 0 !important;
+}
 
 /* Dark mode: swap to github-dark highlight colors */
 .dark .hljs{color:#c9d1d9}
