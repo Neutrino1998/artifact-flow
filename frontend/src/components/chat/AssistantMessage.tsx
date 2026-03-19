@@ -104,11 +104,6 @@ function AssistantMessage({ content, messageId, responseSummary }: AssistantMess
       )}
 
       <div className={PROSE_CLASSES}>
-        {responseSummary && (
-          <span className="inline-block mr-1 align-text-top">
-            <SummaryPopover summary={responseSummary} />
-          </span>
-        )}
         <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]} components={markdownComponents}>
           {content}
         </ReactMarkdown>
@@ -132,6 +127,7 @@ function AssistantMessage({ content, messageId, responseSummary }: AssistantMess
             </svg>
           )}
         </button>
+        {responseSummary && <SummaryPopover summary={responseSummary} />}
       </div>
     </div>
   );

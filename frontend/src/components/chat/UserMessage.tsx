@@ -117,15 +117,11 @@ function UserMessage({ content, messageId, parentId, siblingIndex, siblingCount,
     <div className="flex justify-end group">
       <div className="relative max-w-[80%]">
         <div className="bg-panel-accent dark:bg-surface-dark rounded-bubble px-4 py-3 text-text-primary dark:text-text-primary-dark whitespace-pre-wrap break-words">
-          {userInputSummary && (
-            <span className="inline-block mr-1 align-text-top">
-              <SummaryPopover summary={userInputSummary} />
-            </span>
-          )}
           {content}
         </div>
         {/* Action buttons and branch navigator on hover */}
         <div className="absolute -bottom-7 right-2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+          {userInputSummary && <SummaryPopover summary={userInputSummary} />}
           <button
             onClick={handleEdit}
             disabled={isStreaming}
