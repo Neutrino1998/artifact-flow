@@ -27,6 +27,7 @@ export function useArtifacts() {
   const setCurrentLoading = useArtifactStore((s) => s.setCurrentLoading);
   const setVersions = useArtifactStore((s) => s.setVersions);
   const setSelectedVersion = useArtifactStore((s) => s.setSelectedVersion);
+  const setDiffBaseContent = useArtifactStore((s) => s.setDiffBaseContent);
   const setArtifactPanelVisible = useUIStore((s) => s.setArtifactPanelVisible);
 
   // loadArtifacts only depends on conversation store's sessionId (stable during streaming)
@@ -55,13 +56,23 @@ export function useArtifacts() {
         setCurrent(detail);
         setVersions(detail.versions);
         setSelectedVersion(detail.latest_version ?? null);
+        // Fetch previous version content for diff view
+        const latestVer = detail.latest_version?.version;
+        if (latestVer && latestVer > 1) {
+          api
+            .getVersion(sid, artifactId, latestVer - 1)
+            .then((base) => setDiffBaseContent(base.content))
+            .catch(() => setDiffBaseContent(null));
+        } else {
+          setDiffBaseContent(null);
+        }
       } catch (err) {
         console.error('Failed to load artifact:', err);
       } finally {
         setCurrentLoading(false);
       }
     },
-    [setCurrent, setCurrentLoading, setVersions, setSelectedVersion, setArtifactPanelVisible]
+    [setCurrent, setCurrentLoading, setVersions, setSelectedVersion, setDiffBaseContent, setArtifactPanelVisible]
   );
 
   const selectVersion = useCallback(
@@ -69,13 +80,19 @@ export function useArtifacts() {
       const sid = resolveSessionId();
       if (!sid) return;
       try {
-        const detail = await api.getVersion(sid, artifactId, version);
+        const [detail, baseDetail] = await Promise.all([
+          api.getVersion(sid, artifactId, version),
+          version > 1
+            ? api.getVersion(sid, artifactId, version - 1)
+            : Promise.resolve(null),
+        ]);
         setSelectedVersion(detail);
+        setDiffBaseContent(baseDetail?.content ?? null);
       } catch (err) {
         console.error('Failed to load version:', err);
       }
     },
-    [setSelectedVersion]
+    [setSelectedVersion, setDiffBaseContent]
   );
 
   return { loadArtifacts, selectArtifact, selectVersion };

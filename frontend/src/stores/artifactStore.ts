@@ -19,6 +19,9 @@ interface ArtifactState {
   versions: VersionSummary[];
   selectedVersion: VersionDetail | null;
 
+  // Diff base (previous version content for computing diff)
+  diffBaseContent: string | null;
+
   // View
   viewMode: ArtifactViewMode;
 
@@ -37,6 +40,7 @@ interface ArtifactState {
   setCurrentLoading: (loading: boolean) => void;
   setVersions: (versions: VersionSummary[]) => void;
   setSelectedVersion: (version: VersionDetail | null) => void;
+  setDiffBaseContent: (content: string | null) => void;
   setViewMode: (mode: ArtifactViewMode) => void;
   addPendingUpdate: (identifier: string) => void;
   clearPendingUpdates: () => void;
@@ -61,6 +65,7 @@ export const useArtifactStore = create<ArtifactState>((set) => ({
 
   versions: [],
   selectedVersion: null,
+  diffBaseContent: null,
 
   viewMode: 'preview',
 
@@ -80,6 +85,7 @@ export const useArtifactStore = create<ArtifactState>((set) => ({
   setCurrentLoading: (loading) => set({ currentLoading: loading }),
   setVersions: (versions) => set({ versions }),
   setSelectedVersion: (version) => set({ selectedVersion: version }),
+  setDiffBaseContent: (content) => set({ diffBaseContent: content }),
   setViewMode: (mode) => set({ viewMode: mode }),
   addPendingUpdate: (identifier) =>
     set((s) => ({
@@ -97,6 +103,7 @@ export const useArtifactStore = create<ArtifactState>((set) => ({
       current: null,
       versions: [],
       selectedVersion: null,
+      diffBaseContent: null,
       viewMode: 'preview',
       pendingUpdates: [],
       uploading: false,

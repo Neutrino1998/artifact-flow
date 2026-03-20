@@ -16,6 +16,7 @@ export default function ArtifactPanel() {
   const currentLoading = useArtifactStore((s) => s.currentLoading);
   const viewMode = useArtifactStore((s) => s.viewMode);
   const selectedVersion = useArtifactStore((s) => s.selectedVersion);
+  const diffBaseContent = useArtifactStore((s) => s.diffBaseContent);
   const sessionId = useConversationStore((s) => s.current?.session_id);
   const { loadArtifacts } = useArtifacts();
 
@@ -54,7 +55,10 @@ export default function ArtifactPanel() {
         {viewMode === 'preview' && <MarkdownPreview content={content} />}
         {viewMode === 'source' && <SourceView content={content} />}
         {viewMode === 'diff' && (
-          <DiffView changes={selectedVersion?.changes ?? null} />
+          <DiffView
+            oldContent={diffBaseContent ?? ''}
+            newContent={selectedVersion?.content ?? content}
+          />
         )}
       </div>
     </div>
