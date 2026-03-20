@@ -101,54 +101,86 @@ _SPECIAL_SPACES = str.maketrans({
 def _normalize_for_match(text: str) -> tuple[str, list[int]]:
     """Normalize text for fuzzy matching and build index map.
 
-    - Smart quotes → ASCII quotes
-    - Unicode dashes → ASCII hyphen
-    - Special whitespace → regular space
-    - NFKC normalize (fullwidth → halfwidth, etc.)
-    - Strip trailing whitespace per line
-    - Collapse spaces at CJK-Latin/digit boundaries
+    Every transform tracks which original character each normalized
+    character came from, so positions can be mapped back accurately.
+
+    Transforms (in order):
+    1. Smart quotes → ASCII quotes  (1-to-1)
+    2. Unicode dashes → ASCII hyphen (1-to-1)
+    3. Special whitespace → regular space (1-to-1)
+    4. NFKC normalize (may expand, e.g. Ⅳ → IV)
+    5. Strip trailing whitespace per line
+    6. Collapse spaces at CJK-Latin/digit boundaries
 
     Returns:
-        (normalized_text, index_map) where index_map[i] = original char index
-        for normalized char i.
+        (normalized_text, index_map) where index_map[i] = index in the
+        **original** text for normalized char i.
     """
-    # Step 1: Character-level normalization (1-to-1, preserves indices)
-    text = text.translate(_SMART_QUOTES)
-    text = text.translate(_UNICODE_DASHES)
-    text = text.translate(_SPECIAL_SPACES)
+    _all_1to1 = {**_SMART_QUOTES, **_UNICODE_DASHES, **_SPECIAL_SPACES}
 
-    # Step 2: NFKC
-    text = unicodedata.normalize('NFKC', text)
+    # Phase 1: per-character transforms + NFKC, tracking origin
+    chars: list[str] = []
+    origins: list[int] = []  # origins[i] = index in original `text`
 
-    # Step 3: Strip trailing whitespace per line
-    text = '\n'.join(line.rstrip() for line in text.split('\n'))
+    for orig_i, orig_ch in enumerate(text):
+        ch = _all_1to1.get(ord(orig_ch), orig_ch)
+        if isinstance(ch, int):
+            ch = chr(ch)
+        for nc in unicodedata.normalize('NFKC', ch):
+            chars.append(nc)
+            origins.append(orig_i)
 
-    # Step 3: Collapse CJK-Latin boundary spaces, building index map
-    index_map = []
-    result = []
+    # Phase 2: rstrip per line
+    stripped_chars: list[str] = []
+    stripped_origins: list[int] = []
+    line_chars: list[str] = []
+    line_origins: list[int] = []
+
+    for c, o in zip(chars, origins):
+        if c == '\n':
+            # rstrip: drop trailing spaces from this line
+            while line_chars and line_chars[-1] == ' ':
+                line_chars.pop()
+                line_origins.pop()
+            stripped_chars.extend(line_chars)
+            stripped_origins.extend(line_origins)
+            stripped_chars.append(c)
+            stripped_origins.append(o)
+            line_chars.clear()
+            line_origins.clear()
+        else:
+            line_chars.append(c)
+            line_origins.append(o)
+
+    # Last line (no trailing newline)
+    while line_chars and line_chars[-1] == ' ':
+        line_chars.pop()
+        line_origins.pop()
+    stripped_chars.extend(line_chars)
+    stripped_origins.extend(line_origins)
+
+    # Phase 3: collapse CJK-Latin boundary spaces
+    result: list[str] = []
+    index_map: list[int] = []
     i = 0
-    while i < len(text):
-        # Check if we're at a CJK-space-Latin or Latin-space-CJK boundary
-        if text[i] == ' ' and i > 0 and i + 1 < len(text):
-            prev_char = text[i - 1]
-            # Look ahead past spaces
+    while i < len(stripped_chars):
+        if stripped_chars[i] == ' ' and result and i + 1 < len(stripped_chars):
+            # Look ahead past consecutive spaces
             j = i
-            while j < len(text) and text[j] == ' ':
+            while j < len(stripped_chars) and stripped_chars[j] == ' ':
                 j += 1
-            if j < len(text):
-                next_char = text[j]
-                prev_is_cjk = bool(re.match(_CJK_RE, prev_char))
-                next_is_cjk = bool(re.match(_CJK_RE, next_char))
-                prev_is_latin = bool(re.match(r'[A-Za-z0-9]', prev_char))
-                next_is_latin = bool(re.match(r'[A-Za-z0-9]', next_char))
+            if j < len(stripped_chars):
+                prev_is_cjk = bool(re.match(_CJK_RE, result[-1]))
+                next_is_cjk = bool(re.match(_CJK_RE, stripped_chars[j]))
+                prev_is_latin = bool(re.match(r'[A-Za-z0-9]', result[-1]))
+                next_is_latin = bool(re.match(r'[A-Za-z0-9]', stripped_chars[j]))
 
                 if (prev_is_cjk and next_is_latin) or (prev_is_latin and next_is_cjk):
-                    # Skip boundary spaces
                     i = j
                     continue
 
-        result.append(text[i])
-        index_map.append(i)
+        result.append(stripped_chars[i])
+        index_map.append(stripped_origins[i])
         i += 1
 
     return ''.join(result), index_map

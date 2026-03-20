@@ -260,6 +260,51 @@ class TestCase2b_ShortCJKSpaceDiff:
 
 
 # ============================================================
+# Index mapping correctness (reviewer regression cases)
+# ============================================================
+
+class TestIndexMapCorrectness:
+    """Normalization must map positions back to the ORIGINAL text,
+    not to an intermediate post-NFKC/rstrip string."""
+
+    def test_rstrip_does_not_shift_indices(self):
+        """Trailing spaces removed by rstrip must not shift the slice."""
+        artifact = ArtifactMemory(
+            artifact_id="test",
+            content_type="text/markdown",
+            title="Test",
+            content="foo  \nbar\nqux",
+        )
+        success, msg, result, _ = artifact.compute_update("foo\nbar", "X")
+        assert success
+        assert result == "X\nqux", f"Got {result!r}, trailing spaces corrupted the slice"
+
+    def test_nfkc_expansion_does_not_shift_indices(self):
+        """NFKC expanding 1 char to 2 (Ⅳ→IV) must not shift the slice."""
+        artifact = ArtifactMemory(
+            artifact_id="test",
+            content_type="text/markdown",
+            title="Test",
+            content="章节Ⅳ结束-后文",
+        )
+        success, msg, result, _ = artifact.compute_update("章节IV结束", "X")
+        assert success
+        assert result == "X-后文", f"Got {result!r}, NFKC expansion corrupted the slice"
+
+    def test_combined_nfkc_and_rstrip(self):
+        """Both NFKC expansion and trailing space removal in one update."""
+        artifact = ArtifactMemory(
+            artifact_id="test",
+            content_type="text/markdown",
+            title="Test",
+            content="第Ⅲ章  \n内容\n后文",
+        )
+        success, msg, result, _ = artifact.compute_update("第III章\n内容", "X")
+        assert success
+        assert result == "X\n后文", f"Got {result!r}"
+
+
+# ============================================================
 # Layer 2: fuzzysearch fallback
 # ============================================================
 
