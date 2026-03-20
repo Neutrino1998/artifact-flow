@@ -21,6 +21,38 @@ from models.llm import astream_with_retry, get_available_models, get_model_info
 BASIC_QUESTION = "What is 2+2? Answer in one word."
 REASONING_QUESTION = "If a train travels 60 km in 1 hour, how far will it travel in 2.5 hours? Think step by step."
 
+# 模拟 truncation marker + tool result 导致的连续 user 消息
+CONSECUTIVE_USER_MESSAGES = [
+    {"role": "user", "content": "[3 earlier messages truncated]"},
+    {"role": "user", "content": "What is the capital of France? Answer in one word."},
+]
+
+
+async def test_consecutive_user_messages(model_name: str) -> dict:
+    """测试连续 user 消息（truncation marker 场景）"""
+    result = {
+        "model": model_name,
+        "success": False,
+        "content": None,
+        "error": None,
+    }
+
+    print(f"\n  [consecutive user msgs] ", end="", flush=True)
+
+    try:
+        async for chunk in astream_with_retry(CONSECUTIVE_USER_MESSAGES, model=model_name):
+            if chunk["type"] == "content":
+                print(chunk["content"], end="", flush=True)
+            elif chunk["type"] == "final":
+                result["content"] = chunk["content"]
+        print()
+        result["success"] = True
+    except Exception as e:
+        result["error"] = str(e)
+        print(f"ERROR: {e}")
+
+    return result
+
 
 async def test_model(model_name: str) -> dict:
     """测试单个模型的流式输出"""
@@ -113,9 +145,13 @@ async def main():
     print(f"{'=' * 60}")
 
     all_results = []
+    consecutive_results = []
     for model in models:
         result = await test_model(model)
         all_results.append(result)
+        if result["success"]:
+            cr = await test_consecutive_user_messages(model)
+            consecutive_results.append(cr)
 
     # 汇总
     print(f"\n{'=' * 60}")
@@ -134,6 +170,16 @@ async def main():
             has = r.get("reasoning_content") is not None
             extra = f"  reasoning={'yes' if has else 'NO'}"
         print(f"  [{status}] {r['model']}{extra}")
+
+    # Consecutive user messages
+    if consecutive_results:
+        print(f"\n{'-' * 40}")
+        print(f"  Consecutive User Messages")
+        print(f"{'-' * 40}")
+        for r in consecutive_results:
+            status = "PASS" if r["success"] else "FAIL"
+            extra = f"  ({r['error'][:60]})" if r.get("error") else ""
+            print(f"  [{status}] {r['model']}{extra}")
 
     # Token usage
     print(f"\n{'-' * 40}")

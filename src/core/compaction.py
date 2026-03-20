@@ -138,6 +138,7 @@ class CompactionManager:
         2. 逐对: 调 LLM（无 DB 连接）→ 短 session: 写 summary，关闭 session
         """
         from models.llm import astream_with_retry, format_messages_for_debug
+        from core.context_manager import ContextManager
 
         compact_agent = self._agents.get("compact_agent")
         if not compact_agent:
@@ -161,16 +162,23 @@ class CompactionManager:
                 )
                 continue
 
-            # 构建 prompt — 从最新往前累积 summary，超出字符预算则丢弃最早的
-            budget = getattr(config, "CONTEXT_MAX_CHARS", 240000)
-            recent_summaries = []
-            total_len = 0
-            for s in reversed(prior_summaries):
-                if total_len + len(s) > budget:
-                    break
-                recent_summaries.append(s)
-                total_len += len(s)
-            recent_summaries.reverse()
+            # 构建 prompt — 先算固定部分，剩余预算分给 prior_summaries
+            pair_content = (
+                f"<user_input>\n{pair.user_input}\n</user_input>\n\n"
+                f"<response>\n{pair.response}\n</response>"
+            )
+            fixed_chars = len(compact_agent.role_prompt) + len(pair_content)
+            budget = max(getattr(config, "CONTEXT_MAX_CHARS", 240000) - fixed_chars, 0)
+
+            summary_messages = [{"role": "user", "content": s} for s in prior_summaries]
+            summary_messages = ContextManager.truncate_messages(
+                summary_messages, budget, preserve_recent=2
+            )
+            # 提取截断后的 summaries（跳过 truncation marker）
+            recent_summaries = [
+                m["content"] for m in summary_messages
+                if "truncated]" not in m["content"]
+            ]
 
             prompt_parts = []
             if recent_summaries:
@@ -179,10 +187,7 @@ class CompactionManager:
                 )
                 prompt_parts.append(f"<context>\n{context_block}\n</context>")
 
-            prompt_parts.append(
-                f"<user_input>\n{pair.user_input}\n</user_input>\n\n"
-                f"<response>\n{pair.response}\n</response>"
-            )
+            prompt_parts.append(pair_content)
 
             prompt_content = "\n\n".join(prompt_parts)
             messages = [

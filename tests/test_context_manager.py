@@ -224,60 +224,47 @@ class TestLeadVsSubagent:
 # ============================================================
 
 
-class TestCompression:
+class TestTruncation:
 
     def test_within_budget_returns_as_is(self):
         messages = [
             {"role": "user", "content": "short"},
             {"role": "assistant", "content": "reply"},
         ]
-        result = ContextManager.compress_messages_with_budget(messages, max_chars=10000)
+        result = ContextManager.truncate_messages(messages, budget=10000)
         assert len(result) == 2
 
-    def test_over_budget_truncates_old(self):
+    def test_over_budget_drops_oldest(self):
         messages = [
             {"role": "user", "content": "A" * 1000},
             {"role": "assistant", "content": "B" * 1000},
-            {"role": "user", "content": "C" * 1000},
-            {"role": "assistant", "content": "D" * 1000},
-            {"role": "user", "content": "E" * 100},
-            {"role": "assistant", "content": "F" * 100},
+            {"role": "user", "content": "C" * 100},
+            {"role": "assistant", "content": "D" * 100},
         ]
-        result = ContextManager.compress_messages_with_budget(messages, max_chars=500, preserve_recent=2)
-        # Should preserve last 2 messages + truncation marker
-        assert len(result) <= len(messages)
-        # Last two messages should be preserved
-        assert result[-1]["content"] == "F" * 100
-        assert result[-2]["content"] == "E" * 100 or "truncated" in result[0]["content"]
+        result = ContextManager.truncate_messages(messages, budget=500, preserve_recent=2)
+        # Last 2 preserved, first 2 dropped, truncation marker added
+        assert result[-1]["content"] == "D" * 100
+        assert result[-2]["content"] == "C" * 100
+        assert "truncated" in result[0]["content"]
+        assert result[0]["role"] == "user"
 
-    def test_truncation_marker_merged(self):
-        messages = [
-            {"role": "user", "content": "A" * 5000},
-            {"role": "assistant", "content": "B" * 5000},
-            {"role": "user", "content": "recent_user"},
-            {"role": "assistant", "content": "recent_assistant"},
-        ]
-        result = ContextManager.compress_messages_with_budget(messages, max_chars=500, preserve_recent=2)
-        # Check that truncation marker exists somewhere
-        all_content = " ".join(m.get("content", "") for m in result)
-        assert "truncated" in all_content
-
-    def test_hard_truncate_when_few_messages(self):
+    def test_preserve_recent_is_hard_limit(self):
         messages = [
             {"role": "user", "content": "X" * 10000},
-            {"role": "assistant", "content": "Y" * 100},
+            {"role": "assistant", "content": "Y" * 10000},
         ]
-        result = ContextManager.compress_messages_with_budget(
-            messages, max_chars=500, preserve_recent=4
-        )
-        # With preserve_recent=4, all 2 msgs count as "recent", triggers hard truncate
-        total = sum(len(m.get("content", "")) for m in result)
-        assert total <= 500 or len(result) < len(messages)
+        result = ContextManager.truncate_messages(messages, budget=500, preserve_recent=4)
+        # Only 2 messages, preserve_recent=4 prevents any dropping
+        assert len(result) == 2
+        assert result[0]["content"] == "X" * 10000
 
-    def test_history_budget_calculation(self):
-        """history_budget = max(total - tool_chars, 20000)."""
+    def test_empty_returns_empty(self):
+        result = ContextManager.truncate_messages([], budget=100)
+        assert result == []
+
+    def test_build_truncates_history_before_tools(self):
+        """Over budget: history gets truncated first, tool interactions preserved."""
         agent = _FakeAgentConfig()
-        # Large conversation history
         history = [
             {"role": "user", "content": f"msg {i}" * 500}
             for i in range(20)
@@ -293,8 +280,10 @@ class TestCompression:
             state=state, agent_config=agent, agents={}, tools={},
             context_max_chars=5000,
         )
-        # Should not crash and should produce output
-        assert len(ctx.messages) >= 2  # system + at least some history
+        assert len(ctx.messages) >= 2  # system + at least some content
+        # "current" (tool interaction) should always be present
+        all_content = " ".join(m["content"] for m in ctx.messages)
+        assert "current" in all_content
 
 
 # ============================================================

@@ -101,40 +101,34 @@ class ContextManager:
         system_prompt = "\n\n".join(s for s in system_parts if s)
 
         # ========== Messages ==========
-        messages = [{"role": "system", "content": system_prompt}]
+        system_message = {"role": "system", "content": system_prompt}
+        system_chars = len(system_prompt)
 
         # 两个 agent 类型共用的输入构建
-        current_input_messages = cls._build_current_input(state, agent_config)
+        tool_messages = cls._build_current_input(state, agent_config)
 
         # Lead 独有：conversation history（DB Message 层，含 compaction summaries）
+        history_messages = []
         if agent_config.name == "lead_agent":
-            history = state.get("conversation_history", [])
-            if history:
-                tool_chars = sum(len(m.get("content", "")) for m in current_input_messages)
-                history_budget = max(context_max_chars - tool_chars, 20000)
-                preserve_recent = compaction_preserve_pairs * 2
-                compressed = cls.compress_messages_with_budget(
-                    history, history_budget, preserve_recent=preserve_recent
-                )
-                messages.extend(compressed)
+            history_messages = state.get("conversation_history", [])
 
-        # Tool interactions — 尾部保留截断
-        # max_tool_rounds 限制轮数但不限体积（read_artifact / web_fetch 等
-        # 单次结果可能很大），所以需要预算兜底。长任务有 task_plan 跟踪上下文，
-        # 丢弃早期轮次不影响当前决策。
-        if current_input_messages:
-            remaining = context_max_chars - sum(len(m.get("content", "")) for m in messages)
-            tool_total = sum(len(m.get("content", "")) for m in current_input_messages)
-            if remaining >= tool_total or remaining <= 0:
-                # 在预算内，或预算已被 system+history 耗尽（至少保留全部 tool interactions）
-                messages.extend(current_input_messages)
-            else:
-                compressed = cls.compress_messages_with_budget(
-                    current_input_messages, remaining, preserve_recent=max(tool_interaction_preserve, 2)
-                )
-                messages.extend(compressed)
+        # ========== 预算截断：先砍 history，再砍 tool interactions ==========
+        total = system_chars + cls._chars(history_messages) + cls._chars(tool_messages)
+        if total > context_max_chars:
+            preserve_recent = compaction_preserve_pairs * 2
+            history_budget = max(context_max_chars - system_chars - cls._chars(tool_messages), 0)
+            history_messages = cls.truncate_messages(
+                history_messages, history_budget, preserve_recent=preserve_recent
+            )
 
-        return Context(messages=messages)
+            total = system_chars + cls._chars(history_messages) + cls._chars(tool_messages)
+            if total > context_max_chars:
+                tool_budget = max(context_max_chars - system_chars - cls._chars(history_messages), 0)
+                tool_messages = cls.truncate_messages(
+                    tool_messages, tool_budget, preserve_recent=tool_interaction_preserve
+                )
+
+        return Context(messages=[system_message] + history_messages + tool_messages)
 
     @classmethod
     def _extract_task_plan(cls, artifacts_inventory: Optional[List[Dict]]) -> Optional[str]:
@@ -253,89 +247,38 @@ class ContextManager:
 
         return interactions
 
+    @staticmethod
+    def _chars(messages: List[Dict]) -> int:
+        return sum(len(m.get("content", "")) for m in messages)
+
     @classmethod
-    def compress_messages_with_budget(
+    def truncate_messages(
         cls,
         messages: List[Dict],
-        max_chars: int,
-        preserve_recent: int = 4
+        budget: int,
+        preserve_recent: int = 4,
     ) -> List[Dict]:
         """
-        按绝对字符预算压缩消息历史
-
-        Args:
-            messages: 消息列表
-            max_chars: 最大字符数预算
-            preserve_recent: 保留最近 N 条完整消息
-
-        Returns:
-            压缩后的消息列表
+        从最旧的消息开始丢弃，直到总字符数 <= budget 或只剩 preserve_recent 条。
+        preserve_recent 是硬下限，不会被突破。
         """
-        if not messages:
+        if not messages or cls._chars(messages) <= budget:
             return messages
 
-        total_length = sum(len(msg.get("content", "")) for msg in messages)
-        if total_length <= max_chars:
-            return messages
-
-        logger.debug(f"Compressing {len(messages)} messages: {total_length} chars -> budget {max_chars}")
-
-        if len(messages) <= preserve_recent:
-            # Still over budget — hard-truncate older messages from the front
-            return cls._hard_truncate_to_budget(messages, max_chars)
-
-        recent_messages = messages[-preserve_recent:]
-        older_messages = messages[:-preserve_recent]
-
-        recent_length = sum(len(msg.get("content", "")) for msg in recent_messages)
-        remaining_length = max_chars - recent_length
-
-        if remaining_length <= 0:
-            return [{
-                "role": "system",
-                "content": f"[{len(older_messages)} earlier messages truncated due to length limit]"
-            }] + recent_messages
-
-        compressed = []
-        current_length = 0
-
-        for msg in reversed(older_messages):
-            msg_length = len(msg.get("content", ""))
-            if current_length + msg_length > remaining_length:
-                if len(older_messages) > len(compressed):
-                    compressed.insert(0, {
-                        "role": "system",
-                        "content": f"[{len(older_messages) - len(compressed)} earlier messages truncated]"
-                    })
-                break
-            compressed.insert(0, msg)
-            current_length += msg_length
-
-        return compressed + recent_messages
-
-    @classmethod
-    def _hard_truncate_to_budget(cls, messages: List[Dict], max_chars: int) -> List[Dict]:
-        """
-        硬截断：当消息数 <= preserve_recent 但仍超预算时，
-        从最早的消息开始丢弃，直到总量在预算内。
-        """
-        total = sum(len(m.get("content", "")) for m in messages)
-        if total <= max_chars:
-            return messages
-
-        # 从前向后丢弃，保留尽可能多的最近消息
         result = list(messages)
+        total = cls._chars(result)
         dropped = 0
-        while len(result) > 1:
+
+        while len(result) > preserve_recent and total > budget:
             total -= len(result[0].get("content", ""))
             result.pop(0)
             dropped += 1
-            if total <= max_chars:
-                break
 
         if dropped > 0:
+            logger.debug(f"Truncated {dropped} messages, {total} chars remaining")
             result.insert(0, {
-                "role": "system",
-                "content": f"[{dropped} earlier messages truncated due to length limit]"
+                "role": "user",
+                "content": f"[{dropped} earlier messages truncated]",
             })
+
         return result
