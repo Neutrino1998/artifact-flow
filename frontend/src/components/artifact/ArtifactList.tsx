@@ -33,7 +33,7 @@ export default function ArtifactList() {
     <div className="h-full bg-panel-accent dark:bg-panel-dark">
       <div className="px-4 py-3 border-b border-border dark:border-border-dark">
         <h3 className="font-semibold text-text-primary dark:text-text-primary-dark">
-          文稿
+          文稿列表
         </h3>
       </div>
       <div className="overflow-y-auto px-2 py-2 space-y-2">

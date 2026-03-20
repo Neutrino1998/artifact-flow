@@ -2,7 +2,6 @@
 
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { useArtifactStore } from '@/stores/artifactStore';
-import { useUIStore } from '@/stores/uiStore';
 import { useArtifacts } from '@/hooks/useArtifacts';
 import { exportArtifact } from '@/lib/api';
 
@@ -27,7 +26,6 @@ export default function ArtifactToolbar() {
   const versions = useArtifactStore((s) => s.versions);
   const selectedVersion = useArtifactStore((s) => s.selectedVersion);
   const setCurrent = useArtifactStore((s) => s.setCurrent);
-  const setArtifactPanelVisible = useUIStore((s) => s.setArtifactPanelVisible);
   const { selectVersion, selectArtifact } = useArtifacts();
   const [copied, setCopied] = useState(false);
   const [showDownloadMenu, setShowDownloadMenu] = useState(false);
@@ -89,11 +87,6 @@ export default function ArtifactToolbar() {
     if (!current) return;
     selectArtifact(current.id);
   }, [current, selectArtifact]);
-
-  const handleClose = useCallback(() => {
-    setCurrent(null);
-    setArtifactPanelVisible(false);
-  }, [setCurrent, setArtifactPanelVisible]);
 
   const handleVersionChange = useCallback(
     (e: React.ChangeEvent<HTMLSelectElement>) => {
@@ -200,24 +193,12 @@ export default function ArtifactToolbar() {
         {/* Back to list */}
         <button
           onClick={() => setCurrent(null)}
-          className="p-1.5 rounded text-text-secondary dark:text-text-secondary-dark hover:bg-bg dark:hover:bg-bg-dark transition-colors"
+          className="w-7 h-7 flex items-center justify-center rounded-full bg-accent text-white hover:bg-accent-hover transition-colors"
           aria-label="Back to artifact list"
           title="返回列表"
         >
           <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5">
             <path d="M2 3.5h10M2 7h10M2 10.5h10" />
-          </svg>
-        </button>
-
-        {/* Close */}
-        <button
-          onClick={handleClose}
-          className="p-1.5 rounded text-text-secondary dark:text-text-secondary-dark hover:bg-bg dark:hover:bg-bg-dark transition-colors"
-          aria-label="Close artifact panel"
-          title="关闭面板"
-        >
-          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5">
-            <path d="M3 3l8 8M11 3l-8 8" />
           </svg>
         </button>
       </div>
