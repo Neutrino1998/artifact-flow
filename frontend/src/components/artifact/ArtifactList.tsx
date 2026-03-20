@@ -11,7 +11,7 @@ export default function ArtifactList() {
 
   if (artifactsLoading) {
     return (
-      <div className="h-full flex items-center justify-center bg-panel-accent dark:bg-panel-dark">
+      <div className="h-full flex items-center justify-center bg-chat dark:bg-chat-dark">
         <span className="text-text-tertiary dark:text-text-tertiary-dark">
           加载文稿中...
         </span>
@@ -21,7 +21,7 @@ export default function ArtifactList() {
 
   if (artifacts.length === 0) {
     return (
-      <div className="h-full flex items-center justify-center bg-panel-accent dark:bg-panel-dark">
+      <div className="h-full flex items-center justify-center bg-chat dark:bg-chat-dark">
         <span className="text-text-tertiary dark:text-text-tertiary-dark">
           暂无文稿
         </span>
@@ -30,7 +30,7 @@ export default function ArtifactList() {
   }
 
   return (
-    <div className="h-full bg-panel-accent dark:bg-panel-dark">
+    <div className="h-full bg-chat dark:bg-chat-dark">
       <div className="px-4 py-3 border-b border-border dark:border-border-dark">
         <h3 className="font-semibold text-text-primary dark:text-text-primary-dark">
           文稿列表
@@ -43,7 +43,7 @@ export default function ArtifactList() {
             <button
               key={artifact.id}
               onClick={() => selectArtifact(artifact.id)}
-              className="w-full text-left px-3 py-2.5 rounded-lg bg-chat dark:bg-panel-accent-dark border border-border dark:border-border-dark hover:bg-chat/70 dark:hover:bg-panel-accent-dark/70 transition-colors"
+              className="w-full text-left px-3 py-2.5 rounded-lg bg-panel-accent dark:bg-surface-dark hover:bg-panel-accent/70 dark:hover:bg-surface-dark/70 transition-colors"
             >
               <div className="flex items-center gap-2">
                 <span className="font-medium text-text-primary dark:text-text-primary-dark flex-1 truncate">
