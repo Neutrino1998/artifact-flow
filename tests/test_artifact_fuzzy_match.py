@@ -303,6 +303,40 @@ class TestIndexMapCorrectness:
         assert success
         assert result == "X\n后文", f"Got {result!r}"
 
+    def test_partial_nfkc_start_rejected(self):
+        """Matching only 'I' from NFKC-expanded Ⅳ→IV must not succeed."""
+        artifact = ArtifactMemory(
+            artifact_id="test",
+            content_type="text/markdown",
+            title="Test",
+            content="Ⅳx",
+        )
+        success, msg, result, _ = artifact.compute_update("I", "X")
+        assert not success or result != "XⅣx", f"Partial NFKC start was not rejected: {result!r}"
+
+    def test_partial_nfkc_end_rejected(self):
+        """Matching only 'V' from NFKC-expanded Ⅳ→IV must not succeed."""
+        artifact = ArtifactMemory(
+            artifact_id="test",
+            content_type="text/markdown",
+            title="Test",
+            content="Ⅳx",
+        )
+        success, msg, result, _ = artifact.compute_update("V", "X")
+        assert not success or result != "Xx", f"Partial NFKC end was not rejected: {result!r}"
+
+    def test_full_nfkc_match_still_works(self):
+        """Matching the full NFKC expansion 'IV' from Ⅳ must still succeed."""
+        artifact = ArtifactMemory(
+            artifact_id="test",
+            content_type="text/markdown",
+            title="Test",
+            content="前文Ⅳ后文",
+        )
+        success, msg, result, info = artifact.compute_update("IV", "4")
+        assert success
+        assert result == "前文4后文", f"Got {result!r}"
+
 
 # ============================================================
 # Layer 2: fuzzysearch fallback

@@ -282,27 +282,37 @@ class ArtifactMemory:
             norm_start = norm_content.index(norm_old)
             norm_end = norm_start + len(norm_old)
 
-            orig_start = content_idx_map[norm_start]
-            # norm_end could be == len(content_idx_map) if match reaches end
-            orig_end = content_idx_map[norm_end] if norm_end < len(content_idx_map) else len(self.content)
+            # Boundary safety: reject if match starts or ends inside
+            # an NFKC expansion (e.g. Ⅳ→IV, matching only "I" or "V").
+            # Detect by checking if the adjacent normalized char shares
+            # the same origin — if so, we're mid-expansion.
+            if norm_start > 0 and content_idx_map[norm_start] == content_idx_map[norm_start - 1]:
+                logger.debug("Normalized match starts inside NFKC expansion, falling through to Layer 2")
+            elif norm_end < len(content_idx_map) and content_idx_map[norm_end] == content_idx_map[norm_end - 1]:
+                logger.debug("Normalized match ends inside NFKC expansion, falling through to Layer 2")
+            else:
+                orig_start = content_idx_map[norm_start]
+                # norm_end could be == len(content_idx_map) if match reaches end
+                orig_end = (content_idx_map[norm_end] if norm_end < len(content_idx_map)
+                            else len(self.content))
 
-            matched_text = self.content[orig_start:orig_end]
-            new_content = self.content[:orig_start] + new_str + self.content[orig_end:]
+                matched_text = self.content[orig_start:orig_end]
+                new_content = self.content[:orig_start] + new_str + self.content[orig_end:]
 
-            similarity = 1.0 - (abs(len(matched_text) - len(old_str)) / max(len(matched_text), len(old_str)))
-            logger.info(
-                f"Normalized match succeeded (similarity: {similarity:.1%})\n"
-                f"Expected: {old_str[:100]}...\n"
-                f"Actual:   {matched_text[:100]}..."
-            )
+                similarity = 1.0 - (abs(len(matched_text) - len(old_str)) / max(len(matched_text), len(old_str)))
+                logger.info(
+                    f"Normalized match succeeded (similarity: {similarity:.1%})\n"
+                    f"Expected: {old_str[:100]}...\n"
+                    f"Actual:   {matched_text[:100]}..."
+                )
 
-            return True, f"normalized match {similarity:.1%}", new_content, {
-                "match_type": "normalized",
-                "similarity": similarity,
-                "expected_text": old_str,
-                "matched_text": matched_text,
-                "changes": [(matched_text, new_str)]
-            }
+                return True, f"normalized match {similarity:.1%}", new_content, {
+                    "match_type": "normalized",
+                    "similarity": similarity,
+                    "expected_text": old_str,
+                    "matched_text": matched_text,
+                    "changes": [(matched_text, new_str)]
+                }
 
         # Layer 2: fuzzysearch 近似子串搜索
         logger.debug("Normalized match failed, trying fuzzysearch...")
