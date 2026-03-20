@@ -193,7 +193,7 @@ export default function ArtifactToolbar() {
         {/* Back to list */}
         <button
           onClick={() => setCurrent(null)}
-          className="w-7 h-7 flex items-center justify-center rounded-full bg-accent text-white hover:bg-accent-hover transition-colors"
+          className="ml-2 w-7 h-7 flex items-center justify-center rounded-full bg-accent text-white hover:bg-accent-hover transition-colors"
           aria-label="Back to artifact list"
           title="返回列表"
         >
