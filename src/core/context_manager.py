@@ -84,7 +84,8 @@ class ContextManager:
                 f'type="{task_plan["content_type"]}" '
                 f'source="{task_plan.get("source", "agent")}" '
                 f'updated="{task_plan["updated_at"]}">\n'
-                f'{task_plan["content"]}\n'
+                f'<id>{task_plan["id"]}</id>\n'
+                f'<content>\n{task_plan["content"]}\n</content>\n'
                 f'</team_task_plan>'
             )
 
@@ -166,12 +167,19 @@ class ContextManager:
         for artifact in artifacts_inventory:
             source = artifact.get("source", "agent")
             lines.append(
-                f'<artifact version="{artifact["version"]}" type="{artifact["content_type"]}" '
+                f'<artifact version="{artifact["version"]}" '
+                f'type="{artifact["content_type"]}" '
                 f'source="{source}" updated="{artifact["updated_at"]}">'
             )
             lines.append(f'<id>{artifact["id"]}</id>')
             lines.append(f'<title>{artifact["title"]}</title>')
-            lines.append(cls._preview_content(artifact.get("content", "")))
+            content = artifact.get("content", "")
+            preview = cls._preview_content(content)
+            is_truncated = len(content) > cls.INVENTORY_PREVIEW_LENGTH
+            if is_truncated:
+                lines.append(f'<content_preview length="{cls.INVENTORY_PREVIEW_LENGTH}">{preview}</content_preview>')
+            else:
+                lines.append(f'<content>{content}</content>')
             lines.append('</artifact>')
         lines.append(
             '\nArtifacts with source: user_upload are documents uploaded by the user '

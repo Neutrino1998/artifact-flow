@@ -308,20 +308,21 @@ class TestArtifactsAndAgents:
             artifacts_inventory=artifacts,
         )
         system_content = ctx.messages[0]["content"]
-        assert "Step 1: Do X" in system_content
-        # meta attributes present on <team_task_plan>
+        assert "<content>\nStep 1: Do X\n</content>" in system_content
+        # id as child element, meta as attributes
+        assert '<id>task_plan</id>' in system_content
         assert 'version="1"' in system_content
         assert 'type="text/markdown"' in system_content
 
     def test_task_plan_full_in_dedicated_section_preview_in_inventory(self):
-        """<team_task_plan> has full content; inventory truncates to preview."""
+        """<team_task_plan> wraps full content in <content>; inventory uses <content_preview>."""
         agent = _FakeAgentConfig(tools={"create_artifact": "auto", "read_artifact": "auto"})
         long_content = "A" * 300
         artifacts = [
             {"id": "task_plan", "title": "Plan", "version": 1, "content_type": "text/markdown",
              "content": long_content, "updated_at": "2024-01-01", "source": "agent"},
             {"id": "doc1", "title": "Document", "version": 1, "content_type": "text/plain",
-             "content": "Some content", "updated_at": "2024-01-01", "source": "agent"},
+             "content": "Short", "updated_at": "2024-01-01", "source": "agent"},
         ]
         state = _make_state(events=[
             _make_event(StreamEventType.USER_INPUT.value, data={"content": "hi"}),
@@ -332,15 +333,17 @@ class TestArtifactsAndAgents:
             artifacts_inventory=artifacts,
         )
         system_content = ctx.messages[0]["content"]
-        # <team_task_plan> has full content
-        assert long_content in system_content
-        # inventory truncates to preview
+        # <team_task_plan> has full content wrapped in <content>
+        assert f"<content>\n{long_content}\n</content>" in system_content
+        # inventory uses <content_preview> for truncated, <content> for short
         inv_start = system_content.index("<artifacts_inventory>")
         inv_end = system_content.index("</artifacts_inventory>")
         inventory_section = system_content[inv_start:inv_end]
-        assert "task_plan" in inventory_section
+        assert '<id>task_plan</id>' in inventory_section
+        assert '<content_preview length="200">' in inventory_section
         assert long_content not in inventory_section
-        assert "A" * 200 + "..." in inventory_section
+        # short artifact uses <content> not <content_preview>
+        assert "<content>Short</content>" in inventory_section
         assert "2 artifact(s)" in system_content
 
     def test_artifact_tools_show_inventory(self):
