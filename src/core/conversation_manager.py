@@ -169,7 +169,9 @@ class ConversationManager:
                 logger.debug(f"Conversation {conv_id} already exists, loading from DB")
                 await self._load_conversation_from_db(conv_id)
             except Exception as e:
+                self._cache.pop(conv_id, None)
                 logger.warning(f"Failed to persist conversation: {e}")
+                raise
 
         logger.info(f"Started conversation: {conv_id}")
         return conv_id

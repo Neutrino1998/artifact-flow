@@ -407,13 +407,28 @@ async def execute_loop(
                     "error": f"Tool '{tool_name}' not available for '{agent_name}'",
                     "duration_ms": 0,
                 })
+                tool_round_count[agent_name] = tool_round_count.get(agent_name, 0) + 1
                 continue
 
             # call_subagent 特殊处理
             if tool_name == "call_subagent":
                 tool = _resolve_tool("call_subagent")
                 if tool:
-                    result = await tool(**params)
+                    try:
+                        result = await tool(**params)
+                    except Exception as e:
+                        logger.exception(f"call_subagent execution error: {e}")
+                        await _emit(StreamEventType.TOOL_START.value, agent_name, {
+                            "tool": "call_subagent", "params": params,
+                        })
+                        await _emit(StreamEventType.TOOL_COMPLETE.value, agent_name, {
+                            "tool": "call_subagent",
+                            "success": False,
+                            "error": str(e),
+                            "duration_ms": 0,
+                        })
+                        tool_round_count[agent_name] = tool_round_count.get(agent_name, 0) + 1
+                        continue
                     if result.success:
                         target_agent = params["agent_name"]
                         instruction = params["instruction"]
@@ -460,6 +475,7 @@ async def execute_loop(
                     "error": f"Tool '{tool_name}' not found",
                     "duration_ms": 0,
                 })
+                tool_round_count[agent_name] = tool_round_count.get(agent_name, 0) + 1
                 continue
 
             # 权限检查（per-agent 权限覆盖）
@@ -469,6 +485,7 @@ async def execute_loop(
                 if tool_name not in state.get("always_allowed_tools", []):
                     approved = await _handle_permission(tool_name, params, agent_name, effective_permission)
                     if not approved:
+                        tool_round_count[agent_name] = tool_round_count.get(agent_name, 0) + 1
                         continue
 
             # 执行工具
