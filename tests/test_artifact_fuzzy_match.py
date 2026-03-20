@@ -337,6 +337,36 @@ class TestIndexMapCorrectness:
         assert success
         assert result == "前文4后文", f"Got {result!r}"
 
+    def test_hangul_decomposed_matches_precomposed(self):
+        """Decomposed Hangul Jamo in old_str must match precomposed syllables.
+        This requires whole-string NFKC (per-char NFKC cannot compose)."""
+        # 가 (U+AC00, precomposed) vs 가 (U+1100 U+1161, decomposed Jamo)
+        artifact = ArtifactMemory(
+            artifact_id="test",
+            content_type="text/markdown",
+            title="Test",
+            content="테스트: 가나다 끝",
+        )
+        # old_str uses decomposed Jamo for 가나다
+        old_str = "\u1100\u1161\u1102\u1161\u1103\u1161"  # 가나다
+        success, msg, result, info = artifact.compute_update(old_str, "ABC")
+        assert success, f"Hangul decomposed→precomposed failed: {msg}"
+        assert result == "테스트: ABC 끝", f"Got {result!r}"
+
+    def test_combining_accent_matches_precomposed(self):
+        """Base + combining accent in old_str must match precomposed form."""
+        # é (U+00E9, precomposed) vs e + ́ (U+0065 U+0301, decomposed)
+        artifact = ArtifactMemory(
+            artifact_id="test",
+            content_type="text/markdown",
+            title="Test",
+            content="café latte",
+        )
+        old_str = "cafe\u0301"  # e + combining acute
+        success, msg, result, info = artifact.compute_update(old_str, "coffee")
+        assert success, f"Combining accent failed: {msg}"
+        assert result == "coffee latte", f"Got {result!r}"
+
 
 # ============================================================
 # Layer 2: fuzzysearch fallback

@@ -98,39 +98,67 @@ _SPECIAL_SPACES = str.maketrans({
 })
 
 
+# Merged 1-to-1 translation table
+_ALL_CHAR_TRANSLATES = {**_SMART_QUOTES, **_UNICODE_DASHES, **_SPECIAL_SPACES}
+
+
+def _align_nfkc(pre: str, post: str) -> list[int]:
+    """Build origin map for whole-string NFKC: post[i] came from pre[result[i]].
+
+    Uses NFKD as a bridge: NFKD(pre) ≡ NFKD(NFKC(pre)) = NFKD(post),
+    so both sides decompose to the same string. Per-char NFKD on each
+    side tracks origins, then we zip through the shared decomposition.
+    """
+    # Left side: per-char NFKD of pre → each decomposed char knows its pre index
+    left_origins: list[int] = []
+    for idx, ch in enumerate(pre):
+        for _ in unicodedata.normalize('NFKD', ch):
+            left_origins.append(idx)
+
+    # Right side: per-char NFKD of post → each decomposed char knows its post index
+    right_origins: list[int] = []
+    for idx, ch in enumerate(post):
+        for _ in unicodedata.normalize('NFKD', ch):
+            right_origins.append(idx)
+
+    # Both decomposed sequences are identical, zip to build post→pre map
+    post_to_pre: dict[int, int] = {}
+    for decomp_pos in range(len(left_origins)):
+        post_idx = right_origins[decomp_pos]
+        if post_idx not in post_to_pre:
+            post_to_pre[post_idx] = left_origins[decomp_pos]
+
+    return [post_to_pre[i] for i in range(len(post))]
+
+
 def _normalize_for_match(text: str) -> tuple[str, list[int]]:
     """Normalize text for fuzzy matching and build index map.
 
-    Every transform tracks which original character each normalized
-    character came from, so positions can be mapped back accurately.
+    Each transform is applied to the whole string (not per-character),
+    with origin tracking built via alignment or deletion tracking.
 
     Transforms (in order):
-    1. Smart quotes → ASCII quotes  (1-to-1)
-    2. Unicode dashes → ASCII hyphen (1-to-1)
-    3. Special whitespace → regular space (1-to-1)
-    4. NFKC normalize (may expand, e.g. Ⅳ → IV)
-    5. Strip trailing whitespace per line
-    6. Collapse spaces at CJK-Latin/digit boundaries
+    1. Smart quotes, Unicode dashes, special spaces → ASCII (1-to-1)
+    2. Whole-string NFKC (may expand or contract)
+    3. Strip trailing whitespace per line
+    4. Collapse spaces at CJK-Latin/digit boundaries
 
     Returns:
         (normalized_text, index_map) where index_map[i] = index in the
         **original** text for normalized char i.
     """
-    _all_1to1 = {**_SMART_QUOTES, **_UNICODE_DASHES, **_SPECIAL_SPACES}
+    # Phase 1: 1-to-1 char translates (preserves length, index = identity)
+    translated = text.translate(_ALL_CHAR_TRANSLATES)
 
-    # Phase 1: per-character transforms + NFKC, tracking origin
-    chars: list[str] = []
-    origins: list[int] = []  # origins[i] = index in original `text`
+    # Phase 2: whole-string NFKC + NFKD-bridge alignment
+    nfkc_text = unicodedata.normalize('NFKC', translated)
+    nfkc_origins = _align_nfkc(translated, nfkc_text)
+    # nfkc_origins[i] = index in `translated` = index in original `text`
 
-    for orig_i, orig_ch in enumerate(text):
-        ch = _all_1to1.get(ord(orig_ch), orig_ch)
-        if isinstance(ch, int):
-            ch = chr(ch)
-        for nc in unicodedata.normalize('NFKC', ch):
-            chars.append(nc)
-            origins.append(orig_i)
+    # Phase 3: rstrip per line (deletion tracking)
+    chars = list(nfkc_text)
+    origins = list(nfkc_origins)
 
-    # Phase 2: rstrip per line
     stripped_chars: list[str] = []
     stripped_origins: list[int] = []
     line_chars: list[str] = []
@@ -138,7 +166,6 @@ def _normalize_for_match(text: str) -> tuple[str, list[int]]:
 
     for c, o in zip(chars, origins):
         if c == '\n':
-            # rstrip: drop trailing spaces from this line
             while line_chars and line_chars[-1] == ' ':
                 line_chars.pop()
                 line_origins.pop()
@@ -152,20 +179,18 @@ def _normalize_for_match(text: str) -> tuple[str, list[int]]:
             line_chars.append(c)
             line_origins.append(o)
 
-    # Last line (no trailing newline)
     while line_chars and line_chars[-1] == ' ':
         line_chars.pop()
         line_origins.pop()
     stripped_chars.extend(line_chars)
     stripped_origins.extend(line_origins)
 
-    # Phase 3: collapse CJK-Latin boundary spaces
+    # Phase 4: collapse CJK-Latin boundary spaces (deletion tracking)
     result: list[str] = []
     index_map: list[int] = []
     i = 0
     while i < len(stripped_chars):
         if stripped_chars[i] == ' ' and result and i + 1 < len(stripped_chars):
-            # Look ahead past consecutive spaces
             j = i
             while j < len(stripped_chars) and stripped_chars[j] == ' ':
                 j += 1
