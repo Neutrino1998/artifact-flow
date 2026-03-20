@@ -102,40 +102,53 @@ _SPECIAL_SPACES = str.maketrans({
 _ALL_CHAR_TRANSLATES = {**_SMART_QUOTES, **_UNICODE_DASHES, **_SPECIAL_SPACES}
 
 
-def _align_nfkc(pre: str, post: str) -> list[int]:
-    """Build origin map for whole-string NFKC: post[i] came from pre[result[i]].
+# Type alias: each normalized char maps to [start, end) in the original text
+Span = Tuple[int, int]
 
-    Uses NFKD as a bridge: NFKD(pre) ≡ NFKD(NFKC(pre)) = NFKD(post),
-    so both sides decompose to the same string. Per-char NFKD on each
-    side tracks origins, then we zip through the shared decomposition.
+
+def _nfkc_span_map(pre: str, post: str) -> list[Span]:
+    """Build span map for whole-string NFKC: post[i] came from pre[span].
+
+    Uses NFKD as a bridge: NFKD(pre) ≡ NFKD(post), so per-char NFKD
+    on each side gives a shared decomposition we can zip through.
+
+    Returns list of (orig_start, orig_end) spans, one per post char.
     """
-    # Left side: per-char NFKD of pre → each decomposed char knows its pre index
+    # Left: per-char NFKD of pre → each decomposed char knows its pre index
     left_origins: list[int] = []
     for idx, ch in enumerate(pre):
         for _ in unicodedata.normalize('NFKD', ch):
             left_origins.append(idx)
 
-    # Right side: per-char NFKD of post → each decomposed char knows its post index
+    # Right: per-char NFKD of post → each decomposed char knows its post index
     right_origins: list[int] = []
     for idx, ch in enumerate(post):
         for _ in unicodedata.normalize('NFKD', ch):
             right_origins.append(idx)
 
-    # Both decomposed sequences are identical, zip to build post→pre map
-    post_to_pre: dict[int, int] = {}
+    # Zip through shared decomposition to find min/max original index per post char
+    span_min: dict[int, int] = {}
+    span_max: dict[int, int] = {}
     for decomp_pos in range(len(left_origins)):
         post_idx = right_origins[decomp_pos]
-        if post_idx not in post_to_pre:
-            post_to_pre[post_idx] = left_origins[decomp_pos]
+        orig_idx = left_origins[decomp_pos]
+        if post_idx not in span_min:
+            span_min[post_idx] = orig_idx
+            span_max[post_idx] = orig_idx
+        else:
+            span_min[post_idx] = min(span_min[post_idx], orig_idx)
+            span_max[post_idx] = max(span_max[post_idx], orig_idx)
 
-    return [post_to_pre[i] for i in range(len(post))]
+    return [(span_min[i], span_max[i] + 1) for i in range(len(post))]
 
 
-def _normalize_for_match(text: str) -> tuple[str, list[int]]:
-    """Normalize text for fuzzy matching and build index map.
+def _normalize_for_match(text: str) -> tuple[str, list[Span]]:
+    """Normalize text and build a span map back to the original.
 
-    Each transform is applied to the whole string (not per-character),
-    with origin tracking built via alignment or deletion tracking.
+    Each normalized character maps to a [start, end) span in the
+    **original** text. This handles all length-changing transforms
+    uniformly: expansions (Ⅳ→IV), contractions (가→가), and
+    deletions (rstrip, CJK-Latin space collapse).
 
     Transforms (in order):
     1. Smart quotes, Unicode dashes, special spaces → ASCII (1-to-1)
@@ -144,50 +157,48 @@ def _normalize_for_match(text: str) -> tuple[str, list[int]]:
     4. Collapse spaces at CJK-Latin/digit boundaries
 
     Returns:
-        (normalized_text, index_map) where index_map[i] = index in the
-        **original** text for normalized char i.
+        (normalized_text, span_map) where span_map[i] = (start, end)
+        in the **original** text for normalized char i.
     """
-    # Phase 1: 1-to-1 char translates (preserves length, index = identity)
+    # Phase 1: 1-to-1 char translates (preserves length)
     translated = text.translate(_ALL_CHAR_TRANSLATES)
 
-    # Phase 2: whole-string NFKC + NFKD-bridge alignment
+    # Phase 2: whole-string NFKC + NFKD-bridge span alignment
     nfkc_text = unicodedata.normalize('NFKC', translated)
-    nfkc_origins = _align_nfkc(translated, nfkc_text)
-    # nfkc_origins[i] = index in `translated` = index in original `text`
+    spans = _nfkc_span_map(translated, nfkc_text)
+    # spans[i] = (start, end) in `translated` = in original `text`
 
-    # Phase 3: rstrip per line (deletion tracking)
+    # Phase 3: rstrip per line (drop trailing spaces, keep spans of survivors)
     chars = list(nfkc_text)
-    origins = list(nfkc_origins)
-
     stripped_chars: list[str] = []
-    stripped_origins: list[int] = []
+    stripped_spans: list[Span] = []
     line_chars: list[str] = []
-    line_origins: list[int] = []
+    line_spans: list[Span] = []
 
-    for c, o in zip(chars, origins):
+    for c, s in zip(chars, spans):
         if c == '\n':
             while line_chars and line_chars[-1] == ' ':
                 line_chars.pop()
-                line_origins.pop()
+                line_spans.pop()
             stripped_chars.extend(line_chars)
-            stripped_origins.extend(line_origins)
+            stripped_spans.extend(line_spans)
             stripped_chars.append(c)
-            stripped_origins.append(o)
+            stripped_spans.append(s)
             line_chars.clear()
-            line_origins.clear()
+            line_spans.clear()
         else:
             line_chars.append(c)
-            line_origins.append(o)
+            line_spans.append(s)
 
     while line_chars and line_chars[-1] == ' ':
         line_chars.pop()
-        line_origins.pop()
+        line_spans.pop()
     stripped_chars.extend(line_chars)
-    stripped_origins.extend(line_origins)
+    stripped_spans.extend(line_spans)
 
-    # Phase 4: collapse CJK-Latin boundary spaces (deletion tracking)
+    # Phase 4: collapse CJK-Latin boundary spaces
     result: list[str] = []
-    index_map: list[int] = []
+    result_spans: list[Span] = []
     i = 0
     while i < len(stripped_chars):
         if stripped_chars[i] == ' ' and result and i + 1 < len(stripped_chars):
@@ -205,10 +216,10 @@ def _normalize_for_match(text: str) -> tuple[str, list[int]]:
                     continue
 
         result.append(stripped_chars[i])
-        index_map.append(stripped_origins[i])
+        result_spans.append(stripped_spans[i])
         i += 1
 
-    return ''.join(result), index_map
+    return ''.join(result), result_spans
 
 
 # ============================================================
@@ -296,30 +307,25 @@ class ArtifactMemory:
         logger.debug("Exact match failed, trying normalized match...")
 
         norm_old, _ = _normalize_for_match(old_str)
-        norm_content, content_idx_map = _normalize_for_match(self.content)
+        norm_content, content_span_map = _normalize_for_match(self.content)
 
         if norm_old in norm_content:
             count = norm_content.count(norm_old)
             if count > 1:
                 return False, f"Text '{old_str[:50]}...' appears {count} times after normalization (must be unique)", None, None
 
-            # Map normalized position back to original content
             norm_start = norm_content.index(norm_old)
             norm_end = norm_start + len(norm_old)
 
-            # Boundary safety: reject if match starts or ends inside
-            # an NFKC expansion (e.g. Ⅳ→IV, matching only "I" or "V").
-            # Detect by checking if the adjacent normalized char shares
-            # the same origin — if so, we're mid-expansion.
-            if norm_start > 0 and content_idx_map[norm_start] == content_idx_map[norm_start - 1]:
-                logger.debug("Normalized match starts inside NFKC expansion, falling through to Layer 2")
-            elif norm_end < len(content_idx_map) and content_idx_map[norm_end] == content_idx_map[norm_end - 1]:
-                logger.debug("Normalized match ends inside NFKC expansion, falling through to Layer 2")
+            # Span-based boundary safety: reject if match starts or ends
+            # inside a normalization group (chars sharing the same span).
+            if norm_start > 0 and content_span_map[norm_start] == content_span_map[norm_start - 1]:
+                logger.debug("Normalized match starts inside a normalization group, falling through to Layer 2")
+            elif norm_end < len(content_span_map) and content_span_map[norm_end] == content_span_map[norm_end - 1]:
+                logger.debug("Normalized match ends inside a normalization group, falling through to Layer 2")
             else:
-                orig_start = content_idx_map[norm_start]
-                # norm_end could be == len(content_idx_map) if match reaches end
-                orig_end = (content_idx_map[norm_end] if norm_end < len(content_idx_map)
-                            else len(self.content))
+                orig_start = content_span_map[norm_start][0]
+                orig_end = content_span_map[norm_end - 1][1]
 
                 matched_text = self.content[orig_start:orig_end]
                 new_content = self.content[:orig_start] + new_str + self.content[orig_end:]
