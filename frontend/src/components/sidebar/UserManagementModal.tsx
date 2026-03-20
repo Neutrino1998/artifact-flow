@@ -301,12 +301,16 @@ export default function UserManagementModal({ open, onClose }: Props) {
                       </span>
                     </td>
                     <td className="py-2.5">
-                      <span
-                        className={`inline-block w-2 h-2 rounded-full ${
-                          user.is_active ? 'bg-green-500' : 'bg-red-400'
-                        }`}
-                        title={user.is_active ? '已启用' : '已禁用'}
-                      />
+                      <span className="inline-flex items-center gap-1.5">
+                        <span
+                          className={`inline-block w-2 h-2 rounded-full ${
+                            user.is_active ? 'bg-green-500' : 'bg-red-400'
+                          }`}
+                        />
+                        <span className={`text-xs ${user.is_active ? 'text-green-600 dark:text-green-400' : 'text-red-500 dark:text-red-400'}`}>
+                          {user.is_active ? '已启用' : '已禁用'}
+                        </span>
+                      </span>
                     </td>
                     <td className="py-2.5 text-right">
                       {isSelf(user) ? (
