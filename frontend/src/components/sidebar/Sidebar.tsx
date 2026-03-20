@@ -48,10 +48,11 @@ export default function Sidebar() {
   if (sidebarCollapsed) {
     return (
       <div className="flex flex-col items-center h-full bg-panel-accent dark:bg-panel-dark py-3 gap-1 w-12">
-        {/* New chat */}
-        <IconButton onClick={handleNewChat} label="新建对话">
+        {/* Expand */}
+        <IconButton onClick={toggleSidebar} label="展开侧栏">
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
-            <path d="M8 3v10M3 8h10" />
+            <rect x="1.5" y="1.5" width="13" height="13" rx="2" />
+            <path d="M6 1.5v13" />
           </svg>
         </IconButton>
 
@@ -63,18 +64,18 @@ export default function Sidebar() {
           </svg>
         </IconButton>
 
+        {/* New chat */}
+        <IconButton onClick={handleNewChat} label="新建对话">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+            <path d="M8 3v10M3 8h10" />
+          </svg>
+        </IconButton>
+
         {/* Spacer */}
         <div className="flex-1" />
 
         {/* User menu */}
         <UserMenu collapsed />
-
-        {/* Expand */}
-        <IconButton onClick={toggleSidebar} label="展开侧栏">
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
-            <path d="M6 3l5 5-5 5" />
-          </svg>
-        </IconButton>
       </div>
     );
   }
@@ -94,7 +95,8 @@ export default function Sidebar() {
           title="收起侧栏"
         >
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
-            <path d="M2 4h12M2 8h12M2 12h12" />
+            <rect x="1.5" y="1.5" width="13" height="13" rx="2" />
+            <path d="M6 1.5v13" />
           </svg>
         </button>
       </div>
