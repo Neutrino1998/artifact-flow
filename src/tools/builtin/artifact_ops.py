@@ -12,7 +12,8 @@ from typing import Dict, Any, Optional, List, Tuple
 from datetime import datetime
 from dataclasses import dataclass, field
 import re
-import diff_match_patch as dmp_module
+import unicodedata
+from fuzzysearch import find_near_matches
 
 from tools.base import BaseTool, ToolResult, ToolParameter, ToolPermission
 from repositories.artifact_repo import ArtifactRepository
@@ -29,6 +30,128 @@ def _truncate_middle(text: str, max_len: int = 200) -> str:
         return text
     half = (max_len - 5) // 2  # 5 chars for "\n...\n"
     return text[:half] + "\n...\n" + text[-half:]
+
+
+# CJK Unicode ranges for normalization
+_CJK_RE = (
+    r'[\u2e80-\u2fdf'   # CJK Radicals
+    r'\u3000-\u303f'     # CJK Symbols & Punctuation
+    r'\u3040-\u309f'     # Hiragana
+    r'\u30a0-\u30ff'     # Katakana
+    r'\u3400-\u4dbf'     # CJK Unified Ext A
+    r'\u4e00-\u9fff'     # CJK Unified
+    r'\uf900-\ufaff'     # CJK Compat Ideographs
+    r'\ufe30-\ufe4f'     # CJK Compat Forms
+    r'\uff00-\uffef'     # Halfwidth/Fullwidth Forms
+    r'\U00020000-\U0002a6df'  # CJK Unified Ext B
+    r']'
+)
+# Space(s) between CJK and Latin/digit, or vice versa
+_CJK_LATIN_SPACE = re.compile(
+    rf'({_CJK_RE})\s+([A-Za-z0-9])|([A-Za-z0-9])\s+({_CJK_RE})'
+)
+
+
+# Smart quotes → ASCII
+_SMART_QUOTES = str.maketrans({
+    '\u2018': "'",   # '
+    '\u2019': "'",   # '
+    '\u201a': "'",   # ‚
+    '\u201c': '"',   # "
+    '\u201d': '"',   # "
+    '\u201e': '"',   # „
+    '\u2039': "'",   # ‹
+    '\u203a': "'",   # ›
+    '\u00ab': '"',   # «
+    '\u00bb': '"',   # »
+})
+
+# Unicode dashes → ASCII hyphen
+_UNICODE_DASHES = str.maketrans({
+    '\u2012': '-',   # figure dash
+    '\u2013': '-',   # en dash –
+    '\u2014': '-',   # em dash —
+    '\u2015': '-',   # horizontal bar ―
+    '\u2212': '-',   # minus sign −
+    '\ufe58': '-',   # small em dash ﹘
+    '\ufe63': '-',   # small hyphen-minus ﹣
+    '\uff0d': '-',   # fullwidth hyphen-minus －
+})
+
+# Special whitespace → regular space
+_SPECIAL_SPACES = str.maketrans({
+    '\u00a0': ' ',   # non-breaking space
+    '\u2000': ' ',   # en quad
+    '\u2001': ' ',   # em quad
+    '\u2002': ' ',   # en space
+    '\u2003': ' ',   # em space
+    '\u2004': ' ',   # three-per-em space
+    '\u2005': ' ',   # four-per-em space
+    '\u2006': ' ',   # six-per-em space
+    '\u2007': ' ',   # figure space
+    '\u2008': ' ',   # punctuation space
+    '\u2009': ' ',   # thin space
+    '\u200a': ' ',   # hair space
+    '\u202f': ' ',   # narrow no-break space
+    '\u205f': ' ',   # medium mathematical space
+    '\u3000': ' ',   # ideographic space
+})
+
+
+def _normalize_for_match(text: str) -> tuple[str, list[int]]:
+    """Normalize text for fuzzy matching and build index map.
+
+    - Smart quotes → ASCII quotes
+    - Unicode dashes → ASCII hyphen
+    - Special whitespace → regular space
+    - NFKC normalize (fullwidth → halfwidth, etc.)
+    - Strip trailing whitespace per line
+    - Collapse spaces at CJK-Latin/digit boundaries
+
+    Returns:
+        (normalized_text, index_map) where index_map[i] = original char index
+        for normalized char i.
+    """
+    # Step 1: Character-level normalization (1-to-1, preserves indices)
+    text = text.translate(_SMART_QUOTES)
+    text = text.translate(_UNICODE_DASHES)
+    text = text.translate(_SPECIAL_SPACES)
+
+    # Step 2: NFKC
+    text = unicodedata.normalize('NFKC', text)
+
+    # Step 3: Strip trailing whitespace per line
+    text = '\n'.join(line.rstrip() for line in text.split('\n'))
+
+    # Step 3: Collapse CJK-Latin boundary spaces, building index map
+    index_map = []
+    result = []
+    i = 0
+    while i < len(text):
+        # Check if we're at a CJK-space-Latin or Latin-space-CJK boundary
+        if text[i] == ' ' and i > 0 and i + 1 < len(text):
+            prev_char = text[i - 1]
+            # Look ahead past spaces
+            j = i
+            while j < len(text) and text[j] == ' ':
+                j += 1
+            if j < len(text):
+                next_char = text[j]
+                prev_is_cjk = bool(re.match(_CJK_RE, prev_char))
+                next_is_cjk = bool(re.match(_CJK_RE, next_char))
+                prev_is_latin = bool(re.match(r'[A-Za-z0-9]', prev_char))
+                next_is_latin = bool(re.match(r'[A-Za-z0-9]', next_char))
+
+                if (prev_is_cjk and next_is_latin) or (prev_is_latin and next_is_cjk):
+                    # Skip boundary spaces
+                    i = j
+                    continue
+
+        result.append(text[i])
+        index_map.append(i)
+        i += 1
+
+    return ''.join(result), index_map
 
 
 # ============================================================
@@ -80,29 +203,30 @@ class ArtifactMemory:
         self,
         old_str: str,
         new_str: str,
-        match_threshold: float = 0.7,
         max_diff_ratio: float = 0.3
     ) -> Tuple[bool, str, Optional[str], Optional[Dict]]:
         """
-        计算更新结果（使用 diff-match-patch）
+        计算更新结果（分层匹配策略）
+
+        Layer 0: 精确匹配
+        Layer 1: CJK-Latin 空格归一化 + 精确匹配
+        Layer 2: fuzzysearch 近似子串搜索（兜底）
 
         Args:
             old_str: 要替换的原文本
             new_str: 新文本
-            match_threshold: 匹配阈值 (0.0-1.0)
-            max_diff_ratio: 最大允许的差异率
+            max_diff_ratio: 最大允许的差异率（用于 Layer 2）
 
         Returns:
             (成功与否, 消息, 新内容, 匹配详情字典)
         """
-        # Step 1: 快速精确匹配
+        # Layer 0: 精确匹配
         if old_str in self.content:
             count = self.content.count(old_str)
 
             if count > 1:
                 return False, f"Text '{old_str[:50]}...' appears {count} times (must be unique)", None, None
 
-            # 精确匹配成功
             new_content = self.content.replace(old_str, new_str, 1)
 
             return True, "exact match", new_content, {
@@ -111,49 +235,72 @@ class ArtifactMemory:
                 "changes": [(old_str, new_str)]
             }
 
-        # Step 2: 使用 DMP 进行模糊匹配
-        logger.debug("Exact match failed, attempting fuzzy match...")
+        # Layer 1: 归一化 + 精确匹配
+        logger.debug("Exact match failed, trying normalized match...")
 
-        dmp = dmp_module.diff_match_patch()
-        dmp.Match_Threshold = match_threshold
-        dmp.Match_Distance = len(self.content)
+        norm_old, _ = _normalize_for_match(old_str)
+        norm_content, content_idx_map = _normalize_for_match(self.content)
 
-        # 2.1 定位起始位置
-        match_pos = dmp.match_main(self.content, old_str, 0)
+        if norm_old in norm_content:
+            count = norm_content.count(norm_old)
+            if count > 1:
+                return False, f"Text '{old_str[:50]}...' appears {count} times after normalization (must be unique)", None, None
 
-        if match_pos == -1:
+            # Map normalized position back to original content
+            norm_start = norm_content.index(norm_old)
+            norm_end = norm_start + len(norm_old)
+
+            orig_start = content_idx_map[norm_start]
+            # norm_end could be == len(content_idx_map) if match reaches end
+            orig_end = content_idx_map[norm_end] if norm_end < len(content_idx_map) else len(self.content)
+
+            matched_text = self.content[orig_start:orig_end]
+            new_content = self.content[:orig_start] + new_str + self.content[orig_end:]
+
+            similarity = 1.0 - (abs(len(matched_text) - len(old_str)) / max(len(matched_text), len(old_str)))
+            logger.info(
+                f"Normalized match succeeded (similarity: {similarity:.1%})\n"
+                f"Expected: {old_str[:100]}...\n"
+                f"Actual:   {matched_text[:100]}..."
+            )
+
+            return True, f"normalized match {similarity:.1%}", new_content, {
+                "match_type": "normalized",
+                "similarity": similarity,
+                "expected_text": old_str,
+                "matched_text": matched_text,
+                "changes": [(matched_text, new_str)]
+            }
+
+        # Layer 2: fuzzysearch 近似子串搜索
+        logger.debug("Normalized match failed, trying fuzzysearch...")
+
+        max_l_dist = max(5, int(len(old_str) * max_diff_ratio))
+        matches = find_near_matches(old_str, self.content, max_l_dist=max_l_dist)
+
+        if not matches:
             return False, f"Failed to find matching text '{old_str[:50]}...'", None, None
 
-        # 2.2 计算精确的结束位置
-        diffs = dmp.diff_main(old_str, self.content[match_pos:])
-        dmp.diff_cleanupSemantic(diffs)
+        if len(matches) > 1:
+            # Pick the best (lowest distance); reject if ambiguous (same distance)
+            matches.sort(key=lambda m: m.dist)
+            if matches[0].dist == matches[1].dist:
+                return False, f"Text '{old_str[:50]}...' has {len(matches)} ambiguous fuzzy matches", None, None
 
-        if diffs and diffs[-1][0] == 1:
-            diffs = diffs[:-1]
+        best = matches[0]
+        matched_text = self.content[best.start:best.end]
+        levenshtein_distance = best.dist
 
-        # 检查相似度
-        levenshtein_distance = dmp.diff_levenshtein(diffs)
         if levenshtein_distance > len(old_str) * max_diff_ratio:
             return False, f"Best match difference is too large (edit distance: {levenshtein_distance})", None, None
 
-        # 使用 diff_xIndex 计算精确长度
-        exact_len = dmp.diff_xIndex(diffs, len(old_str))
-        end_pos = match_pos + exact_len
-        matched_text = self.content[match_pos:end_pos]
-
-        # 2.3 生成并应用补丁
-        patches = dmp.patch_make(matched_text, new_str)
-        new_content, results = dmp.patch_apply(patches, self.content)
-
-        if not all(results):
-            logger.warning("Patch application failed, falling back to direct replacement.")
-            new_content = self.content[:match_pos] + new_str + self.content[end_pos:]
+        new_content = self.content[:best.start] + new_str + self.content[best.end:]
 
         similarity = 1.0 - (levenshtein_distance / len(old_str))
         logger.info(
             f"Fuzzy match succeeded (similarity: {similarity:.1%})\n"
             f"Expected: {old_str[:100]}...\n"
-            f"Actual: {matched_text[:100]}..."
+            f"Actual:   {matched_text[:100]}..."
         )
 
         return True, f"fuzzy match {similarity:.1%}", new_content, {

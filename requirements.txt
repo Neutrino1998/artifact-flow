@@ -22,8 +22,8 @@ pymupdf>=1.24.0  # PDF文本提取
 charset-normalizer>=3.0.0  # 文本编码检测
 python-multipart>=0.0.9  # 文件上传支持
 
-# 文本差异对比
-diff-match-patch>=20230430
+# 文本模糊匹配（artifact update）
+fuzzysearch>=0.8.0
 
 # YAML 解析（Agent MD 文件）
 pyyaml>=6.0
