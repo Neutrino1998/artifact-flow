@@ -449,6 +449,7 @@ async def execute_loop(
                         # tool_complete 在 subagent 完成后由 _complete_agent 路径追加
                         state["current_agent"] = target_agent
                         logger.info(f"Switching to subagent: {target_agent}")
+                        tool_round_count[agent_name] = tool_round_count.get(agent_name, 0) + 1
                         break  # 跳出 tool_calls 循环，继续 while loop
                     else:
                         # 验证失败（如目标 agent 不存在），返回错误信息给 agent
