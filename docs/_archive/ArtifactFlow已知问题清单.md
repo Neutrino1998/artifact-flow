@@ -63,6 +63,12 @@ system prompt + instruction + history(如果有) + tool result
 - [ ] Graph 流程自动化测试：mock `BaseAgent._call_llm()` 返回预设 response（含 XML tool call），覆盖 graph 路由/状态流转/事件推送，不依赖真实 LLM
 
 
+# ~~Artifact 模糊匹配算法问题~~ ✅ 已修复
+
+已移除 DMP，重写为分层匹配：exact → 归一化+exact → fuzzysearch。归一化使用 span 映射追踪原文位置，覆盖 NFKC 合/拆、CJK-Latin 空格、smart quotes、Unicode dashes 等。见 `artifact_ops.py` 和 `tests/test_artifact_fuzzy_match.py`。
+
+---
+
 # Agent模块已知问题清单
 
 ## 重要问题
