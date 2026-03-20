@@ -87,6 +87,11 @@
   }
 }
 
+/* Match newsprint theme: tighter line-height (1.5) */
+.prose :where(p, li, blockquote):not(:where([class~="not-prose"] *)) {
+  line-height: 1.5;
+}
+
 /* Override highlight.js background to use our theme tokens */
 .hljs { background: transparent !important; }
 
