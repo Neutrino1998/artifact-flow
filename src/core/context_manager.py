@@ -58,7 +58,7 @@ class ContextManager:
             agents: 所有 agent 配置 {name: AgentConfig}
             tools: 所有可用工具 {name: BaseTool}
             artifact_manager: ArtifactManager（用于 artifacts 清单）
-            artifacts_inventory: 预加载的 artifacts 清单
+            artifacts_inventory: 预加载的 artifacts 清单（含完整内容）
 
         Returns:
             Context（含 messages 列表）
@@ -76,8 +76,8 @@ class ContextManager:
         current_time = datetime.now().strftime("%Y/%m/%d %H:%M:%S %a")
         system_parts.append(f'<system_time>Current time: {current_time}</system_time>')
 
-        # 3. 任务计划（从 artifacts 注入）
-        task_plan = cls._extract_task_plan(artifacts_inventory)
+        # 3. 任务计划（从 artifacts 提取全文注入）
+        task_plan = cls._find_task_plan(artifacts_inventory)
         if task_plan:
             system_parts.append(
                 f'<team_task_plan version="{task_plan["version"]}" '
@@ -137,9 +137,11 @@ class ContextManager:
 
         return Context(messages=[system_message] + history_messages + tool_messages)
 
+    INVENTORY_PREVIEW_LENGTH = 200
+
     @classmethod
-    def _extract_task_plan(cls, artifacts_inventory: Optional[List[Dict]]) -> Optional[Dict]:
-        """从 artifacts 清单中提取 task_plan artifact"""
+    def _find_task_plan(cls, artifacts_inventory: Optional[List[Dict]]) -> Optional[Dict]:
+        """从 artifacts 清单中查找 task_plan"""
         if not artifacts_inventory:
             return None
 
@@ -149,13 +151,19 @@ class ContextManager:
         return None
 
     @classmethod
+    def _preview_content(cls, content: str) -> str:
+        """截断内容为 inventory 预览长度"""
+        if len(content) > cls.INVENTORY_PREVIEW_LENGTH:
+            return content[:cls.INVENTORY_PREVIEW_LENGTH] + "..."
+        return content
+
+    @classmethod
     def _build_artifacts_inventory(cls, artifacts_inventory: List[Dict]) -> str:
-        """构建 artifacts 清单部分"""
-        filtered = [a for a in artifacts_inventory if a.get("id") != "task_plan"]
-        count = len(filtered)
+        """构建 artifacts 清单部分（内容截断为预览）"""
+        count = len(artifacts_inventory)
         lines = [f'{count} artifact(s) in this session.']
         lines.append('<artifacts_inventory>')
-        for artifact in filtered:
+        for artifact in artifacts_inventory:
             source = artifact.get("source", "agent")
             lines.append(
                 f'<artifact version="{artifact["version"]}" type="{artifact["content_type"]}" '
@@ -163,7 +171,7 @@ class ContextManager:
             )
             lines.append(f'<id>{artifact["id"]}</id>')
             lines.append(f'<title>{artifact["title"]}</title>')
-            lines.append(artifact.get("content", ""))
+            lines.append(cls._preview_content(artifact.get("content", "")))
             lines.append('</artifact>')
         lines.append(
             '\nArtifacts with source: user_upload are documents uploaded by the user '

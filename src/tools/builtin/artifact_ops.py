@@ -808,8 +808,6 @@ class ArtifactManager:
         session_id: str,
         content_type: Optional[str] = None,
         include_content: bool = True,
-        content_preview_length: int = 200,
-        full_content_for: Optional[List[str]] = None
     ) -> List[Dict[str, Any]]:
         """
         列出 Session 的所有 Artifacts
@@ -818,35 +816,17 @@ class ArtifactManager:
             session_id: Session ID
             content_type: 按类型筛选
             include_content: 是否包含内容
-            content_preview_length: 内容预览长度
-            full_content_for: 需要完整内容的 artifact ID 列表
 
         Returns:
             Artifact 信息列表
         """
-        if full_content_for is None:
-            full_content_for = []
-
         repo = self._ensure_repository()
 
-        # 从数据库获取列表
-        artifacts = await repo.list_artifacts(
+        return await repo.list_artifacts(
             session_id=session_id,
             content_type=content_type,
             include_content=include_content,
-            content_preview_length=content_preview_length
         )
-
-        # 处理需要完整内容的 artifacts
-        if full_content_for:
-            full_artifacts = await repo.get_artifacts_with_full_content(
-                session_id, full_content_for
-            )
-            for artifact_info in artifacts:
-                if artifact_info["id"] in full_artifacts:
-                    artifact_info["content"] = full_artifacts[artifact_info["id"]].content
-
-        return artifacts
 
     def clear_cache(self, session_id: Optional[str] = None) -> None:
         """

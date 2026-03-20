@@ -172,7 +172,7 @@ class TestArtifactCRUD:
         assert len(md_only) == 1
         assert md_only[0]["content_type"] == "text/markdown"
 
-    async def test_list_artifacts_content_preview(
+    async def test_list_artifacts_returns_full_content(
         self, artifact_repo: ArtifactRepository, artifact_session: str
     ):
         long_content = "x" * 300
@@ -184,12 +184,9 @@ class TestArtifactCRUD:
             long_content,
         )
 
-        arts = await artifact_repo.list_artifacts(
-            artifact_session, content_preview_length=50
-        )
+        arts = await artifact_repo.list_artifacts(artifact_session)
         assert len(arts) == 1
-        assert len(arts[0]["content"]) < len(long_content)
-        assert arts[0]["content"].endswith("[...]")
+        assert arts[0]["content"] == long_content
 
     async def test_delete_artifact_cascades_versions(
         self, artifact_repo: ArtifactRepository, sample_artifact
@@ -380,31 +377,3 @@ class TestVersionHistory:
 # Batch operations
 # ============================================================
 
-
-class TestBatchOperations:
-
-    async def test_get_artifacts_with_full_content(
-        self, artifact_repo: ArtifactRepository, artifact_session: str
-    ):
-        ids = []
-        for i in range(3):
-            aid = f"art-{uuid.uuid4().hex[:8]}"
-            await artifact_repo.create_artifact(
-                artifact_session, aid, "text/markdown", f"Art {i}", f"content {i}"
-            )
-            ids.append(aid)
-
-        # Fetch 2 of 3
-        result = await artifact_repo.get_artifacts_with_full_content(
-            artifact_session, ids[:2]
-        )
-        assert len(result) == 2
-        assert ids[0] in result
-        assert ids[1] in result
-        assert ids[2] not in result
-
-    async def test_get_artifacts_with_full_content_empty(
-        self, artifact_repo: ArtifactRepository, artifact_session: str
-    ):
-        result = await artifact_repo.get_artifacts_with_full_content(artifact_session, [])
-        assert result == {}

@@ -202,8 +202,6 @@ async def execute_loop(
                 artifacts_inventory = await artifact_manager.list_artifacts(
                     session_id=state["session_id"],
                     include_content=True,
-                    content_preview_length=200,
-                    full_content_for=["task_plan"]
                 )
             except Exception as e:
                 logger.warning(f"Failed to get artifacts inventory: {e}")

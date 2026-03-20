@@ -204,30 +204,28 @@ class ArtifactRepository(BaseRepository[Artifact]):
         *,
         content_type: Optional[str] = None,
         include_content: bool = True,
-        content_preview_length: int = 200
     ) -> List[Dict[str, Any]]:
         """
         列出 Session 的所有 Artifacts
-        
+
         Args:
             session_id: Session ID
             content_type: 按类型筛选
-            include_content: 是否包含内容
-            content_preview_length: 内容预览长度
-            
+            include_content: 是否包含内容（完整内容）
+
         Returns:
             Artifact 信息列表
         """
         query = select(Artifact).where(Artifact.session_id == session_id)
-        
+
         if content_type:
             query = query.where(Artifact.content_type == content_type)
-        
+
         query = query.order_by(Artifact.created_at)
-        
+
         result = await self._session.execute(query)
         artifacts = result.scalars().all()
-        
+
         artifact_list = []
         for artifact in artifacts:
             info = {
@@ -240,16 +238,12 @@ class ArtifactRepository(BaseRepository[Artifact]):
                 "created_at": artifact.created_at.isoformat(),
                 "updated_at": artifact.updated_at.isoformat()
             }
-            
+
             if include_content:
-                content = artifact.content
-                if len(content) > content_preview_length:
-                    info["content"] = content[:content_preview_length] + "[...]"
-                else:
-                    info["content"] = content
-            
+                info["content"] = artifact.content
+
             artifact_list.append(info)
-        
+
         return artifact_list
     
     async def delete_artifact(
@@ -558,36 +552,3 @@ class ArtifactRepository(BaseRepository[Artifact]):
             "to_changes": to_ver.changes
         }
     
-    # ========================================
-    # 批量操作
-    # ========================================
-    
-    async def get_artifacts_with_full_content(
-        self,
-        session_id: str,
-        artifact_ids: List[str]
-    ) -> Dict[str, Artifact]:
-        """
-        批量获取 Artifacts（含完整内容）
-        
-        Args:
-            session_id: Session ID
-            artifact_ids: Artifact ID 列表
-            
-        Returns:
-            {artifact_id: Artifact} 字典
-        """
-        if not artifact_ids:
-            return {}
-        
-        query = select(Artifact).where(
-            and_(
-                Artifact.session_id == session_id,
-                Artifact.id.in_(artifact_ids)
-            )
-        )
-        
-        result = await self._session.execute(query)
-        artifacts = result.scalars().all()
-        
-        return {a.id: a for a in artifacts}
