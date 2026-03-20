@@ -77,9 +77,16 @@ class ContextManager:
         system_parts.append(f'<system_time>Current time: {current_time}</system_time>')
 
         # 3. 任务计划（从 artifacts 注入）
-        task_plan_content = cls._extract_task_plan(artifacts_inventory)
-        if task_plan_content:
-            system_parts.append(f'<team_task_plan>\n{task_plan_content}\n</team_task_plan>')
+        task_plan = cls._extract_task_plan(artifacts_inventory)
+        if task_plan:
+            system_parts.append(
+                f'<team_task_plan version="{task_plan["version"]}" '
+                f'type="{task_plan["content_type"]}" '
+                f'source="{task_plan.get("source", "agent")}" '
+                f'updated="{task_plan["updated_at"]}">\n'
+                f'{task_plan["content"]}\n'
+                f'</team_task_plan>'
+            )
 
         # 4. Artifact 清单（条件注入：仅有 artifact 工具的 agent）
         has_artifact_tools = any(t in agent_config.tools for t in [
@@ -131,23 +138,24 @@ class ContextManager:
         return Context(messages=[system_message] + history_messages + tool_messages)
 
     @classmethod
-    def _extract_task_plan(cls, artifacts_inventory: Optional[List[Dict]]) -> Optional[str]:
-        """从 artifacts 清单中提取 task_plan 内容"""
+    def _extract_task_plan(cls, artifacts_inventory: Optional[List[Dict]]) -> Optional[Dict]:
+        """从 artifacts 清单中提取 task_plan artifact"""
         if not artifacts_inventory:
             return None
 
         for artifact in artifacts_inventory:
             if artifact.get("id") == "task_plan" and artifact.get("content"):
-                return artifact["content"]
+                return artifact
         return None
 
     @classmethod
     def _build_artifacts_inventory(cls, artifacts_inventory: List[Dict]) -> str:
         """构建 artifacts 清单部分"""
-        count = len(artifacts_inventory)
+        filtered = [a for a in artifacts_inventory if a.get("id") != "task_plan"]
+        count = len(filtered)
         lines = [f'{count} artifact(s) in this session.']
         lines.append('<artifacts_inventory>')
-        for artifact in artifacts_inventory:
+        for artifact in filtered:
             source = artifact.get("source", "agent")
             lines.append(
                 f'<artifact version="{artifact["version"]}" type="{artifact["content_type"]}" '

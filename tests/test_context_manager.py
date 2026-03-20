@@ -309,6 +309,37 @@ class TestArtifactsAndAgents:
         )
         system_content = ctx.messages[0]["content"]
         assert "Step 1: Do X" in system_content
+        # meta attributes present on <team_task_plan>
+        assert 'version="1"' in system_content
+        assert 'type="text/markdown"' in system_content
+
+    def test_task_plan_excluded_from_inventory(self):
+        """task_plan should appear only in <team_task_plan>, not in <artifacts_inventory>."""
+        agent = _FakeAgentConfig(tools={"create_artifact": "auto", "read_artifact": "auto"})
+        artifacts = [
+            {"id": "task_plan", "title": "Plan", "version": 1, "content_type": "text/markdown",
+             "content": "Step 1: Do X", "updated_at": "2024-01-01", "source": "agent"},
+            {"id": "doc1", "title": "Document", "version": 1, "content_type": "text/plain",
+             "content": "Some content", "updated_at": "2024-01-01", "source": "agent"},
+        ]
+        state = _make_state(events=[
+            _make_event(StreamEventType.USER_INPUT.value, data={"content": "hi"}),
+        ])
+
+        ctx = ContextManager.build(
+            state=state, agent_config=agent, agents={}, tools={},
+            artifacts_inventory=artifacts,
+        )
+        system_content = ctx.messages[0]["content"]
+        # task_plan in dedicated section
+        assert "<team_task_plan" in system_content
+        # inventory should contain doc1 but NOT task_plan
+        assert "Document" in system_content
+        inv_start = system_content.index("<artifacts_inventory>")
+        inv_end = system_content.index("</artifacts_inventory>")
+        inventory_section = system_content[inv_start:inv_end]
+        assert "task_plan" not in inventory_section
+        assert "1 artifact(s)" in system_content
 
     def test_artifact_tools_show_inventory(self):
         agent = _FakeAgentConfig(tools={"read_artifact": "auto"})
