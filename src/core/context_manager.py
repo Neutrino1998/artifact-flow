@@ -42,7 +42,6 @@ class ContextManager:
         agent_config: Any,  # AgentConfig
         agents: Dict[str, Any],  # {name: AgentConfig} for building available agents section
         tools: Dict[str, Any],   # {name: BaseTool}
-        artifact_manager: Optional[Any] = None,
         artifacts_inventory: Optional[List[Dict]] = None,
     ) -> Context:
         """
@@ -55,7 +54,6 @@ class ContextManager:
             agent_config: 当前 agent 的 AgentConfig
             agents: 所有 agent 配置 {name: AgentConfig}
             tools: 所有可用工具 {name: BaseTool}
-            artifact_manager: ArtifactManager（用于 artifacts 清单）
             artifacts_inventory: 预加载的 artifacts 清单（含完整内容）
 
         Returns:

@@ -204,7 +204,6 @@ async def execute_loop(
             agent_config=agent_config,
             agents=agents,
             tools=tools,
-            artifact_manager=artifact_manager,
             artifacts_inventory=artifacts_inventory,
         )
 
