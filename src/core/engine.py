@@ -50,7 +50,6 @@ class ExecutionMetrics(TypedDict):
     started_at: str
     completed_at: Optional[str]
     total_duration_ms: Optional[int]
-    last_token_usage: Optional[TokenUsage]
     last_context_chars: int
     total_token_usage: TokenUsage
     events: List[MetricsEvent]
@@ -61,7 +60,6 @@ def create_initial_metrics() -> ExecutionMetrics:
         "started_at": datetime.now().isoformat(),
         "completed_at": None,
         "total_duration_ms": None,
-        "last_token_usage": None,
         "last_context_chars": 0,
         "total_token_usage": {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0},
         "events": [],
@@ -81,7 +79,6 @@ def append_metrics_event(metrics: ExecutionMetrics, event: MetricsEvent) -> None
     if event.get("type") == "agent_complete":
         usage = event.get("token_usage")
         if usage:
-            metrics["last_token_usage"] = usage
             total = metrics["total_token_usage"]
             total["input_tokens"] += usage.get("input_tokens", 0)
             total["output_tokens"] += usage.get("output_tokens", 0)

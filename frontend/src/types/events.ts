@@ -105,7 +105,6 @@ export interface ExecutionMetrics {
   started_at: string;
   completed_at?: string;
   total_duration_ms?: number;
-  last_token_usage?: TokenUsage;
   total_token_usage: TokenUsage;
   events: MetricsEvent[];
 }
