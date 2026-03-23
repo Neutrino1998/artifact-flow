@@ -13,6 +13,7 @@ import asyncio
 from typing import Dict, Any, Optional, Callable, Awaitable, List, Tuple, TypedDict, Union
 from datetime import datetime
 
+from config import config
 from core.events import StreamEventType, ExecutionEvent
 from core.context_manager import ContextManager
 from tools.xml_parser import parse_tool_calls
@@ -125,10 +126,6 @@ async def execute_loop(
     task_manager: Any,        # TaskManager
     artifact_manager: Optional[Any] = None,
     emit: Optional[EmitFn] = None,
-    permission_timeout: int = 300,
-    context_max_chars: int = 240000,
-    compaction_preserve_pairs: int = 2,
-    tool_interaction_preserve: int = 6,
 ) -> Dict[str, Any]:
     """
     Pi-style 扁平 while loop 执行引擎
@@ -140,8 +137,6 @@ async def execute_loop(
         task_manager: TaskManager 实例（用于 interrupt 和 message queue）
         artifact_manager: ArtifactManager 实例（用于 artifacts 清单）
         emit: 事件推送回调（推 SSE）
-        permission_timeout: 单次 permission 确认等待超时（秒），默认 300
-
     Returns:
         最终执行状态
     """
@@ -211,9 +206,6 @@ async def execute_loop(
             tools=tools,
             artifact_manager=artifact_manager,
             artifacts_inventory=artifacts_inventory,
-            context_max_chars=context_max_chars,
-            compaction_preserve_pairs=compaction_preserve_pairs,
-            tool_interaction_preserve=tool_interaction_preserve,
         )
 
         messages = context.messages
@@ -337,9 +329,9 @@ async def execute_loop(
         })
 
         try:
-            await asyncio.wait_for(interrupt.event.wait(), timeout=permission_timeout)
+            await asyncio.wait_for(interrupt.event.wait(), timeout=config.PERMISSION_TIMEOUT)
         except asyncio.TimeoutError:
-            logger.warning(f"Permission timeout for tool '{tool_name}' after {permission_timeout}s, treating as denied")
+            logger.warning(f"Permission timeout for tool '{tool_name}' after {config.PERMISSION_TIMEOUT}s, treating as denied")
             await _emit(StreamEventType.PERMISSION_RESULT.value, agent_name, {
                 "approved": False, "tool": tool_name, "reason": "timeout",
             })

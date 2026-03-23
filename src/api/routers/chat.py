@@ -17,7 +17,7 @@ from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from api.config import config
+from config import config
 from api.dependencies import (
     get_agents,
     get_compaction_manager,
@@ -119,12 +119,7 @@ async def _create_controller() -> AsyncGenerator:
             artifact_manager=artifact_manager,
             conversation_manager=conv_manager,
             message_event_repo=event_repo,
-            permission_timeout=config.PERMISSION_TIMEOUT,
             compaction_manager=get_compaction_manager(),
-            compaction_config=config,
-            context_max_chars=config.CONTEXT_MAX_CHARS,
-            compaction_preserve_pairs=config.COMPACTION_PRESERVE_PAIRS,
-            tool_interaction_preserve=config.TOOL_INTERACTION_PRESERVE,
         )
 
 
@@ -514,7 +509,7 @@ async def trigger_compaction(
     if compaction_manager is None:
         raise HTTPException(status_code=503, detail="Compaction service not available")
 
-    started = await compaction_manager.trigger(conv_id, config)
+    started = await compaction_manager.trigger(conv_id)
     if not started:
         raise HTTPException(status_code=409, detail="Compaction already in progress for this conversation")
 

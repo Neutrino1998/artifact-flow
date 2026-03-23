@@ -38,13 +38,6 @@ class _FakeAgentConfig:
     internal: bool = True
 
 
-@dataclass
-class _FakeCompactionConfig:
-    COMPACTION_THRESHOLD: int = 1000
-    COMPACTION_PRESERVE_PAIRS: int = 2
-    COMPACTION_TIMEOUT: int = 10
-
-
 def _make_fake_stream(text: str):
     """Fake LLM stream that returns a single text response."""
     async def fake(messages, **kwargs):
@@ -102,9 +95,13 @@ def agents():
     return {"compact_agent": _FakeAgentConfig()}
 
 
-@pytest.fixture
-def config():
-    return _FakeCompactionConfig()
+@pytest.fixture(autouse=True)
+def patch_compaction_config():
+    """Patch config values used by CompactionManager for fast tests."""
+    with patch("core.compaction.config.COMPACTION_THRESHOLD", 1000), \
+         patch("core.compaction.config.COMPACTION_PRESERVE_PAIRS", 2), \
+         patch("core.compaction.config.COMPACTION_TIMEOUT", 10):
+        yield
 
 
 # Lightweight CM for trigger/wait tests (no real DB needed)
@@ -121,15 +118,15 @@ def cm_light(agents):
 
 class TestTrigger:
 
-    async def test_below_threshold_no_trigger(self, cm_light, config):
+    async def test_below_threshold_no_trigger(self, cm_light):
         metrics = {"last_context_chars": 500}
-        await cm_light.maybe_trigger("conv-1", "msg-1", metrics, config)
+        await cm_light.maybe_trigger("conv-1", "msg-1", metrics)
         assert "conv-1" not in cm_light._running
 
-    async def test_above_threshold_triggers(self, cm_light, config):
+    async def test_above_threshold_triggers(self, cm_light):
         metrics = {"last_context_chars": 2000}
         with patch.object(cm_light, "_compact", return_value=None) as mock_compact:
-            await cm_light.maybe_trigger("conv-1", "msg-1", metrics, config)
+            await cm_light.maybe_trigger("conv-1", "msg-1", metrics)
             # Wait for the background task to finish so the patch stays alive
             event = cm_light._running.get("conv-1")
             if event:
@@ -138,15 +135,15 @@ class TestTrigger:
         # _running should be cleaned up after completion
         assert "conv-1" not in cm_light._running
 
-    async def test_already_running_skips(self, cm_light, config):
+    async def test_already_running_skips(self, cm_light):
         cm_light._running["conv-1"] = asyncio.Event()
         metrics = {"last_context_chars": 2000}
-        await cm_light.maybe_trigger("conv-1", "msg-1", metrics, config)
+        await cm_light.maybe_trigger("conv-1", "msg-1", metrics)
         assert "conv-1" in cm_light._running
 
-    async def test_manual_trigger_success(self, cm_light, config):
+    async def test_manual_trigger_success(self, cm_light):
         with patch.object(cm_light, "_compact", return_value=None) as mock_compact:
-            result = await cm_light.trigger("conv-1", config)
+            result = await cm_light.trigger("conv-1")
             assert result is True
             # Wait for the background task to finish within the patch scope
             event = cm_light._running.get("conv-1")
@@ -155,9 +152,9 @@ class TestTrigger:
             mock_compact.assert_awaited_once()
         assert "conv-1" not in cm_light._running
 
-    async def test_manual_trigger_already_running(self, cm_light, config):
+    async def test_manual_trigger_already_running(self, cm_light):
         cm_light._running["conv-1"] = asyncio.Event()
-        result = await cm_light.trigger("conv-1", config)
+        result = await cm_light.trigger("conv-1")
         assert result is False
 
 
@@ -199,7 +196,7 @@ class TestWait:
 
 class TestCompactLogic:
 
-    async def test_compact_writes_summaries(self, db_manager, agents, config):
+    async def test_compact_writes_summaries(self, db_manager, agents):
         cm = CompactionManager(db_manager=db_manager, agents=agents)
         user = await _create_user(db_manager)
         conv_id, msg_ids = await _seed_conversation(db_manager, user.id, n_pairs=5)
@@ -210,7 +207,7 @@ class TestCompactLogic:
         )
 
         with patch("models.llm.astream_with_retry", _make_fake_stream(summary_xml)):
-            await cm._compact(conv_id, msg_ids[-1], config)
+            await cm._compact(conv_id, msg_ids[-1])
 
         async with db_manager.session() as session:
             repo = ConversationRepository(session)
@@ -219,7 +216,7 @@ class TestCompactLogic:
                 assert msg.user_input_summary is not None
                 assert msg.response_summary is not None
 
-    async def test_existing_summary_skipped(self, db_manager, agents, config):
+    async def test_existing_summary_skipped(self, db_manager, agents):
         cm = CompactionManager(db_manager=db_manager, agents=agents)
         user = await _create_user(db_manager)
         conv_id, msg_ids = await _seed_conversation(db_manager, user.id, n_pairs=5)
@@ -245,15 +242,14 @@ class TestCompactLogic:
             yield {"type": "final", "content": text, "reasoning_content": None, "token_usage": {}}
 
         with patch("models.llm.astream_with_retry", counting_stream):
-            await cm._compact(conv_id, msg_ids[-1], config)
+            await cm._compact(conv_id, msg_ids[-1])
 
         # 3 pairs to compact - 1 existing = 2 LLM calls
         assert call_count["n"] == 2
 
-    async def test_preserve_recent_pairs(self, db_manager, agents, config):
+    async def test_preserve_recent_pairs(self, db_manager, agents):
         cm = CompactionManager(db_manager=db_manager, agents=agents)
         user = await _create_user(db_manager)
-        config.COMPACTION_PRESERVE_PAIRS = 2
         conv_id, msg_ids = await _seed_conversation(db_manager, user.id, n_pairs=4)
 
         summary_xml = (
@@ -262,7 +258,7 @@ class TestCompactLogic:
         )
 
         with patch("models.llm.astream_with_retry", _make_fake_stream(summary_xml)):
-            await cm._compact(conv_id, msg_ids[-1], config)
+            await cm._compact(conv_id, msg_ids[-1])
 
         async with db_manager.session() as session:
             repo = ConversationRepository(session)
@@ -270,7 +266,7 @@ class TestCompactLogic:
                 msg = await repo.get_message(msg_id)
                 assert msg.user_input_summary is None
 
-    async def test_llm_failure_continues(self, db_manager, agents, config):
+    async def test_llm_failure_continues(self, db_manager, agents):
         cm = CompactionManager(db_manager=db_manager, agents=agents)
         user = await _create_user(db_manager)
         conv_id, msg_ids = await _seed_conversation(db_manager, user.id, n_pairs=5)
@@ -288,7 +284,7 @@ class TestCompactLogic:
             yield {"type": "final", "content": text, "reasoning_content": None, "token_usage": {}}
 
         with patch("models.llm.astream_with_retry", failing_then_success):
-            await cm._compact(conv_id, msg_ids[-1], config)
+            await cm._compact(conv_id, msg_ids[-1])
 
         async with db_manager.session() as session:
             repo = ConversationRepository(session)
@@ -298,13 +294,13 @@ class TestCompactLogic:
             msg1 = await repo.get_message(msg_ids[1])
             assert msg1.user_input_summary is not None
 
-    async def test_xml_parse_failure_skips(self, db_manager, agents, config):
+    async def test_xml_parse_failure_skips(self, db_manager, agents):
         cm = CompactionManager(db_manager=db_manager, agents=agents)
         user = await _create_user(db_manager)
         conv_id, msg_ids = await _seed_conversation(db_manager, user.id, n_pairs=4)
 
         with patch("models.llm.astream_with_retry", _make_fake_stream("no xml tags here")):
-            await cm._compact(conv_id, msg_ids[-1], config)
+            await cm._compact(conv_id, msg_ids[-1])
 
         async with db_manager.session() as session:
             repo = ConversationRepository(session)

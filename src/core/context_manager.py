@@ -14,6 +14,7 @@ from typing import Dict, Any, List, Optional
 from dataclasses import dataclass
 from datetime import datetime
 
+from config import config
 from utils.logger import get_logger
 
 logger = get_logger("ArtifactFlow")
@@ -43,9 +44,6 @@ class ContextManager:
         tools: Dict[str, Any],   # {name: BaseTool}
         artifact_manager: Optional[Any] = None,
         artifacts_inventory: Optional[List[Dict]] = None,
-        context_max_chars: int = 240000,
-        compaction_preserve_pairs: int = 2,
-        tool_interaction_preserve: int = 6,
     ) -> Context:
         """
         构建 LLM 调用所需的完整 messages
@@ -122,18 +120,18 @@ class ContextManager:
 
         # ========== 预算截断：先砍 history，再砍 tool interactions ==========
         total = system_chars + cls._chars(history_messages) + cls._chars(tool_messages)
-        if total > context_max_chars:
-            preserve_recent = compaction_preserve_pairs * 2
-            history_budget = max(context_max_chars - system_chars - cls._chars(tool_messages), 0)
+        if total > config.CONTEXT_MAX_CHARS:
+            preserve_recent = config.COMPACTION_PRESERVE_PAIRS * 2
+            history_budget = max(config.CONTEXT_MAX_CHARS - system_chars - cls._chars(tool_messages), 0)
             history_messages = cls.truncate_messages(
                 history_messages, history_budget, preserve_recent=preserve_recent
             )
 
             total = system_chars + cls._chars(history_messages) + cls._chars(tool_messages)
-            if total > context_max_chars:
-                tool_budget = max(context_max_chars - system_chars - cls._chars(history_messages), 0)
+            if total > config.CONTEXT_MAX_CHARS:
+                tool_budget = max(config.CONTEXT_MAX_CHARS - system_chars - cls._chars(history_messages), 0)
                 tool_messages = cls.truncate_messages(
-                    tool_messages, tool_budget, preserve_recent=tool_interaction_preserve
+                    tool_messages, tool_budget, preserve_recent=config.TOOL_INTERACTION_PRESERVE
                 )
 
         return Context(messages=[system_message] + history_messages + tool_messages)

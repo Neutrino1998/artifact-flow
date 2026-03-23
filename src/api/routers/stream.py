@@ -11,7 +11,7 @@ from typing import AsyncGenerator
 from fastapi import APIRouter, Depends, HTTPException
 from starlette.responses import StreamingResponse
 
-from api.config import config
+from config import config
 from api.dependencies import get_current_user, get_stream_manager, get_task_manager
 from api.services.auth import TokenPayload
 from api.services.stream_manager import StreamManager, StreamNotFoundError

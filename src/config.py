@@ -1,19 +1,15 @@
-"""
-API 配置
-
-包含服务器配置、CORS 配置、SSE 配置等。
-"""
+"""服务级配置"""
 
 from typing import List
 from pydantic_settings import BaseSettings
 from pydantic import ConfigDict
 
 
-class APIConfig(BaseSettings):
+class Settings(BaseSettings):
     """
-    API 配置类
+    服务级配置
 
-    可通过环境变量覆盖配置项。
+    可通过环境变量覆盖配置项（前缀 ARTIFACTFLOW_）。
     """
 
     model_config = ConfigDict(env_prefix="ARTIFACTFLOW_", case_sensitive=False)
@@ -62,7 +58,7 @@ class APIConfig(BaseSettings):
 
 
 # 全局配置实例
-config = APIConfig()
+config = Settings()
 
 
 def validate_config() -> None:

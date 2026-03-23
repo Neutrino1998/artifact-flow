@@ -413,9 +413,9 @@ async function handleSSEEvent(eventType, parsed) {
 ## 配置选项
 
 ```python
-# src/api/config.py
+# src/config.py
 
-class APIConfig(BaseSettings):
+class Settings(BaseSettings):
     # SSE 配置
     SSE_PING_INTERVAL: int = 15      # 心跳间隔（秒）
     STREAM_TIMEOUT: int = 300        # 流超时（秒）

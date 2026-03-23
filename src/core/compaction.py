@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from typing import Dict, Any, List, Optional
 
 from agents.loader import AgentConfig
+from config import config
 from db.database import DatabaseManager
 from repositories.conversation_repo import ConversationRepository
 from utils.logger import get_logger
@@ -52,7 +53,6 @@ class CompactionManager:
         conv_id: str,
         message_id: str,
         execution_metrics: Dict[str, Any],
-        config: Any,
     ) -> None:
         """
         根据 execution_metrics 判断是否触发 compaction。
@@ -70,7 +70,7 @@ class CompactionManager:
         logger.info(f"Triggering compaction for {conv_id} (context_chars={last_context_chars})")
         done_event = asyncio.Event()
         self._running[conv_id] = done_event
-        asyncio.create_task(self._run_compaction(conv_id, message_id, done_event, config))
+        asyncio.create_task(self._run_compaction(conv_id, message_id, done_event))
 
     def is_running(self, conv_id: str) -> bool:
         """检查 conv_id 是否有正在运行的 compaction。"""
@@ -90,7 +90,7 @@ class CompactionManager:
         await event.wait()
         return True
 
-    async def trigger(self, conv_id: str, config: Any) -> bool:
+    async def trigger(self, conv_id: str) -> bool:
         """
         手动触发 compaction。
 
@@ -102,7 +102,7 @@ class CompactionManager:
 
         done_event = asyncio.Event()
         self._running[conv_id] = done_event
-        asyncio.create_task(self._run_compaction(conv_id, None, done_event, config))
+        asyncio.create_task(self._run_compaction(conv_id, None, done_event))
         return True
 
     async def _run_compaction(
@@ -110,12 +110,11 @@ class CompactionManager:
         conv_id: str,
         current_message_id: Optional[str],
         done_event: asyncio.Event,
-        config: Any,
     ) -> None:
         """运行 compaction，带超时和清理。"""
         try:
             async with asyncio.timeout(config.COMPACTION_TIMEOUT):
-                await self._compact(conv_id, current_message_id, config)
+                await self._compact(conv_id, current_message_id)
         except TimeoutError:
             logger.error(f"Compaction timed out for {conv_id} after {config.COMPACTION_TIMEOUT}s")
         except Exception as e:
@@ -128,7 +127,6 @@ class CompactionManager:
         self,
         conv_id: str,
         current_message_id: Optional[str],
-        config: Any,
     ) -> None:
         """
         核心 compaction 逻辑。
@@ -146,7 +144,7 @@ class CompactionManager:
             return
 
         # ── Phase 1: 短事务读取，脱离 session ──
-        pairs = await self._load_pairs(conv_id, current_message_id, config)
+        pairs = await self._load_pairs(conv_id, current_message_id)
         if not pairs:
             return
 
@@ -237,7 +235,6 @@ class CompactionManager:
         self,
         conv_id: str,
         current_message_id: Optional[str],
-        config: Any,
     ) -> List[_PairInfo]:
         """短事务：读取对话路径，提取为脱离 session 的纯数据。"""
         async with self._db_manager.session() as session:

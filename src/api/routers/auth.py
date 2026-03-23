@@ -13,7 +13,7 @@ from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from api.config import config
+from config import config
 from api.dependencies import get_current_user, require_admin, get_user_repository
 from api.schemas.auth import (
     LoginRequest,

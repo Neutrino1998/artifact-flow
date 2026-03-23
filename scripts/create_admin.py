@@ -29,7 +29,7 @@ async def main(username: str, password: str, no_claim: bool) -> None:
     from db.models import User, Conversation
     from repositories.user_repo import UserRepository
     from api.services.auth import hash_password
-    from api.config import config
+    from config import config
 
     db = DatabaseManager(config.DATABASE_URL)
     await db.initialize()

@@ -13,7 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query
 from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api.config import config
+from config import config
 from api.dependencies import get_artifact_manager, get_conversation_manager, get_current_user, get_db_session
 from api.services.auth import TokenPayload
 from core.conversation_manager import ConversationManager

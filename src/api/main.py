@@ -10,7 +10,7 @@ from typing import AsyncGenerator
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from api.config import config, validate_config
+from config import config, validate_config
 from api.dependencies import init_globals, close_globals
 from api.routers import auth, chat, artifacts, stream
 from utils.doc_converter import DocConverter

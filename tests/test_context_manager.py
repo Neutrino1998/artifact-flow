@@ -6,6 +6,7 @@ and artifacts/agents injection.
 """
 
 from dataclasses import dataclass, field
+from unittest.mock import patch
 
 import pytest
 
@@ -276,10 +277,10 @@ class TestTruncation:
             ],
         )
 
-        ctx = ContextManager.build(
-            state=state, agent_config=agent, agents={}, tools={},
-            context_max_chars=5000,
-        )
+        with patch("core.context_manager.config.CONTEXT_MAX_CHARS", 5000):
+            ctx = ContextManager.build(
+                state=state, agent_config=agent, agents={}, tools={},
+            )
         assert len(ctx.messages) >= 2  # system + at least some content
         # "current" (tool interaction) should always be present
         all_content = " ".join(m["content"] for m in ctx.messages)

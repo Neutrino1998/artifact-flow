@@ -34,7 +34,7 @@ from fastapi import Depends, HTTPException
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api.config import config
+from config import config
 from core.conversation_manager import ConversationManager
 from tools.base import BaseTool, build_tool_map
 from tools.builtin.artifact_ops import ArtifactManager

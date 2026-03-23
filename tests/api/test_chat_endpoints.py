@@ -204,7 +204,7 @@ class TestCompact:
         conv_id, _ = conv_with_messages
 
         class FakeCompactionManager:
-            async def trigger(self, conv_id, config):
+            async def trigger(self, conv_id):
                 return True
 
         old = deps._compaction_manager
@@ -222,7 +222,7 @@ class TestCompact:
         conv_id, _ = conv_with_messages
 
         class FakeCompactionManager:
-            async def trigger(self, conv_id, config):
+            async def trigger(self, conv_id):
                 return False
 
         old = deps._compaction_manager
@@ -252,7 +252,7 @@ class TestCompact:
         conv_id, _ = conv_with_messages
 
         class FakeCompactionManager:
-            async def trigger(self, conv_id, config):
+            async def trigger(self, conv_id):
                 return True
 
         old = deps._compaction_manager

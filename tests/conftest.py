@@ -1,8 +1,8 @@
 """
 Shared pytest fixtures for ArtifactFlow.
 
-IMPORTANT: JWT_SECRET must be set BEFORE any `src/api/*` module is imported,
-because `api/config.py` has a module-level fail-fast check (line 59).
+IMPORTANT: JWT_SECRET must be set BEFORE any module is imported,
+because `config.py` has a module-level Settings() instantiation.
 """
 
 import os

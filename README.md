@@ -394,6 +394,7 @@ artifact-flow/
 │   ├── config.py                # CLI 配置和状态管理
 │   └── ui.py                    # Rich 终端 UI 组件
 ├── src/
+│   ├── config.py                 # 服务级配置（Settings，环境变量覆盖）
 │   ├── core/        # 核心工作流和状态管理 (已完成)
 │   │   ├── engine.py             # Pi-style 执行引擎（含状态创建和ExecutionMetrics）
 │   │   ├── controller.py         # 执行控制器 (支持流式和批量模式)
@@ -436,7 +437,6 @@ artifact-flow/
 │   │   └── doc_converter.py      # 文档转换（pandoc/pymupdf，支持导入导出）
 │   └── api/         # API 接口层 (已完成)
 │       ├── main.py               # FastAPI 应用入口
-│       ├── config.py             # API 配置（CORS、SSE、分页等）
 │       ├── dependencies.py       # 依赖注入（Controller、Manager等）
 │       ├── routers/              # 路由模块
 │       │   ├── chat.py           # /api/v1/chat 对话接口

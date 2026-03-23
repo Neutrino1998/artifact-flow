@@ -132,7 +132,6 @@ async def _run_engine(
     conversation_history=None,
     task_manager=None,
     permission_timeout=1,
-    **kwargs,
 ):
     """Helper to run engine with given LLM factory and return (state, emitted)."""
     state = create_initial_state(
@@ -153,15 +152,20 @@ async def _run_engine(
     if agents is None:
         agents = {"lead_agent": _FakeAgentConfig()}
 
-    with patch("models.llm.astream_with_retry", llm_factory):
+    with patch("models.llm.astream_with_retry", llm_factory), \
+         patch("core.engine.config") as mock_config:
+        # Copy real config values then override permission_timeout for fast tests
+        from config import config as real_config
+        for attr in dir(real_config):
+            if attr.isupper():
+                setattr(mock_config, attr, getattr(real_config, attr))
+        mock_config.PERMISSION_TIMEOUT = permission_timeout
         result = await execute_loop(
             state=state,
             agents=agents,
             tools=tools or {},
             task_manager=task_manager,
             emit=capture_emit,
-            permission_timeout=permission_timeout,
-            **kwargs,
         )
 
     return result, emitted, task_manager
@@ -438,14 +442,14 @@ class TestPermissionInterrupt:
             _simple_llm_chunks("Done"),
         ]
 
-        with patch("models.llm.astream_with_retry", _make_fake_stream_sequence(rounds)):
+        with patch("models.llm.astream_with_retry", _make_fake_stream_sequence(rounds)), \
+             patch("core.engine.config.PERMISSION_TIMEOUT", 5):
             result = await execute_loop(
                 state=state,
                 agents={"lead_agent": agent},
                 tools={"sensitive_tool": tool},
                 task_manager=tm,
                 emit=capture_emit,
-                permission_timeout=5,
             )
 
         perm_requests = _events_of_type(emitted, "permission_request")
@@ -482,14 +486,14 @@ class TestPermissionInterrupt:
             _simple_llm_chunks("Ok denied"),
         ]
 
-        with patch("models.llm.astream_with_retry", _make_fake_stream_sequence(rounds)):
+        with patch("models.llm.astream_with_retry", _make_fake_stream_sequence(rounds)), \
+             patch("core.engine.config.PERMISSION_TIMEOUT", 5):
             result = await execute_loop(
                 state=state,
                 agents={"lead_agent": agent},
                 tools={"sensitive_tool": tool},
                 task_manager=tm,
                 emit=capture_emit,
-                permission_timeout=5,
             )
 
         perm_results = _events_of_type(emitted, "permission_result")
@@ -527,14 +531,14 @@ class TestPermissionInterrupt:
             _simple_llm_chunks("Done"),
         ]
 
-        with patch("models.llm.astream_with_retry", _make_fake_stream_sequence(rounds)):
+        with patch("models.llm.astream_with_retry", _make_fake_stream_sequence(rounds)), \
+             patch("core.engine.config.PERMISSION_TIMEOUT", 5):
             result = await execute_loop(
                 state=state,
                 agents={"lead_agent": agent},
                 tools={"sensitive_tool": tool},
                 task_manager=tm,
                 emit=capture_emit,
-                permission_timeout=5,
             )
 
         # Only one permission request should have been emitted

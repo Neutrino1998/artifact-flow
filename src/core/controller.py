@@ -46,12 +46,7 @@ class ExecutionController:
         artifact_manager: Optional[ArtifactManager] = None,
         conversation_manager: Optional[ConversationManager] = None,
         message_event_repo: Optional[Any] = None,  # MessageEventRepository
-        permission_timeout: int = 300,
         compaction_manager: Optional[Any] = None,
-        compaction_config: Optional[Any] = None,
-        context_max_chars: int = 240000,
-        compaction_preserve_pairs: int = 2,
-        tool_interaction_preserve: int = 6,
     ):
         self.agents = agents
         self.tools = tools
@@ -59,12 +54,7 @@ class ExecutionController:
         self.artifact_manager = artifact_manager
         self.conversation_manager = conversation_manager or ConversationManager()
         self.message_event_repo = message_event_repo
-        self.permission_timeout = permission_timeout
         self.compaction_manager = compaction_manager
-        self.compaction_config = compaction_config
-        self.context_max_chars = context_max_chars
-        self.compaction_preserve_pairs = compaction_preserve_pairs
-        self.tool_interaction_preserve = tool_interaction_preserve
         logger.info("ExecutionController v2 initialized")
 
     async def stream_execute(
@@ -186,10 +176,6 @@ class ExecutionController:
                     task_manager=self.task_manager,
                     artifact_manager=self.artifact_manager,
                     emit=emit_to_queue,
-                    permission_timeout=self.permission_timeout,
-                    context_max_chars=self.context_max_chars,
-                    compaction_preserve_pairs=self.compaction_preserve_pairs,
-                    tool_interaction_preserve=self.tool_interaction_preserve,
                 )
             except Exception as e:
                 logger.exception(f"Engine error: {e}")
@@ -273,7 +259,6 @@ class ExecutionController:
                     conv_id=conversation_id,
                     message_id=message_id,
                     execution_metrics=execution_metrics,
-                    config=self.compaction_config,
                 )
 
             # 终态事件：error 路径由 engine 已发（在 state["events"] 中），

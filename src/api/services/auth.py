@@ -11,7 +11,7 @@ from typing import Optional
 import bcrypt
 import jwt
 
-from api.config import config
+from config import config
 
 
 @dataclass
