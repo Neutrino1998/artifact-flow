@@ -199,15 +199,13 @@ async def execute_loop(
             except Exception as e:
                 logger.warning(f"Failed to get artifacts inventory: {e}")
 
-        context = ContextManager.build(
+        messages = ContextManager.build(
             state=state,
             agent_config=agent_config,
             agents=agents,
             tools=tools,
             artifacts_inventory=artifacts_inventory,
         )
-
-        messages = context.messages
 
         if tool_round_count.get(agent_name, 0) >= agent_config.max_tool_rounds:
             messages.append({

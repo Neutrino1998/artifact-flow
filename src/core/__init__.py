@@ -22,7 +22,7 @@ from .engine import (
 )
 
 # 上下文管理
-from .context_manager import ContextManager, Context
+from .context_manager import ContextManager
 
 # 执行控制器
 from .controller import ExecutionController
@@ -45,7 +45,6 @@ __all__ = [
     "append_metrics_event",
     # 上下文管理
     "ContextManager",
-    "Context",
     # 执行控制器
     "ExecutionController",
     # 对话管理

@@ -11,19 +11,12 @@ ContextManager — 唯一的抽象
 """
 
 from typing import Dict, Any, List, Optional
-from dataclasses import dataclass
 from datetime import datetime
 
 from config import config
 from utils.logger import get_logger
 
 logger = get_logger("ArtifactFlow")
-
-
-@dataclass
-class Context:
-    """构建好的 context"""
-    messages: List[Dict[str, str]]
 
 
 class ContextManager:
@@ -43,7 +36,7 @@ class ContextManager:
         agents: Dict[str, Any],  # {name: AgentConfig} for building available agents section
         tools: Dict[str, Any],   # {name: BaseTool}
         artifacts_inventory: Optional[List[Dict]] = None,
-    ) -> Context:
+    ) -> List[Dict[str, str]]:
         """
         构建 LLM 调用所需的完整 messages
 
@@ -57,7 +50,7 @@ class ContextManager:
             artifacts_inventory: 预加载的 artifacts 清单（含完整内容）
 
         Returns:
-            Context（含 messages 列表）
+            List[Dict]（messages 列表）
         """
         from tools.xml_formatter import generate_tool_instruction
 
@@ -132,7 +125,7 @@ class ContextManager:
                     tool_messages, tool_budget, preserve_recent=config.TOOL_INTERACTION_PRESERVE
                 )
 
-        return Context(messages=[system_message] + history_messages + tool_messages)
+        return [system_message] + history_messages + tool_messages
 
     INVENTORY_PREVIEW_LENGTH = 200
 
