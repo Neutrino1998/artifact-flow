@@ -168,7 +168,7 @@ class CompactionManager:
                 f"<response>\n{pair.response}\n</response>"
             )
             fixed_chars = len(compact_agent.role_prompt) + len(pair_content)
-            budget = max(getattr(config, "CONTEXT_MAX_CHARS", 240000) - fixed_chars, 0)
+            budget = max(config.CONTEXT_MAX_CHARS - fixed_chars, 0)
 
             summary_messages = [{"role": "user", "content": s} for s in prior_summaries]
             summary_messages = ContextManager.truncate_messages(
