@@ -177,7 +177,7 @@ async def execute_loop(
         """从合并后的 tools dict 查找工具"""
         return tools.get(name)
 
-    async def _build_context(agent_name: str, agent_config) -> list:
+    async def _build_context(agent_name: str) -> list:
         """drain messages → artifacts 清单 → ContextManager.build → tool limit 注入"""
         if current_agent_name == "lead_agent":
             for msg in task_manager.drain_messages(message_id):
@@ -201,13 +201,13 @@ async def execute_loop(
 
         messages = ContextManager.build(
             state=state,
-            agent_config=agent_config,
+            agent_name=agent_name,
             agents=agents,
             tools=tools,
             artifacts_inventory=artifacts_inventory,
         )
 
-        if tool_round_count.get(agent_name, 0) >= agent_config.max_tool_rounds:
+        if tool_round_count.get(agent_name, 0) >= agents[agent_name].max_tool_rounds:
             messages.append({
                 "role": "system",
                 "content": "You have reached the maximum number of tool calls. "
@@ -361,7 +361,7 @@ async def execute_loop(
 
         return True
 
-    async def _execute_tools(tool_calls: list, agent_name: str, agent_config) -> None:
+    async def _execute_tools(tool_calls: list, agent_name: str) -> None:
         """串行执行工具列表，处理权限中断和 subagent 切换。
         call_subagent 延后到最后执行，确保同一轮的常规工具不会被 break 跳过。
         """
@@ -385,7 +385,7 @@ async def execute_loop(
             params = tool_call.params
 
             # Agent 工具白名单校验
-            if tool_name not in agent_config.tools:
+            if tool_name not in agents[agent_name].tools:
                 await _emit(StreamEventType.TOOL_START.value, agent_name, {
                     "tool": tool_name, "params": params,
                 })
@@ -467,7 +467,7 @@ async def execute_loop(
                 continue
 
             # 权限检查（per-agent 权限覆盖）
-            agent_perm_str = agent_config.tools.get(tool_name, tool.permission.value)
+            agent_perm_str = agents[agent_name].tools.get(tool_name, tool.permission.value)
             effective_permission = ToolPermission(agent_perm_str)
             if effective_permission == ToolPermission.CONFIRM:
                 if tool_name not in state.get("always_allowed_tools", []):
@@ -528,8 +528,7 @@ async def execute_loop(
                 break
 
             current_agent_name = state["current_agent"]
-            agent_config = agents.get(current_agent_name)
-            if not agent_config:
+            if current_agent_name not in agents:
                 logger.error(f"Agent '{current_agent_name}' not found")
                 state["error"] = True
                 state["response"] = f"Agent '{current_agent_name}' not found"
@@ -538,7 +537,7 @@ async def execute_loop(
                 })
                 break
 
-            messages = await _build_context(current_agent_name, agent_config)
+            messages = await _build_context(current_agent_name)
 
             # 记录 context 字符数（与 context_manager 的 len() 计算方式一致）
             last_context_chars = sum(len(m.get("content", "")) for m in messages)
@@ -551,7 +550,7 @@ async def execute_loop(
             logger.debug(f"[{current_agent_name}] Messages:\n{format_messages_for_debug(messages)}")
 
             # 调用 LLM（流式）
-            llm_result = await _call_llm(messages, current_agent_name, agent_config.model)
+            llm_result = await _call_llm(messages, current_agent_name, agents[current_agent_name].model)
             if llm_result is None:
                 break
 
@@ -603,7 +602,7 @@ async def execute_loop(
                 continue
 
             # 串行执行工具
-            await _execute_tools(tool_calls, current_agent_name, agent_config)
+            await _execute_tools(tool_calls, current_agent_name)
 
     except Exception as e:
         logger.exception(f"Execution loop error: {e}")

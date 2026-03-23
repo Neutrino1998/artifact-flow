@@ -32,8 +32,8 @@ class ContextManager:
     def build(
         cls,
         state: Dict[str, Any],
-        agent_config: Any,  # AgentConfig
-        agents: Dict[str, Any],  # {name: AgentConfig} for building available agents section
+        agent_name: str,
+        agents: Dict[str, Any],  # {name: AgentConfig}
         tools: Dict[str, Any],   # {name: BaseTool}
         artifacts_inventory: Optional[List[Dict]] = None,
     ) -> List[Dict[str, str]]:
@@ -44,7 +44,7 @@ class ContextManager:
 
         Args:
             state: 执行状态
-            agent_config: 当前 agent 的 AgentConfig
+            agent_name: 当前 agent 名称
             agents: 所有 agent 配置 {name: AgentConfig}
             tools: 所有可用工具 {name: BaseTool}
             artifacts_inventory: 预加载的 artifacts 清单（含完整内容）
@@ -53,6 +53,8 @@ class ContextManager:
             List[Dict]（messages 列表）
         """
         from tools.xml_formatter import generate_tool_instruction
+
+        agent_config = agents[agent_name]
 
         # ========== System Prompt ==========
         system_parts = []
