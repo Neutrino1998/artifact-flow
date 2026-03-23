@@ -10,7 +10,7 @@ from unittest.mock import patch
 
 import pytest
 
-from core.context_manager import ContextManager, Context
+from core.context_manager import ContextManager
 from core.events import StreamEventType, ExecutionEvent
 
 
@@ -56,6 +56,19 @@ def _make_event(event_type, agent_name="lead_agent", data=None):
     return ExecutionEvent(event_type=event_type, agent_name=agent_name, data=data)
 
 
+def _build(agent, agents=None, **kwargs):
+    """Helper: call ContextManager.build with agent_name + agents dict."""
+    if agents is None:
+        agents = {agent.name: agent}
+    elif agent.name not in agents:
+        agents[agent.name] = agent
+    return ContextManager.build(
+        agent_name=agent.name,
+        agents=agents,
+        **kwargs,
+    )
+
+
 # ============================================================
 # TestSystemPrompt
 # ============================================================
@@ -69,8 +82,8 @@ class TestSystemPrompt:
             _make_event(StreamEventType.USER_INPUT.value, data={"content": "hi"}),
         ])
 
-        ctx = ContextManager.build(state=state, agent_config=agent, agents={}, tools={})
-        system_msg = ctx.messages[0]
+        messages = _build(agent, state=state, tools={})
+        system_msg = messages[0]
         assert system_msg["role"] == "system"
         assert "research assistant" in system_msg["content"]
 
@@ -80,8 +93,8 @@ class TestSystemPrompt:
             _make_event(StreamEventType.USER_INPUT.value, data={"content": "hi"}),
         ])
 
-        ctx = ContextManager.build(state=state, agent_config=agent, agents={}, tools={})
-        system_content = ctx.messages[0]["content"]
+        messages = _build(agent, state=state, tools={})
+        system_content = messages[0]["content"]
         assert "system_time" in system_content
 
     def test_with_tools_includes_tool_instruction(self):
@@ -100,13 +113,12 @@ class TestSystemPrompt:
             _make_event(StreamEventType.USER_INPUT.value, data={"content": "hi"}),
         ])
 
-        ctx = ContextManager.build(
+        messages = _build(
+            agent,
             state=state,
-            agent_config=agent,
-            agents={},
             tools={"web_search": FakeTool()},
         )
-        system_content = ctx.messages[0]["content"]
+        system_content = messages[0]["content"]
         assert "web_search" in system_content
 
     def test_no_tools_no_tool_instruction(self):
@@ -115,8 +127,8 @@ class TestSystemPrompt:
             _make_event(StreamEventType.USER_INPUT.value, data={"content": "hi"}),
         ])
 
-        ctx = ContextManager.build(state=state, agent_config=agent, agents={}, tools={})
-        system_content = ctx.messages[0]["content"]
+        messages = _build(agent, state=state, tools={})
+        system_content = messages[0]["content"]
         # Should not contain tool_call instruction
         assert "tool_call" not in system_content.lower() or "tool" not in system_content.split("<system_time>")[0].lower()
 
@@ -141,8 +153,8 @@ class TestLeadVsSubagent:
             ],
         )
 
-        ctx = ContextManager.build(state=state, agent_config=agent, agents={}, tools={})
-        contents = [m["content"] for m in ctx.messages]
+        messages = _build(agent, state=state, tools={})
+        contents = [m["content"] for m in messages]
         all_content = " ".join(contents)
         assert "prev question" in all_content
         assert "prev answer" in all_content
@@ -157,8 +169,8 @@ class TestLeadVsSubagent:
             }),
         ])
 
-        ctx = ContextManager.build(state=state, agent_config=agent, agents={}, tools={})
-        contents = [m["content"] for m in ctx.messages]
+        messages = _build(agent, state=state, tools={})
+        contents = [m["content"] for m in messages]
         all_content = " ".join(contents)
         assert "query" in all_content
         assert "search" in all_content.lower()
@@ -180,8 +192,8 @@ class TestLeadVsSubagent:
             ],
         )
 
-        ctx = ContextManager.build(state=state, agent_config=sub_config, agents={}, tools={})
-        contents = [m["content"] for m in ctx.messages]
+        messages = _build(sub_config, state=state, tools={})
+        contents = [m["content"] for m in messages]
         all_content = " ".join(contents)
         assert "find X" in all_content
         assert "user task" not in all_content
@@ -200,8 +212,8 @@ class TestLeadVsSubagent:
             ],
         )
 
-        ctx = ContextManager.build(state=state, agent_config=sub_config, agents={}, tools={})
-        contents = [m["content"] for m in ctx.messages]
+        messages = _build(sub_config, state=state, tools={})
+        contents = [m["content"] for m in messages]
         all_content = " ".join(contents)
         assert "old question" not in all_content
 
@@ -214,9 +226,9 @@ class TestLeadVsSubagent:
             ],
         )
 
-        ctx = ContextManager.build(state=state, agent_config=sub_config, agents={}, tools={})
+        messages = _build(sub_config, state=state, tools={})
         # Instruction should appear as a user message
-        user_msgs = [m for m in ctx.messages if m["role"] == "user"]
+        user_msgs = [m for m in messages if m["role"] == "user"]
         assert any("find info" in m["content"] for m in user_msgs)
 
 
@@ -278,12 +290,10 @@ class TestTruncation:
         )
 
         with patch("core.context_manager.config.CONTEXT_MAX_CHARS", 5000):
-            ctx = ContextManager.build(
-                state=state, agent_config=agent, agents={}, tools={},
-            )
-        assert len(ctx.messages) >= 2  # system + at least some content
+            messages = _build(agent, state=state, tools={})
+        assert len(messages) >= 2  # system + at least some content
         # "current" (tool interaction) should always be present
-        all_content = " ".join(m["content"] for m in ctx.messages)
+        all_content = " ".join(m["content"] for m in messages)
         assert "current" in all_content
 
 
@@ -304,11 +314,11 @@ class TestArtifactsAndAgents:
             _make_event(StreamEventType.USER_INPUT.value, data={"content": "hi"}),
         ])
 
-        ctx = ContextManager.build(
-            state=state, agent_config=agent, agents={}, tools={},
+        messages = _build(
+            agent, state=state, tools={},
             artifacts_inventory=artifacts,
         )
-        system_content = ctx.messages[0]["content"]
+        system_content = messages[0]["content"]
         assert "<content>\nStep 1: Do X\n</content>" in system_content
         # id as child element, meta as attributes
         assert '<id>task_plan</id>' in system_content
@@ -329,11 +339,11 @@ class TestArtifactsAndAgents:
             _make_event(StreamEventType.USER_INPUT.value, data={"content": "hi"}),
         ])
 
-        ctx = ContextManager.build(
-            state=state, agent_config=agent, agents={}, tools={},
+        messages = _build(
+            agent, state=state, tools={},
             artifacts_inventory=artifacts,
         )
-        system_content = ctx.messages[0]["content"]
+        system_content = messages[0]["content"]
         # <team_task_plan> has full content wrapped in <content>
         assert f"<content>\n{long_content}\n</content>" in system_content
         # inventory uses <content_preview> for truncated, <content> for short
@@ -357,11 +367,11 @@ class TestArtifactsAndAgents:
             _make_event(StreamEventType.USER_INPUT.value, data={"content": "hi"}),
         ])
 
-        ctx = ContextManager.build(
-            state=state, agent_config=agent, agents={}, tools={},
+        messages = _build(
+            agent, state=state, tools={},
             artifacts_inventory=artifacts,
         )
-        system_content = ctx.messages[0]["content"]
+        system_content = messages[0]["content"]
         assert "artifacts_inventory" in system_content
         assert "Document" in system_content
 
@@ -375,11 +385,11 @@ class TestArtifactsAndAgents:
             _make_event(StreamEventType.USER_INPUT.value, data={"content": "hi"}),
         ])
 
-        ctx = ContextManager.build(
-            state=state, agent_config=agent, agents={}, tools={},
+        messages = _build(
+            agent, state=state, tools={},
             artifacts_inventory=artifacts,
         )
-        system_content = ctx.messages[0]["content"]
+        system_content = messages[0]["content"]
         assert "artifacts_inventory" not in system_content
 
     def test_call_subagent_shows_available_agents(self):
@@ -390,13 +400,13 @@ class TestArtifactsAndAgents:
             _make_event(StreamEventType.USER_INPUT.value, data={"content": "hi"}),
         ])
 
-        ctx = ContextManager.build(
-            state=state,
-            agent_config=lead,
+        messages = _build(
+            lead,
             agents={"lead_agent": lead, "search_agent": sub},
+            state=state,
             tools={},
         )
-        system_content = ctx.messages[0]["content"]
+        system_content = messages[0]["content"]
         assert "available_subagents" in system_content
         assert "search_agent" in system_content
 
@@ -408,11 +418,11 @@ class TestArtifactsAndAgents:
             _make_event(StreamEventType.USER_INPUT.value, data={"content": "hi"}),
         ])
 
-        ctx = ContextManager.build(
-            state=state,
-            agent_config=lead,
+        messages = _build(
+            lead,
             agents={"lead_agent": lead, "compact_agent": internal},
+            state=state,
             tools={},
         )
-        system_content = ctx.messages[0]["content"]
+        system_content = messages[0]["content"]
         assert "compact_agent" not in system_content
