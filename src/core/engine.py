@@ -10,7 +10,7 @@
 """
 
 import asyncio
-from typing import Dict, Any, Optional, Callable, Awaitable, List, Tuple, TypedDict
+from typing import Dict, Any, Optional, Callable, Awaitable, List, Tuple, TypedDict, Union
 from datetime import datetime
 
 from core.events import StreamEventType, ExecutionEvent
@@ -47,8 +47,8 @@ class MetricsEvent(TypedDict, total=False):
 
 
 class ExecutionMetrics(TypedDict):
-    started_at: str
-    completed_at: Optional[str]
+    started_at: Union[datetime, str]
+    completed_at: Union[datetime, str, None]
     total_duration_ms: Optional[int]
     last_context_chars: int
     total_token_usage: TokenUsage
@@ -57,7 +57,7 @@ class ExecutionMetrics(TypedDict):
 
 def create_initial_metrics() -> ExecutionMetrics:
     return {
-        "started_at": datetime.now().isoformat(),
+        "started_at": datetime.now(),
         "completed_at": None,
         "total_duration_ms": None,
         "last_context_chars": 0,
@@ -67,10 +67,11 @@ def create_initial_metrics() -> ExecutionMetrics:
 
 
 def finalize_metrics(metrics: ExecutionMetrics) -> None:
+    started_at = metrics["started_at"]
     completed_at = datetime.now()
-    metrics["completed_at"] = completed_at.isoformat()
-    started_at = datetime.fromisoformat(metrics["started_at"])
     metrics["total_duration_ms"] = int((completed_at - started_at).total_seconds() * 1000)
+    metrics["started_at"] = started_at.isoformat()
+    metrics["completed_at"] = completed_at.isoformat()
 
 
 def append_metrics_event(metrics: ExecutionMetrics, event: MetricsEvent) -> None:
