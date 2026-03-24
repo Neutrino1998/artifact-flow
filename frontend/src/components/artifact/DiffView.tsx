@@ -14,7 +14,8 @@ const CONTEXT_LINES = 3;
 interface DiffLine {
   type: 'added' | 'removed' | 'unchanged';
   content: string;
-  lineNo: number;
+  oldLineNo: number;
+  newLineNo: number;
 }
 
 interface DiffHunk {
@@ -26,8 +27,9 @@ interface DiffHunk {
 function computeHunks(oldContent: string, newContent: string): DiffHunk[] {
   const changes: Change[] = diffLines(oldContent, newContent);
 
-  // Build flat line list — single line number tracking the new file
+  // Build flat line list — track both old and new file line numbers
   const allLines: DiffLine[] = [];
+  let oldLine = 1;
   let newLine = 1;
 
   for (const change of changes) {
@@ -36,12 +38,11 @@ function computeHunks(oldContent: string, newContent: string): DiffHunk[] {
 
     for (const line of lines) {
       if (change.added) {
-        allLines.push({ type: 'added', content: line, lineNo: newLine++ });
+        allLines.push({ type: 'added', content: line, oldLineNo: -1, newLineNo: newLine++ });
       } else if (change.removed) {
-        // Removed lines don't advance line counter — show blank
-        allLines.push({ type: 'removed', content: line, lineNo: -1 });
+        allLines.push({ type: 'removed', content: line, oldLineNo: oldLine++, newLineNo: -1 });
       } else {
-        allLines.push({ type: 'unchanged', content: line, lineNo: newLine++ });
+        allLines.push({ type: 'unchanged', content: line, oldLineNo: oldLine++, newLineNo: newLine++ });
       }
     }
   }
@@ -99,11 +100,14 @@ function CollapsedSection({
       <>
         {lines.map((line, i) => (
           <tr key={i} className="h-[22px]">
-            <td className="w-[3px]" />
-            <td className="px-2 text-right select-none text-text-tertiary dark:text-text-tertiary-dark w-12">
-              {line.lineNo > 0 ? line.lineNo : ''}
+            <td className="w-[3px] align-top" />
+            <td className="px-2 text-right select-none align-top text-text-tertiary dark:text-text-tertiary-dark w-10">
+              {line.oldLineNo > 0 ? line.oldLineNo : ''}
             </td>
-            <td className="px-3 whitespace-pre-wrap break-all text-text-primary dark:text-text-primary-dark">
+            <td className="px-2 text-right select-none align-top text-text-tertiary dark:text-text-tertiary-dark w-10">
+              {line.newLineNo > 0 ? line.newLineNo : ''}
+            </td>
+            <td className="px-3 whitespace-pre-wrap break-all align-top text-text-primary dark:text-text-primary-dark">
               <span className="select-none mr-2 opacity-40">{' '}</span>
               {line.content || '\u00A0'}
             </td>
@@ -115,7 +119,7 @@ function CollapsedSection({
 
   return (
     <tr>
-      <td colSpan={3} className="py-1.5 px-3">
+      <td colSpan={4} className="py-1.5 px-3">
         <div
           onClick={toggle}
           className="flex items-center justify-center gap-1.5 py-1 px-3 rounded-md cursor-pointer
@@ -176,12 +180,15 @@ function DiffView({ oldContent, newContent }: DiffViewProps) {
                   key={`${hi}-${li}`}
                   className={`h-[22px] ${lineClassName(line.type)}`}
                 >
-                  <td className={`w-[3px] ${gutterClassName(line.type)}`} />
-                  <td className="px-2 text-right select-none text-text-tertiary dark:text-text-tertiary-dark w-12">
-                    {line.lineNo > 0 ? line.lineNo : ''}
+                  <td className={`w-[3px] align-top ${gutterClassName(line.type)}`} />
+                  <td className="px-2 text-right select-none align-top text-text-tertiary dark:text-text-tertiary-dark w-10">
+                    {line.oldLineNo > 0 ? line.oldLineNo : ''}
+                  </td>
+                  <td className="px-2 text-right select-none align-top text-text-tertiary dark:text-text-tertiary-dark w-10">
+                    {line.newLineNo > 0 ? line.newLineNo : ''}
                   </td>
                   <td
-                    className={`px-3 whitespace-pre-wrap break-all ${lineTextClassName(line.type)}`}
+                    className={`px-3 whitespace-pre-wrap break-all align-top ${lineTextClassName(line.type)}`}
                   >
                     <span className="select-none mr-2 opacity-60">
                       {line.type === 'added'
