@@ -197,6 +197,40 @@ async def execute_loop(
 
         return messages
 
+    async def _complete_agent(agent_name: str, response_content: str) -> None:
+        """
+        完成当前 agent，发送 agent_complete 事件。
+
+        - lead 无工具调用 → completed = True
+        - subagent 无工具调用 → 切回 lead，追加 call_subagent tool_complete
+        """
+        await _emit(StreamEventType.AGENT_COMPLETE.value, agent_name, {
+            "agent": agent_name,
+            "content": response_content,
+        })
+
+        if agent_name == "lead_agent":
+            state["completed"] = True
+            state["response"] = response_content
+            logger.info("Lead agent completed, execution done")
+        else:
+            # Subagent 完成 → 切回 lead
+            # subagent 的响应作为 call_subagent 的 tool_result 返回给 lead
+            state["current_agent"] = "lead_agent"
+            logger.info(f"Subagent {agent_name} completed, switching back to lead_agent")
+
+            subagent_xml = (
+                f'<subagent_result agent="{agent_name}">'
+                f'\n{response_content}'
+                f'\n</subagent_result>'
+            )
+            await _emit(StreamEventType.TOOL_COMPLETE.value, "lead_agent", {
+                "tool": "call_subagent",
+                "success": True,
+                "result_data": subagent_xml,
+                "duration_ms": 0,
+            })
+
     async def _call_llm(messages: list, agent_name: str, model: str) -> Optional[Tuple[str, Optional[str], dict]]:
         """
         流式调用 LLM，推送 llm_chunk / llm_complete，记录 metrics。
@@ -527,30 +561,8 @@ async def execute_loop(
                         continue  # 回到 while loop 顶部，下次 _build_context 会看到新事件
 
                 # 无待处理消息 → 正常完成当前 agent
-                previous_agent = state["current_agent"]
-                _complete_agent(state, current_agent_name, response_content)
+                await _complete_agent(current_agent_name, response_content)
                 tool_round_count.pop(current_agent_name, None)
-
-                await _emit(StreamEventType.AGENT_COMPLETE.value, current_agent_name, {
-                    "agent": current_agent_name,
-                    "content": response_content,
-                })
-
-                # Subagent 完成 → 追加 call_subagent 的 tool_complete，
-                # 把 subagent 的 response 作为 result 传回给 lead
-                if previous_agent != "lead_agent" and state["current_agent"] == "lead_agent":
-                    subagent_xml = (
-                        f'<subagent_result agent="{previous_agent}">'
-                        f'\n{response_content}'
-                        f'\n</subagent_result>'
-                    )
-                    await _emit(StreamEventType.TOOL_COMPLETE.value, "lead_agent", {
-                        "tool": "call_subagent",
-                        "success": True,
-                        "result_data": subagent_xml,
-                        "duration_ms": 0,
-                    })
-
                 continue
 
             # 串行执行工具
@@ -569,27 +581,5 @@ async def execute_loop(
     finalize_metrics(state["execution_metrics"])
 
     return state
-
-
-def _complete_agent(
-    state: Dict[str, Any],
-    agent_name: str,
-    response_content: str,
-) -> None:
-    """
-    完成当前 agent
-
-    - lead 无工具调用 → completed = True
-    - subagent 无工具调用 → 打包 tool_result 切回 lead
-    """
-    if agent_name == "lead_agent":
-        state["completed"] = True
-        state["response"] = response_content
-        logger.info("Lead agent completed, execution done")
-    else:
-        # Subagent 完成 → 切回 lead
-        # subagent 的响应作为 call_subagent 的 tool_result 返回给 lead
-        state["current_agent"] = "lead_agent"
-        logger.info(f"Subagent {agent_name} completed, switching back to lead_agent")
 
 
