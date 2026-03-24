@@ -397,61 +397,6 @@ async def execute_loop(
                 tool_round_count[agent_name] = tool_round_count.get(agent_name, 0) + 1
                 continue
 
-            # call_subagent 特殊处理
-            if tool_name == "call_subagent":
-                tool = _resolve_tool("call_subagent")
-                if tool:
-                    try:
-                        result = await tool(**params)
-                    except Exception as e:
-                        logger.exception(f"call_subagent execution error: {e}")
-                        await _emit(StreamEventType.TOOL_START.value, agent_name, {
-                            "tool": "call_subagent", "params": params,
-                        })
-                        await _emit(StreamEventType.TOOL_COMPLETE.value, agent_name, {
-                            "tool": "call_subagent",
-                            "success": False,
-                            "error": str(e),
-                            "duration_ms": 0,
-                        })
-                        tool_round_count[agent_name] = tool_round_count.get(agent_name, 0) + 1
-                        continue
-                    if result.success:
-                        target_agent = params["agent_name"]
-                        instruction = params["instruction"]
-
-                        await _emit(StreamEventType.TOOL_START.value, agent_name, {
-                            "tool": "call_subagent",
-                            "params": {"agent_name": target_agent, "instruction": instruction},
-                        })
-
-                        # 注入 instruction 到 subagent 的事件流（仅内存，不推 SSE）
-                        # context 构建按 agent_name 过滤时自然拿到 instruction
-                        state["events"].append(ExecutionEvent(
-                            event_type=StreamEventType.SUBAGENT_INSTRUCTION.value,
-                            agent_name=target_agent,
-                            data={"instruction": instruction},
-                        ))
-
-                        # tool_complete 在 subagent 完成后由 _complete_agent 路径追加
-                        state["current_agent"] = target_agent
-                        logger.info(f"Switching to subagent: {target_agent}")
-                        tool_round_count[agent_name] = tool_round_count.get(agent_name, 0) + 1
-                        break  # 跳出 tool_calls 循环，继续 while loop
-                    else:
-                        # 验证失败（如目标 agent 不存在），返回错误信息给 agent
-                        await _emit(StreamEventType.TOOL_START.value, agent_name, {
-                            "tool": "call_subagent", "params": params,
-                        })
-                        await _emit(StreamEventType.TOOL_COMPLETE.value, agent_name, {
-                            "tool": "call_subagent",
-                            "success": False,
-                            "error": result.error or "call_subagent validation failed",
-                            "duration_ms": 0,
-                        })
-                        tool_round_count[agent_name] = tool_round_count.get(agent_name, 0) + 1
-                        continue
-
             # 获取工具
             tool = _resolve_tool(tool_name)
             if not tool:
@@ -465,6 +410,49 @@ async def execute_loop(
                 })
                 tool_round_count[agent_name] = tool_round_count.get(agent_name, 0) + 1
                 continue
+
+            # call_subagent 特殊处理
+            if tool_name == "call_subagent":
+                try:
+                    result = await tool(**params)
+                except Exception as e:
+                    logger.exception(f"call_subagent execution error: {e}")
+                    result = ToolResult(success=False, error=str(e))
+
+                if result.success:
+                    target_agent = params["agent_name"]
+                    instruction = params["instruction"]
+
+                    await _emit(StreamEventType.TOOL_START.value, agent_name, {
+                        "tool": "call_subagent",
+                        "params": {"agent_name": target_agent, "instruction": instruction},
+                    })
+
+                    # 注入 instruction 到 subagent 的事件流（仅内存，不推 SSE）
+                    # context 构建按 agent_name 过滤时自然拿到 instruction
+                    state["events"].append(ExecutionEvent(
+                        event_type=StreamEventType.SUBAGENT_INSTRUCTION.value,
+                        agent_name=target_agent,
+                        data={"instruction": instruction},
+                    ))
+
+                    # tool_complete 在 subagent 完成后由 _complete_agent 路径追加
+                    state["current_agent"] = target_agent
+                    logger.info(f"Switching to subagent: {target_agent}")
+                    tool_round_count[agent_name] = tool_round_count.get(agent_name, 0) + 1
+                    break  # 跳出 tool_calls 循环，继续 while loop
+                else:
+                    await _emit(StreamEventType.TOOL_START.value, agent_name, {
+                        "tool": "call_subagent", "params": params,
+                    })
+                    await _emit(StreamEventType.TOOL_COMPLETE.value, agent_name, {
+                        "tool": "call_subagent",
+                        "success": False,
+                        "error": result.error or "call_subagent failed",
+                        "duration_ms": 0,
+                    })
+                    tool_round_count[agent_name] = tool_round_count.get(agent_name, 0) + 1
+                    continue
 
             # 权限检查（per-agent 权限覆盖）
             agent_perm_str = agents[agent_name].tools.get(tool_name, tool.permission.value)
