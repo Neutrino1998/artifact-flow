@@ -33,27 +33,12 @@ class TokenUsage(TypedDict):
     total_tokens: int
 
 
-class MetricsEvent(TypedDict, total=False):
-    type: str              # "llm_complete" | "tool_complete"
-    # llm_complete fields
-    agent: str
-    model: str
-    token_usage: TokenUsage
-    duration_ms: int
-    started_at: str
-    completed_at: str
-    # tool_complete fields
-    tool: str
-    success: bool
-
-
 class ExecutionMetrics(TypedDict):
     started_at: Union[datetime, str]
     completed_at: Union[datetime, str, None]
     total_duration_ms: Optional[int]
     last_context_chars: int
     total_token_usage: TokenUsage
-    events: List[MetricsEvent]
 
 
 def create_initial_metrics() -> ExecutionMetrics:
@@ -63,7 +48,6 @@ def create_initial_metrics() -> ExecutionMetrics:
         "total_duration_ms": None,
         "last_context_chars": 0,
         "total_token_usage": {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0},
-        "events": [],
     }
 
 
@@ -75,16 +59,13 @@ def finalize_metrics(metrics: ExecutionMetrics) -> None:
     metrics["completed_at"] = completed_at.isoformat()
 
 
-def append_metrics_event(metrics: ExecutionMetrics, event: MetricsEvent) -> None:
-    """Append a metrics event and update token usage aggregates for llm_complete events."""
-    metrics["events"].append(event)
-    if event.get("type") == "llm_complete":
-        usage = event.get("token_usage")
-        if usage:
-            total = metrics["total_token_usage"]
-            total["input_tokens"] += usage.get("input_tokens", 0)
-            total["output_tokens"] += usage.get("output_tokens", 0)
-            total["total_tokens"] += usage.get("total_tokens", 0)
+def accumulate_token_usage(metrics: ExecutionMetrics, usage: dict) -> None:
+    """Accumulate token usage into metrics totals."""
+    if usage:
+        total = metrics["total_token_usage"]
+        total["input_tokens"] += usage.get("input_tokens", 0)
+        total["output_tokens"] += usage.get("output_tokens", 0)
+        total["total_tokens"] += usage.get("total_tokens", 0)
 
 
 # ============================================================
@@ -287,15 +268,7 @@ async def execute_loop(
             "duration_ms": llm_duration_ms,
         })
 
-        append_metrics_event(state["execution_metrics"], {
-            "type": "llm_complete",
-            "agent": agent_name,
-            "model": model,
-            "token_usage": normalized_usage,
-            "duration_ms": llm_duration_ms,
-            "started_at": llm_start_time.isoformat(),
-            "completed_at": llm_end_time.isoformat(),
-        })
+        accumulate_token_usage(state["execution_metrics"], normalized_usage)
 
         input_tokens = normalized_usage["input_tokens"]
         output_tokens = normalized_usage["output_tokens"]
@@ -488,15 +461,6 @@ async def execute_loop(
                 "params": params,
             })
 
-            append_metrics_event(state["execution_metrics"], {
-                "type": "tool_complete",
-                "tool": tool_name,
-                "success": tool_result.success,
-                "duration_ms": tool_duration_ms,
-                "started_at": tool_start_time.isoformat(),
-                "completed_at": tool_end_time.isoformat(),
-                "agent": agent_name,
-            })
 
             tool_round_count[agent_name] = tool_round_count.get(agent_name, 0) + 1
 

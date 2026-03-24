@@ -89,24 +89,11 @@ export interface TokenUsage {
   total_tokens: number;
 }
 
-export interface MetricsEvent {
-  type: 'llm_complete' | 'tool_complete';
-  agent?: string;
-  model?: string;
-  token_usage?: TokenUsage;
-  duration_ms?: number;
-  started_at?: string;
-  completed_at?: string;
-  tool?: string;
-  success?: boolean;
-}
-
 export interface ExecutionMetrics {
   started_at: string;
   completed_at?: string;
   total_duration_ms?: number;
   total_token_usage: TokenUsage;
-  events: MetricsEvent[];
 }
 
 export interface CompleteData {

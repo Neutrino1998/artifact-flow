@@ -14,11 +14,10 @@ from .engine import (
     execute_loop,
     create_initial_state,
     ExecutionMetrics,
-    MetricsEvent,
     TokenUsage,
     create_initial_metrics,
     finalize_metrics,
-    append_metrics_event,
+    accumulate_token_usage,
 )
 
 # 上下文管理
@@ -38,11 +37,10 @@ __all__ = [
     "execute_loop",
     "create_initial_state",
     "ExecutionMetrics",
-    "MetricsEvent",
     "TokenUsage",
     "create_initial_metrics",
     "finalize_metrics",
-    "append_metrics_event",
+    "accumulate_token_usage",
     # 上下文管理
     "ContextManager",
     # 执行控制器
