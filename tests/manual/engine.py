@@ -175,7 +175,7 @@ class StreamEventHandler:
                 metrics = data["execution_metrics"]
                 print(f"   总耗时: {metrics.get('total_duration_ms', 0)}ms")
                 events = metrics.get("events", [])
-                agent_events = [e for e in events if e.get("type") == "agent_complete"]
+                agent_events = [e for e in events if e.get("type") == "llm_complete"]
                 tool_events = [e for e in events if e.get("type") == "tool_complete"]
                 print(f"   Agent 执行次数: {len(agent_events)}")
                 print(f"   工具调用次数: {len(tool_events)}")

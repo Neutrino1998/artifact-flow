@@ -34,8 +34,8 @@ class TokenUsage(TypedDict):
 
 
 class MetricsEvent(TypedDict, total=False):
-    type: str              # "agent_complete" | "tool_complete"
-    # agent_complete fields
+    type: str              # "llm_complete" | "tool_complete"
+    # llm_complete fields
     agent: str
     model: str
     token_usage: TokenUsage
@@ -76,9 +76,9 @@ def finalize_metrics(metrics: ExecutionMetrics) -> None:
 
 
 def append_metrics_event(metrics: ExecutionMetrics, event: MetricsEvent) -> None:
-    """Append a metrics event and update token usage aggregates for agent_complete events."""
+    """Append a metrics event and update token usage aggregates for llm_complete events."""
     metrics["events"].append(event)
-    if event.get("type") == "agent_complete":
+    if event.get("type") == "llm_complete":
         usage = event.get("token_usage")
         if usage:
             total = metrics["total_token_usage"]
@@ -288,7 +288,7 @@ async def execute_loop(
         })
 
         append_metrics_event(state["execution_metrics"], {
-            "type": "agent_complete",
+            "type": "llm_complete",
             "agent": agent_name,
             "model": model,
             "token_usage": normalized_usage,

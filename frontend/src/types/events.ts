@@ -90,7 +90,7 @@ export interface TokenUsage {
 }
 
 export interface MetricsEvent {
-  type: 'agent_complete' | 'tool_complete';
+  type: 'llm_complete' | 'tool_complete';
   agent?: string;
   model?: string;
   token_usage?: TokenUsage;
