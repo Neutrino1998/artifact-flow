@@ -80,22 +80,12 @@ class ConversationManager:
         初始化 ConversationManager
 
         Args:
-            repository: ConversationRepository 实例
-                       可以为 None，稍后通过 set_repository 设置
+            repository: ConversationRepository 实例（可以为 None）
         """
         self.repository = repository
         self._cache: Dict[str, ConversationCache] = {}
 
         logger.info("ConversationManager initialized")
-
-    def set_repository(self, repository: ConversationRepository) -> None:
-        """
-        设置/更新 Repository
-
-        Args:
-            repository: ConversationRepository 实例
-        """
-        self.repository = repository
 
     def _ensure_repository(self) -> ConversationRepository:
         """确保 Repository 已设置"""
@@ -390,36 +380,6 @@ class ConversationManager:
         if conv_id in self._cache:
             return self._cache[conv_id].active_branch or None
         return None
-
-    async def get_conversation_path_async(
-        self,
-        conv_id: str,
-        to_message_id: Optional[str] = None
-    ) -> List[Dict]:
-        """
-        获取对话路径（从根到指定消息）
-
-        Args:
-            conv_id: 对话ID
-            to_message_id: 目标消息ID（None则使用活跃分支）
-
-        Returns:
-            消息路径列表
-        """
-        repo = self._ensure_repository()
-        messages = await repo.get_conversation_path(conv_id, to_message_id)
-
-        return [
-            {
-                "message_id": msg.id,
-                "parent_id": msg.parent_id,
-                "user_input": msg.user_input,
-                "timestamp": msg.created_at.isoformat(),
-                "response": msg.response,
-                "metadata": msg.metadata_ or {}
-            }
-            for msg in messages
-        ]
 
     async def format_conversation_history_async(
         self,

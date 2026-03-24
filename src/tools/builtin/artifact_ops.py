@@ -411,28 +411,16 @@ class ArtifactManager:
         初始化 ArtifactManager
 
         Args:
-            repository: ArtifactRepository 实例（通过依赖注入）
-                       可以为 None，稍后通过 set_repository 设置
+            repository: ArtifactRepository 实例（可以为 None）
         """
         self.repository = repository
         self._cache: Dict[str, Dict[str, ArtifactMemory]] = {}  # {session_id: {artifact_id: ArtifactMemory}}
         self._current_session_id: Optional[str] = None
 
-        logger.debug("ArtifactManager initialized")
-
-    def set_repository(self, repository: ArtifactRepository) -> None:
-        """
-        设置/更新 Repository（用于每次请求时绑定新的数据库 session）
-
-        Args:
-            repository: ArtifactRepository 实例
-        """
-        self.repository = repository
-
     def _ensure_repository(self) -> ArtifactRepository:
         """确保 Repository 已设置"""
         if self.repository is None:
-            raise RuntimeError("ArtifactManager: repository not configured. Call set_repository() first.")
+            raise RuntimeError("ArtifactManager: repository not configured")
         return self.repository
 
     def set_session(self, session_id: str) -> None:
@@ -827,19 +815,6 @@ class ArtifactManager:
             content_type=content_type,
             include_content=include_content,
         )
-
-    def clear_cache(self, session_id: Optional[str] = None) -> None:
-        """
-        清除缓存
-
-        Args:
-            session_id: Session ID（None 则清除所有）
-        """
-        if session_id:
-            if session_id in self._cache:
-                del self._cache[session_id]
-        else:
-            self._cache.clear()
 
 
 # ============================================================
