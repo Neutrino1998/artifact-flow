@@ -62,11 +62,25 @@ export function useSSE() {
         setCurrent(detail);
         setConversations(list.conversations, list.total, list.has_more);
         clearPendingUpdates();
+
+        // Refresh artifact data now that flush_all has persisted to DB
+        const curArtifact = useArtifactStore.getState().current;
+        if (curArtifact) {
+          Promise.all([
+            api.getArtifact(conversationId, curArtifact.id),
+            api.listArtifacts(conversationId),
+          ]).then(([artDetail, artList]) => {
+            setArtifactCurrent(artDetail);
+            setArtifacts(artList.artifacts);
+            setArtifactVersions(artDetail.versions);
+            setSelectedVersion(artDetail.latest_version ?? null);
+          }).catch(() => {});
+        }
       } catch (err) {
         console.error('Failed to refresh after complete:', err);
       }
     },
-    [setCurrent, setConversations, clearPendingUpdates]
+    [setCurrent, setConversations, clearPendingUpdates, setArtifactCurrent, setArtifacts, setArtifactVersions, setSelectedVersion]
   );
 
   const handleEvent = useCallback(

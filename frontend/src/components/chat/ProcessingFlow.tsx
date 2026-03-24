@@ -7,10 +7,11 @@ interface ProcessingFlowProps {
   agentStepCount: number;
   isActive: boolean;
   defaultExpanded: boolean;
+  hasError?: boolean;
   children: React.ReactNode;
 }
 
-function ProcessingFlow({ agentStepCount, isActive, defaultExpanded, children }: ProcessingFlowProps) {
+function ProcessingFlow({ agentStepCount, isActive, defaultExpanded, hasError, children }: ProcessingFlowProps) {
   const [expanded, setExpanded] = useState(defaultExpanded);
 
   useEffect(() => {
@@ -42,6 +43,15 @@ function ProcessingFlow({ agentStepCount, isActive, defaultExpanded, children }:
           <span className="inline-flex items-center gap-1.5 text-accent font-medium">
             <span className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse" />
             Processing<CyclingDots />
+          </span>
+        ) : hasError ? (
+          <span className="inline-flex items-center gap-1.5 text-red-600 dark:text-red-400 font-medium">
+            <svg width="10" height="10" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2">
+              <circle cx="6" cy="6" r="5" />
+              <line x1="7.5" y1="4.5" x2="4.5" y2="7.5" />
+              <line x1="4.5" y1="4.5" x2="7.5" y2="7.5" />
+            </svg>
+            Error
           </span>
         ) : (
           <span className="inline-flex items-center gap-1.5 text-text-secondary dark:text-text-secondary-dark font-medium">

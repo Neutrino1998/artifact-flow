@@ -230,11 +230,13 @@ class ExecutionController:
             is_cancelled = final_state.get("cancelled", False)
 
             # Flush dirty artifacts to DB before updating response
+            flush_error: Optional[str] = None
             if self.artifact_manager:
                 try:
                     await self.artifact_manager.flush_all(session_id)
                 except Exception as flush_err:
                     logger.exception(f"Artifact flush failed: {flush_err}")
+                    flush_error = f"Artifact persistence failed: {flush_err}"
 
             # 更新 conversation response
             await self.conversation_manager.update_response_async(
@@ -281,6 +283,18 @@ class ExecutionController:
                         "conversation_id": conversation_id,
                         "message_id": message_id,
                         "response": response,
+                        "execution_metrics": final_state.get("execution_metrics", {}),
+                    }
+                }
+            elif flush_error:
+                terminal_event_dict = {
+                    "type": StreamEventType.ERROR.value,
+                    "timestamp": datetime.now().isoformat(),
+                    "data": {
+                        "success": False,
+                        "conversation_id": conversation_id,
+                        "message_id": message_id,
+                        "error": flush_error,
                         "execution_metrics": final_state.get("execution_metrics", {}),
                     }
                 }

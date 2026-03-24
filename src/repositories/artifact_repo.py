@@ -37,18 +37,48 @@ class ArtifactRepository(BaseRepository[Artifact]):
     # ========================================
 
     async def get_session(self, session_id: str) -> Optional[ArtifactSession]:
-        """获取 ArtifactSession"""
+        """
+        获取 ArtifactSession
+
+        Args:
+            session_id: Session ID（与 conversation_id 相同）
+
+        Returns:
+            ArtifactSession 对象，不存在则返回 None
+        """
         return await self._session.get(ArtifactSession, session_id)
 
     async def get_session_or_raise(self, session_id: str) -> ArtifactSession:
-        """获取 ArtifactSession（不存在则抛出异常）"""
+        """
+        获取 ArtifactSession（不存在则抛出异常）
+
+        Args:
+            session_id: Session ID
+
+        Returns:
+            ArtifactSession 对象
+
+        Raises:
+            NotFoundError: Session 不存在
+        """
         art_session = await self.get_session(session_id)
         if not art_session:
             raise NotFoundError("ArtifactSession", session_id)
         return art_session
 
     async def ensure_session_exists(self, session_id: str) -> ArtifactSession:
-        """确保 ArtifactSession 存在（不存在则创建）"""
+        """
+        确保 ArtifactSession 存在（不存在则创建）
+
+        注意：通常 Session 会在创建 Conversation 时自动创建。
+        此方法用于边缘情况的兼容性处理。
+
+        Args:
+            session_id: Session ID
+
+        Returns:
+            ArtifactSession 对象
+        """
         art_session = await self.get_session(session_id)
         if not art_session:
             art_session = ArtifactSession(id=session_id)
@@ -69,10 +99,24 @@ class ArtifactRepository(BaseRepository[Artifact]):
         title: str,
         content: str,
         metadata: Optional[Dict[str, Any]] = None,
-        source: str = "agent"
+        source: str = "agent",
+        target_version: int = 1,
     ) -> Artifact:
         """
         创建 Artifact（同时创建初始版本）
+
+        Args:
+            session_id: Session ID
+            artifact_id: Artifact ID
+            content_type: 内容类型 (MIME type)
+            title: 标题
+            content: 初始内容
+            metadata: 扩展元数据
+            source: 来源 (agent, user_upload)
+            target_version: 版本号（默认 1）。flush 折叠内存编辑时可传更大值。
+
+        Returns:
+            创建的 Artifact
 
         Raises:
             NotFoundError: Session 不存在
@@ -90,7 +134,7 @@ class ArtifactRepository(BaseRepository[Artifact]):
             content_type=content_type,
             title=title,
             content=content,
-            current_version=1,
+            current_version=target_version,
             metadata_=metadata or {},
             source=source
         )
@@ -100,7 +144,7 @@ class ArtifactRepository(BaseRepository[Artifact]):
         version = ArtifactVersion(
             artifact_id=artifact_id,
             session_id=session_id,
-            version=1,
+            version=target_version,
             content=content,
             update_type="create",
             changes=None
@@ -120,7 +164,17 @@ class ArtifactRepository(BaseRepository[Artifact]):
         *,
         load_versions: bool = False
     ) -> Optional[Artifact]:
-        """获取 Artifact"""
+        """
+        获取 Artifact
+
+        Args:
+            session_id: Session ID
+            artifact_id: Artifact ID
+            load_versions: 是否预加载版本历史
+
+        Returns:
+            Artifact 对象，不存在则返回 None
+        """
         query = select(Artifact).where(
             and_(
                 Artifact.session_id == session_id,
@@ -140,7 +194,20 @@ class ArtifactRepository(BaseRepository[Artifact]):
         artifact_id: str,
         **kwargs
     ) -> Artifact:
-        """获取 Artifact（不存在则抛出异常）"""
+        """
+        获取 Artifact（不存在则抛出异常）
+
+        Args:
+            session_id: Session ID
+            artifact_id: Artifact ID
+            **kwargs: 传递给 get_artifact 的参数
+
+        Returns:
+            Artifact 对象
+
+        Raises:
+            NotFoundError: Artifact 不存在
+        """
         artifact = await self.get_artifact(session_id, artifact_id, **kwargs)
         if not artifact:
             raise NotFoundError("Artifact", f"{session_id}/{artifact_id}")
@@ -152,7 +219,16 @@ class ArtifactRepository(BaseRepository[Artifact]):
         *,
         content_type: Optional[str] = None,
     ) -> List[Artifact]:
-        """列出 Session 的所有 Artifacts"""
+        """
+        列出 Session 的所有 Artifacts
+
+        Args:
+            session_id: Session ID
+            content_type: 按类型筛选
+
+        Returns:
+            Artifact ORM 对象列表
+        """
         query = select(Artifact).where(Artifact.session_id == session_id)
 
         if content_type:
@@ -174,7 +250,8 @@ class ArtifactRepository(BaseRepository[Artifact]):
         new_content: str,
         update_type: str,
         changes: Optional[List[Tuple[str, str]]] = None,
-        source: Optional[str] = None
+        source: Optional[str] = None,
+        target_version: Optional[int] = None,
     ) -> Artifact:
         """
         更新 Artifact 内容并创建新版本（无乐观锁）
@@ -185,7 +262,9 @@ class ArtifactRepository(BaseRepository[Artifact]):
             new_content: 新内容
             update_type: 更新类型 (update/update_fuzzy/rewrite)
             changes: 变更记录 [(old, new), ...]
-            source: 可选，更新来源
+            source: 可选，更新来源（传入时同步更新 artifact.source）
+            target_version: 显式指定版本号。None 则自增 1。
+                            flush 传入内存版本号以保持一致。
 
         Returns:
             更新后的 Artifact
@@ -195,17 +274,17 @@ class ArtifactRepository(BaseRepository[Artifact]):
         """
         artifact = await self.get_artifact_or_raise(session_id, artifact_id)
 
+        new_ver = target_version if target_version is not None else artifact.current_version + 1
         artifact.content = new_content
-        artifact.current_version = artifact.current_version + 1
+        artifact.current_version = new_ver
         artifact.updated_at = datetime.now()
         if source is not None:
             artifact.source = source
 
-        # 创建版本记录
         version = ArtifactVersion(
             artifact_id=artifact_id,
             session_id=session_id,
-            version=artifact.current_version,
+            version=new_ver,
             content=new_content,
             update_type=update_type,
             changes=changes
@@ -228,7 +307,17 @@ class ArtifactRepository(BaseRepository[Artifact]):
         artifact_id: str,
         version: int
     ) -> Optional[ArtifactVersion]:
-        """获取指定版本"""
+        """
+        获取指定版本
+
+        Args:
+            session_id: Session ID
+            artifact_id: Artifact ID
+            version: 版本号
+
+        Returns:
+            ArtifactVersion 对象，不存在则返回 None
+        """
         query = select(ArtifactVersion).where(
             and_(
                 ArtifactVersion.session_id == session_id,
@@ -246,7 +335,17 @@ class ArtifactRepository(BaseRepository[Artifact]):
         artifact_id: str,
         version: Optional[int] = None
     ) -> Optional[str]:
-        """获取指定版本的内容"""
+        """
+        获取指定版本的内容
+
+        Args:
+            session_id: Session ID
+            artifact_id: Artifact ID
+            version: 版本号（None 则获取当前版本）
+
+        Returns:
+            版本内容字符串，不存在则返回 None
+        """
         if version is None:
             artifact = await self.get_artifact(session_id, artifact_id)
             return artifact.content if artifact else None
@@ -259,7 +358,16 @@ class ArtifactRepository(BaseRepository[Artifact]):
         session_id: str,
         artifact_id: str
     ) -> List[ArtifactVersion]:
-        """列出 Artifact 的所有版本"""
+        """
+        列出 Artifact 的所有版本
+
+        Args:
+            session_id: Session ID
+            artifact_id: Artifact ID
+
+        Returns:
+            ArtifactVersion ORM 对象列表（按版本号升序）
+        """
         query = (
             select(ArtifactVersion)
             .where(

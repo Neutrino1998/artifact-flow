@@ -710,14 +710,18 @@ class ArtifactManager:
         """
         将所有 dirty artifacts 持久化到数据库。
 
-        - 新建的 artifact → repo.create_artifact() + v1
-        - 已有的 artifact → repo.upsert_artifact_content() + v_next
+        - 新建的 artifact → repo.create_artifact(target_version=memory.current_version)
+        - 已有的 artifact → repo.upsert_artifact_content(target_version=memory.current_version)
+
+        Only clears entries that flush successfully.
+        Raises on any failure so the caller can decide the terminal state.
         """
         if not self._dirty:
             return
 
         repo = self._ensure_repository()
         to_flush = [(sid, aid) for sid, aid in self._dirty if sid == session_id]
+        failed: list = []
 
         for sid, aid in to_flush:
             memory = self._cache.get(sid, {}).get(aid)
@@ -726,7 +730,6 @@ class ArtifactManager:
 
             try:
                 if (sid, aid) in self._new:
-                    # New artifact — create in DB
                     await repo.create_artifact(
                         session_id=sid,
                         artifact_id=aid,
@@ -735,33 +738,29 @@ class ArtifactManager:
                         content=memory.content,
                         metadata=memory.metadata,
                         source=memory.source,
+                        target_version=memory.current_version,
                     )
-                    # If there were updates after create (version > 1), persist those too
-                    if memory.current_version > 1:
-                        await repo.upsert_artifact_content(
-                            session_id=sid,
-                            artifact_id=aid,
-                            new_content=memory.content,
-                            update_type="update",
-                            source=memory.source,
-                        )
                 else:
-                    # Existing artifact — update content
                     await repo.upsert_artifact_content(
                         session_id=sid,
                         artifact_id=aid,
                         new_content=memory.content,
                         update_type="update",
                         source=memory.source,
+                        target_version=memory.current_version,
                     )
 
+                # Success — remove from dirty/new
+                self._dirty.discard((sid, aid))
+                self._new.discard((sid, aid))
                 logger.info(f"Flushed artifact '{aid}' in session '{sid}'")
             except Exception as e:
                 logger.exception(f"Failed to flush artifact '{aid}': {e}")
+                failed.append((aid, e))
 
-        # Clear dirty/new sets for this session
-        self._dirty = {(s, a) for s, a in self._dirty if s != session_id}
-        self._new = {(s, a) for s, a in self._new if s != session_id}
+        if failed:
+            ids = ", ".join(aid for aid, _ in failed)
+            raise RuntimeError(f"Failed to flush artifacts: {ids}")
 
     async def get_version(self, session_id: str, artifact_id: str, version: int):
         """获取指定版本"""
@@ -779,28 +778,71 @@ class ArtifactManager:
         content_type: Optional[str] = None,
         include_content: bool = True,
     ) -> List[Dict[str, Any]]:
-        """列出 Session 的所有 Artifacts（序列化后的 dict）"""
+        """列出 Session 的所有 Artifacts（序列化后的 dict）。
+
+        Merges DB results with in-memory dirty/new artifacts so that
+        the engine's context assembly sees same-run changes.
+        """
         repo = self._ensure_repository()
-        artifacts = await repo.list_artifacts(
+        db_artifacts = await repo.list_artifacts(
             session_id=session_id,
             content_type=content_type,
         )
 
+        # Build result from DB, keyed by id for merging
+        seen_ids: set = set()
         result = []
-        for art in artifacts:
-            info: Dict[str, Any] = {
-                "id": art.id,
-                "content_type": art.content_type,
-                "title": art.title,
-                "version": art.current_version,
-                "source": art.source,
-                "created_at": art.created_at.isoformat(),
-                "updated_at": art.updated_at.isoformat(),
-            }
-            if include_content:
-                info["content"] = art.content
+        for art in db_artifacts:
+            # If we have a dirty in-memory version, prefer it
+            memory = self._cache.get(session_id, {}).get(art.id)
+            if memory and (session_id, art.id) in self._dirty:
+                if content_type and memory.content_type != content_type:
+                    continue
+                info = self._serialize_memory(memory, session_id, include_content)
+            else:
+                info: Dict[str, Any] = {
+                    "id": art.id,
+                    "content_type": art.content_type,
+                    "title": art.title,
+                    "version": art.current_version,
+                    "source": art.source,
+                    "created_at": art.created_at.isoformat(),
+                    "updated_at": art.updated_at.isoformat(),
+                }
+                if include_content:
+                    info["content"] = art.content
             result.append(info)
+            seen_ids.add(art.id)
+
+        # Append in-memory new artifacts not yet in DB
+        for sid, aid in self._new:
+            if sid != session_id or aid in seen_ids:
+                continue
+            memory = self._cache.get(sid, {}).get(aid)
+            if not memory:
+                continue
+            if content_type and memory.content_type != content_type:
+                continue
+            result.append(self._serialize_memory(memory, session_id, include_content))
+
         return result
+
+    @staticmethod
+    def _serialize_memory(
+        memory: 'ArtifactMemory', session_id: str, include_content: bool
+    ) -> Dict[str, Any]:
+        info: Dict[str, Any] = {
+            "id": memory.id,
+            "content_type": memory.content_type,
+            "title": memory.title,
+            "version": memory.current_version,
+            "source": memory.source,
+            "created_at": memory.created_at.isoformat(),
+            "updated_at": memory.updated_at.isoformat(),
+        }
+        if include_content:
+            info["content"] = memory.content
+        return info
 
 
 # ============================================================

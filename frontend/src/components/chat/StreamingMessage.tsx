@@ -4,22 +4,24 @@ import { useStreamStore, interleaveFlowItems } from '@/stores/streamStore';
 import AgentSegmentBlock from './AgentSegmentBlock';
 import InjectFlowBlock from './InjectFlowBlock';
 import CompactionFlowBlock from './CompactionFlowBlock';
+import ErrorFlowBlock from './ErrorFlowBlock';
 import ProcessingFlow from './ProcessingFlow';
 
 export default function StreamingMessage() {
   const segments = useStreamStore((s) => s.segments);
   const isStreaming = useStreamStore((s) => s.isStreaming);
   const nonAgentBlocks = useStreamStore((s) => s.nonAgentBlocks);
+  const error = useStreamStore((s) => s.error);
 
   const flowItems = interleaveFlowItems(segments, nonAgentBlocks);
 
-  if (flowItems.length === 0) return null;
+  if (flowItems.length === 0 && !error) return null;
 
   const agentStepCount = segments.length;
 
   return (
-    <ProcessingFlow agentStepCount={agentStepCount} isActive={isStreaming} defaultExpanded={true}>
-      {flowItems.map((item, idx) => {
+    <ProcessingFlow agentStepCount={agentStepCount} isActive={isStreaming} defaultExpanded={true} hasError={!!error}>
+      {flowItems.map((item) => {
         if (item.kind === 'agent') {
           return (
             <AgentSegmentBlock
@@ -39,6 +41,7 @@ export default function StreamingMessage() {
         }
         return null;
       })}
+      {error && <ErrorFlowBlock message={error} />}
     </ProcessingFlow>
   );
 }
