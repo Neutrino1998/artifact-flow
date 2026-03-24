@@ -129,8 +129,6 @@ class ContextManager:
 
         return [system_message] + history_messages + tool_messages
 
-    INVENTORY_PREVIEW_LENGTH = 200
-
     @classmethod
     def _find_task_plan(cls, artifacts_inventory: Optional[List[Dict]]) -> Optional[Dict]:
         """从 artifacts 清单中查找 task_plan"""
@@ -145,8 +143,8 @@ class ContextManager:
     @classmethod
     def _preview_content(cls, content: str) -> str:
         """截断内容为 inventory 预览长度"""
-        if len(content) > cls.INVENTORY_PREVIEW_LENGTH:
-            return content[:cls.INVENTORY_PREVIEW_LENGTH] + "..."
+        if len(content) > config.INVENTORY_PREVIEW_LENGTH:
+            return content[:config.INVENTORY_PREVIEW_LENGTH] + "..."
         return content
 
     @classmethod
@@ -166,9 +164,9 @@ class ContextManager:
             lines.append(f'<title>{artifact["title"]}</title>')
             content = artifact.get("content", "")
             preview = cls._preview_content(content)
-            is_truncated = len(content) > cls.INVENTORY_PREVIEW_LENGTH
+            is_truncated = len(content) > config.INVENTORY_PREVIEW_LENGTH
             if is_truncated:
-                lines.append(f'<content_preview length="{cls.INVENTORY_PREVIEW_LENGTH}">{preview}</content_preview>')
+                lines.append(f'<content_preview length="{config.INVENTORY_PREVIEW_LENGTH}">{preview}</content_preview>')
             else:
                 lines.append(f'<content>{content}</content>')
             lines.append('</artifact>')

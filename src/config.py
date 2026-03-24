@@ -37,6 +37,7 @@ class Settings(BaseSettings):
     COMPACTION_TIMEOUT: int = 600            # 秒, compaction 后台任务超时
     CONTEXT_MAX_CHARS: int = 240000          # context 最大字符数
     TOOL_INTERACTION_PRESERVE: int = 6       # 轮内 tool interaction 尾部保留条数
+    INVENTORY_PREVIEW_LENGTH: int = 200     # artifact 清单内容预览截断长度
 
     # 并发控制
     MAX_CONCURRENT_TASKS: int = 10  # 最大并发引擎执行数
