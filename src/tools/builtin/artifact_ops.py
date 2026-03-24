@@ -710,6 +710,12 @@ class ArtifactManager:
         """
         将所有 dirty artifacts 持久化到数据库。
 
+        Write-back 语义：执行期间 create/update/rewrite 只改内存，flush_all
+        在 engine loop 结束后统一持久化。同一轮执行内的多次编辑折叠为一个
+        最终快照 — DB 只产生一条版本记录，版本号取内存中的 current_version。
+        这意味着 ArtifactVersion 表的版本号可以是稀疏的（例如 v1 → v3，
+        跳过了内存中的 v2），中间状态不可恢复，这是预期行为。
+
         - 新建的 artifact → repo.create_artifact(target_version=memory.current_version)
         - 已有的 artifact → repo.upsert_artifact_content(target_version=memory.current_version)
 
