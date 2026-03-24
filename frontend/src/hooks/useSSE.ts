@@ -216,7 +216,7 @@ export function useSSE() {
               // Use snapshot from metadata if available (write-back: DB not yet updated)
               const snapshot = metadata?.artifact_snapshot as Record<string, unknown> | undefined;
               if (snapshot) {
-                setArtifactCurrent({
+                const detail = {
                   id: snapshot.id as string,
                   session_id: sessionId,
                   content_type: snapshot.content_type as string,
@@ -228,7 +228,28 @@ export function useSSE() {
                   updated_at: new Date().toISOString(),
                   versions: [],
                   latest_version: null,
-                });
+                };
+                setArtifactCurrent(detail);
+
+                // Keep artifacts list in sync so ArtifactList renders correctly
+                const existing = useArtifactStore.getState().artifacts;
+                const summary = {
+                  id: detail.id,
+                  content_type: detail.content_type,
+                  title: detail.title,
+                  current_version: detail.current_version,
+                  source: detail.source,
+                  created_at: detail.created_at,
+                  updated_at: detail.updated_at,
+                };
+                const idx = existing.findIndex((a) => a.id === detail.id);
+                if (idx >= 0) {
+                  const updated = [...existing];
+                  updated[idx] = summary;
+                  setArtifacts(updated);
+                } else {
+                  setArtifacts([...existing, summary]);
+                }
               } else {
                 // Fallback: fetch from REST API
                 api.getArtifact(sessionId, artifactId).then((detail) => {

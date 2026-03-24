@@ -24,8 +24,11 @@ export default function ArtifactPanel() {
 
   // Reload artifacts when conversation session changes
   useEffect(() => {
-    // Clear stale artifact detail from previous session
-    setCurrent_(null);
+    // Clear stale artifact detail only if it belongs to a different session
+    const cur = useArtifactStore.getState().current;
+    if (cur && cur.session_id !== sessionId) {
+      setCurrent_(null);
+    }
     if (sessionId) {
       loadArtifacts();
     }
