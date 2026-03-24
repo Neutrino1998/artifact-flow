@@ -174,11 +174,6 @@ class StreamEventHandler:
             if self.verbose and data.get("execution_metrics"):
                 metrics = data["execution_metrics"]
                 print(f"   总耗时: {metrics.get('total_duration_ms', 0)}ms")
-                events = metrics.get("events", [])
-                agent_events = [e for e in events if e.get("type") == "llm_complete"]
-                tool_events = [e for e in events if e.get("type") == "tool_complete"]
-                print(f"   Agent 执行次数: {len(agent_events)}")
-                print(f"   工具调用次数: {len(tool_events)}")
                 total_usage = metrics.get("total_token_usage", {})
                 print(f"   总 Token: {total_usage.get('input_tokens', 0)} in / {total_usage.get('output_tokens', 0)} out")
             if not self.verbose and data.get("response"):
