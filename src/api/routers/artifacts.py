@@ -11,13 +11,11 @@ from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query
 from fastapi.responses import Response
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import config
-from api.dependencies import get_artifact_manager, get_conversation_manager, get_current_user, get_db_session
+from api.dependencies import get_artifact_manager, get_conversation_manager, get_current_user
 from api.services.auth import TokenPayload
 from core.conversation_manager import ConversationManager
-from repositories.conversation_repo import ConversationRepository
 from api.schemas.artifact import (
     ArtifactListResponse,
     ArtifactDetailResponse,
@@ -36,12 +34,10 @@ router = APIRouter()
 
 
 async def _verify_session_ownership(
-    session_id: str, user: TokenPayload, session: AsyncSession
+    session_id: str, user: TokenPayload, conversation_manager: ConversationManager
 ) -> None:
     """校验 session（= conversation）归属当前用户"""
-    repo = ConversationRepository(session)
-    conv = await repo.get_conversation(session_id)
-    if not conv or conv.user_id != user.user_id:
+    if not await conversation_manager.verify_ownership(session_id, user.user_id):
         raise HTTPException(status_code=404, detail=f"Session '{session_id}' not found")
 
 
@@ -49,7 +45,6 @@ async def _verify_session_ownership(
 async def upload_file_new_session(
     file: UploadFile = File(...),
     current_user: TokenPayload = Depends(get_current_user),
-    db_session: AsyncSession = Depends(get_db_session),
     artifact_manager: ArtifactManager = Depends(get_artifact_manager),
     conversation_manager: ConversationManager = Depends(get_conversation_manager),
 ):
@@ -115,13 +110,13 @@ async def upload_file_new_session(
 async def list_artifacts(
     session_id: str,
     current_user: TokenPayload = Depends(get_current_user),
-    db_session: AsyncSession = Depends(get_db_session),
     artifact_manager: ArtifactManager = Depends(get_artifact_manager),
+    conversation_manager: ConversationManager = Depends(get_conversation_manager),
 ):
     """
     列出 session 下所有 artifacts
     """
-    await _verify_session_ownership(session_id, current_user, db_session)
+    await _verify_session_ownership(session_id, current_user, conversation_manager)
 
     try:
         artifacts = await artifact_manager.list_artifacts(
@@ -156,14 +151,14 @@ async def upload_file(
     session_id: str,
     file: UploadFile = File(...),
     current_user: TokenPayload = Depends(get_current_user),
-    db_session: AsyncSession = Depends(get_db_session),
     artifact_manager: ArtifactManager = Depends(get_artifact_manager),
+    conversation_manager: ConversationManager = Depends(get_conversation_manager),
 ):
     """
     Upload a file and create an artifact from it.
     Supports text files, markdown, code, PDF, and Word documents.
     """
-    await _verify_session_ownership(session_id, current_user, db_session)
+    await _verify_session_ownership(session_id, current_user, conversation_manager)
 
     # Read file bytes
     file_bytes = await file.read()
@@ -220,14 +215,14 @@ async def export_artifact(
     artifact_id: str,
     format: str = Query(..., description="Export format (docx)"),
     current_user: TokenPayload = Depends(get_current_user),
-    db_session: AsyncSession = Depends(get_db_session),
     artifact_manager: ArtifactManager = Depends(get_artifact_manager),
+    conversation_manager: ConversationManager = Depends(get_conversation_manager),
 ):
     """
     Export an artifact to a different format.
     Currently supports exporting text/markdown artifacts to docx.
     """
-    await _verify_session_ownership(session_id, current_user, db_session)
+    await _verify_session_ownership(session_id, current_user, conversation_manager)
 
     if format != "docx":
         raise HTTPException(status_code=422, detail=f"Unsupported export format: {format}")
@@ -274,15 +269,14 @@ async def get_artifact(
     session_id: str,
     artifact_id: str,
     current_user: TokenPayload = Depends(get_current_user),
-    db_session: AsyncSession = Depends(get_db_session),
     artifact_manager: ArtifactManager = Depends(get_artifact_manager),
+    conversation_manager: ConversationManager = Depends(get_conversation_manager),
 ):
     """
     获取 artifact 详情（包含当前版本内容、版本列表和最新版本详情）
     """
-    await _verify_session_ownership(session_id, current_user, db_session)
+    await _verify_session_ownership(session_id, current_user, conversation_manager)
 
-    repo = artifact_manager._ensure_repository()
     result = await artifact_manager.read_artifact(
         session_id=session_id,
         artifact_id=artifact_id
@@ -294,21 +288,21 @@ async def get_artifact(
             detail=f"Artifact '{artifact_id}' not found in session '{session_id}'"
         )
 
-    # Fetch version list and latest version detail in parallel
-    version_list = await repo.list_versions(session_id, artifact_id)
+    # Fetch version list and latest version detail via manager
+    versions = await artifact_manager.list_versions(session_id, artifact_id)
     version_summaries = [
         VersionSummary(
-            version=v["version"],
-            update_type=v["update_type"],
-            created_at=datetime.fromisoformat(v["created_at"]),
+            version=v.version,
+            update_type=v.update_type,
+            created_at=v.created_at,
         )
-        for v in version_list
+        for v in versions
     ]
 
     latest_version_detail = None
     current_ver = result["version"]
     if current_ver:
-        ver = await repo.get_version(session_id, artifact_id, current_ver)
+        ver = await artifact_manager.get_version(session_id, artifact_id, current_ver)
         if ver:
             latest_version_detail = VersionDetailResponse(
                 version=ver.version,
@@ -339,17 +333,15 @@ async def get_version(
     artifact_id: str,
     version: int,
     current_user: TokenPayload = Depends(get_current_user),
-    db_session: AsyncSession = Depends(get_db_session),
     artifact_manager: ArtifactManager = Depends(get_artifact_manager),
+    conversation_manager: ConversationManager = Depends(get_conversation_manager),
 ):
     """
     获取特定版本的完整内容
     """
-    await _verify_session_ownership(session_id, current_user, db_session)
-    repo = artifact_manager._ensure_repository()
+    await _verify_session_ownership(session_id, current_user, conversation_manager)
 
-    # 获取版本
-    ver = await repo.get_version(session_id, artifact_id, version)
+    ver = await artifact_manager.get_version(session_id, artifact_id, version)
 
     if ver is None:
         raise HTTPException(

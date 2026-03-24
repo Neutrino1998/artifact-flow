@@ -7,7 +7,7 @@
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 
-from sqlalchemy import select, func, and_
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -132,30 +132,6 @@ class ConversationRepository(BaseRepository[Conversation]):
         conversation = await self.get_conversation(conversation_id, **kwargs)
         if not conversation:
             raise NotFoundError("Conversation", conversation_id)
-        return conversation
-    
-    async def update_active_branch(
-        self,
-        conversation_id: str,
-        message_id: str
-    ) -> Conversation:
-        """
-        更新对话的活跃分支
-        
-        Args:
-            conversation_id: 对话ID
-            message_id: 新的活跃分支消息ID
-            
-        Returns:
-            更新后的对话
-            
-        Raises:
-            NotFoundError: 对话不存在
-        """
-        conversation = await self.get_conversation_or_raise(conversation_id)
-        conversation.active_branch = message_id
-        conversation.updated_at = datetime.now()
-        await self.update(conversation)
         return conversation
     
     async def update_title(
@@ -460,137 +436,3 @@ class ConversationRepository(BaseRepository[Conversation]):
         
         return path
     
-    async def get_branch_children(
-        self,
-        conversation_id: str,
-        parent_id: str
-    ) -> List[Message]:
-        """
-        获取消息的所有子分支
-        
-        Args:
-            conversation_id: 对话ID
-            parent_id: 父消息ID
-            
-        Returns:
-            子消息列表
-        """
-        query = (
-            select(Message)
-            .where(
-                and_(
-                    Message.conversation_id == conversation_id,
-                    Message.parent_id == parent_id
-                )
-            )
-            .order_by(Message.created_at)
-        )
-        
-        result = await self._session.execute(query)
-        return list(result.scalars().all())
-    
-    async def format_conversation_history(
-        self,
-        conversation_id: str,
-        to_message_id: Optional[str] = None
-    ) -> List[Dict[str, str]]:
-        """
-        格式化对话历史为消息列表
-        
-        Args:
-            conversation_id: 对话ID
-            to_message_id: 目标消息ID
-            
-        Returns:
-            格式化的消息列表：
-            [{"role": "user", "content": ...}, {"role": "assistant", "content": ...}, ...]
-        """
-        path = await self.get_conversation_path(conversation_id, to_message_id)
-        
-        messages = []
-        for msg in path:
-            # 添加用户消息（优先使用摘要）
-            messages.append({
-                "role": "user",
-                "content": msg.user_input_summary or msg.user_input
-            })
-
-            # 添加 assistant 响应（如果有，优先使用摘要）
-            response = msg.response
-            if response:
-                messages.append({
-                    "role": "assistant",
-                    "content": msg.response_summary or response
-                })
-
-        return messages
-    
-    async def get_branch_structure(
-        self,
-        conversation_id: str
-    ) -> Dict[str, List[str]]:
-        """
-        获取对话的分支结构
-        
-        Args:
-            conversation_id: 对话ID
-            
-        Returns:
-            分支结构字典：{parent_id: [child_ids]}
-        """
-        messages = await self.get_conversation_messages(conversation_id)
-        
-        branches: Dict[str, List[str]] = {}
-        for msg in messages:
-            if msg.parent_id:
-                if msg.parent_id not in branches:
-                    branches[msg.parent_id] = []
-                branches[msg.parent_id].append(msg.id)
-        
-        return branches
-
-
-# ============================================================
-# 辅助类型
-# ============================================================
-
-class MessagePath:
-    """
-    消息路径封装类
-    
-    提供便捷的路径操作方法。
-    """
-    
-    def __init__(self, messages: List[Message]):
-        self.messages = messages
-    
-    def __len__(self) -> int:
-        return len(self.messages)
-    
-    def __iter__(self):
-        return iter(self.messages)
-    
-    @property
-    def root(self) -> Optional[Message]:
-        """获取根消息"""
-        return self.messages[0] if self.messages else None
-    
-    @property
-    def leaf(self) -> Optional[Message]:
-        """获取叶子消息"""
-        return self.messages[-1] if self.messages else None
-    
-    @property
-    def depth(self) -> int:
-        """获取路径深度"""
-        return len(self.messages)
-    
-    def to_formatted_history(self) -> List[Dict[str, str]]:
-        """转换为格式化的对话历史"""
-        history = []
-        for msg in self.messages:
-            history.append({"role": "user", "content": msg.user_input_summary or msg.user_input})
-            response = msg.response
-            if response:
-                history.append({"role": "assistant", "content": msg.response_summary or response})
-        return history

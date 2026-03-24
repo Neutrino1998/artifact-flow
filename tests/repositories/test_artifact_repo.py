@@ -1,7 +1,7 @@
 """
 ArtifactRepository contract tests.
 
-Covers session management, artifact CRUD, optimistic locking,
+Covers session management, artifact CRUD, content updates,
 version history, and batch operations.
 """
 
@@ -14,7 +14,6 @@ from db.models import (
     Conversation,
     Artifact,
     ArtifactVersion,
-    VersionConflictError,
 )
 from repositories.artifact_repo import ArtifactRepository
 from repositories.conversation_repo import ConversationRepository
@@ -107,7 +106,6 @@ class TestArtifactCRUD:
 
         assert artifact.id == artifact_id
         assert artifact.current_version == 1
-        assert artifact.lock_version == 1
         assert artifact.content == "print('hello')"
 
         # v1 version record should exist
@@ -170,9 +168,9 @@ class TestArtifactCRUD:
             artifact_session, content_type="text/markdown"
         )
         assert len(md_only) == 1
-        assert md_only[0]["content_type"] == "text/markdown"
+        assert md_only[0].content_type == "text/markdown"
 
-    async def test_list_artifacts_returns_full_content(
+    async def test_list_artifacts_returns_orm_objects(
         self, artifact_repo: ArtifactRepository, artifact_session: str
     ):
         long_content = "x" * 300
@@ -186,59 +184,33 @@ class TestArtifactCRUD:
 
         arts = await artifact_repo.list_artifacts(artifact_session)
         assert len(arts) == 1
-        assert arts[0]["content"] == long_content
-
-    async def test_delete_artifact_cascades_versions(
-        self, artifact_repo: ArtifactRepository, sample_artifact
-    ):
-        session_id, artifact_id, _ = sample_artifact
-
-        # Update to create v2
-        await artifact_repo.update_artifact_content(
-            session_id, artifact_id, "updated", "update", expected_lock_version=1
-        )
-
-        result = await artifact_repo.delete_artifact(session_id, artifact_id)
-        assert result is True
-
-        # Artifact and versions should be gone
-        assert await artifact_repo.get_artifact(session_id, artifact_id) is None
-        assert await artifact_repo.get_version(session_id, artifact_id, 1) is None
-        assert await artifact_repo.get_version(session_id, artifact_id, 2) is None
-
-    async def test_delete_artifact_nonexistent(
-        self, artifact_repo: ArtifactRepository, artifact_session: str
-    ):
-        result = await artifact_repo.delete_artifact(artifact_session, "nonexistent")
-        assert result is False
+        assert arts[0].content == long_content
 
 
 # ============================================================
-# Optimistic locking (PG migration critical)
+# Content updates (upsert_artifact_content)
 # ============================================================
 
 
-class TestOptimisticLocking:
+class TestContentUpdates:
 
-    async def test_update_content_increments_versions(
+    async def test_upsert_increments_version(
         self, artifact_repo: ArtifactRepository, sample_artifact
     ):
         session_id, artifact_id, artifact = sample_artifact
         assert artifact.current_version == 1
-        assert artifact.lock_version == 1
 
-        updated = await artifact_repo.update_artifact_content(
-            session_id, artifact_id, "v2 content", "update", expected_lock_version=1
+        updated = await artifact_repo.upsert_artifact_content(
+            session_id, artifact_id, "v2 content", "update"
         )
         assert updated.current_version == 2
-        assert updated.lock_version == 2
 
-    async def test_update_content_creates_version_record(
+    async def test_upsert_creates_version_record(
         self, artifact_repo: ArtifactRepository, sample_artifact
     ):
         session_id, artifact_id, _ = sample_artifact
-        await artifact_repo.update_artifact_content(
-            session_id, artifact_id, "v2 content", "update", expected_lock_version=1
+        await artifact_repo.upsert_artifact_content(
+            session_id, artifact_id, "v2 content", "update"
         )
 
         ver = await artifact_repo.get_version(session_id, artifact_id, 2)
@@ -246,44 +218,26 @@ class TestOptimisticLocking:
         assert ver.content == "v2 content"
         assert ver.update_type == "update"
 
-    async def test_update_content_wrong_lock_raises(
-        self, artifact_repo: ArtifactRepository, sample_artifact
+    async def test_upsert_nonexistent_raises(
+        self, artifact_repo: ArtifactRepository, artifact_session: str
     ):
-        session_id, artifact_id, _ = sample_artifact
-
-        with pytest.raises(VersionConflictError) as exc_info:
-            await artifact_repo.update_artifact_content(
-                session_id, artifact_id, "bad", "update", expected_lock_version=999
+        with pytest.raises(NotFoundError):
+            await artifact_repo.upsert_artifact_content(
+                artifact_session, "nonexistent", "content", "update"
             )
-        assert exc_info.value.artifact_id == artifact_id
-        assert exc_info.value.expected_version == 999
 
-    async def test_rewrite_artifact(
+    async def test_upsert_rewrite(
         self, artifact_repo: ArtifactRepository, sample_artifact
     ):
         session_id, artifact_id, _ = sample_artifact
-        result = await artifact_repo.rewrite_artifact(
-            session_id, artifact_id, "completely new", expected_lock_version=1
+        result = await artifact_repo.upsert_artifact_content(
+            session_id, artifact_id, "completely new", "rewrite"
         )
         assert result.content == "completely new"
         assert result.current_version == 2
 
         ver = await artifact_repo.get_version(session_id, artifact_id, 2)
         assert ver.update_type == "rewrite"
-
-    async def test_update_title_no_version_change(
-        self, artifact_repo: ArtifactRepository, sample_artifact
-    ):
-        session_id, artifact_id, artifact = sample_artifact
-        old_version = artifact.current_version
-        old_lock = artifact.lock_version
-
-        updated = await artifact_repo.update_artifact_title(
-            session_id, artifact_id, "New Title"
-        )
-        assert updated.title == "New Title"
-        assert updated.current_version == old_version
-        assert updated.lock_version == old_lock
 
 
 # ============================================================
@@ -315,8 +269,8 @@ class TestVersionHistory:
         session_id, artifact_id, _ = sample_artifact
 
         # Create v2
-        await artifact_repo.update_artifact_content(
-            session_id, artifact_id, "v2", "update", expected_lock_version=1
+        await artifact_repo.upsert_artifact_content(
+            session_id, artifact_id, "v2", "update"
         )
 
         # Get v1 content
@@ -335,45 +289,20 @@ class TestVersionHistory:
         session_id, artifact_id, _ = sample_artifact
 
         # Create v2 and v3
-        await artifact_repo.update_artifact_content(
-            session_id, artifact_id, "v2", "update", expected_lock_version=1
+        await artifact_repo.upsert_artifact_content(
+            session_id, artifact_id, "v2", "update"
         )
-        await artifact_repo.update_artifact_content(
-            session_id, artifact_id, "v3", "update", expected_lock_version=2
+        await artifact_repo.upsert_artifact_content(
+            session_id, artifact_id, "v3", "update"
         )
 
         versions = await artifact_repo.list_versions(session_id, artifact_id)
         assert len(versions) == 3
-        assert [v["version"] for v in versions] == [1, 2, 3]
-        assert versions[0]["update_type"] == "create"
-        assert versions[1]["update_type"] == "update"
-
-    async def test_get_version_diff(
-        self, artifact_repo: ArtifactRepository, sample_artifact
-    ):
-        session_id, artifact_id, _ = sample_artifact
-
-        await artifact_repo.update_artifact_content(
-            session_id, artifact_id, "v2 content", "update", expected_lock_version=1
-        )
-
-        diff = await artifact_repo.get_version_diff(session_id, artifact_id, 1, 2)
-        assert diff is not None
-        assert diff["from_version"] == 1
-        assert diff["to_version"] == 2
-        assert diff["from_content"] == "# Hello World"
-        assert diff["to_content"] == "v2 content"
-        assert diff["to_update_type"] == "update"
-
-    async def test_get_version_diff_nonexistent(
-        self, artifact_repo: ArtifactRepository, sample_artifact
-    ):
-        session_id, artifact_id, _ = sample_artifact
-        diff = await artifact_repo.get_version_diff(session_id, artifact_id, 1, 999)
-        assert diff is None
+        assert [v.version for v in versions] == [1, 2, 3]
+        assert versions[0].update_type == "create"
+        assert versions[1].update_type == "update"
 
 
 # ============================================================
 # Batch operations
 # ============================================================
-

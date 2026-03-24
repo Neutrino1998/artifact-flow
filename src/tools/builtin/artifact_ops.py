@@ -18,7 +18,6 @@ from fuzzysearch import find_near_matches
 from tools.base import BaseTool, ToolResult, ToolParameter, ToolPermission
 from repositories.artifact_repo import ArtifactRepository
 from repositories.base import NotFoundError, DuplicateError
-from db.models import VersionConflictError
 from utils.logger import get_logger
 
 logger = get_logger("ArtifactFlow")
@@ -251,7 +250,6 @@ class ArtifactMemory:
         title: str,
         content: str,
         current_version: int = 1,
-        lock_version: int = 1,
         metadata: Dict = None,
         created_at: Optional[datetime] = None,
         source: str = "agent"
@@ -262,7 +260,6 @@ class ArtifactMemory:
         self.content = content
         self.metadata = metadata or {}
         self.current_version = current_version
-        self.lock_version = lock_version
         self.created_at = created_at or datetime.now()
         self.updated_at = datetime.now()
         self.source = source
@@ -397,7 +394,7 @@ class ArtifactManager:
     - 协调内存 Artifact 和数据库持久化
     - 通过依赖注入接收 ArtifactRepository
     - 维护当前 session 的内存缓存
-    - 使用乐观锁进行并发控制
+    - 执行期间只改内存，loop 结束统一 flush
 
     使用方式：
         async with db_manager.session() as session:
@@ -407,15 +404,11 @@ class ArtifactManager:
     """
 
     def __init__(self, repository: Optional[ArtifactRepository] = None):
-        """
-        初始化 ArtifactManager
-
-        Args:
-            repository: ArtifactRepository 实例（可以为 None）
-        """
         self.repository = repository
         self._cache: Dict[str, Dict[str, ArtifactMemory]] = {}  # {session_id: {artifact_id: ArtifactMemory}}
         self._current_session_id: Optional[str] = None
+        self._dirty: set = set()  # Set of (session_id, artifact_id) tuples
+        self._new: set = set()    # Set of (session_id, artifact_id) tuples — created during this execution
 
     def _ensure_repository(self) -> ArtifactRepository:
         """确保 Repository 已设置"""
@@ -452,47 +445,29 @@ class ArtifactManager:
         source: str = "agent"
     ) -> Tuple[bool, str]:
         """
-        创建新的 Artifact
-
-        Args:
-            session_id: Session ID
-            artifact_id: Artifact ID
-            content_type: 内容类型
-            title: 标题
-            content: 初始内容
-            metadata: 元数据
-            source: 来源 (agent, user_upload)
-
-        Returns:
-            (成功与否, 消息)
+        创建新的 Artifact（只写内存，flush_all 时持久化）
         """
         try:
-            repo = self._ensure_repository()
-
-            # 1. 确保 session 存在
+            # 确保 session 存在
             await self.ensure_session_exists(session_id)
 
-            # 2. 创建数据库记录
-            db_artifact = await repo.create_artifact(
-                session_id=session_id,
-                artifact_id=artifact_id,
-                content_type=content_type,
-                title=title,
-                content=content,
-                metadata=metadata,
-                source=source
-            )
+            # 检查缓存和 DB 中是否已存在
+            if session_id in self._cache and artifact_id in self._cache[session_id]:
+                return False, f"Artifact '{artifact_id}' already exists in session"
 
-            # 3. 创建内存缓存
+            repo = self._ensure_repository()
+            existing = await repo.get_artifact(session_id, artifact_id)
+            if existing:
+                return False, f"Artifact '{artifact_id}' already exists in session"
+
+            # 创建内存对象
             memory = ArtifactMemory(
                 artifact_id=artifact_id,
                 content_type=content_type,
                 title=title,
                 content=content,
-                current_version=db_artifact.current_version,
-                lock_version=db_artifact.lock_version,
+                current_version=1,
                 metadata=metadata,
-                created_at=db_artifact.created_at,
                 source=source,
             )
 
@@ -500,11 +475,14 @@ class ArtifactManager:
                 self._cache[session_id] = {}
             self._cache[session_id][artifact_id] = memory
 
-            logger.info(f"Created artifact '{artifact_id}' in session '{session_id}'")
+            # 标记为 dirty + new
+            key = (session_id, artifact_id)
+            self._dirty.add(key)
+            self._new.add(key)
+
+            logger.info(f"Created artifact '{artifact_id}' in session '{session_id}' (pending flush)")
             return True, f"Created artifact '{artifact_id}'"
 
-        except DuplicateError:
-            return False, f"Artifact '{artifact_id}' already exists in session"
         except NotFoundError as e:
             return False, str(e)
         except Exception as e:
@@ -521,16 +499,7 @@ class ArtifactManager:
     ) -> Tuple[bool, str, Optional[Dict]]:
         """
         Create artifact from user-uploaded file.
-
-        Args:
-            session_id: Session ID
-            filename: Original filename
-            content: Converted text content
-            content_type: MIME type (after conversion)
-            metadata: Conversion metadata
-
-        Returns:
-            (success, message, artifact_info dict or None)
+        Uploads are committed immediately (not deferred to flush_all).
         """
         # Generate artifact_id from filename (allow Unicode letters/digits)
         base = re.sub(r'[^\w\-.]', '_', filename)
@@ -558,18 +527,35 @@ class ArtifactManager:
         upload_metadata = metadata or {}
         upload_metadata["original_filename"] = filename
 
-        success, message = await self.create_artifact(
-            session_id=session_id,
-            artifact_id=artifact_id,
-            content_type=content_type,
-            title=title,
-            content=content,
-            metadata=upload_metadata,
-            source="user_upload"
-        )
+        # Uploads commit immediately via repo
+        try:
+            await self.ensure_session_exists(session_id)
+            db_artifact = await repo.create_artifact(
+                session_id=session_id,
+                artifact_id=artifact_id,
+                content_type=content_type,
+                title=title,
+                content=content,
+                metadata=upload_metadata,
+                source="user_upload"
+            )
 
-        if success:
-            return True, message, {
+            # Cache the memory object (not dirty — already persisted)
+            memory = ArtifactMemory(
+                artifact_id=artifact_id,
+                content_type=content_type,
+                title=title,
+                content=content,
+                current_version=db_artifact.current_version,
+                metadata=upload_metadata,
+                created_at=db_artifact.created_at,
+                source="user_upload",
+            )
+            if session_id not in self._cache:
+                self._cache[session_id] = {}
+            self._cache[session_id][artifact_id] = memory
+
+            return True, f"Created artifact '{artifact_id}'", {
                 "id": artifact_id,
                 "session_id": session_id,
                 "content_type": content_type,
@@ -578,23 +564,18 @@ class ArtifactManager:
                 "source": "user_upload",
                 "original_filename": filename,
             }
-        return False, message, None
+        except DuplicateError:
+            return False, f"Artifact '{artifact_id}' already exists in session", None
+        except Exception as e:
+            logger.exception(f"Failed to create upload artifact: {e}")
+            return False, f"Failed to create artifact: {str(e)}", None
 
     async def get_artifact(
         self,
         session_id: str,
         artifact_id: str
     ) -> Optional[ArtifactMemory]:
-        """
-        获取 Artifact（优先从缓存）
-
-        Args:
-            session_id: Session ID
-            artifact_id: Artifact ID
-
-        Returns:
-            ArtifactMemory 对象
-        """
+        """获取 Artifact（优先从缓存，miss 时从 DB 加载）"""
         # 1. 检查缓存
         if session_id in self._cache and artifact_id in self._cache[session_id]:
             return self._cache[session_id][artifact_id]
@@ -612,7 +593,6 @@ class ArtifactManager:
             title=db_artifact.title,
             content=db_artifact.content,
             current_version=db_artifact.current_version,
-            lock_version=db_artifact.lock_version,
             metadata=db_artifact.metadata_,
             created_at=db_artifact.created_at,
             source=db_artifact.source,
@@ -624,6 +604,21 @@ class ArtifactManager:
 
         return memory
 
+    def build_snapshot(self, session_id: str, artifact_id: str) -> Optional[Dict[str, Any]]:
+        """Build an artifact snapshot dict from the in-memory cache for SSE transport."""
+        memory = self._cache.get(session_id, {}).get(artifact_id)
+        if not memory:
+            return None
+        return {
+            "id": memory.id,
+            "session_id": session_id,
+            "content_type": memory.content_type,
+            "title": memory.title,
+            "content": memory.content,
+            "current_version": memory.current_version,
+            "source": memory.source,
+        }
+
     async def update_artifact(
         self,
         session_id: str,
@@ -631,63 +626,25 @@ class ArtifactManager:
         old_str: str,
         new_str: str
     ) -> Tuple[bool, str, Optional[Dict]]:
-        """
-        更新 Artifact 内容（使用 diff-match-patch）
-
-        Args:
-            session_id: Session ID
-            artifact_id: Artifact ID
-            old_str: 要替换的文本
-            new_str: 新文本
-
-        Returns:
-            (成功与否, 消息, 匹配信息)
-        """
-        # 1. 获取内存对象
+        """更新 Artifact 内容（只改内存，标记 dirty）"""
         memory = await self.get_artifact(session_id, artifact_id)
         if not memory:
             return False, f"Artifact '{artifact_id}' not found", None
 
-        # 2. 计算更新
         success, msg, new_content, match_info = memory.compute_update(old_str, new_str)
 
         if not success:
             return False, msg, None
 
-        # 3. 持久化到数据库（使用乐观锁）
-        try:
-            repo = self._ensure_repository()
-            update_type = "update" if match_info["match_type"] == "exact" else "update_fuzzy"
+        # 只改内存
+        memory.content = new_content
+        memory.current_version += 1
+        memory.updated_at = datetime.now()
+        memory.source = "agent"
 
-            db_artifact = await repo.update_artifact_content(
-                session_id=session_id,
-                artifact_id=artifact_id,
-                new_content=new_content,
-                update_type=update_type,
-                expected_lock_version=memory.lock_version,
-                changes=match_info.get("changes"),
-                source="agent"
-            )
+        self._dirty.add((session_id, artifact_id))
 
-            # 4. 更新内存缓存
-            memory.content = new_content
-            memory.current_version = db_artifact.current_version
-            memory.lock_version = db_artifact.lock_version
-            memory.updated_at = datetime.now()
-            memory.source = "agent"
-
-            return True, f"Successfully updated artifact '{artifact_id}' (v{memory.current_version})", match_info
-
-        except VersionConflictError as e:
-            # 版本冲突，需要重新加载
-            logger.warning(f"Version conflict: {e}")
-            # 清除缓存，下次访问时重新加载
-            if session_id in self._cache and artifact_id in self._cache[session_id]:
-                del self._cache[session_id][artifact_id]
-            return False, f"Version conflict: artifact was modified by another process", None
-        except Exception as e:
-            logger.exception(f"Failed to update artifact: {e}")
-            return False, f"Failed to update artifact: {str(e)}", None
+        return True, f"Successfully updated artifact '{artifact_id}' (v{memory.current_version})", match_info
 
     async def rewrite_artifact(
         self,
@@ -695,49 +652,19 @@ class ArtifactManager:
         artifact_id: str,
         new_content: str
     ) -> Tuple[bool, str]:
-        """
-        完全重写 Artifact 内容
-
-        Args:
-            session_id: Session ID
-            artifact_id: Artifact ID
-            new_content: 新内容
-
-        Returns:
-            (成功与否, 消息)
-        """
-        # 1. 获取内存对象
+        """完全重写 Artifact 内容（只改内存，标记 dirty）"""
         memory = await self.get_artifact(session_id, artifact_id)
         if not memory:
             return False, f"Artifact '{artifact_id}' not found"
 
-        # 2. 持久化到数据库
-        try:
-            repo = self._ensure_repository()
-            db_artifact = await repo.rewrite_artifact(
-                session_id=session_id,
-                artifact_id=artifact_id,
-                new_content=new_content,
-                expected_lock_version=memory.lock_version,
-                source="agent"
-            )
+        memory.content = new_content
+        memory.current_version += 1
+        memory.updated_at = datetime.now()
+        memory.source = "agent"
 
-            # 3. 更新内存缓存
-            memory.content = new_content
-            memory.current_version = db_artifact.current_version
-            memory.lock_version = db_artifact.lock_version
-            memory.updated_at = datetime.now()
-            memory.source = "agent"
+        self._dirty.add((session_id, artifact_id))
 
-            return True, f"Successfully rewritten artifact '{artifact_id}' (v{memory.current_version})"
-
-        except VersionConflictError:
-            if session_id in self._cache and artifact_id in self._cache[session_id]:
-                del self._cache[session_id][artifact_id]
-            return False, "Version conflict: artifact was modified by another process"
-        except Exception as e:
-            logger.exception(f"Failed to rewrite artifact: {e}")
-            return False, f"Failed to rewrite artifact: {str(e)}"
+        return True, f"Successfully rewritten artifact '{artifact_id}' (v{memory.current_version})"
 
     async def read_artifact(
         self,
@@ -745,19 +672,8 @@ class ArtifactManager:
         artifact_id: str,
         version: Optional[int] = None
     ) -> Optional[Dict[str, Any]]:
-        """
-        读取 Artifact 内容
-
-        Args:
-            session_id: Session ID
-            artifact_id: Artifact ID
-            version: 版本号（None 则读取最新版本）
-
-        Returns:
-            Artifact 信息字典
-        """
+        """读取 Artifact 内容"""
         if version is None:
-            # 读取当前版本
             memory = await self.get_artifact(session_id, artifact_id)
             if not memory:
                 return None
@@ -773,7 +689,6 @@ class ArtifactManager:
                 "updated_at": memory.updated_at.isoformat()
             }
         else:
-            # 读取历史版本
             repo = self._ensure_repository()
             content = await repo.get_version_content(session_id, artifact_id, version)
             if content is None:
@@ -791,30 +706,101 @@ class ArtifactManager:
                 "updated_at": None
             }
 
+    async def flush_all(self, session_id: str) -> None:
+        """
+        将所有 dirty artifacts 持久化到数据库。
+
+        - 新建的 artifact → repo.create_artifact() + v1
+        - 已有的 artifact → repo.upsert_artifact_content() + v_next
+        """
+        if not self._dirty:
+            return
+
+        repo = self._ensure_repository()
+        to_flush = [(sid, aid) for sid, aid in self._dirty if sid == session_id]
+
+        for sid, aid in to_flush:
+            memory = self._cache.get(sid, {}).get(aid)
+            if not memory:
+                continue
+
+            try:
+                if (sid, aid) in self._new:
+                    # New artifact — create in DB
+                    await repo.create_artifact(
+                        session_id=sid,
+                        artifact_id=aid,
+                        content_type=memory.content_type,
+                        title=memory.title,
+                        content=memory.content,
+                        metadata=memory.metadata,
+                        source=memory.source,
+                    )
+                    # If there were updates after create (version > 1), persist those too
+                    if memory.current_version > 1:
+                        await repo.upsert_artifact_content(
+                            session_id=sid,
+                            artifact_id=aid,
+                            new_content=memory.content,
+                            update_type="update",
+                            source=memory.source,
+                        )
+                else:
+                    # Existing artifact — update content
+                    await repo.upsert_artifact_content(
+                        session_id=sid,
+                        artifact_id=aid,
+                        new_content=memory.content,
+                        update_type="update",
+                        source=memory.source,
+                    )
+
+                logger.info(f"Flushed artifact '{aid}' in session '{sid}'")
+            except Exception as e:
+                logger.exception(f"Failed to flush artifact '{aid}': {e}")
+
+        # Clear dirty/new sets for this session
+        self._dirty = {(s, a) for s, a in self._dirty if s != session_id}
+        self._new = {(s, a) for s, a in self._new if s != session_id}
+
+    async def get_version(self, session_id: str, artifact_id: str, version: int):
+        """获取指定版本"""
+        repo = self._ensure_repository()
+        return await repo.get_version(session_id, artifact_id, version)
+
+    async def list_versions(self, session_id: str, artifact_id: str):
+        """列出 Artifact 的所有版本（ORM 对象列表）"""
+        repo = self._ensure_repository()
+        return await repo.list_versions(session_id, artifact_id)
+
     async def list_artifacts(
         self,
         session_id: str,
         content_type: Optional[str] = None,
         include_content: bool = True,
     ) -> List[Dict[str, Any]]:
-        """
-        列出 Session 的所有 Artifacts
-
-        Args:
-            session_id: Session ID
-            content_type: 按类型筛选
-            include_content: 是否包含内容
-
-        Returns:
-            Artifact 信息列表
-        """
+        """列出 Session 的所有 Artifacts（序列化后的 dict）"""
         repo = self._ensure_repository()
-
-        return await repo.list_artifacts(
+        artifacts = await repo.list_artifacts(
             session_id=session_id,
             content_type=content_type,
-            include_content=include_content,
         )
+
+        result = []
+        for art in artifacts:
+            info: Dict[str, Any] = {
+                "id": art.id,
+                "content_type": art.content_type,
+                "title": art.title,
+                "version": art.current_version,
+                "source": art.source,
+                "created_at": art.created_at.isoformat(),
+                "updated_at": art.updated_at.isoformat(),
+            }
+            if include_content:
+                info["content"] = art.content
+            result.append(info)
+        return result
 
 
 # ============================================================
@@ -884,9 +870,11 @@ class CreateArtifactTool(BaseTool):
 
         if success:
             logger.info(message)
+            snapshot = self._manager.build_snapshot(session_id, params["id"])
             return ToolResult(
                 success=True,
                 data=f'<artifact version="1"><id>{params["id"]}</id> {message}</artifact>',
+                metadata={"artifact_snapshot": snapshot} if snapshot else {},
             )
         return ToolResult(success=False, error=message)
 
@@ -969,7 +957,11 @@ class UpdateArtifactTool(BaseTool):
             else:
                 xml = f'<artifact version="{version}"><id>{params["id"]}</id> {message}</artifact>'
 
-            return ToolResult(success=True, data=xml, metadata=match_info)
+            metadata = match_info or {}
+            snapshot = self._manager.build_snapshot(session_id, params["id"])
+            if snapshot:
+                metadata["artifact_snapshot"] = snapshot
+            return ToolResult(success=True, data=xml, metadata=metadata)
 
         return ToolResult(success=False, error=message)
 
@@ -1040,9 +1032,11 @@ class RewriteArtifactTool(BaseTool):
             logger.info(message)
             memory = await self._manager.get_artifact(session_id, params["id"])
             version = memory.current_version if memory else None
+            snapshot = self._manager.build_snapshot(session_id, params["id"])
             return ToolResult(
                 success=True,
                 data=f'<artifact version="{version}"><id>{params["id"]}</id> {message}</artifact>',
+                metadata={"artifact_snapshot": snapshot} if snapshot else {},
             )
 
         return ToolResult(success=False, error=message)

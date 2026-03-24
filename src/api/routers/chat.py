@@ -47,7 +47,6 @@ from api.services.stream_manager import StreamManager
 from api.services.task_manager import TaskManager
 from core.conversation_manager import ConversationManager
 from repositories.base import NotFoundError
-from repositories.conversation_repo import ConversationRepository
 from utils.logger import get_logger, set_request_context
 
 logger = get_logger("ArtifactFlow")
@@ -56,11 +55,10 @@ router = APIRouter()
 
 
 async def _verify_ownership(
-    conv_id: str, user: TokenPayload, repo: ConversationRepository
+    conv_id: str, user: TokenPayload, conversation_manager: ConversationManager
 ) -> None:
     """校验 conversation 归属当前用户，不匹配返回 404"""
-    conv = await repo.get_conversation(conv_id)
-    if not conv or conv.user_id != user.user_id:
+    if not await conversation_manager.verify_ownership(conv_id, user.user_id):
         raise HTTPException(status_code=404, detail=f"Conversation '{conv_id}' not found")
 
 
@@ -186,8 +184,7 @@ async def send_message(
 
     # 已有会话：校验归属
     if request.conversation_id:
-        repo = conversation_manager._ensure_repository()
-        await _verify_ownership(conversation_id, current_user, repo)
+        await _verify_ownership(conversation_id, current_user, conversation_manager)
 
     # 原子地预留 conversation — 在任何 await 之前完成，消除竞争窗口
     active = task_manager.try_reserve_conversation(conversation_id, message_id)
@@ -265,8 +262,7 @@ async def inject_message(
     可通过 GET /chat/{conv_id}/messages/{msg_id}/events 查询。
     不创建独立 Message 记录（注入是同一轮执行的补充输入，非独立对话轮次）。
     """
-    repo = conversation_manager._ensure_repository()
-    await _verify_ownership(conv_id, current_user, repo)
+    await _verify_ownership(conv_id, current_user, conversation_manager)
 
     active_msg_id = task_manager.get_active_message_id(conv_id)
     if not active_msg_id:
@@ -292,8 +288,7 @@ async def cancel_execution(
 
     请求取消 conversation 当前正在运行的执行。引擎会在下一个检查点优雅退出。
     """
-    repo = conversation_manager._ensure_repository()
-    await _verify_ownership(conv_id, current_user, repo)
+    await _verify_ownership(conv_id, current_user, conversation_manager)
 
     active_msg_id = task_manager.get_active_message_id(conv_id)
     if not active_msg_id:
@@ -342,14 +337,13 @@ async def get_conversation(
 ):
     """获取对话详情（含消息树）"""
     try:
-        repo = conversation_manager._ensure_repository()
-        await _verify_ownership(conv_id, current_user, repo)
+        await _verify_ownership(conv_id, current_user, conversation_manager)
 
-        conversation = await repo.get_conversation(conv_id, load_messages=True)
+        conversation = await conversation_manager.get_conversation_detail(conv_id)
         if not conversation:
             raise HTTPException(status_code=404, detail=f"Conversation '{conv_id}' not found")
 
-        messages = await repo.get_conversation_messages(conv_id)
+        messages = await conversation_manager.get_conversation_messages(conv_id)
 
         children_map = {}
         for msg in messages:
@@ -392,14 +386,12 @@ async def delete_conversation(
 ):
     """删除对话"""
     try:
-        repo = conversation_manager._ensure_repository()
-        await _verify_ownership(conv_id, current_user, repo)
+        await _verify_ownership(conv_id, current_user, conversation_manager)
 
-        success = await repo.delete_conversation(conv_id)
+        success = await conversation_manager.delete_conversation(conv_id)
         if not success:
             raise HTTPException(status_code=404, detail=f"Conversation '{conv_id}' not found")
 
-        conversation_manager.clear_cache(conv_id)
         return {"success": True, "message": f"Conversation '{conv_id}' deleted"}
 
     except NotFoundError:
@@ -417,11 +409,10 @@ async def get_message_events(
     """查询消息的事件链（用于历史回放和可观测性）"""
     from repositories.message_event_repo import MessageEventRepository
 
-    repo = conversation_manager._ensure_repository()
-    await _verify_ownership(conv_id, current_user, repo)
+    await _verify_ownership(conv_id, current_user, conversation_manager)
 
     # 校验 message 归属
-    message = await repo.get_message(msg_id)
+    message = await conversation_manager.get_message(msg_id)
     if not message or message.conversation_id != conv_id:
         raise HTTPException(status_code=404, detail="Message not found")
 
@@ -466,11 +457,10 @@ async def resume_execution(
     message_id = request.message_id
 
     # 校验 conversation 归属
-    repo = conversation_manager._ensure_repository()
-    await _verify_ownership(conv_id, current_user, repo)
+    await _verify_ownership(conv_id, current_user, conversation_manager)
 
     # 校验 message 归属
-    message = await repo.get_message(message_id)
+    message = await conversation_manager.get_message(message_id)
     if not message:
         raise HTTPException(status_code=404, detail="Message not found")
     if message.conversation_id != conv_id:
@@ -502,8 +492,7 @@ async def trigger_compaction(
     conversation_manager: ConversationManager = Depends(get_conversation_manager),
 ):
     """手动触发对话 compaction"""
-    repo = conversation_manager._ensure_repository()
-    await _verify_ownership(conv_id, current_user, repo)
+    await _verify_ownership(conv_id, current_user, conversation_manager)
 
     compaction_manager = get_compaction_manager()
     if compaction_manager is None:

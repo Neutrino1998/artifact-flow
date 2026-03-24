@@ -71,6 +71,7 @@ export interface ToolCompleteData {
   error?: string;
   duration_ms: number;
   params?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
 }
 
 export interface PermissionRequestData {

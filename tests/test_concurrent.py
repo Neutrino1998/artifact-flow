@@ -13,7 +13,7 @@ import pytest
 from sqlalchemy.exc import IntegrityError
 
 from db.database import DatabaseManager
-from db.models import User, VersionConflictError
+from db.models import User
 from repositories.user_repo import UserRepository
 from repositories.conversation_repo import ConversationRepository
 from repositories.artifact_repo import ArtifactRepository
@@ -89,46 +89,11 @@ async def _create_test_artifact(
 
 class TestConcurrent:
 
-    async def test_concurrent_artifact_update_one_wins(self, file_db: DatabaseManager):
-        """
-        Two sessions update the same artifact simultaneously.
-        Exactly one succeeds, the other gets VersionConflictError.
-        """
-        user = await _create_test_user(file_db)
-        conv_id = await _create_test_conversation(file_db, user.id)
-        artifact_id = await _create_test_artifact(file_db, conv_id)
-
-        barrier = asyncio.Barrier(2)
-        results = []
-
-        async def update_worker(worker_id: int):
-            async with file_db.session() as session:
-                repo = ArtifactRepository(session)
-                await barrier.wait()  # synchronize start
-                try:
-                    await repo.update_artifact_content(
-                        session_id=conv_id,
-                        artifact_id=artifact_id,
-                        new_content=f"content from worker {worker_id}",
-                        update_type="update",
-                        expected_lock_version=1,
-                    )
-                    results.append(("success", worker_id))
-                except VersionConflictError:
-                    results.append(("conflict", worker_id))
-
-        await asyncio.gather(update_worker(1), update_worker(2))
-
-        successes = [r for r in results if r[0] == "success"]
-        conflicts = [r for r in results if r[0] == "conflict"]
-        assert len(successes) == 1
-        assert len(conflicts) == 1
-
     async def test_concurrent_artifact_update_sequential(
         self, file_db: DatabaseManager
     ):
         """
-        Three sequential updates with correct lock_version all succeed.
+        Three sequential updates all succeed.
         Final version should be 4 (1 create + 3 updates).
         """
         user = await _create_test_user(file_db)
@@ -138,12 +103,11 @@ class TestConcurrent:
         for i in range(3):
             async with file_db.session() as session:
                 repo = ArtifactRepository(session)
-                await repo.update_artifact_content(
+                await repo.upsert_artifact_content(
                     session_id=conv_id,
                     artifact_id=artifact_id,
                     new_content=f"update {i + 1}",
                     update_type="update",
-                    expected_lock_version=i + 1,
                 )
 
         # Verify final state
@@ -151,7 +115,6 @@ class TestConcurrent:
             repo = ArtifactRepository(session)
             artifact = await repo.get_artifact(conv_id, artifact_id)
             assert artifact.current_version == 4
-            assert artifact.lock_version == 4
             assert artifact.content == "update 3"
 
     async def test_concurrent_add_messages_same_conversation(

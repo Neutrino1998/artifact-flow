@@ -51,12 +51,11 @@ async def seed_artifacts(
         )
 
         # Create v2
-        await art_repo.update_artifact_content(
+        await art_repo.upsert_artifact_content(
             session_id=conv_id,
             artifact_id=artifact_id,
             new_content="# Version 2",
             update_type="update",
-            expected_lock_version=1,
         )
 
     return conv_id, artifact_id

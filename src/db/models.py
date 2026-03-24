@@ -309,7 +309,6 @@ class Artifact(Base):
     
     存储 Artifact 的当前内容和元数据。
     使用复合主键 (id, session_id)。
-    包含乐观锁字段 lock_version。
     """
     __tablename__ = "artifacts"
     
@@ -335,9 +334,6 @@ class Artifact(Base):
     
     # 当前版本号
     current_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
-    
-    # 乐观锁版本号
-    lock_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     
     # 时间戳
     created_at: Mapped[datetime] = mapped_column(
@@ -440,22 +436,6 @@ class ArtifactVersion(Base):
     
     def __repr__(self) -> str:
         return f"<ArtifactVersion(artifact={self.artifact_id}, version={self.version})>"
-
-
-# ============================================================
-# 异常定义
-# ============================================================
-
-class VersionConflictError(Exception):
-    """
-    乐观锁版本冲突异常
-    
-    当更新 Artifact 时检测到版本冲突时抛出。
-    """
-    def __init__(self, message: str, artifact_id: str = None, expected_version: int = None):
-        super().__init__(message)
-        self.artifact_id = artifact_id
-        self.expected_version = expected_version
 
 
 if __name__ == "__main__":

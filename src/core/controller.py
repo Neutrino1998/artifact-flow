@@ -229,6 +229,13 @@ class ExecutionController:
             has_error = final_state.get("error", False)
             is_cancelled = final_state.get("cancelled", False)
 
+            # Flush dirty artifacts to DB before updating response
+            if self.artifact_manager:
+                try:
+                    await self.artifact_manager.flush_all(session_id)
+                except Exception as flush_err:
+                    logger.exception(f"Artifact flush failed: {flush_err}")
+
             # 更新 conversation response
             await self.conversation_manager.update_response_async(
                 conv_id=conversation_id,

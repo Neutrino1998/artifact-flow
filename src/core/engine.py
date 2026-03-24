@@ -493,6 +493,7 @@ async def execute_loop(
                 "error": tool_result.error if not tool_result.success else None,
                 "duration_ms": tool_duration_ms,
                 "params": params,
+                "metadata": tool_result.metadata or None,
             })
 
 

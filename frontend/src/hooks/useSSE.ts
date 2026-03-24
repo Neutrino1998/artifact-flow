@@ -201,30 +201,42 @@ export function useSSE() {
             });
           }
 
-          // Auto-open artifact panel and fetch content on artifact tool completion
+          // Auto-open artifact panel and update content on artifact tool completion
           if (ARTIFACT_TOOLS.has(toolName) && success) {
             setArtifactPanelVisible(true);
             const params = data?.params as Record<string, unknown> | undefined;
+            const metadata = data?.metadata as Record<string, unknown> | undefined;
             const artifactId = params?.id as string | undefined;
             if (artifactId) {
               addPendingUpdate(artifactId);
-              // session_id == conversation_id in the backend;
-              // store it so useArtifacts can use it even before conversation loads
               const sessionId = conversationId;
               setArtifactSessionId(sessionId);
-              // Clear selectedVersion so the panel shows the latest current.content
               setSelectedVersion(null);
-              Promise.all([
-                api.getArtifact(sessionId, artifactId),
-                api.listArtifacts(sessionId),
-              ]).then(([detail, list]) => {
-                setArtifactCurrent(detail);
-                setArtifacts(list.artifacts);
-                setArtifactVersions(detail.versions);
-                setSelectedVersion(detail.latest_version ?? null);
-              }).catch(() => {
-                // Artifact may not be persisted yet; will retry on stream complete
-              });
+
+              // Use snapshot from metadata if available (write-back: DB not yet updated)
+              const snapshot = metadata?.artifact_snapshot as Record<string, unknown> | undefined;
+              if (snapshot) {
+                setArtifactCurrent({
+                  id: snapshot.id as string,
+                  session_id: sessionId,
+                  content_type: snapshot.content_type as string,
+                  title: snapshot.title as string,
+                  content: snapshot.content as string,
+                  current_version: snapshot.current_version as number,
+                  source: (snapshot.source as string) ?? null,
+                  created_at: new Date().toISOString(),
+                  updated_at: new Date().toISOString(),
+                  versions: [],
+                  latest_version: null,
+                });
+              } else {
+                // Fallback: fetch from REST API
+                api.getArtifact(sessionId, artifactId).then((detail) => {
+                  setArtifactCurrent(detail);
+                  setArtifactVersions(detail.versions);
+                  setSelectedVersion(detail.latest_version ?? null);
+                }).catch(() => {});
+              }
             }
           }
           break;

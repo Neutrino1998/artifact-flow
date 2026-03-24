@@ -62,8 +62,12 @@ async def branched_conversation(conversation_repo: ConversationRepository, test_
         conv_id, msg_c_id, "msg_c content", parent_id=root_id
     )
 
-    # Set active_branch to msg_b (linear chain tip)
-    await conversation_repo.update_active_branch(conv_id, msg_b_id)
+    # active_branch is automatically set to msg_c (last add_message call)
+    # but we need it to be msg_b for the linear chain tests
+    conv_obj = await conversation_repo.get_conversation(conv_id)
+    conv_obj.active_branch = msg_b_id
+    conv_obj.updated_at = datetime.now()
+    await conversation_repo.update(conv_obj)
 
     return {
         "conv_id": conv_id,
@@ -140,23 +144,6 @@ class TestConversationCRUD:
         updated = await conversation_repo.update_title(sample_conversation.id, "New Title")
         assert updated.title == "New Title"
         assert updated.updated_at > old_time
-
-    async def test_update_active_branch(
-        self, conversation_repo: ConversationRepository, sample_conversation: Conversation
-    ):
-        msg = await conversation_repo.add_message(
-            sample_conversation.id, f"msg-{uuid.uuid4().hex}", "hi"
-        )
-        updated = await conversation_repo.update_active_branch(
-            sample_conversation.id, msg.id
-        )
-        assert updated.active_branch == msg.id
-
-    async def test_update_active_branch_nonexistent(
-        self, conversation_repo: ConversationRepository
-    ):
-        with pytest.raises(NotFoundError):
-            await conversation_repo.update_active_branch("nonexistent", "msg-x")
 
     async def test_delete_conversation_cascades(
         self, conversation_repo: ConversationRepository, test_user: User
@@ -387,68 +374,3 @@ class TestBranchPath:
         path = await conversation_repo.get_conversation_path(conv_id)
         assert path == []
 
-    async def test_get_branch_children(
-        self, conversation_repo: ConversationRepository, branched_conversation
-    ):
-        bc = branched_conversation
-        children = await conversation_repo.get_branch_children(bc["conv_id"], bc["root_id"])
-        child_ids = [c.id for c in children]
-        assert len(child_ids) == 2
-        assert bc["msg_a_id"] in child_ids
-        assert bc["msg_c_id"] in child_ids
-
-    async def test_get_branch_structure(
-        self, conversation_repo: ConversationRepository, branched_conversation
-    ):
-        bc = branched_conversation
-        structure = await conversation_repo.get_branch_structure(bc["conv_id"])
-
-        # root has two children
-        assert bc["root_id"] in structure
-        assert len(structure[bc["root_id"]]) == 2
-
-        # msg_a has one child (msg_b)
-        assert bc["msg_a_id"] in structure
-        assert structure[bc["msg_a_id"]] == [bc["msg_b_id"]]
-
-    async def test_format_conversation_history(
-        self, conversation_repo: ConversationRepository, test_user: User
-    ):
-        conv_id = f"conv-{uuid.uuid4().hex}"
-        await conversation_repo.create_conversation(
-            conversation_id=conv_id, user_id=test_user.id
-        )
-
-        msg1_id = f"msg-{uuid.uuid4().hex}"
-        msg2_id = f"msg-{uuid.uuid4().hex}"
-
-        await conversation_repo.add_message(conv_id, msg1_id, "hello")
-        await conversation_repo.update_response(msg1_id, "hi there")
-
-        await conversation_repo.add_message(
-            conv_id, msg2_id, "how are you", parent_id=msg1_id
-        )
-        await conversation_repo.update_response(msg2_id, "doing great")
-
-        history = await conversation_repo.format_conversation_history(conv_id, msg2_id)
-        assert len(history) == 4  # 2 user + 2 assistant
-        assert history[0] == {"role": "user", "content": "hello"}
-        assert history[1] == {"role": "assistant", "content": "hi there"}
-        assert history[2] == {"role": "user", "content": "how are you"}
-        assert history[3] == {"role": "assistant", "content": "doing great"}
-
-    async def test_format_history_skips_no_response(
-        self, conversation_repo: ConversationRepository, test_user: User
-    ):
-        conv_id = f"conv-{uuid.uuid4().hex}"
-        await conversation_repo.create_conversation(
-            conversation_id=conv_id, user_id=test_user.id
-        )
-
-        msg_id = f"msg-{uuid.uuid4().hex}"
-        await conversation_repo.add_message(conv_id, msg_id, "hello")
-        # No response set
-
-        history = await conversation_repo.format_conversation_history(conv_id, msg_id)
-        assert len(history) == 1  # only user turn
-        assert history[0] == {"role": "user", "content": "hello"}

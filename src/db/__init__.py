@@ -13,7 +13,6 @@ from .models import (
     ArtifactSession,
     Artifact,
     ArtifactVersion,
-    VersionConflictError,
 )
 
 __all__ = [
@@ -28,6 +27,4 @@ __all__ = [
     "ArtifactSession",
     "Artifact",
     "ArtifactVersion",
-    # Exceptions
-    "VersionConflictError",
 ]
