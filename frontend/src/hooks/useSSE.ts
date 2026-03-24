@@ -244,6 +244,7 @@ export function useSSE() {
                   latest_version: null,
                 };
                 setArtifactCurrent(detail);
+                setArtifactVersions([]);
 
                 // Keep artifacts list in sync so ArtifactList renders correctly
                 const existing = useArtifactStore.getState().artifacts;
@@ -332,10 +333,16 @@ export function useSSE() {
           break;
         }
 
-        case StreamEventType.ERROR:
+        case StreamEventType.ERROR: {
           setError(data?.error as string ?? 'Unknown error');
+          const errMsgId = useStreamStore.getState().messageId;
+          if (errMsgId) {
+            snapshotSegments(errMsgId);
+          }
           endStream();
+          refreshAfterComplete(conversationId);
           break;
+        }
 
         default:
           console.warn('Unhandled SSE event type:', type);
