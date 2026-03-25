@@ -140,7 +140,7 @@ class RuntimeStore(Protocol):
 - `src/api/routers/chat.py` — send_message, inject, cancel, resume
 - `src/api/routers/stream.py` — resolve_interrupt
 - `src/core/engine.py` — EngineHooks 回调签名改 async
-- `src/core/controller.py` — on_engine_exit 改 async
+- `src/core/controller.py` — `on_engine_exit` 签名改为 `Callable[[str, str], Awaitable[None]]`，接收 `(conversation_id, message_id)` 双参数
 - `src/api/services/execution_runner.py` — cleanup_execution, shutdown_cleanup
 
 ### 1.3 Interrupt 跨进程唤醒（解决 Reviewer P2）
@@ -392,7 +392,7 @@ async def _renew_loop(self, conversation_id, task_id, interval):
 | `src/api/services/runtime_store.py` | **改** — Protocol async 化 + InMemory 适配 |
 | `src/api/services/redis_runtime_store.py` | **新建** — Redis 实现 |
 | `src/core/engine.py` | **改** — InterruptState 解耦、EngineHooks async 化、wait_for_resume |
-| `src/core/controller.py` | **改** — on_engine_exit async、hooks 构建适配 |
+| `src/core/controller.py` | **改** — `on_engine_exit: Callable[[str, str], Awaitable[None]]`，`stream_execute()` 传 `(conv_id, msg_id)` 调用，确保 compare-and-del |
 | `src/api/routers/chat.py` | **改** — await store 调用 |
 | `src/api/routers/stream.py` | **改** — await store 调用 |
 | `src/api/services/execution_runner.py` | **改** — await store 调用 |
