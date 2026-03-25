@@ -19,6 +19,17 @@
 
 **最大的变化**：LangGraph 移除后，Redis 不再是"解决 checkpointer 串行瓶颈"的角色，而是纯粹为多 Worker 部署服务。这意味着 Redis 的引入可以和多 Worker 适配一步到位，不需要分两轮做。
 
+### 能力边界说明
+
+本方案提供的是**控制面高可用（active-active shared control plane）**，不是执行中任务无损迁移。具体含义：
+
+- **能做到**：任一台应用机挂了，新请求可以被另一台正常处理（lease/interrupt/stream 状态在 Redis 中共享）
+- **不能做到**：某个 engine 正跑在挂掉的机器上时，这次执行中的状态无法迁移到另一台继续跑——engine 的 Python 运行时状态（LLM 对话上下文、工具调用栈、内存中的 agent state）不做分布式持久化
+
+执行中任务丢失后的恢复路径：lease TTL 过期 → 用户重新发送消息 → 新执行在存活 Worker 上启动。对话历史和 artifact 已持久化在数据库中不受影响。
+
+> 注：Phase 1 和 Phase 2 可以分开开发，但必须一起上线才能支撑真正的双机 active-active 部署。单独上 Phase 1 时 POST /chat 和 GET /stream 仍可能落在不同 Worker，SSE 事件不可达。
+
 ---
 
 ## 架构现状
@@ -76,7 +87,8 @@ redis:
 与旧计划的区别：用 `redis:7-alpine` 而非 `redis/redis-stack`。LangGraph checkpointer 需要 RedisJSON + RediSearch 模块，但我们不再需要 checkpointer，纯 Redis 足矣。镜像从 ~300MB 降到 ~30MB。
 
 配置项（`config.py`）：
-- `REDIS_URL: str = "redis://localhost:6379"`
+- `REDIS_URL: str = ""`（空 = 走 InMemory，非空 = 走 Redis）
+- `LEASE_TTL: int = 90`（秒，lease 初始 TTL，心跳每 TTL/3 续租）
 
 ### 1.2 RuntimeStore Protocol 升级为 async
 
@@ -107,6 +119,8 @@ class RuntimeStore(Protocol):
 
     async def inject_message(self, message_id: str, content: str) -> None: ...
     async def drain_messages(self, message_id: str) -> List[str]: ...
+
+    async def renew_lease(self, message_id: str, ttl: int) -> None: ...
 
     async def cleanup_execution(self, message_id: str) -> None: ...
     async def shutdown_cleanup(self) -> None: ...
@@ -164,7 +178,53 @@ async def get_interrupt_data(self, message_id) -> Optional[Dict]    # 读取 int
 
 **关键设计**：`wait_for_resume` 内部机制因实现而异：
 - `InMemoryRuntimeStore`：内部维护 `asyncio.Event`，`wait_for_resume` 就是 `await event.wait()`
-- `RedisRuntimeStore`：`SUBSCRIBE interrupt:{msg_id}` + 本地 `asyncio.Event` 桥接。subscribe 回调中 set 本地 event
+- `RedisRuntimeStore`：**check-subscribe-check-wait** 四步模式（见下方）
+
+**Pub/Sub 丢通知防护**：
+
+纯 Pub/Sub 有竞争窗口——如果 `PUBLISH` 发生在 `SUBSCRIBE` 建立之前，消息丢失，engine 白等到超时。`RedisRuntimeStore.wait_for_resume` 必须用双重检查覆盖这个窗口：
+
+```python
+async def wait_for_resume(self, message_id, timeout):
+    # ① CHECK：PUBLISH 可能已经发生，先查 Hash 状态
+    if await self._is_resolved(message_id):
+        return await self._get_resume_data(message_id)
+
+    # ② SUBSCRIBE：建立订阅
+    pubsub = self._redis.pubsub()
+    await pubsub.subscribe(f"interrupt:{message_id}")
+
+    # ③ CHECK：覆盖 ① 和 ② 之间的窗口
+    #    如果 PUBLISH 恰好在 check 之后、subscribe 之前发生，
+    #    消息丢了没关系，状态已写入 Hash，这里查到
+    if await self._is_resolved(message_id):
+        await pubsub.unsubscribe()
+        return await self._get_resume_data(message_id)
+
+    # ④ WAIT：订阅已生效且状态仍 pending，安全等待
+    try:
+        async with asyncio.timeout(timeout):
+            async for msg in pubsub.listen():
+                if msg["type"] == "message":
+                    break
+    except TimeoutError:
+        return None  # 超时视为拒绝
+    finally:
+        await pubsub.unsubscribe()
+
+    return await self._get_resume_data(message_id)
+```
+
+时序穷举：
+
+| /resume 发生时刻 | ① check | ② subscribe | ③ check | ④ wait | 结果 |
+|---|---|---|---|---|---|
+| 在 ① 之前 | ✅ 查到 resolved | — | — | — | 直接返回 |
+| ① 和 ② 之间 | ❌ pending | 建立 | ✅ 查到 resolved | — | 直接返回 |
+| ② 和 ③ 之间 | ❌ pending | 已建立 | ✅ 查到 resolved | — | 直接返回 |
+| ③ 之后 | ❌ pending | 已建立 | ❌ pending | ✅ 收到 PUBLISH | 正常唤醒 |
+
+每个时序至少有一个机制兜住，无遗漏窗口。
 
 **Engine 改动**（`src/core/engine.py`）：
 
@@ -209,22 +269,29 @@ class RedisRuntimeStore:
 
 | Key | 类型 | TTL | 用途 |
 |-----|------|-----|------|
-| `lease:{conv_id}` | STRING (msg_id) | `STREAM_TIMEOUT` | conversation lease |
-| `interactive:{conv_id}` | STRING (msg_id) | `STREAM_TIMEOUT` | engine interactive 标记 |
+| `lease:{conv_id}` | STRING (msg_id) | `LEASE_TTL` (90s)，心跳续租 | conversation lease |
+| `interactive:{conv_id}` | STRING (msg_id) | `LEASE_TTL` (90s)，心跳续租 | engine interactive 标记 |
 | `interrupt:{msg_id}` | HASH {data, status, resume_data} | `PERMISSION_TIMEOUT + 60` | interrupt 状态 |
 | `cancel:{msg_id}` | STRING "1" | `STREAM_TIMEOUT` | 取消标记 |
 | `queue:{msg_id}` | LIST | `STREAM_TIMEOUT` | 消息注入队列 |
 
+**Lease / Interactive TTL 策略**：不用静态 `STREAM_TIMEOUT` 做 TTL（任务可能比预期长），改为短 TTL + 心跳续租：
+- 初始 TTL = `LEASE_TTL`（建议 90s）
+- 执行中每 `LEASE_TTL / 3`（30s）续一次（`EXPIRE` 重置 TTL）
+- 正常执行：不管跑多久，心跳持续续租，lease 永不过期
+- Worker 崩溃：心跳停止，最多等 `LEASE_TTL`（90s）自动释放
+- 续租间隔 = TTL/3，给两次重试机会（某次 EXPIRE 因网络抖动失败，下次还来得及）
+
 **关键方法实现**：
 
-- `try_acquire_lease` → `SET lease:{conv_id} {msg_id} NX EX {ttl}`，原子操作天然防重
+- `try_acquire_lease` → `SET lease:{conv_id} {msg_id} NX EX {LEASE_TTL}`，原子操作天然防重，初始 TTL 由心跳续租维持
 - `release_lease` → `DEL lease:{conv_id}`（需 compare-and-del，防误删其他 worker 的 lease）
 - `is_cancelled` → `EXISTS cancel:{msg_id}`
 - `inject_message` → `RPUSH queue:{msg_id} {content}`
 - `drain_messages` → Lua 脚本：`LRANGE + DEL` 原子取出全部消息
 - `create_interrupt` → `HSET interrupt:{msg_id} data {json} status pending`
 - `resolve_interrupt` → Lua 脚本：检查 status=pending → 设 resume_data + status=resolved → `PUBLISH interrupt:{msg_id}`
-- `wait_for_resume` → `SUBSCRIBE interrupt:{msg_id}` + 本地 `asyncio.Event`，超时返回 None
+- `wait_for_resume` → check-subscribe-check-wait 四步模式（见 1.3），防 Pub/Sub 丢通知
 - `cleanup_execution` → pipeline DEL 所有相关 key
 
 **Lua 脚本**（原子操作）：
@@ -261,6 +328,31 @@ return "resolved"
 - `submit()` 的 finally 中 `await self.store.cleanup_execution(task_id)` 已是 async
 
 不需要全局 Semaphore（旧计划 5.5.2 继续 defer，理由同旧计划：per-Worker 限流已足够）。
+
+**Lease 心跳续租**：`submit()` 内的 `_wrapped()` 启动后台心跳任务，定期续租 lease 和 interactive key：
+
+```python
+async def _wrapped():
+    heartbeat = asyncio.create_task(
+        self._renew_loop(task_id, interval=config.LEASE_TTL // 3)
+    )
+    async with self._semaphore:
+        try:
+            await coro
+        finally:
+            heartbeat.cancel()
+            await self.store.cleanup_execution(task_id)
+
+async def _renew_loop(self, task_id, interval):
+    """每 interval 秒续一次 lease + interactive"""
+    while True:
+        await asyncio.sleep(interval)
+        await self.store.renew_lease(task_id, ttl=interval * 3)
+```
+
+`RuntimeStore` Protocol 新增 `renew_lease` 方法：
+- `InMemoryRuntimeStore`：空操作（内存无 TTL 概念）
+- `RedisRuntimeStore`：对 `lease:{conv_id}` 和 `interactive:{conv_id}` 执行 `EXPIRE`（需先通过 value 匹配确认是自己的 lease，防止续错）
 
 ### 1.6 故障处理
 
@@ -478,6 +570,8 @@ updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now()
 ```
 
 理由：SQLite 存 datetime 为文本，`datetime.now` 用 Python 端时间没问题。MySQL 的 `DATETIME` 列受服务器时区影响，Python 端和 DB 端时间可能不一致。用 `func.now()` 让数据库控制时间，保证一致性。
+
+**连接初始化时区锁定**：生产连接初始化时显式执行 `SET time_zone = '+00:00'`，不依赖云库默认时区配置。通过 SQLAlchemy 的 `event.listen(engine, "connect", set_timezone)` 实现，每个新连接自动设置。
 
 **其他类型无需改动**：`JSON` → MySQL `JSON` / PostgreSQL `JSONB`、`Text` → `TEXT`、`String(N)` → `VARCHAR(N)`、`Integer` + `autoincrement=True` → MySQL `AUTO_INCREMENT` / PostgreSQL `SERIAL`。SQLAlchemy 根据 URL 前缀自动选择正确映射，代码层零方言判断。
 
