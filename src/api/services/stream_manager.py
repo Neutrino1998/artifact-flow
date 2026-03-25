@@ -35,23 +35,10 @@ from typing import Dict, Optional, AsyncGenerator, Literal, Any
 from datetime import datetime
 from dataclasses import dataclass, field
 
+from api.services.stream_transport import StreamNotFoundError, StreamAlreadyExistsError
 from utils.logger import get_logger
 
 logger = get_logger("ArtifactFlow")
-
-
-class StreamNotFoundError(Exception):
-    """Stream 不存在异常"""
-    def __init__(self, message_id: str):
-        self.message_id = message_id
-        super().__init__(f"Stream '{message_id}' not found")
-
-
-class StreamAlreadyExistsError(Exception):
-    """Stream 已存在异常"""
-    def __init__(self, message_id: str):
-        self.message_id = message_id
-        super().__init__(f"Stream '{message_id}' already exists")
 
 
 @dataclass

@@ -9,6 +9,20 @@ StreamTransport Protocol — 流式事件传输抽象
 from typing import Protocol, runtime_checkable, Optional, Dict, Any, AsyncGenerator
 
 
+class StreamNotFoundError(Exception):
+    """Stream 不存在异常"""
+    def __init__(self, message_id: str):
+        self.message_id = message_id
+        super().__init__(f"Stream '{message_id}' not found")
+
+
+class StreamAlreadyExistsError(Exception):
+    """Stream 已存在异常"""
+    def __init__(self, message_id: str):
+        self.message_id = message_id
+        super().__init__(f"Stream '{message_id}' already exists")
+
+
 @runtime_checkable
 class StreamTransport(Protocol):
     """流式事件传输协议"""

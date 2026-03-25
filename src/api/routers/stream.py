@@ -14,7 +14,7 @@ from starlette.responses import StreamingResponse
 from config import config
 from api.dependencies import get_current_user, get_stream_transport, get_execution_runner
 from api.services.auth import TokenPayload
-from api.services.stream_manager import StreamNotFoundError
+from api.services.stream_transport import StreamNotFoundError
 from api.services.stream_transport import StreamTransport
 from api.services.execution_runner import ExecutionRunner
 from api.utils.sse import format_sse_event, format_sse_comment
