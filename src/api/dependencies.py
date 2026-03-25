@@ -15,8 +15,8 @@ FastAPI 依赖注入
 
 并发安全保证：
     - DatabaseManager: 全局单例，管理连接池
-    - StreamManager: 全局单例，事件缓冲队列
-    - TaskManager: 全局单例，后台任务 + interrupt 管理
+    - StreamTransport: 全局单例，事件缓冲队列
+    - ExecutionRunner: 全局单例，后台任务调度 + RuntimeStore
     - AsyncSession: 请求独立，每个请求创建新的数据库会话
     - Repository/Manager/Controller: 请求独立，绑定到请求的 session
 """
@@ -27,8 +27,8 @@ from functools import lru_cache
 from typing import AsyncGenerator, Any, Dict, Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from api.services.stream_manager import StreamManager
-    from api.services.task_manager import TaskManager
+    from api.services.stream_transport import StreamTransport
+    from api.services.execution_runner import ExecutionRunner
 
 from fastapi import Depends, HTTPException
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -51,8 +51,8 @@ logger = get_logger("ArtifactFlow")
 # ============================================================
 
 _db_manager: Optional[DatabaseManager] = None
-_stream_manager: Optional["StreamManager"] = None
-_task_manager: Optional["TaskManager"] = None
+_stream_transport: Optional["StreamTransport"] = None
+_execution_runner: Optional["ExecutionRunner"] = None
 
 # Agent configs + tools（启动时加载一次）
 _agents: Optional[dict] = None                    # {name: AgentConfig}
@@ -68,7 +68,7 @@ async def init_globals() -> None:
     """
     from pathlib import Path
 
-    global _db_manager, _stream_manager, _task_manager, _agents, _tools, _compaction_manager
+    global _db_manager, _stream_transport, _execution_runner, _agents, _tools, _compaction_manager
 
     # 0. 确保 data 目录存在
     data_dir = Path("data")
@@ -80,15 +80,19 @@ async def init_globals() -> None:
     await _db_manager.initialize()
     logger.info("Database manager initialized")
 
-    # 2. 创建 StreamManager
+    # 2. 创建 StreamTransport (StreamManager)
     from api.services.stream_manager import StreamManager
-    _stream_manager = StreamManager(ttl_seconds=config.STREAM_TTL)
-    logger.info("Stream manager initialized")
+    _stream_transport = StreamManager(ttl_seconds=config.STREAM_TTL)
+    logger.info("Stream transport initialized")
 
-    # 3. 创建 TaskManager
-    from api.services.task_manager import TaskManager
-    _task_manager = TaskManager(max_concurrent=config.MAX_CONCURRENT_TASKS)
-    logger.info("Task manager initialized")
+    # 3. 创建 ExecutionRunner + InMemoryRuntimeStore
+    from api.services.execution_runner import ExecutionRunner
+    from api.services.runtime_store import InMemoryRuntimeStore
+    _execution_runner = ExecutionRunner(
+        max_concurrent=config.MAX_CONCURRENT_TASKS,
+        store=InMemoryRuntimeStore(),
+    )
+    logger.info("Execution runner initialized")
 
     # 4. 加载 Agent 配置
     from agents.loader import load_all_agents
@@ -136,36 +140,36 @@ async def close_globals() -> None:
 
     在 FastAPI lifespan 中调用。
     """
-    global _db_manager, _stream_manager, _task_manager, _compaction_manager
+    global _db_manager, _stream_transport, _execution_runner, _compaction_manager
 
-    # 1. 先关闭 TaskManager（等待运行中的任务完成）
-    if _task_manager:
-        await _task_manager.shutdown()
-        logger.info("Task manager shut down")
+    # 1. 先关闭 ExecutionRunner（等待运行中的任务完成）
+    if _execution_runner:
+        await _execution_runner.shutdown()
+        logger.info("Execution runner shut down")
 
     # 2. 关闭数据库管理器
     if _db_manager:
         await _db_manager.close()
         logger.info("Database manager closed")
 
-    _task_manager = None
+    _execution_runner = None
     _db_manager = None
-    _stream_manager = None
+    _stream_transport = None
     _compaction_manager = None
 
 
-def get_task_manager() -> "TaskManager":
-    """获取 TaskManager 单例"""
-    if _task_manager is None:
-        raise RuntimeError("TaskManager not initialized. Call init_globals() first.")
-    return _task_manager
+def get_execution_runner() -> "ExecutionRunner":
+    """获取 ExecutionRunner 单例"""
+    if _execution_runner is None:
+        raise RuntimeError("ExecutionRunner not initialized. Call init_globals() first.")
+    return _execution_runner
 
 
-def get_stream_manager() -> "StreamManager":
-    """获取 StreamManager 单例"""
-    if _stream_manager is None:
-        raise RuntimeError("StreamManager not initialized. Call init_globals() first.")
-    return _stream_manager
+def get_stream_transport() -> "StreamTransport":
+    """获取 StreamTransport 单例"""
+    if _stream_transport is None:
+        raise RuntimeError("StreamTransport not initialized. Call init_globals() first.")
+    return _stream_transport
 
 
 def get_db_manager() -> DatabaseManager:

@@ -27,7 +27,8 @@ from tools.builtin.artifact_ops import ArtifactManager, create_artifact_tools
 from tools.builtin.call_subagent import CallSubagentTool
 from tools.builtin.web_search import WebSearchTool
 from tools.builtin.web_fetch import WebFetchTool
-from api.services.task_manager import TaskManager
+from api.services.execution_runner import ExecutionRunner
+from api.services.runtime_store import InMemoryRuntimeStore
 from db.database import DatabaseManager
 from repositories.artifact_repo import ArtifactRepository
 from repositories.conversation_repo import ConversationRepository
@@ -221,13 +222,13 @@ class TestEnvironment:
     测试环境管理器
 
     模拟 API 层的依赖注入模式：
-    - db_manager 和 task_manager 是全局共享的
+    - db_manager 和 execution_runner 是全局共享的
     - 每个 "请求" 通过 request_scope() 获得独立的 session/manager/controller
     """
 
     def __init__(self):
         self.db_manager: Optional[DatabaseManager] = None
-        self.task_manager: Optional[TaskManager] = None
+        self.runner: Optional[ExecutionRunner] = None
         self._agents: Optional[Dict] = None
         self._tools: Optional[Dict[str, BaseTool]] = None
 
@@ -249,14 +250,16 @@ class TestEnvironment:
         if custom:
             print(f"Loaded {len(custom)} custom tool(s): {[t.name for t in custom]}")
 
-        # 4. TaskManager
-        self.task_manager = TaskManager(max_concurrent=5)
+        # 4. ExecutionRunner + RuntimeStore
+        self.runner = ExecutionRunner(max_concurrent=5, store=InMemoryRuntimeStore())
 
         return self
 
     @asynccontextmanager
     async def request_scope(self):
         """每个调用产出独立的 session + controller"""
+        store = self.runner.store
+
         async with self.db_manager.session() as session:
             artifact_repo = ArtifactRepository(session)
             artifact_manager = ArtifactManager(artifact_repo)
@@ -268,9 +271,9 @@ class TestEnvironment:
             conv_manager = ConversationManager(conv_repo)
 
             hooks = EngineHooks(
-                check_cancelled=self.task_manager.is_cancelled,
-                create_interrupt=self.task_manager.create_interrupt,
-                drain_messages=self.task_manager.drain_messages,
+                check_cancelled=store.is_cancelled,
+                create_interrupt=store.create_interrupt,
+                drain_messages=store.drain_messages,
             )
 
             controller = ExecutionController(
@@ -284,8 +287,8 @@ class TestEnvironment:
             yield controller
 
     async def cleanup(self):
-        if self.task_manager:
-            await self.task_manager.shutdown()
+        if self.runner:
+            await self.runner.shutdown()
         if self.db_manager:
             await self.db_manager.close()
         print("Test environment cleaned up")
@@ -393,6 +396,7 @@ async def demo_permission():
     env = await TestEnvironment().setup()
     try:
         handler = StreamEventHandler(verbose=True)
+        store = env.runner.store
 
         # 发送会触发 web_fetch 的消息
         print("\n用户: 请抓取 https://example.com 的内容")
@@ -406,13 +410,13 @@ async def demo_permission():
             # 等待 interrupt 被创建
             while True:
                 await asyncio.sleep(0.5)
-                interrupts = env.task_manager._interrupts
+                interrupts = store._interrupts
                 if interrupts:
                     msg_id = next(iter(interrupts))
                     interrupt = interrupts[msg_id]
                     if not interrupt.event.is_set():
                         print("\n[AUTO-APPROVE] 自动批准权限请求...")
-                        await env.task_manager.resolve_interrupt(
+                        store.resolve_interrupt(
                             msg_id, {"approved": True}
                         )
                         permission_resolved.set()

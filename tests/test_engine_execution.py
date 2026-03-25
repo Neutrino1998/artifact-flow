@@ -4,7 +4,7 @@ Engine execution flow tests.
 Covers: agent routing, tool execution, cancellation, permission interrupts,
 subagent routing, round limits, pending message drain, and metrics.
 
-Mock strategy: patch("models.llm.astream_with_retry") + real TaskManager.
+Mock strategy: patch("models.llm.astream_with_retry") + real RuntimeStore.
 """
 
 import asyncio
@@ -15,7 +15,7 @@ import pytest
 
 from core.engine import EngineHooks, InterruptState, create_initial_state, execute_loop
 from core.events import StreamEventType, ExecutionEvent
-from api.services.task_manager import TaskManager
+from api.services.runtime_store import InMemoryRuntimeStore
 from tools.base import BaseTool, ToolPermission, ToolResult
 
 
@@ -123,12 +123,12 @@ class _FailingTool(BaseTool):
         return await self.execute(**params)
 
 
-def _hooks_from_tm(tm: TaskManager) -> EngineHooks:
-    """Build EngineHooks wired to a real TaskManager."""
+def _hooks_from_store(store: InMemoryRuntimeStore) -> EngineHooks:
+    """Build EngineHooks wired to a real RuntimeStore."""
     return EngineHooks(
-        check_cancelled=tm.is_cancelled,
-        create_interrupt=tm.create_interrupt,
-        drain_messages=tm.drain_messages,
+        check_cancelled=store.is_cancelled,
+        create_interrupt=store.create_interrupt,
+        drain_messages=store.drain_messages,
     )
 
 
@@ -139,7 +139,7 @@ async def _run_engine(
     task="hello",
     message_id="msg-1",
     conversation_history=None,
-    task_manager=None,
+    store=None,
     permission_timeout=1,
 ):
     """Helper to run engine with given LLM factory and return (state, emitted)."""
@@ -150,8 +150,8 @@ async def _run_engine(
         conversation_history=conversation_history or [],
     )
 
-    if task_manager is None:
-        task_manager = TaskManager(max_concurrent=5)
+    if store is None:
+        store = InMemoryRuntimeStore()
 
     emitted = []
 
@@ -173,11 +173,11 @@ async def _run_engine(
             state=state,
             agents=agents,
             tools=tools or {},
-            hooks=_hooks_from_tm(task_manager),
+            hooks=_hooks_from_store(store),
             emit=capture_emit,
         )
 
-    return result, emitted, task_manager
+    return result, emitted, store
 
 
 def _events_of_type(emitted, event_type):
@@ -192,15 +192,15 @@ def _events_of_type(emitted, event_type):
 class TestLeadCompletion:
 
     async def test_plain_text_completes(self):
-        result, emitted, tm = await _run_engine(
+        result, emitted, store = await _run_engine(
             _make_fake_stream(_simple_llm_chunks("Done!"))
         )
         assert result["completed"] is True
         assert result["response"] == "Done!"
-        await tm.shutdown(timeout=1)
+        # store has no shutdown needed
 
     async def test_agent_start_and_complete_events(self):
-        result, emitted, tm = await _run_engine(
+        result, emitted, store = await _run_engine(
             _make_fake_stream(_simple_llm_chunks("ok"))
         )
 
@@ -210,7 +210,7 @@ class TestLeadCompletion:
         assert len(completes) == 1
         assert starts[0]["agent"] == "lead_agent"
         assert completes[0]["agent"] == "lead_agent"
-        await tm.shutdown(timeout=1)
+        # store has no shutdown needed
 
 
 # ============================================================
@@ -246,7 +246,7 @@ class TestSubagentRouting:
             _simple_llm_chunks("Final answer"),           # lead completes
         ]
 
-        result, emitted, tm = await _run_engine(
+        result, emitted, store = await _run_engine(
             _make_fake_stream_sequence(rounds),
             agents={"lead_agent": lead_config, "search_agent": sub_config},
             tools={"call_subagent": CallSubagentTool()},
@@ -268,7 +268,7 @@ class TestSubagentRouting:
         subagent_results = [tc for tc in tool_completes if tc["data"].get("tool") == "call_subagent"]
         assert any("search result here" in str(tc["data"].get("result_data", "")) for tc in subagent_results)
 
-        await tm.shutdown(timeout=1)
+        # store has no shutdown needed
 
     async def test_subagent_instruction_event(self):
         """call_subagent should emit SUBAGENT_INSTRUCTION event."""
@@ -290,7 +290,7 @@ class TestSubagentRouting:
             _simple_llm_chunks("lead done"),
         ]
 
-        result, emitted, tm = await _run_engine(
+        result, emitted, store = await _run_engine(
             _make_fake_stream_sequence(rounds),
             agents={"lead_agent": lead_config, "sub_agent": sub_config},
             tools={"call_subagent": CallSubagentTool()},
@@ -302,7 +302,7 @@ class TestSubagentRouting:
         ]
         assert len(sub_instr) == 1
         assert sub_instr[0].data["instruction"] == "do stuff"
-        await tm.shutdown(timeout=1)
+        # store has no shutdown needed
 
 
 # ============================================================
@@ -322,7 +322,7 @@ class TestToolExecution:
             _simple_llm_chunks("Done with tool"),
         ]
 
-        result, emitted, tm = await _run_engine(
+        result, emitted, store = await _run_engine(
             _make_fake_stream_sequence(rounds),
             agents={"lead_agent": agent},
             tools={"my_tool": tool},
@@ -333,7 +333,7 @@ class TestToolExecution:
         assert len(starts) == 1
         assert len(completes) == 1
         assert completes[0]["data"]["success"] is True
-        await tm.shutdown(timeout=1)
+        # store has no shutdown needed
 
     async def test_tool_not_found(self):
         agent = _FakeAgentConfig(tools={"my_tool": "auto"})
@@ -343,7 +343,7 @@ class TestToolExecution:
             _simple_llm_chunks("ok"),
         ]
 
-        result, emitted, tm = await _run_engine(
+        result, emitted, store = await _run_engine(
             _make_fake_stream_sequence(rounds),
             agents={"lead_agent": agent},
             tools={},  # no tools registered
@@ -353,7 +353,7 @@ class TestToolExecution:
         assert len(completes) == 1
         assert completes[0]["data"]["success"] is False
         assert "not found" in completes[0]["data"]["error"]
-        await tm.shutdown(timeout=1)
+        # store has no shutdown needed
 
     async def test_tool_not_in_whitelist(self):
         agent = _FakeAgentConfig(tools={})  # empty whitelist
@@ -364,7 +364,7 @@ class TestToolExecution:
             _simple_llm_chunks("ok"),
         ]
 
-        result, emitted, tm = await _run_engine(
+        result, emitted, store = await _run_engine(
             _make_fake_stream_sequence(rounds),
             agents={"lead_agent": agent},
             tools={"my_tool": tool},
@@ -374,7 +374,7 @@ class TestToolExecution:
         assert len(completes) == 1
         assert completes[0]["data"]["success"] is False
         assert "not available" in completes[0]["data"]["error"]
-        await tm.shutdown(timeout=1)
+        # store has no shutdown needed
 
     async def test_tool_raises_exception(self):
         agent = _FakeAgentConfig(tools={"bad_tool": "auto"})
@@ -385,7 +385,7 @@ class TestToolExecution:
             _simple_llm_chunks("recovered"),
         ]
 
-        result, emitted, tm = await _run_engine(
+        result, emitted, store = await _run_engine(
             _make_fake_stream_sequence(rounds),
             agents={"lead_agent": agent},
             tools={"bad_tool": tool},
@@ -395,7 +395,7 @@ class TestToolExecution:
         assert len(completes) == 1
         assert completes[0]["data"]["success"] is False
         assert "exploded" in completes[0]["data"]["error"]
-        await tm.shutdown(timeout=1)
+        # store has no shutdown needed
 
     async def test_tool_call_parse_error(self):
         """Malformed tool_call XML → engine should not crash."""
@@ -406,14 +406,14 @@ class TestToolExecution:
             _simple_llm_chunks("ok"),
         ]
 
-        result, emitted, tm = await _run_engine(
+        result, emitted, store = await _run_engine(
             _make_fake_stream_sequence(rounds),
             agents={"lead_agent": agent},
             tools={"my_tool": _FakeTool("my_tool")},
         )
 
         assert result["completed"] is True
-        await tm.shutdown(timeout=1)
+        # store has no shutdown needed
 
 
 # ============================================================
@@ -429,15 +429,15 @@ class TestPermissionInterrupt:
 
         xml = _tool_call_xml("sensitive_tool", query="test")
 
-        tm = TaskManager(max_concurrent=5)
+        store = InMemoryRuntimeStore()
         state = create_initial_state(task="test", session_id="s1", message_id="msg-1", conversation_history=[])
         emitted = []
 
         async def _resolve_after_delay():
             """Wait until interrupt exists, then resolve."""
             for _ in range(100):
-                if tm.get_interrupt("msg-1"):
-                    await tm.resolve_interrupt("msg-1", {"approved": True})
+                if store.get_interrupt("msg-1"):
+                    store.resolve_interrupt("msg-1", {"approved": True})
                     return
                 await asyncio.sleep(0.01)
 
@@ -457,7 +457,7 @@ class TestPermissionInterrupt:
                 state=state,
                 agents={"lead_agent": agent},
                 tools={"sensitive_tool": tool},
-                hooks=_hooks_from_tm(tm),
+                hooks=_hooks_from_store(store),
                 emit=capture_emit,
             )
 
@@ -467,21 +467,21 @@ class TestPermissionInterrupt:
         perm_results = _events_of_type(emitted, "permission_result")
         assert len(perm_results) == 1
         assert perm_results[0]["data"]["approved"] is True
-        await tm.shutdown(timeout=1)
+        # store has no shutdown needed
 
     async def test_denied_tool_not_executed(self):
         agent = _FakeAgentConfig(tools={"sensitive_tool": "confirm"})
         tool = _FakeTool("sensitive_tool", permission=ToolPermission.CONFIRM)
 
         xml = _tool_call_xml("sensitive_tool", query="test")
-        tm = TaskManager(max_concurrent=5)
+        store = InMemoryRuntimeStore()
         state = create_initial_state(task="test", session_id="s1", message_id="msg-1", conversation_history=[])
         emitted = []
 
         async def _resolve_deny():
             for _ in range(100):
-                if tm.get_interrupt("msg-1"):
-                    await tm.resolve_interrupt("msg-1", {"approved": False})
+                if store.get_interrupt("msg-1"):
+                    store.resolve_interrupt("msg-1", {"approved": False})
                     return
                 await asyncio.sleep(0.01)
 
@@ -501,7 +501,7 @@ class TestPermissionInterrupt:
                 state=state,
                 agents={"lead_agent": agent},
                 tools={"sensitive_tool": tool},
-                hooks=_hooks_from_tm(tm),
+                hooks=_hooks_from_store(store),
                 emit=capture_emit,
             )
 
@@ -511,21 +511,21 @@ class TestPermissionInterrupt:
         # Tool complete should show error (denied)
         tool_completes = [e for e in emitted if e["type"] == "tool_complete" and e["data"]["tool"] == "sensitive_tool"]
         assert any("denied" in str(tc["data"].get("error", "")).lower() for tc in tool_completes)
-        await tm.shutdown(timeout=1)
+        # store has no shutdown needed
 
     async def test_always_allow_skips_subsequent(self):
         agent = _FakeAgentConfig(tools={"sensitive_tool": "confirm"})
         tool = _FakeTool("sensitive_tool", permission=ToolPermission.CONFIRM)
 
         xml = _tool_call_xml("sensitive_tool", query="test")
-        tm = TaskManager(max_concurrent=5)
+        store = InMemoryRuntimeStore()
         state = create_initial_state(task="test", session_id="s1", message_id="msg-1", conversation_history=[])
         emitted = []
 
         async def _resolve_allow():
             for _ in range(100):
-                if tm.get_interrupt("msg-1"):
-                    await tm.resolve_interrupt("msg-1", {"approved": True, "always_allow": True})
+                if store.get_interrupt("msg-1"):
+                    store.resolve_interrupt("msg-1", {"approved": True, "always_allow": True})
                     return
                 await asyncio.sleep(0.01)
 
@@ -546,7 +546,7 @@ class TestPermissionInterrupt:
                 state=state,
                 agents={"lead_agent": agent},
                 tools={"sensitive_tool": tool},
-                hooks=_hooks_from_tm(tm),
+                hooks=_hooks_from_store(store),
                 emit=capture_emit,
             )
 
@@ -554,7 +554,7 @@ class TestPermissionInterrupt:
         perm_requests = _events_of_type(emitted, "permission_request")
         assert len(perm_requests) == 1
         assert "sensitive_tool" in state["always_allowed_tools"]
-        await tm.shutdown(timeout=1)
+        # store has no shutdown needed
 
     async def test_timeout_treated_as_denied(self):
         agent = _FakeAgentConfig(tools={"sensitive_tool": "confirm"})
@@ -568,7 +568,7 @@ class TestPermissionInterrupt:
             _simple_llm_chunks("timed out"),
         ]
 
-        result, emitted, tm = await _run_engine(
+        result, emitted, store = await _run_engine(
             _make_fake_stream_sequence(rounds),
             agents={"lead_agent": agent},
             tools={"sensitive_tool": tool},
@@ -578,7 +578,7 @@ class TestPermissionInterrupt:
         perm_results = _events_of_type(emitted, "permission_result")
         assert len(perm_results) == 1
         assert perm_results[0]["data"]["approved"] is False
-        await tm.shutdown(timeout=1)
+        # store has no shutdown needed
 
 
 # ============================================================
@@ -590,19 +590,19 @@ class TestCancellation:
 
     async def test_cancel_at_loop_top(self):
         """Cancellation flag set before LLM call → immediate exit."""
-        tm = TaskManager(max_concurrent=5)
-        tm._cancellations["msg-1"] = asyncio.Event()
-        tm._cancellations["msg-1"].set()
+        store = InMemoryRuntimeStore()
+        store._cancellations["msg-1"] = asyncio.Event()
+        store._cancellations["msg-1"].set()
 
-        result, emitted, _ = await _run_engine(
+        result, emitted, _store = await _run_engine(
             _make_fake_stream(_simple_llm_chunks("should not reach")),
-            task_manager=tm,
+            store=store,
             message_id="msg-1",
         )
 
         assert result["completed"] is True
         assert result.get("cancelled") is True
-        await tm.shutdown(timeout=1)
+        # store has no shutdown needed
 
     async def test_cancel_between_tools(self):
         """Cancel during tool execution → break out of tool loop."""
@@ -614,7 +614,7 @@ class TestCancellation:
             + _tool_call_xml("t2", param="val2")
         )
 
-        tm = TaskManager(max_concurrent=5)
+        store = InMemoryRuntimeStore()
         state = create_initial_state(task="test", session_id="s1", message_id="msg-1", conversation_history=[])
         emitted = []
 
@@ -622,36 +622,36 @@ class TestCancellation:
             emitted.append(event_dict)
             # Cancel after first tool completes
             if event_dict["type"] == "tool_complete":
-                tm._cancellations["msg-1"] = asyncio.Event()
-                tm._cancellations["msg-1"].set()
+                store._cancellations["msg-1"] = asyncio.Event()
+                store._cancellations["msg-1"].set()
 
         with patch("models.llm.astream_with_retry", _make_fake_stream(_tool_call_chunks(xml))):
             result = await execute_loop(
                 state=state,
                 agents={"lead_agent": agent},
                 tools={"t1": _FakeTool("t1"), "t2": _FakeTool("t2")},
-                hooks=_hooks_from_tm(tm),
+                hooks=_hooks_from_store(store),
                 emit=capture_emit,
             )
 
         assert result["completed"] is True
         assert result.get("cancelled") is True
-        await tm.shutdown(timeout=1)
+        # store has no shutdown needed
 
     async def test_cancelled_state_flags(self):
-        tm = TaskManager(max_concurrent=5)
-        tm._cancellations["msg-1"] = asyncio.Event()
-        tm._cancellations["msg-1"].set()
+        store = InMemoryRuntimeStore()
+        store._cancellations["msg-1"] = asyncio.Event()
+        store._cancellations["msg-1"].set()
 
-        result, _, _ = await _run_engine(
+        result, _, _store = await _run_engine(
             _make_fake_stream(_simple_llm_chunks("x")),
-            task_manager=tm,
+            store=store,
             message_id="msg-1",
         )
 
         assert result["cancelled"] is True
         assert result["completed"] is True
-        await tm.shutdown(timeout=1)
+        # store has no shutdown needed
 
 
 # ============================================================
@@ -682,7 +682,7 @@ class TestRoundLimits:
             for c in chunks:
                 yield c
 
-        result, emitted, tm = await _run_engine(
+        result, emitted, store = await _run_engine(
             intercepting_stream,
             agents={"lead_agent": agent},
             tools={"my_tool": tool},
@@ -694,7 +694,7 @@ class TestRoundLimits:
             system_msgs = [m for m in last_call_msgs if m["role"] == "system"]
             has_limit_msg = any("maximum number of tool calls" in m["content"] for m in system_msgs)
             assert has_limit_msg
-        await tm.shutdown(timeout=1)
+        # store has no shutdown needed
 
 
 # ============================================================
@@ -706,23 +706,23 @@ class TestPendingMessageDrain:
 
     async def test_lead_drains_before_completing(self):
         """If messages arrive during last LLM call, lead should continue instead of completing."""
-        tm = TaskManager(max_concurrent=5)
+        store = InMemoryRuntimeStore()
         call_count = {"n": 0}
 
         async def injecting_stream(messages, **kwargs):
             call_count["n"] += 1
             if call_count["n"] == 1:
                 # Inject a message during first LLM call
-                tm.inject_message("msg-1", "injected content")
+                store.inject_message("msg-1", "injected content")
                 for c in _simple_llm_chunks("first response"):
                     yield c
             else:
                 for c in _simple_llm_chunks("final response"):
                     yield c
 
-        result, emitted, _ = await _run_engine(
+        result, emitted, _store = await _run_engine(
             injecting_stream,
-            task_manager=tm,
+            store=store,
             message_id="msg-1",
         )
 
@@ -732,7 +732,7 @@ class TestPendingMessageDrain:
         # Should have queued_message event
         queued = [e for e in emitted if e["type"] == StreamEventType.QUEUED_MESSAGE.value]
         assert len(queued) >= 1
-        await tm.shutdown(timeout=1)
+        # store has no shutdown needed
 
 
 # ============================================================
@@ -743,7 +743,7 @@ class TestPendingMessageDrain:
 class TestMetrics:
 
     async def test_metrics_timestamps(self):
-        result, _, tm = await _run_engine(
+        result, _, store = await _run_engine(
             _make_fake_stream(_simple_llm_chunks("ok"))
         )
 
@@ -752,7 +752,7 @@ class TestMetrics:
         assert metrics["completed_at"] is not None
         assert metrics["total_duration_ms"] is not None
         assert metrics["total_duration_ms"] >= 0
-        await tm.shutdown(timeout=1)
+        # store has no shutdown needed
 
     async def test_token_usage_aggregation(self):
         """Multi-round token usage should be aggregated."""
@@ -765,7 +765,7 @@ class TestMetrics:
             _simple_llm_chunks("Done", input_tokens=200, output_tokens=30),
         ]
 
-        result, _, tm = await _run_engine(
+        result, _, store = await _run_engine(
             _make_fake_stream_sequence(rounds),
             agents={"lead_agent": agent},
             tools={"my_tool": tool},
@@ -775,4 +775,4 @@ class TestMetrics:
         assert total["input_tokens"] == 300
         assert total["output_tokens"] == 80
         assert total["total_tokens"] == 380
-        await tm.shutdown(timeout=1)
+        # store has no shutdown needed

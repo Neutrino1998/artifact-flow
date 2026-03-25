@@ -12,10 +12,11 @@ from fastapi import APIRouter, Depends, HTTPException
 from starlette.responses import StreamingResponse
 
 from config import config
-from api.dependencies import get_current_user, get_stream_manager, get_task_manager
+from api.dependencies import get_current_user, get_stream_transport, get_execution_runner
 from api.services.auth import TokenPayload
-from api.services.stream_manager import StreamManager, StreamNotFoundError
-from api.services.task_manager import TaskManager
+from api.services.stream_manager import StreamNotFoundError
+from api.services.stream_transport import StreamTransport
+from api.services.execution_runner import ExecutionRunner
 from api.utils.sse import format_sse_event, format_sse_comment
 from utils.logger import get_logger
 
@@ -28,8 +29,8 @@ router = APIRouter()
 async def stream_events(
     stream_id: str,
     current_user: TokenPayload = Depends(get_current_user),
-    stream_manager: StreamManager = Depends(get_stream_manager),
-    task_manager: TaskManager = Depends(get_task_manager),
+    stream_transport: StreamTransport = Depends(get_stream_transport),
+    runner: ExecutionRunner = Depends(get_execution_runner),
 ) -> StreamingResponse:
     """
     SSE 端点，订阅执行过程
@@ -55,11 +56,11 @@ async def stream_events(
         """
         事件生成器
 
-        从 StreamManager 消费事件，格式化为 SSE 并 yield。
+        从 StreamTransport 消费事件，格式化为 SSE 并 yield。
         """
         try:
             # 消费事件（带心跳支持 + 用户校验）
-            async for event in stream_manager.consume_events(
+            async for event in stream_transport.consume_events(
                 stream_id,
                 heartbeat_interval=config.SSE_PING_INTERVAL,
                 user_id=current_user.user_id,
@@ -92,9 +93,9 @@ async def stream_events(
         except asyncio.CancelledError:
             # 客户端断开连接
             logger.info(f"Stream {stream_id}: client disconnected")
-            await stream_manager.close_stream(stream_id)
+            await stream_transport.close_stream(stream_id)
             # 自动拒绝未决的权限中断，避免引擎无限阻塞
-            result = await task_manager.resolve_interrupt(
+            result = runner.store.resolve_interrupt(
                 stream_id, {"approved": False, "reason": "client_disconnected"}
             )
             if result == "resolved":

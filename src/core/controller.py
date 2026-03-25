@@ -40,7 +40,7 @@ class ExecutionController:
         conversation_manager: Optional[ConversationManager] = None,
         message_event_repo: Optional[Any] = None,  # MessageEventRepository
         compaction_manager: Optional[Any] = None,
-        unregister_conversation: Optional[Callable[[str], None]] = None,
+        on_engine_exit: Optional[Callable[[str], None]] = None,
     ):
         self.agents = agents
         self.tools = tools
@@ -49,7 +49,7 @@ class ExecutionController:
         self.conversation_manager = conversation_manager or ConversationManager()
         self.message_event_repo = message_event_repo
         self.compaction_manager = compaction_manager
-        self._unregister_conversation = unregister_conversation
+        self._on_engine_exit = on_engine_exit
         logger.info("ExecutionController initialized")
 
     async def stream_execute(
@@ -212,8 +212,8 @@ class ExecutionController:
 
         # Engine 已退出，不会再 drain 消息 — 立即取消活跃映射，
         # 使 /inject 端点正确返回 409 而非假装成功入队
-        if self._unregister_conversation:
-            self._unregister_conversation(conversation_id)
+        if self._on_engine_exit:
+            self._on_engine_exit(conversation_id)
 
         # ========== Post-processing ==========
         # Use initial_state as fallback if engine crashed before setting final_state

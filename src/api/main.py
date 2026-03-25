@@ -24,7 +24,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """
     应用生命周期管理
 
-    启动时：初始化全局单例（数据库、StreamManager、TaskManager）
+    启动时：初始化全局单例（数据库、StreamTransport、ExecutionRunner）
     关闭时：清理资源
     """
     # 启动

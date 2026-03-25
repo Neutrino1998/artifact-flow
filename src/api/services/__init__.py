@@ -10,13 +10,18 @@ from .stream_manager import (
     StreamNotFoundError,
     StreamAlreadyExistsError,
 )
-from .task_manager import TaskManager, DuplicateExecutionError
+from .execution_runner import ExecutionRunner, DuplicateExecutionError
+from .runtime_store import RuntimeStore, InMemoryRuntimeStore
+from .stream_transport import StreamTransport
 
 __all__ = [
     "StreamManager",
     "StreamContext",
     "StreamNotFoundError",
     "StreamAlreadyExistsError",
-    "TaskManager",
+    "ExecutionRunner",
     "DuplicateExecutionError",
+    "RuntimeStore",
+    "InMemoryRuntimeStore",
+    "StreamTransport",
 ]

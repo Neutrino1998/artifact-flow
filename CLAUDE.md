@@ -38,7 +38,7 @@ These are non-obvious design choices that you won't easily infer from reading th
 
 - **Security: 404 not 403**: Cross-user access returns 404 to avoid leaking resource existence. Auth stays at API boundary only — core/engine/tools receive `user_id` as a plain field.
 
-- **Permission interrupts**: `CONFIRM`-level tools trigger `TaskManager.create_interrupt()` which blocks on `asyncio.Event`. Timeout and client disconnect both treated as deny. Multi-tool turns execute serially so interrupts naturally slot between tools.
+- **Permission interrupts**: `CONFIRM`-level tools trigger `RuntimeStore.create_interrupt()` which blocks on `asyncio.Event`. Timeout and client disconnect both treated as deny. Multi-tool turns execute serially so interrupts naturally slot between tools.
 
 - **Three-layer responsibility model**:
   - **Repository** (`src/repositories/`): Pure data access — returns ORM objects, no formatting/serialization/business logic. ORM objects must not escape the session that loaded them.

@@ -25,7 +25,7 @@ logger = get_logger("ArtifactFlow")
 
 
 # ============================================================
-# InterruptState — 中断状态（engine 拥有定义，TaskManager 引用）
+# InterruptState — 中断状态（engine 拥有定义，RuntimeStore 引用）
 # ============================================================
 
 @dataclass
@@ -42,7 +42,7 @@ class InterruptState:
 
 @dataclass
 class EngineHooks:
-    """Engine 通过 hooks 与 TaskManager 交互，避免 core→api/services 层级倒置。"""
+    """Engine 通过 hooks 与 RuntimeStore 交互，避免 core→api/services 层级倒置。"""
     check_cancelled: Callable[[str], bool]
     create_interrupt: Callable[[str, Dict[str, Any]], InterruptState]
     drain_messages: Callable[[str], List[str]]

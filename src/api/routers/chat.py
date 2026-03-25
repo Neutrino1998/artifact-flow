@@ -25,8 +25,8 @@ from api.dependencies import (
     get_current_user,
     get_db_manager,
     get_db_session,
-    get_stream_manager,
-    get_task_manager,
+    get_stream_transport,
+    get_execution_runner,
     get_tools,
 )
 from api.services.auth import TokenPayload
@@ -43,8 +43,8 @@ from api.schemas.chat import (
     ConversationSummary,
     MessageResponse,
 )
-from api.services.stream_manager import StreamManager
-from api.services.task_manager import TaskManager
+from api.services.stream_transport import StreamTransport
+from api.services.execution_runner import ExecutionRunner
 from core.conversation_manager import ConversationManager
 from repositories.base import NotFoundError
 from utils.logger import get_logger, set_request_context
@@ -96,7 +96,8 @@ async def _create_controller() -> AsyncGenerator:
     from repositories.message_event_repo import MessageEventRepository
 
     db_manager = get_db_manager()
-    task_manager = get_task_manager()
+    runner = get_execution_runner()
+    store = runner.store
     agents = get_agents()
 
     async with db_manager.session() as session:
@@ -112,9 +113,9 @@ async def _create_controller() -> AsyncGenerator:
         event_repo = MessageEventRepository(session)
 
         hooks = EngineHooks(
-            check_cancelled=task_manager.is_cancelled,
-            create_interrupt=task_manager.create_interrupt,
-            drain_messages=task_manager.drain_messages,
+            check_cancelled=store.is_cancelled,
+            create_interrupt=store.create_interrupt,
+            drain_messages=store.drain_messages,
         )
 
         yield ExecutionController(
@@ -125,17 +126,17 @@ async def _create_controller() -> AsyncGenerator:
             conversation_manager=conv_manager,
             message_event_repo=event_repo,
             compaction_manager=get_compaction_manager(),
-            unregister_conversation=task_manager.unregister_conversation,
+            on_engine_exit=store.clear_engine_interactive,
         )
 
 
 async def _run_and_push(
-    stream_manager: StreamManager,
+    stream_transport: StreamTransport,
     stream_id: str,
     event_stream: AsyncIterator[dict],
 ) -> None:
     """
-    Consume events from a controller stream and push them to the StreamManager.
+    Consume events from a controller stream and push them to the StreamTransport.
 
     Handles timeout and unexpected errors, pushing sanitized error events.
     Execution runs to completion even if the SSE client disconnects.
@@ -146,13 +147,13 @@ async def _run_and_push(
             async for event in event_stream:
                 if stream_closed:
                     continue
-                if not await stream_manager.push_event(stream_id, _sanitize_error_event(event)):
+                if not await stream_transport.push_event(stream_id, _sanitize_error_event(event)):
                     logger.info(f"Stream {stream_id} closed, execution will continue to completion")
                     stream_closed = True
 
     except TimeoutError:
         logger.error(f"Execution timed out after {config.STREAM_TIMEOUT}s for {stream_id}")
-        await stream_manager.push_event(stream_id, _sanitize_error_event({
+        await stream_transport.push_event(stream_id, _sanitize_error_event({
             "type": "error",
             "timestamp": datetime.now().isoformat(),
             "data": {"success": False, "error": f"Execution timed out after {config.STREAM_TIMEOUT}s"}
@@ -160,7 +161,7 @@ async def _run_and_push(
 
     except Exception as e:
         logger.exception(f"Error in execution: {e}")
-        await stream_manager.push_event(stream_id, _sanitize_error_event({
+        await stream_transport.push_event(stream_id, _sanitize_error_event({
             "type": "error",
             "timestamp": datetime.now().isoformat(),
             "data": {"success": False, "error": str(e)}
@@ -172,8 +173,8 @@ async def send_message(
     request: ChatRequest,
     current_user: TokenPayload = Depends(get_current_user),
     conversation_manager: ConversationManager = Depends(get_conversation_manager),
-    stream_manager: StreamManager = Depends(get_stream_manager),
-    task_manager: TaskManager = Depends(get_task_manager),
+    stream_transport: StreamTransport = Depends(get_stream_transport),
+    runner: ExecutionRunner = Depends(get_execution_runner),
 ):
     """
     发送新消息
@@ -181,6 +182,8 @@ async def send_message(
     启动执行，返回 stream_url 供前端订阅。
     """
     from uuid import uuid4
+
+    store = runner.store
 
     # 为新消息准备 ID
     conversation_id = request.conversation_id
@@ -194,8 +197,8 @@ async def send_message(
     if request.conversation_id:
         await _verify_ownership(conversation_id, current_user, conversation_manager)
 
-    # 原子地预留 conversation — 在任何 await 之前完成，消除竞争窗口
-    active = task_manager.try_reserve_conversation(conversation_id, message_id)
+    # 原子地获取 conversation lease — 在任何 await 之前完成，消除竞争窗口
+    active = store.try_acquire_lease(conversation_id, message_id)
     if active:
         raise HTTPException(
             status_code=409,
@@ -203,13 +206,16 @@ async def send_message(
                    "Use POST /chat/{conv_id}/inject to send input to the running execution.",
         )
 
-    # reserve 之后的所有步骤失败时必须回滚，否则 reservation 永久泄漏
+    # lease 之后的所有步骤失败时必须回滚，否则 lease 永久泄漏
     try:
+        # 标记 engine 可交互
+        store.mark_engine_interactive(conversation_id, message_id)
+
         # 确保 conversation 存在
         await conversation_manager.ensure_conversation_exists(conversation_id, user_id=user_id)
 
         # 创建 stream（使用 message_id 作为 stream key）
-        await stream_manager.create_stream(message_id, owner_user_id=user_id)
+        await stream_transport.create_stream(message_id, owner_user_id=user_id)
 
         # 设置请求上下文
         set_request_context(message_id=message_id, conv_id=conversation_id)
@@ -222,7 +228,7 @@ async def send_message(
                     if 'parent_message_id' in request.model_fields_set:
                         parent_kwargs['parent_message_id'] = request.parent_message_id
                     await _run_and_push(
-                        stream_manager,
+                        stream_transport,
                         message_id,
                         ctrl.stream_execute(
                             user_input=request.user_input,
@@ -233,15 +239,16 @@ async def send_message(
                     )
             except Exception as e:
                 logger.exception(f"Failed to initialize execution: {e}")
-                await stream_manager.push_event(message_id, _sanitize_error_event({
+                await stream_transport.push_event(message_id, _sanitize_error_event({
                     "type": "error",
                     "timestamp": datetime.now().isoformat(),
                     "data": {"success": False, "error": str(e)}
                 }))
 
-        await task_manager.submit(message_id, execute_and_push())
+        await runner.submit(message_id, execute_and_push())
     except Exception:
-        task_manager.unregister_conversation(conversation_id)
+        store.release_lease(conversation_id)
+        store.clear_engine_interactive(conversation_id)
         raise
 
     return ChatResponse(
@@ -257,7 +264,7 @@ async def inject_message(
     request: InjectRequest,
     current_user: TokenPayload = Depends(get_current_user),
     conversation_manager: ConversationManager = Depends(get_conversation_manager),
-    task_manager: TaskManager = Depends(get_task_manager),
+    runner: ExecutionRunner = Depends(get_execution_runner),
 ):
     """
     向活跃执行注入消息
@@ -272,11 +279,11 @@ async def inject_message(
     """
     await _verify_ownership(conv_id, current_user, conversation_manager)
 
-    active_msg_id = task_manager.get_active_message_id(conv_id)
+    active_msg_id = runner.store.get_interactive_message_id(conv_id)
     if not active_msg_id:
         raise HTTPException(status_code=409, detail="No active execution for this conversation")
 
-    task_manager.inject_message(active_msg_id, request.content)
+    runner.store.inject_message(active_msg_id, request.content)
 
     return InjectResponse(
         message_id=active_msg_id,
@@ -289,7 +296,7 @@ async def cancel_execution(
     conv_id: str,
     current_user: TokenPayload = Depends(get_current_user),
     conversation_manager: ConversationManager = Depends(get_conversation_manager),
-    task_manager: TaskManager = Depends(get_task_manager),
+    runner: ExecutionRunner = Depends(get_execution_runner),
 ):
     """
     取消活跃执行
@@ -298,11 +305,11 @@ async def cancel_execution(
     """
     await _verify_ownership(conv_id, current_user, conversation_manager)
 
-    active_msg_id = task_manager.get_active_message_id(conv_id)
+    active_msg_id = runner.store.get_interactive_message_id(conv_id)
     if not active_msg_id:
         raise HTTPException(status_code=409, detail="No active execution for this conversation")
 
-    task_manager.request_cancel(active_msg_id)
+    runner.store.request_cancel(active_msg_id)
 
     return CancelResponse(message_id=active_msg_id)
 
@@ -454,13 +461,13 @@ async def resume_execution(
     request: ResumeRequest,
     current_user: TokenPayload = Depends(get_current_user),
     conversation_manager: ConversationManager = Depends(get_conversation_manager),
-    stream_manager: StreamManager = Depends(get_stream_manager),
-    task_manager: TaskManager = Depends(get_task_manager),
+    stream_transport: StreamTransport = Depends(get_stream_transport),
+    runner: ExecutionRunner = Depends(get_execution_runner),
 ):
     """
     恢复中断的执行（权限确认后）
 
-    通过 TaskManager.resolve_interrupt() 唤醒暂停的 coroutine。
+    通过 RuntimeStore.resolve_interrupt() 唤醒暂停的 coroutine。
     """
     message_id = request.message_id
 
@@ -480,7 +487,7 @@ async def resume_execution(
         "always_allow": request.always_allow,
     }
 
-    result = await task_manager.resolve_interrupt(message_id, resume_data)
+    result = runner.store.resolve_interrupt(message_id, resume_data)
     if result == "not_found":
         raise HTTPException(status_code=404, detail="No pending interrupt found for this message")
     if result == "already_resolved":

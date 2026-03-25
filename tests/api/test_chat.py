@@ -16,7 +16,7 @@ from httpx import AsyncClient
 from db.models import User
 from db.database import DatabaseManager
 from repositories.conversation_repo import ConversationRepository
-from api.services.task_manager import TaskManager
+from api.services.execution_runner import ExecutionRunner
 
 
 # ============================================================
@@ -258,12 +258,12 @@ class TestResumeInterrupt:
         conv_id, msg_ids = seed_conversation
         message_id = msg_ids[0]
 
-        # Get the TaskManager injected into the app
-        from api.dependencies import get_task_manager
-        task_manager: TaskManager = app.dependency_overrides[get_task_manager]()
+        # Get the ExecutionRunner injected into the app
+        from api.dependencies import get_execution_runner
+        runner: ExecutionRunner = app.dependency_overrides[get_execution_runner]()
 
         # Simulate an interrupt that the engine would create
-        task_manager.create_interrupt(message_id, {
+        runner.store.create_interrupt(message_id, {
             "tool": "web_search",
             "params": {"query": "test"},
         })

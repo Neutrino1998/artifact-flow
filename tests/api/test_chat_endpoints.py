@@ -18,8 +18,8 @@ from httpx import AsyncClient
 from db.models import User
 from db.database import DatabaseManager
 from repositories.conversation_repo import ConversationRepository
-from api.services.task_manager import TaskManager
-from api.dependencies import get_task_manager
+from api.services.execution_runner import ExecutionRunner
+from api.dependencies import get_execution_runner
 import api.dependencies as deps
 
 
@@ -50,18 +50,20 @@ async def _seed_conversation(
 
 async def _simulate_active_task(app, conv_id: str, msg_id: str) -> asyncio.Event:
     """
-    Register a reservation and submit a sleeping coroutine to simulate an active task.
+    Register a lease + interactive state and submit a sleeping coroutine to simulate an active task.
     Returns a blocker event that can be set to let the task complete.
     """
-    task_manager: TaskManager = app.dependency_overrides[get_task_manager]()
-    task_manager.try_reserve_conversation(conv_id, msg_id)
+    runner: ExecutionRunner = app.dependency_overrides[get_execution_runner]()
+    store = runner.store
+    store.try_acquire_lease(conv_id, msg_id)
+    store.mark_engine_interactive(conv_id, msg_id)
 
     blocker = asyncio.Event()
 
     async def sleeping():
         await blocker.wait()
 
-    await task_manager.submit(msg_id, sleeping())
+    await runner.submit(msg_id, sleeping())
     return blocker
 
 
@@ -99,9 +101,9 @@ class TestInject:
         assert body["message_id"] == msg_ids[0]
         assert "stream" in body["stream_url"]
 
-        # Verify the message was actually enqueued in TaskManager
-        tm: TaskManager = app.dependency_overrides[get_task_manager]()
-        drained = tm.drain_messages(msg_ids[0])
+        # Verify the message was actually enqueued in RuntimeStore
+        runner: ExecutionRunner = app.dependency_overrides[get_execution_runner]()
+        drained = runner.store.drain_messages(msg_ids[0])
         assert drained == ["additional input"]
 
         blocker.set()
@@ -160,8 +162,8 @@ class TestCancel:
         assert body["message_id"] == msg_ids[0]
 
         # Verify cancellation was requested
-        tm: TaskManager = app.dependency_overrides[get_task_manager]()
-        assert tm.is_cancelled(msg_ids[0]) is True
+        runner: ExecutionRunner = app.dependency_overrides[get_execution_runner]()
+        assert runner.store.is_cancelled(msg_ids[0]) is True
 
         blocker.set()
 
@@ -395,7 +397,7 @@ class TestChatStreamE2E:
     """
     End-to-end: POST /chat → background execution → GET /stream → SSE events.
 
-    Mock only the LLM; exercises real ExecutionController, TaskManager,
+    Mock only the LLM; exercises real ExecutionController, ExecutionRunner,
     StreamManager, conversation persistence, and event persistence.
     """
 
@@ -404,16 +406,16 @@ class TestChatStreamE2E:
     ):
         """POST /chat returns stream_url; GET /stream yields metadata → ... → complete."""
         fake_agents = {"lead_agent": _FakeAgentConfig()}
-        tm: TaskManager = app.dependency_overrides[get_task_manager]()
+        runner: ExecutionRunner = app.dependency_overrides[get_execution_runner]()
 
-        # _create_controller() calls get_task_manager/get_agents/get_tools directly,
+        # _create_controller() calls get_execution_runner/get_agents/get_tools directly,
         # so we must set the module-level globals (not just dependency_overrides).
         old_agents = deps._agents
         old_tools = deps._tools
-        old_tm = deps._task_manager
+        old_runner = deps._execution_runner
         deps._agents = fake_agents
         deps._tools = {}
-        deps._task_manager = tm
+        deps._execution_runner = runner
 
         try:
             with patch("models.llm.astream_with_retry", _make_fake_llm_stream("Hello from agent")):
@@ -431,7 +433,7 @@ class TestChatStreamE2E:
 
                 # Wait for background execution to complete
                 for _ in range(50):
-                    if message_id not in tm._tasks:
+                    if message_id not in runner._tasks:
                         break
                     await asyncio.sleep(0.1)
 
@@ -471,9 +473,10 @@ class TestChatStreamE2E:
                     assert len(db_events) >= 4, f"Expected ≥4 persisted events, got: {db_event_types}"
                     assert "complete" in db_event_types
 
-                # 5. Verify reservation was cleaned up
-                assert tm.get_active_message_id(conv_id) is None
+                # 5. Verify lease was cleaned up
+                assert runner.store.get_leased_message_id(conv_id) is None
+                assert runner.store.get_interactive_message_id(conv_id) is None
         finally:
             deps._agents = old_agents
             deps._tools = old_tools
-            deps._task_manager = old_tm
+            deps._execution_runner = old_runner
