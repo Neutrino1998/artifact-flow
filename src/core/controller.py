@@ -8,7 +8,7 @@
 """
 
 import asyncio
-from typing import Dict, Optional, Any, AsyncGenerator
+from typing import Callable, Dict, Optional, Any, AsyncGenerator
 from uuid import uuid4
 from datetime import datetime
 
@@ -40,6 +40,7 @@ class ExecutionController:
         conversation_manager: Optional[ConversationManager] = None,
         message_event_repo: Optional[Any] = None,  # MessageEventRepository
         compaction_manager: Optional[Any] = None,
+        unregister_conversation: Optional[Callable[[str], None]] = None,
     ):
         self.agents = agents
         self.tools = tools
@@ -48,6 +49,7 @@ class ExecutionController:
         self.conversation_manager = conversation_manager or ConversationManager()
         self.message_event_repo = message_event_repo
         self.compaction_manager = compaction_manager
+        self._unregister_conversation = unregister_conversation
         logger.info("ExecutionController initialized")
 
     async def stream_execute(
@@ -207,6 +209,11 @@ class ExecutionController:
         finally:
             if not engine_task.done():
                 await engine_task
+
+        # Engine 已退出，不会再 drain 消息 — 立即取消活跃映射，
+        # 使 /inject 端点正确返回 409 而非假装成功入队
+        if self._unregister_conversation:
+            self._unregister_conversation(conversation_id)
 
         # ========== Post-processing ==========
         # Use initial_state as fallback if engine crashed before setting final_state

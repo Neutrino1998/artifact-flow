@@ -125,6 +125,7 @@ async def _create_controller() -> AsyncGenerator:
             conversation_manager=conv_manager,
             message_event_repo=event_repo,
             compaction_manager=get_compaction_manager(),
+            unregister_conversation=task_manager.unregister_conversation,
         )
 
 
