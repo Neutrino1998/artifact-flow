@@ -101,30 +101,38 @@ redis:
 ```python
 @runtime_checkable
 class RuntimeStore(Protocol):
+    # ── Lease（owner = message_id，compare-and-del 需要） ──
     async def try_acquire_lease(self, conversation_id: str, message_id: str) -> Optional[str]: ...
-    async def release_lease(self, conversation_id: str) -> None: ...
+    async def release_lease(self, conversation_id: str, message_id: str) -> None: ...
     async def get_leased_message_id(self, conversation_id: str) -> Optional[str]: ...
 
+    # ── Interactive（同理需要 owner 做 compare-and-del）──
     async def mark_engine_interactive(self, conversation_id: str, message_id: str) -> None: ...
-    async def clear_engine_interactive(self, conversation_id: str) -> None: ...
+    async def clear_engine_interactive(self, conversation_id: str, message_id: str) -> None: ...
     async def get_interactive_message_id(self, conversation_id: str) -> Optional[str]: ...
 
+    # ── Interrupt ──
     async def create_interrupt(self, message_id: str, data: Dict[str, Any]) -> None: ...
     async def resolve_interrupt(self, message_id: str, resume_data: Dict[str, Any]) -> Literal["resolved", "not_found", "already_resolved"]: ...
     async def get_interrupt_data(self, message_id: str) -> Optional[Dict[str, Any]]: ...
     async def wait_for_resume(self, message_id: str, timeout: float) -> Optional[Dict[str, Any]]: ...
 
+    # ── Cancellation / Message queue ──
     async def request_cancel(self, message_id: str) -> None: ...
     async def is_cancelled(self, message_id: str) -> bool: ...
-
     async def inject_message(self, message_id: str, content: str) -> None: ...
     async def drain_messages(self, message_id: str) -> List[str]: ...
 
-    async def renew_lease(self, message_id: str, ttl: int) -> None: ...
-
-    async def cleanup_execution(self, message_id: str) -> None: ...
+    # ── Lifecycle（renew 需要 conv_id + msg_id 定位 key + 校验 owner）──
+    async def renew_lease(self, conversation_id: str, message_id: str, ttl: int) -> None: ...
+    async def cleanup_execution(self, conversation_id: str, message_id: str) -> None: ...
     async def shutdown_cleanup(self) -> None: ...
 ```
+
+**Owner 语义说明**：`release_lease`、`clear_engine_interactive`、`renew_lease`、`cleanup_execution` 都需要 `(conversation_id, message_id)` 对，原因：
+- Redis key 是 `lease:{conv_id}`（需要 conv_id 定位 key）
+- compare-and-del 需要 message_id 校验 owner（防止误删其他 Worker 的 lease）
+- `InMemoryRuntimeStore` 忽略 message_id 参数即可（单进程无竞争）
 
 **`InMemoryRuntimeStore`** — 同步实现加 `async` 关键字（dict 操作本身不阻塞，加 async 只是满足协议）。
 
@@ -285,14 +293,14 @@ class RedisRuntimeStore:
 **关键方法实现**：
 
 - `try_acquire_lease` → `SET lease:{conv_id} {msg_id} NX EX {LEASE_TTL}`，原子操作天然防重，初始 TTL 由心跳续租维持
-- `release_lease` → `DEL lease:{conv_id}`（需 compare-and-del，防误删其他 worker 的 lease）
+- `release_lease(conv_id, msg_id)` → Lua compare-and-del：`GET lease:{conv_id}` == msg_id 才 `DEL`
 - `is_cancelled` → `EXISTS cancel:{msg_id}`
 - `inject_message` → `RPUSH queue:{msg_id} {content}`
 - `drain_messages` → Lua 脚本：`LRANGE + DEL` 原子取出全部消息
 - `create_interrupt` → `HSET interrupt:{msg_id} data {json} status pending`
 - `resolve_interrupt` → Lua 脚本：检查 status=pending → 设 resume_data + status=resolved → `PUBLISH interrupt:{msg_id}`
 - `wait_for_resume` → check-subscribe-check-wait 四步模式（见 1.3），防 Pub/Sub 丢通知
-- `cleanup_execution` → pipeline DEL 所有相关 key
+- `cleanup_execution(conv_id, msg_id)` → pipeline：compare-and-del lease/interactive + DEL cancel/queue/interrupt
 
 **Lua 脚本**（原子操作）：
 
@@ -308,6 +316,13 @@ end
 local msgs = redis.call("LRANGE", KEYS[1], 0, -1)
 redis.call("DEL", KEYS[1])
 return msgs
+
+-- compare-and-expire（lease / interactive 心跳续租）
+if redis.call("GET", KEYS[1]) == ARGV[1] then
+    return redis.call("EXPIRE", KEYS[1], ARGV[2])
+else
+    return 0
+end
 
 -- resolve-interrupt（原子状态转换 + 发布通知）
 local status = redis.call("HGET", KEYS[1], "status")
@@ -325,34 +340,39 @@ return "resolved"
 - `_tasks: dict[str, asyncio.Task]` — 永远只管本 Worker 的任务
 - `_semaphore` — per-Worker 并发上限
 - 分布式防重由 Redis lease 保证（`try_acquire_lease` 的 `SET NX` 天然跨 Worker 互斥）
-- `submit()` 的 finally 中 `await self.store.cleanup_execution(task_id)` 已是 async
 
 不需要全局 Semaphore（旧计划 5.5.2 继续 defer，理由同旧计划：per-Worker 限流已足够）。
 
-**Lease 心跳续租**：`submit()` 内的 `_wrapped()` 启动后台心跳任务，定期续租 lease 和 interactive key：
+**`submit()` 签名变更**：新增 `conversation_id` 参数，用于心跳续租和 cleanup 时定位 Redis key + 校验 owner：
+
+```python
+async def submit(self, task_id: str, conversation_id: str, coro: Coroutine) -> asyncio.Task:
+```
+
+**Lease 心跳续租**：`_wrapped()` 启动后台心跳，定期续租 lease 和 interactive key：
 
 ```python
 async def _wrapped():
     heartbeat = asyncio.create_task(
-        self._renew_loop(task_id, interval=config.LEASE_TTL // 3)
+        self._renew_loop(conversation_id, task_id, interval=config.LEASE_TTL // 3)
     )
     async with self._semaphore:
         try:
             await coro
         finally:
             heartbeat.cancel()
-            await self.store.cleanup_execution(task_id)
+            await self.store.cleanup_execution(conversation_id, task_id)
 
-async def _renew_loop(self, task_id, interval):
+async def _renew_loop(self, conversation_id, task_id, interval):
     """每 interval 秒续一次 lease + interactive"""
     while True:
         await asyncio.sleep(interval)
-        await self.store.renew_lease(task_id, ttl=interval * 3)
+        await self.store.renew_lease(conversation_id, task_id, ttl=interval * 3)
 ```
 
-`RuntimeStore` Protocol 新增 `renew_lease` 方法：
+`renew_lease` 实现：
 - `InMemoryRuntimeStore`：空操作（内存无 TTL 概念）
-- `RedisRuntimeStore`：对 `lease:{conv_id}` 和 `interactive:{conv_id}` 执行 `EXPIRE`（需先通过 value 匹配确认是自己的 lease，防止续错）
+- `RedisRuntimeStore`：Lua compare-and-expire — 校验 `GET lease:{conv_id} == msg_id` 后才 `EXPIRE`，防止续错别人的 lease。interactive 同理。
 
 ### 1.6 故障处理
 
@@ -571,7 +591,7 @@ updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now()
 
 理由：SQLite 存 datetime 为文本，`datetime.now` 用 Python 端时间没问题。MySQL 的 `DATETIME` 列受服务器时区影响，Python 端和 DB 端时间可能不一致。用 `func.now()` 让数据库控制时间，保证一致性。
 
-**连接初始化时区锁定**：生产连接初始化时显式执行 `SET time_zone = '+00:00'`，不依赖云库默认时区配置。通过 SQLAlchemy 的 `event.listen(engine, "connect", set_timezone)` 实现，每个新连接自动设置。
+> 部署提醒：确认云库时区配置（TDSQL 默认 `Asia/Shanghai`），所有 Worker 连同一个库即保证时间一致。
 
 **其他类型无需改动**：`JSON` → MySQL `JSON` / PostgreSQL `JSONB`、`Text` → `TEXT`、`String(N)` → `VARCHAR(N)`、`Integer` + `autoincrement=True` → MySQL `AUTO_INCREMENT` / PostgreSQL `SERIAL`。SQLAlchemy 根据 URL 前缀自动选择正确映射，代码层零方言判断。
 
