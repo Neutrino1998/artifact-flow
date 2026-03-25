@@ -11,9 +11,9 @@ TaskManager - Background Task 生命周期管理 + Interrupt + Message Queue
 """
 
 import asyncio
-from dataclasses import dataclass, field
 from typing import Coroutine, Literal, Optional, Dict, Any, List
 
+from core.engine import InterruptState
 from utils.logger import get_logger
 
 logger = get_logger("ArtifactFlow")
@@ -22,14 +22,6 @@ logger = get_logger("ArtifactFlow")
 class DuplicateExecutionError(Exception):
     """重复执行错误（message_id 已存在活跃任务）"""
     pass
-
-
-@dataclass
-class InterruptState:
-    """中断状态"""
-    event: asyncio.Event = field(default_factory=asyncio.Event)
-    interrupt_data: Dict[str, Any] = field(default_factory=dict)  # 发给前端的中断信息
-    resume_data: Optional[Dict[str, Any]] = None  # 用户确认结果
 
 
 class TaskManager:

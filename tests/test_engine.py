@@ -9,9 +9,8 @@ import pytest
 from dataclasses import dataclass, field
 from unittest.mock import patch, AsyncMock
 
-from core.engine import create_initial_state, execute_loop
+from core.engine import EngineHooks, create_initial_state, execute_loop
 from core.events import StreamEventType
-from api.services.task_manager import TaskManager
 
 
 # ============================================================
@@ -39,6 +38,15 @@ def _make_fake_stream(chunks: list[dict]):
     return fake
 
 
+def _noop_hooks() -> EngineHooks:
+    """EngineHooks stub: nothing cancelled, no interrupts, no messages."""
+    return EngineHooks(
+        check_cancelled=lambda _mid: False,
+        create_interrupt=lambda _mid, _data: None,
+        drain_messages=lambda _mid: [],
+    )
+
+
 async def _run_with_fake_llm(chunks: list[dict], agent_config=None):
     """Helper: run execute_loop with a fake LLM returning given chunks."""
     state = create_initial_state(
@@ -51,7 +59,6 @@ async def _run_with_fake_llm(chunks: list[dict], agent_config=None):
     if agent_config is None:
         agent_config = _FakeAgentConfig()
 
-    task_manager = TaskManager(max_concurrent=1)
     emitted: list = []
 
     async def capture_emit(event_dict):
@@ -62,11 +69,10 @@ async def _run_with_fake_llm(chunks: list[dict], agent_config=None):
             state=state,
             agents={"lead_agent": agent_config},
             tools={},
-            task_manager=task_manager,
+            hooks=_noop_hooks(),
             emit=capture_emit,
         )
 
-    await task_manager.shutdown()
     return result, emitted
 
 
@@ -88,7 +94,6 @@ class TestAgentNotFound:
         # Override to a non-existent agent
         state["current_agent"] = "nonexistent_agent"
 
-        task_manager = TaskManager(max_concurrent=1)
         emitted: list = []
 
         async def capture_emit(event_dict):
@@ -98,7 +103,7 @@ class TestAgentNotFound:
             state=state,
             agents={},  # no agents registered
             tools={},
-            task_manager=task_manager,
+            hooks=_noop_hooks(),
             emit=capture_emit,
         )
 
@@ -120,8 +125,6 @@ class TestAgentNotFound:
         # No complete event should be emitted
         sse_completes = [e for e in emitted if e["type"] == StreamEventType.COMPLETE.value]
         assert len(sse_completes) == 0
-
-        await task_manager.shutdown()
 
 
 class TestLlmChunkAccumulation:

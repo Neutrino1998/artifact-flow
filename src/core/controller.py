@@ -12,7 +12,7 @@ from typing import Dict, Optional, Any, AsyncGenerator
 from uuid import uuid4
 from datetime import datetime
 
-from core.engine import create_initial_state, execute_loop
+from core.engine import EngineHooks, create_initial_state, execute_loop
 from core.events import StreamEventType, ExecutionEvent
 from core.conversation_manager import ConversationManager
 from tools.base import BaseTool
@@ -35,7 +35,7 @@ class ExecutionController:
         self,
         agents: Dict[str, Any],           # {name: AgentConfig}
         tools: Dict[str, BaseTool],        # {name: BaseTool}
-        task_manager: Any,                 # TaskManager
+        hooks: EngineHooks,
         artifact_manager: Optional[ArtifactManager] = None,
         conversation_manager: Optional[ConversationManager] = None,
         message_event_repo: Optional[Any] = None,  # MessageEventRepository
@@ -43,7 +43,7 @@ class ExecutionController:
     ):
         self.agents = agents
         self.tools = tools
-        self.task_manager = task_manager
+        self.hooks = hooks
         self.artifact_manager = artifact_manager
         self.conversation_manager = conversation_manager or ConversationManager()
         self.message_event_repo = message_event_repo
@@ -166,7 +166,7 @@ class ExecutionController:
                     state=initial_state,
                     agents=self.agents,
                     tools=self.tools,
-                    task_manager=self.task_manager,
+                    hooks=self.hooks,
                     artifact_manager=self.artifact_manager,
                     emit=emit_to_queue,
                 )
@@ -207,10 +207,6 @@ class ExecutionController:
         finally:
             if not engine_task.done():
                 await engine_task
-
-        # Engine 已退出，不会再 drain 消息 — 立即取消活跃映射，
-        # 使 /inject 端点正确返回 409 而非假装成功入队
-        self.task_manager.unregister_conversation(conversation_id)
 
         # ========== Post-processing ==========
         # Use initial_state as fallback if engine crashed before setting final_state

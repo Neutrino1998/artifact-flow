@@ -18,6 +18,7 @@ from datetime import datetime
 from contextlib import asynccontextmanager
 
 from core.controller import ExecutionController
+from core.engine import EngineHooks
 from core.events import StreamEventType
 from core.conversation_manager import ConversationManager
 from agents.loader import load_all_agents
@@ -266,10 +267,16 @@ class TestEnvironment:
             conv_repo = ConversationRepository(session)
             conv_manager = ConversationManager(conv_repo)
 
+            hooks = EngineHooks(
+                check_cancelled=self.task_manager.is_cancelled,
+                create_interrupt=self.task_manager.create_interrupt,
+                drain_messages=self.task_manager.drain_messages,
+            )
+
             controller = ExecutionController(
                 agents=self._agents,
                 tools=all_tools,
-                task_manager=self.task_manager,
+                hooks=hooks,
                 artifact_manager=artifact_manager,
                 conversation_manager=conv_manager,
             )

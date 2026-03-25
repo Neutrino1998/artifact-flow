@@ -10,6 +10,7 @@
 """
 
 import asyncio
+from dataclasses import dataclass, field
 from typing import Dict, Any, Optional, Callable, Awaitable, List, Tuple, TypedDict, Union
 from datetime import datetime
 
@@ -21,6 +22,30 @@ from tools.base import ToolPermission, ToolResult
 from utils.logger import get_logger
 
 logger = get_logger("ArtifactFlow")
+
+
+# ============================================================
+# InterruptState — 中断状态（engine 拥有定义，TaskManager 引用）
+# ============================================================
+
+@dataclass
+class InterruptState:
+    """中断状态"""
+    event: asyncio.Event = field(default_factory=asyncio.Event)
+    interrupt_data: Dict[str, Any] = field(default_factory=dict)  # 发给前端的中断信息
+    resume_data: Optional[Dict[str, Any]] = None  # 用户确认结果
+
+
+# ============================================================
+# EngineHooks — engine 与外部交互的回调接口
+# ============================================================
+
+@dataclass
+class EngineHooks:
+    """Engine 通过 hooks 与 TaskManager 交互，避免 core→api/services 层级倒置。"""
+    check_cancelled: Callable[[str], bool]
+    create_interrupt: Callable[[str, Dict[str, Any]], InterruptState]
+    drain_messages: Callable[[str], List[str]]
 
 
 # ============================================================
@@ -104,7 +129,7 @@ async def execute_loop(
     state: Dict[str, Any],
     agents: Dict[str, Any],  # {name: AgentConfig}
     tools: Dict[str, Any],   # {name: BaseTool}
-    task_manager: Any,        # TaskManager
+    hooks: EngineHooks,
     artifact_manager: Optional[Any] = None,
     emit: Optional[EmitFn] = None,
 ) -> Dict[str, Any]:
@@ -115,7 +140,7 @@ async def execute_loop(
         state: 执行状态（from create_initial_state）
         agents: {name: AgentConfig} 字典
         tools: {name: BaseTool} 字典（全局 + 请求级工具已合并）
-        task_manager: TaskManager 实例（用于 interrupt 和 message queue）
+        hooks: EngineHooks（check_cancelled / create_interrupt / drain_messages）
         artifact_manager: ArtifactManager 实例（用于 artifacts 清单）
         emit: 事件推送回调（推 SSE）
     Returns:
@@ -161,7 +186,7 @@ async def execute_loop(
     async def _build_context(agent_name: str) -> list:
         """drain messages → artifacts 清单 → ContextManager.build → tool limit 注入"""
         if current_agent_name == "lead_agent":
-            for msg in task_manager.drain_messages(message_id):
+            for msg in hooks.drain_messages(message_id):
                 wrapped = (
                     "[The user has injected a message during execution. "
                     "Consider this input and adjust your approach as needed.]\n"
@@ -323,7 +348,7 @@ async def execute_loop(
             "params": params,
         })
 
-        interrupt = task_manager.create_interrupt(message_id, {
+        interrupt = hooks.create_interrupt(message_id, {
             "type": "tool_permission",
             "agent": agent_name,
             "tool_name": tool_name,
@@ -500,7 +525,7 @@ async def execute_loop(
             tool_round_count[agent_name] = tool_round_count.get(agent_name, 0) + 1
 
     def _check_cancelled() -> bool:
-        if task_manager.is_cancelled(message_id):
+        if hooks.check_cancelled(message_id):
             state["completed"] = True
             state["cancelled"] = True
             state["response"] = state.get("response", "") or ""
@@ -550,7 +575,7 @@ async def execute_loop(
                 # Lead 无工具调用但队列中有待处理消息 → 不退出，继续循环
                 # 这处理了 inject 消息在最后一次 LLM 调用期间到达的情况
                 if current_agent_name == "lead_agent":
-                    pending = task_manager.drain_messages(message_id)
+                    pending = hooks.drain_messages(message_id)
                     if pending:
                         for msg in pending:
                             wrapped = (

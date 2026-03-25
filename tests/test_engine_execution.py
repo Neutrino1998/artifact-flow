@@ -13,7 +13,7 @@ from unittest.mock import patch
 
 import pytest
 
-from core.engine import create_initial_state, execute_loop
+from core.engine import EngineHooks, InterruptState, create_initial_state, execute_loop
 from core.events import StreamEventType, ExecutionEvent
 from api.services.task_manager import TaskManager
 from tools.base import BaseTool, ToolPermission, ToolResult
@@ -123,6 +123,15 @@ class _FailingTool(BaseTool):
         return await self.execute(**params)
 
 
+def _hooks_from_tm(tm: TaskManager) -> EngineHooks:
+    """Build EngineHooks wired to a real TaskManager."""
+    return EngineHooks(
+        check_cancelled=tm.is_cancelled,
+        create_interrupt=tm.create_interrupt,
+        drain_messages=tm.drain_messages,
+    )
+
+
 async def _run_engine(
     llm_factory,
     agents=None,
@@ -164,7 +173,7 @@ async def _run_engine(
             state=state,
             agents=agents,
             tools=tools or {},
-            task_manager=task_manager,
+            hooks=_hooks_from_tm(task_manager),
             emit=capture_emit,
         )
 
@@ -448,7 +457,7 @@ class TestPermissionInterrupt:
                 state=state,
                 agents={"lead_agent": agent},
                 tools={"sensitive_tool": tool},
-                task_manager=tm,
+                hooks=_hooks_from_tm(tm),
                 emit=capture_emit,
             )
 
@@ -492,7 +501,7 @@ class TestPermissionInterrupt:
                 state=state,
                 agents={"lead_agent": agent},
                 tools={"sensitive_tool": tool},
-                task_manager=tm,
+                hooks=_hooks_from_tm(tm),
                 emit=capture_emit,
             )
 
@@ -537,7 +546,7 @@ class TestPermissionInterrupt:
                 state=state,
                 agents={"lead_agent": agent},
                 tools={"sensitive_tool": tool},
-                task_manager=tm,
+                hooks=_hooks_from_tm(tm),
                 emit=capture_emit,
             )
 
@@ -621,7 +630,7 @@ class TestCancellation:
                 state=state,
                 agents={"lead_agent": agent},
                 tools={"t1": _FakeTool("t1"), "t2": _FakeTool("t2")},
-                task_manager=tm,
+                hooks=_hooks_from_tm(tm),
                 emit=capture_emit,
             )
 

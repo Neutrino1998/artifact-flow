@@ -88,6 +88,7 @@ async def _create_controller() -> AsyncGenerator:
                 ...
     """
     from core.controller import ExecutionController
+    from core.engine import EngineHooks
     from core.conversation_manager import ConversationManager as CM
     from tools.builtin.artifact_ops import ArtifactManager, create_artifact_tools
     from repositories.artifact_repo import ArtifactRepository
@@ -110,10 +111,16 @@ async def _create_controller() -> AsyncGenerator:
         conv_manager = CM(conv_repo)
         event_repo = MessageEventRepository(session)
 
+        hooks = EngineHooks(
+            check_cancelled=task_manager.is_cancelled,
+            create_interrupt=task_manager.create_interrupt,
+            drain_messages=task_manager.drain_messages,
+        )
+
         yield ExecutionController(
             agents=agents,
             tools=all_tools,
-            task_manager=task_manager,
+            hooks=hooks,
             artifact_manager=artifact_manager,
             conversation_manager=conv_manager,
             message_event_repo=event_repo,
