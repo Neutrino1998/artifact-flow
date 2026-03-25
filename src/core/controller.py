@@ -1,9 +1,9 @@
 """
-执行控制器（v2 — 无 LangGraph）
+执行控制器 — Pi-style while loop
 
 职责：
 1. stream_execute() — 创建 state → 启动 execute_loop → 事件推 StreamManager
-2. resume() — 唤醒暂停的 coroutine（不再是"重新调用 graph"）
+2. resume() — 唤醒暂停的 coroutine
 3. 对话管理复用 ConversationManager
 """
 
@@ -29,14 +29,7 @@ _SENTINEL = object()
 
 
 class ExecutionController:
-    """
-    执行控制器（v2 — Pi-style while loop）
-
-    变化点：
-    - 不再持有 compiled_graph
-    - 持有 agents（dict[str, AgentConfig]）和 tools（dict[str, BaseTool]）
-    - resume 是唤醒 coroutine 而非重新调用 graph
-    """
+    """Pi-style 执行控制器，驱动 agent/tool 循环并管理 interrupt resume。"""
 
     def __init__(
         self,
@@ -55,7 +48,7 @@ class ExecutionController:
         self.conversation_manager = conversation_manager or ConversationManager()
         self.message_event_repo = message_event_repo
         self.compaction_manager = compaction_manager
-        logger.info("ExecutionController v2 initialized")
+        logger.info("ExecutionController initialized")
 
     async def stream_execute(
         self,

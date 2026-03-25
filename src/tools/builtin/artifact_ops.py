@@ -1,12 +1,4 @@
-"""
-Artifact 操作工具和管理器
-
-改造说明（v2.0）：
-- 移除全局单例 `_artifact_store`
-- 新增 `ArtifactManager` 类，通过依赖注入使用 `ArtifactRepository`
-- 保留 `Artifact` 类的核心 diff-match-patch 逻辑（作为内存对象）
-- 工具类通过 `ArtifactManager` 访问数据
-"""
+"""Artifact 操作工具和管理器（ArtifactManager + write-back cache）"""
 
 from typing import Dict, Any, Optional, List, Tuple
 from datetime import datetime
