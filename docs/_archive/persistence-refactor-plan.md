@@ -751,39 +751,46 @@ Phase 3 完成后砍掉生产 `DatabaseManager` 中的 SQLite 代码，`aiosqlit
 
 ---
 
-## 依赖关系与执行顺序
+## 实施节奏
+
+三轮提交，每轮独立可验证：
 
 ```
-Phase 1: Redis RuntimeStore（多 Worker 核心）
-  1.1 Redis 基础设施
-  1.2 Protocol async 化（可先行，不依赖 Redis）
-  1.3 Interrupt 跨进程唤醒设计
-  1.4 RedisRuntimeStore 实现
-  1.5 ExecutionRunner 适配
+第一轮：P3 — 数据库层（改动面最隔离，先落地）
+  3.1 Alembic 替换手写迁移
+  3.2 DatabaseManager 去 SQLite 分支
+  3.3 datetime.now → func.now()
+  3.4 依赖策略 (aiosqlite 默认 + extras)
+  → 全量单元测试通过 → commit
+  （数据库层就绪，上层完全不动）
+
+第二轮：P1.2 — Protocol async 化（纯机械改动，接口就绪）
+  RuntimeStore Protocol 全部 async
+  InMemoryRuntimeStore 加 async 关键字
+  所有调用点加 await
+  EngineHooks 签名改 Awaitable
+  on_engine_exit 改 async + (conv_id, msg_id) 双参数
+  submit() 新增 conversation_id 参数
+  → 全量单元测试通过 → commit
+  （仍是 InMemory，行为不变，但接口已就绪）
+
+第三轮：P1.3-1.4 + P2 — Redis 实现（一起写一起上线）
+  1.1 Redis 基础设施 (docker-compose + config)
+  1.3 RedisRuntimeStore (含 check-subscribe-check-wait、心跳续租、Lua 脚本)
+  1.5 ExecutionRunner 心跳任务
   1.6 故障处理
-      │
-      ▼
-Phase 2: Redis StreamTransport（跨 Worker 事件）
-  2.2 RedisStreamTransport 实现
-  2.3 SSE 断线重连
-      │
-      ▼ （可与 Phase 2 并行）
-Phase 3: 去 SQLite + 数据库通用适配
-  3.1 Alembic
-  3.2 DatabaseManager 简化
-  3.3 ORM 时区适配
-  3.4 依赖策略 (aiosqlite 默认 + aiomysql/asyncpg 可选)
-  3.5 Docker 开发环境 (MySQL/PG 双 profile)
-  3.6 复合索引
+  2.2 RedisStreamTransport (含断线重连)
+  2.3 SSE Last-Event-ID 支持
+  dependencies.py REDIS_URL 分支
+  → 单元测试 + 集成测试通过 → commit
+  （Phase 1 + Phase 2 必须一起上线，见能力边界说明）
 ```
 
-**推荐拆分**：
+**为什么这个顺序**：
 
-Phase 1.2（Protocol async 化）可以先行，是纯机械改动且不引入新依赖。完成后 InMemoryRuntimeStore 仍然工作，但所有调用点已为 Redis 做好准备。
-
-Phase 1.3-1.4 和 Phase 2 可并行开发（共用 Redis 连接）。
-
-Phase 3 仅依赖 Alembic，与 Phase 1/2 无直接依赖，可并行推进（但建议在 Phase 1 之前或同时做，因为 TDSQL 是生产硬需求）。
+- **P3 先行**：改的是数据层，与运行时状态无关。改完跑一遍全量测试就能确认没 break。如果和 P1/P2 叠加，数据库驱动 + Protocol async 同时出问题很难定位。
+- **P1.2 单独一轮**：把"接口变更"和"实现切换"隔离。接口变更的 bug 能通过现有单元测试（InMemory 实现）立刻发现，不需要 Redis 容器。
+- **P1.3+P2 合并**：Redis RuntimeStore 和 Redis StreamTransport 共用 Redis 连接，且必须一起上线才能支撑双机部署（单上 RuntimeStore 时 SSE 仍然跨 Worker 不可达）。
 
 ---
 
