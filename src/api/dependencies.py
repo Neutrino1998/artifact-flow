@@ -1,24 +1,25 @@
 """
 FastAPI 依赖注入
 
-提供请求级别的数据库 session、manager 和 controller 实例。
+提供全局单例的获取函数和请求级别的数据库 session / manager 实例。
 
-依赖注入链路：
-    HTTP Request
-        │
-        ▼
-    get_db_session()        # 创建独立的 AsyncSession
-        │
+全局单例（init_globals 初始化，跨请求共享）：
+    get_db_manager()          # DatabaseManager — 连接池
+    get_stream_transport()    # StreamTransport — SSE 事件缓冲队列
+    get_execution_runner()    # ExecutionRunner — 后台任务调度 + RuntimeStore
+    get_compaction_manager()  # CompactionManager — 对话压缩
+    get_agents()              # Agent 配置字典
+    get_tools()               # 全局工具字典
+
+请求级依赖（每次 HTTP 请求独立创建）：
+    get_db_session()            # AsyncSession
         ├──► get_artifact_manager()
         ├──► get_conversation_manager()
-        └──► get_controller()
+        └──► get_user_repository()
 
-并发安全保证：
-    - DatabaseManager: 全局单例，管理连接池
-    - StreamTransport: 全局单例，事件缓冲队列
-    - ExecutionRunner: 全局单例，后台任务调度 + RuntimeStore
-    - AsyncSession: 请求独立，每个请求创建新的数据库会话
-    - Repository/Manager/Controller: 请求独立，绑定到请求的 session
+认证依赖：
+    get_current_user()          # JWT 校验 + DB 查活
+        └──► require_admin()    # 管理员权限
 """
 
 from __future__ import annotations

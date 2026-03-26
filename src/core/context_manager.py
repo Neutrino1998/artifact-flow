@@ -1,13 +1,11 @@
 """
-ContextManager — 唯一的抽象
-
-设计文档 §唯一的抽象：ContextManager.build()
+ContextManager — 为每次 LLM 调用构建完整的 messages 列表
 
 职责：
-1. 拼接 system prompt（role_prompt + system_info + task_plan + artifacts + agents + tools）
-2. 构建对话历史（含跨轮 compaction）
-3. 构建当前输入（含 queued messages 合并、tool 交互）
-4. 按 agent_name 过滤事件构建 context
+1. 拼接 system prompt（role_prompt + system_time + task_plan + artifacts + agents + tools）
+2. 构建对话历史（lead_agent 独有，含 compaction summaries）
+3. 构建当前轮事件（按 agent_name 过滤，含 queued_message / tool_complete 等）
+4. 预算截断：总字符超限时先砍 history 再砍 tool 交互，保留最近 N 条
 """
 
 from typing import Dict, Any, List, Optional
@@ -21,11 +19,10 @@ logger = get_logger("ArtifactFlow")
 
 class ContextManager:
     """
-    上下文管理器
+    为每次 LLM 调用构建完整的 messages 列表。
 
-    职责：
-    1. 为每次 LLM 调用构建完整的 messages
-    2. 通用的消息压缩
+    纯静态工具类（classmethod only），不持有状态。
+    截断策略：字符预算超限时从最旧消息开始丢弃，插入 "[N earlier messages truncated]" 占位。
     """
 
     @classmethod
