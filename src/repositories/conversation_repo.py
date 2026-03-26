@@ -249,7 +249,7 @@ class ConversationRepository(BaseRepository[Conversation]):
             DuplicateError: 消息ID已存在
         """
         # 确保对话存在
-        await self.get_conversation_or_raise(conversation_id)
+        conversation = await self.get_conversation_or_raise(conversation_id)
 
         # 检查消息是否已存在
         existing_msg = await self.get_message(message_id)
@@ -267,12 +267,8 @@ class ConversationRepository(BaseRepository[Conversation]):
 
         self._session.add(message)
 
-        # Bulk UPDATE: 更新活跃分支 + updated_at，不污染已加载的 conversation 实例
-        await self._session.execute(
-            update(Conversation)
-            .where(Conversation.id == conversation_id)
-            .values(active_branch=message_id, updated_at=func.now())
-        )
+        # 更新对话的活跃分支（onupdate=func.now() 自动处理 updated_at）
+        conversation.active_branch = message_id
 
         await self._session.flush()
         await self._session.commit()
@@ -328,12 +324,13 @@ class ConversationRepository(BaseRepository[Conversation]):
         message = await self.get_message_or_raise(message_id)
         message.response = response
 
-        # Bulk UPDATE: 用 DB 时间更新 conversation.updated_at，
-        # 不经过 ORM 实例属性追踪，避免 expired 状态污染
+        # Bulk UPDATE: conversation 自身无属性变化，onupdate 不会触发，
+        # 需显式用 DB 时间更新 updated_at。commit 后同 session 已持有的
+        # Conversation 实例会被 expire，不要直接访问其属性（见 CLAUDE.md 规范）
         await self._session.execute(
             update(Conversation)
             .where(Conversation.id == message.conversation_id)
-            .values(updated_at=func.now())
+            .values(updated_at=func.now()),
         )
 
         await self._session.flush()

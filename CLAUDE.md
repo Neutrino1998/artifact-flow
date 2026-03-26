@@ -53,3 +53,9 @@ These are non-obvious design choices that you won't easily infer from reading th
 - Tools must return `ToolResult` dataclass; agents must return `AgentResponse` dataclass
 - Use unified `StreamEventType` from `core/events.py` for all streaming event layers
 - All protected API endpoints use `Depends(get_current_user)`; admin endpoints use `Depends(require_admin)`
+- **ORM instances are short-lived persistence snapshots, not runtime state containers.** In async sessions, ORM attribute access on expired instances triggers implicit IO → `MissingGreenlet`. Rules:
+  - Timestamps: `server_default=func.now()` for creation, `onupdate=func.now()` for updates. Do not assign `datetime.now()` in repository code.
+  - Prefer ORM attribute mutation when the row is already dirty (e.g. changing `active_branch` lets `onupdate` handle `updated_at` automatically).
+  - Use bulk `UPDATE` only when the row has no other attribute change but needs a DB-side value written (e.g. `update_response` bumping `conversation.updated_at` via `func.now()`).
+  - Never assign SQL expressions (e.g. `func.now()`) directly to ORM instance attributes; use bulk UPDATE instead.
+  - After bulk UPDATE or commit, treat same-session ORM instances of affected rows as potentially stale — use explicit `refresh()` or a fresh query to read current values.
