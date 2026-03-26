@@ -23,6 +23,7 @@ from sqlalchemy import (
     JSON,
     UniqueConstraint,
     Index,
+    func,
 )
 from sqlalchemy.orm import (
     DeclarativeBase,
@@ -54,13 +55,13 @@ class User(Base):
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime,
-        default=datetime.now,
+        server_default=func.now(),
         nullable=False
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime,
-        default=datetime.now,
-        onupdate=datetime.now,
+        server_default=func.now(),
+        onupdate=func.now(),
         nullable=False
     )
 
@@ -109,17 +110,17 @@ class Conversation(Base):
     
     # 时间戳
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, 
-        default=datetime.now,
+        DateTime,
+        server_default=func.now(),
         nullable=False
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime,
-        default=datetime.now,
-        onupdate=datetime.now,
+        server_default=func.now(),
+        onupdate=func.now(),
         nullable=False
     )
-    
+
     # 扩展元数据
     metadata_: Mapped[Optional[Dict[str, Any]]] = mapped_column(
         "metadata",  # 数据库列名
@@ -145,6 +146,10 @@ class Conversation(Base):
         lazy="selectin"
     )
     
+    __table_args__ = (
+        Index("ix_conversations_user_updated", "user_id", "updated_at"),
+    )
+
     def __repr__(self) -> str:
         return f"<Conversation(id={self.id}, title={self.title})>"
 
@@ -189,7 +194,7 @@ class Message(Base):
     # 时间戳
     created_at: Mapped[datetime] = mapped_column(
         DateTime,
-        default=datetime.now,
+        server_default=func.now(),
         nullable=False
     )
 
@@ -205,6 +210,10 @@ class Message(Base):
     conversation: Mapped["Conversation"] = relationship(
         "Conversation",
         back_populates="messages"
+    )
+
+    __table_args__ = (
+        Index("ix_messages_conv_created", "conversation_id", "created_at"),
     )
 
     def __repr__(self) -> str:
@@ -244,7 +253,7 @@ class MessageEvent(Base):
     # 时间戳
     created_at: Mapped[datetime] = mapped_column(
         DateTime,
-        default=datetime.now,
+        server_default=func.now(),
         nullable=False
     )
 
@@ -275,16 +284,16 @@ class ArtifactSession(Base):
     # 时间戳
     created_at: Mapped[datetime] = mapped_column(
         DateTime,
-        default=datetime.now,
+        server_default=func.now(),
         nullable=False
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime,
-        default=datetime.now,
-        onupdate=datetime.now,
+        server_default=func.now(),
+        onupdate=func.now(),
         nullable=False
     )
-    
+
     # 关系：一对一 -> conversation
     conversation: Mapped["Conversation"] = relationship(
         "Conversation",
@@ -338,16 +347,16 @@ class Artifact(Base):
     # 时间戳
     created_at: Mapped[datetime] = mapped_column(
         DateTime,
-        default=datetime.now,
+        server_default=func.now(),
         nullable=False
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime,
-        default=datetime.now,
-        onupdate=datetime.now,
+        server_default=func.now(),
+        onupdate=func.now(),
         nullable=False
     )
-    
+
     # 扩展元数据
     metadata_: Mapped[Optional[Dict[str, Any]]] = mapped_column(
         "metadata",
@@ -355,7 +364,7 @@ class Artifact(Base):
         nullable=True,
         default=dict
     )
-    
+
     # 关系：多对一 -> session
     session: Mapped["ArtifactSession"] = relationship(
         "ArtifactSession",
@@ -409,10 +418,10 @@ class ArtifactVersion(Base):
     # 时间戳
     created_at: Mapped[datetime] = mapped_column(
         DateTime,
-        default=datetime.now,
+        server_default=func.now(),
         nullable=False
     )
-    
+
     # 关系：多对一 -> artifact
     artifact: Mapped["Artifact"] = relationship(
         "Artifact",
@@ -440,86 +449,3 @@ class ArtifactVersion(Base):
     
     def __repr__(self) -> str:
         return f"<ArtifactVersion(artifact={self.artifact_id}, version={self.version})>"
-
-
-if __name__ == "__main__":
-    import asyncio
-    from sqlalchemy import select
-    from db.database import create_test_database_manager
-    
-    async def test():
-        """测试 ORM 模型"""
-        print("\n🧪 ORM 模型测试")
-        print("=" * 50)
-        
-        db = create_test_database_manager()
-        
-        try:
-            await db.initialize()
-            print("✅ 数据库初始化成功")
-            
-            async with db.session() as session:
-                # 创建对话
-                conv = Conversation(
-                    id="conv-test-001",
-                    title="测试对话"
-                )
-                session.add(conv)
-                await session.flush()
-                print(f"✅ 创建对话: {conv}")
-                
-                # 创建 Artifact Session
-                art_session = ArtifactSession(id=conv.id)
-                session.add(art_session)
-                await session.flush()
-                print(f"✅ 创建 ArtifactSession: {art_session}")
-                
-                # 创建消息
-                msg = Message(
-                    id="msg-test-001",
-                    conversation_id=conv.id,
-                    user_input="Hello, World!",
-                )
-                session.add(msg)
-                await session.flush()
-                print(f"✅ 创建消息: {msg}")
-                
-                # 创建 Artifact
-                artifact = Artifact(
-                    id="task_plan",
-                    session_id=art_session.id,
-                    content_type="text/markdown",
-                    title="任务计划",
-                    content="# Task Plan\n\n- Step 1"
-                )
-                session.add(artifact)
-                await session.flush()
-                print(f"✅ 创建 Artifact: {artifact}")
-                
-                # 创建版本
-                version = ArtifactVersion(
-                    artifact_id=artifact.id,
-                    session_id=artifact.session_id,
-                    version=1,
-                    content=artifact.content,
-                    update_type="create"
-                )
-                session.add(version)
-                await session.flush()
-                print(f"✅ 创建版本: {version}")
-                
-                # 查询测试
-                result = await session.execute(
-                    select(Conversation).where(Conversation.id == "conv-test-001")
-                )
-                loaded_conv = result.scalar_one()
-                print(f"✅ 查询对话: {loaded_conv}")
-                print(f"   - 消息数: {len(loaded_conv.messages)}")
-                print(f"   - Artifacts: {len(loaded_conv.artifact_session.artifacts)}")
-            
-            print("\n✅ 所有 ORM 测试通过!")
-            
-        finally:
-            await db.close()
-    
-    asyncio.run(test())

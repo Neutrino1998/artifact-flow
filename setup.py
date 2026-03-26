@@ -21,6 +21,10 @@ setup(
     package_dir={"": "src"},
     python_requires=">=3.10",
     install_requires=parse_requirements("requirements.txt"),
+    extras_require={
+        "mysql": ["aiomysql>=0.2.0"],
+        "postgresql": ["asyncpg>=0.29.0"],
+    },
     entry_points={
         "console_scripts": [
             "artifact-flow=cli.main:app",

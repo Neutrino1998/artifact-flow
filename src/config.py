@@ -51,6 +51,10 @@ class Settings(BaseSettings):
 
     # 数据库配置
     DATABASE_URL: str = "sqlite+aiosqlite:///data/artifactflow.db"
+    DATABASE_POOL_SIZE: int = 5
+    DATABASE_MAX_OVERFLOW: int = 10
+    DATABASE_POOL_TIMEOUT: int = 30
+    DATABASE_POOL_RECYCLE: int = 1800
 
     # JWT 认证配置
     JWT_SECRET: str = ""

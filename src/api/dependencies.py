@@ -76,7 +76,13 @@ async def init_globals() -> None:
     logger.info(f"Data directory ensured: {data_dir.absolute()}")
 
     # 1. 初始化数据库管理器
-    _db_manager = DatabaseManager(config.DATABASE_URL)
+    _db_manager = DatabaseManager(
+        database_url=config.DATABASE_URL,
+        pool_size=config.DATABASE_POOL_SIZE,
+        max_overflow=config.DATABASE_MAX_OVERFLOW,
+        pool_timeout=config.DATABASE_POOL_TIMEOUT,
+        pool_recycle=config.DATABASE_POOL_RECYCLE,
+    )
     await _db_manager.initialize()
     logger.info("Database manager initialized")
 

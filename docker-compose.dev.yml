@@ -1,0 +1,48 @@
+# Development database services for integration testing.
+# Usage:
+#   docker compose -f docker-compose.dev.yml --profile mysql up -d
+#   docker compose -f docker-compose.dev.yml --profile postgresql up -d
+
+services:
+  mysql:
+    image: mysql:8.0
+    profiles: [mysql]
+    ports:
+      - "3306:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: artifactflow
+      MYSQL_DATABASE: artifactflow
+      MYSQL_USER: artifactflow
+      MYSQL_PASSWORD: artifactflow
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --default-time-zone=+00:00
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  postgresql:
+    image: postgres:16-alpine
+    profiles: [postgresql]
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: artifactflow
+      POSTGRES_USER: artifactflow
+      POSTGRES_PASSWORD: artifactflow
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U artifactflow"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  mysql_data:
+  pg_data:
