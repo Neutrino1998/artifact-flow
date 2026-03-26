@@ -764,13 +764,16 @@ Phase 3 完成后砍掉生产 `DatabaseManager` 中的 SQLite 代码，`aiosqlit
   → 全量单元测试通过 → commit
   （数据库层就绪，上层完全不动）
 
-第二轮：P1.2 — Protocol async 化（纯机械改动，接口就绪）
+第二轮：P1.2 — Protocol async 化（纯机械改动，接口就绪）  ✅ DONE
   RuntimeStore Protocol 全部 async
   InMemoryRuntimeStore 加 async 关键字
   所有调用点加 await
   EngineHooks 签名改 Awaitable
   on_engine_exit 改 async + (conv_id, msg_id) 双参数
   submit() 新增 conversation_id 参数
+  StreamManager → InMemoryStreamTransport，合入 stream_transport.py
+  create_interrupt + wait_for_resume 合并为 wait_for_interrupt
+  InterruptState 降级为 InMemory 内部实现细节
   → 全量单元测试通过 → commit
   （仍是 InMemory，行为不变，但接口已就绪）
 
