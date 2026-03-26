@@ -193,6 +193,10 @@ class DatabaseManager:
         - 表不存在 → RuntimeError（迁移未执行）
         - 表为空 → RuntimeError（迁移状态异常）
         - 连接/鉴权等其他异常 → 原样抛出，让启动 fail fast
+
+        注意：此方法只验证迁移是否执行过，不校验 revision 是否与代码期望的
+        head 一致。Revision 与 head 的匹配校验应在部署流程中通过
+        `alembic check` 或 `alembic heads` 完成（CI/CD pipeline）。
         """
         from sqlalchemy import inspect as sa_inspect
 

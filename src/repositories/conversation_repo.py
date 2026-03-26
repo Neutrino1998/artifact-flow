@@ -6,7 +6,7 @@
 
 from typing import Optional, List, Dict, Any
 
-from sqlalchemy import select, func
+from sqlalchemy import select, func, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -249,7 +249,7 @@ class ConversationRepository(BaseRepository[Conversation]):
             DuplicateError: 消息ID已存在
         """
         # 确保对话存在
-        conversation = await self.get_conversation_or_raise(conversation_id)
+        await self.get_conversation_or_raise(conversation_id)
 
         # 检查消息是否已存在
         existing_msg = await self.get_message(message_id)
@@ -264,11 +264,15 @@ class ConversationRepository(BaseRepository[Conversation]):
             user_input=user_input,
             metadata_=metadata or {}
         )
-        
+
         self._session.add(message)
 
-        # 更新对话的活跃分支
-        conversation.active_branch = message_id
+        # Bulk UPDATE: 更新活跃分支 + updated_at，不污染已加载的 conversation 实例
+        await self._session.execute(
+            update(Conversation)
+            .where(Conversation.id == conversation_id)
+            .values(active_branch=message_id, updated_at=func.now())
+        )
 
         await self._session.flush()
         await self._session.commit()
@@ -324,10 +328,13 @@ class ConversationRepository(BaseRepository[Conversation]):
         message = await self.get_message_or_raise(message_id)
         message.response = response
 
-        # 显式使用 DB 时间更新 conversation.updated_at
-        conversation = await self.get_conversation(message.conversation_id)
-        if conversation:
-            conversation.updated_at = func.now()
+        # Bulk UPDATE: 用 DB 时间更新 conversation.updated_at，
+        # 不经过 ORM 实例属性追踪，避免 expired 状态污染
+        await self._session.execute(
+            update(Conversation)
+            .where(Conversation.id == message.conversation_id)
+            .values(updated_at=func.now())
+        )
 
         await self._session.flush()
         await self._session.commit()
