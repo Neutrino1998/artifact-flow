@@ -187,15 +187,36 @@ class DatabaseManager:
         logger.info("Database tables created")
 
     async def _check_alembic_version(self) -> None:
-        """检查 alembic_version 表是否存在（生产模式）"""
-        try:
-            async with self._engine.connect() as conn:
-                await conn.execute(text("SELECT 1 FROM alembic_version LIMIT 1"))
-        except Exception:
-            logger.warning(
-                "alembic_version table not found. "
-                "Run 'alembic upgrade head' before starting the server."
+        """
+        检查 alembic_version 表并记录当前 revision（生产模式）。
+
+        - 表不存在 → RuntimeError（迁移未执行）
+        - 表为空 → RuntimeError（迁移状态异常）
+        - 连接/鉴权等其他异常 → 原样抛出，让启动 fail fast
+        """
+        from sqlalchemy import inspect as sa_inspect
+
+        async with self._engine.connect() as conn:
+            # 检查表是否存在
+            has_table = await conn.run_sync(
+                lambda sync_conn: sa_inspect(sync_conn).has_table("alembic_version")
             )
+            if not has_table:
+                raise RuntimeError(
+                    "alembic_version table not found. "
+                    "Run 'alembic upgrade head' before starting the server."
+                )
+
+            result = await conn.execute(
+                text("SELECT version_num FROM alembic_version LIMIT 1")
+            )
+            row = result.first()
+            if row is None:
+                raise RuntimeError(
+                    "alembic_version table is empty. "
+                    "Run 'alembic upgrade head' to apply migrations."
+                )
+            logger.info(f"Database schema revision: {row[0]}")
 
     @asynccontextmanager
     async def session(self) -> AsyncGenerator[AsyncSession, None]:

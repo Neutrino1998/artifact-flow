@@ -5,7 +5,6 @@
 """
 
 from typing import Optional, List, Dict, Any
-from datetime import datetime
 
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -151,7 +150,6 @@ class ConversationRepository(BaseRepository[Conversation]):
         """
         conversation = await self.get_conversation_or_raise(conversation_id)
         conversation.title = title
-        conversation.updated_at = datetime.now()
         await self.update(conversation)
         return conversation
     
@@ -271,7 +269,6 @@ class ConversationRepository(BaseRepository[Conversation]):
 
         # 更新对话的活跃分支
         conversation.active_branch = message_id
-        conversation.updated_at = datetime.now()
 
         await self._session.flush()
         await self._session.commit()
@@ -327,10 +324,10 @@ class ConversationRepository(BaseRepository[Conversation]):
         message = await self.get_message_or_raise(message_id)
         message.response = response
 
-        # 同时更新对话的 updated_at
+        # 显式使用 DB 时间更新 conversation.updated_at
         conversation = await self.get_conversation(message.conversation_id)
         if conversation:
-            conversation.updated_at = datetime.now()
+            conversation.updated_at = func.now()
 
         await self._session.flush()
         await self._session.commit()

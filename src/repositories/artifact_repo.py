@@ -5,7 +5,6 @@ Artifact Repository
 """
 
 from typing import Optional, List, Dict, Any, Tuple
-from datetime import datetime
 
 from sqlalchemy import select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -277,7 +276,6 @@ class ArtifactRepository(BaseRepository[Artifact]):
         new_ver = target_version if target_version is not None else artifact.current_version + 1
         artifact.content = new_content
         artifact.current_version = new_ver
-        artifact.updated_at = datetime.now()
         if source is not None:
             artifact.source = source
 
