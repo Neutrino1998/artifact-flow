@@ -756,7 +756,7 @@ Phase 3 完成后砍掉生产 `DatabaseManager` 中的 SQLite 代码，`aiosqlit
 三轮提交，每轮独立可验证：
 
 ```
-第一轮：P3 — 数据库层（改动面最隔离，先落地）
+第一轮：P3 — 数据库层（改动面最隔离，先落地）  ✅ DONE
   3.1 Alembic 替换手写迁移
   3.2 DatabaseManager 去 SQLite 分支
   3.3 datetime.now → func.now()
