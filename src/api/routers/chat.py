@@ -72,7 +72,7 @@ def _sanitize_error_event(event: dict) -> dict:
 
 
 @asynccontextmanager
-async def _create_controller() -> AsyncGenerator:
+async def _create_controller(conversation_id: str, message_id: str) -> AsyncGenerator:
     """
     Build a fresh ExecutionController with its own DB session.
 
@@ -83,7 +83,7 @@ async def _create_controller() -> AsyncGenerator:
     scoped to the background task's lifetime.
 
     Usage:
-        async with _create_controller() as ctrl:
+        async with _create_controller(conv_id, msg_id) as ctrl:
             async for event in ctrl.stream_execute(...):
                 ...
     """
@@ -114,9 +114,12 @@ async def _create_controller() -> AsyncGenerator:
 
         hooks = EngineHooks(
             check_cancelled=store.is_cancelled,
-            create_interrupt=store.create_interrupt,
+            wait_for_interrupt=store.wait_for_interrupt,
             drain_messages=store.drain_messages,
         )
+
+        async def _on_engine_exit(conv_id: str, msg_id: str) -> None:
+            await store.clear_engine_interactive(conv_id, msg_id)
 
         yield ExecutionController(
             agents=agents,
@@ -126,7 +129,7 @@ async def _create_controller() -> AsyncGenerator:
             conversation_manager=conv_manager,
             message_event_repo=event_repo,
             compaction_manager=get_compaction_manager(),
-            on_engine_exit=store.clear_engine_interactive,
+            on_engine_exit=_on_engine_exit,
         )
 
 
@@ -198,7 +201,7 @@ async def send_message(
         await _verify_ownership(conversation_id, current_user, conversation_manager)
 
     # 原子地获取 conversation lease — 在任何 await 之前完成，消除竞争窗口
-    active = store.try_acquire_lease(conversation_id, message_id)
+    active = await store.try_acquire_lease(conversation_id, message_id)
     if active:
         raise HTTPException(
             status_code=409,
@@ -209,7 +212,7 @@ async def send_message(
     # lease 之后的所有步骤失败时必须回滚，否则 lease 永久泄漏
     try:
         # 标记 engine 可交互
-        store.mark_engine_interactive(conversation_id, message_id)
+        await store.mark_engine_interactive(conversation_id, message_id)
 
         # 确保 conversation 存在
         await conversation_manager.ensure_conversation_exists(conversation_id, user_id=user_id)
@@ -223,7 +226,7 @@ async def send_message(
         # 启动后台任务
         async def execute_and_push():
             try:
-                async with _create_controller() as ctrl:
+                async with _create_controller(conversation_id, message_id) as ctrl:
                     parent_kwargs = {}
                     if 'parent_message_id' in request.model_fields_set:
                         parent_kwargs['parent_message_id'] = request.parent_message_id
@@ -245,10 +248,10 @@ async def send_message(
                     "data": {"success": False, "error": str(e)}
                 }))
 
-        await runner.submit(message_id, execute_and_push())
+        await runner.submit(conversation_id, message_id, execute_and_push())
     except Exception:
-        store.release_lease(conversation_id)
-        store.clear_engine_interactive(conversation_id)
+        await store.release_lease(conversation_id, message_id)
+        await store.clear_engine_interactive(conversation_id, message_id)
         raise
 
     return ChatResponse(
@@ -279,11 +282,11 @@ async def inject_message(
     """
     await _verify_ownership(conv_id, current_user, conversation_manager)
 
-    active_msg_id = runner.store.get_interactive_message_id(conv_id)
+    active_msg_id = await runner.store.get_interactive_message_id(conv_id)
     if not active_msg_id:
         raise HTTPException(status_code=409, detail="No active execution for this conversation")
 
-    runner.store.inject_message(active_msg_id, request.content)
+    await runner.store.inject_message(active_msg_id, request.content)
 
     return InjectResponse(
         message_id=active_msg_id,
@@ -305,11 +308,11 @@ async def cancel_execution(
     """
     await _verify_ownership(conv_id, current_user, conversation_manager)
 
-    active_msg_id = runner.store.get_interactive_message_id(conv_id)
+    active_msg_id = await runner.store.get_interactive_message_id(conv_id)
     if not active_msg_id:
         raise HTTPException(status_code=409, detail="No active execution for this conversation")
 
-    runner.store.request_cancel(active_msg_id)
+    await runner.store.request_cancel(active_msg_id)
 
     return CancelResponse(message_id=active_msg_id)
 
@@ -487,7 +490,7 @@ async def resume_execution(
         "always_allow": request.always_allow,
     }
 
-    result = runner.store.resolve_interrupt(message_id, resume_data)
+    result = await runner.store.resolve_interrupt(message_id, resume_data)
     if result == "not_found":
         raise HTTPException(status_code=404, detail="No pending interrupt found for this message")
     if result == "already_resolved":

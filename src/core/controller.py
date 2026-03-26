@@ -2,13 +2,13 @@
 执行控制器 — Pi-style while loop
 
 职责：
-1. stream_execute() — 创建 state → 启动 execute_loop → 事件推 StreamManager
+1. stream_execute() — 创建 state → 启动 execute_loop → 事件推 StreamTransport
 2. resume() — 唤醒暂停的 coroutine
 3. 对话管理复用 ConversationManager
 """
 
 import asyncio
-from typing import Callable, Dict, Optional, Any, AsyncGenerator
+from typing import Awaitable, Callable, Dict, Optional, Any, AsyncGenerator
 from uuid import uuid4
 from datetime import datetime
 
@@ -40,7 +40,7 @@ class ExecutionController:
         conversation_manager: Optional[ConversationManager] = None,
         message_event_repo: Optional[Any] = None,  # MessageEventRepository
         compaction_manager: Optional[Any] = None,
-        on_engine_exit: Optional[Callable[[str], None]] = None,
+        on_engine_exit: Optional[Callable[[str, str], Awaitable[None]]] = None,
     ):
         self.agents = agents
         self.tools = tools
@@ -213,7 +213,7 @@ class ExecutionController:
         # Engine 已退出，不会再 drain 消息 — 立即取消活跃映射，
         # 使 /inject 端点正确返回 409 而非假装成功入队
         if self._on_engine_exit:
-            self._on_engine_exit(conversation_id)
+            await self._on_engine_exit(conversation_id, message_id)
 
         # ========== Post-processing ==========
         # Use initial_state as fallback if engine crashed before setting final_state

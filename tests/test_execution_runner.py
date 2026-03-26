@@ -9,7 +9,7 @@ import asyncio
 import pytest
 
 from api.services.execution_runner import DuplicateExecutionError, ExecutionRunner
-from api.services.runtime_store import InMemoryRuntimeStore
+from api.services.runtime_store import InMemoryRuntimeStore, _InterruptState
 
 
 # ============================================================
@@ -46,7 +46,7 @@ class TestSubmit:
         async def coro():
             done.set()
 
-        task = await runner.submit("t1", coro())
+        task = await runner.submit("conv-1", "t1", coro())
         await done.wait()
         await task  # let cleanup run
         await asyncio.sleep(0)  # yield to allow finally block
@@ -55,11 +55,11 @@ class TestSubmit:
     async def test_duplicate_task_id_raises(self):
         runner = ExecutionRunner()
         blocker = asyncio.Event()
-        await runner.submit("t1", _blocking_coro(blocker))
+        await runner.submit("conv-1", "t1", _blocking_coro(blocker))
 
         dup_coro = _noop_coro()
         with pytest.raises(DuplicateExecutionError):
-            await runner.submit("t1", dup_coro)
+            await runner.submit("conv-1", "t1", dup_coro)
         dup_coro.close()  # prevent "coroutine was never awaited" warning
 
         blocker.set()
@@ -80,8 +80,8 @@ class TestSubmit:
             t2_started.set()
             await release2.wait()
 
-        await runner.submit("t1", coro1())
-        await runner.submit("t2", coro2())
+        await runner.submit("conv-1", "t1", coro1())
+        await runner.submit("conv-2", "t2", coro2())
         await t1_started.wait()
         await t2_started.wait()
 
@@ -91,7 +91,7 @@ class TestSubmit:
         async def coro3():
             t3_started.set()
 
-        await runner.submit("t3", coro3())
+        await runner.submit("conv-3", "t3", coro3())
         await asyncio.sleep(0.05)
         assert not t3_started.is_set()
 
@@ -105,7 +105,7 @@ class TestSubmit:
 
     async def test_exception_cleans_up(self):
         runner = ExecutionRunner()
-        task = await runner.submit("t1", _failing_coro())
+        task = await runner.submit("conv-1", "t1", _failing_coro())
         await asyncio.sleep(0.05)
         assert runner.active_task_count == 0
 
@@ -114,12 +114,13 @@ class TestSubmit:
         runner = ExecutionRunner(store=store)
         blocker = asyncio.Event()
 
-        await runner.submit("t1", _blocking_coro(blocker))
+        await runner.submit("conv-1", "t1", _blocking_coro(blocker))
 
         # Set up store state that should be cleaned up
-        store.try_acquire_lease("conv-1", "t1")
-        store.mark_engine_interactive("conv-1", "t1")
-        store.create_interrupt("t1", {"tool": "x"})
+        await store.try_acquire_lease("conv-1", "t1")
+        await store.mark_engine_interactive("conv-1", "t1")
+        from api.services.runtime_store import _InterruptState
+        store._interrupts["t1"] = _InterruptState(interrupt_data={"tool": "x"})
         store._cancellations["t1"] = asyncio.Event()
         store._queues["t1"] = asyncio.Queue()
 
@@ -127,9 +128,9 @@ class TestSubmit:
         await runner.shutdown(timeout=2)
 
         assert "t1" not in runner._tasks
-        assert store.get_interrupt("t1") is None
-        assert store.get_leased_message_id("conv-1") is None
-        assert store.get_interactive_message_id("conv-1") is None
+        assert await store.get_interrupt_data("t1") is None
+        assert await store.get_leased_message_id("conv-1") is None
+        assert await store.get_interactive_message_id("conv-1") is None
 
 
 # ============================================================
@@ -152,14 +153,14 @@ class TestShutdown:
             await asyncio.sleep(0.1)
             completed.set()
 
-        await runner.submit("t1", slow_coro())
+        await runner.submit("conv-1", "t1", slow_coro())
         await runner.shutdown(timeout=5)
         assert completed.is_set()
 
     async def test_shutdown_cancels_on_timeout(self):
         runner = ExecutionRunner()
         blocker = asyncio.Event()
-        await runner.submit("t1", _blocking_coro(blocker))
+        await runner.submit("conv-1", "t1", _blocking_coro(blocker))
 
         await runner.shutdown(timeout=0.1)
         # Task should be cancelled after timeout
@@ -170,8 +171,11 @@ class TestShutdown:
         runner = ExecutionRunner(store=store)
         blocker = asyncio.Event()
 
-        await runner.submit("msg-1", _blocking_coro(blocker))
-        interrupt = store.create_interrupt("msg-1", {})
+        await runner.submit("conv-1", "msg-1", _blocking_coro(blocker))
+        store._interrupts["msg-1"] = _InterruptState(interrupt_data={})
+
+        # Capture interrupt for verification
+        interrupt = store._interrupts["msg-1"]
 
         # Start shutdown in background
         shutdown_task = asyncio.create_task(runner.shutdown(timeout=2))
@@ -187,7 +191,7 @@ class TestShutdown:
     async def test_shutdown_clears_tasks(self):
         runner = ExecutionRunner()
         blocker = asyncio.Event()
-        await runner.submit("t1", _blocking_coro(blocker))
+        await runner.submit("conv-1", "t1", _blocking_coro(blocker))
 
         blocker.set()
         await runner.shutdown(timeout=2)

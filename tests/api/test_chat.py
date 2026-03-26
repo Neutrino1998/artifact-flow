@@ -262,8 +262,10 @@ class TestResumeInterrupt:
         from api.dependencies import get_execution_runner
         runner: ExecutionRunner = app.dependency_overrides[get_execution_runner]()
 
-        # Simulate an interrupt that the engine would create
-        runner.store.create_interrupt(message_id, {
+        # Simulate an interrupt that the engine would create (bypass wait_for_interrupt
+        # which would block; directly populate internal state)
+        from api.services.runtime_store import _InterruptState
+        runner.store._interrupts[message_id] = _InterruptState(interrupt_data={
             "tool": "web_search",
             "params": {"query": "test"},
         })

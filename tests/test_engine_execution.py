@@ -13,7 +13,7 @@ from unittest.mock import patch
 
 import pytest
 
-from core.engine import EngineHooks, InterruptState, create_initial_state, execute_loop
+from core.engine import EngineHooks, create_initial_state, execute_loop
 from core.events import StreamEventType, ExecutionEvent
 from api.services.runtime_store import InMemoryRuntimeStore
 from tools.base import BaseTool, ToolPermission, ToolResult
@@ -127,7 +127,7 @@ def _hooks_from_store(store: InMemoryRuntimeStore) -> EngineHooks:
     """Build EngineHooks wired to a real RuntimeStore."""
     return EngineHooks(
         check_cancelled=store.is_cancelled,
-        create_interrupt=store.create_interrupt,
+        wait_for_interrupt=store.wait_for_interrupt,
         drain_messages=store.drain_messages,
     )
 
@@ -197,7 +197,6 @@ class TestLeadCompletion:
         )
         assert result["completed"] is True
         assert result["response"] == "Done!"
-        # store has no shutdown needed
 
     async def test_agent_start_and_complete_events(self):
         result, emitted, store = await _run_engine(
@@ -210,7 +209,6 @@ class TestLeadCompletion:
         assert len(completes) == 1
         assert starts[0]["agent"] == "lead_agent"
         assert completes[0]["agent"] == "lead_agent"
-        # store has no shutdown needed
 
 
 # ============================================================
@@ -268,8 +266,6 @@ class TestSubagentRouting:
         subagent_results = [tc for tc in tool_completes if tc["data"].get("tool") == "call_subagent"]
         assert any("search result here" in str(tc["data"].get("result_data", "")) for tc in subagent_results)
 
-        # store has no shutdown needed
-
     async def test_subagent_instruction_event(self):
         """call_subagent should emit SUBAGENT_INSTRUCTION event."""
         lead_config = _FakeAgentConfig(tools={"call_subagent": "auto"})
@@ -302,7 +298,6 @@ class TestSubagentRouting:
         ]
         assert len(sub_instr) == 1
         assert sub_instr[0].data["instruction"] == "do stuff"
-        # store has no shutdown needed
 
 
 # ============================================================
@@ -333,7 +328,6 @@ class TestToolExecution:
         assert len(starts) == 1
         assert len(completes) == 1
         assert completes[0]["data"]["success"] is True
-        # store has no shutdown needed
 
     async def test_tool_not_found(self):
         agent = _FakeAgentConfig(tools={"my_tool": "auto"})
@@ -353,7 +347,6 @@ class TestToolExecution:
         assert len(completes) == 1
         assert completes[0]["data"]["success"] is False
         assert "not found" in completes[0]["data"]["error"]
-        # store has no shutdown needed
 
     async def test_tool_not_in_whitelist(self):
         agent = _FakeAgentConfig(tools={})  # empty whitelist
@@ -374,7 +367,6 @@ class TestToolExecution:
         assert len(completes) == 1
         assert completes[0]["data"]["success"] is False
         assert "not available" in completes[0]["data"]["error"]
-        # store has no shutdown needed
 
     async def test_tool_raises_exception(self):
         agent = _FakeAgentConfig(tools={"bad_tool": "auto"})
@@ -395,7 +387,6 @@ class TestToolExecution:
         assert len(completes) == 1
         assert completes[0]["data"]["success"] is False
         assert "exploded" in completes[0]["data"]["error"]
-        # store has no shutdown needed
 
     async def test_tool_call_parse_error(self):
         """Malformed tool_call XML → engine should not crash."""
@@ -413,7 +404,6 @@ class TestToolExecution:
         )
 
         assert result["completed"] is True
-        # store has no shutdown needed
 
 
 # ============================================================
@@ -436,8 +426,8 @@ class TestPermissionInterrupt:
         async def _resolve_after_delay():
             """Wait until interrupt exists, then resolve."""
             for _ in range(100):
-                if store.get_interrupt("msg-1"):
-                    store.resolve_interrupt("msg-1", {"approved": True})
+                if await store.get_interrupt_data("msg-1") is not None:
+                    await store.resolve_interrupt("msg-1", {"approved": True})
                     return
                 await asyncio.sleep(0.01)
 
@@ -467,7 +457,6 @@ class TestPermissionInterrupt:
         perm_results = _events_of_type(emitted, "permission_result")
         assert len(perm_results) == 1
         assert perm_results[0]["data"]["approved"] is True
-        # store has no shutdown needed
 
     async def test_denied_tool_not_executed(self):
         agent = _FakeAgentConfig(tools={"sensitive_tool": "confirm"})
@@ -480,8 +469,8 @@ class TestPermissionInterrupt:
 
         async def _resolve_deny():
             for _ in range(100):
-                if store.get_interrupt("msg-1"):
-                    store.resolve_interrupt("msg-1", {"approved": False})
+                if await store.get_interrupt_data("msg-1") is not None:
+                    await store.resolve_interrupt("msg-1", {"approved": False})
                     return
                 await asyncio.sleep(0.01)
 
@@ -511,7 +500,6 @@ class TestPermissionInterrupt:
         # Tool complete should show error (denied)
         tool_completes = [e for e in emitted if e["type"] == "tool_complete" and e["data"]["tool"] == "sensitive_tool"]
         assert any("denied" in str(tc["data"].get("error", "")).lower() for tc in tool_completes)
-        # store has no shutdown needed
 
     async def test_always_allow_skips_subsequent(self):
         agent = _FakeAgentConfig(tools={"sensitive_tool": "confirm"})
@@ -524,8 +512,8 @@ class TestPermissionInterrupt:
 
         async def _resolve_allow():
             for _ in range(100):
-                if store.get_interrupt("msg-1"):
-                    store.resolve_interrupt("msg-1", {"approved": True, "always_allow": True})
+                if await store.get_interrupt_data("msg-1") is not None:
+                    await store.resolve_interrupt("msg-1", {"approved": True, "always_allow": True})
                     return
                 await asyncio.sleep(0.01)
 
@@ -554,7 +542,6 @@ class TestPermissionInterrupt:
         perm_requests = _events_of_type(emitted, "permission_request")
         assert len(perm_requests) == 1
         assert "sensitive_tool" in state["always_allowed_tools"]
-        # store has no shutdown needed
 
     async def test_timeout_treated_as_denied(self):
         agent = _FakeAgentConfig(tools={"sensitive_tool": "confirm"})
@@ -578,7 +565,6 @@ class TestPermissionInterrupt:
         perm_results = _events_of_type(emitted, "permission_result")
         assert len(perm_results) == 1
         assert perm_results[0]["data"]["approved"] is False
-        # store has no shutdown needed
 
 
 # ============================================================
@@ -602,7 +588,6 @@ class TestCancellation:
 
         assert result["completed"] is True
         assert result.get("cancelled") is True
-        # store has no shutdown needed
 
     async def test_cancel_between_tools(self):
         """Cancel during tool execution → break out of tool loop."""
@@ -636,7 +621,6 @@ class TestCancellation:
 
         assert result["completed"] is True
         assert result.get("cancelled") is True
-        # store has no shutdown needed
 
     async def test_cancelled_state_flags(self):
         store = InMemoryRuntimeStore()
@@ -651,7 +635,6 @@ class TestCancellation:
 
         assert result["cancelled"] is True
         assert result["completed"] is True
-        # store has no shutdown needed
 
 
 # ============================================================
@@ -694,7 +677,6 @@ class TestRoundLimits:
             system_msgs = [m for m in last_call_msgs if m["role"] == "system"]
             has_limit_msg = any("maximum number of tool calls" in m["content"] for m in system_msgs)
             assert has_limit_msg
-        # store has no shutdown needed
 
 
 # ============================================================
@@ -713,7 +695,7 @@ class TestPendingMessageDrain:
             call_count["n"] += 1
             if call_count["n"] == 1:
                 # Inject a message during first LLM call
-                store.inject_message("msg-1", "injected content")
+                await store.inject_message("msg-1", "injected content")
                 for c in _simple_llm_chunks("first response"):
                     yield c
             else:
@@ -732,7 +714,6 @@ class TestPendingMessageDrain:
         # Should have queued_message event
         queued = [e for e in emitted if e["type"] == StreamEventType.QUEUED_MESSAGE.value]
         assert len(queued) >= 1
-        # store has no shutdown needed
 
 
 # ============================================================
@@ -752,7 +733,6 @@ class TestMetrics:
         assert metrics["completed_at"] is not None
         assert metrics["total_duration_ms"] is not None
         assert metrics["total_duration_ms"] >= 0
-        # store has no shutdown needed
 
     async def test_token_usage_aggregation(self):
         """Multi-round token usage should be aggregated."""
@@ -775,4 +755,3 @@ class TestMetrics:
         assert total["input_tokens"] == 300
         assert total["output_tokens"] == 80
         assert total["total_tokens"] == 380
-        # store has no shutdown needed

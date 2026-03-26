@@ -272,7 +272,7 @@ class TestEnvironment:
 
             hooks = EngineHooks(
                 check_cancelled=store.is_cancelled,
-                create_interrupt=store.create_interrupt,
+                wait_for_interrupt=store.wait_for_interrupt,
                 drain_messages=store.drain_messages,
             )
 
@@ -416,7 +416,7 @@ async def demo_permission():
                     interrupt = interrupts[msg_id]
                     if not interrupt.event.is_set():
                         print("\n[AUTO-APPROVE] 自动批准权限请求...")
-                        store.resolve_interrupt(
+                        await store.resolve_interrupt(
                             msg_id, {"approved": True}
                         )
                         permission_resolved.set()

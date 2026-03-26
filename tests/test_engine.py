@@ -40,10 +40,19 @@ def _make_fake_stream(chunks: list[dict]):
 
 def _noop_hooks() -> EngineHooks:
     """EngineHooks stub: nothing cancelled, no interrupts, no messages."""
+    async def _check_cancelled(_mid):
+        return False
+
+    async def _wait_for_interrupt(_mid, _data, _timeout):
+        return None
+
+    async def _drain_messages(_mid):
+        return []
+
     return EngineHooks(
-        check_cancelled=lambda _mid: False,
-        create_interrupt=lambda _mid, _data: None,
-        drain_messages=lambda _mid: [],
+        check_cancelled=_check_cancelled,
+        wait_for_interrupt=_wait_for_interrupt,
+        drain_messages=_drain_messages,
     )
 
 

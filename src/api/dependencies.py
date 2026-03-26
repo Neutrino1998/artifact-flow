@@ -86,9 +86,9 @@ async def init_globals() -> None:
     await _db_manager.initialize()
     logger.info("Database manager initialized")
 
-    # 2. 创建 StreamTransport (StreamManager)
-    from api.services.stream_manager import StreamManager
-    _stream_transport = StreamManager(ttl_seconds=config.STREAM_TTL)
+    # 2. 创建 StreamTransport (InMemoryStreamTransport)
+    from api.services.stream_transport import InMemoryStreamTransport
+    _stream_transport = InMemoryStreamTransport(ttl_seconds=config.STREAM_TTL)
     logger.info("Stream transport initialized")
 
     # 3. 创建 ExecutionRunner + InMemoryRuntimeStore

@@ -25,27 +25,15 @@ logger = get_logger("ArtifactFlow")
 
 
 # ============================================================
-# InterruptState — 中断状态（engine 拥有定义，RuntimeStore 引用）
-# ============================================================
-
-@dataclass
-class InterruptState:
-    """中断状态"""
-    event: asyncio.Event = field(default_factory=asyncio.Event)
-    interrupt_data: Dict[str, Any] = field(default_factory=dict)  # 发给前端的中断信息
-    resume_data: Optional[Dict[str, Any]] = None  # 用户确认结果
-
-
-# ============================================================
 # EngineHooks — engine 与外部交互的回调接口
 # ============================================================
 
 @dataclass
 class EngineHooks:
     """Engine 通过 hooks 与 RuntimeStore 交互，避免 core→api/services 层级倒置。"""
-    check_cancelled: Callable[[str], bool]
-    create_interrupt: Callable[[str, Dict[str, Any]], InterruptState]
-    drain_messages: Callable[[str], List[str]]
+    check_cancelled: Callable[[str], Awaitable[bool]]
+    wait_for_interrupt: Callable[[str, Dict[str, Any], float], Awaitable[Optional[Dict[str, Any]]]]
+    drain_messages: Callable[[str], Awaitable[List[str]]]
 
 
 # ============================================================
@@ -140,7 +128,7 @@ async def execute_loop(
         state: 执行状态（from create_initial_state）
         agents: {name: AgentConfig} 字典
         tools: {name: BaseTool} 字典（全局 + 请求级工具已合并）
-        hooks: EngineHooks（check_cancelled / create_interrupt / drain_messages）
+        hooks: EngineHooks（check_cancelled / create_interrupt / wait_for_resume / drain_messages）
         artifact_manager: ArtifactManager 实例（用于 artifacts 清单）
         emit: 事件推送回调（推 SSE）
     Returns:
@@ -186,7 +174,7 @@ async def execute_loop(
     async def _build_context(agent_name: str) -> list:
         """drain messages → artifacts 清单 → ContextManager.build → tool limit 注入"""
         if current_agent_name == "lead_agent":
-            for msg in hooks.drain_messages(message_id):
+            for msg in await hooks.drain_messages(message_id):
                 wrapped = (
                     "[The user has injected a message during execution. "
                     "Consider this input and adjust your approach as needed.]\n"
@@ -348,25 +336,22 @@ async def execute_loop(
             "params": params,
         })
 
-        interrupt = hooks.create_interrupt(message_id, {
+        resume_data = await hooks.wait_for_interrupt(message_id, {
             "type": "tool_permission",
             "agent": agent_name,
             "tool_name": tool_name,
             "params": params,
             "permission_level": permission.value,
             "message": f"Tool '{tool_name}' requires {permission.value} permission",
-        })
+        }, config.PERMISSION_TIMEOUT)
 
-        try:
-            await asyncio.wait_for(interrupt.event.wait(), timeout=config.PERMISSION_TIMEOUT)
-        except asyncio.TimeoutError:
+        if resume_data is None:
             logger.warning(f"Permission timeout for tool '{tool_name}' after {config.PERMISSION_TIMEOUT}s, treating as denied")
             await _emit(StreamEventType.PERMISSION_RESULT.value, agent_name, {
                 "approved": False, "tool": tool_name, "reason": "timeout",
             })
             return False
 
-        resume_data = interrupt.resume_data or {}
         is_approved = resume_data.get("approved", False)
 
         await _emit(StreamEventType.PERMISSION_RESULT.value, agent_name, {
@@ -399,7 +384,7 @@ async def execute_loop(
         """
         tool_calls = sorted(tool_calls, key=lambda tc: tc.name == "call_subagent")
         for tool_call in tool_calls:
-            if _check_cancelled():
+            if await _check_cancelled():
                 break
 
             # Parser 返回的解析错误 → 直接反馈给 agent
@@ -524,8 +509,8 @@ async def execute_loop(
 
             tool_round_count[agent_name] = tool_round_count.get(agent_name, 0) + 1
 
-    def _check_cancelled() -> bool:
-        if hooks.check_cancelled(message_id):
+    async def _check_cancelled() -> bool:
+        if await hooks.check_cancelled(message_id):
             state["completed"] = True
             state["cancelled"] = True
             state["response"] = state.get("response", "") or ""
@@ -536,7 +521,7 @@ async def execute_loop(
 
     try:
         while not state["completed"]:
-            if _check_cancelled():
+            if await _check_cancelled():
                 break
 
             current_agent_name = state["current_agent"]
@@ -575,7 +560,7 @@ async def execute_loop(
                 # Lead 无工具调用但队列中有待处理消息 → 不退出，继续循环
                 # 这处理了 inject 消息在最后一次 LLM 调用期间到达的情况
                 if current_agent_name == "lead_agent":
-                    pending = hooks.drain_messages(message_id)
+                    pending = await hooks.drain_messages(message_id)
                     if pending:
                         for msg in pending:
                             wrapped = (
@@ -607,5 +592,3 @@ async def execute_loop(
     finalize_metrics(state["execution_metrics"])
 
     return state
-
-

@@ -55,15 +55,15 @@ async def _simulate_active_task(app, conv_id: str, msg_id: str) -> asyncio.Event
     """
     runner: ExecutionRunner = app.dependency_overrides[get_execution_runner]()
     store = runner.store
-    store.try_acquire_lease(conv_id, msg_id)
-    store.mark_engine_interactive(conv_id, msg_id)
+    await store.try_acquire_lease(conv_id, msg_id)
+    await store.mark_engine_interactive(conv_id, msg_id)
 
     blocker = asyncio.Event()
 
     async def sleeping():
         await blocker.wait()
 
-    await runner.submit(msg_id, sleeping())
+    await runner.submit(conv_id, msg_id, sleeping())
     return blocker
 
 
@@ -103,7 +103,7 @@ class TestInject:
 
         # Verify the message was actually enqueued in RuntimeStore
         runner: ExecutionRunner = app.dependency_overrides[get_execution_runner]()
-        drained = runner.store.drain_messages(msg_ids[0])
+        drained = await runner.store.drain_messages(msg_ids[0])
         assert drained == ["additional input"]
 
         blocker.set()
@@ -163,7 +163,7 @@ class TestCancel:
 
         # Verify cancellation was requested
         runner: ExecutionRunner = app.dependency_overrides[get_execution_runner]()
-        assert runner.store.is_cancelled(msg_ids[0]) is True
+        assert await runner.store.is_cancelled(msg_ids[0]) is True
 
         blocker.set()
 
@@ -398,7 +398,7 @@ class TestChatStreamE2E:
     End-to-end: POST /chat → background execution → GET /stream → SSE events.
 
     Mock only the LLM; exercises real ExecutionController, ExecutionRunner,
-    StreamManager, conversation persistence, and event persistence.
+    InMemoryStreamTransport, conversation persistence, and event persistence.
     """
 
     async def test_chat_and_stream_happy_path(
@@ -474,8 +474,8 @@ class TestChatStreamE2E:
                     assert "complete" in db_event_types
 
                 # 5. Verify lease was cleaned up
-                assert runner.store.get_leased_message_id(conv_id) is None
-                assert runner.store.get_interactive_message_id(conv_id) is None
+                assert await runner.store.get_leased_message_id(conv_id) is None
+                assert await runner.store.get_interactive_message_id(conv_id) is None
         finally:
             deps._agents = old_agents
             deps._tools = old_tools

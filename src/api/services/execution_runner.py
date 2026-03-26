@@ -45,11 +45,12 @@ class ExecutionRunner:
 
         logger.info(f"ExecutionRunner initialized (max_concurrent={max_concurrent})")
 
-    async def submit(self, task_id: str, coro: Coroutine) -> asyncio.Task:
+    async def submit(self, conversation_id: str, task_id: str, coro: Coroutine) -> asyncio.Task:
         """
         提交一个后台任务
 
         Args:
+            conversation_id: 对话 ID（用于 cleanup_execution）
             task_id: 任务 ID（message_id）
             coro: 要执行的协程
 
@@ -70,7 +71,7 @@ class ExecutionRunner:
                     logger.exception(f"Task {task_id} failed with unhandled exception")
                 finally:
                     self._tasks.pop(task_id, None)
-                    self.store.cleanup_execution(task_id)
+                    await self.store.cleanup_execution(conversation_id, task_id)
                     logger.debug(f"Task {task_id} completed and cleaned up (active: {len(self._tasks)})")
 
         task = asyncio.create_task(_wrapped(), name=f"exec-{task_id}")
@@ -93,7 +94,7 @@ class ExecutionRunner:
         logger.info(f"ExecutionRunner shutdown: waiting for {task_count} active tasks (timeout={timeout}s)")
 
         # 1. 唤醒所有 pending interrupt
-        self.store.shutdown_cleanup()
+        await self.store.shutdown_cleanup()
 
         # 2. 等待任务完成
         _, pending = await asyncio.wait(

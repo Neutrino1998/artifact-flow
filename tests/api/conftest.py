@@ -6,7 +6,7 @@ in-process via ASGITransport (no server needed).
 
 Dependency overrides:
 - get_db_manager    → test db_manager (session-scoped in-memory SQLite)
-- get_stream_transport → fresh StreamManager per test
+- get_stream_transport → fresh InMemoryStreamTransport per test
 - get_execution_runner → fresh ExecutionRunner per test
 
 NOT overridden (by design):
@@ -33,7 +33,7 @@ from api.dependencies import (
     get_execution_runner,
 )
 from api.services.auth import create_access_token
-from api.services.stream_manager import StreamManager
+from api.services.stream_transport import InMemoryStreamTransport
 from api.services.execution_runner import ExecutionRunner
 from api.services.runtime_store import InMemoryRuntimeStore
 from db.database import DatabaseManager
@@ -52,7 +52,7 @@ async def app(db_manager: DatabaseManager):
     """
     application = create_app()
 
-    stream_transport = StreamManager(ttl_seconds=30)
+    stream_transport = InMemoryStreamTransport(ttl_seconds=30)
     execution_runner = ExecutionRunner(max_concurrent=5, store=InMemoryRuntimeStore())
 
     # Set module-level global so get_db_session()'s direct call works
