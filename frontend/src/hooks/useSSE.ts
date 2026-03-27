@@ -363,16 +363,23 @@ export function useSSE() {
   );
 
   const attemptReconnect = useCallback(
-    async (conversationId: string, lastEventId: string | null, startAttempt = 0) => {
+    async (
+      conversationId: string,
+      lastEventId: string | null,
+      ownerController: AbortController,
+      startAttempt = 0,
+    ) => {
       for (let attempt = startAttempt; attempt < MAX_RECONNECT_ATTEMPTS; attempt++) {
         const delay = RECONNECT_BASE_DELAY_MS * Math.pow(2, attempt);
         await new Promise((r) => setTimeout(r, delay));
 
-        // Check if user manually disconnected while waiting
-        if (!_sharedAbortController) return;
+        // Bail out if ownership has changed (user started a new stream or disconnected)
+        if (_sharedAbortController !== ownerController || ownerController.signal.aborted) return;
 
         try {
           const active = await api.getActiveStream(conversationId);
+          if (_sharedAbortController !== ownerController || ownerController.signal.aborted) return;
+
           // Execution still active — reconnect with lastEventId
           setReconnecting(false);
 
@@ -397,7 +404,7 @@ export function useSSE() {
                 if (controller.signal.aborted) return;
                 if (nextAttempt < MAX_RECONNECT_ATTEMPTS) {
                   setReconnecting(true);
-                  attemptReconnect(conversationId, lastEventId, nextAttempt);
+                  attemptReconnect(conversationId, lastEventId, controller, nextAttempt);
                 } else {
                   setReconnecting(false);
                   endStream();
@@ -407,7 +414,7 @@ export function useSSE() {
               onClose: () => {
                 if (receivedTerminal || controller.signal.aborted) return;
                 setReconnecting(true);
-                attemptReconnect(conversationId, connection.lastEventId);
+                attemptReconnect(conversationId, connection.lastEventId, controller);
               },
             },
             controller.signal,
@@ -421,6 +428,8 @@ export function useSSE() {
       }
 
       // All attempts exhausted — execution likely finished
+      // Final ownership check before touching shared state
+      if (_sharedAbortController !== ownerController) return;
       setReconnecting(false);
       endStream();
       refreshAfterComplete(conversationId);
@@ -458,7 +467,7 @@ export function useSSE() {
             if (receivedTerminal || controller.signal.aborted) return;
             // Abnormal disconnect — attempt reconnection
             setReconnecting(true);
-            attemptReconnect(conversationId, connection.lastEventId);
+            attemptReconnect(conversationId, connection.lastEventId, controller);
           },
         },
         controller.signal,

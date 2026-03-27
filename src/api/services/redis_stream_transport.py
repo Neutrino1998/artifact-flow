@@ -10,6 +10,7 @@ Key 设计：
 """
 
 import json
+import os
 from typing import Any, AsyncGenerator, Dict, Literal, Optional
 
 import redis.asyncio as aioredis
@@ -22,14 +23,16 @@ logger = get_logger("ArtifactFlow")
 # 终结事件类型
 _TERMINAL_EVENTS = frozenset(("complete", "cancelled", "error"))
 
-# Lua CAS: 仅当 status == "streaming" 时回退到 pending + 设 TTL
-# 防止旧 consumer 的 finally 覆盖新 consumer 的 streaming 或 producer 的 closed
+# Lua CAS: 仅当 consumer_id 仍匹配时回退到 pending + 设 TTL。
+# 每个 consumer 进入时写自己的 consumer_id，finally 里只清理自己的。
+# 防止旧 consumer 的 finally 覆盖新 consumer 的 streaming 或 producer 的 closed。
+# KEYS[1]=meta_key, KEYS[2]=stream_key, ARGV[1]=consumer_id, ARGV[2]=ttl
 _LUA_REVERT_TO_PENDING = """
-local status = redis.call('HGET', KEYS[1], 'status')
-if status == 'streaming' then
-    redis.call('HSET', KEYS[1], 'status', 'pending')
-    redis.call('EXPIRE', KEYS[1], tonumber(ARGV[1]))
-    redis.call('EXPIRE', KEYS[2], tonumber(ARGV[1]))
+local cid = redis.call('HGET', KEYS[1], 'consumer_id')
+if cid == ARGV[1] then
+    redis.call('HSET', KEYS[1], 'status', 'pending', 'consumer_id', '')
+    redis.call('EXPIRE', KEYS[1], tonumber(ARGV[2]))
+    redis.call('EXPIRE', KEYS[2], tonumber(ARGV[2]))
     return 1
 end
 return 0
@@ -138,8 +141,12 @@ class RedisStreamTransport:
         if owner and user_id and owner != user_id:
             raise StreamNotFoundError(stream_id)
 
-        # 标记为 streaming + 移除 TTL（前端已连接）
-        await self._redis.hset(meta_key, "status", "streaming")
+        # 生成 consumer_id，标记为 streaming + 移除 TTL（前端已连接）
+        consumer_id = os.urandom(8).hex()
+        await self._redis.hset(meta_key, mapping={
+            "status": "streaming",
+            "consumer_id": consumer_id,
+        })
         await self._redis.persist(meta_key)
         await self._redis.persist(stream_key)
 
@@ -173,12 +180,12 @@ class RedisStreamTransport:
                             return
         finally:
             # Consumer 断连：原子 CAS 回退到 pending。
-            # 仅当 status 仍是 "streaming"（本 consumer 设置的）时才回退，
+            # 仅当 consumer_id 仍匹配（说明没有新 consumer 接管）时才回退，
             # 避免覆盖新 consumer 的 streaming 或 producer 的 closed。
             await self._redis.evalsha(
                 self._sha_revert_to_pending,
                 2, meta_key, stream_key,
-                str(self._stream_ttl),
+                consumer_id, str(self._stream_ttl),
             )
 
     async def close_stream(self, stream_id: str) -> bool:
