@@ -41,6 +41,7 @@ class StreamTransport(Protocol):
         stream_id: str,
         heartbeat_interval: Optional[float] = None,
         user_id: Optional[str] = None,
+        last_event_id: Optional[str] = None,
     ) -> AsyncGenerator[Dict[str, Any], None]: ...
     async def close_stream(self, stream_id: str) -> bool: ...
     def get_stream_status(self, stream_id: str) -> Optional[str]: ...
@@ -143,6 +144,7 @@ class InMemoryStreamTransport:
         message_id: str,
         heartbeat_interval: Optional[float] = None,
         user_id: Optional[str] = None,
+        last_event_id: Optional[str] = None,
     ) -> AsyncGenerator[Dict[str, Any], None]:
         async with self._lock:
             context = self.streams.get(message_id)

@@ -29,6 +29,7 @@ from typing import AsyncGenerator, Any, Dict, Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from api.services.stream_transport import StreamTransport
+    from api.services.runtime_store import RuntimeStore
     from api.services.execution_runner import ExecutionRunner
 
 from fastapi import Depends, HTTPException
@@ -54,6 +55,7 @@ logger = get_logger("ArtifactFlow")
 _db_manager: Optional[DatabaseManager] = None
 _stream_transport: Optional["StreamTransport"] = None
 _execution_runner: Optional["ExecutionRunner"] = None
+_redis_client: Optional[Any] = None               # redis.asyncio.Redis (optional)
 
 # Agent configs + tools（启动时加载一次）
 _agents: Optional[dict] = None                    # {name: AgentConfig}
@@ -69,7 +71,7 @@ async def init_globals() -> None:
     """
     from pathlib import Path
 
-    global _db_manager, _stream_transport, _execution_runner, _agents, _tools, _compaction_manager
+    global _db_manager, _stream_transport, _execution_runner, _redis_client, _agents, _tools, _compaction_manager
 
     # 0. 确保 data 目录存在
     data_dir = Path("data")
@@ -87,19 +89,47 @@ async def init_globals() -> None:
     await _db_manager.initialize()
     logger.info("Database manager initialized")
 
-    # 2. 创建 StreamTransport (InMemoryStreamTransport)
-    from api.services.stream_transport import InMemoryStreamTransport
-    _stream_transport = InMemoryStreamTransport(ttl_seconds=config.STREAM_TTL)
-    logger.info("Stream transport initialized")
-
-    # 3. 创建 ExecutionRunner + InMemoryRuntimeStore
+    # 2+3. StreamTransport + ExecutionRunner (Redis or InMemory)
     from api.services.execution_runner import ExecutionRunner
-    from api.services.runtime_store import InMemoryRuntimeStore
-    _execution_runner = ExecutionRunner(
-        max_concurrent=config.MAX_CONCURRENT_TASKS,
-        store=InMemoryRuntimeStore(),
-    )
-    logger.info("Execution runner initialized")
+
+    if config.REDIS_URL:
+        import redis.asyncio as aioredis
+        from api.services.redis_runtime_store import RedisRuntimeStore
+        from api.services.redis_stream_transport import RedisStreamTransport
+
+        _redis_client = aioredis.from_url(config.REDIS_URL, decode_responses=True)
+        await _redis_client.ping()  # fail fast
+        logger.info(f"Redis connected: {config.REDIS_URL}")
+
+        runtime_store = RedisRuntimeStore(
+            _redis_client,
+            lease_ttl=config.LEASE_TTL,
+            stream_timeout=config.STREAM_TIMEOUT,
+            permission_timeout=config.PERMISSION_TIMEOUT,
+        )
+        await runtime_store.init_scripts()
+
+        _stream_transport = RedisStreamTransport(
+            _redis_client,
+            stream_ttl=config.STREAM_TTL,
+            stream_timeout=config.STREAM_TIMEOUT,
+        )
+        _execution_runner = ExecutionRunner(
+            max_concurrent=config.MAX_CONCURRENT_TASKS,
+            store=runtime_store,
+            lease_ttl=config.LEASE_TTL,
+        )
+        logger.info("Redis runtime initialized (RuntimeStore + StreamTransport)")
+    else:
+        from api.services.stream_transport import InMemoryStreamTransport
+        from api.services.runtime_store import InMemoryRuntimeStore
+
+        _stream_transport = InMemoryStreamTransport(ttl_seconds=config.STREAM_TTL)
+        _execution_runner = ExecutionRunner(
+            max_concurrent=config.MAX_CONCURRENT_TASKS,
+            store=InMemoryRuntimeStore(),
+        )
+        logger.info("InMemory runtime initialized (no REDIS_URL)")
 
     # 4. 加载 Agent 配置
     from agents.loader import load_all_agents
@@ -147,19 +177,25 @@ async def close_globals() -> None:
 
     在 FastAPI lifespan 中调用。
     """
-    global _db_manager, _stream_transport, _execution_runner, _compaction_manager
+    global _db_manager, _stream_transport, _execution_runner, _redis_client, _compaction_manager
 
     # 1. 先关闭 ExecutionRunner（等待运行中的任务完成）
     if _execution_runner:
         await _execution_runner.shutdown()
         logger.info("Execution runner shut down")
 
-    # 2. 关闭数据库管理器
+    # 2. 关闭 Redis 连接
+    if _redis_client:
+        await _redis_client.aclose()
+        logger.info("Redis connection closed")
+
+    # 3. 关闭数据库管理器
     if _db_manager:
         await _db_manager.close()
         logger.info("Database manager closed")
 
     _execution_runner = None
+    _redis_client = None
     _db_manager = None
     _stream_transport = None
     _compaction_manager = None
@@ -170,6 +206,11 @@ def get_execution_runner() -> "ExecutionRunner":
     if _execution_runner is None:
         raise RuntimeError("ExecutionRunner not initialized. Call init_globals() first.")
     return _execution_runner
+
+
+def get_runtime_store() -> "RuntimeStore":
+    """获取 RuntimeStore 单例（从 ExecutionRunner 获取）"""
+    return get_execution_runner().store
 
 
 def get_stream_transport() -> "StreamTransport":

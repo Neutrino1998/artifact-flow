@@ -11,6 +11,7 @@ ExecutionRunner — 本地 asyncio 任务调度
 """
 
 import asyncio
+import contextlib
 from typing import Coroutine
 
 from api.services.runtime_store import InMemoryRuntimeStore, RuntimeStore
@@ -37,13 +38,19 @@ class ExecutionRunner:
     运行时状态委托给 self.store (RuntimeStore)。
     """
 
-    def __init__(self, max_concurrent: int = 10, store: RuntimeStore | None = None):
+    def __init__(
+        self,
+        max_concurrent: int = 10,
+        store: RuntimeStore | None = None,
+        lease_ttl: int = 0,
+    ):
         self._tasks: dict[str, asyncio.Task] = {}
         self._semaphore = asyncio.Semaphore(max_concurrent)
         self._max_concurrent = max_concurrent
+        self._lease_ttl = lease_ttl  # 0 = 不续租（InMemory 场景）
         self.store: RuntimeStore = store or InMemoryRuntimeStore()
 
-        logger.info(f"ExecutionRunner initialized (max_concurrent={max_concurrent})")
+        logger.info(f"ExecutionRunner initialized (max_concurrent={max_concurrent}, lease_ttl={lease_ttl})")
 
     async def submit(self, conversation_id: str, task_id: str, coro: Coroutine) -> asyncio.Task:
         """
@@ -64,12 +71,22 @@ class ExecutionRunner:
             raise DuplicateExecutionError(f"Execution already running for {task_id}")
 
         async def _wrapped():
+            heartbeat = None
+            if self._lease_ttl > 0:
+                heartbeat = asyncio.create_task(
+                    self._renew_loop(conversation_id, task_id),
+                    name=f"heartbeat-{task_id}",
+                )
             async with self._semaphore:
                 try:
                     await coro
                 except Exception:
                     logger.exception(f"Task {task_id} failed with unhandled exception")
                 finally:
+                    if heartbeat is not None:
+                        heartbeat.cancel()
+                        with contextlib.suppress(asyncio.CancelledError):
+                            await heartbeat
                     self._tasks.pop(task_id, None)
                     await self.store.cleanup_execution(conversation_id, task_id)
                     logger.debug(f"Task {task_id} completed and cleaned up (active: {len(self._tasks)})")
@@ -78,6 +95,16 @@ class ExecutionRunner:
         self._tasks[task_id] = task
         logger.info(f"Task {task_id} submitted (active: {len(self._tasks)})")
         return task
+
+    async def _renew_loop(self, conversation_id: str, task_id: str) -> None:
+        """心跳续租循环（TTL/3 间隔）"""
+        interval = self._lease_ttl // 3
+        while True:
+            await asyncio.sleep(interval)
+            try:
+                await self.store.renew_lease(conversation_id, task_id, ttl=self._lease_ttl)
+            except Exception:
+                logger.warning(f"Heartbeat renewal failed for {task_id}")
 
     async def shutdown(self, timeout: float = 30.0):
         """

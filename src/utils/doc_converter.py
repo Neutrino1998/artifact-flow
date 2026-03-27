@@ -85,16 +85,6 @@ class DocConverter:
             )
         logger.info("pandoc check passed")
 
-    @classmethod
-    def check_pymupdf(cls) -> None:
-        """Check pymupdf availability at startup. Raises RuntimeError if not found."""
-        try:
-            import pymupdf  # noqa: F401
-        except ImportError:
-            raise RuntimeError(
-                "pymupdf is not installed. Install with: pip install pymupdf"
-            )
-        logger.info("pymupdf check passed")
 
     async def convert(self, file_bytes: bytes, filename: str) -> ConvertResult:
         """

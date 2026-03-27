@@ -39,6 +39,10 @@ class Settings(BaseSettings):
     TOOL_INTERACTION_PRESERVE: int = 6       # 轮内 tool interaction 尾部保留条数
     INVENTORY_PREVIEW_LENGTH: int = 200     # artifact 清单内容预览截断长度
 
+    # Redis（空 = InMemory fallback，非空 = Redis）
+    REDIS_URL: str = ""
+    LEASE_TTL: int = 90  # 秒，心跳每 TTL/3 续租
+
     # 并发控制
     MAX_CONCURRENT_TASKS: int = 10  # 最大并发引擎执行数
 

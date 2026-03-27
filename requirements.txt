@@ -36,8 +36,15 @@ pyyaml>=6.0
 sqlalchemy[asyncio]>=2.0.0
 aiosqlite>=0.20.0
 
+# 可选数据库驱动（MySQL / PostgreSQL）
+aiomysql>=0.2.0
+asyncpg>=0.29.0
+
 # 数据库迁移
 alembic>=1.13.0
+
+# Redis（运行时状态 + 流传输）
+redis>=5.0.0,<6.0.0
 
 # ========================================
 # API 依赖

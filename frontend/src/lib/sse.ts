@@ -9,11 +9,17 @@ export interface SSEHandlers {
   onClose?: () => void;
 }
 
+export interface SSEConnection {
+  /** Last received SSE event ID (for reconnection) */
+  lastEventId: string | null;
+}
+
 export function connectSSE(
   streamUrl: string,
   handlers: SSEHandlers,
   signal?: AbortSignal
-): void {
+): SSEConnection {
+  const connection: SSEConnection = { lastEventId: null };
   const url = streamUrl.startsWith('http')
     ? streamUrl
     : `${BASE_URL}${streamUrl}`;
@@ -41,6 +47,7 @@ export function connectSSE(
       const decoder = new TextDecoder();
       let buffer = '';
       let currentEvent = '';
+      let currentId: string | null = null;
 
       while (true) {
         const { done, value } = await reader.read();
@@ -54,6 +61,8 @@ export function connectSSE(
         for (const line of lines) {
           if (line.startsWith('event:')) {
             currentEvent = line.slice(6).trim();
+          } else if (line.startsWith('id:')) {
+            currentId = line.slice(3).trim();
           } else if (line.startsWith('data:')) {
             const dataStr = line.slice(5).trim();
             if (!dataStr) continue;
@@ -63,10 +72,14 @@ export function connectSSE(
                 parsed.type = currentEvent as SSEEvent['type'];
               }
               handlers.onEvent(parsed);
+              if (currentId) {
+                connection.lastEventId = currentId;
+              }
             } catch {
               // skip malformed JSON
             }
             currentEvent = '';
+            currentId = null;
           }
           // ignore comments (lines starting with ':')
         }
@@ -81,4 +94,6 @@ export function connectSSE(
       }
       handlers.onError?.(err as Error);
     });
+
+  return connection;
 }

@@ -8,7 +8,7 @@ Stream Router
 import asyncio
 from typing import AsyncGenerator
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from starlette.responses import StreamingResponse
 
 from config import config
@@ -28,6 +28,7 @@ router = APIRouter()
 @router.get("/{stream_id}")
 async def stream_events(
     stream_id: str,
+    request: Request,
     current_user: TokenPayload = Depends(get_current_user),
     stream_transport: StreamTransport = Depends(get_stream_transport),
     runner: ExecutionRunner = Depends(get_execution_runner),
@@ -52,6 +53,8 @@ async def stream_events(
         - 收到 complete/error 事件后，服务端主动关闭连接
         - 前端应销毁 EventSource 实例
     """
+    last_event_id = request.headers.get("Last-Event-ID")
+
     async def event_generator() -> AsyncGenerator[str, None]:
         """
         事件生成器
@@ -59,18 +62,21 @@ async def stream_events(
         从 StreamTransport 消费事件，格式化为 SSE 并 yield。
         """
         try:
-            # 消费事件（带心跳支持 + 用户校验）
+            # 消费事件（带心跳支持 + 用户校验 + 断点续传）
             async for event in stream_transport.consume_events(
                 stream_id,
                 heartbeat_interval=config.SSE_PING_INTERVAL,
                 user_id=current_user.user_id,
+                last_event_id=last_event_id,
             ):
                 # 心跳哨兵事件 → SSE 注释
                 if event.get("type") == "__ping__":
                     yield format_sse_comment("ping")
                     continue
 
-                yield format_sse_event(event, event=event.get("type"))
+                # 提取 stream entry ID 作为 SSE id 字段
+                stream_entry_id = event.pop("_stream_id", None)
+                yield format_sse_event(event, event=event.get("type"), id=stream_entry_id)
 
                 # 检查是否是终结事件
                 event_type = event.get("type", "")
