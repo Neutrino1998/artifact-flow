@@ -160,6 +160,12 @@ export async function deleteConversation(convId: string) {
   return res;
 }
 
+export async function getActiveStream(conversationId: string) {
+  return request<{ conversation_id: string; message_id: string; stream_url: string }>(
+    `/api/v1/chat/${conversationId}/active-stream`
+  );
+}
+
 export async function cancelExecution(convId: string) {
   return request<CancelResponse>(`/api/v1/chat/${convId}/cancel`, { method: 'POST' });
 }

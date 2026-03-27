@@ -143,6 +143,7 @@ async def _run_and_push(
 
     Handles timeout and unexpected errors, pushing sanitized error events.
     Execution runs to completion even if the SSE client disconnects.
+    Stream is always closed by the producer in the finally block.
     """
     stream_closed = False
     try:
@@ -169,6 +170,10 @@ async def _run_and_push(
             "timestamp": datetime.now().isoformat(),
             "data": {"success": False, "error": str(e)}
         }))
+
+    finally:
+        # Producer 侧关闭 stream — 设 closed 状态 + 延迟清理 TTL
+        await stream_transport.close_stream(stream_id)
 
 
 @router.post("", response_model=ChatResponse)
@@ -259,6 +264,27 @@ async def send_message(
         message_id=message_id,
         stream_url=f"/api/v1/stream/{message_id}"
     )
+
+
+@router.get("/{conv_id}/active-stream")
+async def get_active_stream(
+    conv_id: str,
+    current_user: TokenPayload = Depends(get_current_user),
+    conversation_manager: ConversationManager = Depends(get_conversation_manager),
+    runner: ExecutionRunner = Depends(get_execution_runner),
+):
+    """查询会话是否有活跃的执行流，用于断线重连"""
+    await _verify_ownership(conv_id, current_user, conversation_manager)
+
+    message_id = await runner.store.get_leased_message_id(conv_id)
+    if not message_id:
+        raise HTTPException(status_code=404, detail="No active execution")
+
+    return {
+        "conversation_id": conv_id,
+        "message_id": message_id,
+        "stream_url": f"/api/v1/stream/{message_id}",
+    }
 
 
 @router.post("/{conv_id}/inject", response_model=InjectResponse)

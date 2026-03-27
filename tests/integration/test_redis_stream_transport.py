@@ -146,6 +146,7 @@ class TestCrossInstance:
 
 class TestLastEventId:
     async def test_resume_from_last_event_id(self, transport):
+        """Consumer disconnect reverts to pending; reconnect with last_event_id resumes."""
         stream_id = "test_stream_resume"
         await transport.create_stream(stream_id)
 
@@ -154,10 +155,9 @@ class TestLastEventId:
         await transport.push_event(stream_id, {"type": "llm_chunk", "data": {"content": "a"}})
         await transport.push_event(stream_id, {"type": "llm_chunk", "data": {"content": "b"}})
 
-        # Consume first 2 events
+        # Consume first 2 events then break (simulates consumer disconnect)
         event_ids = []
         count = 0
-        # We need to consume without terminal event, so use a timeout approach
         try:
             async with asyncio.timeout(1.0):
                 async for event in transport.consume_events(
@@ -175,11 +175,12 @@ class TestLastEventId:
         assert len(event_ids) >= 2
         last_id = event_ids[1]
 
-        # Re-create stream for consume (since close_stream was called in finally)
-        await transport.create_stream(stream_id)
-        # Re-push the third event + terminal
-        await transport.push_event(stream_id, {"type": "llm_chunk", "data": {"content": "b"}})
-        await transport.push_event(stream_id, {"type": "complete", "data": {}})
+        # After consumer disconnect, stream should revert to pending (not closed)
+        status = await transport.get_stream_status_async(stream_id)
+        assert status == "pending"
+
+        # Producer can still push events (stream NOT closed)
+        assert await transport.push_event(stream_id, {"type": "complete", "data": {}})
 
         # Resume from last_id — should get events after that id
         events = []
@@ -190,9 +191,75 @@ class TestLastEventId:
                 continue
             events.append(event)
 
-        # Should get the remaining events
+        # Should get the remaining events (llm_chunk "b" + complete)
         assert len(events) >= 1
         assert events[-1]["type"] == "complete"
+
+
+class TestConsumerDisconnect:
+    async def test_consumer_disconnect_does_not_close_stream(self, transport):
+        """Consumer breaking out of consume_events should revert to pending, not close."""
+        stream_id = "test_stream_disconnect"
+        await transport.create_stream(stream_id)
+        await transport.push_event(stream_id, {"type": "metadata", "data": {}})
+
+        # Consume then break (simulates disconnect)
+        async for event in transport.consume_events(
+            stream_id, heartbeat_interval=0.3
+        ):
+            if event.get("type") != "__ping__":
+                break
+
+        # Stream should be pending, not closed
+        status = await transport.get_stream_status_async(stream_id)
+        assert status == "pending"
+
+        # Producer can still push
+        assert await transport.push_event(stream_id, {"type": "complete", "data": {}})
+
+    async def test_consumer_disconnect_after_producer_close(self, transport, redis_client):
+        """If producer already closed, consumer disconnect should not revert to pending."""
+        stream_id = "test_stream_disc_after_close"
+        await transport.create_stream(stream_id)
+        await transport.push_event(stream_id, {"type": "metadata", "data": {}})
+
+        # Start consuming in a task, then close from producer side
+        async def consume_and_break():
+            async for event in transport.consume_events(
+                stream_id, heartbeat_interval=0.3
+            ):
+                if event.get("type") != "__ping__":
+                    # Wait for producer to close
+                    await asyncio.sleep(0.2)
+                    break
+
+        task = asyncio.create_task(consume_and_break())
+        await asyncio.sleep(0.1)
+        await transport.close_stream(stream_id)
+        await task
+
+        # Should stay closed
+        status = await transport.get_stream_status_async(stream_id)
+        assert status == "closed"
+
+
+class TestOrphanKeyFix:
+    async def test_create_stream_no_orphan_key(self, transport, redis_client):
+        """create_stream should NOT set EXPIRE on non-existent stream key."""
+        stream_id = "test_stream_orphan"
+        await transport.create_stream(stream_id)
+
+        stream_key = f"stream:{stream_id}"
+        # stream key should not exist yet (no XADD has happened)
+        exists = await redis_client.exists(stream_key)
+        assert exists == 0
+
+        # After first push, stream key should exist with TTL
+        await transport.push_event(stream_id, {"type": "metadata", "data": {}})
+        exists = await redis_client.exists(stream_key)
+        assert exists == 1
+        ttl = await redis_client.ttl(stream_key)
+        assert ttl > 0  # TTL should be set
 
 
 class TestStreamClose:

@@ -97,9 +97,8 @@ async def stream_events(
             yield format_sse_event(error_event, event="error")
 
         except asyncio.CancelledError:
-            # 客户端断开连接
+            # 客户端断开连接 — 不关闭 stream（producer 仍在推送，consumer 可重连）
             logger.info(f"Stream {stream_id}: client disconnected")
-            await stream_transport.close_stream(stream_id)
             # 自动拒绝未决的权限中断，避免引擎无限阻塞
             result = await runner.store.resolve_interrupt(
                 stream_id, {"approved": False, "reason": "client_disconnected"}

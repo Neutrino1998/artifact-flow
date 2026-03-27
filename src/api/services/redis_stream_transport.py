@@ -56,15 +56,15 @@ class RedisStreamTransport:
         if existing_status is not None and existing_status != "closed":
             raise StreamAlreadyExistsError(stream_id)
 
-        # 创建元数据
+        # 创建元数据 (带 TTL，前端不连接时自动清理)
         await self._redis.hset(meta_key, mapping={
             "owner": owner_user_id or "",
             "status": "pending",
         })
         await self._redis.expire(meta_key, self._stream_ttl)
-        # stream key 的 TTL 也设置（如果前端一直不连接，自动清理）
-        stream_key = self._stream_key(stream_id)
-        await self._redis.expire(stream_key, self._stream_ttl)
+        # 注意：不对尚未创建的 stream key 做 EXPIRE（EXPIRE 对不存在的 key 是 no-op，
+        # 会导致后续 XADD 创建的 key 没有 TTL → 孤儿 key）。
+        # stream key 的 TTL 在 push_event 首次 XADD 后设置。
 
         logger.debug(f"Created Redis stream: {stream_id}")
 
@@ -78,6 +78,9 @@ class RedisStreamTransport:
         event_json = json.dumps(event, ensure_ascii=False, default=str)
         event_type = event.get("type", "")
 
+        # 检查 stream key 是否已存在（首次 XADD 后需设 TTL 防孤儿 key）
+        first_push = not await self._redis.exists(stream_key)
+
         # XADD with MAXLEN ~ 1000（近似修剪，性能更好）
         entry_id = await self._redis.xadd(
             stream_key,
@@ -85,6 +88,10 @@ class RedisStreamTransport:
             maxlen=1000,
             approximate=True,
         )
+
+        # 首次 XADD 后设 stream key 的 TTL（pending 状态下前端可能不来连接）
+        if first_push:
+            await self._redis.expire(stream_key, self._stream_ttl)
 
         # 注入 _stream_id 到原始 event dict（供 SSE 层使用）
         event["_stream_id"] = entry_id
@@ -141,11 +148,18 @@ class RedisStreamTransport:
                         event["_stream_id"] = entry_id
                         yield event
 
-                        # 终结事件 → 退出
+                        # 终结事件 → 正常退出（producer 负责 close_stream）
                         if event.get("type") in _TERMINAL_EVENTS:
                             return
         finally:
-            await self.close_stream(stream_id)
+            # Consumer 断连：不关闭 stream。
+            # 如果 producer 已关闭（status=closed），不改动。
+            # 否则回退到 pending + 恢复 TTL，等待前端重连。
+            current_status = await self._redis.hget(meta_key, "status")
+            if current_status and current_status != "closed":
+                await self._redis.hset(meta_key, "status", "pending")
+                await self._redis.expire(meta_key, self._stream_ttl)
+                await self._redis.expire(stream_key, self._stream_ttl)
 
     async def close_stream(self, stream_id: str) -> bool:
         meta_key = self._meta_key(stream_id)

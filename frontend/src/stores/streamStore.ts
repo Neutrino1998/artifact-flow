@@ -99,6 +99,9 @@ interface StreamState {
   // Cancelled
   cancelled: boolean;
 
+  // Reconnecting (SSE auto-reconnect in progress)
+  reconnecting: boolean;
+
   // Error
   error: string | null;
 
@@ -124,6 +127,9 @@ interface StreamState {
 
   // Snapshot segments for completed messages
   snapshotSegments: (messageId: string) => void;
+
+  // Reconnecting
+  setReconnecting: (val: boolean) => void;
 
   // Cancelled / Permission / error
   setCancelled: (val: boolean) => void;
@@ -181,6 +187,7 @@ export const useStreamStore = create<StreamState>((set, get) => {
     nonAgentBlocks: [],
     completedNonAgentBlocks: new Map(),
     executionMetrics: null,
+    reconnecting: false,
     cancelled: false,
     permissionRequest: null,
     error: null,
@@ -195,6 +202,7 @@ export const useStreamStore = create<StreamState>((set, get) => {
         segments: [],
         nonAgentBlocks: [],
         executionMetrics: null,
+        reconnecting: false,
         cancelled: false,
         permissionRequest: null,
         error: null,
@@ -203,7 +211,7 @@ export const useStreamStore = create<StreamState>((set, get) => {
 
     endStream: () => {
       cancelPendingFlush();
-      set({ isStreaming: false, streamUrl: null, conversationId: null, cancelled: false, permissionRequest: null, streamParentId: undefined });
+      set({ isStreaming: false, streamUrl: null, conversationId: null, reconnecting: false, cancelled: false, permissionRequest: null, streamParentId: undefined });
     },
 
     reset: () =>
@@ -313,6 +321,7 @@ export const useStreamStore = create<StreamState>((set, get) => {
       }
     },
 
+    setReconnecting: (val) => set({ reconnecting: val }),
     setCancelled: (val) => set({ cancelled: val }),
     setPermissionRequest: (req) => set({ permissionRequest: req }),
     setError: (error) => set({ error }),

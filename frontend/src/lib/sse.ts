@@ -17,7 +17,8 @@ export interface SSEConnection {
 export function connectSSE(
   streamUrl: string,
   handlers: SSEHandlers,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  lastEventId?: string | null,
 ): SSEConnection {
   const connection: SSEConnection = { lastEventId: null };
   const url = streamUrl.startsWith('http')
@@ -28,6 +29,9 @@ export function connectSSE(
   const token = useAuthStore.getState().token;
   if (token) {
     headers['Authorization'] = `Bearer ${token}`;
+  }
+  if (lastEventId) {
+    headers['Last-Event-ID'] = lastEventId;
   }
 
   fetch(url, { headers, signal })

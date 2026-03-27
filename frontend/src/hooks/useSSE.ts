@@ -21,6 +21,9 @@ const ARTIFACT_TOOLS = new Set([
 // operate on the same controller, preventing orphaned SSE connections.
 let _sharedAbortController: AbortController | null = null;
 
+const MAX_RECONNECT_ATTEMPTS = 3;
+const RECONNECT_BASE_DELAY_MS = 1000;
+
 export function useSSE() {
 
   // Stream store actions
@@ -35,6 +38,7 @@ export function useSSE() {
   const pushNonAgentBlock = useStreamStore((s) => s.pushNonAgentBlock);
   const setExecutionMetrics = useStreamStore((s) => s.setExecutionMetrics);
   const setCancelled = useStreamStore((s) => s.setCancelled);
+  const setReconnecting = useStreamStore((s) => s.setReconnecting);
 
   // Conversation store actions
   const setCurrent = useConversationStore((s) => s.setCurrent);
@@ -358,6 +362,63 @@ export function useSSE() {
     ]
   );
 
+  const attemptReconnect = useCallback(
+    async (conversationId: string, lastEventId: string | null) => {
+      for (let attempt = 0; attempt < MAX_RECONNECT_ATTEMPTS; attempt++) {
+        const delay = RECONNECT_BASE_DELAY_MS * Math.pow(2, attempt);
+        await new Promise((r) => setTimeout(r, delay));
+
+        // Check if user manually disconnected while waiting
+        if (!_sharedAbortController) return;
+
+        try {
+          const active = await api.getActiveStream(conversationId);
+          // Execution still active — reconnect with lastEventId
+          setReconnecting(false);
+
+          const controller = new AbortController();
+          _sharedAbortController = controller;
+
+          let receivedTerminal = false;
+          const connection = connectSSE(
+            active.stream_url,
+            {
+              onEvent: (event) => {
+                if (controller.signal.aborted) return;
+                handleEvent(event, conversationId);
+                const t = event.type;
+                if (t === 'complete' || t === 'cancelled' || t === 'error') {
+                  receivedTerminal = true;
+                }
+              },
+              onError: (err) => {
+                setError(err.message);
+                endStream();
+              },
+              onClose: () => {
+                if (receivedTerminal || controller.signal.aborted) return;
+                setReconnecting(true);
+                attemptReconnect(conversationId, connection.lastEventId);
+              },
+            },
+            controller.signal,
+            lastEventId,
+          );
+          return; // reconnected successfully
+        } catch {
+          // 404 or network error — execution may have ended
+          continue;
+        }
+      }
+
+      // All attempts exhausted — execution likely finished
+      setReconnecting(false);
+      endStream();
+      refreshAfterComplete(conversationId);
+    },
+    [handleEvent, setError, endStream, setReconnecting, refreshAfterComplete],
+  );
+
   const connect = useCallback(
     (streamUrl: string, conversationId: string, _messageId: string) => {
       if (_sharedAbortController) {
@@ -367,25 +428,34 @@ export function useSSE() {
       const controller = new AbortController();
       _sharedAbortController = controller;
 
-      connectSSE(
+      let receivedTerminal = false;
+
+      const connection = connectSSE(
         streamUrl,
         {
           onEvent: (event) => {
             if (controller.signal.aborted) return;
             handleEvent(event, conversationId);
+            const t = event.type;
+            if (t === 'complete' || t === 'cancelled' || t === 'error') {
+              receivedTerminal = true;
+            }
           },
           onError: (err) => {
             setError(err.message);
             endStream();
           },
           onClose: () => {
-            // Connection closed — stream may have ended naturally
+            if (receivedTerminal || controller.signal.aborted) return;
+            // Abnormal disconnect — attempt reconnection
+            setReconnecting(true);
+            attemptReconnect(conversationId, connection.lastEventId);
           },
         },
-        controller.signal
+        controller.signal,
       );
     },
-    [handleEvent, setError, endStream]
+    [handleEvent, setError, endStream, setReconnecting, attemptReconnect],
   );
 
   const disconnect = useCallback(() => {

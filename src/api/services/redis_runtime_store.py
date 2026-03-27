@@ -44,6 +44,15 @@ else
 end
 """
 
+# acquire-lease: 原子 SET NX 或返回现有持有者
+_LUA_ACQUIRE_LEASE = """
+local ok = redis.call('SET', KEYS[1], ARGV[1], 'NX', 'EX', tonumber(ARGV[2]))
+if ok then
+    return nil
+end
+return redis.call('GET', KEYS[1])
+"""
+
 # drain-all: LRANGE + DEL 原子取出队列
 _LUA_DRAIN_ALL = """
 local items = redis.call('LRANGE', KEYS[1], 0, -1)
@@ -84,6 +93,7 @@ class RedisRuntimeStore:
         self._permission_timeout = permission_timeout
 
         # Lua script SHA（_init_scripts 中加载）
+        self._sha_acquire_lease: str = ""
         self._sha_compare_and_del: str = ""
         self._sha_compare_and_expire: str = ""
         self._sha_drain_all: str = ""
@@ -94,6 +104,7 @@ class RedisRuntimeStore:
 
     async def init_scripts(self) -> None:
         """SCRIPT LOAD 所有 Lua 脚本（init_globals 时调用一次）"""
+        self._sha_acquire_lease = await self._redis.script_load(_LUA_ACQUIRE_LEASE)
         self._sha_compare_and_del = await self._redis.script_load(_LUA_COMPARE_AND_DEL)
         self._sha_compare_and_expire = await self._redis.script_load(_LUA_COMPARE_AND_EXPIRE)
         self._sha_drain_all = await self._redis.script_load(_LUA_DRAIN_ALL)
@@ -130,13 +141,12 @@ class RedisRuntimeStore:
 
     async def try_acquire_lease(self, conversation_id: str, message_id: str) -> Optional[str]:
         key = self._lease_key(conversation_id)
-        # SET NX EX — 原子获取
-        acquired = await self._redis.set(key, message_id, nx=True, ex=self._lease_ttl)
-        if acquired:
-            return None  # 成功获取
-        # 已有持有者
-        existing = await self._redis.get(key)
-        return existing
+        # 原子操作：SET NX 成功返回 nil，否则返回现有持有者
+        # 消除了原先 SET NX + GET 之间的竞态窗口
+        result = await self._redis.evalsha(
+            self._sha_acquire_lease, 1, key, message_id, str(self._lease_ttl)
+        )
+        return result  # None = acquired, str = existing owner
 
     async def release_lease(self, conversation_id: str, message_id: str) -> None:
         key = self._lease_key(conversation_id)

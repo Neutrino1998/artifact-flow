@@ -110,6 +110,26 @@ class TestLease:
         assert ttl > 2
 
 
+class TestLeaseAtomicity:
+    async def test_concurrent_acquire_no_orphan(self, store):
+        """Concurrent lease acquisitions should be atomic — exactly one wins."""
+        conv_id = "test_conv_race"
+        results = await asyncio.gather(
+            store.try_acquire_lease(conv_id, "msg_a"),
+            store.try_acquire_lease(conv_id, "msg_b"),
+            store.try_acquire_lease(conv_id, "msg_c"),
+        )
+        # Exactly one should have acquired (None), the rest should get the winner's msg_id
+        winners = [r for r in results if r is None]
+        losers = [r for r in results if r is not None]
+        assert len(winners) == 1
+        assert len(losers) == 2
+        # All losers should report the same existing holder
+        assert len(set(losers)) == 1
+        # The holder should be one of the contenders
+        assert losers[0] in ("msg_a", "msg_b", "msg_c")
+
+
 class TestInterrupt:
     async def test_resolve_before_timeout(self, store):
         async def resolver():
