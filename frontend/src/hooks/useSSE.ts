@@ -400,11 +400,13 @@ export function useSSE() {
                 }
               },
               onError: () => {
-                // SSE fetch handshake failed — consume a retry attempt
+                // SSE failed — could be handshake or mid-stream read error.
+                // Use connection.lastEventId (not the outer lastEventId) so
+                // events already consumed in this attempt aren't replayed.
                 if (controller.signal.aborted) return;
                 if (nextAttempt < MAX_RECONNECT_ATTEMPTS) {
                   setReconnecting(true);
-                  attemptReconnect(conversationId, lastEventId, controller, nextAttempt);
+                  attemptReconnect(conversationId, connection.lastEventId ?? lastEventId, controller, nextAttempt);
                 } else {
                   setReconnecting(false);
                   endStream();
