@@ -777,7 +777,7 @@ Phase 3 完成后砍掉生产 `DatabaseManager` 中的 SQLite 代码，`aiosqlit
   → 全量单元测试通过 → commit
   （仍是 InMemory，行为不变，但接口已就绪）
 
-第三轮：P1.3-1.4 + P2 — Redis 实现（一起写一起上线）
+第三轮：P1.3-1.4 + P2 — Redis 实现（一起写一起上线）  ✅ DONE
   1.1 Redis 基础设施 (docker-compose + config)
   1.3 RedisRuntimeStore (含 check-subscribe-check-wait、心跳续租、Lua 脚本)
   1.5 ExecutionRunner 心跳任务
@@ -787,6 +787,10 @@ Phase 3 完成后砍掉生产 `DatabaseManager` 中的 SQLite 代码，`aiosqlit
   dependencies.py REDIS_URL 分支
   → 单元测试 + 集成测试通过 → commit
   （Phase 1 + Phase 2 必须一起上线，见能力边界说明）
+  补丁：stream 生命周期修复（consumer 断连不关 stream、producer 侧 close、
+  consumer_id CAS 防竞态、孤儿 key 修复）、lease 竞态 Lua 原子化、
+  前端 SSE 自动重连（Last-Event-ID + 指数退避 + ownership guard）、
+  active-stream 查询 API
 ```
 
 **为什么这个顺序**：
