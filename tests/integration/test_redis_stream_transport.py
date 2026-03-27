@@ -53,11 +53,13 @@ async def redis_client():
 async def transport(redis_client):
     from api.services.redis_stream_transport import RedisStreamTransport
 
-    return RedisStreamTransport(
+    t = RedisStreamTransport(
         redis_client,
         stream_ttl=30,
         stream_timeout=60,
     )
+    await t.init_scripts()
+    return t
 
 
 class TestStreamLifecycle:

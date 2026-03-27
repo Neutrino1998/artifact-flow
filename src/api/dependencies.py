@@ -114,6 +114,7 @@ async def init_globals() -> None:
             stream_ttl=config.STREAM_TTL,
             stream_timeout=config.STREAM_TIMEOUT,
         )
+        await _stream_transport.init_scripts()
         _execution_runner = ExecutionRunner(
             max_concurrent=config.MAX_CONCURRENT_TASKS,
             store=runtime_store,

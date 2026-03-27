@@ -22,6 +22,19 @@ logger = get_logger("ArtifactFlow")
 # 终结事件类型
 _TERMINAL_EVENTS = frozenset(("complete", "cancelled", "error"))
 
+# Lua CAS: 仅当 status == "streaming" 时回退到 pending + 设 TTL
+# 防止旧 consumer 的 finally 覆盖新 consumer 的 streaming 或 producer 的 closed
+_LUA_REVERT_TO_PENDING = """
+local status = redis.call('HGET', KEYS[1], 'status')
+if status == 'streaming' then
+    redis.call('HSET', KEYS[1], 'status', 'pending')
+    redis.call('EXPIRE', KEYS[1], tonumber(ARGV[1]))
+    redis.call('EXPIRE', KEYS[2], tonumber(ARGV[1]))
+    return 1
+end
+return 0
+"""
+
 
 class RedisStreamTransport:
     """Redis Streams-backed StreamTransport 实现"""
@@ -35,6 +48,13 @@ class RedisStreamTransport:
         self._redis = redis_client
         self._stream_ttl = stream_ttl
         self._stream_timeout = stream_timeout
+        self._sha_revert_to_pending: str = ""
+
+    async def init_scripts(self) -> None:
+        """SCRIPT LOAD Lua 脚本（init_globals 时调用一次）"""
+        self._sha_revert_to_pending = await self._redis.script_load(
+            _LUA_REVERT_TO_PENDING
+        )
 
     # ── Key helpers ──
 
@@ -152,14 +172,14 @@ class RedisStreamTransport:
                         if event.get("type") in _TERMINAL_EVENTS:
                             return
         finally:
-            # Consumer 断连：不关闭 stream。
-            # 如果 producer 已关闭（status=closed），不改动。
-            # 否则回退到 pending + 恢复 TTL，等待前端重连。
-            current_status = await self._redis.hget(meta_key, "status")
-            if current_status and current_status != "closed":
-                await self._redis.hset(meta_key, "status", "pending")
-                await self._redis.expire(meta_key, self._stream_ttl)
-                await self._redis.expire(stream_key, self._stream_ttl)
+            # Consumer 断连：原子 CAS 回退到 pending。
+            # 仅当 status 仍是 "streaming"（本 consumer 设置的）时才回退，
+            # 避免覆盖新 consumer 的 streaming 或 producer 的 closed。
+            await self._redis.evalsha(
+                self._sha_revert_to_pending,
+                2, meta_key, stream_key,
+                str(self._stream_ttl),
+            )
 
     async def close_stream(self, stream_id: str) -> bool:
         meta_key = self._meta_key(stream_id)

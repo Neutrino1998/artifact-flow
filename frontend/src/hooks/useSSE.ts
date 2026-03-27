@@ -363,8 +363,8 @@ export function useSSE() {
   );
 
   const attemptReconnect = useCallback(
-    async (conversationId: string, lastEventId: string | null) => {
-      for (let attempt = 0; attempt < MAX_RECONNECT_ATTEMPTS; attempt++) {
+    async (conversationId: string, lastEventId: string | null, startAttempt = 0) => {
+      for (let attempt = startAttempt; attempt < MAX_RECONNECT_ATTEMPTS; attempt++) {
         const delay = RECONNECT_BASE_DELAY_MS * Math.pow(2, attempt);
         await new Promise((r) => setTimeout(r, delay));
 
@@ -378,6 +378,7 @@ export function useSSE() {
 
           const controller = new AbortController();
           _sharedAbortController = controller;
+          const nextAttempt = attempt + 1;
 
           let receivedTerminal = false;
           const connection = connectSSE(
@@ -391,9 +392,17 @@ export function useSSE() {
                   receivedTerminal = true;
                 }
               },
-              onError: (err) => {
-                setError(err.message);
-                endStream();
+              onError: () => {
+                // SSE fetch handshake failed — consume a retry attempt
+                if (controller.signal.aborted) return;
+                if (nextAttempt < MAX_RECONNECT_ATTEMPTS) {
+                  setReconnecting(true);
+                  attemptReconnect(conversationId, lastEventId, nextAttempt);
+                } else {
+                  setReconnecting(false);
+                  endStream();
+                  refreshAfterComplete(conversationId);
+                }
               },
               onClose: () => {
                 if (receivedTerminal || controller.signal.aborted) return;
@@ -404,9 +413,9 @@ export function useSSE() {
             controller.signal,
             lastEventId,
           );
-          return; // reconnected successfully
+          return; // SSE connection initiated (handlers take over)
         } catch {
-          // 404 or network error — execution may have ended
+          // getActiveStream failed (404 or network error) — try next attempt
           continue;
         }
       }
@@ -416,7 +425,7 @@ export function useSSE() {
       endStream();
       refreshAfterComplete(conversationId);
     },
-    [handleEvent, setError, endStream, setReconnecting, refreshAfterComplete],
+    [handleEvent, endStream, setReconnecting, refreshAfterComplete],
   );
 
   const connect = useCallback(
