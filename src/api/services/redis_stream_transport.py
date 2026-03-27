@@ -23,13 +23,15 @@ logger = get_logger("ArtifactFlow")
 # 终结事件类型
 _TERMINAL_EVENTS = frozenset(("complete", "cancelled", "error"))
 
-# Lua CAS: 仅当 consumer_id 仍匹配时回退到 pending + 设 TTL。
-# 每个 consumer 进入时写自己的 consumer_id，finally 里只清理自己的。
-# 防止旧 consumer 的 finally 覆盖新 consumer 的 streaming 或 producer 的 closed。
+# Lua CAS: 仅当 consumer_id 匹配 且 status 仍为 streaming 时回退到 pending + 设 TTL。
+# 双重条件防止两类竞态：
+#   - consumer_id 不匹配 → 新 consumer 已接管，旧 finally 不动
+#   - status != streaming → producer 已 close，consumer finally 不动
 # KEYS[1]=meta_key, KEYS[2]=stream_key, ARGV[1]=consumer_id, ARGV[2]=ttl
 _LUA_REVERT_TO_PENDING = """
 local cid = redis.call('HGET', KEYS[1], 'consumer_id')
-if cid == ARGV[1] then
+local status = redis.call('HGET', KEYS[1], 'status')
+if cid == ARGV[1] and status == 'streaming' then
     redis.call('HSET', KEYS[1], 'status', 'pending', 'consumer_id', '')
     redis.call('EXPIRE', KEYS[1], tonumber(ARGV[2]))
     redis.call('EXPIRE', KEYS[2], tonumber(ARGV[2]))
