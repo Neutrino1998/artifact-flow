@@ -1,0 +1,2009 @@
+
+<!doctype html>
+<html lang="zh" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Multi-Agent Research System Built on LangGraph">
+      
+      
+      
+        <link rel="canonical" href="https://neutrino.github.io/artifact-flow/_archive/ha-review-findings/">
+      
+      
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>高可用 Review 发现与修复建议 - ArtifactFlow</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#高可用-review-发现与修复建议" class="md-skip">
+          跳转至
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="页眉">
+    <a href="../.." title="ArtifactFlow" class="md-header__button md-logo" aria-label="ArtifactFlow" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            ArtifactFlow
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              高可用 Review 发现与修复建议
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="搜索" placeholder="搜索" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="查找">
+        
+        <button type="reset" class="md-search__icon md-icon" title="清空当前内容" aria-label="清空当前内容" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            正在初始化搜索引擎
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/Neutrino1998/artifact-flow" title="前往仓库" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    Neutrino1998/artifact-flow
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="标签" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../frontend/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Frontend Guide
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../request-lifecycle/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Request Lifecycle
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../architecture/core/" class="md-tabs__link">
+          
+  
+  
+  Architecture
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../streaming/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Streaming
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../extension-guide/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Extension Guide
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../api/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  API Reference
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../faq/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  FAQ
+
+      </a>
+    </li>
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="导航栏" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="ArtifactFlow" class="md-nav__button md-logo" aria-label="ArtifactFlow" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    ArtifactFlow
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/Neutrino1998/artifact-flow" title="前往仓库" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    Neutrino1998/artifact-flow
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../frontend/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Frontend Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../request-lifecycle/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Request Lifecycle
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Architecture
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../architecture/core/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Core
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../architecture/agents/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Agents
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../architecture/tools/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tools
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../architecture/data-layer/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data Layer
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../architecture/concurrency/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Concurrency
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../streaming/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Streaming
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../extension-guide/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Extension Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../faq/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    FAQ
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="目录">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      目录
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#当前能力边界" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        当前能力边界
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#p0--必须修复" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        P0 — 必须修复
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="P0 — 必须修复">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#f-01-lease-fencing-缺失split-brain-风险-执行生命周期职责错位" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        F-01 Lease fencing 缺失（split-brain 风险）+ 执行生命周期职责错位
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#f-02-health-端点缺少深度检查" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        F-02 Health 端点缺少深度检查
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#f-03-get_stream_status-同步异步接口不一致" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        F-03 get_stream_status 同步/异步接口不一致
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#f-04-database_url-硬编码默认值生产隐患" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        F-04 DATABASE_URL 硬编码默认值（生产隐患）
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#p1--应该修复" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        P1 — 应该修复
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="P1 — 应该修复">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#f-05-断线重连与-permission-auto-deny-冲突" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        F-05 断线重连与 permission auto-deny 冲突
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#f-06-consume_events-xread-断连无恢复" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        F-06 consume_events XREAD 断连无恢复
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#f-07-lua-脚本-noscript-容错" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        F-07 Lua 脚本 NOSCRIPT 容错
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#f-08-redis-连接缺少-retry-策略" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        F-08 Redis 连接缺少 retry 策略
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#p2--建议修复--加固" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        P2 — 建议修复 / 加固
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="P2 — 建议修复 / 加固">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#f-09-wait_for_interrupt-pubsub-断连无捕获" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        F-09 wait_for_interrupt Pub/Sub 断连无捕获
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#f-10-删除-event-fallback-本地文件假安全感" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        F-10 删除 event fallback 本地文件（假安全感）
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#f-11-llm_chunk-每-token-一条全量快照--coalesced-snapshots" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        F-11 llm_chunk 每 token 一条全量快照 → coalesced snapshots
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#f-12-push_event-check-then-act-竞态" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        F-12 push_event check-then-act 竞态
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#f-13-redis-key-无命名空间隔离" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        F-13 Redis key 无命名空间隔离
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#f-14-stream-ttl-默认-30s-偏短" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        F-14 Stream TTL 默认 30s 偏短
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#f-15-inmemory-cleanup_execution-全量扫描" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        F-15 InMemory cleanup_execution 全量扫描
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#架构问题--router--service-职责划分" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        架构问题 — Router / Service 职责划分
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="架构问题 — Router / Service 职责划分">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#审计结论" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        审计结论
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#r-01-chatpy-执行编排逻辑散落在路由层" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        R-01 chat.py: 执行编排逻辑散落在路由层
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#r-02-chatpy-controller-实例化在路由层" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        R-02 chat.py: Controller 实例化在路由层
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#r-03-chatpy-路由直接访问-runnerstore" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        R-03 chat.py: 路由直接访问 runner.store
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#r-04-streampy-断连时直接-resolve-interrupt" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        R-04 stream.py: 断连时直接 resolve interrupt
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#不存在问题的路由" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        不存在问题的路由
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#重构影响范围" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        重构影响范围
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#修复优先级总览" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        修复优先级总览
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="高可用-review-发现与修复建议">高可用 Review 发现与修复建议</h1>
+<blockquote>
+<p>持久化改造（persistence-refactor-plan.md）三轮全部完成后的 HA 专项 review。
+来源：自研 review + 外部 reviewer 反馈，合并去重后统一排列。
+评估基线：双服务器 active-active + 云托管 RDBMS + 云托管 Redis。</p>
+</blockquote>
+<hr />
+<h2 id="当前能力边界">当前能力边界</h2>
+<table>
+<thead>
+<tr>
+<th>能力</th>
+<th>状态</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>共享控制面（lease/interrupt/stream 跨 Worker）</td>
+<td>✅</td>
+<td>Lua CAS、check-subscribe-check-wait、心跳续租</td>
+</tr>
+<tr>
+<td>Fencing / split-brain 防护</td>
+<td>❌</td>
+<td>lease 丢失后无阻断机制</td>
+</tr>
+<tr>
+<td>故障检测（readiness）</td>
+<td>❌</td>
+<td><code>/health</code> 不检查 DB/Redis</td>
+</tr>
+<tr>
+<td>Redis failover 恢复</td>
+<td>⚠️ 部分</td>
+<td><code>is_cancelled</code>/<code>drain_messages</code> 有 graceful degrade，Pub/Sub 和 XREAD 无恢复</td>
+</tr>
+<tr>
+<td>事件持久化保证</td>
+<td>⚠️ 降级</td>
+<td>fallback 到本地文件，容器环境不可靠</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="p0--必须修复">P0 — 必须修复</h2>
+<h3 id="f-01-lease-fencing-缺失split-brain-风险-执行生命周期职责错位">F-01 Lease fencing 缺失（split-brain 风险）+ 执行生命周期职责错位</h3>
+<p><strong>来源</strong>：Reviewer P1 + 职责审计</p>
+<p><strong>问题</strong>：两个层面。</p>
+<p><strong>层面 1 — 无 fencing</strong>：入口只在 <code>chat.py:208</code> 拿一次 lease，续租循环 <code>execution_runner.py:99</code> 失败只记日志继续跑。<code>redis_runtime_store.py:336</code> 的 <code>renew_lease</code> 不返回 owner 校验结果。一旦 lease 因 Redis failover / 网络抖动 / GC pause 过期，另一个 Worker 可以 <code>SET NX</code> 成功接管，原 Worker 仍继续写库。<code>conversation_repo.py:324</code> 是覆盖写，<code>artifact_repo.py:245</code> 明确无乐观锁 → last-writer-wins / split-brain。</p>
+<p><strong>层面 2 — 职责错位</strong>：lease 获取在 <code>chat.py</code>（路由层），续租在 <code>ExecutionRunner</code>（服务层），但续租失败的反应谁都没做。根因是执行生命周期管理被拆散在路由和服务两层：</p>
+<table>
+<thead>
+<tr>
+<th>步骤</th>
+<th>当前在哪里</th>
+<th>应该在哪里</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>try_acquire_lease</code></td>
+<td><code>chat.py:209</code></td>
+<td><code>ExecutionRunner.submit()</code> 预提交阶段</td>
+</tr>
+<tr>
+<td><code>mark_engine_interactive</code></td>
+<td><code>chat.py:220</code></td>
+<td><code>ExecutionRunner.submit()</code> 预提交阶段</td>
+</tr>
+<tr>
+<td><code>create_stream</code></td>
+<td><code>chat.py:226</code></td>
+<td><code>ExecutionRunner.submit()</code> 预提交阶段</td>
+</tr>
+<tr>
+<td>预提交失败回滚（release_lease + clear_interactive）</td>
+<td><code>chat.py:257-260</code></td>
+<td><code>ExecutionRunner.submit()</code> 预提交 try/except</td>
+</tr>
+<tr>
+<td>心跳续租</td>
+<td><code>ExecutionRunner._renew_loop</code></td>
+<td>✓ 位置正确</td>
+</tr>
+<tr>
+<td>续租失败 → fencing</td>
+<td>❌ 无人负责</td>
+<td><code>ExecutionRunner._renew_loop</code></td>
+</tr>
+<tr>
+<td>cleanup_execution</td>
+<td><code>ExecutionRunner._wrapped</code> finally</td>
+<td>✓ 位置正确</td>
+</tr>
+</tbody>
+</table>
+<p>路由层（chat.py）应该只做参数校验 + 鉴权 + 调用 <code>runner.submit()</code> + 返回 HTTP 响应。执行生命周期的全部管理（拿锁 → 创建 stream → 心跳 → fencing → 清理）都应该收敛到 <code>ExecutionRunner</code>。</p>
+<blockquote>
+<p><strong>拆分 guardrail</strong>：当前 <code>ExecutionRunner</code> 约 146 行，加入生命周期管理后预计 ~250 行，仍在合理范围。如果后续持续膨胀超过 ~300 行（例如需要管理 controller factory、多种执行模式），应拆出独立的 <code>ExecutionOrchestrator</code>，Runner 回归纯调度器职责。</p>
+</blockquote>
+<p><strong>涉及文件</strong>：
+- <code>src/api/routers/chat.py</code> — lease/interactive/stream 操作移出
+- <code>src/api/services/execution_runner.py</code> — 接管完整生命周期 + fencing
+- <code>src/api/services/runtime_store.py</code> — <code>renew_lease</code> 返回类型改 <code>bool</code>
+- <code>src/api/services/redis_runtime_store.py</code> — <code>renew_lease</code> 返回 compare-and-expire 结果</p>
+<p><strong>修复建议</strong>：</p>
+<p><strong>1. <code>renew_lease</code> → 返回 <code>bool</code></strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1"># RuntimeStore Protocol</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">renew_lease</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">conversation_id</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">message_id</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">ttl</span><span class="p">:</span> <span class="nb">float</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span> <span class="o">...</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="c1"># RedisRuntimeStore — 检查 pipeline 结果</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">renew_lease</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">...</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>    <span class="n">pipe</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_redis</span><span class="o">.</span><span class="n">pipeline</span><span class="p">(</span><span class="n">transaction</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>    <span class="n">pipe</span><span class="o">.</span><span class="n">evalsha</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_sha_compare_and_expire</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_lease_key</span><span class="p">(</span><span class="n">conversation_id</span><span class="p">),</span> <span class="n">message_id</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">ttl_int</span><span class="p">))</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>    <span class="n">pipe</span><span class="o">.</span><span class="n">evalsha</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_sha_compare_and_expire</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_interactive_key</span><span class="p">(</span><span class="n">conversation_id</span><span class="p">),</span> <span class="n">message_id</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">ttl_int</span><span class="p">))</span>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>    <span class="n">results</span> <span class="o">=</span> <span class="k">await</span> <span class="n">pipe</span><span class="o">.</span><span class="n">execute</span><span class="p">()</span>
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>    <span class="k">return</span> <span class="n">results</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">==</span> <span class="mi">1</span>  <span class="c1"># lease key 续租成功</span>
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a><span class="c1"># InMemoryRuntimeStore — 永远返回 True</span>
+<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">renew_lease</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">...</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>    <span class="k">return</span> <span class="kc">True</span>
+</code></pre></div>
+<p><strong>2. <code>_renew_loop</code> 检测到 lease 丢失 → <code>task.cancel()</code></strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">_renew_loop</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">conversation_id</span><span class="p">,</span> <span class="n">task_id</span><span class="p">):</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>    <span class="n">interval</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_lease_ttl</span> <span class="o">//</span> <span class="mi">3</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>    <span class="k">while</span> <span class="kc">True</span><span class="p">:</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>        <span class="k">await</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="n">interval</span><span class="p">)</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>        <span class="k">try</span><span class="p">:</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>            <span class="n">still_owner</span> <span class="o">=</span> <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">store</span><span class="o">.</span><span class="n">renew_lease</span><span class="p">(</span><span class="n">conversation_id</span><span class="p">,</span> <span class="n">task_id</span><span class="p">,</span> <span class="n">ttl</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">_lease_ttl</span><span class="p">)</span>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>        <span class="k">except</span> <span class="ne">Exception</span><span class="p">:</span>
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>            <span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Heartbeat renewal failed for </span><span class="si">{</span><span class="n">task_id</span><span class="si">}</span><span class="s2"> (network issue)&quot;</span><span class="p">)</span>
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>            <span class="k">continue</span>  <span class="c1"># 网络抖动：下次重试，还有 2 次机会（TTL/3 间隔）</span>
+<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a>
+<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a>        <span class="k">if</span> <span class="ow">not</span> <span class="n">still_owner</span><span class="p">:</span>
+<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a>            <span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Lease lost for </span><span class="si">{</span><span class="n">task_id</span><span class="si">}</span><span class="s2"> — fencing execution&quot;</span><span class="p">)</span>
+<a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a>            <span class="n">task</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_tasks</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">task_id</span><span class="p">)</span>
+<a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a>            <span class="k">if</span> <span class="n">task</span><span class="p">:</span>
+<a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a>                <span class="n">task</span><span class="o">.</span><span class="n">cancel</span><span class="p">()</span>  <span class="c1"># 注入 CancelledError，整条调用链展开</span>
+<a id="__codelineno-1-16" name="__codelineno-1-16" href="#__codelineno-1-16"></a>            <span class="k">return</span>
+</code></pre></div>
+<p><strong>3. <code>CancelledError</code> 天然跳过 post-processing</strong></p>
+<p><code>task.cancel()</code> 会向 <code>execute_and_push → _run_and_push → controller.stream_execute</code> 注入 <code>CancelledError</code>。controller 的 post-processing（flush artifacts、update response）在 engine loop 之后的顺序代码中，<code>CancelledError</code> 会直接跳过这些代码 → <strong>不需要额外 flag，写 DB 操作天然被阻止</strong>。</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>_renew_loop: task.cancel()
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>    ↓
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>CancelledError 注入到 coro 当前 await 的点
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>    ├─ engine 正在 call_llm → 中断
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>    ├─ engine 正在 wait_for_interrupt → 中断
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>    ├─ controller 正在 event_queue.get() → 中断
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>    ↓
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>stream_execute 的 post-processing 被跳过（flush_all、update_response 不执行）
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>    ↓
+<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a>ExecutionRunner._wrapped() finally → cleanup_execution（正常清理）
+</code></pre></div>
+<p><strong>4. 执行生命周期收敛到 <code>ExecutionRunner.submit()</code></strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="c1"># ExecutionRunner — submit 接管全部生命周期</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">submit</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">conversation_id</span><span class="p">,</span> <span class="n">task_id</span><span class="p">,</span> <span class="n">coro</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>                 <span class="n">user_id</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">stream_transport</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">Task</span><span class="p">:</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>    <span class="c1"># 1. 拿 lease（原来在 chat.py:209）</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>    <span class="n">active</span> <span class="o">=</span> <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">store</span><span class="o">.</span><span class="n">try_acquire_lease</span><span class="p">(</span><span class="n">conversation_id</span><span class="p">,</span> <span class="n">task_id</span><span class="p">)</span>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>    <span class="k">if</span> <span class="n">active</span><span class="p">:</span>
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a>        <span class="k">raise</span> <span class="n">ConflictError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Execution already active: </span><span class="si">{</span><span class="n">active</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a>
+<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a>    <span class="k">try</span><span class="p">:</span>
+<a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a>        <span class="c1"># 2. 标记 interactive（原来在 chat.py:220）</span>
+<a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a>        <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">store</span><span class="o">.</span><span class="n">mark_engine_interactive</span><span class="p">(</span><span class="n">conversation_id</span><span class="p">,</span> <span class="n">task_id</span><span class="p">)</span>
+<a id="__codelineno-3-12" name="__codelineno-3-12" href="#__codelineno-3-12"></a>        <span class="c1"># 3. 创建 stream（原来在 chat.py:226）</span>
+<a id="__codelineno-3-13" name="__codelineno-3-13" href="#__codelineno-3-13"></a>        <span class="k">if</span> <span class="n">stream_transport</span><span class="p">:</span>
+<a id="__codelineno-3-14" name="__codelineno-3-14" href="#__codelineno-3-14"></a>            <span class="k">await</span> <span class="n">stream_transport</span><span class="o">.</span><span class="n">create_stream</span><span class="p">(</span><span class="n">task_id</span><span class="p">,</span> <span class="n">owner_user_id</span><span class="o">=</span><span class="n">user_id</span><span class="p">)</span>
+<a id="__codelineno-3-15" name="__codelineno-3-15" href="#__codelineno-3-15"></a>    <span class="k">except</span> <span class="ne">Exception</span><span class="p">:</span>
+<a id="__codelineno-3-16" name="__codelineno-3-16" href="#__codelineno-3-16"></a>        <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">store</span><span class="o">.</span><span class="n">release_lease</span><span class="p">(</span><span class="n">conversation_id</span><span class="p">,</span> <span class="n">task_id</span><span class="p">)</span>
+<a id="__codelineno-3-17" name="__codelineno-3-17" href="#__codelineno-3-17"></a>        <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">store</span><span class="o">.</span><span class="n">clear_engine_interactive</span><span class="p">(</span><span class="n">conversation_id</span><span class="p">,</span> <span class="n">task_id</span><span class="p">)</span>
+<a id="__codelineno-3-18" name="__codelineno-3-18" href="#__codelineno-3-18"></a>        <span class="k">raise</span>
+<a id="__codelineno-3-19" name="__codelineno-3-19" href="#__codelineno-3-19"></a>
+<a id="__codelineno-3-20" name="__codelineno-3-20" href="#__codelineno-3-20"></a>    <span class="c1"># 4. 提交后台任务（心跳 + fencing 在 _wrapped 中）</span>
+<a id="__codelineno-3-21" name="__codelineno-3-21" href="#__codelineno-3-21"></a>    <span class="o">...</span>
+<a id="__codelineno-3-22" name="__codelineno-3-22" href="#__codelineno-3-22"></a>
+<a id="__codelineno-3-23" name="__codelineno-3-23" href="#__codelineno-3-23"></a><span class="c1"># chat.py — 简化为参数校验 + 鉴权 + 调度</span>
+<a id="__codelineno-3-24" name="__codelineno-3-24" href="#__codelineno-3-24"></a><span class="nd">@router</span><span class="o">.</span><span class="n">post</span><span class="p">(</span><span class="s2">&quot;&quot;</span><span class="p">)</span>
+<a id="__codelineno-3-25" name="__codelineno-3-25" href="#__codelineno-3-25"></a><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">send_message</span><span class="p">(</span><span class="n">request</span><span class="p">,</span> <span class="n">current_user</span><span class="p">,</span> <span class="n">runner</span><span class="p">,</span> <span class="o">...</span><span class="p">):</span>
+<a id="__codelineno-3-26" name="__codelineno-3-26" href="#__codelineno-3-26"></a>    <span class="n">conversation_id</span> <span class="o">=</span> <span class="n">request</span><span class="o">.</span><span class="n">conversation_id</span> <span class="ow">or</span> <span class="sa">f</span><span class="s2">&quot;conv-</span><span class="si">{</span><span class="n">uuid4</span><span class="p">()</span><span class="o">.</span><span class="n">hex</span><span class="si">}</span><span class="s2">&quot;</span>
+<a id="__codelineno-3-27" name="__codelineno-3-27" href="#__codelineno-3-27"></a>    <span class="n">message_id</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;msg-</span><span class="si">{</span><span class="n">uuid4</span><span class="p">()</span><span class="o">.</span><span class="n">hex</span><span class="si">}</span><span class="s2">&quot;</span>
+<a id="__codelineno-3-28" name="__codelineno-3-28" href="#__codelineno-3-28"></a>
+<a id="__codelineno-3-29" name="__codelineno-3-29" href="#__codelineno-3-29"></a>    <span class="k">if</span> <span class="n">request</span><span class="o">.</span><span class="n">conversation_id</span><span class="p">:</span>
+<a id="__codelineno-3-30" name="__codelineno-3-30" href="#__codelineno-3-30"></a>        <span class="k">await</span> <span class="n">_verify_ownership</span><span class="p">(</span><span class="n">conversation_id</span><span class="p">,</span> <span class="n">current_user</span><span class="p">,</span> <span class="n">conversation_manager</span><span class="p">)</span>
+<a id="__codelineno-3-31" name="__codelineno-3-31" href="#__codelineno-3-31"></a>
+<a id="__codelineno-3-32" name="__codelineno-3-32" href="#__codelineno-3-32"></a>    <span class="k">try</span><span class="p">:</span>
+<a id="__codelineno-3-33" name="__codelineno-3-33" href="#__codelineno-3-33"></a>        <span class="k">await</span> <span class="n">runner</span><span class="o">.</span><span class="n">submit</span><span class="p">(</span><span class="n">conversation_id</span><span class="p">,</span> <span class="n">message_id</span><span class="p">,</span> <span class="n">execute_and_push</span><span class="p">(),</span>
+<a id="__codelineno-3-34" name="__codelineno-3-34" href="#__codelineno-3-34"></a>                           <span class="n">user_id</span><span class="o">=</span><span class="n">current_user</span><span class="o">.</span><span class="n">user_id</span><span class="p">,</span> <span class="n">stream_transport</span><span class="o">=</span><span class="n">stream_transport</span><span class="p">)</span>
+<a id="__codelineno-3-35" name="__codelineno-3-35" href="#__codelineno-3-35"></a>    <span class="k">except</span> <span class="n">ConflictError</span><span class="p">:</span>
+<a id="__codelineno-3-36" name="__codelineno-3-36" href="#__codelineno-3-36"></a>        <span class="k">raise</span> <span class="n">HTTPException</span><span class="p">(</span><span class="n">status_code</span><span class="o">=</span><span class="mi">409</span><span class="p">,</span> <span class="n">detail</span><span class="o">=</span><span class="s2">&quot;...&quot;</span><span class="p">)</span>
+<a id="__codelineno-3-37" name="__codelineno-3-37" href="#__codelineno-3-37"></a>
+<a id="__codelineno-3-38" name="__codelineno-3-38" href="#__codelineno-3-38"></a>    <span class="k">return</span> <span class="n">ChatResponse</span><span class="p">(</span><span class="n">conversation_id</span><span class="o">=</span><span class="n">conversation_id</span><span class="p">,</span> <span class="n">message_id</span><span class="o">=</span><span class="n">message_id</span><span class="p">,</span> <span class="o">...</span><span class="p">)</span>
+</code></pre></div>
+<p><strong>关键点</strong>：engine 和 controller 都不需要改动。engine 完全不知道 lease 的存在，<code>CancelledError</code> 是 asyncio 的标准取消机制。</p>
+<hr />
+<h3 id="f-02-health-端点缺少深度检查">F-02 Health 端点缺少深度检查</h3>
+<p><strong>来源</strong>：Reviewer P2 + 自研 Review</p>
+<p><strong>问题</strong>：<code>main.py:98</code> 永远返回 <code>{"status": "healthy"}</code>，不验证 DB 和 Redis 连通性。负载均衡器会继续给故障节点分流量。</p>
+<p><strong>涉及文件</strong>：
+- <code>src/api/main.py</code></p>
+<p><strong>修复建议</strong>：</p>
+<p>拆分为 liveness + readiness 两个端点：</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="nd">@app</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;/health/live&quot;</span><span class="p">)</span>    <span class="c1"># 进程活着 — K8s liveness probe</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">liveness</span><span class="p">():</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>    <span class="k">return</span> <span class="p">{</span><span class="s2">&quot;status&quot;</span><span class="p">:</span> <span class="s2">&quot;ok&quot;</span><span class="p">}</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="nd">@app</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;/health/ready&quot;</span><span class="p">)</span>   <span class="c1"># 可接受流量 — K8s readiness probe / LB health check</span>
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">readiness</span><span class="p">():</span>
+<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a>    <span class="n">checks</span> <span class="o">=</span> <span class="p">{}</span>
+<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a>    <span class="k">try</span><span class="p">:</span>
+<a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a>        <span class="k">async</span> <span class="k">with</span> <span class="n">db_manager</span><span class="o">.</span><span class="n">session</span><span class="p">()</span> <span class="k">as</span> <span class="n">s</span><span class="p">:</span>
+<a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a>            <span class="k">await</span> <span class="n">s</span><span class="o">.</span><span class="n">execute</span><span class="p">(</span><span class="n">text</span><span class="p">(</span><span class="s2">&quot;SELECT 1&quot;</span><span class="p">))</span>
+<a id="__codelineno-4-11" name="__codelineno-4-11" href="#__codelineno-4-11"></a>        <span class="n">checks</span><span class="p">[</span><span class="s2">&quot;db&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;ok&quot;</span>
+<a id="__codelineno-4-12" name="__codelineno-4-12" href="#__codelineno-4-12"></a>    <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+<a id="__codelineno-4-13" name="__codelineno-4-13" href="#__codelineno-4-13"></a>        <span class="n">checks</span><span class="p">[</span><span class="s2">&quot;db&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">e</span><span class="p">)</span>
+<a id="__codelineno-4-14" name="__codelineno-4-14" href="#__codelineno-4-14"></a>
+<a id="__codelineno-4-15" name="__codelineno-4-15" href="#__codelineno-4-15"></a>    <span class="k">if</span> <span class="n">redis_client</span><span class="p">:</span>
+<a id="__codelineno-4-16" name="__codelineno-4-16" href="#__codelineno-4-16"></a>        <span class="k">try</span><span class="p">:</span>
+<a id="__codelineno-4-17" name="__codelineno-4-17" href="#__codelineno-4-17"></a>            <span class="k">await</span> <span class="n">redis_client</span><span class="o">.</span><span class="n">ping</span><span class="p">()</span>
+<a id="__codelineno-4-18" name="__codelineno-4-18" href="#__codelineno-4-18"></a>            <span class="n">checks</span><span class="p">[</span><span class="s2">&quot;redis&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;ok&quot;</span>
+<a id="__codelineno-4-19" name="__codelineno-4-19" href="#__codelineno-4-19"></a>        <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+<a id="__codelineno-4-20" name="__codelineno-4-20" href="#__codelineno-4-20"></a>            <span class="n">checks</span><span class="p">[</span><span class="s2">&quot;redis&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">e</span><span class="p">)</span>
+<a id="__codelineno-4-21" name="__codelineno-4-21" href="#__codelineno-4-21"></a>
+<a id="__codelineno-4-22" name="__codelineno-4-22" href="#__codelineno-4-22"></a>    <span class="n">healthy</span> <span class="o">=</span> <span class="nb">all</span><span class="p">(</span><span class="n">v</span> <span class="o">==</span> <span class="s2">&quot;ok&quot;</span> <span class="k">for</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">checks</span><span class="o">.</span><span class="n">values</span><span class="p">())</span>
+<a id="__codelineno-4-23" name="__codelineno-4-23" href="#__codelineno-4-23"></a>    <span class="k">return</span> <span class="n">JSONResponse</span><span class="p">(</span><span class="n">checks</span><span class="p">,</span> <span class="n">status_code</span><span class="o">=</span><span class="mi">200</span> <span class="k">if</span> <span class="n">healthy</span> <span class="k">else</span> <span class="mi">503</span><span class="p">)</span>
+</code></pre></div>
+<p>保留原 <code>/health</code> 指向 readiness（向后兼容）或直接替换。</p>
+<hr />
+<h3 id="f-03-get_stream_status-同步异步接口不一致">F-03 <code>get_stream_status</code> 同步/异步接口不一致</h3>
+<p><strong>来源</strong>：自研 Review</p>
+<p><strong>等级调整</strong>：P0 → P2（当前无生产调用点，属于接口清理，非功能性缺陷）</p>
+<p><strong>问题</strong>：<code>StreamTransport</code> Protocol 中 <code>get_stream_status</code> 是同步方法。<code>RedisStreamTransport</code> 无法同步读 Redis，当前直接返回 <code>None</code>（<code>redis_stream_transport.py:210-213</code>），另有 <code>get_stream_status_async</code>。如果未来调用方依赖同步版本做状态判断，Redis 模式下会返回错误结果。</p>
+<p><strong>涉及文件</strong>：
+- <code>src/api/services/stream_transport.py</code> — Protocol 定义
+- <code>src/api/services/redis_stream_transport.py</code></p>
+<p><strong>修复建议</strong>：Protocol 中 <code>get_stream_status</code> 改为 <code>async</code>，<code>InMemoryStreamTransport</code> 对应加 <code>async</code>（dict 操作不阻塞），调用点加 <code>await</code>。删除 <code>get_stream_status_async</code>。</p>
+<hr />
+<h3 id="f-04-database_url-硬编码默认值生产隐患">F-04 <code>DATABASE_URL</code> 硬编码默认值（生产隐患）</h3>
+<p><strong>来源</strong>：自研 Review + Reviewer 修正</p>
+<p><strong>问题</strong>：<code>config.py</code> 中 <code>DATABASE_URL</code> 的默认值硬编码为 SQLite。应用启动时 <code>dependencies.py:83</code> 总会把 <code>config.DATABASE_URL</code> 传给 <code>DatabaseManager</code>，所以 <code>DatabaseManager.__init__</code> 的 <code>None</code> fallback 不是真正的风险点——真正的风险是 <code>.env</code> 没配 <code>DATABASE_URL</code> 时，<code>config.py</code> 的默认值直接生效为 SQLite，双机部署各自用独立 SQLite，数据不同步且难以排查。</p>
+<p><strong>涉及文件</strong>：
+- <code>src/config.py</code> — <code>DATABASE_URL</code> 默认值（主要修复点）
+- <code>src/db/database.py</code> — <code>__init__</code> 的 <code>None</code> fallback（顺带清理）</p>
+<p><strong>修复建议</strong>：</p>
+<ol>
+<li><code>config.py</code>：<code>DATABASE_URL</code> 默认空字符串，不提供 SQLite fallback</li>
+<li><code>config.py</code> 或 <code>dependencies.py</code> 的 <code>init_globals()</code>：启动时校验 <code>DATABASE_URL</code> 非空，空值 fail fast</li>
+<li><code>database.py</code>：移除 <code>database_url is None</code> 的 SQLite fallback（<code>create_test_database_manager()</code> 显式传 SQLite URL，不受影响）</li>
+</ol>
+<p>所有数据库配置统一通过 <code>.env</code> 提供，代码中不硬编码任何默认 URL。</p>
+<hr />
+<h2 id="p1--应该修复">P1 — 应该修复</h2>
+<h3 id="f-05-断线重连与-permission-auto-deny-冲突">F-05 断线重连与 permission auto-deny 冲突</h3>
+<p><strong>来源</strong>：Reviewer P3</p>
+<p><strong>问题</strong>：<code>stream.py:99-107</code> 在 <code>CancelledError</code>（客户端断连）时立刻 auto-deny pending interrupt。但 Redis Streams 已支持 <code>last_event_id</code> 断线重连（<code>redis_stream_transport.py:146</code>）。两个逻辑矛盾：如果认为断线是临时的→不应立刻 deny；如果认为用户走了→不需要重连基础设施。</p>
+<p>网络抖动、LB 切连接、滚动发布期间的短暂断线都会被当成"用户拒绝工具调用"。</p>
+<p><strong>涉及文件</strong>：
+- <code>src/api/routers/stream.py</code> — <code>CancelledError</code> 处理</p>
+<p><strong>修复建议</strong>：</p>
+<p>三个方案按复杂度递增：</p>
+<ol>
+<li><strong>最简方案</strong>：删掉 auto-deny，依赖 <code>PERMISSION_TIMEOUT</code>（通常 300s）自然超时。缺点：用户真的走了也要等 5 分钟</li>
+<li><strong>Grace period</strong>：断连后不立刻 deny，启动延迟任务（比如 30s），期间客户端重连则取消 deny。需要额外状态管理</li>
+<li><strong>Consumer 计数</strong>：Redis 记录 stream 是否有活跃 consumer，只有确认无 consumer 且超过 grace period 才 deny</li>
+</ol>
+<p>建议先用方案 1（最安全），后续按 UX 需求升级到方案 2。</p>
+<hr />
+<h3 id="f-06-consume_events-xread-断连无恢复">F-06 <code>consume_events</code> XREAD 断连无恢复</h3>
+<p><strong>来源</strong>：Reviewer P2（故障链路经 Reviewer 二轮修正）</p>
+<p><strong>问题</strong>：<code>redis_stream_transport.py:159</code> 的 <code>XREAD BLOCK</code> 循环中，Redis 断连（云 Redis 主从切换 1-3s）会抛 <code>ConnectionError</code>，当前无捕获 → 异常从 <code>consume_events</code> 生成器抛出 → 被 <code>stream.py:109</code> 的 <code>except Exception</code> 捕获（<strong>不是</strong> <code>CancelledError</code> 分支）→ 给前端推 error event → SSE 连接中断。</p>
+<p>注意：此路径<strong>不会</strong>触发 <code>stream.py:99</code> 的 auto-deny interrupt（那是 <code>CancelledError</code> 分支，仅在客户端主动断连时触发）。直接后果是流中断/报错，不是自动拒绝 permission。</p>
+<p><strong>涉及文件</strong>：
+- <code>src/api/services/redis_stream_transport.py</code> — <code>consume_events</code></p>
+<p><strong>修复建议</strong>：</p>
+<p>在 XREAD 循环中加 <code>ConnectionError</code> 重试：</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="k">while</span> <span class="kc">True</span><span class="p">:</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>    <span class="k">try</span><span class="p">:</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>        <span class="n">result</span> <span class="o">=</span> <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">_redis</span><span class="o">.</span><span class="n">xread</span><span class="p">(</span><span class="o">...</span><span class="p">)</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>    <span class="k">except</span> <span class="n">aioredis</span><span class="o">.</span><span class="n">ConnectionError</span><span class="p">:</span>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>        <span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Redis connection lost during consume </span><span class="si">{</span><span class="n">stream_id</span><span class="si">}</span><span class="s2">, retrying...&quot;</span><span class="p">)</span>
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a>        <span class="k">await</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>  <span class="c1"># 短暂等待 Redis 恢复</span>
+<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a>        <span class="k">continue</span>
+<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a>    <span class="c1"># ... 正常处理</span>
+</code></pre></div>
+<p>注意：cursor 已在本地维护，重连后从上次位置继续读即可。</p>
+<hr />
+<h3 id="f-07-lua-脚本-noscript-容错">F-07 Lua 脚本 NOSCRIPT 容错</h3>
+<p><strong>来源</strong>：自研 Review</p>
+<p><strong>问题</strong>：<code>init_scripts()</code> 在启动时 <code>SCRIPT LOAD</code>，但 Redis <code>SCRIPT FLUSH</code>（运维操作）或主从切换后 SHA 失效，<code>evalsha</code> 会抛 <code>NOSCRIPT</code>。</p>
+<p><strong>涉及文件</strong>：
+- <code>src/api/services/redis_runtime_store.py</code> — 所有 <code>evalsha</code> 调用
+- <code>src/api/services/redis_stream_transport.py</code> — <code>evalsha</code> 调用</p>
+<p><strong>修复建议</strong>：</p>
+<p>用 redis-py 内置的 <code>Script</code> 对象替代手动 <code>script_load</code> + <code>evalsha</code>：</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="c1"># 初始化时</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="bp">self</span><span class="o">.</span><span class="n">_acquire_lease</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_redis</span><span class="o">.</span><span class="n">register_script</span><span class="p">(</span><span class="n">_LUA_ACQUIRE_LEASE</span><span class="p">)</span>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="c1"># 调用时（自动处理 NOSCRIPT → re-load → retry）</span>
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="n">result</span> <span class="o">=</span> <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">_acquire_lease</span><span class="p">(</span><span class="n">keys</span><span class="o">=</span><span class="p">[</span><span class="n">key</span><span class="p">],</span> <span class="n">args</span><span class="o">=</span><span class="p">[</span><span class="n">message_id</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">ttl</span><span class="p">)])</span>
+</code></pre></div>
+<p><code>Script</code> 对象内部已实现 NOSCRIPT 自动 re-load，无需手动管理 SHA。</p>
+<hr />
+<h3 id="f-08-redis-连接缺少-retry-策略">F-08 Redis 连接缺少 retry 策略</h3>
+<p><strong>来源</strong>：自研 Review</p>
+<p><strong>问题</strong>：<code>dependencies.py:100</code> 用 <code>aioredis.from_url()</code> 创建客户端，未配置重试策略。云 Redis 主从切换（1-3s）期间所有 Redis 操作都会失败。</p>
+<p><strong>涉及文件</strong>：
+- <code>src/api/dependencies.py</code> — Redis 客户端创建</p>
+<p><strong>修复建议</strong>：</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">redis.backoff</span><span class="w"> </span><span class="kn">import</span> <span class="n">ExponentialBackoff</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">redis.retry</span><span class="w"> </span><span class="kn">import</span> <span class="n">Retry</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="n">_redis_client</span> <span class="o">=</span> <span class="n">aioredis</span><span class="o">.</span><span class="n">from_url</span><span class="p">(</span>
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a>    <span class="n">config</span><span class="o">.</span><span class="n">REDIS_URL</span><span class="p">,</span>
+<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a>    <span class="n">decode_responses</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a>    <span class="n">retry</span><span class="o">=</span><span class="n">Retry</span><span class="p">(</span><span class="n">ExponentialBackoff</span><span class="p">(</span><span class="n">cap</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span> <span class="n">base</span><span class="o">=</span><span class="mf">0.1</span><span class="p">),</span> <span class="n">retries</span><span class="o">=</span><span class="mi">3</span><span class="p">),</span>
+<a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a>    <span class="n">retry_on_timeout</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+<a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a><span class="p">)</span>
+</code></pre></div>
+<p>这覆盖了短暂网络抖动场景。对于 Pub/Sub 连接（长连接），redis-py 的 retry 不适用，需要在业务层处理（见 F-06、F-09）。</p>
+<hr />
+<h2 id="p2--建议修复--加固">P2 — 建议修复 / 加固</h2>
+<h3 id="f-09-wait_for_interrupt-pubsub-断连无捕获">F-09 <code>wait_for_interrupt</code> Pub/Sub 断连无捕获</h3>
+<p><strong>来源</strong>：Reviewer P2</p>
+<p><strong>问题</strong>：<code>redis_runtime_store.py:204</code> 的 Pub/Sub 循环中，Redis 断连会抛 <code>ConnectionError</code>，当前无捕获 → 异常上抛 → engine 崩溃。</p>
+<p>自然兜底：interrupt 有 <code>PERMISSION_TIMEOUT</code>（通常 300s），即使不做恢复，最坏情况是超时 deny。但 engine 异常退出比正常超时更难处理（error state vs timeout deny）。</p>
+<p><strong>涉及文件</strong>：
+- <code>src/api/services/redis_runtime_store.py</code> — <code>wait_for_interrupt</code></p>
+<p><strong>修复建议</strong>：</p>
+<p>在 Pub/Sub 循环中捕获 <code>ConnectionError</code>，重走 check-subscribe-check-wait：</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="k">except</span> <span class="n">aioredis</span><span class="o">.</span><span class="n">ConnectionError</span><span class="p">:</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>    <span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Pub/Sub connection lost for </span><span class="si">{</span><span class="n">message_id</span><span class="si">}</span><span class="s2">, re-checking status...&quot;</span><span class="p">)</span>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>    <span class="k">await</span> <span class="n">pubsub</span><span class="o">.</span><span class="n">aclose</span><span class="p">()</span>
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>    <span class="c1"># 重新检查状态（可能在断连期间已 resolve）</span>
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>    <span class="k">if</span> <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">_is_resolved</span><span class="p">(</span><span class="n">message_id</span><span class="p">):</span>
+<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a>        <span class="k">return</span> <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_resume_data</span><span class="p">(</span><span class="n">message_id</span><span class="p">)</span>
+<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a>    <span class="c1"># 重建 Pub/Sub 订阅</span>
+<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a>    <span class="n">pubsub</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_redis</span><span class="o">.</span><span class="n">pubsub</span><span class="p">()</span>
+<a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a>    <span class="k">await</span> <span class="n">pubsub</span><span class="o">.</span><span class="n">subscribe</span><span class="p">(</span><span class="n">channel_name</span><span class="p">)</span>
+<a id="__codelineno-8-10" name="__codelineno-8-10" href="#__codelineno-8-10"></a>    <span class="c1"># 双重检查</span>
+<a id="__codelineno-8-11" name="__codelineno-8-11" href="#__codelineno-8-11"></a>    <span class="k">if</span> <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">_is_resolved</span><span class="p">(</span><span class="n">message_id</span><span class="p">):</span>
+<a id="__codelineno-8-12" name="__codelineno-8-12" href="#__codelineno-8-12"></a>        <span class="o">...</span>
+</code></pre></div>
+<p>或简化为：捕获 <code>ConnectionError</code> → <code>return None</code>（视为超时 deny），行为与现有 timeout 一致。</p>
+<hr />
+<h3 id="f-10-删除-event-fallback-本地文件假安全感">F-10 删除 event fallback 本地文件（假安全感）</h3>
+<p><strong>来源</strong>：Reviewer P2 + 重新评估</p>
+<p><strong>问题</strong>：<code>controller.py:384</code> 事件持久化 3 次重试失败后 fallback 到 <code>logs/events_fallback.jsonl</code>。</p>
+<p>这个 fallback 机制有害无益：
+1. 容器/双机环境下本地文件不共享，实例被杀或磁盘是临时卷时仍然丢失
+2. 没有 replay 机制——写了也没人读
+3. fallback 本身也可能失败（<code>controller.py:406</code>），最终只是 <code>logger.critical</code> 然后结束
+4. 给人"数据被兜住了"的假安全感，实际上就是丢了</p>
+<p><strong>影响范围</strong>：events 是审计/回放数据（哪个 agent 调了什么 tool），不影响核心业务路径。在 <code>_persist_events</code> 被调用前，<code>flush_all</code>（artifact 持久化）和 <code>update_response_async</code>（对话响应持久化）已经完成。用户的对话结果和 artifact 不受影响。</p>
+<p><strong>涉及文件</strong>：
+- <code>src/core/controller.py</code> — <code>_persist_events</code> / <code>_write_fallback_events</code></p>
+<p><strong>修复建议</strong>：</p>
+<p>直接删除 <code>_write_fallback_events</code> 方法和调用。3 次重试失败后 <code>logger.error</code> 记录丢失的事件摘要（message_id + event count）→ 结束。不做 fallback。</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="c1"># 改动后的 _persist_events 末尾：</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="k">else</span><span class="p">:</span>
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>    <span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span>
+<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a>        <span class="sa">f</span><span class="s2">&quot;Event persistence failed after </span><span class="si">{</span><span class="n">max_retries</span><span class="si">}</span><span class="s2"> attempts for </span><span class="si">{</span><span class="n">message_id</span><span class="si">}</span><span class="s2"> &quot;</span>
+<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a>        <span class="sa">f</span><span class="s2">&quot;(</span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">db_events</span><span class="p">)</span><span class="si">}</span><span class="s2"> events lost): </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">&quot;</span>
+<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a>    <span class="p">)</span>
+<a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a>    <span class="c1"># 不做 fallback — events 是审计数据，conversation + artifact 已持久化</span>
+</code></pre></div>
+<p>如果未来有审计合规需求，再考虑 outbox pattern（events 与业务写在同一事务）。</p>
+<hr />
+<h3 id="f-11-llm_chunk-每-token-一条全量快照--coalesced-snapshots">F-11 <code>llm_chunk</code> 每 token 一条全量快照 → coalesced snapshots</h3>
+<p><strong>来源</strong>：自研 Review + Reviewer 深化分析</p>
+<p><strong>问题</strong>：<code>engine.py:265-268</code> 每收到一个 LLM token 就 emit 一条 <code>llm_chunk</code>，内容是 <code>response_content</code> 全量累积文本（不是 delta）。这导致：</p>
+<ol>
+<li><strong>O(n²) 字节量</strong>：假设最终 response 2000 字符、500 次 chunk，总传输 ≈ 1+2+3+...+2000 ≈ 200 万字符</li>
+<li><strong>Redis Stream 被灌满</strong>：500 条 chunk + 其他事件，MAXLEN 1000 几乎用尽，断线重连时旧事件可能已被修剪</li>
+<li><strong>前端只用最新快照</strong>：<code>useSSE.ts:114</code> 直接用 <code>content</code> 覆盖显示，不依赖逐 token append，中间态全浪费</li>
+</ol>
+<p><strong>涉及文件</strong>：
+- <code>src/api/routers/chat.py</code> — <code>_run_and_push</code>（coalescer 放置位置）
+- <code>src/api/services/redis_stream_transport.py</code> — MAXLEN 参数</p>
+<p><strong>修复建议</strong>：</p>
+<p>在 <code>_run_and_push</code> 中加 coalescing 逻辑（engine、transport、前端都不改）：</p>
+<ul>
+<li><strong>只合并 <code>llm_chunk</code></strong>，其他事件类型（<code>tool_call</code>、<code>agent_start</code>、<code>complete</code> 等）立即推送</li>
+<li>flush 条件：距上次 flush ≥ 80ms，或遇到非 <code>llm_chunk</code> 事件前强制 flush</li>
+<li>不需要字符数检测——累积快照语义下每条都是全量，coalescer 只需"保留最新 + 定时 flush"</li>
+</ul>
+<p><strong>注意</strong>：<code>llm_chunk</code> 有两种字段——<code>reasoning_content</code>（推理阶段）和 <code>content</code>（回复阶段），来自 engine.py 的两个独立分支，不会出现在同一条 chunk 里。但 reasoning → content 切换时，可能在同一个时间窗口内共存：</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>t=0ms   缓冲: reasoning_content: &quot;ABCDEFGHIJ&quot;    // 还没到 80ms
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>t=5ms   缓冲: content: &quot;ABC&quot;                      // content 开始了
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>        如果用单变量缓冲（pending = event），reasoning 最后一条被覆盖丢失
+</code></pre></div>
+<p>因此必须<strong>按字段分开缓冲</strong>：</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">_run_and_push</span><span class="p">(</span><span class="n">stream_transport</span><span class="p">,</span> <span class="n">stream_id</span><span class="p">,</span> <span class="n">event_stream</span><span class="p">):</span>
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>    <span class="n">pending_chunks</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">dict</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>  <span class="c1"># &quot;content&quot; 或 &quot;reasoning_content&quot; → 最新 event</span>
+<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>    <span class="n">last_flush_time</span> <span class="o">=</span> <span class="mf">0.0</span>
+<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a>
+<a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a>    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">flush_pending</span><span class="p">():</span>
+<a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a>        <span class="k">nonlocal</span> <span class="n">last_flush_time</span>
+<a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a>        <span class="k">for</span> <span class="n">key</span> <span class="ow">in</span> <span class="nb">list</span><span class="p">(</span><span class="n">pending_chunks</span><span class="p">):</span>
+<a id="__codelineno-11-8" name="__codelineno-11-8" href="#__codelineno-11-8"></a>            <span class="k">await</span> <span class="n">stream_transport</span><span class="o">.</span><span class="n">push_event</span><span class="p">(</span><span class="n">stream_id</span><span class="p">,</span> <span class="n">pending_chunks</span><span class="o">.</span><span class="n">pop</span><span class="p">(</span><span class="n">key</span><span class="p">))</span>
+<a id="__codelineno-11-9" name="__codelineno-11-9" href="#__codelineno-11-9"></a>        <span class="n">last_flush_time</span> <span class="o">=</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">get_event_loop</span><span class="p">()</span><span class="o">.</span><span class="n">time</span><span class="p">()</span>
+<a id="__codelineno-11-10" name="__codelineno-11-10" href="#__codelineno-11-10"></a>
+<a id="__codelineno-11-11" name="__codelineno-11-11" href="#__codelineno-11-11"></a>    <span class="k">async</span> <span class="k">for</span> <span class="n">event</span> <span class="ow">in</span> <span class="n">event_stream</span><span class="p">:</span>
+<a id="__codelineno-11-12" name="__codelineno-11-12" href="#__codelineno-11-12"></a>        <span class="k">if</span> <span class="n">event</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;type&quot;</span><span class="p">)</span> <span class="o">==</span> <span class="s2">&quot;llm_chunk&quot;</span><span class="p">:</span>
+<a id="__codelineno-11-13" name="__codelineno-11-13" href="#__codelineno-11-13"></a>            <span class="n">data</span> <span class="o">=</span> <span class="n">event</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;data&quot;</span><span class="p">,</span> <span class="p">{})</span>
+<a id="__codelineno-11-14" name="__codelineno-11-14" href="#__codelineno-11-14"></a>            <span class="n">chunk_key</span> <span class="o">=</span> <span class="s2">&quot;reasoning_content&quot;</span> <span class="k">if</span> <span class="s2">&quot;reasoning_content&quot;</span> <span class="ow">in</span> <span class="n">data</span> <span class="k">else</span> <span class="s2">&quot;content&quot;</span>
+<a id="__codelineno-11-15" name="__codelineno-11-15" href="#__codelineno-11-15"></a>            <span class="n">pending_chunks</span><span class="p">[</span><span class="n">chunk_key</span><span class="p">]</span> <span class="o">=</span> <span class="n">event</span>  <span class="c1"># 同类覆盖，异类共存</span>
+<a id="__codelineno-11-16" name="__codelineno-11-16" href="#__codelineno-11-16"></a>            <span class="n">now</span> <span class="o">=</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">get_event_loop</span><span class="p">()</span><span class="o">.</span><span class="n">time</span><span class="p">()</span>
+<a id="__codelineno-11-17" name="__codelineno-11-17" href="#__codelineno-11-17"></a>            <span class="k">if</span> <span class="n">now</span> <span class="o">-</span> <span class="n">last_flush_time</span> <span class="o">&gt;=</span> <span class="mf">0.08</span><span class="p">:</span>  <span class="c1"># 80ms 节流</span>
+<a id="__codelineno-11-18" name="__codelineno-11-18" href="#__codelineno-11-18"></a>                <span class="k">await</span> <span class="n">flush_pending</span><span class="p">()</span>
+<a id="__codelineno-11-19" name="__codelineno-11-19" href="#__codelineno-11-19"></a>        <span class="k">else</span><span class="p">:</span>
+<a id="__codelineno-11-20" name="__codelineno-11-20" href="#__codelineno-11-20"></a>            <span class="k">await</span> <span class="n">flush_pending</span><span class="p">()</span>  <span class="c1"># 非 chunk 事件前先 flush</span>
+<a id="__codelineno-11-21" name="__codelineno-11-21" href="#__codelineno-11-21"></a>            <span class="k">await</span> <span class="n">stream_transport</span><span class="o">.</span><span class="n">push_event</span><span class="p">(</span><span class="n">stream_id</span><span class="p">,</span> <span class="n">event</span><span class="p">)</span>
+<a id="__codelineno-11-22" name="__codelineno-11-22" href="#__codelineno-11-22"></a>
+<a id="__codelineno-11-23" name="__codelineno-11-23" href="#__codelineno-11-23"></a>    <span class="k">await</span> <span class="n">flush_pending</span><span class="p">()</span>  <span class="c1"># 确保最后的 chunk 被发出</span>
+</code></pre></div>
+<p><strong>为什么放在 <code>_run_and_push</code></strong>：
+- engine 是纯逻辑层，不应知道传输优化
+- transport 是通用传输层，不应有事件类型语义
+- <code>_run_and_push</code> 是 controller → transport 的桥梁，天然是 coalescing 的位置</p>
+<p><strong>效果</strong>：
+- 2000 字符回复：~500 条 chunk → ~25 条（80ms 节流），Redis Stream 压力降 95%
+- MAXLEN 1000 绰绰有余，可保持不改
+- 断线重连仍安全：每条仍是累计快照，丢中间态靠下一条追平
+- 前端零改动</p>
+<hr />
+<h3 id="f-12-push_event-check-then-act-竞态">F-12 <code>push_event</code> check-then-act 竞态</h3>
+<p><strong>来源</strong>：自研 Review</p>
+<p><strong>问题</strong>：<code>redis_stream_transport.py:96-124</code> 先 <code>HGET status</code>，再 <code>exists(stream_key)</code>，再 <code>XADD</code>，三步非原子。<code>close_stream</code> 可能在 HGET 之后、XADD 之前执行，事件写入已关闭的 stream。</p>
+<p><strong>影响</strong>：实际危害有限（TTL 会清理），consumer 已正常退出。</p>
+<p><strong>涉及文件</strong>：
+- <code>src/api/services/redis_stream_transport.py</code> — <code>push_event</code></p>
+<p><strong>修复建议</strong>：可以用 Lua 脚本原子化 <code>HGET status + XADD</code>，或接受这个 edge case（在注释中标注已知竞态窗口）。</p>
+<hr />
+<h3 id="f-13-redis-key-无命名空间隔离">F-13 Redis key 无命名空间隔离</h3>
+<p><strong>来源</strong>：自研 Review</p>
+<p><strong>问题</strong>：所有 key 用 <code>lease:</code>, <code>stream:</code>, <code>interrupt:</code> 等扁平前缀。同一 Redis 实例被多环境（staging/production）或多 ArtifactFlow 实例共用时 key 冲突。</p>
+<p><strong>涉及文件</strong>：
+- <code>src/api/services/redis_runtime_store.py</code> — key helper 方法
+- <code>src/api/services/redis_stream_transport.py</code> — key helper 方法</p>
+<p><strong>修复建议</strong>：加可配置前缀：</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="c1"># config.py</span>
+<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="n">REDIS_KEY_PREFIX</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;af&quot;</span>
+<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a>
+<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a><span class="c1"># redis_runtime_store.py</span>
+<a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a><span class="k">def</span><span class="w"> </span><span class="nf">_lease_key</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">conversation_id</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a>    <span class="k">return</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">_prefix</span><span class="si">}</span><span class="s2">:lease:</span><span class="si">{</span><span class="n">conversation_id</span><span class="si">}</span><span class="s2">&quot;</span>
+</code></pre></div>
+<hr />
+<h3 id="f-14-stream-ttl-默认-30s-偏短">F-14 Stream TTL 默认 30s 偏短</h3>
+<p><strong>来源</strong>：自研 Review</p>
+<p><strong>问题</strong>：<code>redis_stream_transport.py:51</code> 默认 <code>stream_ttl=30</code>。前端首次加载 JS bundle + 网络延迟可能超过 30s，stream metadata 过期后 consumer 连接失败。</p>
+<p><strong>涉及文件</strong>：
+- <code>src/api/services/redis_stream_transport.py</code>
+- <code>src/config.py</code></p>
+<p><strong>修复建议</strong>：生产环境建议 60-120s，确保在 config 中暴露为可配置项。</p>
+<hr />
+<h3 id="f-15-inmemory-cleanup_execution-全量扫描">F-15 InMemory <code>cleanup_execution</code> 全量扫描</h3>
+<p><strong>来源</strong>：自研 Review</p>
+<p><strong>问题</strong>：<code>runtime_store.py:210-215</code> 每次 cleanup 对 <code>_conversation_leases</code> 和 <code>_engine_interactive</code> 做 dict comprehension 全量扫描（O(n)）。</p>
+<p><strong>影响</strong>：单 Worker 并发量不大时无影响，大量活跃对话时成为热点。</p>
+<p><strong>涉及文件</strong>：
+- <code>src/api/services/runtime_store.py</code> — <code>InMemoryRuntimeStore.cleanup_execution</code></p>
+<p><strong>修复建议</strong>：维护 <code>message_id → conversation_id</code> 反向映射，cleanup 时 O(1) 删除。</p>
+<hr />
+<h2 id="架构问题--router--service-职责划分">架构问题 — Router / Service 职责划分</h2>
+<blockquote>
+<p>在分析 F-01 时发现的系统性问题：路由层（routers）承担了大量应属服务层（services/core）的职责。
+以下审计覆盖了 <code>src/api/routers/</code> 下的所有文件。</p>
+</blockquote>
+<h3 id="审计结论">审计结论</h3>
+<p><strong>chat.py</strong> 是重灾区，包含 7 处职责越界。<strong>stream.py</strong> 有 1 处。<strong>auth.py</strong> 和 <strong>artifacts.py</strong> 分层清晰，无问题。</p>
+<h3 id="r-01-chatpy-执行编排逻辑散落在路由层">R-01 chat.py: 执行编排逻辑散落在路由层</h3>
+<p><strong>位置</strong>：<code>chat.py:208-260</code>（<code>send_message</code> 函数）</p>
+<p><code>send_message</code> 中的多步编排序列本应是服务层的原子操作：</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a>chat.py 当前做的事（不该做）：
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a>  ① try_acquire_lease        ← RuntimeStore 操作
+<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a>  ② mark_engine_interactive  ← RuntimeStore 操作
+<a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a>  ③ ensure_conversation      ← 业务逻辑
+<a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a>  ④ create_stream            ← StreamTransport 操作
+<a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a>  ⑤ 组装 execute_and_push    ← 协程编排
+<a id="__codelineno-13-7" name="__codelineno-13-7" href="#__codelineno-13-7"></a>  ⑥ runner.submit            ← 调度
+<a id="__codelineno-13-8" name="__codelineno-13-8" href="#__codelineno-13-8"></a>  ⑦ 失败回滚 release/clear   ← 生命周期管理
+</code></pre></div>
+<p><strong>问题</strong>：
+- 路由层知道了 lease、interactive、stream 三者的创建顺序和回滚逻辑
+- 如果未来新增入口（如 WebSocket、gRPC），这些逻辑必须重复
+- 错误处理分散：HTTP 层回滚在 <code>try/except</code>，后台任务错误在 <code>execute_and_push</code> 的内层 <code>except</code></p>
+<p><strong>归属</strong>：全部收敛到 <code>ExecutionRunner.submit()</code> 或新建 <code>ExecutionOrchestrator</code>。路由层只需 <code>await runner.submit(...)</code> + HTTP 状态码映射。</p>
+<p><strong>与 F-01 的关系</strong>：F-01 的修复方案已包含此重构（lease 获取 + stream 创建 + interactive 标记全部移入 runner）。</p>
+<hr />
+<h3 id="r-02-chatpy-controller-实例化在路由层">R-02 chat.py: Controller 实例化在路由层</h3>
+<p><strong>位置</strong>：<code>chat.py:74-133</code>（<code>_create_controller</code> context manager）</p>
+<p>路由层负责组装 <code>ExecutionController</code> 的全部依赖（session、repo、hooks、tools），包含 ~60 行基础设施代码。</p>
+<p><strong>问题</strong>：
+- 路由知道 controller 的内部依赖结构（ArtifactRepository、ConversationRepository、MessageEventRepository...）
+- DB session 在路由层创建但被后台任务使用（生命周期跨越了 HTTP 请求）
+- 修改 controller 依赖需要同时改路由代码</p>
+<p><strong>归属</strong>：移到 <code>ExecutionRunner</code> 或独立 factory，路由层不应知道 controller 的构造细节。</p>
+<hr />
+<h3 id="r-03-chatpy-路由直接访问-runnerstore">R-03 chat.py: 路由直接访问 <code>runner.store</code></h3>
+<p><strong>位置</strong>：<code>chat.py</code> 多处（<code>send_message</code>、<code>inject_message</code>、<code>cancel_execution</code>、<code>resume_execution</code>）</p>
+<p>路由层通过 <code>runner.store</code> 直接调用 RuntimeStore 的方法（<code>try_acquire_lease</code>、<code>get_interactive_message_id</code>、<code>inject_message</code>、<code>request_cancel</code>、<code>resolve_interrupt</code>）。<code>RuntimeStore</code> 是 <code>ExecutionRunner</code> 的实现细节，不应暴露给路由层。</p>
+<p><strong>问题</strong>：
+- 路由层与 RuntimeStore 的 API 紧耦合
+- 语义泄漏：路由知道 "lease"、"interactive" 这些运行时概念
+- 如果 RuntimeStore 接口变更，所有路由都要改</p>
+<p><strong>归属</strong>：<code>ExecutionRunner</code> 应暴露高层方法，隐藏 RuntimeStore 细节：</p>
+<table>
+<thead>
+<tr>
+<th>当前（路由直接调 store）</th>
+<th>应改为（runner 方法）</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>store.get_interactive_message_id(conv_id)</code></td>
+<td><code>runner.get_active_execution(conv_id)</code></td>
+</tr>
+<tr>
+<td><code>store.inject_message(msg_id, content)</code></td>
+<td><code>runner.inject(conv_id, content)</code></td>
+</tr>
+<tr>
+<td><code>store.request_cancel(msg_id)</code></td>
+<td><code>runner.cancel(conv_id)</code></td>
+</tr>
+<tr>
+<td><code>store.resolve_interrupt(msg_id, data)</code></td>
+<td><code>runner.resolve_interrupt(msg_id, data)</code></td>
+</tr>
+</tbody>
+</table>
+<p><code>inject</code> 和 <code>cancel</code> 可以用 <code>conv_id</code>（语义上就是"对当前活跃执行操作"，runner 内部做 conv→msg 映射）。</p>
+<p><strong>但 <code>resume</code> 必须保留 <code>message_id</code> 粒度</strong>：permission-resume 是幂等操作，需要精确匹配到具体的 interrupt。如果只用 <code>conv_id</code> 找"当前活跃执行"，旧页面或重试请求可能把审批结果打到新一轮执行的 interrupt 上，语义错位。<code>message_id</code> 是 resume 的外部 contract，不能降级。</p>
+<hr />
+<h3 id="r-04-streampy-断连时直接-resolve-interrupt">R-04 stream.py: 断连时直接 resolve interrupt</h3>
+<p><strong>位置</strong>：<code>stream.py:99-107</code></p>
+<p>stream 路由在 <code>CancelledError</code>（客户端断连）时直接调 <code>runner.store.resolve_interrupt()</code> auto-deny。</p>
+<p><strong>问题</strong>：
+- stream 路由是传输层（事件搬运），不应做运行时状态决策
+- 断连处理策略（立即 deny / grace period / 忽略）属于执行生命周期逻辑
+- 与 F-05（断线 auto-deny 与重连冲突）相关</p>
+<p><strong>归属</strong>：断连后的 interrupt 处理逻辑应在 <code>ExecutionRunner</code> 或 RuntimeStore 层面统一管理。</p>
+<hr />
+<h3 id="不存在问题的路由">不存在问题的路由</h3>
+<table>
+<thead>
+<tr>
+<th>文件</th>
+<th>评估</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>auth.py</code></td>
+<td>✅ 纯 HTTP 认证 + token 操作，正确委托给 <code>auth</code> service</td>
+</tr>
+<tr>
+<td><code>artifacts.py</code></td>
+<td>✅ 参数校验 + 委托给 <code>ArtifactManager</code>，无越界</td>
+</tr>
+<tr>
+<td><code>stream.py</code>（除 R-04）</td>
+<td>✅ 事件消费 + SSE 格式化，正确委托给 <code>StreamTransport</code></td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p>注：对话相关的 CRUD 端点（list/get/delete/rename）直接在 <code>chat.py</code> 中，没有独立的 <code>conversations.py</code> 路由文件。</p>
+</blockquote>
+<hr />
+<h3 id="重构影响范围">重构影响范围</h3>
+<p>R-01 ~ R-03 的修复与 F-01 高度重叠（都是把 chat.py 中的执行生命周期逻辑收敛到 <code>ExecutionRunner</code>），建议合并实施。R-04 与 F-05 重叠。</p>
+<p>预期改动后的 <code>chat.py</code> <code>send_message</code>：</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="nd">@router</span><span class="o">.</span><span class="n">post</span><span class="p">(</span><span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="n">response_model</span><span class="o">=</span><span class="n">ChatResponse</span><span class="p">)</span>
+<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">send_message</span><span class="p">(</span>
+<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a>    <span class="n">request</span><span class="p">:</span> <span class="n">ChatRequest</span><span class="p">,</span>
+<a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a>    <span class="n">current_user</span><span class="p">:</span> <span class="n">TokenPayload</span> <span class="o">=</span> <span class="n">Depends</span><span class="p">(</span><span class="n">get_current_user</span><span class="p">),</span>
+<a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a>    <span class="n">conversation_manager</span><span class="p">:</span> <span class="n">ConversationManager</span> <span class="o">=</span> <span class="n">Depends</span><span class="p">(</span><span class="n">get_conversation_manager</span><span class="p">),</span>
+<a id="__codelineno-14-6" name="__codelineno-14-6" href="#__codelineno-14-6"></a>    <span class="n">runner</span><span class="p">:</span> <span class="n">ExecutionRunner</span> <span class="o">=</span> <span class="n">Depends</span><span class="p">(</span><span class="n">get_execution_runner</span><span class="p">),</span>
+<a id="__codelineno-14-7" name="__codelineno-14-7" href="#__codelineno-14-7"></a><span class="p">):</span>
+<a id="__codelineno-14-8" name="__codelineno-14-8" href="#__codelineno-14-8"></a>    <span class="n">conversation_id</span> <span class="o">=</span> <span class="n">request</span><span class="o">.</span><span class="n">conversation_id</span> <span class="ow">or</span> <span class="sa">f</span><span class="s2">&quot;conv-</span><span class="si">{</span><span class="n">uuid4</span><span class="p">()</span><span class="o">.</span><span class="n">hex</span><span class="si">}</span><span class="s2">&quot;</span>
+<a id="__codelineno-14-9" name="__codelineno-14-9" href="#__codelineno-14-9"></a>    <span class="n">message_id</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;msg-</span><span class="si">{</span><span class="n">uuid4</span><span class="p">()</span><span class="o">.</span><span class="n">hex</span><span class="si">}</span><span class="s2">&quot;</span>
+<a id="__codelineno-14-10" name="__codelineno-14-10" href="#__codelineno-14-10"></a>
+<a id="__codelineno-14-11" name="__codelineno-14-11" href="#__codelineno-14-11"></a>    <span class="c1"># 路由层只做鉴权</span>
+<a id="__codelineno-14-12" name="__codelineno-14-12" href="#__codelineno-14-12"></a>    <span class="k">if</span> <span class="n">request</span><span class="o">.</span><span class="n">conversation_id</span><span class="p">:</span>
+<a id="__codelineno-14-13" name="__codelineno-14-13" href="#__codelineno-14-13"></a>        <span class="k">await</span> <span class="n">_verify_ownership</span><span class="p">(</span><span class="n">conversation_id</span><span class="p">,</span> <span class="n">current_user</span><span class="p">,</span> <span class="n">conversation_manager</span><span class="p">)</span>
+<a id="__codelineno-14-14" name="__codelineno-14-14" href="#__codelineno-14-14"></a>
+<a id="__codelineno-14-15" name="__codelineno-14-15" href="#__codelineno-14-15"></a>    <span class="c1"># 调度 — 一行搞定，所有生命周期管理在 runner 内部</span>
+<a id="__codelineno-14-16" name="__codelineno-14-16" href="#__codelineno-14-16"></a>    <span class="k">try</span><span class="p">:</span>
+<a id="__codelineno-14-17" name="__codelineno-14-17" href="#__codelineno-14-17"></a>        <span class="k">await</span> <span class="n">runner</span><span class="o">.</span><span class="n">submit</span><span class="p">(</span><span class="n">conversation_id</span><span class="p">,</span> <span class="n">message_id</span><span class="p">,</span> <span class="o">...</span><span class="p">,</span>
+<a id="__codelineno-14-18" name="__codelineno-14-18" href="#__codelineno-14-18"></a>                           <span class="n">user_id</span><span class="o">=</span><span class="n">current_user</span><span class="o">.</span><span class="n">user_id</span><span class="p">)</span>
+<a id="__codelineno-14-19" name="__codelineno-14-19" href="#__codelineno-14-19"></a>    <span class="k">except</span> <span class="n">ConflictError</span><span class="p">:</span>
+<a id="__codelineno-14-20" name="__codelineno-14-20" href="#__codelineno-14-20"></a>        <span class="k">raise</span> <span class="n">HTTPException</span><span class="p">(</span><span class="n">status_code</span><span class="o">=</span><span class="mi">409</span><span class="p">,</span> <span class="n">detail</span><span class="o">=</span><span class="s2">&quot;Execution already active&quot;</span><span class="p">)</span>
+<a id="__codelineno-14-21" name="__codelineno-14-21" href="#__codelineno-14-21"></a>
+<a id="__codelineno-14-22" name="__codelineno-14-22" href="#__codelineno-14-22"></a>    <span class="k">return</span> <span class="n">ChatResponse</span><span class="p">(</span><span class="n">conversation_id</span><span class="o">=</span><span class="n">conversation_id</span><span class="p">,</span>
+<a id="__codelineno-14-23" name="__codelineno-14-23" href="#__codelineno-14-23"></a>                       <span class="n">message_id</span><span class="o">=</span><span class="n">message_id</span><span class="p">,</span>
+<a id="__codelineno-14-24" name="__codelineno-14-24" href="#__codelineno-14-24"></a>                       <span class="n">stream_url</span><span class="o">=</span><span class="sa">f</span><span class="s2">&quot;/api/v1/stream/</span><span class="si">{</span><span class="n">message_id</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+</code></pre></div>
+<hr />
+<h2 id="修复优先级总览">修复优先级总览</h2>
+<table>
+<thead>
+<tr>
+<th>序号</th>
+<th>ID</th>
+<th>问题</th>
+<th>等级</th>
+<th>工作量</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>F-01</td>
+<td>Lease fencing + 执行生命周期收敛到 Runner（含 R-01~R-03）</td>
+<td>P0</td>
+<td>中</td>
+</tr>
+<tr>
+<td>2</td>
+<td>F-02</td>
+<td>Health readiness 深度检查</td>
+<td>P0</td>
+<td>小</td>
+</tr>
+<tr>
+<td>3</td>
+<td>F-04</td>
+<td><code>DATABASE_URL</code> 配置层 fail-fast</td>
+<td>P0</td>
+<td>极小</td>
+</tr>
+<tr>
+<td>4</td>
+<td>F-05</td>
+<td>断线 auto-deny → grace period（含 R-04）</td>
+<td>P1</td>
+<td>小</td>
+</tr>
+<tr>
+<td>5</td>
+<td>F-06</td>
+<td>XREAD 断连重试</td>
+<td>P1</td>
+<td>中</td>
+</tr>
+<tr>
+<td>6</td>
+<td>F-07</td>
+<td>Lua NOSCRIPT 容错</td>
+<td>P1</td>
+<td>中</td>
+</tr>
+<tr>
+<td>7</td>
+<td>F-08</td>
+<td>Redis 连接 retry 策略</td>
+<td>P1</td>
+<td>小</td>
+</tr>
+<tr>
+<td>8</td>
+<td>F-09</td>
+<td>Pub/Sub 断连捕获</td>
+<td>P2</td>
+<td>中</td>
+</tr>
+<tr>
+<td>9</td>
+<td>F-10</td>
+<td>删除 event fallback 本地文件</td>
+<td>P2</td>
+<td>极小</td>
+</tr>
+<tr>
+<td>10</td>
+<td>F-03</td>
+<td><code>get_stream_status</code> 接口统一</td>
+<td>P2</td>
+<td>小</td>
+</tr>
+<tr>
+<td>11</td>
+<td>F-11</td>
+<td>Stream MAXLEN 调大</td>
+<td>P2</td>
+<td>极小</td>
+</tr>
+<tr>
+<td>12</td>
+<td>F-12</td>
+<td><code>push_event</code> 竞态</td>
+<td>P2</td>
+<td>小</td>
+</tr>
+<tr>
+<td>13</td>
+<td>F-13</td>
+<td>Redis key 命名空间</td>
+<td>P2</td>
+<td>小</td>
+</tr>
+<tr>
+<td>14</td>
+<td>F-14</td>
+<td>Stream TTL 调大</td>
+<td>P2</td>
+<td>极小</td>
+</tr>
+<tr>
+<td>15</td>
+<td>F-15</td>
+<td>InMemory cleanup O(n)</td>
+<td>P2</td>
+<td>小</td>
+</tr>
+</tbody>
+</table>
+<p><strong>建议 PR 序列</strong>（配置修正、结构重构、语义变更不混在同一 PR，方便 bisect）：</p>
+<table>
+<thead>
+<tr>
+<th>PR</th>
+<th>内容</th>
+<th>性质</th>
+<th>回归面</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>PR1</strong></td>
+<td>F-02 + F-04</td>
+<td>配置 + 运维</td>
+<td>极小：health 端点 + config 默认值</td>
+</tr>
+<tr>
+<td><strong>PR2</strong></td>
+<td>R-01 ~ R-03</td>
+<td>结构重构</td>
+<td>中：chat.py 瘦身 → Runner 接管生命周期，<strong>行为不变</strong></td>
+</tr>
+<tr>
+<td><strong>PR3</strong></td>
+<td>F-01</td>
+<td>并发语义变更</td>
+<td>中：renew_lease → bool、lease lost → task.cancel()、跳过 post-processing</td>
+</tr>
+<tr>
+<td><strong>PR4</strong></td>
+<td>F-05（含 R-04）~ F-09（F-09 从 P2 提前合入）</td>
+<td>Redis 韧性</td>
+<td>中：XREAD 重试、Pub/Sub 重试、auto-deny 改 grace period、连接 retry、NOSCRIPT 容错</td>
+</tr>
+<tr>
+<td><strong>PR5</strong></td>
+<td>F-10 ~ F-15</td>
+<td>加固清理</td>
+<td>小：按需挑选</td>
+</tr>
+</tbody>
+</table>
+<p><strong>为什么 F-09 提前到 PR4</strong>：只修 XREAD（F-06）不修 Pub/Sub（F-09），Redis failover 恢复只做了一半——主从切换时 XREAD 能重连但 Pub/Sub 断了，interrupt 仍然会异常退出。两者应同批处理。</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  回到页面顶部
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.tabs", "navigation.sections", "navigation.expand", "navigation.top", "search.highlight", "content.code.copy"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "\u5df2\u590d\u5236", "clipboard.copy": "\u590d\u5236", "search.result.more.one": "\u5728\u8be5\u9875\u4e0a\u8fd8\u6709 1 \u4e2a\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.more.other": "\u5728\u8be5\u9875\u4e0a\u8fd8\u6709 # \u4e2a\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.none": "\u6ca1\u6709\u627e\u5230\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.one": "\u627e\u5230 1 \u4e2a\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.other": "# \u4e2a\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.placeholder": "\u952e\u5165\u4ee5\u5f00\u59cb\u641c\u7d22", "search.result.term.missing": "\u7f3a\u5c11", "select.version": "\u9009\u62e9\u5f53\u524d\u7248\u672c"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>
