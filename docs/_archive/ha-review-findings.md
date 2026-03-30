@@ -32,15 +32,17 @@
 
 | 步骤 | 当前在哪里 | 应该在哪里 |
 |------|-----------|-----------|
-| `try_acquire_lease` | `chat.py:209` | `ExecutionRunner.submit()` |
-| `mark_engine_interactive` | `chat.py:220` | `ExecutionRunner.submit()` |
-| `create_stream` | `chat.py:226` | `ExecutionRunner.submit()` |
-| 失败回滚（release_lease + clear_interactive） | `chat.py:257-260` | `ExecutionRunner._wrapped()` |
+| `try_acquire_lease` | `chat.py:209` | `ExecutionRunner.submit()` 预提交阶段 |
+| `mark_engine_interactive` | `chat.py:220` | `ExecutionRunner.submit()` 预提交阶段 |
+| `create_stream` | `chat.py:226` | `ExecutionRunner.submit()` 预提交阶段 |
+| 预提交失败回滚（release_lease + clear_interactive） | `chat.py:257-260` | `ExecutionRunner.submit()` 预提交 try/except |
 | 心跳续租 | `ExecutionRunner._renew_loop` | ✓ 位置正确 |
 | 续租失败 → fencing | ❌ 无人负责 | `ExecutionRunner._renew_loop` |
 | cleanup_execution | `ExecutionRunner._wrapped` finally | ✓ 位置正确 |
 
 路由层（chat.py）应该只做参数校验 + 鉴权 + 调用 `runner.submit()` + 返回 HTTP 响应。执行生命周期的全部管理（拿锁 → 创建 stream → 心跳 → fencing → 清理）都应该收敛到 `ExecutionRunner`。
+
+> **拆分 guardrail**：当前 `ExecutionRunner` 约 146 行，加入生命周期管理后预计 ~250 行，仍在合理范围。如果后续持续膨胀超过 ~300 行（例如需要管理 controller factory、多种执行模式），应拆出独立的 `ExecutionOrchestrator`，Runner 回归纯调度器职责。
 
 **涉及文件**：
 - `src/api/routers/chat.py` — lease/interactive/stream 操作移出
@@ -591,8 +593,9 @@ stream 路由在 `CancelledError`（客户端断连）时直接调 `runner.store
 |------|------|
 | `auth.py` | ✅ 纯 HTTP 认证 + token 操作，正确委托给 `auth` service |
 | `artifacts.py` | ✅ 参数校验 + 委托给 `ArtifactManager`，无越界 |
-| `conversations.py` | ✅ CRUD 委托给 `ConversationManager`，无越界 |
 | `stream.py`（除 R-04） | ✅ 事件消费 + SSE 格式化，正确委托给 `StreamTransport` |
+
+> 注：对话相关的 CRUD 端点（list/get/delete/rename）直接在 `chat.py` 中，没有独立的 `conversations.py` 路由文件。
 
 ---
 
