@@ -654,7 +654,14 @@ async def send_message(
 | 14 | F-14 | Stream TTL 调大 | P2 | 极小 |
 | 15 | F-15 | InMemory cleanup O(n) | P2 | 小 |
 
-**建议实施节奏**：
-- **第一轮**：F-01（含 R-01~R-03）+ F-02 + F-04 — 消除 split-brain + 职责收敛 + 故障检测
-- **第二轮**：F-05（含 R-04）~ F-08 — Redis 韧性 + UX 修正
-- **第三轮**：F-09 ~ F-15 — 加固 + 打磨，按需挑选
+**建议 PR 序列**（配置修正、结构重构、语义变更不混在同一 PR，方便 bisect）：
+
+| PR | 内容 | 性质 | 回归面 |
+|----|------|------|--------|
+| **PR1** | F-02 + F-04 | 配置 + 运维 | 极小：health 端点 + config 默认值 |
+| **PR2** | R-01 ~ R-03 | 结构重构 | 中：chat.py 瘦身 → Runner 接管生命周期，**行为不变** |
+| **PR3** | F-01 | 并发语义变更 | 中：renew_lease → bool、lease lost → task.cancel()、跳过 post-processing |
+| **PR4** | F-05（含 R-04）~ F-09（F-09 从 P2 提前合入） | Redis 韧性 | 中：XREAD 重试、Pub/Sub 重试、auto-deny 改 grace period、连接 retry、NOSCRIPT 容错 |
+| **PR5** | F-10 ~ F-15 | 加固清理 | 小：按需挑选 |
+
+**为什么 F-09 提前到 PR4**：只修 XREAD（F-06）不修 Pub/Sub（F-09），Redis failover 恢复只做了一半——主从切换时 XREAD 能重连但 Pub/Sub 断了，interrupt 仍然会异常退出。两者应同批处理。
