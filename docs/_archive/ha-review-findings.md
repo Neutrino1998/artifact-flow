@@ -201,33 +201,35 @@ async def readiness():
 
 **来源**：自研 Review
 
-**问题**：`StreamTransport` Protocol 中 `get_stream_status` 是同步方法。`RedisStreamTransport` 无法同步读 Redis，当前直接返回 `None`（`redis_stream_transport.py:210-213`），另有 `get_stream_status_async`。如果任何调用方依赖同步版本做状态判断，Redis 模式下全部返回"不存在"。
+**等级调整**：P0 → P2（当前无生产调用点，属于接口清理，非功能性缺陷）
+
+**问题**：`StreamTransport` Protocol 中 `get_stream_status` 是同步方法。`RedisStreamTransport` 无法同步读 Redis，当前直接返回 `None`（`redis_stream_transport.py:210-213`），另有 `get_stream_status_async`。如果未来调用方依赖同步版本做状态判断，Redis 模式下会返回错误结果。
 
 **涉及文件**：
 - `src/api/services/stream_transport.py` — Protocol 定义
 - `src/api/services/redis_stream_transport.py`
-- 所有 `get_stream_status` 调用点
 
 **修复建议**：Protocol 中 `get_stream_status` 改为 `async`，`InMemoryStreamTransport` 对应加 `async`（dict 操作不阻塞），调用点加 `await`。删除 `get_stream_status_async`。
 
 ---
 
-### F-04 `DATABASE_URL` 默认 fallback SQLite（生产隐患）
+### F-04 `DATABASE_URL` 硬编码默认值（生产隐患）
 
-**来源**：自研 Review
+**来源**：自研 Review + Reviewer 修正
 
-**问题**：`database.py:68-71` 在 `database_url is None` 时默默 fallback 到 SQLite。Phase 3 计划要求生产代码 fail fast，当前实现允许双机部署时各自用独立 SQLite，数据不同步且难以排查。
+**问题**：`config.py` 中 `DATABASE_URL` 的默认值硬编码为 SQLite。应用启动时 `dependencies.py:83` 总会把 `config.DATABASE_URL` 传给 `DatabaseManager`，所以 `DatabaseManager.__init__` 的 `None` fallback 不是真正的风险点——真正的风险是 `.env` 没配 `DATABASE_URL` 时，`config.py` 的默认值直接生效为 SQLite，双机部署各自用独立 SQLite，数据不同步且难以排查。
 
 **涉及文件**：
-- `src/db/database.py` — `__init__`
+- `src/config.py` — `DATABASE_URL` 默认值（主要修复点）
+- `src/db/database.py` — `__init__` 的 `None` fallback（顺带清理）
 
 **修复建议**：
 
-两个方案选一：
-- **方案 A**（推荐）：`config.py` 中 `DATABASE_URL` 默认空字符串，`DatabaseManager.__init__` 检测到空值时抛 `RuntimeError("DATABASE_URL must be configured")`
-- **方案 B**：保留 SQLite fallback 但打 `WARNING` 日志 + 文档注明仅限开发
+1. `config.py`：`DATABASE_URL` 默认空字符串，不提供 SQLite fallback
+2. `config.py` 或 `dependencies.py` 的 `init_globals()`：启动时校验 `DATABASE_URL` 非空，空值 fail fast
+3. `database.py`：移除 `database_url is None` 的 SQLite fallback（`create_test_database_manager()` 显式传 SQLite URL，不受影响）
 
-注意：改动后需确保 `create_test_database_manager()` 不受影响（它显式传 SQLite URL）。
+所有数据库配置统一通过 `.env` 提供，代码中不硬编码任何默认 URL。
 
 ---
 
@@ -258,9 +260,11 @@ async def readiness():
 
 ### F-06 `consume_events` XREAD 断连无恢复
 
-**来源**：Reviewer P2
+**来源**：Reviewer P2（故障链路经 Reviewer 二轮修正）
 
-**问题**：`redis_stream_transport.py:159` 的 `XREAD BLOCK` 循环中，Redis 断连（云 Redis 主从切换 1-3s）会抛 `ConnectionError`，当前无捕获 → consumer 退出 → 触发 stream.py 的 `CancelledError` 处理 → 可能 auto-deny interrupt。
+**问题**：`redis_stream_transport.py:159` 的 `XREAD BLOCK` 循环中，Redis 断连（云 Redis 主从切换 1-3s）会抛 `ConnectionError`，当前无捕获 → 异常从 `consume_events` 生成器抛出 → 被 `stream.py:109` 的 `except Exception` 捕获（**不是** `CancelledError` 分支）→ 给前端推 error event → SSE 连接中断。
+
+注意：此路径**不会**触发 `stream.py:99` 的 auto-deny interrupt（那是 `CancelledError` 分支，仅在客户端主动断连时触发）。直接后果是流中断/报错，不是自动拒绝 permission。
 
 **涉及文件**：
 - `src/api/services/redis_stream_transport.py` — `consume_events`
@@ -551,16 +555,18 @@ chat.py 当前做的事（不该做）：
 - 语义泄漏：路由知道 "lease"、"interactive" 这些运行时概念
 - 如果 RuntimeStore 接口变更，所有路由都要改
 
-**归属**：`ExecutionRunner` 应暴露高层方法：
+**归属**：`ExecutionRunner` 应暴露高层方法，隐藏 RuntimeStore 细节：
 
 | 当前（路由直接调 store） | 应改为（runner 方法） |
 |---|---|
 | `store.get_interactive_message_id(conv_id)` | `runner.get_active_execution(conv_id)` |
 | `store.inject_message(msg_id, content)` | `runner.inject(conv_id, content)` |
 | `store.request_cancel(msg_id)` | `runner.cancel(conv_id)` |
-| `store.resolve_interrupt(msg_id, data)` | `runner.resolve_interrupt(conv_id, data)` |
+| `store.resolve_interrupt(msg_id, data)` | `runner.resolve_interrupt(msg_id, data)` |
 
-路由层只需要 `conversation_id`，不需要知道 `message_id` 与 lease/interactive 的映射关系。
+`inject` 和 `cancel` 可以用 `conv_id`（语义上就是"对当前活跃执行操作"，runner 内部做 conv→msg 映射）。
+
+**但 `resume` 必须保留 `message_id` 粒度**：permission-resume 是幂等操作，需要精确匹配到具体的 interrupt。如果只用 `conv_id` 找"当前活跃执行"，旧页面或重试请求可能把审批结果打到新一轮执行的 interrupt 上，语义错位。`message_id` 是 resume 的外部 contract，不能降级。
 
 ---
 
@@ -631,14 +637,14 @@ async def send_message(
 |------|-----|------|------|--------|
 | 1 | F-01 | Lease fencing + 执行生命周期收敛到 Runner（含 R-01~R-03） | P0 | 中 |
 | 2 | F-02 | Health readiness 深度检查 | P0 | 小 |
-| 3 | F-03 | `get_stream_status` 接口统一 | P0 | 小 |
-| 4 | F-04 | `DATABASE_URL` fail-fast | P0 | 极小 |
-| 5 | F-05 | 断线 auto-deny → grace period（含 R-04） | P1 | 小 |
-| 6 | F-06 | XREAD 断连重试 | P1 | 中 |
-| 7 | F-07 | Lua NOSCRIPT 容错 | P1 | 中 |
-| 8 | F-08 | Redis 连接 retry 策略 | P1 | 小 |
-| 9 | F-09 | Pub/Sub 断连捕获 | P2 | 中 |
-| 10 | F-10 | Event fallback → outbox | P2 | 大 |
+| 3 | F-04 | `DATABASE_URL` 配置层 fail-fast | P0 | 极小 |
+| 4 | F-05 | 断线 auto-deny → grace period（含 R-04） | P1 | 小 |
+| 5 | F-06 | XREAD 断连重试 | P1 | 中 |
+| 6 | F-07 | Lua NOSCRIPT 容错 | P1 | 中 |
+| 7 | F-08 | Redis 连接 retry 策略 | P1 | 小 |
+| 8 | F-09 | Pub/Sub 断连捕获 | P2 | 中 |
+| 9 | F-10 | 删除 event fallback 本地文件 | P2 | 极小 |
+| 10 | F-03 | `get_stream_status` 接口统一 | P2 | 小 |
 | 11 | F-11 | Stream MAXLEN 调大 | P2 | 极小 |
 | 12 | F-12 | `push_event` 竞态 | P2 | 小 |
 | 13 | F-13 | Redis key 命名空间 | P2 | 小 |
@@ -646,6 +652,6 @@ async def send_message(
 | 15 | F-15 | InMemory cleanup O(n) | P2 | 小 |
 
 **建议实施节奏**：
-- **第一轮**：F-01（含 R-01~R-03）+ F-02 ~ F-04 — 消除 split-brain + 职责收敛 + 故障检测
+- **第一轮**：F-01（含 R-01~R-03）+ F-02 + F-04 — 消除 split-brain + 职责收敛 + 故障检测
 - **第二轮**：F-05（含 R-04）~ F-08 — Redis 韧性 + UX 修正
 - **第三轮**：F-09 ~ F-15 — 加固 + 打磨，按需挑选
