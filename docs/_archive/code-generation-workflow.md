@@ -29,7 +29,7 @@ Review 发现的问题分类：
 | 本地文件假装 fallback | 看起来比"什么都不做"好 | 没有"不能保证就别假装"的原则 |
 | 绕过 manager 直接调 repo | 能 work，更短 | 规则写了但太具体，新边界出现时防不住 |
 
-关键发现：CLAUDE.md 已经写了 "Routers must not bypass Manager to call Repo directly"，但还是会违反——因为这条规则太具体，只防了一个边界，新的边界（router 直接调 RuntimeStore）防不住。**需要的是高层原则，具体规则从原则推导。**
+关键发现：router 绕过 manager 直接调 repo 的问题被发现后，在 CLAUDE.md 里补了一条 "Routers must not bypass Manager to call Repo directly"。但这种事后补丁只防了一个具体边界——后来 router 直接调 RuntimeStore 的越界照样发生了，因为规则里没提 RuntimeStore。**逐条补规则是打地鼠，需要的是高层原则，具体规则从原则推导。**
 
 ---
 
