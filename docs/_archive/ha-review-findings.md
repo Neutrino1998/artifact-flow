@@ -414,16 +414,65 @@ else:
 
 ---
 
-### F-11 Stream MAXLEN ~1000 可能不够
+### F-11 `llm_chunk` 每 token 一条全量快照 → coalesced snapshots
 
-**来源**：自研 Review
+**来源**：自研 Review + Reviewer 深化分析
 
-**问题**：`redis_stream_transport.py:113` MAXLEN 1000。LLM streaming 每 token 一个 `llm_chunk` 事件，长回复可能超过 1000 token，加上 tool_call/tool_result，断线重连时旧事件可能已被修剪。
+**问题**：`engine.py:265-268` 每收到一个 LLM token 就 emit 一条 `llm_chunk`，内容是 `response_content` 全量累积文本（不是 delta）。这导致：
+
+1. **O(n²) 字节量**：假设最终 response 2000 字符、500 次 chunk，总传输 ≈ 1+2+3+...+2000 ≈ 200 万字符
+2. **Redis Stream 被灌满**：500 条 chunk + 其他事件，MAXLEN 1000 几乎用尽，断线重连时旧事件可能已被修剪
+3. **前端只用最新快照**：`useSSE.ts:114` 直接用 `content` 覆盖显示，不依赖逐 token append，中间态全浪费
 
 **涉及文件**：
-- `src/api/services/redis_stream_transport.py` — `push_event`
+- `src/api/routers/chat.py` — `_run_and_push`（coalescer 放置位置）
+- `src/api/services/redis_stream_transport.py` — MAXLEN 参数
 
-**修复建议**：调大到 5000-10000，或改为可配置参数。也可考虑 `MINID` 策略（按时间窗口而非条数修剪）。
+**修复建议**：
+
+在 `_run_and_push` 中加 coalescing 逻辑（engine、transport、前端都不改）：
+
+- **只合并 `llm_chunk`**，其他事件类型（`tool_call`、`agent_start`、`complete` 等）立即推送
+- flush 条件：
+  - 距上次 flush ≥ 50-100ms
+  - 或累计新增 ≥ 32-128 字符
+  - 遇到非 `llm_chunk` 事件前强制 flush 缓冲的最后一条
+
+```python
+async def _run_and_push(stream_transport, stream_id, event_stream):
+    pending_chunk = None        # 缓冲的最新 llm_chunk
+    last_flush_time = 0.0
+
+    async def flush_pending():
+        nonlocal pending_chunk, last_flush_time
+        if pending_chunk:
+            await stream_transport.push_event(stream_id, pending_chunk)
+            pending_chunk = None
+            last_flush_time = asyncio.get_event_loop().time()
+
+    async for event in event_stream:
+        if event.get("type") == "llm_chunk":
+            pending_chunk = event  # 只保留最新（累积快照语义，旧的可丢）
+            now = asyncio.get_event_loop().time()
+            if now - last_flush_time >= 0.08:  # 80ms 节流
+                await flush_pending()
+        else:
+            await flush_pending()  # 非 chunk 事件前先 flush
+            await stream_transport.push_event(stream_id, event)
+
+    await flush_pending()  # 确保最后一条 chunk 被发出
+```
+
+**为什么放在 `_run_and_push`**：
+- engine 是纯逻辑层，不应知道传输优化
+- transport 是通用传输层，不应有事件类型语义
+- `_run_and_push` 是 controller → transport 的桥梁，天然是 coalescing 的位置
+
+**效果**：
+- 2000 字符回复：~500 条 chunk → ~25 条（80ms 节流），Redis Stream 压力降 95%
+- MAXLEN 1000 绰绰有余，可保持不改
+- 断线重连仍安全：每条仍是累计快照，丢中间态靠下一条追平
+- 前端零改动
 
 ---
 
