@@ -433,26 +433,35 @@ else:
 在 `_run_and_push` 中加 coalescing 逻辑（engine、transport、前端都不改）：
 
 - **只合并 `llm_chunk`**，其他事件类型（`tool_call`、`agent_start`、`complete` 等）立即推送
-- flush 条件：
-  - 距上次 flush ≥ 50-100ms
-  - 或累计新增 ≥ 32-128 字符
-  - 遇到非 `llm_chunk` 事件前强制 flush 缓冲的最后一条
+- flush 条件：距上次 flush ≥ 80ms，或遇到非 `llm_chunk` 事件前强制 flush
+- 不需要字符数检测——累积快照语义下每条都是全量，coalescer 只需"保留最新 + 定时 flush"
+
+**注意**：`llm_chunk` 有两种字段——`reasoning_content`（推理阶段）和 `content`（回复阶段），来自 engine.py 的两个独立分支，不会出现在同一条 chunk 里。但 reasoning → content 切换时，可能在同一个时间窗口内共存：
+
+```
+t=0ms   缓冲: reasoning_content: "ABCDEFGHIJ"    // 还没到 80ms
+t=5ms   缓冲: content: "ABC"                      // content 开始了
+        如果用单变量缓冲（pending = event），reasoning 最后一条被覆盖丢失
+```
+
+因此必须**按字段分开缓冲**：
 
 ```python
 async def _run_and_push(stream_transport, stream_id, event_stream):
-    pending_chunk = None        # 缓冲的最新 llm_chunk
+    pending_chunks: dict[str, dict] = {}  # "content" 或 "reasoning_content" → 最新 event
     last_flush_time = 0.0
 
     async def flush_pending():
-        nonlocal pending_chunk, last_flush_time
-        if pending_chunk:
-            await stream_transport.push_event(stream_id, pending_chunk)
-            pending_chunk = None
-            last_flush_time = asyncio.get_event_loop().time()
+        nonlocal last_flush_time
+        for key in list(pending_chunks):
+            await stream_transport.push_event(stream_id, pending_chunks.pop(key))
+        last_flush_time = asyncio.get_event_loop().time()
 
     async for event in event_stream:
         if event.get("type") == "llm_chunk":
-            pending_chunk = event  # 只保留最新（累积快照语义，旧的可丢）
+            data = event.get("data", {})
+            chunk_key = "reasoning_content" if "reasoning_content" in data else "content"
+            pending_chunks[chunk_key] = event  # 同类覆盖，异类共存
             now = asyncio.get_event_loop().time()
             if now - last_flush_time >= 0.08:  # 80ms 节流
                 await flush_pending()
@@ -460,7 +469,7 @@ async def _run_and_push(stream_transport, stream_id, event_stream):
             await flush_pending()  # 非 chunk 事件前先 flush
             await stream_transport.push_event(stream_id, event)
 
-    await flush_pending()  # 确保最后一条 chunk 被发出
+    await flush_pending()  # 确保最后的 chunk 被发出
 ```
 
 **为什么放在 `_run_and_push`**：
