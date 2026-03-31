@@ -12,7 +12,7 @@ ArtifactFlow is a multi-agent system with a [Pi-style](https://github.com/badlog
 # JWT secret (required, server won't start without it)
 echo "ARTIFACTFLOW_JWT_SECRET=$(python -c 'import secrets; print(secrets.token_urlsafe(32))')" >> .env
 
-# API type sync (after changing backend API schemas)
+# API type sync (MUST run before writing frontend code that depends on API schemas)
 python scripts/export_openapi.py                # Export OpenAPI JSON
 cd frontend && npm run generate-types           # Regenerate TS types
 
@@ -46,6 +46,11 @@ These are non-obvious design choices that you won't easily infer from reading th
   - **Router** (`src/api/routers/`): Transport layer — auth, parameter parsing, HTTP mapping. No business logic, no Repo imports.
 
 - **Artifact write-back** (`ArtifactManager`): During engine execution, `create_artifact`/`update_artifact`/`rewrite_artifact` only modify in-memory cache and mark dirty. `flush_all()` is called once in controller post-processing (before terminal SSE event) to persist the final snapshot. Consequences: (1) `ArtifactVersion` numbers can be sparse — intermediate in-memory edits are folded into one DB record. (2) `list_artifacts()` merges DB + in-memory cache so engine context sees same-run changes. (3) `ToolResult.metadata` carries `artifact_snapshot` for real-time frontend updates during execution; REST API reflects the latest only after flush. (4) `create_from_upload` bypasses write-back and commits immediately (not in engine loop).
+
+## Testing
+
+- pytest config: `testpaths = ["tests"]`, default `test_*.py` collection pattern
+- `tests/manual/` contains scripts that require external services (API keys, running server, Redis, etc.) — **file names must NOT start with `test_`** to avoid pytest auto-collection (e.g. `coalescer_bench.py`, `api_smoke.py`)
 
 ## Code Conventions
 

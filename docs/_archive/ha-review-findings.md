@@ -265,15 +265,21 @@ async def readiness():
 
 **修复建议**：
 
-在 XREAD 循环中加 `ConnectionError` 重试：
+在 XREAD 循环中加 `ConnectionError` 重试，最多重试 2 次（覆盖主从切换 1-3s），超过则放弃：
 
 ```python
+retry_count = 0
 while True:
     try:
         result = await self._redis.xread(...)
+        retry_count = 0  # 成功则重置
     except aioredis.ConnectionError:
-        logger.warning(f"Redis connection lost during consume {stream_id}, retrying...")
-        await asyncio.sleep(1)  # 短暂等待 Redis 恢复
+        retry_count += 1
+        if retry_count > 2:
+            logger.error(f"Redis connection lost during consume {stream_id}, giving up")
+            break
+        logger.warning(f"Redis connection lost during consume {stream_id}, retry {retry_count}/2")
+        await asyncio.sleep(1)
         continue
     # ... 正常处理
 ```
@@ -348,26 +354,7 @@ _redis_client = aioredis.from_url(
 **涉及文件**：
 - `src/api/services/redis_runtime_store.py` — `wait_for_interrupt`
 
-**修复建议**：
-
-在 Pub/Sub 循环中捕获 `ConnectionError`，重走 check-subscribe-check-wait：
-
-```python
-except aioredis.ConnectionError:
-    logger.warning(f"Pub/Sub connection lost for {message_id}, re-checking status...")
-    await pubsub.aclose()
-    # 重新检查状态（可能在断连期间已 resolve）
-    if await self._is_resolved(message_id):
-        return await self._get_resume_data(message_id)
-    # 重建 Pub/Sub 订阅
-    pubsub = self._redis.pubsub()
-    await pubsub.subscribe(channel_name)
-    # 双重检查
-    if await self._is_resolved(message_id):
-        ...
-```
-
-或简化为：捕获 `ConnectionError` → `return None`（视为超时 deny），行为与现有 timeout 一致。
+**修复建议**：捕获 `ConnectionError` → `return None`（视为超时 deny），行为与现有 `PERMISSION_TIMEOUT` 一致。Pub/Sub 断连只影响单次审批，不值得做复杂重连。
 
 ---
 
@@ -402,7 +389,6 @@ else:
     # 不做 fallback — events 是审计数据，conversation + artifact 已持久化
 ```
 
-如果未来有审计合规需求，再考虑 outbox pattern（events 与业务写在同一事务）。
 
 ---
 
@@ -469,8 +455,9 @@ async def _run_and_push(stream_transport, stream_id, event_stream):
 - transport 是通用传输层，不应有事件类型语义
 - `_run_and_push` 是 controller → transport 的桥梁，天然是 coalescing 的位置
 
-**效果**：
-- 2000 字符回复：~500 条 chunk → ~25 条（80ms 节流），Redis Stream 压力降 95%
+**效果**（实测数据见 `tests/manual/coalescer_bench.py`，qwen3.5-plus thinking 模式）：
+- 754 chunks → 4 chunks（99% 减少），累积传输 3,205,614 → 17,679 字符（99% 减少）
+- reasoning 和 content 分开缓冲，切换时强制 flush，无数据丢失
 - MAXLEN 1000 绰绰有余，可保持不改
 - 断线重连仍安全：每条仍是累计快照，丢中间态靠下一条追平
 - 前端零改动
