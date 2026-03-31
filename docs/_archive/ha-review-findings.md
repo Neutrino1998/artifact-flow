@@ -195,7 +195,7 @@ async def readiness():
     return JSONResponse(checks, status_code=200 if healthy else 503)
 ```
 
-保留原 `/health` 指向 readiness（向后兼容）或直接替换。
+直接删除原 `/health` 端点，替换为 `/health/live` + `/health/ready`。
 
 ---
 
@@ -231,7 +231,7 @@ async def readiness():
 2. `config.py` 或 `dependencies.py` 的 `init_globals()`：启动时校验 `DATABASE_URL` 非空，空值 fail fast
 3. `database.py`：移除 `database_url is None` 的 SQLite fallback（`create_test_database_manager()` 显式传 SQLite URL，不受影响）
 
-所有数据库配置统一通过 `.env` 提供，代码中不硬编码任何默认 URL。
+所有数据库配置统一通过 `.env` 提供，代码中不硬编码任何默认 URL。`.env.example` 中默认提供 SQLite 配置，方便本地开发。
 
 ---
 
@@ -248,15 +248,7 @@ async def readiness():
 **涉及文件**：
 - `src/api/routers/stream.py` — `CancelledError` 处理
 
-**修复建议**：
-
-三个方案按复杂度递增：
-
-1. **最简方案**：删掉 auto-deny，依赖 `PERMISSION_TIMEOUT`（通常 300s）自然超时。缺点：用户真的走了也要等 5 分钟
-2. **Grace period**：断连后不立刻 deny，启动延迟任务（比如 30s），期间客户端重连则取消 deny。需要额外状态管理
-3. **Consumer 计数**：Redis 记录 stream 是否有活跃 consumer，只有确认无 consumer 且超过 grace period 才 deny
-
-建议先用方案 1（最安全），后续按 UX 需求升级到方案 2。
+**修复建议**：删掉 auto-deny，依赖 `PERMISSION_TIMEOUT`（通常 300s）自然超时。
 
 ---
 
