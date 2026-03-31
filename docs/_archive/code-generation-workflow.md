@@ -40,43 +40,46 @@ Review 发现的问题分类：
 ```mermaid
 flowchart TD
     REQ["需求描述"]
-    CONST["Constitution\n高层原则"]
+    C1["Constitution L1\n通用设计原则（跨项目）"]
     TECH["技术总体方案\n架构 / 语言 / 框架 / 部署模型 / 外部依赖"]
+    C2["Constitution L2\n架构约束原则（项目级）"]
     SPEC["Module Specs\n契约 / 保证+不保证 / 量化约束 / 接口"]
     PLAN["Implementation Plan\n按依赖排序，每步可独立验证"]
 
-    REQ --> CONST
-    CONST -->|"约束技术选型"| TECH
-    TECH -->|"暴露共享资源/部署假设\n→ 补充架构级原则"| CONST
-    CONST --> SPEC
+    REQ --> C1
+    C1 -->|"约束技术选型"| TECH
+    TECH -->|"暴露共享资源/部署假设\n→ 补充架构级原则"| C2
+    C1 & C2 --> SPEC
     TECH --> SPEC
     SPEC --> PLAN
-
     PLAN --> LOOP
 
     subgraph LOOP["实施循环 (per plan step)"]
         direction TB
-        S1["1. 读 Constitution + 相关 Spec"]
-        S2["2. 按 step 性质决定测试策略\n语义变更 → spec 级测试先写\n边界变更 → 窄集成测试\n纯重构 → 回归覆盖即可"]
+        S1["1. 读 Constitution + Spec + agent.md"]
+        S2["2. 按 step 性质决定测试策略"]
         S3["3. 写代码"]
         S4["4. 跑测试"]
-        S5["5. 新 session review\nclean context: 只给 constitution + spec + diff"]
+        S5["5. 新 session review"]
         S1 --> S2 --> S3 --> S4 --> S5
+        AGENT["agent.md\n实施期间发现的设计问题\n（轻量修正层）"]
     end
-
-    S5 -->|"通过 → 下一步"| LOOP
-    S5 -->|"不通过 → 修复后重新 review"| S3
 ```
 
-**Constitution 与技术方案的回路**：先写通用设计原则（不依赖架构），约束技术选型；技术方案确定后，暴露出的共享资源、部署假设、外部依赖等信息回填为架构级原则，补充进同一份 Constitution。两者迭代收敛后，统一输入 Module Specs。
+**Constitution 分两层**：
+
+- **L1 通用设计原则**：跨项目复用，不依赖架构决策。如"同一概念只有一种语义"、"不能保证就别假装"。在技术方案之前写，约束选型方向。
+- **L2 架构约束原则**：依赖技术方案才能写出，项目级有效。如"共享外部资源必须声明 ownership 边界"、"对外部依赖的可用性假设必须显式声明"。技术方案确定后产出。
+
+**agent.md — 实施期间的轻量修正层**：编码和 review 过程中发现的设计层面问题（spec 遗漏、原则缺失、边界条件未覆盖）不直接修改上游产物，而是追加到 agent.md。实施循环中每步开始时读取 agent.md 作为补充约束（类似 LoRA：不改 base weights，叠加一层适配）。整轮实施结束后，统一回顾 agent.md，将仍然有效的发现合并回 Constitution / Spec。
 
 ---
 
 ## 各阶段说明
 
-### Constitution（高层原则）
+### Constitution L1（通用设计原则）
 
-- 跨模块、跨项目通用的约束，不随功能变化
+- 跨模块、跨项目复用的约束，不依赖具体架构决策
 - 应该很短（一页以内），写一次，偶尔修订
 - **在技术方案之前写**，因为原则会影响技术选型
 - 示例方向（待细化）：
@@ -89,6 +92,15 @@ flowchart TD
 
 - 系统架构（分布式/单体）、语言/框架选型、模块划分
 - 这一步产出的是系统的大骨架，不涉及实现细节
+
+### Constitution L2（架构约束原则）
+
+- 依赖技术方案才能写出，项目级有效
+- 技术方案确定共享资源、部署模型、外部依赖后，从中推导出的约束
+- 示例方向（待细化）：
+  - 共享外部资源必须声明 ownership 边界（命名空间隔离）
+  - 对外部依赖的可用性假设必须显式声明（独占/共享、故障恢复窗口）
+  - 不可假设运行环境独占（磁盘、端口、进程）
 
 ### Module Specs（模块契约）
 
@@ -153,6 +165,14 @@ async def test_runner_submit_rollback_on_stream_failure():
 - 每个 plan step 完成后，拉新 session review
 - 新 session 只给 constitution + spec + diff，不给实现背景
 - clean context 是 review 的价值所在——写代码的 session 带着"我为什么这么做"的隐含假设，review session 没有这些假设，反而能发现问题
+- review 发现设计层面问题（spec 遗漏、原则缺失）→ 记录到 agent.md，不改上游产物
+
+**agent.md（实施期间的轻量修正层）**：
+
+- 实施循环中发现的设计问题、踩坑经验、上游产物的缺漏，追加记录到 agent.md
+- 每步开始时读取，作为 Constitution + Spec 的补充约束（避免同一个坑踩两次）
+- **实施期间不修改上游产物**——上游冻结保证实施基线稳定，避免改设计引发连锁返工
+- 整轮实施结束后，统一回顾 agent.md，将仍然有效的发现合并回 Constitution / Spec，然后清空
 - 这也解释了为什么外部 reviewer 能抓到那么多问题——他没有"跟着 plan 一步步写过来"的上下文包袱
 
 ---
