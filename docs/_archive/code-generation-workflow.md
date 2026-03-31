@@ -163,7 +163,7 @@ async def test_runner_submit_rollback_on_stream_failure():
 **新 session review**：
 
 - 每个 plan step 完成后，拉新 session review
-- 新 session 只给 constitution + spec + diff，不给实现背景
+- 新 session 只给 constitution + spec + agent.md + diff，不给实现背景
 - clean context 是 review 的价值所在——写代码的 session 带着"我为什么这么做"的隐含假设，review session 没有这些假设，反而能发现问题
 - review 发现设计层面问题（spec 遗漏、原则缺失）→ 记录到 agent.md，不改上游产物
 
@@ -171,7 +171,7 @@ async def test_runner_submit_rollback_on_stream_failure():
 
 - 实施循环中发现的设计问题、踩坑经验、上游产物的缺漏，追加记录到 agent.md
 - 每步开始时读取，作为 Constitution + Spec 的补充约束（避免同一个坑踩两次）
-- **实施期间不修改上游产物**——上游冻结保证实施基线稳定，避免改设计引发连锁返工
+- **实施期间默认不修改上游产物**——上游冻结保证实施基线稳定，避免改设计引发连锁返工。如发现影响后续步骤依赖或验证边界的重大问题，经人工确认后可立即修订上游产物
 - 整轮实施结束后，统一回顾 agent.md，将仍然有效的发现合并回 Constitution / Spec，然后清空
 - 这也解释了为什么外部 reviewer 能抓到那么多问题——他没有"跟着 plan 一步步写过来"的上下文包袱
 
