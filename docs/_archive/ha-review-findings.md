@@ -604,7 +604,7 @@ else:
 
 **chat.py** 是重灾区，包含 7 处职责越界。**stream.py** 有 1 处。**auth.py** 和 **artifacts.py** 分层清晰，无问题。
 
-### R-01 chat.py: 执行编排逻辑散落在路由层
+### R-01 chat.py: 执行编排逻辑散落在路由层 ✅ done (PR2)
 
 **位置**：`chat.py:208-260`（`send_message` 函数）
 
@@ -632,7 +632,7 @@ chat.py 当前做的事（不该做）：
 
 ---
 
-### R-02 chat.py: Controller 实例化在路由层
+### R-02 chat.py: Controller 实例化在路由层 ✅ done (PR2)
 
 **位置**：`chat.py:74-133`（`_create_controller` context manager）
 
@@ -761,7 +761,7 @@ async def send_message(
 | PR | 内容 | 性质 | 回归面 |
 |----|------|------|--------|
 | **PR1** | F-02 + F-04 | 配置 + 运维 | ✅ done |
-| **PR2** | R-01 + R-02 | 结构重构 | 中：chat.py 瘦身 → Runner 接管生命周期 + controller factory 抽离，**行为不变**（R-03 deferred） |
+| **PR2** | R-01 + R-02 | 结构重构 | ✅ done |
 | **PR3** | F-01 | 并发语义变更 | 中：renew_lease → bool、lease lost → task.cancel()、跳过 post-processing |
 | **PR4** | F-05（含 R-04）~ F-09 + F-16（F-09 从 P2 提前合入） | Redis 韧性 + DB 接入 | 中：XREAD 重试、Pub/Sub 重试、auto-deny 改 grace period、连接 retry、NOSCRIPT 容错、RedisCluster 切换、多 PX 故障切换 |
 | **PR5** | F-10 ~ F-15 | 加固清理 | 小：按需挑选 |
