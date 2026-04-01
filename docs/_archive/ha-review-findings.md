@@ -483,13 +483,13 @@ async def _run_and_push(stream_transport, stream_id, event_stream):
 
 **来源**：自研 Review
 
-**问题**：所有 key 用 `lease:`, `stream:`, `interrupt:` 等扁平前缀。同一 Redis 实例被多环境（staging/production）或多 ArtifactFlow 实例共用时 key 冲突。
+**问题**：所有 key 用 `lease:`, `stream:`, `interrupt:` 等扁平前缀。Redis 已确认为华为云 DCS 公共区 Cluster 集群，与其他系统共用，云托管要求所有 key 加系统前缀。
 
 **涉及文件**：
 - `src/api/services/redis_runtime_store.py` — key helper 方法
 - `src/api/services/redis_stream_transport.py` — key helper 方法
 
-**修复建议**：加可配置前缀：
+**修复建议**：加可配置前缀（已确认为强制要求）：
 
 ```python
 # config.py
@@ -499,6 +499,8 @@ REDIS_KEY_PREFIX: str = "af"
 def _lease_key(self, conversation_id: str) -> str:
     return f"{self._prefix}:lease:{conversation_id}"
 ```
+
+> **Cluster 注意**：Redis 为 Cluster 模式，单个 Lua 脚本涉及的所有 key 必须在同一 hash slot。使用 hash tag 保证：`{af:session123}:lease` 和 `{af:session123}:fencing_token` 中 `{af:session123}` 相同 → 同 slot。F-01 的 Lua 脚本需同步适配。
 
 ---
 
@@ -713,9 +715,9 @@ async def send_message(
 |---------|-----------|---------|
 | F-01 | 主从切换时间窗口 | lease TTL、心跳间隔的具体数值 |
 | F-06 | 主从切换时间窗口 + XREAD 断线行为 | 重试次数、sleep 时长 |
-| F-07 | 主从切换后 script cache 是否清空 | 是否需要改为 `register_script` |
+| F-07 | ~~主从切换后 script cache 是否清空~~ | ✅ 无需确认，`register_script` 自动处理 |
 | F-08 | 主从切换时间窗口 | retry backoff 参数 |
 | F-09 | Pub/Sub 断线行为 | 已简化为 catch-and-deny，影响不大 |
-| F-13 | Redis 是否与其他系统共用实例 | 共用→必须加前缀，专用→可选 |
+| F-13 | ~~Redis 是否与其他系统共用实例~~ | ✅ 已确认共用（华为云 DCS Cluster），前缀为强制要求 |
 
 其余 findings（F-02、F-03、F-04、F-05、F-10、F-11、F-12、F-14、F-15、R-01~R-04）不依赖确认结果，可直接实施。
