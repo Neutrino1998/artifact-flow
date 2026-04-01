@@ -10,7 +10,7 @@
       
       
       
-        <link rel="canonical" href="https://neutrino.github.io/artifact-flow/_archive/code-generation-workflow/">
+        <link rel="canonical" href="https://neutrino.github.io/artifact-flow/_archive/cloud-service-checklist/">
       
       
       
@@ -23,7 +23,7 @@
     
     
       
-        <title>代码生成流程设计 - ArtifactFlow</title>
+        <title>云托管服务确认清单 - ArtifactFlow</title>
       
     
     
@@ -74,7 +74,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#代码生成流程设计" class="md-skip">
+        <a href="#云托管服务确认清单" class="md-skip">
           跳转至
         </a>
       
@@ -108,7 +108,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              代码生成流程设计
+              云托管服务确认清单
             
           </span>
         </div>
@@ -828,10 +828,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#问题回顾" class="md-nav__link">
+  <a href="#一部署与接入模式" class="md-nav__link">
     <span class="md-ellipsis">
       
-        问题回顾
+        一、部署与接入模式
       
     </span>
   </a>
@@ -839,10 +839,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#目标流程" class="md-nav__link">
+  <a href="#二主从切换行为" class="md-nav__link">
     <span class="md-ellipsis">
       
-        目标流程
+        二、主从切换行为
       
     </span>
   </a>
@@ -850,124 +850,13 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#各阶段说明" class="md-nav__link">
+  <a href="#三兼容性与资源限制" class="md-nav__link">
     <span class="md-ellipsis">
       
-        各阶段说明
+        三、兼容性与资源限制
       
     </span>
   </a>
-  
-    <nav class="md-nav" aria-label="各阶段说明">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#constitution-l1通用设计原则" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Constitution L1（通用设计原则）
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#技术总体方案" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        技术总体方案
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#constitution-l2架构约束原则" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Constitution L2（架构约束原则）
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#module-specs模块契约" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Module Specs（模块契约）
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#implementation-plan" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Implementation Plan
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#实施循环" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        实施循环
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#行业参考" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        行业参考
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="行业参考">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#关键参考" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        关键参考
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#与本流程的关系" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        与本流程的关系
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
   
 </li>
       
@@ -991,262 +880,89 @@
   
 
 
-<h1 id="代码生成流程设计">代码生成流程设计</h1>
+<h1 id="云托管服务确认清单">云托管服务确认清单</h1>
 <blockquote>
-<p>基于持久化改造（persistence-refactor-plan.md → ha-review-findings.md）的复盘。
-核心问题：plan 写得很细但全是 happy path，review 发现的问题本应在设计阶段避免。</p>
+<p>双机 active-active 部署前，需要和云托管方确认的问题。</p>
 </blockquote>
 <hr />
-<h2 id="问题回顾">问题回顾</h2>
-<p>这次的实际流程：</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>persistence-refactor-plan.md（很细，但全是 happy path）
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>    ↓
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>写代码（照着 plan 写，plan 没提的就随手放）
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>    ↓
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>review 发现（fencing 没做、职责错位、reconnect 矛盾……）
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>    ↓
-<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>补文档 ha-review-findings.md
-</code></pre></div>
-<p>Review 发现的问题分类：</p>
-<table>
-<thead>
-<tr>
-<th>问题</th>
-<th>表面原因</th>
-<th>深层原因</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>路由层做了 lease/stream 管理</td>
-<td>没有"谁负责执行生命周期"的规定</td>
-<td>没有定义模块的 ownership 边界</td>
-</tr>
-<tr>
-<td>lease 丢失后无 fencing</td>
-<td>只想了 happy path</td>
-<td>没有要求"获取资源 → 必须定义丢失时的行为"</td>
-</tr>
-<tr>
-<td>auto-deny 和 reconnect 自相矛盾</td>
-<td>分开做的，没对齐</td>
-<td>没有要求同一概念的语义一致</td>
-</tr>
-<tr>
-<td>本地文件假装 fallback</td>
-<td>看起来比"什么都不做"好</td>
-<td>没有"不能保证就别假装"的原则</td>
-</tr>
-<tr>
-<td>绕过 manager 直接调 repo</td>
-<td>能 work，更短</td>
-<td>规则写了但太具体，新边界出现时防不住</td>
-</tr>
-</tbody>
-</table>
-<p>关键发现：router 绕过 manager 直接调 repo 的问题被发现后，在 CLAUDE.md 里补了一条 "Routers must not bypass Manager to call Repo directly"。但这种事后补丁只防了一个具体边界——后来 router 直接调 RuntimeStore 的越界照样发生了，因为规则里没提 RuntimeStore。<strong>逐条补规则是打地鼠，需要的是高层原则，具体规则从原则推导。</strong></p>
+<h2 id="一部署与接入模式">一、部署与接入模式</h2>
+<blockquote>
+<p><strong>已确认</strong>：异地双活（北京 + 上海），每中心两台服务器各一个实例，不涉及跨中心流量。
+Redis：组 8（公共区一般业务），华为云 DCS Cluster 集群，与 MOJITO/UCAM/AOSP 等共用，峰值 TPS 2265。
+TDSQL：YDB 资源组一（一般业务系统），集中式实例（1 主 2 从，3 节点），DCN 同步，通过 3 PX 节点接入。</p>
+</blockquote>
+<ol>
+<li>
+<p>~~<strong>双活是同城还是异地？</strong>~~ → ✅ 异地（北京 + 上海）</p>
+</li>
+<li>
+<p>~~<strong>服务接入是否存在跨中心访问？</strong>~~ → ✅ 不存在，各中心独立服务</p>
+</li>
+<li>
+<p>~~<strong>跨中心的数据同步方式是什么？</strong>~~ → ✅ 不影响。中心绑定路由，每个中心只写自己的数据，跨中心同步仅用于灾备。</p>
+</li>
+<li>TDSQL：实例内 DCN 同步（实例级切换），跨中心通过 DBBridge 异步复制</li>
+<li>
+<p>Redis：各中心独立，不跨中心同步</p>
+</li>
+<li>
+<p>~~<strong>Redis 实例是否与其他系统共用？</strong>~~ → ✅ 共用（华为云 DCS 公共区 Cluster 集群）。云托管要求所有 key 加系统前缀，我们使用 <code>af:</code> 前缀。</p>
+<blockquote>
+<p><strong>注意</strong>：ArtifactFlow 使用 Redis 做协调（分布式锁、SSE Stream、Pub/Sub），不是缓存。Redis 不可用时降级策略为 health probe 返回 not ready，拒绝新请求，现有会话超时结束。</p>
+</blockquote>
+</li>
+</ol>
 <hr />
-<h2 id="目标流程">目标流程</h2>
-<p>不采用端到端自动化流程，而是<strong>人工走流程、借用工具辅助各阶段</strong>。这样流程中哪个环节出问题可以单独发现和优化（类似消融实验）。</p>
-<pre class="mermaid"><code>flowchart TD
-    REQ["需求描述"]
-    C1["Constitution L1\n通用设计原则（跨项目）"]
-    TECH["技术总体方案\n架构 / 语言 / 框架 / 部署模型 / 外部依赖"]
-    C2["Constitution L2\n架构约束原则（项目级）"]
-    SPEC["Module Specs\n契约 / 保证+不保证 / 量化约束 / 接口"]
-    PLAN["Implementation Plan\n按依赖排序，每步可独立验证"]
-
-    REQ --&gt; C1
-    C1 --&gt;|"约束技术选型"| TECH
-    TECH --&gt;|"暴露共享资源/部署假设\n→ 补充架构级原则"| C2
-    C1 &amp; C2 --&gt; SPEC
-    TECH --&gt; SPEC
-    SPEC --&gt; PLAN
-    PLAN --&gt; LOOP
-
-    subgraph LOOP["实施循环 (per plan step)"]
-        direction TB
-        S1["1. 读 Constitution + Spec + agent.md"]
-        S2["2. 按 step 性质决定测试策略"]
-        S3["3. 写代码"]
-        S4["4. 跑测试"]
-        S5["5. 新 session review"]
-        S1 --&gt; S2 --&gt; S3 --&gt; S4 --&gt; S5
-        AGENT["agent.md\n实施期间发现的设计问题\n（轻量修正层）"]
-    end</code></pre>
-<p><strong>Constitution 分两层</strong>：</p>
-<ul>
-<li><strong>L1 通用设计原则</strong>：跨项目复用，不依赖架构决策。如"同一概念只有一种语义"、"不能保证就别假装"。在技术方案之前写，约束选型方向。</li>
-<li><strong>L2 架构约束原则</strong>：依赖技术方案才能写出，项目级有效。如"共享外部资源必须声明 ownership 边界"、"对外部依赖的可用性假设必须显式声明"。技术方案确定后产出。</li>
-</ul>
-<p><strong>agent.md — 实施期间的轻量修正层</strong>：编码和 review 过程中发现的设计层面问题（spec 遗漏、原则缺失、边界条件未覆盖）不直接修改上游产物，而是追加到 agent.md。实施循环中每步开始时读取 agent.md 作为补充约束（类似 LoRA：不改 base weights，叠加一层适配）。整轮实施结束后，统一回顾 agent.md，将仍然有效的发现合并回 Constitution / Spec。</p>
+<h2 id="二主从切换行为">二、主从切换行为</h2>
+<blockquote>
+<p>主从切换分两种场景，时间窗口差异大，影响我们的超时和重试参数设计：
+- <strong>Switchover（计划切换）</strong>：运维主动触发（升级、维护），先同步数据再切换，通常亚秒~秒级
+- <strong>Failover（故障切换）</strong>：master 宕机，集群检测+选举 replica 提升。Redis Cluster 默认 <code>cluster-node-timeout=15s</code>（主观下线）+ 多数确认 + 投票选举，整个窗口约 <strong>15-20+ 秒</strong>；部分云托管数据库 switchover 也可能需要几十秒</p>
+<p>我们的设计已覆盖两种场景（XREAD 重试 + Pub/Sub 断连降级），以下确认用于参数调优，不阻塞实施。</p>
+</blockquote>
+<ol>
+<li>
+<p><strong>TDSQL 和 Redis 的 switchover / failover 时间窗口分别是多少？</strong>
+   影响 lease TTL、心跳间隔、重试等待时间的具体数值。如果 switchover 需要几十秒，lease TTL 需要相应放宽</p>
+</li>
+<li>
+<p><strong>Redis 主从切换时，已有的 Pub/Sub 连接和 XREAD 长连接会怎样？</strong>
+   是自动重连还是直接断开？我们业务层已有降级方案（F-06 XREAD 重试、F-09 Pub/Sub catch-and-deny），确认后用于调优重试参数</p>
+</li>
+<li>
+<p>~~<strong>Redis 主从切换后，Lua script cache 是否会清空？</strong>~~ → ✅ 不需要确认。使用 <code>register_script</code> 自动处理 NOSCRIPT → re-load → retry，无论是否清空都无影响。</p>
+</li>
+</ol>
 <hr />
-<h2 id="各阶段说明">各阶段说明</h2>
-<h3 id="constitution-l1通用设计原则">Constitution L1（通用设计原则）</h3>
-<ul>
-<li>跨模块、跨项目复用的约束，不依赖具体架构决策</li>
-<li>应该很短（一页以内），写一次，偶尔修订</li>
-<li><strong>在技术方案之前写</strong>，因为原则会影响技术选型</li>
-<li>示例方向（待细化）：</li>
-<li>每个模块只通过上一层的公开接口操作，不穿透</li>
-<li>获取的资源必须定义丢失时的行为</li>
-<li>同一个概念在系统里只有一种语义</li>
-<li>不能保证的事情不要假装做了</li>
-</ul>
-<h3 id="技术总体方案">技术总体方案</h3>
-<ul>
-<li>系统架构（分布式/单体）、语言/框架选型、模块划分</li>
-<li>这一步产出的是系统的大骨架，不涉及实现细节</li>
-</ul>
-<h3 id="constitution-l2架构约束原则">Constitution L2（架构约束原则）</h3>
-<ul>
-<li>依赖技术方案才能写出，项目级有效</li>
-<li>技术方案确定共享资源、部署模型、外部依赖后，从中推导出的约束</li>
-<li>示例方向（待细化）：</li>
-<li>共享外部资源必须声明 ownership 边界（命名空间隔离）</li>
-<li>对外部依赖的可用性假设必须显式声明（独占/共享、故障恢复窗口）</li>
-<li>不可假设运行环境独占（磁盘、端口、进程）</li>
-</ul>
-<h3 id="module-specs模块契约">Module Specs（模块契约）</h3>
-<ul>
-<li>每个模块的接口定义 + 不变量 + 失败行为</li>
-<li>关键是<strong>保证和不保证</strong>都要写，保证需要区分条件和边界：
-  <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>ExecutionRunner
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>  输入：conversation_id, message_id, coroutine
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>  保证：同一 conversation 同时只有一个执行
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>  保证：进程存活时，执行结束后 lease 在 finally 中释放
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>  保证：进程 crash 时，lease 在 TTL（90s）内自动释放
-<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>  保证：lease 丢失时执行被终止，post-processing 不执行
-<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>  不保证：执行中任务跨 Worker 迁移
-<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>  量化约束：
-<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>    - lease TTL = 90s，心跳间隔 = TTL/3（30s）
-<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a>    - lease 丢失检测延迟 ≤ 1 个心跳间隔（30s）
-<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a>    - permission interrupt 超时 = 300s
-</code></pre></div></li>
-<li><strong>量化约束</strong>不可省略——HA 类问题往往不是二元的"有没有"，而是"时间窗口够不够"。TTL、grace period、retention、failover 恢复窗口都要写进 spec，否则"逻辑对但参数和时序不稳"的问题会漏过</li>
-<li>这次缺的就是这个——persistence-refactor-plan.md 写了"怎么实现"，但没写每个模块的保证/不保证。如果当时写了"lease 丢失时执行被终止"，实现时就不会忘 fencing</li>
-</ul>
-<h3 id="implementation-plan">Implementation Plan</h3>
-<ul>
-<li>按模块依赖关系排序</li>
-<li>每一步可独立验证</li>
-<li>每一步的范围应区分性质：配置修正、结构重构、语义变更不混在同一步（方便 bisect）</li>
-</ul>
-<h3 id="实施循环">实施循环</h3>
-<p><strong>测试策略按 step 性质区分</strong>（不一刀切）：</p>
-<table>
-<thead>
-<tr>
-<th>Step 性质</th>
-<th>测试要求</th>
-<th>理由</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><strong>行为/契约变更</strong>（如 fencing 语义）</td>
-<td>Spec 级测试先写，再写代码</td>
-<td>测试就是 spec 的可执行版本，强制想清楚边界</td>
-</tr>
-<tr>
-<td><strong>模块边界变更</strong>（如职责收敛）</td>
-<td>当步带窄集成测试</td>
-<td>接缝问题只靠单元测试发现不了</td>
-</tr>
-<tr>
-<td><strong>配置修正</strong></td>
-<td>不需要新 spec 测试</td>
-<td>回归覆盖即可</td>
-</tr>
-<tr>
-<td><strong>纯重构</strong></td>
-<td>不需要新 spec 测试，现有测试必须全过</td>
-<td>行为不变是重构的前提</td>
-</tr>
-</tbody>
-</table>
-<p>Spec 级测试示例：</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="c1"># 从 spec 推导，不需要看实现</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">test_lease_lost_stops_execution</span><span class="p">():</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;lease 过期后，执行应被终止，不应写 DB&quot;&quot;&quot;</span>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">test_concurrent_execution_rejected</span><span class="p">():</span>
-<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;同一 conversation 并发提交第二个执行，应返回 conflict&quot;&quot;&quot;</span>
-</code></pre></div>
-<p>窄集成测试示例（模块边界变更时当步就要写）：</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">test_runner_submit_acquires_lease_and_creates_stream</span><span class="p">():</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;submit 内部完成 lease + stream 创建，router 不参与&quot;&quot;&quot;</span>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">test_runner_submit_rollback_on_stream_failure</span><span class="p">():</span>
-<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;stream 创建失败时，lease 和 interactive 被回滚&quot;&quot;&quot;</span>
-</code></pre></div>
-<p><strong>新 session review</strong>：</p>
-<ul>
-<li>每个 plan step 完成后，拉新 session review</li>
-<li>新 session 只给 constitution + spec + agent.md + diff，不给实现背景</li>
-<li>clean context 是 review 的价值所在——写代码的 session 带着"我为什么这么做"的隐含假设，review session 没有这些假设，反而能发现问题</li>
-<li>review 发现设计层面问题（spec 遗漏、原则缺失）→ 记录到 agent.md，不改上游产物</li>
-</ul>
-<p><strong>agent.md（实施期间的轻量修正层）</strong>：</p>
-<ul>
-<li>实施循环中发现的设计问题、踩坑经验、上游产物的缺漏，追加记录到 agent.md</li>
-<li>每步开始时读取，作为 Constitution + Spec 的补充约束（避免同一个坑踩两次）</li>
-<li><strong>实施期间默认不修改上游产物</strong>——上游冻结保证实施基线稳定，避免改设计引发连锁返工。如发现影响后续步骤依赖或验证边界的重大问题，经人工确认后可立即修订上游产物</li>
-<li>整轮实施结束后，统一回顾 agent.md，将仍然有效的发现合并回 Constitution / Spec，然后清空</li>
-<li>这也解释了为什么外部 reviewer 能抓到那么多问题——他没有"跟着 plan 一步步写过来"的上下文包袱</li>
-</ul>
-<hr />
-<h2 id="行业参考">行业参考</h2>
-<p>这个流程在业界已有名字：<strong>Spec-Driven Development (SDD)</strong>，2025 年下半年开始成熟。</p>
-<h3 id="关键参考">关键参考</h3>
-<ul>
-<li><strong>Constitutional SDD</strong>（<a href="https://arxiv.org/html/2602.02584">arxiv 论文</a>）— constitution 作为不可违反的原则层，每条原则有 ID + 约束 + 实现模式 + rationale。生成时注入 3-5 条相关原则作为 context，生成后对照原则校验</li>
-<li><strong>GitHub Spec Kit</strong>（<a href="https://github.com/github/spec-kit">GitHub</a>）— GitHub 官方开源的 SDD 工具链，提供 CLI + slash commands，支持 Claude Code / Copilot / Cursor 等 20+ agents。流程：Constitution → Specify → Plan → Tasks → Implement</li>
-<li><strong>cc-sdd</strong>（<a href="https://github.com/gotalab/cc-sdd">GitHub</a>）— 社区 SDD 工具，Requirements → Design → Tasks，带 <code>validate-design</code>（设计是否满足需求）和 <code>validate-gap</code>（代码是否满足需求）的校验命令</li>
-<li><strong>Addy Osmani 的实操流程</strong>（<a href="https://addyosmani.com/blog/ai-coding-workflow/">博客</a>）— Google Chrome 团队工程师。spec.md 包含需求 + 架构 + 数据模型 + 测试策略，"waterfall in 15 minutes"。关键实践：<strong>开第二个 AI session 来 review 第一个的输出</strong></li>
-<li><strong>Martin Fowler 团队的工具对比</strong>（<a href="https://martinfowler.com/articles/exploring-gen-ai/sdd-3-tools.html">文章</a>）— 对比 Kiro / Spec Kit / Tessl 三个工具。关键观察：现有工具的通病是<strong>流程太死板，小任务也要走完整流程</strong></li>
-</ul>
-<h3 id="与本流程的关系">与本流程的关系</h3>
-<table>
-<thead>
-<tr>
-<th>维度</th>
-<th>行业实践</th>
-<th>本流程</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>Constitution</td>
-<td>论文: "non-negotiable requirements with MUST/SHOULD/MAY"</td>
-<td>一致，待细化结构</td>
-</tr>
-<tr>
-<td>Spec 内容</td>
-<td>论文: constraint + rationale</td>
-<td>扩展为保证/不保证 + 量化约束</td>
-</tr>
-<tr>
-<td>新 session review</td>
-<td>Osmani: "spawn second AI session to critique"</td>
-<td>一致</td>
-</tr>
-<tr>
-<td>测试策略</td>
-<td>多数工具一刀切要求 spec-first test</td>
-<td>按 step 性质区分，避免假测试</td>
-</tr>
-<tr>
-<td>端到端自动化</td>
-<td>Spec Kit / cc-sdd 提供端到端工具链</td>
-<td><strong>不采用</strong>端到端自动化，人工走流程 + 借用工具辅助</td>
-</tr>
-</tbody>
-</table>
-<p>不采用端到端的原因：
-1. Martin Fowler 的观察——工具流程太死板，不适合所有任务规模
-2. 需要能单独观察每个环节的效果，发现和优化薄弱点（消融思路）
-3. 可以按需引入工具（如 Spec Kit 的 <code>specify check</code> 做校验、constitution slash command 做原则生成），而不是被工具链绑定</p>
+<h2 id="三兼容性与资源限制">三、兼容性与资源限制</h2>
+<ol>
+<li>
+<p>~~<strong>TDSQL 兼容的 PostgreSQL / MySQL 版本是多少？</strong>~~ → ✅ 基本确认 MySQL 兼容（应用通过 JDBC 连接 PX 节点）。Python 端使用 MySQL 方言（asyncmy + SQLAlchemy）。</p>
+</li>
+<li>
+<p>🌟 <strong>TDSQL 的接入方式是 VIP 还是需要客户端连接多个 PX 地址？</strong>
+   已知 3 PX 节点，需确认连接方式</p>
+</li>
+<li>
+<p>🌟 <strong>TDSQL 默认的事务隔离级别是什么？</strong>
+   我们的并发写入行为依赖隔离级别（预期 REPEATABLE READ）</p>
+</li>
+<li>
+<p>~~<strong>TDSQL 是否支持 <code>SELECT 1</code> 做连通性检查？</strong>~~ → ✅ MySQL 兼容，支持</p>
+</li>
+<li>
+<p>~~<strong>Redis 版本是多少？</strong>~~ → ✅ 5.0+。Stream/Lua 可用；无 Sharded Pub/Sub（7+ 才有），使用普通 Pub/Sub 广播模式，对我们影响不大（仅用于 interrupt 通知，流量小）</p>
+</li>
+<li>
+<p>🌟 <strong>Redis 是否有禁用或限制的命令？</strong>
+   特别关注：<code>SCRIPT LOAD</code>、<code>EVALSHA</code>（Lua 脚本原子操作依赖这两个）、<code>KEYS</code>（我们不用，仅确认）</p>
+</li>
+<li>
+<p><strong>Redis 和 TDSQL 单中心的最大连接数和内存上限？</strong>
+   我们用连接池 + Redis Stream 缓冲事件数据，需要确认上限。
+   参考值：连接池 maxTotal ≈ CPU 核数 × 2 + 冗余系数(3-5)，文档建议 50</p>
+</li>
+</ol>
 
 
 

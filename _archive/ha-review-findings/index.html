@@ -862,10 +862,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#f-02-health-端点缺少深度检查" class="md-nav__link">
+  <a href="#f-02-health-端点缺少深度检查--done-pr1" class="md-nav__link">
     <span class="md-ellipsis">
       
-        F-02 Health 端点缺少深度检查
+        F-02 Health 端点缺少深度检查 ✅ done (PR1)
       
     </span>
   </a>
@@ -884,10 +884,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#f-04-database_url-硬编码默认值生产隐患" class="md-nav__link">
+  <a href="#f-04-database_url-硬编码默认值生产隐患--done-pr1" class="md-nav__link">
     <span class="md-ellipsis">
       
-        F-04 DATABASE_URL 硬编码默认值（生产隐患）
+        F-04 DATABASE_URL 硬编码默认值（生产隐患） ✅ done (PR1)
       
     </span>
   </a>
@@ -1100,10 +1100,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#r-03-chatpy-路由直接访问-runnerstore" class="md-nav__link">
+  <a href="#r-03-chatpy-路由直接访问-runnerstoredeferred" class="md-nav__link">
     <span class="md-ellipsis">
       
-        R-03 chat.py: 路由直接访问 runner.store
+        R-03 chat.py: 路由直接访问 runner.store（deferred）
       
     </span>
   </a>
@@ -1159,6 +1159,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#依赖云托管确认的-findings" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        依赖云托管确认的 Findings
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1183,7 +1194,9 @@
 <blockquote>
 <p>持久化改造（persistence-refactor-plan.md）三轮全部完成后的 HA 专项 review。
 来源：自研 review + 外部 reviewer 反馈，合并去重后统一排列。
-评估基线：双服务器 active-active + 云托管 RDBMS + 云托管 Redis。</p>
+评估基线：异地双活（北京 + 上海），每中心两台服务器各一个实例，不涉及跨中心流量。各中心共享云托管 TDSQL + Redis，Redis 不跨中心同步。
+Redis：华为云 DCS Cluster（组 8 公共区），Redis 5.0+，<code>cluster-node-timeout</code> 默认 15s，failover 窗口约 15-20+ 秒。
+TDSQL：YDB 资源组一，集中式实例（1 主 2 从），DCN 同步，通过 3 PX 节点接入（MySQL 兼容）。</p>
 </blockquote>
 <hr />
 <h2 id="当前能力边界">当前能力边界</h2>
@@ -1208,8 +1221,8 @@
 </tr>
 <tr>
 <td>故障检测（readiness）</td>
-<td>❌</td>
-<td><code>/health</code> 不检查 DB/Redis</td>
+<td>✅</td>
+<td><code>/health/ready</code> 检查 DB + Redis（PR1）</td>
 </tr>
 <tr>
 <td>Redis failover 恢复</td>
@@ -1302,6 +1315,9 @@
 <a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">renew_lease</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">...</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
 <a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>    <span class="k">return</span> <span class="kc">True</span>
 </code></pre></div>
+<blockquote>
+<p><strong>TTL 参数设计</strong>：Redis Cluster failover 窗口约 15-20s（<code>cluster-node-timeout=15s</code> + 选举），期间续租会连续失败。lease TTL 需大于 failover 窗口，建议 <strong>60s</strong>，心跳间隔 20s（TTL/3），failover 期间有 ~3 次重试机会不会误判丢锁。</p>
+</blockquote>
 <p><strong>2. <code>_renew_loop</code> 检测到 lease 丢失 → <code>task.cancel()</code></strong></p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">_renew_loop</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">conversation_id</span><span class="p">,</span> <span class="n">task_id</span><span class="p">):</span>
 <a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>    <span class="n">interval</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_lease_ttl</span> <span class="o">//</span> <span class="mi">3</span>
@@ -1375,7 +1391,7 @@
 </code></pre></div>
 <p><strong>关键点</strong>：engine 和 controller 都不需要改动。engine 完全不知道 lease 的存在，<code>CancelledError</code> 是 asyncio 的标准取消机制。</p>
 <hr />
-<h3 id="f-02-health-端点缺少深度检查">F-02 Health 端点缺少深度检查</h3>
+<h3 id="f-02-health-端点缺少深度检查--done-pr1">F-02 Health 端点缺少深度检查 ✅ done (PR1)</h3>
 <p><strong>来源</strong>：Reviewer P2 + 自研 Review</p>
 <p><strong>问题</strong>：<code>main.py:98</code> 永远返回 <code>{"status": "healthy"}</code>，不验证 DB 和 Redis 连通性。负载均衡器会继续给故障节点分流量。</p>
 <p><strong>涉及文件</strong>：
@@ -1406,7 +1422,7 @@
 <a id="__codelineno-4-22" name="__codelineno-4-22" href="#__codelineno-4-22"></a>    <span class="n">healthy</span> <span class="o">=</span> <span class="nb">all</span><span class="p">(</span><span class="n">v</span> <span class="o">==</span> <span class="s2">&quot;ok&quot;</span> <span class="k">for</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">checks</span><span class="o">.</span><span class="n">values</span><span class="p">())</span>
 <a id="__codelineno-4-23" name="__codelineno-4-23" href="#__codelineno-4-23"></a>    <span class="k">return</span> <span class="n">JSONResponse</span><span class="p">(</span><span class="n">checks</span><span class="p">,</span> <span class="n">status_code</span><span class="o">=</span><span class="mi">200</span> <span class="k">if</span> <span class="n">healthy</span> <span class="k">else</span> <span class="mi">503</span><span class="p">)</span>
 </code></pre></div>
-<p>保留原 <code>/health</code> 指向 readiness（向后兼容）或直接替换。</p>
+<p>直接删除原 <code>/health</code> 端点，替换为 <code>/health/live</code> + <code>/health/ready</code>。</p>
 <hr />
 <h3 id="f-03-get_stream_status-同步异步接口不一致">F-03 <code>get_stream_status</code> 同步/异步接口不一致</h3>
 <p><strong>来源</strong>：自研 Review</p>
@@ -1417,7 +1433,7 @@
 - <code>src/api/services/redis_stream_transport.py</code></p>
 <p><strong>修复建议</strong>：Protocol 中 <code>get_stream_status</code> 改为 <code>async</code>，<code>InMemoryStreamTransport</code> 对应加 <code>async</code>（dict 操作不阻塞），调用点加 <code>await</code>。删除 <code>get_stream_status_async</code>。</p>
 <hr />
-<h3 id="f-04-database_url-硬编码默认值生产隐患">F-04 <code>DATABASE_URL</code> 硬编码默认值（生产隐患）</h3>
+<h3 id="f-04-database_url-硬编码默认值生产隐患--done-pr1">F-04 <code>DATABASE_URL</code> 硬编码默认值（生产隐患） ✅ done (PR1)</h3>
 <p><strong>来源</strong>：自研 Review + Reviewer 修正</p>
 <p><strong>问题</strong>：<code>config.py</code> 中 <code>DATABASE_URL</code> 的默认值硬编码为 SQLite。应用启动时 <code>dependencies.py:83</code> 总会把 <code>config.DATABASE_URL</code> 传给 <code>DatabaseManager</code>，所以 <code>DatabaseManager.__init__</code> 的 <code>None</code> fallback 不是真正的风险点——真正的风险是 <code>.env</code> 没配 <code>DATABASE_URL</code> 时，<code>config.py</code> 的默认值直接生效为 SQLite，双机部署各自用独立 SQLite，数据不同步且难以排查。</p>
 <p><strong>涉及文件</strong>：
@@ -1429,7 +1445,7 @@
 <li><code>config.py</code> 或 <code>dependencies.py</code> 的 <code>init_globals()</code>：启动时校验 <code>DATABASE_URL</code> 非空，空值 fail fast</li>
 <li><code>database.py</code>：移除 <code>database_url is None</code> 的 SQLite fallback（<code>create_test_database_manager()</code> 显式传 SQLite URL，不受影响）</li>
 </ol>
-<p>所有数据库配置统一通过 <code>.env</code> 提供，代码中不硬编码任何默认 URL。</p>
+<p>所有数据库配置统一通过 <code>.env</code> 提供，代码中不硬编码任何默认 URL。<code>.env.example</code> 中默认提供 SQLite 配置，方便本地开发。</p>
 <hr />
 <h2 id="p1--应该修复">P1 — 应该修复</h2>
 <h3 id="f-05-断线重连与-permission-auto-deny-冲突">F-05 断线重连与 permission auto-deny 冲突</h3>
@@ -1438,14 +1454,7 @@
 <p>网络抖动、LB 切连接、滚动发布期间的短暂断线都会被当成"用户拒绝工具调用"。</p>
 <p><strong>涉及文件</strong>：
 - <code>src/api/routers/stream.py</code> — <code>CancelledError</code> 处理</p>
-<p><strong>修复建议</strong>：</p>
-<p>三个方案按复杂度递增：</p>
-<ol>
-<li><strong>最简方案</strong>：删掉 auto-deny，依赖 <code>PERMISSION_TIMEOUT</code>（通常 300s）自然超时。缺点：用户真的走了也要等 5 分钟</li>
-<li><strong>Grace period</strong>：断连后不立刻 deny，启动延迟任务（比如 30s），期间客户端重连则取消 deny。需要额外状态管理</li>
-<li><strong>Consumer 计数</strong>：Redis 记录 stream 是否有活跃 consumer，只有确认无 consumer 且超过 grace period 才 deny</li>
-</ol>
-<p>建议先用方案 1（最安全），后续按 UX 需求升级到方案 2。</p>
+<p><strong>修复建议</strong>：删掉 auto-deny，依赖 <code>PERMISSION_TIMEOUT</code>（通常 300s）自然超时。</p>
 <hr />
 <h3 id="f-06-consume_events-xread-断连无恢复">F-06 <code>consume_events</code> XREAD 断连无恢复</h3>
 <p><strong>来源</strong>：Reviewer P2（故障链路经 Reviewer 二轮修正）</p>
@@ -1454,15 +1463,21 @@
 <p><strong>涉及文件</strong>：
 - <code>src/api/services/redis_stream_transport.py</code> — <code>consume_events</code></p>
 <p><strong>修复建议</strong>：</p>
-<p>在 XREAD 循环中加 <code>ConnectionError</code> 重试：</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="k">while</span> <span class="kc">True</span><span class="p">:</span>
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>    <span class="k">try</span><span class="p">:</span>
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>        <span class="n">result</span> <span class="o">=</span> <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">_redis</span><span class="o">.</span><span class="n">xread</span><span class="p">(</span><span class="o">...</span><span class="p">)</span>
-<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>    <span class="k">except</span> <span class="n">aioredis</span><span class="o">.</span><span class="n">ConnectionError</span><span class="p">:</span>
-<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>        <span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Redis connection lost during consume </span><span class="si">{</span><span class="n">stream_id</span><span class="si">}</span><span class="s2">, retrying...&quot;</span><span class="p">)</span>
-<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a>        <span class="k">await</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>  <span class="c1"># 短暂等待 Redis 恢复</span>
-<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a>        <span class="k">continue</span>
-<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a>    <span class="c1"># ... 正常处理</span>
+<p>在 XREAD 循环中加 <code>ConnectionError</code> 重试，最多重试 2 次（覆盖主从切换 1-3s），超过则放弃：</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="n">retry_count</span> <span class="o">=</span> <span class="mi">0</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="k">while</span> <span class="kc">True</span><span class="p">:</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>    <span class="k">try</span><span class="p">:</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>        <span class="n">result</span> <span class="o">=</span> <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">_redis</span><span class="o">.</span><span class="n">xread</span><span class="p">(</span><span class="o">...</span><span class="p">)</span>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>        <span class="n">retry_count</span> <span class="o">=</span> <span class="mi">0</span>  <span class="c1"># 成功则重置</span>
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a>    <span class="k">except</span> <span class="n">aioredis</span><span class="o">.</span><span class="n">ConnectionError</span><span class="p">:</span>
+<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a>        <span class="n">retry_count</span> <span class="o">+=</span> <span class="mi">1</span>
+<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a>        <span class="k">if</span> <span class="n">retry_count</span> <span class="o">&gt;</span> <span class="mi">2</span><span class="p">:</span>
+<a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a>            <span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Redis connection lost during consume </span><span class="si">{</span><span class="n">stream_id</span><span class="si">}</span><span class="s2">, giving up&quot;</span><span class="p">)</span>
+<a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a>            <span class="k">break</span>
+<a id="__codelineno-5-11" name="__codelineno-5-11" href="#__codelineno-5-11"></a>        <span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Redis connection lost during consume </span><span class="si">{</span><span class="n">stream_id</span><span class="si">}</span><span class="s2">, retry </span><span class="si">{</span><span class="n">retry_count</span><span class="si">}</span><span class="s2">/2&quot;</span><span class="p">)</span>
+<a id="__codelineno-5-12" name="__codelineno-5-12" href="#__codelineno-5-12"></a>        <span class="k">await</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
+<a id="__codelineno-5-13" name="__codelineno-5-13" href="#__codelineno-5-13"></a>        <span class="k">continue</span>
+<a id="__codelineno-5-14" name="__codelineno-5-14" href="#__codelineno-5-14"></a>    <span class="c1"># ... 正常处理</span>
 </code></pre></div>
 <p>注意：cursor 已在本地维护，重连后从上次位置继续读即可。</p>
 <hr />
@@ -1484,21 +1499,45 @@
 <hr />
 <h3 id="f-08-redis-连接缺少-retry-策略">F-08 Redis 连接缺少 retry 策略</h3>
 <p><strong>来源</strong>：自研 Review</p>
-<p><strong>问题</strong>：<code>dependencies.py:100</code> 用 <code>aioredis.from_url()</code> 创建客户端，未配置重试策略。云 Redis 主从切换（1-3s）期间所有 Redis 操作都会失败。</p>
+<p><strong>问题</strong>：<code>dependencies.py:100</code> 用 <code>aioredis.from_url()</code> 创建客户端，存在三个问题：
+1. 未配置重试策略，Redis 主从切换期间所有操作失败
+2. 未设置 <code>max_connections</code>，共用 Cluster 实例下可能耗尽连接
+3. 使用单机 <code>Redis</code> 客户端，生产 Cluster 模式下缺少 MOVED 重定向、路由表刷新等能力</p>
 <p><strong>涉及文件</strong>：
-- <code>src/api/dependencies.py</code> — Redis 客户端创建</p>
+- <code>src/api/dependencies.py</code> — Redis 客户端创建
+- <code>src/config.py</code> — 新增 Cluster 开关和连接池配置</p>
 <p><strong>修复建议</strong>：</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">redis.backoff</span><span class="w"> </span><span class="kn">import</span> <span class="n">ExponentialBackoff</span>
-<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">redis.retry</span><span class="w"> </span><span class="kn">import</span> <span class="n">Retry</span>
-<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>
-<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="n">_redis_client</span> <span class="o">=</span> <span class="n">aioredis</span><span class="o">.</span><span class="n">from_url</span><span class="p">(</span>
-<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a>    <span class="n">config</span><span class="o">.</span><span class="n">REDIS_URL</span><span class="p">,</span>
-<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a>    <span class="n">decode_responses</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
-<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a>    <span class="n">retry</span><span class="o">=</span><span class="n">Retry</span><span class="p">(</span><span class="n">ExponentialBackoff</span><span class="p">(</span><span class="n">cap</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span> <span class="n">base</span><span class="o">=</span><span class="mf">0.1</span><span class="p">),</span> <span class="n">retries</span><span class="o">=</span><span class="mi">3</span><span class="p">),</span>
-<a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a>    <span class="n">retry_on_timeout</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
-<a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">redis.asyncio</span><span class="w"> </span><span class="kn">import</span> <span class="n">Redis</span><span class="p">,</span> <span class="n">RedisCluster</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">redis.backoff</span><span class="w"> </span><span class="kn">import</span> <span class="n">ExponentialBackoff</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="kn">from</span><span class="w"> </span><span class="nn">redis.retry</span><span class="w"> </span><span class="kn">import</span> <span class="n">Retry</span>
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="n">retry</span> <span class="o">=</span> <span class="n">Retry</span><span class="p">(</span><span class="n">ExponentialBackoff</span><span class="p">(</span><span class="n">cap</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span> <span class="n">base</span><span class="o">=</span><span class="mf">0.1</span><span class="p">),</span> <span class="n">retries</span><span class="o">=</span><span class="mi">3</span><span class="p">)</span>
+<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a>
+<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a><span class="k">if</span> <span class="n">config</span><span class="o">.</span><span class="n">REDIS_CLUSTER</span><span class="p">:</span>
+<a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a>    <span class="c1"># Cluster 模式：共用实例，需控制连接数</span>
+<a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a>    <span class="c1"># max_connections: CPU核数×2+冗余(3-5)，参考值 50</span>
+<a id="__codelineno-7-10" name="__codelineno-7-10" href="#__codelineno-7-10"></a>    <span class="n">_redis_client</span> <span class="o">=</span> <span class="n">RedisCluster</span><span class="o">.</span><span class="n">from_url</span><span class="p">(</span>
+<a id="__codelineno-7-11" name="__codelineno-7-11" href="#__codelineno-7-11"></a>        <span class="n">config</span><span class="o">.</span><span class="n">REDIS_URL</span><span class="p">,</span>
+<a id="__codelineno-7-12" name="__codelineno-7-12" href="#__codelineno-7-12"></a>        <span class="n">decode_responses</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+<a id="__codelineno-7-13" name="__codelineno-7-13" href="#__codelineno-7-13"></a>        <span class="n">max_connections</span><span class="o">=</span><span class="n">config</span><span class="o">.</span><span class="n">REDIS_MAX_CONNECTIONS</span><span class="p">,</span>
+<a id="__codelineno-7-14" name="__codelineno-7-14" href="#__codelineno-7-14"></a>        <span class="n">retry</span><span class="o">=</span><span class="n">retry</span><span class="p">,</span>
+<a id="__codelineno-7-15" name="__codelineno-7-15" href="#__codelineno-7-15"></a>        <span class="n">retry_on_timeout</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+<a id="__codelineno-7-16" name="__codelineno-7-16" href="#__codelineno-7-16"></a>    <span class="p">)</span>
+<a id="__codelineno-7-17" name="__codelineno-7-17" href="#__codelineno-7-17"></a><span class="k">else</span><span class="p">:</span>
+<a id="__codelineno-7-18" name="__codelineno-7-18" href="#__codelineno-7-18"></a>    <span class="c1"># 本地开发：单机 Redis，API 与 RedisCluster 一致，业务代码零改动</span>
+<a id="__codelineno-7-19" name="__codelineno-7-19" href="#__codelineno-7-19"></a>    <span class="n">_redis_client</span> <span class="o">=</span> <span class="n">Redis</span><span class="o">.</span><span class="n">from_url</span><span class="p">(</span>
+<a id="__codelineno-7-20" name="__codelineno-7-20" href="#__codelineno-7-20"></a>        <span class="n">config</span><span class="o">.</span><span class="n">REDIS_URL</span><span class="p">,</span>
+<a id="__codelineno-7-21" name="__codelineno-7-21" href="#__codelineno-7-21"></a>        <span class="n">decode_responses</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+<a id="__codelineno-7-22" name="__codelineno-7-22" href="#__codelineno-7-22"></a>        <span class="n">max_connections</span><span class="o">=</span><span class="n">config</span><span class="o">.</span><span class="n">REDIS_MAX_CONNECTIONS</span><span class="p">,</span>
+<a id="__codelineno-7-23" name="__codelineno-7-23" href="#__codelineno-7-23"></a>        <span class="n">retry</span><span class="o">=</span><span class="n">retry</span><span class="p">,</span>
+<a id="__codelineno-7-24" name="__codelineno-7-24" href="#__codelineno-7-24"></a>        <span class="n">retry_on_timeout</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+<a id="__codelineno-7-25" name="__codelineno-7-25" href="#__codelineno-7-25"></a>    <span class="p">)</span>
 </code></pre></div>
-<p>这覆盖了短暂网络抖动场景。对于 Pub/Sub 连接（长连接），redis-py 的 retry 不适用，需要在业务层处理（见 F-06、F-09）。</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="c1"># config.py</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="n">REDIS_CLUSTER</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span>          <span class="c1"># 生产环境设 True</span>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="n">REDIS_MAX_CONNECTIONS</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">50</span>      <span class="c1"># 云托管建议: CPU核数×2+冗余(3-5)</span>
+</code></pre></div>
+<p>这覆盖了短暂网络抖动场景。对于 Pub/Sub 和 XREAD 长连接，redis-py 的 retry 不适用，需要在业务层处理（见 F-06、F-09）。</p>
 <hr />
 <h2 id="p2--建议修复--加固">P2 — 建议修复 / 加固</h2>
 <h3 id="f-09-wait_for_interrupt-pubsub-断连无捕获">F-09 <code>wait_for_interrupt</code> Pub/Sub 断连无捕获</h3>
@@ -1507,22 +1546,7 @@
 <p>自然兜底：interrupt 有 <code>PERMISSION_TIMEOUT</code>（通常 300s），即使不做恢复，最坏情况是超时 deny。但 engine 异常退出比正常超时更难处理（error state vs timeout deny）。</p>
 <p><strong>涉及文件</strong>：
 - <code>src/api/services/redis_runtime_store.py</code> — <code>wait_for_interrupt</code></p>
-<p><strong>修复建议</strong>：</p>
-<p>在 Pub/Sub 循环中捕获 <code>ConnectionError</code>，重走 check-subscribe-check-wait：</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="k">except</span> <span class="n">aioredis</span><span class="o">.</span><span class="n">ConnectionError</span><span class="p">:</span>
-<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>    <span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Pub/Sub connection lost for </span><span class="si">{</span><span class="n">message_id</span><span class="si">}</span><span class="s2">, re-checking status...&quot;</span><span class="p">)</span>
-<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>    <span class="k">await</span> <span class="n">pubsub</span><span class="o">.</span><span class="n">aclose</span><span class="p">()</span>
-<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>    <span class="c1"># 重新检查状态（可能在断连期间已 resolve）</span>
-<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>    <span class="k">if</span> <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">_is_resolved</span><span class="p">(</span><span class="n">message_id</span><span class="p">):</span>
-<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a>        <span class="k">return</span> <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_resume_data</span><span class="p">(</span><span class="n">message_id</span><span class="p">)</span>
-<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a>    <span class="c1"># 重建 Pub/Sub 订阅</span>
-<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a>    <span class="n">pubsub</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_redis</span><span class="o">.</span><span class="n">pubsub</span><span class="p">()</span>
-<a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a>    <span class="k">await</span> <span class="n">pubsub</span><span class="o">.</span><span class="n">subscribe</span><span class="p">(</span><span class="n">channel_name</span><span class="p">)</span>
-<a id="__codelineno-8-10" name="__codelineno-8-10" href="#__codelineno-8-10"></a>    <span class="c1"># 双重检查</span>
-<a id="__codelineno-8-11" name="__codelineno-8-11" href="#__codelineno-8-11"></a>    <span class="k">if</span> <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">_is_resolved</span><span class="p">(</span><span class="n">message_id</span><span class="p">):</span>
-<a id="__codelineno-8-12" name="__codelineno-8-12" href="#__codelineno-8-12"></a>        <span class="o">...</span>
-</code></pre></div>
-<p>或简化为：捕获 <code>ConnectionError</code> → <code>return None</code>（视为超时 deny），行为与现有 timeout 一致。</p>
+<p><strong>修复建议</strong>：捕获 <code>ConnectionError</code> → <code>return None</code>（视为超时 deny），行为与现有 <code>PERMISSION_TIMEOUT</code> 一致。Pub/Sub 断连只影响单次审批，不值得做复杂重连。</p>
 <hr />
 <h3 id="f-10-删除-event-fallback-本地文件假安全感">F-10 删除 event fallback 本地文件（假安全感）</h3>
 <p><strong>来源</strong>：Reviewer P2 + 重新评估</p>
@@ -1545,7 +1569,6 @@
 <a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a>    <span class="p">)</span>
 <a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a>    <span class="c1"># 不做 fallback — events 是审计数据，conversation + artifact 已持久化</span>
 </code></pre></div>
-<p>如果未来有审计合规需求，再考虑 outbox pattern（events 与业务写在同一事务）。</p>
 <hr />
 <h3 id="f-11-llm_chunk-每-token-一条全量快照--coalesced-snapshots">F-11 <code>llm_chunk</code> 每 token 一条全量快照 → coalesced snapshots</h3>
 <p><strong>来源</strong>：自研 Review + Reviewer 深化分析</p>
@@ -1599,8 +1622,9 @@
 - engine 是纯逻辑层，不应知道传输优化
 - transport 是通用传输层，不应有事件类型语义
 - <code>_run_and_push</code> 是 controller → transport 的桥梁，天然是 coalescing 的位置</p>
-<p><strong>效果</strong>：
-- 2000 字符回复：~500 条 chunk → ~25 条（80ms 节流），Redis Stream 压力降 95%
+<p><strong>效果</strong>（实测数据见 <code>tests/manual/coalescer_bench.py</code>，qwen3.5-plus thinking 模式）：
+- 754 chunks → 4 chunks（99% 减少），累积传输 3,205,614 → 17,679 字符（99% 减少）
+- reasoning 和 content 分开缓冲，切换时强制 flush，无数据丢失
 - MAXLEN 1000 绰绰有余，可保持不改
 - 断线重连仍安全：每条仍是累计快照，丢中间态靠下一条追平
 - 前端零改动</p>
@@ -1608,18 +1632,18 @@
 <h3 id="f-12-push_event-check-then-act-竞态">F-12 <code>push_event</code> check-then-act 竞态</h3>
 <p><strong>来源</strong>：自研 Review</p>
 <p><strong>问题</strong>：<code>redis_stream_transport.py:96-124</code> 先 <code>HGET status</code>，再 <code>exists(stream_key)</code>，再 <code>XADD</code>，三步非原子。<code>close_stream</code> 可能在 HGET 之后、XADD 之前执行，事件写入已关闭的 stream。</p>
-<p><strong>影响</strong>：实际危害有限（TTL 会清理），consumer 已正常退出。</p>
+<p><strong>影响</strong>：当前不会发生——<code>close_stream</code> 和 <code>push_event</code> 在同一执行流程中由 controller 顺序调用，close 一定在最后一个 push 之后。仅当未来引入外部强制关闭 stream 的场景时才可能触发。TTL 会清理孤儿事件。</p>
 <p><strong>涉及文件</strong>：
 - <code>src/api/services/redis_stream_transport.py</code> — <code>push_event</code></p>
-<p><strong>修复建议</strong>：可以用 Lua 脚本原子化 <code>HGET status + XADD</code>，或接受这个 edge case（在注释中标注已知竞态窗口）。</p>
+<p><strong>修复建议</strong>：不修。在 <code>push_event</code> 代码中加注释标注已知竞态窗口即可。</p>
 <hr />
 <h3 id="f-13-redis-key-无命名空间隔离">F-13 Redis key 无命名空间隔离</h3>
 <p><strong>来源</strong>：自研 Review</p>
-<p><strong>问题</strong>：所有 key 用 <code>lease:</code>, <code>stream:</code>, <code>interrupt:</code> 等扁平前缀。同一 Redis 实例被多环境（staging/production）或多 ArtifactFlow 实例共用时 key 冲突。</p>
+<p><strong>问题</strong>：所有 key 用 <code>lease:</code>, <code>stream:</code>, <code>interrupt:</code> 等扁平前缀。Redis 已确认为华为云 DCS 公共区 Cluster 集群，与其他系统共用，云托管要求所有 key 加系统前缀。</p>
 <p><strong>涉及文件</strong>：
 - <code>src/api/services/redis_runtime_store.py</code> — key helper 方法
 - <code>src/api/services/redis_stream_transport.py</code> — key helper 方法</p>
-<p><strong>修复建议</strong>：加可配置前缀：</p>
+<p><strong>修复建议</strong>：加可配置前缀（已确认为强制要求）：</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="c1"># config.py</span>
 <a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="n">REDIS_KEY_PREFIX</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;af&quot;</span>
 <a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a>
@@ -1627,6 +1651,9 @@
 <a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a><span class="k">def</span><span class="w"> </span><span class="nf">_lease_key</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">conversation_id</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
 <a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a>    <span class="k">return</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">_prefix</span><span class="si">}</span><span class="s2">:lease:</span><span class="si">{</span><span class="n">conversation_id</span><span class="si">}</span><span class="s2">&quot;</span>
 </code></pre></div>
+<blockquote>
+<p><strong>Cluster 注意</strong>：Redis 为 Cluster 模式，单个 Lua 脚本涉及的所有 key 必须在同一 hash slot。使用 hash tag 保证：<code>{af:session123}:lease</code> 和 <code>{af:session123}:fencing_token</code> 中 <code>{af:session123}</code> 相同 → 同 slot。F-01 的 Lua 脚本需同步适配。</p>
+</blockquote>
 <hr />
 <h3 id="f-14-stream-ttl-默认-30s-偏短">F-14 Stream TTL 默认 30s 偏短</h3>
 <p><strong>来源</strong>：自研 Review</p>
@@ -1677,9 +1704,9 @@
 - 路由知道 controller 的内部依赖结构（ArtifactRepository、ConversationRepository、MessageEventRepository...）
 - DB session 在路由层创建但被后台任务使用（生命周期跨越了 HTTP 请求）
 - 修改 controller 依赖需要同时改路由代码</p>
-<p><strong>归属</strong>：移到 <code>ExecutionRunner</code> 或独立 factory，路由层不应知道 controller 的构造细节。</p>
+<p><strong>归属</strong>：抽到 <code>src/api/services/controller_factory.py</code>，一个 <code>create_controller</code> async context manager。路由和 runner 都调它。</p>
 <hr />
-<h3 id="r-03-chatpy-路由直接访问-runnerstore">R-03 chat.py: 路由直接访问 <code>runner.store</code></h3>
+<h3 id="r-03-chatpy-路由直接访问-runnerstoredeferred">R-03 chat.py: 路由直接访问 <code>runner.store</code>（deferred）</h3>
 <p><strong>位置</strong>：<code>chat.py</code> 多处（<code>send_message</code>、<code>inject_message</code>、<code>cancel_execution</code>、<code>resume_execution</code>）</p>
 <p>路由层通过 <code>runner.store</code> 直接调用 RuntimeStore 的方法（<code>try_acquire_lease</code>、<code>get_interactive_message_id</code>、<code>inject_message</code>、<code>request_cancel</code>、<code>resolve_interrupt</code>）。<code>RuntimeStore</code> 是 <code>ExecutionRunner</code> 的实现细节，不应暴露给路由层。</p>
 <p><strong>问题</strong>：
@@ -1753,7 +1780,7 @@
 </blockquote>
 <hr />
 <h3 id="重构影响范围">重构影响范围</h3>
-<p>R-01 ~ R-03 的修复与 F-01 高度重叠（都是把 chat.py 中的执行生命周期逻辑收敛到 <code>ExecutionRunner</code>），建议合并实施。R-04 与 F-05 重叠。</p>
+<p>R-01、R-02 的修复与 F-01 高度重叠（都是把 chat.py 中的执行生命周期逻辑收敛到 <code>ExecutionRunner</code>），建议合并实施。R-04 与 F-05 重叠。R-03 在 R-01 完成后严重程度降低（剩余的 store 调用只是 inject/cancel/resume 各一次数据访问），defer。</p>
 <p>预期改动后的 <code>chat.py</code> <code>send_message</code>：</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="nd">@router</span><span class="o">.</span><span class="n">post</span><span class="p">(</span><span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="n">response_model</span><span class="o">=</span><span class="n">ChatResponse</span><span class="p">)</span>
 <a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">send_message</span><span class="p">(</span>
@@ -1915,13 +1942,13 @@
 <td><strong>PR1</strong></td>
 <td>F-02 + F-04</td>
 <td>配置 + 运维</td>
-<td>极小：health 端点 + config 默认值</td>
+<td>✅ done</td>
 </tr>
 <tr>
 <td><strong>PR2</strong></td>
-<td>R-01 ~ R-03</td>
+<td>R-01 + R-02</td>
 <td>结构重构</td>
-<td>中：chat.py 瘦身 → Runner 接管生命周期，<strong>行为不变</strong></td>
+<td>中：chat.py 瘦身 → Runner 接管生命周期 + controller factory 抽离，<strong>行为不变</strong>（R-03 deferred）</td>
 </tr>
 <tr>
 <td><strong>PR3</strong></td>
@@ -1944,6 +1971,51 @@
 </tbody>
 </table>
 <p><strong>为什么 F-09 提前到 PR4</strong>：只修 XREAD（F-06）不修 Pub/Sub（F-09），Redis failover 恢复只做了一半——主从切换时 XREAD 能重连但 Pub/Sub 断了，interrupt 仍然会异常退出。两者应同批处理。</p>
+<hr />
+<h2 id="依赖云托管确认的-findings">依赖云托管确认的 Findings</h2>
+<p>以下 findings 的方案方向已确定，但具体参数或是否实施依赖 <code>cloud-service-checklist.md</code> 的确认结果：</p>
+<table>
+<thead>
+<tr>
+<th>Finding</th>
+<th>依赖确认项</th>
+<th>影响范围</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>F-01</td>
+<td>~~主从切换时间窗口~~</td>
+<td>✅ Cluster failover 约 15-20s，lease TTL 建议 60s / 心跳 20s</td>
+</tr>
+<tr>
+<td>F-06</td>
+<td>主从切换时间窗口 + XREAD 断线行为</td>
+<td>failover 窗口已知（15-20s），重试 sleep 可设 10s，2 次覆盖窗口</td>
+</tr>
+<tr>
+<td>F-07</td>
+<td>~~主从切换后 script cache 是否清空~~</td>
+<td>✅ 无需确认，<code>register_script</code> 自动处理</td>
+</tr>
+<tr>
+<td>F-08</td>
+<td>主从切换时间窗口</td>
+<td>failover 窗口已知（15-20s），backoff 参数可据此设定</td>
+</tr>
+<tr>
+<td>F-09</td>
+<td>Pub/Sub 断线行为</td>
+<td>已简化为 catch-and-deny，影响不大</td>
+</tr>
+<tr>
+<td>F-13</td>
+<td>~~Redis 是否与其他系统共用实例~~</td>
+<td>✅ 已确认共用（华为云 DCS Cluster），前缀为强制要求</td>
+</tr>
+</tbody>
+</table>
+<p>其余 findings（F-02、F-03、F-04、F-05、F-10、F-11、F-12、F-14、F-15、R-01~R-04）不依赖确认结果，可直接实施。</p>
 
 
 
