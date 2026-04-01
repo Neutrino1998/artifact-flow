@@ -12,7 +12,7 @@
 |------|------|------|
 | 共享控制面（lease/interrupt/stream 跨 Worker） | ✅ | Lua CAS、check-subscribe-check-wait、心跳续租 |
 | Fencing / split-brain 防护 | ❌ | lease 丢失后无阻断机制 |
-| 故障检测（readiness） | ❌ | `/health` 不检查 DB/Redis |
+| 故障检测（readiness） | ✅ | `/health/ready` 检查 DB + Redis（PR1） |
 | Redis failover 恢复 | ⚠️ 部分 | `is_cancelled`/`drain_messages` 有 graceful degrade，Pub/Sub 和 XREAD 无恢复 |
 | 事件持久化保证 | ⚠️ 降级 | fallback 到本地文件，容器环境不可靠 |
 
@@ -156,7 +156,7 @@ async def send_message(request, current_user, runner, ...):
 
 ---
 
-### F-02 Health 端点缺少深度检查
+### F-02 Health 端点缺少深度检查 ✅ done (PR1)
 
 **来源**：Reviewer P2 + 自研 Review
 
@@ -215,7 +215,7 @@ async def readiness():
 
 ---
 
-### F-04 `DATABASE_URL` 硬编码默认值（生产隐患）
+### F-04 `DATABASE_URL` 硬编码默认值（生产隐患） ✅ done (PR1)
 
 **来源**：自研 Review + Reviewer 修正
 
@@ -695,7 +695,7 @@ async def send_message(
 
 | PR | 内容 | 性质 | 回归面 |
 |----|------|------|--------|
-| **PR1** | F-02 + F-04 | 配置 + 运维 | 极小：health 端点 + config 默认值 |
+| **PR1** | F-02 + F-04 | 配置 + 运维 | ✅ done |
 | **PR2** | R-01 + R-02 | 结构重构 | 中：chat.py 瘦身 → Runner 接管生命周期 + controller factory 抽离，**行为不变**（R-03 deferred） |
 | **PR3** | F-01 | 并发语义变更 | 中：renew_lease → bool、lease lost → task.cancel()、跳过 post-processing |
 | **PR4** | F-05（含 R-04）~ F-09（F-09 从 P2 提前合入） | Redis 韧性 | 中：XREAD 重试、Pub/Sub 重试、auto-deny 改 grace period、连接 retry、NOSCRIPT 容错 |
