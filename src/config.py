@@ -54,7 +54,7 @@ class Settings(BaseSettings):
     MAX_PAGE_SIZE: int = 100
 
     # 数据库配置
-    DATABASE_URL: str = "sqlite+aiosqlite:///data/artifactflow.db"
+    DATABASE_URL: str = ""
     DATABASE_POOL_SIZE: int = 5
     DATABASE_MAX_OVERFLOW: int = 10
     DATABASE_POOL_TIMEOUT: int = 30
@@ -72,6 +72,12 @@ config = Settings()
 
 def validate_config() -> None:
     """Validate required config values. Called during app lifespan startup."""
+    if not config.DATABASE_URL:
+        raise RuntimeError(
+            "ARTIFACTFLOW_DATABASE_URL environment variable is not set. "
+            "Example: ARTIFACTFLOW_DATABASE_URL=sqlite+aiosqlite:///data/artifactflow.db\n"
+            "See .env.example for more options."
+        )
     if not config.JWT_SECRET:
         raise RuntimeError(
             "ARTIFACTFLOW_JWT_SECRET environment variable is not set. "

@@ -114,6 +114,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/chat/{conv_id}/active-stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Active Stream
+         * @description 查询会话是否有活跃的执行流，用于断线重连
+         */
+        get: operations["get_active_stream_api_v1_chat__conv_id__active_stream_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/chat/{conv_id}/inject": {
         parameters: {
             query?: never;
@@ -221,7 +241,7 @@ export interface paths {
          * Resume Execution
          * @description 恢复中断的执行（权限确认后）
          *
-         *     通过 TaskManager.resolve_interrupt() 唤醒暂停的 coroutine。
+         *     通过 RuntimeStore.resolve_interrupt() 唤醒暂停的 coroutine。
          */
         post: operations["resume_execution_api_v1_chat__conv_id__resume_post"];
         delete?: never;
@@ -410,15 +430,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/health": {
+    "/health/live": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /** Health Check */
-        get: operations["health_check_health_get"];
+        /** Liveness */
+        get: operations["liveness_health_live_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/health/ready": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Readiness */
+        get: operations["readiness_health_ready_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1321,6 +1358,37 @@ export interface operations {
             };
         };
     };
+    get_active_stream_api_v1_chat__conv_id__active_stream_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                conv_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     inject_message_api_v1_chat__conv_id__inject_post: {
         parameters: {
             query?: never;
@@ -1780,7 +1848,27 @@ export interface operations {
             };
         };
     };
-    health_check_health_get: {
+    liveness_health_live_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    readiness_health_ready_get: {
         parameters: {
             query?: never;
             header?: never;

@@ -10,8 +10,11 @@ from typing import AsyncGenerator
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from fastapi.responses import JSONResponse
+from sqlalchemy import text
+
 from config import config, validate_config
-from api.dependencies import init_globals, close_globals
+from api.dependencies import init_globals, close_globals, get_db_manager, get_redis_client
 from api.routers import auth, chat, artifacts, stream
 from utils.doc_converter import DocConverter
 from utils.logger import get_logger
@@ -95,9 +98,42 @@ def create_app() -> FastAPI:
     )
 
     # 健康检查端点
-    @app.get("/health")
-    async def health_check():
-        return {"status": "healthy"}
+    @app.get("/health/live")
+    async def liveness():
+        return {"status": "ok"}
+
+    @app.get("/health/ready")
+    async def readiness():
+        checks: dict = {}
+        ok = True
+
+        # DB check
+        try:
+            db = get_db_manager()
+            async with db.session() as session:
+                await session.execute(text("SELECT 1"))
+            checks["db"] = "ok"
+        except Exception:
+            logger.exception("Readiness: DB check failed")
+            checks["db"] = "error"
+            ok = False
+
+        # Redis check (optional)
+        redis = get_redis_client()
+        if redis is not None:
+            try:
+                await redis.ping()
+                checks["redis"] = "ok"
+            except Exception:
+                logger.exception("Readiness: Redis check failed")
+                checks["redis"] = "error"
+                ok = False
+
+        status_code = 200 if ok else 503
+        return JSONResponse(
+            content={"status": "ok" if ok else "error", **checks},
+            status_code=status_code,
+        )
 
     return app
 

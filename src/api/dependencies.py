@@ -228,6 +228,11 @@ def get_db_manager() -> DatabaseManager:
     return _db_manager
 
 
+def get_redis_client() -> Optional[Any]:
+    """获取 Redis 客户端（未配置 Redis 时返回 None）"""
+    return _redis_client
+
+
 def get_compaction_manager():
     """获取 CompactionManager 单例"""
     return _compaction_manager

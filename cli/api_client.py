@@ -48,7 +48,7 @@ class APIClient:
         """健康检查"""
         async with httpx.AsyncClient(base_url=self.base_url, timeout=10) as client:
             try:
-                resp = await client.get("/health")
+                resp = await client.get("/health/ready")
                 return resp.status_code == 200
             except Exception:
                 return False

@@ -91,17 +91,26 @@ async def login(username: str, password: str) -> bool:
 # ============================================================
 
 async def test_health():
-    """测试健康检查端点"""
-    log("Testing /health endpoint...")
+    """测试健康检查端点（liveness + readiness）"""
+    log("Testing /health/live endpoint...")
 
     async with httpx.AsyncClient(base_url=BASE_URL) as client:
-        resp = await client.get("/health")
-
+        # Liveness
+        resp = await client.get("/health/live")
         if resp.status_code == 200:
-            log(f"Health check passed: {resp.json()}", "OK")
+            log(f"Liveness check passed: {resp.json()}", "OK")
+        else:
+            log(f"Liveness check failed: {resp.status_code}", "ERROR")
+            return False
+
+        # Readiness
+        log("Testing /health/ready endpoint...")
+        resp = await client.get("/health/ready")
+        if resp.status_code == 200:
+            log(f"Readiness check passed: {resp.json()}", "OK")
             return True
         else:
-            log(f"Health check failed: {resp.status_code}", "ERROR")
+            log(f"Readiness check failed: {resp.status_code} - {resp.json()}", "ERROR")
             return False
 
 

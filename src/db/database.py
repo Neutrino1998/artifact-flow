@@ -8,8 +8,6 @@
 - 连接池管理（MySQL/PostgreSQL）
 """
 
-import os
-from pathlib import Path
 from typing import Optional, AsyncGenerator
 from contextlib import asynccontextmanager
 
@@ -64,12 +62,7 @@ class DatabaseManager:
             pool_recycle: 连接回收秒数（仅 MySQL/PG）
             pool_pre_ping: 是否启用连接存活检测（仅 MySQL/PG）
         """
-        # 默认数据库路径
-        if database_url is None:
-            data_dir = Path("data")
-            data_dir.mkdir(parents=True, exist_ok=True)
-            database_url = f"sqlite+aiosqlite:///{data_dir}/artifactflow.db"
-
+        assert database_url, "database_url must be provided"
         self.database_url = database_url
         self.echo = echo
         self._pool_size = pool_size
