@@ -31,9 +31,11 @@ async def _noop_coro():
     pass
 
 
-async def _blocking_coro(event: asyncio.Event):
-    """Coroutine that blocks until *event* is set."""
-    await event.wait()
+def _blocking_factory(event: asyncio.Event):
+    """Return a coro factory that blocks until *event* is set."""
+    async def _coro():
+        await event.wait()
+    return _coro
 
 
 async def _failing_coro():
@@ -55,7 +57,7 @@ class TestSubmit:
         async def coro():
             done.set()
 
-        task = await runner.submit("conv-1", "t1", coro(), user_id="u1", stream_transport=_mock_transport)
+        task = await runner.submit("conv-1", "t1", coro, user_id="u1", stream_transport=_mock_transport)
         await done.wait()
         await task  # let cleanup run
         await asyncio.sleep(0)  # yield to allow finally block
@@ -64,12 +66,10 @@ class TestSubmit:
     async def test_duplicate_task_id_raises(self):
         runner = ExecutionRunner()
         blocker = asyncio.Event()
-        await runner.submit("conv-1", "t1", _blocking_coro(blocker), user_id="u1", stream_transport=_mock_transport)
+        await runner.submit("conv-1", "t1", _blocking_factory(blocker), user_id="u1", stream_transport=_mock_transport)
 
-        dup_coro = _noop_coro()
         with pytest.raises(DuplicateExecutionError):
-            await runner.submit("conv-1", "t1", dup_coro, user_id="u1", stream_transport=_mock_transport)
-        dup_coro.close()  # prevent "coroutine was never awaited" warning
+            await runner.submit("conv-1", "t1", _noop_coro, user_id="u1", stream_transport=_mock_transport)
 
         blocker.set()
         await runner.shutdown(timeout=2)
@@ -89,8 +89,8 @@ class TestSubmit:
             t2_started.set()
             await release2.wait()
 
-        await runner.submit("conv-1", "t1", coro1(), user_id="u1", stream_transport=_mock_transport)
-        await runner.submit("conv-2", "t2", coro2(), user_id="u1", stream_transport=_mock_transport)
+        await runner.submit("conv-1", "t1", coro1, user_id="u1", stream_transport=_mock_transport)
+        await runner.submit("conv-2", "t2", coro2, user_id="u1", stream_transport=_mock_transport)
         await t1_started.wait()
         await t2_started.wait()
 
@@ -100,7 +100,7 @@ class TestSubmit:
         async def coro3():
             t3_started.set()
 
-        await runner.submit("conv-3", "t3", coro3(), user_id="u1", stream_transport=_mock_transport)
+        await runner.submit("conv-3", "t3", coro3, user_id="u1", stream_transport=_mock_transport)
         await asyncio.sleep(0.05)
         assert not t3_started.is_set()
 
@@ -114,7 +114,7 @@ class TestSubmit:
 
     async def test_exception_cleans_up(self):
         runner = ExecutionRunner()
-        task = await runner.submit("conv-1", "t1", _failing_coro(), user_id="u1", stream_transport=_mock_transport)
+        task = await runner.submit("conv-1", "t1", _failing_coro, user_id="u1", stream_transport=_mock_transport)
         await asyncio.sleep(0.05)
         assert runner.active_task_count == 0
 
@@ -124,7 +124,7 @@ class TestSubmit:
         blocker = asyncio.Event()
 
         # submit() now acquires lease + marks interactive internally
-        await runner.submit("conv-1", "t1", _blocking_coro(blocker), user_id="u1", stream_transport=_mock_transport)
+        await runner.submit("conv-1", "t1", _blocking_factory(blocker), user_id="u1", stream_transport=_mock_transport)
 
         # Set up additional store state that should be cleaned up
         store._interrupts["t1"] = _InterruptState(interrupt_data={"tool": "x"})
@@ -160,14 +160,14 @@ class TestShutdown:
             await asyncio.sleep(0.1)
             completed.set()
 
-        await runner.submit("conv-1", "t1", slow_coro(), user_id="u1", stream_transport=_mock_transport)
+        await runner.submit("conv-1", "t1", slow_coro, user_id="u1", stream_transport=_mock_transport)
         await runner.shutdown(timeout=5)
         assert completed.is_set()
 
     async def test_shutdown_cancels_on_timeout(self):
         runner = ExecutionRunner()
         blocker = asyncio.Event()
-        await runner.submit("conv-1", "t1", _blocking_coro(blocker), user_id="u1", stream_transport=_mock_transport)
+        await runner.submit("conv-1", "t1", _blocking_factory(blocker), user_id="u1", stream_transport=_mock_transport)
 
         await runner.shutdown(timeout=0.1)
         # Task should be cancelled after timeout
@@ -178,7 +178,7 @@ class TestShutdown:
         runner = ExecutionRunner(store=store)
         blocker = asyncio.Event()
 
-        await runner.submit("conv-1", "msg-1", _blocking_coro(blocker), user_id="u1", stream_transport=_mock_transport)
+        await runner.submit("conv-1", "msg-1", _blocking_factory(blocker), user_id="u1", stream_transport=_mock_transport)
         store._interrupts["msg-1"] = _InterruptState(interrupt_data={})
 
         # Capture interrupt for verification
@@ -198,7 +198,7 @@ class TestShutdown:
     async def test_shutdown_clears_tasks(self):
         runner = ExecutionRunner()
         blocker = asyncio.Event()
-        await runner.submit("conv-1", "t1", _blocking_coro(blocker), user_id="u1", stream_transport=_mock_transport)
+        await runner.submit("conv-1", "t1", _blocking_factory(blocker), user_id="u1", stream_transport=_mock_transport)
 
         blocker.set()
         await runner.shutdown(timeout=2)
@@ -218,7 +218,7 @@ class TestSubmitOrchestration:
         runner = ExecutionRunner(store=store)
         blocker = asyncio.Event()
 
-        await runner.submit("conv-1", "t1", _blocking_coro(blocker), user_id="u1", stream_transport=_mock_transport)
+        await runner.submit("conv-1", "t1", _blocking_factory(blocker), user_id="u1", stream_transport=_mock_transport)
 
         # Verify lease + interactive were set
         assert await store.get_leased_message_id("conv-1") == "t1"
@@ -232,13 +232,11 @@ class TestSubmitOrchestration:
         runner = ExecutionRunner(store=store)
         blocker = asyncio.Event()
 
-        await runner.submit("conv-1", "t1", _blocking_coro(blocker), user_id="u1", stream_transport=_mock_transport)
+        await runner.submit("conv-1", "t1", _blocking_factory(blocker), user_id="u1", stream_transport=_mock_transport)
 
-        # Second submit for same conversation → ConflictError
-        coro = _noop_coro()
+        # Second submit for same conversation → ConflictError (no orphan coroutine)
         with pytest.raises(ConflictError):
-            await runner.submit("conv-1", "t2", coro, user_id="u1", stream_transport=_mock_transport)
-        coro.close()
+            await runner.submit("conv-1", "t2", _noop_coro, user_id="u1", stream_transport=_mock_transport)
 
         blocker.set()
         await runner.shutdown(timeout=2)
@@ -252,10 +250,9 @@ class TestSubmitOrchestration:
                 raise RuntimeError("stream create failed")
             async def close_stream(self, stream_id): return True
 
-        coro = _noop_coro()
+        # No orphan coroutine — factory is never called on failure
         with pytest.raises(RuntimeError, match="stream create failed"):
-            await runner.submit("conv-1", "t1", coro, user_id="u1", stream_transport=_FailingTransport())
-        coro.close()
+            await runner.submit("conv-1", "t1", _noop_coro, user_id="u1", stream_transport=_FailingTransport())
 
         # Lease + interactive should have been rolled back
         assert await store.get_leased_message_id("conv-1") is None

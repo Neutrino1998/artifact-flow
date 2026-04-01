@@ -64,10 +64,12 @@ async def _simulate_active_task(app, conv_id: str, msg_id: str) -> asyncio.Event
 
     blocker = asyncio.Event()
 
-    async def sleeping():
-        await blocker.wait()
+    def sleeping_factory():
+        async def sleeping():
+            await blocker.wait()
+        return sleeping()
 
-    await runner.submit(conv_id, msg_id, sleeping(), user_id="test-user", stream_transport=_MockStreamTransport())
+    await runner.submit(conv_id, msg_id, sleeping_factory, user_id="test-user", stream_transport=_MockStreamTransport())
     return blocker
 
 

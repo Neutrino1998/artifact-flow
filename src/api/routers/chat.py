@@ -119,7 +119,7 @@ async def send_message(
     # submit 内部处理 lease + interactive + stream 编排
     try:
         await runner.submit(
-            conversation_id, message_id, execute_and_push(),
+            conversation_id, message_id, execute_and_push,
             user_id=user_id, stream_transport=stream_transport,
         )
     except ConflictError:

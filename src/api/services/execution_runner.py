@@ -12,7 +12,7 @@ ExecutionRunner — 本地 asyncio 任务调度
 
 import asyncio
 import contextlib
-from typing import TYPE_CHECKING, Coroutine
+from typing import TYPE_CHECKING, Callable, Coroutine
 
 from api.services.runtime_store import InMemoryRuntimeStore, RuntimeStore
 
@@ -64,7 +64,7 @@ class ExecutionRunner:
         self,
         conversation_id: str,
         task_id: str,
-        coro: Coroutine,
+        coro_factory: Callable[[], Coroutine],
         *,
         user_id: str,
         stream_transport: "StreamTransport",
@@ -75,10 +75,13 @@ class ExecutionRunner:
         编排生命周期：acquire lease → mark interactive → create stream → run task.
         失败时自动回滚 lease + interactive 状态。
 
+        接收 coroutine factory 而非 coroutine 对象，确保 coroutine 仅在编排成功后
+        才被创建，避免预调度失败路径产生未被 await 的孤儿 coroutine。
+
         Args:
             conversation_id: 对话 ID（用于 cleanup_execution）
             task_id: 任务 ID（message_id）
-            coro: 要执行的协程
+            coro_factory: 零参数 callable，调用后返回要执行的协程
             user_id: 当前用户 ID（用于 stream owner）
             stream_transport: StreamTransport 实例
 
@@ -108,6 +111,9 @@ class ExecutionRunner:
             await self.store.release_lease(conversation_id, task_id)
             await self.store.clear_engine_interactive(conversation_id, task_id)
             raise
+
+        # 编排成功后才创建 coroutine — 不会产生孤儿
+        coro = coro_factory()
 
         async def _wrapped():
             heartbeat = None
