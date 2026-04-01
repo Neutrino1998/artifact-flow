@@ -12,9 +12,12 @@ ExecutionRunner — 本地 asyncio 任务调度
 
 import asyncio
 import contextlib
-from typing import Coroutine
+from typing import TYPE_CHECKING, Coroutine
 
 from api.services.runtime_store import InMemoryRuntimeStore, RuntimeStore
+
+if TYPE_CHECKING:
+    from api.services.stream_transport import StreamTransport
 from utils.logger import get_logger
 
 logger = get_logger("ArtifactFlow")
@@ -22,6 +25,11 @@ logger = get_logger("ArtifactFlow")
 
 class DuplicateExecutionError(Exception):
     """重复执行错误（message_id 已存在活跃任务）"""
+    pass
+
+
+class ConflictError(Exception):
+    """会话已有活跃执行（lease 冲突）"""
     pass
 
 
@@ -52,23 +60,54 @@ class ExecutionRunner:
 
         logger.info(f"ExecutionRunner initialized (max_concurrent={max_concurrent}, lease_ttl={lease_ttl})")
 
-    async def submit(self, conversation_id: str, task_id: str, coro: Coroutine) -> asyncio.Task:
+    async def submit(
+        self,
+        conversation_id: str,
+        task_id: str,
+        coro: Coroutine,
+        *,
+        user_id: str,
+        stream_transport: "StreamTransport",
+    ) -> asyncio.Task:
         """
         提交一个后台任务
+
+        编排生命周期：acquire lease → mark interactive → create stream → run task.
+        失败时自动回滚 lease + interactive 状态。
 
         Args:
             conversation_id: 对话 ID（用于 cleanup_execution）
             task_id: 任务 ID（message_id）
             coro: 要执行的协程
+            user_id: 当前用户 ID（用于 stream owner）
+            stream_transport: StreamTransport 实例
 
         Returns:
             asyncio.Task 实例
 
         Raises:
             DuplicateExecutionError: task_id 已存在活跃任务
+            ConflictError: 会话已有活跃执行（lease 冲突）
         """
         if task_id in self._tasks:
             raise DuplicateExecutionError(f"Execution already running for {task_id}")
+
+        # 原子地获取 conversation lease
+        active = await self.store.try_acquire_lease(conversation_id, task_id)
+        if active:
+            raise ConflictError(
+                "An execution is already active for this conversation. "
+                "Use POST /chat/{conv_id}/inject to send input to the running execution."
+            )
+
+        # lease 之后的所有步骤失败时必须回滚
+        try:
+            await self.store.mark_engine_interactive(conversation_id, task_id)
+            await stream_transport.create_stream(task_id, owner_user_id=user_id)
+        except Exception:
+            await self.store.release_lease(conversation_id, task_id)
+            await self.store.clear_engine_interactive(conversation_id, task_id)
+            raise
 
         async def _wrapped():
             heartbeat = None

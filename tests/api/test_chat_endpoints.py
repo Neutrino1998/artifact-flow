@@ -48,22 +48,26 @@ async def _seed_conversation(
     return conv_id, [msg1_id, msg2_id]
 
 
+class _MockStreamTransport:
+    """Minimal mock for StreamTransport — satisfies submit() orchestration."""
+    async def create_stream(self, stream_id, owner_user_id=None): pass
+    async def close_stream(self, stream_id): return True
+
+
 async def _simulate_active_task(app, conv_id: str, msg_id: str) -> asyncio.Event:
     """
-    Register a lease + interactive state and submit a sleeping coroutine to simulate an active task.
+    Submit a sleeping coroutine to simulate an active task.
+    submit() now handles lease + interactive internally.
     Returns a blocker event that can be set to let the task complete.
     """
     runner: ExecutionRunner = app.dependency_overrides[get_execution_runner]()
-    store = runner.store
-    await store.try_acquire_lease(conv_id, msg_id)
-    await store.mark_engine_interactive(conv_id, msg_id)
 
     blocker = asyncio.Event()
 
     async def sleeping():
         await blocker.wait()
 
-    await runner.submit(conv_id, msg_id, sleeping())
+    await runner.submit(conv_id, msg_id, sleeping(), user_id="test-user", stream_transport=_MockStreamTransport())
     return blocker
 
 

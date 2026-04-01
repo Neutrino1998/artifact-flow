@@ -10,16 +10,12 @@ Chat Router
 - POST /api/v1/chat/{conv_id}/resume - 恢复中断执行
 """
 
-import asyncio
-from contextlib import asynccontextmanager
-from typing import AsyncGenerator, AsyncIterator, Optional
+from typing import Optional
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from config import config
 from api.dependencies import (
-    get_agents,
     get_compaction_manager,
     get_conversation_manager,
     get_current_user,
@@ -27,7 +23,6 @@ from api.dependencies import (
     get_db_session,
     get_stream_transport,
     get_execution_runner,
-    get_tools,
 )
 from api.services.auth import TokenPayload
 from api.schemas.chat import (
@@ -43,8 +38,9 @@ from api.schemas.chat import (
     ConversationSummary,
     MessageResponse,
 )
+from api.services.controller_factory import create_controller, run_and_push, sanitize_error_event
 from api.services.stream_transport import StreamTransport
-from api.services.execution_runner import ExecutionRunner
+from api.services.execution_runner import ConflictError, ExecutionRunner
 from core.conversation_manager import ConversationManager
 from repositories.base import NotFoundError
 from utils.logger import get_logger, set_request_context
@@ -62,120 +58,6 @@ async def _verify_ownership(
         raise HTTPException(status_code=404, detail=f"Conversation '{conv_id}' not found")
 
 
-def _sanitize_error_event(event: dict) -> dict:
-    """Strip internal error details from error events in production."""
-    if config.DEBUG:
-        return event
-    if event.get("type") == "error" and isinstance(event.get("data"), dict):
-        event = {**event, "data": {**event["data"], "error": "Internal server error"}}
-    return event
-
-
-@asynccontextmanager
-async def _create_controller(conversation_id: str, message_id: str) -> AsyncGenerator:
-    """
-    Build a fresh ExecutionController with its own DB session.
-
-    Why not use Depends(get_controller)?
-    send_message() launches a background task whose lifetime exceeds the HTTP request.
-    Depends(get_db_session) closes the session when the request ends, but the background
-    task still needs a live session. This context manager provides an independent session
-    scoped to the background task's lifetime.
-
-    Usage:
-        async with _create_controller(conv_id, msg_id) as ctrl:
-            async for event in ctrl.stream_execute(...):
-                ...
-    """
-    from core.controller import ExecutionController
-    from core.engine import EngineHooks
-    from core.conversation_manager import ConversationManager as CM
-    from tools.builtin.artifact_ops import ArtifactManager, create_artifact_tools
-    from repositories.artifact_repo import ArtifactRepository
-    from repositories.conversation_repo import ConversationRepository as CR
-    from repositories.message_event_repo import MessageEventRepository
-
-    db_manager = get_db_manager()
-    runner = get_execution_runner()
-    store = runner.store
-    agents = get_agents()
-
-    async with db_manager.session() as session:
-        artifact_repo = ArtifactRepository(session)
-        artifact_manager = ArtifactManager(artifact_repo)
-
-        # 合并全局工具 + 请求级 artifact 工具
-        artifact_tools = create_artifact_tools(artifact_manager)
-        all_tools = {**get_tools(), **{t.name: t for t in artifact_tools}}
-
-        conv_repo = CR(session)
-        conv_manager = CM(conv_repo)
-        event_repo = MessageEventRepository(session)
-
-        hooks = EngineHooks(
-            check_cancelled=store.is_cancelled,
-            wait_for_interrupt=store.wait_for_interrupt,
-            drain_messages=store.drain_messages,
-        )
-
-        async def _on_engine_exit(conv_id: str, msg_id: str) -> None:
-            await store.clear_engine_interactive(conv_id, msg_id)
-
-        yield ExecutionController(
-            agents=agents,
-            tools=all_tools,
-            hooks=hooks,
-            artifact_manager=artifact_manager,
-            conversation_manager=conv_manager,
-            message_event_repo=event_repo,
-            compaction_manager=get_compaction_manager(),
-            on_engine_exit=_on_engine_exit,
-        )
-
-
-async def _run_and_push(
-    stream_transport: StreamTransport,
-    stream_id: str,
-    event_stream: AsyncIterator[dict],
-) -> None:
-    """
-    Consume events from a controller stream and push them to the StreamTransport.
-
-    Handles timeout and unexpected errors, pushing sanitized error events.
-    Execution runs to completion even if the SSE client disconnects.
-    Stream is always closed by the producer in the finally block.
-    """
-    stream_closed = False
-    try:
-        async with asyncio.timeout(config.STREAM_TIMEOUT):
-            async for event in event_stream:
-                if stream_closed:
-                    continue
-                if not await stream_transport.push_event(stream_id, _sanitize_error_event(event)):
-                    logger.info(f"Stream {stream_id} closed, execution will continue to completion")
-                    stream_closed = True
-
-    except TimeoutError:
-        logger.error(f"Execution timed out after {config.STREAM_TIMEOUT}s for {stream_id}")
-        await stream_transport.push_event(stream_id, _sanitize_error_event({
-            "type": "error",
-            "timestamp": datetime.now().isoformat(),
-            "data": {"success": False, "error": f"Execution timed out after {config.STREAM_TIMEOUT}s"}
-        }))
-
-    except Exception as e:
-        logger.exception(f"Error in execution: {e}")
-        await stream_transport.push_event(stream_id, _sanitize_error_event({
-            "type": "error",
-            "timestamp": datetime.now().isoformat(),
-            "data": {"success": False, "error": str(e)}
-        }))
-
-    finally:
-        # Producer 侧关闭 stream — 设 closed 状态 + 延迟清理 TTL
-        await stream_transport.close_stream(stream_id)
-
-
 @router.post("", response_model=ChatResponse)
 async def send_message(
     request: ChatRequest,
@@ -191,8 +73,6 @@ async def send_message(
     """
     from uuid import uuid4
 
-    store = runner.store
-
     # 为新消息准备 ID
     conversation_id = request.conversation_id
     if not conversation_id:
@@ -205,59 +85,49 @@ async def send_message(
     if request.conversation_id:
         await _verify_ownership(conversation_id, current_user, conversation_manager)
 
-    # 原子地获取 conversation lease — 在任何 await 之前完成，消除竞争窗口
-    active = await store.try_acquire_lease(conversation_id, message_id)
-    if active:
+    # 确保 conversation 存在（失败需返回 HTTP 错误，保留在路由层）
+    await conversation_manager.ensure_conversation_exists(conversation_id, user_id=user_id)
+
+    # 设置请求上下文
+    set_request_context(message_id=message_id, conv_id=conversation_id)
+
+    # 构造执行闭包
+    async def execute_and_push():
+        try:
+            async with create_controller(conversation_id, message_id) as ctrl:
+                parent_kwargs = {}
+                if 'parent_message_id' in request.model_fields_set:
+                    parent_kwargs['parent_message_id'] = request.parent_message_id
+                await run_and_push(
+                    stream_transport,
+                    message_id,
+                    ctrl.stream_execute(
+                        user_input=request.user_input,
+                        conversation_id=conversation_id,
+                        message_id=message_id,
+                        **parent_kwargs,
+                    ),
+                )
+        except Exception as e:
+            logger.exception(f"Failed to initialize execution: {e}")
+            await stream_transport.push_event(message_id, sanitize_error_event({
+                "type": "error",
+                "timestamp": datetime.now().isoformat(),
+                "data": {"success": False, "error": str(e)}
+            }))
+
+    # submit 内部处理 lease + interactive + stream 编排
+    try:
+        await runner.submit(
+            conversation_id, message_id, execute_and_push(),
+            user_id=user_id, stream_transport=stream_transport,
+        )
+    except ConflictError:
         raise HTTPException(
             status_code=409,
             detail="An execution is already active for this conversation. "
                    "Use POST /chat/{conv_id}/inject to send input to the running execution.",
         )
-
-    # lease 之后的所有步骤失败时必须回滚，否则 lease 永久泄漏
-    try:
-        # 标记 engine 可交互
-        await store.mark_engine_interactive(conversation_id, message_id)
-
-        # 确保 conversation 存在
-        await conversation_manager.ensure_conversation_exists(conversation_id, user_id=user_id)
-
-        # 创建 stream（使用 message_id 作为 stream key）
-        await stream_transport.create_stream(message_id, owner_user_id=user_id)
-
-        # 设置请求上下文
-        set_request_context(message_id=message_id, conv_id=conversation_id)
-
-        # 启动后台任务
-        async def execute_and_push():
-            try:
-                async with _create_controller(conversation_id, message_id) as ctrl:
-                    parent_kwargs = {}
-                    if 'parent_message_id' in request.model_fields_set:
-                        parent_kwargs['parent_message_id'] = request.parent_message_id
-                    await _run_and_push(
-                        stream_transport,
-                        message_id,
-                        ctrl.stream_execute(
-                            user_input=request.user_input,
-                            conversation_id=conversation_id,
-                            message_id=message_id,
-                            **parent_kwargs,
-                        ),
-                    )
-            except Exception as e:
-                logger.exception(f"Failed to initialize execution: {e}")
-                await stream_transport.push_event(message_id, _sanitize_error_event({
-                    "type": "error",
-                    "timestamp": datetime.now().isoformat(),
-                    "data": {"success": False, "error": str(e)}
-                }))
-
-        await runner.submit(conversation_id, message_id, execute_and_push())
-    except Exception:
-        await store.release_lease(conversation_id, message_id)
-        await store.clear_engine_interactive(conversation_id, message_id)
-        raise
 
     return ChatResponse(
         conversation_id=conversation_id,

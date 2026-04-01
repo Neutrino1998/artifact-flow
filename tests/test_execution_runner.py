@@ -8,13 +8,22 @@ import asyncio
 
 import pytest
 
-from api.services.execution_runner import DuplicateExecutionError, ExecutionRunner
+from api.services.execution_runner import ConflictError, DuplicateExecutionError, ExecutionRunner
 from api.services.runtime_store import InMemoryRuntimeStore, _InterruptState
 
 
 # ============================================================
 # Helpers
 # ============================================================
+
+
+class _MockStreamTransport:
+    """Minimal mock for StreamTransport — satisfies submit() orchestration."""
+    async def create_stream(self, stream_id, owner_user_id=None): pass
+    async def close_stream(self, stream_id): return True
+
+
+_mock_transport = _MockStreamTransport()
 
 
 async def _noop_coro():
@@ -46,7 +55,7 @@ class TestSubmit:
         async def coro():
             done.set()
 
-        task = await runner.submit("conv-1", "t1", coro())
+        task = await runner.submit("conv-1", "t1", coro(), user_id="u1", stream_transport=_mock_transport)
         await done.wait()
         await task  # let cleanup run
         await asyncio.sleep(0)  # yield to allow finally block
@@ -55,11 +64,11 @@ class TestSubmit:
     async def test_duplicate_task_id_raises(self):
         runner = ExecutionRunner()
         blocker = asyncio.Event()
-        await runner.submit("conv-1", "t1", _blocking_coro(blocker))
+        await runner.submit("conv-1", "t1", _blocking_coro(blocker), user_id="u1", stream_transport=_mock_transport)
 
         dup_coro = _noop_coro()
         with pytest.raises(DuplicateExecutionError):
-            await runner.submit("conv-1", "t1", dup_coro)
+            await runner.submit("conv-1", "t1", dup_coro, user_id="u1", stream_transport=_mock_transport)
         dup_coro.close()  # prevent "coroutine was never awaited" warning
 
         blocker.set()
@@ -80,8 +89,8 @@ class TestSubmit:
             t2_started.set()
             await release2.wait()
 
-        await runner.submit("conv-1", "t1", coro1())
-        await runner.submit("conv-2", "t2", coro2())
+        await runner.submit("conv-1", "t1", coro1(), user_id="u1", stream_transport=_mock_transport)
+        await runner.submit("conv-2", "t2", coro2(), user_id="u1", stream_transport=_mock_transport)
         await t1_started.wait()
         await t2_started.wait()
 
@@ -91,7 +100,7 @@ class TestSubmit:
         async def coro3():
             t3_started.set()
 
-        await runner.submit("conv-3", "t3", coro3())
+        await runner.submit("conv-3", "t3", coro3(), user_id="u1", stream_transport=_mock_transport)
         await asyncio.sleep(0.05)
         assert not t3_started.is_set()
 
@@ -105,7 +114,7 @@ class TestSubmit:
 
     async def test_exception_cleans_up(self):
         runner = ExecutionRunner()
-        task = await runner.submit("conv-1", "t1", _failing_coro())
+        task = await runner.submit("conv-1", "t1", _failing_coro(), user_id="u1", stream_transport=_mock_transport)
         await asyncio.sleep(0.05)
         assert runner.active_task_count == 0
 
@@ -114,12 +123,10 @@ class TestSubmit:
         runner = ExecutionRunner(store=store)
         blocker = asyncio.Event()
 
-        await runner.submit("conv-1", "t1", _blocking_coro(blocker))
+        # submit() now acquires lease + marks interactive internally
+        await runner.submit("conv-1", "t1", _blocking_coro(blocker), user_id="u1", stream_transport=_mock_transport)
 
-        # Set up store state that should be cleaned up
-        await store.try_acquire_lease("conv-1", "t1")
-        await store.mark_engine_interactive("conv-1", "t1")
-        from api.services.runtime_store import _InterruptState
+        # Set up additional store state that should be cleaned up
         store._interrupts["t1"] = _InterruptState(interrupt_data={"tool": "x"})
         store._cancellations["t1"] = asyncio.Event()
         store._queues["t1"] = asyncio.Queue()
@@ -153,14 +160,14 @@ class TestShutdown:
             await asyncio.sleep(0.1)
             completed.set()
 
-        await runner.submit("conv-1", "t1", slow_coro())
+        await runner.submit("conv-1", "t1", slow_coro(), user_id="u1", stream_transport=_mock_transport)
         await runner.shutdown(timeout=5)
         assert completed.is_set()
 
     async def test_shutdown_cancels_on_timeout(self):
         runner = ExecutionRunner()
         blocker = asyncio.Event()
-        await runner.submit("conv-1", "t1", _blocking_coro(blocker))
+        await runner.submit("conv-1", "t1", _blocking_coro(blocker), user_id="u1", stream_transport=_mock_transport)
 
         await runner.shutdown(timeout=0.1)
         # Task should be cancelled after timeout
@@ -171,7 +178,7 @@ class TestShutdown:
         runner = ExecutionRunner(store=store)
         blocker = asyncio.Event()
 
-        await runner.submit("conv-1", "msg-1", _blocking_coro(blocker))
+        await runner.submit("conv-1", "msg-1", _blocking_coro(blocker), user_id="u1", stream_transport=_mock_transport)
         store._interrupts["msg-1"] = _InterruptState(interrupt_data={})
 
         # Capture interrupt for verification
@@ -191,9 +198,65 @@ class TestShutdown:
     async def test_shutdown_clears_tasks(self):
         runner = ExecutionRunner()
         blocker = asyncio.Event()
-        await runner.submit("conv-1", "t1", _blocking_coro(blocker))
+        await runner.submit("conv-1", "t1", _blocking_coro(blocker), user_id="u1", stream_transport=_mock_transport)
 
         blocker.set()
         await runner.shutdown(timeout=2)
 
         assert len(runner._tasks) == 0
+
+
+# ============================================================
+# TestSubmitOrchestration — lease / interactive / stream lifecycle
+# ============================================================
+
+
+class TestSubmitOrchestration:
+
+    async def test_submit_acquires_lease_and_marks_interactive(self):
+        store = InMemoryRuntimeStore()
+        runner = ExecutionRunner(store=store)
+        blocker = asyncio.Event()
+
+        await runner.submit("conv-1", "t1", _blocking_coro(blocker), user_id="u1", stream_transport=_mock_transport)
+
+        # Verify lease + interactive were set
+        assert await store.get_leased_message_id("conv-1") == "t1"
+        assert await store.get_interactive_message_id("conv-1") == "t1"
+
+        blocker.set()
+        await runner.shutdown(timeout=2)
+
+    async def test_submit_conflict_error(self):
+        store = InMemoryRuntimeStore()
+        runner = ExecutionRunner(store=store)
+        blocker = asyncio.Event()
+
+        await runner.submit("conv-1", "t1", _blocking_coro(blocker), user_id="u1", stream_transport=_mock_transport)
+
+        # Second submit for same conversation → ConflictError
+        coro = _noop_coro()
+        with pytest.raises(ConflictError):
+            await runner.submit("conv-1", "t2", coro, user_id="u1", stream_transport=_mock_transport)
+        coro.close()
+
+        blocker.set()
+        await runner.shutdown(timeout=2)
+
+    async def test_submit_rollback_on_stream_create_failure(self):
+        store = InMemoryRuntimeStore()
+        runner = ExecutionRunner(store=store)
+
+        class _FailingTransport:
+            async def create_stream(self, stream_id, owner_user_id=None):
+                raise RuntimeError("stream create failed")
+            async def close_stream(self, stream_id): return True
+
+        coro = _noop_coro()
+        with pytest.raises(RuntimeError, match="stream create failed"):
+            await runner.submit("conv-1", "t1", coro, user_id="u1", stream_transport=_FailingTransport())
+        coro.close()
+
+        # Lease + interactive should have been rolled back
+        assert await store.get_leased_message_id("conv-1") is None
+        assert await store.get_interactive_message_id("conv-1") is None
