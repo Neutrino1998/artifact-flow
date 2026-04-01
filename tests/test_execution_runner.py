@@ -259,15 +259,19 @@ class TestSubmitOrchestration:
         assert await store.get_interactive_message_id("conv-1") is None
 
     async def test_submit_rollback_on_factory_failure(self):
+        from api.services.stream_transport import InMemoryStreamTransport
+
         store = InMemoryRuntimeStore()
         runner = ExecutionRunner(store=store)
+        transport = InMemoryStreamTransport(ttl_seconds=60)
 
         def bad_factory():
             raise RuntimeError("factory exploded")
 
         with pytest.raises(RuntimeError, match="factory exploded"):
-            await runner.submit("conv-1", "t1", bad_factory, user_id="u1", stream_transport=_mock_transport)
+            await runner.submit("conv-1", "t1", bad_factory, user_id="u1", stream_transport=transport)
 
-        # Lease + interactive should have been rolled back
+        # Lease + interactive + stream should all have been rolled back
         assert await store.get_leased_message_id("conv-1") is None
         assert await store.get_interactive_message_id("conv-1") is None
+        assert transport.get_stream_status("t1") != "pending"
