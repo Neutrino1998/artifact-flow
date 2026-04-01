@@ -3,8 +3,8 @@
 > 持久化改造（persistence-refactor-plan.md）三轮全部完成后的 HA 专项 review。
 > 来源：自研 review + 外部 reviewer 反馈，合并去重后统一排列。
 > 评估基线：异地双活（北京 + 上海），每中心两台服务器各一个实例，不涉及跨中心流量。各中心共享云托管 TDSQL + Redis，Redis 不跨中心同步。
-> Redis：华为云 DCS Cluster（组 8 公共区），Redis 5.0+，`cluster-node-timeout` 默认 15s，failover 窗口约 15-20+ 秒。
-> TDSQL：YDB 资源组一，集中式实例（1 主 2 从），DCN 同步，通过 3 PX 节点接入（MySQL 兼容）。
+> Redis：组 9 数据分析区，华为大数据平台 redis Cluster，Redis 5.0+，`cluster-node-timeout` 默认 15s，failover 窗口约 15-20+ 秒。
+> TDSQL：YDB 资源组一，集中式实例（1 主 2 从，选 3 DN），DCN 同步，配置 3 PX 地址接入（无 VIP），REPEATABLE READ。
 
 ---
 
@@ -563,6 +563,38 @@ def _lease_key(self, conversation_id: str) -> str:
 
 ---
 
+### F-16 TDSQL 多 PX 地址故障切换
+
+**来源**：云托管确认
+
+**问题**：TDSQL 通过 3 个 PX 节点接入，无 VIP。当前 `DATABASE_URL` 为单地址格式，PX 节点故障时无法自动切换到其他节点。和 Redis Cluster 问题类似——生产环境是多节点，本地开发是单实例。
+
+**涉及文件**：
+- `src/config.py` — 数据库连接配置
+- `src/api/dependencies.py` — engine 创建
+
+**修复建议**：
+
+```python
+# config.py
+DATABASE_URLS: str = ""  # 逗号分隔多 PX 地址: "mysql+asyncmy://user:pass@px1:3306/db,mysql+asyncmy://user:pass@px2:3306/db,..."
+
+# dependencies.py — 按配置选择连接方式
+urls = [u.strip() for u in config.DATABASE_URLS.split(",") if u.strip()]
+if len(urls) == 1:
+    # 本地开发：单地址，直接连
+    engine = create_async_engine(urls[0], ...)
+else:
+    # 生产环境：多 PX 地址，配合 pre_ping + 短 pool_recycle 实现故障切换
+    # SQLAlchemy 不原生支持多 host failover，方案：
+    #   a) 前置 HAProxy/ProxySQL 做负载均衡（运维侧）
+    #   b) 应用层 try-connect 逻辑（简单但粗糙）
+    #   c) asyncmy 的 failover 参数（如支持）
+    engine = create_async_engine(urls[0], pool_pre_ping=True, ...)
+```
+
+---
+
 ## 架构问题 — Router / Service 职责划分
 
 > 在分析 F-01 时发现的系统性问题：路由层（routers）承担了大量应属服务层（services/core）的职责。
@@ -722,6 +754,7 @@ async def send_message(
 | 13 | F-13 | Redis key 命名空间 | P2 | 小 |
 | 14 | F-14 | Stream TTL 调大 | P2 | 极小 |
 | 15 | F-15 | InMemory cleanup O(n) | P2 | 小 |
+| 16 | F-16 | TDSQL 多 PX 地址故障切换 | P1 | 小 |
 
 **建议 PR 序列**（配置修正、结构重构、语义变更不混在同一 PR，方便 bisect）：
 
@@ -730,7 +763,7 @@ async def send_message(
 | **PR1** | F-02 + F-04 | 配置 + 运维 | ✅ done |
 | **PR2** | R-01 + R-02 | 结构重构 | 中：chat.py 瘦身 → Runner 接管生命周期 + controller factory 抽离，**行为不变**（R-03 deferred） |
 | **PR3** | F-01 | 并发语义变更 | 中：renew_lease → bool、lease lost → task.cancel()、跳过 post-processing |
-| **PR4** | F-05（含 R-04）~ F-09（F-09 从 P2 提前合入） | Redis 韧性 | 中：XREAD 重试、Pub/Sub 重试、auto-deny 改 grace period、连接 retry、NOSCRIPT 容错 |
+| **PR4** | F-05（含 R-04）~ F-09 + F-16（F-09 从 P2 提前合入） | Redis 韧性 + DB 接入 | 中：XREAD 重试、Pub/Sub 重试、auto-deny 改 grace period、连接 retry、NOSCRIPT 容错、RedisCluster 切换、多 PX 故障切换 |
 | **PR5** | F-10 ~ F-15 | 加固清理 | 小：按需挑选 |
 
 **为什么 F-09 提前到 PR4**：只修 XREAD（F-06）不修 Pub/Sub（F-09），Redis failover 恢复只做了一半——主从切换时 XREAD 能重连但 Pub/Sub 断了，interrupt 仍然会异常退出。两者应同批处理。

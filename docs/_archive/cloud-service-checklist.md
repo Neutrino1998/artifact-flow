@@ -7,8 +7,8 @@
 ## 一、部署与接入模式
 
 > **已确认**：异地双活（北京 + 上海），每中心两台服务器各一个实例，不涉及跨中心流量。
-> Redis：组 8（公共区一般业务），华为云 DCS Cluster 集群，与 MOJITO/UCAM/AOSP 等共用，峰值 TPS 2265。
-> TDSQL：YDB 资源组一（一般业务系统），集中式实例（1 主 2 从，3 节点），DCN 同步，通过 3 PX 节点接入。
+> Redis：组 9（数据分析区），华为大数据平台 redis Cluster 集群，共用实例。
+> TDSQL：YDB 资源组一（一般业务系统），集中式实例（1 主 2 从，选 3 DN），DCN 同步，配置 3 个 PX 地址接入（无 VIP）。
 
 1. ~~**双活是同城还是异地？**~~ → ✅ 异地（北京 + 上海）
 
@@ -18,7 +18,7 @@
    - TDSQL：实例内 DCN 同步（实例级切换），跨中心通过 DBBridge 异步复制
    - Redis：各中心独立，不跨中心同步
 
-4. ~~**Redis 实例是否与其他系统共用？**~~ → ✅ 共用（华为云 DCS 公共区 Cluster 集群）。云托管要求所有 key 加系统前缀，我们使用 `af:` 前缀。
+4. ~~**Redis 实例是否与其他系统共用？**~~ → ✅ 共用（组 8 数据分析区，华为大数据平台 redis Cluster）。云托管要求所有 key 加系统前缀，我们使用 `af:` 前缀。
    > **注意**：ArtifactFlow 使用 Redis 做协调（分布式锁、SSE Stream、Pub/Sub），不是缓存。Redis 不可用时降级策略为 health probe 返回 not ready，拒绝新请求，现有会话超时结束。
 
 ---
@@ -45,11 +45,9 @@
 
 1. ~~**TDSQL 兼容的 PostgreSQL / MySQL 版本是多少？**~~ → ✅ 基本确认 MySQL 兼容（应用通过 JDBC 连接 PX 节点）。Python 端使用 MySQL 方言（asyncmy + SQLAlchemy）。
 
-2. 🌟 **TDSQL 的接入方式是 VIP 还是需要客户端连接多个 PX 地址？**
-   已知 3 PX 节点，需确认连接方式
+2. ~~🌟 **TDSQL 的接入方式是 VIP 还是需要客户端连接多个 PX 地址？**~~ → ✅ 配置 3 个 PX 地址，无 VIP。客户端需自行实现多地址故障切换。
 
-3. 🌟 **TDSQL 默认的事务隔离级别是什么？**
-   我们的并发写入行为依赖隔离级别（预期 REPEATABLE READ）
+3. ~~🌟 **TDSQL 默认的事务隔离级别是什么？**~~ → ✅ REPEATABLE READ，符合预期
 
 4. ~~**TDSQL 是否支持 `SELECT 1` 做连通性检查？**~~ → ✅ MySQL 兼容，支持
 
