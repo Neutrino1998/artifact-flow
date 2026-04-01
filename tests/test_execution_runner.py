@@ -257,3 +257,17 @@ class TestSubmitOrchestration:
         # Lease + interactive should have been rolled back
         assert await store.get_leased_message_id("conv-1") is None
         assert await store.get_interactive_message_id("conv-1") is None
+
+    async def test_submit_rollback_on_factory_failure(self):
+        store = InMemoryRuntimeStore()
+        runner = ExecutionRunner(store=store)
+
+        def bad_factory():
+            raise RuntimeError("factory exploded")
+
+        with pytest.raises(RuntimeError, match="factory exploded"):
+            await runner.submit("conv-1", "t1", bad_factory, user_id="u1", stream_transport=_mock_transport)
+
+        # Lease + interactive should have been rolled back
+        assert await store.get_leased_message_id("conv-1") is None
+        assert await store.get_interactive_message_id("conv-1") is None

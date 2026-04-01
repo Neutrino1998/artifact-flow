@@ -103,17 +103,15 @@ class ExecutionRunner:
                 "Use POST /chat/{conv_id}/inject to send input to the running execution."
             )
 
-        # lease 之后的所有步骤失败时必须回滚
+        # lease 之后的所有步骤失败时必须回滚（含 coro_factory 调用）
         try:
             await self.store.mark_engine_interactive(conversation_id, task_id)
             await stream_transport.create_stream(task_id, owner_user_id=user_id)
+            coro = coro_factory()
         except Exception:
             await self.store.release_lease(conversation_id, task_id)
             await self.store.clear_engine_interactive(conversation_id, task_id)
             raise
-
-        # 编排成功后才创建 coroutine — 不会产生孤儿
-        coro = coro_factory()
 
         async def _wrapped():
             heartbeat = None
