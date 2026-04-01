@@ -3,6 +3,8 @@
 > 持久化改造（persistence-refactor-plan.md）三轮全部完成后的 HA 专项 review。
 > 来源：自研 review + 外部 reviewer 反馈，合并去重后统一排列。
 > 评估基线：异地双活（北京 + 上海），每中心两台服务器各一个实例，不涉及跨中心流量。各中心共享云托管 TDSQL + Redis，Redis 不跨中心同步。
+> Redis：华为云 DCS Cluster（组 8 公共区），Redis 5.0+，`cluster-node-timeout` 默认 15s，failover 窗口约 15-20+ 秒。
+> TDSQL：YDB 资源组一，集中式实例（1 主 2 从），DCN 同步，通过 3 PX 节点接入（MySQL 兼容）。
 
 ---
 
@@ -70,6 +72,8 @@ async def renew_lease(self, ...) -> bool:
 async def renew_lease(self, ...) -> bool:
     return True
 ```
+
+> **TTL 参数设计**：Redis Cluster failover 窗口约 15-20s（`cluster-node-timeout=15s` + 选举），期间续租会连续失败。lease TTL 需大于 failover 窗口，建议 **60s**，心跳间隔 20s（TTL/3），failover 期间有 ~3 次重试机会不会误判丢锁。
 
 **2. `_renew_loop` 检测到 lease 丢失 → `task.cancel()`**
 
@@ -318,26 +322,52 @@ result = await self._acquire_lease(keys=[key], args=[message_id, str(ttl)])
 
 **来源**：自研 Review
 
-**问题**：`dependencies.py:100` 用 `aioredis.from_url()` 创建客户端，未配置重试策略。云 Redis 主从切换（1-3s）期间所有 Redis 操作都会失败。
+**问题**：`dependencies.py:100` 用 `aioredis.from_url()` 创建客户端，存在三个问题：
+1. 未配置重试策略，Redis 主从切换期间所有操作失败
+2. 未设置 `max_connections`，共用 Cluster 实例下可能耗尽连接
+3. 使用单机 `Redis` 客户端，生产 Cluster 模式下缺少 MOVED 重定向、路由表刷新等能力
 
 **涉及文件**：
 - `src/api/dependencies.py` — Redis 客户端创建
+- `src/config.py` — 新增 Cluster 开关和连接池配置
 
 **修复建议**：
 
 ```python
+from redis.asyncio import Redis, RedisCluster
 from redis.backoff import ExponentialBackoff
 from redis.retry import Retry
 
-_redis_client = aioredis.from_url(
-    config.REDIS_URL,
-    decode_responses=True,
-    retry=Retry(ExponentialBackoff(cap=2, base=0.1), retries=3),
-    retry_on_timeout=True,
-)
+retry = Retry(ExponentialBackoff(cap=2, base=0.1), retries=3)
+
+if config.REDIS_CLUSTER:
+    # Cluster 模式：共用实例，需控制连接数
+    # max_connections: CPU核数×2+冗余(3-5)，参考值 50
+    _redis_client = RedisCluster.from_url(
+        config.REDIS_URL,
+        decode_responses=True,
+        max_connections=config.REDIS_MAX_CONNECTIONS,
+        retry=retry,
+        retry_on_timeout=True,
+    )
+else:
+    # 本地开发：单机 Redis，API 与 RedisCluster 一致，业务代码零改动
+    _redis_client = Redis.from_url(
+        config.REDIS_URL,
+        decode_responses=True,
+        max_connections=config.REDIS_MAX_CONNECTIONS,
+        retry=retry,
+        retry_on_timeout=True,
+    )
 ```
 
-这覆盖了短暂网络抖动场景。对于 Pub/Sub 连接（长连接），redis-py 的 retry 不适用，需要在业务层处理（见 F-06、F-09）。
+```python
+# config.py
+REDIS_CLUSTER: bool = False          # 生产环境设 True
+REDIS_MAX_CONNECTIONS: int = 50      # 云托管建议: CPU核数×2+冗余(3-5)
+```
+
+这覆盖了短暂网络抖动场景。对于 Pub/Sub 和 XREAD 长连接，redis-py 的 retry 不适用，需要在业务层处理（见 F-06、F-09）。
 
 ---
 
@@ -713,10 +743,10 @@ async def send_message(
 
 | Finding | 依赖确认项 | 影响范围 |
 |---------|-----------|---------|
-| F-01 | 主从切换时间窗口 | lease TTL、心跳间隔的具体数值 |
-| F-06 | 主从切换时间窗口 + XREAD 断线行为 | 重试次数、sleep 时长 |
+| F-01 | ~~主从切换时间窗口~~ | ✅ Cluster failover 约 15-20s，lease TTL 建议 60s / 心跳 20s |
+| F-06 | 主从切换时间窗口 + XREAD 断线行为 | failover 窗口已知（15-20s），重试 sleep 可设 10s，2 次覆盖窗口 |
 | F-07 | ~~主从切换后 script cache 是否清空~~ | ✅ 无需确认，`register_script` 自动处理 |
-| F-08 | 主从切换时间窗口 | retry backoff 参数 |
+| F-08 | 主从切换时间窗口 | failover 窗口已知（15-20s），backoff 参数可据此设定 |
 | F-09 | Pub/Sub 断线行为 | 已简化为 catch-and-deny，影响不大 |
 | F-13 | ~~Redis 是否与其他系统共用实例~~ | ✅ 已确认共用（华为云 DCS Cluster），前缀为强制要求 |
 
