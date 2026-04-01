@@ -2,7 +2,7 @@
 
 > 持久化改造（persistence-refactor-plan.md）三轮全部完成后的 HA 专项 review。
 > 来源：自研 review + 外部 reviewer 反馈，合并去重后统一排列。
-> 评估基线：双服务器 active-active + 云托管 RDBMS + 云托管 Redis。
+> 评估基线：异地双活（北京 + 上海），每中心两台服务器各一个实例，不涉及跨中心流量。各中心共享云托管 TDSQL + Redis，Redis 不跨中心同步。
 
 ---
 
