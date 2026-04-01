@@ -470,12 +470,12 @@ async def _run_and_push(stream_transport, stream_id, event_stream):
 
 **问题**：`redis_stream_transport.py:96-124` 先 `HGET status`，再 `exists(stream_key)`，再 `XADD`，三步非原子。`close_stream` 可能在 HGET 之后、XADD 之前执行，事件写入已关闭的 stream。
 
-**影响**：实际危害有限（TTL 会清理），consumer 已正常退出。
+**影响**：当前不会发生——`close_stream` 和 `push_event` 在同一执行流程中由 controller 顺序调用，close 一定在最后一个 push 之后。仅当未来引入外部强制关闭 stream 的场景时才可能触发。TTL 会清理孤儿事件。
 
 **涉及文件**：
 - `src/api/services/redis_stream_transport.py` — `push_event`
 
-**修复建议**：可以用 Lua 脚本原子化 `HGET status + XADD`，或接受这个 edge case（在注释中标注已知竞态窗口）。
+**修复建议**：不修。在 `push_event` 代码中加注释标注已知竞态窗口即可。
 
 ---
 
@@ -579,11 +579,11 @@ chat.py 当前做的事（不该做）：
 - DB session 在路由层创建但被后台任务使用（生命周期跨越了 HTTP 请求）
 - 修改 controller 依赖需要同时改路由代码
 
-**归属**：移到 `ExecutionRunner` 或独立 factory，路由层不应知道 controller 的构造细节。
+**归属**：抽到 `src/api/services/controller_factory.py`，一个 `create_controller` async context manager。路由和 runner 都调它。
 
 ---
 
-### R-03 chat.py: 路由直接访问 `runner.store`
+### R-03 chat.py: 路由直接访问 `runner.store`（deferred）
 
 **位置**：`chat.py` 多处（`send_message`、`inject_message`、`cancel_execution`、`resume_execution`）
 
@@ -638,7 +638,7 @@ stream 路由在 `CancelledError`（客户端断连）时直接调 `runner.store
 
 ### 重构影响范围
 
-R-01 ~ R-03 的修复与 F-01 高度重叠（都是把 chat.py 中的执行生命周期逻辑收敛到 `ExecutionRunner`），建议合并实施。R-04 与 F-05 重叠。
+R-01、R-02 的修复与 F-01 高度重叠（都是把 chat.py 中的执行生命周期逻辑收敛到 `ExecutionRunner`），建议合并实施。R-04 与 F-05 重叠。R-03 在 R-01 完成后严重程度降低（剩余的 store 调用只是 inject/cancel/resume 各一次数据访问），defer。
 
 预期改动后的 `chat.py` `send_message`：
 
@@ -696,9 +696,26 @@ async def send_message(
 | PR | 内容 | 性质 | 回归面 |
 |----|------|------|--------|
 | **PR1** | F-02 + F-04 | 配置 + 运维 | 极小：health 端点 + config 默认值 |
-| **PR2** | R-01 ~ R-03 | 结构重构 | 中：chat.py 瘦身 → Runner 接管生命周期，**行为不变** |
+| **PR2** | R-01 + R-02 | 结构重构 | 中：chat.py 瘦身 → Runner 接管生命周期 + controller factory 抽离，**行为不变**（R-03 deferred） |
 | **PR3** | F-01 | 并发语义变更 | 中：renew_lease → bool、lease lost → task.cancel()、跳过 post-processing |
 | **PR4** | F-05（含 R-04）~ F-09（F-09 从 P2 提前合入） | Redis 韧性 | 中：XREAD 重试、Pub/Sub 重试、auto-deny 改 grace period、连接 retry、NOSCRIPT 容错 |
 | **PR5** | F-10 ~ F-15 | 加固清理 | 小：按需挑选 |
 
 **为什么 F-09 提前到 PR4**：只修 XREAD（F-06）不修 Pub/Sub（F-09），Redis failover 恢复只做了一半——主从切换时 XREAD 能重连但 Pub/Sub 断了，interrupt 仍然会异常退出。两者应同批处理。
+
+---
+
+## 依赖云托管确认的 Findings
+
+以下 findings 的方案方向已确定，但具体参数或是否实施依赖 `cloud-service-checklist.md` 的确认结果：
+
+| Finding | 依赖确认项 | 影响范围 |
+|---------|-----------|---------|
+| F-01 | 主从切换时间窗口 | lease TTL、心跳间隔的具体数值 |
+| F-06 | 主从切换时间窗口 + XREAD 断线行为 | 重试次数、sleep 时长 |
+| F-07 | 主从切换后 script cache 是否清空 | 是否需要改为 `register_script` |
+| F-08 | 主从切换时间窗口 | retry backoff 参数 |
+| F-09 | Pub/Sub 断线行为 | 已简化为 catch-and-deny，影响不大 |
+| F-13 | Redis 是否与其他系统共用实例 | 共用→必须加前缀，专用→可选 |
+
+其余 findings（F-02、F-03、F-04、F-05、F-10、F-11、F-12、F-14、F-15、R-01~R-04）不依赖确认结果，可直接实施。
