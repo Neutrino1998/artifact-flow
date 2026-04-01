@@ -109,7 +109,10 @@ class ExecutionRunner:
             await stream_transport.create_stream(task_id, owner_user_id=user_id)
             coro = coro_factory()
         except Exception:
-            await stream_transport.close_stream(task_id)
+            try:
+                await stream_transport.close_stream(task_id)
+            except Exception:
+                logger.warning(f"Best-effort close_stream failed for {task_id}")
             await self.store.release_lease(conversation_id, task_id)
             await self.store.clear_engine_interactive(conversation_id, task_id)
             raise
