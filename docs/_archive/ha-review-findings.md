@@ -13,7 +13,7 @@
 | 能力 | 状态 | 说明 |
 |------|------|------|
 | 共享控制面（lease/interrupt/stream 跨 Worker） | ✅ | Lua CAS、check-subscribe-check-wait、心跳续租 |
-| Fencing / split-brain 防护 | ❌ | lease 丢失后无阻断机制 |
+| Fencing / split-brain 防护 | ✅ | renew_lease → bool，lease 丢失 → task.cancel()（PR3） |
 | 故障检测（readiness） | ✅ | `/health/ready` 检查 DB + Redis（PR1） |
 | Redis failover 恢复 | ⚠️ 部分 | `is_cancelled`/`drain_messages` 有 graceful degrade，Pub/Sub 和 XREAD 无恢复 |
 | 事件持久化保证 | ⚠️ 降级 | fallback 到本地文件，容器环境不可靠 |
@@ -762,7 +762,7 @@ async def send_message(
 |----|------|------|--------|
 | **PR1** | F-02 + F-04 | 配置 + 运维 | ✅ done |
 | **PR2** | R-01 + R-02 | 结构重构 | ✅ done |
-| **PR3** | F-01 | 并发语义变更 | 中：renew_lease → bool、lease lost → task.cancel()、跳过 post-processing |
+| **PR3** | F-01 | 并发语义变更 | ✅ done |
 | **PR4** | F-05（含 R-04）~ F-09 + F-16（F-09 从 P2 提前合入） | Redis 韧性 + DB 接入 | 中：XREAD 重试、Pub/Sub 重试、auto-deny 改 grace period、连接 retry、NOSCRIPT 容错、RedisCluster 切换、多 PX 故障切换 |
 | **PR5** | F-10 ~ F-15 | 加固清理 | 小：按需挑选 |
 
