@@ -4,9 +4,9 @@ RedisStreamTransport — Redis Streams-backed StreamTransport 实现
 支持跨 Worker 的事件 push/consume。
 使用 Redis Streams (XADD/XREAD) 实现事件缓冲和消费。
 
-Key 设计（hash tag 保证同一 stream_id 的 key 落在同一 Cluster slot）：
-    {msg_id}:stream       STREAM    TTL=STREAM_TTL   事件流
-    {msg_id}:stream_meta  HASH      TTL=STREAM_TTL   stream 元数据 {owner, status}
+Key 设计（hash tag {msg_id} 保证同一 stream 的 key 落在同一 Cluster slot）：
+    stream:{msg_id}       STREAM    TTL=STREAM_TTL   事件流
+    stream_meta:{msg_id}  HASH      TTL=STREAM_TTL   stream 元数据 {owner, status}
 """
 
 import asyncio
@@ -66,11 +66,11 @@ class RedisStreamTransport:
 
     @staticmethod
     def _stream_key(stream_id: str) -> str:
-        return f"{{{stream_id}}}:stream"
+        return f"stream:{{{stream_id}}}"
 
     @staticmethod
     def _meta_key(stream_id: str) -> str:
-        return f"{{{stream_id}}}:stream_meta"
+        return f"stream_meta:{{{stream_id}}}"
 
     # ── Protocol methods ──
 

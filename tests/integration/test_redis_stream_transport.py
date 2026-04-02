@@ -41,9 +41,9 @@ async def redis_client():
         pytest.skip("Redis not available")
     client = aioredis.from_url(REDIS_URL, decode_responses=True)
     yield client
-    # Cleanup test keys (hash-tagged format: {id}:stream / {id}:stream_meta)
-    keys = await client.keys("{test_*}:stream")
-    keys += await client.keys("{test_*}:stream_meta")
+    # Cleanup test keys (hash-tagged format: stream:{id} / stream_meta:{id})
+    keys = await client.keys("stream:{test_*}")
+    keys += await client.keys("stream_meta:{test_*}")
     if keys:
         await client.delete(*keys)
     await client.aclose()
@@ -251,7 +251,7 @@ class TestOrphanKeyFix:
         stream_id = "test_stream_orphan"
         await transport.create_stream(stream_id)
 
-        stream_key = f"{{{stream_id}}}:stream"
+        stream_key = f"stream:{{{stream_id}}}"
         # stream key should not exist yet (no XADD has happened)
         exists = await redis_client.exists(stream_key)
         assert exists == 0
