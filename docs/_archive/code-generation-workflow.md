@@ -43,7 +43,8 @@ flowchart TD
     C1["Constitution L1\n通用设计原则（跨项目）"]
     TECH["技术总体方案\n架构 / 语言 / 框架 / 部署模型 / 外部依赖"]
     C2["Constitution L2\n架构约束原则（项目级）"]
-    SPEC["Module Specs\n契约 / 保证+不保证 / 量化约束 / 接口"]
+    SPEC["Module Specs\n契约 / 保证+不保证+违反时行为 / 量化约束"]
+    IFACE["Interface Contracts\n禁止路径 / 故障责任归属 / 语义一致性"]
     PLAN["Implementation Plan\n按依赖排序，每步可独立验证"]
 
     REQ --> C1
@@ -51,7 +52,8 @@ flowchart TD
     TECH -->|"暴露共享资源/部署假设\n→ 补充架构级原则"| C2
     C1 & C2 --> SPEC
     TECH --> SPEC
-    SPEC --> PLAN
+    SPEC --> IFACE
+    IFACE --> PLAN
     PLAN --> LOOP
 
     subgraph LOOP["实施循环 (per plan step)"]
@@ -87,6 +89,7 @@ flowchart TD
   - 获取的资源必须定义丢失时的行为
   - 同一个概念在系统里只有一种语义
   - 不能保证的事情不要假装做了
+  - 验证必须覆盖声明——spec 中的每条保证都必须有对应的测试来判定其是否被满足
 
 ### 技术总体方案
 
@@ -110,17 +113,40 @@ flowchart TD
   ExecutionRunner
     输入：conversation_id, message_id, coroutine
     保证：同一 conversation 同时只有一个执行
+      违反时：后到的请求返回 409 Conflict
     保证：进程存活时，执行结束后 lease 在 finally 中释放
+      违反时：lease 在 TTL 内自动过期（见量化约束）
     保证：进程 crash 时，lease 在 TTL（90s）内自动释放
+      违反时：N/A — TTL 由 Redis 保证，属于基础设施假设
     保证：lease 丢失时执行被终止，post-processing 不执行
+      违反时：log error + 终止进程（不尝试恢复）
     不保证：执行中任务跨 Worker 迁移
     量化约束：
       - lease TTL = 90s，心跳间隔 = TTL/3（30s）
       - lease 丢失检测延迟 ≤ 1 个心跳间隔（30s）
       - permission interrupt 超时 = 300s
   ```
+- **"违反时行为"不是要求无限递归设计 fallback**，而是要求显式声明降级链的终止点。大部分情况下答案就是 fail — 但"经过思考决定 fail"和"没想过这个问题碰巧 fail"是两件事
 - **量化约束**不可省略——HA 类问题往往不是二元的"有没有"，而是"时间窗口够不够"。TTL、grace period、retention、failover 恢复窗口都要写进 spec，否则"逻辑对但参数和时序不稳"的问题会漏过
 - 这次缺的就是这个——persistence-refactor-plan.md 写了"怎么实现"，但没写每个模块的保证/不保证。如果当时写了"lease 丢失时执行被终止"，实现时就不会忘 fencing
+
+### Interface Contracts（接口契约）
+
+- 对每对有交互的模块，显式声明跨边界的约束。只覆盖实际存在的交互边，不做 N² 全组合
+- 两类声明：
+  - **禁止路径**：哪些模块间的直接调用不应该存在（如 Router → Repository）
+  - **故障责任归属**：A 调 B 失败时，谁负责回滚 / 重试 / 报错
+- 示例：
+  ```
+  Router → Manager
+    禁止：Router 不直接调用 Repository 或 RuntimeStore
+    故障责任：Manager 返回错误时，Router 只做 HTTP 状态码映射，不做重试或补偿
+
+  Manager → Repository
+    语义一致性：Manager 和 Repository 对同一概念（如"执行中"）的定义必须一致
+    故障责任：Repository 抛异常时，Manager 负责回滚同一用例中的其他副作用
+  ```
+- 接口契约的数量和模块数是线性关系（沿分层架构的合法调用方向），不会指数爆炸
 
 ### Implementation Plan
 
@@ -163,9 +189,10 @@ async def test_runner_submit_rollback_on_stream_failure():
 **新 session review**：
 
 - 每个 plan step 完成后，拉新 session review
-- 新 session 只给 constitution + spec + agent.md + diff，不给实现背景
+- 新 session 只给 constitution + spec + agent.md + diff + test，不给实现背景
 - clean context 是 review 的价值所在——写代码的 session 带着"我为什么这么做"的隐含假设，review session 没有这些假设，反而能发现问题
-- review 发现设计层面问题（spec 遗漏、原则缺失）→ 记录到 agent.md，不改上游产物
+- review 不仅审代码，还要审测试策略：spec 的保证条目是否都有对应测试，测试是否真的能判定该保证被满足
+- review 发现设计层面问题（spec 遗漏、原则缺失、保证项缺少对应测试）→ 记录到 agent.md，不改上游产物
 
 **agent.md（实施期间的轻量修正层）**：
 
