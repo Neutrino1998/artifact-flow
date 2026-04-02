@@ -8,8 +8,9 @@
 - 连接池管理（MySQL/PostgreSQL）
 """
 
-from typing import Optional, AsyncGenerator
+from typing import Any, Dict, List, Optional, AsyncGenerator
 from contextlib import asynccontextmanager
+from urllib.parse import urlparse, unquote
 
 from sqlalchemy import event, text
 from sqlalchemy.ext.asyncio import (
@@ -43,11 +44,12 @@ class DatabaseManager:
     def __init__(
         self,
         database_url: Optional[str] = None,
+        database_urls: Optional[List[str]] = None,
         echo: bool = False,
         pool_size: int = 5,
         max_overflow: int = 10,
         pool_timeout: int = 30,
-        pool_recycle: int = 1800,
+        pool_recycle: int = 300,
         pool_pre_ping: bool = True,
     ):
         """
@@ -55,6 +57,7 @@ class DatabaseManager:
 
         Args:
             database_url: 数据库连接 URL，默认为 SQLite
+            database_urls: 多地址列表（优先级高于 database_url），用于多 PX failover
             echo: 是否打印 SQL 语句（调试用）
             pool_size: 连接池大小（仅 MySQL/PG）
             max_overflow: 连接池最大溢出（仅 MySQL/PG）
@@ -64,6 +67,7 @@ class DatabaseManager:
         """
         assert database_url, "database_url must be provided"
         self.database_url = database_url
+        self._database_urls = database_urls
         self.echo = echo
         self._pool_size = pool_size
         self._max_overflow = max_overflow
@@ -90,6 +94,27 @@ class DatabaseManager:
     def _is_sqlite(self) -> bool:
         """判断是否是 SQLite 数据库"""
         return "sqlite" in self.database_url.lower()
+
+    @staticmethod
+    def _parse_db_url(url: str) -> Dict[str, Any]:
+        """从 mysql+asyncmy://user:pass@host:port/db 解析出 asyncmy.connect kwargs"""
+        # 去掉 SQLAlchemy dialect 前缀 (e.g. "mysql+asyncmy://")
+        if "://" in url:
+            scheme_end = url.index("://")
+            pure_url = "mysql" + url[scheme_end:]  # normalize to mysql://
+        else:
+            pure_url = url
+        parsed = urlparse(pure_url)
+        result: Dict[str, Any] = {
+            "host": parsed.hostname or "127.0.0.1",
+            "port": parsed.port or 3306,
+            "db": parsed.path.lstrip("/") if parsed.path else "",
+        }
+        if parsed.username:
+            result["user"] = unquote(parsed.username)
+        if parsed.password:
+            result["password"] = unquote(parsed.password)
+        return result
 
     async def initialize(self) -> None:
         """
@@ -122,6 +147,27 @@ class DatabaseManager:
             engine_kwargs["pool_timeout"] = self._pool_timeout
             engine_kwargs["pool_recycle"] = self._pool_recycle
             engine_kwargs["pool_pre_ping"] = self._pool_pre_ping
+
+            # 多 PX failover：primary-first 尝试
+            if self._database_urls and len(self._database_urls) > 1:
+                parsed_urls = [self._parse_db_url(u) for u in self._database_urls]
+
+                async def _failover_creator():
+                    """Primary-first: 按配置顺序尝试，首个成功即返回"""
+                    import asyncmy
+                    errors = []
+                    for target in parsed_urls:  # 固定顺序，不轮转
+                        try:
+                            return await asyncmy.connect(**target, connect_timeout=5)
+                        except Exception as e:
+                            errors.append((target["host"], e))
+                            logger.warning(f"DB connect failed: {target['host']}: {e}")
+                    raise ConnectionError(
+                        f"All DB nodes unreachable: {[(h, str(e)) for h, e in errors]}"
+                    )
+
+                engine_kwargs["async_creator"] = _failover_creator
+                logger.info(f"Multi-PX failover enabled ({len(self._database_urls)} addresses)")
 
         self._engine = create_async_engine(self.database_url, **engine_kwargs)
 

@@ -28,7 +28,7 @@ class Settings(BaseSettings):
     # SSE 配置
     SSE_PING_INTERVAL: int = 15  # 秒，保持连接活跃
     STREAM_TIMEOUT: int = 1800   # 秒，总执行上限（含 permission 等待）
-    STREAM_TTL: int = 30         # 秒，队列 TTL（前端未连接时自动清理）
+    STREAM_TTL: int = 60         # 秒，队列 TTL（前端未连接时自动清理）
     PERMISSION_TIMEOUT: int = 300  # 秒，单次 permission 等待超时
 
     # Compaction / Context 配置
@@ -41,6 +41,8 @@ class Settings(BaseSettings):
 
     # Redis（空 = InMemory fallback，非空 = Redis）
     REDIS_URL: str = ""
+    REDIS_CLUSTER: bool = False           # 生产 Cluster 模式
+    REDIS_MAX_CONNECTIONS: int = 50       # 连接池上限
     LEASE_TTL: int = 90  # 秒，心跳每 TTL/3 续租
 
     # 并发控制
@@ -55,10 +57,11 @@ class Settings(BaseSettings):
 
     # 数据库配置
     DATABASE_URL: str = ""
+    DATABASE_URLS: str = ""               # 逗号分隔多 PX 地址（优先级高于 DATABASE_URL）
     DATABASE_POOL_SIZE: int = 5
     DATABASE_MAX_OVERFLOW: int = 10
     DATABASE_POOL_TIMEOUT: int = 30
-    DATABASE_POOL_RECYCLE: int = 1800
+    DATABASE_POOL_RECYCLE: int = 300       # 缩短回收周期，加速故障检测和恢复回切
 
     # JWT 认证配置
     JWT_SECRET: str = ""
@@ -72,7 +75,7 @@ config = Settings()
 
 def validate_config() -> None:
     """Validate required config values. Called during app lifespan startup."""
-    if not config.DATABASE_URL:
+    if not config.DATABASE_URL and not config.DATABASE_URLS:
         raise RuntimeError(
             "ARTIFACTFLOW_DATABASE_URL environment variable is not set. "
             "Example: ARTIFACTFLOW_DATABASE_URL=sqlite+aiosqlite:///data/artifactflow.db\n"

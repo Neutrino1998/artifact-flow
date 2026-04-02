@@ -9,6 +9,7 @@ Key 设计：
     stream_meta:{msg_id}  HASH      TTL=STREAM_TTL   stream 元数据 {owner, status}
 """
 
+import asyncio
 import json
 import os
 from typing import Any, AsyncGenerator, Dict, Literal, Optional
@@ -53,11 +54,11 @@ class RedisStreamTransport:
         self._redis = redis_client
         self._stream_ttl = stream_ttl
         self._stream_timeout = stream_timeout
-        self._sha_revert_to_pending: str = ""
+        self._script_revert_to_pending = None
 
-    async def init_scripts(self) -> None:
-        """SCRIPT LOAD Lua 脚本（init_globals 时调用一次）"""
-        self._sha_revert_to_pending = await self._redis.script_load(
+    def init_scripts(self) -> None:
+        """注册 Lua 脚本（register_script 是同步方法，自动处理 NOSCRIPT 重试）"""
+        self._script_revert_to_pending = self._redis.register_script(
             _LUA_REVERT_TO_PENDING
         )
 
@@ -156,12 +157,29 @@ class RedisStreamTransport:
         cursor = last_event_id if last_event_id else "0-0"
         block_ms = int((heartbeat_interval or 15) * 1000)
 
+        retry_count = 0
         try:
             while True:
                 # XREAD BLOCK
-                result = await self._redis.xread(
-                    {stream_key: cursor}, count=100, block=block_ms
-                )
+                try:
+                    result = await self._redis.xread(
+                        {stream_key: cursor}, count=100, block=block_ms
+                    )
+                    retry_count = 0  # 成功重置
+                except (aioredis.ConnectionError, aioredis.TimeoutError):
+                    retry_count += 1
+                    if retry_count > 2:
+                        logger.error(
+                            f"Redis connection lost during consume {stream_id}, "
+                            f"giving up after {retry_count} retries"
+                        )
+                        break
+                    logger.warning(
+                        f"Redis connection lost during consume {stream_id}, "
+                        f"retry {retry_count}/2"
+                    )
+                    await asyncio.sleep(10)  # failover 窗口 15-20s，sleep 10s × 2 覆盖
+                    continue
 
                 if not result:
                     # 超时 → 发送心跳
@@ -184,10 +202,9 @@ class RedisStreamTransport:
             # Consumer 断连：原子 CAS 回退到 pending。
             # 仅当 consumer_id 仍匹配（说明没有新 consumer 接管）时才回退，
             # 避免覆盖新 consumer 的 streaming 或 producer 的 closed。
-            await self._redis.evalsha(
-                self._sha_revert_to_pending,
-                2, meta_key, stream_key,
-                consumer_id, str(self._stream_ttl),
+            await self._script_revert_to_pending(
+                keys=[meta_key, stream_key],
+                args=[consumer_id, str(self._stream_ttl)],
             )
 
     async def close_stream(self, stream_id: str) -> bool:

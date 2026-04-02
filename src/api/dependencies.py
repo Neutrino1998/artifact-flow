@@ -79,8 +79,13 @@ async def init_globals() -> None:
     logger.info(f"Data directory ensured: {data_dir.absolute()}")
 
     # 1. 初始化数据库管理器
+    db_urls = []
+    if config.DATABASE_URLS:
+        db_urls = [u.strip() for u in config.DATABASE_URLS.split(",") if u.strip()]
+
     _db_manager = DatabaseManager(
-        database_url=config.DATABASE_URL,
+        database_url=db_urls[0] if db_urls else config.DATABASE_URL,
+        database_urls=db_urls if len(db_urls) > 1 else None,
         pool_size=config.DATABASE_POOL_SIZE,
         max_overflow=config.DATABASE_MAX_OVERFLOW,
         pool_timeout=config.DATABASE_POOL_TIMEOUT,
@@ -93,11 +98,30 @@ async def init_globals() -> None:
     from api.services.execution_runner import ExecutionRunner
 
     if config.REDIS_URL:
-        import redis.asyncio as aioredis
+        from redis.asyncio import Redis, RedisCluster
+        from redis.backoff import ExponentialBackoff
+        from redis.retry import Retry
         from api.services.redis_runtime_store import RedisRuntimeStore
         from api.services.redis_stream_transport import RedisStreamTransport
 
-        _redis_client = aioredis.from_url(config.REDIS_URL, decode_responses=True)
+        retry = Retry(ExponentialBackoff(cap=2, base=0.1), retries=3)
+
+        if config.REDIS_CLUSTER:
+            _redis_client = RedisCluster.from_url(
+                config.REDIS_URL,
+                decode_responses=True,
+                max_connections=config.REDIS_MAX_CONNECTIONS,
+                retry=retry,
+                retry_on_timeout=True,
+            )
+        else:
+            _redis_client = Redis.from_url(
+                config.REDIS_URL,
+                decode_responses=True,
+                max_connections=config.REDIS_MAX_CONNECTIONS,
+                retry=retry,
+                retry_on_timeout=True,
+            )
         await _redis_client.ping()  # fail fast
         logger.info(f"Redis connected: {config.REDIS_URL}")
 
@@ -107,14 +131,14 @@ async def init_globals() -> None:
             stream_timeout=config.STREAM_TIMEOUT,
             permission_timeout=config.PERMISSION_TIMEOUT,
         )
-        await runtime_store.init_scripts()
+        runtime_store.init_scripts()
 
         _stream_transport = RedisStreamTransport(
             _redis_client,
             stream_ttl=config.STREAM_TTL,
             stream_timeout=config.STREAM_TIMEOUT,
         )
-        await _stream_transport.init_scripts()
+        _stream_transport.init_scripts()
         _execution_runner = ExecutionRunner(
             max_concurrent=config.MAX_CONCURRENT_TASKS,
             store=runtime_store,

@@ -67,7 +67,7 @@ async def store(redis_client):
         stream_timeout=60,
         permission_timeout=30,
     )
-    await s.init_scripts()
+    s.init_scripts()
     return s
 
 

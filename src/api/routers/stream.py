@@ -12,11 +12,10 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from starlette.responses import StreamingResponse
 
 from config import config
-from api.dependencies import get_current_user, get_stream_transport, get_execution_runner
+from api.dependencies import get_current_user, get_stream_transport
 from api.services.auth import TokenPayload
 from api.services.stream_transport import StreamNotFoundError
 from api.services.stream_transport import StreamTransport
-from api.services.execution_runner import ExecutionRunner
 from api.utils.sse import format_sse_event, format_sse_comment
 from utils.logger import get_logger
 
@@ -31,7 +30,6 @@ async def stream_events(
     request: Request,
     current_user: TokenPayload = Depends(get_current_user),
     stream_transport: StreamTransport = Depends(get_stream_transport),
-    runner: ExecutionRunner = Depends(get_execution_runner),
 ) -> StreamingResponse:
     """
     SSE 端点，订阅执行过程
@@ -98,13 +96,8 @@ async def stream_events(
 
         except asyncio.CancelledError:
             # 客户端断开连接 — 不关闭 stream（producer 仍在推送，consumer 可重连）
+            # 不自动 deny interrupt，依赖 PERMISSION_TIMEOUT 自然超时
             logger.info(f"Stream {stream_id}: client disconnected")
-            # 自动拒绝未决的权限中断，避免引擎无限阻塞
-            result = await runner.store.resolve_interrupt(
-                stream_id, {"approved": False, "reason": "client_disconnected"}
-            )
-            if result == "resolved":
-                logger.info(f"Stream {stream_id}: auto-denied pending interrupt due to client disconnect")
 
         except Exception as e:
             # 其他错误

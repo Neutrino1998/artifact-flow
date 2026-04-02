@@ -92,24 +92,24 @@ class RedisRuntimeStore:
         self._stream_timeout = stream_timeout
         self._permission_timeout = permission_timeout
 
-        # Lua script SHA（_init_scripts 中加载）
-        self._sha_acquire_lease: str = ""
-        self._sha_compare_and_del: str = ""
-        self._sha_compare_and_expire: str = ""
-        self._sha_drain_all: str = ""
-        self._sha_resolve_interrupt: str = ""
+        # Lua scripts（register_script 对象，自动处理 NOSCRIPT 重试）
+        self._script_acquire_lease = None
+        self._script_compare_and_del = None
+        self._script_compare_and_expire = None
+        self._script_drain_all = None
+        self._script_resolve_interrupt = None
 
         # 本 Worker 已知的 interrupt subscription，用于 shutdown_cleanup
         self._local_subscriptions: Set[str] = set()
 
-    async def init_scripts(self) -> None:
-        """SCRIPT LOAD 所有 Lua 脚本（init_globals 时调用一次）"""
-        self._sha_acquire_lease = await self._redis.script_load(_LUA_ACQUIRE_LEASE)
-        self._sha_compare_and_del = await self._redis.script_load(_LUA_COMPARE_AND_DEL)
-        self._sha_compare_and_expire = await self._redis.script_load(_LUA_COMPARE_AND_EXPIRE)
-        self._sha_drain_all = await self._redis.script_load(_LUA_DRAIN_ALL)
-        self._sha_resolve_interrupt = await self._redis.script_load(_LUA_RESOLVE_INTERRUPT)
-        logger.info("Redis Lua scripts loaded")
+    def init_scripts(self) -> None:
+        """注册所有 Lua 脚本（register_script 是同步方法，自动处理 NOSCRIPT 重试）"""
+        self._script_acquire_lease = self._redis.register_script(_LUA_ACQUIRE_LEASE)
+        self._script_compare_and_del = self._redis.register_script(_LUA_COMPARE_AND_DEL)
+        self._script_compare_and_expire = self._redis.register_script(_LUA_COMPARE_AND_EXPIRE)
+        self._script_drain_all = self._redis.register_script(_LUA_DRAIN_ALL)
+        self._script_resolve_interrupt = self._redis.register_script(_LUA_RESOLVE_INTERRUPT)
+        logger.info("Redis Lua scripts registered")
 
     # ── Key helpers ──
 
@@ -143,16 +143,14 @@ class RedisRuntimeStore:
         key = self._lease_key(conversation_id)
         # 原子操作：SET NX 成功返回 nil，否则返回现有持有者
         # 消除了原先 SET NX + GET 之间的竞态窗口
-        result = await self._redis.evalsha(
-            self._sha_acquire_lease, 1, key, message_id, str(self._lease_ttl)
+        result = await self._script_acquire_lease(
+            keys=[key], args=[message_id, str(self._lease_ttl)]
         )
         return result  # None = acquired, str = existing owner
 
     async def release_lease(self, conversation_id: str, message_id: str) -> None:
         key = self._lease_key(conversation_id)
-        await self._redis.evalsha(
-            self._sha_compare_and_del, 1, key, message_id
-        )
+        await self._script_compare_and_del(keys=[key], args=[message_id])
 
     async def get_leased_message_id(self, conversation_id: str) -> Optional[str]:
         return await self._redis.get(self._lease_key(conversation_id))
@@ -165,9 +163,7 @@ class RedisRuntimeStore:
 
     async def clear_engine_interactive(self, conversation_id: str, message_id: str) -> None:
         key = self._interactive_key(conversation_id)
-        await self._redis.evalsha(
-            self._sha_compare_and_del, 1, key, message_id
-        )
+        await self._script_compare_and_del(keys=[key], args=[message_id])
 
     async def get_interactive_message_id(self, conversation_id: str) -> Optional[str]:
         return await self._redis.get(self._interactive_key(conversation_id))
@@ -217,9 +213,17 @@ class RedisRuntimeStore:
             try:
                 async with asyncio.timeout(timeout):
                     while True:
-                        msg = await pubsub.get_message(
-                            ignore_subscribe_messages=True, timeout=1.0
-                        )
+                        try:
+                            msg = await pubsub.get_message(
+                                ignore_subscribe_messages=True, timeout=1.0
+                            )
+                        except (aioredis.ConnectionError, aioredis.TimeoutError):
+                            logger.warning(
+                                f"Redis Pub/Sub connection lost for {message_id}, "
+                                "treating as timeout deny"
+                            )
+                            self._local_subscriptions.discard(message_id)
+                            return None
                         if msg and msg["type"] == "message":
                             break
             except TimeoutError:
@@ -242,12 +246,9 @@ class RedisRuntimeStore:
         channel_name = self._interrupt_channel(message_id)
         resume_json = json.dumps(resume_data)
 
-        result = await self._redis.evalsha(
-            self._sha_resolve_interrupt,
-            1, interrupt_key,
-            resume_json, channel_name,
+        result = await self._script_resolve_interrupt(
+            keys=[interrupt_key], args=[resume_json, channel_name]
         )
-        # evalsha returns bytes when decode_responses=True → str
         status = result if isinstance(result, str) else result.decode()
         logger.info(f"Interrupt resolve for {message_id}: {status}")
         return status  # type: ignore[return-value]
@@ -268,10 +269,8 @@ class RedisRuntimeStore:
         interrupt_key = self._interrupt_key(message_id)
         channel_name = self._interrupt_channel(message_id)
         cancel_data = json.dumps({"approved": False, "reason": "cancelled"})
-        await self._redis.evalsha(
-            self._sha_resolve_interrupt,
-            1, interrupt_key,
-            cancel_data, channel_name,
+        await self._script_resolve_interrupt(
+            keys=[interrupt_key], args=[cancel_data, channel_name]
         )
         logger.info(f"Cancellation requested for {message_id}")
 
@@ -294,7 +293,7 @@ class RedisRuntimeStore:
     async def drain_messages(self, message_id: str) -> List[str]:
         try:
             key = self._queue_key(message_id)
-            items = await self._redis.evalsha(self._sha_drain_all, 1, key)
+            items = await self._script_drain_all(keys=[key])
             return list(items) if items else []
         except aioredis.ConnectionError:
             logger.warning(f"Redis unavailable draining messages for {message_id}, returning empty")
@@ -304,20 +303,18 @@ class RedisRuntimeStore:
 
     async def cleanup_execution(self, conversation_id: str, message_id: str) -> None:
         """清理指定 message_id 的所有运行时 key"""
-        pipe = self._redis.pipeline(transaction=False)
-        pipe.delete(self._interrupt_key(message_id))
-        pipe.delete(self._cancel_key(message_id))
-        pipe.delete(self._queue_key(message_id))
+        await self._redis.delete(
+            self._interrupt_key(message_id),
+            self._cancel_key(message_id),
+            self._queue_key(message_id),
+        )
         # lease 和 interactive：compare-and-del（只删自己持有的）
-        pipe.evalsha(
-            self._sha_compare_and_del, 1,
-            self._lease_key(conversation_id), message_id,
+        await self._script_compare_and_del(
+            keys=[self._lease_key(conversation_id)], args=[message_id]
         )
-        pipe.evalsha(
-            self._sha_compare_and_del, 1,
-            self._interactive_key(conversation_id), message_id,
+        await self._script_compare_and_del(
+            keys=[self._interactive_key(conversation_id)], args=[message_id]
         )
-        await pipe.execute()
         self._local_subscriptions.discard(message_id)
         logger.debug(f"Execution {message_id} cleaned up from Redis")
 
@@ -340,15 +337,13 @@ class RedisRuntimeStore:
         False if the lease was lost (expired or taken over by another worker).
         """
         ttl_int = int(ttl)
-        pipe = self._redis.pipeline(transaction=False)
-        pipe.evalsha(
-            self._sha_compare_and_expire, 1,
-            self._lease_key(conversation_id), message_id, str(ttl_int),
+        lease_result = await self._script_compare_and_expire(
+            keys=[self._lease_key(conversation_id)],
+            args=[message_id, str(ttl_int)],
         )
-        pipe.evalsha(
-            self._sha_compare_and_expire, 1,
-            self._interactive_key(conversation_id), message_id, str(ttl_int),
+        await self._script_compare_and_expire(
+            keys=[self._interactive_key(conversation_id)],
+            args=[message_id, str(ttl_int)],
         )
-        results = await pipe.execute()
-        # results[0] == 1 means lease key EXPIRE succeeded (we're still owner)
-        return results[0] == 1
+        # lease_result == 1 means lease key EXPIRE succeeded (we're still owner)
+        return lease_result == 1

@@ -58,7 +58,7 @@ async def transport(redis_client):
         stream_ttl=30,
         stream_timeout=60,
     )
-    await t.init_scripts()
+    t.init_scripts()
     return t
 
 
