@@ -31,7 +31,11 @@ async def main(username: str, password: str, no_claim: bool) -> None:
     from api.services.auth import hash_password
     from config import config
 
-    db = DatabaseManager(config.effective_database_url)
+    db_urls = [u.strip() for u in config.DATABASE_URLS.split(",") if u.strip()] if config.DATABASE_URLS else []
+    db = DatabaseManager(
+        database_url=config.effective_database_url,
+        database_urls=db_urls if len(db_urls) > 1 else None,
+    )
     await db.initialize()
 
     try:

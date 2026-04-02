@@ -4,7 +4,7 @@ RedisStreamTransport — Redis Streams-backed StreamTransport 实现
 支持跨 Worker 的事件 push/consume。
 使用 Redis Streams (XADD/XREAD) 实现事件缓冲和消费。
 
-Key 设计（hash tag {msg_id} 保证同一 stream 的 key 落在同一 Cluster slot）：
+Key 设计：
     stream:{msg_id}       STREAM    TTL=STREAM_TTL   事件流
     stream_meta:{msg_id}  HASH      TTL=STREAM_TTL   stream 元数据 {owner, status}
 """
@@ -28,14 +28,15 @@ _TERMINAL_EVENTS = frozenset(("complete", "cancelled", "error"))
 # 双重条件防止两类竞态：
 #   - consumer_id 不匹配 → 新 consumer 已接管，旧 finally 不动
 #   - status != streaming → producer 已 close，consumer finally 不动
-# KEYS[1]=meta_key, KEYS[2]=stream_key, ARGV[1]=consumer_id, ARGV[2]=ttl
+# 单 key 操作（KEYS[1]=meta_key），避免 Redis Cluster CROSSSLOT。
+# stream_key 的 EXPIRE 在调用方单独执行。
+# KEYS[1]=meta_key, ARGV[1]=consumer_id, ARGV[2]=ttl
 _LUA_REVERT_TO_PENDING = """
 local cid = redis.call('HGET', KEYS[1], 'consumer_id')
 local status = redis.call('HGET', KEYS[1], 'status')
 if cid == ARGV[1] and status == 'streaming' then
     redis.call('HSET', KEYS[1], 'status', 'pending', 'consumer_id', '')
     redis.call('EXPIRE', KEYS[1], tonumber(ARGV[2]))
-    redis.call('EXPIRE', KEYS[2], tonumber(ARGV[2]))
     return 1
 end
 return 0
@@ -66,11 +67,11 @@ class RedisStreamTransport:
 
     @staticmethod
     def _stream_key(stream_id: str) -> str:
-        return f"stream:{{{stream_id}}}"
+        return f"stream:{stream_id}"
 
     @staticmethod
     def _meta_key(stream_id: str) -> str:
-        return f"stream_meta:{{{stream_id}}}"
+        return f"stream_meta:{stream_id}"
 
     # ── Protocol methods ──
 
@@ -199,13 +200,16 @@ class RedisStreamTransport:
                         if event.get("type") in _TERMINAL_EVENTS:
                             return
         finally:
-            # Consumer 断连：原子 CAS 回退到 pending。
+            # Consumer 断连：CAS 回退 meta 到 pending（单 key Lua，Cluster 安全）。
             # 仅当 consumer_id 仍匹配（说明没有新 consumer 接管）时才回退，
             # 避免覆盖新 consumer 的 streaming 或 producer 的 closed。
-            await self._script_revert_to_pending(
-                keys=[meta_key, stream_key],
+            reverted = await self._script_revert_to_pending(
+                keys=[meta_key],
                 args=[consumer_id, str(self._stream_ttl)],
             )
+            # CAS 成功后单独 EXPIRE stream_key（仅 TTL 刷新，不需要原子）
+            if reverted:
+                await self._redis.expire(stream_key, self._stream_ttl)
 
     async def close_stream(self, stream_id: str) -> bool:
         meta_key = self._meta_key(stream_id)
