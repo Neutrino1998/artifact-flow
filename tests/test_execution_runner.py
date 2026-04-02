@@ -370,7 +370,6 @@ class TestLeaseFencing:
         blocker.set()
         await runner.shutdown(timeout=2)
 
-    @pytest.mark.filterwarnings("ignore::RuntimeWarning")
     async def test_renew_false_during_semaphore_wait_cleans_up(self):
         """Lease lost while task is queued for semaphore → cleanup still runs."""
         store = _FencingStore()

@@ -136,6 +136,7 @@ class ExecutionRunner:
                     heartbeat.cancel()
                     with contextlib.suppress(asyncio.CancelledError):
                         await heartbeat
+                coro.close()
                 self._tasks.pop(task_id, None)
                 await self.store.cleanup_execution(conversation_id, task_id)
                 logger.debug(f"Task {task_id} completed and cleaned up (active: {len(self._tasks)})")
