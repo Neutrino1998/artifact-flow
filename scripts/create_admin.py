@@ -31,7 +31,7 @@ async def main(username: str, password: str, no_claim: bool) -> None:
     from api.services.auth import hash_password
     from config import config
 
-    db = DatabaseManager(config.DATABASE_URL)
+    db = DatabaseManager(config.effective_database_url)
     await db.initialize()
 
     try:

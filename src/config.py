@@ -68,6 +68,18 @@ class Settings(BaseSettings):
     JWT_ALGORITHM: str = "HS256"
     JWT_EXPIRY_DAYS: int = 7
 
+    @property
+    def effective_database_url(self) -> str:
+        """统一的有效数据库 URL — 所有消费者（应用、Alembic、脚本）都应使用此属性。
+
+        优先取 DATABASE_URLS 的第一个地址，回落到 DATABASE_URL。
+        """
+        if self.DATABASE_URLS:
+            first = self.DATABASE_URLS.split(",")[0].strip()
+            if first:
+                return first
+        return self.DATABASE_URL
+
 
 # 全局配置实例
 config = Settings()
@@ -75,7 +87,7 @@ config = Settings()
 
 def validate_config() -> None:
     """Validate required config values. Called during app lifespan startup."""
-    if not config.DATABASE_URL and not config.DATABASE_URLS:
+    if not config.effective_database_url:
         raise RuntimeError(
             "ARTIFACTFLOW_DATABASE_URL environment variable is not set. "
             "Example: ARTIFACTFLOW_DATABASE_URL=sqlite+aiosqlite:///data/artifactflow.db\n"

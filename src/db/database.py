@@ -10,9 +10,9 @@
 
 from typing import Any, Dict, List, Optional, AsyncGenerator
 from contextlib import asynccontextmanager
-from urllib.parse import urlparse, unquote
 
 from sqlalchemy import event, text
+from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import (
     create_async_engine,
     AsyncSession,
@@ -97,23 +97,20 @@ class DatabaseManager:
 
     @staticmethod
     def _parse_db_url(url: str) -> Dict[str, Any]:
-        """从 mysql+asyncmy://user:pass@host:port/db 解析出 asyncmy.connect kwargs"""
-        # 去掉 SQLAlchemy dialect 前缀 (e.g. "mysql+asyncmy://")
-        if "://" in url:
-            scheme_end = url.index("://")
-            pure_url = "mysql" + url[scheme_end:]  # normalize to mysql://
-        else:
-            pure_url = url
-        parsed = urlparse(pure_url)
+        """从 SQLAlchemy URL 解析出 asyncmy.connect kwargs（含 query string 参数）"""
+        u = make_url(url)
         result: Dict[str, Any] = {
-            "host": parsed.hostname or "127.0.0.1",
-            "port": parsed.port or 3306,
-            "db": parsed.path.lstrip("/") if parsed.path else "",
+            "host": u.host or "127.0.0.1",
+            "port": u.port or 3306,
+            "db": u.database or "",
         }
-        if parsed.username:
-            result["user"] = unquote(parsed.username)
-        if parsed.password:
-            result["password"] = unquote(parsed.password)
+        if u.username:
+            result["user"] = u.username
+        if u.password:
+            result["password"] = u.password
+        # query string 参数（charset, ssl_ca, ssl_cert 等）直接透传
+        if u.query:
+            result.update(u.query)
         return result
 
     async def initialize(self) -> None:

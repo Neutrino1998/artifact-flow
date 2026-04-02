@@ -79,12 +79,10 @@ async def init_globals() -> None:
     logger.info(f"Data directory ensured: {data_dir.absolute()}")
 
     # 1. 初始化数据库管理器
-    db_urls = []
-    if config.DATABASE_URLS:
-        db_urls = [u.strip() for u in config.DATABASE_URLS.split(",") if u.strip()]
+    db_urls = [u.strip() for u in config.DATABASE_URLS.split(",") if u.strip()] if config.DATABASE_URLS else []
 
     _db_manager = DatabaseManager(
-        database_url=db_urls[0] if db_urls else config.DATABASE_URL,
+        database_url=config.effective_database_url,
         database_urls=db_urls if len(db_urls) > 1 else None,
         pool_size=config.DATABASE_POOL_SIZE,
         max_overflow=config.DATABASE_MAX_OVERFLOW,

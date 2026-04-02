@@ -24,8 +24,11 @@ if config.config_file_name is not None:
 # ORM metadata for autogenerate
 target_metadata = Base.metadata
 
-# Read database URL from env var (avoids importing config module and its full dependency tree)
-database_url = os.environ.get(
+# Read database URL from env var (avoids importing config module and its full dependency tree).
+# DATABASE_URLS (comma-separated multi-PX) takes precedence — use the first address.
+_raw_urls = os.environ.get("ARTIFACTFLOW_DATABASE_URLS", "")
+_first_url = next((u.strip() for u in _raw_urls.split(",") if u.strip()), "")
+database_url = _first_url or os.environ.get(
     "ARTIFACTFLOW_DATABASE_URL",
     "sqlite+aiosqlite:///data/artifactflow.db",
 )
