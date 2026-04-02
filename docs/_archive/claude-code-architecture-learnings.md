@@ -248,6 +248,28 @@ QueryEngine.submitMessage()        # async generator, yields streaming events
 
 ---
 
+## 11. Tool Invocation 范式对比：CLI vs Structured Call
+
+> Source: [Manus 前 backend lead 分享](https://gist.github.com/thoroc/973bef1770387e1986876ab6c6d20947)（原帖 [r/LocalLLaMA](https://www.reddit.com/r/LocalLLaMA/comments/1rrisqn/)）
+> Date: 2026-04-02
+
+**CLI 范式（Manus）：**
+- 单一 `run(command="...")` 接口，用 Unix pipe（`|`, `&&`, `||`, `;`）组合多步操作
+- 渐进式帮助：不预加载工具文档，模型按需 `cmd --help` 获取用法
+- 错误引导：每个错误返回修正建议（e.g. `[error] binary image. Use: see photo.png`）
+- 结果溢出：>200 行 / 50KB 截断，完整结果写文件，返回 preview + 导航命令提示
+
+**为何不适用 ArtifactFlow：**
+- 我们是 web 服务，无真实 shell → 模型会幻觉不存在的命令和 flag
+- 业务工具（artifact CRUD）用 pipe 语义无意义
+- 长文本参数在 CLI escaping 下极易出错，XML+CDATA 更可靠
+
+**可借鉴：**
+- **错误信息引导**：`ToolResult` 错误返回时附修正建议（"did you mean X?"）
+- **渐进式帮助**：工具数量增长后，考虑 `help(tool_name)` 元工具按需注入文档。与第 8 节 Deferred Tool Search 对比：deferred schema 是一次性拉取完整定义留在 context，`--help` 是每次按需获取更轻量但多消耗一轮 tool call
+
+---
+
 ## 优先级总结
 
 | 模式 | 难度 | 收益 | 建议 |
