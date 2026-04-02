@@ -120,7 +120,9 @@ class TestCrossInstance:
         from api.services.redis_stream_transport import RedisStreamTransport
 
         producer = RedisStreamTransport(redis_client, stream_ttl=30, stream_timeout=60)
+        producer.init_scripts()
         consumer = RedisStreamTransport(redis_client, stream_ttl=30, stream_timeout=60)
+        consumer.init_scripts()
 
         stream_id = "test_stream_cross"
         await producer.create_stream(stream_id)
