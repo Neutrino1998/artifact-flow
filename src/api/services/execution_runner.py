@@ -119,26 +119,26 @@ class ExecutionRunner:
 
         async def _wrapped():
             heartbeat = None
-            if self._lease_ttl > 0:
-                heartbeat = asyncio.create_task(
-                    self._renew_loop(conversation_id, task_id),
-                    name=f"heartbeat-{task_id}",
-                )
-            async with self._semaphore:
-                try:
+            try:
+                if self._lease_ttl > 0:
+                    heartbeat = asyncio.create_task(
+                        self._renew_loop(conversation_id, task_id),
+                        name=f"heartbeat-{task_id}",
+                    )
+                async with self._semaphore:
                     await coro
-                except asyncio.CancelledError:
-                    logger.warning(f"Task {task_id} cancelled (lease fencing or shutdown)")
-                except Exception:
-                    logger.exception(f"Task {task_id} failed with unhandled exception")
-                finally:
-                    if heartbeat is not None:
-                        heartbeat.cancel()
-                        with contextlib.suppress(asyncio.CancelledError):
-                            await heartbeat
-                    self._tasks.pop(task_id, None)
-                    await self.store.cleanup_execution(conversation_id, task_id)
-                    logger.debug(f"Task {task_id} completed and cleaned up (active: {len(self._tasks)})")
+            except asyncio.CancelledError:
+                logger.warning(f"Task {task_id} cancelled (lease fencing or shutdown)")
+            except Exception:
+                logger.exception(f"Task {task_id} failed with unhandled exception")
+            finally:
+                if heartbeat is not None:
+                    heartbeat.cancel()
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await heartbeat
+                self._tasks.pop(task_id, None)
+                await self.store.cleanup_execution(conversation_id, task_id)
+                logger.debug(f"Task {task_id} completed and cleaned up (active: {len(self._tasks)})")
 
         task = asyncio.create_task(_wrapped(), name=f"exec-{task_id}")
         self._tasks[task_id] = task

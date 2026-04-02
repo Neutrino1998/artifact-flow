@@ -369,3 +369,42 @@ class TestLeaseFencing:
 
         blocker.set()
         await runner.shutdown(timeout=2)
+
+    @pytest.mark.filterwarnings("ignore::RuntimeWarning")
+    async def test_renew_false_during_semaphore_wait_cleans_up(self):
+        """Lease lost while task is queued for semaphore → cleanup still runs."""
+        store = _FencingStore()
+        runner = ExecutionRunner(max_concurrent=1, store=store, lease_ttl=3)
+        blocker = asyncio.Event()
+
+        # t1 holds the only semaphore slot
+        await runner.submit(
+            "conv-1", "t1", _blocking_factory(blocker),
+            user_id="u1", stream_transport=_mock_transport,
+        )
+
+        # t2 is queued waiting for semaphore — coro never starts
+        coro_started = asyncio.Event()
+
+        async def coro2():
+            coro_started.set()
+            await asyncio.Event().wait()
+
+        await runner.submit(
+            "conv-2", "t2", coro2,
+            user_id="u1", stream_transport=_mock_transport,
+        )
+        await asyncio.sleep(0.05)
+        assert not coro_started.is_set(), "t2 should be waiting for semaphore"
+
+        # Fence t2 while it's still queued
+        store._renew_result = False
+        await asyncio.sleep(1.5)  # heartbeat fires, finds lease lost
+
+        # t2 should be cleaned up despite never executing
+        assert "t2" not in runner._tasks, "_tasks should not have stale t2 entry"
+        assert await store.get_leased_message_id("conv-2") is None
+
+        # Release t1 and shut down
+        blocker.set()
+        await runner.shutdown(timeout=2)
