@@ -63,7 +63,7 @@ class RuntimeStore(Protocol):
 
     async def cleanup_execution(self, conversation_id: str, message_id: str) -> None: ...
     async def shutdown_cleanup(self) -> None: ...
-    async def renew_lease(self, conversation_id: str, message_id: str, ttl: float) -> None: ...
+    async def renew_lease(self, conversation_id: str, message_id: str, ttl: float) -> bool: ...
 
 
 # ============================================================
@@ -229,6 +229,6 @@ class InMemoryRuntimeStore:
         self._queues.clear()
         logger.debug("Runtime store shutdown cleanup complete")
 
-    async def renew_lease(self, conversation_id: str, message_id: str, ttl: float) -> None:
-        """心跳续租。InMemory 空操作（内存无 TTL）。"""
-        pass
+    async def renew_lease(self, conversation_id: str, message_id: str, ttl: float) -> bool:
+        """心跳续租。InMemory 永远成功（内存无 TTL）。"""
+        return True

@@ -275,3 +275,97 @@ class TestSubmitOrchestration:
         assert await store.get_leased_message_id("conv-1") is None
         assert await store.get_interactive_message_id("conv-1") is None
         assert transport.get_stream_status("t1") != "pending"
+
+
+# ============================================================
+# TestLeaseFencing — renew_lease fencing behavior
+# ============================================================
+
+
+class _FencingStore(InMemoryRuntimeStore):
+    """InMemoryRuntimeStore with controllable renew_lease behavior."""
+
+    def __init__(self):
+        super().__init__()
+        self._renew_result: bool = True
+        self._renew_error: Exception | None = None
+
+    async def renew_lease(self, conversation_id: str, message_id: str, ttl: float) -> bool:
+        if self._renew_error is not None:
+            raise self._renew_error
+        return self._renew_result
+
+
+class TestLeaseFencing:
+
+    async def test_renew_false_cancels_task(self):
+        """renew_lease returns False → task is cancelled via fencing."""
+        store = _FencingStore()
+        runner = ExecutionRunner(max_concurrent=5, store=store, lease_ttl=3)
+        blocker = asyncio.Event()
+        cancelled = asyncio.Event()
+
+        async def coro():
+            try:
+                await blocker.wait()
+            except asyncio.CancelledError:
+                cancelled.set()
+                raise
+
+        task = await runner.submit("conv-1", "t1", coro, user_id="u1", stream_transport=_mock_transport)
+
+        # Let heartbeat run once, then make lease lost
+        await asyncio.sleep(0.05)
+        store._renew_result = False
+
+        # Wait for fencing to kick in (heartbeat interval = lease_ttl // 3 = 1s, but
+        # our lease_ttl=3 so interval=1s — we need to wait for the sleep to pass)
+        await asyncio.sleep(1.5)
+
+        assert cancelled.is_set(), "Task should have been cancelled by lease fencing"
+        # Task should have completed cleanup
+        await asyncio.sleep(0.1)
+        assert runner.active_task_count == 0
+
+    async def test_renew_exception_does_not_fence(self):
+        """renew_lease raises Exception → transient error, task continues."""
+        store = _FencingStore()
+        runner = ExecutionRunner(max_concurrent=5, store=store, lease_ttl=3)
+        blocker = asyncio.Event()
+
+        task = await runner.submit(
+            "conv-1", "t1", _blocking_factory(blocker),
+            user_id="u1", stream_transport=_mock_transport,
+        )
+
+        # Make renew raise a transient error
+        store._renew_error = ConnectionError("redis gone")
+        await asyncio.sleep(1.5)  # past one heartbeat interval
+
+        # Task should still be running (not fenced)
+        assert runner.active_task_count == 1
+
+        # Clean up
+        store._renew_error = None
+        blocker.set()
+        await runner.shutdown(timeout=2)
+
+    async def test_renew_true_task_continues(self):
+        """renew_lease returns True → task keeps running normally."""
+        store = _FencingStore()
+        runner = ExecutionRunner(max_concurrent=5, store=store, lease_ttl=3)
+        blocker = asyncio.Event()
+
+        await runner.submit(
+            "conv-1", "t1", _blocking_factory(blocker),
+            user_id="u1", stream_transport=_mock_transport,
+        )
+
+        # Let heartbeat run a couple times
+        await asyncio.sleep(2.5)
+
+        # Task should still be running
+        assert runner.active_task_count == 1
+
+        blocker.set()
+        await runner.shutdown(timeout=2)

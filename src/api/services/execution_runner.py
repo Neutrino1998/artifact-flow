@@ -127,6 +127,8 @@ class ExecutionRunner:
             async with self._semaphore:
                 try:
                     await coro
+                except asyncio.CancelledError:
+                    logger.warning(f"Task {task_id} cancelled (lease fencing or shutdown)")
                 except Exception:
                     logger.exception(f"Task {task_id} failed with unhandled exception")
                 finally:
@@ -144,14 +146,28 @@ class ExecutionRunner:
         return task
 
     async def _renew_loop(self, conversation_id: str, task_id: str) -> None:
-        """心跳续租循环（TTL/3 间隔）"""
+        """心跳续租循环（TTL/3 间隔）。
+
+        Lease lost (renew returns False) → cancel the execution task (fencing).
+        Transient errors (network blip) → log and retry next interval.
+        """
         interval = self._lease_ttl // 3
         while True:
             await asyncio.sleep(interval)
             try:
-                await self.store.renew_lease(conversation_id, task_id, ttl=self._lease_ttl)
+                still_owner = await self.store.renew_lease(
+                    conversation_id, task_id, ttl=self._lease_ttl
+                )
             except Exception:
-                logger.warning(f"Heartbeat renewal failed for {task_id}")
+                logger.warning(f"Heartbeat renewal failed for {task_id} (transient error)")
+                continue
+
+            if not still_owner:
+                logger.error(f"Lease lost for {task_id} — fencing execution")
+                task = self._tasks.get(task_id)
+                if task:
+                    task.cancel()
+                return
 
     async def shutdown(self, timeout: float = 30.0):
         """

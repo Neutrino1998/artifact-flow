@@ -8,6 +8,7 @@
 """
 
 import asyncio
+import contextlib
 from typing import Awaitable, Callable, Dict, Optional, Any, AsyncGenerator
 from uuid import uuid4
 from datetime import datetime
@@ -208,7 +209,9 @@ class ExecutionController:
                 yield event
         finally:
             if not engine_task.done():
-                await engine_task
+                engine_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await engine_task
 
         # Engine 已退出，不会再 drain 消息 — 立即取消活跃映射，
         # 使 /inject 端点正确返回 409 而非假装成功入队

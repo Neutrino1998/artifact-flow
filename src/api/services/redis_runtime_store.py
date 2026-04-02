@@ -333,8 +333,12 @@ class RedisRuntimeStore:
         self._local_subscriptions.clear()
         logger.debug("Redis runtime store shutdown cleanup complete")
 
-    async def renew_lease(self, conversation_id: str, message_id: str, ttl: float) -> None:
-        """心跳续租 — 校验 owner 后 EXPIRE lease + interactive"""
+    async def renew_lease(self, conversation_id: str, message_id: str, ttl: float) -> bool:
+        """心跳续租 — 校验 owner 后 EXPIRE lease + interactive。
+
+        Returns True if the lease key was successfully renewed (still owner),
+        False if the lease was lost (expired or taken over by another worker).
+        """
         ttl_int = int(ttl)
         pipe = self._redis.pipeline(transaction=False)
         pipe.evalsha(
@@ -345,4 +349,6 @@ class RedisRuntimeStore:
             self._sha_compare_and_expire, 1,
             self._interactive_key(conversation_id), message_id, str(ttl_int),
         )
-        await pipe.execute()
+        results = await pipe.execute()
+        # results[0] == 1 means lease key EXPIRE succeeded (we're still owner)
+        return results[0] == 1
