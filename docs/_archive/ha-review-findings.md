@@ -15,7 +15,7 @@
 | 共享控制面（lease/interrupt/stream 跨 Worker） | ✅ | Lua CAS、check-subscribe-check-wait、心跳续租 |
 | Fencing / split-brain 防护 | ✅ | renew_lease → bool，lease 丢失 → task.cancel()（PR3） |
 | 故障检测（readiness） | ✅ | `/health/ready` 检查 DB + Redis（PR1） |
-| Redis failover 恢复 | ⚠️ 部分 | `is_cancelled`/`drain_messages` 有 graceful degrade，Pub/Sub 和 XREAD 无恢复 |
+| Redis failover 恢复 | ✅ | register_script 自动 NOSCRIPT 重试，XREAD 断连重试（2×10s），Pub/Sub 断连 graceful deny，连接层 ExponentialBackoff + Cluster 支持（PR4） |
 | 事件持久化保证 | ⚠️ 降级 | fallback 到本地文件，容器环境不可靠 |
 
 ---
@@ -241,7 +241,7 @@ async def readiness():
 
 ## P1 — 应该修复
 
-### F-05 断线重连与 permission auto-deny 冲突
+### F-05 断线重连与 permission auto-deny 冲突 ✅ done (PR4)
 
 **来源**：Reviewer P3
 
@@ -256,7 +256,7 @@ async def readiness():
 
 ---
 
-### F-06 `consume_events` XREAD 断连无恢复
+### F-06 `consume_events` XREAD 断连无恢复 ✅ done (PR4)
 
 **来源**：Reviewer P2（故障链路经 Reviewer 二轮修正）
 
@@ -292,7 +292,7 @@ while True:
 
 ---
 
-### F-07 Lua 脚本 NOSCRIPT 容错
+### F-07 Lua 脚本 NOSCRIPT 容错 ✅ done (PR4)
 
 **来源**：自研 Review
 
@@ -318,7 +318,7 @@ result = await self._acquire_lease(keys=[key], args=[message_id, str(ttl)])
 
 ---
 
-### F-08 Redis 连接缺少 retry 策略
+### F-08 Redis 连接缺少 retry 策略 ✅ done (PR4)
 
 **来源**：自研 Review
 
@@ -373,7 +373,7 @@ REDIS_MAX_CONNECTIONS: int = 50      # 云托管建议: CPU核数×2+冗余(3-5)
 
 ## P2 — 建议修复 / 加固
 
-### F-09 `wait_for_interrupt` Pub/Sub 断连无捕获
+### F-09 `wait_for_interrupt` Pub/Sub 断连无捕获 ✅ done (PR4)
 
 **来源**：Reviewer P2
 
@@ -534,7 +534,7 @@ def _lease_key(self, conversation_id: str) -> str:
 
 ---
 
-### F-14 Stream TTL 默认 30s 偏短
+### F-14 Stream TTL 默认 30s 偏短 ✅ done (PR4)
 
 **来源**：自研 Review
 
@@ -563,7 +563,7 @@ def _lease_key(self, conversation_id: str) -> str:
 
 ---
 
-### F-16 TDSQL 多 PX 地址故障切换
+### F-16 TDSQL 多 PX 地址故障切换 ✅ done (PR4)
 
 **来源**：云托管确认
 
@@ -673,7 +673,7 @@ chat.py 当前做的事（不该做）：
 
 ---
 
-### R-04 stream.py: 断连时直接 resolve interrupt
+### R-04 stream.py: 断连时直接 resolve interrupt ✅ done (PR4)
 
 **位置**：`stream.py:99-107`
 
@@ -763,7 +763,7 @@ async def send_message(
 | **PR1** | F-02 + F-04 | 配置 + 运维 | ✅ done |
 | **PR2** | R-01 + R-02 | 结构重构 | ✅ done |
 | **PR3** | F-01 | 并发语义变更 | ✅ done |
-| **PR4** | F-05（含 R-04）~ F-09 + F-16（F-09 从 P2 提前合入） | Redis 韧性 + DB 接入 | 中：XREAD 重试、Pub/Sub 重试、auto-deny 改 grace period、连接 retry、NOSCRIPT 容错、RedisCluster 切换、多 PX 故障切换 |
+| **PR4** | F-05（含 R-04）~ F-09 + F-14 + F-16（F-09 从 P2 提前合入） | Redis 韧性 + DB 接入 | ✅ done |
 | **PR5** | F-10 ~ F-15 | 加固清理 | 小：按需挑选 |
 
 **为什么 F-09 提前到 PR4**：只修 XREAD（F-06）不修 Pub/Sub（F-09），Redis failover 恢复只做了一半——主从切换时 XREAD 能重连但 Pub/Sub 断了，interrupt 仍然会异常退出。两者应同批处理。
