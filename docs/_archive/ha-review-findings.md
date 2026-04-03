@@ -16,7 +16,7 @@
 | Fencing / split-brain 防护 | ✅ | renew_lease → bool，lease 丢失 → task.cancel()（PR3） |
 | 故障检测（readiness） | ✅ | `/health/ready` 检查 DB + Redis（PR1） |
 | Redis failover 恢复 | ✅ | register_script 自动 NOSCRIPT 重试，XREAD 断连重试（2×10s），Pub/Sub 断连 graceful deny，连接层 ExponentialBackoff + Cluster 支持（PR4） |
-| 事件持久化保证 | ⚠️ 降级 | fallback 到本地文件，容器环境不可靠 |
+| 事件持久化保证 | ⚠️ 降级 | 3 次重试失败后记日志丢弃（审计数据，不影响核心业务） |
 
 ---
 
@@ -203,7 +203,7 @@ async def readiness():
 
 ---
 
-### F-03 `get_stream_status` 同步/异步接口不一致
+### F-03 `get_stream_status` 同步/异步接口不一致 ✅ done (PR5)
 
 **来源**：自研 Review
 
@@ -388,7 +388,7 @@ REDIS_MAX_CONNECTIONS: int = 50      # 云托管建议: CPU核数×2+冗余(3-5)
 
 ---
 
-### F-10 删除 event fallback 本地文件（假安全感）
+### F-10 删除 event fallback 本地文件（假安全感） ✅ done (PR5)
 
 **来源**：Reviewer P2 + 重新评估
 
@@ -422,7 +422,7 @@ else:
 
 ---
 
-### F-11 `llm_chunk` 每 token 一条全量快照 → coalesced snapshots
+### F-11 `llm_chunk` 每 token 一条全量快照 → coalesced snapshots ✅ done (PR5)
 
 **来源**：自研 Review + Reviewer 深化分析
 
@@ -494,7 +494,7 @@ async def _run_and_push(stream_transport, stream_id, event_stream):
 
 ---
 
-### F-12 `push_event` check-then-act 竞态
+### F-12 `push_event` check-then-act 竞态 ✅ done (PR5)
 
 **来源**：自研 Review
 
@@ -509,7 +509,7 @@ async def _run_and_push(stream_transport, stream_id, event_stream):
 
 ---
 
-### F-13 Redis key 无命名空间隔离
+### F-13 Redis key 无命名空间隔离 ✅ done (PR5)
 
 **来源**：自研 Review
 
@@ -548,7 +548,7 @@ def _lease_key(self, conversation_id: str) -> str:
 
 ---
 
-### F-15 InMemory `cleanup_execution` 全量扫描
+### F-15 InMemory `cleanup_execution` 全量扫描 ✅ done (PR5)
 
 **来源**：自研 Review
 
@@ -747,13 +747,13 @@ async def send_message(
 | 6 | F-07 | Lua NOSCRIPT 容错 | P1 | 中 |
 | 7 | F-08 | Redis 连接 retry 策略 | P1 | 小 |
 | 8 | F-09 | Pub/Sub 断连捕获 | P2 | 中 |
-| 9 | F-10 | 删除 event fallback 本地文件 | P2 | 极小 |
-| 10 | F-03 | `get_stream_status` 接口统一 | P2 | 小 |
-| 11 | F-11 | Stream MAXLEN 调大 | P2 | 极小 |
-| 12 | F-12 | `push_event` 竞态 | P2 | 小 |
-| 13 | F-13 | Redis key 命名空间 | P2 | 小 |
-| 14 | F-14 | Stream TTL 调大 | P2 | 极小 |
-| 15 | F-15 | InMemory cleanup O(n) | P2 | 小 |
+| 9 | F-10 | 删除 event fallback 本地文件 | P2 | ✅ done (PR5) |
+| 10 | F-03 | `get_stream_status` 接口统一 | P2 | ✅ done (PR5) |
+| 11 | F-11 | llm_chunk coalescing | P2 | ✅ done (PR5) |
+| 12 | F-12 | `push_event` 竞态注释 | P2 | ✅ done (PR5) |
+| 13 | F-13 | Redis key 命名空间 | P2 | ✅ done (PR5) |
+| 14 | F-14 | Stream TTL 调大 | P2 | ✅ done (PR4) |
+| 15 | F-15 | InMemory cleanup O(1) | P2 | ✅ done (PR5) |
 | 16 | F-16 | TDSQL 多 PX 地址故障切换 | P1 | 小 |
 
 **建议 PR 序列**（配置修正、结构重构、语义变更不混在同一 PR，方便 bisect）：
@@ -764,7 +764,7 @@ async def send_message(
 | **PR2** | R-01 + R-02 | 结构重构 | ✅ done |
 | **PR3** | F-01 | 并发语义变更 | ✅ done |
 | **PR4** | F-05（含 R-04）~ F-09 + F-14 + F-16（F-09 从 P2 提前合入） | Redis 韧性 + DB 接入 | ✅ done |
-| **PR5** | F-10 ~ F-15 | 加固清理 | 小：按需挑选 |
+| **PR5** | F-10, F-11, F-12, F-13, F-15, F-03 | 加固清理 | ✅ done |
 
 **为什么 F-09 提前到 PR4**：只修 XREAD（F-06）不修 Pub/Sub（F-09），Redis failover 恢复只做了一半——主从切换时 XREAD 能重连但 Pub/Sub 断了，interrupt 仍然会异常退出。两者应同批处理。
 
