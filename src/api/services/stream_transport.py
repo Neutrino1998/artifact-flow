@@ -44,7 +44,7 @@ class StreamTransport(Protocol):
         last_event_id: Optional[str] = None,
     ) -> AsyncGenerator[Dict[str, Any], None]: ...
     async def close_stream(self, stream_id: str) -> bool: ...
-    def get_stream_status(self, stream_id: str) -> Optional[str]: ...
+    async def get_stream_status(self, stream_id: str) -> Optional[str]: ...
 
 
 # ============================================================
@@ -216,7 +216,7 @@ class InMemoryStreamTransport:
                 self._closed_streams.discard(message_id)
                 logger.debug(f"Stream {message_id} cleaned up from memory")
 
-    def get_stream_status(self, message_id: str) -> Optional[str]:
+    async def get_stream_status(self, message_id: str) -> Optional[str]:
         context = self.streams.get(message_id)
         return context.status if context else None
 

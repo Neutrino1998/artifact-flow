@@ -128,6 +128,7 @@ async def init_globals() -> None:
             lease_ttl=config.LEASE_TTL,
             stream_timeout=config.STREAM_TIMEOUT,
             permission_timeout=config.PERMISSION_TIMEOUT,
+            key_prefix=config.REDIS_KEY_PREFIX,
         )
         runtime_store.init_scripts()
 
@@ -135,6 +136,7 @@ async def init_globals() -> None:
             _redis_client,
             stream_ttl=config.STREAM_TTL,
             stream_timeout=config.STREAM_TIMEOUT,
+            key_prefix=config.REDIS_KEY_PREFIX,
         )
         _stream_transport.init_scripts()
         _execution_runner = ExecutionRunner(

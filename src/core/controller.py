@@ -343,7 +343,7 @@ class ExecutionController:
         1. execution_complete — 成功
         2. error — 失败
 
-        策略：3 次指数退避重试，最终失败写入 fallback 日志文件（JSON lines）。
+        策略：3 次指数退避重试，最终失败记录日志。
         """
         if not self.message_event_repo:
             return
@@ -380,28 +380,9 @@ class ExecutionController:
                     logger.warning(f"Event persistence attempt {attempt + 1} failed, retrying in {wait}s: {e}")
                     await asyncio.sleep(wait)
                 else:
-                    logger.error(f"Event persistence failed after {max_retries} attempts: {e}")
-                    self._write_fallback_events(message_id, db_events)
-
-    @staticmethod
-    def _write_fallback_events(message_id: str, db_events: list) -> None:
-        """将失败事件写入 fallback 日志文件（JSON lines），防止数据丢失。"""
-        import json
-        from pathlib import Path
-
-        fallback_dir = Path("logs")
-        fallback_dir.mkdir(exist_ok=True)
-        fallback_path = fallback_dir / "events_fallback.jsonl"
-
-        try:
-            with open(fallback_path, "a", encoding="utf-8") as f:
-                for event in db_events:
-                    record = {**event}
-                    # datetime → ISO string for JSON serialization
-                    if hasattr(record.get("created_at"), "isoformat"):
-                        record["created_at"] = record["created_at"].isoformat()
-                    f.write(json.dumps(record, ensure_ascii=False) + "\n")
-            logger.warning(f"Wrote {len(db_events)} fallback events for message {message_id} to {fallback_path}")
-        except Exception as fallback_err:
-            logger.critical(f"Fallback event write also failed for message {message_id}: {fallback_err}")
+                    logger.error(
+                        f"Event persistence failed after {max_retries} attempts for {message_id} "
+                        f"({len(db_events)} events lost): {e}"
+                    )
+                    # 不做 fallback — events 是审计数据，conversation + artifact 已持久化
 

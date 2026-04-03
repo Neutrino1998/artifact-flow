@@ -4,9 +4,9 @@ RedisStreamTransport — Redis Streams-backed StreamTransport 实现
 支持跨 Worker 的事件 push/consume。
 使用 Redis Streams (XADD/XREAD) 实现事件缓冲和消费。
 
-Key 设计：
-    stream:{msg_id}       STREAM    TTL=STREAM_TTL   事件流
-    stream_meta:{msg_id}  HASH      TTL=STREAM_TTL   stream 元数据 {owner, status}
+Key 设计（{prefix:id} 为 hash tag，确保同 entity 同 slot）：
+    {prefix:msg_id}:stream       STREAM    TTL=STREAM_TTL   事件流
+    {prefix:msg_id}:stream_meta  HASH      TTL=STREAM_TTL   stream 元数据 {owner, status}
 """
 
 import asyncio
@@ -51,10 +51,12 @@ class RedisStreamTransport:
         redis_client: aioredis.Redis,
         stream_ttl: int = 30,
         stream_timeout: int = 1800,
+        key_prefix: str = "",
     ):
         self._redis = redis_client
         self._stream_ttl = stream_ttl
         self._stream_timeout = stream_timeout
+        self._prefix = key_prefix
         self._script_revert_to_pending = None
 
     def init_scripts(self) -> None:
@@ -65,13 +67,11 @@ class RedisStreamTransport:
 
     # ── Key helpers ──
 
-    @staticmethod
-    def _stream_key(stream_id: str) -> str:
-        return f"stream:{stream_id}"
+    def _stream_key(self, stream_id: str) -> str:
+        return f"{{{self._prefix}:{stream_id}}}:stream"
 
-    @staticmethod
-    def _meta_key(stream_id: str) -> str:
-        return f"stream_meta:{stream_id}"
+    def _meta_key(self, stream_id: str) -> str:
+        return f"{{{self._prefix}:{stream_id}}}:stream_meta"
 
     # ── Protocol methods ──
 
@@ -97,6 +97,11 @@ class RedisStreamTransport:
 
     async def push_event(self, stream_id: str, event: Dict[str, Any]) -> bool:
         meta_key = self._meta_key(stream_id)
+        # ⚠️ 已知竞态窗口：HGET → XADD 之间 close_stream 可能将 status 置为 closed，
+        # 导致事件写入已关闭的 stream。当前不修复，原因：
+        # 1. close_stream 和 push_event 在同一执行流中由 controller 顺序调用，close 一定在最后一个 push 之后
+        # 2. 即使未来引入外部强制关闭，孤儿事件有 TTL 自动清理
+        # 3. events 已通过 _persist_events 持久化到 DB，stream 只是 SSE 传输通道
         status = await self._redis.hget(meta_key, "status")
         if status is None or status == "closed":
             return False
@@ -228,11 +233,5 @@ class RedisStreamTransport:
         logger.debug(f"Redis stream {stream_id} closed (TTL={cleanup_ttl}s)")
         return True
 
-    def get_stream_status(self, stream_id: str) -> Optional[str]:
-        # Protocol 定义为同步方法 — Redis 实现无法同步读取
-        # 返回 None，调用方应使用 async 版本
-        return None
-
-    async def get_stream_status_async(self, stream_id: str) -> Optional[str]:
-        """异步版本的 get_stream_status"""
+    async def get_stream_status(self, stream_id: str) -> Optional[str]:
         return await self._redis.hget(self._meta_key(stream_id), "status")

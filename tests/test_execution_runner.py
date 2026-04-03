@@ -274,7 +274,7 @@ class TestSubmitOrchestration:
         # Lease + interactive + stream should all have been rolled back
         assert await store.get_leased_message_id("conv-1") is None
         assert await store.get_interactive_message_id("conv-1") is None
-        assert transport.get_stream_status("t1") != "pending"
+        assert await transport.get_stream_status("t1") != "pending"
 
 
 # ============================================================

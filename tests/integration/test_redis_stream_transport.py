@@ -180,7 +180,7 @@ class TestLastEventId:
         last_id = event_ids[1]
 
         # After consumer disconnect, stream should revert to pending (not closed)
-        status = await transport.get_stream_status_async(stream_id)
+        status = await transport.get_stream_status(stream_id)
         assert status == "pending"
 
         # Producer can still push events (stream NOT closed)
@@ -215,7 +215,7 @@ class TestConsumerDisconnect:
                 break
 
         # Stream should be pending, not closed
-        status = await transport.get_stream_status_async(stream_id)
+        status = await transport.get_stream_status(stream_id)
         assert status == "pending"
 
         # Producer can still push
@@ -243,7 +243,7 @@ class TestConsumerDisconnect:
         await task
 
         # Should stay closed
-        status = await transport.get_stream_status_async(stream_id)
+        status = await transport.get_stream_status(stream_id)
         assert status == "closed"
 
 

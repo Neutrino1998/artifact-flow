@@ -4,12 +4,12 @@ RedisRuntimeStore — Redis-backed RuntimeStore 实现
 支持跨 Worker 的 lease/interrupt/cancel/queue 状态共享。
 使用 Lua 脚本保证原子性，Pub/Sub 实现 interrupt 唤醒。
 
-Key 设计：
-    lease:{conv_id}       STRING (msg_id)   TTL=LEASE_TTL   conversation lease
-    interactive:{conv_id} STRING (msg_id)   TTL=LEASE_TTL   engine interactive
-    interrupt:{msg_id}    HASH              TTL=PERM+60     interrupt 状态
-    cancel:{msg_id}       STRING "1"        TTL=STREAM_TO   取消标记
-    queue:{msg_id}        LIST              TTL=STREAM_TO   消息注入队列
+Key 设计（{prefix:id} 为 hash tag，确保同 entity 同 slot）：
+    {prefix:conv_id}:lease        STRING (msg_id)   TTL=LEASE_TTL   conversation lease
+    {prefix:conv_id}:interactive  STRING (msg_id)   TTL=LEASE_TTL   engine interactive
+    {prefix:msg_id}:interrupt     HASH              TTL=PERM+60     interrupt 状态
+    {prefix:msg_id}:cancel        STRING "1"        TTL=STREAM_TO   取消标记
+    {prefix:msg_id}:queue         LIST              TTL=STREAM_TO   消息注入队列
 """
 
 import asyncio
@@ -86,11 +86,13 @@ class RedisRuntimeStore:
         lease_ttl: int,
         stream_timeout: int,
         permission_timeout: int,
+        key_prefix: str = "",
     ):
         self._redis = redis_client
         self._lease_ttl = lease_ttl
         self._stream_timeout = stream_timeout
         self._permission_timeout = permission_timeout
+        self._prefix = key_prefix
 
         # Lua scripts（register_script 对象，自动处理 NOSCRIPT 重试）
         self._script_acquire_lease = None
@@ -113,29 +115,23 @@ class RedisRuntimeStore:
 
     # ── Key helpers ──
 
-    @staticmethod
-    def _lease_key(conversation_id: str) -> str:
-        return f"lease:{conversation_id}"
+    def _lease_key(self, conversation_id: str) -> str:
+        return f"{{{self._prefix}:{conversation_id}}}:lease"
 
-    @staticmethod
-    def _interactive_key(conversation_id: str) -> str:
-        return f"interactive:{conversation_id}"
+    def _interactive_key(self, conversation_id: str) -> str:
+        return f"{{{self._prefix}:{conversation_id}}}:interactive"
 
-    @staticmethod
-    def _interrupt_key(message_id: str) -> str:
-        return f"interrupt:{message_id}"
+    def _interrupt_key(self, message_id: str) -> str:
+        return f"{{{self._prefix}:{message_id}}}:interrupt"
 
-    @staticmethod
-    def _cancel_key(message_id: str) -> str:
-        return f"cancel:{message_id}"
+    def _cancel_key(self, message_id: str) -> str:
+        return f"{{{self._prefix}:{message_id}}}:cancel"
 
-    @staticmethod
-    def _queue_key(message_id: str) -> str:
-        return f"queue:{message_id}"
+    def _queue_key(self, message_id: str) -> str:
+        return f"{{{self._prefix}:{message_id}}}:queue"
 
-    @staticmethod
-    def _interrupt_channel(message_id: str) -> str:
-        return f"interrupt_ch:{message_id}"
+    def _interrupt_channel(self, message_id: str) -> str:
+        return f"{{{self._prefix}:{message_id}}}:interrupt_ch"
 
     # ── Conversation lease ──
 

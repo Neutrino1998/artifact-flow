@@ -206,13 +206,11 @@ class InMemoryRuntimeStore:
         self._interrupts.pop(message_id, None)
         self._cancellations.pop(message_id, None)
         self._queues.pop(message_id, None)
-        # 清理 lease 和 interactive 中引用此 message_id 的条目
-        self._conversation_leases = {
-            k: v for k, v in self._conversation_leases.items() if v != message_id
-        }
-        self._engine_interactive = {
-            k: v for k, v in self._engine_interactive.items() if v != message_id
-        }
+        # 清理 lease 和 interactive — O(1) 条件删除（conversation_id 已知）
+        if self._conversation_leases.get(conversation_id) == message_id:
+            self._conversation_leases.pop(conversation_id, None)
+        if self._engine_interactive.get(conversation_id) == message_id:
+            self._engine_interactive.pop(conversation_id, None)
         logger.debug(f"Execution {message_id} cleaned up from runtime store")
 
     async def shutdown_cleanup(self) -> None:

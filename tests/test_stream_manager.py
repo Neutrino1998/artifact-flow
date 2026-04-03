@@ -26,7 +26,7 @@ class TestCreateStream:
         sm = InMemoryStreamTransport(ttl_seconds=10)
         ctx = await sm.create_stream("msg-1")
         assert ctx.status == "pending"
-        assert sm.get_stream_status("msg-1") == "pending"
+        assert await sm.get_stream_status("msg-1") == "pending"
         await sm.close_stream("msg-1")
 
     async def test_duplicate_raises(self):
@@ -198,10 +198,10 @@ class TestTTL:
     async def test_pending_ttl_expires(self):
         sm = InMemoryStreamTransport(ttl_seconds=0.1)
         await sm.create_stream("msg-1")
-        assert sm.get_stream_status("msg-1") == "pending"
+        assert await sm.get_stream_status("msg-1") == "pending"
 
         await asyncio.sleep(0.2)
-        assert sm.get_stream_status("msg-1") == "closed"
+        assert await sm.get_stream_status("msg-1") == "closed"
 
     async def test_streaming_not_cleaned_by_ttl(self):
         sm = InMemoryStreamTransport(ttl_seconds=0.1)
@@ -218,7 +218,7 @@ class TestTTL:
         ctx.status = "streaming"
 
         await asyncio.sleep(0.15)
-        assert sm.get_stream_status("msg-1") == "streaming"
+        assert await sm.get_stream_status("msg-1") == "streaming"
         await sm.close_stream("msg-1")
 
 
@@ -245,9 +245,9 @@ class TestCloseAndStatus:
 
     async def test_status_query(self):
         sm = InMemoryStreamTransport(ttl_seconds=10)
-        assert sm.get_stream_status("msg-x") is None
+        assert await sm.get_stream_status("msg-x") is None
 
         await sm.create_stream("msg-1")
-        assert sm.get_stream_status("msg-1") == "pending"
+        assert await sm.get_stream_status("msg-1") == "pending"
         await sm.close_stream("msg-1")
-        assert sm.get_stream_status("msg-1") == "closed"
+        assert await sm.get_stream_status("msg-1") == "closed"

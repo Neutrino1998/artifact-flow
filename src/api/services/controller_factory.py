@@ -107,14 +107,43 @@ async def run_and_push(
     Stream is always closed by the producer in the finally block.
     """
     stream_closed = False
+    # llm_chunk coalescing: 保留最新快照，定时 flush（80ms）
+    pending_chunks: dict[str, dict] = {}  # "content" | "reasoning_content" → latest event
+    last_flush_time = 0.0
+
+    async def flush_pending():
+        nonlocal last_flush_time, stream_closed
+        for key in list(pending_chunks):
+            if stream_closed:
+                pending_chunks.clear()
+                return
+            if not await stream_transport.push_event(stream_id, sanitize_error_event(pending_chunks.pop(key))):
+                logger.info(f"Stream {stream_id} closed, execution continues")
+                stream_closed = True
+        last_flush_time = asyncio.get_event_loop().time()
+
     try:
         async with asyncio.timeout(config.STREAM_TIMEOUT):
             async for event in event_stream:
                 if stream_closed:
                     continue
-                if not await stream_transport.push_event(stream_id, sanitize_error_event(event)):
-                    logger.info(f"Stream {stream_id} closed, execution will continue to completion")
-                    stream_closed = True
+
+                if event.get("type") == "llm_chunk":
+                    data = event.get("data", {})
+                    chunk_key = "reasoning_content" if "reasoning_content" in data else "content"
+                    pending_chunks[chunk_key] = event
+                    now = asyncio.get_event_loop().time()
+                    if now - last_flush_time >= 0.08:
+                        await flush_pending()
+                else:
+                    await flush_pending()  # 非 chunk 前先 flush
+                    if stream_closed:
+                        continue
+                    if not await stream_transport.push_event(stream_id, sanitize_error_event(event)):
+                        logger.info(f"Stream {stream_id} closed, execution continues")
+                        stream_closed = True
+
+            await flush_pending()  # 流结束 flush 残余
 
     except TimeoutError:
         logger.error(f"Execution timed out after {config.STREAM_TIMEOUT}s for {stream_id}")

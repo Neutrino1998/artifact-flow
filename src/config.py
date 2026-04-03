@@ -42,6 +42,7 @@ class Settings(BaseSettings):
     # Redis（空 = InMemory fallback，非空 = Redis）
     REDIS_URL: str = ""
     REDIS_CLUSTER: bool = False           # 生产 Cluster 模式
+    REDIS_KEY_PREFIX: str = "af"          # Redis key 命名空间前缀（共用 Cluster 必须配置）
     REDIS_MAX_CONNECTIONS: int = 50       # 连接池上限
     LEASE_TTL: int = 90  # 秒，心跳每 TTL/3 续租
 
