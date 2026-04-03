@@ -938,6 +938,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#11-tool-invocation-范式对比cli-vs-structured-call" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11. Tool Invocation 范式对比：CLI vs Structured Call
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#优先级总结" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1140,6 +1151,24 @@ Deep merge：后者覆盖前者，对象字段递归合并。</p>
 - <code>build-output/query.ts:219-250</code> — 核心循环，turn 管理
 - <code>build-output/services/tools/StreamingToolExecutor.ts</code> — 流式工具执行</p>
 <p><strong>ArtifactFlow 对比：</strong> 我们的 pi-style loop 更简洁（flat while loop），Claude Code 用 async generator yield 事件流。两者本质相同，只是 streaming 粒度不同。</p>
+<hr />
+<h2 id="11-tool-invocation-范式对比cli-vs-structured-call">11. Tool Invocation 范式对比：CLI vs Structured Call</h2>
+<blockquote>
+<p>Source: <a href="https://gist.github.com/thoroc/973bef1770387e1986876ab6c6d20947">Manus 前 backend lead 分享</a>（原帖 <a href="https://www.reddit.com/r/LocalLLaMA/comments/1rrisqn/">r/LocalLLaMA</a>）
+Date: 2026-04-02</p>
+</blockquote>
+<p><strong>CLI 范式（Manus）：</strong>
+- 单一 <code>run(command="...")</code> 接口，用 Unix pipe（<code>|</code>, <code>&amp;&amp;</code>, <code>||</code>, <code>;</code>）组合多步操作
+- 渐进式帮助：不预加载工具文档，模型按需 <code>cmd --help</code> 获取用法
+- 错误引导：每个错误返回修正建议（e.g. <code>[error] binary image. Use: see photo.png</code>）
+- 结果溢出：&gt;200 行 / 50KB 截断，完整结果写文件，返回 preview + 导航命令提示</p>
+<p><strong>为何不适用 ArtifactFlow：</strong>
+- 我们是 web 服务，无真实 shell → 模型会幻觉不存在的命令和 flag
+- 业务工具（artifact CRUD）用 pipe 语义无意义
+- 长文本参数在 CLI escaping 下极易出错，XML+CDATA 更可靠</p>
+<p><strong>可借鉴：</strong>
+- <strong>错误信息引导</strong>：<code>ToolResult</code> 错误返回时附修正建议（"did you mean X?"）
+- <strong>渐进式帮助</strong>：工具数量增长后，考虑 <code>help(tool_name)</code> 元工具按需注入文档。与第 8 节 Deferred Tool Search 对比：deferred schema 是一次性拉取完整定义留在 context，<code>--help</code> 是每次按需获取更轻量但多消耗一轮 tool call</p>
 <hr />
 <h2 id="优先级总结">优先级总结</h2>
 <table>

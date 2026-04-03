@@ -850,22 +850,22 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#各阶段说明" class="md-nav__link">
+  <a href="#设计阶段" class="md-nav__link">
     <span class="md-ellipsis">
       
-        各阶段说明
+        设计阶段
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="各阶段说明">
+    <nav class="md-nav" aria-label="设计阶段">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#constitution-l1通用设计原则" class="md-nav__link">
+  <a href="#constitution设计原则" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Constitution L1（通用设计原则）
+        Constitution（设计原则）
       
     </span>
   </a>
@@ -884,17 +884,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#constitution-l2架构约束原则" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Constitution L2（架构约束原则）
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#module-specs模块契约" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -906,15 +895,43 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#implementation-plan" class="md-nav__link">
+  <a href="#interface-contracts接口契约" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Implementation Plan
+        Interface Contracts（接口契约）
       
     </span>
   </a>
   
 </li>
+        
+          <li class="md-nav__item">
+  <a href="#implementation-plan实施计划" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Implementation Plan（实施计划）
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#实施阶段" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        实施阶段
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="实施阶段">
+      <ul class="md-nav__list">
         
           <li class="md-nav__item">
   <a href="#实施循环" class="md-nav__link">
@@ -924,6 +941,45 @@
       
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="实施循环">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#测试策略" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        测试策略
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#新-session-review" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        新 session review
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentmd实施期间的轻量修正层" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        agent.md（实施期间的轻量修正层）
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
         
@@ -956,10 +1012,21 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#与本流程的关系" class="md-nav__link">
+  <a href="#与本流程的差异" class="md-nav__link">
     <span class="md-ellipsis">
       
-        与本流程的关系
+        与本流程的差异
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#工具落地思路" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        工具落地思路
       
     </span>
   </a>
@@ -993,12 +1060,12 @@
 
 <h1 id="代码生成流程设计">代码生成流程设计</h1>
 <blockquote>
-<p>基于持久化改造（persistence-refactor-plan.md → ha-review-findings.md）的复盘。
-核心问题：plan 写得很细但全是 happy path，review 发现的问题本应在设计阶段避免。</p>
+<p>这篇文档总结了一次 AI 辅助开发中遇到的问题，并提出了一套改进后的流程。
+背景：我们用 AI 做了一次智能体框架的持久化改造，写了很详细的实现计划（persistence-refactor-plan.md），但 review 时发现了大量本应在设计阶段就避免的问题（ha-review-findings.md）。</p>
 </blockquote>
 <hr />
 <h2 id="问题回顾">问题回顾</h2>
-<p>这次的实际流程：</p>
+<p>这次的实际流程是：先写一份很详细的实现计划，然后照着计划写代码，最后 review 时发现一堆问题再补文档。</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>persistence-refactor-plan.md（很细，但全是 happy path）
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>    ↓
 <a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>写代码（照着 plan 写，plan 没提的就随手放）
@@ -1007,53 +1074,21 @@
 <a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>    ↓
 <a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>补文档 ha-review-findings.md
 </code></pre></div>
-<p>Review 发现的问题分类：</p>
-<table>
-<thead>
-<tr>
-<th>问题</th>
-<th>表面原因</th>
-<th>深层原因</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>路由层做了 lease/stream 管理</td>
-<td>没有"谁负责执行生命周期"的规定</td>
-<td>没有定义模块的 ownership 边界</td>
-</tr>
-<tr>
-<td>lease 丢失后无 fencing</td>
-<td>只想了 happy path</td>
-<td>没有要求"获取资源 → 必须定义丢失时的行为"</td>
-</tr>
-<tr>
-<td>auto-deny 和 reconnect 自相矛盾</td>
-<td>分开做的，没对齐</td>
-<td>没有要求同一概念的语义一致</td>
-</tr>
-<tr>
-<td>本地文件假装 fallback</td>
-<td>看起来比"什么都不做"好</td>
-<td>没有"不能保证就别假装"的原则</td>
-</tr>
-<tr>
-<td>绕过 manager 直接调 repo</td>
-<td>能 work，更短</td>
-<td>规则写了但太具体，新边界出现时防不住</td>
-</tr>
-</tbody>
-</table>
-<p>关键发现：router 绕过 manager 直接调 repo 的问题被发现后，在 CLAUDE.md 里补了一条 "Routers must not bypass Manager to call Repo directly"。但这种事后补丁只防了一个具体边界——后来 router 直接调 RuntimeStore 的越界照样发生了，因为规则里没提 RuntimeStore。<strong>逐条补规则是打地鼠，需要的是高层原则，具体规则从原则推导。</strong></p>
+<p>Review 发现了几类问题，表面上各不相同，但深层原因是一样的——<strong>设计阶段缺少高层原则的约束</strong>。</p>
+<p>比如，路由层（本应只做 HTTP 请求分发）承担了资源管理的职责，根本原因是没有明确定义"谁负责什么"的边界。再比如，分布式锁（lease）过期后系统继续执行写入操作，是因为计划只想了正常路径，没有要求"获取了资源就必须定义丢失时怎么办"。还有，断线自动拒绝（auto-deny）和断线重连（reconnect）两个功能自相矛盾——一个说"断了就当用户拒绝"，另一个说"断了可以重连继续"——因为它们是分别实现的，没有人检查同一个概念（断线）在系统里是否只有一种含义。</p>
+<p>最有启发性的一个案例是：review 发现路由层绕过 manager 直接调用了 repository（数据层），于是我们在规则文件里补了一条"路由层不能直接调 repository"。但后来路由层又绕过 manager 直接调了另一个模块（RuntimeStore），因为规则里没提这个模块。<strong>逐条补规则就像打地鼠——真正需要的是高层原则（"每个模块只能通过上一层的公开接口操作"），具体规则从原则推导出来。</strong></p>
 <hr />
 <h2 id="目标流程">目标流程</h2>
-<p>不采用端到端自动化流程，而是<strong>人工走流程、借用工具辅助各阶段</strong>。这样流程中哪个环节出问题可以单独发现和优化（类似消融实验）。</p>
+<p>改进后的流程不是一个自动化工具链，而是<strong>人工走流程、在各阶段借助 AI 工具辅助</strong>。这样做是为了能单独观察每个环节的效果，发现哪一步薄弱就优化哪一步。</p>
+<p>这个流程乍看像瀑布式开发——先写原则，再写 spec，再写计划，最后才写代码。但传统瀑布的问题不是"先想清楚再动手"这个理念本身，而是前期设计的成本太高、迭代太慢，导致设计和实际脱节。AI 改变了这个成本结构：生成和迭代 spec/plan 的边际成本大幅下降，一个从 spec 到 implement 的完整循环可能只需要几个小时，所以"先想清楚再写"又变得划算了。同时，agent.md 机制让实施过程中的发现能持续反馈到设计层面（本质上是持续进行的 retrospective），小任务也可以跳步不走全套流程。所以更准确地说，这是<strong>瀑布的阶段纪律 + 敏捷的迭代速度</strong>——AI 消除了两者之间原本的矛盾。但也要注意不根据任务规模灵活调整的话，就会退化成真正的瀑布。</p>
+<p>整体分为两大阶段：先通过一系列设计产物把约束层层细化，然后在实施阶段逐步执行。</p>
 <pre class="mermaid"><code>flowchart TD
     REQ["需求描述"]
     C1["Constitution L1\n通用设计原则（跨项目）"]
     TECH["技术总体方案\n架构 / 语言 / 框架 / 部署模型 / 外部依赖"]
     C2["Constitution L2\n架构约束原则（项目级）"]
-    SPEC["Module Specs\n契约 / 保证+不保证 / 量化约束 / 接口"]
+    SPEC["Module Specs\n契约 / 保证+不保证+违反时行为 / 量化约束"]
+    IFACE["Interface Contracts\n禁止路径 / 故障责任归属 / 语义一致性"]
     PLAN["Implementation Plan\n按依赖排序，每步可独立验证"]
 
     REQ --&gt; C1
@@ -1061,192 +1096,141 @@
     TECH --&gt;|"暴露共享资源/部署假设\n→ 补充架构级原则"| C2
     C1 &amp; C2 --&gt; SPEC
     TECH --&gt; SPEC
-    SPEC --&gt; PLAN
+    SPEC --&gt; IFACE
+    IFACE --&gt; PLAN
     PLAN --&gt; LOOP
 
     subgraph LOOP["实施循环 (per plan step)"]
         direction TB
         S1["1. 读 Constitution + Spec + agent.md"]
-        S2["2. 按 step 性质决定测试策略"]
+        S2["2. 确定测试策略"]
         S3["3. 写代码"]
         S4["4. 跑测试"]
         S5["5. 新 session review"]
         S1 --&gt; S2 --&gt; S3 --&gt; S4 --&gt; S5
         AGENT["agent.md\n实施期间发现的设计问题\n（轻量修正层）"]
     end</code></pre>
-<p><strong>Constitution 分两层</strong>：</p>
-<ul>
-<li><strong>L1 通用设计原则</strong>：跨项目复用，不依赖架构决策。如"同一概念只有一种语义"、"不能保证就别假装"。在技术方案之前写，约束选型方向。</li>
-<li><strong>L2 架构约束原则</strong>：依赖技术方案才能写出，项目级有效。如"共享外部资源必须声明 ownership 边界"、"对外部依赖的可用性假设必须显式声明"。技术方案确定后产出。</li>
-</ul>
-<p><strong>agent.md — 实施期间的轻量修正层</strong>：编码和 review 过程中发现的设计层面问题（spec 遗漏、原则缺失、边界条件未覆盖）不直接修改上游产物，而是追加到 agent.md。实施循环中每步开始时读取 agent.md 作为补充约束（类似 LoRA：不改 base weights，叠加一层适配）。整轮实施结束后，统一回顾 agent.md，将仍然有效的发现合并回 Constitution / Spec。</p>
+<p>下面逐个阶段说明。</p>
 <hr />
-<h2 id="各阶段说明">各阶段说明</h2>
-<h3 id="constitution-l1通用设计原则">Constitution L1（通用设计原则）</h3>
+<h2 id="设计阶段">设计阶段</h2>
+<h3 id="constitution设计原则">Constitution（设计原则）</h3>
+<p>Constitution 是一组高层设计原则，作用类似宪法——不直接告诉你怎么写代码，但约束所有下游设计决策的方向。它分两层：</p>
+<p><strong>L1 通用设计原则</strong>——跨项目复用，不依赖具体技术选型。应该很短（一页以内），写一次，偶尔修订。在技术方案之前写，因为原则会影响选型方向。示例：</p>
 <ul>
-<li>跨模块、跨项目复用的约束，不依赖具体架构决策</li>
-<li>应该很短（一页以内），写一次，偶尔修订</li>
-<li><strong>在技术方案之前写</strong>，因为原则会影响技术选型</li>
-<li>示例方向（待细化）：</li>
-<li>每个模块只通过上一层的公开接口操作，不穿透</li>
+<li>每个模块只通过上一层的公开接口操作，不能穿透调用</li>
 <li>获取的资源必须定义丢失时的行为</li>
 <li>同一个概念在系统里只有一种语义</li>
 <li>不能保证的事情不要假装做了</li>
+<li>spec 中的每条保证都必须有对应的测试</li>
 </ul>
+<p><strong>L2 架构约束原则</strong>——依赖技术方案才能写出，项目级有效。技术方案确定了共享资源、部署模型、外部依赖之后，从中推导出的约束。示例：</p>
+<ul>
+<li>共享外部资源必须声明 ownership 边界（如命名空间隔离）</li>
+<li>对外部依赖的可用性假设必须显式声明（独占还是共享、故障恢复窗口多长）</li>
+<li>不可假设运行环境是独占的（磁盘、端口、进程可能被其他服务使用）</li>
+</ul>
+<p>Constitution 的原则本身是高层的，但在写 Module Spec 时必须逐条检查：这条原则在这个模块适用吗？如果适用，spec 里有没有对应的保证条目？这个展开步骤防止原则变成空话。</p>
 <h3 id="技术总体方案">技术总体方案</h3>
-<ul>
-<li>系统架构（分布式/单体）、语言/框架选型、模块划分</li>
-<li>这一步产出的是系统的大骨架，不涉及实现细节</li>
-</ul>
-<h3 id="constitution-l2架构约束原则">Constitution L2（架构约束原则）</h3>
-<ul>
-<li>依赖技术方案才能写出，项目级有效</li>
-<li>技术方案确定共享资源、部署模型、外部依赖后，从中推导出的约束</li>
-<li>示例方向（待细化）：</li>
-<li>共享外部资源必须声明 ownership 边界（命名空间隔离）</li>
-<li>对外部依赖的可用性假设必须显式声明（独占/共享、故障恢复窗口）</li>
-<li>不可假设运行环境独占（磁盘、端口、进程）</li>
-</ul>
+<p>技术总体方案是流程中<strong>唯一需要外部确认的产物</strong>——其他产物（constitution、spec、plan）都是团队内部执行用的，但技术方案涉及架构选型、资源共享、部署模型这些需要和其他团队或技术负责人对齐的决策。</p>
+<p>内容包括：系统架构（分布式还是单体）、语言和框架选型、模块划分、资源共享方案、部署模型。</p>
+<p>技术方案产出后有两个去向：对外的架构决策需要相关方确认；对内的共享资源和外部依赖清单会驱动 L2 原则和 Module Spec 的编写。技术方案做出的决策会被下游产物吸收（选型体现在 Spec 的实现约束里，共享资源催生 L2 原则，模块划分体现在 Interface Contract 的结构里），因此实施阶段不需要再反复参考技术方案。</p>
 <h3 id="module-specs模块契约">Module Specs（模块契约）</h3>
-<ul>
-<li>每个模块的接口定义 + 不变量 + 失败行为</li>
-<li>关键是<strong>保证和不保证</strong>都要写，保证需要区分条件和边界：
-  <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>ExecutionRunner
+<p>Module Spec 定义每个模块的接口、不变量和失败行为。和普通的 API 文档不同，它的关键在于<strong>不仅写"保证什么"，还要写"不保证什么"和"违反时怎么办"</strong>。</p>
+<p>以下是一个简化的示例：</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>ExecutionRunner
 <a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>  输入：conversation_id, message_id, coroutine
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>  保证：同一 conversation 同时只有一个执行
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>  保证：进程存活时，执行结束后 lease 在 finally 中释放
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>  保证：进程 crash 时，lease 在 TTL（90s）内自动释放
-<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>  保证：lease 丢失时执行被终止，post-processing 不执行
-<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>  不保证：执行中任务跨 Worker 迁移
-<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>  量化约束：
-<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>    - lease TTL = 90s，心跳间隔 = TTL/3（30s）
-<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a>    - lease 丢失检测延迟 ≤ 1 个心跳间隔（30s）
-<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a>    - permission interrupt 超时 = 300s
-</code></pre></div></li>
-<li><strong>量化约束</strong>不可省略——HA 类问题往往不是二元的"有没有"，而是"时间窗口够不够"。TTL、grace period、retention、failover 恢复窗口都要写进 spec，否则"逻辑对但参数和时序不稳"的问题会漏过</li>
-<li>这次缺的就是这个——persistence-refactor-plan.md 写了"怎么实现"，但没写每个模块的保证/不保证。如果当时写了"lease 丢失时执行被终止"，实现时就不会忘 fencing</li>
-</ul>
-<h3 id="implementation-plan">Implementation Plan</h3>
-<ul>
-<li>按模块依赖关系排序</li>
-<li>每一步可独立验证</li>
-<li>每一步的范围应区分性质：配置修正、结构重构、语义变更不混在同一步（方便 bisect）</li>
-</ul>
-<h3 id="实施循环">实施循环</h3>
-<p><strong>测试策略按 step 性质区分</strong>（不一刀切）：</p>
-<table>
-<thead>
-<tr>
-<th>Step 性质</th>
-<th>测试要求</th>
-<th>理由</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><strong>行为/契约变更</strong>（如 fencing 语义）</td>
-<td>Spec 级测试先写，再写代码</td>
-<td>测试就是 spec 的可执行版本，强制想清楚边界</td>
-</tr>
-<tr>
-<td><strong>模块边界变更</strong>（如职责收敛）</td>
-<td>当步带窄集成测试</td>
-<td>接缝问题只靠单元测试发现不了</td>
-</tr>
-<tr>
-<td><strong>配置修正</strong></td>
-<td>不需要新 spec 测试</td>
-<td>回归覆盖即可</td>
-</tr>
-<tr>
-<td><strong>纯重构</strong></td>
-<td>不需要新 spec 测试，现有测试必须全过</td>
-<td>行为不变是重构的前提</td>
-</tr>
-</tbody>
-</table>
-<p>Spec 级测试示例：</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="c1"># 从 spec 推导，不需要看实现</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">test_lease_lost_stops_execution</span><span class="p">():</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;lease 过期后，执行应被终止，不应写 DB&quot;&quot;&quot;</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>  保证：同一 conversation 同时只有一个执行
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>    违反时：后到的请求返回 409 Conflict
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>  保证：lease 丢失时执行被终止，后续处理不执行
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>    违反时：记录错误日志 + 终止进程（不尝试恢复）
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>
+<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a>  不保证：执行中的任务可以跨 Worker 迁移
+<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a>
+<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a>  量化约束：
+<a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a>    - lease TTL = 90s，心跳间隔 = 30s
+<a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a>    - permission interrupt 超时 = 300s
+</code></pre></div>
+<p>几个要点：</p>
+<p><strong>"违反时行为"不是要求为每种异常设计复杂的恢复方案。</strong> 大部分情况下答案就是 fail，但"经过思考决定 fail"和"没想过这个问题碰巧 fail"是两件事。要求写"违反时行为"的目的是强制你想清楚降级链在哪里终止。</p>
+<p><strong>量化约束不能省略。</strong> 高可用类的问题往往不是"有没有做"的问题，而是"时间窗口够不够"的问题。TTL、心跳间隔、超时时间、故障恢复窗口都要写进 spec，否则"逻辑对但参数配错"的问题会漏过设计审查。</p>
+<p>回顾这次的教训：persistence-refactor-plan.md 写了"怎么实现"，但没写每个模块的保证和不保证。如果当时写了"lease 丢失时执行被终止"，实现时就不会忘记做 fencing（即锁失效后阻止继续操作的保护机制）。</p>
+<h3 id="interface-contracts接口契约">Interface Contracts（接口契约）</h3>
+<p>对每对有交互的模块，显式声明跨边界的约束。只覆盖实际存在的调用关系，不做所有模块的全组合——数量和模块数是线性关系，不会爆炸。</p>
+<p>主要声明两类内容：<strong>禁止路径</strong>（哪些模块间的直接调用不应存在）和<strong>故障责任归属</strong>（A 调 B 失败时，谁负责回滚、重试、报错）。示例：</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>Router → Manager
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>  禁止：Router 不直接调用 Repository 或 RuntimeStore
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>  故障责任：Manager 返回错误时，Router 只做 HTTP 状态码映射，不做重试或补偿
 <a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">test_concurrent_execution_rejected</span><span class="p">():</span>
-<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;同一 conversation 并发提交第二个执行，应返回 conflict&quot;&quot;&quot;</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>Manager → Repository
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>  语义一致性：Manager 和 Repository 对同一概念（如&quot;执行中&quot;）的判定逻辑必须一致
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>  故障责任：Repository 抛异常时，Manager 负责回滚同一用例中的其他副作用
 </code></pre></div>
-<p>窄集成测试示例（模块边界变更时当步就要写）：</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">test_runner_submit_acquires_lease_and_creates_stream</span><span class="p">():</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;submit 内部完成 lease + stream 创建，router 不参与&quot;&quot;&quot;</span>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">test_runner_submit_rollback_on_stream_failure</span><span class="p">():</span>
-<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;stream 创建失败时，lease 和 interactive 被回滚&quot;&quot;&quot;</span>
+<h3 id="implementation-plan实施计划">Implementation Plan（实施计划）</h3>
+<p>实施计划按模块依赖关系排序，每一步可以独立验证。重要的是每一步只包含一种性质的变更——配置修正、结构重构、语义变更不要混在同一步里，这样出问题时容易定位是哪一步引入的。</p>
+<hr />
+<h2 id="实施阶段">实施阶段</h2>
+<h3 id="实施循环">实施循环</h3>
+<p>设计产物就绪后，进入逐步实施。每个 plan step 的执行流程：</p>
+<ol>
+<li><strong>读约束</strong>：读 Constitution + 对应的 Module Spec + agent.md，明确本步需要满足的保证和边界</li>
+<li><strong>确定测试策略</strong>：根据这一步的变更性质决定需要写什么测试（见下文）</li>
+<li><strong>写代码</strong></li>
+<li><strong>跑测试</strong></li>
+<li><strong>新 session review</strong>：开一个新的 AI 对话来 review 这一步的产出（见下文）</li>
+</ol>
+<h4 id="测试策略">测试策略</h4>
+<p>不是每一步都需要同样的测试要求，根据变更性质区分：</p>
+<p><strong>行为或契约变更</strong>（比如新增 fencing 语义）——先写测试再写代码。测试直接从 spec 的保证条目推导，不需要看实现。这种测试就是 spec 的可执行版本，写测试的过程本身会强制你想清楚边界条件。例如：</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="c1"># 从 spec 推导：保证&quot;同一 conversation 同时只有一个执行，违反时返回 conflict&quot;</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">test_concurrent_execution_rejected</span><span class="p">():</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;同一 conversation 并发提交第二个执行，应返回 conflict&quot;&quot;&quot;</span>
 </code></pre></div>
-<p><strong>新 session review</strong>：</p>
-<ul>
-<li>每个 plan step 完成后，拉新 session review</li>
-<li>新 session 只给 constitution + spec + agent.md + diff，不给实现背景</li>
-<li>clean context 是 review 的价值所在——写代码的 session 带着"我为什么这么做"的隐含假设，review session 没有这些假设，反而能发现问题</li>
-<li>review 发现设计层面问题（spec 遗漏、原则缺失）→ 记录到 agent.md，不改上游产物</li>
-</ul>
-<p><strong>agent.md（实施期间的轻量修正层）</strong>：</p>
-<ul>
-<li>实施循环中发现的设计问题、踩坑经验、上游产物的缺漏，追加记录到 agent.md</li>
-<li>每步开始时读取，作为 Constitution + Spec 的补充约束（避免同一个坑踩两次）</li>
-<li><strong>实施期间默认不修改上游产物</strong>——上游冻结保证实施基线稳定，避免改设计引发连锁返工。如发现影响后续步骤依赖或验证边界的重大问题，经人工确认后可立即修订上游产物</li>
-<li>整轮实施结束后，统一回顾 agent.md，将仍然有效的发现合并回 Constitution / Spec，然后清空</li>
-<li>这也解释了为什么外部 reviewer 能抓到那么多问题——他没有"跟着 plan 一步步写过来"的上下文包袱</li>
-</ul>
+<p><strong>模块边界变更</strong>（比如把某个职责从路由层收敛到 manager 层）——在做这一步的同时写集成测试，只测涉及的模块之间的交互，不需要全链路。因为模块接缝处的问题单靠单元测试发现不了。例如：</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">test_runner_submit_acquires_lease_and_creates_stream</span><span class="p">():</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;submit 内部完成 lease + stream 创建，router 不参与&quot;&quot;&quot;</span>
+</code></pre></div>
+<p><strong>配置修正</strong>——不需要写新测试，跑现有回归测试即可。</p>
+<p><strong>纯重构</strong>——不需要写新测试，但现有测试必须全部通过。行为不变是重构的前提。</p>
+<h4 id="新-session-review">新 session review</h4>
+<p>每个 plan step 完成后，开一个新的 AI 会话来 review。新会话只给 constitution、spec、agent.md、这一步的 diff 和测试，<strong>不给实现背景</strong>。</p>
+<p>这样做的价值在于 clean context——写代码的会话带着"我为什么这么做"的隐含假设，review 会话没有这些假设，反而能发现被默认合理的问题。这也解释了为什么之前外部 reviewer 能抓到那么多问题——他没有"跟着 plan 一步步写过来"的上下文包袱。</p>
+<p>Review 不仅审代码，还要审测试策略：spec 的保证条目是否都有对应测试、测试是否真的能判定该保证被满足。如果发现设计层面的问题（spec 遗漏、原则缺失、保证项没有对应测试），记录到 agent.md。</p>
+<h4 id="agentmd实施期间的轻量修正层">agent.md（实施期间的轻量修正层）</h4>
+<p>编码和 review 过程中经常会发现设计层面的问题——spec 遗漏了某个边界条件、某条原则没覆盖到新场景、等等。这些发现不直接修改上游的 constitution 或 spec，而是追加记录到 agent.md。</p>
+<p>每一步开始时都会读取 agent.md 作为补充约束，避免同一个坑踩两次。这样做的好处是上游产物保持稳定，不会因为改设计而引发连锁返工。如果发现影响后续步骤的重大问题，经人工确认后可以立即修订上游产物。</p>
+<p>整轮实施结束后，统一回顾 agent.md，把仍然有效的发现合并回 Constitution 或 Spec，然后清空 agent.md。</p>
 <hr />
 <h2 id="行业参考">行业参考</h2>
-<p>这个流程在业界已有名字：<strong>Spec-Driven Development (SDD)</strong>，2025 年下半年开始成熟。</p>
+<p>这个流程在业界已有名字：<strong>Spec-Driven Development (SDD)</strong>，2025 年下半年开始成熟。我们的流程和行业实践基本一致，但有几处刻意的差异。</p>
 <h3 id="关键参考">关键参考</h3>
 <ul>
-<li><strong>Constitutional SDD</strong>（<a href="https://arxiv.org/html/2602.02584">arxiv 论文</a>）— constitution 作为不可违反的原则层，每条原则有 ID + 约束 + 实现模式 + rationale。生成时注入 3-5 条相关原则作为 context，生成后对照原则校验</li>
-<li><strong>GitHub Spec Kit</strong>（<a href="https://github.com/github/spec-kit">GitHub</a>）— GitHub 官方开源的 SDD 工具链，提供 CLI + slash commands，支持 Claude Code / Copilot / Cursor 等 20+ agents。流程：Constitution → Specify → Plan → Tasks → Implement</li>
-<li><strong>cc-sdd</strong>（<a href="https://github.com/gotalab/cc-sdd">GitHub</a>）— 社区 SDD 工具，Requirements → Design → Tasks，带 <code>validate-design</code>（设计是否满足需求）和 <code>validate-gap</code>（代码是否满足需求）的校验命令</li>
-<li><strong>Addy Osmani 的实操流程</strong>（<a href="https://addyosmani.com/blog/ai-coding-workflow/">博客</a>）— Google Chrome 团队工程师。spec.md 包含需求 + 架构 + 数据模型 + 测试策略，"waterfall in 15 minutes"。关键实践：<strong>开第二个 AI session 来 review 第一个的输出</strong></li>
-<li><strong>Martin Fowler 团队的工具对比</strong>（<a href="https://martinfowler.com/articles/exploring-gen-ai/sdd-3-tools.html">文章</a>）— 对比 Kiro / Spec Kit / Tessl 三个工具。关键观察：现有工具的通病是<strong>流程太死板，小任务也要走完整流程</strong></li>
+<li><strong>Constitutional SDD</strong>（<a href="https://arxiv.org/html/2602.02584">arxiv 论文</a>）— 提出将 constitution 作为不可违反的原则层，每条原则有 ID、约束文本、实现模式和 rationale。生成代码时只注入 3-5 条与当前任务相关的原则（而非全部），生成后对照原则校验</li>
+<li><strong>GitHub Spec Kit</strong>（<a href="https://github.com/github/spec-kit">GitHub</a>）— GitHub 官方开源的 SDD 工具链，提供 CLI 和 slash commands，支持 Claude Code、Copilot、Cursor 等 20+ AI 工具。流程：Constitution → Specify → Plan → Tasks → Implement</li>
+<li><strong>cc-sdd</strong>（<a href="https://github.com/gotalab/cc-sdd">GitHub</a>）— 社区 SDD 工具，Requirements → Design → Tasks，带校验命令检查设计是否满足需求、代码是否满足设计</li>
+<li><strong>Addy Osmani 的实操流程</strong>（<a href="https://addyosmani.com/blog/ai-coding-workflow/">博客</a>）— Google Chrome 团队工程师，核心实践是用 spec.md 描述需求 + 架构 + 测试策略，并<strong>开第二个 AI session 来 review 第一个的输出</strong></li>
+<li><strong>Martin Fowler 团队的工具对比</strong>（<a href="https://martinfowler.com/articles/exploring-gen-ai/sdd-3-tools.html">文章</a>）— 对比 Kiro、Spec Kit、Tessl 三个工具，关键观察：现有工具的通病是<strong>流程太死板，小任务也要走完整流程</strong></li>
 </ul>
-<h3 id="与本流程的关系">与本流程的关系</h3>
-<table>
-<thead>
-<tr>
-<th>维度</th>
-<th>行业实践</th>
-<th>本流程</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>Constitution</td>
-<td>论文: "non-negotiable requirements with MUST/SHOULD/MAY"</td>
-<td>一致，待细化结构</td>
-</tr>
-<tr>
-<td>Spec 内容</td>
-<td>论文: constraint + rationale</td>
-<td>扩展为保证/不保证 + 量化约束</td>
-</tr>
-<tr>
-<td>新 session review</td>
-<td>Osmani: "spawn second AI session to critique"</td>
-<td>一致</td>
-</tr>
-<tr>
-<td>测试策略</td>
-<td>多数工具一刀切要求 spec-first test</td>
-<td>按 step 性质区分，避免假测试</td>
-</tr>
-<tr>
-<td>端到端自动化</td>
-<td>Spec Kit / cc-sdd 提供端到端工具链</td>
-<td><strong>不采用</strong>端到端自动化，人工走流程 + 借用工具辅助</td>
-</tr>
-</tbody>
-</table>
-<p>不采用端到端的原因：
-1. Martin Fowler 的观察——工具流程太死板，不适合所有任务规模
-2. 需要能单独观察每个环节的效果，发现和优化薄弱点（消融思路）
-3. 可以按需引入工具（如 Spec Kit 的 <code>specify check</code> 做校验、constitution slash command 做原则生成），而不是被工具链绑定</p>
+<h3 id="与本流程的差异">与本流程的差异</h3>
+<p><strong>Spec 内容更丰富</strong>：行业实践中 spec 通常只写约束和理由，我们扩展为保证/不保证 + 量化约束 + 违反时行为，因为这次的教训表明只写"怎么实现"不够，还需要写"出问题时怎么办"。</p>
+<p><strong>测试策略不一刀切</strong>：多数工具要求所有步骤都先写 spec 级测试，我们按变更性质区分——纯重构和配置修正不需要新测试，避免写出"为了有测试而写的测试"。</p>
+<p><strong>不采用端到端自动化</strong>：Spec Kit 和 cc-sdd 都提供从设计到实现的自动化工具链，我们选择人工走流程、按需借助工具。原因有三：Martin Fowler 的观察表明工具流程太死板不适合所有任务规模；我们需要能单独观察每个环节的效果来发现薄弱点；我们可以按需引入某个工具的某个功能（比如用 Spec Kit 的校验命令），而不是被整个工具链绑定。</p>
+<h3 id="工具落地思路">工具落地思路</h3>
+<p>预期的开发模式是使用 AI 编程工具（如 opencode、Claude Code）配合定制的 skill/slash command，每个 skill 对应流程中的一个阶段。不直接使用 Spec Kit 的 CLI 工具链，而是参考其 prompt 模板的设计思路，改写为自己的 skill。</p>
+<p><strong>从 Spec Kit 值得借鉴的设计</strong>：</p>
+<ul>
+<li>Constitution 模板的结构：命名原则 + 治理条款 + 语义化版本号，以及更新后自动扫描下游模板检查对齐的传播机制</li>
+<li>Spec 模板中的几个设计：用户故事按优先级分层（P1/P2/P3）、用 Given/When/Then 格式写验收场景、用 <code>[NEEDS CLARIFICATION]</code> 标记显式标注歧义而非忽略</li>
+<li>Analyze 步骤的思路：跨产物一致性检查（spec 和 plan 是否矛盾、constitution 是否被违反），这个作为独立的校验 skill 很有价值</li>
+<li>任务分解的结构：按阶段组织（Setup → 基础设施 → 用户故事 → 收尾），标记可并行项和用户故事溯源</li>
+</ul>
+<p><strong>不需要引入的部分</strong>：</p>
+<ul>
+<li>CLI 脚手架和文件目录约定（<code>.specify/</code> 目录结构、自动编号、自动建分支）——skill 可以直接操作项目已有的结构</li>
+<li>线性流程的强制——我们明确选择人工控制流程节奏，小任务可以跳步，大任务可以反复迭代某个阶段</li>
+<li>模板的冗长度——Spec Kit 的单个模板可达 200 行指令，在 context window 中开销很大。改写为 skill 时应精简，只保留对 AI 行为有实际约束力的部分</li>
+</ul>
 
 
 

@@ -888,8 +888,8 @@
 <h2 id="一部署与接入模式">一、部署与接入模式</h2>
 <blockquote>
 <p><strong>已确认</strong>：异地双活（北京 + 上海），每中心两台服务器各一个实例，不涉及跨中心流量。
-Redis：组 8（公共区一般业务），华为云 DCS Cluster 集群，与 MOJITO/UCAM/AOSP 等共用，峰值 TPS 2265。
-TDSQL：YDB 资源组一（一般业务系统），集中式实例（1 主 2 从，3 节点），DCN 同步，通过 3 PX 节点接入。</p>
+Redis：组 9（数据分析区），华为大数据平台 redis Cluster 集群，共用实例。
+TDSQL：YDB 资源组一（一般业务系统），集中式实例（1 主 2 从，选 3 DN），DCN 同步，配置 3 个 PX 地址接入（无 VIP）。</p>
 </blockquote>
 <ol>
 <li>
@@ -906,7 +906,7 @@ TDSQL：YDB 资源组一（一般业务系统），集中式实例（1 主 2 从
 <p>Redis：各中心独立，不跨中心同步</p>
 </li>
 <li>
-<p>~~<strong>Redis 实例是否与其他系统共用？</strong>~~ → ✅ 共用（华为云 DCS 公共区 Cluster 集群）。云托管要求所有 key 加系统前缀，我们使用 <code>af:</code> 前缀。</p>
+<p>~~<strong>Redis 实例是否与其他系统共用？</strong>~~ → ✅ 共用（组 8 数据分析区，华为大数据平台 redis Cluster）。云托管要求所有 key 加系统前缀，我们使用 <code>af:</code> 前缀。</p>
 <blockquote>
 <p><strong>注意</strong>：ArtifactFlow 使用 Redis 做协调（分布式锁、SSE Stream、Pub/Sub），不是缓存。Redis 不可用时降级策略为 health probe 返回 not ready，拒绝新请求，现有会话超时结束。</p>
 </blockquote>
@@ -940,12 +940,10 @@ TDSQL：YDB 资源组一（一般业务系统），集中式实例（1 主 2 从
 <p>~~<strong>TDSQL 兼容的 PostgreSQL / MySQL 版本是多少？</strong>~~ → ✅ 基本确认 MySQL 兼容（应用通过 JDBC 连接 PX 节点）。Python 端使用 MySQL 方言（asyncmy + SQLAlchemy）。</p>
 </li>
 <li>
-<p>🌟 <strong>TDSQL 的接入方式是 VIP 还是需要客户端连接多个 PX 地址？</strong>
-   已知 3 PX 节点，需确认连接方式</p>
+<p>~~🌟 <strong>TDSQL 的接入方式是 VIP 还是需要客户端连接多个 PX 地址？</strong>~~ → ✅ 配置 3 个 PX 地址，无 VIP。客户端需自行实现多地址故障切换。</p>
 </li>
 <li>
-<p>🌟 <strong>TDSQL 默认的事务隔离级别是什么？</strong>
-   我们的并发写入行为依赖隔离级别（预期 REPEATABLE READ）</p>
+<p>~~🌟 <strong>TDSQL 默认的事务隔离级别是什么？</strong>~~ → ✅ REPEATABLE READ，符合预期</p>
 </li>
 <li>
 <p>~~<strong>TDSQL 是否支持 <code>SELECT 1</code> 做连通性检查？</strong>~~ → ✅ MySQL 兼容，支持</p>

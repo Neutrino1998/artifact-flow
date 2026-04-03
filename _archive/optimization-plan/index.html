@@ -862,10 +862,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#33-graph-编译缓存来自-concurrencymd-phase-3--deferred" class="md-nav__link">
+  <a href="#33-graph-编译缓存来自-concurrencymd-phase-3--已失效" class="md-nav__link">
     <span class="md-ellipsis">
       
-        3.3 Graph 编译缓存（来自 concurrency.md Phase 3） ⏸️ Deferred
+        3.3 Graph 编译缓存（来自 concurrency.md Phase 3） ✅ 已失效
       
     </span>
   </a>
@@ -1270,80 +1270,10 @@
 <p><strong>3.1 &amp; 3.2 完成于</strong>: commit <code>14f44e6</code> — 分页 total 真实计数（Repository 层 count 查询）、Artifact created_at 返回 DB 真实时间。
 <strong>补丁</strong>: commit <code>925ce9f</code> — list_conversations 去掉 asyncio.gather 避免共享 AsyncSession；create_artifact 缓存构造传入 db_artifact.created_at。</p>
 </blockquote>
-<h3 id="33-graph-编译缓存来自-concurrencymd-phase-3--deferred">3.3 Graph 编译缓存（来自 concurrency.md Phase 3） ⏸️ Deferred</h3>
-<p><strong>当前状态</strong>: 暂不实施，先保持“每请求编译 graph”现状，后续在有明确性能瓶颈数据后再推进。</p>
-<p><strong>背景问题</strong>: 当前每个请求都会创建 Agent/Tool/Registry 并编译 StateGraph，存在固定 CPU 开销，影响吞吐。</p>
-<p><strong>现有实现特征（2026-02）</strong>:
-- <code>src/api/dependencies.py</code> 和 <code>src/api/routers/chat.py</code> 的后台任务路径中，均会按请求调用 <code>create_multi_agent_graph()</code>
-- <code>artifact_manager</code>（请求级对象，绑定请求级 DB session）当前通过闭包/实例字段参与 graph 构建
-- 该设计在“每请求编译”前提下并发正确性可接受（不会跨请求复用 session），但吞吐较差</p>
-<p><strong>候选改造方案（已调研，未落地）</strong>:
-- 目标：启动时编译一次 graph 并缓存为全局单例；请求级 <code>artifact_manager</code> 通过 runtime context 注入
-- 对齐 LangGraph 推荐模式：<code>context_schema</code> + <code>runtime.context</code>（context 不进入 checkpoint，resume 时需重新传入）</p>
-<ol>
-<li>新增 <code>GraphContext</code></li>
-<li>新建 <code>src/core/graph_context.py</code></li>
-<li>定义 dataclass：<code>GraphContext(artifact_manager: Optional[ArtifactManager])</code></li>
-<li>
-<p>作用：承载请求级依赖，避免 graph 闭包捕获 request-scoped 对象</p>
-</li>
-<li>
-<p>改造 <code>core/graph.py</code></p>
-</li>
-<li><code>ExtendableGraph</code> 移除 <code>artifact_manager</code> 构造参数</li>
-<li><code>StateGraph</code> 增加 <code>context_schema=GraphContext</code></li>
-<li>节点执行时通过 runtime 读取 <code>artifact_manager</code>，传入 <code>ContextManager.build_agent_messages(...)</code></li>
-<li>
-<p><code>create_multi_agent_graph()</code> 改为不接收 <code>artifact_manager</code></p>
-</li>
-<li>
-<p>改造 <code>tools/implementations/artifact_ops.py</code></p>
-</li>
-<li>Artifact 工具不再在 <code>__init__</code> 持有 manager</li>
-<li>执行时从 runtime context 获取 manager</li>
-<li>
-<p><code>create_artifact_tools()</code> 改为无参工厂</p>
-</li>
-<li>
-<p>改造 <code>api/dependencies.py</code></p>
-</li>
-<li>增加 <code>_compiled_graph</code> 全局变量</li>
-<li>在 <code>init_globals()</code> 中编译并缓存 graph</li>
-<li>增加 <code>get_compiled_graph()</code> 访问器</li>
-<li>
-<p><code>get_controller()</code> 改为复用缓存 graph，仅注入请求级 manager</p>
-</li>
-<li>
-<p>改造 <code>core/controller.py</code></p>
-</li>
-<li>
-<p>所有 graph 调用点（<code>ainvoke</code>/<code>astream</code>、new/resume）统一传入 <code>context=GraphContext(...)</code></p>
-</li>
-<li>
-<p>改造 <code>api/routers/chat.py</code></p>
-</li>
-<li>两个后台任务（<code>execute_and_push</code> / <code>execute_resume</code>）改为复用 <code>get_compiled_graph()</code></li>
-<li>
-<p>删除任务内重复编译 graph 的逻辑</p>
-</li>
-<li>
-<p>测试适配</p>
-</li>
-<li><code>tests/test_core_graph.py</code> / <code>tests/test_core_graph_stream.py</code>：测试环境改为“graph 编译一次 + 请求级 manager 复用 graph”</li>
-</ol>
-<p><strong>关键注意事项（必须满足）</strong>:
-- <code>compiled_graph</code> 绝不能持有 request-scoped 对象（尤其 <code>ArtifactManager</code> / <code>AsyncSession</code>）
-- 开启 graph 缓存后，graph 内绑定的 tool/agent 实例会跨请求复用；所有工具需保证无状态或并发安全
-- <code>web_fetch</code> 等工具若持有可变实例状态（配置/运行对象），应改为执行期局部创建，避免跨请求状态污染
-- 需锁定支持 runtime context 的 LangGraph 版本，避免环境解析到旧版本导致运行时错误
-- context 不会持久化到 checkpoint，resume 路径必须每次重新传入 context</p>
-<p><strong>为何先 defer</strong>:
-- 当前更关注并发正确性与稳定性，优先避免一次性引入“缓存 + 依赖注入模型切换 + tool 生命周期变化”的复合改动风险
-- Phase 5/6（Redis + PostgreSQL 迁移）完成后再结合压测数据评估，收益/风险比更清晰</p>
-<p><strong>后续触发条件（再开启本项）</strong>:
-- 有明确数据表明 graph 编译耗时显著影响 p95/p99 或吞吐
-- 完成工具无状态化审计（至少 <code>artifact_ops</code>、<code>web_fetch</code>）
-- 有可自动化回归覆盖 new/resume/streaming/并发双会话</p>
+<h3 id="33-graph-编译缓存来自-concurrencymd-phase-3--已失效">3.3 Graph 编译缓存（来自 concurrency.md Phase 3） ✅ 已失效</h3>
+<blockquote>
+<p>LangGraph 已移除（Pi-style engine 替代），StateGraph 编译缓存不再适用。当前 agent 配置为静态 MD 文件，启动时一次性加载，无每请求编译开销。</p>
+</blockquote>
 <hr />
 <h2 id="phase-4-认证框架--done">Phase 4: 认证框架 ✅ DONE</h2>
 <blockquote>
