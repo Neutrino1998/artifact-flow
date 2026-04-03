@@ -270,6 +270,79 @@ QueryEngine.submitMessage()        # async generator, yields streaming events
 
 ---
 
+## 12. Bash 沙盒（Sandbox）— 代码执行隔离
+
+ArtifactFlow 需要让 agent 执行用户的数据分析代码（Python），需要隔离执行环境。Claude Code 的沙盒设计是很好的参考。
+
+### Claude Code 的方案
+
+**平台适配层：** 不自己实现沙盒，而是包一层 adapter 对接平台原生隔离：
+- macOS → Seatbelt（Apple 内置强制访问控制，零依赖）
+- Linux/WSL2 → Bubblewrap（用户态容器，mount namespace + seccomp）
+- 统一接口 `@anthropic-ai/sandbox-runtime`，上层代码不感知平台差异
+
+**三维隔离策略：**
+
+```
+filesystem:
+  allowWrite: ['.', tempDir, additionalDirs...]   # 白名单可写
+  denyWrite:  [settings.json, .claude/skills...]  # 黑名单禁写（优先级高于 allow）
+  denyRead:   [...]                               # 黑名单禁读
+  allowRead:  [...]                               # 白名单回放（在 denyRead 区域内开口子）
+
+network:
+  allowedDomains: [...]        # 域名白名单
+  deniedDomains: [...]         # 域名黑名单
+  allowLocalBinding: bool      # 是否允许绑定 localhost
+  httpProxyPort / socksProxyPort  # 可选代理
+
+violations:
+  ignoreViolations: { command: [violation_type...] }  # 按命令忽略特定违规
+```
+
+**配置→沙盒规则的自动推导：** 不让用户单独配沙盒规则，而是从已有的权限规则自动推导：
+- `Edit(path)` allow 规则 → 自动加入 `allowWrite`
+- `Read(path)` deny 规则 → 自动加入 `denyRead`
+- `WebFetch(domain:x)` allow 规则 → 自动加入 `allowedDomains`
+
+这样用户只需维护一套权限规则，沙盒自动保持一致。
+
+**沙盒启用后的权限简化：** `autoAllowBashIfSandboxed: true`（默认开启）— 沙盒开启后 Bash 命令自动批准，不再逐条确认。沙盒本身就是安全边界，权限弹窗变成多余的。
+
+**Violation 检测与报告：** 命令执行后检查 stderr 中的沙盒违规，注入可读的错误提示（而非裸的 seatbelt/bwrap 错误）。
+
+**Ref:**
+- `build-output/utils/sandbox/sandbox-adapter.ts` — 核心适配层，settings→SandboxRuntimeConfig 转换（~600 行）
+- `build-output/tools/BashTool/shouldUseSandbox.ts` — 启用判断逻辑，含 excludedCommands 匹配
+- `build-output/entrypoints/sandboxTypes.ts` — 沙盒配置类型定义
+
+### ArtifactFlow 应用：microVM 方案对比
+
+我们的场景（agent 执行 Python 数据分析代码）与 Claude Code 有本质区别：
+
+| | Claude Code | ArtifactFlow |
+|---|---|---|
+| 执行内容 | 用户的 shell 命令 | agent 生成的 Python 代码 |
+| 信任模型 | 半信任（用户在场审批） | 不信任（自动执行，无人审批） |
+| 隔离粒度 | 进程级（seatbelt/bwrap） | VM 级（microVM） |
+| 生命周期 | 单命令（执行完销毁沙盒） | 会话级（Python 环境需持久） |
+| 文件系统 | 宿主目录白名单 | 独立 rootfs + 挂载数据卷 |
+| 网络 | 域名白名单 | 完全隔离或指定出口代理 |
+
+**可借鉴的设计模式：**
+
+1. **配置→隔离规则自动推导**：不暴露 VM 底层配置，从业务层语义（"允许访问 S3 bucket X"）自动推导网络/文件系统规则
+2. **Violation 检测与友好报告**：microVM 里 Python 因权限不足报错时，翻译成用户可理解的提示（"需要网络访问权限来安装 pandas"）
+3. **三维隔离（FS/网络/进程）作为配置模板**：直接复用 filesystem allow/deny + network allow/deny 的声明式结构
+4. **沙盒启用=权限简化**：在 microVM 方案下，code execution tool 可以跳过确认直接执行，因为 VM 本身就是安全边界
+
+**不适用的部分：**
+- Seatbelt/bwrap 的进程级隔离太轻，我们需要 VM 级（Firecracker/gVisor/Kata）
+- 单命令生命周期不适合 Python 交互式分析（需要保持 kernel 状态）
+- 宿主文件系统白名单模型不适用，应该用独立 rootfs + 显式数据挂载
+
+---
+
 ## 优先级总结
 
 | 模式 | 难度 | 收益 | 建议 |
@@ -282,3 +355,4 @@ QueryEngine.submitMessage()        # async generator, yields streaming events
 | Fork agent + cache 共享 | 高 | 高 | 设计参考 |
 | Deferred tool search | 高 | 低 | 暂不需要 |
 | Hook 系统 | 高 | 中 | 后期 |
+| 沙盒隔离（→microVM） | 高 | 高 | 设计参考，实现用 microVM 替代 |
