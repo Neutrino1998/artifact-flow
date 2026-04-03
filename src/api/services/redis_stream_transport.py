@@ -51,7 +51,7 @@ class RedisStreamTransport:
         redis_client: aioredis.Redis,
         stream_ttl: int = 30,
         stream_timeout: int = 1800,
-        key_prefix: str = "af",
+        key_prefix: str,
     ):
         self._redis = redis_client
         self._stream_ttl = stream_ttl

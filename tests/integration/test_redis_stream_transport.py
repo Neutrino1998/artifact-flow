@@ -35,15 +35,17 @@ async def _check_redis() -> bool:
         return False
 
 
+TEST_PREFIX = "test"
+
+
 @pytest_asyncio.fixture
 async def redis_client():
     if not await _check_redis():
         pytest.skip("Redis not available")
     client = aioredis.from_url(REDIS_URL, decode_responses=True)
     yield client
-    # Cleanup test keys
-    keys = await client.keys("stream:test_*")
-    keys += await client.keys("stream_meta:test_*")
+    # Cleanup test keys (match {test:...}:* pattern)
+    keys = await client.keys(f"{{{TEST_PREFIX}:*}}:*")
     if keys:
         await client.delete(*keys)
     await client.aclose()
@@ -57,6 +59,7 @@ async def transport(redis_client):
         redis_client,
         stream_ttl=30,
         stream_timeout=60,
+        key_prefix=TEST_PREFIX,
     )
     t.init_scripts()
     return t
@@ -119,9 +122,9 @@ class TestCrossInstance:
         """Simulate cross-worker: one pushes, another consumes."""
         from api.services.redis_stream_transport import RedisStreamTransport
 
-        producer = RedisStreamTransport(redis_client, stream_ttl=30, stream_timeout=60)
+        producer = RedisStreamTransport(redis_client, stream_ttl=30, stream_timeout=60, key_prefix=TEST_PREFIX)
         producer.init_scripts()
-        consumer = RedisStreamTransport(redis_client, stream_ttl=30, stream_timeout=60)
+        consumer = RedisStreamTransport(redis_client, stream_ttl=30, stream_timeout=60, key_prefix=TEST_PREFIX)
         consumer.init_scripts()
 
         stream_id = "test_stream_cross"
@@ -253,7 +256,7 @@ class TestOrphanKeyFix:
         stream_id = "test_stream_orphan"
         await transport.create_stream(stream_id)
 
-        stream_key = f"stream:{stream_id}"
+        stream_key = transport._stream_key(stream_id)
         # stream key should not exist yet (no XADD has happened)
         exists = await redis_client.exists(stream_key)
         assert exists == 0

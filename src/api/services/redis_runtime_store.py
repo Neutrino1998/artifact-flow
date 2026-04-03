@@ -86,7 +86,7 @@ class RedisRuntimeStore:
         lease_ttl: int,
         stream_timeout: int,
         permission_timeout: int,
-        key_prefix: str = "af",
+        key_prefix: str,
     ):
         self._redis = redis_client
         self._lease_ttl = lease_ttl

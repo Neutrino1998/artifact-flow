@@ -37,6 +37,9 @@ async def _check_redis() -> bool:
         return False
 
 
+TEST_PREFIX = "test"
+
+
 @pytest_asyncio.fixture
 async def redis_client():
     """Provide a Redis client, skip if not available."""
@@ -44,13 +47,8 @@ async def redis_client():
         pytest.skip("Redis not available")
     client = aioredis.from_url(REDIS_URL, decode_responses=True)
     yield client
-    # Cleanup test keys
-    keys = await client.keys("lease:test_*")
-    keys += await client.keys("interactive:test_*")
-    keys += await client.keys("interrupt:test_*")
-    keys += await client.keys("cancel:test_*")
-    keys += await client.keys("queue:test_*")
-    keys += await client.keys("interrupt_ch:test_*")
+    # Cleanup test keys (match {test:...}:* pattern)
+    keys = await client.keys(f"{{{TEST_PREFIX}:*}}:*")
     if keys:
         await client.delete(*keys)
     await client.aclose()
@@ -66,6 +64,7 @@ async def store(redis_client):
         lease_ttl=10,
         stream_timeout=60,
         permission_timeout=30,
+        key_prefix=TEST_PREFIX,
     )
     s.init_scripts()
     return s
@@ -94,7 +93,7 @@ class TestLease:
         """Lease should expire after TTL."""
         await store.try_acquire_lease("test_conv_3", "test_msg_ttl")
         # Set a very short TTL for testing
-        await redis_client.expire("lease:test_conv_3", 1)
+        await redis_client.expire(store._lease_key("test_conv_3"), 1)
         await asyncio.sleep(1.5)
         msg = await store.get_leased_message_id("test_conv_3")
         assert msg is None
@@ -103,10 +102,10 @@ class TestLease:
         await store.try_acquire_lease("test_conv_4", "test_msg_renew")
         await store.mark_engine_interactive("test_conv_4", "test_msg_renew")
         # Set short TTL
-        await redis_client.expire("lease:test_conv_4", 2)
+        await redis_client.expire(store._lease_key("test_conv_4"), 2)
         # Renew with longer TTL
         await store.renew_lease("test_conv_4", "test_msg_renew", ttl=10)
-        ttl = await redis_client.ttl("lease:test_conv_4")
+        ttl = await redis_client.ttl(store._lease_key("test_conv_4"))
         assert ttl > 2
 
 

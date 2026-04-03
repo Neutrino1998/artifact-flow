@@ -42,7 +42,7 @@ class Settings(BaseSettings):
     # Redis（空 = InMemory fallback，非空 = Redis）
     REDIS_URL: str = ""
     REDIS_CLUSTER: bool = False           # 生产 Cluster 模式
-    REDIS_KEY_PREFIX: str = "af"          # Redis key 命名空间前缀（共用 Cluster 必须配置）
+    REDIS_KEY_PREFIX: str = ""             # Redis key 命名空间前缀（共用 Cluster 必须配置）
     REDIS_MAX_CONNECTIONS: int = 50       # 连接池上限
     LEASE_TTL: int = 90  # 秒，心跳每 TTL/3 续租
 
@@ -93,6 +93,11 @@ def validate_config() -> None:
             "ARTIFACTFLOW_DATABASE_URL environment variable is not set. "
             "Example: ARTIFACTFLOW_DATABASE_URL=sqlite+aiosqlite:///data/artifactflow.db\n"
             "See .env.example for more options."
+        )
+    if config.REDIS_URL and not config.REDIS_KEY_PREFIX:
+        raise RuntimeError(
+            "ARTIFACTFLOW_REDIS_KEY_PREFIX must be set when Redis is enabled. "
+            "Example: ARTIFACTFLOW_REDIS_KEY_PREFIX=af"
         )
     if not config.JWT_SECRET:
         raise RuntimeError(
