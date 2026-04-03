@@ -957,6 +957,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#提案自检" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        提案自检
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#新-session-review" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1122,6 +1133,8 @@
 <li>同一个概念在系统里只有一种语义</li>
 <li>不能保证的事情不要假装做了</li>
 <li>spec 中的每条保证都必须有对应的测试</li>
+<li>修改已有行为时，必须列出可能被削弱的已有保证，逐条确认不冲突</li>
+<li>提案的机制必须在语言、框架和现有接口层面可落地——逻辑上说得通不等于能实现</li>
 </ul>
 <p><strong>L2 架构约束原则</strong>——依赖技术方案才能写出，项目级有效。技术方案确定了共享资源、部署模型、外部依赖之后，从中推导出的约束。示例：</p>
 <ul>
@@ -1178,6 +1191,7 @@
 <li><strong>确定测试策略</strong>：根据这一步的变更性质决定需要写什么测试（见下文）</li>
 <li><strong>写代码</strong></li>
 <li><strong>跑测试</strong></li>
+<li><strong>提案自检</strong>：提交 review 前，对照检查清单验证（见下文）</li>
 <li><strong>新 session review</strong>：开一个新的 AI 对话来 review 这一步的产出（见下文）</li>
 </ol>
 <h4 id="测试策略">测试策略</h4>
@@ -1193,6 +1207,38 @@
 </code></pre></div>
 <p><strong>配置修正</strong>——不需要写新测试，跑现有回归测试即可。</p>
 <p><strong>纯重构</strong>——不需要写新测试，但现有测试必须全部通过。行为不变是重构的前提。</p>
+<h4 id="提案自检">提案自检</h4>
+<p>写完代码、跑完测试之后，提交 review 之前，对照以下清单检查。这一步专门针对<strong>修改已有系统</strong>的场景——从零构建时风险主要在遗漏，修改时风险主要在破坏。</p>
+<table>
+<thead>
+<tr>
+<th>检查项</th>
+<th>问自己</th>
+<th>防护的失误类型</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>问题定义准确性</td>
+<td>我描述的问题行为，和代码实际行为一致吗？</td>
+<td>问题描述错误导致修复方向偏（如 F-18 孤儿 stream）</td>
+</tr>
+<tr>
+<td>机制可行性</td>
+<td>提案的核心机制在语言/框架/现有接口层面能跑通吗？</td>
+<td>逻辑对但落不了地（如 F-22 asynccontextmanager 不能 yield 两次，F-19 Protocol 参数不匹配）</td>
+</tr>
+<tr>
+<td>已有保证不退化</td>
+<td>这个改动会削弱哪些已有的保证？逐条确认</td>
+<td>修复一个问题的同时破坏另一个保证（如 F-21 重试方案重开 split-brain）</td>
+</tr>
+</tbody>
+</table>
+<p>前两项是事实核查（对着代码就能验证），第三项需要回查 Module Spec 的保证条目。如果没有 spec，至少回查 review findings 文档中标注为"已修复"的保证。</p>
+<blockquote>
+<p><strong>来源</strong>：这三个检查项分别对应二轮 HA review 中被 reviewer 打回的三类问题。一轮 review 的问题主要是正向设计遗漏（没想到要做 fencing），二轮的问题主要是修复提案本身有缺陷。两类问题需要不同的防护手段。</p>
+</blockquote>
 <h4 id="新-session-review">新 session review</h4>
 <p>每个 plan step 完成后，开一个新的 AI 会话来 review。新会话只给 constitution、spec、agent.md、这一步的 diff 和测试，<strong>不给实现背景</strong>。</p>
 <p>这样做的价值在于 clean context——写代码的会话带着"我为什么这么做"的隐含假设，review 会话没有这些假设，反而能发现被默认合理的问题。这也解释了为什么之前外部 reviewer 能抓到那么多问题——他没有"跟着 plan 一步步写过来"的上下文包袱。</p>
