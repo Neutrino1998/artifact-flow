@@ -20,8 +20,8 @@
 | Redis failover 恢复 | ✅ | 无变化（PR4） |
 | 事件持久化保证 | ⚠️ 降级 | 无变化（PR5 清理了假 fallback） |
 | Multi-PX TDSQL failover | ❌ 阻塞 | F-16（PR4）引入了 asyncmy 硬依赖，干净环境 `ModuleNotFoundError` |
-| Stream 生命周期与执行生命周期对齐 | ❌ 缺失 | STREAM_TTL 60s vs 执行 1800s / 权限 300s，长断线后流恢复失效 |
-| Compaction 跨实例互斥 | ❌ 缺失 | 仍为进程内 dict，双实例部署下重复压缩 |
+| Stream 生命周期与执行生命周期对齐 | ✅ | PR7 已修复 — stream TTL 对齐 EXECUTION_TIMEOUT，consumer 断连不缩短 TTL |
+| Compaction 跨实例互斥 | ✅ | PR7 已修复 — owner-key 原语 + 分布式锁 + 心跳续租 + lock-loss fencing |
 
 ---
 
@@ -575,8 +575,8 @@ async def _load_history_with_retry(self, conversation_id, ...):
 | 序号 | ID | 问题 | 等级 | 工作量 |
 |------|-----|------|------|--------|
 | 1 | F-17 | ~~Multi-PX failover asyncmy → aiomysql~~ | P0 | ✅ PR6 已合入 |
-| 2 | F-18 | Stream 生命周期与执行生命周期对齐（TTL 策略简化 + `STREAM_TTL` → `STREAM_CLEANUP_TTL`） | P1 | 中（~40 行后端） |
-| 3 | F-19 | Compaction 分布式锁（抽 owner-key 原语 + conversation lease 重构 + 心跳续租） | P1 | 中（~140 行，含原语层 + lease 重构 + CompactionManager + 心跳 + 调用点适配） |
+| 2 | F-18 | ~~Stream 生命周期与执行生命周期对齐（TTL 策略简化 + `STREAM_TTL` → `STREAM_CLEANUP_TTL`）~~ | P1 | ✅ PR7 已合入 |
+| 3 | F-19 | ~~Compaction 分布式锁（抽 owner-key 原语 + conversation lease 重构 + 心跳续租）~~ | P1 | ✅ PR7 已合入 |
 | 4 | F-20 | 前端首连 SSE 可重试 | P2 | 小（~15 行前端） |
 | 5 | ~~F-21~~ | ~~心跳续约二次确认~~ | — | 已撤回（会重开 split-brain） |
 | 6 | F-22 | DB 瞬断函数级重试 | P2 | 小（~40 行） |
@@ -588,7 +588,7 @@ async def _load_history_with_retry(self, conversation_id, ...):
 | PR | 内容 | 性质 | 回归面 |
 |----|------|------|--------|
 | **PR6** ✅ | F-17 | 依赖修正 | 极小 — 只改 import 和注释，不改逻辑 |
-| **PR7** | F-18 + F-19 | 分布式协调 | 中 — stream TTL 策略简化 + owner-key 原语抽取 + conversation lease 重构 + compaction 分布式锁，需回归 SSE 重连、lease 续租和 compaction 场景 |
+| **PR7** ✅ | F-18 + F-19 | 分布式协调 | 中 — stream TTL 策略简化 + owner-key 原语抽取 + compaction 分布式锁，需回归 SSE 重连、lease 续租和 compaction 场景 |
 | **PR8** | F-20 + F-22 | 容错加固 | 小 — 前端重试策略 + DB 读操作重试，各自独立 |
 
 **PR 拆分理由**：
