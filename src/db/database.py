@@ -97,7 +97,7 @@ class DatabaseManager:
 
     @staticmethod
     def _parse_db_url(url: str) -> Dict[str, Any]:
-        """从 SQLAlchemy URL 解析出 asyncmy.connect kwargs（含 query string 参数）"""
+        """从 SQLAlchemy URL 解析出 aiomysql.connect kwargs（含 query string 参数）"""
         u = make_url(url)
         result: Dict[str, Any] = {
             "host": u.host or "127.0.0.1",
@@ -151,11 +151,11 @@ class DatabaseManager:
 
                 async def _failover_creator():
                     """Primary-first: 按配置顺序尝试，首个成功即返回"""
-                    import asyncmy
+                    import aiomysql
                     errors = []
                     for target in parsed_urls:  # 固定顺序，不轮转
                         try:
-                            return await asyncmy.connect(**target, connect_timeout=5)
+                            return await aiomysql.connect(**target, connect_timeout=5)
                         except Exception as e:
                             errors.append((target["host"], e))
                             logger.warning(f"DB connect failed: {target['host']}: {e}")
