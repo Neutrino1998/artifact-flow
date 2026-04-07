@@ -57,8 +57,8 @@ async def transport(redis_client):
 
     t = RedisStreamTransport(
         redis_client,
-        stream_ttl=30,
-        stream_timeout=60,
+        cleanup_ttl=30,
+        execution_timeout=60,
         key_prefix=TEST_PREFIX,
     )
     t.init_scripts()
@@ -122,9 +122,9 @@ class TestCrossInstance:
         """Simulate cross-worker: one pushes, another consumes."""
         from api.services.redis_stream_transport import RedisStreamTransport
 
-        producer = RedisStreamTransport(redis_client, stream_ttl=30, stream_timeout=60, key_prefix=TEST_PREFIX)
+        producer = RedisStreamTransport(redis_client, cleanup_ttl=30, execution_timeout=60, key_prefix=TEST_PREFIX)
         producer.init_scripts()
-        consumer = RedisStreamTransport(redis_client, stream_ttl=30, stream_timeout=60, key_prefix=TEST_PREFIX)
+        consumer = RedisStreamTransport(redis_client, cleanup_ttl=30, execution_timeout=60, key_prefix=TEST_PREFIX)
         consumer.init_scripts()
 
         stream_id = "test_stream_cross"

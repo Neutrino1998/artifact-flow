@@ -151,6 +151,7 @@ class CompactionManager:
         owner_id = uuid4().hex
         lock_key = self._lock_key(conv_id)
         heartbeat_task: Optional[asyncio.Task] = None
+        compact_task: Optional[asyncio.Task] = None
 
         try:
             # Acquire distributed lock (if store available)
@@ -160,42 +161,75 @@ class CompactionManager:
                     logger.debug(f"Compaction lock already held for {conv_id}, skipping")
                     return
 
-                # Start heartbeat renewal
+            compact_task = asyncio.current_task()
+
+            if self._store:
+                # Start heartbeat renewal — passes compact_task so it can
+                # cancel compaction when lock ownership is lost.
                 heartbeat_task = asyncio.create_task(
-                    self._renew_loop(conv_id, lock_key, owner_id)
+                    self._renew_loop(conv_id, lock_key, owner_id, compact_task)
                 )
 
             async with asyncio.timeout(config.COMPACTION_TIMEOUT):
                 await self._compact(conv_id, current_message_id)
+        except asyncio.CancelledError:
+            logger.warning(f"Compaction cancelled for {conv_id} (lock lost or external cancel)")
         except TimeoutError:
             logger.error(f"Compaction timed out for {conv_id} after {config.COMPACTION_TIMEOUT}s")
         except Exception as e:
             logger.exception(f"Compaction failed for {conv_id}: {e}")
         finally:
+            # Local cleanup MUST run regardless of lock release outcome
+            done_event.set()
+            self._running.pop(conv_id, None)
+
             if heartbeat_task:
                 heartbeat_task.cancel()
                 try:
                     await heartbeat_task
                 except asyncio.CancelledError:
                     pass
+            # Best-effort lock release — Redis errors must not block local cleanup
             if self._store:
-                await self._store.release(lock_key, owner_id)
-            done_event.set()
-            self._running.pop(conv_id, None)
+                try:
+                    await self._store.release(lock_key, owner_id)
+                except Exception as e:
+                    logger.warning(f"Compaction lock release failed for {conv_id}: {e}")
 
-    async def _renew_loop(self, conv_id: str, lock_key: str, owner_id: str) -> None:
-        """Heartbeat loop: renew lock every TTL/3. Cancel compaction if lock is lost."""
+    async def _renew_loop(
+        self,
+        conv_id: str,
+        lock_key: str,
+        owner_id: str,
+        compact_task: asyncio.Task,
+    ) -> None:
+        """Heartbeat loop: renew lock every TTL/3. Cancel compaction task if lock is lost."""
         interval = _LOCK_TTL / 3
+        max_transient_failures = 2
+        consecutive_failures = 0
+
         while True:
             await asyncio.sleep(interval)
             try:
                 renewed = await self._store.renew(lock_key, owner_id, _LOCK_TTL)
                 if not renewed:
-                    logger.warning(f"Compaction lock lost for {conv_id}, lock may have expired")
+                    logger.warning(f"Compaction lock lost for {conv_id}, cancelling compaction")
+                    compact_task.cancel()
                     return
+                consecutive_failures = 0
             except Exception as e:
-                logger.warning(f"Compaction lock renewal failed for {conv_id}: {e}")
-                return
+                consecutive_failures += 1
+                if consecutive_failures > max_transient_failures:
+                    logger.warning(
+                        f"Compaction lock renewal failed {consecutive_failures}x for {conv_id}, "
+                        f"cancelling compaction: {e}"
+                    )
+                    compact_task.cancel()
+                    return
+                logger.warning(
+                    f"Compaction lock renewal transient error for {conv_id} "
+                    f"({consecutive_failures}/{max_transient_failures}): {e}"
+                )
 
     async def _compact(
         self,
