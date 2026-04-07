@@ -126,7 +126,7 @@ async def init_globals() -> None:
         runtime_store = RedisRuntimeStore(
             _redis_client,
             lease_ttl=config.LEASE_TTL,
-            stream_timeout=config.STREAM_TIMEOUT,
+            execution_timeout=config.EXECUTION_TIMEOUT,
             permission_timeout=config.PERMISSION_TIMEOUT,
             key_prefix=config.REDIS_KEY_PREFIX,
         )
@@ -134,8 +134,8 @@ async def init_globals() -> None:
 
         _stream_transport = RedisStreamTransport(
             _redis_client,
-            stream_ttl=config.STREAM_TTL,
-            stream_timeout=config.STREAM_TIMEOUT,
+            cleanup_ttl=config.STREAM_CLEANUP_TTL,
+            execution_timeout=config.EXECUTION_TIMEOUT,
             key_prefix=config.REDIS_KEY_PREFIX,
         )
         _stream_transport.init_scripts()
@@ -149,7 +149,7 @@ async def init_globals() -> None:
         from api.services.stream_transport import InMemoryStreamTransport
         from api.services.runtime_store import InMemoryRuntimeStore
 
-        _stream_transport = InMemoryStreamTransport(ttl_seconds=config.STREAM_TTL)
+        _stream_transport = InMemoryStreamTransport(ttl_seconds=config.STREAM_CLEANUP_TTL)
         _execution_runner = ExecutionRunner(
             max_concurrent=config.MAX_CONCURRENT_TASKS,
             store=InMemoryRuntimeStore(),
@@ -165,9 +165,12 @@ async def init_globals() -> None:
     _tools = _load_tools()
     logger.info(f"Loaded {len(_tools)} global tools")
 
-    # 6. 初始化 CompactionManager
+    # 6. 初始化 CompactionManager（Redis 模式下注入 runtime_store 以支持分布式锁）
     from core.compaction import CompactionManager
-    _compaction_manager = CompactionManager(_db_manager, _agents)
+    _compaction_manager = CompactionManager(
+        _db_manager, _agents,
+        runtime_store=_execution_runner.store if config.REDIS_URL else None,
+    )
     logger.info("Compaction manager initialized")
 
 

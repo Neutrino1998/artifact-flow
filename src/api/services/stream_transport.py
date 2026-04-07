@@ -45,6 +45,7 @@ class StreamTransport(Protocol):
     ) -> AsyncGenerator[Dict[str, Any], None]: ...
     async def close_stream(self, stream_id: str) -> bool: ...
     async def get_stream_status(self, stream_id: str) -> Optional[str]: ...
+    async def is_stream_alive(self, stream_id: str) -> bool: ...
 
 
 # ============================================================
@@ -219,6 +220,11 @@ class InMemoryStreamTransport:
     async def get_stream_status(self, message_id: str) -> Optional[str]:
         context = self.streams.get(message_id)
         return context.status if context else None
+
+    async def is_stream_alive(self, message_id: str) -> bool:
+        """Check if stream exists and is not closed."""
+        context = self.streams.get(message_id)
+        return context is not None and context.status != "closed"
 
     @property
     def active_stream_count(self) -> int:

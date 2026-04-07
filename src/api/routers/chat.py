@@ -141,6 +141,7 @@ async def get_active_stream(
     conv_id: str,
     current_user: TokenPayload = Depends(get_current_user),
     conversation_manager: ConversationManager = Depends(get_conversation_manager),
+    stream_transport: StreamTransport = Depends(get_stream_transport),
     runner: ExecutionRunner = Depends(get_execution_runner),
 ):
     """查询会话是否有活跃的执行流，用于断线重连"""
@@ -149,6 +150,10 @@ async def get_active_stream(
     message_id = await runner.store.get_leased_message_id(conv_id)
     if not message_id:
         raise HTTPException(status_code=404, detail="No active execution")
+
+    # 校验 stream 是否仍存活（meta key 未过期）
+    if not await stream_transport.is_stream_alive(message_id):
+        raise HTTPException(status_code=410, detail="Stream expired")
 
     return {
         "conversation_id": conv_id,

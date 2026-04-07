@@ -104,7 +104,7 @@ class ExecutionController:
 
         # Wait for any running compaction before loading history
         # Yield COMPACTION_WAIT before blocking so frontend can show the indicator
-        if self.compaction_manager and self.compaction_manager.is_running(conversation_id):
+        if self.compaction_manager and await self.compaction_manager.is_running(conversation_id):
             yield {
                 "type": StreamEventType.COMPACTION_WAIT.value,
                 "timestamp": datetime.now().isoformat(),

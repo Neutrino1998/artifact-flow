@@ -123,7 +123,7 @@ async def run_and_push(
         last_flush_time = asyncio.get_event_loop().time()
 
     try:
-        async with asyncio.timeout(config.STREAM_TIMEOUT):
+        async with asyncio.timeout(config.EXECUTION_TIMEOUT):
             async for event in event_stream:
                 if stream_closed:
                     continue
@@ -146,11 +146,11 @@ async def run_and_push(
             await flush_pending()  # 流结束 flush 残余
 
     except TimeoutError:
-        logger.error(f"Execution timed out after {config.STREAM_TIMEOUT}s for {stream_id}")
+        logger.error(f"Execution timed out after {config.EXECUTION_TIMEOUT}s for {stream_id}")
         await stream_transport.push_event(stream_id, sanitize_error_event({
             "type": "error",
             "timestamp": datetime.now().isoformat(),
-            "data": {"success": False, "error": f"Execution timed out after {config.STREAM_TIMEOUT}s"}
+            "data": {"success": False, "error": f"Execution timed out after {config.EXECUTION_TIMEOUT}s"}
         }))
 
     except Exception as e:

@@ -4,12 +4,16 @@ CompactionManager — 跨轮对话摘要压缩
 异步后台执行 LLM 摘要生成，逐对处理，带上下文传递。
 每对独立 DB session：读消息 → 关 session → 调 LLM → 开 session → 写 summary。
 LLM 调用期间不持有任何 DB 资源。
+
+分布式锁（F-19）：当注入 RuntimeStore 时，使用 owner-key 原语实现跨实例互斥。
+无 RuntimeStore 时回退到进程内 _running dict（单实例行为不变）。
 """
 
 import asyncio
 import re
 from dataclasses import dataclass
-from typing import Dict, Any, List, Optional
+from typing import TYPE_CHECKING, Dict, Any, List, Optional
+from uuid import uuid4
 
 from agents.loader import AgentConfig
 from config import config
@@ -17,7 +21,14 @@ from db.database import DatabaseManager
 from repositories.conversation_repo import ConversationRepository
 from utils.logger import get_logger
 
+if TYPE_CHECKING:
+    from api.services.runtime_store import RuntimeStore
+
 logger = get_logger("ArtifactFlow")
+
+# Distributed lock constants
+_LOCK_TTL = 60          # seconds, renewed every TTL/3
+_LOCK_POLL_INTERVAL = 2  # seconds, for wait_if_running polling
 
 
 @dataclass
@@ -43,10 +54,15 @@ class CompactionManager:
         self,
         db_manager: DatabaseManager,
         agents: Dict[str, AgentConfig],
+        runtime_store: Optional["RuntimeStore"] = None,
     ):
         self._db_manager = db_manager
         self._agents = agents
-        self._running: Dict[str, asyncio.Event] = {}  # conv_id → done_event
+        self._store = runtime_store
+        self._running: Dict[str, asyncio.Event] = {}  # conv_id → done_event (local fallback)
+
+    def _lock_key(self, conv_id: str) -> str:
+        return f"compact:{conv_id}"
 
     async def maybe_trigger(
         self,
@@ -63,7 +79,7 @@ class CompactionManager:
         if last_context_chars < config.COMPACTION_THRESHOLD:
             return
 
-        if conv_id in self._running:
+        if await self.is_running(conv_id):
             logger.debug(f"Compaction already running for {conv_id}, skipping")
             return
 
@@ -72,9 +88,16 @@ class CompactionManager:
         self._running[conv_id] = done_event
         asyncio.create_task(self._run_compaction(conv_id, message_id, done_event))
 
-    def is_running(self, conv_id: str) -> bool:
+    async def is_running(self, conv_id: str) -> bool:
         """检查 conv_id 是否有正在运行的 compaction。"""
-        return conv_id in self._running
+        # Local check first (same-process compaction)
+        if conv_id in self._running:
+            return True
+        # Cross-instance check via distributed lock
+        if self._store:
+            owner = await self._store.get_owner(self._lock_key(conv_id))
+            return owner is not None
+        return False
 
     async def wait_if_running(self, conv_id: str) -> bool:
         """
@@ -83,12 +106,25 @@ class CompactionManager:
         Returns:
             True 如果等待了（compaction 完成），False 如果没有正在运行的 compaction。
         """
+        # Local event available — wait on it directly
         event = self._running.get(conv_id)
-        if event is None:
-            return False
+        if event is not None:
+            await event.wait()
+            return True
 
-        await event.wait()
-        return True
+        # Cross-instance: poll lock state
+        if self._store:
+            owner = await self._store.get_owner(self._lock_key(conv_id))
+            if owner is None:
+                return False
+            # Poll until lock is released
+            while True:
+                await asyncio.sleep(_LOCK_POLL_INTERVAL)
+                owner = await self._store.get_owner(self._lock_key(conv_id))
+                if owner is None:
+                    return True
+
+        return False
 
     async def trigger(self, conv_id: str) -> bool:
         """
@@ -97,7 +133,7 @@ class CompactionManager:
         Returns:
             True 如果成功启动，False 如果已在运行。
         """
-        if conv_id in self._running:
+        if await self.is_running(conv_id):
             return False
 
         done_event = asyncio.Event()
@@ -111,8 +147,24 @@ class CompactionManager:
         current_message_id: Optional[str],
         done_event: asyncio.Event,
     ) -> None:
-        """运行 compaction，带超时和清理。"""
+        """运行 compaction，带超时、分布式锁和清理。"""
+        owner_id = uuid4().hex
+        lock_key = self._lock_key(conv_id)
+        heartbeat_task: Optional[asyncio.Task] = None
+
         try:
+            # Acquire distributed lock (if store available)
+            if self._store:
+                acquired, _ = await self._store.acquire(lock_key, _LOCK_TTL, owner=owner_id)
+                if not acquired:
+                    logger.debug(f"Compaction lock already held for {conv_id}, skipping")
+                    return
+
+                # Start heartbeat renewal
+                heartbeat_task = asyncio.create_task(
+                    self._renew_loop(conv_id, lock_key, owner_id)
+                )
+
             async with asyncio.timeout(config.COMPACTION_TIMEOUT):
                 await self._compact(conv_id, current_message_id)
         except TimeoutError:
@@ -120,8 +172,30 @@ class CompactionManager:
         except Exception as e:
             logger.exception(f"Compaction failed for {conv_id}: {e}")
         finally:
+            if heartbeat_task:
+                heartbeat_task.cancel()
+                try:
+                    await heartbeat_task
+                except asyncio.CancelledError:
+                    pass
+            if self._store:
+                await self._store.release(lock_key, owner_id)
             done_event.set()
             self._running.pop(conv_id, None)
+
+    async def _renew_loop(self, conv_id: str, lock_key: str, owner_id: str) -> None:
+        """Heartbeat loop: renew lock every TTL/3. Cancel compaction if lock is lost."""
+        interval = _LOCK_TTL / 3
+        while True:
+            await asyncio.sleep(interval)
+            try:
+                renewed = await self._store.renew(lock_key, owner_id, _LOCK_TTL)
+                if not renewed:
+                    logger.warning(f"Compaction lock lost for {conv_id}, lock may have expired")
+                    return
+            except Exception as e:
+                logger.warning(f"Compaction lock renewal failed for {conv_id}: {e}")
+                return
 
     async def _compact(
         self,

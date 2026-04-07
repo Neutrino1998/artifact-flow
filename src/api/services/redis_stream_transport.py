@@ -5,8 +5,8 @@ RedisStreamTransport — Redis Streams-backed StreamTransport 实现
 使用 Redis Streams (XADD/XREAD) 实现事件缓冲和消费。
 
 Key 设计（{prefix:id} 为 hash tag，确保同 entity 同 slot）：
-    {prefix:msg_id}:stream       STREAM    TTL=STREAM_TTL   事件流
-    {prefix:msg_id}:stream_meta  HASH      TTL=STREAM_TTL   stream 元数据 {owner, status}
+    {prefix:msg_id}:stream       STREAM    TTL=EXECUTION_TIMEOUT  事件流
+    {prefix:msg_id}:stream_meta  HASH      TTL=EXECUTION_TIMEOUT  stream 元数据 {owner, status}
 """
 
 import asyncio
@@ -24,19 +24,18 @@ logger = get_logger("ArtifactFlow")
 # 终结事件类型
 _TERMINAL_EVENTS = frozenset(("complete", "cancelled", "error"))
 
-# Lua CAS: 仅当 consumer_id 匹配 且 status 仍为 streaming 时回退到 pending + 设 TTL。
+# Lua CAS: 仅当 consumer_id 匹配 且 status 仍为 streaming 时回退到 pending。
+# 不缩短 TTL — stream 生命周期由 EXECUTION_TIMEOUT 决定，consumer 断连不影响。
 # 双重条件防止两类竞态：
 #   - consumer_id 不匹配 → 新 consumer 已接管，旧 finally 不动
 #   - status != streaming → producer 已 close，consumer finally 不动
 # 单 key 操作（KEYS[1]=meta_key），避免 Redis Cluster CROSSSLOT。
-# stream_key 的 EXPIRE 在调用方单独执行。
-# KEYS[1]=meta_key, ARGV[1]=consumer_id, ARGV[2]=ttl
+# KEYS[1]=meta_key, ARGV[1]=consumer_id
 _LUA_REVERT_TO_PENDING = """
 local cid = redis.call('HGET', KEYS[1], 'consumer_id')
 local status = redis.call('HGET', KEYS[1], 'status')
 if cid == ARGV[1] and status == 'streaming' then
     redis.call('HSET', KEYS[1], 'status', 'pending', 'consumer_id', '')
-    redis.call('EXPIRE', KEYS[1], tonumber(ARGV[2]))
     return 1
 end
 return 0
@@ -49,13 +48,13 @@ class RedisStreamTransport:
     def __init__(
         self,
         redis_client: aioredis.Redis,
-        stream_ttl: int = 30,
-        stream_timeout: int = 1800,
+        cleanup_ttl: int = 60,
+        execution_timeout: int = 1800,
         key_prefix: str,
     ):
         self._redis = redis_client
-        self._stream_ttl = stream_ttl
-        self._stream_timeout = stream_timeout
+        self._cleanup_ttl = cleanup_ttl
+        self._execution_timeout = execution_timeout
         self._prefix = key_prefix
         self._script_revert_to_pending = None
 
@@ -88,7 +87,7 @@ class RedisStreamTransport:
             "owner": owner_user_id or "",
             "status": "pending",
         })
-        await self._redis.expire(meta_key, self._stream_ttl)
+        await self._redis.expire(meta_key, self._execution_timeout)
         # 注意：不对尚未创建的 stream key 做 EXPIRE（EXPIRE 对不存在的 key 是 no-op，
         # 会导致后续 XADD 创建的 key 没有 TTL → 孤儿 key）。
         # stream key 的 TTL 在 push_event 首次 XADD 后设置。
@@ -121,9 +120,9 @@ class RedisStreamTransport:
             approximate=True,
         )
 
-        # 首次 XADD 后设 stream key 的 TTL（pending 状态下前端可能不来连接）
+        # 首次 XADD 后设 stream key 的 TTL（与 meta_key 对齐，跟随执行生命周期）
         if first_push:
-            await self._redis.expire(stream_key, self._stream_ttl)
+            await self._redis.expire(stream_key, self._execution_timeout)
 
         # 注入 _stream_id 到原始 event dict（供 SSE 层使用）
         event["_stream_id"] = entry_id
@@ -150,14 +149,14 @@ class RedisStreamTransport:
         if owner and user_id and owner != user_id:
             raise StreamNotFoundError(stream_id)
 
-        # 生成 consumer_id，标记为 streaming + 移除 TTL（前端已连接）
+        # 生成 consumer_id，标记为 streaming
+        # 不移除 TTL — stream 生命周期由 EXECUTION_TIMEOUT 决定，
+        # 如果 producer crash 未调 close_stream，不会产生永久孤儿 key
         consumer_id = os.urandom(8).hex()
         await self._redis.hset(meta_key, mapping={
             "status": "streaming",
             "consumer_id": consumer_id,
         })
-        await self._redis.persist(meta_key)
-        await self._redis.persist(stream_key)
 
         # 起始 ID
         cursor = last_event_id if last_event_id else "0-0"
@@ -208,13 +207,11 @@ class RedisStreamTransport:
             # Consumer 断连：CAS 回退 meta 到 pending（单 key Lua，Cluster 安全）。
             # 仅当 consumer_id 仍匹配（说明没有新 consumer 接管）时才回退，
             # 避免覆盖新 consumer 的 streaming 或 producer 的 closed。
-            reverted = await self._script_revert_to_pending(
+            # 不缩短 TTL — stream 生命周期由 EXECUTION_TIMEOUT 决定。
+            await self._script_revert_to_pending(
                 keys=[meta_key],
-                args=[consumer_id, str(self._stream_ttl)],
+                args=[consumer_id],
             )
-            # CAS 成功后单独 EXPIRE stream_key（仅 TTL 刷新，不需要原子）
-            if reverted:
-                await self._redis.expire(stream_key, self._stream_ttl)
 
     async def close_stream(self, stream_id: str) -> bool:
         meta_key = self._meta_key(stream_id)
@@ -223,7 +220,7 @@ class RedisStreamTransport:
             return False
 
         # 标记为 closed + 设置延迟清理 TTL
-        cleanup_ttl = max(self._stream_ttl, 10)
+        cleanup_ttl = max(self._cleanup_ttl, 10)
         pipe = self._redis.pipeline(transaction=False)
         pipe.hset(meta_key, "status", "closed")
         pipe.expire(meta_key, cleanup_ttl)
@@ -235,3 +232,8 @@ class RedisStreamTransport:
 
     async def get_stream_status(self, stream_id: str) -> Optional[str]:
         return await self._redis.hget(self._meta_key(stream_id), "status")
+
+    async def is_stream_alive(self, stream_id: str) -> bool:
+        """Check if the stream meta key still exists in Redis (not expired)."""
+        status = await self._redis.hget(self._meta_key(stream_id), "status")
+        return status is not None and status != "closed"

@@ -27,8 +27,8 @@ class Settings(BaseSettings):
 
     # SSE 配置
     SSE_PING_INTERVAL: int = 15  # 秒，保持连接活跃
-    STREAM_TIMEOUT: int = 1800   # 秒，总执行上限（含 permission 等待）
-    STREAM_TTL: int = 60         # 秒，队列 TTL（前端未连接时自动清理）
+    EXECUTION_TIMEOUT: int = 1800   # 秒，总执行上限（含 permission 等待），同时用作 stream lifetime
+    STREAM_CLEANUP_TTL: int = 60    # 秒，执行结束后 consumer 读取剩余事件的清理窗口
     PERMISSION_TIMEOUT: int = 300  # 秒，单次 permission 等待超时
 
     # Compaction / Context 配置

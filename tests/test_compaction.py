@@ -14,7 +14,7 @@ from unittest.mock import patch, MagicMock
 
 import pytest
 
-from core.compaction import CompactionManager, _PairInfo
+from core.compaction import CompactionManager, _PairInfo, _LOCK_TTL
 from db.database import DatabaseManager
 from db.models import User
 from repositories.conversation_repo import ConversationRepository
@@ -121,7 +121,7 @@ class TestTrigger:
     async def test_below_threshold_no_trigger(self, cm_light):
         metrics = {"last_context_chars": 500}
         await cm_light.maybe_trigger("conv-1", "msg-1", metrics)
-        assert "conv-1" not in cm_light._running
+        assert not await cm_light.is_running("conv-1")
 
     async def test_above_threshold_triggers(self, cm_light):
         metrics = {"last_context_chars": 2000}
@@ -133,13 +133,13 @@ class TestTrigger:
                 await event.wait()
             mock_compact.assert_awaited_once()
         # _running should be cleaned up after completion
-        assert "conv-1" not in cm_light._running
+        assert not await cm_light.is_running("conv-1")
 
     async def test_already_running_skips(self, cm_light):
         cm_light._running["conv-1"] = asyncio.Event()
         metrics = {"last_context_chars": 2000}
         await cm_light.maybe_trigger("conv-1", "msg-1", metrics)
-        assert "conv-1" in cm_light._running
+        assert await cm_light.is_running("conv-1")
 
     async def test_manual_trigger_success(self, cm_light):
         with patch.object(cm_light, "_compact", return_value=None) as mock_compact:
@@ -150,7 +150,7 @@ class TestTrigger:
             if event:
                 await event.wait()
             mock_compact.assert_awaited_once()
-        assert "conv-1" not in cm_light._running
+        assert not await cm_light.is_running("conv-1")
 
     async def test_manual_trigger_already_running(self, cm_light):
         cm_light._running["conv-1"] = asyncio.Event()

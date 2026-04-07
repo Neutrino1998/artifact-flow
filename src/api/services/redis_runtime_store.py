@@ -8,13 +8,13 @@ Key 设计（{prefix:id} 为 hash tag，确保同 entity 同 slot）：
     {prefix:conv_id}:lease        STRING (msg_id)   TTL=LEASE_TTL   conversation lease
     {prefix:conv_id}:interactive  STRING (msg_id)   TTL=LEASE_TTL   engine interactive
     {prefix:msg_id}:interrupt     HASH              TTL=PERM+60     interrupt 状态
-    {prefix:msg_id}:cancel        STRING "1"        TTL=STREAM_TO   取消标记
-    {prefix:msg_id}:queue         LIST              TTL=STREAM_TO   消息注入队列
+    {prefix:msg_id}:cancel        STRING "1"        TTL=EXEC_TO     取消标记
+    {prefix:msg_id}:queue         LIST              TTL=EXEC_TO     消息注入队列
 """
 
 import asyncio
 import json
-from typing import Any, Dict, List, Literal, Optional, Set
+from typing import Any, Dict, List, Literal, Optional, Set, Tuple
 
 import redis.asyncio as aioredis
 
@@ -84,13 +84,13 @@ class RedisRuntimeStore:
         self,
         redis_client: aioredis.Redis,
         lease_ttl: int,
-        stream_timeout: int,
+        execution_timeout: int,
         permission_timeout: int,
         key_prefix: str,
     ):
         self._redis = redis_client
         self._lease_ttl = lease_ttl
-        self._stream_timeout = stream_timeout
+        self._execution_timeout = execution_timeout
         self._permission_timeout = permission_timeout
         self._prefix = key_prefix
 
@@ -259,7 +259,7 @@ class RedisRuntimeStore:
 
     async def request_cancel(self, message_id: str) -> None:
         await self._redis.set(
-            self._cancel_key(message_id), "1", ex=self._stream_timeout
+            self._cancel_key(message_id), "1", ex=self._execution_timeout
         )
         # 同时唤醒可能阻塞的 interrupt（与 InMemory 行为一致）
         interrupt_key = self._interrupt_key(message_id)
@@ -283,7 +283,7 @@ class RedisRuntimeStore:
     async def inject_message(self, message_id: str, content: str) -> None:
         key = self._queue_key(message_id)
         await self._redis.rpush(key, content)
-        await self._redis.expire(key, self._stream_timeout)
+        await self._redis.expire(key, self._execution_timeout)
         logger.debug(f"Message injected for {message_id}")
 
     async def drain_messages(self, message_id: str) -> List[str]:
@@ -294,6 +294,39 @@ class RedisRuntimeStore:
         except aioredis.ConnectionError:
             logger.warning(f"Redis unavailable draining messages for {message_id}, returning empty")
             return []
+
+    # ── Owner-key primitives ──
+
+    def _prefixed(self, key: str) -> str:
+        """Add hash-tagged prefix for Cluster slot routing."""
+        return f"{{{self._prefix}:{key}}}"
+
+    async def acquire(self, key: str, ttl: int, *, owner: Optional[str] = None) -> Tuple[bool, str]:
+        from uuid import uuid4
+        if owner is None:
+            owner = uuid4().hex
+        redis_key = self._prefixed(key)
+        result = await self._script_acquire_lease(
+            keys=[redis_key], args=[owner, str(ttl)]
+        )
+        if result is None:
+            return (True, owner)
+        return (False, result if isinstance(result, str) else result.decode())
+
+    async def renew(self, key: str, owner: str, ttl: int) -> bool:
+        redis_key = self._prefixed(key)
+        result = await self._script_compare_and_expire(
+            keys=[redis_key], args=[owner, str(ttl)]
+        )
+        return result == 1
+
+    async def release(self, key: str, owner: str) -> None:
+        redis_key = self._prefixed(key)
+        await self._script_compare_and_del(keys=[redis_key], args=[owner])
+
+    async def get_owner(self, key: str) -> Optional[str]:
+        redis_key = self._prefixed(key)
+        return await self._redis.get(redis_key)
 
     # ── Lifecycle ──
 
