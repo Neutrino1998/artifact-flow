@@ -97,7 +97,7 @@ class DatabaseManager:
 
     @staticmethod
     def _parse_db_url(url: str) -> Dict[str, Any]:
-        """从 SQLAlchemy URL 解析出 aiomysql.connect kwargs（含 query string 参数）"""
+        """从 SQLAlchemy URL 解析出 aiomysql.connect kwargs"""
         u = make_url(url)
         result: Dict[str, Any] = {
             "host": u.host or "127.0.0.1",
@@ -108,9 +108,24 @@ class DatabaseManager:
             result["user"] = u.username
         if u.password:
             result["password"] = u.password
-        # query string 参数（charset, ssl_ca, ssl_cert 等）直接透传
         if u.query:
-            result.update(u.query)
+            ssl_params = {}
+            for key, value in u.query.items():
+                if key.startswith("ssl_"):
+                    ssl_params[key] = value
+                else:
+                    result[key] = value
+            if ssl_params:
+                import ssl
+                ctx = ssl.create_default_context()
+                if "ssl_ca" in ssl_params:
+                    ctx.load_verify_locations(cafile=ssl_params["ssl_ca"])
+                if "ssl_cert" in ssl_params and "ssl_key" in ssl_params:
+                    ctx.load_cert_chain(
+                        certfile=ssl_params["ssl_cert"],
+                        keyfile=ssl_params["ssl_key"],
+                    )
+                result["ssl"] = ctx
         return result
 
     async def initialize(self) -> None:
