@@ -110,6 +110,7 @@ class ExecutionRunner:
                 task_id,
                 owner_user_id=user_id,
                 lease_check_key=self.store.get_lease_key(conversation_id),
+                lease_expected_owner=task_id,
             )
             coro = coro_factory()
         except Exception:

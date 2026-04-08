@@ -50,7 +50,7 @@ async def _seed_conversation(
 
 class _MockStreamTransport:
     """Minimal mock for StreamTransport — satisfies submit() orchestration."""
-    async def create_stream(self, stream_id, owner_user_id=None, lease_check_key=None): pass
+    async def create_stream(self, stream_id, owner_user_id=None, lease_check_key=None, lease_expected_owner=None): pass
     async def close_stream(self, stream_id): return True
 
 

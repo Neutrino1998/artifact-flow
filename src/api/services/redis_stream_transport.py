@@ -74,7 +74,7 @@ class RedisStreamTransport:
 
     # ── Protocol methods ──
 
-    async def create_stream(self, stream_id: str, owner_user_id: Optional[str] = None, lease_check_key: Optional[str] = None) -> None:
+    async def create_stream(self, stream_id: str, owner_user_id: Optional[str] = None, lease_check_key: Optional[str] = None, lease_expected_owner: Optional[str] = None) -> None:
         meta_key = self._meta_key(stream_id)
 
         # 检查是否已存在且未关闭
@@ -87,6 +87,7 @@ class RedisStreamTransport:
             "owner": owner_user_id or "",
             "status": "pending",
             "lease_check_key": lease_check_key or "",
+            "lease_expected_owner": lease_expected_owner or "",
         })
         await self._redis.expire(meta_key, self._execution_timeout)
         # 注意：不对尚未创建的 stream key 做 EXPIRE（EXPIRE 对不存在的 key 是 no-op，
@@ -189,14 +190,18 @@ class RedisStreamTransport:
 
                 if not result:
                     # 检查 producer lease 是否仍然存活
-                    lease_key = await self._redis.hget(meta_key, "lease_check_key")
-                    if lease_key:
+                    lease_meta = await self._redis.hmget(
+                        meta_key, "lease_check_key", "lease_expected_owner"
+                    )
+                    lease_key, expected_owner = lease_meta[0], lease_meta[1]
+                    if lease_key and expected_owner:
                         lease_val = await self._redis.get(lease_key)
-                        if lease_val is None:
-                            # Lease 已过期 → producer 已崩溃或被 fence
+                        if lease_val is None or lease_val != expected_owner:
+                            # Lease 过期或已被新执行接管 → producer 已不在
                             logger.warning(
-                                f"Lease expired for stream {stream_id} "
-                                f"(key={lease_key}) — closing consumer"
+                                f"Lease lost for stream {stream_id} "
+                                f"(key={lease_key}, expected={expected_owner}, "
+                                f"actual={lease_val}) — closing consumer"
                             )
                             yield {
                                 "type": "error",

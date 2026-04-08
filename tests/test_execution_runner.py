@@ -19,7 +19,7 @@ from api.services.runtime_store import InMemoryRuntimeStore, _InterruptState
 
 class _MockStreamTransport:
     """Minimal mock for StreamTransport — satisfies submit() orchestration."""
-    async def create_stream(self, stream_id, owner_user_id=None, lease_check_key=None): pass
+    async def create_stream(self, stream_id, owner_user_id=None, lease_check_key=None, lease_expected_owner=None): pass
     async def close_stream(self, stream_id): return True
 
 
@@ -246,7 +246,7 @@ class TestSubmitOrchestration:
         runner = ExecutionRunner(store=store)
 
         class _FailingTransport:
-            async def create_stream(self, stream_id, owner_user_id=None, lease_check_key=None):
+            async def create_stream(self, stream_id, owner_user_id=None, lease_check_key=None, lease_expected_owner=None):
                 raise RuntimeError("stream create failed")
             async def close_stream(self, stream_id): return True
 
