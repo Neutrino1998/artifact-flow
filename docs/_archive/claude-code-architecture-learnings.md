@@ -341,6 +341,41 @@ violations:
 - 单命令生命周期不适合 Python 交互式分析（需要保持 kernel 状态）
 - 宿主文件系统白名单模型不适用，应该用独立 rootfs + 显式数据挂载
 
+### 沙盒方案对比：gVisor vs Firecracker vs Kata
+
+**gVisor（推荐方案）：** Google 开源的用户态 Linux 内核（Go 实现）。核心组件 Sentry 在用户态拦截并模拟 ~70% 的 Linux 系统调用，只有文件 I/O 等少数操作通过 Gofer 进程代理到宿主机。
+
+```
+普通容器:    应用 → syscall → 宿主内核          （共享内核，风险大）
+gVisor:     应用 → syscall → Sentry(用户态内核) → 有限的宿主syscall
+```
+
+| 方案 | 隔离级别 | 需要 KVM | 启动速度 | Docker 内可用 | 架构支持 |
+|------|----------|----------|----------|---------------|----------|
+| **gVisor** | 用户态内核 | ❌ 不需要 | 毫秒级 | ✅ OCI runtime | x86_64, aarch64 |
+| **Firecracker** | microVM | ✅ 必需 | ~125ms | 需要 `--device /dev/kvm` | x86_64, aarch64 |
+| **Kata** | 轻量 VM | ✅ 必需 | ~500ms | 需要特权 | x86_64, aarch64 |
+| **nsjail/bwrap** | namespace | ❌ | 即时 | 需要 capabilities | 全架构 |
+
+**gVisor 适合 ArtifactFlow 的原因：**
+- 不需要 KVM → Docker 容器化部署无障碍，不怕云主机没有嵌套虚拟化
+- OCI 兼容 → `docker run --runtime=runsc` 即可，对应用透明
+- 信创环境鲲鹏（aarch64）可用
+
+**gVisor 局限：**
+- 系统调用密集场景有 10-30% 性能开销（Python 数据分析常用库一般可接受）
+- 不是 100% syscall 覆盖，少数程序可能不兼容
+- 龙芯（loongarch64）不支持
+
+**部署模型：** gVisor 安装在宿主机，注册为 Docker 备用 runtime。主应用通过 Docker API 按需创建/销毁 `--runtime=runsc` 的沙盒容器执行用户代码：
+
+```
+docker-compose.yml:
+├── artifactflow           ← 主应用（普通 runc）
+├── postgres / redis
+└── code-sandbox           ← 沙盒容器（runsc runtime），按需创建或容器池复用
+```
+
 ---
 
 ## 优先级总结
