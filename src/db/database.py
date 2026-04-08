@@ -314,6 +314,30 @@ class DatabaseManager:
         """检查是否已初始化"""
         return self._initialized
 
+    async def with_retry(self, fn, *, max_retries=3, base_delay=1.0):
+        """
+        用 fresh session 重试 DB 瞬断异常（连接断开/事务回滚）。
+
+        fn: async (session: AsyncSession) -> result
+        每次 attempt 创建独立 session，仅用于读操作或幂等写操作。
+        """
+        import asyncio
+        from sqlalchemy.exc import OperationalError, DisconnectionError
+
+        for attempt in range(max_retries + 1):
+            try:
+                async with self.session() as session:
+                    return await fn(session)
+            except (OperationalError, DisconnectionError) as e:
+                if attempt == max_retries:
+                    raise
+                delay = base_delay * (2 ** attempt)
+                logger.warning(
+                    f"DB transient error (attempt {attempt + 1}/{max_retries + 1}), "
+                    f"retrying in {delay:.1f}s: {e}"
+                )
+                await asyncio.sleep(delay)
+
 
 # ============================================================
 # 测试支持

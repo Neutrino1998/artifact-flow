@@ -43,7 +43,9 @@ export function connectSSE(
       }
 
       if (!res.ok || !res.body) {
-        handlers.onError?.(new Error(`SSE connection failed: ${res.status}`));
+        const err = new Error(`SSE connection failed: ${res.status}`) as Error & { status?: number };
+        err.status = res.status;
+        handlers.onError?.(err);
         return;
       }
 

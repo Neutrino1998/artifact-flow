@@ -698,7 +698,7 @@ class ArtifactManager:
                 "updated_at": None
             }
 
-    async def flush_all(self, session_id: str) -> None:
+    async def flush_all(self, session_id: str, *, db_manager=None) -> None:
         """
         将所有 dirty artifacts 持久化到数据库。
 
@@ -711,13 +711,15 @@ class ArtifactManager:
         - 新建的 artifact → repo.create_artifact(target_version=memory.current_version)
         - 已有的 artifact → repo.upsert_artifact_content(target_version=memory.current_version)
 
+        When db_manager is provided, each artifact flush uses a fresh session + retry
+        (resilient to DB transient failures). Dirty cache reads stay in this manager.
+
         Only clears entries that flush successfully.
         Raises on any failure so the caller can decide the terminal state.
         """
         if not self._dirty:
             return
 
-        repo = self._ensure_repository()
         to_flush = [(sid, aid) for sid, aid in self._dirty if sid == session_id]
         failed: list = []
 
@@ -727,27 +729,7 @@ class ArtifactManager:
                 continue
 
             try:
-                if (sid, aid) in self._new:
-                    await repo.create_artifact(
-                        session_id=sid,
-                        artifact_id=aid,
-                        content_type=memory.content_type,
-                        title=memory.title,
-                        content=memory.content,
-                        metadata=memory.metadata,
-                        source=memory.source,
-                        target_version=memory.current_version,
-                    )
-                else:
-                    await repo.upsert_artifact_content(
-                        session_id=sid,
-                        artifact_id=aid,
-                        new_content=memory.content,
-                        update_type="update",
-                        source=memory.source,
-                        target_version=memory.current_version,
-                    )
-
+                await self._flush_one(sid, aid, memory, db_manager=db_manager)
                 # Success — remove from dirty/new
                 self._dirty.discard((sid, aid))
                 self._new.discard((sid, aid))
@@ -759,6 +741,32 @@ class ArtifactManager:
         if failed:
             ids = ", ".join(aid for aid, _ in failed)
             raise RuntimeError(f"Failed to flush artifacts: {ids}")
+
+    async def _flush_one(self, sid: str, aid: str, memory, *, db_manager=None) -> None:
+        """Flush a single dirty artifact. Uses fresh session + retry when db_manager is provided."""
+        is_new = (sid, aid) in self._new
+
+        async def _write(repo):
+            if is_new:
+                await repo.create_artifact(
+                    session_id=sid, artifact_id=aid,
+                    content_type=memory.content_type, title=memory.title,
+                    content=memory.content, metadata=memory.metadata,
+                    source=memory.source, target_version=memory.current_version,
+                )
+            else:
+                await repo.upsert_artifact_content(
+                    session_id=sid, artifact_id=aid,
+                    new_content=memory.content, update_type="update",
+                    source=memory.source, target_version=memory.current_version,
+                )
+
+        if db_manager:
+            await db_manager.with_retry(
+                lambda session: _write(ArtifactRepository(session))
+            )
+        else:
+            await _write(self._ensure_repository())
 
     async def get_version(self, session_id: str, artifact_id: str, version: int):
         """获取指定版本"""

@@ -91,6 +91,7 @@ async def create_controller(conversation_id: str, message_id: str) -> AsyncGener
             message_event_repo=event_repo,
             compaction_manager=get_compaction_manager(),
             on_engine_exit=_on_engine_exit,
+            db_manager=db_manager,
         )
 
 

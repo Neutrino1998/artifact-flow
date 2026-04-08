@@ -41,6 +41,7 @@ class ExecutionController:
         message_event_repo: Optional[Any] = None,  # MessageEventRepository
         compaction_manager: Optional[Any] = None,
         on_engine_exit: Optional[Callable[[str, str], Awaitable[None]]] = None,
+        db_manager: Optional[Any] = None,
     ):
         self.agents = agents
         self.tools = tools
@@ -50,7 +51,31 @@ class ExecutionController:
         self.message_event_repo = message_event_repo
         self.compaction_manager = compaction_manager
         self._on_engine_exit = on_engine_exit
+        self._db_manager = db_manager
         logger.info("ExecutionController initialized")
+
+    async def _with_db_retry(self, fn):
+        """
+        DB 操作重试适配器。
+
+        fn: async (conv_mgr, event_repo, art_mgr) -> result
+        有 db_manager 时委托 db_manager.with_retry（fresh session + 瞬断重试）。
+        无 db_manager 时回退到 bound 实例（不重试）。
+        """
+        if not self._db_manager:
+            return await fn(self.conversation_manager, self.message_event_repo, self.artifact_manager)
+
+        from repositories.conversation_repo import ConversationRepository
+        from repositories.message_event_repo import MessageEventRepository
+        from repositories.artifact_repo import ArtifactRepository
+
+        async def _with_session(session):
+            conv_mgr = ConversationManager(ConversationRepository(session))
+            event_repo = MessageEventRepository(session)
+            art_mgr = ArtifactManager(ArtifactRepository(session))
+            return await fn(conv_mgr, event_repo, art_mgr)
+
+        return await self._db_manager.with_retry(_with_session)
 
     async def stream_execute(
         self,
@@ -116,9 +141,10 @@ class ExecutionController:
         if parent_message_id is not _UNSET and resolved_parent is None:
             conversation_history = []
         else:
-            conversation_history = await self.conversation_manager.format_conversation_history_async(
-                conv_id=conversation_id,
-                to_message_id=resolved_parent
+            conversation_history = await self._with_db_retry(
+                lambda cm, er, am: cm.format_conversation_history_async(
+                    conv_id=conversation_id, to_message_id=resolved_parent
+                )
             )
 
         # Session
@@ -229,16 +255,19 @@ class ExecutionController:
             flush_error: Optional[str] = None
             if self.artifact_manager:
                 try:
-                    await self.artifact_manager.flush_all(session_id)
+                    await self.artifact_manager.flush_all(
+                        session_id, db_manager=self._db_manager
+                    )
                 except Exception as flush_err:
-                    logger.exception(f"Artifact flush failed: {flush_err}")
+                    logger.exception(f"Artifact flush failed after retries: {flush_err}")
                     flush_error = f"Artifact persistence failed: {flush_err}"
 
             # 更新 conversation response
-            await self.conversation_manager.update_response_async(
-                conv_id=conversation_id,
-                message_id=message_id,
-                response=response if not has_error else (response or "An error occurred during execution."),
+            final_response = response if not has_error else (response or "An error occurred during execution.")
+            await self._with_db_retry(
+                lambda cm, er, am: cm.update_response_async(
+                    conv_id=conversation_id, message_id=message_id, response=final_response,
+                )
             )
 
             logger.info("Streaming execution completed")
@@ -343,7 +372,7 @@ class ExecutionController:
         1. execution_complete — 成功
         2. error — 失败
 
-        策略：3 次指数退避重试，最终失败记录日志。
+        策略：fresh-session-per-attempt + retry_on_db_transient。
         """
         if not self.message_event_repo:
             return
@@ -363,26 +392,14 @@ class ExecutionController:
             for e in events
         ]
 
-        max_retries = 3
-        for attempt in range(max_retries):
-            try:
-                await self.message_event_repo.batch_create(db_events)
-                logger.info(f"Persisted {len(db_events)} events for message {message_id}")
-                return
-            except Exception as e:
-                # rollback 使 session 恢复可用状态，否则后续重试会触发 PendingRollbackError
-                try:
-                    await self.message_event_repo.reset()
-                except Exception as rollback_err:
-                    logger.debug(f"Session rollback failed during retry: {rollback_err}")
-                if attempt < max_retries - 1:
-                    wait = 2 ** attempt  # 1s, 2s
-                    logger.warning(f"Event persistence attempt {attempt + 1} failed, retrying in {wait}s: {e}")
-                    await asyncio.sleep(wait)
-                else:
-                    logger.error(
-                        f"Event persistence failed after {max_retries} attempts for {message_id} "
-                        f"({len(db_events)} events lost): {e}"
-                    )
-                    # 不做 fallback — events 是审计数据，conversation + artifact 已持久化
+        try:
+            await self._with_db_retry(
+                lambda cm, er, am: er.batch_create(db_events)
+            )
+            logger.info(f"Persisted {len(db_events)} events for message {message_id}")
+        except Exception as e:
+            logger.error(
+                f"Event persistence failed after retries for {message_id} "
+                f"({len(db_events)} events lost): {e}"
+            )
 

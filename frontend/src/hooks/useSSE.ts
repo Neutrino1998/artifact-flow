@@ -462,8 +462,16 @@ export function useSSE() {
             }
           },
           onError: (err) => {
-            setError(err.message);
-            endStream();
+            const status = (err as Error & { status?: number }).status;
+            // Non-retryable: 401 auth expired, 404 resource not found
+            if (status === 401 || status === 404) {
+              setError(err.message);
+              endStream();
+              return;
+            }
+            // Retryable: 502/503/network error — use same reconnect path as onClose
+            setReconnecting(true);
+            attemptReconnect(conversationId, connection.lastEventId, controller);
           },
           onClose: () => {
             if (receivedTerminal || controller.signal.aborted) return;
