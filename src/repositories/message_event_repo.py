@@ -79,7 +79,7 @@ class MessageEventRepository:
                 )
                 result = await self.session.execute(stmt)
                 existing_count = result.scalar() or 0
-                if existing_count > 0:
+                if existing_count == len(event_ids):
                     logger.info(f"Events already persisted (duplicate event_id), skipping batch of {len(db_events)}")
                     return []
             # Not a duplicate — re-raise the real integrity error
