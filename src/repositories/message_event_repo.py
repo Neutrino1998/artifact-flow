@@ -6,7 +6,7 @@ MessageEvent Repository
 
 from typing import List, Optional, Dict, Any
 
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -69,10 +69,21 @@ class MessageEventRepository:
             await self.session.flush()
             await self.session.commit()
         except IntegrityError:
-            # Duplicate event_id — previous attempt already committed this batch
             await self.session.rollback()
-            logger.info(f"Events already persisted (duplicate event_id), skipping batch of {len(db_events)}")
-            return []
+            # Verify this is a duplicate event_id conflict (previous retry committed),
+            # not a different integrity violation (e.g. FK to messages).
+            event_ids = [e.get("event_id") for e in events if e.get("event_id")]
+            if event_ids:
+                stmt = select(func.count()).select_from(MessageEvent).where(
+                    MessageEvent.event_id.in_(event_ids)
+                )
+                result = await self.session.execute(stmt)
+                existing_count = result.scalar() or 0
+                if existing_count > 0:
+                    logger.info(f"Events already persisted (duplicate event_id), skipping batch of {len(db_events)}")
+                    return []
+            # Not a duplicate — re-raise the real integrity error
+            raise
 
         logger.debug(f"Batch created {len(db_events)} message events")
         return db_events
