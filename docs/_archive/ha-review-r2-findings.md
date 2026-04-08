@@ -577,9 +577,9 @@ async def _load_history_with_retry(self, conversation_id, ...):
 | 1 | F-17 | ~~Multi-PX failover asyncmy → aiomysql~~ | P0 | ✅ PR6 已合入 |
 | 2 | F-18 | ~~Stream 生命周期与执行生命周期对齐（TTL 策略简化 + `STREAM_TTL` → `STREAM_CLEANUP_TTL`）~~ | P1 | ✅ PR7 已合入 |
 | 3 | F-19 | ~~Compaction 分布式锁（抽 owner-key 原语 + conversation lease 重构 + 心跳续租）~~ | P1 | ✅ PR7 已合入 |
-| 4 | F-20 | 前端首连 SSE 可重试 | P2 | 小（~15 行前端） |
+| 4 | F-20 | ~~前端首连 SSE 可重试~~ | P2 | ✅ PR8 已合入 |
 | 5 | ~~F-21~~ | ~~心跳续约二次确认~~ | — | 已撤回（会重开 split-brain） |
-| 6 | F-22 | DB 瞬断函数级重试 | P2 | 小（~40 行） |
+| 6 | F-22 | ~~DB 瞬断函数级重试~~ | P2 | ✅ PR8 已合入 |
 
 ---
 
@@ -589,7 +589,7 @@ async def _load_history_with_retry(self, conversation_id, ...):
 |----|------|------|--------|
 | **PR6** ✅ | F-17 | 依赖修正 | 极小 — 只改 import 和注释，不改逻辑 |
 | **PR7** ✅ | F-18 + F-19 | 分布式协调 | 中 — stream TTL 策略简化 + owner-key 原语抽取 + compaction 分布式锁，需回归 SSE 重连、lease 续租和 compaction 场景 |
-| **PR8** | F-20 + F-22 | 容错加固 | 小 — 前端重试策略 + DB 读操作重试，各自独立 |
+| **PR8** ✅ | F-20 + F-22 | 容错加固 | 小 — 前端重试策略 + DB 读操作重试，各自独立 |
 
 **PR 拆分理由**：
 - **PR6 独立**：P0 阻塞项，改动极小，可立即合入解除 multi-PX 启动阻塞
