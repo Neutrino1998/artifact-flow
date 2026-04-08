@@ -34,7 +34,7 @@ class StreamAlreadyExistsError(Exception):
 class StreamTransport(Protocol):
     """流式事件传输协议"""
 
-    async def create_stream(self, stream_id: str, owner_user_id: Optional[str] = None) -> None: ...
+    async def create_stream(self, stream_id: str, owner_user_id: Optional[str] = None, lease_check_key: Optional[str] = None) -> None: ...
     async def push_event(self, stream_id: str, event: Dict[str, Any]) -> bool: ...
     async def consume_events(
         self,
@@ -96,7 +96,7 @@ class InMemoryStreamTransport:
         logger.info(f"InMemoryStreamTransport initialized (TTL: {ttl_seconds}s)")
 
     async def create_stream(
-        self, message_id: str, owner_user_id: Optional[str] = None
+        self, message_id: str, owner_user_id: Optional[str] = None, lease_check_key: Optional[str] = None,
     ) -> StreamContext:
         async with self._lock:
             existing = self.streams.get(message_id)

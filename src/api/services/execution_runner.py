@@ -106,7 +106,11 @@ class ExecutionRunner:
         # lease 之后的所有步骤失败时必须回滚（含 coro_factory 调用）
         try:
             await self.store.mark_engine_interactive(conversation_id, task_id)
-            await stream_transport.create_stream(task_id, owner_user_id=user_id)
+            await stream_transport.create_stream(
+                task_id,
+                owner_user_id=user_id,
+                lease_check_key=self.store.get_lease_key(conversation_id),
+            )
             coro = coro_factory()
         except Exception:
             try:
@@ -139,6 +143,7 @@ class ExecutionRunner:
                 coro.close()
                 self._tasks.pop(task_id, None)
                 await self.store.cleanup_execution(conversation_id, task_id)
+                await stream_transport.close_stream(task_id)
                 logger.debug(f"Task {task_id} completed and cleaned up (active: {len(self._tasks)})")
 
         task = asyncio.create_task(_wrapped(), name=f"exec-{task_id}")
@@ -151,16 +156,32 @@ class ExecutionRunner:
 
         Lease lost (renew returns False) → cancel the execution task (fencing).
         Transient errors (network blip) → log and retry next interval.
+        Consecutive failures ≥ 2 → treat as permanent failure, cancel task (fail-closed).
         """
         interval = self._lease_ttl // 3
+        consecutive_failures = 0
         while True:
             await asyncio.sleep(interval)
             try:
                 still_owner = await self.store.renew_lease(
                     conversation_id, task_id, ttl=self._lease_ttl
                 )
+                consecutive_failures = 0
             except Exception:
-                logger.warning(f"Heartbeat renewal failed for {task_id} (transient error)")
+                consecutive_failures += 1
+                logger.warning(
+                    f"Heartbeat renewal failed for {task_id} "
+                    f"(consecutive_failures={consecutive_failures})"
+                )
+                if consecutive_failures >= 2:
+                    logger.error(
+                        f"Heartbeat renewal failed {consecutive_failures} times "
+                        f"for {task_id} — fail-closed, cancelling task"
+                    )
+                    task = self._tasks.get(task_id)
+                    if task:
+                        task.cancel()
+                    return
                 continue
 
             if not still_owner:

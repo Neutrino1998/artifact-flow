@@ -115,6 +115,7 @@ async def send_message(
                 "timestamp": datetime.now().isoformat(),
                 "data": {"success": False, "error": str(e)}
             }))
+            await stream_transport.close_stream(message_id)
 
     # submit 内部处理 lease + interactive + stream 编排
     try:

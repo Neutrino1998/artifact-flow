@@ -62,7 +62,7 @@ async def store(redis_client):
     s = RedisRuntimeStore(
         redis_client,
         lease_ttl=10,
-        stream_timeout=60,
+        execution_timeout=60,
         permission_timeout=30,
         key_prefix=TEST_PREFIX,
     )

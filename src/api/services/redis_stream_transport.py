@@ -74,7 +74,7 @@ class RedisStreamTransport:
 
     # ── Protocol methods ──
 
-    async def create_stream(self, stream_id: str, owner_user_id: Optional[str] = None) -> None:
+    async def create_stream(self, stream_id: str, owner_user_id: Optional[str] = None, lease_check_key: Optional[str] = None) -> None:
         meta_key = self._meta_key(stream_id)
 
         # 检查是否已存在且未关闭
@@ -86,6 +86,7 @@ class RedisStreamTransport:
         await self._redis.hset(meta_key, mapping={
             "owner": owner_user_id or "",
             "status": "pending",
+            "lease_check_key": lease_check_key or "",
         })
         await self._redis.expire(meta_key, self._execution_timeout)
         # 注意：不对尚未创建的 stream key 做 EXPIRE（EXPIRE 对不存在的 key 是 no-op，
@@ -187,6 +188,24 @@ class RedisStreamTransport:
                     continue
 
                 if not result:
+                    # 检查 producer lease 是否仍然存活
+                    lease_key = await self._redis.hget(meta_key, "lease_check_key")
+                    if lease_key:
+                        lease_val = await self._redis.get(lease_key)
+                        if lease_val is None:
+                            # Lease 已过期 → producer 已崩溃或被 fence
+                            logger.warning(
+                                f"Lease expired for stream {stream_id} "
+                                f"(key={lease_key}) — closing consumer"
+                            )
+                            yield {
+                                "type": "error",
+                                "data": {
+                                    "success": False,
+                                    "error": "Execution lease expired (producer lost)",
+                                },
+                            }
+                            return
                     # 超时 → 发送心跳
                     yield {"type": "__ping__"}
                     continue

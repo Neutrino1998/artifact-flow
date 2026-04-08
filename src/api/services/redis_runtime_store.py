@@ -328,6 +328,12 @@ class RedisRuntimeStore:
         redis_key = self._prefixed(key)
         return await self._redis.get(redis_key)
 
+    # ── Lease key ──
+
+    def get_lease_key(self, conversation_id: str) -> str:
+        """Return the Redis key used for conversation lease (for stream transport lease check)."""
+        return self._lease_key(conversation_id)
+
     # ── Lifecycle ──
 
     async def cleanup_execution(self, conversation_id: str, message_id: str) -> None:

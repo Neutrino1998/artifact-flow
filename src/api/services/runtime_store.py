@@ -75,6 +75,10 @@ class RuntimeStore(Protocol):
         """Get current owner of key, or None if not held."""
         ...
 
+    # ── Lease key (for stream transport lease check) ──
+
+    def get_lease_key(self, conversation_id: str) -> str: ...
+
     # ── Lifecycle ──
 
     async def cleanup_execution(self, conversation_id: str, message_id: str) -> None: ...
@@ -258,6 +262,12 @@ class InMemoryRuntimeStore:
         if not self._is_key_alive(key):
             return None
         return self._owner_keys[key][0]
+
+    # ── Lease key ──
+
+    def get_lease_key(self, conversation_id: str) -> str:
+        """InMemory 无跨实例 lease 检查，返回空字符串。"""
+        return ""
 
     # ── Lifecycle ──
 
