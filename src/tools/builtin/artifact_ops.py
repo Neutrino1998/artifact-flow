@@ -7,6 +7,8 @@ import re
 import unicodedata
 from fuzzysearch import find_near_matches
 
+from sqlalchemy.exc import IntegrityError
+
 from tools.base import BaseTool, ToolResult, ToolParameter, ToolPermission
 from repositories.artifact_repo import ArtifactRepository
 from repositories.base import NotFoundError, DuplicateError
@@ -762,9 +764,14 @@ class ArtifactManager:
                 )
 
         if db_manager:
-            await db_manager.with_retry(
-                lambda session: _write(ArtifactRepository(session))
-            )
+            async def _attempt(session):
+                try:
+                    await _write(ArtifactRepository(session))
+                except (DuplicateError, IntegrityError):
+                    # Previous retry attempt already committed — treat as success
+                    logger.info(f"Artifact '{aid}' already persisted (duplicate), skipping")
+
+            await db_manager.with_retry(_attempt)
         else:
             await _write(self._ensure_repository())
 

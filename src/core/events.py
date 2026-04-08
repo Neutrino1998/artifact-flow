@@ -48,6 +48,7 @@ class ExecutionEvent:
     event_type: str          # StreamEventType.value
     agent_name: Optional[str] = None
     data: Any = None
+    event_id: Optional[str] = None  # stable dedupe key, set by controller before persist
     created_at: datetime = field(default_factory=datetime.now)
 
     def to_dict(self) -> dict:

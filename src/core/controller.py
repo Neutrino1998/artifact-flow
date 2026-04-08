@@ -281,10 +281,10 @@ class ExecutionController:
             if execution_metrics:
                 metadata_updates["execution_metrics"] = execution_metrics
             if metadata_updates:
-                await self.conversation_manager.update_message_metadata_async(
-                    conv_id=conversation_id,
-                    message_id=message_id,
-                    metadata=metadata_updates,
+                await self._with_db_retry(
+                    lambda cm, er, am: cm.update_message_metadata_async(
+                        conv_id=conversation_id, message_id=message_id, metadata=metadata_updates,
+                    )
                 )
 
             # 自动触发 compaction（cancelled 不触发）
@@ -381,15 +381,17 @@ class ExecutionController:
         if not events:
             return
 
+        # Assign stable event_id for retry idempotency: {message_id}-{seq}
         db_events = [
             {
+                "event_id": f"{message_id}-{seq}",
                 "message_id": message_id,
                 "event_type": e.event_type,
                 "agent_name": e.agent_name,
                 "data": e.data,
                 "created_at": e.created_at,
             }
-            for e in events
+            for seq, e in enumerate(events)
         ]
 
         try:

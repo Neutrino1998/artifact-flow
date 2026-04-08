@@ -234,6 +234,9 @@ class MessageEvent(Base):
     # 自增主键，天然有序
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
 
+    # 业务去重键：{message_id}-{seq}，用于 retry 幂等
+    event_id: Mapped[Optional[str]] = mapped_column(String(96), nullable=True, unique=True)
+
     # 外键：所属消息
     message_id: Mapped[str] = mapped_column(
         String(64),

@@ -38,7 +38,9 @@ export function connectSSE(
     .then(async (res) => {
       if (res.status === 401) {
         useAuthStore.getState().logout();
-        handlers.onError?.(new Error('Session expired'));
+        const err = new Error('Session expired') as Error & { status?: number };
+        err.status = 401;
+        handlers.onError?.(err);
         return;
       }
 

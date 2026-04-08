@@ -7,6 +7,7 @@ MessageEvent Repository
 from typing import List, Optional, Dict, Any
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.models import MessageEvent
@@ -53,6 +54,7 @@ class MessageEventRepository:
         db_events = []
         for event_data in events:
             event = MessageEvent(
+                event_id=event_data.get("event_id"),
                 message_id=event_data["message_id"],
                 event_type=event_data["event_type"],
                 agent_name=event_data.get("agent_name"),
@@ -63,8 +65,14 @@ class MessageEventRepository:
             db_events.append(event)
 
         self.session.add_all(db_events)
-        await self.session.flush()
-        await self.session.commit()
+        try:
+            await self.session.flush()
+            await self.session.commit()
+        except IntegrityError:
+            # Duplicate event_id — previous attempt already committed this batch
+            await self.session.rollback()
+            logger.info(f"Events already persisted (duplicate event_id), skipping batch of {len(db_events)}")
+            return []
 
         logger.debug(f"Batch created {len(db_events)} message events")
         return db_events
