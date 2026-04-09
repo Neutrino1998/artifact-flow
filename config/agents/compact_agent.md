@@ -4,7 +4,7 @@ description: |
   Internal agent for conversation compaction.
   Generates concise summaries of conversation pairs for context window management.
 internal: true
-model: qwen3.5-flash-no-thinking
+model: qwen3.6-plus-no-thinking
 tools: {}
 max_tool_rounds: 0
 ---

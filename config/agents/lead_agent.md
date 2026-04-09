@@ -11,7 +11,7 @@ tools:
   rewrite_artifact: auto
   read_artifact: auto
   call_subagent: auto
-model: qwen3.5-plus
+model: qwen3.6-plus
 max_tool_rounds: 100
 ---
 

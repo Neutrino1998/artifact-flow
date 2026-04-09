@@ -6,7 +6,7 @@ description: |
   - Information retrieval
 tools:
   web_search: auto
-model: qwen3.5-flash-no-thinking
+model: qwen3.6-plus-no-thinking
 max_tool_rounds: 3
 ---
 
