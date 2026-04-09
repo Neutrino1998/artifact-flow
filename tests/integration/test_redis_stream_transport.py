@@ -165,11 +165,10 @@ class TestLastEventId:
         # Consume first 2 events then break (simulates consumer disconnect)
         event_ids = []
         count = 0
+        gen = transport.consume_events(stream_id, heartbeat_interval=0.3)
         try:
             async with asyncio.timeout(1.0):
-                async for event in transport.consume_events(
-                    stream_id, heartbeat_interval=0.3
-                ):
+                async for event in gen:
                     if event.get("type") == "__ping__":
                         continue
                     event_ids.append(event.get("_stream_id"))
@@ -178,12 +177,10 @@ class TestLastEventId:
                         break
         except TimeoutError:
             pass
+        await gen.aclose()
 
         assert len(event_ids) >= 2
         last_id = event_ids[1]
-
-        # Let fire-and-forget revert task complete
-        await asyncio.sleep(0)
 
         # After consumer disconnect, stream should revert to pending (not closed)
         status = await transport.get_stream_status(stream_id)
@@ -214,14 +211,11 @@ class TestConsumerDisconnect:
         await transport.push_event(stream_id, {"type": "metadata", "data": {}})
 
         # Consume then break (simulates disconnect)
-        async for event in transport.consume_events(
-            stream_id, heartbeat_interval=0.3
-        ):
+        gen = transport.consume_events(stream_id, heartbeat_interval=0.3)
+        async for event in gen:
             if event.get("type") != "__ping__":
                 break
-
-        # Let fire-and-forget revert task complete
-        await asyncio.sleep(0)
+        await gen.aclose()
 
         # Stream should be pending, not closed
         status = await transport.get_stream_status(stream_id)

@@ -59,14 +59,15 @@ async def stream_events(
 
         从 StreamTransport 消费事件，格式化为 SSE 并 yield。
         """
+        consumer = stream_transport.consume_events(
+            stream_id,
+            heartbeat_interval=config.SSE_PING_INTERVAL,
+            user_id=current_user.user_id,
+            last_event_id=last_event_id,
+        )
         try:
             # 消费事件（带心跳支持 + 用户校验 + 断点续传）
-            async for event in stream_transport.consume_events(
-                stream_id,
-                heartbeat_interval=config.SSE_PING_INTERVAL,
-                user_id=current_user.user_id,
-                last_event_id=last_event_id,
-            ):
+            async for event in consumer:
                 # 心跳哨兵事件 → SSE 注释
                 if event.get("type") == "__ping__":
                     yield format_sse_comment("ping")
@@ -112,6 +113,9 @@ async def stream_events(
                 }
             }
             yield format_sse_event(error_event, event="error")
+
+        finally:
+            await consumer.aclose()
 
     return StreamingResponse(
         event_generator(),
