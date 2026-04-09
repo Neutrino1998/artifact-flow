@@ -3,7 +3,7 @@
 > Artifacts 架构的多智能体系统
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
-[![SQLite](https://img.shields.io/badge/SQLite-Persistent-blue.svg)]()
+[![SQLite/PostgreSQL](https://img.shields.io/badge/SQLite%20%7C%20PostgreSQL-Persistent-blue.svg)]()
 [![Development Status](https://img.shields.io/badge/Status-Alpha%20Development-orange.svg)]()
 
 ArtifactFlow 是一个智能多智能体系统，通过协调专门的AI智能体来执行综合性任务。基于 [Pi-style](https://github.com/badlogic/pi-mono) 执行引擎构建，采用独特的双 Artifact 架构，实现 AI 协作和人工监督的迭代优化。
@@ -165,55 +165,22 @@ GET /stream/{id} ← consume_events ← push_event ← execute_loop
 
 ### 方式一：Docker 部署（推荐）
 
-最简单的部署方式，无需配置 Python 环境。
+最简单的部署方式，无需配置 Python 环境。SQLite + InMemory，适合本地试用。
 
-1. **克隆项目**
-   ```bash
-   git clone https://github.com/yourusername/artifact-flow.git
-   cd artifact-flow
-   ```
-
-2. **配置环境变量**
-   ```bash
-   cp .env.example .env
-   # 编辑 .env 文件，添加你的 API Keys
-   # 设置 JWT 密钥（必须）
-   echo "ARTIFACTFLOW_JWT_SECRET=$(python -c 'import secrets; print(secrets.token_urlsafe(32))')" >> .env
-   ```
-
-3. **启动服务**
-   ```bash
-   docker-compose up -d
-   ```
-
-4. **创建管理员账号**
-   ```bash
-   # "admin" 是用户名，--password 指定密码（不加则交互式提示输入）
-   docker-compose exec backend python scripts/create_admin.py admin --password admin
-   ```
-   管理员登录后可在侧边栏底部的用户菜单中打开「管理用户」面板，创建和管理其他用户账号。
-
-5. **查看日志**
-   ```bash
-   docker-compose logs -f
-   ```
-
-6. **访问服务**
-   - 前端界面: http://localhost:3000
-   - API 文档: http://localhost:8000/docs
-   - ReDoc 文档: http://localhost:8000/redoc
-
-**停止服务：**
 ```bash
-docker-compose down
+git clone https://github.com/yourusername/artifact-flow.git
+cd artifact-flow
+
+cp .env.example .env
+# 编辑 .env，填入 API Keys 和 JWT secret
+
+docker compose up -d
+docker compose exec backend python scripts/create_admin.py admin --password <your-password>
 ```
 
-**重新构建（代码更新后）：**
-```bash
-docker-compose up -d --build
-```
+访问：前端 http://localhost:3000 / API 文档 http://localhost:8000/docs
 
-> **注意：** Docker 镜像 <1GB（约 430MB）。首次构建需要下载较多依赖。
+> **生产部署 / 内网离线部署**：支持 Nginx 反向代理 + PostgreSQL + Redis + 多副本水平扩展 + Alembic 自动迁移。详见 [部署 SOP](docs/_archive/deployment-sop.md)。
 
 ### 方式二：本地安装
 
@@ -346,42 +313,11 @@ BOCHA_API_KEY=sk-xxx
 
 ## 数据持久化
 
-ArtifactFlow 使用 SQLite 数据库进行数据持久化，采用双层存储架构：
+- **开发/试用**：SQLite（WAL 模式，零配置，自动创建）
+- **生产**：PostgreSQL 16+（Alembic 管理 schema 迁移，容器启动时自动执行）
+- **运行时状态**：InMemory（单副本）或 Redis（多副本，支持跨 Worker 的 RuntimeStore + StreamTransport）
 
-### 存储位置
-
-```
-data/
-└── artifactflow.db    # SQLite 数据库文件（自动创建）
-```
-
-### 数据库表结构
-
-| 表名 | 说明 |
-|------|------|
-| `users` | 用户信息（用户名、密码哈希、角色） |
-| `conversations` | 对话元信息（ID、标题、活跃分支、所属用户） |
-| `messages` | 消息记录（树结构，支持分支对话） |
-| `message_events` | 执行事件流（append-only，完整执行过程回放） |
-| `artifact_sessions` | Artifact 会话（与对话 1:1 关联） |
-| `artifacts` | Artifact 内容（含乐观锁版本控制） |
-| `artifact_versions` | Artifact 历史版本（支持版本回溯） |
-
-### 特性
-
-- **WAL 模式**: 启用 Write-Ahead Logging，支持并发读写
-- **乐观锁**: Artifact 更新使用乐观锁机制，防止并发冲突
-- **热数据缓存**: Manager 层实现 LRU 缓存，减少数据库访问
-- **PostgreSQL 兼容**: 使用 SQLAlchemy ORM，可平滑迁移到 PostgreSQL
-
-### 初始化
-
-数据库在首次运行时自动创建，无需手动初始化。如需重置数据库：
-
-```bash
-# 删除数据库文件（谨慎操作，将丢失所有数据）
-rm data/artifactflow.db
-```
+SQLAlchemy ORM 统一数据访问层，Manager 层 LRU 缓存热数据，Artifact 更新使用乐观锁。
 
 ## 项目结构
 
