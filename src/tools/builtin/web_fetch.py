@@ -25,7 +25,8 @@ logger = get_logger("ArtifactFlow")
 JINA_API_KEY = os.getenv("JINA_API_KEY")
 JINA_BASE_URL = "https://r.jina.ai"
 JINA_RETRY_MAX = 2
-JINA_RETRY_DELAY = 30  # 429限额时等待秒数
+JINA_RETRY_DELAY = 30   # 429限额时等待秒数
+JINA_TIMEOUT = 15        # 单次请求超时（秒），正常响应 1-5s
 
 
 class WebFetchTool(BaseTool):
@@ -183,7 +184,7 @@ class WebFetchTool(BaseTool):
         if JINA_API_KEY:
             headers["Authorization"] = f"Bearer {JINA_API_KEY}"
 
-        timeout = aiohttp.ClientTimeout(total=60)
+        timeout = aiohttp.ClientTimeout(total=JINA_TIMEOUT)
 
         for attempt in range(1 + JINA_RETRY_MAX):
             try:
@@ -234,6 +235,7 @@ class WebFetchTool(BaseTool):
             except asyncio.TimeoutError:
                 logger.warning(f"Jina timeout for {url} (attempt {attempt + 1})")
                 if attempt < JINA_RETRY_MAX:
+                    await asyncio.sleep(2)
                     continue
                 return None
             except Exception as e:
