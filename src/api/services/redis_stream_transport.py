@@ -48,9 +48,9 @@ class RedisStreamTransport:
     def __init__(
         self,
         redis_client: aioredis.Redis,
+        key_prefix: str,
         cleanup_ttl: int = 60,
         execution_timeout: int = 1800,
-        key_prefix: str,
     ):
         self._redis = redis_client
         self._cleanup_ttl = cleanup_ttl
