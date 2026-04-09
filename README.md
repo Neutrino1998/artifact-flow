@@ -2,7 +2,7 @@
 
 > Artifacts 架构的多智能体系统
 
-[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![SQLite/PostgreSQL](https://img.shields.io/badge/SQLite%20%7C%20PostgreSQL-Persistent-blue.svg)]()
 [![Development Status](https://img.shields.io/badge/Status-Alpha%20Development-orange.svg)]()
 
@@ -195,7 +195,7 @@ docker compose exec backend python scripts/create_admin.py admin --password <you
 2. **创建虚拟环境**
    ```bash
    # 使用 conda（推荐）
-   conda create -n artifact-flow python=3.10
+   conda create -n artifact-flow python=3.11
    conda activate artifact-flow
 
    # 或使用 venv

@@ -4,7 +4,7 @@
 
 ArtifactFlow is a multi-agent system with a [Pi-style](https://github.com/badlogic/pi-mono) execution engine. It uses a dual-artifact architecture (Task Plan Artifact + Result Artifact) with specialized AI agents (Lead, Search, Crawl) that collaborate to perform tasks.
 
-**Requirements:** Python 3.10+
+**Requirements:** Python 3.11+
 
 ## Essential Commands
 

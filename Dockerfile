@@ -4,7 +4,7 @@
 # 基于 Python 3.10，使用 Jina Reader API 进行网页抓取
 # 无需浏览器依赖，镜像体积 <1GB
 
-FROM python:3.10-slim
+FROM python:3.11-slim
 
 LABEL maintainer="1998neutrino@gmail.com"
 LABEL description="ArtifactFlow - Multi-Agent System"

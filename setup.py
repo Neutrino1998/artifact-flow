@@ -19,7 +19,7 @@ setup(
     author="ArtifactFlow Team",
     packages=find_packages(where="src"),
     package_dir={"": "src"},
-    python_requires=">=3.10",
+    python_requires=">=3.11",
     install_requires=parse_requirements("requirements.txt"),
     entry_points={
         "console_scripts": [
