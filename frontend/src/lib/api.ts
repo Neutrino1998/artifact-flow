@@ -20,7 +20,7 @@ import type {
 } from '@/types';
 import { useAuthStore } from '@/stores/authStore';
 
-const BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
 const CONVERSATION_DETAIL_TTL_MS = 20_000;
 
 type ConversationCacheItem = {

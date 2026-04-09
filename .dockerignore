@@ -17,14 +17,25 @@ build
 venv
 env
 
-# 环境变量（敏感信息）
+# Environment variables (sensitive)
 .env
+.env.*
 
-# 本地数据（应通过 volume 挂载）
+# Local data (mount via volume)
 data/
 
-# 测试日志
-tests/logs/
+# Frontend (has its own Dockerfile)
+frontend/
+
+# Deploy configs (not needed in backend image, except entrypoint.sh)
+deploy/
+!deploy/entrypoint.sh
+
+# Tests
+tests/
+
+# Docs
+docs/
 
 # IDE
 .idea
@@ -35,13 +46,8 @@ tests/logs/
 # macOS
 .DS_Store
 
-# 前端（前端有独立的 Dockerfile，不需要打进后端镜像）
-frontend/
-
-# 文档（可选，如需要可移除此行）
-# docs/
-
-# 临时文件
+# Temp
 *.tmp
 *.temp
 *.log
+tests/logs/

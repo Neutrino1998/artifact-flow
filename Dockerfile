@@ -48,5 +48,9 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:8000/health/live || exit 1
 
+# Auto-migrate entrypoint (skips for SQLite, runs alembic upgrade head for PG/MySQL)
+RUN chmod +x /app/deploy/entrypoint.sh
+ENTRYPOINT ["/app/deploy/entrypoint.sh"]
+
 # 启动命令
 CMD ["python", "run_server.py", "--host", "0.0.0.0", "--port", "8000"]
