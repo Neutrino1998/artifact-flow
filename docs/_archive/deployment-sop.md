@@ -191,6 +191,33 @@ docker compose -f deploy/docker-compose.intranet.yml exec backend python scripts
 | `postgres_data` | PostgreSQL 数据（Mode 2A/3A） |
 | `redis_data` | Redis AOF 持久化（Mode 2A/3A） |
 
+### 停止与清理
+
+> **⚠️ `--profile infra` 必须与启动时一致**，否则 PG/Redis 容器不在 Compose 作用域内，`down` 会跳过它们。
+
+```bash
+# Mode 1
+docker compose down
+
+# Mode 2A（启动时带了 --profile infra，停止也必须带）
+docker compose -f docker-compose.prod.yml --profile infra down
+
+# Mode 2B（无 --profile）
+docker compose -f docker-compose.prod.yml down
+
+# Mode 3A
+docker compose -f deploy/docker-compose.intranet.yml --profile infra down
+
+# Mode 3B
+docker compose -f deploy/docker-compose.intranet.yml down
+```
+
+如需同时删除数据卷（**不可逆，会丢失数据库和 Redis 数据**）：
+
+```bash
+docker compose -f docker-compose.prod.yml --profile infra down -v
+```
+
 ### 日志
 
 ```bash
