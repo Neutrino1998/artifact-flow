@@ -168,6 +168,27 @@ class TestConsumeEvents:
             assert ctx.ttl_task is None
             break
 
+    async def test_consumer_disconnect_rearms_ttl(self):
+        """Consumer disconnect reverts to pending and re-arms TTL cleanup."""
+        sm = InMemoryStreamTransport(ttl_seconds=0.1)
+        await sm.create_stream("msg-1")
+        await sm.push_event("msg-1", {"type": "metadata", "data": {}})
+
+        gen = sm.consume_events("msg-1", heartbeat_interval=0.05)
+        async for event in gen:
+            if event.get("type") != "__ping__":
+                break
+        await gen.aclose()
+
+        # Should be pending with TTL re-armed
+        ctx = sm.streams["msg-1"]
+        assert ctx.status == "pending"
+        assert ctx.ttl_task is not None
+
+        # TTL should fire and close the stream
+        await asyncio.sleep(0.2)
+        assert await sm.get_stream_status("msg-1") == "closed"
+
     async def test_heartbeat_emits_ping(self):
         sm = InMemoryStreamTransport(ttl_seconds=10)
         await sm.create_stream("msg-1")

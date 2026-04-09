@@ -187,10 +187,14 @@ class InMemoryStreamTransport:
         finally:
             # Consumer 断连：回退到 pending（与 RedisStreamTransport 语义对齐）。
             # close_stream() 由 producer 在执行结束后调用，consumer 不应关闭 stream。
+            # 重新启动 TTL 防止 producer 挂掉后 stream 永久驻留内存。
             async with self._lock:
                 context = self.streams.get(message_id)
                 if context and context.status == "streaming":
                     context.status = "pending"
+                    context.ttl_task = asyncio.create_task(
+                        self._ttl_cleanup(message_id)
+                    )
                     logger.debug(f"Stream {message_id} reverted to pending (consumer disconnect)")
 
     async def close_stream(self, message_id: str) -> bool:
