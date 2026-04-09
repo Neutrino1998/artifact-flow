@@ -125,14 +125,16 @@ async def list_artifacts(
             include_content=False
         )
 
-        # Merge in-memory-only artifacts from active engine execution (if any).
+        # Overlay / append in-memory artifacts from active engine execution.
+        # Covers both new (not yet in DB) and dirty (updated since last flush).
         # Only reads the cache dict — no DB calls on the controller's session.
         active = ArtifactManager.get_active(session_id)
         if active:
-            seen_ids = {art["id"] for art in artifacts}
-            for aid, memory in active.get_cached_artifacts(session_id).items():
-                if aid not in seen_ids:
-                    artifacts.append({
+            cache = active.get_cached_artifacts(session_id)
+            if cache:
+                db_index = {art["id"]: i for i, art in enumerate(artifacts)}
+                for aid, memory in cache.items():
+                    entry = {
                         "id": memory.id,
                         "content_type": memory.content_type,
                         "title": memory.title,
@@ -140,7 +142,11 @@ async def list_artifacts(
                         "source": memory.source,
                         "created_at": memory.created_at.isoformat(),
                         "updated_at": memory.updated_at.isoformat(),
-                    })
+                    }
+                    if aid in db_index:
+                        artifacts[db_index[aid]] = entry  # overlay dirty
+                    else:
+                        artifacts.append(entry)  # new
 
         return ArtifactListResponse(
             session_id=session_id,
@@ -301,22 +307,22 @@ async def get_artifact(
         artifact_id=artifact_id
     )
 
-    # If not in DB, check active engine's in-memory cache (cache-only read, no DB)
-    if result is None:
-        active = ArtifactManager.get_active(session_id)
-        if active:
-            memory = active.get_cached_artifacts(session_id).get(artifact_id)
-            if memory:
-                result = {
-                    "id": memory.id,
-                    "content_type": memory.content_type,
-                    "title": memory.title,
-                    "content": memory.content,
-                    "version": memory.current_version,
-                    "source": memory.source,
-                    "created_at": memory.created_at.isoformat(),
-                    "updated_at": memory.updated_at.isoformat(),
-                }
+    # Overlay or supply from active engine's in-memory cache (cache-only, no DB).
+    # Handles both new artifacts (DB miss) and dirty ones (DB hit but stale).
+    active = ArtifactManager.get_active(session_id)
+    if active:
+        memory = active.get_cached_artifacts(session_id).get(artifact_id)
+        if memory:
+            result = {
+                "id": memory.id,
+                "content_type": memory.content_type,
+                "title": memory.title,
+                "content": memory.content,
+                "version": memory.current_version,
+                "source": memory.source,
+                "created_at": memory.created_at.isoformat(),
+                "updated_at": memory.updated_at.isoformat(),
+            }
 
     if result is None:
         raise HTTPException(
