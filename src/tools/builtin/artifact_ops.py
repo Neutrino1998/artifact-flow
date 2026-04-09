@@ -395,7 +395,27 @@ class ArtifactManager:
             repo = ArtifactRepository(session)
             manager = ArtifactManager(repo)
             await manager.create_artifact(...)
+
+    类级别注册表 ``_active_managers`` 允许 REST API 在执行期间读到
+    engine 内存中尚未 flush 的 artifact。执行开始时 register，
+    flush_all 后 unregister。
     """
+
+    # {session_id: ArtifactManager} — 进程级，执行期间注册
+    _active_managers: Dict[str, "ArtifactManager"] = {}
+
+    @classmethod
+    def get_active(cls, session_id: str) -> Optional["ArtifactManager"]:
+        """查找正在执行中的 ArtifactManager（REST API 用）"""
+        return cls._active_managers.get(session_id)
+
+    def register(self, session_id: str) -> None:
+        """执行开始时注册，使 REST API 可访问内存中的 artifact"""
+        ArtifactManager._active_managers[session_id] = self
+
+    def unregister(self, session_id: str) -> None:
+        """执行结束后注销"""
+        ArtifactManager._active_managers.pop(session_id, None)
 
     def __init__(self, repository: Optional[ArtifactRepository] = None):
         self.repository = repository
@@ -411,10 +431,11 @@ class ArtifactManager:
         return self.repository
 
     def set_session(self, session_id: str) -> None:
-        """设置当前 session"""
+        """设置当前 session 并注册到活跃管理器"""
         self._current_session_id = session_id
         if session_id not in self._cache:
             self._cache[session_id] = {}
+        self.register(session_id)
 
     @property
     def current_session_id(self) -> Optional[str]:
@@ -739,6 +760,9 @@ class ArtifactManager:
             except Exception as e:
                 logger.exception(f"Failed to flush artifact '{aid}': {e}")
                 failed.append((aid, e))
+
+        # flush 完成（无论是否有 dirty），注销活跃管理器
+        self.unregister(session_id)
 
         if failed:
             ids = ", ".join(aid for aid, _ in failed)

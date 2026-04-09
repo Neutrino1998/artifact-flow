@@ -66,7 +66,6 @@ export function useSSE() {
         setCurrent(detail);
         setConversations(list.conversations, list.total, list.has_more);
         clearPendingUpdates();
-
         // Refresh artifact data now that flush_all has persisted to DB
         const curArtifact = useArtifactStore.getState().current;
         if (curArtifact) {

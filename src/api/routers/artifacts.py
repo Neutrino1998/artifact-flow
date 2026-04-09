@@ -118,6 +118,11 @@ async def list_artifacts(
     """
     await _verify_session_ownership(session_id, current_user, conversation_manager)
 
+    # 执行期间优先使用 engine 内存中的 ArtifactManager（含未 flush 的 artifact）
+    active = ArtifactManager.get_active(session_id)
+    if active:
+        artifact_manager = active
+
     try:
         artifacts = await artifact_manager.list_artifacts(
             session_id=session_id,
@@ -276,6 +281,11 @@ async def get_artifact(
     获取 artifact 详情（包含当前版本内容、版本列表和最新版本详情）
     """
     await _verify_session_ownership(session_id, current_user, conversation_manager)
+
+    # 执行期间优先使用 engine 内存中的 ArtifactManager（含未 flush 的 artifact）
+    active = ArtifactManager.get_active(session_id)
+    if active:
+        artifact_manager = active
 
     result = await artifact_manager.read_artifact(
         session_id=session_id,

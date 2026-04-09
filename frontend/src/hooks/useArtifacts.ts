@@ -49,8 +49,8 @@ export function useArtifacts() {
     async (artifactId: string) => {
       const sid = resolveSessionId();
       if (!sid) return;
-      setCurrentLoading(true);
       setArtifactPanelVisible(true);
+      setCurrentLoading(true);
       try {
         const detail = await api.getArtifact(sid, artifactId);
         setCurrent(detail);
