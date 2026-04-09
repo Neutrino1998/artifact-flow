@@ -118,16 +118,29 @@ async def list_artifacts(
     """
     await _verify_session_ownership(session_id, current_user, conversation_manager)
 
-    # 执行期间优先使用 engine 内存中的 ArtifactManager（含未 flush 的 artifact）
-    active = ArtifactManager.get_active(session_id)
-    if active:
-        artifact_manager = active
-
     try:
+        # DB query via request-scoped manager (own session)
         artifacts = await artifact_manager.list_artifacts(
             session_id=session_id,
             include_content=False
         )
+
+        # Merge in-memory-only artifacts from active engine execution (if any).
+        # Only reads the cache dict — no DB calls on the controller's session.
+        active = ArtifactManager.get_active(session_id)
+        if active:
+            seen_ids = {art["id"] for art in artifacts}
+            for aid, memory in active.get_cached_artifacts(session_id).items():
+                if aid not in seen_ids:
+                    artifacts.append({
+                        "id": memory.id,
+                        "content_type": memory.content_type,
+                        "title": memory.title,
+                        "version": memory.current_version,
+                        "source": memory.source,
+                        "created_at": memory.created_at.isoformat(),
+                        "updated_at": memory.updated_at.isoformat(),
+                    })
 
         return ArtifactListResponse(
             session_id=session_id,
@@ -282,15 +295,28 @@ async def get_artifact(
     """
     await _verify_session_ownership(session_id, current_user, conversation_manager)
 
-    # 执行期间优先使用 engine 内存中的 ArtifactManager（含未 flush 的 artifact）
-    active = ArtifactManager.get_active(session_id)
-    if active:
-        artifact_manager = active
-
+    # Try DB first via request-scoped manager
     result = await artifact_manager.read_artifact(
         session_id=session_id,
         artifact_id=artifact_id
     )
+
+    # If not in DB, check active engine's in-memory cache (cache-only read, no DB)
+    if result is None:
+        active = ArtifactManager.get_active(session_id)
+        if active:
+            memory = active.get_cached_artifacts(session_id).get(artifact_id)
+            if memory:
+                result = {
+                    "id": memory.id,
+                    "content_type": memory.content_type,
+                    "title": memory.title,
+                    "content": memory.content,
+                    "version": memory.current_version,
+                    "source": memory.source,
+                    "created_at": memory.created_at.isoformat(),
+                    "updated_at": memory.updated_at.isoformat(),
+                }
 
     if result is None:
         raise HTTPException(
@@ -298,7 +324,9 @@ async def get_artifact(
             detail=f"Artifact '{artifact_id}' not found in session '{session_id}'"
         )
 
-    # Fetch version list and latest version detail via manager
+    # Fetch version list and latest version detail via request-scoped manager.
+    # In-memory-only artifacts (not yet flushed) won't have DB versions — that's fine,
+    # versions list will be empty and latest_version will be None.
     versions = await artifact_manager.list_versions(session_id, artifact_id)
     version_summaries = [
         VersionSummary(

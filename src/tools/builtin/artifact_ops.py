@@ -442,6 +442,14 @@ class ArtifactManager:
         """获取当前 session ID"""
         return self._current_session_id
 
+    def get_cached_artifacts(self, session_id: str) -> Dict[str, "ArtifactMemory"]:
+        """返回指定 session 的内存缓存（只读，不触发 DB 查询）。
+
+        供 REST API 在执行期间读取未 flush 的 artifact，
+        避免共享 controller 的 DB session。
+        """
+        return self._cache.get(session_id, {})
+
     async def ensure_session_exists(self, session_id: str) -> None:
         """确保 ArtifactSession 存在（数据库层）"""
         repo = self._ensure_repository()
@@ -741,28 +749,29 @@ class ArtifactManager:
         Raises on any failure so the caller can decide the terminal state.
         """
         if not self._dirty:
+            self.unregister(session_id)
             return
 
         to_flush = [(sid, aid) for sid, aid in self._dirty if sid == session_id]
         failed: list = []
 
-        for sid, aid in to_flush:
-            memory = self._cache.get(sid, {}).get(aid)
-            if not memory:
-                continue
+        try:
+            for sid, aid in to_flush:
+                memory = self._cache.get(sid, {}).get(aid)
+                if not memory:
+                    continue
 
-            try:
-                await self._flush_one(sid, aid, memory, db_manager=db_manager)
-                # Success — remove from dirty/new
-                self._dirty.discard((sid, aid))
-                self._new.discard((sid, aid))
-                logger.info(f"Flushed artifact '{aid}' in session '{sid}'")
-            except Exception as e:
-                logger.exception(f"Failed to flush artifact '{aid}': {e}")
-                failed.append((aid, e))
-
-        # flush 完成（无论是否有 dirty），注销活跃管理器
-        self.unregister(session_id)
+                try:
+                    await self._flush_one(sid, aid, memory, db_manager=db_manager)
+                    # Success — remove from dirty/new
+                    self._dirty.discard((sid, aid))
+                    self._new.discard((sid, aid))
+                    logger.info(f"Flushed artifact '{aid}' in session '{sid}'")
+                except Exception as e:
+                    logger.exception(f"Failed to flush artifact '{aid}': {e}")
+                    failed.append((aid, e))
+        finally:
+            self.unregister(session_id)
 
         if failed:
             ids = ", ".join(aid for aid, _ in failed)
