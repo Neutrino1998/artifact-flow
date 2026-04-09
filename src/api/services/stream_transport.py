@@ -185,7 +185,13 @@ class InMemoryStreamTransport:
                     logger.debug(f"Stream {message_id} received terminal event: {event_type}")
                     break
         finally:
-            await self.close_stream(message_id)
+            # Consumer 断连：回退到 pending（与 RedisStreamTransport 语义对齐）。
+            # close_stream() 由 producer 在执行结束后调用，consumer 不应关闭 stream。
+            async with self._lock:
+                context = self.streams.get(message_id)
+                if context and context.status == "streaming":
+                    context.status = "pending"
+                    logger.debug(f"Stream {message_id} reverted to pending (consumer disconnect)")
 
     async def close_stream(self, message_id: str) -> bool:
         async with self._lock:
