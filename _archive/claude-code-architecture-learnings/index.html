@@ -982,6 +982,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#沙盒方案对比gvisor-vs-firecracker-vs-kata" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        沙盒方案对比：gVisor vs Firecracker vs Kata
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1297,6 +1308,71 @@ Date: 2026-04-02</p>
 - Seatbelt/bwrap 的进程级隔离太轻，我们需要 VM 级（Firecracker/gVisor/Kata）
 - 单命令生命周期不适合 Python 交互式分析（需要保持 kernel 状态）
 - 宿主文件系统白名单模型不适用，应该用独立 rootfs + 显式数据挂载</p>
+<h3 id="沙盒方案对比gvisor-vs-firecracker-vs-kata">沙盒方案对比：gVisor vs Firecracker vs Kata</h3>
+<p><strong>gVisor（推荐方案）：</strong> Google 开源的用户态 Linux 内核（Go 实现）。核心组件 Sentry 在用户态拦截并模拟 ~70% 的 Linux 系统调用，只有文件 I/O 等少数操作通过 Gofer 进程代理到宿主机。</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>普通容器:    应用 → syscall → 宿主内核          （共享内核，风险大）
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>gVisor:     应用 → syscall → Sentry(用户态内核) → 有限的宿主syscall
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>方案</th>
+<th>隔离级别</th>
+<th>需要 KVM</th>
+<th>启动速度</th>
+<th>Docker 内可用</th>
+<th>架构支持</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>gVisor</strong></td>
+<td>用户态内核</td>
+<td>❌ 不需要</td>
+<td>毫秒级</td>
+<td>✅ OCI runtime</td>
+<td>x86_64, aarch64</td>
+</tr>
+<tr>
+<td><strong>Firecracker</strong></td>
+<td>microVM</td>
+<td>✅ 必需</td>
+<td>~125ms</td>
+<td>需要 <code>--device /dev/kvm</code></td>
+<td>x86_64, aarch64</td>
+</tr>
+<tr>
+<td><strong>Kata</strong></td>
+<td>轻量 VM</td>
+<td>✅ 必需</td>
+<td>~500ms</td>
+<td>需要特权</td>
+<td>x86_64, aarch64</td>
+</tr>
+<tr>
+<td><strong>nsjail/bwrap</strong></td>
+<td>namespace</td>
+<td>❌</td>
+<td>即时</td>
+<td>需要 capabilities</td>
+<td>全架构</td>
+</tr>
+</tbody>
+</table>
+<p><strong>gVisor 适合 ArtifactFlow 的原因：</strong>
+- 不需要 KVM → Docker 容器化部署无障碍，不怕云主机没有嵌套虚拟化
+- OCI 兼容 → <code>docker run --runtime=runsc</code> 即可，对应用透明
+- 信创环境鲲鹏（aarch64）可用</p>
+<p><strong>gVisor 局限：</strong>
+- 系统调用密集场景有 10-30% 性能开销（Python 数据分析常用库一般可接受）
+- 不是 100% syscall 覆盖，少数程序可能不兼容
+- 龙芯（loongarch64）不支持</p>
+<p><strong>部署模型：</strong> gVisor 安装在宿主机，注册为 Docker 备用 runtime。主应用通过 Docker API 按需创建/销毁 <code>--runtime=runsc</code> 的沙盒容器执行用户代码：</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>docker-compose.yml:
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>├── artifactflow           ← 主应用（普通 runc）
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>├── postgres / redis
+<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a>└── code-sandbox           ← 沙盒容器（runsc runtime），按需创建或容器池复用
+</code></pre></div>
 <hr />
 <h2 id="优先级总结">优先级总结</h2>
 <table>
