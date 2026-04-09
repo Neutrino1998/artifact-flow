@@ -232,10 +232,17 @@ class RedisStreamTransport:
             # 仅当 consumer_id 仍匹配（说明没有新 consumer 接管）时才回退，
             # 避免覆盖新 consumer 的 streaming 或 producer 的 closed。
             # 不缩短 TTL — stream 生命周期由 EXECUTION_TIMEOUT 决定。
-            await self._script_revert_to_pending(
-                keys=[meta_key],
-                args=[consumer_id],
-            )
+            # 使用 ensure_future 因为 async generator 的 finally 中 await 在
+            # GeneratorExit 时不可靠（break 退出 async for 会触发 GeneratorExit）。
+            async def _revert():
+                try:
+                    await self._script_revert_to_pending(
+                        keys=[meta_key],
+                        args=[consumer_id],
+                    )
+                except Exception:
+                    pass
+            asyncio.ensure_future(_revert())
 
     async def close_stream(self, stream_id: str) -> bool:
         meta_key = self._meta_key(stream_id)

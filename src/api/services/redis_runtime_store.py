@@ -65,7 +65,7 @@ return items
 # resolve-interrupt: 检查 status=pending → 设 resume_data + status=resolved → PUBLISH
 _LUA_RESOLVE_INTERRUPT = """
 local status = redis.call('HGET', KEYS[1], 'status')
-if status == nil then
+if not status then
     return 'not_found'
 end
 if status ~= 'pending' then

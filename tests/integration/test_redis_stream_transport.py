@@ -182,6 +182,9 @@ class TestLastEventId:
         assert len(event_ids) >= 2
         last_id = event_ids[1]
 
+        # Let fire-and-forget revert task complete
+        await asyncio.sleep(0)
+
         # After consumer disconnect, stream should revert to pending (not closed)
         status = await transport.get_stream_status(stream_id)
         assert status == "pending"
@@ -216,6 +219,9 @@ class TestConsumerDisconnect:
         ):
             if event.get("type") != "__ping__":
                 break
+
+        # Let fire-and-forget revert task complete
+        await asyncio.sleep(0)
 
         # Stream should be pending, not closed
         status = await transport.get_stream_status(stream_id)
