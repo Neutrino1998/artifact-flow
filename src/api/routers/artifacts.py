@@ -331,8 +331,6 @@ async def get_artifact(
         )
 
     # Fetch version list and latest version detail via request-scoped manager.
-    # In-memory-only artifacts (not yet flushed) won't have DB versions — that's fine,
-    # versions list will be empty and latest_version will be None.
     versions = await artifact_manager.list_versions(session_id, artifact_id)
     version_summaries = [
         VersionSummary(
@@ -354,6 +352,16 @@ async def get_artifact(
                 update_type=ver.update_type,
                 changes=ver.changes,
                 created_at=ver.created_at,
+            )
+        elif active and active.get_cached_artifacts(session_id).get(artifact_id):
+            # current_ver is ahead of DB (in-memory edit not yet flushed).
+            # Synthesize a version entry from cache to keep the response consistent.
+            latest_version_detail = VersionDetailResponse(
+                version=current_ver,
+                content=result["content"],
+                update_type="update",
+                changes=None,
+                created_at=datetime.now(),
             )
 
     return ArtifactDetailResponse(
