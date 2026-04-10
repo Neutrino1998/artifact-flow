@@ -63,7 +63,7 @@ export default function MessageList() {
         {/* Show pending user message during streaming (before conversation refresh) */}
         {isStreamingHere && pendingUserMessage && (
           <div className="flex justify-end">
-            <div className="max-w-[80%] bg-panel dark:bg-surface-dark rounded-bubble px-4 py-3 text-text-primary dark:text-text-primary-dark whitespace-pre-wrap break-words">
+            <div className="max-w-[80%] bg-panel-accent dark:bg-surface-dark rounded-bubble px-4 py-3 text-text-primary dark:text-text-primary-dark whitespace-pre-wrap break-words">
               {pendingUserMessage}
             </div>
           </div>

@@ -100,10 +100,10 @@ export function login(body: LoginRequest) {
 }
 
 // Conversations
-export function listConversations(limit = 20, offset = 0) {
-  return request<ConversationListResponse>(
-    `/api/v1/chat?limit=${limit}&offset=${offset}`
-  );
+export function listConversations(limit = 20, offset = 0, query?: string) {
+  const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+  if (query) params.set('q', query);
+  return request<ConversationListResponse>(`/api/v1/chat?${params}`);
 }
 
 export function getConversation(convId: string, options?: GetConversationOptions) {

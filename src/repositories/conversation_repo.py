@@ -157,6 +157,7 @@ class ConversationRepository(BaseRepository[Conversation]):
         self,
         *,
         user_id: Optional[str] = None,
+        title_query: Optional[str] = None,
         limit: int = 50,
         offset: int = 0,
         order_by_updated: bool = True,
@@ -167,6 +168,7 @@ class ConversationRepository(BaseRepository[Conversation]):
 
         Args:
             user_id: 按用户ID筛选（预留）
+            title_query: 按标题模糊搜索
             limit: 限制数量
             offset: 跳过数量
             order_by_updated: 是否按更新时间降序排列
@@ -183,6 +185,9 @@ class ConversationRepository(BaseRepository[Conversation]):
         if user_id:
             query = query.where(Conversation.user_id == user_id)
 
+        if title_query:
+            query = query.where(Conversation.title.ilike(f"%{title_query}%"))
+
         if order_by_updated:
             query = query.order_by(Conversation.updated_at.desc())
 
@@ -191,12 +196,13 @@ class ConversationRepository(BaseRepository[Conversation]):
         result = await self._session.execute(query)
         return list(result.scalars().all())
     
-    async def count_conversations(self, *, user_id: Optional[str] = None) -> int:
+    async def count_conversations(self, *, user_id: Optional[str] = None, title_query: Optional[str] = None) -> int:
         """
         统计对话总数
 
         Args:
             user_id: 按用户ID筛选（预留）
+            title_query: 按标题模糊搜索
 
         Returns:
             对话总数
@@ -204,6 +210,8 @@ class ConversationRepository(BaseRepository[Conversation]):
         query = select(func.count()).select_from(Conversation)
         if user_id:
             query = query.where(Conversation.user_id == user_id)
+        if title_query:
+            query = query.where(Conversation.title.ilike(f"%{title_query}%"))
         result = await self._session.execute(query)
         return result.scalar_one()
 

@@ -45,10 +45,10 @@ function ConversationItem({ conversation, isActive, onSelect }: ConversationItem
       </div>
       <div className="flex items-center gap-2 mt-0.5 text-xs text-text-tertiary dark:text-text-tertiary-dark">
         <span>{date}</span>
-        <span>{conversation.message_count} msgs</span>
+        <span>{conversation.message_count} messages</span>
       </div>
 
-      {/* Hover menu */}
+      {/* Hover delete */}
       {showMenu && (
         <button
           onClick={handleDelete}

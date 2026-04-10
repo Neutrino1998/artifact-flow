@@ -223,14 +223,16 @@ async def cancel_execution(
 async def list_conversations(
     limit: int = Query(default=20, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
+    q: Optional[str] = Query(default=None, max_length=200),
     current_user: TokenPayload = Depends(get_current_user),
     conversation_manager: ConversationManager = Depends(get_conversation_manager),
 ):
     """列出对话列表"""
     user_id = current_user.user_id
-    total = await conversation_manager.count_conversations_async(user_id=user_id)
+    title_query = q.strip() if q else None
+    total = await conversation_manager.count_conversations_async(user_id=user_id, title_query=title_query)
     conversations = await conversation_manager.list_conversations_async(
-        limit=limit, offset=offset, user_id=user_id
+        limit=limit, offset=offset, user_id=user_id, title_query=title_query
     )
 
     return ConversationListResponse(

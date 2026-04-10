@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { useConversationStore } from '@/stores/conversationStore';
 import { useStreamStore } from '@/stores/streamStore';
 import { useArtifactStore } from '@/stores/artifactStore';
@@ -10,6 +10,7 @@ import { uploadFile, uploadFileNewSession, getConversation, listConversations } 
 import MessageList from './MessageList';
 import MessageInput from './MessageInput';
 import StreamingMessage from './StreamingMessage';
+import ConversationBrowser from './ConversationBrowser';
 
 function getGreeting(): string {
   const hour = new Date().getHours();
@@ -32,6 +33,9 @@ export default function ChatPanel() {
   const setUploadError = useArtifactStore((s) => s.setUploadError);
   const setArtifactPanelVisible = useUIStore((s) => s.setArtifactPanelVisible);
   const { loadArtifacts, selectArtifact } = useArtifacts();
+
+  const conversationBrowserVisible = useUIStore((s) => s.conversationBrowserVisible);
+  const setConversationBrowserVisible = useUIStore((s) => s.setConversationBrowserVisible);
 
   const [isDragOver, setIsDragOver] = useState(false);
 
@@ -90,6 +94,19 @@ export default function ChatPanel() {
     setIsDragOver(false);
   }, []);
 
+  // Close browser when a conversation is selected from sidebar
+  useEffect(() => {
+    if (current && conversationBrowserVisible) {
+      setConversationBrowserVisible(false);
+    }
+    // Only react to current changes, not browser visibility
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [current?.id]);
+
+  if (conversationBrowserVisible) {
+    return <ConversationBrowser />;
+  }
+
   if (currentLoading) {
     return (
       <div className="flex-1 flex items-center justify-center bg-chat dark:bg-chat-dark">
@@ -116,7 +133,7 @@ export default function ChatPanel() {
           <div className="max-w-3xl mx-auto pl-8 pr-4 py-6 space-y-6">
             {pendingUserMessage && (
               <div className="flex justify-end">
-                <div className="max-w-[80%] bg-panel dark:bg-surface-dark rounded-bubble px-4 py-3 text-text-primary dark:text-text-primary-dark whitespace-pre-wrap break-words">
+                <div className="max-w-[80%] bg-panel-accent dark:bg-surface-dark rounded-bubble px-4 py-3 text-text-primary dark:text-text-primary-dark whitespace-pre-wrap break-words">
                   {pendingUserMessage}
                 </div>
               </div>

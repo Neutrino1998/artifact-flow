@@ -9,12 +9,14 @@ function applyTheme(theme: 'light' | 'dark') {
 interface UIState {
   sidebarCollapsed: boolean;
   artifactPanelVisible: boolean;
+  conversationBrowserVisible: boolean;
   theme: 'light' | 'dark';
 
   toggleSidebar: () => void;
   setSidebarCollapsed: (collapsed: boolean) => void;
   toggleArtifactPanel: () => void;
   setArtifactPanelVisible: (visible: boolean) => void;
+  setConversationBrowserVisible: (visible: boolean) => void;
   setTheme: (theme: 'light' | 'dark') => void;
   toggleTheme: () => void;
 }
@@ -22,6 +24,7 @@ interface UIState {
 export const useUIStore = create<UIState>((set) => ({
   sidebarCollapsed: false,
   artifactPanelVisible: false,
+  conversationBrowserVisible: false,
   theme: 'dark',
 
   toggleSidebar: () =>
@@ -31,6 +34,7 @@ export const useUIStore = create<UIState>((set) => ({
   toggleArtifactPanel: () =>
     set((s) => ({ artifactPanelVisible: !s.artifactPanelVisible })),
   setArtifactPanelVisible: (visible) => set({ artifactPanelVisible: visible }),
+  setConversationBrowserVisible: (visible) => set({ conversationBrowserVisible: visible }),
 
   setTheme: (theme) => {
     applyTheme(theme);

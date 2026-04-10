@@ -2,6 +2,7 @@
 
 import { useEffect, useCallback } from 'react';
 import { useConversationStore } from '@/stores/conversationStore';
+import { useUIStore } from '@/stores/uiStore';
 import { listConversations, getConversation } from '@/lib/api';
 import ConversationItem from './ConversationItem';
 
@@ -11,10 +12,10 @@ export default function ConversationList() {
   const listLoading = useConversationStore((s) => s.listLoading);
   const currentId = useConversationStore((s) => s.current?.id);
   const setConversations = useConversationStore((s) => s.setConversations);
-  const appendConversations = useConversationStore((s) => s.appendConversations);
   const setListLoading = useConversationStore((s) => s.setListLoading);
   const setCurrent = useConversationStore((s) => s.setCurrent);
   const setCurrentLoading = useConversationStore((s) => s.setCurrentLoading);
+  const setConversationBrowserVisible = useUIStore((s) => s.setConversationBrowserVisible);
 
   const loadConversations = useCallback(async () => {
     setListLoading(true);
@@ -27,19 +28,6 @@ export default function ConversationList() {
       setListLoading(false);
     }
   }, [setConversations, setListLoading]);
-
-  const loadMore = useCallback(async () => {
-    if (listLoading || !hasMore) return;
-    setListLoading(true);
-    try {
-      const data = await listConversations(20, conversations.length);
-      appendConversations(data.conversations, data.total, data.has_more);
-    } catch (err) {
-      console.error('Failed to load more conversations:', err);
-    } finally {
-      setListLoading(false);
-    }
-  }, [listLoading, hasMore, conversations.length, appendConversations, setListLoading]);
 
   const selectConversation = useCallback(
     async (id: string) => {
@@ -79,12 +67,14 @@ export default function ConversationList() {
       )}
 
       {hasMore && !listLoading && (
-        <button
-          onClick={loadMore}
-          className="w-full px-4 py-2 text-xs text-text-secondary dark:text-text-secondary-dark hover:bg-bg dark:hover:bg-bg-dark transition-colors"
-        >
-          Load more
-        </button>
+        <div className="mx-2 mb-1">
+          <button
+            onClick={() => setConversationBrowserVisible(true)}
+            className="w-full px-3 py-2 text-xs text-text-secondary dark:text-text-secondary-dark rounded-lg hover:bg-chat/60 dark:hover:bg-panel-accent-dark/60 transition-colors"
+          >
+            显示所有对话
+          </button>
+        </div>
       )}
 
       {!listLoading && conversations.length === 0 && (

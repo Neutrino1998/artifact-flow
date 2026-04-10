@@ -37,11 +37,18 @@ export default function Sidebar() {
   const resetArtifacts = useArtifactStore((s) => s.reset);
   const setArtifactPanelVisible = useUIStore((s) => s.setArtifactPanelVisible);
 
+  const setConversationBrowserVisible = useUIStore((s) => s.setConversationBrowserVisible);
+
   const handleNewChat = () => {
     setCurrent(null);
     reset();
     resetArtifacts();
     setArtifactPanelVisible(false);
+    setConversationBrowserVisible(false);
+  };
+
+  const handleSearchChat = () => {
+    setConversationBrowserVisible(true);
   };
 
   // ── Collapsed: 48px icon bar ──
@@ -61,6 +68,14 @@ export default function Sidebar() {
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
             <rect x="2" y="2" width="12" height="12" rx="1.5" />
             <path d="M5 6h6M5 8.5h4" />
+          </svg>
+        </IconButton>
+
+        {/* Search conversations */}
+        <IconButton onClick={handleSearchChat} label="搜索对话">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+            <circle cx="7" cy="7" r="5" />
+            <path d="M11 11l3.5 3.5" />
           </svg>
         </IconButton>
 
@@ -112,6 +127,16 @@ export default function Sidebar() {
             <path d="M5 6h6M5 8.5h4" />
           </svg>
           文稿面板
+        </button>
+        <button
+          onClick={handleSearchChat}
+          className="w-full flex items-center gap-2 px-3 py-2 font-medium text-text-primary bg-chat dark:bg-panel-accent-dark dark:text-text-primary-dark rounded-card border border-border dark:border-border-dark hover:bg-chat/70 dark:hover:bg-surface-dark transition-colors"
+        >
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+            <circle cx="7" cy="7" r="5" />
+            <path d="M11 11l3.5 3.5" />
+          </svg>
+          搜索对话
         </button>
         <button
           onClick={handleNewChat}

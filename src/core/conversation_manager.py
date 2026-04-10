@@ -300,6 +300,7 @@ class ConversationManager:
         limit: int = 50,
         offset: int = 0,
         user_id: Optional[str] = None,
+        title_query: Optional[str] = None,
     ) -> List[Dict]:
         """
         列出所有对话
@@ -308,6 +309,7 @@ class ConversationManager:
             limit: 限制数量
             offset: 跳过数量
             user_id: 按用户ID筛选
+            title_query: 按标题模糊搜索
 
         Returns:
             对话信息字典列表
@@ -317,6 +319,7 @@ class ConversationManager:
             limit=limit,
             offset=offset,
             user_id=user_id,
+            title_query=title_query,
             load_messages=True
         )
         return [
@@ -330,18 +333,19 @@ class ConversationManager:
             for conv in conversations
         ]
 
-    async def count_conversations_async(self, user_id: Optional[str] = None) -> int:
+    async def count_conversations_async(self, user_id: Optional[str] = None, title_query: Optional[str] = None) -> int:
         """
         统计对话总数
 
         Args:
             user_id: 按用户ID筛选
+            title_query: 按标题模糊搜索
 
         Returns:
             对话总数
         """
         repo = self._ensure_repository()
-        return await repo.count_conversations(user_id=user_id)
+        return await repo.count_conversations(user_id=user_id, title_query=title_query)
 
     # ========================================
     # Router 代理方法
