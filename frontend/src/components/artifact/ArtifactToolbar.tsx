@@ -2,6 +2,7 @@
 
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { useArtifactStore } from '@/stores/artifactStore';
+import { useStreamStore } from '@/stores/streamStore';
 import { useArtifacts } from '@/hooks/useArtifacts';
 import { exportArtifact } from '@/lib/api';
 
@@ -26,6 +27,7 @@ export default function ArtifactToolbar() {
   const versions = useArtifactStore((s) => s.versions);
   const selectedVersion = useArtifactStore((s) => s.selectedVersion);
   const setCurrent = useArtifactStore((s) => s.setCurrent);
+  const isStreaming = useStreamStore((s) => s.isStreaming);
   const { selectVersion, selectArtifact } = useArtifacts();
   const [copied, setCopied] = useState(false);
   const [showDownloadMenu, setShowDownloadMenu] = useState(false);
@@ -108,8 +110,8 @@ export default function ArtifactToolbar() {
         <h3 className="font-semibold text-text-primary dark:text-text-primary-dark truncate">
           {current.title}
         </h3>
-        {/* Version selector */}
-        {versions.length > 1 && (
+        {/* Version selector — hidden during streaming (in-memory versions not in DB yet) */}
+        {!isStreaming && versions.length > 1 && (
           <select
             value={displayVersion}
             onChange={handleVersionChange}

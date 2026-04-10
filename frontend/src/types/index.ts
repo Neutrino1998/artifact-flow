@@ -39,13 +39,7 @@ export type ConversationDetail = S['ConversationDetailResponse'];
 
 export type ArtifactSummary = S['ArtifactSummary'];
 export type ArtifactListResponse = S['ArtifactListResponse'];
-// Override latest_version to use narrowed VersionDetail (tuple changes)
-export type ArtifactDetail = Omit<S['ArtifactDetailResponse'], 'latest_version'> & {
-  latest_version: VersionDetail | null;
-};
+export type ArtifactDetail = S['ArtifactResponse'];
 export type VersionSummary = S['VersionSummary'];
-// Narrow changes from string[][] to [string, string][] for tuple precision
-export type VersionDetail = Omit<S['VersionDetailResponse'], 'changes'> & {
-  changes: [string, string][] | null;
-};
+export type VersionDetail = S['VersionDetailResponse'];
 export type UploadResponse = S['UploadResponse'];

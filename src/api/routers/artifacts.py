@@ -18,7 +18,7 @@ from api.services.auth import TokenPayload
 from core.conversation_manager import ConversationManager
 from api.schemas.artifact import (
     ArtifactListResponse,
-    ArtifactDetailResponse,
+    ArtifactResponse,
     ArtifactSummary,
     VersionDetailResponse,
     VersionSummary,
@@ -288,7 +288,7 @@ async def export_artifact(
     )
 
 
-@router.get("/{session_id}/{artifact_id}", response_model=ArtifactDetailResponse)
+@router.get("/{session_id}/{artifact_id}", response_model=ArtifactResponse)
 async def get_artifact(
     session_id: str,
     artifact_id: str,
@@ -297,7 +297,7 @@ async def get_artifact(
     conversation_manager: ConversationManager = Depends(get_conversation_manager),
 ):
     """
-    获取 artifact 详情（包含当前版本内容、版本列表和最新版本详情）
+    获取 artifact 当前内容和版本列表
     """
     await _verify_session_ownership(session_id, current_user, conversation_manager)
 
@@ -330,7 +330,7 @@ async def get_artifact(
             detail=f"Artifact '{artifact_id}' not found in session '{session_id}'"
         )
 
-    # Fetch version list and latest version detail via request-scoped manager.
+    # Fetch persisted version list from DB.
     versions = await artifact_manager.list_versions(session_id, artifact_id)
     version_summaries = [
         VersionSummary(
@@ -341,30 +341,9 @@ async def get_artifact(
         for v in versions
     ]
 
-    latest_version_detail = None
     current_ver = result["version"]
-    if current_ver:
-        ver = await artifact_manager.get_version(session_id, artifact_id, current_ver)
-        if ver:
-            latest_version_detail = VersionDetailResponse(
-                version=ver.version,
-                content=ver.content,
-                update_type=ver.update_type,
-                changes=ver.changes,
-                created_at=ver.created_at,
-            )
-        elif active and active.get_cached_artifacts(session_id).get(artifact_id):
-            # current_ver is ahead of DB (in-memory edit not yet flushed).
-            # Synthesize a version entry from cache to keep the response consistent.
-            latest_version_detail = VersionDetailResponse(
-                version=current_ver,
-                content=result["content"],
-                update_type="update",
-                changes=None,
-                created_at=datetime.now(),
-            )
 
-    return ArtifactDetailResponse(
+    return ArtifactResponse(
         id=result["id"],
         session_id=session_id,
         content_type=result["content_type"],
@@ -375,7 +354,6 @@ async def get_artifact(
         created_at=datetime.fromisoformat(result["created_at"]),
         updated_at=datetime.fromisoformat(result["updated_at"]),
         versions=version_summaries,
-        latest_version=latest_version_detail,
     )
 
 
@@ -405,6 +383,5 @@ async def get_version(
         version=ver.version,
         content=ver.content,
         update_type=ver.update_type,
-        changes=ver.changes,
         created_at=ver.created_at,
     )

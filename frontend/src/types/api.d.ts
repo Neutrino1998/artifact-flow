@@ -362,7 +362,7 @@ export interface paths {
         };
         /**
          * Get Artifact
-         * @description 获取 artifact 详情（包含当前版本内容、版本列表和最新版本详情）
+         * @description 获取 artifact 当前内容和版本列表
          */
         get: operations["get_artifact_api_v1_artifacts__session_id___artifact_id__get"];
         put?: never;
@@ -469,10 +469,26 @@ export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
         /**
-         * ArtifactDetailResponse
+         * ArtifactListResponse
+         * @description GET /api/v1/artifacts/{session_id} response
+         */
+        ArtifactListResponse: {
+            /**
+             * Session Id
+             * @description Session ID
+             */
+            session_id: string;
+            /**
+             * Artifacts
+             * @description Artifact list
+             */
+            artifacts: components["schemas"]["ArtifactSummary"][];
+        };
+        /**
+         * ArtifactResponse
          * @description GET /api/v1/artifacts/{session_id}/{artifact_id} response
          */
-        ArtifactDetailResponse: {
+        ArtifactResponse: {
             /**
              * Id
              * @description Artifact ID
@@ -525,24 +541,6 @@ export interface components {
              * @description All version summaries
              */
             versions: components["schemas"]["VersionSummary"][];
-            /** @description Latest version detail (content + changes) */
-            latest_version: components["schemas"]["VersionDetailResponse"] | null;
-        };
-        /**
-         * ArtifactListResponse
-         * @description GET /api/v1/artifacts/{session_id} response
-         */
-        ArtifactListResponse: {
-            /**
-             * Session Id
-             * @description Session ID
-             */
-            session_id: string;
-            /**
-             * Artifacts
-             * @description Artifact list
-             */
-            artifacts: components["schemas"]["ArtifactSummary"][];
         };
         /**
          * ArtifactSummary
@@ -1097,11 +1095,6 @@ export interface components {
              * @description Update type
              */
             update_type: string;
-            /**
-             * Changes
-             * @description Changes [[old, new], ...]
-             */
-            changes: string[][] | null;
             /**
              * Created At
              * Format: date-time
@@ -1770,7 +1763,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ArtifactDetailResponse"];
+                    "application/json": components["schemas"]["ArtifactResponse"];
                 };
             };
             /** @description Validation Error */

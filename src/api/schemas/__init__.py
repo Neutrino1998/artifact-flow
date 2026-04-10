@@ -16,7 +16,7 @@ from .chat import (
 )
 from .artifact import (
     ArtifactListResponse,
-    ArtifactDetailResponse,
+    ArtifactResponse,
     ArtifactSummary,
     VersionListResponse,
     VersionDetailResponse,
@@ -45,7 +45,7 @@ __all__ = [
     "MessageResponse",
     # Artifact schemas
     "ArtifactListResponse",
-    "ArtifactDetailResponse",
+    "ArtifactResponse",
     "ArtifactSummary",
     "VersionListResponse",
     "VersionDetailResponse",

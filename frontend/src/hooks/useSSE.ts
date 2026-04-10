@@ -81,7 +81,7 @@ export function useSSE() {
             setArtifactCurrent(artDetail);
             setArtifacts(artList.artifacts);
             setArtifactVersions(artDetail.versions);
-            setSelectedVersion(artDetail.latest_version ?? null);
+            setSelectedVersion(null);
           }).catch(() => {});
         }
       } catch (err) {
@@ -249,7 +249,6 @@ export function useSSE() {
                   created_at: new Date().toISOString(),
                   updated_at: new Date().toISOString(),
                   versions: [],
-                  latest_version: null,
                 };
                 setArtifactCurrent(detail);
                 setArtifactVersions([]);
@@ -278,7 +277,7 @@ export function useSSE() {
                 api.getArtifact(sessionId, artifactId).then((detail) => {
                   setArtifactCurrent(detail);
                   setArtifactVersions(detail.versions);
-                  setSelectedVersion(detail.latest_version ?? null);
+                  setSelectedVersion(null);
                 }).catch(() => {});
               }
             }

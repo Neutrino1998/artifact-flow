@@ -42,7 +42,6 @@ class VersionDetailResponse(BaseModel):
     version: int = Field(..., description="Version number")
     content: str = Field(..., description="Version content")
     update_type: str = Field(..., description="Update type")
-    changes: Optional[List[List[str]]] = Field(None, description="Changes [[old, new], ...]")
     created_at: datetime = Field(..., description="Version creation time")
 
 
@@ -53,7 +52,7 @@ class VersionListResponse(BaseModel):
     versions: List[VersionSummary] = Field(..., description="Version list")
 
 
-class ArtifactDetailResponse(BaseModel):
+class ArtifactResponse(BaseModel):
     """GET /api/v1/artifacts/{session_id}/{artifact_id} response"""
     id: str = Field(..., description="Artifact ID")
     session_id: str = Field(..., description="Session ID")
@@ -65,7 +64,6 @@ class ArtifactDetailResponse(BaseModel):
     created_at: datetime = Field(..., description="Creation time")
     updated_at: datetime = Field(..., description="Last update time")
     versions: List[VersionSummary] = Field(default_factory=list, description="All version summaries")
-    latest_version: Optional[VersionDetailResponse] = Field(None, description="Latest version detail (content + changes)")
 
 
 class UploadResponse(BaseModel):

@@ -5,6 +5,7 @@ import { useArtifactStore } from '@/stores/artifactStore';
 import { useConversationStore } from '@/stores/conversationStore';
 import { useUIStore } from '@/stores/uiStore';
 import * as api from '@/lib/api';
+import type { VersionSummary } from '@/types';
 
 /**
  * Resolve session ID at call time.
@@ -17,6 +18,16 @@ function resolveSessionId(): string | null {
     useArtifactStore.getState().sessionId ??
     null
   );
+}
+
+/**
+ * Find the previous version number from a sorted versions list.
+ * Version numbers can be sparse (e.g. 1, 3, 5) due to write-back folding.
+ */
+function findPrevVersion(versions: VersionSummary[], currentVersion: number): number | null {
+  const sorted = versions.map((v) => v.version).sort((a, b) => a - b);
+  const idx = sorted.indexOf(currentVersion);
+  return idx > 0 ? sorted[idx - 1] : null;
 }
 
 export function useArtifacts() {
@@ -55,12 +66,15 @@ export function useArtifacts() {
         const detail = await api.getArtifact(sid, artifactId);
         setCurrent(detail);
         setVersions(detail.versions);
-        setSelectedVersion(detail.latest_version ?? null);
+        // current.content is already the latest — no need to fetch version detail.
+        // selectedVersion is only set when user explicitly picks from the dropdown.
+        setSelectedVersion(null);
         // Fetch previous version content for diff view
-        const latestVer = detail.latest_version?.version;
-        if (latestVer && latestVer > 1) {
+        const curVer = detail.current_version;
+        const prevVer = curVer ? findPrevVersion(detail.versions, curVer) : null;
+        if (prevVer !== null) {
           api
-            .getVersion(sid, artifactId, latestVer - 1)
+            .getVersion(sid, artifactId, prevVer)
             .then((base) => setDiffBaseContent(base.content))
             .catch(() => setDiffBaseContent(null));
         } else {
@@ -79,11 +93,13 @@ export function useArtifacts() {
     async (artifactId: string, version: number) => {
       const sid = resolveSessionId();
       if (!sid) return;
+      const versions = useArtifactStore.getState().versions;
+      const prevVer = findPrevVersion(versions, version);
       try {
         const [detail, baseDetail] = await Promise.all([
           api.getVersion(sid, artifactId, version),
-          version > 1
-            ? api.getVersion(sid, artifactId, version - 1)
+          prevVer !== null
+            ? api.getVersion(sid, artifactId, prevVer)
             : Promise.resolve(null),
         ]);
         setSelectedVersion(detail);
