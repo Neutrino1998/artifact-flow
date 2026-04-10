@@ -12,6 +12,7 @@ import MessageInput from './MessageInput';
 import StreamingMessage from './StreamingMessage';
 import ConversationBrowser from './ConversationBrowser';
 import UserManagementPanel from './UserManagementPanel';
+import { useAuthStore } from '@/stores/authStore';
 
 function getGreeting(): string {
   const hour = new Date().getHours();
@@ -37,6 +38,7 @@ export default function ChatPanel() {
 
   const conversationBrowserVisible = useUIStore((s) => s.conversationBrowserVisible);
   const userManagementVisible = useUIStore((s) => s.userManagementVisible);
+  const isAdmin = useAuthStore((s) => s.user?.role === 'admin');
 
   const [isDragOver, setIsDragOver] = useState(false);
 
@@ -95,7 +97,7 @@ export default function ChatPanel() {
     setIsDragOver(false);
   }, []);
 
-  if (userManagementVisible) {
+  if (userManagementVisible && isAdmin) {
     return <UserManagementPanel />;
   }
 

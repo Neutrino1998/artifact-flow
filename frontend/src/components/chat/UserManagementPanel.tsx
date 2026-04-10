@@ -17,6 +17,7 @@ export default function UserManagementPanel() {
   const [query, setQuery] = useState('');
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
+  const currentUserId = useAuthStore((s) => s.user?.id);
   const setUserManagementVisible = useUIStore((s) => s.setUserManagementVisible);
 
   // Create form
@@ -28,18 +29,6 @@ export default function UserManagementPanel() {
     role: 'user',
   });
   const [creating, setCreating] = useState(false);
-
-  // Inline display_name editing
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [editValue, setEditValue] = useState('');
-  const editRef = useRef<HTMLInputElement>(null);
-  const savingRef = useRef(false);
-
-  // Reset password
-  const [resetPasswordId, setResetPasswordId] = useState<string | null>(null);
-  const [resetPasswordValue, setResetPasswordValue] = useState('');
-  const [resetting, setResetting] = useState(false);
-  const resetRef = useRef<HTMLInputElement>(null);
 
   const fetchUsers = useCallback(async (searchQuery: string, offset = 0, append = false) => {
     setLoading(true);
@@ -103,68 +92,31 @@ export default function UserManagementPanel() {
     }
   };
 
-  const handleToggleActive = async (user: UserResponse) => {
+  const handleUpdate = useCallback(async (userId: string, fields: Record<string, unknown>) => {
+    try {
+      await api.updateUser(userId, fields);
+      // If editing self's display_name, sync authStore
+      if (currentUserId === userId && 'display_name' in fields) {
+        const { user, token, login } = useAuthStore.getState();
+        if (user && token) {
+          const displayName = (fields.display_name as string)?.trim() || null;
+          login(token, { ...user, display_name: displayName });
+        }
+      }
+      fetchUsers(query);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '更新用户失败');
+    }
+  }, [currentUserId, fetchUsers, query]);
+
+  const handleToggleActive = useCallback(async (user: UserResponse) => {
     try {
       await api.updateUser(user.id, { is_active: !user.is_active });
       fetchUsers(query);
     } catch (err) {
       setError(err instanceof Error ? err.message : '更新用户状态失败');
     }
-  };
-
-  const startEditing = (user: UserResponse) => {
-    setEditingId(user.id);
-    setEditValue(user.display_name || '');
-    setTimeout(() => editRef.current?.focus(), 0);
-  };
-
-  const saveDisplayName = async (user: UserResponse) => {
-    if (savingRef.current) return;
-    savingRef.current = true;
-    setEditingId(null);
-    const trimmed = editValue.trim();
-    const newValue = trimmed || null;
-    if (newValue === (user.display_name || null)) { savingRef.current = false; return; }
-    try {
-      await api.updateUser(user.id, { display_name: trimmed });
-      const currentUser = useAuthStore.getState().user;
-      if (currentUser && currentUser.id === user.id) {
-        useAuthStore.getState().login(
-          useAuthStore.getState().token!,
-          { ...currentUser, display_name: newValue },
-        );
-      }
-      fetchUsers(query);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : '更新显示名称失败');
-    } finally {
-      savingRef.current = false;
-    }
-  };
-
-  const startResetPassword = (user: UserResponse) => {
-    setResetPasswordId(user.id);
-    setResetPasswordValue('');
-    setTimeout(() => resetRef.current?.focus(), 0);
-  };
-
-  const handleResetPassword = async (user: UserResponse) => {
-    if (!resetPasswordValue.trim() || resetPasswordValue.length < 4) return;
-    setResetting(true);
-    setError(null);
-    try {
-      await api.updateUser(user.id, { password: resetPasswordValue });
-      setResetPasswordId(null);
-      setResetPasswordValue('');
-    } catch (err) {
-      setError(err instanceof Error ? err.message : '重置密码失败');
-    } finally {
-      setResetting(false);
-    }
-  };
-
-  const isSelf = (user: UserResponse) =>
-    useAuthStore.getState().user?.id === user.id;
+  }, [fetchUsers, query]);
 
   return (
     <div className="flex-1 flex flex-col min-h-0 bg-chat dark:bg-chat-dark">
@@ -299,24 +251,9 @@ export default function UserManagementPanel() {
                 <UserRow
                   key={user.id}
                   user={user}
-                  isSelf={isSelf(user)}
-                  editingId={editingId}
-                  editValue={editValue}
-                  editRef={editRef}
-                  savingRef={savingRef}
-                  resetPasswordId={resetPasswordId}
-                  resetPasswordValue={resetPasswordValue}
-                  resetRef={resetRef}
-                  resetting={resetting}
-                  onStartEditing={startEditing}
-                  onSaveDisplayName={saveDisplayName}
-                  onSetEditingId={setEditingId}
-                  onSetEditValue={setEditValue}
+                  isSelf={user.id === currentUserId}
+                  onUpdate={handleUpdate}
                   onToggleActive={handleToggleActive}
-                  onStartResetPassword={startResetPassword}
-                  onResetPassword={handleResetPassword}
-                  onSetResetPasswordId={setResetPasswordId}
-                  onSetResetPasswordValue={setResetPasswordValue}
                 />
               ))}
 
@@ -345,58 +282,79 @@ export default function UserManagementPanel() {
 function UserRow({
   user,
   isSelf,
-  editingId,
-  editValue,
-  editRef,
-  savingRef,
-  resetPasswordId,
-  resetPasswordValue,
-  resetRef,
-  resetting,
-  onStartEditing,
-  onSaveDisplayName,
-  onSetEditingId,
-  onSetEditValue,
+  onUpdate,
   onToggleActive,
-  onStartResetPassword,
-  onResetPassword,
-  onSetResetPasswordId,
-  onSetResetPasswordValue,
 }: {
   user: UserResponse;
   isSelf: boolean;
-  editingId: string | null;
-  editValue: string;
-  editRef: React.RefObject<HTMLInputElement | null>;
-  savingRef: React.RefObject<boolean>;
-  resetPasswordId: string | null;
-  resetPasswordValue: string;
-  resetRef: React.RefObject<HTMLInputElement | null>;
-  resetting: boolean;
-  onStartEditing: (user: UserResponse) => void;
-  onSaveDisplayName: (user: UserResponse) => void;
-  onSetEditingId: (id: string | null) => void;
-  onSetEditValue: (value: string) => void;
+  onUpdate: (userId: string, fields: Record<string, unknown>) => Promise<void>;
   onToggleActive: (user: UserResponse) => void;
-  onStartResetPassword: (user: UserResponse) => void;
-  onResetPassword: (user: UserResponse) => void;
-  onSetResetPasswordId: (id: string | null) => void;
-  onSetResetPasswordValue: (value: string) => void;
 }) {
+  // Local editing state
+  const [editing, setEditing] = useState(false);
+  const [editValue, setEditValue] = useState('');
+  const editRef = useRef<HTMLInputElement>(null);
+  const savingRef = useRef(false);
+
+  // Local reset password state
+  const [resettingPassword, setResettingPassword] = useState(false);
+  const [passwordValue, setPasswordValue] = useState('');
+  const [passwordSaving, setPasswordSaving] = useState(false);
+  const passwordRef = useRef<HTMLInputElement>(null);
+
+  const startEditing = () => {
+    setEditing(true);
+    setEditValue(user.display_name || '');
+    setTimeout(() => editRef.current?.focus(), 0);
+  };
+
+  const saveDisplayName = async () => {
+    if (savingRef.current) return;
+    savingRef.current = true;
+    setEditing(false);
+    const trimmed = editValue.trim();
+    const newValue = trimmed || null;
+    if (newValue !== (user.display_name || null)) {
+      await onUpdate(user.id, { display_name: trimmed });
+    }
+    savingRef.current = false;
+  };
+
+  const cancelEditing = () => {
+    savingRef.current = true;
+    setEditing(false);
+    queueMicrotask(() => { savingRef.current = false; });
+  };
+
+  const startResetPassword = () => {
+    setResettingPassword(true);
+    setPasswordValue('');
+    setTimeout(() => passwordRef.current?.focus(), 0);
+  };
+
+  const handleResetPassword = async () => {
+    if (!passwordValue.trim() || passwordValue.length < 4) return;
+    setPasswordSaving(true);
+    await onUpdate(user.id, { password: passwordValue });
+    setPasswordSaving(false);
+    setResettingPassword(false);
+    setPasswordValue('');
+  };
+
   return (
     <div className="flex items-center gap-4 px-4 py-3 rounded-lg hover:bg-panel/60 dark:hover:bg-panel-accent-dark/60 transition-colors mb-1">
       {/* User info */}
       <div className="flex-1 min-w-0">
-        {editingId === user.id ? (
+        {editing ? (
           <input
             ref={editRef}
             type="text"
             value={editValue}
-            onChange={(e) => onSetEditValue(e.target.value)}
-            onBlur={() => onSaveDisplayName(user)}
+            onChange={(e) => setEditValue(e.target.value)}
+            onBlur={saveDisplayName}
             onKeyDown={(e) => {
-              if (e.key === 'Enter') onSaveDisplayName(user);
-              if (e.key === 'Escape') { savingRef.current = true; onSetEditingId(null); queueMicrotask(() => { savingRef.current = false; }); }
+              if (e.key === 'Enter') saveDisplayName();
+              if (e.key === 'Escape') cancelEditing();
             }}
             placeholder={user.username}
             className="w-full px-2 py-0.5 rounded border border-accent bg-surface dark:bg-surface-dark text-text-primary dark:text-text-primary-dark outline-none"
@@ -404,7 +362,7 @@ function UserRow({
         ) : (
           <div
             className="cursor-pointer group/name"
-            onClick={() => onStartEditing(user)}
+            onClick={startEditing}
             title="点击编辑显示名称"
           >
             <div className="font-medium text-text-primary dark:text-text-primary-dark group-hover/name:text-accent transition-colors truncate">
@@ -418,29 +376,29 @@ function UserRow({
         )}
 
         {/* Reset password inline */}
-        {resetPasswordId === user.id && (
+        {resettingPassword && (
           <div className="flex items-center gap-1.5 mt-2">
             <input
-              ref={resetRef}
+              ref={passwordRef}
               type="password"
-              value={resetPasswordValue}
-              onChange={(e) => onSetResetPasswordValue(e.target.value)}
+              value={passwordValue}
+              onChange={(e) => setPasswordValue(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === 'Enter') onResetPassword(user);
-                if (e.key === 'Escape') onSetResetPasswordId(null);
+                if (e.key === 'Enter') handleResetPassword();
+                if (e.key === 'Escape') setResettingPassword(false);
               }}
               placeholder="新密码（≥4位）"
               className="w-36 px-2 py-1 text-xs rounded border border-accent bg-surface dark:bg-surface-dark text-text-primary dark:text-text-primary-dark outline-none placeholder:text-text-tertiary dark:placeholder:text-text-tertiary-dark"
             />
             <button
-              onClick={() => onResetPassword(user)}
-              disabled={resetting || resetPasswordValue.length < 4}
+              onClick={handleResetPassword}
+              disabled={passwordSaving || passwordValue.length < 4}
               className="px-2 py-1 text-xs rounded bg-accent text-white hover:bg-accent-hover disabled:opacity-40 transition-colors"
             >
-              {resetting ? '...' : '确认'}
+              {passwordSaving ? '...' : '确认'}
             </button>
             <button
-              onClick={() => onSetResetPasswordId(null)}
+              onClick={() => setResettingPassword(false)}
               className="px-2 py-1 text-xs rounded border border-border dark:border-border-dark text-text-secondary dark:text-text-secondary-dark hover:bg-bg dark:hover:bg-bg-dark transition-colors"
             >
               取消
@@ -481,7 +439,7 @@ function UserRow({
         ) : (
           <>
             <button
-              onClick={() => onStartResetPassword(user)}
+              onClick={startResetPassword}
               className="px-2 py-1 text-xs rounded border border-border dark:border-border-dark text-text-secondary dark:text-text-secondary-dark hover:text-accent hover:border-accent transition-colors"
             >
               重置密码
