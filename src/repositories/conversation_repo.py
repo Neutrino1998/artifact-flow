@@ -4,6 +4,7 @@
 提供对话和消息的 CRUD 操作，以及树结构查询。
 """
 
+import re
 from typing import Optional, List, Dict, Any
 
 from sqlalchemy import select, func, update
@@ -186,7 +187,8 @@ class ConversationRepository(BaseRepository[Conversation]):
             query = query.where(Conversation.user_id == user_id)
 
         if title_query:
-            query = query.where(Conversation.title.ilike(f"%{title_query}%"))
+            escaped = re.sub(r"([%_\\])", r"\\\1", title_query)
+            query = query.where(Conversation.title.ilike(f"%{escaped}%"))
 
         if order_by_updated:
             query = query.order_by(Conversation.updated_at.desc())
@@ -211,7 +213,8 @@ class ConversationRepository(BaseRepository[Conversation]):
         if user_id:
             query = query.where(Conversation.user_id == user_id)
         if title_query:
-            query = query.where(Conversation.title.ilike(f"%{title_query}%"))
+            escaped = re.sub(r"([%_\\])", r"\\\1", title_query)
+            query = query.where(Conversation.title.ilike(f"%{escaped}%"))
         result = await self._session.execute(query)
         return result.scalar_one()
 

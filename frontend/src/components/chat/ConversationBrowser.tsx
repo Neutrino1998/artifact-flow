@@ -5,6 +5,7 @@ import { useConversationStore } from '@/stores/conversationStore';
 import { useUIStore } from '@/stores/uiStore';
 import { listConversations, getConversation, deleteConversation } from '@/lib/api';
 import type { ConversationSummary } from '@/types';
+import ConfirmModal from '@/components/layout/ConfirmModal';
 
 const PAGE_SIZE = 20;
 
@@ -174,43 +175,60 @@ function BrowserItem({
   onDelete: (id: string) => void;
 }) {
   const [showMenu, setShowMenu] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const title = conversation.title || 'Untitled';
   const date = new Date(conversation.updated_at).toLocaleDateString();
 
   return (
-    <div
-      className={`group relative cursor-pointer transition-colors rounded-lg mb-1 ${
-        isActive
-          ? 'bg-panel dark:bg-panel-accent-dark px-4 py-3'
-          : 'hover:bg-panel/60 dark:hover:bg-panel-accent-dark/60 px-4 py-3'
-      }`}
-      onClick={() => onSelect(conversation.id)}
-      onMouseEnter={() => setShowMenu(true)}
-      onMouseLeave={() => setShowMenu(false)}
-    >
-      <div className={`font-medium text-text-primary dark:text-text-primary-dark truncate ${showMenu ? 'pr-8' : ''}`}>
-        {title}
-      </div>
-      <div className="flex items-center gap-2 mt-1 text-xs text-text-tertiary dark:text-text-tertiary-dark">
-        <span>{date}</span>
-        <span>{conversation.message_count} messages</span>
+    <>
+      <div
+        className={`group relative cursor-pointer transition-colors rounded-lg mb-1 ${
+          isActive
+            ? 'bg-panel dark:bg-panel-accent-dark px-4 py-3'
+            : 'hover:bg-panel/60 dark:hover:bg-panel-accent-dark/60 px-4 py-3'
+        }`}
+        onClick={() => onSelect(conversation.id)}
+        onMouseEnter={() => setShowMenu(true)}
+        onMouseLeave={() => setShowMenu(false)}
+      >
+        <div className={`font-medium text-text-primary dark:text-text-primary-dark truncate ${showMenu ? 'pr-8' : ''}`}>
+          {title}
+        </div>
+        <div className="flex items-center gap-2 mt-1 text-xs text-text-tertiary dark:text-text-tertiary-dark">
+          <span>{date}</span>
+          <span>{conversation.message_count} messages</span>
+        </div>
+
+        {showMenu && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              setConfirmDelete(true);
+            }}
+            className="absolute right-3 top-1/2 -translate-y-1/2 p-1.5 rounded-md text-text-tertiary dark:text-text-tertiary-dark hover:text-status-error dark:hover:text-status-error hover:bg-status-error/10 dark:hover:bg-status-error/10 transition-colors"
+            aria-label="删除对话"
+            title="删除对话"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6M10 11v6M14 11v6" />
+            </svg>
+          </button>
+        )}
       </div>
 
-      {showMenu && (
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            onDelete(conversation.id);
-          }}
-          className="absolute right-3 top-1/2 -translate-y-1/2 p-1.5 rounded-md text-text-tertiary dark:text-text-tertiary-dark hover:text-status-error dark:hover:text-status-error hover:bg-status-error/10 dark:hover:bg-status-error/10 transition-colors"
-          aria-label="删除对话"
+      {confirmDelete && (
+        <ConfirmModal
           title="删除对话"
-        >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6M10 11v6M14 11v6" />
-          </svg>
-        </button>
+          message={`确定要删除「${title}」吗？此操作无法撤销。`}
+          confirmLabel="删除"
+          destructive
+          onConfirm={() => {
+            onDelete(conversation.id);
+            setConfirmDelete(false);
+          }}
+          onCancel={() => setConfirmDelete(false)}
+        />
       )}
-    </div>
+    </>
   );
 }

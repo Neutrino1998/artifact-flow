@@ -32,6 +32,7 @@ export default function ConversationList() {
   const selectConversation = useCallback(
     async (id: string) => {
       if (id === currentId) return;
+      setConversationBrowserVisible(false);
       setCurrentLoading(true);
       try {
         const detail = await getConversation(id);
@@ -42,7 +43,7 @@ export default function ConversationList() {
         setCurrentLoading(false);
       }
     },
-    [currentId, setCurrent, setCurrentLoading]
+    [currentId, setCurrent, setCurrentLoading, setConversationBrowserVisible]
   );
 
   useEffect(() => {
