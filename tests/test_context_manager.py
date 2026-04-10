@@ -317,8 +317,8 @@ class TestTruncation:
         all_content = " ".join(m["content"] for m in messages)
         assert "current" in all_content
 
-    def test_no_meta_messages_not_truncated(self):
-        """Messages without _meta should not cause errors."""
+    def test_no_meta_no_model_not_truncated(self):
+        """Without _meta and no model fallback, total=0 → no truncation."""
         messages = [
             {"role": "user", "content": "Q1"},
             {"role": "assistant", "content": "A1"},  # no _meta
@@ -326,8 +326,92 @@ class TestTruncation:
             {"role": "assistant", "content": "A2"},  # no _meta
         ]
         result = ContextManager.truncate_messages(messages, budget=100)
-        # total = 0 (no _meta), so nothing to truncate
         assert len(result) == 4
+
+    def test_savings_are_independent_not_cumulative(self):
+        """Each AI boundary's savings is independent (cumulative from start).
+
+        Regression: old code had `total -= savings` which double-counted.
+        Example: total=20000, A1=5500, A2=11000, A3=16500, budget=5000.
+        Correct: total-A2=9000>5000, continue to A3 where total-16500=3500<=5000.
+        Buggy (cumulative subtract): after A1 total becomes 14500, then
+        14500-11000=3500<=5000, stops at A2 leaving real 20000-11000=9000>5000.
+        """
+        messages = [
+            {"role": "user", "content": "Q1"},
+            _ai_msg("A1", input_tokens=5000, output_tokens=500),
+            {"role": "user", "content": "Q2"},
+            _ai_msg("A2", input_tokens=10000, output_tokens=1000),
+            {"role": "user", "content": "Q3"},
+            _ai_msg("A3", input_tokens=15000, output_tokens=1500),
+            {"role": "user", "content": "Q4"},
+            _ai_msg("A4", input_tokens=20000, output_tokens=2000),
+        ]
+        # total from last AI = 20000+2000 = 22000, budget = 5000, preserve=1
+        # A1 savings=5500 → 22000-5500=16500 > 5000
+        # A2 savings=11000 → 22000-11000=11000 > 5000
+        # A3 savings=16500 → 22000-16500=5500 > 5000
+        # All cuttable exhausted (3 cuttable, preserve 1) → cut at A3
+        result = ContextManager.truncate_messages(messages, budget=5000, preserve_ai_msgs=1)
+        assert "truncated" in result[0]["content"]
+        # Should have cut through A3 (index 5), keeping Q4 + A4
+        assert result[1]["content"] == "Q4"
+        assert result[2]["content"] == "A4"
+
+    def test_no_meta_with_model_fallback(self):
+        """When _meta is absent but model is provided, use token_counter fallback."""
+        messages = [
+            {"role": "user", "content": "Q1"},
+            {"role": "assistant", "content": "A1"},  # no _meta
+            {"role": "user", "content": "Q2"},
+            {"role": "assistant", "content": "A2"},  # no _meta
+        ]
+        with patch("litellm.token_counter") as mock_tc:
+            # Total estimation: token_counter(messages) returns 200 (over budget=100)
+            # Prefix savings for A1: token_counter(messages[:2]) returns 80
+            # 200 - 80 = 120 > 100, continue
+            # Only 1 cuttable (2 AIs, preserve=1), cut at A1
+            mock_tc.side_effect = lambda **kwargs: (
+                200 if len(kwargs.get("messages", [])) == 4
+                else 80
+            )
+            result = ContextManager.truncate_messages(
+                messages, budget=100, preserve_ai_msgs=1, model="test-model"
+            )
+        assert "truncated" in result[0]["content"]
+        assert result[1]["content"] == "Q2"
+
+    def test_build_fallback_when_no_meta(self):
+        """build() should fallback to token_counter for total when no _meta exists."""
+        agent = _FakeAgentConfig()
+        history = [
+            {"role": "user", "content": "old question"},
+            {"role": "assistant", "content": "old answer"},  # no _meta
+            {"role": "user", "content": "newer question"},
+            {"role": "assistant", "content": "newer answer"},  # no _meta
+        ]
+        state = _make_state(
+            conversation_history=history,
+            events=[
+                _make_event(StreamEventType.USER_INPUT.value, data={"content": "current"}),
+            ],
+        )
+
+        with patch("core.context_manager.config.CONTEXT_MAX_TOKENS", 50), \
+             patch("core.context_manager.config.TRUNCATION_PRESERVE_AI_MSGS", 1), \
+             patch("litellm.token_counter") as mock_tc:
+            # Simulate: token_counter returns 200 for all messages (over budget=50)
+            # Then for truncation prefix: token_counter(messages[:2]) = 80
+            mock_tc.side_effect = lambda **kwargs: (
+                200 if len(kwargs.get("messages", [])) >= 4
+                else 80
+            )
+            messages = _build(agent, state=state, tools={}, model="test-model")
+
+        # Should have truncated (marker present) and kept "current"
+        all_content = " ".join(m["content"] for m in messages)
+        assert "truncated" in all_content
+        assert "current" in all_content
 
 
 # ============================================================

@@ -11,6 +11,8 @@ ContextManager — 为每次 LLM 调用构建完整的 messages 列表
 from typing import Dict, Any, List, Optional, Tuple
 from datetime import datetime
 
+import litellm
+
 from config import config
 from utils.logger import get_logger
 
@@ -114,14 +116,20 @@ class ContextManager:
 
         last_ai_meta, trailing_user_msgs = cls._find_last_ai_and_trailing(all_messages)
         total = last_ai_meta["input_tokens"] + last_ai_meta["output_tokens"]
-        if trailing_user_msgs and model:
-            from litellm import token_counter
-            total += token_counter(model=model, messages=trailing_user_msgs)
+
+        if total > 0:
+            # Have _meta on last AI: add trailing user msgs estimate
+            if trailing_user_msgs and model:
+                total += litellm.token_counter(model=model, messages=trailing_user_msgs)
+        elif all_messages and model:
+            # Fallback: no _meta on last AI → estimate total via token_counter
+            total = litellm.token_counter(model=model, messages=all_messages)
 
         if total > config.CONTEXT_MAX_TOKENS:
             all_messages = cls.truncate_messages(
                 all_messages, config.CONTEXT_MAX_TOKENS,
                 preserve_ai_msgs=config.TRUNCATION_PRESERVE_AI_MSGS,
+                model=model,
             )
 
         # 发给 LLM 前剥离 _meta
@@ -271,19 +279,25 @@ class ContextManager:
         messages: List[Dict],
         budget: int,
         preserve_ai_msgs: int = 4,
+        model: Optional[str] = None,
     ) -> List[Dict]:
         """
         Token-based truncation at assistant message boundaries.
 
-        Uses _meta.input_tokens + _meta.output_tokens on each assistant message
-        to estimate savings. Cuts at assistant boundaries from left to right until
-        total - savings <= budget. Preserves at least preserve_ai_msgs assistant
-        messages at the tail.
+        Each assistant message's _meta.input_tokens already includes all prior
+        context (it's the LLM-reported input for that call), so each AI boundary's
+        savings = input_tokens + output_tokens is independent — NOT incremental.
+        We scan left-to-right and cut at the first boundary where
+        total - savings <= budget.
+
+        Fallback: when _meta is absent (e.g. provider didn't return usage),
+        uses litellm.token_counter to estimate savings.
 
         Args:
             messages: merged history + tool messages (may contain _meta on assistant msgs)
             budget: max token budget
             preserve_ai_msgs: minimum assistant messages to keep at tail
+            model: litellm model ID for token_counter fallback (None = no fallback)
         """
         if not messages:
             return messages
@@ -291,6 +305,10 @@ class ContextManager:
         # Find the last ai msg to estimate total
         last_ai_meta, trailing = cls._find_last_ai_and_trailing(messages)
         total = last_ai_meta["input_tokens"] + last_ai_meta["output_tokens"]
+
+        # Fallback: estimate total via token_counter when _meta is absent
+        if total == 0 and model:
+            total = litellm.token_counter(model=model, messages=messages)
 
         if total <= budget:
             return messages
@@ -300,23 +318,26 @@ class ContextManager:
         if len(ai_indices) <= preserve_ai_msgs:
             return messages
 
-        # Scan from left; each ai msg's _meta represents the savings of cutting it and everything before
+        # Scan from left; each ai msg's _meta is the cumulative savings at that boundary
         cut_point = 0  # cut everything before this index (exclusive)
         dropped_count = 0
-        # Only consider cutting up to len(ai_indices) - preserve_ai_msgs
         max_cuttable = len(ai_indices) - preserve_ai_msgs
 
         for scan_idx in range(max_cuttable):
             ai_idx = ai_indices[scan_idx]
             meta = messages[ai_idx].get("_meta", {})
             savings = meta.get("input_tokens", 0) + meta.get("output_tokens", 0)
+
+            # Fallback: estimate savings via token_counter on the prefix
+            if savings <= 0 and model:
+                savings = litellm.token_counter(model=model, messages=messages[:ai_idx + 1])
+
             if savings <= 0:
                 continue
             cut_point = ai_idx + 1
             dropped_count = cut_point
             if total - savings <= budget:
                 break
-            total -= savings
 
         if dropped_count > 0:
             result = messages[cut_point:]
