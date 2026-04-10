@@ -26,7 +26,7 @@ JINA_API_KEY = os.getenv("JINA_API_KEY")
 JINA_BASE_URL = "https://r.jina.ai"
 JINA_RETRY_MAX = 2
 JINA_RETRY_DELAY = 30   # 429限额时等待秒数
-JINA_TIMEOUT = 15        # 单次请求超时（秒），正常响应 1-5s
+JINA_TIMEOUT = 30        # 单次请求超时（秒），正常响应 1-5s，不重试所以给足余量
 
 
 class WebFetchTool(BaseTool):
@@ -233,10 +233,7 @@ class WebFetchTool(BaseTool):
                             return None
 
             except asyncio.TimeoutError:
-                logger.warning(f"Jina timeout for {url} (attempt {attempt + 1})")
-                if attempt < JINA_RETRY_MAX:
-                    await asyncio.sleep(2)
-                    continue
+                logger.warning(f"Jina timeout for {url}, skipping retries")
                 return None
             except Exception as e:
                 logger.warning(f"Jina error for {url}: {e}")
