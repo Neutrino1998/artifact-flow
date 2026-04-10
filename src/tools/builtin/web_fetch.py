@@ -188,7 +188,7 @@ class WebFetchTool(BaseTool):
 
         for attempt in range(1 + JINA_RETRY_MAX):
             try:
-                async with aiohttp.ClientSession() as session:
+                async with aiohttp.ClientSession(trust_env=True) as session:
                     async with session.get(jina_url, headers=headers, timeout=timeout) as response:
                         if response.status == 200:
                             content = await response.text()
@@ -256,7 +256,7 @@ class WebFetchTool(BaseTool):
             timeout = aiohttp.ClientTimeout(total=30)
             headers = {"User-Agent": random.choice(self.user_agents)}
 
-            async with aiohttp.ClientSession() as session:
+            async with aiohttp.ClientSession(trust_env=True) as session:
                 async with session.get(url, headers=headers, timeout=timeout) as response:
                     if response.status != 200:
                         return {
@@ -326,7 +326,7 @@ class WebFetchTool(BaseTool):
             logger.info(f"Fetching PDF: {url}")
 
             timeout = aiohttp.ClientTimeout(total=60)
-            async with aiohttp.ClientSession() as session:
+            async with aiohttp.ClientSession(trust_env=True) as session:
                 async with session.get(
                     url,
                     timeout=timeout,
