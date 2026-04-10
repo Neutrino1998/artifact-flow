@@ -16,6 +16,7 @@ export default function UserManagementPanel() {
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const queryRef = useRef(query);
 
   const currentUserId = useAuthStore((s) => s.user?.id);
   const setUserManagementVisible = useUIStore((s) => s.setUserManagementVisible);
@@ -56,6 +57,7 @@ export default function UserManagementPanel() {
 
   const handleQueryChange = useCallback((value: string) => {
     setQuery(value);
+    queryRef.current = value;
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => {
       fetchUsers(value);
@@ -103,20 +105,21 @@ export default function UserManagementPanel() {
           login(token, { ...user, display_name: displayName });
         }
       }
-      fetchUsers(query);
+      fetchUsers(queryRef.current);
     } catch (err) {
       setError(err instanceof Error ? err.message : '更新用户失败');
+      throw err;
     }
-  }, [currentUserId, fetchUsers, query]);
+  }, [currentUserId, fetchUsers]);
 
   const handleToggleActive = useCallback(async (user: UserResponse) => {
     try {
       await api.updateUser(user.id, { is_active: !user.is_active });
-      fetchUsers(query);
+      fetchUsers(queryRef.current);
     } catch (err) {
       setError(err instanceof Error ? err.message : '更新用户状态失败');
     }
-  }, [fetchUsers, query]);
+  }, [fetchUsers]);
 
   return (
     <div className="flex-1 flex flex-col min-h-0 bg-chat dark:bg-chat-dark">
@@ -312,12 +315,17 @@ function UserRow({
     if (savingRef.current) return;
     savingRef.current = true;
     setEditing(false);
-    const trimmed = editValue.trim();
-    const newValue = trimmed || null;
-    if (newValue !== (user.display_name || null)) {
-      await onUpdate(user.id, { display_name: trimmed });
+    try {
+      const trimmed = editValue.trim();
+      const newValue = trimmed || null;
+      if (newValue !== (user.display_name || null)) {
+        await onUpdate(user.id, { display_name: trimmed });
+      }
+    } catch {
+      // error handled by parent
+    } finally {
+      savingRef.current = false;
     }
-    savingRef.current = false;
   };
 
   const cancelEditing = () => {
@@ -335,10 +343,15 @@ function UserRow({
   const handleResetPassword = async () => {
     if (!passwordValue.trim() || passwordValue.length < 4) return;
     setPasswordSaving(true);
-    await onUpdate(user.id, { password: passwordValue });
-    setPasswordSaving(false);
-    setResettingPassword(false);
-    setPasswordValue('');
+    try {
+      await onUpdate(user.id, { password: passwordValue });
+      setResettingPassword(false);
+      setPasswordValue('');
+    } catch {
+      // error handled by parent
+    } finally {
+      setPasswordSaving(false);
+    }
   };
 
   return (
