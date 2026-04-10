@@ -73,17 +73,17 @@ class CompactionManager:
         """
         根据 execution_metrics 判断是否触发 compaction。
 
-        从 last_context_chars（构建 context 时的 len() 总和）判断是否超过阈值。
+        从 last_input_tokens（LLM 返回的精确 input token 数）判断是否超过阈值。
         """
-        last_context_chars = execution_metrics.get("last_context_chars", 0)
-        if last_context_chars < config.COMPACTION_THRESHOLD:
+        last_input_tokens = execution_metrics.get("last_input_tokens", 0)
+        if last_input_tokens < config.COMPACTION_TOKEN_THRESHOLD:
             return
 
         if await self.is_running(conv_id):
             logger.debug(f"Compaction already running for {conv_id}, skipping")
             return
 
-        logger.info(f"Triggering compaction for {conv_id} (context_chars={last_context_chars})")
+        logger.info(f"Triggering compaction for {conv_id} (last_input_tokens={last_input_tokens})")
         done_event = asyncio.Event()
         self._running[conv_id] = done_event
         asyncio.create_task(self._run_compaction(conv_id, message_id, done_event))
@@ -244,7 +244,6 @@ class CompactionManager:
         2. 逐对: 调 LLM（无 DB 连接）→ 短 session: 写 summary，关闭 session
         """
         from models.llm import astream_with_retry, format_messages_for_debug
-        from core.context_manager import ContextManager
 
         compact_agent = self._agents.get("compact_agent")
         if not compact_agent:
@@ -268,23 +267,25 @@ class CompactionManager:
                 )
                 continue
 
-            # 构建 prompt — 先算固定部分，剩余预算分给 prior_summaries
+            # 构建 prompt — 先算固定部分 token 数，剩余预算分给 prior_summaries
             pair_content = (
                 f"<user_input>\n{pair.user_input}\n</user_input>\n\n"
                 f"<response>\n{pair.response}\n</response>"
             )
-            fixed_chars = len(compact_agent.role_prompt) + len(pair_content)
-            budget = max(config.CONTEXT_MAX_CHARS - fixed_chars, 0)
+            from litellm import token_counter
+            from models.llm import get_litellm_model_id
+            model_id = get_litellm_model_id(compact_agent.model)
+            fixed_tokens = token_counter(model=model_id, text=compact_agent.role_prompt + pair_content)
+            budget = max(config.CONTEXT_MAX_TOKENS - fixed_tokens, 0)
 
-            summary_messages = [{"role": "user", "content": s} for s in prior_summaries]
-            summary_messages = ContextManager.truncate_messages(
-                summary_messages, budget, preserve_recent=2
-            )
-            # 提取截断后的 summaries（跳过 truncation marker）
-            recent_summaries = [
-                m["content"] for m in summary_messages
-                if "truncated]" not in m["content"]
-            ]
+            # Truncate prior_summaries to fit token budget (keep most recent)
+            recent_summaries = list(prior_summaries)
+            while recent_summaries and len(recent_summaries) > 2:
+                summary_msgs = [{"role": "user", "content": s} for s in recent_summaries]
+                summary_tokens = token_counter(model=model_id, messages=summary_msgs)
+                if summary_tokens <= budget:
+                    break
+                recent_summaries.pop(0)  # drop oldest
 
             prompt_parts = []
             if recent_summaries:

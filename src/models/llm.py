@@ -99,6 +99,12 @@ def _resolve_model_params(
     return params
 
 
+def get_litellm_model_id(model_alias: str) -> str:
+    """Resolve a model alias to its litellm model ID."""
+    params = _resolve_model_params(model_alias)
+    return params["model"]
+
+
 # ========================================
 # 流式调用（带重试）
 # ========================================

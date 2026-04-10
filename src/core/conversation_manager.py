@@ -276,10 +276,17 @@ class ConversationManager:
             })
             response = msg.response
             if response:
-                messages.append({
+                ai_msg = {
                     "role": "assistant",
                     "content": msg.response_summary or response
-                })
+                }
+                meta = msg.metadata_ or {}
+                exec_metrics = meta.get("execution_metrics", {})
+                first_in = exec_metrics.get("first_input_tokens", 0)
+                last_out = exec_metrics.get("last_output_tokens", 0)
+                if first_in or last_out:
+                    ai_msg["_meta"] = {"input_tokens": first_in, "output_tokens": last_out}
+                messages.append(ai_msg)
 
         logger.debug(f"Formatted {len(messages)} messages from conversation history")
         return messages

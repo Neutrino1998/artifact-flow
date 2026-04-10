@@ -5,10 +5,10 @@ ContextManager — 为每次 LLM 调用构建完整的 messages 列表
 1. 拼接 system prompt（role_prompt + system_time + task_plan + artifacts + agents + tools）
 2. 构建对话历史（lead_agent 独有，含 compaction summaries）
 3. 构建当前轮事件（按 agent_name 过滤，含 queued_message / tool_complete 等）
-4. 预算截断：总字符超限时先砍 history 再砍 tool 交互，保留最近 N 条
+4. Token-based 预算截断：基于 LLM 返回的精确 token 数，统一截断 history + tool 消息
 """
 
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 from datetime import datetime
 
 from config import config
@@ -33,6 +33,7 @@ class ContextManager:
         agents: Dict[str, Any],  # {name: AgentConfig}
         tools: Dict[str, Any],   # {name: BaseTool}
         artifacts_inventory: Optional[List[Dict]] = None,
+        model: Optional[str] = None,
     ) -> List[Dict[str, str]]:
         """
         构建 LLM 调用所需的完整 messages
@@ -108,23 +109,23 @@ class ContextManager:
         if agent_config.name == "lead_agent":
             history_messages = state.get("conversation_history", [])
 
-        # ========== 预算截断：先砍 history，再砍 tool interactions ==========
-        total = system_chars + cls._chars(history_messages) + cls._chars(tool_messages)
-        if total > config.CONTEXT_MAX_CHARS:
-            preserve_recent = config.COMPACTION_PRESERVE_PAIRS * 2
-            history_budget = max(config.CONTEXT_MAX_CHARS - system_chars - cls._chars(tool_messages), 0)
-            history_messages = cls.truncate_messages(
-                history_messages, history_budget, preserve_recent=preserve_recent
+        # ========== Token-based 预算截断 ==========
+        all_messages = history_messages + tool_messages
+
+        last_ai_meta, trailing_user_msgs = cls._find_last_ai_and_trailing(all_messages)
+        total = last_ai_meta["input_tokens"] + last_ai_meta["output_tokens"]
+        if trailing_user_msgs and model:
+            from litellm import token_counter
+            total += token_counter(model=model, messages=trailing_user_msgs)
+
+        if total > config.CONTEXT_MAX_TOKENS:
+            all_messages = cls.truncate_messages(
+                all_messages, config.CONTEXT_MAX_TOKENS,
+                preserve_ai_msgs=config.TRUNCATION_PRESERVE_AI_MSGS,
             )
 
-            total = system_chars + cls._chars(history_messages) + cls._chars(tool_messages)
-            if total > config.CONTEXT_MAX_CHARS:
-                tool_budget = max(config.CONTEXT_MAX_CHARS - system_chars - cls._chars(history_messages), 0)
-                tool_messages = cls.truncate_messages(
-                    tool_messages, tool_budget, preserve_recent=config.TOOL_INTERACTION_PRESERVE
-                )
-
-        return [system_message] + history_messages + tool_messages
+        # 发给 LLM 前剥离 _meta
+        return [system_message] + cls._strip_meta(all_messages)
 
     @classmethod
     def _find_task_plan(cls, artifacts_inventory: Optional[List[Dict]]) -> Optional[Dict]:
@@ -232,10 +233,17 @@ class ContextManager:
                     interactions.append({"role": "user", "content": instruction})
 
             elif event.event_type == StreamEventType.LLM_COMPLETE.value:
-                # LLM 响应 → assistant 消息
+                # LLM 响应 → assistant 消息（附加 _meta token usage）
                 content = event.data.get("content", "") if event.data else ""
                 if content:
-                    interactions.append({"role": "assistant", "content": content})
+                    msg = {"role": "assistant", "content": content}
+                    token_usage = event.data.get("token_usage") if event.data else None
+                    if token_usage:
+                        msg["_meta"] = {
+                            "input_tokens": token_usage.get("input_tokens", 0),
+                            "output_tokens": token_usage.get("output_tokens", 0),
+                        }
+                    interactions.append(msg)
 
             elif event.event_type == StreamEventType.QUEUED_MESSAGE.value:
                 # 执行中注入的用户消息 → user 消息
@@ -257,38 +265,102 @@ class ContextManager:
 
         return interactions
 
-    @staticmethod
-    def _chars(messages: List[Dict]) -> int:
-        return sum(len(m.get("content", "")) for m in messages)
-
     @classmethod
     def truncate_messages(
         cls,
         messages: List[Dict],
         budget: int,
-        preserve_recent: int = 4,
+        preserve_ai_msgs: int = 4,
     ) -> List[Dict]:
         """
-        从最旧的消息开始丢弃，直到总字符数 <= budget 或只剩 preserve_recent 条。
-        preserve_recent 是硬下限，不会被突破。
+        Token-based truncation at assistant message boundaries.
+
+        Uses _meta.input_tokens + _meta.output_tokens on each assistant message
+        to estimate savings. Cuts at assistant boundaries from left to right until
+        total - savings <= budget. Preserves at least preserve_ai_msgs assistant
+        messages at the tail.
+
+        Args:
+            messages: merged history + tool messages (may contain _meta on assistant msgs)
+            budget: max token budget
+            preserve_ai_msgs: minimum assistant messages to keep at tail
         """
-        if not messages or cls._chars(messages) <= budget:
+        if not messages:
             return messages
 
-        result = list(messages)
-        total = cls._chars(result)
-        dropped = 0
+        # Find the last ai msg to estimate total
+        last_ai_meta, trailing = cls._find_last_ai_and_trailing(messages)
+        total = last_ai_meta["input_tokens"] + last_ai_meta["output_tokens"]
 
-        while len(result) > preserve_recent and total > budget:
-            total -= len(result[0].get("content", ""))
-            result.pop(0)
-            dropped += 1
+        if total <= budget:
+            return messages
 
-        if dropped > 0:
-            logger.debug(f"Truncated {dropped} messages, {total} chars remaining")
+        # Collect assistant boundary indices (index of the assistant msg)
+        ai_indices = [i for i, m in enumerate(messages) if m.get("role") == "assistant"]
+        if len(ai_indices) <= preserve_ai_msgs:
+            return messages
+
+        # Scan from left; each ai msg's _meta represents the savings of cutting it and everything before
+        cut_point = 0  # cut everything before this index (exclusive)
+        dropped_count = 0
+        # Only consider cutting up to len(ai_indices) - preserve_ai_msgs
+        max_cuttable = len(ai_indices) - preserve_ai_msgs
+
+        for scan_idx in range(max_cuttable):
+            ai_idx = ai_indices[scan_idx]
+            meta = messages[ai_idx].get("_meta", {})
+            savings = meta.get("input_tokens", 0) + meta.get("output_tokens", 0)
+            if savings <= 0:
+                continue
+            cut_point = ai_idx + 1
+            dropped_count = cut_point
+            if total - savings <= budget:
+                break
+            total -= savings
+
+        if dropped_count > 0:
+            result = messages[cut_point:]
+            logger.debug(f"Truncated {dropped_count} messages (token-based)")
             result.insert(0, {
                 "role": "user",
-                "content": f"[{dropped} earlier messages truncated]",
+                "content": f"[{dropped_count} earlier messages truncated]",
             })
+            return result
 
+        return messages
+
+    @classmethod
+    def _find_last_ai_and_trailing(
+        cls, messages: List[Dict]
+    ) -> Tuple[Dict[str, int], List[Dict]]:
+        """
+        Find the last assistant message's _meta and any trailing user/tool messages after it.
+
+        Returns:
+            (last_ai_meta dict with input_tokens/output_tokens, list of trailing non-assistant msgs)
+        """
+        default_meta = {"input_tokens": 0, "output_tokens": 0}
+        last_ai_idx = -1
+        for i in range(len(messages) - 1, -1, -1):
+            if messages[i].get("role") == "assistant":
+                last_ai_idx = i
+                break
+
+        if last_ai_idx < 0:
+            return default_meta, list(messages)
+
+        meta = messages[last_ai_idx].get("_meta", default_meta)
+        trailing = messages[last_ai_idx + 1:]
+        return meta, trailing
+
+    @classmethod
+    def _strip_meta(cls, messages: List[Dict]) -> List[Dict]:
+        """Return a copy of messages with _meta keys removed."""
+        result = []
+        for msg in messages:
+            if "_meta" in msg:
+                cleaned = {k: v for k, v in msg.items() if k != "_meta"}
+                result.append(cleaned)
+            else:
+                result.append(msg)
         return result

@@ -50,7 +50,9 @@ class ExecutionMetrics(TypedDict):
     started_at: Union[datetime, str]
     completed_at: Union[datetime, str, None]
     total_duration_ms: Optional[int]
-    last_context_chars: int
+    first_input_tokens: int
+    last_output_tokens: int
+    last_input_tokens: int
     total_token_usage: TokenUsage
 
 
@@ -59,7 +61,9 @@ def create_initial_metrics() -> ExecutionMetrics:
         "started_at": datetime.now(),
         "completed_at": None,
         "total_duration_ms": None,
-        "last_context_chars": 0,
+        "first_input_tokens": 0,
+        "last_output_tokens": 0,
+        "last_input_tokens": 0,
         "total_token_usage": {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0},
     }
 
@@ -134,7 +138,7 @@ async def execute_loop(
     Returns:
         最终执行状态
     """
-    from models.llm import astream_with_retry, format_messages_for_debug
+    from models.llm import astream_with_retry, format_messages_for_debug, get_litellm_model_id
 
     message_id = state["message_id"]
     tool_round_count: Dict[str, int] = {}  # per-agent tool round counter
@@ -199,6 +203,7 @@ async def execute_loop(
             agents=agents,
             tools=tools,
             artifacts_inventory=artifacts_inventory,
+            model=get_litellm_model_id(agents[agent_name].model),
         )
 
         if tool_round_count.get(agent_name, 0) >= agents[agent_name].max_tool_rounds:
@@ -316,6 +321,14 @@ async def execute_loop(
         })
 
         accumulate_token_usage(state["execution_metrics"], normalized_usage)
+
+        # Track per-turn token metrics for lead_agent (used by compaction + context budgeting)
+        if agent_name == "lead_agent":
+            metrics = state["execution_metrics"]
+            if metrics["first_input_tokens"] == 0:
+                metrics["first_input_tokens"] = normalized_usage["input_tokens"]
+            metrics["last_output_tokens"] = normalized_usage["output_tokens"]
+            metrics["last_input_tokens"] = normalized_usage["input_tokens"]
 
         input_tokens = normalized_usage["input_tokens"]
         output_tokens = normalized_usage["output_tokens"]
@@ -535,10 +548,6 @@ async def execute_loop(
                 break
 
             messages = await _build_context(current_agent_name)
-
-            # 记录 context 字符数（与 context_manager 的 len() 计算方式一致）
-            last_context_chars = sum(len(m.get("content", "")) for m in messages)
-            state["execution_metrics"]["last_context_chars"] = last_context_chars
 
             await _emit(StreamEventType.AGENT_START.value, current_agent_name, {
                 "agent": current_agent_name,

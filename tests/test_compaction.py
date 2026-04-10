@@ -98,7 +98,7 @@ def agents():
 @pytest.fixture(autouse=True)
 def patch_compaction_config():
     """Patch config values used by CompactionManager for fast tests."""
-    with patch("core.compaction.config.COMPACTION_THRESHOLD", 1000), \
+    with patch("core.compaction.config.COMPACTION_TOKEN_THRESHOLD", 1000), \
          patch("core.compaction.config.COMPACTION_PRESERVE_PAIRS", 2), \
          patch("core.compaction.config.COMPACTION_TIMEOUT", 10):
         yield
@@ -119,12 +119,12 @@ def cm_light(agents):
 class TestTrigger:
 
     async def test_below_threshold_no_trigger(self, cm_light):
-        metrics = {"last_context_chars": 500}
+        metrics = {"last_input_tokens": 500}
         await cm_light.maybe_trigger("conv-1", "msg-1", metrics)
         assert not await cm_light.is_running("conv-1")
 
     async def test_above_threshold_triggers(self, cm_light):
-        metrics = {"last_context_chars": 2000}
+        metrics = {"last_input_tokens": 2000}
         with patch.object(cm_light, "_compact", return_value=None) as mock_compact:
             await cm_light.maybe_trigger("conv-1", "msg-1", metrics)
             # Wait for the background task to finish so the patch stays alive
@@ -137,7 +137,7 @@ class TestTrigger:
 
     async def test_already_running_skips(self, cm_light):
         cm_light._running["conv-1"] = asyncio.Event()
-        metrics = {"last_context_chars": 2000}
+        metrics = {"last_input_tokens": 2000}
         await cm_light.maybe_trigger("conv-1", "msg-1", metrics)
         assert await cm_light.is_running("conv-1")
 
