@@ -63,7 +63,12 @@ export function useSSE() {
           api.getConversation(conversationId, { force: true }),
           api.listConversations(20, 0),
         ]);
-        setCurrent(detail);
+        // Only update current conversation if user is still viewing it
+        // (or viewing no conversation, i.e. the new-conversation flow)
+        const viewing = useConversationStore.getState().current?.id;
+        if (!viewing || viewing === conversationId) {
+          setCurrent(detail);
+        }
         setConversations(list.conversations, list.total, list.has_more);
         clearPendingUpdates();
         // Refresh artifact data now that flush_all has persisted to DB

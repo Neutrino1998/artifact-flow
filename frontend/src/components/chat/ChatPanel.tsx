@@ -23,6 +23,7 @@ export default function ChatPanel() {
   const current = useConversationStore((s) => s.current);
   const currentLoading = useConversationStore((s) => s.currentLoading);
   const isStreaming = useStreamStore((s) => s.isStreaming);
+  const streamConversationId = useStreamStore((s) => s.conversationId);
   const pendingUserMessage = useStreamStore((s) => s.pendingUserMessage);
 
   const sessionId = useConversationStore((s) => s.current?.session_id);

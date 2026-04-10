@@ -9,20 +9,25 @@ import StreamingMessage from './StreamingMessage';
 
 export default function MessageList() {
   const branchPath = useConversationStore((s) => s.branchPath);
+  const currentId = useConversationStore((s) => s.current?.id);
   const isStreaming = useStreamStore((s) => s.isStreaming);
+  const streamConversationId = useStreamStore((s) => s.conversationId);
   const streamParentId = useStreamStore((s) => s.streamParentId);
   const pendingUserMessage = useStreamStore((s) => s.pendingUserMessage);
+
+  // Only show streaming UI if the active stream belongs to this conversation
+  const isStreamingHere = isStreaming && streamConversationId === currentId;
   const bottomRef = useRef<HTMLDivElement>(null);
 
   // During rerun/edit streaming, truncate branchPath to show only
   // messages up to (and including) the branch parent
   const displayPath = useMemo(() => {
-    if (!isStreaming || streamParentId === undefined) return branchPath;
+    if (!isStreamingHere || streamParentId === undefined) return branchPath;
     if (streamParentId === null) return []; // root rerun: show nothing before
     const idx = branchPath.findIndex((n) => n.id === streamParentId);
     if (idx === -1) return branchPath;
     return branchPath.slice(0, idx + 1);
-  }, [branchPath, isStreaming, streamParentId]);
+  }, [branchPath, isStreamingHere, streamParentId]);
 
   // Auto-scroll to bottom when conversation loads or new messages arrive
   useEffect(() => {
@@ -56,7 +61,7 @@ export default function MessageList() {
           ))}
 
         {/* Show pending user message during streaming (before conversation refresh) */}
-        {isStreaming && pendingUserMessage && (
+        {isStreamingHere && pendingUserMessage && (
           <div className="flex justify-end">
             <div className="max-w-[80%] bg-panel dark:bg-surface-dark rounded-bubble px-4 py-3 text-text-primary dark:text-text-primary-dark whitespace-pre-wrap break-words">
               {pendingUserMessage}
@@ -65,7 +70,7 @@ export default function MessageList() {
         )}
 
         {/* Streaming message */}
-        {isStreaming && <StreamingMessage />}
+        {isStreamingHere && <StreamingMessage />}
 
         <div ref={bottomRef} />
       </div>
