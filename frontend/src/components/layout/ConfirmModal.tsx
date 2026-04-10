@@ -28,7 +28,7 @@ export default function ConfirmModal({
         <h2 className="text-lg font-semibold text-text-primary dark:text-text-primary-dark mb-1">
           {title}
         </h2>
-        <p className="text-text-secondary dark:text-text-secondary-dark mb-5">
+        <p className="text-text-secondary dark:text-text-secondary-dark mb-8">
           {message}
         </p>
         <div className="flex justify-end gap-3">

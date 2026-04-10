@@ -72,7 +72,7 @@ function ConversationItem({ conversation, isActive, onSelect }: ConversationItem
       {confirmDelete && (
         <ConfirmModal
           title="删除对话"
-          message={`确定要删除「${title}」吗？此操作无法撤销。`}
+          message={`确定要删除对话「${title}」吗？此操作无法撤销。`}
           confirmLabel="删除"
           destructive
           onConfirm={handleDelete}
