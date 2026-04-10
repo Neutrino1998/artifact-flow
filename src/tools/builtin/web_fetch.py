@@ -265,10 +265,11 @@ class WebFetchTool(BaseTool):
                             "error": f"HTTP {response.status}"
                         }
 
-                    html = await response.text()
+                    # Read raw bytes and let BS4 detect encoding
+                    raw = await response.read()
 
-            # BeautifulSoup解析
-            soup = BeautifulSoup(html, "html.parser")
+            # BeautifulSoup解析 (auto-detects encoding from meta tags / byte patterns)
+            soup = BeautifulSoup(raw, "html.parser")
 
             # 提取标题
             title = "Untitled"
