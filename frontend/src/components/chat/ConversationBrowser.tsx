@@ -110,6 +110,9 @@ export default function ConversationBrowser() {
               autoFocus
               className="flex-1 bg-transparent text-text-primary dark:text-text-primary-dark placeholder:text-text-tertiary dark:placeholder:text-text-tertiary-dark outline-none"
             />
+            <span className="flex-shrink-0 text-xs text-text-tertiary dark:text-text-tertiary-dark">
+              {total} 对话
+            </span>
             <button
               onClick={handleClose}
               className="flex-shrink-0 p-1 rounded-lg text-text-tertiary dark:text-text-tertiary-dark hover:text-text-secondary dark:hover:text-text-secondary-dark transition-colors"
