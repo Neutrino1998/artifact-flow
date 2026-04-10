@@ -94,7 +94,7 @@ export default function ConversationBrowser() {
       {/* Search */}
       <div className="px-4 pt-4 pb-2">
         <div className="max-w-3xl mx-auto">
-          <div className="bg-surface dark:bg-surface-dark border border-border dark:border-border-dark rounded-2xl shadow-float px-4 py-3 flex items-center gap-3">
+          <div className="bg-surface dark:bg-surface-dark border border-border dark:border-border-dark focus-within:border-accent dark:focus-within:border-accent rounded-2xl shadow-float px-4 py-3 flex items-center gap-3">
             <svg
               className="flex-shrink-0 text-text-tertiary dark:text-text-tertiary-dark"
               width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5"

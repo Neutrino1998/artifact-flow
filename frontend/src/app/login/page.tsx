@@ -51,7 +51,7 @@ export default function LoginPage() {
               onChange={(e) => setUsername(e.target.value)}
               required
               autoFocus
-              className="w-full rounded-lg border border-border dark:border-border-dark bg-bg dark:bg-bg-dark px-3 py-2 text-text-primary dark:text-text-primary-dark outline-none focus:border-accent"
+              className="w-full rounded-lg border border-border dark:border-border-dark bg-bg dark:bg-bg-dark px-3 py-2 text-text-primary dark:text-text-primary-dark outline-none focus:border-accent dark:focus:border-accent"
             />
           </div>
 
@@ -68,7 +68,7 @@ export default function LoginPage() {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
-              className="w-full rounded-lg border border-border dark:border-border-dark bg-bg dark:bg-bg-dark px-3 py-2 text-text-primary dark:text-text-primary-dark outline-none focus:border-accent"
+              className="w-full rounded-lg border border-border dark:border-border-dark bg-bg dark:bg-bg-dark px-3 py-2 text-text-primary dark:text-text-primary-dark outline-none focus:border-accent dark:focus:border-accent"
             />
           </div>
 

@@ -126,7 +126,7 @@ export default function UserManagementPanel() {
       {/* Search */}
       <div className="px-4 pt-4 pb-2">
         <div className="max-w-3xl mx-auto">
-          <div className="bg-surface dark:bg-surface-dark border border-border dark:border-border-dark rounded-2xl shadow-float px-4 py-3 flex items-center gap-3">
+          <div className="bg-surface dark:bg-surface-dark border border-border dark:border-border-dark focus-within:border-accent dark:focus-within:border-accent rounded-2xl shadow-float px-4 py-3 flex items-center gap-3">
             <svg
               className="flex-shrink-0 text-text-tertiary dark:text-text-tertiary-dark"
               width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5"
@@ -183,7 +183,7 @@ export default function UserManagementPanel() {
           ) : (
             <div className="mb-3 p-4 bg-chat dark:bg-chat-dark rounded-2xl border border-border dark:border-border-dark space-y-3">
               <div className="grid grid-cols-2 gap-2">
-                <div className="bg-surface dark:bg-surface-dark border border-border dark:border-border-dark rounded-lg shadow-float px-4 py-2.5">
+                <div className="bg-surface dark:bg-surface-dark border border-border dark:border-border-dark focus-within:border-accent dark:focus-within:border-accent rounded-lg shadow-float px-4 py-2.5">
                   <input
                     type="text"
                     placeholder="用户名"
@@ -192,7 +192,7 @@ export default function UserManagementPanel() {
                     className="w-full bg-transparent text-text-primary dark:text-text-primary-dark placeholder:text-text-tertiary dark:placeholder:text-text-tertiary-dark outline-none"
                   />
                 </div>
-                <div className="bg-surface dark:bg-surface-dark border border-border dark:border-border-dark rounded-lg shadow-float px-4 py-2.5">
+                <div className="bg-surface dark:bg-surface-dark border border-border dark:border-border-dark focus-within:border-accent dark:focus-within:border-accent rounded-lg shadow-float px-4 py-2.5">
                   <input
                     type="password"
                     placeholder="密码"
@@ -201,7 +201,7 @@ export default function UserManagementPanel() {
                     className="w-full bg-transparent text-text-primary dark:text-text-primary-dark placeholder:text-text-tertiary dark:placeholder:text-text-tertiary-dark outline-none"
                   />
                 </div>
-                <div className="bg-surface dark:bg-surface-dark border border-border dark:border-border-dark rounded-lg shadow-float px-4 py-2.5">
+                <div className="bg-surface dark:bg-surface-dark border border-border dark:border-border-dark focus-within:border-accent dark:focus-within:border-accent rounded-lg shadow-float px-4 py-2.5">
                   <input
                     type="text"
                     placeholder="显示名（可选）"
@@ -210,7 +210,7 @@ export default function UserManagementPanel() {
                     className="w-full bg-transparent text-text-primary dark:text-text-primary-dark placeholder:text-text-tertiary dark:placeholder:text-text-tertiary-dark outline-none"
                   />
                 </div>
-                <div className="bg-surface dark:bg-surface-dark border border-border dark:border-border-dark rounded-lg shadow-float px-4 py-2.5">
+                <div className="bg-surface dark:bg-surface-dark border border-border dark:border-border-dark focus-within:border-accent dark:focus-within:border-accent rounded-lg shadow-float px-4 py-2.5">
                   <select
                     value={createForm.role}
                     onChange={(e) => setCreateForm((f) => ({ ...f, role: e.target.value }))}

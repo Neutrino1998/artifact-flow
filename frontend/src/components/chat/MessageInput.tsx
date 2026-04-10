@@ -192,7 +192,7 @@ export default function MessageInput() {
           className={`bg-surface dark:bg-surface-dark border rounded-2xl shadow-float px-4 py-3 transition-colors ${
             dragOver
               ? 'border-accent ring-2 ring-accent/30'
-              : 'border-border dark:border-border-dark'
+              : 'border-border dark:border-border-dark focus-within:border-accent dark:focus-within:border-accent'
           }`}
           onDragOver={handleDragOver}
           onDragEnter={handleDragOver}
