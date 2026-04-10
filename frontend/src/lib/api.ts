@@ -292,10 +292,10 @@ export function getMessageEvents(convId: string, msgId: string) {
 }
 
 // User Management (Admin)
-export function listUsers(limit = 50, offset = 0) {
-  return request<UserListResponse>(
-    `/api/v1/auth/users?limit=${limit}&offset=${offset}`
-  );
+export function listUsers(limit = 50, offset = 0, query?: string) {
+  const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+  if (query) params.set('q', query);
+  return request<UserListResponse>(`/api/v1/auth/users?${params}`);
 }
 
 export function createUser(body: CreateUserRequest) {

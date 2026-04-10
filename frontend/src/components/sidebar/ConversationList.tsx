@@ -16,6 +16,7 @@ export default function ConversationList() {
   const setCurrent = useConversationStore((s) => s.setCurrent);
   const setCurrentLoading = useConversationStore((s) => s.setCurrentLoading);
   const setConversationBrowserVisible = useUIStore((s) => s.setConversationBrowserVisible);
+  const setUserManagementVisible = useUIStore((s) => s.setUserManagementVisible);
 
   const loadConversations = useCallback(async () => {
     setListLoading(true);
@@ -33,6 +34,7 @@ export default function ConversationList() {
     async (id: string) => {
       if (id === currentId) return;
       setConversationBrowserVisible(false);
+      setUserManagementVisible(false);
       setCurrentLoading(true);
       try {
         const detail = await getConversation(id);
@@ -43,7 +45,7 @@ export default function ConversationList() {
         setCurrentLoading(false);
       }
     },
-    [currentId, setCurrent, setCurrentLoading, setConversationBrowserVisible]
+    [currentId, setCurrent, setCurrentLoading, setConversationBrowserVisible, setUserManagementVisible]
   );
 
   useEffect(() => {

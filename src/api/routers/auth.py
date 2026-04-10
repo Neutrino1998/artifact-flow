@@ -9,6 +9,7 @@ Auth Router
 - PUT /api/v1/auth/users/{user_id} - 更新用户（Admin）
 """
 
+from typing import Optional
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -123,12 +124,14 @@ async def create_user(
 async def list_users(
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
+    q: Optional[str] = Query(default=None, max_length=200),
     _admin: TokenPayload = Depends(require_admin),
     user_repo: UserRepository = Depends(get_user_repository),
 ):
     """列出所有用户（仅 Admin）"""
-    users = await user_repo.list_users(limit=limit, offset=offset, include_inactive=True)
-    total = await user_repo.count_users(include_inactive=True)
+    search_query = q.strip() if q else None
+    users = await user_repo.list_users(limit=limit, offset=offset, include_inactive=True, search_query=search_query)
+    total = await user_repo.count_users(include_inactive=True, search_query=search_query)
 
     return UserListResponse(
         users=[

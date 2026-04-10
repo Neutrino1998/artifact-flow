@@ -11,6 +11,7 @@ import MessageList from './MessageList';
 import MessageInput from './MessageInput';
 import StreamingMessage from './StreamingMessage';
 import ConversationBrowser from './ConversationBrowser';
+import UserManagementPanel from './UserManagementPanel';
 
 function getGreeting(): string {
   const hour = new Date().getHours();
@@ -35,6 +36,7 @@ export default function ChatPanel() {
   const { loadArtifacts, selectArtifact } = useArtifacts();
 
   const conversationBrowserVisible = useUIStore((s) => s.conversationBrowserVisible);
+  const userManagementVisible = useUIStore((s) => s.userManagementVisible);
 
   const [isDragOver, setIsDragOver] = useState(false);
 
@@ -92,6 +94,10 @@ export default function ChatPanel() {
     if (e.currentTarget.contains(e.relatedTarget as Node)) return;
     setIsDragOver(false);
   }, []);
+
+  if (userManagementVisible) {
+    return <UserManagementPanel />;
+  }
 
   if (conversationBrowserVisible) {
     return <ConversationBrowser />;

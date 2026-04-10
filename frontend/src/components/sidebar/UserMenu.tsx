@@ -3,7 +3,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { useAuthStore } from '@/stores/authStore';
 import { useUIStore } from '@/stores/uiStore';
-import UserManagementModal from './UserManagementModal';
 
 export default function UserMenu({ collapsed }: { collapsed?: boolean }) {
   const user = useAuthStore((s) => s.user);
@@ -11,7 +10,7 @@ export default function UserMenu({ collapsed }: { collapsed?: boolean }) {
   const toggleTheme = useUIStore((s) => s.toggleTheme);
   const theme = useUIStore((s) => s.theme);
   const [popoverOpen, setPopoverOpen] = useState(false);
-  const [modalOpen, setModalOpen] = useState(false);
+  const setUserManagementVisible = useUIStore((s) => s.setUserManagementVisible);
   const containerRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const [popoverStyle, setPopoverStyle] = useState<React.CSSProperties>({});
@@ -54,7 +53,7 @@ export default function UserMenu({ collapsed }: { collapsed?: boolean }) {
 
   const handleManageUsers = () => {
     setPopoverOpen(false);
-    setModalOpen(true);
+    setUserManagementVisible(true);
   };
 
   if (!user) return null;
@@ -167,8 +166,6 @@ export default function UserMenu({ collapsed }: { collapsed?: boolean }) {
         )}
       </div>
 
-      {/* User management modal */}
-      <UserManagementModal open={modalOpen} onClose={() => setModalOpen(false)} />
     </>
   );
 }

@@ -38,6 +38,7 @@ export default function Sidebar() {
   const setArtifactPanelVisible = useUIStore((s) => s.setArtifactPanelVisible);
 
   const setConversationBrowserVisible = useUIStore((s) => s.setConversationBrowserVisible);
+  const setUserManagementVisible = useUIStore((s) => s.setUserManagementVisible);
 
   const handleNewChat = () => {
     setCurrent(null);
@@ -45,6 +46,7 @@ export default function Sidebar() {
     resetArtifacts();
     setArtifactPanelVisible(false);
     setConversationBrowserVisible(false);
+    setUserManagementVisible(false);
   };
 
   const handleSearchChat = () => {
