@@ -317,8 +317,8 @@ class TestTruncation:
         all_content = " ".join(m["content"] for m in messages)
         assert "current" in all_content
 
-    def test_no_meta_no_model_not_truncated(self):
-        """Without _meta and no model fallback, total=0 → no truncation."""
+    def test_no_meta_not_truncated(self):
+        """Without _meta, total=0 → no truncation (llm.py guarantees _meta in normal flow)."""
         messages = [
             {"role": "user", "content": "Q1"},
             {"role": "assistant", "content": "A1"},  # no _meta
@@ -358,60 +358,6 @@ class TestTruncation:
         assert result[1]["content"] == "Q4"
         assert result[2]["content"] == "A4"
 
-    def test_no_meta_with_model_fallback(self):
-        """When _meta is absent but model is provided, use token_counter fallback."""
-        messages = [
-            {"role": "user", "content": "Q1"},
-            {"role": "assistant", "content": "A1"},  # no _meta
-            {"role": "user", "content": "Q2"},
-            {"role": "assistant", "content": "A2"},  # no _meta
-        ]
-        with patch("litellm.token_counter") as mock_tc:
-            # Total estimation: token_counter(messages) returns 200 (over budget=100)
-            # Prefix savings for A1: token_counter(messages[:2]) returns 80
-            # 200 - 80 = 120 > 100, continue
-            # Only 1 cuttable (2 AIs, preserve=1), cut at A1
-            mock_tc.side_effect = lambda **kwargs: (
-                200 if len(kwargs.get("messages", [])) == 4
-                else 80
-            )
-            result = ContextManager.truncate_messages(
-                messages, budget=100, preserve_ai_msgs=1, model="test-model"
-            )
-        assert "truncated" in result[0]["content"]
-        assert result[1]["content"] == "Q2"
-
-    def test_build_fallback_when_no_meta(self):
-        """build() should fallback to token_counter for total when no _meta exists."""
-        agent = _FakeAgentConfig()
-        history = [
-            {"role": "user", "content": "old question"},
-            {"role": "assistant", "content": "old answer"},  # no _meta
-            {"role": "user", "content": "newer question"},
-            {"role": "assistant", "content": "newer answer"},  # no _meta
-        ]
-        state = _make_state(
-            conversation_history=history,
-            events=[
-                _make_event(StreamEventType.USER_INPUT.value, data={"content": "current"}),
-            ],
-        )
-
-        with patch("core.context_manager.config.CONTEXT_MAX_TOKENS", 50), \
-             patch("core.context_manager.config.TRUNCATION_PRESERVE_AI_MSGS", 1), \
-             patch("litellm.token_counter") as mock_tc:
-            # Simulate: token_counter returns 200 for all messages (over budget=50)
-            # Then for truncation prefix: token_counter(messages[:2]) = 80
-            mock_tc.side_effect = lambda **kwargs: (
-                200 if len(kwargs.get("messages", [])) >= 4
-                else 80
-            )
-            messages = _build(agent, state=state, tools={}, model="test-model")
-
-        # Should have truncated (marker present) and kept "current"
-        all_content = " ".join(m["content"] for m in messages)
-        assert "truncated" in all_content
-        assert "current" in all_content
 
 
 # ============================================================

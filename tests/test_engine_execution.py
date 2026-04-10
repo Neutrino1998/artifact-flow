@@ -777,3 +777,43 @@ class TestMetrics:
         assert metrics["first_input_tokens"] == 100
         assert metrics["last_input_tokens"] == 200
         assert metrics["last_output_tokens"] == 30
+
+    async def test_token_usage_estimated_when_provider_returns_none(self):
+        """When provider doesn't return usage, llm.py estimates via token_counter."""
+        from models.llm import astream_with_retry
+
+        # Mock acompletion to return a stream with no usage
+        async def fake_response():
+            """Simulate a stream with content but no usage."""
+            from unittest.mock import MagicMock
+
+            chunk = MagicMock()
+            chunk.usage = None
+            chunk.choices = [MagicMock()]
+            chunk.choices[0].delta.content = "Hello"
+            chunk.choices[0].delta.reasoning_content = None
+            yield chunk
+
+            # Final chunk with no choices, no usage
+            end = MagicMock()
+            end.usage = None
+            end.choices = []
+            yield end
+
+        with patch("models.llm.acompletion", return_value=fake_response()), \
+             patch("litellm.token_counter", return_value=42):
+            chunks = []
+            async for chunk in astream_with_retry(
+                [{"role": "user", "content": "hi"}], model="fake-model"
+            ):
+                chunks.append(chunk)
+
+        # Should have usage and final chunks with estimated values
+        usage_chunks = [c for c in chunks if c["type"] == "usage"]
+        assert len(usage_chunks) == 1
+        assert usage_chunks[0]["token_usage"]["prompt_tokens"] == 42
+        assert usage_chunks[0]["token_usage"]["completion_tokens"] == 42
+
+        final_chunks = [c for c in chunks if c["type"] == "final"]
+        assert len(final_chunks) == 1
+        assert final_chunks[0]["token_usage"]["prompt_tokens"] == 42

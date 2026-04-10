@@ -172,8 +172,24 @@ async def astream_with_retry(
                     full_content += delta.content
                     yield {"type": "content", "content": delta.content}
 
-            if token_usage:
-                yield {"type": "usage", "token_usage": token_usage}
+            # Ensure token_usage is always populated — estimate if provider didn't return it
+            if not token_usage or token_usage.get("prompt_tokens", 0) == 0:
+                try:
+                    from litellm import token_counter
+                    model_id = params["model"]
+                    est_input = token_counter(model=model_id, messages=messages)
+                    est_output = token_counter(model=model_id, text=full_content) if full_content else 0
+                    token_usage = {
+                        "prompt_tokens": est_input,
+                        "completion_tokens": est_output,
+                        "total_tokens": est_input + est_output,
+                    }
+                    logger.debug(f"Estimated token usage via token_counter: {token_usage}")
+                except Exception as e:
+                    logger.warning(f"Token usage estimation failed: {e}")
+                    token_usage = token_usage or {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+
+            yield {"type": "usage", "token_usage": token_usage}
 
             yield {
                 "type": "final",
