@@ -50,7 +50,7 @@ docker compose exec backend python scripts/create_admin.py admin --password <you
 
 # 4. 访问
 # 前端: http://localhost:3000
-# API:  http://localhost:8000/docs
+# API 文档: http://localhost:8000/docs（需设置 ARTIFACTFLOW_DEBUG=true）
 ```
 
 **注意事项：**
@@ -74,7 +74,7 @@ cp deploy/.env.prod.example .env
 # 2. 编辑 .env，必须填写：
 #    - ARTIFACTFLOW_JWT_SECRET（生成: python -c "import secrets; print(secrets.token_urlsafe(32))"）
 #    - POSTGRES_PASSWORD（强密码）
-#    - LLM API Keys（至少一个）
+#    - DASHSCOPE_API_KEY（默认模型必填）
 ```
 
 ### 启动
@@ -186,84 +186,96 @@ docker compose -f deploy/docker-compose.intranet.yml exec backend \
 
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
-| `HOST` | `127.0.0.1` | 监听地址 |
-| `PORT` | `8000` | 监听端口 |
-| `DEBUG` | `false` | 调试模式（详细日志 + 错误信息不脱敏） |
+| `ARTIFACTFLOW_HOST` | `127.0.0.1` | 监听地址 |
+| `ARTIFACTFLOW_PORT` | `8000` | 监听端口 |
+| `ARTIFACTFLOW_DEBUG` | `false` | 调试模式（详细日志 + 错误信息不脱敏 + 启用 Swagger 文档） |
 
 ### JWT 认证
 
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
-| `JWT_SECRET` | — (**必填**) | HS256 签名密钥 |
-| `JWT_ALGORITHM` | `HS256` | 签名算法 |
-| `JWT_EXPIRY_DAYS` | `7` | Token 有效期（天） |
+| `ARTIFACTFLOW_JWT_SECRET` | — (**必填**) | HS256 签名密钥 |
+| `ARTIFACTFLOW_JWT_ALGORITHM` | `HS256` | 签名算法 |
+| `ARTIFACTFLOW_JWT_EXPIRY_DAYS` | `7` | Token 有效期（天） |
 
 ### 数据库
 
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
-| `DATABASE_URL` | — (**必填**) | 连接串，如 `sqlite+aiosqlite:///data/artifactflow.db` 或 `postgresql+asyncpg://...` |
-| `DATABASE_URLS` | `""` | 逗号分隔多地址（优先级高于 `DATABASE_URL`，取第一个） |
-| `DATABASE_POOL_SIZE` | `5` | 连接池大小 |
-| `DATABASE_MAX_OVERFLOW` | `10` | 连接池溢出上限 |
-| `DATABASE_POOL_TIMEOUT` | `30` | 获取连接超时（秒） |
-| `DATABASE_POOL_RECYCLE` | `300` | 连接回收周期（秒） |
+| `ARTIFACTFLOW_DATABASE_URL` | — (**必填**) | 连接串，如 `sqlite+aiosqlite:///data/artifactflow.db` 或 `postgresql+asyncpg://...` |
+| `ARTIFACTFLOW_DATABASE_URLS` | `""` | 逗号分隔多地址（优先级高于 `DATABASE_URL`，取第一个） |
+| `ARTIFACTFLOW_DATABASE_POOL_SIZE` | `5` | 连接池大小 |
+| `ARTIFACTFLOW_DATABASE_MAX_OVERFLOW` | `10` | 连接池溢出上限 |
+| `ARTIFACTFLOW_DATABASE_POOL_TIMEOUT` | `30` | 获取连接超时（秒） |
+| `ARTIFACTFLOW_DATABASE_POOL_RECYCLE` | `300` | 连接回收周期（秒） |
 
 ### Redis
 
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
-| `REDIS_URL` | `""` | 空 = InMemory 回退；非空 = Redis 模式 |
-| `REDIS_CLUSTER` | `false` | Redis Cluster 模式 |
-| `REDIS_KEY_PREFIX` | `""` | Key 命名空间前缀（启用 Redis 时**必填**） |
-| `REDIS_MAX_CONNECTIONS` | `50` | 连接池上限 |
-| `LEASE_TTL` | `90` | 对话租约 TTL（秒），心跳每 TTL/3 续租 |
+| `ARTIFACTFLOW_REDIS_URL` | `""` | 空 = InMemory 回退；非空 = Redis 模式 |
+| `ARTIFACTFLOW_REDIS_CLUSTER` | `false` | Redis Cluster 模式 |
+| `ARTIFACTFLOW_REDIS_KEY_PREFIX` | `""` | Key 命名空间前缀（启用 Redis 时**必填**） |
+| `ARTIFACTFLOW_REDIS_MAX_CONNECTIONS` | `50` | 连接池上限 |
+| `ARTIFACTFLOW_LEASE_TTL` | `90` | 对话租约 TTL（秒），心跳每 TTL/3 续租 |
 
 ### SSE 与执行超时
 
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
-| `SSE_PING_INTERVAL` | `15` | 心跳间隔（秒），保持连接活跃 |
-| `EXECUTION_TIMEOUT` | `1800` | 总执行上限（秒），含 permission 等待 |
-| `STREAM_CLEANUP_TTL` | `60` | 执行结束后 stream 清理窗口（秒） |
-| `PERMISSION_TIMEOUT` | `300` | 单次权限等待超时（秒） |
+| `ARTIFACTFLOW_SSE_PING_INTERVAL` | `15` | 心跳间隔（秒），保持连接活跃 |
+| `ARTIFACTFLOW_EXECUTION_TIMEOUT` | `1800` | 总执行上限（秒），含 permission 等待 |
+| `ARTIFACTFLOW_STREAM_CLEANUP_TTL` | `60` | 执行结束后 stream 清理窗口（秒） |
+| `ARTIFACTFLOW_PERMISSION_TIMEOUT` | `300` | 单次权限等待超时（秒） |
 
 ### Compaction 与上下文
 
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
-| `COMPACTION_TOKEN_THRESHOLD` | `60000` | 触发跨轮 compaction 的 token 阈值 |
-| `COMPACTION_PRESERVE_PAIRS` | `2` | 保留最近 N 对不压缩 |
-| `COMPACTION_TIMEOUT` | `600` | Compaction 后台任务超时（秒） |
-| `CONTEXT_MAX_TOKENS` | `80000` | 上下文最大 token 数 |
-| `TRUNCATION_PRESERVE_AI_MSGS` | `4` | 截断时至少保留的 assistant 消息数 |
-| `INVENTORY_PREVIEW_LENGTH` | `200` | Artifact 清单预览截断长度 |
+| `ARTIFACTFLOW_COMPACTION_TOKEN_THRESHOLD` | `60000` | 触发跨轮 compaction 的 token 阈值 |
+| `ARTIFACTFLOW_COMPACTION_PRESERVE_PAIRS` | `2` | 保留最近 N 对不压缩 |
+| `ARTIFACTFLOW_COMPACTION_TIMEOUT` | `600` | Compaction 后台任务超时（秒） |
+| `ARTIFACTFLOW_CONTEXT_MAX_TOKENS` | `80000` | 上下文最大 token 数 |
+| `ARTIFACTFLOW_TRUNCATION_PRESERVE_AI_MSGS` | `4` | 截断时至少保留的 assistant 消息数 |
+| `ARTIFACTFLOW_INVENTORY_PREVIEW_LENGTH` | `200` | Artifact 清单预览截断长度 |
 
 ### CORS
 
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
-| `CORS_ORIGINS` | `["http://localhost:3000"]` | 允许的跨域来源 |
-| `CORS_ALLOW_CREDENTIALS` | `true` | 允许携带凭证 |
-| `CORS_ALLOW_METHODS` | `["*"]` | 允许的 HTTP 方法 |
-| `CORS_ALLOW_HEADERS` | `["*"]` | 允许的请求头 |
+| `ARTIFACTFLOW_CORS_ORIGINS` | `["http://localhost:3000"]` | 允许的跨域来源 |
+| `ARTIFACTFLOW_CORS_ALLOW_CREDENTIALS` | `true` | 允许携带凭证 |
+| `ARTIFACTFLOW_CORS_ALLOW_METHODS` | `["*"]` | 允许的 HTTP 方法 |
+| `ARTIFACTFLOW_CORS_ALLOW_HEADERS` | `["*"]` | 允许的请求头 |
 
 ### 其他
 
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
-| `MAX_CONCURRENT_TASKS` | `10` | 最大并发引擎执行数 |
-| `MAX_UPLOAD_SIZE` | `20971520` | 上传大小限制（字节，默认 20MB） |
-| `DEFAULT_PAGE_SIZE` | `20` | 分页默认每页条数 |
-| `MAX_PAGE_SIZE` | `100` | 分页最大每页条数 |
+| `ARTIFACTFLOW_MAX_CONCURRENT_TASKS` | `10` | 最大并发引擎执行数 |
+| `ARTIFACTFLOW_MAX_UPLOAD_SIZE` | `20971520` | 上传大小限制（字节，默认 20MB） |
+| `ARTIFACTFLOW_DEFAULT_PAGE_SIZE` | `20` | 分页默认每页条数 |
+| `ARTIFACTFLOW_MAX_PAGE_SIZE` | `100` | 分页最大每页条数 |
+
+### LLM 与工具 API Key
+
+以下变量**不使用** `ARTIFACTFLOW_` 前缀，由 LiteLLM / 工具直接读取：
+
+| 变量 | 说明 |
+|------|------|
+| `DASHSCOPE_API_KEY` | 通义千问 API（**默认模型必填**） |
+| `OPENAI_API_KEY` | OpenAI API |
+| `DEEPSEEK_API_KEY` | DeepSeek API |
+| `BOCHA_API_KEY` | Bocha Web 搜索 |
+| `JINA_API_KEY` | Jina Reader（网页抓取） |
 
 ### 启动校验规则
 
 应用启动时会验证以下条件，不满足则拒绝启动：
 
-1. `JWT_SECRET` 必须设置
-2. `DATABASE_URL` 或 `DATABASE_URLS` 必须设置
-3. 启用 Redis（`REDIS_URL` 非空）时，`REDIS_KEY_PREFIX` 必须设置
+1. `ARTIFACTFLOW_JWT_SECRET` 必须设置
+2. `ARTIFACTFLOW_DATABASE_URL` 或 `ARTIFACTFLOW_DATABASE_URLS` 必须设置
+3. 启用 Redis（`ARTIFACTFLOW_REDIS_URL` 非空）时，`ARTIFACTFLOW_REDIS_KEY_PREFIX` 必须设置
 
 ---
 

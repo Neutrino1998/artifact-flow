@@ -18,7 +18,7 @@ ArtifactFlow 是一个基于扁平 while loop 执行引擎的多 Agent 协作系
 ### 前置要求
 
 - Docker & Docker Compose
-- 至少一个 LLM API Key（DashScope / OpenAI / DeepSeek）
+- `DASHSCOPE_API_KEY` — 默认 Agent 配置使用通义千问（Qwen）模型，需要 DashScope API Key。如需使用 OpenAI 或 DeepSeek，需同时修改 `config/agents/*.md` 中的 model 字段和 `config/models/models.yaml`
 
 ### 三步启动
 
@@ -30,7 +30,7 @@ git clone <repo-url> && cd artifact-flow
 cp .env.example .env
 # 编辑 .env，填入：
 #   - ARTIFACTFLOW_JWT_SECRET（必填）
-#   - LLM API Key（至少一个）
+#   - DASHSCOPE_API_KEY（默认模型必填）
 #   - BOCHA_API_KEY（Web 搜索工具）
 
 # 3. 启动服务
@@ -43,25 +43,25 @@ docker compose exec backend python scripts/create_admin.py admin --password <you
 启动后访问：
 
 - 前端：http://localhost:3000
-- API 文档：http://localhost:8000/docs
+- API 文档：http://localhost:8000/docs （需在 `.env` 中设置 `ARTIFACTFLOW_DEBUG=true`）
 
 > 这是 Quick Trial 模式（SQLite + InMemory），适合本地试用。生产部署请参考 [部署指南](deployment.md)。
 
 ## 环境变量速查
 
-所有环境变量使用 `ARTIFACTFLOW_` 前缀，完整列表见 `src/config.py`。
+所有应用级变量使用 `ARTIFACTFLOW_` 前缀（通过 Pydantic Settings 自动映射），完整列表见 [部署指南 - 环境变量完整参考](deployment.md#环境变量完整参考)。
 
 | 变量 | 必填 | 默认值 | 说明 |
 |------|------|--------|------|
-| `JWT_SECRET` | **是** | — | JWT 签名密钥，`python -c "import secrets; print(secrets.token_urlsafe(32))"` 生成 |
-| `DATABASE_URL` | **是** | — | 数据库连接串，如 `sqlite+aiosqlite:///data/artifactflow.db` |
-| `REDIS_URL` | 否 | `""` (InMemory) | Redis 连接串，生产环境建议配置 |
-| `REDIS_KEY_PREFIX` | 启用 Redis 时必填 | `""` | Redis key 命名空间前缀 |
-| `DEBUG` | 否 | `false` | 开启调试日志和详细错误信息 |
-| `EXECUTION_TIMEOUT` | 否 | `1800` | 总执行超时（秒） |
-| `PERMISSION_TIMEOUT` | 否 | `300` | 单次权限等待超时（秒） |
-| `COMPACTION_TOKEN_THRESHOLD` | 否 | `60000` | 触发上下文压缩的 token 阈值 |
-| `MAX_CONCURRENT_TASKS` | 否 | `10` | 最大并发引擎执行数 |
+| `ARTIFACTFLOW_JWT_SECRET` | **是** | — | JWT 签名密钥，`python -c "import secrets; print(secrets.token_urlsafe(32))"` 生成 |
+| `ARTIFACTFLOW_DATABASE_URL` | **是** | — | 数据库连接串，如 `sqlite+aiosqlite:///data/artifactflow.db` |
+| `ARTIFACTFLOW_REDIS_URL` | 否 | `""` (InMemory) | Redis 连接串，生产环境建议配置 |
+| `ARTIFACTFLOW_REDIS_KEY_PREFIX` | 启用 Redis 时必填 | `""` | Redis key 命名空间前缀 |
+| `ARTIFACTFLOW_DEBUG` | 否 | `false` | 开启调试日志、详细错误信息和 Swagger 文档 |
+| `ARTIFACTFLOW_EXECUTION_TIMEOUT` | 否 | `1800` | 总执行超时（秒） |
+| `ARTIFACTFLOW_PERMISSION_TIMEOUT` | 否 | `300` | 单次权限等待超时（秒） |
+| `ARTIFACTFLOW_COMPACTION_TOKEN_THRESHOLD` | 否 | `60000` | 触发上下文压缩的 token 阈值 |
+| `ARTIFACTFLOW_MAX_CONCURRENT_TASKS` | 否 | `10` | 最大并发引擎执行数 |
 
 LLM 和工具的 API Key 不使用 `ARTIFACTFLOW_` 前缀，直接设置：
 
