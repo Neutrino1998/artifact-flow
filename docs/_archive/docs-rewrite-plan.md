@@ -377,3 +377,4 @@ docs/
 - 避免引用已移除的 LangGraph / LangChain
 - 配置示例使用实际的 config/ 文件内容
 - 保持 CLAUDE.md 中的架构决策与文档一致（CLAUDE.md 作为 AI 精简版，docs 作为人类详细版）
+- 架构图、流程图、时序图统一使用 Mermaid 语法（不使用 ASCII 图），便于 MkDocs 渲染和维护
