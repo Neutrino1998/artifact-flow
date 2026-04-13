@@ -15,7 +15,7 @@ from sqlalchemy import text
 
 from config import config, validate_config
 from api.dependencies import init_globals, close_globals, get_db_manager, get_redis_client
-from api.routers import auth, chat, artifacts, stream
+from api.routers import admin, auth, chat, artifacts, stream
 from utils.doc_converter import DocConverter
 from utils.logger import get_logger
 
@@ -95,6 +95,11 @@ def create_app() -> FastAPI:
         stream.router,
         prefix="/api/v1/stream",
         tags=["stream"]
+    )
+    app.include_router(
+        admin.router,
+        prefix="/api/v1/admin",
+        tags=["admin"]
     )
 
     # 健康检查端点

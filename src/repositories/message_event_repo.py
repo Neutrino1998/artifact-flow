@@ -10,7 +10,7 @@ from sqlalchemy import select, func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from db.models import MessageEvent
+from db.models import Message, MessageEvent
 from utils.logger import get_logger
 
 logger = get_logger("ArtifactFlow")
@@ -101,6 +101,25 @@ class MessageEventRepository:
         stmt = (
             select(MessageEvent)
             .where(MessageEvent.message_id == message_id)
+            .order_by(MessageEvent.id)
+        )
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
+    async def get_by_conversation(self, conversation_id: str) -> List[MessageEvent]:
+        """
+        获取对话的所有事件（跨 message）
+
+        Args:
+            conversation_id: 对话ID
+
+        Returns:
+            事件列表（按 id 排序）
+        """
+        stmt = (
+            select(MessageEvent)
+            .join(Message, MessageEvent.message_id == Message.id)
+            .where(Message.conversation_id == conversation_id)
             .order_by(MessageEvent.id)
         )
         result = await self.session.execute(stmt)

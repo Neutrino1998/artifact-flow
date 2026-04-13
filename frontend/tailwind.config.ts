@@ -77,6 +77,9 @@ const config: Config = {
         float: 'var(--shadow-float)',
         sidebar: 'var(--shadow-sidebar)',
       },
+      animation: {
+        'spin-once': 'spin 0.6s ease-in-out',
+      },
     },
   },
   plugins: [require('@tailwindcss/typography')],

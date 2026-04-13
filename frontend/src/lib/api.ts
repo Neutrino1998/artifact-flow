@@ -291,6 +291,65 @@ export function getMessageEvents(convId: string, msgId: string) {
   );
 }
 
+// Admin Observability
+export interface AdminConversationSummary {
+  id: string;
+  title: string | null;
+  user_id: string | null;
+  user_display_name: string | null;
+  message_count: number;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AdminConversationListResponse {
+  conversations: AdminConversationSummary[];
+  total: number;
+  has_more: boolean;
+}
+
+export interface AdminEventItem {
+  id: number;
+  event_type: string;
+  agent_name: string | null;
+  data: Record<string, unknown> | null;
+  created_at: string;
+}
+
+export interface AdminMessageGroup {
+  message_id: string;
+  user_input: string;
+  response: string | null;
+  created_at: string;
+  events: AdminEventItem[];
+  execution_metrics: Record<string, unknown> | null;
+}
+
+export interface AdminConversationEventsResponse {
+  conversation_id: string;
+  title: string | null;
+  messages: AdminMessageGroup[];
+}
+
+export function listAdminConversations(
+  limit = 20,
+  offset = 0,
+  query?: string,
+  userId?: string,
+) {
+  const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+  if (query) params.set('q', query);
+  if (userId) params.set('user_id', userId);
+  return request<AdminConversationListResponse>(`/api/v1/admin/conversations?${params}`);
+}
+
+export function getAdminConversationEvents(convId: string) {
+  return request<AdminConversationEventsResponse>(
+    `/api/v1/admin/conversations/${convId}/events`
+  );
+}
+
 // User Management (Admin)
 export function listUsers(limit = 50, offset = 0, query?: string) {
   const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });

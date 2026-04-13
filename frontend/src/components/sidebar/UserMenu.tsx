@@ -11,6 +11,7 @@ export default function UserMenu({ collapsed }: { collapsed?: boolean }) {
   const theme = useUIStore((s) => s.theme);
   const [popoverOpen, setPopoverOpen] = useState(false);
   const setUserManagementVisible = useUIStore((s) => s.setUserManagementVisible);
+  const setObservabilityVisible = useUIStore((s) => s.setObservabilityVisible);
   const containerRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const [popoverStyle, setPopoverStyle] = useState<React.CSSProperties>({});
@@ -54,6 +55,11 @@ export default function UserMenu({ collapsed }: { collapsed?: boolean }) {
   const handleManageUsers = () => {
     setPopoverOpen(false);
     setUserManagementVisible(true);
+  };
+
+  const handleObservability = () => {
+    setPopoverOpen(false);
+    setObservabilityVisible(true);
   };
 
   if (!user) return null;
@@ -146,6 +152,19 @@ export default function UserMenu({ collapsed }: { collapsed?: boolean }) {
                   <path d="M2 14c0-3.3 2.7-6 6-6s6 2.7 6 6" />
                 </svg>
                 管理用户
+              </button>
+            )}
+
+            {/* Admin: observability */}
+            {isAdmin && (
+              <button
+                onClick={handleObservability}
+                className="w-full flex items-center gap-2 px-2.5 py-2 text-text-primary dark:text-text-primary-dark hover:bg-surface dark:hover:bg-surface-dark rounded-lg transition-colors"
+              >
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+                  <path d="M1 8h2l2-5 3 10 2-5h2l2-3h1" />
+                </svg>
+                运行监控
               </button>
             )}
 

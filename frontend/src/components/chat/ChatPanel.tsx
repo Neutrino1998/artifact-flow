@@ -12,6 +12,7 @@ import MessageInput from './MessageInput';
 import StreamingMessage from './StreamingMessage';
 import ConversationBrowser from './ConversationBrowser';
 import UserManagementPanel from './UserManagementPanel';
+import ObservabilityPanel from './ObservabilityPanel';
 import { useAuthStore } from '@/stores/authStore';
 
 function getGreeting(): string {
@@ -38,6 +39,7 @@ export default function ChatPanel() {
 
   const conversationBrowserVisible = useUIStore((s) => s.conversationBrowserVisible);
   const userManagementVisible = useUIStore((s) => s.userManagementVisible);
+  const observabilityVisible = useUIStore((s) => s.observabilityVisible);
   const isAdmin = useAuthStore((s) => s.user?.role === 'admin');
 
   const [isDragOver, setIsDragOver] = useState(false);
@@ -96,6 +98,10 @@ export default function ChatPanel() {
     if (e.currentTarget.contains(e.relatedTarget as Node)) return;
     setIsDragOver(false);
   }, []);
+
+  if (observabilityVisible && isAdmin) {
+    return <ObservabilityPanel />;
+  }
 
   if (userManagementVisible && isAdmin) {
     return <UserManagementPanel />;

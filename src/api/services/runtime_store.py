@@ -79,6 +79,12 @@ class RuntimeStore(Protocol):
 
     def get_lease_key(self, conversation_id: str) -> str: ...
 
+    # ── Active conversations ──
+
+    async def list_active_conversations(self) -> List[str]:
+        """Return conversation IDs that currently hold a lease."""
+        ...
+
     # ── Lifecycle ──
 
     async def cleanup_execution(self, conversation_id: str, message_id: str) -> None: ...
@@ -262,6 +268,11 @@ class InMemoryRuntimeStore:
         if not self._is_key_alive(key):
             return None
         return self._owner_keys[key][0]
+
+    # ── Active conversations ──
+
+    async def list_active_conversations(self) -> List[str]:
+        return list(self._conversation_leases.keys())
 
     # ── Lease key ──
 

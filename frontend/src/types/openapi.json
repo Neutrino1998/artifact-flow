@@ -156,6 +156,23 @@
               "default": 0,
               "title": "Offset"
             }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 200
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Q"
+            }
           }
         ],
         "responses": {
@@ -320,6 +337,23 @@
               "minimum": 0,
               "default": 0,
               "title": "Offset"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 200
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Q"
             }
           }
         ],
@@ -927,7 +961,7 @@
           "artifacts"
         ],
         "summary": "Export Artifact",
-        "description": "Export an artifact to a different format.\nCurrently supports exporting text/markdown artifacts to docx.",
+        "description": "Export an artifact to a different format.\nCurrently supports exporting text/markdown artifacts to docx.\n\nNote: reads from DB only \u2014 during execution, exports the last flushed\nversion, not in-memory edits.  Frontend hides export while streaming.",
         "operationId": "export_artifact_api_v1_artifacts__session_id___artifact_id__export_get",
         "security": [
           {
@@ -1050,7 +1084,7 @@
           "artifacts"
         ],
         "summary": "Get Version",
-        "description": "\u83b7\u53d6\u7279\u5b9a\u7248\u672c\u7684\u5b8c\u6574\u5185\u5bb9",
+        "description": "\u83b7\u53d6\u7279\u5b9a\u7248\u672c\u7684\u5b8c\u6574\u5185\u5bb9\n\nNote: DB-only \u2014 unflushed in-memory versions return 404.\nFrontend hides version selector while streaming, so this is unreachable\nfor versions that only exist in cache.",
         "operationId": "get_version_api_v1_artifacts__session_id___artifact_id__versions__version__get",
         "security": [
           {
@@ -1156,6 +1190,150 @@
         }
       }
     },
+    "/api/v1/admin/conversations": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "List Admin Conversations",
+        "description": "List all conversations (admin view) with active execution status.",
+        "operationId": "list_admin_conversations_api_v1_admin_conversations_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 20,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 200
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Q"
+            }
+          },
+          {
+            "name": "user_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 64
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "User Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminConversationListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/conversations/{conv_id}/events": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Get Admin Conversation Events",
+        "description": "Get all events for a conversation, grouped by message.",
+        "operationId": "get_admin_conversation_events_api_v1_admin_conversations__conv_id__events_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "conv_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Conv Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminConversationEventsResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/health/live": {
       "get": {
         "summary": "Liveness",
@@ -1191,6 +1369,249 @@
   },
   "components": {
     "schemas": {
+      "AdminConversationEventsResponse": {
+        "properties": {
+          "conversation_id": {
+            "type": "string",
+            "title": "Conversation Id"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "messages": {
+            "items": {
+              "$ref": "#/components/schemas/AdminMessageGroup"
+            },
+            "type": "array",
+            "title": "Messages"
+          }
+        },
+        "type": "object",
+        "required": [
+          "conversation_id",
+          "title",
+          "messages"
+        ],
+        "title": "AdminConversationEventsResponse",
+        "description": "GET /api/v1/admin/conversations/{conv_id}/events response"
+      },
+      "AdminConversationListResponse": {
+        "properties": {
+          "conversations": {
+            "items": {
+              "$ref": "#/components/schemas/AdminConversationSummary"
+            },
+            "type": "array",
+            "title": "Conversations"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "has_more": {
+            "type": "boolean",
+            "title": "Has More"
+          }
+        },
+        "type": "object",
+        "required": [
+          "conversations",
+          "total",
+          "has_more"
+        ],
+        "title": "AdminConversationListResponse",
+        "description": "GET /api/v1/admin/conversations response"
+      },
+      "AdminConversationSummary": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
+          },
+          "user_display_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Display Name"
+          },
+          "message_count": {
+            "type": "integer",
+            "title": "Message Count",
+            "default": 0
+          },
+          "is_active": {
+            "type": "boolean",
+            "title": "Is Active",
+            "default": false
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "title",
+          "user_id",
+          "user_display_name",
+          "message_count",
+          "is_active",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "AdminConversationSummary",
+        "description": "Conversation summary for admin view"
+      },
+      "AdminEventItem": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "event_type": {
+            "type": "string",
+            "title": "Event Type"
+          },
+          "agent_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Name"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "event_type",
+          "agent_name",
+          "data",
+          "created_at"
+        ],
+        "title": "AdminEventItem",
+        "description": "Single event in admin event timeline"
+      },
+      "AdminMessageGroup": {
+        "properties": {
+          "message_id": {
+            "type": "string",
+            "title": "Message Id"
+          },
+          "user_input": {
+            "type": "string",
+            "title": "User Input"
+          },
+          "response": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Response"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/AdminEventItem"
+            },
+            "type": "array",
+            "title": "Events"
+          },
+          "execution_metrics": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Execution Metrics"
+          }
+        },
+        "type": "object",
+        "required": [
+          "message_id",
+          "user_input",
+          "response",
+          "created_at",
+          "events",
+          "execution_metrics"
+        ],
+        "title": "AdminMessageGroup",
+        "description": "Events grouped by message"
+      },
       "ArtifactListResponse": {
         "properties": {
           "session_id": {

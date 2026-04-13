@@ -343,6 +343,9 @@ export interface paths {
          * Export Artifact
          * @description Export an artifact to a different format.
          *     Currently supports exporting text/markdown artifacts to docx.
+         *
+         *     Note: reads from DB only — during execution, exports the last flushed
+         *     version, not in-memory edits.  Frontend hides export while streaming.
          */
         get: operations["export_artifact_api_v1_artifacts__session_id___artifact_id__export_get"];
         put?: never;
@@ -383,6 +386,10 @@ export interface paths {
         /**
          * Get Version
          * @description 获取特定版本的完整内容
+         *
+         *     Note: DB-only — unflushed in-memory versions return 404.
+         *     Frontend hides version selector while streaming, so this is unreachable
+         *     for versions that only exist in cache.
          */
         get: operations["get_version_api_v1_artifacts__session_id___artifact_id__versions__version__get"];
         put?: never;
@@ -430,6 +437,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/conversations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Admin Conversations
+         * @description List all conversations (admin view) with active execution status.
+         */
+        get: operations["list_admin_conversations_api_v1_admin_conversations_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/conversations/{conv_id}/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Admin Conversation Events
+         * @description Get all events for a conversation, grouped by message.
+         */
+        get: operations["get_admin_conversation_events_api_v1_admin_conversations__conv_id__events_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/health/live": {
         parameters: {
             query?: never;
@@ -468,6 +515,108 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /**
+         * AdminConversationEventsResponse
+         * @description GET /api/v1/admin/conversations/{conv_id}/events response
+         */
+        AdminConversationEventsResponse: {
+            /** Conversation Id */
+            conversation_id: string;
+            /** Title */
+            title: string | null;
+            /** Messages */
+            messages: components["schemas"]["AdminMessageGroup"][];
+        };
+        /**
+         * AdminConversationListResponse
+         * @description GET /api/v1/admin/conversations response
+         */
+        AdminConversationListResponse: {
+            /** Conversations */
+            conversations: components["schemas"]["AdminConversationSummary"][];
+            /** Total */
+            total: number;
+            /** Has More */
+            has_more: boolean;
+        };
+        /**
+         * AdminConversationSummary
+         * @description Conversation summary for admin view
+         */
+        AdminConversationSummary: {
+            /** Id */
+            id: string;
+            /** Title */
+            title: string | null;
+            /** User Id */
+            user_id: string | null;
+            /** User Display Name */
+            user_display_name: string | null;
+            /**
+             * Message Count
+             * @default 0
+             */
+            message_count: number;
+            /**
+             * Is Active
+             * @default false
+             */
+            is_active: boolean;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /**
+         * AdminEventItem
+         * @description Single event in admin event timeline
+         */
+        AdminEventItem: {
+            /** Id */
+            id: number;
+            /** Event Type */
+            event_type: string;
+            /** Agent Name */
+            agent_name: string | null;
+            /** Data */
+            data: {
+                [key: string]: unknown;
+            } | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /**
+         * AdminMessageGroup
+         * @description Events grouped by message
+         */
+        AdminMessageGroup: {
+            /** Message Id */
+            message_id: string;
+            /** User Input */
+            user_input: string;
+            /** Response */
+            response: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Events */
+            events: components["schemas"]["AdminEventItem"][];
+            /** Execution Metrics */
+            execution_metrics: {
+                [key: string]: unknown;
+            } | null;
+        };
         /**
          * ArtifactListResponse
          * @description GET /api/v1/artifacts/{session_id} response
@@ -1191,6 +1340,7 @@ export interface operations {
             query?: {
                 limit?: number;
                 offset?: number;
+                q?: string | null;
             };
             header?: never;
             path?: never;
@@ -1291,6 +1441,7 @@ export interface operations {
             query?: {
                 limit?: number;
                 offset?: number;
+                q?: string | null;
             };
             header?: never;
             path?: never;
@@ -1828,6 +1979,71 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_admin_conversations_api_v1_admin_conversations_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                offset?: number;
+                q?: string | null;
+                user_id?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminConversationListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_admin_conversation_events_api_v1_admin_conversations__conv_id__events_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                conv_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminConversationEventsResponse"];
                 };
             };
             /** @description Validation Error */

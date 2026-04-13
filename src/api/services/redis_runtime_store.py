@@ -328,6 +328,21 @@ class RedisRuntimeStore:
         redis_key = self._prefixed(key)
         return await self._redis.get(redis_key)
 
+    # ── Active conversations ──
+
+    async def list_active_conversations(self) -> List[str]:
+        """Scan for active conversation leases and return conversation IDs."""
+        pattern = f"{{{self._prefix}:*}}:lease"
+        conv_ids: List[str] = []
+        async for key in self._redis.scan_iter(match=pattern, count=100):
+            # Key format: {prefix:conv_id}:lease
+            k = key if isinstance(key, str) else key.decode()
+            # Extract conv_id from {prefix:conv_id}:lease
+            start = k.index(":") + 1  # after prefix:
+            end = k.index("}")
+            conv_ids.append(k[start:end])
+        return conv_ids
+
     # ── Lease key ──
 
     def get_lease_key(self, conversation_id: str) -> str:

@@ -334,6 +334,9 @@ async def execute_loop(
         output_tokens = normalized_usage["output_tokens"]
         logger.debug(f"[{agent_name}] LLM Response (input: {input_tokens}, output: {output_tokens}):\n{response_content[:500]}")
 
+        if reasoning_content:
+            logger.debug(f"[{agent_name}] Reasoning:\n{reasoning_content[:500]}")
+
         return response_content, reasoning_content, token_usage
 
     async def _handle_permission(tool_name: str, params: dict, agent_name: str, permission: ToolPermission) -> bool:
@@ -551,6 +554,7 @@ async def execute_loop(
 
             await _emit(StreamEventType.AGENT_START.value, current_agent_name, {
                 "agent": current_agent_name,
+                "system_prompt": messages[0]["content"] if messages and messages[0].get("role") == "system" else None,
             })
 
             logger.debug(f"[{current_agent_name}] Messages:\n{format_messages_for_debug(messages)}")

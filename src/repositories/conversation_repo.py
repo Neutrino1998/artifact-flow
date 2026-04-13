@@ -7,7 +7,7 @@
 import re
 from typing import Optional, List, Dict, Any
 
-from sqlalchemy import select, func, update
+from sqlalchemy import or_, select, func, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -188,7 +188,10 @@ class ConversationRepository(BaseRepository[Conversation]):
 
         if title_query:
             escaped = re.sub(r"([%_\\])", r"\\\1", title_query)
-            query = query.where(Conversation.title.ilike(f"%{escaped}%"))
+            query = query.where(or_(
+                Conversation.title.ilike(f"%{escaped}%"),
+                Conversation.id == title_query,
+            ))
 
         if order_by_updated:
             query = query.order_by(Conversation.updated_at.desc())
@@ -214,7 +217,10 @@ class ConversationRepository(BaseRepository[Conversation]):
             query = query.where(Conversation.user_id == user_id)
         if title_query:
             escaped = re.sub(r"([%_\\])", r"\\\1", title_query)
-            query = query.where(Conversation.title.ilike(f"%{escaped}%"))
+            query = query.where(or_(
+                Conversation.title.ilike(f"%{escaped}%"),
+                Conversation.id == title_query,
+            ))
         result = await self._session.execute(query)
         return result.scalar_one()
 
