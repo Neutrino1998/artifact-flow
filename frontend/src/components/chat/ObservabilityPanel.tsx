@@ -130,10 +130,10 @@ export default function ObservabilityPanel() {
     return (
       <div className="flex-1 flex items-center justify-center bg-chat dark:bg-chat-dark">
         <div className="text-center">
-          <div className="text-text-tertiary dark:text-text-tertiary-dark text-sm">
+          <div className="text-text-secondary dark:text-text-secondary-dark text-3xl font-semibold">
             从侧栏选择一个对话查看事件时间线
           </div>
-          <div className="text-text-tertiary dark:text-text-tertiary-dark text-xs mt-1">
+          <div className="text-text-tertiary dark:text-text-tertiary-dark mt-1">
             或使用「搜索对话」查找更多
           </div>
         </div>
@@ -188,25 +188,97 @@ export default function ObservabilityPanel() {
 
       {/* Detail panel */}
       {selectedEvent != null ? (
-        <div className="w-[360px] flex-shrink-0 flex flex-col overflow-hidden border-l border-border dark:border-border-dark">
-          <div className="px-4 pt-3 pb-2 border-b border-border dark:border-border-dark flex items-center justify-between">
-            <h3 className="text-sm font-semibold text-text-primary dark:text-text-primary-dark">
-              {selectedEvent.event_type}
-            </h3>
-            <button
-              onClick={() => setSelectedEvent(null)}
-              className="p-1 rounded-md text-text-tertiary dark:text-text-tertiary-dark hover:text-text-secondary dark:hover:text-text-secondary-dark transition-colors"
-            >
-              <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
-                <path d="M4 4l8 8M12 4l-8 8" />
-              </svg>
-            </button>
-          </div>
-          <div className="flex-1 overflow-y-auto px-4 py-3">
-            <EventDetail event={selectedEvent} />
-          </div>
-        </div>
+        <DetailPanel event={selectedEvent} onClose={() => setSelectedEvent(null)} />
       ) : null}
+    </div>
+  );
+}
+
+function serializeEventToText(event: AdminEventItem): string {
+  const lines: string[] = [];
+  const d = event.data;
+  lines.push(`ID: ${event.id}`);
+  lines.push(`类型: ${event.event_type}`);
+  lines.push(`Agent: ${event.agent_name || '-'}`);
+  lines.push(`时间: ${new Date(event.created_at).toLocaleString('zh-CN')}`);
+
+  if (d != null && event.event_type === 'llm_complete') {
+    lines.push(`模型: ${(d.model as string) || '-'}`);
+    lines.push(`耗时: ${d.duration_ms as number}ms`);
+    if (d.token_usage != null) {
+      const t = d.token_usage as Record<string, number>;
+      lines.push(`Tokens: in: ${t.input_tokens} | out: ${t.output_tokens}`);
+    }
+    if (d.reasoning_content != null) lines.push(`\n--- Reasoning ---\n${d.reasoning_content as string}`);
+    if (d.content != null) lines.push(`\n--- Response ---\n${d.content as string}`);
+  }
+  if (d != null && (event.event_type === 'tool_start' || event.event_type === 'tool_complete')) {
+    lines.push(`工具: ${(d.tool as string) || '-'}`);
+    if (d.duration_ms != null) lines.push(`耗时: ${d.duration_ms}ms`);
+    if (d.success != null) lines.push(`状态: ${d.success ? 'OK' : 'FAIL'}`);
+    if (d.params != null) lines.push(`\n--- Params ---\n${JSON.stringify(d.params, null, 2)}`);
+    if (d.result_data != null) lines.push(`\n--- Result ---\n${typeof d.result_data === 'string' ? d.result_data : JSON.stringify(d.result_data, null, 2)}`);
+    if (d.error != null) lines.push(`\n--- Error ---\n${d.error as string}`);
+  }
+  if (d != null && event.event_type === 'agent_start' && d.system_prompt != null) {
+    lines.push(`\n--- System Prompt ---\n${d.system_prompt as string}`);
+  }
+  if (d != null && event.event_type === 'error') {
+    lines.push(`\n--- Error ---\n${(d.error as string) || JSON.stringify(d, null, 2)}`);
+  }
+  if (d != null && !['llm_complete', 'tool_start', 'tool_complete', 'agent_start', 'error'].includes(event.event_type)) {
+    lines.push(`\n--- Data ---\n${JSON.stringify(d, null, 2)}`);
+  }
+  return lines.join('\n');
+}
+
+function DetailPanel({ event, onClose }: { event: AdminEventItem; onClose: () => void }) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = useCallback(() => {
+    const text = serializeEventToText(event);
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    });
+  }, [event]);
+
+  return (
+    <div className="w-[360px] flex-shrink-0 flex flex-col overflow-hidden border-l border-border dark:border-border-dark">
+      <div className="px-4 pt-3 pb-2 border-b border-border dark:border-border-dark flex items-center justify-between">
+        <h3 className="text-sm font-semibold text-text-primary dark:text-text-primary-dark">
+          {event.event_type}
+        </h3>
+        <div className="flex items-center gap-1">
+          <button
+            onClick={handleCopy}
+            className="p-1 rounded-md text-text-tertiary dark:text-text-tertiary-dark hover:text-text-secondary dark:hover:text-text-secondary-dark transition-colors"
+            title="复制全部内容"
+          >
+            {copied ? (
+              <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M3.5 8.5l3 3 6-7" />
+              </svg>
+            ) : (
+              <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="5" y="5" width="9" height="9" rx="1" />
+                <path d="M11 5V3a1 1 0 00-1-1H3a1 1 0 00-1 1v7a1 1 0 001 1h2" />
+              </svg>
+            )}
+          </button>
+          <button
+            onClick={onClose}
+            className="p-1 rounded-md text-text-tertiary dark:text-text-tertiary-dark hover:text-text-secondary dark:hover:text-text-secondary-dark transition-colors"
+          >
+            <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+              <path d="M4 4l8 8M12 4l-8 8" />
+            </svg>
+          </button>
+        </div>
+      </div>
+      <div className="flex-1 overflow-y-auto px-4 py-3">
+        <EventDetail event={event} />
+      </div>
     </div>
   );
 }

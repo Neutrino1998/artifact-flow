@@ -59,7 +59,7 @@ export const useUIStore = create<UIState>((set) => ({
   }),
   setObservabilityVisible: (visible) => set({
     observabilityVisible: visible,
-    ...(visible && { conversationBrowserVisible: false, userManagementVisible: false }),
+    ...(visible && { conversationBrowserVisible: false, userManagementVisible: false, artifactPanelVisible: false }),
     ...(!visible && { observabilitySelectedConvId: null, observabilityBrowseVisible: false }),
   }),
   setObservabilitySelectedConvId: (id) => set({
