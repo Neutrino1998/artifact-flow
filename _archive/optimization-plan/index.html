@@ -1111,74 +1111,13 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#phase-10-内网离线部署" class="md-nav__link">
+  <a href="#phase-10-部署基础设施--done-101-deferred" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Phase 10: 内网离线部署
+        Phase 10: 部署基础设施 ✅ DONE (10.1 deferred)
       
     </span>
   </a>
-  
-    <nav class="md-nav" aria-label="Phase 10: 内网离线部署">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#101-应用配置改造--模型配置外部化" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        10.1 应用配置改造 — 模型配置外部化
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#102-外网构建发布流程" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        10.2 外网构建发布流程
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#103-内网-compose--配置模板" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        10.3 内网 Compose + 配置模板
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#104-内网部署-sop" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        10.4 内网部署 SOP
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#105-交付物清单" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        10.5 交付物清单
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
   
 </li>
       
@@ -1592,144 +1531,48 @@
 - <code>src/api/dependencies.py</code> — 注入 skill_repo</p>
 <p><strong>依赖</strong>: 仅依赖 Phase 4（认证，已完成）。独立于 Phase 7/8，可随时实施。</p>
 <hr />
-<h2 id="phase-10-内网离线部署">Phase 10: 内网离线部署</h2>
-<p><strong>目标</strong>: 实现"外网构建 + 内网运行"的标准化发布流程，支持无外网环境下的镜像交付和离线部署。适用场景：企业私有知识库、对接内网数据库做数据分析/报表等。</p>
-<p><strong>前置依赖</strong>: Phase 5/6（4-service 栈定型后统一改造，避免 compose 反复修改）。</p>
-<p><strong>背景</strong>: 当前 <code>docker-compose.yml</code> 是"源码构建部署"模式（service 定义包含 <code>build</code>，前端 API 地址通过构建参数写入，默认 Agent 模型指向公网服务）。外网环境可直接构建运行，但在无外网、无内网镜像仓的环境中，<code>docker compose up</code> 会遇到：构建依赖无法下载、前端回源地址不匹配、模型调用出网失败。需要把"构建时联网"与"运行时离线"彻底解耦。</p>
-<p><strong>开发者模式</strong>: Phase 5/6 完成后砍掉 SQLite 支持，只保留 PostgreSQL。本地开发采用"基础设施 Docker + 应用本地跑"模式：<code>docker-compose.dev.yml</code> 仅包含 PostgreSQL + Redis 两个 service，后端和前端本地直接运行（保留热重载和调试体验）。</p>
-<h3 id="101-应用配置改造--模型配置外部化">10.1 应用配置改造 — 模型配置外部化</h3>
-<p><strong>目标</strong>: Agent 使用的模型名、推理服务地址、API Key 全部通过环境变量注入，支持运行时从前端切换 Lead Agent 模型。</p>
-<p><strong>设计决策</strong>:
-- <strong>单 Provider</strong>：所有模型共享一个推理服务地址（内网典型场景），不做多 Provider
-- <strong>手动声明可用模型</strong>（不做自动发现）
-- <strong>env var default + per-message override</strong>：管理员通过 env var 设默认模型，用户发消息时可从前端切换 Lead Agent 模型
-- <strong>公网模式不受影响</strong>：<code>LLM_BASE_URL</code> 不设时走 litellm 默认路由（当前行为）</p>
-<p><strong>新增配置项</strong>（<code>config.py</code>，<code>ARTIFACTFLOW_</code> 前缀）:</p>
+<h2 id="phase-10-部署基础设施--done-101-deferred">Phase 10: 部署基础设施 ✅ DONE (10.1 deferred)</h2>
+<blockquote>
+<p><strong>完成于</strong>: 部署基础设施系列提交 <code>12a3bf8</code>..<code>e6b99ac</code>。</p>
+<p>实际实现超出原计划范围：不仅覆盖内网离线部署，还建立了三种部署模式（Quick Trial / Production / Intranet），支持 <code>--profile infra</code> 控制 PG/Redis 容器、<code>--scale backend=N</code> 水平扩展、PG advisory lock 保护的自动 Alembic 迁移。</p>
 <table>
 <thead>
 <tr>
-<th>配置项</th>
+<th>子项</th>
+<th>状态</th>
 <th>说明</th>
-<th>默认值</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td><code>LLM_BASE_URL</code></td>
-<td>推理服务地址（空 = litellm 默认路由）</td>
-<td><code>""</code></td>
+<td>10.1 模型配置外部化</td>
+<td>⏸️ Deferred</td>
+<td>原方案（全局 <code>LLM_BASE_URL</code> + 前端模型切换）暂不实施。当前 <code>models.yaml</code> per-model <code>base_url</code> 已覆盖内网指向内部推理端点的需求。</td>
 </tr>
 <tr>
-<td><code>LLM_API_KEY</code></td>
-<td>推理服务 API Key</td>
-<td><code>""</code></td>
+<td>10.2 外网构建发布流程</td>
+<td>✅</td>
+<td><code>scripts/release.sh</code> — build + tag + <code>docker save</code> + sha256</td>
 </tr>
 <tr>
-<td><code>LLM_AVAILABLE_MODELS</code></td>
-<td>逗号分隔的可用模型 ID（空 = 用 <code>MODEL_CONFIGS</code> 预设）</td>
-<td><code>""</code></td>
+<td>10.3 Compose + 配置模板</td>
+<td>✅</td>
+<td><code>docker-compose.yml</code>（Mode 1）、<code>docker-compose.prod.yml</code>（Mode 2）、<code>deploy/docker-compose.intranet.yml</code>（Mode 3）、<code>deploy/nginx.conf</code>、<code>deploy/.env.prod.example</code>、<code>deploy/.env.intranet.example</code></td>
 </tr>
 <tr>
-<td><code>LEAD_MODEL</code></td>
-<td>Lead Agent 默认模型</td>
-<td><code>"qwen3.5-plus"</code></td>
+<td>10.4 部署 SOP</td>
+<td>✅</td>
+<td><code>docs/_archive/deployment-sop.md</code></td>
 </tr>
 <tr>
-<td><code>WORKER_MODEL</code></td>
-<td>Search/Crawl Agent 默认模型</td>
-<td><code>"qwen3.5-flash-no-thinking"</code></td>
+<td>10.5 交付物</td>
+<td>✅</td>
+<td><code>release.sh</code> 输出结构覆盖</td>
 </tr>
 </tbody>
 </table>
-<p><strong>两种运行模式</strong>（由 <code>LLM_BASE_URL</code> 是否设置自动切换）：</p>
-<table>
-<thead>
-<tr>
-<th></th>
-<th>公网模式（当前行为）</th>
-<th>内网模式</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>可用模型来源</td>
-<td><code>MODEL_CONFIGS</code> 预设 keys</td>
-<td><code>LLM_AVAILABLE_MODELS</code> 配置</td>
-</tr>
-<tr>
-<td>模型路由</td>
-<td>litellm 按 provider 前缀路由</td>
-<td>全部走 <code>LLM_BASE_URL</code></td>
-</tr>
-<tr>
-<td>API Key</td>
-<td>各 provider 独立 env var</td>
-<td>统一 <code>LLM_API_KEY</code></td>
-</tr>
-</tbody>
-</table>
-<p><strong>改造链路</strong>（从底向上穿透）:</p>
-<ol>
-<li><strong><code>models/llm.py</code></strong> — <code>create_llm()</code> 自动注入全局 Provider（调用方未指定 <code>base_url</code> 时）；<code>get_available_models()</code> 按模式返回不同来源；保留 <code>MODEL_CONFIGS</code> 不动（公网模式的 extra_params 仍需要）</li>
-<li><strong>Agent 工厂</strong> — <code>create_lead_agent(model=)</code> 参数化，默认值改为 <code>config.LEAD_MODEL</code>；Search/Crawl 同理用 <code>config.WORKER_MODEL</code></li>
-<li><strong><code>graph.py</code></strong> — <code>create_multi_agent_graph(lead_model=)</code> 新增参数，传入 lead agent 工厂。Search/Crawl 不暴露 override（执行层模型由管理员统一配置）</li>
-<li><strong>API 层</strong> — <code>ChatRequest</code> 增加可选 <code>model</code> 字段；router 校验 model 在可用列表中后传入 graph；新增 <code>GET /api/v1/models</code> 端点返回可用模型列表 + 当前默认值</li>
-<li><strong>前端</strong> — Chat 输入区域增加模型选择下拉，页面加载时从 <code>/models</code> 获取列表，发送消息时附带选中的 model</li>
-</ol>
-<p><strong>涉及文件</strong>:</p>
-<ul>
-<li><strong>修改</strong>: <code>config.py</code>, <code>models/llm.py</code>, <code>lead_agent.py</code>, <code>search_agent.py</code>, <code>crawl_agent.py</code>, <code>graph.py</code>, <code>schemas/chat.py</code>, <code>routers/chat.py</code>, <code>main.py</code>, <code>frontend/src/lib/api.ts</code>, <code>frontend/src/components/chat/</code>, <code>.env.example</code></li>
-<li><strong>新增</strong>: <code>routers/models.py</code>, <code>schemas/model.py</code></li>
-</ul>
-<p><strong>退出标准</strong>:
-- 内网模式：设置 <code>LLM_BASE_URL</code> + <code>LLM_AVAILABLE_MODELS</code> → agent 调用走指定推理服务
-- 公网模式：不设 <code>LLM_BASE_URL</code> → 行为与改造前完全一致
-- 前端可选模型、per-message override 生效
-- <code>validate_config()</code> 在内网模式下校验默认模型在可用列表中</p>
-<hr />
-<h3 id="102-外网构建发布流程">10.2 外网构建发布流程</h3>
-<p><strong>目标</strong>: <code>scripts/release.sh</code> 一键完成版本化构建 → 冒烟验证 → 镜像导出 → sha256 校验。</p>
-<p><strong>流程</strong>: 版本号传入 → 构建 backend/frontend/nginx 三镜像（带 version label）→ 启动全栈跑健康检查 → <code>docker save</code> 导出五个 tar（含 postgres + redis-stack 基础设施镜像）→ 生成 <code>checksums.sha256</code>。</p>
-<p><strong>前端 <code>NEXT_PUBLIC_API_URL</code> 处理</strong>: 推荐每个部署环境单独构建前端镜像（方案 C）——前端镜像轻量（~50MB），<code>NEXT_PUBLIC_*</code> 是 Next.js 编译时变量，运行时替换都是 workaround。</p>
-<p><strong>退出标准</strong>:
-- <code>release.sh</code> 一键完成全流程
-- 导出的 tar 可在全新机器上 <code>docker load</code> 成功</p>
-<hr />
-<h3 id="103-内网-compose--配置模板">10.3 内网 Compose + 配置模板</h3>
-<p><strong>目标</strong>: <code>deploy/docker-compose.intranet.yml</code>（纯 <code>image</code>，无 <code>build</code>）+ <code>deploy/.env.intranet.example</code>（配置模板）。</p>
-<p><strong>关键设计</strong>:
-- 五个 service：nginx / backend / frontend / postgres / redis-stack，全部仅 <code>image</code> 引用
-- Nginx 作为唯一对外入口，按路径分流：<code>/api/*</code> → backend:8000，<code>/*</code> → frontend:3000
-- backend 和 frontend <strong>不映射端口到宿主机</strong>，仅通过 Docker 内部网络与 Nginx 通信
-- 健康检查链：redis/postgres healthy → backend healthy → frontend 启动 → nginx 启动
-- 三个 named volume 持久化（backend_data / postgres_data / redis_data）
-- DB 连接串在 compose 内拼接，敏感值（JWT secret、PG password、LLM key）从 <code>.env</code> 读取
-- 对外端口可配（<code>HTTP_PORT</code>，默认 80）</p>
-<p><strong>Nginx 配置要点</strong>:
-- 路径分流：<code>/api/</code> 和 <code>/health</code> → backend，其余 → frontend
-- SSE 支持：<code>/api/v1/stream/</code> 路径关闭 <code>proxy_buffering</code>，设长超时
-- 安全：屏蔽 <code>/docs</code> 和 <code>/redoc</code>（Swagger UI），仅内部访问
-- 可选限流：<code>limit_req_zone</code> 按 IP 限制 API 请求频率
-- 后续加 HTTPS：只需在 Nginx 配置中增加 SSL 证书，后端零改动</p>
-<p><strong><code>.env.intranet.example</code> 必填项</strong>: VERSION、JWT_SECRET、POSTGRES_PASSWORD、LLM_BASE_URL、LLM_API_KEY、LLM_AVAILABLE_MODELS、LEAD_MODEL、WORKER_MODEL。</p>
-<p><strong>退出标准</strong>:
-- 纯离线环境（镜像已 load）<code>docker compose up -d</code> 五个 service 全部 healthy
-- 通过 Nginx 端口访问前端可正常登录，API 请求正确转发
-- 直接访问 backend/frontend 端口不可达（未映射到宿主机）
-- <code>/docs</code> 路径被 Nginx 拦截，返回 403/404</p>
-<hr />
-<h3 id="104-内网部署-sop">10.4 内网部署 SOP</h3>
-<p><strong>目标</strong>: <code>deploy/deployment-guide.md</code>，运维人员无需理解技术栈即可完成部署。</p>
-<p><strong>大纲</strong>: 前置要求（Docker 24+ / 4C8G / OpenAI 兼容推理服务已部署）→ 镜像导入（sha256 校验 + docker load）→ 配置（复制 .env 模板 + 修改必填项）→ 启动 → 创建管理员 → 验证。附日常运维（日志 / 备份 / 升级）。</p>
-<p><strong>退出标准</strong>: 按手册操作可在全新机器上完成完整部署。</p>
-<hr />
-<h3 id="105-交付物清单">10.5 交付物清单</h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>artifactflow-release-${VERSION}/
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>├── images/          # 五个 tar + checksums.sha256（nginx / backend / frontend / postgres / redis-stack）
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>├── compose/         # docker-compose.intranet.yml + .env.intranet.example + nginx.conf
-<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>├── scripts/         # load-images.sh（docker load 一键脚本）
-<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>└── docs/            # deployment-guide.md
-</code></pre></div>
+<p><strong>与原计划的差异</strong>：保留了 SQLite（Mode 1 Quick Trial），未砍掉；前端 <code>NEXT_PUBLIC_API_URL</code> 用 <code>??</code>（nullish coalescing）+ Nginx 反向代理解决，无需每环境单独构建；<code>deploy/entrypoint.sh</code> 用 PG advisory lock + schema 验证保护多副本迁移安全。</p>
+</blockquote>
 <hr />
 <h2 id="phase-11-可观测性--结构化日志--运维界面">Phase 11: 可观测性 — 结构化日志 + 运维界面</h2>
 <p><strong>目标</strong>: 完整记录 Agent 执行链路（类似 LangSmith 的 trace 能力），支持按对话回溯完整的 prompt → response → tool call → tool result 链路。数据自托管，不依赖外部服务。</p>
@@ -1761,19 +1604,19 @@
 </table>
 <p>DB 写入失败时静默忽略，绝不影响主流程。现有 <code>utils/logger.py</code> 保留并输出到 stdout，DB handler 作为附加通道。</p>
 <p><strong>数据模型</strong>（一张表）:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="k">CREATE</span><span class="w"> </span><span class="k">TABLE</span><span class="w"> </span><span class="n">execution_logs</span><span class="w"> </span><span class="p">(</span>
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="w">    </span><span class="n">id</span><span class="w"> </span><span class="n">BIGSERIAL</span><span class="w"> </span><span class="k">PRIMARY</span><span class="w"> </span><span class="k">KEY</span><span class="p">,</span>
-<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="w">    </span><span class="n">ts</span><span class="w"> </span><span class="n">TIMESTAMPTZ</span><span class="w"> </span><span class="k">DEFAULT</span><span class="w"> </span><span class="n">now</span><span class="p">(),</span>
-<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="w">    </span><span class="k">level</span><span class="w"> </span><span class="nb">VARCHAR</span><span class="p">(</span><span class="mi">10</span><span class="p">),</span><span class="w">          </span><span class="c1">-- INFO / WARN / ERROR</span>
-<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="w">    </span><span class="n">conv_id</span><span class="w"> </span><span class="n">UUID</span><span class="p">,</span>
-<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a><span class="w">    </span><span class="n">request_id</span><span class="w"> </span><span class="nb">VARCHAR</span><span class="p">(</span><span class="mi">64</span><span class="p">),</span><span class="w">     </span><span class="c1">-- 请求链路追踪</span>
-<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a><span class="w">    </span><span class="n">user_id</span><span class="w"> </span><span class="n">UUID</span><span class="p">,</span>
-<a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a><span class="w">    </span><span class="n">agent</span><span class="w"> </span><span class="nb">VARCHAR</span><span class="p">(</span><span class="mi">32</span><span class="p">),</span><span class="w">          </span><span class="c1">-- lead / search / crawl</span>
-<a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a><span class="w">    </span><span class="n">tool</span><span class="w"> </span><span class="nb">VARCHAR</span><span class="p">(</span><span class="mi">64</span><span class="p">),</span>
-<a id="__codelineno-6-10" name="__codelineno-6-10" href="#__codelineno-6-10"></a><span class="w">    </span><span class="n">message</span><span class="w"> </span><span class="nb">TEXT</span><span class="p">,</span>
-<a id="__codelineno-6-11" name="__codelineno-6-11" href="#__codelineno-6-11"></a><span class="w">    </span><span class="n">extra</span><span class="w"> </span><span class="n">JSONB</span><span class="w">                 </span><span class="c1">-- duration_ms, token_count, 原始 prompt/response 等</span>
-<a id="__codelineno-6-12" name="__codelineno-6-12" href="#__codelineno-6-12"></a><span class="p">);</span>
-<a id="__codelineno-6-13" name="__codelineno-6-13" href="#__codelineno-6-13"></a><span class="k">CREATE</span><span class="w"> </span><span class="k">INDEX</span><span class="w"> </span><span class="n">idx_logs_conv_id</span><span class="w"> </span><span class="k">ON</span><span class="w"> </span><span class="n">execution_logs</span><span class="p">(</span><span class="n">conv_id</span><span class="p">,</span><span class="w"> </span><span class="n">ts</span><span class="p">);</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="k">CREATE</span><span class="w"> </span><span class="k">TABLE</span><span class="w"> </span><span class="n">execution_logs</span><span class="w"> </span><span class="p">(</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="w">    </span><span class="n">id</span><span class="w"> </span><span class="n">BIGSERIAL</span><span class="w"> </span><span class="k">PRIMARY</span><span class="w"> </span><span class="k">KEY</span><span class="p">,</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="w">    </span><span class="n">ts</span><span class="w"> </span><span class="n">TIMESTAMPTZ</span><span class="w"> </span><span class="k">DEFAULT</span><span class="w"> </span><span class="n">now</span><span class="p">(),</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="w">    </span><span class="k">level</span><span class="w"> </span><span class="nb">VARCHAR</span><span class="p">(</span><span class="mi">10</span><span class="p">),</span><span class="w">          </span><span class="c1">-- INFO / WARN / ERROR</span>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="w">    </span><span class="n">conv_id</span><span class="w"> </span><span class="n">UUID</span><span class="p">,</span>
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="w">    </span><span class="n">request_id</span><span class="w"> </span><span class="nb">VARCHAR</span><span class="p">(</span><span class="mi">64</span><span class="p">),</span><span class="w">     </span><span class="c1">-- 请求链路追踪</span>
+<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="w">    </span><span class="n">user_id</span><span class="w"> </span><span class="n">UUID</span><span class="p">,</span>
+<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a><span class="w">    </span><span class="n">agent</span><span class="w"> </span><span class="nb">VARCHAR</span><span class="p">(</span><span class="mi">32</span><span class="p">),</span><span class="w">          </span><span class="c1">-- lead / search / crawl</span>
+<a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a><span class="w">    </span><span class="n">tool</span><span class="w"> </span><span class="nb">VARCHAR</span><span class="p">(</span><span class="mi">64</span><span class="p">),</span>
+<a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a><span class="w">    </span><span class="n">message</span><span class="w"> </span><span class="nb">TEXT</span><span class="p">,</span>
+<a id="__codelineno-5-11" name="__codelineno-5-11" href="#__codelineno-5-11"></a><span class="w">    </span><span class="n">extra</span><span class="w"> </span><span class="n">JSONB</span><span class="w">                 </span><span class="c1">-- duration_ms, token_count, 原始 prompt/response 等</span>
+<a id="__codelineno-5-12" name="__codelineno-5-12" href="#__codelineno-5-12"></a><span class="p">);</span>
+<a id="__codelineno-5-13" name="__codelineno-5-13" href="#__codelineno-5-13"></a><span class="k">CREATE</span><span class="w"> </span><span class="k">INDEX</span><span class="w"> </span><span class="n">idx_logs_conv_id</span><span class="w"> </span><span class="k">ON</span><span class="w"> </span><span class="n">execution_logs</span><span class="p">(</span><span class="n">conv_id</span><span class="p">,</span><span class="w"> </span><span class="n">ts</span><span class="p">);</span>
 </code></pre></div>
 <p><strong>记录的关键节点</strong>: agent_start（system prompt 全文）、llm_complete（模型原始输出、token usage）、tool_start（工具名 + 完整入参）、tool_complete（原始返回 + 耗时）、error（完整 traceback）。与现有 <code>ExecutionMetrics</code>（摘要统计）互补 — metrics 记"调了几次花了多久"，LogEntry 记"具体输入了什么输出了什么"。</p>
 <p><strong>运维界面</strong>: 复用现有前端技术栈和布局模式，不引入独立运维系统。核心思路 — 现有三栏布局的"管理员视图"：</p>
@@ -1787,25 +1630,19 @@
 <p><strong>注意事项</strong>: 日志写入用 fire-and-forget 或批量 insert，不阻塞主流程；设 retention 定期清理（如 30 天）；开发时 console 人类可读格式，生产时同时写表。</p>
 <hr />
 <h2 id="各-phase-依赖关系">各 Phase 依赖关系</h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>Phase 1 (核心 Bug)          ✅ 已完成
-<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>Phase 2 (安全加固)          ✅ 已完成
-<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>Phase 3 (数据质量)          ← 3.1/3.2 ✅, 3.3 ⏸️
-<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>Phase 4 (认证框架)          ✅ 已完成
-<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a>Phase 5/6 (持久化改造)       ✅ 已完成 → 见 persistence-refactor-plan.md
-<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a>Phase 7A (文档上传)          ✅ 已完成
-<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a>Phase 7B (结构化数据)        ← 依赖 7A ✅ + Phase 5/6 ✅
-<a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a>Phase 8 (编辑 Artifact)      ← 依赖 7A ✅（上传和编辑共享写接口模式）
-<a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a>Phase 9 (Skill 系统)         ← 仅依赖 Phase 4（认证），独立于 Phase 7/8，可随时实施
-<a id="__codelineno-7-10" name="__codelineno-7-10" href="#__codelineno-7-10"></a>Phase 10 (内网离线部署)      ← 依赖 Phase 5/6 ✅
-<a id="__codelineno-7-11" name="__codelineno-7-11" href="#__codelineno-7-11"></a>  10.1 模型配置外部化          ← 无外部依赖
-<a id="__codelineno-7-12" name="__codelineno-7-12" href="#__codelineno-7-12"></a>  10.2 外网构建发布流程        ← 依赖 10.1
-<a id="__codelineno-7-13" name="__codelineno-7-13" href="#__codelineno-7-13"></a>  10.3 内网 Compose            ← 依赖 10.2
-<a id="__codelineno-7-14" name="__codelineno-7-14" href="#__codelineno-7-14"></a>  10.4 内网部署 SOP            ← 依赖 10.3
-<a id="__codelineno-7-15" name="__codelineno-7-15" href="#__codelineno-7-15"></a>  10.5 交付物清单              ← 依赖 10.2 + 10.3 + 10.4
-<a id="__codelineno-7-16" name="__codelineno-7-16" href="#__codelineno-7-16"></a>Phase 11 (可观测性)            ← 依赖 Phase 5/6 ✅
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>Phase 1 (核心 Bug)          ✅ 已完成
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>Phase 2 (安全加固)          ✅ 已完成
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>Phase 3 (数据质量)          ← 3.1/3.2 ✅, 3.3 ⏸️
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a>Phase 4 (认证框架)          ✅ 已完成
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a>Phase 5/6 (持久化改造)       ✅ 已完成 → 见 persistence-refactor-plan.md
+<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a>Phase 7A (文档上传)          ✅ 已完成
+<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a>Phase 7B (结构化数据)        ← 依赖 7A ✅ + Phase 5/6 ✅
+<a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a>Phase 8 (编辑 Artifact)      ← 依赖 7A ✅（上传和编辑共享写接口模式）
+<a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a>Phase 9 (Skill 系统)         ← 仅依赖 Phase 4（认证），独立于 Phase 7/8，可随时实施
+<a id="__codelineno-6-10" name="__codelineno-6-10" href="#__codelineno-6-10"></a>Phase 10 (部署基础设施)       ✅ 已完成 (10.1 deferred)
+<a id="__codelineno-6-11" name="__codelineno-6-11" href="#__codelineno-6-11"></a>Phase 11 (可观测性)            ← 依赖 Phase 5/6 ✅
 </code></pre></div>
-<p>建议执行顺序: <strong>Phase 4 ✅ → 7A ✅ → 5/6 ✅ → 10 → 11 → 7B → 8</strong>。Phase 9 可随时排入开发。</p>
-<p>关键路径: <strong>10.1 → 10.2 → 10.3</strong>（Phase 5/6 已完成，10 的前置依赖已就绪）。</p>
+<p>建议执行顺序: <strong>Phase 4 ✅ → 7A ✅ → 5/6 ✅ → 10 ✅ → 11 → 7B → 8</strong>。Phase 9 可随时排入开发。</p>
 <hr />
 <h2 id="备注">备注</h2>
 <ul>
@@ -1815,7 +1652,7 @@
 <li>Phase 7A ✅ 已完成（content_type 统一、文档转换、上传 API/UI、渲染策略修正、Prompt Review）</li>
 <li>Phase 7B 的前置依赖 Phase 5/6 已完成，可随时排入</li>
 <li>Phase 9 Skill 系统调研已完成，方案已确定（轻量独立 <code>skills</code> 表），仅依赖 Phase 4（已完成），可随时排入开发</li>
-<li>Phase 10 内网部署改造的前置依赖 Phase 5/6 已就绪，10.1 模型配置外部化是最关键的子项</li>
+<li>Phase 10 部署基础设施 ✅ 已完成（10.1 模型配置外部化 deferred，<code>models.yaml</code> per-model <code>base_url</code> 已覆盖内网场景）</li>
 <li><strong>数据迁移</strong>: 系统处于开发阶段，不需要考虑旧数据迁移</li>
 <li>concurrency.md 中已标记 ✅ 的项目（短事务、日志上下文、SSE Heartbeat 等）不在此计划中</li>
 </ul>
