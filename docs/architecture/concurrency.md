@@ -54,23 +54,31 @@ flowchart TD
 | `pool_recycle` | 300s | 连接最大寿命，防中间件断连 |
 | `pool_pre_ping` | True | 每次拿连接先 ping，踢掉死连接 |
 
-### 多 PX Failover
+### 多地址 Failover
 
 `database_urls=[...]` 传入多个地址时启用 primary-first failover：
 
 ```python
+# _parse_db_url 按后端类型返回 ("mysql"/"postgres", kwargs)
+# _failover_creator 根据 driver 分发到 aiomysql 或 asyncpg
 async def _failover_creator():
-    for target in parsed_urls:   # 固定顺序，不轮转
+    connect_fn, timeout_kw = (
+        (asyncpg.connect, "timeout") if driver == "postgres"
+        else (aiomysql.connect, "connect_timeout")
+    )
+    for _, kwargs in parsed_urls:   # 固定顺序，不轮转
         try:
-            return await aiomysql.connect(**target, connect_timeout=5)
+            return await connect_fn(**kwargs, **{timeout_kw: 5})
         except Exception as e:
             errors.append(...)
     raise ConnectionError(...)
 ```
 
 - **Primary-first**：按配置顺序尝试，首个成功即返回 — 不做负载均衡
+- **支持 MySQL 和 PostgreSQL**：按 URL 后端自动选择 `aiomysql` / `asyncpg` 驱动；所有地址必须同一种 driver（启动时校验）
 - 通过 SQLAlchemy 的 `async_creator` hook 注入
 - 仅用于建立新连接；已建立的连接断开由 `pool_pre_ping` + 应用层 `with_retry()` 处理
+- SSL 参数（`ssl_ca`/`ssl_cert`/`ssl_key`）通过 URL query string 传入，构建 `ssl.SSLContext` 后两种驱动都通过 `ssl=` kwarg 传递
 
 ### 瞬断重试
 

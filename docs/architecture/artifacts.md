@@ -217,7 +217,17 @@ flowchart TD
 
 每次 artifact 操作成功后，`ArtifactManager.build_snapshot()` 构建完整快照（含 content），通过 `ToolResult.metadata["artifact_snapshot"]` 随 `tool_complete` 事件推送到前端。前端由此在执行期间实时看到 artifact 变化，无需等待执行结束后再 REST 拉取。
 
-REST API 拉取的内容则通过前述 `_active_managers` 注册表反映同一轮的最新状态。两个通道在执行期间始终一致。
+REST API 在执行期间的一致性**按接口分**：
+
+| REST 接口 | 执行中行为 |
+|----------|----------|
+| `GET /artifacts` (列表) | ✅ `list_artifacts()` 合并 DB 和内存 dirty/new 条目 |
+| `GET /artifacts/{id}` 的当前内容 | ✅ `ArtifactManager.get_active()` overlay 内存态 |
+| `GET /artifacts/{id}` 返回的 `versions[]` | ❌ DB-only — 未 flush 的中间版本不可见 |
+| `GET /versions/{version}` | ❌ DB-only — 未 flush 的版本返回 404 |
+| `GET /export` (docx) | ❌ DB-only — 导出最后一次已 flush 的快照 |
+
+前端通过"流式执行期间隐藏版本选择器和 export 入口"规避 DB-only 接口的滞后问题；列表和当前内容通道在执行期间与 SSE 保持一致。
 
 ## Upload 旁路
 
@@ -233,10 +243,12 @@ REST API 拉取的内容则通过前述 `_active_managers` 注册表反映同一
 
 ### 为什么 Write-Back 而非即时写入
 
-- **原子性**：同一轮多次编辑要么全部落盘（引擎正常结束），要么全部丢弃（引擎异常），对下游观察者始终呈现一致状态
 - **减少 DB 写入**：长任务中 Task Plan 可能被更新 10+ 次，直写会放大写压力
 - **简化 version 语义**：稀疏版本号自然对应"轮次边界的快照"，版本回溯的粒度与用户感知一致
+- **单 artifact 原子性**：每个 dirty artifact 用独立事务 + `with_retry()` 落盘，瞬断仅影响该条，不会把成功的条目也回滚
 - **代价**：引擎崩溃 → 内存修改丢失（但这一轮的 user 消息也未写入 response，整体一致）
+
+注意：write-back 的原子性**仅在单 artifact 粒度成立**。`flush_all()` 逐个 flush，先成功的条目已 commit 落盘；`failed` 列表非空时 Controller 会推 `error` 终态事件，但**不会回滚**先前成功写入的 artifact。也就是说可能出现"3 个 dirty artifact，2 个成功、1 个失败"的部分成功状态。这个设计优先 retry 粒度（避免整批因单条失败重试）而非"一整轮的 all-or-nothing"。
 
 ### 为什么版本号稀疏可接受
 

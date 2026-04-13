@@ -158,8 +158,10 @@ class BaseRepository(Generic[T]):
 严格遵循[三层责任模型](overview.md#三层责任模型)：
 
 - **Repo 只返回 ORM 对象**，不做序列化、不做 ownership check、不做业务逻辑
-- ORM 对象**不得逃逸**创建它的 session（Manager 层必须在 session 关闭前转为 dict）
-- Router 层禁止导入 Repository — 所有 DB 访问通过 Manager
+- ORM 对象**不得逃逸**创建它的 session（Manager 层必须在 session 关闭前转为 dict，或让请求级 session 覆盖 router 的响应构建）
+- **Router 层不直接实例化 Repository** — 所有 DB 访问通过 Manager 方法
+  - `chat.py` 的事件查询、`admin.py` 的 admin 列表/详情都通过 `ConversationManager.get_message_events()` / `list_admin_conversations()` / `get_admin_conversation_events()` 间接访问 `MessageEventRepository`
+  - 唯一例外是 Controller/后台任务层（如 `controller.py`、`controller_factory.py`），它们不是 router，自管 session 生命周期和重试逻辑，可直接创建 Repository
 
 ## 事务所有权
 

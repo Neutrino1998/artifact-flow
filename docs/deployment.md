@@ -201,7 +201,7 @@ docker compose -f deploy/docker-compose.intranet.yml exec backend \
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
 | `ARTIFACTFLOW_DATABASE_URL` | — (**必填**) | 连接串，如 `sqlite+aiosqlite:///data/artifactflow.db` 或 `postgresql+asyncpg://...` |
-| `ARTIFACTFLOW_DATABASE_URLS` | `""` | 逗号分隔多地址（优先级高于 `DATABASE_URL`，取第一个） |
+| `ARTIFACTFLOW_DATABASE_URLS` | `""` | 逗号分隔多地址列表，启用 primary-first failover（按顺序尝试，首个可连即用）；非空时优先于 `DATABASE_URL`，所有地址必须同一 driver（MySQL 或 PostgreSQL） |
 | `ARTIFACTFLOW_DATABASE_POOL_SIZE` | `5` | 连接池大小 |
 | `ARTIFACTFLOW_DATABASE_MAX_OVERFLOW` | `10` | 连接池溢出上限 |
 | `ARTIFACTFLOW_DATABASE_POOL_TIMEOUT` | `30` | 获取连接超时（秒） |
