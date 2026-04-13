@@ -336,11 +336,11 @@ docs/
 
 ---
 
-### PR 6: README 更新
+### PR 6: README + mkdocs.yml + 主题
 
-**范围：** README.md
+**范围：** README.md, mkdocs.yml, docs/stylesheets/custom.css
 
-**定位：** 项目第一印象 + 快速上手入口，详细内容全部指向 docs/
+**定位：** 项目第一印象 + 快速上手入口 + 文档站点部署配置
 
 **README.md 结构：**
 - **项目一句话介绍**（Pi-style 可配置 Agent 引擎 SaaS）
@@ -348,11 +348,22 @@ docs/
 - **Quick Start**（docker-compose up 三步走：clone → 配置 .env → docker-compose up）
 - **截图**（复用 docs/assets/screenshot.png + cli_screenshot.png）
 - **Documentation**（指向 docs/ 各模块的链接表）
-  - 架构：overview, engine, agents, tools, artifacts, data-layer, streaming, concurrency
+  - 架构：overview, engine, agents, tools, artifacts, data-layer, streaming, concurrency, observability
   - 指南：add-agent, add-tool, add-model, api-reference
   - 运维：deployment
   - 前端：frontend
 - **License**
+
+**mkdocs.yml：**
+- 恢复 initial commit 中的配置（git show fe82608:mkdocs.yml）
+- 更新 site_description（移除 LangGraph 引用）
+- 更新 nav 导航对齐新文档结构
+- 添加 extra_css: [stylesheets/custom.css]
+
+**docs/stylesheets/custom.css：**
+- 从前端 Tailwind config 提取品牌色（primary, accent）和字体
+- 覆盖 MkDocs Material CSS 变量（--md-primary-fg-color 等）
+- 保持文档站和产品 UI 视觉统一
 
 **注意：** 等 PR 1-5 全部合并后再写，确保所有文档链接有效。
 
