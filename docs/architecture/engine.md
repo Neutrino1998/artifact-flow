@@ -218,7 +218,7 @@ sequenceDiagram
 
 ### 等待 Compaction
 
-`wait_if_running()` 供 engine 在 context build 前调用：
+`wait_if_running()` 由 `ExecutionController.stream_execute()` 在加载对话历史之前调用（而非在引擎内部），确保读取到 compaction 写入的最新 summary。引擎本身不感知 compaction 状态。
 
 - 本地 compaction → 等待 `asyncio.Event`
 - 跨实例 → 轮询分布式锁状态（每 2s 检查一次）
