@@ -77,8 +77,9 @@ export default function ObservabilityPanel() {
   const [eventsLoading, setEventsLoading] = useState(false);
   const [collapsedMessages, setCollapsedMessages] = useState<Set<string>>(new Set());
   const [selectedEvent, setSelectedEvent] = useState<AdminEventItem | null>(null);
+  const refreshTick = useUIStore((s) => s.observabilityRefreshTick);
 
-  // Fetch events when selected conversation changes
+  // Fetch events when selected conversation changes or refresh is triggered
   useEffect(() => {
     if (!selectedConvId) {
       setEventsData(null);
@@ -86,20 +87,24 @@ export default function ObservabilityPanel() {
       return;
     }
     let cancelled = false;
-    setEventsLoading(true);
+    setEventsData(null);
     setSelectedEvent(null);
+    setEventsLoading(true);
     api.getAdminConversationEvents(selectedConvId).then((res) => {
       if (!cancelled) {
         setEventsData(res);
         setCollapsedMessages(new Set());
       }
     }).catch((err) => {
-      if (!cancelled) console.error('Failed to load conversation events:', err);
+      if (!cancelled) {
+        console.error('Failed to load conversation events:', err);
+        setEventsData(null);
+      }
     }).finally(() => {
       if (!cancelled) setEventsLoading(false);
     });
     return () => { cancelled = true; };
-  }, [selectedConvId]);
+  }, [selectedConvId, refreshTick]);
 
   const toggleMessageCollapse = useCallback((msgId: string) => {
     setCollapsedMessages((prev) => {
