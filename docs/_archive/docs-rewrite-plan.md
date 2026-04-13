@@ -16,7 +16,8 @@ docs/
 │   ├── artifacts.md             # Artifact 双层架构
 │   ├── data-layer.md            # 数据层
 │   ├── streaming.md             # SSE 流式传输
-│   └── concurrency.md           # 并发与运行时
+│   ├── concurrency.md           # 并发与运行时
+│   └── observability.md         # 可观测性与监控
 ├── guides/
 │   ├── add-agent.md             # 添加新 Agent
 │   ├── add-tool.md              # 添加新 Tool
@@ -209,9 +210,9 @@ docs/
 
 ---
 
-### PR 4: Streaming + API Reference + 前端
+### PR 4: Streaming + 可观测性 + API Reference + 前端
 
-**范围：** architecture/streaming.md, guides/api-reference.md, frontend.md
+**范围：** architecture/streaming.md, architecture/observability.md, guides/api-reference.md, frontend.md
 
 **architecture/streaming.md 内容要点：**
 - StreamEventType 枚举（完整列表，按层分组）：
@@ -230,6 +231,28 @@ docs/
 - **Design Decisions：**
   - 为什么 fetch+ReadableStream 而非 EventSource（EventSource 不支持自定义 Auth header）
   - 为什么 llm_chunk 不持久化（高频低价值，只做 SSE 传输）
+
+**architecture/observability.md 内容要点：**
+- Event Sourcing 架构：
+  - MessageEvent 表结构：event_id, message_id, event_type, agent_name, data(JSON), created_at
+  - 事件类型目录（10+ 类型，含各类型 data 字段示例）
+  - 持久化边界：llm_chunk SSE-only，其余批量写入（execution_complete / error 两个边界）
+  - 事件富化：llm_complete 携带 model/duration_ms/token_usage，tool_complete 携带 params/result/duration_ms
+- Admin API：
+  - GET /admin/conversations（分页、全文搜索、活跃状态实时标记）
+  - GET /admin/conversations/{id}/events（按消息分组的事件时间线 + 执行指标）
+- 监控 UI：
+  - Observability Mode（admin 专属切换）
+  - 事件时间线：按消息折叠、事件类型色彩编码
+  - 事件详情面板：按类型渲染（LLM → token/model，Tool → params/result，Error → 完整堆栈）
+  - 对话浏览器：搜索、分页、活跃/非活跃标记
+- 健康检查：
+  - GET /health/live（存活探针，始终 200）
+  - GET /health/ready（就绪探针，检查 DB + Redis 连通性，503 降级）
+- **Design Decisions：**
+  - 为什么 llm_chunk 不持久化（高频低价值，llm_complete 有完整内容）
+  - 为什么事件 data 用 JSON 而非固定 schema（可扩展，无需 migration）
+  - 为什么批量写入而非逐条（减少 DB 写入，原子性）
 
 **guides/api-reference.md 内容要点：**
 - 认证：POST /auth/register, /auth/login, /auth/refresh（JWT）
@@ -323,7 +346,7 @@ docs/
 - **项目一句话介绍**（Pi-style 可配置 Agent 引擎 SaaS）
 - **核心特性**（bullet list，每条一句话）
 - **Quick Start**（docker-compose up 三步走：clone → 配置 .env → docker-compose up）
-- **截图**（可选，复用 docs/assets/）
+- **截图**（复用 docs/assets/screenshot.png + cli_screenshot.png）
 - **Documentation**（指向 docs/ 各模块的链接表）
   - 架构：overview, engine, agents, tools, artifacts, data-layer, streaming, concurrency
   - 指南：add-agent, add-tool, add-model, api-reference
