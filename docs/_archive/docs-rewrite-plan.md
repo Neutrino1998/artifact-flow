@@ -31,7 +31,7 @@ docs/
 
 ## PR 分批计划
 
-### PR 1: 骨架搭建 + 清理旧文件 + 核心概述
+### PR 1: 骨架搭建 + 清理旧文件 + 核心概述 ✅
 
 **范围：** index.md, architecture/overview.md, deployment.md
 
