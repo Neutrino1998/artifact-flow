@@ -73,7 +73,7 @@ docs/
 
 ---
 
-### PR 2: 引擎 + Agent + 工具（架构核心三件套）
+### PR 2: 引擎 + Agent + 工具（架构核心三件套） ✅
 
 **范围：** architecture/engine.md, architecture/agents.md, architecture/tools.md
 
