@@ -11,8 +11,9 @@ from typing import Dict, List, Optional, Any
 from datetime import datetime
 
 from repositories.conversation_repo import ConversationRepository
+from repositories.message_event_repo import MessageEventRepository
 from repositories.base import NotFoundError, DuplicateError
-from db.models import Conversation, Message
+from db.models import Conversation, Message, MessageEvent
 from utils.logger import get_logger
 
 logger = get_logger("ArtifactFlow")
@@ -408,6 +409,86 @@ class ConversationManager:
         """
         repo = self._ensure_repository()
         return await repo.get_message(message_id)
+
+    # ========================================
+    # Event / Admin 查询（封装 MessageEventRepository 访问）
+    # ========================================
+
+    async def get_message_events(
+        self,
+        message_id: str,
+        event_type: Optional[str] = None,
+    ) -> List[MessageEvent]:
+        """获取消息的事件链（用于历史回放和可观测性）。
+
+        Router 不得直接实例化 MessageEventRepository — 通过本方法复用
+        ConversationManager 持有的 session。
+        """
+        repo = self._ensure_repository()
+        event_repo = MessageEventRepository(repo.session)
+        if event_type:
+            return await event_repo.get_by_type(message_id, event_type)
+        return await event_repo.get_by_message(message_id)
+
+    async def list_admin_conversations(
+        self,
+        *,
+        limit: int,
+        offset: int,
+        title_query: Optional[str] = None,
+        user_id: Optional[str] = None,
+    ) -> tuple[List[Conversation], int, Dict[str, str]]:
+        """Admin 视图：返回 (conversations, total, user_id → display_name 映射)。
+
+        conversations 预加载 messages 以支持计数；user_names 用于避免
+        N+1 查询。调用方需在 session 关闭前完成序列化。
+        """
+        from sqlalchemy import select
+        from db.models import User
+
+        repo = self._ensure_repository()
+        conversations = await repo.list_conversations(
+            limit=limit,
+            offset=offset,
+            title_query=title_query,
+            user_id=user_id,
+            load_messages=True,
+        )
+        total = await repo.count_conversations(
+            title_query=title_query,
+            user_id=user_id,
+        )
+
+        user_names: Dict[str, str] = {}
+        user_ids = {c.user_id for c in conversations if c.user_id}
+        if user_ids:
+            stmt = select(User.id, User.display_name, User.username).where(
+                User.id.in_(user_ids)
+            )
+            result = await repo.session.execute(stmt)
+            for uid, display_name, username in result.all():
+                user_names[uid] = display_name or username
+
+        return conversations, total, user_names
+
+    async def get_admin_conversation_events(
+        self,
+        conv_id: str,
+    ) -> Optional[tuple[Conversation, List[Message], List[MessageEvent]]]:
+        """Admin 视图：取对话 + 所有消息 + 跨消息事件流（按 id 升序）。
+
+        Returns:
+            (conversation, messages, events) 元组；对话不存在时返回 None。
+        """
+        repo = self._ensure_repository()
+        conv = await repo.get_conversation(conv_id)
+        if not conv:
+            return None
+
+        messages = await repo.get_conversation_messages(conv_id)
+        event_repo = MessageEventRepository(repo.session)
+        events = await event_repo.get_by_conversation(conv_id)
+        return conv, messages, events
 
     async def delete_conversation(self, conversation_id: str) -> bool:
         """

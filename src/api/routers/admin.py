@@ -11,7 +11,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from api.dependencies import (
-    get_db_manager,
+    get_conversation_manager,
     get_runtime_store,
     require_admin,
 )
@@ -23,6 +23,7 @@ from api.schemas.admin import (
     AdminMessageGroup,
     AdminConversationEventsResponse,
 )
+from core.conversation_manager import ConversationManager
 from utils.logger import get_logger
 
 logger = get_logger("ArtifactFlow")
@@ -37,52 +38,32 @@ async def list_admin_conversations(
     q: Optional[str] = Query(default=None, max_length=200),
     user_id: Optional[str] = Query(default=None, max_length=64),
     _admin: TokenPayload = Depends(require_admin),
+    conversation_manager: ConversationManager = Depends(get_conversation_manager),
 ):
     """List all conversations (admin view) with active execution status."""
-    from repositories.conversation_repo import ConversationRepository
-    from db.models import User
-
     store = get_runtime_store()
     active_conv_ids = set(await store.list_active_conversations())
 
-    db_manager = get_db_manager()
-    async with db_manager.session() as session:
-        repo = ConversationRepository(session)
-        conversations = await repo.list_conversations(
-            limit=limit,
-            offset=offset,
-            title_query=q.strip() if q else None,
-            user_id=user_id,
-            load_messages=True,
-        )
-        total = await repo.count_conversations(
-            title_query=q.strip() if q else None,
-            user_id=user_id,
-        )
+    conversations, total, user_names = await conversation_manager.list_admin_conversations(
+        limit=limit,
+        offset=offset,
+        title_query=q.strip() if q else None,
+        user_id=user_id,
+    )
 
-        # Batch-load user display names
-        user_ids = {c.user_id for c in conversations if c.user_id}
-        user_names: dict[str, str | None] = {}
-        if user_ids:
-            from sqlalchemy import select
-            stmt = select(User.id, User.display_name, User.username).where(User.id.in_(user_ids))
-            result = await session.execute(stmt)
-            for uid, display_name, username in result.all():
-                user_names[uid] = display_name or username
-
-        items = [
-            AdminConversationSummary(
-                id=conv.id,
-                title=conv.title,
-                user_id=conv.user_id,
-                user_display_name=user_names.get(conv.user_id) if conv.user_id else None,
-                message_count=len(conv.messages) if conv.messages else 0,
-                is_active=conv.id in active_conv_ids,
-                created_at=conv.created_at,
-                updated_at=conv.updated_at,
-            )
-            for conv in conversations
-        ]
+    items = [
+        AdminConversationSummary(
+            id=conv.id,
+            title=conv.title,
+            user_id=conv.user_id,
+            user_display_name=user_names.get(conv.user_id) if conv.user_id else None,
+            message_count=len(conv.messages) if conv.messages else 0,
+            is_active=conv.id in active_conv_ids,
+            created_at=conv.created_at,
+            updated_at=conv.updated_at,
+        )
+        for conv in conversations
+    ]
 
     return AdminConversationListResponse(
         conversations=items,
@@ -98,21 +79,13 @@ async def list_admin_conversations(
 async def get_admin_conversation_events(
     conv_id: str,
     _admin: TokenPayload = Depends(require_admin),
+    conversation_manager: ConversationManager = Depends(get_conversation_manager),
 ):
     """Get all events for a conversation, grouped by message."""
-    from repositories.conversation_repo import ConversationRepository
-    from repositories.message_event_repo import MessageEventRepository
-
-    db_manager = get_db_manager()
-    async with db_manager.session() as session:
-        conv_repo = ConversationRepository(session)
-        conv = await conv_repo.get_conversation(conv_id)
-        if not conv:
-            raise HTTPException(status_code=404, detail="Conversation not found")
-
-        messages = await conv_repo.get_conversation_messages(conv_id)
-        event_repo = MessageEventRepository(session)
-        all_events = await event_repo.get_by_conversation(conv_id)
+    result = await conversation_manager.get_admin_conversation_events(conv_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    conv, messages, all_events = result
 
     # Group events by message_id
     events_by_msg: dict[str, list] = {}

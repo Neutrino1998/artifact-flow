@@ -19,7 +19,6 @@ from api.dependencies import (
     get_compaction_manager,
     get_conversation_manager,
     get_current_user,
-    get_db_manager,
     get_db_session,
     get_stream_transport,
     get_execution_runner,
@@ -329,8 +328,6 @@ async def get_message_events(
     conversation_manager: ConversationManager = Depends(get_conversation_manager),
 ):
     """查询消息的事件链（用于历史回放和可观测性）"""
-    from repositories.message_event_repo import MessageEventRepository
-
     await _verify_ownership(conv_id, current_user, conversation_manager)
 
     # 校验 message 归属
@@ -338,13 +335,7 @@ async def get_message_events(
     if not message or message.conversation_id != conv_id:
         raise HTTPException(status_code=404, detail="Message not found")
 
-    db_manager = get_db_manager()
-    async with db_manager.session() as session:
-        event_repo = MessageEventRepository(session)
-        if event_type:
-            events = await event_repo.get_by_type(msg_id, event_type)
-        else:
-            events = await event_repo.get_by_message(msg_id)
+    events = await conversation_manager.get_message_events(msg_id, event_type=event_type)
 
     return {
         "message_id": msg_id,

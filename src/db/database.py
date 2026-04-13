@@ -8,7 +8,7 @@
 - 连接池管理（MySQL/PostgreSQL）
 """
 
-from typing import Any, Dict, List, Optional, AsyncGenerator
+from typing import Any, Dict, List, Optional, AsyncGenerator, Tuple
 from contextlib import asynccontextmanager
 
 from sqlalchemy import event, text
@@ -96,24 +96,42 @@ class DatabaseManager:
         return "sqlite" in self.database_url.lower()
 
     @staticmethod
-    def _parse_db_url(url: str) -> Dict[str, Any]:
-        """从 SQLAlchemy URL 解析出 aiomysql.connect kwargs"""
+    def _parse_db_url(url: str) -> Tuple[str, Dict[str, Any]]:
+        """Parse SQLAlchemy URL into driver-specific connect kwargs for failover probes.
+
+        Returns:
+            (driver, kwargs) where driver is "mysql" or "postgres" and kwargs
+            are shaped for aiomysql.connect or asyncpg.connect respectively.
+        """
         u = make_url(url)
-        result: Dict[str, Any] = {
-            "host": u.host or "127.0.0.1",
-            "port": u.port or 3306,
-            "db": u.database or "",
-        }
+        backend = u.get_backend_name()
+        is_pg = backend.startswith("postgres")
+
+        if is_pg:
+            result: Dict[str, Any] = {
+                "host": u.host or "127.0.0.1",
+                "port": u.port or 5432,
+                "database": u.database or "",
+            }
+        else:
+            result = {
+                "host": u.host or "127.0.0.1",
+                "port": u.port or 3306,
+                "db": u.database or "",
+            }
+
         if u.username:
             result["user"] = u.username
         if u.password:
             result["password"] = u.password
+
         if u.query:
             ssl_params = {}
             for key, value in u.query.items():
                 if key.startswith("ssl_"):
                     ssl_params[key] = value
-                else:
+                elif not is_pg:
+                    # aiomysql accepts pass-through query args; asyncpg ignores unknowns
                     result[key] = value
             if ssl_params:
                 import ssl
@@ -126,7 +144,8 @@ class DatabaseManager:
                         keyfile=ssl_params["ssl_key"],
                     )
                 result["ssl"] = ctx
-        return result
+
+        return ("postgres" if is_pg else "mysql", result)
 
     async def initialize(self) -> None:
         """
@@ -160,26 +179,43 @@ class DatabaseManager:
             engine_kwargs["pool_recycle"] = self._pool_recycle
             engine_kwargs["pool_pre_ping"] = self._pool_pre_ping
 
-            # 多 PX failover：primary-first 尝试
+            # 多地址 failover：primary-first 尝试
             if self._database_urls and len(self._database_urls) > 1:
                 parsed_urls = [self._parse_db_url(u) for u in self._database_urls]
+                drivers = {d for d, _ in parsed_urls}
+                if len(drivers) > 1:
+                    raise ValueError(
+                        f"database_urls must use a single driver, got: {drivers}"
+                    )
+                driver = next(iter(drivers))
 
                 async def _failover_creator():
                     """Primary-first: 按配置顺序尝试，首个成功即返回"""
-                    import aiomysql
+                    if driver == "postgres":
+                        import asyncpg
+                        connect_fn = asyncpg.connect
+                        timeout_kw = "timeout"
+                    else:
+                        import aiomysql
+                        connect_fn = aiomysql.connect
+                        timeout_kw = "connect_timeout"
+
                     errors = []
-                    for target in parsed_urls:  # 固定顺序，不轮转
+                    for _, kwargs in parsed_urls:  # 固定顺序，不轮转
                         try:
-                            return await aiomysql.connect(**target, connect_timeout=5)
+                            return await connect_fn(**kwargs, **{timeout_kw: 5})
                         except Exception as e:
-                            errors.append((target["host"], e))
-                            logger.warning(f"DB connect failed: {target['host']}: {e}")
+                            errors.append((kwargs["host"], e))
+                            logger.warning(f"DB connect failed: {kwargs['host']}: {e}")
                     raise ConnectionError(
                         f"All DB nodes unreachable: {[(h, str(e)) for h, e in errors]}"
                     )
 
                 engine_kwargs["async_creator"] = _failover_creator
-                logger.info(f"Multi-PX failover enabled ({len(self._database_urls)} addresses)")
+                logger.info(
+                    f"Multi-address failover enabled "
+                    f"({len(self._database_urls)} addresses, driver={driver})"
+                )
 
         self._engine = create_async_engine(self.database_url, **engine_kwargs)
 
