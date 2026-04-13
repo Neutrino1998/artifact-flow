@@ -188,7 +188,7 @@ export default function ObservabilityPanel() {
 
       {/* Detail panel */}
       {selectedEvent != null ? (
-        <DetailPanel event={selectedEvent} onClose={() => setSelectedEvent(null)} />
+        <DetailPanel key={selectedEvent.id} event={selectedEvent} onClose={() => setSelectedEvent(null)} />
       ) : null}
     </div>
   );
@@ -235,12 +235,15 @@ function serializeEventToText(event: AdminEventItem): string {
 function DetailPanel({ event, onClose }: { event: AdminEventItem; onClose: () => void }) {
   const [copied, setCopied] = useState(false);
 
-  const handleCopy = useCallback(() => {
-    const text = serializeEventToText(event);
-    navigator.clipboard.writeText(text).then(() => {
+  const handleCopy = useCallback(async () => {
+    try {
+      const text = serializeEventToText(event);
+      await navigator.clipboard.writeText(text);
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
-    });
+    } catch {
+      // Clipboard API unavailable or permission denied — ignore silently
+    }
   }, [event]);
 
   return (
