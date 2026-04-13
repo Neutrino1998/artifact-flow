@@ -141,6 +141,18 @@ export default function ChatPanel() {
         </div>
       ) : (
         <div className="flex-1 flex flex-col items-center justify-center gap-2">
+          <div className="relative">
+            <img
+              src="/cat-sleep-light.svg"
+              alt=""
+              className="dark:hidden w-72 translate-y-6"
+            />
+            <img
+              src="/cat-sleep-dark.svg"
+              alt=""
+              className="hidden dark:block w-72 translate-y-6"
+            />
+          </div>
           <div className="text-text-secondary dark:text-text-secondary-dark text-3xl font-semibold">
             {getGreeting()}，有什么可以帮你的？
           </div>
