@@ -186,8 +186,6 @@ docker compose -f deploy/docker-compose.intranet.yml exec backend \
 
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
-| `ARTIFACTFLOW_HOST` | `127.0.0.1` | 监听地址 |
-| `ARTIFACTFLOW_PORT` | `8000` | 监听端口 |
 | `ARTIFACTFLOW_DEBUG` | `false` | 调试模式（详细日志 + 错误信息不脱敏 + 启用 Swagger 文档） |
 
 ### JWT 认证

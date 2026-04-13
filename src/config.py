@@ -15,8 +15,6 @@ class Settings(BaseSettings):
     model_config = ConfigDict(env_prefix="ARTIFACTFLOW_", case_sensitive=False)
 
     # 服务器配置
-    HOST: str = "127.0.0.1"
-    PORT: int = 8000
     DEBUG: bool = False
 
     # CORS 配置

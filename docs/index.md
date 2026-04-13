@@ -18,7 +18,7 @@ ArtifactFlow 是一个基于扁平 while loop 执行引擎的多 Agent 协作系
 ### 前置要求
 
 - Docker & Docker Compose
-- `DASHSCOPE_API_KEY` — 默认 Agent 配置使用通义千问（Qwen）模型，需要 DashScope API Key。如需使用 OpenAI 或 DeepSeek，需同时修改 `config/agents/*.md` 中的 model 字段和 `config/models/models.yaml`
+- `DASHSCOPE_API_KEY` — 默认 Agent 配置使用通义千问（Qwen）模型，需要 DashScope API Key。如需使用 OpenAI 或 DeepSeek，只需修改 `config/agents/*.md` 中的 model 字段为已内置的 alias（如 `gpt-4o`、`deepseek-chat`）并设置对应 API Key
 
 ### 三步启动
 
