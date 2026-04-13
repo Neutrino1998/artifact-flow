@@ -245,6 +245,9 @@ async def export_artifact(
     """
     Export an artifact to a different format.
     Currently supports exporting text/markdown artifacts to docx.
+
+    Note: reads from DB only — during execution, exports the last flushed
+    version, not in-memory edits.  Frontend hides export while streaming.
     """
     await _verify_session_ownership(session_id, current_user, conversation_manager)
 
@@ -331,6 +334,8 @@ async def get_artifact(
         )
 
     # Fetch persisted version list from DB.
+    # During execution, current_version (from cache) may be ahead of this list.
+    # This is intentional — frontend hides the version selector while streaming.
     versions = await artifact_manager.list_versions(session_id, artifact_id)
     version_summaries = [
         VersionSummary(
@@ -368,6 +373,10 @@ async def get_version(
 ):
     """
     获取特定版本的完整内容
+
+    Note: DB-only — unflushed in-memory versions return 404.
+    Frontend hides version selector while streaming, so this is unreachable
+    for versions that only exist in cache.
     """
     await _verify_session_ownership(session_id, current_user, conversation_manager)
 
