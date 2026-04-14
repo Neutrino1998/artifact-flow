@@ -62,7 +62,12 @@ async def _persist_events(state):
 
 **触发点**：引擎 loop 退出后进入 post-processing，`_persist_events()` 一次性批量写入 `state["events"]` 累积的全部事件。`complete` / `cancelled` 两条路径走的是"先写 DB、后 emit 终端事件到 SSE"：Controller 在 post-processing 内把终端事件 append 到 events 列表、调用 `_persist_events()`、再 yield 给 SSE — 前端收到 `complete` / `cancelled` 时 DB 已就绪。
 
-**`error` 路径是例外**：引擎异常时 Controller 立即把 `error` 事件推进事件队列（yield 给 SSE 客户端），之后引擎任务结束才会进入 post-processing 调用 `_persist_events()`。也就是说**客户端收到 `error` 的时刻早于 DB 写入完成**，紧接着发 `GET /messages/{id}/events` 有可能撞到空窗。集成方如果依赖 error 后立即查历史，需要自己加重试或等待几百 ms；Admin 监控 UI 因为是人工操作粒度，不会感知。
+**`error` 路径不保证可持久化**：
+
+- 引擎内部抛异常时，Controller 捕获后立即把 `error` 事件推进事件队列（yield 给 SSE 客户端），之后才在 post-processing 里调用 `_persist_events()`。此时 SSE 与 DB 之间存在竞争窗口，窗口大小取决于 post-processing 其余步骤（flush artifacts、DB retry backoff 指数为 1s/2s/4s）
+- 更严重：post-processing 自身出错时（`controller.py` 的 except 分支），Controller 直接 yield 一条 SSE `error`，这条事件**既不会追加到 `state["events"]`，也不会触发 `_persist_events()`** — 永远不会进 `MessageEvent` 表
+
+结论：**不要假设 SSE 收到 `error` 后 `GET /messages/{id}/events` 能查到该错误**。监控回看以 DB 为准时，必须把 SSE `error` 视为"可能只出现在实时流里"的事件；需要强一致审计的场景应在外层（Controller 之外）补一份日志。Admin 监控 UI 因为是人工粒度，不会感知。
 
 批量写入本身的收益：
 
