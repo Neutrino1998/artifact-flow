@@ -289,7 +289,7 @@ docs/
 
 ---
 
-### PR 5: Guides（扩展指南）
+### PR 5: Guides（扩展指南） ✅
 
 **范围：** guides/add-agent.md, guides/add-tool.md, guides/add-model.md
 
