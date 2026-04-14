@@ -152,7 +152,7 @@ from models.llm import get_litellm_model_id
 print(get_litellm_model_id("my-model"))   # 打印真实的 litellm 模型 ID
 ```
 
-或设置 `ARTIFACTFLOW_DEBUG=true` 查看 debug 日志中 `ContextManager.build` 打印的解析后 model ID。
+或查看服务 info 级日志，每次 LLM 调用会打印 `LLM call: <resolved-model-id>`（`src/models/llm.py` 中的 `logger.info`，默认 info 级即可见，无需开 `ARTIFACTFLOW_DEBUG`）。
 
 ## 常见问题
 
