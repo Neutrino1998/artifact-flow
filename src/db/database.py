@@ -98,12 +98,41 @@ class DatabaseManager:
     # Query params we know how to translate per driver. Unknown keys are
     # rejected at init to avoid silently dropping DSN options when moving
     # from DATABASE_URL (SQLAlchemy-parsed) to DATABASE_URLS (raw probes).
+    #
+    # Each entry describes how to apply the param to the driver's connect()
+    # call — the raw path bypasses SQLAlchemy's dialect translation, so every
+    # param must either be a real connect() kwarg or be explicitly routed.
     _SSL_FILE_KEYS = frozenset({"ssl_ca", "ssl_cert", "ssl_key"})
-    _PG_ALLOWED_QUERY = frozenset({"sslmode", "command_timeout", "application_name"})
-    _MYSQL_ALLOWED_QUERY = frozenset({
-        "charset", "autocommit", "connect_timeout", "read_timeout", "write_timeout",
-        "unix_socket", "init_command", "program_name",
-    })
+
+    # PostgreSQL (asyncpg.connect): sslmode handled separately (→ ssl=).
+    # application_name must go through server_settings, not a direct kwarg.
+    _PG_DIRECT_KWARGS = {
+        "command_timeout": float,    # asyncpg expects float/int, not str
+    }
+    _PG_SERVER_SETTINGS = frozenset({"application_name"})
+
+    # MySQL (aiomysql.connect). read_timeout/write_timeout are NOT aiomysql
+    # kwargs (PyMySQL has them, aiomysql doesn't). connect_timeout is reserved
+    # for the 5s probe in _failover_creator — DSN override would conflict with
+    # Python kwarg duplication rules.
+    _MYSQL_DIRECT_KWARGS = {
+        "charset": str,
+        "autocommit": "bool",        # coerce 'true'/'false'/'1'/'0'
+        "unix_socket": str,
+        "init_command": str,
+        "program_name": str,
+    }
+
+    @staticmethod
+    def _coerce_bool(value: str, *, key: str) -> bool:
+        v = value.strip().lower()
+        if v in ("true", "1", "yes", "on"):
+            return True
+        if v in ("false", "0", "no", "off"):
+            return False
+        raise ValueError(
+            f"DSN query param '{key}' expects a boolean (true/false/1/0), got {value!r}"
+        )
 
     @staticmethod
     def _parse_db_url(url: str) -> Tuple[str, Dict[str, Any]]:
@@ -111,9 +140,17 @@ class DatabaseManager:
 
         Supported DSN query params (others raise ValueError to prevent silent drops):
         - Both drivers: ``ssl_ca`` / ``ssl_cert`` / ``ssl_key`` (file paths → SSLContext)
-        - PostgreSQL: ``sslmode`` (→ asyncpg ``ssl=``), ``command_timeout``, ``application_name``
-        - MySQL: ``charset``, ``autocommit``, ``connect_timeout``, ``read_timeout``,
-          ``write_timeout``, ``unix_socket``, ``init_command``, ``program_name``
+        - PostgreSQL:
+            - ``sslmode`` (→ asyncpg ``ssl=`` string)
+            - ``command_timeout`` (coerced to float)
+            - ``application_name`` (routed to asyncpg ``server_settings={...}``)
+        - MySQL:
+            - ``charset``, ``unix_socket``, ``init_command``, ``program_name`` (str)
+            - ``autocommit`` (coerced bool)
+
+        ``connect_timeout`` is intentionally NOT accepted on MySQL — the 5s
+        probe timeout in ``_failover_creator`` is an architectural choice and
+        would collide with the DSN value via Python kwarg duplication.
 
         Returns:
             (driver, kwargs) where driver is "mysql" or "postgres" and kwargs
@@ -142,30 +179,50 @@ class DatabaseManager:
             result["password"] = u.password
 
         if u.query:
-            allowed = (
-                DatabaseManager._PG_ALLOWED_QUERY if is_pg
-                else DatabaseManager._MYSQL_ALLOWED_QUERY
-            )
             ssl_file_params: Dict[str, str] = {}
             pg_sslmode: Optional[str] = None
+            pg_server_settings: Dict[str, str] = {}
+
+            direct_kwargs = (
+                DatabaseManager._PG_DIRECT_KWARGS if is_pg
+                else DatabaseManager._MYSQL_DIRECT_KWARGS
+            )
 
             for key, value in u.query.items():
                 if key in DatabaseManager._SSL_FILE_KEYS:
                     ssl_file_params[key] = value
                 elif is_pg and key == "sslmode":
                     pg_sslmode = value
-                elif key in allowed:
-                    # Driver-native pass-through (PG: command_timeout/application_name;
-                    # MySQL: charset/autocommit/...)
-                    result[key] = value
+                elif is_pg and key in DatabaseManager._PG_SERVER_SETTINGS:
+                    pg_server_settings[key] = value
+                elif key in direct_kwargs:
+                    coerce = direct_kwargs[key]
+                    if coerce == "bool":
+                        result[key] = DatabaseManager._coerce_bool(value, key=key)
+                    else:
+                        try:
+                            result[key] = coerce(value)
+                        except (TypeError, ValueError) as e:
+                            raise ValueError(
+                                f"DSN query param '{key}' cannot be coerced to "
+                                f"{coerce.__name__}: {value!r}"
+                            ) from e
                 else:
                     driver_name = "postgres" if is_pg else "mysql"
+                    if is_pg:
+                        supported = ", ".join(sorted(
+                            {"ssl_ca", "ssl_cert", "ssl_key", "sslmode"}
+                            | set(DatabaseManager._PG_DIRECT_KWARGS)
+                            | set(DatabaseManager._PG_SERVER_SETTINGS)
+                        ))
+                    else:
+                        supported = ", ".join(sorted(
+                            {"ssl_ca", "ssl_cert", "ssl_key"}
+                            | set(DatabaseManager._MYSQL_DIRECT_KWARGS)
+                        ))
                     raise ValueError(
                         f"Unsupported DSN query param '{key}' for {driver_name} "
-                        f"failover path. Supported: ssl_ca/ssl_cert/ssl_key"
-                        + (", sslmode, command_timeout, application_name"
-                           if is_pg else
-                           ", " + ", ".join(sorted(DatabaseManager._MYSQL_ALLOWED_QUERY)))
+                        f"failover path. Supported: {supported}"
                     )
 
             if ssl_file_params:
@@ -182,6 +239,9 @@ class DatabaseManager:
             elif pg_sslmode is not None:
                 # asyncpg accepts the mode string directly via ssl=
                 result["ssl"] = pg_sslmode
+
+            if pg_server_settings:
+                result["server_settings"] = pg_server_settings
 
         return ("postgres" if is_pg else "mysql", result)
 
