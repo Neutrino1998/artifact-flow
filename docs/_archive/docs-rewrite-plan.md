@@ -145,7 +145,7 @@ docs/
 
 ---
 
-### PR 3: Artifact + 数据层 + 并发
+### PR 3: Artifact + 数据层 + 并发 ✅
 
 **范围：** architecture/artifacts.md, architecture/data-layer.md, architecture/concurrency.md
 
