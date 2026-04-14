@@ -1583,10 +1583,7 @@
     轮N --&gt;|事件丢弃| 轮N1
     轮N --&gt;|摘要化| 压缩
     压缩 --&gt; 轮N1
-    P1 ==&gt;|Artifact 跨轮持久| P2
-
-    style P1 fill:#e8f5e9
-    style P2 fill:#e8f5e9</code></pre>
+    P1 ==&gt;|Artifact 跨轮持久| P2</code></pre>
 <ul>
 <li>Task Plan Artifact：承载"任务分解 + 进度状态"，每轮模型通过 <code>update_artifact</code> 勾选完成项（<code>[✗] → [✓]</code>），下一轮读到的 system prompt 天然携带最新状态</li>
 <li>Result Artifact：累积产出（研究报告、代码文件），避免重复劳动，也让模型在后续轮次可直接 <code>read_artifact</code> 回顾</li>
@@ -1714,13 +1711,7 @@
     L1 --&gt;|落在归一化组内部| L2
     L1 --&gt;|未命中| L2{Layer 2&lt;br/&gt;fuzzysearch 近似}
     L2 --&gt;|best.dist ≤ 阈值| OK2[Levenshtein 替换]
-    L2 --&gt;|无匹配/歧义/超阈值| FAIL2[拒绝]
-
-    style OK0 fill:#e8f5e9
-    style OK1 fill:#e8f5e9
-    style OK2 fill:#fff3e0
-    style FAIL0 fill:#ffebee
-    style FAIL2 fill:#ffebee</code></pre>
+    L2 --&gt;|无匹配/歧义/超阈值| FAIL2[拒绝]</code></pre>
 <p><strong>Layer 1 的归一化转换链</strong>（<code>_normalize_for_match()</code>）：</p>
 <ol>
 <li><strong>1-to-1 字符翻译</strong>：智能引号（<code>""</code> → <code>"</code>）、Unicode 破折号（<code>—</code> → <code>-</code>）、特殊空格（nbsp、ideographic space → <code></code>）</li>

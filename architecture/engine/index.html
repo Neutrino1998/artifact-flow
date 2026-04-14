@@ -1646,11 +1646,7 @@
     PARSE --&gt;|有工具调用| EXEC[串行执行工具]
     EXEC --&gt; CHECK_CANCEL
     COMPLETE --&gt; CHECK_CANCEL
-    CONTINUE --&gt; CHECK_CANCEL
-
-    style START fill:#e1f5fe
-    style EXIT fill:#e8f5e9
-    style ERROR fill:#ffebee</code></pre>
+    CONTINUE --&gt; CHECK_CANCEL</code></pre>
 <h3 id="每轮迭代详解">每轮迭代详解</h3>
 <p><strong>1. 构建上下文</strong>（<code>_build_context</code>）</p>
 <ul>
@@ -1712,10 +1708,7 @@
     NO_TOOLS[Agent 无工具调用] --&gt; IS_LEAD{是 Lead Agent?}
     IS_LEAD --&gt;|是| EXIT["completed = True&lt;br/&gt;退出循环"]
     IS_LEAD --&gt;|否| PACK["打包响应为&lt;br/&gt;call_subagent tool_result"]
-    PACK --&gt; SWITCH["切回 lead_agent&lt;br/&gt;继续循环"]
-
-    style EXIT fill:#e8f5e9
-    style SWITCH fill:#fff3e0</code></pre>
+    PACK --&gt; SWITCH["切回 lead_agent&lt;br/&gt;继续循环"]</code></pre>
 <p><strong>Lead Agent 无工具调用：</strong></p>
 <ul>
 <li>先检查是否有待处理消息（<code>drain_messages</code>）</li>

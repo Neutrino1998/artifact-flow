@@ -1384,11 +1384,7 @@
 <pre class="mermaid"><code>graph LR
     R[Router] --&gt;|调用| M[Manager]
     M --&gt;|调用| Repo[Repository]
-    R -.-&gt;|禁止| Repo
-
-    style R fill:#4a9eff,color:#fff
-    style M fill:#50c878,color:#fff
-    style Repo fill:#ff8c42,color:#fff</code></pre>
+    R -.-&gt;|禁止| Repo</code></pre>
 <p><strong>关键约束：</strong> Router 必须通过 Manager 访问数据，不可绕过 Manager 直接调用 Repository。</p>
 <h2 id="请求生命周期">请求生命周期</h2>
 <p>一次用户消息从发送到接收完整响应的全流程：</p>

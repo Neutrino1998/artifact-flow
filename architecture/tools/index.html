@@ -1629,10 +1629,7 @@
     AA --&gt;|是| ADD[加入 always_allowed_tools] --&gt; EXEC
     AA --&gt;|否| EXEC
     WAIT --&gt;|denied| DENY[返回权限拒绝]
-    WAIT --&gt;|timeout| DENY
-
-    style EXEC fill:#e8f5e9
-    style DENY fill:#ffebee</code></pre>
+    WAIT --&gt;|timeout| DENY</code></pre>
 <p><strong>Permission Interrupt 流程：</strong></p>
 <ol>
 <li>推送 <code>PERMISSION_REQUEST</code> 事件（含工具名、参数、权限级别）</li>
