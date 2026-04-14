@@ -244,9 +244,9 @@ cd frontend && npm run generate-types   # openapi-typescript 生成 api.d.ts
 
 ### 为什么共享 `streamStore` 而非每消息独立
 
-- 任意时刻只有一次执行在流式（被 lease 互斥），单例 store 天然匹配
-- 切对话时 reset 全部 stream 态，避免跨对话状态污染
-- 历史消息的"已完成 segment"快照通过 `snapshotSegments()` 下沉到 `conversationStore.current.messages[].segments`，流式态和历史态解耦
+- **前端视角是单当前对话**：UI 任意时刻只聚焦在一个对话上，所以"正在流式的 SSE 连接"在单个浏览器标签内唯一；后端 lease 是**按 `conversation_id`** 的，多对话可并发执行（见 [architecture/concurrency.md → RuntimeStore](architecture/concurrency.md#runtimestore)），但前端不会同时渲染多条实时流
+- 切对话时 `reset()` 全部 stream 态，避免跨对话状态污染；同一用户多 tab 打开不同对话由浏览器天然隔离（每 tab 独立 store 实例）
+- 历史消息的"已完成 segment"快照通过 `snapshotSegments(messageId)` 下沉到 `streamStore.completedSegments` / `completedNonAgentBlocks` 两个 `Map<messageId, ...>`，`AssistantMessage` 直接按 `messageId` 从这两个 map 读取。这样流式状态与历史状态共用 store 但 key 空间分离，避免与 `conversationStore.current.messages[]` 的 DB 结构耦合
 
 ### 为什么不用 react-virtual
 

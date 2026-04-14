@@ -60,11 +60,14 @@ async def _persist_events(state):
     await event_repo.batch_create(db_events)
 ```
 
-**触发点**：引擎 loop 退出、产生终端事件（`complete` / `cancelled` / `error`）后，在 emit 终端事件给 SSE **之前**调用 `_persist_events()`。这保证：
+**触发点**：引擎 loop 退出后进入 post-processing，`_persist_events()` 一次性批量写入 `state["events"]` 累积的全部事件。`complete` / `cancelled` 两条路径走的是"先写 DB、后 emit 终端事件到 SSE"：Controller 在 post-processing 内把终端事件 append 到 events 列表、调用 `_persist_events()`、再 yield 给 SSE — 前端收到 `complete` / `cancelled` 时 DB 已就绪。
 
-- 前端收到 `complete` 时 DB 已就绪，后续 GET 历史立即可见
-- 批量一次 INSERT，比每事件一条事务快几个数量级
-- 退一步说即使在写入时崩溃，`event_id` 的 unique 约束保证重启后重试无副作用
+**`error` 路径是例外**：引擎异常时 Controller 立即把 `error` 事件推进事件队列（yield 给 SSE 客户端），之后引擎任务结束才会进入 post-processing 调用 `_persist_events()`。也就是说**客户端收到 `error` 的时刻早于 DB 写入完成**，紧接着发 `GET /messages/{id}/events` 有可能撞到空窗。集成方如果依赖 error 后立即查历史，需要自己加重试或等待几百 ms；Admin 监控 UI 因为是人工操作粒度，不会感知。
+
+批量写入本身的收益：
+
+- 一次 INSERT，比逐事件事务快一个数量级
+- `event_id` 的 unique 约束保证崩溃重启后重试幂等
 
 **排除规则**：引擎 emit `llm_chunk` 时显式传 `sse_only=True`，Controller 只推 SSE 不加入 `state["events"]` — DB 天然没有这一类。
 

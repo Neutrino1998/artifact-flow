@@ -1,6 +1,6 @@
 # API 参考
 
-> 五个路由组 + 统一鉴权 + SSE 订阅 — 面向集成方的紧凑端点手册。完整字段与 schema 见 `/api/v1/openapi.json`。
+> 五个路由组 + 统一鉴权 + SSE 订阅 — 面向集成方的紧凑端点手册。完整字段与 schema 见 `/openapi.json`（`ARTIFACTFLOW_DEBUG=true` 时 `/docs` 渲染 Swagger UI）。
 
 ## 通用约定
 
