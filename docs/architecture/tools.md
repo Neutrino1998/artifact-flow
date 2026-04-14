@@ -78,9 +78,6 @@ flowchart TD
     AA -->|否| EXEC
     WAIT -->|denied| DENY[返回权限拒绝]
     WAIT -->|timeout| DENY
-
-    style EXEC fill:#e8f5e9
-    style DENY fill:#ffebee
 ```
 
 **Permission Interrupt 流程：**

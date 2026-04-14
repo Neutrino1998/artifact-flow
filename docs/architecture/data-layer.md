@@ -74,8 +74,6 @@ flowchart TD
     M1 --> M3["msg_3<br/>user: 改为 Agent"]
     M2 --> M4["msg_4<br/>user: 写报告"]
     M3 --> M5["msg_5<br/>user: 总结"]
-
-    style M4 fill:#e8f5e9
     note1["active_branch = msg_4"]
     M4 -.-> note1
 ```

@@ -50,9 +50,6 @@ flowchart LR
     轮N -->|摘要化| 压缩
     压缩 --> 轮N1
     P1 ==>|Artifact 跨轮持久| P2
-
-    style P1 fill:#e8f5e9
-    style P2 fill:#e8f5e9
 ```
 
 - Task Plan Artifact：承载"任务分解 + 进度状态"，每轮模型通过 `update_artifact` 勾选完成项（`[✗] → [✓]`），下一轮读到的 system prompt 天然携带最新状态
@@ -185,12 +182,6 @@ flowchart TD
     L1 -->|未命中| L2{Layer 2<br/>fuzzysearch 近似}
     L2 -->|best.dist ≤ 阈值| OK2[Levenshtein 替换]
     L2 -->|无匹配/歧义/超阈值| FAIL2[拒绝]
-
-    style OK0 fill:#e8f5e9
-    style OK1 fill:#e8f5e9
-    style OK2 fill:#fff3e0
-    style FAIL0 fill:#ffebee
-    style FAIL2 fill:#ffebee
 ```
 
 **Layer 1 的归一化转换链**（`_normalize_for_match()`）：

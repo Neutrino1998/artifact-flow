@@ -43,10 +43,6 @@ flowchart TD
     EXEC --> CHECK_CANCEL
     COMPLETE --> CHECK_CANCEL
     CONTINUE --> CHECK_CANCEL
-
-    style START fill:#e1f5fe
-    style EXIT fill:#e8f5e9
-    style ERROR fill:#ffebee
 ```
 
 ### 每轮迭代详解
@@ -97,9 +93,6 @@ flowchart LR
     IS_LEAD -->|是| EXIT["completed = True<br/>退出循环"]
     IS_LEAD -->|否| PACK["打包响应为<br/>call_subagent tool_result"]
     PACK --> SWITCH["切回 lead_agent<br/>继续循环"]
-
-    style EXIT fill:#e8f5e9
-    style SWITCH fill:#fff3e0
 ```
 
 **Lead Agent 无工具调用：**

@@ -64,10 +64,6 @@ graph LR
     R[Router] -->|调用| M[Manager]
     M -->|调用| Repo[Repository]
     R -.->|禁止| Repo
-
-    style R fill:#4a9eff,color:#fff
-    style M fill:#50c878,color:#fff
-    style Repo fill:#ff8c42,color:#fff
 ```
 
 **关键约束：** Router 必须通过 Manager 访问数据，不可绕过 Manager 直接调用 Repository。
