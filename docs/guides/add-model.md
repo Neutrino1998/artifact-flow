@@ -60,7 +60,11 @@ models:
       <任意 LiteLLM 支持的参数>
 ```
 
-**参数合并规则：** 模型的 `params` 深度合并到 `defaults`，模型级覆盖默认级。
+**参数合并规则（注意实现限制）：**
+
+- `defaults` 中**只有 `temperature` 和 `max_tokens` 会被继承** — 见 `src/models/llm.py` `_resolve_model_params()`
+- 其他默认项（`top_p`、`top_k`、`presence_penalty`、`enable_thinking` 等）放在 `defaults` 下会**静默失效**，必须写在每个模型的 `params` 里
+- 模型的 `params` 优先级高于 `defaults`（仅对 `temperature` / `max_tokens` 有效）
 
 ### 完整字段参考
 
@@ -138,7 +142,17 @@ python tests/manual/litellm_providers.py
 
 ### 在 Agent 中试用
 
-把 model alias 填进某个 agent 的 frontmatter，重启服务后发起一个对话，在前端 Observability 模式查看 `llm_complete` 事件中的 `model` 字段确认实际被调用的模型。
+把 model alias 填进某个 agent 的 frontmatter，重启服务后发起一个对话，在前端 Observability 模式查看 `llm_complete` 事件。
+
+**注意：** `llm_complete` 事件的 `model` 字段是 agent frontmatter 里的 **alias**，不是解析后的 LiteLLM `provider/model-id`。要确认真正发出去的模型 ID（含 `openai/` 前缀自动补全等行为），用以下方式：
+
+```python
+# 在服务进程中（或独立 REPL）
+from models.llm import get_litellm_model_id
+print(get_litellm_model_id("my-model"))   # 打印真实的 litellm 模型 ID
+```
+
+或设置 `ARTIFACTFLOW_DEBUG=true` 查看 debug 日志中 `ContextManager.build` 打印的解析后 model ID。
 
 ## 常见问题
 

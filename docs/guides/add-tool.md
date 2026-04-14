@@ -196,18 +196,28 @@ __all__ = [
 ]
 ```
 
-**4. 在 `src/api/dependencies.py` 的 `_load_tools()` 中登记实例**
+**4. 在 `src/api/dependencies.py` 的 `_load_tools()` 中 import 并登记实例**
 
-找到构造 `tools` 列表的位置，添加 `MyTool()`：
+`_load_tools()` 在函数内**显式**导入每个 builtin 工具（不会因为 `__init__.py` 导出就自动可用），所以需要同时加 import 和实例：
 
 ```python
-tools = [
-    WebSearchTool(),
-    WebFetchTool(),
-    CallSubagentTool(),
-    MyTool(),   # 新增
-]
+def _load_tools() -> Dict[str, BaseTool]:
+    from tools.builtin.call_subagent import CallSubagentTool
+    from tools.builtin.web_search import WebSearchTool
+    from tools.builtin.web_fetch import WebFetchTool
+    from tools.builtin.my_tool import MyTool            # 新增 import
+    from tools.custom.loader import load_custom_tools
+
+    tools = [
+        CallSubagentTool(valid_agents=valid_agents),
+        WebSearchTool(),
+        WebFetchTool(),
+        MyTool(),                                        # 新增实例
+    ]
+    ...
 ```
+
+漏掉 import 会在启动时抛 `NameError`。
 
 **5. 在 Agent frontmatter 中引用**
 
