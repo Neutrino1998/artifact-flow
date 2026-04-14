@@ -210,7 +210,7 @@ docs/
 
 ---
 
-### PR 4: Streaming + 可观测性 + API Reference + 前端
+### PR 4: Streaming + 可观测性 + API Reference + 前端 ✅
 
 **范围：** architecture/streaming.md, architecture/observability.md, guides/api-reference.md, frontend.md
 
