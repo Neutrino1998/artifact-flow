@@ -107,9 +107,10 @@ function formatNumber(n: number): string {
 
 function formatDuration(ms: number): string {
   if (ms < 1_000) return `${ms}ms`;
-  if (ms < 60_000) return `${(ms / 1_000).toFixed(1)}s`;
-  const mins = Math.floor(ms / 60_000);
-  const secs = Math.floor((ms % 60_000) / 1_000);
+  const totalSecs = Math.floor(ms / 1_000);
+  if (totalSecs < 60) return `${totalSecs}s`;
+  const mins = Math.floor(totalSecs / 60);
+  const secs = totalSecs % 60;
   return `${mins}m ${secs}s`;
 }
 
