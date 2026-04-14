@@ -65,6 +65,63 @@ function formatTime(iso: string): string {
   }
 }
 
+// ── Stats helpers ──
+interface AggregatedStats {
+  inputTokens: number;
+  outputTokens: number;
+  llmCalls: number;
+  toolCalls: number;
+  toolFails: number;
+  totalDurationMs: number;
+}
+
+function aggregateStats(messages: AdminMessageGroup[]): AggregatedStats {
+  const stats: AggregatedStats = { inputTokens: 0, outputTokens: 0, llmCalls: 0, toolCalls: 0, toolFails: 0, totalDurationMs: 0 };
+  for (const msg of messages) {
+    for (const ev of msg.events) {
+      const d = ev.data;
+      if (!d) continue;
+      if (ev.event_type === 'llm_complete') {
+        stats.llmCalls++;
+        const tokens = d.token_usage as Record<string, number> | undefined;
+        if (tokens) {
+          stats.inputTokens += tokens.input_tokens ?? 0;
+          stats.outputTokens += tokens.output_tokens ?? 0;
+        }
+        stats.totalDurationMs += (d.duration_ms as number) ?? 0;
+      } else if (ev.event_type === 'tool_complete') {
+        stats.toolCalls++;
+        if (!(d.success as boolean)) stats.toolFails++;
+        stats.totalDurationMs += (d.duration_ms as number) ?? 0;
+      }
+    }
+  }
+  return stats;
+}
+
+function formatNumber(n: number): string {
+  if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M';
+  if (n >= 1_000) return (n / 1_000).toFixed(1) + 'K';
+  return String(n);
+}
+
+function formatDuration(ms: number): string {
+  if (ms < 1_000) return `${ms}ms`;
+  if (ms < 60_000) return `${(ms / 1_000).toFixed(1)}s`;
+  const mins = Math.floor(ms / 60_000);
+  const secs = ((ms % 60_000) / 1_000).toFixed(0);
+  return `${mins}m ${secs}s`;
+}
+
+function StatCard({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="px-3 py-1.5 rounded-lg bg-panel-accent dark:bg-surface-dark">
+      <div className="text-[10px] text-text-tertiary dark:text-text-tertiary-dark uppercase tracking-wide">{label}</div>
+      <div className="text-sm font-semibold text-text-primary dark:text-text-primary-dark">{value}</div>
+    </div>
+  );
+}
+
 // ── Main Panel ──
 export default function ObservabilityPanel() {
   const selectedConvId = useUIStore((s) => s.observabilitySelectedConvId);
@@ -152,21 +209,32 @@ export default function ObservabilityPanel() {
     );
   }
 
+  // Aggregate stats
+  const stats = eventsData != null ? aggregateStats(eventsData.messages) : null;
+
   // Timeline + Detail
   return (
     <div className="flex-1 flex min-h-0 bg-chat dark:bg-chat-dark">
       {/* Timeline */}
       <div className="flex-1 flex flex-col min-w-0">
-        {eventsData != null ? (
+        {eventsData != null && stats != null ? (
           <>
             {/* Header */}
             <div className="px-4 pt-3 pb-2 border-b border-border dark:border-border-dark">
               <div className="text-sm font-semibold text-text-primary dark:text-text-primary-dark truncate">
                 {eventsData.title || selectedConvId}
               </div>
-              <div className="text-xs text-text-tertiary dark:text-text-tertiary-dark mt-0.5">
-                {eventsData.messages.length} messages | {eventsData.messages.reduce((n, m) => n + m.events.length, 0)} events
-              </div>
+            </div>
+
+            {/* Stats cards */}
+            <div className="px-4 py-2 border-b border-border dark:border-border-dark flex gap-3 flex-wrap">
+              <StatCard label="Messages" value={String(eventsData.messages.length)} />
+              <StatCard label="Events" value={String(eventsData.messages.reduce((n, m) => n + m.events.length, 0))} />
+              <StatCard label="Tokens In" value={formatNumber(stats.inputTokens)} />
+              <StatCard label="Tokens Out" value={formatNumber(stats.outputTokens)} />
+              <StatCard label="LLM Calls" value={String(stats.llmCalls)} />
+              <StatCard label="Tool Calls" value={stats.toolFails > 0 ? `${stats.toolCalls} (${stats.toolFails} fail)` : String(stats.toolCalls)} />
+              <StatCard label="Total Time" value={formatDuration(stats.totalDurationMs)} />
             </div>
 
             {/* Messages & events */}
