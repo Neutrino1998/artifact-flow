@@ -96,6 +96,7 @@ async def _failover_creator():
 - `connect_timeout` 故意**不在**白名单中：failover 路径硬编码 5s probe timeout（架构决策），DSN 覆盖会导致 Python 层 kwarg 重复报错
 - `read_timeout` / `write_timeout` 不在白名单：虽然 PyMySQL 支持，但 **aiomysql 不支持这两个参数**，传过去会 `TypeError`
 - URL query 值永远是 `str`，数值/布尔类参数必须在解析时显式转换，否则 driver 内部使用时（如 `asyncio.wait_for(timeout=...)`、`if autocommit:`）会出错
+- **PG 的 `sslmode` 与 `ssl_ca`/`ssl_cert`/`ssl_key` 不可混用**：两者表达 TLS 意图的方式不同，混用有语义歧义（`sslmode=disable + ssl_ca=...` 会反转用户禁用 TLS 的意图），而 asyncpg 也不复刻 libpq 的 `prefer`/`allow` 降级逻辑。混用时 init 直接 fail。用户须二选一：要么只用 `sslmode=`（走系统 CA 池），要么只给 CA/cert 文件路径（构造 `SSLContext`）
 
 之所以要白名单 + fail-fast：failover 路径绕过了 SQLAlchemy dialect 的 URL 翻译（直接调 driver 的 `connect()`），而 `asyncpg.connect` 和 `aiomysql.connect` 签名都是固定的、不吃任意 `**kwargs`。白名单保证迁移 `DATABASE_URL → DATABASE_URLS` 不会出现连接行为静默变化，也不会在真正连接时才炸。
 
