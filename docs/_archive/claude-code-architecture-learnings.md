@@ -391,3 +391,94 @@ docker-compose.yml:
 | Deferred tool search | 高 | 低 | 暂不需要 |
 | Hook 系统 | 高 | 中 | 后期 |
 | 沙盒隔离（→microVM） | 高 | 高 | 设计参考，实现用 microVM 替代 |
+
+---
+
+## 13. OpenHarness 对比分析
+
+> Source: [HKUDS/OpenHarness](https://github.com/HKUDS/OpenHarness) v0.1.6（Python，~35K 行）
+> Date: 2026-04-14
+
+OpenHarness 是港大 HKUDS 实验室的开源项目，本质上是 Claude Code 的 Python 复刻。工具名、skill/plugin 格式、CLAUDE.md 发现机制、MEMORY.md、permission modes 几乎 1:1 对标 Claude Code。与 ArtifactFlow 的根本区别是**本地 CLI 单用户工具 vs 多租户 SaaS 服务**。
+
+### 13.1 结构化 UI 协议
+
+OpenHarness 的前后端通信不走 HTTP，而是父子进程间的 stdin/stdout JSON-lines 协议，前缀 `OHJSON:` 与普通 print 区分。
+
+**双向都用 Pydantic 强类型：**
+- `FrontendRequest`（7 种 type）：前端 → 后端
+- `BackendEvent`（18 种 type）：后端 → 前端
+
+每种事件的 payload 字段在 Pydantic model 里固定声明，传错字段直接校验失败。
+
+**权限确认的 request-response 模式：**
+```
+Backend  → modal_request(request_id="abc", tool_name="Write", reason="...")
+Frontend → permission_response(request_id="abc", allowed=true)
+```
+后端用 `asyncio.Future` 等回复，300s 超时自动拒绝。与 ArtifactFlow 的 `RuntimeStore.create_interrupt()` + `asyncio.Event` 本质相同，但协议更显式。
+
+**Ref:**
+- `src/openharness/ui/protocol.py` — `FrontendRequest` / `BackendEvent` Pydantic 定义（221 行）
+- `src/openharness/ui/backend_host.py` — `ReactBackendHost`，事件 emit / 请求 dispatch（778 行）
+
+**ArtifactFlow 应用：** 传输层不需要改（HTTP SSE 是 SaaS 的正确选择），但可以借鉴事件 payload 的强类型化。当前 `ExecutionEvent.data` 是 `Any`，前端靠约定解析。可以为每种 `StreamEventType` 定义具体的 Pydantic payload model（如 `ToolStartPayload(tool_name, tool_input, agent_name)`），然后通过 `export_openapi.py` → `npm run generate-types` 自动生成前端 TS 类型，从"靠约定"变为"靠类型系统"。
+
+### 13.2 Auto-Compaction（自动上下文压缩）
+
+与第 2 节 Claude Code 的 compaction 对比，OpenHarness 增加了 **reactive compaction**：
+
+- **预检**：每轮对话前估算 token，超阈值触发 micro-compact（清理旧 tool results）或 LLM 摘要压缩
+- **反应式**：API 返回 "prompt too long" 时，强制压缩后自动重试（不中断用户流程）
+- **Carryover metadata**：工具执行后在 metadata 里携带 `recent_goals`、`verified_state`、`read_files`、`invoked_skills` 到下一轮，作为短期工作记忆。不需要 RAG 或向量搜索，开销极低
+
+**Ref:**
+- `src/openharness/engine/query.py:106-183` — carryover state tracking
+- `src/openharness/engine/query.py` `run_query()` — auto-compaction 逻辑（716 行）
+
+**ArtifactFlow 应用：** reactive compaction 的"出错后自动压缩重试"对长会话场景很实用。carryover metadata 可以低成本地集成到 `conversation_manager` 的消息组装中，让模型对工作进度有更好的短期记忆。
+
+### 13.3 多 Provider 抽象
+
+统一的 provider 接口，支持 Anthropic / OpenAI / Copilot / Moonshot / GLM 等，通过 profile 机制切换。
+
+- `AnthropicClient`：带指数退避重试（最多 3 次），retry 过程以 `ApiRetryEvent` 暴露给前端
+- `OpenAIClient`：将 Anthropic 风格的 tool call 转为 OpenAI 风格
+- Provider registry：从模型名字符串自动检测 provider
+
+**Ref:**
+- `src/openharness/api/client.py` — AnthropicClient（266 行）
+- `src/openharness/api/registry.py` — provider 自动检测（423 行）
+
+**ArtifactFlow 应用：** 暂时只需要 Anthropic。如果未来支持多模型后端，provider registry + profile 的设计可以直接参考。
+
+### 13.4 Pydantic Tool 系统
+
+每个 tool 用 Pydantic `BaseModel` 定义输入 schema，自动转 JSON Schema 给模型，执行时自动校验。每个 tool 还有 `is_read_only()` 方法用于权限分层。
+
+**对比 ArtifactFlow：** 我们用 XML+CDATA 解析工具调用，这是有意选择（部分模型在 XML 格式下 tool call 质量更高）。Pydantic tool 系统更标准化，但不是必须迁移。
+
+### 13.5 Swarm 多 Agent
+
+两种执行后端：
+- **进程内**：asyncio Task + `contextvars` 隔离（类似 Node 的 AsyncLocalStorage）
+- **子进程**：JSON-lines 通信，支持 git worktree 隔离
+
+mailbox 系统做 agent 间异步消息传递。比 ArtifactFlow 的 Lead/Search/Crawl 路由更通用，但我们的场景目前不需要这种通用性。
+
+### 13.6 敏感路径硬编码防护
+
+`PermissionChecker` 里硬编码了 SSH keys、AWS credentials、GCP service accounts、Docker config、K8s config 等路径 pattern，无论用户怎么配置权限都会拒绝访问。这是 defense-in-depth，防止 prompt injection 诱导模型读取敏感文件。
+
+**ArtifactFlow 应用：** 我们的安全模型不同（web 服务，agent 不直接操作宿主文件系统），但如果未来加入 code execution sandbox，sandbox 内部可以借鉴这种硬编码 deny list 的模式。
+
+---
+
+### 优先级更新
+
+| 模式 | 难度 | 收益 | 建议 |
+|------|------|------|------|
+| SSE 事件 payload 强类型化 | 低 | 中 | 随手做，配合现有 OpenAPI 生成流程 |
+| Reactive compaction | 中 | 高 | 与第 2 节 compaction 一起实现 |
+| Carryover metadata | 低 | 中 | 低成本集成到 conversation_manager |
+| 多 Provider 抽象 | 高 | 低 | 暂不需要，需要时参考 |
