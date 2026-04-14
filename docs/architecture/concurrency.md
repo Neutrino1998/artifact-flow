@@ -81,14 +81,23 @@ async def _failover_creator():
 
 **DSN query 参数白名单**（不在列表内的 key 在 init 时 fail fast，避免 failover 路径静默丢配置）：
 
-| 参数 | 适用 | 说明 |
-|------|------|------|
-| `ssl_ca` / `ssl_cert` / `ssl_key` | 两者 | 文件路径，构建 `ssl.SSLContext` 后作为 `ssl=` kwarg 传递 |
-| `sslmode` | PG | 翻译为 asyncpg 的 `ssl=` 字符串（`require` / `prefer` / `disable` 等） |
-| `command_timeout` / `application_name` | PG | 透传给 asyncpg |
-| `charset` / `autocommit` / `connect_timeout` / `read_timeout` / `write_timeout` / `unix_socket` / `init_command` / `program_name` | MySQL | 透传给 aiomysql |
+| 参数 | 适用 | 映射 | 类型处理 |
+|------|------|------|---------|
+| `ssl_ca` / `ssl_cert` / `ssl_key` | 两者 | 文件路径 → `ssl.SSLContext` → `ssl=` kwarg | — |
+| `sslmode` | PG | → asyncpg `ssl=` 字符串（`require` / `prefer` / `disable` 等） | — |
+| `command_timeout` | PG | asyncpg 直接 kwarg | 强制转 `float` |
+| `application_name` | PG | asyncpg `server_settings={...}` 字典（**不是**直接 kwarg） | — |
+| `charset` / `unix_socket` / `init_command` / `program_name` | MySQL | aiomysql 直接 kwarg | `str` |
+| `autocommit` | MySQL | aiomysql 直接 kwarg | 强制转 `bool`（接受 `true`/`false`/`1`/`0`/`yes`/`no`/`on`/`off`） |
 
-这样设计是因为 failover 路径绕过了 SQLAlchemy 的 dialect URL 翻译（直接调 driver 的 `connect()`），而 `asyncpg.connect` 签名固定、不吃任意 `**kwargs`，未知 key 会 `TypeError`；MySQL 虽然能透传但静默接受也会引起迷惑。白名单 + fail-fast 保证迁移 `DATABASE_URL → DATABASE_URLS` 不会出现连接行为静默变化。
+**关键点：**
+
+- `application_name` 不是 `asyncpg.connect()` 的直接 kwarg，必须走 `server_settings` 字典 — 直接当 kwarg 传会 `TypeError`
+- `connect_timeout` 故意**不在**白名单中：failover 路径硬编码 5s probe timeout（架构决策），DSN 覆盖会导致 Python 层 kwarg 重复报错
+- `read_timeout` / `write_timeout` 不在白名单：虽然 PyMySQL 支持，但 **aiomysql 不支持这两个参数**，传过去会 `TypeError`
+- URL query 值永远是 `str`，数值/布尔类参数必须在解析时显式转换，否则 driver 内部使用时（如 `asyncio.wait_for(timeout=...)`、`if autocommit:`）会出错
+
+之所以要白名单 + fail-fast：failover 路径绕过了 SQLAlchemy dialect 的 URL 翻译（直接调 driver 的 `connect()`），而 `asyncpg.connect` 和 `aiomysql.connect` 签名都是固定的、不吃任意 `**kwargs`。白名单保证迁移 `DATABASE_URL → DATABASE_URLS` 不会出现连接行为静默变化，也不会在真正连接时才炸。
 
 ### 瞬断重试
 
