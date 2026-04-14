@@ -78,7 +78,17 @@ async def _failover_creator():
 - **支持 MySQL 和 PostgreSQL**：按 URL 后端自动选择 `aiomysql` / `asyncpg` 驱动；所有地址必须同一种 driver（启动时校验）
 - 通过 SQLAlchemy 的 `async_creator` hook 注入
 - 仅用于建立新连接；已建立的连接断开由 `pool_pre_ping` + 应用层 `with_retry()` 处理
-- SSL 参数（`ssl_ca`/`ssl_cert`/`ssl_key`）通过 URL query string 传入，构建 `ssl.SSLContext` 后两种驱动都通过 `ssl=` kwarg 传递
+
+**DSN query 参数白名单**（不在列表内的 key 在 init 时 fail fast，避免 failover 路径静默丢配置）：
+
+| 参数 | 适用 | 说明 |
+|------|------|------|
+| `ssl_ca` / `ssl_cert` / `ssl_key` | 两者 | 文件路径，构建 `ssl.SSLContext` 后作为 `ssl=` kwarg 传递 |
+| `sslmode` | PG | 翻译为 asyncpg 的 `ssl=` 字符串（`require` / `prefer` / `disable` 等） |
+| `command_timeout` / `application_name` | PG | 透传给 asyncpg |
+| `charset` / `autocommit` / `connect_timeout` / `read_timeout` / `write_timeout` / `unix_socket` / `init_command` / `program_name` | MySQL | 透传给 aiomysql |
+
+这样设计是因为 failover 路径绕过了 SQLAlchemy 的 dialect URL 翻译（直接调 driver 的 `connect()`），而 `asyncpg.connect` 签名固定、不吃任意 `**kwargs`，未知 key 会 `TypeError`；MySQL 虽然能透传但静默接受也会引起迷惑。白名单 + fail-fast 保证迁移 `DATABASE_URL → DATABASE_URLS` 不会出现连接行为静默变化。
 
 ### 瞬断重试
 
