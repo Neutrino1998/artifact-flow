@@ -78,6 +78,8 @@ interface AggregatedStats {
 function aggregateStats(messages: AdminMessageGroup[]): AggregatedStats {
   const stats: AggregatedStats = { inputTokens: 0, outputTokens: 0, llmCalls: 0, toolCalls: 0, toolFails: 0, totalDurationMs: 0 };
   for (const msg of messages) {
+    const metrics = msg.execution_metrics as Record<string, number> | null;
+    if (metrics?.total_duration_ms) stats.totalDurationMs += metrics.total_duration_ms;
     for (const ev of msg.events) {
       const d = ev.data;
       if (!d) continue;
@@ -88,11 +90,9 @@ function aggregateStats(messages: AdminMessageGroup[]): AggregatedStats {
           stats.inputTokens += tokens.input_tokens ?? 0;
           stats.outputTokens += tokens.output_tokens ?? 0;
         }
-        stats.totalDurationMs += (d.duration_ms as number) ?? 0;
       } else if (ev.event_type === 'tool_complete') {
         stats.toolCalls++;
         if (!(d.success as boolean)) stats.toolFails++;
-        stats.totalDurationMs += (d.duration_ms as number) ?? 0;
       }
     }
   }
@@ -109,7 +109,7 @@ function formatDuration(ms: number): string {
   if (ms < 1_000) return `${ms}ms`;
   if (ms < 60_000) return `${(ms / 1_000).toFixed(1)}s`;
   const mins = Math.floor(ms / 60_000);
-  const secs = ((ms % 60_000) / 1_000).toFixed(0);
+  const secs = Math.floor((ms % 60_000) / 1_000);
   return `${mins}m ${secs}s`;
 }
 
