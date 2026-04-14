@@ -95,9 +95,25 @@ class DatabaseManager:
         """判断是否是 SQLite 数据库"""
         return "sqlite" in self.database_url.lower()
 
+    # Query params we know how to translate per driver. Unknown keys are
+    # rejected at init to avoid silently dropping DSN options when moving
+    # from DATABASE_URL (SQLAlchemy-parsed) to DATABASE_URLS (raw probes).
+    _SSL_FILE_KEYS = frozenset({"ssl_ca", "ssl_cert", "ssl_key"})
+    _PG_ALLOWED_QUERY = frozenset({"sslmode", "command_timeout", "application_name"})
+    _MYSQL_ALLOWED_QUERY = frozenset({
+        "charset", "autocommit", "connect_timeout", "read_timeout", "write_timeout",
+        "unix_socket", "init_command", "program_name",
+    })
+
     @staticmethod
     def _parse_db_url(url: str) -> Tuple[str, Dict[str, Any]]:
         """Parse SQLAlchemy URL into driver-specific connect kwargs for failover probes.
+
+        Supported DSN query params (others raise ValueError to prevent silent drops):
+        - Both drivers: ``ssl_ca`` / ``ssl_cert`` / ``ssl_key`` (file paths → SSLContext)
+        - PostgreSQL: ``sslmode`` (→ asyncpg ``ssl=``), ``command_timeout``, ``application_name``
+        - MySQL: ``charset``, ``autocommit``, ``connect_timeout``, ``read_timeout``,
+          ``write_timeout``, ``unix_socket``, ``init_command``, ``program_name``
 
         Returns:
             (driver, kwargs) where driver is "mysql" or "postgres" and kwargs
@@ -126,24 +142,46 @@ class DatabaseManager:
             result["password"] = u.password
 
         if u.query:
-            ssl_params = {}
+            allowed = (
+                DatabaseManager._PG_ALLOWED_QUERY if is_pg
+                else DatabaseManager._MYSQL_ALLOWED_QUERY
+            )
+            ssl_file_params: Dict[str, str] = {}
+            pg_sslmode: Optional[str] = None
+
             for key, value in u.query.items():
-                if key.startswith("ssl_"):
-                    ssl_params[key] = value
-                elif not is_pg:
-                    # aiomysql accepts pass-through query args; asyncpg ignores unknowns
+                if key in DatabaseManager._SSL_FILE_KEYS:
+                    ssl_file_params[key] = value
+                elif is_pg and key == "sslmode":
+                    pg_sslmode = value
+                elif key in allowed:
+                    # Driver-native pass-through (PG: command_timeout/application_name;
+                    # MySQL: charset/autocommit/...)
                     result[key] = value
-            if ssl_params:
+                else:
+                    driver_name = "postgres" if is_pg else "mysql"
+                    raise ValueError(
+                        f"Unsupported DSN query param '{key}' for {driver_name} "
+                        f"failover path. Supported: ssl_ca/ssl_cert/ssl_key"
+                        + (", sslmode, command_timeout, application_name"
+                           if is_pg else
+                           ", " + ", ".join(sorted(DatabaseManager._MYSQL_ALLOWED_QUERY)))
+                    )
+
+            if ssl_file_params:
                 import ssl
                 ctx = ssl.create_default_context()
-                if "ssl_ca" in ssl_params:
-                    ctx.load_verify_locations(cafile=ssl_params["ssl_ca"])
-                if "ssl_cert" in ssl_params and "ssl_key" in ssl_params:
+                if "ssl_ca" in ssl_file_params:
+                    ctx.load_verify_locations(cafile=ssl_file_params["ssl_ca"])
+                if "ssl_cert" in ssl_file_params and "ssl_key" in ssl_file_params:
                     ctx.load_cert_chain(
-                        certfile=ssl_params["ssl_cert"],
-                        keyfile=ssl_params["ssl_key"],
+                        certfile=ssl_file_params["ssl_cert"],
+                        keyfile=ssl_file_params["ssl_key"],
                     )
                 result["ssl"] = ctx
+            elif pg_sslmode is not None:
+                # asyncpg accepts the mode string directly via ssl=
+                result["ssl"] = pg_sslmode
 
         return ("postgres" if is_pg else "mysql", result)
 
