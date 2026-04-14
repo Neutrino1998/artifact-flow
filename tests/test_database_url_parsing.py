@@ -214,6 +214,24 @@ class TestSslFileParams:
         import ssl as _ssl
         assert isinstance(kw["ssl"], _ssl.SSLContext)
 
+    def test_pg_sslmode_and_ssl_ca_rejected(self, tmp_path):
+        # Mixing sslmode with file-based SSL params has ambiguous semantics
+        # (disable+ssl_ca would silently enable TLS). Must fail fast.
+        ca_file = self._write_self_signed_ca(tmp_path)
+        with pytest.raises(ValueError, match="cannot mix 'sslmode' with file-based SSL"):
+            DatabaseManager._parse_db_url(
+                f"postgresql+asyncpg://h/d?sslmode=disable&ssl_ca={ca_file}"
+            )
+
+    def test_pg_sslmode_require_with_ssl_ca_also_rejected(self, tmp_path):
+        # Even a "compatible-looking" combo like require+ssl_ca is rejected,
+        # because asyncpg can't honor the subtler libpq semantics.
+        ca_file = self._write_self_signed_ca(tmp_path)
+        with pytest.raises(ValueError, match="cannot mix 'sslmode' with file-based SSL"):
+            DatabaseManager._parse_db_url(
+                f"postgresql+asyncpg://h/d?sslmode=require&ssl_ca={ca_file}"
+            )
+
 
 class TestDriverMixDetection:
     def test_parse_returns_driver_tag(self):

@@ -225,6 +225,20 @@ class DatabaseManager:
                         f"failover path. Supported: {supported}"
                     )
 
+            # PG: sslmode (string) and ssl_* (file paths → SSLContext) are two
+            # different ways to configure TLS. Mixing them has ambiguous
+            # semantics (e.g. sslmode=disable + ssl_ca= would silently enable
+            # TLS, reversing the user's intent) and asyncpg does not replicate
+            # libpq's prefer/allow fallback behaviour, so merged semantics
+            # cannot be honoured faithfully. Reject the combination.
+            if is_pg and ssl_file_params and pg_sslmode is not None:
+                raise ValueError(
+                    "PostgreSQL DSN cannot mix 'sslmode' with file-based SSL "
+                    "params (ssl_ca/ssl_cert/ssl_key). Use either "
+                    "'?sslmode=require' (or other mode) alone, or "
+                    "'?ssl_ca=/path&ssl_cert=/path&ssl_key=/path' alone."
+                )
+
             if ssl_file_params:
                 import ssl
                 ctx = ssl.create_default_context()
