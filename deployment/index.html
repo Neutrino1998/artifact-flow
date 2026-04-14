@@ -1,0 +1,2438 @@
+
+<!doctype html>
+<html lang="zh" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Pi-style 可配置 Agent 引擎 + 双 Artifact 架构的多智能体 SaaS">
+      
+      
+      
+        <link rel="canonical" href="https://neutrino1998.github.io/artifact-flow/deployment/">
+      
+      
+        <link rel="prev" href="..">
+      
+      
+        <link rel="next" href="../architecture/overview/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>Deployment - ArtifactFlow</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../stylesheets/custom.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="custom">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#部署指南" class="md-skip">
+          跳转至
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="页眉">
+    <a href=".." title="ArtifactFlow" class="md-header__button md-logo" aria-label="ArtifactFlow" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            ArtifactFlow
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Deployment
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="custom"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="custom" data-md-color-accent="custom"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="搜索" placeholder="搜索" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="查找">
+        
+        <button type="reset" class="md-search__icon md-icon" title="清空当前内容" aria-label="清空当前内容" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            正在初始化搜索引擎
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/Neutrino1998/artifact-flow" title="前往仓库" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    Neutrino1998/artifact-flow
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="标签" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href=".." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    <li class="md-tabs__item md-tabs__item--active">
+      <a href="./" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Deployment
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../architecture/overview/" class="md-tabs__link">
+          
+  
+  
+  Architecture
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../guides/add-agent/" class="md-tabs__link">
+          
+  
+  
+  Guides
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../frontend/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Frontend
+
+      </a>
+    </li>
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="导航栏" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="ArtifactFlow" class="md-nav__button md-logo" aria-label="ArtifactFlow" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    ArtifactFlow
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/Neutrino1998/artifact-flow" title="前往仓库" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    Neutrino1998/artifact-flow
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deployment
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deployment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="目录">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      目录
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#部署模式总览" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        部署模式总览
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#mode-1-quick-trial" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Mode 1: Quick Trial
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#mode-2a-production自建基础设施" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Mode 2A: Production（自建基础设施）
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Mode 2A: Production（自建基础设施）">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#前置准备" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        前置准备
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#启动" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        启动
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#首次初始化" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        首次初始化
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#验证" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        验证
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#扩缩容" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        扩缩容
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#mode-2b-production云数据库" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Mode 2B: Production（云数据库）
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Mode 2B: Production（云数据库）">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#配置" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        配置
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#启动_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        启动
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#mode-3-内网离线部署" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Mode 3: 内网离线部署
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Mode 3: 内网离线部署">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#构建发布包在有网络的构建机上" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        构建发布包（在有网络的构建机上）
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#部署在目标内网机器上" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        部署（在目标内网机器上）
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#环境变量完整参考" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        环境变量完整参考
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="环境变量完整参考">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#核心" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        核心
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#jwt-认证" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        JWT 认证
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#数据库" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        数据库
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#redis" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Redis
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#sse-与执行超时" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SSE 与执行超时
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#compaction-与上下文" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Compaction 与上下文
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#cors" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CORS
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#其他" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        其他
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#llm-与工具-api-key" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        LLM 与工具 API Key
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#启动校验规则" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        启动校验规则
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#运维参考" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        运维参考
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="运维参考">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#数据库迁移" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        数据库迁移
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#nginx-配置" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Nginx 配置
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#健康检查" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        健康检查
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#数据卷" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        数据卷
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#停止与清理" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        停止与清理
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#日志" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        日志
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Architecture
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture/overview/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture/engine/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Engine
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture/agents/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Agents
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture/tools/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tools
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture/artifacts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Artifacts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture/data-layer/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data Layer
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture/streaming/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Streaming
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture/concurrency/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Concurrency
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture/observability/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Observability
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Guides
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Guides
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guides/add-agent/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Add Agent
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guides/add-tool/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Add Tool
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guides/add-model/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Add Model
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guides/api-reference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../frontend/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Frontend
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="目录">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      目录
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#部署模式总览" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        部署模式总览
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#mode-1-quick-trial" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Mode 1: Quick Trial
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#mode-2a-production自建基础设施" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Mode 2A: Production（自建基础设施）
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Mode 2A: Production（自建基础设施）">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#前置准备" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        前置准备
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#启动" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        启动
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#首次初始化" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        首次初始化
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#验证" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        验证
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#扩缩容" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        扩缩容
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#mode-2b-production云数据库" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Mode 2B: Production（云数据库）
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Mode 2B: Production（云数据库）">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#配置" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        配置
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#启动_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        启动
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#mode-3-内网离线部署" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Mode 3: 内网离线部署
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Mode 3: 内网离线部署">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#构建发布包在有网络的构建机上" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        构建发布包（在有网络的构建机上）
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#部署在目标内网机器上" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        部署（在目标内网机器上）
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#环境变量完整参考" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        环境变量完整参考
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="环境变量完整参考">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#核心" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        核心
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#jwt-认证" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        JWT 认证
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#数据库" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        数据库
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#redis" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Redis
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#sse-与执行超时" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SSE 与执行超时
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#compaction-与上下文" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Compaction 与上下文
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#cors" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CORS
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#其他" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        其他
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#llm-与工具-api-key" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        LLM 与工具 API Key
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#启动校验规则" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        启动校验规则
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#运维参考" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        运维参考
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="运维参考">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#数据库迁移" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        数据库迁移
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#nginx-配置" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Nginx 配置
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#健康检查" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        健康检查
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#数据卷" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        数据卷
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#停止与清理" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        停止与清理
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#日志" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        日志
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="部署指南">部署指南</h1>
+<blockquote>
+<p>五种部署模式覆盖从本地试用到内网离线的全部场景。</p>
+</blockquote>
+<h2 id="部署模式总览">部署模式总览</h2>
+<pre class="mermaid"><code>graph TD
+    Start{选择部署模式}
+    Start --&gt;|本地试用| M1[Mode 1: Quick Trial]
+    Start --&gt;|生产部署| Prod{基础设施}
+    Start --&gt;|内网离线| Intra{基础设施}
+
+    Prod --&gt;|自建 PG + Redis| M2A[Mode 2A: 自建基础设施]
+    Prod --&gt;|云数据库 RDS| M2B[Mode 2B: 云数据库]
+    Intra --&gt;|自建 PG + Redis| M3A[Mode 3A: 内网自建]
+    Intra --&gt;|内部 DB 服务| M3B[Mode 3B: 内网托管DB]</code></pre>
+<table>
+<thead>
+<tr>
+<th>Mode</th>
+<th>场景</th>
+<th>服务</th>
+<th>数据库</th>
+<th>Compose 文件</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>1: Quick Trial</strong></td>
+<td>本地试用</td>
+<td>backend + frontend</td>
+<td>SQLite + InMemory</td>
+<td><code>docker-compose.yml</code></td>
+</tr>
+<tr>
+<td><strong>2A: Prod 自建</strong></td>
+<td>生产 + 自建基础设施</td>
+<td>nginx + backend + frontend + PG + Redis</td>
+<td>容器化</td>
+<td><code>docker-compose.prod.yml --profile infra</code></td>
+</tr>
+<tr>
+<td><strong>2B: Prod 云数据库</strong></td>
+<td>生产 + RDS/ElastiCache</td>
+<td>nginx + backend + frontend</td>
+<td>外部托管</td>
+<td><code>docker-compose.prod.yml</code></td>
+</tr>
+<tr>
+<td><strong>3A: 内网 自建</strong></td>
+<td>离线/内网部署</td>
+<td>同 2A</td>
+<td>容器化</td>
+<td><code>deploy/docker-compose.intranet.yml --profile infra</code></td>
+</tr>
+<tr>
+<td><strong>3B: 内网 托管DB</strong></td>
+<td>离线 + 内部DB服务</td>
+<td>nginx + backend + frontend</td>
+<td>内部托管</td>
+<td><code>deploy/docker-compose.intranet.yml</code></td>
+</tr>
+</tbody>
+</table>
+<p><strong>关键区别：</strong></p>
+<ul>
+<li><strong>Mode 2 vs 1：</strong> Nginx 反向代理（单端口 80）、PG + Redis 持久化、Alembic 自动迁移</li>
+<li><strong>Mode 3 vs 2：</strong> <code>image:</code> 替代 <code>build:</code>，通过 <code>docker save/load</code> 离线部署，无需访问外部镜像仓库</li>
+<li><strong>2A/3A vs 2B/3B：</strong> <code>--profile infra</code> 控制是否启动 PG/Redis 容器</li>
+</ul>
+<hr />
+<h2 id="mode-1-quick-trial">Mode 1: Quick Trial</h2>
+<p>最简部署，SQLite + InMemory RuntimeStore，适合本地试用和开发。</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1"># 1. 配置环境变量</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>cp<span class="w"> </span>.env.example<span class="w"> </span>.env
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="c1"># 编辑 .env，填入 API Keys 和 JWT secret</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="c1"># 2. 启动</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>docker<span class="w"> </span>compose<span class="w"> </span>up<span class="w"> </span>-d
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="c1"># 3. 创建管理员</span>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>docker<span class="w"> </span>compose<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>backend<span class="w"> </span>python<span class="w"> </span>scripts/create_admin.py<span class="w"> </span>admin<span class="w"> </span>--password<span class="w"> </span>&lt;your-password&gt;
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="c1"># 4. 访问</span>
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a><span class="c1"># 前端: http://localhost:3000</span>
+<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a><span class="c1"># API 文档: http://localhost:8000/docs（需设置 ARTIFACTFLOW_DEBUG=true）</span>
+</code></pre></div>
+<p><strong>注意事项：</strong></p>
+<ul>
+<li>前端 3000 → 后端 8000 跨端口，CORS 默认开启</li>
+<li>数据存储在 Docker named volume <code>artifactflow_data</code></li>
+<li>不支持多副本（InMemory RuntimeStore 是单进程的）</li>
+</ul>
+<hr />
+<h2 id="mode-2a-production自建基础设施">Mode 2A: Production（自建基础设施）</h2>
+<p>完整生产部署，PG + Redis 容器化，Nginx 反向代理。</p>
+<h3 id="前置准备">前置准备</h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="c1"># 1. 从模板创建 .env</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>cp<span class="w"> </span>deploy/.env.prod.example<span class="w"> </span>.env
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="c1"># 2. 编辑 .env，必须填写：</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="c1">#    - ARTIFACTFLOW_JWT_SECRET（生成: python -c &quot;import secrets; print(secrets.token_urlsafe(32))&quot;）</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="c1">#    - POSTGRES_PASSWORD（强密码）</span>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="c1">#    - DASHSCOPE_API_KEY（默认模型必填）</span>
+</code></pre></div>
+<h3 id="启动">启动</h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>docker-compose.prod.yml<span class="w"> </span>--profile<span class="w"> </span>infra<span class="w"> </span>up<span class="w"> </span>-d
+</code></pre></div>
+<h3 id="首次初始化">首次初始化</h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="c1"># Alembic 自动迁移（容器 entrypoint 自动完成，无需手动）</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="c1"># 确认迁移成功：</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>docker-compose.prod.yml<span class="w"> </span>logs<span class="w"> </span>backend<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>-i<span class="w"> </span><span class="s2">&quot;alembic&quot;</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="c1"># 创建管理员</span>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>docker-compose.prod.yml<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>backend<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="w">  </span>python<span class="w"> </span>scripts/create_admin.py<span class="w"> </span>admin<span class="w"> </span>--password<span class="w"> </span>&lt;your-password&gt;
+</code></pre></div>
+<h3 id="验证">验证</h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="c1"># 健康检查（通过 Nginx）</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>curl<span class="w"> </span>http://localhost/health/ready
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="c1"># 预期: {&quot;status&quot;:&quot;ok&quot;,&quot;db&quot;:&quot;ok&quot;,&quot;redis&quot;:&quot;ok&quot;}</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="c1"># 前端</span>
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>open<span class="w"> </span>http://localhost
+</code></pre></div>
+<h3 id="扩缩容">扩缩容</h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="c1"># 水平扩展 backend（Nginx 自动负载均衡）</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>docker-compose.prod.yml<span class="w"> </span>--profile<span class="w"> </span>infra<span class="w"> </span>up<span class="w"> </span>-d<span class="w"> </span>--scale<span class="w"> </span><span class="nv">backend</span><span class="o">=</span><span class="m">2</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="c1"># 注意：首次启动多副本时，Alembic 迁移通过 PG advisory lock 串行化</span>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="c1"># 只有一个副本执行迁移，其他副本等待并验证后再启动</span>
+</code></pre></div>
+<hr />
+<h2 id="mode-2b-production云数据库">Mode 2B: Production（云数据库）</h2>
+<p>使用外部 RDS + ElastiCache/Redis，不启动数据库容器。</p>
+<h3 id="配置">配置</h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>cp<span class="w"> </span>deploy/.env.prod.example<span class="w"> </span>.env
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="c1"># 编辑 .env，修改连接地址：</span>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="c1"># ARTIFACTFLOW_DATABASE_URL=postgresql+asyncpg://user:pass@your-rds-endpoint:5432/artifactflow</span>
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="c1"># ARTIFACTFLOW_REDIS_URL=redis://your-redis-endpoint:6379</span>
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="c1"># 删除或注释掉 POSTGRES_* 相关变量</span>
+</code></pre></div>
+<h3 id="启动_1">启动</h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="c1"># 不加 --profile infra，不启动 PG/Redis 容器</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>docker-compose.prod.yml<span class="w"> </span>up<span class="w"> </span>-d
+</code></pre></div>
+<hr />
+<h2 id="mode-3-内网离线部署">Mode 3: 内网离线部署</h2>
+<p>适用于无法访问外部网络的环境。使用预构建镜像，通过 <code>docker save/load</code> 传输。</p>
+<h3 id="构建发布包在有网络的构建机上">构建发布包（在有网络的构建机上）</h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>./scripts/release.sh<span class="w"> </span><span class="m">1</span>.0.0
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="c1"># 产出:</span>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="c1">#   dist/artifactflow-1.0.0.tar.gz        (~500MB, 含全部 5 个镜像)</span>
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="c1">#   dist/artifactflow-1.0.0.tar.gz.sha256  (校验文件)</span>
+</code></pre></div>
+<h3 id="部署在目标内网机器上">部署（在目标内网机器上）</h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="c1"># 1. 传输文件到目标机器</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>scp<span class="w"> </span>dist/artifactflow-1.0.0.tar.gz<span class="w"> </span>deploy/<span class="w"> </span>target:/opt/artifactflow/
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>
+<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="c1"># 2. 加载镜像</span>
+<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a>docker<span class="w"> </span>load<span class="w"> </span>&lt;<span class="w"> </span>artifactflow-1.0.0.tar.gz
+<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a>
+<a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a><span class="c1"># 3. 配置</span>
+<a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a>cp<span class="w"> </span>deploy/.env.intranet.example<span class="w"> </span>deploy/.env
+<a id="__codelineno-9-9" name="__codelineno-9-9" href="#__codelineno-9-9"></a><span class="c1"># 编辑 deploy/.env，填写密码和 API Keys</span>
+<a id="__codelineno-9-10" name="__codelineno-9-10" href="#__codelineno-9-10"></a><span class="c1"># 内网 LLM：编辑 config/models/models.yaml，设置 base_url 为内部推理端点</span>
+<a id="__codelineno-9-11" name="__codelineno-9-11" href="#__codelineno-9-11"></a>
+<a id="__codelineno-9-12" name="__codelineno-9-12" href="#__codelineno-9-12"></a><span class="c1"># 4. 启动（3A: 自建基础设施）</span>
+<a id="__codelineno-9-13" name="__codelineno-9-13" href="#__codelineno-9-13"></a><span class="nv">AF_VERSION</span><span class="o">=</span><span class="m">1</span>.0.0<span class="w"> </span>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>deploy/docker-compose.intranet.yml<span class="w"> </span>--profile<span class="w"> </span>infra<span class="w"> </span>up<span class="w"> </span>-d
+<a id="__codelineno-9-14" name="__codelineno-9-14" href="#__codelineno-9-14"></a>
+<a id="__codelineno-9-15" name="__codelineno-9-15" href="#__codelineno-9-15"></a><span class="c1"># 5. 创建管理员</span>
+<a id="__codelineno-9-16" name="__codelineno-9-16" href="#__codelineno-9-16"></a>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>deploy/docker-compose.intranet.yml<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>backend<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-9-17" name="__codelineno-9-17" href="#__codelineno-9-17"></a><span class="w">  </span>python<span class="w"> </span>scripts/create_admin.py<span class="w"> </span>admin<span class="w"> </span>--password<span class="w"> </span>&lt;your-password&gt;
+</code></pre></div>
+<hr />
+<h2 id="环境变量完整参考">环境变量完整参考</h2>
+<p>所有应用级变量使用 <code>ARTIFACTFLOW_</code> 前缀（通过 Pydantic Settings 自动映射），定义在 <code>src/config.py</code>。</p>
+<h3 id="核心">核心</h3>
+<table>
+<thead>
+<tr>
+<th>变量</th>
+<th>默认值</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ARTIFACTFLOW_DEBUG</code></td>
+<td><code>false</code></td>
+<td>调试模式（详细日志 + 错误信息不脱敏 + 启用 Swagger 文档）</td>
+</tr>
+</tbody>
+</table>
+<h3 id="jwt-认证">JWT 认证</h3>
+<table>
+<thead>
+<tr>
+<th>变量</th>
+<th>默认值</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ARTIFACTFLOW_JWT_SECRET</code></td>
+<td>— (<strong>必填</strong>)</td>
+<td>HS256 签名密钥</td>
+</tr>
+<tr>
+<td><code>ARTIFACTFLOW_JWT_ALGORITHM</code></td>
+<td><code>HS256</code></td>
+<td>签名算法</td>
+</tr>
+<tr>
+<td><code>ARTIFACTFLOW_JWT_EXPIRY_DAYS</code></td>
+<td><code>7</code></td>
+<td>Token 有效期（天）</td>
+</tr>
+</tbody>
+</table>
+<h3 id="数据库">数据库</h3>
+<table>
+<thead>
+<tr>
+<th>变量</th>
+<th>默认值</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ARTIFACTFLOW_DATABASE_URL</code></td>
+<td>— (<strong>必填</strong>)</td>
+<td>连接串，如 <code>sqlite+aiosqlite:///data/artifactflow.db</code> 或 <code>postgresql+asyncpg://...</code></td>
+</tr>
+<tr>
+<td><code>ARTIFACTFLOW_DATABASE_URLS</code></td>
+<td><code>""</code></td>
+<td>逗号分隔多地址列表，启用 primary-first failover（按顺序尝试，首个可连即用）；非空时优先于 <code>DATABASE_URL</code>，所有地址必须同一 driver（MySQL 或 PostgreSQL）</td>
+</tr>
+<tr>
+<td><code>ARTIFACTFLOW_DATABASE_POOL_SIZE</code></td>
+<td><code>5</code></td>
+<td>连接池大小</td>
+</tr>
+<tr>
+<td><code>ARTIFACTFLOW_DATABASE_MAX_OVERFLOW</code></td>
+<td><code>10</code></td>
+<td>连接池溢出上限</td>
+</tr>
+<tr>
+<td><code>ARTIFACTFLOW_DATABASE_POOL_TIMEOUT</code></td>
+<td><code>30</code></td>
+<td>获取连接超时（秒）</td>
+</tr>
+<tr>
+<td><code>ARTIFACTFLOW_DATABASE_POOL_RECYCLE</code></td>
+<td><code>300</code></td>
+<td>连接回收周期（秒）</td>
+</tr>
+</tbody>
+</table>
+<h3 id="redis">Redis</h3>
+<table>
+<thead>
+<tr>
+<th>变量</th>
+<th>默认值</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ARTIFACTFLOW_REDIS_URL</code></td>
+<td><code>""</code></td>
+<td>空 = InMemory 回退；非空 = Redis 模式</td>
+</tr>
+<tr>
+<td><code>ARTIFACTFLOW_REDIS_CLUSTER</code></td>
+<td><code>false</code></td>
+<td>Redis Cluster 模式</td>
+</tr>
+<tr>
+<td><code>ARTIFACTFLOW_REDIS_KEY_PREFIX</code></td>
+<td><code>""</code></td>
+<td>Key 命名空间前缀（启用 Redis 时<strong>必填</strong>）</td>
+</tr>
+<tr>
+<td><code>ARTIFACTFLOW_REDIS_MAX_CONNECTIONS</code></td>
+<td><code>50</code></td>
+<td>连接池上限</td>
+</tr>
+<tr>
+<td><code>ARTIFACTFLOW_LEASE_TTL</code></td>
+<td><code>90</code></td>
+<td>对话租约 TTL（秒），心跳每 TTL/3 续租</td>
+</tr>
+</tbody>
+</table>
+<h3 id="sse-与执行超时">SSE 与执行超时</h3>
+<table>
+<thead>
+<tr>
+<th>变量</th>
+<th>默认值</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ARTIFACTFLOW_SSE_PING_INTERVAL</code></td>
+<td><code>15</code></td>
+<td>心跳间隔（秒），保持连接活跃</td>
+</tr>
+<tr>
+<td><code>ARTIFACTFLOW_EXECUTION_TIMEOUT</code></td>
+<td><code>1800</code></td>
+<td>总执行上限（秒），含 permission 等待</td>
+</tr>
+<tr>
+<td><code>ARTIFACTFLOW_STREAM_CLEANUP_TTL</code></td>
+<td><code>60</code></td>
+<td>执行结束后 stream 清理窗口（秒）</td>
+</tr>
+<tr>
+<td><code>ARTIFACTFLOW_PERMISSION_TIMEOUT</code></td>
+<td><code>300</code></td>
+<td>单次权限等待超时（秒）</td>
+</tr>
+</tbody>
+</table>
+<h3 id="compaction-与上下文">Compaction 与上下文</h3>
+<table>
+<thead>
+<tr>
+<th>变量</th>
+<th>默认值</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ARTIFACTFLOW_COMPACTION_TOKEN_THRESHOLD</code></td>
+<td><code>60000</code></td>
+<td>触发跨轮 compaction 的 token 阈值</td>
+</tr>
+<tr>
+<td><code>ARTIFACTFLOW_COMPACTION_PRESERVE_PAIRS</code></td>
+<td><code>2</code></td>
+<td>保留最近 N 对不压缩</td>
+</tr>
+<tr>
+<td><code>ARTIFACTFLOW_COMPACTION_TIMEOUT</code></td>
+<td><code>600</code></td>
+<td>Compaction 后台任务超时（秒）</td>
+</tr>
+<tr>
+<td><code>ARTIFACTFLOW_CONTEXT_MAX_TOKENS</code></td>
+<td><code>80000</code></td>
+<td>上下文最大 token 数</td>
+</tr>
+<tr>
+<td><code>ARTIFACTFLOW_TRUNCATION_PRESERVE_AI_MSGS</code></td>
+<td><code>4</code></td>
+<td>截断时至少保留的 assistant 消息数</td>
+</tr>
+<tr>
+<td><code>ARTIFACTFLOW_INVENTORY_PREVIEW_LENGTH</code></td>
+<td><code>200</code></td>
+<td>Artifact 清单预览截断长度</td>
+</tr>
+</tbody>
+</table>
+<h3 id="cors">CORS</h3>
+<table>
+<thead>
+<tr>
+<th>变量</th>
+<th>默认值</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ARTIFACTFLOW_CORS_ORIGINS</code></td>
+<td><code>["http://localhost:3000"]</code></td>
+<td>允许的跨域来源</td>
+</tr>
+<tr>
+<td><code>ARTIFACTFLOW_CORS_ALLOW_CREDENTIALS</code></td>
+<td><code>true</code></td>
+<td>允许携带凭证</td>
+</tr>
+<tr>
+<td><code>ARTIFACTFLOW_CORS_ALLOW_METHODS</code></td>
+<td><code>["*"]</code></td>
+<td>允许的 HTTP 方法</td>
+</tr>
+<tr>
+<td><code>ARTIFACTFLOW_CORS_ALLOW_HEADERS</code></td>
+<td><code>["*"]</code></td>
+<td>允许的请求头</td>
+</tr>
+</tbody>
+</table>
+<h3 id="其他">其他</h3>
+<table>
+<thead>
+<tr>
+<th>变量</th>
+<th>默认值</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ARTIFACTFLOW_MAX_CONCURRENT_TASKS</code></td>
+<td><code>10</code></td>
+<td>最大并发引擎执行数</td>
+</tr>
+<tr>
+<td><code>ARTIFACTFLOW_MAX_UPLOAD_SIZE</code></td>
+<td><code>20971520</code></td>
+<td>上传大小限制（字节，默认 20MB）</td>
+</tr>
+<tr>
+<td><code>ARTIFACTFLOW_DEFAULT_PAGE_SIZE</code></td>
+<td><code>20</code></td>
+<td>分页默认每页条数</td>
+</tr>
+<tr>
+<td><code>ARTIFACTFLOW_MAX_PAGE_SIZE</code></td>
+<td><code>100</code></td>
+<td>分页最大每页条数</td>
+</tr>
+</tbody>
+</table>
+<h3 id="llm-与工具-api-key">LLM 与工具 API Key</h3>
+<p>以下变量<strong>不使用</strong> <code>ARTIFACTFLOW_</code> 前缀，由 LiteLLM / 工具直接读取：</p>
+<table>
+<thead>
+<tr>
+<th>变量</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>DASHSCOPE_API_KEY</code></td>
+<td>通义千问 API（<strong>默认模型必填</strong>）</td>
+</tr>
+<tr>
+<td><code>OPENAI_API_KEY</code></td>
+<td>OpenAI API</td>
+</tr>
+<tr>
+<td><code>DEEPSEEK_API_KEY</code></td>
+<td>DeepSeek API</td>
+</tr>
+<tr>
+<td><code>BOCHA_API_KEY</code></td>
+<td>Bocha Web 搜索</td>
+</tr>
+<tr>
+<td><code>JINA_API_KEY</code></td>
+<td>Jina Reader（网页抓取）</td>
+</tr>
+</tbody>
+</table>
+<h3 id="启动校验规则">启动校验规则</h3>
+<p>应用启动时会验证以下条件，不满足则拒绝启动：</p>
+<ol>
+<li><code>ARTIFACTFLOW_JWT_SECRET</code> 必须设置</li>
+<li><code>ARTIFACTFLOW_DATABASE_URL</code> 或 <code>ARTIFACTFLOW_DATABASE_URLS</code> 必须设置</li>
+<li>启用 Redis（<code>ARTIFACTFLOW_REDIS_URL</code> 非空）时，<code>ARTIFACTFLOW_REDIS_KEY_PREFIX</code> 必须设置</li>
+</ol>
+<hr />
+<h2 id="运维参考">运维参考</h2>
+<h3 id="数据库迁移">数据库迁移</h3>
+<p>容器启动时 <code>deploy/entrypoint.sh</code> 自动处理迁移：</p>
+<pre class="mermaid"><code>flowchart TD
+    Start[容器启动] --&gt; Check{数据库类型?}
+    Check --&gt;|SQLite / 未配置| Skip[跳过迁移]
+    Check --&gt;|PostgreSQL / MySQL| Lock{获取 PG advisory lock}
+
+    Lock --&gt;|获取成功 Leader| Migrate[执行 alembic upgrade head]
+    Lock --&gt;|获取失败 Follower| Wait[等待 lock 释放]
+
+    Migrate --&gt;|成功| Release[释放 lock]
+    Migrate --&gt;|失败| Exit1[退出, 不释放 lock]
+
+    Wait --&gt; Verify{验证 schema at head?}
+    Verify --&gt;|是| Continue[继续启动]
+    Verify --&gt;|否| Exit2[退出 Leader 迁移失败]
+
+    Release --&gt; Continue
+    Skip --&gt; Continue
+    Continue --&gt; Server[启动服务]</code></pre>
+<ul>
+<li><strong>多副本安全：</strong> 通过 <code>pg_advisory_lock(hashtext('alembic_migrate'))</code> 保证只有一个副本执行迁移</li>
+<li><strong>失败处理：</strong> Leader 迁移失败后不释放 lock（连接关闭自动释放），Follower 检测到 schema 未到 head 后退出，容器 restart policy 会重试</li>
+<li><strong>Fallback：</strong> 如果 advisory lock 不可用（如 MySQL），直接执行 <code>alembic upgrade head</code></li>
+</ul>
+<h3 id="nginx-配置">Nginx 配置</h3>
+<p>生产模式使用 Nginx 反向代理（配置文件：<code>deploy/nginx.conf</code>）：</p>
+<ul>
+<li>SSE 流式连接：<code>/api/v1/stream/</code> 路径关闭 <code>proxy_buffering</code>，超时 1800s</li>
+<li>Swagger 文档：生产环境下 <code>/docs</code>、<code>/redoc</code>、<code>/openapi.json</code> 返回 404</li>
+<li><code>--scale</code> 支持：使用 Docker 内部 DNS resolver <code>127.0.0.11</code></li>
+</ul>
+<h3 id="健康检查">健康检查</h3>
+<table>
+<thead>
+<tr>
+<th>端点</th>
+<th>用途</th>
+<th>检查内容</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>GET /health/live</code></td>
+<td>存活探测（Mode 1 / K8s liveness）</td>
+<td>进程存活，始终返回 200</td>
+</tr>
+<tr>
+<td><code>GET /health/ready</code></td>
+<td>就绪探测（Mode 2/3 / K8s readiness）</td>
+<td>进程 + DB + Redis 连通性，失败返回 503</td>
+</tr>
+</tbody>
+</table>
+<h3 id="数据卷">数据卷</h3>
+<table>
+<thead>
+<tr>
+<th>卷名</th>
+<th>用途</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>artifactflow_data</code></td>
+<td>SQLite 数据库 / 上传文件</td>
+</tr>
+<tr>
+<td><code>postgres_data</code></td>
+<td>PostgreSQL 数据（Mode 2A/3A）</td>
+</tr>
+<tr>
+<td><code>redis_data</code></td>
+<td>Redis AOF 持久化（Mode 2A/3A）</td>
+</tr>
+</tbody>
+</table>
+<h3 id="停止与清理">停止与清理</h3>
+<blockquote>
+<p><strong><code>--profile infra</code> 必须与启动时一致</strong>，否则 PG/Redis 容器不在 Compose 作用域内，<code>down</code> 会跳过它们。</p>
+</blockquote>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="c1"># Mode 1</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>docker<span class="w"> </span>compose<span class="w"> </span>down
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="c1"># Mode 2A（启动时带了 --profile infra，停止也必须带）</span>
+<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>docker-compose.prod.yml<span class="w"> </span>--profile<span class="w"> </span>infra<span class="w"> </span>down
+<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a>
+<a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a><span class="c1"># Mode 2B（无 --profile）</span>
+<a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>docker-compose.prod.yml<span class="w"> </span>down
+<a id="__codelineno-10-9" name="__codelineno-10-9" href="#__codelineno-10-9"></a>
+<a id="__codelineno-10-10" name="__codelineno-10-10" href="#__codelineno-10-10"></a><span class="c1"># Mode 3A</span>
+<a id="__codelineno-10-11" name="__codelineno-10-11" href="#__codelineno-10-11"></a>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>deploy/docker-compose.intranet.yml<span class="w"> </span>--profile<span class="w"> </span>infra<span class="w"> </span>down
+<a id="__codelineno-10-12" name="__codelineno-10-12" href="#__codelineno-10-12"></a>
+<a id="__codelineno-10-13" name="__codelineno-10-13" href="#__codelineno-10-13"></a><span class="c1"># Mode 3B</span>
+<a id="__codelineno-10-14" name="__codelineno-10-14" href="#__codelineno-10-14"></a>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>deploy/docker-compose.intranet.yml<span class="w"> </span>down
+</code></pre></div>
+<p>如需同时删除数据卷（<strong>不可逆，会丢失数据库和 Redis 数据</strong>）：</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>docker-compose.prod.yml<span class="w"> </span>--profile<span class="w"> </span>infra<span class="w"> </span>down<span class="w"> </span>-v
+</code></pre></div>
+<h3 id="日志">日志</h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="c1"># 查看所有服务日志</span>
+<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>&lt;compose-file&gt;<span class="w"> </span>logs<span class="w"> </span>-f
+<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a>
+<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a><span class="c1"># 单服务日志</span>
+<a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>&lt;compose-file&gt;<span class="w"> </span>logs<span class="w"> </span>-f<span class="w"> </span>backend
+<a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a>
+<a id="__codelineno-12-7" name="__codelineno-12-7" href="#__codelineno-12-7"></a><span class="c1"># 开启 debug 日志：.env 中设置 ARTIFACTFLOW_DEBUG=true</span>
+</code></pre></div>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  回到页面顶部
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.tabs", "navigation.sections", "navigation.expand", "navigation.top", "search.highlight", "content.code.copy"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "\u5df2\u590d\u5236", "clipboard.copy": "\u590d\u5236", "search.result.more.one": "\u5728\u8be5\u9875\u4e0a\u8fd8\u6709 1 \u4e2a\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.more.other": "\u5728\u8be5\u9875\u4e0a\u8fd8\u6709 # \u4e2a\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.none": "\u6ca1\u6709\u627e\u5230\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.one": "\u627e\u5230 1 \u4e2a\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.other": "# \u4e2a\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.placeholder": "\u952e\u5165\u4ee5\u5f00\u59cb\u641c\u7d22", "search.result.term.missing": "\u7f3a\u5c11", "select.version": "\u9009\u62e9\u5f53\u524d\u7248\u672c"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>

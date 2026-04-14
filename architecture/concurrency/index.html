@@ -6,17 +6,17 @@
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width,initial-scale=1">
       
-        <meta name="description" content="Multi-Agent Research System Built on LangGraph">
+        <meta name="description" content="Pi-style 可配置 Agent 引擎 + 双 Artifact 架构的多智能体 SaaS">
       
       
       
-        <link rel="canonical" href="https://neutrino.github.io/artifact-flow/architecture/concurrency/">
+        <link rel="canonical" href="https://neutrino1998.github.io/artifact-flow/architecture/concurrency/">
       
       
-        <link rel="prev" href="../data-layer/">
+        <link rel="prev" href="../streaming/">
       
       
-        <link rel="next" href="../../streaming/">
+        <link rel="next" href="../observability/">
       
       
         
@@ -53,6 +53,8 @@
       
     
     
+      <link rel="stylesheet" href="../../stylesheets/custom.css">
+    
     <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
     
       
@@ -69,7 +71,7 @@
     
     
     
-    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="custom">
   
     
     <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
@@ -78,7 +80,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#concurrency-architecture" class="md-skip">
+        <a href="#并发与运行时" class="md-skip">
           跳转至
         </a>
       
@@ -125,7 +127,7 @@
     
     
     
-    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="custom"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
     
       <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
@@ -135,7 +137,7 @@
     
     
     
-    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="custom" data-md-color-accent="custom"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
     
       <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
@@ -242,32 +244,13 @@
   
   
     <li class="md-tabs__item">
-      <a href="../../frontend/" class="md-tabs__link">
+      <a href="../../deployment/" class="md-tabs__link">
         
   
   
     
   
-  Frontend Guide
-
-      </a>
-    </li>
-  
-
-      
-        
-  
-  
-  
-  
-    <li class="md-tabs__item">
-      <a href="../../request-lifecycle/" class="md-tabs__link">
-        
-  
-  
-    
-  
-  Request Lifecycle
+  Deployment
 
       </a>
     </li>
@@ -284,7 +267,7 @@
     
     
       <li class="md-tabs__item md-tabs__item--active">
-        <a href="../core/" class="md-tabs__link">
+        <a href="../overview/" class="md-tabs__link">
           
   
   
@@ -301,17 +284,18 @@
   
   
   
-    <li class="md-tabs__item">
-      <a href="../../streaming/" class="md-tabs__link">
-        
-  
-  
     
+    
+      <li class="md-tabs__item">
+        <a href="../../guides/add-agent/" class="md-tabs__link">
+          
   
-  Streaming
+  
+  Guides
 
-      </a>
-    </li>
+        </a>
+      </li>
+    
   
 
       
@@ -321,51 +305,13 @@
   
   
     <li class="md-tabs__item">
-      <a href="../../extension-guide/" class="md-tabs__link">
+      <a href="../../frontend/" class="md-tabs__link">
         
   
   
     
   
-  Extension Guide
-
-      </a>
-    </li>
-  
-
-      
-        
-  
-  
-  
-  
-    <li class="md-tabs__item">
-      <a href="../../api/" class="md-tabs__link">
-        
-  
-  
-    
-  
-  API Reference
-
-      </a>
-    </li>
-  
-
-      
-        
-  
-  
-  
-  
-    <li class="md-tabs__item">
-      <a href="../../faq/" class="md-tabs__link">
-        
-  
-  
-    
-  
-  FAQ
+  Frontend
 
       </a>
     </li>
@@ -451,41 +397,14 @@
   
   
     <li class="md-nav__item">
-      <a href="../../frontend/" class="md-nav__link">
+      <a href="../../deployment/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    Frontend Guide
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-    
-      
-      
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../request-lifecycle/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Request Lifecycle
+    Deployment
   
 
     
@@ -523,10 +442,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" checked>
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
         
           
-          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
             
   
   
@@ -544,8 +463,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="true">
-          <label class="md-nav__title" for="__nav_4">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_3">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -562,14 +481,42 @@
   
   
     <li class="md-nav__item">
-      <a href="../core/" class="md-nav__link">
+      <a href="../overview/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    Core
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../engine/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Engine
   
 
     
@@ -646,6 +593,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../artifacts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Artifacts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../data-layer/" class="md-nav__link">
         
   
@@ -654,6 +629,34 @@
     
   
     Data Layer
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../streaming/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Streaming
   
 
     
@@ -734,22 +737,33 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#当前设计" class="md-nav__link">
+  <a href="#两层并发关注点" class="md-nav__link">
     <span class="md-ellipsis">
       
-        当前设计
+        两层并发关注点
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="当前设计">
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#databasemanager" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        DatabaseManager
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="DatabaseManager">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#资源分层模型" class="md-nav__link">
+  <a href="#初始化分支" class="md-nav__link">
     <span class="md-ellipsis">
       
-        资源分层模型
+        初始化分支
       
     </span>
   </a>
@@ -757,10 +771,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#依赖注入链路" class="md-nav__link">
+  <a href="#sqlite-配置" class="md-nav__link">
     <span class="md-ellipsis">
       
-        依赖注入链路
+        SQLite 配置
       
     </span>
   </a>
@@ -768,10 +782,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#post-chat-执行流程" class="md-nav__link">
+  <a href="#mysql--postgresql-连接池" class="md-nav__link">
     <span class="md-ellipsis">
       
-        POST /chat 执行流程
+        MySQL / PostgreSQL 连接池
       
     </span>
   </a>
@@ -779,10 +793,32 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#数据库并发配置" class="md-nav__link">
+  <a href="#多地址-failover" class="md-nav__link">
     <span class="md-ellipsis">
       
-        数据库并发配置
+        多地址 Failover
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#瞬断重试" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        瞬断重试
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#session-生命周期" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Session 生命周期
       
     </span>
   </a>
@@ -795,22 +831,22 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#运行边界与已知局限" class="md-nav__link">
+  <a href="#runtimestore" class="md-nav__link">
     <span class="md-ellipsis">
       
-        运行边界与已知局限
+        RuntimeStore
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="运行边界与已知局限">
+    <nav class="md-nav" aria-label="RuntimeStore">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#checkpointer-单连接瓶颈" class="md-nav__link">
+  <a href="#双状态生命周期" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Checkpointer 单连接瓶颈
+        双状态生命周期
       
     </span>
   </a>
@@ -818,10 +854,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#graph-重复编译" class="md-nav__link">
+  <a href="#interrupt-机制" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Graph 重复编译
+        Interrupt 机制
       
     </span>
   </a>
@@ -829,10 +865,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#错误信息泄露已部分缓解" class="md-nav__link">
+  <a href="#cancellation" class="md-nav__link">
     <span class="md-ellipsis">
       
-        错误信息泄露（已部分缓解）
+        Cancellation
       
     </span>
   </a>
@@ -840,10 +876,21 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#已解决的问题" class="md-nav__link">
+  <a href="#消息注入" class="md-nav__link">
     <span class="md-ellipsis">
       
-        已解决的问题
+        消息注入
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#owner-key-通用原语" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Owner-Key 通用原语
       
     </span>
   </a>
@@ -856,22 +903,22 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#演进方向" class="md-nav__link">
+  <a href="#两种-runtimestore-实现" class="md-nav__link">
     <span class="md-ellipsis">
       
-        演进方向
+        两种 RuntimeStore 实现
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="演进方向">
+    <nav class="md-nav" aria-label="两种 RuntimeStore 实现">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#phase-1-redis-引入--支持多-worker-部署" class="md-nav__link">
+  <a href="#inmemoryruntimestore单进程" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Phase 1: Redis 引入 — 支持多 Worker 部署
+        InMemoryRuntimeStore（单进程）
       
     </span>
   </a>
@@ -879,10 +926,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#phase-2-checkpointer-迁移--ttl-管理" class="md-nav__link">
+  <a href="#redisruntimestore分布式" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Phase 2: Checkpointer 迁移 + TTL 管理
+        RedisRuntimeStore（分布式）
       
     </span>
   </a>
@@ -890,21 +937,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#phase-25-主数据库迁移按需" class="md-nav__link">
+  <a href="#心跳续租" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Phase 2.5: 主数据库迁移（按需）
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#phase-3-生产化完善" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Phase 3: 生产化完善
+        心跳续租
       
     </span>
   </a>
@@ -917,13 +953,85 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#参考" class="md-nav__link">
+  <a href="#超时参数总览" class="md-nav__link">
     <span class="md-ellipsis">
       
-        参考
+        超时参数总览
       
     </span>
   </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#design-decisions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Design Decisions
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Design Decisions">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#为什么-permission-interrupt-用-asyncioevent-阻塞" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        为什么 Permission Interrupt 用 asyncio.Event 阻塞
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#为什么用-lease-而非-lock" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        为什么用 Lease 而非 Lock
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#为什么-inmemory-和-redis-共用-protocol" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        为什么 InMemory 和 Redis 共用 Protocol
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#为什么-redis-key-用-hash-tag-prefixid" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        为什么 Redis Key 用 hash tag {prefix:id}
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#为什么事务控制在-repository-而非-session-context-manager" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        为什么事务控制在 Repository 而非 Session Context Manager
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -931,6 +1039,207 @@
   
 </nav>
       
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../observability/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Observability
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Guides
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Guides
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/add-agent/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Add Agent
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/add-tool/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Add Tool
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/add-model/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Add Model
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/api-reference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
     </li>
   
 
@@ -950,95 +1259,14 @@
   
   
     <li class="md-nav__item">
-      <a href="../../streaming/" class="md-nav__link">
+      <a href="../../frontend/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    Streaming
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-    
-      
-      
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../extension-guide/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Extension Guide
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-    
-      
-      
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../api/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    API Reference
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-    
-      
-      
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../faq/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    FAQ
+    Frontend
   
 
     
@@ -1078,22 +1306,33 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#当前设计" class="md-nav__link">
+  <a href="#两层并发关注点" class="md-nav__link">
     <span class="md-ellipsis">
       
-        当前设计
+        两层并发关注点
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="当前设计">
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#databasemanager" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        DatabaseManager
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="DatabaseManager">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#资源分层模型" class="md-nav__link">
+  <a href="#初始化分支" class="md-nav__link">
     <span class="md-ellipsis">
       
-        资源分层模型
+        初始化分支
       
     </span>
   </a>
@@ -1101,10 +1340,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#依赖注入链路" class="md-nav__link">
+  <a href="#sqlite-配置" class="md-nav__link">
     <span class="md-ellipsis">
       
-        依赖注入链路
+        SQLite 配置
       
     </span>
   </a>
@@ -1112,10 +1351,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#post-chat-执行流程" class="md-nav__link">
+  <a href="#mysql--postgresql-连接池" class="md-nav__link">
     <span class="md-ellipsis">
       
-        POST /chat 执行流程
+        MySQL / PostgreSQL 连接池
       
     </span>
   </a>
@@ -1123,10 +1362,32 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#数据库并发配置" class="md-nav__link">
+  <a href="#多地址-failover" class="md-nav__link">
     <span class="md-ellipsis">
       
-        数据库并发配置
+        多地址 Failover
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#瞬断重试" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        瞬断重试
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#session-生命周期" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Session 生命周期
       
     </span>
   </a>
@@ -1139,22 +1400,22 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#运行边界与已知局限" class="md-nav__link">
+  <a href="#runtimestore" class="md-nav__link">
     <span class="md-ellipsis">
       
-        运行边界与已知局限
+        RuntimeStore
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="运行边界与已知局限">
+    <nav class="md-nav" aria-label="RuntimeStore">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#checkpointer-单连接瓶颈" class="md-nav__link">
+  <a href="#双状态生命周期" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Checkpointer 单连接瓶颈
+        双状态生命周期
       
     </span>
   </a>
@@ -1162,10 +1423,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#graph-重复编译" class="md-nav__link">
+  <a href="#interrupt-机制" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Graph 重复编译
+        Interrupt 机制
       
     </span>
   </a>
@@ -1173,10 +1434,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#错误信息泄露已部分缓解" class="md-nav__link">
+  <a href="#cancellation" class="md-nav__link">
     <span class="md-ellipsis">
       
-        错误信息泄露（已部分缓解）
+        Cancellation
       
     </span>
   </a>
@@ -1184,10 +1445,21 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#已解决的问题" class="md-nav__link">
+  <a href="#消息注入" class="md-nav__link">
     <span class="md-ellipsis">
       
-        已解决的问题
+        消息注入
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#owner-key-通用原语" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Owner-Key 通用原语
       
     </span>
   </a>
@@ -1200,22 +1472,22 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#演进方向" class="md-nav__link">
+  <a href="#两种-runtimestore-实现" class="md-nav__link">
     <span class="md-ellipsis">
       
-        演进方向
+        两种 RuntimeStore 实现
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="演进方向">
+    <nav class="md-nav" aria-label="两种 RuntimeStore 实现">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#phase-1-redis-引入--支持多-worker-部署" class="md-nav__link">
+  <a href="#inmemoryruntimestore单进程" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Phase 1: Redis 引入 — 支持多 Worker 部署
+        InMemoryRuntimeStore（单进程）
       
     </span>
   </a>
@@ -1223,10 +1495,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#phase-2-checkpointer-迁移--ttl-管理" class="md-nav__link">
+  <a href="#redisruntimestore分布式" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Phase 2: Checkpointer 迁移 + TTL 管理
+        RedisRuntimeStore（分布式）
       
     </span>
   </a>
@@ -1234,21 +1506,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#phase-25-主数据库迁移按需" class="md-nav__link">
+  <a href="#心跳续租" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Phase 2.5: 主数据库迁移（按需）
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#phase-3-生产化完善" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Phase 3: 生产化完善
+        心跳续租
       
     </span>
   </a>
@@ -1261,13 +1522,85 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#参考" class="md-nav__link">
+  <a href="#超时参数总览" class="md-nav__link">
     <span class="md-ellipsis">
       
-        参考
+        超时参数总览
       
     </span>
   </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#design-decisions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Design Decisions
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Design Decisions">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#为什么-permission-interrupt-用-asyncioevent-阻塞" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        为什么 Permission Interrupt 用 asyncio.Event 阻塞
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#为什么用-lease-而非-lock" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        为什么用 Lease 而非 Lock
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#为什么-inmemory-和-redis-共用-protocol" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        为什么 InMemory 和 Redis 共用 Protocol
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#为什么-redis-key-用-hash-tag-prefixid" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        为什么 Redis Key 用 hash tag {prefix:id}
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#为什么事务控制在-repository-而非-session-context-manager" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        为什么事务控制在 Repository 而非 Session Context Manager
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -1291,194 +1624,529 @@
   
 
 
-<h1 id="concurrency-architecture">Concurrency Architecture</h1>
-<p>本文档描述 ArtifactFlow 的并发模型：当前设计、已知局限、以及面向生产环境的演进路线。</p>
-<h2 id="当前设计">当前设计</h2>
-<h3 id="资源分层模型">资源分层模型</h3>
-<pre class="mermaid"><code>graph TB
-    subgraph Global["全局单例（跨请求共享，应用启动时初始化）"]
-        DM["DatabaseManager&lt;br/&gt;&lt;i&gt;SQLAlchemy async engine + 连接池&lt;/i&gt;"]
-        CP["Checkpointer&lt;br/&gt;&lt;i&gt;AsyncSqliteSaver（单 aiosqlite 连接）&lt;/i&gt;"]
-        SM["StreamManager&lt;br/&gt;&lt;i&gt;事件缓冲队列 + TTL 清理&lt;/i&gt;"]
-    end
-
-    subgraph PerReq["请求级实例（AsyncSession → Repository → Manager → Controller）"]
-        Session["AsyncSession"]
-        Repo["Repository"]
-        Mgr["Manager"]
-        Ctrl["Controller"]
-        Session --&gt; Repo --&gt; Mgr --&gt; Ctrl
-    end
-
-    Global -- "Depends() 注入 / background task 创建" --&gt; PerReq</code></pre>
+<h1 id="并发与运行时">并发与运行时</h1>
 <blockquote>
-<p><strong>Note</strong>: HTTP 请求（POST /chat）只做轻量同步操作（<code>ensure_conversation</code> + <code>create_stream</code>），然后立即返回。Graph 执行由 background task（<code>asyncio.create_task</code>）独立管理，task 内部创建自己的 session / manager / controller 实例（因为 HTTP 请求的依赖在返回后即释放）。</p>
+<p>DatabaseManager 的连接池与重试 + RuntimeStore 的租约/中断/取消/消息队列 — 中小规模 SaaS 的高可用底座。</p>
 </blockquote>
-<h3 id="依赖注入链路">依赖注入链路</h3>
-<pre class="mermaid"><code>graph TD
-    Req["HTTP Request"] --&gt; GDS["get_db_session()&lt;i&gt;&lt;br/&gt;从 DatabaseManager 连接池&lt;br/&gt;获取 AsyncSession&lt;/i&gt;"]
-    GDS --&gt; AR["ArtifactRepository → ArtifactManager"]
-    GDS --&gt; CR["ConversationRepository → &lt;br/&gt;ConversationManager"]
-    GDS --&gt; Graph["create_multi_agent_graph() + &lt;br/&gt;Controller"]
-    Graph -. "共享单例" .-&gt; CP["Checkpointer&lt;br/&gt;&lt;i&gt;支持跨请求 interrupt/resume&lt;/i&gt;"]</code></pre>
-<p>并发安全保证：
-- <strong>DatabaseManager</strong>: 全局单例，内部维护 SQLAlchemy 连接池，天然支持并发
-- <strong>Checkpointer</strong>: 全局单例，所有 graph 执行共享同一个 checkpoint 存储
-- <strong>StreamManager</strong>: 全局单例，使用 <code>asyncio.Lock</code> 保护 stream 创建/关闭操作
-- <strong>AsyncSession</strong>: 请求独立，每个请求（或 background task）创建新的数据库会话</p>
-<h3 id="post-chat-执行流程">POST /chat 执行流程</h3>
-<blockquote>
-<p>此图侧重并发与生命周期视角，完整的端到端流程见 <a href="../../request-lifecycle/#整体流程">Request Lifecycle — 整体流程</a>。</p>
-</blockquote>
+<h2 id="两层并发关注点">两层并发关注点</h2>
+<p>ArtifactFlow 的并发分为两个正交维度：</p>
+<table>
+<thead>
+<tr>
+<th>维度</th>
+<th>模块</th>
+<th>关注</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>数据层并发</strong></td>
+<td><code>DatabaseManager</code></td>
+<td>连接池、SQLite WAL、多 PX failover、瞬断重试</td>
+</tr>
+<tr>
+<td><strong>执行层并发</strong></td>
+<td><code>RuntimeStore</code></td>
+<td>单对话互斥（lease）、中断等待、取消信号、消息队列</td>
+</tr>
+</tbody>
+</table>
+<p>两者由 Controller 层组合使用，但互不感知 — DB 的连接问题不污染执行状态，反之亦然。</p>
+<h2 id="databasemanager">DatabaseManager</h2>
+<p><code>src/db/database.py</code> 封装 SQLAlchemy AsyncEngine，统一 SQLite / MySQL / PostgreSQL 的初始化与会话管理。</p>
+<h3 id="初始化分支">初始化分支</h3>
+<pre class="mermaid"><code>flowchart TD
+    INIT[DatabaseManager.initialize] --&gt; KIND{URL kind?}
+    KIND --&gt;|sqlite| SQLITE[配置 WAL&lt;br/&gt;cache_size / busy_timeout&lt;br/&gt;foreign_keys]
+    KIND --&gt;|mysql / pg| POOL[配置连接池&lt;br/&gt;pool_size / max_overflow&lt;br/&gt;pool_recycle / pre_ping]
+    SQLITE --&gt; CREATE[create_all 自动建表]
+    POOL --&gt; CHECK[校验 alembic_version 表]
+    CREATE --&gt; DONE
+    CHECK --&gt; DONE([ready])</code></pre>
+<h3 id="sqlite-配置">SQLite 配置</h3>
+<p>开发/测试默认使用 SQLite + WAL：</p>
+<table>
+<thead>
+<tr>
+<th>PRAGMA</th>
+<th>值</th>
+<th>作用</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>journal_mode</code></td>
+<td><code>WAL</code></td>
+<td>读写并发、更好的崩溃恢复</td>
+</tr>
+<tr>
+<td><code>synchronous</code></td>
+<td><code>NORMAL</code></td>
+<td>平衡性能与持久性</td>
+</tr>
+<tr>
+<td><code>cache_size</code></td>
+<td><code>-64000</code></td>
+<td>64MB 页缓存</td>
+</tr>
+<tr>
+<td><code>foreign_keys</code></td>
+<td><code>ON</code></td>
+<td>强制外键约束</td>
+</tr>
+<tr>
+<td><code>busy_timeout</code></td>
+<td><code>5000</code></td>
+<td>写锁冲突时等 5 秒</td>
+</tr>
+</tbody>
+</table>
+<p>内存库（<code>:memory:</code>）使用 <code>StaticPool</code> 单连接，因为跨连接不可见表。</p>
+<h3 id="mysql--postgresql-连接池">MySQL / PostgreSQL 连接池</h3>
+<table>
+<thead>
+<tr>
+<th>参数</th>
+<th>默认</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>pool_size</code></td>
+<td>5</td>
+<td>保持空闲连接数</td>
+</tr>
+<tr>
+<td><code>max_overflow</code></td>
+<td>10</td>
+<td>高峰期可溢出数</td>
+</tr>
+<tr>
+<td><code>pool_timeout</code></td>
+<td>30s</td>
+<td>获取连接超时</td>
+</tr>
+<tr>
+<td><code>pool_recycle</code></td>
+<td>300s</td>
+<td>连接最大寿命，防中间件断连</td>
+</tr>
+<tr>
+<td><code>pool_pre_ping</code></td>
+<td>True</td>
+<td>每次拿连接先 ping，踢掉死连接</td>
+</tr>
+</tbody>
+</table>
+<h3 id="多地址-failover">多地址 Failover</h3>
+<p><code>database_urls=[...]</code> 传入多个地址时启用 primary-first failover：</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1"># _parse_db_url 按后端类型返回 (&quot;mysql&quot;/&quot;postgres&quot;, kwargs)</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="c1"># _failover_creator 根据 driver 分发到 aiomysql 或 asyncpg</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">_failover_creator</span><span class="p">():</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>    <span class="n">connect_fn</span><span class="p">,</span> <span class="n">timeout_kw</span> <span class="o">=</span> <span class="p">(</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>        <span class="p">(</span><span class="n">asyncpg</span><span class="o">.</span><span class="n">connect</span><span class="p">,</span> <span class="s2">&quot;timeout&quot;</span><span class="p">)</span> <span class="k">if</span> <span class="n">driver</span> <span class="o">==</span> <span class="s2">&quot;postgres&quot;</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>        <span class="k">else</span> <span class="p">(</span><span class="n">aiomysql</span><span class="o">.</span><span class="n">connect</span><span class="p">,</span> <span class="s2">&quot;connect_timeout&quot;</span><span class="p">)</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>    <span class="p">)</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>    <span class="k">for</span> <span class="n">_</span><span class="p">,</span> <span class="n">kwargs</span> <span class="ow">in</span> <span class="n">parsed_urls</span><span class="p">:</span>   <span class="c1"># 固定顺序，不轮转</span>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>        <span class="k">try</span><span class="p">:</span>
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>            <span class="k">return</span> <span class="k">await</span> <span class="n">connect_fn</span><span class="p">(</span><span class="o">**</span><span class="n">kwargs</span><span class="p">,</span> <span class="o">**</span><span class="p">{</span><span class="n">timeout_kw</span><span class="p">:</span> <span class="mi">5</span><span class="p">})</span>
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>        <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>            <span class="n">errors</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="o">...</span><span class="p">)</span>
+<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>    <span class="k">raise</span> <span class="ne">ConnectionError</span><span class="p">(</span><span class="o">...</span><span class="p">)</span>
+</code></pre></div>
+<ul>
+<li><strong>Primary-first</strong>：按配置顺序尝试，首个成功即返回 — 不做负载均衡</li>
+<li><strong>支持 MySQL 和 PostgreSQL</strong>：按 URL 后端自动选择 <code>aiomysql</code> / <code>asyncpg</code> 驱动；所有地址必须同一种 driver（启动时校验）</li>
+<li>通过 SQLAlchemy 的 <code>async_creator</code> hook 注入</li>
+<li>仅用于建立新连接；已建立的连接断开由 <code>pool_pre_ping</code> + 应用层 <code>with_retry()</code> 处理</li>
+</ul>
+<p><strong>DSN query 参数白名单</strong>（不在列表内的 key 在 init 时 fail fast，避免 failover 路径静默丢配置）：</p>
+<table>
+<thead>
+<tr>
+<th>参数</th>
+<th>适用</th>
+<th>映射</th>
+<th>类型处理</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ssl_ca</code> / <code>ssl_cert</code> / <code>ssl_key</code></td>
+<td>两者</td>
+<td>文件路径 → <code>ssl.SSLContext</code> → <code>ssl=</code> kwarg</td>
+<td>—</td>
+</tr>
+<tr>
+<td><code>sslmode</code></td>
+<td>PG</td>
+<td>→ asyncpg <code>ssl=</code> 字符串（<code>require</code> / <code>prefer</code> / <code>disable</code> 等）</td>
+<td>—</td>
+</tr>
+<tr>
+<td><code>command_timeout</code></td>
+<td>PG</td>
+<td>asyncpg 直接 kwarg</td>
+<td>强制转 <code>float</code></td>
+</tr>
+<tr>
+<td><code>application_name</code></td>
+<td>PG</td>
+<td>asyncpg <code>server_settings={...}</code> 字典（<strong>不是</strong>直接 kwarg）</td>
+<td>—</td>
+</tr>
+<tr>
+<td><code>charset</code> / <code>unix_socket</code> / <code>init_command</code> / <code>program_name</code></td>
+<td>MySQL</td>
+<td>aiomysql 直接 kwarg</td>
+<td><code>str</code></td>
+</tr>
+<tr>
+<td><code>autocommit</code></td>
+<td>MySQL</td>
+<td>aiomysql 直接 kwarg</td>
+<td>强制转 <code>bool</code>（接受 <code>true</code>/<code>false</code>/<code>1</code>/<code>0</code>/<code>yes</code>/<code>no</code>/<code>on</code>/<code>off</code>）</td>
+</tr>
+</tbody>
+</table>
+<p><strong>关键点：</strong></p>
+<ul>
+<li><code>application_name</code> 不是 <code>asyncpg.connect()</code> 的直接 kwarg，必须走 <code>server_settings</code> 字典 — 直接当 kwarg 传会 <code>TypeError</code></li>
+<li><code>connect_timeout</code> 故意<strong>不在</strong>白名单中：failover 路径硬编码 5s probe timeout（架构决策），DSN 覆盖会导致 Python 层 kwarg 重复报错</li>
+<li><code>read_timeout</code> / <code>write_timeout</code> 不在白名单：虽然 PyMySQL 支持，但 <strong>aiomysql 不支持这两个参数</strong>，传过去会 <code>TypeError</code></li>
+<li>URL query 值永远是 <code>str</code>，数值/布尔类参数必须在解析时显式转换，否则 driver 内部使用时（如 <code>asyncio.wait_for(timeout=...)</code>、<code>if autocommit:</code>）会出错</li>
+<li><strong>PG 的 <code>sslmode</code> 与 <code>ssl_ca</code>/<code>ssl_cert</code>/<code>ssl_key</code> 不可混用</strong>：两者表达 TLS 意图的方式不同，混用有语义歧义（<code>sslmode=disable + ssl_ca=...</code> 会反转用户禁用 TLS 的意图）。即使是看似相容的组合（如 <code>sslmode=prefer + ssl_ca=...</code>），本项目在 <code>ssl_*</code> 路径下也不会复刻 asyncpg 自身的 <code>prefer</code> / <code>allow</code> 降级语义 — 构造 <code>SSLContext</code> 后交给 asyncpg 就意味着"确定 TLS"，没有 mode 字符串承载降级意图。因此混用时 init 直接 fail。用户须二选一：要么只用 <code>sslmode=</code>（由 asyncpg 处理语义 — 注意 <code>require</code> 不做证书校验，<code>verify-ca</code>/<code>verify-full</code> 需要额外 root cert），要么只给 CA/cert 文件路径（构造 <code>SSLContext</code>，由 Python <code>ssl</code> 模块做校验）</li>
+</ul>
+<p>之所以要白名单 + fail-fast：failover 路径绕过了 SQLAlchemy dialect 的 URL 翻译（直接调 driver 的 <code>connect()</code>），而 <code>asyncpg.connect</code> 和 <code>aiomysql.connect</code> 签名都是固定的、不吃任意 <code>**kwargs</code>。白名单保证迁移 <code>DATABASE_URL → DATABASE_URLS</code> 不会出现连接行为静默变化，也不会在真正连接时才炸。</p>
+<h3 id="瞬断重试">瞬断重试</h3>
+<p><code>db_manager.with_retry(fn)</code> 在 <code>OperationalError / DisconnectionError</code> 时重试（最多 3 次，指数退避 1s → 2s → 4s）。每次 attempt 创建<strong>独立 session</strong>，所以只适合：</p>
+<ul>
+<li>幂等写操作（如 <code>flush_one</code> 的 artifact 写入 — Duplicate 视为成功）</li>
+<li>只读查询</li>
+</ul>
+<p>不适合需要事务串联多步的写入 — 中间失败会破坏一致性。</p>
+<h3 id="session-生命周期">Session 生命周期</h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nd">@asynccontextmanager</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">session</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>    <span class="n">session</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_session_factory</span><span class="p">()</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>    <span class="k">try</span><span class="p">:</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>        <span class="k">yield</span> <span class="n">session</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>    <span class="k">finally</span><span class="p">:</span>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>        <span class="k">await</span> <span class="n">session</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
+</code></pre></div>
+<p><strong>只管创建和关闭</strong>，不做 <code>begin/commit/rollback</code>。事务控制在 Repository 方法内，见 <a href="../data-layer/#事务所有权">data-layer.md → 事务所有权</a>。</p>
+<h2 id="runtimestore">RuntimeStore</h2>
+<p>执行层的共享状态都放在 <code>RuntimeStore</code> 后面，通过 Protocol 接口隔离实现：</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="nd">@runtime_checkable</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="k">class</span><span class="w"> </span><span class="nc">RuntimeStore</span><span class="p">(</span><span class="n">Protocol</span><span class="p">):</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>    <span class="c1"># Conversation lease — 阻止同一对话并发 POST /chat</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">try_acquire_lease</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">conv_id</span><span class="p">,</span> <span class="n">msg_id</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">]:</span> <span class="o">...</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">release_lease</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">conv_id</span><span class="p">,</span> <span class="n">msg_id</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span> <span class="o">...</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>    <span class="c1"># Engine interactive — inject / cancel 的有效窗口</span>
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">mark_engine_interactive</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">conv_id</span><span class="p">,</span> <span class="n">msg_id</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span> <span class="o">...</span>
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">clear_engine_interactive</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">conv_id</span><span class="p">,</span> <span class="n">msg_id</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span> <span class="o">...</span>
+<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a>
+<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a>    <span class="c1"># Interrupts — permission 确认等待</span>
+<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a>    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">wait_for_interrupt</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">msg_id</span><span class="p">,</span> <span class="n">data</span><span class="p">,</span> <span class="n">timeout</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Optional</span><span class="p">[</span><span class="n">Dict</span><span class="p">]:</span> <span class="o">...</span>
+<a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a>    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">resolve_interrupt</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">msg_id</span><span class="p">,</span> <span class="n">resume_data</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Literal</span><span class="p">[</span><span class="o">...</span><span class="p">]:</span> <span class="o">...</span>
+<a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a>
+<a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a>    <span class="c1"># Cancellation</span>
+<a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a>    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">request_cancel</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">msg_id</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span> <span class="o">...</span>
+<a id="__codelineno-2-17" name="__codelineno-2-17" href="#__codelineno-2-17"></a>    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">is_cancelled</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">msg_id</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span> <span class="o">...</span>
+<a id="__codelineno-2-18" name="__codelineno-2-18" href="#__codelineno-2-18"></a>
+<a id="__codelineno-2-19" name="__codelineno-2-19" href="#__codelineno-2-19"></a>    <span class="c1"># Message queue — 执行中用户注入</span>
+<a id="__codelineno-2-20" name="__codelineno-2-20" href="#__codelineno-2-20"></a>    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">inject_message</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">msg_id</span><span class="p">,</span> <span class="n">content</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span> <span class="o">...</span>
+<a id="__codelineno-2-21" name="__codelineno-2-21" href="#__codelineno-2-21"></a>    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">drain_messages</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">msg_id</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">List</span><span class="p">[</span><span class="nb">str</span><span class="p">]:</span> <span class="o">...</span>
+<a id="__codelineno-2-22" name="__codelineno-2-22" href="#__codelineno-2-22"></a>
+<a id="__codelineno-2-23" name="__codelineno-2-23" href="#__codelineno-2-23"></a>    <span class="c1"># Owner-key primitives — 通用分布式锁（compaction 等用）</span>
+<a id="__codelineno-2-24" name="__codelineno-2-24" href="#__codelineno-2-24"></a>    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">acquire</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">key</span><span class="p">,</span> <span class="n">ttl</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">owner</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Tuple</span><span class="p">[</span><span class="nb">bool</span><span class="p">,</span> <span class="nb">str</span><span class="p">]:</span> <span class="o">...</span>
+<a id="__codelineno-2-25" name="__codelineno-2-25" href="#__codelineno-2-25"></a>    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">renew</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">key</span><span class="p">,</span> <span class="n">owner</span><span class="p">,</span> <span class="n">ttl</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span> <span class="o">...</span>
+<a id="__codelineno-2-26" name="__codelineno-2-26" href="#__codelineno-2-26"></a>    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">release</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">key</span><span class="p">,</span> <span class="n">owner</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span> <span class="o">...</span>
+<a id="__codelineno-2-27" name="__codelineno-2-27" href="#__codelineno-2-27"></a>
+<a id="__codelineno-2-28" name="__codelineno-2-28" href="#__codelineno-2-28"></a>    <span class="c1"># Lease lifecycle</span>
+<a id="__codelineno-2-29" name="__codelineno-2-29" href="#__codelineno-2-29"></a>    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">renew_lease</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">conv_id</span><span class="p">,</span> <span class="n">msg_id</span><span class="p">,</span> <span class="n">ttl</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span> <span class="o">...</span>
+<a id="__codelineno-2-30" name="__codelineno-2-30" href="#__codelineno-2-30"></a>    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">cleanup_execution</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">conv_id</span><span class="p">,</span> <span class="n">msg_id</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span> <span class="o">...</span>
+<a id="__codelineno-2-31" name="__codelineno-2-31" href="#__codelineno-2-31"></a>    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">shutdown_cleanup</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span> <span class="o">...</span>
+</code></pre></div>
+<h3 id="双状态生命周期">双状态生命周期</h3>
+<p>lease 和 interactive 是<strong>两个独立状态</strong>，生命周期不同：</p>
+<pre class="mermaid"><code>gantt
+    title 执行请求的双状态时间线
+    dateFormat  X
+    axisFormat %s
+
+    section Lease
+    acquire_lease      :a1, 0, 30
+    post_processing    :a2, 25, 30
+
+    section Interactive
+    mark_interactive   :b1, 2, 23
+    engine_loop        :b2, 2, 23
+
+    section Execution
+    receive_request    :milestone, 0, 0
+    release_lease      :milestone, 30, 0</code></pre>
+<ul>
+<li><strong>Lease</strong> 覆盖<strong>整个请求生命周期</strong>（含 post-processing、flush、终端事件推送）</li>
+<li><strong>Interactive</strong> 仅覆盖<strong>引擎 loop 期间</strong>（退出后 inject/cancel 返回 409）</li>
+</ul>
+<p>这个分离允许 post-processing 阶段拒绝新的 inject/cancel（此时引擎已退出无法响应），但仍阻止并发 POST /chat（lease 未释放）。</p>
+<h3 id="interrupt-机制">Interrupt 机制</h3>
+<p>Permission CONFIRM 工具执行前，工具处理器调用 <code>wait_for_interrupt()</code> 挂起引擎，等待用户从前端 <code>POST /chat/{id}/resume</code> 响应：</p>
 <pre class="mermaid"><code>sequenceDiagram
-    participant Client as Frontend
-    participant POST as POST /chat
-    participant SM as StreamManager
-    participant BG as Background Task
-    participant SSE as GET /stream/{thread_id}
+    participant Engine
+    participant Store as RuntimeStore
+    participant API as POST /resume
+    participant User
 
-    Client-&gt;&gt;POST: 发送消息
-    POST-&gt;&gt;POST: 1. ensure_conversation_exists()
-    POST-&gt;&gt;SM: 2. create_stream(thread_id)
-    POST-&gt;&gt;BG: 3. asyncio.create_task(execute_and_push())
-    POST--&gt;&gt;Client: 4. 返回 { stream_url }
+    Engine-&gt;&gt;Store: wait_for_interrupt(msg_id, data, timeout=300s)
+    Note over Store: 创建 _InterruptState&lt;br/&gt;（Event + data + resume_data）
+    Store--&gt;&gt;Engine: [blocked on asyncio.Event]
 
-    Note over BG: 创建独立的&lt;br/&gt;db session / manager / controller
-
-    Client-&gt;&gt;SSE: 订阅 SSE
-
-    loop Graph 执行
-        BG-&gt;&gt;SM: push_event(event)
-        SM-&gt;&gt;SSE: consume_events()
-        SSE--&gt;&gt;Client: event: {type} + data: {event}
-    end
-
-    BG-&gt;&gt;SM: push_event({ type: "complete" })
-    SM-&gt;&gt;SSE: 终结事件
-    SSE--&gt;&gt;Client: event: complete + data: {complete}
-    SSE-&gt;&gt;SM: close_stream()</code></pre>
-<p>关键设计决策：
-- Background task 创建<strong>独立的</strong>依赖实例，不复用 HTTP 请求的 session（避免请求结束后 session 失效）
-- StreamManager 作为中间缓冲层，解耦 POST（生产事件）和 GET（消费事件）的时序
-- TTL 机制防止前端不连接时队列无限增长
-- <strong>Graph 执行独立于 SSE 连接</strong>：前端断开 SSE 后，graph 仍继续运行到完成，结果持久化到数据库，用户刷新页面后可查看</p>
-<h3 id="数据库并发配置">数据库并发配置</h3>
-<p>当前使用 SQLite + WAL 模式：</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="n">PRAGMA</span> <span class="n">journal_mode</span><span class="o">=</span><span class="n">WAL</span>       <span class="c1"># 读写可并发</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="n">PRAGMA</span> <span class="n">synchronous</span><span class="o">=</span><span class="n">NORMAL</span>     <span class="c1"># 平衡性能和安全</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="n">PRAGMA</span> <span class="n">busy_timeout</span><span class="o">=</span><span class="mi">15000</span>     <span class="c1"># 写锁等待 15 秒</span>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="n">PRAGMA</span> <span class="n">foreign_keys</span><span class="o">=</span><span class="n">ON</span>
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="n">PRAGMA</span> <span class="n">cache_size</span><span class="o">=-</span><span class="mi">64000</span>      <span class="c1"># 64MB 缓存</span>
-</code></pre></div>
-<p>WAL 模式允许多个读操作并发执行，但<strong>写操作仍然是串行的</strong>（单写者模型）。</p>
-<hr />
-<h2 id="运行边界与已知局限">运行边界与已知局限</h2>
-<h3 id="checkpointer-单连接瓶颈">Checkpointer 单连接瓶颈</h3>
-<p><code>AsyncSqliteSaver</code> 使用单个 <code>aiosqlite.connect()</code> 连接，作为全局单例被所有并发请求共享。<code>aiosqlite</code> 内部只有一个后台线程 + 队列，所有操作串行执行。LangGraph 每个 node 执行完都要写 checkpoint，N 个并发用户 = 所有 checkpoint 读写排队，高并发时成为全局延迟瓶颈。</p>
-<p><strong>缓解</strong>: 演进路线 Phase 2 迁移到 <code>langgraph-checkpoint-redis</code>。</p>
-<h3 id="graph-重复编译">Graph 重复编译</h3>
-<p>每个请求都会执行：创建 3 个 Agent → 创建所有 Tool → 注册到 Registry → 编译 StateGraph。Graph 结构本身是无状态的（状态存在 checkpointer 里），理论上可编译一次后复用。当前设计是因为 <code>artifact_manager</code> 通过闭包绑定到 graph 节点中，导致 graph 与请求级实例耦合。</p>
-<p><strong>缓解</strong>: 演进路线 Phase 3 — 通过 state 传递 <code>artifact_manager</code> 而非闭包捕获，实现 graph 编译缓存。</p>
-<h3 id="错误信息泄露已部分缓解">错误信息泄露（已部分缓解）</h3>
-<p><code>_sanitize_error_event()</code>（<code>api/routers/chat.py</code>）在非 DEBUG 模式下将 error 事件的详情替换为 <code>"Internal server error"</code>，开发模式保留原始 <code>str(e)</code> 便于调试。当前脱敏仅覆盖 SSE error 事件，HTTP 异常（如 500）的响应体尚未统一处理。</p>
-<h3 id="已解决的问题">已解决的问题</h3>
-<p>以下问题已在历次迭代中修复，详细修复记录见 <a href="../../_archive/optimization-plan/">optimization-plan.md</a>：</p>
+    API-&gt;&gt;User: SSE: permission_request
+    User-&gt;&gt;API: 审批/拒绝
+    API-&gt;&gt;Store: resolve_interrupt(msg_id, {approved: true})
+    Store-&gt;&gt;Store: Event.set()
+    Store--&gt;&gt;Engine: resume_data
+    Engine-&gt;&gt;Engine: 继续执行工具或跳过</code></pre>
+<p><strong>超时或 shutdown：</strong></p>
 <ul>
-<li><strong>Background Task 生命周期管理</strong> — <code>TaskManager</code> 持有任务引用防 GC、Semaphore 限制并发数、graceful shutdown</li>
-<li><strong>SQLite 写并发</strong> — 短事务模式，Repository 层立即 <code>flush() + commit()</code></li>
-<li><strong>请求级日志上下文</strong> — <code>contextvars</code> + <code>RequestContextFilter</code> 实现 <code>[conv_id|thread_id]</code> 日志追踪</li>
-<li><strong>StreamManager 内存泄漏</strong> — 延迟清理任务，关闭后 5 秒自动移除</li>
-<li><strong>请求级超时</strong> — <code>asyncio.timeout(config.STREAM_TIMEOUT)</code></li>
-<li><strong>SSE Heartbeat</strong> — <code>SSE_PING_INTERVAL</code> 秒发送 <code>: ping</code> 注释</li>
-<li><strong>认证鉴权</strong> — JWT 认证框架 + 数据隔离</li>
+<li><code>asyncio.wait_for()</code> 超时 → 返回 <code>None</code> → 工具处理器视为 deny</li>
+<li><code>request_cancel()</code> 同时唤醒 pending interrupt：设 <code>resume_data = {"approved": False, "reason": "cancelled"}</code> → Event.set()</li>
+<li><code>shutdown_cleanup()</code> 唤醒所有 pending interrupt：<code>{"approved": False, "reason": "shutdown"}</code></li>
 </ul>
-<hr />
-<h2 id="演进方向">演进方向</h2>
-<h3 id="phase-1-redis-引入--支持多-worker-部署">Phase 1: Redis 引入 — 支持多 Worker 部署</h3>
-<p><strong>目标</strong>: 将进程内状态迁移到 Redis，支持多 worker 实例。</p>
+<p>这保证引擎永远不会"死在 interrupt 上"。</p>
+<h3 id="cancellation">Cancellation</h3>
+<ul>
+<li><code>request_cancel(msg_id)</code> 设置 Event 标志</li>
+<li>引擎在每次循环顶部和工具执行前调用 <code>check_cancelled</code> hook 检查</li>
+<li>取消时引擎 emit <code>cancelled</code> 终端事件，释放资源，lease 随后在 finally 块释放</li>
+</ul>
+<h3 id="消息注入">消息注入</h3>
+<p><code>POST /chat/{id}/inject</code> 在执行中追加用户消息：</p>
+<ul>
+<li>条件：对话处于 <code>interactive</code> 状态</li>
+<li><code>inject_message(msg_id, content)</code> 入队</li>
+<li>Lead agent 在每次迭代顶部 <code>drain_messages(msg_id)</code> 取出所有待处理消息，包装为 <code>QUEUED_MESSAGE</code> 事件注入上下文</li>
+<li>非 lead agent 不检查队列 — 注入消息只影响 lead agent 的决策回路</li>
+</ul>
+<h3 id="owner-key-通用原语">Owner-Key 通用原语</h3>
+<p><code>acquire / renew / release / get_owner</code> 是建立在 lease 之上的通用分布式锁，主要用户是 Compaction：</p>
+<ul>
+<li>Compaction 在多实例部署时需要互斥，避免同一对话被多实例同时压缩</li>
+<li>使用 <code>acquire("compact:{conv_id}", ttl=60, owner=uuid)</code></li>
+<li>启动后台续期任务，每 20s 调 <code>renew()</code></li>
+<li>任务结束或崩溃后 TTL 到期自动释放</li>
+</ul>
+<h2 id="两种-runtimestore-实现">两种 RuntimeStore 实现</h2>
+<h3 id="inmemoryruntimestore单进程">InMemoryRuntimeStore（单进程）</h3>
+<p><code>src/api/services/runtime_store.py</code> — 开发、单实例部署使用：</p>
 <table>
 <thead>
 <tr>
-<th>组件</th>
-<th>当前</th>
-<th>迁移到</th>
+<th>状态维度</th>
+<th>存储</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td>ConversationManager._cache</td>
-<td>Python dict</td>
-<td>Redis Hash</td>
+<td>Conversation lease</td>
+<td><code>dict[conv_id → msg_id]</code></td>
 </tr>
 <tr>
-<td>StreamManager 事件队列</td>
-<td>asyncio.Queue</td>
-<td>Redis Pub/Sub (或 Redis Streams)</td>
+<td>Engine interactive</td>
+<td><code>dict[conv_id → msg_id]</code></td>
+</tr>
+<tr>
+<td>Interrupts</td>
+<td><code>dict[msg_id → _InterruptState]</code>（Event + data + resume_data）</td>
+</tr>
+<tr>
+<td>Cancellations</td>
+<td><code>dict[msg_id → asyncio.Event]</code></td>
+</tr>
+<tr>
+<td>Message queues</td>
+<td><code>dict[msg_id → asyncio.Queue]</code></td>
+</tr>
+<tr>
+<td>Owner keys</td>
+<td><code>dict[key → (owner, expires_at)]</code>（内存 TTL）</td>
 </tr>
 </tbody>
 </table>
-<p>迁移后的架构：</p>
-<pre class="mermaid"><code>graph LR
-    W1["Worker 1"] --&gt; Redis["Redis Pub/Sub"]
-    W2["Worker 2"] --&gt; Redis
-    W3["Worker 3"] --&gt; Redis
-    Redis --&gt; C1["SSE Client A"]
-    Redis --&gt; C2["SSE Client B"]
-    Redis --&gt; C3["SSE Client C"]</code></pre>
-<p>注意事项：
-- Redis Pub/Sub 是"发后即忘"的，如果消费者不在线则消息丢失。如果需要可靠投递，考虑 Redis Streams（支持消费者组 + ACK）
-- ConversationManager cache 迁移后，需要处理 cache invalidation 策略</p>
-<h3 id="phase-2-checkpointer-迁移--ttl-管理">Phase 2: Checkpointer 迁移 + TTL 管理</h3>
-<p><strong>目标</strong>: 解决 checkpoint 单连接瓶颈。</p>
+<p><strong>特点：</strong></p>
+<ul>
+<li>无 TTL 必要 — <code>cleanup_execution()</code> 或 <code>shutdown_cleanup()</code> 显式清理</li>
+<li><code>renew_lease()</code> 永远 True — 单进程无失效风险</li>
+<li><code>get_lease_key()</code> 返回空字符串 — 无跨实例查询需求</li>
+</ul>
+<h3 id="redisruntimestore分布式">RedisRuntimeStore（分布式）</h3>
+<p><code>src/api/services/redis_runtime_store.py</code> — 生产多 Worker / 多 Pod 部署：</p>
+<p><strong>Key 设计</strong>（使用 <code>{prefix:id}</code> 的 hash tag 保证同 entity 同 slot，兼容 Redis Cluster）：</p>
 <table>
 <thead>
 <tr>
-<th>组件</th>
-<th>当前</th>
-<th>迁移到</th>
+<th>Key</th>
+<th>类型</th>
+<th>TTL</th>
+<th>用途</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td>LangGraph Checkpointer</td>
-<td>AsyncSqliteSaver（单 aiosqlite 连接）</td>
-<td>langgraph-checkpoint-redis</td>
+<td><code>{af:conv_id}:lease</code></td>
+<td>STRING (msg_id)</td>
+<td><code>LEASE_TTL</code> = 90s</td>
+<td>Conversation 持有</td>
+</tr>
+<tr>
+<td><code>{af:conv_id}:interactive</code></td>
+<td>STRING (msg_id)</td>
+<td><code>LEASE_TTL</code></td>
+<td>Engine interactive</td>
+</tr>
+<tr>
+<td><code>{af:msg_id}:interrupt</code></td>
+<td>HASH</td>
+<td><code>PERM_TIMEOUT + 60</code></td>
+<td>Interrupt 状态</td>
+</tr>
+<tr>
+<td><code>{af:msg_id}:cancel</code></td>
+<td>STRING "1"</td>
+<td><code>EXECUTION_TIMEOUT</code></td>
+<td>取消标记</td>
+</tr>
+<tr>
+<td><code>{af:msg_id}:queue</code></td>
+<td>LIST</td>
+<td><code>EXECUTION_TIMEOUT</code></td>
+<td>消息队列</td>
+</tr>
+<tr>
+<td><code>{af:msg_id}:interrupt_ch</code></td>
+<td>Pub/Sub channel</td>
+<td>—</td>
+<td>Interrupt 唤醒通知</td>
 </tr>
 </tbody>
 </table>
-<p>Redis 作为 checkpointer 的优势：
-- 天然支持并发读写（无写锁竞争）
-- 内置 TTL，checkpoint 数据自动过期清理
-- 读写延迟远低于 SQLite</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="c1"># 迁移示例</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">langgraph.checkpoint.redis.aio</span><span class="w"> </span><span class="kn">import</span> <span class="n">AsyncRedisSaver</span>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">create_redis_checkpointer</span><span class="p">(</span><span class="n">redis_url</span><span class="p">:</span> <span class="nb">str</span><span class="p">):</span>
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>    <span class="n">checkpointer</span> <span class="o">=</span> <span class="n">AsyncRedisSaver</span><span class="o">.</span><span class="n">from_conn_string</span><span class="p">(</span><span class="n">redis_url</span><span class="p">)</span>
-<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>    <span class="k">await</span> <span class="n">checkpointer</span><span class="o">.</span><span class="n">setup</span><span class="p">()</span>
-<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>    <span class="k">return</span> <span class="n">checkpointer</span>
+<p><strong>原子性 — Lua 脚本：</strong></p>
+<table>
+<thead>
+<tr>
+<th>脚本</th>
+<th>用途</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>acquire-lease</code></td>
+<td><code>SET NX EX</code> 原子获取或返回现有持有者（避免 SET NX + GET 竞态）</td>
+</tr>
+<tr>
+<td><code>compare-and-del</code></td>
+<td>仅当 owner 匹配时 DEL（防止误释放他人持有的 lease）</td>
+</tr>
+<tr>
+<td><code>compare-and-expire</code></td>
+<td>仅当 owner 匹配时续期</td>
+</tr>
+<tr>
+<td><code>drain-all</code></td>
+<td><code>LRANGE + DEL</code> 原子取出队列</td>
+</tr>
+<tr>
+<td><code>resolve-interrupt</code></td>
+<td>HSET status + PUBLISH 的原子组合</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Interrupt 的 Pub/Sub 四步模式：</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>1. HSET 创建 interrupt（status=pending）
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>2. SUBSCRIBE channel
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>3. 再次 HGET 检查 status（防止步骤 1-2 之间被 resolve）
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>4. 等待 PUBLISH 通知或超时
 </code></pre></div>
-<h3 id="phase-25-主数据库迁移按需">Phase 2.5: 主数据库迁移（按需）</h3>
-<p><strong>触发条件</strong>: 当短事务模式仍无法满足并发需求时（例如极高写入频率）。当前 SQLite + 短事务模式可满足中等并发场景。</p>
-<p><strong>方案</strong> — 迁移到 PostgreSQL：
-- 彻底解决写并发问题（MVCC 支持真正的多写者）
-- SQLAlchemy 切换只需改 <code>DATABASE_URL</code> 和 driver</p>
-<h3 id="phase-3-生产化完善">Phase 3: 生产化完善</h3>
+<p>步骤 3 是关键 — 没有它则 1-2 之间的 resolve 会丢失通知，导致永久阻塞到超时。</p>
+<h3 id="心跳续租">心跳续租</h3>
+<p>Controller 启动后台任务每 <code>LEASE_TTL / 3 = 30s</code> 调用 <code>renew_lease()</code>：</p>
 <ul>
-<li>API Rate Limiting（per-user 限流）</li>
-<li>分布式锁（防止同一 conversation 的并发写入冲突）</li>
-<li>错误信息脱敏补全（SSE 已脱敏，HTTP 500 响应体待统一）</li>
-<li>Metrics 采集（Prometheus / OpenTelemetry，基于已有的 <code>contextvars</code> 请求上下文扩展 trace/span）</li>
-<li>Graph 编译缓存（编译一次，通过 state 传递 <code>artifact_manager</code> 而非闭包捕获）</li>
+<li>InMemory 永远成功</li>
+<li>Redis 通过 <code>compare-and-expire</code> 脚本：owner 不匹配返回 0 → 续租失败 → Controller 感知到"lease 被抢" → 主动终止执行</li>
 </ul>
-<hr />
-<h2 id="参考">参考</h2>
+<p>这允许在 Pod 崩溃时（心跳停止）90s 内 lease 自动释放，其他实例可接管该对话的新请求。</p>
+<h2 id="超时参数总览">超时参数总览</h2>
+<table>
+<thead>
+<tr>
+<th>参数</th>
+<th>默认</th>
+<th>作用</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>EXECUTION_TIMEOUT</code></td>
+<td>1800s (30min)</td>
+<td>总执行上限，同时作为 stream lifetime 上限</td>
+</tr>
+<tr>
+<td><code>PERMISSION_TIMEOUT</code></td>
+<td>300s (5min)</td>
+<td>单次 permission 等待上限</td>
+</tr>
+<tr>
+<td><code>LEASE_TTL</code></td>
+<td>90s</td>
+<td>Lease 存活时长（心跳每 30s 续）</td>
+</tr>
+<tr>
+<td><code>COMPACTION_TIMEOUT</code></td>
+<td>600s (10min)</td>
+<td>Compaction 后台任务上限</td>
+</tr>
+<tr>
+<td><code>SSE_PING_INTERVAL</code></td>
+<td>15s</td>
+<td>SSE 心跳间隔</td>
+</tr>
+</tbody>
+</table>
+<p>选择原则：<code>PERMISSION_TIMEOUT &lt; EXECUTION_TIMEOUT</code>，给模型在用户审批后仍有足够时间完成任务。</p>
+<h2 id="design-decisions">Design Decisions</h2>
+<h3 id="为什么-permission-interrupt-用-asyncioevent-阻塞">为什么 Permission Interrupt 用 asyncio.Event 阻塞</h3>
 <ul>
-<li><a href="https://docs.python.org/3/library/asyncio-task.html#creating-tasks">Python asyncio.create_task — 关于任务引用的警告</a></li>
-<li><a href="https://langchain-ai.github.io/langgraph/reference/checkpoints/#langgraph.checkpoint.redis">langgraph-checkpoint-redis</a></li>
-<li><a href="https://www.sqlite.org/wal.html">SQLite WAL Mode</a></li>
-<li><a href="https://fastapi.tiangolo.com/advanced/events/">FastAPI Lifespan Events</a></li>
+<li>实现简单，依赖标准库 — InMemory 版本无外部依赖</li>
+<li>阻塞语义天然与"工具串行执行"契合，interrupt 自然插入在工具之间</li>
+<li>超时由 <code>asyncio.wait_for</code> 统一处理，无需额外 watchdog</li>
+<li>取消和 shutdown 都能通过 Event.set() + resume_data 唤醒，无死锁风险</li>
 </ul>
+<p>对比轮询方案：轮询需要精心选择间隔（响应延迟 vs CPU 消耗），Event 通知零延迟。</p>
+<h3 id="为什么用-lease-而非-lock">为什么用 Lease 而非 Lock</h3>
+<ul>
+<li>Lock 是"谁持有谁释放" — 持有者崩溃则永久占用</li>
+<li>Lease 带 TTL + 心跳续期 — 崩溃时 TTL 自动过期，其他实例可接管</li>
+<li>SaaS 场景下 Pod 重启、网络抖动、OOM Kill 都是常态，Lease 更稳健</li>
+<li>代价：实例需感知 "lease 被抢" 并主动退出，Controller 层实现这一逻辑</li>
+</ul>
+<h3 id="为什么-inmemory-和-redis-共用-protocol">为什么 InMemory 和 Redis 共用 Protocol</h3>
+<ul>
+<li>本地开发、单元测试、Docker Compose 单实例都不需要 Redis，InMemory 足够</li>
+<li>生产多实例必须 Redis — 同 Protocol 允许配置驱动切换（<code>REDIS_URL</code> 环境变量）</li>
+<li>Protocol 方法全部 async 是为 Redis 实现留出空间，InMemory 的"伪 async"是小代价</li>
+</ul>
+<h3 id="为什么-redis-key-用-hash-tag-prefixid">为什么 Redis Key 用 hash tag <code>{prefix:id}</code></h3>
+<ul>
+<li>Redis Cluster 按 CRC16 分片；同一对话的 lease / interactive 等 key 必须在同一 slot 才能跨 key 原子操作</li>
+<li>hash tag <code>{...}</code> 内的内容决定分片位置，将 <code>conv_id</code> 或 <code>msg_id</code> 放入 tag 即可确保同 entity 聚合到同 slot</li>
+<li>不用 hash tag 则 Cluster 模式下 Lua 脚本的 <code>KEYS[]</code> 跨 slot 会报错</li>
+</ul>
+<h3 id="为什么事务控制在-repository-而非-session-context-manager">为什么事务控制在 Repository 而非 Session Context Manager</h3>
+<p>见 <a href="../data-layer/#事务所有权">data-layer.md → 事务所有权</a>。核心：缩短 SQLite 写锁持有时间，将每个 Repo 方法视为独立微事务。</p>
 
 
 

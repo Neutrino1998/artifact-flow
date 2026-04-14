@@ -6,17 +6,17 @@
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width,initial-scale=1">
       
-        <meta name="description" content="Multi-Agent Research System Built on LangGraph">
+        <meta name="description" content="Pi-style 可配置 Agent 引擎 + 双 Artifact 架构的多智能体 SaaS">
       
       
       
-        <link rel="canonical" href="https://neutrino.github.io/artifact-flow/architecture/data-layer/">
+        <link rel="canonical" href="https://neutrino1998.github.io/artifact-flow/architecture/data-layer/">
       
       
-        <link rel="prev" href="../tools/">
+        <link rel="prev" href="../artifacts/">
       
       
-        <link rel="next" href="../concurrency/">
+        <link rel="next" href="../streaming/">
       
       
         
@@ -53,6 +53,8 @@
       
     
     
+      <link rel="stylesheet" href="../../stylesheets/custom.css">
+    
     <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
     
       
@@ -69,7 +71,7 @@
     
     
     
-    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="custom">
   
     
     <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
@@ -125,7 +127,7 @@
     
     
     
-    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="custom"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
     
       <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
@@ -135,7 +137,7 @@
     
     
     
-    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="custom" data-md-color-accent="custom"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
     
       <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
@@ -242,32 +244,13 @@
   
   
     <li class="md-tabs__item">
-      <a href="../../frontend/" class="md-tabs__link">
+      <a href="../../deployment/" class="md-tabs__link">
         
   
   
     
   
-  Frontend Guide
-
-      </a>
-    </li>
-  
-
-      
-        
-  
-  
-  
-  
-    <li class="md-tabs__item">
-      <a href="../../request-lifecycle/" class="md-tabs__link">
-        
-  
-  
-    
-  
-  Request Lifecycle
+  Deployment
 
       </a>
     </li>
@@ -284,7 +267,7 @@
     
     
       <li class="md-tabs__item md-tabs__item--active">
-        <a href="../core/" class="md-tabs__link">
+        <a href="../overview/" class="md-tabs__link">
           
   
   
@@ -301,17 +284,18 @@
   
   
   
-    <li class="md-tabs__item">
-      <a href="../../streaming/" class="md-tabs__link">
-        
-  
-  
     
+    
+      <li class="md-tabs__item">
+        <a href="../../guides/add-agent/" class="md-tabs__link">
+          
   
-  Streaming
+  
+  Guides
 
-      </a>
-    </li>
+        </a>
+      </li>
+    
   
 
       
@@ -321,51 +305,13 @@
   
   
     <li class="md-tabs__item">
-      <a href="../../extension-guide/" class="md-tabs__link">
+      <a href="../../frontend/" class="md-tabs__link">
         
   
   
     
   
-  Extension Guide
-
-      </a>
-    </li>
-  
-
-      
-        
-  
-  
-  
-  
-    <li class="md-tabs__item">
-      <a href="../../api/" class="md-tabs__link">
-        
-  
-  
-    
-  
-  API Reference
-
-      </a>
-    </li>
-  
-
-      
-        
-  
-  
-  
-  
-    <li class="md-tabs__item">
-      <a href="../../faq/" class="md-tabs__link">
-        
-  
-  
-    
-  
-  FAQ
+  Frontend
 
       </a>
     </li>
@@ -451,41 +397,14 @@
   
   
     <li class="md-nav__item">
-      <a href="../../frontend/" class="md-nav__link">
+      <a href="../../deployment/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    Frontend Guide
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-    
-      
-      
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../request-lifecycle/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Request Lifecycle
+    Deployment
   
 
     
@@ -523,10 +442,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" checked>
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
         
           
-          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
             
   
   
@@ -544,8 +463,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="true">
-          <label class="md-nav__title" for="__nav_4">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_3">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -562,14 +481,42 @@
   
   
     <li class="md-nav__item">
-      <a href="../core/" class="md-nav__link">
+      <a href="../overview/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    Core
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../engine/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Engine
   
 
     
@@ -626,6 +573,34 @@
     
   
     Tools
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../artifacts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Artifacts
   
 
     
@@ -706,88 +681,22 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#模块结构" class="md-nav__link">
+  <a href="#orm-模型总览" class="md-nav__link">
     <span class="md-ellipsis">
       
-        模块结构
+        ORM 模型总览
       
     </span>
   </a>
   
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#数据模型-modelspy" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        数据模型 (models.py)
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="数据模型 (models.py)">
+    <nav class="md-nav" aria-label="ORM 模型总览">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#er-图" class="md-nav__link">
+  <a href="#表级职责划分" class="md-nav__link">
     <span class="md-ellipsis">
       
-        ER 图
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#user" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        User
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#conversation" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Conversation
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#message" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Message
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#artifact" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Artifact
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#artifactversion" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        ArtifactVersion
+        表级职责划分
       
     </span>
   </a>
@@ -800,22 +709,72 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#数据库管理-databasepy" class="md-nav__link">
+  <a href="#对话树结构" class="md-nav__link">
     <span class="md-ellipsis">
       
-        数据库管理 (database.py)
+        对话树结构
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="数据库管理 (database.py)">
+    <nav class="md-nav" aria-label="对话树结构">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#databasemanager" class="md-nav__link">
+  <a href="#compaction-在树上的语义" class="md-nav__link">
     <span class="md-ellipsis">
       
-        DatabaseManager
+        Compaction 在树上的语义
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#event-sourcing-层" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Event Sourcing 层
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Event Sourcing 层">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#关键字段" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        关键字段
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#持久化边界" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        持久化边界
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#查询接口" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        查询接口
       
     </span>
   </a>
@@ -840,10 +799,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#baserepository" class="md-nav__link">
+  <a href="#泛型基类" class="md-nav__link">
     <span class="md-ellipsis">
       
-        BaseRepository
+        泛型基类
       
     </span>
   </a>
@@ -851,10 +810,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#conversationrepository" class="md-nav__link">
+  <a href="#具体-repository" class="md-nav__link">
     <span class="md-ellipsis">
       
-        ConversationRepository
+        具体 Repository
       
     </span>
   </a>
@@ -862,21 +821,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#artifactrepository" class="md-nav__link">
+  <a href="#repo-边界规则" class="md-nav__link">
     <span class="md-ellipsis">
       
-        ArtifactRepository
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#userrepository" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        UserRepository
+        Repo 边界规则
       
     </span>
   </a>
@@ -889,22 +837,22 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#乐观锁机制" class="md-nav__link">
+  <a href="#事务所有权" class="md-nav__link">
     <span class="md-ellipsis">
       
-        乐观锁机制
+        事务所有权
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="乐观锁机制">
+    <nav class="md-nav" aria-label="事务所有权">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#为什么需要乐观锁" class="md-nav__link">
+  <a href="#为什么" class="md-nav__link">
     <span class="md-ellipsis">
       
-        为什么需要乐观锁？
+        为什么
       
     </span>
   </a>
@@ -912,10 +860,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#处理流程" class="md-nav__link">
+  <a href="#典型模式" class="md-nav__link">
     <span class="md-ellipsis">
       
-        处理流程
+        典型模式
       
     </span>
   </a>
@@ -923,10 +871,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#agent-处理冲突" class="md-nav__link">
+  <a href="#批量-update-模式" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Agent 处理冲突
+        批量 UPDATE 模式
       
     </span>
   </a>
@@ -939,13 +887,146 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#langgraph-checkpointer" class="md-nav__link">
+  <a href="#orm-使用规范" class="md-nav__link">
     <span class="md-ellipsis">
       
-        LangGraph Checkpointer
+        ORM 使用规范
       
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="ORM 使用规范">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#时间戳" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        时间戳
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#优先-orm-属性变动" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        优先 ORM 属性变动
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#bulk-update-仅用于-db-side-计算" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Bulk UPDATE 仅用于 DB-side 计算
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#绝不把-sql-表达式赋给-orm-属性" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        绝不把 SQL 表达式赋给 ORM 属性
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#实例过期后不可访问属性" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        实例过期后不可访问属性
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alembic-迁移" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Alembic 迁移
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#design-decisions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Design Decisions
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Design Decisions">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#为什么-404-not-403" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        为什么 404 not 403
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#为什么-repository-内部控制事务" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        为什么 Repository 内部控制事务
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#为什么-messageeventrepository-不继承-baserepository" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        为什么 MessageEventRepository 不继承 BaseRepository
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#为什么-messagemetadata_-用-json-而非规范化列" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        为什么 Message.metadata_ 用 JSON 而非规范化列
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -953,6 +1034,34 @@
   
 </nav>
       
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../streaming/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Streaming
+  
+
+    
+  </span>
+  
+  
+
+      </a>
     </li>
   
 
@@ -986,6 +1095,34 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../observability/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Observability
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -999,15 +1136,69 @@
   
   
   
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Guides
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Guides
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
     <li class="md-nav__item">
-      <a href="../../streaming/" class="md-nav__link">
+      <a href="../../guides/add-agent/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    Streaming
+    Add Agent
   
 
     
@@ -1019,22 +1210,23 @@
     </li>
   
 
-    
-      
-      
+              
+            
+              
+                
   
   
   
   
     <li class="md-nav__item">
-      <a href="../../extension-guide/" class="md-nav__link">
+      <a href="../../guides/add-tool/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    Extension Guide
+    Add Tool
   
 
     
@@ -1046,15 +1238,44 @@
     </li>
   
 
-    
-      
-      
+              
+            
+              
+                
   
   
   
   
     <li class="md-nav__item">
-      <a href="../../api/" class="md-nav__link">
+      <a href="../../guides/add-model/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Add Model
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/api-reference/" class="md-nav__link">
         
   
   
@@ -1073,6 +1294,14 @@
     </li>
   
 
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
     
       
       
@@ -1081,14 +1310,14 @@
   
   
     <li class="md-nav__item">
-      <a href="../../faq/" class="md-nav__link">
+      <a href="../../frontend/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    FAQ
+    Frontend
   
 
     
@@ -1128,88 +1357,22 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#模块结构" class="md-nav__link">
+  <a href="#orm-模型总览" class="md-nav__link">
     <span class="md-ellipsis">
       
-        模块结构
+        ORM 模型总览
       
     </span>
   </a>
   
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#数据模型-modelspy" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        数据模型 (models.py)
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="数据模型 (models.py)">
+    <nav class="md-nav" aria-label="ORM 模型总览">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#er-图" class="md-nav__link">
+  <a href="#表级职责划分" class="md-nav__link">
     <span class="md-ellipsis">
       
-        ER 图
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#user" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        User
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#conversation" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Conversation
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#message" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Message
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#artifact" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Artifact
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#artifactversion" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        ArtifactVersion
+        表级职责划分
       
     </span>
   </a>
@@ -1222,22 +1385,72 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#数据库管理-databasepy" class="md-nav__link">
+  <a href="#对话树结构" class="md-nav__link">
     <span class="md-ellipsis">
       
-        数据库管理 (database.py)
+        对话树结构
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="数据库管理 (database.py)">
+    <nav class="md-nav" aria-label="对话树结构">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#databasemanager" class="md-nav__link">
+  <a href="#compaction-在树上的语义" class="md-nav__link">
     <span class="md-ellipsis">
       
-        DatabaseManager
+        Compaction 在树上的语义
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#event-sourcing-层" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Event Sourcing 层
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Event Sourcing 层">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#关键字段" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        关键字段
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#持久化边界" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        持久化边界
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#查询接口" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        查询接口
       
     </span>
   </a>
@@ -1262,10 +1475,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#baserepository" class="md-nav__link">
+  <a href="#泛型基类" class="md-nav__link">
     <span class="md-ellipsis">
       
-        BaseRepository
+        泛型基类
       
     </span>
   </a>
@@ -1273,10 +1486,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#conversationrepository" class="md-nav__link">
+  <a href="#具体-repository" class="md-nav__link">
     <span class="md-ellipsis">
       
-        ConversationRepository
+        具体 Repository
       
     </span>
   </a>
@@ -1284,21 +1497,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#artifactrepository" class="md-nav__link">
+  <a href="#repo-边界规则" class="md-nav__link">
     <span class="md-ellipsis">
       
-        ArtifactRepository
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#userrepository" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        UserRepository
+        Repo 边界规则
       
     </span>
   </a>
@@ -1311,22 +1513,22 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#乐观锁机制" class="md-nav__link">
+  <a href="#事务所有权" class="md-nav__link">
     <span class="md-ellipsis">
       
-        乐观锁机制
+        事务所有权
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="乐观锁机制">
+    <nav class="md-nav" aria-label="事务所有权">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#为什么需要乐观锁" class="md-nav__link">
+  <a href="#为什么" class="md-nav__link">
     <span class="md-ellipsis">
       
-        为什么需要乐观锁？
+        为什么
       
     </span>
   </a>
@@ -1334,10 +1536,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#处理流程" class="md-nav__link">
+  <a href="#典型模式" class="md-nav__link">
     <span class="md-ellipsis">
       
-        处理流程
+        典型模式
       
     </span>
   </a>
@@ -1345,10 +1547,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#agent-处理冲突" class="md-nav__link">
+  <a href="#批量-update-模式" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Agent 处理冲突
+        批量 UPDATE 模式
       
     </span>
   </a>
@@ -1361,13 +1563,146 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#langgraph-checkpointer" class="md-nav__link">
+  <a href="#orm-使用规范" class="md-nav__link">
     <span class="md-ellipsis">
       
-        LangGraph Checkpointer
+        ORM 使用规范
       
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="ORM 使用规范">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#时间戳" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        时间戳
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#优先-orm-属性变动" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        优先 ORM 属性变动
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#bulk-update-仅用于-db-side-计算" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Bulk UPDATE 仅用于 DB-side 计算
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#绝不把-sql-表达式赋给-orm-属性" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        绝不把 SQL 表达式赋给 ORM 属性
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#实例过期后不可访问属性" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        实例过期后不可访问属性
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alembic-迁移" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Alembic 迁移
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#design-decisions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Design Decisions
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Design Decisions">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#为什么-404-not-403" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        为什么 404 not 403
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#为什么-repository-内部控制事务" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        为什么 Repository 内部控制事务
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#为什么-messageeventrepository-不继承-baserepository" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        为什么 MessageEventRepository 不继承 BaseRepository
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#为什么-messagemetadata_-用-json-而非规范化列" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        为什么 Message.metadata_ 用 JSON 而非规范化列
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -1392,594 +1727,342 @@
 
 
 <h1 id="数据层">数据层</h1>
-<p>数据层负责持久化存储，包括对话历史、消息、Artifact 等。</p>
-<h2 id="模块结构">模块结构</h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>src/
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>├── db/
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>│   ├── models.py      # SQLAlchemy ORM 模型
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>│   └── database.py    # 数据库管理器
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>└── repositories/
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>    ├── base.py        # Repository 基类
-<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>    ├── conversation_repo.py
-<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>    ├── artifact_repo.py
-<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>    └── user_repo.py   # 用户数据访问
-</code></pre></div>
-<h2 id="数据模型-modelspy">数据模型 (models.py)</h2>
-<h3 id="er-图">ER 图</h3>
+<blockquote>
+<p>SQLAlchemy async ORM + Repository 模式 — 三层责任模型的"数据访问层"。</p>
+</blockquote>
+<h2 id="orm-模型总览">ORM 模型总览</h2>
+<p>所有模型定义在 <code>src/db/models.py</code>，继承自 <code>Base = DeclarativeBase()</code>：</p>
 <pre class="mermaid"><code>erDiagram
     User ||--o{ Conversation : owns
     Conversation ||--o{ Message : contains
-    Conversation ||--o| ArtifactSession : has
-    ArtifactSession ||--o{ Artifact : contains
-    Artifact ||--o{ ArtifactVersion : versions
+    Conversation ||--o| ArtifactSession : "1:1"
+    ArtifactSession ||--o{ Artifact : holds
+    Artifact ||--o{ ArtifactVersion : versioned
+    Message ||--o{ MessageEvent : emits
 
     User {
         string id PK
         string username UK
         string hashed_password
-        string display_name
-        string role
+        string role "user / admin"
         bool is_active
-        datetime created_at
-        datetime updated_at
     }
-
     Conversation {
         string id PK
-        string active_branch
+        string active_branch "叶节点 message_id"
         string title
         string user_id FK
-        datetime created_at
-        datetime updated_at
-        json metadata_
+        json metadata "per-conversation 扩展"
     }
-
     Message {
         string id PK
         string conversation_id FK
-        string parent_id
-        text content
-        string thread_id
-        text graph_response
-        datetime created_at
-        json metadata_
+        string parent_id "自引用，形成树"
+        text user_input
+        text response
+        text user_input_summary "compaction 产出"
+        text response_summary
+        json metadata "always_allowed_tools / metrics / last_input_tokens"
     }
-
     ArtifactSession {
-        string id PK "FK"
-        datetime created_at
-        datetime updated_at
+        string id PK "= conversation_id"
     }
-
-    Artifact {
-        string id PK
-        string session_id PK "FK"
-        string content_type
-        string title
-        text content
-        int current_version
-        int lock_version
-        datetime created_at
-        datetime updated_at
-        json metadata_
-    }
-
-    ArtifactVersion {
-        int id PK
-        string artifact_id FK
-        string session_id FK
-        int version
-        text content
-        string update_type
-        json changes
-        datetime created_at
+    MessageEvent {
+        int id PK "autoincrement"
+        string event_id UK "message_id-seq, 幂等键"
+        string message_id FK
+        string event_type
+        string agent_name
+        json data
     }</code></pre>
-<h3 id="user">User</h3>
-<p>用户实体（认证与数据隔离）：</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="k">class</span><span class="w"> </span><span class="nc">User</span><span class="p">(</span><span class="n">Base</span><span class="p">):</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>    <span class="n">__tablename__</span> <span class="o">=</span> <span class="s2">&quot;users&quot;</span>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>    <span class="nb">id</span><span class="p">:</span> <span class="n">Mapped</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="n">mapped_column</span><span class="p">(</span><span class="n">String</span><span class="p">(</span><span class="mi">64</span><span class="p">),</span> <span class="n">primary_key</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>       <span class="c1"># &quot;user-{uuid}&quot;</span>
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>    <span class="n">username</span><span class="p">:</span> <span class="n">Mapped</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="n">mapped_column</span><span class="p">(</span><span class="n">String</span><span class="p">(</span><span class="mi">64</span><span class="p">),</span> <span class="n">unique</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">index</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
-<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>    <span class="n">hashed_password</span><span class="p">:</span> <span class="n">Mapped</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="n">mapped_column</span><span class="p">(</span><span class="n">String</span><span class="p">(</span><span class="mi">256</span><span class="p">))</span>
-<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>    <span class="n">display_name</span><span class="p">:</span> <span class="n">Mapped</span><span class="p">[</span><span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">]]</span> <span class="o">=</span> <span class="n">mapped_column</span><span class="p">(</span><span class="n">String</span><span class="p">(</span><span class="mi">128</span><span class="p">),</span> <span class="n">nullable</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
-<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>    <span class="n">role</span><span class="p">:</span> <span class="n">Mapped</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="n">mapped_column</span><span class="p">(</span><span class="n">String</span><span class="p">(</span><span class="mi">16</span><span class="p">),</span> <span class="n">default</span><span class="o">=</span><span class="s2">&quot;user&quot;</span><span class="p">)</span>       <span class="c1"># &quot;admin&quot; | &quot;user&quot;</span>
-<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>    <span class="n">is_active</span><span class="p">:</span> <span class="n">Mapped</span><span class="p">[</span><span class="nb">bool</span><span class="p">]</span> <span class="o">=</span> <span class="n">mapped_column</span><span class="p">(</span><span class="n">Boolean</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
-<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a>    <span class="n">created_at</span><span class="p">:</span> <span class="n">Mapped</span><span class="p">[</span><span class="n">datetime</span><span class="p">]</span> <span class="o">=</span> <span class="n">mapped_column</span><span class="p">(</span><span class="n">DateTime</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="n">datetime</span><span class="o">.</span><span class="n">now</span><span class="p">)</span>
-<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a>    <span class="n">updated_at</span><span class="p">:</span> <span class="n">Mapped</span><span class="p">[</span><span class="n">datetime</span><span class="p">]</span> <span class="o">=</span> <span class="n">mapped_column</span><span class="p">(</span><span class="n">DateTime</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="n">datetime</span><span class="o">.</span><span class="n">now</span><span class="p">,</span> <span class="n">onupdate</span><span class="o">=</span><span class="n">datetime</span><span class="o">.</span><span class="n">now</span><span class="p">)</span>
-<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a>
-<a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a>    <span class="n">conversations</span><span class="p">:</span> <span class="n">Mapped</span><span class="p">[</span><span class="n">List</span><span class="p">[</span><span class="s2">&quot;Conversation&quot;</span><span class="p">]]</span> <span class="o">=</span> <span class="n">relationship</span><span class="p">(</span><span class="s2">&quot;Conversation&quot;</span><span class="p">,</span> <span class="n">back_populates</span><span class="o">=</span><span class="s2">&quot;owner&quot;</span><span class="p">)</span>
-</code></pre></div>
-<p>角色说明：
-- <code>admin</code>：可创建/管理用户、查看所有用户列表
-- <code>user</code>：普通用户，只能访问自己的对话和 Artifact</p>
-<h3 id="conversation">Conversation</h3>
-<p>对话实体：</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="k">class</span><span class="w"> </span><span class="nc">Conversation</span><span class="p">(</span><span class="n">Base</span><span class="p">):</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>    <span class="n">__tablename__</span> <span class="o">=</span> <span class="s2">&quot;conversations&quot;</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>    <span class="nb">id</span><span class="p">:</span> <span class="n">Mapped</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="n">mapped_column</span><span class="p">(</span><span class="n">String</span><span class="p">(</span><span class="mi">64</span><span class="p">),</span> <span class="n">primary_key</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>    <span class="n">active_branch</span><span class="p">:</span> <span class="n">Mapped</span><span class="p">[</span><span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">]]</span> <span class="o">=</span> <span class="n">mapped_column</span><span class="p">(</span><span class="n">String</span><span class="p">(</span><span class="mi">64</span><span class="p">),</span> <span class="n">nullable</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
-<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>    <span class="n">title</span><span class="p">:</span> <span class="n">Mapped</span><span class="p">[</span><span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">]]</span> <span class="o">=</span> <span class="n">mapped_column</span><span class="p">(</span><span class="n">String</span><span class="p">(</span><span class="mi">256</span><span class="p">),</span> <span class="n">nullable</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
-<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>    <span class="n">user_id</span><span class="p">:</span> <span class="n">Mapped</span><span class="p">[</span><span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">]]</span> <span class="o">=</span> <span class="n">mapped_column</span><span class="p">(</span>
-<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>        <span class="n">String</span><span class="p">(</span><span class="mi">64</span><span class="p">),</span> <span class="n">ForeignKey</span><span class="p">(</span><span class="s2">&quot;users.id&quot;</span><span class="p">,</span> <span class="n">ondelete</span><span class="o">=</span><span class="s2">&quot;SET NULL&quot;</span><span class="p">),</span> <span class="n">nullable</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">index</span><span class="o">=</span><span class="kc">True</span>
-<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>    <span class="p">)</span>
-<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a>    <span class="n">created_at</span><span class="p">:</span> <span class="n">Mapped</span><span class="p">[</span><span class="n">datetime</span><span class="p">]</span> <span class="o">=</span> <span class="n">mapped_column</span><span class="p">(</span><span class="n">DateTime</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="n">datetime</span><span class="o">.</span><span class="n">now</span><span class="p">)</span>
-<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a>    <span class="n">updated_at</span><span class="p">:</span> <span class="n">Mapped</span><span class="p">[</span><span class="n">datetime</span><span class="p">]</span> <span class="o">=</span> <span class="n">mapped_column</span><span class="p">(</span><span class="n">DateTime</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="n">datetime</span><span class="o">.</span><span class="n">now</span><span class="p">,</span> <span class="n">onupdate</span><span class="o">=</span><span class="n">datetime</span><span class="o">.</span><span class="n">now</span><span class="p">)</span>
-<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a>    <span class="n">metadata_</span><span class="p">:</span> <span class="n">Mapped</span><span class="p">[</span><span class="n">Optional</span><span class="p">[</span><span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]]]</span> <span class="o">=</span> <span class="n">mapped_column</span><span class="p">(</span><span class="s2">&quot;metadata&quot;</span><span class="p">,</span> <span class="n">JSON</span><span class="p">,</span> <span class="n">nullable</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
-<a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a>
-<a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a>    <span class="c1"># 关系</span>
-<a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a>    <span class="n">owner</span><span class="p">:</span> <span class="n">Mapped</span><span class="p">[</span><span class="n">Optional</span><span class="p">[</span><span class="s2">&quot;User&quot;</span><span class="p">]]</span> <span class="o">=</span> <span class="n">relationship</span><span class="p">(</span><span class="s2">&quot;User&quot;</span><span class="p">,</span> <span class="n">back_populates</span><span class="o">=</span><span class="s2">&quot;conversations&quot;</span><span class="p">)</span>
-<a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a>    <span class="n">messages</span><span class="p">:</span> <span class="n">Mapped</span><span class="p">[</span><span class="n">List</span><span class="p">[</span><span class="s2">&quot;Message&quot;</span><span class="p">]]</span> <span class="o">=</span> <span class="n">relationship</span><span class="p">(</span>
-<a id="__codelineno-2-17" name="__codelineno-2-17" href="#__codelineno-2-17"></a>        <span class="s2">&quot;Message&quot;</span><span class="p">,</span> <span class="n">back_populates</span><span class="o">=</span><span class="s2">&quot;conversation&quot;</span><span class="p">,</span> <span class="n">cascade</span><span class="o">=</span><span class="s2">&quot;all, delete-orphan&quot;</span><span class="p">,</span> <span class="n">lazy</span><span class="o">=</span><span class="s2">&quot;selectin&quot;</span>
-<a id="__codelineno-2-18" name="__codelineno-2-18" href="#__codelineno-2-18"></a>    <span class="p">)</span>
-<a id="__codelineno-2-19" name="__codelineno-2-19" href="#__codelineno-2-19"></a>    <span class="n">artifact_session</span><span class="p">:</span> <span class="n">Mapped</span><span class="p">[</span><span class="n">Optional</span><span class="p">[</span><span class="s2">&quot;ArtifactSession&quot;</span><span class="p">]]</span> <span class="o">=</span> <span class="n">relationship</span><span class="p">(</span>
-<a id="__codelineno-2-20" name="__codelineno-2-20" href="#__codelineno-2-20"></a>        <span class="s2">&quot;ArtifactSession&quot;</span><span class="p">,</span> <span class="n">back_populates</span><span class="o">=</span><span class="s2">&quot;conversation&quot;</span><span class="p">,</span> <span class="n">uselist</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">cascade</span><span class="o">=</span><span class="s2">&quot;all, delete-orphan&quot;</span>
-<a id="__codelineno-2-21" name="__codelineno-2-21" href="#__codelineno-2-21"></a>    <span class="p">)</span>
-</code></pre></div>
-<p><strong>数据隔离</strong>：<code>user_id</code> 外键关联 <code>users.id</code>，API 层通过 ownership 校验确保用户只能访问自己的对话。跨用户访问统一返回 404（不暴露存在性）。</p>
-<h3 id="message">Message</h3>
-<p>消息实体（树状结构）：</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="k">class</span><span class="w"> </span><span class="nc">Message</span><span class="p">(</span><span class="n">Base</span><span class="p">):</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>    <span class="n">__tablename__</span> <span class="o">=</span> <span class="s2">&quot;messages&quot;</span>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>    <span class="nb">id</span><span class="p">:</span> <span class="n">Mapped</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="n">mapped_column</span><span class="p">(</span><span class="n">String</span><span class="p">(</span><span class="mi">64</span><span class="p">),</span> <span class="n">primary_key</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
-<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>    <span class="n">conversation_id</span><span class="p">:</span> <span class="n">Mapped</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="n">mapped_column</span><span class="p">(</span>
-<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>        <span class="n">String</span><span class="p">(</span><span class="mi">64</span><span class="p">),</span> <span class="n">ForeignKey</span><span class="p">(</span><span class="s2">&quot;conversations.id&quot;</span><span class="p">,</span> <span class="n">ondelete</span><span class="o">=</span><span class="s2">&quot;CASCADE&quot;</span><span class="p">)</span>
-<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a>    <span class="p">)</span>
-<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a>    <span class="n">parent_id</span><span class="p">:</span> <span class="n">Mapped</span><span class="p">[</span><span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">]]</span> <span class="o">=</span> <span class="n">mapped_column</span><span class="p">(</span><span class="n">String</span><span class="p">(</span><span class="mi">64</span><span class="p">),</span> <span class="n">nullable</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>  <span class="c1"># None = 根消息</span>
-<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a>    <span class="n">content</span><span class="p">:</span> <span class="n">Mapped</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="n">mapped_column</span><span class="p">(</span><span class="n">Text</span><span class="p">)</span>                      <span class="c1"># 用户消息</span>
-<a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a>    <span class="n">thread_id</span><span class="p">:</span> <span class="n">Mapped</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="n">mapped_column</span><span class="p">(</span><span class="n">String</span><span class="p">(</span><span class="mi">64</span><span class="p">))</span>              <span class="c1"># LangGraph 线程 ID</span>
-<a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a>    <span class="n">created_at</span><span class="p">:</span> <span class="n">Mapped</span><span class="p">[</span><span class="n">datetime</span><span class="p">]</span> <span class="o">=</span> <span class="n">mapped_column</span><span class="p">(</span><span class="n">DateTime</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="n">datetime</span><span class="o">.</span><span class="n">now</span><span class="p">)</span>
-<a id="__codelineno-3-12" name="__codelineno-3-12" href="#__codelineno-3-12"></a>    <span class="n">graph_response</span><span class="p">:</span> <span class="n">Mapped</span><span class="p">[</span><span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">]]</span> <span class="o">=</span> <span class="n">mapped_column</span><span class="p">(</span><span class="n">Text</span><span class="p">)</span>     <span class="c1"># Agent 回复</span>
-<a id="__codelineno-3-13" name="__codelineno-3-13" href="#__codelineno-3-13"></a>    <span class="n">metadata_</span><span class="p">:</span> <span class="n">Mapped</span><span class="p">[</span><span class="n">Optional</span><span class="p">[</span><span class="n">Dict</span><span class="p">]]</span> <span class="o">=</span> <span class="n">mapped_column</span><span class="p">(</span><span class="s2">&quot;metadata&quot;</span><span class="p">,</span> <span class="n">JSON</span><span class="p">)</span>  <span class="c1"># 扩展元数据</span>
-<a id="__codelineno-3-14" name="__codelineno-3-14" href="#__codelineno-3-14"></a>
-<a id="__codelineno-3-15" name="__codelineno-3-15" href="#__codelineno-3-15"></a>    <span class="n">conversation</span><span class="p">:</span> <span class="n">Mapped</span><span class="p">[</span><span class="s2">&quot;Conversation&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">relationship</span><span class="p">(</span><span class="s2">&quot;Conversation&quot;</span><span class="p">,</span> <span class="n">back_populates</span><span class="o">=</span><span class="s2">&quot;messages&quot;</span><span class="p">)</span>
-</code></pre></div>
-<p><strong>树状结构说明</strong>：</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>parent_id 实现消息树：
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>msg_1 (parent_id=None)     ← 根消息
-<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>  ├── msg_2 (parent_id=msg_1)
-<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>  │     └── msg_4 (parent_id=msg_2)
-<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>  └── msg_3 (parent_id=msg_1)    ← 分支
-<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a>        └── msg_5 (parent_id=msg_3)
-</code></pre></div>
-<h3 id="artifact">Artifact</h3>
-<p>文稿实体（复合主键 + 乐观锁）：</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="k">class</span><span class="w"> </span><span class="nc">Artifact</span><span class="p">(</span><span class="n">Base</span><span class="p">):</span>
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>    <span class="n">__tablename__</span> <span class="o">=</span> <span class="s2">&quot;artifacts&quot;</span>
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>
-<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>    <span class="c1"># 复合主键</span>
-<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>    <span class="nb">id</span><span class="p">:</span> <span class="n">Mapped</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="n">mapped_column</span><span class="p">(</span><span class="n">String</span><span class="p">(</span><span class="mi">64</span><span class="p">),</span> <span class="n">primary_key</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
-<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a>    <span class="n">session_id</span><span class="p">:</span> <span class="n">Mapped</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="n">mapped_column</span><span class="p">(</span>
-<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a>        <span class="n">String</span><span class="p">(</span><span class="mi">64</span><span class="p">),</span> <span class="n">ForeignKey</span><span class="p">(</span><span class="s2">&quot;artifact_sessions.id&quot;</span><span class="p">,</span> <span class="n">ondelete</span><span class="o">=</span><span class="s2">&quot;CASCADE&quot;</span><span class="p">),</span> <span class="n">primary_key</span><span class="o">=</span><span class="kc">True</span>
-<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a>    <span class="p">)</span>
-<a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a>
-<a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a>    <span class="n">content_type</span><span class="p">:</span> <span class="n">Mapped</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="n">mapped_column</span><span class="p">(</span><span class="n">String</span><span class="p">(</span><span class="mi">64</span><span class="p">))</span>  <span class="c1"># MIME type (text/markdown, text/x-python, etc)</span>
-<a id="__codelineno-5-11" name="__codelineno-5-11" href="#__codelineno-5-11"></a>    <span class="n">title</span><span class="p">:</span> <span class="n">Mapped</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="n">mapped_column</span><span class="p">(</span><span class="n">String</span><span class="p">(</span><span class="mi">256</span><span class="p">))</span>
-<a id="__codelineno-5-12" name="__codelineno-5-12" href="#__codelineno-5-12"></a>    <span class="n">content</span><span class="p">:</span> <span class="n">Mapped</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="n">mapped_column</span><span class="p">(</span><span class="n">Text</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="s2">&quot;&quot;</span><span class="p">)</span>
-<a id="__codelineno-5-13" name="__codelineno-5-13" href="#__codelineno-5-13"></a>    <span class="n">source</span><span class="p">:</span> <span class="n">Mapped</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="n">mapped_column</span><span class="p">(</span><span class="n">String</span><span class="p">(</span><span class="mi">32</span><span class="p">),</span> <span class="n">default</span><span class="o">=</span><span class="s2">&quot;agent&quot;</span><span class="p">)</span>  <span class="c1"># agent / user_upload</span>
-<a id="__codelineno-5-14" name="__codelineno-5-14" href="#__codelineno-5-14"></a>
-<a id="__codelineno-5-15" name="__codelineno-5-15" href="#__codelineno-5-15"></a>    <span class="c1"># 版本控制</span>
-<a id="__codelineno-5-16" name="__codelineno-5-16" href="#__codelineno-5-16"></a>    <span class="n">current_version</span><span class="p">:</span> <span class="n">Mapped</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span> <span class="o">=</span> <span class="n">mapped_column</span><span class="p">(</span><span class="n">Integer</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
-<a id="__codelineno-5-17" name="__codelineno-5-17" href="#__codelineno-5-17"></a>    <span class="n">lock_version</span><span class="p">:</span> <span class="n">Mapped</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span> <span class="o">=</span> <span class="n">mapped_column</span><span class="p">(</span><span class="n">Integer</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>  <span class="c1"># 乐观锁</span>
-<a id="__codelineno-5-18" name="__codelineno-5-18" href="#__codelineno-5-18"></a>
-<a id="__codelineno-5-19" name="__codelineno-5-19" href="#__codelineno-5-19"></a>    <span class="n">created_at</span><span class="p">:</span> <span class="n">Mapped</span><span class="p">[</span><span class="n">datetime</span><span class="p">]</span> <span class="o">=</span> <span class="n">mapped_column</span><span class="p">(</span><span class="n">DateTime</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="n">datetime</span><span class="o">.</span><span class="n">now</span><span class="p">)</span>
-<a id="__codelineno-5-20" name="__codelineno-5-20" href="#__codelineno-5-20"></a>    <span class="n">updated_at</span><span class="p">:</span> <span class="n">Mapped</span><span class="p">[</span><span class="n">datetime</span><span class="p">]</span> <span class="o">=</span> <span class="n">mapped_column</span><span class="p">(</span><span class="n">DateTime</span><span class="p">,</span> <span class="n">onupdate</span><span class="o">=</span><span class="n">datetime</span><span class="o">.</span><span class="n">now</span><span class="p">)</span>
-<a id="__codelineno-5-21" name="__codelineno-5-21" href="#__codelineno-5-21"></a>    <span class="n">metadata_</span><span class="p">:</span> <span class="n">Mapped</span><span class="p">[</span><span class="n">Optional</span><span class="p">[</span><span class="n">Dict</span><span class="p">]]</span> <span class="o">=</span> <span class="n">mapped_column</span><span class="p">(</span><span class="s2">&quot;metadata&quot;</span><span class="p">,</span> <span class="n">JSON</span><span class="p">)</span>
-<a id="__codelineno-5-22" name="__codelineno-5-22" href="#__codelineno-5-22"></a>
-<a id="__codelineno-5-23" name="__codelineno-5-23" href="#__codelineno-5-23"></a>    <span class="n">versions</span><span class="p">:</span> <span class="n">Mapped</span><span class="p">[</span><span class="n">List</span><span class="p">[</span><span class="s2">&quot;ArtifactVersion&quot;</span><span class="p">]]</span> <span class="o">=</span> <span class="n">relationship</span><span class="p">(</span>
-<a id="__codelineno-5-24" name="__codelineno-5-24" href="#__codelineno-5-24"></a>        <span class="s2">&quot;ArtifactVersion&quot;</span><span class="p">,</span> <span class="n">back_populates</span><span class="o">=</span><span class="s2">&quot;artifact&quot;</span><span class="p">,</span> <span class="n">cascade</span><span class="o">=</span><span class="s2">&quot;all, delete-orphan&quot;</span>
-<a id="__codelineno-5-25" name="__codelineno-5-25" href="#__codelineno-5-25"></a>    <span class="p">)</span>
-</code></pre></div>
-<h3 id="artifactversion">ArtifactVersion</h3>
-<p>版本历史：</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="k">class</span><span class="w"> </span><span class="nc">ArtifactVersion</span><span class="p">(</span><span class="n">Base</span><span class="p">):</span>
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>    <span class="n">__tablename__</span> <span class="o">=</span> <span class="s2">&quot;artifact_versions&quot;</span>
-<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>
-<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a>    <span class="nb">id</span><span class="p">:</span> <span class="n">Mapped</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span> <span class="o">=</span> <span class="n">mapped_column</span><span class="p">(</span><span class="n">Integer</span><span class="p">,</span> <span class="n">primary_key</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">autoincrement</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
-<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a>
-<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a>    <span class="c1"># 复合外键</span>
-<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a>    <span class="n">artifact_id</span><span class="p">:</span> <span class="n">Mapped</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="n">mapped_column</span><span class="p">(</span><span class="n">String</span><span class="p">(</span><span class="mi">64</span><span class="p">))</span>
-<a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a>    <span class="n">session_id</span><span class="p">:</span> <span class="n">Mapped</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="n">mapped_column</span><span class="p">(</span><span class="n">String</span><span class="p">(</span><span class="mi">64</span><span class="p">))</span>
-<a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a>
-<a id="__codelineno-6-10" name="__codelineno-6-10" href="#__codelineno-6-10"></a>    <span class="n">version</span><span class="p">:</span> <span class="n">Mapped</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span> <span class="o">=</span> <span class="n">mapped_column</span><span class="p">(</span><span class="n">Integer</span><span class="p">)</span>
-<a id="__codelineno-6-11" name="__codelineno-6-11" href="#__codelineno-6-11"></a>    <span class="n">content</span><span class="p">:</span> <span class="n">Mapped</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="n">mapped_column</span><span class="p">(</span><span class="n">Text</span><span class="p">)</span>
-<a id="__codelineno-6-12" name="__codelineno-6-12" href="#__codelineno-6-12"></a>    <span class="n">update_type</span><span class="p">:</span> <span class="n">Mapped</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="n">mapped_column</span><span class="p">(</span><span class="n">String</span><span class="p">(</span><span class="mi">32</span><span class="p">))</span>  <span class="c1"># create/update/update_fuzzy/rewrite</span>
-<a id="__codelineno-6-13" name="__codelineno-6-13" href="#__codelineno-6-13"></a>    <span class="n">changes</span><span class="p">:</span> <span class="n">Mapped</span><span class="p">[</span><span class="n">Optional</span><span class="p">[</span><span class="n">List</span><span class="p">]]</span> <span class="o">=</span> <span class="n">mapped_column</span><span class="p">(</span><span class="n">JSON</span><span class="p">)</span>  <span class="c1"># [(old, new), ...]</span>
-<a id="__codelineno-6-14" name="__codelineno-6-14" href="#__codelineno-6-14"></a>    <span class="n">created_at</span><span class="p">:</span> <span class="n">Mapped</span><span class="p">[</span><span class="n">datetime</span><span class="p">]</span> <span class="o">=</span> <span class="n">mapped_column</span><span class="p">(</span><span class="n">DateTime</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="n">datetime</span><span class="o">.</span><span class="n">now</span><span class="p">)</span>
-<a id="__codelineno-6-15" name="__codelineno-6-15" href="#__codelineno-6-15"></a>
-<a id="__codelineno-6-16" name="__codelineno-6-16" href="#__codelineno-6-16"></a>    <span class="n">artifact</span><span class="p">:</span> <span class="n">Mapped</span><span class="p">[</span><span class="s2">&quot;Artifact&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">relationship</span><span class="p">(</span><span class="s2">&quot;Artifact&quot;</span><span class="p">,</span> <span class="n">back_populates</span><span class="o">=</span><span class="s2">&quot;versions&quot;</span><span class="p">)</span>
-<a id="__codelineno-6-17" name="__codelineno-6-17" href="#__codelineno-6-17"></a>
-<a id="__codelineno-6-18" name="__codelineno-6-18" href="#__codelineno-6-18"></a>    <span class="n">__table_args__</span> <span class="o">=</span> <span class="p">(</span>
-<a id="__codelineno-6-19" name="__codelineno-6-19" href="#__codelineno-6-19"></a>        <span class="n">UniqueConstraint</span><span class="p">(</span><span class="s2">&quot;artifact_id&quot;</span><span class="p">,</span> <span class="s2">&quot;session_id&quot;</span><span class="p">,</span> <span class="s2">&quot;version&quot;</span><span class="p">),</span>
-<a id="__codelineno-6-20" name="__codelineno-6-20" href="#__codelineno-6-20"></a>        <span class="n">ForeignKeyConstraint</span><span class="p">(</span>
-<a id="__codelineno-6-21" name="__codelineno-6-21" href="#__codelineno-6-21"></a>            <span class="p">[</span><span class="s2">&quot;artifact_id&quot;</span><span class="p">,</span> <span class="s2">&quot;session_id&quot;</span><span class="p">],</span>
-<a id="__codelineno-6-22" name="__codelineno-6-22" href="#__codelineno-6-22"></a>            <span class="p">[</span><span class="s2">&quot;artifacts.id&quot;</span><span class="p">,</span> <span class="s2">&quot;artifacts.session_id&quot;</span><span class="p">],</span>
-<a id="__codelineno-6-23" name="__codelineno-6-23" href="#__codelineno-6-23"></a>            <span class="n">ondelete</span><span class="o">=</span><span class="s2">&quot;CASCADE&quot;</span>
-<a id="__codelineno-6-24" name="__codelineno-6-24" href="#__codelineno-6-24"></a>        <span class="p">),</span>
-<a id="__codelineno-6-25" name="__codelineno-6-25" href="#__codelineno-6-25"></a>    <span class="p">)</span>
-</code></pre></div>
-<h2 id="数据库管理-databasepy">数据库管理 (database.py)</h2>
-<h3 id="databasemanager">DatabaseManager</h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="k">class</span><span class="w"> </span><span class="nc">DatabaseManager</span><span class="p">:</span>
-<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span>
-<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>        <span class="bp">self</span><span class="p">,</span>
-<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>        <span class="n">database_url</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
-<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a>        <span class="n">echo</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
-<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a>    <span class="p">):</span>
-<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
-<a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a><span class="sd">        Args:</span>
-<a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a><span class="sd">            database_url: 数据库连接 URL，默认为 SQLite</span>
-<a id="__codelineno-7-10" name="__codelineno-7-10" href="#__codelineno-7-10"></a><span class="sd">            echo: 是否打印 SQL 语句（调试用）</span>
-<a id="__codelineno-7-11" name="__codelineno-7-11" href="#__codelineno-7-11"></a><span class="sd">        &quot;&quot;&quot;</span>
-<a id="__codelineno-7-12" name="__codelineno-7-12" href="#__codelineno-7-12"></a>        <span class="k">if</span> <span class="n">database_url</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
-<a id="__codelineno-7-13" name="__codelineno-7-13" href="#__codelineno-7-13"></a>            <span class="n">database_url</span> <span class="o">=</span> <span class="s2">&quot;sqlite+aiosqlite:///data/artifactflow.db&quot;</span>
-<a id="__codelineno-7-14" name="__codelineno-7-14" href="#__codelineno-7-14"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">database_url</span> <span class="o">=</span> <span class="n">database_url</span>
-<a id="__codelineno-7-15" name="__codelineno-7-15" href="#__codelineno-7-15"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">echo</span> <span class="o">=</span> <span class="n">echo</span>
-<a id="__codelineno-7-16" name="__codelineno-7-16" href="#__codelineno-7-16"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">_engine</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">AsyncEngine</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span>
-<a id="__codelineno-7-17" name="__codelineno-7-17" href="#__codelineno-7-17"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">_session_factory</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">async_sessionmaker</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span>
-<a id="__codelineno-7-18" name="__codelineno-7-18" href="#__codelineno-7-18"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">_initialized</span> <span class="o">=</span> <span class="kc">False</span>
-<a id="__codelineno-7-19" name="__codelineno-7-19" href="#__codelineno-7-19"></a>
-<a id="__codelineno-7-20" name="__codelineno-7-20" href="#__codelineno-7-20"></a>    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">initialize</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
-<a id="__codelineno-7-21" name="__codelineno-7-21" href="#__codelineno-7-21"></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;初始化数据库（创建引擎、配置 WAL、创建表）&quot;&quot;&quot;</span>
-<a id="__codelineno-7-22" name="__codelineno-7-22" href="#__codelineno-7-22"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">_engine</span> <span class="o">=</span> <span class="n">create_async_engine</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">database_url</span><span class="p">,</span> <span class="n">echo</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">echo</span><span class="p">)</span>
-<a id="__codelineno-7-23" name="__codelineno-7-23" href="#__codelineno-7-23"></a>
-<a id="__codelineno-7-24" name="__codelineno-7-24" href="#__codelineno-7-24"></a>        <span class="c1"># SQLite WAL 模式配置（提高并发性能）</span>
-<a id="__codelineno-7-25" name="__codelineno-7-25" href="#__codelineno-7-25"></a>        <span class="k">if</span> <span class="s2">&quot;sqlite&quot;</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">database_url</span><span class="p">:</span>
-<a id="__codelineno-7-26" name="__codelineno-7-26" href="#__codelineno-7-26"></a>            <span class="k">async</span> <span class="k">with</span> <span class="bp">self</span><span class="o">.</span><span class="n">_engine</span><span class="o">.</span><span class="n">begin</span><span class="p">()</span> <span class="k">as</span> <span class="n">conn</span><span class="p">:</span>
-<a id="__codelineno-7-27" name="__codelineno-7-27" href="#__codelineno-7-27"></a>                <span class="k">await</span> <span class="n">conn</span><span class="o">.</span><span class="n">execute</span><span class="p">(</span><span class="n">text</span><span class="p">(</span><span class="s2">&quot;PRAGMA journal_mode=WAL&quot;</span><span class="p">))</span>
-<a id="__codelineno-7-28" name="__codelineno-7-28" href="#__codelineno-7-28"></a>                <span class="k">await</span> <span class="n">conn</span><span class="o">.</span><span class="n">execute</span><span class="p">(</span><span class="n">text</span><span class="p">(</span><span class="s2">&quot;PRAGMA foreign_keys=ON&quot;</span><span class="p">))</span>
-<a id="__codelineno-7-29" name="__codelineno-7-29" href="#__codelineno-7-29"></a>
-<a id="__codelineno-7-30" name="__codelineno-7-30" href="#__codelineno-7-30"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">_session_factory</span> <span class="o">=</span> <span class="n">async_sessionmaker</span><span class="p">(</span>
-<a id="__codelineno-7-31" name="__codelineno-7-31" href="#__codelineno-7-31"></a>            <span class="n">bind</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">_engine</span><span class="p">,</span>
-<a id="__codelineno-7-32" name="__codelineno-7-32" href="#__codelineno-7-32"></a>            <span class="n">class_</span><span class="o">=</span><span class="n">AsyncSession</span><span class="p">,</span>
-<a id="__codelineno-7-33" name="__codelineno-7-33" href="#__codelineno-7-33"></a>            <span class="n">expire_on_commit</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
-<a id="__codelineno-7-34" name="__codelineno-7-34" href="#__codelineno-7-34"></a>            <span class="n">autoflush</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
-<a id="__codelineno-7-35" name="__codelineno-7-35" href="#__codelineno-7-35"></a>        <span class="p">)</span>
-<a id="__codelineno-7-36" name="__codelineno-7-36" href="#__codelineno-7-36"></a>
-<a id="__codelineno-7-37" name="__codelineno-7-37" href="#__codelineno-7-37"></a>        <span class="c1"># 创建所有表</span>
-<a id="__codelineno-7-38" name="__codelineno-7-38" href="#__codelineno-7-38"></a>        <span class="k">async</span> <span class="k">with</span> <span class="bp">self</span><span class="o">.</span><span class="n">_engine</span><span class="o">.</span><span class="n">begin</span><span class="p">()</span> <span class="k">as</span> <span class="n">conn</span><span class="p">:</span>
-<a id="__codelineno-7-39" name="__codelineno-7-39" href="#__codelineno-7-39"></a>            <span class="k">await</span> <span class="n">conn</span><span class="o">.</span><span class="n">run_sync</span><span class="p">(</span><span class="n">Base</span><span class="o">.</span><span class="n">metadata</span><span class="o">.</span><span class="n">create_all</span><span class="p">)</span>
-<a id="__codelineno-7-40" name="__codelineno-7-40" href="#__codelineno-7-40"></a>
-<a id="__codelineno-7-41" name="__codelineno-7-41" href="#__codelineno-7-41"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">_initialized</span> <span class="o">=</span> <span class="kc">True</span>
-<a id="__codelineno-7-42" name="__codelineno-7-42" href="#__codelineno-7-42"></a>
-<a id="__codelineno-7-43" name="__codelineno-7-43" href="#__codelineno-7-43"></a>    <span class="nd">@asynccontextmanager</span>
-<a id="__codelineno-7-44" name="__codelineno-7-44" href="#__codelineno-7-44"></a>    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">session</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">AsyncGenerator</span><span class="p">[</span><span class="n">AsyncSession</span><span class="p">,</span> <span class="kc">None</span><span class="p">]:</span>
-<a id="__codelineno-7-45" name="__codelineno-7-45" href="#__codelineno-7-45"></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;获取数据库会话（纯生命周期管理，不自动 commit/rollback）&quot;&quot;&quot;</span>
-<a id="__codelineno-7-46" name="__codelineno-7-46" href="#__codelineno-7-46"></a>        <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">_initialized</span><span class="p">:</span>
-<a id="__codelineno-7-47" name="__codelineno-7-47" href="#__codelineno-7-47"></a>            <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">initialize</span><span class="p">()</span>
-<a id="__codelineno-7-48" name="__codelineno-7-48" href="#__codelineno-7-48"></a>
-<a id="__codelineno-7-49" name="__codelineno-7-49" href="#__codelineno-7-49"></a>        <span class="n">session</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_session_factory</span><span class="p">()</span>
-<a id="__codelineno-7-50" name="__codelineno-7-50" href="#__codelineno-7-50"></a>        <span class="k">try</span><span class="p">:</span>
-<a id="__codelineno-7-51" name="__codelineno-7-51" href="#__codelineno-7-51"></a>            <span class="k">yield</span> <span class="n">session</span>
-<a id="__codelineno-7-52" name="__codelineno-7-52" href="#__codelineno-7-52"></a>        <span class="k">finally</span><span class="p">:</span>
-<a id="__codelineno-7-53" name="__codelineno-7-53" href="#__codelineno-7-53"></a>            <span class="k">await</span> <span class="n">session</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
-<a id="__codelineno-7-54" name="__codelineno-7-54" href="#__codelineno-7-54"></a>
-<a id="__codelineno-7-55" name="__codelineno-7-55" href="#__codelineno-7-55"></a>    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">close</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
-<a id="__codelineno-7-56" name="__codelineno-7-56" href="#__codelineno-7-56"></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;关闭数据库连接&quot;&quot;&quot;</span>
-<a id="__codelineno-7-57" name="__codelineno-7-57" href="#__codelineno-7-57"></a>        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_engine</span><span class="p">:</span>
-<a id="__codelineno-7-58" name="__codelineno-7-58" href="#__codelineno-7-58"></a>            <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">_engine</span><span class="o">.</span><span class="n">dispose</span><span class="p">()</span>
-<a id="__codelineno-7-59" name="__codelineno-7-59" href="#__codelineno-7-59"></a>            <span class="bp">self</span><span class="o">.</span><span class="n">_initialized</span> <span class="o">=</span> <span class="kc">False</span>
-</code></pre></div>
-<p><strong>使用示例</strong>：</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="n">db_manager</span> <span class="o">=</span> <span class="n">DatabaseManager</span><span class="p">(</span><span class="s2">&quot;sqlite+aiosqlite:///data/app.db&quot;</span><span class="p">)</span>
-<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="k">await</span> <span class="n">db_manager</span><span class="o">.</span><span class="n">initialize</span><span class="p">()</span>
-<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>
-<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="k">async</span> <span class="k">with</span> <span class="n">db_manager</span><span class="o">.</span><span class="n">session</span><span class="p">()</span> <span class="k">as</span> <span class="n">session</span><span class="p">:</span>
-<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>    <span class="n">repo</span> <span class="o">=</span> <span class="n">ConversationRepository</span><span class="p">(</span><span class="n">session</span><span class="p">)</span>
-<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a>    <span class="n">conversation</span> <span class="o">=</span> <span class="k">await</span> <span class="n">repo</span><span class="o">.</span><span class="n">get_by_id</span><span class="p">(</span><span class="s2">&quot;xxx&quot;</span><span class="p">)</span>
-</code></pre></div>
-<h2 id="repository-模式">Repository 模式</h2>
-<h3 id="baserepository">BaseRepository</h3>
-<p>通用 CRUD 操作：</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="k">class</span><span class="w"> </span><span class="nc">BaseRepository</span><span class="p">(</span><span class="n">ABC</span><span class="p">,</span> <span class="n">Generic</span><span class="p">[</span><span class="n">T</span><span class="p">]):</span>
-<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">session</span><span class="p">:</span> <span class="n">AsyncSession</span><span class="p">,</span> <span class="n">model_class</span><span class="p">:</span> <span class="n">Type</span><span class="p">[</span><span class="n">T</span><span class="p">]):</span>
-<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">_session</span> <span class="o">=</span> <span class="n">session</span>
-<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">_model_class</span> <span class="o">=</span> <span class="n">model_class</span>
-<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a>
-<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a>    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">get_by_id</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="nb">id</span><span class="p">:</span> <span class="n">Any</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Optional</span><span class="p">[</span><span class="n">T</span><span class="p">]:</span>
-<a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a>        <span class="k">return</span> <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">_session</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_model_class</span><span class="p">,</span> <span class="nb">id</span><span class="p">)</span>
-<a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a>
-<a id="__codelineno-9-9" name="__codelineno-9-9" href="#__codelineno-9-9"></a>    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">get_all</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">limit</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">offset</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">List</span><span class="p">[</span><span class="n">T</span><span class="p">]:</span>
-<a id="__codelineno-9-10" name="__codelineno-9-10" href="#__codelineno-9-10"></a>        <span class="n">query</span> <span class="o">=</span> <span class="n">select</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_model_class</span><span class="p">)</span>
-<a id="__codelineno-9-11" name="__codelineno-9-11" href="#__codelineno-9-11"></a>        <span class="k">if</span> <span class="n">offset</span><span class="p">:</span> <span class="n">query</span> <span class="o">=</span> <span class="n">query</span><span class="o">.</span><span class="n">offset</span><span class="p">(</span><span class="n">offset</span><span class="p">)</span>
-<a id="__codelineno-9-12" name="__codelineno-9-12" href="#__codelineno-9-12"></a>        <span class="k">if</span> <span class="n">limit</span><span class="p">:</span> <span class="n">query</span> <span class="o">=</span> <span class="n">query</span><span class="o">.</span><span class="n">limit</span><span class="p">(</span><span class="n">limit</span><span class="p">)</span>
-<a id="__codelineno-9-13" name="__codelineno-9-13" href="#__codelineno-9-13"></a>        <span class="n">result</span> <span class="o">=</span> <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">_session</span><span class="o">.</span><span class="n">execute</span><span class="p">(</span><span class="n">query</span><span class="p">)</span>
-<a id="__codelineno-9-14" name="__codelineno-9-14" href="#__codelineno-9-14"></a>        <span class="k">return</span> <span class="nb">list</span><span class="p">(</span><span class="n">result</span><span class="o">.</span><span class="n">scalars</span><span class="p">()</span><span class="o">.</span><span class="n">all</span><span class="p">())</span>
-<a id="__codelineno-9-15" name="__codelineno-9-15" href="#__codelineno-9-15"></a>
-<a id="__codelineno-9-16" name="__codelineno-9-16" href="#__codelineno-9-16"></a>    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">count</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
-<a id="__codelineno-9-17" name="__codelineno-9-17" href="#__codelineno-9-17"></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;获取实体总数&quot;&quot;&quot;</span>
-<a id="__codelineno-9-18" name="__codelineno-9-18" href="#__codelineno-9-18"></a>
-<a id="__codelineno-9-19" name="__codelineno-9-19" href="#__codelineno-9-19"></a>    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">exists</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="nb">id</span><span class="p">:</span> <span class="n">Any</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
-<a id="__codelineno-9-20" name="__codelineno-9-20" href="#__codelineno-9-20"></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;检查实体是否存在&quot;&quot;&quot;</span>
-<a id="__codelineno-9-21" name="__codelineno-9-21" href="#__codelineno-9-21"></a>
-<a id="__codelineno-9-22" name="__codelineno-9-22" href="#__codelineno-9-22"></a>    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">add</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">entity</span><span class="p">:</span> <span class="n">T</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">T</span><span class="p">:</span>
-<a id="__codelineno-9-23" name="__codelineno-9-23" href="#__codelineno-9-23"></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;添加新实体（flush + commit 立即释放写锁）&quot;&quot;&quot;</span>
-<a id="__codelineno-9-24" name="__codelineno-9-24" href="#__codelineno-9-24"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">_session</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">entity</span><span class="p">)</span>
-<a id="__codelineno-9-25" name="__codelineno-9-25" href="#__codelineno-9-25"></a>        <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">_session</span><span class="o">.</span><span class="n">flush</span><span class="p">()</span>
-<a id="__codelineno-9-26" name="__codelineno-9-26" href="#__codelineno-9-26"></a>        <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">_session</span><span class="o">.</span><span class="n">commit</span><span class="p">()</span>
-<a id="__codelineno-9-27" name="__codelineno-9-27" href="#__codelineno-9-27"></a>        <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">_session</span><span class="o">.</span><span class="n">refresh</span><span class="p">(</span><span class="n">entity</span><span class="p">)</span>
-<a id="__codelineno-9-28" name="__codelineno-9-28" href="#__codelineno-9-28"></a>        <span class="k">return</span> <span class="n">entity</span>
-<a id="__codelineno-9-29" name="__codelineno-9-29" href="#__codelineno-9-29"></a>
-<a id="__codelineno-9-30" name="__codelineno-9-30" href="#__codelineno-9-30"></a>    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">add_all</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">entities</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="n">T</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="n">List</span><span class="p">[</span><span class="n">T</span><span class="p">]:</span>
-<a id="__codelineno-9-31" name="__codelineno-9-31" href="#__codelineno-9-31"></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;批量添加实体&quot;&quot;&quot;</span>
-<a id="__codelineno-9-32" name="__codelineno-9-32" href="#__codelineno-9-32"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">_session</span><span class="o">.</span><span class="n">add_all</span><span class="p">(</span><span class="n">entities</span><span class="p">)</span>
-<a id="__codelineno-9-33" name="__codelineno-9-33" href="#__codelineno-9-33"></a>        <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">_session</span><span class="o">.</span><span class="n">flush</span><span class="p">()</span>
-<a id="__codelineno-9-34" name="__codelineno-9-34" href="#__codelineno-9-34"></a>        <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">_session</span><span class="o">.</span><span class="n">commit</span><span class="p">()</span>
-<a id="__codelineno-9-35" name="__codelineno-9-35" href="#__codelineno-9-35"></a>        <span class="k">for</span> <span class="n">entity</span> <span class="ow">in</span> <span class="n">entities</span><span class="p">:</span>
-<a id="__codelineno-9-36" name="__codelineno-9-36" href="#__codelineno-9-36"></a>            <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">_session</span><span class="o">.</span><span class="n">refresh</span><span class="p">(</span><span class="n">entity</span><span class="p">)</span>
-<a id="__codelineno-9-37" name="__codelineno-9-37" href="#__codelineno-9-37"></a>        <span class="k">return</span> <span class="n">entities</span>
-<a id="__codelineno-9-38" name="__codelineno-9-38" href="#__codelineno-9-38"></a>
-<a id="__codelineno-9-39" name="__codelineno-9-39" href="#__codelineno-9-39"></a>    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">update</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">entity</span><span class="p">:</span> <span class="n">T</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">T</span><span class="p">:</span>
-<a id="__codelineno-9-40" name="__codelineno-9-40" href="#__codelineno-9-40"></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;更新实体（需已在 Session 中）&quot;&quot;&quot;</span>
-<a id="__codelineno-9-41" name="__codelineno-9-41" href="#__codelineno-9-41"></a>        <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">_session</span><span class="o">.</span><span class="n">flush</span><span class="p">()</span>
-<a id="__codelineno-9-42" name="__codelineno-9-42" href="#__codelineno-9-42"></a>        <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">_session</span><span class="o">.</span><span class="n">commit</span><span class="p">()</span>
-<a id="__codelineno-9-43" name="__codelineno-9-43" href="#__codelineno-9-43"></a>        <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">_session</span><span class="o">.</span><span class="n">refresh</span><span class="p">(</span><span class="n">entity</span><span class="p">)</span>
-<a id="__codelineno-9-44" name="__codelineno-9-44" href="#__codelineno-9-44"></a>        <span class="k">return</span> <span class="n">entity</span>
-<a id="__codelineno-9-45" name="__codelineno-9-45" href="#__codelineno-9-45"></a>
-<a id="__codelineno-9-46" name="__codelineno-9-46" href="#__codelineno-9-46"></a>    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">delete</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">entity</span><span class="p">:</span> <span class="n">T</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
-<a id="__codelineno-9-47" name="__codelineno-9-47" href="#__codelineno-9-47"></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;删除实体&quot;&quot;&quot;</span>
-<a id="__codelineno-9-48" name="__codelineno-9-48" href="#__codelineno-9-48"></a>        <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">_session</span><span class="o">.</span><span class="n">delete</span><span class="p">(</span><span class="n">entity</span><span class="p">)</span>
-<a id="__codelineno-9-49" name="__codelineno-9-49" href="#__codelineno-9-49"></a>        <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">_session</span><span class="o">.</span><span class="n">flush</span><span class="p">()</span>
-<a id="__codelineno-9-50" name="__codelineno-9-50" href="#__codelineno-9-50"></a>        <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">_session</span><span class="o">.</span><span class="n">commit</span><span class="p">()</span>
-<a id="__codelineno-9-51" name="__codelineno-9-51" href="#__codelineno-9-51"></a>
-<a id="__codelineno-9-52" name="__codelineno-9-52" href="#__codelineno-9-52"></a>    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">delete_by_id</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="nb">id</span><span class="p">:</span> <span class="n">Any</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
-<a id="__codelineno-9-53" name="__codelineno-9-53" href="#__codelineno-9-53"></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;根据主键删除&quot;&quot;&quot;</span>
-</code></pre></div>
-<h3 id="conversationrepository">ConversationRepository</h3>
-<p>对话和消息操作：</p>
+<h3 id="表级职责划分">表级职责划分</h3>
 <table>
 <thead>
 <tr>
-<th>方法</th>
-<th>说明</th>
+<th>表</th>
+<th>角色</th>
+<th>生命周期</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td><code>create_conversation</code></td>
-<td>创建新对话（同时创建关联的 ArtifactSession）</td>
+<td><code>users</code></td>
+<td>认证主体</td>
+<td>用户创建即存在</td>
 </tr>
 <tr>
-<td><code>get_conversation</code></td>
-<td>获取对话（可选预加载消息和 Artifacts）</td>
+<td><code>conversations</code></td>
+<td>对话容器，含 <code>active_branch</code> 指向当前叶</td>
+<td>级联删除 messages + artifact_session</td>
 </tr>
 <tr>
-<td><code>get_conversation_or_raise</code></td>
-<td>获取对话，不存在则抛出 NotFoundError</td>
+<td><code>messages</code></td>
+<td>用户输入 + 助手响应，树结构</td>
+<td>级联由 conversation 触发</td>
 </tr>
 <tr>
-<td><code>update_active_branch</code></td>
-<td>更新对话的活动分支</td>
+<td><code>message_events</code></td>
+<td>Append-only 执行事件流</td>
+<td>FK 跟随 message</td>
 </tr>
 <tr>
-<td><code>update_title</code></td>
-<td>更新对话标题</td>
+<td><code>artifact_sessions</code></td>
+<td>Artifact 容器，与 conversation 1:1</td>
+<td>级联由 conversation 触发</td>
 </tr>
 <tr>
-<td><code>list_conversations</code></td>
-<td>列出对话（支持分页、按 <code>user_id</code> 过滤）</td>
+<td><code>artifacts</code></td>
+<td>Artifact 当前快照（复合 PK）</td>
+<td>级联由 session 触发</td>
 </tr>
 <tr>
-<td><code>delete_conversation</code></td>
-<td>删除对话</td>
-</tr>
-<tr>
-<td><code>add_message</code></td>
-<td>添加消息到对话（自动更新 active_branch）</td>
-</tr>
-<tr>
-<td><code>get_message</code></td>
-<td>获取单条消息</td>
-</tr>
-<tr>
-<td><code>get_message_or_raise</code></td>
-<td>获取消息，不存在则抛出 NotFoundError</td>
-</tr>
-<tr>
-<td><code>update_graph_response</code></td>
-<td>更新消息的 Graph 响应</td>
-</tr>
-<tr>
-<td><code>get_conversation_messages</code></td>
-<td>获取对话的所有消息</td>
-</tr>
-<tr>
-<td><code>get_conversation_path</code></td>
-<td>获取从根到指定消息的路径（向上追溯）</td>
-</tr>
-<tr>
-<td><code>get_branch_children</code></td>
-<td>获取消息的子分支</td>
-</tr>
-<tr>
-<td><code>format_conversation_history</code></td>
-<td>格式化为 <code>[{"role": "user"}, {"role": "assistant"}, ...]</code></td>
-</tr>
-<tr>
-<td><code>get_branch_structure</code></td>
-<td>获取对话的完整分支结构</td>
+<td><code>artifact_versions</code></td>
+<td>版本历史，版本号<strong>可稀疏</strong></td>
+<td>复合 FK 级联删除</td>
 </tr>
 </tbody>
 </table>
-<h3 id="artifactrepository">ArtifactRepository</h3>
-<p>Artifact 操作（含乐观锁）：</p>
-<table>
-<thead>
-<tr>
-<th>方法</th>
-<th>说明</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>get_session</code></td>
-<td>获取 ArtifactSession</td>
-</tr>
-<tr>
-<td><code>get_session_or_raise</code></td>
-<td>获取 Session，不存在则抛出 NotFoundError</td>
-</tr>
-<tr>
-<td><code>ensure_session_exists</code></td>
-<td>确保 Session 存在（不存在则创建）</td>
-</tr>
-<tr>
-<td><code>create_artifact</code></td>
-<td>创建 Artifact（同时创建初始版本）</td>
-</tr>
-<tr>
-<td><code>get_artifact</code></td>
-<td>获取 Artifact（复合主键查询）</td>
-</tr>
-<tr>
-<td><code>get_artifact_or_raise</code></td>
-<td>获取 Artifact，不存在则抛出 NotFoundError</td>
-</tr>
-<tr>
-<td><code>list_artifacts</code></td>
-<td>列出 Session 下所有 Artifacts</td>
-</tr>
-<tr>
-<td><code>delete_artifact</code></td>
-<td>删除 Artifact</td>
-</tr>
-<tr>
-<td><code>update_artifact_content</code></td>
-<td>乐观锁更新内容（版本冲突抛出 VersionConflictError）</td>
-</tr>
-<tr>
-<td><code>rewrite_artifact</code></td>
-<td>完全重写内容（乐观锁）</td>
-</tr>
-<tr>
-<td><code>update_artifact_title</code></td>
-<td>更新标题</td>
-</tr>
-<tr>
-<td><code>get_version</code></td>
-<td>获取指定版本记录</td>
-</tr>
-<tr>
-<td><code>get_version_content</code></td>
-<td>获取指定版本的内容</td>
-</tr>
-<tr>
-<td><code>list_versions</code></td>
-<td>列出版本历史（不含完整内容）</td>
-</tr>
-<tr>
-<td><code>get_version_diff</code></td>
-<td>获取两个版本间的差异</td>
-</tr>
-<tr>
-<td><code>get_artifacts_with_full_content</code></td>
-<td>批量获取完整内容</td>
-</tr>
-</tbody>
-</table>
-<h3 id="userrepository">UserRepository</h3>
-<p>用户操作：</p>
-<table>
-<thead>
-<tr>
-<th>方法</th>
-<th>说明</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>get_by_username</code></td>
-<td>按用户名查询（登录）</td>
-</tr>
-<tr>
-<td><code>get_by_id</code></td>
-<td>按 ID 查询（继承自 BaseRepository）</td>
-</tr>
-<tr>
-<td><code>list_users</code></td>
-<td>列出用户（支持分页、可选包含已禁用用户）</td>
-</tr>
-<tr>
-<td><code>count_users</code></td>
-<td>用户总数</td>
-</tr>
-</tbody>
-</table>
-<h2 id="乐观锁机制">乐观锁机制</h2>
-<h3 id="为什么需要乐观锁">为什么需要乐观锁？</h3>
-<p>多 Agent 并发场景下，可能同时更新同一个 Artifact：</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>Agent A: 读取 Artifact (version=1)
-<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>Agent B: 读取 Artifact (version=1)
-<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>Agent A: 更新 Artifact → version=2
-<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a>Agent B: 更新 Artifact → 冲突！
-</code></pre></div>
-<h3 id="处理流程">处理流程</h3>
-<pre class="mermaid"><code>sequenceDiagram
-    participant Agent
-    participant Tool
-    participant Manager
-    participant Repo
-    participant DB
+<h2 id="对话树结构">对话树结构</h2>
+<p>Message 通过 <code>parent_id</code> 自引用形成树，<code>Conversation.active_branch</code> 指向当前活跃叶节点。</p>
+<pre class="mermaid"><code>flowchart TD
+    M1["msg_1&lt;br/&gt;user: 研究 LLM"] --&gt; M2["msg_2&lt;br/&gt;user: 细化到多模态"]
+    M1 --&gt; M3["msg_3&lt;br/&gt;user: 改为 Agent"]
+    M2 --&gt; M4["msg_4&lt;br/&gt;user: 写报告"]
+    M3 --&gt; M5["msg_5&lt;br/&gt;user: 总结"]
 
-    Agent-&gt;&gt;Tool: update_artifact(id, old_str, new_str)
-    Tool-&gt;&gt;Manager: update_artifact(...)
-    Manager-&gt;&gt;Manager: 从缓存获取 lock_version
-    Manager-&gt;&gt;Repo: update_artifact_content(expected_lock_version)
-    Repo-&gt;&gt;DB: UPDATE ... WHERE lock_version=X RETURNING ...
-
-    alt 更新成功（lock_version 匹配）
-        DB-&gt;&gt;Repo: new_version, new_lock_version
-        Repo-&gt;&gt;DB: INSERT INTO artifact_versions ...
-        Repo-&gt;&gt;Manager: 返回更新后的 Artifact
-        Manager-&gt;&gt;Manager: 更新缓存中的 lock_version
-        Manager-&gt;&gt;Tool: (success, message, match_info)
-        Tool-&gt;&gt;Agent: ToolResult(success=True)
-    else 更新失败（lock_version 不匹配）
-        DB-&gt;&gt;Repo: 0 rows affected
-        Repo-&gt;&gt;Repo: 检查是不存在还是版本冲突
-        Repo-&gt;&gt;Manager: VersionConflictError
-        Manager-&gt;&gt;Manager: 清除缓存
-        Manager-&gt;&gt;Tool: (False, "Version conflict", None)
-        Tool-&gt;&gt;Agent: ToolResult(success=False, error="Version conflict")
-    end</code></pre>
-<p><strong>说明</strong>：<code>lock_version</code> 由 <code>ArtifactManager</code> 在内存缓存中自动管理，Agent 无需感知版本号。</p>
-<h3 id="agent-处理冲突">Agent 处理冲突</h3>
-<p>当收到版本冲突错误时，Agent 应该：</p>
-<ol>
-<li>重新调用 <code>read_artifact</code> 获取最新内容（Manager 会重新加载缓存）</li>
-<li>基于最新内容重新计算变更</li>
-<li>重试更新</li>
-</ol>
-<h2 id="langgraph-checkpointer">LangGraph Checkpointer</h2>
-<p>除了业务数据，LangGraph 状态也需要持久化：</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="c1"># src/core/graph.py</span>
-<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">create_async_sqlite_checkpointer</span><span class="p">(</span><span class="n">db_path</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;data/langgraph.db&quot;</span><span class="p">):</span>
-<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;创建 LangGraph 状态检查点&quot;&quot;&quot;</span>
-<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a>    <span class="kn">import</span><span class="w"> </span><span class="nn">aiosqlite</span>
-<a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a>    <span class="kn">from</span><span class="w"> </span><span class="nn">langgraph.checkpoint.sqlite.aio</span><span class="w"> </span><span class="kn">import</span> <span class="n">AsyncSqliteSaver</span>
-<a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a>
-<a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a>    <span class="c1"># 确保目录存在</span>
-<a id="__codelineno-11-8" name="__codelineno-11-8" href="#__codelineno-11-8"></a>    <span class="n">db_dir</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">dirname</span><span class="p">(</span><span class="n">db_path</span><span class="p">)</span>
-<a id="__codelineno-11-9" name="__codelineno-11-9" href="#__codelineno-11-9"></a>    <span class="k">if</span> <span class="n">db_dir</span> <span class="ow">and</span> <span class="ow">not</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">exists</span><span class="p">(</span><span class="n">db_dir</span><span class="p">):</span>
-<a id="__codelineno-11-10" name="__codelineno-11-10" href="#__codelineno-11-10"></a>        <span class="n">os</span><span class="o">.</span><span class="n">makedirs</span><span class="p">(</span><span class="n">db_dir</span><span class="p">,</span> <span class="n">exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
-<a id="__codelineno-11-11" name="__codelineno-11-11" href="#__codelineno-11-11"></a>
-<a id="__codelineno-11-12" name="__codelineno-11-12" href="#__codelineno-11-12"></a>    <span class="c1"># 手动创建连接以便配置 PRAGMA</span>
-<a id="__codelineno-11-13" name="__codelineno-11-13" href="#__codelineno-11-13"></a>    <span class="n">conn</span> <span class="o">=</span> <span class="k">await</span> <span class="n">aiosqlite</span><span class="o">.</span><span class="n">connect</span><span class="p">(</span><span class="n">db_path</span><span class="p">)</span>
-<a id="__codelineno-11-14" name="__codelineno-11-14" href="#__codelineno-11-14"></a>    <span class="k">await</span> <span class="n">conn</span><span class="o">.</span><span class="n">execute</span><span class="p">(</span><span class="s2">&quot;PRAGMA journal_mode=WAL&quot;</span><span class="p">)</span>      <span class="c1"># WAL 模式提高并发</span>
-<a id="__codelineno-11-15" name="__codelineno-11-15" href="#__codelineno-11-15"></a>    <span class="k">await</span> <span class="n">conn</span><span class="o">.</span><span class="n">execute</span><span class="p">(</span><span class="s2">&quot;PRAGMA busy_timeout=5000&quot;</span><span class="p">)</span>     <span class="c1"># 5 秒忙等待</span>
-<a id="__codelineno-11-16" name="__codelineno-11-16" href="#__codelineno-11-16"></a>
-<a id="__codelineno-11-17" name="__codelineno-11-17" href="#__codelineno-11-17"></a>    <span class="n">checkpointer</span> <span class="o">=</span> <span class="n">AsyncSqliteSaver</span><span class="p">(</span><span class="n">conn</span><span class="p">)</span>
-<a id="__codelineno-11-18" name="__codelineno-11-18" href="#__codelineno-11-18"></a>    <span class="k">await</span> <span class="n">checkpointer</span><span class="o">.</span><span class="n">setup</span><span class="p">()</span>
-<a id="__codelineno-11-19" name="__codelineno-11-19" href="#__codelineno-11-19"></a>    <span class="k">return</span> <span class="n">checkpointer</span>
-</code></pre></div>
-<p>Checkpointer 存储：</p>
+    style M4 fill:#e8f5e9
+    note1["active_branch = msg_4"]
+    M4 -.-&gt; note1</code></pre>
 <ul>
-<li>每个 <code>thread_id</code> 的完整状态历史</li>
-<li>支持 <code>interrupt()</code> 后恢复执行</li>
-<li>存储在独立的 SQLite 文件（<code>data/langgraph.db</code>）</li>
+<li>用户可从任意历史消息创建分支（前端 UI 支持）→ 新消息的 <code>parent_id</code> 指向被选消息</li>
+<li><code>ConversationRepository.get_conversation_path(to_msg_id)</code> 从目标节点向上回溯 <code>parent_id</code> 得到线性路径，供引擎构建对话历史</li>
+<li><code>add_message()</code> 自动更新 <code>active_branch = new_msg_id</code></li>
+</ul>
+<h3 id="compaction-在树上的语义">Compaction 在树上的语义</h3>
+<p>Compaction 只修改 <code>user_input_summary</code> / <code>response_summary</code> 字段，<strong>不改 parent_id</strong>。因此：</p>
+<ul>
+<li>分支结构跨 compaction 保留</li>
+<li>引擎上下文加载时按路径取 <code>summary</code> 替换 <code>user_input</code> / <code>response</code>，未压缩的对使用原文</li>
+<li>切换到旧分支后 compaction 继续工作，不影响已切出的新分支</li>
+</ul>
+<h2 id="event-sourcing-层">Event Sourcing 层</h2>
+<p><code>MessageEvent</code> 是执行过程的完整事件链，append-only：</p>
+<h3 id="关键字段">关键字段</h3>
+<table>
+<thead>
+<tr>
+<th>字段</th>
+<th>用途</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>id</code></td>
+<td>自增主键，天然时序</td>
+</tr>
+<tr>
+<td><code>event_id</code></td>
+<td>业务去重键（<code>{message_id}-{seq}</code>），幂等批量写入时识别重复</td>
+</tr>
+<tr>
+<td><code>event_type</code></td>
+<td><code>StreamEventType.value</code> 字符串（<code>agent_start</code>/<code>llm_complete</code>/<code>tool_complete</code> 等）</td>
+</tr>
+<tr>
+<td><code>agent_name</code></td>
+<td>产生事件的 agent（<code>lead_agent</code> / <code>search_agent</code> / ...）</td>
+</tr>
+<tr>
+<td><code>data</code></td>
+<td>JSON 完整载荷，按 <code>event_type</code> 有不同 schema</td>
+</tr>
+</tbody>
+</table>
+<h3 id="持久化边界">持久化边界</h3>
+<ul>
+<li><code>llm_chunk</code> 标记 <code>sse_only=True</code>，<strong>仅 SSE 传输，不入表</strong> — 高频低价值，<code>llm_complete</code> 已含完整内容</li>
+<li>其余事件累积在 <code>state["events"]</code>，引擎退出后由 Controller 层调用 <code>MessageEventRepository.batch_create()</code> 一次性写入</li>
+<li>批写遇 <code>IntegrityError</code> 时判断是否全部 <code>event_id</code> 已存在：是则视为前次重试已成功，静默跳过；否则重抛</li>
+</ul>
+<h3 id="查询接口">查询接口</h3>
+<table>
+<thead>
+<tr>
+<th>方法</th>
+<th>用途</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>get_by_message(message_id)</code></td>
+<td>单条消息的完整事件链（Admin Observability UI 用）</td>
+</tr>
+<tr>
+<td><code>get_by_conversation(conv_id)</code></td>
+<td>跨 message join，用于对话级分析</td>
+</tr>
+<tr>
+<td><code>get_by_type(message_id, type)</code></td>
+<td>按类型过滤，常用于取 <code>tool_complete</code> 列表</td>
+</tr>
+</tbody>
+</table>
+<p>事件数据的详细 schema 和 Admin 消费路径见 <a href="../observability/">observability.md</a>。</p>
+<h2 id="repository-模式">Repository 模式</h2>
+<h3 id="泛型基类">泛型基类</h3>
+<p><code>BaseRepository[T]</code>（<code>src/repositories/base.py</code>）封装通用 CRUD：</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="k">class</span><span class="w"> </span><span class="nc">BaseRepository</span><span class="p">(</span><span class="n">Generic</span><span class="p">[</span><span class="n">T</span><span class="p">]):</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">session</span><span class="p">:</span> <span class="n">AsyncSession</span><span class="p">,</span> <span class="n">model_class</span><span class="p">:</span> <span class="n">Type</span><span class="p">[</span><span class="n">T</span><span class="p">]):</span> <span class="o">...</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">get_by_id</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="nb">id</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Optional</span><span class="p">[</span><span class="n">T</span><span class="p">]</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">add</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">entity</span><span class="p">:</span> <span class="n">T</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">T</span>              <span class="c1"># flush + commit + refresh</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">update</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">entity</span><span class="p">:</span> <span class="n">T</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">T</span>           <span class="c1"># flush + commit + refresh</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">delete</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">entity</span><span class="p">:</span> <span class="n">T</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">flush</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span>                    <span class="c1"># 立即释放 SQLite write lock</span>
+</code></pre></div>
+<p>异常类型：</p>
+<ul>
+<li><code>NotFoundError(entity_type, entity_id)</code> — 实体不存在</li>
+<li><code>DuplicateError(entity_type, entity_id)</code> — 主键/唯一约束冲突</li>
+</ul>
+<h3 id="具体-repository">具体 Repository</h3>
+<table>
+<thead>
+<tr>
+<th>Repository</th>
+<th>职责</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>UserRepository</code></td>
+<td>认证相关查询（按 username 取、角色过滤）</td>
+</tr>
+<tr>
+<td><code>ConversationRepository</code></td>
+<td>对话/消息树 CRUD、<code>get_conversation_path()</code>、标题搜索分页、Compaction 写 summary</td>
+</tr>
+<tr>
+<td><code>ArtifactRepository</code></td>
+<td>Artifact + Version + ArtifactSession CRUD</td>
+</tr>
+<tr>
+<td><code>MessageEventRepository</code></td>
+<td><code>batch_create</code> / 按多维度查询（不继承 BaseRepository，因业务模型特殊）</td>
+</tr>
+</tbody>
+</table>
+<h3 id="repo-边界规则">Repo 边界规则</h3>
+<p>严格遵循<a href="../overview/#三层责任模型">三层责任模型</a>：</p>
+<ul>
+<li><strong>Repo 只返回 ORM 对象</strong>，不做序列化、不做 ownership check、不做业务逻辑</li>
+<li>ORM 对象<strong>不得逃逸</strong>创建它的 session（Manager 层必须在 session 关闭前转为 dict，或让请求级 session 覆盖 router 的响应构建）</li>
+<li><strong>Router 层不直接实例化 Repository</strong> — 所有 DB 访问通过 Manager 方法</li>
+<li><code>chat.py</code> 的事件查询、<code>admin.py</code> 的 admin 列表/详情都通过 <code>ConversationManager.get_message_events()</code> / <code>list_admin_conversations()</code> / <code>get_admin_conversation_events()</code> 间接访问 <code>MessageEventRepository</code></li>
+<li>唯一例外是 Controller/后台任务层（如 <code>controller.py</code>、<code>controller_factory.py</code>），它们不是 router，自管 session 生命周期和重试逻辑，可直接创建 Repository</li>
+</ul>
+<h2 id="事务所有权">事务所有权</h2>
+<p><strong>原则：</strong> <code>DatabaseManager.session()</code> 只管生命周期（创建 + 关闭），<strong>不做事务控制</strong>。<code>flush()</code> + <code>commit()</code> 由 Repository 方法内部决定。</p>
+<h3 id="为什么">为什么</h3>
+<p>SQLite 的写锁是整库级别的。如果用 <code>async with db.session() as s:</code> 包裹整个 controller 逻辑并在结束时统一 commit：</p>
+<ul>
+<li>写锁持续到 controller 结束（可能几十秒，含 LLM 调用）</li>
+<li>其他请求全部阻塞在 <code>PRAGMA busy_timeout</code> 内</li>
+</ul>
+<p>Repository 内部 <code>flush + commit</code> 的好处：</p>
+<ul>
+<li>写操作完成立即释放锁</li>
+<li>每个 Repo 方法是独立的"微事务"边界</li>
+<li>跨表原子操作（如创建 conversation 同时建 artifact_session）仍在同一方法内完成</li>
+</ul>
+<h3 id="典型模式">典型模式</h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="c1"># ConversationRepository.add_message()</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">add_message</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">...</span><span class="p">):</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>    <span class="n">conversation</span> <span class="o">=</span> <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_conversation_or_raise</span><span class="p">(</span><span class="n">conversation_id</span><span class="p">)</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>    <span class="n">existing_msg</span> <span class="o">=</span> <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_message</span><span class="p">(</span><span class="n">message_id</span><span class="p">)</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>    <span class="k">if</span> <span class="n">existing_msg</span><span class="p">:</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>        <span class="k">raise</span> <span class="n">DuplicateError</span><span class="p">(</span><span class="o">...</span><span class="p">)</span>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>    <span class="n">message</span> <span class="o">=</span> <span class="n">Message</span><span class="p">(</span><span class="o">...</span><span class="p">)</span>
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">_session</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">message</span><span class="p">)</span>
+<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a>    <span class="n">conversation</span><span class="o">.</span><span class="n">active_branch</span> <span class="o">=</span> <span class="n">message_id</span>   <span class="c1"># ORM 属性变动，onupdate 自动刷 updated_at</span>
+<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a>
+<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a>    <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">_session</span><span class="o">.</span><span class="n">flush</span><span class="p">()</span>
+<a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a>    <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">_session</span><span class="o">.</span><span class="n">commit</span><span class="p">()</span>              <span class="c1"># 写锁在此释放</span>
+<a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a>    <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">_session</span><span class="o">.</span><span class="n">refresh</span><span class="p">(</span><span class="n">message</span><span class="p">)</span>
+<a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a>    <span class="k">return</span> <span class="n">message</span>
+</code></pre></div>
+<h3 id="批量-update-模式">批量 UPDATE 模式</h3>
+<p>某些场景下 ORM 实例无其他属性变动但需要刷新 DB-side 计算值（如 <code>updated_at</code>），此时用 bulk UPDATE：</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="c1"># update_response：message.response 变动，但 conversation 本身无变动</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">_session</span><span class="o">.</span><span class="n">execute</span><span class="p">(</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>    <span class="n">update</span><span class="p">(</span><span class="n">Conversation</span><span class="p">)</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>    <span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">Conversation</span><span class="o">.</span><span class="n">id</span> <span class="o">==</span> <span class="n">message</span><span class="o">.</span><span class="n">conversation_id</span><span class="p">)</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>    <span class="o">.</span><span class="n">values</span><span class="p">(</span><span class="n">updated_at</span><span class="o">=</span><span class="n">func</span><span class="o">.</span><span class="n">now</span><span class="p">()),</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="p">)</span>
+</code></pre></div>
+<p>注意：bulk UPDATE 之后，同 session 中已持有的 <code>Conversation</code> 实例会被 expire，不要再访问其属性（会触发隐式 IO，async 下即 <code>MissingGreenlet</code>）。</p>
+<h2 id="orm-使用规范">ORM 使用规范</h2>
+<p>这些规则在仓库根 <code>CLAUDE.md</code> 的 "Code Conventions" 已列出，这里展开 why。</p>
+<h3 id="时间戳">时间戳</h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="n">created_at</span><span class="p">:</span> <span class="n">Mapped</span><span class="p">[</span><span class="n">datetime</span><span class="p">]</span> <span class="o">=</span> <span class="n">mapped_column</span><span class="p">(</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>    <span class="n">DateTime</span><span class="p">,</span> <span class="n">server_default</span><span class="o">=</span><span class="n">func</span><span class="o">.</span><span class="n">now</span><span class="p">(),</span> <span class="n">nullable</span><span class="o">=</span><span class="kc">False</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="p">)</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="n">updated_at</span><span class="p">:</span> <span class="n">Mapped</span><span class="p">[</span><span class="n">datetime</span><span class="p">]</span> <span class="o">=</span> <span class="n">mapped_column</span><span class="p">(</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>    <span class="n">DateTime</span><span class="p">,</span> <span class="n">server_default</span><span class="o">=</span><span class="n">func</span><span class="o">.</span><span class="n">now</span><span class="p">(),</span> <span class="n">onupdate</span><span class="o">=</span><span class="n">func</span><span class="o">.</span><span class="n">now</span><span class="p">(),</span> <span class="n">nullable</span><span class="o">=</span><span class="kc">False</span>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="p">)</span>
+</code></pre></div>
+<ul>
+<li><strong><code>server_default=func.now()</code></strong> 在 INSERT 时由 DB 填值 — 跨时区一致、与客户端时钟无关</li>
+<li><strong><code>onupdate=func.now()</code></strong> 在 UPDATE 时由 ORM 自动生成 SQL <code>SET updated_at = CURRENT_TIMESTAMP</code> — 但<strong>仅当</strong> ORM 检测到该行有属性变动</li>
+<li>Repo 代码<strong>绝不</strong>写 <code>entity.created_at = datetime.now()</code> — 引入客户端时钟依赖</li>
+</ul>
+<h3 id="优先-orm-属性变动">优先 ORM 属性变动</h3>
+<p>当一行已 dirty（有其他字段变动），改用 ORM 属性赋值让 <code>onupdate</code> 自动处理时间戳：</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="n">conversation</span><span class="o">.</span><span class="n">active_branch</span> <span class="o">=</span> <span class="n">message_id</span>   <span class="c1"># ✅</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="c1"># 而不是：</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="k">await</span> <span class="n">session</span><span class="o">.</span><span class="n">execute</span><span class="p">(</span><span class="n">update</span><span class="p">(</span><span class="o">...</span><span class="p">)</span><span class="o">.</span><span class="n">values</span><span class="p">(</span><span class="n">active_branch</span><span class="o">=...</span><span class="p">,</span> <span class="n">updated_at</span><span class="o">=</span><span class="n">func</span><span class="o">.</span><span class="n">now</span><span class="p">()))</span>
+</code></pre></div>
+<h3 id="bulk-update-仅用于-db-side-计算">Bulk UPDATE 仅用于 DB-side 计算</h3>
+<p>如前述 <code>update_response</code> 模式。唯一合法理由：<strong>行本身无其他字段变动，但需要 DB-side 函数写入（如 <code>func.now()</code>）</strong>。</p>
+<h3 id="绝不把-sql-表达式赋给-orm-属性">绝不把 SQL 表达式赋给 ORM 属性</h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="n">entity</span><span class="o">.</span><span class="n">updated_at</span> <span class="o">=</span> <span class="n">func</span><span class="o">.</span><span class="n">now</span><span class="p">()</span>   <span class="c1"># ❌ SQLAlchemy 不会翻译这个，会当 Python 对象塞进 DateTime 列</span>
+</code></pre></div>
+<h3 id="实例过期后不可访问属性">实例过期后不可访问属性</h3>
+<p>commit 后 session 内持有的 ORM 实例会被 expire。async 下访问过期实例的属性会触发隐式 IO，抛 <code>MissingGreenlet</code>。应对：</p>
+<ul>
+<li>用 <code>session.refresh(entity)</code> 显式重新加载</li>
+<li>或直接发起一个新查询获取当前状态</li>
+</ul>
+<p>Repository 方法的 <code>refresh(entity)</code> 调用就是为了让返回值对调用方安全。</p>
+<h2 id="alembic-迁移">Alembic 迁移</h2>
+<ul>
+<li><strong>SQLite 开发模式</strong>：<code>DatabaseManager._create_tables()</code> 调用 <code>Base.metadata.create_all</code> 自动建表</li>
+<li><strong>MySQL / PostgreSQL</strong>：依赖 <code>alembic upgrade head</code> 建表，启动时 <code>_check_alembic_version()</code> 校验 <code>alembic_version</code> 表存在且非空，缺失则 fail fast</li>
+<li>Revision 与 head 一致性由 CI/CD 通过 <code>alembic current --check-heads</code> 验证，DB 管理器本身不做此校验</li>
+</ul>
+<h2 id="design-decisions">Design Decisions</h2>
+<h3 id="为什么-404-not-403">为什么 404 not 403</h3>
+<p>跨用户访问他人资源时，路由层统一返回 <strong>404 Not Found</strong> 而非 403 Forbidden。</p>
+<ul>
+<li>403 会泄露资源存在性（"这个 ID 确实存在，只是你没权限"）</li>
+<li>404 等同于"这个 ID 对你不存在"，攻击者无法枚举</li>
+<li>代价：合法用户遇到权限问题时排障略难，但 SaaS 场景下可接受</li>
+<li>这一策略在 API 层实现，Core/Engine/Tools 不感知 <code>user_id</code> 以外的鉴权逻辑</li>
+</ul>
+<h3 id="为什么-repository-内部控制事务">为什么 Repository 内部控制事务</h3>
+<p>见上文"事务所有权"。核心是缩短 SQLite 写锁持有时间，同时保持跨表原子操作能力。</p>
+<h3 id="为什么-messageeventrepository-不继承-baserepository">为什么 MessageEventRepository 不继承 BaseRepository</h3>
+<ul>
+<li>MessageEvent 没有"用户级 CRUD"语义 — 只有 append 和只读查询</li>
+<li><code>batch_create</code> 的幂等处理（<code>IntegrityError</code> → 验 <code>event_id</code> 存在性）与泛型基类的简单 <code>add</code> 语义冲突</li>
+<li>按业务建模时不强行套用泛型更清晰</li>
+</ul>
+<h3 id="为什么-messagemetadata_-用-json-而非规范化列">为什么 Message.metadata_ 用 JSON 而非规范化列</h3>
+<ul>
+<li><code>metadata</code> 承载异质字段：<code>always_allowed_tools</code> / <code>execution_metrics</code> 汇总 / <code>last_input_tokens</code></li>
+<li>这些字段增减频繁且只有 Manager 层读写，规范化成列需频繁迁移</li>
+<li>JSON 列牺牲了 SQL 级查询能力，但换取 schema 稳定性 — 符合中小 SaaS 的迭代节奏</li>
 </ul>
 
 

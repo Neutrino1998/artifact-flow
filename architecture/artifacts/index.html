@@ -10,13 +10,13 @@
       
       
       
-        <link rel="canonical" href="https://neutrino1998.github.io/artifact-flow/architecture/agents/">
+        <link rel="canonical" href="https://neutrino1998.github.io/artifact-flow/architecture/artifacts/">
       
       
-        <link rel="prev" href="../engine/">
+        <link rel="prev" href="../tools/">
       
       
-        <link rel="next" href="../tools/">
+        <link rel="next" href="../data-layer/">
       
       
         
@@ -27,7 +27,7 @@
     
     
       
-        <title>Agents - ArtifactFlow</title>
+        <title>Artifacts - ArtifactFlow</title>
       
     
     
@@ -80,7 +80,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#agent-配置化系统" class="md-skip">
+        <a href="#artifact-系统" class="md-skip">
           跳转至
         </a>
       
@@ -114,7 +114,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Agents
+              Artifacts
             
           </span>
         </div>
@@ -534,37 +534,10 @@
                 
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Agents
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../agents/" class="md-nav__link">
         
   
   
@@ -580,215 +553,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="目录">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      目录
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#agent-as-config-理念" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Agent-as-Config 理念
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#agentconfig-数据结构" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        AgentConfig 数据结构
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#yaml-frontmatter-schema" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        YAML Frontmatter Schema
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="YAML Frontmatter Schema">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#字段参考" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        字段参考
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#工具权限覆盖" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        工具权限覆盖
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#role-prompt-设计" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Role Prompt 设计
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#现有-agent-概览" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        现有 Agent 概览
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="现有 Agent 概览">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#角色分工" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        角色分工
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#agent-协作模型" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Agent 协作模型
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#agent-注册与加载" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Agent 注册与加载
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Agent 注册与加载">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#加载机制" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        加载机制
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#单文件解析" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        单文件解析
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#design-decisions" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Design Decisions
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Design Decisions">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#为什么-agent-是数据不是类" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        为什么 Agent 是数据不是类
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#完成路由不对称性的意图" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        完成路由不对称性的意图
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -826,10 +590,37 @@
                 
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../artifacts/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Artifacts
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -845,6 +636,275 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="目录">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      目录
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#双-artifact-架构" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        双 Artifact 架构
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#artifact-作为任务追踪-checkpoint" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Artifact 作为任务追踪 Checkpoint
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#数据模型" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        数据模型
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#write-back-cache-机制" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Write-Back Cache 机制
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Write-Back Cache 机制">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#语义" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        语义
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#关键字段" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        关键字段
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#flush-弹性" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Flush 弹性
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#版本号稀疏的后果" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        版本号稀疏的后果
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#执行期间的-rest-api-读取" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        执行期间的 REST API 读取
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#operations-语义" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Operations 语义
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Operations 语义">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#create_artifact" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        create_artifact
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#update_artifact分层模糊匹配" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        update_artifact（分层模糊匹配）
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#rewrite_artifact" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        rewrite_artifact
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#read_artifact" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        read_artifact
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sse-实时推送" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SSE 实时推送
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#upload-旁路" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Upload 旁路
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#design-decisions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Design Decisions
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Design Decisions">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#为什么-write-back-而非即时写入" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        为什么 Write-Back 而非即时写入
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#为什么版本号稀疏可接受" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        为什么版本号稀疏可接受
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#为什么-task-plan-走-system-prompt-而非-inventory" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        为什么 Task Plan 走 System Prompt 而非 Inventory
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#为什么-upload-要旁路-write-back" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        为什么 Upload 要旁路 Write-Back
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -1196,10 +1256,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#agent-as-config-理念" class="md-nav__link">
+  <a href="#双-artifact-架构" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Agent-as-Config 理念
+        双 Artifact 架构
       
     </span>
   </a>
@@ -1207,10 +1267,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#agentconfig-数据结构" class="md-nav__link">
+  <a href="#artifact-作为任务追踪-checkpoint" class="md-nav__link">
     <span class="md-ellipsis">
       
-        AgentConfig 数据结构
+        Artifact 作为任务追踪 Checkpoint
       
     </span>
   </a>
@@ -1218,22 +1278,33 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#yaml-frontmatter-schema" class="md-nav__link">
+  <a href="#数据模型" class="md-nav__link">
     <span class="md-ellipsis">
       
-        YAML Frontmatter Schema
+        数据模型
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="YAML Frontmatter Schema">
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#write-back-cache-机制" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Write-Back Cache 机制
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Write-Back Cache 机制">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#字段参考" class="md-nav__link">
+  <a href="#语义" class="md-nav__link">
     <span class="md-ellipsis">
       
-        字段参考
+        语义
       
     </span>
   </a>
@@ -1241,10 +1312,32 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#工具权限覆盖" class="md-nav__link">
+  <a href="#关键字段" class="md-nav__link">
     <span class="md-ellipsis">
       
-        工具权限覆盖
+        关键字段
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#flush-弹性" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Flush 弹性
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#版本号稀疏的后果" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        版本号稀疏的后果
       
     </span>
   </a>
@@ -1257,10 +1350,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#role-prompt-设计" class="md-nav__link">
+  <a href="#执行期间的-rest-api-读取" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Role Prompt 设计
+        执行期间的 REST API 读取
       
     </span>
   </a>
@@ -1268,22 +1361,55 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#现有-agent-概览" class="md-nav__link">
+  <a href="#operations-语义" class="md-nav__link">
     <span class="md-ellipsis">
       
-        现有 Agent 概览
+        Operations 语义
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="现有 Agent 概览">
+    <nav class="md-nav" aria-label="Operations 语义">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#角色分工" class="md-nav__link">
+  <a href="#create_artifact" class="md-nav__link">
     <span class="md-ellipsis">
       
-        角色分工
+        create_artifact
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#update_artifact分层模糊匹配" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        update_artifact（分层模糊匹配）
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#rewrite_artifact" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        rewrite_artifact
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#read_artifact" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        read_artifact
       
     </span>
   </a>
@@ -1296,10 +1422,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#agent-协作模型" class="md-nav__link">
+  <a href="#sse-实时推送" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Agent 协作模型
+        SSE 实时推送
       
     </span>
   </a>
@@ -1307,41 +1433,13 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#agent-注册与加载" class="md-nav__link">
+  <a href="#upload-旁路" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Agent 注册与加载
+        Upload 旁路
       
     </span>
   </a>
-  
-    <nav class="md-nav" aria-label="Agent 注册与加载">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#加载机制" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        加载机制
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#单文件解析" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        单文件解析
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
   
 </li>
       
@@ -1358,10 +1456,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#为什么-agent-是数据不是类" class="md-nav__link">
+  <a href="#为什么-write-back-而非即时写入" class="md-nav__link">
     <span class="md-ellipsis">
       
-        为什么 Agent 是数据不是类
+        为什么 Write-Back 而非即时写入
       
     </span>
   </a>
@@ -1369,10 +1467,32 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#完成路由不对称性的意图" class="md-nav__link">
+  <a href="#为什么版本号稀疏可接受" class="md-nav__link">
     <span class="md-ellipsis">
       
-        完成路由不对称性的意图
+        为什么版本号稀疏可接受
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#为什么-task-plan-走-system-prompt-而非-inventory" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        为什么 Task Plan 走 System Prompt 而非 Inventory
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#为什么-upload-要旁路-write-back" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        为什么 Upload 要旁路 Write-Back
       
     </span>
   </a>
@@ -1404,260 +1524,287 @@
   
 
 
-<h1 id="agent-配置化系统">Agent 配置化系统</h1>
+<h1 id="artifact-系统">Artifact 系统</h1>
 <blockquote>
-<p>Agent 是数据，不是类 — 一个 Markdown 文件就是一个 Agent。</p>
+<p>双 Artifact 架构 + Write-Back Cache — Artifact 既是产物，也是模型跨轮次、跨 compaction 维持任务状态的"工作记忆"。</p>
 </blockquote>
-<h2 id="agent-as-config-理念">Agent-as-Config 理念</h2>
-<p>ArtifactFlow 的 Agent 完全由配置驱动：每个 Agent 是 <code>config/agents/</code> 下的一个 <code>.md</code> 文件，包含 YAML frontmatter（元数据）和 Markdown body（角色提示词）。不需要编写任何 Python 代码。</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>config/agents/
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>├── lead_agent.md       # 协调者
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>├── search_agent.md     # Web 搜索专家
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>├── crawl_agent.md      # 网页内容提取
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>└── compact_agent.md    # 对话摘要（内部）
-</code></pre></div>
-<h2 id="agentconfig-数据结构">AgentConfig 数据结构</h2>
-<p><code>src/agents/loader.py</code> 定义了 <code>AgentConfig</code> dataclass：</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nd">@dataclass</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="k">class</span><span class="w"> </span><span class="nc">AgentConfig</span><span class="p">:</span>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>    <span class="n">name</span><span class="p">:</span> <span class="nb">str</span>                                        <span class="c1"># Agent 唯一标识</span>
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>    <span class="n">description</span><span class="p">:</span> <span class="nb">str</span>                                 <span class="c1"># Agent 描述（用于 call_subagent 候选列表）</span>
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>    <span class="n">tools</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="n">field</span><span class="p">(</span><span class="n">default_factory</span><span class="o">=</span><span class="nb">dict</span><span class="p">)</span>  <span class="c1"># {tool_name: permission_level}</span>
-<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>    <span class="n">model</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;qwen3.6-plus-no-thinking&quot;</span>          <span class="c1"># LLM 模型别名</span>
-<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>    <span class="n">max_tool_rounds</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">3</span>                         <span class="c1"># 最大工具调用轮数</span>
-<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>    <span class="n">internal</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span>                           <span class="c1"># 内部 Agent（不出现在候选列表）</span>
-<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>    <span class="n">role_prompt</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span>                            <span class="c1"># MD body（角色提示词）</span>
-</code></pre></div>
-<h2 id="yaml-frontmatter-schema">YAML Frontmatter Schema</h2>
-<p>每个 Agent 的 <code>.md</code> 文件以 YAML frontmatter 开头：</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="nn">---</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">search_agent</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="nt">description</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">|</span>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="w">  </span><span class="no">Web search and information retrieval specialist</span>
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="w">  </span><span class="no">- Web search</span>
-<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="w">  </span><span class="no">- Information retrieval</span>
-<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="nt">tools</span><span class="p">:</span>
-<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="w">  </span><span class="nt">web_search</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">auto</span>
-<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="nt">model</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">qwen3.6-plus-no-thinking</span>
-<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="nt">max_tool_rounds</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">3</span>
-<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="nn">---</span>
-</code></pre></div>
-<h3 id="字段参考">字段参考</h3>
+<h2 id="双-artifact-架构">双 Artifact 架构</h2>
+<p>ArtifactFlow 采用<strong>双 Artifact 约定</strong>作为 lead_agent 工作流的核心协议：</p>
+<table>
+<thead>
+<tr>
+<th>Artifact</th>
+<th>ID 约定</th>
+<th>角色</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Task Plan</td>
+<td><code>task_plan</code></td>
+<td>任务分解、状态追踪、进度勾选 — 模型的 todo list</td>
+</tr>
+<tr>
+<td>Result</td>
+<td>任意（如 <code>research_report</code>、<code>analysis.py</code>）</td>
+<td>最终产出 — 用户可见的交付物</td>
+</tr>
+</tbody>
+</table>
+<p>"双"不是数据库上的强约束，而是 prompt 层的约定。系统通过两个机制将 <code>task_plan</code> 提升为一等公民：</p>
+<ol>
+<li><strong>System Prompt 层注入</strong>：<code>ContextManager</code> 发现 <code>id="task_plan"</code> 的 artifact 时，将其全文注入 system prompt（见 <a href="../engine/#system-prompt-组装">engine.md → System Prompt 组装</a>），使模型在每次 LLM 调用时都看到最新的任务状态</li>
+<li><strong>Role Prompt 引导</strong>：<code>lead_agent.md</code> 的 role prompt 明确要求"先写/更新 Task Plan 再执行"</li>
+</ol>
+<p>Result Artifact 则通过 Artifact Inventory 层以预览形式暴露（<code>INVENTORY_PREVIEW_LENGTH=200</code> 字符），需完整内容时由模型显式调用 <code>read_artifact</code>。</p>
+<h2 id="artifact-作为任务追踪-checkpoint">Artifact 作为任务追踪 Checkpoint</h2>
+<p>这是 ArtifactFlow 架构中最容易被忽略但最关键的语义。</p>
+<p><strong>背景：</strong> 引擎每轮 <code>ContextManager.build()</code> 重新生成上下文，只加载 <code>Conversation</code> + <code>Message</code>，<strong>不加载 <code>MessageEvent</code></strong>（见 <a href="../engine/#为什么上下文只加载-conversation-不加载-events">engine.md → 为什么上下文只加载 Conversation 不加载 Events</a>）。这意味着：</p>
+<ul>
+<li>当前轮的工具调用、subagent 交互在 <code>state["events"]</code> 内存中可见</li>
+<li>但一旦轮次结束（即 lead agent 完成一次 turn），这些事件对下一轮模型<strong>不可见</strong></li>
+<li>Compaction 进一步压缩历史消息为摘要，细节信息进一步丢失</li>
+</ul>
+<p><strong>后果：</strong> 模型在长任务中缺乏"持久工作记忆"。若 Task 5 步骤中前 3 步通过 subagent 完成，下一轮 lead agent 唤起时只能看到 user 原始输入 + 历史 assistant 响应（可能已被压缩），无法精确知道"哪些已做、哪些没做、中间发现了什么"。</p>
+<p><strong>Artifact 填补这个空洞：</strong></p>
+<pre class="mermaid"><code>flowchart LR
+    subgraph 轮N[轮 N 执行]
+        E1[events: 内存可见]
+        P1[Task Plan v3]
+    end
+    subgraph 压缩[Compaction]
+        S[摘要替代原始消息]
+    end
+    subgraph 轮N1[轮 N+1 执行]
+        E2[events: 不可见]
+        P2[Task Plan v3 — 仍可见]
+    end
+
+    轮N --&gt;|事件丢弃| 轮N1
+    轮N --&gt;|摘要化| 压缩
+    压缩 --&gt; 轮N1
+    P1 ==&gt;|Artifact 跨轮持久| P2
+
+    style P1 fill:#e8f5e9
+    style P2 fill:#e8f5e9</code></pre>
+<ul>
+<li>Task Plan Artifact：承载"任务分解 + 进度状态"，每轮模型通过 <code>update_artifact</code> 勾选完成项（<code>[✗] → [✓]</code>），下一轮读到的 system prompt 天然携带最新状态</li>
+<li>Result Artifact：累积产出（研究报告、代码文件），避免重复劳动，也让模型在后续轮次可直接 <code>read_artifact</code> 回顾</li>
+</ul>
+<p><strong>设计含义：</strong> Artifact 不是"展示用"的副产品，而是模型自己的状态机。lead_agent 的 role prompt 强制"先写 Task Plan"就是为了创建这个 checkpoint；对于 ArtifactFlow 的长任务能力，这是架构上的 load-bearing 设计，不可省略。</p>
+<h2 id="数据模型">数据模型</h2>
+<pre class="mermaid"><code>erDiagram
+    Conversation ||--o| ArtifactSession : "1:1 (同 ID)"
+    ArtifactSession ||--o{ Artifact : contains
+    Artifact ||--o{ ArtifactVersion : "版本历史"
+
+    ArtifactSession {
+        string id PK "= conversation_id"
+    }
+    Artifact {
+        string id PK
+        string session_id PK
+        string content_type "MIME"
+        string title
+        text content "当前快照（冗余）"
+        int current_version
+        string source "agent / user_upload"
+    }
+    ArtifactVersion {
+        int id PK
+        string artifact_id FK
+        string session_id FK
+        int version
+        text content
+        string update_type "create/update/update_fuzzy/rewrite"
+        json changes "[(old, new), ...]"
+    }</code></pre>
+<ul>
+<li><strong>ArtifactSession</strong> 与 Conversation 1:1 绑定（<code>session_id == conversation_id</code>），<code>cascade="all, delete-orphan"</code>：删除对话同时清理所有 artifacts</li>
+<li><strong>Artifact</strong> 使用复合主键 <code>(id, session_id)</code>，同一 ID 可在不同 session 独立存在</li>
+<li><strong>Artifact.content</strong> 冗余存当前快照（避免每次查版本表），<code>current_version</code> 是最新版本号</li>
+<li><strong>ArtifactVersion.version</strong> 在同一 Artifact 内唯一，但<strong>可以稀疏</strong>（见下文 write-back 语义）</li>
+</ul>
+<h2 id="write-back-cache-机制">Write-Back Cache 机制</h2>
+<p>这是 Artifact 系统最核心的运行时设计。</p>
+<h3 id="语义">语义</h3>
+<p>引擎执行期间，<code>create_artifact</code> / <code>update_artifact</code> / <code>rewrite_artifact</code> <strong>只改内存缓存 + 标记 dirty</strong>，不写数据库。<code>ArtifactManager.flush_all()</code> 在 Controller 后处理阶段（引擎 loop 退出后、终端 SSE 事件推送前）统一持久化。</p>
+<pre class="mermaid"><code>sequenceDiagram
+    participant Agent as Agent（LLM 工具调用）
+    participant Manager as ArtifactManager
+    participant Cache as _cache / _dirty / _new
+    participant Repo as ArtifactRepository
+    participant DB
+
+    Agent-&gt;&gt;Manager: create_artifact(task_plan, v1)
+    Manager-&gt;&gt;Cache: 写入 ArtifactMemory + 标 dirty/new
+    Note over Cache: v1 in memory
+
+    Agent-&gt;&gt;Manager: update_artifact(task_plan, old→new)
+    Manager-&gt;&gt;Cache: content 替换 + v2, 仍 dirty
+    Agent-&gt;&gt;Manager: update_artifact(task_plan, old→new)
+    Manager-&gt;&gt;Cache: content 替换 + v3, 仍 dirty
+
+    Note over Agent,DB: 引擎 loop 退出
+
+    Manager-&gt;&gt;Manager: flush_all(session_id, db_manager)
+    Manager-&gt;&gt;Repo: create_artifact(target_version=3)
+    Repo-&gt;&gt;DB: INSERT artifact + ArtifactVersion(v=3)
+    Note over DB: v1 / v2 不产生记录&lt;br/&gt;版本号稀疏</code></pre>
+<h3 id="关键字段">关键字段</h3>
+<p><code>ArtifactManager</code> 持有三个进程内数据结构：</p>
 <table>
 <thead>
 <tr>
 <th>字段</th>
 <th>类型</th>
-<th>必填</th>
-<th>默认值</th>
-<th>说明</th>
+<th>作用</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td><code>name</code></td>
-<td>string</td>
-<td>是</td>
-<td>—</td>
-<td>Agent 唯一标识（与文件名无关，以此字段为准）</td>
+<td><code>_cache</code></td>
+<td><code>{session_id: {artifact_id: ArtifactMemory}}</code></td>
+<td>内存快照，含 content/version/metadata</td>
 </tr>
 <tr>
-<td><code>description</code></td>
-<td>string</td>
-<td>否</td>
-<td><code>""</code></td>
-<td>Agent 描述，注入到 <code>&lt;available_subagents&gt;</code> 列表中</td>
+<td><code>_dirty</code></td>
+<td><code>set[(session_id, artifact_id)]</code></td>
+<td>需要 flush 的条目</td>
 </tr>
 <tr>
-<td><code>tools</code></td>
-<td>dict</td>
-<td>否</td>
-<td><code>{}</code></td>
-<td>工具白名单 + 权限覆盖，格式 <code>{tool_name: auto\|confirm}</code></td>
-</tr>
-<tr>
-<td><code>model</code></td>
-<td>string</td>
-<td>否</td>
-<td><code>"qwen3.6-plus-no-thinking"</code></td>
-<td>引用 <code>config/models/models.yaml</code> 中的模型别名</td>
-</tr>
-<tr>
-<td><code>max_tool_rounds</code></td>
-<td>int</td>
-<td>否</td>
-<td><code>3</code></td>
-<td>最大工具调用轮数，超过后注入系统提示要求总结</td>
-</tr>
-<tr>
-<td><code>internal</code></td>
-<td>bool</td>
-<td>否</td>
-<td><code>false</code></td>
-<td>内部 Agent，不出现在 <code>call_subagent</code> 的可用候选列表中</td>
+<td><code>_new</code></td>
+<td><code>set[(session_id, artifact_id)]</code></td>
+<td>执行期间新建（未入 DB）</td>
 </tr>
 </tbody>
 </table>
-<h3 id="工具权限覆盖">工具权限覆盖</h3>
-<p><code>tools</code> 字段不仅是工具白名单，也是 per-agent 的权限覆盖：</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="nt">tools</span><span class="p">:</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="w">  </span><span class="nt">web_search</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">auto</span><span class="w">       </span><span class="c1"># 该 agent 自动执行 web_search</span>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="w">  </span><span class="nt">web_fetch</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">confirm</span><span class="w">     </span><span class="c1"># 该 agent 执行 web_fetch 前需用户确认</span>
-</code></pre></div>
-<p>引擎执行工具时的权限决策逻辑：</p>
-<ol>
-<li>检查 agent 配置中该工具的权限值（<code>agents[agent_name].tools[tool_name]</code>）</li>
-<li>如未配置，回退到工具自身的默认权限（<code>tool.permission</code>）</li>
-<li>如果最终权限为 <code>CONFIRM</code> 且工具不在 <code>always_allowed_tools</code> 中 → 触发权限中断</li>
-</ol>
-<h2 id="role-prompt-设计">Role Prompt 设计</h2>
-<p>YAML frontmatter 之后的 Markdown body 是 Agent 的角色提示词，会作为 system prompt 的第一层注入到每次 LLM 调用中。</p>
-<p>以 <code>lead_agent.md</code> 为例：</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>---
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>name: lead_agent
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="gu">...</span>
-<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="gu">---</span>
-<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>
-<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>&lt;role&gt;
-<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a>You are lead_agent, the Lead Agent coordinating a multi-agent system.
-<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a>
-<a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a><span class="gs">**Execution Flow:**</span>
-<a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a><span class="k">1.</span> <span class="gs">**Analyze Request**</span> — Determine complexity
-<a id="__codelineno-4-11" name="__codelineno-4-11" href="#__codelineno-4-11"></a><span class="k">2.</span> <span class="gs">**Plan Tasks**</span> — Create task_plan if needed
-<a id="__codelineno-4-12" name="__codelineno-4-12" href="#__codelineno-4-12"></a><span class="k">3.</span> <span class="gs">**Execute**</span> — Call sub-agents or work directly
-<a id="__codelineno-4-13" name="__codelineno-4-13" href="#__codelineno-4-13"></a><span class="k">4.</span> <span class="gs">**Integrate**</span> — Update result artifact with findings
-<a id="__codelineno-4-14" name="__codelineno-4-14" href="#__codelineno-4-14"></a><span class="k">5.</span> <span class="gs">**Iterate**</span> — Refine based on progress and feedback
-<a id="__codelineno-4-15" name="__codelineno-4-15" href="#__codelineno-4-15"></a>&lt;/role&gt;
-<a id="__codelineno-4-16" name="__codelineno-4-16" href="#__codelineno-4-16"></a>
-<a id="__codelineno-4-17" name="__codelineno-4-17" href="#__codelineno-4-17"></a>&lt;task_plan&gt;
-<a id="__codelineno-4-18" name="__codelineno-4-18" href="#__codelineno-4-18"></a>For tasks requiring multiple steps or sub-agent calls, create a task_plan artifact...
-<a id="__codelineno-4-19" name="__codelineno-4-19" href="#__codelineno-4-19"></a>&lt;/task_plan&gt;
-<a id="__codelineno-4-20" name="__codelineno-4-20" href="#__codelineno-4-20"></a>
-<a id="__codelineno-4-21" name="__codelineno-4-21" href="#__codelineno-4-21"></a>&lt;artifacts&gt;
-<a id="__codelineno-4-22" name="__codelineno-4-22" href="#__codelineno-4-22"></a>You can create MULTIPLE result artifacts...
-<a id="__codelineno-4-23" name="__codelineno-4-23" href="#__codelineno-4-23"></a>&lt;/artifacts&gt;
-</code></pre></div>
-<p><strong>编写建议：</strong></p>
+<p><code>_new</code> 与 <code>_dirty</code> 的区别决定 flush 路径：<code>_new</code> → <code>repo.create_artifact</code>，否则 → <code>repo.upsert_artifact_content</code>（传 <code>target_version=memory.current_version</code>）。</p>
+<h3 id="flush-弹性">Flush 弹性</h3>
+<p><code>flush_one()</code> 在 <code>db_manager</code> 可用时走 <code>with_retry()</code>：每次 attempt 创建独立 session，捕获 <code>DuplicateError / IntegrityError</code> 视为"前次 attempt 已提交"视作成功。这保证了终端事件之前 artifact 一定落盘，即使遇到 DB 瞬断也能恢复。</p>
+<h3 id="版本号稀疏的后果">版本号稀疏的后果</h3>
+<p>执行期间模型可能对同一 artifact 连续 update 三次（v1 → v2 → v3 in memory），flush 时 DB 只产生一条 <code>ArtifactVersion(version=3)</code> 记录。用户视角：</p>
 <ul>
-<li>用 XML 标签分隔不同关注点（<code>&lt;role&gt;</code>, <code>&lt;task_plan&gt;</code>, <code>&lt;output_format&gt;</code> 等）</li>
-<li>明确职责边界（"你是什么"、"你不做什么"）</li>
-<li>定义输出格式（减少 LLM 输出的不确定性）</li>
-<li>设置停止条件（如 search_agent 的 "Maximum 3 search iterations"）</li>
+<li><code>list_versions()</code> 返回的版本号列表可能是 <code>[1, 3, 7, 8]</code> — 中间版本是不可恢复的</li>
+<li>对比历史只能在<strong>轮次边界</strong>之间做，同一轮内的中间态不保留</li>
+<li>这是预期行为 — 同一轮的中间编辑通常是模型自我修正，无保留价值</li>
 </ul>
-<h2 id="现有-agent-概览">现有 Agent 概览</h2>
+<h2 id="执行期间的-rest-api-读取">执行期间的 REST API 读取</h2>
+<p><code>ArtifactManager._active_managers</code> 是<strong>类级别注册表</strong>（<code>Dict[session_id, ArtifactManager]</code>）：</p>
+<ul>
+<li>引擎执行开始时 <code>manager.set_session(session_id)</code> → <code>register()</code></li>
+<li><code>flush_all()</code> 结束时 <code>unregister()</code></li>
+</ul>
+<p>作用：REST API（<code>GET /artifacts</code>）在引擎执行中被调用时，可通过 <code>ArtifactManager.get_active(session_id)</code> 拿到正在执行的 manager，调用 <code>get_cached_artifacts()</code> 读取未 flush 的内存内容，避免用户看到"陈旧"的 DB 状态。</p>
+<h2 id="operations-语义">Operations 语义</h2>
+<h3 id="create_artifact">create_artifact</h3>
+<ul>
+<li>幂等检查：同时查缓存和 DB，任一存在即拒绝</li>
+<li>成功后 memory 入 <code>_cache</code>，<code>_dirty</code> 和 <code>_new</code> 均置位</li>
+<li>返回 XML：<code>&lt;artifact version="1"&gt;&lt;id&gt;task_plan&lt;/id&gt; Created...&lt;/artifact&gt;</code></li>
+</ul>
+<h3 id="update_artifact分层模糊匹配">update_artifact（分层模糊匹配）</h3>
+<p><code>ArtifactMemory.compute_update()</code> 采用 3 层匹配策略，依次尝试：</p>
+<pre class="mermaid"><code>flowchart TD
+    START[old_str, new_str] --&gt; L0{Layer 0&lt;br/&gt;精确子串匹配}
+    L0 --&gt;|唯一命中| OK0[替换成功]
+    L0 --&gt;|多次命中| FAIL0[拒绝：歧义]
+    L0 --&gt;|未命中| L1{Layer 1&lt;br/&gt;NFKC 归一化 + 精确}
+    L1 --&gt;|唯一命中| OK1[span 映射回原文替换]
+    L1 --&gt;|落在归一化组内部| L2
+    L1 --&gt;|未命中| L2{Layer 2&lt;br/&gt;fuzzysearch 近似}
+    L2 --&gt;|best.dist ≤ 阈值| OK2[Levenshtein 替换]
+    L2 --&gt;|无匹配/歧义/超阈值| FAIL2[拒绝]
+
+    style OK0 fill:#e8f5e9
+    style OK1 fill:#e8f5e9
+    style OK2 fill:#fff3e0
+    style FAIL0 fill:#ffebee
+    style FAIL2 fill:#ffebee</code></pre>
+<p><strong>Layer 1 的归一化转换链</strong>（<code>_normalize_for_match()</code>）：</p>
+<ol>
+<li><strong>1-to-1 字符翻译</strong>：智能引号（<code>""</code> → <code>"</code>）、Unicode 破折号（<code>—</code> → <code>-</code>）、特殊空格（nbsp、ideographic space → <code></code>）</li>
+<li><strong>NFKC 归一化</strong>：全字符串，可能扩展（<code>Ⅳ</code> → <code>IV</code>）或收缩（预组合韩文 → 分解 + 重组）</li>
+<li><strong>行尾空白剥离</strong>：每行 rstrip</li>
+<li><strong>CJK-Latin 边界空格折叠</strong>：<code>中文 word</code> → <code>中文word</code></li>
+</ol>
+<p>关键难点：每个归一化后字符维护 <code>span_map[i] = (start, end)</code> 映射回<strong>原始文本</strong>的位置，替换时用原始位置切片，确保替换结果与原文字符完全一致。匹配起止落在"归一化组"（多字符折叠成一个）内部时拒绝，避免破坏原文。</p>
+<p><strong>Layer 2 阈值</strong>：<code>max_l_dist = max(5, int(len(old_str) * 0.3))</code>，相似度 <code>&lt; 70%</code> 拒绝；存在多个等距最佳匹配时拒绝。</p>
+<h3 id="rewrite_artifact">rewrite_artifact</h3>
+<p>完全替换 content，<code>current_version += 1</code>，不做任何匹配。用于大幅改动（diff 多到 update_artifact 不划算）。</p>
+<h3 id="read_artifact">read_artifact</h3>
+<ul>
+<li>无 version 参数 → 读当前 memory（可能含未 flush 修改）</li>
+<li>指定 version → 走 <code>repo.get_version_content()</code> 查历史表</li>
+</ul>
+<h2 id="sse-实时推送">SSE 实时推送</h2>
+<p>每次 artifact 操作成功后，<code>ArtifactManager.build_snapshot()</code> 构建完整快照（含 content），通过 <code>ToolResult.metadata["artifact_snapshot"]</code> 随 <code>tool_complete</code> 事件推送到前端。前端由此在执行期间实时看到 artifact 变化，无需等待执行结束后再 REST 拉取。</p>
+<p>REST API 在执行期间的一致性<strong>按接口分</strong>：</p>
 <table>
 <thead>
 <tr>
-<th>Agent</th>
-<th>职责</th>
-<th>工具</th>
-<th>模型</th>
-<th>最大轮数</th>
-<th>内部</th>
+<th>REST 接口</th>
+<th>执行中行为</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td><code>lead_agent</code></td>
-<td>任务协调、规划、Artifact 管理、subagent 路由</td>
-<td>create/update/rewrite/read_artifact (auto), call_subagent (auto)</td>
-<td>qwen3.6-plus</td>
-<td>100</td>
-<td>否</td>
+<td><code>GET /artifacts</code> (列表)</td>
+<td>✅ <code>list_artifacts()</code> 合并 DB 和内存 dirty/new 条目</td>
 </tr>
 <tr>
-<td><code>search_agent</code></td>
-<td>Web 搜索，信息检索</td>
-<td>web_search (auto)</td>
-<td>qwen3.6-plus-no-thinking</td>
-<td>3</td>
-<td>否</td>
+<td><code>GET /artifacts/{id}</code> 的当前内容</td>
+<td>✅ <code>ArtifactManager.get_active()</code> overlay 内存态</td>
 </tr>
 <tr>
-<td><code>crawl_agent</code></td>
-<td>网页内容提取与清洗</td>
-<td>web_fetch (confirm)</td>
-<td>qwen3.6-plus-no-thinking</td>
-<td>3</td>
-<td>否</td>
+<td><code>GET /artifacts/{id}</code> 返回的 <code>versions[]</code></td>
+<td>❌ DB-only — 未 flush 的中间版本不可见</td>
 </tr>
 <tr>
-<td><code>compact_agent</code></td>
-<td>对话摘要生成（Compaction）</td>
-<td>无</td>
-<td>qwen3.6-plus-no-thinking</td>
-<td>0</td>
-<td>是</td>
+<td><code>GET /versions/{version}</code></td>
+<td>❌ DB-only — 未 flush 的版本返回 404</td>
+</tr>
+<tr>
+<td><code>GET /export</code> (docx)</td>
+<td>❌ DB-only — 导出最后一次已 flush 的快照</td>
 </tr>
 </tbody>
 </table>
-<h3 id="角色分工">角色分工</h3>
+<p>前端通过"流式执行期间隐藏版本选择器和 export 入口"规避 DB-only 接口的滞后问题；列表和当前内容通道在执行期间与 SSE 保持一致。</p>
+<h2 id="upload-旁路">Upload 旁路</h2>
+<p>用户上传文件（<code>POST /artifacts/upload</code>）走 <code>create_from_upload()</code>，<strong>绕过 write-back</strong>，直接调用 <code>repo.create_artifact()</code> 立即 commit。原因：</p>
 <ul>
-<li><strong>lead_agent</strong> 是唯一与用户直接交互的 Agent，也是唯一能创建/修改 Artifact 的 Agent</li>
-<li><strong>search_agent</strong> 和 <strong>crawl_agent</strong> 是执行型 subagent，由 lead_agent 通过 <code>call_subagent</code> 分发任务</li>
-<li><strong>compact_agent</strong> 是内部 Agent，由 <code>CompactionManager</code> 直接调用，不参与正常的引擎循环</li>
+<li>上传不在 engine loop 内，没有"折叠多次编辑"的需求</li>
+<li>上传用户期望是同步操作（文件传完就该可用），write-back 语义不符合</li>
+<li>文件名中特殊字符经 <code>re.sub(r'[^\w\-.]', '_', filename)</code> 清洗后作为 artifact_id，冲突时追加 <code>_1</code> / <code>_2</code> 后缀自动去重</li>
 </ul>
-<h2 id="agent-协作模型">Agent 协作模型</h2>
-<pre class="mermaid"><code>sequenceDiagram
-    participant User
-    participant Lead as lead_agent
-    participant Sub as search/crawl_agent
-
-    User-&gt;&gt;Lead: 用户请求
-    Lead-&gt;&gt;Lead: 分析任务, 创建 task_plan
-
-    Lead-&gt;&gt;Sub: call_subagent(instruction)
-    Note over Lead,Sub: current_agent 切换为 subagent
-
-    Sub-&gt;&gt;Sub: 执行工具 (web_search / web_fetch)
-    Sub--&gt;&gt;Lead: 返回结果 (subagent_result XML)
-    Note over Lead,Sub: current_agent 切回 lead_agent
-
-    Lead-&gt;&gt;Lead: 整合结果, 更新 Artifact
-    Lead--&gt;&gt;User: 最终响应</code></pre>
-<p><strong>协作流程：</strong></p>
-<ol>
-<li><strong>Lead 分发</strong>：Lead 调用 <code>call_subagent</code> 工具，提供 <code>agent_name</code> 和 <code>instruction</code></li>
-<li><strong>Agent 切换</strong>：引擎将 <code>state["current_agent"]</code> 设为目标 subagent，instruction 作为 <code>SUBAGENT_INSTRUCTION</code> 事件注入</li>
-<li><strong>Sub 执行</strong>：Subagent 不看对话历史，只看当前请求中按 <code>agent_name</code> 过滤的所有事件（instruction、LLM 响应、tool results）。如果同一请求内 Lead 两次调用同一个 subagent，第二次调用会看到第一次的完整事件上下文</li>
-<li><strong>结果回传</strong>：Subagent 无工具调用时，响应打包为 <code>&lt;subagent_result&gt;</code> XML，作为 <code>call_subagent</code> 的 tool_result 返回给 Lead</li>
-<li><strong>Lead 继续</strong>：Lead 看到 tool_result 后决定下一步（继续分发、整合结果、或完成）</li>
-</ol>
-<h2 id="agent-注册与加载">Agent 注册与加载</h2>
-<h3 id="加载机制">加载机制</h3>
-<p><code>load_all_agents()</code>（<code>src/agents/loader.py</code>）在服务启动时扫描 <code>config/agents/</code> 目录：</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="k">def</span><span class="w"> </span><span class="nf">load_all_agents</span><span class="p">(</span><span class="n">agents_dir</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">AgentConfig</span><span class="p">]:</span>
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>    <span class="c1"># 默认从 {project_root}/config/agents/ 加载</span>
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>    <span class="c1"># 遍历所有 .md 文件，按 sorted() 顺序</span>
-<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>    <span class="c1"># 解析 YAML frontmatter + MD body</span>
-<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>    <span class="c1"># 返回 {agent_name: AgentConfig} 字典</span>
-</code></pre></div>
-<ul>
-<li>文件名不重要，以 frontmatter 中的 <code>name</code> 字段为准</li>
-<li>单个文件解析失败不影响其他 agent 的加载（错误会 log）</li>
-<li>加载结果传递给 <code>execute_loop()</code> 的 <code>agents</code> 参数</li>
-</ul>
-<h3 id="单文件解析">单文件解析</h3>
-<p><code>load_agent(md_path)</code> 的解析逻辑：</p>
-<ol>
-<li>检查文件以 <code>---</code> 开头</li>
-<li>找到第二个 <code>---</code>，之间的内容用 <code>yaml.safe_load</code> 解析为 frontmatter</li>
-<li>第二个 <code>---</code> 之后的内容作为 <code>role_prompt</code>（strip 后赋值）</li>
-</ol>
+<p>上传 artifact 的 <code>source="user_upload"</code>，在 Artifact Inventory 中与 agent 创建的条目区分展示。</p>
 <h2 id="design-decisions">Design Decisions</h2>
-<h3 id="为什么-agent-是数据不是类">为什么 Agent 是数据不是类</h3>
+<h3 id="为什么-write-back-而非即时写入">为什么 Write-Back 而非即时写入</h3>
 <ul>
-<li><strong>降低扩展门槛</strong>：添加新 Agent 只需创建一个 <code>.md</code> 文件，不需要理解 Python 代码结构</li>
-<li><strong>热加载潜力</strong>：配置文件的修改不需要改动代码，未来可以实现运行时重载</li>
-<li><strong>关注点分离</strong>：Agent 的行为完全由提示词决定，执行逻辑统一在引擎中处理</li>
-<li><strong>可审查性</strong>：所有 Agent 的配置集中在 <code>config/agents/</code>，一目了然</li>
+<li><strong>减少 DB 写入</strong>：长任务中 Task Plan 可能被更新 10+ 次，直写会放大写压力</li>
+<li><strong>简化 version 语义</strong>：稀疏版本号自然对应"轮次边界的快照"，版本回溯的粒度与用户感知一致</li>
+<li><strong>单 artifact 原子性</strong>：每个 dirty artifact 用独立事务 + <code>with_retry()</code> 落盘，瞬断仅影响该条，不会把成功的条目也回滚</li>
+<li><strong>代价</strong>：引擎崩溃 → 内存修改丢失（但这一轮的 user 消息也未写入 response，整体一致）</li>
 </ul>
-<h3 id="完成路由不对称性的意图">完成路由不对称性的意图</h3>
+<p>注意：write-back 的原子性<strong>仅在单 artifact 粒度成立</strong>。<code>flush_all()</code> 逐个 flush，先成功的条目已 commit 落盘；<code>failed</code> 列表非空时 Controller 会推 <code>error</code> 终态事件，但<strong>不会回滚</strong>先前成功写入的 artifact。也就是说可能出现"3 个 dirty artifact，2 个成功、1 个失败"的部分成功状态。这个设计优先 retry 粒度（避免整批因单条失败重试）而非"一整轮的 all-or-nothing"。</p>
+<h3 id="为什么版本号稀疏可接受">为什么版本号稀疏可接受</h3>
 <ul>
-<li><strong>Lead 是唯一出口</strong>：只有 Lead Agent 的无工具调用才会终止执行循环</li>
-<li><strong>Subagent 必须回传</strong>：Subagent 完成后其响应作为工具结果返回给 Lead，由 Lead 决定下一步</li>
-<li><strong>统一控制流</strong>：所有的任务调度、结果整合、最终响应都经过 Lead，避免 subagent 直接对用户输出</li>
-<li>这个设计使得 Lead 拥有全局视角，可以在多个 subagent 结果之间做出取舍和整合</li>
+<li>中间态通常是模型自我修正（写错 → 改对），保留无价值</li>
+<li>若需严格版本历史，可改为每次 operation 直写 version 表，但 write-back 语义会被破坏</li>
+<li>稀疏版本号也暗示"一轮一个 snapshot"的心智模型，对用户更直观</li>
+</ul>
+<h3 id="为什么-task-plan-走-system-prompt-而非-inventory">为什么 Task Plan 走 System Prompt 而非 Inventory</h3>
+<ul>
+<li>Inventory 只给预览（200 字符），Task Plan 通常包含完整步骤列表，截断会丢失关键状态</li>
+<li>System Prompt 保证每次 LLM 调用都能看到完整 Task Plan，无需模型记忆或 <code>read_artifact</code> 重读</li>
+<li>这是用"配置化双 Artifact 约定"换取"模型任务追踪能力"的核心交易点</li>
+</ul>
+<h3 id="为什么-upload-要旁路-write-back">为什么 Upload 要旁路 Write-Back</h3>
+<ul>
+<li>Upload 不在 engine 事务边界内，若延迟 flush 则用户看到"上传成功但列表无此项"的时间窗</li>
+<li>Upload 是幂等的用户操作，即时 commit 更符合心智模型</li>
+<li>与 agent 创建的 artifact 走不同路径也让 <code>source</code> 字段语义清晰</li>
 </ul>
 
 

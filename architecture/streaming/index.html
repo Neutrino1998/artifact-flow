@@ -1,0 +1,1770 @@
+
+<!doctype html>
+<html lang="zh" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Pi-style 可配置 Agent 引擎 + 双 Artifact 架构的多智能体 SaaS">
+      
+      
+      
+        <link rel="canonical" href="https://neutrino1998.github.io/artifact-flow/architecture/streaming/">
+      
+      
+        <link rel="prev" href="../data-layer/">
+      
+      
+        <link rel="next" href="../concurrency/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>Streaming - ArtifactFlow</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../stylesheets/custom.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="custom">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#sse-流式传输" class="md-skip">
+          跳转至
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="页眉">
+    <a href="../.." title="ArtifactFlow" class="md-header__button md-logo" aria-label="ArtifactFlow" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            ArtifactFlow
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Streaming
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="custom"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="custom" data-md-color-accent="custom"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="搜索" placeholder="搜索" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="查找">
+        
+        <button type="reset" class="md-search__icon md-icon" title="清空当前内容" aria-label="清空当前内容" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            正在初始化搜索引擎
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/Neutrino1998/artifact-flow" title="前往仓库" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    Neutrino1998/artifact-flow
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="标签" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../deployment/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Deployment
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../overview/" class="md-tabs__link">
+          
+  
+  
+  Architecture
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../guides/add-agent/" class="md-tabs__link">
+          
+  
+  
+  Guides
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../frontend/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Frontend
+
+      </a>
+    </li>
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="导航栏" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="ArtifactFlow" class="md-nav__button md-logo" aria-label="ArtifactFlow" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    ArtifactFlow
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/Neutrino1998/artifact-flow" title="前往仓库" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    Neutrino1998/artifact-flow
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../deployment/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deployment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Architecture
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../overview/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../engine/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Engine
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../agents/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Agents
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tools/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tools
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../artifacts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Artifacts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../data-layer/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data Layer
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Streaming
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Streaming
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="目录">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      目录
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#责任边界" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        责任边界
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#统一事件模型" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        统一事件模型
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#stream-生命周期" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Stream 生命周期
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#streamtransport-protocol" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        StreamTransport Protocol
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#inmemorystreamtransport单进程" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        InMemoryStreamTransport（单进程）
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#redisstreamtransport分布式" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        RedisStreamTransport（分布式）
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sse-端点" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SSE 端点
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sse-格式" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SSE 格式
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#last-event-id-断线续传" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Last-Event-ID 断线续传
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#与-concurrency-的协作点" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        与 Concurrency 的协作点
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#design-decisions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Design Decisions
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Design Decisions">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#为什么-llm_chunk-不持久化" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        为什么 llm_chunk 不持久化
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#为什么选-fetch--readablestream-而非-eventsource" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        为什么选 fetch + ReadableStream 而非 EventSource
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#为什么两种-transport-共享-protocol" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        为什么两种 Transport 共享 Protocol
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#为什么-redis-用-stream-而非-pubsub" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        为什么 Redis 用 Stream 而非 Pub/Sub
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../concurrency/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Concurrency
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../observability/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Observability
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Guides
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Guides
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/add-agent/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Add Agent
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/add-tool/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Add Tool
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/add-model/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Add Model
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/api-reference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../frontend/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Frontend
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="目录">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      目录
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#责任边界" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        责任边界
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#统一事件模型" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        统一事件模型
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#stream-生命周期" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Stream 生命周期
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#streamtransport-protocol" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        StreamTransport Protocol
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#inmemorystreamtransport单进程" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        InMemoryStreamTransport（单进程）
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#redisstreamtransport分布式" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        RedisStreamTransport（分布式）
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sse-端点" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SSE 端点
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sse-格式" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SSE 格式
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#last-event-id-断线续传" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Last-Event-ID 断线续传
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#与-concurrency-的协作点" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        与 Concurrency 的协作点
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#design-decisions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Design Decisions
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Design Decisions">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#为什么-llm_chunk-不持久化" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        为什么 llm_chunk 不持久化
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#为什么选-fetch--readablestream-而非-eventsource" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        为什么选 fetch + ReadableStream 而非 EventSource
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#为什么两种-transport-共享-protocol" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        为什么两种 Transport 共享 Protocol
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#为什么-redis-用-stream-而非-pubsub" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        为什么 Redis 用 Stream 而非 Pub/Sub
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="sse-流式传输">SSE 流式传输</h1>
+<blockquote>
+<p>统一事件类型 + 两种 Transport 实现 + Last-Event-ID 断线续传 — 把引擎的执行过程实时投射到前端。</p>
+</blockquote>
+<h2 id="责任边界">责任边界</h2>
+<p>Streaming 层只关心"事件如何从引擎传到浏览器"：</p>
+<table>
+<thead>
+<tr>
+<th>在本章</th>
+<th>在别处</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>StreamEventType</code> 枚举与事件数据结构</td>
+<td>事件的 DB 持久化与回看 → <a href="../observability/">observability.md</a></td>
+</tr>
+<tr>
+<td><code>StreamTransport</code> Protocol + InMemory / Redis 实现</td>
+<td>Interrupt / Cancel 的运行时语义 → <a href="../concurrency/#runtimestore">concurrency.md</a></td>
+</tr>
+<tr>
+<td>SSE 协议格式、心跳、Last-Event-ID 续传</td>
+<td>Lease / 心跳续租 → <a href="../concurrency/#心跳续租">concurrency.md</a></td>
+</tr>
+<tr>
+<td><code>/stream/{stream_id}</code> 端点行为</td>
+<td>业务层消费（stores / hooks） → <a href="../../frontend/">../frontend.md</a></td>
+</tr>
+</tbody>
+</table>
+<p>Streaming 与 Concurrency 的分界线很关键：RuntimeStore 负责"对话执行中要不要继续、要不要等人"，StreamTransport 负责"已经发生的事件怎么送达客户端"。两者通过 <code>lease_check_key</code> 发生弱耦合（Transport 会检查 lease 是否还在，见下文）。</p>
+<h2 id="统一事件模型">统一事件模型</h2>
+<p><code>src/core/events.py</code> 定义所有层共用的事件类型：</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="k">class</span><span class="w"> </span><span class="nc">StreamEventType</span><span class="p">(</span><span class="n">Enum</span><span class="p">):</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>    <span class="c1"># Controller 层</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>    <span class="n">METADATA</span> <span class="o">=</span> <span class="s2">&quot;metadata&quot;</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>    <span class="n">COMPLETE</span> <span class="o">=</span> <span class="s2">&quot;complete&quot;</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>    <span class="n">CANCELLED</span> <span class="o">=</span> <span class="s2">&quot;cancelled&quot;</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>    <span class="n">ERROR</span> <span class="o">=</span> <span class="s2">&quot;error&quot;</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>    <span class="c1"># Agent 层</span>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>    <span class="n">AGENT_START</span> <span class="o">=</span> <span class="s2">&quot;agent_start&quot;</span>
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>    <span class="n">LLM_CHUNK</span> <span class="o">=</span> <span class="s2">&quot;llm_chunk&quot;</span>          <span class="c1"># 仅 SSE，不持久化</span>
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>    <span class="n">LLM_COMPLETE</span> <span class="o">=</span> <span class="s2">&quot;llm_complete&quot;</span>
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>    <span class="n">AGENT_COMPLETE</span> <span class="o">=</span> <span class="s2">&quot;agent_complete&quot;</span>
+<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>
+<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>    <span class="c1"># 工具 / 权限层</span>
+<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a>    <span class="n">TOOL_START</span> <span class="o">=</span> <span class="s2">&quot;tool_start&quot;</span>
+<a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a>    <span class="n">TOOL_COMPLETE</span> <span class="o">=</span> <span class="s2">&quot;tool_complete&quot;</span>
+<a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a>    <span class="n">PERMISSION_REQUEST</span> <span class="o">=</span> <span class="s2">&quot;permission_request&quot;</span>
+<a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a>    <span class="n">PERMISSION_RESULT</span> <span class="o">=</span> <span class="s2">&quot;permission_result&quot;</span>
+<a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a>    <span class="n">COMPACTION_WAIT</span> <span class="o">=</span> <span class="s2">&quot;compaction_wait&quot;</span>
+<a id="__codelineno-0-20" name="__codelineno-0-20" href="#__codelineno-0-20"></a>
+<a id="__codelineno-0-21" name="__codelineno-0-21" href="#__codelineno-0-21"></a>    <span class="c1"># 输入 / 消息注入层</span>
+<a id="__codelineno-0-22" name="__codelineno-0-22" href="#__codelineno-0-22"></a>    <span class="n">USER_INPUT</span> <span class="o">=</span> <span class="s2">&quot;user_input&quot;</span>
+<a id="__codelineno-0-23" name="__codelineno-0-23" href="#__codelineno-0-23"></a>    <span class="n">QUEUED_MESSAGE</span> <span class="o">=</span> <span class="s2">&quot;queued_message&quot;</span>
+<a id="__codelineno-0-24" name="__codelineno-0-24" href="#__codelineno-0-24"></a>    <span class="n">SUBAGENT_INSTRUCTION</span> <span class="o">=</span> <span class="s2">&quot;subagent_instruction&quot;</span>
+</code></pre></div>
+<p>所有发射点都用同一个枚举（前端 <code>types/events.ts</code> 镜像此列表），避免引擎/控制器/工具层各自起名。每个事件类型的 <code>data</code> 字段约定见 <a href="../observability/#事件目录">observability.md → 事件目录</a>.</p>
+<p><code>ExecutionEvent</code> 是内存中流转的统一容器：</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nd">@dataclass</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="k">class</span><span class="w"> </span><span class="nc">ExecutionEvent</span><span class="p">:</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>    <span class="n">event_type</span><span class="p">:</span> <span class="nb">str</span>                  <span class="c1"># StreamEventType.value</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>    <span class="n">agent_name</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>    <span class="n">data</span><span class="p">:</span> <span class="n">Any</span> <span class="o">=</span> <span class="kc">None</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>    <span class="n">event_id</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span>   <span class="c1"># 持久化前由 Controller 赋值，作为幂等键</span>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>    <span class="n">created_at</span><span class="p">:</span> <span class="n">datetime</span> <span class="o">=</span> <span class="n">field</span><span class="p">(</span><span class="n">default_factory</span><span class="o">=</span><span class="n">datetime</span><span class="o">.</span><span class="n">now</span><span class="p">)</span>
+</code></pre></div>
+<p><code>agent_name</code> 在 Agent 层事件里标注是 lead / search / crawl / compact，Controller 层事件为 <code>None</code>。</p>
+<h2 id="stream-生命周期">Stream 生命周期</h2>
+<p>一次 <code>POST /chat</code> 的事件流从 Controller 起笔，经 Transport 缓冲，到 <code>/stream/{stream_id}</code> 消费，完整生命周期如下：</p>
+<pre class="mermaid"><code>sequenceDiagram
+    participant Client
+    participant ChatAPI as POST /chat
+    participant Controller
+    participant Transport as StreamTransport
+    participant Engine
+    participant StreamAPI as GET /stream/{id}
+
+    Client-&gt;&gt;ChatAPI: user_input
+    ChatAPI-&gt;&gt;Controller: submit(...)
+    Controller-&gt;&gt;Transport: create_stream(stream_id, owner_user_id, lease_check_key)
+    ChatAPI--&gt;&gt;Client: {stream_url: "/stream/{msg_id}"}
+
+    Client-&gt;&gt;StreamAPI: GET /stream/{msg_id}&lt;br/&gt;(Authorization + Last-Event-ID)
+    StreamAPI-&gt;&gt;Transport: consume_events(stream_id, last_event_id)
+
+    loop 引擎每轮
+        Engine-&gt;&gt;Controller: emit(ExecutionEvent)
+        Controller-&gt;&gt;Transport: push_event({type, data, ...})
+        Transport--&gt;&gt;StreamAPI: event
+        StreamAPI--&gt;&gt;Client: event: tool_start\ndata: {...}\n\n
+    end
+
+    Engine--&gt;&gt;Controller: 终止（complete/cancelled/error）
+    Controller-&gt;&gt;Transport: push_event(terminal)
+    Transport--&gt;&gt;StreamAPI: terminal event
+    StreamAPI--&gt;&gt;Client: event: complete\n\n
+    StreamAPI-&gt;&gt;Transport: close_stream(stream_id)</code></pre>
+<p><code>stream_id</code> 与 <code>message_id</code> 一对一（用同一个字符串），客户端拿到 <code>stream_url</code> 后立即 GET 订阅。中间任何时刻 Client 掉线重连，都带上最后收到的 <code>id</code> 作为 <code>Last-Event-ID</code> header 即可续传。</p>
+<h2 id="streamtransport-protocol">StreamTransport Protocol</h2>
+<p><code>src/api/services/stream_transport.py</code> 定义了抽象接口：</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="nd">@runtime_checkable</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="k">class</span><span class="w"> </span><span class="nc">StreamTransport</span><span class="p">(</span><span class="n">Protocol</span><span class="p">):</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">create_stream</span><span class="p">(</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>        <span class="bp">self</span><span class="p">,</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>        <span class="n">stream_id</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>        <span class="n">owner_user_id</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>        <span class="n">lease_check_key</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>        <span class="n">lease_expected_owner</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>    <span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span> <span class="o">...</span>
+<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a>
+<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a>    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">push_event</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">stream_id</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">event</span><span class="p">:</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span> <span class="o">...</span>
+<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a>
+<a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a>    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">consume_events</span><span class="p">(</span>
+<a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a>        <span class="bp">self</span><span class="p">,</span>
+<a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a>        <span class="n">stream_id</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+<a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a>        <span class="n">heartbeat_interval</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">float</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-2-17" name="__codelineno-2-17" href="#__codelineno-2-17"></a>        <span class="n">user_id</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-2-18" name="__codelineno-2-18" href="#__codelineno-2-18"></a>        <span class="n">last_event_id</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-2-19" name="__codelineno-2-19" href="#__codelineno-2-19"></a>    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">AsyncGenerator</span><span class="p">[</span><span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">],</span> <span class="kc">None</span><span class="p">]:</span> <span class="o">...</span>
+<a id="__codelineno-2-20" name="__codelineno-2-20" href="#__codelineno-2-20"></a>
+<a id="__codelineno-2-21" name="__codelineno-2-21" href="#__codelineno-2-21"></a>    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">close_stream</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">stream_id</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span> <span class="o">...</span>
+<a id="__codelineno-2-22" name="__codelineno-2-22" href="#__codelineno-2-22"></a>    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">get_stream_status</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">stream_id</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">]:</span> <span class="o">...</span>
+<a id="__codelineno-2-23" name="__codelineno-2-23" href="#__codelineno-2-23"></a>    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">is_stream_alive</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">stream_id</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span> <span class="o">...</span>
+</code></pre></div>
+<p>Protocol 方法全部 async — 即使 InMemory 实现实际是同步 dict 操作，也保留 async 以兼容 Redis 实现。</p>
+<h2 id="inmemorystreamtransport单进程">InMemoryStreamTransport（单进程）</h2>
+<p><code>src/api/services/stream_transport.py</code> — 开发与单实例部署使用。</p>
+<table>
+<thead>
+<tr>
+<th>机制</th>
+<th>实现</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>缓冲</td>
+<td><code>asyncio.Queue</code> per stream</td>
+</tr>
+<tr>
+<td>状态</td>
+<td><code>pending / streaming / closed</code></td>
+</tr>
+<tr>
+<td>生产者→消费者</td>
+<td><code>Queue.put</code> / <code>Queue.get</code>，无背压</td>
+</tr>
+<tr>
+<td>心跳</td>
+<td><code>asyncio.wait_for(queue.get, timeout=heartbeat_interval)</code> 超时即 yield <code>{"type": "__ping__"}</code></td>
+</tr>
+<tr>
+<td>Last-Event-ID 续传</td>
+<td><strong>不支持</strong>（无持久化游标）</td>
+</tr>
+<tr>
+<td>TTL</td>
+<td>未被消费者接上的 stream 30s 自动清理</td>
+</tr>
+<tr>
+<td>终止清理</td>
+<td><code>close_stream()</code> 后延迟 5s 再删除 context（给 in-flight consumer 留窗口）</td>
+</tr>
+</tbody>
+</table>
+<p>消费者断线但 stream 未终止时，<code>consume_events</code> 的 finally 块把状态从 <code>streaming</code> 回退到 <code>pending</code> 并重启 TTL，允许短时间内重连（但 InMemory 没有游标，重连只能从当前时刻往后，之前错过的事件丢失）。这是 InMemory 与 Redis 的核心差别。</p>
+<h2 id="redisstreamtransport分布式">RedisStreamTransport（分布式）</h2>
+<p><code>src/api/services/redis_stream_transport.py</code> — 多 Worker / 多 Pod 生产部署。</p>
+<p><strong>Key 设计</strong>（hash tag 保证 Cluster 下同 stream 的 key 落同一 slot）：</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>类型</th>
+<th>TTL</th>
+<th>用途</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>{af:msg_id}:stream</code></td>
+<td>Stream (XADD)</td>
+<td><code>EXECUTION_TIMEOUT</code>（1800s）</td>
+<td>事件主体</td>
+</tr>
+<tr>
+<td><code>{af:msg_id}:stream_meta</code></td>
+<td>Hash</td>
+<td>同上</td>
+<td>owner、status、consumer_id、lease_check_key、lease_expected_owner</td>
+</tr>
+</tbody>
+</table>
+<p><strong>写入</strong>：</p>
+<ul>
+<li><code>XADD ... MAXLEN ~ 1000</code> — 近似裁剪，限制单 stream 最大事件数（长任务超过会丢最旧事件，前端须在终止前消费完）</li>
+<li><code>_stream_id</code> 字段注入到事件 dict，携带 Redis entry ID（形如 <code>1710000000000-0</code>），作为 SSE <code>id:</code> 行输出</li>
+</ul>
+<p><strong>消费</strong>：</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="n">XREAD</span> <span class="n">BLOCK</span> <span class="n">block_ms</span> <span class="n">COUNT</span> <span class="mi">100</span> <span class="n">STREAMS</span> <span class="p">{</span><span class="n">key</span><span class="p">}</span> <span class="p">{</span><span class="n">cursor</span><span class="p">}</span>
+</code></pre></div>
+<ul>
+<li><code>cursor</code> 初始化为 <code>last_event_id</code>（客户端带来）或 <code>"0-0"</code>（从头）</li>
+<li><code>block_ms</code> 取 <code>heartbeat_interval</code>（默认 15s）；XREAD 返回空即超时 → yield <code>__ping__</code></li>
+<li>Consumer 在接管前生成 <code>consumer_id</code>（8-byte hex），写入 meta Hash；finally 块用 Lua CAS 把 status 回退到 <code>pending</code>，但仅当 <code>consumer_id</code> 仍是自己（防止踢掉已接管的新消费者）</li>
+</ul>
+<p><strong>Lease 感知</strong>（可选）：</p>
+<p>若 <code>create_stream</code> 传入 <code>lease_check_key</code> 和 <code>lease_expected_owner</code>，每次 XREAD 超时时 consumer 会检查 lease 是否仍归预期 owner。Lease 被抢或释放（见 <a href="../concurrency/#心跳续租">concurrency.md → 心跳续租</a>）意味着生产者已退出，此时 consumer 主动发送 error 事件并终止，避免僵尸 SSE 连接挂到 <code>EXECUTION_TIMEOUT</code> 才断。</p>
+<h2 id="sse-端点">SSE 端点</h2>
+<p><code>src/api/routers/stream.py</code>：</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="nd">@router</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;/</span><span class="si">{stream_id}</span><span class="s2">&quot;</span><span class="p">)</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">stream_events</span><span class="p">(</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>    <span class="n">stream_id</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>    <span class="n">request</span><span class="p">:</span> <span class="n">Request</span><span class="p">,</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>    <span class="n">current_user</span><span class="p">:</span> <span class="n">TokenPayload</span> <span class="o">=</span> <span class="n">Depends</span><span class="p">(</span><span class="n">get_current_user</span><span class="p">),</span>
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>    <span class="n">stream_transport</span><span class="p">:</span> <span class="n">StreamTransport</span> <span class="o">=</span> <span class="n">Depends</span><span class="p">(</span><span class="n">get_stream_transport</span><span class="p">),</span>
+<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">StreamingResponse</span>
+</code></pre></div>
+<p><strong>关键行为：</strong></p>
+<ul>
+<li><strong>鉴权</strong>：标准 <code>Authorization: Bearer &lt;JWT&gt;</code> header，不支持 query 参数 token。这迫使前端用 <code>fetch + ReadableStream</code> 实现（EventSource 不支持自定义 header，详见 Design Decisions）</li>
+<li><strong>Last-Event-ID</strong>：从请求 header 读取，透传给 <code>consume_events()</code> 作为 cursor</li>
+<li><strong>响应 header</strong>：</li>
+<li><code>Cache-Control: no-cache</code></li>
+<li><code>Connection: keep-alive</code></li>
+<li><code>X-Accel-Buffering: no</code>（nginx 不缓冲）</li>
+<li><code>media_type: text/event-stream</code></li>
+<li><strong>心跳</strong>：<code>config.SSE_PING_INTERVAL</code>（默认 15s）传给 transport 作为超时阈值；收到 <code>__ping__</code> 转为 SSE comment <code>: ping\n\n</code></li>
+<li><strong>终止检测</strong>：收到 <code>complete / cancelled / error</code> 后关闭连接；客户端 <code>CancelledError</code> 不视为 deny，仅调用 <code>consumer.aclose()</code> 归还 context</li>
+</ul>
+<h2 id="sse-格式">SSE 格式</h2>
+<p><code>src/api/utils/sse.py</code> 负责字节序列化：</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="k">def</span><span class="w"> </span><span class="nf">format_sse_event</span><span class="p">(</span><span class="n">data</span><span class="p">,</span> <span class="n">event</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="nb">id</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">retry</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>    <span class="c1"># event: &lt;name&gt;\n</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>    <span class="c1"># id: &lt;entry_id&gt;\n</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>    <span class="c1"># data: &lt;json&gt;\n\n</span>
+</code></pre></div>
+<p>每条事件输出三行加空行结尾：</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>event: tool_complete
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>id: 1710000003456-0
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>data: {&quot;type&quot;:&quot;tool_complete&quot;,&quot;timestamp&quot;:&quot;2026-04-14T12:00:03&quot;,&quot;agent&quot;:&quot;search_agent&quot;,&quot;data&quot;:{&quot;tool&quot;:&quot;web_search&quot;,&quot;success&quot;:true,&quot;duration_ms&quot;:812,...}}
+</code></pre></div>
+<ul>
+<li><code>event</code> 取 <code>event.type</code>（即 <code>StreamEventType.value</code>），前端可按 event 名分发</li>
+<li><code>id</code> 只有 Redis transport 会填（XADD entry ID）；InMemory 为 None，<code>format_sse_event</code> 跳过 <code>id:</code> 行</li>
+<li><code>data</code> 是单行 JSON；<code>datetime</code> 统一通过 <code>_json_serializer</code> 转 ISO 字符串</li>
+<li>心跳用 SSE comment（<code>: ping\n\n</code>）而不是伪事件，避免污染前端的 event-name 路由</li>
+</ul>
+<h2 id="last-event-id-断线续传">Last-Event-ID 断线续传</h2>
+<p>只有 RedisStreamTransport 支持真正的续传。流程：</p>
+<pre class="mermaid"><code>sequenceDiagram
+    participant Client
+    participant SSE as /stream/{id}
+    participant Redis
+
+    Client-&gt;&gt;SSE: GET (Last-Event-ID: 1710000003456-0)
+    SSE-&gt;&gt;Redis: XREAD STREAMS key "1710000003456-0"
+    Redis--&gt;&gt;SSE: 后续 entries
+    SSE--&gt;&gt;Client: 从断点继续推送</code></pre>
+<p>InMemory 模式下 client 带 <code>Last-Event-ID</code> 也没有影响（transport 忽略），重连后只能收到重连之后的新事件 — 但因为 InMemory 只跑在单实例，客户端重连路径通常也意味着同一进程还在推事件，丢失窗口小。</p>
+<p>跨层的完整可靠性矩阵：</p>
+<table>
+<thead>
+<tr>
+<th>场景</th>
+<th>InMemory</th>
+<th>Redis</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>正常消费</td>
+<td>✅</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>Client 短暂断网 → 重连</td>
+<td>丢失期间事件</td>
+<td>完全续传</td>
+</tr>
+<tr>
+<td>Pod 挂掉 → 另一 Pod 接管</td>
+<td>❌（stream 在原进程内存）</td>
+<td>✅（通过 lease 检测 + 续传）</td>
+</tr>
+<tr>
+<td>生产者崩溃</td>
+<td>stream 孤立 → TTL 清理</td>
+<td>lease 失效 → consumer 主动 error</td>
+</tr>
+</tbody>
+</table>
+<h2 id="与-concurrency-的协作点">与 Concurrency 的协作点</h2>
+<p>Streaming 与 RuntimeStore 是两个独立系统，但在三处握手：</p>
+<ol>
+<li>
+<p><strong>Permission Interrupt 的 SSE 投影</strong>：RuntimeStore 的 <code>wait_for_interrupt()</code> 阻塞引擎时，Controller 在阻塞前已经推了一条 <code>PERMISSION_REQUEST</code> 事件；前端据此弹确认框。用户 <code>POST /chat/{id}/resume</code> 时 Controller 推 <code>PERMISSION_RESULT</code>，引擎恢复。Interrupt 的存活/超时语义属于 RuntimeStore（见 <a href="../concurrency/#interrupt-机制">concurrency.md → Interrupt 机制</a>），Streaming 只负责把两端的状态切换可视化。</p>
+</li>
+<li>
+<p><strong>Cancellation 的终端事件</strong>：<code>request_cancel()</code> 只设标志；真正 emit <code>CANCELLED</code> 是引擎在下一个 checkpoint 发现已取消后由 Controller 推送，然后 <code>close_stream()</code>。</p>
+</li>
+<li>
+<p><strong>Lease 感知的 Redis transport</strong>：<code>create_stream</code> 时 Controller 把当前 lease key + owner 传给 transport，作为"生产者还活着"的探针。这是 transport 层对 concurrency 层的唯一依赖。</p>
+</li>
+</ol>
+<h2 id="design-decisions">Design Decisions</h2>
+<h3 id="为什么-llm_chunk-不持久化">为什么 <code>llm_chunk</code> 不持久化</h3>
+<ul>
+<li>频率极高（每个 token 一次），占 MessageEvent 表空间最大来源</li>
+<li>信息可从 <code>llm_complete</code> 完整恢复（<code>llm_complete.data.content</code> 就是累积的最终文本）</li>
+<li>回看场景只需最终内容，不需要逐字重放</li>
+<li>引擎发射处显式 <code>sse_only=True</code> 标记，Controller 收集 <code>state["events"]</code> 时跳过（<code>src/core/engine.py</code>）</li>
+</ul>
+<h3 id="为什么选-fetch--readablestream-而非-eventsource">为什么选 fetch + ReadableStream 而非 EventSource</h3>
+<ul>
+<li>EventSource 不支持自定义 header — 而 <code>/stream/{stream_id}</code> 必须带 <code>Authorization: Bearer &lt;JWT&gt;</code></li>
+<li>替代方案（把 token 放 query 参数）会导致 token 进入 access log 与浏览器历史记录，泄露风险更高</li>
+<li>fetch API 天然支持 <code>AbortController</code>，断开控制更干净</li>
+<li>代价：前端需手写 event-stream 解析（见 <a href="../../frontend/">../frontend.md</a> 的 <code>lib/sse.ts</code>）</li>
+</ul>
+<h3 id="为什么两种-transport-共享-protocol">为什么两种 Transport 共享 Protocol</h3>
+<ul>
+<li>本地开发、单元测试、Docker Compose 单实例场景不需要 Redis 的复杂度</li>
+<li>生产多实例必须 Redis — 否则 POST /chat 落在 Pod A、GET /stream 落在 Pod B 时后者拿不到事件</li>
+<li>配置驱动切换（<code>REDIS_URL</code> 有值则用 Redis），业务层无感知</li>
+</ul>
+<h3 id="为什么-redis-用-stream-而非-pubsub">为什么 Redis 用 Stream 而非 Pub/Sub</h3>
+<ul>
+<li>Pub/Sub 是 fire-and-forget — 消费者晚到就丢事件，无法支持重连续传</li>
+<li>Redis Stream 自带持久化缓冲 + entry ID，天然匹配 <code>Last-Event-ID</code> 语义</li>
+<li><code>XADD MAXLEN ~ 1000</code> 限制内存占用，一次 30 分钟内的执行产生的事件远低于此</li>
+<li>代价：XREAD BLOCK 轮询比 Pub/Sub 推送延迟略高，但 15s 心跳节奏下不敏感</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  回到页面顶部
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.tabs", "navigation.sections", "navigation.expand", "navigation.top", "search.highlight", "content.code.copy"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "\u5df2\u590d\u5236", "clipboard.copy": "\u590d\u5236", "search.result.more.one": "\u5728\u8be5\u9875\u4e0a\u8fd8\u6709 1 \u4e2a\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.more.other": "\u5728\u8be5\u9875\u4e0a\u8fd8\u6709 # \u4e2a\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.none": "\u6ca1\u6709\u627e\u5230\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.one": "\u627e\u5230 1 \u4e2a\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.other": "# \u4e2a\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.placeholder": "\u952e\u5165\u4ee5\u5f00\u59cb\u641c\u7d22", "search.result.term.missing": "\u7f3a\u5c11", "select.version": "\u9009\u62e9\u5f53\u524d\u7248\u672c"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>

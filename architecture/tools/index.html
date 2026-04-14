@@ -6,17 +6,17 @@
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width,initial-scale=1">
       
-        <meta name="description" content="Multi-Agent Research System Built on LangGraph">
+        <meta name="description" content="Pi-style 可配置 Agent 引擎 + 双 Artifact 架构的多智能体 SaaS">
       
       
       
-        <link rel="canonical" href="https://neutrino.github.io/artifact-flow/architecture/tools/">
+        <link rel="canonical" href="https://neutrino1998.github.io/artifact-flow/architecture/tools/">
       
       
         <link rel="prev" href="../agents/">
       
       
-        <link rel="next" href="../data-layer/">
+        <link rel="next" href="../artifacts/">
       
       
         
@@ -53,6 +53,8 @@
       
     
     
+      <link rel="stylesheet" href="../../stylesheets/custom.css">
+    
     <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
     
       
@@ -69,7 +71,7 @@
     
     
     
-    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="custom">
   
     
     <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
@@ -78,7 +80,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#tool-系统" class="md-skip">
+        <a href="#工具系统" class="md-skip">
           跳转至
         </a>
       
@@ -125,7 +127,7 @@
     
     
     
-    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="custom"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
     
       <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
@@ -135,7 +137,7 @@
     
     
     
-    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="custom" data-md-color-accent="custom"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
     
       <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
@@ -242,32 +244,13 @@
   
   
     <li class="md-tabs__item">
-      <a href="../../frontend/" class="md-tabs__link">
+      <a href="../../deployment/" class="md-tabs__link">
         
   
   
     
   
-  Frontend Guide
-
-      </a>
-    </li>
-  
-
-      
-        
-  
-  
-  
-  
-    <li class="md-tabs__item">
-      <a href="../../request-lifecycle/" class="md-tabs__link">
-        
-  
-  
-    
-  
-  Request Lifecycle
+  Deployment
 
       </a>
     </li>
@@ -284,7 +267,7 @@
     
     
       <li class="md-tabs__item md-tabs__item--active">
-        <a href="../core/" class="md-tabs__link">
+        <a href="../overview/" class="md-tabs__link">
           
   
   
@@ -301,17 +284,18 @@
   
   
   
-    <li class="md-tabs__item">
-      <a href="../../streaming/" class="md-tabs__link">
-        
-  
-  
     
+    
+      <li class="md-tabs__item">
+        <a href="../../guides/add-agent/" class="md-tabs__link">
+          
   
-  Streaming
+  
+  Guides
 
-      </a>
-    </li>
+        </a>
+      </li>
+    
   
 
       
@@ -321,51 +305,13 @@
   
   
     <li class="md-tabs__item">
-      <a href="../../extension-guide/" class="md-tabs__link">
+      <a href="../../frontend/" class="md-tabs__link">
         
   
   
     
   
-  Extension Guide
-
-      </a>
-    </li>
-  
-
-      
-        
-  
-  
-  
-  
-    <li class="md-tabs__item">
-      <a href="../../api/" class="md-tabs__link">
-        
-  
-  
-    
-  
-  API Reference
-
-      </a>
-    </li>
-  
-
-      
-        
-  
-  
-  
-  
-    <li class="md-tabs__item">
-      <a href="../../faq/" class="md-tabs__link">
-        
-  
-  
-    
-  
-  FAQ
+  Frontend
 
       </a>
     </li>
@@ -451,41 +397,14 @@
   
   
     <li class="md-nav__item">
-      <a href="../../frontend/" class="md-nav__link">
+      <a href="../../deployment/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    Frontend Guide
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-    
-      
-      
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../request-lifecycle/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Request Lifecycle
+    Deployment
   
 
     
@@ -523,10 +442,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" checked>
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
         
           
-          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
             
   
   
@@ -544,8 +463,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="true">
-          <label class="md-nav__title" for="__nav_4">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_3">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -562,14 +481,42 @@
   
   
     <li class="md-nav__item">
-      <a href="../core/" class="md-nav__link">
+      <a href="../overview/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    Core
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../engine/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Engine
   
 
     
@@ -678,33 +625,139 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#模块结构" class="md-nav__link">
+  <a href="#xml-工具调用格式" class="md-nav__link">
     <span class="md-ellipsis">
       
-        模块结构
+        XML 工具调用格式
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="XML 工具调用格式">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#工具结果格式" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        工具结果格式
       
     </span>
   </a>
   
 </li>
-      
-        <li class="md-nav__item">
-  <a href="#权限系统-basepy" class="md-nav__link">
+        
+          <li class="md-nav__item">
+  <a href="#容错解析" class="md-nav__link">
     <span class="md-ellipsis">
       
-        权限系统 (base.py)
+        容错解析
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="权限系统 (base.py)">
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#权限模型" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        权限模型
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="权限模型">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#toolpermission" class="md-nav__link">
+  <a href="#toolpermission-两级模型" class="md-nav__link">
     <span class="md-ellipsis">
       
-        ToolPermission
+        ToolPermission 两级模型
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#权限决策流程" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        权限决策流程
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#工具执行流水线" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        工具执行流水线
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="工具执行流水线">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#basetool-调用管道" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        BaseTool 调用管道
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#引擎中的工具执行" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        引擎中的工具执行
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#核心数据结构" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        核心数据结构
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="核心数据结构">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#toolresult" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ToolResult
       
     </span>
   </a>
@@ -722,39 +775,39 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#toolresult" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        ToolResult
-      
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#basetool-基类" class="md-nav__link">
+  <a href="#内置工具清单" class="md-nav__link">
     <span class="md-ellipsis">
       
-        BaseTool 基类
+        内置工具清单
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="BaseTool 基类">
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#工具注册" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        工具注册
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="工具注册">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#定义工具" class="md-nav__link">
+  <a href="#工具映射构建" class="md-nav__link">
     <span class="md-ellipsis">
       
-        定义工具
+        工具映射构建
       
     </span>
   </a>
@@ -762,10 +815,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#示例websearchtool" class="md-nav__link">
+  <a href="#工具指令生成" class="md-nav__link">
     <span class="md-ellipsis">
       
-        示例：WebSearchTool
+        工具指令生成
       
     </span>
   </a>
@@ -778,22 +831,44 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#工具管理" class="md-nav__link">
+  <a href="#design-decisions" class="md-nav__link">
     <span class="md-ellipsis">
       
-        工具管理
+        Design Decisions
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="工具管理">
+    <nav class="md-nav" aria-label="Design Decisions">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#初始化流程" class="md-nav__link">
+  <a href="#为什么选-xml-而非-json" class="md-nav__link">
     <span class="md-ellipsis">
       
-        初始化流程
+        为什么选 XML 而非 JSON
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#为什么串行执行工具" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        为什么串行执行工具
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#为什么-call_subagent-排最后" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        为什么 call_subagent 排最后
       
     </span>
   </a>
@@ -802,78 +877,6 @@
         
       </ul>
     </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#xml-解析器-xml_parserpy" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        XML 解析器 (xml_parser.py)
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="XML 解析器 (xml_parser.py)">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#工具调用格式" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        工具调用格式
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#xmltoolcallparser" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        XMLToolCallParser
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#xml-格式化器-xml_formatterpy" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        XML 格式化器 (xml_formatter.py)
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#内置工具" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        内置工具
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#添加新工具" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        添加新工具
-      
-    </span>
-  </a>
   
 </li>
       
@@ -881,6 +884,34 @@
   
 </nav>
       
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../artifacts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Artifacts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
     </li>
   
 
@@ -901,6 +932,34 @@
     
   
     Data Layer
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../streaming/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Streaming
   
 
     
@@ -942,6 +1001,34 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../observability/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Observability
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -955,15 +1042,69 @@
   
   
   
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Guides
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Guides
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
     <li class="md-nav__item">
-      <a href="../../streaming/" class="md-nav__link">
+      <a href="../../guides/add-agent/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    Streaming
+    Add Agent
   
 
     
@@ -975,22 +1116,23 @@
     </li>
   
 
-    
-      
-      
+              
+            
+              
+                
   
   
   
   
     <li class="md-nav__item">
-      <a href="../../extension-guide/" class="md-nav__link">
+      <a href="../../guides/add-tool/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    Extension Guide
+    Add Tool
   
 
     
@@ -1002,15 +1144,44 @@
     </li>
   
 
-    
-      
-      
+              
+            
+              
+                
   
   
   
   
     <li class="md-nav__item">
-      <a href="../../api/" class="md-nav__link">
+      <a href="../../guides/add-model/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Add Model
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/api-reference/" class="md-nav__link">
         
   
   
@@ -1029,6 +1200,14 @@
     </li>
   
 
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
     
       
       
@@ -1037,14 +1216,14 @@
   
   
     <li class="md-nav__item">
-      <a href="../../faq/" class="md-nav__link">
+      <a href="../../frontend/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    FAQ
+    Frontend
   
 
     
@@ -1084,33 +1263,139 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#模块结构" class="md-nav__link">
+  <a href="#xml-工具调用格式" class="md-nav__link">
     <span class="md-ellipsis">
       
-        模块结构
+        XML 工具调用格式
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="XML 工具调用格式">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#工具结果格式" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        工具结果格式
       
     </span>
   </a>
   
 </li>
-      
-        <li class="md-nav__item">
-  <a href="#权限系统-basepy" class="md-nav__link">
+        
+          <li class="md-nav__item">
+  <a href="#容错解析" class="md-nav__link">
     <span class="md-ellipsis">
       
-        权限系统 (base.py)
+        容错解析
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="权限系统 (base.py)">
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#权限模型" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        权限模型
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="权限模型">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#toolpermission" class="md-nav__link">
+  <a href="#toolpermission-两级模型" class="md-nav__link">
     <span class="md-ellipsis">
       
-        ToolPermission
+        ToolPermission 两级模型
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#权限决策流程" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        权限决策流程
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#工具执行流水线" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        工具执行流水线
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="工具执行流水线">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#basetool-调用管道" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        BaseTool 调用管道
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#引擎中的工具执行" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        引擎中的工具执行
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#核心数据结构" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        核心数据结构
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="核心数据结构">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#toolresult" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ToolResult
       
     </span>
   </a>
@@ -1128,39 +1413,39 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#toolresult" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        ToolResult
-      
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#basetool-基类" class="md-nav__link">
+  <a href="#内置工具清单" class="md-nav__link">
     <span class="md-ellipsis">
       
-        BaseTool 基类
+        内置工具清单
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="BaseTool 基类">
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#工具注册" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        工具注册
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="工具注册">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#定义工具" class="md-nav__link">
+  <a href="#工具映射构建" class="md-nav__link">
     <span class="md-ellipsis">
       
-        定义工具
+        工具映射构建
       
     </span>
   </a>
@@ -1168,10 +1453,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#示例websearchtool" class="md-nav__link">
+  <a href="#工具指令生成" class="md-nav__link">
     <span class="md-ellipsis">
       
-        示例：WebSearchTool
+        工具指令生成
       
     </span>
   </a>
@@ -1184,22 +1469,44 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#工具管理" class="md-nav__link">
+  <a href="#design-decisions" class="md-nav__link">
     <span class="md-ellipsis">
       
-        工具管理
+        Design Decisions
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="工具管理">
+    <nav class="md-nav" aria-label="Design Decisions">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#初始化流程" class="md-nav__link">
+  <a href="#为什么选-xml-而非-json" class="md-nav__link">
     <span class="md-ellipsis">
       
-        初始化流程
+        为什么选 XML 而非 JSON
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#为什么串行执行工具" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        为什么串行执行工具
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#为什么-call_subagent-排最后" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        为什么 call_subagent 排最后
       
     </span>
   </a>
@@ -1208,78 +1515,6 @@
         
       </ul>
     </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#xml-解析器-xml_parserpy" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        XML 解析器 (xml_parser.py)
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="XML 解析器 (xml_parser.py)">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#工具调用格式" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        工具调用格式
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#xmltoolcallparser" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        XMLToolCallParser
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#xml-格式化器-xml_formatterpy" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        XML 格式化器 (xml_formatter.py)
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#内置工具" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        内置工具
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#添加新工具" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        添加新工具
-      
-    </span>
-  </a>
   
 </li>
       
@@ -1303,304 +1538,310 @@
   
 
 
-<h1 id="tool-系统">Tool 系统</h1>
-<p>Tool 系统为 Agent 提供与外部世界交互的能力，包括搜索、抓取、Artifact 操作等。</p>
-<h2 id="模块结构">模块结构</h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>src/tools/
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>├── base.py              # 工具基类和权限定义
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>├── xml_parser.py        # XML 工具调用解析
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>├── xml_formatter.py     # XML 格式化（工具说明 + 结果序列化）
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>└── implementations/     # 具体工具实现
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>    ├── call_subagent.py
-<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>    ├── web_search.py
-<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>    ├── web_fetch.py
-<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>    └── artifact_ops.py
+<h1 id="工具系统">工具系统</h1>
+<blockquote>
+<p>XML 调用格式 + CDATA 包裹 + 两级权限 + 串行执行 — 为 LLM 文本生成场景设计的工具系统。</p>
+</blockquote>
+<h2 id="xml-工具调用格式">XML 工具调用格式</h2>
+<p>ArtifactFlow 使用 XML 格式进行工具调用，所有参数值用 CDATA 包裹：</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nt">&lt;tool_call&gt;</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="w">  </span><span class="nt">&lt;name&gt;</span>web_search<span class="nt">&lt;/name&gt;</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="w">  </span><span class="nt">&lt;params&gt;</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="w">    </span><span class="nt">&lt;query&gt;</span><span class="cp">&lt;![CDATA[python async tutorial]]&gt;</span><span class="nt">&lt;/query&gt;</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="w">    </span><span class="nt">&lt;count&gt;</span><span class="cp">&lt;![CDATA[10]]&gt;</span><span class="nt">&lt;/count&gt;</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="w">  </span><span class="nt">&lt;/params&gt;</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="nt">&lt;/tool_call&gt;</span>
 </code></pre></div>
-<h2 id="权限系统-basepy">权限系统 (base.py)</h2>
-<h3 id="toolpermission">ToolPermission</h3>
-<p>两级权限模型：</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="k">class</span><span class="w"> </span><span class="nc">ToolPermission</span><span class="p">(</span><span class="n">Enum</span><span class="p">):</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>    <span class="n">AUTO</span> <span class="o">=</span> <span class="s2">&quot;auto&quot;</span>        <span class="c1"># 自动执行，无需用户确认</span>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>    <span class="n">CONFIRM</span> <span class="o">=</span> <span class="s2">&quot;confirm&quot;</span>  <span class="c1"># 执行前需用户确认（通过 interrupt 暂停）</span>
+<p>LLM 可以在单次响应中包含多个 <code>&lt;tool_call&gt;</code> 块，引擎会按顺序串行执行。</p>
+<h3 id="工具结果格式">工具结果格式</h3>
+<p>工具执行结果以 XML 格式注入上下文（由 <code>xml_formatter.py</code> 的 <code>format_result()</code> 生成）：</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nt">&lt;tool_result</span><span class="w"> </span><span class="na">name=</span><span class="s">&quot;web_search&quot;</span><span class="w"> </span><span class="na">success=</span><span class="s">&quot;true&quot;</span><span class="nt">&gt;</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="nt">&lt;data&gt;</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>...搜索结果...
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="nt">&lt;/data&gt;</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="nt">&lt;/tool_result&gt;</span>
 </code></pre></div>
-<p><strong>权限处理流程</strong>（在 <code>engine.py</code> 的 <code>_execute_tools</code> 中）：</p>
-<pre class="mermaid"><code>flowchart TD
-    A[获取工具权限] --&gt; B{权限级别}
-    B --&gt;|AUTO| C[直接执行]
-    B --&gt;|CONFIRM| D[发送 PERMISSION_REQUEST]
-    D --&gt; E[interrupt 暂停]
-    E --&gt; F{用户响应}
-    F --&gt;|approved| C
-    F --&gt;|denied| G[返回拒绝结果]
-    C --&gt; H[发送 TOOL_COMPLETE]</code></pre>
-<h3 id="toolparameter">ToolParameter</h3>
-<p>工具参数定义：</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="nd">@dataclass</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="k">class</span><span class="w"> </span><span class="nc">ToolParameter</span><span class="p">:</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>    <span class="n">name</span><span class="p">:</span> <span class="nb">str</span>                    <span class="c1"># 参数名</span>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>    <span class="nb">type</span><span class="p">:</span> <span class="nb">str</span>                    <span class="c1"># 类型：string, integer, boolean, array, object</span>
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>    <span class="n">description</span><span class="p">:</span> <span class="nb">str</span>             <span class="c1"># 参数描述</span>
-<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>    <span class="n">required</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span>        <span class="c1"># 是否必需</span>
-<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>    <span class="n">default</span><span class="p">:</span> <span class="n">Any</span> <span class="o">=</span> <span class="kc">None</span>          <span class="c1"># 默认值</span>
-</code></pre></div>
-<h3 id="toolresult">ToolResult</h3>
-<p>工具执行结果：</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="nd">@dataclass</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="k">class</span><span class="w"> </span><span class="nc">ToolResult</span><span class="p">:</span>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>    <span class="n">success</span><span class="p">:</span> <span class="nb">bool</span>                              <span class="c1"># 执行是否成功</span>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>    <span class="n">data</span><span class="p">:</span> <span class="n">Any</span> <span class="o">=</span> <span class="kc">None</span>                           <span class="c1"># 结果数据</span>
-<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>    <span class="n">error</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span>                <span class="c1"># 错误信息</span>
-<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>    <span class="n">metadata</span><span class="p">:</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]</span> <span class="o">=</span> <span class="n">field</span><span class="p">(</span><span class="n">default_factory</span><span class="o">=</span><span class="nb">dict</span><span class="p">)</span>  <span class="c1"># 元数据</span>
-<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a>
-<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">to_dict</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]:</span>
-<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;转换为字典格式&quot;&quot;&quot;</span>
-</code></pre></div>
-<h2 id="basetool-基类">BaseTool 基类</h2>
-<h3 id="定义工具">定义工具</h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="k">class</span><span class="w"> </span><span class="nc">BaseTool</span><span class="p">(</span><span class="n">ABC</span><span class="p">):</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span>
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>        <span class="bp">self</span><span class="p">,</span>
-<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>        <span class="n">name</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
-<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>        <span class="n">description</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
-<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>        <span class="n">permission</span><span class="p">:</span> <span class="n">ToolPermission</span> <span class="o">=</span> <span class="n">ToolPermission</span><span class="o">.</span><span class="n">AUTO</span><span class="p">,</span>
-<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a>        <span class="o">**</span><span class="n">kwargs</span>
-<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a>    <span class="p">):</span>
-<a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">name</span> <span class="o">=</span> <span class="n">name</span>
-<a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">description</span> <span class="o">=</span> <span class="n">description</span>
-<a id="__codelineno-4-11" name="__codelineno-4-11" href="#__codelineno-4-11"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">permission</span> <span class="o">=</span> <span class="n">permission</span>
-<a id="__codelineno-4-12" name="__codelineno-4-12" href="#__codelineno-4-12"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">config</span> <span class="o">=</span> <span class="n">kwargs</span>
-<a id="__codelineno-4-13" name="__codelineno-4-13" href="#__codelineno-4-13"></a>
-<a id="__codelineno-4-14" name="__codelineno-4-14" href="#__codelineno-4-14"></a>    <span class="nd">@abstractmethod</span>
-<a id="__codelineno-4-15" name="__codelineno-4-15" href="#__codelineno-4-15"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">get_parameters</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">List</span><span class="p">[</span><span class="n">ToolParameter</span><span class="p">]:</span>
-<a id="__codelineno-4-16" name="__codelineno-4-16" href="#__codelineno-4-16"></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;返回参数定义列表&quot;&quot;&quot;</span>
-<a id="__codelineno-4-17" name="__codelineno-4-17" href="#__codelineno-4-17"></a>        <span class="k">pass</span>
-<a id="__codelineno-4-18" name="__codelineno-4-18" href="#__codelineno-4-18"></a>
-<a id="__codelineno-4-19" name="__codelineno-4-19" href="#__codelineno-4-19"></a>    <span class="nd">@abstractmethod</span>
-<a id="__codelineno-4-20" name="__codelineno-4-20" href="#__codelineno-4-20"></a>    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">execute</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">**</span><span class="n">params</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">ToolResult</span><span class="p">:</span>
-<a id="__codelineno-4-21" name="__codelineno-4-21" href="#__codelineno-4-21"></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;执行工具&quot;&quot;&quot;</span>
-<a id="__codelineno-4-22" name="__codelineno-4-22" href="#__codelineno-4-22"></a>        <span class="k">pass</span>
-<a id="__codelineno-4-23" name="__codelineno-4-23" href="#__codelineno-4-23"></a>
-<a id="__codelineno-4-24" name="__codelineno-4-24" href="#__codelineno-4-24"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">validate_params</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">params</span><span class="p">:</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">]:</span>
-<a id="__codelineno-4-25" name="__codelineno-4-25" href="#__codelineno-4-25"></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
-<a id="__codelineno-4-26" name="__codelineno-4-26" href="#__codelineno-4-26"></a><span class="sd">        验证参数（可选覆盖）</span>
-<a id="__codelineno-4-27" name="__codelineno-4-27" href="#__codelineno-4-27"></a>
-<a id="__codelineno-4-28" name="__codelineno-4-28" href="#__codelineno-4-28"></a><span class="sd">        Returns:</span>
-<a id="__codelineno-4-29" name="__codelineno-4-29" href="#__codelineno-4-29"></a><span class="sd">            None 表示验证通过，字符串表示错误信息</span>
-<a id="__codelineno-4-30" name="__codelineno-4-30" href="#__codelineno-4-30"></a><span class="sd">        &quot;&quot;&quot;</span>
-<a id="__codelineno-4-31" name="__codelineno-4-31" href="#__codelineno-4-31"></a>        <span class="c1"># 默认实现：检查必需参数和未知参数</span>
-<a id="__codelineno-4-32" name="__codelineno-4-32" href="#__codelineno-4-32"></a>        <span class="o">...</span>
-<a id="__codelineno-4-33" name="__codelineno-4-33" href="#__codelineno-4-33"></a>
-<a id="__codelineno-4-34" name="__codelineno-4-34" href="#__codelineno-4-34"></a>    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="fm">__call__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">**</span><span class="n">params</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">ToolResult</span><span class="p">:</span>
-<a id="__codelineno-4-35" name="__codelineno-4-35" href="#__codelineno-4-35"></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;使工具可调用（内部调用 validate_params 和 execute）&quot;&quot;&quot;</span>
-</code></pre></div>
-<h3 id="示例websearchtool">示例：WebSearchTool</h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="k">class</span><span class="w"> </span><span class="nc">WebSearchTool</span><span class="p">(</span><span class="n">BaseTool</span><span class="p">):</span>
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span>
-<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>            <span class="n">name</span><span class="o">=</span><span class="s2">&quot;web_search&quot;</span><span class="p">,</span>
-<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>            <span class="n">description</span><span class="o">=</span><span class="s2">&quot;搜索互联网获取信息&quot;</span><span class="p">,</span>
-<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a>            <span class="n">permission</span><span class="o">=</span><span class="n">ToolPermission</span><span class="o">.</span><span class="n">AUTO</span>
-<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a>        <span class="p">)</span>
-<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a>
-<a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">get_parameters</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">List</span><span class="p">[</span><span class="n">ToolParameter</span><span class="p">]:</span>
-<a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a>        <span class="k">return</span> <span class="p">[</span>
-<a id="__codelineno-5-11" name="__codelineno-5-11" href="#__codelineno-5-11"></a>            <span class="n">ToolParameter</span><span class="p">(</span>
-<a id="__codelineno-5-12" name="__codelineno-5-12" href="#__codelineno-5-12"></a>                <span class="n">name</span><span class="o">=</span><span class="s2">&quot;query&quot;</span><span class="p">,</span>
-<a id="__codelineno-5-13" name="__codelineno-5-13" href="#__codelineno-5-13"></a>                <span class="nb">type</span><span class="o">=</span><span class="s2">&quot;string&quot;</span><span class="p">,</span>
-<a id="__codelineno-5-14" name="__codelineno-5-14" href="#__codelineno-5-14"></a>                <span class="n">description</span><span class="o">=</span><span class="s2">&quot;搜索查询词&quot;</span><span class="p">,</span>
-<a id="__codelineno-5-15" name="__codelineno-5-15" href="#__codelineno-5-15"></a>                <span class="n">required</span><span class="o">=</span><span class="kc">True</span>
-<a id="__codelineno-5-16" name="__codelineno-5-16" href="#__codelineno-5-16"></a>            <span class="p">),</span>
-<a id="__codelineno-5-17" name="__codelineno-5-17" href="#__codelineno-5-17"></a>            <span class="n">ToolParameter</span><span class="p">(</span>
-<a id="__codelineno-5-18" name="__codelineno-5-18" href="#__codelineno-5-18"></a>                <span class="n">name</span><span class="o">=</span><span class="s2">&quot;max_results&quot;</span><span class="p">,</span>
-<a id="__codelineno-5-19" name="__codelineno-5-19" href="#__codelineno-5-19"></a>                <span class="nb">type</span><span class="o">=</span><span class="s2">&quot;integer&quot;</span><span class="p">,</span>
-<a id="__codelineno-5-20" name="__codelineno-5-20" href="#__codelineno-5-20"></a>                <span class="n">description</span><span class="o">=</span><span class="s2">&quot;最大结果数量&quot;</span><span class="p">,</span>
-<a id="__codelineno-5-21" name="__codelineno-5-21" href="#__codelineno-5-21"></a>                <span class="n">required</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
-<a id="__codelineno-5-22" name="__codelineno-5-22" href="#__codelineno-5-22"></a>                <span class="n">default</span><span class="o">=</span><span class="mi">10</span>
-<a id="__codelineno-5-23" name="__codelineno-5-23" href="#__codelineno-5-23"></a>            <span class="p">)</span>
-<a id="__codelineno-5-24" name="__codelineno-5-24" href="#__codelineno-5-24"></a>        <span class="p">]</span>
-<a id="__codelineno-5-25" name="__codelineno-5-25" href="#__codelineno-5-25"></a>
-<a id="__codelineno-5-26" name="__codelineno-5-26" href="#__codelineno-5-26"></a>    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">execute</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">query</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">max_results</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">10</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">ToolResult</span><span class="p">:</span>
-<a id="__codelineno-5-27" name="__codelineno-5-27" href="#__codelineno-5-27"></a>        <span class="k">try</span><span class="p">:</span>
-<a id="__codelineno-5-28" name="__codelineno-5-28" href="#__codelineno-5-28"></a>            <span class="n">results</span> <span class="o">=</span> <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">_do_search</span><span class="p">(</span><span class="n">query</span><span class="p">,</span> <span class="n">max_results</span><span class="p">)</span>
-<a id="__codelineno-5-29" name="__codelineno-5-29" href="#__codelineno-5-29"></a>            <span class="k">return</span> <span class="n">ToolResult</span><span class="p">(</span><span class="n">success</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">data</span><span class="o">=</span><span class="n">results</span><span class="p">)</span>
-<a id="__codelineno-5-30" name="__codelineno-5-30" href="#__codelineno-5-30"></a>        <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
-<a id="__codelineno-5-31" name="__codelineno-5-31" href="#__codelineno-5-31"></a>            <span class="k">return</span> <span class="n">ToolResult</span><span class="p">(</span><span class="n">success</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">error</span><span class="o">=</span><span class="nb">str</span><span class="p">(</span><span class="n">e</span><span class="p">))</span>
-</code></pre></div>
-<h2 id="工具管理">工具管理</h2>
-<p>工具以 <code>Dict[str, BaseTool]</code> 管理，和 agents 一样是启动时加载的全局单例。</p>
-<h3 id="初始化流程">初始化流程</h3>
-<p>全局工具在 <code>dependencies.py</code> 的 <code>_load_tools()</code> 中加载，请求级工具（artifact 操作）在 <code>_create_controller()</code> 中合并：</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="c1"># dependencies.py — 启动时加载一次</span>
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="n">_tools</span> <span class="o">=</span> <span class="p">{</span><span class="n">t</span><span class="o">.</span><span class="n">name</span><span class="p">:</span> <span class="n">t</span> <span class="k">for</span> <span class="n">t</span> <span class="ow">in</span> <span class="p">[</span><span class="n">CallSubagentTool</span><span class="p">(</span><span class="o">...</span><span class="p">),</span> <span class="n">WebSearchTool</span><span class="p">(),</span> <span class="n">WebFetchTool</span><span class="p">()]}</span>
-<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>
-<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="c1"># chat.py — 每次请求合并</span>
-<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="n">artifact_tools</span> <span class="o">=</span> <span class="n">create_artifact_tools</span><span class="p">(</span><span class="n">artifact_manager</span><span class="p">)</span>
-<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a><span class="n">all_tools</span> <span class="o">=</span> <span class="p">{</span><span class="o">**</span><span class="n">get_tools</span><span class="p">(),</span> <span class="o">**</span><span class="p">{</span><span class="n">t</span><span class="o">.</span><span class="n">name</span><span class="p">:</span> <span class="n">t</span> <span class="k">for</span> <span class="n">t</span> <span class="ow">in</span> <span class="n">artifact_tools</span><span class="p">}}</span>
-<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a><span class="c1"># 传入 ExecutionController → engine → context_manager</span>
-</code></pre></div>
-<p>Engine 通过 <code>tools.get(name)</code> 查找工具，agent 工具白名单由 Agent MD 的 <code>tools</code> frontmatter 控制。</p>
-<h2 id="xml-解析器-xml_parserpy">XML 解析器 (xml_parser.py)</h2>
-<h3 id="工具调用格式">工具调用格式</h3>
-<p>Agent 使用 XML 格式发起工具调用，所有参数值使用 CDATA 包裹：</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="nt">&lt;tool_call&gt;</span>
-<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="w">  </span><span class="nt">&lt;name&gt;</span>web_search<span class="nt">&lt;/name&gt;</span>
-<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="w">  </span><span class="nt">&lt;params&gt;</span>
-<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="w">    </span><span class="nt">&lt;query&gt;</span><span class="cp">&lt;![CDATA[Python async best practices]]&gt;</span><span class="nt">&lt;/query&gt;</span>
-<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="w">    </span><span class="nt">&lt;max_results&gt;</span><span class="cp">&lt;![CDATA[10]]&gt;</span><span class="nt">&lt;/max_results&gt;</span>
-<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="w">  </span><span class="nt">&lt;/params&gt;</span>
-<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a><span class="nt">&lt;/tool_call&gt;</span>
-</code></pre></div>
-<p><strong>为什么使用 CDATA？</strong></p>
-<ul>
-<li>避免特殊字符（<code>&lt;</code>, <code>&gt;</code>, <code>&amp;</code>）导致解析失败</li>
-<li>支持多行内容（如代码片段）</li>
-<li>保持内容原样，无需转义</li>
-</ul>
-<h3 id="xmltoolcallparser">XMLToolCallParser</h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="nd">@dataclass</span>
-<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="k">class</span><span class="w"> </span><span class="nc">ToolCall</span><span class="p">:</span>
-<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;工具调用数据结构&quot;&quot;&quot;</span>
-<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>    <span class="n">name</span><span class="p">:</span> <span class="nb">str</span>
-<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>    <span class="n">params</span><span class="p">:</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]</span>
-<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a>    <span class="n">raw_text</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span>
-<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a>
-<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a><span class="k">class</span><span class="w"> </span><span class="nc">XMLToolCallParser</span><span class="p">:</span>
-<a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a>    <span class="nd">@staticmethod</span>
-<a id="__codelineno-8-10" name="__codelineno-8-10" href="#__codelineno-8-10"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">parse_tool_calls</span><span class="p">(</span><span class="n">text</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">List</span><span class="p">[</span><span class="n">ToolCall</span><span class="p">]:</span>
-<a id="__codelineno-8-11" name="__codelineno-8-11" href="#__codelineno-8-11"></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
-<a id="__codelineno-8-12" name="__codelineno-8-12" href="#__codelineno-8-12"></a><span class="sd">        解析 XML 工具调用</span>
-<a id="__codelineno-8-13" name="__codelineno-8-13" href="#__codelineno-8-13"></a>
-<a id="__codelineno-8-14" name="__codelineno-8-14" href="#__codelineno-8-14"></a><span class="sd">        Returns:</span>
-<a id="__codelineno-8-15" name="__codelineno-8-15" href="#__codelineno-8-15"></a><span class="sd">            ToolCall 对象列表</span>
-<a id="__codelineno-8-16" name="__codelineno-8-16" href="#__codelineno-8-16"></a><span class="sd">        &quot;&quot;&quot;</span>
-<a id="__codelineno-8-17" name="__codelineno-8-17" href="#__codelineno-8-17"></a>        <span class="c1"># 使用 xml.etree.ElementTree 解析</span>
-<a id="__codelineno-8-18" name="__codelineno-8-18" href="#__codelineno-8-18"></a>        <span class="c1"># 自动处理 CDATA</span>
-<a id="__codelineno-8-19" name="__codelineno-8-19" href="#__codelineno-8-19"></a>        <span class="c1"># 自动类型转换（bool, int, float, string）</span>
-<a id="__codelineno-8-20" name="__codelineno-8-20" href="#__codelineno-8-20"></a>        <span class="c1"># 支持 fallback 正则解析（处理 LLM 格式不严格的情况）</span>
-<a id="__codelineno-8-21" name="__codelineno-8-21" href="#__codelineno-8-21"></a>
-<a id="__codelineno-8-22" name="__codelineno-8-22" href="#__codelineno-8-22"></a><span class="c1"># 便捷函数</span>
-<a id="__codelineno-8-23" name="__codelineno-8-23" href="#__codelineno-8-23"></a><span class="k">def</span><span class="w"> </span><span class="nf">parse_tool_calls</span><span class="p">(</span><span class="n">text</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">List</span><span class="p">[</span><span class="n">ToolCall</span><span class="p">]:</span>
-<a id="__codelineno-8-24" name="__codelineno-8-24" href="#__codelineno-8-24"></a>    <span class="k">return</span> <span class="n">XMLToolCallParser</span><span class="o">.</span><span class="n">parse_tool_calls</span><span class="p">(</span><span class="n">text</span><span class="p">)</span>
-</code></pre></div>
-<p><strong>类型转换规则</strong>：</p>
+<h3 id="容错解析">容错解析</h3>
+<p><code>XMLToolCallParser</code>（<code>src/tools/xml_parser.py</code>）面对小模型常见的格式错误提供多层容错：</p>
+<p><strong>标准解析</strong> → <strong>修复后重试</strong> → <strong>正则 Fallback</strong> → <strong>错误 ToolCall</strong></p>
+<p>修复策略覆盖以下常见问题：</p>
 <table>
 <thead>
 <tr>
-<th>原始值</th>
-<th>转换结果</th>
+<th>问题</th>
+<th>示例</th>
+<th>修复方式</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td><code>"true"</code> / <code>"false"</code></td>
-<td><code>bool</code></td>
+<td>工具名作为标签</td>
+<td><code>&lt;web_fetch&gt;&lt;params&gt;...</code></td>
+<td>提取为 <code>&lt;name&gt;web_fetch&lt;/name&gt;</code></td>
 </tr>
 <tr>
-<td><code>"123"</code></td>
-<td><code>int</code></td>
+<td>标签等号语法</td>
+<td><code>&lt;name=call_subagent&lt;/name&gt;</code></td>
+<td>转为 <code>&lt;name&gt;call_subagent&lt;/name&gt;</code></td>
 </tr>
 <tr>
-<td><code>"3.14"</code></td>
-<td><code>float</code></td>
+<td>CDATA 后缺闭合标签</td>
+<td><code>&lt;content&gt;&lt;![CDATA[...]]&gt;</code> 后无 <code>&lt;/content&gt;</code></td>
+<td>补全闭合标签</td>
 </tr>
 <tr>
-<td>其他</td>
-<td><code>str</code></td>
+<td>散落的参数标签</td>
+<td>参数出现在 <code>&lt;params&gt;</code> 外部或多个 <code>&lt;params&gt;</code> 块</td>
+<td>合并收集到单个 <code>&lt;params&gt;</code> 中</td>
+</tr>
+<tr>
+<td>缺失 <code>&lt;/params&gt;</code></td>
+<td>没有 params 闭合标签</td>
+<td>追加闭合标签</td>
+</tr>
+<tr>
+<td>未闭合 <code>&lt;tool_call&gt;</code></td>
+<td>末尾缺少 <code>&lt;/tool_call&gt;</code></td>
+<td>检测并解析未闭合块</td>
 </tr>
 </tbody>
 </table>
-<h2 id="xml-格式化器-xml_formatterpy">XML 格式化器 (xml_formatter.py)</h2>
-<p>与 <code>xml_parser.py</code> 互为 formatter / parser 对。提供两个模块级函数：</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="k">def</span><span class="w"> </span><span class="nf">generate_tool_instruction</span><span class="p">(</span><span class="n">tools</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="n">BaseTool</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
-<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
-<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="sd">    生成完整的工具使用说明（注入 system prompt）</span>
-<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a>
-<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a><span class="sd">    包含：</span>
-<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a><span class="sd">    - 可用工具列表</span>
-<a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a><span class="sd">    - 每个工具的参数说明</span>
-<a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a><span class="sd">    - XML 调用格式示例（使用 CDATA）</span>
-<a id="__codelineno-9-9" name="__codelineno-9-9" href="#__codelineno-9-9"></a><span class="sd">    &quot;&quot;&quot;</span>
-<a id="__codelineno-9-10" name="__codelineno-9-10" href="#__codelineno-9-10"></a>
-<a id="__codelineno-9-11" name="__codelineno-9-11" href="#__codelineno-9-11"></a><span class="k">def</span><span class="w"> </span><span class="nf">format_result</span><span class="p">(</span><span class="n">name</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">result</span><span class="p">:</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
-<a id="__codelineno-9-12" name="__codelineno-9-12" href="#__codelineno-9-12"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;格式化工具执行结果为 XML（注入 context 消息）&quot;&quot;&quot;</span>
+<p>所有解析手段均失败时，返回 <code>ToolCall(name="__malformed__", error=...)</code> 而非静默忽略，确保 engine 将解析错误反馈给 agent。</p>
+<h2 id="权限模型">权限模型</h2>
+<h3 id="toolpermission-两级模型">ToolPermission 两级模型</h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="k">class</span><span class="w"> </span><span class="nc">ToolPermission</span><span class="p">(</span><span class="n">Enum</span><span class="p">):</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>    <span class="n">AUTO</span> <span class="o">=</span> <span class="s2">&quot;auto&quot;</span>        <span class="c1"># 自动执行，无需用户确认</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>    <span class="n">CONFIRM</span> <span class="o">=</span> <span class="s2">&quot;confirm&quot;</span>  <span class="c1"># 执行前需用户确认（通过 Permission Interrupt）</span>
 </code></pre></div>
-<p><strong>生成示例</strong>（实际输出格式）：</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>### web_search
-<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>Description: Search the web for information using Bocha AI search engine
-<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>Parameters:
-<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a>  - query: string (required) - Search query using keywords.
-<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a>  - freshness: string (optional) - Time range filter: &#39;noLimit&#39;, &#39;oneDay&#39;, ...
-<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a>    Default: noLimit
-<a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a>  - count: integer (optional) - Number of results to return (1-50)
-<a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a>    Default: 10
-<a id="__codelineno-10-9" name="__codelineno-10-9" href="#__codelineno-10-9"></a>Example:
-<a id="__codelineno-10-10" name="__codelineno-10-10" href="#__codelineno-10-10"></a>&lt;tool_call&gt;
-<a id="__codelineno-10-11" name="__codelineno-10-11" href="#__codelineno-10-11"></a>  &lt;name&gt;web_search&lt;/name&gt;
-<a id="__codelineno-10-12" name="__codelineno-10-12" href="#__codelineno-10-12"></a>  &lt;params&gt;
-<a id="__codelineno-10-13" name="__codelineno-10-13" href="#__codelineno-10-13"></a>    &lt;query&gt;&lt;![CDATA[your_query_here]]&gt;&lt;/query&gt;
-<a id="__codelineno-10-14" name="__codelineno-10-14" href="#__codelineno-10-14"></a>    &lt;freshness&gt;&lt;![CDATA[noLimit]]&gt;&lt;/freshness&gt;
-<a id="__codelineno-10-15" name="__codelineno-10-15" href="#__codelineno-10-15"></a>    &lt;count&gt;&lt;![CDATA[10]]&gt;&lt;/count&gt;
-<a id="__codelineno-10-16" name="__codelineno-10-16" href="#__codelineno-10-16"></a>  &lt;/params&gt;
-<a id="__codelineno-10-17" name="__codelineno-10-17" href="#__codelineno-10-17"></a>&lt;/tool_call&gt;
+<h3 id="权限决策流程">权限决策流程</h3>
+<pre class="mermaid"><code>flowchart TD
+    START[工具调用] --&gt; AGENT_PERM{Agent 配置了&lt;br/&gt;该工具权限?}
+    AGENT_PERM --&gt;|是| USE_AGENT[使用 Agent 级权限]
+    AGENT_PERM --&gt;|否| USE_TOOL[使用工具默认权限]
+    USE_AGENT --&gt; CHECK{权限 = CONFIRM?}
+    USE_TOOL --&gt; CHECK
+    CHECK --&gt;|AUTO| EXEC[直接执行]
+    CHECK --&gt;|CONFIRM| ALWAYS{在 always_allowed 中?}
+    ALWAYS --&gt;|是| EXEC
+    ALWAYS --&gt;|否| INTERRUPT[触发 Permission Interrupt]
+    INTERRUPT --&gt; WAIT[等待用户响应]
+    WAIT --&gt;|approved| AA{always_allow?}
+    AA --&gt;|是| ADD[加入 always_allowed_tools] --&gt; EXEC
+    AA --&gt;|否| EXEC
+    WAIT --&gt;|denied| DENY[返回权限拒绝]
+    WAIT --&gt;|timeout| DENY
+
+    style EXEC fill:#e8f5e9
+    style DENY fill:#ffebee</code></pre>
+<p><strong>Permission Interrupt 流程：</strong></p>
+<ol>
+<li>推送 <code>PERMISSION_REQUEST</code> 事件（含工具名、参数、权限级别）</li>
+<li>调用 <code>hooks.wait_for_interrupt()</code> 阻塞等待（基于 <code>asyncio.Event</code>）</li>
+<li>超时（<code>config.PERMISSION_TIMEOUT</code>）或客户端断开 → 视为 deny</li>
+<li>用户响应中可包含 <code>always_allow: true</code> → 将该工具加入 <code>state["always_allowed_tools"]</code>，后续调用自动跳过确认</li>
+</ol>
+<h2 id="工具执行流水线">工具执行流水线</h2>
+<h3 id="basetool-调用管道">BaseTool 调用管道</h3>
+<p><code>BaseTool.__call__()</code> 定义了统一的执行管道：</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>XML 字符串参数 → 类型强转 → 默认值填充 → 参数校验 → 执行 → 错误包装
 </code></pre></div>
-<h2 id="内置工具">内置工具</h2>
+<p><strong>1. 类型强转</strong>（<code>_coerce_params</code>）</p>
+<p>XML parser 返回的值统一为字符串，需要根据 <code>ToolParameter.type</code> 转换：</p>
 <table>
 <thead>
 <tr>
-<th>工具名</th>
-<th>类</th>
-<th>说明</th>
-<th>权限</th>
+<th>目标类型</th>
+<th>转换规则</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td><code>call_subagent</code></td>
-<td>CallSubagentTool</td>
-<td>路由到 SubAgent（验证参数后设置路由）</td>
-<td>AUTO</td>
+<td><code>string</code></td>
+<td>保持原值</td>
 </tr>
 <tr>
+<td><code>integer</code></td>
+<td><code>int(value)</code></td>
+</tr>
+<tr>
+<td><code>boolean</code></td>
+<td><code>true/1/yes</code> → <code>True</code>，<code>false/0/no</code> → <code>False</code></td>
+</tr>
+<tr>
+<td><code>number</code></td>
+<td><code>float(value)</code></td>
+</tr>
+</tbody>
+</table>
+<p>转换失败保持原值，由后续校验报错。</p>
+<p><strong>2. 默认值填充</strong>（<code>_apply_defaults</code>）</p>
+<p>遍历 <code>get_parameters()</code> 返回的参数定义，为缺失的参数填入 <code>default</code> 值。</p>
+<p><strong>3. 参数校验</strong>（<code>validate_params</code>）</p>
+<p>按顺序检查：
+- 必填参数是否存在
+- 是否有未知参数
+- enum 约束是否满足
+- 类型是否正确（coerce 后仍为 str 说明转换失败）</p>
+<p>校验失败返回 <code>ToolResult(success=False, error=...)</code> 而非抛异常。</p>
+<p><strong>4. 执行</strong></p>
+<p>调用子类实现的 <code>async execute(**params)</code> 方法。执行异常被捕获并包装为 <code>ToolResult</code>。</p>
+<h3 id="引擎中的工具执行">引擎中的工具执行</h3>
+<p>引擎的 <code>_execute_tools()</code> 在 BaseTool 管道之上增加了额外逻辑：</p>
+<ol>
+<li><strong>排序</strong>：<code>call_subagent</code> 排最后</li>
+<li><strong>取消检查</strong>：每个工具执行前检查 <code>hooks.check_cancelled()</code></li>
+<li><strong>Agent 白名单校验</strong>：工具必须在当前 agent 的 <code>tools</code> 配置中</li>
+<li><strong>权限处理</strong>：CONFIRM 级工具触发 Permission Interrupt</li>
+<li><strong>call_subagent 特殊路径</strong>：成功则切换 agent + break 跳出工具循环</li>
+<li><strong>事件推送</strong>：每个工具推送 <code>TOOL_START</code> 和 <code>TOOL_COMPLETE</code> 事件（含参数、结果、耗时）</li>
+</ol>
+<h2 id="核心数据结构">核心数据结构</h2>
+<h3 id="toolresult">ToolResult</h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="nd">@dataclass</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="k">class</span><span class="w"> </span><span class="nc">ToolResult</span><span class="p">:</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>    <span class="n">success</span><span class="p">:</span> <span class="nb">bool</span>                           <span class="c1"># 是否成功</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>    <span class="n">data</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span>                          <span class="c1"># 成功时的输出数据</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>    <span class="n">error</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span>             <span class="c1"># 失败时的错误信息</span>
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>    <span class="n">metadata</span><span class="p">:</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]</span> <span class="o">=</span> <span class="n">field</span><span class="p">(</span><span class="o">...</span><span class="p">)</span>   <span class="c1"># 附加元数据</span>
+</code></pre></div>
+<p><code>metadata</code> 可携带 <code>artifact_snapshot</code>（Artifact 操作工具在内存更新后附带完整快照），通过 <code>TOOL_COMPLETE</code> 事件的 <code>metadata</code> 字段推送给前端，实现执行期间的实时 Artifact 更新。</p>
+<h3 id="toolparameter">ToolParameter</h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="nd">@dataclass</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="k">class</span><span class="w"> </span><span class="nc">ToolParameter</span><span class="p">:</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>    <span class="n">name</span><span class="p">:</span> <span class="nb">str</span>                               <span class="c1"># 参数名</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>    <span class="nb">type</span><span class="p">:</span> <span class="nb">str</span>                               <span class="c1"># &quot;string&quot; | &quot;integer&quot; | &quot;boolean&quot; | &quot;number&quot;</span>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>    <span class="n">description</span><span class="p">:</span> <span class="nb">str</span>                        <span class="c1"># 参数描述</span>
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a>    <span class="n">required</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span>                   <span class="c1"># 是否必填</span>
+<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a>    <span class="n">default</span><span class="p">:</span> <span class="n">Any</span> <span class="o">=</span> <span class="kc">None</span>                     <span class="c1"># 默认值</span>
+<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a>    <span class="n">enum</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">List</span><span class="p">[</span><span class="nb">str</span><span class="p">]]</span> <span class="o">=</span> <span class="kc">None</span>        <span class="c1"># 可选值列表</span>
+</code></pre></div>
+<h2 id="内置工具清单">内置工具清单</h2>
+<table>
+<thead>
+<tr>
+<th>工具</th>
+<th>类</th>
+<th>默认权限</th>
+<th>参数</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
 <td><code>web_search</code></td>
-<td>WebSearchTool</td>
-<td>互联网搜索（博查 AI）</td>
+<td><code>WebSearchTool</code></td>
 <td>AUTO</td>
+<td><code>query</code> (string), <code>freshness</code> (string, enum, 默认 <code>noLimit</code>), <code>count</code> (integer, 默认 10)</td>
+<td>Bocha AI API 搜索</td>
 </tr>
 <tr>
 <td><code>web_fetch</code></td>
-<td>WebFetchTool</td>
-<td>网页/PDF 内容抓取（Jina Reader API，BS4/DocConverter+pymupdf 降级）</td>
+<td><code>WebFetchTool</code></td>
 <td>CONFIRM</td>
+<td><code>url</code> (string), <code>max_content_length</code> (integer, 默认 20000)</td>
+<td>Jina Reader 深度内容提取</td>
 </tr>
 <tr>
 <td><code>create_artifact</code></td>
-<td>CreateArtifactTool</td>
-<td>创建新 Artifact</td>
+<td><code>CreateArtifactTool</code></td>
 <td>AUTO</td>
-</tr>
-<tr>
-<td><code>read_artifact</code></td>
-<td>ReadArtifactTool</td>
-<td>读取内容（支持历史版本）</td>
-<td>AUTO</td>
+<td><code>id</code> (string), <code>content_type</code> (string, enum, 默认 <code>text/markdown</code>), <code>title</code> (string), <code>content</code> (string)</td>
+<td>创建 Artifact（写入内存缓存）</td>
 </tr>
 <tr>
 <td><code>update_artifact</code></td>
-<td>UpdateArtifactTool</td>
-<td>增量更新（支持模糊匹配）</td>
+<td><code>UpdateArtifactTool</code></td>
 <td>AUTO</td>
+<td><code>id</code> (string), <code>old_str</code> (string), <code>new_str</code> (string)</td>
+<td>替换 Artifact 中的指定文本（支持模糊匹配）</td>
 </tr>
 <tr>
 <td><code>rewrite_artifact</code></td>
-<td>RewriteArtifactTool</td>
-<td>完全重写内容</td>
+<td><code>RewriteArtifactTool</code></td>
 <td>AUTO</td>
+<td><code>id</code> (string), <code>content</code> (string)</td>
+<td>完整替换 Artifact 内容</td>
+</tr>
+<tr>
+<td><code>read_artifact</code></td>
+<td><code>ReadArtifactTool</code></td>
+<td>AUTO</td>
+<td><code>id</code> (string), <code>version</code> (integer, 可选)</td>
+<td>读取 Artifact 内容（默认最新版本）</td>
+</tr>
+<tr>
+<td><code>call_subagent</code></td>
+<td><code>CallSubagentTool</code></td>
+<td>AUTO</td>
+<td><code>agent_name</code> (string), <code>instruction</code> (string)</td>
+<td>调用 subagent（仅路由验证，不执行）</td>
 </tr>
 </tbody>
 </table>
-<p><strong>注意</strong>：<code>call_subagent</code> 是特殊的路由工具。Agent 在 <code>base.py</code> 中检测到此工具时，会先调用 <code>execute()</code> 验证参数（如 agent_name 是否有效），验证通过后再设置路由信息，由 Graph 路由到目标 SubAgent。</p>
-<h2 id="添加新工具">添加新工具</h2>
-<p>参见 <a href="../../extension-guide/#添加新工具">Extension Guide</a>。</p>
+<p><strong>注意：</strong></p>
+<ul>
+<li>Artifact 工具（create/update/rewrite/read）是请求级创建的（绑定 <code>ArtifactManager</code> 实例），名称为保留名（<code>RESERVED_TOOL_NAMES</code>），自定义工具不可同名</li>
+<li><code>call_subagent</code> 的 <code>execute()</code> 仅做路由验证（目标 agent 是否存在、是否非 internal），实际的 agent 切换由引擎的 <code>_execute_tools</code> 处理</li>
+</ul>
+<h2 id="工具注册">工具注册</h2>
+<h3 id="工具映射构建">工具映射构建</h3>
+<p><code>build_tool_map()</code>（<code>src/tools/base.py</code>）在启动时构建 <code>name → BaseTool</code> 映射：</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="k">def</span><span class="w"> </span><span class="nf">build_tool_map</span><span class="p">(</span><span class="n">builtin_tools</span><span class="p">,</span> <span class="n">custom_tools</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">BaseTool</span><span class="p">]:</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>    <span class="c1"># 1. 加载 builtin_tools</span>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>    <span class="c1"># 2. 加载 custom_tools，检查与 builtin/reserved 名冲突</span>
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a>    <span class="c1"># 3. 返回合并后的 tool_map</span>
+</code></pre></div>
+<p>保留名列表：<code>create_artifact</code>, <code>update_artifact</code>, <code>rewrite_artifact</code>, <code>read_artifact</code>。</p>
+<h3 id="工具指令生成">工具指令生成</h3>
+<p>工具的使用说明通过两步注入 system prompt：</p>
+<ol>
+<li><code>BaseTool.to_xml_example()</code> — 生成单个工具的 XML 调用示例（CDATA 包裹所有参数值）</li>
+<li><code>generate_tool_instruction(tools)</code> — 组装完整的工具说明块：</li>
+</ol>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="nt">&lt;tool_instructions&gt;</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="nt">&lt;format&gt;</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>You<span class="w"> </span>may<span class="w"> </span>make<span class="w"> </span>one<span class="w"> </span>or<span class="w"> </span>more<span class="w"> </span>tool<span class="w"> </span>calls<span class="w"> </span>per<span class="w"> </span>turn.<span class="w"> </span>They<span class="w"> </span>execute<span class="w"> </span>sequentially.
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>Wrap<span class="w"> </span>ALL<span class="w"> </span>parameter<span class="w"> </span>values<span class="w"> </span>in<span class="w"> </span><span class="cp">&lt;![CDATA[...]]&gt;</span>.
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="nt">&lt;/format&gt;</span>
+<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a>
+<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a><span class="nt">&lt;tool</span><span class="w"> </span><span class="na">name=</span><span class="s">&quot;web_search&quot;</span><span class="nt">&gt;</span>
+<a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a>Web<span class="w"> </span>search<span class="w"> </span>and<span class="w"> </span>information<span class="w"> </span>retrieval<span class="w"> </span>specialist...
+<a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a>Parameters:
+<a id="__codelineno-7-10" name="__codelineno-7-10" href="#__codelineno-7-10"></a><span class="w">  </span>-<span class="w"> </span>query:<span class="w"> </span>string<span class="w"> </span>(required)<span class="w"> </span>-<span class="w"> </span>Search<span class="w"> </span>query
+<a id="__codelineno-7-11" name="__codelineno-7-11" href="#__codelineno-7-11"></a><span class="w">  </span>-<span class="w"> </span>freshness:<span class="w"> </span>string<span class="w"> </span>(optional)<span class="w"> </span>-<span class="w"> </span>Time<span class="w"> </span>range<span class="w"> </span>filter.<span class="w"> </span>Values:<span class="w"> </span>noLimit,<span class="w"> </span>oneDay,<span class="w"> </span>oneWeek,<span class="w"> </span>oneMonth,<span class="w"> </span>oneYear.<span class="w"> </span>Default:<span class="w"> </span>noLimit
+<a id="__codelineno-7-12" name="__codelineno-7-12" href="#__codelineno-7-12"></a><span class="w">  </span>-<span class="w"> </span>count:<span class="w"> </span>integer<span class="w"> </span>(optional)<span class="w"> </span>-<span class="w"> </span>Number<span class="w"> </span>of<span class="w"> </span>results<span class="w"> </span>to<span class="w"> </span>return<span class="w"> </span>(1-50).<span class="w"> </span>Default:<span class="w"> </span>10
+<a id="__codelineno-7-13" name="__codelineno-7-13" href="#__codelineno-7-13"></a>Example:
+<a id="__codelineno-7-14" name="__codelineno-7-14" href="#__codelineno-7-14"></a><span class="nt">&lt;tool_call&gt;</span>
+<a id="__codelineno-7-15" name="__codelineno-7-15" href="#__codelineno-7-15"></a><span class="w">  </span><span class="nt">&lt;name&gt;</span>web_search<span class="nt">&lt;/name&gt;</span>
+<a id="__codelineno-7-16" name="__codelineno-7-16" href="#__codelineno-7-16"></a><span class="w">  </span><span class="nt">&lt;params&gt;</span>
+<a id="__codelineno-7-17" name="__codelineno-7-17" href="#__codelineno-7-17"></a><span class="w">    </span><span class="nt">&lt;query&gt;</span><span class="cp">&lt;![CDATA[your_query_here]]&gt;</span><span class="nt">&lt;/query&gt;</span>
+<a id="__codelineno-7-18" name="__codelineno-7-18" href="#__codelineno-7-18"></a><span class="w">    </span><span class="nt">&lt;count&gt;</span><span class="cp">&lt;![CDATA[10]]&gt;</span><span class="nt">&lt;/count&gt;</span>
+<a id="__codelineno-7-19" name="__codelineno-7-19" href="#__codelineno-7-19"></a><span class="w">  </span><span class="nt">&lt;/params&gt;</span>
+<a id="__codelineno-7-20" name="__codelineno-7-20" href="#__codelineno-7-20"></a><span class="nt">&lt;/tool_call&gt;</span>
+<a id="__codelineno-7-21" name="__codelineno-7-21" href="#__codelineno-7-21"></a><span class="nt">&lt;/tool&gt;</span>
+<a id="__codelineno-7-22" name="__codelineno-7-22" href="#__codelineno-7-22"></a>
+<a id="__codelineno-7-23" name="__codelineno-7-23" href="#__codelineno-7-23"></a><span class="nt">&lt;/tool_instructions&gt;</span>
+</code></pre></div>
+<p>每个 agent 只看到自己 <code>tools</code> 配置中列出的工具的说明。</p>
+<h2 id="design-decisions">Design Decisions</h2>
+<h3 id="为什么选-xml-而非-json">为什么选 XML 而非 JSON</h3>
+<ul>
+<li><strong>CDATA 避免转义地狱</strong>：代码、Markdown 等内容包含大量特殊字符（<code>"</code>, <code>\</code>, <code>{}</code>），JSON 需要层层转义，XML CDATA 原样包裹</li>
+<li><strong>文本生成鲁棒性</strong>：LLM 生成 JSON 时容易漏引号、多逗号、嵌套括号错误；XML 的标签结构更容易被 LLM 正确生成</li>
+<li><strong>容错修复空间大</strong>：缺失闭合标签、格式变体等问题都可以通过修复策略恢复，JSON 的语法错误通常无法修复</li>
+</ul>
+<h3 id="为什么串行执行工具">为什么串行执行工具</h3>
+<ul>
+<li><strong>Permission Interrupt 天然插入点</strong>：CONFIRM 级工具需要暂停等待用户确认，串行执行使中断自然插入在工具之间</li>
+<li><strong>简单可靠</strong>：不需要处理并行工具的依赖、竞争、部分失败等复杂场景</li>
+<li><strong>可观测性友好</strong>：事件流按时间顺序线性排列，易于调试和回放</li>
+</ul>
+<h3 id="为什么-call_subagent-排最后">为什么 call_subagent 排最后</h3>
+<ul>
+<li><code>call_subagent</code> 成功后会 <code>break</code> 跳出工具循环（切换到目标 agent）</li>
+<li>如果不排最后，同一轮 LLM 响应中 <code>call_subagent</code> 之后的常规工具会被跳过</li>
+<li>排最后确保所有常规工具先完成，再进行 agent 切换</li>
+</ul>
 
 
 

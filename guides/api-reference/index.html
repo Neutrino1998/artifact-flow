@@ -1,0 +1,2178 @@
+
+<!doctype html>
+<html lang="zh" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Pi-style 可配置 Agent 引擎 + 双 Artifact 架构的多智能体 SaaS">
+      
+      
+      
+        <link rel="canonical" href="https://neutrino1998.github.io/artifact-flow/guides/api-reference/">
+      
+      
+        <link rel="prev" href="../add-model/">
+      
+      
+        <link rel="next" href="../../frontend/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>API Reference - ArtifactFlow</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../stylesheets/custom.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="custom">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#api-参考" class="md-skip">
+          跳转至
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="页眉">
+    <a href="../.." title="ArtifactFlow" class="md-header__button md-logo" aria-label="ArtifactFlow" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            ArtifactFlow
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              API Reference
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="custom"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="custom" data-md-color-accent="custom"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="搜索" placeholder="搜索" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="查找">
+        
+        <button type="reset" class="md-search__icon md-icon" title="清空当前内容" aria-label="清空当前内容" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            正在初始化搜索引擎
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/Neutrino1998/artifact-flow" title="前往仓库" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    Neutrino1998/artifact-flow
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="标签" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../deployment/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Deployment
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../architecture/overview/" class="md-tabs__link">
+          
+  
+  
+  Architecture
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../add-agent/" class="md-tabs__link">
+          
+  
+  
+  Guides
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../frontend/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Frontend
+
+      </a>
+    </li>
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="导航栏" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="ArtifactFlow" class="md-nav__button md-logo" aria-label="ArtifactFlow" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    ArtifactFlow
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/Neutrino1998/artifact-flow" title="前往仓库" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    Neutrino1998/artifact-flow
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../deployment/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deployment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Architecture
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../architecture/overview/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../architecture/engine/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Engine
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../architecture/agents/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Agents
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../architecture/tools/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tools
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../architecture/artifacts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Artifacts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../architecture/data-layer/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data Layer
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../architecture/streaming/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Streaming
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../architecture/concurrency/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Concurrency
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../architecture/observability/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Observability
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Guides
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Guides
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../add-agent/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Add Agent
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../add-tool/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Add Tool
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../add-model/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Add Model
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API Reference
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="目录">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      目录
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#通用约定" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        通用约定
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="通用约定">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#状态码约定" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        状态码约定
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#404-not-403-原则" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        404-not-403 原则
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#auth" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Auth
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#chat-对话" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Chat 对话
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Chat 对话">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#post---发送消息" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        POST `` — 发送消息
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#post-conv_idinject--运行中注入" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        POST /{conv_id}/inject — 运行中注入
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#post-conv_idcancel" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        POST /{conv_id}/cancel
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#post-conv_idresume--permission-接续" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        POST /{conv_id}/resume — Permission 接续
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#post-conv_idcompact" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        POST /{conv_id}/compact
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#get-conv_idactive-stream" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /{conv_id}/active-stream
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#get-conv_idmessagesmsg_idevents" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /{conv_id}/messages/{msg_id}/events
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#artifacts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Artifacts
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Artifacts">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#上传约定" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        上传约定
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#读取的即时性" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        读取的即时性
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#stream-sse" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Stream (SSE)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#admin" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Admin
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Admin">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#get-conversations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /conversations
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#get-conversationsconv_idevents" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /conversations/{conv_id}/events
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#health" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Health
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#design-decisions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Design Decisions
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Design Decisions">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#为什么-chat-是资源路径而非-conversations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        为什么 /chat 是资源路径而非 /conversations
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#为什么没有-authregister--authrefresh" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        为什么没有 /auth/register / /auth/refresh
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#为什么-stream-用-stream_id--message_id" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        为什么 Stream 用 stream_id == message_id
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#为什么-inject--cancel--resume-都走-post-chatid" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        为什么 Inject / Cancel / Resume 都走 POST /chat/{id}/...
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../frontend/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Frontend
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="目录">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      目录
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#通用约定" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        通用约定
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="通用约定">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#状态码约定" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        状态码约定
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#404-not-403-原则" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        404-not-403 原则
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#auth" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Auth
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#chat-对话" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Chat 对话
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Chat 对话">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#post---发送消息" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        POST `` — 发送消息
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#post-conv_idinject--运行中注入" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        POST /{conv_id}/inject — 运行中注入
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#post-conv_idcancel" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        POST /{conv_id}/cancel
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#post-conv_idresume--permission-接续" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        POST /{conv_id}/resume — Permission 接续
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#post-conv_idcompact" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        POST /{conv_id}/compact
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#get-conv_idactive-stream" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /{conv_id}/active-stream
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#get-conv_idmessagesmsg_idevents" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /{conv_id}/messages/{msg_id}/events
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#artifacts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Artifacts
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Artifacts">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#上传约定" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        上传约定
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#读取的即时性" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        读取的即时性
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#stream-sse" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Stream (SSE)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#admin" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Admin
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Admin">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#get-conversations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /conversations
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#get-conversationsconv_idevents" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /conversations/{conv_id}/events
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#health" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Health
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#design-decisions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Design Decisions
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Design Decisions">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#为什么-chat-是资源路径而非-conversations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        为什么 /chat 是资源路径而非 /conversations
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#为什么没有-authregister--authrefresh" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        为什么没有 /auth/register / /auth/refresh
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#为什么-stream-用-stream_id--message_id" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        为什么 Stream 用 stream_id == message_id
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#为什么-inject--cancel--resume-都走-post-chatid" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        为什么 Inject / Cancel / Resume 都走 POST /chat/{id}/...
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="api-参考">API 参考</h1>
+<blockquote>
+<p>五个路由组 + 统一鉴权 + SSE 订阅 — 面向集成方的紧凑端点手册。完整字段与 schema 见 <code>/openapi.json</code>（<code>ARTIFACTFLOW_DEBUG=true</code> 时 <code>/docs</code> 渲染 Swagger UI）。</p>
+</blockquote>
+<h2 id="通用约定">通用约定</h2>
+<ul>
+<li><strong>Base URL</strong>：<code>/api/v1/{group}</code>，group ∈ <code>auth / chat / artifacts / stream / admin</code></li>
+<li><strong>鉴权</strong>：除 <code>/health/*</code> 与 <code>/auth/login</code> 外全部要求 <code>Authorization: Bearer &lt;JWT&gt;</code>；Admin 路由额外要求 <code>role=admin</code></li>
+<li><strong>JSON</strong>：请求与响应默认 <code>application/json</code>；文件上传用 <code>multipart/form-data</code></li>
+<li><strong>时间</strong>：所有 timestamp 用 ISO-8601 字符串</li>
+<li><strong>ID</strong>：所有资源 ID 用字符串（非自增数字），避免跨存储后端的整型语义差异</li>
+</ul>
+<h3 id="状态码约定">状态码约定</h3>
+<table>
+<thead>
+<tr>
+<th>码</th>
+<th>含义</th>
+<th>触发</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>200</code></td>
+<td>成功</td>
+<td>正常响应</td>
+</tr>
+<tr>
+<td><code>202</code></td>
+<td>异步接受</td>
+<td><code>/chat/{id}/compact</code> 后台任务已排队</td>
+</tr>
+<tr>
+<td><code>401</code></td>
+<td>未鉴权</td>
+<td>缺 token / token 失效 / 用户被禁用</td>
+</tr>
+<tr>
+<td><code>403</code></td>
+<td>权限不足</td>
+<td>非 admin 访问 <code>/admin/*</code> 端点</td>
+</tr>
+<tr>
+<td><code>404</code></td>
+<td>资源不存在</td>
+<td><strong>也覆盖"跨用户访问"</strong> — 见 Design Decision</td>
+</tr>
+<tr>
+<td><code>409</code></td>
+<td>冲突</td>
+<td>Lease 冲突 / interrupt 已解决 / compaction 在跑</td>
+</tr>
+<tr>
+<td><code>410</code></td>
+<td>资源失效</td>
+<td><code>active-stream</code> 指向的 stream 已过期</td>
+</tr>
+<tr>
+<td><code>422</code></td>
+<td>请求不合法</td>
+<td>参数校验、文件过大、格式不支持</td>
+</tr>
+<tr>
+<td><code>503</code></td>
+<td>服务不可用</td>
+<td>Health ready 降级、Compaction 后台服务未启动</td>
+</tr>
+</tbody>
+</table>
+<h3 id="404-not-403-原则">404-not-403 原则</h3>
+<p>跨用户访问他人资源（<code>GET /chat/{someone_elses_conv_id}</code> 等）一律返回 <strong>404</strong> 而非 403，不泄露资源存在性。实现上 Repository 查询即带 <code>user_id</code> 过滤，"没找到"与"不是你的"在同一代码路径。</p>
+<hr />
+<h2 id="auth">Auth</h2>
+<p><code>/api/v1/auth</code> — 登录与用户管理（无自助注册）。</p>
+<table>
+<thead>
+<tr>
+<th>方法</th>
+<th>路径</th>
+<th>鉴权</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>POST</td>
+<td><code>/login</code></td>
+<td>—</td>
+<td>用户名密码换 JWT</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/me</code></td>
+<td>用户</td>
+<td>当前用户信息</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/users</code></td>
+<td>admin</td>
+<td>创建用户</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/users</code></td>
+<td>admin</td>
+<td>列出用户（<code>limit</code> 1-200, <code>offset</code>, <code>q</code> 搜索）</td>
+</tr>
+<tr>
+<td>PUT</td>
+<td><code>/users/{user_id}</code></td>
+<td>admin</td>
+<td>更新 display_name / password / role / is_active</td>
+</tr>
+</tbody>
+</table>
+<p><strong>POST /login</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="err">POST /api/v1/auth/login</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="err">{&quot;username&quot;: &quot;alice&quot;, &quot;password&quot;: &quot;...&quot;}</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="err">200 OK</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="err">{</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="err">  &quot;access_token&quot;: &quot;eyJhbGc...&quot;,</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="err">  &quot;token_type&quot;: &quot;bearer&quot;,</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="err">  &quot;expires_in&quot;: 86400,</span>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="err">  &quot;user&quot;: {&quot;id&quot;: &quot;...&quot;, &quot;username&quot;: &quot;alice&quot;, &quot;display_name&quot;: &quot;Alice&quot;, &quot;role&quot;: &quot;user&quot;}</span>
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="err">}</span>
+</code></pre></div>
+<ul>
+<li>失败统一返回 <strong>401</strong>（用户不存在 / 密码错 / 账号禁用），不区分原因</li>
+<li><strong>无 <code>/refresh</code> 端点</strong>：token 过期后客户端需重新 login</li>
+</ul>
+<p><strong>POST /users</strong></p>
+<ul>
+<li>字段：<code>username</code>, <code>password</code>, <code>display_name</code>, <code>role</code> ∈ <code>user</code> / <code>admin</code></li>
+<li><code>409</code> 用户名已存在；<code>400</code> 非法 role</li>
+</ul>
+<hr />
+<h2 id="chat-对话">Chat 对话</h2>
+<p><code>/api/v1/chat</code> — 所有对话、执行、消息树、permission 接续、compaction 都在这一组。</p>
+<table>
+<thead>
+<tr>
+<th>方法</th>
+<th>路径</th>
+<th>鉴权</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>POST</td>
+<td>``</td>
+<td>用户</td>
+<td>发送消息、启动执行，返回 <code>stream_url</code></td>
+</tr>
+<tr>
+<td>GET</td>
+<td>``</td>
+<td>用户</td>
+<td>列出自己的对话（<code>limit</code> 1-100, <code>offset</code>, <code>q</code>）</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/{conv_id}</code></td>
+<td>用户</td>
+<td>对话详情含消息树</td>
+</tr>
+<tr>
+<td>DELETE</td>
+<td><code>/{conv_id}</code></td>
+<td>用户</td>
+<td>删除对话</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/{conv_id}/active-stream</code></td>
+<td>用户</td>
+<td>查询当前是否有运行中的 stream（用于重连）</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/{conv_id}/inject</code></td>
+<td>用户</td>
+<td>运行中注入一条 user 消息</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/{conv_id}/cancel</code></td>
+<td>用户</td>
+<td>请求取消运行</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/{conv_id}/resume</code></td>
+<td>用户</td>
+<td>Permission 审批后恢复运行</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/{conv_id}/compact</code></td>
+<td>用户</td>
+<td>手动触发对话压缩</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/{conv_id}/messages/{msg_id}/events</code></td>
+<td>用户</td>
+<td>单个 message 的事件链（可观测性）</td>
+</tr>
+</tbody>
+</table>
+<h3 id="post---发送消息">POST `` — 发送消息</h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="err">POST /api/v1/chat</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="err">{</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="err">  &quot;user_input&quot;: &quot;...&quot;,</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="err">  &quot;conversation_id&quot;: &quot;...&quot; | null,        // null → 新建对话</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="err">  &quot;parent_message_id&quot;: &quot;...&quot; | null       // 可指定分支父节点</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="err">}</span>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="err">200 OK</span>
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="err">{</span>
+<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a><span class="err">  &quot;conversation_id&quot;: &quot;...&quot;,</span>
+<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a><span class="err">  &quot;message_id&quot;: &quot;...&quot;,</span>
+<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a><span class="err">  &quot;stream_url&quot;: &quot;/api/v1/stream/{message_id}&quot;</span>
+<a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a><span class="err">}</span>
+</code></pre></div>
+<ul>
+<li><strong><code>409 Conflict</code></strong>：该对话已有执行占用 lease — 客户端应先 <code>cancel</code> 或等前一次结束</li>
+<li><strong><code>404</code></strong>：<code>conversation_id</code> 存在但不属于当前用户（见 404-not-403）</li>
+<li>调用方拿到 <code>stream_url</code> 后必须立即 <code>GET</code>，否则 Transport 的 pending TTL 到期会清理</li>
+</ul>
+<h3 id="post-conv_idinject--运行中注入">POST <code>/{conv_id}/inject</code> — 运行中注入</h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="err">POST /api/v1/chat/{conv_id}/inject</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="err">{&quot;content&quot;: &quot;补充一条要求&quot;}</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="err">200 OK</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="err">{&quot;message_id&quot;: &quot;...&quot;, &quot;stream_url&quot;: &quot;/api/v1/stream/{original_msg_id}&quot;}</span>
+</code></pre></div>
+<ul>
+<li>注入的消息<strong>不会</strong>新建 <code>Message</code> 行，仅作为 <code>queued_message</code> 事件持久化</li>
+<li><code>409</code>：对话不在 interactive 状态（引擎已退出或未启动）</li>
+<li><code>stream_url</code> 指向<strong>原执行</strong>的 stream — 客户端无需重新订阅</li>
+</ul>
+<h3 id="post-conv_idcancel">POST <code>/{conv_id}/cancel</code></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="err">POST /api/v1/chat/{conv_id}/cancel</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="err">→ 200 {&quot;message_id&quot;: &quot;...&quot;}</span>
+</code></pre></div>
+<ul>
+<li>设置取消标志，引擎在下一检查点 emit <code>cancelled</code> 并终止；并非立即生效</li>
+<li><code>409</code>：对话无运行中执行</li>
+</ul>
+<h3 id="post-conv_idresume--permission-接续">POST <code>/{conv_id}/resume</code> — Permission 接续</h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="err">POST /api/v1/chat/{conv_id}/resume</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="err">{&quot;message_id&quot;: &quot;...&quot;, &quot;approved&quot;: true, &quot;always_allow&quot;: false}</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="err">200 OK</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="err">{&quot;stream_url&quot;: &quot;/api/v1/stream/{message_id}&quot;}</span>
+</code></pre></div>
+<ul>
+<li><code>404</code>：message 或 interrupt 不存在</li>
+<li><code>409</code>：interrupt 已解决（超时、被 cancel 唤醒、或已被处理）</li>
+<li><code>stream_url</code> 与原 <code>POST /chat</code> 返回相同，继续订阅即可</li>
+</ul>
+<h3 id="post-conv_idcompact">POST <code>/{conv_id}/compact</code></h3>
+<ul>
+<li>触发后台压缩任务，<code>202</code> 表示已接受（<code>{"status": "accepted", "conversation_id": "..."}</code>）</li>
+<li><code>409</code>：已有压缩在跑；<code>503</code>：未启用 CompactionManager</li>
+</ul>
+<h3 id="get-conv_idactive-stream">GET <code>/{conv_id}/active-stream</code></h3>
+<ul>
+<li>返回 <code>{"conversation_id", "message_id", "stream_url"}</code></li>
+<li><code>404</code>：当前无运行中执行</li>
+<li><code>410</code>：有执行但对应 stream 已过 <code>EXECUTION_TIMEOUT</code> 失效</li>
+</ul>
+<h3 id="get-conv_idmessagesmsg_idevents">GET <code>/{conv_id}/messages/{msg_id}/events</code></h3>
+<ul>
+<li>Query：<code>event_type</code>（可选过滤）</li>
+<li>返回该消息的完整事件链（不含 <code>llm_chunk</code>，见 <a href="../../architecture/observability/">../architecture/observability.md</a>）</li>
+<li>用户侧可观测端点；Admin 版本见下方 <code>/admin/conversations/{id}/events</code></li>
+</ul>
+<hr />
+<h2 id="artifacts">Artifacts</h2>
+<p><code>/api/v1/artifacts</code> — 上传、读取、导出、版本管理。</p>
+<table>
+<thead>
+<tr>
+<th>方法</th>
+<th>路径</th>
+<th>鉴权</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>POST</td>
+<td><code>/upload</code></td>
+<td>用户</td>
+<td>新建对话并上传首个 artifact</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/{session_id}</code></td>
+<td>用户</td>
+<td>列出 session 下所有 artifacts</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/{session_id}/upload</code></td>
+<td>用户</td>
+<td>向已有 session 追加 artifact</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/{session_id}/{artifact_id}</code></td>
+<td>用户</td>
+<td>获取内容 + 版本列表</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/{session_id}/{artifact_id}/versions/{version}</code></td>
+<td>用户</td>
+<td>获取指定版本</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/{session_id}/{artifact_id}/export?format=docx</code></td>
+<td>用户</td>
+<td>导出为 DOCX</td>
+</tr>
+</tbody>
+</table>
+<h3 id="上传约定">上传约定</h3>
+<ul>
+<li><code>multipart/form-data</code>，字段名 <code>file</code></li>
+<li>大小上限：<code>config.MAX_UPLOAD_SIZE</code>（环境可配，默认见 <a href="../../deployment/">deployment.md</a>）</li>
+<li><code>422</code> 触发：超限、格式不支持</li>
+<li>走 <code>create_from_upload</code> 路径绕过 write-back cache，直接 commit 到 DB（见 <a href="../../architecture/artifacts/">../architecture/artifacts.md</a>）</li>
+</ul>
+<h3 id="读取的即时性">读取的即时性</h3>
+<ul>
+<li><code>GET /{session_id}</code> 和 <code>GET /{session_id}/{artifact_id}</code> 会<strong>合并 DB + 当前 engine 的内存缓存</strong>，返回最新快照</li>
+<li><code>GET .../versions/{version}</code> 与 <code>GET .../export</code> <strong>只读 DB</strong>：执行中未 flush 的中间版本返回 <code>404</code></li>
+</ul>
+<hr />
+<h2 id="stream-sse">Stream (SSE)</h2>
+<p><code>/api/v1/stream</code> — 订阅某次执行的事件流。</p>
+<table>
+<thead>
+<tr>
+<th>方法</th>
+<th>路径</th>
+<th>鉴权</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>GET</td>
+<td><code>/{stream_id}</code></td>
+<td>用户</td>
+<td>SSE 长连接；<code>stream_id == message_id</code></td>
+</tr>
+</tbody>
+</table>
+<p><strong>请求头：</strong></p>
+<ul>
+<li><code>Authorization: Bearer &lt;JWT&gt;</code> —— 强制；不支持 query token</li>
+<li><code>Last-Event-ID: &lt;entry_id&gt;</code> —— 可选；Redis transport 下实现续传，InMemory 模式忽略</li>
+</ul>
+<p><strong>响应：</strong></p>
+<ul>
+<li><code>Content-Type: text/event-stream</code></li>
+<li><code>Cache-Control: no-cache</code></li>
+<li><code>X-Accel-Buffering: no</code></li>
+</ul>
+<p><strong>事件格式</strong>（多行，空行分隔）：</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>event: tool_complete
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>id: 1710000003456-0
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>data: {&quot;type&quot;:&quot;tool_complete&quot;,&quot;timestamp&quot;:&quot;...&quot;,&quot;agent&quot;:&quot;search_agent&quot;,&quot;data&quot;:{...}}
+</code></pre></div>
+<p>心跳以 SSE comment 发送（<code>: ping\n\n</code>）；间隔 <code>SSE_PING_INTERVAL</code>（默认 15s）。</p>
+<p>终止条件：收到 <code>complete / cancelled / error</code> 后连接关闭。</p>
+<p>事件类型完整列表与 <code>data</code> 字段契约见 <a href="../../architecture/observability/#事件目录">../architecture/observability.md → 事件目录</a>。Transport 细节与断线续传见 <a href="../../architecture/streaming/">../architecture/streaming.md</a>.</p>
+<hr />
+<h2 id="admin">Admin</h2>
+<p><code>/api/v1/admin</code> — 全部端点 <code>role=admin</code>，非 admin 返回 <strong>403</strong>。</p>
+<table>
+<thead>
+<tr>
+<th>方法</th>
+<th>路径</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>GET</td>
+<td><code>/conversations</code></td>
+<td>全站对话列表 + 活跃标记</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/conversations/{conv_id}/events</code></td>
+<td>按 message 分组的事件时间线</td>
+</tr>
+</tbody>
+</table>
+<h3 id="get-conversations">GET <code>/conversations</code></h3>
+<p>Query：<code>limit</code> (1-100, 默认 20), <code>offset</code>, <code>q</code> (title 搜索), <code>user_id</code> (按 owner 过滤)</p>
+<p>响应：</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="p">{</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="w">  </span><span class="nt">&quot;conversations&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="w">    </span><span class="p">{</span>
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="w">      </span><span class="nt">&quot;id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;...&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;title&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;...&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;user_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;...&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;user_display_name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;...&quot;</span><span class="p">,</span>
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="w">      </span><span class="nt">&quot;message_count&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">42</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;is_active&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
+<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a><span class="w">      </span><span class="nt">&quot;created_at&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;...&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;updated_at&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;...&quot;</span>
+<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a><span class="w">    </span><span class="p">}</span>
+<a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a><span class="w">  </span><span class="p">],</span>
+<a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a><span class="w">  </span><span class="nt">&quot;total&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">120</span><span class="p">,</span>
+<a id="__codelineno-6-10" name="__codelineno-6-10" href="#__codelineno-6-10"></a><span class="w">  </span><span class="nt">&quot;has_more&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span>
+<a id="__codelineno-6-11" name="__codelineno-6-11" href="#__codelineno-6-11"></a><span class="p">}</span>
+</code></pre></div>
+<p><code>is_active</code> 实时来自 RuntimeStore（见 <a href="../../architecture/observability/#admin-api">../architecture/observability.md → Admin API</a>）。</p>
+<h3 id="get-conversationsconv_idevents">GET <code>/conversations/{conv_id}/events</code></h3>
+<p>见 <a href="../../architecture/observability/#get-apiv1adminconversationsconv_idevents">../architecture/observability.md → Admin API</a>.</p>
+<hr />
+<h2 id="health">Health</h2>
+<p><code>src/api/main.py</code>，<strong>无鉴权</strong>（故意），供 LB / K8s 探针。</p>
+<table>
+<thead>
+<tr>
+<th>方法</th>
+<th>路径</th>
+<th>行为</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>GET</td>
+<td><code>/health/live</code></td>
+<td>始终 200 <code>{"status":"ok"}</code></td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/health/ready</code></td>
+<td>DB + Redis 连通性检查；全通过 200，任一失败 503</td>
+</tr>
+</tbody>
+</table>
+<p>详见 <a href="../../architecture/observability/#健康检查">../architecture/observability.md → 健康检查</a>.</p>
+<hr />
+<h2 id="design-decisions">Design Decisions</h2>
+<h3 id="为什么-chat-是资源路径而非-conversations">为什么 <code>/chat</code> 是资源路径而非 <code>/conversations</code></h3>
+<ul>
+<li><code>conversation</code> 是 DB 名词，但对外语义是"对话"而非"会话记录"；<code>/chat</code> 读起来即动作也即资源</li>
+<li>保持 <code>/chat</code>、<code>/chat/{id}/inject</code>、<code>/chat/{id}/cancel</code> 的一致命名 — action 不单独用 <code>PATCH /conversations/{id}</code></li>
+<li>内部仍使用 <code>conversation_id</code> 字段名，命名空间与 URL 解耦</li>
+</ul>
+<h3 id="为什么没有-authregister--authrefresh">为什么没有 <code>/auth/register</code> / <code>/auth/refresh</code></h3>
+<ul>
+<li>产品定位是团队内 SaaS，用户由 admin 主动创建；开放自助注册会放大滥用面</li>
+<li>JWT 直接用较长 <code>expires_in</code>（默认 86400s），过期重新 login — 省掉 refresh token 的存储与撤销复杂度</li>
+<li>有强制失效需求可由 admin 通过 PUT <code>/users/{id}</code> 设 <code>is_active=false</code> 实现</li>
+</ul>
+<h3 id="为什么-stream-用-stream_id--message_id">为什么 Stream 用 <code>stream_id == message_id</code></h3>
+<ul>
+<li>一次执行对应一个 message，ID 天然一对一，省去映射表</li>
+<li>重连时客户端无需保存独立的 <code>stream_id</code>，只要记得上次的 <code>message_id</code></li>
+<li>权限校验天然走"这个 message 是不是你的"</li>
+</ul>
+<h3 id="为什么-inject--cancel--resume-都走-post-chatid">为什么 Inject / Cancel / Resume 都走 POST <code>/chat/{id}/...</code></h3>
+<ul>
+<li>都是对"运行中的执行"的副作用动作，资源定位都是 <code>conv_id</code></li>
+<li>副作用天然非幂等（inject 会排队、cancel 会设标志），POST 语义契合</li>
+<li>统一的路径 prefix 让前端 api client 可以共享 conv 级别的 wrapper</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  回到页面顶部
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.tabs", "navigation.sections", "navigation.expand", "navigation.top", "search.highlight", "content.code.copy"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "\u5df2\u590d\u5236", "clipboard.copy": "\u590d\u5236", "search.result.more.one": "\u5728\u8be5\u9875\u4e0a\u8fd8\u6709 1 \u4e2a\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.more.other": "\u5728\u8be5\u9875\u4e0a\u8fd8\u6709 # \u4e2a\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.none": "\u6ca1\u6709\u627e\u5230\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.one": "\u627e\u5230 1 \u4e2a\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.other": "# \u4e2a\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.placeholder": "\u952e\u5165\u4ee5\u5f00\u59cb\u641c\u7d22", "search.result.term.missing": "\u7f3a\u5c11", "select.version": "\u9009\u62e9\u5f53\u524d\u7248\u672c"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>

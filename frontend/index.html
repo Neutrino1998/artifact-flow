@@ -6,17 +6,15 @@
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width,initial-scale=1">
       
-        <meta name="description" content="Multi-Agent Research System Built on LangGraph">
+        <meta name="description" content="Pi-style 可配置 Agent 引擎 + 双 Artifact 架构的多智能体 SaaS">
       
       
       
-        <link rel="canonical" href="https://neutrino.github.io/artifact-flow/frontend/">
+        <link rel="canonical" href="https://neutrino1998.github.io/artifact-flow/frontend/">
       
       
-        <link rel="prev" href="..">
+        <link rel="prev" href="../guides/api-reference/">
       
-      
-        <link rel="next" href="../request-lifecycle/">
       
       
         
@@ -27,7 +25,7 @@
     
     
       
-        <title>Frontend Guide - ArtifactFlow</title>
+        <title>Frontend - ArtifactFlow</title>
       
     
     
@@ -53,6 +51,8 @@
       
     
     
+      <link rel="stylesheet" href="../stylesheets/custom.css">
+    
     <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
     
       
@@ -69,7 +69,7 @@
     
     
     
-    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="custom">
   
     
     <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
@@ -78,7 +78,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#前端架构指南" class="md-skip">
+        <a href="#前端架构" class="md-skip">
           跳转至
         </a>
       
@@ -112,7 +112,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Frontend Guide
+              Frontend
             
           </span>
         </div>
@@ -125,7 +125,7 @@
     
     
     
-    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="custom"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
     
       <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
@@ -135,7 +135,7 @@
     
     
     
-    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="custom" data-md-color-accent="custom"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
     
       <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
@@ -240,36 +240,15 @@
   
   
   
-    
-  
-  
-    <li class="md-tabs__item md-tabs__item--active">
-      <a href="./" class="md-tabs__link">
-        
-  
-  
-    
-  
-  Frontend Guide
-
-      </a>
-    </li>
-  
-
-      
-        
-  
-  
-  
   
     <li class="md-tabs__item">
-      <a href="../request-lifecycle/" class="md-tabs__link">
+      <a href="../deployment/" class="md-tabs__link">
         
   
   
     
   
-  Request Lifecycle
+  Deployment
 
       </a>
     </li>
@@ -284,7 +263,7 @@
     
     
       <li class="md-tabs__item">
-        <a href="../architecture/core/" class="md-tabs__link">
+        <a href="../architecture/overview/" class="md-tabs__link">
           
   
   
@@ -301,17 +280,18 @@
   
   
   
-    <li class="md-tabs__item">
-      <a href="../streaming/" class="md-tabs__link">
-        
-  
-  
     
+    
+      <li class="md-tabs__item">
+        <a href="../guides/add-agent/" class="md-tabs__link">
+          
   
-  Streaming
+  
+  Guides
 
-      </a>
-    </li>
+        </a>
+      </li>
+    
   
 
       
@@ -319,53 +299,17 @@
   
   
   
+    
   
-    <li class="md-tabs__item">
-      <a href="../extension-guide/" class="md-tabs__link">
+  
+    <li class="md-tabs__item md-tabs__item--active">
+      <a href="./" class="md-tabs__link">
         
   
   
     
   
-  Extension Guide
-
-      </a>
-    </li>
-  
-
-      
-        
-  
-  
-  
-  
-    <li class="md-tabs__item">
-      <a href="../api/" class="md-tabs__link">
-        
-  
-  
-    
-  
-  API Reference
-
-      </a>
-    </li>
-  
-
-      
-        
-  
-  
-  
-  
-    <li class="md-tabs__item">
-      <a href="../faq/" class="md-tabs__link">
-        
-  
-  
-    
-  
-  FAQ
+  Frontend
 
       </a>
     </li>
@@ -448,518 +392,17 @@
       
   
   
-    
-  
-  
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Frontend Guide
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Frontend Guide
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="目录">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      目录
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#技术栈" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        技术栈
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#目录结构总览" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        目录结构总览
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#核心概念" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        核心概念
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="核心概念">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#什么是-hook" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        什么是 Hook？
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#什么是-store" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        什么是 Store？
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#页面结构" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        页面结构
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#文件详解" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        文件详解
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="文件详解">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#app--nextjs-入口" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        app/ — Next.js 入口
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#types--类型定义" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        types/ — 类型定义
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#lib--工具函数" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        lib/ — 工具函数
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="lib/ — 工具函数">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#apits--api-客户端" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        api.ts — API 客户端
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#ssets--sse-连接" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        sse.ts — SSE 连接
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#messagetreets--消息树" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        messageTree.ts — 消息树
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#stores--状态仓库" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        stores/ — 状态仓库
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="stores/ — 状态仓库">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#conversationstorets--对话状态" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        conversationStore.ts — 对话状态
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#streamstorets--流式状态" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        streamStore.ts — 流式状态
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#artifactstorets--文稿状态" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        artifactStore.ts — 文稿状态
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#authstorets--认证状态" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        authStore.ts — 认证状态
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#uistorets--ui-状态" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        uiStore.ts — UI 状态
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#hooks--自定义-hook" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        hooks/ — 自定义 Hook
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="hooks/ — 自定义 Hook">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#usessets--sse-事件处理" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        useSSE.ts — SSE 事件处理
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#usechatts--聊天操作" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        useChat.ts — 聊天操作
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#useartifactsts--文稿操作" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        useArtifacts.ts — 文稿操作
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#usemediaqueryts--响应式断点" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        useMediaQuery.ts — 响应式断点
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#components--ui-组件" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        components/ — UI 组件
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="components/ — UI 组件">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#认证组件" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        认证组件
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#布局组件-layout" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        布局组件 (layout/)
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#侧边栏组件-sidebar" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        侧边栏组件 (sidebar/)
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#聊天组件-chat" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        聊天组件 (chat/)
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#文稿组件-artifact" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        文稿组件 (artifact/)
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#数据流全景" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        数据流全景
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="数据流全景">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#发送消息" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        发送消息
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#对话分支" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        对话分支
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#文稿更新" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        文稿更新
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#样式系统" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        样式系统
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
-    </li>
-  
-
-    
-      
-      
-  
-  
   
   
     <li class="md-nav__item">
-      <a href="../request-lifecycle/" class="md-nav__link">
+      <a href="../deployment/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    Request Lifecycle
+    Deployment
   
 
     
@@ -994,10 +437,10 @@
         
           
         
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
         
           
-          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
             
   
   
@@ -1015,8 +458,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_4">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -1033,14 +476,42 @@
   
   
     <li class="md-nav__item">
-      <a href="../architecture/core/" class="md-nav__link">
+      <a href="../architecture/overview/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    Core
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture/engine/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Engine
   
 
     
@@ -1117,6 +588,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../architecture/artifacts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Artifacts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../architecture/data-layer/" class="md-nav__link">
         
   
@@ -1125,6 +624,34 @@
     
   
     Data Layer
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture/streaming/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Streaming
   
 
     
@@ -1166,6 +693,34 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture/observability/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Observability
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -1179,15 +734,69 @@
   
   
   
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Guides
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Guides
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
     <li class="md-nav__item">
-      <a href="../streaming/" class="md-nav__link">
+      <a href="../guides/add-agent/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    Streaming
+    Add Agent
   
 
     
@@ -1199,22 +808,23 @@
     </li>
   
 
-    
-      
-      
+              
+            
+              
+                
   
   
   
   
     <li class="md-nav__item">
-      <a href="../extension-guide/" class="md-nav__link">
+      <a href="../guides/add-tool/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    Extension Guide
+    Add Tool
   
 
     
@@ -1226,15 +836,44 @@
     </li>
   
 
-    
-      
-      
+              
+            
+              
+                
   
   
   
   
     <li class="md-nav__item">
-      <a href="../api/" class="md-nav__link">
+      <a href="../guides/add-model/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Add Model
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guides/api-reference/" class="md-nav__link">
         
   
   
@@ -1253,22 +892,57 @@
     </li>
   
 
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
     
       
       
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../faq/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Frontend
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
   <span class="md-ellipsis">
     
   
-    FAQ
+    Frontend
   
 
     
@@ -1277,6 +951,286 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="目录">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      目录
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#tech-stack" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tech Stack
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#目录结构" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        目录结构
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#三栏布局" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        三栏布局
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#状态管理zustand-stores" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        状态管理（Zustand Stores）
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="状态管理（Zustand Stores）">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#authstore" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        authStore
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#conversationstore" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        conversationStore
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#artifactstore" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        artifactStore
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#uistore" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        uiStore
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#streamstore" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        streamStore
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sse-集成" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SSE 集成
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#性能优化" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        性能优化
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="性能优化">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#raf-节流-llm_chunk" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        RAF 节流 llm_chunk
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#zustand-selector-精细订阅" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Zustand selector 精细订阅
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#reactmemo-消息组件" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        React.memo 消息组件
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#类型同步" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        类型同步
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#暗色模式" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        暗色模式
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#rest-client-缓存" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        REST Client 缓存
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#design-decisions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Design Decisions
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Design Decisions">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#为什么-zustand-而非-redux--context" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        为什么 Zustand 而非 Redux / Context
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#为什么类型手写一部分eventsts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        为什么类型手写一部分（events.ts）
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#为什么共享-streamstore-而非每消息独立" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        为什么共享 streamStore 而非每消息独立
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#为什么不用-react-virtual" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        为什么不用 react-virtual
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -1308,10 +1262,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#技术栈" class="md-nav__link">
+  <a href="#tech-stack" class="md-nav__link">
     <span class="md-ellipsis">
       
-        技术栈
+        Tech Stack
       
     </span>
   </a>
@@ -1319,10 +1273,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#目录结构总览" class="md-nav__link">
+  <a href="#目录结构" class="md-nav__link">
     <span class="md-ellipsis">
       
-        目录结构总览
+        目录结构
       
     </span>
   </a>
@@ -1330,49 +1284,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#核心概念" class="md-nav__link">
+  <a href="#三栏布局" class="md-nav__link">
     <span class="md-ellipsis">
       
-        核心概念
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="核心概念">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#什么是-hook" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        什么是 Hook？
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#什么是-store" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        什么是 Store？
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#页面结构" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        页面结构
+        三栏布局
       
     </span>
   </a>
@@ -1380,22 +1295,22 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#文件详解" class="md-nav__link">
+  <a href="#状态管理zustand-stores" class="md-nav__link">
     <span class="md-ellipsis">
       
-        文件详解
+        状态管理（Zustand Stores）
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="文件详解">
+    <nav class="md-nav" aria-label="状态管理（Zustand Stores）">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#app--nextjs-入口" class="md-nav__link">
+  <a href="#authstore" class="md-nav__link">
     <span class="md-ellipsis">
       
-        app/ — Next.js 入口
+        authStore
       
     </span>
   </a>
@@ -1403,10 +1318,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#types--类型定义" class="md-nav__link">
+  <a href="#conversationstore" class="md-nav__link">
     <span class="md-ellipsis">
       
-        types/ — 类型定义
+        conversationStore
       
     </span>
   </a>
@@ -1414,22 +1329,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#lib--工具函数" class="md-nav__link">
+  <a href="#artifactstore" class="md-nav__link">
     <span class="md-ellipsis">
       
-        lib/ — 工具函数
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="lib/ — 工具函数">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#apits--api-客户端" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        api.ts — API 客户端
+        artifactStore
       
     </span>
   </a>
@@ -1437,10 +1340,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#ssets--sse-连接" class="md-nav__link">
+  <a href="#uistore" class="md-nav__link">
     <span class="md-ellipsis">
       
-        sse.ts — SSE 连接
+        uiStore
       
     </span>
   </a>
@@ -1448,270 +1351,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#messagetreets--消息树" class="md-nav__link">
+  <a href="#streamstore" class="md-nav__link">
     <span class="md-ellipsis">
       
-        messageTree.ts — 消息树
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#stores--状态仓库" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        stores/ — 状态仓库
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="stores/ — 状态仓库">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#conversationstorets--对话状态" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        conversationStore.ts — 对话状态
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#streamstorets--流式状态" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        streamStore.ts — 流式状态
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#artifactstorets--文稿状态" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        artifactStore.ts — 文稿状态
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#authstorets--认证状态" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        authStore.ts — 认证状态
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#uistorets--ui-状态" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        uiStore.ts — UI 状态
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#hooks--自定义-hook" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        hooks/ — 自定义 Hook
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="hooks/ — 自定义 Hook">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#usessets--sse-事件处理" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        useSSE.ts — SSE 事件处理
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#usechatts--聊天操作" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        useChat.ts — 聊天操作
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#useartifactsts--文稿操作" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        useArtifacts.ts — 文稿操作
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#usemediaqueryts--响应式断点" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        useMediaQuery.ts — 响应式断点
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#components--ui-组件" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        components/ — UI 组件
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="components/ — UI 组件">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#认证组件" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        认证组件
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#布局组件-layout" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        布局组件 (layout/)
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#侧边栏组件-sidebar" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        侧边栏组件 (sidebar/)
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#聊天组件-chat" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        聊天组件 (chat/)
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#文稿组件-artifact" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        文稿组件 (artifact/)
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#数据流全景" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        数据流全景
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="数据流全景">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#发送消息" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        发送消息
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#对话分支" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        对话分支
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#文稿更新" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        文稿更新
+        streamStore
       
     </span>
   </a>
@@ -1724,13 +1367,157 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#样式系统" class="md-nav__link">
+  <a href="#sse-集成" class="md-nav__link">
     <span class="md-ellipsis">
       
-        样式系统
+        SSE 集成
       
     </span>
   </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#性能优化" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        性能优化
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="性能优化">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#raf-节流-llm_chunk" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        RAF 节流 llm_chunk
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#zustand-selector-精细订阅" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Zustand selector 精细订阅
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#reactmemo-消息组件" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        React.memo 消息组件
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#类型同步" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        类型同步
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#暗色模式" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        暗色模式
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#rest-client-缓存" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        REST Client 缓存
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#design-decisions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Design Decisions
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Design Decisions">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#为什么-zustand-而非-redux--context" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        为什么 Zustand 而非 Redux / Context
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#为什么类型手写一部分eventsts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        为什么类型手写一部分（events.ts）
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#为什么共享-streamstore-而非每消息独立" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        为什么共享 streamStore 而非每消息独立
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#为什么不用-react-virtual" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        为什么不用 react-virtual
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -1754,662 +1541,350 @@
   
 
 
-<h1 id="前端架构指南">前端架构指南</h1>
-<p>本文档帮助你理解 ArtifactFlow 前端的完整架构，适合刚接触这个项目的开发者阅读。</p>
-<h2 id="技术栈">技术栈</h2>
-<table>
-<thead>
-<tr>
-<th>技术</th>
-<th>版本</th>
-<th>用途</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>Next.js</td>
-<td>15</td>
-<td>React 框架（App Router 模式）</td>
-</tr>
-<tr>
-<td>React</td>
-<td>19</td>
-<td>UI 库</td>
-</tr>
-<tr>
-<td>TypeScript</td>
-<td>strict mode</td>
-<td>类型安全</td>
-</tr>
-<tr>
-<td>Tailwind CSS</td>
-<td>3</td>
-<td>原子化 CSS</td>
-</tr>
-<tr>
-<td>Zustand</td>
-<td>5</td>
-<td>状态管理</td>
-</tr>
-</tbody>
-</table>
-<h2 id="目录结构总览">目录结构总览</h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>frontend/src/
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>├── app/                  # Next.js 入口（路由 + 全局样式）
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>│   └── login/           # 登录页
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>├── components/           # React 组件
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>│   ├── layout/          # 页面布局
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>│   ├── sidebar/         # 左侧栏（对话列表）
-<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>│   ├── chat/            # 中间栏（聊天面板）
-<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>│   └── artifact/        # 右侧栏（文稿面板）
-<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>├── hooks/                # 自定义 Hook
-<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>├── lib/                  # 工具函数（API 客户端、SSE、消息树）
-<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>├── stores/               # Zustand 状态仓库（含 authStore）
-<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>└── types/                # TypeScript 类型定义
-</code></pre></div>
-<hr />
-<h2 id="核心概念">核心概念</h2>
-<h3 id="什么是-hook">什么是 Hook？</h3>
-<p>Hook 是 React 的一种模式，用来把<strong>可复用的逻辑</strong>从组件中抽离出来。函数名以 <code>use</code> 开头。</p>
-<p>比如 <code>useChat</code> 封装了「发送消息、刷新对话」等操作，任何需要聊天功能的组件只需调用 <code>useChat()</code> 就能拿到这些函数，而不用重复写逻辑。</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="c1">// 使用示例</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="kd">function</span><span class="w"> </span><span class="nx">MyComponent</span><span class="p">()</span><span class="w"> </span><span class="p">{</span>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">  </span><span class="kd">const</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nx">sendMessage</span><span class="p">,</span><span class="w"> </span><span class="nx">isNewConversation</span><span class="w"> </span><span class="p">}</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nx">useChat</span><span class="p">();</span>
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="w">  </span><span class="c1">// 现在可以直接调用 sendMessage(&quot;hello&quot;)</span>
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="p">}</span>
-</code></pre></div>
-<h3 id="什么是-store">什么是 Store？</h3>
-<p>Store（状态仓库）是用 Zustand 创建的全局状态容器。它解决的问题是：<strong>多个不相关的组件需要共享同一份数据</strong>。</p>
-<p>比如 <code>streamStore</code> 保存了当前 SSE 流的状态（是否在流式传输、当前内容、工具调用等），聊天面板和消息列表都需要读取这些数据。</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="c1">// 通过 selector 读取单个字段（推荐，避免不必要的重渲染）</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="kd">const</span><span class="w"> </span><span class="nx">isStreaming</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nx">useStreamStore</span><span class="p">((</span><span class="nx">s</span><span class="p">)</span><span class="w"> </span><span class="p">=&gt;</span><span class="w"> </span><span class="nx">s</span><span class="p">.</span><span class="nx">isStreaming</span><span class="p">);</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="c1">// 调用 action 修改状态</span>
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="kd">const</span><span class="w"> </span><span class="nx">startStream</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nx">useStreamStore</span><span class="p">((</span><span class="nx">s</span><span class="p">)</span><span class="w"> </span><span class="p">=&gt;</span><span class="w"> </span><span class="nx">s</span><span class="p">.</span><span class="nx">startStream</span><span class="p">);</span>
-<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="nx">startStream</span><span class="p">(</span><span class="nx">url</span><span class="p">,</span><span class="w"> </span><span class="nx">threadId</span><span class="p">,</span><span class="w"> </span><span class="nx">messageId</span><span class="p">);</span>
-</code></pre></div>
+<h1 id="前端架构">前端架构</h1>
 <blockquote>
-<p><strong>Selector 模式</strong>：<code>useStreamStore((s) =&gt; s.isStreaming)</code> 只在 <code>isStreaming</code> 变化时触发重渲染。如果写成 <code>useStreamStore()</code> 获取整个 store，那么 store 里任何字段变化都会导致重渲染，在高频率流式更新时会造成性能问题。</p>
+<p>Next.js 15 App Router + Zustand + fetch/ReadableStream SSE — 三栏工作台，围绕"实时投射引擎状态"构建。</p>
 </blockquote>
-<hr />
-<h2 id="页面结构">页面结构</h2>
-<p>整个应用只有一个页面 <code>app/page.tsx</code>，采用三栏布局：</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>┌──────────┬──────────────────────┬──────────────┐
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>│          │                      │              │
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>│ Sidebar  │     Chat Panel       │  Artifact    │
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>│ 对话列表  │     聊天面板          │  文稿面板     │
-<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>│          │                      │              │
-<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>│          │                      │              │
-<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a>└──────────┴──────────────────────┴──────────────┘
+<h2 id="tech-stack">Tech Stack</h2>
+<table>
+<thead>
+<tr>
+<th>维度</th>
+<th>选型</th>
+<th>备注</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>框架</td>
+<td>Next.js 15 (App Router)</td>
+<td>React 19</td>
+</tr>
+<tr>
+<td>语言</td>
+<td>TypeScript 5.7（strict）</td>
+<td>类型从 OpenAPI 自动生成</td>
+</tr>
+<tr>
+<td>样式</td>
+<td>Tailwind 3.4 + <code>@tailwindcss/typography</code></td>
+<td>class-based 暗色模式</td>
+</tr>
+<tr>
+<td>状态</td>
+<td>Zustand 5</td>
+<td>分 5 个 store，selector 精细订阅</td>
+</tr>
+<tr>
+<td>Markdown</td>
+<td><code>react-markdown</code> + <code>remark-gfm</code> + <code>rehype-highlight</code></td>
+<td>代码高亮</td>
+</tr>
+<tr>
+<td>Diff</td>
+<td><code>diff</code> 8</td>
+<td>Artifact 版本对比</td>
+</tr>
+<tr>
+<td>类型工具</td>
+<td><code>openapi-typescript</code></td>
+<td><code>npm run generate-types</code></td>
+</tr>
+</tbody>
+</table>
+<p><strong>不使用</strong> <code>@tanstack/react-virtual</code>——对话树长度实测不触发虚拟化收益，暂保持常规渲染；将来长会话场景可再引入。</p>
+<h2 id="目录结构">目录结构</h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>frontend/src/
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>├── app/
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>│   ├── layout.tsx              # Root layout + ThemeInitializer + auth hydration
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>│   ├── page.tsx                # 主聊天页
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>│   └── login/page.tsx
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>├── components/
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>│   ├── chat/                   # 消息、流式、工具卡片、admin 面板
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>│   ├── artifact/               # 面板、Tabs、预览 / Source / Diff
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>│   ├── layout/                 # ThreeColumnLayout、Modals
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>│   ├── sidebar/                # 对话列表、用户菜单
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>│   └── markdown/CodeBlock.tsx
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>├── stores/                     # 5 个 Zustand store
+<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>├── hooks/                      # useSSE / useChat / useArtifacts / useMediaQuery
+<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>├── lib/                        # sse.ts / api.ts / messageTree.ts / reconstructSegments.ts
+<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a>└── types/
+<a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a>    ├── api.d.ts                # 自动生成（不要手改）
+<a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a>    ├── events.ts               # StreamEventType 镜像 + 各事件 data 接口
+<a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a>    └── index.ts                # 从 api.d.ts 抽取的常用类型 re-export
+</code></pre></div>
+<h2 id="三栏布局">三栏布局</h2>
+<p><code>components/layout/ThreeColumnLayout.tsx</code> 固定三栏，宽度由 <code>uiStore</code> 控制折叠：</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>┌──────────┬──────────────────────┬──────────────┐
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>│ Sidebar  │        Chat          │  Artifacts   │
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>│          │                      │              │
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>│ 对话列表 │  MessageList         │  ArtifactTabs│
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>│ 用户菜单 │  ProcessingFlow      │  Preview/    │
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>│          │  MessageInput        │  Source/Diff │
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>└──────────┴──────────────────────┴──────────────┘
 </code></pre></div>
 <ul>
-<li><strong>Sidebar</strong>：对话列表、新建对话、底部用户菜单（主题切换、退出登录、Admin 用户管理）</li>
-<li><strong>Chat Panel</strong>：消息历史 + 流式响应 + 输入框</li>
-<li><strong>Artifact Panel</strong>：文稿预览（Markdown）/ 源码 / Diff 对比</li>
+<li><strong>Sidebar</strong>：<code>ConversationList</code> + <code>UserMenu</code>；admin 可打开 <code>AdminConversationList</code> / <code>ObservabilityPanel</code> / <code>UserManagementPanel</code></li>
+<li><strong>Chat</strong>：<code>ChatPanel</code> 组合 <code>MessageList</code>（含分支导航 <code>BranchNavigator</code>）+ <code>MessageInput</code>；流式期间由 <code>ProcessingFlow</code> 渲染各 agent 的 <code>AgentSegmentBlock</code> / <code>ToolCallCard</code> / <code>ThinkingBlock</code> / <code>CompactionFlowBlock</code> / <code>InjectFlowBlock</code> / <code>ErrorFlowBlock</code></li>
+<li><strong>Artifacts</strong>：<code>ArtifactPanel</code> → <code>ArtifactTabs</code> → <code>MarkdownPreview | SourceView | DiffView</code>，顶栏 <code>ArtifactToolbar</code> 提供版本切换与 DOCX 导出</li>
 </ul>
-<p>Artifact Panel 默认隐藏，当 Agent 创建/更新文稿时自动弹出。</p>
-<hr />
-<h2 id="文件详解">文件详解</h2>
-<h3 id="app--nextjs-入口"><code>app/</code> — Next.js 入口</h3>
+<h2 id="状态管理zustand-stores">状态管理（Zustand Stores）</h2>
+<p>5 个 store 各管一个职责维度：</p>
+<h3 id="authstore"><code>authStore</code></h3>
 <table>
 <thead>
 <tr>
-<th>文件</th>
-<th>作用</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>layout.tsx</code></td>
-<td>根布局，设置 HTML metadata、字体、全局样式</td>
-</tr>
-<tr>
-<td><code>page.tsx</code></td>
-<td>首页，组装三栏布局 + 权限确认弹窗（被 <code>AuthGuard</code> 包裹）</td>
-</tr>
-<tr>
-<td><code>login/page.tsx</code></td>
-<td>登录页，username/password 表单</td>
-</tr>
-<tr>
-<td><code>globals.css</code></td>
-<td>全局 CSS（Tailwind 指令 + 自定义样式）</td>
-</tr>
-</tbody>
-</table>
-<h3 id="types--类型定义"><code>types/</code> — 类型定义</h3>
-<table>
-<thead>
-<tr>
-<th>文件</th>
-<th>作用</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>index.ts</code></td>
-<td>从 <code>api.d.ts</code> re-export 的业务类型别名（<code>ChatRequest</code>、<code>ConversationDetail</code> 等），保持简短的 import 路径</td>
-</tr>
-<tr>
-<td><code>events.ts</code></td>
-<td>SSE 事件类型：<code>StreamEventType</code> 枚举 + 每种事件的数据结构（手写，不在 REST schema 里）</td>
-</tr>
-<tr>
-<td><code>api.d.ts</code></td>
-<td>从后端 OpenAPI schema 自动生成的类型（<code>npm run generate-types</code>）</td>
-</tr>
-<tr>
-<td><code>openapi.json</code></td>
-<td>后端导出的 OpenAPI schema（<code>python scripts/export_openapi.py</code>）</td>
-</tr>
-</tbody>
-</table>
-<p><code>index.ts</code> 从 <code>api.d.ts</code> re-export 类型并做必要的 alias（如 <code>ConversationDetail</code> → <code>ConversationDetailResponse</code>）。当后端 API 改了字段时，重新跑 <code>export_openapi.py</code> + <code>npm run generate-types</code> 即可自动同步。</p>
-<h3 id="lib--工具函数"><code>lib/</code> — 工具函数</h3>
-<h4 id="apits--api-客户端"><code>api.ts</code> — API 客户端</h4>
-<p>封装了所有后端 HTTP 请求，提供类型安全的函数：</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="c1">// 对话相关</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="nx">listConversations</span><span class="p">(</span><span class="nx">limit</span><span class="p">,</span><span class="w"> </span><span class="nx">offset</span><span class="p">)</span><span class="w">    </span><span class="c1">// GET  /api/v1/chat</span>
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="nx">getConversation</span><span class="p">(</span><span class="nx">convId</span><span class="p">)</span><span class="w">             </span><span class="c1">// GET  /api/v1/chat/:id</span>
-<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="nx">sendMessage</span><span class="p">(</span><span class="nx">body</span><span class="p">)</span><span class="w">                   </span><span class="c1">// POST /api/v1/chat</span>
-<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="nx">deleteConversation</span><span class="p">(</span><span class="nx">convId</span><span class="p">)</span><span class="w">          </span><span class="c1">// DELETE /api/v1/chat/:id</span>
-<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="nx">resumeExecution</span><span class="p">(</span><span class="nx">convId</span><span class="p">,</span><span class="w"> </span><span class="nx">body</span><span class="p">)</span><span class="w">       </span><span class="c1">// POST /api/v1/chat/:id/resume</span>
-<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a>
-<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a><span class="c1">// 文稿相关</span>
-<a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a><span class="nx">listArtifacts</span><span class="p">(</span><span class="nx">sessionId</span><span class="p">)</span><span class="w">            </span><span class="c1">// GET  /api/v1/artifacts/:sessionId</span>
-<a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a><span class="nx">getArtifact</span><span class="p">(</span><span class="nx">sessionId</span><span class="p">,</span><span class="w"> </span><span class="nx">artifactId</span><span class="p">)</span><span class="w">  </span><span class="c1">// GET  /api/v1/artifacts/:sessionId/:id</span>
-<a id="__codelineno-4-11" name="__codelineno-4-11" href="#__codelineno-4-11"></a><span class="nx">listVersions</span><span class="p">(</span><span class="nx">sessionId</span><span class="p">,</span><span class="w"> </span><span class="nx">artifactId</span><span class="p">)</span><span class="w"> </span><span class="c1">// GET  /api/v1/artifacts/:sessionId/:id/versions</span>
-<a id="__codelineno-4-12" name="__codelineno-4-12" href="#__codelineno-4-12"></a><span class="nx">getVersion</span><span class="p">(</span><span class="nx">sessionId</span><span class="p">,</span><span class="w"> </span><span class="nx">id</span><span class="p">,</span><span class="w"> </span><span class="nx">version</span><span class="p">)</span><span class="w">  </span><span class="c1">// GET  /api/v1/artifacts/:sessionId/:id/versions/:v</span>
-<a id="__codelineno-4-13" name="__codelineno-4-13" href="#__codelineno-4-13"></a>
-<a id="__codelineno-4-14" name="__codelineno-4-14" href="#__codelineno-4-14"></a><span class="c1">// 文件上传与导出</span>
-<a id="__codelineno-4-15" name="__codelineno-4-15" href="#__codelineno-4-15"></a><span class="nx">uploadFile</span><span class="p">(</span><span class="nx">sessionId</span><span class="p">,</span><span class="w"> </span><span class="nx">file</span><span class="p">)</span><span class="w">         </span><span class="c1">// POST /api/v1/artifacts/:sessionId/upload (multipart)</span>
-<a id="__codelineno-4-16" name="__codelineno-4-16" href="#__codelineno-4-16"></a><span class="nx">uploadFileNewSession</span><span class="p">(</span><span class="nx">file</span><span class="p">)</span><span class="w">          </span><span class="c1">// POST /api/v1/artifacts/upload (multipart, 自动创建对话)</span>
-<a id="__codelineno-4-17" name="__codelineno-4-17" href="#__codelineno-4-17"></a><span class="nx">exportArtifact</span><span class="p">(</span><span class="nx">sessionId</span><span class="p">,</span><span class="w"> </span><span class="nx">id</span><span class="p">,</span><span class="w"> </span><span class="nx">fmt</span><span class="p">)</span><span class="w">  </span><span class="c1">// GET  /api/v1/artifacts/:sessionId/:id/export?format=</span>
-</code></pre></div>
-<p>内部用一个通用的 <code>request&lt;T&gt;()</code> 函数处理 fetch + 错误处理 + JSON 解析。所有请求自动从 <code>authStore</code> 读取 token 注入 <code>Authorization: Bearer &lt;token&gt;</code> header，401 响应自动触发登出。</p>
-<p>新增认证与用户管理函数：
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="nx">login</span><span class="p">(</span><span class="nx">body</span><span class="o">:</span><span class="w"> </span><span class="kt">LoginRequest</span><span class="p">)</span><span class="w">              </span><span class="c1">// POST /api/v1/auth/login（无需 token）</span>
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="c1">// 用户管理（Admin）</span>
-<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="nx">listUsers</span><span class="p">(</span><span class="nx">limit</span><span class="p">,</span><span class="w"> </span><span class="nx">offset</span><span class="p">)</span><span class="w">               </span><span class="c1">// GET  /api/v1/auth/users</span>
-<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="nx">createUser</span><span class="p">(</span><span class="nx">body</span><span class="o">:</span><span class="w"> </span><span class="kt">CreateUserRequest</span><span class="p">)</span><span class="w">     </span><span class="c1">// POST /api/v1/auth/users</span>
-<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="nx">updateUser</span><span class="p">(</span><span class="nx">userId</span><span class="p">,</span><span class="w"> </span><span class="nx">body</span><span class="o">:</span><span class="w"> </span><span class="kt">UpdateUserRequest</span><span class="p">)</span><span class="w"> </span><span class="c1">// PUT  /api/v1/auth/users/:userId</span>
-</code></pre></div></p>
-<h4 id="ssets--sse-连接"><code>sse.ts</code> — SSE 连接</h4>
-<p><strong>为什么不用浏览器原生的 <code>EventSource</code>？</strong> 因为 <code>EventSource</code> 不支持自定义 Header（无法传 <code>Authorization</code>），也无法用 <code>AbortController</code> 精确取消连接。SSE 连接同样从 <code>authStore</code> 读取 token 注入 auth header，401 响应触发登出。</p>
-<p>实现方式是 <code>fetch()</code> + <code>ReadableStream</code> 手动解析 SSE 协议：</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>event: agent_start        ← 事件类型
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>data: {&quot;agent&quot;:&quot;Lead&quot;}    ← JSON 数据
-<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>                          ← 空行分隔
-<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a>event: llm_chunk
-<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a>data: {&quot;content&quot;:&quot;你好&quot;}
-</code></pre></div>
-<p>解析流程：逐行读取 → 遇到 <code>event:</code> 记录类型 → 遇到 <code>data:</code> 解析 JSON → 回调 <code>onEvent</code>。</p>
-<h4 id="messagetreets--消息树"><code>messageTree.ts</code> — 消息树</h4>
-<p>后端返回的消息是<strong>扁平数组</strong>，每条消息带一个 <code>parent_id</code> 指向它的父消息。这个文件负责把扁平数组转换成<strong>树结构</strong>，用于支持对话分支。</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>消息A (root)
-<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>├── 消息B (parent_id = A)
-<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>│   ├── 消息C (parent_id = B)  ← 分支1
-<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>│   └── 消息D (parent_id = B)  ← 分支2
-<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a>└── 消息E (parent_id = A)
-</code></pre></div>
-<p>三个核心函数：</p>
-<ul>
-<li><strong><code>buildMessageTree(messages)</code></strong>：扁平数组 → <code>Map&lt;id, MessageNode&gt;</code>，每个 node 带 <code>childNodes</code>、<code>siblingIndex</code>、<code>siblingCount</code></li>
-<li><strong><code>extractBranchPath(nodeMap, activeBranch)</code></strong>：给定一个目标消息 ID，从 root 到目标消息的完整路径（这就是当前展示的对话线）</li>
-<li><strong><code>getBranchChoicesAtMessage(nodeMap, messageId)</code></strong>：获取某条消息的所有兄弟节点（用于分支导航器 <code>&lt; 1/3 &gt;</code>）</li>
-</ul>
-<h3 id="stores--状态仓库"><code>stores/</code> — 状态仓库</h3>
-<h4 id="conversationstorets--对话状态"><code>conversationStore.ts</code> — 对话状态</h4>
-<p>管理对话列表和当前对话的所有数据：</p>
-<table>
-<thead>
-<tr>
-<th>状态</th>
+<th>State</th>
 <th>说明</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td><code>conversations</code></td>
-<td>对话列表</td>
-</tr>
-<tr>
-<td><code>current</code></td>
-<td>当前选中的对话详情（含完整消息）</td>
-</tr>
-<tr>
-<td><code>nodeMap</code></td>
-<td>消息树（<code>Map&lt;id, MessageNode&gt;</code>）</td>
-</tr>
-<tr>
-<td><code>branchPath</code></td>
-<td>当前展示的分支路径（消息数组）</td>
-</tr>
-<tr>
-<td><code>activeBranch</code></td>
-<td>当前分支末端的消息 ID</td>
-</tr>
-</tbody>
-</table>
-<p>关键动作：
-- <code>setCurrent(conv)</code> — 设置当前对话时，自动构建消息树 + 提取分支路径
-- <code>setActiveBranch(messageId)</code> — 切换分支时，重新计算路径</p>
-<h4 id="streamstorets--流式状态"><code>streamStore.ts</code> — 流式状态</h4>
-<p>管理 SSE 流式传输过程中的实时数据：</p>
-<table>
-<thead>
-<tr>
-<th>状态</th>
-<th>说明</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>isStreaming</code></td>
-<td>是否正在流式传输</td>
-</tr>
-<tr>
-<td><code>segments</code></td>
-<td>执行段列表（每个 Agent 一段）</td>
-</tr>
-<tr>
-<td><code>pendingUserMessage</code></td>
-<td>用户消息（在对话加载前先显示）</td>
-</tr>
-<tr>
-<td><code>completedSegments</code></td>
-<td>已完成消息的段缓存（按 messageId 索引）</td>
-</tr>
-<tr>
-<td><code>permissionRequest</code></td>
-<td>待确认的权限请求</td>
-</tr>
-<tr>
-<td><code>error</code></td>
-<td>错误信息</td>
-</tr>
-</tbody>
-</table>
-<p><strong>ExecutionSegment（执行段）</strong> 是流式渲染的核心概念：</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="kd">interface</span><span class="w"> </span><span class="nx">ExecutionSegment</span><span class="w"> </span><span class="p">{</span>
-<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="w">  </span><span class="nx">agent</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">;</span><span class="w">           </span><span class="c1">// Agent 名称</span>
-<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="w">  </span><span class="nx">status</span><span class="o">:</span><span class="w"> </span><span class="s1">&#39;running&#39;</span><span class="w"> </span><span class="o">|</span><span class="w"> </span><span class="s1">&#39;complete&#39;</span><span class="p">;</span>
-<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="w">  </span><span class="nx">reasoningContent</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">;</span><span class="w"> </span><span class="c1">// 思考过程</span>
-<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="w">  </span><span class="nx">isThinking</span><span class="o">:</span><span class="w"> </span><span class="kt">boolean</span><span class="p">;</span><span class="w">     </span><span class="c1">// 是否正在思考</span>
-<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a><span class="w">  </span><span class="nx">toolCalls</span><span class="o">:</span><span class="w"> </span><span class="kt">ToolCallInfo</span><span class="p">[];</span><span class="w">  </span><span class="c1">// 工具调用列表</span>
-<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a><span class="w">  </span><span class="nx">content</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">;</span><span class="w">         </span><span class="c1">// LLM 输出内容</span>
-<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a><span class="p">}</span>
-</code></pre></div>
-<p>一次完整的执行可能产生多个 Segment（Lead Agent → Search Agent → Lead Agent），UI 按 Segment 分段展示。</p>
-<p><strong>性能优化</strong>：<code>scheduleContentUpdate()</code> 使用 <code>requestAnimationFrame</code> 节流，避免每个 <code>llm_chunk</code> 事件都触发一次 Zustand 状态更新和 React 重渲染。</p>
-<h4 id="artifactstorets--文稿状态"><code>artifactStore.ts</code> — 文稿状态</h4>
-<p>管理文稿面板的数据：</p>
-<table>
-<thead>
-<tr>
-<th>状态</th>
-<th>说明</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>artifacts</code></td>
-<td>文稿列表</td>
-</tr>
-<tr>
-<td><code>current</code></td>
-<td>当前选中的文稿详情</td>
-</tr>
-<tr>
-<td><code>versions</code></td>
-<td>版本列表</td>
-</tr>
-<tr>
-<td><code>viewMode</code></td>
-<td>查看模式：<code>preview</code> / <code>source</code> / <code>diff</code></td>
-</tr>
-<tr>
-<td><code>pendingUpdates</code></td>
-<td>流式过程中正在更新的文稿 ID</td>
-</tr>
-</tbody>
-</table>
-<h4 id="authstorets--认证状态"><code>authStore.ts</code> — 认证状态</h4>
-<p>管理用户登录态：</p>
-<table>
-<thead>
-<tr>
-<th>状态</th>
-<th>说明</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>token</code></td>
-<td>JWT access token</td>
-</tr>
-<tr>
-<td><code>user</code></td>
-<td>当前用户信息（UserInfo）</td>
-</tr>
-<tr>
-<td><code>isAuthenticated</code></td>
-<td>是否已登录</td>
+<td><code>token</code>, <code>user</code>, <code>isAuthenticated</code></td>
+<td>JWT 与当前用户</td>
 </tr>
 <tr>
 <td><code>isHydrated</code></td>
-<td>是否已从 localStorage 恢复状态</td>
+<td>localStorage 恢复完成标志（避免 SSR mismatch）</td>
 </tr>
 </tbody>
 </table>
-<p>关键动作：
-- <code>login(token, user)</code> — 登录成功后存储 token 和用户信息到 state + localStorage
-- <code>logout()</code> — 清除所有认证状态和 localStorage
-- <code>hydrate()</code> — 从 localStorage 同步恢复认证状态（应用启动时调用）</p>
-<p>持久化 key：<code>af_token</code>、<code>af_user</code>（localStorage）。</p>
-<h4 id="uistorets--ui-状态"><code>uiStore.ts</code> — UI 状态</h4>
-<p>最简单的 store，管理三个 UI 开关：</p>
+<p>Actions：<code>login(token, user)</code>, <code>logout()</code>, <code>hydrate()</code>。</p>
+<h3 id="conversationstore"><code>conversationStore</code></h3>
+<table>
+<thead>
+<tr>
+<th>State</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>conversations[]</code>, <code>current</code></td>
+<td>列表与当前对话详情</td>
+</tr>
+<tr>
+<td><code>listLoading</code>, <code>currentLoading</code></td>
+<td>分别的 loading 标志</td>
+</tr>
+<tr>
+<td><code>nodeMap</code>, <code>branchPath</code>, <code>activeBranch</code></td>
+<td>消息树结构（由 <code>lib/messageTree.ts</code> 构建）</td>
+</tr>
+</tbody>
+</table>
+<p>消息树通过 <code>parent_id</code> 形成 DAG，<code>branchPath</code> 是从根到 <code>activeBranch</code> 叶子的路径；切换分支只改 <code>activeBranch</code> 和重算 <code>branchPath</code>。</p>
+<h3 id="artifactstore"><code>artifactStore</code></h3>
+<table>
+<thead>
+<tr>
+<th>State</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>sessionId</code>, <code>artifacts[]</code>, <code>current</code></td>
+<td>当前 session 的 artifact 列表与选中项</td>
+</tr>
+<tr>
+<td><code>versions[]</code>, <code>selectedVersion</code></td>
+<td>版本列表（对应 <code>GET .../versions/{v}</code>）</td>
+</tr>
+<tr>
+<td><code>viewMode</code></td>
+<td><code>preview</code> / <code>source</code> / <code>diff</code></td>
+</tr>
+<tr>
+<td><code>diffBaseContent</code></td>
+<td>diff 模式的基线</td>
+</tr>
+<tr>
+<td><code>pendingUpdates[]</code></td>
+<td>引擎执行中来自 <code>tool_complete.metadata.artifact_snapshot</code> 的增量覆盖</td>
+</tr>
+<tr>
+<td><code>uploading</code>, <code>uploadError</code></td>
+<td>上传态</td>
+</tr>
+</tbody>
+</table>
+<p><code>pendingUpdates</code> 是"DB 还未 flush、但 SSE 已推过来"的中间态（见 <a href="../architecture/artifacts/">architecture/artifacts.md</a>）—— 执行终止后由 <code>clearPendingUpdates()</code> 清掉，REST 再次拉取拿到 flush 后的权威数据。</p>
+<h3 id="uistore"><code>uiStore</code></h3>
+<table>
+<thead>
+<tr>
+<th>State</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>sidebarCollapsed</code>, <code>artifactPanelVisible</code></td>
+<td>布局折叠</td>
+</tr>
+<tr>
+<td><code>conversationBrowserVisible</code>, <code>userManagementVisible</code>, <code>observabilityVisible</code></td>
+<td>Admin 面板</td>
+</tr>
+<tr>
+<td><code>observabilitySelectedConvId</code></td>
+<td>Admin 事件时间线当前选中</td>
+</tr>
+<tr>
+<td><code>theme</code></td>
+<td><code>light</code> / <code>dark</code>，持久化到 localStorage</td>
+</tr>
+</tbody>
+</table>
+<h3 id="streamstore"><code>streamStore</code></h3>
+<p>整个实时引擎的投影：</p>
+<table>
+<thead>
+<tr>
+<th>State</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>isStreaming</code>, <code>streamUrl</code>, <code>messageId</code>, <code>conversationId</code></td>
+<td>连接态</td>
+</tr>
+<tr>
+<td><code>segments[]</code></td>
+<td><code>ExecutionSegment</code>：每个 agent 一段（agent, content, toolCalls, tokenUsage）</td>
+</tr>
+<tr>
+<td><code>nonAgentBlocks[]</code></td>
+<td>非 agent 事件（inject / compaction / error）</td>
+</tr>
+<tr>
+<td><code>executionMetrics</code></td>
+<td>从 <code>complete</code> 事件提取</td>
+</tr>
+<tr>
+<td><code>permissionRequest</code></td>
+<td>等待用户审批的当前项（null 表示无）</td>
+</tr>
+<tr>
+<td><code>cancelled</code>, <code>reconnecting</code>, <code>error</code></td>
+<td>终端/中间态</td>
+</tr>
+</tbody>
+</table>
+<p>关键 action：<code>appendCurrentSegmentContent(chunk)</code> 是 <code>llm_chunk</code> 的入口，内部走 RAF 节流（见下文性能小节）。</p>
+<h2 id="sse-集成">SSE 集成</h2>
+<p><code>lib/sse.ts</code> 的 <code>connectSSE(url, handlers, signal, lastEventId)</code>：</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="kd">const</span><span class="w"> </span><span class="nx">res</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">await</span><span class="w"> </span><span class="nx">fetch</span><span class="p">(</span><span class="nx">url</span><span class="p">,</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">  </span><span class="nx">headers</span><span class="o">:</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="w">    </span><span class="s1">&#39;Authorization&#39;</span><span class="o">:</span><span class="w"> </span><span class="sb">`Bearer </span><span class="si">${</span><span class="nx">token</span><span class="si">}</span><span class="sb">`</span><span class="p">,</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="w">    </span><span class="p">...(</span><span class="nx">lastEventId</span><span class="w"> </span><span class="o">?</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="s1">&#39;Last-Event-ID&#39;</span><span class="o">:</span><span class="w"> </span><span class="nx">lastEventId</span><span class="w"> </span><span class="p">}</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="p">{}),</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="w">  </span><span class="p">},</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="w">  </span><span class="nx">signal</span><span class="p">,</span>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="p">});</span>
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="kd">const</span><span class="w"> </span><span class="nx">reader</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nx">res</span><span class="p">.</span><span class="nx">body</span><span class="o">!</span><span class="p">.</span><span class="nx">getReader</span><span class="p">();</span>
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="kd">const</span><span class="w"> </span><span class="nx">decoder</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="ow">new</span><span class="w"> </span><span class="nx">TextDecoder</span><span class="p">();</span>
+<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="kd">let</span><span class="w"> </span><span class="nx">buffer</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s1">&#39;&#39;</span><span class="p">;</span>
+<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="kd">let</span><span class="w"> </span><span class="nx">currentEvent</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s1">&#39;&#39;</span><span class="p">,</span><span class="w"> </span><span class="nx">currentId</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s1">&#39;&#39;</span><span class="p">;</span>
+<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a>
+<a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a><span class="k">while</span><span class="w"> </span><span class="p">(</span><span class="kc">true</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a><span class="w">  </span><span class="kd">const</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nx">done</span><span class="p">,</span><span class="w"> </span><span class="nx">value</span><span class="w"> </span><span class="p">}</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">await</span><span class="w"> </span><span class="nx">reader</span><span class="p">.</span><span class="nx">read</span><span class="p">();</span>
+<a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a><span class="w">  </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="nx">done</span><span class="p">)</span><span class="w"> </span><span class="k">break</span><span class="p">;</span>
+<a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a><span class="w">  </span><span class="nx">buffer</span><span class="w"> </span><span class="o">+=</span><span class="w"> </span><span class="nx">decoder</span><span class="p">.</span><span class="nx">decode</span><span class="p">(</span><span class="nx">value</span><span class="p">,</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nx">stream</span><span class="o">:</span><span class="w"> </span><span class="kt">true</span><span class="w"> </span><span class="p">});</span>
+<a id="__codelineno-2-17" name="__codelineno-2-17" href="#__codelineno-2-17"></a><span class="w">  </span><span class="kd">const</span><span class="w"> </span><span class="nx">lines</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nx">buffer</span><span class="p">.</span><span class="nx">split</span><span class="p">(</span><span class="s1">&#39;\n&#39;</span><span class="p">);</span>
+<a id="__codelineno-2-18" name="__codelineno-2-18" href="#__codelineno-2-18"></a><span class="w">  </span><span class="nx">buffer</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nx">lines</span><span class="p">.</span><span class="nx">pop</span><span class="p">()</span><span class="o">!</span><span class="p">;</span><span class="w">                  </span><span class="c1">// 最后一行可能不完整，留在 buffer</span>
+<a id="__codelineno-2-19" name="__codelineno-2-19" href="#__codelineno-2-19"></a><span class="w">  </span><span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="kd">const</span><span class="w"> </span><span class="nx">line</span><span class="w"> </span><span class="k">of</span><span class="w"> </span><span class="nx">lines</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-2-20" name="__codelineno-2-20" href="#__codelineno-2-20"></a><span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="nx">line</span><span class="p">.</span><span class="nx">startsWith</span><span class="p">(</span><span class="s1">&#39;event:&#39;</span><span class="p">))</span><span class="w"> </span><span class="nx">currentEvent</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nx">line</span><span class="p">.</span><span class="nx">slice</span><span class="p">(</span><span class="mf">6</span><span class="p">).</span><span class="nx">trim</span><span class="p">();</span>
+<a id="__codelineno-2-21" name="__codelineno-2-21" href="#__codelineno-2-21"></a><span class="w">    </span><span class="k">else</span><span class="w"> </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="nx">line</span><span class="p">.</span><span class="nx">startsWith</span><span class="p">(</span><span class="s1">&#39;id:&#39;</span><span class="p">))</span><span class="w"> </span><span class="nx">currentId</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nx">line</span><span class="p">.</span><span class="nx">slice</span><span class="p">(</span><span class="mf">3</span><span class="p">).</span><span class="nx">trim</span><span class="p">();</span>
+<a id="__codelineno-2-22" name="__codelineno-2-22" href="#__codelineno-2-22"></a><span class="w">    </span><span class="k">else</span><span class="w"> </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="nx">line</span><span class="p">.</span><span class="nx">startsWith</span><span class="p">(</span><span class="s1">&#39;data:&#39;</span><span class="p">))</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-2-23" name="__codelineno-2-23" href="#__codelineno-2-23"></a><span class="w">      </span><span class="kd">const</span><span class="w"> </span><span class="nx">parsed</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nb">JSON</span><span class="p">.</span><span class="nx">parse</span><span class="p">(</span><span class="nx">line</span><span class="p">.</span><span class="nx">slice</span><span class="p">(</span><span class="mf">5</span><span class="p">).</span><span class="nx">trim</span><span class="p">())</span><span class="w"> </span><span class="kr">as</span><span class="w"> </span><span class="nx">SSEEvent</span><span class="p">;</span>
+<a id="__codelineno-2-24" name="__codelineno-2-24" href="#__codelineno-2-24"></a><span class="w">      </span><span class="nx">handlers</span><span class="p">.</span><span class="nx">onEvent</span><span class="p">(</span><span class="nx">parsed</span><span class="p">);</span>
+<a id="__codelineno-2-25" name="__codelineno-2-25" href="#__codelineno-2-25"></a><span class="w">      </span><span class="nx">connection</span><span class="p">.</span><span class="nx">lastEventId</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nx">currentId</span><span class="p">;</span>
+<a id="__codelineno-2-26" name="__codelineno-2-26" href="#__codelineno-2-26"></a><span class="w">    </span><span class="p">}</span>
+<a id="__codelineno-2-27" name="__codelineno-2-27" href="#__codelineno-2-27"></a><span class="w">  </span><span class="p">}</span>
+<a id="__codelineno-2-28" name="__codelineno-2-28" href="#__codelineno-2-28"></a><span class="p">}</span>
+</code></pre></div>
+<p><strong>为什么不是 EventSource</strong>：EventSource 不支持自定义 header，而后端强制 <code>Authorization: Bearer</code>（详见 <a href="../architecture/streaming/#为什么选-fetch--readablestream-而非-eventsource">architecture/streaming.md → Design Decisions</a>）。</p>
+<p><strong><code>useSSE</code> hook</strong> 在 <code>connectSSE</code> 之上加了业务分发：</p>
 <ul>
-<li><code>sidebarCollapsed</code> — 侧边栏折叠</li>
-<li><code>artifactPanelVisible</code> — 文稿面板显示</li>
-<li><code>theme</code> — 亮色 / 暗色主题（通过 <code>document.documentElement.classList.toggle('dark')</code> 切换）</li>
+<li>按 <code>event.type</code> 分派到 <code>streamStore</code> 的对应 action</li>
+<li><code>llm_chunk</code> 走 RAF 节流</li>
+<li>终端事件（<code>complete</code> / <code>cancelled</code> / <code>error</code>）触发 <code>endStream()</code> 并清理资源</li>
+<li>自动重连：非终端断开时最多 3 次，指数退避 1s / 2s / 4s，携带 <code>lastEventId</code></li>
+<li>共享 <code>AbortController</code> 防止切换对话时出现孤立连接</li>
 </ul>
-<h3 id="hooks--自定义-hook"><code>hooks/</code> — 自定义 Hook</h3>
-<h4 id="usessets--sse-事件处理"><code>useSSE.ts</code> — SSE 事件处理</h4>
-<p><strong>最复杂的 Hook</strong>，负责把后端推送的 SSE 事件翻译成 store 状态更新。</p>
-<p>事件处理流程：</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>后端推送事件 → connectSSE() 解析 → handleEvent() 分发 → 更新各 store
+<p>Tool 事件副作用：<code>create_artifact</code> / <code>update_artifact</code> / <code>rewrite_artifact</code> 的 <code>tool_complete</code> 会触发 <code>uiStore.setArtifactPanelVisible(true)</code> 并把 <code>metadata.artifact_snapshot</code>（如果有）覆盖到 <code>artifactStore.pendingUpdates</code>；没有 snapshot 则走 REST 拉取。</p>
+<h2 id="性能优化">性能优化</h2>
+<h3 id="raf-节流-llm_chunk">RAF 节流 <code>llm_chunk</code></h3>
+<p>每个 token 都触发一次 React state 更新会把对话窗口卡死。<code>streamStore</code> 用模块级 <code>_rafId</code> / <code>_pendingContent</code> 缓存增量：</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="kd">function</span><span class="w"> </span><span class="nx">scheduleContentUpdate</span><span class="p">(</span><span class="nx">chunk</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="w">  </span><span class="nx">_pendingContent</span><span class="w"> </span><span class="o">+=</span><span class="w"> </span><span class="nx">chunk</span><span class="p">;</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="w">  </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="nx">_rafId</span><span class="w"> </span><span class="o">!==</span><span class="w"> </span><span class="kc">null</span><span class="p">)</span><span class="w"> </span><span class="k">return</span><span class="p">;</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="w">  </span><span class="nx">_rafId</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nx">requestAnimationFrame</span><span class="p">(()</span><span class="w"> </span><span class="p">=&gt;</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="w">    </span><span class="nx">_appendFn</span><span class="o">?</span><span class="p">.(</span><span class="nx">_pendingContent</span><span class="p">);</span>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="w">    </span><span class="nx">_pendingContent</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s1">&#39;&#39;</span><span class="p">;</span>
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="w">    </span><span class="nx">_rafId</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="kc">null</span><span class="p">;</span>
+<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="w">  </span><span class="p">});</span>
+<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a><span class="p">}</span>
 </code></pre></div>
-<p>各事件的处理：</p>
-<table>
-<thead>
-<tr>
-<th>事件</th>
-<th>处理</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>AGENT_START</code></td>
-<td>创建新 Segment</td>
-</tr>
-<tr>
-<td><code>LLM_CHUNK</code></td>
-<td>追加思考内容 / 输出内容（RAF 节流）</td>
-</tr>
-<tr>
-<td><code>LLM_COMPLETE</code></td>
-<td>设置最终内容</td>
-</tr>
-<tr>
-<td><code>TOOL_START</code></td>
-<td>添加工具调用卡片</td>
-</tr>
-<tr>
-<td><code>TOOL_COMPLETE</code></td>
-<td>更新工具调用状态 + 如果是文稿工具则拉取文稿</td>
-</tr>
-<tr>
-<td><code>AGENT_COMPLETE</code></td>
-<td>标记 Segment 完成</td>
-</tr>
-<tr>
-<td><code>PERMISSION_REQUEST</code></td>
-<td>弹出权限确认弹窗</td>
-</tr>
-<tr>
-<td><code>COMPLETE</code></td>
-<td>快照 Segments → 刷新对话和文稿</td>
-</tr>
-<tr>
-<td><code>ERROR</code></td>
-<td>显示错误信息</td>
-</tr>
-</tbody>
-</table>
-<p>文稿相关的特殊逻辑：当 <code>create_artifact</code> / <code>update_artifact</code> / <code>rewrite_artifact</code> 工具完成时，自动打开文稿面板并拉取最新内容。</p>
-<h4 id="usechatts--聊天操作"><code>useChat.ts</code> — 聊天操作</h4>
-<p>封装了发消息的核心流程：</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>用户输入 → sendMessage() → POST /api/v1/chat → 拿到 stream_url → connectSSE()
+<p>效果：无论 LLM 每秒吐 5 / 50 / 500 个 chunk，组件重渲染被限制到约 60fps。</p>
+<h3 id="zustand-selector-精细订阅">Zustand selector 精细订阅</h3>
+<p>所有组件都用 <code>useStore(state =&gt; state.specificField)</code> 或 <code>useStore(useShallow(...))</code>，避免整 store 订阅；<code>segments[]</code> 更新不会触发 <code>MessageInput</code> 重渲染。</p>
+<h3 id="reactmemo-消息组件"><code>React.memo</code> 消息组件</h3>
+<p><code>AssistantMessage</code> / <code>UserMessage</code> / <code>ToolCallCard</code> 全部 memo；<code>segments[]</code> 是不可变数组（每次更新替换 ref），配合 memo 让非当前 streaming 的历史段落不重算。</p>
+<h2 id="类型同步">类型同步</h2>
+<p>后端 OpenAPI → 前端 <code>types/api.d.ts</code>：</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="c1"># 后端（项目根）</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>python<span class="w"> </span>scripts/export_openapi.py<span class="w">    </span><span class="c1"># 输出 frontend/openapi.json</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="c1"># 前端</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="nb">cd</span><span class="w"> </span>frontend<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>npm<span class="w"> </span>run<span class="w"> </span>generate-types<span class="w">   </span><span class="c1"># openapi-typescript 生成 api.d.ts</span>
 </code></pre></div>
-<p>处理三种发消息场景：
-- <strong>正常发送</strong>：<code>parentMessageId</code> 为 undefined，自动用当前分支最后一条消息作为 parent
-- <strong>重跑（rerun）</strong>：<code>parentMessageId</code> 为指定的消息 ID
-- <strong>新对话</strong>：<code>conversation_id</code> 为空</p>
-<h4 id="useartifactsts--文稿操作"><code>useArtifacts.ts</code> — 文稿操作</h4>
-<p>加载和管理文稿相关数据。</p>
-<h4 id="usemediaqueryts--响应式断点"><code>useMediaQuery.ts</code> — 响应式断点</h4>
-<p>检测屏幕宽度，用于响应式布局（比如小屏自动折叠侧边栏）。</p>
-<h3 id="components--ui-组件"><code>components/</code> — UI 组件</h3>
-<h4 id="认证组件">认证组件</h4>
-<table>
-<thead>
-<tr>
-<th>组件</th>
-<th>作用</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>AuthGuard</code></td>
-<td>路由保护组件，包裹需认证的页面。等待 <code>hydrate()</code> 完成后检查登录态，未登录则重定向到 <code>/login</code></td>
-</tr>
-</tbody>
-</table>
-<h4 id="布局组件-layout">布局组件 (<code>layout/</code>)</h4>
-<table>
-<thead>
-<tr>
-<th>组件</th>
-<th>作用</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>ThreeColumnLayout</code></td>
-<td>三栏布局容器，支持拖拽调整文稿面板宽度，处理响应式断点</td>
-</tr>
-<tr>
-<td><code>PermissionModal</code></td>
-<td>权限确认弹窗（Agent 请求执行受限工具时弹出）</td>
-</tr>
-</tbody>
-</table>
-<h4 id="侧边栏组件-sidebar">侧边栏组件 (<code>sidebar/</code>)</h4>
-<table>
-<thead>
-<tr>
-<th>组件</th>
-<th>作用</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>Sidebar</code></td>
-<td>侧边栏容器：新建对话按钮、对话列表、文稿切换、底部用户菜单</td>
-</tr>
-<tr>
-<td><code>ConversationList</code></td>
-<td>对话列表，支持分页</td>
-</tr>
-<tr>
-<td><code>ConversationItem</code></td>
-<td>单条对话项（标题、时间、删除按钮）</td>
-</tr>
-<tr>
-<td><code>UserMenu</code></td>
-<td>底部用户组件：头像 + 用户名，点击弹出 Popover（主题切换、退出登录、Admin 管理入口）</td>
-</tr>
-<tr>
-<td><code>UserManagementModal</code></td>
-<td>Admin 用户管理弹窗：用户列表、新建用户、编辑显示名称、启用/禁用</td>
-</tr>
-</tbody>
-</table>
-<h4 id="聊天组件-chat">聊天组件 (<code>chat/</code>)</h4>
-<table>
-<thead>
-<tr>
-<th>组件</th>
-<th>作用</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>ChatPanel</code></td>
-<td>聊天面板主容器，三种状态切换：欢迎页 / 消息列表 / 流式新对话</td>
-</tr>
-<tr>
-<td><code>MessageList</code></td>
-<td>渲染当前分支路径上的所有消息</td>
-</tr>
-<tr>
-<td><code>MessageInput</code></td>
-<td>输入框 + 发送 / 上传按钮</td>
-</tr>
-<tr>
-<td><code>UserMessage</code></td>
-<td>用户消息气泡（支持编辑、重跑、分支导航）</td>
-</tr>
-<tr>
-<td><code>AssistantMessage</code></td>
-<td>助手消息（展示 Agent 执行段 + 分支导航）</td>
-</tr>
-<tr>
-<td><code>StreamingMessage</code></td>
-<td>流式响应（正在生成中的消息）</td>
-</tr>
-<tr>
-<td><code>AgentSegmentBlock</code></td>
-<td>单个 Agent 执行段（思考 + 工具调用 + 输出）</td>
-</tr>
-<tr>
-<td><code>BranchNavigator</code></td>
-<td>分支导航器 <code>&lt; 1/3 &gt;</code>，切换同一位置的不同回复</td>
-</tr>
-<tr>
-<td><code>ToolCallCard</code></td>
-<td>工具调用卡片（名称、参数、结果、耗时）</td>
-</tr>
-<tr>
-<td><code>ThinkingBlock</code></td>
-<td>可折叠的思考过程块</td>
-</tr>
-<tr>
-<td><code>AgentBadge</code></td>
-<td>Agent 名称标签</td>
-</tr>
-</tbody>
-</table>
-<h4 id="文稿组件-artifact">文稿组件 (<code>artifact/</code>)</h4>
-<table>
-<thead>
-<tr>
-<th>组件</th>
-<th>作用</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>ArtifactPanel</code></td>
-<td>文稿面板容器，路由到列表/详情视图</td>
-</tr>
-<tr>
-<td><code>ArtifactList</code></td>
-<td>文稿列表</td>
-</tr>
-<tr>
-<td><code>ArtifactToolbar</code></td>
-<td>顶部工具栏（返回、文稿信息、下载、版本选择）</td>
-</tr>
-<tr>
-<td><code>ArtifactTabs</code></td>
-<td>视图切换标签（Preview / Source / Diff）</td>
-</tr>
-<tr>
-<td><code>MarkdownPreview</code></td>
-<td>Markdown 渲染预览</td>
-</tr>
-<tr>
-<td><code>SourceView</code></td>
-<td>源码查看</td>
-</tr>
-<tr>
-<td><code>DiffView</code></td>
-<td>版本差异对比</td>
-</tr>
-</tbody>
-</table>
-<hr />
-<h2 id="数据流全景">数据流全景</h2>
-<h3 id="发送消息">发送消息</h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>用户输入文本
-<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>    │
-<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>    ▼
-<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a>useChat.sendMessage(content)
-<a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a>    │
-<a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a>    ├─ POST /api/v1/chat ──────► 后端开始执行
-<a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a>    │   返回 { stream_url, conversation_id, message_id }
-<a id="__codelineno-11-8" name="__codelineno-11-8" href="#__codelineno-11-8"></a>    │
-<a id="__codelineno-11-9" name="__codelineno-11-9" href="#__codelineno-11-9"></a>    ├─ streamStore.startStream()  ← 设置流式状态
-<a id="__codelineno-11-10" name="__codelineno-11-10" href="#__codelineno-11-10"></a>    ├─ streamStore.setPendingUserMessage()  ← 立即显示用户消息
-<a id="__codelineno-11-11" name="__codelineno-11-11" href="#__codelineno-11-11"></a>    │
-<a id="__codelineno-11-12" name="__codelineno-11-12" href="#__codelineno-11-12"></a>    └─ useSSE.connect(stream_url)
-<a id="__codelineno-11-13" name="__codelineno-11-13" href="#__codelineno-11-13"></a>        │
-<a id="__codelineno-11-14" name="__codelineno-11-14" href="#__codelineno-11-14"></a>        ▼
-<a id="__codelineno-11-15" name="__codelineno-11-15" href="#__codelineno-11-15"></a>    GET /api/v1/stream/:thread_id （SSE 长连接）
-<a id="__codelineno-11-16" name="__codelineno-11-16" href="#__codelineno-11-16"></a>        │
-<a id="__codelineno-11-17" name="__codelineno-11-17" href="#__codelineno-11-17"></a>        ├─ event: agent_start    → pushSegment(&quot;Lead&quot;)
-<a id="__codelineno-11-18" name="__codelineno-11-18" href="#__codelineno-11-18"></a>        ├─ event: llm_chunk      → scheduleContentUpdate(content)  [RAF 节流]
-<a id="__codelineno-11-19" name="__codelineno-11-19" href="#__codelineno-11-19"></a>        ├─ event: tool_start     → addToolCallToSegment(...)
-<a id="__codelineno-11-20" name="__codelineno-11-20" href="#__codelineno-11-20"></a>        ├─ event: tool_complete  → updateToolCallInSegment(...)
-<a id="__codelineno-11-21" name="__codelineno-11-21" href="#__codelineno-11-21"></a>        ├─ event: agent_complete → updateCurrentSegment({ status: &#39;complete&#39; })
-<a id="__codelineno-11-22" name="__codelineno-11-22" href="#__codelineno-11-22"></a>        ├─ ...（可能循环多个 Agent）
-<a id="__codelineno-11-23" name="__codelineno-11-23" href="#__codelineno-11-23"></a>        │
-<a id="__codelineno-11-24" name="__codelineno-11-24" href="#__codelineno-11-24"></a>        └─ event: complete
-<a id="__codelineno-11-25" name="__codelineno-11-25" href="#__codelineno-11-25"></a>            ├─ snapshotSegments()     ← 缓存执行段
-<a id="__codelineno-11-26" name="__codelineno-11-26" href="#__codelineno-11-26"></a>            ├─ endStream()            ← 结束流式状态
-<a id="__codelineno-11-27" name="__codelineno-11-27" href="#__codelineno-11-27"></a>            └─ refreshAfterComplete() ← 重新拉取对话 + 文稿数据
-</code></pre></div>
-<h3 id="对话分支">对话分支</h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>消息A (user: &quot;搜索 AI 新闻&quot;)
-<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>├── 消息B (assistant: 回复1)          ← 分支 1/2
-<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a>│   └── 消息C (user: &quot;详细说说&quot;)
-<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a>│       └── 消息D (assistant: ...)
-<a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a>└── 消息E (assistant: 回复2)          ← 分支 2/2  [用户点了重跑]
-<a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a>    └── 消息F (user: &quot;换个角度&quot;)
-<a id="__codelineno-12-7" name="__codelineno-12-7" href="#__codelineno-12-7"></a>
-<a id="__codelineno-12-8" name="__codelineno-12-8" href="#__codelineno-12-8"></a>当前分支路径 branchPath = [A, E, F]
-<a id="__codelineno-12-9" name="__codelineno-12-9" href="#__codelineno-12-9"></a>BranchNavigator 在消息 E 处显示 &lt; 2/2 &gt;，点击可切回 [A, B, C, D]
-</code></pre></div>
-<h3 id="文稿更新">文稿更新</h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a>Agent 调用 create_artifact / update_artifact
-<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a>    │
-<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a>    ▼
-<a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a>SSE: tool_complete (tool_name = &quot;create_artifact&quot;)
-<a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a>    │
-<a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a>    ├─ setArtifactPanelVisible(true)   ← 自动打开文稿面板
-<a id="__codelineno-13-7" name="__codelineno-13-7" href="#__codelineno-13-7"></a>    ├─ addPendingUpdate(artifactId)     ← 标记正在更新
-<a id="__codelineno-13-8" name="__codelineno-13-8" href="#__codelineno-13-8"></a>    └─ 并行拉取文稿详情 + 列表 + 版本
-<a id="__codelineno-13-9" name="__codelineno-13-9" href="#__codelineno-13-9"></a>        │
-<a id="__codelineno-13-10" name="__codelineno-13-10" href="#__codelineno-13-10"></a>        ▼
-<a id="__codelineno-13-11" name="__codelineno-13-11" href="#__codelineno-13-11"></a>    文稿面板实时更新内容
-<a id="__codelineno-13-12" name="__codelineno-13-12" href="#__codelineno-13-12"></a>
-<a id="__codelineno-13-13" name="__codelineno-13-13" href="#__codelineno-13-13"></a>SSE: complete
-<a id="__codelineno-13-14" name="__codelineno-13-14" href="#__codelineno-13-14"></a>    └─ clearPendingUpdates()           ← 清除待更新标记
-</code></pre></div>
-<hr />
-<h2 id="样式系统">样式系统</h2>
-<p>使用 Tailwind CSS + 自定义设计系统（RAMS），在 <code>tailwind.config.ts</code> 中定义：</p>
+<p><strong>约定</strong>：每次改后端 schema（路由、request/response model）后必须跑一遍，PR 包含 <code>api.d.ts</code> 的 diff。<code>types/index.ts</code> 从 <code>api.d.ts</code> re-export 常用类型给业务层使用，不要直接 import 路径 <code>components["schemas"]["..."]</code> 形式。</p>
+<p><strong><code>types/events.ts</code></strong> 是<strong>手写</strong>的（不自动生成）——SSE 事件不进 OpenAPI schema，为了与后端 <code>StreamEventType</code> 保持对齐，需要在后端新增事件类型时同步更新此文件。</p>
+<h2 id="暗色模式">暗色模式</h2>
 <ul>
-<li><strong>语义化颜色</strong>：<code>text-primary</code>、<code>bg-surface</code>、<code>border-border</code> 等，每个颜色都有 dark 变体</li>
-<li><strong>暗色模式</strong>：通过 <code>class</code> 策略，<code>&lt;html class="dark"&gt;</code> 切换</li>
-<li><strong>组件样式</strong>：<code>rounded-bubble</code>（消息气泡圆角）、<code>shadow-card</code>（卡片阴影）等</li>
+<li>Tailwind <code>darkMode: 'class'</code>；<code>uiStore.theme</code> 切换时把 <code>dark</code> class 加到 <code>&lt;html&gt;</code></li>
+<li><code>ThemeInitializer</code> 在 root layout 用 <code>useEffect</code> 从 localStorage 读取初值，避免 SSR flash</li>
+<li>品牌色从 Tailwind config 的 <code>theme.extend.colors</code> 提取（见 <code>tailwind.config.ts</code>）：</li>
+<li><code>accent.DEFAULT = #c96442</code>（主品牌色）</li>
+<li><code>chat.light = #FAF9F6</code> / <code>chat.dark = #1e1e1e</code></li>
+<li>status 色：<code>success #4a8c6f</code> / <code>error #c25d4e</code> / <code>warning #c49a3c</code></li>
 </ul>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="c1">// 典型用法：同时写亮色和暗色</span>
-<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="p">&lt;</span><span class="nt">div</span><span class="w"> </span><span class="na">className</span><span class="o">=</span><span class="s">&quot;bg-surface dark:bg-surface-dark text-text-primary dark:text-text-primary-dark&quot;</span><span class="p">&gt;</span>
-</code></pre></div>
+<p>文档站（MkDocs Material）的 CSS 从同一组 token 派生，见 <code>docs/stylesheets/custom.css</code>（PR 6 交付）。</p>
+<h2 id="rest-client-缓存">REST Client 缓存</h2>
+<p><code>lib/api.ts</code> 做了两件事防抖：</p>
+<ul>
+<li><code>listConversations()</code> 结果缓存 20s（切对话时来回点击不重复发请求）</li>
+<li><code>getConversation(id)</code> 做 in-flight dedup（同一 id 的并发调用共享 Promise）</li>
+</ul>
+<p>写操作（send / inject / cancel / resume / upload / delete）不缓存；写成功后业务层自行失效列表缓存。</p>
+<h2 id="design-decisions">Design Decisions</h2>
+<h3 id="为什么-zustand-而非-redux--context">为什么 Zustand 而非 Redux / Context</h3>
+<ul>
+<li>不需要时光回溯 / devtools 级别复杂度；selector-based 订阅天然适配 60fps 流式更新</li>
+<li>5 个正交 store 比单一大 store 更利于代码分隔与类型推导</li>
+<li>Context + reducer 在流式高频更新下 re-render 失控，Zustand 的 <code>subscribe</code> 粒度可控</li>
+</ul>
+<h3 id="为什么类型手写一部分eventsts">为什么类型手写一部分（<code>events.ts</code>）</h3>
+<ul>
+<li>SSE 事件 schema 不在 OpenAPI 里（HTTP 响应体是 <code>text/event-stream</code>，OpenAPI 3.0 表达不了逐事件结构）</li>
+<li>强行把事件塞进 schema 会让 <code>api.d.ts</code> 变得脏且难维护</li>
+<li>手写 + 文档 + 后端 emitter 约定是更务实的权衡；新增事件类型是低频动作</li>
+</ul>
+<h3 id="为什么共享-streamstore-而非每消息独立">为什么共享 <code>streamStore</code> 而非每消息独立</h3>
+<ul>
+<li><strong>前端视角是单当前对话</strong>：UI 任意时刻只聚焦在一个对话上，所以"正在流式的 SSE 连接"在单个浏览器标签内唯一；后端 lease 是<strong>按 <code>conversation_id</code></strong> 的，多对话可并发执行（见 <a href="../architecture/concurrency/#runtimestore">architecture/concurrency.md → RuntimeStore</a>），但前端不会同时渲染多条实时流</li>
+<li>切对话时 <code>reset()</code> 全部 stream 态，避免跨对话状态污染；同一用户多 tab 打开不同对话由浏览器天然隔离（每 tab 独立 store 实例）</li>
+<li>历史消息的"已完成 segment"快照通过 <code>snapshotSegments(messageId)</code> 下沉到 <code>streamStore.completedSegments</code> / <code>completedNonAgentBlocks</code> 两个 <code>Map&lt;messageId, ...&gt;</code>，<code>AssistantMessage</code> 直接按 <code>messageId</code> 从这两个 map 读取。这样流式状态与历史状态共用 store 但 key 空间分离，避免与 <code>conversationStore.current.messages[]</code> 的 DB 结构耦合</li>
+</ul>
+<h3 id="为什么不用-react-virtual">为什么不用 react-virtual</h3>
+<ul>
+<li>实测单次对话 message 数量（含分支）远低于需要虚拟化的门槛（千级）</li>
+<li>引入 react-virtual 会和 Markdown 动态高度、代码块展开、分支折叠产生耦合</li>
+<li>未来出现超长对话场景（如导入超大上下文）再按需引入，不预先埋</li>
+</ul>
 
 
 
