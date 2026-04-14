@@ -1,0 +1,43 @@
+/* ArtifactFlow 品牌配色
+ * 与前端 Tailwind config 对齐：accent #c96442（暖橙红）
+ * 仅覆盖 primary / accent 相关变量，字体和其他样式保留 Material 默认
+ */
+
+:root > * {
+  --brand-fg: #c96442;
+  --brand-fg-hover: #b5573a;
+  --brand-fg-dark: #a84d32;
+}
+
+/* 浅色模式 primary（顶部 header / tabs 背景） */
+[data-md-color-scheme="default"][data-md-color-primary="custom"] {
+  --md-primary-fg-color: var(--brand-fg);
+  --md-primary-fg-color--light: #d9826a;
+  --md-primary-fg-color--dark: var(--brand-fg-dark);
+  --md-primary-bg-color: #ffffff;
+  --md-primary-bg-color--light: #ffffffb3;
+}
+
+/* 浅色模式 accent（链接 / 选中态） */
+[data-md-color-scheme="default"][data-md-color-accent="custom"] {
+  --md-accent-fg-color: var(--brand-fg-hover);
+  --md-accent-fg-color--transparent: #c9644214;
+  --md-accent-bg-color: #ffffff;
+  --md-accent-bg-color--light: #ffffffb3;
+}
+
+/* 暗色模式（slate）沿用同一品牌色，保持视觉统一 */
+[data-md-color-scheme="slate"][data-md-color-primary="custom"] {
+  --md-primary-fg-color: var(--brand-fg);
+  --md-primary-fg-color--light: #d9826a;
+  --md-primary-fg-color--dark: var(--brand-fg-dark);
+  --md-primary-bg-color: #ffffff;
+  --md-primary-bg-color--light: #ffffffb3;
+}
+
+[data-md-color-scheme="slate"][data-md-color-accent="custom"] {
+  --md-accent-fg-color: #d9826a;
+  --md-accent-fg-color--transparent: #c9644226;
+  --md-accent-bg-color: #ffffff;
+  --md-accent-bg-color--light: #ffffffb3;
+}

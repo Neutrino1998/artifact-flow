@@ -1,6 +1,6 @@
 site_name: ArtifactFlow
-site_description: Multi-Agent Research System Built on LangGraph
-site_url: https://neutrino.github.io/artifact-flow/
+site_description: Pi-style 可配置 Agent 引擎 + 双 Artifact 架构的多智能体 SaaS
+site_url: https://neutrino1998.github.io/artifact-flow/
 repo_url: https://github.com/Neutrino1998/artifact-flow
 repo_name: Neutrino1998/artifact-flow
 
@@ -9,14 +9,14 @@ theme:
   language: zh
   palette:
     - scheme: default
-      primary: indigo
-      accent: indigo
+      primary: custom
+      accent: custom
       toggle:
         icon: material/brightness-7
         name: Switch to dark mode
     - scheme: slate
-      primary: indigo
-      accent: indigo
+      primary: custom
+      accent: custom
       toggle:
         icon: material/brightness-4
         name: Switch to light mode
@@ -27,6 +27,9 @@ theme:
     - navigation.top
     - search.highlight
     - content.code.copy
+
+extra_css:
+  - stylesheets/custom.css
 
 plugins:
   - search
@@ -53,15 +56,20 @@ markdown_extensions:
 
 nav:
   - Home: index.md
-  - Frontend Guide: frontend.md
-  - Request Lifecycle: request-lifecycle.md
+  - Deployment: deployment.md
   - Architecture:
-      - Core: architecture/core.md
+      - Overview: architecture/overview.md
+      - Engine: architecture/engine.md
       - Agents: architecture/agents.md
       - Tools: architecture/tools.md
+      - Artifacts: architecture/artifacts.md
       - Data Layer: architecture/data-layer.md
+      - Streaming: architecture/streaming.md
       - Concurrency: architecture/concurrency.md
-  - Streaming: streaming.md
-  - Extension Guide: extension-guide.md
-  - API Reference: api.md
-  - FAQ: faq.md
+      - Observability: architecture/observability.md
+  - Guides:
+      - Add Agent: guides/add-agent.md
+      - Add Tool: guides/add-tool.md
+      - Add Model: guides/add-model.md
+      - API Reference: guides/api-reference.md
+  - Frontend: frontend.md

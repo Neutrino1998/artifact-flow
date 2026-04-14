@@ -217,7 +217,7 @@ await self._session.execute(
 
 ## ORM 使用规范
 
-这些规则在 [CLAUDE.md](../../CLAUDE.md) 的"Code Conventions"已列出，这里展开 why。
+这些规则在仓库根 `CLAUDE.md` 的 "Code Conventions" 已列出，这里展开 why。
 
 ### 时间戳
 
