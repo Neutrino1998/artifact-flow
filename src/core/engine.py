@@ -17,6 +17,7 @@ from datetime import datetime
 from config import config
 from core.events import StreamEventType, ExecutionEvent
 from core.context_manager import ContextManager
+from core.compaction_runner import CompactionRunner
 from tools.xml_parser import parse_tool_calls
 from tools.base import ToolPermission, ToolResult
 from utils.logger import get_logger
@@ -93,20 +94,29 @@ def create_initial_state(
     task: str,
     session_id: str,
     message_id: str,
-    conversation_history: List[Dict[str, str]],
+    path_events: Optional[List[Any]] = None,  # List[ExecutionEvent] with is_historical=True
     always_allowed_tools: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
-    """创建初始执行状态"""
+    """
+    创建初始执行状态
+
+    Args:
+        task: 当前用户输入（将作为首个 USER_INPUT 事件由 execute_loop 追加）
+        session_id: 会话 ID
+        message_id: 本轮消息 ID
+        path_events: 当前 conversation path 上的历史事件（is_historical=True），
+                     作为 state["events"] 的初始内容；执行中新追加的事件 is_historical=False
+        always_allowed_tools: 本会话已允许的工具列表
+    """
     return {
         "current_task": task,
         "session_id": session_id,
         "message_id": message_id,
-        "conversation_history": conversation_history,
         "completed": False,
         "error": False,
         "current_agent": "lead_agent",
         "always_allowed_tools": list(always_allowed_tools) if always_allowed_tools else [],
-        "events": [],
+        "events": list(path_events) if path_events else [],
         "execution_metrics": create_initial_metrics(),
         "response": "",
     }
@@ -142,6 +152,7 @@ async def execute_loop(
 
     message_id = state["message_id"]
     tool_round_count: Dict[str, int] = {}  # per-agent tool round counter
+    compaction_runner = CompactionRunner(agents=agents, emit=emit)
 
     # 3a. 记录用户原始输入为事件（统一 context 构建路径）
     state["events"].append(ExecutionEvent(
@@ -337,7 +348,7 @@ async def execute_loop(
         if reasoning_content:
             logger.debug(f"[{agent_name}] Reasoning:\n{reasoning_content[:500]}")
 
-        return response_content, reasoning_content, token_usage
+        return response_content, reasoning_content, normalized_usage
 
     async def _handle_permission(tool_name: str, params: dict, agent_name: str, permission: ToolPermission) -> bool:
         """
@@ -453,20 +464,28 @@ async def execute_loop(
                     result = ToolResult(success=False, error=str(e))
 
                 if result.success:
+                    from tools.builtin.call_subagent import CallSubagentTool
+
                     target_agent = params["agent_name"]
                     instruction = params["instruction"]
+                    fresh_start = CallSubagentTool.parse_fresh_start(params)
 
                     await _emit(StreamEventType.TOOL_START.value, agent_name, {
                         "tool": "call_subagent",
-                        "params": {"agent_name": target_agent, "instruction": instruction},
+                        "params": {
+                            "agent_name": target_agent,
+                            "instruction": instruction,
+                            "fresh_start": fresh_start,
+                        },
                     })
 
                     # 注入 instruction 到 subagent 的事件流（仅内存，不推 SSE）
-                    # context 构建按 agent_name 过滤时自然拿到 instruction
+                    # fresh_start=True 时 EventHistory 会把此事件视作 subagent 历史边界，
+                    # 之前该 subagent 的 events 对本次调用不可见。
                     state["events"].append(ExecutionEvent(
                         event_type=StreamEventType.SUBAGENT_INSTRUCTION.value,
                         agent_name=target_agent,
-                        data={"instruction": instruction},
+                        data={"instruction": instruction, "fresh_start": fresh_start},
                     ))
 
                     # tool_complete 在 subagent 完成后由 _complete_agent 路径追加
@@ -564,7 +583,15 @@ async def execute_loop(
             if llm_result is None:
                 break
 
-            response_content, reasoning_content, token_usage = llm_result
+            response_content, reasoning_content, normalized_usage = llm_result
+
+            # 引擎内 compaction 检查：本次 LLM 调用 input+output 超阈值则立即压缩
+            await compaction_runner.maybe_trigger(
+                state=state,
+                agent_name=current_agent_name,
+                input_tokens=normalized_usage["input_tokens"],
+                output_tokens=normalized_usage["output_tokens"],
+            )
 
             # 解析工具调用
             tool_calls = parse_tool_calls(response_content)

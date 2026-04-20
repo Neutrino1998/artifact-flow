@@ -3,17 +3,17 @@ ContextManager — 为每次 LLM 调用构建完整的 messages 列表
 
 职责：
 1. 拼接 system prompt（role_prompt + system_time + task_plan + artifacts + agents + tools）
-2. 构建对话历史（lead_agent 独有，含 compaction summaries）
-3. 构建当前轮事件（按 agent_name 过滤，含 queued_message / tool_complete 等）
-4. Token-based 预算截断：基于 LLM 返回的精确 token 数，统一截断 history + tool 消息
+2. 通过 EventHistory 从 state["events"] 构建历史 messages（含 compaction_summary boundary）
+
+Token 预算的上下文控制由引擎内 compaction 负责（见 compaction_runner.py），
+ContextManager 本身不再做任何截断。
 """
 
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Dict, Any, List, Optional
 from datetime import datetime
 
-import litellm
-
 from config import config
+from core.event_history import build_event_history
 from utils.logger import get_logger
 
 logger = get_logger("ArtifactFlow")
@@ -24,7 +24,8 @@ class ContextManager:
     为每次 LLM 调用构建完整的 messages 列表。
 
     纯静态工具类（classmethod only），不持有状态。
-    截断策略：字符预算超限时从最旧消息开始丢弃，插入 "[N earlier messages truncated]" 占位。
+    历史和当前轮事件统一来自 state["events"]（EventHistory 处理 boundary 扫描 + 过滤）。
+    Compaction 由引擎 loop 尾部同步触发（不在 build 内执行）。
     """
 
     @classmethod
@@ -101,29 +102,9 @@ class ContextManager:
 
         # ========== Messages ==========
         system_message = {"role": "system", "content": system_prompt}
-        system_chars = len(system_prompt)
 
-        # 两个 agent 类型共用的输入构建
-        tool_messages = cls._build_current_input(state, agent_config)
-
-        # Lead 独有：conversation history（DB Message 层，含 compaction summaries）
-        history_messages = []
-        if agent_config.name == "lead_agent":
-            history_messages = state.get("conversation_history", [])
-
-        # ========== Token-based 预算截断 ==========
-        all_messages = history_messages + tool_messages
-
-        last_ai_meta, trailing_user_msgs = cls._find_last_ai_and_trailing(all_messages)
-        total = last_ai_meta["input_tokens"] + last_ai_meta["output_tokens"]
-        if trailing_user_msgs and model:
-            total += litellm.token_counter(model=model, messages=trailing_user_msgs)
-
-        if total > config.CONTEXT_MAX_TOKENS:
-            all_messages = cls.truncate_messages(
-                all_messages, config.CONTEXT_MAX_TOKENS,
-                preserve_ai_msgs=config.TRUNCATION_PRESERVE_AI_MSGS,
-            )
+        # 历史 + 当前轮统一来自 state["events"]，EventHistory 处理 boundary / 过滤
+        all_messages = build_event_history(state.get("events", []), agent_name)
 
         # 发给 LLM 前剥离 _meta
         return [system_message] + cls._strip_meta(all_messages)
@@ -193,168 +174,6 @@ class ContextManager:
 
         lines.append("</available_subagents>")
         return "\n".join(lines)
-
-    @classmethod
-    def _build_current_input(cls, state: Dict[str, Any], agent_config: Any) -> List[Dict[str, str]]:
-        """
-        Build raw messages from events (no compression). Both lead and sub.
-        """
-        events = state.get("events", [])
-        return cls._build_tool_interactions(events, agent_config.name)
-
-    @classmethod
-    def _build_tool_interactions(cls, events: List, agent_name: str) -> List[Dict[str, str]]:
-        """
-        从事件流中构建 tool 交互历史
-
-        按 agent_name 过滤事件，处理事件类型：
-        - user_input → user 消息（用户原始输入，lead only）
-        - subagent_instruction → user 消息（subagent 的 instruction）
-        - queued_message → user 消息（执行中注入）
-        - llm_complete → assistant 消息
-        - tool_complete → user 消息
-        """
-        from tools.xml_formatter import format_result
-        from core.events import StreamEventType
-
-        interactions = []
-        agent_events = [e for e in events if e.agent_name == agent_name]
-
-        for event in agent_events:
-            if event.event_type == StreamEventType.USER_INPUT.value:
-                # 用户原始输入 → user 消息
-                content = event.data.get("content", "") if event.data else ""
-                if content:
-                    interactions.append({"role": "user", "content": content})
-
-            elif event.event_type == StreamEventType.SUBAGENT_INSTRUCTION.value:
-                # Subagent instruction → user 消息
-                instruction = event.data.get("instruction", "") if event.data else ""
-                if instruction:
-                    interactions.append({"role": "user", "content": instruction})
-
-            elif event.event_type == StreamEventType.LLM_COMPLETE.value:
-                # LLM 响应 → assistant 消息（附加 _meta token usage）
-                content = event.data.get("content", "") if event.data else ""
-                if content:
-                    msg = {"role": "assistant", "content": content}
-                    token_usage = event.data.get("token_usage") if event.data else None
-                    if token_usage:
-                        msg["_meta"] = {
-                            "input_tokens": token_usage.get("input_tokens", 0),
-                            "output_tokens": token_usage.get("output_tokens", 0),
-                        }
-                    interactions.append(msg)
-
-            elif event.event_type == StreamEventType.QUEUED_MESSAGE.value:
-                # 执行中注入的用户消息 → user 消息
-                content = event.data.get("content", "") if event.data else ""
-                if content:
-                    interactions.append({"role": "user", "content": content})
-
-            elif event.event_type == StreamEventType.TOOL_COMPLETE.value:
-                # 工具结果 → user 消息
-                if event.data:
-                    tool_name = event.data.get("tool", "unknown")
-                    result_data = {
-                        "success": event.data.get("success", False),
-                        "data": event.data.get("result_data"),
-                        "error": event.data.get("error"),
-                    }
-                    result_text = format_result(tool_name, result_data)
-                    interactions.append({"role": "user", "content": result_text})
-
-        return interactions
-
-    @classmethod
-    def truncate_messages(
-        cls,
-        messages: List[Dict],
-        budget: int,
-        preserve_ai_msgs: int = 4,
-    ) -> List[Dict]:
-        """
-        Token-based truncation at assistant message boundaries.
-
-        Each assistant message's _meta.input_tokens already includes all prior
-        context (it's the LLM-reported input for that call), so each AI boundary's
-        savings = input_tokens + output_tokens is independent — NOT incremental.
-        We scan left-to-right and cut at the first boundary where
-        total - savings <= budget.
-
-        Relies on llm.py guaranteeing non-zero token_usage (estimated when
-        provider doesn't return it), so _meta is always present.
-
-        Args:
-            messages: merged history + tool messages (with _meta on assistant msgs)
-            budget: max token budget
-            preserve_ai_msgs: minimum assistant messages to keep at tail
-        """
-        if not messages:
-            return messages
-
-        # Find the last ai msg to estimate total
-        last_ai_meta, trailing = cls._find_last_ai_and_trailing(messages)
-        total = last_ai_meta["input_tokens"] + last_ai_meta["output_tokens"]
-
-        if total <= budget:
-            return messages
-
-        # Collect assistant boundary indices (index of the assistant msg)
-        ai_indices = [i for i, m in enumerate(messages) if m.get("role") == "assistant"]
-        if len(ai_indices) <= preserve_ai_msgs:
-            return messages
-
-        # Scan from left; each ai msg's _meta is the cumulative savings at that boundary
-        cut_point = 0  # cut everything before this index (exclusive)
-        dropped_count = 0
-        max_cuttable = len(ai_indices) - preserve_ai_msgs
-
-        for scan_idx in range(max_cuttable):
-            ai_idx = ai_indices[scan_idx]
-            meta = messages[ai_idx].get("_meta", {})
-            savings = meta.get("input_tokens", 0) + meta.get("output_tokens", 0)
-            if savings <= 0:
-                continue
-            cut_point = ai_idx + 1
-            dropped_count = cut_point
-            if total - savings <= budget:
-                break
-
-        if dropped_count > 0:
-            result = messages[cut_point:]
-            logger.debug(f"Truncated {dropped_count} messages (token-based)")
-            result.insert(0, {
-                "role": "user",
-                "content": f"[{dropped_count} earlier messages truncated]",
-            })
-            return result
-
-        return messages
-
-    @classmethod
-    def _find_last_ai_and_trailing(
-        cls, messages: List[Dict]
-    ) -> Tuple[Dict[str, int], List[Dict]]:
-        """
-        Find the last assistant message's _meta and any trailing user/tool messages after it.
-
-        Returns:
-            (last_ai_meta dict with input_tokens/output_tokens, list of trailing non-assistant msgs)
-        """
-        default_meta = {"input_tokens": 0, "output_tokens": 0}
-        last_ai_idx = -1
-        for i in range(len(messages) - 1, -1, -1):
-            if messages[i].get("role") == "assistant":
-                last_ai_idx = i
-                break
-
-        if last_ai_idx < 0:
-            return default_meta, list(messages)
-
-        meta = messages[last_ai_idx].get("_meta", default_meta)
-        trailing = messages[last_ai_idx + 1:]
-        return meta, trailing
 
     @classmethod
     def _strip_meta(cls, messages: List[Dict]) -> List[Dict]:

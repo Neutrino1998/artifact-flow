@@ -34,7 +34,7 @@ class CallSubagentTool(BaseTool):
         return [
             ToolParameter(
                 name="agent_name",
-                type="string", 
+                type="string",
                 description="Sub-agent type: check available_subagents section for available agents",
                 required=True
             ),
@@ -43,9 +43,20 @@ class CallSubagentTool(BaseTool):
                 type="string",
                 description="Specific task instruction for the sub-agent. Be concise about what you need.",
                 required=True
+            ),
+            ToolParameter(
+                name="fresh_start",
+                type="boolean",
+                description=(
+                    "Whether the sub-agent starts with a fresh conversation context "
+                    "(True, default) or continues from its prior calls within this conversation "
+                    "(False). Use False only when you need the sub-agent to build on earlier "
+                    "exchanges it had in this session."
+                ),
+                required=False
             )
         ]
-    
+
     async def execute(self, **params) -> ToolResult:
         """
         验证参数并返回路由信息。
@@ -72,4 +83,17 @@ class CallSubagentTool(BaseTool):
         logger.info(f"Routing to {agent_name}: {instruction[:100]}...")
 
         return ToolResult(success=True)
+
+    @staticmethod
+    def parse_fresh_start(params: Dict[str, Any]) -> bool:
+        """
+        Parse the `fresh_start` parameter from XML-sourced params (string-typed) into bool.
+        Default True.
+        """
+        raw = params.get("fresh_start")
+        if raw is None:
+            return True
+        if isinstance(raw, bool):
+            return raw
+        return str(raw).strip().lower() not in ("false", "0", "no", "off")
 

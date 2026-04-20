@@ -30,12 +30,15 @@ class StreamEventType(Enum):
     TOOL_COMPLETE = "tool_complete"      # 工具执行完成
     PERMISSION_REQUEST = "permission_request"  # 请求权限确认
     PERMISSION_RESULT = "permission_result"    # 权限确认结果
-    COMPACTION_WAIT = "compaction_wait"        # 等待 compaction 完成
 
     # ========== 输入 / 消息注入层 ==========
     USER_INPUT = "user_input"                        # 用户原始输入 → lead 首条消息
     QUEUED_MESSAGE = "queued_message"                # 执行中注入的用户消息 → lead
     SUBAGENT_INSTRUCTION = "subagent_instruction"    # lead → sub 的指令
+
+    # ========== Compaction 层 ==========
+    COMPACTION_START = "compaction_start"      # compaction 开始（仅 SSE，不持久化）
+    COMPACTION_SUMMARY = "compaction_summary"  # compaction 结果（持久化，作为历史 boundary）
 
 
 # ============================================================
@@ -50,6 +53,10 @@ class ExecutionEvent:
     data: Any = None
     event_id: Optional[str] = None  # stable dedupe key, set by controller before persist
     created_at: datetime = field(default_factory=datetime.now)
+    # True 表示从 DB 载入的历史事件（prior turn）；False 表示本轮新产生的事件。
+    # 用于：持久化过滤（只写 False 的）、compaction preserve 边界（不跨轮）、
+    # compaction 插入位置合法性校验（只能插在 False 段内）。
+    is_historical: bool = False
 
     def to_dict(self) -> dict:
         return {

@@ -181,15 +181,11 @@ class Message(Base):
         index=True
     )
 
-    # 用户消息内容
+    # 用户消息内容（显示用，不再承担历史注入职责 —— 历史由 MessageEvent 提供）
     user_input: Mapped[str] = mapped_column(Text, nullable=False)
 
-    # 助手最终响应
+    # 助手最终响应（显示用）
     response: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-
-    # 内容摘要（跨轮 compaction 用）
-    user_input_summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    response_summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     # 时间戳
     created_at: Mapped[datetime] = mapped_column(

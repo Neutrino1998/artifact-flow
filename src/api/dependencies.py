@@ -7,7 +7,6 @@ FastAPI 依赖注入
     get_db_manager()          # DatabaseManager — 连接池
     get_stream_transport()    # StreamTransport — SSE 事件缓冲队列
     get_execution_runner()    # ExecutionRunner — 后台任务调度 + RuntimeStore
-    get_compaction_manager()  # CompactionManager — 对话压缩
     get_agents()              # Agent 配置字典
     get_tools()               # 全局工具字典
 
@@ -60,7 +59,6 @@ _redis_client: Optional[Any] = None               # redis.asyncio.Redis (optiona
 # Agent configs + tools（启动时加载一次）
 _agents: Optional[dict] = None                    # {name: AgentConfig}
 _tools: Optional[Dict[str, BaseTool]] = None      # {name: BaseTool}
-_compaction_manager: Optional[Any] = None         # CompactionManager
 
 
 async def init_globals() -> None:
@@ -71,7 +69,7 @@ async def init_globals() -> None:
     """
     from pathlib import Path
 
-    global _db_manager, _stream_transport, _execution_runner, _redis_client, _agents, _tools, _compaction_manager
+    global _db_manager, _stream_transport, _execution_runner, _redis_client, _agents, _tools
 
     # 0. 确保 data 目录存在
     data_dir = Path("data")
@@ -165,14 +163,6 @@ async def init_globals() -> None:
     _tools = _load_tools()
     logger.info(f"Loaded {len(_tools)} global tools")
 
-    # 6. 初始化 CompactionManager（Redis 模式下注入 runtime_store 以支持分布式锁）
-    from core.compaction import CompactionManager
-    _compaction_manager = CompactionManager(
-        _db_manager, _agents,
-        runtime_store=_execution_runner.store if config.REDIS_URL else None,
-    )
-    logger.info("Compaction manager initialized")
-
 
 def _load_tools() -> Dict[str, BaseTool]:
     """启动时加载全局工具（无状态，跨请求共享）"""
@@ -205,7 +195,7 @@ async def close_globals() -> None:
 
     在 FastAPI lifespan 中调用。
     """
-    global _db_manager, _stream_transport, _execution_runner, _redis_client, _compaction_manager
+    global _db_manager, _stream_transport, _execution_runner, _redis_client
 
     # 1. 先关闭 ExecutionRunner（等待运行中的任务完成）
     if _execution_runner:
@@ -226,7 +216,6 @@ async def close_globals() -> None:
     _redis_client = None
     _db_manager = None
     _stream_transport = None
-    _compaction_manager = None
 
 
 def get_execution_runner() -> "ExecutionRunner":
@@ -258,11 +247,6 @@ def get_db_manager() -> DatabaseManager:
 def get_redis_client() -> Optional[Any]:
     """获取 Redis 客户端（未配置 Redis 时返回 None）"""
     return _redis_client
-
-
-def get_compaction_manager():
-    """获取 CompactionManager 单例"""
-    return _compaction_manager
 
 
 def get_agents() -> dict:

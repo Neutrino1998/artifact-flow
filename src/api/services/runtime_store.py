@@ -19,9 +19,8 @@ Protocol 方法全部 async，为 Redis 实现铺平接口。
 """
 
 import asyncio
-import time
 from dataclasses import dataclass, field
-from typing import Protocol, runtime_checkable, Optional, Dict, Any, List, Literal, Tuple
+from typing import Protocol, runtime_checkable, Optional, Dict, Any, List, Literal
 
 from utils.logger import get_logger
 
@@ -59,21 +58,6 @@ class RuntimeStore(Protocol):
 
     async def inject_message(self, message_id: str, content: str) -> None: ...
     async def drain_messages(self, message_id: str) -> List[str]: ...
-
-    # ── Owner-key primitives ──
-
-    async def acquire(self, key: str, ttl: int, *, owner: Optional[str] = None) -> Tuple[bool, str]:
-        """Acquire a key with owner. Returns (acquired, owner_id)."""
-        ...
-    async def renew(self, key: str, owner: str, ttl: int) -> bool:
-        """Renew TTL if owner matches. Returns True on success."""
-        ...
-    async def release(self, key: str, owner: str) -> None:
-        """Release key if owner matches."""
-        ...
-    async def get_owner(self, key: str) -> Optional[str]:
-        """Get current owner of key, or None if not held."""
-        ...
 
     # ── Lease key (for stream transport lease check) ──
 
@@ -119,7 +103,6 @@ class InMemoryRuntimeStore:
         self._interrupts: dict[str, _InterruptState] = {}  # message_id → _InterruptState
         self._cancellations: dict[str, asyncio.Event] = {}  # message_id → Event
         self._queues: dict[str, asyncio.Queue] = {}       # message_id → Queue
-        self._owner_keys: dict[str, tuple[str, float]] = {}  # key → (owner, expires_at)
 
     # ── Conversation lease ──
 
@@ -225,49 +208,6 @@ class InMemoryRuntimeStore:
             except asyncio.QueueEmpty:
                 break
         return messages
-
-    # ── Owner-key primitives ──
-
-    def _is_key_alive(self, key: str) -> bool:
-        entry = self._owner_keys.get(key)
-        if entry is None:
-            return False
-        _, expires_at = entry
-        if time.monotonic() > expires_at:
-            del self._owner_keys[key]
-            return False
-        return True
-
-    async def acquire(self, key: str, ttl: int, *, owner: Optional[str] = None) -> Tuple[bool, str]:
-        from uuid import uuid4
-        if owner is None:
-            owner = uuid4().hex
-        if self._is_key_alive(key):
-            existing_owner = self._owner_keys[key][0]
-            return (False, existing_owner)
-        self._owner_keys[key] = (owner, time.monotonic() + ttl)
-        return (True, owner)
-
-    async def renew(self, key: str, owner: str, ttl: int) -> bool:
-        if not self._is_key_alive(key):
-            return False
-        existing_owner, _ = self._owner_keys[key]
-        if existing_owner != owner:
-            return False
-        self._owner_keys[key] = (owner, time.monotonic() + ttl)
-        return True
-
-    async def release(self, key: str, owner: str) -> None:
-        if not self._is_key_alive(key):
-            return
-        existing_owner, _ = self._owner_keys[key]
-        if existing_owner == owner:
-            del self._owner_keys[key]
-
-    async def get_owner(self, key: str) -> Optional[str]:
-        if not self._is_key_alive(key):
-            return None
-        return self._owner_keys[key][0]
 
     # ── Active conversations ──
 

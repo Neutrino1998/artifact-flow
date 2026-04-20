@@ -12,7 +12,6 @@ from typing import AsyncGenerator, AsyncIterator
 from config import config
 from api.dependencies import (
     get_agents,
-    get_compaction_manager,
     get_db_manager,
     get_execution_runner,
     get_tools,
@@ -89,7 +88,6 @@ async def create_controller(conversation_id: str, message_id: str) -> AsyncGener
             artifact_manager=artifact_manager,
             conversation_manager=conv_manager,
             message_event_repo=event_repo,
-            compaction_manager=get_compaction_manager(),
             on_engine_exit=_on_engine_exit,
             db_manager=db_manager,
         )

@@ -30,11 +30,9 @@ class Settings(BaseSettings):
     PERMISSION_TIMEOUT: int = 300  # 秒，单次 permission 等待超时
 
     # Compaction / Context 配置
-    COMPACTION_TOKEN_THRESHOLD: int = 60000  # tokens, 触发跨轮 compaction（基于 LLM 返回的精确 input_tokens）
-    COMPACTION_PRESERVE_PAIRS: int = 2       # 保留最近 N 对不 compact
-    COMPACTION_TIMEOUT: int = 600            # 秒, compaction 后台任务超时
-    CONTEXT_MAX_TOKENS: int = 80000          # context 最大 token 数
-    TRUNCATION_PRESERVE_AI_MSGS: int = 4     # 截断时至少保留 N 条 assistant 消息
+    COMPACTION_TOKEN_THRESHOLD: int = 60000  # tokens, LLM 单次调用 input+output 超此值触发引擎内 compaction
+    COMPACTION_PRESERVE_LLM_COMPLETES: int = 2  # 保留最近 N 个 agent 自己的 llm_complete 事件（不跨轮）
+    COMPACTION_TIMEOUT: int = 120            # 秒, 单次 compact LLM 调用超时
     INVENTORY_PREVIEW_LENGTH: int = 200     # artifact 清单内容预览截断长度
 
     # Redis（空 = InMemory fallback，非空 = Redis）

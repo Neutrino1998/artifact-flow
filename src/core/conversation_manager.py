@@ -251,46 +251,46 @@ class ConversationManager:
                 return conv.active_branch or None
         return None
 
-    async def format_conversation_history_async(
+    async def load_event_history_async(
         self,
         conv_id: str,
-        to_message_id: Optional[str] = None
-    ) -> List[Dict]:
+        to_message_id: Optional[str] = None,
+    ) -> List[Any]:
         """
-        格式化对话历史为消息列表
+        加载对话 path 上的完整事件链，转为 is_historical=True 的 ExecutionEvent 列表。
+
+        用于 turn 开始时初始化 state["events"]：返回列表会作为 state["events"]
+        的起始内容，引擎执行中新产生的事件（is_historical=False）追加其后。
 
         Args:
-            conv_id: 对话ID
-            to_message_id: 目标消息ID（None则使用活跃分支）
+            conv_id: 对话 ID
+            to_message_id: 目标消息 ID（None 则使用 active_branch）
 
         Returns:
-            消息列表 [{"role": "user", "content": ...}, {"role": "assistant", ...}, ...]
+            按全局 id 升序的 ExecutionEvent 列表（is_historical=True）
         """
+        from core.events import ExecutionEvent
+
         repo = self._ensure_repository()
         path = await repo.get_conversation_path(conv_id, to_message_id)
+        if not path:
+            return []
 
-        messages = []
-        for msg in path:
-            messages.append({
-                "role": "user",
-                "content": msg.user_input_summary or msg.user_input
-            })
-            response = msg.response
-            if response:
-                ai_msg = {
-                    "role": "assistant",
-                    "content": msg.response_summary or response
-                }
-                meta = msg.metadata_ or {}
-                exec_metrics = meta.get("execution_metrics", {})
-                first_in = exec_metrics.get("first_input_tokens", 0)
-                last_out = exec_metrics.get("last_output_tokens", 0)
-                if first_in or last_out:
-                    ai_msg["_meta"] = {"input_tokens": first_in, "output_tokens": last_out}
-                messages.append(ai_msg)
+        message_ids = [msg.id for msg in path]
+        event_repo = MessageEventRepository(repo.session)
+        db_events = await event_repo.get_by_message_ids(message_ids)
 
-        logger.debug(f"Formatted {len(messages)} messages from conversation history")
-        return messages
+        return [
+            ExecutionEvent(
+                event_type=ev.event_type,
+                agent_name=ev.agent_name,
+                data=ev.data,
+                event_id=ev.event_id,
+                created_at=ev.created_at,
+                is_historical=True,
+            )
+            for ev in db_events
+        ]
 
     # ========================================
     # 列表操作

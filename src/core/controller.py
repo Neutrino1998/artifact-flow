@@ -39,7 +39,6 @@ class ExecutionController:
         artifact_manager: Optional[ArtifactManager] = None,
         conversation_manager: Optional[ConversationManager] = None,
         message_event_repo: Optional[Any] = None,  # MessageEventRepository
-        compaction_manager: Optional[Any] = None,
         on_engine_exit: Optional[Callable[[str, str], Awaitable[None]]] = None,
         db_manager: Optional[Any] = None,
     ):
@@ -49,7 +48,6 @@ class ExecutionController:
         self.artifact_manager = artifact_manager
         self.conversation_manager = conversation_manager or ConversationManager()
         self.message_event_repo = message_event_repo
-        self.compaction_manager = compaction_manager
         self._on_engine_exit = on_engine_exit
         self._db_manager = db_manager
         logger.info("ExecutionController initialized")
@@ -127,22 +125,14 @@ class ExecutionController:
             }
         }
 
-        # Wait for any running compaction before loading history
-        # Yield COMPACTION_WAIT before blocking so frontend can show the indicator
-        if self.compaction_manager and await self.compaction_manager.is_running(conversation_id):
-            yield {
-                "type": StreamEventType.COMPACTION_WAIT.value,
-                "timestamp": datetime.now().isoformat(),
-                "data": {"conversation_id": conversation_id, "status": "waiting"},
-            }
-            await self.compaction_manager.wait_if_running(conversation_id)
-
-        # History (reads summaries written by compaction if we waited above)
+        # Path events — load conversation path 上已持久化的全部事件作为 state["events"]
+        # 的历史段（is_historical=True）。Compaction 在引擎内部同步触发，不再需要
+        # 异步等待或分布式锁。
         if parent_message_id is not _UNSET and resolved_parent is None:
-            conversation_history = []
+            path_events = []
         else:
-            conversation_history = await self._with_db_retry(
-                lambda cm, er, am: cm.format_conversation_history_async(
+            path_events = await self._with_db_retry(
+                lambda cm, er, am: cm.load_event_history_async(
                     conv_id=conversation_id, to_message_id=resolved_parent
                 )
             )
@@ -165,7 +155,7 @@ class ExecutionController:
             task=user_input,
             session_id=session_id,
             message_id=message_id,
-            conversation_history=conversation_history,
+            path_events=path_events,
             always_allowed_tools=parent_always_allowed,
         )
 
@@ -287,13 +277,8 @@ class ExecutionController:
                     )
                 )
 
-            # 自动触发 compaction（cancelled 不触发）
-            if self.compaction_manager and execution_metrics and not is_cancelled:
-                await self.compaction_manager.maybe_trigger(
-                    conv_id=conversation_id,
-                    message_id=message_id,
-                    execution_metrics=execution_metrics,
-                )
+            # Compaction 已在 engine loop 内同步处理（每次 LLM call 后检查阈值），
+            # controller 后处理阶段不再涉及 compaction。
 
             # 终态事件：error 路径由 engine 已发（在 state["events"] 中），
             # controller 负责 success 和 cancelled 路径的终态事件。
@@ -377,8 +362,11 @@ class ExecutionController:
         if not self.message_event_repo:
             return
 
-        events = final_state.get("events", [])
-        if not events:
+        all_events = final_state.get("events", [])
+        # 只持久化本轮新产生的 events（历史 events 是 turn 开始时从 DB 载入的快照，
+        # 已经在 DB 里，不要重复写）
+        new_events = [e for e in all_events if not getattr(e, "is_historical", False)]
+        if not new_events:
             return
 
         # Assign stable event_id for retry idempotency: {message_id}-{seq}
@@ -391,7 +379,7 @@ class ExecutionController:
                 "data": e.data,
                 "created_at": e.created_at,
             }
-            for seq, e in enumerate(events)
+            for seq, e in enumerate(new_events)
         ]
 
         try:

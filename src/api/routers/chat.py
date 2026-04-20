@@ -16,7 +16,6 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from api.dependencies import (
-    get_compaction_manager,
     get_conversation_manager,
     get_current_user,
     get_db_session,
@@ -283,8 +282,6 @@ async def get_conversation(
                     parent_id=msg.parent_id,
                     user_input=msg.user_input,
                     response=msg.response,
-                    user_input_summary=msg.user_input_summary,
-                    response_summary=msg.response_summary,
                     created_at=msg.created_at,
                     children=children_map.get(msg.id, []),
                 )
@@ -398,21 +395,3 @@ async def resume_execution(
     )
 
 
-@router.post("/{conv_id}/compact")
-async def trigger_compaction(
-    conv_id: str,
-    current_user: TokenPayload = Depends(get_current_user),
-    conversation_manager: ConversationManager = Depends(get_conversation_manager),
-):
-    """手动触发对话 compaction"""
-    await _verify_ownership(conv_id, current_user, conversation_manager)
-
-    compaction_manager = get_compaction_manager()
-    if compaction_manager is None:
-        raise HTTPException(status_code=503, detail="Compaction service not available")
-
-    started = await compaction_manager.trigger(conv_id)
-    if not started:
-        raise HTTPException(status_code=409, detail="Compaction already in progress for this conversation")
-
-    return {"status": "accepted", "conversation_id": conv_id}

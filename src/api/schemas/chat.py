@@ -65,8 +65,6 @@ class MessageResponse(BaseModel):
     parent_id: Optional[str] = Field(None, description="Parent message ID")
     user_input: str = Field(..., description="User message content")
     response: Optional[str] = Field(None, description="Assistant response")
-    user_input_summary: Optional[str] = Field(None, description="Compacted summary of user input")
-    response_summary: Optional[str] = Field(None, description="Compacted summary of assistant response")
     created_at: datetime = Field(..., description="Message creation time")
     children: List[str] = Field(default_factory=list, description="Child message IDs")
 

@@ -106,6 +106,30 @@ class MessageEventRepository:
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 
+    async def get_by_message_ids(self, message_ids: List[str]) -> List[MessageEvent]:
+        """
+        按一组 message_id 获取事件（供 conversation path 载入使用）。
+
+        全局 auto-increment id 保证：同一对话 path 内早期 message 的 events.id
+        永远小于晚期 message 的 events.id（message 串行执行，每轮 batch 写入），
+        所以 ORDER BY id 即可得到正确的时间线顺序。
+
+        Args:
+            message_ids: 消息 ID 列表（通常来自 get_conversation_path）
+
+        Returns:
+            事件列表，按 id 全局升序
+        """
+        if not message_ids:
+            return []
+        stmt = (
+            select(MessageEvent)
+            .where(MessageEvent.message_id.in_(message_ids))
+            .order_by(MessageEvent.id)
+        )
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
     async def get_by_conversation(self, conversation_id: str) -> List[MessageEvent]:
         """
         获取对话的所有事件（跨 message）

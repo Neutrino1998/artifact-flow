@@ -14,7 +14,7 @@ Key 设计（{prefix:id} 为 hash tag，确保同 entity 同 slot）：
 
 import asyncio
 import json
-from typing import Any, Dict, List, Literal, Optional, Set, Tuple
+from typing import Any, Dict, List, Literal, Optional, Set
 
 import redis.asyncio as aioredis
 
@@ -300,33 +300,6 @@ class RedisRuntimeStore:
     def _prefixed(self, key: str) -> str:
         """Add hash-tagged prefix for Cluster slot routing."""
         return f"{{{self._prefix}:{key}}}"
-
-    async def acquire(self, key: str, ttl: int, *, owner: Optional[str] = None) -> Tuple[bool, str]:
-        from uuid import uuid4
-        if owner is None:
-            owner = uuid4().hex
-        redis_key = self._prefixed(key)
-        result = await self._script_acquire_lease(
-            keys=[redis_key], args=[owner, str(ttl)]
-        )
-        if result is None:
-            return (True, owner)
-        return (False, result if isinstance(result, str) else result.decode())
-
-    async def renew(self, key: str, owner: str, ttl: int) -> bool:
-        redis_key = self._prefixed(key)
-        result = await self._script_compare_and_expire(
-            keys=[redis_key], args=[owner, str(ttl)]
-        )
-        return result == 1
-
-    async def release(self, key: str, owner: str) -> None:
-        redis_key = self._prefixed(key)
-        await self._script_compare_and_del(keys=[redis_key], args=[owner])
-
-    async def get_owner(self, key: str) -> Optional[str]:
-        redis_key = self._prefixed(key)
-        return await self._redis.get(redis_key)
 
     # ── Active conversations ──
 
