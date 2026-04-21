@@ -37,7 +37,7 @@ class StreamEventType(Enum):
     SUBAGENT_INSTRUCTION = "subagent_instruction"    # lead → sub 的指令
 
     # ========== Compaction 层 ==========
-    COMPACTION_START = "compaction_start"      # compaction 开始（仅 SSE，不持久化）
+    COMPACTION_START = "compaction_start"      # compaction 开始（持久化，便于 replay 看到"压缩进行中"指示）
     COMPACTION_SUMMARY = "compaction_summary"  # compaction 结果（持久化，作为历史 boundary）
 
 

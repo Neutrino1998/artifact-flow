@@ -60,13 +60,25 @@ class CompactionRunner:
             logger.warning("compact_agent not configured, skipping compaction")
             return
 
-        await self._emit_sse(StreamEventType.COMPACTION_START.value, agent_name, {
+        # compaction_start 同时入 state["events"]（持久化）+ SSE，便于中途重连的 replay
+        # 看到"压缩进行中"指示器，而不是看完最后一个 llm_complete 就等到 summary。
+        start_data = {
             "last_input_tokens": input_tokens,
             "last_output_tokens": output_tokens,
-        })
+        }
+        start_event = ExecutionEvent(
+            event_type=StreamEventType.COMPACTION_START.value,
+            agent_name=agent_name,
+            data=start_data,
+            is_historical=False,
+        )
+        state["events"].append(start_event)
+        await self._emit_sse(StreamEventType.COMPACTION_START.value, agent_name, start_data)
 
         # 快照当前 events 作为 compact 输入。注意：必须在 append summary_event 之前快照，
         # 否则新 summary 会被包含进"要被自己压缩"的输入里。
+        # compaction_start 也在快照里 —— 它会被 EventHistory 的过滤器自然忽略（不是 history-building
+        # 关心的事件类型），所以不影响压缩输入。
         events_to_compact = list(state["events"])
 
         try:
