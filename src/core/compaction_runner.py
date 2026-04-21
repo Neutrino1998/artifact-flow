@@ -5,12 +5,13 @@ In-engine compaction — 引擎内同步触发的上下文压缩
 - 在 engine loop 每次 LLM call 后调用 maybe_trigger：检查 last_input+output_tokens
   是否超阈值，若超则立即执行一次 compaction。
 - 不再使用异步后台任务、分布式锁、heartbeat 续租等机制（engine 是单协程流）。
-- 生成的 compaction_summary 作为 ExecutionEvent 插入 state["events"] 的 preserve
-  边界位置（而非 append 到尾部），这样 EventHistory 从右往左扫描能正确识别边界。
+- 生成的 compaction_summary 作为 ExecutionEvent **追加到 state["events"] 尾部**：
+  EventHistory 从右往左扫描会在此处停下，之前的 events 在 context 构建中被跳过。
+  下一轮 load path events 时，这条 compaction_summary 天然出现在历史段的尾部，
+  所以下一轮首次 LLM call 的 history 自动就是 [summary, 新 user_input]，不会超窗。
 - 压缩只作用于同一个 agent（按 agent_name 过滤），lead 和 subagent 互不干扰。
-- Preserve 窗口只在当前轮（is_historical=False）events 中扫描，不跨轮。
-- Compaction LLM 失败时降级到 "synthetic summary + 硬截断占位"，不再让 ContextManager
-  做主路径的 truncation。
+- Compaction LLM 失败时降级为 "占位 summary"，boundary 语义不变，效果等价硬截断，
+  不需要单独的 truncate 兜底路径。
 """
 
 import asyncio
@@ -48,7 +49,7 @@ class CompactionRunner:
         """
         LLM 调用完成后的 compaction 检查入口。
 
-        超阈值则生成 compaction_summary 并插入 state["events"] 的 preserve 边界。
+        超阈值则生成 compaction_summary 并**追加到 state["events"] 尾部**。
         非超阈值 / 无 compact_agent 时静默跳过。
         """
         if input_tokens + output_tokens <= config.COMPACTION_TOKEN_THRESHOLD:
@@ -64,8 +65,9 @@ class CompactionRunner:
             "last_output_tokens": output_tokens,
         })
 
-        boundary_idx = self._find_preserve_boundary(state, agent_name)
-        events_to_compact = state["events"][:boundary_idx]
+        # 快照当前 events 作为 compact 输入。注意：必须在 append summary_event 之前快照，
+        # 否则新 summary 会被包含进"要被自己压缩"的输入里。
+        events_to_compact = list(state["events"])
 
         try:
             content, duration_ms, usage = await self._run_compact_llm(
@@ -75,15 +77,11 @@ class CompactionRunner:
         except asyncio.CancelledError:
             raise
         except Exception as e:
-            # Fallback: compaction_summary 仍然插入到 preserve 边界（boundary_idx 已计算好），
-            # 只是内容变成占位符。EventHistory 扫描时依旧会在此处断开，boundary 前的原始
-            # events 在 context 构建中被跳过 —— 等价于 "硬截断" 但不需要单独的截断逻辑。
+            # Fallback: compaction_summary 照样 append 到尾部，只是内容变占位符。
+            # EventHistory 右扫左依旧在此断开，之前的 events 在 context 构建中被跳过，
+            # 等价于硬截断。
             logger.exception(f"Compaction LLM failed for {agent_name}: {e}")
-            content = (
-                f"[compaction failed: {e}. Earlier conversation context was "
-                f"dropped to fit the context budget. Continue from the preserved "
-                f"recent messages.]"
-            )
+            content = f"[compaction failed: {e}. Earlier context was truncated.]"
             duration_ms = 0
             usage = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
             error = str(e)
@@ -99,7 +97,7 @@ class CompactionRunner:
             },
             is_historical=False,
         )
-        state["events"].insert(boundary_idx, summary_event)
+        state["events"].append(summary_event)
 
         await self._emit_sse(
             StreamEventType.COMPACTION_SUMMARY.value,
@@ -110,36 +108,6 @@ class CompactionRunner:
     # ─────────────────────────────────────────────────────────────
     # 内部实现
     # ─────────────────────────────────────────────────────────────
-
-    @staticmethod
-    def _find_preserve_boundary(state: Dict[str, Any], agent_name: str) -> int:
-        """
-        在 state["events"] 里从右往左扫描，找 preserve 窗口的起始索引（compaction_summary
-        将被插在这个索引处，使其出现在 preserve 窗口之前）。
-
-        语义：
-        - 保留最近 K 个 "该 agent 自己的 llm_complete" 及其之间/之后的所有 event
-        - 遇到 is_historical=True 即停止（preserve 不跨轮）
-        - 若当前轮该 agent 的 llm_complete 少于 K，按实际数量保留
-        """
-        K = config.COMPACTION_PRESERVE_LLM_COMPLETES
-        events = state["events"]
-        count = 0
-        boundary = len(events)  # 默认：preserve 窗口为空（全部可压）
-
-        for i in range(len(events) - 1, -1, -1):
-            ev = events[i]
-            if ev.is_historical:
-                break
-            if (
-                ev.agent_name == agent_name
-                and ev.event_type == StreamEventType.LLM_COMPLETE.value
-            ):
-                count += 1
-                boundary = i
-                if count >= K:
-                    break
-        return boundary
 
     async def _run_compact_llm(
         self,

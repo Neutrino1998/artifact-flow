@@ -241,7 +241,7 @@ class ExecutionController:
             has_error = final_state.get("error", False)
             is_cancelled = final_state.get("cancelled", False)
 
-            # Flush dirty artifacts to DB before updating response
+            # Flush dirty artifacts to DB
             flush_error: Optional[str] = None
             if self.artifact_manager:
                 try:
@@ -252,36 +252,8 @@ class ExecutionController:
                     logger.exception(f"Artifact flush failed after retries: {flush_err}")
                     flush_error = f"Artifact persistence failed: {flush_err}"
 
-            # 更新 conversation response
-            final_response = response if not has_error else (response or "An error occurred during execution.")
-            await self._with_db_retry(
-                lambda cm, er, am: cm.update_response_async(
-                    conv_id=conversation_id, message_id=message_id, response=final_response,
-                )
-            )
-
-            logger.info("Streaming execution completed")
-
-            # 合并为一次 metadata 写入
-            metadata_updates = {}
-            always_allowed = final_state.get("always_allowed_tools", [])
-            if always_allowed:
-                metadata_updates["always_allowed_tools"] = always_allowed
-            execution_metrics = final_state.get("execution_metrics", {})
-            if execution_metrics:
-                metadata_updates["execution_metrics"] = execution_metrics
-            if metadata_updates:
-                await self._with_db_retry(
-                    lambda cm, er, am: cm.update_message_metadata_async(
-                        conv_id=conversation_id, message_id=message_id, metadata=metadata_updates,
-                    )
-                )
-
-            # Compaction 已在 engine loop 内同步处理（每次 LLM call 后检查阈值），
-            # controller 后处理阶段不再涉及 compaction。
-
             # 终态事件：error 路径由 engine 已发（在 state["events"] 中），
-            # controller 负责 success 和 cancelled 路径的终态事件。
+            # controller 负责 success / cancelled / flush_error 路径的终态事件。
             terminal_event_dict = None
             if is_cancelled:
                 terminal_event_dict = {
@@ -329,8 +301,64 @@ class ExecutionController:
                     data=terminal_event_dict["data"],
                 ))
 
-            # 持久化事件（batch write — 设计文档 §关键设计约束）
-            await self._persist_events(message_id, final_state)
+            # 持久化事件 —— 必须先于 Message.response 更新。
+            # 新架构下 events 是历史 source of truth，持久化失败=下一轮恢复不了本轮。
+            # 持久化成功后再更新 Message.response，避免出现"显示成功 + 历史丢失"的假成功状态。
+            events_persisted = await self._persist_events(message_id, final_state)
+
+            if not events_persisted:
+                # 持久化失败 → 整轮判定失败，覆盖终态为 ERROR，跳过 response/metadata 更新
+                logger.error(
+                    f"Aborting turn {message_id}: event persistence failed, "
+                    f"Message.response will not be updated"
+                )
+                terminal_event_dict = {
+                    "type": StreamEventType.ERROR.value,
+                    "timestamp": datetime.now().isoformat(),
+                    "data": {
+                        "success": False,
+                        "conversation_id": conversation_id,
+                        "message_id": message_id,
+                        "error": "Event persistence failed — turn aborted, please retry",
+                        "execution_metrics": final_state.get("execution_metrics", {}),
+                    }
+                }
+            else:
+                # events 已落库 → 可以更新 Message.response 和 metadata（best-effort）
+                final_response = response if not has_error else (response or "An error occurred during execution.")
+                try:
+                    await self._with_db_retry(
+                        lambda cm, er, am: cm.update_response_async(
+                            conv_id=conversation_id, message_id=message_id, response=final_response,
+                        )
+                    )
+                except Exception as resp_err:
+                    # events 已成功 → 历史正确，仅显示可能短暂落后，不把终态转为 ERROR
+                    logger.warning(
+                        f"Message.response update failed for {message_id} "
+                        f"(events already persisted, display may lag): {resp_err}"
+                    )
+
+                metadata_updates = {}
+                always_allowed = final_state.get("always_allowed_tools", [])
+                if always_allowed:
+                    metadata_updates["always_allowed_tools"] = always_allowed
+                execution_metrics = final_state.get("execution_metrics", {})
+                if execution_metrics:
+                    metadata_updates["execution_metrics"] = execution_metrics
+                if metadata_updates:
+                    try:
+                        await self._with_db_retry(
+                            lambda cm, er, am: cm.update_message_metadata_async(
+                                conv_id=conversation_id, message_id=message_id, metadata=metadata_updates,
+                            )
+                        )
+                    except Exception as meta_err:
+                        logger.warning(
+                            f"Message.metadata update failed for {message_id}: {meta_err}"
+                        )
+
+                logger.info("Streaming execution completed")
 
             # 发送终态到 SSE（error 已由 engine 实时推送）
             if terminal_event_dict:
@@ -349,25 +377,27 @@ class ExecutionController:
                 }
             }
 
-    async def _persist_events(self, message_id: str, final_state: Dict[str, Any]) -> None:
+    async def _persist_events(self, message_id: str, final_state: Dict[str, Any]) -> bool:
         """
         持久化事件到 MessageEvent 表
 
-        只在两个时刻调用（设计文档 §关键设计约束）：
-        1. execution_complete — 成功
-        2. error — 失败
+        新架构下 events 是历史的 source of truth（Message.response 仅用于显示），
+        持久化失败 = 下一轮恢复不了这一轮的上下文。因此返回 bool 让 caller 能据此
+        把 terminal 转成 ERROR，而不是静默吞掉。
 
-        策略：fresh-session-per-attempt + retry_on_db_transient。
+        Returns:
+            True — 成功，或无需持久化（无事件 / 无 repo）
+            False — 批量写入重试后仍失败
         """
         if not self.message_event_repo:
-            return
+            return True
 
         all_events = final_state.get("events", [])
         # 只持久化本轮新产生的 events（历史 events 是 turn 开始时从 DB 载入的快照，
         # 已经在 DB 里，不要重复写）
         new_events = [e for e in all_events if not getattr(e, "is_historical", False)]
         if not new_events:
-            return
+            return True
 
         # Assign stable event_id for retry idempotency: {message_id}-{seq}
         db_events = [
@@ -387,9 +417,11 @@ class ExecutionController:
                 lambda cm, er, am: er.batch_create(db_events)
             )
             logger.info(f"Persisted {len(db_events)} events for message {message_id}")
+            return True
         except Exception as e:
             logger.error(
                 f"Event persistence failed after retries for {message_id} "
                 f"({len(db_events)} events lost): {e}"
             )
+            return False
 

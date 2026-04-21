@@ -31,7 +31,6 @@ class Settings(BaseSettings):
 
     # Compaction / Context 配置
     COMPACTION_TOKEN_THRESHOLD: int = 60000  # tokens, LLM 单次调用 input+output 超此值触发引擎内 compaction
-    COMPACTION_PRESERVE_LLM_COMPLETES: int = 2  # 保留最近 N 个 agent 自己的 llm_complete 事件（不跨轮）
     COMPACTION_TIMEOUT: int = 120            # 秒, 单次 compact LLM 调用超时
     INVENTORY_PREVIEW_LENGTH: int = 200     # artifact 清单内容预览截断长度
 
