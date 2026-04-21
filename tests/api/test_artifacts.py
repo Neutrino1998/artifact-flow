@@ -137,7 +137,7 @@ class TestVersions:
     async def test_detail_includes_versions(
         self, client: AsyncClient, seed_artifacts: Tuple[str, str]
     ):
-        """getArtifact response includes versions list and latest_version detail."""
+        """getArtifact response includes versions list and current content."""
         session_id, artifact_id = seed_artifacts
         resp = await client.get(
             f"/api/v1/artifacts/{session_id}/{artifact_id}"
@@ -147,9 +147,9 @@ class TestVersions:
         assert len(body["versions"]) == 2
         assert body["versions"][0]["version"] == 1
         assert body["versions"][1]["version"] == 2
-        # latest_version should match current_version
-        assert body["latest_version"]["version"] == 2
-        assert body["latest_version"]["content"] == "# Version 2"
+        # current_version + content together replace the removed latest_version field
+        assert body["current_version"] == 2
+        assert body["content"] == "# Version 2"
 
     async def test_get_version_detail(
         self, client: AsyncClient, seed_artifacts: Tuple[str, str]
