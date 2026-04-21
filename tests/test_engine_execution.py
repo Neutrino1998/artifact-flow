@@ -138,7 +138,7 @@ async def _run_engine(
     tools=None,
     task="hello",
     message_id="msg-1",
-    conversation_history=None,
+    path_events=None,
     store=None,
     permission_timeout=1,
 ):
@@ -147,7 +147,7 @@ async def _run_engine(
         task=task,
         session_id="sess-1",
         message_id=message_id,
-        conversation_history=conversation_history or [],
+        path_events=path_events or [],
     )
 
     if store is None:
@@ -420,7 +420,7 @@ class TestPermissionInterrupt:
         xml = _tool_call_xml("sensitive_tool", query="test")
 
         store = InMemoryRuntimeStore()
-        state = create_initial_state(task="test", session_id="s1", message_id="msg-1", conversation_history=[])
+        state = create_initial_state(task="test", session_id="s1", message_id="msg-1", path_events=[])
         emitted = []
 
         async def _resolve_after_delay():
@@ -464,7 +464,7 @@ class TestPermissionInterrupt:
 
         xml = _tool_call_xml("sensitive_tool", query="test")
         store = InMemoryRuntimeStore()
-        state = create_initial_state(task="test", session_id="s1", message_id="msg-1", conversation_history=[])
+        state = create_initial_state(task="test", session_id="s1", message_id="msg-1", path_events=[])
         emitted = []
 
         async def _resolve_deny():
@@ -507,7 +507,7 @@ class TestPermissionInterrupt:
 
         xml = _tool_call_xml("sensitive_tool", query="test")
         store = InMemoryRuntimeStore()
-        state = create_initial_state(task="test", session_id="s1", message_id="msg-1", conversation_history=[])
+        state = create_initial_state(task="test", session_id="s1", message_id="msg-1", path_events=[])
         emitted = []
 
         async def _resolve_allow():
@@ -600,7 +600,7 @@ class TestCancellation:
         )
 
         store = InMemoryRuntimeStore()
-        state = create_initial_state(task="test", session_id="s1", message_id="msg-1", conversation_history=[])
+        state = create_initial_state(task="test", session_id="s1", message_id="msg-1", path_events=[])
         emitted = []
 
         async def capture_emit(event_dict):

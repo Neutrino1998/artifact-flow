@@ -199,77 +199,9 @@ class TestCancel:
         assert resp.status_code == 401
 
 
-# ============================================================
-# TestCompact
-# ============================================================
-
-
-class TestCompact:
-
-    async def test_compact_success(
-        self, client: AsyncClient, app, conv_with_messages
-    ):
-        conv_id, _ = conv_with_messages
-
-        class FakeCompactionManager:
-            async def trigger(self, conv_id):
-                return True
-
-        old = deps._compaction_manager
-        deps._compaction_manager = FakeCompactionManager()
-        try:
-            resp = await client.post(f"/api/v1/chat/{conv_id}/compact")
-            assert resp.status_code == 200
-            assert resp.json()["status"] == "accepted"
-        finally:
-            deps._compaction_manager = old
-
-    async def test_compact_already_running(
-        self, client: AsyncClient, app, conv_with_messages
-    ):
-        conv_id, _ = conv_with_messages
-
-        class FakeCompactionManager:
-            async def trigger(self, conv_id):
-                return False
-
-        old = deps._compaction_manager
-        deps._compaction_manager = FakeCompactionManager()
-        try:
-            resp = await client.post(f"/api/v1/chat/{conv_id}/compact")
-            assert resp.status_code == 409
-        finally:
-            deps._compaction_manager = old
-
-    async def test_compact_service_unavailable(
-        self, client: AsyncClient, app, conv_with_messages
-    ):
-        conv_id, _ = conv_with_messages
-
-        old = deps._compaction_manager
-        deps._compaction_manager = None
-        try:
-            resp = await client.post(f"/api/v1/chat/{conv_id}/compact")
-            assert resp.status_code == 503
-        finally:
-            deps._compaction_manager = old
-
-    async def test_compact_cross_user(
-        self, admin_client: AsyncClient, app, conv_with_messages
-    ):
-        conv_id, _ = conv_with_messages
-
-        class FakeCompactionManager:
-            async def trigger(self, conv_id):
-                return True
-
-        old = deps._compaction_manager
-        deps._compaction_manager = FakeCompactionManager()
-        try:
-            resp = await admin_client.post(f"/api/v1/chat/{conv_id}/compact")
-            assert resp.status_code == 404
-        finally:
-            deps._compaction_manager = old
+# POST /api/v1/chat/{conv_id}/compact endpoint was removed together with
+# CompactionManager — compaction is now synchronous inside the engine loop,
+# no separate manual trigger path.
 
 
 # ============================================================

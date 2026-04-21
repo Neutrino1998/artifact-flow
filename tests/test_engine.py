@@ -62,7 +62,7 @@ async def _run_with_fake_llm(chunks: list[dict], agent_config=None):
         task="hello",
         session_id="sess-1",
         message_id="msg-1",
-        conversation_history=[],
+        path_events=[],
     )
 
     if agent_config is None:
@@ -98,7 +98,7 @@ class TestAgentNotFound:
             task="hello",
             session_id="sess-1",
             message_id="msg-1",
-            conversation_history=[],
+            path_events=[],
         )
         # Override to a non-existent agent
         state["current_agent"] = "nonexistent_agent"

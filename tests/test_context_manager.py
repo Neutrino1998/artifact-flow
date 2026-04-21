@@ -32,7 +32,6 @@ class _FakeAgentConfig:
 
 def _make_state(
     events=None,
-    conversation_history=None,
     current_task="hello",
     current_agent="lead_agent",
     session_id="sess-1",
@@ -42,7 +41,6 @@ def _make_state(
         "current_task": current_task,
         "session_id": session_id,
         "message_id": "msg-1",
-        "conversation_history": conversation_history or [],
         "completed": False,
         "error": False,
         "current_agent": current_agent,
@@ -52,8 +50,13 @@ def _make_state(
     }
 
 
-def _make_event(event_type, agent_name="lead_agent", data=None):
-    return ExecutionEvent(event_type=event_type, agent_name=agent_name, data=data)
+def _make_event(event_type, agent_name="lead_agent", data=None, is_historical=False):
+    return ExecutionEvent(
+        event_type=event_type,
+        agent_name=agent_name,
+        data=data,
+        is_historical=is_historical,
+    )
 
 
 def _build(agent, agents=None, **kwargs):
@@ -149,24 +152,25 @@ class TestSystemPrompt:
 
 class TestLeadVsSubagent:
 
-    def test_lead_gets_conversation_history(self):
+    def test_lead_gets_historical_events(self):
+        """Historical events (is_historical=True) are included in the LLM context."""
         agent = _FakeAgentConfig()
-        history = [
-            {"role": "user", "content": "prev question"},
-            {"role": "assistant", "content": "prev answer"},
-        ]
-        state = _make_state(
-            conversation_history=history,
-            events=[
-                _make_event(StreamEventType.USER_INPUT.value, data={"content": "current"}),
-            ],
-        )
+        state = _make_state(events=[
+            # prior-turn events loaded from DB
+            _make_event(StreamEventType.USER_INPUT.value, data={"content": "prev question"}, is_historical=True),
+            _make_event(StreamEventType.LLM_COMPLETE.value, data={
+                "content": "prev answer",
+                "token_usage": {"input_tokens": 100, "output_tokens": 20},
+            }, is_historical=True),
+            # current turn
+            _make_event(StreamEventType.USER_INPUT.value, data={"content": "current"}),
+        ])
 
         messages = _build(agent, state=state, tools={})
-        contents = [m["content"] for m in messages]
-        all_content = " ".join(contents)
+        all_content = " ".join(m["content"] for m in messages)
         assert "prev question" in all_content
         assert "prev answer" in all_content
+        assert "current" in all_content
 
     def test_lead_gets_tool_interactions(self):
         agent = _FakeAgentConfig()
@@ -216,24 +220,30 @@ class TestLeadVsSubagent:
         assert "find X" in all_content
         assert "user task" not in all_content
 
-    def test_subagent_does_not_get_history(self):
+    def test_subagent_filters_out_lead_historical_events(self):
+        """Historical lead events are filtered out from subagent's context (agent_name filter)."""
         sub_config = _FakeAgentConfig(name="search_agent")
-        history = [
-            {"role": "user", "content": "old question"},
-            {"role": "assistant", "content": "old answer"},
-        ]
         state = _make_state(
             current_agent="search_agent",
-            conversation_history=history,
             events=[
-                _make_event(StreamEventType.SUBAGENT_INSTRUCTION.value, "search_agent", {"instruction": "do task"}),
+                # historical lead events from prior turns — should NOT appear in sub context
+                _make_event(StreamEventType.USER_INPUT.value, "lead_agent",
+                            {"content": "old question"}, is_historical=True),
+                _make_event(StreamEventType.LLM_COMPLETE.value, "lead_agent", {
+                    "content": "old answer",
+                    "token_usage": {"input_tokens": 100, "output_tokens": 20},
+                }, is_historical=True),
+                # current subagent session
+                _make_event(StreamEventType.SUBAGENT_INSTRUCTION.value, "search_agent",
+                            {"instruction": "do task"}),
             ],
         )
 
         messages = _build(sub_config, state=state, tools={})
-        contents = [m["content"] for m in messages]
-        all_content = " ".join(contents)
+        all_content = " ".join(m["content"] for m in messages)
         assert "old question" not in all_content
+        assert "old answer" not in all_content
+        assert "do task" in all_content
 
     def test_subagent_instruction_as_user_message(self):
         sub_config = _FakeAgentConfig(name="search_agent")
@@ -250,114 +260,10 @@ class TestLeadVsSubagent:
         assert any("find info" in m["content"] for m in user_msgs)
 
 
-# ============================================================
-# TestTruncation
-# ============================================================
-
-
-class TestTruncation:
-
-    def test_within_budget_returns_as_is(self):
-        messages = [
-            {"role": "user", "content": "short"},
-            _ai_msg("reply", input_tokens=100, output_tokens=50),
-        ]
-        result = ContextManager.truncate_messages(messages, budget=10000)
-        assert len(result) == 2
-
-    def test_over_budget_drops_at_ai_boundary(self):
-        messages = [
-            {"role": "user", "content": "Q1"},
-            _ai_msg("A1", input_tokens=5000, output_tokens=1000),
-            {"role": "user", "content": "Q2"},
-            _ai_msg("A2", input_tokens=8000, output_tokens=2000),
-            {"role": "user", "content": "Q3"},
-            _ai_msg("A3", input_tokens=12000, output_tokens=3000),
-        ]
-        # total from last ai = 12000 + 3000 = 15000, budget = 10000
-        # First ai savings = 5000 + 1000 = 6000; 15000 - 6000 = 9000 <= 10000 → cut at index 2
-        result = ContextManager.truncate_messages(messages, budget=10000, preserve_ai_msgs=1)
-        assert "truncated" in result[0]["content"]
-        assert result[1]["content"] == "Q2"
-        assert result[2]["content"] == "A2"
-
-    def test_preserve_ai_msgs_is_hard_limit(self):
-        messages = [
-            {"role": "user", "content": "Q1"},
-            _ai_msg("A1", input_tokens=50000, output_tokens=10000),
-        ]
-        # Over budget but only 1 ai msg and preserve_ai_msgs=4
-        result = ContextManager.truncate_messages(messages, budget=100, preserve_ai_msgs=4)
-        assert len(result) == 2
-        assert result[0]["content"] == "Q1"
-
-    def test_empty_returns_empty(self):
-        result = ContextManager.truncate_messages([], budget=100)
-        assert result == []
-
-    def test_build_truncates_when_over_token_budget(self):
-        """Over token budget: messages get truncated."""
-        agent = _FakeAgentConfig()
-        history = [
-            {"role": "user", "content": "old question"},
-            _ai_msg("old answer", input_tokens=50000, output_tokens=10000),
-            {"role": "user", "content": "newer question"},
-            _ai_msg("newer answer", input_tokens=70000, output_tokens=15000),
-        ]
-        state = _make_state(
-            conversation_history=history,
-            events=[
-                _make_event(StreamEventType.USER_INPUT.value, data={"content": "current"}),
-            ],
-        )
-
-        with patch("core.context_manager.config.CONTEXT_MAX_TOKENS", 50000):
-            messages = _build(agent, state=state, tools={})
-        # "current" (tool interaction) should always be present
-        all_content = " ".join(m["content"] for m in messages)
-        assert "current" in all_content
-
-    def test_no_meta_not_truncated(self):
-        """Without _meta, total=0 → no truncation (llm.py guarantees _meta in normal flow)."""
-        messages = [
-            {"role": "user", "content": "Q1"},
-            {"role": "assistant", "content": "A1"},  # no _meta
-            {"role": "user", "content": "Q2"},
-            {"role": "assistant", "content": "A2"},  # no _meta
-        ]
-        result = ContextManager.truncate_messages(messages, budget=100)
-        assert len(result) == 4
-
-    def test_savings_are_independent_not_cumulative(self):
-        """Each AI boundary's savings is independent (cumulative from start).
-
-        Regression: old code had `total -= savings` which double-counted.
-        Example: total=20000, A1=5500, A2=11000, A3=16500, budget=5000.
-        Correct: total-A2=9000>5000, continue to A3 where total-16500=3500<=5000.
-        Buggy (cumulative subtract): after A1 total becomes 14500, then
-        14500-11000=3500<=5000, stops at A2 leaving real 20000-11000=9000>5000.
-        """
-        messages = [
-            {"role": "user", "content": "Q1"},
-            _ai_msg("A1", input_tokens=5000, output_tokens=500),
-            {"role": "user", "content": "Q2"},
-            _ai_msg("A2", input_tokens=10000, output_tokens=1000),
-            {"role": "user", "content": "Q3"},
-            _ai_msg("A3", input_tokens=15000, output_tokens=1500),
-            {"role": "user", "content": "Q4"},
-            _ai_msg("A4", input_tokens=20000, output_tokens=2000),
-        ]
-        # total from last AI = 20000+2000 = 22000, budget = 5000, preserve=1
-        # A1 savings=5500 → 22000-5500=16500 > 5000
-        # A2 savings=11000 → 22000-11000=11000 > 5000
-        # A3 savings=16500 → 22000-16500=5500 > 5000
-        # All cuttable exhausted (3 cuttable, preserve 1) → cut at A3
-        result = ContextManager.truncate_messages(messages, budget=5000, preserve_ai_msgs=1)
-        assert "truncated" in result[0]["content"]
-        # Should have cut through A3 (index 5), keeping Q4 + A4
-        assert result[1]["content"] == "Q4"
-        assert result[2]["content"] == "A4"
-
+# ContextManager.truncate_messages was removed — token-budget truncation is no
+# longer a main-path concern. Compaction handles context overflow in-engine via
+# CompactionRunner (see tests/test_compaction_runner.py); there is no separate
+# fallback truncation code path.
 
 
 # ============================================================
@@ -388,89 +294,23 @@ class TestStripMeta:
     def test_build_output_has_no_meta(self):
         """Messages returned by build() should not contain _meta."""
         agent = _FakeAgentConfig()
-        history = [
-            {"role": "user", "content": "question"},
-            _ai_msg("answer", input_tokens=100, output_tokens=50),
-        ]
-        state = _make_state(
-            conversation_history=history,
-            events=[
-                _make_event(StreamEventType.USER_INPUT.value, data={"content": "current"}),
-            ],
-        )
+        state = _make_state(events=[
+            _make_event(StreamEventType.USER_INPUT.value, data={"content": "question"}, is_historical=True),
+            _make_event(StreamEventType.LLM_COMPLETE.value, data={
+                "content": "answer",
+                "token_usage": {"input_tokens": 100, "output_tokens": 50},
+            }, is_historical=True),
+            _make_event(StreamEventType.USER_INPUT.value, data={"content": "current"}),
+        ])
 
         messages = _build(agent, state=state, tools={})
         for msg in messages:
             assert "_meta" not in msg
 
 
-# ============================================================
-# TestFindLastAiAndTrailing
-# ============================================================
-
-
-class TestFindLastAiAndTrailing:
-
-    def test_basic(self):
-        messages = [
-            {"role": "user", "content": "Q"},
-            {"role": "assistant", "content": "A", "_meta": {"input_tokens": 500, "output_tokens": 100}},
-            {"role": "user", "content": "follow-up"},
-        ]
-        meta, trailing = ContextManager._find_last_ai_and_trailing(messages)
-        assert meta["input_tokens"] == 500
-        assert meta["output_tokens"] == 100
-        assert len(trailing) == 1
-        assert trailing[0]["content"] == "follow-up"
-
-    def test_no_ai_messages(self):
-        messages = [{"role": "user", "content": "only user"}]
-        meta, trailing = ContextManager._find_last_ai_and_trailing(messages)
-        assert meta["input_tokens"] == 0
-        assert len(trailing) == 1
-
-    def test_ai_is_last(self):
-        messages = [
-            {"role": "user", "content": "Q"},
-            {"role": "assistant", "content": "A", "_meta": {"input_tokens": 200, "output_tokens": 50}},
-        ]
-        meta, trailing = ContextManager._find_last_ai_and_trailing(messages)
-        assert meta["input_tokens"] == 200
-        assert len(trailing) == 0
-
-
-# ============================================================
-# TestToolInteractionMeta
-# ============================================================
-
-
-class TestToolInteractionMeta:
-
-    def test_llm_complete_attaches_meta(self):
-        """_build_tool_interactions should attach _meta from token_usage."""
-        events = [
-            _make_event(StreamEventType.USER_INPUT.value, data={"content": "hi"}),
-            _make_event(StreamEventType.LLM_COMPLETE.value, data={
-                "content": "response",
-                "token_usage": {"input_tokens": 500, "output_tokens": 100},
-            }),
-        ]
-        interactions = ContextManager._build_tool_interactions(events, "lead_agent")
-        ai_msgs = [m for m in interactions if m["role"] == "assistant"]
-        assert len(ai_msgs) == 1
-        assert ai_msgs[0]["_meta"]["input_tokens"] == 500
-        assert ai_msgs[0]["_meta"]["output_tokens"] == 100
-
-    def test_llm_complete_no_token_usage_no_meta(self):
-        """Without token_usage, no _meta should be attached."""
-        events = [
-            _make_event(StreamEventType.USER_INPUT.value, data={"content": "hi"}),
-            _make_event(StreamEventType.LLM_COMPLETE.value, data={"content": "response"}),
-        ]
-        interactions = ContextManager._build_tool_interactions(events, "lead_agent")
-        ai_msgs = [m for m in interactions if m["role"] == "assistant"]
-        assert len(ai_msgs) == 1
-        assert "_meta" not in ai_msgs[0]
+# _find_last_ai_and_trailing and _build_tool_interactions were removed along
+# with truncate_messages — event→message conversion and history scanning now
+# live in core/event_history.py and are covered by tests/test_event_history.py.
 
 
 # ============================================================
