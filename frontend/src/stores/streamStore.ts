@@ -16,13 +16,35 @@ export interface PermissionRequest {
   params: Record<string, unknown>;
 }
 
-export interface NonAgentBlock {
-  kind: 'inject' | 'compaction';
+/** User message injected during agent execution (QUEUED_MESSAGE event). */
+export interface InjectBlock {
+  kind: 'inject';
   id: string;
-  content?: string;    // inject only
+  content: string;
   timestamp: string;
-  position: number;    // segments.length at insertion time
+  position: number;   // segments.length at insertion time
 }
+
+/** Context-compaction block. Lifecycle: running → done | error. */
+export interface CompactionBlock {
+  kind: 'compaction';
+  id: string;
+  state: 'running' | 'done' | 'error';
+  /** input+output tokens of the LLM call that tripped the threshold (from COMPACTION_START) */
+  triggerTokens?: { input: number; output: number };
+  /** compacted summary text (from COMPACTION_SUMMARY) */
+  summary?: string;
+  /** compact_agent's own LLM cost */
+  tokenUsage?: TokenUsage;
+  /** compact_agent LLM duration in ms */
+  durationMs?: number;
+  /** populated when compact LLM failed — in that case `summary` is a placeholder */
+  error?: string | null;
+  timestamp: string;
+  position: number;
+}
+
+export type NonAgentBlock = InjectBlock | CompactionBlock;
 
 export type FlowItem =
   | { kind: 'agent'; segment: ExecutionSegment; index: number }
@@ -123,6 +145,9 @@ interface StreamState {
 
   // Non-agent blocks / metrics
   pushNonAgentBlock: (block: NonAgentBlock) => void;
+  /** Merge a patch into an existing NonAgentBlock by id. Used to transition a
+      CompactionBlock from running→done/error when COMPACTION_SUMMARY arrives. */
+  updateNonAgentBlock: (id: string, patch: Partial<CompactionBlock>) => void;
   setExecutionMetrics: (metrics: ExecutionMetrics) => void;
 
   // Snapshot segments for completed messages
@@ -297,6 +322,14 @@ export const useStreamStore = create<StreamState>((set, get) => {
 
     pushNonAgentBlock: (block) =>
       set((s) => ({ nonAgentBlocks: [...s.nonAgentBlocks, block] })),
+    updateNonAgentBlock: (id, patch) =>
+      set((s) => ({
+        nonAgentBlocks: s.nonAgentBlocks.map((b) =>
+          b.id === id && b.kind === 'compaction'
+            ? ({ ...b, ...patch } as CompactionBlock)
+            : b
+        ),
+      })),
     setExecutionMetrics: (metrics) => set({ executionMetrics: metrics }),
 
     snapshotSegments: (messageId) => {
@@ -312,8 +345,9 @@ export const useStreamStore = create<StreamState>((set, get) => {
         newMap.set(messageId, JSON.parse(JSON.stringify(segsToSnapshot)));
         set({ completedSegments: newMap });
       }
-      // Snapshot non-agent blocks (exclude compaction — it's a transient wait indicator)
-      const blocksToSnapshot = state.nonAgentBlocks.filter((b) => b.kind !== 'compaction');
+      // Snapshot non-agent blocks. Compaction is now persistent (COMPACTION_SUMMARY
+      // is a DB event), so both inject and compaction blocks are retained in cache.
+      const blocksToSnapshot = state.nonAgentBlocks;
       if (blocksToSnapshot.length > 0) {
         const nabMap = new Map(state.completedNonAgentBlocks);
         nabMap.set(messageId, blocksToSnapshot);

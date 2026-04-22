@@ -14,15 +14,13 @@ import AgentSegmentBlock from './AgentSegmentBlock';
 import InjectFlowBlock from './InjectFlowBlock';
 import CompactionFlowBlock from './CompactionFlowBlock';
 import ProcessingFlow from './ProcessingFlow';
-import SummaryPopover from './SummaryPopover';
 
 interface AssistantMessageProps {
   content: string;
   messageId?: string;
-  responseSummary?: string | null;
 }
 
-function AssistantMessage({ content, messageId, responseSummary }: AssistantMessageProps) {
+function AssistantMessage({ content, messageId }: AssistantMessageProps) {
   const [copied, setCopied] = useState(false);
   const completedSegs = useStreamStore(
     (s) => messageId ? s.completedSegments.get(messageId) : undefined
@@ -95,7 +93,7 @@ function AssistantMessage({ content, messageId, responseSummary }: AssistantMess
                 return <InjectFlowBlock key={item.id} content={item.content} />;
               }
               if (item.kind === 'compaction') {
-                return <CompactionFlowBlock key={item.id} />;
+                return <CompactionFlowBlock key={item.id} block={item} />;
               }
               return null;
             })}
@@ -127,7 +125,6 @@ function AssistantMessage({ content, messageId, responseSummary }: AssistantMess
             </svg>
           )}
         </button>
-        {responseSummary && <SummaryPopover summary={responseSummary} />}
       </div>
     </div>
   );

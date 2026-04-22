@@ -23,8 +23,11 @@ export enum StreamEventType {
 
   // Input / injection layer
   QUEUED_MESSAGE = 'queued_message',
-  COMPACTION_WAIT = 'compaction_wait',
   SUBAGENT_INSTRUCTION = 'subagent_instruction',
+
+  // Compaction layer
+  COMPACTION_START = 'compaction_start',      // context compression started
+  COMPACTION_SUMMARY = 'compaction_summary',  // context compression finished (persisted as history boundary)
 }
 
 // ============================================================
@@ -105,6 +108,24 @@ export interface CompleteData {
 export interface ErrorData {
   error: string;
   code?: string;
+}
+
+export interface CompactionStartData {
+  /** input tokens of the LLM call that tripped the threshold */
+  last_input_tokens: number;
+  /** output tokens of the same call */
+  last_output_tokens: number;
+}
+
+export interface CompactionSummaryData {
+  /** the compacted summary text (wrapped in <summary> tags by compact_agent) */
+  content: string;
+  /** token cost of the compact_agent LLM call itself */
+  token_usage: TokenUsage;
+  /** compact_agent LLM duration */
+  duration_ms: number;
+  /** non-null when compaction LLM failed and content is a placeholder */
+  error: string | null;
 }
 
 // ============================================================

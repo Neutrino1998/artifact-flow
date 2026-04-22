@@ -46,7 +46,6 @@ export default function MessageList() {
                 parentId={node.parent_id}
                 siblingIndex={node.siblingIndex}
                 siblingCount={node.siblingCount}
-                userInputSummary={node.user_input_summary}
               />
 
               {/* Assistant response */}
@@ -54,7 +53,6 @@ export default function MessageList() {
                 <AssistantMessage
                   content={node.response}
                   messageId={node.id}
-                  responseSummary={node.response_summary}
                 />
               )}
             </div>

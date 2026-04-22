@@ -4,7 +4,6 @@ import { memo, useState, useRef, useEffect, useCallback } from 'react';
 import { useChat } from '@/hooks/useChat';
 import { useStreamStore } from '@/stores/streamStore';
 import BranchNavigator from './BranchNavigator';
-import SummaryPopover from './SummaryPopover';
 
 interface UserMessageProps {
   content: string;
@@ -12,10 +11,9 @@ interface UserMessageProps {
   parentId: string | null;
   siblingIndex: number;
   siblingCount: number;
-  userInputSummary?: string | null;
 }
 
-function UserMessage({ content, messageId, parentId, siblingIndex, siblingCount, userInputSummary }: UserMessageProps) {
+function UserMessage({ content, messageId, parentId, siblingIndex, siblingCount }: UserMessageProps) {
   const [copied, setCopied] = useState(false);
   const [editing, setEditing] = useState(false);
   const [editContent, setEditContent] = useState(content);
@@ -121,7 +119,6 @@ function UserMessage({ content, messageId, parentId, siblingIndex, siblingCount,
         </div>
         {/* Action buttons and branch navigator on hover */}
         <div className="absolute -bottom-7 right-2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-          {userInputSummary && <SummaryPopover summary={userInputSummary} />}
           <button
             onClick={handleEdit}
             disabled={isStreaming}

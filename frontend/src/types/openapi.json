@@ -756,52 +756,6 @@
         }
       }
     },
-    "/api/v1/chat/{conv_id}/compact": {
-      "post": {
-        "tags": [
-          "chat"
-        ],
-        "summary": "Trigger Compaction",
-        "description": "\u624b\u52a8\u89e6\u53d1\u5bf9\u8bdd compaction",
-        "operationId": "trigger_compaction_api_v1_chat__conv_id__compact_post",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "conv_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Conv Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/v1/artifacts/upload": {
       "post": {
         "tags": [
@@ -2221,30 +2175,6 @@
             "title": "Response",
             "description": "Assistant response"
           },
-          "user_input_summary": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "User Input Summary",
-            "description": "Compacted summary of user input"
-          },
-          "response_summary": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Response Summary",
-            "description": "Compacted summary of assistant response"
-          },
           "created_at": {
             "type": "string",
             "format": "date-time",
@@ -2266,8 +2196,6 @@
           "parent_id",
           "user_input",
           "response",
-          "user_input_summary",
-          "response_summary",
           "created_at",
           "children"
         ],

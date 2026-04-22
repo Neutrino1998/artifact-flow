@@ -250,26 +250,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/chat/{conv_id}/compact": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Trigger Compaction
-         * @description 手动触发对话 compaction
-         */
-        post: operations["trigger_compaction_api_v1_chat__conv_id__compact_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/artifacts/upload": {
         parameters: {
             query?: never;
@@ -1026,16 +1006,6 @@ export interface components {
              */
             response: string | null;
             /**
-             * User Input Summary
-             * @description Compacted summary of user input
-             */
-            user_input_summary: string | null;
-            /**
-             * Response Summary
-             * @description Compacted summary of assistant response
-             */
-            response_summary: string | null;
-            /**
              * Created At
              * Format: date-time
              * @description Message creation time
@@ -1718,37 +1688,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ResumeResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    trigger_compaction_api_v1_chat__conv_id__compact_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                conv_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */

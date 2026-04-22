@@ -1,5 +1,6 @@
 import type { MessageEventItem } from '@/lib/api';
-import type { ExecutionSegment, ToolCallInfo, NonAgentBlock } from '@/stores/streamStore';
+import type { ExecutionSegment, ToolCallInfo, NonAgentBlock, CompactionBlock } from '@/stores/streamStore';
+import type { TokenUsage } from '@/types/events';
 
 /**
  * Reconstruct ExecutionSegment[] from persisted MessageEvent records.
@@ -138,6 +139,11 @@ export function reconstructSegments(events: MessageEventItem[]): ExecutionSegmen
 
 /**
  * Reconstruct NonAgentBlock[] from persisted MessageEvent records.
+ *
+ * Compaction replays from the paired compaction_start + compaction_summary
+ * events. They're matched by arrival order within a message (same strategy as
+ * the live SSE handler): each compaction_summary consumes the earliest
+ * still-running compaction block of the same position bucket.
  */
 export function reconstructNonAgentBlocks(events: MessageEventItem[]): NonAgentBlock[] {
   const blocks: NonAgentBlock[] = [];
@@ -156,8 +162,37 @@ export function reconstructNonAgentBlocks(events: MessageEventItem[]): NonAgentB
         timestamp: evt.created_at,
         position: agentSegmentCount,
       });
+    } else if (event_type === 'compaction_start') {
+      blocks.push({
+        kind: 'compaction',
+        id: `compact-${evt.created_at}`,
+        state: 'running',
+        triggerTokens: data ? {
+          input: (data.last_input_tokens as number) ?? 0,
+          output: (data.last_output_tokens as number) ?? 0,
+        } : undefined,
+        timestamp: evt.created_at,
+        position: agentSegmentCount,
+      });
+    } else if (event_type === 'compaction_summary') {
+      // Find the most recent still-running compaction block and finalize it
+      for (let i = blocks.length - 1; i >= 0; i--) {
+        const b = blocks[i];
+        if (b.kind === 'compaction' && b.state === 'running') {
+          const err = (data?.error as string | null | undefined) ?? null;
+          const patched: CompactionBlock = {
+            ...b,
+            state: err ? 'error' : 'done',
+            summary: (data?.content as string) ?? '',
+            tokenUsage: (data?.token_usage as TokenUsage | undefined) ?? undefined,
+            durationMs: (data?.duration_ms as number | undefined) ?? undefined,
+            error: err,
+          };
+          blocks[i] = patched;
+          break;
+        }
+      }
     }
-    // compaction_wait is SSE-only (not persisted), so no reconstruction needed
   }
 
   return blocks;

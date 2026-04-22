@@ -36,6 +36,7 @@ export function useSSE() {
   const setError = useStreamStore((s) => s.setError);
   const endStream = useStreamStore((s) => s.endStream);
   const pushNonAgentBlock = useStreamStore((s) => s.pushNonAgentBlock);
+  const updateNonAgentBlock = useStreamStore((s) => s.updateNonAgentBlock);
   const setExecutionMetrics = useStreamStore((s) => s.setExecutionMetrics);
   const setCancelled = useStreamStore((s) => s.setCancelled);
   const setReconnecting = useStreamStore((s) => s.setReconnecting);
@@ -306,14 +307,44 @@ export function useSSE() {
           });
           break;
 
-        case StreamEventType.COMPACTION_WAIT:
+        case StreamEventType.COMPACTION_START: {
+          const d = data as import('@/types/events').CompactionStartData | undefined;
           pushNonAgentBlock({
             kind: 'compaction',
-            id: `compact-${Date.now()}`,
+            id: `compact-${event.timestamp}`,
+            state: 'running',
+            triggerTokens: d
+              ? { input: d.last_input_tokens, output: d.last_output_tokens }
+              : undefined,
             timestamp: event.timestamp,
             position: useStreamStore.getState().segments.length,
           });
           break;
+        }
+
+        case StreamEventType.COMPACTION_SUMMARY: {
+          // Find the most recent running compaction block and transition it
+          // to done (or error) with summary + stats. compaction_start and
+          // compaction_summary are paired by order of arrival; we don't have an
+          // explicit correlation id, so the most-recent-running match works.
+          const d = data as import('@/types/events').CompactionSummaryData | undefined;
+          if (!d) break;
+          const blocks = useStreamStore.getState().nonAgentBlocks;
+          const target = [...blocks].reverse().find(
+            (b): b is import('@/stores/streamStore').CompactionBlock =>
+              b.kind === 'compaction' && b.state === 'running'
+          );
+          if (target) {
+            updateNonAgentBlock(target.id, {
+              state: d.error ? 'error' : 'done',
+              summary: d.content,
+              tokenUsage: d.token_usage,
+              durationMs: d.duration_ms,
+              error: d.error,
+            });
+          }
+          break;
+        }
 
         case StreamEventType.CANCELLED: {
           const metrics = data?.execution_metrics;
@@ -361,7 +392,7 @@ export function useSSE() {
       setError, endStream, refreshAfterComplete, setArtifactPanelVisible,
       addPendingUpdate, setArtifactSessionId, setArtifactCurrent, setArtifacts,
       setArtifactVersions, setSelectedVersion,
-      pushNonAgentBlock, setExecutionMetrics, setCancelled,
+      pushNonAgentBlock, updateNonAgentBlock, setExecutionMetrics, setCancelled,
     ]
   );
 

@@ -37,7 +37,7 @@ export default function StreamingMessage() {
           return <InjectFlowBlock key={item.id} content={item.content} />;
         }
         if (item.kind === 'compaction') {
-          return <CompactionFlowBlock key={item.id} />;
+          return <CompactionFlowBlock key={item.id} block={item} />;
         }
         return null;
       })}
