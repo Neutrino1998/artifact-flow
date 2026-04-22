@@ -59,8 +59,10 @@ class TestThresholdCheck:
         runner = CompactionRunner(agents, emit=None)
         state = _make_state([_ev(StreamEventType.USER_INPUT.value, data={"content": "hi"})])
 
-        # Threshold default 60000; 10000+10000 is below
-        await runner.maybe_trigger(state, "lead_agent", input_tokens=10000, output_tokens=10000)
+        # Patch threshold explicitly so the test doesn't depend on the default
+        # (the default is tuned for production and gets adjusted over time).
+        with patch("core.compaction_runner.config.COMPACTION_TOKEN_THRESHOLD", 100000):
+            await runner.maybe_trigger(state, "lead_agent", input_tokens=10000, output_tokens=10000)
 
         # No compaction events appended
         types = [e.event_type for e in state["events"]]
