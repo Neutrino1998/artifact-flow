@@ -26,7 +26,7 @@ Organize your response under these numbered sections:
 3. **Tool Interactions**: Significant tool calls and their outcomes (search queries + key findings, crawl targets + content excerpts, etc.).
 4. **Errors and Fixes**: Errors encountered and how they were resolved; pay special attention to user feedback that corrected course.
 5. **Pending Tasks**: Tasks that are in progress or queued but not yet completed.
-6. **Current Work**: Precisely what was being worked on at the time of the summary.
+6. **Current Work**: Precisely what was being worked on at the time of the summary. Compaction fires right after the assistant's LLM response (before any tool it just called has executed), so if the most recent assistant turn issued a tool call, name the tool and its key params and note that its result is still pending.
 7. **Next Step**: The next action that was about to happen. You MUST include a verbatim quote from the most recent user or assistant message in the original language to avoid drift during continuation.
 
 ## Format example
