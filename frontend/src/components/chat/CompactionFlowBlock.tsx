@@ -83,19 +83,17 @@ function Extra({ block }: { block: CompactionBlock }) {
   if (block.state === 'error') {
     return <>context truncated</>;
   }
-  // done
+  // done — mirror AgentSegmentBlock's header format 1:1
+  //   {model} · {input}k ↑ · {output}k ↓ · {duration}s
   const parts: string[] = [];
-  if (block.triggerTokens) {
-    const total = block.triggerTokens.input + block.triggerTokens.output;
-    parts.push(`${formatTokens(total)} compressed`);
-  }
-  if (block.durationMs != null) {
-    parts.push(`${(block.durationMs / 1000).toFixed(1)}s`);
-  }
+  if (block.model) parts.push(block.model);
   if (block.tokenUsage) {
     parts.push(
       `${formatTokens(block.tokenUsage.input_tokens)} ↑ · ${formatTokens(block.tokenUsage.output_tokens)} ↓`
     );
+  }
+  if (block.durationMs != null) {
+    parts.push(`${(block.durationMs / 1000).toFixed(1)}s`);
   }
   return <>{parts.join(' · ')}</>;
 }

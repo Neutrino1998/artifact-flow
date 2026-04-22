@@ -343,10 +343,12 @@ async def execute_loop(
 
         input_tokens = normalized_usage["input_tokens"]
         output_tokens = normalized_usage["output_tokens"]
-        logger.debug(f"[{agent_name}] LLM Response (input: {input_tokens}, output: {output_tokens}):\n{response_content[:500]}")
 
+        # Log reasoning before content — reasoning happens first semantically
         if reasoning_content:
             logger.debug(f"[{agent_name}] Reasoning:\n{reasoning_content[:500]}")
+
+        logger.debug(f"[{agent_name}] LLM Response (input: {input_tokens}, output: {output_tokens}):\n{response_content[:500]}")
 
         return response_content, reasoning_content, normalized_usage
 

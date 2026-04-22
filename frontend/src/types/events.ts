@@ -118,12 +118,14 @@ export interface CompactionStartData {
 }
 
 export interface CompactionSummaryData {
-  /** the compacted summary text (wrapped in <summary> tags by compact_agent) */
+  /** the compacted summary text (memory-aid frame prepended + compact_agent's output) */
   content: string;
   /** token cost of the compact_agent LLM call itself */
   token_usage: TokenUsage;
   /** compact_agent LLM duration */
   duration_ms: number;
+  /** compact_agent's model id (for display parity with llm_complete events) */
+  model?: string;
   /** non-null when compaction LLM failed and content is a placeholder */
   error: string | null;
 }

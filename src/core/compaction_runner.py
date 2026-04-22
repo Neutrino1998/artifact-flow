@@ -27,6 +27,15 @@ logger = get_logger("ArtifactFlow")
 
 EmitFn = Callable[[Dict[str, Any]], Awaitable[None]]
 
+# Prepended to the summary text when persisted. Role parallels queued_message's
+# "[The user has injected a message...]" framing: the DB-stored content is the
+# LLM-ready form, so EventHistory does no runtime wrapping. The frame tells the
+# LLM the user message it's looking at is a memory aid, not a fresh user input.
+_SUMMARY_FRAME = (
+    "[Prior conversation has been compacted into this summary. "
+    "Treat it as your memory of earlier context and continue from here.]"
+)
+
 
 class CompactionRunner:
     """
@@ -59,6 +68,14 @@ class CompactionRunner:
         if not compact_agent:
             logger.warning("compact_agent not configured, skipping compaction")
             return
+
+        logger.debug(
+            f"[compaction] triggered for {agent_name}: "
+            f"threshold={config.COMPACTION_TOKEN_THRESHOLD}, "
+            f"last_call input={input_tokens} output={output_tokens} "
+            f"(sum={input_tokens + output_tokens}), "
+            f"events_in_state={len(state['events'])}"
+        )
 
         # compaction_start 同时入 state["events"]（持久化）+ SSE，便于中途重连的 replay
         # 看到"压缩进行中"指示器，而不是看完最后一个 llm_complete 就等到 summary。
@@ -98,13 +115,18 @@ class CompactionRunner:
             usage = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
             error = str(e)
 
+        # Prepend the memory-aid frame so the LLM treats this user-role message
+        # as a condensed summary rather than a fresh user prompt.
+        framed_content = f"{_SUMMARY_FRAME}\n\n{content}"
+
         summary_event = ExecutionEvent(
             event_type=StreamEventType.COMPACTION_SUMMARY.value,
             agent_name=agent_name,
             data={
-                "content": content,
+                "content": framed_content,
                 "token_usage": usage,
                 "duration_ms": duration_ms,
+                "model": compact_agent.model,
                 "error": error,
             },
             is_historical=False,
@@ -131,7 +153,7 @@ class CompactionRunner:
         调用 compact_agent LLM，返回 (summary_content, duration_ms, token_usage)。
         """
         from core.event_history import build_event_history
-        from models.llm import astream_with_retry
+        from models.llm import astream_with_retry, format_messages_for_debug
 
         # 按 agent_name 过滤 + boundary 扫描，得到用于压缩的历史 messages
         history = build_event_history(events_to_compact, agent_name)
@@ -159,6 +181,11 @@ class CompactionRunner:
                 "your instructions. Do not call any tools — respond with plain text only."
             ),
         })
+
+        logger.debug(
+            f"[compact_agent] Messages (for {agent_name} compaction, "
+            f"{len(events_to_compact)} events):\n{format_messages_for_debug(messages)}"
+        )
 
         start = datetime.now()
         response = ""
@@ -200,6 +227,10 @@ class CompactionRunner:
         if not content:
             raise RuntimeError("compact_agent produced empty summary")
 
+        logger.debug(
+            f"[compact_agent] LLM Response (input: {usage['input_tokens']}, "
+            f"output: {usage['output_tokens']}):\n{content[:500]}"
+        )
         logger.info(
             f"[compaction] {agent_name}: compressed {len(events_to_compact)} events "
             f"in {duration_ms}ms (in={usage['input_tokens']}, out={usage['output_tokens']})"

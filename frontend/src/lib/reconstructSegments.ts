@@ -184,6 +184,7 @@ export function reconstructNonAgentBlocks(events: MessageEventItem[]): NonAgentB
             ...b,
             state: err ? 'error' : 'done',
             summary: (data?.content as string) ?? '',
+            model: (data?.model as string | undefined) ?? undefined,
             tokenUsage: (data?.token_usage as TokenUsage | undefined) ?? undefined,
             durationMs: (data?.duration_ms as number | undefined) ?? undefined,
             error: err,

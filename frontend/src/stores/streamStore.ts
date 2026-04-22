@@ -32,8 +32,10 @@ export interface CompactionBlock {
   state: 'running' | 'done' | 'error';
   /** input+output tokens of the LLM call that tripped the threshold (from COMPACTION_START) */
   triggerTokens?: { input: number; output: number };
-  /** compacted summary text (from COMPACTION_SUMMARY) */
+  /** compacted summary text (frame-prepended; from COMPACTION_SUMMARY) */
   summary?: string;
+  /** compact_agent's model id — shown in header next to usage, mirroring agent segment */
+  model?: string;
   /** compact_agent's own LLM cost */
   tokenUsage?: TokenUsage;
   /** compact_agent LLM duration in ms */

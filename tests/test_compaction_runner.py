@@ -103,8 +103,11 @@ class TestAppendSemantics:
         assert types[-1] == StreamEventType.COMPACTION_SUMMARY.value
 
         summary_ev = state["events"][-1]
-        assert summary_ev.data["content"] == "mocked summary text"
+        # Content is prepended with the memory-aid frame, then the raw summary
+        assert summary_ev.data["content"].startswith("[Prior conversation has been compacted")
+        assert "mocked summary text" in summary_ev.data["content"]
         assert summary_ev.data["error"] is None
+        assert summary_ev.data["model"] == "fake-model"
         assert summary_ev.agent_name == "lead_agent"
         assert summary_ev.is_historical is False
 
@@ -149,7 +152,7 @@ class TestAppendSemantics:
 
         # Sanity: the summary text actually flows through to the final event data
         summary_ev = state["events"][-1]
-        assert summary_ev.data["content"] == "UNIQUE_SUMMARY_SENTINEL"
+        assert "UNIQUE_SUMMARY_SENTINEL" in summary_ev.data["content"]
 
     async def test_per_agent_tagging(self):
         """Summary for subagent is tagged with subagent name, not lead."""

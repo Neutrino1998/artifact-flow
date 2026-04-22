@@ -874,7 +874,10 @@ class TestInEngineCompaction:
         # compaction_summary must be tagged with the triggering agent
         summary_ev = next(e for e in result["events"] if e.event_type == "compaction_summary")
         assert summary_ev.agent_name == "lead_agent"
-        assert summary_ev.data["content"] == "compacted prior turn"
+        # Content = memory-aid frame + raw summary from compact_agent
+        assert summary_ev.data["content"].startswith("[Prior conversation has been compacted")
+        assert "compacted prior turn" in summary_ev.data["content"]
+        assert summary_ev.data["model"] == "fake-model"
         assert summary_ev.data["error"] is None
 
     async def test_under_threshold_no_compaction(self):

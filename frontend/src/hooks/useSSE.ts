@@ -338,6 +338,7 @@ export function useSSE() {
             updateNonAgentBlock(target.id, {
               state: d.error ? 'error' : 'done',
               summary: d.content,
+              model: d.model,
               tokenUsage: d.token_usage,
               durationMs: d.duration_ms,
               error: d.error,
