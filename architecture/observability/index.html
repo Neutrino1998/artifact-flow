@@ -843,6 +843,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#compaction-层" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Compaction 层
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#输入层" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1329,6 +1340,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#compaction-层" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Compaction 层
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#输入层" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1639,10 +1661,6 @@
 <td><code>ERROR</code></td>
 <td><code>success=false</code>, <code>conversation_id</code>, <code>message_id</code>, <code>error</code>, <code>execution_metrics</code></td>
 </tr>
-<tr>
-<td><code>COMPACTION_WAIT</code></td>
-<td><code>conversation_id</code>, <code>status="waiting"</code></td>
-</tr>
 </tbody>
 </table>
 <p><code>execution_metrics</code> 汇总整次执行指标（总耗时、总 token、每 agent 轮数等），是监控面板的核心字段。</p>
@@ -1703,6 +1721,26 @@
 </table>
 <p><code>tool_complete.metadata</code> 里携带 <code>artifact_snapshot</code> 时，前端据此实时刷新 Artifact 面板（不等 DB flush），见 <a href="../artifacts/#write-back-cache-机制">artifacts.md → Write-Back</a>.</p>
 <p>Permission 事件的阻塞语义属于 RuntimeStore，见 <a href="../concurrency/#interrupt-机制">concurrency.md → Interrupt 机制</a>.</p>
+<h3 id="compaction-层">Compaction 层</h3>
+<table>
+<thead>
+<tr>
+<th>事件</th>
+<th><code>data</code> 字段</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>COMPACTION_START</code></td>
+<td><code>last_input_tokens</code>, <code>last_output_tokens</code>（触发时本次 LLM 调用的 token 数）</td>
+</tr>
+<tr>
+<td><code>COMPACTION_SUMMARY</code></td>
+<td><code>content</code>（带 frame prefix 的结构化摘要）, <code>token_usage={input,output,total}</code>, <code>duration_ms</code>, <code>model</code>, <code>error?</code>（LLM 失败时为占位符内容 + 非空 error）</td>
+</tr>
+</tbody>
+</table>
+<p>两条事件都带 <code>agent_name</code>（触发 compaction 的 agent），都持久化。<code>EventHistory</code> 在构建历史时以 <code>COMPACTION_SUMMARY</code> 作为 boundary（见 <a href="../engine/#compaction-机制">engine.md → Compaction 机制</a>），<code>COMPACTION_START</code> 对历史构建无影响 — 仅用于前端实时指示和 replay 重放。</p>
 <h3 id="输入层">输入层</h3>
 <table>
 <thead>

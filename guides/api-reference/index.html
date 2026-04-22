@@ -1044,17 +1044,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#post-conv_idcompact" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        POST /{conv_id}/compact
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#get-conv_idactive-stream" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1418,17 +1407,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#post-conv_idcompact" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        POST /{conv_id}/compact
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#get-conv_idactive-stream" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1664,11 +1642,6 @@
 <td>正常响应</td>
 </tr>
 <tr>
-<td><code>202</code></td>
-<td>异步接受</td>
-<td><code>/chat/{id}/compact</code> 后台任务已排队</td>
-</tr>
-<tr>
 <td><code>401</code></td>
 <td>未鉴权</td>
 <td>缺 token / token 失效 / 用户被禁用</td>
@@ -1686,7 +1659,7 @@
 <tr>
 <td><code>409</code></td>
 <td>冲突</td>
-<td>Lease 冲突 / interrupt 已解决 / compaction 在跑</td>
+<td>Lease 冲突 / interrupt 已解决</td>
 </tr>
 <tr>
 <td><code>410</code></td>
@@ -1701,7 +1674,7 @@
 <tr>
 <td><code>503</code></td>
 <td>服务不可用</td>
-<td>Health ready 降级、Compaction 后台服务未启动</td>
+<td>Health ready 降级</td>
 </tr>
 </tbody>
 </table>
@@ -1775,7 +1748,7 @@
 </ul>
 <hr />
 <h2 id="chat-对话">Chat 对话</h2>
-<p><code>/api/v1/chat</code> — 所有对话、执行、消息树、permission 接续、compaction 都在这一组。</p>
+<p><code>/api/v1/chat</code> — 所有对话、执行、消息树、permission 接续都在这一组。</p>
 <table>
 <thead>
 <tr>
@@ -1835,12 +1808,6 @@
 <td>Permission 审批后恢复运行</td>
 </tr>
 <tr>
-<td>POST</td>
-<td><code>/{conv_id}/compact</code></td>
-<td>用户</td>
-<td>手动触发对话压缩</td>
-</tr>
-<tr>
 <td>GET</td>
 <td><code>/{conv_id}/messages/{msg_id}/events</code></td>
 <td>用户</td>
@@ -1848,6 +1815,9 @@
 </tr>
 </tbody>
 </table>
+<blockquote>
+<p>Compaction 现为<strong>引擎内同步执行</strong>（单次 LLM 调用 <code>input+output</code> 超阈值时触发），不再有手动触发端点；详见 <a href="../../architecture/engine/#compaction-机制">engine.md → Compaction 机制</a>。</p>
+</blockquote>
 <h3 id="post---发送消息">POST `` — 发送消息</h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="err">POST /api/v1/chat</span>
 <a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="err">{</span>
@@ -1899,11 +1869,6 @@
 <li><code>404</code>：message 或 interrupt 不存在</li>
 <li><code>409</code>：interrupt 已解决（超时、被 cancel 唤醒、或已被处理）</li>
 <li><code>stream_url</code> 与原 <code>POST /chat</code> 返回相同，继续订阅即可</li>
-</ul>
-<h3 id="post-conv_idcompact">POST <code>/{conv_id}/compact</code></h3>
-<ul>
-<li>触发后台压缩任务，<code>202</code> 表示已接受（<code>{"status": "accepted", "conversation_id": "..."}</code>）</li>
-<li><code>409</code>：已有压缩在跑；<code>503</code>：未启用 CompactionManager</li>
 </ul>
 <h3 id="get-conv_idactive-stream">GET <code>/{conv_id}/active-stream</code></h3>
 <ul>

@@ -1421,12 +1421,15 @@
 <a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a>    <span class="n">TOOL_COMPLETE</span> <span class="o">=</span> <span class="s2">&quot;tool_complete&quot;</span>
 <a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a>    <span class="n">PERMISSION_REQUEST</span> <span class="o">=</span> <span class="s2">&quot;permission_request&quot;</span>
 <a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a>    <span class="n">PERMISSION_RESULT</span> <span class="o">=</span> <span class="s2">&quot;permission_result&quot;</span>
-<a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a>    <span class="n">COMPACTION_WAIT</span> <span class="o">=</span> <span class="s2">&quot;compaction_wait&quot;</span>
-<a id="__codelineno-0-20" name="__codelineno-0-20" href="#__codelineno-0-20"></a>
-<a id="__codelineno-0-21" name="__codelineno-0-21" href="#__codelineno-0-21"></a>    <span class="c1"># 输入 / 消息注入层</span>
-<a id="__codelineno-0-22" name="__codelineno-0-22" href="#__codelineno-0-22"></a>    <span class="n">USER_INPUT</span> <span class="o">=</span> <span class="s2">&quot;user_input&quot;</span>
-<a id="__codelineno-0-23" name="__codelineno-0-23" href="#__codelineno-0-23"></a>    <span class="n">QUEUED_MESSAGE</span> <span class="o">=</span> <span class="s2">&quot;queued_message&quot;</span>
-<a id="__codelineno-0-24" name="__codelineno-0-24" href="#__codelineno-0-24"></a>    <span class="n">SUBAGENT_INSTRUCTION</span> <span class="o">=</span> <span class="s2">&quot;subagent_instruction&quot;</span>
+<a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a>
+<a id="__codelineno-0-20" name="__codelineno-0-20" href="#__codelineno-0-20"></a>    <span class="c1"># Compaction</span>
+<a id="__codelineno-0-21" name="__codelineno-0-21" href="#__codelineno-0-21"></a>    <span class="n">COMPACTION_START</span> <span class="o">=</span> <span class="s2">&quot;compaction_start&quot;</span>      <span class="c1"># 引擎内触发压缩，持久化</span>
+<a id="__codelineno-0-22" name="__codelineno-0-22" href="#__codelineno-0-22"></a>    <span class="n">COMPACTION_SUMMARY</span> <span class="o">=</span> <span class="s2">&quot;compaction_summary&quot;</span>  <span class="c1"># 结构化摘要，持久化 + boundary</span>
+<a id="__codelineno-0-23" name="__codelineno-0-23" href="#__codelineno-0-23"></a>
+<a id="__codelineno-0-24" name="__codelineno-0-24" href="#__codelineno-0-24"></a>    <span class="c1"># 输入 / 消息注入层</span>
+<a id="__codelineno-0-25" name="__codelineno-0-25" href="#__codelineno-0-25"></a>    <span class="n">USER_INPUT</span> <span class="o">=</span> <span class="s2">&quot;user_input&quot;</span>
+<a id="__codelineno-0-26" name="__codelineno-0-26" href="#__codelineno-0-26"></a>    <span class="n">QUEUED_MESSAGE</span> <span class="o">=</span> <span class="s2">&quot;queued_message&quot;</span>
+<a id="__codelineno-0-27" name="__codelineno-0-27" href="#__codelineno-0-27"></a>    <span class="n">SUBAGENT_INSTRUCTION</span> <span class="o">=</span> <span class="s2">&quot;subagent_instruction&quot;</span>
 </code></pre></div>
 <p>所有发射点都用同一个枚举（前端 <code>types/events.ts</code> 镜像此列表），避免引擎/控制器/工具层各自起名。每个事件类型的 <code>data</code> 字段约定见 <a href="../observability/#事件目录">observability.md → 事件目录</a>.</p>
 <p><code>ExecutionEvent</code> 是内存中流转的统一容器：</p>

@@ -1758,10 +1758,8 @@
         string id PK
         string conversation_id FK
         string parent_id "自引用，形成树"
-        text user_input
-        text response
-        text user_input_summary "compaction 产出"
-        text response_summary
+        text user_input "display-only，原始用户输入"
+        text response "display-only，终轮 assistant 文本"
         json metadata "always_allowed_tools / metrics / last_input_tokens"
     }
     ArtifactSession {
@@ -1837,12 +1835,15 @@
 <li><code>add_message()</code> 自动更新 <code>active_branch = new_msg_id</code></li>
 </ul>
 <h3 id="compaction-在树上的语义">Compaction 在树上的语义</h3>
-<p>Compaction 只修改 <code>user_input_summary</code> / <code>response_summary</code> 字段，<strong>不改 parent_id</strong>。因此：</p>
+<p>Compaction 不再修改 <code>Message</code> 行 — 它只往 <code>MessageEvent</code> 追加一条 <code>COMPACTION_SUMMARY</code> 事件（绑定到触发它的 agent 名），<strong>从不触碰 <code>parent_id</code></strong>。因此：</p>
 <ul>
-<li>分支结构跨 compaction 保留</li>
-<li>引擎上下文加载时按路径取 <code>summary</code> 替换 <code>user_input</code> / <code>response</code>，未压缩的对使用原文</li>
-<li>切换到旧分支后 compaction 继续工作，不影响已切出的新分支</li>
+<li>分支结构跨 compaction 完全保留（<code>Message</code> 表只负责树形与显示字段）</li>
+<li>引擎上下文加载时按 path 展开所有 <code>MessageEvent</code>，<code>EventHistory</code> 从右向左找 <code>COMPACTION_SUMMARY</code> 作为 boundary → 摘要之前的事件对后续 LLM 调用不可见（详见 <a href="../engine/#compaction-机制">engine.md → Compaction 机制</a>）</li>
+<li>切换到旧分支后沿新 path 展开，已存在分支的 compaction_summary 事件自然继承，互不干扰</li>
 </ul>
+<blockquote>
+<p><strong>废弃字段：</strong> <code>Message.user_input_summary</code> / <code>response_summary</code> 已从 ORM 中移除。对话历史由 <code>MessageEvent</code> 唯一承载，<code>Message.user_input</code> / <code>response</code> 仅作显示用。</p>
+</blockquote>
 <h2 id="event-sourcing-层">Event Sourcing 层</h2>
 <p><code>MessageEvent</code> 是执行过程的完整事件链，append-only：</p>
 <h3 id="关键字段">关键字段</h3>
@@ -1938,7 +1939,7 @@
 </tr>
 <tr>
 <td><code>ConversationRepository</code></td>
-<td>对话/消息树 CRUD、<code>get_conversation_path()</code>、标题搜索分页、Compaction 写 summary</td>
+<td>对话/消息树 CRUD、<code>get_conversation_path()</code>、标题搜索分页</td>
 </tr>
 <tr>
 <td><code>ArtifactRepository</code></td>

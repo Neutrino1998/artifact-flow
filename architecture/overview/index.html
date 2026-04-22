@@ -1319,12 +1319,13 @@
         Controller["ExecutionController"]
         ConvManager["ConversationManager"]
         ArtifactManager["ArtifactManager"]
-        CompactionManager["CompactionManager"]
     end
 
     subgraph Core["引擎层"]
         Engine["Engine&lt;br/&gt;(Pi-style while loop)"]
         ContextManager["ContextManager"]
+        EventHistory["EventHistory&lt;br/&gt;(boundary 扫描)"]
+        CompactionRunner["CompactionRunner&lt;br/&gt;(engine 内同步)"]
         Agents["Agents&lt;br/&gt;(config/agents/*.md)"]
         Tools["Tools&lt;br/&gt;(tools/builtin/)"]
     end
@@ -1342,6 +1343,8 @@
     Controller --&gt; ConvManager
     Controller --&gt; ArtifactManager
     Engine --&gt; ContextManager
+    ContextManager --&gt; EventHistory
+    Engine --&gt; CompactionRunner
     Engine --&gt; Agents
     Engine --&gt; Tools
     Engine --&gt;|events| SSE
@@ -1503,9 +1506,9 @@
 </tr>
 <tr>
 <td><code>compact_agent</code></td>
-<td>生成对话摘要</td>
+<td>生成对话摘要（7 sections：Primary Request / Artifacts / Tool Interactions / Errors / Pending Tasks / Current Work / Next Step）</td>
 <td>无</td>
-<td>internal，不可被 <code>call_subagent</code> 调用</td>
+<td>internal，由 <code>CompactionRunner</code> 在引擎循环内直接调用</td>
 </tr>
 </tbody>
 </table>

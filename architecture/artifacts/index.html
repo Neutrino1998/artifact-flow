@@ -1559,13 +1559,13 @@
 <p>Result Artifact 则通过 Artifact Inventory 层以预览形式暴露（<code>INVENTORY_PREVIEW_LENGTH=200</code> 字符），需完整内容时由模型显式调用 <code>read_artifact</code>。</p>
 <h2 id="artifact-作为任务追踪-checkpoint">Artifact 作为任务追踪 Checkpoint</h2>
 <p>这是 ArtifactFlow 架构中最容易被忽略但最关键的语义。</p>
-<p><strong>背景：</strong> 引擎每轮 <code>ContextManager.build()</code> 重新生成上下文，只加载 <code>Conversation</code> + <code>Message</code>，<strong>不加载 <code>MessageEvent</code></strong>（见 <a href="../engine/#为什么上下文只加载-conversation-不加载-events">engine.md → 为什么上下文只加载 Conversation 不加载 Events</a>）。这意味着：</p>
+<p><strong>背景：</strong> 引擎每轮 <code>ContextManager.build()</code> 重新生成上下文。历史由 conversation path 上的 <code>MessageEvent</code> 展开、按 agent 过滤、再从右向左扫描到最近的 <code>COMPACTION_SUMMARY</code> 边界（见 <a href="../engine/#消息构建">engine.md → 消息构建</a>）。这意味着：</p>
 <ul>
 <li>当前轮的工具调用、subagent 交互在 <code>state["events"]</code> 内存中可见</li>
-<li>但一旦轮次结束（即 lead agent 完成一次 turn），这些事件对下一轮模型<strong>不可见</strong></li>
-<li>Compaction 进一步压缩历史消息为摘要，细节信息进一步丢失</li>
+<li>一旦发生 compaction（超阈值触发），摘要之前的全部 <code>LLM_COMPLETE</code> / <code>TOOL_COMPLETE</code> 原文对该 agent 不可见 — 摘要本身成为"agent 对过去的全部记忆"</li>
+<li>Compaction 的 7-section 摘要会尽量保留 tool interactions / current work / next step，但细节保真度无可避免地下降</li>
 </ul>
-<p><strong>后果：</strong> 模型在长任务中缺乏"持久工作记忆"。若 Task 5 步骤中前 3 步通过 subagent 完成，下一轮 lead agent 唤起时只能看到 user 原始输入 + 历史 assistant 响应（可能已被压缩），无法精确知道"哪些已做、哪些没做、中间发现了什么"。</p>
+<p><strong>后果：</strong> 模型在长任务中缺乏"持久工作记忆"。若 Task 5 步骤中前 3 步通过 subagent 完成，一旦 compaction 触发，lead agent 在后续轮次只能读到摘要，无法精确知道"哪些已做、哪些没做、中间发现了什么"。</p>
 <p><strong>Artifact 填补这个空洞：</strong></p>
 <pre class="mermaid"><code>flowchart LR
     subgraph 轮N[轮 N 执行]

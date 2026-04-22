@@ -886,17 +886,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#owner-key-通用原语" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Owner-Key 通用原语
-      
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -1455,17 +1444,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#owner-key-通用原语" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Owner-Key 通用原语
-      
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -1860,15 +1838,10 @@
 <a id="__codelineno-2-20" name="__codelineno-2-20" href="#__codelineno-2-20"></a>    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">inject_message</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">msg_id</span><span class="p">,</span> <span class="n">content</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span> <span class="o">...</span>
 <a id="__codelineno-2-21" name="__codelineno-2-21" href="#__codelineno-2-21"></a>    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">drain_messages</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">msg_id</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">List</span><span class="p">[</span><span class="nb">str</span><span class="p">]:</span> <span class="o">...</span>
 <a id="__codelineno-2-22" name="__codelineno-2-22" href="#__codelineno-2-22"></a>
-<a id="__codelineno-2-23" name="__codelineno-2-23" href="#__codelineno-2-23"></a>    <span class="c1"># Owner-key primitives — 通用分布式锁（compaction 等用）</span>
-<a id="__codelineno-2-24" name="__codelineno-2-24" href="#__codelineno-2-24"></a>    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">acquire</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">key</span><span class="p">,</span> <span class="n">ttl</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">owner</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Tuple</span><span class="p">[</span><span class="nb">bool</span><span class="p">,</span> <span class="nb">str</span><span class="p">]:</span> <span class="o">...</span>
-<a id="__codelineno-2-25" name="__codelineno-2-25" href="#__codelineno-2-25"></a>    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">renew</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">key</span><span class="p">,</span> <span class="n">owner</span><span class="p">,</span> <span class="n">ttl</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span> <span class="o">...</span>
-<a id="__codelineno-2-26" name="__codelineno-2-26" href="#__codelineno-2-26"></a>    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">release</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">key</span><span class="p">,</span> <span class="n">owner</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span> <span class="o">...</span>
-<a id="__codelineno-2-27" name="__codelineno-2-27" href="#__codelineno-2-27"></a>
-<a id="__codelineno-2-28" name="__codelineno-2-28" href="#__codelineno-2-28"></a>    <span class="c1"># Lease lifecycle</span>
-<a id="__codelineno-2-29" name="__codelineno-2-29" href="#__codelineno-2-29"></a>    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">renew_lease</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">conv_id</span><span class="p">,</span> <span class="n">msg_id</span><span class="p">,</span> <span class="n">ttl</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span> <span class="o">...</span>
-<a id="__codelineno-2-30" name="__codelineno-2-30" href="#__codelineno-2-30"></a>    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">cleanup_execution</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">conv_id</span><span class="p">,</span> <span class="n">msg_id</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span> <span class="o">...</span>
-<a id="__codelineno-2-31" name="__codelineno-2-31" href="#__codelineno-2-31"></a>    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">shutdown_cleanup</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span> <span class="o">...</span>
+<a id="__codelineno-2-23" name="__codelineno-2-23" href="#__codelineno-2-23"></a>    <span class="c1"># Lease lifecycle</span>
+<a id="__codelineno-2-24" name="__codelineno-2-24" href="#__codelineno-2-24"></a>    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">renew_lease</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">conv_id</span><span class="p">,</span> <span class="n">msg_id</span><span class="p">,</span> <span class="n">ttl</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span> <span class="o">...</span>
+<a id="__codelineno-2-25" name="__codelineno-2-25" href="#__codelineno-2-25"></a>    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">cleanup_execution</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">conv_id</span><span class="p">,</span> <span class="n">msg_id</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span> <span class="o">...</span>
+<a id="__codelineno-2-26" name="__codelineno-2-26" href="#__codelineno-2-26"></a>    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">shutdown_cleanup</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span> <span class="o">...</span>
 </code></pre></div>
 <h3 id="双状态生命周期">双状态生命周期</h3>
 <p>lease 和 interactive 是<strong>两个独立状态</strong>，生命周期不同：</p>
@@ -1932,14 +1905,9 @@
 <li>Lead agent 在每次迭代顶部 <code>drain_messages(msg_id)</code> 取出所有待处理消息，包装为 <code>QUEUED_MESSAGE</code> 事件注入上下文</li>
 <li>非 lead agent 不检查队列 — 注入消息只影响 lead agent 的决策回路</li>
 </ul>
-<h3 id="owner-key-通用原语">Owner-Key 通用原语</h3>
-<p><code>acquire / renew / release / get_owner</code> 是建立在 lease 之上的通用分布式锁，主要用户是 Compaction：</p>
-<ul>
-<li>Compaction 在多实例部署时需要互斥，避免同一对话被多实例同时压缩</li>
-<li>使用 <code>acquire("compact:{conv_id}", ttl=60, owner=uuid)</code></li>
-<li>启动后台续期任务，每 20s 调 <code>renew()</code></li>
-<li>任务结束或崩溃后 TTL 到期自动释放</li>
-</ul>
+<blockquote>
+<p><strong>历史注：</strong> 早期 <code>RuntimeStore</code> 暴露过一组通用 owner-key 原语（<code>acquire / renew / release</code>），用于 Compaction 跨实例互斥。Compaction 改为引擎内同步执行后（见 <a href="../engine/#compaction-机制">engine.md → Compaction 机制</a>），这组原语没有剩余用户，已从 Protocol 移除。Lease 相关的 Lua 脚本（<code>compare-and-del</code> / <code>compare-and-expire</code>）仍在 Redis 实现里服务 lease，但不再对外暴露为通用锁。</p>
+</blockquote>
 <h2 id="两种-runtimestore-实现">两种 RuntimeStore 实现</h2>
 <h3 id="inmemoryruntimestore单进程">InMemoryRuntimeStore（单进程）</h3>
 <p><code>src/api/services/runtime_store.py</code> — 开发、单实例部署使用：</p>
@@ -1970,10 +1938,6 @@
 <tr>
 <td>Message queues</td>
 <td><code>dict[msg_id → asyncio.Queue]</code></td>
-</tr>
-<tr>
-<td>Owner keys</td>
-<td><code>dict[key → (owner, expires_at)]</code>（内存 TTL）</td>
 </tr>
 </tbody>
 </table>
@@ -2106,8 +2070,8 @@
 </tr>
 <tr>
 <td><code>COMPACTION_TIMEOUT</code></td>
-<td>600s (10min)</td>
-<td>Compaction 后台任务上限</td>
+<td>120s</td>
+<td>单次 compact LLM 调用超时（引擎内同步触发）</td>
 </tr>
 <tr>
 <td><code>SSE_PING_INTERVAL</code></td>

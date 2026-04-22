@@ -1470,7 +1470,7 @@
 </ul>
 <h2 id="注意事项">注意事项</h2>
 <h3 id="internal-true-的-agent-不出现在候选列表"><code>internal: true</code> 的 Agent 不出现在候选列表</h3>
-<p>设置 <code>internal: true</code> 后，agent 不会出现在注入到 <code>call_subagent</code> 工具说明中的 <code>&lt;available_subagents&gt;</code> 列表 — 换言之，Lead 看不到它，无法主动调用。适用于由代码直接调度的 agent（如 <code>compact_agent</code> 由 <code>CompactionManager</code> 调用）。</p>
+<p>设置 <code>internal: true</code> 后，agent 不会出现在注入到 <code>call_subagent</code> 工具说明中的 <code>&lt;available_subagents&gt;</code> 列表 — 换言之，Lead 看不到它，无法主动调用。适用于由代码直接调度的 agent（如 <code>compact_agent</code> 由 <code>CompactionRunner</code> 在引擎循环内调用）。</p>
 <h3 id="工具权限覆盖">工具权限覆盖</h3>
 <p><code>tools</code> 字段是白名单 + per-agent 权限覆盖：</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="nt">tools</span><span class="p">:</span>
