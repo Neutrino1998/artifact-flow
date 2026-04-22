@@ -15,7 +15,6 @@ In-engine compaction — 引擎内同步触发的上下文压缩
 """
 
 import asyncio
-import re
 from datetime import datetime
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
@@ -220,9 +219,13 @@ class CompactionRunner:
 
         duration_ms = int((datetime.now() - start).total_seconds() * 1000)
 
-        # 解析 <summary> 标签
-        match = re.search(r"<summary>([\s\S]*?)</summary>", response)
-        content = match.group(1).strip() if match else response.strip()
+        # The entire response is the summary — compact_agent is instructed to
+        # emit the numbered sections directly with no outer wrapper. We do NOT
+        # parse or extract: any wrapper regex would be vulnerable to the
+        # required `<quote>` verbatim user text containing matching tag
+        # literals (e.g. a user saying "how do I write </summary>" would
+        # truncate a <summary>...</summary> regex extraction).
+        content = response.strip()
 
         if not content:
             raise RuntimeError("compact_agent produced empty summary")

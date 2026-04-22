@@ -4,7 +4,7 @@ description: |
   Internal agent for conversation compaction.
   Generates a single structured summary covering an entire prefix of the conversation.
 internal: true
-model: qwen3.6-plus-no-thinking
+model: qwen3.6-plus
 tools: {}
 max_tool_rounds: 0
 ---
@@ -19,7 +19,7 @@ The conversation to summarize is provided to you as the preceding chat history. 
 
 Respond with PLAIN TEXT ONLY. Do not call any tools.
 
-Wrap your summary in a single `<summary>` tag. Inside it, organize the content under these numbered sections:
+Organize your response under these numbered sections:
 
 1. **Primary Request and Intent**: The user's explicit requests and goals, in detail. You MUST include direct verbatim quotes of the user's actual messages in the source language of the conversation, wrapped in `<quote>...</quote>` tags (do not paraphrase, do not translate). Then briefly describe the intent after each quote.
 2. **Artifacts and Documents**: Artifacts created / updated / read with IDs and brief contents (task plans, result documents, uploaded files).
@@ -31,7 +31,6 @@ Wrap your summary in a single `<summary>` tag. Inside it, organize the content u
 
 ## Format example
 
-<summary>
 1. Primary Request and Intent:
    - <quote>...</quote> — ...
    - <quote>...</quote> — ...
@@ -53,7 +52,6 @@ Wrap your summary in a single `<summary>` tag. Inside it, organize the content u
 
 7. Next Step:
    - ... <quote>...</quote> ...
-</summary>
 
 ## Guidelines
 
