@@ -176,8 +176,8 @@ class CompactionRunner:
             "role": "user",
             "content": (
                 "Please provide your detailed summary of the conversation so far now, "
-                "wrapped in a single <summary> tag following the structure specified in "
-                "your instructions. Do not call any tools — respond with plain text only."
+                "following the structure specified in your instructions. Do not call "
+                "any tools — respond with plain text only."
             ),
         })
 
