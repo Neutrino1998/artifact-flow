@@ -150,11 +150,6 @@ class RuntimeStore(Protocol):
     async def inject_message(self, msg_id, content) -> None: ...
     async def drain_messages(self, msg_id) -> List[str]: ...
 
-    # Owner-key primitives — 通用分布式锁（compaction 等用）
-    async def acquire(self, key, ttl, *, owner=None) -> Tuple[bool, str]: ...
-    async def renew(self, key, owner, ttl) -> bool: ...
-    async def release(self, key, owner) -> None: ...
-
     # Lease lifecycle
     async def renew_lease(self, conv_id, msg_id, ttl) -> bool: ...
     async def cleanup_execution(self, conv_id, msg_id) -> None: ...
@@ -235,14 +230,7 @@ sequenceDiagram
 - Lead agent 在每次迭代顶部 `drain_messages(msg_id)` 取出所有待处理消息，包装为 `QUEUED_MESSAGE` 事件注入上下文
 - 非 lead agent 不检查队列 — 注入消息只影响 lead agent 的决策回路
 
-### Owner-Key 通用原语
-
-`acquire / renew / release / get_owner` 是建立在 lease 之上的通用分布式锁，主要用户是 Compaction：
-
-- Compaction 在多实例部署时需要互斥，避免同一对话被多实例同时压缩
-- 使用 `acquire("compact:{conv_id}", ttl=60, owner=uuid)`
-- 启动后台续期任务，每 20s 调 `renew()`
-- 任务结束或崩溃后 TTL 到期自动释放
+> **历史注：** 早期 `RuntimeStore` 暴露过一组通用 owner-key 原语（`acquire / renew / release`），用于 Compaction 跨实例互斥。Compaction 改为引擎内同步执行后（见 [engine.md → Compaction 机制](engine.md#compaction-机制)），这组原语没有剩余用户，已从 Protocol 移除。Lease 相关的 Lua 脚本（`compare-and-del` / `compare-and-expire`）仍在 Redis 实现里服务 lease，但不再对外暴露为通用锁。
 
 ## 两种 RuntimeStore 实现
 
@@ -257,7 +245,6 @@ sequenceDiagram
 | Interrupts | `dict[msg_id → _InterruptState]`（Event + data + resume_data） |
 | Cancellations | `dict[msg_id → asyncio.Event]` |
 | Message queues | `dict[msg_id → asyncio.Queue]` |
-| Owner keys | `dict[key → (owner, expires_at)]`（内存 TTL） |
 
 **特点：**
 
@@ -317,7 +304,7 @@ Controller 启动后台任务每 `LEASE_TTL / 3 = 30s` 调用 `renew_lease()`：
 | `EXECUTION_TIMEOUT` | 1800s (30min) | 总执行上限，同时作为 stream lifetime 上限 |
 | `PERMISSION_TIMEOUT` | 300s (5min) | 单次 permission 等待上限 |
 | `LEASE_TTL` | 90s | Lease 存活时长（心跳每 30s 续） |
-| `COMPACTION_TIMEOUT` | 600s (10min) | Compaction 后台任务上限 |
+| `COMPACTION_TIMEOUT` | 120s | 单次 compact LLM 调用超时（引擎内同步触发） |
 | `SSE_PING_INTERVAL` | 15s | SSE 心跳间隔 |
 
 选择原则：`PERMISSION_TIMEOUT < EXECUTION_TIMEOUT`，给模型在用户审批后仍有足够时间完成任务。

@@ -22,13 +22,13 @@ Result Artifact 则通过 Artifact Inventory 层以预览形式暴露（`INVENTO
 
 这是 ArtifactFlow 架构中最容易被忽略但最关键的语义。
 
-**背景：** 引擎每轮 `ContextManager.build()` 重新生成上下文，只加载 `Conversation` + `Message`，**不加载 `MessageEvent`**（见 [engine.md → 为什么上下文只加载 Conversation 不加载 Events](engine.md#为什么上下文只加载-conversation-不加载-events)）。这意味着：
+**背景：** 引擎每轮 `ContextManager.build()` 重新生成上下文。历史由 conversation path 上的 `MessageEvent` 展开、按 agent 过滤、再从右向左扫描到最近的 `COMPACTION_SUMMARY` 边界（见 [engine.md → 消息构建](engine.md#消息构建)）。这意味着：
 
 - 当前轮的工具调用、subagent 交互在 `state["events"]` 内存中可见
-- 但一旦轮次结束（即 lead agent 完成一次 turn），这些事件对下一轮模型**不可见**
-- Compaction 进一步压缩历史消息为摘要，细节信息进一步丢失
+- 一旦发生 compaction（超阈值触发），摘要之前的全部 `LLM_COMPLETE` / `TOOL_COMPLETE` 原文对该 agent 不可见 — 摘要本身成为"agent 对过去的全部记忆"
+- Compaction 的 7-section 摘要会尽量保留 tool interactions / current work / next step，但细节保真度无可避免地下降
 
-**后果：** 模型在长任务中缺乏"持久工作记忆"。若 Task 5 步骤中前 3 步通过 subagent 完成，下一轮 lead agent 唤起时只能看到 user 原始输入 + 历史 assistant 响应（可能已被压缩），无法精确知道"哪些已做、哪些没做、中间发现了什么"。
+**后果：** 模型在长任务中缺乏"持久工作记忆"。若 Task 5 步骤中前 3 步通过 subagent 完成，一旦 compaction 触发，lead agent 在后续轮次只能读到摘要，无法精确知道"哪些已做、哪些没做、中间发现了什么"。
 
 **Artifact 填补这个空洞：**
 

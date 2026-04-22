@@ -88,7 +88,6 @@ async def _persist_events(state):
 | `COMPLETE` | `success=true`, `conversation_id`, `message_id`, `response`, `execution_metrics` |
 | `CANCELLED` | `success=false`, `cancelled=true`, `conversation_id`, `message_id`, `response`, `execution_metrics` |
 | `ERROR` | `success=false`, `conversation_id`, `message_id`, `error`, `execution_metrics` |
-| `COMPACTION_WAIT` | `conversation_id`, `status="waiting"` |
 
 `execution_metrics` 汇总整次执行指标（总耗时、总 token、每 agent 轮数等），是监控面板的核心字段。
 
@@ -115,6 +114,15 @@ async def _persist_events(state):
 `tool_complete.metadata` 里携带 `artifact_snapshot` 时，前端据此实时刷新 Artifact 面板（不等 DB flush），见 [artifacts.md → Write-Back](artifacts.md#write-back-cache-机制).
 
 Permission 事件的阻塞语义属于 RuntimeStore，见 [concurrency.md → Interrupt 机制](concurrency.md#interrupt-机制).
+
+### Compaction 层
+
+| 事件 | `data` 字段 |
+|------|------------|
+| `COMPACTION_START` | `last_input_tokens`, `last_output_tokens`（触发时本次 LLM 调用的 token 数） |
+| `COMPACTION_SUMMARY` | `content`（带 frame prefix 的结构化摘要）, `token_usage={input,output,total}`, `duration_ms`, `model`, `error?`（LLM 失败时为占位符内容 + 非空 error） |
+
+两条事件都带 `agent_name`（触发 compaction 的 agent），都持久化。`EventHistory` 在构建历史时以 `COMPACTION_SUMMARY` 作为 boundary（见 [engine.md → Compaction 机制](engine.md#compaction-机制)），`COMPACTION_START` 对历史构建无影响 — 仅用于前端实时指示和 replay 重放。
 
 ### 输入层
 

@@ -15,14 +15,13 @@
 | 码 | 含义 | 触发 |
 |----|------|------|
 | `200` | 成功 | 正常响应 |
-| `202` | 异步接受 | `/chat/{id}/compact` 后台任务已排队 |
 | `401` | 未鉴权 | 缺 token / token 失效 / 用户被禁用 |
 | `403` | 权限不足 | 非 admin 访问 `/admin/*` 端点 |
 | `404` | 资源不存在 | **也覆盖"跨用户访问"** — 见 Design Decision |
-| `409` | 冲突 | Lease 冲突 / interrupt 已解决 / compaction 在跑 |
+| `409` | 冲突 | Lease 冲突 / interrupt 已解决 |
 | `410` | 资源失效 | `active-stream` 指向的 stream 已过期 |
 | `422` | 请求不合法 | 参数校验、文件过大、格式不支持 |
-| `503` | 服务不可用 | Health ready 降级、Compaction 后台服务未启动 |
+| `503` | 服务不可用 | Health ready 降级 |
 
 ### 404-not-403 原则
 
@@ -69,7 +68,7 @@ POST /api/v1/auth/login
 
 ## Chat 对话
 
-`/api/v1/chat` — 所有对话、执行、消息树、permission 接续、compaction 都在这一组。
+`/api/v1/chat` — 所有对话、执行、消息树、permission 接续都在这一组。
 
 | 方法 | 路径 | 鉴权 | 说明 |
 |------|------|------|------|
@@ -81,8 +80,9 @@ POST /api/v1/auth/login
 | POST | `/{conv_id}/inject` | 用户 | 运行中注入一条 user 消息 |
 | POST | `/{conv_id}/cancel` | 用户 | 请求取消运行 |
 | POST | `/{conv_id}/resume` | 用户 | Permission 审批后恢复运行 |
-| POST | `/{conv_id}/compact` | 用户 | 手动触发对话压缩 |
 | GET | `/{conv_id}/messages/{msg_id}/events` | 用户 | 单个 message 的事件链（可观测性） |
+
+> Compaction 现为**引擎内同步执行**（单次 LLM 调用 `input+output` 超阈值时触发），不再有手动触发端点；详见 [engine.md → Compaction 机制](../architecture/engine.md#compaction-机制)。
 
 ### POST `` — 发送消息
 
@@ -143,11 +143,6 @@ POST /api/v1/chat/{conv_id}/resume
 - `404`：message 或 interrupt 不存在
 - `409`：interrupt 已解决（超时、被 cancel 唤醒、或已被处理）
 - `stream_url` 与原 `POST /chat` 返回相同，继续订阅即可
-
-### POST `/{conv_id}/compact`
-
-- 触发后台压缩任务，`202` 表示已接受（`{"status": "accepted", "conversation_id": "..."}`）
-- `409`：已有压缩在跑；`503`：未启用 CompactionManager
 
 ### GET `/{conv_id}/active-stream`
 

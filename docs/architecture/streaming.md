@@ -38,7 +38,10 @@ class StreamEventType(Enum):
     TOOL_COMPLETE = "tool_complete"
     PERMISSION_REQUEST = "permission_request"
     PERMISSION_RESULT = "permission_result"
-    COMPACTION_WAIT = "compaction_wait"
+
+    # Compaction
+    COMPACTION_START = "compaction_start"      # 引擎内触发压缩，持久化
+    COMPACTION_SUMMARY = "compaction_summary"  # 结构化摘要，持久化 + boundary
 
     # 输入 / 消息注入层
     USER_INPUT = "user_input"

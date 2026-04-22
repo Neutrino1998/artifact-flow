@@ -230,12 +230,11 @@ docker compose -f deploy/docker-compose.intranet.yml exec backend \
 
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
-| `ARTIFACTFLOW_COMPACTION_TOKEN_THRESHOLD` | `60000` | 触发跨轮 compaction 的 token 阈值 |
-| `ARTIFACTFLOW_COMPACTION_PRESERVE_PAIRS` | `2` | 保留最近 N 对不压缩 |
-| `ARTIFACTFLOW_COMPACTION_TIMEOUT` | `600` | Compaction 后台任务超时（秒） |
-| `ARTIFACTFLOW_CONTEXT_MAX_TOKENS` | `80000` | 上下文最大 token 数 |
-| `ARTIFACTFLOW_TRUNCATION_PRESERVE_AI_MSGS` | `4` | 截断时至少保留的 assistant 消息数 |
+| `ARTIFACTFLOW_COMPACTION_TOKEN_THRESHOLD` | `60000` | 单次 LLM 调用 input+output 超此值时，引擎内立即触发 compaction |
+| `ARTIFACTFLOW_COMPACTION_TIMEOUT` | `120` | 单次 compact LLM 调用的超时（秒） |
 | `ARTIFACTFLOW_INVENTORY_PREVIEW_LENGTH` | `200` | Artifact 清单预览截断长度 |
+
+> 旧版本的 `COMPACTION_PRESERVE_PAIRS` / `CONTEXT_MAX_TOKENS` / `TRUNCATION_PRESERVE_AI_MSGS` 已随异步后台 compaction 与 token-预算截断一起移除。现在引擎不做独立截断，压缩完全由上述阈值驱动（详见 [engine.md → Compaction 机制](architecture/engine.md#compaction-机制)）。
 
 ### CORS
 

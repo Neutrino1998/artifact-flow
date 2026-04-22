@@ -110,7 +110,7 @@ Return only the translated text, wrapped in:
 
 ### `internal: true` 的 Agent 不出现在候选列表
 
-设置 `internal: true` 后，agent 不会出现在注入到 `call_subagent` 工具说明中的 `<available_subagents>` 列表 — 换言之，Lead 看不到它，无法主动调用。适用于由代码直接调度的 agent（如 `compact_agent` 由 `CompactionManager` 调用）。
+设置 `internal: true` 后，agent 不会出现在注入到 `call_subagent` 工具说明中的 `<available_subagents>` 列表 — 换言之，Lead 看不到它，无法主动调用。适用于由代码直接调度的 agent（如 `compact_agent` 由 `CompactionRunner` 在引擎循环内调用）。
 
 ### 工具权限覆盖
 

@@ -17,12 +17,13 @@ graph TB
         Controller["ExecutionController"]
         ConvManager["ConversationManager"]
         ArtifactManager["ArtifactManager"]
-        CompactionManager["CompactionManager"]
     end
 
     subgraph Core["引擎层"]
         Engine["Engine<br/>(Pi-style while loop)"]
         ContextManager["ContextManager"]
+        EventHistory["EventHistory<br/>(boundary 扫描)"]
+        CompactionRunner["CompactionRunner<br/>(engine 内同步)"]
         Agents["Agents<br/>(config/agents/*.md)"]
         Tools["Tools<br/>(tools/builtin/)"]
     end
@@ -40,6 +41,8 @@ graph TB
     Controller --> ConvManager
     Controller --> ArtifactManager
     Engine --> ContextManager
+    ContextManager --> EventHistory
+    Engine --> CompactionRunner
     Engine --> Agents
     Engine --> Tools
     Engine -->|events| SSE
@@ -144,7 +147,7 @@ ArtifactFlow 的核心扩展机制全部基于配置文件，无需修改 Python
 | `lead_agent` | 协调者，任务规划，Artifact 管理 | 全部工具 + `call_subagent` | 唯一出口 |
 | `search_agent` | Web 搜索 | `web_search` (AUTO) | max 3 rounds |
 | `crawl_agent` | 网页内容提取 | `web_fetch` (CONFIRM) | max 3 rounds |
-| `compact_agent` | 生成对话摘要 | 无 | internal，不可被 `call_subagent` 调用 |
+| `compact_agent` | 生成对话摘要（7 sections：Primary Request / Artifacts / Tool Interactions / Errors / Pending Tasks / Current Work / Next Step） | 无 | internal，由 `CompactionRunner` 在引擎循环内直接调用 |
 
 ## 信号流：用户视角的完整交互
 

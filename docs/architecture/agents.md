@@ -121,13 +121,13 @@ You can create MULTIPLE result artifacts...
 | `lead_agent` | 任务协调、规划、Artifact 管理、subagent 路由 | create/update/rewrite/read_artifact (auto), call_subagent (auto) | qwen3.6-plus | 100 | 否 |
 | `search_agent` | Web 搜索，信息检索 | web_search (auto) | qwen3.6-plus-no-thinking | 3 | 否 |
 | `crawl_agent` | 网页内容提取与清洗 | web_fetch (confirm) | qwen3.6-plus-no-thinking | 3 | 否 |
-| `compact_agent` | 对话摘要生成（Compaction） | 无 | qwen3.6-plus-no-thinking | 0 | 是 |
+| `compact_agent` | 对话摘要生成（Compaction） | 无 | qwen3.6-plus | 0 | 是 |
 
 ### 角色分工
 
 - **lead_agent** 是唯一与用户直接交互的 Agent，也是唯一能创建/修改 Artifact 的 Agent
 - **search_agent** 和 **crawl_agent** 是执行型 subagent，由 lead_agent 通过 `call_subagent` 分发任务
-- **compact_agent** 是内部 Agent，由 `CompactionManager` 直接调用，不参与正常的引擎循环
+- **compact_agent** 是内部 Agent，由 `CompactionRunner` 在引擎循环内每次 LLM 调用后同步触发（超阈值时），输出结构化摘要作为 `COMPACTION_SUMMARY` 事件追加到 `state["events"]` 尾部，详见 [engine.md → Compaction 机制](engine.md#compaction-机制)
 
 ## Agent 协作模型
 

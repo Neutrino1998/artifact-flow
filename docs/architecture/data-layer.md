@@ -33,10 +33,8 @@ erDiagram
         string id PK
         string conversation_id FK
         string parent_id "自引用，形成树"
-        text user_input
-        text response
-        text user_input_summary "compaction 产出"
-        text response_summary
+        text user_input "display-only，原始用户输入"
+        text response "display-only，终轮 assistant 文本"
         json metadata "always_allowed_tools / metrics / last_input_tokens"
     }
     ArtifactSession {
@@ -84,11 +82,13 @@ flowchart TD
 
 ### Compaction 在树上的语义
 
-Compaction 只修改 `user_input_summary` / `response_summary` 字段，**不改 parent_id**。因此：
+Compaction 不再修改 `Message` 行 — 它只往 `MessageEvent` 追加一条 `COMPACTION_SUMMARY` 事件（绑定到触发它的 agent 名），**从不触碰 `parent_id`**。因此：
 
-- 分支结构跨 compaction 保留
-- 引擎上下文加载时按路径取 `summary` 替换 `user_input` / `response`，未压缩的对使用原文
-- 切换到旧分支后 compaction 继续工作，不影响已切出的新分支
+- 分支结构跨 compaction 完全保留（`Message` 表只负责树形与显示字段）
+- 引擎上下文加载时按 path 展开所有 `MessageEvent`，`EventHistory` 从右向左找 `COMPACTION_SUMMARY` 作为 boundary → 摘要之前的事件对后续 LLM 调用不可见（详见 [engine.md → Compaction 机制](engine.md#compaction-机制)）
+- 切换到旧分支后沿新 path 展开，已存在分支的 compaction_summary 事件自然继承，互不干扰
+
+> **废弃字段：** `Message.user_input_summary` / `response_summary` 已从 ORM 中移除。对话历史由 `MessageEvent` 唯一承载，`Message.user_input` / `response` 仅作显示用。
 
 ## Event Sourcing 层
 
@@ -147,7 +147,7 @@ class BaseRepository(Generic[T]):
 | Repository | 职责 |
 |-----------|------|
 | `UserRepository` | 认证相关查询（按 username 取、角色过滤） |
-| `ConversationRepository` | 对话/消息树 CRUD、`get_conversation_path()`、标题搜索分页、Compaction 写 summary |
+| `ConversationRepository` | 对话/消息树 CRUD、`get_conversation_path()`、标题搜索分页 |
 | `ArtifactRepository` | Artifact + Version + ArtifactSession CRUD |
 | `MessageEventRepository` | `batch_create` / 按多维度查询（不继承 BaseRepository，因业务模型特殊） |
 
