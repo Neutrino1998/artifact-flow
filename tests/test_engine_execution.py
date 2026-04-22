@@ -817,3 +817,103 @@ class TestMetrics:
         final_chunks = [c for c in chunks if c["type"] == "final"]
         assert len(final_chunks) == 1
         assert final_chunks[0]["token_usage"]["prompt_tokens"] == 42
+
+
+# ============================================================
+# TestInEngineCompaction
+# ============================================================
+
+
+class TestInEngineCompaction:
+    """
+    Integration coverage for the engine → CompactionRunner wiring.
+
+    These tests intentionally go through execute_loop (not just
+    CompactionRunner.maybe_trigger) so that deleting the `await
+    compaction_runner.maybe_trigger(...)` call in src/core/engine.py
+    would fail CI — the unit tests alone would not catch that regression.
+    """
+
+    async def test_over_threshold_triggers_compaction(self):
+        """Lead LLM returns usage > threshold → compaction_start + compaction_summary in state + SSE."""
+        lead = _FakeAgentConfig(tools={})
+        compact = _FakeAgentConfig(name="compact_agent", role_prompt="Compactor.", tools={})
+
+        # Round 1: lead returns big usage — triggers compaction after this call
+        # Round 2: compact_agent (same astream_with_retry patch) returns a summary
+        rounds = [
+            _simple_llm_chunks("Done", input_tokens=80, output_tokens=30),
+            [
+                {"type": "content", "content": "<summary>compacted prior turn</summary>"},
+                {"type": "usage", "token_usage": {
+                    "prompt_tokens": 50, "completion_tokens": 20, "total_tokens": 70,
+                }},
+                {"type": "final", "content": "<summary>compacted prior turn</summary>",
+                 "reasoning_content": None, "token_usage": {
+                    "prompt_tokens": 50, "completion_tokens": 20, "total_tokens": 70,
+                 }},
+            ],
+        ]
+
+        with patch("core.compaction_runner.config.COMPACTION_TOKEN_THRESHOLD", 100):
+            result, emitted, _ = await _run_engine(
+                _make_fake_stream_sequence(rounds),
+                agents={"lead_agent": lead, "compact_agent": compact},
+            )
+
+        # Both events should end up in persisted state
+        event_types = [e.event_type for e in result["events"]]
+        assert "compaction_start" in event_types
+        assert "compaction_summary" in event_types
+
+        # And both should have been emitted to SSE
+        emitted_types = [e["type"] for e in emitted]
+        assert "compaction_start" in emitted_types
+        assert "compaction_summary" in emitted_types
+
+        # compaction_summary must be tagged with the triggering agent
+        summary_ev = next(e for e in result["events"] if e.event_type == "compaction_summary")
+        assert summary_ev.agent_name == "lead_agent"
+        assert summary_ev.data["content"] == "compacted prior turn"
+        assert summary_ev.data["error"] is None
+
+    async def test_under_threshold_no_compaction(self):
+        """Usage below threshold → no compaction events appear."""
+        lead = _FakeAgentConfig(tools={})
+        compact = _FakeAgentConfig(name="compact_agent", role_prompt="Compactor.", tools={})
+
+        rounds = [_simple_llm_chunks("Done", input_tokens=10, output_tokens=5)]
+
+        with patch("core.compaction_runner.config.COMPACTION_TOKEN_THRESHOLD", 1000):
+            result, emitted, _ = await _run_engine(
+                _make_fake_stream_sequence(rounds),
+                agents={"lead_agent": lead, "compact_agent": compact},
+            )
+
+        event_types = [e.event_type for e in result["events"]]
+        assert "compaction_start" not in event_types
+        assert "compaction_summary" not in event_types
+
+        emitted_types = [e["type"] for e in emitted]
+        assert "compaction_start" not in emitted_types
+        assert "compaction_summary" not in emitted_types
+
+    async def test_no_compact_agent_silently_skips_over_threshold(self):
+        """Over threshold but compact_agent not registered → no crash, no compaction events."""
+        lead = _FakeAgentConfig(tools={})
+        # Note: no compact_agent in the agents dict
+
+        rounds = [_simple_llm_chunks("Done", input_tokens=80, output_tokens=30)]
+
+        with patch("core.compaction_runner.config.COMPACTION_TOKEN_THRESHOLD", 100):
+            result, emitted, _ = await _run_engine(
+                _make_fake_stream_sequence(rounds),
+                agents={"lead_agent": lead},
+            )
+
+        # Engine should complete normally
+        assert result["completed"] is True
+        assert result["response"] == "Done"
+
+        event_types = [e.event_type for e in result["events"]]
+        assert "compaction_summary" not in event_types

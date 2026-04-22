@@ -109,33 +109,47 @@ class TestAppendSemantics:
         assert summary_ev.is_historical is False
 
     async def test_events_to_compact_snapshot_excludes_new_summary(self):
-        """The compact LLM input must NOT include the summary being produced."""
-        captured_messages = {}
+        """
+        The events list passed to _run_compact_llm must NOT contain the
+        compaction_summary being produced (it hasn't been appended yet).
 
-        async def capture_stream(messages, model=None):
-            captured_messages["messages"] = messages
-            yield {"type": "content", "content": "<summary>ok</summary>"}
-            yield {"type": "usage", "token_usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}}
+        Capturing _run_compact_llm's input directly is the right level: the
+        invariant is about the in-memory snapshot, not about what eventually
+        renders into the compact LLM prompt.
+        """
+        captured_events: list = []
+
+        async def fake_run(self_, events_to_compact, agent_name, compact_agent):
+            # Record the snapshot for inspection + return a canned summary
+            captured_events.extend(events_to_compact)
+            return ("UNIQUE_SUMMARY_SENTINEL", 0, {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0})
 
         agents = {"compact_agent": _FakeAgent()}
         runner = CompactionRunner(agents, emit=None)
-        state = _make_state([
+        original_events = [
             _ev(StreamEventType.USER_INPUT.value, data={"content": "original user msg"}),
             _ev(StreamEventType.LLM_COMPLETE.value, data={
                 "content": "assistant reply",
                 "token_usage": {"input_tokens": 100, "output_tokens": 20},
             }),
-        ])
+        ]
+        state = _make_state(original_events)
 
-        with patch("models.llm.astream_with_retry", capture_stream), \
+        with patch.object(CompactionRunner, "_run_compact_llm", fake_run), \
              patch("core.compaction_runner.config.COMPACTION_TOKEN_THRESHOLD", 100):
             await runner.maybe_trigger(state, "lead_agent", input_tokens=80, output_tokens=30)
 
-        # The compact LLM saw original messages but NOT a compaction_summary (it didn't exist yet)
-        contents = " ".join(m.get("content", "") for m in captured_messages["messages"])
-        assert "original user msg" in contents
-        assert "assistant reply" in contents
-        assert "mocked summary text" not in contents  # summary wasn't in input
+        # Snapshot must contain original events + the compaction_start we just appended,
+        # but NOT the compaction_summary (still unset at time of snapshot).
+        snapshot_types = [e.event_type for e in captured_events]
+        assert StreamEventType.USER_INPUT.value in snapshot_types
+        assert StreamEventType.LLM_COMPLETE.value in snapshot_types
+        assert StreamEventType.COMPACTION_START.value in snapshot_types
+        assert StreamEventType.COMPACTION_SUMMARY.value not in snapshot_types
+
+        # Sanity: the summary text actually flows through to the final event data
+        summary_ev = state["events"][-1]
+        assert summary_ev.data["content"] == "UNIQUE_SUMMARY_SENTINEL"
 
     async def test_per_agent_tagging(self):
         """Summary for subagent is tagged with subagent name, not lead."""
