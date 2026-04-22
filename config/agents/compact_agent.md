@@ -21,15 +21,13 @@ Respond with PLAIN TEXT ONLY. Do not call any tools.
 
 Wrap your summary in a single `<summary>` tag. Inside it, organize the content under these numbered sections:
 
-1. **Primary Request and Intent**: The user's explicit requests and goals, in detail.
-2. **Key Technical / Domain Concepts**: Concepts, technologies, data sources, domain terms discussed.
-3. **Artifacts and Documents**: Artifacts created / updated / read with IDs and brief contents (task plans, result documents, uploaded files).
-4. **Tool Interactions**: Significant tool calls and their outcomes (search queries + key findings, crawl targets + content excerpts, etc.).
-5. **Errors and Fixes**: Errors encountered and how they were resolved; pay special attention to user feedback that corrected course.
-6. **All User Messages**: List every user message verbatim or near-verbatim. Exclude messages that are tool results wrapped as user messages.
-7. **Pending Tasks**: Tasks that are in progress or queued but not yet completed.
-8. **Current Work**: Precisely what was being worked on at the time of the summary.
-9. **Next Step**: The next action that was about to happen, including direct quotes from the most recent assistant and user messages to avoid drift.
+1. **Primary Request and Intent**: The user's explicit requests and goals, in detail. INCLUDE verbatim quotes of the user's actual messages (not paraphrased) — this preserves exact phrasing, tone, and the source language of the conversation.
+2. **Artifacts and Documents**: Artifacts created / updated / read with IDs and brief contents (task plans, result documents, uploaded files).
+3. **Tool Interactions**: Significant tool calls and their outcomes (search queries + key findings, crawl targets + content excerpts, etc.).
+4. **Errors and Fixes**: Errors encountered and how they were resolved; pay special attention to user feedback that corrected course.
+5. **Pending Tasks**: Tasks that are in progress or queued but not yet completed.
+6. **Current Work**: Precisely what was being worked on at the time of the summary.
+7. **Next Step**: The next action that was about to happen, including direct quotes from the most recent assistant and user messages to avoid drift.
 
 ## Format example
 
@@ -37,28 +35,22 @@ Wrap your summary in a single `<summary>` tag. Inside it, organize the content u
 1. Primary Request and Intent:
    ...
 
-2. Key Technical / Domain Concepts:
+2. Artifacts and Documents:
    - ...
 
-3. Artifacts and Documents:
+3. Tool Interactions:
    - ...
 
-4. Tool Interactions:
+4. Errors and Fixes:
    - ...
 
-5. Errors and Fixes:
+5. Pending Tasks:
    - ...
 
-6. All User Messages:
-   - ...
-
-7. Pending Tasks:
-   - ...
-
-8. Current Work:
+6. Current Work:
    ...
 
-9. Next Step:
+7. Next Step:
    ...
 </summary>
 

@@ -227,9 +227,11 @@ class CompactionRunner:
         if not content:
             raise RuntimeError("compact_agent produced empty summary")
 
+        # No truncation on compact response — the whole point of this log is
+        # reviewing summary quality. DEBUG level keeps it off in prod.
         logger.debug(
             f"[compact_agent] LLM Response (input: {usage['input_tokens']}, "
-            f"output: {usage['output_tokens']}):\n{content[:500]}"
+            f"output: {usage['output_tokens']}):\n{content}"
         )
         logger.info(
             f"[compaction] {agent_name}: compressed {len(events_to_compact)} events "
