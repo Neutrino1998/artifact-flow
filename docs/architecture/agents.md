@@ -155,7 +155,7 @@ sequenceDiagram
 
 1. **Lead 分发**：Lead 调用 `call_subagent` 工具，提供 `agent_name` 和 `instruction`
 2. **Agent 切换**：引擎将 `state["current_agent"]` 设为目标 subagent，instruction 作为 `SUBAGENT_INSTRUCTION` 事件注入
-3. **Sub 执行**：Subagent 不看 lead 的对话历史，只看自己那部分 agent_name-filtered 事件（instruction、LLM 响应、tool results）。`EventHistory` 扫 boundary 时对 subagent 还会停在 `SUBAGENT_INSTRUCTION.fresh_start=True` 上 — `call_subagent` 的 `fresh_start` **默认 True**，所以 Lead 默认每次调用都给 subagent 一个干净起点；仅当 Lead 显式传 `fresh_start=false` 时，第二次调用才能看到第一次的完整事件上下文
+3. **Sub 执行**：Subagent 不看 lead 的对话历史，只看自己那部分 agent_name-filtered 事件（instruction、LLM 响应、tool results）。`EventHistory` 扫 boundary 时对 subagent 还会停在 `SUBAGENT_INSTRUCTION.fresh_start=True` 上 — `call_subagent` 的 `fresh_start` **默认 True**，所以 Lead 默认每次调用都给 subagent 一个干净起点；仅当 Lead 显式传 `fresh_start=false` 时，第二次调用才能延续第一次调用的上下文，**直到最近的 `COMPACTION_SUMMARY` boundary**（如第一次调用中途触发过 compaction，第二次看到的仍是摘要 + 其后的事件，而非第一次的完整原始上下文）
 4. **结果回传**：Subagent 无工具调用时，响应打包为 `<subagent_result>` XML，作为 `call_subagent` 的 tool_result 返回给 Lead
 5. **Lead 继续**：Lead 看到 tool_result 后决定下一步（继续分发、整合结果、或完成）
 
