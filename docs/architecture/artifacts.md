@@ -35,20 +35,20 @@ Result Artifact 则通过 Artifact Inventory 层以预览形式暴露（`INVENTO
 ```mermaid
 flowchart LR
     subgraph 轮N[轮 N 执行]
-        E1[events: 内存可见]
+        E1[events: state 内存可见]
         P1[Task Plan v3]
     end
-    subgraph 压缩[Compaction]
-        S[摘要替代原始消息]
+    subgraph 压缩[Compaction 触发后]
+        S[COMPACTION_SUMMARY<br/>成为新 boundary]
     end
     subgraph 轮N1[轮 N+1 执行]
-        E2[events: 不可见]
+        E2[events: MessageEvent 重新展开<br/>但 boundary 之前不可见]
         P2[Task Plan v3 — 仍可见]
     end
 
-    轮N -->|事件丢弃| 轮N1
-    轮N -->|摘要化| 压缩
-    压缩 --> 轮N1
+    轮N -->|事件写入 MessageEvent| 轮N1
+    轮N -->|超阈值时触发| 压缩
+    压缩 -->|boundary 切断历史| 轮N1
     P1 ==>|Artifact 跨轮持久| P2
 ```
 

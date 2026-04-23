@@ -46,7 +46,9 @@ flowchart LR
 ```python
 # 伪代码
 async def _persist_events(state):
-    events = state["events"]
+    # state["events"] 混有轮起始从 DB 加载的历史事件（is_historical=True）
+    # 和本轮引擎新追加的事件（is_historical=False）；只写后者，避免重复
+    new_events = [e for e in state["events"] if not e.is_historical]
     db_events = [
         MessageEvent(
             event_id=f"{message_id}-{seq}",
@@ -55,12 +57,12 @@ async def _persist_events(state):
             agent_name=e.agent_name,
             data=e.data,
         )
-        for seq, e in enumerate(events)
+        for seq, e in enumerate(new_events)
     ]
     await event_repo.batch_create(db_events)
 ```
 
-**触发点**：引擎 loop 退出后进入 post-processing，`_persist_events()` 一次性批量写入 `state["events"]` 累积的全部事件。`complete` / `cancelled` 两条路径走的是"先写 DB、后 emit 终端事件到 SSE"：Controller 在 post-processing 内把终端事件 append 到 events 列表、调用 `_persist_events()`、再 yield 给 SSE — 前端收到 `complete` / `cancelled` 时 DB 已就绪。
+**触发点**：引擎 loop 退出后进入 post-processing，`_persist_events()` 一次性批量写入本轮新追加的事件（`is_historical=False`）。历史事件在轮开始时由 Controller 从 `MessageEvent` 表按 conversation path 加载并填入 `state["events"]`（`is_historical=True`），仅供 `EventHistory` 在 context 构建时消费，不再重写回 DB。`complete` / `cancelled` 两条路径走的是"先写 DB、后 emit 终端事件到 SSE"：Controller 在 post-processing 内把终端事件 append 到 events 列表、调用 `_persist_events()`、再 yield 给 SSE — 前端收到 `complete` / `cancelled` 时 DB 已就绪。
 
 **`error` 路径不保证可持久化**：
 
