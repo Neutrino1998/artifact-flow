@@ -122,7 +122,7 @@ Permission 事件的阻塞语义属于 RuntimeStore，见 [concurrency.md → In
 | 事件 | `data` 字段 |
 |------|------------|
 | `COMPACTION_START` | `last_input_tokens`, `last_output_tokens`（触发时本次 LLM 调用的 token 数） |
-| `COMPACTION_SUMMARY` | `content`（带 frame prefix 的结构化摘要）, `token_usage={input,output,total}`, `duration_ms`, `model`, `error?`（LLM 失败时为占位符内容 + 非空 error） |
+| `COMPACTION_SUMMARY` | `success`（false 时表示 compact LLM 失败、本 turn 已被 engine 标 ERROR；旧记录无此字段视为 true）, `content`（带 frame prefix 的结构化摘要；`success=false` 时为空字符串）, `token_usage={input,output,total}`（`success=false` 时全 0）, `duration_ms`（`success=false` 时为 0）, `model`, `error`（仅 `success=false` 时非空） |
 
 两条事件都带 `agent_name`（触发 compaction 的 agent），都持久化。`EventHistory` 在构建历史时以 `COMPACTION_SUMMARY` 作为 boundary（见 [engine.md → Compaction 机制](engine.md#compaction-机制)），`COMPACTION_START` 对历史构建无影响 — 仅用于前端实时指示和 replay 重放。
 
