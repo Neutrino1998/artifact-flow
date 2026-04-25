@@ -1569,20 +1569,20 @@
 <p><strong>Artifact 填补这个空洞：</strong></p>
 <pre class="mermaid"><code>flowchart LR
     subgraph 轮N[轮 N 执行]
-        E1[events: 内存可见]
+        E1[events: state 内存可见]
         P1[Task Plan v3]
     end
-    subgraph 压缩[Compaction]
-        S[摘要替代原始消息]
+    subgraph 压缩[Compaction 触发后]
+        S[COMPACTION_SUMMARY&lt;br/&gt;成为新 boundary]
     end
     subgraph 轮N1[轮 N+1 执行]
-        E2[events: 不可见]
+        E2[events: MessageEvent 重新展开&lt;br/&gt;但 boundary 之前不可见]
         P2[Task Plan v3 — 仍可见]
     end
 
-    轮N --&gt;|事件丢弃| 轮N1
-    轮N --&gt;|摘要化| 压缩
-    压缩 --&gt; 轮N1
+    轮N --&gt;|事件写入 MessageEvent| 轮N1
+    轮N --&gt;|超阈值时触发| 压缩
+    压缩 --&gt;|boundary 切断历史| 轮N1
     P1 ==&gt;|Artifact 跨轮持久| P2</code></pre>
 <ul>
 <li>Task Plan Artifact：承载"任务分解 + 进度状态"，每轮模型通过 <code>update_artifact</code> 勾选完成项（<code>[✗] → [✓]</code>），下一轮读到的 system prompt 天然携带最新状态</li>

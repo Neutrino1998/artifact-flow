@@ -1792,7 +1792,7 @@
 </tbody>
 </table>
 <blockquote>
-<p>注：引擎不做任何"token 预算截断"。上下文增长到超过阈值时由下节的 <strong>Compaction</strong> 处理；compaction 失败时写入 placeholder summary，语义等同硬截断。</p>
+<p>注：引擎不做任何"token 预算截断"。上下文增长到超过阈值时由下节的 <strong>Compaction</strong> 处理；compaction 失败 → 当前 turn 标 ERROR（见下节 <em>失败处理</em>）。</p>
 </blockquote>
 <h2 id="compaction-机制">Compaction 机制</h2>
 <p><code>CompactionRunner</code>（<code>src/core/compaction_runner.py</code>）运行在引擎循环内部，<strong>同步</strong>为当前 agent 产出一个结构化摘要并 append 到 <code>state["events"]</code> 尾部，<code>EventHistory</code> 的右到左扫描会在此 boundary 处停下 → 摘要之前的事件对后续 LLM 调用不可见。</p>
@@ -1817,8 +1817,9 @@
         alt LLM 成功
             LLM--&gt;&gt;Runner: 结构化摘要 (7 sections)
             Runner-&gt;&gt;Engine: append COMPACTION_SUMMARY(agent_name=current)&lt;br/&gt;content = frame prefix + 摘要
-        else LLM 失败
-            Runner-&gt;&gt;Engine: append placeholder COMPACTION_SUMMARY&lt;br/&gt;(error 字段已填)
+        else LLM 失败（astream_with_retry 用尽后仍抛）
+            Runner-&gt;&gt;Engine: append COMPACTION_SUMMARY(success=False, error 字段已填)&lt;br/&gt;+ raise
+            Engine-&gt;&gt;Engine: 标当前 turn ERROR，break
         end
     end
     Engine-&gt;&gt;Engine: 下一次 _build_context 时&lt;br/&gt;EventHistory 扫描到 boundary，&lt;br/&gt;摘要前事件不可见</code></pre>
@@ -1827,7 +1828,7 @@
 <li><strong>Summary 即 agent 的唯一记忆</strong> — compaction 之前的 <code>LLM_COMPLETE</code> / <code>TOOL_COMPLETE</code> 原文对该 agent 不再可见。<code>compact_agent</code> prompt 的 <em>Current Work</em> / <em>Next Step</em> 两节必须承载 in-flight 状态（例如"刚调用了工具 X，结果尚未返回"），以便 compaction 之后 append 的 tool_result 仍可解读。</li>
 <li><strong>不兜底工具结果溢出</strong>：compaction 只在 LLM 调用后触发；若 compaction 之后同轮某工具返回超大 blob，下一次 LLM 调用仍可能超模型上限。工具作者自行处理 <code>max_length</code> / 分页 / 结构化截断（附 <code>(truncated at N)</code> 标记）。真超了 → LLM 调用 loudly 报错（ERROR 给用户），不静默丢数据。</li>
 <li><strong>Per-agent 隔离</strong>：<code>COMPACTION_SUMMARY</code> 携带 <code>agent_name</code>，<code>EventHistory</code> 先按 agent 过滤再扫 boundary → lead 与 subagent 的 compaction 完全独立。subagent 的 <code>SUBAGENT_INSTRUCTION.fresh_start=True</code> 额外做会话级隔离。</li>
-<li><strong>失败回退 = placeholder summary</strong>：LLM 调用失败时 append 一条带 <code>error</code> 字段的占位摘要到同一 tail 位置，boundary 语义完全一致 → 等价于硬截断。无独立的截断代码路径。</li>
+<li><strong>失败处理 = loud fail，无占位摘要</strong>：<code>compact_agent</code> 走 <code>astream_with_retry</code>（与普通 agent LLM 同款重试），仍失败时 append 一条 <code>success=False</code> 的 <code>COMPACTION_SUMMARY</code> 配对 <code>compaction_start</code>（保持事件流配对完整、replay/UI 可识别），然后 raise；engine 在 <code>maybe_trigger</code> 调用点捕获并把 turn 标 ERROR，对齐 <code>_call_llm</code> 的失败处理路径。<code>EventHistory</code> 完全跳过 <code>success=False</code> 的 summary（既不作 boundary，也不进 messages） → 不产生"等价硬截断"。设计原因：compaction 在 <code>llm_complete</code> 之后立即触发，往往伴随同轮的 tool_call；如果失败时仍写"硬截断 boundary"，下次 LLM 调用看到的将是 <code>[占位摘要, 凭空冒出来的 tool_result]</code>，连刚刚自己说要调这个 tool 的 assistant 消息也丢了 → 模型必然 confused。Loud fail 让用户感知到压缩失败并重试当前 message，而不是把损坏的上下文藏到下一条。</li>
 <li><strong><code>compaction_start</code> 事件持久化</strong>：在开始调用 LLM 前先 append 一条 <code>COMPACTION_START</code> 事件（含 triggering inputs），用于 replay / audit。</li>
 <li><strong>树结构保持</strong>：compaction 只往 <code>MessageEvent</code> append 新事件，完全不触碰 <code>Message.parent_id</code> / 分支结构。</li>
 </ul>
