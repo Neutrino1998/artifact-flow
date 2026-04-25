@@ -587,13 +587,27 @@ async def execute_loop(
 
             response_content, reasoning_content, normalized_usage = llm_result
 
-            # 引擎内 compaction 检查：本次 LLM 调用 input+output 超阈值则立即压缩
-            await compaction_runner.maybe_trigger(
-                state=state,
-                agent_name=current_agent_name,
-                input_tokens=normalized_usage["input_tokens"],
-                output_tokens=normalized_usage["output_tokens"],
-            )
+            # 引擎内 compaction 检查：本次 LLM 调用 input+output 超阈值则立即压缩。
+            # 失败时 maybe_trigger 已经追加了 success=False 的 compaction_summary 占位
+            # （配对 compaction_start），这里把 turn 标 ERROR 退出 —— 对齐 _call_llm 的
+            # 失败处理路径，避免在已损坏的 context 上继续跑下个工具/LLM。
+            try:
+                await compaction_runner.maybe_trigger(
+                    state=state,
+                    agent_name=current_agent_name,
+                    input_tokens=normalized_usage["input_tokens"],
+                    output_tokens=normalized_usage["output_tokens"],
+                )
+            except Exception as compact_error:
+                logger.error(f"Compaction failed for {current_agent_name}: {compact_error}")
+                await _emit(StreamEventType.ERROR.value, current_agent_name, {
+                    "error": f"Compaction failed: {str(compact_error)}",
+                    "agent": current_agent_name,
+                })
+                state["completed"] = True
+                state["error"] = True
+                state["response"] = f"Compaction failed: {str(compact_error)}"
+                break
 
             # 解析工具调用
             tool_calls = parse_tool_calls(response_content)

@@ -89,6 +89,52 @@ class TestCompactionSummaryBoundary:
         assert "mid" not in contents
         assert "latest" in contents
 
+    def test_failed_compaction_summary_does_not_form_boundary(self):
+        """
+        success=False compaction_summary is a paired terminator for compaction_start
+        (UI / replay only). EventHistory must skip it: prior events stay visible
+        and the failure marker itself does not become a user message. Otherwise
+        a failed compaction would silently amputate mid-turn context.
+        """
+        events = [
+            _ev(StreamEventType.USER_INPUT.value, "lead_agent", {"content": "old q"}, is_historical=True),
+            _ev(StreamEventType.LLM_COMPLETE.value, "lead_agent",
+                {"content": "old a", "token_usage": {"input_tokens": 100, "output_tokens": 20}},
+                is_historical=True),
+            _ev(StreamEventType.COMPACTION_SUMMARY.value, "lead_agent",
+                {"success": False, "content": "", "error": "LLM unreachable"},
+                is_historical=True),
+            _ev(StreamEventType.USER_INPUT.value, "lead_agent", {"content": "new q"}),
+        ]
+        msgs = build_event_history(events, "lead_agent")
+        contents = " ".join(m["content"] for m in msgs)
+        assert "old q" in contents
+        assert "old a" in contents
+        assert "new q" in contents
+        assert "LLM unreachable" not in contents
+
+    def test_failed_summary_falls_through_to_earlier_successful_summary(self):
+        """If a successful summary exists earlier, scan should land on it (skipping the failed marker)."""
+        events = [
+            _ev(StreamEventType.USER_INPUT.value, "lead_agent", {"content": "ancient"}, is_historical=True),
+            _ev(StreamEventType.COMPACTION_SUMMARY.value, "lead_agent",
+                {"success": True, "content": "good summary", "error": None},
+                is_historical=True),
+            _ev(StreamEventType.LLM_COMPLETE.value, "lead_agent",
+                {"content": "post-summary reply", "token_usage": {"input_tokens": 1, "output_tokens": 1}},
+                is_historical=True),
+            _ev(StreamEventType.COMPACTION_SUMMARY.value, "lead_agent",
+                {"success": False, "content": "", "error": "boom"},
+                is_historical=True),
+            _ev(StreamEventType.USER_INPUT.value, "lead_agent", {"content": "new q"}),
+        ]
+        msgs = build_event_history(events, "lead_agent")
+        contents = " ".join(m["content"] for m in msgs)
+        assert "ancient" not in contents
+        assert "good summary" in contents
+        assert "post-summary reply" in contents
+        assert "new q" in contents
+
     def test_compaction_summary_is_agent_scoped(self):
         """A sub-agent compaction_summary does NOT affect lead history."""
         events = [

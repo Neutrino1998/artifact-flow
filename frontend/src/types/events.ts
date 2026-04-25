@@ -118,15 +118,21 @@ export interface CompactionStartData {
 }
 
 export interface CompactionSummaryData {
-  /** the compacted summary text (memory-aid frame prepended + compact_agent's output) */
+  /** false → compaction LLM failed; this event is a paired terminator for compaction_start
+   *  (also marks the turn ERROR backend-side). Treat as a status marker only —
+   *  content is empty and error carries the message. Optional: pre-existing DB
+   *  records lack this field and should be treated as success=true. */
+  success?: boolean;
+  /** the compacted summary text (memory-aid frame prepended + compact_agent's output);
+   *  empty string when success=false */
   content: string;
-  /** token cost of the compact_agent LLM call itself */
+  /** token cost of the compact_agent LLM call itself; zeros when success=false */
   token_usage: TokenUsage;
-  /** compact_agent LLM duration */
+  /** compact_agent LLM duration; 0 when success=false */
   duration_ms: number;
   /** compact_agent's model id (for display parity with llm_complete events) */
   model?: string;
-  /** non-null when compaction LLM failed and content is a placeholder */
+  /** non-null when success=false */
   error: string | null;
 }
 

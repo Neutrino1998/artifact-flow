@@ -5,7 +5,9 @@ Covers:
 - threshold check (no trigger below)
 - tail-append semantics (compaction_start + compaction_summary both appended)
 - events_to_compact snapshot is taken before summary append
-- LLM failure → placeholder summary with error field populated
+- LLM failure → raises after appending success=False compaction_summary marker
+  (paired terminator for compaction_start; ignored by EventHistory, see
+  test_event_history.py for the boundary-skip side)
 - no compact_agent → silent skip
 - SSE emission on both start and summary
 - per-agent isolation: compaction_summary is tagged with the triggering agent
@@ -108,6 +110,7 @@ class TestAppendSemantics:
         # Content is prepended with the memory-aid frame, then the raw summary
         assert summary_ev.data["content"].startswith("[Prior conversation has been compacted")
         assert "mocked summary text" in summary_ev.data["content"]
+        assert summary_ev.data["success"] is True
         assert summary_ev.data["error"] is None
         assert summary_ev.data["model"] == "fake-model"
         assert summary_ev.agent_name == "lead_agent"
@@ -175,11 +178,19 @@ class TestAppendSemantics:
         assert summary_ev.agent_name == "search_agent"
 
 
-class TestFailureFallback:
+class TestFailureLoud:
 
-    async def test_llm_failure_appends_placeholder_summary(self):
+    async def test_llm_failure_raises_with_marker_summary(self):
+        """
+        On compact LLM failure, runner appends a success=False compaction_summary
+        (paired terminator for compaction_start so the event stream stays well-formed)
+        then re-raises. Engine catches the exception and marks the turn ERROR; we
+        do NOT silently insert a placeholder boundary that would erase mid-turn
+        context.
+        """
         agents = {"compact_agent": _FakeAgent()}
-        runner = CompactionRunner(agents, emit=None)
+        emit = AsyncMock()
+        runner = CompactionRunner(agents, emit=emit)
         state = _make_state([
             _ev(StreamEventType.USER_INPUT.value, data={"content": "hi"}),
             _ev(StreamEventType.LLM_COMPLETE.value, data={
@@ -189,16 +200,23 @@ class TestFailureFallback:
 
         with patch("models.llm.astream_with_retry", _fake_stream_raises), \
              patch("core.compaction_runner.config.COMPACTION_TOKEN_THRESHOLD", 100):
-            await runner.maybe_trigger(state, "lead_agent", input_tokens=80, output_tokens=30)
+            with pytest.raises(RuntimeError, match="LLM unreachable"):
+                await runner.maybe_trigger(state, "lead_agent", input_tokens=80, output_tokens=30)
 
-        # Both start and placeholder summary should still be appended
+        # Start + failure-marker summary both appended (paired)
         types = [e.event_type for e in state["events"]]
-        assert StreamEventType.COMPACTION_START.value in types
-        assert StreamEventType.COMPACTION_SUMMARY.value in types
+        assert types[-2] == StreamEventType.COMPACTION_START.value
+        assert types[-1] == StreamEventType.COMPACTION_SUMMARY.value
 
         summary_ev = state["events"][-1]
-        assert "compaction failed" in summary_ev.data["content"].lower()
+        assert summary_ev.data["success"] is False
         assert summary_ev.data["error"] == "LLM unreachable"
+        assert summary_ev.data["content"] == ""
+
+        # SSE emission still happens for the failure marker so UI can show "failed"
+        sse_types = [call.args[0]["type"] for call in emit.call_args_list]
+        assert StreamEventType.COMPACTION_START.value in sse_types
+        assert StreamEventType.COMPACTION_SUMMARY.value in sse_types
 
 
 class TestMissingCompactAgent:

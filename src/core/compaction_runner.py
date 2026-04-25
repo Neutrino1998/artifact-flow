@@ -10,8 +10,11 @@ In-engine compaction — 引擎内同步触发的上下文压缩
   下一轮 load path events 时，这条 compaction_summary 天然出现在历史段的尾部，
   所以下一轮首次 LLM call 的 history 自动就是 [summary, 新 user_input]，不会超窗。
 - 压缩只作用于同一个 agent（按 agent_name 过滤），lead 和 subagent 互不干扰。
-- Compaction LLM 失败时降级为 "占位 summary"，boundary 语义不变，效果等价硬截断，
-  不需要单独的 truncate 兜底路径。
+- Compaction LLM 失败 → append 一个 success=False 的 compaction_summary 配对
+  compaction_start，然后 raise。EventHistory 跳过 success=False 的 summary（既不
+  作 boundary 也不入 messages），由 engine 调用方接住异常把整个 turn 标 ERROR。
+  不引入占位 summary —— 在 turn 中段插入"等价硬截断"会让模型完全失忆刚发生的
+  llm_complete / 即将到达的 tool_result，无法续接。
 """
 
 import asyncio
@@ -101,18 +104,36 @@ class CompactionRunner:
             content, duration_ms, usage = await self._run_compact_llm(
                 events_to_compact, agent_name, compact_agent
             )
-            error: Optional[str] = None
         except asyncio.CancelledError:
             raise
         except Exception as e:
-            # Fallback: compaction_summary 照样 append 到尾部，只是内容变占位符。
-            # EventHistory 右扫左依旧在此断开，之前的 events 在 context 构建中被跳过，
-            # 等价于硬截断。
+            # Append a success=False compaction_summary so compaction_start has a
+            # paired terminator (event stream stays well-formed for replay / UI),
+            # then re-raise. EventHistory ignores success=False summaries entirely
+            # — no boundary, no message — so the next LLM call still sees full
+            # uncompacted history. The engine catches this exception and marks
+            # the turn ERROR; we don't silently continue with a broken context.
             logger.exception(f"Compaction LLM failed for {agent_name}: {e}")
-            content = f"[compaction failed: {e}. Earlier context was truncated.]"
-            duration_ms = 0
-            usage = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
-            error = str(e)
+            failure_data = {
+                "success": False,
+                "content": "",
+                "token_usage": {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0},
+                "duration_ms": 0,
+                "model": compact_agent.model,
+                "error": str(e),
+            }
+            state["events"].append(ExecutionEvent(
+                event_type=StreamEventType.COMPACTION_SUMMARY.value,
+                agent_name=agent_name,
+                data=failure_data,
+                is_historical=False,
+            ))
+            await self._emit_sse(
+                StreamEventType.COMPACTION_SUMMARY.value,
+                agent_name,
+                failure_data,
+            )
+            raise
 
         # Prepend the memory-aid frame so the LLM treats this user-role message
         # as a condensed summary rather than a fresh user prompt.
@@ -122,11 +143,12 @@ class CompactionRunner:
             event_type=StreamEventType.COMPACTION_SUMMARY.value,
             agent_name=agent_name,
             data={
+                "success": True,
                 "content": framed_content,
                 "token_usage": usage,
                 "duration_ms": duration_ms,
                 "model": compact_agent.model,
-                "error": error,
+                "error": None,
             },
             is_historical=False,
         )

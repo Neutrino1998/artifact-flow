@@ -4,7 +4,9 @@ EventHistory — 从 ExecutionEvent 列表构建 LLM messages
 核心语义：
 - 按 agent_name 过滤事件（lead / sub 各看各的）
 - 从右往左扫描，在最近一次"边界"处停：
-  * COMPACTION_SUMMARY：所有 agent 都视为硬边界（此前事件全部由 summary 覆盖）
+  * COMPACTION_SUMMARY with success=True：所有 agent 都视为硬边界
+    （success=False 是 compaction LLM 失败的占位事件，仅用于 start/summary
+     配对 + UI 展示，对历史完全透明 —— 既不作 boundary，也不入 messages）
   * SUBAGENT_INSTRUCTION with fresh_start=True：仅对 subagent 生效（之前 session 隔离）
 - 从边界（含）到末尾的事件转成 messages
 """
@@ -46,10 +48,12 @@ def _find_boundary(events: List[ExecutionEvent], is_subagent: bool) -> int:
     """
     for i in range(len(events) - 1, -1, -1):
         ev = events[i]
+        data = ev.data or {}
         if ev.event_type == StreamEventType.COMPACTION_SUMMARY.value:
-            return i
+            if data.get("success", True):
+                return i
+            continue
         if is_subagent and ev.event_type == StreamEventType.SUBAGENT_INSTRUCTION.value:
-            data = ev.data or {}
             if data.get("fresh_start", False):
                 return i
     return 0
@@ -65,6 +69,8 @@ def _events_to_messages(events: List[ExecutionEvent]) -> List[Dict[str, Any]]:
         et = ev.event_type
 
         if et == StreamEventType.COMPACTION_SUMMARY.value:
+            if not data.get("success", True):
+                continue  # failure marker — paired with compaction_start, ignored by history
             content = data.get("content", "")
             if content:
                 messages.append({"role": "user", "content": content})
