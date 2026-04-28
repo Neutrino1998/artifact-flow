@@ -81,10 +81,15 @@ describe('interleaveFlowItems', () => {
 
 describe('streamStore actions', () => {
   beforeEach(() => {
-    // Reset to a clean baseline before each test
+    // Reset all mutable state — including the snapshot Maps — so tests are
+    // order-independent. Forgetting completedSegments / completedNonAgentBlocks
+    // here would let snapshot entries leak between cases and silently mask
+    // regressions in `snapshotSegments` assertions.
     useStreamStore.setState({
       segments: [],
       nonAgentBlocks: [],
+      completedSegments: new Map(),
+      completedNonAgentBlocks: new Map(),
     });
   });
 
