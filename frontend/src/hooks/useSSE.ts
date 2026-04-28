@@ -72,15 +72,17 @@ export function useSSE() {
         }
         setConversations(list.conversations, list.total, list.has_more);
         clearPendingUpdates();
-        // Refresh artifact data now that flush_all has persisted to DB
+        // Refresh artifact list unconditionally — user may have navigated back
+        // to the list view mid-stream, so `current` being null does NOT mean
+        // the list is irrelevant.
+        api.listArtifacts(conversationId)
+          .then((artList) => setArtifacts(artList.artifacts))
+          .catch(() => {});
+        // Refresh detail only if user is still viewing one.
         const curArtifact = useArtifactStore.getState().current;
         if (curArtifact) {
-          Promise.all([
-            api.getArtifact(conversationId, curArtifact.id),
-            api.listArtifacts(conversationId),
-          ]).then(([artDetail, artList]) => {
+          api.getArtifact(conversationId, curArtifact.id).then((artDetail) => {
             setArtifactCurrent(artDetail);
-            setArtifacts(artList.artifacts);
             setArtifactVersions(artDetail.versions);
             setSelectedVersion(null);
           }).catch(() => {});
@@ -244,6 +246,14 @@ export function useSSE() {
               setArtifactSessionId(sessionId);
               setSelectedVersion(null);
               api.getArtifact(sessionId, artifactId).then((detail) => {
+                // Discard out-of-order responses: the in-memory cache only ever
+                // advances, so a response with current_version <= what we've
+                // already applied was issued before a newer one we kept.
+                const cur = useArtifactStore.getState().current;
+                if (
+                  cur?.id === detail.id &&
+                  cur.current_version > detail.current_version
+                ) return;
                 setArtifactCurrent(detail);
                 setArtifactVersions(detail.versions);
                 setSelectedVersion(null);
