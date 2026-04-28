@@ -3,7 +3,8 @@
 import { useEffect, useCallback } from 'react';
 import { useConversationStore } from '@/stores/conversationStore';
 import { useUIStore } from '@/stores/uiStore';
-import { listConversations, getConversation } from '@/lib/api';
+import { useChat } from '@/hooks/useChat';
+import { listConversations } from '@/lib/api';
 import ConversationItem from './ConversationItem';
 
 export default function ConversationList() {
@@ -13,10 +14,9 @@ export default function ConversationList() {
   const currentId = useConversationStore((s) => s.current?.id);
   const setConversations = useConversationStore((s) => s.setConversations);
   const setListLoading = useConversationStore((s) => s.setListLoading);
-  const setCurrent = useConversationStore((s) => s.setCurrent);
-  const setCurrentLoading = useConversationStore((s) => s.setCurrentLoading);
   const setConversationBrowserVisible = useUIStore((s) => s.setConversationBrowserVisible);
   const setUserManagementVisible = useUIStore((s) => s.setUserManagementVisible);
+  const { switchConversation } = useChat();
 
   const loadConversations = useCallback(async () => {
     setListLoading(true);
@@ -32,20 +32,11 @@ export default function ConversationList() {
 
   const selectConversation = useCallback(
     async (id: string) => {
-      if (id === currentId) return;
       setConversationBrowserVisible(false);
       setUserManagementVisible(false);
-      setCurrentLoading(true);
-      try {
-        const detail = await getConversation(id);
-        setCurrent(detail);
-      } catch (err) {
-        console.error('Failed to load conversation:', err);
-      } finally {
-        setCurrentLoading(false);
-      }
+      await switchConversation(id);
     },
-    [currentId, setCurrent, setCurrentLoading, setConversationBrowserVisible, setUserManagementVisible]
+    [switchConversation, setConversationBrowserVisible, setUserManagementVisible]
   );
 
   useEffect(() => {

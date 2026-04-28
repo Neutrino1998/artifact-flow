@@ -2,10 +2,8 @@
 
 import { useState, useCallback } from 'react';
 import { useUIStore } from '@/stores/uiStore';
-import { useConversationStore } from '@/stores/conversationStore';
-import { useStreamStore } from '@/stores/streamStore';
-import { useArtifactStore } from '@/stores/artifactStore';
 import { useAuthStore } from '@/stores/authStore';
+import { useChat } from '@/hooks/useChat';
 import ConversationList from './ConversationList';
 import AdminConversationList from './AdminConversationList';
 import UserMenu from './UserMenu';
@@ -50,9 +48,6 @@ export default function Sidebar() {
   const sidebarCollapsed = useUIStore((s) => s.sidebarCollapsed);
   const toggleSidebar = useUIStore((s) => s.toggleSidebar);
   const toggleArtifactPanel = useUIStore((s) => s.toggleArtifactPanel);
-  const setCurrent = useConversationStore((s) => s.setCurrent);
-  const reset = useStreamStore((s) => s.reset);
-  const resetArtifacts = useArtifactStore((s) => s.reset);
   const setArtifactPanelVisible = useUIStore((s) => s.setArtifactPanelVisible);
 
   const setConversationBrowserVisible = useUIStore((s) => s.setConversationBrowserVisible);
@@ -63,11 +58,10 @@ export default function Sidebar() {
   const setObservabilityBrowseVisible = useUIStore((s) => s.setObservabilityBrowseVisible);
   const triggerObservabilityRefresh = useUIStore((s) => s.triggerObservabilityRefresh);
   const isAdmin = useAuthStore((s) => s.user?.role === 'admin');
+  const { startNewChat } = useChat();
 
   const handleNewChat = () => {
-    setCurrent(null);
-    reset();
-    resetArtifacts();
+    startNewChat();
     setArtifactPanelVisible(false);
     setConversationBrowserVisible(false);
     setUserManagementVisible(false);

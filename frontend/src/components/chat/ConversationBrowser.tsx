@@ -3,7 +3,8 @@
 import { useState, useCallback, useEffect, useRef, } from 'react';
 import { useConversationStore } from '@/stores/conversationStore';
 import { useUIStore } from '@/stores/uiStore';
-import { listConversations, getConversation, deleteConversation } from '@/lib/api';
+import { useChat } from '@/hooks/useChat';
+import { listConversations, deleteConversation } from '@/lib/api';
 import type { ConversationSummary } from '@/types';
 import ConfirmModal from '@/components/layout/ConfirmModal';
 
@@ -18,10 +19,9 @@ export default function ConversationBrowser() {
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   const currentId = useConversationStore((s) => s.current?.id);
-  const setCurrent = useConversationStore((s) => s.setCurrent);
-  const setCurrentLoading = useConversationStore((s) => s.setCurrentLoading);
   const removeConversation = useConversationStore((s) => s.removeConversation);
   const setConversationBrowserVisible = useUIStore((s) => s.setConversationBrowserVisible);
+  const { switchConversation } = useChat();
 
   const fetchConversations = useCallback(async (searchQuery: string, offset = 0, append = false) => {
     setLoading(true);
@@ -62,17 +62,9 @@ export default function ConversationBrowser() {
   }, [loading, hasMore, query, conversations.length, fetchConversations]);
 
   const handleSelect = useCallback(async (id: string) => {
-    setCurrentLoading(true);
-    try {
-      const detail = await getConversation(id);
-      setCurrent(detail);
-      setConversationBrowserVisible(false);
-    } catch (err) {
-      console.error('Failed to load conversation:', err);
-    } finally {
-      setCurrentLoading(false);
-    }
-  }, [setCurrent, setCurrentLoading, setConversationBrowserVisible]);
+    setConversationBrowserVisible(false);
+    await switchConversation(id);
+  }, [switchConversation, setConversationBrowserVisible]);
 
   const handleDelete = useCallback(async (id: string) => {
     try {

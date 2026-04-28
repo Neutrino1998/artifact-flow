@@ -246,14 +246,15 @@ export function useSSE() {
               setArtifactSessionId(sessionId);
               setSelectedVersion(null);
               api.getArtifact(sessionId, artifactId).then((detail) => {
-                // Discard out-of-order responses: the in-memory cache only ever
-                // advances, so a response with current_version <= what we've
-                // already applied was issued before a newer one we kept.
                 const cur = useArtifactStore.getState().current;
-                if (
-                  cur?.id === detail.id &&
-                  cur.current_version > detail.current_version
-                ) return;
+                // User navigated to a different artifact mid-flight — don't
+                // steal focus back from their newer selection. (cur === null
+                // means panel was on list view; auto-open is intended.)
+                if (cur && cur.id !== detail.id) return;
+                // Out-of-order: same id but older version was issued before a
+                // newer GET we already applied. The in-memory cache only ever
+                // advances, so this check is sound.
+                if (cur && cur.current_version > detail.current_version) return;
                 setArtifactCurrent(detail);
                 setArtifactVersions(detail.versions);
                 setSelectedVersion(null);
@@ -506,5 +507,21 @@ export function useSSE() {
     endStream();
   }, [endStream]);
 
-  return { connect, disconnect };
+  // Open SSE if the backend still has an active execution for this conversation.
+  // Used when the user navigates back to a conversation whose stream we
+  // disconnected on the way out — re-attaches to the live tail instead of
+  // showing a frozen view of the already-loaded historical events.
+  const reconnectIfActive = useCallback(
+    async (conversationId: string) => {
+      try {
+        const active = await api.getActiveStream(conversationId);
+        connect(active.stream_url, conversationId, active.message_id);
+      } catch {
+        // 404 (no active execution) / 410 (stream expired) — nothing live to attach to
+      }
+    },
+    [connect]
+  );
+
+  return { connect, disconnect, reconnectIfActive };
 }

@@ -3,6 +3,7 @@
 import { useCallback } from 'react';
 import { useConversationStore } from '@/stores/conversationStore';
 import { useStreamStore } from '@/stores/streamStore';
+import { useArtifactStore } from '@/stores/artifactStore';
 import { useSSE } from '@/hooks/useSSE';
 import type { ChatRequest } from '@/types';
 import * as api from '@/lib/api';
@@ -11,12 +12,15 @@ export function useChat() {
   const current = useConversationStore((s) => s.current);
   const branchPath = useConversationStore((s) => s.branchPath);
   const setCurrent = useConversationStore((s) => s.setCurrent);
+  const setCurrentLoading = useConversationStore((s) => s.setCurrentLoading);
   const setConversations = useConversationStore((s) => s.setConversations);
   const startStream = useStreamStore((s) => s.startStream);
   const setPendingUserMessage = useStreamStore((s) => s.setPendingUserMessage);
   const setStreamParentId = useStreamStore((s) => s.setStreamParentId);
   const setError = useStreamStore((s) => s.setError);
-  const { connect, disconnect } = useSSE();
+  const resetStream = useStreamStore((s) => s.reset);
+  const resetArtifacts = useArtifactStore((s) => s.reset);
+  const { connect, disconnect, reconnectIfActive } = useSSE();
 
   const isNewConversation = !current;
 
@@ -67,6 +71,40 @@ export function useChat() {
     [current?.id, lastMessageId, startStream, setPendingUserMessage, setStreamParentId, connect, setError]
   );
 
+  // Switch to an existing conversation: tear down the previous conversation's
+  // SSE + in-flight stream/artifact state, load the new conversation's detail,
+  // then re-attach to the live tail if backend execution is still active.
+  // Centralized here so all entry points (sidebar list, search browser) use
+  // the same lifecycle and we don't accumulate background SSE connections.
+  const switchConversation = useCallback(
+    async (id: string) => {
+      if (id === current?.id) return;
+      disconnect();
+      resetStream();
+      resetArtifacts();
+      setCurrentLoading(true);
+      try {
+        const detail = await api.getConversation(id);
+        setCurrent(detail);
+        reconnectIfActive(id);
+      } catch (err) {
+        console.error('Failed to load conversation:', err);
+      } finally {
+        setCurrentLoading(false);
+      }
+    },
+    [current?.id, disconnect, resetStream, resetArtifacts, setCurrentLoading, setCurrent, reconnectIfActive]
+  );
+
+  // Drop into the new-conversation flow: same teardown as switchConversation
+  // but no detail to load, current goes to null.
+  const startNewChat = useCallback(() => {
+    disconnect();
+    resetStream();
+    resetArtifacts();
+    setCurrent(null);
+  }, [disconnect, resetStream, resetArtifacts, setCurrent]);
+
   const refreshConversation = useCallback(
     async (conversationId: string) => {
       try {
@@ -90,6 +128,8 @@ export function useChat() {
 
   return {
     sendMessage,
+    switchConversation,
+    startNewChat,
     disconnect,
     refreshConversation,
     refreshConversationList,
