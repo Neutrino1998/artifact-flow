@@ -389,7 +389,14 @@ class TestToolExecution:
         assert "exploded" in completes[0]["data"]["error"]
 
     async def test_tool_call_parse_error(self):
-        """Malformed tool_call XML → engine should not crash."""
+        """Malformed tool_call XML → engine emits paired TOOL_START + TOOL_COMPLETE.
+
+        Pairing contract: every TOOL_COMPLETE must have a preceding TOOL_START
+        for the same tool. The parser-error branch used to violate this by
+        emitting only TOOL_COMPLETE, which forced live SSE / replay consumers
+        to write orphan-tolerance code. We now require the pair so both
+        consumer paths can rely on the invariant.
+        """
         agent = _FakeAgentConfig(tools={"my_tool": "auto"})
         xml = '<tool_call>some random garbage</tool_call>'
         rounds = [
@@ -404,6 +411,19 @@ class TestToolExecution:
         )
 
         assert result["completed"] is True
+
+        # Parser turns malformed input into ToolCall(name="__malformed__", error=...)
+        starts = [e for e in emitted if e["type"] == "tool_start" and e["data"]["tool"] == "__malformed__"]
+        completes = [e for e in emitted if e["type"] == "tool_complete" and e["data"]["tool"] == "__malformed__"]
+        assert len(starts) == 1, "parser-error path must emit TOOL_START to keep the pairing contract"
+        assert len(completes) == 1
+        assert completes[0]["data"]["success"] is False
+        assert "could not be parsed" in completes[0]["data"]["error"]
+
+        # START must precede COMPLETE in the emit stream
+        start_idx = next(i for i, e in enumerate(emitted) if e["type"] == "tool_start" and e["data"]["tool"] == "__malformed__")
+        complete_idx = next(i for i, e in enumerate(emitted) if e["type"] == "tool_complete" and e["data"]["tool"] == "__malformed__")
+        assert start_idx < complete_idx
 
 
 # ============================================================

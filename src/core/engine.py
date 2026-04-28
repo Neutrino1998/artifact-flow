@@ -417,7 +417,14 @@ async def execute_loop(
                 break
 
             # Parser 返回的解析错误 → 直接反馈给 agent
+            # 配对发 TOOL_START + TOOL_COMPLETE，与 permission-denied / not-allowed
+            # 路径保持一致；让消费者（live SSE / 历史重放）可以无条件假设 START 在
+            # COMPLETE 之前，无需 orphan 兜底。
             if tool_call.error:
+                await _emit(StreamEventType.TOOL_START.value, agent_name, {
+                    "tool": tool_call.name,
+                    "params": tool_call.params,
+                })
                 await _emit(StreamEventType.TOOL_COMPLETE.value, agent_name, {
                     "tool": tool_call.name,
                     "success": False,
