@@ -204,7 +204,10 @@ export function useSSE() {
               : JSON.stringify(data?.result_data ?? data?.result ?? '');
           const durationMs = data?.duration_ms as number | undefined;
 
-          // Find the matching running tool call across all segments
+          // Find the matching running tool call across all segments. The engine
+          // guarantees a paired TOOL_START precedes every TOOL_COMPLETE (see
+          // engine.py _execute_tools), so a missing match means the producer
+          // contract is broken — surface it loudly instead of silently dropping.
           const segments = useStreamStore.getState().segments;
           let runningId: string | undefined;
           for (const seg of segments) {
@@ -216,7 +219,11 @@ export function useSSE() {
               break;
             }
           }
-          if (runningId) {
+          if (!runningId) {
+            console.error(
+              `[useSSE] tool_complete for "${toolName}" with no matching running tool — engine pairing contract violated`
+            );
+          } else {
             updateToolCallInSegment(runningId, {
               status: success ? 'success' : 'error',
               result,

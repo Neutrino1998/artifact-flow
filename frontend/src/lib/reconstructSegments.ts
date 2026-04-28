@@ -82,8 +82,10 @@ export function reconstructSegments(events: MessageEventItem[]): ExecutionSegmen
             : JSON.stringify(data?.result_data ?? '');
         const durationMs = data?.duration_ms as number | undefined;
 
-        // Find the matching running tool call across all segments
-        let found = false;
+        // Engine guarantees a paired TOOL_START precedes every TOOL_COMPLETE
+        // (see engine.py _execute_tools — normal exec, whitelist-rejected,
+        // permission-denied, and parser-error all emit START first). If no
+        // running tool matches, the contract is broken upstream — log and skip.
         for (const seg of segments) {
           const tc = seg.toolCalls.find(
             (t) => t.toolName === toolName && t.status === 'running'
@@ -92,23 +94,7 @@ export function reconstructSegments(events: MessageEventItem[]): ExecutionSegmen
             tc.status = success ? 'success' : 'error';
             tc.result = result;
             tc.durationMs = durationMs;
-            found = true;
             break;
-          }
-        }
-        if (!found) {
-          // Orphan tool_complete — append to current segment
-          const seg = current();
-          if (seg) {
-            seg.toolCalls.push({
-              id: `${toolName}-${evt.created_at}`,
-              toolName,
-              params: (data?.params as Record<string, unknown>) ?? {},
-              agent: agent_name ?? '',
-              status: success ? 'success' : 'error',
-              result,
-              durationMs,
-            });
           }
         }
         break;

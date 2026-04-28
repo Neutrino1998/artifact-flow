@@ -63,26 +63,6 @@ describe('reconstructSegments', () => {
     expect(segs[0].toolCalls[0].result).toBe('timeout');
   });
 
-  test('orphan tool_complete (legacy DB rows pre-engine fix) → appended to current segment', () => {
-    // Backward-compat: the engine now pairs TOOL_START + TOOL_COMPLETE on every
-    // path including parser errors (see engine.py _execute_tools), so new event
-    // streams never produce orphan tool_complete. But MessageEvent rows
-    // persisted before that fix can still surface here on replay — this case
-    // verifies we tolerate them rather than crashing or dropping the failure.
-    // If/when historical rows are migrated away, this case can be deleted.
-    const events = [
-      makeEvent('agent_start', {}, 'lead'),
-      makeEvent('tool_complete', { tool: 'mystery', success: true, result_data: 'ok' }, 'lead'),
-    ];
-    const segs = reconstructSegments(events);
-    expect(segs[0].toolCalls).toHaveLength(1);
-    expect(segs[0].toolCalls[0]).toMatchObject({
-      toolName: 'mystery',
-      status: 'success',
-      result: 'ok',
-    });
-  });
-
   test('llm_complete content with <tool_call> preserves to llmOutput', () => {
     const events = [
       makeEvent('agent_start', {}, 'lead'),
