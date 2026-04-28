@@ -18,7 +18,6 @@ from .artifact import (
     ArtifactListResponse,
     ArtifactResponse,
     ArtifactSummary,
-    VersionListResponse,
     VersionDetailResponse,
     VersionSummary,
 )
@@ -47,7 +46,6 @@ __all__ = [
     "ArtifactListResponse",
     "ArtifactResponse",
     "ArtifactSummary",
-    "VersionListResponse",
     "VersionDetailResponse",
     "VersionSummary",
     # Auth schemas

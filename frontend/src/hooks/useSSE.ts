@@ -231,63 +231,23 @@ export function useSSE() {
             });
           }
 
-          // Auto-open artifact panel and update content on artifact tool completion
+          // Auto-open artifact panel and update content on artifact tool completion.
+          // REST overlays in-memory cache via ArtifactManager.get_active(), so
+          // GET returns the just-written content even before flush_all.
           if (ARTIFACT_TOOLS.has(toolName) && success) {
             setArtifactPanelVisible(true);
             const params = data?.params as Record<string, unknown> | undefined;
-            const metadata = data?.metadata as Record<string, unknown> | undefined;
             const artifactId = params?.id as string | undefined;
             if (artifactId) {
               addPendingUpdate(artifactId);
               const sessionId = conversationId;
               setArtifactSessionId(sessionId);
               setSelectedVersion(null);
-
-              // Use snapshot from metadata if available (write-back: DB not yet updated)
-              const snapshot = metadata?.artifact_snapshot as Record<string, unknown> | undefined;
-              if (snapshot) {
-                const detail = {
-                  id: snapshot.id as string,
-                  session_id: sessionId,
-                  content_type: snapshot.content_type as string,
-                  title: snapshot.title as string,
-                  content: snapshot.content as string,
-                  current_version: snapshot.current_version as number,
-                  source: (snapshot.source as string) ?? null,
-                  created_at: new Date().toISOString(),
-                  updated_at: new Date().toISOString(),
-                  versions: [],
-                };
+              api.getArtifact(sessionId, artifactId).then((detail) => {
                 setArtifactCurrent(detail);
-                setArtifactVersions([]);
-
-                // Keep artifacts list in sync so ArtifactList renders correctly
-                const existing = useArtifactStore.getState().artifacts;
-                const summary = {
-                  id: detail.id,
-                  content_type: detail.content_type,
-                  title: detail.title,
-                  current_version: detail.current_version,
-                  source: detail.source,
-                  created_at: detail.created_at,
-                  updated_at: detail.updated_at,
-                };
-                const idx = existing.findIndex((a) => a.id === detail.id);
-                if (idx >= 0) {
-                  const updated = [...existing];
-                  updated[idx] = summary;
-                  setArtifacts(updated);
-                } else {
-                  setArtifacts([...existing, summary]);
-                }
-              } else {
-                // Fallback: fetch from REST API
-                api.getArtifact(sessionId, artifactId).then((detail) => {
-                  setArtifactCurrent(detail);
-                  setArtifactVersions(detail.versions);
-                  setSelectedVersion(null);
-                }).catch(() => {});
-              }
+                setArtifactVersions(detail.versions);
+                setSelectedVersion(null);
+              }).catch(() => {});
             }
           }
           break;

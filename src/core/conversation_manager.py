@@ -101,7 +101,6 @@ class ConversationManager:
                     conversation_id=conv_id,
                     title=None,
                     user_id=user_id,
-                    metadata={}
                 )
             except DuplicateError:
                 logger.debug(f"Conversation {conv_id} already exists")

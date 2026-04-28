@@ -121,14 +121,6 @@ class Conversation(Base):
         nullable=False
     )
 
-    # 扩展元数据
-    metadata_: Mapped[Optional[Dict[str, Any]]] = mapped_column(
-        "metadata",  # 数据库列名
-        JSON,
-        nullable=True,
-        default=dict
-    )
-    
     # 关系：一对多 -> messages
     messages: Mapped[List["Message"]] = relationship(
         "Message",
@@ -194,7 +186,8 @@ class Message(Base):
         nullable=False
     )
 
-    # 扩展元数据（存 always_allowed_tools, execution_metrics 汇总, last_input_tokens）
+    # 扩展元数据（顶层 keys: always_allowed_tools, execution_metrics；
+    # last_input_tokens 嵌在 execution_metrics 内部）
     metadata_: Mapped[Optional[Dict[str, Any]]] = mapped_column(
         "metadata",
         JSON,

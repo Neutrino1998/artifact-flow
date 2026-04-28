@@ -40,7 +40,6 @@ def upgrade() -> None:
         sa.Column('user_id', sa.String(length=64), nullable=True),
         sa.Column('created_at', sa.DateTime(), server_default=sa.func.now(), nullable=False),
         sa.Column('updated_at', sa.DateTime(), server_default=sa.func.now(), nullable=False),
-        sa.Column('metadata', sa.JSON(), nullable=True),
         sa.ForeignKeyConstraint(['user_id'], ['users.id'], ondelete='SET NULL'),
         sa.PrimaryKeyConstraint('id')
     )
@@ -61,8 +60,6 @@ def upgrade() -> None:
         sa.Column('parent_id', sa.String(length=64), nullable=True),
         sa.Column('user_input', sa.Text(), nullable=False),
         sa.Column('response', sa.Text(), nullable=True),
-        sa.Column('user_input_summary', sa.Text(), nullable=True),
-        sa.Column('response_summary', sa.Text(), nullable=True),
         sa.Column('created_at', sa.DateTime(), server_default=sa.func.now(), nullable=False),
         sa.Column('metadata', sa.JSON(), nullable=True),
         sa.ForeignKeyConstraint(['conversation_id'], ['conversations.id'], ondelete='CASCADE'),

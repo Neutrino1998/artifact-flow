@@ -627,21 +627,6 @@ class ArtifactManager:
 
         return memory
 
-    def build_snapshot(self, session_id: str, artifact_id: str) -> Optional[Dict[str, Any]]:
-        """Build an artifact snapshot dict from the in-memory cache for SSE transport."""
-        memory = self._cache.get(session_id, {}).get(artifact_id)
-        if not memory:
-            return None
-        return {
-            "id": memory.id,
-            "session_id": session_id,
-            "content_type": memory.content_type,
-            "title": memory.title,
-            "content": memory.content,
-            "current_version": memory.current_version,
-            "source": memory.source,
-        }
-
     async def update_artifact(
         self,
         session_id: str,
@@ -958,11 +943,9 @@ class CreateArtifactTool(BaseTool):
 
         if success:
             logger.info(message)
-            snapshot = self._manager.build_snapshot(session_id, params["id"])
             return ToolResult(
                 success=True,
                 data=f'<artifact version="1"><id>{params["id"]}</id> {message}</artifact>',
-                metadata={"artifact_snapshot": snapshot} if snapshot else {},
             )
         return ToolResult(success=False, error=message)
 
@@ -1046,9 +1029,6 @@ class UpdateArtifactTool(BaseTool):
                 xml = f'<artifact version="{version}"><id>{params["id"]}</id> {message}</artifact>'
 
             metadata = match_info or {}
-            snapshot = self._manager.build_snapshot(session_id, params["id"])
-            if snapshot:
-                metadata["artifact_snapshot"] = snapshot
             return ToolResult(success=True, data=xml, metadata=metadata)
 
         return ToolResult(success=False, error=message)
@@ -1120,11 +1100,9 @@ class RewriteArtifactTool(BaseTool):
             logger.info(message)
             memory = await self._manager.get_artifact(session_id, params["id"])
             version = memory.current_version if memory else None
-            snapshot = self._manager.build_snapshot(session_id, params["id"])
             return ToolResult(
                 success=True,
                 data=f'<artifact version="{version}"><id>{params["id"]}</id> {message}</artifact>',
-                metadata={"artifact_snapshot": snapshot} if snapshot else {},
             )
 
         return ToolResult(success=False, error=message)

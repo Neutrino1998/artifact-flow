@@ -38,20 +38,18 @@ class ConversationRepository(BaseRepository[Conversation]):
         conversation_id: str,
         title: Optional[str] = None,
         user_id: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None
     ) -> Conversation:
         """
         创建新对话（同时创建关联的 ArtifactSession）
-        
+
         Args:
             conversation_id: 对话ID
             title: 对话标题
             user_id: 用户ID（预留）
-            metadata: 扩展元数据
-            
+
         Returns:
             创建的对话对象
-            
+
         Raises:
             DuplicateError: 对话ID已存在
         """
@@ -59,13 +57,12 @@ class ConversationRepository(BaseRepository[Conversation]):
         existing = await self.get_by_id(conversation_id)
         if existing:
             raise DuplicateError("Conversation", conversation_id)
-        
+
         # 创建对话
         conversation = Conversation(
             id=conversation_id,
             title=title,
             user_id=user_id,
-            metadata_=metadata or {}
         )
         
         # 同时创建关联的 ArtifactSession

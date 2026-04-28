@@ -45,13 +45,6 @@ class VersionDetailResponse(BaseModel):
     created_at: datetime = Field(..., description="Version creation time")
 
 
-class VersionListResponse(BaseModel):
-    """GET /api/v1/artifacts/{session_id}/{artifact_id}/versions response"""
-    artifact_id: str = Field(..., description="Artifact ID")
-    session_id: str = Field(..., description="Session ID")
-    versions: List[VersionSummary] = Field(..., description="Version list")
-
-
 class ArtifactResponse(BaseModel):
     """GET /api/v1/artifacts/{session_id}/{artifact_id} response"""
     id: str = Field(..., description="Artifact ID")
