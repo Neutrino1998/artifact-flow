@@ -1016,6 +1016,13 @@ export interface components {
              * @description Child message IDs
              */
             children: string[];
+            /**
+             * Execution Metrics
+             * @description Turn-level metrics from Message.metadata_['execution_metrics']: started_at, completed_at, total_duration_ms, total_token_usage, etc.
+             */
+            execution_metrics: {
+                [key: string]: unknown;
+            } | null;
         };
         /**
          * ResumeRequest

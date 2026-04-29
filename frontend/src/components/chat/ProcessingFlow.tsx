@@ -8,10 +8,21 @@ interface ProcessingFlowProps {
   isActive: boolean;
   defaultExpanded: boolean;
   hasError?: boolean;
+  /** Total turn duration in ms; only shown when not active. */
+  totalDurationMs?: number | null;
   children: React.ReactNode;
 }
 
-function ProcessingFlow({ agentStepCount, isActive, defaultExpanded, hasError, children }: ProcessingFlowProps) {
+function formatDuration(ms: number): string {
+  if (ms < 1000) return `${ms}ms`;
+  const s = ms / 1000;
+  if (s < 60) return `${s.toFixed(1)}s`;
+  const m = Math.floor(s / 60);
+  const rem = s - m * 60;
+  return `${m}m ${rem.toFixed(0)}s`;
+}
+
+function ProcessingFlow({ agentStepCount, isActive, defaultExpanded, hasError, totalDurationMs, children }: ProcessingFlowProps) {
   const [expanded, setExpanded] = useState(defaultExpanded);
 
   useEffect(() => {
@@ -62,9 +73,12 @@ function ProcessingFlow({ agentStepCount, isActive, defaultExpanded, hasError, c
           </span>
         )}
 
-        {/* Right side: step count */}
+        {/* Right side: step count + (when finished) total duration */}
         <span className="ml-auto text-text-tertiary dark:text-text-tertiary-dark">
           {agentStepCount} {agentStepCount === 1 ? 'step' : 'steps'}
+          {!isActive && totalDurationMs != null && totalDurationMs > 0 && (
+            <span className="ml-2 font-mono">· {formatDuration(totalDurationMs)}</span>
+          )}
         </span>
       </button>
 

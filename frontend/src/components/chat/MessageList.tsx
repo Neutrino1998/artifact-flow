@@ -53,6 +53,7 @@ export default function MessageList() {
                 <AssistantMessage
                   content={node.response}
                   messageId={node.id}
+                  executionMetrics={node.execution_metrics as { total_duration_ms?: number | null } | null | undefined}
                 />
               )}
             </div>

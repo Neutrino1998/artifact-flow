@@ -12,6 +12,7 @@ export default function StreamingMessage() {
   const isStreaming = useStreamStore((s) => s.isStreaming);
   const nonAgentBlocks = useStreamStore((s) => s.nonAgentBlocks);
   const error = useStreamStore((s) => s.error);
+  const executionMetrics = useStreamStore((s) => s.executionMetrics);
 
   const flowItems = interleaveFlowItems(segments, nonAgentBlocks);
 
@@ -20,7 +21,13 @@ export default function StreamingMessage() {
   const agentStepCount = segments.length;
 
   return (
-    <ProcessingFlow agentStepCount={agentStepCount} isActive={isStreaming} defaultExpanded={true} hasError={!!error}>
+    <ProcessingFlow
+      agentStepCount={agentStepCount}
+      isActive={isStreaming}
+      defaultExpanded={true}
+      hasError={!!error}
+      totalDurationMs={executionMetrics?.total_duration_ms ?? null}
+    >
       {flowItems.map((item) => {
         if (item.kind === 'agent') {
           return (

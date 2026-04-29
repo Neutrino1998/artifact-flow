@@ -67,6 +67,10 @@ class MessageResponse(BaseModel):
     response: Optional[str] = Field(None, description="Assistant response")
     created_at: datetime = Field(..., description="Message creation time")
     children: List[str] = Field(default_factory=list, description="Child message IDs")
+    execution_metrics: Optional[Dict[str, Any]] = Field(
+        None,
+        description="Turn-level metrics from Message.metadata_['execution_metrics']: started_at, completed_at, total_duration_ms, total_token_usage, etc.",
+    )
 
 
 class ConversationSummary(BaseModel):

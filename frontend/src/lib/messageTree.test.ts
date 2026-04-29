@@ -10,6 +10,7 @@ function msg(id: string, parent_id: string | null = null): MessageResponse {
     response: null,
     created_at: '2026-01-01T00:00:00Z',
     children: [],
+    execution_metrics: null,
   };
 }
 

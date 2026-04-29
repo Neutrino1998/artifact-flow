@@ -2188,6 +2188,19 @@
             "type": "array",
             "title": "Children",
             "description": "Child message IDs"
+          },
+          "execution_metrics": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Execution Metrics",
+            "description": "Turn-level metrics from Message.metadata_['execution_metrics']: started_at, completed_at, total_duration_ms, total_token_usage, etc."
           }
         },
         "type": "object",
@@ -2197,7 +2210,8 @@
           "user_input",
           "response",
           "created_at",
-          "children"
+          "children",
+          "execution_metrics"
         ],
         "title": "MessageResponse",
         "description": "Message in conversation detail response"

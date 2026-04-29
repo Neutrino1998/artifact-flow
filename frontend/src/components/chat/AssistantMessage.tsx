@@ -18,9 +18,11 @@ import ProcessingFlow from './ProcessingFlow';
 interface AssistantMessageProps {
   content: string;
   messageId?: string;
+  /** Persisted turn metrics from the message row; shape matches ExecutionMetrics in events.ts. */
+  executionMetrics?: { total_duration_ms?: number | null } | null;
 }
 
-function AssistantMessage({ content, messageId }: AssistantMessageProps) {
+function AssistantMessage({ content, messageId, executionMetrics }: AssistantMessageProps) {
   const [copied, setCopied] = useState(false);
   const completedSegs = useStreamStore(
     (s) => messageId ? s.completedSegments.get(messageId) : undefined
@@ -76,7 +78,12 @@ function AssistantMessage({ content, messageId }: AssistantMessageProps) {
       {/* Completed execution segments (collapsible) */}
       {flowItems && flowItems.length > 0 && (
         <div className="mb-3">
-          <ProcessingFlow agentStepCount={completedSegs?.length ?? 0} isActive={false} defaultExpanded={false}>
+          <ProcessingFlow
+            agentStepCount={completedSegs?.length ?? 0}
+            isActive={false}
+            defaultExpanded={false}
+            totalDurationMs={executionMetrics?.total_duration_ms ?? null}
+          >
             {flowItems.map((item) => {
               if (item.kind === 'agent') {
                 return (

@@ -284,6 +284,7 @@ async def get_conversation(
                     response=msg.response,
                     created_at=msg.created_at,
                     children=children_map.get(msg.id, []),
+                    execution_metrics=(msg.metadata_ or {}).get("execution_metrics"),
                 )
                 for msg in messages
             ],
