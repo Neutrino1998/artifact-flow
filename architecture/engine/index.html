@@ -819,6 +819,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#错误处理end-turn-不等于阻断下一轮-continuation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        错误处理：end turn 不等于阻断下一轮 continuation
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1513,6 +1524,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#错误处理end-turn-不等于阻断下一轮-continuation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        错误处理：end turn 不等于阻断下一轮 continuation
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1940,6 +1962,18 @@
 <li>Compaction 只 append <code>COMPACTION_SUMMARY</code> 事件，绝不改任何 <code>Message.parent_id</code></li>
 <li>分支切换后新分支从父节点的 path 继承历史事件（含已存在的 compaction_summary），互不干扰</li>
 <li>用户可以回溯到任意分支点创建新分支，compaction 不影响这一能力</li>
+</ul>
+<h3 id="错误处理end-turn-不等于阻断下一轮-continuation">错误处理：end turn 不等于阻断下一轮 continuation</h3>
+<p>错误处理基于两个独立判定：</p>
+<ul>
+<li><strong>不可恢复 → end turn（loud fail）</strong>：<code>astream_with_retry</code> 用尽后仍失败、compaction 失败、agent 不存在等 → engine emit ERROR、<code>state["error"]=True</code>、break loop。turn 终止是 loud 的，用户能感知失败并选择 retry / 换思路。</li>
+<li><strong>end turn ≠ 阻断下一轮 continuation</strong>：events 在 <code>controller.post_process</code> 中<strong>无条件 persist</strong>（不论 <code>has_error</code>），失败 turn 的 <code>user_input</code> / <code>llm_complete</code> / <code>tool_complete</code> / 失败标记事件全部入库。下一条 user message 加载 <code>path_events</code> 时天然包含这些事件，<code>EventHistory</code> 跳过 <code>success=False</code> 的边界标记 → LLM 看到"上轮我做到这里、然后是新 user_input"，可以从 left off 处继续。除非用户主动 retry 失败 turn 或开新分支。</li>
+</ul>
+<p>推论（非显然，容易踩坑）：</p>
+<ul>
+<li><strong><code>Message.response</code> 是 display 用的 final response 快照</strong>，跟历史构建完全解耦。历史走 events，<code>Message.response</code> 写什么都不影响下一轮 LLM 的输入。错误时它是错误消息或 <code>"An error occurred..."</code>；不要把已生成的 partial <code>response_content</code> 塞进去 —— partial <code>llm_complete</code>（例如模型刚说"我要 call tool X"就 compaction 失败）不是 final response，写进 <code>Message.response</code> 反而让用户误以为这是答案。</li>
+<li><strong>Tool 异常被 engine 包成 <code>ToolResult(success=False)</code></strong>（<code>engine.py:529-531</code>）而不是 raise，让 LLM 看到失败 result 自行决定下一步 —— 这正是 events-as-truth 的体现，by design，不是"漏 set error"的 bug。</li>
+<li><strong>ERROR 终态事件不进 LLM messages</strong>：<code>EventHistory._events_to_messages</code> 只处理 6 种事件类型（USER_INPUT / SUBAGENT_INSTRUCTION / QUEUED_MESSAGE / LLM_COMPLETE / TOOL_COMPLETE / COMPACTION_SUMMARY），ERROR / COMPLETE / CANCELLED 等终态事件入库但只用于 UI 展示和 replay。所以 controller 把终态升级为 ERROR（如 artifact flush 失败）顶多影响 UI 显示精度，不影响下一轮历史构建。</li>
 </ul>
 
 
