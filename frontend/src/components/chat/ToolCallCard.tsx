@@ -84,8 +84,19 @@ function ToolCallCard({ toolCall }: ToolCallCardProps) {
               <div className="text-text-tertiary dark:text-text-tertiary-dark mb-1">
                 Permission
               </div>
-              <div className="text-text-secondary dark:text-text-secondary-dark">
-                {permission.approved ? 'approved' : 'denied'}
+              <div>
+                <span className={`inline-flex items-center gap-1.5 ${permission.approved ? 'text-status-success' : 'text-status-error'}`}>
+                  {permission.approved ? (
+                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M2.5 6.5 5 9l4.5-6" />
+                    </svg>
+                  ) : (
+                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M3 3l6 6M9 3l-6 6" />
+                    </svg>
+                  )}
+                  {permission.approved ? 'approved' : 'denied'}
+                </span>
                 {permission.reason && (
                   <span className="text-text-tertiary dark:text-text-tertiary-dark"> ({permission.reason})</span>
                 )}
