@@ -13,6 +13,7 @@ import { reconstructSegments, reconstructNonAgentBlocks } from '@/lib/reconstruc
 import AgentSegmentBlock from './AgentSegmentBlock';
 import InjectFlowBlock from './InjectFlowBlock';
 import CompactionFlowBlock from './CompactionFlowBlock';
+import ErrorFlowBlock from './ErrorFlowBlock';
 import ProcessingFlow from './ProcessingFlow';
 
 interface AssistantMessageProps {
@@ -72,6 +73,7 @@ function AssistantMessage({ content, messageId, executionMetrics }: AssistantMes
   const flowItems = (hasSegs || hasBlocks)
     ? interleaveFlowItems(completedSegs ?? [], completedBlocks ?? [])
     : null;
+  const hasError = !!completedBlocks?.some((b) => b.kind === 'error');
 
   return (
     <div className="group relative">
@@ -82,6 +84,7 @@ function AssistantMessage({ content, messageId, executionMetrics }: AssistantMes
             agentStepCount={completedSegs?.length ?? 0}
             isActive={false}
             defaultExpanded={false}
+            hasError={hasError}
             totalDurationMs={executionMetrics?.total_duration_ms ?? null}
           >
             {flowItems.map((item) => {
@@ -101,6 +104,9 @@ function AssistantMessage({ content, messageId, executionMetrics }: AssistantMes
               }
               if (item.kind === 'compaction') {
                 return <CompactionFlowBlock key={item.id} block={item} />;
+              }
+              if (item.kind === 'error') {
+                return <ErrorFlowBlock key={item.id} message={item.error} />;
               }
               return null;
             })}

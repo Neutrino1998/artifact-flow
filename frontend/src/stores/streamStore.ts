@@ -46,7 +46,17 @@ export interface CompactionBlock {
   position: number;
 }
 
-export type NonAgentBlock = InjectBlock | CompactionBlock;
+/** Error event surfaced inline in the flow timeline (replay-only — live path
+ *  uses the standalone streamStore.error / ErrorFlowBlock). */
+export interface ErrorBlock {
+  kind: 'error';
+  id: string;
+  error: string;
+  timestamp: string;
+  position: number;
+}
+
+export type NonAgentBlock = InjectBlock | CompactionBlock | ErrorBlock;
 
 export type FlowItem =
   | { kind: 'agent'; segment: ExecutionSegment; index: number }

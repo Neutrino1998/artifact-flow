@@ -7,7 +7,7 @@ import { useArtifactStore } from '@/stores/artifactStore';
 import { useUIStore } from '@/stores/uiStore';
 import { connectSSE } from '@/lib/sse';
 import { StreamEventType } from '@/types/events';
-import type { SSEEvent } from '@/types/events';
+import type { SSEEvent, LLMCompleteData } from '@/types/events';
 import * as api from '@/lib/api';
 
 const ARTIFACT_TOOLS = new Set([
@@ -140,7 +140,8 @@ export function useSSE() {
         }
 
         case StreamEventType.LLM_COMPLETE: {
-          const finalContent = data?.content as string | undefined;
+          const d = (data ?? {}) as Partial<LLMCompleteData>;
+          const finalContent = d.content;
 
           // Determine the definitive content (from event data or accumulated chunks)
           const segs = useStreamStore.getState().segments;
@@ -154,17 +155,13 @@ export function useSSE() {
             ? { llmOutput: effectiveContent }
             : {};
 
-          const tokenUsage = data?.token_usage as { input_tokens: number; output_tokens: number; total_tokens: number } | undefined;
-          const model = data?.model as string | undefined;
-          const durationMs = data?.duration_ms as number | undefined;
-
           updateCurrentSegment({
             ...(finalContent ? { content: finalContent } : {}),
             isThinking: false,
             ...llmOutputUpdate,
-            ...(tokenUsage ? { tokenUsage } : {}),
-            ...(model ? { model } : {}),
-            ...(durationMs != null ? { llmDurationMs: durationMs } : {}),
+            ...(d.token_usage ? { tokenUsage: d.token_usage } : {}),
+            ...(d.model ? { model: d.model } : {}),
+            ...(d.duration_ms != null ? { llmDurationMs: d.duration_ms } : {}),
           });
           break;
         }

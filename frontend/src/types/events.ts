@@ -41,6 +41,7 @@ export interface MetadataData {
 
 export interface AgentStartData {
   agent: string;
+  system_prompt?: string;
 }
 
 export interface LLMChunkData {
@@ -50,11 +51,10 @@ export interface LLMChunkData {
 
 export interface LLMCompleteData {
   content: string;
-  token_usage?: {
-    input_tokens: number;
-    output_tokens: number;
-    total_tokens: number;
-  };
+  reasoning_content?: string;
+  model?: string;
+  duration_ms?: number;
+  token_usage?: TokenUsage;
 }
 
 export interface AgentCompleteData {

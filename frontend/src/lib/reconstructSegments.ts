@@ -1,6 +1,6 @@
 import type { MessageEventItem } from '@/lib/api';
 import type { ExecutionSegment, ToolCallInfo, NonAgentBlock, CompactionBlock } from '@/stores/streamStore';
-import type { TokenUsage } from '@/types/events';
+import type { TokenUsage, LLMCompleteData } from '@/types/events';
 
 /**
  * Reconstruct ExecutionSegment[] from persisted MessageEvent records.
@@ -34,22 +34,19 @@ export function reconstructSegments(events: MessageEventItem[]): ExecutionSegmen
       case 'llm_complete': {
         const seg = current();
         if (!seg) break;
-        const content = (data?.content as string) ?? '';
+        const d = (data ?? {}) as Partial<LLMCompleteData>;
+        const content = d.content ?? '';
         seg.content = content;
-        const reasoning = (data?.reasoning_content as string) ?? '';
-        if (reasoning) {
-          seg.reasoningContent = reasoning;
+        if (d.reasoning_content) {
+          seg.reasoningContent = d.reasoning_content;
           seg.isThinking = false; // historical — already complete
         }
         if (content.includes('<tool_call>') && !seg.llmOutput) {
           seg.llmOutput = content;
         }
-        const tokenUsage = data?.token_usage as ExecutionSegment['tokenUsage'];
-        if (tokenUsage) seg.tokenUsage = tokenUsage;
-        const model = data?.model as string | undefined;
-        if (model) seg.model = model;
-        const durationMs = data?.duration_ms as number | undefined;
-        if (durationMs != null) seg.llmDurationMs = durationMs;
+        if (d.token_usage) seg.tokenUsage = d.token_usage;
+        if (d.model) seg.model = d.model;
+        if (d.duration_ms != null) seg.llmDurationMs = d.duration_ms;
         break;
       }
 
@@ -157,6 +154,16 @@ export function reconstructNonAgentBlocks(events: MessageEventItem[]): NonAgentB
           input: (data.last_input_tokens as number) ?? 0,
           output: (data.last_output_tokens as number) ?? 0,
         } : undefined,
+        timestamp: evt.created_at,
+        position: agentSegmentCount,
+      });
+    } else if (event_type === 'error') {
+      // Replay path only — live error is rendered standalone via streamStore.error.
+      // Engine emits {error: string, agent?: string} (engine.py:307,576,610,647).
+      blocks.push({
+        kind: 'error',
+        id: `error-${evt.created_at}`,
+        error: (data?.error as string) ?? 'Unknown error',
         timestamp: evt.created_at,
         position: agentSegmentCount,
       });
