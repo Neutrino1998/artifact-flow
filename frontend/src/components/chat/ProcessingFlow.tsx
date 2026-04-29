@@ -15,11 +15,14 @@ interface ProcessingFlowProps {
 
 function formatDuration(ms: number): string {
   if (ms < 1000) return `${ms}ms`;
-  const s = ms / 1000;
-  if (s < 60) return `${s.toFixed(1)}s`;
-  const m = Math.floor(s / 60);
-  const rem = s - m * 60;
-  return `${m}m ${rem.toFixed(0)}s`;
+  const totalSec = Math.floor(ms / 1000);
+  if (totalSec < 60) {
+    const tenths = Math.floor(ms / 100) / 10;
+    return `${tenths.toFixed(1)}s`;
+  }
+  const m = Math.floor(totalSec / 60);
+  const rem = totalSec - m * 60;
+  return `${m}m ${rem}s`;
 }
 
 function ProcessingFlow({ agentStepCount, isActive, defaultExpanded, hasError, totalDurationMs, children }: ProcessingFlowProps) {
