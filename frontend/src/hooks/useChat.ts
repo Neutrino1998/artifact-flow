@@ -14,7 +14,6 @@ export function useChat() {
   const setCurrent = useConversationStore((s) => s.setCurrent);
   const setCurrentLoading = useConversationStore((s) => s.setCurrentLoading);
   const setConversations = useConversationStore((s) => s.setConversations);
-  const startStream = useStreamStore((s) => s.startStream);
   const setPendingUserMessage = useStreamStore((s) => s.setPendingUserMessage);
   const setStreamParentId = useStreamStore((s) => s.setStreamParentId);
   const setError = useStreamStore((s) => s.setError);
@@ -53,9 +52,9 @@ export function useChat() {
         if (parentMessageId !== undefined) {
           setStreamParentId(parentMessageId);
         }
-        startStream(res.stream_url, res.message_id, res.conversation_id);
 
-        // Connect SSE for streaming
+        // connect() now also flips streamStore into streaming state, so
+        // sendMessage no longer needs to call startStream itself.
         connect(res.stream_url, res.conversation_id, res.message_id);
 
         // Refresh sidebar immediately so the new conversation appears
@@ -68,7 +67,7 @@ export function useChat() {
         setError((err as Error).message);
       }
     },
-    [current?.id, lastMessageId, startStream, setPendingUserMessage, setStreamParentId, connect, setError]
+    [current?.id, lastMessageId, setPendingUserMessage, setStreamParentId, connect, setError]
   );
 
   // Switch to an existing conversation: tear down the previous conversation's

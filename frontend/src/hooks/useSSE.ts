@@ -34,6 +34,7 @@ export function useSSE() {
   const snapshotSegments = useStreamStore((s) => s.snapshotSegments);
   const setPermissionRequest = useStreamStore((s) => s.setPermissionRequest);
   const setError = useStreamStore((s) => s.setError);
+  const startStream = useStreamStore((s) => s.startStream);
   const endStream = useStreamStore((s) => s.endStream);
   const pushNonAgentBlock = useStreamStore((s) => s.pushNonAgentBlock);
   const updateNonAgentBlock = useStreamStore((s) => s.updateNonAgentBlock);
@@ -453,10 +454,16 @@ export function useSSE() {
   );
 
   const connect = useCallback(
-    (streamUrl: string, conversationId: string, _messageId: string) => {
+    (streamUrl: string, conversationId: string, messageId: string) => {
       if (_sharedAbortController) {
         _sharedAbortController.abort();
       }
+
+      // Enter streaming state. Centralizing this here (rather than relying on
+      // every caller to call startStream first) ensures the reconnect path
+      // also flips isStreaming/messageId/conversationId, so StreamingMessage
+      // renders, MessageInput shows stop/inject, and permission resume works.
+      startStream(streamUrl, messageId, conversationId);
 
       const controller = new AbortController();
       _sharedAbortController = controller;
@@ -496,7 +503,7 @@ export function useSSE() {
         controller.signal,
       );
     },
-    [handleEvent, setError, endStream, setReconnecting, attemptReconnect],
+    [handleEvent, setError, endStream, setReconnecting, attemptReconnect, startStream],
   );
 
   const disconnect = useCallback(() => {
@@ -515,6 +522,10 @@ export function useSSE() {
     async (conversationId: string) => {
       try {
         const active = await api.getActiveStream(conversationId);
+        // The probe is async and switchConversation can fire several in
+        // quick succession (e.g. B → C). A late-resolving probe for B must
+        // not steal the SSE connection from the now-active C.
+        if (useConversationStore.getState().current?.id !== conversationId) return;
         connect(active.stream_url, conversationId, active.message_id);
       } catch {
         // 404 (no active execution) / 410 (stream expired) — nothing live to attach to
