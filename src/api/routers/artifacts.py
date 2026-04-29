@@ -140,6 +140,7 @@ async def list_artifacts(
                         "title": memory.title,
                         "version": memory.current_version,
                         "source": memory.source,
+                        "original_filename": (memory.metadata or {}).get("original_filename"),
                         "created_at": memory.created_at.isoformat(),
                         "updated_at": memory.updated_at.isoformat(),
                     }
@@ -157,6 +158,7 @@ async def list_artifacts(
                     title=art["title"],
                     current_version=art["version"],
                     source=art.get("source"),
+                    original_filename=art.get("original_filename"),
                     created_at=datetime.fromisoformat(art["created_at"]),
                     updated_at=datetime.fromisoformat(art["updated_at"]),
                 )
@@ -323,6 +325,7 @@ async def get_artifact(
                 "content": memory.content,
                 "version": memory.current_version,
                 "source": memory.source,
+                "original_filename": (memory.metadata or {}).get("original_filename"),
                 "created_at": memory.created_at.isoformat(),
                 "updated_at": memory.updated_at.isoformat(),
             }
@@ -356,6 +359,7 @@ async def get_artifact(
         content=result["content"],
         current_version=current_ver,
         source=result.get("source"),
+        original_filename=result.get("original_filename"),
         created_at=datetime.fromisoformat(result["created_at"]),
         updated_at=datetime.fromisoformat(result["updated_at"]),
         versions=version_summaries,

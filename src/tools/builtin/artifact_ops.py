@@ -693,6 +693,7 @@ class ArtifactManager:
                 "content": memory.content,
                 "version": memory.current_version,
                 "source": memory.source,
+                "original_filename": (memory.metadata or {}).get("original_filename"),
                 "created_at": memory.created_at.isoformat(),
                 "updated_at": memory.updated_at.isoformat()
             }
@@ -837,6 +838,7 @@ class ArtifactManager:
                     "title": art.title,
                     "version": art.current_version,
                     "source": art.source,
+                    "original_filename": (art.metadata_ or {}).get("original_filename"),
                     "created_at": art.created_at.isoformat(),
                     "updated_at": art.updated_at.isoformat(),
                 }
@@ -868,6 +870,7 @@ class ArtifactManager:
             "title": memory.title,
             "version": memory.current_version,
             "source": memory.source,
+            "original_filename": (memory.metadata or {}).get("original_filename"),
             "created_at": memory.created_at.isoformat(),
             "updated_at": memory.updated_at.isoformat(),
         }

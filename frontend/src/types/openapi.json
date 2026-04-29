@@ -1634,6 +1634,18 @@
             "title": "Source",
             "description": "Source (agent, user_upload)"
           },
+          "original_filename": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Original Filename",
+            "description": "For source=user_upload artifacts: the filename the user uploaded. From metadata['original_filename']."
+          },
           "created_at": {
             "type": "string",
             "format": "date-time",
@@ -1664,6 +1676,7 @@
           "content",
           "current_version",
           "source",
+          "original_filename",
           "created_at",
           "updated_at",
           "versions"
@@ -1705,6 +1718,18 @@
             "title": "Source",
             "description": "Source (agent, user_upload)"
           },
+          "original_filename": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Original Filename",
+            "description": "For source=user_upload artifacts: the filename the user uploaded. From metadata['original_filename']."
+          },
           "created_at": {
             "type": "string",
             "format": "date-time",
@@ -1725,6 +1750,7 @@
           "title",
           "current_version",
           "source",
+          "original_filename",
           "created_at",
           "updated_at"
         ],

@@ -9,7 +9,7 @@ interface ToolCallCardProps {
 
 function ToolCallCard({ toolCall }: ToolCallCardProps) {
   const [expanded, setExpanded] = useState(false);
-  const { toolName, agent, status, params, result, durationMs } = toolCall;
+  const { toolName, agent, status, params, result, durationMs, permission } = toolCall;
 
   const statusColor =
     status === 'running'
@@ -75,6 +75,21 @@ function ToolCallCard({ toolCall }: ToolCallCardProps) {
               <pre className="bg-bg dark:bg-bg-dark rounded p-2 overflow-x-auto text-text-secondary dark:text-text-secondary-dark font-mono">
                 {JSON.stringify(params, null, 2)}
               </pre>
+            </div>
+          )}
+
+          {/* Permission — only set for CONFIRM-level tools */}
+          {permission && (
+            <div>
+              <div className="text-text-tertiary dark:text-text-tertiary-dark mb-1">
+                Permission
+              </div>
+              <div className="text-text-secondary dark:text-text-secondary-dark">
+                {permission.approved ? 'approved' : 'denied'}
+                {permission.reason && (
+                  <span className="text-text-tertiary dark:text-text-tertiary-dark"> ({permission.reason})</span>
+                )}
+              </div>
             </div>
           )}
 

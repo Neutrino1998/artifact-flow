@@ -57,6 +57,11 @@ export default function ArtifactList() {
                 <span>{artifact.content_type}</span>
                 <span>v{artifact.current_version}</span>
                 <span>{new Date(artifact.updated_at).toLocaleDateString()}</span>
+                {artifact.original_filename && (
+                  <span className="truncate" title={artifact.original_filename}>
+                    📎 {artifact.original_filename}
+                  </span>
+                )}
               </div>
             </button>
           );

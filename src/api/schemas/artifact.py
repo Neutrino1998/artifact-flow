@@ -20,6 +20,10 @@ class ArtifactSummary(BaseModel):
     title: str = Field(..., description="Artifact title")
     current_version: int = Field(..., description="Current version number")
     source: Optional[str] = Field(None, description="Source (agent, user_upload)")
+    original_filename: Optional[str] = Field(
+        None,
+        description="For source=user_upload artifacts: the filename the user uploaded. From metadata['original_filename'].",
+    )
     created_at: datetime = Field(..., description="Creation time")
     updated_at: datetime = Field(..., description="Last update time")
 
@@ -54,6 +58,10 @@ class ArtifactResponse(BaseModel):
     content: str = Field(..., description="Current version content")
     current_version: int = Field(..., description="Current version number")
     source: Optional[str] = Field(None, description="Source (agent, user_upload)")
+    original_filename: Optional[str] = Field(
+        None,
+        description="For source=user_upload artifacts: the filename the user uploaded. From metadata['original_filename'].",
+    )
     created_at: datetime = Field(..., description="Creation time")
     updated_at: datetime = Field(..., description="Last update time")
     versions: List[VersionSummary] = Field(default_factory=list, description="All version summaries")

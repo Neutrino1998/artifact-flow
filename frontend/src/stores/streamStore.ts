@@ -9,6 +9,10 @@ export interface ToolCallInfo {
   status: 'running' | 'success' | 'error';
   result?: string;
   durationMs?: number;
+  /** Set only for CONFIRM-level tools — the user's response (or timeout).
+   *  Engine emits permission_request → permission_result immediately before
+   *  the tool's own tool_start, so live + replay both pair by time. */
+  permission?: { approved: boolean; reason?: string };
 }
 
 export interface PermissionRequest {

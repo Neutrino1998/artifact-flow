@@ -21,6 +21,12 @@ const ARTIFACT_TOOLS = new Set([
 // operate on the same controller, preventing orphaned SSE connections.
 let _sharedAbortController: AbortController | null = null;
 
+// Most recent permission_result, latched until the next tool_start consumes
+// it. Engine guarantees serial execution, so the immediately-following
+// tool_start is the one this result belongs to (matches reconstructSegments
+// pairing). Cleared on stream start/end via endStream() consumer.
+let _pendingPermissionResult: { approved: boolean; reason?: string } | null = null;
+
 const MAX_RECONNECT_ATTEMPTS = 3;
 const RECONNECT_BASE_DELAY_MS = 1000;
 
@@ -182,12 +188,19 @@ export function useSSE() {
             ? { llmOutput: lastSeg.content }
             : {};
 
+          // Latch a just-resolved permission_result onto this tool call (the
+          // tool the user just approved/denied). Engine emits permission_result
+          // immediately before this tool_start.
+          const permission = _pendingPermissionResult ?? undefined;
+          _pendingPermissionResult = null;
+
           addToolCallToSegment({
             id: `${toolName}-${Date.now()}`,
             toolName,
             params,
             agent,
             status: 'running',
+            ...(permission ? { permission } : {}),
           });
           // Clear streaming content when entering tool phase
           updateCurrentSegment({ content: '', ...preserveLlmOutput });
@@ -269,9 +282,13 @@ export function useSSE() {
           });
           break;
 
-        case StreamEventType.PERMISSION_RESULT:
+        case StreamEventType.PERMISSION_RESULT: {
           setPermissionRequest(null);
+          const approved = (data?.approved as boolean) ?? false;
+          const reason = data?.reason as string | undefined;
+          _pendingPermissionResult = reason ? { approved, reason } : { approved };
           break;
+        }
 
         case StreamEventType.QUEUED_MESSAGE:
           pushNonAgentBlock({
@@ -455,6 +472,9 @@ export function useSSE() {
       if (_sharedAbortController) {
         _sharedAbortController.abort();
       }
+      // Clear any leaked permission latch from a prior stream — the next
+      // tool_start in this stream is unrelated to a previous turn's modal.
+      _pendingPermissionResult = null;
 
       // Enter streaming state. Centralizing this here (rather than relying on
       // every caller to call startStream first) ensures the reconnect path

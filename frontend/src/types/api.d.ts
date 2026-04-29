@@ -654,6 +654,11 @@ export interface components {
              */
             source: string | null;
             /**
+             * Original Filename
+             * @description For source=user_upload artifacts: the filename the user uploaded. From metadata['original_filename'].
+             */
+            original_filename: string | null;
+            /**
              * Created At
              * Format: date-time
              * @description Creation time
@@ -701,6 +706,11 @@ export interface components {
              * @description Source (agent, user_upload)
              */
             source: string | null;
+            /**
+             * Original Filename
+             * @description For source=user_upload artifacts: the filename the user uploaded. From metadata['original_filename'].
+             */
+            original_filename: string | null;
             /**
              * Created At
              * Format: date-time

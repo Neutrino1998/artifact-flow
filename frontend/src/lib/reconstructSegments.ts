@@ -8,6 +8,10 @@ import type { TokenUsage, LLMCompleteData } from '@/types/events';
  */
 export function reconstructSegments(events: MessageEventItem[]): ExecutionSegment[] {
   const segments: ExecutionSegment[] = [];
+  // Latched on permission_result, consumed by the next tool_start. Mirrors
+  // useSSE._pendingPermissionResult — engine emits permission_result
+  // immediately before the relevant tool_start, so serial pairing is correct.
+  let pendingPermission: { approved: boolean; reason?: string } | null = null;
 
   function current(): ExecutionSegment | undefined {
     return segments[segments.length - 1];
@@ -58,14 +62,24 @@ export function reconstructSegments(events: MessageEventItem[]): ExecutionSegmen
         if (seg.content && !seg.llmOutput) {
           seg.llmOutput = seg.content;
         }
+        const permission = pendingPermission ?? undefined;
+        pendingPermission = null;
         seg.toolCalls.push({
           id: `${toolName}-${evt.created_at}`,
           toolName,
           params: (data?.params as Record<string, unknown>) ?? {},
           agent: agent_name ?? '',
           status: 'running',
+          ...(permission ? { permission } : {}),
         });
         seg.content = '';
+        break;
+      }
+
+      case 'permission_result': {
+        const approved = (data?.approved as boolean) ?? false;
+        const reason = data?.reason as string | undefined;
+        pendingPermission = reason ? { approved, reason } : { approved };
         break;
       }
 
