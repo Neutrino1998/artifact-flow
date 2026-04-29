@@ -232,7 +232,15 @@ class InMemoryStreamTransport:
                     if eid > cursor:
                         cursor = eid
                         drained_any = True
-                        yield event
+                        # Shallow copy so the SSE router's `event.pop("_stream_id")`
+                        # (and any other consumer mutation) doesn't poison the
+                        # buffered history. Otherwise a later replaying consumer
+                        # would see the same dict with _stream_id missing, and
+                        # the SSE response would drop its `id:` field for that
+                        # event — breaking Last-Event-ID continuity. Redis
+                        # avoids this naturally because each XREAD round-trips
+                        # through JSON; InMemory must copy explicitly.
+                        yield dict(event)
                         if event.get("type", "") in _TERMINAL_EVENTS:
                             logger.debug(
                                 f"Stream {message_id} received terminal event: {event['type']}"

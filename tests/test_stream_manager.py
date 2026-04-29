@@ -402,3 +402,30 @@ class TestReplay:
             events.append(event)
 
         assert [e["type"] for e in events] == ["agent_start", "complete"]
+
+    async def test_consumer_mutation_does_not_poison_history(self):
+        """
+        Regression: SSE router pops _stream_id off each yielded event; if the
+        transport hands out the buffered dict by reference, a second consumer
+        replaying the same history would see _stream_id missing and the SSE
+        response would lose its `id:` field for that event.
+        """
+        sm = InMemoryStreamTransport(ttl_seconds=10)
+        await sm.create_stream("msg-1")
+        await sm.push_event("msg-1", {"type": "agent_start"})
+        await sm.push_event("msg-1", {"type": "complete"})
+
+        # First consumer: simulate router behavior (pop _stream_id)
+        first_pass = []
+        async for event in sm.consume_events("msg-1"):
+            first_pass.append(event.pop("_stream_id", None))
+
+        # Second consumer replays the same history. Each event must still
+        # carry its _stream_id — i.e. the first consumer's pop did not touch
+        # the buffered entry.
+        second_pass = []
+        async for event in sm.consume_events("msg-1"):
+            second_pass.append(event.get("_stream_id"))
+
+        assert first_pass == ["0", "1"]
+        assert second_pass == ["0", "1"]

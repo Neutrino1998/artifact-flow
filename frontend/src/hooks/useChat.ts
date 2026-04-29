@@ -114,14 +114,19 @@ export function useChat() {
   // Drop into the new-conversation flow: same teardown as switchConversation
   // but no detail to load, current goes to null. Bumping _switchGen here
   // invalidates any in-flight switchConversation so its late getConversation
-  // response can't rewrite current back to a stale selection.
+  // response can't rewrite current back to a stale selection. We also clear
+  // currentLoading explicitly: an invalidated switchConversation will skip
+  // its `setCurrentLoading(false)` in finally (gen mismatch), and the new
+  // chat semantically has nothing loading, so this is the right place to
+  // ensure the chat panel doesn't get stuck on the loading placeholder.
   const startNewChat = useCallback(() => {
     _switchGen++;
     disconnect();
     resetStream();
     resetArtifacts();
     setCurrent(null);
-  }, [disconnect, resetStream, resetArtifacts, setCurrent]);
+    setCurrentLoading(false);
+  }, [disconnect, resetStream, resetArtifacts, setCurrent, setCurrentLoading]);
 
   const refreshConversation = useCallback(
     async (conversationId: string) => {
