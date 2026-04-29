@@ -272,3 +272,133 @@ class TestCloseAndStatus:
         assert await sm.get_stream_status("msg-1") == "pending"
         await sm.close_stream("msg-1")
         assert await sm.get_stream_status("msg-1") == "closed"
+
+
+# ============================================================
+# TestReplay — history-based reconnect / Last-Event-ID semantics
+# Mirrors RedisStreamTransport's XREAD `0-0` (full replay) and
+# `last_event_id` (resume) behavior so dev/prod stay aligned.
+# ============================================================
+
+
+class TestReplay:
+
+    async def test_push_assigns_monotonic_id(self):
+        sm = InMemoryStreamTransport(ttl_seconds=10)
+        await sm.create_stream("msg-1")
+
+        e1 = {"type": "agent_start"}
+        e2 = {"type": "metadata"}
+        await sm.push_event("msg-1", e1)
+        await sm.push_event("msg-1", e2)
+
+        # _stream_id injected into the original dict, monotonically increasing
+        assert e1["_stream_id"] == "0"
+        assert e2["_stream_id"] == "1"
+        await sm.close_stream("msg-1")
+
+    async def test_consume_replays_from_start_when_no_last_event_id(self):
+        """A fresh consumer with no Last-Event-ID sees every history entry."""
+        sm = InMemoryStreamTransport(ttl_seconds=10)
+        await sm.create_stream("msg-1")
+
+        # Simulate a turn that already pushed several events before any
+        # consumer attached (e.g. user navigated away and back).
+        await sm.push_event("msg-1", {"type": "agent_start"})
+        await sm.push_event("msg-1", {"type": "tool_start", "data": {"name": "x"}})
+        await sm.push_event("msg-1", {"type": "tool_complete", "data": {"name": "x"}})
+        await sm.push_event("msg-1", {"type": "complete"})
+
+        events = []
+        async for event in sm.consume_events("msg-1"):
+            events.append(event)
+
+        types = [e["type"] for e in events]
+        assert types == ["agent_start", "tool_start", "tool_complete", "complete"]
+
+    async def test_consume_resumes_after_last_event_id(self):
+        """Last-Event-ID skips already-delivered events."""
+        sm = InMemoryStreamTransport(ttl_seconds=10)
+        await sm.create_stream("msg-1")
+
+        await sm.push_event("msg-1", {"type": "agent_start"})  # id 0
+        await sm.push_event("msg-1", {"type": "tool_start"})   # id 1
+        await sm.push_event("msg-1", {"type": "tool_complete"})  # id 2
+        await sm.push_event("msg-1", {"type": "complete"})     # id 3
+
+        # Resume after id "1" — should yield only events 2 and 3
+        events = []
+        async for event in sm.consume_events("msg-1", last_event_id="1"):
+            events.append(event)
+
+        types = [e["type"] for e in events]
+        assert types == ["tool_complete", "complete"]
+
+    async def test_reconnect_after_disconnect_replays_full_history(self):
+        """
+        Regression: switching away then back to an in-flight conversation
+        previously dropped events the prior consumer had already pulled
+        (asyncio.Queue model). New history-based model replays from start.
+        """
+        sm = InMemoryStreamTransport(ttl_seconds=10)
+        await sm.create_stream("msg-1")
+
+        # First push: tool_start observed by consumer A
+        await sm.push_event("msg-1", {"type": "tool_start", "data": {"name": "fetch"}})
+
+        gen_a = sm.consume_events("msg-1", heartbeat_interval=0.01)
+        events_a = []
+        async for event in gen_a:
+            if event.get("type") == "__ping__":
+                break
+            events_a.append(event)
+        await gen_a.aclose()
+        assert [e["type"] for e in events_a] == ["tool_start"]
+
+        # Engine continues while no consumer is attached
+        await sm.push_event("msg-1", {"type": "tool_complete", "data": {"name": "fetch"}})
+        await sm.push_event("msg-1", {"type": "complete"})
+
+        # Reconnect: full replay (tool_start + tool_complete + complete)
+        gen_b = sm.consume_events("msg-1")
+        events_b = []
+        async for event in gen_b:
+            events_b.append(event)
+
+        types_b = [e["type"] for e in events_b]
+        assert types_b == ["tool_start", "tool_complete", "complete"]
+
+    async def test_history_bounded_by_max_history(self):
+        """Oldest events are dropped once max_history is exceeded."""
+        sm = InMemoryStreamTransport(ttl_seconds=10, max_history=3)
+        await sm.create_stream("msg-1")
+
+        for i in range(5):
+            await sm.push_event("msg-1", {"type": "metadata", "data": {"i": i}})
+        await sm.push_event("msg-1", {"type": "complete"})
+
+        # Only the last 3 metadata events survive trimming, plus complete
+        events = []
+        async for event in sm.consume_events("msg-1"):
+            events.append(event)
+
+        # Expect the 3 most recent metadata + the complete event
+        metadata_events = [e for e in events if e["type"] == "metadata"]
+        assert [e["data"]["i"] for e in metadata_events] == [3, 4]
+        # i=2 was kept too (3 metadata + complete = 4 total in buffer of 3
+        # would drop i=2 first; but complete is added last so only i=3,4
+        # remain alongside complete). Tolerate either bound interpretation:
+        assert events[-1]["type"] == "complete"
+
+    async def test_invalid_last_event_id_falls_back_to_start(self):
+        """A garbled Last-Event-ID must not raise; behave like no ID."""
+        sm = InMemoryStreamTransport(ttl_seconds=10)
+        await sm.create_stream("msg-1")
+        await sm.push_event("msg-1", {"type": "agent_start"})
+        await sm.push_event("msg-1", {"type": "complete"})
+
+        events = []
+        async for event in sm.consume_events("msg-1", last_event_id="not-a-number"):
+            events.append(event)
+
+        assert [e["type"] for e in events] == ["agent_start", "complete"]

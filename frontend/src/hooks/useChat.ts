@@ -8,6 +8,13 @@ import { useSSE } from '@/hooks/useSSE';
 import type { ChatRequest } from '@/types';
 import * as api from '@/lib/api';
 
+// Module-level monotonic counter shared across all useChat() instances.
+// switchConversation captures the value at entry; if a later switch (from
+// any component, including startNewChat) bumps the counter while we're
+// awaiting getConversation, the late response is dropped instead of
+// rewriting current/SSE on top of the user's newer selection.
+let _switchGen = 0;
+
 export function useChat() {
   const current = useConversationStore((s) => s.current);
   const branchPath = useConversationStore((s) => s.branchPath);
@@ -78,26 +85,38 @@ export function useChat() {
   const switchConversation = useCallback(
     async (id: string) => {
       if (id === current?.id) return;
+      const myGen = ++_switchGen;
       disconnect();
       resetStream();
       resetArtifacts();
       setCurrentLoading(true);
       try {
         const detail = await api.getConversation(id);
+        // A later switch (or startNewChat) bumped the counter while we were
+        // awaiting — our setCurrent/reconnect would clobber that newer
+        // selection. Bail. setCurrentLoading is also gated on myGen so we
+        // don't race against the latest switch's loading flag.
+        if (myGen !== _switchGen) return;
         setCurrent(detail);
         reconnectIfActive(id);
       } catch (err) {
+        if (myGen !== _switchGen) return;
         console.error('Failed to load conversation:', err);
       } finally {
-        setCurrentLoading(false);
+        if (myGen === _switchGen) {
+          setCurrentLoading(false);
+        }
       }
     },
     [current?.id, disconnect, resetStream, resetArtifacts, setCurrentLoading, setCurrent, reconnectIfActive]
   );
 
   // Drop into the new-conversation flow: same teardown as switchConversation
-  // but no detail to load, current goes to null.
+  // but no detail to load, current goes to null. Bumping _switchGen here
+  // invalidates any in-flight switchConversation so its late getConversation
+  // response can't rewrite current back to a stale selection.
   const startNewChat = useCallback(() => {
+    _switchGen++;
     disconnect();
     resetStream();
     resetArtifacts();
