@@ -165,6 +165,11 @@ export function useSSE() {
             ...(finalContent ? { content: finalContent } : {}),
             isThinking: false,
             ...llmOutputUpdate,
+            // Backfill reasoning when the provider only delivers it on the
+            // final event (no llm_chunk reasoning_content stream). Without
+            // this, live shows blank reasoning while replay can — same gap
+            // as P2 in the reviewer's findings.
+            ...(d.reasoning_content ? { reasoningContent: d.reasoning_content } : {}),
             ...(d.token_usage ? { tokenUsage: d.token_usage } : {}),
             ...(d.model ? { model: d.model } : {}),
             ...(d.duration_ms != null ? { llmDurationMs: d.duration_ms } : {}),
@@ -366,7 +371,20 @@ export function useSSE() {
         }
 
         case StreamEventType.ERROR: {
-          setError(data?.error as string ?? 'Unknown error');
+          const errMsg = (data?.error as string) ?? 'Unknown error';
+          // Push as a flow block FIRST so snapshotSegments captures it into
+          // completedNonAgentBlocks. Without this, AssistantMessage's
+          // lazy-load gate (completedSegs !== undefined → skip refetch)
+          // hides the just-finished failure as a green "Completed" until
+          // the page is reloaded — the live/replay regression P1.
+          pushNonAgentBlock({
+            kind: 'error',
+            id: `error-${event.timestamp}`,
+            error: errMsg,
+            timestamp: event.timestamp,
+            position: useStreamStore.getState().segments.length,
+          });
+          setError(errMsg);
           const errMsgId = useStreamStore.getState().messageId;
           if (errMsgId) {
             snapshotSegments(errMsgId);

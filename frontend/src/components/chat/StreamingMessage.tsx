@@ -46,9 +46,17 @@ export default function StreamingMessage() {
         if (item.kind === 'compaction') {
           return <CompactionFlowBlock key={item.id} block={item} />;
         }
+        if (item.kind === 'error') {
+          return <ErrorFlowBlock key={item.id} message={item.error} />;
+        }
         return null;
       })}
-      {error && <ErrorFlowBlock message={error} />}
+      {/* Standalone fallback for non-event errors (e.g. SSE 401/404 transport
+          failures that never reach the ERROR handler). When ERROR did fire,
+          the block is already in nonAgentBlocks and rendered via interleave. */}
+      {error && !nonAgentBlocks.some((b) => b.kind === 'error') && (
+        <ErrorFlowBlock message={error} />
+      )}
     </ProcessingFlow>
   );
 }
