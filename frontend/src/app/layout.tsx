@@ -5,8 +5,8 @@ import ThemeInitializer from '@/components/ThemeInitializer';
 const themeScript = `(function(){var t=localStorage.getItem('theme');var d=t==='dark'||(t!=='light'&&window.matchMedia('(prefers-color-scheme:dark)').matches);if(d)document.documentElement.classList.add('dark')})()`;
 
 export const metadata: Metadata = {
-  title: 'ArtifactFlow',
-  description: 'Multi-agent research system',
+  title: '银清Claw测试版',
+  description: 'powered by deepseek-v4-flash',
 };
 
 export default function RootLayout({

@@ -167,11 +167,11 @@ export default function Sidebar() {
       <div className="flex items-center justify-between px-4 py-3 border-b border-border dark:border-border-dark">
         <div className="min-w-0">
           <h1 className="text-lg font-semibold text-text-primary dark:text-text-primary-dark">
-            {inObservability ? '运行监控' : 'ArtifactFlow'}
+            {inObservability ? '运行监控' : '银清Claw测试版'}
           </h1>
           {!inObservability && (
             <p className="text-xs text-text-secondary dark:text-text-secondary-dark">
-              多智能体任务工作台
+              powered by deepseek-v4-flash
             </p>
           )}
         </div>
