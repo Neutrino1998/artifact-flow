@@ -32,9 +32,12 @@ export default function LoginPage() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-bg dark:bg-bg-dark">
       <div className="w-full max-w-sm rounded-card bg-surface dark:bg-surface-dark p-8 shadow-modal">
-        <h1 className="mb-6 text-center text-3xl font-semibold font-serif text-text-primary dark:text-text-primary-dark">
+        <h1 className="text-center text-3xl font-semibold font-serif text-text-primary dark:text-text-primary-dark">
           ArtifactFlow
         </h1>
+        <p className="mb-6 mt-1 text-center text-sm text-text-secondary dark:text-text-secondary-dark">
+          多智能体任务工作台
+        </p>
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>

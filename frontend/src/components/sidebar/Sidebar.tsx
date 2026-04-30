@@ -165,9 +165,16 @@ export default function Sidebar() {
     <div className="flex flex-col h-full bg-panel-accent dark:bg-panel-dark">
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-border dark:border-border-dark">
-        <h1 className="text-lg font-semibold text-text-primary dark:text-text-primary-dark">
-          {inObservability ? '运行监控' : 'ArtifactFlow'}
-        </h1>
+        <div className="min-w-0">
+          <h1 className="text-lg font-semibold text-text-primary dark:text-text-primary-dark">
+            {inObservability ? '运行监控' : 'ArtifactFlow'}
+          </h1>
+          {!inObservability && (
+            <p className="text-xs text-text-secondary dark:text-text-secondary-dark">
+              多智能体任务工作台
+            </p>
+          )}
+        </div>
         <button
           onClick={toggleSidebar}
           className="p-1.5 rounded-lg text-text-secondary dark:text-text-secondary-dark hover:bg-bg dark:hover:bg-bg-dark transition-colors"
