@@ -21,6 +21,14 @@ services:
     image: artifactflow:${AF_VERSION:-latest}
     expose:
       - "8000"
+    # Old Docker (≤19.x) on old kernels (CentOS 7 / 3.10) ships a seccomp
+    # profile that blocks rseq, which Debian Trixie's glibc uses inside
+    # pthread_create — backend dies at startup with "can't start new thread"
+    # the moment asyncio touches its threadpool. Disabling seccomp restores
+    # the missing syscalls; on intranet behind a firewall this is acceptable.
+    # Drop this line on Docker 20.10+ where the default profile is current.
+    security_opt:
+      - seccomp:unconfined
     volumes:
       - artifactflow_data:/app/data
       - ../config:/app/config:ro
