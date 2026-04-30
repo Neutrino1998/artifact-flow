@@ -1,0 +1,11 @@
+# ========================================
+# Development / test-only dependencies
+# ========================================
+# Install alongside requirements.txt for local dev:
+#   pip install -r requirements.txt -r requirements-dev.txt
+#
+# NOT installed in production Docker image (Dockerfile only installs requirements.txt).
+
+# Test framework
+pytest>=8.0.0
+pytest-asyncio>=0.23.0

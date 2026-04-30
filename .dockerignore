@@ -50,4 +50,8 @@ docs/
 *.tmp
 *.temp
 *.log
+logs/
 tests/logs/
+
+# Build outputs (mkdocs build dir, not the same as Python `build/` above)
+site/

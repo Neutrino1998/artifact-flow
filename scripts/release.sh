@@ -8,6 +8,7 @@ set -euo pipefail
 VERSION="${1:-$(date +%Y%m%d)}"
 OUTDIR="dist"
 ARCHIVE="$OUTDIR/artifactflow-${VERSION}.tar.gz"
+CONFIG_ARCHIVE="$OUTDIR/artifactflow-config-${VERSION}.tar.gz"
 
 echo "=== ArtifactFlow Release: v${VERSION} ==="
 
@@ -39,15 +40,33 @@ mkdir -p "$OUTDIR"
 echo "Saving images to ${ARCHIVE}..."
 docker save "${IMAGES[@]}" | gzip > "$ARCHIVE"
 
-# Checksum
+# Package config/ separately so operators can ship prompt / model changes
+# without re-transferring the (large) image tarball. The intranet compose
+# bind-mounts ../config:/app/config:ro, so config/ must sit next to deploy/
+# on the target host.
+echo "Packaging config/ to ${CONFIG_ARCHIVE}..."
+tar -czf "$CONFIG_ARCHIVE" config/
+
+# Checksums
 sha256sum "$ARCHIVE" > "${ARCHIVE}.sha256"
+sha256sum "$CONFIG_ARCHIVE" > "${CONFIG_ARCHIVE}.sha256"
 
 echo ""
 echo "=== Release artifacts ==="
-ls -lh "$ARCHIVE" "${ARCHIVE}.sha256"
+ls -lh "$ARCHIVE" "${ARCHIVE}.sha256" "$CONFIG_ARCHIVE" "${CONFIG_ARCHIVE}.sha256"
 echo ""
 echo "To deploy on air-gapped host:"
-echo "  1. Copy ${ARCHIVE} and deploy/ directory to target"
-echo "  2. docker load < ${ARCHIVE}"
-echo "  3. cp deploy/.env.intranet.example deploy/.env && vi deploy/.env"
-echo "  4. AF_VERSION=${VERSION} docker compose -f deploy/docker-compose.intranet.yml --profile infra up -d"
+echo "  1. Copy to /opt/artifactflow/ on target:"
+echo "       ${ARCHIVE}"
+echo "       ${CONFIG_ARCHIVE}"
+echo "       deploy/   (whole directory)"
+echo "  2. cd /opt/artifactflow"
+echo "  3. docker load < $(basename "${ARCHIVE}")"
+echo "  4. tar xzf $(basename "${CONFIG_ARCHIVE}")   # extracts ./config"
+echo "  5. cp deploy/.env.intranet.example deploy/.env && vi deploy/.env"
+echo "  6. AF_VERSION=${VERSION} docker compose -f deploy/docker-compose.intranet.yml --profile infra up -d"
+echo ""
+echo "To ship config-only updates later (no image re-transfer):"
+echo "  scp ${CONFIG_ARCHIVE} target:/opt/artifactflow/"
+echo "  ssh target 'cd /opt/artifactflow && tar xzf $(basename "${CONFIG_ARCHIVE}") \\"
+echo "              && docker compose -f deploy/docker-compose.intranet.yml restart backend'"

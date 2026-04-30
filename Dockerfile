@@ -1,56 +1,58 @@
 # ========================================
-# ArtifactFlow Docker Image
+# ArtifactFlow Docker Image (multi-stage)
 # ========================================
-# 基于 Python 3.10，使用 Jina Reader API 进行网页抓取
-# 无需浏览器依赖，镜像体积 <1GB
+# Stage 1 (builder): installs Python deps into ~/.local
+# Stage 2 (runtime): copies installed deps + adds pandoc/curl
+# Net effect vs single-stage: drops pip cache, build artifacts, and pip's own
+# transitive tooling out of the final image.
 
+# --- Stage 1: builder ---
+FROM python:3.11-slim AS builder
+
+ENV PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+WORKDIR /build
+
+COPY requirements.txt .
+RUN pip install --user --no-warn-script-location -r requirements.txt
+
+# --- Stage 2: runtime ---
 FROM python:3.11-slim
 
 LABEL maintainer="1998neutrino@gmail.com"
 LABEL description="ArtifactFlow - Multi-Agent System"
 
-# 设置工作目录
-WORKDIR /app
-
-# 设置环境变量
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PATH=/root/.local/bin:$PATH
 
-# 安装系统依赖
+# Runtime system deps (pandoc for docx convert, curl for healthcheck)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     pandoc \
     && rm -rf /var/lib/apt/lists/*
 
-# 复制依赖文件（单独复制以利用 Docker 缓存）
-# 只要 requirements.txt 不变，下面的依赖安装层就会使用缓存
-COPY requirements.txt .
+WORKDIR /app
 
-# 安装 Python 依赖
-RUN pip install -r requirements.txt
+# Bring over installed Python deps from builder (~/.local)
+COPY --from=builder /root/.local /root/.local
 
-# 复制源代码
+# Source code
 COPY . .
 
-# 安装项目（editable mode）
-# --no-deps: 依赖已在上面安装，跳过依赖检查
-RUN pip install -e . --no-deps
+# Register the local package (no deps — already installed via builder)
+RUN pip install --user -e . --no-deps
 
-# 创建数据目录
-RUN mkdir -p /app/data
+# Data directory + entrypoint exec bit
+RUN mkdir -p /app/data && chmod +x /app/deploy/entrypoint.sh
 
-# 暴露端口
 EXPOSE 8000
 
-# 健康检查
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:8000/health/live || exit 1
 
-# Auto-migrate entrypoint (skips for SQLite, runs alembic upgrade head for PG/MySQL)
-RUN chmod +x /app/deploy/entrypoint.sh
 ENTRYPOINT ["/app/deploy/entrypoint.sh"]
-
-# 启动命令
 CMD ["python", "run_server.py", "--host", "0.0.0.0", "--port", "8000"]

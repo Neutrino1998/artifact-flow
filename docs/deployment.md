@@ -150,30 +150,67 @@ docker compose -f docker-compose.prod.yml up -d
 ```bash
 ./scripts/release.sh 1.0.0
 # 产出:
-#   dist/artifactflow-1.0.0.tar.gz        (~500MB, 含全部 5 个镜像)
-#   dist/artifactflow-1.0.0.tar.gz.sha256  (校验文件)
+#   dist/artifactflow-1.0.0.tar.gz               (~500MB, 含全部 5 个镜像)
+#   dist/artifactflow-1.0.0.tar.gz.sha256
+#   dist/artifactflow-config-1.0.0.tar.gz        (config/ — agent prompts + models.yaml)
+#   dist/artifactflow-config-1.0.0.tar.gz.sha256
 ```
+
+> **为什么 config 单独打包：** intranet compose 通过 `../config:/app/config:ro` bind mount 让运维直接在宿主机编辑 prompt / 模型配置，重启容器即可生效（不用 rebuild 镜像）。配置变更频率远高于代码变更，单独打包后日常迭代只需传输几十 KB 的 config tar，不必重新拉 ~500MB 镜像 tar。
 
 ### 部署（在目标内网机器上）
 
 ```bash
-# 1. 传输文件到目标机器
-scp dist/artifactflow-1.0.0.tar.gz deploy/ target:/opt/artifactflow/
+# 1. 传输文件到目标机器（镜像 tar + config tar + deploy/ 目录）
+scp dist/artifactflow-1.0.0.tar.gz \
+    dist/artifactflow-config-1.0.0.tar.gz \
+    deploy/ \
+    target:/opt/artifactflow/
 
-# 2. 加载镜像
+# 2. 加载镜像 + 解压 config
+cd /opt/artifactflow
 docker load < artifactflow-1.0.0.tar.gz
+tar xzf artifactflow-config-1.0.0.tar.gz   # 解出 ./config/
 
-# 3. 配置
+# 3. 配置 .env
 cp deploy/.env.intranet.example deploy/.env
 # 编辑 deploy/.env，填写密码和 API Keys
-# 内网 LLM：编辑 config/models/models.yaml，设置 base_url 为内部推理端点
 
-# 4. 启动（3A: 自建基础设施）
+# 4. 配置内网 LLM（如需）
+# 编辑 config/models/models.yaml，设置 base_url 为内部推理端点
+
+# 5. 启动（3A: 自建基础设施）
 AF_VERSION=1.0.0 docker compose -f deploy/docker-compose.intranet.yml --profile infra up -d
 
-# 5. 创建管理员
+# 6. 创建管理员
 docker compose -f deploy/docker-compose.intranet.yml exec backend \
   python scripts/create_admin.py admin --password <your-password>
+```
+
+### 运行时配置变更（无需 rebuild / 重新传镜像）
+
+| 变更类型 | 操作 | 生效命令 |
+|---------|------|---------|
+| `config/agents/*.md`（agent prompt） | 直接编辑宿主机文件 | `docker compose -f deploy/docker-compose.intranet.yml restart backend` |
+| `config/models/models.yaml`（模型 / base_url） | 直接编辑宿主机文件 | 同上 — `restart backend` |
+| `config/tools/*.md`（自定义工具） | 直接编辑宿主机文件 | 同上 — `restart backend` |
+| `deploy/.env`（任何 `ARTIFACTFLOW_*` 变量） | 直接编辑 | **`up -d backend`**（restart 不会重读 .env，up 会检测 env 变化重建容器） |
+| `deploy/nginx.conf` | 直接编辑 | `docker compose -f deploy/docker-compose.intranet.yml restart nginx` |
+| `deploy/docker-compose.intranet.yml`（端口、profile 等） | 直接编辑 | `up -d` |
+
+> **关键区别：** 改 `config/*` 用 `restart`，改 `.env` 用 `up -d`。前者只是把进程重新拉起来读文件，后者要让 compose 重新组装容器才能注入新的环境变量。
+
+### 仅推送 config 更新（不动镜像）
+
+```bash
+# 在构建机上重新打包（或手工 tar）
+tar czf artifactflow-config-1.0.1.tar.gz config/
+
+# 推到内网
+scp artifactflow-config-1.0.1.tar.gz target:/opt/artifactflow/
+ssh target 'cd /opt/artifactflow && \
+            tar xzf artifactflow-config-1.0.1.tar.gz && \
+            docker compose -f deploy/docker-compose.intranet.yml restart backend'
 ```
 
 ---
@@ -230,7 +267,7 @@ docker compose -f deploy/docker-compose.intranet.yml exec backend \
 
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
-| `ARTIFACTFLOW_COMPACTION_TOKEN_THRESHOLD` | `60000` | 单次 LLM 调用 input+output 超此值时，引擎内立即触发 compaction |
+| `ARTIFACTFLOW_COMPACTION_TOKEN_THRESHOLD` | `80000` | 单次 LLM 调用 input+output 超此值时，引擎内立即触发 compaction |
 | `ARTIFACTFLOW_COMPACTION_TIMEOUT` | `120` | 单次 compact LLM 调用的超时（秒） |
 | `ARTIFACTFLOW_INVENTORY_PREVIEW_LENGTH` | `200` | Artifact 清单预览截断长度 |
 

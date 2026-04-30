@@ -12,6 +12,7 @@ services:
       - "8000:8000"
     volumes:
       - artifactflow_data:/app/data
+      - ./config:/app/config:ro
     env_file:
       - .env
     environment:
