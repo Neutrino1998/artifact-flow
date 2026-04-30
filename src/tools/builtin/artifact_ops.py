@@ -1042,14 +1042,14 @@ class UpdateArtifactTool(BaseTool):
   <name>update_artifact</name>
   <params>
     <id><![CDATA[task_plan]]></id>
-    <old_str><![CDATA[1. [✗] Search for recent developments
+    <old_str><![CDATA[1. [✗] Extract content from example.com
    - Status: pending
-   - Assigned: search_agent
+   - Assigned: crawl_agent
    - Notes: N/A]]></old_str>
-    <new_str><![CDATA[1. [✓] Search for recent developments
+    <new_str><![CDATA[1. [✓] Extract content from example.com
    - Status: completed
-   - Assigned: search_agent
-   - Notes: Found 5 key breakthroughs]]></new_str>
+   - Assigned: crawl_agent
+   - Notes: Extracted 3 key sections]]></new_str>
   </params>
 </tool_call>"""
 

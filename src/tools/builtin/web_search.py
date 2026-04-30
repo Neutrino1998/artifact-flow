@@ -34,7 +34,18 @@ class WebSearchTool(BaseTool):
     def __init__(self):
         super().__init__(
             name="web_search",
-            description="Search the web for information using Bocha AI search engine",
+            description=(
+                "Search the web using Bocha AI. Returns ranked results, each with a short "
+                "snippet and a longer text excerpt from the page.\n"
+                "\n"
+                "Query tips:\n"
+                "- If results are weak, try alternative phrasings — broader or narrower terms — before giving up\n"
+                "- Use English for technical/academic topics; local language only for region-specific content\n"
+                "\n"
+                "Prefer authoritative sources (Wikipedia, .edu/.gov, official docs, peer-reviewed, "
+                "established media); check publication dates for fast-moving topics. "
+                "Set `freshness` (oneWeek / oneMonth / ...) when recency matters."
+            ),
             permission=ToolPermission.AUTO
         )
         
@@ -47,8 +58,8 @@ class WebSearchTool(BaseTool):
                 name="query",
                 type="string",
                 description=(
-                    "Search query using keywords."
-                    "Note: Does not support search operators like 'site:', 'AND', 'OR', quotes, or minus signs."
+                    "Search query using natural keywords. "
+                    "Does not support search operators (site:, AND, OR, quotes, minus signs)."
                 ),
                 required=True
             ),
