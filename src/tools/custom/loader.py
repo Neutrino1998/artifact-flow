@@ -134,7 +134,8 @@ def load_custom_tools(tools_dir: Optional[str] = None) -> List[BaseTool]:
     """
     if tools_dir is None:
         # 默认从项目根目录 config/tools/ 加载
-        project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        # __file__ → src/tools/custom/loader.py，向上 4 层取项目根
+        project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
         tools_dir = os.path.join(project_root, "config", "tools")
 
     if not os.path.isdir(tools_dir):

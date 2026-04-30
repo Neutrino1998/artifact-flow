@@ -4,6 +4,7 @@ HttpTool — 从 MD 配置生成的 HTTP API 工具
 继承 BaseTool，将声明式 YAML 配置转化为可执行的 HTTP 调用。
 """
 
+import json
 import httpx
 from typing import Any, Dict, List, Optional
 from dataclasses import dataclass, field
@@ -98,7 +99,15 @@ class HttpTool(BaseTool):
                 # JSONPath 提取
                 if self._response_extract:
                     data = _extract_jsonpath(data, self._response_extract)
-                result_text = str(data)
+                # dict/list → JSON（给 LLM 可读的格式，单引号 repr 容易误导）
+                # 含非序列化类型时回退 str()
+                if isinstance(data, (dict, list)):
+                    try:
+                        result_text = json.dumps(data, ensure_ascii=False)
+                    except (TypeError, ValueError):
+                        result_text = str(data)
+                else:
+                    result_text = "" if data is None else str(data)
             else:
                 result_text = response.text
 
