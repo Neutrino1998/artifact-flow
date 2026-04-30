@@ -1,6 +1,6 @@
 ---
 name: jina_fetch
-description: "Fetch and convert a single URL to Markdown via Jina Reader (proxied through DMZ FastAPI)"
+description: "Fetch a single web page and return its content as clean Markdown."
 type: http
 permission: auto
 endpoint: "http://43.98.84.30:4001/api/jina"
@@ -24,8 +24,17 @@ parameters:
     default: 60
 ---
 
-Fetch a webpage and convert it to clean Markdown via Jina Reader.
+Use this when search snippets / summaries aren't enough and you need the full
+article body — long-form posts, docs, papers, source pages cited by other tools.
 
-Returns the page's Markdown content (title, headings, paragraphs, links). The first
-lines include `Title:` and `URL Source:` for reference. Use this when search
-snippets aren't enough and you need the full article body.
+The response begins with `Title:` and `URL Source:` lines, followed by the
+page rendered as Markdown (headings, paragraphs, lists, links). Output may
+still contain navigation/footer noise — focus on the main content area.
+
+Usage notes:
+- One URL per call. To fetch several pages, issue parallel calls.
+- Heavy SPA / JS-rendered pages may return placeholder text instead of real
+  content; if the result looks empty or says "fallback", try a different URL
+  (e.g. an `m.` mobile mirror, an article-only URL, or a related cached page).
+- Pages can be large — pull only the URLs you actually need, not whole search
+  result lists.

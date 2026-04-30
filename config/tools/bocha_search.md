@@ -1,6 +1,6 @@
 ---
 name: bocha_search
-description: "Search the web via the Bocha gateway (proxied through DMZ FastAPI)"
+description: "Search the web. Returns ranked results, each with a short snippet and a longer text excerpt from the page."
 type: http
 permission: auto
 endpoint: "http://43.98.84.30:4001/api/bocha_search"
@@ -24,9 +24,8 @@ parameters:
     enum: [noLimit, oneDay, oneWeek, oneMonth, oneYear]
 ---
 
-Search the web via the gateway-hosted Bocha AI. Each result item contains
-`url`, `title`, `siteName`, `date`, and a `content` block embedding both
-`<snippet>` (short) and `<summary>` (longer excerpt) tags.
+Each result item carries `url`, `title`, `siteName`, `date`, and a `content` block
+embedding both `<snippet>` (short, ~100 chars) and `<summary>` (longer page excerpt) tags.
 
 Query tips:
 - If results are weak, try alternative phrasings — broader or narrower terms — before giving up
