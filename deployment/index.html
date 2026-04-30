@@ -623,6 +623,28 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#运行时配置变更无需-rebuild--重新传镜像" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        运行时配置变更（无需 rebuild / 重新传镜像）
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#仅推送-config-更新不动镜像" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        仅推送 config 更新（不动镜像）
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1552,6 +1574,28 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#运行时配置变更无需-rebuild--重新传镜像" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        运行时配置变更（无需 rebuild / 重新传镜像）
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#仅推送-config-更新不动镜像" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        仅推送 config 更新（不动镜像）
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1938,27 +1982,94 @@
 <h3 id="构建发布包在有网络的构建机上">构建发布包（在有网络的构建机上）</h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>./scripts/release.sh<span class="w"> </span><span class="m">1</span>.0.0
 <a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="c1"># 产出:</span>
-<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="c1">#   dist/artifactflow-1.0.0.tar.gz        (~500MB, 含全部 5 个镜像)</span>
-<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="c1">#   dist/artifactflow-1.0.0.tar.gz.sha256  (校验文件)</span>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="c1">#   dist/artifactflow-1.0.0.tar.gz               (~500MB, 含全部 5 个镜像)</span>
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="c1">#   dist/artifactflow-1.0.0.tar.gz.sha256</span>
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="c1">#   dist/artifactflow-config-1.0.0.tar.gz        (config/ — agent prompts + models.yaml)</span>
+<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a><span class="c1">#   dist/artifactflow-config-1.0.0.tar.gz.sha256</span>
 </code></pre></div>
+<blockquote>
+<p><strong>为什么 config 单独打包：</strong> intranet compose 通过 <code>../config:/app/config:ro</code> bind mount 让运维直接在宿主机编辑 prompt / 模型配置，重启容器即可生效（不用 rebuild 镜像）。配置变更频率远高于代码变更，单独打包后日常迭代只需传输几十 KB 的 config tar，不必重新拉 ~500MB 镜像 tar。</p>
+</blockquote>
 <h3 id="部署在目标内网机器上">部署（在目标内网机器上）</h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="c1"># 1. 传输文件到目标机器</span>
-<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>scp<span class="w"> </span>dist/artifactflow-1.0.0.tar.gz<span class="w"> </span>deploy/<span class="w"> </span>target:/opt/artifactflow/
-<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>
-<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="c1"># 2. 加载镜像</span>
-<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a>docker<span class="w"> </span>load<span class="w"> </span>&lt;<span class="w"> </span>artifactflow-1.0.0.tar.gz
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="c1"># 1. 传输文件到目标机器（镜像 tar + config tar + deploy/ 目录）</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>scp<span class="w"> </span>dist/artifactflow-1.0.0.tar.gz<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="w">    </span>dist/artifactflow-config-1.0.0.tar.gz<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="w">    </span>deploy/<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a><span class="w">    </span>target:/opt/artifactflow/
 <a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a>
-<a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a><span class="c1"># 3. 配置</span>
-<a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a>cp<span class="w"> </span>deploy/.env.intranet.example<span class="w"> </span>deploy/.env
-<a id="__codelineno-9-9" name="__codelineno-9-9" href="#__codelineno-9-9"></a><span class="c1"># 编辑 deploy/.env，填写密码和 API Keys</span>
-<a id="__codelineno-9-10" name="__codelineno-9-10" href="#__codelineno-9-10"></a><span class="c1"># 内网 LLM：编辑 config/models/models.yaml，设置 base_url 为内部推理端点</span>
+<a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a><span class="c1"># 2. 加载镜像 + 解压 config</span>
+<a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a><span class="nb">cd</span><span class="w"> </span>/opt/artifactflow
+<a id="__codelineno-9-9" name="__codelineno-9-9" href="#__codelineno-9-9"></a>docker<span class="w"> </span>load<span class="w"> </span>&lt;<span class="w"> </span>artifactflow-1.0.0.tar.gz
+<a id="__codelineno-9-10" name="__codelineno-9-10" href="#__codelineno-9-10"></a>tar<span class="w"> </span>xzf<span class="w"> </span>artifactflow-config-1.0.0.tar.gz<span class="w">   </span><span class="c1"># 解出 ./config/</span>
 <a id="__codelineno-9-11" name="__codelineno-9-11" href="#__codelineno-9-11"></a>
-<a id="__codelineno-9-12" name="__codelineno-9-12" href="#__codelineno-9-12"></a><span class="c1"># 4. 启动（3A: 自建基础设施）</span>
-<a id="__codelineno-9-13" name="__codelineno-9-13" href="#__codelineno-9-13"></a><span class="nv">AF_VERSION</span><span class="o">=</span><span class="m">1</span>.0.0<span class="w"> </span>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>deploy/docker-compose.intranet.yml<span class="w"> </span>--profile<span class="w"> </span>infra<span class="w"> </span>up<span class="w"> </span>-d
-<a id="__codelineno-9-14" name="__codelineno-9-14" href="#__codelineno-9-14"></a>
-<a id="__codelineno-9-15" name="__codelineno-9-15" href="#__codelineno-9-15"></a><span class="c1"># 5. 创建管理员</span>
-<a id="__codelineno-9-16" name="__codelineno-9-16" href="#__codelineno-9-16"></a>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>deploy/docker-compose.intranet.yml<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>backend<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-9-17" name="__codelineno-9-17" href="#__codelineno-9-17"></a><span class="w">  </span>python<span class="w"> </span>scripts/create_admin.py<span class="w"> </span>admin<span class="w"> </span>--password<span class="w"> </span>&lt;your-password&gt;
+<a id="__codelineno-9-12" name="__codelineno-9-12" href="#__codelineno-9-12"></a><span class="c1"># 3. 配置 .env</span>
+<a id="__codelineno-9-13" name="__codelineno-9-13" href="#__codelineno-9-13"></a>cp<span class="w"> </span>deploy/.env.intranet.example<span class="w"> </span>deploy/.env
+<a id="__codelineno-9-14" name="__codelineno-9-14" href="#__codelineno-9-14"></a><span class="c1"># 编辑 deploy/.env，填写密码和 API Keys</span>
+<a id="__codelineno-9-15" name="__codelineno-9-15" href="#__codelineno-9-15"></a>
+<a id="__codelineno-9-16" name="__codelineno-9-16" href="#__codelineno-9-16"></a><span class="c1"># 4. 配置内网 LLM（如需）</span>
+<a id="__codelineno-9-17" name="__codelineno-9-17" href="#__codelineno-9-17"></a><span class="c1"># 编辑 config/models/models.yaml，设置 base_url 为内部推理端点</span>
+<a id="__codelineno-9-18" name="__codelineno-9-18" href="#__codelineno-9-18"></a>
+<a id="__codelineno-9-19" name="__codelineno-9-19" href="#__codelineno-9-19"></a><span class="c1"># 5. 启动（3A: 自建基础设施）</span>
+<a id="__codelineno-9-20" name="__codelineno-9-20" href="#__codelineno-9-20"></a><span class="nv">AF_VERSION</span><span class="o">=</span><span class="m">1</span>.0.0<span class="w"> </span>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>deploy/docker-compose.intranet.yml<span class="w"> </span>--profile<span class="w"> </span>infra<span class="w"> </span>up<span class="w"> </span>-d
+<a id="__codelineno-9-21" name="__codelineno-9-21" href="#__codelineno-9-21"></a>
+<a id="__codelineno-9-22" name="__codelineno-9-22" href="#__codelineno-9-22"></a><span class="c1"># 6. 创建管理员</span>
+<a id="__codelineno-9-23" name="__codelineno-9-23" href="#__codelineno-9-23"></a>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>deploy/docker-compose.intranet.yml<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>backend<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-9-24" name="__codelineno-9-24" href="#__codelineno-9-24"></a><span class="w">  </span>python<span class="w"> </span>scripts/create_admin.py<span class="w"> </span>admin<span class="w"> </span>--password<span class="w"> </span>&lt;your-password&gt;
+</code></pre></div>
+<h3 id="运行时配置变更无需-rebuild--重新传镜像">运行时配置变更（无需 rebuild / 重新传镜像）</h3>
+<table>
+<thead>
+<tr>
+<th>变更类型</th>
+<th>操作</th>
+<th>生效命令</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>config/agents/*.md</code>（agent prompt）</td>
+<td>直接编辑宿主机文件</td>
+<td><code>docker compose -f deploy/docker-compose.intranet.yml restart backend</code></td>
+</tr>
+<tr>
+<td><code>config/models/models.yaml</code>（模型 / base_url）</td>
+<td>直接编辑宿主机文件</td>
+<td>同上 — <code>restart backend</code></td>
+</tr>
+<tr>
+<td><code>config/tools/*.md</code>（自定义工具）</td>
+<td>直接编辑宿主机文件</td>
+<td>同上 — <code>restart backend</code></td>
+</tr>
+<tr>
+<td><code>deploy/.env</code>（任何 <code>ARTIFACTFLOW_*</code> 变量）</td>
+<td>直接编辑</td>
+<td><strong><code>up -d backend</code></strong>（restart 不会重读 .env，up 会检测 env 变化重建容器）</td>
+</tr>
+<tr>
+<td><code>deploy/nginx.conf</code></td>
+<td>直接编辑</td>
+<td><code>docker compose -f deploy/docker-compose.intranet.yml restart nginx</code></td>
+</tr>
+<tr>
+<td><code>deploy/docker-compose.intranet.yml</code>（端口、profile 等）</td>
+<td>直接编辑</td>
+<td><code>up -d</code></td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p><strong>关键区别：</strong> 改 <code>config/*</code> 用 <code>restart</code>，改 <code>.env</code> 用 <code>up -d</code>。前者只是把进程重新拉起来读文件，后者要让 compose 重新组装容器才能注入新的环境变量。</p>
+</blockquote>
+<h3 id="仅推送-config-更新不动镜像">仅推送 config 更新（不动镜像）</h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="c1"># 在构建机上重新打包（或手工 tar）</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>tar<span class="w"> </span>czf<span class="w"> </span>artifactflow-config-1.0.1.tar.gz<span class="w"> </span>config/
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="c1"># 推到内网</span>
+<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a>scp<span class="w"> </span>artifactflow-config-1.0.1.tar.gz<span class="w"> </span>target:/opt/artifactflow/
+<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a>ssh<span class="w"> </span>target<span class="w"> </span><span class="s1">&#39;cd /opt/artifactflow &amp;&amp; \</span>
+<a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a><span class="s1">            tar xzf artifactflow-config-1.0.1.tar.gz &amp;&amp; \</span>
+<a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a><span class="s1">            docker compose -f deploy/docker-compose.intranet.yml restart backend&#39;</span>
 </code></pre></div>
 <hr />
 <h2 id="环境变量完整参考">环境变量完整参考</h2>
@@ -2130,7 +2241,7 @@
 <tbody>
 <tr>
 <td><code>ARTIFACTFLOW_COMPACTION_TOKEN_THRESHOLD</code></td>
-<td><code>60000</code></td>
+<td><code>80000</code></td>
 <td>单次 LLM 调用 input+output 超此值时，引擎内立即触发 compaction</td>
 </tr>
 <tr>
@@ -2334,32 +2445,32 @@
 <blockquote>
 <p><strong><code>--profile infra</code> 必须与启动时一致</strong>，否则 PG/Redis 容器不在 Compose 作用域内，<code>down</code> 会跳过它们。</p>
 </blockquote>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="c1"># Mode 1</span>
-<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>docker<span class="w"> </span>compose<span class="w"> </span>down
-<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>
-<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="c1"># Mode 2A（启动时带了 --profile infra，停止也必须带）</span>
-<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>docker-compose.prod.yml<span class="w"> </span>--profile<span class="w"> </span>infra<span class="w"> </span>down
-<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a>
-<a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a><span class="c1"># Mode 2B（无 --profile）</span>
-<a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>docker-compose.prod.yml<span class="w"> </span>down
-<a id="__codelineno-10-9" name="__codelineno-10-9" href="#__codelineno-10-9"></a>
-<a id="__codelineno-10-10" name="__codelineno-10-10" href="#__codelineno-10-10"></a><span class="c1"># Mode 3A</span>
-<a id="__codelineno-10-11" name="__codelineno-10-11" href="#__codelineno-10-11"></a>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>deploy/docker-compose.intranet.yml<span class="w"> </span>--profile<span class="w"> </span>infra<span class="w"> </span>down
-<a id="__codelineno-10-12" name="__codelineno-10-12" href="#__codelineno-10-12"></a>
-<a id="__codelineno-10-13" name="__codelineno-10-13" href="#__codelineno-10-13"></a><span class="c1"># Mode 3B</span>
-<a id="__codelineno-10-14" name="__codelineno-10-14" href="#__codelineno-10-14"></a>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>deploy/docker-compose.intranet.yml<span class="w"> </span>down
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="c1"># Mode 1</span>
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>docker<span class="w"> </span>compose<span class="w"> </span>down
+<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>
+<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="c1"># Mode 2A（启动时带了 --profile infra，停止也必须带）</span>
+<a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>docker-compose.prod.yml<span class="w"> </span>--profile<span class="w"> </span>infra<span class="w"> </span>down
+<a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a>
+<a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a><span class="c1"># Mode 2B（无 --profile）</span>
+<a id="__codelineno-11-8" name="__codelineno-11-8" href="#__codelineno-11-8"></a>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>docker-compose.prod.yml<span class="w"> </span>down
+<a id="__codelineno-11-9" name="__codelineno-11-9" href="#__codelineno-11-9"></a>
+<a id="__codelineno-11-10" name="__codelineno-11-10" href="#__codelineno-11-10"></a><span class="c1"># Mode 3A</span>
+<a id="__codelineno-11-11" name="__codelineno-11-11" href="#__codelineno-11-11"></a>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>deploy/docker-compose.intranet.yml<span class="w"> </span>--profile<span class="w"> </span>infra<span class="w"> </span>down
+<a id="__codelineno-11-12" name="__codelineno-11-12" href="#__codelineno-11-12"></a>
+<a id="__codelineno-11-13" name="__codelineno-11-13" href="#__codelineno-11-13"></a><span class="c1"># Mode 3B</span>
+<a id="__codelineno-11-14" name="__codelineno-11-14" href="#__codelineno-11-14"></a>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>deploy/docker-compose.intranet.yml<span class="w"> </span>down
 </code></pre></div>
 <p>如需同时删除数据卷（<strong>不可逆，会丢失数据库和 Redis 数据</strong>）：</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>docker-compose.prod.yml<span class="w"> </span>--profile<span class="w"> </span>infra<span class="w"> </span>down<span class="w"> </span>-v
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>docker-compose.prod.yml<span class="w"> </span>--profile<span class="w"> </span>infra<span class="w"> </span>down<span class="w"> </span>-v
 </code></pre></div>
 <h3 id="日志">日志</h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="c1"># 查看所有服务日志</span>
-<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>&lt;compose-file&gt;<span class="w"> </span>logs<span class="w"> </span>-f
-<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a>
-<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a><span class="c1"># 单服务日志</span>
-<a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>&lt;compose-file&gt;<span class="w"> </span>logs<span class="w"> </span>-f<span class="w"> </span>backend
-<a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a>
-<a id="__codelineno-12-7" name="__codelineno-12-7" href="#__codelineno-12-7"></a><span class="c1"># 开启 debug 日志：.env 中设置 ARTIFACTFLOW_DEBUG=true</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="c1"># 查看所有服务日志</span>
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>&lt;compose-file&gt;<span class="w"> </span>logs<span class="w"> </span>-f
+<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a>
+<a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a><span class="c1"># 单服务日志</span>
+<a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>&lt;compose-file&gt;<span class="w"> </span>logs<span class="w"> </span>-f<span class="w"> </span>backend
+<a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a>
+<a id="__codelineno-13-7" name="__codelineno-13-7" href="#__codelineno-13-7"></a><span class="c1"># 开启 debug 日志：.env 中设置 ARTIFACTFLOW_DEBUG=true</span>
 </code></pre></div>
 
 
