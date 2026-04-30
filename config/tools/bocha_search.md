@@ -3,7 +3,7 @@ name: bocha_search
 description: "Search the web. Returns ranked results, each with a short snippet and a longer text excerpt from the page."
 type: http
 permission: auto
-endpoint: "http://43.98.84.30:4001/api/bocha_search"
+endpoint: "http://172.22.80.35:4001/api/bocha_search"
 method: POST
 timeout: 30
 parameters:

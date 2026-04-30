@@ -3,7 +3,7 @@ name: jina_fetch
 description: "Fetch a single web page and return its content as clean Markdown."
 type: http
 permission: auto
-endpoint: "http://43.98.84.30:4001/api/jina"
+endpoint: "http://172.22.80.35:4001/api/jina"
 method: POST
 timeout: 60
 response_extract: "$.data"

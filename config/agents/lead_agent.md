@@ -12,7 +12,7 @@ tools:
   read_artifact: auto
   call_subagent: auto
   bocha_search: auto
-model: qwen3.6-plus
+model: deepseek-v4-flash
 max_tool_rounds: 100
 ---
 

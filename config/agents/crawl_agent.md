@@ -7,7 +7,7 @@ description: |
   - IMPORTANT: Instructions must include a specific URL to crawl
 tools:
   jina_fetch: confirm
-model: qwen3.6-plus-no-thinking
+model: deepseek-v4-flash-no-thinking
 max_tool_rounds: 3
 ---
 
