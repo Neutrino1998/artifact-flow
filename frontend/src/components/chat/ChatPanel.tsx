@@ -3,10 +3,8 @@
 import { useState, useCallback } from 'react';
 import { useConversationStore } from '@/stores/conversationStore';
 import { useStreamStore } from '@/stores/streamStore';
-import { useArtifactStore } from '@/stores/artifactStore';
 import { useUIStore } from '@/stores/uiStore';
-import { useArtifacts } from '@/hooks/useArtifacts';
-import { uploadFile, uploadFileNewSession, getConversation, listConversations } from '@/lib/api';
+import { useUpload } from '@/hooks/useUpload';
 import MessageList from './MessageList';
 import MessageInput from './MessageInput';
 import StreamingMessage from './StreamingMessage';
@@ -29,64 +27,19 @@ export default function ChatPanel() {
   const isStreaming = useStreamStore((s) => s.isStreaming);
   const pendingUserMessage = useStreamStore((s) => s.pendingUserMessage);
 
-  const sessionId = useConversationStore((s) => s.current?.session_id);
-  const setCurrent = useConversationStore((s) => s.setCurrent);
-  const setConversations = useConversationStore((s) => s.setConversations);
-  const setUploading = useArtifactStore((s) => s.setUploading);
-  const setUploadError = useArtifactStore((s) => s.setUploadError);
-  const setArtifactPanelVisible = useUIStore((s) => s.setArtifactPanelVisible);
-  const { loadArtifacts, selectArtifact } = useArtifacts();
-
   const conversationBrowserVisible = useUIStore((s) => s.conversationBrowserVisible);
   const userManagementVisible = useUIStore((s) => s.userManagementVisible);
   const observabilityVisible = useUIStore((s) => s.observabilityVisible);
   const isAdmin = useAuthStore((s) => s.user?.role === 'admin');
 
+  const upload = useUpload();
   const [isDragOver, setIsDragOver] = useState(false);
 
   const handleDrop = useCallback(async (e: React.DragEvent) => {
     e.preventDefault();
     setIsDragOver(false);
-
-    const files = Array.from(e.dataTransfer.files);
-    if (files.length === 0) return;
-
-    setUploading(true);
-    setUploadError(null);
-
-    let currentSessionId = sessionId;
-    let lastResultId: string | null = null;
-
-    try {
-      for (const file of files) {
-        let result;
-        if (currentSessionId) {
-          result = await uploadFile(currentSessionId, file);
-        } else {
-          result = await uploadFileNewSession(file);
-          currentSessionId = result.session_id;
-          const [detail, list] = await Promise.all([
-            getConversation(result.session_id),
-            listConversations(20, 0),
-          ]);
-          setCurrent(detail);
-          setConversations(list.conversations, list.total, list.has_more);
-        }
-        lastResultId = result.id;
-      }
-
-      await loadArtifacts();
-      setArtifactPanelVisible(true);
-      if (lastResultId) selectArtifact(lastResultId);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Upload failed';
-      setUploadError(message);
-      window.alert(message);
-      if (lastResultId) await loadArtifacts();
-    } finally {
-      setUploading(false);
-    }
-  }, [sessionId, setUploading, setUploadError, loadArtifacts, setArtifactPanelVisible, selectArtifact, setCurrent, setConversations]);
+    await upload(Array.from(e.dataTransfer.files));
+  }, [upload]);
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
