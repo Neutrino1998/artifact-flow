@@ -6,8 +6,8 @@ import { useStreamStore } from '@/stores/streamStore';
 import { useUIStore } from '@/stores/uiStore';
 import { useArtifactStore } from '@/stores/artifactStore';
 import { useConversationStore } from '@/stores/conversationStore';
-import { uploadFile, uploadFileNewSession, listConversations, getConversation, injectMessage, cancelExecution } from '@/lib/api';
-import { useArtifacts } from '@/hooks/useArtifacts';
+import { injectMessage, cancelExecution } from '@/lib/api';
+import { useUpload } from '@/hooks/useUpload';
 
 export default function MessageInput() {
   const [content, setContent] = useState('');
@@ -18,13 +18,9 @@ export default function MessageInput() {
   const { sendMessage, isNewConversation } = useChat();
   const isStreaming = useStreamStore((s) => s.isStreaming);
   const toggleArtifactPanel = useUIStore((s) => s.toggleArtifactPanel);
-  const setArtifactPanelVisible = useUIStore((s) => s.setArtifactPanelVisible);
 
   const uploading = useArtifactStore((s) => s.uploading);
-  const setUploading = useArtifactStore((s) => s.setUploading);
-  const setUploadError = useArtifactStore((s) => s.setUploadError);
-  const sessionId = useConversationStore((s) => s.current?.session_id);
-  const { loadArtifacts, selectArtifact } = useArtifacts();
+  const upload = useUpload();
 
   // Auto-resize textarea
   useEffect(() => {
@@ -94,58 +90,6 @@ export default function MessageInput() {
     [handleSend]
   );
 
-  const setCurrent = useConversationStore((s) => s.setCurrent);
-  const setConversations = useConversationStore((s) => s.setConversations);
-
-  const handleUploadFiles = useCallback(async (files: File[]) => {
-    if (files.length === 0) return;
-
-    setUploading(true);
-    setUploadError(null);
-
-    let currentSessionId = sessionId;
-    let lastResultId: string | null = null;
-    const total = files.length;
-
-    try {
-      for (let i = 0; i < files.length; i++) {
-        if (total > 1) setUploadProgress({ current: i + 1, total });
-        const file = files[i];
-        let result;
-
-        if (currentSessionId) {
-          result = await uploadFile(currentSessionId, file);
-        } else {
-          // First file with no session — auto-create
-          result = await uploadFileNewSession(file);
-          currentSessionId = result.session_id;
-
-          const [detail, list] = await Promise.all([
-            getConversation(result.session_id),
-            listConversations(20, 0),
-          ]);
-          setCurrent(detail);
-          setConversations(list.conversations, list.total, list.has_more);
-        }
-
-        lastResultId = result.id;
-      }
-
-      await loadArtifacts();
-      setArtifactPanelVisible(true);
-      if (lastResultId) selectArtifact(lastResultId);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Upload failed';
-      setUploadError(message);
-      window.alert(message);
-      // Refresh artifacts for any successful uploads before the error
-      if (lastResultId) await loadArtifacts();
-    } finally {
-      setUploading(false);
-      setUploadProgress(null);
-    }
-  }, [sessionId, setUploading, setUploadError, loadArtifacts, setArtifactPanelVisible, selectArtifact, setCurrent, setConversations]);
-
   const handleFileSelect = useCallback(() => {
     fileInputRef.current?.click();
   }, []);
@@ -153,11 +97,11 @@ export default function MessageInput() {
   const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (files && files.length > 0) {
-      handleUploadFiles(Array.from(files));
+      upload(Array.from(files), { onProgress: setUploadProgress });
     }
     // Reset input so the same files can be selected again
     e.target.value = '';
-  }, [handleUploadFiles]);
+  }, [upload]);
 
   const uploadDisabled = uploading || isStreaming;
 
