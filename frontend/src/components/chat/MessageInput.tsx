@@ -12,7 +12,6 @@ import { useArtifacts } from '@/hooks/useArtifacts';
 export default function MessageInput() {
   const [content, setContent] = useState('');
   const [uploadProgress, setUploadProgress] = useState<{ current: number; total: number } | null>(null);
-  const [dragOver, setDragOver] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const isComposingRef = useRef(false);
@@ -162,42 +161,13 @@ export default function MessageInput() {
 
   const uploadDisabled = uploading || isStreaming;
 
-  const handleDragOver = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    if (!uploadDisabled) setDragOver(true);
-  }, [uploadDisabled]);
-
-  const handleDragLeave = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setDragOver(false);
-  }, []);
-
-  const handleDrop = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setDragOver(false);
-    if (uploadDisabled) return;
-    const files = Array.from(e.dataTransfer.files);
-    if (files.length > 0) handleUploadFiles(files);
-  }, [uploadDisabled, handleUploadFiles]);
-
   return (
     <div className="relative px-4 pt-4 pb-5">
       {/* Gradient fade above input */}
       <div className="absolute inset-x-0 -top-6 h-6 bg-gradient-to-t from-chat dark:from-chat-dark to-transparent pointer-events-none" />
       <div className="max-w-3xl mx-auto">
         <div
-          className={`bg-surface dark:bg-surface-dark border rounded-2xl shadow-float px-4 py-3 transition-colors ${
-            dragOver
-              ? 'border-accent ring-2 ring-accent/30'
-              : 'border-border dark:border-border-dark focus-within:border-accent dark:focus-within:border-accent'
-          }`}
-          onDragOver={handleDragOver}
-          onDragEnter={handleDragOver}
-          onDragLeave={handleDragLeave}
-          onDrop={handleDrop}
+          className="bg-surface dark:bg-surface-dark border border-border dark:border-border-dark focus-within:border-accent dark:focus-within:border-accent rounded-2xl shadow-float px-4 py-3 transition-colors"
         >
           <textarea
             ref={textareaRef}
