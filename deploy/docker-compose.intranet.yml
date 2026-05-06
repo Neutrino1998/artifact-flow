@@ -21,6 +21,7 @@ services:
     image: artifactflow:${AF_VERSION:-latest}
     expose:
       - "8000"
+    mem_limit: 2g
     # Old Docker (≤19.x) on old kernels (CentOS 7 / 3.10) ships a seccomp
     # profile that blocks rseq, which Debian Trixie's glibc uses inside
     # pthread_create — backend dies at startup with "can't start new thread"
@@ -63,6 +64,10 @@ services:
   postgres:
     image: postgres:16-alpine
     profiles: ["infra"]
+    # max_connections sized for backend pool (POOL_SIZE=20 + MAX_OVERFLOW=40 = 60)
+    # plus PG internal workers, alembic, and debug headroom. shared_buffers raised
+    # from 128MB default to fit the larger connection count.
+    command: postgres -c max_connections=200 -c shared_buffers=256MB
     volumes:
       - postgres_data:/var/lib/postgresql/data
     environment:
@@ -79,11 +84,19 @@ services:
   redis:
     image: redis:7-alpine
     profiles: ["infra"]
+    mem_limit: 768m
     volumes:
       - redis_data:/data
+    # noeviction is intentional: lease / interrupt / cancel / queue / stream keys
+    # all carry TTL, so any *keys-lru / volatile-lru policy would evict whole
+    # control-state keys at random — silently killing in-flight tasks (consumer
+    # treats missing lease as producer-lost; cancel/interrupt signals just vanish).
+    # We prefer loud write failure → operator scales up. 512mb sized for 64-way
+    # concurrent execution (peak ~130MB streams + runtime), ~4× headroom over 256mb.
+    # Stream entries are trimmed by XADD MAXLEN, not by eviction policy.
     command: >
       redis-server --appendonly yes --appendfsync everysec
-      --maxmemory 256mb --maxmemory-policy noeviction
+      --maxmemory 512mb --maxmemory-policy noeviction
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
