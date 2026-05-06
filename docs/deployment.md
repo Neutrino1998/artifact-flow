@@ -313,6 +313,70 @@ ssh target 'cd /opt/artifactflow && \
 
 ---
 
+## 容量规划
+
+`src/config.py` 的代码默认值（`MAX_CONCURRENT_TASKS=10`、`DATABASE_POOL_SIZE=5+10`、`REDIS_MAX_CONNECTIONS=50`）在没有特定模型 API 并发预算时是安全起点，但**对于 Mode 2/3 的实际生产部署偏保守** —— 单 backend 只允许 10 个引擎并发，模型 API 配额（如 64 路并行）会被严重浪费。
+
+`deploy/.env.intranet.example` 和 `deploy/.env.prod.example` 已按 64 路模型并发预设了一组推荐值，下面是这组值的依据，便于按你自己的模型 API 配额线性缩放。
+
+### 三个互相绑定的旋钮
+
+```
+模型 API 并发预算 (例 64)
+        │
+        ▼
+ARTIFACTFLOW_MAX_CONCURRENT_TASKS  ← 单 backend 引擎执行 Semaphore (src/api/services/execution_runner.py)
+        │
+        ├─► ARTIFACTFLOW_DATABASE_POOL_SIZE + MAX_OVERFLOW
+        │     单 backend DB 连接上限，每个执行 post-process 期间短暂占 1–2 连接
+        │     建议 ≈ MAX_CONCURRENT_TASKS（含 overflow），余量留给后台任务/调试
+        │
+        └─► ARTIFACTFLOW_REDIS_MAX_CONNECTIONS
+              建议 ≈ 2× MAX_CONCURRENT_TASKS（runtime store + stream consumer + pub/sub）
+```
+
+如果模型 API 并发不是 64，把以上三个值按比例缩放即可。
+
+### Mode A vs Mode B：DB 池的安全边界
+
+模板里 DB 池两行（`POOL_SIZE` / `MAX_OVERFLOW`）**默认是注释掉的**，这是有意的：
+
+| 部署形态 | DB 来源 | `max_connections` 上限 | DB 池处理 |
+|---|---|---|---|
+| Mode 2A / 3A（`--profile infra`） | 捆绑的 `postgres` 容器 | `200`（compose `command:` 显式设置） | **取消注释开启 20+40** —— 60 连接安全 |
+| Mode 2B（云托管 DB） | 外部 RDS / Aurora 等 | 由托管层级决定（小规格 ~85–150） | **保持注释或缩小** —— 否则单 backend 60 连接易打满 |
+| Mode 3B（内部企业 DB，无 `--profile infra`） | 公司内部 DB | 由 DBA 配置 | 同上 —— 由内部 DB 容量决定 |
+
+详见 [`deploy/docker-compose.intranet.yml`](../deploy/docker-compose.intranet.yml) 和 [`docker-compose.prod.yml`](../docker-compose.prod.yml) 中 `postgres` 服务的 `command: postgres -c max_connections=200 -c shared_buffers=256MB`，**这条 patch 仅在 `--profile infra` 启动时生效**。
+
+### Redis 内存预算
+
+Mode A 的 compose 把 Redis `--maxmemory` 从默认 `256mb` 提到 **`512mb`**，并保留 `--maxmemory-policy noeviction`。
+
+**容量估算**（基于实测，单 message 平均 ~500 KB、重负载 ~1 MB）：
+
+| 并发 | 典型峰值 | 重负载峰值 |
+|---|---|---|
+| 10（代码默认） | 5–10 MB | ~10 MB |
+| 64（推荐） | 30–60 MB | ~130 MB |
+
+512 MB 在 64 并发下提供 ~4× 余量。如果你的模型并发 > 64 或自定义工具单条输出可能很大（>100 KB），按比例抬 `maxmemory`。
+
+**为什么是 `noeviction` 而不是 `volatile-lru`**：所有 Redis key（lease / interrupt / cancel / queue / stream / stream_meta）都带 TTL 但承载在飞任务的关键控制状态。Redis 驱逐策略**以 key 为粒度**，LRU 类策略会随机删整个 lease/interrupt key，让 `consume_events` 误判 producer 掉线、cancel/interrupt 信号无声丢失 —— 表现为"任务随机被杀"。`noeviction` 在内存满时**显式写失败**，让运维拿到清晰信号去扩容。Stream 内的 entry 修剪由 `XADD MAXLEN ~ 1000` 在生产端处理，与 maxmemory 策略无关。
+
+### 容器内存上限
+
+两个 compose 文件都加了 `mem_limit`：
+
+| 服务 | `mem_limit` | 说明 |
+|---|---|---|
+| `backend` | `2g` | FastAPI + LiteLLM + ML SDK 进程，避免单 backend OOM 拖整机 |
+| `redis` | `768m` | Redis maxmemory 512m + AOF rewrite/RDB fork 余量 |
+
+Postgres 没设 `mem_limit` 是有意的 —— PG 的 `shared_buffers=256MB` + per-connection `work_mem` 会占用浮动内存，硬上限容易触发 OOM kill；建议在主机层留够 PG 工作集的物理内存。
+
+---
+
 ## 运维参考
 
 ### 数据库迁移
