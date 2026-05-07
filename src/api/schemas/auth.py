@@ -84,3 +84,12 @@ class UserListResponse(BaseModel):
     """GET /api/v1/auth/users response"""
     users: List[UserResponse]
     total: int
+
+
+class UserImpactResponse(BaseModel):
+    """
+    GET /api/v1/auth/users/{id}/impact response
+
+    给前端硬删用户前的二次确认弹窗显示影响数据。
+    """
+    conversation_count: int = Field(..., description="该用户拥有的对话数（CASCADE 删除时一并丢失）")

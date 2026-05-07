@@ -20,6 +20,9 @@ interface UIState {
   conversationBrowserVisible: boolean;
   userManagementVisible: boolean;
   userManagementRightView: UserMgmtRightView;
+  // 列表刷新版本号 — 右面板表单（创建/编辑/删除）成功后 bump，
+  // UserManagementPanel 订阅版本号触发 refetch，避免 prop 钻透
+  userMgmtListVersion: number;
   observabilityVisible: boolean;
   observabilitySelectedConvId: string | null;
   observabilityBrowseVisible: boolean;
@@ -33,6 +36,7 @@ interface UIState {
   setConversationBrowserVisible: (visible: boolean) => void;
   setUserManagementVisible: (visible: boolean) => void;
   setUserManagementRightView: (view: UserMgmtRightView) => void;
+  bumpUserMgmtListVersion: () => void;
   setObservabilityVisible: (visible: boolean) => void;
   setObservabilitySelectedConvId: (id: string | null) => void;
   setObservabilityBrowseVisible: (visible: boolean) => void;
@@ -47,6 +51,7 @@ export const useUIStore = create<UIState>((set) => ({
   conversationBrowserVisible: false,
   userManagementVisible: false,
   userManagementRightView: { type: 'empty' },
+  userMgmtListVersion: 0,
   observabilityVisible: false,
   observabilitySelectedConvId: null,
   observabilityBrowseVisible: false,
@@ -74,6 +79,8 @@ export const useUIStore = create<UIState>((set) => ({
     ...(!visible && { userManagementRightView: { type: 'empty' } }),
   }),
   setUserManagementRightView: (view) => set({ userManagementRightView: view }),
+  bumpUserMgmtListVersion: () =>
+    set((s) => ({ userMgmtListVersion: s.userMgmtListVersion + 1 })),
   setObservabilityVisible: (visible) => set({
     observabilityVisible: visible,
     ...(visible && {

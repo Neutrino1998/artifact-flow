@@ -95,12 +95,53 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /**
+         * Get User
+         * @description 单查用户（Admin） — 给前端编辑表单初始化用
+         */
+        get: operations["get_user_api_v1_auth_users__user_id__get"];
         /**
          * Update User
          * @description 更新用户（仅 Admin）
+         *
+         *     防误锁：admin 不能改自己的 role 或 is_active。配合 DELETE 路径的
+         *     "不能删自己"保护，足以保证系统始终至少有 1 个活跃 admin
+         *     （操作者必然活跃 → 不能动自己 → 至少剩自己）。
          */
         put: operations["update_user_api_v1_auth_users__user_id__put"];
+        post?: never;
+        /**
+         * Delete User
+         * @description 硬删用户（仅 Admin）
+         *
+         *     FK CASCADE 一并删除其所有会话 / messages / events / artifacts。
+         *     若用户当前有正在跑的 engine，被级联删的 conversation 行会被 controller
+         *     post-processing 的 exists() 检查兜住（PR2a），不会撞 FK。
+         *
+         *     保护：admin 不能删自己。配合"不能改自己 role/is_active"，足以保证
+         *     系统始终至少 1 个活跃 admin。
+         */
+        delete: operations["delete_user_api_v1_auth_users__user_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/users/{user_id}/impact": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get User Impact
+         * @description 硬删用户前的影响数据 — 返回会话数。
+         *
+         *     给前端 DangerConfirmModal 显示"将级联删除 N 条会话，操作不可恢复"。
+         */
+        get: operations["get_user_impact_api_v1_auth_users__user_id__impact_get"];
+        put?: never;
         post?: never;
         delete?: never;
         options?: never;
@@ -1177,6 +1218,19 @@ export interface components {
             created_at: string;
         };
         /**
+         * UserImpactResponse
+         * @description GET /api/v1/auth/users/{id}/impact response
+         *
+         *     给前端硬删用户前的二次确认弹窗显示影响数据。
+         */
+        UserImpactResponse: {
+            /**
+             * Conversation Count
+             * @description 该用户拥有的对话数（CASCADE 删除时一并丢失）
+             */
+            conversation_count: number;
+        };
+        /**
          * UserInfo
          * @description User info in responses
          */
@@ -1455,6 +1509,37 @@ export interface operations {
             };
         };
     };
+    get_user_api_v1_auth_users__user_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     update_user_api_v1_auth_users__user_id__put: {
         parameters: {
             query?: never;
@@ -1477,6 +1562,66 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["UserResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_user_api_v1_auth_users__user_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_user_impact_api_v1_auth_users__user_id__impact_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserImpactResponse"];
                 };
             };
             /** @description Validation Error */

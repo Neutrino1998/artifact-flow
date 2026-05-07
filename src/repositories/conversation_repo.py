@@ -213,6 +213,20 @@ class ConversationRepository(BaseRepository[Conversation]):
         result = await self._session.execute(query)
         return list(result.scalars().all())
     
+    async def count_by_user(self, user_id: str) -> int:
+        """
+        统计指定用户拥有的对话数。
+
+        用于硬删用户前的 impact 提示（"将级联删除该用户的 N 条会话"）。
+        与 count_conversations(user_id=...) 行为等价但语义更直接。
+        """
+        result = await self._session.execute(
+            select(func.count())
+            .select_from(Conversation)
+            .where(Conversation.user_id == user_id)
+        )
+        return result.scalar_one()
+
     async def count_conversations(self, *, user_id: Optional[str] = None, title_query: Optional[str] = None) -> int:
         """
         统计对话总数

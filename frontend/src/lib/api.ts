@@ -17,6 +17,7 @@ import type {
   ChangePasswordRequest,
   UserResponse,
   UserListResponse,
+  UserImpactResponse,
   UploadResponse,
 } from '@/types';
 import { useAuthStore } from '@/stores/authStore';
@@ -402,11 +403,23 @@ export function createUser(body: CreateUserRequest) {
   });
 }
 
+export function getUser(userId: string) {
+  return request<UserResponse>(`/api/v1/auth/users/${userId}`);
+}
+
 export function updateUser(userId: string, body: UpdateUserRequest) {
   return request<UserResponse>(`/api/v1/auth/users/${userId}`, {
     method: 'PUT',
     body: JSON.stringify(body),
   });
+}
+
+export function deleteUser(userId: string) {
+  return request<void>(`/api/v1/auth/users/${userId}`, { method: 'DELETE' });
+}
+
+export function getUserImpact(userId: string) {
+  return request<UserImpactResponse>(`/api/v1/auth/users/${userId}/impact`);
 }
 
 export function changeMyPassword(body: ChangePasswordRequest) {

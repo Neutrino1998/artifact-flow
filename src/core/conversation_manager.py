@@ -510,3 +510,14 @@ class ConversationManager:
         """
         repo = self._ensure_repository()
         return await repo.exists(conversation_id)
+
+    async def count_user_conversations(self, user_id: str) -> int:
+        """
+        统计指定用户拥有的对话数。
+
+        用于硬删用户前的 impact 提示（"将级联删除该用户的 N 条会话"）。
+        薄包装 ConversationRepository.count_by_user，维持 router → manager → repo
+        的三层调用边界。
+        """
+        repo = self._ensure_repository()
+        return await repo.count_by_user(user_id)

@@ -72,10 +72,13 @@ class User(Base):
     )
 
     # 关系：一对多 -> conversations
+    # passive_deletes=True：删除 User 时让 DB 的 FK CASCADE 处理子行，
+    # 不让 ORM 预先 SET NULL 或逐行 DELETE 而绕过 CASCADE。
     conversations: Mapped[List["Conversation"]] = relationship(
         "Conversation",
         back_populates="owner",
-        lazy="selectin"
+        lazy="selectin",
+        passive_deletes=True,
     )
 
     def __repr__(self) -> str:
@@ -101,9 +104,12 @@ class Conversation(Base):
     title: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
     
     # 用户ID（认证隔离）
+    # ondelete=CASCADE：硬删用户时连带删除其所有会话（messages / events /
+    # artifacts 通过下一级 CASCADE 自动清理）。内网工具不保留孤儿会话；
+    # 若要保留需走"禁用 (is_active=False)"软删路径。
     user_id: Mapped[Optional[str]] = mapped_column(
         String(64),
-        ForeignKey("users.id", ondelete="SET NULL"),
+        ForeignKey("users.id", ondelete="CASCADE"),
         nullable=True,
         index=True
     )

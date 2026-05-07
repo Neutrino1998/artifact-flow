@@ -41,7 +41,7 @@ def upgrade() -> None:
         sa.Column('user_id', sa.String(length=64), nullable=True),
         sa.Column('created_at', sa.DateTime(), server_default=sa.func.now(), nullable=False),
         sa.Column('updated_at', sa.DateTime(), server_default=sa.func.now(), nullable=False),
-        sa.ForeignKeyConstraint(['user_id'], ['users.id'], ondelete='SET NULL'),
+        sa.ForeignKeyConstraint(['user_id'], ['users.id'], ondelete='CASCADE'),
         sa.PrimaryKeyConstraint('id')
     )
     op.create_index(op.f('ix_conversations_user_id'), 'conversations', ['user_id'], unique=False)

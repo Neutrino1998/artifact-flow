@@ -15,7 +15,12 @@ from uuid import uuid4
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from config import config
-from api.dependencies import get_current_user, require_admin, get_user_repository
+from api.dependencies import (
+    get_current_user,
+    require_admin,
+    get_user_repository,
+    get_conversation_manager,
+)
 from api.schemas.auth import (
     LoginRequest,
     LoginResponse,
@@ -25,6 +30,7 @@ from api.schemas.auth import (
     ChangePasswordRequest,
     UserResponse,
     UserListResponse,
+    UserImpactResponse,
 )
 from api.services.auth import (
     TokenPayload,
@@ -32,6 +38,7 @@ from api.services.auth import (
     verify_password,
     create_access_token,
 )
+from core.conversation_manager import ConversationManager
 from repositories.user_repo import UserRepository
 from db.models import User
 from utils.logger import get_logger
@@ -172,17 +179,67 @@ async def list_users(
     )
 
 
+@router.get("/users/{user_id}", response_model=UserResponse)
+async def get_user(
+    user_id: str,
+    _admin: TokenPayload = Depends(require_admin),
+    user_repo: UserRepository = Depends(get_user_repository),
+):
+    """单查用户（Admin） — 给前端编辑表单初始化用"""
+    user = await user_repo.get_by_id(user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    return UserResponse(
+        id=user.id,
+        username=user.username,
+        display_name=user.display_name,
+        role=user.role,
+        is_active=user.is_active,
+        created_at=user.created_at,
+        updated_at=user.updated_at,
+    )
+
+
+@router.get("/users/{user_id}/impact", response_model=UserImpactResponse)
+async def get_user_impact(
+    user_id: str,
+    _admin: TokenPayload = Depends(require_admin),
+    user_repo: UserRepository = Depends(get_user_repository),
+    conversation_manager: ConversationManager = Depends(get_conversation_manager),
+):
+    """
+    硬删用户前的影响数据 — 返回会话数。
+
+    给前端 DangerConfirmModal 显示"将级联删除 N 条会话，操作不可恢复"。
+    """
+    user = await user_repo.get_by_id(user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    count = await conversation_manager.count_user_conversations(user_id)
+    return UserImpactResponse(conversation_count=count)
+
+
 @router.put("/users/{user_id}", response_model=UserResponse)
 async def update_user(
     user_id: str,
     request: UpdateUserRequest,
-    _admin: TokenPayload = Depends(require_admin),
+    current_user: TokenPayload = Depends(require_admin),
     user_repo: UserRepository = Depends(get_user_repository),
 ):
-    """更新用户（仅 Admin）"""
+    """
+    更新用户（仅 Admin）
+
+    防误锁：admin 不能改自己的 role 或 is_active。配合 DELETE 路径的
+    "不能删自己"保护，足以保证系统始终至少有 1 个活跃 admin
+    （操作者必然活跃 → 不能动自己 → 至少剩自己）。
+    """
     user = await user_repo.get_by_id(user_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
+
+    is_self = user_id == current_user.user_id
 
     if request.display_name is not None:
         user.display_name = request.display_name or None
@@ -193,8 +250,15 @@ async def update_user(
     if request.role is not None:
         if request.role not in ("admin", "user"):
             raise HTTPException(status_code=400, detail="Role must be 'admin' or 'user'")
+        if is_self and request.role != user.role:
+            raise HTTPException(status_code=403, detail="Cannot change your own role")
         user.role = request.role
     if request.is_active is not None:
+        if is_self and request.is_active != user.is_active:
+            raise HTTPException(
+                status_code=403,
+                detail="Cannot change your own active status",
+            )
         user.is_active = request.is_active
 
     await user_repo.update(user)
@@ -210,3 +274,34 @@ async def update_user(
         created_at=user.created_at,
         updated_at=user.updated_at,
     )
+
+
+@router.delete("/users/{user_id}", status_code=204)
+async def delete_user(
+    user_id: str,
+    current_user: TokenPayload = Depends(require_admin),
+    user_repo: UserRepository = Depends(get_user_repository),
+):
+    """
+    硬删用户（仅 Admin）
+
+    FK CASCADE 一并删除其所有会话 / messages / events / artifacts。
+    若用户当前有正在跑的 engine，被级联删的 conversation 行会被 controller
+    post-processing 的 exists() 检查兜住（PR2a），不会撞 FK。
+
+    保护：admin 不能删自己。配合"不能改自己 role/is_active"，足以保证
+    系统始终至少 1 个活跃 admin。
+    """
+    if user_id == current_user.user_id:
+        raise HTTPException(status_code=403, detail="Cannot delete yourself")
+
+    user = await user_repo.get_by_id(user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    deleted = await user_repo.hard_delete(user_id)
+    if not deleted:
+        # 极小概率的 TOCTOU：get_by_id 与 hard_delete 之间用户被删
+        raise HTTPException(status_code=404, detail="User not found")
+
+    logger.info(f"User hard-deleted: {user.username} (id={user_id})")
