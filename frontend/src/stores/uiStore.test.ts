@@ -128,4 +128,28 @@ describe('uiStore userManagementRightView', () => {
 
     expect(useUIStore.getState().userManagementRightView).toEqual({ type: 'create-user' });
   });
+
+  test('opening conversationBrowser also resets RightView (sibling-panel path)', () => {
+    useUIStore.setState({
+      userManagementVisible: true,
+      userManagementRightView: { type: 'edit-user', userId: 'u-1' },
+    });
+    useUIStore.getState().setConversationBrowserVisible(true);
+
+    const s = useUIStore.getState();
+    expect(s.userManagementVisible).toBe(false);
+    expect(s.userManagementRightView).toEqual({ type: 'empty' });
+  });
+
+  test('opening observability also resets RightView (sibling-panel path)', () => {
+    useUIStore.setState({
+      userManagementVisible: true,
+      userManagementRightView: { type: 'edit-user', userId: 'u-1' },
+    });
+    useUIStore.getState().setObservabilityVisible(true);
+
+    const s = useUIStore.getState();
+    expect(s.userManagementVisible).toBe(false);
+    expect(s.userManagementRightView).toEqual({ type: 'empty' });
+  });
 });

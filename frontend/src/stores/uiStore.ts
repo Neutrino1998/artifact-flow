@@ -62,7 +62,11 @@ export const useUIStore = create<UIState>((set) => ({
   setArtifactPanelVisible: (visible) => set({ artifactPanelVisible: visible }),
   setConversationBrowserVisible: (visible) => set({
     conversationBrowserVisible: visible,
-    ...(visible && { userManagementVisible: false, observabilityVisible: false }),
+    ...(visible && {
+      userManagementVisible: false,
+      userManagementRightView: { type: 'empty' },
+      observabilityVisible: false,
+    }),
   }),
   setUserManagementVisible: (visible) => set({
     userManagementVisible: visible,
@@ -72,7 +76,12 @@ export const useUIStore = create<UIState>((set) => ({
   setUserManagementRightView: (view) => set({ userManagementRightView: view }),
   setObservabilityVisible: (visible) => set({
     observabilityVisible: visible,
-    ...(visible && { conversationBrowserVisible: false, userManagementVisible: false, artifactPanelVisible: false }),
+    ...(visible && {
+      conversationBrowserVisible: false,
+      userManagementVisible: false,
+      userManagementRightView: { type: 'empty' },
+      artifactPanelVisible: false,
+    }),
     ...(!visible && { observabilitySelectedConvId: null, observabilityBrowseVisible: false }),
   }),
   setObservabilitySelectedConvId: (id) => set({
