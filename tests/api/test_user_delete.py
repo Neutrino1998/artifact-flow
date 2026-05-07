@@ -206,6 +206,20 @@ class TestUpdateSelfProtection:
         assert resp.status_code == 403
         assert "your own active" in resp.json()["detail"].lower()
 
+    async def test_admin_cannot_change_own_password_via_admin_endpoint(
+        self, admin_client: AsyncClient, test_admin: User
+    ):
+        """
+        防止 admin 在后台绕过 /me/password 的 current_password 校验。
+        token 被盗场景下，攻击者持 token 也不能直接改 admin 自己密码。
+        """
+        resp = await admin_client.put(
+            f"/api/v1/auth/users/{test_admin.id}",
+            json={"password": "newpass1234"},
+        )
+        assert resp.status_code == 403
+        assert "/me/password" in resp.json()["detail"].lower()
+
     async def test_admin_can_change_own_display_name(
         self, admin_client: AsyncClient, test_admin: User
     ):

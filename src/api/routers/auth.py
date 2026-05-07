@@ -231,9 +231,13 @@ async def update_user(
     """
     更新用户（仅 Admin）
 
-    防误锁：admin 不能改自己的 role 或 is_active。配合 DELETE 路径的
-    "不能删自己"保护，足以保证系统始终至少有 1 个活跃 admin
+    防误锁：admin 不能改自己的 role / is_active / password。配合 DELETE
+    路径的"不能删自己"保护，足以保证系统始终至少有 1 个活跃 admin
     （操作者必然活跃 → 不能动自己 → 至少剩自己）。
+
+    Self 改 password 走 POST /me/password —— 该端点强制校验 current_password，
+    防止 token 被盗后攻击者无需旧密码就能接管账号。本端点对 self 改 password
+    返回 403，避免在 admin 后台绕过该校验。
     """
     user = await user_repo.get_by_id(user_id)
     if not user:
@@ -244,6 +248,11 @@ async def update_user(
     if request.display_name is not None:
         user.display_name = request.display_name or None
     if request.password is not None:
+        if is_self:
+            raise HTTPException(
+                status_code=403,
+                detail="Use POST /auth/me/password to change your own password",
+            )
         user.hashed_password = hash_password(request.password)
         # admin 重置密码同样吊销该用户的旧 token
         user.password_version = (user.password_version or 0) + 1

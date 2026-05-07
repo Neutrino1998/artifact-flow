@@ -91,7 +91,7 @@ export default function CreateUserForm() {
             onChange={(e) => setUsername(e.target.value)}
             disabled={submitting}
             autoFocus
-            className="w-full px-3 py-2 rounded-lg bg-bg dark:bg-bg-dark border border-border dark:border-border-dark text-text-primary dark:text-text-primary-dark focus:outline-none focus:border-accent disabled:opacity-40 font-mono"
+            className="w-full px-3 py-2 rounded-lg bg-bg dark:bg-bg-dark border border-border dark:border-border-dark text-text-primary dark:text-text-primary-dark placeholder:text-text-tertiary dark:placeholder:text-text-tertiary-dark focus:outline-none focus:border-accent disabled:opacity-40 font-mono"
           />
         </div>
 
@@ -105,7 +105,7 @@ export default function CreateUserForm() {
             onChange={(e) => setPassword(e.target.value)}
             disabled={submitting}
             placeholder="至少 4 个字符"
-            className="w-full px-3 py-2 rounded-lg bg-bg dark:bg-bg-dark border border-border dark:border-border-dark text-text-primary dark:text-text-primary-dark focus:outline-none focus:border-accent disabled:opacity-40"
+            className="w-full px-3 py-2 rounded-lg bg-bg dark:bg-bg-dark border border-border dark:border-border-dark text-text-primary dark:text-text-primary-dark placeholder:text-text-tertiary dark:placeholder:text-text-tertiary-dark focus:outline-none focus:border-accent disabled:opacity-40"
           />
         </div>
 
@@ -119,7 +119,7 @@ export default function CreateUserForm() {
             onChange={(e) => setDisplayName(e.target.value)}
             disabled={submitting}
             placeholder={username || '默认使用用户名'}
-            className="w-full px-3 py-2 rounded-lg bg-bg dark:bg-bg-dark border border-border dark:border-border-dark text-text-primary dark:text-text-primary-dark focus:outline-none focus:border-accent disabled:opacity-40"
+            className="w-full px-3 py-2 rounded-lg bg-bg dark:bg-bg-dark border border-border dark:border-border-dark text-text-primary dark:text-text-primary-dark placeholder:text-text-tertiary dark:placeholder:text-text-tertiary-dark focus:outline-none focus:border-accent disabled:opacity-40"
           />
         </div>
 
@@ -127,16 +127,24 @@ export default function CreateUserForm() {
           <label className="block text-sm text-text-secondary dark:text-text-secondary-dark mb-1">
             角色
           </label>
-          <select
-            value={role}
-            onChange={(e) => setRole(e.target.value as 'user' | 'admin')}
-            disabled={submitting}
-            className="w-full px-3 py-2 rounded-lg bg-bg dark:bg-bg-dark border border-border dark:border-border-dark text-text-primary dark:text-text-primary-dark focus:outline-none focus:border-accent disabled:opacity-40"
-          >
-            {ROLE_OPTIONS.map((opt) => (
-              <option key={opt.value} value={opt.value}>{opt.label}</option>
-            ))}
-          </select>
+          <div className="relative">
+            <select
+              value={role}
+              onChange={(e) => setRole(e.target.value as 'user' | 'admin')}
+              disabled={submitting}
+              className="w-full appearance-none px-3 py-2 pr-9 rounded-lg bg-bg dark:bg-bg-dark border border-border dark:border-border-dark text-text-primary dark:text-text-primary-dark focus:outline-none focus:border-accent disabled:opacity-40"
+            >
+              {ROLE_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>{opt.label}</option>
+              ))}
+            </select>
+            <svg
+              className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-text-tertiary dark:text-text-tertiary-dark"
+              width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"
+            >
+              <path d="M3 4.5l3 3 3-3" />
+            </svg>
+          </div>
         </div>
 
         {error && (

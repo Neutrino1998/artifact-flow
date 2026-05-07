@@ -36,11 +36,8 @@ export default function UserDetailForm({ userId }: UserDetailFormProps) {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
-  // Reset password sub-form
-  const [passwordOpen, setPasswordOpen] = useState(false);
+  // 重置密码：留空则不修改，与其他字段一起走主保存
   const [newPassword, setNewPassword] = useState('');
-  const [passwordSaving, setPasswordSaving] = useState(false);
-  const [passwordError, setPasswordError] = useState<string | null>(null);
 
   // Delete confirmation
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -66,25 +63,28 @@ export default function UserDetailForm({ userId }: UserDetailFormProps) {
   useEffect(() => {
     loadUser();
     // Reset sub-state when switching user
-    setPasswordOpen(false);
     setNewPassword('');
-    setPasswordError(null);
     setSaveError(null);
     setConfirmDelete(false);
     setDeleteImpact(null);
     setDeleteImpactError(null);
   }, [loadUser]);
 
+  // 非空 < 4 字符视作无效；空值表示不修改密码
+  const passwordInvalid = newPassword.length > 0 && newPassword.length < 4;
+  const passwordChanged = newPassword.length > 0;
+
   const dirty =
     user !== null &&
     (
       (displayName.trim() || null) !== (user.display_name ?? null) ||
       role !== user.role ||
-      isActive !== user.is_active
+      isActive !== user.is_active ||
+      passwordChanged
     );
 
   const handleSave = async () => {
-    if (!user || !dirty || saving) return;
+    if (!user || !dirty || saving || passwordInvalid) return;
     setSaving(true);
     setSaveError(null);
     try {
@@ -95,9 +95,12 @@ export default function UserDetailForm({ userId }: UserDetailFormProps) {
       }
       if (role !== user.role) patch.role = role;
       if (isActive !== user.is_active) patch.is_active = isActive;
+      if (passwordChanged) patch.password = newPassword;
 
       const updated = await api.updateUser(user.id, patch);
       setUser(updated);
+      // 保存成功后清空密码，避免下次再点"保存"重复改密
+      if (passwordChanged) setNewPassword('');
 
       // Sync authStore if editing self's display_name
       if (isSelf && 'display_name' in patch) {
@@ -111,22 +114,6 @@ export default function UserDetailForm({ userId }: UserDetailFormProps) {
       setSaveError(err instanceof ApiError ? err.message : '保存失败');
     } finally {
       setSaving(false);
-    }
-  };
-
-  const handleResetPassword = async () => {
-    if (!user || newPassword.length < 4 || passwordSaving) return;
-    setPasswordSaving(true);
-    setPasswordError(null);
-    try {
-      await api.updateUser(user.id, { password: newPassword });
-      setNewPassword('');
-      setPasswordOpen(false);
-      bumpListVersion();
-    } catch (err) {
-      setPasswordError(err instanceof ApiError ? err.message : '重置密码失败');
-    } finally {
-      setPasswordSaving(false);
     }
   };
 
@@ -224,30 +211,33 @@ export default function UserDetailForm({ userId }: UserDetailFormProps) {
             value={displayName}
             onChange={(e) => setDisplayName(e.target.value)}
             placeholder={user.username}
-            disabled={saving}
-            className="w-full px-3 py-2 rounded-lg bg-bg dark:bg-bg-dark border border-border dark:border-border-dark text-text-primary dark:text-text-primary-dark focus:outline-none focus:border-accent disabled:opacity-40"
+            disabled={saving || isSelf}
+            className="w-full px-3 py-2 rounded-lg bg-bg dark:bg-bg-dark border border-border dark:border-border-dark text-text-primary dark:text-text-primary-dark placeholder:text-text-tertiary dark:placeholder:text-text-tertiary-dark focus:outline-none focus:border-accent disabled:opacity-40"
           />
         </div>
 
         <div>
           <label className="block text-sm text-text-secondary dark:text-text-secondary-dark mb-1">
             角色
-            {isSelf && (
-              <span className="ml-2 text-xs text-text-tertiary dark:text-text-tertiary-dark">
-                (不能修改自己的角色)
-              </span>
-            )}
           </label>
-          <select
-            value={role}
-            onChange={(e) => setRole(e.target.value as 'user' | 'admin')}
-            disabled={saving || isSelf}
-            className="w-full px-3 py-2 rounded-lg bg-bg dark:bg-bg-dark border border-border dark:border-border-dark text-text-primary dark:text-text-primary-dark focus:outline-none focus:border-accent disabled:opacity-40"
-          >
-            {ROLE_OPTIONS.map((opt) => (
-              <option key={opt.value} value={opt.value}>{opt.label}</option>
-            ))}
-          </select>
+          <div className="relative">
+            <select
+              value={role}
+              onChange={(e) => setRole(e.target.value as 'user' | 'admin')}
+              disabled={saving || isSelf}
+              className="w-full appearance-none px-3 py-2 pr-9 rounded-lg bg-bg dark:bg-bg-dark border border-border dark:border-border-dark text-text-primary dark:text-text-primary-dark focus:outline-none focus:border-accent disabled:opacity-40"
+            >
+              {ROLE_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>{opt.label}</option>
+              ))}
+            </select>
+            <svg
+              className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-text-tertiary dark:text-text-tertiary-dark"
+              width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"
+            >
+              <path d="M3 4.5l3 3 3-3" />
+            </svg>
+          </div>
         </div>
 
         <div>
@@ -261,59 +251,33 @@ export default function UserDetailForm({ userId }: UserDetailFormProps) {
             />
             <span className="text-sm text-text-primary dark:text-text-primary-dark">
               启用账号
-              {isSelf && (
-                <span className="ml-2 text-xs text-text-tertiary dark:text-text-tertiary-dark">
-                  (不能停用自己)
-                </span>
-              )}
             </span>
           </label>
         </div>
 
-        {/* Reset password */}
-        <div className="border-t border-border dark:border-border-dark pt-5">
-          {!passwordOpen ? (
-            <button
-              onClick={() => { setPasswordOpen(true); setPasswordError(null); }}
-              className="text-sm text-accent hover:text-accent-hover transition-colors"
-            >
+        {/* Reset password — 自己看自己时整段隐藏（走 /me/password） */}
+        {!isSelf && (
+          <div>
+            <label className="block text-sm text-text-secondary dark:text-text-secondary-dark mb-1">
               重置密码
-            </button>
-          ) : (
-            <div className="space-y-2">
-              <label className="block text-sm text-text-secondary dark:text-text-secondary-dark">
-                新密码（至少 4 个字符）
-              </label>
-              <div className="flex gap-2">
-                <input
-                  type="password"
-                  value={newPassword}
-                  onChange={(e) => setNewPassword(e.target.value)}
-                  disabled={passwordSaving}
-                  autoFocus
-                  className="flex-1 px-3 py-2 rounded-lg bg-bg dark:bg-bg-dark border border-border dark:border-border-dark text-text-primary dark:text-text-primary-dark focus:outline-none focus:border-accent disabled:opacity-40"
-                />
-                <button
-                  onClick={handleResetPassword}
-                  disabled={passwordSaving || newPassword.length < 4}
-                  className="px-4 py-2 rounded-lg bg-accent text-white hover:bg-accent-hover disabled:opacity-40 transition-colors"
-                >
-                  {passwordSaving ? '...' : '确认'}
-                </button>
-                <button
-                  onClick={() => { setPasswordOpen(false); setNewPassword(''); setPasswordError(null); }}
-                  disabled={passwordSaving}
-                  className="px-3 py-2 rounded-lg border border-border dark:border-border-dark text-text-secondary dark:text-text-secondary-dark hover:bg-bg dark:hover:bg-bg-dark disabled:opacity-40 transition-colors"
-                >
-                  取消
-                </button>
-              </div>
-              {passwordError && (
-                <div className="text-status-error text-xs">{passwordError}</div>
-              )}
-            </div>
-          )}
-        </div>
+              <span className="ml-2 text-xs text-text-tertiary dark:text-text-tertiary-dark">
+                （留空则不修改）
+              </span>
+            </label>
+            <input
+              type="password"
+              value={newPassword}
+              onChange={(e) => setNewPassword(e.target.value)}
+              disabled={saving}
+              placeholder="新密码至少 4 个字符"
+              autoComplete="new-password"
+              className="w-full px-3 py-2 rounded-lg bg-bg dark:bg-bg-dark border border-border dark:border-border-dark text-text-primary dark:text-text-primary-dark placeholder:text-text-tertiary dark:placeholder:text-text-tertiary-dark focus:outline-none focus:border-accent disabled:opacity-40"
+            />
+            {passwordInvalid && (
+              <p className="text-status-error text-xs mt-1">密码至少需要 4 个字符</p>
+            )}
+          </div>
+        )}
 
         {saveError && (
           <div className="text-status-error text-sm">{saveError}</div>
@@ -323,23 +287,31 @@ export default function UserDetailForm({ userId }: UserDetailFormProps) {
         )}
       </div>
 
-      {/* Footer actions */}
-      <div className="border-t border-border dark:border-border-dark px-6 py-4 flex items-center justify-between gap-3">
-        <button
-          onClick={openDeleteConfirm}
-          disabled={isSelf || saving}
-          title={isSelf ? '不能删除自己' : '硬删除该用户（级联删除其所有会话）'}
-          className="px-5 py-2 rounded-lg border border-status-error text-status-error hover:bg-status-error/10 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-        >
-          删除用户
-        </button>
-        <button
-          onClick={handleSave}
-          disabled={!dirty || saving}
-          className="px-6 py-2 rounded-lg bg-accent text-white hover:bg-accent-hover disabled:opacity-40 transition-colors"
-        >
-          {saving ? '保存中...' : '保存'}
-        </button>
+      {/* Footer — isSelf 时按钮位置替换为居中提示，沿用同一根分割线保持视觉一致 */}
+      <div className="border-t border-border dark:border-border-dark px-6 py-4">
+        {isSelf ? (
+          <p className="text-center text-sm text-text-secondary dark:text-text-secondary-dark">
+            查看自己的信息为只读。修改密码请使用左下角用户菜单。
+          </p>
+        ) : (
+          <div className="flex items-center justify-end gap-3">
+            <button
+              onClick={openDeleteConfirm}
+              disabled={saving}
+              title="硬删除该用户（级联删除其所有会话）"
+              className="px-5 py-2 rounded-lg border border-status-error text-status-error hover:bg-status-error/10 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            >
+              删除用户
+            </button>
+            <button
+              onClick={handleSave}
+              disabled={!dirty || saving || passwordInvalid}
+              className="px-6 py-2 rounded-lg bg-accent text-white hover:bg-accent-hover disabled:opacity-40 transition-colors"
+            >
+              {saving ? '保存中...' : '保存'}
+            </button>
+          </div>
+        )}
       </div>
 
       {confirmDelete && (
