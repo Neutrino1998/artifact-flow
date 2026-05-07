@@ -4,6 +4,7 @@ import { useState, useRef, useEffect } from 'react';
 import { useAuthStore } from '@/stores/authStore';
 import { useUIStore } from '@/stores/uiStore';
 import ChangePasswordDialog from '@/components/layout/ChangePasswordDialog';
+import EditDisplayNameDialog from '@/components/layout/EditDisplayNameDialog';
 
 export default function UserMenu({ collapsed }: { collapsed?: boolean }) {
   const user = useAuthStore((s) => s.user);
@@ -12,6 +13,7 @@ export default function UserMenu({ collapsed }: { collapsed?: boolean }) {
   const theme = useUIStore((s) => s.theme);
   const [popoverOpen, setPopoverOpen] = useState(false);
   const [changePasswordOpen, setChangePasswordOpen] = useState(false);
+  const [editProfileOpen, setEditProfileOpen] = useState(false);
   const setUserManagementVisible = useUIStore((s) => s.setUserManagementVisible);
   const setObservabilityVisible = useUIStore((s) => s.setObservabilityVisible);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -67,6 +69,11 @@ export default function UserMenu({ collapsed }: { collapsed?: boolean }) {
   const handleChangePassword = () => {
     setPopoverOpen(false);
     setChangePasswordOpen(true);
+  };
+
+  const handleEditProfile = () => {
+    setPopoverOpen(false);
+    setEditProfileOpen(true);
   };
 
   if (!user) return null;
@@ -148,6 +155,17 @@ export default function UserMenu({ collapsed }: { collapsed?: boolean }) {
               {theme === 'light' ? '深色模式' : '浅色模式'}
             </button>
 
+            {/* Edit display name (all users) */}
+            <button
+              onClick={handleEditProfile}
+              className="w-full flex items-center gap-2 px-2.5 py-2 text-text-primary dark:text-text-primary-dark hover:bg-surface dark:hover:bg-surface-dark rounded-lg transition-colors"
+            >
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <path d="M11 2l3 3-9 9H2v-3z" />
+              </svg>
+              修改显示名
+            </button>
+
             {/* Change password (all users) */}
             <button
               onClick={handleChangePassword}
@@ -206,6 +224,10 @@ export default function UserMenu({ collapsed }: { collapsed?: boolean }) {
 
       {changePasswordOpen && (
         <ChangePasswordDialog onClose={() => setChangePasswordOpen(false)} />
+      )}
+
+      {editProfileOpen && (
+        <EditDisplayNameDialog onClose={() => setEditProfileOpen(false)} />
       )}
     </>
   );

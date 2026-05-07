@@ -28,6 +28,7 @@ from api.schemas.auth import (
     CreateUserRequest,
     UpdateUserRequest,
     ChangePasswordRequest,
+    UpdateMyProfileRequest,
     UserResponse,
     UserListResponse,
     UserImpactResponse,
@@ -110,6 +111,39 @@ async def change_my_password(
     await user_repo.update(user)
 
     logger.info(f"Password changed: {user.username} (pwd_v={user.password_version})")
+
+
+@router.patch("/me", response_model=UserInfo)
+async def update_my_profile(
+    request: UpdateMyProfileRequest,
+    current_user: TokenPayload = Depends(get_current_user),
+    user_repo: UserRepository = Depends(get_user_repository),
+):
+    """
+    当前用户自助修改非敏感资料字段（目前仅 display_name）。
+
+    设计意图：与 admin 后台 PUT /users/{id} 解耦 —— role / is_active /
+    password 这些安全敏感字段走专门端点，profile 字段走这里。任何已登录
+    用户都能调，不需要 admin 权限。
+    """
+    user = await user_repo.get_by_id(current_user.user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    if request.display_name is not None:
+        # 显式空字符串 = 清空 display_name（落库为 NULL）
+        user.display_name = request.display_name.strip() or None
+
+    await user_repo.update(user)
+
+    logger.info(f"Profile updated: {user.username}")
+
+    return UserInfo(
+        id=user.id,
+        username=user.username,
+        display_name=user.display_name,
+        role=user.role,
+    )
 
 
 @router.post("/users", response_model=UserResponse)

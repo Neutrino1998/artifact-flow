@@ -15,6 +15,8 @@ import type {
   CreateUserRequest,
   UpdateUserRequest,
   ChangePasswordRequest,
+  UpdateMyProfileRequest,
+  UserInfo,
   UserResponse,
   UserListResponse,
   UserImpactResponse,
@@ -425,6 +427,13 @@ export function getUserImpact(userId: string) {
 export function changeMyPassword(body: ChangePasswordRequest) {
   return request<void>('/api/v1/auth/me/password', {
     method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export function updateMyProfile(body: UpdateMyProfileRequest) {
+  return request<UserInfo>('/api/v1/auth/me', {
+    method: 'PATCH',
     body: JSON.stringify(body),
   });
 }

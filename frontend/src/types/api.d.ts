@@ -41,7 +41,15 @@ export interface paths {
         delete?: never;
         options?: never;
         head?: never;
-        patch?: never;
+        /**
+         * Update My Profile
+         * @description 当前用户自助修改非敏感资料字段（目前仅 display_name）。
+         *
+         *     设计意图：与 admin 后台 PUT /users/{id} 解耦 —— role / is_active /
+         *     password 这些安全敏感字段走专门端点，profile 字段走这里。任何已登录
+         *     用户都能调，不需要 admin 权限。
+         */
+        patch: operations["update_my_profile_api_v1_auth_me_patch"];
         trace?: never;
     };
     "/api/v1/auth/me/password": {
@@ -104,9 +112,13 @@ export interface paths {
          * Update User
          * @description 更新用户（仅 Admin）
          *
-         *     防误锁：admin 不能改自己的 role 或 is_active。配合 DELETE 路径的
-         *     "不能删自己"保护，足以保证系统始终至少有 1 个活跃 admin
+         *     防误锁：admin 不能改自己的 role / is_active / password。配合 DELETE
+         *     路径的"不能删自己"保护，足以保证系统始终至少有 1 个活跃 admin
          *     （操作者必然活跃 → 不能动自己 → 至少剩自己）。
+         *
+         *     Self 改 password 走 POST /me/password —— 该端点强制校验 current_password，
+         *     防止 token 被盗后攻击者无需旧密码就能接管账号。本端点对 self 改 password
+         *     返回 403，避免在 admin 后台绕过该校验。
          */
         put: operations["update_user_api_v1_auth_users__user_id__put"];
         post?: never;
@@ -1145,6 +1157,17 @@ export interface components {
             stream_url: string;
         };
         /**
+         * UpdateMyProfileRequest
+         * @description PATCH /api/v1/auth/me request body — 自助修改自己的非敏感资料字段
+         */
+        UpdateMyProfileRequest: {
+            /**
+             * Display Name
+             * @description Display name; pass empty string to clear
+             */
+            display_name?: string | null;
+        };
+        /**
          * UpdateUserRequest
          * @description PUT /api/v1/auth/users/{id} request body
          */
@@ -1408,6 +1431,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["UserInfo"];
+                };
+            };
+        };
+    };
+    update_my_profile_api_v1_auth_me_patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateMyProfileRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserInfo"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

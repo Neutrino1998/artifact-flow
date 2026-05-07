@@ -49,6 +49,11 @@ class ChangePasswordRequest(BaseModel):
     new_password: str = Field(..., min_length=4, max_length=128, description="New password")
 
 
+class UpdateMyProfileRequest(BaseModel):
+    """PATCH /api/v1/auth/me request body — 自助修改自己的非敏感资料字段"""
+    display_name: Optional[str] = Field(None, max_length=128, description="Display name; pass empty string to clear")
+
+
 # ============================================================
 # Response Models
 # ============================================================
