@@ -228,7 +228,7 @@ export default function UserDetailForm({ userId }: UserDetailFormProps) {
             onChange={(e) => setDisplayName(e.target.value)}
             placeholder={user.username}
             disabled={saving || isSelf}
-            className="w-full px-3 py-2 rounded-lg bg-bg dark:bg-bg-dark border border-border dark:border-border-dark text-text-primary dark:text-text-primary-dark placeholder:text-text-tertiary dark:placeholder:text-text-tertiary-dark focus:outline-none focus:border-accent disabled:opacity-40"
+            className="w-full px-3 py-2 rounded-lg bg-surface dark:bg-surface-dark border border-border dark:border-border-dark text-text-primary dark:text-text-primary-dark placeholder:text-text-tertiary dark:placeholder:text-text-tertiary-dark focus:outline-none focus:border-accent disabled:opacity-40"
           />
         </div>
 
@@ -241,7 +241,7 @@ export default function UserDetailForm({ userId }: UserDetailFormProps) {
               value={role}
               onChange={(e) => setRole(e.target.value as 'user' | 'admin')}
               disabled={saving || isSelf}
-              className="w-full appearance-none px-3 py-2 pr-9 rounded-lg bg-bg dark:bg-bg-dark border border-border dark:border-border-dark text-text-primary dark:text-text-primary-dark focus:outline-none focus:border-accent disabled:opacity-40"
+              className="w-full appearance-none px-3 py-2 pr-9 rounded-lg bg-surface dark:bg-surface-dark border border-border dark:border-border-dark text-text-primary dark:text-text-primary-dark focus:outline-none focus:border-accent disabled:opacity-40"
             >
               {ROLE_OPTIONS.map((opt) => (
                 <option key={opt.value} value={opt.value}>{opt.label}</option>
@@ -300,7 +300,7 @@ export default function UserDetailForm({ userId }: UserDetailFormProps) {
               disabled={saving}
               placeholder="新密码至少 4 个字符"
               autoComplete="new-password"
-              className="w-full px-3 py-2 rounded-lg bg-bg dark:bg-bg-dark border border-border dark:border-border-dark text-text-primary dark:text-text-primary-dark placeholder:text-text-tertiary dark:placeholder:text-text-tertiary-dark focus:outline-none focus:border-accent disabled:opacity-40"
+              className="w-full px-3 py-2 rounded-lg bg-surface dark:bg-surface-dark border border-border dark:border-border-dark text-text-primary dark:text-text-primary-dark placeholder:text-text-tertiary dark:placeholder:text-text-tertiary-dark focus:outline-none focus:border-accent disabled:opacity-40"
             />
             {passwordInvalid && (
               <p className="text-status-error text-xs mt-1">密码至少需要 4 个字符</p>

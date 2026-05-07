@@ -211,7 +211,7 @@ export default function DepartmentCascader({
                 value={selected}
                 onChange={(e) => handleSelectChange(i, level.parentId, e.target.value)}
                 disabled={disabled || creating}
-                className="w-full appearance-none px-3 py-1.5 pr-9 rounded-lg bg-bg dark:bg-bg-dark border border-border dark:border-border-dark text-sm text-text-primary dark:text-text-primary-dark focus:outline-none focus:border-accent disabled:opacity-40"
+                className="w-full appearance-none px-3 py-1.5 pr-9 rounded-lg bg-surface dark:bg-surface-dark border border-border dark:border-border-dark text-sm text-text-primary dark:text-text-primary-dark focus:outline-none focus:border-accent disabled:opacity-40"
               >
                 <option value="">— 不选 —</option>
                 {visibleOptions.map((o) => (
@@ -245,7 +245,7 @@ export default function DepartmentCascader({
             }}
             disabled={creating}
             placeholder="新部门名称"
-            className="flex-1 px-3 py-1.5 rounded-lg bg-bg dark:bg-bg-dark border border-border dark:border-border-dark text-sm text-text-primary dark:text-text-primary-dark focus:outline-none focus:border-accent disabled:opacity-40"
+            className="flex-1 px-3 py-1.5 rounded-lg bg-surface dark:bg-surface-dark border border-border dark:border-border-dark text-sm text-text-primary dark:text-text-primary-dark focus:outline-none focus:border-accent disabled:opacity-40"
           />
           <button
             onClick={handleCreateSubmit}

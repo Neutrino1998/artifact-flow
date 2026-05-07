@@ -149,7 +149,7 @@ export default function DepartmentDetailForm({
             value={name}
             onChange={(e) => setName(e.target.value)}
             disabled={saving}
-            className="w-full px-3 py-2 rounded-lg bg-bg dark:bg-bg-dark border border-border dark:border-border-dark text-text-primary dark:text-text-primary-dark focus:outline-none focus:border-accent disabled:opacity-40"
+            className="w-full px-3 py-2 rounded-lg bg-surface dark:bg-surface-dark border border-border dark:border-border-dark text-text-primary dark:text-text-primary-dark focus:outline-none focus:border-accent disabled:opacity-40"
           />
           {nameInvalid && (
             <p className="text-status-error text-xs mt-1">名称不能为空</p>

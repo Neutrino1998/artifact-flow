@@ -255,10 +255,18 @@ function UserRow({
         </div>
         <div className="text-xs text-text-tertiary dark:text-text-tertiary-dark truncate">
           @{user.username}
-          {deptName && <span className="ml-2">· {deptName}</span>}
+          {deptName && <span className="ml-2">{deptName}</span>}
           <span className="ml-2 opacity-60">{user.id}</span>
         </div>
       </div>
+
+      {/* "当前" badge — placed before role/status so the eye lands on
+          identity first, then runs through the right-aligned status cluster */}
+      {isSelf && (
+        <span className="flex-shrink-0 text-xs text-text-tertiary dark:text-text-tertiary-dark">
+          当前
+        </span>
+      )}
 
       {/* Role badge */}
       <span
@@ -282,12 +290,6 @@ function UserRow({
           {user.is_active ? '启用' : '禁用'}
         </span>
       </span>
-
-      {isSelf && (
-        <span className="flex-shrink-0 text-xs text-text-tertiary dark:text-text-tertiary-dark">
-          当前
-        </span>
-      )}
     </div>
   );
 }
