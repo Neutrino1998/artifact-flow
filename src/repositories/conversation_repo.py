@@ -108,6 +108,21 @@ class ConversationRepository(BaseRepository[Conversation]):
         result = await self._session.execute(query)
         return result.scalar_one_or_none()
     
+    async def exists(self, conversation_id: str) -> bool:
+        """
+        判断对话是否存在（轻量 COUNT 查询）
+
+        用于 controller post-processing 入口判定 conversation 是否被
+        中途 DELETE：删除路径不抢 lease，conv 行可能在 engine 跑完前消失，
+        此时 post-processing 写库会撞 FK，需要用此方法早返回跳过。
+        """
+        result = await self._session.execute(
+            select(func.count())
+            .select_from(Conversation)
+            .where(Conversation.id == conversation_id)
+        )
+        return result.scalar_one() > 0
+
     async def get_conversation_or_raise(
         self,
         conversation_id: str,

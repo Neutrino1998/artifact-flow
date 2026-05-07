@@ -166,6 +166,26 @@ class TestConversationCRUD:
         result = await conversation_repo.delete_conversation("nonexistent")
         assert result is False
 
+    async def test_exists_returns_true_for_existing(
+        self, conversation_repo: ConversationRepository, sample_conversation: Conversation
+    ):
+        assert await conversation_repo.exists(sample_conversation.id) is True
+
+    async def test_exists_returns_false_for_missing(
+        self, conversation_repo: ConversationRepository
+    ):
+        assert await conversation_repo.exists("conv-does-not-exist") is False
+
+    async def test_exists_after_delete(
+        self, conversation_repo: ConversationRepository, test_user: User
+    ):
+        conv_id = f"conv-{uuid.uuid4().hex}"
+        await conversation_repo.create_conversation(conversation_id=conv_id, user_id=test_user.id)
+        assert await conversation_repo.exists(conv_id) is True
+
+        await conversation_repo.delete_conversation(conv_id)
+        assert await conversation_repo.exists(conv_id) is False
+
 
 # ============================================================
 # Count / Pagination

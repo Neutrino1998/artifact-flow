@@ -12,6 +12,7 @@ Covers the behavior introduced by commit 677b7c5:
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from sqlalchemy.exc import IntegrityError
 
 from core.controller import ExecutionController
 from core.engine import EngineHooks
@@ -110,6 +111,21 @@ class TestPersistEvents:
         state = {"events": [_ev(StreamEventType.USER_INPUT.value, {"content": "hi"})]}
         result = await ctrl._persist_events("msg-1", state)
         assert result is False
+
+    async def test_integrity_error_reraises(self):
+        """
+        IntegrityError 透传给 caller — 让 stream_execute 区分"基础设施失败"
+        和"被外部删除（FK 违规）"。后者不应被当作普通持久化失败而把整轮转 ERROR。
+        """
+        async def fake_with_retry(fn):
+            raise IntegrityError("FK violation", None, None)
+
+        ctrl = _make_controller(repo=MagicMock())
+        ctrl._with_db_retry = fake_with_retry  # type: ignore
+
+        state = {"events": [_ev(StreamEventType.USER_INPUT.value, {"content": "hi"})]}
+        with pytest.raises(IntegrityError):
+            await ctrl._persist_events("msg-1", state)
 
     async def test_success_assigns_event_id(self):
         """Event IDs use the {message_id}-{seq} idempotency key."""

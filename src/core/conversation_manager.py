@@ -501,3 +501,12 @@ class ConversationManager:
         """
         repo = self._ensure_repository()
         return await repo.delete_conversation(conversation_id)
+
+    async def exists_async(self, conversation_id: str) -> bool:
+        """
+        判断对话是否存在（薄包装 ConversationRepository.exists）
+
+        controller post-processing 用来判定 conv 是否被中途 DELETE。
+        """
+        repo = self._ensure_repository()
+        return await repo.exists(conversation_id)
