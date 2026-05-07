@@ -23,8 +23,8 @@ from sqlalchemy import (
     JSON,
     UniqueConstraint,
     Index,
+    Computed,
     func,
-    text,
 )
 from sqlalchemy.orm import (
     DeclarativeBase,
@@ -124,6 +124,18 @@ class Department(Base):
     )
     name: Mapped[str] = mapped_column(String(128), nullable=False)
 
+    # 跨方言根级去重的生成列实现 — 详见 __table_args__ 的 uq_dept_root_name 注释。
+    # ORM 视角只读：Computed 列由 DB 在 INSERT/UPDATE 时根据 parent_id + name 自动
+    # 计算，SQLAlchemy 默认不会在 INSERT 语句里写这一列。
+    root_name_key: Mapped[Optional[str]] = mapped_column(
+        String(128),
+        Computed(
+            "CASE WHEN parent_id IS NULL THEN name END",
+            persisted=True,
+        ),
+        nullable=True,
+    )
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime,
         server_default=func.now(),
@@ -158,17 +170,27 @@ class Department(Base):
     __table_args__ = (
         # 同父下名称唯一 — 适用于 parent_id 非 NULL 的所有行
         UniqueConstraint("parent_id", "name", name="uq_dept_parent_name"),
-        # SQL 标准把多个 NULL 视为 DISTINCT，所以上面的 UC 不约束根级行
-        # （parent_id IS NULL）。partial unique index 专门兜根级，让 DB 在
-        # 并发 INSERT 同名根部门时原子拒绝第二条 — 路由层 SELECT-then-INSERT
-        # 抓不住的 TOCTOU 漏洞由这里兜住。
-        Index(
-            "uq_dept_root_name",
-            "name",
-            unique=True,
-            sqlite_where=text("parent_id IS NULL"),
-            postgresql_where=text("parent_id IS NULL"),
-        ),
+        # 根级（parent_id IS NULL）名称唯一性兜底。
+        #
+        # 为什么不是 partial unique index：
+        #   - SQL 标准把多个 NULL 视为 DISTINCT，上面的 UC 在 parent_id IS NULL
+        #     的行上失效（NULL,'A' 不等于 NULL,'A'，两条都允许插入）
+        #   - SQLite/PostgreSQL 支持 partial unique index（带 WHERE 条件），
+        #     可以专门约束根级；但 MySQL 5.7~8.x 不支持 partial index
+        #     （8.0.13 的 functional index 是另一回事），sqlite_where /
+        #     postgresql_where 在 MySQL 方言下会被忽略，编译成全表
+        #     UNIQUE(name)，反而误伤"不同父下同名子部门"的合法情况
+        #
+        # 改用生成列 + 普通 UNIQUE：
+        #   - root_name_key 在根级行 = name，非根级 = NULL
+        #   - UNIQUE(root_name_key)：根级 NULL 与 name 相比，相同 name 直接冲突；
+        #     非根级行的 NULL 互相 DISTINCT，不冲突，不影响"不同父下同名子"
+        #   - SQLite 3.31+ / PostgreSQL 12+ / MySQL 5.7+ 都原生支持 STORED
+        #     生成列（与 UNIQUE 索引兼容）
+        #
+        # 这条约束是 source of truth，路由层 pre-check 只是为了给 admin 早返回
+        # 友好的 409；并发请求穿过 pre-check 后，DB 这层会原子拒绝第二条 INSERT。
+        UniqueConstraint("root_name_key", name="uq_dept_root_name"),
     )
 
     def __repr__(self) -> str:

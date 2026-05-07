@@ -68,7 +68,9 @@ class TestDepartmentDBConstraints:
 
     async def test_root_name_distinct_from_child_name(self, db_session):
         """
-        根级名 与 任意非根级行 应当各自独立 — partial index 只看 parent_id IS NULL。
+        根级名 与 任意非根级行 应当各自独立 — root_name_key 生成列只在
+        parent_id IS NULL 时投射 name；非根级行 root_name_key 永远是 NULL，
+        与根级行的具体 name 不冲突。
         即：根 "部门A" 与 某父下的子 "部门A" 互不冲突。
         """
         parent = Department(id="dept-p", parent_id=None, name="父")
@@ -82,6 +84,33 @@ class TestDepartmentDBConstraints:
         db_session.add(Department(id="dept-child-a", parent_id=parent.id, name="部门A"))
         await db_session.flush()
         await db_session.commit()
+
+    async def test_root_name_key_computed_correctly(self, db_session):
+        """
+        防回归：跨方言根级去重依赖 root_name_key 这个 STORED 生成列。
+        如果哪天有人删了 Computed() 没人发现，这个测试会立刻炸 — 否则
+        partial-unique 路径全靠 SELECT 查不到也察觉不出来。
+        """
+        from sqlalchemy import select
+
+        root = Department(id="dept-root", parent_id=None, name="根部门")
+        db_session.add(root)
+        await db_session.flush()
+        await db_session.commit()
+
+        child = Department(id="dept-child", parent_id="dept-root", name="子部门")
+        db_session.add(child)
+        await db_session.flush()
+        await db_session.commit()
+
+        # 直接 SELECT 取生成列值（绕过 ORM 缓存，确认 DB 实际填了什么）
+        rows = (await db_session.execute(
+            select(Department.id, Department.root_name_key)
+            .order_by(Department.id)
+        )).all()
+        result = {r.id: r.root_name_key for r in rows}
+        assert result["dept-root"] == "根部门", "根级行 root_name_key 应当 = name"
+        assert result["dept-child"] is None, "非根级行 root_name_key 应当 NULL"
 
 
 @pytest.mark.asyncio

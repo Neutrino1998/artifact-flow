@@ -20,24 +20,26 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     """Create all tables matching models.py."""
+    # 跨方言根级去重：root_name_key 生成列 + UNIQUE 见 models.py Department
+    # __table_args__ 的 uq_dept_root_name 注释。STORED generated column 在
+    # SQLite 3.31+ / PostgreSQL 12+ / MySQL 5.7+ 都支持。
     op.create_table('departments',
         sa.Column('id', sa.String(length=64), nullable=False),
         sa.Column('parent_id', sa.String(length=64), nullable=True),
         sa.Column('name', sa.String(length=128), nullable=False),
+        sa.Column(
+            'root_name_key', sa.String(length=128),
+            sa.Computed('CASE WHEN parent_id IS NULL THEN name END', persisted=True),
+            nullable=True,
+        ),
         sa.Column('created_at', sa.DateTime(), server_default=sa.func.now(), nullable=False),
         sa.Column('updated_at', sa.DateTime(), server_default=sa.func.now(), nullable=False),
         sa.ForeignKeyConstraint(['parent_id'], ['departments.id'], ondelete='RESTRICT'),
         sa.PrimaryKeyConstraint('id'),
-        sa.UniqueConstraint('parent_id', 'name', name='uq_dept_parent_name')
+        sa.UniqueConstraint('parent_id', 'name', name='uq_dept_parent_name'),
+        sa.UniqueConstraint('root_name_key', name='uq_dept_root_name'),
     )
     op.create_index(op.f('ix_departments_parent_id'), 'departments', ['parent_id'], unique=False)
-    # Partial unique index — 见 models.py Department.__table_args__ 注释。
-    # 兜 NULL parent_id（根级）的 name 唯一性，闭合 SELECT-then-INSERT 的 TOCTOU。
-    op.create_index(
-        'uq_dept_root_name', 'departments', ['name'], unique=True,
-        sqlite_where=sa.text('parent_id IS NULL'),
-        postgresql_where=sa.text('parent_id IS NULL'),
-    )
 
     op.create_table('users',
         sa.Column('id', sa.String(length=64), nullable=False),
@@ -155,6 +157,5 @@ def downgrade() -> None:
     op.drop_index(op.f('ix_users_department_id'), table_name='users')
     op.drop_index(op.f('ix_users_username'), table_name='users')
     op.drop_table('users')
-    op.drop_index('uq_dept_root_name', table_name='departments')
     op.drop_index(op.f('ix_departments_parent_id'), table_name='departments')
     op.drop_table('departments')
