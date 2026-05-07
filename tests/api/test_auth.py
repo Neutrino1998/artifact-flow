@@ -197,3 +197,86 @@ class TestAdminCRUD:
             json={"display_name": "Nope"},
         )
         assert resp.status_code == 403
+
+
+class TestChangeMyPassword:
+
+    async def test_success_and_relogin(
+        self,
+        client: AsyncClient,
+        anon_client: AsyncClient,
+        test_user: User,
+    ):
+        resp = await client.post(
+            "/api/v1/auth/me/password",
+            json={"current_password": "testpass", "new_password": "newpass1234"},
+        )
+        assert resp.status_code == 204
+
+        # New password works
+        ok = await anon_client.post(
+            "/api/v1/auth/login",
+            json={"username": "testuser", "password": "newpass1234"},
+        )
+        assert ok.status_code == 200
+
+        # Old password no longer works
+        fail = await anon_client.post(
+            "/api/v1/auth/login",
+            json={"username": "testuser", "password": "testpass"},
+        )
+        assert fail.status_code == 401
+
+    async def test_wrong_current_password(self, client: AsyncClient, test_user: User):
+        resp = await client.post(
+            "/api/v1/auth/me/password",
+            json={"current_password": "wrongpass", "new_password": "newpass1234"},
+        )
+        assert resp.status_code == 400
+        assert "current password" in resp.json()["detail"].lower()
+
+    async def test_new_password_too_short(self, client: AsyncClient, test_user: User):
+        resp = await client.post(
+            "/api/v1/auth/me/password",
+            json={"current_password": "testpass", "new_password": "abc"},
+        )
+        assert resp.status_code == 422
+
+    async def test_unauthenticated(self, anon_client: AsyncClient):
+        resp = await anon_client.post(
+            "/api/v1/auth/me/password",
+            json={"current_password": "x", "new_password": "abcd"},
+        )
+        assert resp.status_code == 401
+
+
+class TestUsernameValidation:
+
+    async def test_create_user_rejects_space(self, admin_client: AsyncClient):
+        resp = await admin_client.post(
+            "/api/v1/auth/users",
+            json={"username": "bad name", "password": "pass1234", "role": "user"},
+        )
+        assert resp.status_code == 422
+
+    async def test_create_user_rejects_chinese(self, admin_client: AsyncClient):
+        resp = await admin_client.post(
+            "/api/v1/auth/users",
+            json={"username": "张三", "password": "pass1234", "role": "user"},
+        )
+        assert resp.status_code == 422
+
+    async def test_create_user_rejects_too_short(self, admin_client: AsyncClient):
+        resp = await admin_client.post(
+            "/api/v1/auth/users",
+            json={"username": "a", "password": "pass1234", "role": "user"},
+        )
+        assert resp.status_code == 422
+
+    async def test_create_user_accepts_special_chars(self, admin_client: AsyncClient):
+        resp = await admin_client.post(
+            "/api/v1/auth/users",
+            json={"username": "a.b_c-d", "password": "pass1234", "role": "user"},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["username"] == "a.b_c-d"

@@ -44,6 +44,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/auth/me/password": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Change My Password
+         * @description 当前用户自助修改密码
+         */
+        post: operations["change_my_password_api_v1_auth_me_password_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auth/users": {
         parameters: {
             query?: never;
@@ -752,6 +772,22 @@ export interface components {
             message_id: string;
         };
         /**
+         * ChangePasswordRequest
+         * @description POST /api/v1/auth/me/password request body
+         */
+        ChangePasswordRequest: {
+            /**
+             * Current Password
+             * @description Current password
+             */
+            current_password: string;
+            /**
+             * New Password
+             * @description New password
+             */
+            new_password: string;
+        };
+        /**
          * ChatRequest
          * @description POST /api/v1/chat request body
          */
@@ -1318,6 +1354,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["UserInfo"];
+                };
+            };
+        };
+    };
+    change_my_password_api_v1_auth_me_password_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ChangePasswordRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

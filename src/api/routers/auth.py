@@ -22,6 +22,7 @@ from api.schemas.auth import (
     UserInfo,
     CreateUserRequest,
     UpdateUserRequest,
+    ChangePasswordRequest,
     UserResponse,
     UserListResponse,
 )
@@ -81,6 +82,26 @@ async def get_me(
         display_name=user.display_name if user else None,
         role=current_user.role,
     )
+
+
+@router.post("/me/password", status_code=204)
+async def change_my_password(
+    request: ChangePasswordRequest,
+    current_user: TokenPayload = Depends(get_current_user),
+    user_repo: UserRepository = Depends(get_user_repository),
+):
+    """当前用户自助修改密码"""
+    user = await user_repo.get_by_id(current_user.user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    if not verify_password(request.current_password, user.hashed_password):
+        raise HTTPException(status_code=400, detail="Current password is incorrect")
+
+    user.hashed_password = hash_password(request.new_password)
+    await user_repo.update(user)
+
+    logger.info(f"Password changed: {user.username}")
 
 
 @router.post("/users", response_model=UserResponse)

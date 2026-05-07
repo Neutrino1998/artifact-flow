@@ -15,6 +15,7 @@ export type LoginResponse = S['LoginResponse'];
 
 export type CreateUserRequest = S['CreateUserRequest'];
 export type UpdateUserRequest = S['UpdateUserRequest'];
+export type ChangePasswordRequest = S['ChangePasswordRequest'];
 export type UserResponse = S['UserResponse'];
 export type UserListResponse = S['UserListResponse'];
 

@@ -14,6 +14,7 @@ import type {
   LoginResponse,
   CreateUserRequest,
   UpdateUserRequest,
+  ChangePasswordRequest,
   UserResponse,
   UserListResponse,
   UploadResponse,
@@ -79,6 +80,9 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   if (!res.ok) {
     const body = await res.text().catch(() => '');
     throw new Error(`API ${res.status}: ${body}`);
+  }
+  if (res.status === 204) {
+    return undefined as T;
   }
   return res.json();
 }
@@ -367,6 +371,13 @@ export function createUser(body: CreateUserRequest) {
 export function updateUser(userId: string, body: UpdateUserRequest) {
   return request<UserResponse>(`/api/v1/auth/users/${userId}`, {
     method: 'PUT',
+    body: JSON.stringify(body),
+  });
+}
+
+export function changeMyPassword(body: ChangePasswordRequest) {
+  return request<void>('/api/v1/auth/me/password', {
+    method: 'POST',
     body: JSON.stringify(body),
   });
 }
