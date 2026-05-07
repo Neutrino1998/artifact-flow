@@ -27,6 +27,7 @@ def upgrade() -> None:
         sa.Column('display_name', sa.String(length=128), nullable=True),
         sa.Column('role', sa.String(length=16), nullable=False),
         sa.Column('is_active', sa.Boolean(), nullable=False),
+        sa.Column('password_version', sa.Integer(), nullable=False, server_default='0'),
         sa.Column('created_at', sa.DateTime(), server_default=sa.func.now(), nullable=False),
         sa.Column('updated_at', sa.DateTime(), server_default=sa.func.now(), nullable=False),
         sa.PrimaryKeyConstraint('id')
