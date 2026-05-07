@@ -22,6 +22,20 @@ export type UserListResponse = S['UserListResponse'];
 export type UserImpactResponse = S['UserImpactResponse'];
 
 // ============================================================
+// Department Types (Admin)
+// ============================================================
+
+export type DepartmentResponse = S['DepartmentResponse'];
+export type DepartmentListResponse = S['DepartmentListResponse'];
+export type DepartmentTreeNode = S['DepartmentTreeNode'];
+export type DepartmentTreeResponse = S['DepartmentTreeResponse'];
+export type CreateDepartmentRequest = S['CreateDepartmentRequest'];
+export type UpdateDepartmentRequest = S['UpdateDepartmentRequest'];
+export type MoveDepartmentRequest = S['MoveDepartmentRequest'];
+export type ResolveDepartmentRequest = S['ResolveDepartmentRequest'];
+export type ResolveDepartmentResponse = S['ResolveDepartmentResponse'];
+
+// ============================================================
 // Chat Types
 // ============================================================
 

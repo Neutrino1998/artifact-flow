@@ -4,6 +4,7 @@ import { useState } from 'react';
 import * as api from '@/lib/api';
 import { ApiError } from '@/lib/api';
 import { useUIStore } from '@/stores/uiStore';
+import DepartmentCascader from '@/components/forms/DepartmentCascader';
 
 const ROLE_OPTIONS = [
   { value: 'user', label: 'user' },
@@ -18,6 +19,7 @@ export default function CreateUserForm() {
   const [password, setPassword] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [role, setRole] = useState<'user' | 'admin'>('user');
+  const [departmentId, setDepartmentId] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -37,6 +39,7 @@ export default function CreateUserForm() {
         password,
         display_name: displayName.trim() || null,
         role,
+        department_id: departmentId,
       });
       bumpListVersion();
       setRightView({ type: 'empty' });
@@ -145,6 +148,18 @@ export default function CreateUserForm() {
               <path d="M3 4.5l3 3 3-3" />
             </svg>
           </div>
+        </div>
+
+        <div>
+          <label className="block text-sm text-text-secondary dark:text-text-secondary-dark mb-1">
+            部门（可选）
+          </label>
+          <DepartmentCascader
+            value={departmentId}
+            onChange={setDepartmentId}
+            allowCreate
+            disabled={submitting}
+          />
         </div>
 
         {error && (

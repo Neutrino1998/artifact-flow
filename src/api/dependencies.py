@@ -348,3 +348,11 @@ async def get_user_repository(
     """获取 UserRepository 实例"""
     from repositories.user_repo import UserRepository
     return UserRepository(session)
+
+
+async def get_department_repository(
+    session: AsyncSession = Depends(get_db_session),
+) -> "DepartmentRepository":
+    """获取 DepartmentRepository 实例"""
+    from repositories.department_repo import DepartmentRepository
+    return DepartmentRepository(session)

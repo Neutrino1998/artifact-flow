@@ -71,6 +71,15 @@ class User(Base):
         nullable=False
     )
 
+    # 部门归属（可空：未分配 / 自助注册的用户）
+    # ondelete=SET NULL：删除部门时把用户的 department_id 置空，不级联删用户
+    department_id: Mapped[Optional[str]] = mapped_column(
+        String(64),
+        ForeignKey("departments.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
     # 关系：一对多 -> conversations
     # passive_deletes=True：删除 User 时让 DB 的 FK CASCADE 处理子行，
     # 不让 ORM 预先 SET NULL 或逐行 DELETE 而绕过 CASCADE。
@@ -81,8 +90,76 @@ class User(Base):
         passive_deletes=True,
     )
 
+    # 关系：多对一 -> department（按需 lazy load，列表场景不预加载）
+    department: Mapped[Optional["Department"]] = relationship(
+        "Department",
+        back_populates="users",
+    )
+
     def __repr__(self) -> str:
         return f"<User(id={self.id}, username={self.username}, role={self.role})>"
+
+
+class Department(Base):
+    """
+    部门表（邻接表实现的层级结构）
+
+    每个部门可以有一个父部门，形成树。深度可变 —— 用户可以挂在任意一级，
+    取决于实际组织结构。
+
+    设计要点：
+    - parent_id ondelete=RESTRICT：不允许删有子部门的部门（必须先迁子）
+    - UNIQUE(parent_id, name)：同父下部门名不重复，堵手抖空格 / 重复创建
+    - 删除非空部门（含 user）由路由层校验，DB 不做 cascade
+    """
+    __tablename__ = "departments"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    parent_id: Mapped[Optional[str]] = mapped_column(
+        String(64),
+        ForeignKey("departments.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+    )
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        server_default=func.now(),
+        nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False
+    )
+
+    # 自引用：父-子关系
+    parent: Mapped[Optional["Department"]] = relationship(
+        "Department",
+        remote_side=[id],
+        back_populates="children",
+    )
+    children: Mapped[List["Department"]] = relationship(
+        "Department",
+        back_populates="parent",
+        passive_deletes=True,
+    )
+
+    # 一对多 -> users（只在按部门反查用户时显式 join，平时不预加载）
+    users: Mapped[List["User"]] = relationship(
+        "User",
+        back_populates="department",
+        passive_deletes=True,
+    )
+
+    __table_args__ = (
+        UniqueConstraint("parent_id", "name", name="uq_dept_parent_name"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<Department(id={self.id}, name={self.name}, parent={self.parent_id})>"
 
 
 class Conversation(Base):

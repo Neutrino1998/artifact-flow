@@ -20,6 +20,7 @@ from api.dependencies import (
     require_admin,
     get_user_repository,
     get_conversation_manager,
+    get_department_repository,
 )
 from api.schemas.auth import (
     LoginRequest,
@@ -41,6 +42,7 @@ from api.services.auth import (
 )
 from core.conversation_manager import ConversationManager
 from repositories.user_repo import UserRepository
+from repositories.department_repo import DepartmentRepository
 from db.models import User
 from utils.logger import get_logger
 
@@ -151,6 +153,7 @@ async def create_user(
     request: CreateUserRequest,
     _admin: TokenPayload = Depends(require_admin),
     user_repo: UserRepository = Depends(get_user_repository),
+    dept_repo: DepartmentRepository = Depends(get_department_repository),
 ):
     """创建用户（仅 Admin）"""
     # 检查用户名是否已存在
@@ -161,12 +164,19 @@ async def create_user(
     if request.role not in ("admin", "user"):
         raise HTTPException(status_code=400, detail="Role must be 'admin' or 'user'")
 
+    # 校验 department_id 引用合法（DB FK 也会兜，但前置给出友好错误）
+    if request.department_id is not None:
+        dept = await dept_repo.get_by_id(request.department_id)
+        if dept is None:
+            raise HTTPException(status_code=400, detail="department_id does not reference an existing department")
+
     user = User(
         id=f"user-{uuid4().hex}",
         username=request.username,
         hashed_password=hash_password(request.password),
         display_name=request.display_name,
         role=request.role,
+        department_id=request.department_id,
     )
     await user_repo.add(user)
 
@@ -178,6 +188,7 @@ async def create_user(
         display_name=user.display_name,
         role=user.role,
         is_active=user.is_active,
+        department_id=user.department_id,
         created_at=user.created_at,
         updated_at=user.updated_at,
     )
@@ -230,6 +241,7 @@ async def get_user(
         display_name=user.display_name,
         role=user.role,
         is_active=user.is_active,
+        department_id=user.department_id,
         created_at=user.created_at,
         updated_at=user.updated_at,
     )
@@ -261,6 +273,7 @@ async def update_user(
     request: UpdateUserRequest,
     current_user: TokenPayload = Depends(require_admin),
     user_repo: UserRepository = Depends(get_user_repository),
+    dept_repo: DepartmentRepository = Depends(get_department_repository),
 ):
     """
     更新用户（仅 Admin）
@@ -304,6 +317,17 @@ async def update_user(
             )
         user.is_active = request.is_active
 
+    # department_id 用 model_fields_set 区分"未传"与"显式 null（清空）"
+    if "department_id" in request.model_fields_set:
+        if request.department_id is not None:
+            dept = await dept_repo.get_by_id(request.department_id)
+            if dept is None:
+                raise HTTPException(
+                    status_code=400,
+                    detail="department_id does not reference an existing department",
+                )
+        user.department_id = request.department_id
+
     await user_repo.update(user)
 
     logger.info(f"User updated: {user.username}")
@@ -314,6 +338,7 @@ async def update_user(
         display_name=user.display_name,
         role=user.role,
         is_active=user.is_active,
+        department_id=user.department_id,
         created_at=user.created_at,
         updated_at=user.updated_at,
     )

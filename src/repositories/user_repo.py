@@ -7,11 +7,12 @@
 import re
 from typing import Optional, List
 
-from sqlalchemy import select, func, or_, delete
+from sqlalchemy import select, func, or_, delete, false
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from db.models import User
+from db.models import User, Department
 from repositories.base import BaseRepository
+from utils.department_tree import expand_subtree
 
 
 class UserRepository(BaseRepository[User]):
@@ -27,16 +28,44 @@ class UserRepository(BaseRepository[User]):
         )
         return result.scalar_one_or_none()
 
-    def _apply_search_filter(self, query, search_query: Optional[str]):
-        """Apply ILIKE search on username and display_name"""
-        if search_query:
-            escaped = re.sub(r"([%_\\])", r"\\\1", search_query)
-            pattern = f"%{escaped}%"
-            query = query.where(or_(
-                User.username.ilike(pattern),
-                User.display_name.ilike(pattern),
-            ))
-        return query
+    async def _apply_search_filter(self, query, search_query: Optional[str]):
+        """
+        Apply ILIKE search on username + display_name + department subtree.
+
+        部门匹配为子树语义：搜根部门名返回整个条线的用户。实现：
+        1. 找名称匹配的部门
+        2. 全量拉部门表，BFS 展开 seed 们的子树
+        3. OR User.department_id IN (subtree_ids)
+
+        部门表预期保持小（几十~几百行），全量拉一次 + 内存 BFS 比 SQL CTE 简单。
+        """
+        if not search_query:
+            return query
+        escaped = re.sub(r"([%_\\])", r"\\\1", search_query)
+        pattern = f"%{escaped}%"
+
+        # 1. 名称匹配的部门 id
+        seed_dept_rows = (await self._session.execute(
+            select(Department.id).where(Department.name.ilike(pattern))
+        )).scalars().all()
+        seed_dept_ids = set(seed_dept_rows)
+
+        # 2. 子树展开
+        if seed_dept_ids:
+            all_depts = (await self._session.execute(select(Department))).scalars().all()
+            subtree_ids = expand_subtree(all_depts, seed_dept_ids)
+        else:
+            subtree_ids = set()
+
+        # 3. OR 三条
+        conds = [
+            User.username.ilike(pattern),
+            User.display_name.ilike(pattern),
+        ]
+        if subtree_ids:
+            conds.append(User.department_id.in_(subtree_ids))
+
+        return query.where(or_(*conds))
 
     async def list_users(
         self,
@@ -49,7 +78,7 @@ class UserRepository(BaseRepository[User]):
         query = select(User)
         if not include_inactive:
             query = query.where(User.is_active == True)
-        query = self._apply_search_filter(query, search_query)
+        query = await self._apply_search_filter(query, search_query)
         query = query.order_by(User.created_at.desc()).offset(offset).limit(limit)
         result = await self._session.execute(query)
         return list(result.scalars().all())
@@ -59,7 +88,7 @@ class UserRepository(BaseRepository[User]):
         query = select(func.count()).select_from(User)
         if not include_inactive:
             query = query.where(User.is_active == True)
-        query = self._apply_search_filter(query, search_query)
+        query = await self._apply_search_filter(query, search_query)
         result = await self._session.execute(query)
         return result.scalar_one()
 

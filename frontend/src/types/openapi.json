@@ -1506,6 +1506,383 @@
         }
       }
     },
+    "/api/v1/departments": {
+      "get": {
+        "tags": [
+          "departments"
+        ],
+        "summary": "List Departments",
+        "description": "\u5217\u51fa\u67d0\u7236\u4e0b\u7684\u5b50\u90e8\u95e8\uff08\u6309 name \u6392\u5e8f\uff09\u3002\n\nparent_id \u7f3a\u7701 \u2192 \u4e00\u7ea7\u90e8\u95e8\uff1b\u4f20\u5177\u4f53 id \u2192 \u8be5\u90e8\u95e8\u7684\u76f4\u63a5\u5b50\u3002\n\u7ed9\u524d\u7aef cascader \u6bcf\u7ea7\u6e32\u67d3\u7528\u3002",
+        "operationId": "list_departments_api_v1_departments_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "parent_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Parent id; omit for top-level",
+              "title": "Parent Id"
+            },
+            "description": "Parent id; omit for top-level"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DepartmentListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "departments"
+        ],
+        "summary": "Create Department",
+        "description": "\u663e\u5f0f\u521b\u5efa\u90e8\u95e8\uff08admin \u5728\u7ba1\u7406 UI \u4e2d\u70b9 \"+ \u65b0\u5efa\" \u8d70\u8fd9\u91cc\uff09\u3002\n\n\u51b2\u7a81 \u2192 409\u3002\u6279\u91cf\u5bfc\u5165 / \u521b\u5efa\u7528\u6237\u65f6\u7684\"\u8def\u5f84\u89e3\u6790\u81ea\u52a8\u5efa\" \u8d70 /resolve \u7aef\u70b9\u3002",
+        "operationId": "create_department_api_v1_departments_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateDepartmentRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DepartmentResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/departments/tree": {
+      "get": {
+        "tags": [
+          "departments"
+        ],
+        "summary": "Get Tree",
+        "description": "\u8fd4\u56de\u5b8c\u6574\u90e8\u95e8\u6811\uff08\u9876\u5c42\u8282\u70b9\u5217\u8868 \u2192 children \u5d4c\u5957\uff09\u3002\n\n\u4e00\u6b21\u6027\u8fd4\u56de\uff0c\u90e8\u95e8\u8868\u6570\u91cf\u7ea7\u522b\u5c0f\uff08\u51e0\u5341\u5230\u51e0\u767e\uff09\u3002\u7ed9\u90e8\u95e8\u7ba1\u7406\u9762\u677f\u7528\u3002\nuser_count \u662f\u8be5\u8282\u70b9\u7684**\u76f4\u5c5e**\u7528\u6237\u6570\uff0c\u5b50\u6811\u5408\u8ba1\u7531\u524d\u7aef\u6309\u9700\u8ba1\u7b97\u3002",
+        "operationId": "get_tree_api_v1_departments_tree_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DepartmentTreeResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/departments/{dept_id}": {
+      "get": {
+        "tags": [
+          "departments"
+        ],
+        "summary": "Get Department",
+        "description": "\u5355\u4e2a\u90e8\u95e8\u8be6\u60c5\uff08\u542b user_count, child_count\uff0c\u7ed9\u8be6\u60c5/\u5220\u9664\u524d\u7f6e\u5c55\u793a\u7528\uff09",
+        "operationId": "get_department_api_v1_departments__dept_id__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "dept_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Dept Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DepartmentResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "departments"
+        ],
+        "summary": "Rename Department",
+        "description": "\u4ec5\u6539\u90e8\u95e8\u540d\uff08\u642c\u5bb6\u8d70 POST /{id}/move\uff0c\u8def\u5f84\u5206\u79bb\u907f\u514d PATCH \u5b57\u6bb5\u6b67\u4e49\uff09\u3002\n\n\u51b2\u7a81\uff08\u540c\u7236\u4e0b\u91cd\u540d\uff09 \u2192 409\u3002",
+        "operationId": "rename_department_api_v1_departments__dept_id__patch",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "dept_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Dept Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateDepartmentRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DepartmentResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "departments"
+        ],
+        "summary": "Delete Department",
+        "description": "\u5220\u9664\u90e8\u95e8 \u2014 \u5fc5\u987b\u4e3a\u7a7a\uff08\u65e0\u5b50\u90e8\u95e8\u3001\u65e0\u76f4\u5c5e\u7528\u6237\uff09\u3002\n\n\u975e\u7a7a \u2192 409 + body \u542b user_count/child_count\uff0c\u524d\u7aef\u636e\u6b64\u63d0\u793a\u5148\u8fc1\u3002\nparent_id ondelete=RESTRICT \u5728 DB \u5c42\u515c\u5e95\uff0c\u4f46\u8def\u7531\u5c42\u5148\u6821\u9a8c\u7ed9\u51fa\u66f4\u53cb\u597d\u9519\u8bef\u3002",
+        "operationId": "delete_department_api_v1_departments__dept_id__delete",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "dept_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Dept Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/departments/{dept_id}/move": {
+      "post": {
+        "tags": [
+          "departments"
+        ],
+        "summary": "Move Department",
+        "description": "\u642c\u5bb6\uff1a\u628a\u90e8\u95e8\u6302\u5230\u65b0\u7236\u4e0b\u3002new_parent_id=None \u2192 \u642c\u5230\u6839\u3002\n\n\u6821\u9a8c\uff1a\n- \u73af\u68c0\u6d4b\uff1a\u4e0d\u80fd\u642c\u5230\u81ea\u5df1 / \u81ea\u5df1\u5b50\u5b59\u4e0b \u2192 400\n- \u540d\u79f0\u51b2\u7a81\uff1a\u65b0\u7236\u4e0b\u5df2\u6709\u540c\u540d \u2192 409\n- \u65b0\u7236\u4e0d\u5b58\u5728 \u2192 400",
+        "operationId": "move_department_api_v1_departments__dept_id__move_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "dept_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Dept Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MoveDepartmentRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DepartmentResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/departments/resolve": {
+      "post": {
+        "tags": [
+          "departments"
+        ],
+        "summary": "Resolve Path",
+        "description": "\u8def\u5f84 \u2192 \u672b\u7ea7 dept_id\u3002\u7f3a\u5931\u5c42\u7ea7\u81ea\u52a8\u521b\u5efa\uff08admin \u663e\u5f0f\u63d0\u4ea4\uff0c\u5b89\u5168\uff09\u3002\n\n\u7ed9\u524d\u7aef cascader \"+ \u65b0\u5efa\u5f53\u524d\u7ea7\" \u5165\u53e3\u3001PR3 \u6279\u91cf\u5bfc\u5165\u65f6\u6309\u884c\u89e3\u6790\u7528\u3002\n\u7a7a\u8def\u5f84 / \u5168\u7a7a\u5b57\u7b26\u4e32 \u2192 \u8fd4\u56de {id: null}\u3002",
+        "operationId": "resolve_path_api_v1_departments_resolve_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResolveDepartmentRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResolveDepartmentResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
     "/health/live": {
       "get": {
         "summary": "Liveness",
@@ -2258,6 +2635,35 @@
         "title": "ConversationSummary",
         "description": "Conversation summary in list response"
       },
+      "CreateDepartmentRequest": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Name",
+            "description": "Department name"
+          },
+          "parent_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Id",
+            "description": "Parent department id; null = top-level"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "title": "CreateDepartmentRequest",
+        "description": "POST /api/v1/departments request body"
+      },
       "CreateUserRequest": {
         "properties": {
           "username": {
@@ -2292,6 +2698,18 @@
             "title": "Role",
             "description": "Role (admin or user)",
             "default": "user"
+          },
+          "department_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Department Id",
+            "description": "Department id; null = unassigned"
           }
         },
         "type": "object",
@@ -2301,6 +2719,140 @@
         ],
         "title": "CreateUserRequest",
         "description": "POST /api/v1/auth/users request body"
+      },
+      "DepartmentListResponse": {
+        "properties": {
+          "departments": {
+            "items": {
+              "$ref": "#/components/schemas/DepartmentResponse"
+            },
+            "type": "array",
+            "title": "Departments"
+          }
+        },
+        "type": "object",
+        "required": [
+          "departments"
+        ],
+        "title": "DepartmentListResponse",
+        "description": "GET /api/v1/departments response \u2014 \u540c\u7ea7\u5217\u8868"
+      },
+      "DepartmentResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "parent_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "user_count": {
+            "type": "integer",
+            "title": "User Count",
+            "description": "\u8be5\u90e8\u95e8\u4e0b\u76f4\u5c5e\u7528\u6237\u6570\uff08\u4e0d\u542b\u5b50\u90e8\u95e8\uff09"
+          },
+          "child_count": {
+            "type": "integer",
+            "title": "Child Count",
+            "description": "\u76f4\u63a5\u5b50\u90e8\u95e8\u6570"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "parent_id",
+          "name",
+          "user_count",
+          "child_count",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "DepartmentResponse",
+        "description": "Single department response (\u542b\u76f4\u5c5e\u8ba1\u6570)"
+      },
+      "DepartmentTreeNode": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "parent_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "user_count": {
+            "type": "integer",
+            "title": "User Count",
+            "description": "\u8be5\u90e8\u95e8\u4e0b\u76f4\u5c5e\u7528\u6237\u6570"
+          },
+          "children": {
+            "items": {
+              "$ref": "#/components/schemas/DepartmentTreeNode"
+            },
+            "type": "array",
+            "title": "Children"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "parent_id",
+          "name",
+          "user_count",
+          "children"
+        ],
+        "title": "DepartmentTreeNode",
+        "description": "Tree node \u2014 \u9012\u5f52\u7ed3\u6784\uff0c\u5305\u542b children"
+      },
+      "DepartmentTreeResponse": {
+        "properties": {
+          "nodes": {
+            "items": {
+              "$ref": "#/components/schemas/DepartmentTreeNode"
+            },
+            "type": "array",
+            "title": "Nodes"
+          }
+        },
+        "type": "object",
+        "required": [
+          "nodes"
+        ],
+        "title": "DepartmentTreeResponse",
+        "description": "GET /api/v1/departments/tree response \u2014 \u9876\u5c42\u8282\u70b9\u5217\u8868"
       },
       "HTTPValidationError": {
         "properties": {
@@ -2485,6 +3037,65 @@
         "title": "MessageResponse",
         "description": "Message in conversation detail response"
       },
+      "MoveDepartmentRequest": {
+        "properties": {
+          "new_parent_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "New Parent Id",
+            "description": "New parent id; null = move to root"
+          }
+        },
+        "type": "object",
+        "title": "MoveDepartmentRequest",
+        "description": "POST /api/v1/departments/{id}/move request body \u2014 \u642c\u5bb6"
+      },
+      "ResolveDepartmentRequest": {
+        "properties": {
+          "path": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Path",
+            "description": "Department path from top to leaf; empty list \u2192 null id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "path"
+        ],
+        "title": "ResolveDepartmentRequest",
+        "description": "POST /api/v1/departments/resolve request body"
+      },
+      "ResolveDepartmentResponse": {
+        "properties": {
+          "id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id",
+            "description": "\u672b\u7ea7\u90e8\u95e8 id\uff1b\u7a7a path \u2192 null"
+          }
+        },
+        "type": "object",
+        "title": "ResolveDepartmentResponse",
+        "description": "POST /api/v1/departments/resolve response",
+        "required": [
+          "id"
+        ]
+      },
       "ResumeRequest": {
         "properties": {
           "message_id": {
@@ -2526,6 +3137,23 @@
         ],
         "title": "ResumeResponse",
         "description": "POST /api/v1/chat/{conv_id}/resume response"
+      },
+      "UpdateDepartmentRequest": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Name",
+            "description": "New department name"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "title": "UpdateDepartmentRequest",
+        "description": "PATCH /api/v1/departments/{id} request body \u2014 \u4ec5\u6539\u540d"
       },
       "UpdateMyProfileRequest": {
         "properties": {
@@ -2599,11 +3227,23 @@
             ],
             "title": "Is Active",
             "description": "Whether user is active"
+          },
+          "department_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Department Id",
+            "description": "Department id; explicit null clears"
           }
         },
         "type": "object",
         "title": "UpdateUserRequest",
-        "description": "PUT /api/v1/auth/users/{id} request body"
+        "description": "PUT /api/v1/auth/users/{id} request body.\n\nAll fields optional. department_id semantics: \u5b57\u6bb5\u88ab\u663e\u5f0f\u4f20\u5165\u65f6\u751f\u6548\uff08\u5305\u62ec\n\u4f20 null = \u6e05\u7a7a\u5f52\u5c5e\uff09\uff1b\u5b57\u6bb5\u7f3a\u7701 \u2192 \u4e0d\u6539\u3002\u8def\u7531\u901a\u8fc7 model_fields_set \u533a\u5206\u3002"
       },
       "UploadResponse": {
         "properties": {
@@ -2769,6 +3409,17 @@
             "type": "boolean",
             "title": "Is Active"
           },
+          "department_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Department Id"
+          },
           "created_at": {
             "type": "string",
             "format": "date-time",
@@ -2787,6 +3438,7 @@
           "display_name",
           "role",
           "is_active",
+          "department_id",
           "created_at",
           "updated_at"
         ],

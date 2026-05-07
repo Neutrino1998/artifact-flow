@@ -20,6 +20,14 @@ import type {
   UserResponse,
   UserListResponse,
   UserImpactResponse,
+  DepartmentResponse,
+  DepartmentListResponse,
+  DepartmentTreeResponse,
+  CreateDepartmentRequest,
+  UpdateDepartmentRequest,
+  MoveDepartmentRequest,
+  ResolveDepartmentRequest,
+  ResolveDepartmentResponse,
   UploadResponse,
 } from '@/types';
 import { useAuthStore } from '@/stores/authStore';
@@ -434,6 +442,54 @@ export function changeMyPassword(body: ChangePasswordRequest) {
 export function updateMyProfile(body: UpdateMyProfileRequest) {
   return request<UserInfo>('/api/v1/auth/me', {
     method: 'PATCH',
+    body: JSON.stringify(body),
+  });
+}
+
+// Departments (Admin)
+export function listDepartments(parentId?: string | null) {
+  const params = new URLSearchParams();
+  if (parentId) params.set('parent_id', parentId);
+  const qs = params.toString();
+  return request<DepartmentListResponse>(`/api/v1/departments${qs ? `?${qs}` : ''}`);
+}
+
+export function getDepartmentTree() {
+  return request<DepartmentTreeResponse>('/api/v1/departments/tree');
+}
+
+export function getDepartment(deptId: string) {
+  return request<DepartmentResponse>(`/api/v1/departments/${deptId}`);
+}
+
+export function createDepartment(body: CreateDepartmentRequest) {
+  return request<DepartmentResponse>('/api/v1/departments', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export function renameDepartment(deptId: string, body: UpdateDepartmentRequest) {
+  return request<DepartmentResponse>(`/api/v1/departments/${deptId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(body),
+  });
+}
+
+export function moveDepartment(deptId: string, body: MoveDepartmentRequest) {
+  return request<DepartmentResponse>(`/api/v1/departments/${deptId}/move`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export function deleteDepartment(deptId: string) {
+  return request<void>(`/api/v1/departments/${deptId}`, { method: 'DELETE' });
+}
+
+export function resolveDepartmentPath(body: ResolveDepartmentRequest) {
+  return request<ResolveDepartmentResponse>('/api/v1/departments/resolve', {
+    method: 'POST',
     body: JSON.stringify(body),
   });
 }

@@ -2,9 +2,16 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import * as api from '@/lib/api';
-import type { UserResponse } from '@/types';
+import type { UserResponse, DepartmentTreeNode } from '@/types';
 import { useAuthStore } from '@/stores/authStore';
 import { useUIStore } from '@/stores/uiStore';
+
+function flattenDeptNames(nodes: DepartmentTreeNode[], out: Map<string, string>): void {
+  for (const n of nodes) {
+    out.set(n.id, n.name);
+    if (n.children?.length) flattenDeptNames(n.children, out);
+  }
+}
 
 const PAGE_SIZE = 20;
 
@@ -15,6 +22,7 @@ export default function UserManagementPanel() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState('');
+  const [deptNames, setDeptNames] = useState<Map<string, string>>(new Map());
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const queryRef = useRef(query);
 
@@ -54,6 +62,23 @@ export default function UserManagementPanel() {
     fetchUsers(queryRef.current);
   }, [listVersion, fetchUsers]);
 
+  // 拉部门树 — 给 UserRow 显示部门名用。dept 改名/搬家后 listVersion bump
+  // 也会触发重拉（dept 管理面板内的写操作都会 bump）
+  useEffect(() => {
+    let cancelled = false;
+    api.getDepartmentTree()
+      .then((r) => {
+        if (cancelled) return;
+        const m = new Map<string, string>();
+        flattenDeptNames(r.nodes, m);
+        setDeptNames(m);
+      })
+      .catch(() => {
+        // 静默：部门名只是辅助信息，加载失败不阻断用户列表
+      });
+    return () => { cancelled = true; };
+  }, [listVersion]);
+
   const handleQueryChange = useCallback((value: string) => {
     setQuery(value);
     queryRef.current = value;
@@ -91,7 +116,7 @@ export default function UserManagementPanel() {
               type="text"
               value={query}
               onChange={(e) => handleQueryChange(e.target.value)}
-              placeholder="搜索用户名或显示名..."
+              placeholder="搜索用户名 / 显示名 / 部门..."
               autoFocus
               className="flex-1 bg-transparent text-text-primary dark:text-text-primary-dark placeholder:text-text-tertiary dark:placeholder:text-text-tertiary-dark outline-none"
             />
@@ -122,16 +147,31 @@ export default function UserManagementPanel() {
             </div>
           )}
 
-          {/* Create user button — opens right panel */}
-          <button
-            onClick={() => setRightView({ type: 'create-user' })}
-            className="w-full mb-3 flex items-center gap-2 px-4 py-2.5 text-accent bg-chat dark:bg-chat-dark rounded-2xl border border-border dark:border-border-dark hover:bg-panel dark:hover:bg-panel-accent-dark transition-colors"
-          >
-            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5">
-              <path d="M7 2v10M2 7h10" />
-            </svg>
-            新建用户
-          </button>
+          {/* Top-level actions — both open right panel */}
+          <div className="mb-3 flex items-center gap-2">
+            <button
+              onClick={() => setRightView({ type: 'create-user' })}
+              className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 text-accent bg-chat dark:bg-chat-dark rounded-2xl border border-border dark:border-border-dark hover:bg-panel dark:hover:bg-panel-accent-dark transition-colors"
+            >
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <path d="M7 2v10M2 7h10" />
+              </svg>
+              新建用户
+            </button>
+            <button
+              onClick={() => setRightView({ type: 'dept-manager' })}
+              className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-2xl border transition-colors ${
+                rightView.type === 'dept-manager'
+                  ? 'text-accent border-accent bg-panel dark:bg-panel-accent-dark'
+                  : 'text-text-secondary dark:text-text-secondary-dark border-border dark:border-border-dark bg-chat dark:bg-chat-dark hover:bg-panel dark:hover:bg-panel-accent-dark'
+              }`}
+            >
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <path d="M2 3h10M2 7h10M2 11h6" />
+              </svg>
+              管理部门
+            </button>
+          </div>
 
           {/* User list */}
           {loading && users.length === 0 ? (
@@ -150,6 +190,7 @@ export default function UserManagementPanel() {
                   user={user}
                   isSelf={user.id === currentUserId}
                   isSelected={user.id === selectedUserId}
+                  deptName={user.department_id ? deptNames.get(user.department_id) ?? null : null}
                   onOpenDetail={() => setRightView({ type: 'edit-user', userId: user.id })}
                 />
               ))}
@@ -180,11 +221,13 @@ function UserRow({
   user,
   isSelf,
   isSelected,
+  deptName,
   onOpenDetail,
 }: {
   user: UserResponse;
   isSelf: boolean;
   isSelected: boolean;
+  deptName: string | null;
   onOpenDetail: () => void;
 }) {
   return (
@@ -212,6 +255,7 @@ function UserRow({
         </div>
         <div className="text-xs text-text-tertiary dark:text-text-tertiary-dark truncate">
           @{user.username}
+          {deptName && <span className="ml-2">· {deptName}</span>}
           <span className="ml-2 opacity-60">{user.id}</span>
         </div>
       </div>

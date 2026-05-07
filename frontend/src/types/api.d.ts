@@ -530,6 +530,139 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/departments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Departments
+         * @description 列出某父下的子部门（按 name 排序）。
+         *
+         *     parent_id 缺省 → 一级部门；传具体 id → 该部门的直接子。
+         *     给前端 cascader 每级渲染用。
+         */
+        get: operations["list_departments_api_v1_departments_get"];
+        put?: never;
+        /**
+         * Create Department
+         * @description 显式创建部门（admin 在管理 UI 中点 "+ 新建" 走这里）。
+         *
+         *     冲突 → 409。批量导入 / 创建用户时的"路径解析自动建" 走 /resolve 端点。
+         */
+        post: operations["create_department_api_v1_departments_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/departments/tree": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Tree
+         * @description 返回完整部门树（顶层节点列表 → children 嵌套）。
+         *
+         *     一次性返回，部门表数量级别小（几十到几百）。给部门管理面板用。
+         *     user_count 是该节点的**直属**用户数，子树合计由前端按需计算。
+         */
+        get: operations["get_tree_api_v1_departments_tree_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/departments/{dept_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Department
+         * @description 单个部门详情（含 user_count, child_count，给详情/删除前置展示用）
+         */
+        get: operations["get_department_api_v1_departments__dept_id__get"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete Department
+         * @description 删除部门 — 必须为空（无子部门、无直属用户）。
+         *
+         *     非空 → 409 + body 含 user_count/child_count，前端据此提示先迁。
+         *     parent_id ondelete=RESTRICT 在 DB 层兜底，但路由层先校验给出更友好错误。
+         */
+        delete: operations["delete_department_api_v1_departments__dept_id__delete"];
+        options?: never;
+        head?: never;
+        /**
+         * Rename Department
+         * @description 仅改部门名（搬家走 POST /{id}/move，路径分离避免 PATCH 字段歧义）。
+         *
+         *     冲突（同父下重名） → 409。
+         */
+        patch: operations["rename_department_api_v1_departments__dept_id__patch"];
+        trace?: never;
+    };
+    "/api/v1/departments/{dept_id}/move": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Move Department
+         * @description 搬家：把部门挂到新父下。new_parent_id=None → 搬到根。
+         *
+         *     校验：
+         *     - 环检测：不能搬到自己 / 自己子孙下 → 400
+         *     - 名称冲突：新父下已有同名 → 409
+         *     - 新父不存在 → 400
+         */
+        post: operations["move_department_api_v1_departments__dept_id__move_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/departments/resolve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Resolve Path
+         * @description 路径 → 末级 dept_id。缺失层级自动创建（admin 显式提交，安全）。
+         *
+         *     给前端 cascader "+ 新建当前级" 入口、PR3 批量导入时按行解析用。
+         *     空路径 / 全空字符串 → 返回 {id: null}。
+         */
+        post: operations["resolve_path_api_v1_departments_resolve_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/health/live": {
         parameters: {
             query?: never;
@@ -981,6 +1114,22 @@ export interface components {
             updated_at: string;
         };
         /**
+         * CreateDepartmentRequest
+         * @description POST /api/v1/departments request body
+         */
+        CreateDepartmentRequest: {
+            /**
+             * Name
+             * @description Department name
+             */
+            name: string;
+            /**
+             * Parent Id
+             * @description Parent department id; null = top-level
+             */
+            parent_id?: string | null;
+        };
+        /**
          * CreateUserRequest
          * @description POST /api/v1/auth/users request body
          */
@@ -1006,6 +1155,78 @@ export interface components {
              * @default user
              */
             role: string;
+            /**
+             * Department Id
+             * @description Department id; null = unassigned
+             */
+            department_id?: string | null;
+        };
+        /**
+         * DepartmentListResponse
+         * @description GET /api/v1/departments response — 同级列表
+         */
+        DepartmentListResponse: {
+            /** Departments */
+            departments: components["schemas"]["DepartmentResponse"][];
+        };
+        /**
+         * DepartmentResponse
+         * @description Single department response (含直属计数)
+         */
+        DepartmentResponse: {
+            /** Id */
+            id: string;
+            /** Parent Id */
+            parent_id: string | null;
+            /** Name */
+            name: string;
+            /**
+             * User Count
+             * @description 该部门下直属用户数（不含子部门）
+             */
+            user_count: number;
+            /**
+             * Child Count
+             * @description 直接子部门数
+             */
+            child_count: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /**
+         * DepartmentTreeNode
+         * @description Tree node — 递归结构，包含 children
+         */
+        DepartmentTreeNode: {
+            /** Id */
+            id: string;
+            /** Parent Id */
+            parent_id: string | null;
+            /** Name */
+            name: string;
+            /**
+             * User Count
+             * @description 该部门下直属用户数
+             */
+            user_count: number;
+            /** Children */
+            children: components["schemas"]["DepartmentTreeNode"][];
+        };
+        /**
+         * DepartmentTreeResponse
+         * @description GET /api/v1/departments/tree response — 顶层节点列表
+         */
+        DepartmentTreeResponse: {
+            /** Nodes */
+            nodes: components["schemas"]["DepartmentTreeNode"][];
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -1124,6 +1345,39 @@ export interface components {
             } | null;
         };
         /**
+         * MoveDepartmentRequest
+         * @description POST /api/v1/departments/{id}/move request body — 搬家
+         */
+        MoveDepartmentRequest: {
+            /**
+             * New Parent Id
+             * @description New parent id; null = move to root
+             */
+            new_parent_id?: string | null;
+        };
+        /**
+         * ResolveDepartmentRequest
+         * @description POST /api/v1/departments/resolve request body
+         */
+        ResolveDepartmentRequest: {
+            /**
+             * Path
+             * @description Department path from top to leaf; empty list → null id
+             */
+            path: string[];
+        };
+        /**
+         * ResolveDepartmentResponse
+         * @description POST /api/v1/departments/resolve response
+         */
+        ResolveDepartmentResponse: {
+            /**
+             * Id
+             * @description 末级部门 id；空 path → null
+             */
+            id: string | null;
+        };
+        /**
          * ResumeRequest
          * @description POST /api/v1/chat/{conv_id}/resume request body
          */
@@ -1157,6 +1411,17 @@ export interface components {
             stream_url: string;
         };
         /**
+         * UpdateDepartmentRequest
+         * @description PATCH /api/v1/departments/{id} request body — 仅改名
+         */
+        UpdateDepartmentRequest: {
+            /**
+             * Name
+             * @description New department name
+             */
+            name: string;
+        };
+        /**
          * UpdateMyProfileRequest
          * @description PATCH /api/v1/auth/me request body — 自助修改自己的非敏感资料字段
          */
@@ -1169,7 +1434,10 @@ export interface components {
         };
         /**
          * UpdateUserRequest
-         * @description PUT /api/v1/auth/users/{id} request body
+         * @description PUT /api/v1/auth/users/{id} request body.
+         *
+         *     All fields optional. department_id semantics: 字段被显式传入时生效（包括
+         *     传 null = 清空归属）；字段缺省 → 不改。路由通过 model_fields_set 区分。
          */
         UpdateUserRequest: {
             /**
@@ -1192,6 +1460,11 @@ export interface components {
              * @description Whether user is active
              */
             is_active?: boolean | null;
+            /**
+             * Department Id
+             * @description Department id; explicit null clears
+             */
+            department_id?: string | null;
         };
         /**
          * UploadResponse
@@ -1304,6 +1577,8 @@ export interface components {
             role: string;
             /** Is Active */
             is_active: boolean;
+            /** Department Id */
+            department_id: string | null;
             /**
              * Created At
              * Format: date-time
@@ -2268,6 +2543,254 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AdminConversationEventsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_departments_api_v1_departments_get: {
+        parameters: {
+            query?: {
+                /** @description Parent id; omit for top-level */
+                parent_id?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DepartmentListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_department_api_v1_departments_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateDepartmentRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DepartmentResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_tree_api_v1_departments_tree_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DepartmentTreeResponse"];
+                };
+            };
+        };
+    };
+    get_department_api_v1_departments__dept_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                dept_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DepartmentResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_department_api_v1_departments__dept_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                dept_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    rename_department_api_v1_departments__dept_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                dept_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateDepartmentRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DepartmentResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    move_department_api_v1_departments__dept_id__move_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                dept_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MoveDepartmentRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DepartmentResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    resolve_path_api_v1_departments_resolve_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ResolveDepartmentRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResolveDepartmentResponse"];
                 };
             };
             /** @description Validation Error */

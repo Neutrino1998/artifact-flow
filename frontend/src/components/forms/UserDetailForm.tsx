@@ -7,6 +7,7 @@ import { useAuthStore } from '@/stores/authStore';
 import { useUIStore } from '@/stores/uiStore';
 import type { UserResponse } from '@/types';
 import DangerConfirmModal from '@/components/layout/DangerConfirmModal';
+import DepartmentCascader from '@/components/forms/DepartmentCascader';
 
 interface UserDetailFormProps {
   userId: string;
@@ -33,6 +34,7 @@ export default function UserDetailForm({ userId }: UserDetailFormProps) {
   const [displayName, setDisplayName] = useState('');
   const [role, setRole] = useState<'user' | 'admin'>('user');
   const [isActive, setIsActive] = useState(true);
+  const [departmentId, setDepartmentId] = useState<string | null>(null);
 
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -54,6 +56,7 @@ export default function UserDetailForm({ userId }: UserDetailFormProps) {
       setDisplayName(u.display_name ?? '');
       setRole(u.role === 'admin' ? 'admin' : 'user');
       setIsActive(u.is_active);
+      setDepartmentId(u.department_id ?? null);
     } catch (err) {
       setLoadError(err instanceof Error ? err.message : '加载用户失败');
     } finally {
@@ -91,6 +94,7 @@ export default function UserDetailForm({ userId }: UserDetailFormProps) {
       (displayName.trim() || null) !== (user.display_name ?? null) ||
       role !== user.role ||
       isActive !== user.is_active ||
+      departmentId !== (user.department_id ?? null) ||
       passwordChanged
     );
 
@@ -106,6 +110,7 @@ export default function UserDetailForm({ userId }: UserDetailFormProps) {
       }
       if (role !== user.role) patch.role = role;
       if (isActive !== user.is_active) patch.is_active = isActive;
+      if (departmentId !== (user.department_id ?? null)) patch.department_id = departmentId;
       if (passwordChanged) patch.password = newPassword;
 
       const updated = await api.updateUser(user.id, patch);
@@ -264,6 +269,19 @@ export default function UserDetailForm({ userId }: UserDetailFormProps) {
               启用账号
             </span>
           </label>
+        </div>
+
+        <div>
+          <label className="block text-sm text-text-secondary dark:text-text-secondary-dark mb-1">
+            部门
+          </label>
+          <DepartmentCascader
+            value={departmentId}
+            onChange={setDepartmentId}
+            allowCreate
+            disabled={saving}
+            refreshKey={listVersion}
+          />
         </div>
 
         {/* Reset password — 自己看自己时整段隐藏（走 /me/password） */}

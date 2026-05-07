@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from db.database import create_test_database_manager, DatabaseManager
 from db.models import (
     User,
+    Department,
     Conversation,
     Message,
     MessageEvent,
@@ -29,6 +30,7 @@ from db.models import (
 from repositories.user_repo import UserRepository
 from repositories.conversation_repo import ConversationRepository
 from repositories.artifact_repo import ArtifactRepository
+from repositories.department_repo import DepartmentRepository
 from api.services.auth import hash_password
 
 
@@ -77,6 +79,16 @@ async def db_session(db_manager: DatabaseManager) -> AsyncSession:
     async with db_manager.session() as cleanup_session:
         for table_name in _TABLES_DELETE_ORDER:
             await cleanup_session.execute(text(f"DELETE FROM {table_name}"))
+        # Departments: parent_id self-FK with ondelete=RESTRICT means we can't
+        # blanket-delete in one statement (parent rows still referenced when
+        # row-level check fires). Iteratively delete leaves until empty.
+        while True:
+            result = await cleanup_session.execute(text(
+                "DELETE FROM departments WHERE id NOT IN "
+                "(SELECT parent_id FROM departments WHERE parent_id IS NOT NULL)"
+            ))
+            if result.rowcount == 0:
+                break
         await cleanup_session.commit()
 
 
@@ -98,6 +110,11 @@ def conversation_repo(db_session: AsyncSession) -> ConversationRepository:
 @pytest.fixture
 def artifact_repo(db_session: AsyncSession) -> ArtifactRepository:
     return ArtifactRepository(db_session)
+
+
+@pytest.fixture
+def department_repo(db_session: AsyncSession) -> DepartmentRepository:
+    return DepartmentRepository(db_session)
 
 
 # ============================================================

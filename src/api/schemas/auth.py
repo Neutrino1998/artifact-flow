@@ -27,6 +27,7 @@ class CreateUserRequest(BaseModel):
     password: str = Field(..., min_length=4, max_length=128, description="Password")
     display_name: Optional[str] = Field(None, max_length=128, description="Display name")
     role: str = Field("user", description="Role (admin or user)")
+    department_id: Optional[str] = Field(None, description="Department id; null = unassigned")
 
     @field_validator("username")
     @classmethod
@@ -36,11 +37,17 @@ class CreateUserRequest(BaseModel):
 
 
 class UpdateUserRequest(BaseModel):
-    """PUT /api/v1/auth/users/{id} request body"""
+    """
+    PUT /api/v1/auth/users/{id} request body.
+
+    All fields optional. department_id semantics: 字段被显式传入时生效（包括
+    传 null = 清空归属）；字段缺省 → 不改。路由通过 model_fields_set 区分。
+    """
     display_name: Optional[str] = Field(None, max_length=128, description="Display name")
     password: Optional[str] = Field(None, min_length=4, max_length=128, description="New password")
     role: Optional[str] = Field(None, description="Role (admin or user)")
     is_active: Optional[bool] = Field(None, description="Whether user is active")
+    department_id: Optional[str] = Field(None, description="Department id; explicit null clears")
 
 
 class ChangePasswordRequest(BaseModel):
@@ -81,6 +88,7 @@ class UserResponse(BaseModel):
     display_name: Optional[str] = None
     role: str
     is_active: bool
+    department_id: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 

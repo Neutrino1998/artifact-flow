@@ -10,8 +10,7 @@ export type UserMgmtRightView =
   | { type: 'empty' }
   | { type: 'create-user' }
   | { type: 'edit-user'; userId: string }
-  | { type: 'create-dept'; parentId: string | null }
-  | { type: 'edit-dept'; deptId: string }
+  | { type: 'dept-manager' }
   | { type: 'bulk-action' };
 
 interface UIState {
