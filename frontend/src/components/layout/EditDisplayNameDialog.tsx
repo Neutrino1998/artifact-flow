@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import * as api from '@/lib/api';
 import { ApiError } from '@/lib/api';
 import { useAuthStore } from '@/stores/authStore';
+import { useUIStore } from '@/stores/uiStore';
 
 interface EditDisplayNameDialogProps {
   onClose: () => void;
@@ -13,6 +14,7 @@ export default function EditDisplayNameDialog({ onClose }: EditDisplayNameDialog
   const user = useAuthStore((s) => s.user);
   const token = useAuthStore((s) => s.token);
   const login = useAuthStore((s) => s.login);
+  const bumpListVersion = useUIStore((s) => s.bumpUserMgmtListVersion);
 
   const [displayName, setDisplayName] = useState(user?.display_name ?? '');
   const [submitting, setSubmitting] = useState(false);
@@ -40,10 +42,13 @@ export default function EditDisplayNameDialog({ onClose }: EditDisplayNameDialog
     try {
       // 后端用空字符串清空 display_name；trimmed=='' 时也走这条路径
       const updated = await api.updateMyProfile({ display_name: trimmed });
-      // 同步 authStore，sidebar / 各处 display_name 立即刷新
+      // 同步 authStore — sidebar 头像名等立即刷新
       if (token && user) {
         login(token, { ...user, display_name: updated.display_name ?? null });
       }
+      // 通知其他持有 UserResponse 副本的组件刷新（UserManagementPanel 列表 +
+      // UserDetailForm 详情）。authStore 不是这些组件的真相来源，必须显式 bump
+      bumpListVersion();
       onClose();
     } catch (err) {
       if (err instanceof ApiError) {

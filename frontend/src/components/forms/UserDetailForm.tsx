@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import * as api from '@/lib/api';
 import { ApiError } from '@/lib/api';
 import { useAuthStore } from '@/stores/authStore';
@@ -21,6 +21,7 @@ export default function UserDetailForm({ userId }: UserDetailFormProps) {
   const currentUserId = useAuthStore((s) => s.user?.id);
   const setRightView = useUIStore((s) => s.setUserManagementRightView);
   const bumpListVersion = useUIStore((s) => s.bumpUserMgmtListVersion);
+  const listVersion = useUIStore((s) => s.userMgmtListVersion);
 
   const isSelf = currentUserId === userId;
 
@@ -69,6 +70,16 @@ export default function UserDetailForm({ userId }: UserDetailFormProps) {
     setDeleteImpact(null);
     setDeleteImpactError(null);
   }, [loadUser]);
+
+  // 订阅 listVersion — 别处（UserMenu PATCH /me、未来 bulk action 等）改了
+  // 用户数据后，detail 这份 user 副本要跟着刷新，否则只读字段会显示陈旧值。
+  // 用 ref 锁住 mount 时的初值，避免 mount 时与上面的 effect 重复 load。
+  // 同一 instance 内每次 bump → 重新 loadUser；切换 userId 走新 instance（key=userId）。
+  const initialListVersionRef = useRef(listVersion);
+  useEffect(() => {
+    if (listVersion === initialListVersionRef.current) return;
+    loadUser();
+  }, [listVersion, loadUser]);
 
   // 非空 < 4 字符视作无效；空值表示不修改密码
   const passwordInvalid = newPassword.length > 0 && newPassword.length < 4;
