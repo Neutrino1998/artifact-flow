@@ -249,6 +249,47 @@ class TestChangeMyPassword:
         )
         assert resp.status_code == 401
 
+    async def test_old_token_invalidated_after_change(
+        self,
+        client: AsyncClient,
+        anon_client: AsyncClient,
+        test_user: User,
+    ):
+        """改密前签发的 token 改密后应当 401（pwd_v 校验）"""
+        # client fixture token was issued with pwd_v=0
+        ok = await client.get("/api/v1/auth/me")
+        assert ok.status_code == 200
+
+        # Change password
+        resp = await client.post(
+            "/api/v1/auth/me/password",
+            json={"current_password": "testpass", "new_password": "newpass1234"},
+        )
+        assert resp.status_code == 204
+
+        # Old token now rejected
+        stale = await client.get("/api/v1/auth/me")
+        assert stale.status_code == 401
+
+    async def test_admin_password_reset_invalidates_user_token(
+        self,
+        admin_client: AsyncClient,
+        client: AsyncClient,
+        test_user: User,
+    ):
+        """admin 给用户重置密码也应吊销该用户旧 token"""
+        ok = await client.get("/api/v1/auth/me")
+        assert ok.status_code == 200
+
+        resp = await admin_client.put(
+            f"/api/v1/auth/users/{test_user.id}",
+            json={"password": "newadminreset"},
+        )
+        assert resp.status_code == 200
+
+        stale = await client.get("/api/v1/auth/me")
+        assert stale.status_code == 401
+
 
 class TestUsernameValidation:
 

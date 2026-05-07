@@ -54,7 +54,7 @@ async def login(
     if not user.is_active:
         raise HTTPException(status_code=401, detail="User account is disabled")
 
-    token = create_access_token(user.id, user.username, user.role)
+    token = create_access_token(user.id, user.username, user.role, user.password_version)
 
     return LoginResponse(
         access_token=token,
@@ -99,9 +99,10 @@ async def change_my_password(
         raise HTTPException(status_code=400, detail="Current password is incorrect")
 
     user.hashed_password = hash_password(request.new_password)
+    user.password_version = (user.password_version or 0) + 1
     await user_repo.update(user)
 
-    logger.info(f"Password changed: {user.username}")
+    logger.info(f"Password changed: {user.username} (pwd_v={user.password_version})")
 
 
 @router.post("/users", response_model=UserResponse)
@@ -187,6 +188,8 @@ async def update_user(
         user.display_name = request.display_name or None
     if request.password is not None:
         user.hashed_password = hash_password(request.password)
+        # admin 重置密码同样吊销该用户的旧 token
+        user.password_version = (user.password_version or 0) + 1
     if request.role is not None:
         if request.role not in ("admin", "user"):
             raise HTTPException(status_code=400, detail="Role must be 'admin' or 'user'")

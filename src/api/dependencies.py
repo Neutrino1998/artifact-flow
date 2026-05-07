@@ -321,7 +321,16 @@ async def get_current_user(
     if not user or not user.is_active:
         raise HTTPException(status_code=401, detail="User disabled or not found")
 
-    return TokenPayload(user_id=user.id, username=user.username, role=user.role)
+    # 密码已被修改 → 老 token 失效（pwd_v 比对）
+    if payload.password_version != user.password_version:
+        raise HTTPException(status_code=401, detail="Token invalidated; please log in again")
+
+    return TokenPayload(
+        user_id=user.id,
+        username=user.username,
+        role=user.role,
+        password_version=user.password_version,
+    )
 
 
 async def require_admin(

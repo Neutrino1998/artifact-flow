@@ -53,6 +53,12 @@ class User(Base):
     role: Mapped[str] = mapped_column(String(16), nullable=False, default="user")
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
 
+    # 密码版本号：每次改密 +1，老 token 的 pwd_v 与当前不一致即视为失效。
+    # 不是 blacklist —— 单调递增计数器，无需 Redis / 持久化吊销集合。
+    password_version: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime,
         server_default=func.now(),

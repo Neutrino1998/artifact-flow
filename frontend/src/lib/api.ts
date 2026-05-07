@@ -64,6 +64,40 @@ function authHeaders(): Record<string, string> {
   return {};
 }
 
+export class ApiError extends Error {
+  status: number;
+  constructor(status: number, message: string) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+  }
+}
+
+/**
+ * Best-effort 把 FastAPI 错误响应转成可读字符串。
+ * - {"detail": "string"}                    → 直接用
+ * - {"detail": [{msg, ...}, ...]}（422）   → 拼接 msg 字段，去掉 Pydantic 的 "Value error, " 前缀
+ * - 其他非 JSON / 无 detail                  → 退回原始 body
+ */
+function formatApiError(status: number, body: string): string {
+  if (!body) return `API ${status}`;
+  try {
+    const parsed = JSON.parse(body);
+    const detail = parsed?.detail;
+    if (typeof detail === 'string') return detail;
+    if (Array.isArray(detail)) {
+      const msgs = detail
+        .map((d: { msg?: string }) => d?.msg)
+        .filter((m): m is string => typeof m === 'string')
+        .map((m) => m.replace(/^Value error,\s*/i, ''));
+      if (msgs.length) return msgs.join('；');
+    }
+  } catch {
+    // not JSON, fall through
+  }
+  return `API ${status}: ${body}`;
+}
+
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE_URL}${path}`, {
     headers: {
@@ -75,11 +109,11 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   });
   if (res.status === 401) {
     useAuthStore.getState().logout();
-    throw new Error('Session expired');
+    throw new ApiError(401, 'Session expired');
   }
   if (!res.ok) {
     const body = await res.text().catch(() => '');
-    throw new Error(`API ${res.status}: ${body}`);
+    throw new ApiError(res.status, formatApiError(res.status, body));
   }
   if (res.status === 204) {
     return undefined as T;

@@ -2,6 +2,8 @@
 
 import { useState } from 'react';
 import * as api from '@/lib/api';
+import { ApiError } from '@/lib/api';
+import { useAuthStore } from '@/stores/authStore';
 
 interface ChangePasswordDialogProps {
   onClose: () => void;
@@ -32,15 +34,20 @@ export default function ChangePasswordDialog({ onClose }: ChangePasswordDialogPr
         new_password: newPassword,
       });
       setSuccess(true);
-      setTimeout(onClose, 1200);
+      // pwd_v bumped server-side → current token is invalid; explicitly log out
+      // so AuthGuard redirects to /login instead of waiting for next 401.
+      setTimeout(() => useAuthStore.getState().logout(), 1500);
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      if (/\b400\b/.test(msg) && /current password/i.test(msg)) {
-        setError('当前密码错误');
-      } else if (/\b422\b/.test(msg)) {
-        setError('新密码不符合要求（至少 4 个字符）');
+      if (err instanceof ApiError) {
+        if (err.status === 400) {
+          setError('当前密码错误');
+        } else if (err.status === 422) {
+          setError('新密码不符合要求（至少 4 个字符）');
+        } else {
+          setError(err.message || '修改失败，请重试');
+        }
       } else {
-        setError(msg.replace(/^API \d+:\s*/, '') || '修改失败，请重试');
+        setError(err instanceof Error ? err.message : '修改失败，请重试');
       }
     } finally {
       setSubmitting(false);
@@ -63,11 +70,13 @@ export default function ChangePasswordDialog({ onClose }: ChangePasswordDialogPr
           修改密码
         </h2>
         <p className="text-text-secondary dark:text-text-secondary-dark mb-6 text-sm">
-          修改后当前登录会话仍然有效，下次登录时使用新密码。
+          修改后所有已登录的设备（包括当前页）都会被强制重新登录。
         </p>
 
         {success ? (
-          <div className="py-4 text-center text-status-success">密码已更新</div>
+          <div className="py-4 text-center text-status-success">
+            密码已更新，即将退出登录...
+          </div>
         ) : (
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
