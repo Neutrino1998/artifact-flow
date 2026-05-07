@@ -398,6 +398,26 @@ class TestUserDepartmentIntegration:
         assert resp.status_code == 200
         assert resp.json()["department_id"] == a["id"]
 
+    async def test_list_users_includes_department_id(self, admin_client: AsyncClient):
+        """
+        Regression: list_users 响应里 department_id 不应丢。
+
+        UserResponse schema 含 department_id；单查 / 创建 / 更新都返回该字段；
+        早期 list_users 端点的响应构造里漏了 — 导致前端 UserRow 永远拿到 null。
+        """
+        a = (await admin_client.post("/api/v1/departments", json={"name": "部门A"})).json()
+        await admin_client.post(
+            "/api/v1/auth/users",
+            json={
+                "username": "alice", "password": "pass1234",
+                "department_id": a["id"],
+            },
+        )
+        r = await admin_client.get("/api/v1/auth/users")
+        assert r.status_code == 200
+        alice = next(u for u in r.json()["users"] if u["username"] == "alice")
+        assert alice["department_id"] == a["id"]
+
     async def test_delete_dept_clears_user_dept(self, admin_client: AsyncClient):
         """ondelete=SET NULL：删除部门时其下用户的 department_id 自动置空。"""
         a = (await admin_client.post("/api/v1/departments", json={"name": "部门A"})).json()

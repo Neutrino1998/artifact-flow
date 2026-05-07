@@ -24,6 +24,7 @@ from sqlalchemy import (
     UniqueConstraint,
     Index,
     func,
+    text,
 )
 from sqlalchemy.orm import (
     DeclarativeBase,
@@ -155,7 +156,19 @@ class Department(Base):
     )
 
     __table_args__ = (
+        # 同父下名称唯一 — 适用于 parent_id 非 NULL 的所有行
         UniqueConstraint("parent_id", "name", name="uq_dept_parent_name"),
+        # SQL 标准把多个 NULL 视为 DISTINCT，所以上面的 UC 不约束根级行
+        # （parent_id IS NULL）。partial unique index 专门兜根级，让 DB 在
+        # 并发 INSERT 同名根部门时原子拒绝第二条 — 路由层 SELECT-then-INSERT
+        # 抓不住的 TOCTOU 漏洞由这里兜住。
+        Index(
+            "uq_dept_root_name",
+            "name",
+            unique=True,
+            sqlite_where=text("parent_id IS NULL"),
+            postgresql_where=text("parent_id IS NULL"),
+        ),
     )
 
     def __repr__(self) -> str:

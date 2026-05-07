@@ -130,10 +130,14 @@ export default function DepartmentCascader({
     // Level 0
     levels.push({ parentId: null, options: tree.rootChildren });
     // Subsequent levels — under each chosen dept；上限 MAX_DEPTH 级
+    //
+    // 即使选中的是叶子（无子部门），也要为它再 push 一层空 options 的 select。
+    // 这样 allowCreate=true 时用户能在那一级用 "+ 在此层级新建" 创建叶子的子，
+    // 而当前层级的 "+ 新建" 创建的是 sibling — 两个意图都能表达。
     for (const chosen of path) {
       if (levels.length >= MAX_DEPTH) break;
       const node = tree.byId.get(chosen);
-      if (!node || node.children.length === 0) break;
+      if (!node) break;
       levels.push({ parentId: node.id, options: node.children });
     }
     return levels;

@@ -215,6 +215,7 @@ async def list_users(
                 display_name=u.display_name,
                 role=u.role,
                 is_active=u.is_active,
+                department_id=u.department_id,
                 created_at=u.created_at,
                 updated_at=u.updated_at,
             )

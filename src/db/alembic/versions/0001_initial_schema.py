@@ -31,6 +31,13 @@ def upgrade() -> None:
         sa.UniqueConstraint('parent_id', 'name', name='uq_dept_parent_name')
     )
     op.create_index(op.f('ix_departments_parent_id'), 'departments', ['parent_id'], unique=False)
+    # Partial unique index — 见 models.py Department.__table_args__ 注释。
+    # 兜 NULL parent_id（根级）的 name 唯一性，闭合 SELECT-then-INSERT 的 TOCTOU。
+    op.create_index(
+        'uq_dept_root_name', 'departments', ['name'], unique=True,
+        sqlite_where=sa.text('parent_id IS NULL'),
+        postgresql_where=sa.text('parent_id IS NULL'),
+    )
 
     op.create_table('users',
         sa.Column('id', sa.String(length=64), nullable=False),
@@ -148,5 +155,6 @@ def downgrade() -> None:
     op.drop_index(op.f('ix_users_department_id'), table_name='users')
     op.drop_index(op.f('ix_users_username'), table_name='users')
     op.drop_table('users')
+    op.drop_index('uq_dept_root_name', table_name='departments')
     op.drop_index(op.f('ix_departments_parent_id'), table_name='departments')
     op.drop_table('departments')

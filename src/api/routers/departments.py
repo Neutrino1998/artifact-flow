@@ -157,8 +157,12 @@ async def create_department(
         if parent is None:
             raise HTTPException(status_code=400, detail="parent_id does not reference an existing department")
 
-    # 显式预检：UNIQUE(parent_id, name) 在 parent_id=NULL 时被 SQLite/PG 视为
-    # 互不相等（NULL DISTINCT 语义），无法约束根级重名 — 必须路由层兜
+    # 唯一性的两层防线：
+    #   1. 路由层 pre-check（这里）— 99% 常规情况走的快路径，给 admin 友好的 409
+    #   2. DB 层（uq_dept_parent_name 给 parent_id 非 NULL 的行；uq_dept_root_name
+    #      partial index 给 parent_id IS NULL 的根级行）— source of truth，
+    #      原子拒绝并发 SELECT-then-INSERT 的 TOCTOU 窗口
+    # pre-check 漏掉的并发情况由下面的 IntegrityError catch 兜住。
     existing = await repo.find_by_parent_and_name(request.parent_id, request.name)
     if existing is not None:
         raise HTTPException(
@@ -177,7 +181,8 @@ async def create_department(
         await repo.session.commit()
         await repo.session.refresh(new_dept)
     except IntegrityError:
-        # 并发窗口被另一个请求抢先（仅 parent_id 非 NULL 时 DB 兜得住）
+        # 并发请求在 pre-check 之间抢先 INSERT — DB 唯一约束（含根级 partial
+        # unique index）拦下，这里转 409 给 admin
         await repo.session.rollback()
         raise HTTPException(
             status_code=409,
@@ -208,7 +213,7 @@ async def rename_department(
         # No-op；直接返回
         return await _to_response(dept, repo)
 
-    # 显式预检（同 create_department：NULL parent_id 不被 UNIQUE 约束兜）
+    # Pre-check + IntegrityError 两层防线（见 create_department 注释）
     conflict = await repo.find_by_parent_and_name(dept.parent_id, request.name)
     if conflict is not None and conflict.id != dept.id:
         raise HTTPException(
@@ -266,7 +271,7 @@ async def move_department(
         # No-op
         return await _to_response(dept, repo)
 
-    # 显式预检（同 create_department：NULL parent_id 不被 UNIQUE 约束兜）
+    # Pre-check + IntegrityError 两层防线（见 create_department 注释）
     conflict = await repo.find_by_parent_and_name(request.new_parent_id, dept.name)
     if conflict is not None and conflict.id != dept.id:
         raise HTTPException(
