@@ -51,6 +51,7 @@ export default function Sidebar() {
   const setArtifactPanelVisible = useUIStore((s) => s.setArtifactPanelVisible);
 
   const setConversationBrowserVisible = useUIStore((s) => s.setConversationBrowserVisible);
+  const userManagementVisible = useUIStore((s) => s.userManagementVisible);
   const setUserManagementVisible = useUIStore((s) => s.setUserManagementVisible);
 
   const observabilityVisible = useUIStore((s) => s.observabilityVisible);
@@ -89,6 +90,11 @@ export default function Sidebar() {
   };
 
   const inObservability = observabilityVisible && isAdmin;
+  // While user-management owns the right panel (master-detail on desktop,
+  // force-hidden on mobile), the artifact toggle would just flip a hidden
+  // store flag that ThreeColumnLayout's forceArtifactVisible overrides —
+  // the button looks broken and leaks state across exit. Hide it here.
+  const inUserMgmt = userManagementVisible && isAdmin;
 
   // ── Collapsed: 48px icon bar ──
   if (sidebarCollapsed) {
@@ -126,13 +132,15 @@ export default function Sidebar() {
           </>
         ) : (
           <>
-            {/* Artifacts */}
-            <IconButton onClick={toggleArtifactPanel} label="文稿面板">
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
-                <rect x="2" y="2" width="12" height="12" rx="1.5" />
-                <path d="M5 6h6M5 8.5h4" />
-              </svg>
-            </IconButton>
+            {/* Artifacts — hidden while user-management owns the right panel */}
+            {!inUserMgmt && (
+              <IconButton onClick={toggleArtifactPanel} label="文稿面板">
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+                  <rect x="2" y="2" width="12" height="12" rx="1.5" />
+                  <path d="M5 6h6M5 8.5h4" />
+                </svg>
+              </IconButton>
+            )}
 
             {/* Search conversations */}
             <IconButton onClick={handleSearchChat} label="搜索对话">
@@ -221,16 +229,19 @@ export default function Sidebar() {
           </>
         ) : (
           <>
-            <button
-              onClick={toggleArtifactPanel}
-              className="w-full flex items-center gap-2 px-3 py-2 font-medium text-text-primary bg-chat dark:bg-panel-accent-dark dark:text-text-primary-dark rounded-card border border-border dark:border-border-dark hover:bg-chat/70 dark:hover:bg-surface-dark transition-colors"
-            >
-              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
-                <rect x="2" y="2" width="12" height="12" rx="1.5" />
-                <path d="M5 6h6M5 8.5h4" />
-              </svg>
-              文稿面板
-            </button>
+            {/* Artifacts — hidden while user-management owns the right panel */}
+            {!inUserMgmt && (
+              <button
+                onClick={toggleArtifactPanel}
+                className="w-full flex items-center gap-2 px-3 py-2 font-medium text-text-primary bg-chat dark:bg-panel-accent-dark dark:text-text-primary-dark rounded-card border border-border dark:border-border-dark hover:bg-chat/70 dark:hover:bg-surface-dark transition-colors"
+              >
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+                  <rect x="2" y="2" width="12" height="12" rx="1.5" />
+                  <path d="M5 6h6M5 8.5h4" />
+                </svg>
+                文稿面板
+              </button>
+            )}
             <button
               onClick={handleSearchChat}
               className="w-full flex items-center gap-2 px-3 py-2 font-medium text-text-primary bg-chat dark:bg-panel-accent-dark dark:text-text-primary-dark rounded-card border border-border dark:border-border-dark hover:bg-chat/70 dark:hover:bg-surface-dark transition-colors"
