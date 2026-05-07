@@ -20,12 +20,14 @@ export default function Home() {
   const isMd = useMediaQuery(BREAKPOINTS.md);
   const userMgmtMode = userManagementVisible && isAdmin;
 
-  // Master-detail right panel is desktop-only (>= md). On mobile the overlay
-  // would cover the entire user list with no usable dismiss path; admin work
-  // (CSV import, dept tree, batch ops) doesn't fit narrow screens anyway, so
-  // we treat the detail panel as desktop-only and let mobile admins fall back
-  // to the inline list interactions.
-  const forceArtifactVisible = userMgmtMode && isMd;
+  // Right-panel visibility override (see ThreeColumnLayout's prop doc):
+  //   desktop user-mgmt → true  (master-detail force-show)
+  //   mobile  user-mgmt → false (force-hide; overrides any prior artifactPanelVisible
+  //                              so opening user management while the artifact drawer
+  //                              was open does not bury the user list under an empty
+  //                              detail panel — admin work isn't a mobile use case)
+  //   not in user-mgmt  → undefined (defer to user-controlled artifactPanelVisible)
+  const forceArtifactVisible = userMgmtMode ? isMd : undefined;
 
   const rightContent = userMgmtMode ? (
     <ErrorBoundary fallbackLabel="用户管理详情面板出错了">

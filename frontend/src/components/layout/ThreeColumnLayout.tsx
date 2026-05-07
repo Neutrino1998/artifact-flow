@@ -12,6 +12,10 @@ interface ThreeColumnLayoutProps {
   sidebar: React.ReactNode;
   chat: React.ReactNode;
   artifact?: React.ReactNode;
+  // 3-state visibility override for the right panel:
+  //   true       → force show (e.g. desktop master-detail mode)
+  //   false      → force hide (e.g. mobile fallback that must not be auto-shown)
+  //   undefined  → defer to user-controlled artifactPanelVisible
   forceArtifactVisible?: boolean;
 }
 
@@ -19,7 +23,7 @@ export default function ThreeColumnLayout({
   sidebar,
   chat,
   artifact,
-  forceArtifactVisible = false,
+  forceArtifactVisible,
 }: ThreeColumnLayoutProps) {
   const sidebarCollapsed = useUIStore((s) => s.sidebarCollapsed);
   const setSidebarCollapsed = useUIStore((s) => s.setSidebarCollapsed);
@@ -79,7 +83,7 @@ export default function ThreeColumnLayout({
     setArtifactWidth(DEFAULT_ARTIFACT_WIDTH);
   }, []);
 
-  const showArtifact = (artifactPanelVisible || forceArtifactVisible) && artifact;
+  const showArtifact = (forceArtifactVisible ?? artifactPanelVisible) && artifact;
   const showSidebar = isMd; // < 768px: sidebar completely hidden
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
