@@ -106,3 +106,37 @@ class UserImpactResponse(BaseModel):
     给前端硬删用户前的二次确认弹窗显示影响数据。
     """
     conversation_count: int = Field(..., description="该用户拥有的对话数（CASCADE 删除时一并丢失）")
+
+
+# ============================================================
+# Bulk Import (PR3)
+# ============================================================
+
+
+class BulkImportFailedRow(BaseModel):
+    """单行业务校验失败 — 行号 + username（可能为空）+ 原因。"""
+    row: int = Field(..., description="1-based data row number (excluding header)")
+    username: Optional[str] = Field(None, description="Username on the row, may be empty if row had none")
+    reason: str = Field(..., description="Failure reason (validation message)")
+
+
+class BulkImportSkippedRow(BaseModel):
+    """单行被跳过 — 当前唯一原因是 username 已在 DB 中存在。"""
+    row: int
+    username: str
+    reason: str = Field("username_exists", description="Skip reason")
+
+
+class BulkImportResponse(BaseModel):
+    """
+    POST /api/v1/auth/users/bulk-import response。
+
+    best-effort 三分类。total_rows = created + failed + skipped。
+    warnings 含编码 fallback / unknown 列等非阻断提示。
+    """
+    created: List[UserResponse] = Field(default_factory=list)
+    failed: List[BulkImportFailedRow] = Field(default_factory=list)
+    skipped: List[BulkImportSkippedRow] = Field(default_factory=list)
+    total_rows: int = Field(..., description="Total data rows processed (excluding header)")
+    detected_encoding: Optional[str] = Field(None, description="Encoding charset-normalizer picked")
+    warnings: List[str] = Field(default_factory=list, description="Non-blocking notices (unknown columns, etc.)")

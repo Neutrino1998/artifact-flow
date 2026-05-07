@@ -161,6 +161,39 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/auth/users/bulk-import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Bulk Import Users
+         * @description 批量导入用户（仅 Admin）。
+         *
+         *     CSV header 必含 `username`；可选列 `password` / `display_name` /
+         *     `dept_l1` / `dept_l2` / `dept_l3`。其他列被忽略并在 warnings 里上报。
+         *
+         *     语义（best-effort，非原子）：
+         *     - parse 阶段失败（解码 / 缺 username 列 / 行数超限）→ 400
+         *     - 文件内 username 重复 → 400 + duplicate_rows 列出
+         *     - 单行业务校验失败（username 格式 / 部门 gap / 默认密码过短）→ failed
+         *     - 单行 username 已在 DB → skipped
+         *     - 其余 → created（每行独立 commit；逐行成功/失败）
+         *
+         *     部门路径解析使用 resolve_department_path（PR4），会按需自动建表；
+         *     同 CSV 内重复路径在内存里 cache 避免重复 SELECT。
+         */
+        post: operations["bulk_import_users_api_v1_auth_users_bulk_import_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/chat": {
         parameters: {
             query?: never;
@@ -930,6 +963,14 @@ export interface components {
              */
             updated_at: string;
         };
+        /** Body_bulk_import_users_api_v1_auth_users_bulk_import_post */
+        Body_bulk_import_users_api_v1_auth_users_bulk_import_post: {
+            /**
+             * File
+             * Format: binary
+             */
+            file: string;
+        };
         /** Body_upload_file_api_v1_artifacts__session_id__upload_post */
         Body_upload_file_api_v1_artifacts__session_id__upload_post: {
             /**
@@ -945,6 +986,73 @@ export interface components {
              * Format: binary
              */
             file: string;
+        };
+        /**
+         * BulkImportFailedRow
+         * @description 单行业务校验失败 — 行号 + username（可能为空）+ 原因。
+         */
+        BulkImportFailedRow: {
+            /**
+             * Row
+             * @description 1-based data row number (excluding header)
+             */
+            row: number;
+            /**
+             * Username
+             * @description Username on the row, may be empty if row had none
+             */
+            username: string | null;
+            /**
+             * Reason
+             * @description Failure reason (validation message)
+             */
+            reason: string;
+        };
+        /**
+         * BulkImportResponse
+         * @description POST /api/v1/auth/users/bulk-import response。
+         *
+         *     best-effort 三分类。total_rows = created + failed + skipped。
+         *     warnings 含编码 fallback / unknown 列等非阻断提示。
+         */
+        BulkImportResponse: {
+            /** Created */
+            created: components["schemas"]["UserResponse"][];
+            /** Failed */
+            failed: components["schemas"]["BulkImportFailedRow"][];
+            /** Skipped */
+            skipped: components["schemas"]["BulkImportSkippedRow"][];
+            /**
+             * Total Rows
+             * @description Total data rows processed (excluding header)
+             */
+            total_rows: number;
+            /**
+             * Detected Encoding
+             * @description Encoding charset-normalizer picked
+             */
+            detected_encoding: string | null;
+            /**
+             * Warnings
+             * @description Non-blocking notices (unknown columns, etc.)
+             */
+            warnings: string[];
+        };
+        /**
+         * BulkImportSkippedRow
+         * @description 单行被跳过 — 当前唯一原因是 username 已在 DB 中存在。
+         */
+        BulkImportSkippedRow: {
+            /** Row */
+            row: number;
+            /** Username */
+            username: string;
+            /**
+             * Reason
+             * @description Skip reason
+             * @default username_exists
+             */
+            reason: string;
         };
         /**
          * CancelResponse
@@ -1953,6 +2061,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["UserImpactResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    bulk_import_users_api_v1_auth_users_bulk_import_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_bulk_import_users_api_v1_auth_users_bulk_import_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BulkImportResponse"];
                 };
             };
             /** @description Validation Error */

@@ -20,6 +20,9 @@ export type UpdateMyProfileRequest = S['UpdateMyProfileRequest'];
 export type UserResponse = S['UserResponse'];
 export type UserListResponse = S['UserListResponse'];
 export type UserImpactResponse = S['UserImpactResponse'];
+export type BulkImportFailedRow = S['BulkImportFailedRow'];
+export type BulkImportSkippedRow = S['BulkImportSkippedRow'];
+export type BulkImportResponse = S['BulkImportResponse'];
 
 // ============================================================
 // Department Types (Admin)

@@ -147,16 +147,33 @@ export default function UserManagementPanel() {
             </div>
           )}
 
-          {/* Top-level actions — both open right panel */}
+          {/* Top-level actions — all open right panel */}
           <div className="mb-3 flex items-center gap-2">
             <button
               onClick={() => setRightView({ type: 'create-user' })}
-              className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 text-accent bg-chat dark:bg-chat-dark rounded-2xl border border-border dark:border-border-dark hover:bg-panel dark:hover:bg-panel-accent-dark transition-colors"
+              className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-2xl border transition-colors ${
+                rightView.type === 'create-user'
+                  ? 'text-accent border-accent bg-panel dark:bg-panel-accent-dark'
+                  : 'text-accent border-border dark:border-border-dark bg-chat dark:bg-chat-dark hover:bg-panel dark:hover:bg-panel-accent-dark'
+              }`}
             >
               <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5">
                 <path d="M7 2v10M2 7h10" />
               </svg>
               新建用户
+            </button>
+            <button
+              onClick={() => setRightView({ type: 'bulk-import' })}
+              className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-2xl border transition-colors ${
+                rightView.type === 'bulk-import'
+                  ? 'text-accent border-accent bg-panel dark:bg-panel-accent-dark'
+                  : 'text-text-secondary dark:text-text-secondary-dark border-border dark:border-border-dark bg-chat dark:bg-chat-dark hover:bg-panel dark:hover:bg-panel-accent-dark'
+              }`}
+            >
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <path d="M7 2v8M3 8l4 4 4-4M2 13h10" />
+              </svg>
+              批量导入
             </button>
             <button
               onClick={() => setRightView({ type: 'dept-manager' })}

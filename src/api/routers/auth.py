@@ -12,7 +12,8 @@ Auth Router
 from typing import Optional
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
+from sqlalchemy.exc import IntegrityError
 
 from config import config
 from api.dependencies import (
@@ -33,6 +34,9 @@ from api.schemas.auth import (
     UserResponse,
     UserListResponse,
     UserImpactResponse,
+    BulkImportFailedRow,
+    BulkImportSkippedRow,
+    BulkImportResponse,
 )
 from api.services.auth import (
     TokenPayload,
@@ -44,7 +48,10 @@ from core.conversation_manager import ConversationManager
 from repositories.user_repo import UserRepository
 from repositories.department_repo import DepartmentRepository
 from db.models import User
+from utils.csv_import import CsvParseError, ParsedRow, parse_user_csv
+from utils.department_resolve import resolve_department_path
 from utils.logger import get_logger
+from utils.validators import validate_username
 
 logger = get_logger("ArtifactFlow")
 
@@ -374,3 +381,205 @@ async def delete_user(
         raise HTTPException(status_code=404, detail="User not found")
 
     logger.info(f"User hard-deleted: {user.username} (id={user_id})")
+
+
+# ============================================================
+# Bulk Import (PR3)
+# ============================================================
+
+
+def _validate_dept_path(row: ParsedRow) -> Optional[list[str]]:
+    """
+    校验部门字段必须是连续前缀（dept_l1 → dept_l2 → dept_l3，无 gap）。
+
+    返回非空 path 列表（顶层 → 末级）；全空 → None；gap → 抛 ValueError。
+
+    设计理由：resolve_department_path 在内部会折叠空段（[A,'',C] → [A,C]），
+    对 cascader 提交是合理的（用户主动选了哪一级就是哪一级），但 CSV 用户
+    可能误把"想跳过 l2"理解成"l1 直接当 l2 父" —— gap 在 CSV 语义里是错。
+    importer 自己做严格校验，把陷阱挡在调用 resolve 之前。
+    """
+    levels = [row.dept_l1, row.dept_l2, row.dept_l3]
+    # 找最后一个非空的层级 — 之后的位置都必须为空（前缀语义）
+    last_non_empty = -1
+    for i, v in enumerate(levels):
+        if v:
+            last_non_empty = i
+    if last_non_empty < 0:
+        return None
+    # 前 last_non_empty 个位置必须都非空
+    for i in range(last_non_empty + 1):
+        if not levels[i]:
+            raise ValueError(
+                f"department levels must be contiguous (dept_l{i+1} empty "
+                f"but a deeper level is set)"
+            )
+    return levels[: last_non_empty + 1]
+
+
+@router.post("/users/bulk-import", response_model=BulkImportResponse)
+async def bulk_import_users(
+    file: UploadFile = File(...),
+    _admin: TokenPayload = Depends(require_admin),
+    user_repo: UserRepository = Depends(get_user_repository),
+    dept_repo: DepartmentRepository = Depends(get_department_repository),
+):
+    """
+    批量导入用户（仅 Admin）。
+
+    CSV header 必含 `username`；可选列 `password` / `display_name` /
+    `dept_l1` / `dept_l2` / `dept_l3`。其他列被忽略并在 warnings 里上报。
+
+    语义（best-effort，非原子）：
+    - parse 阶段失败（解码 / 缺 username 列 / 行数超限）→ 400
+    - 文件内 username 重复 → 400 + duplicate_rows 列出
+    - 单行业务校验失败（username 格式 / 部门 gap / 默认密码过短）→ failed
+    - 单行 username 已在 DB → skipped
+    - 其余 → created（每行独立 commit；逐行成功/失败）
+
+    部门路径解析使用 resolve_department_path（PR4），会按需自动建表；
+    同 CSV 内重复路径在内存里 cache 避免重复 SELECT。
+    """
+    raw = await file.read()
+    if len(raw) > config.MAX_BULK_IMPORT_BYTES:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"File too large: {len(raw) / 1024 / 1024:.1f}MB "
+                f"(max {config.MAX_BULK_IMPORT_BYTES / 1024 / 1024:.0f}MB)"
+            ),
+        )
+
+    try:
+        parsed = parse_user_csv(raw, max_rows=config.MAX_BULK_IMPORT_ROWS)
+    except CsvParseError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    if parsed.duplicate_rows:
+        # 文件内重复 — 整体拒绝（admin 必须先在源文件去重，否则容易把 password
+        # 列后写的覆盖前面的，安全/可预测性都差）
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "message": "CSV contains duplicate usernames within the file",
+                "duplicate_rows": [
+                    {"row": r, "username": u} for r, u in parsed.duplicate_rows
+                ],
+            },
+        )
+
+    total_rows = len(parsed.rows)
+    warnings = list(parsed.warnings)
+
+    # 1. 批查已存在的 username（一次性 SELECT IN，避免 N+1）
+    candidate_usernames = {r.username for r in parsed.rows if r.username}
+    existing = await user_repo.find_existing_usernames(candidate_usernames)
+
+    created: list[UserResponse] = []
+    failed: list[BulkImportFailedRow] = []
+    skipped: list[BulkImportSkippedRow] = []
+
+    # 2. 部门路径 cache（同 CSV 内重复路径只 resolve 一次）
+    #    key = tuple of cleaned levels；value = dept_id or None
+    dept_cache: dict[tuple[str, ...], Optional[str]] = {}
+
+    for row in parsed.rows:
+        # 2a. username 必填 + 格式
+        if not row.username:
+            failed.append(BulkImportFailedRow(
+                row=row.row_number, username=None,
+                reason="username is required",
+            ))
+            continue
+        try:
+            validate_username(row.username)
+        except ValueError as e:
+            failed.append(BulkImportFailedRow(
+                row=row.row_number, username=row.username, reason=str(e),
+            ))
+            continue
+
+        # 2b. 已存在 → skipped
+        if row.username in existing:
+            skipped.append(BulkImportSkippedRow(
+                row=row.row_number, username=row.username,
+                reason="username_exists",
+            ))
+            continue
+
+        # 2c. 默认密码 = username；强制最短 4 位（与 CreateUserRequest 一致）
+        password = row.password if row.password else row.username
+        if len(password) < 4:
+            failed.append(BulkImportFailedRow(
+                row=row.row_number, username=row.username,
+                reason=(
+                    f"password too short (min 4 chars); "
+                    f"default = username '{row.username}' has only {len(row.username)} chars"
+                ),
+            ))
+            continue
+
+        # 2d. 部门路径：gap 校验 + cache + resolve
+        try:
+            path = _validate_dept_path(row)
+        except ValueError as e:
+            failed.append(BulkImportFailedRow(
+                row=row.row_number, username=row.username, reason=str(e),
+            ))
+            continue
+
+        department_id: Optional[str] = None
+        if path is not None:
+            cache_key = tuple(seg.strip() for seg in path)
+            if cache_key in dept_cache:
+                department_id = dept_cache[cache_key]
+            else:
+                department_id = await resolve_department_path(dept_repo, path)
+                dept_cache[cache_key] = department_id
+
+        # 2e. INSERT user（独立 commit；UNIQUE 冲突意味着 batch-check 与
+        #     此处之间另一 admin 抢先创建了同名 → 当 skipped 处理）
+        new_user = User(
+            id=f"user-{uuid4().hex}",
+            username=row.username,
+            hashed_password=hash_password(password),
+            display_name=row.display_name or None,
+            role="user",
+            department_id=department_id,
+        )
+        try:
+            await user_repo.add(new_user)
+        except IntegrityError:
+            await user_repo.session.rollback()
+            existing.add(row.username)  # 防同 CSV 后续行又试一遍
+            skipped.append(BulkImportSkippedRow(
+                row=row.row_number, username=row.username,
+                reason="username_exists",
+            ))
+            continue
+
+        existing.add(row.username)  # 同 CSV 后续行不再触发同 username
+        created.append(UserResponse(
+            id=new_user.id,
+            username=new_user.username,
+            display_name=new_user.display_name,
+            role=new_user.role,
+            is_active=new_user.is_active,
+            department_id=new_user.department_id,
+            created_at=new_user.created_at,
+            updated_at=new_user.updated_at,
+        ))
+
+    logger.info(
+        f"Bulk import done: total={total_rows} created={len(created)} "
+        f"failed={len(failed)} skipped={len(skipped)}"
+    )
+
+    return BulkImportResponse(
+        created=created,
+        failed=failed,
+        skipped=skipped,
+        total_rows=total_rows,
+        detected_encoding=parsed.detected_encoding,
+        warnings=warnings,
+    )

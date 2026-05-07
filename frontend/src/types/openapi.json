@@ -475,6 +475,53 @@
         }
       }
     },
+    "/api/v1/auth/users/bulk-import": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Bulk Import Users",
+        "description": "\u6279\u91cf\u5bfc\u5165\u7528\u6237\uff08\u4ec5 Admin\uff09\u3002\n\nCSV header \u5fc5\u542b `username`\uff1b\u53ef\u9009\u5217 `password` / `display_name` /\n`dept_l1` / `dept_l2` / `dept_l3`\u3002\u5176\u4ed6\u5217\u88ab\u5ffd\u7565\u5e76\u5728 warnings \u91cc\u4e0a\u62a5\u3002\n\n\u8bed\u4e49\uff08best-effort\uff0c\u975e\u539f\u5b50\uff09\uff1a\n- parse \u9636\u6bb5\u5931\u8d25\uff08\u89e3\u7801 / \u7f3a username \u5217 / \u884c\u6570\u8d85\u9650\uff09\u2192 400\n- \u6587\u4ef6\u5185 username \u91cd\u590d \u2192 400 + duplicate_rows \u5217\u51fa\n- \u5355\u884c\u4e1a\u52a1\u6821\u9a8c\u5931\u8d25\uff08username \u683c\u5f0f / \u90e8\u95e8 gap / \u9ed8\u8ba4\u5bc6\u7801\u8fc7\u77ed\uff09\u2192 failed\n- \u5355\u884c username \u5df2\u5728 DB \u2192 skipped\n- \u5176\u4f59 \u2192 created\uff08\u6bcf\u884c\u72ec\u7acb commit\uff1b\u9010\u884c\u6210\u529f/\u5931\u8d25\uff09\n\n\u90e8\u95e8\u8def\u5f84\u89e3\u6790\u4f7f\u7528 resolve_department_path\uff08PR4\uff09\uff0c\u4f1a\u6309\u9700\u81ea\u52a8\u5efa\u8868\uff1b\n\u540c CSV \u5185\u91cd\u590d\u8def\u5f84\u5728\u5185\u5b58\u91cc cache \u907f\u514d\u91cd\u590d SELECT\u3002",
+        "operationId": "bulk_import_users_api_v1_auth_users_bulk_import_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_bulk_import_users_api_v1_auth_users_bulk_import_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BulkImportResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
     "/api/v1/chat": {
       "post": {
         "tags": [
@@ -2352,6 +2399,20 @@
         "title": "ArtifactSummary",
         "description": "Artifact summary in list response"
       },
+      "Body_bulk_import_users_api_v1_auth_users_bulk_import_post": {
+        "properties": {
+          "file": {
+            "type": "string",
+            "format": "binary",
+            "title": "File"
+          }
+        },
+        "type": "object",
+        "required": [
+          "file"
+        ],
+        "title": "Body_bulk_import_users_api_v1_auth_users_bulk_import_post"
+      },
       "Body_upload_file_api_v1_artifacts__session_id__upload_post": {
         "properties": {
           "file": {
@@ -2379,6 +2440,127 @@
           "file"
         ],
         "title": "Body_upload_file_new_session_api_v1_artifacts_upload_post"
+      },
+      "BulkImportFailedRow": {
+        "properties": {
+          "row": {
+            "type": "integer",
+            "title": "Row",
+            "description": "1-based data row number (excluding header)"
+          },
+          "username": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Username",
+            "description": "Username on the row, may be empty if row had none"
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason",
+            "description": "Failure reason (validation message)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "row",
+          "username",
+          "reason"
+        ],
+        "title": "BulkImportFailedRow",
+        "description": "\u5355\u884c\u4e1a\u52a1\u6821\u9a8c\u5931\u8d25 \u2014 \u884c\u53f7 + username\uff08\u53ef\u80fd\u4e3a\u7a7a\uff09+ \u539f\u56e0\u3002"
+      },
+      "BulkImportResponse": {
+        "properties": {
+          "created": {
+            "items": {
+              "$ref": "#/components/schemas/UserResponse"
+            },
+            "type": "array",
+            "title": "Created"
+          },
+          "failed": {
+            "items": {
+              "$ref": "#/components/schemas/BulkImportFailedRow"
+            },
+            "type": "array",
+            "title": "Failed"
+          },
+          "skipped": {
+            "items": {
+              "$ref": "#/components/schemas/BulkImportSkippedRow"
+            },
+            "type": "array",
+            "title": "Skipped"
+          },
+          "total_rows": {
+            "type": "integer",
+            "title": "Total Rows",
+            "description": "Total data rows processed (excluding header)"
+          },
+          "detected_encoding": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detected Encoding",
+            "description": "Encoding charset-normalizer picked"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Warnings",
+            "description": "Non-blocking notices (unknown columns, etc.)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "created",
+          "failed",
+          "skipped",
+          "total_rows",
+          "detected_encoding",
+          "warnings"
+        ],
+        "title": "BulkImportResponse",
+        "description": "POST /api/v1/auth/users/bulk-import response\u3002\n\nbest-effort \u4e09\u5206\u7c7b\u3002total_rows = created + failed + skipped\u3002\nwarnings \u542b\u7f16\u7801 fallback / unknown \u5217\u7b49\u975e\u963b\u65ad\u63d0\u793a\u3002"
+      },
+      "BulkImportSkippedRow": {
+        "properties": {
+          "row": {
+            "type": "integer",
+            "title": "Row"
+          },
+          "username": {
+            "type": "string",
+            "title": "Username"
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason",
+            "description": "Skip reason",
+            "default": "username_exists"
+          }
+        },
+        "type": "object",
+        "required": [
+          "row",
+          "username",
+          "reason"
+        ],
+        "title": "BulkImportSkippedRow",
+        "description": "\u5355\u884c\u88ab\u8df3\u8fc7 \u2014 \u5f53\u524d\u552f\u4e00\u539f\u56e0\u662f username \u5df2\u5728 DB \u4e2d\u5b58\u5728\u3002"
       },
       "CancelResponse": {
         "properties": {

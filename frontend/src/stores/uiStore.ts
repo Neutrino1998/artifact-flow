@@ -11,6 +11,7 @@ export type UserMgmtRightView =
   | { type: 'create-user' }
   | { type: 'edit-user'; userId: string }
   | { type: 'dept-manager' }
+  | { type: 'bulk-import' }
   | { type: 'bulk-action' };
 
 interface UIState {

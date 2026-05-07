@@ -47,6 +47,10 @@ class Settings(BaseSettings):
     # 上传限制
     MAX_UPLOAD_SIZE: int = 20 * 1024 * 1024  # 20MB
 
+    # 批量导入用户（CSV）
+    MAX_BULK_IMPORT_ROWS: int = 1000          # 行数上限，超过整体拒绝（防误传）
+    MAX_BULK_IMPORT_BYTES: int = 5 * 1024 * 1024  # 5MB 字节上限（先于行数检查，防恶意大文件）
+
     # 分页默认值
     DEFAULT_PAGE_SIZE: int = 20
     MAX_PAGE_SIZE: int = 100

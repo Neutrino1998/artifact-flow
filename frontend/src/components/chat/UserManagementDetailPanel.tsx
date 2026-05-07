@@ -3,6 +3,7 @@
 import { useUIStore } from '@/stores/uiStore';
 import UserDetailForm from '@/components/forms/UserDetailForm';
 import CreateUserForm from '@/components/forms/CreateUserForm';
+import BulkImportForm from '@/components/forms/BulkImportForm';
 import DepartmentManagerPanel from '@/components/chat/DepartmentManagerPanel';
 
 export default function UserManagementDetailPanel() {
@@ -14,6 +15,10 @@ export default function UserManagementDetailPanel() {
 
   if (view.type === 'create-user') {
     return <CreateUserForm />;
+  }
+
+  if (view.type === 'bulk-import') {
+    return <BulkImportForm />;
   }
 
   if (view.type === 'dept-manager') {

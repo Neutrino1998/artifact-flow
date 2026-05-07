@@ -20,6 +20,7 @@ import type {
   UserResponse,
   UserListResponse,
   UserImpactResponse,
+  BulkImportResponse,
   DepartmentResponse,
   DepartmentListResponse,
   DepartmentTreeResponse,
@@ -77,10 +78,17 @@ function authHeaders(): Record<string, string> {
 
 export class ApiError extends Error {
   status: number;
-  constructor(status: number, message: string) {
+  /**
+   * Parsed JSON response body when available — lets callers read structured
+   * error payloads (e.g. bulk-import returns `{detail: {message, duplicate_rows}}`).
+   * Undefined if the body wasn't JSON or wasn't parsed.
+   */
+  body?: unknown;
+  constructor(status: number, message: string, body?: unknown) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
+    this.body = body;
   }
 }
 
@@ -430,6 +438,40 @@ export function deleteUser(userId: string) {
 
 export function getUserImpact(userId: string) {
   return request<UserImpactResponse>(`/api/v1/auth/users/${userId}/impact`);
+}
+
+/**
+ * 批量导入用户（CSV）— PR3。
+ *
+ * 错误：
+ * - 400 + dict detail（`{message, duplicate_rows}`）→ 文件内 username 重复，
+ *   ApiError.body 含原始 JSON 给 UI 渲染重复行号
+ * - 400 + string detail → CSV 解析错（缺 username 列 / 行数超限 / 空文件）
+ * - 422 → 字节超限
+ */
+export async function bulkImportUsers(file: File): Promise<BulkImportResponse> {
+  const formData = new FormData();
+  formData.append('file', file);
+
+  const res = await fetch(`${BASE_URL}/api/v1/auth/users/bulk-import`, {
+    method: 'POST',
+    headers: authHeaders(),
+    body: formData,
+  });
+
+  if (res.status === 401) {
+    useAuthStore.getState().logout();
+    throw new ApiError(401, 'Session expired');
+  }
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    let parsed: unknown = undefined;
+    try { parsed = JSON.parse(text); } catch { /* not JSON */ }
+    throw new ApiError(res.status, formatApiError(res.status, text), parsed);
+  }
+
+  return res.json() as Promise<BulkImportResponse>;
 }
 
 export function changeMyPassword(body: ChangePasswordRequest) {

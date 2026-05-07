@@ -28,6 +28,20 @@ class UserRepository(BaseRepository[User]):
         )
         return result.scalar_one_or_none()
 
+    async def find_existing_usernames(self, usernames: set[str]) -> set[str]:
+        """
+        批查已存在的 username 集合 — 给批量导入 preflight 用。
+
+        单次 SELECT username WHERE username IN (...)，避免逐行 N+1 查询。
+        空集合直接返回空集合，不发 SQL。
+        """
+        if not usernames:
+            return set()
+        result = await self._session.execute(
+            select(User.username).where(User.username.in_(usernames))
+        )
+        return set(result.scalars().all())
+
     async def _apply_search_filter(self, query, search_query: Optional[str]):
         """
         Apply ILIKE search on username + display_name + department subtree.
