@@ -76,7 +76,11 @@ export default function CreateUserForm() {
       </div>
 
       {/* Form */}
-      <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto px-6 py-5 space-y-4">
+      <form
+        id="create-user-form"
+        onSubmit={handleSubmit}
+        className="flex-1 overflow-y-auto px-6 py-5 space-y-4"
+      >
         <div>
           <label className="block text-sm text-text-secondary dark:text-text-secondary-dark mb-1">
             用户名 <span className="text-status-error">*</span>
@@ -151,9 +155,9 @@ export default function CreateUserForm() {
           取消
         </button>
         <button
-          onClick={handleSubmit}
-          disabled={!canSubmit}
+          form="create-user-form"
           type="submit"
+          disabled={!canSubmit}
           className="px-6 py-2 rounded-lg bg-accent text-white hover:bg-accent-hover disabled:opacity-40 transition-colors"
         >
           {submitting ? '创建中...' : '创建'}

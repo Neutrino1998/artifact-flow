@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { ApiError } from '@/lib/api';
 
 interface DangerConfirmModalProps {
   title: string;
@@ -10,7 +11,11 @@ interface DangerConfirmModalProps {
   acknowledgeLabel?: string;
   confirmLabel?: string;
   cancelLabel?: string;
-  /** 确认时的 async handler；执行期间按钮显示 loading */
+  /**
+   * 确认时的 async handler；执行期间按钮显示 loading。
+   * 抛错时由本 modal 接住并 inline 显示，modal 保持打开供用户重试或取消，
+   * 避免 caller 把删除失败变成 unhandled rejection。
+   */
   onConfirm: () => void | Promise<void>;
   onCancel: () => void;
 }
@@ -26,8 +31,9 @@ export default function DangerConfirmModal({
 }: DangerConfirmModalProps) {
   const [acknowledged, setAcknowledged] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  // ESC 关闭
+  // ESC 关闭（提交中除外）
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.key === 'Escape' && !submitting) onCancel();
@@ -39,8 +45,18 @@ export default function DangerConfirmModal({
   const handleConfirm = async () => {
     if (!acknowledged || submitting) return;
     setSubmitting(true);
+    setError(null);
     try {
       await onConfirm();
+    } catch (err) {
+      // 失败时不关闭 modal — 用户可重试或取消，不至于静默失败
+      if (err instanceof ApiError) {
+        setError(err.message);
+      } else if (err instanceof Error) {
+        setError(err.message || '操作失败');
+      } else {
+        setError('操作失败');
+      }
     } finally {
       setSubmitting(false);
     }
@@ -62,7 +78,7 @@ export default function DangerConfirmModal({
           {message}
         </p>
 
-        <label className="flex items-start gap-3 mb-6 cursor-pointer select-none group">
+        <label className="flex items-start gap-3 mb-4 cursor-pointer select-none group">
           <input
             type="checkbox"
             checked={acknowledged}
@@ -74,6 +90,15 @@ export default function DangerConfirmModal({
             {acknowledgeLabel}
           </span>
         </label>
+
+        {error && (
+          <div
+            role="alert"
+            className="mb-4 px-3 py-2 text-sm text-status-error bg-status-error/10 border border-status-error/30 rounded-lg"
+          >
+            {error}
+          </div>
+        )}
 
         <div className="flex justify-end gap-3">
           <button
