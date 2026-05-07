@@ -6,11 +6,20 @@ function applyTheme(theme: 'light' | 'dark') {
   }
 }
 
+export type UserMgmtRightView =
+  | { type: 'empty' }
+  | { type: 'create-user' }
+  | { type: 'edit-user'; userId: string }
+  | { type: 'create-dept'; parentId: string | null }
+  | { type: 'edit-dept'; deptId: string }
+  | { type: 'bulk-action' };
+
 interface UIState {
   sidebarCollapsed: boolean;
   artifactPanelVisible: boolean;
   conversationBrowserVisible: boolean;
   userManagementVisible: boolean;
+  userManagementRightView: UserMgmtRightView;
   observabilityVisible: boolean;
   observabilitySelectedConvId: string | null;
   observabilityBrowseVisible: boolean;
@@ -23,6 +32,7 @@ interface UIState {
   setArtifactPanelVisible: (visible: boolean) => void;
   setConversationBrowserVisible: (visible: boolean) => void;
   setUserManagementVisible: (visible: boolean) => void;
+  setUserManagementRightView: (view: UserMgmtRightView) => void;
   setObservabilityVisible: (visible: boolean) => void;
   setObservabilitySelectedConvId: (id: string | null) => void;
   setObservabilityBrowseVisible: (visible: boolean) => void;
@@ -36,6 +46,7 @@ export const useUIStore = create<UIState>((set) => ({
   artifactPanelVisible: false,
   conversationBrowserVisible: false,
   userManagementVisible: false,
+  userManagementRightView: { type: 'empty' },
   observabilityVisible: false,
   observabilitySelectedConvId: null,
   observabilityBrowseVisible: false,
@@ -56,7 +67,9 @@ export const useUIStore = create<UIState>((set) => ({
   setUserManagementVisible: (visible) => set({
     userManagementVisible: visible,
     ...(visible && { conversationBrowserVisible: false, observabilityVisible: false }),
+    ...(!visible && { userManagementRightView: { type: 'empty' } }),
   }),
+  setUserManagementRightView: (view) => set({ userManagementRightView: view }),
   setObservabilityVisible: (visible) => set({
     observabilityVisible: visible,
     ...(visible && { conversationBrowserVisible: false, userManagementVisible: false, artifactPanelVisible: false }),

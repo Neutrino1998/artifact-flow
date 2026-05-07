@@ -12,12 +12,14 @@ interface ThreeColumnLayoutProps {
   sidebar: React.ReactNode;
   chat: React.ReactNode;
   artifact?: React.ReactNode;
+  forceArtifactVisible?: boolean;
 }
 
 export default function ThreeColumnLayout({
   sidebar,
   chat,
   artifact,
+  forceArtifactVisible = false,
 }: ThreeColumnLayoutProps) {
   const sidebarCollapsed = useUIStore((s) => s.sidebarCollapsed);
   const setSidebarCollapsed = useUIStore((s) => s.setSidebarCollapsed);
@@ -77,7 +79,7 @@ export default function ThreeColumnLayout({
     setArtifactWidth(DEFAULT_ARTIFACT_WIDTH);
   }, []);
 
-  const showArtifact = artifactPanelVisible && artifact;
+  const showArtifact = (artifactPanelVisible || forceArtifactVisible) && artifact;
   const showSidebar = isMd; // < 768px: sidebar completely hidden
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 

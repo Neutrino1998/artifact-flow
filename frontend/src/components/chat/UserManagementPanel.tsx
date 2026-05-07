@@ -20,6 +20,7 @@ export default function UserManagementPanel() {
 
   const currentUserId = useAuthStore((s) => s.user?.id);
   const setUserManagementVisible = useUIStore((s) => s.setUserManagementVisible);
+  const setUserManagementRightView = useUIStore((s) => s.setUserManagementRightView);
 
   // Create form
   const [showCreate, setShowCreate] = useState(false);
@@ -257,6 +258,7 @@ export default function UserManagementPanel() {
                   isSelf={user.id === currentUserId}
                   onUpdate={handleUpdate}
                   onToggleActive={handleToggleActive}
+                  onOpenDetail={() => setUserManagementRightView({ type: 'edit-user', userId: user.id })}
                 />
               ))}
 
@@ -287,11 +289,13 @@ function UserRow({
   isSelf,
   onUpdate,
   onToggleActive,
+  onOpenDetail,
 }: {
   user: UserResponse;
   isSelf: boolean;
   onUpdate: (userId: string, fields: Record<string, unknown>) => Promise<void>;
   onToggleActive: (user: UserResponse) => void;
+  onOpenDetail: () => void;
 }) {
   // Local editing state
   const [editing, setEditing] = useState(false);
@@ -355,9 +359,13 @@ function UserRow({
   };
 
   return (
-    <div className="flex items-center gap-4 px-4 py-3 rounded-lg hover:bg-panel/60 dark:hover:bg-panel-accent-dark/60 transition-colors mb-1">
-      {/* User info */}
-      <div className="flex-1 min-w-0">
+    <div
+      className="flex items-center gap-4 px-4 py-3 rounded-lg hover:bg-panel/60 dark:hover:bg-panel-accent-dark/60 transition-colors mb-1 cursor-pointer"
+      onClick={onOpenDetail}
+      title="点击查看详情"
+    >
+      {/* User info — inline edit zone, isolate clicks from row handler */}
+      <div className="flex-1 min-w-0" onClick={(e) => e.stopPropagation()}>
         {editing ? (
           <input
             ref={editRef}
@@ -443,8 +451,11 @@ function UserRow({
         </span>
       </span>
 
-      {/* Actions */}
-      <div className="flex-shrink-0 flex items-center gap-1.5">
+      {/* Actions — isolate clicks from row handler */}
+      <div
+        className="flex-shrink-0 flex items-center gap-1.5"
+        onClick={(e) => e.stopPropagation()}
+      >
         {isSelf ? (
           <span className="text-xs text-text-tertiary dark:text-text-tertiary-dark">
             当前
