@@ -415,6 +415,62 @@ flowchart TD
 - SSE 流式连接：`/api/v1/stream/` 路径关闭 `proxy_buffering`，超时 1800s
 - Swagger 文档：生产环境下 `/docs`、`/redoc`、`/openapi.json` 返回 404
 - `--scale` 支持：使用 Docker 内部 DNS resolver `127.0.0.11`
+- 维护开关：`deploy/maintenance/MAINTENANCE_ON` flag 文件控制（详见下方"维护模式"）
+
+### 维护模式（无停机更新窗口）
+
+适用于 **Mode 2 / 3**（有 Nginx 反向代理）。Mode 1 无 Nginx，不适用。
+
+**机制：**
+
+- `deploy/scripts/maintenance.sh on|off|status` 在宿主机 `deploy/maintenance/` 下写入 / 删除 `MAINTENANCE_ON` flag 文件
+- Nginx 在每个 gated location 头部 `if (-f /etc/nginx/maintenance/MAINTENANCE_ON) { return 503; }`，触发后 `error_page 503 @maintenance` 渲染 `maintenance.html`（带睡猫的静态页）
+- 检查是 per-request 的，**无需 reload**，切换秒级生效
+- `/health/` 故意不挡——容器 healthcheck 和外部监控仍要看到真实状态
+- `error_page 503 @maintenance` 只在 gated location 内生效（不放在 server 级），加上 `proxy_intercept_errors` 默认 `off`，**上游真实 503 原样穿透**（如 `/health/ready` 在 DB/Redis 异常时返回的 JSON 503，契约不会被改写为 HTML）
+
+**首次启用（仅一次）：** Mode 2/3 的 compose 已声明 `deploy/maintenance` 卷挂载，但既有 nginx 容器需要 force-recreate 一次才会挂上：
+
+```bash
+# Mode 3（内网）
+docker compose -f deploy/docker-compose.intranet.yml up -d --force-recreate nginx
+
+# Mode 2（生产）
+docker compose -f docker-compose.prod.yml up -d --force-recreate nginx
+```
+
+之后所有切换不需要碰 docker。
+
+**典型滚动更新流程（Mode 3 内网为例）：**
+
+```bash
+# 1. 开维护，可选传文案
+./deploy/scripts/maintenance.sh on "正在更新到 v2.3.0，预计 5 分钟"
+
+# 2. 加载新镜像（intranet 通过 docker load）
+docker load -i artifactflow-v2.3.0.tar
+docker load -i artifactflow-frontend-v2.3.0.tar
+
+# 3. 重启变更的容器（postgres / redis / nginx 不动）
+AF_VERSION=v2.3.0 docker compose -f deploy/docker-compose.intranet.yml up -d backend frontend
+
+# 4. 等 backend 健康检查变绿
+docker compose -f deploy/docker-compose.intranet.yml ps
+
+# 5. 关维护
+./deploy/scripts/maintenance.sh off
+```
+
+**自定义文案：** `maintenance.sh on "..."` 传入的字符串写入 `deploy/maintenance/note.txt`，维护页通过 `fetch('/__maintenance/note.txt')` 异步加载并渲染。不传则显示默认文案"服务正在更新，请稍后重试。"页面每 30 秒自动 reload，维护结束后用户无需手动刷新。
+
+**与配置热更新组合：** 大多数运行时配置（`config/agents/*.md`、`config/models/models.yaml`、`.env`）的更新流程见 [Mode 3 → 运行时配置变更](#运行时配置变更无需-rebuild--重新传镜像) 表，组合使用即可：
+
+```bash
+./deploy/scripts/maintenance.sh on "调整 agent 配置，约 1 分钟"
+vim config/agents/lead_agent.md
+docker compose -f deploy/docker-compose.intranet.yml restart backend
+./deploy/scripts/maintenance.sh off
+```
 
 ### 健康检查
 
