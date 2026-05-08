@@ -145,39 +145,45 @@ docker compose -f docker-compose.prod.yml up -d
 
 适用于无法访问外部网络的环境。使用预构建镜像，通过 `docker save/load` 传输。
 
+> **`docker compose` vs `docker-compose`：** 下面的命令用 V2 写法（`docker compose`，带空格）。CentOS 7 等老环境如果只有 V1（`docker-compose`，带横线），把所有 compose 调用替换成 V1 即可，compose 文件本身两版都解析。`pause.sh` / `resume.sh` 自动探测，无需替换。
+
 ### 构建发布包（在有网络的构建机上）
 
 ```bash
 ./scripts/release.sh 1.0.0
-# 产出:
-#   dist/artifactflow-1.0.0.tar.gz               (~500MB, 含全部 5 个镜像)
-#   dist/artifactflow-1.0.0.tar.gz.sha256
-#   dist/artifactflow-config-1.0.0.tar.gz        (config/ — agent prompts + models.yaml)
-#   dist/artifactflow-config-1.0.0.tar.gz.sha256
+# 产出 3 个 tar + sha256（存到 dist/）：
+#   artifactflow-1.0.0.tar.gz             (~370MB, 5 个 docker 镜像)
+#   artifactflow-config-1.0.0.tar.gz      (~10KB, config/ — agent prompts + models.yaml)
+#   artifactflow-deploy-1.0.0.tar.gz      (~15KB, deploy/ — compose + nginx.conf + scripts)
 ```
 
-> **为什么 config 单独打包：** intranet compose 通过 `../config:/app/config:ro` bind mount 让运维直接在宿主机编辑 prompt / 模型配置，重启容器即可生效（不用 rebuild 镜像）。配置变更频率远高于代码变更，单独打包后日常迭代只需传输几十 KB 的 config tar，不必重新拉 ~500MB 镜像 tar。
+> **三 tar 按变更频率拆分：** 调 prompt 只需重传 config tar，调 nginx 配置只需重传 deploy tar，不必每次都拖 ~370MB 镜像。intranet compose 把 `../config:/app/config:ro` 和 `./maintenance:/etc/nginx/maintenance:ro` 都用 bind mount 挂进容器，所以宿主机解出来的文件直接生效（详见后文运行时变更表）。
 
-### 部署（在目标内网机器上）
+> **目标平台默认 `linux/amd64`。** Apple Silicon 上跑 `release.sh` 会自动通过 buildx + QEMU 交叉编译，省得装到 x86_64 服务器后撞 `exec format error`。要构建别的平台传 `PLATFORM=linux/arm64 ./scripts/release.sh ...`。
+
+### 首次部署（在目标内网机器上）
 
 ```bash
-# 1. 传输文件到目标机器（镜像 tar + config tar + deploy/ 目录）
-scp dist/artifactflow-1.0.0.tar.gz \
-    dist/artifactflow-config-1.0.0.tar.gz \
-    deploy/ \
+# 1. 传 3 个 tar + sha256 到目标机
+scp dist/artifactflow-1.0.0.tar.gz dist/artifactflow-1.0.0.tar.gz.sha256 \
+    dist/artifactflow-config-1.0.0.tar.gz dist/artifactflow-config-1.0.0.tar.gz.sha256 \
+    dist/artifactflow-deploy-1.0.0.tar.gz dist/artifactflow-deploy-1.0.0.tar.gz.sha256 \
     target:/opt/artifactflow/
 
-# 2. 加载镜像 + 解压 config
+# 2. 校验 + 解包
 cd /opt/artifactflow
-docker load < artifactflow-1.0.0.tar.gz
+sha256sum -c artifactflow-1.0.0.tar.gz.sha256
+sha256sum -c artifactflow-config-1.0.0.tar.gz.sha256
+sha256sum -c artifactflow-deploy-1.0.0.tar.gz.sha256
+docker load -i artifactflow-1.0.0.tar.gz
+tar xzf artifactflow-deploy-1.0.0.tar.gz   # 解出 ./deploy/
 tar xzf artifactflow-config-1.0.0.tar.gz   # 解出 ./config/
 
 # 3. 配置 .env
 cp deploy/.env.intranet.example deploy/.env
 # 编辑 deploy/.env，填写密码和 API Keys
 
-# 4. 配置内网 LLM（如需）
-# 编辑 config/models/models.yaml，设置 base_url 为内部推理端点
+# 4. 内网 LLM（如需）：编辑 config/models/models.yaml，把 base_url 指向内部推理端点
 
 # 5. 启动（3A: 自建基础设施）
 AF_VERSION=1.0.0 docker compose -f deploy/docker-compose.intranet.yml --profile infra up -d
@@ -186,6 +192,35 @@ AF_VERSION=1.0.0 docker compose -f deploy/docker-compose.intranet.yml --profile 
 docker compose -f deploy/docker-compose.intranet.yml exec backend \
   python scripts/create_admin.py admin --password <your-password>
 ```
+
+### 滚动更新已有部署
+
+新版本到位后，`pause.sh` / `resume.sh` 把维护窗口包成两个动作：起维护页 + 停服务 → 加载新镜像 → 起新版本 + 关维护页。
+
+```bash
+# 在内网机（假设新 tar 已 scp 到 ./tmp/ 下）
+cd /opt/artifactflow
+
+# 1. 校验 + 解包（不影响在跑容器，可在维护开始前做）
+sha256sum -c tmp/artifactflow-1.0.1.tar.gz.sha256
+sha256sum -c tmp/artifactflow-config-1.0.1.tar.gz.sha256
+sha256sum -c tmp/artifactflow-deploy-1.0.1.tar.gz.sha256
+tar xzf tmp/artifactflow-deploy-1.0.1.tar.gz
+tar xzf tmp/artifactflow-config-1.0.1.tar.gz
+docker load -i tmp/artifactflow-1.0.1.tar.gz
+
+# 2. 进维护窗口
+./deploy/scripts/pause.sh "升级到 v1.0.1"
+
+# 3. 退维护窗口（resume 失败 → 维护页保持开启，运维有时间排查）
+./deploy/scripts/resume.sh 1.0.1
+```
+
+> **首次启用维护页（一次性 bootstrap）：** 如果现有 nginx 容器是用旧 compose 起的（没有 maintenance 卷挂载），先 force-recreate 一次让它读新 nginx.conf：
+> ```bash
+> docker compose -f deploy/docker-compose.intranet.yml up -d --force-recreate nginx
+> ```
+> 之后 `pause.sh` 写的 flag 文件才能被 nginx 看到。后续升级直接 pause/resume 即可，不再需要 force-recreate。
 
 ### 运行时配置变更（无需 rebuild / 重新传镜像）
 
@@ -421,6 +456,8 @@ flowchart TD
 
 适用于 **Mode 2 / 3**（有 Nginx 反向代理）。Mode 1 无 Nginx，不适用。
 
+**两层接口：** 镜像升级（典型场景）用 `pause.sh` / `resume.sh`，它们封装了"维护页 + 停服务 → 起新版本 + 关维护页"的全套动作；config-only 改动不需要停服务，直接用底层的 `maintenance.sh on|off`。
+
 **机制：**
 
 - `deploy/scripts/maintenance.sh on|off|status` 在宿主机 `deploy/maintenance/` 下写入 / 删除 `MAINTENANCE_ON` flag 文件
@@ -441,29 +478,27 @@ docker compose -f docker-compose.prod.yml up -d --force-recreate nginx
 
 之后所有切换不需要碰 docker。
 
-**典型滚动更新流程（Mode 3 内网为例）：**
+**镜像升级（典型场景）—— `pause.sh` / `resume.sh`：**
 
 ```bash
-# 1. 开维护，可选传文案
-./deploy/scripts/maintenance.sh on "正在更新到 v2.3.0，预计 5 分钟"
+# 1. 加载新镜像（不影响在跑容器）
+docker load -i tmp/artifactflow-v2.3.0.tar.gz
+tar xzf tmp/artifactflow-deploy-v2.3.0.tar.gz   # 如果 deploy 也变了
+tar xzf tmp/artifactflow-config-v2.3.0.tar.gz   # 如果 config 也变了
 
-# 2. 加载新镜像（intranet 通过 docker load）
-docker load -i artifactflow-v2.3.0.tar
-docker load -i artifactflow-frontend-v2.3.0.tar
+# 2. 进维护窗口（写 flag → 等 2s → stop backend frontend）
+./deploy/scripts/pause.sh "正在更新到 v2.3.0，预计 5 分钟"
 
-# 3. 重启变更的容器（postgres / redis / nginx 不动）
-AF_VERSION=v2.3.0 docker compose -f deploy/docker-compose.intranet.yml up -d backend frontend
-
-# 4. 等 backend 健康检查变绿
-docker compose -f deploy/docker-compose.intranet.yml ps
-
-# 5. 关维护
-./deploy/scripts/maintenance.sh off
+# 3. 退维护窗口（up -d backend frontend → 等 healthy → 关 flag）
+#    backend 60s 内不 healthy → 维护页保持开启，运维有时间排查
+./deploy/scripts/resume.sh v2.3.0
 ```
 
-**自定义文案：** `maintenance.sh on "..."` 传入的字符串写入 `deploy/maintenance/note.txt`，维护页通过 `fetch('/__maintenance/note.txt')` 异步加载并渲染。不传则显示默认文案"服务正在更新，请稍后重试。"页面每 30 秒自动 reload，维护结束后用户无需手动刷新。
+`resume.sh` 兼容 V1（`docker-compose`）和 V2（`docker compose`），自动探测，CentOS 7 老服务器和 Docker Desktop 都能用。
 
-**与配置热更新组合：** 大多数运行时配置（`config/agents/*.md`、`config/models/models.yaml`、`.env`）的更新流程见 [Mode 3 → 运行时配置变更](#运行时配置变更无需-rebuild--重新传镜像) 表，组合使用即可：
+**Config-only 变更 —— 直接 `maintenance.sh`：**
+
+只调 prompt / `models.yaml` / `.env` 这种不重启 backend 也能生效（restart 即可）的场景，不需要 `pause.sh` 那种"停服务"操作，开关 flag 的同时 `restart backend` 就够：
 
 ```bash
 ./deploy/scripts/maintenance.sh on "调整 agent 配置，约 1 分钟"

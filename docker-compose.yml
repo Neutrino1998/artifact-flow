@@ -13,6 +13,7 @@ services:
     volumes:
       - artifactflow_data:/app/data
       - ./config:/app/config:ro
+      - /etc/localtime:/etc/localtime:ro
     env_file:
       - .env
     environment:
@@ -35,6 +36,8 @@ services:
     container_name: artifactflow-frontend
     ports:
       - "3000:3000"
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
     depends_on:
       backend:
         condition: service_healthy
