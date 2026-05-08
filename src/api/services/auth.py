@@ -20,6 +20,7 @@ class TokenPayload:
     user_id: str
     username: str
     role: str
+    password_version: int = 0
 
 
 def hash_password(plain: str) -> str:
@@ -32,7 +33,12 @@ def verify_password(plain: str, hashed: str) -> bool:
     return bcrypt.checkpw(plain.encode("utf-8"), hashed.encode("utf-8"))
 
 
-def create_access_token(user_id: str, username: str, role: str) -> str:
+def create_access_token(
+    user_id: str,
+    username: str,
+    role: str,
+    password_version: int = 0,
+) -> str:
     """
     签发 JWT Token
 
@@ -40,6 +46,7 @@ def create_access_token(user_id: str, username: str, role: str) -> str:
         user_id: 用户 ID
         username: 用户名
         role: 角色
+        password_version: 用户当前的密码版本（改密会递增）
 
     Returns:
         JWT Token 字符串
@@ -49,6 +56,7 @@ def create_access_token(user_id: str, username: str, role: str) -> str:
         "sub": user_id,
         "username": username,
         "role": role,
+        "pwd_v": password_version,
         "iat": now,
         "exp": now + timedelta(days=config.JWT_EXPIRY_DAYS),
     }
@@ -75,6 +83,7 @@ def decode_access_token(token: str) -> Optional[TokenPayload]:
             user_id=payload["sub"],
             username=payload["username"],
             role=payload["role"],
+            password_version=payload.get("pwd_v", 0),
         )
     except (jwt.InvalidTokenError, KeyError):
         return None

@@ -501,3 +501,32 @@ class ConversationManager:
         """
         repo = self._ensure_repository()
         return await repo.delete_conversation(conversation_id)
+
+    async def exists_async(self, conversation_id: str) -> bool:
+        """
+        判断对话是否存在（薄包装 ConversationRepository.exists）
+
+        controller post-processing 用来判定 conv 是否被中途 DELETE。
+        """
+        repo = self._ensure_repository()
+        return await repo.exists(conversation_id)
+
+    async def count_user_conversations(self, user_id: str) -> int:
+        """
+        统计指定用户拥有的对话数。
+
+        用于硬删用户前的 impact 提示（"将级联删除该用户的 N 条会话"）。
+        薄包装 ConversationRepository.count_by_user，维持 router → manager → repo
+        的三层调用边界。
+        """
+        repo = self._ensure_repository()
+        return await repo.count_by_user(user_id)
+
+    async def count_users_conversations(self, user_ids: list[str]) -> int:
+        """
+        一次性统计一批用户共拥有的对话数。
+
+        用于 PR5a 批量硬删用户前的 impact 提示。一次 IN 查询，避免 N+1。
+        """
+        repo = self._ensure_repository()
+        return await repo.count_by_users(user_ids)

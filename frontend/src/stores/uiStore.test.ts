@@ -7,6 +7,7 @@ function reset() {
     artifactPanelVisible: false,
     conversationBrowserVisible: false,
     userManagementVisible: false,
+    userManagementRightView: { type: 'empty' },
     observabilityVisible: false,
     observabilitySelectedConvId: null,
     observabilityBrowseVisible: false,
@@ -95,5 +96,60 @@ describe('uiStore observability sub-state', () => {
     useUIStore.getState().triggerObservabilityRefresh();
     useUIStore.getState().triggerObservabilityRefresh();
     expect(useUIStore.getState().observabilityRefreshTick).toBe(2);
+  });
+});
+
+describe('uiStore userManagementRightView', () => {
+  beforeEach(() => reset());
+
+  test('setUserManagementRightView updates view payload', () => {
+    useUIStore.getState().setUserManagementRightView({ type: 'edit-user', userId: 'u-1' });
+
+    const view = useUIStore.getState().userManagementRightView;
+    expect(view).toEqual({ type: 'edit-user', userId: 'u-1' });
+  });
+
+  test('closing user management resets RightView to empty', () => {
+    useUIStore.setState({
+      userManagementVisible: true,
+      userManagementRightView: { type: 'edit-user', userId: 'u-1' },
+    });
+    useUIStore.getState().setUserManagementVisible(false);
+
+    const s = useUIStore.getState();
+    expect(s.userManagementVisible).toBe(false);
+    expect(s.userManagementRightView).toEqual({ type: 'empty' });
+  });
+
+  test('opening user management does NOT touch RightView (caller controls)', () => {
+    // simulate stale state from a prior session (shouldn't happen in practice, but verifies opener doesn't overwrite)
+    useUIStore.setState({ userManagementRightView: { type: 'create-user' } });
+    useUIStore.getState().setUserManagementVisible(true);
+
+    expect(useUIStore.getState().userManagementRightView).toEqual({ type: 'create-user' });
+  });
+
+  test('opening conversationBrowser also resets RightView (sibling-panel path)', () => {
+    useUIStore.setState({
+      userManagementVisible: true,
+      userManagementRightView: { type: 'edit-user', userId: 'u-1' },
+    });
+    useUIStore.getState().setConversationBrowserVisible(true);
+
+    const s = useUIStore.getState();
+    expect(s.userManagementVisible).toBe(false);
+    expect(s.userManagementRightView).toEqual({ type: 'empty' });
+  });
+
+  test('opening observability also resets RightView (sibling-panel path)', () => {
+    useUIStore.setState({
+      userManagementVisible: true,
+      userManagementRightView: { type: 'edit-user', userId: 'u-1' },
+    });
+    useUIStore.getState().setObservabilityVisible(true);
+
+    const s = useUIStore.getState();
+    expect(s.userManagementVisible).toBe(false);
+    expect(s.userManagementRightView).toEqual({ type: 'empty' });
   });
 });

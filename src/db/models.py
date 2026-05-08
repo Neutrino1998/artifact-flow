@@ -23,6 +23,7 @@ from sqlalchemy import (
     JSON,
     UniqueConstraint,
     Index,
+    Computed,
     func,
 )
 from sqlalchemy.orm import (
@@ -53,6 +54,12 @@ class User(Base):
     role: Mapped[str] = mapped_column(String(16), nullable=False, default="user")
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
 
+    # 密码版本号：每次改密 +1，老 token 的 pwd_v 与当前不一致即视为失效。
+    # 不是 blacklist —— 单调递增计数器，无需 Redis / 持久化吊销集合。
+    password_version: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime,
         server_default=func.now(),
@@ -65,15 +72,129 @@ class User(Base):
         nullable=False
     )
 
+    # 部门归属（可空：未分配 / 自助注册的用户）
+    # ondelete=SET NULL：删除部门时把用户的 department_id 置空，不级联删用户
+    department_id: Mapped[Optional[str]] = mapped_column(
+        String(64),
+        ForeignKey("departments.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
     # 关系：一对多 -> conversations
+    # passive_deletes=True：删除 User 时让 DB 的 FK CASCADE 处理子行，
+    # 不让 ORM 预先 SET NULL 或逐行 DELETE 而绕过 CASCADE。
     conversations: Mapped[List["Conversation"]] = relationship(
         "Conversation",
         back_populates="owner",
-        lazy="selectin"
+        lazy="selectin",
+        passive_deletes=True,
+    )
+
+    # 关系：多对一 -> department（按需 lazy load，列表场景不预加载）
+    department: Mapped[Optional["Department"]] = relationship(
+        "Department",
+        back_populates="users",
     )
 
     def __repr__(self) -> str:
         return f"<User(id={self.id}, username={self.username}, role={self.role})>"
+
+
+class Department(Base):
+    """
+    部门表（邻接表实现的层级结构）
+
+    每个部门可以有一个父部门，形成树。深度可变 —— 用户可以挂在任意一级，
+    取决于实际组织结构。
+
+    设计要点：
+    - parent_id ondelete=RESTRICT：不允许删有子部门的部门（必须先迁子）
+    - UNIQUE(parent_id, name)：同父下部门名不重复，堵手抖空格 / 重复创建
+    - 删除非空部门（含 user）由路由层校验，DB 不做 cascade
+    """
+    __tablename__ = "departments"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    parent_id: Mapped[Optional[str]] = mapped_column(
+        String(64),
+        ForeignKey("departments.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+    )
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+
+    # 跨方言根级去重的生成列实现 — 详见 __table_args__ 的 uq_dept_root_name 注释。
+    # ORM 视角只读：Computed 列由 DB 在 INSERT/UPDATE 时根据 parent_id + name 自动
+    # 计算，SQLAlchemy 默认不会在 INSERT 语句里写这一列。
+    root_name_key: Mapped[Optional[str]] = mapped_column(
+        String(128),
+        Computed(
+            "CASE WHEN parent_id IS NULL THEN name END",
+            persisted=True,
+        ),
+        nullable=True,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        server_default=func.now(),
+        nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False
+    )
+
+    # 自引用：父-子关系
+    parent: Mapped[Optional["Department"]] = relationship(
+        "Department",
+        remote_side=[id],
+        back_populates="children",
+    )
+    children: Mapped[List["Department"]] = relationship(
+        "Department",
+        back_populates="parent",
+        passive_deletes=True,
+    )
+
+    # 一对多 -> users（只在按部门反查用户时显式 join，平时不预加载）
+    users: Mapped[List["User"]] = relationship(
+        "User",
+        back_populates="department",
+        passive_deletes=True,
+    )
+
+    __table_args__ = (
+        # 同父下名称唯一 — 适用于 parent_id 非 NULL 的所有行
+        UniqueConstraint("parent_id", "name", name="uq_dept_parent_name"),
+        # 根级（parent_id IS NULL）名称唯一性兜底。
+        #
+        # 为什么不是 partial unique index：
+        #   - SQL 标准把多个 NULL 视为 DISTINCT，上面的 UC 在 parent_id IS NULL
+        #     的行上失效（NULL,'A' 不等于 NULL,'A'，两条都允许插入）
+        #   - SQLite/PostgreSQL 支持 partial unique index（带 WHERE 条件），
+        #     可以专门约束根级；但 MySQL 5.7~8.x 不支持 partial index
+        #     （8.0.13 的 functional index 是另一回事），sqlite_where /
+        #     postgresql_where 在 MySQL 方言下会被忽略，编译成全表
+        #     UNIQUE(name)，反而误伤"不同父下同名子部门"的合法情况
+        #
+        # 改用生成列 + 普通 UNIQUE：
+        #   - root_name_key 在根级行 = name，非根级 = NULL
+        #   - UNIQUE(root_name_key)：根级 NULL 与 name 相比，相同 name 直接冲突；
+        #     非根级行的 NULL 互相 DISTINCT，不冲突，不影响"不同父下同名子"
+        #   - SQLite 3.31+ / PostgreSQL 12+ / MySQL 5.7+ 都原生支持 STORED
+        #     生成列（与 UNIQUE 索引兼容）
+        #
+        # 这条约束是 source of truth，路由层 pre-check 只是为了给 admin 早返回
+        # 友好的 409；并发请求穿过 pre-check 后，DB 这层会原子拒绝第二条 INSERT。
+        UniqueConstraint("root_name_key", name="uq_dept_root_name"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<Department(id={self.id}, name={self.name}, parent={self.parent_id})>"
 
 
 class Conversation(Base):
@@ -95,9 +216,12 @@ class Conversation(Base):
     title: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
     
     # 用户ID（认证隔离）
+    # ondelete=CASCADE：硬删用户时连带删除其所有会话（messages / events /
+    # artifacts 通过下一级 CASCADE 自动清理）。内网工具不保留孤儿会话；
+    # 若要保留需走"禁用 (is_active=False)"软删路径。
     user_id: Mapped[Optional[str]] = mapped_column(
         String(64),
-        ForeignKey("users.id", ondelete="SET NULL"),
+        ForeignKey("users.id", ondelete="CASCADE"),
         nullable=True,
         index=True
     )

@@ -1,10 +1,10 @@
 # API 参考
 
-> 五个路由组 + 统一鉴权 + SSE 订阅 — 面向集成方的紧凑端点手册。完整字段与 schema 见 `/openapi.json`（`ARTIFACTFLOW_DEBUG=true` 时 `/docs` 渲染 Swagger UI）。
+> 六个路由组 + 统一鉴权 + SSE 订阅 — 面向集成方的紧凑端点手册。完整字段与 schema 见 `/openapi.json`（`ARTIFACTFLOW_DEBUG=true` 时 `/docs` 渲染 Swagger UI）。
 
 ## 通用约定
 
-- **Base URL**：`/api/v1/{group}`，group ∈ `auth / chat / artifacts / stream / admin`
+- **Base URL**：`/api/v1/{group}`，group ∈ `auth / departments / chat / artifacts / stream / admin`
 - **鉴权**：除 `/health/*` 与 `/auth/login` 外全部要求 `Authorization: Bearer <JWT>`；Admin 路由额外要求 `role=admin`
 - **JSON**：请求与响应默认 `application/json`；文件上传用 `multipart/form-data`
 - **时间**：所有 timestamp 用 ISO-8601 字符串
@@ -31,17 +31,27 @@
 
 ## Auth
 
-`/api/v1/auth` — 登录与用户管理（无自助注册）。
+`/api/v1/auth` — 登录、自助资料、admin 用户管理（无自助注册）。
 
 | 方法 | 路径 | 鉴权 | 说明 |
 |------|------|------|------|
 | POST | `/login` | — | 用户名密码换 JWT |
 | GET | `/me` | 用户 | 当前用户信息 |
+| POST | `/me/password` | 用户 | 自助改密（校验 `current_password`） |
+| PATCH | `/me` | 用户 | 自助改 `display_name`（清空传 `""`） |
 | POST | `/users` | admin | 创建用户 |
-| GET | `/users` | admin | 列出用户（`limit` 1-200, `offset`, `q` 搜索） |
-| PUT | `/users/{user_id}` | admin | 更新 display_name / password / role / is_active |
+| GET | `/users` | admin | 列出用户（`limit` 1-200, `offset`, `q` 搜索按用户名/显示名/部门子树） |
+| GET | `/users/{user_id}` | admin | 单查 |
+| PUT | `/users/{user_id}` | admin | 更新 `display_name` / `password` / `role` / `is_active` / `department_id` |
+| DELETE | `/users/{user_id}` | admin | 硬删（FK CASCADE 连带删会话/消息/事件/工件） |
+| GET | `/users/{user_id}/impact` | admin | 删前 impact：`{conversation_count}` |
+| POST | `/users/bulk-import` | admin | CSV 批量导入用户（multipart） |
+| POST | `/users/bulk-action` | admin | 批量动作：disable/enable/delete/set_department |
+| GET | `/users/bulk-impact` | admin | 批量删前 impact：`{user_count, conversation_count}` |
 
-**POST /login**
+> **路由注册顺序**：`/users/bulk-impact` 必须早于 `/users/{user_id}` 注册，否则会被解析为 `user_id="bulk-impact"`。bulk-action 同名地放在那之后纯粹是聚类，POST 没有路由冲突。
+
+### POST `/login`
 
 ```http
 POST /api/v1/auth/login
@@ -59,10 +69,227 @@ POST /api/v1/auth/login
 - 失败统一返回 **401**（用户不存在 / 密码错 / 账号禁用），不区分原因
 - **无 `/refresh` 端点**：token 过期后客户端需重新 login
 
-**POST /users**
+### POST `/me/password` — 自助改密
 
-- 字段：`username`, `password`, `display_name`, `role` ∈ `user` / `admin`
-- `409` 用户名已存在；`400` 非法 role
+```http
+POST /api/v1/auth/me/password
+{"current_password": "...", "new_password": "..."}
+
+204 No Content
+```
+
+- 校验失败 → `400 Current password is incorrect`
+- `new_password` 服务端要求 `min_length=4`（与 admin 重置一致）
+- 改密后 `password_version++`；旧 token 立即失效（`get_current_user` 查 `password_version` 字段对比 JWT 内嵌版本号）
+
+### PATCH `/me` — 自助改 display_name
+
+```http
+PATCH /api/v1/auth/me
+{"display_name": "Alice Liu"}        // 传 "" 则清空，传 null 不改
+```
+
+返回最新 `UserInfo`。安全敏感字段（role / is_active / password）在此端点**不受理**，必须走 admin `PUT /users/{id}` 或 `POST /me/password`。
+
+### POST `/users` — 创建用户（admin）
+
+- 字段：`username` (2-64, regex `^[A-Za-z0-9._-]+$`), `password` (4-128), `display_name?`, `role?` ∈ `user`/`admin`, `department_id?`
+- `409` 用户名已存在；`400` 非法 role / 非法 username 字符 / `department_id` 不存在
+
+### PUT `/users/{user_id}` — 更新（admin）
+
+所有字段可选（`UpdateUserRequest`）。**self-protection** 阻止三类自我修改：
+
+| 字段 | self 改动行为 |
+|---|---|
+| `password` | `403`（必须走 `/me/password` 校验旧密码） |
+| `role` | `403`（admin 不能 demote 自己） |
+| `is_active` | `403`（admin 不能禁用自己） |
+| `display_name` / `department_id` | 允许 |
+
+`department_id` 用 Pydantic `model_fields_set` 区分"未传"与"显式 null（清空）"：
+
+```http
+PUT /api/v1/auth/users/u-abc
+{"department_id": null}              // 清空归属
+{"display_name": "..."}              // 仅改 display_name，不动 department_id
+```
+
+非自身 admin 可以 demote / disable —— 仅自身被 self-protection 守住。
+
+### DELETE `/users/{user_id}` — 硬删（admin）
+
+- `403 Cannot delete yourself`
+- `404 User not found`
+- 成功 → `204`，**FK CASCADE** 连带删该用户的全部 conversations / messages / events / artifacts
+- 若该用户当前有正在跑的 engine：被级联删的 conversation 行由 controller post-processing 的 `exists()` 检查兜住（PR2a），engine 静默跳过持久化、不抛 FK 异常
+
+### GET `/users/{user_id}/impact` — 删前 impact（admin）
+
+```http
+GET /api/v1/auth/users/u-abc/impact
+200 OK
+{"conversation_count": 17}
+```
+
+给前端 `DangerConfirmModal` 显示"将级联删除该用户的 N 条会话"。
+
+### POST `/users/bulk-import` — CSV 批量导入（admin）
+
+`multipart/form-data` 上传 CSV 文件。Header 必含 `username`，可选 `password` / `display_name` / `dept_l1` / `dept_l2` / `dept_l3`。
+
+**关键语义：**
+
+- **best-effort 三分类**：`created` / `failed` / `skipped`
+- **默认密码**：`password` 留空 → 默认值 = `username`（如果 username 长度 < 4，该行进 `failed`）
+- **部门路径**：`(dept_l1, dept_l2, dept_l3)` 走 `resolve_department_path` 自动建表；gap（中间空、后面非空）严格拒绝
+- **文件内 username 重复 → 整体 400**（admin 必须先在源文件去重）
+- **行数上限**：`MAX_BULK_IMPORT_ROWS=1000`，超 → 400
+- **字节上限**：`MAX_BULK_IMPORT_BYTES=5MB`，超 → 422
+- 编码：`charset-normalizer` 自动 sniff（UTF-8 / GBK 等），结果回到 `detected_encoding`
+- bcrypt hash 阶段并行（`asyncio.gather + asyncio.to_thread`），300 行约 6 秒，event loop 不卡
+
+```http
+POST /api/v1/auth/users/bulk-import
+Content-Type: multipart/form-data
+file=@users.csv
+
+200 OK
+{
+  "created": [<UserResponse>, ...],
+  "failed": [{"row": 5, "username": "x y", "reason": "username has invalid characters"}],
+  "skipped": [{"row": 9, "username": "alice", "reason": "username_exists"}],
+  "total_rows": 12,
+  "detected_encoding": "utf-8",
+  "warnings": ["Unknown column 'note' ignored"]
+}
+```
+
+### POST `/users/bulk-action` — 批量动作（admin）
+
+```http
+POST /api/v1/auth/users/bulk-action
+{
+  "ids": ["u-1", "u-2", ...],         // 1-200, 同请求内自动去重
+  "action": "disable",                 // | enable | delete | set_department
+  "payload": null                      // set_department 时 = {"department_id": "dept-x" | null}
+}
+
+200 OK
+{
+  "succeeded": ["u-1", "u-2"],
+  "failed": [{"id": "u-3", "reason": "forbidden_self"}]
+}
+```
+
+- `failed.reason` 词汇：`forbidden_self`（自己的 id，self-protection）/ `not_found` / `internal_error`（IntegrityError 等已 rollback 的并发场景）
+- **set_department 预校验**：`payload.department_id` 在循环外查存在性，不存在 → 整批 400（fail-fast）
+- **IntegrityError 处理**：单条 IntegrityError（如 `set_department` 期间 dept 被并发删除）→ rollback session + 该条进 failed + 后续行不受影响
+- **其他异常**冒泡为 5xx（loud failure，CLAUDE.md "不为不会发生的场景加防御"）
+
+### GET `/users/bulk-impact` — 批量删前 impact（admin）
+
+```http
+GET /api/v1/auth/users/bulk-impact?ids=u-1&ids=u-2&ids=u-3
+
+200 OK
+{"user_count": 3, "conversation_count": 27}
+```
+
+`user_count` = 请求 ids 去重后的数量（不区分是否存在）；`conversation_count` = 一次 IN 查询的会话总数。`ids` 上限 200。
+
+---
+
+## Departments
+
+`/api/v1/departments` — 邻接表组织树（`Department(id, parent_id, name)`）。**全部 admin 权限**。每级在同 `parent_id` 下 `name` 唯一（含根级，跨方言由 STORED 生成列 + UNIQUE 兜底）；`parent_id` `ondelete=RESTRICT` 防级联误删。
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `` | 列出某父下的子部门（`parent_id` 缺省 → 一级） |
+| GET | `/tree` | 完整部门树（节点带 `user_count` 直属用户数） |
+| GET | `/{dept_id}` | 单查（含 `user_count` / `child_count`，删前展示用） |
+| POST | `` | 显式创建 |
+| PATCH | `/{dept_id}` | 改名（搬家走 `/move`） |
+| POST | `/{dept_id}/move` | 搬家（含环检测） |
+| DELETE | `/{dept_id}` | 删除（必须为空） |
+| POST | `/resolve` | 路径 → 末级 dept_id（缺失层级自动建） |
+
+### GET `` / GET `/tree`
+
+```http
+GET /api/v1/departments?parent_id=dept-xxx        # 缺省 = 顶层
+200 OK
+{"departments": [{"id":"...","parent_id":"...","name":"...","user_count":3,"child_count":1, ...}]}
+
+GET /api/v1/departments/tree
+200 OK
+{"nodes": [{"id":"...", "name":"...", "user_count":15, "children":[{...}, ...]}, ...]}
+```
+
+`/tree` 一次性返回（部门表数量级几十~几百，不分页）；`user_count` 是**直属**用户数，子树合计由前端按需算。
+
+### POST `` — 创建
+
+```http
+POST /api/v1/departments
+{"name": "技术部", "parent_id": null}     // null = 顶层
+
+200 OK <DepartmentResponse>
+```
+
+- `400`：`parent_id` 不存在
+- `409`：同父下已有同名（前置 SELECT + DB UNIQUE 双层防线，并发抢创建走 IntegrityError → 409）
+
+### PATCH `/{dept_id}` — 改名
+
+```http
+PATCH /api/v1/departments/dept-x
+{"name": "新名称"}
+```
+
+`409`：同父下已有同名。`name` 不变 → no-op 直接返回。
+
+### POST `/{dept_id}/move` — 搬家
+
+```http
+POST /api/v1/departments/dept-x/move
+{"new_parent_id": "dept-y"}                // null = 搬到根
+```
+
+- `400`：`new_parent_id` 不存在 / **环检测失败**（不能搬到自己/自己子孙下）
+- `409`：新父下已有同名
+
+### DELETE `/{dept_id}` — 删除空部门
+
+```http
+DELETE /api/v1/departments/dept-x
+204 No Content
+```
+
+非空 → `409` + body：
+
+```json
+{"detail": {"message": "Department is not empty", "user_count": 5, "child_count": 2}}
+```
+
+提示先迁走（批量改部门走 `/auth/users/bulk-action` `set_department`）。
+
+### POST `/resolve` — 路径解析（admin 显式调用）
+
+```http
+POST /api/v1/departments/resolve
+{"path": ["技术部", "后端组", "Kibana"]}    // 顶层 → 末级，缺失自动 INSERT
+
+200 OK
+{"id": "dept-xyz"}                          // 末级 id；空 path / 全空字符串 → null
+```
+
+供前端 cascader "+ 新建当前级" 与 PR3 批量导入按行解析时复用；**自动建 dept** 是合法 admin 行为，不走 `POST /` 的 409 路径。并发同路径插入由 `IntegrityError` 重试 SELECT 兜住（最多 1 次）。
+
+### 用户搜索按部门子树扩展
+
+`GET /api/v1/auth/users?q=...` 的 `q` 不只匹配 `username` / `display_name`，也匹配部门名 ILIKE，并**展开整个子树**（搜根部门名返回该条线下全部用户）。实现见 `src/utils/department_tree.expand_subtree`。
 
 ---
 
@@ -75,7 +302,8 @@ POST /api/v1/auth/login
 | POST | `` | 用户 | 发送消息、启动执行，返回 `stream_url` |
 | GET | `` | 用户 | 列出自己的对话（`limit` 1-100, `offset`, `q`） |
 | GET | `/{conv_id}` | 用户 | 对话详情含消息树 |
-| DELETE | `/{conv_id}` | 用户 | 删除对话 |
+| DELETE | `/{conv_id}` | 用户 | 删除对话（fire-and-forget，引擎自检 fail-soft） |
+| POST | `/bulk-delete` | 用户 | 批量删除自己的会话（best-effort） |
 | GET | `/{conv_id}/active-stream` | 用户 | 查询当前是否有运行中的 stream（用于重连） |
 | POST | `/{conv_id}/inject` | 用户 | 运行中注入一条 user 消息 |
 | POST | `/{conv_id}/cancel` | 用户 | 请求取消运行 |
@@ -143,6 +371,29 @@ POST /api/v1/chat/{conv_id}/resume
 - `404`：message 或 interrupt 不存在
 - `409`：interrupt 已解决（超时、被 cancel 唤醒、或已被处理）
 - `stream_url` 与原 `POST /chat` 返回相同，继续订阅即可
+
+### DELETE `/{conv_id}` — 单条删除
+
+- 不预查 active execution，**fire-and-forget**
+- 若引擎正在跑：被删的 conversation 行被 controller post-processing 的 `exists()` 检查兜住（PR2a），引擎跳过持久化，不抛 FK
+- `404`：不存在 / 不属于当前用户（404-not-403）
+
+### POST `/bulk-delete` — 批量删除
+
+```http
+POST /api/v1/chat/bulk-delete
+{"ids": ["conv-1", "conv-2", ...]}     // 1-200, 同请求内自动去重
+
+200 OK
+{
+  "deleted": ["conv-1"],
+  "failed": [{"id": "conv-2", "reason": "not_found"}]
+}
+```
+
+- `failed.reason` 词汇：仅 `not_found`（cross-user 与不存在统一归此，遵循 404-not-403）
+- 与单条 DELETE 同样 fire-and-forget
+- **不存在 admin 全局批量删** —— admin 角色边界 = 用户管理而非数据管理；如需清理某用户的会话，删该用户即可（FK CASCADE 自动级联）
 
 ### GET `/{conv_id}/active-stream`
 

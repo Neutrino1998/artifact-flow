@@ -321,7 +321,16 @@ async def get_current_user(
     if not user or not user.is_active:
         raise HTTPException(status_code=401, detail="User disabled or not found")
 
-    return TokenPayload(user_id=user.id, username=user.username, role=user.role)
+    # 密码已被修改 → 老 token 失效（pwd_v 比对）
+    if payload.password_version != user.password_version:
+        raise HTTPException(status_code=401, detail="Token invalidated; please log in again")
+
+    return TokenPayload(
+        user_id=user.id,
+        username=user.username,
+        role=user.role,
+        password_version=user.password_version,
+    )
 
 
 async def require_admin(
@@ -339,3 +348,11 @@ async def get_user_repository(
     """获取 UserRepository 实例"""
     from repositories.user_repo import UserRepository
     return UserRepository(session)
+
+
+async def get_department_repository(
+    session: AsyncSession = Depends(get_db_session),
+) -> "DepartmentRepository":
+    """获取 DepartmentRepository 实例"""
+    from repositories.department_repo import DepartmentRepository
+    return DepartmentRepository(session)

@@ -197,3 +197,182 @@ class TestAdminCRUD:
             json={"display_name": "Nope"},
         )
         assert resp.status_code == 403
+
+
+class TestUpdateMyProfile:
+
+    async def test_update_own_display_name(self, client: AsyncClient, test_user: User):
+        resp = await client.patch(
+            "/api/v1/auth/me",
+            json={"display_name": "Hello World"},
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["display_name"] == "Hello World"
+        assert body["username"] == test_user.username
+        assert body["id"] == test_user.id
+
+    async def test_clear_display_name_with_empty_string(self, client: AsyncClient):
+        # First set a value, then clear via empty string
+        await client.patch("/api/v1/auth/me", json={"display_name": "Foo"})
+        resp = await client.patch("/api/v1/auth/me", json={"display_name": ""})
+        assert resp.status_code == 200
+        assert resp.json()["display_name"] is None
+
+    async def test_unauthenticated_rejected(self, anon_client: AsyncClient):
+        resp = await anon_client.patch(
+            "/api/v1/auth/me",
+            json={"display_name": "x"},
+        )
+        assert resp.status_code == 401
+
+    async def test_does_not_touch_role_or_active(
+        self, client: AsyncClient, test_user: User, db_manager
+    ):
+        """schema 仅声明 display_name；其他字段被 Pydantic 默默忽略，不影响行。"""
+        await client.patch(
+            "/api/v1/auth/me",
+            json={"display_name": "ok", "role": "admin", "is_active": False},
+        )
+        from sqlalchemy import select
+        async with db_manager.session() as s:
+            result = await s.execute(select(User).where(User.id == test_user.id))
+            row = result.scalar_one()
+            assert row.role == "user"  # unchanged
+            assert row.is_active is True  # unchanged
+            assert row.display_name == "ok"
+
+    async def test_admin_can_use_endpoint_too(
+        self, admin_client: AsyncClient, test_admin: User
+    ):
+        """与 PUT /users/{id} 的 self password lock 配合：admin 改自己 display_name 的官方路径。"""
+        resp = await admin_client.patch(
+            "/api/v1/auth/me",
+            json={"display_name": "Captain Admin"},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["display_name"] == "Captain Admin"
+
+
+class TestChangeMyPassword:
+
+    async def test_success_and_relogin(
+        self,
+        client: AsyncClient,
+        anon_client: AsyncClient,
+        test_user: User,
+    ):
+        resp = await client.post(
+            "/api/v1/auth/me/password",
+            json={"current_password": "testpass", "new_password": "newpass1234"},
+        )
+        assert resp.status_code == 204
+
+        # New password works
+        ok = await anon_client.post(
+            "/api/v1/auth/login",
+            json={"username": "testuser", "password": "newpass1234"},
+        )
+        assert ok.status_code == 200
+
+        # Old password no longer works
+        fail = await anon_client.post(
+            "/api/v1/auth/login",
+            json={"username": "testuser", "password": "testpass"},
+        )
+        assert fail.status_code == 401
+
+    async def test_wrong_current_password(self, client: AsyncClient, test_user: User):
+        resp = await client.post(
+            "/api/v1/auth/me/password",
+            json={"current_password": "wrongpass", "new_password": "newpass1234"},
+        )
+        assert resp.status_code == 400
+        assert "current password" in resp.json()["detail"].lower()
+
+    async def test_new_password_too_short(self, client: AsyncClient, test_user: User):
+        resp = await client.post(
+            "/api/v1/auth/me/password",
+            json={"current_password": "testpass", "new_password": "abc"},
+        )
+        assert resp.status_code == 422
+
+    async def test_unauthenticated(self, anon_client: AsyncClient):
+        resp = await anon_client.post(
+            "/api/v1/auth/me/password",
+            json={"current_password": "x", "new_password": "abcd"},
+        )
+        assert resp.status_code == 401
+
+    async def test_old_token_invalidated_after_change(
+        self,
+        client: AsyncClient,
+        anon_client: AsyncClient,
+        test_user: User,
+    ):
+        """改密前签发的 token 改密后应当 401（pwd_v 校验）"""
+        # client fixture token was issued with pwd_v=0
+        ok = await client.get("/api/v1/auth/me")
+        assert ok.status_code == 200
+
+        # Change password
+        resp = await client.post(
+            "/api/v1/auth/me/password",
+            json={"current_password": "testpass", "new_password": "newpass1234"},
+        )
+        assert resp.status_code == 204
+
+        # Old token now rejected
+        stale = await client.get("/api/v1/auth/me")
+        assert stale.status_code == 401
+
+    async def test_admin_password_reset_invalidates_user_token(
+        self,
+        admin_client: AsyncClient,
+        client: AsyncClient,
+        test_user: User,
+    ):
+        """admin 给用户重置密码也应吊销该用户旧 token"""
+        ok = await client.get("/api/v1/auth/me")
+        assert ok.status_code == 200
+
+        resp = await admin_client.put(
+            f"/api/v1/auth/users/{test_user.id}",
+            json={"password": "newadminreset"},
+        )
+        assert resp.status_code == 200
+
+        stale = await client.get("/api/v1/auth/me")
+        assert stale.status_code == 401
+
+
+class TestUsernameValidation:
+
+    async def test_create_user_rejects_space(self, admin_client: AsyncClient):
+        resp = await admin_client.post(
+            "/api/v1/auth/users",
+            json={"username": "bad name", "password": "pass1234", "role": "user"},
+        )
+        assert resp.status_code == 422
+
+    async def test_create_user_rejects_chinese(self, admin_client: AsyncClient):
+        resp = await admin_client.post(
+            "/api/v1/auth/users",
+            json={"username": "张三", "password": "pass1234", "role": "user"},
+        )
+        assert resp.status_code == 422
+
+    async def test_create_user_rejects_too_short(self, admin_client: AsyncClient):
+        resp = await admin_client.post(
+            "/api/v1/auth/users",
+            json={"username": "a", "password": "pass1234", "role": "user"},
+        )
+        assert resp.status_code == 422
+
+    async def test_create_user_accepts_special_chars(self, admin_client: AsyncClient):
+        resp = await admin_client.post(
+            "/api/v1/auth/users",
+            json={"username": "a.b_c-d", "password": "pass1234", "role": "user"},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["username"] == "a.b_c-d"

@@ -20,6 +20,27 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     """Create all tables matching models.py."""
+    # 跨方言根级去重：root_name_key 生成列 + UNIQUE 见 models.py Department
+    # __table_args__ 的 uq_dept_root_name 注释。STORED generated column 在
+    # SQLite 3.31+ / PostgreSQL 12+ / MySQL 5.7+ 都支持。
+    op.create_table('departments',
+        sa.Column('id', sa.String(length=64), nullable=False),
+        sa.Column('parent_id', sa.String(length=64), nullable=True),
+        sa.Column('name', sa.String(length=128), nullable=False),
+        sa.Column(
+            'root_name_key', sa.String(length=128),
+            sa.Computed('CASE WHEN parent_id IS NULL THEN name END', persisted=True),
+            nullable=True,
+        ),
+        sa.Column('created_at', sa.DateTime(), server_default=sa.func.now(), nullable=False),
+        sa.Column('updated_at', sa.DateTime(), server_default=sa.func.now(), nullable=False),
+        sa.ForeignKeyConstraint(['parent_id'], ['departments.id'], ondelete='RESTRICT'),
+        sa.PrimaryKeyConstraint('id'),
+        sa.UniqueConstraint('parent_id', 'name', name='uq_dept_parent_name'),
+        sa.UniqueConstraint('root_name_key', name='uq_dept_root_name'),
+    )
+    op.create_index(op.f('ix_departments_parent_id'), 'departments', ['parent_id'], unique=False)
+
     op.create_table('users',
         sa.Column('id', sa.String(length=64), nullable=False),
         sa.Column('username', sa.String(length=64), nullable=False),
@@ -27,11 +48,15 @@ def upgrade() -> None:
         sa.Column('display_name', sa.String(length=128), nullable=True),
         sa.Column('role', sa.String(length=16), nullable=False),
         sa.Column('is_active', sa.Boolean(), nullable=False),
+        sa.Column('password_version', sa.Integer(), nullable=False, server_default='0'),
+        sa.Column('department_id', sa.String(length=64), nullable=True),
         sa.Column('created_at', sa.DateTime(), server_default=sa.func.now(), nullable=False),
         sa.Column('updated_at', sa.DateTime(), server_default=sa.func.now(), nullable=False),
+        sa.ForeignKeyConstraint(['department_id'], ['departments.id'], ondelete='SET NULL'),
         sa.PrimaryKeyConstraint('id')
     )
     op.create_index(op.f('ix_users_username'), 'users', ['username'], unique=True)
+    op.create_index(op.f('ix_users_department_id'), 'users', ['department_id'], unique=False)
 
     op.create_table('conversations',
         sa.Column('id', sa.String(length=64), nullable=False),
@@ -40,7 +65,7 @@ def upgrade() -> None:
         sa.Column('user_id', sa.String(length=64), nullable=True),
         sa.Column('created_at', sa.DateTime(), server_default=sa.func.now(), nullable=False),
         sa.Column('updated_at', sa.DateTime(), server_default=sa.func.now(), nullable=False),
-        sa.ForeignKeyConstraint(['user_id'], ['users.id'], ondelete='SET NULL'),
+        sa.ForeignKeyConstraint(['user_id'], ['users.id'], ondelete='CASCADE'),
         sa.PrimaryKeyConstraint('id')
     )
     op.create_index(op.f('ix_conversations_user_id'), 'conversations', ['user_id'], unique=False)
@@ -129,5 +154,8 @@ def downgrade() -> None:
     op.drop_index('ix_conversations_user_updated', table_name='conversations')
     op.drop_index(op.f('ix_conversations_user_id'), table_name='conversations')
     op.drop_table('conversations')
+    op.drop_index(op.f('ix_users_department_id'), table_name='users')
     op.drop_index(op.f('ix_users_username'), table_name='users')
     op.drop_table('users')
+    op.drop_index(op.f('ix_departments_parent_id'), table_name='departments')
+    op.drop_table('departments')

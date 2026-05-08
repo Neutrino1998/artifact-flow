@@ -15,8 +15,32 @@ export type LoginResponse = S['LoginResponse'];
 
 export type CreateUserRequest = S['CreateUserRequest'];
 export type UpdateUserRequest = S['UpdateUserRequest'];
+export type ChangePasswordRequest = S['ChangePasswordRequest'];
+export type UpdateMyProfileRequest = S['UpdateMyProfileRequest'];
 export type UserResponse = S['UserResponse'];
 export type UserListResponse = S['UserListResponse'];
+export type UserImpactResponse = S['UserImpactResponse'];
+export type BulkImportFailedRow = S['BulkImportFailedRow'];
+export type BulkImportSkippedRow = S['BulkImportSkippedRow'];
+export type BulkImportResponse = S['BulkImportResponse'];
+export type BulkActionRequest = S['BulkActionRequest'];
+export type BulkActionResponse = S['BulkActionResponse'];
+export type BulkActionFailedItem = S['BulkActionFailedItem'];
+export type BulkImpactResponse = S['BulkImpactResponse'];
+
+// ============================================================
+// Department Types (Admin)
+// ============================================================
+
+export type DepartmentResponse = S['DepartmentResponse'];
+export type DepartmentListResponse = S['DepartmentListResponse'];
+export type DepartmentTreeNode = S['DepartmentTreeNode'];
+export type DepartmentTreeResponse = S['DepartmentTreeResponse'];
+export type CreateDepartmentRequest = S['CreateDepartmentRequest'];
+export type UpdateDepartmentRequest = S['UpdateDepartmentRequest'];
+export type MoveDepartmentRequest = S['MoveDepartmentRequest'];
+export type ResolveDepartmentRequest = S['ResolveDepartmentRequest'];
+export type ResolveDepartmentResponse = S['ResolveDepartmentResponse'];
 
 // ============================================================
 // Chat Types
@@ -32,6 +56,9 @@ export type MessageResponse = S['MessageResponse'];
 export type ConversationSummary = S['ConversationSummary'];
 export type ConversationListResponse = S['ConversationListResponse'];
 export type ConversationDetail = S['ConversationDetailResponse'];
+export type BulkDeleteRequest = S['BulkDeleteRequest'];
+export type BulkDeleteResponse = S['BulkDeleteResponse'];
+export type BulkDeleteFailedItem = S['BulkDeleteFailedItem'];
 
 // ============================================================
 // Artifact Types

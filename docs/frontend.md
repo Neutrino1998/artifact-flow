@@ -53,8 +53,9 @@ frontend/src/
 └──────────┴──────────────────────┴──────────────┘
 ```
 
-- **Sidebar**：`ConversationList` + `UserMenu`；admin 可打开 `AdminConversationList` / `ObservabilityPanel` / `UserManagementPanel`
+- **Sidebar**：`ConversationList` + `UserMenu`；admin 可打开 `AdminConversationList`（只读 observability，不删数据）/ `ObservabilityPanel` / `UserManagementPanel`
 - **Chat**：`ChatPanel` 组合 `MessageList`（含分支导航 `BranchNavigator`）+ `MessageInput`；流式期间由 `ProcessingFlow` 渲染各 agent 的 `AgentSegmentBlock` / `ToolCallCard` / `ThinkingBlock` / `CompactionFlowBlock` / `InjectFlowBlock` / `ErrorFlowBlock`
+- **Right panel — mode-aware**（PR0+）：`userManagementVisible && isAdmin` 时右栏从 `ArtifactPanel` 切换为 `UserManagementDetailPanel`，按 `userManagementRightView` 类型分发到 `UserDetailForm` / `CreateUserForm` / `BulkImportForm`(PR3) / `BulkActionPanel`(PR5a) / `DepartmentManagerPanel`(PR4)；退出用户管理模式自动恢复 `ArtifactPanel`
 - **Artifacts**：`ArtifactPanel` → `ArtifactTabs` → `MarkdownPreview | SourceView | DiffView`，顶栏 `ArtifactToolbar` 提供版本切换与 DOCX 导出
 
 ## 状态管理（Zustand Stores）
@@ -98,9 +99,14 @@ Actions：`login(token, user)`, `logout()`, `hydrate()`。
 | State | 说明 |
 |-------|------|
 | `sidebarCollapsed`, `artifactPanelVisible` | 布局折叠 |
-| `conversationBrowserVisible`, `userManagementVisible`, `observabilityVisible` | Admin 面板 |
-| `observabilitySelectedConvId` | Admin 事件时间线当前选中 |
+| `conversationBrowserVisible`, `userManagementVisible`, `observabilityVisible` | Admin 面板互斥可见性（同时只能开一个） |
+| `userManagementRightView` | 右面板内容（discriminated union）：`empty` / `create-user` / `edit-user` / `bulk-import`(PR3) / `bulk-action`(PR5a) / `dept-manager`(PR4) |
+| `userMgmtListVersion` | 右面板表单成功后 bump，触发 `UserManagementPanel` refetch（避免 prop 钻透） |
+| `selectionMode`, `userManagementSelection` | PR5a 用户管理多选模式开关 + 选中 ID 列表；进入 `enterSelectionMode()` 自动把 RightView 切到 `bulk-action`，退出时回 `empty` |
+| `observabilitySelectedConvId`, `observabilityBrowseVisible`, `observabilityRefreshTick` | Admin 观测面板：选中 conv id / 完整列表浏览 / 轮询触发 tick |
 | `theme` | `light` / `dark`，持久化到 localStorage |
+
+**面板切换协调**（避免状态泄漏）：`setUserManagementVisible(false)` / 切到其他 admin 面板会同时 reset `userManagementRightView` + `selectionMode` + `userManagementSelection`，保证下次进入是干净状态。
 
 ### `streamStore`
 

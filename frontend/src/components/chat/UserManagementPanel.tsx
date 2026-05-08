@@ -2,9 +2,17 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import * as api from '@/lib/api';
-import type { UserResponse } from '@/types';
+import type { UserResponse, DepartmentTreeNode } from '@/types';
 import { useAuthStore } from '@/stores/authStore';
 import { useUIStore } from '@/stores/uiStore';
+import Checkbox from '@/components/forms/Checkbox';
+
+function flattenDeptNames(nodes: DepartmentTreeNode[], out: Map<string, string>): void {
+  for (const n of nodes) {
+    out.set(n.id, n.name);
+    if (n.children?.length) flattenDeptNames(n.children, out);
+  }
+}
 
 const PAGE_SIZE = 20;
 
@@ -15,21 +23,21 @@ export default function UserManagementPanel() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState('');
+  const [deptNames, setDeptNames] = useState<Map<string, string>>(new Map());
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const queryRef = useRef(query);
 
   const currentUserId = useAuthStore((s) => s.user?.id);
   const setUserManagementVisible = useUIStore((s) => s.setUserManagementVisible);
-
-  // Create form
-  const [showCreate, setShowCreate] = useState(false);
-  const [createForm, setCreateForm] = useState({
-    username: '',
-    password: '',
-    display_name: '',
-    role: 'user',
-  });
-  const [creating, setCreating] = useState(false);
+  const setRightView = useUIStore((s) => s.setUserManagementRightView);
+  const rightView = useUIStore((s) => s.userManagementRightView);
+  const listVersion = useUIStore((s) => s.userMgmtListVersion);
+  const selectionMode = useUIStore((s) => s.selectionMode);
+  const selection = useUIStore((s) => s.userManagementSelection);
+  const enterSelectionMode = useUIStore((s) => s.enterSelectionMode);
+  const exitSelectionMode = useUIStore((s) => s.exitSelectionMode);
+  const toggleUserSelection = useUIStore((s) => s.toggleUserSelection);
+  const setUserManagementSelection = useUIStore((s) => s.setUserManagementSelection);
 
   const fetchUsers = useCallback(async (searchQuery: string, offset = 0, append = false) => {
     setLoading(true);
@@ -55,6 +63,29 @@ export default function UserManagementPanel() {
     fetchUsers('');
   }, [fetchUsers]);
 
+  // 右面板表单成功后 bumpUserMgmtListVersion → 触发列表刷新（保留搜索词）
+  useEffect(() => {
+    if (listVersion === 0) return;
+    fetchUsers(queryRef.current);
+  }, [listVersion, fetchUsers]);
+
+  // 拉部门树 — 给 UserRow 显示部门名用。dept 改名/搬家后 listVersion bump
+  // 也会触发重拉（dept 管理面板内的写操作都会 bump）
+  useEffect(() => {
+    let cancelled = false;
+    api.getDepartmentTree()
+      .then((r) => {
+        if (cancelled) return;
+        const m = new Map<string, string>();
+        flattenDeptNames(r.nodes, m);
+        setDeptNames(m);
+      })
+      .catch(() => {
+        // 静默：部门名只是辅助信息，加载失败不阻断用户列表
+      });
+    return () => { cancelled = true; };
+  }, [listVersion]);
+
   const handleQueryChange = useCallback((value: string) => {
     setQuery(value);
     queryRef.current = value;
@@ -73,53 +104,28 @@ export default function UserManagementPanel() {
     setUserManagementVisible(false);
   }, [setUserManagementVisible]);
 
-  const handleCreate = async () => {
-    if (!createForm.username || !createForm.password) return;
-    setCreating(true);
-    setError(null);
-    try {
-      await api.createUser({
-        username: createForm.username,
-        password: createForm.password,
-        display_name: createForm.display_name || null,
-        role: createForm.role,
-      });
-      setCreateForm({ username: '', password: '', display_name: '', role: 'user' });
-      setShowCreate(false);
-      fetchUsers(query);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : '创建用户失败');
-    } finally {
-      setCreating(false);
-    }
-  };
+  // Esc 退出选择模式（与中间面板的其他 Esc 行为不打架 — 只在选择模式生效）
+  useEffect(() => {
+    if (!selectionMode) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') exitSelectionMode();
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [selectionMode, exitSelectionMode]);
 
-  const handleUpdate = useCallback(async (userId: string, fields: Record<string, unknown>) => {
-    try {
-      await api.updateUser(userId, fields);
-      // If editing self's display_name, sync authStore
-      if (currentUserId === userId && 'display_name' in fields) {
-        const { user, token, login } = useAuthStore.getState();
-        if (user && token) {
-          const displayName = (fields.display_name as string)?.trim() || null;
-          login(token, { ...user, display_name: displayName });
-        }
-      }
-      fetchUsers(queryRef.current);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : '更新用户失败');
-      throw err;
+  const selectedSet = new Set(selection);
+  const selectAllOnPage = useCallback(() => {
+    const next = new Set(selection);
+    for (const u of users) {
+      if (u.id !== currentUserId) next.add(u.id);  // 自己不可选（self-protection）
     }
-  }, [currentUserId, fetchUsers]);
+    setUserManagementSelection(Array.from(next));
+  }, [selection, users, currentUserId, setUserManagementSelection]);
+  const allOnPageSelected = users.length > 0
+    && users.every((u) => u.id === currentUserId || selectedSet.has(u.id));
 
-  const handleToggleActive = useCallback(async (user: UserResponse) => {
-    try {
-      await api.updateUser(user.id, { is_active: !user.is_active });
-      fetchUsers(queryRef.current);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : '更新用户状态失败');
-    }
-  }, [fetchUsers]);
+  const selectedUserId = rightView.type === 'edit-user' ? rightView.userId : null;
 
   return (
     <div className="flex-1 flex flex-col min-h-0 bg-chat dark:bg-chat-dark">
@@ -138,7 +144,7 @@ export default function UserManagementPanel() {
               type="text"
               value={query}
               onChange={(e) => handleQueryChange(e.target.value)}
-              placeholder="搜索用户名或显示名..."
+              placeholder="搜索用户名 / 显示名 / 部门..."
               autoFocus
               className="flex-1 bg-transparent text-text-primary dark:text-text-primary-dark placeholder:text-text-tertiary dark:placeholder:text-text-tertiary-dark outline-none"
             />
@@ -169,73 +175,78 @@ export default function UserManagementPanel() {
             </div>
           )}
 
-          {/* Create user toggle */}
-          {!showCreate ? (
-            <button
-              onClick={() => setShowCreate(true)}
-              className="w-full mb-3 flex items-center gap-2 px-4 py-2.5 text-accent bg-chat dark:bg-chat-dark rounded-2xl border border-border dark:border-border-dark hover:bg-panel dark:hover:bg-panel-accent-dark transition-colors"
-            >
-              <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5">
-                <path d="M7 2v10M2 7h10" />
-              </svg>
-              新建用户
-            </button>
+          {/* Top-level actions — selection mode shows selection toolbar instead */}
+          {!selectionMode ? (
+            <div className="mb-3 flex items-center gap-2">
+              <button
+                onClick={() => setRightView({ type: 'create-user' })}
+                className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-2xl border transition-colors ${
+                  rightView.type === 'create-user'
+                    ? 'text-accent border-accent bg-panel dark:bg-panel-accent-dark'
+                    : 'text-accent border-border dark:border-border-dark bg-chat dark:bg-chat-dark hover:bg-panel dark:hover:bg-panel-accent-dark'
+                }`}
+              >
+                <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5">
+                  <path d="M7 2v10M2 7h10" />
+                </svg>
+                新建用户
+              </button>
+              <button
+                onClick={() => setRightView({ type: 'bulk-import' })}
+                className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-2xl border transition-colors ${
+                  rightView.type === 'bulk-import'
+                    ? 'text-accent border-accent bg-panel dark:bg-panel-accent-dark'
+                    : 'text-text-secondary dark:text-text-secondary-dark border-border dark:border-border-dark bg-chat dark:bg-chat-dark hover:bg-panel dark:hover:bg-panel-accent-dark'
+                }`}
+              >
+                <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5">
+                  <path d="M7 2v8M3 8l4 4 4-4M2 13h10" />
+                </svg>
+                批量导入
+              </button>
+              <button
+                onClick={() => setRightView({ type: 'dept-manager' })}
+                className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-2xl border transition-colors ${
+                  rightView.type === 'dept-manager'
+                    ? 'text-accent border-accent bg-panel dark:bg-panel-accent-dark'
+                    : 'text-text-secondary dark:text-text-secondary-dark border-border dark:border-border-dark bg-chat dark:bg-chat-dark hover:bg-panel dark:hover:bg-panel-accent-dark'
+                }`}
+              >
+                <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5">
+                  <path d="M2 3h10M2 7h10M2 11h6" />
+                </svg>
+                管理部门
+              </button>
+              <button
+                onClick={enterSelectionMode}
+                className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-2xl border text-text-secondary dark:text-text-secondary-dark border-border dark:border-border-dark bg-chat dark:bg-chat-dark hover:bg-panel dark:hover:bg-panel-accent-dark transition-colors"
+              >
+                <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5">
+                  <rect x="2" y="2" width="10" height="10" rx="1.5" />
+                  <path d="M5 7l1.5 1.5L9 6" />
+                </svg>
+                批量管理
+              </button>
+            </div>
           ) : (
-            <div className="mb-3 p-4 bg-chat dark:bg-chat-dark rounded-2xl border border-border dark:border-border-dark space-y-3">
-              <div className="grid grid-cols-2 gap-2">
-                <div className="bg-surface dark:bg-surface-dark border border-border dark:border-border-dark focus-within:border-accent dark:focus-within:border-accent rounded-lg shadow-float px-4 py-2.5">
-                  <input
-                    type="text"
-                    placeholder="用户名"
-                    value={createForm.username}
-                    onChange={(e) => setCreateForm((f) => ({ ...f, username: e.target.value }))}
-                    className="w-full bg-transparent text-text-primary dark:text-text-primary-dark placeholder:text-text-tertiary dark:placeholder:text-text-tertiary-dark outline-none"
-                  />
-                </div>
-                <div className="bg-surface dark:bg-surface-dark border border-border dark:border-border-dark focus-within:border-accent dark:focus-within:border-accent rounded-lg shadow-float px-4 py-2.5">
-                  <input
-                    type="password"
-                    placeholder="密码"
-                    value={createForm.password}
-                    onChange={(e) => setCreateForm((f) => ({ ...f, password: e.target.value }))}
-                    className="w-full bg-transparent text-text-primary dark:text-text-primary-dark placeholder:text-text-tertiary dark:placeholder:text-text-tertiary-dark outline-none"
-                  />
-                </div>
-                <div className="bg-surface dark:bg-surface-dark border border-border dark:border-border-dark focus-within:border-accent dark:focus-within:border-accent rounded-lg shadow-float px-4 py-2.5">
-                  <input
-                    type="text"
-                    placeholder="显示名（可选）"
-                    value={createForm.display_name}
-                    onChange={(e) => setCreateForm((f) => ({ ...f, display_name: e.target.value }))}
-                    className="w-full bg-transparent text-text-primary dark:text-text-primary-dark placeholder:text-text-tertiary dark:placeholder:text-text-tertiary-dark outline-none"
-                  />
-                </div>
-                <div className="bg-surface dark:bg-surface-dark border border-border dark:border-border-dark focus-within:border-accent dark:focus-within:border-accent rounded-lg shadow-float px-4 py-2.5">
-                  <select
-                    value={createForm.role}
-                    onChange={(e) => setCreateForm((f) => ({ ...f, role: e.target.value }))}
-                    className="w-full bg-transparent text-text-primary dark:text-text-primary-dark outline-none"
-                  >
-                    <option value="user">user</option>
-                    <option value="admin">admin</option>
-                  </select>
-                </div>
-              </div>
-              <div className="flex justify-end gap-2">
-                <button
-                  onClick={() => setShowCreate(false)}
-                  className="px-8 py-1.5 rounded-lg border border-border dark:border-border-dark text-text-primary dark:text-text-primary-dark hover:bg-bg dark:hover:bg-bg-dark transition-colors"
-                >
-                  取消
-                </button>
-                <button
-                  onClick={handleCreate}
-                  disabled={creating || !createForm.username || !createForm.password}
-                  className="px-8 py-1.5 rounded-lg bg-accent text-white hover:bg-accent-hover disabled:opacity-40 transition-colors"
-                >
-                  {creating ? '创建中...' : '创建'}
-                </button>
-              </div>
+            <div className="mb-3 flex items-center gap-2 px-4 py-2.5 rounded-2xl border border-accent/40 bg-accent/5 dark:bg-accent/10">
+              <span className="text-sm text-text-secondary dark:text-text-secondary-dark">
+                已选 <span className="text-text-primary dark:text-text-primary-dark font-medium">{selection.length}</span> 项
+              </span>
+              <button
+                onClick={selectAllOnPage}
+                disabled={allOnPageSelected || users.length === 0}
+                className="px-3 py-1 text-xs rounded-md border border-border dark:border-border-dark text-text-secondary dark:text-text-secondary-dark hover:bg-bg dark:hover:bg-bg-dark disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >
+                全选当前页
+              </button>
+              <div className="flex-1" />
+              <button
+                onClick={exitSelectionMode}
+                className="px-3 py-1 text-xs rounded-md border border-border dark:border-border-dark text-text-secondary dark:text-text-secondary-dark hover:bg-bg dark:hover:bg-bg-dark transition-colors"
+              >
+                退出
+              </button>
             </div>
           )}
 
@@ -255,8 +266,12 @@ export default function UserManagementPanel() {
                   key={user.id}
                   user={user}
                   isSelf={user.id === currentUserId}
-                  onUpdate={handleUpdate}
-                  onToggleActive={handleToggleActive}
+                  isSelected={user.id === selectedUserId}
+                  deptName={user.department_id ? deptNames.get(user.department_id) ?? null : null}
+                  selectionMode={selectionMode}
+                  isChecked={selectedSet.has(user.id)}
+                  onToggleSelect={() => toggleUserSelection(user.id)}
+                  onOpenDetail={() => setRightView({ type: 'edit-user', userId: user.id })}
                 />
               ))}
 
@@ -285,140 +300,82 @@ export default function UserManagementPanel() {
 function UserRow({
   user,
   isSelf,
-  onUpdate,
-  onToggleActive,
+  isSelected,
+  deptName,
+  selectionMode,
+  isChecked,
+  onToggleSelect,
+  onOpenDetail,
 }: {
   user: UserResponse;
   isSelf: boolean;
-  onUpdate: (userId: string, fields: Record<string, unknown>) => Promise<void>;
-  onToggleActive: (user: UserResponse) => void;
+  isSelected: boolean;
+  deptName: string | null;
+  selectionMode: boolean;
+  isChecked: boolean;
+  onToggleSelect: () => void;
+  onOpenDetail: () => void;
 }) {
-  // Local editing state
-  const [editing, setEditing] = useState(false);
-  const [editValue, setEditValue] = useState('');
-  const editRef = useRef<HTMLInputElement>(null);
-  const savingRef = useRef(false);
-
-  // Local reset password state
-  const [resettingPassword, setResettingPassword] = useState(false);
-  const [passwordValue, setPasswordValue] = useState('');
-  const [passwordSaving, setPasswordSaving] = useState(false);
-  const passwordRef = useRef<HTMLInputElement>(null);
-
-  const startEditing = () => {
-    setEditing(true);
-    setEditValue(user.display_name || '');
-    setTimeout(() => editRef.current?.focus(), 0);
+  // 选择模式下：自己不可选（self-protection 在后端兜底，前端先打 affordance）；
+  // 行点击切换选中而不是打开详情。
+  const handleClick = () => {
+    if (selectionMode) {
+      if (!isSelf) onToggleSelect();
+    } else {
+      onOpenDetail();
+    }
   };
-
-  const saveDisplayName = async () => {
-    if (savingRef.current) return;
-    savingRef.current = true;
-    setEditing(false);
-    try {
-      const trimmed = editValue.trim();
-      const newValue = trimmed || null;
-      if (newValue !== (user.display_name || null)) {
-        await onUpdate(user.id, { display_name: trimmed });
-      }
-    } catch {
-      // error handled by parent
-    } finally {
-      savingRef.current = false;
+  const handleKey = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      handleClick();
     }
   };
 
-  const cancelEditing = () => {
-    savingRef.current = true;
-    setEditing(false);
-    queueMicrotask(() => { savingRef.current = false; });
-  };
-
-  const startResetPassword = () => {
-    setResettingPassword(true);
-    setPasswordValue('');
-    setTimeout(() => passwordRef.current?.focus(), 0);
-  };
-
-  const handleResetPassword = async () => {
-    if (!passwordValue.trim() || passwordValue.length < 4) return;
-    setPasswordSaving(true);
-    try {
-      await onUpdate(user.id, { password: passwordValue });
-      setResettingPassword(false);
-      setPasswordValue('');
-    } catch {
-      // error handled by parent
-    } finally {
-      setPasswordSaving(false);
-    }
-  };
+  const rowBg = selectionMode && isChecked
+    ? 'bg-accent/10 dark:bg-accent/15'
+    : isSelected
+    ? 'bg-panel dark:bg-panel-accent-dark'
+    : 'hover:bg-panel/60 dark:hover:bg-panel-accent-dark/60';
+  const rowCursor = selectionMode && isSelf ? 'cursor-not-allowed opacity-60' : 'cursor-pointer';
 
   return (
-    <div className="flex items-center gap-4 px-4 py-3 rounded-lg hover:bg-panel/60 dark:hover:bg-panel-accent-dark/60 transition-colors mb-1">
+    <div
+      role="button"
+      tabIndex={selectionMode && isSelf ? -1 : 0}
+      onClick={handleClick}
+      onKeyDown={handleKey}
+      title={selectionMode ? (isSelf ? '不能对自己执行批量操作' : '点击选中') : '点击查看详情'}
+      className={`flex items-center gap-4 px-4 py-3 rounded-lg transition-colors mb-1 ${rowBg} ${rowCursor}`}
+    >
+      {selectionMode && (
+        <Checkbox
+          checked={isChecked}
+          disabled={isSelf}
+          onChange={() => { if (!isSelf) onToggleSelect(); }}
+          onClick={(e) => e.stopPropagation()}
+          ariaLabel={`选中 ${user.display_name || user.username}`}
+        />
+      )}
       {/* User info */}
       <div className="flex-1 min-w-0">
-        {editing ? (
-          <input
-            ref={editRef}
-            type="text"
-            value={editValue}
-            onChange={(e) => setEditValue(e.target.value)}
-            onBlur={saveDisplayName}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') saveDisplayName();
-              if (e.key === 'Escape') cancelEditing();
-            }}
-            placeholder={user.username}
-            className="w-full px-2 py-0.5 rounded border border-accent bg-surface dark:bg-surface-dark text-text-primary dark:text-text-primary-dark outline-none"
-          />
-        ) : (
-          <div
-            className="cursor-pointer group/name"
-            onClick={startEditing}
-            title="点击编辑显示名称"
-          >
-            <div className="font-medium text-text-primary dark:text-text-primary-dark group-hover/name:text-accent transition-colors truncate">
-              {user.display_name || user.username}
-            </div>
-            <div className="text-xs text-text-tertiary dark:text-text-tertiary-dark truncate">
-              @{user.username}
-              <span className="ml-2 opacity-60">{user.id}</span>
-            </div>
-          </div>
-        )}
-
-        {/* Reset password inline */}
-        {resettingPassword && (
-          <div className="flex items-center gap-1.5 mt-2">
-            <input
-              ref={passwordRef}
-              type="password"
-              value={passwordValue}
-              onChange={(e) => setPasswordValue(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') handleResetPassword();
-                if (e.key === 'Escape') setResettingPassword(false);
-              }}
-              placeholder="新密码（≥4位）"
-              className="w-36 px-2 py-1 text-xs rounded border border-accent bg-surface dark:bg-surface-dark text-text-primary dark:text-text-primary-dark outline-none placeholder:text-text-tertiary dark:placeholder:text-text-tertiary-dark"
-            />
-            <button
-              onClick={handleResetPassword}
-              disabled={passwordSaving || passwordValue.length < 4}
-              className="px-2 py-1 text-xs rounded bg-accent text-white hover:bg-accent-hover disabled:opacity-40 transition-colors"
-            >
-              {passwordSaving ? '...' : '确认'}
-            </button>
-            <button
-              onClick={() => setResettingPassword(false)}
-              className="px-2 py-1 text-xs rounded border border-border dark:border-border-dark text-text-secondary dark:text-text-secondary-dark hover:bg-bg dark:hover:bg-bg-dark transition-colors"
-            >
-              取消
-            </button>
-          </div>
-        )}
+        <div className="font-medium text-text-primary dark:text-text-primary-dark truncate">
+          {user.display_name || user.username}
+        </div>
+        <div className="text-xs text-text-tertiary dark:text-text-tertiary-dark truncate">
+          @{user.username}
+          {deptName && <span className="ml-2">{deptName}</span>}
+          <span className="ml-2 opacity-60">{user.id}</span>
+        </div>
       </div>
+
+      {/* "当前" badge — placed before role/status so the eye lands on
+          identity first, then runs through the right-aligned status cluster */}
+      {isSelf && (
+        <span className="flex-shrink-0 text-xs text-text-tertiary dark:text-text-tertiary-dark">
+          当前
+        </span>
+      )}
 
       {/* Role badge */}
       <span
@@ -442,34 +399,6 @@ function UserRow({
           {user.is_active ? '启用' : '禁用'}
         </span>
       </span>
-
-      {/* Actions */}
-      <div className="flex-shrink-0 flex items-center gap-1.5">
-        {isSelf ? (
-          <span className="text-xs text-text-tertiary dark:text-text-tertiary-dark">
-            当前
-          </span>
-        ) : (
-          <>
-            <button
-              onClick={startResetPassword}
-              className="px-2 py-1 text-xs rounded border border-border dark:border-border-dark text-text-secondary dark:text-text-secondary-dark hover:text-accent hover:border-accent transition-colors"
-            >
-              重置密码
-            </button>
-            <button
-              onClick={() => onToggleActive(user)}
-              className={`px-2 py-1 text-xs rounded border transition-colors ${
-                user.is_active
-                  ? 'border-red-300 dark:border-red-700 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20'
-                  : 'border-green-300 dark:border-green-700 text-green-600 hover:bg-green-50 dark:hover:bg-green-900/20'
-              }`}
-            >
-              {user.is_active ? '禁用' : '启用'}
-            </button>
-          </>
-        )}
-      </div>
     </div>
   );
 }

@@ -7,6 +7,7 @@ import type {
   InjectResponse,
   ResumeRequest,
   ResumeResponse,
+  BulkDeleteResponse,
   ArtifactListResponse,
   ArtifactDetail,
   VersionDetail,
@@ -14,8 +15,24 @@ import type {
   LoginResponse,
   CreateUserRequest,
   UpdateUserRequest,
+  ChangePasswordRequest,
+  UpdateMyProfileRequest,
+  UserInfo,
   UserResponse,
   UserListResponse,
+  UserImpactResponse,
+  BulkImportResponse,
+  BulkActionRequest,
+  BulkActionResponse,
+  BulkImpactResponse,
+  DepartmentResponse,
+  DepartmentListResponse,
+  DepartmentTreeResponse,
+  CreateDepartmentRequest,
+  UpdateDepartmentRequest,
+  MoveDepartmentRequest,
+  ResolveDepartmentRequest,
+  ResolveDepartmentResponse,
   UploadResponse,
 } from '@/types';
 import { useAuthStore } from '@/stores/authStore';
@@ -63,6 +80,47 @@ function authHeaders(): Record<string, string> {
   return {};
 }
 
+export class ApiError extends Error {
+  status: number;
+  /**
+   * Parsed JSON response body when available — lets callers read structured
+   * error payloads (e.g. bulk-import returns `{detail: {message, duplicate_rows}}`).
+   * Undefined if the body wasn't JSON or wasn't parsed.
+   */
+  body?: unknown;
+  constructor(status: number, message: string, body?: unknown) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+    this.body = body;
+  }
+}
+
+/**
+ * Best-effort 把 FastAPI 错误响应转成可读字符串。
+ * - {"detail": "string"}                    → 直接用
+ * - {"detail": [{msg, ...}, ...]}（422）   → 拼接 msg 字段，去掉 Pydantic 的 "Value error, " 前缀
+ * - 其他非 JSON / 无 detail                  → 退回原始 body
+ */
+function formatApiError(status: number, body: string): string {
+  if (!body) return `API ${status}`;
+  try {
+    const parsed = JSON.parse(body);
+    const detail = parsed?.detail;
+    if (typeof detail === 'string') return detail;
+    if (Array.isArray(detail)) {
+      const msgs = detail
+        .map((d: { msg?: string }) => d?.msg)
+        .filter((m): m is string => typeof m === 'string')
+        .map((m) => m.replace(/^Value error,\s*/i, ''));
+      if (msgs.length) return msgs.join('；');
+    }
+  } catch {
+    // not JSON, fall through
+  }
+  return `API ${status}: ${body}`;
+}
+
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE_URL}${path}`, {
     headers: {
@@ -74,11 +132,14 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   });
   if (res.status === 401) {
     useAuthStore.getState().logout();
-    throw new Error('Session expired');
+    throw new ApiError(401, 'Session expired');
   }
   if (!res.ok) {
     const body = await res.text().catch(() => '');
-    throw new Error(`API ${res.status}: ${body}`);
+    throw new ApiError(res.status, formatApiError(res.status, body));
+  }
+  if (res.status === 204) {
+    return undefined as T;
   }
   return res.json();
 }
@@ -157,6 +218,15 @@ export async function sendMessage(body: ChatRequest) {
 export async function deleteConversation(convId: string) {
   const res = await request(`/api/v1/chat/${convId}`, { method: 'DELETE' });
   invalidateConversationCache(convId);
+  return res;
+}
+
+export async function bulkDeleteConversations(ids: string[]) {
+  const res = await request<BulkDeleteResponse>('/api/v1/chat/bulk-delete', {
+    method: 'POST',
+    body: JSON.stringify({ ids }),
+  });
+  for (const id of res.deleted) invalidateConversationCache(id);
   return res;
 }
 
@@ -364,9 +434,131 @@ export function createUser(body: CreateUserRequest) {
   });
 }
 
+export function getUser(userId: string) {
+  return request<UserResponse>(`/api/v1/auth/users/${userId}`);
+}
+
 export function updateUser(userId: string, body: UpdateUserRequest) {
   return request<UserResponse>(`/api/v1/auth/users/${userId}`, {
     method: 'PUT',
+    body: JSON.stringify(body),
+  });
+}
+
+export function deleteUser(userId: string) {
+  return request<void>(`/api/v1/auth/users/${userId}`, { method: 'DELETE' });
+}
+
+export function getUserImpact(userId: string) {
+  return request<UserImpactResponse>(`/api/v1/auth/users/${userId}/impact`);
+}
+
+// PR5a — Bulk user actions
+export function bulkUserAction(body: BulkActionRequest) {
+  return request<BulkActionResponse>('/api/v1/auth/users/bulk-action', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export function getUsersBulkImpact(ids: string[]) {
+  const params = new URLSearchParams();
+  for (const id of ids) params.append('ids', id);
+  return request<BulkImpactResponse>(`/api/v1/auth/users/bulk-impact?${params}`);
+}
+
+/**
+ * 批量导入用户（CSV）— PR3。
+ *
+ * 错误：
+ * - 400 + dict detail（`{message, duplicate_rows}`）→ 文件内 username 重复，
+ *   ApiError.body 含原始 JSON 给 UI 渲染重复行号
+ * - 400 + string detail → CSV 解析错（缺 username 列 / 行数超限 / 空文件）
+ * - 422 → 字节超限
+ */
+export async function bulkImportUsers(file: File): Promise<BulkImportResponse> {
+  const formData = new FormData();
+  formData.append('file', file);
+
+  const res = await fetch(`${BASE_URL}/api/v1/auth/users/bulk-import`, {
+    method: 'POST',
+    headers: authHeaders(),
+    body: formData,
+  });
+
+  if (res.status === 401) {
+    useAuthStore.getState().logout();
+    throw new ApiError(401, 'Session expired');
+  }
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    let parsed: unknown = undefined;
+    try { parsed = JSON.parse(text); } catch { /* not JSON */ }
+    throw new ApiError(res.status, formatApiError(res.status, text), parsed);
+  }
+
+  return res.json() as Promise<BulkImportResponse>;
+}
+
+export function changeMyPassword(body: ChangePasswordRequest) {
+  return request<void>('/api/v1/auth/me/password', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export function updateMyProfile(body: UpdateMyProfileRequest) {
+  return request<UserInfo>('/api/v1/auth/me', {
+    method: 'PATCH',
+    body: JSON.stringify(body),
+  });
+}
+
+// Departments (Admin)
+export function listDepartments(parentId?: string | null) {
+  const params = new URLSearchParams();
+  if (parentId) params.set('parent_id', parentId);
+  const qs = params.toString();
+  return request<DepartmentListResponse>(`/api/v1/departments${qs ? `?${qs}` : ''}`);
+}
+
+export function getDepartmentTree() {
+  return request<DepartmentTreeResponse>('/api/v1/departments/tree');
+}
+
+export function getDepartment(deptId: string) {
+  return request<DepartmentResponse>(`/api/v1/departments/${deptId}`);
+}
+
+export function createDepartment(body: CreateDepartmentRequest) {
+  return request<DepartmentResponse>('/api/v1/departments', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export function renameDepartment(deptId: string, body: UpdateDepartmentRequest) {
+  return request<DepartmentResponse>(`/api/v1/departments/${deptId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(body),
+  });
+}
+
+export function moveDepartment(deptId: string, body: MoveDepartmentRequest) {
+  return request<DepartmentResponse>(`/api/v1/departments/${deptId}/move`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export function deleteDepartment(deptId: string) {
+  return request<void>(`/api/v1/departments/${deptId}`, { method: 'DELETE' });
+}
+
+export function resolveDepartmentPath(body: ResolveDepartmentRequest) {
+  return request<ResolveDepartmentResponse>('/api/v1/departments/resolve', {
+    method: 'POST',
     body: JSON.stringify(body),
   });
 }

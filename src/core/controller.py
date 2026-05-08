@@ -12,6 +12,8 @@ from typing import Awaitable, Callable, Dict, Optional, Any, AsyncGenerator
 from uuid import uuid4
 from datetime import datetime
 
+from sqlalchemy.exc import IntegrityError
+
 from core.engine import EngineHooks, create_initial_state, execute_loop
 from core.events import StreamEventType, ExecutionEvent
 from core.conversation_manager import ConversationManager
@@ -236,6 +238,29 @@ class ExecutionController:
         if final_state is None:
             final_state = initial_state
 
+        # Layer 1: 早判 conversation 是否仍存在。
+        # 删除路径不抢 lease，conv 行可能在 engine 跑完前消失（DELETE /chat/{id}
+        # 或硬删用户触发的 CASCADE）。早返回跳过后续三段写库，避免撞 FK。
+        try:
+            conv_alive = await self._with_db_retry(
+                lambda cm, er, am: cm.exists_async(conversation_id)
+            )
+        except Exception as exists_err:
+            # exists 探测的瞬断不应阻塞 post-processing —— 当作 alive 走原流程
+            logger.warning(
+                f"exists() probe failed for {conversation_id} (msg={message_id}), "
+                f"falling through to normal post-processing: {exists_err}"
+            )
+            conv_alive = True
+
+        if not conv_alive:
+            logger.info(
+                f"Conversation {conversation_id} deleted during execution, "
+                f"skip persistence (message_id={message_id})"
+            )
+            # Lease 由 runner 的 _wrapped finally → cleanup_execution 兜底释放
+            return
+
         try:
             response = final_state.get("response", "")
             has_error = final_state.get("error", False)
@@ -248,6 +273,13 @@ class ExecutionController:
                     await self.artifact_manager.flush_all(
                         session_id, db_manager=self._db_manager
                     )
+                except IntegrityError as flush_ie:
+                    # Layer 2: exists() 之后到 flush 之间 conv 被删（TOCTOU）
+                    logger.warning(
+                        f"Conversation {conversation_id} deleted mid-persist "
+                        f"(artifact phase, msg={message_id}): {flush_ie}"
+                    )
+                    return
                 except Exception as flush_err:
                     logger.exception(f"Artifact flush failed after retries: {flush_err}")
                     flush_error = f"Artifact persistence failed: {flush_err}"
@@ -304,7 +336,15 @@ class ExecutionController:
             # 持久化事件 —— 必须先于 Message.response 更新。
             # 新架构下 events 是历史 source of truth，持久化失败=下一轮恢复不了本轮。
             # 持久化成功后再更新 Message.response，避免出现"显示成功 + 历史丢失"的假成功状态。
-            events_persisted = await self._persist_events(message_id, final_state)
+            try:
+                events_persisted = await self._persist_events(message_id, final_state)
+            except IntegrityError as events_ie:
+                # Layer 2: events 写阶段命中 conv 删除的 TOCTOU
+                logger.warning(
+                    f"Conversation {conversation_id} deleted mid-persist "
+                    f"(events phase, msg={message_id}): {events_ie}"
+                )
+                return
 
             if not events_persisted:
                 # 持久化失败 → 整轮判定失败，覆盖终态为 ERROR，跳过 response/metadata 更新
@@ -388,6 +428,9 @@ class ExecutionController:
         Returns:
             True — 成功，或无需持久化（无事件 / 无 repo）
             False — 批量写入重试后仍失败
+
+        Raises:
+            IntegrityError — conv 已被删除（caller 应早返回，跳过后续阶段）
         """
         if not self.message_event_repo:
             return True
@@ -418,6 +461,11 @@ class ExecutionController:
             )
             logger.info(f"Persisted {len(db_events)} events for message {message_id}")
             return True
+        except IntegrityError:
+            # FK 违规通常意味着 conv/message 行已被删除（TOCTOU 窗口）。
+            # 透传给 caller 区分"基础设施失败"和"被外部删除"，避免被
+            # 当作普通持久化失败而错误地把整轮转 ERROR 给前端。
+            raise
         except Exception as e:
             logger.error(
                 f"Event persistence failed after retries for {message_id} "

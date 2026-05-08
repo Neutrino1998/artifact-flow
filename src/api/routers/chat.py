@@ -24,6 +24,9 @@ from api.dependencies import (
 )
 from api.services.auth import TokenPayload
 from api.schemas.chat import (
+    BulkDeleteFailedItem,
+    BulkDeleteRequest,
+    BulkDeleteResponse,
     CancelResponse,
     ChatRequest,
     ChatResponse,
@@ -315,6 +318,55 @@ async def delete_conversation(
 
     except NotFoundError:
         raise HTTPException(status_code=404, detail=f"Conversation '{conv_id}' not found")
+
+
+@router.post("/bulk-delete", response_model=BulkDeleteResponse)
+async def bulk_delete_conversations(
+    request: BulkDeleteRequest,
+    current_user: TokenPayload = Depends(get_current_user),
+    conversation_manager: ConversationManager = Depends(get_conversation_manager),
+):
+    """
+    批量删除对话（用户视角，仅删自己的）
+
+    Best-effort 范围：cross-user / 不存在的 id 走 `failed.reason="not_found"`，
+    遵循 "404 not 403" 安全策略避免泄漏会话存在。引擎正在执行的会话同样直接
+    DELETE — 引擎 post-processing 在 PR2a 里 fail-soft 兜底。
+
+    单行 FK 违规这条路径不存在，因此不需要 IntegrityError + rollback：所有指向
+    `conversations.id` 的外键（Message / ArtifactSession）都是 ondelete=CASCADE，
+    下游链 messages / events / artifacts / artifact_versions 也全是 CASCADE
+    （src/db/models.py），删 conversation 不会因子行残留而失败，session 状态
+    不会被某一行污染到影响后续行。
+
+    其他异常（OperationalError 等基础设施级故障）冒泡为 5xx loud failure —
+    此时第 1 条就会失败、循环本就进不下去；与 CLAUDE.md "不为不会发生的场景
+    加防御代码" 一致，故不做广泛 except。
+    """
+    user_id = current_user.user_id
+    deleted: list[str] = []
+    failed: list[BulkDeleteFailedItem] = []
+    seen: set[str] = set()
+
+    for conv_id in request.ids:
+        if conv_id in seen:
+            continue
+        seen.add(conv_id)
+
+        try:
+            if not await conversation_manager.verify_ownership(conv_id, user_id):
+                failed.append(BulkDeleteFailedItem(id=conv_id, reason="not_found"))
+                continue
+
+            success = await conversation_manager.delete_conversation(conv_id)
+            if success:
+                deleted.append(conv_id)
+            else:
+                failed.append(BulkDeleteFailedItem(id=conv_id, reason="not_found"))
+        except NotFoundError:
+            failed.append(BulkDeleteFailedItem(id=conv_id, reason="not_found"))
+
+    return BulkDeleteResponse(deleted=deleted, failed=failed)
 
 
 @router.get("/{conv_id}/messages/{msg_id}/events")
