@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="robots" content="noindex" />
+  <title>系统维护中 · ArtifactFlow</title>
+  <style>
+    :root {
+      --bg: #FAF9F6;
+      --text-secondary: #656565;
+      --text-tertiary: #999999;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #1e1e1e;
+        --text-secondary: #9b9590;
+        --text-tertiary: #6b6560;
+      }
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      background: var(--bg);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+                   "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+    .wrap {
+      min-height: 100%;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 24px;
+      text-align: center;
+    }
+    .cat {
+      width: 288px;
+      max-width: 70vw;
+      transform: translateY(24px);
+      user-select: none;
+      pointer-events: none;
+    }
+    .cat-light { display: block; }
+    .cat-dark  { display: none; }
+    @media (prefers-color-scheme: dark) {
+      .cat-light { display: none; }
+      .cat-dark  { display: block; }
+    }
+    .title {
+      color: var(--text-secondary);
+      font-size: 1.875rem;
+      font-weight: 600;
+      line-height: 1.3;
+    }
+    .note {
+      color: var(--text-tertiary);
+      font-size: 1rem;
+      max-width: 520px;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+  </style>
+</head>
+<body>
+  <main class="wrap">
+    <div>
+      <img class="cat cat-light" src="/__maintenance/cat-sleep-light.svg" alt="" />
+      <img class="cat cat-dark"  src="/__maintenance/cat-sleep-dark.svg"  alt="" />
+    </div>
+    <div class="title">系统维护中，很抱歉给您带来不便</div>
+    <div id="note" class="note">服务正在更新，请稍后重试。</div>
+  </main>
+
+  <script>
+    // Operator-supplied note (timing, contact, etc.). 404 → keep default.
+    fetch('/__maintenance/note.txt', { cache: 'no-store' })
+      .then(function (r) { return r.ok ? r.text() : null; })
+      .then(function (txt) {
+        if (txt && txt.trim()) {
+          document.getElementById('note').textContent = txt.trim();
+        }
+      })
+      .catch(function () { /* ignore */ });
+
+    // Auto-refresh: when maintenance ends, page reload returns the real app.
+    setTimeout(function () { location.reload(); }, 30000);
+  </script>
+</body>
+</html>

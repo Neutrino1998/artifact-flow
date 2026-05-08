@@ -10,6 +10,7 @@ services:
       - "${AF_HTTP_PORT:-80}:80"
     volumes:
       - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./maintenance:/etc/nginx/maintenance:ro
     depends_on:
       backend:
         condition: service_healthy
