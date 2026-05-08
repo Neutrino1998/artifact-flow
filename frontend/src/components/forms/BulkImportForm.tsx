@@ -107,6 +107,15 @@ export default function BulkImportForm() {
       setStage({ kind: 'result', data });
       bumpListVersion();
     } catch (err) {
+      // 错误终态：清掉 file state + native input value，强制 admin 重新挑文件。
+      // 否则 admin 在 Excel 改完源 CSV 重新选同路径，input.value 不变 → 不
+      // 触发 onChange → 上传仍是旧 File 句柄；同时 Firefox 等浏览器对已修
+      // 改的 File 句柄可能抛 NotReadableError。统一清空让"修源 → 重传"流程
+      // 可预测。
+      setStage({ kind: 'upload' });
+      setFile(null);
+      clearNativeInput();
+
       // 文件内重复 → 结构化展示；其他 → 文案
       if (err instanceof ApiError && err.body && typeof err.body === 'object') {
         const detail = (err.body as { detail?: unknown }).detail;
@@ -120,14 +129,12 @@ export default function BulkImportForm() {
               .duplicate_rows,
           );
           setError('CSV 文件内 username 重复，请先在源文件去重再上传');
-          setStage({ kind: 'upload' });
           return;
         }
       }
       setError(err instanceof Error ? err.message : '导入失败');
-      setStage({ kind: 'upload' });
     }
-  }, [file, bumpListVersion]);
+  }, [file, bumpListVersion, clearNativeInput]);
 
   const close = useCallback(() => {
     if (stage.kind === 'submitting') return;
@@ -311,7 +318,7 @@ function UploadStage({
             <button
               onClick={onClear}
               type="button"
-              className="mt-2 text-xs text-text-secondary dark:text-text-secondary-dark hover:text-accent"
+              className="mt-2 text-xs text-accent hover:underline"
             >
               换一个文件
             </button>
