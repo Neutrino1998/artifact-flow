@@ -360,8 +360,13 @@ async def bulk_user_action(
 
             await user_repo.update(user)
             succeeded.append(user_id)
-        except Exception as e:
-            logger.warning(f"bulk_user_action failed for {user_id}: {e}")
+        except IntegrityError as e:
+            # 真实并发场景：set_department 的 dept 在 loop 外预校验通过后被
+            # 另一个 admin 删了，per-row UPDATE 撞 FK 违规。flush 失败让 session
+            # 进 dirty 态，必须 explicit rollback 才能继续后续行（与 PR3
+            # bulk_import_users 同模式）。
+            logger.warning(f"bulk_user_action {request.action} failed for {user_id}: {e}")
+            await user_repo.session.rollback()
             failed.append(BulkActionFailedItem(id=user_id, reason="internal_error"))
 
     logger.info(

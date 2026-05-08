@@ -16,6 +16,7 @@ from typing import List
 import pytest
 from httpx import AsyncClient
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
 from db.database import DatabaseManager
 from db.models import Conversation, Department, User
@@ -273,6 +274,83 @@ class TestSetDepartment:
             json={"ids": ["u-x"], "action": "set_department", "payload": {}},
         )
         assert resp.status_code == 400
+
+    async def test_integrity_error_one_row_does_not_poison_subsequent(
+        self,
+        admin_client: AsyncClient,
+        db_manager: DatabaseManager,
+        monkeypatch,
+    ):
+        """
+        Reviewer P1 regression: 模拟 set_department 的 dept 在 loop 外预校验
+        通过后被另一个 admin 删了 → 中间一行 update 撞 FK，应当 rollback
+        session 让后续行正常处理，而不是把整批拖进 PendingRollbackError。
+        """
+        dept = await _seed_department(db_manager)
+        u_first = await _seed_user(db_manager)
+        u_bad = await _seed_user(db_manager)
+        u_last = await _seed_user(db_manager)
+
+        real_update = UserRepository.update
+
+        async def faulty_update(self, entity):
+            if entity.id == u_bad.id:
+                raise IntegrityError("simulated FK violation", None, Exception())
+            return await real_update(self, entity)
+
+        monkeypatch.setattr(UserRepository, "update", faulty_update)
+
+        resp = await admin_client.post(
+            "/api/v1/auth/users/bulk-action",
+            json={
+                "ids": [u_first.id, u_bad.id, u_last.id],
+                "action": "set_department",
+                "payload": {"department_id": dept.id},
+            },
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert sorted(body["succeeded"]) == sorted([u_first.id, u_last.id])
+        assert body["failed"] == [{"id": u_bad.id, "reason": "internal_error"}]
+
+        # u_last 真的被 commit — 证明 session 没被前面那条污染
+        first = await _get_user(db_manager, u_first.id)
+        last = await _get_user(db_manager, u_last.id)
+        assert first is not None and first.department_id == dept.id
+        assert last is not None and last.department_id == dept.id
+
+    async def test_unknown_exception_bubbles_loudly(
+        self,
+        admin_client: AsyncClient,
+        db_manager: DatabaseManager,
+        monkeypatch,
+    ):
+        """
+        非 IntegrityError 的异常（编程错误 / 真正的基础设施故障）不被静默 catch，
+        冒泡为未处理异常 → 由 FastAPI 转 500（loud failure）。与 CLAUDE.md
+        "不为不会发生的场景加防御代码" 一致 —— 我们故意让这条路径炸出来，
+        而不是吞成 per-id internal_error 假装好了。
+
+        测试客户端 ASGITransport 默认 raise_app_exceptions=True，不在意 FastAPI
+        的 500 转换；用 pytest.raises 验证异常已经从 endpoint 跳出。
+        """
+        dept = await _seed_department(db_manager)
+        u = await _seed_user(db_manager)
+
+        async def boom_update(self, entity):
+            raise RuntimeError("unexpected programming error")
+
+        monkeypatch.setattr(UserRepository, "update", boom_update)
+
+        with pytest.raises(RuntimeError, match="unexpected programming error"):
+            await admin_client.post(
+                "/api/v1/auth/users/bulk-action",
+                json={
+                    "ids": [u.id],
+                    "action": "set_department",
+                    "payload": {"department_id": dept.id},
+                },
+            )
 
 
 # ============================================================

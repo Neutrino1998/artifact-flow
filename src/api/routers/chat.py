@@ -329,9 +329,19 @@ async def bulk_delete_conversations(
     """
     批量删除对话（用户视角，仅删自己的）
 
-    Best-effort：失败一条不阻断其余。Cross-user / 不存在的 id 都归为 `not_found`，
-    遵循 "404 not 403" 安全策略避免泄漏会话存在。
-    引擎正在执行的会话同样直接 DELETE — 引擎 post-processing 在 PR2a 里 fail-soft 兜底。
+    Best-effort 范围：cross-user / 不存在的 id 走 `failed.reason="not_found"`，
+    遵循 "404 not 403" 安全策略避免泄漏会话存在。引擎正在执行的会话同样直接
+    DELETE — 引擎 post-processing 在 PR2a 里 fail-soft 兜底。
+
+    单行 FK 违规这条路径不存在，因此不需要 IntegrityError + rollback：所有指向
+    `conversations.id` 的外键（Message / ArtifactSession）都是 ondelete=CASCADE，
+    下游链 messages / events / artifacts / artifact_versions 也全是 CASCADE
+    （src/db/models.py），删 conversation 不会因子行残留而失败，session 状态
+    不会被某一行污染到影响后续行。
+
+    其他异常（OperationalError 等基础设施级故障）冒泡为 5xx loud failure —
+    此时第 1 条就会失败、循环本就进不下去；与 CLAUDE.md "不为不会发生的场景
+    加防御代码" 一致，故不做广泛 except。
     """
     user_id = current_user.user_id
     deleted: list[str] = []
