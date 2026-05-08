@@ -15,9 +15,5 @@
 
 ## 工程改进
 
-### `scripts/release.sh` 不支持跨架构构建
-
-- **现状**：脚本里用的是 `docker build`，没用 `docker buildx`。从 macOS arm64 dev 机直接跑，构建出来的镜像也是 arm64；scp 到 x86_64 服务器 `docker run` 会立刻 `exec format error`。
-- **临时绕过**：手工跑 `docker buildx build --platform linux/amd64 -t ... --load` 替换脚本里的 `docker build` 步骤。
-- **修法**：把脚本里两处 `docker build` 改成 `docker buildx build --platform "${PLATFORM:-linux/amd64}" ... --load`，加个可选环境变量 `PLATFORM` 让本机原生构建的场景也能用。
-- **优先级**：中。下次外网构建发布前修。
+<!-- 跨架构构建已修：release.sh 默认走 buildx + linux/amd64，PLATFORM 可覆盖。 -->
+<!-- 对应改动见 commit b775b29 (build(release): three-tar packaging + amd64 default + portable sha256) -->
