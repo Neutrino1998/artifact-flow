@@ -7,6 +7,7 @@ import type {
   InjectResponse,
   ResumeRequest,
   ResumeResponse,
+  BulkDeleteResponse,
   ArtifactListResponse,
   ArtifactDetail,
   VersionDetail,
@@ -21,6 +22,9 @@ import type {
   UserListResponse,
   UserImpactResponse,
   BulkImportResponse,
+  BulkActionRequest,
+  BulkActionResponse,
+  BulkImpactResponse,
   DepartmentResponse,
   DepartmentListResponse,
   DepartmentTreeResponse,
@@ -214,6 +218,15 @@ export async function sendMessage(body: ChatRequest) {
 export async function deleteConversation(convId: string) {
   const res = await request(`/api/v1/chat/${convId}`, { method: 'DELETE' });
   invalidateConversationCache(convId);
+  return res;
+}
+
+export async function bulkDeleteConversations(ids: string[]) {
+  const res = await request<BulkDeleteResponse>('/api/v1/chat/bulk-delete', {
+    method: 'POST',
+    body: JSON.stringify({ ids }),
+  });
+  for (const id of res.deleted) invalidateConversationCache(id);
   return res;
 }
 
@@ -438,6 +451,20 @@ export function deleteUser(userId: string) {
 
 export function getUserImpact(userId: string) {
   return request<UserImpactResponse>(`/api/v1/auth/users/${userId}/impact`);
+}
+
+// PR5a — Bulk user actions
+export function bulkUserAction(body: BulkActionRequest) {
+  return request<BulkActionResponse>('/api/v1/auth/users/bulk-action', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export function getUsersBulkImpact(ids: string[]) {
+  const params = new URLSearchParams();
+  for (const id of ids) params.append('ids', id);
+  return request<BulkImpactResponse>(`/api/v1/auth/users/bulk-impact?${params}`);
 }
 
 /**

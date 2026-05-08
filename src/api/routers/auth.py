@@ -25,6 +25,7 @@ from api.dependencies import (
     get_department_repository,
 )
 from api.schemas.auth import (
+    MAX_BULK_USER_ACTION_IDS,
     LoginRequest,
     LoginResponse,
     UserInfo,
@@ -38,6 +39,10 @@ from api.schemas.auth import (
     BulkImportFailedRow,
     BulkImportSkippedRow,
     BulkImportResponse,
+    BulkActionRequest,
+    BulkActionResponse,
+    BulkActionFailedItem,
+    BulkImpactResponse,
 )
 from api.services.auth import (
     TokenPayload,
@@ -238,6 +243,133 @@ async def list_users(
         ],
         total=total,
     )
+
+
+# ============================================================
+# Bulk Actions (PR5a)
+# ============================================================
+#
+# 路由注册顺序约束：`GET /users/bulk-impact` 必须早于 `GET /users/{user_id}`
+# 注册，否则会被解析为 user_id="bulk-impact"。POST /users/bulk-action 没有
+# 对应的 POST /users/{id} 路由，方法层面不会撞，但放在这里方便就近聚类。
+
+
+@router.get("/users/bulk-impact", response_model=BulkImpactResponse)
+async def get_users_bulk_impact(
+    ids: list[str] = Query(..., min_length=1, max_length=MAX_BULK_USER_ACTION_IDS),
+    _admin: TokenPayload = Depends(require_admin),
+    conversation_manager: ConversationManager = Depends(get_conversation_manager),
+):
+    """
+    批量删除用户前的影响数据 — 一次 IN 查询。
+
+    给前端 DangerConfirmModal 显示"将删除 N 个用户、共 M 条会话"。
+    user_count 是请求 ids 的去重数（不区分是否真存在），conversation_count
+    是这批用户名下当前会话总数。
+    """
+    unique_ids = list({i for i in ids if i})
+    count = await conversation_manager.count_users_conversations(unique_ids)
+    return BulkImpactResponse(
+        user_count=len(unique_ids),
+        conversation_count=count,
+    )
+
+
+@router.post("/users/bulk-action", response_model=BulkActionResponse)
+async def bulk_user_action(
+    request: BulkActionRequest,
+    current_user: TokenPayload = Depends(require_admin),
+    user_repo: UserRepository = Depends(get_user_repository),
+    dept_repo: DepartmentRepository = Depends(get_department_repository),
+):
+    """
+    批量执行用户管理动作（仅 Admin）。
+
+    支持 action：disable / enable / delete / set_department。Best-effort：
+    单条失败不阻断其余。Self-protection 取代 last-admin 计数 —— admin
+    不能对自己执行任何 action（与 PR2b 单条 update_user / delete_user 一致）；
+    配合 disabled admin 进不来后台，足以保住至少 1 个活跃 admin。
+
+    set_department 的 payload.department_id 在 loop 外预校验：非 null 且
+    在 DB 中找不到对应部门 → 整批 400（fail-fast，省掉无谓的 N 次失败）。
+
+    delete 走 hard_delete（DB CASCADE）。若用户当前正在跑 engine，
+    被级联删的 conversation 行由 PR2a 的 controller exists() / IntegrityError
+    catch 兜住；本端点直接 fire-and-forget。
+    """
+    # set_department 预校验：非 null department_id 必须存在
+    target_dept_id: Optional[str] = None
+    if request.action == "set_department":
+        payload = request.payload or {}
+        if "department_id" not in payload:
+            raise HTTPException(
+                status_code=400,
+                detail="set_department requires payload.department_id (use null to clear)",
+            )
+        target_dept_id = payload["department_id"]
+        if target_dept_id is not None:
+            if not isinstance(target_dept_id, str):
+                raise HTTPException(
+                    status_code=400,
+                    detail="payload.department_id must be a string or null",
+                )
+            dept = await dept_repo.get_by_id(target_dept_id)
+            if dept is None:
+                raise HTTPException(
+                    status_code=400,
+                    detail="department_id does not reference an existing department",
+                )
+
+    succeeded: list[str] = []
+    failed: list[BulkActionFailedItem] = []
+    seen: set[str] = set()
+
+    for user_id in request.ids:
+        if user_id in seen:
+            continue
+        seen.add(user_id)
+
+        if user_id == current_user.user_id:
+            failed.append(BulkActionFailedItem(id=user_id, reason="forbidden_self"))
+            continue
+
+        try:
+            if request.action == "delete":
+                deleted = await user_repo.hard_delete(user_id)
+                if deleted:
+                    succeeded.append(user_id)
+                else:
+                    failed.append(BulkActionFailedItem(id=user_id, reason="not_found"))
+                continue
+
+            user = await user_repo.get_by_id(user_id)
+            if user is None:
+                failed.append(BulkActionFailedItem(id=user_id, reason="not_found"))
+                continue
+
+            if request.action == "disable":
+                user.is_active = False
+            elif request.action == "enable":
+                user.is_active = True
+            elif request.action == "set_department":
+                user.department_id = target_dept_id
+            else:
+                # Pydantic Literal 兜底，理论上到不了这里
+                failed.append(BulkActionFailedItem(id=user_id, reason="internal_error"))
+                continue
+
+            await user_repo.update(user)
+            succeeded.append(user_id)
+        except Exception as e:
+            logger.warning(f"bulk_user_action failed for {user_id}: {e}")
+            failed.append(BulkActionFailedItem(id=user_id, reason="internal_error"))
+
+    logger.info(
+        f"Bulk action '{request.action}' done: succeeded={len(succeeded)} "
+        f"failed={len(failed)}"
+    )
+
+    return BulkActionResponse(succeeded=succeeded, failed=failed)
 
 
 @router.get("/users/{user_id}", response_model=UserResponse)

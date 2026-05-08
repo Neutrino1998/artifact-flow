@@ -4,6 +4,7 @@ import { useUIStore } from '@/stores/uiStore';
 import UserDetailForm from '@/components/forms/UserDetailForm';
 import CreateUserForm from '@/components/forms/CreateUserForm';
 import BulkImportForm from '@/components/forms/BulkImportForm';
+import BulkActionPanel from '@/components/forms/BulkActionPanel';
 import DepartmentManagerPanel from '@/components/chat/DepartmentManagerPanel';
 
 export default function UserManagementDetailPanel() {
@@ -25,7 +26,11 @@ export default function UserManagementDetailPanel() {
     return <DepartmentManagerPanel />;
   }
 
-  // empty / bulk-action（PR5a）— 占位
+  if (view.type === 'bulk-action') {
+    return <BulkActionPanel />;
+  }
+
+  // empty
   return (
     <div className="flex-1 flex flex-col min-h-0 items-center justify-center bg-chat dark:bg-chat-dark p-6">
       <div className="text-sm text-text-tertiary dark:text-text-tertiary-dark text-center">

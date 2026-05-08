@@ -4,9 +4,11 @@ import { useState, useCallback, useEffect, useRef, } from 'react';
 import { useConversationStore } from '@/stores/conversationStore';
 import { useUIStore } from '@/stores/uiStore';
 import { useChat } from '@/hooks/useChat';
-import { listConversations, deleteConversation } from '@/lib/api';
+import { listConversations, deleteConversation, bulkDeleteConversations } from '@/lib/api';
 import type { ConversationSummary } from '@/types';
 import ConfirmModal from '@/components/layout/ConfirmModal';
+import DangerConfirmModal from '@/components/layout/DangerConfirmModal';
+import Checkbox from '@/components/forms/Checkbox';
 
 const PAGE_SIZE = 20;
 
@@ -17,6 +19,11 @@ export default function ConversationBrowser() {
   const [loading, setLoading] = useState(false);
   const [query, setQuery] = useState('');
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+
+  // Selection mode state — local only, not in uiStore
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
 
   const currentId = useConversationStore((s) => s.current?.id);
   const removeConversation = useConversationStore((s) => s.removeConversation);
@@ -81,9 +88,65 @@ export default function ConversationBrowser() {
     setConversationBrowserVisible(false);
   }, [setConversationBrowserVisible]);
 
+  const exitSelectionMode = useCallback(() => {
+    setSelectionMode(false);
+    setSelectedIds(new Set());
+  }, []);
+
+  const enterSelectionMode = useCallback(() => {
+    setSelectionMode(true);
+    setSelectedIds(new Set());
+  }, []);
+
+  const toggleSelection = useCallback((id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const selectAllOnPage = useCallback(() => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      for (const c of conversations) next.add(c.id);
+      return next;
+    });
+  }, [conversations]);
+
+  const handleBulkDeleteConfirm = useCallback(async () => {
+    const ids = Array.from(selectedIds);
+    if (ids.length === 0) return;
+    const res = await bulkDeleteConversations(ids);
+    const deletedSet = new Set(res.deleted);
+    setConversations((prev) => prev.filter((c) => !deletedSet.has(c.id)));
+    setTotal((prev) => prev - res.deleted.length);
+    for (const id of res.deleted) removeConversation(id);
+    setConfirmBulkDelete(false);
+    exitSelectionMode();
+    if (res.failed.length > 0) {
+      console.warn(`Bulk delete: ${res.failed.length} failed`, res.failed);
+    }
+  }, [selectedIds, removeConversation, exitSelectionMode]);
+
+  // Esc to exit selection mode (when no modal is open — modals own their own Esc)
+  useEffect(() => {
+    if (!selectionMode || confirmBulkDelete) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') exitSelectionMode();
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [selectionMode, confirmBulkDelete, exitSelectionMode]);
+
+  const selectedCount = selectedIds.size;
+  const allOnPageSelected = conversations.length > 0
+    && conversations.every((c) => selectedIds.has(c.id));
+
   return (
     <div className="flex-1 flex flex-col min-h-0 bg-chat dark:bg-chat-dark">
-      {/* Search */}
+      {/* Search / selection-mode header */}
       <div className="px-4 pt-4 pb-2">
         <div className="max-w-3xl mx-auto">
           <div className="bg-surface dark:bg-surface-dark border border-border dark:border-border-dark focus-within:border-accent dark:focus-within:border-accent rounded-2xl shadow-float px-4 py-3 flex items-center gap-3">
@@ -100,11 +163,28 @@ export default function ConversationBrowser() {
               onChange={(e) => handleQueryChange(e.target.value)}
               placeholder="搜索对话标题..."
               autoFocus
-              className="flex-1 bg-transparent text-text-primary dark:text-text-primary-dark placeholder:text-text-tertiary dark:placeholder:text-text-tertiary-dark outline-none"
+              disabled={selectionMode}
+              className="flex-1 bg-transparent text-text-primary dark:text-text-primary-dark placeholder:text-text-tertiary dark:placeholder:text-text-tertiary-dark outline-none disabled:opacity-50"
             />
-            <span className="flex-shrink-0 text-xs text-text-tertiary dark:text-text-tertiary-dark">
-              {total} 对话
-            </span>
+            {!selectionMode && (
+              <>
+                <span className="flex-shrink-0 text-xs text-text-tertiary dark:text-text-tertiary-dark">
+                  {total} 对话
+                </span>
+                <button
+                  onClick={enterSelectionMode}
+                  className="flex-shrink-0 px-2.5 py-1 text-xs rounded-md text-text-secondary dark:text-text-secondary-dark hover:text-text-primary dark:hover:text-text-primary-dark hover:bg-bg dark:hover:bg-bg-dark transition-colors"
+                  title="批量管理"
+                >
+                  批量管理
+                </button>
+              </>
+            )}
+            {selectionMode && (
+              <span className="flex-shrink-0 text-xs text-accent">
+                选择模式
+              </span>
+            )}
             <button
               onClick={handleClose}
               className="flex-shrink-0 p-1 rounded-lg text-text-tertiary dark:text-text-tertiary-dark hover:text-text-secondary dark:hover:text-text-secondary-dark transition-colors"
@@ -127,7 +207,10 @@ export default function ConversationBrowser() {
             key={conv.id}
             conversation={conv}
             isActive={conv.id === currentId}
+            selectionMode={selectionMode}
+            selected={selectedIds.has(conv.id)}
             onSelect={handleSelect}
+            onToggleSelect={toggleSelection}
             onDelete={handleDelete}
           />
         ))}
@@ -154,6 +237,48 @@ export default function ConversationBrowser() {
         )}
         </div>
       </div>
+
+      {/* Selection-mode bottom toolbar */}
+      {selectionMode && (
+        <div className="border-t border-border dark:border-border-dark bg-surface dark:bg-surface-dark px-4 py-3">
+          <div className="max-w-3xl mx-auto flex items-center gap-3">
+            <span className="text-sm text-text-secondary dark:text-text-secondary-dark">
+              已选 <span className="text-text-primary dark:text-text-primary-dark font-medium">{selectedCount}</span> 项
+            </span>
+            <button
+              onClick={selectAllOnPage}
+              disabled={allOnPageSelected || conversations.length === 0}
+              className="px-3 py-1.5 text-xs rounded-md border border-border dark:border-border-dark text-text-secondary dark:text-text-secondary-dark hover:bg-bg dark:hover:bg-bg-dark disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            >
+              全选当前页
+            </button>
+            <div className="flex-1" />
+            <button
+              onClick={exitSelectionMode}
+              className="px-3 py-1.5 text-xs rounded-md border border-border dark:border-border-dark text-text-secondary dark:text-text-secondary-dark hover:bg-bg dark:hover:bg-bg-dark transition-colors"
+            >
+              退出
+            </button>
+            <button
+              onClick={() => setConfirmBulkDelete(true)}
+              disabled={selectedCount === 0}
+              className="px-4 py-1.5 text-xs rounded-md text-white bg-status-error hover:bg-status-error/80 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            >
+              删除 ({selectedCount})
+            </button>
+          </div>
+        </div>
+      )}
+
+      {confirmBulkDelete && (
+        <DangerConfirmModal
+          title="批量删除对话"
+          message={`将删除 ${selectedCount} 条会话，此操作不可恢复。`}
+          confirmLabel="删除"
+          onConfirm={handleBulkDeleteConfirm}
+          onCancel={() => setConfirmBulkDelete(false)}
+        />
+      )}
     </div>
   );
 }
@@ -161,12 +286,18 @@ export default function ConversationBrowser() {
 function BrowserItem({
   conversation,
   isActive,
+  selectionMode,
+  selected,
   onSelect,
+  onToggleSelect,
   onDelete,
 }: {
   conversation: ConversationSummary;
   isActive: boolean;
+  selectionMode: boolean;
+  selected: boolean;
   onSelect: (id: string) => void;
+  onToggleSelect: (id: string) => void;
   onDelete: (id: string) => void;
 }) {
   const [showMenu, setShowMenu] = useState(false);
@@ -200,31 +331,53 @@ function BrowserItem({
     return () => document.removeEventListener('mousedown', handleClick);
   }, [menuOpen]);
 
+  const handleRowClick = () => {
+    if (selectionMode) {
+      onToggleSelect(conversation.id);
+    } else {
+      onSelect(conversation.id);
+    }
+  };
+
   return (
     <>
       <div
         className={`group relative cursor-pointer transition-colors rounded-lg mb-1 ${
           menuOpen ? 'z-40' : ''
         } ${
-          isActive
+          selectionMode && selected
+            ? 'bg-accent/10 dark:bg-accent/15 px-4 py-3'
+            : isActive
             ? 'bg-panel dark:bg-panel-accent-dark px-4 py-3'
             : 'hover:bg-panel/60 dark:hover:bg-panel-accent-dark/60 px-4 py-3'
         }`}
-        onClick={() => onSelect(conversation.id)}
+        onClick={handleRowClick}
         onMouseEnter={() => setShowMenu(true)}
         onMouseLeave={() => { if (!menuOpen) setShowMenu(false); }}
       >
-        <div className={`font-medium text-text-primary dark:text-text-primary-dark truncate ${showMenu || menuOpen ? 'pr-8' : ''}`}>
-          {title}
-        </div>
-        <div className="flex items-center gap-2 mt-1 text-xs text-text-tertiary dark:text-text-tertiary-dark">
-          <span>{date}</span>
-          <span>{conversation.message_count} messages</span>
-          {copyFeedback && <span className="text-accent">ID copied</span>}
+        <div className="flex items-center gap-3">
+          {selectionMode && (
+            <Checkbox
+              checked={selected}
+              onChange={() => onToggleSelect(conversation.id)}
+              onClick={(e) => e.stopPropagation()}
+              ariaLabel={`选中 ${title}`}
+            />
+          )}
+          <div className="flex-1 min-w-0">
+            <div className={`font-medium text-text-primary dark:text-text-primary-dark truncate ${(showMenu || menuOpen) && !selectionMode ? 'pr-8' : ''}`}>
+              {title}
+            </div>
+            <div className="flex items-center gap-2 mt-1 text-xs text-text-tertiary dark:text-text-tertiary-dark">
+              <span>{date}</span>
+              <span>{conversation.message_count} messages</span>
+              {copyFeedback && <span className="text-accent">ID copied</span>}
+            </div>
+          </div>
         </div>
 
-        {/* ··· menu trigger */}
-        {(showMenu || menuOpen) && (
+        {/* ··· menu trigger — hidden in selection mode */}
+        {!selectionMode && (showMenu || menuOpen) && (
           <div ref={menuRef} className="absolute right-3 top-1/2 -translate-y-1/2">
             <button
               onClick={(e) => {

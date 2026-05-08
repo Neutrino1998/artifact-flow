@@ -4,11 +4,14 @@ Auth-related Pydantic schemas
 Defines request and response models for authentication endpoints.
 """
 
-from typing import Optional, List
+from typing import Any, Dict, Literal, Optional, List
 from datetime import datetime
 from pydantic import BaseModel, Field, field_validator
 
 from utils.validators import validate_username
+
+
+MAX_BULK_USER_ACTION_IDS = 200
 
 
 # ============================================================
@@ -140,3 +143,57 @@ class BulkImportResponse(BaseModel):
     total_rows: int = Field(..., description="Total data rows processed (excluding header)")
     detected_encoding: Optional[str] = Field(None, description="Encoding charset-normalizer picked")
     warnings: List[str] = Field(default_factory=list, description="Non-blocking notices (unknown columns, etc.)")
+
+
+# ============================================================
+# Bulk Actions (PR5a)
+# ============================================================
+
+
+BulkActionType = Literal["disable", "enable", "delete", "set_department"]
+
+
+class BulkActionRequest(BaseModel):
+    """
+    POST /api/v1/auth/users/bulk-action request body。
+
+    payload 仅在 action="set_department" 时使用，shape = {"department_id": str | null}；
+    null 表示清空归属。其他 action 忽略 payload。
+    """
+    ids: List[str] = Field(
+        ...,
+        min_length=1,
+        max_length=MAX_BULK_USER_ACTION_IDS,
+        description=f"User IDs (1-{MAX_BULK_USER_ACTION_IDS})",
+    )
+    action: BulkActionType = Field(..., description="Action to apply to all listed users")
+    payload: Optional[Dict[str, Any]] = Field(
+        None,
+        description="Action-specific payload (set_department: {department_id: str|null})",
+    )
+
+
+class BulkActionFailedItem(BaseModel):
+    """单条 bulk-action 失败项。"""
+    id: str = Field(..., description="User ID that failed")
+    reason: str = Field(
+        ..., description="Failure reason: 'forbidden_self' | 'not_found' | 'internal_error'"
+    )
+
+
+class BulkActionResponse(BaseModel):
+    """POST /api/v1/auth/users/bulk-action response."""
+    succeeded: List[str] = Field(default_factory=list, description="User IDs successfully processed")
+    failed: List[BulkActionFailedItem] = Field(default_factory=list)
+
+
+class BulkImpactResponse(BaseModel):
+    """
+    GET /api/v1/auth/users/bulk-impact response。
+
+    给前端 DangerConfirmModal 显示"将删除 N 个用户、共 M 条会话"。
+    user_count = 请求 ids 的去重个数（不区分是否真正存在）；
+    conversation_count = 这批用户名下当前会话总数（CASCADE 级联会丢失的）。
+    """
+    user_count: int = Field(..., description="Number of distinct user IDs in the request")
+    conversation_count: int = Field(..., description="Total conversations across these users")

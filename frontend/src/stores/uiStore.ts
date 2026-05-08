@@ -23,6 +23,10 @@ interface UIState {
   // 列表刷新版本号 — 右面板表单（创建/编辑/删除）成功后 bump，
   // UserManagementPanel 订阅版本号触发 refetch，避免 prop 钻透
   userMgmtListVersion: number;
+  // PR5a: 中间面板的选择模式 + 选中集；与 RightView 协调（进入选择模式
+  // 自动切到 'bulk-action'，退出回 'empty'）
+  selectionMode: boolean;
+  userManagementSelection: string[];
   observabilityVisible: boolean;
   observabilitySelectedConvId: string | null;
   observabilityBrowseVisible: boolean;
@@ -37,6 +41,11 @@ interface UIState {
   setUserManagementVisible: (visible: boolean) => void;
   setUserManagementRightView: (view: UserMgmtRightView) => void;
   bumpUserMgmtListVersion: () => void;
+  enterSelectionMode: () => void;
+  exitSelectionMode: () => void;
+  toggleUserSelection: (userId: string) => void;
+  setUserManagementSelection: (ids: string[]) => void;
+  clearUserSelection: () => void;
   setObservabilityVisible: (visible: boolean) => void;
   setObservabilitySelectedConvId: (id: string | null) => void;
   setObservabilityBrowseVisible: (visible: boolean) => void;
@@ -52,6 +61,8 @@ export const useUIStore = create<UIState>((set) => ({
   userManagementVisible: false,
   userManagementRightView: { type: 'empty' },
   userMgmtListVersion: 0,
+  selectionMode: false,
+  userManagementSelection: [],
   observabilityVisible: false,
   observabilitySelectedConvId: null,
   observabilityBrowseVisible: false,
@@ -70,23 +81,51 @@ export const useUIStore = create<UIState>((set) => ({
     ...(visible && {
       userManagementVisible: false,
       userManagementRightView: { type: 'empty' },
+      selectionMode: false,
+      userManagementSelection: [],
       observabilityVisible: false,
     }),
   }),
   setUserManagementVisible: (visible) => set({
     userManagementVisible: visible,
     ...(visible && { conversationBrowserVisible: false, observabilityVisible: false }),
-    ...(!visible && { userManagementRightView: { type: 'empty' } }),
+    ...(!visible && {
+      userManagementRightView: { type: 'empty' },
+      selectionMode: false,
+      userManagementSelection: [],
+    }),
   }),
   setUserManagementRightView: (view) => set({ userManagementRightView: view }),
   bumpUserMgmtListVersion: () =>
     set((s) => ({ userMgmtListVersion: s.userMgmtListVersion + 1 })),
+  enterSelectionMode: () => set({
+    selectionMode: true,
+    userManagementSelection: [],
+    userManagementRightView: { type: 'bulk-action' },
+  }),
+  exitSelectionMode: () => set({
+    selectionMode: false,
+    userManagementSelection: [],
+    userManagementRightView: { type: 'empty' },
+  }),
+  toggleUserSelection: (userId) => set((s) => {
+    const has = s.userManagementSelection.includes(userId);
+    return {
+      userManagementSelection: has
+        ? s.userManagementSelection.filter((id) => id !== userId)
+        : [...s.userManagementSelection, userId],
+    };
+  }),
+  setUserManagementSelection: (ids) => set({ userManagementSelection: ids }),
+  clearUserSelection: () => set({ userManagementSelection: [] }),
   setObservabilityVisible: (visible) => set({
     observabilityVisible: visible,
     ...(visible && {
       conversationBrowserVisible: false,
       userManagementVisible: false,
       userManagementRightView: { type: 'empty' },
+      selectionMode: false,
+      userManagementSelection: [],
       artifactPanelVisible: false,
     }),
     ...(!visible && { observabilitySelectedConvId: null, observabilityBrowseVisible: false }),

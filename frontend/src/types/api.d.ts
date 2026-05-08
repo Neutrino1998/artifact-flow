@@ -96,6 +96,62 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/auth/users/bulk-impact": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Users Bulk Impact
+         * @description 批量删除用户前的影响数据 — 一次 IN 查询。
+         *
+         *     给前端 DangerConfirmModal 显示"将删除 N 个用户、共 M 条会话"。
+         *     user_count 是请求 ids 的去重数（不区分是否真存在），conversation_count
+         *     是这批用户名下当前会话总数。
+         */
+        get: operations["get_users_bulk_impact_api_v1_auth_users_bulk_impact_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/users/bulk-action": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Bulk User Action
+         * @description 批量执行用户管理动作（仅 Admin）。
+         *
+         *     支持 action：disable / enable / delete / set_department。Best-effort：
+         *     单条失败不阻断其余。Self-protection 取代 last-admin 计数 —— admin
+         *     不能对自己执行任何 action（与 PR2b 单条 update_user / delete_user 一致）；
+         *     配合 disabled admin 进不来后台，足以保住至少 1 个活跃 admin。
+         *
+         *     set_department 的 payload.department_id 在 loop 外预校验：非 null 且
+         *     在 DB 中找不到对应部门 → 整批 400（fail-fast，省掉无谓的 N 次失败）。
+         *
+         *     delete 走 hard_delete（DB CASCADE）。若用户当前正在跑 engine，
+         *     被级联删的 conversation 行由 PR2a 的 controller exists() / IntegrityError
+         *     catch 兜住；本端点直接 fire-and-forget。
+         */
+        post: operations["bulk_user_action_api_v1_auth_users_bulk_action_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auth/users/{user_id}": {
         parameters: {
             query?: never;
@@ -180,12 +236,21 @@ export interface paths {
          *     语义（best-effort，非原子）：
          *     - parse 阶段失败（解码 / 缺 username 列 / 行数超限）→ 400
          *     - 文件内 username 重复 → 400 + duplicate_rows 列出
-         *     - 单行业务校验失败（username 格式 / 部门 gap / 默认密码过短）→ failed
+         *     - 单行业务校验失败（username 格式 / 部门 gap / 字段超长 / 默认密码过短）
+         *       → failed
          *     - 单行 username 已在 DB → skipped
          *     - 其余 → created（每行独立 commit；逐行成功/失败）
          *
-         *     部门路径解析使用 resolve_department_path（PR4），会按需自动建表；
-         *     同 CSV 内重复路径在内存里 cache 避免重复 SELECT。
+         *     执行结构（3 段）：
+         *     1. validate + dept resolve：顺序遍历，校验失败的行进 failed，
+         *        通过的行收集到 to_create（含已 resolve 的 department_id）。
+         *        dept_cache 避免同 CSV 内重复路径多次 SELECT。
+         *     2. parallel hash：to_create 里所有 password 通过 asyncio.gather +
+         *        asyncio.to_thread 并行扔给默认 ThreadPoolExecutor 跑 bcrypt。
+         *        bcrypt-python 在 C 层释放 GIL，~8 核机器 300 行 hash 阶段
+         *        从 ~50s 缩到 ~6s，且 event loop 全程不卡（其他请求正常响应）。
+         *     3. INSERT：顺序写库；username UNIQUE 撞上 → 当 skipped 处理（race
+         *        between phase-1 batch-check 和此处之间另一 admin 抢先创建）。
          */
         post: operations["bulk_import_users_api_v1_auth_users_bulk_import_post"];
         delete?: never;
@@ -309,6 +374,30 @@ export interface paths {
          * @description 删除对话
          */
         delete: operations["delete_conversation_api_v1_chat__conv_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/chat/bulk-delete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Bulk Delete Conversations
+         * @description 批量删除对话（用户视角，仅删自己的）
+         *
+         *     Best-effort：失败一条不阻断其余。Cross-user / 不存在的 id 都归为 `not_found`，
+         *     遵循 "404 not 403" 安全策略避免泄漏会话存在。
+         *     引擎正在执行的会话同样直接 DELETE — 引擎 post-processing 在 PR2a 里 fail-soft 兜底。
+         */
+        post: operations["bulk_delete_conversations_api_v1_chat_bulk_delete_post"];
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -986,6 +1075,125 @@ export interface components {
              * Format: binary
              */
             file: string;
+        };
+        /**
+         * BulkActionFailedItem
+         * @description 单条 bulk-action 失败项。
+         */
+        BulkActionFailedItem: {
+            /**
+             * Id
+             * @description User ID that failed
+             */
+            id: string;
+            /**
+             * Reason
+             * @description Failure reason: 'forbidden_self' | 'not_found' | 'internal_error'
+             */
+            reason: string;
+        };
+        /**
+         * BulkActionRequest
+         * @description POST /api/v1/auth/users/bulk-action request body。
+         *
+         *     payload 仅在 action="set_department" 时使用，shape = {"department_id": str | null}；
+         *     null 表示清空归属。其他 action 忽略 payload。
+         */
+        BulkActionRequest: {
+            /**
+             * Ids
+             * @description User IDs (1-200)
+             */
+            ids: string[];
+            /**
+             * Action
+             * @description Action to apply to all listed users
+             * @enum {string}
+             */
+            action: "disable" | "enable" | "delete" | "set_department";
+            /**
+             * Payload
+             * @description Action-specific payload (set_department: {department_id: str|null})
+             */
+            payload?: {
+                [key: string]: unknown;
+            } | null;
+        };
+        /**
+         * BulkActionResponse
+         * @description POST /api/v1/auth/users/bulk-action response.
+         */
+        BulkActionResponse: {
+            /**
+             * Succeeded
+             * @description User IDs successfully processed
+             */
+            succeeded: string[];
+            /** Failed */
+            failed: components["schemas"]["BulkActionFailedItem"][];
+        };
+        /**
+         * BulkDeleteFailedItem
+         * @description One failed item in BulkDeleteResponse.failed.
+         */
+        BulkDeleteFailedItem: {
+            /**
+             * Id
+             * @description Conversation ID that failed to delete
+             */
+            id: string;
+            /**
+             * Reason
+             * @description Failure reason: 'not_found'
+             */
+            reason: string;
+        };
+        /**
+         * BulkDeleteRequest
+         * @description POST /api/v1/chat/bulk-delete request body
+         */
+        BulkDeleteRequest: {
+            /**
+             * Ids
+             * @description Conversation IDs to delete (1-200)
+             */
+            ids: string[];
+        };
+        /**
+         * BulkDeleteResponse
+         * @description POST /api/v1/chat/bulk-delete response
+         */
+        BulkDeleteResponse: {
+            /**
+             * Deleted
+             * @description Successfully deleted conversation IDs
+             */
+            deleted: string[];
+            /**
+             * Failed
+             * @description Per-id failures
+             */
+            failed: components["schemas"]["BulkDeleteFailedItem"][];
+        };
+        /**
+         * BulkImpactResponse
+         * @description GET /api/v1/auth/users/bulk-impact response。
+         *
+         *     给前端 DangerConfirmModal 显示"将删除 N 个用户、共 M 条会话"。
+         *     user_count = 请求 ids 的去重个数（不区分是否真正存在）；
+         *     conversation_count = 这批用户名下当前会话总数（CASCADE 级联会丢失的）。
+         */
+        BulkImpactResponse: {
+            /**
+             * User Count
+             * @description Number of distinct user IDs in the request
+             */
+            user_count: number;
+            /**
+             * Conversation Count
+             * @description Total conversations across these users
+             */
+            conversation_count: number;
         };
         /**
          * BulkImportFailedRow
@@ -1948,6 +2156,70 @@ export interface operations {
             };
         };
     };
+    get_users_bulk_impact_api_v1_auth_users_bulk_impact_get: {
+        parameters: {
+            query: {
+                ids: string[];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BulkImpactResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    bulk_user_action_api_v1_auth_users_bulk_action_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BulkActionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BulkActionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_user_api_v1_auth_users__user_id__get: {
         parameters: {
             query?: never;
@@ -2319,6 +2591,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    bulk_delete_conversations_api_v1_chat_bulk_delete_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BulkDeleteRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BulkDeleteResponse"];
                 };
             };
             /** @description Validation Error */

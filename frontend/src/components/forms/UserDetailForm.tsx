@@ -8,6 +8,7 @@ import { useUIStore } from '@/stores/uiStore';
 import type { UserResponse } from '@/types';
 import DangerConfirmModal from '@/components/layout/DangerConfirmModal';
 import DepartmentCascader from '@/components/forms/DepartmentCascader';
+import Checkbox from '@/components/forms/Checkbox';
 
 interface UserDetailFormProps {
   userId: string;
@@ -257,13 +258,12 @@ export default function UserDetailForm({ userId }: UserDetailFormProps) {
         </div>
 
         <div>
-          <label className="flex items-center gap-3 select-none">
-            <input
-              type="checkbox"
+          <label className="flex items-center gap-3 select-none cursor-pointer">
+            <Checkbox
               checked={isActive}
-              onChange={(e) => setIsActive(e.target.checked)}
+              onChange={setIsActive}
               disabled={saving || isSelf}
-              className="w-4 h-4 accent-accent disabled:cursor-not-allowed"
+              ariaLabel="启用账号"
             />
             <span className="text-sm text-text-primary dark:text-text-primary-dark">
               启用账号

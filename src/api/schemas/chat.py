@@ -43,6 +43,19 @@ class ResumeRequest(BaseModel):
     always_allow: bool = Field(False, description="Always allow this tool for the rest of this execution")
 
 
+MAX_BULK_DELETE_IDS = 200
+
+
+class BulkDeleteRequest(BaseModel):
+    """POST /api/v1/chat/bulk-delete request body"""
+    ids: List[str] = Field(
+        ...,
+        min_length=1,
+        max_length=MAX_BULK_DELETE_IDS,
+        description=f"Conversation IDs to delete (1-{MAX_BULK_DELETE_IDS})",
+    )
+
+
 # ============================================================
 # Response Models
 # ============================================================
@@ -98,3 +111,15 @@ class ConversationDetailResponse(BaseModel):
     session_id: str = Field(..., description="Associated artifact session ID")
     created_at: datetime = Field(..., description="Creation time")
     updated_at: datetime = Field(..., description="Last update time")
+
+
+class BulkDeleteFailedItem(BaseModel):
+    """One failed item in BulkDeleteResponse.failed."""
+    id: str = Field(..., description="Conversation ID that failed to delete")
+    reason: str = Field(..., description="Failure reason: 'not_found'")
+
+
+class BulkDeleteResponse(BaseModel):
+    """POST /api/v1/chat/bulk-delete response"""
+    deleted: List[str] = Field(..., description="Successfully deleted conversation IDs")
+    failed: List[BulkDeleteFailedItem] = Field(..., description="Per-id failures")

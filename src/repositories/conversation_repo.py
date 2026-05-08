@@ -227,6 +227,21 @@ class ConversationRepository(BaseRepository[Conversation]):
         )
         return result.scalar_one()
 
+    async def count_by_users(self, user_ids: List[str]) -> int:
+        """
+        统计一批用户共拥有的对话数（一次 IN 查询）。
+
+        用于 PR5a 批量硬删用户前的 impact 提示。空 list → 0。
+        """
+        if not user_ids:
+            return 0
+        result = await self._session.execute(
+            select(func.count())
+            .select_from(Conversation)
+            .where(Conversation.user_id.in_(user_ids))
+        )
+        return result.scalar_one()
+
     async def count_conversations(self, *, user_id: Optional[str] = None, title_query: Optional[str] = None) -> int:
         """
         统计对话总数

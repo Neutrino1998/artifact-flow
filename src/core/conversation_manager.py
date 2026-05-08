@@ -521,3 +521,12 @@ class ConversationManager:
         """
         repo = self._ensure_repository()
         return await repo.count_by_user(user_id)
+
+    async def count_users_conversations(self, user_ids: list[str]) -> int:
+        """
+        一次性统计一批用户共拥有的对话数。
+
+        用于 PR5a 批量硬删用户前的 impact 提示。一次 IN 查询，避免 N+1。
+        """
+        repo = self._ensure_repository()
+        return await repo.count_by_users(user_ids)
