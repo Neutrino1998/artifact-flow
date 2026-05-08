@@ -203,6 +203,63 @@ class TestValidationFailures:
         assert resp.status_code == 200
         assert len(resp.json()["created"]) == 1
 
+    async def test_display_name_over_length_fails(
+        self, admin_client: AsyncClient
+    ):
+        """display_name > 128 chars → failed (would otherwise crash on PG/MySQL)."""
+        long_name = "x" * 200
+        csv = _csv_bytes(
+            "username,display_name\n"
+            f"alice,{long_name}\n"
+            "bobby,正常名字\n"  # control: should still create
+        )
+        resp = await _post_csv(admin_client, csv)
+        assert resp.status_code == 200
+        body = resp.json()
+        assert {u["username"] for u in body["created"]} == {"bobby"}
+        assert len(body["failed"]) == 1
+        f = body["failed"][0]
+        assert f["username"] == "alice"
+        assert "display_name too long" in f["reason"]
+        assert "200 chars" in f["reason"]
+
+    async def test_dept_name_over_length_fails(
+        self, admin_client: AsyncClient
+    ):
+        """Any dept_l* > 128 chars → failed."""
+        long_dept = "y" * 200
+        csv = _csv_bytes(
+            "username,dept_l1,dept_l2\n"
+            f"alice,部门A,{long_dept}\n"
+            f"bobby,{long_dept},\n"
+            "carol,部门A,子部门A1\n"  # control
+        )
+        resp = await _post_csv(admin_client, csv)
+        assert resp.status_code == 200
+        body = resp.json()
+        assert {u["username"] for u in body["created"]} == {"carol"}
+        assert len(body["failed"]) == 2
+        reasons = {f["username"]: f["reason"] for f in body["failed"]}
+        assert "dept_l2 too long" in reasons["alice"]
+        assert "dept_l1 too long" in reasons["bobby"]
+
+    async def test_explicit_password_over_length_fails(
+        self, admin_client: AsyncClient
+    ):
+        """Explicit password > 128 chars → failed (default = username never exceeds)."""
+        long_pw = "p" * 200
+        csv = _csv_bytes(
+            "username,password\n"
+            f"alice,{long_pw}\n"
+            "bobby,sane_pw\n"  # control
+        )
+        resp = await _post_csv(admin_client, csv)
+        assert resp.status_code == 200
+        body = resp.json()
+        assert {u["username"] for u in body["created"]} == {"bobby"}
+        assert len(body["failed"]) == 1
+        assert "password too long" in body["failed"][0]["reason"]
+
 
 # ============================================================
 # Skipped (already exists)

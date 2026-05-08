@@ -9,6 +9,7 @@ Auth Router
 - PUT /api/v1/auth/users/{user_id} - 更新用户（Admin）
 """
 
+import asyncio
 from typing import Optional
 from uuid import uuid4
 
@@ -48,7 +49,14 @@ from core.conversation_manager import ConversationManager
 from repositories.user_repo import UserRepository
 from repositories.department_repo import DepartmentRepository
 from db.models import User
-from utils.csv_import import CsvParseError, ParsedRow, parse_user_csv
+from utils.csv_import import (
+    DEPT_NAME_MAX,
+    DISPLAY_NAME_MAX,
+    PASSWORD_MAX,
+    CsvParseError,
+    ParsedRow,
+    parse_user_csv,
+)
 from utils.department_resolve import resolve_department_path
 from utils.logger import get_logger
 from utils.validators import validate_username
@@ -417,6 +425,35 @@ def _validate_dept_path(row: ParsedRow) -> Optional[list[str]]:
     return levels[: last_non_empty + 1]
 
 
+def _validate_field_lengths(row: ParsedRow) -> None:
+    """
+    校验 CSV 字段长度不超 DB 列宽 / Pydantic schema max_length。
+
+    普通 API 走 schema 自动拦下；CSV 路径绕过 schema，必须在 importer 里
+    复刻这层校验，否则 PG/MySQL 在 INSERT 阶段会炸 500（SQLite VARCHAR
+    不强制长度，所以 SQLite 测试发现不了这个问题）。
+
+    注意 username 不在此处校验 —— validate_username 已限定 2-64 ASCII。
+
+    Raises:
+        ValueError: 任一字段超长，message 为具体字段名 + 实际长度 + 上限。
+    """
+    if len(row.display_name) > DISPLAY_NAME_MAX:
+        raise ValueError(
+            f"display_name too long: {len(row.display_name)} chars (max {DISPLAY_NAME_MAX})"
+        )
+    # password 仅在 explicit 时校验 —— 默认 = username 时长度一定 ≤ 64
+    if row.password and len(row.password) > PASSWORD_MAX:
+        raise ValueError(
+            f"password too long: {len(row.password)} chars (max {PASSWORD_MAX})"
+        )
+    for level_idx, name in enumerate((row.dept_l1, row.dept_l2, row.dept_l3), start=1):
+        if name and len(name) > DEPT_NAME_MAX:
+            raise ValueError(
+                f"dept_l{level_idx} too long: {len(name)} chars (max {DEPT_NAME_MAX})"
+            )
+
+
 @router.post("/users/bulk-import", response_model=BulkImportResponse)
 async def bulk_import_users(
     file: UploadFile = File(...),
@@ -433,12 +470,21 @@ async def bulk_import_users(
     语义（best-effort，非原子）：
     - parse 阶段失败（解码 / 缺 username 列 / 行数超限）→ 400
     - 文件内 username 重复 → 400 + duplicate_rows 列出
-    - 单行业务校验失败（username 格式 / 部门 gap / 默认密码过短）→ failed
+    - 单行业务校验失败（username 格式 / 部门 gap / 字段超长 / 默认密码过短）
+      → failed
     - 单行 username 已在 DB → skipped
     - 其余 → created（每行独立 commit；逐行成功/失败）
 
-    部门路径解析使用 resolve_department_path（PR4），会按需自动建表；
-    同 CSV 内重复路径在内存里 cache 避免重复 SELECT。
+    执行结构（3 段）：
+    1. validate + dept resolve：顺序遍历，校验失败的行进 failed，
+       通过的行收集到 to_create（含已 resolve 的 department_id）。
+       dept_cache 避免同 CSV 内重复路径多次 SELECT。
+    2. parallel hash：to_create 里所有 password 通过 asyncio.gather +
+       asyncio.to_thread 并行扔给默认 ThreadPoolExecutor 跑 bcrypt。
+       bcrypt-python 在 C 层释放 GIL，~8 核机器 300 行 hash 阶段
+       从 ~50s 缩到 ~6s，且 event loop 全程不卡（其他请求正常响应）。
+    3. INSERT：顺序写库；username UNIQUE 撞上 → 当 skipped 处理（race
+       between phase-1 batch-check 和此处之间另一 admin 抢先创建）。
     """
     raw = await file.read()
     if len(raw) > config.MAX_BULK_IMPORT_BYTES:
@@ -471,7 +517,7 @@ async def bulk_import_users(
     total_rows = len(parsed.rows)
     warnings = list(parsed.warnings)
 
-    # 1. 批查已存在的 username（一次性 SELECT IN，避免 N+1）
+    # 批查已存在的 username（一次性 SELECT IN，避免 N+1）
     candidate_usernames = {r.username for r in parsed.rows if r.username}
     existing = await user_repo.find_existing_usernames(candidate_usernames)
 
@@ -479,12 +525,15 @@ async def bulk_import_users(
     failed: list[BulkImportFailedRow] = []
     skipped: list[BulkImportSkippedRow] = []
 
-    # 2. 部门路径 cache（同 CSV 内重复路径只 resolve 一次）
-    #    key = tuple of cleaned levels；value = dept_id or None
+    # 部门路径 cache（同 CSV 内重复路径只 resolve 一次）
     dept_cache: dict[tuple[str, ...], Optional[str]] = {}
 
+    # ---------- Phase 1: validate + dept resolve ----------
+    # 收集通过校验的行；password 此时只挑出来不 hash
+    to_create: list[tuple[ParsedRow, str, Optional[str]]] = []  # (row, password, dept_id)
+
     for row in parsed.rows:
-        # 2a. username 必填 + 格式
+        # username 必填 + 格式
         if not row.username:
             failed.append(BulkImportFailedRow(
                 row=row.row_number, username=None,
@@ -499,7 +548,7 @@ async def bulk_import_users(
             ))
             continue
 
-        # 2b. 已存在 → skipped
+        # 已存在 → skipped
         if row.username in existing:
             skipped.append(BulkImportSkippedRow(
                 row=row.row_number, username=row.username,
@@ -507,7 +556,16 @@ async def bulk_import_users(
             ))
             continue
 
-        # 2c. 默认密码 = username；强制最短 4 位（与 CreateUserRequest 一致）
+        # 字段长度（display_name / password / dept_l*）— 复刻 schema max_length
+        try:
+            _validate_field_lengths(row)
+        except ValueError as e:
+            failed.append(BulkImportFailedRow(
+                row=row.row_number, username=row.username, reason=str(e),
+            ))
+            continue
+
+        # 默认密码 = username；强制最短 4 位（与 CreateUserRequest 一致）
         password = row.password if row.password else row.username
         if len(password) < 4:
             failed.append(BulkImportFailedRow(
@@ -519,7 +577,7 @@ async def bulk_import_users(
             ))
             continue
 
-        # 2d. 部门路径：gap 校验 + cache + resolve
+        # 部门路径：gap 校验 + cache + resolve
         try:
             path = _validate_dept_path(row)
         except ValueError as e:
@@ -537,28 +595,41 @@ async def bulk_import_users(
                 department_id = await resolve_department_path(dept_repo, path)
                 dept_cache[cache_key] = department_id
 
-        # 2e. INSERT user（独立 commit；UNIQUE 冲突意味着 batch-check 与
-        #     此处之间另一 admin 抢先创建了同名 → 当 skipped 处理）
+        to_create.append((row, password, department_id))
+        # phase-1 内同 CSV 后续行不再尝试同 username（防 inter-row 冲突）
+        existing.add(row.username)
+
+    # ---------- Phase 2: parallel hash ----------
+    # bcrypt 是 CPU bound；丢线程池并行跑 + 释放 event loop。
+    # gather 失败（极罕见）→ 整体 500 是正确行为（系统级问题，不静默吞）。
+    hashed_passwords: list[str] = (
+        await asyncio.gather(*(
+            asyncio.to_thread(hash_password, pw) for _, pw, _ in to_create
+        ))
+        if to_create else []
+    )
+
+    # ---------- Phase 3: INSERT ----------
+    for (row, _password, dept_id), hashed in zip(to_create, hashed_passwords):
         new_user = User(
             id=f"user-{uuid4().hex}",
             username=row.username,
-            hashed_password=hash_password(password),
+            hashed_password=hashed,
             display_name=row.display_name or None,
             role="user",
-            department_id=department_id,
+            department_id=dept_id,
         )
         try:
             await user_repo.add(new_user)
         except IntegrityError:
+            # phase-1 batch check 与此处之间另一 admin 抢先创建了同名 username
             await user_repo.session.rollback()
-            existing.add(row.username)  # 防同 CSV 后续行又试一遍
             skipped.append(BulkImportSkippedRow(
                 row=row.row_number, username=row.username,
                 reason="username_exists",
             ))
             continue
 
-        existing.add(row.username)  # 同 CSV 后续行不再触发同 username
         created.append(UserResponse(
             id=new_user.id,
             username=new_user.username,

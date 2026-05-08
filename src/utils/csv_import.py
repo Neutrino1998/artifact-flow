@@ -35,6 +35,15 @@ KNOWN_COLUMNS = {
 
 REQUIRED_COLUMNS = {"username"}
 
+# 字段长度上限 — 与 DB 列宽 / Pydantic schema max_length 对齐。
+# Source of truth: User.display_name = String(128), Department.name = String(128),
+# CreateUserRequest.password = max_length=128.
+# 普通 API 走 Pydantic schema 自动拦下；CSV 路径绕过 schema，必须在 importer
+# 里复刻这层校验，否则 PG/MySQL 在 INSERT 时会炸 500（SQLite VARCHAR 不强制）。
+DISPLAY_NAME_MAX = 128
+DEPT_NAME_MAX = 128
+PASSWORD_MAX = 128
+
 
 class CsvParseError(ValueError):
     """CSV 解析期错误（路由层应转 400）。"""

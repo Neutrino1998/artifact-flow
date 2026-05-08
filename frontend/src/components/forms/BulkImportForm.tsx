@@ -57,18 +57,26 @@ export default function BulkImportForm() {
   const [dragActive, setDragActive] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
+  // 清掉 <input type="file"> 的 DOM 值 —— 否则用户重新选同名文件不触发
+  // onChange，"换一个文件 / 再导入一批"流程会卡住（受控之外的 DOM 状态）
+  const clearNativeInput = useCallback(() => {
+    if (inputRef.current) inputRef.current.value = '';
+  }, []);
+
   const reset = useCallback(() => {
     setStage({ kind: 'upload' });
     setFile(null);
     setError(null);
     setDuplicateRows(null);
-  }, []);
+    clearNativeInput();
+  }, [clearNativeInput]);
 
   const handleFile = useCallback((f: File | null) => {
     setError(null);
     setDuplicateRows(null);
     if (!f) {
       setFile(null);
+      clearNativeInput();
       return;
     }
     // Soft client-side hint — backend is authoritative
@@ -77,7 +85,7 @@ export default function BulkImportForm() {
       return;
     }
     setFile(f);
-  }, []);
+  }, [clearNativeInput]);
 
   const onDrop = useCallback(
     (e: React.DragEvent) => {
