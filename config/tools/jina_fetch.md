@@ -24,6 +24,13 @@ parameters:
     default: 60
 ---
 
+**Availability:** This tool is routed via an intranet gateway that is only
+open Monday–Friday, 09:00–17:00 (server local time). Calls outside this
+window will fail with a 502 Bad Gateway. Check `<system_time>` in the
+system context — if the current time is outside the window (weekend or
+off-hours), do NOT call this tool; tell the user the fetch service is
+offline until the next business window.
+
 Use this when search snippets / summaries aren't enough and you need the full
 article body — long-form posts, docs, papers, source pages cited by other tools.
 

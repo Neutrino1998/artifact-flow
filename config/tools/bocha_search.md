@@ -24,6 +24,13 @@ parameters:
     enum: [noLimit, oneDay, oneWeek, oneMonth, oneYear]
 ---
 
+**Availability:** This tool is routed via an intranet gateway that is only
+open Monday–Friday, 09:00–17:00 (server local time). Calls outside this
+window will fail with a 502 Bad Gateway. Check `<system_time>` in the
+system context — if the current time is outside the window (weekend or
+off-hours), do NOT call this tool; tell the user the search service is
+offline until the next business window.
+
 Each result item carries `url`, `title`, `siteName`, `date`, and a `content` block
 embedding both `<snippet>` (short, ~100 chars) and `<summary>` (longer page excerpt) tags.
 
