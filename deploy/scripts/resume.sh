@@ -20,11 +20,16 @@ COMPOSE_FILE="$ROOT/deploy/docker-compose.intranet.yml"
 ENV_FILE="$ROOT/deploy/.env"
 VERSION="${1:-${AF_VERSION:-latest}}"
 
-# Read AF_HTTP_PORT for the nginx probe, mirroring Compose's precedence:
-# shell env > deploy/.env > default 80. `AF_HTTP_PORT=8080 ./resume.sh`
-# must probe :8080 even when .env says 9090 — otherwise the override
-# Compose honors at `up -d` falls out of sync with the probe and
-# maintenance gets stuck on a perfectly healthy service.
+# Resolve AF_HTTP_PORT exactly the way Compose substitutes
+# `${AF_HTTP_PORT:-80}` in the compose file:
+#   1. Shell env explicitly set (even to "") → that value, with `:-` empty
+#      fallback to 80. Crucially, `AF_HTTP_PORT= ./resume.sh` must yield
+#      80 (not the .env value), because Compose itself treats shell-empty
+#      as overriding .env and then `:-` defaults to 80.
+#   2. Shell env unset → consult deploy/.env.
+#   3. Otherwise → 80.
+# `${VAR+x}` (no colon) distinguishes set-but-empty from unset; `${VAR:-80}`
+# (with colon) handles the empty-fallback for case (1).
 #
 # We deliberately do NOT `source` deploy/.env: Compose reads it as
 # literal KEY=VALUE text, but `bash` evaluates the file as shell —
@@ -32,19 +37,23 @@ VERSION="${1:-${AF_VERSION:-latest}}"
 # `PASSWORD=pa$$word`), `$abc` aborts under `set -u`, and `$(cmd)` would
 # execute. Compose itself loads .env from the compose-file directory,
 # so we don't need to export anything to the shell.
-HTTP_PORT="${AF_HTTP_PORT:-}"
-if [[ -z "$HTTP_PORT" && -f "$ENV_FILE" ]]; then
-  HTTP_PORT=$(awk -F= '
-    /^[[:space:]]*AF_HTTP_PORT[[:space:]]*=/ {
-      val = $2
-      sub(/^[[:space:]]*["'\'']?/, "", val)
-      sub(/[^0-9].*$/, "", val)
-      if (val != "") last = val
-    }
-    END { if (last != "") print last }
-  ' "$ENV_FILE")
+if [[ -n "${AF_HTTP_PORT+set}" ]]; then
+  HTTP_PORT="${AF_HTTP_PORT:-80}"
+else
+  HTTP_PORT=""
+  if [[ -f "$ENV_FILE" ]]; then
+    HTTP_PORT=$(awk -F= '
+      /^[[:space:]]*AF_HTTP_PORT[[:space:]]*=/ {
+        val = $2
+        sub(/^[[:space:]]*["'\'']?/, "", val)
+        sub(/[^0-9].*$/, "", val)
+        if (val != "") last = val
+      }
+      END { if (last != "") print last }
+    ' "$ENV_FILE")
+  fi
+  HTTP_PORT="${HTTP_PORT:-80}"
 fi
-HTTP_PORT="${HTTP_PORT:-80}"
 
 # Pick docker compose CLI: V2 plugin ("docker compose") on dev hosts, V1
 # standalone ("docker-compose") on older intranet hosts. Both speak the
