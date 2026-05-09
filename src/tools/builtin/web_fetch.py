@@ -70,13 +70,6 @@ class WebFetchTool(BaseTool):
                 description="URL to fetch (supports HTML and PDF)",
                 required=True
             ),
-            ToolParameter(
-                name="max_content_length",
-                type="integer",
-                description="Maximum content length per page in characters (default: 20000)",
-                required=False,
-                default=20000
-            ),
         ]
 
     async def execute(self, **params) -> ToolResult:
@@ -85,10 +78,10 @@ class WebFetchTool(BaseTool):
 
         Args:
             url: 目标URL
-            max_content_length: 最大内容长度
 
         Returns:
-            ToolResult: 包含XML格式的抓取结果
+            ToolResult: 包含XML格式的抓取结果。超长内容由引擎中间件按
+            max_result_size_chars 自动落盘到 artifact，本工具不再截断。
         """
         url = params.get("url")
         if not url:
@@ -101,12 +94,10 @@ class WebFetchTool(BaseTool):
                 error=f"Unsupported URL scheme: {url}. Only http:// and https:// are allowed."
             )
 
-        max_content_length = params["max_content_length"]
-
         logger.info(f"Fetching URL: {url}")
 
         try:
-            result = await self._fetch_single_url(url, max_content_length)
+            result = await self._fetch_single_url(url)
             xml_result = self._format_result_to_xml(result)
             success = result.get("success", False)
 
@@ -137,19 +128,18 @@ class WebFetchTool(BaseTool):
             return 'pdf'
         return 'html'
 
-    async def _fetch_single_url(self, url: str, max_content_length: int) -> Dict[str, Any]:
+    async def _fetch_single_url(self, url: str) -> Dict[str, Any]:
         """
         抓取单个URL：先试Jina Reader API，失败后按类型降级
 
         Args:
             url: 目标URL
-            max_content_length: 最大内容长度
 
         Returns:
             抓取结果字典
         """
         # 主路径：Jina Reader API
-        jina_result = await self._fetch_via_jina(url, max_content_length)
+        jina_result = await self._fetch_via_jina(url)
         if jina_result is not None:
             return jina_result
 
@@ -157,12 +147,12 @@ class WebFetchTool(BaseTool):
         content_type = self._detect_content_type(url)
         if content_type == 'pdf':
             logger.info(f"Jina failed for PDF, falling back to pypdf: {url}")
-            return await self._fetch_pdf(url, max_content_length)
+            return await self._fetch_pdf(url)
         else:
             logger.info(f"Jina failed for HTML, falling back to BeautifulSoup: {url}")
-            return await self._fetch_via_bs4(url, max_content_length)
+            return await self._fetch_via_bs4(url)
 
-    async def _fetch_via_jina(self, url: str, max_content_length: int) -> Optional[Dict[str, Any]]:
+    async def _fetch_via_jina(self, url: str) -> Optional[Dict[str, Any]]:
         """
         通过Jina Reader API抓取URL内容
 
@@ -171,7 +161,6 @@ class WebFetchTool(BaseTool):
 
         Args:
             url: 目标URL
-            max_content_length: 最大内容长度
 
         Returns:
             抓取结果字典，或None表示失败
@@ -198,10 +187,6 @@ class WebFetchTool(BaseTool):
                             title_match = re.match(r'^Title:\s*(.+)$', content, re.MULTILINE)
                             if title_match:
                                 title = title_match.group(1).strip()
-
-                            # 限制长度
-                            if len(content) > max_content_length:
-                                content = content[:max_content_length] + "\n\n[Content truncated...]"
 
                             source_type = self._detect_content_type(url)
                             logger.debug(f"Jina fetched {url}: {len(content)} chars")
@@ -241,13 +226,12 @@ class WebFetchTool(BaseTool):
 
         return None
 
-    async def _fetch_via_bs4(self, url: str, max_content_length: int) -> Dict[str, Any]:
+    async def _fetch_via_bs4(self, url: str) -> Dict[str, Any]:
         """
         降级路径：aiohttp下载HTML + BeautifulSoup提取纯文本
 
         Args:
             url: 目标URL
-            max_content_length: 最大内容长度
 
         Returns:
             抓取结果字典
@@ -287,10 +271,6 @@ class WebFetchTool(BaseTool):
             # 清理多余空行
             content = re.sub(r'\n{3,}', '\n\n', content).strip()
 
-            # 限制长度
-            if len(content) > max_content_length:
-                content = content[:max_content_length] + "\n\n[Content truncated...]"
-
             logger.debug(f"BS4 fetched {url}: {len(content)} chars")
 
             return {
@@ -311,13 +291,12 @@ class WebFetchTool(BaseTool):
                 "error": f"Fetch failed: {str(e)}"
             }
 
-    async def _fetch_pdf(self, url: str, max_content_length: int) -> Dict[str, Any]:
+    async def _fetch_pdf(self, url: str) -> Dict[str, Any]:
         """
         降级路径：抓取并解析PDF文件（DocConverter / pymupdf）
 
         Args:
             url: PDF文件URL
-            max_content_length: 最大内容长度
 
         Returns:
             抓取结果字典
@@ -345,9 +324,6 @@ class WebFetchTool(BaseTool):
                     result = await converter.convert(pdf_bytes, "document.pdf")
 
                     content = result.content
-                    if len(content) > max_content_length:
-                        content = content[:max_content_length] + "\n\n[Content truncated...]"
-
                     page_count = result.metadata.get("page_count", 0)
                     logger.info(f"PDF extracted: {page_count} pages, {len(content)} chars")
 
@@ -411,7 +387,7 @@ if __name__ == "__main__":
 
         # Test 2: PDF file
         print("\nTest 2: PDF file")
-        result = await tool(url="https://arxiv.org/pdf/1706.03762.pdf", max_content_length=5000)
+        result = await tool(url="https://arxiv.org/pdf/1706.03762.pdf")
         if result.success:
             print(f"OK: {len(result.data)} chars")
             print(result.data[:500] + "...")

@@ -7,6 +7,8 @@ description: |
   - IMPORTANT: Instructions must include a specific URL to crawl
 tools:
   web_fetch: confirm
+  read_artifact: auto
+  update_artifact: auto
 model: qwen3.6-plus-no-thinking
 max_tool_rounds: 3
 ---
