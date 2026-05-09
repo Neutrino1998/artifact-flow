@@ -486,7 +486,7 @@ tar xzf tmp/artifactflow-config-v2.3.0.tar.gz   # 如果 config 也变了
 ./deploy/scripts/pause.sh "正在更新到 v2.3.0，预计 5 分钟"
 
 # 3. 退维护窗口（up -d backend frontend → 等 healthy → 关 flag）
-#    backend 60s 内不 healthy → 维护页保持开启，运维有时间排查
+#    backend 或 frontend 60s 内不 healthy → 维护页保持开启，运维有时间排查
 ./deploy/scripts/resume.sh v2.3.0
 ```
 
