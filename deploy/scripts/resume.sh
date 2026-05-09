@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Exit a maintenance window: bring backend / frontend up (optionally with
-# a new version), wait for backend health, then lower the maintenance flag.
-# If backend doesn't become healthy within 60s, the maintenance page stays
-# on so the operator can investigate without exposing a half-broken service.
+# a new version), wait for both to become healthy, then lower the maintenance
+# flag. If either container fails to become healthy within 60s, or the nginx
+# probe fails, the maintenance page stays on so the operator can investigate
+# without exposing a half-broken service.
 #
 # Usage:
 #   deploy/scripts/resume.sh [VERSION]
@@ -16,7 +17,19 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 COMPOSE_FILE="$ROOT/deploy/docker-compose.intranet.yml"
+ENV_FILE="$ROOT/deploy/.env"
 VERSION="${1:-${AF_VERSION:-latest}}"
+
+# Pull AF_HTTP_PORT (and any other compose-relevant vars) from .env so the
+# nginx probe targets the actual published port. Without this the probe is
+# pinned to :80 and any host-port override silently breaks resume.
+if [[ -f "$ENV_FILE" ]]; then
+  set -a
+  # shellcheck disable=SC1090
+  . "$ENV_FILE"
+  set +a
+fi
+HTTP_PORT="${AF_HTTP_PORT:-80}"
 
 # Pick docker compose CLI: V2 plugin ("docker compose") on dev hosts, V1
 # standalone ("docker-compose") on older intranet hosts. Both speak the
@@ -33,33 +46,39 @@ fi
 echo "→ Starting backend / frontend (AF_VERSION=$VERSION)"
 AF_VERSION="$VERSION" "${DC[@]}" -f "$COMPOSE_FILE" up -d backend frontend
 
-echo -n "→ Waiting for backend healthy"
-HEALTHY=0
-for _ in $(seq 1 30); do
-  cid=$("${DC[@]}" -f "$COMPOSE_FILE" ps -q backend 2>/dev/null || true)
-  if [[ -n "$cid" ]]; then
-    state=$(docker inspect --format '{{.State.Health.Status}}' "$cid" 2>/dev/null || echo unknown)
-    if [[ "$state" == "healthy" ]]; then
-      HEALTHY=1
-      echo " ✓"
-      break
+wait_healthy() {
+  local svc="$1" label="$2"
+  echo -n "→ Waiting for $label healthy"
+  for _ in $(seq 1 30); do
+    local cid state
+    cid=$("${DC[@]}" -f "$COMPOSE_FILE" ps -q "$svc" 2>/dev/null || true)
+    if [[ -n "$cid" ]]; then
+      state=$(docker inspect --format '{{.State.Health.Status}}' "$cid" 2>/dev/null || echo unknown)
+      if [[ "$state" == "healthy" ]]; then
+        echo " ✓"
+        return 0
+      fi
     fi
-  fi
-  printf '.'
-  sleep 2
-done
-
-if (( HEALTHY == 0 )); then
+    printf '.'
+    sleep 2
+  done
   echo
-  echo "✗ backend 未在 60s 内 healthy，维护页保持开启"
-  echo "  排查：${DC[*]} -f $COMPOSE_FILE logs --tail=80 backend"
-  exit 1
-fi
+  echo "✗ $label 未在 60s 内 healthy，维护页保持开启"
+  echo "  排查：${DC[*]} -f $COMPOSE_FILE logs --tail=80 $svc"
+  return 1
+}
+
+# Backend AND frontend must both be healthy before lifting maintenance —
+# nginx routes `/` to frontend, so a crash-looping frontend would 502 users
+# the instant maintenance flips off if we only gated on backend.
+wait_healthy backend  backend  || exit 1
+wait_healthy frontend frontend || exit 1
 
 # /health is intentionally NOT gated by maintenance (see deploy/nginx.conf),
 # so this probe goes through nginx and confirms upstream wiring is alive.
-if ! curl -fs -m 5 "http://localhost/health/ready" >/dev/null; then
-  echo "⚠ /health/ready 通过 nginx 不可达，维护页保持开启"
+# Use AF_HTTP_PORT from .env — pinning :80 breaks any host-port override.
+if ! curl -fs -m 5 "http://localhost:${HTTP_PORT}/health/ready" >/dev/null; then
+  echo "⚠ /health/ready 通过 nginx (port ${HTTP_PORT}) 不可达，维护页保持开启"
   echo "  排查：${DC[*]} -f $COMPOSE_FILE logs --tail=40 nginx backend"
   exit 1
 fi
