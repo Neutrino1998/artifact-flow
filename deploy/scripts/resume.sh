@@ -20,16 +20,26 @@ COMPOSE_FILE="$ROOT/deploy/docker-compose.intranet.yml"
 ENV_FILE="$ROOT/deploy/.env"
 VERSION="${1:-${AF_VERSION:-latest}}"
 
-# Pull AF_HTTP_PORT (and any other compose-relevant vars) from .env so the
-# nginx probe targets the actual published port. Without this the probe is
-# pinned to :80 and any host-port override silently breaks resume.
+# Read AF_HTTP_PORT for the nginx probe. We deliberately do NOT `source`
+# deploy/.env: Compose treats it as literal KEY=VALUE text, but `bash`
+# evaluates the file as shell — `$$` expands to the script PID (mangling
+# secrets like `PASSWORD=pa$$word`), `$abc` aborts under `set -u`, and
+# `$(cmd)` would execute. Compose itself loads .env from the compose-file
+# directory, so we don't need to export anything to the shell — only the
+# port is needed locally for the curl probe.
+HTTP_PORT=80
 if [[ -f "$ENV_FILE" ]]; then
-  set -a
-  # shellcheck disable=SC1090
-  . "$ENV_FILE"
-  set +a
+  parsed=$(awk -F= '
+    /^[[:space:]]*AF_HTTP_PORT[[:space:]]*=/ {
+      val = $2
+      sub(/^[[:space:]]*["'\'']?/, "", val)
+      sub(/[^0-9].*$/, "", val)
+      if (val != "") last = val
+    }
+    END { if (last != "") print last }
+  ' "$ENV_FILE")
+  [[ -n "$parsed" ]] && HTTP_PORT="$parsed"
 fi
-HTTP_PORT="${AF_HTTP_PORT:-80}"
 
 # Pick docker compose CLI: V2 plugin ("docker compose") on dev hosts, V1
 # standalone ("docker-compose") on older intranet hosts. Both speak the
