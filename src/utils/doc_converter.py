@@ -185,27 +185,10 @@ class DocConverter:
 
     async def _convert_pdf(self, file_bytes: bytes, filename: str) -> ConvertResult:
         """Convert .pdf to markdown via pymupdf."""
-        import pymupdf
-
-        doc = pymupdf.open(stream=file_bytes, filetype="pdf")
-        page_count = len(doc)
-
-        if page_count > self.MAX_PDF_PAGES:
-            doc.close()
-            raise ValueError(
-                f"PDF has {page_count} pages (max {self.MAX_PDF_PAGES})"
-            )
-
-        text_parts = []
-        for page_num in range(page_count):
-            page = doc[page_num]
-            text = page.get_text()
-            if text.strip():
-                text_parts.append(f"## Page {page_num + 1}\n\n{text.strip()}")
-
-        doc.close()
-
-        content = "\n\n".join(text_parts)
+        # pymupdf 是 CPU bound（多页 PDF 可能数百 ms ~ 数秒），丢线程池避免卡 event loop
+        content, page_count = await asyncio.to_thread(
+            _extract_pdf_text, file_bytes, self.MAX_PDF_PAGES
+        )
         word_count = len(content.split())
 
         return ConvertResult(
@@ -250,3 +233,25 @@ class DocConverter:
                 "word_count": word_count,
             },
         )
+
+
+def _extract_pdf_text(file_bytes: bytes, max_pages: int) -> tuple[str, int]:
+    """Sync pymupdf extraction. Designed to run inside asyncio.to_thread."""
+    import pymupdf
+
+    doc = pymupdf.open(stream=file_bytes, filetype="pdf")
+    try:
+        page_count = len(doc)
+        if page_count > max_pages:
+            raise ValueError(f"PDF has {page_count} pages (max {max_pages})")
+
+        text_parts = []
+        for page_num in range(page_count):
+            page = doc[page_num]
+            text = page.get_text()
+            if text.strip():
+                text_parts.append(f"## Page {page_num + 1}\n\n{text.strip()}")
+
+        return "\n\n".join(text_parts), page_count
+    finally:
+        doc.close()

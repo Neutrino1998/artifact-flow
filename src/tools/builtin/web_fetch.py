@@ -29,6 +29,27 @@ JINA_RETRY_DELAY = 30   # 429限额时等待秒数
 JINA_TIMEOUT = 30        # 单次请求超时（秒），正常响应 1-5s，不重试所以给足余量
 
 
+def _parse_html_with_bs4(raw: bytes) -> tuple[str, str]:
+    """
+    Sync HTML parse: returns (title, plain_text_content).
+    Designed to run inside asyncio.to_thread — BS4 is CPU bound.
+    """
+    soup = BeautifulSoup(raw, "html.parser")
+
+    title = "Untitled"
+    title_tag = soup.find("title")
+    if title_tag and title_tag.string:
+        title = title_tag.string.strip()
+
+    for tag in soup.find_all(["script", "style", "nav", "header", "footer", "form", "aside"]):
+        tag.decompose()
+
+    content = soup.get_text(separator="\n")
+    content = re.sub(r'\n{3,}', '\n\n', content).strip()
+
+    return title, content
+
+
 class WebFetchTool(BaseTool):
     """
     Web内容抓取工具
@@ -252,24 +273,8 @@ class WebFetchTool(BaseTool):
                     # Read raw bytes and let BS4 detect encoding
                     raw = await response.read()
 
-            # BeautifulSoup解析 (auto-detects encoding from meta tags / byte patterns)
-            soup = BeautifulSoup(raw, "html.parser")
-
-            # 提取标题
-            title = "Untitled"
-            title_tag = soup.find("title")
-            if title_tag and title_tag.string:
-                title = title_tag.string.strip()
-
-            # 移除无用标签
-            for tag in soup.find_all(["script", "style", "nav", "header", "footer", "form", "aside"]):
-                tag.decompose()
-
-            # 提取纯文本
-            content = soup.get_text(separator="\n")
-
-            # 清理多余空行
-            content = re.sub(r'\n{3,}', '\n\n', content).strip()
+            # BeautifulSoup 解析是 CPU bound（大页面可达数百 ms），丢线程池避免卡 event loop
+            title, content = await asyncio.to_thread(_parse_html_with_bs4, raw)
 
             logger.debug(f"BS4 fetched {url}: {len(content)} chars")
 
