@@ -93,6 +93,115 @@ class TestPersistToolResult:
         assert memory.metadata["tool_name"] == original
 
 
+class TestCreateFromUpload:
+    """create_from_upload 也必须满足 _ARTIFACT_ID_PATTERN（之前漏校验，
+    长文件名会让 ID 超 64 字符进 DB）。"""
+
+    async def test_long_filename_normalized(
+        self, artifact_manager: ArtifactManager, session_id: str
+    ):
+        # 80 字符的 base name + .txt 扩展名
+        long_filename = ("a" * 80) + ".txt"
+        ok, _, info = await artifact_manager.create_from_upload(
+            session_id=session_id, filename=long_filename,
+            content="hello", content_type="text/plain",
+        )
+        assert ok
+        aid = info["id"]
+        assert len(aid) <= 64
+        # 扩展名应被保留
+        assert aid.endswith(".txt")
+        import re
+        assert re.match(r"^[\w\-.]{1,64}$", aid)
+
+    async def test_filename_with_special_chars(
+        self, artifact_manager: ArtifactManager, session_id: str
+    ):
+        ok, _, info = await artifact_manager.create_from_upload(
+            session_id=session_id, filename="report (final) v2!.txt",
+            content="x", content_type="text/plain",
+        )
+        assert ok
+        import re
+        assert re.match(r"^[\w\-.]{1,64}$", info["id"])
+
+    async def test_dedup_suffix_stays_within_cap(
+        self, artifact_manager: ArtifactManager, session_id: str
+    ):
+        """长文件名连续上传同名，dedup 后 ID 仍 ≤ 64。"""
+        long_filename = ("b" * 70) + ".txt"
+        ids = []
+        for _ in range(3):
+            ok, _, info = await artifact_manager.create_from_upload(
+                session_id=session_id, filename=long_filename,
+                content="x", content_type="text/plain",
+            )
+            assert ok, info
+            assert len(info["id"]) <= 64
+            ids.append(info["id"])
+        # 三个 ID 必须互不相同
+        assert len(set(ids)) == 3
+
+    async def test_all_punctuation_filename(
+        self, artifact_manager: ArtifactManager, session_id: str
+    ):
+        """全标点文件名 → 全部变 _，仍合法（_ 是 \\w）不触发 'upload' fallback。"""
+        ok, _, info = await artifact_manager.create_from_upload(
+            session_id=session_id, filename="!!!@@@",
+            content="x", content_type="text/plain",
+        )
+        assert ok
+        import re
+        assert re.match(r"^[\w\-.]{1,64}$", info["id"])
+        assert info["id"] == "______"  # 6 个 _
+
+    async def test_empty_filename_sanitized(
+        self, artifact_manager: ArtifactManager, session_id: str
+    ):
+        """空文件名 → 走 fallback 'upload'。"""
+        ok, _, info = await artifact_manager.create_from_upload(
+            session_id=session_id, filename="",
+            content="x", content_type="text/plain",
+        )
+        assert ok
+        assert info["id"] == "upload"
+
+    async def test_chinese_filename_preserved(
+        self, artifact_manager: ArtifactManager, session_id: str
+    ):
+        """中文文件名：Python 3 默认 \\w 是 Unicode-aware，中文应被保留。
+
+        Regression guard：如果以后有人加了 re.ASCII 或改了正则，中文会
+        全部变成 _，让所有中文上传变成相同 ID 互相 dedup 冲突。
+        """
+        ok, _, info = await artifact_manager.create_from_upload(
+            session_id=session_id, filename="季度报告.txt",
+            content="x", content_type="text/plain",
+        )
+        assert ok
+        # 中文字符必须保留，不能变 _
+        assert "季度报告" in info["id"]
+        assert info["id"].endswith(".txt")
+        # 同时仍满足 ID pattern
+        import re
+        assert re.match(r"^[\w\-.]{1,64}$", info["id"])
+
+    async def test_chinese_filename_with_punctuation(
+        self, artifact_manager: ArtifactManager, session_id: str
+    ):
+        """中文 + 标点符号：中文保留，全角 / 半角标点变 _。"""
+        ok, _, info = await artifact_manager.create_from_upload(
+            session_id=session_id, filename="报告（V2）.txt",
+            content="x", content_type="text/plain",
+        )
+        assert ok
+        # 中文保留，全角括号变 _
+        assert "报告" in info["id"]
+        assert "v2" in info["id"]  # .lower() 把 V2 → v2
+        assert "（" not in info["id"]
+        assert "）" not in info["id"]
+
+
 class TestArtifactIdValidation:
     """Layer A: create_artifact 校验 id，避免脏字符流入 envelope attribute。"""
 

@@ -35,9 +35,30 @@ def _truncate_middle(text: str, max_len: int = 200) -> str:
 
 
 # Artifact ID 合法字符集：letter/digit/underscore + hyphen + dot，1-64 字符。
-# 与 create_from_upload 的 sanitize 规则一致；envelope renderer 依赖此前提
-# 把 id 当受控值放入 XML attribute。
+# envelope renderer 依赖此前提把 id 当受控值放入 XML attribute；create_artifact
+# 入口校验，create_from_upload / persist_tool_result 通过 sanitize 保证生成
+# 的 ID 满足该 pattern。
 _ARTIFACT_ID_PATTERN = re.compile(r"^[\w\-.]{1,64}$")
+
+
+def _normalize_filename_to_id(filename: str, max_base_len: int = 56) -> str:
+    """文件名 → 合法 artifact_id base。
+
+    保留扩展名（如果短），预留 8 字符给 dedup suffix（_NNNN.ext）让最终 ID
+    仍在 64 字符内。全 Unicode 文件名降级为 "upload"。
+    """
+    base = re.sub(r'[^\w\-.]', '_', filename).lower()
+    if not base:
+        base = "upload"
+    if len(base) <= max_base_len:
+        return base
+    name_part, dot, ext_part = base.rpartition('.')
+    # 短扩展名保留：keep + '.' + ext == max_base_len
+    if name_part and dot and 1 <= len(ext_part) <= 10:
+        keep = max_base_len - len(ext_part) - 1
+        if keep >= 1:
+            return name_part[:keep] + '.' + ext_part
+    return base[:max_base_len]
 
 
 # CJK Unicode ranges for normalization
@@ -586,9 +607,8 @@ class ArtifactManager:
         Create artifact from user-uploaded file.
         Uploads are committed immediately (not deferred to flush_all).
         """
-        # Generate artifact_id from filename (allow Unicode letters/digits)
-        base = re.sub(r'[^\w\-.]', '_', filename)
-        artifact_id = base.lower()
+        # Generate base artifact_id from filename，保证 ≤ 56 字符 + 合法字符集
+        artifact_id = _normalize_filename_to_id(filename)
 
         # Deduplicate: if ID already exists, append suffix
         repo = self._ensure_repository()
@@ -604,6 +624,14 @@ class ArtifactManager:
                 artifact_id = f"{name_part}_{suffix}.{ext_part}"
             else:
                 artifact_id = f"{original_id}_{suffix}"
+
+        # 最终守门员：理论上 normalize + dedup（≤4 位后缀）总 ≤ 64，但留个
+        # 防御性检查避免万一边界 bug 让脏 ID 进 DB
+        if not _ARTIFACT_ID_PATTERN.match(artifact_id):
+            return False, (
+                f"Generated invalid artifact_id from filename {filename!r}: "
+                f"{artifact_id!r} (must match {_ARTIFACT_ID_PATTERN.pattern})"
+            ), None
 
         # Title from filename (without extension)
         import os
