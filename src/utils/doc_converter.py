@@ -9,12 +9,20 @@ Supports:
 import asyncio
 import os
 import shutil
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Dict
 
 from utils.logger import get_logger
 
 logger = get_logger("ArtifactFlow")
+
+# PyMuPDF 在 import 时调 mupdf.reinit_singlethreaded()，底层是单线程模式 ——
+# 多线程并发调用会得到错误结果或直接段错误。用专属 single-worker executor
+# 把 PDF 解析序列化掉，event loop 仍然不卡（其他请求继续跑），但 PyMuPDF 调用
+# 永远在同一固定线程上执行，符合上游约束。详见：
+# https://pymupdf.readthedocs.io/en/latest/recipes-multiprocessing.html
+_PYMUPDF_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="pymupdf")
 
 # Extension -> MIME type mapping
 EXTENSION_MIME_MAP: Dict[str, str] = {
@@ -185,9 +193,10 @@ class DocConverter:
 
     async def _convert_pdf(self, file_bytes: bytes, filename: str) -> ConvertResult:
         """Convert .pdf to markdown via pymupdf."""
-        # pymupdf 是 CPU bound（多页 PDF 可能数百 ms ~ 数秒），丢线程池避免卡 event loop
-        content, page_count = await asyncio.to_thread(
-            _extract_pdf_text, file_bytes, self.MAX_PDF_PAGES
+        # PyMuPDF 必须串行（见模块顶部 _PYMUPDF_EXECUTOR 注释），同时不卡 event loop
+        loop = asyncio.get_running_loop()
+        content, page_count = await loop.run_in_executor(
+            _PYMUPDF_EXECUTOR, _extract_pdf_text, file_bytes, self.MAX_PDF_PAGES
         )
         word_count = len(content.split())
 
