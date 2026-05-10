@@ -88,19 +88,34 @@ def slice_lines_by_offset_limit(
         body_chars += line_len
         end_idx_by_cap = i + 1
 
-    # 边界：第一行就超 cap → 强制返回该行（避免空 body 卡死分页）。
-    # 注意 cap_was_binding 故意保持 False：cap 本意是约束但实际整行被吐回，
-    # 标 char_limit + has_more 都会让模型困惑（"截断了但又没更多内容"）。
-    # 接受 single-line 超限场景的 context 浪费换 API 简洁。
+    # ─── 边界：单行 > char_cap → 硬截断 + 末尾打标 ─────────────────
+    # mega-line（minified JSON / HTML 等）会让按行累加的 cap 检查从未
+    # 推进 end_idx_by_cap，普通逻辑会返回空 body 卡死分页。这里硬截断
+    # 到 cap 字符 + 加可见标记，让模型知道：
+    #   - 该行被截断（body 末尾的 marker）
+    #   - 截断后的 tail 无法通过 offset 续读（marker 文案明示）
+    # 接受 tail 数据丢失换 context 有界 + 0 新 API 面。
+    body_override: Optional[str] = None
     if end_idx_by_cap == start_idx and end_idx_by_limit > start_idx:
+        original_line = lines[start_idx]
+        head = original_line[:char_cap]
+        marker = (
+            f"\n[... line truncated at {char_cap} chars "
+            f"(original {len(original_line)}); "
+            f"remainder not retrievable via pagination ...]"
+        )
+        body_override = head + marker
         end_idx_by_cap = start_idx + 1
-        cap_was_binding = False
+        cap_was_binding = True  # 真的截断了，metadata 这次诚实
 
     end_idx = end_idx_by_cap  # 0-indexed exclusive
 
-    body = "".join(lines[start_idx:end_idx])
+    if body_override is not None:
+        body = body_override
+    else:
+        body = "".join(lines[start_idx:end_idx])
     shown_lines = (start_idx + 1, end_idx)  # 1-indexed inclusive
-    has_more = end_idx < total_lines
+    has_more = end_idx < total_lines  # 行级判断；within-line tail 不算 more
 
     if cap_was_binding:
         truncated_by = "char_limit"

@@ -31,6 +31,68 @@ def artifact_manager(artifact_repo: ArtifactRepository) -> ArtifactManager:
     return ArtifactManager(artifact_repo)
 
 
+class TestPersistToolResult:
+    """persist_tool_result 必须扛住任意 tool_name（长名 / 非法字符）。
+
+    回归测试：早期 ID 校验加上后，长 tool_name 会让 persist_tool_result
+    生成超 64 字符的 ID 然后 RuntimeError，引擎中间件 fail-open 把原始
+    超长内容塞回 context——这恰恰是该机制要防的。
+    """
+
+    async def test_long_tool_name(
+        self, artifact_manager: ArtifactManager, session_id: str
+    ):
+        artifact_manager.set_session(session_id)
+        long_name = "very_long_custom_http_tool_name_" * 3  # ~96 chars
+        aid, version = await artifact_manager.persist_tool_result(
+            session_id=session_id, tool_name=long_name, content="x" * 1000,
+        )
+        assert len(aid) <= 64
+        assert aid.startswith("tool_")
+        assert version == 1
+
+    async def test_tool_name_with_special_chars(
+        self, artifact_manager: ArtifactManager, session_id: str
+    ):
+        """MCP 工具名常含 `:`、`.`，自定义工具可能含 `/` 等。"""
+        artifact_manager.set_session(session_id)
+        names = [
+            "mcp:server:tool",
+            "mcp__github__create_issue",
+            "weird/tool name with spaces",
+            "tool.with.dots",
+        ]
+        for name in names:
+            aid, _ = await artifact_manager.persist_tool_result(
+                session_id=session_id, tool_name=name, content="x",
+            )
+            # ID 通过 create_artifact 校验意味着只含 [\w\-.]
+            import re
+            assert re.match(r"^[\w\-.]{1,64}$", aid), f"invalid id for {name!r}: {aid}"
+
+    async def test_short_tool_name_unchanged_in_id(
+        self, artifact_manager: ArtifactManager, session_id: str
+    ):
+        artifact_manager.set_session(session_id)
+        aid, _ = await artifact_manager.persist_tool_result(
+            session_id=session_id, tool_name="web_fetch", content="x",
+        )
+        assert aid.startswith("tool_web_fetch_")
+
+    async def test_metadata_preserves_original_tool_name(
+        self, artifact_manager: ArtifactManager, session_id: str
+    ):
+        """sanitize 后的名字进 ID，但原始名字必须留在 metadata 里供审计。"""
+        artifact_manager.set_session(session_id)
+        original = "mcp:server:tool"
+        aid, _ = await artifact_manager.persist_tool_result(
+            session_id=session_id, tool_name=original, content="x",
+        )
+        # 从 manager 缓存里读 metadata
+        memory = artifact_manager._cache[session_id][aid]
+        assert memory.metadata["tool_name"] == original
+
+
 class TestArtifactIdValidation:
     """Layer A: create_artifact 校验 id，避免脏字符流入 envelope attribute。"""
 

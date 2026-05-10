@@ -546,12 +546,19 @@ class ArtifactManager:
 
         由引擎中间件调用（见 core/engine.py）。content_type 固定 text/plain，
         source 固定 "tool"。artifact_id 自动生成，避免和用户/agent 命名冲突。
+
+        tool_name 可能含非法字符（MCP 工具的 `:`、`.`）或过长（自定义 HTTP
+        工具名 50+ 字符），都会让 create_artifact 的 ID 校验拒绝。这里先
+        sanitize + truncate 到安全范围，保证持久化路径不会因为名字格式问题
+        fail-open 到原文回填——那是这个机制最不该出现的失败模式。
         """
-        suffix = secrets.token_hex(6)  # 12 hex chars，session 内冲突概率忽略
-        artifact_id = f"tool_{tool_name}_{suffix}"
-        title = f"Output of {tool_name}"
+        suffix = secrets.token_hex(6)  # 12 hex chars
+        # 字符预算：64 - len("tool_") - len("_") - 12 = 46，留余量到 40
+        safe_name = re.sub(r"[^\w\-.]", "_", tool_name)[:40]
+        artifact_id = f"tool_{safe_name}_{suffix}"
+        title = f"Output of {tool_name}"  # title 不受 ID 规则约束
         metadata = {
-            "tool_name": tool_name,
+            "tool_name": tool_name,  # metadata 保留原始名字便于审计
             "persisted_at": datetime.now(timezone.utc).isoformat(),
         }
         success, message = await self.create_artifact(

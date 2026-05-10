@@ -176,28 +176,44 @@ class TestSliceLinesByOffsetLimit:
         assert trunc == "char_limit"
         assert more is True
 
-    def test_single_line_exceeds_cap_force_return(self):
-        """边界：第一行就比 cap 还长 → 强制返回该行 + has_more=true（后面还有内容）"""
-        content = "this_is_a_very_long_single_line_that_exceeds_the_cap\nshort\n"
+    def test_single_line_exceeds_cap_hard_truncate(self):
+        """单行超 cap → 硬截断到 cap + 末尾标记，后续行仍能 has_more=true。"""
+        long_line = "x" * 500
+        content = long_line + "\nshort\n"
         body, shown, trunc, more = slice_lines_by_offset_limit(
-            content, offset=1, limit=None, char_cap=10
+            content, offset=1, limit=None, char_cap=50
         )
-        assert body != ""
+        # body = 截断头 + 标记
+        assert body.startswith("x" * 50)
+        assert "line truncated at 50 chars" in body
+        assert "original 501" in body  # 含 \n 的原始长度
+        assert "remainder not retrievable" in body
         assert shown == (1, 1)
-        # 单行超限 fallback：metadata 自洽——没真截断就别说 char_limit
-        assert trunc == "none"
-        assert more is True  # 第 2 行还在，has_more 仍真实
+        assert trunc == "char_limit"
+        assert more is True  # 第 2 行还在
 
     def test_only_single_oversized_line(self):
-        """整个 artifact 只有一条超大行 → 返回全行 + truncated_by=none + has_more=false"""
-        content = "x" * 500
+        """只有一条超大行 → 截断 + 标记 + has_more=false（行级判断）。"""
+        content = "x" * 500  # 单行无尾换行
         body, shown, trunc, more = slice_lines_by_offset_limit(
             content, offset=1, limit=None, char_cap=10
         )
-        assert body == content  # 全文返回
+        assert body.startswith("x" * 10)
+        assert "line truncated at 10 chars" in body
+        assert "original 500" in body
         assert shown == (1, 1)
-        assert trunc == "none"  # 不撒谎说被 cap 截断
-        assert more is False    # 后面没东西了
+        assert trunc == "char_limit"
+        assert more is False  # 没有下一行可读
+
+    def test_truncation_marker_does_not_leak_artifact_chars(self):
+        """marker 是合成文本，不能让 body 长度暴涨太多——标记本身 ~80 chars。"""
+        content = "x" * 1000
+        body, _, _, _ = slice_lines_by_offset_limit(
+            content, offset=1, limit=None, char_cap=100
+        )
+        # head 100 + marker ~80 = ~180 总长（远小于原始 1000）
+        assert len(body) < 200
+        assert len(body) > 100  # 至少包含 head + 部分 marker
 
     def test_no_trailing_newline(self):
         """末尾无换行的内容也能正常处理。"""
