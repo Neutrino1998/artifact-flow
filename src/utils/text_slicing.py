@@ -88,10 +88,13 @@ def slice_lines_by_offset_limit(
         body_chars += line_len
         end_idx_by_cap = i + 1
 
-    # 边界：第一行就超 cap → 强制返回该行（避免空 body 卡死分页），但标记 char_limit
+    # 边界：第一行就超 cap → 强制返回该行（避免空 body 卡死分页）。
+    # 注意 cap_was_binding 故意保持 False：cap 本意是约束但实际整行被吐回，
+    # 标 char_limit + has_more 都会让模型困惑（"截断了但又没更多内容"）。
+    # 接受 single-line 超限场景的 context 浪费换 API 简洁。
     if end_idx_by_cap == start_idx and end_idx_by_limit > start_idx:
         end_idx_by_cap = start_idx + 1
-        cap_was_binding = True
+        cap_was_binding = False
 
     end_idx = end_idx_by_cap  # 0-indexed exclusive
 

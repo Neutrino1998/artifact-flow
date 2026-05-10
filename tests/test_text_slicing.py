@@ -177,16 +177,27 @@ class TestSliceLinesByOffsetLimit:
         assert more is True
 
     def test_single_line_exceeds_cap_force_return(self):
-        """边界：第一行就比 cap 还长 → 强制返回该行（避免空 body 卡死）"""
+        """边界：第一行就比 cap 还长 → 强制返回该行 + has_more=true（后面还有内容）"""
         content = "this_is_a_very_long_single_line_that_exceeds_the_cap\nshort\n"
         body, shown, trunc, more = slice_lines_by_offset_limit(
             content, offset=1, limit=None, char_cap=10
         )
-        # 必须返回非空 body，否则模型无法分页前进
         assert body != ""
         assert shown == (1, 1)
-        assert trunc == "char_limit"
-        assert more is True
+        # 单行超限 fallback：metadata 自洽——没真截断就别说 char_limit
+        assert trunc == "none"
+        assert more is True  # 第 2 行还在，has_more 仍真实
+
+    def test_only_single_oversized_line(self):
+        """整个 artifact 只有一条超大行 → 返回全行 + truncated_by=none + has_more=false"""
+        content = "x" * 500
+        body, shown, trunc, more = slice_lines_by_offset_limit(
+            content, offset=1, limit=None, char_cap=10
+        )
+        assert body == content  # 全文返回
+        assert shown == (1, 1)
+        assert trunc == "none"  # 不撒谎说被 cap 截断
+        assert more is False    # 后面没东西了
 
     def test_no_trailing_newline(self):
         """末尾无换行的内容也能正常处理。"""

@@ -34,6 +34,12 @@ def _truncate_middle(text: str, max_len: int = 200) -> str:
     return text[:half] + "\n...\n" + text[-half:]
 
 
+# Artifact ID 合法字符集：letter/digit/underscore + hyphen + dot，1-64 字符。
+# 与 create_from_upload 的 sanitize 规则一致；envelope renderer 依赖此前提
+# 把 id 当受控值放入 XML attribute。
+_ARTIFACT_ID_PATTERN = re.compile(r"^[\w\-.]{1,64}$")
+
+
 # CJK Unicode ranges for normalization
 _CJK_RE = (
     r'[\u2e80-\u2fdf'   # CJK Radicals
@@ -479,6 +485,14 @@ class ArtifactManager:
         """
         创建新的 Artifact（只写内存，flush_all 时持久化）
         """
+        # ID 校验：限制为 word/hyphen/dot，1-64 字符。这是 envelope renderer
+        # 把 id 放入 attribute 的安全前提，也和 create_from_upload 的 sanitize
+        # 规则保持一致。
+        if not _ARTIFACT_ID_PATTERN.match(artifact_id):
+            return False, (
+                f"Invalid artifact_id '{artifact_id}': must be 1-64 chars of "
+                f"letters/digits/underscore/hyphen/dot only."
+            )
         try:
             # 确保 session 存在
             await self.ensure_session_exists(session_id)
@@ -1239,6 +1253,7 @@ class ReadArtifactTool(BaseTool):
 
         offset = params.get("offset") or 1
         limit = params.get("limit")  # None = 读到 char_cap
+        explicit_version = params.get("version")  # None = latest
 
         body, shown_lines, truncated_by, has_more = slice_lines_by_offset_limit(
             content,
@@ -1250,10 +1265,14 @@ class ReadArtifactTool(BaseTool):
 
         hint = None
         if has_more and shown_lines is not None:
+            # 透传调用者原始的 limit / version：避免续读悄悄换页大小或跳到 latest 版本
             next_offset = shown_lines[1] + 1
-            hint = (
-                f"To continue: read_artifact(id='{artifact_id}', offset={next_offset})"
-            )
+            cont_args = [f"id='{artifact_id}'", f"offset={next_offset}"]
+            if limit is not None:
+                cont_args.append(f"limit={limit}")
+            if explicit_version is not None:
+                cont_args.append(f"version={explicit_version}")
+            hint = f"To continue: read_artifact({', '.join(cont_args)})"
 
         slice = ArtifactSlice(
             id=artifact_id,

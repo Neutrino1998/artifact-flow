@@ -165,3 +165,60 @@ class TestReadArtifactPagination:
         assert content in result.data
         assert "&lt;" not in result.data
         assert "&amp;" not in result.data
+
+    @staticmethod
+    def _extract_hint(rendered: str) -> str:
+        """从 envelope 输出里抽取 hint 字符串（避免和 envelope 自身的 attribute 误匹配）。"""
+        import re
+        m = re.search(r'hint="([^"]+)"', rendered)
+        assert m, f"no hint attribute in: {rendered}"
+        return m.group(1)
+
+    async def test_continuation_hint_preserves_limit(
+        self, read_tool: ReadArtifactTool, artifact_manager: ArtifactManager, session_id: str
+    ):
+        """has_more 续读 hint 必须保留 caller 的 limit，避免下次 silently 切到读到 cap 模式。"""
+        content = "".join(f"line_{i}\n" for i in range(1, 21))
+        aid = await _create_artifact(artifact_manager, session_id, content)
+
+        result = await read_tool(id=aid, offset=1, limit=5)
+        assert result.success
+        assert 'has_more="true"' in result.data
+        hint = self._extract_hint(result.data)
+        assert "offset=6" in hint
+        assert "limit=5" in hint  # 关键：limit 被透传
+
+    async def test_continuation_hint_preserves_version(
+        self, read_tool: ReadArtifactTool, artifact_manager: ArtifactManager, session_id: str,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        """has_more 续读 hint 必须保留 caller 的 version，避免下次跳到 latest。"""
+        # 触发 has_more：cap 调小 + 多行内容
+        monkeypatch.setattr(config, "READ_ARTIFACT_MAX_CHARS", 30)
+        content = "".join(f"line_{i:02d}\n" for i in range(1, 11))  # 80 chars
+        aid = await _create_artifact(artifact_manager, session_id, content)
+        # 显式 version 读取走 DB 路径，需要先 flush
+        await artifact_manager.flush_all(session_id)
+
+        result = await read_tool(id=aid, version=1)
+        assert result.success
+        assert 'has_more="true"' in result.data
+        hint = self._extract_hint(result.data)
+        assert "version=1" in hint  # version 被透传
+
+    async def test_continuation_hint_default_no_extra_args(
+        self, read_tool: ReadArtifactTool, artifact_manager: ArtifactManager, session_id: str,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        """无 limit / 无 version 时 hint 只带 id + offset，不引入冗余参数。"""
+        monkeypatch.setattr(config, "READ_ARTIFACT_MAX_CHARS", 30)
+        content = "".join(f"line_{i:02d}\n" for i in range(1, 11))
+        aid = await _create_artifact(artifact_manager, session_id, content)
+
+        result = await read_tool(id=aid)
+        assert result.success
+        assert 'has_more="true"' in result.data
+        hint = self._extract_hint(result.data)
+        assert "offset=" in hint
+        assert "limit=" not in hint
+        assert "version=" not in hint

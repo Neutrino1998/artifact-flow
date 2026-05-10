@@ -31,6 +31,47 @@ def artifact_manager(artifact_repo: ArtifactRepository) -> ArtifactManager:
     return ArtifactManager(artifact_repo)
 
 
+class TestArtifactIdValidation:
+    """Layer A: create_artifact 校验 id，避免脏字符流入 envelope attribute。"""
+
+    @pytest.mark.parametrize("bad_id", [
+        'evil"id',          # 引号会破 envelope attribute 边界
+        "with space",       # 空格
+        "with<gt",          # 角括号
+        "with&amp",         # & 字符
+        "",                 # 空串
+        "x" * 65,           # 超长（上限 64）
+    ])
+    async def test_invalid_id_rejected(
+        self, artifact_manager: ArtifactManager, session_id: str, bad_id: str,
+    ):
+        artifact_manager.set_session(session_id)
+        ok, msg = await artifact_manager.create_artifact(
+            session_id=session_id, artifact_id=bad_id,
+            content_type="text/plain", title="t", content="x",
+        )
+        assert not ok, f"expected reject for {bad_id!r}"
+        assert "Invalid artifact_id" in msg
+
+    @pytest.mark.parametrize("good_id", [
+        "task_plan",
+        "doc-1",
+        "report.v2",
+        "tool_web_fetch_a3b9c1d2e4f5",
+        "x",  # 单字符
+        "x" * 64,  # 上限
+    ])
+    async def test_valid_id_accepted(
+        self, artifact_manager: ArtifactManager, session_id: str, good_id: str,
+    ):
+        artifact_manager.set_session(session_id)
+        ok, msg = await artifact_manager.create_artifact(
+            session_id=session_id, artifact_id=good_id,
+            content_type="text/plain", title="t", content="x",
+        )
+        assert ok, msg
+
+
 class TestWriteBackFlush:
     """Verify that flush_all collapses in-memory edits into a single DB version."""
 

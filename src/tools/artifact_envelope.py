@@ -20,6 +20,18 @@ from typing import Optional, Tuple
 _VALID_TRUNCATED_BY = {"none", "preview", "char_limit", "line_limit"}
 
 
+def _attr(value) -> str:
+    """
+    Defensive attribute-value escape: 仅替换 `"` → `&quot;` 防止破坏 XML 结构。
+
+    上游已经做了：受控值（数字/枚举/sanitized id/ISO timestamp）天然不含 `"`。
+    这层是 belt-and-suspenders——hint / id 等若意外含引号也不会让 envelope
+    边界错位。`<`、`&` 不在 attribute value 里特殊（attribute value 由
+    `"..."` 或 `'...'` 包裹，里面只有匹配的引号才是边界字符）。
+    """
+    return str(value).replace('"', "&quot;")
+
+
 @dataclass
 class ArtifactSlice:
     """渲染参数。所有可空字段省略时不出现在 attribute 里。"""
@@ -48,12 +60,18 @@ class ArtifactSlice:
 
 
 def render_artifact_slice(slice: ArtifactSlice) -> str:
-    """渲染 ArtifactSlice 为 XML 字符串（给模型看，不参与机器解析）。"""
+    """渲染 ArtifactSlice 为 XML 字符串（给模型看，不参与机器解析）。
+
+    Body 和 <title> 原文输出（不转义）—— update_artifact 用 read 出的内容
+    作 old_string 匹配，escape 会破坏匹配。
+    Attribute 值过 _attr() 防御性 escape `"`，即使上游 ID/hint 校验漏掉
+    脏字符也不会破 envelope 边界。
+    """
     attrs = [
-        f'id="{slice.id}"',
+        f'id="{_attr(slice.id)}"',
         f'version="{slice.version}"',
-        f'type="{slice.content_type}"',
-        f'source="{slice.source}"',
+        f'type="{_attr(slice.content_type)}"',
+        f'source="{_attr(slice.source)}"',
         f'total_chars="{slice.total_chars}"',
         f'shown_chars="{slice.shown_chars}"',
     ]
@@ -65,9 +83,9 @@ def render_artifact_slice(slice: ArtifactSlice) -> str:
     attrs.append(f'truncated_by="{slice.truncated_by}"')
     attrs.append(f'has_more="{"true" if slice.has_more else "false"}"')
     if slice.updated_at is not None:
-        attrs.append(f'updated_at="{slice.updated_at}"')
+        attrs.append(f'updated_at="{_attr(slice.updated_at)}"')
     if slice.hint is not None:
-        attrs.append(f'hint="{slice.hint}"')
+        attrs.append(f'hint="{_attr(slice.hint)}"')
 
     return (
         f"<artifact_slice {' '.join(attrs)}>\n"

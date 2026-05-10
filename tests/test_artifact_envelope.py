@@ -155,6 +155,31 @@ class TestRenderArtifactSlice:
         out = render_artifact_slice(slice)
         assert 'shown_lines="10-14"' in out
 
+    def test_attribute_value_escapes_quote(self):
+        """Layer B 防御：attribute 值中的 `"` 必须转义，避免破 envelope 边界。
+
+        ID 校验是上游屏障（Layer A），envelope 这层是 defense in depth——
+        即使有 bug 让脏 id 漏到这里，也不能让结构错位。
+        """
+        slice = ArtifactSlice(
+            id='evil"id',
+            version=1,
+            content_type='text/plain',
+            source='agent',
+            title="t", body="b",
+            total_chars=1, shown_chars=1,
+            hint='do read_artifact(id="weird") then continue',
+            updated_at='2024-"01-01',
+        )
+        out = render_artifact_slice(slice)
+        # 原始引号不应出现在 attribute value 内（会破边界）
+        assert 'id="evil"id"' not in out
+        assert 'id="evil&quot;id"' in out
+        # hint 同理
+        assert 'hint="do read_artifact(id=&quot;weird&quot;) then continue"' in out
+        # updated_at 同理
+        assert 'updated_at="2024-&quot;01-01"' in out
+
     def test_attribute_order_stable(self):
         """attribute 顺序固定（便于 prompt cache 稳定）。"""
         slice = ArtifactSlice(
