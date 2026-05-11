@@ -71,7 +71,7 @@ class APIClient:
     ) -> SendMessageResponse:
         """发送消息"""
         async with httpx.AsyncClient(base_url=self.base_url, timeout=self.timeout) as client:
-            payload = {"content": content}
+            payload = {"user_input": content}
             if conversation_id:
                 payload["conversation_id"] = conversation_id
             if parent_message_id:
@@ -113,7 +113,7 @@ class APIClient:
                         )
 
                         # 终结事件
-                        if event_type in ("complete", "error"):
+                        if event_type in ("complete", "error", "cancelled"):
                             break
                     except json.JSONDecodeError:
                         continue
@@ -147,13 +147,11 @@ class APIClient:
             resp.raise_for_status()
             return resp.json()
 
-    async def get_conversation(self, conversation_id: str, load_messages: bool = True) -> dict:
+    async def get_conversation(self, conversation_id: str) -> dict:
         """获取对话详情"""
         async with httpx.AsyncClient(base_url=self.base_url, timeout=10) as client:
-            params = {"load_messages": load_messages}
             resp = await client.get(
                 f"/api/v1/chat/{conversation_id}",
-                params=params,
                 headers=self._auth_headers(),
             )
             resp.raise_for_status()

@@ -321,6 +321,46 @@ class StreamDisplay:
             self._finalize_current_agent()
             self.current_tool = None
 
+        elif event.type == "permission_result":
+            # 权限确认结果 —— 一行 dim 提示
+            tool = event.data.get("tool", "?")
+            approved = event.data.get("approved", False)
+            reason = event.data.get("reason")
+            if approved:
+                console.print(f"[dim]· permission approved for {tool}[/dim]")
+            else:
+                label = f"denied ({reason})" if reason else "denied"
+                console.print(f"[yellow]· permission {label} for {tool}[/yellow]")
+
+        elif event.type == "compaction_start":
+            # 压缩开始 —— 一行 dim 提示
+            self._finalize_current_agent()
+            agent = event.agent or "agent"
+            inp = event.data.get("last_input_tokens", 0)
+            outp = event.data.get("last_output_tokens", 0)
+            console.print(f"[dim]· compacting {agent} history (in={inp}, out={outp})...[/dim]")
+
+        elif event.type == "compaction_summary":
+            # 压缩完成 —— 一行 dim/red 提示
+            agent = event.agent or "agent"
+            success = event.data.get("success", False)
+            if success:
+                usage = event.data.get("token_usage", {}) or {}
+                dur = event.data.get("duration_ms", 0)
+                in_tok = usage.get("input_tokens", 0)
+                out_tok = usage.get("output_tokens", 0)
+                console.print(
+                    f"[dim]· compaction done for {agent} ({dur}ms, in={in_tok}, out={out_tok})[/dim]"
+                )
+            else:
+                err = event.data.get("error", "unknown")
+                console.print(f"[red]· compaction failed for {agent}: {err}[/red]")
+
+        elif event.type == "cancelled":
+            # 取消终态 —— 由 main.py 的 _stream_events 打印 cancelled 信息
+            self._finalize_current_agent()
+            self.current_tool = None
+
         # 更新显示
         if self.live:
             self.live.update(self._render())
@@ -377,18 +417,24 @@ def print_conversation_detail(conv: dict):
         border_style="cyan",
     ))
 
-    # 打印消息
+    # 打印消息（每个 Message 行 = user_input + response 一对）
     messages = conv.get("messages", [])
     if messages:
         console.print(f"\n[cyan]Messages ({len(messages)}):[/cyan]")
         for msg in messages:
-            role = msg.get("role", "unknown")
-            content = msg.get("content", "")
-            if len(content) > 200:
-                content = content[:197] + "..."
+            user_input = msg.get("user_input", "") or ""
+            response = msg.get("response") or ""
 
-            role_style = "green" if role == "user" else "blue"
-            console.print(f"  [{role_style}]{role}:[/{role_style}] {content}")
+            if len(user_input) > 200:
+                user_input = user_input[:197] + "..."
+            if len(response) > 200:
+                response = response[:197] + "..."
+
+            console.print(f"  [green]user:[/green] {user_input}")
+            if response:
+                console.print(f"  [blue]assistant:[/blue] {response}")
+            else:
+                console.print("  [dim]assistant: (no response)[/dim]")
 
 
 def print_artifacts_table(artifacts: list):

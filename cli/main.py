@@ -165,6 +165,14 @@ async def _stream_events(
             if "message_id" in event.data:
                 result["message_id"] = event.data["message_id"]
 
+        elif event.type == "cancelled":
+            result["success"] = False
+            if "message_id" in event.data:
+                result["message_id"] = event.data["message_id"]
+            display.stop()
+            ui.print_info("Execution cancelled")
+            display.start()
+
         elif event.type == "error":
             result["success"] = False
             ui.print_error(event.data.get("error", "Unknown error"))
@@ -309,7 +317,7 @@ def use_conversation(
 
     try:
         # 验证对话存在
-        conv = asyncio.run(api.get_conversation(conversation_id, load_messages=False))
+        conv = asyncio.run(api.get_conversation(conversation_id))
 
         # 更新状态
         state.conversation_id = conv["id"]
