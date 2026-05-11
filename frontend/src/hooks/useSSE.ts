@@ -72,29 +72,35 @@ export function useSSE() {
           api.getConversation(conversationId, { force: true }),
           api.listConversations(20, 0),
         ]);
-        // Has the user navigated to a different conversation during the
-        // above await? If so, conversationStore.current.id differs from our
-        // target. We use this same predicate to gate per-conversation
-        // mutations (current detail, artifact list, artifact detail) below
-        // so an old refreshAfterComplete callback can't reclaim a session
-        // the user has already moved on from.
-        // !viewing is treated as "still us" — covers the new-conversation
-        // flow where the user lands on the freshly created conv mid-stream
-        // but the conversation-store cursor hasn't been set yet.
+        // For conversation-detail refresh we still use the viewing check.
+        // It can be stale during the switchConversation handoff (current?.id
+        // lags behind resetArtifacts), but the worst case is a transient
+        // setCurrent of the old detail that switchConversation's own
+        // setCurrent immediately overwrites on resolution — visible only as
+        // wasted state churn, not as leaked data.
         const viewing = useConversationStore.getState().current?.id;
-        const stillOnThisConv = !viewing || viewing === conversationId;
-
-        if (stillOnThisConv) {
+        if (!viewing || viewing === conversationId) {
           setCurrent(detail);
         }
         setConversations(list.conversations, list.total, list.has_more);
         clearPendingUpdates();
 
-        // Refresh artifact list only if the user is still on this conversation.
-        // The helper's claim-before-await covers in-flight reset; this guard
-        // covers the case where refreshAfterComplete itself is called late
-        // — after the user has already switched away.
-        if (stillOnThisConv) {
+        // Artifact refreshes use a DIFFERENT signal: artifactStore.sessionId.
+        // useChat.switchConversation calls resetArtifacts() *before* awaiting
+        // getConversation, so the artifact-store sessionId becomes null
+        // immediately on switch, while conversationStore.current?.id lags
+        // until getConversation resolves. Checking artifactSession lets us
+        // detect "user has navigated away" the instant it happens.
+        //
+        // Skip if sessionId differs from our target — covers both:
+        //   (a) Switched / reset: sessionId is null or a newer conv's id
+        //   (b) New conversation with no artifact tools fired: sessionId is
+        //       null, so skipping is safe (the list is empty anyway; the
+        //       panel-mount loadArtifacts will populate it on demand).
+        const artifactSession = useArtifactStore.getState().sessionId;
+        const ownsArtifactSession = artifactSession === conversationId;
+
+        if (ownsArtifactSession) {
           refreshArtifactList(
             conversationId,
             setArtifacts,
@@ -102,11 +108,10 @@ export function useSSE() {
             () => useArtifactStore.getState().sessionId,
           );
         }
-        // Refresh detail only if user is still viewing one AND we're still
-        // on the originating conversation (curArtifact from a different conv
-        // would otherwise produce a cross-session GET).
+        // Detail refetch also gated — a curArtifact from a different conv
+        // would produce a cross-conversation GET.
         const curArtifact = useArtifactStore.getState().current;
-        if (curArtifact && stillOnThisConv) {
+        if (curArtifact && ownsArtifactSession) {
           api.getArtifact(conversationId, curArtifact.id).then((artDetail) => {
             setArtifactCurrent(artDetail);
             setArtifactVersions(artDetail.versions);
