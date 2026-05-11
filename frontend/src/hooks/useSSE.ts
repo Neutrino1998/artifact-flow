@@ -10,6 +10,8 @@ import { StreamEventType } from '@/types/events';
 import type { SSEEvent, LLMCompleteData } from '@/types/events';
 import * as api from '@/lib/api';
 import { refreshArtifactList } from '@/lib/refreshArtifactList';
+import { autoOpenArtifact } from '@/lib/artifactAutoOpen';
+import { bumpArtifactFetchGen } from '@/lib/artifactFetchGen';
 import { getNavGen } from '@/lib/navGen';
 
 const ARTIFACT_TOOLS = new Set([
@@ -59,6 +61,7 @@ export function useSSE() {
   const setArtifacts = useArtifactStore((s) => s.setArtifacts);
   const setArtifactCurrent = useArtifactStore((s) => s.setCurrent);
   const setArtifactCurrentAuto = useArtifactStore((s) => s.setCurrentAuto);
+  const refreshArtifactCurrent = useArtifactStore((s) => s.refreshCurrent);
   const setArtifactVersions = useArtifactStore((s) => s.setVersions);
   const setSelectedVersion = useArtifactStore((s) => s.setSelectedVersion);
   const addPendingUpdate = useArtifactStore((s) => s.addPendingUpdate);
@@ -115,7 +118,11 @@ export function useSSE() {
           if (autoSelected) {
             // Stream finished and the panel is on an artifact the agent auto-
             // opened — revert to list so the user sees the overview. The list
-            // refresh above already loaded the latest artifacts.
+            // refresh above already loaded the latest artifacts. Bump the
+            // artifact-fetch counter BEFORE clearing so any auto-open promise
+            // still in flight from this stream can't reopen the panel after
+            // we've reverted (its captured gen is now stale).
+            bumpArtifactFetchGen();
             setArtifactCurrent(null);
           } else {
             // User actively picked this artifact — refresh content but keep
@@ -297,20 +304,17 @@ export function useSSE() {
               const sessionId = conversationId;
               setArtifactSessionId(sessionId);
               setSelectedVersion(null);
-              api.getArtifact(sessionId, artifactId).then((detail) => {
-                const { current: cur, autoSelected } = useArtifactStore.getState();
-                // If the user actively picked something (autoSelected=false),
-                // don't yank them away — even to a different freshly-updated
-                // artifact. An earlier auto-set current IS allowed to be
-                // replaced so the panel follows whichever artifact the agent
-                // most recently touched.
-                if (cur && !autoSelected && cur.id !== detail.id) return;
-                // Out-of-order: same artifact, older version than already shown.
-                if (cur && cur.id === detail.id && cur.current_version > detail.current_version) return;
-                setArtifactCurrentAuto(detail);
-                setArtifactVersions(detail.versions);
-                setSelectedVersion(null);
-              }).catch(() => {});
+              // All the race/ownership logic (per-fetch gen, same-id refresh,
+              // cross-id ownership) lives in `autoOpenArtifact` — see that
+              // helper for the full decision matrix and its unit tests.
+              autoOpenArtifact(sessionId, artifactId, {
+                getCurrent: () => useArtifactStore.getState().current,
+                getAutoSelected: () => useArtifactStore.getState().autoSelected,
+                setCurrentAuto: setArtifactCurrentAuto,
+                refreshCurrent: refreshArtifactCurrent,
+                setVersions: setArtifactVersions,
+                setSelectedVersion: setSelectedVersion,
+              });
             }
           }
 
@@ -463,7 +467,8 @@ export function useSSE() {
       pushSegment, updateCurrentSegment, addToolCallToSegment,
       updateToolCallInSegment, snapshotSegments, setPermissionRequest,
       setError, endStream, refreshAfterComplete, setArtifactPanelVisible,
-      addPendingUpdate, setArtifactSessionId, setArtifactCurrent, setArtifacts,
+      addPendingUpdate, setArtifactSessionId, setArtifactCurrent,
+      setArtifactCurrentAuto, refreshArtifactCurrent, setArtifacts,
       setArtifactVersions, setSelectedVersion,
       pushNonAgentBlock, updateNonAgentBlock, setExecutionMetrics, setCancelled,
     ]

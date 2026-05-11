@@ -78,6 +78,51 @@ describe('artifactStore.autoSelected provenance flag', () => {
   });
 });
 
+describe('artifactStore.refreshCurrent', () => {
+  beforeEach(() => useArtifactStore.getState().reset());
+
+  test('same-id refresh: updates current without touching autoSelected', () => {
+    const v1 = { ...detail('text/markdown'), current_version: 1 } as ArtifactDetail;
+    const v2 = { ...detail('text/markdown'), current_version: 2 } as ArtifactDetail;
+    useArtifactStore.getState().setCurrent(v1);  // user pick → autoSelected=false
+    expect(useArtifactStore.getState().autoSelected).toBe(false);
+
+    useArtifactStore.getState().refreshCurrent(v2);
+
+    expect(useArtifactStore.getState().current?.current_version).toBe(2);
+    expect(useArtifactStore.getState().autoSelected).toBe(false);  // preserved
+  });
+
+  test('same-id refresh: does not reset viewMode', () => {
+    const v1 = { ...detail('text/markdown'), current_version: 1 } as ArtifactDetail;
+    const v2 = { ...detail('text/markdown'), current_version: 2 } as ArtifactDetail;
+    useArtifactStore.getState().setCurrent(v1);
+    useArtifactStore.getState().setViewMode('diff');  // user-chosen mode
+
+    useArtifactStore.getState().refreshCurrent(v2);
+
+    expect(useArtifactStore.getState().viewMode).toBe('diff');  // preserved
+  });
+
+  test('cross-id refresh: no-op (guard against accidental misuse)', () => {
+    const a = { ...detail('text/markdown'), id: 'A', current_version: 1 } as ArtifactDetail;
+    const b = { ...detail('text/markdown'), id: 'B', current_version: 1 } as ArtifactDetail;
+    useArtifactStore.getState().setCurrent(a);
+
+    useArtifactStore.getState().refreshCurrent(b);
+
+    expect(useArtifactStore.getState().current?.id).toBe('A');  // unchanged
+  });
+
+  test('refresh when current is null: no-op', () => {
+    const a = { ...detail('text/markdown'), id: 'A' } as ArtifactDetail;
+
+    useArtifactStore.getState().refreshCurrent(a);
+
+    expect(useArtifactStore.getState().current).toBe(null);
+  });
+});
+
 describe('artifactStore.addPendingUpdate', () => {
   beforeEach(() => useArtifactStore.getState().reset());
 

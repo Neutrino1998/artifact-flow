@@ -48,6 +48,7 @@ interface ArtifactState {
   setArtifactsLoading: (loading: boolean) => void;
   setCurrent: (artifact: ArtifactDetail | null) => void;
   setCurrentAuto: (artifact: ArtifactDetail) => void;
+  refreshCurrent: (artifact: ArtifactDetail) => void;
   setCurrentLoading: (loading: boolean) => void;
   setVersions: (versions: VersionSummary[]) => void;
   setSelectedVersion: (version: VersionDetail | null) => void;
@@ -101,6 +102,16 @@ export const useArtifactStore = create<ArtifactState>((set) => ({
       autoSelected: true,
       viewMode: defaultViewMode(artifact.content_type),
     }),
+  // Same-artifact content refresh: write the new ArtifactDetail through
+  // WITHOUT touching `autoSelected` or `viewMode`. Used when a stream
+  // updates the artifact the user currently has open — we must not flip
+  // ownership back to "auto-selected" (which would yank the user to the
+  // list at stream end) and must not reset their chosen view mode (diff,
+  // source, etc). Guarded against accidental cross-id misuse.
+  refreshCurrent: (artifact) =>
+    set((s) =>
+      s.current && s.current.id === artifact.id ? { current: artifact } : s
+    ),
   setCurrentLoading: (loading) => set({ currentLoading: loading }),
   setVersions: (versions) => set({ versions }),
   setSelectedVersion: (version) => set({ selectedVersion: version }),
