@@ -61,19 +61,20 @@ export function useUpload() {
           if (currentSessionId) {
             result = await uploadFile(currentSessionId, file);
           } else {
-            // First file with no session — auto-create. Skip the
-            // setCurrent/sidebar writes if the user navigated away during
-            // the upload; the conv still exists server-side and will
-            // appear in the sidebar on next list refresh.
+            // First file with no session — auto-create. The server has
+            // created the conv regardless of navigation; the sidebar
+            // refresh must fire so the user can find it again. Only
+            // setCurrent (which redirects the active UI to the new
+            // conv) is gated by nav-gen.
             result = await uploadFileNewSession(file);
             currentSessionId = result.session_id;
             const [detail, list] = await Promise.all([
               getConversation(result.session_id),
               listConversations(20, 0),
             ]);
+            setConversations(list.conversations, list.total, list.has_more);
             if (myNavGen === getNavGen()) {
               setCurrent(detail);
-              setConversations(list.conversations, list.total, list.has_more);
             }
           }
 
@@ -82,6 +83,13 @@ export function useUpload() {
 
         if (myNavGen !== getNavGen()) return;
         await loadArtifacts();
+        // Second nav-gen check: loadArtifacts is itself an await
+        // (refreshArtifactList → api.listArtifacts). Even though its
+        // internal stamp-and-check drops the list write on a stale
+        // session, the post-await panel-open + selectArtifact below
+        // are not internally guarded and would pop the abandoned
+        // conv's artifact UI into the new context.
+        if (myNavGen !== getNavGen()) return;
         setArtifactPanelVisible(true);
         if (lastResultId) selectArtifact(lastResultId);
       } catch (err) {

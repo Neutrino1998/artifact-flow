@@ -61,6 +61,20 @@ export function useChat() {
 
         const isNew = !current?.id;
         const res = await api.sendMessage(body);
+
+        // Sidebar refresh fires BEFORE the nav-gen check on purpose.
+        // The server has created the conversation regardless of whether
+        // the user navigated away during the request; if we gate this
+        // behind the nav-gen guard, the abandoned-but-running conv
+        // becomes unreachable from the sidebar until a manual refresh.
+        // The write itself is cross-conv safe (only touches the global
+        // sidebar list, no per-conv UI state).
+        if (isNew) {
+          api.listConversations(20, 0).then((data) => {
+            setConversations(data.conversations, data.total, data.has_more);
+          });
+        }
+
         if (myNavGen !== getNavGen()) return;
 
         setPendingUserMessage(content);
@@ -72,16 +86,6 @@ export function useChat() {
         // connect() now also flips streamStore into streaming state, so
         // sendMessage no longer needs to call startStream itself.
         connect(res.stream_url, res.conversation_id, res.message_id);
-
-        // Refresh sidebar immediately so the new conversation appears.
-        // Cross-conversation harmless: the abandoned-but-running conv
-        // legitimately belongs in the sidebar even if the user is now
-        // viewing something else.
-        if (isNew) {
-          api.listConversations(20, 0).then((data) => {
-            setConversations(data.conversations, data.total, data.has_more);
-          });
-        }
       } catch (err) {
         if (myNavGen !== getNavGen()) return;
         setError((err as Error).message);
