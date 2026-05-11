@@ -788,12 +788,29 @@ class ArtifactManager:
                 "updated_at": memory.updated_at.isoformat()
             }
         else:
+            # 显式 version 读取：优先匹配 in-memory current_version。
+            # 否则 read 一个还没 flush 的 artifact（如刚 web_fetch 持久化的）
+            # 用它 envelope 里看到的 version=1 会 404，模型困惑。
+            memory = await self.get_artifact(session_id, artifact_id)
+            if memory and memory.current_version == version:
+                return {
+                    "id": memory.id,
+                    "content_type": memory.content_type,
+                    "title": memory.title,
+                    "content": memory.content,
+                    "version": memory.current_version,
+                    "source": memory.source,
+                    "original_filename": (memory.metadata or {}).get("original_filename"),
+                    "created_at": memory.created_at.isoformat(),
+                    "updated_at": memory.updated_at.isoformat()
+                }
+
+            # 不是当前版本 → 走 DB 取历史版本快照
             repo = self._ensure_repository()
             content = await repo.get_version_content(session_id, artifact_id, version)
             if content is None:
                 return None
 
-            memory = await self.get_artifact(session_id, artifact_id)
             return {
                 "id": artifact_id,
                 "content_type": memory.content_type if memory else "unknown",

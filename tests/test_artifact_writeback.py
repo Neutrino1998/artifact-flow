@@ -31,6 +31,64 @@ def artifact_manager(artifact_repo: ArtifactRepository) -> ArtifactManager:
     return ArtifactManager(artifact_repo)
 
 
+class TestReadArtifactInMemoryVersion:
+    """显式 version=N 读取需要识别 in-memory 当前版本，否则刚持久化但未 flush
+    的 artifact 用 envelope 里看到的 version=1 调用会 404。
+    """
+
+    async def test_explicit_version_matches_in_memory(
+        self, artifact_manager: ArtifactManager, session_id: str
+    ):
+        """刚创建未 flush 的 artifact，version=1 读取应命中内存。"""
+        artifact_manager.set_session(session_id)
+        ok, _ = await artifact_manager.create_artifact(
+            session_id=session_id, artifact_id="doc1",
+            content_type="text/plain", title="T", content="hello",
+        )
+        assert ok
+
+        # 显式 version=1（envelope 里看到的版本号）应返回内存内容
+        result = await artifact_manager.read_artifact(
+            session_id=session_id, artifact_id="doc1", version=1
+        )
+        assert result is not None
+        assert result["content"] == "hello"
+        assert result["version"] == 1
+
+    async def test_explicit_version_after_flush(
+        self, artifact_manager: ArtifactManager, session_id: str
+    ):
+        """flush 后显式 version=1 走 DB 路径，仍能拿到内容。"""
+        artifact_manager.set_session(session_id)
+        await artifact_manager.create_artifact(
+            session_id=session_id, artifact_id="doc2",
+            content_type="text/plain", title="T", content="v1 content",
+        )
+        await artifact_manager.flush_all(session_id)
+
+        result = await artifact_manager.read_artifact(
+            session_id=session_id, artifact_id="doc2", version=1
+        )
+        assert result is not None
+        assert result["content"] == "v1 content"
+
+    async def test_explicit_nonexistent_version_returns_none(
+        self, artifact_manager: ArtifactManager, session_id: str
+    ):
+        """请求一个从未存在过的版本号 → None（404）。"""
+        artifact_manager.set_session(session_id)
+        await artifact_manager.create_artifact(
+            session_id=session_id, artifact_id="doc3",
+            content_type="text/plain", title="T", content="x",
+        )
+
+        # 内存里只有 v1，请求 v99 应该是 None
+        result = await artifact_manager.read_artifact(
+            session_id=session_id, artifact_id="doc3", version=99
+        )
+        assert result is None
+
+
 class TestPersistToolResult:
     """persist_tool_result 必须扛住任意 tool_name（长名 / 非法字符）。
 
