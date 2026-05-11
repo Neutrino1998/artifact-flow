@@ -37,6 +37,26 @@ def _compile_pattern(pattern: str, fixed_strings: bool, ignore_case: bool) -> "r
     return re.compile(pattern, flags)
 
 
+def _pattern_anchors_blank_line(src: str) -> bool:
+    """启发式判定:pattern 是否结构上"定义一整行"(同时含起始锚 + 结尾锚)。
+
+    用于零宽匹配的精修 guard:
+    - True (例: `^$`, `^\\s*$`, `\\A\\Z`) → 这是合法的"找空行" idiom,
+      零宽命中落在真空行上应保留
+    - False (例: bare `^` / `\\A` / `\\b` / `\\Z`) → 单边锚,零宽命中
+      是边界产物，落在哪都该 drop(包括落在空行上)
+
+    实现:剥掉字符类内容(避免 `[^abc]` / `[a$b]` 误判)后做子串检测。
+    不完整解析 regex(Python `re` 没暴露 AST),corner case 兜底原则:
+    误判时 fail-closed(drop)与之前一刀切零宽 drop 的行为方向一致。
+    """
+    # 字符类内容剥掉,避免 [^abc]/[a$b] 把内部的 ^/$ 误识别成锚
+    stripped = re.sub(r"\[[^\]]*\]", "", src)
+    has_start = ("^" in stripped) or (r"\A" in stripped)
+    has_end = ("$" in stripped) or (r"\Z" in stripped)
+    return has_start and has_end
+
+
 def _scan_content(
     content: str,
     regex: "re.Pattern[str]",
@@ -50,8 +70,9 @@ def _scan_content(
     - 跨行 match 只在**起始行**打点（ripgrep `-U` 多行模式行为，避免一次匹配同时
       标记多行带来命中计数歧义）
     - 同一行多次命中去重（按行算 1 个命中）
-    - 零宽匹配:落在**真空行**保留(支持 `^$` / `^\\s*$` 找空行)；落在非空行上
-      的零宽(`\\A`/`^`/`\\b`/`\\Z` 等边界单独/组合产物)skip，避免每行都误标
+    - 零宽匹配:仅当 (a) 落在真空行 且 (b) pattern 同时含起始锚 + 结尾锚
+      (`^...$` / `\\A...\\Z` 这类"定义一行"形态) 时保留。bare `^`/`\\A`/`\\b`/`\\Z`
+      落在空行也 drop —— 它们不"找空行"，只是边界匹配产物。
     - max_count 限制 **行级命中** 数；context 行不计入
 
     返回 [(line_no_1indexed, line_text, is_match), ...]:
@@ -75,16 +96,21 @@ def _scan_content(
         pos += len(kl)
 
     # 全文跑 finditer，把每个 match.start() 通过 bisect 映射到行号
+    # 零宽 keep 规则预算一次:pattern 是否"定义一整行"(双侧锚)
+    pattern_describes_full_line = _pattern_anchors_blank_line(regex.pattern)
+
     match_line_indices: List[int] = []  # 按命中顺序、已去重
     seen_lines = set()
     for m in regex.finditer(content):
         idx = bisect.bisect_right(line_starts, m.start()) - 1
         if idx < 0 or idx >= len(lines):
             continue
-        # 零宽匹配处理:只在**真空行**保留(让 `^$` / `^\s*$` 这种"找空行"
-        # 语义可用)。落在非空行上的零宽来源是 `\A`/`^`/`\b`/`\Z` 等边界
-        # 锚的产物 —— 不识别可见内容，统统 drop 避免把每行都误标 match。
-        if m.start() == m.end() and lines[idx] != "":
+        # 零宽匹配处理:必须同时满足 (a) 落在真空行 (b) pattern 结构上"定义
+        # 一行"(双侧锚) 才保留。否则就是 `\A`/`^`/`\b`/`\Z` 等单边锚产物，
+        # drop —— 让 bare `^` 不会因为艺术品里恰好有空行就误报命中。
+        if m.start() == m.end() and not (
+            lines[idx] == "" and pattern_describes_full_line
+        ):
             continue
         if idx in seen_lines:
             continue
