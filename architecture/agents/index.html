@@ -1412,9 +1412,8 @@
 <p>ArtifactFlow 的 Agent 完全由配置驱动：每个 Agent 是 <code>config/agents/</code> 下的一个 <code>.md</code> 文件，包含 YAML frontmatter（元数据）和 Markdown body（角色提示词）。不需要编写任何 Python 代码。</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>config/agents/
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>├── lead_agent.md       # 协调者
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>├── search_agent.md     # Web 搜索专家
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>├── crawl_agent.md      # 网页内容提取
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>└── compact_agent.md    # 对话摘要（内部）
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>├── research_agent.md   # 大型知识探索/整合（上下文隔离）
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>└── compact_agent.md    # 对话摘要（内部）
 </code></pre></div>
 <h2 id="agentconfig-数据结构">AgentConfig 数据结构</h2>
 <p><code>src/agents/loader.py</code> 定义了 <code>AgentConfig</code> dataclass：</p>
@@ -1431,16 +1430,19 @@
 <h2 id="yaml-frontmatter-schema">YAML Frontmatter Schema</h2>
 <p>每个 Agent 的 <code>.md</code> 文件以 YAML frontmatter 开头：</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="nn">---</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">search_agent</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">research_agent</span>
 <a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="nt">description</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">|</span>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="w">  </span><span class="no">Web search and information retrieval specialist</span>
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="w">  </span><span class="no">- Web search</span>
-<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="w">  </span><span class="no">- Information retrieval</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="w">  </span><span class="no">Large-scale knowledge exploration and multi-source integration</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="w">  </span><span class="no">- Context-isolated deep research</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="w">  </span><span class="no">- Search → fetch → read loops</span>
 <a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="nt">tools</span><span class="p">:</span>
 <a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="w">  </span><span class="nt">web_search</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">auto</span>
-<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="nt">model</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">qwen3.6-plus-no-thinking</span>
-<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="nt">max_tool_rounds</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">3</span>
-<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="nn">---</span>
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="w">  </span><span class="nt">web_fetch</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">confirm</span>
+<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="w">  </span><span class="nt">read_artifact</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">auto</span>
+<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="w">  </span><span class="nt">grep_artifact</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">auto</span>
+<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a><span class="nt">model</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">qwen3.6-plus</span>
+<a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a><span class="nt">max_tool_rounds</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">50</span>
+<a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a><span class="nn">---</span>
 </code></pre></div>
 <h3 id="字段参考">字段参考</h3>
 <table>
@@ -1542,7 +1544,7 @@
 <li>用 XML 标签分隔不同关注点（<code>&lt;role&gt;</code>, <code>&lt;task_plan&gt;</code>, <code>&lt;output_format&gt;</code> 等）</li>
 <li>明确职责边界（"你是什么"、"你不做什么"）</li>
 <li>定义输出格式（减少 LLM 输出的不确定性）</li>
-<li>设置停止条件（如 search_agent 的 "Maximum 3 search iterations"）</li>
+<li>设置停止条件（如 <code>research_agent</code> 的 <code>&lt;output&gt;</code> 收敛要求 + <code>max_tool_rounds</code> 兜底）</li>
 </ul>
 <h2 id="现有-agent-概览">现有 Agent 概览</h2>
 <table>
@@ -1560,25 +1562,17 @@
 <tr>
 <td><code>lead_agent</code></td>
 <td>任务协调、规划、Artifact 管理、subagent 路由</td>
-<td>create/update/rewrite/read_artifact (auto), call_subagent (auto)</td>
+<td>create/update/rewrite/read/grep_artifact + web_search + web_fetch + call_subagent</td>
 <td>qwen3.6-plus</td>
 <td>100</td>
 <td>否</td>
 </tr>
 <tr>
-<td><code>search_agent</code></td>
-<td>Web 搜索，信息检索</td>
-<td>web_search (auto)</td>
-<td>qwen3.6-plus-no-thinking</td>
-<td>3</td>
-<td>否</td>
-</tr>
-<tr>
-<td><code>crawl_agent</code></td>
-<td>网页内容提取与清洗</td>
-<td>web_fetch (confirm)</td>
-<td>qwen3.6-plus-no-thinking</td>
-<td>3</td>
+<td><code>research_agent</code></td>
+<td>大型知识探索 / 多源整合，在隔离上下文中执行</td>
+<td>create/update/rewrite/read/grep_artifact + web_search + web_fetch</td>
+<td>qwen3.6-plus</td>
+<td>50</td>
 <td>否</td>
 </tr>
 <tr>
@@ -1593,15 +1587,15 @@
 </table>
 <h3 id="角色分工">角色分工</h3>
 <ul>
-<li><strong>lead_agent</strong> 是唯一与用户直接交互的 Agent，也是唯一能创建/修改 Artifact 的 Agent</li>
-<li><strong>search_agent</strong> 和 <strong>crawl_agent</strong> 是执行型 subagent，由 lead_agent 通过 <code>call_subagent</code> 分发任务</li>
+<li><strong>lead_agent</strong> 是唯一与用户直接交互的 Agent，也是唯一能创建/修改最终 Artifact 的入口；自身可直接执行 <code>web_search</code> / <code>web_fetch</code> 处理小规模查询。</li>
+<li><strong>research_agent</strong> 是执行型 subagent，由 lead_agent 通过 <code>call_subagent</code> 分发任务。和 lead 工具集几乎相同（除 <code>call_subagent</code>），其存在意义是<strong>上下文隔离</strong>：把需要 ≥3 来源 / 多步 search→fetch→read 循环的大型探索任务从 lead 的上下文中剥离，避免大量中间 fetch 结果污染主对话。</li>
 <li><strong>compact_agent</strong> 是内部 Agent，由 <code>CompactionRunner</code> 在引擎循环内每次 LLM 调用后同步触发（超阈值时），输出结构化摘要作为 <code>COMPACTION_SUMMARY</code> 事件追加到 <code>state["events"]</code> 尾部，详见 <a href="../engine/#compaction-机制">engine.md → Compaction 机制</a></li>
 </ul>
 <h2 id="agent-协作模型">Agent 协作模型</h2>
 <pre class="mermaid"><code>sequenceDiagram
     participant User
     participant Lead as lead_agent
-    participant Sub as search/crawl_agent
+    participant Sub as research_agent
 
     User-&gt;&gt;Lead: 用户请求
     Lead-&gt;&gt;Lead: 分析任务, 创建 task_plan
@@ -1609,7 +1603,7 @@
     Lead-&gt;&gt;Sub: call_subagent(instruction)
     Note over Lead,Sub: current_agent 切换为 subagent
 
-    Sub-&gt;&gt;Sub: 执行工具 (web_search / web_fetch)
+    Sub-&gt;&gt;Sub: 执行工具 (web_search / web_fetch / read_artifact / grep_artifact)
     Sub--&gt;&gt;Lead: 返回结果 (subagent_result XML)
     Note over Lead,Sub: current_agent 切回 lead_agent
 

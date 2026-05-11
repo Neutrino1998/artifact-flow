@@ -736,6 +736,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#超长工具结果自动落盘" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        超长工具结果自动落盘
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1374,6 +1385,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#超长工具结果自动落盘" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        超长工具结果自动落盘
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1690,8 +1712,23 @@
 <li><strong>Agent 白名单校验</strong>：工具必须在当前 agent 的 <code>tools</code> 配置中</li>
 <li><strong>权限处理</strong>：CONFIRM 级工具触发 Permission Interrupt</li>
 <li><strong>call_subagent 特殊路径</strong>：成功则切换 agent + break 跳出工具循环</li>
+<li><strong>超长结果落盘</strong>：成功结果若超过 <code>tool.max_result_size_chars</code>，经 <code>_maybe_persist_tool_result</code> 落盘为 artifact，回填预览（见下节）</li>
 <li><strong>事件推送</strong>：每个工具推送 <code>TOOL_START</code> 和 <code>TOOL_COMPLETE</code> 事件（含参数、结果、耗时）</li>
 </ol>
+<h3 id="超长工具结果自动落盘">超长工具结果自动落盘</h3>
+<p>避免单个工具调用一次性把上下文撑爆——引擎在每次 <code>tool_result.success=True</code> 后检查 <code>len(result.data) &gt; tool.max_result_size_chars</code>（<code>BaseTool</code> 默认 <code>50000</code> 字符），命中即调用 <code>ArtifactManager.persist_tool_result()</code>：</p>
+<ol>
+<li>全文写入新 artifact，ID 形如 <code>tool_&lt;sanitized_name&gt;_&lt;12hex&gt;</code>，<code>source="tool"</code>，<code>content_type="text/plain"</code></li>
+<li>用 <code>make_preview_slice()</code> 把回填给模型的 <code>tool_result.data</code> 替换为 <code>&lt;artifact_slice&gt;</code> 预览（前 <code>TOOL_PERSIST_PREVIEW_LENGTH=1000</code> 字符）+ <code>hint</code>，告知模型用 <code>read_artifact(id='...')</code> 取全文</li>
+<li><code>metadata</code> 补 <code>persisted_artifact_id</code> / <code>original_size_chars</code>，前端 SSE 可拿到完整审计信息</li>
+</ol>
+<p>设计要点：</p>
+<ul>
+<li><strong>关掉机制的工具</strong>：<code>max_result_size_chars=math.inf</code> 永不落盘。<code>read_artifact</code> 必须用 <code>inf</code>，否则会形成 Read→artifact→Read 循环</li>
+<li><strong>Fail-open</strong>：落盘异常时回退到原结果，<strong>不阻断</strong> tool 调用流程（manager 缺失 / DB 异常都走这条路径）</li>
+<li><strong>失败的 <code>ToolResult</code> 不落盘</strong>：仅 <code>success=True</code> 且超长才触发；错误信息保留原样</li>
+<li><strong>不替代 compaction</strong>：本机制处理"单工具产物太大"，compaction 处理"对话历史累计太长"；两者正交（见 <a href="../engine/#compaction-机制">engine.md → Compaction 机制</a> 关于"不兜底工具结果溢出"的设计权衡）</li>
+</ul>
 <h2 id="核心数据结构">核心数据结构</h2>
 <h3 id="toolresult">ToolResult</h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="nd">@dataclass</span>
@@ -1763,8 +1800,15 @@
 <td><code>read_artifact</code></td>
 <td><code>ReadArtifactTool</code></td>
 <td>AUTO</td>
-<td><code>id</code> (string), <code>version</code> (integer, 可选)</td>
-<td>读取 Artifact 内容（默认最新版本）</td>
+<td><code>id</code> (string), <code>version</code> (integer, 可选), <code>offset</code> (integer, 默认 1), <code>limit</code> (integer, 可选)</td>
+<td>读取 Artifact 内容，按行分页；返回 <code>&lt;artifact_slice&gt;</code> 含 <code>shown_lines / total_lines / has_more</code> 和续读 hint</td>
+</tr>
+<tr>
+<td><code>grep_artifact</code></td>
+<td><code>GrepArtifactTool</code></td>
+<td>AUTO</td>
+<td><code>pattern</code> (string), <code>id</code> (string, 可选), <code>fixed_strings</code> (boolean, 默认 false), <code>ignore_case</code> (boolean, 默认 false), <code>context</code> (integer, 默认 0), <code>max_count</code> (integer, 默认 20)</td>
+<td>跨 / 单 artifact 搜索，ripgrep 语义；省略 <code>id</code> 时遍历当前 session 全部 artifact，输出 heading-style 块</td>
 </tr>
 <tr>
 <td><code>call_subagent</code></td>
@@ -1777,7 +1821,8 @@
 </table>
 <p><strong>注意：</strong></p>
 <ul>
-<li>Artifact 工具（create/update/rewrite/read）是请求级创建的（绑定 <code>ArtifactManager</code> 实例），名称为保留名（<code>RESERVED_TOOL_NAMES</code>），自定义工具不可同名</li>
+<li>Artifact 工具（create/update/rewrite/read/grep）是请求级创建的（绑定 <code>ArtifactManager</code> 实例），名称为保留名（<code>RESERVED_TOOL_NAMES</code>），自定义工具不可同名</li>
+<li><code>read_artifact</code> 不分页 / 无 <code>limit</code> 时仍受隐藏字符上限 <code>READ_ARTIFACT_MAX_CHARS</code>（默认 50000）保护，超出后 <code>has_more=true</code> 并附续读 hint，模型按 hint 调用下一段</li>
 <li><code>call_subagent</code> 的 <code>execute()</code> 仅做路由验证（目标 agent 是否存在、是否非 internal），实际的 agent 切换由引擎的 <code>_execute_tools</code> 处理</li>
 </ul>
 <h2 id="工具注册">工具注册</h2>
@@ -1788,7 +1833,7 @@
 <a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>    <span class="c1"># 2. 加载 custom_tools，检查与 builtin/reserved 名冲突</span>
 <a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a>    <span class="c1"># 3. 返回合并后的 tool_map</span>
 </code></pre></div>
-<p>保留名列表：<code>create_artifact</code>, <code>update_artifact</code>, <code>rewrite_artifact</code>, <code>read_artifact</code>。</p>
+<p>保留名列表：<code>create_artifact</code>, <code>update_artifact</code>, <code>rewrite_artifact</code>, <code>read_artifact</code>, <code>grep_artifact</code>。</p>
 <h3 id="工具指令生成">工具指令生成</h3>
 <p>工具的使用说明通过两步注入 system prompt：</p>
 <ol>

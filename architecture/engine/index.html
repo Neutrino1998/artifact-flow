@@ -1718,7 +1718,7 @@
 </ul>
 <p><strong>Subagent 无工具调用：</strong></p>
 <ul>
-<li>将 subagent 的响应打包为 XML：<code>&lt;subagent_result agent="search_agent"&gt;...&lt;/subagent_result&gt;</code></li>
+<li>将 subagent 的响应打包为 XML：<code>&lt;subagent_result agent="research_agent"&gt;...&lt;/subagent_result&gt;</code></li>
 <li>作为 <code>TOOL_COMPLETE</code> 事件（tool=<code>call_subagent</code>）追加到 lead_agent 的事件流</li>
 <li>切换 <code>current_agent</code> 回 <code>"lead_agent"</code></li>
 <li>下次循环时 lead_agent 的 <code>_build_context</code> 会看到这个 tool_result</li>
@@ -1821,7 +1821,7 @@
 <h3 id="触发条件">触发条件</h3>
 <p>每次 <code>_call_llm</code> 返回后，<code>compaction_runner.maybe_trigger(state, agent_name, input_tokens, output_tokens)</code> 被立即调用：</p>
 <ul>
-<li>条件：<code>input_tokens + output_tokens &gt; COMPACTION_TOKEN_THRESHOLD</code>（默认 60,000，本次 LLM 调用的 I/O 合计）</li>
+<li>条件：<code>input_tokens + output_tokens &gt; COMPACTION_TOKEN_THRESHOLD</code>（默认 80,000，本次 LLM 调用的 I/O 合计）</li>
 <li>满足条件 → 立即（blocking）执行 <code>compact_agent</code>，append <code>COMPACTION_SUMMARY</code> 到 tail</li>
 </ul>
 <h3 id="处理流程">处理流程</h3>

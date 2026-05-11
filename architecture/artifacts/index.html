@@ -1727,6 +1727,8 @@
 <ul>
 <li>无 version 参数 → 读当前 memory（可能含未 flush 修改）</li>
 <li>指定 version → 走 <code>repo.get_version_content()</code> 查历史表</li>
+<li>行级分页：<code>offset</code>（1-indexed，默认 1）+ 可选 <code>limit</code>，再受隐藏字符上限 <code>READ_ARTIFACT_MAX_CHARS</code>（默认 50000）兜底</li>
+<li>返回 <code>&lt;artifact_slice&gt;</code> 包含 <code>shown_lines / total_lines / shown_chars / total_chars / truncated_by</code>；未读完时 <code>has_more=true</code> 并附续读 <code>hint</code>（透传调用者原始的 <code>limit</code> / <code>version</code>，避免续读悄悄换页大小或跳到 latest 版本）</li>
 </ul>
 <h2 id="sse-实时推送">SSE 实时推送</h2>
 <p>每次 artifact 操作成功后，<code>ArtifactManager.build_snapshot()</code> 构建完整快照（含 content），通过 <code>ToolResult.metadata["artifact_snapshot"]</code> 随 <code>tool_complete</code> 事件推送到前端。前端由此在执行期间实时看到 artifact 变化，无需等待执行结束后再 REST 拉取。</p>

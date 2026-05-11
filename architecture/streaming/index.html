@@ -1441,7 +1441,7 @@
 <a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>    <span class="n">event_id</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span>   <span class="c1"># 持久化前由 Controller 赋值，作为幂等键</span>
 <a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>    <span class="n">created_at</span><span class="p">:</span> <span class="n">datetime</span> <span class="o">=</span> <span class="n">field</span><span class="p">(</span><span class="n">default_factory</span><span class="o">=</span><span class="n">datetime</span><span class="o">.</span><span class="n">now</span><span class="p">)</span>
 </code></pre></div>
-<p><code>agent_name</code> 在 Agent 层事件里标注是 lead / search / crawl / compact，Controller 层事件为 <code>None</code>。</p>
+<p><code>agent_name</code> 在 Agent 层事件里标注是当前 agent（<code>lead_agent</code> / <code>research_agent</code> / <code>compact_agent</code> 等），Controller 层事件为 <code>None</code>。</p>
 <h2 id="stream-生命周期">Stream 生命周期</h2>
 <p>一次 <code>POST /chat</code> 的事件流从 Controller 起笔，经 Transport 缓冲，到 <code>/stream/{stream_id}</code> 消费，完整生命周期如下：</p>
 <pre class="mermaid"><code>sequenceDiagram
@@ -1615,7 +1615,7 @@
 <p>每条事件输出三行加空行结尾：</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>event: tool_complete
 <a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>id: 1710000003456-0
-<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>data: {&quot;type&quot;:&quot;tool_complete&quot;,&quot;timestamp&quot;:&quot;2026-04-14T12:00:03&quot;,&quot;agent&quot;:&quot;search_agent&quot;,&quot;data&quot;:{&quot;tool&quot;:&quot;web_search&quot;,&quot;success&quot;:true,&quot;duration_ms&quot;:812,...}}
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>data: {&quot;type&quot;:&quot;tool_complete&quot;,&quot;timestamp&quot;:&quot;2026-04-14T12:00:03&quot;,&quot;agent&quot;:&quot;research_agent&quot;,&quot;data&quot;:{&quot;tool&quot;:&quot;web_search&quot;,&quot;success&quot;:true,&quot;duration_ms&quot;:812,...}}
 </code></pre></div>
 <ul>
 <li><code>event</code> 取 <code>event.type</code>（即 <code>StreamEventType.value</code>），前端可按 event 名分发</li>

@@ -1624,8 +1624,9 @@
 <a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>└──────────┴──────────────────────┴──────────────┘
 </code></pre></div>
 <ul>
-<li><strong>Sidebar</strong>：<code>ConversationList</code> + <code>UserMenu</code>；admin 可打开 <code>AdminConversationList</code> / <code>ObservabilityPanel</code> / <code>UserManagementPanel</code></li>
+<li><strong>Sidebar</strong>：<code>ConversationList</code> + <code>UserMenu</code>；admin 可打开 <code>AdminConversationList</code>（只读 observability，不删数据）/ <code>ObservabilityPanel</code> / <code>UserManagementPanel</code></li>
 <li><strong>Chat</strong>：<code>ChatPanel</code> 组合 <code>MessageList</code>（含分支导航 <code>BranchNavigator</code>）+ <code>MessageInput</code>；流式期间由 <code>ProcessingFlow</code> 渲染各 agent 的 <code>AgentSegmentBlock</code> / <code>ToolCallCard</code> / <code>ThinkingBlock</code> / <code>CompactionFlowBlock</code> / <code>InjectFlowBlock</code> / <code>ErrorFlowBlock</code></li>
+<li><strong>Right panel — mode-aware</strong>（PR0+）：<code>userManagementVisible &amp;&amp; isAdmin</code> 时右栏从 <code>ArtifactPanel</code> 切换为 <code>UserManagementDetailPanel</code>，按 <code>userManagementRightView</code> 类型分发到 <code>UserDetailForm</code> / <code>CreateUserForm</code> / <code>BulkImportForm</code>(PR3) / <code>BulkActionPanel</code>(PR5a) / <code>DepartmentManagerPanel</code>(PR4)；退出用户管理模式自动恢复 <code>ArtifactPanel</code></li>
 <li><strong>Artifacts</strong>：<code>ArtifactPanel</code> → <code>ArtifactTabs</code> → <code>MarkdownPreview | SourceView | DiffView</code>，顶栏 <code>ArtifactToolbar</code> 提供版本切换与 DOCX 导出</li>
 </ul>
 <h2 id="状态管理zustand-stores">状态管理（Zustand Stores）</h2>
@@ -1725,11 +1726,23 @@
 </tr>
 <tr>
 <td><code>conversationBrowserVisible</code>, <code>userManagementVisible</code>, <code>observabilityVisible</code></td>
-<td>Admin 面板</td>
+<td>Admin 面板互斥可见性（同时只能开一个）</td>
 </tr>
 <tr>
-<td><code>observabilitySelectedConvId</code></td>
-<td>Admin 事件时间线当前选中</td>
+<td><code>userManagementRightView</code></td>
+<td>右面板内容（discriminated union）：<code>empty</code> / <code>create-user</code> / <code>edit-user</code> / <code>bulk-import</code>(PR3) / <code>bulk-action</code>(PR5a) / <code>dept-manager</code>(PR4)</td>
+</tr>
+<tr>
+<td><code>userMgmtListVersion</code></td>
+<td>右面板表单成功后 bump，触发 <code>UserManagementPanel</code> refetch（避免 prop 钻透）</td>
+</tr>
+<tr>
+<td><code>selectionMode</code>, <code>userManagementSelection</code></td>
+<td>PR5a 用户管理多选模式开关 + 选中 ID 列表；进入 <code>enterSelectionMode()</code> 自动把 RightView 切到 <code>bulk-action</code>，退出时回 <code>empty</code></td>
+</tr>
+<tr>
+<td><code>observabilitySelectedConvId</code>, <code>observabilityBrowseVisible</code>, <code>observabilityRefreshTick</code></td>
+<td>Admin 观测面板：选中 conv id / 完整列表浏览 / 轮询触发 tick</td>
 </tr>
 <tr>
 <td><code>theme</code></td>
@@ -1737,6 +1750,7 @@
 </tr>
 </tbody>
 </table>
+<p><strong>面板切换协调</strong>（避免状态泄漏）：<code>setUserManagementVisible(false)</code> / 切到其他 admin 面板会同时 reset <code>userManagementRightView</code> + <code>selectionMode</code> + <code>userManagementSelection</code>，保证下次进入是干净状态。</p>
 <h3 id="streamstore"><code>streamStore</code></h3>
 <p>整个实时引擎的投影：</p>
 <table>

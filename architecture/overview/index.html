@@ -1488,21 +1488,15 @@
 <tbody>
 <tr>
 <td><code>lead_agent</code></td>
-<td>协调者，任务规划，Artifact 管理</td>
-<td>全部工具 + <code>call_subagent</code></td>
+<td>协调者，任务规划，Artifact 管理，可直接执行小规模搜索/抓取</td>
+<td>全部 artifact 工具（含 <code>grep_artifact</code>）+ <code>web_search</code> (AUTO) + <code>web_fetch</code> (CONFIRM) + <code>call_subagent</code></td>
 <td>唯一出口</td>
 </tr>
 <tr>
-<td><code>search_agent</code></td>
-<td>Web 搜索</td>
-<td><code>web_search</code> (AUTO)</td>
-<td>max 3 rounds</td>
-</tr>
-<tr>
-<td><code>crawl_agent</code></td>
-<td>网页内容提取</td>
-<td><code>web_fetch</code> (CONFIRM)</td>
-<td>max 3 rounds</td>
+<td><code>research_agent</code></td>
+<td>大型知识探索 / 多源整合（隔离上下文）</td>
+<td>artifact 工具（含 <code>grep_artifact</code>）+ <code>web_search</code> (AUTO) + <code>web_fetch</code> (CONFIRM)</td>
+<td>max 50 rounds</td>
 </tr>
 <tr>
 <td><code>compact_agent</code></td>
