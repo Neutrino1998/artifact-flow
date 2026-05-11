@@ -212,14 +212,36 @@ class TestPureFunctions:
         # 两行各 3 个字面 X，但每行只报 1 次
         assert hits == [(1, "XXX", True), (3, "XXX", True)]
 
-    def test_scan_zero_width_match_skipped(self):
-        """零宽匹配（\\A / ^ / \\b 单独）不应产生 hit —— 没有可见命中内容。"""
-        # \A 在 MULTILINE 下匹配 artifact 起始，零宽
+    def test_scan_zero_width_on_nonempty_line_skipped(self):
+        """落在非空行上的零宽匹配跳过(`\\A`/`\\b` 单独存在 → 边界产物，无可见内容)。"""
         rx_anchor = _compile_pattern(r"\A", fixed_strings=False, ignore_case=False)
         assert _scan_content("foo\nbar\n", rx_anchor, context=0, max_count=20) == []
-        # \b 在每个单词边界匹配，零宽
         rx_word_boundary = _compile_pattern(r"\b", fixed_strings=False, ignore_case=False)
         assert _scan_content("hello world\n", rx_word_boundary, context=0, max_count=20) == []
+
+    def test_scan_zero_width_on_empty_line_kept(self):
+        """落在真空行上的零宽匹配保留 —— `^$` / `^\\s*$` 找空行是合法 idiom。"""
+        rx = _compile_pattern(r"^$", fixed_strings=False, ignore_case=False)
+        # foo\n\nbar\n: 第 2 行是空行
+        hits = _scan_content("foo\n\nbar\n", rx, context=0, max_count=20)
+        assert hits == [(2, "", True)]
+
+    def test_scan_blank_line_query_with_context(self):
+        """`^$` 找空行 + context 包含周围两行。"""
+        rx = _compile_pattern(r"^$", fixed_strings=False, ignore_case=False)
+        hits = _scan_content("a\n\nb\n", rx, context=1, max_count=20)
+        # 空行在 line 2;context=1 → lines 1-3
+        assert hits == [
+            (1, "a", False),
+            (2, "", True),
+            (3, "b", False),
+        ]
+
+    def test_scan_caret_alone_does_not_mark_every_line(self):
+        """`^` 单独存在 → 每行行首都零宽匹配，但都落在非空行 → 全 drop。
+        避免一个 bare ^ 把所有非空行都误标 match。"""
+        rx = _compile_pattern(r"^", fixed_strings=False, ignore_case=False)
+        assert _scan_content("foo\nbar\nbaz\n", rx, context=0, max_count=20) == []
 
     def test_scan_caret_dollar_still_match_line_boundaries_under_multiline(self):
         """re.MULTILINE 下 ^/$ 按行边界匹配，与旧实现等价（这部分行为不变）。"""

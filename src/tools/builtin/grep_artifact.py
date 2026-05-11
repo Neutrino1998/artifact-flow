@@ -50,7 +50,8 @@ def _scan_content(
     - 跨行 match 只在**起始行**打点（ripgrep `-U` 多行模式行为，避免一次匹配同时
       标记多行带来命中计数歧义）
     - 同一行多次命中去重（按行算 1 个命中）
-    - 零宽匹配（`\\A`/`^`/`\\b` 单独存在时）skip，避免无可见内容的"命中"
+    - 零宽匹配:落在**真空行**保留(支持 `^$` / `^\\s*$` 找空行)；落在非空行上
+      的零宽(`\\A`/`^`/`\\b`/`\\Z` 等边界单独/组合产物)skip，避免每行都误标
     - max_count 限制 **行级命中** 数；context 行不计入
 
     返回 [(line_no_1indexed, line_text, is_match), ...]:
@@ -77,11 +78,13 @@ def _scan_content(
     match_line_indices: List[int] = []  # 按命中顺序、已去重
     seen_lines = set()
     for m in regex.finditer(content):
-        # 零宽匹配（span 长度 0）跳过 —— 没有可见命中内容，输出徒增噪音
-        if m.start() == m.end():
-            continue
         idx = bisect.bisect_right(line_starts, m.start()) - 1
         if idx < 0 or idx >= len(lines):
+            continue
+        # 零宽匹配处理:只在**真空行**保留(让 `^$` / `^\s*$` 这种"找空行"
+        # 语义可用)。落在非空行上的零宽来源是 `\A`/`^`/`\b`/`\Z` 等边界
+        # 锚的产物 —— 不识别可见内容，统统 drop 避免把每行都误标 match。
+        if m.start() == m.end() and lines[idx] != "":
             continue
         if idx in seen_lines:
             continue

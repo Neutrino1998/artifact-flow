@@ -480,6 +480,41 @@ class TestWriteBackInventory:
         artifacts = await artifact_manager.list_artifacts(session_id)
         assert [a["id"] for a in artifacts] == ids
 
+    async def test_list_preserves_creation_order_across_flush(
+        self, artifact_manager: ArtifactManager,
+        artifact_repo: ArtifactRepository, session_id: str
+    ):
+        """flush_all 后下一 turn 读 DB 应仍按创建顺序返回。
+
+        Regression(reviewer P2 part 2): `_dirty` was a `set()` so flush iterated
+        in hash order — INSERTs happened in hash order, `created_at` reflected
+        flush sequence (not creation), and the next turn's list_artifacts() (sorted
+        by created_at) leaked PYTHONHASHSEED into observable ordering. Fixed by
+        making `_dirty` insertion-ordered AND adding `Artifact.id` tiebreaker in
+        repo.list_artifacts() (since func.now() on SQLite has second-resolution and
+        collides for adjacent INSERTs).
+        """
+        artifact_manager.set_session(session_id)
+        # Use 10 ids whose hash order almost certainly differs from creation order
+        ids = [f"art_{i:02d}" for i in range(10)]
+        for aid in ids:
+            ok, _ = await artifact_manager.create_artifact(
+                session_id=session_id,
+                artifact_id=aid,
+                content_type="text/plain",
+                title=aid,
+                content=f"body of {aid}",
+            )
+            assert ok
+
+        # Flush to DB — simulates end of turn
+        await artifact_manager.flush_all(session_id)
+
+        # Read back through a fresh manager — simulates next turn
+        fresh = ArtifactManager(artifact_repo)
+        artifacts = await fresh.list_artifacts(session_id)
+        assert [a["id"] for a in artifacts] == ids
+
     async def test_list_shows_dirty_content_over_db(
         self, artifact_manager: ArtifactManager, artifact_repo: ArtifactRepository, session_id: str
     ):

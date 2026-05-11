@@ -457,11 +457,15 @@ class ArtifactManager:
         self.repository = repository
         self._cache: Dict[str, Dict[str, ArtifactMemory]] = {}  # {session_id: {artifact_id: ArtifactMemory}}
         self._current_session_id: Optional[str] = None
-        self._dirty: set = set()  # Set of (session_id, artifact_id) tuples
-        # Insertion-ordered (dict-as-ordered-set): list_artifacts iterates `_new` to
-        # append yet-to-be-flushed artifacts, and session-scope consumers (grep_artifact
-        # session mode, etc.) rely on a stable order — a `set` is hash-ordered and
-        # would shuffle which artifact wins a budget cap across runs.
+        # Both `_dirty` and `_new` are insertion-ordered (dict-as-ordered-set) so
+        # that iteration follows creation order, not Python's hash order:
+        # - `list_artifacts` iterates `_new` to append yet-to-be-flushed artifacts —
+        #   without insertion order, session-scope consumers (grep_artifact session
+        #   cap truncation, etc.) shuffle which artifact wins a budget cap across runs.
+        # - `flush_all` iterates `_dirty` to build INSERT order, which becomes the
+        #   `created_at` server_default ordering for new rows; hash-ordered flush
+        #   would leak hash randomization into post-flush DB ordering on the next turn.
+        self._dirty: Dict[Tuple[str, str], None] = {}
         self._new: Dict[Tuple[str, str], None] = {}
 
     def _ensure_repository(self) -> ArtifactRepository:
@@ -546,10 +550,10 @@ class ArtifactManager:
                 self._cache[session_id] = {}
             self._cache[session_id][artifact_id] = memory
 
-            # 标记为 dirty + new
+            # 标记为 dirty + new（dict-as-ordered-set 见 __init__ 注释）
             key = (session_id, artifact_id)
-            self._dirty.add(key)
-            self._new[key] = None  # dict-as-ordered-set
+            self._dirty[key] = None
+            self._new[key] = None
 
             logger.info(f"Created artifact '{artifact_id}' in session '{session_id}' (pending flush)")
             return True, f"Created artifact '{artifact_id}'"
@@ -744,7 +748,7 @@ class ArtifactManager:
         memory.updated_at = datetime.now()
         memory.source = "agent"
 
-        self._dirty.add((session_id, artifact_id))
+        self._dirty[(session_id, artifact_id)] = None
 
         return True, f"Successfully updated artifact '{artifact_id}' (v{memory.current_version})", match_info
 
@@ -764,7 +768,7 @@ class ArtifactManager:
         memory.updated_at = datetime.now()
         memory.source = "agent"
 
-        self._dirty.add((session_id, artifact_id))
+        self._dirty[(session_id, artifact_id)] = None
 
         return True, f"Successfully rewritten artifact '{artifact_id}' (v{memory.current_version})"
 
@@ -861,7 +865,7 @@ class ArtifactManager:
                 try:
                     await self._flush_one(sid, aid, memory, db_manager=db_manager)
                     # Success — remove from dirty/new
-                    self._dirty.discard((sid, aid))
+                    self._dirty.pop((sid, aid), None)
                     self._new.pop((sid, aid), None)
                     logger.info(f"Flushed artifact '{aid}' in session '{sid}'")
                 except Exception as e:

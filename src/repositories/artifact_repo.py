@@ -233,7 +233,11 @@ class ArtifactRepository(BaseRepository[Artifact]):
         if content_type:
             query = query.where(Artifact.content_type == content_type)
 
-        query = query.order_by(Artifact.created_at)
+        # Secondary key by id to break ties when `created_at` collides — common
+        # under `func.now()` second-resolution dialects (SQLite) or when multiple
+        # rows INSERT in the same microsecond. Without this, post-flush row order
+        # is engine-defined and PYTHONHASHSEED can leak into observable ordering.
+        query = query.order_by(Artifact.created_at, Artifact.id)
 
         result = await self._session.execute(query)
         return list(result.scalars().all())
