@@ -5,6 +5,7 @@ import { useArtifactStore } from '@/stores/artifactStore';
 import { useConversationStore } from '@/stores/conversationStore';
 import { useUIStore } from '@/stores/uiStore';
 import * as api from '@/lib/api';
+import { refreshArtifactList } from '@/lib/refreshArtifactList';
 import type { VersionSummary } from '@/types';
 
 /**
@@ -46,10 +47,13 @@ export function useArtifacts() {
     if (!sessionId) return;
     setArtifactsLoading(true);
     try {
-      const data = await api.listArtifacts(sessionId);
-      setArtifacts(data.artifacts);
-    } catch (err) {
-      console.error('Failed to load artifacts:', err);
+      // Shares the same generation counter as useSSE's mid-stream / completion
+      // refreshes — concurrent triggers won't race-overwrite each other.
+      await refreshArtifactList(
+        sessionId,
+        setArtifacts,
+        () => useArtifactStore.getState().sessionId,
+      );
     } finally {
       setArtifactsLoading(false);
     }

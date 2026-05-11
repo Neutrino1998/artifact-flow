@@ -9,6 +9,7 @@ import { connectSSE } from '@/lib/sse';
 import { StreamEventType } from '@/types/events';
 import type { SSEEvent, LLMCompleteData } from '@/types/events';
 import * as api from '@/lib/api';
+import { refreshArtifactList } from '@/lib/refreshArtifactList';
 
 const ARTIFACT_TOOLS = new Set([
   'create_artifact',
@@ -81,10 +82,14 @@ export function useSSE() {
         clearPendingUpdates();
         // Refresh artifact list unconditionally — user may have navigated back
         // to the list view mid-stream, so `current` being null does NOT mean
-        // the list is irrelevant.
-        api.listArtifacts(conversationId)
-          .then((artList) => setArtifacts(artList.artifacts))
-          .catch(() => {});
+        // the list is irrelevant. Guarded refresh: shares a generation counter
+        // with mid-stream refreshes, so a slow in-flight mid-stream response
+        // can't overwrite this final state.
+        refreshArtifactList(
+          conversationId,
+          setArtifacts,
+          () => useArtifactStore.getState().sessionId,
+        );
         // Refresh detail only if user is still viewing one.
         const curArtifact = useArtifactStore.getState().current;
         if (curArtifact) {
@@ -287,13 +292,18 @@ export function useSSE() {
           //       result_data carries metadata.persisted_artifact_id.
           // The REST endpoint overlays the active manager's in-memory cache,
           // so the new entry shows up before flush_all has run.
+          // Guarded refresh: rapid back-to-back tool completions in one turn
+          // can otherwise produce out-of-order responses overwriting newer
+          // state with older snapshots.
           const metadata = data?.metadata as Record<string, unknown> | undefined;
           const persistedId = metadata?.persisted_artifact_id as string | undefined;
           if (success && (ARTIFACT_TOOLS.has(toolName) || persistedId)) {
             setArtifactSessionId(conversationId);
-            api.listArtifacts(conversationId)
-              .then((artList) => setArtifacts(artList.artifacts))
-              .catch(() => {});
+            refreshArtifactList(
+              conversationId,
+              setArtifacts,
+              () => useArtifactStore.getState().sessionId,
+            );
           }
           break;
         }
