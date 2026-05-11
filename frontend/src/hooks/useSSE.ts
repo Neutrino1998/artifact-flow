@@ -67,19 +67,28 @@ export function useSSE() {
 
   const refreshAfterComplete = useCallback(
     async (conversationId: string) => {
+      // Snapshot current?.id BEFORE the await. Combined with the post-await
+      // value, this distinguishes two null states that look identical from
+      // current alone:
+      //   (a) first-message new conv flow: current was null at stream start
+      //       AND still null at completion — legitimate, populate.
+      //   (b) startNewChat() during our await: current was conversationId
+      //       (or null on first-message conv that briefly populated), then
+      //       user explicitly went to new chat → current is null and the
+      //       snapshot is NOT null (or didn't match this conv) — drop.
+      // Without this guard, an in-flight refreshAfterComplete resumes after
+      // startNewChat()'s setCurrent(null) and re-populates the conversation
+      // the user just abandoned.
+      const viewingAtStart = useConversationStore.getState().current?.id ?? null;
       try {
         const [detail, list] = await Promise.all([
           api.getConversation(conversationId, { force: true }),
           api.listConversations(20, 0),
         ]);
-        // For conversation-detail refresh we still use the viewing check.
-        // It can be stale during the switchConversation handoff (current?.id
-        // lags behind resetArtifacts), but the worst case is a transient
-        // setCurrent of the old detail that switchConversation's own
-        // setCurrent immediately overwrites on resolution — visible only as
-        // wasted state churn, not as leaked data.
-        const viewing = useConversationStore.getState().current?.id;
-        if (!viewing || viewing === conversationId) {
+        const viewingNow = useConversationStore.getState().current?.id ?? null;
+        const stillOnThisConv = viewingNow === conversationId;
+        const firstMessageNewConv = viewingNow === null && viewingAtStart === null;
+        if (stillOnThisConv || firstMessageNewConv) {
           setCurrent(detail);
         }
         setConversations(list.conversations, list.total, list.has_more);
