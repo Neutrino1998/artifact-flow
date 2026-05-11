@@ -269,6 +269,23 @@ class StreamDisplay:
             self.current_content = new_content
             self.current_reasoning = new_reasoning
 
+        elif event.type == "llm_complete":
+            # 某些 provider 只在终结块给最终 content / reasoning（中途没有 llm_chunk），
+            # 此时 current_* 仍是空，必须从 llm_complete 回填，否则后续 tool_start /
+            # agent_complete 的 finalize 会打印一个空 panel。正常累积式 provider 这里是 no-op。
+            final_content = event.data.get("content") or ""
+            final_reasoning = event.data.get("reasoning_content") or ""
+
+            if final_content and not self.current_content:
+                if self.current_reasoning and not self.reasoning_printed:
+                    self._finalize_reasoning()
+                self.current_content = final_content
+                self.current_rendering = "content"
+            if final_reasoning and not self.current_reasoning:
+                self.current_reasoning = final_reasoning
+                if not self.current_rendering:
+                    self.current_rendering = "reasoning"
+
         elif event.type == "tool_start":
             # 保存当前 agent 内容（如果有）
             self._finalize_current_agent()
