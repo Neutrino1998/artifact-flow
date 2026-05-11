@@ -144,9 +144,8 @@ ArtifactFlow 的核心扩展机制全部基于配置文件，无需修改 Python
 
 | Agent | 职责 | 工具 | 备注 |
 |-------|------|------|------|
-| `lead_agent` | 协调者，任务规划，Artifact 管理 | 全部工具 + `call_subagent` | 唯一出口 |
-| `search_agent` | Web 搜索 | `web_search` (AUTO) | max 3 rounds |
-| `crawl_agent` | 网页内容提取 | `web_fetch` (CONFIRM) | max 3 rounds |
+| `lead_agent` | 协调者，任务规划，Artifact 管理，可直接执行小规模搜索/抓取 | 全部 artifact 工具 + `web_search` (AUTO) + `web_fetch` (CONFIRM) + `call_subagent` | 唯一出口 |
+| `research_agent` | 大型知识探索 / 多源整合（隔离上下文） | artifact 工具 + `web_search` (AUTO) + `web_fetch` (CONFIRM) | max 50 rounds |
 | `compact_agent` | 生成对话摘要（7 sections：Primary Request / Artifacts / Tool Interactions / Errors / Pending Tasks / Current Work / Next Step） | 无 | internal，由 `CompactionRunner` 在引擎循环内直接调用 |
 
 ## 信号流：用户视角的完整交互

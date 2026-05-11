@@ -414,8 +414,8 @@ def hello():
 <tool_call>
 <name=call_subagent</name>
 <params>
-<agent_name><![CDATA[crawl_agent]]></agent_name>
-<instruction><![CDATA[爬取文章内容]]></instruction>
+<agent_name><![CDATA[research_agent]]></agent_name>
+<instruction><![CDATA[research topic X across multiple sources]]></instruction>
   </params>
 </tool_call>
 """),
