@@ -34,6 +34,7 @@ function findPrevVersion(versions: VersionSummary[], currentVersion: number): nu
 export function useArtifacts() {
   const sessionId = useConversationStore((s) => s.current?.session_id);
   const setArtifacts = useArtifactStore((s) => s.setArtifacts);
+  const setArtifactSessionId = useArtifactStore((s) => s.setSessionId);
   const setArtifactsLoading = useArtifactStore((s) => s.setArtifactsLoading);
   const setCurrent = useArtifactStore((s) => s.setCurrent);
   const setCurrentLoading = useArtifactStore((s) => s.setCurrentLoading);
@@ -49,15 +50,17 @@ export function useArtifacts() {
     try {
       // Shares the same generation counter as useSSE's mid-stream / completion
       // refreshes — concurrent triggers won't race-overwrite each other.
+      // refreshArtifactList stamps the artifact-store sessionId atomically.
       await refreshArtifactList(
         sessionId,
         setArtifacts,
+        setArtifactSessionId,
         () => useArtifactStore.getState().sessionId,
       );
     } finally {
       setArtifactsLoading(false);
     }
-  }, [sessionId, setArtifacts, setArtifactsLoading]);
+  }, [sessionId, setArtifacts, setArtifactSessionId, setArtifactsLoading]);
 
   // selectArtifact resolves sessionId at call time via getState()
   const selectArtifact = useCallback(

@@ -8,16 +8,24 @@
  *
  * Without coordination, concurrent calls produce a race: an older response
  * arrives last and overwrites a newer one, briefly reverting the list to a
- * stale snapshot. This helper centralizes two guards:
+ * stale snapshot. This helper coordinates them with **claim-before-await**:
  *
- *   (1) Generation counter — only the most recently fired request's response
- *       is allowed to update store. Earlier in-flight responses are dropped.
- *   (2) Session check — if the user switched conversations while a request
- *       was in flight, dropping it prevents data from another session from
- *       leaking into the current view.
+ *   1. Bump a module-level generation counter and stamp the target session
+ *      onto the artifact store immediately — claim "the list will belong to
+ *      this session".
+ *   2. Await the API response.
+ *   3. Verify the claim still stands:
+ *        - Generation must still be ours (no newer refresh has fired).
+ *        - Current session must still match our target (no reset / switch
+ *          has invalidated our claim).
+ *      Otherwise drop the response silently.
  *
- * The counter is module-level so all three call sites share the same
- * generation namespace.
+ * This pattern handles the tricky case where `useChat.switchConversation`
+ * (or newConversation) calls `resetArtifacts()` mid-flight, setting the
+ * store's sessionId to null. A stale response that returns after the reset
+ * sees `cur === null !== sessionId` and is dropped, preventing cross-session
+ * leakage. Generation counter alone wouldn't catch this when no follow-up
+ * refresh is fired to bump the counter.
  */
 import * as api from './api';
 import type { ArtifactSummary } from '@/types';
@@ -27,18 +35,21 @@ let _generation = 0;
 export async function refreshArtifactList(
   sessionId: string,
   setArtifacts: (artifacts: ArtifactSummary[]) => void,
+  setSessionId: (sessionId: string | null) => void,
   getCurrentSessionId: () => string | null,
 ): Promise<void> {
   const myGen = ++_generation;
+  // Claim: stamp our target session so a later reset() sets cur back to null
+  // and we can detect "claim invalidated" after the await resolves.
+  setSessionId(sessionId);
   try {
     const data = await api.listArtifacts(sessionId);
-    // (1) A newer call has been fired since we awaited — drop our stale response.
+    // (1) Newer refresh fired during our await → drop.
     if (myGen !== _generation) return;
-    // (2) User switched session while we were in-flight — drop to avoid
-    //     leaking data across sessions. If current is null (e.g. new-convo
-    //     flow), pass through.
-    const cur = getCurrentSessionId();
-    if (cur && cur !== sessionId) return;
+    // (2) Reset / switch invalidated our claim → drop. Strict equality
+    //     means a null cur (post-reset) blocks us even when no replacement
+    //     refresh has been fired.
+    if (getCurrentSessionId() !== sessionId) return;
     setArtifacts(data.artifacts);
   } catch {
     // Silent: callers decide whether/how to surface errors. This refresh is

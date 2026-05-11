@@ -88,6 +88,7 @@ export function useSSE() {
         refreshArtifactList(
           conversationId,
           setArtifacts,
+          setArtifactSessionId,
           () => useArtifactStore.getState().sessionId,
         );
         // Refresh detail only if user is still viewing one.
@@ -298,10 +299,12 @@ export function useSSE() {
           const metadata = data?.metadata as Record<string, unknown> | undefined;
           const persistedId = metadata?.persisted_artifact_id as string | undefined;
           if (success && (ARTIFACT_TOOLS.has(toolName) || persistedId)) {
-            setArtifactSessionId(conversationId);
+            // refreshArtifactList handles the session-id stamping internally
+            // (claim-before-await), so no separate setArtifactSessionId here.
             refreshArtifactList(
               conversationId,
               setArtifacts,
+              setArtifactSessionId,
               () => useArtifactStore.getState().sessionId,
             );
           }
