@@ -13,6 +13,7 @@ tools:
   grep_artifact: auto
   call_subagent: auto
   bocha_search: auto
+  jina_fetch: confirm
 model: deepseek-v4-flash
 max_tool_rounds: 100
 ---
