@@ -60,7 +60,7 @@ docker compose exec backend python scripts/create_admin.py admin --password <you
 | `ARTIFACTFLOW_DEBUG` | 否 | `false` | 开启调试日志、详细错误信息和 Swagger 文档 |
 | `ARTIFACTFLOW_EXECUTION_TIMEOUT` | 否 | `1800` | 总执行超时（秒） |
 | `ARTIFACTFLOW_PERMISSION_TIMEOUT` | 否 | `300` | 单次权限等待超时（秒） |
-| `ARTIFACTFLOW_COMPACTION_TOKEN_THRESHOLD` | 否 | `60000` | 触发上下文压缩的 token 阈值 |
+| `ARTIFACTFLOW_COMPACTION_TOKEN_THRESHOLD` | 否 | `80000` | 触发上下文压缩的 token 阈值 |
 | `ARTIFACTFLOW_MAX_CONCURRENT_TASKS` | 否 | `10` | 最大并发引擎执行数 |
 
 LLM 和工具的 API Key 不使用 `ARTIFACTFLOW_` 前缀，直接设置：

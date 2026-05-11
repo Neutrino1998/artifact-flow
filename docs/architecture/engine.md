@@ -105,7 +105,7 @@ flowchart LR
 
 **Subagent 无工具调用：**
 
-- 将 subagent 的响应打包为 XML：`<subagent_result agent="search_agent">...</subagent_result>`
+- 将 subagent 的响应打包为 XML：`<subagent_result agent="research_agent">...</subagent_result>`
 - 作为 `TOOL_COMPLETE` 事件（tool=`call_subagent`）追加到 lead_agent 的事件流
 - 切换 `current_agent` 回 `"lead_agent"`
 - 下次循环时 lead_agent 的 `_build_context` 会看到这个 tool_result
@@ -178,7 +178,7 @@ System prompt 由六层拼接而成，每层按条件注入：
 
 每次 `_call_llm` 返回后，`compaction_runner.maybe_trigger(state, agent_name, input_tokens, output_tokens)` 被立即调用：
 
-- 条件：`input_tokens + output_tokens > COMPACTION_TOKEN_THRESHOLD`（默认 60,000，本次 LLM 调用的 I/O 合计）
+- 条件：`input_tokens + output_tokens > COMPACTION_TOKEN_THRESHOLD`（默认 80,000，本次 LLM 调用的 I/O 合计）
 - 满足条件 → 立即（blocking）执行 `compact_agent`，append `COMPACTION_SUMMARY` 到 tail
 
 ### 处理流程
