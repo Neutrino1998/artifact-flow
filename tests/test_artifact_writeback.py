@@ -452,6 +452,106 @@ class TestWriteBackInventory:
         assert artifacts[0]["id"] == "plan"
         assert artifacts[0]["content"] == "# Plan"
 
+    async def test_list_preserves_insertion_order_for_unflushed(
+        self, artifact_manager: ArtifactManager, session_id: str
+    ):
+        """In-memory new artifacts must come back in creation order.
+
+        Regression: `_new` used to be a `set()` whose iteration is hash-ordered,
+        not insertion-ordered — so session-scope consumers (grep session-mode cap
+        truncation, inventory rendering) saw a non-deterministic order across runs.
+        """
+        artifact_manager.set_session(session_id)
+        # Use 10 IDs whose hash order is essentially guaranteed to differ
+        # from creation order — short alphanumeric strings reshuffle under
+        # PYTHONHASHSEED randomization. 10 entries makes accidental same-order
+        # vanishingly unlikely.
+        ids = [f"art_{i:02d}" for i in range(10)]
+        for aid in ids:
+            ok, _ = await artifact_manager.create_artifact(
+                session_id=session_id,
+                artifact_id=aid,
+                content_type="text/plain",
+                title=aid,
+                content=f"body of {aid}",
+            )
+            assert ok
+
+        artifacts = await artifact_manager.list_artifacts(session_id)
+        assert [a["id"] for a in artifacts] == ids
+
+    async def test_list_returns_stable_order_across_flush(
+        self, artifact_manager: ArtifactManager,
+        artifact_repo: ArtifactRepository, session_id: str
+    ):
+        """flush_all 后下一 turn 读 DB 应得到稳定顺序(可复现,不受 PYTHONHASHSEED 影响)。
+
+        Regression(reviewer P2 part 2): `_dirty` was a `set()` so flush iterated
+        in hash order — INSERTs happened in hash order and `created_at` reflected
+        flush sequence. Fixed by making `_dirty` insertion-ordered AND adding
+        `Artifact.id` tiebreaker in repo.list_artifacts() (since func.now() on
+        SQLite has second-resolution and collides for adjacent INSERTs).
+
+        **Limitation acknowledgement(see repo.list_artifacts docstring):** when
+        ids don't sort in creation order, post-flush ordering will be `(created_at,
+        id)` rather than strict creation order. This test uses `art_00..art_09`
+        which sort identically to creation order — it verifies *stability*, not
+        strict creation-order preservation. The intentional design trade-off is
+        documented in repo.list_artifacts.
+        """
+        artifact_manager.set_session(session_id)
+        ids = [f"art_{i:02d}" for i in range(10)]
+        for aid in ids:
+            ok, _ = await artifact_manager.create_artifact(
+                session_id=session_id,
+                artifact_id=aid,
+                content_type="text/plain",
+                title=aid,
+                content=f"body of {aid}",
+            )
+            assert ok
+
+        # Flush to DB — simulates end of turn
+        await artifact_manager.flush_all(session_id)
+
+        # Read back through a fresh manager — simulates next turn
+        fresh = ArtifactManager(artifact_repo)
+        artifacts = await fresh.list_artifacts(session_id)
+        assert [a["id"] for a in artifacts] == ids
+
+    async def test_list_post_flush_id_tiebreaker_known_limitation(
+        self, artifact_manager: ArtifactManager,
+        artifact_repo: ArtifactRepository, session_id: str
+    ):
+        """文档化已知限制:同秒创建 + id 字典序与创建顺序冲突 → 后者赢。
+
+        这不是 bug,是用 `(created_at, id)` 作为排序键的必然结果。本测试以
+        executable doc 的形式锁住契约:跨 turn 读出的顺序是 `(created_at, id)`
+        排序,而非创建顺序。如果哪天加 `creation_seq` 列改契约,这个测试需要更新。
+        """
+        artifact_manager.set_session(session_id)
+        # 故意让创建顺序与 id 字典序相反
+        creation_order = ["zebra_doc", "monkey_doc", "apple_doc"]
+        for aid in creation_order:
+            ok, _ = await artifact_manager.create_artifact(
+                session_id=session_id,
+                artifact_id=aid,
+                content_type="text/plain",
+                title=aid,
+                content="x",
+            )
+            assert ok
+
+        await artifact_manager.flush_all(session_id)
+
+        fresh = ArtifactManager(artifact_repo)
+        artifacts = await fresh.list_artifacts(session_id)
+        observed = [a["id"] for a in artifacts]
+        # 同秒 created_at 撞 → id tiebreaker → 字典序
+        assert observed == sorted(creation_order)
+        # 注意:不等于 creation_order(这正是文档化的限制)
+        assert observed != creation_order
+
     async def test_list_shows_dirty_content_over_db(
         self, artifact_manager: ArtifactManager, artifact_repo: ArtifactRepository, session_id: str
     ):

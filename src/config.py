@@ -35,6 +35,7 @@ class Settings(BaseSettings):
     INVENTORY_PREVIEW_LENGTH: int = 200     # artifact 清单内容预览截断长度
     READ_ARTIFACT_MAX_CHARS: int = 50000    # read_artifact 默认字符上限（隐藏，模型不可见）
     TOOL_PERSIST_PREVIEW_LENGTH: int = 1000  # 工具结果落盘后回填给模型的预览长度
+    SESSION_GREP_MAX_TOTAL: int = 200       # grep_artifact session 模式总命中上限（隐藏，不暴露给模型）
 
     # Redis（空 = InMemory fallback，非空 = Redis）
     REDIS_URL: str = ""

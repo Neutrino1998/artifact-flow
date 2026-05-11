@@ -9,8 +9,7 @@ ArtifactFlow 的 Agent 完全由配置驱动：每个 Agent 是 `config/agents/`
 ```
 config/agents/
 ├── lead_agent.md       # 协调者
-├── search_agent.md     # Web 搜索专家
-├── crawl_agent.md      # 网页内容提取
+├── research_agent.md   # 大型知识探索/整合（上下文隔离）
 └── compact_agent.md    # 对话摘要（内部）
 ```
 
@@ -118,15 +117,14 @@ You can create MULTIPLE result artifacts...
 
 | Agent | 职责 | 工具 | 模型 | 最大轮数 | 内部 |
 |-------|------|------|------|---------|------|
-| `lead_agent` | 任务协调、规划、Artifact 管理、subagent 路由 | create/update/rewrite/read_artifact (auto), call_subagent (auto) | qwen3.6-plus | 100 | 否 |
-| `search_agent` | Web 搜索，信息检索 | web_search (auto) | qwen3.6-plus-no-thinking | 3 | 否 |
-| `crawl_agent` | 网页内容提取与清洗 | web_fetch (confirm) | qwen3.6-plus-no-thinking | 3 | 否 |
+| `lead_agent` | 任务协调、规划、Artifact 管理、subagent 路由 | create/update/rewrite/read_artifact + web_search + web_fetch + call_subagent | qwen3.6-plus | 100 | 否 |
+| `research_agent` | 大型知识探索 / 多源整合，在隔离上下文中执行 | create/update/rewrite/read_artifact + web_search + web_fetch | qwen3.6-plus | 50 | 否 |
 | `compact_agent` | 对话摘要生成（Compaction） | 无 | qwen3.6-plus | 0 | 是 |
 
 ### 角色分工
 
-- **lead_agent** 是唯一与用户直接交互的 Agent，也是唯一能创建/修改 Artifact 的 Agent
-- **search_agent** 和 **crawl_agent** 是执行型 subagent，由 lead_agent 通过 `call_subagent` 分发任务
+- **lead_agent** 是唯一与用户直接交互的 Agent，也是唯一能创建/修改最终 Artifact 的入口；自身可直接执行 `web_search` / `web_fetch` 处理小规模查询。
+- **research_agent** 是执行型 subagent，由 lead_agent 通过 `call_subagent` 分发任务。和 lead 工具集几乎相同（除 `call_subagent`），其存在意义是**上下文隔离**：把需要 ≥3 来源 / 多步 search→fetch→read 循环的大型探索任务从 lead 的上下文中剥离，避免大量中间 fetch 结果污染主对话。
 - **compact_agent** 是内部 Agent，由 `CompactionRunner` 在引擎循环内每次 LLM 调用后同步触发（超阈值时），输出结构化摘要作为 `COMPACTION_SUMMARY` 事件追加到 `state["events"]` 尾部，详见 [engine.md → Compaction 机制](engine.md#compaction-机制)
 
 ## Agent 协作模型
@@ -135,7 +133,7 @@ You can create MULTIPLE result artifacts...
 sequenceDiagram
     participant User
     participant Lead as lead_agent
-    participant Sub as search/crawl_agent
+    participant Sub as research_agent
 
     User->>Lead: 用户请求
     Lead->>Lead: 分析任务, 创建 task_plan
@@ -143,7 +141,7 @@ sequenceDiagram
     Lead->>Sub: call_subagent(instruction)
     Note over Lead,Sub: current_agent 切换为 subagent
 
-    Sub->>Sub: 执行工具 (web_search / web_fetch)
+    Sub->>Sub: 执行工具 (web_search / web_fetch / read_artifact)
     Sub-->>Lead: 返回结果 (subagent_result XML)
     Note over Lead,Sub: current_agent 切回 lead_agent
 

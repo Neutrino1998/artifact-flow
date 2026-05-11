@@ -457,8 +457,16 @@ class ArtifactManager:
         self.repository = repository
         self._cache: Dict[str, Dict[str, ArtifactMemory]] = {}  # {session_id: {artifact_id: ArtifactMemory}}
         self._current_session_id: Optional[str] = None
-        self._dirty: set = set()  # Set of (session_id, artifact_id) tuples
-        self._new: set = set()    # Set of (session_id, artifact_id) tuples — created during this execution
+        # Both `_dirty` and `_new` are insertion-ordered (dict-as-ordered-set) so
+        # that iteration follows creation order, not Python's hash order:
+        # - `list_artifacts` iterates `_new` to append yet-to-be-flushed artifacts —
+        #   without insertion order, session-scope consumers (grep_artifact session
+        #   cap truncation, etc.) shuffle which artifact wins a budget cap across runs.
+        # - `flush_all` iterates `_dirty` to build INSERT order, which becomes the
+        #   `created_at` server_default ordering for new rows; hash-ordered flush
+        #   would leak hash randomization into post-flush DB ordering on the next turn.
+        self._dirty: Dict[Tuple[str, str], None] = {}
+        self._new: Dict[Tuple[str, str], None] = {}
 
     def _ensure_repository(self) -> ArtifactRepository:
         """确保 Repository 已设置"""
@@ -542,10 +550,10 @@ class ArtifactManager:
                 self._cache[session_id] = {}
             self._cache[session_id][artifact_id] = memory
 
-            # 标记为 dirty + new
+            # 标记为 dirty + new（dict-as-ordered-set 见 __init__ 注释）
             key = (session_id, artifact_id)
-            self._dirty.add(key)
-            self._new.add(key)
+            self._dirty[key] = None
+            self._new[key] = None
 
             logger.info(f"Created artifact '{artifact_id}' in session '{session_id}' (pending flush)")
             return True, f"Created artifact '{artifact_id}'"
@@ -740,7 +748,7 @@ class ArtifactManager:
         memory.updated_at = datetime.now()
         memory.source = "agent"
 
-        self._dirty.add((session_id, artifact_id))
+        self._dirty[(session_id, artifact_id)] = None
 
         return True, f"Successfully updated artifact '{artifact_id}' (v{memory.current_version})", match_info
 
@@ -760,7 +768,7 @@ class ArtifactManager:
         memory.updated_at = datetime.now()
         memory.source = "agent"
 
-        self._dirty.add((session_id, artifact_id))
+        self._dirty[(session_id, artifact_id)] = None
 
         return True, f"Successfully rewritten artifact '{artifact_id}' (v{memory.current_version})"
 
@@ -857,8 +865,8 @@ class ArtifactManager:
                 try:
                     await self._flush_one(sid, aid, memory, db_manager=db_manager)
                     # Success — remove from dirty/new
-                    self._dirty.discard((sid, aid))
-                    self._new.discard((sid, aid))
+                    self._dirty.pop((sid, aid), None)
+                    self._new.pop((sid, aid), None)
                     logger.info(f"Flushed artifact '{aid}' in session '{sid}'")
                 except Exception as e:
                     logger.exception(f"Failed to flush artifact '{aid}': {e}")
@@ -1149,14 +1157,14 @@ class UpdateArtifactTool(BaseTool):
   <name>update_artifact</name>
   <params>
     <id><![CDATA[task_plan]]></id>
-    <old_str><![CDATA[1. [✗] Extract content from example.com
+    <old_str><![CDATA[1. [✗] Research topic X
    - Status: pending
-   - Assigned: crawl_agent
+   - Assigned: research_agent
    - Notes: N/A]]></old_str>
-    <new_str><![CDATA[1. [✓] Extract content from example.com
+    <new_str><![CDATA[1. [✓] Research topic X
    - Status: completed
-   - Assigned: crawl_agent
-   - Notes: Extracted 3 key sections]]></new_str>
+   - Assigned: research_agent
+   - Notes: See artifact research_topic_x]]></new_str>
   </params>
 </tool_call>"""
 
@@ -1359,11 +1367,15 @@ def create_artifact_tools(manager: ArtifactManager) -> List[BaseTool]:
     Returns:
         工具列表
     """
+    # 局部 import 避免与 grep_artifact.py 的 ArtifactManager 类型引用形成循环
+    from tools.builtin.grep_artifact import GrepArtifactTool
+
     return [
         CreateArtifactTool(manager),
         UpdateArtifactTool(manager),
         RewriteArtifactTool(manager),
         ReadArtifactTool(manager),
+        GrepArtifactTool(manager),
     ]
 
 

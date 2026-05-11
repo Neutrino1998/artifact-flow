@@ -233,7 +233,27 @@ class ArtifactRepository(BaseRepository[Artifact]):
         if content_type:
             query = query.where(Artifact.content_type == content_type)
 
-        query = query.order_by(Artifact.created_at)
+        # Ordering contract: `(created_at, id)`.
+        #
+        # `created_at` is `server_default=func.now()`. On SQLite that's
+        # second-resolution, so multiple INSERTs within the same `flush_all()`
+        # collide on `created_at` and the engine's own tiebreaker becomes
+        # implementation-defined (and can leak PYTHONHASHSEED through the
+        # iteration order of the `_dirty` flush set above). The `id` secondary
+        # key removes that nondeterminism.
+        #
+        # **Caveat (intentional limitation):** this stabilizes the order across
+        # runs but does NOT strictly preserve creation order when `created_at`
+        # ties. If two artifacts created in the same second have ids that do not
+        # sort in creation order (e.g. `b_doc` then `a_doc`), `list_artifacts()`
+        # returns them as `a_doc, b_doc`. Session-wide consumers (`grep_artifact`
+        # session cap, etc.) get a stable subset across runs, but the subset may
+        # differ from the pre-flush in-memory order. Accepted trade-off:
+        # preserving strict creation order across flush would need either an
+        # explicit `creation_seq` column (Alembic migration) or app-side
+        # `created_at` assignment (which conflicts with CLAUDE.md's
+        # "server_default for creation" rule).
+        query = query.order_by(Artifact.created_at, Artifact.id)
 
         result = await self._session.execute(query)
         return list(result.scalars().all())

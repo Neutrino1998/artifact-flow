@@ -66,6 +66,7 @@ These are non-obvious design choices that you won't easily infer from reading th
 
 - Tool calls use XML format with CDATA for all parameter values (`<![CDATA[...]]>`), parsed via `xml.etree.ElementTree`
 - Tools must return `ToolResult` dataclass; agents must return `AgentResponse` dataclass
+- **Minimize tool parameter surface.** Only expose parameters the model has semantic intent to control (e.g. `pattern`, `id`, `offset`, `limit`, `ignore_case`, `fixed_strings`). Implementation knobs — caps, thresholds, internal limits — go in `src/config.py` as hidden constants (e.g. `READ_ARTIFACT_MAX_CHARS`, `TOOL_PERSIST_PREVIEW_LENGTH`, `INVENTORY_PREVIEW_LENGTH`, `COMPACTION_TOKEN_THRESHOLD`), never as tool parameters. When a hidden cap is hit, surface the *consequence* via `hint` / `summary` text so the model can react ("Hit session cap, refine pattern…"), but don't let it tune the cap value. Rationale: every parameter is cognitive overhead for small models, and operator-tunable limits don't need to be model-tunable.
 - Use unified `StreamEventType` from `core/events.py` for all streaming event layers
 - All protected API endpoints use `Depends(get_current_user)`; admin endpoints use `Depends(require_admin)`
 - **ORM instances are short-lived persistence snapshots, not runtime state containers.** In async sessions, ORM attribute access on expired instances triggers implicit IO → `MissingGreenlet`. Rules:

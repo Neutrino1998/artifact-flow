@@ -10,6 +10,8 @@ import { StreamEventType } from '@/types/events';
 import type { SSEEvent, LLMCompleteData } from '@/types/events';
 import * as api from '@/lib/api';
 import { refreshArtifactList } from '@/lib/refreshArtifactList';
+import { autoOpenArtifact } from '@/lib/artifactAutoOpen';
+import { bumpArtifactFetchGen } from '@/lib/artifactFetchGen';
 import { getNavGen } from '@/lib/navGen';
 
 const ARTIFACT_TOOLS = new Set([
@@ -58,6 +60,8 @@ export function useSSE() {
   const setArtifactSessionId = useArtifactStore((s) => s.setSessionId);
   const setArtifacts = useArtifactStore((s) => s.setArtifacts);
   const setArtifactCurrent = useArtifactStore((s) => s.setCurrent);
+  const setArtifactCurrentAuto = useArtifactStore((s) => s.setCurrentAuto);
+  const refreshArtifactCurrent = useArtifactStore((s) => s.refreshCurrent);
   const setArtifactVersions = useArtifactStore((s) => s.setVersions);
   const setSelectedVersion = useArtifactStore((s) => s.setSelectedVersion);
   const addPendingUpdate = useArtifactStore((s) => s.addPendingUpdate);
@@ -79,6 +83,14 @@ export function useSSE() {
       //     populate — would briefly revive abandoned conv before the new
       //     setCurrent overwrites)
       const myNavGen = getNavGen();
+      // Stream just ended — invalidate every in-flight auto-open fetch
+      // unconditionally. Cases this catches that the per-revert bump did
+      // not: the FIRST auto-open from this stream hasn't resolved yet, so
+      // store.current is still null and the auto-selected branch below
+      // wouldn't fire. Without this bump, the late callback would
+      // resurrect the panel after stream end. Costs nothing if there are
+      // no fetches outstanding.
+      bumpArtifactFetchGen();
       try {
         const [detail, list] = await Promise.all([
           api.getConversation(conversationId, { force: true }),
@@ -109,16 +121,27 @@ export function useSSE() {
             () => useArtifactStore.getState().sessionId,
           );
         }
-        const curArtifact = useArtifactStore.getState().current;
+        const { current: curArtifact, autoSelected } = useArtifactStore.getState();
         if (curArtifact && ownsArtifactSession) {
-          api.getArtifact(conversationId, curArtifact.id).then((artDetail) => {
-            // Re-check at resolution: another nav could have fired during
-            // this nested await.
-            if (myNavGen !== getNavGen()) return;
-            setArtifactCurrent(artDetail);
-            setArtifactVersions(artDetail.versions);
-            setSelectedVersion(null);
-          }).catch(() => {});
+          if (autoSelected) {
+            // Stream finished and the panel is on an artifact the agent
+            // auto-opened — revert to list so the user sees the overview.
+            // The list refresh above already loaded the latest artifacts.
+            // (The unconditional bump at the top of this function has
+            // already invalidated any in-flight auto-opens.)
+            setArtifactCurrent(null);
+          } else {
+            // User actively picked this artifact — refresh content but keep
+            // them on it.
+            api.getArtifact(conversationId, curArtifact.id).then((artDetail) => {
+              // Re-check at resolution: another nav could have fired during
+              // this nested await.
+              if (myNavGen !== getNavGen()) return;
+              setArtifactCurrent(artDetail);
+              setArtifactVersions(artDetail.versions);
+              setSelectedVersion(null);
+            }).catch(() => {});
+          }
         }
       } catch (err) {
         console.error('Failed to refresh after complete:', err);
@@ -287,20 +310,17 @@ export function useSSE() {
               const sessionId = conversationId;
               setArtifactSessionId(sessionId);
               setSelectedVersion(null);
-              api.getArtifact(sessionId, artifactId).then((detail) => {
-                const cur = useArtifactStore.getState().current;
-                // User navigated to a different artifact mid-flight — don't
-                // steal focus back from their newer selection. (cur === null
-                // means panel was on list view; auto-open is intended.)
-                if (cur && cur.id !== detail.id) return;
-                // Out-of-order: same id but older version was issued before a
-                // newer GET we already applied. The in-memory cache only ever
-                // advances, so this check is sound.
-                if (cur && cur.current_version > detail.current_version) return;
-                setArtifactCurrent(detail);
-                setArtifactVersions(detail.versions);
-                setSelectedVersion(null);
-              }).catch(() => {});
+              // All the race/ownership logic (per-fetch gen, same-id refresh,
+              // cross-id ownership) lives in `autoOpenArtifact` — see that
+              // helper for the full decision matrix and its unit tests.
+              autoOpenArtifact(sessionId, artifactId, {
+                getCurrent: () => useArtifactStore.getState().current,
+                getAutoSelected: () => useArtifactStore.getState().autoSelected,
+                setCurrentAuto: setArtifactCurrentAuto,
+                refreshCurrent: refreshArtifactCurrent,
+                setVersions: setArtifactVersions,
+                setSelectedVersion: setSelectedVersion,
+              });
             }
           }
 
@@ -453,7 +473,8 @@ export function useSSE() {
       pushSegment, updateCurrentSegment, addToolCallToSegment,
       updateToolCallInSegment, snapshotSegments, setPermissionRequest,
       setError, endStream, refreshAfterComplete, setArtifactPanelVisible,
-      addPendingUpdate, setArtifactSessionId, setArtifactCurrent, setArtifacts,
+      addPendingUpdate, setArtifactSessionId, setArtifactCurrent,
+      setArtifactCurrentAuto, refreshArtifactCurrent, setArtifacts,
       setArtifactVersions, setSelectedVersion,
       pushNonAgentBlock, updateNonAgentBlock, setExecutionMetrics, setCancelled,
     ]

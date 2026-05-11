@@ -15,6 +15,16 @@ interface ArtifactState {
   current: ArtifactDetail | null;
   currentLoading: boolean;
 
+  // True iff `current` was placed there by the SSE auto-open path (i.e. the
+  // agent updated an artifact mid-stream). Cleared the moment the user makes
+  // any explicit pick or the panel is reset to list view. Two consumers:
+  //   - useSSE auto-open: only allows the panel to switch between artifacts
+  //     if the existing current was also auto-set (autoSelected=true) — never
+  //     yanks a user away from an artifact they actively picked.
+  //   - useSSE refreshAfterComplete: at stream end, reverts to list view only
+  //     if current is auto-set; user-picked stays put with refreshed content.
+  autoSelected: boolean;
+
   // Versions
   versions: VersionSummary[];
   selectedVersion: VersionDetail | null;
@@ -37,6 +47,8 @@ interface ArtifactState {
   setArtifacts: (artifacts: ArtifactSummary[]) => void;
   setArtifactsLoading: (loading: boolean) => void;
   setCurrent: (artifact: ArtifactDetail | null) => void;
+  setCurrentAuto: (artifact: ArtifactDetail) => void;
+  refreshCurrent: (artifact: ArtifactDetail) => void;
   setCurrentLoading: (loading: boolean) => void;
   setVersions: (versions: VersionSummary[]) => void;
   setSelectedVersion: (version: VersionDetail | null) => void;
@@ -62,6 +74,7 @@ export const useArtifactStore = create<ArtifactState>((set) => ({
 
   current: null,
   currentLoading: false,
+  autoSelected: false,
 
   versions: [],
   selectedVersion: null,
@@ -80,8 +93,25 @@ export const useArtifactStore = create<ArtifactState>((set) => ({
   setCurrent: (artifact) =>
     set({
       current: artifact,
+      autoSelected: false,
       viewMode: artifact ? defaultViewMode(artifact.content_type) : 'preview',
     }),
+  setCurrentAuto: (artifact) =>
+    set({
+      current: artifact,
+      autoSelected: true,
+      viewMode: defaultViewMode(artifact.content_type),
+    }),
+  // Same-artifact content refresh: write the new ArtifactDetail through
+  // WITHOUT touching `autoSelected` or `viewMode`. Used when a stream
+  // updates the artifact the user currently has open — we must not flip
+  // ownership back to "auto-selected" (which would yank the user to the
+  // list at stream end) and must not reset their chosen view mode (diff,
+  // source, etc). Guarded against accidental cross-id misuse.
+  refreshCurrent: (artifact) =>
+    set((s) =>
+      s.current && s.current.id === artifact.id ? { current: artifact } : s
+    ),
   setCurrentLoading: (loading) => set({ currentLoading: loading }),
   setVersions: (versions) => set({ versions }),
   setSelectedVersion: (version) => set({ selectedVersion: version }),
@@ -101,6 +131,7 @@ export const useArtifactStore = create<ArtifactState>((set) => ({
       sessionId: null,
       artifacts: [],
       current: null,
+      autoSelected: false,
       versions: [],
       selectedVersion: null,
       diffBaseContent: null,
