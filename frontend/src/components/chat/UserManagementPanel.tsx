@@ -5,6 +5,7 @@ import * as api from '@/lib/api';
 import type { UserResponse, DepartmentTreeNode } from '@/types';
 import { useAuthStore } from '@/stores/authStore';
 import { useUIStore } from '@/stores/uiStore';
+import { useLatestOnly } from '@/hooks/useLatestOnly';
 import Checkbox from '@/components/forms/Checkbox';
 
 function flattenDeptNames(nodes: DepartmentTreeNode[], out: Map<string, string>): void {
@@ -38,13 +39,19 @@ export default function UserManagementPanel() {
   const exitSelectionMode = useUIStore((s) => s.exitSelectionMode);
   const toggleUserSelection = useUIStore((s) => s.toggleUserSelection);
   const setUserManagementSelection = useUIStore((s) => s.setUserManagementSelection);
+  const claim = useLatestOnly();
 
   const fetchUsers = useCallback(async (searchQuery: string, offset = 0, append = false) => {
+    // Initial load / debounced search / load-more / listVersion-bump all
+    // funnel through here. Latest-only drops slow older queries (and stale
+    // load-more pages) that would otherwise overwrite a newer result set.
+    const isLatest = claim();
     setLoading(true);
     setError(null);
     try {
       const trimmed = searchQuery.trim() || undefined;
       const res = await api.listUsers(PAGE_SIZE, offset, trimmed);
+      if (!isLatest()) return;
       if (append) {
         setUsers((prev) => [...prev, ...res.users]);
       } else {
@@ -53,11 +60,12 @@ export default function UserManagementPanel() {
       setTotal(res.total);
       setHasMore(offset + res.users.length < res.total);
     } catch (err) {
+      if (!isLatest()) return;
       setError(err instanceof Error ? err.message : '加载用户列表失败');
     } finally {
-      setLoading(false);
+      if (isLatest()) setLoading(false);
     }
-  }, []);
+  }, [claim]);
 
   useEffect(() => {
     fetchUsers('');
