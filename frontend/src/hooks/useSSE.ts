@@ -277,6 +277,24 @@ export function useSSE() {
               }).catch(() => {});
             }
           }
+
+          // Refresh the artifact LIST whenever an artifact has been created or
+          // mutated in this tool turn. Two trigger sources:
+          //   (1) Explicit artifact tools (create / update / rewrite) — fixes
+          //       a pre-existing gap where new agent artifacts didn't appear
+          //       in the list view until stream complete.
+          //   (2) Auto-persist middleware — tool result was saved as artifact;
+          //       result_data carries metadata.persisted_artifact_id.
+          // The REST endpoint overlays the active manager's in-memory cache,
+          // so the new entry shows up before flush_all has run.
+          const metadata = data?.metadata as Record<string, unknown> | undefined;
+          const persistedId = metadata?.persisted_artifact_id as string | undefined;
+          if (success && (ARTIFACT_TOOLS.has(toolName) || persistedId)) {
+            setArtifactSessionId(conversationId);
+            api.listArtifacts(conversationId)
+              .then((artList) => setArtifacts(artList.artifacts))
+              .catch(() => {});
+          }
           break;
         }
 
