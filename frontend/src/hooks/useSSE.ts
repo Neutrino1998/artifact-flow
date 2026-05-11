@@ -72,28 +72,41 @@ export function useSSE() {
           api.getConversation(conversationId, { force: true }),
           api.listConversations(20, 0),
         ]);
-        // Only update current conversation if user is still viewing it
-        // (or viewing no conversation, i.e. the new-conversation flow)
+        // Has the user navigated to a different conversation during the
+        // above await? If so, conversationStore.current.id differs from our
+        // target. We use this same predicate to gate per-conversation
+        // mutations (current detail, artifact list, artifact detail) below
+        // so an old refreshAfterComplete callback can't reclaim a session
+        // the user has already moved on from.
+        // !viewing is treated as "still us" — covers the new-conversation
+        // flow where the user lands on the freshly created conv mid-stream
+        // but the conversation-store cursor hasn't been set yet.
         const viewing = useConversationStore.getState().current?.id;
-        if (!viewing || viewing === conversationId) {
+        const stillOnThisConv = !viewing || viewing === conversationId;
+
+        if (stillOnThisConv) {
           setCurrent(detail);
         }
         setConversations(list.conversations, list.total, list.has_more);
         clearPendingUpdates();
-        // Refresh artifact list unconditionally — user may have navigated back
-        // to the list view mid-stream, so `current` being null does NOT mean
-        // the list is irrelevant. Guarded refresh: shares a generation counter
-        // with mid-stream refreshes, so a slow in-flight mid-stream response
-        // can't overwrite this final state.
-        refreshArtifactList(
-          conversationId,
-          setArtifacts,
-          setArtifactSessionId,
-          () => useArtifactStore.getState().sessionId,
-        );
-        // Refresh detail only if user is still viewing one.
+
+        // Refresh artifact list only if the user is still on this conversation.
+        // The helper's claim-before-await covers in-flight reset; this guard
+        // covers the case where refreshAfterComplete itself is called late
+        // — after the user has already switched away.
+        if (stillOnThisConv) {
+          refreshArtifactList(
+            conversationId,
+            setArtifacts,
+            setArtifactSessionId,
+            () => useArtifactStore.getState().sessionId,
+          );
+        }
+        // Refresh detail only if user is still viewing one AND we're still
+        // on the originating conversation (curArtifact from a different conv
+        // would otherwise produce a cross-session GET).
         const curArtifact = useArtifactStore.getState().current;
-        if (curArtifact) {
+        if (curArtifact && stillOnThisConv) {
           api.getArtifact(conversationId, curArtifact.id).then((artDetail) => {
             setArtifactCurrent(artDetail);
             setArtifactVersions(artDetail.versions);
@@ -104,7 +117,7 @@ export function useSSE() {
         console.error('Failed to refresh after complete:', err);
       }
     },
-    [setCurrent, setConversations, clearPendingUpdates, setArtifactCurrent, setArtifacts, setArtifactVersions, setSelectedVersion]
+    [setCurrent, setConversations, clearPendingUpdates, setArtifactCurrent, setArtifacts, setArtifactSessionId, setArtifactVersions, setSelectedVersion]
   );
 
   const handleEvent = useCallback(
