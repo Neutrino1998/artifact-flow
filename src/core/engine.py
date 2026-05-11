@@ -10,6 +10,7 @@
 """
 
 import asyncio
+import math
 from dataclasses import dataclass, field
 from typing import Dict, Any, Optional, Callable, Awaitable, List, Tuple, TypedDict, Union
 from datetime import datetime
@@ -18,8 +19,9 @@ from config import config
 from core.events import StreamEventType, ExecutionEvent
 from core.context_manager import ContextManager
 from core.compaction_runner import CompactionRunner
+from tools.artifact_envelope import make_preview_slice, render_artifact_slice
 from tools.xml_parser import parse_tool_calls
-from tools.base import ToolPermission, ToolResult
+from tools.base import BaseTool, ToolPermission, ToolResult
 from utils.logger import get_logger
 
 logger = get_logger("ArtifactFlow")
@@ -407,6 +409,61 @@ async def execute_loop(
 
         return True
 
+    async def _maybe_persist_tool_result(
+        tool_name: str, tool: BaseTool, result: ToolResult
+    ) -> ToolResult:
+        """超长成功结果落盘为 artifact，回填预览。
+        其他情况（失败 / 工具关闭持久化 / 长度未超限 / manager 缺失 / 落盘异常）
+        全部 fail-open 返回原结果，不阻断 tool 调用流程。
+        """
+        if not result.success:
+            return result
+        if math.isinf(tool.max_result_size_chars):
+            return result
+        data = result.data or ""
+        if len(data) <= tool.max_result_size_chars:
+            return result
+        if artifact_manager is None or not state.get("session_id"):
+            logger.warning(
+                f"Cannot persist large tool result for '{tool_name}' "
+                f"(size={len(data)}): manager or session unavailable"
+            )
+            return result
+
+        try:
+            aid, version = await artifact_manager.persist_tool_result(
+                session_id=state["session_id"],
+                tool_name=tool_name,
+                content=data,
+            )
+        except Exception as e:
+            logger.exception(f"persist_tool_result failed for '{tool_name}': {e}")
+            return result  # fail-open
+
+        slice = make_preview_slice(
+            artifact_id=aid,
+            version=version,
+            content_type="text/plain",
+            source="tool",
+            title=f"Output of {tool_name}",
+            full_content=data,
+            preview_len=config.TOOL_PERSIST_PREVIEW_LENGTH,
+            hint=(
+                f"Tool output ({len(data)} chars) saved as artifact '{aid}'. "
+                f"Use read_artifact(id='{aid}') for full content; "
+                f"preview shows first {config.TOOL_PERSIST_PREVIEW_LENGTH} chars."
+            ),
+        )
+        return ToolResult(
+            success=True,
+            data=render_artifact_slice(slice),
+            metadata={
+                **(result.metadata or {}),
+                "persisted_artifact_id": aid,
+                "original_size_chars": len(data),
+            },
+        )
+
     async def _execute_tools(tool_calls: list, agent_name: str) -> None:
         """串行执行工具列表，处理权限中断和 subagent 切换。
         call_subagent 延后到最后执行，确保同一轮的常规工具不会被 break 跳过。
@@ -539,6 +596,9 @@ async def execute_loop(
 
             tool_end_time = datetime.now()
             tool_duration_ms = int((tool_end_time - tool_start_time).total_seconds() * 1000)
+
+            # 超长成功结果统一落盘为 artifact，回填预览（fail-open）
+            tool_result = await _maybe_persist_tool_result(tool_name, tool, tool_result)
 
             await _emit(StreamEventType.TOOL_COMPLETE.value, agent_name, {
                 "tool": tool_name,

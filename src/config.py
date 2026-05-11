@@ -33,6 +33,8 @@ class Settings(BaseSettings):
     COMPACTION_TOKEN_THRESHOLD: int = 80000  # tokens, LLM 单次调用 input+output 超此值触发引擎内 compaction
     COMPACTION_TIMEOUT: int = 120            # 秒, 单次 compact LLM 调用超时
     INVENTORY_PREVIEW_LENGTH: int = 200     # artifact 清单内容预览截断长度
+    READ_ARTIFACT_MAX_CHARS: int = 50000    # read_artifact 默认字符上限（隐藏，模型不可见）
+    TOOL_PERSIST_PREVIEW_LENGTH: int = 1000  # 工具结果落盘后回填给模型的预览长度
 
     # Redis（空 = InMemory fallback，非空 = Redis）
     REDIS_URL: str = ""

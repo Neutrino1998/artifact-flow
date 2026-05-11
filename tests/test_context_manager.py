@@ -342,7 +342,7 @@ class TestArtifactsAndAgents:
         assert 'type="text/markdown"' in system_content
 
     def test_task_plan_full_in_dedicated_section_preview_in_inventory(self):
-        """<team_task_plan> wraps full content in <content>; inventory uses <content_preview>."""
+        """<team_task_plan> wraps full content; inventory uses <artifact_slice> with truncated body."""
         agent = _FakeAgentConfig(tools={"create_artifact": "auto", "read_artifact": "auto"})
         long_content = "A" * 300
         artifacts = [
@@ -360,17 +360,22 @@ class TestArtifactsAndAgents:
             artifacts_inventory=artifacts,
         )
         system_content = messages[0]["content"]
-        # <team_task_plan> has full content wrapped in <content>
+        # <team_task_plan> 仍然 wraps full content in <content>（独立 section，不变）
         assert f"<content>\n{long_content}\n</content>" in system_content
-        # inventory uses <content_preview> for truncated, <content> for short
+        # Inventory 用 <artifact_slice> envelope 渲染
         inv_start = system_content.index("<artifacts_inventory>")
         inv_end = system_content.index("</artifacts_inventory>")
         inventory_section = system_content[inv_start:inv_end]
-        assert '<id>task_plan</id>' in inventory_section
-        assert '<content_preview length="200">' in inventory_section
-        assert long_content not in inventory_section
-        # short artifact uses <content> not <content_preview>
-        assert "<content>Short</content>" in inventory_section
+        # task_plan 在 inventory 里被截断为 preview
+        assert '<artifact_slice id="task_plan"' in inventory_section
+        assert 'truncated_by="preview"' in inventory_section
+        assert 'has_more="true"' in inventory_section
+        assert 'shown_chars="200"' in inventory_section
+        assert 'total_chars="300"' in inventory_section
+        assert long_content not in inventory_section  # 全文不应出现在 inventory
+        # 短 artifact: 全文显示，has_more=false
+        assert '<artifact_slice id="doc1"' in inventory_section
+        assert '<title>Document</title>\nShort\n</artifact_slice>' in inventory_section
         assert "2 artifact(s)" in system_content
 
     def test_artifact_tools_show_inventory(self):

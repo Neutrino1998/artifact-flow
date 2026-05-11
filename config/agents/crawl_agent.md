@@ -7,6 +7,8 @@ description: |
   - IMPORTANT: Instructions must include a specific URL to crawl
 tools:
   jina_fetch: confirm
+  read_artifact: auto
+  update_artifact: auto
 model: deepseek-v4-flash-no-thinking
 max_tool_rounds: 3
 ---

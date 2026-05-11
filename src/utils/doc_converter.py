@@ -9,12 +9,20 @@ Supports:
 import asyncio
 import os
 import shutil
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Dict
 
 from utils.logger import get_logger
 
 logger = get_logger("ArtifactFlow")
+
+# PyMuPDF 在 import 时调 mupdf.reinit_singlethreaded()，底层是单线程模式 ——
+# 多线程并发调用会得到错误结果或直接段错误。用专属 single-worker executor
+# 把 PDF 解析序列化掉，event loop 仍然不卡（其他请求继续跑），但 PyMuPDF 调用
+# 永远在同一固定线程上执行，符合上游约束。详见：
+# https://pymupdf.readthedocs.io/en/latest/recipes-multiprocessing.html
+_PYMUPDF_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="pymupdf")
 
 # Extension -> MIME type mapping
 EXTENSION_MIME_MAP: Dict[str, str] = {
@@ -185,27 +193,11 @@ class DocConverter:
 
     async def _convert_pdf(self, file_bytes: bytes, filename: str) -> ConvertResult:
         """Convert .pdf to markdown via pymupdf."""
-        import pymupdf
-
-        doc = pymupdf.open(stream=file_bytes, filetype="pdf")
-        page_count = len(doc)
-
-        if page_count > self.MAX_PDF_PAGES:
-            doc.close()
-            raise ValueError(
-                f"PDF has {page_count} pages (max {self.MAX_PDF_PAGES})"
-            )
-
-        text_parts = []
-        for page_num in range(page_count):
-            page = doc[page_num]
-            text = page.get_text()
-            if text.strip():
-                text_parts.append(f"## Page {page_num + 1}\n\n{text.strip()}")
-
-        doc.close()
-
-        content = "\n\n".join(text_parts)
+        # PyMuPDF 必须串行（见模块顶部 _PYMUPDF_EXECUTOR 注释），同时不卡 event loop
+        loop = asyncio.get_running_loop()
+        content, page_count = await loop.run_in_executor(
+            _PYMUPDF_EXECUTOR, _extract_pdf_text, file_bytes, self.MAX_PDF_PAGES
+        )
         word_count = len(content.split())
 
         return ConvertResult(
@@ -250,3 +242,25 @@ class DocConverter:
                 "word_count": word_count,
             },
         )
+
+
+def _extract_pdf_text(file_bytes: bytes, max_pages: int) -> tuple[str, int]:
+    """Sync pymupdf extraction. Designed to run inside asyncio.to_thread."""
+    import pymupdf
+
+    doc = pymupdf.open(stream=file_bytes, filetype="pdf")
+    try:
+        page_count = len(doc)
+        if page_count > max_pages:
+            raise ValueError(f"PDF has {page_count} pages (max {max_pages})")
+
+        text_parts = []
+        for page_num in range(page_count):
+            page = doc[page_num]
+            text = page.get_text()
+            if text.strip():
+                text_parts.append(f"## Page {page_num + 1}\n\n{text.strip()}")
+
+        return "\n\n".join(text_parts), page_count
+    finally:
+        doc.close()

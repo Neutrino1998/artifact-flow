@@ -7,13 +7,7 @@ import { useArtifactStore } from '@/stores/artifactStore';
 import { useSSE } from '@/hooks/useSSE';
 import type { ChatRequest } from '@/types';
 import * as api from '@/lib/api';
-
-// Module-level monotonic counter shared across all useChat() instances.
-// switchConversation captures the value at entry; if a later switch (from
-// any component, including startNewChat) bumps the counter while we're
-// awaiting getConversation, the late response is dropped instead of
-// rewriting current/SSE on top of the user's newer selection.
-let _switchGen = 0;
+import { getNavGen, bumpNavGen } from '@/lib/navGen';
 
 export function useChat() {
   const current = useConversationStore((s) => s.current);
@@ -85,7 +79,7 @@ export function useChat() {
   const switchConversation = useCallback(
     async (id: string) => {
       if (id === current?.id) return;
-      const myGen = ++_switchGen;
+      const myGen = bumpNavGen();
       disconnect();
       resetStream();
       resetArtifacts();
@@ -96,14 +90,14 @@ export function useChat() {
         // awaiting — our setCurrent/reconnect would clobber that newer
         // selection. Bail. setCurrentLoading is also gated on myGen so we
         // don't race against the latest switch's loading flag.
-        if (myGen !== _switchGen) return;
+        if (myGen !== getNavGen()) return;
         setCurrent(detail);
         reconnectIfActive(id);
       } catch (err) {
-        if (myGen !== _switchGen) return;
+        if (myGen !== getNavGen()) return;
         console.error('Failed to load conversation:', err);
       } finally {
-        if (myGen === _switchGen) {
+        if (myGen === getNavGen()) {
           setCurrentLoading(false);
         }
       }
@@ -112,15 +106,17 @@ export function useChat() {
   );
 
   // Drop into the new-conversation flow: same teardown as switchConversation
-  // but no detail to load, current goes to null. Bumping _switchGen here
-  // invalidates any in-flight switchConversation so its late getConversation
-  // response can't rewrite current back to a stale selection. We also clear
-  // currentLoading explicitly: an invalidated switchConversation will skip
-  // its `setCurrentLoading(false)` in finally (gen mismatch), and the new
-  // chat semantically has nothing loading, so this is the right place to
-  // ensure the chat panel doesn't get stuck on the loading placeholder.
+  // but no detail to load, current goes to null. Bumping nav-gen here
+  // invalidates any in-flight switchConversation (its late getConversation
+  // response can't rewrite current back to a stale selection) AND any
+  // in-flight useSSE.refreshAfterComplete (its late setCurrent(detail) can't
+  // revive an abandoned conversation). We also clear currentLoading
+  // explicitly: an invalidated switchConversation will skip its
+  // `setCurrentLoading(false)` in finally (gen mismatch), and the new chat
+  // semantically has nothing loading, so this is the right place to ensure
+  // the chat panel doesn't get stuck on the loading placeholder.
   const startNewChat = useCallback(() => {
-    _switchGen++;
+    bumpNavGen();
     disconnect();
     resetStream();
     resetArtifacts();

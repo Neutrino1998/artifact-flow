@@ -78,7 +78,8 @@ async def login(
 ):
     """用户登录，返回 JWT Token"""
     user = await user_repo.get_by_username(request.username)
-    if not user or not verify_password(request.password, user.hashed_password):
+    # bcrypt 是 CPU bound (~250ms)；丢线程池避免卡 event loop 影响其他用户的 SSE 流
+    if not user or not await asyncio.to_thread(verify_password, request.password, user.hashed_password):
         raise HTTPException(status_code=401, detail="Invalid username or password")
 
     if not user.is_active:
@@ -125,10 +126,10 @@ async def change_my_password(
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
-    if not verify_password(request.current_password, user.hashed_password):
+    if not await asyncio.to_thread(verify_password, request.current_password, user.hashed_password):
         raise HTTPException(status_code=400, detail="Current password is incorrect")
 
-    user.hashed_password = hash_password(request.new_password)
+    user.hashed_password = await asyncio.to_thread(hash_password, request.new_password)
     user.password_version = (user.password_version or 0) + 1
     await user_repo.update(user)
 
@@ -190,10 +191,11 @@ async def create_user(
         if dept is None:
             raise HTTPException(status_code=400, detail="department_id does not reference an existing department")
 
+    hashed = await asyncio.to_thread(hash_password, request.password)
     user = User(
         id=f"user-{uuid4().hex}",
         username=request.username,
-        hashed_password=hash_password(request.password),
+        hashed_password=hashed,
         display_name=request.display_name,
         role=request.role,
         department_id=request.department_id,
@@ -453,7 +455,7 @@ async def update_user(
                 status_code=403,
                 detail="Use POST /auth/me/password to change your own password",
             )
-        user.hashed_password = hash_password(request.password)
+        user.hashed_password = await asyncio.to_thread(hash_password, request.password)
         # admin 重置密码同样吊销该用户的旧 token
         user.password_version = (user.password_version or 0) + 1
     if request.role is not None:

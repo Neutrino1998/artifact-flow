@@ -24,6 +24,13 @@ from .xml_formatter import (
     format_result,
 )
 
+# Artifact envelope 公共渲染器
+from .artifact_envelope import (
+    ArtifactSlice,
+    render_artifact_slice,
+    make_preview_slice,
+)
+
 # 具体工具实现
 from .builtin import *
 
@@ -42,6 +49,11 @@ __all__ = [
     # XML格式化
     "generate_tool_instruction",
     "format_result",
+
+    # Artifact envelope
+    "ArtifactSlice",
+    "render_artifact_slice",
+    "make_preview_slice",
 
     # 内置工具（从builtin导入）
     "WebSearchTool",

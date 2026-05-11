@@ -14,6 +14,7 @@ from datetime import datetime
 
 from config import config
 from core.event_history import build_event_history
+from tools.artifact_envelope import make_preview_slice, render_artifact_slice
 from utils.logger import get_logger
 
 logger = get_logger("ArtifactFlow")
@@ -121,38 +122,30 @@ class ContextManager:
         return None
 
     @classmethod
-    def _preview_content(cls, content: str) -> str:
-        """截断内容为 inventory 预览长度"""
-        if len(content) > config.INVENTORY_PREVIEW_LENGTH:
-            return content[:config.INVENTORY_PREVIEW_LENGTH] + "..."
-        return content
-
-    @classmethod
     def _build_artifacts_inventory(cls, artifacts_inventory: List[Dict]) -> str:
-        """构建 artifacts 清单部分（内容截断为预览）"""
+        """构建 artifacts 清单部分（每个 artifact 用 render_artifact_slice 渲染预览）"""
         count = len(artifacts_inventory)
         lines = [f'{count} artifact(s) in this session.']
         lines.append('<artifacts_inventory>')
         for artifact in artifacts_inventory:
-            source = artifact.get("source", "agent")
-            lines.append(
-                f'<artifact version="{artifact["version"]}" '
-                f'type="{artifact["content_type"]}" '
-                f'source="{source}" updated="{artifact["updated_at"]}">'
+            slice = make_preview_slice(
+                artifact_id=artifact["id"],
+                version=artifact["version"],
+                content_type=artifact["content_type"],
+                source=artifact.get("source", "agent"),
+                title=artifact["title"],
+                full_content=artifact.get("content", ""),
+                preview_len=config.INVENTORY_PREVIEW_LENGTH,
+                updated_at=artifact["updated_at"],
             )
-            lines.append(f'<id>{artifact["id"]}</id>')
-            lines.append(f'<title>{artifact["title"]}</title>')
-            content = artifact.get("content", "")
-            preview = cls._preview_content(content)
-            is_truncated = len(content) > config.INVENTORY_PREVIEW_LENGTH
-            if is_truncated:
-                lines.append(f'<content_preview length="{config.INVENTORY_PREVIEW_LENGTH}">{preview}</content_preview>')
-            else:
-                lines.append(f'<content>{content}</content>')
-            lines.append('</artifact>')
+            lines.append(render_artifact_slice(slice))
         lines.append(
             '\nArtifacts with source: user_upload are documents uploaded by the user '
             '— use `read_artifact` for full content if relevant.'
+        )
+        lines.append(
+            'Artifacts with source: tool are outputs from tools that exceeded the '
+            'inline result size limit — use `read_artifact` for full content if needed.'
         )
         lines.append('</artifacts_inventory>')
         return '\n'.join(lines)

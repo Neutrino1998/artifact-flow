@@ -9,6 +9,8 @@ import { connectSSE } from '@/lib/sse';
 import { StreamEventType } from '@/types/events';
 import type { SSEEvent, LLMCompleteData } from '@/types/events';
 import * as api from '@/lib/api';
+import { refreshArtifactList } from '@/lib/refreshArtifactList';
+import { getNavGen } from '@/lib/navGen';
 
 const ARTIFACT_TOOLS = new Set([
   'create_artifact',
@@ -66,29 +68,53 @@ export function useSSE() {
 
   const refreshAfterComplete = useCallback(
     async (conversationId: string) => {
+      // Capture nav-gen BEFORE the await. Both startNewChat() and
+      // switchConversation() bump this synchronously on entry, so any
+      // navigation event during our await leaves myNavGen != getNavGen().
+      // This is the only reliable "user navigated away" signal because
+      // current?.id is null in three indistinguishable scenarios:
+      //   - first-message new conv (legit, should populate)
+      //   - startNewChat (user explicitly left, MUST NOT populate)
+      //   - switchConversation handoff (user picked another conv, MUST NOT
+      //     populate — would briefly revive abandoned conv before the new
+      //     setCurrent overwrites)
+      const myNavGen = getNavGen();
       try {
         const [detail, list] = await Promise.all([
           api.getConversation(conversationId, { force: true }),
           api.listConversations(20, 0),
         ]);
-        // Only update current conversation if user is still viewing it
-        // (or viewing no conversation, i.e. the new-conversation flow)
-        const viewing = useConversationStore.getState().current?.id;
-        if (!viewing || viewing === conversationId) {
-          setCurrent(detail);
-        }
+        // Sidebar list refresh is harmless cross-conversation, so always apply.
         setConversations(list.conversations, list.total, list.has_more);
+
+        // Everything below mutates state that belongs to "the conversation
+        // the user is on". A nav-gen change means they aren't on this conv
+        // anymore — drop the whole detail/artifact write path.
+        if (myNavGen !== getNavGen()) return;
+
+        setCurrent(detail);
         clearPendingUpdates();
-        // Refresh artifact list unconditionally — user may have navigated back
-        // to the list view mid-stream, so `current` being null does NOT mean
-        // the list is irrelevant.
-        api.listArtifacts(conversationId)
-          .then((artList) => setArtifacts(artList.artifacts))
-          .catch(() => {});
-        // Refresh detail only if user is still viewing one.
+
+        // Artifact refresh is further gated by artifactStore.sessionId so
+        // that conversations without artifact tools don't trigger a useless
+        // GET. Nav-gen guard above already ensured we're still on this conv.
+        const artifactSession = useArtifactStore.getState().sessionId;
+        const ownsArtifactSession = artifactSession === conversationId;
+
+        if (ownsArtifactSession) {
+          refreshArtifactList(
+            conversationId,
+            setArtifacts,
+            setArtifactSessionId,
+            () => useArtifactStore.getState().sessionId,
+          );
+        }
         const curArtifact = useArtifactStore.getState().current;
-        if (curArtifact) {
+        if (curArtifact && ownsArtifactSession) {
           api.getArtifact(conversationId, curArtifact.id).then((artDetail) => {
+            // Re-check at resolution: another nav could have fired during
+            // this nested await.
+            if (myNavGen !== getNavGen()) return;
             setArtifactCurrent(artDetail);
             setArtifactVersions(artDetail.versions);
             setSelectedVersion(null);
@@ -98,7 +124,7 @@ export function useSSE() {
         console.error('Failed to refresh after complete:', err);
       }
     },
-    [setCurrent, setConversations, clearPendingUpdates, setArtifactCurrent, setArtifacts, setArtifactVersions, setSelectedVersion]
+    [setCurrent, setConversations, clearPendingUpdates, setArtifactCurrent, setArtifacts, setArtifactSessionId, setArtifactVersions, setSelectedVersion]
   );
 
   const handleEvent = useCallback(
@@ -276,6 +302,31 @@ export function useSSE() {
                 setSelectedVersion(null);
               }).catch(() => {});
             }
+          }
+
+          // Refresh the artifact LIST whenever an artifact has been created or
+          // mutated in this tool turn. Two trigger sources:
+          //   (1) Explicit artifact tools (create / update / rewrite) — fixes
+          //       a pre-existing gap where new agent artifacts didn't appear
+          //       in the list view until stream complete.
+          //   (2) Auto-persist middleware — tool result was saved as artifact;
+          //       result_data carries metadata.persisted_artifact_id.
+          // The REST endpoint overlays the active manager's in-memory cache,
+          // so the new entry shows up before flush_all has run.
+          // Guarded refresh: rapid back-to-back tool completions in one turn
+          // can otherwise produce out-of-order responses overwriting newer
+          // state with older snapshots.
+          const metadata = data?.metadata as Record<string, unknown> | undefined;
+          const persistedId = metadata?.persisted_artifact_id as string | undefined;
+          if (success && (ARTIFACT_TOOLS.has(toolName) || persistedId)) {
+            // refreshArtifactList handles the session-id stamping internally
+            // (claim-before-await), so no separate setArtifactSessionId here.
+            refreshArtifactList(
+              conversationId,
+              setArtifacts,
+              setArtifactSessionId,
+              () => useArtifactStore.getState().sessionId,
+            );
           }
           break;
         }

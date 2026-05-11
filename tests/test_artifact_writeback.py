@@ -31,6 +31,276 @@ def artifact_manager(artifact_repo: ArtifactRepository) -> ArtifactManager:
     return ArtifactManager(artifact_repo)
 
 
+class TestReadArtifactInMemoryVersion:
+    """显式 version=N 读取需要识别 in-memory 当前版本，否则刚持久化但未 flush
+    的 artifact 用 envelope 里看到的 version=1 调用会 404。
+    """
+
+    async def test_explicit_version_matches_in_memory(
+        self, artifact_manager: ArtifactManager, session_id: str
+    ):
+        """刚创建未 flush 的 artifact，version=1 读取应命中内存。"""
+        artifact_manager.set_session(session_id)
+        ok, _ = await artifact_manager.create_artifact(
+            session_id=session_id, artifact_id="doc1",
+            content_type="text/plain", title="T", content="hello",
+        )
+        assert ok
+
+        # 显式 version=1（envelope 里看到的版本号）应返回内存内容
+        result = await artifact_manager.read_artifact(
+            session_id=session_id, artifact_id="doc1", version=1
+        )
+        assert result is not None
+        assert result["content"] == "hello"
+        assert result["version"] == 1
+
+    async def test_explicit_version_after_flush(
+        self, artifact_manager: ArtifactManager, session_id: str
+    ):
+        """flush 后显式 version=1 走 DB 路径，仍能拿到内容。"""
+        artifact_manager.set_session(session_id)
+        await artifact_manager.create_artifact(
+            session_id=session_id, artifact_id="doc2",
+            content_type="text/plain", title="T", content="v1 content",
+        )
+        await artifact_manager.flush_all(session_id)
+
+        result = await artifact_manager.read_artifact(
+            session_id=session_id, artifact_id="doc2", version=1
+        )
+        assert result is not None
+        assert result["content"] == "v1 content"
+
+    async def test_explicit_nonexistent_version_returns_none(
+        self, artifact_manager: ArtifactManager, session_id: str
+    ):
+        """请求一个从未存在过的版本号 → None（404）。"""
+        artifact_manager.set_session(session_id)
+        await artifact_manager.create_artifact(
+            session_id=session_id, artifact_id="doc3",
+            content_type="text/plain", title="T", content="x",
+        )
+
+        # 内存里只有 v1，请求 v99 应该是 None
+        result = await artifact_manager.read_artifact(
+            session_id=session_id, artifact_id="doc3", version=99
+        )
+        assert result is None
+
+
+class TestPersistToolResult:
+    """persist_tool_result 必须扛住任意 tool_name（长名 / 非法字符）。
+
+    回归测试：早期 ID 校验加上后，长 tool_name 会让 persist_tool_result
+    生成超 64 字符的 ID 然后 RuntimeError，引擎中间件 fail-open 把原始
+    超长内容塞回 context——这恰恰是该机制要防的。
+    """
+
+    async def test_long_tool_name(
+        self, artifact_manager: ArtifactManager, session_id: str
+    ):
+        artifact_manager.set_session(session_id)
+        long_name = "very_long_custom_http_tool_name_" * 3  # ~96 chars
+        aid, version = await artifact_manager.persist_tool_result(
+            session_id=session_id, tool_name=long_name, content="x" * 1000,
+        )
+        assert len(aid) <= 64
+        assert aid.startswith("tool_")
+        assert version == 1
+
+    async def test_tool_name_with_special_chars(
+        self, artifact_manager: ArtifactManager, session_id: str
+    ):
+        """MCP 工具名常含 `:`、`.`，自定义工具可能含 `/` 等。"""
+        artifact_manager.set_session(session_id)
+        names = [
+            "mcp:server:tool",
+            "mcp__github__create_issue",
+            "weird/tool name with spaces",
+            "tool.with.dots",
+        ]
+        for name in names:
+            aid, _ = await artifact_manager.persist_tool_result(
+                session_id=session_id, tool_name=name, content="x",
+            )
+            # ID 通过 create_artifact 校验意味着只含 [\w\-.]
+            import re
+            assert re.match(r"^[\w\-.]{1,64}$", aid), f"invalid id for {name!r}: {aid}"
+
+    async def test_short_tool_name_unchanged_in_id(
+        self, artifact_manager: ArtifactManager, session_id: str
+    ):
+        artifact_manager.set_session(session_id)
+        aid, _ = await artifact_manager.persist_tool_result(
+            session_id=session_id, tool_name="web_fetch", content="x",
+        )
+        assert aid.startswith("tool_web_fetch_")
+
+    async def test_metadata_preserves_original_tool_name(
+        self, artifact_manager: ArtifactManager, session_id: str
+    ):
+        """sanitize 后的名字进 ID，但原始名字必须留在 metadata 里供审计。"""
+        artifact_manager.set_session(session_id)
+        original = "mcp:server:tool"
+        aid, _ = await artifact_manager.persist_tool_result(
+            session_id=session_id, tool_name=original, content="x",
+        )
+        # 从 manager 缓存里读 metadata
+        memory = artifact_manager._cache[session_id][aid]
+        assert memory.metadata["tool_name"] == original
+
+
+class TestCreateFromUpload:
+    """create_from_upload 也必须满足 _ARTIFACT_ID_PATTERN（之前漏校验，
+    长文件名会让 ID 超 64 字符进 DB）。"""
+
+    async def test_long_filename_normalized(
+        self, artifact_manager: ArtifactManager, session_id: str
+    ):
+        # 80 字符的 base name + .txt 扩展名
+        long_filename = ("a" * 80) + ".txt"
+        ok, _, info = await artifact_manager.create_from_upload(
+            session_id=session_id, filename=long_filename,
+            content="hello", content_type="text/plain",
+        )
+        assert ok
+        aid = info["id"]
+        assert len(aid) <= 64
+        # 扩展名应被保留
+        assert aid.endswith(".txt")
+        import re
+        assert re.match(r"^[\w\-.]{1,64}$", aid)
+
+    async def test_filename_with_special_chars(
+        self, artifact_manager: ArtifactManager, session_id: str
+    ):
+        ok, _, info = await artifact_manager.create_from_upload(
+            session_id=session_id, filename="report (final) v2!.txt",
+            content="x", content_type="text/plain",
+        )
+        assert ok
+        import re
+        assert re.match(r"^[\w\-.]{1,64}$", info["id"])
+
+    async def test_dedup_suffix_stays_within_cap(
+        self, artifact_manager: ArtifactManager, session_id: str
+    ):
+        """长文件名连续上传同名，dedup 后 ID 仍 ≤ 64。"""
+        long_filename = ("b" * 70) + ".txt"
+        ids = []
+        for _ in range(3):
+            ok, _, info = await artifact_manager.create_from_upload(
+                session_id=session_id, filename=long_filename,
+                content="x", content_type="text/plain",
+            )
+            assert ok, info
+            assert len(info["id"]) <= 64
+            ids.append(info["id"])
+        # 三个 ID 必须互不相同
+        assert len(set(ids)) == 3
+
+    async def test_all_punctuation_filename(
+        self, artifact_manager: ArtifactManager, session_id: str
+    ):
+        """全标点文件名 → 全部变 _，仍合法（_ 是 \\w）不触发 'upload' fallback。"""
+        ok, _, info = await artifact_manager.create_from_upload(
+            session_id=session_id, filename="!!!@@@",
+            content="x", content_type="text/plain",
+        )
+        assert ok
+        import re
+        assert re.match(r"^[\w\-.]{1,64}$", info["id"])
+        assert info["id"] == "______"  # 6 个 _
+
+    async def test_empty_filename_sanitized(
+        self, artifact_manager: ArtifactManager, session_id: str
+    ):
+        """空文件名 → 走 fallback 'upload'。"""
+        ok, _, info = await artifact_manager.create_from_upload(
+            session_id=session_id, filename="",
+            content="x", content_type="text/plain",
+        )
+        assert ok
+        assert info["id"] == "upload"
+
+    async def test_chinese_filename_preserved(
+        self, artifact_manager: ArtifactManager, session_id: str
+    ):
+        """中文文件名：Python 3 默认 \\w 是 Unicode-aware，中文应被保留。
+
+        Regression guard：如果以后有人加了 re.ASCII 或改了正则，中文会
+        全部变成 _，让所有中文上传变成相同 ID 互相 dedup 冲突。
+        """
+        ok, _, info = await artifact_manager.create_from_upload(
+            session_id=session_id, filename="季度报告.txt",
+            content="x", content_type="text/plain",
+        )
+        assert ok
+        # 中文字符必须保留，不能变 _
+        assert "季度报告" in info["id"]
+        assert info["id"].endswith(".txt")
+        # 同时仍满足 ID pattern
+        import re
+        assert re.match(r"^[\w\-.]{1,64}$", info["id"])
+
+    async def test_chinese_filename_with_punctuation(
+        self, artifact_manager: ArtifactManager, session_id: str
+    ):
+        """中文 + 标点符号：中文保留，全角 / 半角标点变 _。"""
+        ok, _, info = await artifact_manager.create_from_upload(
+            session_id=session_id, filename="报告（V2）.txt",
+            content="x", content_type="text/plain",
+        )
+        assert ok
+        # 中文保留，全角括号变 _
+        assert "报告" in info["id"]
+        assert "v2" in info["id"]  # .lower() 把 V2 → v2
+        assert "（" not in info["id"]
+        assert "）" not in info["id"]
+
+
+class TestArtifactIdValidation:
+    """Layer A: create_artifact 校验 id，避免脏字符流入 envelope attribute。"""
+
+    @pytest.mark.parametrize("bad_id", [
+        'evil"id',          # 引号会破 envelope attribute 边界
+        "with space",       # 空格
+        "with<gt",          # 角括号
+        "with&amp",         # & 字符
+        "",                 # 空串
+        "x" * 65,           # 超长（上限 64）
+    ])
+    async def test_invalid_id_rejected(
+        self, artifact_manager: ArtifactManager, session_id: str, bad_id: str,
+    ):
+        artifact_manager.set_session(session_id)
+        ok, msg = await artifact_manager.create_artifact(
+            session_id=session_id, artifact_id=bad_id,
+            content_type="text/plain", title="t", content="x",
+        )
+        assert not ok, f"expected reject for {bad_id!r}"
+        assert "Invalid artifact_id" in msg
+
+    @pytest.mark.parametrize("good_id", [
+        "task_plan",
+        "doc-1",
+        "report.v2",
+        "tool_web_fetch_a3b9c1d2e4f5",
+        "x",  # 单字符
+        "x" * 64,  # 上限
+    ])
+    async def test_valid_id_accepted(
+        self, artifact_manager: ArtifactManager, session_id: str, good_id: str,
+    ):
+        artifact_manager.set_session(session_id)
+        ok, msg = await artifact_manager.create_artifact(
+            session_id=session_id, artifact_id=good_id,
+            content_type="text/plain", title="t", content="x",
+        )
+        assert ok, msg
+
+
 class TestWriteBackFlush:
     """Verify that flush_all collapses in-memory edits into a single DB version."""
 

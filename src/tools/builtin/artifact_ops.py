@@ -1,7 +1,9 @@
 """Artifact 操作工具和管理器（ArtifactManager + write-back cache）"""
 
+import math
+import secrets
 from typing import Dict, Any, Optional, List, Tuple
-from datetime import datetime
+from datetime import datetime, timezone
 from dataclasses import dataclass, field
 import re
 import unicodedata
@@ -9,10 +11,17 @@ from fuzzysearch import find_near_matches
 
 from sqlalchemy.exc import IntegrityError
 
+from config import config
+from tools.artifact_envelope import (
+    ArtifactSlice,
+    render_artifact_slice,
+    make_preview_slice,
+)
 from tools.base import BaseTool, ToolResult, ToolParameter, ToolPermission
 from repositories.artifact_repo import ArtifactRepository
 from repositories.base import NotFoundError, DuplicateError
 from utils.logger import get_logger
+from utils.text_slicing import count_lines, slice_lines_by_offset_limit
 
 logger = get_logger("ArtifactFlow")
 
@@ -23,6 +32,33 @@ def _truncate_middle(text: str, max_len: int = 200) -> str:
         return text
     half = (max_len - 5) // 2  # 5 chars for "\n...\n"
     return text[:half] + "\n...\n" + text[-half:]
+
+
+# Artifact ID 合法字符集：letter/digit/underscore + hyphen + dot，1-64 字符。
+# envelope renderer 依赖此前提把 id 当受控值放入 XML attribute；create_artifact
+# 入口校验，create_from_upload / persist_tool_result 通过 sanitize 保证生成
+# 的 ID 满足该 pattern。
+_ARTIFACT_ID_PATTERN = re.compile(r"^[\w\-.]{1,64}$")
+
+
+def _normalize_filename_to_id(filename: str, max_base_len: int = 56) -> str:
+    """文件名 → 合法 artifact_id base。
+
+    保留扩展名（如果短），预留 8 字符给 dedup suffix（_NNNN.ext）让最终 ID
+    仍在 64 字符内。全 Unicode 文件名降级为 "upload"。
+    """
+    base = re.sub(r'[^\w\-.]', '_', filename).lower()
+    if not base:
+        base = "upload"
+    if len(base) <= max_base_len:
+        return base
+    name_part, dot, ext_part = base.rpartition('.')
+    # 短扩展名保留：keep + '.' + ext == max_base_len
+    if name_part and dot and 1 <= len(ext_part) <= 10:
+        keep = max_base_len - len(ext_part) - 1
+        if keep >= 1:
+            return name_part[:keep] + '.' + ext_part
+    return base[:max_base_len]
 
 
 # CJK Unicode ranges for normalization
@@ -470,6 +506,14 @@ class ArtifactManager:
         """
         创建新的 Artifact（只写内存，flush_all 时持久化）
         """
+        # ID 校验：限制为 word/hyphen/dot，1-64 字符。这是 envelope renderer
+        # 把 id 放入 attribute 的安全前提，也和 create_from_upload 的 sanitize
+        # 规则保持一致。
+        if not _ARTIFACT_ID_PATTERN.match(artifact_id):
+            return False, (
+                f"Invalid artifact_id '{artifact_id}': must be 1-64 chars of "
+                f"letters/digits/underscore/hyphen/dot only."
+            )
         try:
             # 确保 session 存在
             await self.ensure_session_exists(session_id)
@@ -512,6 +556,45 @@ class ArtifactManager:
             logger.exception(f"Failed to create artifact: {e}")
             return False, f"Failed to create artifact: {str(e)}"
 
+    async def persist_tool_result(
+        self,
+        session_id: str,
+        tool_name: str,
+        content: str,
+    ) -> Tuple[str, int]:
+        """
+        把超长工具结果持久化为 artifact，返回 (artifact_id, version)。
+
+        由引擎中间件调用（见 core/engine.py）。content_type 固定 text/plain，
+        source 固定 "tool"。artifact_id 自动生成，避免和用户/agent 命名冲突。
+
+        tool_name 可能含非法字符（MCP 工具的 `:`、`.`）或过长（自定义 HTTP
+        工具名 50+ 字符），都会让 create_artifact 的 ID 校验拒绝。这里先
+        sanitize + truncate 到安全范围，保证持久化路径不会因为名字格式问题
+        fail-open 到原文回填——那是这个机制最不该出现的失败模式。
+        """
+        suffix = secrets.token_hex(6)  # 12 hex chars
+        # 字符预算：64 - len("tool_") - len("_") - 12 = 46，留余量到 40
+        safe_name = re.sub(r"[^\w\-.]", "_", tool_name)[:40]
+        artifact_id = f"tool_{safe_name}_{suffix}"
+        title = f"Output of {tool_name}"  # title 不受 ID 规则约束
+        metadata = {
+            "tool_name": tool_name,  # metadata 保留原始名字便于审计
+            "persisted_at": datetime.now(timezone.utc).isoformat(),
+        }
+        success, message = await self.create_artifact(
+            session_id=session_id,
+            artifact_id=artifact_id,
+            content_type="text/plain",
+            title=title,
+            content=content,
+            metadata=metadata,
+            source="tool",
+        )
+        if not success:
+            raise RuntimeError(f"persist_tool_result failed: {message}")
+        return artifact_id, 1
+
     async def create_from_upload(
         self,
         session_id: str,
@@ -524,9 +607,8 @@ class ArtifactManager:
         Create artifact from user-uploaded file.
         Uploads are committed immediately (not deferred to flush_all).
         """
-        # Generate artifact_id from filename (allow Unicode letters/digits)
-        base = re.sub(r'[^\w\-.]', '_', filename)
-        artifact_id = base.lower()
+        # Generate base artifact_id from filename，保证 ≤ 56 字符 + 合法字符集
+        artifact_id = _normalize_filename_to_id(filename)
 
         # Deduplicate: if ID already exists, append suffix
         repo = self._ensure_repository()
@@ -542,6 +624,14 @@ class ArtifactManager:
                 artifact_id = f"{name_part}_{suffix}.{ext_part}"
             else:
                 artifact_id = f"{original_id}_{suffix}"
+
+        # 最终守门员：理论上 normalize + dedup（≤4 位后缀）总 ≤ 64，但留个
+        # 防御性检查避免万一边界 bug 让脏 ID 进 DB
+        if not _ARTIFACT_ID_PATTERN.match(artifact_id):
+            return False, (
+                f"Generated invalid artifact_id from filename {filename!r}: "
+                f"{artifact_id!r} (must match {_ARTIFACT_ID_PATTERN.pattern})"
+            ), None
 
         # Title from filename (without extension)
         import os
@@ -698,12 +788,29 @@ class ArtifactManager:
                 "updated_at": memory.updated_at.isoformat()
             }
         else:
+            # 显式 version 读取：优先匹配 in-memory current_version。
+            # 否则 read 一个还没 flush 的 artifact（如刚 web_fetch 持久化的）
+            # 用它 envelope 里看到的 version=1 会 404，模型困惑。
+            memory = await self.get_artifact(session_id, artifact_id)
+            if memory and memory.current_version == version:
+                return {
+                    "id": memory.id,
+                    "content_type": memory.content_type,
+                    "title": memory.title,
+                    "content": memory.content,
+                    "version": memory.current_version,
+                    "source": memory.source,
+                    "original_filename": (memory.metadata or {}).get("original_filename"),
+                    "created_at": memory.created_at.isoformat(),
+                    "updated_at": memory.updated_at.isoformat()
+                }
+
+            # 不是当前版本 → 走 DB 取历史版本快照
             repo = self._ensure_repository()
             content = await repo.get_version_content(session_id, artifact_id, version)
             if content is None:
                 return None
 
-            memory = await self.get_artifact(session_id, artifact_id)
             return {
                 "id": artifact_id,
                 "content_type": memory.content_type if memory else "unknown",
@@ -1117,8 +1224,16 @@ class ReadArtifactTool(BaseTool):
     def __init__(self, manager: Optional[ArtifactManager] = None):
         super().__init__(
             name="read_artifact",
-            description="Read full artifact content. Artifact inventory only shows previews — use this for complete content.",
-            permission=ToolPermission.AUTO
+            description=(
+                "Read artifact content with optional line-based pagination. "
+                "Returns content wrapped in <artifact_slice> with metadata "
+                "(shown_lines/total_lines/has_more). When has_more=true, use "
+                "the offset hint to read the next slice."
+            ),
+            permission=ToolPermission.AUTO,
+            # Infinity = 永不落盘。read_artifact 自身的输出若被中间件再次落盘，
+            # 会形成 Read→artifact→Read 循环。
+            max_result_size_chars=math.inf,
         )
         self._manager = manager
 
@@ -1140,7 +1255,24 @@ class ReadArtifactTool(BaseTool):
                 description="Version number (optional, defaults to latest)",
                 required=False,
                 default=None
-            )
+            ),
+            ToolParameter(
+                name="offset",
+                type="integer",
+                description="1-indexed start line (omit to read from line 1)",
+                required=False,
+                default=1,
+            ),
+            ToolParameter(
+                name="limit",
+                type="integer",
+                description=(
+                    "Maximum lines to read (omit to read until built-in size cap). "
+                    "Use the offset hint from a prior call to continue reading large artifacts."
+                ),
+                required=False,
+                default=None,
+            ),
         ]
 
     async def execute(self, **params) -> ToolResult:
@@ -1163,25 +1295,54 @@ class ReadArtifactTool(BaseTool):
                 return ToolResult(success=False, error=f"Version {version} not found")
             return ToolResult(success=False, error=f"Artifact '{params['id']}' not found")
 
-        # result is a dict from ArtifactManager.read_artifact
         artifact_id = result.get("id", "")
         content_type = result.get("content_type", "")
         title = result.get("title", "")
-        version_num = result.get("version", "")
+        version_num = result.get("version", 1)
         source = result.get("source", "agent")
         updated_at = result.get("updated_at", "")
-        content = result.get("content", "")
+        content = result.get("content", "") or ""
 
-        # 受控值 → attribute; 用户文本 → 子元素（与 inventory 格式一致）
-        xml = (
-            f'<artifact version="{version_num}" type="{content_type}"'
-            f' source="{source}" updated="{updated_at}">\n'
-            f'<id>{artifact_id}</id>\n'
-            f'<title>{title}</title>\n'
-            f'{content}\n'
-            f'</artifact>'
+        offset = params.get("offset") or 1
+        limit = params.get("limit")  # None = 读到 char_cap
+        explicit_version = params.get("version")  # None = latest
+
+        body, shown_lines, truncated_by, has_more = slice_lines_by_offset_limit(
+            content,
+            offset=offset,
+            limit=limit,
+            char_cap=config.READ_ARTIFACT_MAX_CHARS,
         )
-        return ToolResult(success=True, data=xml)
+        total_lines = count_lines(content)
+
+        hint = None
+        if has_more and shown_lines is not None:
+            # 透传调用者原始的 limit / version：避免续读悄悄换页大小或跳到 latest 版本
+            next_offset = shown_lines[1] + 1
+            cont_args = [f"id='{artifact_id}'", f"offset={next_offset}"]
+            if limit is not None:
+                cont_args.append(f"limit={limit}")
+            if explicit_version is not None:
+                cont_args.append(f"version={explicit_version}")
+            hint = f"To continue: read_artifact({', '.join(cont_args)})"
+
+        slice = ArtifactSlice(
+            id=artifact_id,
+            version=version_num,
+            content_type=content_type,
+            source=source,
+            title=title,
+            body=body,
+            total_chars=len(content),
+            shown_chars=len(body),
+            total_lines=total_lines,
+            shown_lines=shown_lines,
+            truncated_by=truncated_by,
+            has_more=has_more,
+            hint=hint,
+            updated_at=updated_at,
+        )
+        return ToolResult(success=True, data=render_artifact_slice(slice))
 
 
 # ============================================================

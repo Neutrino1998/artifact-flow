@@ -454,7 +454,7 @@ flowchart TD
 
 ### 维护模式（无停机更新窗口）
 
-适用于 **Mode 2 / 3**（有 Nginx 反向代理）。Mode 1 无 Nginx，不适用。
+适用于 **Mode 3**（内网，有 Nginx 反向代理）。Mode 1 无 Nginx，不适用；Mode 2（生产）暂未适配——`pause.sh` / `resume.sh` 硬编码 `docker-compose.intranet.yml`，硬套会驱动错文件。
 
 **两层接口：** 镜像升级（典型场景）用 `pause.sh` / `resume.sh`，它们封装了"维护页 + 停服务 → 起新版本 + 关维护页"的全套动作；config-only 改动不需要停服务，直接用底层的 `maintenance.sh on|off`。
 
@@ -466,14 +466,10 @@ flowchart TD
 - `/health/` 故意不挡——容器 healthcheck 和外部监控仍要看到真实状态
 - `error_page 503 @maintenance` 只在 gated location 内生效（不放在 server 级），加上 `proxy_intercept_errors` 默认 `off`，**上游真实 503 原样穿透**（如 `/health/ready` 在 DB/Redis 异常时返回的 JSON 503，契约不会被改写为 HTML）
 
-**首次启用（仅一次）：** Mode 2/3 的 compose 已声明 `deploy/maintenance` 卷挂载，但既有 nginx 容器需要 force-recreate 一次才会挂上：
+**首次启用（仅一次）：** intranet compose 已声明 `deploy/maintenance` 卷挂载，但既有 nginx 容器需要 force-recreate 一次才会挂上：
 
 ```bash
-# Mode 3（内网）
 docker compose -f deploy/docker-compose.intranet.yml up -d --force-recreate nginx
-
-# Mode 2（生产）
-docker compose -f docker-compose.prod.yml up -d --force-recreate nginx
 ```
 
 之后所有切换不需要碰 docker。
@@ -490,7 +486,7 @@ tar xzf tmp/artifactflow-config-v2.3.0.tar.gz   # 如果 config 也变了
 ./deploy/scripts/pause.sh "正在更新到 v2.3.0，预计 5 分钟"
 
 # 3. 退维护窗口（up -d backend frontend → 等 healthy → 关 flag）
-#    backend 60s 内不 healthy → 维护页保持开启，运维有时间排查
+#    backend 或 frontend 60s 内不 healthy → 维护页保持开启，运维有时间排查
 ./deploy/scripts/resume.sh v2.3.0
 ```
 
@@ -498,7 +494,7 @@ tar xzf tmp/artifactflow-config-v2.3.0.tar.gz   # 如果 config 也变了
 
 **Config-only 变更 —— 直接 `maintenance.sh`：**
 
-只调 prompt / `models.yaml` / `.env` 这种不重启 backend 也能生效（restart 即可）的场景，不需要 `pause.sh` 那种"停服务"操作，开关 flag 的同时 `restart backend` 就够：
+只调 prompt / `models.yaml` 这种 `restart backend` 就能生效的场景，不需要 `pause.sh` 那种"停服务"操作，开关 flag 的同时 `restart backend` 就够：
 
 ```bash
 ./deploy/scripts/maintenance.sh on "调整 agent 配置，约 1 分钟"
@@ -506,6 +502,8 @@ vim config/agents/lead_agent.md
 docker compose -f deploy/docker-compose.intranet.yml restart backend
 ./deploy/scripts/maintenance.sh off
 ```
+
+> **注意：** `.env` 变更不能走 `restart`——`docker compose restart` 不会重读 `.env` interpolation，容器还在用旧值。需要改环境变量时，请走 `pause.sh → 改 .env → resume.sh`（resume 内部 `up -d` 会重建容器并注入新环境变量），或者短维护窗口下手动 `maintenance.sh on → up -d backend → maintenance.sh off`。
 
 ### 健康检查
 
