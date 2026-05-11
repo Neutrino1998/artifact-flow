@@ -103,8 +103,8 @@ Return only the translated text, wrapped in:
 - **用 XML 标签分组关注点** — `<role>`, `<guidelines>`, `<output_format>` 等。LLM 对结构化提示词的遵守度更高
 - **明确职责边界** — 写清楚"你做什么"和"你不做什么"，特别是与其他 agent 的分工
 - **定义输出格式** — subagent 的输出会作为 `<subagent_result>` 打包回传给 Lead，结构化格式便于 Lead 解析整合
-- **设置停止条件** — 如 `search_agent` 的"Maximum 3 search iterations"，避免 agent 无限循环调工具
-- **利用现有 agent 参考** — `config/agents/search_agent.md` / `crawl_agent.md` 是简洁的范例
+- **设置停止条件** — 在 prompt 中定义明确的"完成"信号（如 `research_agent` 的 `<output>` 段要求 5-10 行响应 + artifact ID），配合 frontmatter 的 `max_tool_rounds` 作为兜底，避免 agent 持续工作不收敛
+- **利用现有 agent 参考** — `config/agents/lead_agent.md` / `research_agent.md` 是现存的范例
 
 ## 注意事项
 
