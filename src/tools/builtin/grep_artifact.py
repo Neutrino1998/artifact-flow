@@ -37,26 +37,6 @@ def _compile_pattern(pattern: str, fixed_strings: bool, ignore_case: bool) -> "r
     return re.compile(pattern, flags)
 
 
-def _pattern_anchors_blank_line(src: str) -> bool:
-    """启发式判定:pattern 是否结构上"定义一整行"(同时含起始锚 + 结尾锚)。
-
-    用于零宽匹配的精修 guard:
-    - True (例: `^$`, `^\\s*$`, `\\A\\Z`) → 这是合法的"找空行" idiom,
-      零宽命中落在真空行上应保留
-    - False (例: bare `^` / `\\A` / `\\b` / `\\Z`) → 单边锚,零宽命中
-      是边界产物，落在哪都该 drop(包括落在空行上)
-
-    实现:剥掉字符类内容(避免 `[^abc]` / `[a$b]` 误判)后做子串检测。
-    不完整解析 regex(Python `re` 没暴露 AST),corner case 兜底原则:
-    误判时 fail-closed(drop)与之前一刀切零宽 drop 的行为方向一致。
-    """
-    # 字符类内容剥掉,避免 [^abc]/[a$b] 把内部的 ^/$ 误识别成锚
-    stripped = re.sub(r"\[[^\]]*\]", "", src)
-    has_start = ("^" in stripped) or (r"\A" in stripped)
-    has_end = ("$" in stripped) or (r"\Z" in stripped)
-    return has_start and has_end
-
-
 def _scan_content(
     content: str,
     regex: "re.Pattern[str]",
@@ -70,9 +50,11 @@ def _scan_content(
     - 跨行 match 只在**起始行**打点（ripgrep `-U` 多行模式行为，避免一次匹配同时
       标记多行带来命中计数歧义）
     - 同一行多次命中去重（按行算 1 个命中）
-    - 零宽匹配:仅当 (a) 落在真空行 且 (b) pattern 同时含起始锚 + 结尾锚
-      (`^...$` / `\\A...\\Z` 这类"定义一行"形态) 时保留。bare `^`/`\\A`/`\\b`/`\\Z`
-      落在空行也 drop —— 它们不"找空行"，只是边界匹配产物。
+    - **零宽匹配整体 drop** —— `\\A` / `^` / `\\b` / `\\Z` / `^$` 等无可见内容的
+      命中不进结果。这避免了"从源码字符串启发式判 anchor 意图"的不可靠路径
+      (Python `re` 没暴露 AST,任何 string-level 判断都有 false positive)。
+      若需"找被空行分隔的段落",改用内容侧锚点(例:markdown 的 `^# `、小说的
+      `^第.*章`、Python 的 `^class `),都是非零宽 pattern,正常工作。
     - max_count 限制 **行级命中** 数；context 行不计入
 
     返回 [(line_no_1indexed, line_text, is_match), ...]:
@@ -96,21 +78,18 @@ def _scan_content(
         pos += len(kl)
 
     # 全文跑 finditer，把每个 match.start() 通过 bisect 映射到行号
-    # 零宽 keep 规则预算一次:pattern 是否"定义一整行"(双侧锚)
-    pattern_describes_full_line = _pattern_anchors_blank_line(regex.pattern)
-
     match_line_indices: List[int] = []  # 按命中顺序、已去重
     seen_lines = set()
     for m in regex.finditer(content):
+        # 零宽匹配整体 drop。从源码启发式判 anchor 意图(`^$` 找空行 vs `\A`
+        # 只是起始锚)做不到无 false positive —— Python `re` 没暴露 AST,
+        # 任何 string-level 判断都有边界。换 "全 drop" 换简单 + 可证明:
+        # 跨 reviewer 任何反例,零宽就是零宽,不报。失去的能力(`^$` 找空行)
+        # agent 在 ArtifactFlow 里没有真实用法,可用内容侧锚点替代。
+        if m.start() == m.end():
+            continue
         idx = bisect.bisect_right(line_starts, m.start()) - 1
         if idx < 0 or idx >= len(lines):
-            continue
-        # 零宽匹配处理:必须同时满足 (a) 落在真空行 (b) pattern 结构上"定义
-        # 一行"(双侧锚) 才保留。否则就是 `\A`/`^`/`\b`/`\Z` 等单边锚产物，
-        # drop —— 让 bare `^` 不会因为艺术品里恰好有空行就误报命中。
-        if m.start() == m.end() and not (
-            lines[idx] == "" and pattern_describes_full_line
-        ):
             continue
         if idx in seen_lines:
             continue
@@ -177,16 +156,11 @@ class GrepArtifactTool(BaseTool):
         super().__init__(
             name="grep_artifact",
             description=(
-                "Search artifact content with ripgrep-like semantics. "
-                "Pass id=... to search a single artifact (flat output: 'lineno:content' for matches, "
-                "'lineno-content' for context). Omit id to search every artifact in the current session "
-                "(heading output, one block per artifact with hits). "
-                "Pattern uses Python `re` regex syntax with re.MULTILINE: `^`/`$` match line boundaries, "
-                "`\\A`/`\\Z` match artifact boundaries, and patterns can span newlines (e.g. `foo\\nbar`) — "
-                "cross-line matches are reported on the starting line, and same-line repeated matches are "
-                "deduplicated to one line. Set fixed_strings=true to disable regex semantics and match literally. "
-                "Returns 'No matches for <pattern>' on empty hit. Invalid regex returns success=false with "
-                "the re.error message — retry with fixed_strings=true or fix the pattern."
+                "Search artifact content. Pass id=... to scope to a single artifact "
+                "(flat 'lineno:content' output); omit to search all artifacts in the current "
+                "session (heading-style output, one block per artifact). "
+                "Pattern is a Python `re` regex by default; set fixed_strings=true to match literally. "
+                "Returns 'No matches for <pattern>' on empty hit; invalid regex returns success=false."
             ),
             permission=ToolPermission.AUTO,
             # 沿用 BaseTool 默认 max_result_size_chars=50000：grep 结果若超阈值，

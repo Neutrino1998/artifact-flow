@@ -17,7 +17,6 @@ from tools.builtin.grep_artifact import (
     GrepArtifactTool,
     _compile_pattern,
     _format_flat,
-    _pattern_anchors_blank_line,
     _scan_content,
 )
 
@@ -213,92 +212,35 @@ class TestPureFunctions:
         # 两行各 3 个字面 X，但每行只报 1 次
         assert hits == [(1, "XXX", True), (3, "XXX", True)]
 
-    def test_scan_zero_width_on_nonempty_line_skipped(self):
-        """落在非空行上的零宽匹配跳过(`\\A`/`\\b` 单独存在 → 边界产物，无可见内容)。"""
-        rx_anchor = _compile_pattern(r"\A", fixed_strings=False, ignore_case=False)
-        assert _scan_content("foo\nbar\n", rx_anchor, context=0, max_count=20) == []
-        rx_word_boundary = _compile_pattern(r"\b", fixed_strings=False, ignore_case=False)
-        assert _scan_content("hello world\n", rx_word_boundary, context=0, max_count=20) == []
+    def test_scan_zero_width_matches_dropped_uniformly(self):
+        r"""所有零宽匹配整体 drop —— 不管 pattern 形态(`\A` / `\b` / `^` / `\Z` /
+        `^$`)、不管落在空行还是非空行,统统不报。
 
-    def test_scan_zero_width_on_empty_line_kept(self):
-        """落在真空行上的零宽匹配保留 —— `^$` / `^\\s*$` 找空行是合法 idiom。"""
-        rx = _compile_pattern(r"^$", fixed_strings=False, ignore_case=False)
-        # foo\n\nbar\n: 第 2 行是空行
-        hits = _scan_content("foo\n\nbar\n", rx, context=0, max_count=20)
-        assert hits == [(2, "", True)]
+        理由(详见 _scan_content docstring):从源码启发式判 anchor 意图
+        做不到无 false positive,选择"全 drop"换简单和可证明。失去的
+        capability 是 `^$` 找空行,ArtifactFlow 里没真实用例。
+        """
+        # bare \A 落在非空行
+        rx = _compile_pattern(r"\A", fixed_strings=False, ignore_case=False)
+        assert _scan_content("foo\nbar\n", rx, context=0, max_count=20) == []
+        # bare \A 落在前导空行(之前补丁链的一个反例)
+        assert _scan_content("\nfoo\n", rx, context=0, max_count=20) == []
 
-    def test_scan_blank_line_query_with_context(self):
-        """`^$` 找空行 + context 包含周围两行。"""
-        rx = _compile_pattern(r"^$", fixed_strings=False, ignore_case=False)
-        hits = _scan_content("a\n\nb\n", rx, context=1, max_count=20)
-        # 空行在 line 2;context=1 → lines 1-3
-        assert hits == [
-            (1, "a", False),
-            (2, "", True),
-            (3, "b", False),
-        ]
+        # bare \Z 落在末尾空行
+        rx = _compile_pattern(r"\Z", fixed_strings=False, ignore_case=False)
+        assert _scan_content("foo\n\n", rx, context=0, max_count=20) == []
 
-    def test_scan_caret_alone_does_not_mark_every_line(self):
-        """`^` 单独存在 → 每行行首都零宽匹配，但都落在非空行 → 全 drop。
-        避免一个 bare ^ 把所有非空行都误标 match。"""
+        # bare ^ 不会把每行都标 match
         rx = _compile_pattern(r"^", fixed_strings=False, ignore_case=False)
         assert _scan_content("foo\nbar\nbaz\n", rx, context=0, max_count=20) == []
 
-    # ─── P3 修复:零宽 guard 改成 pattern-aware（双侧锚才放行）─────
-    # 仅"落在真空行 + pattern 同时含起始锚+结尾锚"时保留零宽。
-    # 这样 bare `\A`/`^`/`\b`/`\Z` 即使落在空行上也不会被误报。
+        # bare \b 单词边界
+        rx = _compile_pattern(r"\b", fixed_strings=False, ignore_case=False)
+        assert _scan_content("hello world\n", rx, context=0, max_count=20) == []
 
-    def test_scan_lone_A_anchor_on_leading_blank_line_dropped(self):
-        r"""\A 落在前导空行上的零宽不应被报 —— pattern 只有单边锚。"""
-        rx = _compile_pattern(r"\A", fixed_strings=False, ignore_case=False)
-        # "\nfoo\n" splits → ["", "foo"]，line 1 是空，\A 落上去
-        assert _scan_content("\nfoo\n", rx, context=0, max_count=20) == []
-
-    def test_scan_lone_Z_anchor_on_trailing_blank_line_dropped(self):
-        r"""\Z 落在尾部空行上的零宽不应被报 —— pattern 只有单边锚。"""
-        rx = _compile_pattern(r"\Z", fixed_strings=False, ignore_case=False)
-        # "foo\n\n" splits → ["foo", ""]，line 2 是空，\Z 落在 line 2 末端
-        assert _scan_content("foo\n\n", rx, context=0, max_count=20) == []
-
-    def test_scan_lone_caret_on_blank_line_dropped(self):
-        """`^` 单独存在 + 内容含空行 → 仍不报命中(仅有起始锚,不算完整行定义)。"""
-        rx = _compile_pattern(r"^", fixed_strings=False, ignore_case=False)
-        assert _scan_content("\nfoo\n", rx, context=0, max_count=20) == []
-
-    def test_scan_A_to_Z_anchor_pair_keeps_blank_line(self):
-        r"""`\A\Z` 同时含双侧锚 → "完整定义一个空 artifact"。空 artifact
-        命中保留;含内容的 artifact 不命中(因为 \Z 没在第一行就匹配)。"""
-        rx = _compile_pattern(r"\A\Z", fixed_strings=False, ignore_case=False)
-        # 真空 artifact:只有一个空字符串作为唯一"行"? 实际上 ""
-        # splitlines()==[]，所以我们的 _scan_content 直接 return []
-        assert _scan_content("", rx, context=0, max_count=20) == []
-        # 有内容的 artifact:\Z 不匹配开头 → 0 命中
-        assert _scan_content("foo\n", rx, context=0, max_count=20) == []
-
-    def test_scan_caret_dollar_keeps_blank_line(self):
-        """`^$` 仍然能找空行（双侧锚 → pattern_describes_full_line=True）。"""
+        # `^$` 找空行也 drop(放弃此能力,文档已说明)
         rx = _compile_pattern(r"^$", fixed_strings=False, ignore_case=False)
-        hits = _scan_content("foo\n\nbar\n", rx, context=0, max_count=20)
-        assert hits == [(2, "", True)]
-
-    def test_pattern_anchors_blank_line_strips_char_class(self):
-        """`_pattern_anchors_blank_line` 应剥掉字符类内容,避免 `[^abc]` 里的
-        否定 ^ 或 `[a$b]` 里的字面 $ 被误识别为锚。"""
-        # 字符类内 ^/$ 不是锚,单独 → 不构成"双侧锚"
-        assert _pattern_anchors_blank_line(r"[^abc]") is False
-        assert _pattern_anchors_blank_line(r"[a$b]") is False
-        assert _pattern_anchors_blank_line(r"[^a][b$]") is False
-        # 真正的双侧锚组合应被识别
-        assert _pattern_anchors_blank_line(r"^[abc]$") is True
-        assert _pattern_anchors_blank_line(r"\A[abc]\Z") is True
-        # 单边锚不算
-        assert _pattern_anchors_blank_line(r"^foo") is False
-        assert _pattern_anchors_blank_line(r"foo$") is False
-        assert _pattern_anchors_blank_line(r"\Afoo") is False
-        # `^$` 经典空行 idiom
-        assert _pattern_anchors_blank_line(r"^$") is True
-        # `^\s*$` 空行/纯空白行
-        assert _pattern_anchors_blank_line(r"^\s*$") is True
+        assert _scan_content("foo\n\nbar\n", rx, context=0, max_count=20) == []
 
     def test_scan_caret_dollar_still_match_line_boundaries_under_multiline(self):
         """re.MULTILINE 下 ^/$ 按行边界匹配，与旧实现等价（这部分行为不变）。"""
