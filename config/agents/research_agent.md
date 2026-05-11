@@ -15,9 +15,9 @@ tools:
   rewrite_artifact: auto
   read_artifact: auto
   grep_artifact: auto
-  web_search: auto
-  web_fetch: confirm
-model: qwen3.6-plus
+  bocha_search: auto
+  jina_fetch: confirm
+model: deepseek-v4-flash
 max_tool_rounds: 50
 ---
 
