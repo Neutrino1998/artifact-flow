@@ -9,6 +9,7 @@ Grep across artifact content with ripgrep-faithful semantics.
   group 间 `--`
 """
 
+import bisect
 import re
 from typing import TYPE_CHECKING, List, Optional, Tuple
 
@@ -42,46 +43,67 @@ def _scan_content(
     context: int,
     max_count: int,
 ) -> List[Tuple[int, str, bool]]:
-    """逐行扫描 content，返回 [(line_no_1indexed, line_text, is_match), ...]。
+    """对整 artifact 跑 `regex.finditer(content)`，再把 match.start() 映射回行号。
 
-    - 行号 1-indexed，跟 read_artifact 对齐
-    - context 行的 is_match=False；命中行 is_match=True
-    - 相邻命中的 context 区间重叠 → 合并去重（不会出现重复行号）
-    - max_count 限制 **命中** 数（context 行不计入），数到第 max_count 个命中
-      就停止扫描，所以后续命中的 artifact 不会被部分截断
+    - 全文匹配（不是逐行）兑现 description 的 "Python `re` syntax" 契约:
+      `\\A`/`\\Z` 真正指 artifact 边界、`foo\\nbar` 这类跨行 pattern 也能命中
+    - 跨行 match 只在**起始行**打点（ripgrep `-U` 多行模式行为，避免一次匹配同时
+      标记多行带来命中计数歧义）
+    - 同一行多次命中去重（按行算 1 个命中）
+    - 零宽匹配（`\\A`/`^`/`\\b` 单独存在时）skip，避免无可见内容的"命中"
+    - max_count 限制 **行级命中** 数；context 行不计入
+
+    返回 [(line_no_1indexed, line_text, is_match), ...]:
+    - is_match=True 是命中行；False 是 context 行
+    - 相邻命中的 context 重叠 → sliding skip 合并去重
     """
     if not content or max_count <= 0:
         return []
 
-    lines = content.splitlines()  # 不带末尾换行符
+    lines = content.splitlines()  # 用于显示，去掉行尾分隔符
     if not lines:
         return []
 
-    # 第一遍：找命中行的 0-indexed 索引，到 max_count 就停
-    match_indices: List[int] = []
-    for i, line in enumerate(lines):
-        if regex.search(line):
-            match_indices.append(i)
-            if len(match_indices) >= max_count:
-                break
+    # 行起点偏移表:line_starts[i] = 第 i 行在 content 里的 0-indexed 起始位置
+    # 用 splitlines(keepends=True) 保留分隔符长度以正确累加偏移（\n/\r\n/\r 兼容）
+    kept = content.splitlines(keepends=True)
+    line_starts: List[int] = []
+    pos = 0
+    for kl in kept:
+        line_starts.append(pos)
+        pos += len(kl)
 
-    if not match_indices:
+    # 全文跑 finditer，把每个 match.start() 通过 bisect 映射到行号
+    match_line_indices: List[int] = []  # 按命中顺序、已去重
+    seen_lines = set()
+    for m in regex.finditer(content):
+        # 零宽匹配（span 长度 0）跳过 —— 没有可见命中内容，输出徒增噪音
+        if m.start() == m.end():
+            continue
+        idx = bisect.bisect_right(line_starts, m.start()) - 1
+        if idx < 0 or idx >= len(lines):
+            continue
+        if idx in seen_lines:
+            continue
+        seen_lines.add(idx)
+        match_line_indices.append(idx)
+        if len(match_line_indices) >= max_count:
+            break
+
+    if not match_line_indices:
         return []
 
-    match_set = set(match_indices)
-
-    # 第二遍：按命中顺序构造输出窗口，相邻 window 重叠时 sliding skip
+    # 构造输出窗口:按命中顺序展开 ±context，相邻 window 重叠时 sliding skip
     hits: List[Tuple[int, str, bool]] = []
     last_emitted = -1  # 已加入 hits 的最高 0-indexed 行号
     last_idx = len(lines) - 1
 
-    for m in match_indices:
+    for m in match_line_indices:
         start = max(0, m - context)
         end = min(last_idx, m + context)
-        # 跳过已经在前一个 window 里发出过的行
         actual_start = max(start, last_emitted + 1)
         for i in range(actual_start, end + 1):
-            is_match = i in match_set
+            is_match = i in seen_lines
             hits.append((i + 1, lines[i], is_match))
         if end > last_emitted:
             last_emitted = end
@@ -130,10 +152,12 @@ class GrepArtifactTool(BaseTool):
                 "Pass id=... to search a single artifact (flat output: 'lineno:content' for matches, "
                 "'lineno-content' for context). Omit id to search every artifact in the current session "
                 "(heading output, one block per artifact with hits). "
-                "Pattern uses Python `re` regex syntax by default — set fixed_strings=true for literal "
-                "matching. Returns 'No matches for <pattern>' on empty hit. "
-                "Invalid regex returns success=false with the re.error message — retry with "
-                "fixed_strings=true or fix the pattern."
+                "Pattern uses Python `re` regex syntax with re.MULTILINE: `^`/`$` match line boundaries, "
+                "`\\A`/`\\Z` match artifact boundaries, and patterns can span newlines (e.g. `foo\\nbar`) — "
+                "cross-line matches are reported on the starting line, and same-line repeated matches are "
+                "deduplicated to one line. Set fixed_strings=true to disable regex semantics and match literally. "
+                "Returns 'No matches for <pattern>' on empty hit. Invalid regex returns success=false with "
+                "the re.error message — retry with fixed_strings=true or fix the pattern."
             ),
             permission=ToolPermission.AUTO,
             # 沿用 BaseTool 默认 max_result_size_chars=50000：grep 结果若超阈值，

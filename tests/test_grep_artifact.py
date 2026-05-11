@@ -175,6 +175,60 @@ class TestPureFunctions:
         assert "--" not in out
         assert out == "1:a\n2:b\n3:c"
 
+    # ─── 全文 finditer 语义回归（P1 修复）────────────────────────────
+    # 旧实现是逐行 search，把每行当独立字符串喂给 regex，导致 \A/\Z
+    # 在每行边界都误命中、跨行 pattern 永远 0 命中。新实现对整文跑
+    # finditer 再映射回行号，兑现 description 里 "Python re syntax" 契约。
+
+    def test_scan_anchor_A_only_matches_artifact_start(self):
+        r"""\A 应该只匹配 artifact 起始；旧实现会在每一行 'foo' 都误报。"""
+        rx = _compile_pattern(r"\Afoo", fixed_strings=False, ignore_case=False)
+        # foo 不在 artifact 开头 → 必须 0 命中
+        assert _scan_content("bar\nfoo\n", rx, context=0, max_count=20) == []
+        # foo 在 artifact 开头 → 必须 1 命中
+        hits = _scan_content("foo\nbar\n", rx, context=0, max_count=20)
+        assert hits == [(1, "foo", True)]
+
+    def test_scan_anchor_Z_only_matches_artifact_end(self):
+        r"""\Z 应该只匹配 artifact 结尾；旧实现会在每一行末尾误报。"""
+        rx = _compile_pattern(r"bar\Z", fixed_strings=False, ignore_case=False)
+        # bar 不在末尾 → 0 命中
+        assert _scan_content("bar\nfoo\n", rx, context=0, max_count=20) == []
+        # bar 在末尾（注意末尾换行不算 'after Z'，Python re 的 \Z 行为）
+        hits = _scan_content("foo\nbar", rx, context=0, max_count=20)
+        assert hits == [(2, "bar", True)]
+
+    def test_scan_cross_line_pattern_matches_on_starting_line(self):
+        """foo\\nbar 应该跨行命中，在起始行（foo 所在行）打点；旧实现 0 命中。"""
+        rx = _compile_pattern("foo\nbar", fixed_strings=False, ignore_case=False)
+        hits = _scan_content("xxx\nfoo\nbar\nyyy\n", rx, context=0, max_count=20)
+        # 起始行是 'foo'（line 2），bar 不单独标 match
+        assert hits == [(2, "foo", True)]
+
+    def test_scan_same_line_multiple_matches_dedup(self):
+        """同一行多次命中 → 行级算 1 个命中，max_count 计数也按行算。"""
+        rx = _compile_pattern("X", fixed_strings=False, ignore_case=False)
+        hits = _scan_content("XXX\nY\nXXX\n", rx, context=0, max_count=20)
+        # 两行各 3 个字面 X，但每行只报 1 次
+        assert hits == [(1, "XXX", True), (3, "XXX", True)]
+
+    def test_scan_zero_width_match_skipped(self):
+        """零宽匹配（\\A / ^ / \\b 单独）不应产生 hit —— 没有可见命中内容。"""
+        # \A 在 MULTILINE 下匹配 artifact 起始，零宽
+        rx_anchor = _compile_pattern(r"\A", fixed_strings=False, ignore_case=False)
+        assert _scan_content("foo\nbar\n", rx_anchor, context=0, max_count=20) == []
+        # \b 在每个单词边界匹配，零宽
+        rx_word_boundary = _compile_pattern(r"\b", fixed_strings=False, ignore_case=False)
+        assert _scan_content("hello world\n", rx_word_boundary, context=0, max_count=20) == []
+
+    def test_scan_caret_dollar_still_match_line_boundaries_under_multiline(self):
+        """re.MULTILINE 下 ^/$ 按行边界匹配，与旧实现等价（这部分行为不变）。"""
+        rx = _compile_pattern(r"^foo", fixed_strings=False, ignore_case=False)
+        # foo 在多行的不同位置
+        hits = _scan_content("foo\nbar foo\nfoo bar\n", rx, context=0, max_count=20)
+        # 行 1 (^foo) 和 行 3 (^foo bar)；行 2 'bar foo' 中 foo 不在行首
+        assert hits == [(1, "foo", True), (3, "foo bar", True)]
+
 
 # ============================================================
 # 单 artifact 模式（id 传入）
@@ -312,6 +366,19 @@ class TestSingleArtifactMode:
         result = await grep_tool(pattern="(unclosed", id=aid)
         assert not result.success
         assert "Invalid regex" in (result.error or "")
+
+    async def test_artifact_anchor_via_tool(
+        self,
+        grep_tool: GrepArtifactTool,
+        artifact_manager: ArtifactManager,
+        session_id: str,
+    ):
+        """End-to-end: `\\Afoo` 走完工具栈后只匹配 artifact 起始，不在每行误报。"""
+        aid = await _create_artifact(artifact_manager, session_id, "bar\nfoo\nbaz\n")
+        result = await grep_tool(pattern=r"\Afoo", id=aid)
+        assert result.success
+        # 没有 'foo' 在 artifact 开头 → No matches
+        assert "No matches for" in result.data
 
 
 # ============================================================

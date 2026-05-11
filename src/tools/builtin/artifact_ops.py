@@ -458,7 +458,11 @@ class ArtifactManager:
         self._cache: Dict[str, Dict[str, ArtifactMemory]] = {}  # {session_id: {artifact_id: ArtifactMemory}}
         self._current_session_id: Optional[str] = None
         self._dirty: set = set()  # Set of (session_id, artifact_id) tuples
-        self._new: set = set()    # Set of (session_id, artifact_id) tuples — created during this execution
+        # Insertion-ordered (dict-as-ordered-set): list_artifacts iterates `_new` to
+        # append yet-to-be-flushed artifacts, and session-scope consumers (grep_artifact
+        # session mode, etc.) rely on a stable order — a `set` is hash-ordered and
+        # would shuffle which artifact wins a budget cap across runs.
+        self._new: Dict[Tuple[str, str], None] = {}
 
     def _ensure_repository(self) -> ArtifactRepository:
         """确保 Repository 已设置"""
@@ -545,7 +549,7 @@ class ArtifactManager:
             # 标记为 dirty + new
             key = (session_id, artifact_id)
             self._dirty.add(key)
-            self._new.add(key)
+            self._new[key] = None  # dict-as-ordered-set
 
             logger.info(f"Created artifact '{artifact_id}' in session '{session_id}' (pending flush)")
             return True, f"Created artifact '{artifact_id}'"
@@ -858,7 +862,7 @@ class ArtifactManager:
                     await self._flush_one(sid, aid, memory, db_manager=db_manager)
                     # Success — remove from dirty/new
                     self._dirty.discard((sid, aid))
-                    self._new.discard((sid, aid))
+                    self._new.pop((sid, aid), None)
                     logger.info(f"Flushed artifact '{aid}' in session '{sid}'")
                 except Exception as e:
                     logger.exception(f"Failed to flush artifact '{aid}': {e}")

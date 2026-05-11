@@ -452,6 +452,34 @@ class TestWriteBackInventory:
         assert artifacts[0]["id"] == "plan"
         assert artifacts[0]["content"] == "# Plan"
 
+    async def test_list_preserves_insertion_order_for_unflushed(
+        self, artifact_manager: ArtifactManager, session_id: str
+    ):
+        """In-memory new artifacts must come back in creation order.
+
+        Regression: `_new` used to be a `set()` whose iteration is hash-ordered,
+        not insertion-ordered — so session-scope consumers (grep session-mode cap
+        truncation, inventory rendering) saw a non-deterministic order across runs.
+        """
+        artifact_manager.set_session(session_id)
+        # Use 10 IDs whose hash order is essentially guaranteed to differ
+        # from creation order — short alphanumeric strings reshuffle under
+        # PYTHONHASHSEED randomization. 10 entries makes accidental same-order
+        # vanishingly unlikely.
+        ids = [f"art_{i:02d}" for i in range(10)]
+        for aid in ids:
+            ok, _ = await artifact_manager.create_artifact(
+                session_id=session_id,
+                artifact_id=aid,
+                content_type="text/plain",
+                title=aid,
+                content=f"body of {aid}",
+            )
+            assert ok
+
+        artifacts = await artifact_manager.list_artifacts(session_id)
+        assert [a["id"] for a in artifacts] == ids
+
     async def test_list_shows_dirty_content_over_db(
         self, artifact_manager: ArtifactManager, artifact_repo: ArtifactRepository, session_id: str
     ):
