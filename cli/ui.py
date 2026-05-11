@@ -276,15 +276,21 @@ class StreamDisplay:
             final_content = event.data.get("content") or ""
             final_reasoning = event.data.get("reasoning_content") or ""
 
+            # only-final reasoning：流式阶段没机会在 Live 里被看到（很快被同事件的 content
+            # 切走渲染），_finalize_reasoning 又不写 scrollback，所以这里显式落盘到历史。
+            # 正常 chunked reasoning 维持 transient 行为不变（current_reasoning 已被 llm_chunk
+            # 填充，此分支不进）。
+            if final_reasoning and not self.current_reasoning:
+                if self.current_agent:
+                    self._print_reasoning_complete(self.current_agent, final_reasoning)
+                self.current_reasoning = final_reasoning
+                self.reasoning_printed = True
+
             if final_content and not self.current_content:
                 if self.current_reasoning and not self.reasoning_printed:
                     self._finalize_reasoning()
                 self.current_content = final_content
                 self.current_rendering = "content"
-            if final_reasoning and not self.current_reasoning:
-                self.current_reasoning = final_reasoning
-                if not self.current_rendering:
-                    self.current_rendering = "reasoning"
 
         elif event.type == "tool_start":
             # 保存当前 agent 内容（如果有）
