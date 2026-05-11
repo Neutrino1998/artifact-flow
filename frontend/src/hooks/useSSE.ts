@@ -10,6 +10,7 @@ import { StreamEventType } from '@/types/events';
 import type { SSEEvent, LLMCompleteData } from '@/types/events';
 import * as api from '@/lib/api';
 import { refreshArtifactList } from '@/lib/refreshArtifactList';
+import { getNavGen } from '@/lib/navGen';
 
 const ARTIFACT_TOOLS = new Set([
   'create_artifact',
@@ -67,45 +68,36 @@ export function useSSE() {
 
   const refreshAfterComplete = useCallback(
     async (conversationId: string) => {
-      // Snapshot current?.id BEFORE the await. Combined with the post-await
-      // value, this distinguishes two null states that look identical from
-      // current alone:
-      //   (a) first-message new conv flow: current was null at stream start
-      //       AND still null at completion — legitimate, populate.
-      //   (b) startNewChat() during our await: current was conversationId
-      //       (or null on first-message conv that briefly populated), then
-      //       user explicitly went to new chat → current is null and the
-      //       snapshot is NOT null (or didn't match this conv) — drop.
-      // Without this guard, an in-flight refreshAfterComplete resumes after
-      // startNewChat()'s setCurrent(null) and re-populates the conversation
-      // the user just abandoned.
-      const viewingAtStart = useConversationStore.getState().current?.id ?? null;
+      // Capture nav-gen BEFORE the await. Both startNewChat() and
+      // switchConversation() bump this synchronously on entry, so any
+      // navigation event during our await leaves myNavGen != getNavGen().
+      // This is the only reliable "user navigated away" signal because
+      // current?.id is null in three indistinguishable scenarios:
+      //   - first-message new conv (legit, should populate)
+      //   - startNewChat (user explicitly left, MUST NOT populate)
+      //   - switchConversation handoff (user picked another conv, MUST NOT
+      //     populate — would briefly revive abandoned conv before the new
+      //     setCurrent overwrites)
+      const myNavGen = getNavGen();
       try {
         const [detail, list] = await Promise.all([
           api.getConversation(conversationId, { force: true }),
           api.listConversations(20, 0),
         ]);
-        const viewingNow = useConversationStore.getState().current?.id ?? null;
-        const stillOnThisConv = viewingNow === conversationId;
-        const firstMessageNewConv = viewingNow === null && viewingAtStart === null;
-        if (stillOnThisConv || firstMessageNewConv) {
-          setCurrent(detail);
-        }
+        // Sidebar list refresh is harmless cross-conversation, so always apply.
         setConversations(list.conversations, list.total, list.has_more);
+
+        // Everything below mutates state that belongs to "the conversation
+        // the user is on". A nav-gen change means they aren't on this conv
+        // anymore — drop the whole detail/artifact write path.
+        if (myNavGen !== getNavGen()) return;
+
+        setCurrent(detail);
         clearPendingUpdates();
 
-        // Artifact refreshes use a DIFFERENT signal: artifactStore.sessionId.
-        // useChat.switchConversation calls resetArtifacts() *before* awaiting
-        // getConversation, so the artifact-store sessionId becomes null
-        // immediately on switch, while conversationStore.current?.id lags
-        // until getConversation resolves. Checking artifactSession lets us
-        // detect "user has navigated away" the instant it happens.
-        //
-        // Skip if sessionId differs from our target — covers both:
-        //   (a) Switched / reset: sessionId is null or a newer conv's id
-        //   (b) New conversation with no artifact tools fired: sessionId is
-        //       null, so skipping is safe (the list is empty anyway; the
-        //       panel-mount loadArtifacts will populate it on demand).
+        // Artifact refresh is further gated by artifactStore.sessionId so
+        // that conversations without artifact tools don't trigger a useless
+        // GET. Nav-gen guard above already ensured we're still on this conv.
         const artifactSession = useArtifactStore.getState().sessionId;
         const ownsArtifactSession = artifactSession === conversationId;
 
@@ -117,11 +109,12 @@ export function useSSE() {
             () => useArtifactStore.getState().sessionId,
           );
         }
-        // Detail refetch also gated — a curArtifact from a different conv
-        // would produce a cross-conversation GET.
         const curArtifact = useArtifactStore.getState().current;
         if (curArtifact && ownsArtifactSession) {
           api.getArtifact(conversationId, curArtifact.id).then((artDetail) => {
+            // Re-check at resolution: another nav could have fired during
+            // this nested await.
+            if (myNavGen !== getNavGen()) return;
             setArtifactCurrent(artDetail);
             setArtifactVersions(artDetail.versions);
             setSelectedVersion(null);
