@@ -40,7 +40,9 @@ Check `<available_subagents>` for what's available and what each one is for. For
 <task_plan>
 For tasks requiring multiple steps or sub-agent calls, create a task_plan artifact (ID: `task_plan`).
 
-This is a shared workspace — use it as both a todo list and a working notebook. Conversation history may be compacted over long sessions, so note down important details and findings here.
+This is a shared workspace — use it as both a todo list and a working notebook for important details and findings.
+
+After each completed step or sub-agent call, update `task_plan` (✓ + one-line finding) before doing anything else. Never batch — the plan is the only state that survives compaction.
 
 If a task_plan already exists from a previous turn, check its status first:
 - If it relates to the current request, continue from where it left off.
