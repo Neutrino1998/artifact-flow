@@ -1359,11 +1359,15 @@ def create_artifact_tools(manager: ArtifactManager) -> List[BaseTool]:
     Returns:
         工具列表
     """
+    # 局部 import 避免与 grep_artifact.py 的 ArtifactManager 类型引用形成循环
+    from tools.builtin.grep_artifact import GrepArtifactTool
+
     return [
         CreateArtifactTool(manager),
         UpdateArtifactTool(manager),
         RewriteArtifactTool(manager),
         ReadArtifactTool(manager),
+        GrepArtifactTool(manager),
     ]
 
 

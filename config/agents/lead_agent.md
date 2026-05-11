@@ -10,6 +10,7 @@ tools:
   update_artifact: auto
   rewrite_artifact: auto
   read_artifact: auto
+  grep_artifact: auto
   call_subagent: auto
   web_search: auto
   web_fetch: confirm
