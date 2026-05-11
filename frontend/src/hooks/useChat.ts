@@ -9,6 +9,7 @@ import type { ChatRequest } from '@/types';
 import * as api from '@/lib/api';
 import { getNavGen, bumpNavGen } from '@/lib/navGen';
 import { bumpArtifactFetchGen } from '@/lib/artifactFetchGen';
+import { bumpArtifactDetailGen } from '@/lib/artifactDetailGen';
 
 export function useChat() {
   const current = useConversationStore((s) => s.current);
@@ -30,6 +31,17 @@ export function useChat() {
 
   const sendMessage = useCallback(
     async (content: string, parentMessageId?: string | null) => {
+      // Capture nav-gen BEFORE the await. If the user clicks New Chat or
+      // switches to another conversation while api.sendMessage() is in
+      // flight, the engine still runs server-side (runner.submit is
+      // fire-and-forget — the turn will complete, write events, persist
+      // artifacts); we just must not redirect the abandoned response into
+      // the new UI context. reconnectIfActive() reattaches if the user
+      // returns. Without this guard, pendingUserMessage/connect would
+      // flip streamStore into the abandoned conversation, and Stop/Inject
+      // in MessageInput (keyed off global isStreaming + streamConversationId)
+      // would target the wrong turn.
+      const myNavGen = getNavGen();
       try {
         // undefined = use default (last message in branch), omit from body
         // null = explicitly no parent (create new root), send as null
@@ -49,6 +61,22 @@ export function useChat() {
 
         const isNew = !current?.id;
         const res = await api.sendMessage(body);
+
+        // Sidebar refresh fires BEFORE the nav-gen check on purpose.
+        // The server has created the conversation regardless of whether
+        // the user navigated away during the request; if we gate this
+        // behind the nav-gen guard, the abandoned-but-running conv
+        // becomes unreachable from the sidebar until a manual refresh.
+        // The write itself is cross-conv safe (only touches the global
+        // sidebar list, no per-conv UI state).
+        if (isNew) {
+          api.listConversations(20, 0).then((data) => {
+            setConversations(data.conversations, data.total, data.has_more);
+          });
+        }
+
+        if (myNavGen !== getNavGen()) return;
+
         setPendingUserMessage(content);
         // Track rerun/edit parent for branchPath truncation
         if (parentMessageId !== undefined) {
@@ -58,18 +86,12 @@ export function useChat() {
         // connect() now also flips streamStore into streaming state, so
         // sendMessage no longer needs to call startStream itself.
         connect(res.stream_url, res.conversation_id, res.message_id);
-
-        // Refresh sidebar immediately so the new conversation appears
-        if (isNew) {
-          api.listConversations(20, 0).then((data) => {
-            setConversations(data.conversations, data.total, data.has_more);
-          });
-        }
       } catch (err) {
+        if (myNavGen !== getNavGen()) return;
         setError((err as Error).message);
       }
     },
-    [current?.id, lastMessageId, setPendingUserMessage, setStreamParentId, connect, setError]
+    [current?.id, lastMessageId, setPendingUserMessage, setStreamParentId, connect, setError, setConversations]
   );
 
   // Switch to an existing conversation: tear down the previous conversation's
@@ -87,6 +109,10 @@ export function useChat() {
       // through autoOpenArtifact's `cur==null` branch and inject an
       // artifact from the abandoned session into the new one.
       bumpArtifactFetchGen();
+      // Symmetric for manual selectArtifact / selectVersion in flight:
+      // their post-await writes (setCurrent / setVersions / setDiffBase)
+      // would otherwise leak into the new conversation's panel.
+      bumpArtifactDetailGen();
       disconnect();
       resetStream();
       resetArtifacts();
@@ -128,6 +154,8 @@ export function useChat() {
     // abandoned conversation must not leak its artifact into the empty
     // new-chat panel.
     bumpArtifactFetchGen();
+    // Likewise for in-flight manual selectArtifact / selectVersion.
+    bumpArtifactDetailGen();
     disconnect();
     resetStream();
     resetArtifacts();

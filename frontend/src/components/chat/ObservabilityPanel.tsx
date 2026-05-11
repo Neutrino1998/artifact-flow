@@ -9,6 +9,7 @@ import type {
   AdminConversationEventsResponse,
 } from '@/lib/api';
 import { useUIStore } from '@/stores/uiStore';
+import { useLatestOnly } from '@/hooks/useLatestOnly';
 
 const PAGE_SIZE = 20;
 
@@ -370,12 +371,18 @@ function AdminConversationBrowser({
   const [query, setQuery] = useState('');
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const refreshTick = useUIStore((s) => s.observabilityRefreshTick);
+  const claim = useLatestOnly();
 
   const fetchConversations = useCallback(async (q: string, offset = 0, append = false) => {
+    // Initial load / debounced search / load-more / refreshTick-bump all
+    // funnel through here. Latest-only drops slow older queries (and stale
+    // load-more pages) that would otherwise overwrite a newer result set.
+    const isLatest = claim();
     setLoading(true);
     try {
       const trimmed = q.trim() || undefined;
       const res = await api.listAdminConversations(PAGE_SIZE, offset, trimmed);
+      if (!isLatest()) return;
       if (append) {
         setConversations((prev) => [...prev, ...res.conversations]);
       } else {
@@ -384,11 +391,12 @@ function AdminConversationBrowser({
       setTotal(res.total);
       setHasMore(res.has_more);
     } catch (err) {
+      if (!isLatest()) return;
       console.error('Failed to load admin conversations:', err);
     } finally {
-      setLoading(false);
+      if (isLatest()) setLoading(false);
     }
-  }, []);
+  }, [claim]);
 
   useEffect(() => {
     fetchConversations(query);

@@ -271,7 +271,7 @@ class BaseTool(ABC):
 
 
 # Artifact 工具名字固定（请求级创建），但需要在启动时排除自定义工具同名冲突
-RESERVED_TOOL_NAMES = {"create_artifact", "update_artifact", "rewrite_artifact", "read_artifact"}
+RESERVED_TOOL_NAMES = {"create_artifact", "update_artifact", "rewrite_artifact", "read_artifact", "grep_artifact"}
 
 
 def build_tool_map(

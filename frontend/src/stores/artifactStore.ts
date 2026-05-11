@@ -132,6 +132,7 @@ export const useArtifactStore = create<ArtifactState>((set) => ({
       artifacts: [],
       current: null,
       autoSelected: false,
+      currentLoading: false,
       versions: [],
       selectedVersion: null,
       diffBaseContent: null,

@@ -23,7 +23,7 @@ Organize your response under these numbered sections:
 
 1. **Primary Request and Intent**: The user's explicit requests and goals, in detail. You MUST include verbatim user-message quotes in quotation marks, in the original language. Then briefly describe the intent after each quote.
 2. **Artifacts and Documents**: Artifacts created / updated / read with IDs and brief contents (task plans, result documents, uploaded files).
-3. **Tool Interactions**: Significant tool calls and their outcomes (search queries + key findings, crawl targets + content excerpts, etc.).
+3. **Tool Interactions**: Significant tool calls and their outcomes (search queries + key findings, fetched URLs + content excerpts, grep patterns + match counts, etc.).
 4. **Errors and Fixes**: Errors encountered and how they were resolved; pay special attention to user feedback that corrected course.
 5. **Pending Tasks**: Tasks that are in progress or queued but not yet completed.
 6. **Current Work**: Precisely what was being worked on at the time of the summary. Compaction fires right after the assistant's LLM response (before any tool it just called has executed), so if the most recent assistant turn issued a tool call, name the tool and its key params and note that its result is still pending.

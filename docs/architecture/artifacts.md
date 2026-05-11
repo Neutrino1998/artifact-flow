@@ -203,6 +203,8 @@ flowchart TD
 
 - 无 version 参数 → 读当前 memory（可能含未 flush 修改）
 - 指定 version → 走 `repo.get_version_content()` 查历史表
+- 行级分页：`offset`（1-indexed，默认 1）+ 可选 `limit`，再受隐藏字符上限 `READ_ARTIFACT_MAX_CHARS`（默认 50000）兜底
+- 返回 `<artifact_slice>` 包含 `shown_lines / total_lines / shown_chars / total_chars / truncated_by`；未读完时 `has_more=true` 并附续读 `hint`（透传调用者原始的 `limit` / `version`，避免续读悄悄换页大小或跳到 latest 版本）
 
 ## SSE 实时推送
 

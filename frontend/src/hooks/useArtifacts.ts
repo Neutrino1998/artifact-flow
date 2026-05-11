@@ -6,6 +6,7 @@ import { useConversationStore } from '@/stores/conversationStore';
 import { useUIStore } from '@/stores/uiStore';
 import * as api from '@/lib/api';
 import { refreshArtifactList } from '@/lib/refreshArtifactList';
+import { bumpArtifactDetailGen, getArtifactDetailGen } from '@/lib/artifactDetailGen';
 import type { VersionSummary } from '@/types';
 
 /**
@@ -67,10 +68,18 @@ export function useArtifacts() {
     async (artifactId: string) => {
       const sid = resolveSessionId();
       if (!sid) return;
+      // Bump-before-await: claim "the detail view will belong to this
+      // selection". Late responses (fast A→B clicks, or any selection
+      // followed by a conversation switch) check this after the await
+      // and drop themselves on mismatch, so a slower A cannot overwrite
+      // B's current/versions/diffBase — and a stale selection from a
+      // previous conversation cannot leak into the new conversation.
+      const myGen = bumpArtifactDetailGen();
       setArtifactPanelVisible(true);
       setCurrentLoading(true);
       try {
         const detail = await api.getArtifact(sid, artifactId);
+        if (myGen !== getArtifactDetailGen()) return;
         setCurrent(detail);
         setVersions(detail.versions);
         // current.content is already the latest — no need to fetch version detail.
@@ -82,15 +91,28 @@ export function useArtifacts() {
         if (prevVer !== null) {
           api
             .getVersion(sid, artifactId, prevVer)
-            .then((base) => setDiffBaseContent(base.content))
-            .catch(() => setDiffBaseContent(null));
+            .then((base) => {
+              if (myGen !== getArtifactDetailGen()) return;
+              setDiffBaseContent(base.content);
+            })
+            .catch(() => {
+              if (myGen !== getArtifactDetailGen()) return;
+              setDiffBaseContent(null);
+            });
         } else {
           setDiffBaseContent(null);
         }
       } catch (err) {
         console.error('Failed to load artifact:', err);
       } finally {
-        setCurrentLoading(false);
+        // Only clear the spinner if our selection is still the latest.
+        // A stale selection's finally would otherwise prematurely clear
+        // a newer selection's spinner. Conv-switch case: reset() now
+        // also clears currentLoading, so a stale selection that gets
+        // dropped here leaves the spinner correctly off.
+        if (myGen === getArtifactDetailGen()) {
+          setCurrentLoading(false);
+        }
       }
     },
     [setCurrent, setCurrentLoading, setVersions, setSelectedVersion, setDiffBaseContent, setArtifactPanelVisible]
@@ -100,6 +122,11 @@ export function useArtifacts() {
     async (artifactId: string, version: number) => {
       const sid = resolveSessionId();
       if (!sid) return;
+      // Shares the same counter as selectArtifact: a rapid v5→v3 in the
+      // dropdown drops v5's slower response, and a selectArtifact firing
+      // during a version fetch also invalidates the version fetch (the
+      // detail view is being replaced wholesale anyway).
+      const myGen = bumpArtifactDetailGen();
       const versions = useArtifactStore.getState().versions;
       const prevVer = findPrevVersion(versions, version);
       try {
@@ -109,6 +136,7 @@ export function useArtifacts() {
             ? api.getVersion(sid, artifactId, prevVer)
             : Promise.resolve(null),
         ]);
+        if (myGen !== getArtifactDetailGen()) return;
         setSelectedVersion(detail);
         setDiffBaseContent(baseDetail?.content ?? null);
       } catch (err) {

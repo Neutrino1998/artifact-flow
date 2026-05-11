@@ -11,6 +11,7 @@ import {
   getConversation,
   listConversations,
 } from '@/lib/api';
+import { getNavGen } from '@/lib/navGen';
 
 export type UploadProgress = { current: number; total: number } | null;
 
@@ -34,6 +35,16 @@ export function useUpload() {
     async (files: File[], opts: UploadOptions = {}) => {
       if (files.length === 0) return;
 
+      // Capture nav-gen at callback entry. The upload still completes
+      // server-side against the original session if the user navigates
+      // away mid-flight — those artifacts live in the original conv's
+      // list when the user returns. We just must not let late completion
+      // writes (auto-created session's setCurrent, panel visibility,
+      // selectArtifact) reach into the new UI context. loadArtifacts is
+      // already protected internally by refreshArtifactList's
+      // session-stamp check; the surrounding panel/select calls are not.
+      const myNavGen = getNavGen();
+
       setUploading(true);
       setUploadError(null);
 
@@ -50,30 +61,48 @@ export function useUpload() {
           if (currentSessionId) {
             result = await uploadFile(currentSessionId, file);
           } else {
-            // First file with no session — auto-create
+            // First file with no session — auto-create. The server has
+            // created the conv regardless of navigation; the sidebar
+            // refresh must fire so the user can find it again. Only
+            // setCurrent (which redirects the active UI to the new
+            // conv) is gated by nav-gen.
             result = await uploadFileNewSession(file);
             currentSessionId = result.session_id;
             const [detail, list] = await Promise.all([
               getConversation(result.session_id),
               listConversations(20, 0),
             ]);
-            setCurrent(detail);
             setConversations(list.conversations, list.total, list.has_more);
+            if (myNavGen === getNavGen()) {
+              setCurrent(detail);
+            }
           }
 
           lastResultId = result.id;
         }
 
+        if (myNavGen !== getNavGen()) return;
         await loadArtifacts();
+        // Second nav-gen check: loadArtifacts is itself an await
+        // (refreshArtifactList → api.listArtifacts). Even though its
+        // internal stamp-and-check drops the list write on a stale
+        // session, the post-await panel-open + selectArtifact below
+        // are not internally guarded and would pop the abandoned
+        // conv's artifact UI into the new context.
+        if (myNavGen !== getNavGen()) return;
         setArtifactPanelVisible(true);
         if (lastResultId) selectArtifact(lastResultId);
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Upload failed';
-        setUploadError(message);
-        window.alert(message);
-        // Refresh artifacts for any successful uploads before the error
-        if (lastResultId) await loadArtifacts();
+        if (myNavGen === getNavGen()) {
+          setUploadError(message);
+          window.alert(message);
+          // Refresh artifacts for any successful uploads before the error
+          if (lastResultId) await loadArtifacts();
+        }
       } finally {
+        // setUploading / onProgress are global UI state that should reflect
+        // "no upload is happening" regardless of where the user is now.
         setUploading(false);
         opts.onProgress?.(null);
       }

@@ -4,6 +4,7 @@ import { useState, useCallback, useEffect, useRef, } from 'react';
 import { useConversationStore } from '@/stores/conversationStore';
 import { useUIStore } from '@/stores/uiStore';
 import { useChat } from '@/hooks/useChat';
+import { useLatestOnly } from '@/hooks/useLatestOnly';
 import { listConversations, deleteConversation, bulkDeleteConversations } from '@/lib/api';
 import type { ConversationSummary } from '@/types';
 import ConfirmModal from '@/components/layout/ConfirmModal';
@@ -29,12 +30,18 @@ export default function ConversationBrowser() {
   const removeConversation = useConversationStore((s) => s.removeConversation);
   const setConversationBrowserVisible = useUIStore((s) => s.setConversationBrowserVisible);
   const { switchConversation } = useChat();
+  const claim = useLatestOnly();
 
   const fetchConversations = useCallback(async (searchQuery: string, offset = 0, append = false) => {
+    // Initial load / debounced search / load-more all funnel through here.
+    // Without latest-only, a slow older query (or load-more page) returning
+    // after a newer query can replace/append into the wrong result set.
+    const isLatest = claim();
     setLoading(true);
     try {
       const trimmed = searchQuery.trim() || undefined;
       const data = await listConversations(PAGE_SIZE, offset, trimmed);
+      if (!isLatest()) return;
       if (append) {
         setConversations((prev) => [...prev, ...data.conversations]);
       } else {
@@ -43,11 +50,12 @@ export default function ConversationBrowser() {
       setTotal(data.total);
       setHasMore(data.has_more);
     } catch (err) {
+      if (!isLatest()) return;
       console.error('Failed to load conversations:', err);
     } finally {
-      setLoading(false);
+      if (isLatest()) setLoading(false);
     }
-  }, []);
+  }, [claim]);
 
   // Initial load
   useEffect(() => {

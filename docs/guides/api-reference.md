@@ -460,7 +460,7 @@ POST /api/v1/chat/bulk-delete
 ```
 event: tool_complete
 id: 1710000003456-0
-data: {"type":"tool_complete","timestamp":"...","agent":"search_agent","data":{...}}
+data: {"type":"tool_complete","timestamp":"...","agent":"research_agent","data":{...}}
 ```
 
 心跳以 SSE comment 发送（`: ping\n\n`）；间隔 `SSE_PING_INTERVAL`（默认 15s）。

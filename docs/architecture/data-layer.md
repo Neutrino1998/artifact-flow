@@ -101,7 +101,7 @@ Compaction 不再修改 `Message` 行 — 它只往 `MessageEvent` 追加一条 
 | `id` | 自增主键，天然时序 |
 | `event_id` | 业务去重键（`{message_id}-{seq}`），幂等批量写入时识别重复 |
 | `event_type` | `StreamEventType.value` 字符串（`agent_start`/`llm_complete`/`tool_complete` 等） |
-| `agent_name` | 产生事件的 agent（`lead_agent` / `search_agent` / ...） |
+| `agent_name` | 产生事件的 agent（`lead_agent` / `research_agent` / `compact_agent` 等） |
 | `data` | JSON 完整载荷，按 `event_type` 有不同 schema |
 
 ### 持久化边界

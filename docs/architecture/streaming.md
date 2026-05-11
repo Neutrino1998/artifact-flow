@@ -63,7 +63,7 @@ class ExecutionEvent:
     created_at: datetime = field(default_factory=datetime.now)
 ```
 
-`agent_name` 在 Agent 层事件里标注是 lead / search / crawl / compact，Controller 层事件为 `None`。
+`agent_name` 在 Agent 层事件里标注是当前 agent（`lead_agent` / `research_agent` / `compact_agent` 等），Controller 层事件为 `None`。
 
 ## Stream 生命周期
 
@@ -222,7 +222,7 @@ def format_sse_event(data, event=None, id=None, retry=None) -> str:
 ```
 event: tool_complete
 id: 1710000003456-0
-data: {"type":"tool_complete","timestamp":"2026-04-14T12:00:03","agent":"search_agent","data":{"tool":"web_search","success":true,"duration_ms":812,...}}
+data: {"type":"tool_complete","timestamp":"2026-04-14T12:00:03","agent":"research_agent","data":{"tool":"web_search","success":true,"duration_ms":812,...}}
 
 ```
 

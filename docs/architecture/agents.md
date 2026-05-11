@@ -35,15 +35,18 @@ class AgentConfig:
 
 ```yaml
 ---
-name: search_agent
+name: research_agent
 description: |
-  Web search and information retrieval specialist
-  - Web search
-  - Information retrieval
+  Large-scale knowledge exploration and multi-source integration
+  - Context-isolated deep research
+  - Search → fetch → read loops
 tools:
   web_search: auto
-model: qwen3.6-plus-no-thinking
-max_tool_rounds: 3
+  web_fetch: confirm
+  read_artifact: auto
+  grep_artifact: auto
+model: qwen3.6-plus
+max_tool_rounds: 50
 ---
 ```
 
@@ -111,14 +114,14 @@ You can create MULTIPLE result artifacts...
 - 用 XML 标签分隔不同关注点（`<role>`, `<task_plan>`, `<output_format>` 等）
 - 明确职责边界（"你是什么"、"你不做什么"）
 - 定义输出格式（减少 LLM 输出的不确定性）
-- 设置停止条件（如 search_agent 的 "Maximum 3 search iterations"）
+- 设置停止条件（如 `research_agent` 的 `<output>` 收敛要求 + `max_tool_rounds` 兜底）
 
 ## 现有 Agent 概览
 
 | Agent | 职责 | 工具 | 模型 | 最大轮数 | 内部 |
 |-------|------|------|------|---------|------|
-| `lead_agent` | 任务协调、规划、Artifact 管理、subagent 路由 | create/update/rewrite/read_artifact + web_search + web_fetch + call_subagent | qwen3.6-plus | 100 | 否 |
-| `research_agent` | 大型知识探索 / 多源整合，在隔离上下文中执行 | create/update/rewrite/read_artifact + web_search + web_fetch | qwen3.6-plus | 50 | 否 |
+| `lead_agent` | 任务协调、规划、Artifact 管理、subagent 路由 | create/update/rewrite/read/grep_artifact + web_search + web_fetch + call_subagent | qwen3.6-plus | 100 | 否 |
+| `research_agent` | 大型知识探索 / 多源整合，在隔离上下文中执行 | create/update/rewrite/read/grep_artifact + web_search + web_fetch | qwen3.6-plus | 50 | 否 |
 | `compact_agent` | 对话摘要生成（Compaction） | 无 | qwen3.6-plus | 0 | 是 |
 
 ### 角色分工
@@ -141,7 +144,7 @@ sequenceDiagram
     Lead->>Sub: call_subagent(instruction)
     Note over Lead,Sub: current_agent 切换为 subagent
 
-    Sub->>Sub: 执行工具 (web_search / web_fetch / read_artifact)
+    Sub->>Sub: 执行工具 (web_search / web_fetch / read_artifact / grep_artifact)
     Sub-->>Lead: 返回结果 (subagent_result XML)
     Note over Lead,Sub: current_agent 切回 lead_agent
 
