@@ -127,8 +127,9 @@ describe('autoOpenArtifact', () => {
 
   test('stream-end revert invalidates in-flight fetch', async () => {
     // Scenario: open(A) fires mid-stream. Stream completes and
-    // refreshAfterComplete bumps the gen to invalidate everything in
-    // flight before clearing the panel. A's late resolve must be dropped.
+    // refreshAfterComplete bumps the gen unconditionally at entry. A's
+    // late resolve must be dropped — including the case where current
+    // is still null (first auto-open hadn't resolved before complete).
     const store = makeFakeStore({ current: null });
     const d = deferred<ArtifactDetail>();
     const fetchFn = vi.fn().mockReturnValue(d.promise);
@@ -143,6 +144,28 @@ describe('autoOpenArtifact', () => {
 
     expect(store.setCurrentAuto).not.toHaveBeenCalled();
     expect(store.refreshCurrent).not.toHaveBeenCalled();
+  });
+
+  test('navigation invalidates in-flight fetch from abandoned conversation', async () => {
+    // Scenario: ConvA mid-stream fires auto-open(X). Before X resolves,
+    // user clicks ConvB. switchConversation bumps artifactFetchGen and
+    // resets artifactStore.current to null. X's late resolve must be
+    // dropped — otherwise its setCurrentAuto would inject ConvA's X
+    // into ConvB's panel (cur=null falls through every ownership guard).
+    const store = makeFakeStore({ current: null });
+    const d = deferred<ArtifactDetail>();
+    const fetchFn = vi.fn().mockReturnValue(d.promise);
+
+    const p = autoOpenArtifact('sess-A', 'X', store.deps, fetchFn);
+
+    // Simulate switchConversation / startNewChat bump
+    bumpArtifactFetchGen();
+
+    d.resolve(detail('X'));
+    await p;
+
+    expect(store.setCurrentAuto).not.toHaveBeenCalled();
+    expect(store.snapshot().current).toBe(null);
   });
 
   test('same-id refresh preserves ownership (autoSelected stays false)', async () => {

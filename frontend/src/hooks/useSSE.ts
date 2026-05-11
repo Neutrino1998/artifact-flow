@@ -83,6 +83,14 @@ export function useSSE() {
       //     populate — would briefly revive abandoned conv before the new
       //     setCurrent overwrites)
       const myNavGen = getNavGen();
+      // Stream just ended — invalidate every in-flight auto-open fetch
+      // unconditionally. Cases this catches that the per-revert bump did
+      // not: the FIRST auto-open from this stream hasn't resolved yet, so
+      // store.current is still null and the auto-selected branch below
+      // wouldn't fire. Without this bump, the late callback would
+      // resurrect the panel after stream end. Costs nothing if there are
+      // no fetches outstanding.
+      bumpArtifactFetchGen();
       try {
         const [detail, list] = await Promise.all([
           api.getConversation(conversationId, { force: true }),
@@ -116,13 +124,11 @@ export function useSSE() {
         const { current: curArtifact, autoSelected } = useArtifactStore.getState();
         if (curArtifact && ownsArtifactSession) {
           if (autoSelected) {
-            // Stream finished and the panel is on an artifact the agent auto-
-            // opened — revert to list so the user sees the overview. The list
-            // refresh above already loaded the latest artifacts. Bump the
-            // artifact-fetch counter BEFORE clearing so any auto-open promise
-            // still in flight from this stream can't reopen the panel after
-            // we've reverted (its captured gen is now stale).
-            bumpArtifactFetchGen();
+            // Stream finished and the panel is on an artifact the agent
+            // auto-opened — revert to list so the user sees the overview.
+            // The list refresh above already loaded the latest artifacts.
+            // (The unconditional bump at the top of this function has
+            // already invalidated any in-flight auto-opens.)
             setArtifactCurrent(null);
           } else {
             // User actively picked this artifact — refresh content but keep

@@ -8,6 +8,7 @@ import { useSSE } from '@/hooks/useSSE';
 import type { ChatRequest } from '@/types';
 import * as api from '@/lib/api';
 import { getNavGen, bumpNavGen } from '@/lib/navGen';
+import { bumpArtifactFetchGen } from '@/lib/artifactFetchGen';
 
 export function useChat() {
   const current = useConversationStore((s) => s.current);
@@ -80,6 +81,12 @@ export function useChat() {
     async (id: string) => {
       if (id === current?.id) return;
       const myGen = bumpNavGen();
+      // Also invalidate any in-flight artifact auto-open fetches from the
+      // previous conversation. resetArtifacts() below clears `current` to
+      // null, which would otherwise let a late getArtifact response sail
+      // through autoOpenArtifact's `cur==null` branch and inject an
+      // artifact from the abandoned session into the new one.
+      bumpArtifactFetchGen();
       disconnect();
       resetStream();
       resetArtifacts();
@@ -117,6 +124,10 @@ export function useChat() {
   // the chat panel doesn't get stuck on the loading placeholder.
   const startNewChat = useCallback(() => {
     bumpNavGen();
+    // Symmetric with switchConversation: a late artifact auto-open from the
+    // abandoned conversation must not leak its artifact into the empty
+    // new-chat panel.
+    bumpArtifactFetchGen();
     disconnect();
     resetStream();
     resetArtifacts();
