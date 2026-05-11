@@ -58,6 +58,7 @@ export function useSSE() {
   const setArtifactSessionId = useArtifactStore((s) => s.setSessionId);
   const setArtifacts = useArtifactStore((s) => s.setArtifacts);
   const setArtifactCurrent = useArtifactStore((s) => s.setCurrent);
+  const setArtifactCurrentAuto = useArtifactStore((s) => s.setCurrentAuto);
   const setArtifactVersions = useArtifactStore((s) => s.setVersions);
   const setSelectedVersion = useArtifactStore((s) => s.setSelectedVersion);
   const addPendingUpdate = useArtifactStore((s) => s.addPendingUpdate);
@@ -109,16 +110,25 @@ export function useSSE() {
             () => useArtifactStore.getState().sessionId,
           );
         }
-        const curArtifact = useArtifactStore.getState().current;
+        const { current: curArtifact, autoSelected } = useArtifactStore.getState();
         if (curArtifact && ownsArtifactSession) {
-          api.getArtifact(conversationId, curArtifact.id).then((artDetail) => {
-            // Re-check at resolution: another nav could have fired during
-            // this nested await.
-            if (myNavGen !== getNavGen()) return;
-            setArtifactCurrent(artDetail);
-            setArtifactVersions(artDetail.versions);
-            setSelectedVersion(null);
-          }).catch(() => {});
+          if (autoSelected) {
+            // Stream finished and the panel is on an artifact the agent auto-
+            // opened — revert to list so the user sees the overview. The list
+            // refresh above already loaded the latest artifacts.
+            setArtifactCurrent(null);
+          } else {
+            // User actively picked this artifact — refresh content but keep
+            // them on it.
+            api.getArtifact(conversationId, curArtifact.id).then((artDetail) => {
+              // Re-check at resolution: another nav could have fired during
+              // this nested await.
+              if (myNavGen !== getNavGen()) return;
+              setArtifactCurrent(artDetail);
+              setArtifactVersions(artDetail.versions);
+              setSelectedVersion(null);
+            }).catch(() => {});
+          }
         }
       } catch (err) {
         console.error('Failed to refresh after complete:', err);
@@ -288,16 +298,16 @@ export function useSSE() {
               setArtifactSessionId(sessionId);
               setSelectedVersion(null);
               api.getArtifact(sessionId, artifactId).then((detail) => {
-                const cur = useArtifactStore.getState().current;
-                // User navigated to a different artifact mid-flight — don't
-                // steal focus back from their newer selection. (cur === null
-                // means panel was on list view; auto-open is intended.)
-                if (cur && cur.id !== detail.id) return;
-                // Out-of-order: same id but older version was issued before a
-                // newer GET we already applied. The in-memory cache only ever
-                // advances, so this check is sound.
-                if (cur && cur.current_version > detail.current_version) return;
-                setArtifactCurrent(detail);
+                const { current: cur, autoSelected } = useArtifactStore.getState();
+                // If the user actively picked something (autoSelected=false),
+                // don't yank them away — even to a different freshly-updated
+                // artifact. An earlier auto-set current IS allowed to be
+                // replaced so the panel follows whichever artifact the agent
+                // most recently touched.
+                if (cur && !autoSelected && cur.id !== detail.id) return;
+                // Out-of-order: same artifact, older version than already shown.
+                if (cur && cur.id === detail.id && cur.current_version > detail.current_version) return;
+                setArtifactCurrentAuto(detail);
                 setArtifactVersions(detail.versions);
                 setSelectedVersion(null);
               }).catch(() => {});

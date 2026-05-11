@@ -40,6 +40,44 @@ describe('artifactStore.setCurrent → defaultViewMode', () => {
   });
 });
 
+describe('artifactStore.autoSelected provenance flag', () => {
+  beforeEach(() => useArtifactStore.getState().reset());
+
+  test('initial state → false', () => {
+    expect(useArtifactStore.getState().autoSelected).toBe(false);
+  });
+
+  test('setCurrent (user pick path) → autoSelected stays false', () => {
+    useArtifactStore.getState().setCurrent(detail('text/markdown'));
+    expect(useArtifactStore.getState().autoSelected).toBe(false);
+  });
+
+  test('setCurrentAuto → autoSelected becomes true', () => {
+    useArtifactStore.getState().setCurrentAuto(detail('text/markdown'));
+    expect(useArtifactStore.getState().autoSelected).toBe(true);
+    expect(useArtifactStore.getState().current?.id).toBe('art-1');
+  });
+
+  test('setCurrent after setCurrentAuto → flag reverts to false (user reclaims)', () => {
+    useArtifactStore.getState().setCurrentAuto(detail('text/markdown'));
+    useArtifactStore.getState().setCurrent(detail('text/plain'));
+    expect(useArtifactStore.getState().autoSelected).toBe(false);
+  });
+
+  test('setCurrent(null) → flag cleared', () => {
+    useArtifactStore.getState().setCurrentAuto(detail('text/markdown'));
+    useArtifactStore.getState().setCurrent(null);
+    expect(useArtifactStore.getState().autoSelected).toBe(false);
+    expect(useArtifactStore.getState().current).toBe(null);
+  });
+
+  test('reset → flag cleared', () => {
+    useArtifactStore.getState().setCurrentAuto(detail('text/markdown'));
+    useArtifactStore.getState().reset();
+    expect(useArtifactStore.getState().autoSelected).toBe(false);
+  });
+});
+
 describe('artifactStore.addPendingUpdate', () => {
   beforeEach(() => useArtifactStore.getState().reset());
 

@@ -15,6 +15,16 @@ interface ArtifactState {
   current: ArtifactDetail | null;
   currentLoading: boolean;
 
+  // True iff `current` was placed there by the SSE auto-open path (i.e. the
+  // agent updated an artifact mid-stream). Cleared the moment the user makes
+  // any explicit pick or the panel is reset to list view. Two consumers:
+  //   - useSSE auto-open: only allows the panel to switch between artifacts
+  //     if the existing current was also auto-set (autoSelected=true) — never
+  //     yanks a user away from an artifact they actively picked.
+  //   - useSSE refreshAfterComplete: at stream end, reverts to list view only
+  //     if current is auto-set; user-picked stays put with refreshed content.
+  autoSelected: boolean;
+
   // Versions
   versions: VersionSummary[];
   selectedVersion: VersionDetail | null;
@@ -37,6 +47,7 @@ interface ArtifactState {
   setArtifacts: (artifacts: ArtifactSummary[]) => void;
   setArtifactsLoading: (loading: boolean) => void;
   setCurrent: (artifact: ArtifactDetail | null) => void;
+  setCurrentAuto: (artifact: ArtifactDetail) => void;
   setCurrentLoading: (loading: boolean) => void;
   setVersions: (versions: VersionSummary[]) => void;
   setSelectedVersion: (version: VersionDetail | null) => void;
@@ -62,6 +73,7 @@ export const useArtifactStore = create<ArtifactState>((set) => ({
 
   current: null,
   currentLoading: false,
+  autoSelected: false,
 
   versions: [],
   selectedVersion: null,
@@ -80,7 +92,14 @@ export const useArtifactStore = create<ArtifactState>((set) => ({
   setCurrent: (artifact) =>
     set({
       current: artifact,
+      autoSelected: false,
       viewMode: artifact ? defaultViewMode(artifact.content_type) : 'preview',
+    }),
+  setCurrentAuto: (artifact) =>
+    set({
+      current: artifact,
+      autoSelected: true,
+      viewMode: defaultViewMode(artifact.content_type),
     }),
   setCurrentLoading: (loading) => set({ currentLoading: loading }),
   setVersions: (versions) => set({ versions }),
@@ -101,6 +120,7 @@ export const useArtifactStore = create<ArtifactState>((set) => ({
       sessionId: null,
       artifacts: [],
       current: null,
+      autoSelected: false,
       versions: [],
       selectedVersion: null,
       diffBaseContent: null,
