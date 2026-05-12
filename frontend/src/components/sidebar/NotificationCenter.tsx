@@ -9,6 +9,10 @@ interface Props {
   collapsed?: boolean;
 }
 
+// 60s 是 starts_at/ends_at 过期 / 生效的最大延迟，也是运维改 JSON 到生效的最大延迟。
+// 比这更频繁意义不大（通知配置低频变动），更稀疏会让时间窗语义失真。
+const POLL_INTERVAL_MS = 60_000;
+
 const SEVERITY_DOT_CLASS: Record<Severity, string> = {
   info: 'bg-accent',
   warn: 'bg-status-warning',
@@ -46,6 +50,19 @@ export default function NotificationCenter({ collapsed }: Props) {
 
   useEffect(() => {
     reload();
+    const timer = window.setInterval(reload, POLL_INTERVAL_MS);
+
+    // 标签从隐藏切回可见时立即重拉一次 —— 覆盖"开着标签去开会两小时回来"
+    // 这种 setInterval 节流被浏览器降频的场景。
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') reload();
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
   }, [reload]);
 
   if (items.length === 0) return null;

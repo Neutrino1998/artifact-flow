@@ -42,27 +42,61 @@ export function dismissNotification(id: string): void {
   window.localStorage.setItem(DISMISS_KEY, JSON.stringify(Array.from(dismissed)));
 }
 
-function isValidNotification(x: unknown): x is Notification {
-  if (!x || typeof x !== 'object') return false;
-  const n = x as Record<string, unknown>;
-  return (
-    typeof n.id === 'string' &&
-    typeof n.title === 'string' &&
-    typeof n.body === 'string' &&
-    (n.severity === 'info' || n.severity === 'warn' || n.severity === 'critical')
-  );
+// 可选时间字段在 schema 校验阶段就被解析过，到达 isActive 时一定是有效 epoch。
+// fail-closed：写错日期格式 → 整条通知丢弃，不会因为 Date.parse 返回 NaN 而被
+// 当成"无时间边界"提前曝光或永不过期。
+type ParsedNotification = Omit<Notification, 'starts_at' | 'ends_at'> & {
+  starts_at_ms?: number;
+  ends_at_ms?: number;
+};
+
+function parseOptionalDate(value: unknown): number | undefined | null {
+  // 返回 undefined = 字段缺失（合法）；number = 解析成功；null = 字段存在但解析失败（拒绝整条）
+  if (value === undefined) return undefined;
+  if (typeof value !== 'string') return null;
+  const ms = Date.parse(value);
+  return Number.isNaN(ms) ? null : ms;
 }
 
-function isActive(n: Notification, now: number): boolean {
-  if (n.starts_at) {
-    const start = Date.parse(n.starts_at);
-    if (!Number.isNaN(start) && now < start) return false;
-  }
-  if (n.ends_at) {
-    const end = Date.parse(n.ends_at);
-    if (!Number.isNaN(end) && now > end) return false;
-  }
+function validateNotification(x: unknown): ParsedNotification | null {
+  if (!x || typeof x !== 'object') return null;
+  const n = x as Record<string, unknown>;
+  if (typeof n.id !== 'string' || typeof n.title !== 'string' || typeof n.body !== 'string') return null;
+  if (n.severity !== 'info' && n.severity !== 'warn' && n.severity !== 'critical') return null;
+
+  const starts = parseOptionalDate(n.starts_at);
+  if (starts === null) return null;
+  const ends = parseOptionalDate(n.ends_at);
+  if (ends === null) return null;
+
+  return {
+    id: n.id,
+    title: n.title,
+    body: n.body,
+    severity: n.severity,
+    dismissible: typeof n.dismissible === 'boolean' ? n.dismissible : undefined,
+    starts_at_ms: starts,
+    ends_at_ms: ends,
+  };
+}
+
+function isActive(n: ParsedNotification, now: number): boolean {
+  if (n.starts_at_ms !== undefined && now < n.starts_at_ms) return false;
+  if (n.ends_at_ms !== undefined && now > n.ends_at_ms) return false;
   return true;
+}
+
+function toNotification(p: ParsedNotification): Notification {
+  // ParsedNotification 是内部表示；对外仍保留原始 ISO 字符串语义不必要 ——
+  // 外部组件只看 id/title/body/severity/dismissible，时间字段已经 baked-in
+  // 过滤逻辑里了，所以直接吐出去就行。
+  return {
+    id: p.id,
+    title: p.title,
+    body: p.body,
+    severity: p.severity,
+    dismissible: p.dismissible,
+  };
 }
 
 export async function fetchNotifications(): Promise<Notification[]> {
@@ -78,17 +112,23 @@ export async function fetchNotifications(): Promise<Notification[]> {
 
   const now = Date.now();
   const dismissed = readDismissed();
-  const items = raw.filter(isValidNotification).filter((n) => isActive(n, now));
 
-  // dismissible 默认 true；用户已 dismiss 的剔除
-  const visible = items.filter((n) => {
+  const parsed: ParsedNotification[] = [];
+  for (const item of raw) {
+    const v = validateNotification(item);
+    if (v !== null) parsed.push(v);
+  }
+
+  const visible = parsed.filter((n) => {
+    if (!isActive(n, now)) return false;
+    // dismissible 默认 true；用户已 dismiss 的剔除
     if (n.dismissible === false) return true;
     return !dismissed.has(n.id);
   });
 
   // critical > warn > info；同 severity 保持文件顺序
   visible.sort((a, b) => SEVERITY_RANK[b.severity] - SEVERITY_RANK[a.severity]);
-  return visible;
+  return visible.map(toNotification);
 }
 
 export async function fetchWelcomeTips(): Promise<string[]> {
