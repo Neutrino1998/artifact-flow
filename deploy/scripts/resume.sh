@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Exit a maintenance window: bring backend / frontend up (optionally with
 # a new version), wait for both to become healthy, then lower the maintenance
-# flag. If either container fails to become healthy within 60s, or the nginx
-# probe fails, the maintenance page stays on so the operator can investigate
-# without exposing a half-broken service.
+# flag. If either container fails to become healthy within the configured
+# timeout, or the nginx probe fails, the maintenance page stays on so the
+# operator can investigate without exposing a half-broken service.
 #
 # Usage:
 #   deploy/scripts/resume.sh [VERSION]
@@ -11,6 +11,11 @@
 # VERSION is optional:
 #   - If provided, sets AF_VERSION → backend/frontend recreate with that image tag.
 #   - If omitted, falls back to the AF_VERSION env var, otherwise compose default ("latest").
+#
+# Env knobs:
+#   RESUME_HEALTHY_TIMEOUT   per-service healthy wait, seconds (default 60).
+#                            Bump on slow-disk hosts where Next.js / FastAPI
+#                            cold start can exceed 60s.
 
 set -euo pipefail
 
@@ -67,13 +72,23 @@ else
   exit 1
 fi
 
+# Round up to even seconds so the 2s sleep cadence divides cleanly; refuse
+# anything below 10s (we'd be timing out faster than the healthcheck's own
+# start_period=15s, guaranteeing a false negative).
+HEALTHY_TIMEOUT="${RESUME_HEALTHY_TIMEOUT:-60}"
+if ! [[ "$HEALTHY_TIMEOUT" =~ ^[0-9]+$ ]] || (( HEALTHY_TIMEOUT < 10 )); then
+  echo "Error: RESUME_HEALTHY_TIMEOUT must be an integer ≥ 10 (got: $HEALTHY_TIMEOUT)" >&2
+  exit 2
+fi
+HEALTHY_ITERS=$(( (HEALTHY_TIMEOUT + 1) / 2 ))
+
 echo "→ Starting backend / frontend (AF_VERSION=$VERSION)"
 AF_VERSION="$VERSION" "${DC[@]}" -f "$COMPOSE_FILE" up -d backend frontend
 
 wait_healthy() {
   local svc="$1" label="$2"
-  echo -n "→ Waiting for $label healthy"
-  for _ in $(seq 1 30); do
+  echo -n "→ Waiting for $label healthy (timeout ${HEALTHY_TIMEOUT}s)"
+  for _ in $(seq 1 "$HEALTHY_ITERS"); do
     local cid state
     cid=$("${DC[@]}" -f "$COMPOSE_FILE" ps -q "$svc" 2>/dev/null || true)
     if [[ -n "$cid" ]]; then
@@ -87,8 +102,9 @@ wait_healthy() {
     sleep 2
   done
   echo
-  echo "✗ $label 未在 60s 内 healthy，维护页保持开启"
+  echo "✗ $label 未在 ${HEALTHY_TIMEOUT}s 内 healthy，维护页保持开启"
   echo "  排查：${DC[*]} -f $COMPOSE_FILE logs --tail=80 $svc"
+  echo "  慢盘机器可重试：RESUME_HEALTHY_TIMEOUT=120 $0 $VERSION"
   return 1
 }
 

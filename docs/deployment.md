@@ -495,6 +495,12 @@ tar xzf tmp/artifactflow-config-v2.3.0.tar.gz   # 如果 config 也变了
 
 `resume.sh` 兼容 V1（`docker-compose`）和 V2（`docker compose`），自动探测，CentOS 7 老服务器和 Docker Desktop 都能用。
 
+> **慢盘机器调长超时：** 默认每个服务等 60s healthy；若机器磁盘慢、Next.js / FastAPI 冷启动会超过 60s，超时后看日志没发现真错误，直接重跑并加大超时：
+> ```bash
+> RESUME_HEALTHY_TIMEOUT=120 ./deploy/scripts/resume.sh v2.3.0
+> ```
+> 最小允许值 10s（再小就会比容器 healthcheck 的 `start_period=15s` 还短，必假阴性）。
+
 **Config-only 变更 —— 直接 `maintenance.sh`：**
 
 只调 prompt / `models.yaml` 这种 `restart backend` 就能生效的场景，不需要 `pause.sh` 那种"停服务"操作，开关 flag 的同时 `restart backend` 就够：
