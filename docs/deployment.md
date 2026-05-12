@@ -229,11 +229,12 @@ docker load -i tmp/artifactflow-1.0.1.tar.gz
 | `config/agents/*.md`（agent prompt） | 直接编辑宿主机文件 | `docker compose -f deploy/docker-compose.intranet.yml restart backend` |
 | `config/models/models.yaml`（模型 / base_url） | 直接编辑宿主机文件 | 同上 — `restart backend` |
 | `config/tools/*.md`（自定义工具） | 直接编辑宿主机文件 | 同上 — `restart backend` |
+| `config/site/*.json`（左栏通知 / 欢迎页提示） | 直接编辑宿主机文件，schema 见 `config/site/README.md` | **无需 restart** — 挂载在 frontend 容器，前端 60s 轮询自动重拉（标签回前台时立即重拉） |
 | `deploy/.env`（任何 `ARTIFACTFLOW_*` 变量） | 直接编辑 | **`up -d backend`**（restart 不会重读 .env，up 会检测 env 变化重建容器） |
 | `deploy/nginx.conf` | 直接编辑 | `docker compose -f deploy/docker-compose.intranet.yml restart nginx` |
 | `deploy/docker-compose.intranet.yml`（端口、profile 等） | 直接编辑 | `up -d` |
 
-> **关键区别：** 改 `config/*` 用 `restart`，改 `.env` 用 `up -d`。前者只是把进程重新拉起来读文件，后者要让 compose 重新组装容器才能注入新的环境变量。
+> **关键区别：** 改 `config/*` 用 `restart backend`（让进程重读文件），改 `.env` 用 `up -d`（让 compose 重建容器注入环境变量）。`config/site/` 是例外：挂的是 frontend 容器，前端自己轮询，零运维动作。
 
 ### 仅推送 config 更新（不动镜像）
 
@@ -247,6 +248,8 @@ ssh target 'cd /opt/artifactflow && \
             tar xzf artifactflow-config-1.0.1.tar.gz && \
             docker compose -f deploy/docker-compose.intranet.yml restart backend'
 ```
+
+> 上面的 `restart backend` 是给 `config/agents/`、`config/models/`、`config/tools/` 用的。如果**只**改了 `config/site/*.json`（通知 / 欢迎页提示），不需要任何 docker 命令 —— 前端轮询自己生效。
 
 ---
 
