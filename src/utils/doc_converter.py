@@ -11,7 +11,7 @@ import os
 import shutil
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
-from typing import Dict
+from typing import Dict, Tuple
 
 from utils.logger import get_logger
 
@@ -65,10 +65,55 @@ EXTENSION_MIME_MAP: Dict[str, str] = {
     ".env": "text/plain",
 }
 
-# 老版 Office 二进制 + 现代非 Word 的 Office 格式：落到 charset-normalizer 兜底要么
-# 抛 "Cannot decode" 要么解出乱码，体验都差。统一在 convert() 入口早返回一条
-# 明确的错误信息，引导用户另存为 .docx 或复制粘贴。
-_UNSUPPORTED_OFFICE_EXTS = frozenset({".doc", ".ppt", ".pptx", ".xls", ".xlsx"})
+# Office / ODF 二进制 + 模板 + 宏文件 + 演示/表格的 OOXML：全都落 charset-normalizer
+# 兜底要么抛 "Cannot decode" 要么解出乱码。在 convert() 入口按扩展名早返回，并按
+# 文件类型给出针对性 remediation —— 让用户"把 Excel 另存为 docx"是没意义的。
+# 不走 magic-byte：OOXML 各家都是 PK\x03\x04（zip），要区分需要解压看
+# [Content_Types].xml，复杂度划不来。
+_Cat = Tuple[str, str]  # (category, remediation_advice)
+
+_WORD_TO_DOCX: _Cat = ("Word", "请用 Office/WPS 另存为 .docx 后再上传")
+_WORD_MACRO_TO_DOCX: _Cat = ("Word", "请用 Office/WPS 另存为 .docx（取消宏）后再上传")
+_EXCEL_TO_CSV: _Cat = ("Excel", "请导出为 .csv，或将需要的内容复制到对话框")
+_PPT_TO_PDF: _Cat = ("PowerPoint", "请导出为 PDF（文字版），或将需要的内容复制到对话框")
+_ODF_TEXT: _Cat = ("ODF 文档", "请另存为 .docx 或 .pdf 后再上传")
+_ODF_CALC: _Cat = ("ODF 表格", "请导出为 .csv，或将需要的内容复制到对话框")
+_ODF_IMPRESS: _Cat = ("ODF 演示", "请导出为 PDF（文字版），或将需要的内容复制到对话框")
+
+_UNSUPPORTED_OFFICE: Dict[str, _Cat] = {
+    # Word（老二进制 + 模板 + 宏）
+    ".doc": _WORD_TO_DOCX,
+    ".docm": _WORD_MACRO_TO_DOCX,
+    ".docb": _WORD_TO_DOCX,
+    ".dot": _WORD_TO_DOCX,
+    ".dotx": _WORD_TO_DOCX,
+    ".dotm": _WORD_MACRO_TO_DOCX,
+    # Excel（老二进制 + 现代 OOXML + 模板 + 宏 + 二进制工作簿）
+    ".xls": _EXCEL_TO_CSV,
+    ".xlsx": _EXCEL_TO_CSV,
+    ".xlsm": _EXCEL_TO_CSV,
+    ".xlsb": _EXCEL_TO_CSV,
+    ".xlt": _EXCEL_TO_CSV,
+    ".xltx": _EXCEL_TO_CSV,
+    ".xltm": _EXCEL_TO_CSV,
+    # PowerPoint（老二进制 + 现代 + 模板 + 宏 + 自动播放）
+    ".ppt": _PPT_TO_PDF,
+    ".pptx": _PPT_TO_PDF,
+    ".pptm": _PPT_TO_PDF,
+    ".pps": _PPT_TO_PDF,
+    ".ppsx": _PPT_TO_PDF,
+    ".ppsm": _PPT_TO_PDF,
+    ".pot": _PPT_TO_PDF,
+    ".potx": _PPT_TO_PDF,
+    ".potm": _PPT_TO_PDF,
+    # LibreOffice / ODF
+    ".odt": _ODF_TEXT,
+    ".ott": _ODF_TEXT,
+    ".ods": _ODF_CALC,
+    ".ots": _ODF_CALC,
+    ".odp": _ODF_IMPRESS,
+    ".otp": _ODF_IMPRESS,
+}
 
 
 @dataclass
@@ -125,10 +170,10 @@ class DocConverter:
             return await self._convert_docx(file_bytes, filename)
         elif ext == ".pdf":
             return await self._convert_pdf(file_bytes, filename)
-        elif ext in _UNSUPPORTED_OFFICE_EXTS:
+        elif ext in _UNSUPPORTED_OFFICE:
+            category, advice = _UNSUPPORTED_OFFICE[ext]
             raise ValueError(
-                f"暂不支持 {ext} 格式。请用 Office/WPS 另存为 .docx 后再上传，"
-                f"或将内容复制粘贴到对话框。"
+                f"暂不支持 {ext} 格式（{category} 文件）。{advice}。"
             )
         else:
             return await self._convert_text(file_bytes, filename, ext)
