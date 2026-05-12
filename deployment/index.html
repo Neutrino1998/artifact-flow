@@ -2239,6 +2239,11 @@
 <td>同上 — <code>restart backend</code></td>
 </tr>
 <tr>
+<td><code>config/site/*.json</code>（左栏通知 / 欢迎页提示）</td>
+<td>直接编辑宿主机文件，schema 见 <code>config/site/README.md</code></td>
+<td><strong>无需 restart</strong> — 挂载在 frontend 容器，前端 60s 轮询自动重拉（标签回前台时立即重拉）</td>
+</tr>
+<tr>
 <td><code>deploy/.env</code>（任何 <code>ARTIFACTFLOW_*</code> 变量）</td>
 <td>直接编辑</td>
 <td><strong><code>up -d backend</code></strong>（restart 不会重读 .env，up 会检测 env 变化重建容器）</td>
@@ -2256,7 +2261,7 @@
 </tbody>
 </table>
 <blockquote>
-<p><strong>关键区别：</strong> 改 <code>config/*</code> 用 <code>restart</code>，改 <code>.env</code> 用 <code>up -d</code>。前者只是把进程重新拉起来读文件，后者要让 compose 重新组装容器才能注入新的环境变量。</p>
+<p><strong>关键区别：</strong> 改 <code>config/*</code> 用 <code>restart backend</code>（让进程重读文件），改 <code>.env</code> 用 <code>up -d</code>（让 compose 重建容器注入环境变量）。<code>config/site/</code> 是例外：挂的是 frontend 容器，前端自己轮询，零运维动作。</p>
 </blockquote>
 <h3 id="仅推送-config-更新不动镜像">仅推送 config 更新（不动镜像）</h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="c1"># 在构建机上重新打包（或手工 tar）</span>
@@ -2268,6 +2273,9 @@
 <a id="__codelineno-12-7" name="__codelineno-12-7" href="#__codelineno-12-7"></a><span class="s1">            tar xzf artifactflow-config-1.0.1.tar.gz &amp;&amp; \</span>
 <a id="__codelineno-12-8" name="__codelineno-12-8" href="#__codelineno-12-8"></a><span class="s1">            docker compose -f deploy/docker-compose.intranet.yml restart backend&#39;</span>
 </code></pre></div>
+<blockquote>
+<p>上面的 <code>restart backend</code> 是给 <code>config/agents/</code>、<code>config/models/</code>、<code>config/tools/</code> 用的。如果<strong>只</strong>改了 <code>config/site/*.json</code>（通知 / 欢迎页提示），不需要任何 docker 命令 —— 前端轮询自己生效。</p>
+</blockquote>
 <hr />
 <h2 id="环境变量完整参考">环境变量完整参考</h2>
 <p>所有应用级变量使用 <code>ARTIFACTFLOW_</code> 前缀（通过 Pydantic Settings 自动映射），定义在 <code>src/config.py</code>。</p>
