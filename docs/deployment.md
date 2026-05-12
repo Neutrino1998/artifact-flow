@@ -202,9 +202,7 @@ docker compose -f deploy/docker-compose.intranet.yml exec backend \
 cd /opt/artifactflow
 
 # 1. 校验 + 解包（不影响在跑容器，可在维护开始前做）
-sha256sum -c tmp/artifactflow-1.0.1.tar.gz.sha256
-sha256sum -c tmp/artifactflow-config-1.0.1.tar.gz.sha256
-sha256sum -c tmp/artifactflow-deploy-1.0.1.tar.gz.sha256
+./deploy/scripts/verify-bundle.sh tmp    # 一次性校验 tmp/ 下所有 tar
 tar xzf tmp/artifactflow-deploy-1.0.1.tar.gz
 tar xzf tmp/artifactflow-config-1.0.1.tar.gz
 docker load -i tmp/artifactflow-1.0.1.tar.gz
