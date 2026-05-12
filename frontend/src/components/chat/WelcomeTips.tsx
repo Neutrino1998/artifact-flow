@@ -66,9 +66,11 @@ export default function WelcomeTips() {
 
   if (tips.length === 1) {
     return (
-      <div className="flex items-center justify-center gap-2 text-text-tertiary dark:text-text-tertiary-dark">
-        <LightbulbIcon className="shrink-0" />
-        <span>{tips[0]}</span>
+      <div className="flex items-center justify-center text-text-tertiary dark:text-text-tertiary-dark">
+        <span className="relative">
+          <LightbulbIcon className="absolute right-full top-1/2 -translate-y-1/2 mr-2 shrink-0" />
+          {tips[0]}
+        </span>
       </div>
     );
   }
@@ -82,18 +84,22 @@ export default function WelcomeTips() {
       {prevIdx !== null && (
         <div
           key={`out-${prevIdx}`}
-          className="absolute inset-0 flex items-center justify-center gap-2 animate-slide-out-left text-center px-4"
+          className="absolute inset-0 flex items-center justify-center animate-slide-out-left px-4"
         >
-          <LightbulbIcon className="shrink-0" />
-          <span>{tips[prevIdx]}</span>
+          <span className="relative">
+            <LightbulbIcon className="absolute right-full top-1/2 -translate-y-1/2 mr-2 shrink-0" />
+            {tips[prevIdx]}
+          </span>
         </div>
       )}
       <div
         key={`in-${idx}`}
-        className="absolute inset-0 flex items-center justify-center gap-2 animate-slide-in-right text-center px-4"
+        className="absolute inset-0 flex items-center justify-center animate-slide-in-right px-4"
       >
-        <LightbulbIcon className="shrink-0" />
-        <span>{tips[idx]}</span>
+        <span className="relative">
+          <LightbulbIcon className="absolute right-full top-1/2 -translate-y-1/2 mr-2 shrink-0" />
+          {tips[idx]}
+        </span>
       </div>
     </div>
   );
