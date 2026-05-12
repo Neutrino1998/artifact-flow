@@ -150,34 +150,47 @@ docker compose -f docker-compose.prod.yml up -d
 ### 构建发布包（在有网络的构建机上）
 
 ```bash
+# 滚动更新（默认 --app-only，不打 infra 镜像）—— 95% 场景走这条
 ./scripts/release.sh 1.0.0
-# 产出 3 个 tar + sha256（存到 dist/）：
-#   artifactflow-1.0.0.tar.gz             (~370MB, 5 个 docker 镜像)
-#   artifactflow-config-1.0.0.tar.gz      (~10KB, config/ — agent prompts + models.yaml)
-#   artifactflow-deploy-1.0.0.tar.gz      (~15KB, deploy/ — compose + nginx.conf + scripts)
+# 产出（dist/）：
+#   artifactflow-app-1.0.0.tar.gz         (~240MB, backend + frontend)
+#   artifactflow-config-1.0.0.tar.gz      (~10KB, config/)
+#   artifactflow-deploy-1.0.0.tar.gz      (~15KB, deploy/)
+#   artifactflow-1.0.0.manifest.txt       发版清单（commit、镜像 id、关键文件）
+#   *.sha256                              逐 tar 校验和
+
+# 首次部署 / nginx-pg-redis 版本升级 —— 显式加 infra
+./scripts/release.sh 1.0.0 --with-infra
+# 额外产出：
+#   artifactflow-infra-nginx1.27-pg16-redis7.tar.gz  (~130MB)
+# 文件名按 base image 版本内容寻址 —— 目标机已有同名 tar 就跳过 scp
 ```
 
-> **三 tar 按变更频率拆分：** 调 prompt 只需重传 config tar，调 nginx 配置只需重传 deploy tar，不必每次都拖 ~370MB 镜像。intranet compose 把 `../config:/app/config:ro` 和 `./maintenance:/etc/nginx/maintenance:ro` 都用 bind mount 挂进容器，所以宿主机解出来的文件直接生效（详见后文运行时变更表）。
+> **拆 4 tar 按变更频率分层：**
+> - `config` / `deploy` 是 bind-mount 进容器的,改 prompt / nginx / scripts 重传对应 tar 即可,不动镜像。
+> - `app` 是 backend + frontend,几乎每次发版都改。
+> - `infra` 是 nginx / postgres / redis 三个 base image,版本动得极少（半年一次量级）,默认**不打**,显式 `--with-infra` 才生成。命名带 base image 版本号方便目标机一眼看出"我已经有这个 infra tar 了"。
 
 > **目标平台默认 `linux/amd64`。** Apple Silicon 上跑 `release.sh` 会自动通过 buildx + QEMU 交叉编译，省得装到 x86_64 服务器后撞 `exec format error`。要构建别的平台传 `PLATFORM=linux/arm64 ./scripts/release.sh ...`。
 
 ### 首次部署（在目标内网机器上）
 
 ```bash
-# 1. 传 3 个 tar + sha256 到目标机
-scp dist/artifactflow-1.0.0.tar.gz dist/artifactflow-1.0.0.tar.gz.sha256 \
-    dist/artifactflow-config-1.0.0.tar.gz dist/artifactflow-config-1.0.0.tar.gz.sha256 \
-    dist/artifactflow-deploy-1.0.0.tar.gz dist/artifactflow-deploy-1.0.0.tar.gz.sha256 \
+# 1. 传 4 个 tar + sha256 + manifest 到目标机
+scp dist/artifactflow-{app,config,deploy}-1.0.0.tar.gz{,.sha256} \
+    dist/artifactflow-infra-nginx1.27-pg16-redis7.tar.gz{,.sha256} \
+    dist/artifactflow-1.0.0.manifest.txt \
     target:/opt/artifactflow/
 
 # 2. 校验 + 解包
 cd /opt/artifactflow
-sha256sum -c artifactflow-1.0.0.tar.gz.sha256
-sha256sum -c artifactflow-config-1.0.0.tar.gz.sha256
-sha256sum -c artifactflow-deploy-1.0.0.tar.gz.sha256
-docker load -i artifactflow-1.0.0.tar.gz
-tar xzf artifactflow-deploy-1.0.0.tar.gz   # 解出 ./deploy/
-tar xzf artifactflow-config-1.0.0.tar.gz   # 解出 ./config/
+# 首次部署 deploy/ 还没解出来,verify-bundle.sh 用不了 —— 直接 sha256sum -c。
+# CWD 跟 tar 在同一层、不会撞路径坑;glob 在全新目录里也只会匹配本次的 tar。
+sha256sum -c artifactflow-*.tar.gz.sha256
+tar xzf artifactflow-deploy-1.0.0.tar.gz       # 解出 ./deploy/(下次升级起就能用 verify-bundle.sh)
+tar xzf artifactflow-config-1.0.0.tar.gz       # 解出 ./config/
+docker load -i artifactflow-infra-nginx1.27-pg16-redis7.tar.gz
+docker load -i artifactflow-app-1.0.0.tar.gz
 
 # 3. 配置 .env
 cp deploy/.env.intranet.example deploy/.env
@@ -198,16 +211,14 @@ docker compose -f deploy/docker-compose.intranet.yml exec backend \
 新版本到位后，`pause.sh` / `resume.sh` 把维护窗口包成两个动作：起维护页 + 停服务 → 加载新镜像 → 起新版本 + 关维护页。
 
 ```bash
-# 在内网机（假设新 tar 已 scp 到 ./tmp/ 下）
+# 在内网机（假设新 tar 已 scp 到 ./tmp/ 下，typically 不含 infra）
 cd /opt/artifactflow
 
 # 1. 校验 + 解包（不影响在跑容器，可在维护开始前做）
-sha256sum -c tmp/artifactflow-1.0.1.tar.gz.sha256
-sha256sum -c tmp/artifactflow-config-1.0.1.tar.gz.sha256
-sha256sum -c tmp/artifactflow-deploy-1.0.1.tar.gz.sha256
+./deploy/scripts/verify-bundle.sh tmp    # 一次性校验 tmp/ 下所有 tar
 tar xzf tmp/artifactflow-deploy-1.0.1.tar.gz
 tar xzf tmp/artifactflow-config-1.0.1.tar.gz
-docker load -i tmp/artifactflow-1.0.1.tar.gz
+docker load -i tmp/artifactflow-app-1.0.1.tar.gz
 
 # 2. 进维护窗口
 ./deploy/scripts/pause.sh "升级到 v1.0.1"
@@ -229,11 +240,12 @@ docker load -i tmp/artifactflow-1.0.1.tar.gz
 | `config/agents/*.md`（agent prompt） | 直接编辑宿主机文件 | `docker compose -f deploy/docker-compose.intranet.yml restart backend` |
 | `config/models/models.yaml`（模型 / base_url） | 直接编辑宿主机文件 | 同上 — `restart backend` |
 | `config/tools/*.md`（自定义工具） | 直接编辑宿主机文件 | 同上 — `restart backend` |
+| `config/site/*.json`（左栏通知 / 欢迎页提示） | 直接编辑宿主机文件，schema 见 `config/site/README.md` | **无需 restart** — 挂载在 frontend 容器，前端 60s 轮询自动重拉（标签回前台时立即重拉） |
 | `deploy/.env`（任何 `ARTIFACTFLOW_*` 变量） | 直接编辑 | **`up -d backend`**（restart 不会重读 .env，up 会检测 env 变化重建容器） |
 | `deploy/nginx.conf` | 直接编辑 | `docker compose -f deploy/docker-compose.intranet.yml restart nginx` |
 | `deploy/docker-compose.intranet.yml`（端口、profile 等） | 直接编辑 | `up -d` |
 
-> **关键区别：** 改 `config/*` 用 `restart`，改 `.env` 用 `up -d`。前者只是把进程重新拉起来读文件，后者要让 compose 重新组装容器才能注入新的环境变量。
+> **关键区别：** 改 `config/*` 用 `restart backend`（让进程重读文件），改 `.env` 用 `up -d`（让 compose 重建容器注入环境变量）。`config/site/` 是例外：挂的是 frontend 容器，前端自己轮询，零运维动作。
 
 ### 仅推送 config 更新（不动镜像）
 
@@ -247,6 +259,8 @@ ssh target 'cd /opt/artifactflow && \
             tar xzf artifactflow-config-1.0.1.tar.gz && \
             docker compose -f deploy/docker-compose.intranet.yml restart backend'
 ```
+
+> 上面的 `restart backend` 是给 `config/agents/`、`config/models/`、`config/tools/` 用的。如果**只**改了 `config/site/*.json`（通知 / 欢迎页提示），不需要任何 docker 命令 —— 前端轮询自己生效。
 
 ---
 
@@ -491,6 +505,12 @@ tar xzf tmp/artifactflow-config-v2.3.0.tar.gz   # 如果 config 也变了
 ```
 
 `resume.sh` 兼容 V1（`docker-compose`）和 V2（`docker compose`），自动探测，CentOS 7 老服务器和 Docker Desktop 都能用。
+
+> **慢盘机器调长超时：** 默认每个服务等 60s healthy；若机器磁盘慢、Next.js / FastAPI 冷启动会超过 60s，超时后看日志没发现真错误，直接重跑并加大超时：
+> ```bash
+> RESUME_HEALTHY_TIMEOUT=120 ./deploy/scripts/resume.sh v2.3.0
+> ```
+> 最小允许值 10s（再小就会比容器 healthcheck 的 `start_period=15s` 还短，必假阴性）。
 
 **Config-only 变更 —— 直接 `maintenance.sh`：**
 

@@ -14,6 +14,11 @@ RUN npm run build
 FROM node:20-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
+# Next.js standalone server reads HOSTNAME and listens on that interface.
+# Docker's default HOSTNAME is the container short ID — Next.js then binds
+# only to that hostname, so localhost-based healthchecks get ECONNREFUSED.
+# Force 0.0.0.0 to keep "listen address" and "probe address" aligned.
+ENV HOSTNAME=0.0.0.0
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
 COPY --from=builder /app/public ./public
