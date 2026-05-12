@@ -206,22 +206,34 @@ echo ""
 cat <<EOF
 To deploy on air-gapped host:
 
-  # First-time deployment (need --with-infra in the build):
+  # ---- First-time deployment ----
+  # Build must include --with-infra so the infra tar exists.
   scp dist/artifactflow-{app,config,deploy}-${VERSION}.tar.gz{,.sha256} \\
       dist/artifactflow-infra-${INFRA_SLUG}.tar.gz{,.sha256}              \\
       dist/artifactflow-${VERSION}.manifest.txt                            \\
       target:/opt/artifactflow/
+  ssh target
+    cd /opt/artifactflow
+    # verify-bundle.sh lives inside deploy/, which isn't extracted yet — use
+    # plain sha256sum. Glob is safe in a fresh dir, and CWD matches where
+    # each .sha256 records its filename.
+    sha256sum -c artifactflow-*.tar.gz.sha256
+    tar xzf artifactflow-deploy-${VERSION}.tar.gz
+    tar xzf artifactflow-config-${VERSION}.tar.gz
+    docker load -i artifactflow-infra-${INFRA_SLUG}.tar.gz
+    docker load -i artifactflow-app-${VERSION}.tar.gz
+    cp deploy/.env.intranet.example deploy/.env && vi deploy/.env
+    AF_VERSION=${VERSION} docker compose -f deploy/docker-compose.intranet.yml --profile infra up -d
+    # No pause/resume here — there's nothing running to pause.
 
-  # Roll-update (most common, no infra):
+  # ---- Roll-update (most common, no infra) ----
   scp dist/artifactflow-{app,config,deploy}-${VERSION}.tar.gz{,.sha256} \\
       dist/artifactflow-${VERSION}.manifest.txt                          \\
       target:/opt/artifactflow/tmp/
-
-  # On target:
   ssh target
     cd /opt/artifactflow
     ./deploy/scripts/verify-bundle.sh tmp
-    docker load < tmp/artifactflow-app-${VERSION}.tar.gz
+    docker load -i tmp/artifactflow-app-${VERSION}.tar.gz
     tar xzf tmp/artifactflow-deploy-${VERSION}.tar.gz
     tar xzf tmp/artifactflow-config-${VERSION}.tar.gz
     ./deploy/scripts/pause.sh "升级 ${VERSION}"

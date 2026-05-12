@@ -184,12 +184,13 @@ scp dist/artifactflow-{app,config,deploy}-1.0.0.tar.gz{,.sha256} \
 
 # 2. 校验 + 解包
 cd /opt/artifactflow
-./deploy/scripts/verify-bundle.sh .            # 一次性校验目录下所有 tar
-                                               # (deploy tar 解开前没这个脚本,可手动 sha256sum -c 兜底)
-docker load -i artifactflow-app-1.0.0.tar.gz
-docker load -i artifactflow-infra-nginx1.27-pg16-redis7.tar.gz
-tar xzf artifactflow-deploy-1.0.0.tar.gz       # 解出 ./deploy/
+# 首次部署 deploy/ 还没解出来,verify-bundle.sh 用不了 —— 直接 sha256sum -c。
+# CWD 跟 tar 在同一层、不会撞路径坑;glob 在全新目录里也只会匹配本次的 tar。
+sha256sum -c artifactflow-*.tar.gz.sha256
+tar xzf artifactflow-deploy-1.0.0.tar.gz       # 解出 ./deploy/(下次升级起就能用 verify-bundle.sh)
 tar xzf artifactflow-config-1.0.0.tar.gz       # 解出 ./config/
+docker load -i artifactflow-infra-nginx1.27-pg16-redis7.tar.gz
+docker load -i artifactflow-app-1.0.0.tar.gz
 
 # 3. 配置 .env
 cp deploy/.env.intranet.example deploy/.env
