@@ -53,6 +53,7 @@ services:
       - "3000"
     volumes:
       - /etc/localtime:/etc/localtime:ro
+      - ../config/site:/app/public/site:ro
     # node:20-alpine base — use node itself (no curl/wget guarantees on slim images).
     # Accepts any non-5xx as alive: Next.js may 200 the home page or 3xx-redirect to /login.
     healthcheck:

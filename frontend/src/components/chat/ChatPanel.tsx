@@ -7,6 +7,7 @@ import { useUIStore } from '@/stores/uiStore';
 import { useUpload } from '@/hooks/useUpload';
 import MessageList from './MessageList';
 import MessageInput from './MessageInput';
+import WelcomeTips from './WelcomeTips';
 import StreamingMessage from './StreamingMessage';
 import ConversationBrowser from './ConversationBrowser';
 import UserManagementPanel from './UserManagementPanel';
@@ -115,9 +116,7 @@ export default function ChatPanel() {
           <div className="text-text-secondary dark:text-text-secondary-dark text-3xl font-semibold">
             {getGreeting()}，有什么可以帮你的？
           </div>
-          <div className="text-text-tertiary dark:text-text-tertiary-dark">
-            开始对话，探索更多可能
-          </div>
+          <WelcomeTips />
         </div>
       )}
       <MessageInput />

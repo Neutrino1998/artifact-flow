@@ -7,6 +7,7 @@ import { useChat } from '@/hooks/useChat';
 import ConversationList from './ConversationList';
 import AdminConversationList from './AdminConversationList';
 import UserMenu from './UserMenu';
+import NotificationCenter from './NotificationCenter';
 
 function IconButton({
   onClick,
@@ -162,6 +163,9 @@ export default function Sidebar() {
         {/* Spacer */}
         <div className="flex-1" />
 
+        {/* Notifications (auto-hides when empty) */}
+        <NotificationCenter collapsed />
+
         {/* User menu */}
         <UserMenu collapsed />
       </div>
@@ -268,8 +272,9 @@ export default function Sidebar() {
       {/* Conversation list */}
       {inObservability ? <AdminConversationList /> : <ConversationList />}
 
-      {/* User menu at bottom */}
-      <div className="px-3 pb-3 pt-2">
+      {/* Notifications + user menu at bottom */}
+      <div className="px-3 pb-3 pt-2 space-y-2">
+        <NotificationCenter />
         <UserMenu />
       </div>
     </div>
