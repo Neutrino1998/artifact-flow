@@ -1,0 +1,18 @@
+[
+  {
+    "id": "maintenance-example",
+    "severity": "warn",
+    "title": "系统维护通知",
+    "body": "## 维护时间\n\n**2026-05-20 (周三) 02:00 ~ 04:00**\n\n## 影响\n\n- 期间所有对话功能不可用\n- 已开始的对话不会丢失，重启后可继续\n\n## 联系方式\n\n如有紧急情况，请联系运维小组。",
+    "starts_at": "2026-05-15T00:00:00Z",
+    "ends_at": "2026-05-20T04:00:00Z",
+    "dismissible": false
+  },
+  {
+    "id": "feature-2026-05-pdf-upload",
+    "severity": "info",
+    "title": "文档上传已支持 PDF",
+    "body": "现在可以直接上传文字版 PDF 文件（扫描件暂不支持），后端会自动提取文本。\n\n同时支持的格式：`.docx` / `.md` / `.txt` / 各类代码与配置文件。",
+    "dismissible": true
+  }
+]

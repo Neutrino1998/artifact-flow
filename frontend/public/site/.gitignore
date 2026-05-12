@@ -1,0 +1,6 @@
+# dev 模式下手工放置：
+#   cp ../../config/site/notifications.example.json ./notifications.json
+#   cp ../../config/site/welcome_tips.example.json ./welcome_tips.json
+# prod 走 docker volume mount，跟这里无关。
+notifications.json
+welcome_tips.json

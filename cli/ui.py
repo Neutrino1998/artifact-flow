@@ -269,6 +269,29 @@ class StreamDisplay:
             self.current_content = new_content
             self.current_reasoning = new_reasoning
 
+        elif event.type == "llm_complete":
+            # 某些 provider 只在终结块给最终 content / reasoning（中途没有 llm_chunk），
+            # 此时 current_* 仍是空，必须从 llm_complete 回填，否则后续 tool_start /
+            # agent_complete 的 finalize 会打印一个空 panel。正常累积式 provider 这里是 no-op。
+            final_content = event.data.get("content") or ""
+            final_reasoning = event.data.get("reasoning_content") or ""
+
+            # only-final reasoning：流式阶段没机会在 Live 里被看到（很快被同事件的 content
+            # 切走渲染），_finalize_reasoning 又不写 scrollback，所以这里显式落盘到历史。
+            # 正常 chunked reasoning 维持 transient 行为不变（current_reasoning 已被 llm_chunk
+            # 填充，此分支不进）。
+            if final_reasoning and not self.current_reasoning:
+                if self.current_agent:
+                    self._print_reasoning_complete(self.current_agent, final_reasoning)
+                self.current_reasoning = final_reasoning
+                self.reasoning_printed = True
+
+            if final_content and not self.current_content:
+                if self.current_reasoning and not self.reasoning_printed:
+                    self._finalize_reasoning()
+                self.current_content = final_content
+                self.current_rendering = "content"
+
         elif event.type == "tool_start":
             # 保存当前 agent 内容（如果有）
             self._finalize_current_agent()
@@ -318,6 +341,46 @@ class StreamDisplay:
         elif event.type == "permission_request":
             # 权限请求 - 暂停当前 agent 渲染
             # 实际的用户交互在 main.py 中通过 Prompt 处理
+            self._finalize_current_agent()
+            self.current_tool = None
+
+        elif event.type == "permission_result":
+            # 权限确认结果 —— 一行 dim 提示
+            tool = event.data.get("tool", "?")
+            approved = event.data.get("approved", False)
+            reason = event.data.get("reason")
+            if approved:
+                console.print(f"[dim]· permission approved for {tool}[/dim]")
+            else:
+                label = f"denied ({reason})" if reason else "denied"
+                console.print(f"[yellow]· permission {label} for {tool}[/yellow]")
+
+        elif event.type == "compaction_start":
+            # 压缩开始 —— 一行 dim 提示
+            self._finalize_current_agent()
+            agent = event.agent or "agent"
+            inp = event.data.get("last_input_tokens", 0)
+            outp = event.data.get("last_output_tokens", 0)
+            console.print(f"[dim]· compacting {agent} history (in={inp}, out={outp})...[/dim]")
+
+        elif event.type == "compaction_summary":
+            # 压缩完成 —— 一行 dim/red 提示
+            agent = event.agent or "agent"
+            success = event.data.get("success", False)
+            if success:
+                usage = event.data.get("token_usage", {}) or {}
+                dur = event.data.get("duration_ms", 0)
+                in_tok = usage.get("input_tokens", 0)
+                out_tok = usage.get("output_tokens", 0)
+                console.print(
+                    f"[dim]· compaction done for {agent} ({dur}ms, in={in_tok}, out={out_tok})[/dim]"
+                )
+            else:
+                err = event.data.get("error", "unknown")
+                console.print(f"[red]· compaction failed for {agent}: {err}[/red]")
+
+        elif event.type == "cancelled":
+            # 取消终态 —— 由 main.py 的 _stream_events 打印 cancelled 信息
             self._finalize_current_agent()
             self.current_tool = None
 
@@ -377,18 +440,24 @@ def print_conversation_detail(conv: dict):
         border_style="cyan",
     ))
 
-    # 打印消息
+    # 打印消息（每个 Message 行 = user_input + response 一对）
     messages = conv.get("messages", [])
     if messages:
         console.print(f"\n[cyan]Messages ({len(messages)}):[/cyan]")
         for msg in messages:
-            role = msg.get("role", "unknown")
-            content = msg.get("content", "")
-            if len(content) > 200:
-                content = content[:197] + "..."
+            user_input = msg.get("user_input", "") or ""
+            response = msg.get("response") or ""
 
-            role_style = "green" if role == "user" else "blue"
-            console.print(f"  [{role_style}]{role}:[/{role_style}] {content}")
+            if len(user_input) > 200:
+                user_input = user_input[:197] + "..."
+            if len(response) > 200:
+                response = response[:197] + "..."
+
+            console.print(f"  [green]user:[/green] {user_input}")
+            if response:
+                console.print(f"  [blue]assistant:[/blue] {response}")
+            else:
+                console.print("  [dim]assistant: (no response)[/dim]")
 
 
 def print_artifacts_table(artifacts: list):

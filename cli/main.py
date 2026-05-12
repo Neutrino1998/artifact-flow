@@ -123,9 +123,10 @@ async def _stream_events(
     Returns:
         dict with keys:
         - success: bool
+        - cancelled: bool
         - message_id: str | None
     """
-    result = {"success": False, "message_id": None}
+    result = {"success": False, "cancelled": False, "message_id": None}
 
     async for event in api.stream_response(stream_url):
         display.handle_event(event)
@@ -164,6 +165,15 @@ async def _stream_events(
             result["success"] = event.data.get("success", False)
             if "message_id" in event.data:
                 result["message_id"] = event.data["message_id"]
+
+        elif event.type == "cancelled":
+            result["success"] = False
+            result["cancelled"] = True
+            if "message_id" in event.data:
+                result["message_id"] = event.data["message_id"]
+            display.stop()
+            ui.print_info("Execution cancelled")
+            display.start()
 
         elif event.type == "error":
             result["success"] = False
@@ -207,7 +217,8 @@ async def _send_message_async(api: APIClient, message: str):
         if result.get("message_id"):
             state.parent_message_id = result["message_id"]
 
-        if not result["success"]:
+        # 取消是用户主动行为，不再叠加 "Execution failed" 误导提示。
+        if not result["success"] and not result.get("cancelled"):
             ui.print_error("Execution failed")
 
         # 保存状态
@@ -309,7 +320,7 @@ def use_conversation(
 
     try:
         # 验证对话存在
-        conv = asyncio.run(api.get_conversation(conversation_id, load_messages=False))
+        conv = asyncio.run(api.get_conversation(conversation_id))
 
         # 更新状态
         state.conversation_id = conv["id"]

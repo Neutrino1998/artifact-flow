@@ -77,8 +77,8 @@ wheels/
 
 # Windows
 Thumbs.db
-# MkDocs build output
-site/
+# MkDocs build output (root-only, otherwise matches e.g. config/site/)
+/site/
 
 # ==========================
 # 5. Frontend (Node.js / Next.js)
