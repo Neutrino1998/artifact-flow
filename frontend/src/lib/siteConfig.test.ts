@@ -105,6 +105,26 @@ describe('fetchNotifications: schema validation', () => {
     const result = await fetchNotifications();
     expect(result.map((n) => n.id)).toEqual(['n2']);
   });
+
+  test('drops notification with non-boolean dismissible (fail-closed)', async () => {
+    // 字符串 "false" 之类不能被宽松接受为"默认 true"——会让运维以为强制展示的
+    // 通知被用户关掉。和坏日期一样整条丢。
+    mockFetchJson(NOTIF_URL, [
+      { id: 'bad1', severity: 'info', title: 't', body: 'b', dismissible: 'false' },
+      { id: 'bad2', severity: 'info', title: 't', body: 'b', dismissible: 0 },
+      { id: 'ok', severity: 'info', title: 't', body: 'b', dismissible: false },
+    ]);
+    const result = await fetchNotifications();
+    expect(result.map((n) => n.id)).toEqual(['ok']);
+  });
+
+  test('accepts notification without dismissible (defaults applied later)', async () => {
+    mockFetchJson(NOTIF_URL, [
+      { id: 'default', severity: 'info', title: 't', body: 'b' },
+    ]);
+    const result = await fetchNotifications();
+    expect(result.map((n) => n.id)).toEqual(['default']);
+  });
 });
 
 // ============================================================

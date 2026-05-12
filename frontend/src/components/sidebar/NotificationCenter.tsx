@@ -48,6 +48,12 @@ export default function NotificationCenter({ collapsed }: Props) {
     void fetchNotifications().then(setItems);
   }, []);
 
+  // items 清空时强制关 modal——否则用户开着 modal 时 poll 把通知刷没了，
+  // open 状态会残留，下次 poll 通知再回来时 modal 会"自己弹出"。
+  useEffect(() => {
+    if (items.length === 0) setOpen(false);
+  }, [items.length]);
+
   useEffect(() => {
     reload();
     const timer = window.setInterval(reload, POLL_INTERVAL_MS);

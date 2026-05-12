@@ -69,12 +69,24 @@ function validateNotification(x: unknown): ParsedNotification | null {
   const ends = parseOptionalDate(n.ends_at);
   if (ends === null) return null;
 
+  // dismissible fail-closed 与日期字段对齐：present-but-not-boolean（例如
+  // 字符串 "false"）会让运维以为 notice 强制展示，结果用户点叉就关掉了。
+  // 字段缺失 -> undefined（沿用默认值 true）；字段存在但非 bool -> 整条丢。
+  let dismissible: boolean | undefined;
+  if (n.dismissible === undefined) {
+    dismissible = undefined;
+  } else if (typeof n.dismissible === 'boolean') {
+    dismissible = n.dismissible;
+  } else {
+    return null;
+  }
+
   return {
     id: n.id,
     title: n.title,
     body: n.body,
     severity: n.severity,
-    dismissible: typeof n.dismissible === 'boolean' ? n.dismissible : undefined,
+    dismissible,
     starts_at_ms: starts,
     ends_at_ms: ends,
   };
