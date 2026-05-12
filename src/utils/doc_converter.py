@@ -65,6 +65,11 @@ EXTENSION_MIME_MAP: Dict[str, str] = {
     ".env": "text/plain",
 }
 
+# 老版 Office 二进制 + 现代非 Word 的 Office 格式：落到 charset-normalizer 兜底要么
+# 抛 "Cannot decode" 要么解出乱码，体验都差。统一在 convert() 入口早返回一条
+# 明确的错误信息，引导用户另存为 .docx 或复制粘贴。
+_UNSUPPORTED_OFFICE_EXTS = frozenset({".doc", ".ppt", ".pptx", ".xls", ".xlsx"})
+
 
 @dataclass
 class ConvertResult:
@@ -120,6 +125,11 @@ class DocConverter:
             return await self._convert_docx(file_bytes, filename)
         elif ext == ".pdf":
             return await self._convert_pdf(file_bytes, filename)
+        elif ext in _UNSUPPORTED_OFFICE_EXTS:
+            raise ValueError(
+                f"暂不支持 {ext} 格式。请用 Office/WPS 另存为 .docx 后再上传，"
+                f"或将内容复制粘贴到对话框。"
+            )
         else:
             return await self._convert_text(file_bytes, filename, ext)
 
