@@ -394,6 +394,21 @@ async def execute_loop(
             await _emit(StreamEventType.PERMISSION_RESULT.value, agent_name, {
                 "approved": False, "tool": tool_name, "reason": "timeout",
             })
+            # 与显式 deny 路径一样配对发 TOOL_START + TOOL_COMPLETE：否则超时
+            # 这次 tool_call 在 event history 里没有 TOOL_COMPLETE，下一轮模型只看到
+            # 自己发过 call、却看不到任何结果，可能原样重发。
+            await _emit(StreamEventType.TOOL_START.value, agent_name, {
+                "tool": tool_name, "params": params,
+            })
+            await _emit(StreamEventType.TOOL_COMPLETE.value, agent_name, {
+                "tool": tool_name, "success": False,
+                "error": (
+                    f"Permission request timed out after {config.PERMISSION_TIMEOUT}s "
+                    f"with no response, treated as denied. The tool was not executed."
+                ),
+                "duration_ms": 0,
+                "parser_warnings": parser_warnings,
+            })
             return False
 
         is_approved = resume_data.get("approved", False)

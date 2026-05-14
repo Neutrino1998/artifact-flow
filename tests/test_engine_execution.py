@@ -586,6 +586,23 @@ class TestPermissionInterrupt:
         assert len(perm_results) == 1
         assert perm_results[0]["data"]["approved"] is False
 
+        # 超时也要配对发 TOOL_START + TOOL_COMPLETE，否则 event history 里这次
+        # tool_call 没有 TOOL_COMPLETE，下一轮模型看不到结果。
+        tool_starts = [
+            e for e in emitted
+            if e["type"] == "tool_start" and e["data"].get("tool") == "sensitive_tool"
+        ]
+        tool_completes = [
+            e for e in emitted
+            if e["type"] == "tool_complete" and e["data"].get("tool") == "sensitive_tool"
+        ]
+        assert len(tool_starts) == 1
+        assert len(tool_completes) == 1
+        assert tool_completes[0]["data"]["success"] is False
+        assert "timed out" in tool_completes[0]["data"]["error"].lower()
+        # START 必须在 COMPLETE 之前
+        assert emitted.index(tool_starts[0]) < emitted.index(tool_completes[0])
+
     async def test_denied_tool_complete_includes_parser_warnings(self):
         """显式 deny 的 TOOL_COMPLETE 必须带上本次 tool_call 的 parser_warnings，
         否则被 repair 过的 confirm 工具调用一旦被拒绝，下一轮模型就再也看不到
