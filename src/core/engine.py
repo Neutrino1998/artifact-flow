@@ -260,6 +260,9 @@ async def execute_loop(
                 "success": True,
                 "result_data": subagent_xml,
                 "duration_ms": 0,
+                # call_subagent 调用本身的 parser_warnings 在 _execute_tools 切换 agent 时
+                # 暂存到 state，这里取回写入 deferred tool_complete。
+                "parser_warnings": state.pop("pending_subagent_parser_warnings", None),
             })
 
     async def _call_llm(messages: list, agent_name: str, model: str) -> Optional[Tuple[str, Optional[str], dict]]:
@@ -354,9 +357,19 @@ async def execute_loop(
 
         return response_content, reasoning_content, normalized_usage
 
-    async def _handle_permission(tool_name: str, params: dict, agent_name: str, permission: ToolPermission) -> bool:
+    async def _handle_permission(
+        tool_name: str,
+        params: dict,
+        agent_name: str,
+        permission: ToolPermission,
+        parser_warnings: Optional[List[str]] = None,
+    ) -> bool:
         """
         处理权限中断。
+
+        parser_warnings 是本次 tool_call 的 parser 兜底提示。显式 deny 的
+        TOOL_COMPLETE 一并带回去，让模型下一轮看到 "你这次的 XML 还有 X 个
+        问题、写法应该是 Y"，与其他 TOOL_COMPLETE 路径保持对齐。
 
         Returns:
             True — approved, False — denied（含超时和客户端断开）
@@ -381,6 +394,21 @@ async def execute_loop(
             await _emit(StreamEventType.PERMISSION_RESULT.value, agent_name, {
                 "approved": False, "tool": tool_name, "reason": "timeout",
             })
+            # 与显式 deny 路径一样配对发 TOOL_START + TOOL_COMPLETE：否则超时
+            # 这次 tool_call 在 event history 里没有 TOOL_COMPLETE，下一轮模型只看到
+            # 自己发过 call、却看不到任何结果，可能原样重发。
+            await _emit(StreamEventType.TOOL_START.value, agent_name, {
+                "tool": tool_name, "params": params,
+            })
+            await _emit(StreamEventType.TOOL_COMPLETE.value, agent_name, {
+                "tool": tool_name, "success": False,
+                "error": (
+                    f"Permission request timed out after {config.PERMISSION_TIMEOUT}s "
+                    f"with no response, treated as denied. The tool was not executed."
+                ),
+                "duration_ms": 0,
+                "parser_warnings": parser_warnings,
+            })
             return False
 
         is_approved = resume_data.get("approved", False)
@@ -397,6 +425,7 @@ async def execute_loop(
                 "tool": tool_name, "success": False,
                 "error": "Permission denied by user. You do not have permission to use this tool.",
                 "duration_ms": 0,
+                "parser_warnings": parser_warnings,
             })
             return False
 
@@ -477,6 +506,10 @@ async def execute_loop(
             # 配对发 TOOL_START + TOOL_COMPLETE，与 permission-denied / not-allowed
             # 路径保持一致；让消费者（live SSE / 历史重放）可以无条件假设 START 在
             # COMPLETE 之前，无需 orphan 兜底。
+            # Parser 兜底修复登记的提示（截断 / 语法瑕疵等）—— 每个 tool_complete 都带上，
+            # 让模型在下一轮看到 "这次解析时我做了什么、你下次应该怎么写"。
+            parser_warnings = tool_call.warnings or None
+
             if tool_call.error:
                 await _emit(StreamEventType.TOOL_START.value, agent_name, {
                     "tool": tool_call.name,
@@ -487,6 +520,7 @@ async def execute_loop(
                     "success": False,
                     "error": tool_call.error,
                     "duration_ms": 0,
+                    "parser_warnings": parser_warnings,
                 })
                 tool_round_count[agent_name] = tool_round_count.get(agent_name, 0) + 1
                 continue
@@ -503,6 +537,7 @@ async def execute_loop(
                     "tool": tool_name, "success": False,
                     "error": f"Tool '{tool_name}' not available for '{agent_name}'",
                     "duration_ms": 0,
+                    "parser_warnings": parser_warnings,
                 })
                 tool_round_count[agent_name] = tool_round_count.get(agent_name, 0) + 1
                 continue
@@ -517,6 +552,7 @@ async def execute_loop(
                     "tool": tool_name, "success": False,
                     "error": f"Tool '{tool_name}' not found",
                     "duration_ms": 0,
+                    "parser_warnings": parser_warnings,
                 })
                 tool_round_count[agent_name] = tool_round_count.get(agent_name, 0) + 1
                 continue
@@ -554,7 +590,10 @@ async def execute_loop(
                         data={"instruction": instruction, "fresh_start": fresh_start},
                     ))
 
-                    # tool_complete 在 subagent 完成后由 _complete_agent 路径追加
+                    # tool_complete 在 subagent 完成后由 _complete_agent 路径追加。
+                    # 此处把 call_subagent 调用本身的 parser_warnings 暂存 state，
+                    # _complete_agent 拿到时一并写入 deferred tool_complete。
+                    state["pending_subagent_parser_warnings"] = parser_warnings
                     state["current_agent"] = target_agent
                     logger.info(f"Switching to subagent: {target_agent}")
                     tool_round_count[agent_name] = tool_round_count.get(agent_name, 0) + 1
@@ -568,6 +607,7 @@ async def execute_loop(
                         "success": False,
                         "error": result.error or "call_subagent failed",
                         "duration_ms": 0,
+                        "parser_warnings": parser_warnings,
                     })
                     tool_round_count[agent_name] = tool_round_count.get(agent_name, 0) + 1
                     continue
@@ -577,7 +617,9 @@ async def execute_loop(
             effective_permission = ToolPermission(agent_perm_str)
             if effective_permission == ToolPermission.CONFIRM:
                 if tool_name not in state.get("always_allowed_tools", []):
-                    approved = await _handle_permission(tool_name, params, agent_name, effective_permission)
+                    approved = await _handle_permission(
+                        tool_name, params, agent_name, effective_permission, parser_warnings
+                    )
                     if not approved:
                         tool_round_count[agent_name] = tool_round_count.get(agent_name, 0) + 1
                         continue
@@ -608,6 +650,7 @@ async def execute_loop(
                 "duration_ms": tool_duration_ms,
                 "params": params,
                 "metadata": tool_result.metadata or None,
+                "parser_warnings": parser_warnings,
             })
 
 
