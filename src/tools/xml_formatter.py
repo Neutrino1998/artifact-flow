@@ -30,12 +30,21 @@ Wrap ALL parameter values in <![CDATA[...]]>.
 
 
 def format_result(name: str, result: Dict[str, Any]) -> str:
-    """格式化工具执行结果为 XML（注入 context 消息）"""
+    """格式化工具执行结果为 XML（注入 context 消息）
+
+    parser_warnings 在 <data> 前作为独立子节点渲染（兜底修复/截断提示），
+    保证模型在下一轮 context 里看到 "这次解析做了什么、你下次应该怎么写"。
+    """
     success = result.get("success", False)
     data = result.get("data", "")
     error = result.get("error", "")
+    parser_warnings = result.get("parser_warnings") or []
 
     xml = f'<tool_result name="{name}" success="{"true" if success else "false"}">'
+
+    if parser_warnings:
+        warnings_body = "\n".join(f"- {w}" for w in parser_warnings)
+        xml += f"\n<parser_warnings>\n{warnings_body}\n</parser_warnings>"
 
     if data:
         xml += f"\n<data>\n{data}\n</data>"

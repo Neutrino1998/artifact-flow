@@ -260,6 +260,9 @@ async def execute_loop(
                 "success": True,
                 "result_data": subagent_xml,
                 "duration_ms": 0,
+                # call_subagent 调用本身的 parser_warnings 在 _execute_tools 切换 agent 时
+                # 暂存到 state，这里取回写入 deferred tool_complete。
+                "parser_warnings": state.pop("pending_subagent_parser_warnings", None),
             })
 
     async def _call_llm(messages: list, agent_name: str, model: str) -> Optional[Tuple[str, Optional[str], dict]]:
@@ -477,6 +480,10 @@ async def execute_loop(
             # 配对发 TOOL_START + TOOL_COMPLETE，与 permission-denied / not-allowed
             # 路径保持一致；让消费者（live SSE / 历史重放）可以无条件假设 START 在
             # COMPLETE 之前，无需 orphan 兜底。
+            # Parser 兜底修复登记的提示（截断 / 语法瑕疵等）—— 每个 tool_complete 都带上，
+            # 让模型在下一轮看到 "这次解析时我做了什么、你下次应该怎么写"。
+            parser_warnings = tool_call.warnings or None
+
             if tool_call.error:
                 await _emit(StreamEventType.TOOL_START.value, agent_name, {
                     "tool": tool_call.name,
@@ -487,6 +494,7 @@ async def execute_loop(
                     "success": False,
                     "error": tool_call.error,
                     "duration_ms": 0,
+                    "parser_warnings": parser_warnings,
                 })
                 tool_round_count[agent_name] = tool_round_count.get(agent_name, 0) + 1
                 continue
@@ -503,6 +511,7 @@ async def execute_loop(
                     "tool": tool_name, "success": False,
                     "error": f"Tool '{tool_name}' not available for '{agent_name}'",
                     "duration_ms": 0,
+                    "parser_warnings": parser_warnings,
                 })
                 tool_round_count[agent_name] = tool_round_count.get(agent_name, 0) + 1
                 continue
@@ -517,6 +526,7 @@ async def execute_loop(
                     "tool": tool_name, "success": False,
                     "error": f"Tool '{tool_name}' not found",
                     "duration_ms": 0,
+                    "parser_warnings": parser_warnings,
                 })
                 tool_round_count[agent_name] = tool_round_count.get(agent_name, 0) + 1
                 continue
@@ -554,7 +564,10 @@ async def execute_loop(
                         data={"instruction": instruction, "fresh_start": fresh_start},
                     ))
 
-                    # tool_complete 在 subagent 完成后由 _complete_agent 路径追加
+                    # tool_complete 在 subagent 完成后由 _complete_agent 路径追加。
+                    # 此处把 call_subagent 调用本身的 parser_warnings 暂存 state，
+                    # _complete_agent 拿到时一并写入 deferred tool_complete。
+                    state["pending_subagent_parser_warnings"] = parser_warnings
                     state["current_agent"] = target_agent
                     logger.info(f"Switching to subagent: {target_agent}")
                     tool_round_count[agent_name] = tool_round_count.get(agent_name, 0) + 1
@@ -568,6 +581,7 @@ async def execute_loop(
                         "success": False,
                         "error": result.error or "call_subagent failed",
                         "duration_ms": 0,
+                        "parser_warnings": parser_warnings,
                     })
                     tool_round_count[agent_name] = tool_round_count.get(agent_name, 0) + 1
                     continue
@@ -608,6 +622,7 @@ async def execute_loop(
                 "duration_ms": tool_duration_ms,
                 "params": params,
                 "metadata": tool_result.metadata or None,
+                "parser_warnings": parser_warnings,
             })
 
 

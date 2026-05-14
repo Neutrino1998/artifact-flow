@@ -108,6 +108,7 @@ def _events_to_messages(events: List[ExecutionEvent]) -> List[Dict[str, Any]]:
                 "success": data.get("success", False),
                 "data": data.get("result_data"),
                 "error": data.get("error"),
+                "parser_warnings": data.get("parser_warnings"),
             }
             result_text = format_result(tool_name, result_data)
             messages.append({"role": "user", "content": result_text})
