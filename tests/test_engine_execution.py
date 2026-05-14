@@ -56,6 +56,19 @@ def _make_fake_stream_sequence(rounds: list[list[dict]]):
     return fake
 
 
+def _make_cancelling_stream(chunks: list[dict], store, message_id: str, cancel_before_idx: int = 1):
+    """Fake stream that sets the store's cancel flag right before yielding
+    chunks[cancel_before_idx], so the engine's in-stream cancel poll trips on
+    that chunk (use with cancel_check_interval=0)."""
+    async def fake(messages, **kwargs):
+        for i, c in enumerate(chunks):
+            if i == cancel_before_idx:
+                store._cancellations[message_id] = asyncio.Event()
+                store._cancellations[message_id].set()
+            yield c
+    return fake
+
+
 def _simple_llm_chunks(text: str, input_tokens: int = 10, output_tokens: int = 5):
     """Build standard LLM chunks for a simple text response."""
     return [
@@ -141,8 +154,14 @@ async def _run_engine(
     path_events=None,
     store=None,
     permission_timeout=1,
+    cancel_check_interval=None,
 ):
-    """Helper to run engine with given LLM factory and return (state, emitted)."""
+    """Helper to run engine with given LLM factory and return (state, emitted).
+
+    cancel_check_interval: override config.CANCEL_CHECK_INTERVAL — pass 0 to make
+    the in-stream cancel poll fire on every chunk (fake streams are instant, so
+    the real 0.5s throttle would otherwise never trip in a test).
+    """
     state = create_initial_state(
         task=task,
         session_id="sess-1",
@@ -169,6 +188,8 @@ async def _run_engine(
             if attr.isupper():
                 setattr(mock_config, attr, getattr(real_config, attr))
         mock_config.PERMISSION_TIMEOUT = permission_timeout
+        if cancel_check_interval is not None:
+            mock_config.CANCEL_CHECK_INTERVAL = cancel_check_interval
         result = await execute_loop(
             state=state,
             agents=agents,
@@ -732,6 +753,77 @@ class TestCancellation:
 
         assert result["cancelled"] is True
         assert result["completed"] is True
+
+    async def test_cancel_mid_stream_plain_text(self):
+        """Cancel during a plain-text stream → accumulated prose lands in
+        state['response'] and an llm_complete event carries it."""
+        store = InMemoryRuntimeStore()
+        chunks = [
+            {"type": "content", "content": "Hello, "},
+            {"type": "content", "content": "this is a partial "},
+            {"type": "content", "content": "answer that never finishes"},
+        ]
+        result, emitted, _ = await _run_engine(
+            _make_cancelling_stream(chunks, store, "msg-1", cancel_before_idx=1),
+            store=store,
+            message_id="msg-1",
+            cancel_check_interval=0,
+        )
+
+        assert result["cancelled"] is True
+        assert result["completed"] is True
+        # prose accumulated up to the cancel point becomes the display snapshot
+        assert result["response"] == "Hello, this is a partial "
+        # llm_complete is the history source of truth — must carry the partial content
+        llm_completes = _events_of_type(emitted, StreamEventType.LLM_COMPLETE.value)
+        assert len(llm_completes) == 1
+        assert llm_completes[0]["data"]["content"] == "Hello, this is a partial "
+
+    async def test_cancel_mid_stream_tool_call_xml_not_packed(self):
+        """Cancel mid tool-call XML → state['response'] stays empty (no broken
+        XML snapshot), but llm_complete still carries the full partial content."""
+        store = InMemoryRuntimeStore()
+        xml = _tool_call_xml("some_tool", arg="value")
+        chunks = [
+            {"type": "content", "content": xml[:18]},
+            {"type": "content", "content": xml[18:]},
+        ]
+        result, emitted, _ = await _run_engine(
+            _make_cancelling_stream(chunks, store, "msg-1", cancel_before_idx=1),
+            store=store,
+            message_id="msg-1",
+            cancel_check_interval=0,
+        )
+
+        assert result["cancelled"] is True
+        assert result["completed"] is True
+        # tool-call XML must NOT be packed into the display snapshot
+        assert not result.get("response")
+        # but the event stream still has the full partial content for history
+        llm_completes = _events_of_type(emitted, StreamEventType.LLM_COMPLETE.value)
+        assert len(llm_completes) == 1
+        assert "<tool_call>" in llm_completes[0]["data"]["content"]
+
+    async def test_cancel_mid_stream_reasoning_phase(self):
+        """Cancel during the reasoning phase (no content chunks yet) → no
+        presentable prose, but reasoning is preserved in the llm_complete event."""
+        store = InMemoryRuntimeStore()
+        chunks = [
+            {"type": "reasoning", "content": "Let me think about "},
+            {"type": "reasoning", "content": "this problem..."},
+        ]
+        result, emitted, _ = await _run_engine(
+            _make_cancelling_stream(chunks, store, "msg-1", cancel_before_idx=1),
+            store=store,
+            message_id="msg-1",
+            cancel_check_interval=0,
+        )
+
+        assert result["cancelled"] is True
+        assert not result.get("response")  # reasoning is not a display snapshot
+        llm_completes = _events_of_type(emitted, StreamEventType.LLM_COMPLETE.value)
+        assert len(llm_completes) == 1
+        assert llm_completes[0]["data"]["reasoning_content"] == "Let me think about this problem..."
 
 
 # ============================================================

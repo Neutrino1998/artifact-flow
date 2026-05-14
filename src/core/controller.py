@@ -266,6 +266,14 @@ class ExecutionController:
             has_error = final_state.get("error", False)
             is_cancelled = final_state.get("cancelled", False)
 
+            # Display-snapshot backfill. Message.response is display-only, and the
+            # frontend gates AssistantMessage on it being non-empty. The engine only
+            # packs tool-call-free prose into state["response"], so a turn cancelled
+            # mid-tool-call / mid-reasoning / during TTFT arrives here with response
+            # == "". Mirror the error path's placeholder so the turn still renders
+            # (and its execution flow is reconstructed from events).
+            display_response = (response or "*(已取消)*") if is_cancelled else response
+
             # Flush dirty artifacts to DB
             flush_error: Optional[str] = None
             if self.artifact_manager:
@@ -296,7 +304,7 @@ class ExecutionController:
                         "cancelled": True,
                         "conversation_id": conversation_id,
                         "message_id": message_id,
-                        "response": response,
+                        "response": display_response,
                         "execution_metrics": final_state.get("execution_metrics", {}),
                     }
                 }
@@ -365,7 +373,8 @@ class ExecutionController:
                 }
             else:
                 # events 已落库 → 可以更新 Message.response 和 metadata（best-effort）
-                final_response = response if not has_error else (response or "An error occurred during execution.")
+                # display_response 已处理 success / cancelled；error 单独兜底文案。
+                final_response = (response or "An error occurred during execution.") if has_error else display_response
                 try:
                     await self._with_db_retry(
                         lambda cm, er, am: cm.update_response_async(

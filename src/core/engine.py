@@ -350,6 +350,12 @@ async def execute_loop(
             })
             state["completed"] = True
             state["cancelled"] = True
+            # 只有"无工具调用的纯文本"才作为 display 快照写入 state["response"] ——
+            # 与 _complete_agent 的不变量一致（有 tool call 的轮次从不把 XML 写进
+            # state["response"]）。半截 tool-call XML / 纯 reasoning / TTFT 阶段取消时
+            # response_content 不可呈现，留空，由 controller 兜底成占位文案。
+            if response_content and "<tool_call>" not in response_content:
+                state["response"] = response_content
             logger.info(f"[{agent_name}] LLM stream cancelled mid-flight, partial content persisted")
             return None
 
