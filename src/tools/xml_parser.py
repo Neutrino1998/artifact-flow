@@ -229,6 +229,17 @@ class XMLToolCallParser:
             )
         return new_content
 
+    # 模型续写的标准指引：用 update_artifact 的 old_str/new_str 做 anchor 续写，
+    # 而不是 retry create_artifact 或 rewrite_artifact（两者都会再次撞上 max_tokens）。
+    _CONTINUE_WITH_UPDATE_ARTIFACT = (
+        "To append the missing tail without truncating again, call "
+        "update_artifact(id=<same id>, old_str=<a unique snippet from the end of the "
+        "saved content>, new_str=<that same snippet + your continuation>). "
+        "This writes only the continuation. "
+        "Do NOT retry the same create_artifact call and do NOT use rewrite_artifact — "
+        "both re-send the full content and will truncate again."
+    )
+
     @staticmethod
     def _repair_truncated_cdata(content: str, warnings: List[str]) -> str:
         """
@@ -246,11 +257,19 @@ class XMLToolCallParser:
 
         排除 params / tool_call —— 这两个由 _repair_missing_closing_tags
         和外层 parse_tool_calls 的未闭合块处理逻辑负责。
+
+        ── gate（避免误判 _repair_unclosed_cdata_tags 已经覆盖的场景）──
+        像 <content><![CDATA[x]]><id>foo</id></params> 这种"漏写 </content>
+        但后面还有 sibling 标签"的情况，并不是截断 —— 应该让
+        _repair_unclosed_cdata_tags 把 </content> 插在正确位置。判定依据：
+        case B/C 的未闭合字段标签必须是输入里的最后一个 tag 事件（之后再无
+        push/pop），否则视为 mid-content abandonment 而非 tail truncation。
         """
-        stack: List[str] = []  # 未闭合标签栈
+        stack: List[tuple] = []  # 未闭合标签栈：(tag_name, open_start_pos)
         pos = 0
         cdata_open_at_eof = False
         cdata_wrapper: Optional[str] = None  # CDATA 截断时其外层 tag
+        last_tag_event_pos = -1  # 最后一次见到 tag-shape 内容的位置
 
         tag_re = re.compile(r'<(/?)(\w+)\s*>')
 
@@ -265,7 +284,7 @@ class XMLToolCallParser:
                 if cdata_end == -1:
                     # CDATA 未闭合 → 截断点
                     cdata_open_at_eof = True
-                    cdata_wrapper = stack[-1] if stack else None
+                    cdata_wrapper = stack[-1][0] if stack else None
                     break
                 pos = cdata_end + 3
                 continue
@@ -273,14 +292,17 @@ class XMLToolCallParser:
             if tag_idx == -1:
                 break
 
+            # gate 判断需要：任何 tag 事件（push / 正常 pop / mismatched 忽略）
+            # 都会更新 last_tag_event_pos，因为它们都意味着"开标签之后还有 tag 形态的内容"
+            last_tag_event_pos = tag_idx
             is_close = tag_match.group(1) == '/'
             tag_name = tag_match.group(2)
             if is_close:
-                if stack and stack[-1] == tag_name:
+                if stack and stack[-1][0] == tag_name:
                     stack.pop()
                 # 不匹配的关闭标签忽略（其他 repair 不应该产生这种状态）
             else:
-                stack.append(tag_name)
+                stack.append((tag_name, tag_idx))
             pos = tag_match.end()
 
         # 决策：先处理 CDATA 未闭合
@@ -291,34 +313,36 @@ class XMLToolCallParser:
                     f"Output appears truncated mid-content inside <{cdata_wrapper}> "
                     f"(likely max_tokens output limit hit). Partial content was saved "
                     f"with auto-closed CDATA. "
-                    f"If this was create_artifact, call update_artifact(id=..., new_content=...) "
-                    f"with the SAME id to append the missing tail. "
-                    f"Do NOT retry the same create_artifact call — it will truncate again."
+                    f"{XMLToolCallParser._CONTINUE_WITH_UPDATE_ARTIFACT}"
                 )
                 return content
             # CDATA 直接在 params 下，或栈空 —— 补 ]]> 让结构合法即可
             content = content.rstrip() + ']]>'
             warnings.append(
                 "Output truncated inside CDATA with no clear wrapping field tag "
-                "(likely max_tokens output limit hit). "
-                "Auto-closed CDATA. Verify with read_artifact and continue via update_artifact."
+                "(likely max_tokens output limit hit). Auto-closed CDATA. "
+                "Verify with read_artifact first; "
+                f"{XMLToolCallParser._CONTINUE_WITH_UPDATE_ARTIFACT}"
             )
             return content
 
         # CDATA 都正常闭了，但还有未关闭的字段标签（B / C 案例）
-        field_stack = [t for t in stack if t.lower() not in ('params', 'tool_call')]
+        # gate: 仅在栈顶未闭合标签的 open 就是最后一个 tag 事件时才认为是截断，
+        # 否则交给 _repair_unclosed_cdata_tags 在正确位置插闭合标签。
+        field_stack = [(n, p) for n, p in stack if n.lower() not in ('params', 'tool_call')]
         if field_stack:
-            tags_str = ', '.join(f'</{t}>' for t in reversed(field_stack))
-            suffix = ''.join(f'</{t}>' for t in reversed(field_stack))
-            content = content.rstrip() + suffix
-            warnings.append(
-                f"Output truncated before closing tag(s) {tags_str} "
-                f"(likely max_tokens output limit hit). Field(s) auto-closed. "
-                f"If this was create_artifact, verify completeness with read_artifact "
-                f"and use update_artifact to append any missing tail with the same id. "
-                f"Do NOT retry the same call — it will truncate again."
-            )
-            return content
+            topmost_name, topmost_pos = field_stack[-1]
+            if topmost_pos == last_tag_event_pos:
+                tags_str = ', '.join(f'</{n}>' for n, _ in reversed(field_stack))
+                suffix = ''.join(f'</{n}>' for n, _ in reversed(field_stack))
+                content = content.rstrip() + suffix
+                warnings.append(
+                    f"Output truncated before closing tag(s) {tags_str} "
+                    f"(likely max_tokens output limit hit). Field(s) auto-closed. "
+                    f"If content is incomplete: "
+                    f"{XMLToolCallParser._CONTINUE_WITH_UPDATE_ARTIFACT}"
+                )
+                return content
 
         return content
 

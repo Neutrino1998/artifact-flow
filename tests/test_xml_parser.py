@@ -41,7 +41,9 @@ class TestNormalParse:
 
 class TestTruncationRepair:
     def test_cdata_mid_content_truncation_preserves_partial_content(self):
-        """CDATA 中间被切：partial content 必须被保留，不能静默丢失。"""
+        """CDATA 中间被切：partial content 必须被保留，不能静默丢失。
+        warning 必须给出可执行的 update_artifact(id, old_str, new_str) anchor 续写指引
+        —— 不能用不存在的参数（如 new_content），否则模型按提示调用直接失败。"""
         text = """<tool_call>
 <name>create_artifact</name>
 <params>
@@ -57,9 +59,20 @@ This long content was cut here because max_tokens hit and"""
         assert tc.params["id"] == "doc_xxx"
         # partial content 必须保留
         assert "This long content was cut here" in tc.params["content"]
-        # 截断 warning 必须存在并提到 update_artifact
-        assert any("truncated" in w.lower() and "update_artifact" in w for w in tc.warnings), (
-            f"missing actionable truncation warning, got: {tc.warnings}"
+        # 截断 warning 必须用实际可执行的参数名（old_str/new_str）
+        warning = next((w for w in tc.warnings if "truncated" in w.lower()), None)
+        assert warning is not None, f"missing truncation warning, got: {tc.warnings}"
+        assert "update_artifact" in warning
+        assert "old_str" in warning and "new_str" in warning, (
+            f"warning must reference actual update_artifact params (old_str/new_str), got: {warning}"
+        )
+        # 显式禁止 retry create_artifact / 使用 rewrite_artifact（两者都会再次截断）
+        assert "rewrite_artifact" in warning.lower(), (
+            f"warning should explicitly warn against rewrite_artifact, got: {warning}"
+        )
+        # 不应该出现 update_artifact 不存在的参数
+        assert "new_content" not in warning, (
+            f"warning must not reference a non-existent param (new_content), got: {warning}"
         )
 
     def test_cdata_closed_but_tag_unclosed_at_tail(self):
@@ -105,6 +118,27 @@ This long content was cut here because max_tokens hit and"""
         # 不应该有 truncation warning（CDATA 和字段都正常闭合了）
         assert not any("truncated" in w.lower() for w in tc.warnings), (
             f"spurious truncation warning, got: {tc.warnings}"
+        )
+
+    def test_unclosed_field_tag_with_sibling_after_is_not_truncation(self):
+        """漏写 </content> 但后面还有 sibling 标签（_repair_unclosed_cdata_tags 的场景）
+        —— 不应被误判为截断。会诱导模型对实际完整的内容做不必要的 update_artifact。"""
+        text = """<tool_call>
+<name>create_artifact</name>
+<params>
+<content><![CDATA[Body content here.]]>
+<id><![CDATA[doc_xxx]]></id>
+</params>
+</tool_call>"""
+        results = parse_tool_calls(text)
+        assert len(results) == 1
+        tc = results[0]
+        # content/id 都该被正确解析（_repair_unclosed_cdata_tags 把 </content> 插在正确位置）
+        assert tc.params.get("content") == "Body content here."
+        assert tc.params.get("id") == "doc_xxx"
+        # 不应该有截断 warning（这不是截断，是漏写闭合标签 —— 既有 repair 处理）
+        assert not any("truncated" in w.lower() for w in tc.warnings), (
+            f"spurious truncation warning on abandoned-mid-content case, got: {tc.warnings}"
         )
 
 

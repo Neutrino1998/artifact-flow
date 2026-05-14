@@ -357,9 +357,19 @@ async def execute_loop(
 
         return response_content, reasoning_content, normalized_usage
 
-    async def _handle_permission(tool_name: str, params: dict, agent_name: str, permission: ToolPermission) -> bool:
+    async def _handle_permission(
+        tool_name: str,
+        params: dict,
+        agent_name: str,
+        permission: ToolPermission,
+        parser_warnings: Optional[List[str]] = None,
+    ) -> bool:
         """
         处理权限中断。
+
+        parser_warnings 是本次 tool_call 的 parser 兜底提示。显式 deny 的
+        TOOL_COMPLETE 一并带回去，让模型下一轮看到 "你这次的 XML 还有 X 个
+        问题、写法应该是 Y"，与其他 TOOL_COMPLETE 路径保持对齐。
 
         Returns:
             True — approved, False — denied（含超时和客户端断开）
@@ -400,6 +410,7 @@ async def execute_loop(
                 "tool": tool_name, "success": False,
                 "error": "Permission denied by user. You do not have permission to use this tool.",
                 "duration_ms": 0,
+                "parser_warnings": parser_warnings,
             })
             return False
 
@@ -591,7 +602,9 @@ async def execute_loop(
             effective_permission = ToolPermission(agent_perm_str)
             if effective_permission == ToolPermission.CONFIRM:
                 if tool_name not in state.get("always_allowed_tools", []):
-                    approved = await _handle_permission(tool_name, params, agent_name, effective_permission)
+                    approved = await _handle_permission(
+                        tool_name, params, agent_name, effective_permission, parser_warnings
+                    )
                     if not approved:
                         tool_round_count[agent_name] = tool_round_count.get(agent_name, 0) + 1
                         continue

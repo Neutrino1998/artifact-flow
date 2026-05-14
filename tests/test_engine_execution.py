@@ -586,6 +586,66 @@ class TestPermissionInterrupt:
         assert len(perm_results) == 1
         assert perm_results[0]["data"]["approved"] is False
 
+    async def test_denied_tool_complete_includes_parser_warnings(self):
+        """显式 deny 的 TOOL_COMPLETE 必须带上本次 tool_call 的 parser_warnings，
+        否则被 repair 过的 confirm 工具调用一旦被拒绝，下一轮模型就再也看不到
+        修复提示 —— 与提交目标 "thread parser_warnings through every TOOL_COMPLETE"
+        不一致（reviewer P2）。"""
+        agent = _FakeAgentConfig(tools={"sensitive_tool": "confirm"})
+        tool = _FakeTool("sensitive_tool", permission=ToolPermission.CONFIRM)
+
+        # 用 <name=foo</name> 等号语法触发 _repair_tag_equals_syntax warning
+        xml_with_repair = """<tool_call>
+<name=sensitive_tool</name>
+<params>
+<query><![CDATA[test]]></query>
+</params>
+</tool_call>"""
+
+        store = InMemoryRuntimeStore()
+        state = create_initial_state(task="test", session_id="s1", message_id="msg-1", path_events=[])
+        emitted = []
+
+        async def _resolve_deny():
+            for _ in range(100):
+                if await store.get_interrupt_data("msg-1") is not None:
+                    await store.resolve_interrupt("msg-1", {"approved": False})
+                    return
+                await asyncio.sleep(0.01)
+
+        async def capture_emit(event_dict):
+            emitted.append(event_dict)
+            if event_dict["type"] == "permission_request":
+                asyncio.create_task(_resolve_deny())
+
+        rounds = [
+            _tool_call_chunks(xml_with_repair),
+            _simple_llm_chunks("done"),
+        ]
+
+        with patch("models.llm.astream_with_retry", _make_fake_stream_sequence(rounds)), \
+             patch("core.engine.config.PERMISSION_TIMEOUT", 5):
+            await execute_loop(
+                state=state,
+                agents={"lead_agent": agent},
+                tools={"sensitive_tool": tool},
+                hooks=_hooks_from_store(store),
+                emit=capture_emit,
+            )
+
+        tool_completes = [
+            e for e in emitted
+            if e["type"] == "tool_complete" and e["data"].get("tool") == "sensitive_tool"
+        ]
+        assert len(tool_completes) == 1
+        deny_event = tool_completes[0]
+        assert deny_event["data"]["success"] is False
+        warnings = deny_event["data"].get("parser_warnings")
+        assert warnings, f"deny TOOL_COMPLETE missing parser_warnings, got: {deny_event['data']}"
+        assert any("=" in w and "name" in w.lower() for w in warnings), (
+            f"warnings should describe the '=' syntax repair, got: {warnings}"
+        )
+
 
 # ============================================================
 # TestCancellation
