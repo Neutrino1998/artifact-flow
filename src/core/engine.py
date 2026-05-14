@@ -11,6 +11,7 @@
 
 import asyncio
 import math
+import time
 from dataclasses import dataclass, field
 from typing import Dict, Any, Optional, Callable, Awaitable, List, Tuple, TypedDict, Union
 from datetime import datetime
@@ -278,8 +279,11 @@ async def execute_loop(
         reasoning_content = None
         token_usage = {}
 
+        cancelled_mid_stream = False
+        llm_stream = astream_with_retry(messages, model=model)
         try:
-            async for chunk in astream_with_retry(messages, model=model):
+            last_cancel_check = time.monotonic()
+            async for chunk in llm_stream:
                 chunk_type = chunk.get("type")
 
                 if chunk_type == "content":
@@ -307,6 +311,15 @@ async def execute_loop(
                     if not token_usage and chunk.get("token_usage"):
                         token_usage = chunk["token_usage"]
 
+                # 流式输出期间轮询 cancel —— 节流到 CANCEL_CHECK_INTERVAL，避免每个
+                # chunk 一次 Redis GET。命中则停止消费，把已累积内容当作本次 llm_complete。
+                now = time.monotonic()
+                if now - last_cancel_check >= config.CANCEL_CHECK_INTERVAL:
+                    last_cancel_check = now
+                    if await hooks.check_cancelled(message_id):
+                        cancelled_mid_stream = True
+                        break
+
         except Exception as llm_error:
             logger.error(f"LLM call failed: {llm_error}")
             await _emit(StreamEventType.ERROR.value, agent_name, {
@@ -316,6 +329,28 @@ async def execute_loop(
             state["completed"] = True
             state["error"] = True
             state["response"] = f"LLM call failed: {str(llm_error)}"
+            return None
+        finally:
+            # break 退出 async for 不会自动关闭生成器（参考 redis_stream_transport
+            # 同款约定）—— 显式 aclose 以立即释放底层 HTTP 连接；正常 return /
+            # 异常路径下生成器已终结，aclose 是 no-op。
+            await llm_stream.aclose()
+
+        if cancelled_mid_stream:
+            # 把已累积的部分内容作为 llm_complete 持久化 —— events 是历史 source of
+            # truth，下一轮恢复时模型能看到自己说到一半的内容。流式中途通常还没收到
+            # usage chunk，token_usage 置零即可（本轮 metrics 不再补算）。
+            llm_duration_ms = int((datetime.now() - llm_start_time).total_seconds() * 1000)
+            await _emit(StreamEventType.LLM_COMPLETE.value, agent_name, {
+                "content": response_content,
+                "reasoning_content": reasoning_content,
+                "token_usage": {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0},
+                "model": model,
+                "duration_ms": llm_duration_ms,
+            })
+            state["completed"] = True
+            state["cancelled"] = True
+            logger.info(f"[{agent_name}] LLM stream cancelled mid-flight, partial content persisted")
             return None
 
         llm_end_time = datetime.now()

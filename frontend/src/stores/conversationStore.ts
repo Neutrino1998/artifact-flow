@@ -75,7 +75,12 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
   setActiveBranch: (messageId) => {
     const { nodeMap } = get();
     const branchPath = extractBranchPath(nodeMap, messageId);
-    set({ activeBranch: messageId, branchPath });
+    // extractBranchPath resolves through to the deepest leaf — keep activeBranch
+    // pointing at that leaf so it stays consistent with branchPath (and with the
+    // "active_branch = leaf" contract) when an interior node is selected.
+    const activeBranch =
+      branchPath.length > 0 ? branchPath[branchPath.length - 1].id : messageId;
+    set({ activeBranch, branchPath });
   },
 
   updateMessages: (messages) => {
