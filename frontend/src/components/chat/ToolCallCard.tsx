@@ -81,8 +81,10 @@ function ToolCallCard({ toolCall }: ToolCallCardProps) {
         </div>
       )}
 
-      {/* Result */}
-      {result && (
+      {/* Result — render whenever the tool has completed (incl. legitimate empty string output),
+          not just when result is truthy. Duration lives next to the Result label, so falsy-checking
+          here would also hide the timing for empty-result completions. */}
+      {result !== undefined && (
         <div>
           <div className="flex items-center mb-1 text-text-tertiary dark:text-text-tertiary-dark">
             <span>Result</span>
