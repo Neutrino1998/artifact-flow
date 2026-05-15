@@ -37,7 +37,7 @@ function ToolCallCard({ toolCall }: ToolCallCardProps) {
       leading={<span className={`flex-shrink-0 ${statusColor}`}>{statusIcon}</span>}
       label={
         <>
-          <span className="font-medium text-text-primary dark:text-text-primary-dark">{toolName}</span>
+          <span className="text-text-secondary dark:text-text-secondary-dark">{toolName}</span>
           <span className="text-text-tertiary dark:text-text-tertiary-dark">by {agent}</span>
         </>
       }
