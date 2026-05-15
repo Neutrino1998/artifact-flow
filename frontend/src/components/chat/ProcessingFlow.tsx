@@ -37,7 +37,7 @@ function ProcessingFlow({ agentStepCount, isActive, defaultExpanded, hasError, t
       {/* Header row — inline disclosure style, no outer card chrome */}
       <button
         onClick={() => setExpanded(!expanded)}
-        className="w-full flex items-center gap-2 py-1.5 px-2 text-xs transition-colors rounded-md hover:bg-panel-accent dark:hover:bg-panel-accent-dark cursor-pointer"
+        className="w-full flex items-center gap-2 py-1.5 px-2 text-xs transition-colors rounded-md hover:bg-surface dark:hover:bg-panel-accent-dark cursor-pointer"
       >
         {/* Chevron */}
         <svg

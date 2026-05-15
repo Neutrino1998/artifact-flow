@@ -90,7 +90,7 @@ function AgentSegmentBlock({ segment, isActive, defaultExpanded, stepNumber }: A
       <button
         onClick={() => { if (!isActive) setExpanded(!expanded); }}
         className={`w-full flex items-center gap-2 px-3 py-2 text-xs transition-colors ${
-          isActive ? 'cursor-default' : 'hover:bg-panel-accent dark:hover:bg-panel-accent-dark cursor-pointer'
+          isActive ? 'cursor-default' : 'hover:bg-surface dark:hover:bg-panel-accent-dark cursor-pointer'
         }`}
       >
         {/* Chevron */}

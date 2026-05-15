@@ -87,7 +87,7 @@ export default function NotificationCenter({ collapsed }: Props) {
       <>
         <button
           onClick={() => setOpen(true)}
-          className="relative w-10 h-10 flex items-center justify-center rounded-lg text-text-secondary dark:text-text-secondary-dark hover:bg-bg dark:hover:bg-bg-dark transition-colors"
+          className="relative w-10 h-10 flex items-center justify-center rounded-lg text-text-secondary dark:text-text-secondary-dark hover:bg-surface dark:hover:bg-[#141414] transition-colors"
           title={`${items.length} 条通知`}
           aria-label="查看通知"
         >
@@ -104,7 +104,7 @@ export default function NotificationCenter({ collapsed }: Props) {
     <>
       <button
         onClick={() => setOpen(true)}
-        className="w-full flex items-center gap-3 px-3 py-2.5 bg-chat dark:bg-panel-accent-dark rounded-card hover:bg-chat/70 dark:hover:bg-surface-dark transition-colors text-left"
+        className="w-full flex items-center gap-3 px-3 py-2.5 bg-chat dark:bg-panel-accent-dark rounded-card hover:bg-surface dark:hover:bg-[#141414] transition-colors text-left"
       >
         <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${SEVERITY_BG_TINT[top.severity]}`}>
           <BellIcon className={SEVERITY_TEXT_CLASS[top.severity]} />

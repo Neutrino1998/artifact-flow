@@ -86,7 +86,7 @@ export default function UserMenu({ collapsed }: { collapsed?: boolean }) {
           <button
             ref={triggerRef}
             onClick={togglePopover}
-            className="w-10 h-10 flex items-center justify-center rounded-lg text-text-secondary dark:text-text-secondary-dark hover:bg-bg dark:hover:bg-bg-dark transition-colors"
+            className="w-10 h-10 flex items-center justify-center rounded-lg text-text-secondary dark:text-text-secondary-dark hover:bg-surface dark:hover:bg-[#141414] transition-colors"
             title={user.display_name || user.username}
           >
             <div className="w-7 h-7 rounded-lg bg-accent/15 text-accent flex items-center justify-center text-xs font-medium">
@@ -97,7 +97,7 @@ export default function UserMenu({ collapsed }: { collapsed?: boolean }) {
           <button
             ref={triggerRef}
             onClick={togglePopover}
-            className="w-full flex items-center gap-3 px-3 py-2.5 bg-chat dark:bg-panel-accent-dark rounded-card hover:bg-chat/70 dark:hover:bg-surface-dark transition-colors text-left"
+            className="w-full flex items-center gap-3 px-3 py-2.5 bg-chat dark:bg-panel-accent-dark rounded-card hover:bg-surface dark:hover:bg-[#141414] transition-colors text-left"
           >
             <div className="w-8 h-8 rounded-lg bg-accent/15 text-accent flex items-center justify-center font-medium shrink-0">
               {initial}
@@ -141,7 +141,7 @@ export default function UserMenu({ collapsed }: { collapsed?: boolean }) {
                 toggleTheme();
                 setPopoverOpen(false);
               }}
-              className="w-full flex items-center gap-2 px-2.5 py-2 text-text-primary dark:text-text-primary-dark hover:bg-surface dark:hover:bg-surface-dark rounded-lg transition-colors"
+              className="w-full flex items-center gap-2 px-2.5 py-2 text-text-primary dark:text-text-primary-dark hover:bg-surface dark:hover:bg-[#141414] rounded-lg transition-colors"
             >
               {theme === 'light' ? (
                 <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
@@ -158,7 +158,7 @@ export default function UserMenu({ collapsed }: { collapsed?: boolean }) {
             {/* Edit display name (all users) */}
             <button
               onClick={handleEditProfile}
-              className="w-full flex items-center gap-2 px-2.5 py-2 text-text-primary dark:text-text-primary-dark hover:bg-surface dark:hover:bg-surface-dark rounded-lg transition-colors"
+              className="w-full flex items-center gap-2 px-2.5 py-2 text-text-primary dark:text-text-primary-dark hover:bg-surface dark:hover:bg-[#141414] rounded-lg transition-colors"
             >
               <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
                 <path d="M11 2l3 3-9 9H2v-3z" />
@@ -169,7 +169,7 @@ export default function UserMenu({ collapsed }: { collapsed?: boolean }) {
             {/* Change password (all users) */}
             <button
               onClick={handleChangePassword}
-              className="w-full flex items-center gap-2 px-2.5 py-2 text-text-primary dark:text-text-primary-dark hover:bg-surface dark:hover:bg-surface-dark rounded-lg transition-colors"
+              className="w-full flex items-center gap-2 px-2.5 py-2 text-text-primary dark:text-text-primary-dark hover:bg-surface dark:hover:bg-[#141414] rounded-lg transition-colors"
             >
               <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
                 <rect x="3" y="7" width="10" height="7" rx="1" />
@@ -182,7 +182,7 @@ export default function UserMenu({ collapsed }: { collapsed?: boolean }) {
             {isAdmin && (
               <button
                 onClick={handleManageUsers}
-                className="w-full flex items-center gap-2 px-2.5 py-2 text-text-primary dark:text-text-primary-dark hover:bg-surface dark:hover:bg-surface-dark rounded-lg transition-colors"
+                className="w-full flex items-center gap-2 px-2.5 py-2 text-text-primary dark:text-text-primary-dark hover:bg-surface dark:hover:bg-[#141414] rounded-lg transition-colors"
               >
                 <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
                   <circle cx="8" cy="5" r="3" />
@@ -196,7 +196,7 @@ export default function UserMenu({ collapsed }: { collapsed?: boolean }) {
             {isAdmin && (
               <button
                 onClick={handleObservability}
-                className="w-full flex items-center gap-2 px-2.5 py-2 text-text-primary dark:text-text-primary-dark hover:bg-surface dark:hover:bg-surface-dark rounded-lg transition-colors"
+                className="w-full flex items-center gap-2 px-2.5 py-2 text-text-primary dark:text-text-primary-dark hover:bg-surface dark:hover:bg-[#141414] rounded-lg transition-colors"
               >
                 <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
                   <path d="M1 8h2l2-5 3 10 2-5h2l2-3h1" />
@@ -211,7 +211,7 @@ export default function UserMenu({ collapsed }: { collapsed?: boolean }) {
             {/* Logout */}
             <button
               onClick={handleLogout}
-              className="w-full flex items-center gap-2 px-2.5 py-2 text-red-500 hover:bg-surface dark:hover:bg-surface-dark rounded-lg transition-colors"
+              className="w-full flex items-center gap-2 px-2.5 py-2 text-red-500 hover:bg-surface dark:hover:bg-[#141414] rounded-lg transition-colors"
             >
               <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
                 <path d="M6 2H3a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3M11 11l3-3-3-3M6 8h8" />

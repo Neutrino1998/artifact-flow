@@ -325,7 +325,7 @@ function DetailPanel({ event, onClose }: { event: AdminEventItem; onClose: () =>
         <div className="flex items-center gap-1">
           <button
             onClick={handleCopy}
-            className="p-1 rounded-md text-text-tertiary dark:text-text-tertiary-dark hover:text-text-secondary dark:hover:text-text-secondary-dark transition-colors"
+            className="p-1 rounded-md text-text-tertiary dark:text-text-tertiary-dark hover:text-text-secondary dark:hover:text-text-secondary-dark hover:bg-surface dark:hover:bg-bg-dark transition-colors"
             title="复制全部内容"
           >
             {copied ? (
@@ -441,7 +441,7 @@ function AdminConversationBrowser({
             </span>
             <button
               onClick={onClose}
-              className="flex-shrink-0 p-1 rounded-lg text-text-tertiary dark:text-text-tertiary-dark hover:text-text-secondary dark:hover:text-text-secondary-dark transition-colors"
+              className="flex-shrink-0 p-1 rounded-lg text-text-tertiary dark:text-text-tertiary-dark hover:text-text-secondary dark:hover:text-text-secondary-dark hover:bg-surface dark:hover:bg-bg-dark transition-colors"
               aria-label="关闭"
               title="关闭"
             >
@@ -525,7 +525,7 @@ function MessageGroupView({
       {/* Message header */}
       <button
         onClick={onToggle}
-        className="w-full text-left flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-surface dark:hover:bg-surface-dark transition-colors"
+        className="w-full text-left flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-surface dark:hover:bg-bg-dark transition-colors"
       >
         <svg
           width="10"
@@ -554,7 +554,7 @@ function MessageGroupView({
               className={`w-full text-left flex items-center gap-2 px-2 py-1 rounded text-xs transition-colors ${
                 selectedEventId === event.id
                   ? 'bg-accent/10'
-                  : 'hover:bg-surface dark:hover:bg-surface-dark'
+                  : 'hover:bg-surface dark:hover:bg-bg-dark'
               }`}
             >
               <span className="flex-shrink-0 text-text-tertiary dark:text-text-tertiary-dark w-[52px]">

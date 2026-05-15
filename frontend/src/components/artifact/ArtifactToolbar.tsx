@@ -130,7 +130,7 @@ export default function ArtifactToolbar() {
         {/* Refresh */}
         <button
           onClick={handleRefresh}
-          className="p-1.5 rounded text-text-secondary dark:text-text-secondary-dark hover:bg-bg dark:hover:bg-bg-dark transition-colors"
+          className="p-1.5 rounded text-text-secondary dark:text-text-secondary-dark hover:bg-surface dark:hover:bg-bg-dark transition-colors"
           aria-label="Refresh artifact"
           title="刷新"
         >
@@ -143,7 +143,7 @@ export default function ArtifactToolbar() {
         {/* Copy */}
         <button
           onClick={handleCopy}
-          className="p-1.5 rounded text-text-secondary dark:text-text-secondary-dark hover:bg-bg dark:hover:bg-bg-dark transition-colors"
+          className="p-1.5 rounded text-text-secondary dark:text-text-secondary-dark hover:bg-surface dark:hover:bg-bg-dark transition-colors"
           aria-label="Copy content"
           title={copied ? '已复制' : '复制内容'}
         >
@@ -163,7 +163,7 @@ export default function ArtifactToolbar() {
         <div className="relative" ref={downloadMenuRef}>
           <button
             onClick={() => setShowDownloadMenu((v) => !v)}
-            className="p-1.5 rounded text-text-secondary dark:text-text-secondary-dark hover:bg-bg dark:hover:bg-bg-dark transition-colors"
+            className="p-1.5 rounded text-text-secondary dark:text-text-secondary-dark hover:bg-surface dark:hover:bg-bg-dark transition-colors"
             aria-label="Download artifact"
             title="下载"
           >

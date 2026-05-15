@@ -122,7 +122,7 @@ function UserMessage({ content, messageId, parentId, siblingIndex, siblingCount 
           <button
             onClick={handleEdit}
             disabled={isStreaming}
-            className="p-1 rounded text-text-tertiary dark:text-text-tertiary-dark hover:text-text-secondary dark:hover:text-text-secondary-dark hover:bg-bg dark:hover:bg-bg-dark disabled:opacity-40 transition-colors"
+            className="p-1 rounded text-text-tertiary dark:text-text-tertiary-dark hover:text-text-secondary dark:hover:text-text-secondary-dark hover:bg-surface dark:hover:bg-bg-dark disabled:opacity-40 transition-colors"
             aria-label="Edit message"
             title="编辑"
           >
@@ -133,7 +133,7 @@ function UserMessage({ content, messageId, parentId, siblingIndex, siblingCount 
           <button
             onClick={handleRerun}
             disabled={isStreaming}
-            className="p-1 rounded text-text-tertiary dark:text-text-tertiary-dark hover:text-text-secondary dark:hover:text-text-secondary-dark hover:bg-bg dark:hover:bg-bg-dark disabled:opacity-40 transition-colors"
+            className="p-1 rounded text-text-tertiary dark:text-text-tertiary-dark hover:text-text-secondary dark:hover:text-text-secondary-dark hover:bg-surface dark:hover:bg-bg-dark disabled:opacity-40 transition-colors"
             aria-label="Rerun message"
             title="重新生成"
           >
@@ -144,7 +144,7 @@ function UserMessage({ content, messageId, parentId, siblingIndex, siblingCount 
           </button>
           <button
             onClick={handleCopy}
-            className="p-1 rounded text-text-tertiary dark:text-text-tertiary-dark hover:text-text-secondary dark:hover:text-text-secondary-dark hover:bg-bg dark:hover:bg-bg-dark transition-colors"
+            className="p-1 rounded text-text-tertiary dark:text-text-tertiary-dark hover:text-text-secondary dark:hover:text-text-secondary-dark hover:bg-surface dark:hover:bg-bg-dark transition-colors"
             aria-label="Copy message"
             title={copied ? '已复制' : '复制'}
           >

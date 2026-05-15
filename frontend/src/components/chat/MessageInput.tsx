@@ -153,7 +153,7 @@ export default function MessageInput() {
               <button
                 onClick={handleFileSelect}
                 disabled={uploadDisabled}
-                className="p-1.5 rounded-lg text-text-secondary dark:text-text-secondary-dark hover:bg-bg dark:hover:bg-bg-dark transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                className="p-1.5 rounded-lg text-text-secondary dark:text-text-secondary-dark hover:bg-surface dark:hover:bg-bg-dark transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                 aria-label="Upload file"
                 title="上传文件（支持多选）"
               >
@@ -176,7 +176,7 @@ export default function MessageInput() {
               {/* Artifact panel toggle */}
               <button
                 onClick={toggleArtifactPanel}
-                className="p-1.5 rounded-lg text-text-secondary dark:text-text-secondary-dark hover:bg-bg dark:hover:bg-bg-dark transition-colors"
+                className="p-1.5 rounded-lg text-text-secondary dark:text-text-secondary-dark hover:bg-surface dark:hover:bg-bg-dark transition-colors"
                 aria-label="Toggle artifact panel"
                 title="切换文稿面板"
               >
