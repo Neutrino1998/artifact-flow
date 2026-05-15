@@ -94,6 +94,9 @@ function DisclosureRow({
     ? ''
     : 'border border-border dark:border-border-dark rounded-card overflow-hidden';
   const headerPaddingClass = isInline ? 'py-1.5' : 'px-3 py-2';
+  // Inline rows have no outer rounded container to clip the hover background,
+  // so the button itself needs to round.
+  const headerRoundedClass = isInline ? 'rounded-md' : '';
   const bodyDividerClass = isInline ? '' : 'border-t border-border dark:border-border-dark';
 
   return (
@@ -101,8 +104,8 @@ function DisclosureRow({
       <button
         type="button"
         onClick={() => { if (hasBody) setExpanded(!expanded); }}
-        className={`w-full flex items-center gap-2 ${headerPaddingClass} text-xs transition-colors ${
-          hasBody ? 'hover:bg-bg dark:hover:bg-bg-dark cursor-pointer' : 'cursor-default'
+        className={`w-full flex items-center gap-2 ${headerPaddingClass} ${headerRoundedClass} text-xs transition-colors ${
+          hasBody ? 'hover:bg-panel-accent dark:hover:bg-panel-accent-dark cursor-pointer' : 'cursor-default'
         } ${headerClassName ?? ''}`}
       >
         {chevronPosition === 'leading' && chevron}
