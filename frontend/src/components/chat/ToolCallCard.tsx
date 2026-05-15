@@ -33,7 +33,7 @@ function ToolCallCard({ toolCall }: ToolCallCardProps) {
 
   return (
     <DisclosureRow
-      chevronPosition="trailing"
+      variant="inline"
       leading={<span className={`flex-shrink-0 ${statusColor}`}>{statusIcon}</span>}
       label={
         <>
@@ -41,20 +41,15 @@ function ToolCallCard({ toolCall }: ToolCallCardProps) {
           <span className="text-text-tertiary dark:text-text-tertiary-dark">by {agent}</span>
         </>
       }
-      trailing={
-        durationMs !== undefined
-          ? <span className="text-text-tertiary dark:text-text-tertiary-dark">{durationMs}ms</span>
-          : undefined
-      }
-      bodyClassName="px-3 pb-3 space-y-2 text-xs"
+      bodyClassName="pl-5 pt-1 pb-2 space-y-2 text-xs"
     >
       {/* Parameters */}
       {Object.keys(params).length > 0 && (
-        <div className="pt-2">
+        <div>
           <div className="text-text-tertiary dark:text-text-tertiary-dark mb-1">
             Parameters
           </div>
-          <pre className="bg-bg dark:bg-bg-dark rounded p-2 overflow-x-auto text-text-secondary dark:text-text-secondary-dark font-mono">
+          <pre className="bg-panel-accent dark:bg-bg-dark rounded p-2 overflow-x-auto text-text-secondary dark:text-text-secondary-dark font-mono">
             {JSON.stringify(params, null, 2)}
           </pre>
         </div>
@@ -89,10 +84,13 @@ function ToolCallCard({ toolCall }: ToolCallCardProps) {
       {/* Result */}
       {result && (
         <div>
-          <div className="text-text-tertiary dark:text-text-tertiary-dark mb-1">
-            Result
+          <div className="flex items-center mb-1 text-text-tertiary dark:text-text-tertiary-dark">
+            <span>Result</span>
+            {durationMs !== undefined && (
+              <span className="ml-auto font-mono">{durationMs}ms</span>
+            )}
           </div>
-          <pre className="bg-bg dark:bg-bg-dark rounded p-2 overflow-x-auto text-text-secondary dark:text-text-secondary-dark font-mono max-h-48 overflow-y-auto">
+          <pre className="bg-panel-accent dark:bg-bg-dark rounded p-2 overflow-x-auto text-text-secondary dark:text-text-secondary-dark font-mono max-h-48 overflow-y-auto">
             {result}
           </pre>
         </div>

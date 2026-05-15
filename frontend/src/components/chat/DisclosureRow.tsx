@@ -4,6 +4,14 @@ import { memo, useState, useEffect, type ReactNode } from 'react';
 
 interface DisclosureRowProps {
   /**
+   * 'card' (default): bordered + rounded outer + `border-t` body divider — the
+   *   original visual of ThinkingBlock / AgentOutputBlock / ToolCallCard.
+   * 'inline': borderless, no body divider, no horizontal header padding. Used
+   *   inside a parent card where the disclosure row is a list-style entry, not
+   *   its own card. Callers control body padding/indent via `bodyClassName`.
+   */
+  variant?: 'card' | 'inline';
+  /**
    * Content shown on the header before the label (e.g. status icon).
    * Rendered after the leading chevron when `chevronPosition === 'leading'`.
    */
@@ -38,11 +46,12 @@ interface DisclosureRowProps {
 
 /**
  * Shared collapsible row primitive for in-segment blocks (Thinking, Agent Output, Tool Call).
- * PR1 keeps the existing card-style chrome (border + rounded + `border-t` body divider);
- * PR2 will add a borderless inline variant. The slot API (leading/label/trailing + chevron
- * position) covers both "chevron-first label" rows and "icon-first ... chevron-last" rows.
+ * Two variants share the same slot API (leading/label/trailing + chevron position):
+ *   - 'card' (default) wraps the row in a bordered card — original visual.
+ *   - 'inline' renders a borderless list-style row meant to live inside a parent card.
  */
 function DisclosureRow({
+  variant = 'card',
   leading,
   label,
   trailing,
@@ -80,12 +89,19 @@ function DisclosureRow({
     </svg>
   ) : null;
 
+  const isInline = variant === 'inline';
+  const outerClass = isInline
+    ? ''
+    : 'border border-border dark:border-border-dark rounded-card overflow-hidden';
+  const headerPaddingClass = isInline ? 'py-1.5' : 'px-3 py-2';
+  const bodyDividerClass = isInline ? '' : 'border-t border-border dark:border-border-dark';
+
   return (
-    <div className="border border-border dark:border-border-dark rounded-card overflow-hidden">
+    <div className={outerClass}>
       <button
         type="button"
         onClick={() => { if (hasBody) setExpanded(!expanded); }}
-        className={`w-full flex items-center gap-2 px-3 py-2 text-xs transition-colors ${
+        className={`w-full flex items-center gap-2 ${headerPaddingClass} text-xs transition-colors ${
           hasBody ? 'hover:bg-bg dark:hover:bg-bg-dark cursor-pointer' : 'cursor-default'
         } ${headerClassName ?? ''}`}
       >
@@ -99,7 +115,7 @@ function DisclosureRow({
       </button>
 
       {isExpanded && (
-        <div className={`border-t border-border dark:border-border-dark ${bodyClassName ?? ''}`}>
+        <div className={`${bodyDividerClass} ${bodyClassName ?? ''}`}>
           {children}
         </div>
       )}
