@@ -105,7 +105,7 @@ function DisclosureRow({
         type="button"
         onClick={() => { if (hasBody) setExpanded(!expanded); }}
         className={`w-full flex items-center gap-2 ${headerPaddingClass} ${headerRoundedClass} text-xs transition-colors ${
-          hasBody ? 'hover:bg-surface dark:hover:bg-panel-accent-dark cursor-pointer' : 'cursor-default'
+          hasBody ? 'hover:bg-surface/60 dark:hover:bg-panel-accent-dark/60 cursor-pointer' : 'cursor-default'
         } ${headerClassName ?? ''}`}
       >
         {chevronPosition === 'leading' && chevron}

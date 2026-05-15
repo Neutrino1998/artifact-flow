@@ -41,7 +41,7 @@ function FlowBlock({
         onClick={() => { if (isExpandable) setExpanded(!expanded); }}
         className={`w-full flex items-center gap-2 px-3 py-2 text-xs transition-colors ${
           isExpandable
-            ? 'hover:bg-surface dark:hover:bg-bg-dark cursor-pointer'
+            ? 'hover:bg-surface/60 dark:hover:bg-bg-dark/60 cursor-pointer'
             : 'cursor-default'
         }`}
       >

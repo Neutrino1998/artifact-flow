@@ -21,7 +21,7 @@ function IconButton({
   return (
     <button
       onClick={onClick}
-      className="w-10 h-10 flex items-center justify-center rounded-lg text-text-secondary dark:text-text-secondary-dark hover:bg-surface dark:hover:bg-[#141414] transition-colors"
+      className="w-10 h-10 flex items-center justify-center rounded-lg text-text-secondary dark:text-text-secondary-dark hover:bg-chat/60 dark:hover:bg-panel-accent-dark/60 transition-colors"
       aria-label={label}
       title={label}
     >

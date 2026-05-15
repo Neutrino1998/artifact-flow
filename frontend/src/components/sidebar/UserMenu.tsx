@@ -86,7 +86,7 @@ export default function UserMenu({ collapsed }: { collapsed?: boolean }) {
           <button
             ref={triggerRef}
             onClick={togglePopover}
-            className="w-10 h-10 flex items-center justify-center rounded-lg text-text-secondary dark:text-text-secondary-dark hover:bg-surface dark:hover:bg-[#141414] transition-colors"
+            className="w-10 h-10 flex items-center justify-center rounded-lg text-text-secondary dark:text-text-secondary-dark hover:bg-chat/60 dark:hover:bg-panel-accent-dark/60 transition-colors"
             title={user.display_name || user.username}
           >
             <div className="w-7 h-7 rounded-lg bg-accent/15 text-accent flex items-center justify-center text-xs font-medium">
