@@ -50,7 +50,7 @@ MANIFEST="$OUTDIR/artifactflow-${VERSION}.manifest.txt"
 
 # Infra base image tags — kept in lockstep with deploy/docker-compose.intranet.yml.
 # Content-addressed tar name lets ops see at a glance "do I already have this?"
-NGINX_TAG="1.27-alpine"
+NGINX_TAG="1.30.1-alpine"
 POSTGRES_TAG="16-alpine"
 REDIS_TAG="7-alpine"
 INFRA_SLUG="nginx${NGINX_TAG%%-*}-pg${POSTGRES_TAG%%-*}-redis${REDIS_TAG%%-*}"

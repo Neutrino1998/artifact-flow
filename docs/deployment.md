@@ -162,7 +162,7 @@ docker compose -f docker-compose.prod.yml up -d
 # 首次部署 / nginx-pg-redis 版本升级 —— 显式加 infra
 ./scripts/release.sh 1.0.0 --with-infra
 # 额外产出：
-#   artifactflow-infra-nginx1.27-pg16-redis7.tar.gz  (~130MB)
+#   artifactflow-infra-nginx1.30.1-pg16-redis7.tar.gz  (~130MB)
 # 文件名按 base image 版本内容寻址 —— 目标机已有同名 tar 就跳过 scp
 ```
 
@@ -178,7 +178,7 @@ docker compose -f docker-compose.prod.yml up -d
 ```bash
 # 1. 传 4 个 tar + sha256 + manifest 到目标机
 scp dist/artifactflow-{app,config,deploy}-1.0.0.tar.gz{,.sha256} \
-    dist/artifactflow-infra-nginx1.27-pg16-redis7.tar.gz{,.sha256} \
+    dist/artifactflow-infra-nginx1.30.1-pg16-redis7.tar.gz{,.sha256} \
     dist/artifactflow-1.0.0.manifest.txt \
     target:/opt/artifactflow/
 
@@ -189,7 +189,7 @@ cd /opt/artifactflow
 sha256sum -c artifactflow-*.tar.gz.sha256
 tar xzf artifactflow-deploy-1.0.0.tar.gz       # 解出 ./deploy/(下次升级起就能用 verify-bundle.sh)
 tar xzf artifactflow-config-1.0.0.tar.gz       # 解出 ./config/
-docker load -i artifactflow-infra-nginx1.27-pg16-redis7.tar.gz
+docker load -i artifactflow-infra-nginx1.30.1-pg16-redis7.tar.gz
 docker load -i artifactflow-app-1.0.0.tar.gz
 
 # 3. 配置 .env
