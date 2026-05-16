@@ -12,6 +12,7 @@ import {
 } from '@/lib/styles';
 import type { DepartmentResponse } from '@/types';
 import DangerConfirmModal from '@/components/layout/DangerConfirmModal';
+import PanelShell from '@/components/layout/PanelShell';
 import DepartmentCascader from '@/components/forms/DepartmentCascader';
 
 interface DepartmentDetailFormProps {
@@ -120,9 +121,8 @@ export default function DepartmentDetailForm({
     : '';
 
   return (
-    <div className="flex-1 flex flex-col min-h-0 bg-chat dark:bg-chat-dark">
-      {/* Header */}
-      <div className="px-6 pt-5 pb-3 border-b border-border dark:border-border-dark">
+    <PanelShell
+      header={
         <div className="flex items-center justify-between gap-3">
           <button
             onClick={onBack}
@@ -138,8 +138,27 @@ export default function DepartmentDetailForm({
             {dept.user_count} 人 · {dept.child_count} 子部门
           </div>
         </div>
-      </div>
-
+      }
+      footer={
+        <>
+          <button
+            onClick={() => setConfirmDelete(true)}
+            disabled={saving || !canDelete}
+            title={deleteDisabledReason || '删除部门'}
+            className={`${BUTTON_DANGER_OUTLINE} rounded-lg px-5 py-2`}
+          >
+            删除
+          </button>
+          <button
+            onClick={handleSave}
+            disabled={!dirty || saving || nameInvalid}
+            className={`${BUTTON_PRIMARY} rounded-lg px-6 py-2`}
+          >
+            {saving ? '保存中...' : '保存'}
+          </button>
+        </>
+      }
+    >
       {/* Body */}
       <div className="flex-1 overflow-y-auto px-6 py-5 space-y-5">
         <div className="text-xs">
@@ -184,25 +203,6 @@ export default function DepartmentDetailForm({
         )}
       </div>
 
-      {/* Footer */}
-      <div className="border-t border-border dark:border-border-dark px-6 py-4 flex items-center justify-end gap-3">
-        <button
-          onClick={() => setConfirmDelete(true)}
-          disabled={saving || !canDelete}
-          title={deleteDisabledReason || '删除部门'}
-          className={`${BUTTON_DANGER_OUTLINE} rounded-lg px-5 py-2`}
-        >
-          删除
-        </button>
-        <button
-          onClick={handleSave}
-          disabled={!dirty || saving || nameInvalid}
-          className={`${BUTTON_PRIMARY} rounded-lg px-6 py-2`}
-        >
-          {saving ? '保存中...' : '保存'}
-        </button>
-      </div>
-
       {confirmDelete && (
         <DangerConfirmModal
           title="删除部门"
@@ -212,6 +212,6 @@ export default function DepartmentDetailForm({
           onConfirm={handleDelete}
         />
       )}
-    </div>
+    </PanelShell>
   );
 }

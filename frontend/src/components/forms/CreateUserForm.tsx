@@ -11,6 +11,7 @@ import {
   LABEL_CLASS,
 } from '@/lib/styles';
 import DepartmentCascader from '@/components/forms/DepartmentCascader';
+import PanelShell from '@/components/layout/PanelShell';
 
 const ROLE_OPTIONS = [
   { value: 'user', label: 'user' },
@@ -61,30 +62,50 @@ export default function CreateUserForm() {
   };
 
   return (
-    <div className="flex-1 flex flex-col min-h-0 bg-chat dark:bg-chat-dark">
-      {/* Header */}
-      <div className="px-6 pt-5 pb-3 border-b border-border dark:border-border-dark flex items-center justify-between gap-3">
-        <div>
-          <div className="text-base font-semibold text-text-primary dark:text-text-primary-dark">
-            新建用户
+    <PanelShell
+      header={
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <div className="text-base font-semibold text-text-primary dark:text-text-primary-dark">
+              新建用户
+            </div>
+            <div className="text-xs text-text-tertiary dark:text-text-tertiary-dark">
+              用户名只能包含字母、数字、点、下划线、连字符（2~64 字符）
+            </div>
           </div>
-          <div className="text-xs text-text-tertiary dark:text-text-tertiary-dark">
-            用户名只能包含字母、数字、点、下划线、连字符（2~64 字符）
-          </div>
+          <button
+            onClick={() => setRightView({ type: 'empty' })}
+            disabled={submitting}
+            className="flex-shrink-0 p-1 rounded-lg text-text-tertiary dark:text-text-tertiary-dark hover:text-text-secondary dark:hover:text-text-secondary-dark disabled:opacity-40 transition-colors"
+            aria-label="关闭"
+          >
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+              <path d="M4 4l8 8M12 4l-8 8" />
+            </svg>
+          </button>
         </div>
-        <button
-          onClick={() => setRightView({ type: 'empty' })}
-          disabled={submitting}
-          className="flex-shrink-0 p-1 rounded-lg text-text-tertiary dark:text-text-tertiary-dark hover:text-text-secondary dark:hover:text-text-secondary-dark disabled:opacity-40 transition-colors"
-          aria-label="关闭"
-        >
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
-            <path d="M4 4l8 8M12 4l-8 8" />
-          </svg>
-        </button>
-      </div>
-
-      {/* Form */}
+      }
+      footer={
+        <>
+          <button
+            onClick={() => setRightView({ type: 'empty' })}
+            disabled={submitting}
+            type="button"
+            className={`${BUTTON_SECONDARY} rounded-lg px-6 py-2`}
+          >
+            取消
+          </button>
+          <button
+            form="create-user-form"
+            type="submit"
+            disabled={!canSubmit}
+            className={`${BUTTON_PRIMARY} rounded-lg px-6 py-2`}
+          >
+            {submitting ? '创建中...' : '创建'}
+          </button>
+        </>
+      }
+    >
       <form
         id="create-user-form"
         onSubmit={handleSubmit}
@@ -172,26 +193,6 @@ export default function CreateUserForm() {
           <div className="text-status-error text-sm">{error}</div>
         )}
       </form>
-
-      {/* Footer */}
-      <div className="border-t border-border dark:border-border-dark px-6 py-4 flex justify-end gap-3">
-        <button
-          onClick={() => setRightView({ type: 'empty' })}
-          disabled={submitting}
-          type="button"
-          className={`${BUTTON_SECONDARY} rounded-lg px-6 py-2`}
-        >
-          取消
-        </button>
-        <button
-          form="create-user-form"
-          type="submit"
-          disabled={!canSubmit}
-          className={`${BUTTON_PRIMARY} rounded-lg px-6 py-2`}
-        >
-          {submitting ? '创建中...' : '创建'}
-        </button>
-      </div>
-    </div>
+    </PanelShell>
   );
 }

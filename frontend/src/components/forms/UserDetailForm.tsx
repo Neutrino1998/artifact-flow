@@ -13,6 +13,7 @@ import {
 } from '@/lib/styles';
 import type { UserResponse } from '@/types';
 import DangerConfirmModal from '@/components/layout/DangerConfirmModal';
+import PanelShell from '@/components/layout/PanelShell';
 import DepartmentCascader from '@/components/forms/DepartmentCascader';
 import Checkbox from '@/components/forms/Checkbox';
 
@@ -183,9 +184,8 @@ export default function UserDetailForm({ userId }: UserDetailFormProps) {
   }
 
   return (
-    <div className="flex-1 flex flex-col min-h-0 bg-chat dark:bg-chat-dark">
-      {/* Header */}
-      <div className="px-6 pt-5 pb-3 border-b border-border dark:border-border-dark">
+    <PanelShell
+      header={
         <div className="flex items-center justify-between gap-3">
           <div className="min-w-0">
             <div className="text-base font-semibold text-text-primary dark:text-text-primary-dark truncate">
@@ -206,8 +206,33 @@ export default function UserDetailForm({ userId }: UserDetailFormProps) {
             </svg>
           </button>
         </div>
-      </div>
-
+      }
+      footer={
+        isSelf ? (
+          <p className="flex-1 text-center text-sm text-text-secondary dark:text-text-secondary-dark">
+            查看自己的信息为只读。修改密码请使用左下角用户菜单。
+          </p>
+        ) : (
+          <>
+            <button
+              onClick={openDeleteConfirm}
+              disabled={saving}
+              title="硬删除该用户（级联删除其所有会话）"
+              className={`${BUTTON_DANGER_OUTLINE} rounded-lg px-5 py-2`}
+            >
+              删除用户
+            </button>
+            <button
+              onClick={handleSave}
+              disabled={!dirty || saving || passwordInvalid}
+              className={`${BUTTON_PRIMARY} rounded-lg px-6 py-2`}
+            >
+              {saving ? '保存中...' : '保存'}
+            </button>
+          </>
+        )
+      }
+    >
       {/* Body */}
       <div className="flex-1 overflow-y-auto px-6 py-5 space-y-5">
         {/* Read-only meta */}
@@ -322,33 +347,6 @@ export default function UserDetailForm({ userId }: UserDetailFormProps) {
         )}
       </div>
 
-      {/* Footer — isSelf 时按钮位置替换为居中提示，沿用同一根分割线保持视觉一致 */}
-      <div className="border-t border-border dark:border-border-dark px-6 py-4">
-        {isSelf ? (
-          <p className="text-center text-sm text-text-secondary dark:text-text-secondary-dark">
-            查看自己的信息为只读。修改密码请使用左下角用户菜单。
-          </p>
-        ) : (
-          <div className="flex items-center justify-end gap-3">
-            <button
-              onClick={openDeleteConfirm}
-              disabled={saving}
-              title="硬删除该用户（级联删除其所有会话）"
-              className={`${BUTTON_DANGER_OUTLINE} rounded-lg px-5 py-2`}
-            >
-              删除用户
-            </button>
-            <button
-              onClick={handleSave}
-              disabled={!dirty || saving || passwordInvalid}
-              className={`${BUTTON_PRIMARY} rounded-lg px-6 py-2`}
-            >
-              {saving ? '保存中...' : '保存'}
-            </button>
-          </div>
-        )}
-      </div>
-
       {confirmDelete && (
         <DangerConfirmModal
           title="删除用户"
@@ -362,6 +360,6 @@ export default function UserDetailForm({ userId }: UserDetailFormProps) {
           onConfirm={handleDelete}
         />
       )}
-    </div>
+    </PanelShell>
   );
 }
