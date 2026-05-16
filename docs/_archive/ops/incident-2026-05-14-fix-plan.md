@@ -14,12 +14,13 @@
 |---|---|---|
 | P0 | PR-1 Layer 2 改造为锚定 + RapidFuzz 校验 | 用有界算法替换 fuzzysearch,关掉病态输入炸 CPU 的可能、保留 Layer 2 救援能力 |
 | P0(运维) | 前端 compose 临时覆盖 | 非 PR,内网机直接操作 |
-| P1 | PR-4a 应用内可观测性 | faulthandler / watchdog(自动栈 dump)/ 心跳快照日志 / 工具耗时日志 |
-| P1 | PR-4c 取证工具 + 部署前置 | release 内置 py-spy / preflight 检查 / SOP |
-| P3 | PR-4b metrics 端点 + 采集 | 可选,暂缓——4a 心跳日志已覆盖"自己看趋势"核心需求,需独立决策 |
+| P1 | PR-obs-lite 轻量可观测性框架 | watchdog(自动栈 dump)+ sampler(jsonl 采样)+ `/admin/runtime` + 分析脚本;不动 DB schema、不上 Prometheus |
 | P1 | PR-3 fencing 事件持久化 | 修复 bug ④,恢复审计/回放完整性 |
+| P2 | PR-forensics-bundle 取证工具 + 部署前置 | release 内置 py-spy / preflight 检查 / SOP |
 | P2 | PR-5 前端镜像重建 | 正式消除 HOSTNAME 误配 |
 | P3 | 文档 runbook | 固化"服务卡死"排查流程 |
+
+**小版本迭代打包**:PR-1 + PR-obs-lite(+ PR-3)走同一个 release tag,定位为"事故后加固"——一边修根因,一边补让下次事故 30 秒能拿到栈的观测。PR 独立,可分别回滚。
 
 ---
 
@@ -89,62 +90,158 @@
 
 **做法**:在 `_wrapped` 捕获 `CancelledError` 时,走一遍事件 batch write(类似 `error` 边界的处理),再重新抛出 / 收尾。需注意 `CancelledError` 不能被吞掉,持久化失败也要有兜底。
 
-**关联 bug ③**:bug ③(cancel 杀不掉同步 CPU)的根治不在本 PR——它由 PR-1 的"算法本身就有界"直接解决(最坏几毫秒级,根本不需要被中断)。本 PR 只负责"被取消时不丢事件"。建议在代码注释 / CLAUDE.md 里补一句架构约束:**同步 CPU 密集的工具会击穿引擎所有 cancel/timeout 机制,工具作者需自负成本纪律**。
+**关联 bug ③**:bug ③(cancel 杀不掉同步 CPU)的根治不在本 PR——它由 PR-1 的"算法本身就有界"直接解决(最坏几毫秒级,根本不需要被中断)。本 PR 只负责"被取消时不丢事件"。建议在代码注释 / CLAUDE.md 里补一句架构约束:**同步 CPU 密集的工具会击穿引擎所有 cancel/timeout 机制,工具作者需自负成本纪律**。下次 wedge 的发现路径由 PR-obs-lite 的 watchdog 承担(超阈值自动 dump 栈到 `logs/loop-lag.jsonl`),不指望 cancel 路径救场。
 
 ---
 
-## PR-4:可观测性基建(拆为 4a / 4b / 4c)
+## PR-obs-lite:轻量可观测性框架(P1)
 
-可观测性按"失效区间"分层设计——见 incident 文档同名小节。一句话定调:
+**目标**:用最小代价补齐 incident 暴露的可观测性缺口(A1–6 / B1–7),让下次事故 30 秒内有栈可看、试运行期间能用一个 Python 脚本跑出资源使用报告。
 
-> **4a + 4c 足够*诊断*一个已知的问题(出事后查原因),但不足以*提前发现*问题。** 这次 backend 卡 96 分钟、前端红 2 天都是被动撞见的,缺口正在"提前发现"。补这个缺口最便宜的不是上监控栈,而是 4a 里的"心跳快照日志"。
+**约束(明确写下,避免范围漂移)**:
+- ❌ 不动 DB schema(沿用现有 `MessageEvent.data` JSON 列;聚合走 `data->>` 表达式)
+- ❌ 不上 Prometheus / Grafana / OTel
+- ❌ 不拆 cache token(自家模型,不涉及差价计费)
+- ✅ 业务侧观测复用已有 event 流,运行时 / 系统侧观测落 jsonl
+- ✅ 产出形态满足"裸 Python 脚本 + pandas 跑得出报告"
 
-### PR-4a:应用内可观测性(P1,代码)
+### 数据源(三处,零 schema 变更)
 
-覆盖失效区间 ② + ③。
+| 来源 | 内容 | 状态 |
+|---|---|---|
+| `MessageEvent` 表(JSON 列) | LLM/工具调用:`model`、`token_usage`、`duration_ms`、`tool`、`params`、`success` — 均已在 `llm_complete` / `tool_complete` payload | ✅ 已有 |
+| `logs/metrics.jsonl` | 周期采样:loop_lag p50/p99、process RSS/CPU/FD、DB pool、Redis used、in-flight 数及最长任务 age | ➕ 新增 |
+| `logs/loop-lag.jsonl` | 事件驱动:loop_lag 超阈值时一条记录,带 `asyncio.all_tasks()` 各任务栈截断 | ➕ 新增 |
 
-**日志分级原则**(明确写下来,避免出过事故就反射性开 DEBUG):
+> 复核结论:`engine.py` 已在 L344-378 emit `llm_complete`(含 `model` / `token_usage` / `duration_ms`)、L686-695 emit `tool_complete`(含 `tool` / `params` / `duration_ms` / `success`)。MessageEvent 业务侧不缺字段,**不需要加 event payload**,只需在分析侧用 JSON 表达式取出。
 
-- **INFO(生产常驻)**:运维诊断必需的事件——工具 start/duration、关键参数尺寸、状态转移、慢操作 WARN 的对侧、watchdog 心跳。**这次缺的数据本来就该是 INFO,不该藏在 DEBUG 后面。**
-- **DEBUG(仅排查时点亮)**:大体积 / 低频价值 / 含敏感数据的负载——完整 LLM messages dump、完整工具结果 body、内部 trace breadcrumb、压缩详情等。
-- **WARNING / ERROR**:留给真正异常路径,不要因为"INFO 看着乱"把异常事件降级到 DEBUG。
+### 注入点(三个组件,共 `src/observability/`)
 
-> 心智模型:DEBUG 开关是调试时点的灯,不是"出过事故所以以后都开着"。生产 INFO 必须自带足够诊断信息——把 DEBUG 永久打开 = 用错工具应对真问题(给不到你最想要的,又把你不想要的一股脑塞过来)。
+1. **`watchdog.py` — 事件循环延迟监测(独立 OS 线程)**
+   - `threading.Thread(daemon=True)`,FastAPI lifespan 启动
+   - 每 1s 通过 `loop.call_soon_threadsafe` 投时间戳回调,测投递→执行延迟
+   - 滚动窗口存 p50 / p99 / 1 分钟 max(供 `/admin/runtime` 端点读)
+   - 超 `LOOP_LAG_WARN_MS`(默认 500ms)→ 写一行到 `logs/loop-lag.jsonl`,含 `asyncio.all_tasks()` 每个 task 的 `get_stack()` 前 N 帧(截断)
+   - 超 `LOOP_LAG_DUMP_MS`(默认 5000ms)→ 同时 `faulthandler.dump_traceback()` 到 stderr
+   - **失败必须吞**(observer 不能拖累 observee)。**不在 asyncio task 里**——循环卡死时它自己也会被卡
 
-**落地内容**:
+2. **`sampler.py` — 周期采样(asyncio task)**
+   - `OBS_SAMPLE_INTERVAL_SEC`(默认 30s)采一次,写一行 JSON 到 `logs/metrics.jsonl`,字段示例:
+     ```json
+     {"ts":"2026-05-16T03:14:00Z","loop_lag_ms":{"p50":3,"p99":18,"max_1m":95},
+      "in_flight":2,"tasks_total":134,"tasks_long_running":0,
+      "db_pool":{"in_use":3,"overflow":0,"waiters":0},
+      "redis":{"used_mb":87},
+      "process":{"rss_mb":512,"cpu_pct":12,"open_fds":87},
+      "data_dir_mb":1843}
+     ```
+   - 逼近上限(RSS > 80% mem_limit / Redis used > 80% maxmemory / DB pool waiters > 0 / open_fds > 80% ulimit)→ 额外打一行 WARN 日志(loud failure 原则,对齐 `feedback-loud-failure-over-silent-eviction`)
+   - sampler 自身异常一律吞
 
-1. **`faulthandler` + `SIGUSR1`**:进程启动注册,`kill -USR1 <pid>` 即时 dump 所有线程 Python 栈。C 级信号处理器,主线程卡在纯 Python / C 调用里都能 dump。
-2. **事件循环 watchdog(独立 OS 线程)**——做两件事:
-   - 检测循环延迟超阈值 → **自动 dump 主线程栈到日志**(把"卡死瞬间"变成日志里的一份栈,无需人工介入)。可基于 `faulthandler.dump_traceback_later(timeout, repeat=True)` + 从事件循环周期性 reset 实现。
-   - 周期性心跳快照日志(见下条)。
-3. **心跳快照日志(INFO)**:watchdog 线程每 30~60s 打一行结构化日志,记录关键 gauge——事件循环延迟、在飞 execution 数及最长运行时长、DB 连接池占用、Redis 内存、进程 RSS。**这就是"极简、方便自己看"的 metrics**:无新依赖、无新基建,时间序列直接 `grep` 日志就有,creeping 型问题(慢泄漏、池慢慢满)靠它能看出斜率。
-4. **工具执行 start/duration 日志(INFO)+ 慢操作 WARN**——每个 tool 打 start、结束打 duration,超阈值 WARNING。
-5. **关键参数补打长度(INFO)**(`old_str` 等,内容可截断、长度必须有)。
-6. **健康端点暴露内部状态**:`/health` 或新增 `/debug/status` 返回循环延迟、在飞任务数、池占用等。注意:循环卡死时该端点本身也会卡,所以它是必要不充分,真正的兜底是 #1 #2。
-7. **项目内日志分级审计**——按上述原则扫一遍所有 `logger.*` 调用,典型反模式与方向:
-   - **工具完成 / 外部调用结果**(如 `web_fetch.py:213/279` 抓取结果摘要、`artifact_ops` 各 Layer 命中)——属于"想知道发生了什么"的运维信息,**DEBUG → INFO**。
-   - **状态转移 / 业务事件**(conversation 创建、artifact 版本变更等)——确认是 INFO,不是 DEBUG。
-   - **大体积内容 dump**(`engine.py:732` 完整 messages、压缩详情、长 reasoning/response 预览)——**保持 DEBUG**,生产关闭。
-   - **异常路径**——检查有无"应当 WARNING 但只在 DEBUG 打"的反例,以及"INFO 级别误打了 KB 级内容"。
-   - 这一项**和 #1–#6 同一个 PR 做**:新增的 INFO 项要和存量 INFO 风格一致,分开做容易出现两套风格。
+3. **`admin_runtime.py` — `GET /admin/runtime` 端点**
+   - `require_admin`,返回 sampler 最近快照 + 现拉的 `RuntimeStore.list_active()`
+   - 卡住时第一个 curl 的东西(走 nginx,不依赖 SSE)。诊断 1.0 工具
 
-**范围**:`src/api/main.py`(启动钩子)、引擎工具执行路径、新增 watchdog 模块,+ 项目内 `logger.*` 审计涉及的零散文件(主要在 `src/core/`、`src/tools/`、`src/api/`)。
+### 分析脚本:`scripts/observability_report.py`
 
-### PR-4b:真正的 metrics 端点 + 采集(P3,可选 / 暂缓,需决策)
+目标:你跑一下就能看的报告。
 
-`/metrics`(Prometheus 文本格式)+ 一个 Prometheus 容器(可选 Grafana)。给到 4a 心跳日志给不了的:像样的图、阈值告警、跨指标关联。
+```python
+# 业务侧:从 MessageEvent JSON 列拉
+df_llm = pd.read_sql("""
+    SELECT created_at, agent_name,
+           data->>'model' AS model,
+           (data->'token_usage'->>'input_tokens')::int  AS in_tok,
+           (data->'token_usage'->>'output_tokens')::int AS out_tok,
+           (data->>'duration_ms')::int AS dur_ms
+    FROM message_events
+    WHERE event_type='llm_complete' AND created_at > now() - interval '24 hours'
+""", engine)
+df_tool    = pd.read_sql("""... event_type='tool_complete' ...""", engine)
+df_runtime = pd.read_json("logs/metrics.jsonl",  lines=True)
+df_lag     = pd.read_json("logs/loop-lag.jsonl", lines=True)
+```
 
-**当前判断:暂不做,标记"待决策"。** 理由:4a 的心跳快照日志已覆盖"自己看趋势"的核心需求;内网/离线环境没有现成采集端,自建 Prometheus 是个独立的"采纳一个工具"的决策,不该和热修绑在一起。等出现"4a 的 grep 日志不够用、需要图和告警"的明确信号再做。届时 4a 的 gauge 已定义好,加 `/metrics` 端点是平移工作。
+报告内容:
+- LLM 调用按 model / agent 聚合(次数、token 总量、p99 latency)
+- 工具调用按 name 聚合(p50 / p99 / max latency、失败率)
+- 24h loop lag 分布(中位 / p99 / max,看有没有逼近阈值)
+- 24h RSS / CPU / FD / DB pool / Redis 时序图(matplotlib 几张图,可选)
+- 触发的 loop-lag 事件列表(直接是下次事故的诊断入口)
 
-### PR-4c:取证工具与部署前置(P1,运维/部署)
+### 隐藏常量(`src/config.py`)
 
-覆盖失效区间 ③ 的外部兜底。**核心心态:取证工具的可用性是部署时的保证,不是事故时的指望。**
+| 常量 | 含义 | 建议起点 |
+|---|---|---|
+| `LOOP_LAG_WARN_MS` | watchdog 写 loop-lag.jsonl 阈值 | 500 |
+| `LOOP_LAG_DUMP_MS` | watchdog 触发 `faulthandler.dump_traceback` 阈值 | 5000 |
+| `OBS_SAMPLE_INTERVAL_SEC` | sampler 周期 | 30 |
+| `OBS_LONG_TASK_AGE_SEC` | "长时间运行任务"门槛 | 60 |
+| `OBS_METRICS_LOG_PATH` | 周期采样 jsonl 路径 | `logs/metrics.jsonl` |
+| `OBS_LOOP_LAG_LOG_PATH` | loop-lag 事件 jsonl 路径 | `logs/loop-lag.jsonl` |
 
-1. **release bundle 内置 `py-spy` 静态二进制**(单文件几 MB),从根上消除"内网现抓不到"。
-2. **preflight 检查**:`deploy/scripts/verify-bundle.sh`(或新增 `preflight.sh`)验证宿主机有 `gdb`/`gcore`、`strace`、`procps`。
-3. **诊断策略定调**:app 镜像保持精简,取证走宿主机(不往镜像塞 `top`)。
-4. **写进 SOP**:`docs/_archive/ops/deployment-sop.md` / `cloud-service-checklist.md` 加"取证工具就绪"检查项。
-5. **runbook**:见下方文档项。
+### 新依赖
+
+- `psutil`(进程 RSS / CPU% / FD / disk usage,跨平台)。`requirements.txt` 加一行。
+- 内网 release bundle 需带上对应 wheel(走 vendor / offline 安装)。
+
+### `faulthandler` 注册(运维兜底)
+
+`src/api/main.py` lifespan 启动时:
+- `faulthandler.enable()` 把 SIGSEGV 等致命信号的栈打到 stderr
+- `faulthandler.register(signal.SIGUSR1)` 保留 `kill -USR1 <pid>` 手动 dump 能力(不依赖 watchdog 自动)
+
+### 日志分级原则(明确写下,避免出过事故就反射性开 DEBUG)
+
+- **INFO(生产常驻)**:运维诊断必需事件——工具 start/duration、关键参数尺寸、状态转移、慢操作 WARN 的对侧、sampler 心跳异常。**这次缺的数据本就该是 INFO,不该藏在 DEBUG 后面。**
+- **DEBUG(仅排查时点亮)**:大体积 / 低频价值 / 敏感负载——完整 LLM messages、完整工具结果 body、内部 trace breadcrumb、压缩详情等。
+- **WARNING / ERROR**:真异常,不因 INFO 看着乱就降级。
+
+> 心智模型:DEBUG 是调试时点的灯,不是"出过事故所以以后都开着"。生产 INFO 必须自带足够诊断信息——把 DEBUG 永久打开 = 用错工具应对真问题(给不到你想要的,又把你不想要的塞过来)。
+
+### 日志审计(随 PR 一起做)
+
+扫一遍 `src/core/` / `src/tools/` / `src/api/` 的 `logger.*` 调用,按上述分级原则调整。典型方向:
+- **工具完成 / 外部调用结果**(如 `web_fetch.py:213/279`、`artifact_ops` Layer 命中)→ DEBUG → INFO
+- **状态转移 / 业务事件**(conversation 创建、artifact 版本变更)→ 确认 INFO
+- **大体积内容 dump**(`engine.py:732` 完整 messages、压缩详情)→ 保持 DEBUG
+- **异常路径**:检查"应当 WARNING 却只在 DEBUG 打"、"INFO 误打 KB 级内容"
+
+**和上面新增 INFO 项同一个 PR 做**——分开做容易出现两套风格。
+
+### 范围
+
+`src/observability/`(新)、`src/api/main.py`(lifespan 注册 + 路由)、`src/config.py`(常量)、`requirements.txt`(`+psutil`)、`scripts/observability_report.py`(新)、+ 项目内 `logger.*` 审计涉及的零散文件。
+
+### 与 CLAUDE.md 不变量的兼容性
+
+- **Event sourcing**:采样数据**不**进 `MessageEvent`(避免污染 history;EventHistory 不该看到这些)
+- **Three-layer**:watchdog / sampler 是 infra,装在 `src/observability/`,不进 Repo/Manager;`/admin/runtime` 走标准 Router → 新 `RuntimeInspector` Manager
+- **参数最小化**:阈值常量全进 `src/config.py`,不暴露给模型、不暴露 API
+- **Loud failure**:逼近上限走 WARN 日志,不做自动 LRU / 驱逐 / 降级
+
+### 撤销 / 移走的项
+
+- **原 PR-4b**(`/metrics` + Prometheus + Grafana)→ **撤销**,挪到 P3 backlog。等出现"jsonl + 脚本不够用、需要图和告警"的明确信号再做;届时 sampler 字段已就位,加 Prometheus exporter 是平移工作
+- **原 PR-4c 的取证工具 / preflight**(py-spy bundle 等)→ **拆为单独 PR**(见下方 PR-forensics-bundle)
+
+---
+
+## PR-forensics-bundle:取证工具与部署前置(P2)
+
+**目标**:消除"内网现抓不到 py-spy"这类事故时的工具就绪缺口。属部署 / 发版工程,不进运行时。
+
+**核心心态**:取证工具的可用性是部署时的保证,不是事故时的指望。
+
+**范围**:`deploy/`(release bundle 脚本)、`deploy/scripts/preflight.sh`(新)、`docs/_archive/ops/deployment-sop.md` / `cloud-service-checklist.md`(增改)。
+
+**内容**:
+1. release bundle 内置 `py-spy` 静态二进制(单文件几 MB),从根上消除"内网现抓不到"
+2. preflight 脚本验证宿主机有 `gdb`/`gcore`、`strace`、`procps`
+3. 诊断策略定调:app 镜像保持精简,取证走宿主机(不往镜像塞 `top`)
+4. SOP 增"取证工具就绪"检查项
+
+**与 PR-obs-lite 的关系**:观测框架在容器内自动产出数据;取证工具是手动深挖时的最后一公里。两者互补,但部署节奏可以分开——PR-obs-lite 主要是代码改动,本 PR 主要是 release bundle / 文档,合到同一个 release 也行,但 PR 独立可分别回滚。
 
 ---
 
@@ -177,8 +274,10 @@
 ## 待决策项汇总
 
 1. **PR-1 配置常量起点值**:`FUZZY_MAX_L_DIST` / `ANCHOR_MAX_OCCURRENCES` / `ANCHOR_NUM` / `ANCHOR_SHINGLE_LEN` 等的初始默认值——上面给的是建议起点,可在实现/测试阶段微调。上线后按真实日志可调(都是隐藏常量)。
-2. **运维**:是否引入 unhealthy → 自动重启(autoheal 容器 / 编排层)?这是独立于以上 PR 的韧性决策。
-3. **PR-4b 是否要做**:4a 的心跳快照日志是"自己看趋势"的最低保证、随 4a 一起落地;`/metrics` + Prometheus + 阈值告警属独立的"采纳工具"决策,暂缓,等"grep 日志不够用"的明确信号。
-4. **告警**:容器健康 / CPU 占满 / 事件循环延迟 / 探针失败的告警体系——本次所有问题都是被动发现。最低限度靠 4a 心跳日志 + 人工巡检兜住;成体系的告警依赖 PR-4b 的决策。
+2. **PR-obs-lite 配置常量起点值**:`LOOP_LAG_WARN_MS` / `LOOP_LAG_DUMP_MS` / `OBS_SAMPLE_INTERVAL_SEC` 等——同上,先按建议值上,试运行第一轮看 jsonl 报告再调。
+3. **jsonl 轮转**:`logs/metrics.jsonl` 30s 一行,一天 ~2880 行 / 几百 KB;`logs/loop-lag.jsonl` 仅事件驱动,体量小。试运行阶段可手动归档;长期需接 logrotate(独立运维配置,不进 PR)。
+4. **Prometheus / 告警路径**:暂不做(`/metrics` exporter + 告警体系)。等出现"jsonl + 脚本不够用、需要图和阈值告警"的明确信号再启动决策;届时 sampler 字段已就位,加 exporter 是平移工作。
+5. **运维**:是否引入 unhealthy → 自动重启(autoheal 容器 / 编排层)?独立于以上 PR 的韧性决策。
+6. **告警**:容器健康 / CPU 占满 / 事件循环延迟 / 探针失败的告警体系——本次所有问题都是被动发现。短期靠 PR-obs-lite 的 jsonl + 人工巡检兜住;成体系告警依赖第 4 项的 Prometheus 决策。
 
 > **已决策**(留作可追溯):A vs B 选 B,基于本地 `logs/artifactflow.log` 实测 Layer 2 被触发(`枝/技` 单字符替换用例)。详见 PR-1 节"决策依据"。原 PR-1(封顶热修)和原 PR-2(分两步走)已合并为单一 PR-1。
