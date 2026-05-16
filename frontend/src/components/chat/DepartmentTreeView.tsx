@@ -86,7 +86,7 @@ function TreeNodeItem({
             </svg>
           </button>
         ) : (
-          <span className="flex-shrink-0 w-4 h-4 inline-flex items-center justify-center opacity-50 text-base leading-none">•</span>
+          <span className="flex-shrink-0 w-4 h-4 inline-flex items-center justify-center opacity-50 text-base leading-none">-</span>
         )}
 
         <span className="flex-1 text-sm text-text-primary dark:text-text-primary-dark truncate">
