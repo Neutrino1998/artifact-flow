@@ -2161,7 +2161,7 @@
 <a id="__codelineno-8-10" name="__codelineno-8-10" href="#__codelineno-8-10"></a><span class="c1"># 首次部署 / nginx-pg-redis 版本升级 —— 显式加 infra</span>
 <a id="__codelineno-8-11" name="__codelineno-8-11" href="#__codelineno-8-11"></a>./scripts/release.sh<span class="w"> </span><span class="m">1</span>.0.0<span class="w"> </span>--with-infra
 <a id="__codelineno-8-12" name="__codelineno-8-12" href="#__codelineno-8-12"></a><span class="c1"># 额外产出：</span>
-<a id="__codelineno-8-13" name="__codelineno-8-13" href="#__codelineno-8-13"></a><span class="c1">#   artifactflow-infra-nginx1.27-pg16-redis7.tar.gz  (~130MB)</span>
+<a id="__codelineno-8-13" name="__codelineno-8-13" href="#__codelineno-8-13"></a><span class="c1">#   artifactflow-infra-nginx1.30.1-pg16-redis7.tar.gz  (~130MB)</span>
 <a id="__codelineno-8-14" name="__codelineno-8-14" href="#__codelineno-8-14"></a><span class="c1"># 文件名按 base image 版本内容寻址 —— 目标机已有同名 tar 就跳过 scp</span>
 </code></pre></div>
 <blockquote>
@@ -2174,7 +2174,7 @@
 <h3 id="首次部署在目标内网机器上">首次部署（在目标内网机器上）</h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="c1"># 1. 传 4 个 tar + sha256 + manifest 到目标机</span>
 <a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>scp<span class="w"> </span>dist/artifactflow-<span class="o">{</span>app,config,deploy<span class="o">}</span>-1.0.0.tar.gz<span class="o">{</span>,.sha256<span class="o">}</span><span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="w">    </span>dist/artifactflow-infra-nginx1.27-pg16-redis7.tar.gz<span class="o">{</span>,.sha256<span class="o">}</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="w">    </span>dist/artifactflow-infra-nginx1.30.1-pg16-redis7.tar.gz<span class="o">{</span>,.sha256<span class="o">}</span><span class="w"> </span><span class="se">\</span>
 <a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="w">    </span>dist/artifactflow-1.0.0.manifest.txt<span class="w"> </span><span class="se">\</span>
 <a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a><span class="w">    </span>target:/opt/artifactflow/
 <a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a>
@@ -2185,7 +2185,7 @@
 <a id="__codelineno-9-11" name="__codelineno-9-11" href="#__codelineno-9-11"></a>sha256sum<span class="w"> </span>-c<span class="w"> </span>artifactflow-*.tar.gz.sha256
 <a id="__codelineno-9-12" name="__codelineno-9-12" href="#__codelineno-9-12"></a>tar<span class="w"> </span>xzf<span class="w"> </span>artifactflow-deploy-1.0.0.tar.gz<span class="w">       </span><span class="c1"># 解出 ./deploy/(下次升级起就能用 verify-bundle.sh)</span>
 <a id="__codelineno-9-13" name="__codelineno-9-13" href="#__codelineno-9-13"></a>tar<span class="w"> </span>xzf<span class="w"> </span>artifactflow-config-1.0.0.tar.gz<span class="w">       </span><span class="c1"># 解出 ./config/</span>
-<a id="__codelineno-9-14" name="__codelineno-9-14" href="#__codelineno-9-14"></a>docker<span class="w"> </span>load<span class="w"> </span>-i<span class="w"> </span>artifactflow-infra-nginx1.27-pg16-redis7.tar.gz
+<a id="__codelineno-9-14" name="__codelineno-9-14" href="#__codelineno-9-14"></a>docker<span class="w"> </span>load<span class="w"> </span>-i<span class="w"> </span>artifactflow-infra-nginx1.30.1-pg16-redis7.tar.gz
 <a id="__codelineno-9-15" name="__codelineno-9-15" href="#__codelineno-9-15"></a>docker<span class="w"> </span>load<span class="w"> </span>-i<span class="w"> </span>artifactflow-app-1.0.0.tar.gz
 <a id="__codelineno-9-16" name="__codelineno-9-16" href="#__codelineno-9-16"></a>
 <a id="__codelineno-9-17" name="__codelineno-9-17" href="#__codelineno-9-17"></a><span class="c1"># 3. 配置 .env</span>
