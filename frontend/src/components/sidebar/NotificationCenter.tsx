@@ -162,7 +162,7 @@ function NotificationModal({ items, onClose, onDismiss }: ModalProps) {
               key={n.id}
               className={`rounded-card p-4 ${SEVERITY_BG_TINT[n.severity]} border border-border/40 dark:border-border-dark/40`}
             >
-              <div className="flex items-start justify-between gap-3 mb-2">
+              <div className="flex items-start justify-between gap-3 pb-2 mb-3 border-b border-border dark:border-border-dark">
                 <div className="flex items-center gap-2">
                   <span className={`w-2 h-2 rounded-full ${SEVERITY_DOT_CLASS[n.severity]}`} />
                   <h3 className="font-semibold text-text-primary dark:text-text-primary-dark">
