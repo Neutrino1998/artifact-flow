@@ -71,18 +71,18 @@ export default function PermissionModal() {
             拒绝
           </button>
           <button
-            onClick={() => handleResponse(true)}
+            onClick={() => handleResponse(true, true)}
             disabled={loading}
-            className="px-8 py-2 rounded-lg border border-accent text-accent hover:bg-accent/10 disabled:opacity-40 transition-colors"
+            className="px-8 py-2 rounded-lg border border-border dark:border-border-dark text-text-primary dark:text-text-primary-dark hover:bg-bg dark:hover:bg-bg-dark disabled:opacity-40 transition-colors"
           >
-            {loading ? '允许中...' : '允许一次'}
+            始终允许
           </button>
           <button
-            onClick={() => handleResponse(true, true)}
+            onClick={() => handleResponse(true)}
             disabled={loading}
             className="px-8 py-2 rounded-lg bg-accent text-white hover:bg-accent-hover disabled:opacity-40 transition-colors"
           >
-            始终允许
+            {loading ? '允许中...' : '允许一次'}
           </button>
         </div>
       </div>

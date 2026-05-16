@@ -37,10 +37,11 @@ function ToolCallCard({ toolCall }: ToolCallCardProps) {
       leading={<span className={`flex-shrink-0 ${statusColor}`}>{statusIcon}</span>}
       label={
         <>
-          <span className="text-text-secondary dark:text-text-secondary-dark">{toolName}</span>
+          <span>{toolName}</span>
           <span className="text-text-tertiary dark:text-text-tertiary-dark">by {agent}</span>
         </>
       }
+      headerClassName="text-text-secondary dark:text-text-secondary-dark"
       bodyClassName="pl-5 pt-1 pb-2 space-y-2 text-xs"
     >
       {/* Parameters */}

@@ -89,7 +89,7 @@ export default function UserMenu({ collapsed }: { collapsed?: boolean }) {
             className="w-10 h-10 flex items-center justify-center rounded-lg text-text-secondary dark:text-text-secondary-dark hover:bg-chat/60 dark:hover:bg-panel-accent-dark/60 transition-colors"
             title={user.display_name || user.username}
           >
-            <div className="w-7 h-7 rounded-lg bg-accent/15 text-accent flex items-center justify-center text-xs font-medium">
+            <div className="w-7 h-7 rounded-lg bg-panel-accent dark:bg-surface-dark text-text-primary dark:text-text-primary-dark ring-1 ring-border/60 dark:ring-border-dark/60 flex items-center justify-center text-xs font-medium">
               {initial}
             </div>
           </button>
@@ -99,7 +99,7 @@ export default function UserMenu({ collapsed }: { collapsed?: boolean }) {
             onClick={togglePopover}
             className="w-full flex items-center gap-3 px-3 py-2.5 bg-chat dark:bg-panel-accent-dark rounded-card hover:bg-surface dark:hover:bg-[#141414] transition-colors text-left"
           >
-            <div className="w-8 h-8 rounded-lg bg-accent/15 text-accent flex items-center justify-center font-medium shrink-0">
+            <div className="w-8 h-8 rounded-lg bg-panel-accent dark:bg-surface-dark text-text-primary dark:text-text-primary-dark ring-1 ring-border/60 dark:ring-border-dark/60 flex items-center justify-center font-medium shrink-0">
               {initial}
             </div>
             <div className="min-w-0 flex-1">

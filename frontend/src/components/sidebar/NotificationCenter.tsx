@@ -15,18 +15,18 @@ const POLL_INTERVAL_MS = 60_000;
 
 const SEVERITY_DOT_CLASS: Record<Severity, string> = {
   info: 'bg-accent',
-  warn: 'bg-status-warning',
+  warn: 'bg-accent',
   critical: 'bg-status-error',
 };
 
 const SEVERITY_TEXT_CLASS: Record<Severity, string> = {
-  info: 'text-accent',
+  info: 'text-text-primary dark:text-text-primary-dark',
   warn: 'text-status-warning',
   critical: 'text-status-error',
 };
 
 const SEVERITY_BG_TINT: Record<Severity, string> = {
-  info: 'bg-accent/10',
+  info: 'bg-panel-accent dark:bg-surface-dark',
   warn: 'bg-status-warning/10',
   critical: 'bg-status-error/10',
 };
@@ -106,7 +106,7 @@ export default function NotificationCenter({ collapsed }: Props) {
         onClick={() => setOpen(true)}
         className="w-full flex items-center gap-3 px-3 py-2.5 bg-chat dark:bg-panel-accent-dark rounded-card hover:bg-surface dark:hover:bg-[#141414] transition-colors text-left"
       >
-        <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${SEVERITY_BG_TINT[top.severity]}`}>
+        <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ring-1 ring-border/60 dark:ring-border-dark/60 ${SEVERITY_BG_TINT[top.severity]}`}>
           <BellIcon className={SEVERITY_TEXT_CLASS[top.severity]} />
         </div>
         <div className="min-w-0 flex-1">
