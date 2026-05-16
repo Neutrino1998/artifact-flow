@@ -137,6 +137,11 @@ interface StreamState {
   // Cancelled
   cancelled: boolean;
 
+  // Cancel requested but engine hasn't reached a checkpoint yet
+  // (cancel signal queues into the engine — see CANCEL_CHECK_INTERVAL).
+  // Drives the "cancelling…" spinner on the Stop button.
+  cancelling: boolean;
+
   // Reconnecting (SSE auto-reconnect in progress)
   reconnecting: boolean;
 
@@ -174,6 +179,7 @@ interface StreamState {
 
   // Cancelled / Permission / error
   setCancelled: (val: boolean) => void;
+  setCancelling: (val: boolean) => void;
   setPermissionRequest: (req: PermissionRequest | null) => void;
   setError: (error: string | null) => void;
 }
@@ -230,6 +236,7 @@ export const useStreamStore = create<StreamState>((set, get) => {
     executionMetrics: null,
     reconnecting: false,
     cancelled: false,
+    cancelling: false,
     permissionRequest: null,
     error: null,
 
@@ -245,6 +252,7 @@ export const useStreamStore = create<StreamState>((set, get) => {
         executionMetrics: null,
         reconnecting: false,
         cancelled: false,
+        cancelling: false,
         permissionRequest: null,
         error: null,
       });
@@ -252,7 +260,7 @@ export const useStreamStore = create<StreamState>((set, get) => {
 
     endStream: () => {
       cancelPendingFlush();
-      set({ isStreaming: false, streamUrl: null, conversationId: null, reconnecting: false, cancelled: false, permissionRequest: null, streamParentId: undefined });
+      set({ isStreaming: false, streamUrl: null, conversationId: null, reconnecting: false, cancelled: false, cancelling: false, permissionRequest: null, streamParentId: undefined });
     },
 
     reset: () =>
@@ -373,6 +381,7 @@ export const useStreamStore = create<StreamState>((set, get) => {
 
     setReconnecting: (val) => set({ reconnecting: val }),
     setCancelled: (val) => set({ cancelled: val }),
+    setCancelling: (val) => set({ cancelling: val }),
     setPermissionRequest: (req) => set({ permissionRequest: req }),
     setError: (error) => set({ error }),
   };

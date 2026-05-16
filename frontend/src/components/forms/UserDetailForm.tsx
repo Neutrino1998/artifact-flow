@@ -5,8 +5,15 @@ import * as api from '@/lib/api';
 import { ApiError } from '@/lib/api';
 import { useAuthStore } from '@/stores/authStore';
 import { useUIStore } from '@/stores/uiStore';
+import {
+  BUTTON_DANGER_OUTLINE,
+  BUTTON_PRIMARY,
+  INPUT_ON_PANEL,
+  LABEL_CLASS,
+} from '@/lib/styles';
 import type { UserResponse } from '@/types';
 import DangerConfirmModal from '@/components/layout/DangerConfirmModal';
+import PanelShell from '@/components/layout/PanelShell';
 import DepartmentCascader from '@/components/forms/DepartmentCascader';
 import Checkbox from '@/components/forms/Checkbox';
 
@@ -177,9 +184,8 @@ export default function UserDetailForm({ userId }: UserDetailFormProps) {
   }
 
   return (
-    <div className="flex-1 flex flex-col min-h-0 bg-chat dark:bg-chat-dark">
-      {/* Header */}
-      <div className="px-6 pt-5 pb-3 border-b border-border dark:border-border-dark">
+    <PanelShell
+      header={
         <div className="flex items-center justify-between gap-3">
           <div className="min-w-0">
             <div className="text-base font-semibold text-text-primary dark:text-text-primary-dark truncate">
@@ -200,8 +206,33 @@ export default function UserDetailForm({ userId }: UserDetailFormProps) {
             </svg>
           </button>
         </div>
-      </div>
-
+      }
+      footer={
+        isSelf ? (
+          <p className="flex-1 text-center text-sm text-text-secondary dark:text-text-secondary-dark">
+            查看自己的信息为只读。修改密码请使用左下角用户菜单。
+          </p>
+        ) : (
+          <>
+            <button
+              onClick={openDeleteConfirm}
+              disabled={saving}
+              title="硬删除该用户（级联删除其所有会话）"
+              className={`${BUTTON_DANGER_OUTLINE} rounded-lg px-5 py-2`}
+            >
+              删除用户
+            </button>
+            <button
+              onClick={handleSave}
+              disabled={!dirty || saving || passwordInvalid}
+              className={`${BUTTON_PRIMARY} rounded-lg px-6 py-2`}
+            >
+              {saving ? '保存中...' : '保存'}
+            </button>
+          </>
+        )
+      }
+    >
       {/* Body */}
       <div className="flex-1 overflow-y-auto px-6 py-5 space-y-5">
         {/* Read-only meta */}
@@ -220,7 +251,7 @@ export default function UserDetailForm({ userId }: UserDetailFormProps) {
 
         {/* Editable fields */}
         <div>
-          <label className="block text-sm text-text-secondary dark:text-text-secondary-dark mb-1">
+          <label className={LABEL_CLASS}>
             显示名
           </label>
           <input
@@ -229,12 +260,12 @@ export default function UserDetailForm({ userId }: UserDetailFormProps) {
             onChange={(e) => setDisplayName(e.target.value)}
             placeholder={user.username}
             disabled={saving || isSelf}
-            className="w-full px-3 py-2 rounded-lg bg-surface dark:bg-surface-dark border border-border dark:border-border-dark text-text-primary dark:text-text-primary-dark placeholder:text-text-tertiary dark:placeholder:text-text-tertiary-dark focus:outline-none focus:border-accent disabled:opacity-40"
+            className={INPUT_ON_PANEL}
           />
         </div>
 
         <div>
-          <label className="block text-sm text-text-secondary dark:text-text-secondary-dark mb-1">
+          <label className={LABEL_CLASS}>
             角色
           </label>
           <div className="relative">
@@ -242,7 +273,7 @@ export default function UserDetailForm({ userId }: UserDetailFormProps) {
               value={role}
               onChange={(e) => setRole(e.target.value as 'user' | 'admin')}
               disabled={saving || isSelf}
-              className="w-full appearance-none px-3 py-2 pr-9 rounded-lg bg-surface dark:bg-surface-dark border border-border dark:border-border-dark text-text-primary dark:text-text-primary-dark focus:outline-none focus:border-accent disabled:opacity-40"
+              className={`${INPUT_ON_PANEL} appearance-none pr-9`}
             >
               {ROLE_OPTIONS.map((opt) => (
                 <option key={opt.value} value={opt.value}>{opt.label}</option>
@@ -272,7 +303,7 @@ export default function UserDetailForm({ userId }: UserDetailFormProps) {
         </div>
 
         <div>
-          <label className="block text-sm text-text-secondary dark:text-text-secondary-dark mb-1">
+          <label className={LABEL_CLASS}>
             部门
           </label>
           <DepartmentCascader
@@ -287,7 +318,7 @@ export default function UserDetailForm({ userId }: UserDetailFormProps) {
         {/* Reset password — 自己看自己时整段隐藏（走 /me/password） */}
         {!isSelf && (
           <div>
-            <label className="block text-sm text-text-secondary dark:text-text-secondary-dark mb-1">
+            <label className={LABEL_CLASS}>
               重置密码
               <span className="ml-2 text-xs text-text-tertiary dark:text-text-tertiary-dark">
                 （留空则不修改）
@@ -300,7 +331,7 @@ export default function UserDetailForm({ userId }: UserDetailFormProps) {
               disabled={saving}
               placeholder="新密码至少 4 个字符"
               autoComplete="new-password"
-              className="w-full px-3 py-2 rounded-lg bg-surface dark:bg-surface-dark border border-border dark:border-border-dark text-text-primary dark:text-text-primary-dark placeholder:text-text-tertiary dark:placeholder:text-text-tertiary-dark focus:outline-none focus:border-accent disabled:opacity-40"
+              className={INPUT_ON_PANEL}
             />
             {passwordInvalid && (
               <p className="text-status-error text-xs mt-1">密码至少需要 4 个字符</p>
@@ -313,33 +344,6 @@ export default function UserDetailForm({ userId }: UserDetailFormProps) {
         )}
         {deleteImpactError && (
           <div className="text-status-error text-sm">{deleteImpactError}</div>
-        )}
-      </div>
-
-      {/* Footer — isSelf 时按钮位置替换为居中提示，沿用同一根分割线保持视觉一致 */}
-      <div className="border-t border-border dark:border-border-dark px-6 py-4">
-        {isSelf ? (
-          <p className="text-center text-sm text-text-secondary dark:text-text-secondary-dark">
-            查看自己的信息为只读。修改密码请使用左下角用户菜单。
-          </p>
-        ) : (
-          <div className="flex items-center justify-end gap-3">
-            <button
-              onClick={openDeleteConfirm}
-              disabled={saving}
-              title="硬删除该用户（级联删除其所有会话）"
-              className="px-5 py-2 rounded-lg border border-status-error text-status-error hover:bg-status-error/10 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-            >
-              删除用户
-            </button>
-            <button
-              onClick={handleSave}
-              disabled={!dirty || saving || passwordInvalid}
-              className="px-6 py-2 rounded-lg bg-accent text-white hover:bg-accent-hover disabled:opacity-40 transition-colors"
-            >
-              {saving ? '保存中...' : '保存'}
-            </button>
-          </div>
         )}
       </div>
 
@@ -356,6 +360,6 @@ export default function UserDetailForm({ userId }: UserDetailFormProps) {
           onConfirm={handleDelete}
         />
       )}
-    </div>
+    </PanelShell>
   );
 }

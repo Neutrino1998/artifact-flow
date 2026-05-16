@@ -17,6 +17,8 @@ export default function MessageInput() {
   const isComposingRef = useRef(false);
   const { sendMessage, isNewConversation } = useChat();
   const isStreaming = useStreamStore((s) => s.isStreaming);
+  const cancelling = useStreamStore((s) => s.cancelling);
+  const setCancelling = useStreamStore((s) => s.setCancelling);
   const toggleArtifactPanel = useUIStore((s) => s.toggleArtifactPanel);
 
   const uploading = useArtifactStore((s) => s.uploading);
@@ -35,11 +37,16 @@ export default function MessageInput() {
 
   const handleSend = useCallback(async () => {
     if (isStreaming && !content.trim()) {
-      // Stop: cancel backend execution
+      // Stop: cancel backend execution. The cancel signal queues into the
+      // engine — it only takes effect at the next checkpoint — so flip to a
+      // "cancelling…" state immediately for feedback. endStream() (fired by
+      // any terminal SSE event) clears it.
+      if (cancelling) return;
       const convId = streamConversationId || conversationId;
       if (convId) {
         try {
           await cancelExecution(convId);
+          setCancelling(true);
         } catch (err) {
           console.error('Cancel failed:', err);
         }
@@ -66,7 +73,7 @@ export default function MessageInput() {
 
     setContent('');
     await sendMessage(trimmed);
-  }, [content, isStreaming, sendMessage, conversationId, streamConversationId]);
+  }, [content, isStreaming, cancelling, setCancelling, sendMessage, conversationId, streamConversationId]);
 
   const handleCompositionStart = useCallback(() => {
     isComposingRef.current = true;
@@ -146,7 +153,7 @@ export default function MessageInput() {
               <button
                 onClick={handleFileSelect}
                 disabled={uploadDisabled}
-                className="p-1.5 rounded-lg text-text-secondary dark:text-text-secondary-dark hover:bg-bg dark:hover:bg-bg-dark transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                className="p-1.5 rounded-lg text-text-secondary dark:text-text-secondary-dark hover:bg-surface dark:hover:bg-bg-dark transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                 aria-label="Upload file"
                 title="上传文件（支持多选）"
               >
@@ -169,7 +176,7 @@ export default function MessageInput() {
               {/* Artifact panel toggle */}
               <button
                 onClick={toggleArtifactPanel}
-                className="p-1.5 rounded-lg text-text-secondary dark:text-text-secondary-dark hover:bg-bg dark:hover:bg-bg-dark transition-colors"
+                className="p-1.5 rounded-lg text-text-secondary dark:text-text-secondary-dark hover:bg-surface dark:hover:bg-bg-dark transition-colors"
                 aria-label="Toggle artifact panel"
                 title="切换文稿面板"
               >
@@ -180,22 +187,28 @@ export default function MessageInput() {
               </button>
             </div>
 
-            {/* Unified Send / Stop / Inject button */}
+            {/* Unified Send / Stop / Cancelling / Inject button */}
             {(() => {
-              const isStop = isStreaming && !content.trim();
+              const isStop = isStreaming && !content.trim() && !cancelling;
               return (
                 <button
                   onClick={handleSend}
-                  disabled={!isStreaming && !content.trim()}
+                  disabled={(!isStreaming && !content.trim()) || cancelling}
                   className={`w-8 h-8 flex items-center justify-center rounded-full transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
-                    isStop
+                    isStop || cancelling
                       ? 'bg-red-500 text-white hover:bg-red-600'
                       : 'bg-accent text-white hover:bg-accent-hover'
                   }`}
-                  aria-label={isStop ? 'Stop generation' : isStreaming ? 'Inject message' : 'Send message'}
-                  title={isStop ? '停止生成' : isStreaming ? '追加指令' : '发送消息'}
+                  aria-label={
+                    cancelling ? 'Cancelling' : isStop ? 'Stop generation' : isStreaming ? 'Inject message' : 'Send message'
+                  }
+                  title={cancelling ? '正在停止…' : isStop ? '停止生成' : isStreaming ? '追加指令' : '发送消息'}
                 >
-                  {isStop ? (
+                  {cancelling ? (
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="animate-spin">
+                      <path d="M21 12a9 9 0 1 1-6.219-8.56" strokeLinecap="round" />
+                    </svg>
+                  ) : isStop ? (
                     <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
                       <rect x="4" y="4" width="8" height="8" rx="1" />
                     </svg>
@@ -206,7 +219,7 @@ export default function MessageInput() {
                       viewBox="0 0 24 24"
                       fill="none"
                       stroke="currentColor"
-                      strokeWidth="2"
+                      strokeWidth="2.75"
                       strokeLinecap="round"
                       strokeLinejoin="round"
                     >

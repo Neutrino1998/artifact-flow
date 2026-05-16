@@ -7,6 +7,7 @@ import { useAuthStore } from '@/stores/authStore';
 import { useUIStore } from '@/stores/uiStore';
 import { useLatestOnly } from '@/hooks/useLatestOnly';
 import Checkbox from '@/components/forms/Checkbox';
+import PanelSearchBar from './PanelSearchBar';
 
 function flattenDeptNames(nodes: DepartmentTreeNode[], out: Map<string, string>): void {
   for (const n of nodes) {
@@ -137,41 +138,13 @@ export default function UserManagementPanel() {
 
   return (
     <div className="flex-1 flex flex-col min-h-0 bg-chat dark:bg-chat-dark">
-      {/* Search */}
-      <div className="px-4 pt-4 pb-2">
-        <div className="max-w-3xl mx-auto">
-          <div className="bg-surface dark:bg-surface-dark border border-border dark:border-border-dark focus-within:border-accent dark:focus-within:border-accent rounded-2xl shadow-float px-4 py-3 flex items-center gap-3">
-            <svg
-              className="flex-shrink-0 text-text-tertiary dark:text-text-tertiary-dark"
-              width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5"
-            >
-              <circle cx="7" cy="7" r="5" />
-              <path d="M11 11l3.5 3.5" />
-            </svg>
-            <input
-              type="text"
-              value={query}
-              onChange={(e) => handleQueryChange(e.target.value)}
-              placeholder="搜索用户名 / 显示名 / 部门..."
-              autoFocus
-              className="flex-1 bg-transparent text-text-primary dark:text-text-primary-dark placeholder:text-text-tertiary dark:placeholder:text-text-tertiary-dark outline-none"
-            />
-            <span className="flex-shrink-0 text-xs text-text-tertiary dark:text-text-tertiary-dark">
-              {total} 用户
-            </span>
-            <button
-              onClick={handleClose}
-              className="flex-shrink-0 p-1 rounded-lg text-text-tertiary dark:text-text-tertiary-dark hover:text-text-secondary dark:hover:text-text-secondary-dark transition-colors"
-              aria-label="关闭"
-              title="关闭"
-            >
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
-                <path d="M4 4l8 8M12 4l-8 8" />
-              </svg>
-            </button>
-          </div>
-        </div>
-      </div>
+      <PanelSearchBar
+        value={query}
+        onChange={handleQueryChange}
+        placeholder="搜索用户名 / 显示名 / 部门..."
+        countLabel={`${total} 用户`}
+        onClose={handleClose}
+      />
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto px-4">

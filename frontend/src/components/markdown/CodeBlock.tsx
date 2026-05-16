@@ -1,22 +1,20 @@
 'use client';
 
-import { useState, useRef, useCallback, type HTMLAttributes } from 'react';
+import { useRef, useCallback, type HTMLAttributes } from 'react';
+import { useCopyFeedback } from '@/hooks/useCopyFeedback';
+import { CopyIcon } from '@/components/ui/CopyIcon';
 
 /**
  * Custom <pre> renderer for ReactMarkdown.
  * Wraps code blocks with a copy button in the top-right corner.
  */
 export default function CodeBlock(props: HTMLAttributes<HTMLPreElement>) {
-  const [copied, setCopied] = useState(false);
+  const { copied, copy } = useCopyFeedback();
   const preRef = useRef<HTMLPreElement>(null);
 
   const handleCopy = useCallback(() => {
-    const text = preRef.current?.textContent ?? '';
-    navigator.clipboard.writeText(text).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    });
-  }, []);
+    copy(preRef.current?.textContent ?? '');
+  }, [copy]);
 
   return (
     <div className="relative group/code">
@@ -27,16 +25,7 @@ export default function CodeBlock(props: HTMLAttributes<HTMLPreElement>) {
         aria-label="Copy code"
         title={copied ? '已复制' : '复制代码'}
       >
-        {copied ? (
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M20 6 9 17l-5-5" />
-          </svg>
-        ) : (
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
-            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-          </svg>
-        )}
+        <CopyIcon copied={copied} />
       </button>
     </div>
   );

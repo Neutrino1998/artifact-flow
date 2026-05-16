@@ -90,7 +90,7 @@ function AgentSegmentBlock({ segment, isActive, defaultExpanded, stepNumber }: A
       <button
         onClick={() => { if (!isActive) setExpanded(!expanded); }}
         className={`w-full flex items-center gap-2 px-3 py-2 text-xs transition-colors ${
-          isActive ? 'cursor-default' : 'hover:bg-bg dark:hover:bg-bg-dark cursor-pointer'
+          isActive ? 'cursor-default' : 'hover:bg-surface/60 dark:hover:bg-panel-accent-dark/60 cursor-pointer'
         }`}
       >
         {/* Chevron */}
@@ -113,7 +113,7 @@ function AgentSegmentBlock({ segment, isActive, defaultExpanded, stepNumber }: A
           className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full font-medium ${
             segment.status === 'running'
               ? 'bg-accent/10 text-accent'
-              : 'bg-bg dark:bg-transparent text-text-secondary dark:text-text-secondary-dark'
+              : 'bg-transparent text-text-secondary dark:text-text-secondary-dark'
           }`}
         >
           {segment.status === 'running' && (

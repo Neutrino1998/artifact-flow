@@ -1,10 +1,17 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import * as api from '@/lib/api';
 import { ApiError } from '@/lib/api';
 import { useAuthStore } from '@/stores/authStore';
 import { useUIStore } from '@/stores/uiStore';
+import {
+  BUTTON_PRIMARY,
+  BUTTON_SECONDARY,
+  INPUT_ON_SURFACE,
+  LABEL_CLASS,
+} from '@/lib/styles';
+import DialogShell from './DialogShell';
 
 interface EditDisplayNameDialogProps {
   onClose: () => void;
@@ -19,15 +26,6 @@ export default function EditDisplayNameDialog({ onClose }: EditDisplayNameDialog
   const [displayName, setDisplayName] = useState(user?.display_name ?? '');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  // ESC 关闭
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && !submitting) onClose();
-    };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, [onClose, submitting]);
 
   const trimmed = displayName.trim();
   const original = user?.display_name ?? '';
@@ -64,61 +62,56 @@ export default function EditDisplayNameDialog({ onClose }: EditDisplayNameDialog
   if (!user) return null;
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/30"
-      onClick={submitting ? undefined : onClose}
-    >
-      <div
-        className="bg-surface dark:bg-surface-dark border border-border dark:border-border-dark rounded-card shadow-modal max-w-sm w-full mx-4 p-6"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <h2 className="text-lg font-semibold text-text-primary dark:text-text-primary-dark mb-1">
-          修改显示名
-        </h2>
-        <p className="text-text-secondary dark:text-text-secondary-dark mb-6 text-sm">
+    <DialogShell
+      title="修改显示名"
+      description={
+        <>
           显示名留空则恢复使用用户名 <span className="font-mono">@{user.username}</span>。
-        </p>
+        </>
+      }
+      onClose={onClose}
+      closeOnBackdrop={!submitting}
+      closeOnEscape={!submitting}
+    >
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <div>
+          <label className={LABEL_CLASS}>
+            显示名
+          </label>
+          <input
+            type="text"
+            value={displayName}
+            onChange={(e) => setDisplayName(e.target.value)}
+            autoFocus
+            disabled={submitting}
+            maxLength={128}
+            placeholder={user.username}
+            className={INPUT_ON_SURFACE}
+          />
+        </div>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label className="block text-sm text-text-secondary dark:text-text-secondary-dark mb-1">
-              显示名
-            </label>
-            <input
-              type="text"
-              value={displayName}
-              onChange={(e) => setDisplayName(e.target.value)}
-              autoFocus
-              disabled={submitting}
-              maxLength={128}
-              placeholder={user.username}
-              className="w-full px-3 py-2 rounded-lg bg-bg dark:bg-bg-dark border border-border dark:border-border-dark text-text-primary dark:text-text-primary-dark placeholder:text-text-tertiary dark:placeholder:text-text-tertiary-dark focus:outline-none focus:border-accent disabled:opacity-40"
-            />
-          </div>
+        {error && (
+          <div className="text-status-error text-sm">{error}</div>
+        )}
 
-          {error && (
-            <div className="text-status-error text-sm">{error}</div>
-          )}
-
-          <div className="flex justify-end gap-3 pt-2">
-            <button
-              type="button"
-              onClick={onClose}
-              disabled={submitting}
-              className="px-6 py-2 rounded-lg border border-border dark:border-border-dark text-text-primary dark:text-text-primary-dark hover:bg-bg dark:hover:bg-bg-dark disabled:opacity-40 transition-colors"
-            >
-              取消
-            </button>
-            <button
-              type="submit"
-              disabled={!canSubmit}
-              className="px-6 py-2 rounded-lg bg-accent text-white hover:bg-accent-hover disabled:opacity-40 transition-colors"
-            >
-              {submitting ? '保存中...' : '保存'}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
+        <div className="flex justify-end gap-3 pt-2">
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={submitting}
+            className={`${BUTTON_SECONDARY} rounded-lg px-6 py-2`}
+          >
+            取消
+          </button>
+          <button
+            type="submit"
+            disabled={!canSubmit}
+            className={`${BUTTON_PRIMARY} rounded-lg px-6 py-2`}
+          >
+            {submitting ? '保存中...' : '保存'}
+          </button>
+        </div>
+      </form>
+    </DialogShell>
   );
 }

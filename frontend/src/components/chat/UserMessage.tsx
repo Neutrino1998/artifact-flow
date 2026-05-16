@@ -2,7 +2,9 @@
 
 import { memo, useState, useRef, useEffect, useCallback } from 'react';
 import { useChat } from '@/hooks/useChat';
+import { useCopyFeedback } from '@/hooks/useCopyFeedback';
 import { useStreamStore } from '@/stores/streamStore';
+import { CopyIcon } from '@/components/ui/CopyIcon';
 import BranchNavigator from './BranchNavigator';
 
 interface UserMessageProps {
@@ -14,7 +16,7 @@ interface UserMessageProps {
 }
 
 function UserMessage({ content, messageId, parentId, siblingIndex, siblingCount }: UserMessageProps) {
-  const [copied, setCopied] = useState(false);
+  const { copied, copy } = useCopyFeedback();
   const [editing, setEditing] = useState(false);
   const [editContent, setEditContent] = useState(content);
   const isComposingRef = useRef(false);
@@ -32,11 +34,7 @@ function UserMessage({ content, messageId, parentId, siblingIndex, siblingCount 
     }
   }, [editing]);
 
-  const handleCopy = async () => {
-    await navigator.clipboard.writeText(content);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
-  };
+  const handleCopy = () => copy(content);
 
   const handleEdit = () => {
     setEditContent(content);
@@ -122,7 +120,7 @@ function UserMessage({ content, messageId, parentId, siblingIndex, siblingCount 
           <button
             onClick={handleEdit}
             disabled={isStreaming}
-            className="p-1 rounded text-text-tertiary dark:text-text-tertiary-dark hover:text-text-secondary dark:hover:text-text-secondary-dark hover:bg-bg dark:hover:bg-bg-dark disabled:opacity-40 transition-colors"
+            className="p-1 rounded text-text-tertiary dark:text-text-tertiary-dark hover:text-text-secondary dark:hover:text-text-secondary-dark hover:bg-surface dark:hover:bg-bg-dark disabled:opacity-40 transition-colors"
             aria-label="Edit message"
             title="编辑"
           >
@@ -133,7 +131,7 @@ function UserMessage({ content, messageId, parentId, siblingIndex, siblingCount 
           <button
             onClick={handleRerun}
             disabled={isStreaming}
-            className="p-1 rounded text-text-tertiary dark:text-text-tertiary-dark hover:text-text-secondary dark:hover:text-text-secondary-dark hover:bg-bg dark:hover:bg-bg-dark disabled:opacity-40 transition-colors"
+            className="p-1 rounded text-text-tertiary dark:text-text-tertiary-dark hover:text-text-secondary dark:hover:text-text-secondary-dark hover:bg-surface dark:hover:bg-bg-dark disabled:opacity-40 transition-colors"
             aria-label="Rerun message"
             title="重新生成"
           >
@@ -144,20 +142,11 @@ function UserMessage({ content, messageId, parentId, siblingIndex, siblingCount 
           </button>
           <button
             onClick={handleCopy}
-            className="p-1 rounded text-text-tertiary dark:text-text-tertiary-dark hover:text-text-secondary dark:hover:text-text-secondary-dark hover:bg-bg dark:hover:bg-bg-dark transition-colors"
+            className="p-1 rounded text-text-tertiary dark:text-text-tertiary-dark hover:text-text-secondary dark:hover:text-text-secondary-dark hover:bg-surface dark:hover:bg-bg-dark transition-colors"
             aria-label="Copy message"
             title={copied ? '已复制' : '复制'}
           >
-            {copied ? (
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M20 6 9 17l-5-5" />
-              </svg>
-            ) : (
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
-                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-              </svg>
-            )}
+            <CopyIcon copied={copied} />
           </button>
           {siblingCount > 1 && (
             <>

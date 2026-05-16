@@ -4,7 +4,14 @@ import { useState } from 'react';
 import * as api from '@/lib/api';
 import { ApiError } from '@/lib/api';
 import { useUIStore } from '@/stores/uiStore';
+import {
+  BUTTON_PRIMARY,
+  BUTTON_SECONDARY,
+  INPUT_ON_PANEL,
+  LABEL_CLASS,
+} from '@/lib/styles';
 import DepartmentCascader from '@/components/forms/DepartmentCascader';
+import PanelShell from '@/components/layout/PanelShell';
 
 const ROLE_OPTIONS = [
   { value: 'user', label: 'user' },
@@ -55,37 +62,57 @@ export default function CreateUserForm() {
   };
 
   return (
-    <div className="flex-1 flex flex-col min-h-0 bg-chat dark:bg-chat-dark">
-      {/* Header */}
-      <div className="px-6 pt-5 pb-3 border-b border-border dark:border-border-dark flex items-center justify-between gap-3">
-        <div>
-          <div className="text-base font-semibold text-text-primary dark:text-text-primary-dark">
-            新建用户
+    <PanelShell
+      header={
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <div className="text-base font-semibold text-text-primary dark:text-text-primary-dark">
+              新建用户
+            </div>
+            <div className="text-xs text-text-tertiary dark:text-text-tertiary-dark">
+              用户名只能包含字母、数字、点、下划线、连字符（2~64 字符）
+            </div>
           </div>
-          <div className="text-xs text-text-tertiary dark:text-text-tertiary-dark">
-            用户名只能包含字母、数字、点、下划线、连字符（2~64 字符）
-          </div>
+          <button
+            onClick={() => setRightView({ type: 'empty' })}
+            disabled={submitting}
+            className="flex-shrink-0 p-1 rounded-lg text-text-tertiary dark:text-text-tertiary-dark hover:text-text-secondary dark:hover:text-text-secondary-dark disabled:opacity-40 transition-colors"
+            aria-label="关闭"
+          >
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+              <path d="M4 4l8 8M12 4l-8 8" />
+            </svg>
+          </button>
         </div>
-        <button
-          onClick={() => setRightView({ type: 'empty' })}
-          disabled={submitting}
-          className="flex-shrink-0 p-1 rounded-lg text-text-tertiary dark:text-text-tertiary-dark hover:text-text-secondary dark:hover:text-text-secondary-dark disabled:opacity-40 transition-colors"
-          aria-label="关闭"
-        >
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
-            <path d="M4 4l8 8M12 4l-8 8" />
-          </svg>
-        </button>
-      </div>
-
-      {/* Form */}
+      }
+      footer={
+        <>
+          <button
+            onClick={() => setRightView({ type: 'empty' })}
+            disabled={submitting}
+            type="button"
+            className={`${BUTTON_SECONDARY} rounded-lg px-6 py-2`}
+          >
+            取消
+          </button>
+          <button
+            form="create-user-form"
+            type="submit"
+            disabled={!canSubmit}
+            className={`${BUTTON_PRIMARY} rounded-lg px-6 py-2`}
+          >
+            {submitting ? '创建中...' : '创建'}
+          </button>
+        </>
+      }
+    >
       <form
         id="create-user-form"
         onSubmit={handleSubmit}
         className="flex-1 overflow-y-auto px-6 py-5 space-y-4"
       >
         <div>
-          <label className="block text-sm text-text-secondary dark:text-text-secondary-dark mb-1">
+          <label className={LABEL_CLASS}>
             用户名 <span className="text-status-error">*</span>
           </label>
           <input
@@ -94,12 +121,12 @@ export default function CreateUserForm() {
             onChange={(e) => setUsername(e.target.value)}
             disabled={submitting}
             autoFocus
-            className="w-full px-3 py-2 rounded-lg bg-surface dark:bg-surface-dark border border-border dark:border-border-dark text-text-primary dark:text-text-primary-dark placeholder:text-text-tertiary dark:placeholder:text-text-tertiary-dark focus:outline-none focus:border-accent disabled:opacity-40 font-mono"
+            className={`${INPUT_ON_PANEL} font-mono`}
           />
         </div>
 
         <div>
-          <label className="block text-sm text-text-secondary dark:text-text-secondary-dark mb-1">
+          <label className={LABEL_CLASS}>
             密码 <span className="text-status-error">*</span>
           </label>
           <input
@@ -108,12 +135,12 @@ export default function CreateUserForm() {
             onChange={(e) => setPassword(e.target.value)}
             disabled={submitting}
             placeholder="至少 4 个字符"
-            className="w-full px-3 py-2 rounded-lg bg-surface dark:bg-surface-dark border border-border dark:border-border-dark text-text-primary dark:text-text-primary-dark placeholder:text-text-tertiary dark:placeholder:text-text-tertiary-dark focus:outline-none focus:border-accent disabled:opacity-40"
+            className={INPUT_ON_PANEL}
           />
         </div>
 
         <div>
-          <label className="block text-sm text-text-secondary dark:text-text-secondary-dark mb-1">
+          <label className={LABEL_CLASS}>
             显示名（可选）
           </label>
           <input
@@ -122,12 +149,12 @@ export default function CreateUserForm() {
             onChange={(e) => setDisplayName(e.target.value)}
             disabled={submitting}
             placeholder={username || '默认使用用户名'}
-            className="w-full px-3 py-2 rounded-lg bg-surface dark:bg-surface-dark border border-border dark:border-border-dark text-text-primary dark:text-text-primary-dark placeholder:text-text-tertiary dark:placeholder:text-text-tertiary-dark focus:outline-none focus:border-accent disabled:opacity-40"
+            className={INPUT_ON_PANEL}
           />
         </div>
 
         <div>
-          <label className="block text-sm text-text-secondary dark:text-text-secondary-dark mb-1">
+          <label className={LABEL_CLASS}>
             角色
           </label>
           <div className="relative">
@@ -135,7 +162,7 @@ export default function CreateUserForm() {
               value={role}
               onChange={(e) => setRole(e.target.value as 'user' | 'admin')}
               disabled={submitting}
-              className="w-full appearance-none px-3 py-2 pr-9 rounded-lg bg-surface dark:bg-surface-dark border border-border dark:border-border-dark text-text-primary dark:text-text-primary-dark focus:outline-none focus:border-accent disabled:opacity-40"
+              className={`${INPUT_ON_PANEL} appearance-none pr-9`}
             >
               {ROLE_OPTIONS.map((opt) => (
                 <option key={opt.value} value={opt.value}>{opt.label}</option>
@@ -151,7 +178,7 @@ export default function CreateUserForm() {
         </div>
 
         <div>
-          <label className="block text-sm text-text-secondary dark:text-text-secondary-dark mb-1">
+          <label className={LABEL_CLASS}>
             部门（可选）
           </label>
           <DepartmentCascader
@@ -166,26 +193,6 @@ export default function CreateUserForm() {
           <div className="text-status-error text-sm">{error}</div>
         )}
       </form>
-
-      {/* Footer */}
-      <div className="border-t border-border dark:border-border-dark px-6 py-4 flex justify-end gap-3">
-        <button
-          onClick={() => setRightView({ type: 'empty' })}
-          disabled={submitting}
-          type="button"
-          className="px-6 py-2 rounded-lg border border-border dark:border-border-dark text-text-primary dark:text-text-primary-dark hover:bg-bg dark:hover:bg-bg-dark disabled:opacity-40 transition-colors"
-        >
-          取消
-        </button>
-        <button
-          form="create-user-form"
-          type="submit"
-          disabled={!canSubmit}
-          className="px-6 py-2 rounded-lg bg-accent text-white hover:bg-accent-hover disabled:opacity-40 transition-colors"
-        >
-          {submitting ? '创建中...' : '创建'}
-        </button>
-      </div>
-    </div>
+    </PanelShell>
   );
 }

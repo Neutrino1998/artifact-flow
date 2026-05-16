@@ -1,13 +1,15 @@
 'use client';
 
-import { memo, useState, useEffect } from 'react';
+import { memo, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
 import { useStreamStore, interleaveFlowItems } from '@/stores/streamStore';
 import { useConversationStore } from '@/stores/conversationStore';
+import { useCopyFeedback } from '@/hooks/useCopyFeedback';
 import { PROSE_CLASSES } from '@/lib/styles';
 import { markdownComponents } from '@/components/markdown';
+import { CopyIcon } from '@/components/ui/CopyIcon';
 import { getMessageEvents } from '@/lib/api';
 import { reconstructSegments, reconstructNonAgentBlocks } from '@/lib/reconstructSegments';
 import AgentSegmentBlock from './AgentSegmentBlock';
@@ -24,7 +26,7 @@ interface AssistantMessageProps {
 }
 
 function AssistantMessage({ content, messageId, executionMetrics }: AssistantMessageProps) {
-  const [copied, setCopied] = useState(false);
+  const { copied, copy } = useCopyFeedback();
   const completedSegs = useStreamStore(
     (s) => messageId ? s.completedSegments.get(messageId) : undefined
   );
@@ -62,11 +64,7 @@ function AssistantMessage({ content, messageId, executionMetrics }: AssistantMes
     return () => { cancelled = true; };
   }, [messageId, conversationId, completedSegs]);
 
-  const handleCopy = async () => {
-    await navigator.clipboard.writeText(content);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
-  };
+  const handleCopy = () => copy(content);
 
   const hasSegs = completedSegs && completedSegs.length > 0;
   const hasBlocks = completedBlocks && completedBlocks.length > 0;
@@ -123,20 +121,11 @@ function AssistantMessage({ content, messageId, executionMetrics }: AssistantMes
       <div className="absolute -bottom-7 left-0 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
         <button
           onClick={handleCopy}
-          className="p-1 rounded text-text-tertiary dark:text-text-tertiary-dark hover:text-text-secondary dark:hover:text-text-secondary-dark hover:bg-bg dark:hover:bg-bg-dark transition-colors"
+          className="p-1 rounded text-text-tertiary dark:text-text-tertiary-dark hover:text-text-secondary dark:hover:text-text-secondary-dark hover:bg-surface dark:hover:bg-bg-dark transition-colors"
           aria-label="Copy response"
           title={copied ? '已复制' : '复制'}
         >
-          {copied ? (
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M20 6 9 17l-5-5" />
-            </svg>
-          ) : (
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
-              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-            </svg>
-          )}
+          <CopyIcon copied={copied} />
         </button>
       </div>
     </div>

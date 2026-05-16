@@ -4,6 +4,7 @@ import { useState, useCallback, useRef, useEffect } from 'react';
 import { useArtifactStore } from '@/stores/artifactStore';
 import { useStreamStore } from '@/stores/streamStore';
 import { useArtifacts } from '@/hooks/useArtifacts';
+import { useCopyFeedback } from '@/hooks/useCopyFeedback';
 import { exportArtifact } from '@/lib/api';
 
 function getFileExtension(contentType: string): string {
@@ -29,7 +30,7 @@ export default function ArtifactToolbar() {
   const setCurrent = useArtifactStore((s) => s.setCurrent);
   const isStreaming = useStreamStore((s) => s.isStreaming);
   const { selectVersion, selectArtifact } = useArtifacts();
-  const [copied, setCopied] = useState(false);
+  const { copied, copy } = useCopyFeedback();
   const [showDownloadMenu, setShowDownloadMenu] = useState(false);
   const downloadMenuRef = useRef<HTMLDivElement>(null);
 
@@ -45,12 +46,9 @@ export default function ArtifactToolbar() {
     return () => document.removeEventListener('mousedown', handler);
   }, [showDownloadMenu]);
 
-  const handleCopy = useCallback(async () => {
-    const content = selectedVersion?.content ?? current?.content ?? '';
-    await navigator.clipboard.writeText(content);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
-  }, [current, selectedVersion]);
+  const handleCopy = useCallback(() => {
+    copy(selectedVersion?.content ?? current?.content ?? '');
+  }, [current, selectedVersion, copy]);
 
   const handleDownload = useCallback(() => {
     if (!current) return;
@@ -130,7 +128,7 @@ export default function ArtifactToolbar() {
         {/* Refresh */}
         <button
           onClick={handleRefresh}
-          className="p-1.5 rounded text-text-secondary dark:text-text-secondary-dark hover:bg-bg dark:hover:bg-bg-dark transition-colors"
+          className="p-1.5 rounded text-text-secondary dark:text-text-secondary-dark hover:bg-surface dark:hover:bg-bg-dark transition-colors"
           aria-label="Refresh artifact"
           title="刷新"
         >
@@ -143,7 +141,7 @@ export default function ArtifactToolbar() {
         {/* Copy */}
         <button
           onClick={handleCopy}
-          className="p-1.5 rounded text-text-secondary dark:text-text-secondary-dark hover:bg-bg dark:hover:bg-bg-dark transition-colors"
+          className="p-1.5 rounded text-text-secondary dark:text-text-secondary-dark hover:bg-surface dark:hover:bg-bg-dark transition-colors"
           aria-label="Copy content"
           title={copied ? '已复制' : '复制内容'}
         >
@@ -163,7 +161,7 @@ export default function ArtifactToolbar() {
         <div className="relative" ref={downloadMenuRef}>
           <button
             onClick={() => setShowDownloadMenu((v) => !v)}
-            className="p-1.5 rounded text-text-secondary dark:text-text-secondary-dark hover:bg-bg dark:hover:bg-bg-dark transition-colors"
+            className="p-1.5 rounded text-text-secondary dark:text-text-secondary-dark hover:bg-surface dark:hover:bg-bg-dark transition-colors"
             aria-label="Download artifact"
             title="下载"
           >

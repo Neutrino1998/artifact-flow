@@ -21,7 +21,7 @@ function IconButton({
   return (
     <button
       onClick={onClick}
-      className="w-10 h-10 flex items-center justify-center rounded-lg text-text-secondary dark:text-text-secondary-dark hover:bg-bg dark:hover:bg-bg-dark transition-colors"
+      className="w-10 h-10 flex items-center justify-center rounded-lg text-text-secondary dark:text-text-secondary-dark hover:bg-chat/60 dark:hover:bg-panel-accent-dark/60 transition-colors"
       aria-label={label}
       title={label}
     >
@@ -187,17 +187,12 @@ export default function Sidebar() {
             </p>
           )}
         </div>
-        <button
-          onClick={toggleSidebar}
-          className="p-1.5 rounded-lg text-text-secondary dark:text-text-secondary-dark hover:bg-bg dark:hover:bg-bg-dark transition-colors"
-          aria-label="Collapse sidebar"
-          title="收起侧栏"
-        >
+        <IconButton onClick={toggleSidebar} label="收起侧栏">
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
             <rect x="1.5" y="1.5" width="13" height="13" rx="2" />
             <path d="M6 1.5v13" />
           </svg>
-        </button>
+        </IconButton>
       </div>
 
       {/* Action buttons */}
@@ -206,7 +201,7 @@ export default function Sidebar() {
           <>
             <button
               onClick={handleSearchAdmin}
-              className="w-full flex items-center gap-2 px-3 py-2 font-medium text-text-primary bg-chat dark:bg-panel-accent-dark dark:text-text-primary-dark rounded-card border border-border dark:border-border-dark hover:bg-chat/70 dark:hover:bg-surface-dark transition-colors"
+              className="w-full flex items-center gap-2 px-3 py-2 font-medium text-text-primary bg-chat dark:bg-panel-accent-dark dark:text-text-primary-dark rounded-card border border-border dark:border-border-dark hover:bg-surface dark:hover:bg-[#141414] transition-colors"
             >
               <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
                 <circle cx="7" cy="7" r="5" />
@@ -216,7 +211,7 @@ export default function Sidebar() {
             </button>
             <button
               onClick={handleRefresh}
-              className="w-full flex items-center gap-2 px-3 py-2 font-medium text-text-primary bg-chat dark:bg-panel-accent-dark dark:text-text-primary-dark rounded-card border border-border dark:border-border-dark hover:bg-chat/70 dark:hover:bg-surface-dark transition-colors"
+              className="w-full flex items-center gap-2 px-3 py-2 font-medium text-text-primary bg-chat dark:bg-panel-accent-dark dark:text-text-primary-dark rounded-card border border-border dark:border-border-dark hover:bg-surface dark:hover:bg-[#141414] transition-colors"
             >
               <RefreshIcon size={14} spinning={refreshSpinning} />
               刷新对话
@@ -237,7 +232,7 @@ export default function Sidebar() {
             {!inUserMgmt && (
               <button
                 onClick={toggleArtifactPanel}
-                className="w-full flex items-center gap-2 px-3 py-2 font-medium text-text-primary bg-chat dark:bg-panel-accent-dark dark:text-text-primary-dark rounded-card border border-border dark:border-border-dark hover:bg-chat/70 dark:hover:bg-surface-dark transition-colors"
+                className="w-full flex items-center gap-2 px-3 py-2 font-medium text-text-primary bg-chat dark:bg-panel-accent-dark dark:text-text-primary-dark rounded-card border border-border dark:border-border-dark hover:bg-surface dark:hover:bg-[#141414] transition-colors"
               >
                 <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
                   <rect x="2" y="2" width="12" height="12" rx="1.5" />
@@ -248,7 +243,7 @@ export default function Sidebar() {
             )}
             <button
               onClick={handleSearchChat}
-              className="w-full flex items-center gap-2 px-3 py-2 font-medium text-text-primary bg-chat dark:bg-panel-accent-dark dark:text-text-primary-dark rounded-card border border-border dark:border-border-dark hover:bg-chat/70 dark:hover:bg-surface-dark transition-colors"
+              className="w-full flex items-center gap-2 px-3 py-2 font-medium text-text-primary bg-chat dark:bg-panel-accent-dark dark:text-text-primary-dark rounded-card border border-border dark:border-border-dark hover:bg-surface dark:hover:bg-[#141414] transition-colors"
             >
               <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
                 <circle cx="7" cy="7" r="5" />
@@ -258,7 +253,7 @@ export default function Sidebar() {
             </button>
             <button
               onClick={handleNewChat}
-              className="w-full flex items-center gap-2 px-3 py-2 font-medium text-text-primary bg-chat dark:bg-panel-accent-dark dark:text-text-primary-dark rounded-card border border-border dark:border-border-dark hover:bg-chat/70 dark:hover:bg-surface-dark transition-colors"
+              className="w-full flex items-center gap-2 px-3 py-2 font-medium text-text-primary bg-chat dark:bg-panel-accent-dark dark:text-text-primary-dark rounded-card border border-border dark:border-border-dark hover:bg-surface dark:hover:bg-[#141414] transition-colors"
             >
               <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5">
                 <path d="M7 2v10M2 7h10" />

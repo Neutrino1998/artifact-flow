@@ -1,5 +1,8 @@
 'use client';
 
+import { BUTTON_DANGER, BUTTON_PRIMARY, BUTTON_SECONDARY } from '@/lib/styles';
+import DialogShell from './DialogShell';
+
 interface ConfirmModalProps {
   title: string;
   message: string;
@@ -20,36 +23,26 @@ export default function ConfirmModal({
   onCancel,
 }: ConfirmModalProps) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30" onClick={onCancel}>
-      <div
-        className="bg-surface dark:bg-surface-dark border border-border dark:border-border-dark rounded-card shadow-modal max-w-sm w-full mx-4 p-6"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <h2 className="text-lg font-semibold text-text-primary dark:text-text-primary-dark mb-1">
-          {title}
-        </h2>
-        <p className="text-text-secondary dark:text-text-secondary-dark mb-8">
-          {message}
-        </p>
-        <div className="flex justify-end gap-3">
+    <DialogShell
+      title={title}
+      description={message}
+      onClose={onCancel}
+      footer={
+        <>
           <button
             onClick={onCancel}
-            className="px-8 py-2 rounded-lg border border-border dark:border-border-dark text-text-primary dark:text-text-primary-dark hover:bg-bg dark:hover:bg-bg-dark transition-colors"
+            className={`${BUTTON_SECONDARY} rounded-lg px-8 py-2`}
           >
             {cancelLabel}
           </button>
           <button
             onClick={onConfirm}
-            className={`px-8 py-2 rounded-lg text-white transition-colors ${
-              destructive
-                ? 'bg-status-error hover:bg-status-error/80'
-                : 'bg-accent hover:bg-accent-hover'
-            }`}
+            className={`${destructive ? BUTTON_DANGER : BUTTON_PRIMARY} rounded-lg px-8 py-2`}
           >
             {confirmLabel}
           </button>
-        </div>
-      </div>
-    </div>
+        </>
+      }
+    />
   );
 }

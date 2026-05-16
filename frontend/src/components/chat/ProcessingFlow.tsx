@@ -33,11 +33,11 @@ function ProcessingFlow({ agentStepCount, isActive, defaultExpanded, hasError, t
   }, [isActive]);
 
   return (
-    <div className="border border-border dark:border-border-dark rounded-card overflow-hidden">
-      {/* Header */}
+    <div>
+      {/* Header row — inline disclosure style, no outer card chrome */}
       <button
         onClick={() => setExpanded(!expanded)}
-        className="w-full flex items-center gap-2 px-3 py-2 text-xs transition-colors hover:bg-bg dark:hover:bg-bg-dark cursor-pointer"
+        className="w-full flex items-center gap-2 py-1.5 px-2 text-xs transition-colors rounded-md hover:bg-surface/60 dark:hover:bg-panel-accent-dark/60 cursor-pointer"
       >
         {/* Chevron */}
         <svg
@@ -85,11 +85,11 @@ function ProcessingFlow({ agentStepCount, isActive, defaultExpanded, hasError, t
         </span>
       </button>
 
-      {/* Body */}
+      {/* Body — agent segment list, connected by a vertical rail under the header chevron */}
       {expanded && (
-        <div className="relative border-t border-border dark:border-border-dark px-3 py-3">
-          {/* Vertical connector line — aligned with AgentSegmentBlock chevron center */}
-          <div className="absolute left-[31px] top-5 bottom-5 w-px bg-border dark:bg-border-dark" />
+        <div className="relative pl-6 pt-1 pb-2">
+          {/* Rail aligned with the header chevron's horizontal center (chevron at px-2 = x:8-20, center 14) */}
+          <div className="absolute left-[13px] top-0 bottom-0 w-px bg-border dark:bg-border-dark" />
           <div className="relative space-y-2">
             {children}
           </div>

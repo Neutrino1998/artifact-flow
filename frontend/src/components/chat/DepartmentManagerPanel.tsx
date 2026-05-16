@@ -8,6 +8,7 @@ import { useUIStore } from '@/stores/uiStore';
 import DepartmentTreeView from '@/components/chat/DepartmentTreeView';
 import DepartmentDetailForm from '@/components/forms/DepartmentDetailForm';
 import CreateDepartmentForm from '@/components/forms/CreateDepartmentForm';
+import PanelShell from '@/components/layout/PanelShell';
 
 type InnerView =
   | { type: 'tree' }
@@ -53,7 +54,7 @@ export default function DepartmentManagerPanel() {
   }, [bumpListVersion, reloadTree]);
 
   const renderHeader = (): React.ReactNode => (
-    <div className="px-6 pt-5 pb-3 border-b border-border dark:border-border-dark flex items-center justify-between gap-3">
+    <div className="flex items-center justify-between gap-3">
       <div>
         <div className="text-base font-semibold text-text-primary dark:text-text-primary-dark">
           部门管理
@@ -111,9 +112,7 @@ export default function DepartmentManagerPanel() {
 
   // === Inner view: tree ===
   return (
-    <div className="flex-1 flex flex-col min-h-0 bg-chat dark:bg-chat-dark">
-      {renderHeader()}
-
+    <PanelShell header={renderHeader()}>
       <div className="px-4 pt-4">
         <button
           onClick={() => setInnerView({ type: 'create', parentId: null })}
@@ -143,6 +142,6 @@ export default function DepartmentManagerPanel() {
           />
         )}
       </div>
-    </div>
+    </PanelShell>
   );
 }

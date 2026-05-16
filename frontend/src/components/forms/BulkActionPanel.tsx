@@ -4,6 +4,7 @@ import { useState, useCallback, useEffect } from 'react';
 import * as api from '@/lib/api';
 import { ApiError } from '@/lib/api';
 import { useUIStore } from '@/stores/uiStore';
+import { BUTTON_PRIMARY, BUTTON_SECONDARY } from '@/lib/styles';
 import DepartmentCascader from '@/components/forms/DepartmentCascader';
 import DangerConfirmModal from '@/components/layout/DangerConfirmModal';
 import type { BulkActionResponse, BulkImpactResponse } from '@/types';
@@ -159,7 +160,7 @@ export default function BulkActionPanel() {
             <button
               onClick={() => runSimpleAction('enable')}
               disabled={empty || submitting}
-              className="w-full px-4 py-2.5 rounded-lg border border-border dark:border-border-dark text-text-primary dark:text-text-primary-dark hover:bg-bg dark:hover:bg-bg-dark disabled:opacity-40 disabled:cursor-not-allowed transition-colors text-left"
+              className={`${BUTTON_SECONDARY} w-full rounded-lg px-4 py-2.5 text-left`}
             >
               <div className="font-medium">启用</div>
               <div className="text-xs text-text-tertiary dark:text-text-tertiary-dark">将选中用户设为活跃</div>
@@ -167,7 +168,7 @@ export default function BulkActionPanel() {
             <button
               onClick={() => runSimpleAction('disable')}
               disabled={empty || submitting}
-              className="w-full px-4 py-2.5 rounded-lg border border-border dark:border-border-dark text-text-primary dark:text-text-primary-dark hover:bg-bg dark:hover:bg-bg-dark disabled:opacity-40 disabled:cursor-not-allowed transition-colors text-left"
+              className={`${BUTTON_SECONDARY} w-full rounded-lg px-4 py-2.5 text-left`}
             >
               <div className="font-medium">禁用</div>
               <div className="text-xs text-text-tertiary dark:text-text-tertiary-dark">禁用后用户无法登录；已在跑的 engine 不中断</div>
@@ -175,7 +176,7 @@ export default function BulkActionPanel() {
             <button
               onClick={() => { setMode('set-department'); setPendingDeptId(null); }}
               disabled={empty || submitting}
-              className="w-full px-4 py-2.5 rounded-lg border border-border dark:border-border-dark text-text-primary dark:text-text-primary-dark hover:bg-bg dark:hover:bg-bg-dark disabled:opacity-40 disabled:cursor-not-allowed transition-colors text-left"
+              className={`${BUTTON_SECONDARY} w-full rounded-lg px-4 py-2.5 text-left`}
             >
               <div className="font-medium">改部门</div>
               <div className="text-xs text-text-tertiary dark:text-text-tertiary-dark">将选中用户分配到同一部门（或清空）</div>
@@ -205,14 +206,14 @@ export default function BulkActionPanel() {
               <button
                 onClick={() => { setMode('idle'); setPendingDeptId(null); }}
                 disabled={submitting}
-                className="px-4 py-2 rounded-lg border border-border dark:border-border-dark text-text-secondary dark:text-text-secondary-dark hover:bg-bg dark:hover:bg-bg-dark disabled:opacity-40 transition-colors"
+                className={`${BUTTON_SECONDARY} rounded-lg px-4 py-2`}
               >
                 取消
               </button>
               <button
                 onClick={handleSetDepartment}
                 disabled={submitting}
-                className="flex-1 px-4 py-2 rounded-lg text-white bg-accent hover:bg-accent/80 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                className={`${BUTTON_PRIMARY} flex-1 rounded-lg px-4 py-2`}
               >
                 {submitting ? '处理中...' : pendingDeptId === null ? '清空部门' : '应用'}
               </button>

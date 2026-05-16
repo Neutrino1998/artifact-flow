@@ -57,13 +57,23 @@ export function extractBranchPath(
   const roots = Array.from(nodeMap.values()).filter((n) => !n.parent_id);
   if (roots.length === 0) return [];
 
-  // If we have an active branch, find it and trace back to root
+  // If we have an active branch, trace back to root, then continue forward
+  // through last-child so descendants stay visible. Without the forward walk,
+  // selecting an interior node (e.g. switching back to a reran message that
+  // already has a following turn) would drop everything after it from the
+  // rendered path. `Conversation.active_branch` is contractually a leaf, but
+  // a branch-navigator click can hand us an interior node — resolve it here.
   if (activeBranch && nodeMap.has(activeBranch)) {
     const targetPath: MessageNode[] = [];
     let node: MessageNode | undefined = nodeMap.get(activeBranch);
     while (node) {
       targetPath.unshift(node);
       node = node.parent_id ? nodeMap.get(node.parent_id) : undefined;
+    }
+    let leaf: MessageNode = targetPath[targetPath.length - 1];
+    while (leaf.childNodes.length > 0) {
+      leaf = leaf.childNodes[leaf.childNodes.length - 1];
+      targetPath.push(leaf);
     }
     return targetPath;
   }

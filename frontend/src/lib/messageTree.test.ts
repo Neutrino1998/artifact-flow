@@ -79,6 +79,49 @@ describe('extractBranchPath', () => {
     expect(path.map(n => n.id)).toEqual(['a', 'b']);
   });
 
+  test('activeBranch is interior node → resolves forward to deepest leaf', () => {
+    // Tree:
+    //   a
+    //   └── b
+    //       └── c
+    // Selecting b (interior) must still surface c.
+    const map = buildMessageTree([msg('a'), msg('b', 'a'), msg('c', 'b')]);
+    const path = extractBranchPath(map, 'b');
+    expect(path.map(n => n.id)).toEqual(['a', 'b', 'c']);
+  });
+
+  test('activeBranch is reran sibling with descendants → keeps following turn', () => {
+    // Tree (B reran → B2; C followed the original B):
+    //   a
+    //   ├── b
+    //   │   └── c
+    //   └── b2
+    const map = buildMessageTree([
+      msg('a'),
+      msg('b', 'a'),
+      msg('c', 'b'),
+      msg('b2', 'a'),
+    ]);
+    expect(extractBranchPath(map, 'b').map(n => n.id)).toEqual(['a', 'b', 'c']);
+    expect(extractBranchPath(map, 'b2').map(n => n.id)).toEqual(['a', 'b2']);
+  });
+
+  test('interior activeBranch with branched descendants → follows last child', () => {
+    // Tree:
+    //   a  ← selected
+    //   └── b
+    //       ├── c1
+    //       └── c2
+    const map = buildMessageTree([
+      msg('a'),
+      msg('b', 'a'),
+      msg('c1', 'b'),
+      msg('c2', 'b'),
+    ]);
+    const path = extractBranchPath(map, 'a');
+    expect(path.map(n => n.id)).toEqual(['a', 'b', 'c2']);
+  });
+
   test('no activeBranch + branched tree → follows last-child-of-last-root', () => {
     // Tree:
     //   a

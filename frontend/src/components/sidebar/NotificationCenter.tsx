@@ -15,18 +15,18 @@ const POLL_INTERVAL_MS = 60_000;
 
 const SEVERITY_DOT_CLASS: Record<Severity, string> = {
   info: 'bg-accent',
-  warn: 'bg-status-warning',
+  warn: 'bg-accent',
   critical: 'bg-status-error',
 };
 
 const SEVERITY_TEXT_CLASS: Record<Severity, string> = {
-  info: 'text-accent',
+  info: 'text-text-primary dark:text-text-primary-dark',
   warn: 'text-status-warning',
   critical: 'text-status-error',
 };
 
 const SEVERITY_BG_TINT: Record<Severity, string> = {
-  info: 'bg-accent/10',
+  info: 'bg-panel-accent dark:bg-surface-dark',
   warn: 'bg-status-warning/10',
   critical: 'bg-status-error/10',
 };
@@ -87,7 +87,7 @@ export default function NotificationCenter({ collapsed }: Props) {
       <>
         <button
           onClick={() => setOpen(true)}
-          className="relative w-10 h-10 flex items-center justify-center rounded-lg text-text-secondary dark:text-text-secondary-dark hover:bg-bg dark:hover:bg-bg-dark transition-colors"
+          className="relative w-10 h-10 flex items-center justify-center rounded-lg text-text-secondary dark:text-text-secondary-dark hover:bg-chat/60 dark:hover:bg-panel-accent-dark/60 transition-colors"
           title={`${items.length} 条通知`}
           aria-label="查看通知"
         >
@@ -104,9 +104,9 @@ export default function NotificationCenter({ collapsed }: Props) {
     <>
       <button
         onClick={() => setOpen(true)}
-        className="w-full flex items-center gap-3 px-3 py-2.5 bg-chat dark:bg-panel-accent-dark rounded-card hover:bg-chat/70 dark:hover:bg-surface-dark transition-colors text-left"
+        className="w-full flex items-center gap-3 px-3 py-2.5 bg-chat dark:bg-panel-accent-dark rounded-card hover:bg-surface dark:hover:bg-[#141414] transition-colors text-left"
       >
-        <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${SEVERITY_BG_TINT[top.severity]}`}>
+        <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ring-1 ring-border/60 dark:ring-border-dark/60 ${SEVERITY_BG_TINT[top.severity]}`}>
           <BellIcon className={SEVERITY_TEXT_CLASS[top.severity]} />
         </div>
         <div className="min-w-0 flex-1">
@@ -162,7 +162,7 @@ function NotificationModal({ items, onClose, onDismiss }: ModalProps) {
               key={n.id}
               className={`rounded-card p-4 ${SEVERITY_BG_TINT[n.severity]} border border-border/40 dark:border-border-dark/40`}
             >
-              <div className="flex items-start justify-between gap-3 mb-2">
+              <div className="flex items-start justify-between gap-3 pb-2 mb-3 border-b border-border dark:border-border-dark">
                 <div className="flex items-center gap-2">
                   <span className={`w-2 h-2 rounded-full ${SEVERITY_DOT_CLASS[n.severity]}`} />
                   <h3 className="font-semibold text-text-primary dark:text-text-primary-dark">

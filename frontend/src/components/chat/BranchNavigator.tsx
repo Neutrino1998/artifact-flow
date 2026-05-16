@@ -34,7 +34,7 @@ function BranchNavigator({
       <button
         onClick={() => navigate(-1)}
         disabled={currentIndex === 0}
-        className="p-0.5 rounded hover:bg-bg dark:hover:bg-bg-dark disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+        className="p-0.5 rounded hover:bg-surface dark:hover:bg-bg-dark disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
         aria-label="Previous branch"
         title="上一个分支"
       >
@@ -48,7 +48,7 @@ function BranchNavigator({
       <button
         onClick={() => navigate(1)}
         disabled={currentIndex === totalSiblings - 1}
-        className="p-0.5 rounded hover:bg-bg dark:hover:bg-bg-dark disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+        className="p-0.5 rounded hover:bg-surface dark:hover:bg-bg-dark disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
         aria-label="Next branch"
         title="下一个分支"
       >
