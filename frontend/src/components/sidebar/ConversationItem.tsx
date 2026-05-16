@@ -4,6 +4,7 @@ import { memo, useState, useRef, useEffect } from 'react';
 import type { ConversationSummary } from '@/types';
 import { deleteConversation } from '@/lib/api';
 import { useConversationStore } from '@/stores/conversationStore';
+import { useCopyFeedback } from '@/hooks/useCopyFeedback';
 import ConfirmModal from '@/components/layout/ConfirmModal';
 
 interface ConversationItemProps {
@@ -16,7 +17,7 @@ function ConversationItem({ conversation, isActive, onSelect }: ConversationItem
   const [showMenu, setShowMenu] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const [copyFeedback, setCopyFeedback] = useState(false);
+  const { copied: copyFeedback, copy } = useCopyFeedback();
   const removeConversation = useConversationStore((s) => s.removeConversation);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -32,13 +33,7 @@ function ConversationItem({ conversation, isActive, onSelect }: ConversationItem
   };
 
   const handleCopyId = async () => {
-    try {
-      await navigator.clipboard.writeText(conversation.id);
-      setCopyFeedback(true);
-      setTimeout(() => setCopyFeedback(false), 1500);
-    } catch {
-      // fallback: do nothing
-    }
+    await copy(conversation.id);
     setMenuOpen(false);
   };
 

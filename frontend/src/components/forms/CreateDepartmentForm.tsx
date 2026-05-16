@@ -3,6 +3,12 @@
 import { useState } from 'react';
 import * as api from '@/lib/api';
 import { ApiError } from '@/lib/api';
+import {
+  BUTTON_PRIMARY,
+  BUTTON_SECONDARY,
+  INPUT_ON_PANEL,
+  LABEL_CLASS,
+} from '@/lib/styles';
 import DepartmentCascader from '@/components/forms/DepartmentCascader';
 
 interface CreateDepartmentFormProps {
@@ -69,7 +75,7 @@ export default function CreateDepartmentForm({
         className="flex-1 overflow-y-auto px-6 py-5 space-y-4"
       >
         <div>
-          <label className="block text-sm text-text-secondary dark:text-text-secondary-dark mb-1">
+          <label className={LABEL_CLASS}>
             名称 <span className="text-status-error">*</span>
           </label>
           <input
@@ -79,12 +85,12 @@ export default function CreateDepartmentForm({
             disabled={submitting}
             autoFocus
             placeholder="部门名称"
-            className="w-full px-3 py-2 rounded-lg bg-surface dark:bg-surface-dark border border-border dark:border-border-dark text-text-primary dark:text-text-primary-dark placeholder:text-text-tertiary dark:placeholder:text-text-tertiary-dark focus:outline-none focus:border-accent disabled:opacity-40"
+            className={INPUT_ON_PANEL}
           />
         </div>
 
         <div>
-          <label className="block text-sm text-text-secondary dark:text-text-secondary-dark mb-1">
+          <label className={LABEL_CLASS}>
             父部门
             <span className="ml-2 text-xs text-text-tertiary dark:text-text-tertiary-dark">
               （不选 = 顶级部门）
@@ -108,7 +114,7 @@ export default function CreateDepartmentForm({
           onClick={onBack}
           disabled={submitting}
           type="button"
-          className="px-6 py-2 rounded-lg border border-border dark:border-border-dark text-text-primary dark:text-text-primary-dark hover:bg-bg dark:hover:bg-bg-dark disabled:opacity-40 transition-colors"
+          className={`${BUTTON_SECONDARY} rounded-lg px-6 py-2`}
         >
           取消
         </button>
@@ -116,7 +122,7 @@ export default function CreateDepartmentForm({
           form="create-dept-form"
           type="submit"
           disabled={!canSubmit}
-          className="px-6 py-2 rounded-lg bg-accent text-white hover:bg-accent-hover disabled:opacity-40 transition-colors"
+          className={`${BUTTON_PRIMARY} rounded-lg px-6 py-2`}
         >
           {submitting ? '创建中...' : '创建'}
         </button>

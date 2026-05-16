@@ -4,12 +4,15 @@ import { useState, useCallback, useEffect, useRef, } from 'react';
 import { useConversationStore } from '@/stores/conversationStore';
 import { useUIStore } from '@/stores/uiStore';
 import { useChat } from '@/hooks/useChat';
+import { useCopyFeedback } from '@/hooks/useCopyFeedback';
 import { useLatestOnly } from '@/hooks/useLatestOnly';
 import { listConversations, deleteConversation, bulkDeleteConversations } from '@/lib/api';
 import type { ConversationSummary } from '@/types';
+import { BUTTON_DANGER } from '@/lib/styles';
 import ConfirmModal from '@/components/layout/ConfirmModal';
 import DangerConfirmModal from '@/components/layout/DangerConfirmModal';
 import Checkbox from '@/components/forms/Checkbox';
+import PanelSearchBar from './PanelSearchBar';
 
 const PAGE_SIZE = 20;
 
@@ -154,58 +157,29 @@ export default function ConversationBrowser() {
 
   return (
     <div className="flex-1 flex flex-col min-h-0 bg-chat dark:bg-chat-dark">
-      {/* Search / selection-mode header */}
-      <div className="px-4 pt-4 pb-2">
-        <div className="max-w-3xl mx-auto">
-          <div className="bg-surface dark:bg-surface-dark border border-border dark:border-border-dark focus-within:border-accent dark:focus-within:border-accent rounded-2xl shadow-float px-4 py-3 flex items-center gap-3">
-            <svg
-              className="flex-shrink-0 text-text-tertiary dark:text-text-tertiary-dark"
-              width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5"
-            >
-              <circle cx="7" cy="7" r="5" />
-              <path d="M11 11l3.5 3.5" />
-            </svg>
-            <input
-              type="text"
-              value={query}
-              onChange={(e) => handleQueryChange(e.target.value)}
-              placeholder="搜索对话标题..."
-              autoFocus
-              disabled={selectionMode}
-              className="flex-1 bg-transparent text-text-primary dark:text-text-primary-dark placeholder:text-text-tertiary dark:placeholder:text-text-tertiary-dark outline-none disabled:opacity-50"
-            />
-            {!selectionMode && (
-              <>
-                <span className="flex-shrink-0 text-xs text-text-tertiary dark:text-text-tertiary-dark">
-                  {total} 对话
-                </span>
-                <button
-                  onClick={enterSelectionMode}
-                  className="flex-shrink-0 px-2.5 py-1 text-xs rounded-md text-text-secondary dark:text-text-secondary-dark hover:text-text-primary dark:hover:text-text-primary-dark hover:bg-bg dark:hover:bg-bg-dark transition-colors"
-                  title="批量管理"
-                >
-                  批量管理
-                </button>
-              </>
-            )}
-            {selectionMode && (
-              <span className="flex-shrink-0 text-xs text-accent">
-                选择模式
-              </span>
-            )}
+      <PanelSearchBar
+        value={query}
+        onChange={handleQueryChange}
+        placeholder="搜索对话标题..."
+        disabled={selectionMode}
+        countLabel={selectionMode ? null : `${total} 对话`}
+        rightSlot={
+          selectionMode ? (
+            <span className="flex-shrink-0 text-xs text-accent">
+              选择模式
+            </span>
+          ) : (
             <button
-              onClick={handleClose}
-              className="flex-shrink-0 p-1 rounded-lg text-text-tertiary dark:text-text-tertiary-dark hover:text-text-secondary dark:hover:text-text-secondary-dark transition-colors"
-              aria-label="关闭"
-              title="关闭"
+              onClick={enterSelectionMode}
+              className="flex-shrink-0 px-2.5 py-1 text-xs rounded-md text-text-secondary dark:text-text-secondary-dark hover:text-text-primary dark:hover:text-text-primary-dark hover:bg-bg dark:hover:bg-bg-dark transition-colors"
+              title="批量管理"
             >
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
-                <path d="M4 4l8 8M12 4l-8 8" />
-              </svg>
+              批量管理
             </button>
-          </div>
-        </div>
-      </div>
+          )
+        }
+        onClose={handleClose}
+      />
 
       {/* List */}
       <div className="flex-1 overflow-y-auto px-4">
@@ -270,7 +244,7 @@ export default function ConversationBrowser() {
             <button
               onClick={() => setConfirmBulkDelete(true)}
               disabled={selectedCount === 0}
-              className="px-4 py-1.5 text-xs rounded-md text-white bg-status-error hover:bg-status-error/80 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              className={`${BUTTON_DANGER} rounded-md px-4 py-1.5 text-xs`}
             >
               删除 ({selectedCount})
             </button>
@@ -311,19 +285,13 @@ function BrowserItem({
   const [showMenu, setShowMenu] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const [copyFeedback, setCopyFeedback] = useState(false);
+  const { copied: copyFeedback, copy } = useCopyFeedback();
   const menuRef = useRef<HTMLDivElement>(null);
   const title = conversation.title || 'Untitled';
   const date = new Date(conversation.updated_at).toLocaleDateString();
 
   const handleCopyId = async () => {
-    try {
-      await navigator.clipboard.writeText(conversation.id);
-      setCopyFeedback(true);
-      setTimeout(() => setCopyFeedback(false), 1500);
-    } catch {
-      // fallback: do nothing
-    }
+    await copy(conversation.id);
     setMenuOpen(false);
   };
 

@@ -4,6 +4,12 @@ import { useState } from 'react';
 import * as api from '@/lib/api';
 import { ApiError } from '@/lib/api';
 import { useUIStore } from '@/stores/uiStore';
+import {
+  BUTTON_PRIMARY,
+  BUTTON_SECONDARY,
+  INPUT_ON_PANEL,
+  LABEL_CLASS,
+} from '@/lib/styles';
 import DepartmentCascader from '@/components/forms/DepartmentCascader';
 
 const ROLE_OPTIONS = [
@@ -85,7 +91,7 @@ export default function CreateUserForm() {
         className="flex-1 overflow-y-auto px-6 py-5 space-y-4"
       >
         <div>
-          <label className="block text-sm text-text-secondary dark:text-text-secondary-dark mb-1">
+          <label className={LABEL_CLASS}>
             用户名 <span className="text-status-error">*</span>
           </label>
           <input
@@ -94,12 +100,12 @@ export default function CreateUserForm() {
             onChange={(e) => setUsername(e.target.value)}
             disabled={submitting}
             autoFocus
-            className="w-full px-3 py-2 rounded-lg bg-surface dark:bg-surface-dark border border-border dark:border-border-dark text-text-primary dark:text-text-primary-dark placeholder:text-text-tertiary dark:placeholder:text-text-tertiary-dark focus:outline-none focus:border-accent disabled:opacity-40 font-mono"
+            className={`${INPUT_ON_PANEL} font-mono`}
           />
         </div>
 
         <div>
-          <label className="block text-sm text-text-secondary dark:text-text-secondary-dark mb-1">
+          <label className={LABEL_CLASS}>
             密码 <span className="text-status-error">*</span>
           </label>
           <input
@@ -108,12 +114,12 @@ export default function CreateUserForm() {
             onChange={(e) => setPassword(e.target.value)}
             disabled={submitting}
             placeholder="至少 4 个字符"
-            className="w-full px-3 py-2 rounded-lg bg-surface dark:bg-surface-dark border border-border dark:border-border-dark text-text-primary dark:text-text-primary-dark placeholder:text-text-tertiary dark:placeholder:text-text-tertiary-dark focus:outline-none focus:border-accent disabled:opacity-40"
+            className={INPUT_ON_PANEL}
           />
         </div>
 
         <div>
-          <label className="block text-sm text-text-secondary dark:text-text-secondary-dark mb-1">
+          <label className={LABEL_CLASS}>
             显示名（可选）
           </label>
           <input
@@ -122,12 +128,12 @@ export default function CreateUserForm() {
             onChange={(e) => setDisplayName(e.target.value)}
             disabled={submitting}
             placeholder={username || '默认使用用户名'}
-            className="w-full px-3 py-2 rounded-lg bg-surface dark:bg-surface-dark border border-border dark:border-border-dark text-text-primary dark:text-text-primary-dark placeholder:text-text-tertiary dark:placeholder:text-text-tertiary-dark focus:outline-none focus:border-accent disabled:opacity-40"
+            className={INPUT_ON_PANEL}
           />
         </div>
 
         <div>
-          <label className="block text-sm text-text-secondary dark:text-text-secondary-dark mb-1">
+          <label className={LABEL_CLASS}>
             角色
           </label>
           <div className="relative">
@@ -135,7 +141,7 @@ export default function CreateUserForm() {
               value={role}
               onChange={(e) => setRole(e.target.value as 'user' | 'admin')}
               disabled={submitting}
-              className="w-full appearance-none px-3 py-2 pr-9 rounded-lg bg-surface dark:bg-surface-dark border border-border dark:border-border-dark text-text-primary dark:text-text-primary-dark focus:outline-none focus:border-accent disabled:opacity-40"
+              className={`${INPUT_ON_PANEL} appearance-none pr-9`}
             >
               {ROLE_OPTIONS.map((opt) => (
                 <option key={opt.value} value={opt.value}>{opt.label}</option>
@@ -151,7 +157,7 @@ export default function CreateUserForm() {
         </div>
 
         <div>
-          <label className="block text-sm text-text-secondary dark:text-text-secondary-dark mb-1">
+          <label className={LABEL_CLASS}>
             部门（可选）
           </label>
           <DepartmentCascader
@@ -173,7 +179,7 @@ export default function CreateUserForm() {
           onClick={() => setRightView({ type: 'empty' })}
           disabled={submitting}
           type="button"
-          className="px-6 py-2 rounded-lg border border-border dark:border-border-dark text-text-primary dark:text-text-primary-dark hover:bg-bg dark:hover:bg-bg-dark disabled:opacity-40 transition-colors"
+          className={`${BUTTON_SECONDARY} rounded-lg px-6 py-2`}
         >
           取消
         </button>
@@ -181,7 +187,7 @@ export default function CreateUserForm() {
           form="create-user-form"
           type="submit"
           disabled={!canSubmit}
-          className="px-6 py-2 rounded-lg bg-accent text-white hover:bg-accent-hover disabled:opacity-40 transition-colors"
+          className={`${BUTTON_PRIMARY} rounded-lg px-6 py-2`}
         >
           {submitting ? '创建中...' : '创建'}
         </button>

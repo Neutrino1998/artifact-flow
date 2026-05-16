@@ -4,6 +4,7 @@ import { useCallback, useRef, useState } from 'react';
 import * as api from '@/lib/api';
 import { ApiError } from '@/lib/api';
 import { useUIStore } from '@/stores/uiStore';
+import { BUTTON_PRIMARY, BUTTON_SECONDARY } from '@/lib/styles';
 import type { BulkImportResponse, BulkImportFailedRow } from '@/types';
 
 type Stage =
@@ -216,7 +217,7 @@ export default function BulkImportForm() {
             <button
               onClick={close}
               type="button"
-              className="px-6 py-2 rounded-lg border border-border dark:border-border-dark text-text-primary dark:text-text-primary-dark hover:bg-bg dark:hover:bg-bg-dark transition-colors"
+              className={`${BUTTON_SECONDARY} rounded-lg px-6 py-2`}
             >
               取消
             </button>
@@ -224,7 +225,7 @@ export default function BulkImportForm() {
               onClick={submit}
               disabled={!file}
               type="button"
-              className="px-6 py-2 rounded-lg bg-accent text-white hover:bg-accent-hover disabled:opacity-40 transition-colors"
+              className={`${BUTTON_PRIMARY} rounded-lg px-6 py-2`}
             >
               开始导入
             </button>
@@ -234,7 +235,7 @@ export default function BulkImportForm() {
           <button
             disabled
             type="button"
-            className="px-6 py-2 rounded-lg bg-accent text-white opacity-60"
+            className={`${BUTTON_PRIMARY} rounded-lg px-6 py-2 opacity-60`}
           >
             导入中...
           </button>
@@ -244,14 +245,14 @@ export default function BulkImportForm() {
             <button
               onClick={reset}
               type="button"
-              className="px-6 py-2 rounded-lg border border-border dark:border-border-dark text-text-primary dark:text-text-primary-dark hover:bg-bg dark:hover:bg-bg-dark transition-colors"
+              className={`${BUTTON_SECONDARY} rounded-lg px-6 py-2`}
             >
               再导入一批
             </button>
             <button
               onClick={() => setRightView({ type: 'empty' })}
               type="button"
-              className="px-6 py-2 rounded-lg bg-accent text-white hover:bg-accent-hover transition-colors"
+              className={`${BUTTON_PRIMARY} rounded-lg px-6 py-2`}
             >
               完成
             </button>

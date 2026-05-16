@@ -4,6 +4,7 @@ import { useState, useCallback, useRef, useEffect } from 'react';
 import { useArtifactStore } from '@/stores/artifactStore';
 import { useStreamStore } from '@/stores/streamStore';
 import { useArtifacts } from '@/hooks/useArtifacts';
+import { useCopyFeedback } from '@/hooks/useCopyFeedback';
 import { exportArtifact } from '@/lib/api';
 
 function getFileExtension(contentType: string): string {
@@ -29,7 +30,7 @@ export default function ArtifactToolbar() {
   const setCurrent = useArtifactStore((s) => s.setCurrent);
   const isStreaming = useStreamStore((s) => s.isStreaming);
   const { selectVersion, selectArtifact } = useArtifacts();
-  const [copied, setCopied] = useState(false);
+  const { copied, copy } = useCopyFeedback();
   const [showDownloadMenu, setShowDownloadMenu] = useState(false);
   const downloadMenuRef = useRef<HTMLDivElement>(null);
 
@@ -45,12 +46,9 @@ export default function ArtifactToolbar() {
     return () => document.removeEventListener('mousedown', handler);
   }, [showDownloadMenu]);
 
-  const handleCopy = useCallback(async () => {
-    const content = selectedVersion?.content ?? current?.content ?? '';
-    await navigator.clipboard.writeText(content);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
-  }, [current, selectedVersion]);
+  const handleCopy = useCallback(() => {
+    copy(selectedVersion?.content ?? current?.content ?? '');
+  }, [current, selectedVersion, copy]);
 
   const handleDownload = useCallback(() => {
     if (!current) return;

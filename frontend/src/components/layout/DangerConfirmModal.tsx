@@ -1,7 +1,9 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { ApiError } from '@/lib/api';
+import { BUTTON_DANGER, BUTTON_SECONDARY } from '@/lib/styles';
+import DialogShell from './DialogShell';
 
 interface DangerConfirmModalProps {
   title: string;
@@ -33,15 +35,6 @@ export default function DangerConfirmModal({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // ESC 关闭（提交中除外）
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && !submitting) onCancel();
-    };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, [onCancel, submitting]);
-
   const handleConfirm = async () => {
     if (!acknowledged || submitting) return;
     setSubmitting(true);
@@ -63,60 +56,53 @@ export default function DangerConfirmModal({
   };
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/30"
-      onClick={() => !submitting && onCancel()}
-    >
-      <div
-        className="bg-surface dark:bg-surface-dark border border-border dark:border-border-dark rounded-card shadow-modal max-w-md w-full mx-4 p-6"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <h2 className="text-lg font-semibold text-text-primary dark:text-text-primary-dark mb-2">
-          {title}
-        </h2>
-        <p className="text-text-secondary dark:text-text-secondary-dark whitespace-pre-line mb-6">
-          {message}
-        </p>
-
-        <label className="flex items-start gap-3 mb-4 cursor-pointer select-none group">
-          <input
-            type="checkbox"
-            checked={acknowledged}
-            onChange={(e) => setAcknowledged(e.target.checked)}
-            disabled={submitting}
-            className="mt-0.5 w-4 h-4 accent-status-error cursor-pointer disabled:cursor-not-allowed"
-          />
-          <span className="text-sm text-text-secondary dark:text-text-secondary-dark group-hover:text-text-primary dark:group-hover:text-text-primary-dark transition-colors">
-            {acknowledgeLabel}
-          </span>
-        </label>
-
-        {error && (
-          <div
-            role="alert"
-            className="mb-4 px-3 py-2 text-sm text-status-error bg-status-error/10 border border-status-error/30 rounded-lg"
-          >
-            {error}
-          </div>
-        )}
-
-        <div className="flex justify-end gap-3">
+    <DialogShell
+      title={title}
+      description={<span className="whitespace-pre-line">{message}</span>}
+      size="md"
+      onClose={onCancel}
+      closeOnBackdrop={!submitting}
+      closeOnEscape={!submitting}
+      footer={
+        <>
           <button
             onClick={onCancel}
             disabled={submitting}
-            className="px-8 py-2 rounded-lg border border-border dark:border-border-dark text-text-primary dark:text-text-primary-dark hover:bg-bg dark:hover:bg-bg-dark disabled:opacity-40 transition-colors"
+            className={`${BUTTON_SECONDARY} rounded-lg px-8 py-2`}
           >
             {cancelLabel}
           </button>
           <button
             onClick={handleConfirm}
             disabled={!acknowledged || submitting}
-            className="px-8 py-2 rounded-lg text-white bg-status-error hover:bg-status-error/80 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            className={`${BUTTON_DANGER} rounded-lg px-8 py-2`}
           >
             {submitting ? '处理中...' : confirmLabel}
           </button>
+        </>
+      }
+    >
+      <label className="flex items-start gap-3 mb-4 cursor-pointer select-none group">
+        <input
+          type="checkbox"
+          checked={acknowledged}
+          onChange={(e) => setAcknowledged(e.target.checked)}
+          disabled={submitting}
+          className="mt-0.5 w-4 h-4 accent-status-error cursor-pointer disabled:cursor-not-allowed"
+        />
+        <span className="text-sm text-text-secondary dark:text-text-secondary-dark group-hover:text-text-primary dark:group-hover:text-text-primary-dark transition-colors">
+          {acknowledgeLabel}
+        </span>
+      </label>
+
+      {error && (
+        <div
+          role="alert"
+          className="mb-4 px-3 py-2 text-sm text-status-error bg-status-error/10 border border-status-error/30 rounded-lg"
+        >
+          {error}
         </div>
-      </div>
-    </div>
+      )}
+    </DialogShell>
   );
 }

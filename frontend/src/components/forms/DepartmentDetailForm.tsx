@@ -3,6 +3,13 @@
 import { useCallback, useEffect, useState } from 'react';
 import * as api from '@/lib/api';
 import { ApiError } from '@/lib/api';
+import {
+  BUTTON_DANGER_OUTLINE,
+  BUTTON_PRIMARY,
+  BUTTON_SECONDARY,
+  INPUT_ON_PANEL,
+  LABEL_CLASS,
+} from '@/lib/styles';
 import type { DepartmentResponse } from '@/types';
 import DangerConfirmModal from '@/components/layout/DangerConfirmModal';
 import DepartmentCascader from '@/components/forms/DepartmentCascader';
@@ -100,7 +107,7 @@ export default function DepartmentDetailForm({
     return (
       <div className="flex-1 flex flex-col gap-3 items-center justify-center bg-chat dark:bg-chat-dark p-6">
         <div className="text-sm text-status-error">{loadError ?? '部门不存在'}</div>
-        <button onClick={load} className="px-4 py-1.5 rounded-lg border border-border dark:border-border-dark text-text-secondary dark:text-text-secondary-dark hover:bg-bg dark:hover:bg-bg-dark transition-colors">
+        <button onClick={load} className={`${BUTTON_SECONDARY} rounded-lg px-4 py-1.5`}>
           重试
         </button>
       </div>
@@ -141,7 +148,7 @@ export default function DepartmentDetailForm({
         </div>
 
         <div>
-          <label className="block text-sm text-text-secondary dark:text-text-secondary-dark mb-1">
+          <label className={LABEL_CLASS}>
             名称
           </label>
           <input
@@ -149,7 +156,7 @@ export default function DepartmentDetailForm({
             value={name}
             onChange={(e) => setName(e.target.value)}
             disabled={saving}
-            className="w-full px-3 py-2 rounded-lg bg-surface dark:bg-surface-dark border border-border dark:border-border-dark text-text-primary dark:text-text-primary-dark focus:outline-none focus:border-accent disabled:opacity-40"
+            className={INPUT_ON_PANEL}
           />
           {nameInvalid && (
             <p className="text-status-error text-xs mt-1">名称不能为空</p>
@@ -157,7 +164,7 @@ export default function DepartmentDetailForm({
         </div>
 
         <div>
-          <label className="block text-sm text-text-secondary dark:text-text-secondary-dark mb-1">
+          <label className={LABEL_CLASS}>
             父部门
             <span className="ml-2 text-xs text-text-tertiary dark:text-text-tertiary-dark">
               （不选 = 顶级部门）
@@ -183,14 +190,14 @@ export default function DepartmentDetailForm({
           onClick={() => setConfirmDelete(true)}
           disabled={saving || !canDelete}
           title={deleteDisabledReason || '删除部门'}
-          className="px-5 py-2 rounded-lg border border-status-error text-status-error hover:bg-status-error/10 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          className={`${BUTTON_DANGER_OUTLINE} rounded-lg px-5 py-2`}
         >
           删除
         </button>
         <button
           onClick={handleSave}
           disabled={!dirty || saving || nameInvalid}
-          className="px-6 py-2 rounded-lg bg-accent text-white hover:bg-accent-hover disabled:opacity-40 transition-colors"
+          className={`${BUTTON_PRIMARY} rounded-lg px-6 py-2`}
         >
           {saving ? '保存中...' : '保存'}
         </button>

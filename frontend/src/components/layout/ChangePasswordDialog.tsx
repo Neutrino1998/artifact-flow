@@ -4,6 +4,13 @@ import { useState } from 'react';
 import * as api from '@/lib/api';
 import { ApiError } from '@/lib/api';
 import { useAuthStore } from '@/stores/authStore';
+import {
+  BUTTON_PRIMARY,
+  BUTTON_SECONDARY,
+  INPUT_ON_SURFACE,
+  LABEL_CLASS,
+} from '@/lib/styles';
+import DialogShell from './DialogShell';
 
 interface ChangePasswordDialogProps {
   onClose: () => void;
@@ -58,92 +65,83 @@ export default function ChangePasswordDialog({ onClose }: ChangePasswordDialogPr
     confirmPassword.length > 0 && newPassword !== confirmPassword;
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/30"
-      onClick={submitting ? undefined : onClose}
+    <DialogShell
+      title="修改密码"
+      description="修改后所有已登录的设备（包括当前页）都会被强制重新登录。"
+      onClose={onClose}
+      closeOnBackdrop={!submitting}
+      closeOnEscape={!submitting}
     >
-      <div
-        className="bg-surface dark:bg-surface-dark border border-border dark:border-border-dark rounded-card shadow-modal max-w-sm w-full mx-4 p-6"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <h2 className="text-lg font-semibold text-text-primary dark:text-text-primary-dark mb-1">
-          修改密码
-        </h2>
-        <p className="text-text-secondary dark:text-text-secondary-dark mb-6 text-sm">
-          修改后所有已登录的设备（包括当前页）都会被强制重新登录。
-        </p>
-
-        {success ? (
-          <div className="py-4 text-center text-status-success">
-            密码已更新，即将退出登录...
+      {success ? (
+        <div className="py-4 text-center text-status-success">
+          密码已更新，即将退出登录...
+        </div>
+      ) : (
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label className={LABEL_CLASS}>
+              当前密码
+            </label>
+            <input
+              type="password"
+              value={currentPassword}
+              onChange={(e) => setCurrentPassword(e.target.value)}
+              autoFocus
+              disabled={submitting}
+              className={INPUT_ON_SURFACE}
+            />
           </div>
-        ) : (
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div>
-              <label className="block text-sm text-text-secondary dark:text-text-secondary-dark mb-1">
-                当前密码
-              </label>
-              <input
-                type="password"
-                value={currentPassword}
-                onChange={(e) => setCurrentPassword(e.target.value)}
-                autoFocus
-                disabled={submitting}
-                className="w-full px-3 py-2 rounded-lg bg-bg dark:bg-bg-dark border border-border dark:border-border-dark text-text-primary dark:text-text-primary-dark focus:outline-none focus:border-accent disabled:opacity-40"
-              />
-            </div>
-            <div>
-              <label className="block text-sm text-text-secondary dark:text-text-secondary-dark mb-1">
-                新密码（至少 4 个字符）
-              </label>
-              <input
-                type="password"
-                value={newPassword}
-                onChange={(e) => setNewPassword(e.target.value)}
-                disabled={submitting}
-                className="w-full px-3 py-2 rounded-lg bg-bg dark:bg-bg-dark border border-border dark:border-border-dark text-text-primary dark:text-text-primary-dark focus:outline-none focus:border-accent disabled:opacity-40"
-              />
-            </div>
-            <div>
-              <label className="block text-sm text-text-secondary dark:text-text-secondary-dark mb-1">
-                确认新密码
-              </label>
-              <input
-                type="password"
-                value={confirmPassword}
-                onChange={(e) => setConfirmPassword(e.target.value)}
-                disabled={submitting}
-                className="w-full px-3 py-2 rounded-lg bg-bg dark:bg-bg-dark border border-border dark:border-border-dark text-text-primary dark:text-text-primary-dark focus:outline-none focus:border-accent disabled:opacity-40"
-              />
-              {newPasswordMismatch && (
-                <p className="text-status-error text-xs mt-1">两次输入的密码不一致</p>
-              )}
-            </div>
-
-            {error && (
-              <div className="text-status-error text-sm">{error}</div>
+          <div>
+            <label className={LABEL_CLASS}>
+              新密码（至少 4 个字符）
+            </label>
+            <input
+              type="password"
+              value={newPassword}
+              onChange={(e) => setNewPassword(e.target.value)}
+              disabled={submitting}
+              className={INPUT_ON_SURFACE}
+            />
+          </div>
+          <div>
+            <label className={LABEL_CLASS}>
+              确认新密码
+            </label>
+            <input
+              type="password"
+              value={confirmPassword}
+              onChange={(e) => setConfirmPassword(e.target.value)}
+              disabled={submitting}
+              className={INPUT_ON_SURFACE}
+            />
+            {newPasswordMismatch && (
+              <p className="text-status-error text-xs mt-1">两次输入的密码不一致</p>
             )}
+          </div>
 
-            <div className="flex justify-end gap-3 pt-2">
-              <button
-                type="button"
-                onClick={onClose}
-                disabled={submitting}
-                className="px-6 py-2 rounded-lg border border-border dark:border-border-dark text-text-primary dark:text-text-primary-dark hover:bg-bg dark:hover:bg-bg-dark disabled:opacity-40 transition-colors"
-              >
-                取消
-              </button>
-              <button
-                type="submit"
-                disabled={!canSubmit}
-                className="px-6 py-2 rounded-lg bg-accent text-white hover:bg-accent-hover disabled:opacity-40 transition-colors"
-              >
-                {submitting ? '修改中...' : '确认修改'}
-              </button>
-            </div>
-          </form>
-        )}
-      </div>
-    </div>
+          {error && (
+            <div className="text-status-error text-sm">{error}</div>
+          )}
+
+          <div className="flex justify-end gap-3 pt-2">
+            <button
+              type="button"
+              onClick={onClose}
+              disabled={submitting}
+              className={`${BUTTON_SECONDARY} rounded-lg px-6 py-2`}
+            >
+              取消
+            </button>
+            <button
+              type="submit"
+              disabled={!canSubmit}
+              className={`${BUTTON_PRIMARY} rounded-lg px-6 py-2`}
+            >
+              {submitting ? '修改中...' : '确认修改'}
+            </button>
+          </div>
+        </form>
+      )}
+    </DialogShell>
   );
 }
