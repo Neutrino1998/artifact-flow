@@ -57,7 +57,9 @@
 **失败路径 hint 设计**(统一回明确的下一步指引):
 - `no rare anchor`(Step 2 bail) → "old_str 太重复或文档已大幅漂移,请重新 Read 后提供更独特的上下文,或改用 `rewrite_artifact`"
 - `no window matched`(Step 4 全部超 cutoff) → 同上
-- `ambiguous`(多个等距匹配) → "存在多个等距候选,请扩展上下文使其唯一"
+- `ambiguous`(Step 4 校验后**达标窗口数 ≥ 2,不论距离差是否并列**)→ "old_str 在文档中有多个候选位置,请扩展上下文使其唯一"
+
+> **唯一性对齐 Layer 0/1**:旧 fuzzysearch 实现里"多候选时静默挑距离最近"是个跟 Layer 0/1 不一致的设计漏洞——Layer 0/1 因为精确匹配里**没有合理的挑选依据**一直坚持 `count == 1`,Layer 2 没理由更松。新实现里**任何 ≥2 个达标窗口都直接报错**,让模型显式澄清,不替它做隐式选择。这是本 PR 顺手堵掉的一个隐性 bug。
 
 **最坏成本上界**:`ANCHOR_NUM × ANCHOR_MAX_OCCURRENCES × O(len(old_str) × FUZZY_MAX_L_DIST / 64)` ≈ `3 × 20 × O(3000 × 16 / 64)` ≈ 几毫秒级,**自选常数**。
 
@@ -73,7 +75,7 @@
 - ✅ 单字符替换(测试日志里的 `枝/技` case)—— 走主路径
 - ✅ 低熵 / 表格 / 纯模板 —— 走 Step 2 bail-out,失败响亮
 - ✅ 长 `old_str`(>1500 字符)—— 验证有界
-- ✅ Ambiguity case —— 失败带 hint
+- ✅ Ambiguity case(≥2 个窗口同时达标,**不论距离差**)—— 失败带 hint(对齐 Layer 0/1 的严格唯一性)
 - ✅ 完全漂移(`old_str` 字符级散乱漂移,没有 shingle 精确出现)—— Step 2 bail(诚实 trade-off:旧 fuzzysearch 有概率给一个不可靠的"匹配",B 选择失败而不是猜)
 - ✅ Layer 1 normalized 命中(如 `Ⅳ ↔ IV`、`café` NFC/NFD)—— 返回值含 `normalized="X%"` 属性 + `<normalize_detail>` 块,跟 fuzzy 对称
 
