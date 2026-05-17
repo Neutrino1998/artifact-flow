@@ -424,38 +424,38 @@ export function getAdminConversationEvents(convId: string) {
 export function listUsers(limit = 50, offset = 0, query?: string) {
   const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
   if (query) params.set('q', query);
-  return request<UserListResponse>(`/api/v1/auth/users?${params}`);
+  return request<UserListResponse>(`/api/v1/admin/users?${params}`);
 }
 
 export function createUser(body: CreateUserRequest) {
-  return request<UserResponse>('/api/v1/auth/users', {
+  return request<UserResponse>('/api/v1/admin/users', {
     method: 'POST',
     body: JSON.stringify(body),
   });
 }
 
 export function getUser(userId: string) {
-  return request<UserResponse>(`/api/v1/auth/users/${userId}`);
+  return request<UserResponse>(`/api/v1/admin/users/${userId}`);
 }
 
 export function updateUser(userId: string, body: UpdateUserRequest) {
-  return request<UserResponse>(`/api/v1/auth/users/${userId}`, {
+  return request<UserResponse>(`/api/v1/admin/users/${userId}`, {
     method: 'PUT',
     body: JSON.stringify(body),
   });
 }
 
 export function deleteUser(userId: string) {
-  return request<void>(`/api/v1/auth/users/${userId}`, { method: 'DELETE' });
+  return request<void>(`/api/v1/admin/users/${userId}`, { method: 'DELETE' });
 }
 
 export function getUserImpact(userId: string) {
-  return request<UserImpactResponse>(`/api/v1/auth/users/${userId}/impact`);
+  return request<UserImpactResponse>(`/api/v1/admin/users/${userId}/impact`);
 }
 
 // PR5a — Bulk user actions
 export function bulkUserAction(body: BulkActionRequest) {
-  return request<BulkActionResponse>('/api/v1/auth/users/bulk-action', {
+  return request<BulkActionResponse>('/api/v1/admin/users/bulk-action', {
     method: 'POST',
     body: JSON.stringify(body),
   });
@@ -464,7 +464,7 @@ export function bulkUserAction(body: BulkActionRequest) {
 export function getUsersBulkImpact(ids: string[]) {
   const params = new URLSearchParams();
   for (const id of ids) params.append('ids', id);
-  return request<BulkImpactResponse>(`/api/v1/auth/users/bulk-impact?${params}`);
+  return request<BulkImpactResponse>(`/api/v1/admin/users/bulk-impact?${params}`);
 }
 
 /**
@@ -480,7 +480,7 @@ export async function bulkImportUsers(file: File): Promise<BulkImportResponse> {
   const formData = new FormData();
   formData.append('file', file);
 
-  const res = await fetch(`${BASE_URL}/api/v1/auth/users/bulk-import`, {
+  const res = await fetch(`${BASE_URL}/api/v1/admin/users/bulk-import`, {
     method: 'POST',
     headers: authHeaders(),
     body: formData,

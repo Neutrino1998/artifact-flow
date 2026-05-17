@@ -79,7 +79,7 @@
           "auth"
         ],
         "summary": "Update My Profile",
-        "description": "\u5f53\u524d\u7528\u6237\u81ea\u52a9\u4fee\u6539\u975e\u654f\u611f\u8d44\u6599\u5b57\u6bb5\uff08\u76ee\u524d\u4ec5 display_name\uff09\u3002\n\n\u8bbe\u8ba1\u610f\u56fe\uff1a\u4e0e admin \u540e\u53f0 PUT /users/{id} \u89e3\u8026 \u2014\u2014 role / is_active /\npassword \u8fd9\u4e9b\u5b89\u5168\u654f\u611f\u5b57\u6bb5\u8d70\u4e13\u95e8\u7aef\u70b9\uff0cprofile \u5b57\u6bb5\u8d70\u8fd9\u91cc\u3002\u4efb\u4f55\u5df2\u767b\u5f55\n\u7528\u6237\u90fd\u80fd\u8c03\uff0c\u4e0d\u9700\u8981 admin \u6743\u9650\u3002",
+        "description": "\u5f53\u524d\u7528\u6237\u81ea\u52a9\u4fee\u6539\u975e\u654f\u611f\u8d44\u6599\u5b57\u6bb5\uff08\u76ee\u524d\u4ec5 display_name\uff09\u3002\n\n\u8bbe\u8ba1\u610f\u56fe\uff1a\u4e0e admin \u540e\u53f0 PUT /admin/users/{id} \u89e3\u8026 \u2014\u2014 role / is_active /\npassword \u8fd9\u4e9b\u5b89\u5168\u654f\u611f\u5b57\u6bb5\u8d70\u4e13\u95e8\u7aef\u70b9\uff0cprofile \u5b57\u6bb5\u8d70\u8fd9\u91cc\u3002\u4efb\u4f55\u5df2\u767b\u5f55\n\u7528\u6237\u90fd\u80fd\u8c03\uff0c\u4e0d\u9700\u8981 admin \u6743\u9650\u3002",
         "operationId": "update_my_profile_api_v1_auth_me_patch",
         "requestBody": {
           "content": {
@@ -141,468 +141,6 @@
         "responses": {
           "204": {
             "description": "Successful Response"
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ]
-      }
-    },
-    "/api/v1/auth/users": {
-      "post": {
-        "tags": [
-          "auth"
-        ],
-        "summary": "Create User",
-        "description": "\u521b\u5efa\u7528\u6237\uff08\u4ec5 Admin\uff09",
-        "operationId": "create_user_api_v1_auth_users_post",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreateUserRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UserResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      },
-      "get": {
-        "tags": [
-          "auth"
-        ],
-        "summary": "List Users",
-        "description": "\u5217\u51fa\u6240\u6709\u7528\u6237\uff08\u4ec5 Admin\uff09",
-        "operationId": "list_users_api_v1_auth_users_get",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "limit",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "maximum": 200,
-              "minimum": 1,
-              "default": 50,
-              "title": "Limit"
-            }
-          },
-          {
-            "name": "offset",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "minimum": 0,
-              "default": 0,
-              "title": "Offset"
-            }
-          },
-          {
-            "name": "q",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string",
-                  "maxLength": 200
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Q"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UserListResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/auth/users/bulk-impact": {
-      "get": {
-        "tags": [
-          "auth"
-        ],
-        "summary": "Get Users Bulk Impact",
-        "description": "\u6279\u91cf\u5220\u9664\u7528\u6237\u524d\u7684\u5f71\u54cd\u6570\u636e \u2014 \u4e00\u6b21 IN \u67e5\u8be2\u3002\n\n\u7ed9\u524d\u7aef DangerConfirmModal \u663e\u793a\"\u5c06\u5220\u9664 N \u4e2a\u7528\u6237\u3001\u5171 M \u6761\u4f1a\u8bdd\"\u3002\nuser_count \u662f\u8bf7\u6c42 ids \u7684\u53bb\u91cd\u6570\uff08\u4e0d\u533a\u5206\u662f\u5426\u771f\u5b58\u5728\uff09\uff0cconversation_count\n\u662f\u8fd9\u6279\u7528\u6237\u540d\u4e0b\u5f53\u524d\u4f1a\u8bdd\u603b\u6570\u3002",
-        "operationId": "get_users_bulk_impact_api_v1_auth_users_bulk_impact_get",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "ids",
-            "in": "query",
-            "required": true,
-            "schema": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              },
-              "minItems": 1,
-              "maxItems": 200,
-              "title": "Ids"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BulkImpactResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/auth/users/bulk-action": {
-      "post": {
-        "tags": [
-          "auth"
-        ],
-        "summary": "Bulk User Action",
-        "description": "\u6279\u91cf\u6267\u884c\u7528\u6237\u7ba1\u7406\u52a8\u4f5c\uff08\u4ec5 Admin\uff09\u3002\n\n\u652f\u6301 action\uff1adisable / enable / delete / set_department\u3002Best-effort\uff1a\n\u5355\u6761\u5931\u8d25\u4e0d\u963b\u65ad\u5176\u4f59\u3002Self-protection \u53d6\u4ee3 last-admin \u8ba1\u6570 \u2014\u2014 admin\n\u4e0d\u80fd\u5bf9\u81ea\u5df1\u6267\u884c\u4efb\u4f55 action\uff08\u4e0e PR2b \u5355\u6761 update_user / delete_user \u4e00\u81f4\uff09\uff1b\n\u914d\u5408 disabled admin \u8fdb\u4e0d\u6765\u540e\u53f0\uff0c\u8db3\u4ee5\u4fdd\u4f4f\u81f3\u5c11 1 \u4e2a\u6d3b\u8dc3 admin\u3002\n\nset_department \u7684 payload.department_id \u5728 loop \u5916\u9884\u6821\u9a8c\uff1a\u975e null \u4e14\n\u5728 DB \u4e2d\u627e\u4e0d\u5230\u5bf9\u5e94\u90e8\u95e8 \u2192 \u6574\u6279 400\uff08fail-fast\uff0c\u7701\u6389\u65e0\u8c13\u7684 N \u6b21\u5931\u8d25\uff09\u3002\n\ndelete \u8d70 hard_delete\uff08DB CASCADE\uff09\u3002\u82e5\u7528\u6237\u5f53\u524d\u6b63\u5728\u8dd1 engine\uff0c\n\u88ab\u7ea7\u8054\u5220\u7684 conversation \u884c\u7531 PR2a \u7684 controller exists() / IntegrityError\ncatch \u515c\u4f4f\uff1b\u672c\u7aef\u70b9\u76f4\u63a5 fire-and-forget\u3002",
-        "operationId": "bulk_user_action_api_v1_auth_users_bulk_action_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/BulkActionRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BulkActionResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ]
-      }
-    },
-    "/api/v1/auth/users/{user_id}": {
-      "get": {
-        "tags": [
-          "auth"
-        ],
-        "summary": "Get User",
-        "description": "\u5355\u67e5\u7528\u6237\uff08Admin\uff09 \u2014 \u7ed9\u524d\u7aef\u7f16\u8f91\u8868\u5355\u521d\u59cb\u5316\u7528",
-        "operationId": "get_user_api_v1_auth_users__user_id__get",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "user_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "User Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UserResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      },
-      "put": {
-        "tags": [
-          "auth"
-        ],
-        "summary": "Update User",
-        "description": "\u66f4\u65b0\u7528\u6237\uff08\u4ec5 Admin\uff09\n\n\u9632\u8bef\u9501\uff1aadmin \u4e0d\u80fd\u6539\u81ea\u5df1\u7684 role / is_active / password\u3002\u914d\u5408 DELETE\n\u8def\u5f84\u7684\"\u4e0d\u80fd\u5220\u81ea\u5df1\"\u4fdd\u62a4\uff0c\u8db3\u4ee5\u4fdd\u8bc1\u7cfb\u7edf\u59cb\u7ec8\u81f3\u5c11\u6709 1 \u4e2a\u6d3b\u8dc3 admin\n\uff08\u64cd\u4f5c\u8005\u5fc5\u7136\u6d3b\u8dc3 \u2192 \u4e0d\u80fd\u52a8\u81ea\u5df1 \u2192 \u81f3\u5c11\u5269\u81ea\u5df1\uff09\u3002\n\nSelf \u6539 password \u8d70 POST /me/password \u2014\u2014 \u8be5\u7aef\u70b9\u5f3a\u5236\u6821\u9a8c current_password\uff0c\n\u9632\u6b62 token \u88ab\u76d7\u540e\u653b\u51fb\u8005\u65e0\u9700\u65e7\u5bc6\u7801\u5c31\u80fd\u63a5\u7ba1\u8d26\u53f7\u3002\u672c\u7aef\u70b9\u5bf9 self \u6539 password\n\u8fd4\u56de 403\uff0c\u907f\u514d\u5728 admin \u540e\u53f0\u7ed5\u8fc7\u8be5\u6821\u9a8c\u3002",
-        "operationId": "update_user_api_v1_auth_users__user_id__put",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "user_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "User Id"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/UpdateUserRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UserResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      },
-      "delete": {
-        "tags": [
-          "auth"
-        ],
-        "summary": "Delete User",
-        "description": "\u786c\u5220\u7528\u6237\uff08\u4ec5 Admin\uff09\n\nFK CASCADE \u4e00\u5e76\u5220\u9664\u5176\u6240\u6709\u4f1a\u8bdd / messages / events / artifacts\u3002\n\u82e5\u7528\u6237\u5f53\u524d\u6709\u6b63\u5728\u8dd1\u7684 engine\uff0c\u88ab\u7ea7\u8054\u5220\u7684 conversation \u884c\u4f1a\u88ab controller\npost-processing \u7684 exists() \u68c0\u67e5\u515c\u4f4f\uff08PR2a\uff09\uff0c\u4e0d\u4f1a\u649e FK\u3002\n\n\u4fdd\u62a4\uff1aadmin \u4e0d\u80fd\u5220\u81ea\u5df1\u3002\u914d\u5408\"\u4e0d\u80fd\u6539\u81ea\u5df1 role/is_active\"\uff0c\u8db3\u4ee5\u4fdd\u8bc1\n\u7cfb\u7edf\u59cb\u7ec8\u81f3\u5c11 1 \u4e2a\u6d3b\u8dc3 admin\u3002",
-        "operationId": "delete_user_api_v1_auth_users__user_id__delete",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "user_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "User Id"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "Successful Response"
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/auth/users/{user_id}/impact": {
-      "get": {
-        "tags": [
-          "auth"
-        ],
-        "summary": "Get User Impact",
-        "description": "\u786c\u5220\u7528\u6237\u524d\u7684\u5f71\u54cd\u6570\u636e \u2014 \u8fd4\u56de\u4f1a\u8bdd\u6570\u3002\n\n\u7ed9\u524d\u7aef DangerConfirmModal \u663e\u793a\"\u5c06\u7ea7\u8054\u5220\u9664 N \u6761\u4f1a\u8bdd\uff0c\u64cd\u4f5c\u4e0d\u53ef\u6062\u590d\"\u3002",
-        "operationId": "get_user_impact_api_v1_auth_users__user_id__impact_get",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "user_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "User Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UserImpactResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/auth/users/bulk-import": {
-      "post": {
-        "tags": [
-          "auth"
-        ],
-        "summary": "Bulk Import Users",
-        "description": "\u6279\u91cf\u5bfc\u5165\u7528\u6237\uff08\u4ec5 Admin\uff09\u3002\n\nCSV header \u5fc5\u542b `username`\uff1b\u53ef\u9009\u5217 `password` / `display_name` /\n`dept_l1` / `dept_l2` / `dept_l3`\u3002\u5176\u4ed6\u5217\u88ab\u5ffd\u7565\u5e76\u5728 warnings \u91cc\u4e0a\u62a5\u3002\n\n\u8bed\u4e49\uff08best-effort\uff0c\u975e\u539f\u5b50\uff09\uff1a\n- parse \u9636\u6bb5\u5931\u8d25\uff08\u89e3\u7801 / \u7f3a username \u5217 / \u884c\u6570\u8d85\u9650\uff09\u2192 400\n- \u6587\u4ef6\u5185 username \u91cd\u590d \u2192 400 + duplicate_rows \u5217\u51fa\n- \u5355\u884c\u4e1a\u52a1\u6821\u9a8c\u5931\u8d25\uff08username \u683c\u5f0f / \u90e8\u95e8 gap / \u5b57\u6bb5\u8d85\u957f / \u9ed8\u8ba4\u5bc6\u7801\u8fc7\u77ed\uff09\n  \u2192 failed\n- \u5355\u884c username \u5df2\u5728 DB \u2192 skipped\n- \u5176\u4f59 \u2192 created\uff08\u6bcf\u884c\u72ec\u7acb commit\uff1b\u9010\u884c\u6210\u529f/\u5931\u8d25\uff09\n\n\u6267\u884c\u7ed3\u6784\uff083 \u6bb5\uff09\uff1a\n1. validate + dept resolve\uff1a\u987a\u5e8f\u904d\u5386\uff0c\u6821\u9a8c\u5931\u8d25\u7684\u884c\u8fdb failed\uff0c\n   \u901a\u8fc7\u7684\u884c\u6536\u96c6\u5230 to_create\uff08\u542b\u5df2 resolve \u7684 department_id\uff09\u3002\n   dept_cache \u907f\u514d\u540c CSV \u5185\u91cd\u590d\u8def\u5f84\u591a\u6b21 SELECT\u3002\n2. parallel hash\uff1ato_create \u91cc\u6240\u6709 password \u901a\u8fc7 asyncio.gather +\n   asyncio.to_thread \u5e76\u884c\u6254\u7ed9\u9ed8\u8ba4 ThreadPoolExecutor \u8dd1 bcrypt\u3002\n   bcrypt-python \u5728 C \u5c42\u91ca\u653e GIL\uff0c~8 \u6838\u673a\u5668 300 \u884c hash \u9636\u6bb5\n   \u4ece ~50s \u7f29\u5230 ~6s\uff0c\u4e14 event loop \u5168\u7a0b\u4e0d\u5361\uff08\u5176\u4ed6\u8bf7\u6c42\u6b63\u5e38\u54cd\u5e94\uff09\u3002\n3. INSERT\uff1a\u987a\u5e8f\u5199\u5e93\uff1busername UNIQUE \u649e\u4e0a \u2192 \u5f53 skipped \u5904\u7406\uff08race\n   between phase-1 batch-check \u548c\u6b64\u5904\u4e4b\u95f4\u53e6\u4e00 admin \u62a2\u5148\u521b\u5efa\uff09\u3002",
-        "operationId": "bulk_import_users_api_v1_auth_users_bulk_import_post",
-        "requestBody": {
-          "content": {
-            "multipart/form-data": {
-              "schema": {
-                "$ref": "#/components/schemas/Body_bulk_import_users_api_v1_auth_users_bulk_import_post"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BulkImportResponse"
-                }
-              }
-            }
           },
           "422": {
             "description": "Validation Error",
@@ -996,7 +534,7 @@
           "chat"
         ],
         "summary": "Bulk Delete Conversations",
-        "description": "\u6279\u91cf\u5220\u9664\u5bf9\u8bdd\uff08\u7528\u6237\u89c6\u89d2\uff0c\u4ec5\u5220\u81ea\u5df1\u7684\uff09\n\nBest-effort\uff1a\u5931\u8d25\u4e00\u6761\u4e0d\u963b\u65ad\u5176\u4f59\u3002Cross-user / \u4e0d\u5b58\u5728\u7684 id \u90fd\u5f52\u4e3a `not_found`\uff0c\n\u9075\u5faa \"404 not 403\" \u5b89\u5168\u7b56\u7565\u907f\u514d\u6cc4\u6f0f\u4f1a\u8bdd\u5b58\u5728\u3002\n\u5f15\u64ce\u6b63\u5728\u6267\u884c\u7684\u4f1a\u8bdd\u540c\u6837\u76f4\u63a5 DELETE \u2014 \u5f15\u64ce post-processing \u5728 PR2a \u91cc fail-soft \u515c\u5e95\u3002",
+        "description": "\u6279\u91cf\u5220\u9664\u5bf9\u8bdd\uff08\u7528\u6237\u89c6\u89d2\uff0c\u4ec5\u5220\u81ea\u5df1\u7684\uff09\n\nBest-effort \u8303\u56f4\uff1across-user / \u4e0d\u5b58\u5728\u7684 id \u8d70 `failed.reason=\"not_found\"`\uff0c\n\u9075\u5faa \"404 not 403\" \u5b89\u5168\u7b56\u7565\u907f\u514d\u6cc4\u6f0f\u4f1a\u8bdd\u5b58\u5728\u3002\u5f15\u64ce\u6b63\u5728\u6267\u884c\u7684\u4f1a\u8bdd\u540c\u6837\u76f4\u63a5\nDELETE \u2014 \u5f15\u64ce post-processing \u5728 PR2a \u91cc fail-soft \u515c\u5e95\u3002\n\n\u5355\u884c FK \u8fdd\u89c4\u8fd9\u6761\u8def\u5f84\u4e0d\u5b58\u5728\uff0c\u56e0\u6b64\u4e0d\u9700\u8981 IntegrityError + rollback\uff1a\u6240\u6709\u6307\u5411\n`conversations.id` \u7684\u5916\u952e\uff08Message / ArtifactSession\uff09\u90fd\u662f ondelete=CASCADE\uff0c\n\u4e0b\u6e38\u94fe messages / events / artifacts / artifact_versions \u4e5f\u5168\u662f CASCADE\n\uff08src/db/models.py\uff09\uff0c\u5220 conversation \u4e0d\u4f1a\u56e0\u5b50\u884c\u6b8b\u7559\u800c\u5931\u8d25\uff0csession \u72b6\u6001\n\u4e0d\u4f1a\u88ab\u67d0\u4e00\u884c\u6c61\u67d3\u5230\u5f71\u54cd\u540e\u7eed\u884c\u3002\n\n\u5176\u4ed6\u5f02\u5e38\uff08OperationalError \u7b49\u57fa\u7840\u8bbe\u65bd\u7ea7\u6545\u969c\uff09\u5192\u6ce1\u4e3a 5xx loud failure \u2014\n\u6b64\u65f6\u7b2c 1 \u6761\u5c31\u4f1a\u5931\u8d25\u3001\u5faa\u73af\u672c\u5c31\u8fdb\u4e0d\u4e0b\u53bb\uff1b\u4e0e CLAUDE.md \"\u4e0d\u4e3a\u4e0d\u4f1a\u53d1\u751f\u7684\u573a\u666f\n\u52a0\u9632\u5fa1\u4ee3\u7801\" \u4e00\u81f4\uff0c\u6545\u4e0d\u505a\u5e7f\u6cdb except\u3002",
         "operationId": "bulk_delete_conversations_api_v1_chat_bulk_delete_post",
         "requestBody": {
           "content": {
@@ -1683,6 +1221,468 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/AdminConversationEventsResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/users": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Create User",
+        "description": "\u521b\u5efa\u7528\u6237\uff08\u4ec5 Admin\uff09",
+        "operationId": "create_user_api_v1_admin_users_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateUserRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "List Users",
+        "description": "\u5217\u51fa\u6240\u6709\u7528\u6237\uff08\u4ec5 Admin\uff09",
+        "operationId": "list_users_api_v1_admin_users_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 200
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Q"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/users/bulk-impact": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Get Users Bulk Impact",
+        "description": "\u6279\u91cf\u5220\u9664\u7528\u6237\u524d\u7684\u5f71\u54cd\u6570\u636e \u2014 \u4e00\u6b21 IN \u67e5\u8be2\u3002\n\n\u7ed9\u524d\u7aef DangerConfirmModal \u663e\u793a\"\u5c06\u5220\u9664 N \u4e2a\u7528\u6237\u3001\u5171 M \u6761\u4f1a\u8bdd\"\u3002\nuser_count \u662f\u8bf7\u6c42 ids \u7684\u53bb\u91cd\u6570\uff08\u4e0d\u533a\u5206\u662f\u5426\u771f\u5b58\u5728\uff09\uff0cconversation_count\n\u662f\u8fd9\u6279\u7528\u6237\u540d\u4e0b\u5f53\u524d\u4f1a\u8bdd\u603b\u6570\u3002",
+        "operationId": "get_users_bulk_impact_api_v1_admin_users_bulk_impact_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "ids",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1,
+              "maxItems": 200,
+              "title": "Ids"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BulkImpactResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/users/bulk-action": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Bulk User Action",
+        "description": "\u6279\u91cf\u6267\u884c\u7528\u6237\u7ba1\u7406\u52a8\u4f5c\uff08\u4ec5 Admin\uff09\u3002\n\n\u652f\u6301 action\uff1adisable / enable / delete / set_department\u3002Best-effort\uff1a\n\u5355\u6761\u5931\u8d25\u4e0d\u963b\u65ad\u5176\u4f59\u3002Self-protection \u53d6\u4ee3 last-admin \u8ba1\u6570 \u2014\u2014 admin\n\u4e0d\u80fd\u5bf9\u81ea\u5df1\u6267\u884c\u4efb\u4f55 action\uff08\u4e0e PR2b \u5355\u6761 update_user / delete_user \u4e00\u81f4\uff09\uff1b\n\u914d\u5408 disabled admin \u8fdb\u4e0d\u6765\u540e\u53f0\uff0c\u8db3\u4ee5\u4fdd\u4f4f\u81f3\u5c11 1 \u4e2a\u6d3b\u8dc3 admin\u3002\n\nset_department \u7684 payload.department_id \u5728 loop \u5916\u9884\u6821\u9a8c\uff1a\u975e null \u4e14\n\u5728 DB \u4e2d\u627e\u4e0d\u5230\u5bf9\u5e94\u90e8\u95e8 \u2192 \u6574\u6279 400\uff08fail-fast\uff0c\u7701\u6389\u65e0\u8c13\u7684 N \u6b21\u5931\u8d25\uff09\u3002\n\ndelete \u8d70 hard_delete\uff08DB CASCADE\uff09\u3002\u82e5\u7528\u6237\u5f53\u524d\u6b63\u5728\u8dd1 engine\uff0c\n\u88ab\u7ea7\u8054\u5220\u7684 conversation \u884c\u7531 PR2a \u7684 controller exists() / IntegrityError\ncatch \u515c\u4f4f\uff1b\u672c\u7aef\u70b9\u76f4\u63a5 fire-and-forget\u3002",
+        "operationId": "bulk_user_action_api_v1_admin_users_bulk_action_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BulkActionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BulkActionResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/users/bulk-import": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Bulk Import Users",
+        "description": "\u6279\u91cf\u5bfc\u5165\u7528\u6237\uff08\u4ec5 Admin\uff09\u3002\n\nCSV header \u5fc5\u542b `username`\uff1b\u53ef\u9009\u5217 `password` / `display_name` /\n`dept_l1` / `dept_l2` / `dept_l3`\u3002\u5176\u4ed6\u5217\u88ab\u5ffd\u7565\u5e76\u5728 warnings \u91cc\u4e0a\u62a5\u3002\n\n\u8bed\u4e49\uff08best-effort\uff0c\u975e\u539f\u5b50\uff09\uff1a\n- parse \u9636\u6bb5\u5931\u8d25\uff08\u89e3\u7801 / \u7f3a username \u5217 / \u884c\u6570\u8d85\u9650\uff09\u2192 400\n- \u6587\u4ef6\u5185 username \u91cd\u590d \u2192 400 + duplicate_rows \u5217\u51fa\n- \u5355\u884c\u4e1a\u52a1\u6821\u9a8c\u5931\u8d25\uff08username \u683c\u5f0f / \u90e8\u95e8 gap / \u5b57\u6bb5\u8d85\u957f / \u9ed8\u8ba4\u5bc6\u7801\u8fc7\u77ed\uff09\n  \u2192 failed\n- \u5355\u884c username \u5df2\u5728 DB \u2192 skipped\n- \u5176\u4f59 \u2192 created\uff08\u6bcf\u884c\u72ec\u7acb commit\uff1b\u9010\u884c\u6210\u529f/\u5931\u8d25\uff09\n\n\u6267\u884c\u7ed3\u6784\uff083 \u6bb5\uff09\uff1a\n1. validate + dept resolve\uff1a\u987a\u5e8f\u904d\u5386\uff0c\u6821\u9a8c\u5931\u8d25\u7684\u884c\u8fdb failed\uff0c\n   \u901a\u8fc7\u7684\u884c\u6536\u96c6\u5230 to_create\uff08\u542b\u5df2 resolve \u7684 department_id\uff09\u3002\n   dept_cache \u907f\u514d\u540c CSV \u5185\u91cd\u590d\u8def\u5f84\u591a\u6b21 SELECT\u3002\n2. parallel hash\uff1ato_create \u91cc\u6240\u6709 password \u901a\u8fc7 asyncio.gather +\n   asyncio.to_thread \u5e76\u884c\u6254\u7ed9\u9ed8\u8ba4 ThreadPoolExecutor \u8dd1 bcrypt\u3002\n   bcrypt-python \u5728 C \u5c42\u91ca\u653e GIL\uff0c~8 \u6838\u673a\u5668 300 \u884c hash \u9636\u6bb5\n   \u4ece ~50s \u7f29\u5230 ~6s\uff0c\u4e14 event loop \u5168\u7a0b\u4e0d\u5361\uff08\u5176\u4ed6\u8bf7\u6c42\u6b63\u5e38\u54cd\u5e94\uff09\u3002\n3. INSERT\uff1a\u987a\u5e8f\u5199\u5e93\uff1busername UNIQUE \u649e\u4e0a \u2192 \u5f53 skipped \u5904\u7406\uff08race\n   between phase-1 batch-check \u548c\u6b64\u5904\u4e4b\u95f4\u53e6\u4e00 admin \u62a2\u5148\u521b\u5efa\uff09\u3002",
+        "operationId": "bulk_import_users_api_v1_admin_users_bulk_import_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_bulk_import_users_api_v1_admin_users_bulk_import_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BulkImportResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/users/{user_id}": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Get User",
+        "description": "\u5355\u67e5\u7528\u6237\uff08Admin\uff09 \u2014 \u7ed9\u524d\u7aef\u7f16\u8f91\u8868\u5355\u521d\u59cb\u5316\u7528",
+        "operationId": "get_user_api_v1_admin_users__user_id__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "User Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Update User",
+        "description": "\u66f4\u65b0\u7528\u6237\uff08\u4ec5 Admin\uff09\n\n\u9632\u8bef\u9501\uff1aadmin \u4e0d\u80fd\u6539\u81ea\u5df1\u7684 role / is_active / password\u3002\u914d\u5408 DELETE\n\u8def\u5f84\u7684\"\u4e0d\u80fd\u5220\u81ea\u5df1\"\u4fdd\u62a4\uff0c\u8db3\u4ee5\u4fdd\u8bc1\u7cfb\u7edf\u59cb\u7ec8\u81f3\u5c11\u6709 1 \u4e2a\u6d3b\u8dc3 admin\n\uff08\u64cd\u4f5c\u8005\u5fc5\u7136\u6d3b\u8dc3 \u2192 \u4e0d\u80fd\u52a8\u81ea\u5df1 \u2192 \u81f3\u5c11\u5269\u81ea\u5df1\uff09\u3002\n\nSelf \u6539 password \u8d70 POST /auth/me/password \u2014\u2014 \u8be5\u7aef\u70b9\u5f3a\u5236\u6821\u9a8c current_password\uff0c\n\u9632\u6b62 token \u88ab\u76d7\u540e\u653b\u51fb\u8005\u65e0\u9700\u65e7\u5bc6\u7801\u5c31\u80fd\u63a5\u7ba1\u8d26\u53f7\u3002\u672c\u7aef\u70b9\u5bf9 self \u6539 password\n\u8fd4\u56de 403\uff0c\u907f\u514d\u5728 admin \u540e\u53f0\u7ed5\u8fc7\u8be5\u6821\u9a8c\u3002",
+        "operationId": "update_user_api_v1_admin_users__user_id__put",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "User Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateUserRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Delete User",
+        "description": "\u786c\u5220\u7528\u6237\uff08\u4ec5 Admin\uff09\n\nFK CASCADE \u4e00\u5e76\u5220\u9664\u5176\u6240\u6709\u4f1a\u8bdd / messages / events / artifacts\u3002\n\u82e5\u7528\u6237\u5f53\u524d\u6709\u6b63\u5728\u8dd1\u7684 engine\uff0c\u88ab\u7ea7\u8054\u5220\u7684 conversation \u884c\u4f1a\u88ab controller\npost-processing \u7684 exists() \u68c0\u67e5\u515c\u4f4f\uff08PR2a\uff09\uff0c\u4e0d\u4f1a\u649e FK\u3002\n\n\u4fdd\u62a4\uff1aadmin \u4e0d\u80fd\u5220\u81ea\u5df1\u3002\u914d\u5408\"\u4e0d\u80fd\u6539\u81ea\u5df1 role/is_active\"\uff0c\u8db3\u4ee5\u4fdd\u8bc1\n\u7cfb\u7edf\u59cb\u7ec8\u81f3\u5c11 1 \u4e2a\u6d3b\u8dc3 admin\u3002",
+        "operationId": "delete_user_api_v1_admin_users__user_id__delete",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "User Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/users/{user_id}/impact": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Get User Impact",
+        "description": "\u786c\u5220\u7528\u6237\u524d\u7684\u5f71\u54cd\u6570\u636e \u2014 \u8fd4\u56de\u4f1a\u8bdd\u6570\u3002\n\n\u7ed9\u524d\u7aef DangerConfirmModal \u663e\u793a\"\u5c06\u7ea7\u8054\u5220\u9664 N \u6761\u4f1a\u8bdd\uff0c\u64cd\u4f5c\u4e0d\u53ef\u6062\u590d\"\u3002",
+        "operationId": "get_user_impact_api_v1_admin_users__user_id__impact_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "User Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserImpactResponse"
                 }
               }
             }
@@ -2546,7 +2546,7 @@
         "title": "ArtifactSummary",
         "description": "Artifact summary in list response"
       },
-      "Body_bulk_import_users_api_v1_auth_users_bulk_import_post": {
+      "Body_bulk_import_users_api_v1_admin_users_bulk_import_post": {
         "properties": {
           "file": {
             "type": "string",
@@ -2558,7 +2558,7 @@
         "required": [
           "file"
         ],
-        "title": "Body_bulk_import_users_api_v1_auth_users_bulk_import_post"
+        "title": "Body_bulk_import_users_api_v1_admin_users_bulk_import_post"
       },
       "Body_upload_file_api_v1_artifacts__session_id__upload_post": {
         "properties": {
@@ -2652,7 +2652,7 @@
           "action"
         ],
         "title": "BulkActionRequest",
-        "description": "POST /api/v1/auth/users/bulk-action request body\u3002\n\npayload \u4ec5\u5728 action=\"set_department\" \u65f6\u4f7f\u7528\uff0cshape = {\"department_id\": str | null}\uff1b\nnull \u8868\u793a\u6e05\u7a7a\u5f52\u5c5e\u3002\u5176\u4ed6 action \u5ffd\u7565 payload\u3002"
+        "description": "POST /api/v1/admin/users/bulk-action request body\u3002\n\npayload \u4ec5\u5728 action=\"set_department\" \u65f6\u4f7f\u7528\uff0cshape = {\"department_id\": str | null}\uff1b\nnull \u8868\u793a\u6e05\u7a7a\u5f52\u5c5e\u3002\u5176\u4ed6 action \u5ffd\u7565 payload\u3002"
       },
       "BulkActionResponse": {
         "properties": {
@@ -2674,7 +2674,7 @@
         },
         "type": "object",
         "title": "BulkActionResponse",
-        "description": "POST /api/v1/auth/users/bulk-action response.",
+        "description": "POST /api/v1/admin/users/bulk-action response.",
         "required": [
           "succeeded",
           "failed"
@@ -2767,7 +2767,7 @@
           "conversation_count"
         ],
         "title": "BulkImpactResponse",
-        "description": "GET /api/v1/auth/users/bulk-impact response\u3002\n\n\u7ed9\u524d\u7aef DangerConfirmModal \u663e\u793a\"\u5c06\u5220\u9664 N \u4e2a\u7528\u6237\u3001\u5171 M \u6761\u4f1a\u8bdd\"\u3002\nuser_count = \u8bf7\u6c42 ids \u7684\u53bb\u91cd\u4e2a\u6570\uff08\u4e0d\u533a\u5206\u662f\u5426\u771f\u6b63\u5b58\u5728\uff09\uff1b\nconversation_count = \u8fd9\u6279\u7528\u6237\u540d\u4e0b\u5f53\u524d\u4f1a\u8bdd\u603b\u6570\uff08CASCADE \u7ea7\u8054\u4f1a\u4e22\u5931\u7684\uff09\u3002"
+        "description": "GET /api/v1/admin/users/bulk-impact response\u3002\n\n\u7ed9\u524d\u7aef DangerConfirmModal \u663e\u793a\"\u5c06\u5220\u9664 N \u4e2a\u7528\u6237\u3001\u5171 M \u6761\u4f1a\u8bdd\"\u3002\nuser_count = \u8bf7\u6c42 ids \u7684\u53bb\u91cd\u4e2a\u6570\uff08\u4e0d\u533a\u5206\u662f\u5426\u771f\u6b63\u5b58\u5728\uff09\uff1b\nconversation_count = \u8fd9\u6279\u7528\u6237\u540d\u4e0b\u5f53\u524d\u4f1a\u8bdd\u603b\u6570\uff08CASCADE \u7ea7\u8054\u4f1a\u4e22\u5931\u7684\uff09\u3002"
       },
       "BulkImportFailedRow": {
         "properties": {
@@ -2862,7 +2862,7 @@
           "warnings"
         ],
         "title": "BulkImportResponse",
-        "description": "POST /api/v1/auth/users/bulk-import response\u3002\n\nbest-effort \u4e09\u5206\u7c7b\u3002total_rows = created + failed + skipped\u3002\nwarnings \u542b\u7f16\u7801 fallback / unknown \u5217\u7b49\u975e\u963b\u65ad\u63d0\u793a\u3002"
+        "description": "POST /api/v1/admin/users/bulk-import response\u3002\n\nbest-effort \u4e09\u5206\u7c7b\u3002total_rows = created + failed + skipped\u3002\nwarnings \u542b\u7f16\u7801 fallback / unknown \u5217\u7b49\u975e\u963b\u65ad\u63d0\u793a\u3002"
       },
       "BulkImportSkippedRow": {
         "properties": {
@@ -3228,7 +3228,7 @@
           "password"
         ],
         "title": "CreateUserRequest",
-        "description": "POST /api/v1/auth/users request body"
+        "description": "POST /api/v1/admin/users request body"
       },
       "DepartmentListResponse": {
         "properties": {
@@ -3753,7 +3753,7 @@
         },
         "type": "object",
         "title": "UpdateUserRequest",
-        "description": "PUT /api/v1/auth/users/{id} request body.\n\nAll fields optional. department_id semantics: \u5b57\u6bb5\u88ab\u663e\u5f0f\u4f20\u5165\u65f6\u751f\u6548\uff08\u5305\u62ec\n\u4f20 null = \u6e05\u7a7a\u5f52\u5c5e\uff09\uff1b\u5b57\u6bb5\u7f3a\u7701 \u2192 \u4e0d\u6539\u3002\u8def\u7531\u901a\u8fc7 model_fields_set \u533a\u5206\u3002"
+        "description": "PUT /api/v1/admin/users/{id} request body.\n\nAll fields optional. department_id semantics: \u5b57\u6bb5\u88ab\u663e\u5f0f\u4f20\u5165\u65f6\u751f\u6548\uff08\u5305\u62ec\n\u4f20 null = \u6e05\u7a7a\u5f52\u5c5e\uff09\uff1b\u5b57\u6bb5\u7f3a\u7701 \u2192 \u4e0d\u6539\u3002\u8def\u7531\u901a\u8fc7 model_fields_set \u533a\u5206\u3002"
       },
       "UploadResponse": {
         "properties": {
@@ -3826,7 +3826,7 @@
           "conversation_count"
         ],
         "title": "UserImpactResponse",
-        "description": "GET /api/v1/auth/users/{id}/impact response\n\n\u7ed9\u524d\u7aef\u786c\u5220\u7528\u6237\u524d\u7684\u4e8c\u6b21\u786e\u8ba4\u5f39\u7a97\u663e\u793a\u5f71\u54cd\u6570\u636e\u3002"
+        "description": "GET /api/v1/admin/users/{id}/impact response\n\n\u7ed9\u524d\u7aef\u786c\u5220\u7528\u6237\u524d\u7684\u4e8c\u6b21\u786e\u8ba4\u5f39\u7a97\u663e\u793a\u5f71\u54cd\u6570\u636e\u3002"
       },
       "UserInfo": {
         "properties": {
@@ -3888,7 +3888,7 @@
           "total"
         ],
         "title": "UserListResponse",
-        "description": "GET /api/v1/auth/users response"
+        "description": "GET /api/v1/admin/users response"
       },
       "UserResponse": {
         "properties": {

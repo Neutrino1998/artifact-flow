@@ -25,7 +25,7 @@ class LoginRequest(BaseModel):
 
 
 class CreateUserRequest(BaseModel):
-    """POST /api/v1/auth/users request body"""
+    """POST /api/v1/admin/users request body"""
     username: str = Field(..., min_length=2, max_length=64, description="Username")
     password: str = Field(..., min_length=4, max_length=128, description="Password")
     display_name: Optional[str] = Field(None, max_length=128, description="Display name")
@@ -41,7 +41,7 @@ class CreateUserRequest(BaseModel):
 
 class UpdateUserRequest(BaseModel):
     """
-    PUT /api/v1/auth/users/{id} request body.
+    PUT /api/v1/admin/users/{id} request body.
 
     All fields optional. department_id semantics: 字段被显式传入时生效（包括
     传 null = 清空归属）；字段缺省 → 不改。路由通过 model_fields_set 区分。
@@ -97,14 +97,14 @@ class UserResponse(BaseModel):
 
 
 class UserListResponse(BaseModel):
-    """GET /api/v1/auth/users response"""
+    """GET /api/v1/admin/users response"""
     users: List[UserResponse]
     total: int
 
 
 class UserImpactResponse(BaseModel):
     """
-    GET /api/v1/auth/users/{id}/impact response
+    GET /api/v1/admin/users/{id}/impact response
 
     给前端硬删用户前的二次确认弹窗显示影响数据。
     """
@@ -132,7 +132,7 @@ class BulkImportSkippedRow(BaseModel):
 
 class BulkImportResponse(BaseModel):
     """
-    POST /api/v1/auth/users/bulk-import response。
+    POST /api/v1/admin/users/bulk-import response。
 
     best-effort 三分类。total_rows = created + failed + skipped。
     warnings 含编码 fallback / unknown 列等非阻断提示。
@@ -155,7 +155,7 @@ BulkActionType = Literal["disable", "enable", "delete", "set_department"]
 
 class BulkActionRequest(BaseModel):
     """
-    POST /api/v1/auth/users/bulk-action request body。
+    POST /api/v1/admin/users/bulk-action request body。
 
     payload 仅在 action="set_department" 时使用，shape = {"department_id": str | null}；
     null 表示清空归属。其他 action 忽略 payload。
@@ -182,14 +182,14 @@ class BulkActionFailedItem(BaseModel):
 
 
 class BulkActionResponse(BaseModel):
-    """POST /api/v1/auth/users/bulk-action response."""
+    """POST /api/v1/admin/users/bulk-action response."""
     succeeded: List[str] = Field(default_factory=list, description="User IDs successfully processed")
     failed: List[BulkActionFailedItem] = Field(default_factory=list)
 
 
 class BulkImpactResponse(BaseModel):
     """
-    GET /api/v1/auth/users/bulk-impact response。
+    GET /api/v1/admin/users/bulk-impact response。
 
     给前端 DangerConfirmModal 显示"将删除 N 个用户、共 M 条会话"。
     user_count = 请求 ids 的去重个数（不区分是否真正存在）；

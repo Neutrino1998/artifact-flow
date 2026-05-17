@@ -2,8 +2,8 @@
 PR5a — Bulk-action / bulk-impact endpoint integration tests.
 
 Covers:
-- POST /api/v1/auth/users/bulk-action (disable / enable / delete / set_department)
-- GET /api/v1/auth/users/bulk-impact
+- POST /api/v1/admin/users/bulk-action (disable / enable / delete / set_department)
+- GET /api/v1/admin/users/bulk-impact
 
 Auth + each action's happy path + self-protection + not-found + set_department
 validation + capacity + impact aggregation. Engine fail-soft on active execution
@@ -88,24 +88,24 @@ async def _get_user(db_manager: DatabaseManager, user_id: str) -> User | None:
 class TestAuth:
     async def test_anon_blocked(self, anon_client: AsyncClient):
         resp = await anon_client.post(
-            "/api/v1/auth/users/bulk-action",
+            "/api/v1/admin/users/bulk-action",
             json={"ids": ["u-x"], "action": "disable"},
         )
         assert resp.status_code == 401
 
     async def test_regular_user_blocked(self, client: AsyncClient):
         resp = await client.post(
-            "/api/v1/auth/users/bulk-action",
+            "/api/v1/admin/users/bulk-action",
             json={"ids": ["u-x"], "action": "disable"},
         )
         assert resp.status_code == 403
 
     async def test_impact_anon_blocked(self, anon_client: AsyncClient):
-        resp = await anon_client.get("/api/v1/auth/users/bulk-impact?ids=u-x")
+        resp = await anon_client.get("/api/v1/admin/users/bulk-impact?ids=u-x")
         assert resp.status_code == 401
 
     async def test_impact_regular_user_blocked(self, client: AsyncClient):
-        resp = await client.get("/api/v1/auth/users/bulk-impact?ids=u-x")
+        resp = await client.get("/api/v1/admin/users/bulk-impact?ids=u-x")
         assert resp.status_code == 403
 
 
@@ -122,7 +122,7 @@ class TestDisableEnable:
         u2 = await _seed_user(db_manager, is_active=True)
 
         resp = await admin_client.post(
-            "/api/v1/auth/users/bulk-action",
+            "/api/v1/admin/users/bulk-action",
             json={"ids": [u1.id, u2.id], "action": "disable"},
         )
         assert resp.status_code == 200
@@ -139,7 +139,7 @@ class TestDisableEnable:
     ):
         u = await _seed_user(db_manager, is_active=False)
         resp = await admin_client.post(
-            "/api/v1/auth/users/bulk-action",
+            "/api/v1/admin/users/bulk-action",
             json={"ids": [u.id], "action": "enable"},
         )
         assert resp.status_code == 200
@@ -162,7 +162,7 @@ class TestDelete:
         u2 = await _seed_user(db_manager)
 
         resp = await admin_client.post(
-            "/api/v1/auth/users/bulk-action",
+            "/api/v1/admin/users/bulk-action",
             json={"ids": [u1.id, u2.id], "action": "delete"},
         )
         assert resp.status_code == 200
@@ -180,7 +180,7 @@ class TestDelete:
         conv_id = await _seed_conv(db_manager, u.id)
 
         resp = await admin_client.post(
-            "/api/v1/auth/users/bulk-action",
+            "/api/v1/admin/users/bulk-action",
             json={"ids": [u.id], "action": "delete"},
         )
         assert resp.status_code == 200
@@ -207,7 +207,7 @@ class TestSetDepartment:
         u2 = await _seed_user(db_manager, department_id=None)
 
         resp = await admin_client.post(
-            "/api/v1/auth/users/bulk-action",
+            "/api/v1/admin/users/bulk-action",
             json={
                 "ids": [u1.id, u2.id],
                 "action": "set_department",
@@ -229,7 +229,7 @@ class TestSetDepartment:
         u = await _seed_user(db_manager, department_id=dept.id)
 
         resp = await admin_client.post(
-            "/api/v1/auth/users/bulk-action",
+            "/api/v1/admin/users/bulk-action",
             json={
                 "ids": [u.id],
                 "action": "set_department",
@@ -245,7 +245,7 @@ class TestSetDepartment:
     ):
         u = await _seed_user(db_manager, department_id=None)
         resp = await admin_client.post(
-            "/api/v1/auth/users/bulk-action",
+            "/api/v1/admin/users/bulk-action",
             json={
                 "ids": [u.id],
                 "action": "set_department",
@@ -261,7 +261,7 @@ class TestSetDepartment:
         self, admin_client: AsyncClient
     ):
         resp = await admin_client.post(
-            "/api/v1/auth/users/bulk-action",
+            "/api/v1/admin/users/bulk-action",
             json={"ids": ["u-x"], "action": "set_department"},
         )
         assert resp.status_code == 400
@@ -270,7 +270,7 @@ class TestSetDepartment:
         self, admin_client: AsyncClient
     ):
         resp = await admin_client.post(
-            "/api/v1/auth/users/bulk-action",
+            "/api/v1/admin/users/bulk-action",
             json={"ids": ["u-x"], "action": "set_department", "payload": {}},
         )
         assert resp.status_code == 400
@@ -301,7 +301,7 @@ class TestSetDepartment:
         monkeypatch.setattr(UserRepository, "update", faulty_update)
 
         resp = await admin_client.post(
-            "/api/v1/auth/users/bulk-action",
+            "/api/v1/admin/users/bulk-action",
             json={
                 "ids": [u_first.id, u_bad.id, u_last.id],
                 "action": "set_department",
@@ -344,7 +344,7 @@ class TestSetDepartment:
 
         with pytest.raises(RuntimeError, match="unexpected programming error"):
             await admin_client.post(
-                "/api/v1/auth/users/bulk-action",
+                "/api/v1/admin/users/bulk-action",
                 json={
                     "ids": [u.id],
                     "action": "set_department",
@@ -365,7 +365,7 @@ class TestSelfProtection:
         other = await _seed_user(db_manager, is_active=True)
 
         resp = await admin_client.post(
-            "/api/v1/auth/users/bulk-action",
+            "/api/v1/admin/users/bulk-action",
             json={"ids": [test_admin.id, other.id], "action": "disable"},
         )
         assert resp.status_code == 200
@@ -381,7 +381,7 @@ class TestSelfProtection:
         self, admin_client: AsyncClient, test_admin: User
     ):
         resp = await admin_client.post(
-            "/api/v1/auth/users/bulk-action",
+            "/api/v1/admin/users/bulk-action",
             json={"ids": [test_admin.id], "action": "delete"},
         )
         assert resp.status_code == 200
@@ -396,7 +396,7 @@ class TestNotFound:
     ):
         for action in ("disable", "enable", "delete"):
             resp = await admin_client.post(
-                "/api/v1/auth/users/bulk-action",
+                "/api/v1/admin/users/bulk-action",
                 json={"ids": ["u-ghost"], "action": action},
             )
             assert resp.status_code == 200
@@ -416,7 +416,7 @@ class TestEdgeCases:
     ):
         u = await _seed_user(db_manager, is_active=True)
         resp = await admin_client.post(
-            "/api/v1/auth/users/bulk-action",
+            "/api/v1/admin/users/bulk-action",
             json={"ids": [u.id, u.id, u.id], "action": "disable"},
         )
         assert resp.status_code == 200
@@ -426,7 +426,7 @@ class TestEdgeCases:
 
     async def test_empty_ids_rejected(self, admin_client: AsyncClient):
         resp = await admin_client.post(
-            "/api/v1/auth/users/bulk-action",
+            "/api/v1/admin/users/bulk-action",
             json={"ids": [], "action": "disable"},
         )
         assert resp.status_code == 422
@@ -434,14 +434,14 @@ class TestEdgeCases:
     async def test_over_capacity_rejected(self, admin_client: AsyncClient):
         too_many = [f"u-{i}" for i in range(201)]
         resp = await admin_client.post(
-            "/api/v1/auth/users/bulk-action",
+            "/api/v1/admin/users/bulk-action",
             json={"ids": too_many, "action": "disable"},
         )
         assert resp.status_code == 422
 
     async def test_unknown_action_rejected(self, admin_client: AsyncClient):
         resp = await admin_client.post(
-            "/api/v1/auth/users/bulk-action",
+            "/api/v1/admin/users/bulk-action",
             json={"ids": ["u-x"], "action": "format_disk"},
         )
         assert resp.status_code == 422
@@ -465,7 +465,7 @@ class TestBulkImpact:
             await _seed_conv(db_manager, u2.id)
 
         resp = await admin_client.get(
-            "/api/v1/auth/users/bulk-impact",
+            "/api/v1/admin/users/bulk-impact",
             params=[("ids", u1.id), ("ids", u2.id)],
         )
         assert resp.status_code == 200
@@ -480,7 +480,7 @@ class TestBulkImpact:
         await _seed_conv(db_manager, u.id)
 
         resp = await admin_client.get(
-            "/api/v1/auth/users/bulk-impact",
+            "/api/v1/admin/users/bulk-impact",
             params=[("ids", u.id), ("ids", u.id), ("ids", u.id)],
         )
         assert resp.status_code == 200
@@ -492,7 +492,7 @@ class TestBulkImpact:
         self, admin_client: AsyncClient
     ):
         resp = await admin_client.get(
-            "/api/v1/auth/users/bulk-impact?ids=u-ghost-1&ids=u-ghost-2",
+            "/api/v1/admin/users/bulk-impact?ids=u-ghost-1&ids=u-ghost-2",
         )
         assert resp.status_code == 200
         body = resp.json()
@@ -502,7 +502,7 @@ class TestBulkImpact:
     async def test_impact_capacity_exceeded(self, admin_client: AsyncClient):
         params = [("ids", f"u-{i}") for i in range(201)]
         resp = await admin_client.get(
-            "/api/v1/auth/users/bulk-impact", params=params
+            "/api/v1/admin/users/bulk-impact", params=params
         )
         assert resp.status_code == 422
 
@@ -515,7 +515,7 @@ class TestBulkImpact:
         """
         # A successful 200 with the impact shape proves the literal-path route won.
         resp = await admin_client.get(
-            "/api/v1/auth/users/bulk-impact?ids=u-anything",
+            "/api/v1/admin/users/bulk-impact?ids=u-anything",
         )
         assert resp.status_code == 200
         body = resp.json()

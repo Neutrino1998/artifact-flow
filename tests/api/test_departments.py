@@ -132,7 +132,7 @@ class TestListAndTree:
     async def test_tree_user_count(self, admin_client: AsyncClient):
         a = (await admin_client.post("/api/v1/departments", json={"name": "部门A"})).json()
         await admin_client.post(
-            "/api/v1/auth/users",
+            "/api/v1/admin/users",
             json={
                 "username": "alice", "password": "pass1234",
                 "display_name": "Alice", "department_id": a["id"],
@@ -271,7 +271,7 @@ class TestDelete:
     async def test_delete_with_users_blocked(self, admin_client: AsyncClient):
         a = (await admin_client.post("/api/v1/departments", json={"name": "部门A"})).json()
         await admin_client.post(
-            "/api/v1/auth/users",
+            "/api/v1/admin/users",
             json={
                 "username": "alice", "password": "pass1234",
                 "department_id": a["id"],
@@ -327,7 +327,7 @@ class TestUserDepartmentIntegration:
     async def test_create_user_with_dept(self, admin_client: AsyncClient):
         a = (await admin_client.post("/api/v1/departments", json={"name": "部门A"})).json()
         resp = await admin_client.post(
-            "/api/v1/auth/users",
+            "/api/v1/admin/users",
             json={
                 "username": "alice", "password": "pass1234",
                 "department_id": a["id"],
@@ -338,7 +338,7 @@ class TestUserDepartmentIntegration:
 
     async def test_create_user_with_invalid_dept(self, admin_client: AsyncClient):
         resp = await admin_client.post(
-            "/api/v1/auth/users",
+            "/api/v1/admin/users",
             json={
                 "username": "alice", "password": "pass1234",
                 "department_id": "dept-nope",
@@ -350,14 +350,14 @@ class TestUserDepartmentIntegration:
         a = (await admin_client.post("/api/v1/departments", json={"name": "部门A"})).json()
         b = (await admin_client.post("/api/v1/departments", json={"name": "部门B"})).json()
         u = (await admin_client.post(
-            "/api/v1/auth/users",
+            "/api/v1/admin/users",
             json={
                 "username": "alice", "password": "pass1234",
                 "department_id": a["id"],
             },
         )).json()
         resp = await admin_client.put(
-            f"/api/v1/auth/users/{u['id']}",
+            f"/api/v1/admin/users/{u['id']}",
             json={"department_id": b["id"]},
         )
         assert resp.status_code == 200
@@ -366,7 +366,7 @@ class TestUserDepartmentIntegration:
     async def test_clear_user_department(self, admin_client: AsyncClient):
         a = (await admin_client.post("/api/v1/departments", json={"name": "部门A"})).json()
         u = (await admin_client.post(
-            "/api/v1/auth/users",
+            "/api/v1/admin/users",
             json={
                 "username": "alice", "password": "pass1234",
                 "department_id": a["id"],
@@ -374,7 +374,7 @@ class TestUserDepartmentIntegration:
         )).json()
         # Explicit null clears
         resp = await admin_client.put(
-            f"/api/v1/auth/users/{u['id']}",
+            f"/api/v1/admin/users/{u['id']}",
             json={"department_id": None},
         )
         assert resp.status_code == 200
@@ -384,7 +384,7 @@ class TestUserDepartmentIntegration:
         """字段缺省 ≠ 清空 — 不传 department_id 时应当保持原值。"""
         a = (await admin_client.post("/api/v1/departments", json={"name": "部门A"})).json()
         u = (await admin_client.post(
-            "/api/v1/auth/users",
+            "/api/v1/admin/users",
             json={
                 "username": "alice", "password": "pass1234",
                 "department_id": a["id"],
@@ -392,7 +392,7 @@ class TestUserDepartmentIntegration:
         )).json()
         # Update only display_name — dept should be unchanged
         resp = await admin_client.put(
-            f"/api/v1/auth/users/{u['id']}",
+            f"/api/v1/admin/users/{u['id']}",
             json={"display_name": "Alice Updated"},
         )
         assert resp.status_code == 200
@@ -407,13 +407,13 @@ class TestUserDepartmentIntegration:
         """
         a = (await admin_client.post("/api/v1/departments", json={"name": "部门A"})).json()
         await admin_client.post(
-            "/api/v1/auth/users",
+            "/api/v1/admin/users",
             json={
                 "username": "alice", "password": "pass1234",
                 "department_id": a["id"],
             },
         )
-        r = await admin_client.get("/api/v1/auth/users")
+        r = await admin_client.get("/api/v1/admin/users")
         assert r.status_code == 200
         alice = next(u for u in r.json()["users"] if u["username"] == "alice")
         assert alice["department_id"] == a["id"]
@@ -422,7 +422,7 @@ class TestUserDepartmentIntegration:
         """ondelete=SET NULL：删除部门时其下用户的 department_id 自动置空。"""
         a = (await admin_client.post("/api/v1/departments", json={"name": "部门A"})).json()
         u = (await admin_client.post(
-            "/api/v1/auth/users",
+            "/api/v1/admin/users",
             json={
                 "username": "alice", "password": "pass1234",
                 "department_id": a["id"],
@@ -430,13 +430,13 @@ class TestUserDepartmentIntegration:
         )).json()
         # Move user out so dept becomes empty (delete check requires user_count=0)
         await admin_client.put(
-            f"/api/v1/auth/users/{u['id']}", json={"department_id": None}
+            f"/api/v1/admin/users/{u['id']}", json={"department_id": None}
         )
         # Now safe to delete dept
         resp = await admin_client.delete(f"/api/v1/departments/{a['id']}")
         assert resp.status_code == 204
         # Verify user still exists
-        u_after = (await admin_client.get(f"/api/v1/auth/users/{u['id']}")).json()
+        u_after = (await admin_client.get(f"/api/v1/admin/users/{u['id']}")).json()
         assert u_after["department_id"] is None
 
 
@@ -463,7 +463,7 @@ class TestUserSearchSubtree:
         ]
         for uname, dn, dept_id in users:
             await admin_client.post(
-                "/api/v1/auth/users",
+                "/api/v1/admin/users",
                 json={
                     "username": uname, "password": "pass1234",
                     "display_name": dn, "department_id": dept_id,
@@ -473,45 +473,45 @@ class TestUserSearchSubtree:
 
     async def test_search_root_returns_subtree(self, admin_client: AsyncClient):
         await self._setup(admin_client)
-        r = await admin_client.get("/api/v1/auth/users", params={"q": "部门A"})
+        r = await admin_client.get("/api/v1/admin/users", params={"q": "部门A"})
         usernames = sorted(u["username"] for u in r.json()["users"])
         assert usernames == ["alice", "bob", "carol"]
 
     async def test_search_leaf_returns_direct_only(self, admin_client: AsyncClient):
         await self._setup(admin_client)
-        r = await admin_client.get("/api/v1/auth/users", params={"q": "小组A1a"})
+        r = await admin_client.get("/api/v1/admin/users", params={"q": "小组A1a"})
         usernames = sorted(u["username"] for u in r.json()["users"])
         assert usernames == ["carol"]
 
     async def test_search_mid_level(self, admin_client: AsyncClient):
         await self._setup(admin_client)
-        r = await admin_client.get("/api/v1/auth/users", params={"q": "子部门A1"})
+        r = await admin_client.get("/api/v1/admin/users", params={"q": "子部门A1"})
         usernames = sorted(u["username"] for u in r.json()["users"])
         assert usernames == ["bob", "carol"]
 
     async def test_search_display_name_still_works(self, admin_client: AsyncClient):
         await self._setup(admin_client)
-        r = await admin_client.get("/api/v1/auth/users", params={"q": "Bob"})
+        r = await admin_client.get("/api/v1/admin/users", params={"q": "Bob"})
         usernames = sorted(u["username"] for u in r.json()["users"])
         assert usernames == ["bob"]
 
     async def test_search_username_still_works(self, admin_client: AsyncClient):
         await self._setup(admin_client)
-        r = await admin_client.get("/api/v1/auth/users", params={"q": "eve"})
+        r = await admin_client.get("/api/v1/admin/users", params={"q": "eve"})
         usernames = sorted(u["username"] for u in r.json()["users"])
         assert usernames == ["eve"]
 
     async def test_search_no_match(self, admin_client: AsyncClient):
         await self._setup(admin_client)
         r = await admin_client.get(
-            "/api/v1/auth/users", params={"q": "noSuchUser_or_dept_xyz"}
+            "/api/v1/admin/users", params={"q": "noSuchUser_or_dept_xyz"}
         )
         assert r.json()["users"] == []
 
     async def test_search_count_for_subtree(self, admin_client: AsyncClient):
         await self._setup(admin_client)
         r = await admin_client.get(
-            "/api/v1/auth/users", params={"q": "部门A", "limit": 1}
+            "/api/v1/admin/users", params={"q": "部门A", "limit": 1}
         )
         # total spans full subtree even if limit=1
         assert r.json()["total"] == 3

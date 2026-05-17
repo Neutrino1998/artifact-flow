@@ -110,7 +110,7 @@ PATCH /api/v1/auth/me
 `department_id` 用 Pydantic `model_fields_set` 区分"未传"与"显式 null（清空）"：
 
 ```http
-PUT /api/v1/auth/users/u-abc
+PUT /api/v1/admin/users/u-abc
 {"department_id": null}              // 清空归属
 {"display_name": "..."}              // 仅改 display_name，不动 department_id
 ```
@@ -127,7 +127,7 @@ PUT /api/v1/auth/users/u-abc
 ### GET `/users/{user_id}/impact` — 删前 impact（admin）
 
 ```http
-GET /api/v1/auth/users/u-abc/impact
+GET /api/v1/admin/users/u-abc/impact
 200 OK
 {"conversation_count": 17}
 ```
@@ -150,7 +150,7 @@ GET /api/v1/auth/users/u-abc/impact
 - bcrypt hash 阶段并行（`asyncio.gather + asyncio.to_thread`），300 行约 6 秒，event loop 不卡
 
 ```http
-POST /api/v1/auth/users/bulk-import
+POST /api/v1/admin/users/bulk-import
 Content-Type: multipart/form-data
 file=@users.csv
 
@@ -168,7 +168,7 @@ file=@users.csv
 ### POST `/users/bulk-action` — 批量动作（admin）
 
 ```http
-POST /api/v1/auth/users/bulk-action
+POST /api/v1/admin/users/bulk-action
 {
   "ids": ["u-1", "u-2", ...],         // 1-200, 同请求内自动去重
   "action": "disable",                 // | enable | delete | set_department
@@ -190,7 +190,7 @@ POST /api/v1/auth/users/bulk-action
 ### GET `/users/bulk-impact` — 批量删前 impact（admin）
 
 ```http
-GET /api/v1/auth/users/bulk-impact?ids=u-1&ids=u-2&ids=u-3
+GET /api/v1/admin/users/bulk-impact?ids=u-1&ids=u-2&ids=u-3
 
 200 OK
 {"user_count": 3, "conversation_count": 27}
@@ -273,7 +273,7 @@ DELETE /api/v1/departments/dept-x
 {"detail": {"message": "Department is not empty", "user_count": 5, "child_count": 2}}
 ```
 
-提示先迁走（批量改部门走 `/auth/users/bulk-action` `set_department`）。
+提示先迁走（批量改部门走 `/admin/users/bulk-action` `set_department`）。
 
 ### POST `/resolve` — 路径解析（admin 显式调用）
 
@@ -289,7 +289,7 @@ POST /api/v1/departments/resolve
 
 ### 用户搜索按部门子树扩展
 
-`GET /api/v1/auth/users?q=...` 的 `q` 不只匹配 `username` / `display_name`，也匹配部门名 ILIKE，并**展开整个子树**（搜根部门名返回该条线下全部用户）。实现见 `src/utils/department_tree.expand_subtree`。
+`GET /api/v1/admin/users?q=...` 的 `q` 不只匹配 `username` / `display_name`，也匹配部门名 ILIKE，并**展开整个子树**（搜根部门名返回该条线下全部用户）。实现见 `src/utils/department_tree.expand_subtree`。
 
 ---
 

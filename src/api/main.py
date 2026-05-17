@@ -15,7 +15,7 @@ from sqlalchemy import text
 
 from config import config, validate_config
 from api.dependencies import init_globals, close_globals, get_db_manager, get_redis_client
-from api.routers import admin, auth, chat, artifacts, departments, stream
+from api.routers import admin, admin_users, auth, chat, artifacts, departments, stream
 from utils.doc_converter import DocConverter
 from utils.logger import get_logger
 
@@ -98,6 +98,11 @@ def create_app() -> FastAPI:
     )
     app.include_router(
         admin.router,
+        prefix="/api/v1/admin",
+        tags=["admin"]
+    )
+    app.include_router(
+        admin_users.router,
         prefix="/api/v1/admin",
         tags=["admin"]
     )
