@@ -14,7 +14,7 @@ from datetime import datetime
 
 from sqlalchemy.exc import IntegrityError
 
-from core.engine import EngineHooks, create_initial_state, execute_loop
+from core.engine import EngineHooks, create_initial_state, execute_loop, finalize_metrics
 from core.events import StreamEventType, ExecutionEvent
 from core.conversation_manager import ConversationManager
 from tools.base import BaseTool
@@ -190,6 +190,56 @@ class ExecutionController:
                     artifact_manager=self.artifact_manager,
                     emit=emit_to_queue,
                 )
+            except asyncio.CancelledError:
+                # External cancel cascaded into engine_task (lease fencing / shutdown).
+                # CancelledError is BaseException — bypasses `except Exception` below — so
+                # without this branch the in-memory state["events"] would die with the
+                # task, violating "events persist unconditionally" (CLAUDE.md / bug ④
+                # from 2026-05-14 incident). The cooperative path (RuntimeStore-driven
+                # cancel checked via hooks.check_cancelled) sets state["cancelled"] and
+                # returns normally — it never raises here. This branch fires only when
+                # the outer _wrapped task is cancelled (e.g. _renew_loop fencing) and
+                # stream_execute's finally cancels engine_task to propagate it inward.
+                #
+                # engine_task is its own asyncio.Task: once we catch this one cancel,
+                # subsequent awaits in the handler (_persist_events) run normally.
+                logger.warning(
+                    f"Engine task cancelled externally for {message_id} "
+                    f"(lease fencing/shutdown); persisting accumulated events"
+                )
+                initial_state["cancelled"] = True
+                initial_state["completed"] = True
+                # finalize_metrics is normally called by execute_loop; on this path it
+                # was interrupted, so do it here to keep execution_metrics serializable
+                # (datetimes → isoformat) before stuffing into the CANCELLED event data.
+                try:
+                    finalize_metrics(initial_state["execution_metrics"])
+                except Exception as fm_err:
+                    logger.warning(
+                        f"finalize_metrics failed on cancel for {message_id}: {fm_err}"
+                    )
+                initial_state["events"].append(ExecutionEvent(
+                    event_type=StreamEventType.CANCELLED.value,
+                    agent_name=None,
+                    data={
+                        "success": False,
+                        "cancelled": True,
+                        "conversation_id": conversation_id,
+                        "message_id": message_id,
+                        "reason": "external_cancel",
+                        "execution_metrics": initial_state.get("execution_metrics", {}),
+                    },
+                ))
+                try:
+                    await self._persist_events(message_id, initial_state)
+                except Exception as persist_err:
+                    # Swallow to preserve CancelledError propagation; loud-log so ops sees it.
+                    logger.exception(
+                        f"Persist-on-cancel failed for {message_id}: {persist_err}"
+                    )
+                # SSE is best-effort here (consumer likely gone too); skip yielding a
+                # terminal event. History reconstruction reads from the persisted events.
+                raise
             except Exception as e:
                 logger.exception(f"Engine error: {e}")
                 # Mark error on initial_state (final_state is still None at this point)
@@ -225,8 +275,17 @@ class ExecutionController:
                     break
                 yield event
         finally:
+            # On outer-task cancel, the generator's await above raises CancelledError;
+            # engine_task is independent and would otherwise keep running. Cancel it
+            # explicitly so its `except CancelledError` branch persists accumulated
+            # events before we unwind. Awaiting then absorbs the cancel — engine_task
+            # has already done the persist work.
             if not engine_task.done():
+                engine_task.cancel()
+            try:
                 await engine_task
+            except asyncio.CancelledError:
+                pass
 
         # Engine 已退出，不会再 drain 消息 — 立即取消活跃映射，
         # 使 /inject 端点正确返回 409 而非假装成功入队
