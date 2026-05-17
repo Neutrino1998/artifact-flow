@@ -174,6 +174,10 @@ class ExecutionController:
         # ========== 执行引擎 ==========
         event_queue: asyncio.Queue = asyncio.Queue()
         final_state = None
+        # Hoisted to function scope so the outer late-cancel handler (below
+        # post-processing) can read it. Stays False until _persist_events
+        # returns True in the inner try block.
+        events_persisted = False
 
         async def emit_to_queue(event_dict):
             """emit callback: 实时推送事件到 queue"""
@@ -287,203 +291,265 @@ class ExecutionController:
             except asyncio.CancelledError:
                 pass
 
-        # Engine 已退出，不会再 drain 消息 — 立即取消活跃映射，
-        # 使 /inject 端点正确返回 409 而非假装成功入队
-        if self._on_engine_exit:
-            await self._on_engine_exit(conversation_id, message_id)
-
-        # ========== Post-processing ==========
-        # Use initial_state as fallback if engine crashed before setting final_state
-        if final_state is None:
-            final_state = initial_state
-
-        # Layer 1: 早判 conversation 是否仍存在。
-        # 删除路径不抢 lease，conv 行可能在 engine 跑完前消失（DELETE /chat/{id}
-        # 或硬删用户触发的 CASCADE）。早返回跳过后续三段写库，避免撞 FK。
+        # ========== Late-cancel boundary ==========
+        # Outer cancel (lease fencing / shutdown) can arrive AFTER engine_task
+        # already finished — i.e., during any of the post-processing awaits below
+        # (_on_engine_exit, exists_async, flush_all, _persist_events). At that
+        # point engine_task.done() is already True so the generator's finally
+        # above is a no-op, and run_engine's `except CancelledError` cannot fire
+        # (it has already returned). Without this outer guard, CancelledError
+        # propagates straight through post-processing and skips _persist_events
+        # — re-introducing bug ④ in a narrower window.
+        #
+        # Strategy: catch CancelledError, late-persist if events haven't landed
+        # yet, then re-raise so the runner's cleanup still sees a cancelled task.
         try:
-            conv_alive = await self._with_db_retry(
-                lambda cm, er, am: cm.exists_async(conversation_id)
-            )
-        except Exception as exists_err:
-            # exists 探测的瞬断不应阻塞 post-processing —— 当作 alive 走原流程
-            logger.warning(
-                f"exists() probe failed for {conversation_id} (msg={message_id}), "
-                f"falling through to normal post-processing: {exists_err}"
-            )
-            conv_alive = True
+            # Engine 已退出，不会再 drain 消息 — 立即取消活跃映射，
+            # 使 /inject 端点正确返回 409 而非假装成功入队
+            if self._on_engine_exit:
+                await self._on_engine_exit(conversation_id, message_id)
 
-        if not conv_alive:
-            logger.info(
-                f"Conversation {conversation_id} deleted during execution, "
-                f"skip persistence (message_id={message_id})"
-            )
-            # Lease 由 runner 的 _wrapped finally → cleanup_execution 兜底释放
-            return
+            # ========== Post-processing ==========
+            # Use initial_state as fallback if engine crashed before setting final_state
+            if final_state is None:
+                final_state = initial_state
 
-        try:
-            response = final_state.get("response", "")
-            has_error = final_state.get("error", False)
-            is_cancelled = final_state.get("cancelled", False)
-
-            # Display-snapshot backfill. Message.response is display-only, and the
-            # frontend gates AssistantMessage on it being non-empty. The engine only
-            # packs tool-call-free prose into state["response"], so a turn cancelled
-            # mid-tool-call / mid-reasoning / during TTFT arrives here with response
-            # == "". Mirror the error path's placeholder so the turn still renders
-            # (and its execution flow is reconstructed from events).
-            display_response = (response or "*(已取消)*") if is_cancelled else response
-
-            # Flush dirty artifacts to DB
-            flush_error: Optional[str] = None
-            if self.artifact_manager:
-                try:
-                    await self.artifact_manager.flush_all(
-                        session_id, db_manager=self._db_manager
-                    )
-                except IntegrityError as flush_ie:
-                    # Layer 2: exists() 之后到 flush 之间 conv 被删（TOCTOU）
-                    logger.warning(
-                        f"Conversation {conversation_id} deleted mid-persist "
-                        f"(artifact phase, msg={message_id}): {flush_ie}"
-                    )
-                    return
-                except Exception as flush_err:
-                    logger.exception(f"Artifact flush failed after retries: {flush_err}")
-                    flush_error = f"Artifact persistence failed: {flush_err}"
-
-            # 终态事件：error 路径由 engine 已发（在 state["events"] 中），
-            # controller 负责 success / cancelled / flush_error 路径的终态事件。
-            terminal_event_dict = None
-            if is_cancelled:
-                terminal_event_dict = {
-                    "type": StreamEventType.CANCELLED.value,
-                    "timestamp": datetime.now().isoformat(),
-                    "data": {
-                        "success": False,
-                        "cancelled": True,
-                        "conversation_id": conversation_id,
-                        "message_id": message_id,
-                        "response": display_response,
-                        "execution_metrics": final_state.get("execution_metrics", {}),
-                    }
-                }
-            elif flush_error:
-                terminal_event_dict = {
-                    "type": StreamEventType.ERROR.value,
-                    "timestamp": datetime.now().isoformat(),
-                    "data": {
-                        "success": False,
-                        "conversation_id": conversation_id,
-                        "message_id": message_id,
-                        "error": flush_error,
-                        "execution_metrics": final_state.get("execution_metrics", {}),
-                    }
-                }
-            elif not has_error:
-                terminal_event_dict = {
-                    "type": StreamEventType.COMPLETE.value,
-                    "timestamp": datetime.now().isoformat(),
-                    "data": {
-                        "success": True,
-                        "conversation_id": conversation_id,
-                        "message_id": message_id,
-                        "response": response,
-                        "execution_metrics": final_state.get("execution_metrics", {}),
-                    }
-                }
-
-            if terminal_event_dict:
-                # 终态事件入库
-                final_state["events"].append(ExecutionEvent(
-                    event_type=terminal_event_dict["type"],
-                    agent_name=None,
-                    data=terminal_event_dict["data"],
-                ))
-
-            # 持久化事件 —— 必须先于 Message.response 更新。
-            # 新架构下 events 是历史 source of truth，持久化失败=下一轮恢复不了本轮。
-            # 持久化成功后再更新 Message.response，避免出现"显示成功 + 历史丢失"的假成功状态。
+            # Layer 1: 早判 conversation 是否仍存在。
+            # 删除路径不抢 lease，conv 行可能在 engine 跑完前消失（DELETE /chat/{id}
+            # 或硬删用户触发的 CASCADE）。早返回跳过后续三段写库，避免撞 FK。
             try:
-                events_persisted = await self._persist_events(message_id, final_state)
-            except IntegrityError as events_ie:
-                # Layer 2: events 写阶段命中 conv 删除的 TOCTOU
-                logger.warning(
-                    f"Conversation {conversation_id} deleted mid-persist "
-                    f"(events phase, msg={message_id}): {events_ie}"
+                conv_alive = await self._with_db_retry(
+                    lambda cm, er, am: cm.exists_async(conversation_id)
                 )
+            except Exception as exists_err:
+                # exists 探测的瞬断不应阻塞 post-processing —— 当作 alive 走原流程
+                logger.warning(
+                    f"exists() probe failed for {conversation_id} (msg={message_id}), "
+                    f"falling through to normal post-processing: {exists_err}"
+                )
+                conv_alive = True
+
+            if not conv_alive:
+                logger.info(
+                    f"Conversation {conversation_id} deleted during execution, "
+                    f"skip persistence (message_id={message_id})"
+                )
+                # Lease 由 runner 的 _wrapped finally → cleanup_execution 兜底释放
                 return
 
-            if not events_persisted:
-                # 持久化失败 → 整轮判定失败，覆盖终态为 ERROR，跳过 response/metadata 更新
-                logger.error(
-                    f"Aborting turn {message_id}: event persistence failed, "
-                    f"Message.response will not be updated"
-                )
-                terminal_event_dict = {
+            try:
+                response = final_state.get("response", "")
+                has_error = final_state.get("error", False)
+                is_cancelled = final_state.get("cancelled", False)
+
+                # Display-snapshot backfill. Message.response is display-only, and the
+                # frontend gates AssistantMessage on it being non-empty. The engine only
+                # packs tool-call-free prose into state["response"], so a turn cancelled
+                # mid-tool-call / mid-reasoning / during TTFT arrives here with response
+                # == "". Mirror the error path's placeholder so the turn still renders
+                # (and its execution flow is reconstructed from events).
+                display_response = (response or "*(已取消)*") if is_cancelled else response
+
+                # Flush dirty artifacts to DB
+                flush_error: Optional[str] = None
+                if self.artifact_manager:
+                    try:
+                        await self.artifact_manager.flush_all(
+                            session_id, db_manager=self._db_manager
+                        )
+                    except IntegrityError as flush_ie:
+                        # Layer 2: exists() 之后到 flush 之间 conv 被删（TOCTOU）
+                        logger.warning(
+                            f"Conversation {conversation_id} deleted mid-persist "
+                            f"(artifact phase, msg={message_id}): {flush_ie}"
+                        )
+                        return
+                    except Exception as flush_err:
+                        logger.exception(f"Artifact flush failed after retries: {flush_err}")
+                        flush_error = f"Artifact persistence failed: {flush_err}"
+
+                # 终态事件：error 路径由 engine 已发（在 state["events"] 中），
+                # controller 负责 success / cancelled / flush_error 路径的终态事件。
+                terminal_event_dict = None
+                if is_cancelled:
+                    terminal_event_dict = {
+                        "type": StreamEventType.CANCELLED.value,
+                        "timestamp": datetime.now().isoformat(),
+                        "data": {
+                            "success": False,
+                            "cancelled": True,
+                            "conversation_id": conversation_id,
+                            "message_id": message_id,
+                            "response": display_response,
+                            "execution_metrics": final_state.get("execution_metrics", {}),
+                        }
+                    }
+                elif flush_error:
+                    terminal_event_dict = {
+                        "type": StreamEventType.ERROR.value,
+                        "timestamp": datetime.now().isoformat(),
+                        "data": {
+                            "success": False,
+                            "conversation_id": conversation_id,
+                            "message_id": message_id,
+                            "error": flush_error,
+                            "execution_metrics": final_state.get("execution_metrics", {}),
+                        }
+                    }
+                elif not has_error:
+                    terminal_event_dict = {
+                        "type": StreamEventType.COMPLETE.value,
+                        "timestamp": datetime.now().isoformat(),
+                        "data": {
+                            "success": True,
+                            "conversation_id": conversation_id,
+                            "message_id": message_id,
+                            "response": response,
+                            "execution_metrics": final_state.get("execution_metrics", {}),
+                        }
+                    }
+
+                if terminal_event_dict:
+                    # 终态事件入库
+                    final_state["events"].append(ExecutionEvent(
+                        event_type=terminal_event_dict["type"],
+                        agent_name=None,
+                        data=terminal_event_dict["data"],
+                    ))
+
+                # 持久化事件 —— 必须先于 Message.response 更新。
+                # 新架构下 events 是历史 source of truth，持久化失败=下一轮恢复不了本轮。
+                # 持久化成功后再更新 Message.response，避免出现"显示成功 + 历史丢失"的假成功状态。
+                try:
+                    events_persisted = await self._persist_events(message_id, final_state)
+                except IntegrityError as events_ie:
+                    # Layer 2: events 写阶段命中 conv 删除的 TOCTOU
+                    logger.warning(
+                        f"Conversation {conversation_id} deleted mid-persist "
+                        f"(events phase, msg={message_id}): {events_ie}"
+                    )
+                    return
+
+                if not events_persisted:
+                    # 持久化失败 → 整轮判定失败，覆盖终态为 ERROR，跳过 response/metadata 更新
+                    logger.error(
+                        f"Aborting turn {message_id}: event persistence failed, "
+                        f"Message.response will not be updated"
+                    )
+                    terminal_event_dict = {
+                        "type": StreamEventType.ERROR.value,
+                        "timestamp": datetime.now().isoformat(),
+                        "data": {
+                            "success": False,
+                            "conversation_id": conversation_id,
+                            "message_id": message_id,
+                            "error": "Event persistence failed — turn aborted, please retry",
+                            "execution_metrics": final_state.get("execution_metrics", {}),
+                        }
+                    }
+                else:
+                    # events 已落库 → 可以更新 Message.response 和 metadata（best-effort）
+                    # display_response 已处理 success / cancelled；error 单独兜底文案。
+                    final_response = (response or "An error occurred during execution.") if has_error else display_response
+                    try:
+                        await self._with_db_retry(
+                            lambda cm, er, am: cm.update_response_async(
+                                conv_id=conversation_id, message_id=message_id, response=final_response,
+                            )
+                        )
+                    except Exception as resp_err:
+                        # events 已成功 → 历史正确，仅显示可能短暂落后，不把终态转为 ERROR
+                        logger.warning(
+                            f"Message.response update failed for {message_id} "
+                            f"(events already persisted, display may lag): {resp_err}"
+                        )
+
+                    metadata_updates = {}
+                    always_allowed = final_state.get("always_allowed_tools", [])
+                    if always_allowed:
+                        metadata_updates["always_allowed_tools"] = always_allowed
+                    execution_metrics = final_state.get("execution_metrics", {})
+                    if execution_metrics:
+                        metadata_updates["execution_metrics"] = execution_metrics
+                    if metadata_updates:
+                        try:
+                            await self._with_db_retry(
+                                lambda cm, er, am: cm.update_message_metadata_async(
+                                    conv_id=conversation_id, message_id=message_id, metadata=metadata_updates,
+                                )
+                            )
+                        except Exception as meta_err:
+                            logger.warning(
+                                f"Message.metadata update failed for {message_id}: {meta_err}"
+                            )
+
+                    logger.info("Streaming execution completed")
+
+                # 发送终态到 SSE（error 已由 engine 实时推送）
+                if terminal_event_dict:
+                    yield terminal_event_dict
+
+            except Exception as e:
+                logger.exception(f"Error in post-processing: {e}")
+                yield {
                     "type": StreamEventType.ERROR.value,
                     "timestamp": datetime.now().isoformat(),
                     "data": {
                         "success": False,
                         "conversation_id": conversation_id,
                         "message_id": message_id,
-                        "error": "Event persistence failed — turn aborted, please retry",
-                        "execution_metrics": final_state.get("execution_metrics", {}),
+                        "error": str(e),
                     }
                 }
-            else:
-                # events 已落库 → 可以更新 Message.response 和 metadata（best-effort）
-                # display_response 已处理 success / cancelled；error 单独兜底文案。
-                final_response = (response or "An error occurred during execution.") if has_error else display_response
-                try:
-                    await self._with_db_retry(
-                        lambda cm, er, am: cm.update_response_async(
-                            conv_id=conversation_id, message_id=message_id, response=final_response,
-                        )
-                    )
-                except Exception as resp_err:
-                    # events 已成功 → 历史正确，仅显示可能短暂落后，不把终态转为 ERROR
-                    logger.warning(
-                        f"Message.response update failed for {message_id} "
-                        f"(events already persisted, display may lag): {resp_err}"
-                    )
-
-                metadata_updates = {}
-                always_allowed = final_state.get("always_allowed_tools", [])
-                if always_allowed:
-                    metadata_updates["always_allowed_tools"] = always_allowed
-                execution_metrics = final_state.get("execution_metrics", {})
-                if execution_metrics:
-                    metadata_updates["execution_metrics"] = execution_metrics
-                if metadata_updates:
-                    try:
-                        await self._with_db_retry(
-                            lambda cm, er, am: cm.update_message_metadata_async(
-                                conv_id=conversation_id, message_id=message_id, metadata=metadata_updates,
-                            )
-                        )
-                    except Exception as meta_err:
-                        logger.warning(
-                            f"Message.metadata update failed for {message_id}: {meta_err}"
-                        )
-
-                logger.info("Streaming execution completed")
-
-            # 发送终态到 SSE（error 已由 engine 实时推送）
-            if terminal_event_dict:
-                yield terminal_event_dict
-
-        except Exception as e:
-            logger.exception(f"Error in post-processing: {e}")
-            yield {
-                "type": StreamEventType.ERROR.value,
-                "timestamp": datetime.now().isoformat(),
-                "data": {
-                    "success": False,
-                    "conversation_id": conversation_id,
-                    "message_id": message_id,
-                    "error": str(e),
+        except asyncio.CancelledError:
+            # Late-cancel landed mid-post-processing (between engine_task exit and
+            # _persist_events). If events haven't been written yet, do a best-effort
+            # idempotent persist before propagating. `events_persisted` was hoisted
+            # to function scope so we can see whatever the inner try managed to set.
+            #
+            # Idempotency note: _persist_events uses {message_id}-{seq} stable IDs
+            # and batch_create short-circuits to [] when ALL ids already exist.
+            # That short-circuit breaks if we append a NEW event after a partial
+            # write — so only append the CANCELLED terminal when no terminal exists
+            # yet. If post-processing already appended COMPLETE/ERROR before the
+            # cancel hit but persist hadn't yet run, we keep that terminal as-is
+            # (engine semantically completed; cancel only hit infrastructure).
+            if not events_persisted and final_state is not None:
+                terminal_types = {
+                    StreamEventType.COMPLETE.value,
+                    StreamEventType.ERROR.value,
+                    StreamEventType.CANCELLED.value,
                 }
-            }
+                has_terminal = any(
+                    e.event_type in terminal_types
+                    for e in final_state.get("events", [])
+                )
+                if not has_terminal:
+                    final_state["cancelled"] = True
+                    final_state["events"].append(ExecutionEvent(
+                        event_type=StreamEventType.CANCELLED.value,
+                        agent_name=None,
+                        data={
+                            "success": False,
+                            "cancelled": True,
+                            "conversation_id": conversation_id,
+                            "message_id": message_id,
+                            "reason": "external_cancel_post_processing",
+                        },
+                    ))
+                try:
+                    await self._persist_events(message_id, final_state)
+                    logger.info(
+                        f"Late-cancel persist succeeded for {message_id} "
+                        f"(cancel hit mid-post-processing)"
+                    )
+                except Exception as persist_err:
+                    # Loud-log but never shadow the propagating CancelledError —
+                    # the runner's cleanup needs to see a cancelled task.
+                    logger.exception(
+                        f"Late-cancel persist failed for {message_id}: {persist_err}"
+                    )
+            raise
 
     async def _persist_events(self, message_id: str, final_state: Dict[str, Any]) -> bool:
         """

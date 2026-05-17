@@ -209,6 +209,187 @@ class TestPersistOnExternalCancel:
             "a same-task synchronous wedge, but it must at least signal sibling tasks)."
         )
 
+    async def test_external_cancel_during_exists_async_persists_events(self):
+        """
+        Reviewer-flagged gap: when the outer cancel arrives AFTER execute_loop has
+        already returned (during post-processing — exists_async / flush_all / etc.),
+        engine_task is already done. stream_execute's finally is a no-op, and
+        run_engine's `except CancelledError` cannot fire (it already returned
+        successfully). Without an outer cancel-boundary around post-processing,
+        the CancelledError propagates past _persist_events and events die.
+
+        Reproduction: execute_loop returns clean, exists_async sleeps, we cancel.
+        Without the fix, batch_create stays at 0. With the fix, the outer
+        try/except CancelledError late-persists once.
+        """
+        cm = _make_mock_conversation_manager()
+        # Make exists_async block long enough for us to cancel mid-await
+        async def slow_exists(*args, **kwargs):
+            await asyncio.sleep(60)
+            return True
+        cm.exists_async = AsyncMock(side_effect=slow_exists)
+
+        am = _make_mock_artifact_manager()
+        er, batches = _capturing_event_repo()
+        ctrl = _make_controller(cm, er, am)
+
+        exists_called = asyncio.Event()
+        original_exists = cm.exists_async
+
+        async def signal_then_block(*args, **kwargs):
+            exists_called.set()
+            await asyncio.sleep(60)
+            return True
+
+        cm.exists_async = AsyncMock(side_effect=signal_then_block)
+
+        async def fake_execute_loop(**kwargs):
+            # Execute_loop completes normally — accumulates an event then returns.
+            # The cancel arrives AFTER this returns, during post-processing.
+            kwargs["state"]["events"].append(ExecutionEvent(
+                event_type=StreamEventType.LLM_COMPLETE.value,
+                agent_name="lead_agent",
+                data={"content": "engine ran fine; cancel hit post-processing"},
+                is_historical=False,
+            ))
+            return {
+                **kwargs["state"],
+                "completed": True,
+                "response": "ok",
+                "error": False,
+                "cancelled": False,
+            }
+
+        async def consume():
+            return [event async for event in ctrl.stream_execute(
+                user_input="hi",
+                conversation_id="conv-test",
+                parent_message_id=None,
+                message_id="msg-test",
+            )]
+
+        with patch("core.controller.execute_loop", side_effect=fake_execute_loop):
+            consume_task = asyncio.create_task(consume())
+            # Wait until post-processing is blocked inside exists_async
+            await asyncio.wait_for(exists_called.wait(), timeout=5)
+            await asyncio.sleep(0)
+            consume_task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await consume_task
+
+        # The late-cancel handler must have run a single batch_create
+        assert len(batches) == 1, (
+            f"P1 regression: cancel during exists_async dropped events "
+            f"(batch_create called {len(batches)} times, expected 1)"
+        )
+        batch = batches[0]
+        event_types = [e["event_type"] for e in batch]
+        # LLM_COMPLETE produced by execute_loop survived
+        assert StreamEventType.LLM_COMPLETE.value in event_types
+        # Late-cancel handler appended a CANCELLED terminal with the
+        # post_processing-specific reason
+        cancelled = [e for e in batch if e["event_type"] == StreamEventType.CANCELLED.value]
+        assert len(cancelled) == 1
+        assert cancelled[0]["data"]["reason"] == "external_cancel_post_processing"
+
+        # Downstream best-effort updates skipped (cancel hit before them)
+        cm.update_response_async.assert_not_called()
+
+    async def test_late_cancel_keeps_existing_terminal_event(self):
+        """
+        If post-processing appended a COMPLETE/ERROR terminal (line 397) but cancel
+        hit before _persist_events, the engine semantically DID complete — the
+        cancel only affected persistence infrastructure. The late-persist handler
+        must keep that terminal as-is (not overwrite with CANCELLED). Also
+        protects batch_create's all-or-nothing duplicate-skip path: appending a
+        new event after a partial write would break idempotency.
+        """
+        cm = _make_mock_conversation_manager()
+        am = _make_mock_artifact_manager()
+
+        # Make _persist_events block — we cancel after the terminal has been
+        # appended (line 397) but before the persist completes.
+        er = MagicMock()
+        persist_started = asyncio.Event()
+        persisted_batches = []
+
+        async def slow_batch_create(events):
+            persist_started.set()
+            await asyncio.sleep(60)
+            persisted_batches.append(events)
+            return []
+
+        er.batch_create = slow_batch_create
+        ctrl = _make_controller(cm, er, am)
+
+        async def fake_execute_loop(**kwargs):
+            kwargs["state"]["events"].append(ExecutionEvent(
+                event_type=StreamEventType.LLM_COMPLETE.value,
+                agent_name="lead_agent",
+                data={"content": "engine done"},
+                is_historical=False,
+            ))
+            return {
+                **kwargs["state"],
+                "completed": True,
+                "response": "ok",
+                "error": False,
+                "cancelled": False,
+            }
+
+        # Track all batches via a second patch — the late-cancel retry uses the
+        # same er.batch_create, so we need to also capture its call.
+        # Easier: make slow_batch_create only block on FIRST call.
+        call_count = {"n": 0}
+
+        async def conditional_slow_batch(events):
+            call_count["n"] += 1
+            if call_count["n"] == 1:
+                persist_started.set()
+                await asyncio.sleep(60)  # block first call long enough to cancel
+                persisted_batches.append(events)
+            else:
+                # Late-cancel retry — record and return
+                persisted_batches.append(events)
+            return []
+
+        er.batch_create = conditional_slow_batch
+
+        async def consume():
+            return [event async for event in ctrl.stream_execute(
+                user_input="hi",
+                conversation_id="conv-test",
+                parent_message_id=None,
+                message_id="msg-test",
+            )]
+
+        with patch("core.controller.execute_loop", side_effect=fake_execute_loop):
+            consume_task = asyncio.create_task(consume())
+            await asyncio.wait_for(persist_started.wait(), timeout=5)
+            await asyncio.sleep(0)
+            consume_task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await consume_task
+
+        # Late-cancel handler should have called batch_create a second time
+        assert call_count["n"] == 2, (
+            f"Expected late-cancel handler to retry batch_create, got "
+            f"{call_count['n']} calls. (First call was cancelled mid-sleep, "
+            f"second is the late-persist.)"
+        )
+        # The retry batch should contain LLM_COMPLETE + the COMPLETE terminal
+        # appended by post-processing — NOT a fresh CANCELLED event (engine
+        # completed successfully; the cancel only hit infrastructure).
+        retry_batch = persisted_batches[-1]
+        event_types = [e["event_type"] for e in retry_batch]
+        assert StreamEventType.COMPLETE.value in event_types, (
+            f"COMPLETE terminal should be preserved, got: {event_types}"
+        )
+        assert StreamEventType.CANCELLED.value not in event_types, (
+            f"CANCELLED should NOT be re-appended when terminal already exists, "
+            f"got: {event_types}"
+        )
+
     async def test_persist_failure_on_cancel_does_not_shadow_cancellederror(self):
         """
         If _persist_events itself fails inside the cancel-handler, the failure must
