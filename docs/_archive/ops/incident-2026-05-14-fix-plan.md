@@ -10,21 +10,28 @@
 
 ## 优先级总览
 
-| 优先级 | PR | 说明 |
-|---|---|---|
-| P0 | PR-1 Layer 2 改造为锚定 + RapidFuzz 校验 | 用有界算法替换 fuzzysearch,关掉病态输入炸 CPU 的可能、保留 Layer 2 救援能力 |
-| P0(运维) | 前端 compose 临时覆盖 | 非 PR,内网机直接操作 |
-| P1 | PR-obs-lite 轻量可观测性框架 | watchdog(自动栈 dump)+ sampler(jsonl 采样)+ `/admin/runtime` + 分析脚本;不动 DB schema、不上 Prometheus |
-| P1 | PR-3 fencing 事件持久化 | 修复 bug ④,恢复审计/回放完整性 |
-| P2 | PR-forensics-bundle 取证工具 + 部署前置 | release 内置 py-spy / preflight 检查 / SOP |
-| P2 | PR-5 前端镜像重建 | 正式消除 HOSTNAME 误配 |
-| P3 | 文档 runbook | 固化"服务卡死"排查流程 |
+| 优先级 | PR | 状态 | 说明 |
+|---|---|---|---|
+| P0 | PR-1 Layer 2 改造为锚定 + RapidFuzz 校验 | ✅ 已完成 | 用有界算法替换 fuzzysearch,关掉病态输入炸 CPU 的可能、保留 Layer 2 救援能力 |
+| P0(运维) | 前端 compose 临时覆盖 | — | 非 PR,内网机直接操作 |
+| P1 | PR-obs-lite 轻量可观测性框架 | 待启动 | watchdog(自动栈 dump)+ sampler(jsonl 采样)+ `/admin/runtime` + 分析脚本;不动 DB schema、不上 Prometheus |
+| P1 | PR-3 fencing 事件持久化 | 待启动 | 修复 bug ④,恢复审计/回放完整性 |
+| P2 | PR-forensics-bundle 取证工具 + 部署前置 | 待启动 | release 内置 py-spy / preflight 检查 / SOP |
+| P2 | PR-5 前端镜像重建 | 待启动 | 正式消除 HOSTNAME 误配 |
+| P3 | 文档 runbook | 待启动 | 固化"服务卡死"排查流程 |
 
 **小版本迭代打包**:PR-1 + PR-obs-lite(+ PR-3)走同一个 release tag,定位为"事故后加固"——一边修根因,一边补让下次事故 30 秒能拿到栈的观测。PR 独立,可分别回滚。
 
 ---
 
-## PR-1:Layer 2 改造为锚定 + RapidFuzz 校验(P0)
+## PR-1:Layer 2 改造为锚定 + RapidFuzz 校验(P0)✅ 已完成
+
+**落地记录**(commits 在 `main`):
+- `d295791` v6 算法 + 测试骨架(`fuzzysearch` → `rapidfuzz`,752 通过)
+- `1cf6703` reviewer 反馈 ①:同 center 等距不同 span 的静默选择 → `bail_ambiguous`
+- `b4c551a` reviewer 反馈 ②:`MAX_FUZZY_OLD_STR_LEN=10000` 硬上界 → `bail_budget`(实测 m≈400K 后 Step 1-3 Python 开销本身超 deadline)
+
+下方 spec 保留原文(包含 v1→v6 演进、决策依据、5 轮 review)作为审计材料。`bail_size`/`FUZZY_OLD_STR_{MIN,MAX}_LEN` 在第二轮 review 后被合并到 `bail_budget` + `MAX_FUZZY_OLD_STR_LEN`,常量表与下方略有出入,以代码为准。
 
 **目标**:用"先取稀有精确锚点收窄搜索窗口,再在小窗口内做有界 Levenshtein 校验"的算法替换现有 `fuzzysearch.find_near_matches`。把最坏成本从"文档熵的函数"变成"自选的常数",同时**保留** Layer 2 兜底能力。
 
