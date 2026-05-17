@@ -8,10 +8,14 @@ failed repeatedly. Two failure classes:
    that are actually separated by intermediate content.
 2. "Failed to find matching text" — model hallucinated spaces between CJK
    and Latin/digit characters (e.g. "普恵 AI" vs "普恵AI").
+
+These exercise the free ``compute_update`` dispatcher (Layer 0/1/2). The
+algorithm-level v6 tests live in ``tests/builtin/test_update_artifact.py``.
 """
 
 import pytest
-from tools.builtin.artifact_ops import ArtifactMemory
+
+from tools.builtin.update_artifact import compute_update
 
 
 # ============================================================
@@ -56,14 +60,6 @@ class TestCase1_NonAdjacentLines:
     """Model hallucinated items 3 and 4 as adjacent, but they're separated
     by a whole section. This is a model error, not an algorithm bug."""
 
-    def setup_method(self):
-        self.artifact = ArtifactMemory(
-            artifact_id="task_plan",
-            content_type="text/markdown",
-            title="金融AI新闻稿件任务计划",
-            content=TASK_PLAN_CONTENT,
-        )
-
     def test_non_adjacent_lines_rejected(self):
         """Model sends old_str spanning non-adjacent lines → should fail."""
         old_str = (
@@ -75,17 +71,17 @@ class TestCase1_NonAdjacentLines:
             "4. [✓] 撰写新闻稿部分1 — lead_agent — 已完成\n"
             "5. [✗] 爬取文章2 — crawl_agent — 执行中"
         )
-        success, msg, _, _ = self.artifact.compute_update(old_str, new_str)
-        assert not success
-        print(f"Correctly rejected: {msg}")
+        info = compute_update(TASK_PLAN_CONTENT, old_str, new_str)
+        assert not info.success
+        print(f"Correctly rejected: {info.message}")
 
     def test_single_line_update_succeeds(self):
         """Correct approach: update one line at a time → should succeed."""
         old_str = "3. [✗] 爬取文章1 — crawl_agent — 执行中"
         new_str = "3. [✓] 爬取文章1 — crawl_agent — 已完成"
-        success, msg, new_content, info = self.artifact.compute_update(old_str, new_str)
-        assert success
-        assert "3. [✓] 爬取文章1 — crawl_agent — 已完成" in new_content
+        info = compute_update(TASK_PLAN_CONTENT, old_str, new_str)
+        assert info.success
+        assert "3. [✓] 爬取文章1 — crawl_agent — 已完成" in info.new_content
 
 
 # ============================================================
@@ -148,28 +144,16 @@ class TestCase2_CJKLatinSpaceHallucination:
     """Model hallucinates spaces between CJK and Latin/digit chars.
     E.g. "普恵AI" → "普恵 AI", "千問3.5" → "千問 3.5".
 
-    DMP match_main returns -1 even though the text is semantically identical.
-    This is the more interesting case — the algorithm could potentially
-    handle this if we normalize whitespace or lower the threshold."""
-
-    def setup_method(self):
-        self.artifact = ArtifactMemory(
-            artifact_id="news_draft_ja",
-            content_type="text/markdown",
-            title="2026年3月AI金融技術ニュース（日本語版）",
-            content=JA_ARTICLE_CONTENT,
-        )
+    Normalized match (Layer 1) handles this by collapsing CJK-Latin spaces."""
 
     def test_cjk_space_hallucination_now_succeeds(self):
         """CJK-Latin space diffs should be handled by normalized match."""
-        success, msg, new_content, info = self.artifact.compute_update(
-            JA_MODEL_OLD_STR, JA_MODEL_NEW_STR
-        )
-        assert success, f"Expected success but got: {msg}"
-        assert info["match_type"] == "normalized"
+        info = compute_update(JA_ARTICLE_CONTENT, JA_MODEL_OLD_STR, JA_MODEL_NEW_STR)
+        assert info.success, f"Expected success but got: {info.message}"
+        assert info.match_type == "normalized"
         # Citation should be removed in the result
-        assert "[出典｜アリババが3つの中型千問3.5新モデルをリリース" not in new_content
-        print(f"Result: {msg}, similarity={info['similarity']:.1%}")
+        assert "[出典｜アリババが3つの中型千問3.5新モデルをリリース" not in info.new_content
+        print(f"Result: {info.message}, similarity={info.similarity:.1%}")
 
     def test_exact_text_succeeds(self):
         """Sanity check: using the actual text (no hallucinated spaces) works."""
@@ -180,15 +164,12 @@ class TestCase2_CJKLatinSpaceHallucination:
             "今後半年以内に、100以上の業界応用が千問3.5 APIに接続し、"
             "AI技術が「クラウド実験」から真に「産業落地」へと進むと予想されています。\n\n---"
         )
-        success, msg, new_content, info = self.artifact.compute_update(
-            JA_ACTUAL_TEXT, actual_new_str
-        )
-        assert success
-        assert "[出典｜" not in new_content  # citation removed
+        info = compute_update(JA_ARTICLE_CONTENT, JA_ACTUAL_TEXT, actual_new_str)
+        assert info.success
+        assert "[出典｜" not in info.new_content
 
     def test_space_diff_count(self):
         """Show how many space diffs exist between model text and actual."""
-        # Count the character-level differences
         import difflib
         s = difflib.SequenceMatcher(None, JA_MODEL_OLD_STR, JA_ACTUAL_TEXT)
         diffs = []
@@ -201,21 +182,18 @@ class TestCase2_CJKLatinSpaceHallucination:
 
     def test_normalized_match_preserves_surrounding_content(self):
         """Ensure normalization match doesn't corrupt text outside the matched region."""
-        success, msg, new_content, info = self.artifact.compute_update(
-            JA_MODEL_OLD_STR, JA_MODEL_NEW_STR
-        )
-        assert success
+        info = compute_update(JA_ARTICLE_CONTENT, JA_MODEL_OLD_STR, JA_MODEL_NEW_STR)
+        assert info.success
         # The preceding paragraph should be untouched
-        assert "ModelScope（魔搭）プラットフォーム" in new_content
+        assert "ModelScope（魔搭）プラットフォーム" in info.new_content
         # The article header should be untouched
-        assert "## アリババ千問3.5モデルがリリース" in new_content
+        assert "## アリババ千問3.5モデルがリリース" in info.new_content
 
 
 # ============================================================
 # Case 2b: Citation-only removal (simpler, from same session)
 # ============================================================
 
-# The successful v4 fuzzy match case (98.6% similarity) — for comparison
 JA_WIND_ALICE_OLD_STR = """\
 金融機関にとって、Wind Alice のオンラインは投資研究効率の著しい向上と決定ロジックのスマート化アップグレードを意味します。従業者にとって、AI Agent の使用をマスターすることが新たな核心的競争力となります。金融データターミナルがスマート決定パートナーへと加速的に転換するにつれて、従来の投資研究作業モードは深い変革を迎えるでしょう。
 
@@ -232,31 +210,22 @@ JA_WIND_ALICE_ACTUAL = """\
 
 
 class TestCase2b_ShortCJKSpaceDiff:
-    """Same type of CJK-Latin space hallucination but shorter text.
-    This one SUCCEEDED at 98.6% in production — useful as baseline."""
-
-    def setup_method(self):
-        # Build a minimal artifact containing the Wind Alice section
-        self.artifact = ArtifactMemory(
-            artifact_id="news_draft_ja",
-            content_type="text/markdown",
-            title="Test",
-            content=f"前文...\n\n{JA_WIND_ALICE_ACTUAL}\n\n後文...",
-        )
+    """Same type of CJK-Latin space hallucination but shorter text."""
 
     def test_short_space_diff_succeeds(self):
-        """Shorter text with fewer space diffs → should succeed (98.6%)."""
+        """Shorter text with fewer space diffs → should succeed."""
+        content = f"前文...\n\n{JA_WIND_ALICE_ACTUAL}\n\n後文..."
         new_str = JA_WIND_ALICE_OLD_STR.replace(
-            "\n[出典｜Wind Alice スマート金融アシスタントがオンライン：AI Agent が商品決定ロジックを再構築](https://m.163.com/dy/article/KN5U1AN005198RSU.html)\n",
-            "\n"
+            "\n[出典｜Wind Alice スマート金融アシスタントがオンライン："
+            "AI Agent が商品決定ロジックを再構築]"
+            "(https://m.163.com/dy/article/KN5U1AN005198RSU.html)\n",
+            "\n",
         )
-        success, msg, new_content, info = self.artifact.compute_update(
-            JA_WIND_ALICE_OLD_STR, new_str
-        )
-        print(f"Result: success={success}, msg={msg}")
-        if info:
-            print(f"Similarity: {info.get('similarity', 'N/A')}")
-        assert success
+        info = compute_update(content, JA_WIND_ALICE_OLD_STR, new_str)
+        print(f"Result: success={info.success}, msg={info.message}")
+        if info.similarity is not None:
+            print(f"Similarity: {info.similarity}")
+        assert info.success
 
 
 # ============================================================
@@ -269,142 +238,82 @@ class TestIndexMapCorrectness:
 
     def test_rstrip_does_not_shift_indices(self):
         """Trailing spaces removed by rstrip must not shift the slice."""
-        artifact = ArtifactMemory(
-            artifact_id="test",
-            content_type="text/markdown",
-            title="Test",
-            content="foo  \nbar\nqux",
-        )
-        success, msg, result, _ = artifact.compute_update("foo\nbar", "X")
-        assert success
-        assert result == "X\nqux", f"Got {result!r}, trailing spaces corrupted the slice"
+        info = compute_update("foo  \nbar\nqux", "foo\nbar", "X")
+        assert info.success
+        assert info.new_content == "X\nqux", f"Got {info.new_content!r}"
 
     def test_nfkc_expansion_does_not_shift_indices(self):
         """NFKC expanding 1 char to 2 (Ⅳ→IV) must not shift the slice."""
-        artifact = ArtifactMemory(
-            artifact_id="test",
-            content_type="text/markdown",
-            title="Test",
-            content="章节Ⅳ结束-后文",
-        )
-        success, msg, result, _ = artifact.compute_update("章节IV结束", "X")
-        assert success
-        assert result == "X-后文", f"Got {result!r}, NFKC expansion corrupted the slice"
+        info = compute_update("章节Ⅳ结束-后文", "章节IV结束", "X")
+        assert info.success
+        assert info.new_content == "X-后文", f"Got {info.new_content!r}"
 
     def test_combined_nfkc_and_rstrip(self):
         """Both NFKC expansion and trailing space removal in one update."""
-        artifact = ArtifactMemory(
-            artifact_id="test",
-            content_type="text/markdown",
-            title="Test",
-            content="第Ⅲ章  \n内容\n后文",
-        )
-        success, msg, result, _ = artifact.compute_update("第III章\n内容", "X")
-        assert success
-        assert result == "X\n后文", f"Got {result!r}"
+        info = compute_update("第Ⅲ章  \n内容\n后文", "第III章\n内容", "X")
+        assert info.success
+        assert info.new_content == "X\n后文", f"Got {info.new_content!r}"
 
     def test_partial_nfkc_start_rejected(self):
         """Matching only 'I' from NFKC-expanded Ⅳ→IV must not succeed."""
-        artifact = ArtifactMemory(
-            artifact_id="test",
-            content_type="text/markdown",
-            title="Test",
-            content="Ⅳx",
-        )
-        success, msg, result, _ = artifact.compute_update("I", "X")
-        assert not success or result != "XⅣx", f"Partial NFKC start was not rejected: {result!r}"
+        info = compute_update("Ⅳx", "I", "X")
+        # Must NOT yield a corrupted slice that leaves Ⅳ intact
+        assert not info.success or info.new_content != "XⅣx"
 
     def test_partial_nfkc_end_rejected(self):
         """Matching only 'V' from NFKC-expanded Ⅳ→IV must not succeed."""
-        artifact = ArtifactMemory(
-            artifact_id="test",
-            content_type="text/markdown",
-            title="Test",
-            content="Ⅳx",
-        )
-        success, msg, result, _ = artifact.compute_update("V", "X")
-        assert not success or result != "Xx", f"Partial NFKC end was not rejected: {result!r}"
+        info = compute_update("Ⅳx", "V", "X")
+        assert not info.success or info.new_content != "Xx"
 
     def test_full_nfkc_match_still_works(self):
         """Matching the full NFKC expansion 'IV' from Ⅳ must still succeed."""
-        artifact = ArtifactMemory(
-            artifact_id="test",
-            content_type="text/markdown",
-            title="Test",
-            content="前文Ⅳ后文",
-        )
-        success, msg, result, info = artifact.compute_update("IV", "4")
-        assert success
-        assert result == "前文4后文", f"Got {result!r}"
+        info = compute_update("前文Ⅳ后文", "IV", "4")
+        assert info.success
+        assert info.new_content == "前文4后文", f"Got {info.new_content!r}"
 
     def test_hangul_decomposed_matches_precomposed(self):
-        """Decomposed Hangul Jamo in old_str must match precomposed syllables.
-        This requires whole-string NFKC (per-char NFKC cannot compose)."""
-        # 가 (U+AC00, precomposed) vs 가 (U+1100 U+1161, decomposed Jamo)
-        artifact = ArtifactMemory(
-            artifact_id="test",
-            content_type="text/markdown",
-            title="Test",
-            content="테스트: 가나다 끝",
-        )
-        # old_str uses decomposed Jamo for 가나다
-        old_str = "\u1100\u1161\u1102\u1161\u1103\u1161"  # 가나다
-        success, msg, result, info = artifact.compute_update(old_str, "ABC")
-        assert success, f"Hangul decomposed→precomposed failed: {msg}"
-        assert result == "테스트: ABC 끝", f"Got {result!r}"
+        """Decomposed Hangul Jamo in old_str must match precomposed syllables."""
+        # 가 (U+AC00) vs U+1100 U+1161 (decomposed Jamo)
+        old_str = "가나다"  # 가나다
+        info = compute_update("테스트: 가나다 끝", old_str, "ABC")
+        assert info.success, f"Hangul decomposed→precomposed failed: {info.message}"
+        assert info.new_content == "테스트: ABC 끝", f"Got {info.new_content!r}"
 
     def test_combining_accent_matches_precomposed(self):
         """Base + combining accent in old_str must match precomposed form."""
-        # é (U+00E9, precomposed) vs e + ́ (U+0065 U+0301, decomposed)
-        artifact = ArtifactMemory(
-            artifact_id="test",
-            content_type="text/markdown",
-            title="Test",
-            content="café latte",
-        )
-        old_str = "cafe\u0301"  # e + combining acute
-        success, msg, result, info = artifact.compute_update(old_str, "coffee")
-        assert success, f"Combining accent failed: {msg}"
-        assert result == "coffee latte", f"Got {result!r}"
+        old_str = "café"  # e + combining acute
+        info = compute_update("café latte", old_str, "coffee")
+        assert info.success, f"Combining accent failed: {info.message}"
+        assert info.new_content == "coffee latte", f"Got {info.new_content!r}"
 
 
 # ============================================================
-# Layer 2: fuzzysearch fallback
+# Layer 2: anchor-bounded fuzzy fallback
 # ============================================================
 
 class TestFuzzysearchFallback:
-    """Test that fuzzysearch Layer 2 catches cases that normalization misses."""
+    """Layer 2 catches cases that normalization misses."""
 
     def test_minor_typo_in_chinese(self):
         """A small character substitution that normalization can't fix."""
         content = "这是一段关于人工智能技术的详细介绍，包含了最新的研究进展和应用前景。"
-        artifact = ArtifactMemory(
-            artifact_id="test",
-            content_type="text/markdown",
-            title="Test",
-            content=content,
-        )
-        # Model sends slightly wrong text (技术 swapped to 枝术)
+        # Model sends slightly wrong text (技 swapped to 枝)
         old_str = "关于人工智能枝术的详细介绍"
         new_str = "关于人工智能技术的简要概述"
-        success, msg, new_content, info = artifact.compute_update(old_str, new_str)
-        assert success
-        assert info["match_type"] == "fuzzy"
-        assert "简要概述" in new_content
-        print(f"Result: {msg}")
+        info = compute_update(content, old_str, new_str)
+        assert info.success
+        assert info.match_type == "fuzzy"
+        assert "简要概述" in info.new_content
+        print(f"Result: {info.message}")
 
     def test_rejects_completely_wrong_text(self):
         """Totally unrelated old_str should still be rejected."""
-        artifact = ArtifactMemory(
-            artifact_id="test",
-            content_type="text/markdown",
-            title="Test",
-            content="Hello world, this is a test document about Python programming.",
+        info = compute_update(
+            "Hello world, this is a test document about Python programming.",
+            "これは完全に無関係なテキストです",
+            "replacement",
         )
-        success, msg, _, _ = artifact.compute_update(
-            "これは完全に無関係なテキストです", "replacement"
-        )
-        assert not success
+        assert not info.success
 
 
 # ============================================================
@@ -417,63 +326,35 @@ class TestNormalizationRules:
 
     def test_smart_quotes(self):
         """LLM sends curly quotes, artifact has straight quotes."""
-        artifact = ArtifactMemory(
-            artifact_id="test",
-            content_type="text/markdown",
-            title="Test",
-            content='He said "hello" and she replied \'world\'.',
-        )
-        # Model sends smart/curly quotes
-        old_str = 'He said \u201chello\u201d and she replied \u2018world\u2019.'
-        new_str = 'They greeted each other.'
-        success, msg, new_content, info = artifact.compute_update(old_str, new_str)
-        assert success
-        assert info["match_type"] == "normalized"
-        assert "They greeted each other." in new_content
+        content = 'He said "hello" and she replied \'world\'.'
+        old_str = 'He said “hello” and she replied ‘world’.'
+        info = compute_update(content, old_str, 'They greeted each other.')
+        assert info.success
+        assert info.match_type == "normalized"
+        assert "They greeted each other." in info.new_content
 
     def test_unicode_dashes(self):
         """LLM sends em dash, artifact has ASCII hyphen."""
-        artifact = ArtifactMemory(
-            artifact_id="test",
-            content_type="text/markdown",
-            title="Test",
-            content="AI - the future of technology - is here.",
-        )
-        # Model sends em dashes
-        old_str = "AI \u2014 the future of technology \u2014 is here."
-        new_str = "AI is here now."
-        success, msg, new_content, info = artifact.compute_update(old_str, new_str)
-        assert success
-        assert info["match_type"] == "normalized"
-        assert "AI is here now." in new_content
+        content = "AI - the future of technology - is here."
+        old_str = "AI — the future of technology — is here."
+        info = compute_update(content, old_str, "AI is here now.")
+        assert info.success
+        assert info.match_type == "normalized"
+        assert "AI is here now." in info.new_content
 
     def test_non_breaking_space(self):
         """LLM sends non-breaking space, artifact has regular space."""
-        artifact = ArtifactMemory(
-            artifact_id="test",
-            content_type="text/markdown",
-            title="Test",
-            content="100 million tokens cost 0.2 yuan.",
-        )
-        # Model sends non-breaking spaces
-        old_str = "100\u00a0million tokens cost\u00a00.2\u00a0yuan."
-        new_str = "Tokens are cheap."
-        success, msg, new_content, info = artifact.compute_update(old_str, new_str)
-        assert success
-        assert info["match_type"] == "normalized"
+        content = "100 million tokens cost 0.2 yuan."
+        old_str = "100 million tokens cost 0.2 yuan."
+        info = compute_update(content, old_str, "Tokens are cheap.")
+        assert info.success
+        assert info.match_type == "normalized"
 
     def test_mixed_normalization(self):
         """Multiple normalization issues in one old_str."""
-        artifact = ArtifactMemory(
-            artifact_id="test",
-            content_type="text/markdown",
-            title="Test",
-            content='研究报告 - "AI技术" 的应用前景非常广阔。',
-        )
-        # Model: em dash + smart quotes + CJK-Latin space
-        old_str = '研究报告 \u2014 \u201cAI 技术\u201d 的应用前景非常广阔。'
-        new_str = '结论：前景广阔。'
-        success, msg, new_content, info = artifact.compute_update(old_str, new_str)
-        assert success
-        assert info["match_type"] == "normalized"
-        assert "结论：前景广阔。" in new_content
+        content = '研究报告 - "AI技术" 的应用前景非常广阔。'
+        old_str = '研究报告 — “AI 技术” 的应用前景非常广阔。'
+        info = compute_update(content, old_str, '结论：前景广阔。')
+        assert info.success
+        assert info.match_type == "normalized"
+        assert "结论：前景广阔。" in info.new_content

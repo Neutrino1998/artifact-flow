@@ -14,11 +14,12 @@ from .artifact_ops import (
     ArtifactVersionMemory,
     ArtifactManager,
     CreateArtifactTool,
-    UpdateArtifactTool,
     RewriteArtifactTool,
     ReadArtifactTool,
     create_artifact_tools,
 )
+# update_artifact 已拆出到独立模块；包级 API 保持向后兼容
+from .update_artifact import UpdateArtifactTool
 
 # Subagent调用工具（路由机制）
 from .call_subagent import CallSubagentTool

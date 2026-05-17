@@ -38,6 +38,19 @@ class Settings(BaseSettings):
     TOOL_PERSIST_PREVIEW_LENGTH: int = 1000  # 工具结果落盘后回填给模型的预览长度
     SESSION_GREP_MAX_TOTAL: int = 200       # grep_artifact session 模式总命中上限（隐藏，不暴露给模型）
 
+    # update_artifact Layer 2 fuzzy match（v6 锚定 + RapidFuzz 校验；详见
+    # docs/_archive/ops/incident-2026-05-14-fix-plan.md PR-1 spec）。
+    # 所有常量隐藏，模型不可见，仅供算法实现使用。
+    ANCHOR_SHINGLE_LEN: int = 6                # shingle 切分长度（最终生效值受鸽巢约束）
+    ANCHOR_MIN_USABLE_LEN: int = 3             # 鸽巢推完的 L 低于此值则当场 bail
+    ANCHOR_MAX_OCCURRENCES: int = 20           # shingle 在 content 内最多接受的出现次数（超即视为 common）
+    MAX_UNIQUE_CENTERS: int = 50               # Step 3 去重后 center 数上限，超即 bail
+    MAX_FUZZY_WALL_CLOCK_MS: int = 500         # Step 4 verify 总 wall-clock 上限，超即 bail
+    FUZZY_MAX_L_DIST: int = 16                 # 校验编辑距离绝对上限
+    FUZZY_MAX_RATIO: float = 0.10              # 校验编辑距离比例上限（取 min）
+    FUZZY_OLD_STR_MIN_LEN: int = 8             # fuzzy 层 old_str 最短长度（短于此跳过 Layer 2）
+    FUZZY_OLD_STR_MAX_LEN: int = 3000          # fuzzy 层 old_str 最长长度（长于此跳过 Layer 2）
+
     # Redis（空 = InMemory fallback，非空 = Redis）
     REDIS_URL: str = ""
     REDIS_CLUSTER: bool = False           # 生产 Cluster 模式
