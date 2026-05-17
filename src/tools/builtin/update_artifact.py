@@ -344,6 +344,25 @@ def find_fuzzy_match(old_str: str, content: str) -> FuzzyResult:
     n = len(content)
     old_hash = _hash_old_str(old_str)
 
+    # ---- Hard input-size cap (must precede Step 1) ----
+    # Step 1-3 are pure Python (shingle dict build, raw_centers expand,
+    # sort+dedupe) and run BEFORE the wall-clock deadline guard can fire.
+    # At m ≈ 400K they alone exceed MAX_FUZZY_WALL_CLOCK_MS. Beyond the
+    # cap, the right tool is rewrite_artifact, not best-effort fuzzy.
+    if m > config.MAX_FUZZY_OLD_STR_LEN:
+        return FuzzyBail(
+            outcome="bail_budget",
+            message=(
+                f"old_str 长度 {m} 超出 Layer 2 上界 "
+                f"{config.MAX_FUZZY_OLD_STR_LEN}:"
+                "请缩小 old_str 范围,或改用 `rewrite_artifact`"
+            ),
+            fuzzy_stats=_build_stats(
+                m=m, n=n, k=0, L=0, old_hash=old_hash,
+                outcome="bail_budget",
+            ),
+        )
+
     # ---- Preamble: derive effective parameters ----
     allowed_dist = min(
         config.FUZZY_MAX_L_DIST,

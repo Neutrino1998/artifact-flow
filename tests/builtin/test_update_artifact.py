@@ -109,6 +109,29 @@ class TestAlgorithm:
         assert info.match_type == "fuzzy"
         assert info.fuzzy_stats["distance"] == 1
 
+    # ---- Hard input-size cap ----
+
+    def test_oversize_old_str_bails_before_step1(self):
+        """Input length > MAX_FUZZY_OLD_STR_LEN must bail BEFORE Step 1 — at
+        m ≈ 400K, Python-side Step 1-3 alone exceeds the wall-clock budget
+        and the deadline guard cannot interrupt mid-build. Bail must fire
+        in O(1) time regardless of m."""
+        import time as _time
+
+        big_m = config.MAX_FUZZY_OLD_STR_LEN + 10000
+        oversize = "a" * big_m
+        t0 = _time.perf_counter()
+        info = compute_update("short content", oversize, "X")
+        elapsed_ms = (_time.perf_counter() - t0) * 1000
+
+        assert not info.success
+        assert info.fuzzy_stats["outcome"] == "bail_budget"
+        # Must not have done any algorithmic work
+        assert info.fuzzy_stats["rare_shingles"] == 0
+        assert info.fuzzy_stats["raw_centers"] == 0
+        # Should be near-instant (no shingle build, no scan, no sort)
+        assert elapsed_ms < 10, f"oversize gate took {elapsed_ms:.1f}ms"
+
     # ---- Step 3 budget bail ----
 
     def test_center_budget_exceeded_bails(self):

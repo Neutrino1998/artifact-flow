@@ -48,6 +48,9 @@ class Settings(BaseSettings):
     MAX_FUZZY_WALL_CLOCK_MS: int = 500         # Step 4 verify 总 wall-clock 上限，超即 bail
     FUZZY_MAX_L_DIST: int = 16                 # 校验编辑距离绝对上限
     FUZZY_MAX_RATIO: float = 0.10              # 校验编辑距离比例上限（取 min）
+    MAX_FUZZY_OLD_STR_LEN: int = 10000         # Layer 2 input 长度硬上界（超即 bail_budget；
+                                               # 算法侧 m≈400K 后 Step 1-3 Python 开销本身就超 deadline，
+                                               # 取 10K 留 ~20× headroom 同时反映 update_artifact 设计意图）
 
     # Redis（空 = InMemory fallback，非空 = Redis）
     REDIS_URL: str = ""
