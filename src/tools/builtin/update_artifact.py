@@ -231,7 +231,6 @@ class FuzzyBail:
     """Layer 2 bailed with a structured reason."""
     outcome: str             # bail_low_entropy | bail_no_anchor | bail_budget
                              #   | bail_deadline | bail_ambiguous | bail_no_window
-                             #   | bail_size
     message: str             # hint shown to the LLM
     fuzzy_stats: Optional[Dict[str, Any]] = None
 
@@ -344,20 +343,6 @@ def find_fuzzy_match(old_str: str, content: str) -> FuzzyResult:
     m = len(old_str)
     n = len(content)
     old_hash = _hash_old_str(old_str)
-
-    # ---- Size gate (cheap, runs before any allocation) ----
-    if m < config.FUZZY_OLD_STR_MIN_LEN or m > config.FUZZY_OLD_STR_MAX_LEN:
-        return FuzzyBail(
-            outcome="bail_size",
-            message=(
-                "old_str 长度超出 Layer 2 适用范围"
-                f"({config.FUZZY_OLD_STR_MIN_LEN}–{config.FUZZY_OLD_STR_MAX_LEN}):"
-                "请提供更长 / 更短的上下文,或改用 `rewrite_artifact`"
-            ),
-            fuzzy_stats=_build_stats(
-                m=m, n=n, k=0, L=0, old_hash=old_hash, outcome="bail_size",
-            ),
-        )
 
     # ---- Preamble: derive effective parameters ----
     allowed_dist = min(
@@ -473,12 +458,22 @@ def find_fuzzy_match(old_str: str, content: str) -> FuzzyResult:
     verify_calls = 0
     matches: List[Tuple[int, int, int]] = []  # (distance, ms, me)
     bailed_deadline = False
+    # True iff ANY center had ≥2 distinct (ms, me) tied at its best d, OR a
+    # cross-center merge sees two same-d alignments fall into one region.
+    # Either case is a genuine span ambiguity — different (ms, me) means
+    # different replaced text and different new_content. Aligns with Layer
+    # 0/1's strict count==1; Layer 2 must not be looser.
+    span_tied = False
 
     for center_start in unique_centers:
         if bailed_deadline:
             break
         center_end = center_start + m
         best: Optional[Tuple[int, int, int]] = None
+        # Per-center tie flag — must reset whenever a strictly lower best is
+        # found, otherwise an earlier tie at d=5 would falsely poison a later
+        # uncontested d=1 match.
+        tied_at_best = False
         for ds in range(-k, k + 1):
             if bailed_deadline:
                 break
@@ -501,10 +496,17 @@ def find_fuzzy_match(old_str: str, content: str) -> FuzzyResult:
                 # exceeds score_cutoff, it returns `score_cutoff + 1`, NOT
                 # None. The `<= k` guard is load-bearing — drop it and every
                 # over-cutoff candidate enters `matches` ranked by k+1.
-                if d <= k and (best is None or d < best[0]):
+                if d > k:
+                    continue
+                if best is None or d < best[0]:
                     best = (d, ms, me)
+                    tied_at_best = False
+                elif d == best[0] and (ms, me) != (best[1], best[2]):
+                    tied_at_best = True
         if best is not None:
             matches.append(best)
+            if tied_at_best:
+                span_tied = True
 
     if bailed_deadline:
         elapsed_ms = int((monotonic() - started_at) * 1000)
@@ -560,6 +562,11 @@ def find_fuzzy_match(old_str: str, content: str) -> FuzzyResult:
             if abs(ms - rms) <= k and abs(me - rme) <= k:
                 if d < rd:
                     regions[idx] = (d, ms, me)
+                elif d == rd and (ms, me) != (rms, rme):
+                    # Same region, same distance, different (ms, me) — the
+                    # k-threshold merge would silently pick whichever sorted
+                    # first. Flag so we bail loudly below.
+                    span_tied = True
                 merged = True
                 break
         if not merged:
@@ -567,7 +574,7 @@ def find_fuzzy_match(old_str: str, content: str) -> FuzzyResult:
 
     elapsed_ms = int((monotonic() - started_at) * 1000)
 
-    if len(regions) >= 2:
+    if span_tied or len(regions) >= 2:
         return FuzzyBail(
             outcome="bail_ambiguous",
             message=(

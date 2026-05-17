@@ -48,8 +48,6 @@ class Settings(BaseSettings):
     MAX_FUZZY_WALL_CLOCK_MS: int = 500         # Step 4 verify 总 wall-clock 上限，超即 bail
     FUZZY_MAX_L_DIST: int = 16                 # 校验编辑距离绝对上限
     FUZZY_MAX_RATIO: float = 0.10              # 校验编辑距离比例上限（取 min）
-    FUZZY_OLD_STR_MIN_LEN: int = 8             # fuzzy 层 old_str 最短长度（短于此跳过 Layer 2）
-    FUZZY_OLD_STR_MAX_LEN: int = 3000          # fuzzy 层 old_str 最长长度（长于此跳过 Layer 2）
 
     # Redis（空 = InMemory fallback，非空 = Redis）
     REDIS_URL: str = ""

@@ -93,21 +93,21 @@ class TestAlgorithm:
     # ---- v5 invariant: full center expansion, no top-N gating ----
 
     def test_v5_all_rare_shingles_expanded(self):
-        """Match relies on a shingle in the SECOND half of old_str — first
-        half is more 'rare-looking' but Step 4 alignment fails there. Only
-        full expansion finds the right center."""
-        # Anchor in late part of old_str must be tried. With top-N gating
-        # over first few shingles, this would miss.
-        unique_late = "_LATE_RARE_TAG"
-        # First half has somewhat-rare 'EARLY_LOOKING_TAG_' but real anchor
-        # is in second half.
-        old_str = "EARLY_LOOKING_TAG_middle_filler_segment" + unique_late + "ZZ"
-        # Make one tiny edit so Layer 0 misses
-        bad_old = old_str.replace("middle_filler_segment", "middle_xiller_segment", 1)
-        content = "PREFIX_NOISE " + old_str + " SUFFIX_NOISE"
+        """Pigeonhole does not promise the surviving shingle ranks first by
+        rarity, so v5 expands ALL rare shingles instead of picking top-N.
+        Use varied English so anchors are unique throughout (otherwise tied
+        alignments would mask the property under test)."""
+        old_str = (
+            "The quick brown fox jumps over the lazy dog "
+            "and runs away into the deep dark forest beyond."
+        )
+        # Single-char typo in the middle so Layer 0/1 miss.
+        bad_old = old_str.replace("jumps", "jumqs", 1)
+        content = "Before. " + old_str + " After."
         info = compute_update(content, bad_old, "REPL")
         assert info.success, info.message
         assert info.match_type == "fuzzy"
+        assert info.fuzzy_stats["distance"] == 1
 
     # ---- Step 3 budget bail ----
 
@@ -118,9 +118,6 @@ class TestAlgorithm:
         old_str = "_".join(anchors)  # ~419 chars
         spacer = "x" * 250  # >> allowed_dist (= 16)
         content = spacer.join(anchors) + spacer
-
-        # Sanity: m within bounds
-        assert config.FUZZY_OLD_STR_MIN_LEN <= len(old_str) <= config.FUZZY_OLD_STR_MAX_LEN
 
         info = compute_update(content, old_str, "REPL")
         assert not info.success
@@ -198,6 +195,22 @@ class TestAlgorithm:
         assert not info.success
         assert info.fuzzy_stats["outcome"] == "bail_ambiguous"
 
+    def test_ambiguous_same_center_tied_spans_fail(self):
+        """Reviewer reproducer: same center, two distinct (ms, me) tied at
+        d=1. With a silent tie-break we'd eat a prefix character; with the
+        ``span_tied`` flag we bail loudly. Different (ms, me) → different
+        new_content, so we cannot pick one without misleading the model.
+
+        Concretely: (ms=1, me=14) replaces "ZabcdefABCDEF" → "ZRYY";
+                    (ms=2, me=14) replaces "abcdefABCDEF" → "ZZRYY".
+        """
+        info = compute_update("ZZabcdefABCDEFYY", "XabcdefABCDEF", "R")
+        assert not info.success
+        assert info.fuzzy_stats["outcome"] == "bail_ambiguous"
+        # Lock the invariant: a silent tie-break would have produced one of
+        # these — assert we did NOT.
+        assert info.new_content is None
+
     # ---- bail_no_window (rare anchors exist but Lev too high) ----
 
     def test_no_window_bails_when_lev_above_cutoff(self):
@@ -212,16 +225,19 @@ class TestAlgorithm:
     # ---- Long old_str fast verify ----
 
     def test_long_old_str_verify_under_100ms(self):
-        """1500+ char old_str with 1 typo near middle. Must stay well under
-        100 ms — proves the v6 bounds hold even at the size cap edge."""
-        unique_prefix = "UNIQUEFLAGSTARTHERE"
-        unique_suffix = "UNIQUEFLAGENDHERE"
-        middle = "abcdefghij" * 150  # 1500 chars
-        content_block = unique_prefix + middle + unique_suffix
-        # Inject typo so Layer 0 misses
-        typo_middle = middle[:500] + "X" + middle[501:]
-        old_str = unique_prefix + typo_middle + unique_suffix
-        content = "prefix-pad " + content_block + " suffix-pad"
+        """1500+ char old_str with 1 typo near middle. Pseudo-random text
+        keeps anchors unique throughout (repetitive middles would create
+        tied alignments and trip bail_ambiguous, masking the timing claim).
+        """
+        import random
+
+        rng = random.Random(42)
+        # Single token of pseudo-random letters + space so shingles vary.
+        body = "".join(rng.choices("abcdefghijklmnopqrstuvwxyz ", k=1600))
+        # Inject typo at the middle so Layer 0/1 miss.
+        typo_pos = 800
+        old_str = body[:typo_pos] + "X" + body[typo_pos + 1:]
+        content = "lead " + body + " tail"
 
         t0 = time.monotonic()
         info = compute_update(content, old_str, "REPL")
