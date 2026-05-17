@@ -31,7 +31,7 @@
 
 ## Auth
 
-`/api/v1/auth` — 登录、自助资料、admin 用户管理（无自助注册）。
+`/api/v1/auth` — 登录与自助资料管理（admin 用户管理见下方 [Admin](#admin) 小节）。
 
 | 方法 | 路径 | 鉴权 | 说明 |
 |------|------|------|------|
@@ -39,17 +39,8 @@
 | GET | `/me` | 用户 | 当前用户信息 |
 | POST | `/me/password` | 用户 | 自助改密（校验 `current_password`） |
 | PATCH | `/me` | 用户 | 自助改 `display_name`（清空传 `""`） |
-| POST | `/users` | admin | 创建用户 |
-| GET | `/users` | admin | 列出用户（`limit` 1-200, `offset`, `q` 搜索按用户名/显示名/部门子树） |
-| GET | `/users/{user_id}` | admin | 单查 |
-| PUT | `/users/{user_id}` | admin | 更新 `display_name` / `password` / `role` / `is_active` / `department_id` |
-| DELETE | `/users/{user_id}` | admin | 硬删（FK CASCADE 连带删会话/消息/事件/工件） |
-| GET | `/users/{user_id}/impact` | admin | 删前 impact：`{conversation_count}` |
-| POST | `/users/bulk-import` | admin | CSV 批量导入用户（multipart） |
-| POST | `/users/bulk-action` | admin | 批量动作：disable/enable/delete/set_department |
-| GET | `/users/bulk-impact` | admin | 批量删前 impact：`{user_count, conversation_count}` |
 
-> **路由注册顺序**：`/users/bulk-impact` 必须早于 `/users/{user_id}` 注册，否则会被解析为 `user_id="bulk-impact"`。bulk-action 同名地放在那之后纯粹是聚类，POST 没有路由冲突。
+> 无自助注册：账号由 admin 通过 `POST /api/v1/admin/users` 或 `bulk-import` 创建。
 
 ### POST `/login`
 
@@ -89,114 +80,7 @@ PATCH /api/v1/auth/me
 {"display_name": "Alice Liu"}        // 传 "" 则清空，传 null 不改
 ```
 
-返回最新 `UserInfo`。安全敏感字段（role / is_active / password）在此端点**不受理**，必须走 admin `PUT /users/{id}` 或 `POST /me/password`。
-
-### POST `/users` — 创建用户（admin）
-
-- 字段：`username` (2-64, regex `^[A-Za-z0-9._-]+$`), `password` (4-128), `display_name?`, `role?` ∈ `user`/`admin`, `department_id?`
-- `409` 用户名已存在；`400` 非法 role / 非法 username 字符 / `department_id` 不存在
-
-### PUT `/users/{user_id}` — 更新（admin）
-
-所有字段可选（`UpdateUserRequest`）。**self-protection** 阻止三类自我修改：
-
-| 字段 | self 改动行为 |
-|---|---|
-| `password` | `403`（必须走 `/me/password` 校验旧密码） |
-| `role` | `403`（admin 不能 demote 自己） |
-| `is_active` | `403`（admin 不能禁用自己） |
-| `display_name` / `department_id` | 允许 |
-
-`department_id` 用 Pydantic `model_fields_set` 区分"未传"与"显式 null（清空）"：
-
-```http
-PUT /api/v1/admin/users/u-abc
-{"department_id": null}              // 清空归属
-{"display_name": "..."}              // 仅改 display_name，不动 department_id
-```
-
-非自身 admin 可以 demote / disable —— 仅自身被 self-protection 守住。
-
-### DELETE `/users/{user_id}` — 硬删（admin）
-
-- `403 Cannot delete yourself`
-- `404 User not found`
-- 成功 → `204`，**FK CASCADE** 连带删该用户的全部 conversations / messages / events / artifacts
-- 若该用户当前有正在跑的 engine：被级联删的 conversation 行由 controller post-processing 的 `exists()` 检查兜住（PR2a），engine 静默跳过持久化、不抛 FK 异常
-
-### GET `/users/{user_id}/impact` — 删前 impact（admin）
-
-```http
-GET /api/v1/admin/users/u-abc/impact
-200 OK
-{"conversation_count": 17}
-```
-
-给前端 `DangerConfirmModal` 显示"将级联删除该用户的 N 条会话"。
-
-### POST `/users/bulk-import` — CSV 批量导入（admin）
-
-`multipart/form-data` 上传 CSV 文件。Header 必含 `username`，可选 `password` / `display_name` / `dept_l1` / `dept_l2` / `dept_l3`。
-
-**关键语义：**
-
-- **best-effort 三分类**：`created` / `failed` / `skipped`
-- **默认密码**：`password` 留空 → 默认值 = `username`（如果 username 长度 < 4，该行进 `failed`）
-- **部门路径**：`(dept_l1, dept_l2, dept_l3)` 走 `resolve_department_path` 自动建表；gap（中间空、后面非空）严格拒绝
-- **文件内 username 重复 → 整体 400**（admin 必须先在源文件去重）
-- **行数上限**：`MAX_BULK_IMPORT_ROWS=1000`，超 → 400
-- **字节上限**：`MAX_BULK_IMPORT_BYTES=5MB`，超 → 422
-- 编码：`charset-normalizer` 自动 sniff（UTF-8 / GBK 等），结果回到 `detected_encoding`
-- bcrypt hash 阶段并行（`asyncio.gather + asyncio.to_thread`），300 行约 6 秒，event loop 不卡
-
-```http
-POST /api/v1/admin/users/bulk-import
-Content-Type: multipart/form-data
-file=@users.csv
-
-200 OK
-{
-  "created": [<UserResponse>, ...],
-  "failed": [{"row": 5, "username": "x y", "reason": "username has invalid characters"}],
-  "skipped": [{"row": 9, "username": "alice", "reason": "username_exists"}],
-  "total_rows": 12,
-  "detected_encoding": "utf-8",
-  "warnings": ["Unknown column 'note' ignored"]
-}
-```
-
-### POST `/users/bulk-action` — 批量动作（admin）
-
-```http
-POST /api/v1/admin/users/bulk-action
-{
-  "ids": ["u-1", "u-2", ...],         // 1-200, 同请求内自动去重
-  "action": "disable",                 // | enable | delete | set_department
-  "payload": null                      // set_department 时 = {"department_id": "dept-x" | null}
-}
-
-200 OK
-{
-  "succeeded": ["u-1", "u-2"],
-  "failed": [{"id": "u-3", "reason": "forbidden_self"}]
-}
-```
-
-- `failed.reason` 词汇：`forbidden_self`（自己的 id，self-protection）/ `not_found` / `internal_error`（IntegrityError 等已 rollback 的并发场景）
-- **set_department 预校验**：`payload.department_id` 在循环外查存在性，不存在 → 整批 400（fail-fast）
-- **IntegrityError 处理**：单条 IntegrityError（如 `set_department` 期间 dept 被并发删除）→ rollback session + 该条进 failed + 后续行不受影响
-- **其他异常**冒泡为 5xx（loud failure，CLAUDE.md "不为不会发生的场景加防御"）
-
-### GET `/users/bulk-impact` — 批量删前 impact（admin）
-
-```http
-GET /api/v1/admin/users/bulk-impact?ids=u-1&ids=u-2&ids=u-3
-
-200 OK
-{"user_count": 3, "conversation_count": 27}
-```
-
-`user_count` = 请求 ids 去重后的数量（不区分是否存在）；`conversation_count` = 一次 IN 查询的会话总数。`ids` 上限 200。
+返回最新 `UserInfo`。安全敏感字段（role / is_active / password）在此端点**不受理**，必须走 admin `PUT /admin/users/{id}` 或 `POST /me/password`。
 
 ---
 
@@ -479,6 +363,17 @@ data: {"type":"tool_complete","timestamp":"...","agent":"research_agent","data":
 |------|------|------|
 | GET | `/conversations` | 全站对话列表 + 活跃标记 |
 | GET | `/conversations/{conv_id}/events` | 按 message 分组的事件时间线 |
+| POST | `/users` | 创建用户 |
+| GET | `/users` | 列出用户（`limit` 1-200, `offset`, `q` 搜索按用户名/显示名/部门子树） |
+| GET | `/users/{user_id}` | 单查 |
+| PUT | `/users/{user_id}` | 更新 `display_name` / `password` / `role` / `is_active` / `department_id` |
+| DELETE | `/users/{user_id}` | 硬删（FK CASCADE 连带删会话/消息/事件/工件） |
+| GET | `/users/{user_id}/impact` | 删前 impact：`{conversation_count}` |
+| POST | `/users/bulk-import` | CSV 批量导入用户（multipart） |
+| POST | `/users/bulk-action` | 批量动作：disable/enable/delete/set_department |
+| GET | `/users/bulk-impact` | 批量删前 impact：`{user_count, conversation_count}` |
+
+> **路由注册顺序**：`/users/bulk-impact` 必须早于 `/users/{user_id}` 注册，否则会被解析为 `user_id="bulk-impact"`。bulk-action 同名地放在那之后纯粹是聚类，POST 没有路由冲突。
 
 ### GET `/conversations`
 
@@ -505,6 +400,113 @@ Query：`limit` (1-100, 默认 20), `offset`, `q` (title 搜索), `user_id` (按
 ### GET `/conversations/{conv_id}/events`
 
 见 [../architecture/observability.md → Admin API](../architecture/observability.md#get-apiv1adminconversationsconv_idevents).
+
+### POST `/users` — 创建用户
+
+- 字段：`username` (2-64, regex `^[A-Za-z0-9._-]+$`), `password` (4-128), `display_name?`, `role?` ∈ `user`/`admin`, `department_id?`
+- `409` 用户名已存在；`400` 非法 role / 非法 username 字符 / `department_id` 不存在
+
+### PUT `/users/{user_id}` — 更新
+
+所有字段可选（`UpdateUserRequest`）。**self-protection** 阻止三类自我修改：
+
+| 字段 | self 改动行为 |
+|---|---|
+| `password` | `403`（必须走 `/me/password` 校验旧密码） |
+| `role` | `403`（admin 不能 demote 自己） |
+| `is_active` | `403`（admin 不能禁用自己） |
+| `display_name` / `department_id` | 允许 |
+
+`department_id` 用 Pydantic `model_fields_set` 区分"未传"与"显式 null（清空）"：
+
+```http
+PUT /api/v1/admin/users/u-abc
+{"department_id": null}              // 清空归属
+{"display_name": "..."}              // 仅改 display_name，不动 department_id
+```
+
+非自身 admin 可以 demote / disable —— 仅自身被 self-protection 守住。
+
+### DELETE `/users/{user_id}` — 硬删
+
+- `403 Cannot delete yourself`
+- `404 User not found`
+- 成功 → `204`，**FK CASCADE** 连带删该用户的全部 conversations / messages / events / artifacts
+- 若该用户当前有正在跑的 engine：被级联删的 conversation 行由 controller post-processing 的 `exists()` 检查兜住（PR2a），engine 静默跳过持久化、不抛 FK 异常
+
+### GET `/users/{user_id}/impact` — 删前 impact
+
+```http
+GET /api/v1/admin/users/u-abc/impact
+200 OK
+{"conversation_count": 17}
+```
+
+给前端 `DangerConfirmModal` 显示"将级联删除该用户的 N 条会话"。
+
+### POST `/users/bulk-import` — CSV 批量导入
+
+`multipart/form-data` 上传 CSV 文件。Header 必含 `username`，可选 `password` / `display_name` / `dept_l1` / `dept_l2` / `dept_l3`。
+
+**关键语义：**
+
+- **best-effort 三分类**：`created` / `failed` / `skipped`
+- **默认密码**：`password` 留空 → 默认值 = `username`（如果 username 长度 < 4，该行进 `failed`）
+- **部门路径**：`(dept_l1, dept_l2, dept_l3)` 走 `resolve_department_path` 自动建表；gap（中间空、后面非空）严格拒绝
+- **文件内 username 重复 → 整体 400**（admin 必须先在源文件去重）
+- **行数上限**：`MAX_BULK_IMPORT_ROWS=1000`，超 → 400
+- **字节上限**：`MAX_BULK_IMPORT_BYTES=5MB`，超 → 422
+- 编码：`charset-normalizer` 自动 sniff（UTF-8 / GBK 等），结果回到 `detected_encoding`
+- bcrypt hash 阶段并行（`asyncio.gather + asyncio.to_thread`），300 行约 6 秒，event loop 不卡
+
+```http
+POST /api/v1/admin/users/bulk-import
+Content-Type: multipart/form-data
+file=@users.csv
+
+200 OK
+{
+  "created": [<UserResponse>, ...],
+  "failed": [{"row": 5, "username": "x y", "reason": "username has invalid characters"}],
+  "skipped": [{"row": 9, "username": "alice", "reason": "username_exists"}],
+  "total_rows": 12,
+  "detected_encoding": "utf-8",
+  "warnings": ["Unknown column 'note' ignored"]
+}
+```
+
+### POST `/users/bulk-action` — 批量动作
+
+```http
+POST /api/v1/admin/users/bulk-action
+{
+  "ids": ["u-1", "u-2", ...],         // 1-200, 同请求内自动去重
+  "action": "disable",                 // | enable | delete | set_department
+  "payload": null                      // set_department 时 = {"department_id": "dept-x" | null}
+}
+
+200 OK
+{
+  "succeeded": ["u-1", "u-2"],
+  "failed": [{"id": "u-3", "reason": "forbidden_self"}]
+}
+```
+
+- `failed.reason` 词汇：`forbidden_self`（自己的 id，self-protection）/ `not_found` / `internal_error`（IntegrityError 等已 rollback 的并发场景）
+- **set_department 预校验**：`payload.department_id` 在循环外查存在性，不存在 → 整批 400（fail-fast）
+- **IntegrityError 处理**：单条 IntegrityError（如 `set_department` 期间 dept 被并发删除）→ rollback session + 该条进 failed + 后续行不受影响
+- **其他异常**冒泡为 5xx（loud failure，CLAUDE.md "不为不会发生的场景加防御"）
+
+### GET `/users/bulk-impact` — 批量删前 impact
+
+```http
+GET /api/v1/admin/users/bulk-impact?ids=u-1&ids=u-2&ids=u-3
+
+200 OK
+{"user_count": 3, "conversation_count": 27}
+```
+
+`user_count` = 请求 ids 去重后的数量（不区分是否存在）；`conversation_count` = 一次 IN 查询的会话总数。`ids` 上限 200。
 
 ---
 
