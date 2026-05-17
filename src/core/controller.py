@@ -304,15 +304,19 @@ class ExecutionController:
         # Strategy: catch CancelledError, late-persist if events haven't landed
         # yet, then re-raise so the runner's cleanup still sees a cancelled task.
         try:
+            # ========== Post-processing ==========
+            # final_state fallback must happen BEFORE any await — otherwise a
+            # late-cancel landing in _on_engine_exit / exists_async on the
+            # engine-error path (run_engine `except Exception` appends ERROR to
+            # initial_state["events"] but never assigns final_state) would hit
+            # the late-cancel handler with final_state=None and skip persistence.
+            if final_state is None:
+                final_state = initial_state
+
             # Engine 已退出，不会再 drain 消息 — 立即取消活跃映射，
             # 使 /inject 端点正确返回 409 而非假装成功入队
             if self._on_engine_exit:
                 await self._on_engine_exit(conversation_id, message_id)
-
-            # ========== Post-processing ==========
-            # Use initial_state as fallback if engine crashed before setting final_state
-            if final_state is None:
-                final_state = initial_state
 
             # Layer 1: 早判 conversation 是否仍存在。
             # 删除路径不抢 lease，conv 行可能在 engine 跑完前消失（DELETE /chat/{id}
@@ -514,7 +518,11 @@ class ExecutionController:
             # yet. If post-processing already appended COMPLETE/ERROR before the
             # cancel hit but persist hadn't yet run, we keep that terminal as-is
             # (engine semantically completed; cancel only hit infrastructure).
-            if not events_persisted and final_state is not None:
+            if not events_persisted:
+                # `final_state or initial_state` — defense-in-depth so this branch
+                # stays safe even if a future change reintroduces the "final_state
+                # is still None" window in post-processing.
+                state_to_persist = final_state if final_state is not None else initial_state
                 terminal_types = {
                     StreamEventType.COMPLETE.value,
                     StreamEventType.ERROR.value,
@@ -522,11 +530,11 @@ class ExecutionController:
                 }
                 has_terminal = any(
                     e.event_type in terminal_types
-                    for e in final_state.get("events", [])
+                    for e in state_to_persist.get("events", [])
                 )
                 if not has_terminal:
-                    final_state["cancelled"] = True
-                    final_state["events"].append(ExecutionEvent(
+                    state_to_persist["cancelled"] = True
+                    state_to_persist["events"].append(ExecutionEvent(
                         event_type=StreamEventType.CANCELLED.value,
                         agent_name=None,
                         data={
@@ -538,7 +546,7 @@ class ExecutionController:
                         },
                     ))
                 try:
-                    await self._persist_events(message_id, final_state)
+                    await self._persist_events(message_id, state_to_persist)
                     logger.info(
                         f"Late-cancel persist succeeded for {message_id} "
                         f"(cancel hit mid-post-processing)"

@@ -390,6 +390,79 @@ class TestPersistOnExternalCancel:
             f"got: {event_types}"
         )
 
+    async def test_late_cancel_on_engine_error_path_still_persists(self):
+        """
+        Reviewer P2: when execute_loop raises a normal Exception, run_engine's
+        `except Exception` appends an ERROR event to initial_state["events"] but
+        never assigns final_state — it stays None until the post-processing
+        fallback runs. If a cancel arrives during _on_engine_exit (or any await
+        before that fallback), the late-cancel handler used to see
+        final_state=None and skip persistence, losing the ERROR-marked turn.
+
+        Fix moves `final_state = initial_state` ahead of _on_engine_exit, and
+        the late-cancel handler also falls back to initial_state defensively.
+        """
+        cm = _make_mock_conversation_manager()
+        am = _make_mock_artifact_manager()
+        er, batches = _capturing_event_repo()
+        ctrl = _make_controller(cm, er, am)
+
+        # Slow _on_engine_exit so we can cancel mid-await on the engine-error path
+        on_exit_started = asyncio.Event()
+
+        async def slow_on_exit(conv_id, msg_id):
+            on_exit_started.set()
+            await asyncio.sleep(60)
+
+        ctrl._on_engine_exit = slow_on_exit
+
+        async def fake_execute_loop(**kwargs):
+            # Engine appended some work, then errors out before completion
+            kwargs["state"]["events"].append(ExecutionEvent(
+                event_type=StreamEventType.LLM_COMPLETE.value,
+                agent_name="lead_agent",
+                data={"content": "partial work before engine error"},
+                is_historical=False,
+            ))
+            raise RuntimeError("engine exploded")
+
+        async def consume():
+            return [event async for event in ctrl.stream_execute(
+                user_input="hi",
+                conversation_id="conv-test",
+                parent_message_id=None,
+                message_id="msg-test",
+            )]
+
+        with patch("core.controller.execute_loop", side_effect=fake_execute_loop):
+            consume_task = asyncio.create_task(consume())
+            await asyncio.wait_for(on_exit_started.wait(), timeout=5)
+            await asyncio.sleep(0)
+            consume_task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await consume_task
+
+        # Reviewer's repro: without the fix, batches stays at 0
+        assert len(batches) == 1, (
+            f"P2 regression: cancel during _on_engine_exit on engine-error path "
+            f"dropped events (batch_create called {len(batches)} times, expected 1)"
+        )
+        batch = batches[0]
+        event_types = [e["event_type"] for e in batch]
+        # The pre-error work survived
+        assert StreamEventType.LLM_COMPLETE.value in event_types
+        # run_engine's except Exception appended an ERROR terminal — late-cancel
+        # handler must preserve it (engine errored; cancel only hit infrastructure)
+        error_terminals = [e for e in batch if e["event_type"] == StreamEventType.ERROR.value]
+        assert len(error_terminals) == 1, (
+            f"Existing ERROR terminal must be preserved; got types: {event_types}"
+        )
+        # And no fresh CANCELLED should have been appended on top of the ERROR
+        cancelled = [e for e in batch if e["event_type"] == StreamEventType.CANCELLED.value]
+        assert len(cancelled) == 0, (
+            f"Should not overwrite ERROR terminal with CANCELLED, got types: {event_types}"
+        )
+
     async def test_persist_failure_on_cancel_does_not_shadow_cancellederror(self):
         """
         If _persist_events itself fails inside the cancel-handler, the failure must
