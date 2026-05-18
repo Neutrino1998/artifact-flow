@@ -15,6 +15,7 @@ import os
 import sys
 import threading
 import time
+from datetime import datetime
 from pathlib import Path
 from unittest.mock import patch
 
@@ -360,51 +361,90 @@ def test_script_db_url_passthrough_mysql_async(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_load_message_events_async_bridge(tmp_path):
-    """End-to-end: the async-engine + run_sync bridge actually delivers a
-    DataFrame from a real aiosqlite-backed DB. Skipped where pandas is not
-    installed (analyst-only dependency)."""
+async def test_load_message_events_via_orm(tmp_path):
+    """End-to-end: the script's ORM-based loader reads MessageEvent rows
+    through SQLAlchemy and flattens .data into pandas columns. Schema is
+    created via Base.metadata.create_all (real model, not a hand-rolled
+    CREATE TABLE) so the test catches drift if MessageEvent gains/drops
+    columns. Skipped where pandas isn't installed (analyst-only dep).
+
+    Dialect coverage: this test runs aiosqlite, which exercises the
+    SQLAlchemy JSON adapter's text-encoding path. PG/MySQL paths use the
+    same ORM read code and the same flattening, so once the ORM read
+    works on SQLite the dialect-specific behavior is entirely inside the
+    adapter — no script-level branches left to test."""
     pytest.importorskip("pandas")
 
-    from sqlalchemy.ext.asyncio import create_async_engine
+    from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+    from sqlalchemy.orm import sessionmaker
+
+    from db.models import Base, MessageEvent
 
     db_path = tmp_path / "obs-test.db"
-
-    # Seed schema + a single llm_complete / tool_complete row each so both
-    # _load_message_events queries return something.
-    init_engine = create_async_engine(f"sqlite+aiosqlite:///{db_path}")
-    from sqlalchemy import text as sa_text
-    async with init_engine.begin() as conn:
-        await conn.execute(sa_text("""
-            CREATE TABLE message_events (
-                id TEXT PRIMARY KEY,
-                created_at TEXT,
-                agent_name TEXT,
-                event_type TEXT,
-                data TEXT
-            )
-        """))
-        await conn.execute(sa_text("""
-            INSERT INTO message_events VALUES
-            ('e1', datetime('now'), 'lead', 'llm_complete',
-             '{"model":"gpt","token_usage":{"input_tokens":10,"output_tokens":3},"duration_ms":12}'),
-            ('e2', datetime('now'), 'lead', 'tool_complete',
-             '{"tool":"web_fetch","duration_ms":5,"success":true,"metadata":{"k":"v"}}')
-        """))
-    await init_engine.dispose()
-
-    module = _load_script_module()
-    # Force pandas import via the same path main() uses
-    module.pd = module._require_pandas()
-
     engine = create_async_engine(f"sqlite+aiosqlite:///{db_path}")
     try:
+        # FK constraints stay OFF on this engine (we never PRAGMA them on),
+        # so we can insert MessageEvent rows without seeding parent Message.
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+
+        Session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+        async with Session() as session:
+            session.add_all([
+                MessageEvent(
+                    event_id="e1",
+                    message_id="msg-test-1",
+                    event_type="llm_complete",
+                    agent_name="lead",
+                    data={
+                        "model": "gpt",
+                        "token_usage": {"input_tokens": 10, "output_tokens": 3},
+                        "duration_ms": 12,
+                    },
+                ),
+                MessageEvent(
+                    event_id="e2",
+                    message_id="msg-test-1",
+                    event_type="tool_complete",
+                    agent_name="lead",
+                    data={
+                        "tool": "web_fetch",
+                        "duration_ms": 5,
+                        "success": True,
+                        "metadata": {"k": "v"},
+                    },
+                ),
+                # Out-of-window row to verify the time filter actually applies.
+                MessageEvent(
+                    event_id="e3",
+                    message_id="msg-test-1",
+                    event_type="llm_complete",
+                    agent_name="lead",
+                    data={"model": "old", "duration_ms": 99},
+                    created_at=datetime(2020, 1, 1, tzinfo=None),
+                ),
+            ])
+            await session.commit()
+
+        module = _load_script_module()
+        module.pd = module._require_pandas()
+
         df_llm, df_tool = await module._load_message_events(engine, hours=24)
+
+        # Only the in-window llm row survives; out-of-window 2020 row filtered out.
         assert len(df_llm) == 1
         assert df_llm.iloc[0]["model"] == "gpt"
+        assert df_llm.iloc[0]["in_tok"] == 10
+        assert df_llm.iloc[0]["out_tok"] == 3
+        assert df_llm.iloc[0]["dur_ms"] == 12
+        assert df_llm.iloc[0]["agent_name"] == "lead"
+
         assert len(df_tool) == 1
         assert df_tool.iloc[0]["tool"] == "web_fetch"
-        # metadata is parsed back to dict by the sqlite branch
+        assert df_tool.iloc[0]["dur_ms"] == 5
+        assert bool(df_tool.iloc[0]["success"]) is True
+        # metadata is already a Python dict (ORM JSON adapter deserialized),
+        # no manual json.loads needed downstream.
         assert df_tool.iloc[0]["metadata"] == {"k": "v"}
     finally:
         await engine.dispose()

@@ -24,11 +24,15 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import json
 import os
 import sys
+from datetime import datetime, timedelta, timezone
 from glob import glob
 from pathlib import Path
+
+# Make src/ importable so we can reuse the ORM model.
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(_REPO_ROOT / "src"))
 
 # Lazily set by main() — keeps helpers importable when pandas is absent.
 pd = None  # type: ignore[assignment]
@@ -49,7 +53,10 @@ def _require_pandas():
         sys.exit(2)
 
 
-from sqlalchemy.ext.asyncio import create_async_engine
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+
+from db.models import MessageEvent
 
 
 def _resolve_engine_url() -> str:
@@ -74,75 +81,70 @@ def _resolve_engine_url() -> str:
     return url
 
 
-def _build_sql(dialect: str, hours: int) -> tuple[str, str]:
-    """返回 (llm_sql, tool_sql),按方言生成 JSON 提取语法。"""
-    if dialect == "postgresql":
-        llm_sql = f"""
-            SELECT created_at, agent_name,
-                   data->>'model' AS model,
-                   (data->'token_usage'->>'input_tokens')::int  AS in_tok,
-                   (data->'token_usage'->>'output_tokens')::int AS out_tok,
-                   (data->>'duration_ms')::int AS dur_ms
-            FROM message_events
-            WHERE event_type='llm_complete'
-              AND created_at > now() - interval '{hours} hours'
-        """
-        tool_sql = f"""
-            SELECT created_at,
-                   data->>'tool' AS tool,
-                   (data->>'duration_ms')::int AS dur_ms,
-                   (data->>'success')::bool   AS success,
-                   data->'metadata'           AS metadata
-            FROM message_events
-            WHERE event_type='tool_complete'
-              AND created_at > now() - interval '{hours} hours'
-        """
-    elif dialect == "sqlite":
-        llm_sql = f"""
-            SELECT created_at, agent_name,
-                   json_extract(data, '$.model') AS model,
-                   CAST(json_extract(data, '$.token_usage.input_tokens')  AS INTEGER) AS in_tok,
-                   CAST(json_extract(data, '$.token_usage.output_tokens') AS INTEGER) AS out_tok,
-                   CAST(json_extract(data, '$.duration_ms')               AS INTEGER) AS dur_ms
-            FROM message_events
-            WHERE event_type='llm_complete'
-              AND datetime(created_at) > datetime('now', '-{hours} hours')
-        """
-        tool_sql = f"""
-            SELECT created_at,
-                   json_extract(data, '$.tool') AS tool,
-                   CAST(json_extract(data, '$.duration_ms') AS INTEGER) AS dur_ms,
-                   json_extract(data, '$.success') AS success,
-                   json_extract(data, '$.metadata') AS metadata
-            FROM message_events
-            WHERE event_type='tool_complete'
-              AND datetime(created_at) > datetime('now', '-{hours} hours')
-        """
-    else:
-        # MySQL/MariaDB 用 JSON_EXTRACT;留口子,实际生产是 PG
-        raise NotImplementedError(f"Dialect {dialect} not implemented")
+def _llm_row_to_dict(row: MessageEvent) -> dict:
+    data = row.data or {}
+    usage = data.get("token_usage") or {}
+    return {
+        "created_at": row.created_at,
+        "agent_name": row.agent_name,
+        "model": data.get("model"),
+        "in_tok": usage.get("input_tokens"),
+        "out_tok": usage.get("output_tokens"),
+        "dur_ms": data.get("duration_ms"),
+    }
 
-    return llm_sql, tool_sql
+
+def _tool_row_to_dict(row: MessageEvent) -> dict:
+    data = row.data or {}
+    return {
+        "created_at": row.created_at,
+        "tool": data.get("tool"),
+        "dur_ms": data.get("duration_ms"),
+        "success": data.get("success"),
+        # metadata 已经是 dict(ORM JSON 列自动 deserialize);后续 json_normalize 直接吃
+        "metadata": data.get("metadata"),
+    }
 
 
 async def _load_message_events(async_engine, hours: int):
-    """走 async engine + run_sync 桥接拉两个 DataFrame。
+    """走 ORM select(MessageEvent) 拉事件,在 Python 侧拍平到 DataFrame。
 
-    pd.read_sql 是同步 API,但 AsyncConnection.run_sync 提供的 sync Connection
-    视图底层仍走 async driver,所以不需要 psycopg2 / pymysql 一类 sync driver。
+    用 ORM 而非 raw SQL 的理由:`MessageEvent.data` 是 SQLAlchemy `JSON` 列,
+    PG/MySQL/SQLite 三种方言的存取细节由类型适配器吸收(读出来一律是 Python
+    dict),脚本里不需要再写方言分支。新增字段时也只动 _llm_row_to_dict /
+    _tool_row_to_dict,无 SQL 漂移面。
+
+    用 AsyncSession 而非 AsyncConnection:Connection.execute(select(Entity))
+    返回 Core Row(列元组),.scalars() 只剪到第一列(id);要拿到 hydrate 后的
+    ORM 实例必须走 Session。
     """
-    dialect = async_engine.dialect.name
-    llm_sql, tool_sql = _build_sql(dialect, hours)
+    # SQLite 用 server_default=func.now() 写入的是 naive UTC,PG 写带时区。
+    # 用 naive UTC 比较两边都吃得下;tz-aware 在 SQLite 上会报 can't compare。
+    threshold = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=hours)
 
-    async with async_engine.connect() as conn:
-        df_llm = await conn.run_sync(lambda sync_conn: pd.read_sql(llm_sql, sync_conn))
-        df_tool = await conn.run_sync(lambda sync_conn: pd.read_sql(tool_sql, sync_conn))
-
-    # SQLite 的 metadata 拿回来是 JSON 文本,要二次解析才能给 json_normalize
-    if dialect == "sqlite":
-        df_tool["metadata"] = df_tool["metadata"].apply(
-            lambda v: json.loads(v) if v else None
+    llm_stmt = (
+        select(MessageEvent)
+        .where(
+            MessageEvent.event_type == "llm_complete",
+            MessageEvent.created_at > threshold,
         )
+        .order_by(MessageEvent.id)
+    )
+    tool_stmt = (
+        select(MessageEvent)
+        .where(
+            MessageEvent.event_type == "tool_complete",
+            MessageEvent.created_at > threshold,
+        )
+        .order_by(MessageEvent.id)
+    )
+
+    async with AsyncSession(async_engine) as session:
+        llm_rows = (await session.execute(llm_stmt)).scalars().all()
+        tool_rows = (await session.execute(tool_stmt)).scalars().all()
+
+    df_llm = pd.DataFrame([_llm_row_to_dict(r) for r in llm_rows])
+    df_tool = pd.DataFrame([_tool_row_to_dict(r) for r in tool_rows])
     return df_llm, df_tool
 
 
