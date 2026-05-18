@@ -710,7 +710,13 @@ df_lag     = pd.read_json("data/observability/loop-lag.jsonl", lines=True)
 
 ## PR-tz-unify:事件时间戳时区统一(P3)✅ 已完成
 
-**落地记录**(commits 在 `main`):
+**落地记录**(commits 在 `main`,5 轮串行,最终 test suite 871 / 26):
+
+- `263dc25` initial — 热路径 `datetime.now()` → `utc_now()` + 前端 `parseUtcIso` + 显示侧改写
+- `d785e49` reviewer round 1 — 补 root 三个 compose 的 `-c timezone=UTC` + 加 `_apply_session_tz_kwargs` 连接层兜底(+11 测试)
+- `c1730c3` reviewer round 2 — 单 URL 路径 DSN session-affecting kwargs 保留(`?application_name=af` / `?init_command=...` 不再被 connect_args 整 dict 覆盖,+2 测试)
+- `c13446f` reviewer round 3 — PG 单 URL 路径 sanitize:`difference_update_query` 把 `_PG_SERVER_SETTINGS` 已知 key 从 URL 剥掉,防止 SQLAlchemy asyncpg dialect 当 top-level kwarg dump 给 `asyncpg.connect`(+3 测试)
+- `eb2a2a8` reviewer round 4 — **结构性统一**:`_parse_db_query_params` 立为唯一 DSN query 翻译层,单 URL 与 failover 共享同一翻译器,所有 consumed_keys 都从 URL 剥掉,跳出"一个 key 一个补丁"的循环(+22 测试)
 
 第一轮(initial 落地,commit `263dc25`):
 - 新增 `src/utils/time.utc_now()` 作为后端 naive UTC 单一入口;新增 `frontend/src/lib/time.parseUtcIso()` 把后端发来的 naive ISO 锚定为 UTC
