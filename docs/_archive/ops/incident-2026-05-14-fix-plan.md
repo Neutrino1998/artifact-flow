@@ -614,23 +614,39 @@ df_lag     = pd.read_json("data/observability/loop-lag.jsonl", lines=True)
 
 ## PR-forensics-bundle:取证工具与部署前置(P2)✅ 已完成
 
-**落地记录**(commit 在 `main`):
-- `c606187` 整 PR 一并 commit(5 个文件 + 430 净增行):
-- `scripts/release.sh`:新增 `--with-forensics` 开关,产出 `artifactflow-forensics-<slug>.tar.gz`(内容寻址 `pyspy<ver>-py<ver>`,同 INFRA_SLUG 模式);构建机下载 py-spy v0.4.1 静态二进制(SHA 校验,空 SHA 时打印实际值并 abort 让 operator 显式 pin)+ `pip download --platform manylinux2014_x86_64 --python-version 3.11 --only-binary=:all:` 锁目标平台拉 pandas/numpy 离线 wheels;manifest 增 forensics 段;首次部署 / roll-update 帮助文本同步刷新
-- `deploy/scripts/preflight.sh`(新):两层离线检查 — ① 宿主机 `gdb`/`gcore`/`strace`/`ps`/`top` PATH;② forensics bundle 完整性(py-spy 可执行 + SHA + 已装 PATH 提示;wheels 非空 + `pip install --no-index --find-links --ignore-installed --dry-run pandas` 强制走 wheels 不被系统 pandas 干扰)。失败时按 OK/✗ 计数 + 安装提示
-- `docs/_archive/ops/deployment-sop.md`:Mode 3 段后插入"取证就绪(首次部署必做)"小节,含 `tar xzf forensics → install py-spy → pip install --no-index wheels → preflight.sh` 流程,显式"目标机器零联网"承诺;why-not-in-app-image 三条
-- `docs/_archive/ops/cloud-service-checklist.md`:新增"四、宿主机取证工具"段,跟云托管方对齐:`gdb`/`strace`/`procps` 是否预装、`/usr/local/bin` 写入权限、`ptrace_scope` 当前值、`gcore` 抓 coredump 是否允许
-- 验证范围:preflight.sh 三态测过(missing dir / empty / fake-binary);release.sh syntax + flag parsing + `--help` 渲染过;**未跑** `--with-forensics` 端到端,因为它必触发 docker buildx + 联网下载 py-spy/wheels,留给真正发版时验证
+**落地记录**(commits 在 `main`,三轮 review 收敛):
+
+第一轮(initial 落地):
+- `c606187` 整 PR 一并 commit(5 个文件 + 430 净增行):`scripts/release.sh` 加 `--with-forensics` 开关产出 `artifactflow-forensics-<slug>.tar.gz`;构建机下载 py-spy + pandas/numpy 离线 wheels;`deploy/scripts/preflight.sh` 新增两层离线检查;deployment-sop / cloud-service-checklist 增"取证就绪"
+- `80117a4` fix plan 回填本 PR 落地 SHA
+
+第二轮(reviewer 反馈 4 条):
+- `dee0763` 修 reviewer 反馈:① py-spy GitHub Releases URL 是 404(asset 根本不存在),改走 `pip download py-spy==<ver> --no-deps` 拉 PyPI wheel,unzip 提取 `.data/scripts/py-spy` 二进制;② SHA 口径不一致(release 哈希 tarball、preflight 哈希 binary)→ 统一到**binary** SHA,release 写 `forensics/bin/py-spy.sha256`(sha256sum 标准格式),preflight 走 `sha256sum -c` 同文件零漂移;③ pandas/numpy 未 pin → 顶层加 `PANDAS_VERSION` / `NUMPY_VERSION` + 下载后 `ls *.whl | sort > forensics/wheels.lock.txt` 记录解析全套;④ ptrace_scope 描述偏乐观(把 Yama mode 1 写成"同 UID 即可",实际是 descendant only)→ cloud-service-checklist 重写四模式表 + 当时推荐了 `docker exec backend + cap_add` 路径
+
+第三轮(reviewer round 2,3 条):
+- **P1 修文档承诺不一致**: round 2 reviewer 戳穿"`docker exec backend py-spy` 推荐"在当前 bundle 设计下不可执行 —— py-spy 装在宿主机不在容器、compose 没 `cap_add`。**回退** docker cap_add 推荐路径,回归"宿主机 attach + 依赖云托管 ptrace_scope=0 或 host CAP_SYS_PTRACE",并**重定位** py-spy 为"PR-obs-lite faulthandler deadman 失效时的备份"(主路径是 `docker logs backend` 看 faulthandler dump,不需要任何额外权限)
+- **P2 slug 不全面**: 原 slug `pyspy<ver>-py<ver>` 让 ops 误以为 "同名即等价",但 pandas/numpy 版本和 transitive 都可能漂移。Slug 扩展为 `pyspy<ver>-pandas<ver>-numpy<ver>-py<ver>`(NECESSARY);wheels.lock.txt diff 作 SUFFICIENT 校验。文档措辞同步改"NECESSARY 但不 SUFFICIENT,真等价校验走 wheels.lock"
+- **P3 fix plan 落地记录**: 本节补充三轮 commits + 重定位 note
+
+**关键转向(round 2)**: 跟 PR-obs-lite 边界划清。原设计把 py-spy 当事故现场首选工具,实际 PR-obs-lite 的 `faulthandler` deadman switch(C 线程不获取 GIL,硬 wedge 时自动 dump 栈到 `docker logs backend`)已经覆盖事故现场 90% 场景。py-spy 真实定位是**备份路径** + 采样分布查看;pandas/numpy 是 analyst 离线分析(跟 backend 部署解耦)。这个重定位让所有"py-spy 必须 0 延迟可用"假设解除 —— compose 不需要 cap_add、镜像不需要装 py-spy、宿主机层 gdb/strace 依赖云托管协调即可,**整体设计大幅简化**,不为低频备份做反射性的镜像膨胀。
+
+**验证范围**: 
+- bash syntax + preflight 三态(missing dir / empty / fake-binary / tampered binary)全部测过
+- release.sh `--help` 渲染过、slug 命名规则核对过
+- **未跑** `--with-forensics` 端到端,因为它必触发 docker buildx + 联网下载 py-spy/wheels,留给真正发版时验证;但 reviewer round 1 实测确认了 `py-spy==0.4.1` wheel 下载/解包路径 + `pandas==2.2.3 numpy==1.26.4` 解析路径都可用(reviewer 反馈中提供了实测 SHA `e7c2de2dc54449ec88c086f1859555b4e34e63ccdcf3f8804496f9306cd44de6`)
 
 下方 spec 保留原文作为审计材料。落地与 spec 的差异:
-- spec 写 `deploy/wheels/`,实际走**独立 forensics tar** 而非检入 git(`.gitignore` 已忽略 `wheels/`,且 ~60MB 二进制+wheels 不该污染 git);content-addressed slug 让 ops 一眼看出"我已经有这版了吗",pattern 跟 INFRA_ARCHIVE 一致
-- py-spy 走 GitHub Releases 静态二进制(musl 链接,Alpine/CentOS/Debian 全 cover),不走 PyPI wheel — 事故时是宿主机层 attach,跟 Python 环境无关
-- preflight 增了 `ptrace_scope` / `gcore` 权限检查项(留在 cloud-service-checklist,因为这是云托管方层面的政策,不是 bundle 本身能解决的)
-- **air-gap 硬合约**:release.sh 注释明确写"target intranet hosts MUST be able to deploy with zero network calls",`pip install` 永远 `--no-index --find-links`,这条贯穿脚本 + SOP + preflight。spec 没显式写但跟用户初始约束对齐
+- spec 写 `deploy/wheels/`,实际走**独立 forensics tar** 而非检入 git(`.gitignore` 已忽略 `wheels/`,且 ~60MB 二进制+wheels 不该污染 git);slug 命名跟 INFRA_ARCHIVE pattern 一致
+- py-spy 走 PyPI wheel 提取(非 GitHub Releases —— GitHub 上根本不存在那个 asset);事故时定位为**备份路径**(主路径 faulthandler deadman),不是 spec 设想的"首选取证工具"
+- preflight 检查 host gdb/strace/procps(深挖工具)+ bundle 完整性,**没有**检查 ptrace_scope —— 后者交云托管方协调,bundle 本身解决不了
+- spec 第 4 条"诊断策略定调:取证走宿主机"修正为:**进程内部取证(py-spy)定位为备份**;深挖工具(gdb/strace)仍走宿主机依赖云托管 yum/apt;全局视图(top/iostat/docker stats)毫无疑问宿主机层
+- **air-gap 硬合约**: release.sh 注释 + SOP + preflight 三处显式"目标机器零联网",`pip install` 永远 `--no-index --find-links`。spec 没显式写但跟用户初始约束对齐
 
-**目标**:消除"内网现抓不到 py-spy"这类事故时的工具就绪缺口。属部署 / 发版工程,不进运行时。
+**目标**(round 2 重定位):
+1. 提供 `py-spy` 作为 PR-obs-lite `faulthandler` deadman 失效时的备份 attach 路径
+2. 提供 `pandas`/`numpy` 离线 wheels 作为 analyst 机器的零联网安装路径(跑 `observability_report.py`)
 
-**核心心态**:取证工具的可用性是部署时的保证,不是事故时的指望。
+**核心心态**:取证工具的可用性是部署时的保证,不是事故时的指望。但备份路径不为低频场景做反射性扩张 —— 真出现 deadman 失效频发再启动"打进镜像 + cap_add"的下一阶段决策。
 
 **范围**:`deploy/`(release bundle 脚本)、`deploy/scripts/preflight.sh`(新)、`docs/_archive/ops/deployment-sop.md` / `cloud-service-checklist.md`(增改)。
 

@@ -19,10 +19,14 @@ set -euo pipefail
 #   artifactflow-infra-<infra-slug>.tar.gz     ONLY if --with-infra (content-addressed
 #                                              by base image tags; targets that already
 #                                              have the same nginx/pg/redis can skip).
-#   artifactflow-forensics-<forensics-slug>.tar.gz  ONLY if --with-forensics (content-
-#                                              addressed by py-spy + python versions;
-#                                              py-spy static binary + pandas/numpy
-#                                              offline wheels for `observability_report.py`).
+#   artifactflow-forensics-<forensics-slug>.tar.gz  ONLY if --with-forensics
+#                                              (slug encodes py-spy + pandas +
+#                                              numpy + python versions, NECESSARY
+#                                              for identity; wheels.lock.txt
+#                                              inside the tar is the SUFFICIENT
+#                                              equivalence check). py-spy static
+#                                              binary + pandas/numpy offline
+#                                              wheels for observability_report.py.
 #
 # Air-gap contract:
 #   Everything downloaded by this script is downloaded on the BUILD host.
@@ -110,12 +114,18 @@ FORENSICS_PYTHON="3.11"
 # intranet target set. If a deploy needs older glibc, switch to manylinux2010.
 FORENSICS_PLATFORM="manylinux2014_x86_64"
 
-# Content-addressed tar name — same idea as INFRA_SLUG: ops can see at a
-# glance "do I already have this exact forensics bundle?". py-spy version
-# + Python version are the dimensions that drive ABI compat; pandas/numpy
-# pins do change content but are captured in the manifest + wheels.lock.txt,
-# not the slug (keeping it readable).
-FORENSICS_SLUG="pyspy${PYSPY_VERSION}-py${FORENSICS_PYTHON}"
+# Slug captures the four pinned versions so ops can see at a glance "do I
+# already have this exact forensics bundle?" — same idea as INFRA_SLUG. Top-
+# level versions are NECESSARY but not SUFFICIENT for identity: pip's resolver
+# can still shift transitive deps over time. forensics/wheels.lock.txt is the
+# SUFFICIENT check (diff two bundles' lock files to confirm equivalence). See
+# the README written into the bundle below for the two-tier check protocol.
+#
+# Reviewer round 2 note (incident-2026-05-14 fix plan): the previous slug
+# `pyspy<ver>-py<ver>` was misleading — same name could resolve to different
+# pandas/numpy content. Slug is longer now (still readable) and the docs no
+# longer say "same slug = same bundle".
+FORENSICS_SLUG="pyspy${PYSPY_VERSION}-pandas${PANDAS_VERSION}-numpy${NUMPY_VERSION}-py${FORENSICS_PYTHON}"
 FORENSICS_ARCHIVE="$OUTDIR/artifactflow-forensics-${FORENSICS_SLUG}.tar.gz"
 
 # Build platform — default linux/amd64 because the intranet target is x86_64.
@@ -307,8 +317,9 @@ EOF
   # Top-level versions are pinned (PANDAS_VERSION / NUMPY_VERSION); transitive
   # deps flow from pip's resolver. wheels.lock.txt records the actual resolved
   # set (basenames, sorted) so ops can diff two bundles built at different
-  # times and tell whether they really are equivalent — the slug captures
-  # py-spy + python versions only, by design (slug stays human-readable).
+  # times and tell whether they really are equivalent — the slug encodes
+  # py-spy + pandas + numpy + python versions (NECESSARY check), wheels.lock
+  # is the SUFFICIENT check (catches transitive drift the slug misses).
   echo "Downloading pandas==${PANDAS_VERSION} + numpy==${NUMPY_VERSION} wheels (target: ${FORENSICS_PLATFORM}, py${FORENSICS_PYTHON})..."
   if ! pip download \
       --platform "$FORENSICS_PLATFORM" \
@@ -343,13 +354,23 @@ pandas: ${PANDAS_VERSION}
 numpy:  ${NUMPY_VERSION}
 Python target: ${FORENSICS_PYTHON} / ${FORENSICS_PLATFORM}
 
+Role:
+  py-spy     — backup attach-by-PID Python stack sampler. Used only when the
+               in-process faulthandler deadman switch (PR-obs-lite) fails to
+               dump or you want sampled distribution instead of single-frame
+               stacks. Primary stack-dump path is \`docker logs backend\`.
+  pandas/numpy — analyst tools for scripts/observability_report.py (offline
+               post-incident analysis). Independent of the backend deployment.
+
 Contents:
-  bin/py-spy           — static binary, drop into /usr/local/bin on intranet host
+  bin/py-spy           — static binary, drop into /usr/local/bin on host
   bin/py-spy.sha256    — sha256sum(1)-compatible checksum file, used by preflight
   wheels/*.whl         — pandas + numpy + transitive deps for offline install
-  wheels.lock.txt      — sorted basenames of every wheel in wheels/ (diff against
-                         another bundle to tell if they really are equivalent;
-                         the slug itself only encodes py-spy + python versions)
+  wheels.lock.txt      — sorted basenames of every wheel in wheels/. Use this
+                         to verify two bundles are equivalent: the slug encodes
+                         only the four pinned versions (NECESSARY), wheels.lock
+                         catches transitive drift (SUFFICIENT). Diff:
+                           diff bundleA/forensics/wheels.lock.txt bundleB/...
   README.md            — this file
 
 Install (intranet host, no network needed):
@@ -361,7 +382,7 @@ Verify:
   py-spy --version
   python -c 'import pandas; print(pandas.__version__)'
 
-See: docs/_archive/ops/deployment-sop.md → "Forensics readiness"
+See: docs/_archive/ops/deployment-sop.md → "取证就绪"
      docs/runbooks/service-hang.md (after PR-doc-runbook lands)
 EOF
 
@@ -505,8 +526,10 @@ To deploy on air-gapped host:
     # No pause/resume here — there's nothing running to pause.
 
   # ---- Roll-update (most common, no infra, no forensics re-ship) ----
-  # Forensics tar is content-addressed (pyspy<ver>-py<ver>) — if neither
-  # version changed, the previous tar on the target is still valid; skip.
+  # Slug encodes pyspy/pandas/numpy/python versions (NECESSARY). If the slug
+  # matches what's already on target AND forensics/wheels.lock.txt diffs
+  # clean, skip re-shipping. Slug alone is not sufficient — transitive deps
+  # can shift across builds with the same top-level pins.
   scp dist/artifactflow-{app,config,deploy}-${VERSION}.tar.gz{,.sha256} \\
       dist/artifactflow-${VERSION}.manifest.txt                          \\
       target:/opt/artifactflow/tmp/

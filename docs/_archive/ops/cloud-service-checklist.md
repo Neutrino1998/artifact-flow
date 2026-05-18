@@ -64,43 +64,50 @@
 
 ## 四、宿主机取证工具（事故复盘补，PR-forensics-bundle）
 
-> **背景**：2026-05-14 事件循环卡死事故时，内网现场抓不到 `py-spy`，临时取证额外走了一大圈。复盘后我们把 `py-spy` 静态二进制 + `pandas`/`numpy` 离线 wheels 打进 release bundle（`scripts/release.sh --with-forensics`），目标机器零联网完成安装。**但宿主机层的 `gdb`/`strace`/`procps` 仍需云托管方在主机镜像里预装或允许我们装**。
+> **背景**：2026-05-14 事件循环卡死事故时，内网现场抓不到 `py-spy`，临时取证额外走了一大圈。复盘后:
+> - **主路径**: PR-obs-lite 已集成 `faulthandler` deadman switch —— 硬 wedge 时**自动 dump Python 栈**到 stderr / `docker logs backend`(C 线程,不获取 GIL,C 扩展持 GIL 也能出栈)。事故现场首查 `docker logs backend` 即可定位卡在哪
+> - **备份路径**: `py-spy` 静态二进制 + `pandas`/`numpy` 离线 wheels 打进 release bundle (`scripts/release.sh --with-forensics`),目标机器零联网完成安装。**py-spy 是 deadman 失效时的备份**,不是首选;pandas/numpy 是 analyst 离线分析工具(`scripts/observability_report.py`)
+>
+> 本段问题是**为备份路径就绪**做的最小对齐 —— 主路径(faulthandler)不依赖任何宿主机权限,理论上已自洽。
 
 1. 🌟 **宿主机镜像是否预装 `gdb`、`strace`、`procps`(`ps`/`top`) ？**
-   - 这是排查"服务卡死但未崩溃"的最小工具集（参考 incident-2026-05-14 第 33-41 行）
-   - 若未预装，确认我们能否在不联网情况下走云托管方提供的内部 yum/apt 源安装
+   - 这是排查"服务卡死但未崩溃"的深挖工具集(参考 incident-2026-05-14 第 33-41 行)
+   - **主路径不依赖** —— `faulthandler` dump 已经能告诉我们 Python 栈在哪
+   - 备份/深挖时需要(看 syscall 序列、容器外资源全景)
+   - 若未预装,确认我们能否在不联网情况下走云托管方提供的内部 yum/apt 源安装
 
-2. 🌟 **是否允许我们把 `py-spy` 二进制装到 `/usr/local/bin/`？**
-   - `py-spy` 是 attach-by-PID 的 Python profiler/sampler，通过 `ptrace` syscall 读目标进程栈
-   - 不需要 setuid / root；权限由 Yama LSM (`ptrace_scope`) 控制，见下条
+2. **是否允许我们把 `py-spy` 二进制装到 `/usr/local/bin/`？**
+   - `py-spy` 是 attach-by-PID 的 Python profiler/sampler,通过 `ptrace` syscall 读目标进程栈
+   - **仅在 deadman 失效时使用** —— 主路径已经能 dump Python 栈;py-spy 用于"deadman 自己也失败 / 想看采样分布而非单帧栈"的低频场景
+   - 不需要 setuid / root;权限由 Yama LSM (`ptrace_scope`) 控制,见下条
 
-3. 🌟 **`ptrace_scope` 内核参数 (`/proc/sys/kernel/yama/ptrace_scope`) 当前值是？**
+3. **`ptrace_scope` 内核参数 (`/proc/sys/kernel/yama/ptrace_scope`) 当前值是？**
 
-   Yama LSM 四种模式（参考：[kernel.org Yama](https://www.kernel.org/doc/html/latest/admin-guide/LSM/Yama.html)）：
+   Yama LSM 四种模式(参考: [kernel.org Yama](https://www.kernel.org/doc/html/latest/admin-guide/LSM/Yama.html)):
 
-   | mode | 语义 | py-spy 能否 attach docker 内 backend |
+   | mode | 语义 | 宿主机 py-spy 能否 attach 容器内 backend |
    |---|---|---|
-   | 0 | classic ptrace（同 UID 即可） | ✅ 可直接 attach（最宽松） |
-   | 1 | restricted（**默认**）：仅 descendant，或被 `prctl(PR_SET_PTRACER)` 显式放行，或 CAP_SYS_PTRACE | ⚠️ 默认值下**不能**直接 attach 已运行的容器进程（容器不是 host shell 的子进程） |
-   | 2 | admin only（CAP_SYS_PTRACE） | ❌ 普通用户失败 |
+   | 0 | classic ptrace(同 UID 即可) | ✅ 可直接 attach |
+   | 1 | restricted(**Linux 默认**): 仅 descendant 或带 CAP_SYS_PTRACE | ⚠️ 不能直接 attach(容器不是 host shell 的子进程) |
+   | 2 | admin only(CAP_SYS_PTRACE) | ❌ 普通账户失败 |
    | 3 | 禁用 | ❌ 全部失败 |
 
-   **对我们的影响**：mode 1 是 Linux 发行版默认（Ubuntu / RHEL / Debian），意味着部署账户**无法**直接 `py-spy dump --pid <backend container PID>`。三条变通路径，按优先序：
+   **对备份路径的影响**: mode 1 是 Linux 发行版默认。`py-spy` 在宿主机 attach 容器内进程跨 PID namespace,**默认值下不可行**。两条变通:
 
-   a. **docker compose 加 `cap_add: [SYS_PTRACE]`**（推荐，最小改动）——给容器一个能在自身 namespace 内 ptrace 的能力。`py-spy dump --pid 1` 在容器内即可工作。事故时 `docker exec backend py-spy dump --pid 1`，无宿主机参与。
+   a. **宿主机 `ptrace_scope` 调到 0**(影响整机,需云托管方批准 + 评估安全暴露面)
+   b. **以 host root 跑 py-spy / 部署账户加 CAP_SYS_PTRACE**(范围更小,但仍需云托管方授权)
 
-   b. **`ptrace_scope` 调到 0**（次选）——影响整机所有进程，攻击面比 a 大。仅在云托管不允许 a 时考虑。
+   > 注: 还有一条路径是 "docker compose 加 `cap_add: [SYS_PTRACE]` + 把 py-spy 装进 backend 镜像",但当前 bundle 设计**不打 py-spy 进镜像、不动 compose**(避免镜像膨胀和事故反射性扩张)。若未来 deadman 失效频繁发生再启动该决策。
 
-   c. **由 backend 自己调 `prctl(PR_SET_PTRACER, PR_SET_PTRACER_ANY)`**（最后兜底）——需要应用代码改动，跨平台麻烦，不推荐。
-
-   **请云托管方确认**：
+   **请云托管方确认**:
    - 当前 `ptrace_scope` 值
-   - 是否允许我们给 backend 容器加 `cap_add: [SYS_PTRACE]`（这是 docker capabilities 而非 host kernel cap，作用域仅容器内）
-   - 若 b/c 都不允许，确认 a 是接受的
+   - 若 a / b 都不允许,我们接受 "备份路径不可用,完全依赖 faulthandler dump 主路径" —— 不阻塞部署
 
-4. **是否允许 `gcore <pid>` 抓 coredump？**
-   - `gcore` 内部也是 ptrace，跟第 3 条一样受 Yama 约束 —— 解法同上（最便利路径：`cap_add: [SYS_PTRACE]` 后 `docker exec backend gcore 1`）
-   - coredump 文件落到我们持久卷下 (`/app/data/`)，不污染宿主机
-   - dump 含进程地址空间，仅在事故现场用，事后人工清理
+4. **是否允许 `gcore <pid>` 抓 coredump？**(可选,深挖路径)
+   - `gcore` 内部也是 ptrace,跟第 3 条一样受 Yama 约束
+   - **主路径不依赖** —— faulthandler dump 已经覆盖 Python 栈;coredump 是 C 扩展异常 / 二进制层 bug 的进一步深挖工具
+   - 若云托管允许,coredump 文件落到我们持久卷下 (`/app/data/`),不污染宿主机
+   - dump 含进程地址空间,仅在事故现场用,事后人工清理
 
-> 部署侧 SOP 详见 `deployment-sop.md` → "取证就绪"小节；preflight 校验脚本：`deploy/scripts/preflight.sh`
+> 事故现场 SOP 优先级:① `docker logs backend` 找 faulthandler dump → ② `tail data/observability/loop-lag.jsonl` 看软退化事件 → ③ `GET /admin/runtime` 看在飞任务 → 都不行时上备份路径
+> 部署侧 SOP 详见 `deployment-sop.md` → "取证就绪"小节;preflight 校验脚本: `deploy/scripts/preflight.sh`

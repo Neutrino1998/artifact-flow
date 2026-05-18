@@ -161,7 +161,16 @@ docker compose -f deploy/docker-compose.intranet.yml exec backend python scripts
 
 ### 取证就绪（首次部署必做，PR-forensics-bundle）
 
-事故复盘（`docs/_archive/ops/incident-2026-05-14-eventloop-wedge.md`）的核心运维教训：内网机器在事故时**联网拉不到 py-spy**，临时取证走了一大圈。修法是 release bundle 内置 `py-spy` 静态二进制 + `pandas`/`numpy` 离线 wheels，**目标机器零联网完成全部安装**。
+**事故现场诊断的两条路径**：
+
+| 路径 | 工具 | 来源 | 何时用 |
+|---|---|---|---|
+| **主路径** | `faulthandler` deadman dump | PR-obs-lite 已内置 backend 镜像 | 硬 wedge → `docker logs backend` 看 Python 栈 |
+| **备份路径** | `py-spy` 静态二进制 | 本 PR 的 forensics bundle | deadman 失效 / 想看采样分布 → 宿主机 attach |
+
+主路径不依赖任何宿主机权限或额外工具（`faulthandler` 是 backend 进程自己注册的 C 线程定时器，dump 路径不走 GIL）。本节是**为备份路径就绪**做的部署 — 主路径已经覆盖事故现场 90% 场景，备份是给极端情况兜底。
+
+另外 `pandas`/`numpy` 离线 wheels 是 analyst 工具（`scripts/observability_report.py` 跑离线分析时用），跟 backend 部署解耦 — 装在哪台 analyst 机器都行。
 
 **约束**：构建机有网下载（一次），目标机器全程离线 —— 不允许在内网机器上 `pip install <pkgname>` 或 `curl github`。
 
@@ -174,7 +183,11 @@ docker compose -f deploy/docker-compose.intranet.yml exec backend python scripts
 
 tar xzf artifactflow-forensics-pyspy*.tar.gz    # → ./forensics/{bin,wheels,README.md}
 
-# py-spy：装到宿主机 PATH（不进 app 镜像，事故时直接附加到容器内 PID）
+# py-spy：装到宿主机 PATH（备份路径用）
+# 注：默认 ptrace_scope=1 下，宿主机 py-spy 无法 attach 容器内 PID；需要云托管
+# 方允许 ptrace_scope=0 或部署账户 CAP_SYS_PTRACE。详见
+# cloud-service-checklist.md 第四段。若云托管方不允许，备份路径不可用，
+# 完全依赖主路径（faulthandler dump）—— 不阻塞部署。
 sudo install -m 0755 forensics/bin/py-spy /usr/local/bin/py-spy
 py-spy --version    # 验证
 
@@ -183,18 +196,23 @@ py-spy --version    # 验证
 pip install --no-index --find-links forensics/wheels pandas
 python -c 'import pandas; print(pandas.__version__)'    # 验证
 
-# 宿主机层取证工具（gdb / strace / procps）也得在 —— 走目标 OS 的包管理器
-# 离线源或预装。preflight.sh 一并检查。
+# 宿主机层全局视图工具（top / vmstat / iostat / docker stats / 深挖时的
+# gdb / strace）由云托管方在宿主机预装或允许 yum/apt 装。preflight 一并检查。
 ./deploy/scripts/preflight.sh
 # 期望输出：✓ Preflight passed — host is forensics-ready
 ```
 
-**Roll-update 时**：forensics tar 是按 `pyspy<ver>-py<ver>` 内容寻址的 —— 两个版本都没变就不用重传。`scripts/release.sh` 默认 `--app-only` 不打 forensics tar，roll-update 体积只有几十 KB。bumpy-spy 或 Python 版本时再传一次 forensics tar 即可。
+**Roll-update 时**：forensics tar 的 slug 编码四个 pin 版本（pyspy + pandas + numpy + python），同 slug 且 `forensics/wheels.lock.txt` diff 干净就不用重传 — 同 slug 本身只是必要条件,wheels.lock 才是充分条件(transitive 可能漂移)。`scripts/release.sh` 默认 `--app-only` 不打 forensics tar,roll-update 体积只有几十 KB。
 
-**why 不进 app 镜像**：
-- 镜像精简纪律（容器内 `top`/`gdb` 缺位是部署惯例，运行时镜像只装必需）
-- 事故时常常需要的是"附加到容器外部进程"或"宿主机层 strace"，而非容器内部
-- pandas 80MB+ 是分析工具，业务运行时不需要
+**why py-spy 不进 app 镜像**：
+- 主路径已经覆盖事故现场（`faulthandler` 不需要 py-spy）
+- 备份路径低频 — 不值得为低频备份膨胀生产镜像 + 改 compose `cap_add`
+- 镜像精简纪律对运行时全局视图工具（`top`/`gdb`）仍成立
+- 真出现 deadman 失效频发，那时候有数据支持"进镜像"决策
+
+**why pandas 不进 app 镜像**：
+- pandas 80MB+ 是分析工具，跟业务运行时无关
+- analyst 机器跟部署机不一定是同一台
 
 ---
 
