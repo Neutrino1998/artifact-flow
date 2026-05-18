@@ -18,6 +18,7 @@
 | P1 | PR-3 fencing 事件持久化 | ✅ 已完成 | 修复 bug ④,恢复审计/回放完整性 |
 | P2 | PR-forensics-bundle 取证工具 + 部署前置 | 待启动 | release 内置 py-spy / preflight 检查 / SOP |
 | P2 | PR-5 前端镜像重建 | 待启动 | 正式消除 HOSTNAME 误配 |
+| P3 | PR-tz-unify 事件时间戳时区统一 | 待启动 | events.py 写本地朴素、`server_default=func.now()` 又是 DB 端 UTC,二者不一致;PR-obs-lite 分析脚本在 Shanghai 部署偏 8h。修脚本前先决定全链路用哪个 |
 | P3 | 文档 PR(`docs/runbooks/service-hang.md` + `docs/guides/observability-tuning.md`) | 待启动 | 应急 runbook + obs 调参手册,纯 markdown PR;待 PR-obs-lite + PR-forensics-bundle 代码落地后启动(字段 / 路径稳定后下笔) |
 
 **小版本迭代打包**:整套 fix plan 同一个 release bundle,分两批 ship:
@@ -616,6 +617,55 @@ df_lag     = pd.read_json("data/observability/loop-lag.jsonl", lines=True)
       - HOSTNAME=0.0.0.0
 ```
 然后 `docker compose -f deploy/docker-compose.intranet.yml up -d --force-recreate frontend`。新镜像发版后此覆盖可保留(无害)或移除。
+
+---
+
+## PR-tz-unify:事件时间戳时区统一(P3)
+
+**发现来源**:PR-obs-lite reviewer 在 Shanghai 部署(UTC+8)测 `scripts/observability_report.py --hours 1`,发现一条本地 2 小时前写入的 `llm_complete` 仍被报告查出来 —— 时间窗口偏差正好 8 小时。
+
+**问题成因**:事件 `created_at` 在代码里走两条路,语义不一致。
+
+| 路径 | 位置 | 时间约定 |
+|---|---|---|
+| 热路径(几乎所有事件) | `src/core/events.py:55` `ExecutionEvent.created_at = datetime.now()` | **本地朴素**(Shanghai 部署即 UTC+8 朴素) |
+| 冷回退(没传 created_at 时 ORM 兜底) | `src/db/models.py` 各表 `server_default=func.now()` | DB 端时间:SQLite naive UTC、PG aware UTC、MySQL DB-local |
+
+`MessageEventRepository.batch_create` 总会传 `event_data["created_at"]`,所以**生产 DB 里几乎全是本地朴素**;`server_default` 是 schema 兜底,正常走不到。
+
+PR-obs-lite 的 `observability_report.py` 一开始把 threshold 写成 naive UTC(对齐 `func.now()` 在 SQLite 上的行为),恰好挑错了 —— 在非 UTC 部署里就是 TZ 偏移量大小的窗口错位。
+
+**影响面**:
+- 任何按 `created_at` 做时间窗口查询的代码 —— 目前已知仅 `observability_report.py`,但跨地域多部署 / 跨 TZ 比对场景会触发
+- DST 地区(本项目内网在 Shanghai,无 DST;若未来扩到有 DST 的地区,边界两侧会有 1h 歧义)
+- 显示侧:前端 / 日志渲染当前对这个字段的时区假设需要审一遍
+
+**当前状态**:本 PR 范围内**不修**(怕碰热路径 + schema 而 scope creep)。`observability_report.py` 当前实现保留 naive UTC threshold,**非 UTC 部署里时间窗有 TZ 偏移**;Shanghai 用户建议手动 `--hours N+8` 来覆盖实际 N 小时,直到本 PR 落地。
+
+**修复方向(两选一,落地前需先决策)**:
+
+1. **全链路 naive UTC**
+   - `events.py` 改 `datetime.now(timezone.utc).replace(tzinfo=None)`,所有 `server_default=func.now()` 保持(SQLite/PG 都是 UTC naive)
+   - 优点:改动最小,DB schema 不动
+   - 缺点:仍然是"朴素",未来 DST 地区 / aware 比较场景还会再踩;前端显示要做"DB 是 UTC,展示按 client TZ 转"的约定
+2. **全链路 aware UTC**
+   - 所有 `datetime` 字段改 `DateTime(timezone=True)`、所有 Python 侧 `datetime` aware
+   - SQLite 没有原生 tz 支持,SQLAlchemy 会做文本格式约定,需要小心读路径
+   - 优点:消除朴素时区的根本歧义
+   - 缺点:迁移面更大,需要 schema 改动 + 历史数据迁移(按部署 TZ 一次性偏移回 UTC)
+
+**范围**:
+- 审 `grep -rn "datetime.now()" src/` 所有写时间戳的 callsite
+- 审所有 `server_default=func.now()` 的列(messages、message_events、conversations、artifacts、artifact_versions、users、departments)
+- 审显示路径:前端如何渲染 `created_at`、log 怎么打
+- `observability_report.py` 的 threshold 跟着改对(naive UTC → 跟最终决策一致)
+- Migration 脚本:历史数据按部署 TZ 偏移回 UTC(若选方向 2)或保持(若选方向 1,因为 DB 端 `func.now()` 已经是 UTC,需 audit 是否真的全部一致)
+- 测试:`tests/observability/test_reviewer_fixes.py::test_load_message_events_via_orm` 的种子时间需对齐最终约定
+
+**决策点**(开 PR 前需先确定):
+- 方向 1 vs 2 —— 倾向 1(改动最小,跟现有 ORM 默认对齐;方向 2 留给真正出现跨 TZ 部署时再做)
+- 是否同时审显示侧 —— 倾向纳入(否则后端统一了 UTC,前端如果还用 local naive 渲染会展示偏移)
+- Migration 策略 —— 若选方向 1,可能不需要数据迁移,只需声明"从某个时间点开始 created_at 统一为 UTC naive";若选方向 2,必须 backfill
 
 ---
 
