@@ -614,7 +614,8 @@ df_lag     = pd.read_json("data/observability/loop-lag.jsonl", lines=True)
 
 ## PR-forensics-bundle:取证工具与部署前置(P2)✅ 已完成
 
-**落地记录**(commits 在 `main`,待 commit 后回填 SHA):
+**落地记录**(commit 在 `main`):
+- `c606187` 整 PR 一并 commit(5 个文件 + 430 净增行):
 - `scripts/release.sh`:新增 `--with-forensics` 开关,产出 `artifactflow-forensics-<slug>.tar.gz`(内容寻址 `pyspy<ver>-py<ver>`,同 INFRA_SLUG 模式);构建机下载 py-spy v0.4.1 静态二进制(SHA 校验,空 SHA 时打印实际值并 abort 让 operator 显式 pin)+ `pip download --platform manylinux2014_x86_64 --python-version 3.11 --only-binary=:all:` 锁目标平台拉 pandas/numpy 离线 wheels;manifest 增 forensics 段;首次部署 / roll-update 帮助文本同步刷新
 - `deploy/scripts/preflight.sh`(新):两层离线检查 — ① 宿主机 `gdb`/`gcore`/`strace`/`ps`/`top` PATH;② forensics bundle 完整性(py-spy 可执行 + SHA + 已装 PATH 提示;wheels 非空 + `pip install --no-index --find-links --ignore-installed --dry-run pandas` 强制走 wheels 不被系统 pandas 干扰)。失败时按 OK/✗ 计数 + 安装提示
 - `docs/_archive/ops/deployment-sop.md`:Mode 3 段后插入"取证就绪(首次部署必做)"小节,含 `tar xzf forensics → install py-spy → pip install --no-index wheels → preflight.sh` 流程,显式"目标机器零联网"承诺;why-not-in-app-image 三条
