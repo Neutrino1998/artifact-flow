@@ -240,8 +240,8 @@ docker load -i tmp/artifactflow-app-1.0.1.tar.gz
 | `config/agents/*.md`（agent prompt） | 直接编辑宿主机文件 | `docker compose -f deploy/docker-compose.intranet.yml restart backend` |
 | `config/models/models.yaml`（模型 / base_url） | 直接编辑宿主机文件 | 同上 — `restart backend` |
 | `config/tools/*.md`（自定义工具） | 直接编辑宿主机文件 | 同上 — `restart backend` |
-| `config/site/notifications.json` / `welcome_tips.json`（左栏通知 / 欢迎页提示） | 直接编辑宿主机文件，schema 见 `config/site/README.md` | **无需 restart** — 挂载在 frontend 容器，前端 60s 轮询自动重拉（标签回前台时立即重拉） |
-| `config/site/branding.json`（版权 / 业务联系页脚） | 直接编辑宿主机文件；**首次启用需** `cp branding.example.json branding.json` 再填值（仓库 `.gitignore` 排除真实文件） | **无需 restart**，但**只在挂载时拉一次、不轮询**——改完需用户刷新页面才看到。文件缺失 / schema 错位 → 页脚自动隐藏（fail-closed）。 |
+| `config/site/notifications.json`（左栏通知） | 直接编辑宿主机文件，schema 见 `config/site/README.md` | **无需 restart** — 挂载在 frontend 容器，前端 60s 轮询自动重拉（标签回前台时立即重拉） |
+| `config/site/welcome_tips.json` / `branding.json`（欢迎页提示 / 版权页脚） | 直接编辑宿主机文件；`branding.json` 首次启用需 `cp branding.example.json branding.json` 再填值（仓库 `.gitignore` 排除真实文件） | **无需 restart**，但**只在挂载时拉一次、不轮询**——改完需用户刷新页面才看到。文件缺失 / schema 错位 → 对应 UI 自动隐藏或回落默认（fail-closed）。 |
 | `deploy/.env`（任何 `ARTIFACTFLOW_*` 变量） | 直接编辑 | **`up -d backend`**（restart 不会重读 .env，up 会检测 env 变化重建容器） |
 | `deploy/nginx.conf` | 直接编辑 | `docker compose -f deploy/docker-compose.intranet.yml restart nginx` |
 | `deploy/docker-compose.intranet.yml`（端口、profile 等） | 直接编辑 | `up -d` |
@@ -261,7 +261,7 @@ ssh target 'cd /opt/artifactflow && \
             docker compose -f deploy/docker-compose.intranet.yml restart backend'
 ```
 
-> 上面的 `restart backend` 是给 `config/agents/`、`config/models/`、`config/tools/` 用的。如果**只**改了 `config/site/*.json`（通知 / 欢迎页提示 / 版权页脚），不需要任何 docker 命令——前端轮询自己生效；`branding.json` 例外，需要用户刷新页面才看到。
+> 上面的 `restart backend` 是给 `config/agents/`、`config/models/`、`config/tools/` 用的。如果**只**改了 `config/site/*.json`，不需要任何 docker 命令；其中 `notifications.json` 前端 60s 轮询自己生效，`welcome_tips.json` / `branding.json` 只在挂载时拉一次，需要用户刷新页面才看到。
 
 ---
 
