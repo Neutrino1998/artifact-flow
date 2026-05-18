@@ -614,7 +614,7 @@ df_lag     = pd.read_json("data/observability/loop-lag.jsonl", lines=True)
 
 ## PR-forensics-bundle:取证工具与部署前置(P2)✅ 已完成
 
-**落地记录**(commits 在 `main`,三轮 review 收敛):
+**落地记录**(commits 在 `main`,七轮收敛 = reviewer×5 + 用户主导 step-back×2):
 
 第一轮(initial 落地):
 - `c606187` 整 PR 一并 commit(5 个文件 + 430 净增行):`scripts/release.sh` 加 `--with-forensics` 开关产出 `artifactflow-forensics-<slug>.tar.gz`;构建机下载 py-spy + pandas/numpy 离线 wheels;`deploy/scripts/preflight.sh` 新增两层离线检查;deployment-sop / cloud-service-checklist 增"取证就绪"
@@ -651,7 +651,13 @@ df_lag     = pd.read_json("data/observability/loop-lag.jsonl", lines=True)
 - **行数变化**: preflight ~200 → ~80(-120);recipe + SOP + checklist 增减相抵,fix plan 加本段(+30 净增)。总净减约 -100 行,scope 真正落回"bundle + 镜像 py-spy"
 - **方法论 takeaway**: reviewer 反馈每条都"理论真",但**累积响应**会把简单事做复杂。用户的"step back"是必要的力学纠正 —— 单轮看不出来,跨多轮才能看出"验证机制比交付物还重"的失衡
 
-**关键转向(round 3,即本轮)**: py-spy 从"forensics bundle 工具(装宿主机)" → "**backend 镜像内置工具**(`docker exec backend py-spy`)"。这是对 round 2 的修正:round 2 想避免"为低频备份做反射性镜像膨胀",但实际效果是把可用性外推给云托管协调;round 3 承认 py-spy 是事故现场最常用 + 第三方分发 + 我们能完全控制的诊断工具,直接打进镜像是**精准而非反射性**的扩张。三层分明:① 主路径 faulthandler dump(零依赖) ② 备份路径 `docker exec backend py-spy`(容器内 cap 自洽,零云托管依赖) ③ 深挖路径 host gdb/strace(云托管协调)。前两层完全自洽,事故时秒级可用。
+第七轮(reviewer round 5,P2×2 残留收口):
+- `1006e0c` (+7 行) round 6 收 SOP/checklist 时漏了 release.sh 内部三处 + recipe 顺序问题。**架构 OK,纯文案/SOP 顺序补漏**:
+  - **P2 #1**(recipe preflight 只在 up 前): 第一次 preflight pass py-spy 必 ℹ skip,实际只验了 analyst-tools wheels。**采纳**: recipe 加 pass 2 (up -d 后),注释明示两次的角色差异
+  - **P2 #2**(分进 tar 的 README + manifest 残留 `docker exec backend`): release.sh:247 (README in tar) / :360 (manifest) / :85 (内部注释) 三处统一 → `docker compose -f deploy/docker-compose.intranet.yml exec backend py-spy ...`,跟 round 5 已修过的 SOP/checklist 对齐
+- **reviewer 评价定调**: "剩下主要是 release 输出和打包 README 的残留,不是架构问题" —— 印证 round 6 scope walk-back 方向正确,本 PR **架构面收敛完毕**,后续不会再有同源新增
+
+**关键转向(第四轮)**: py-spy 从"forensics bundle 工具(装宿主机)" → "**backend 镜像内置工具**(`docker exec backend py-spy`)"。这是对 round 2 的修正:round 2 想避免"为低频备份做反射性镜像膨胀",但实际效果是把可用性外推给云托管协调;round 3 承认 py-spy 是事故现场最常用 + 第三方分发 + 我们能完全控制的诊断工具,直接打进镜像是**精准而非反射性**的扩张。三层分明:① 主路径 faulthandler dump(零依赖) ② 备份路径 `docker exec backend py-spy`(容器内 cap 自洽,零云托管依赖) ③ 深挖路径 host gdb/strace(云托管协调)。前两层完全自洽,事故时秒级可用。
 
 **bundle 改名 + 减容**: `artifactflow-forensics-<slug>.tar.gz` → `artifactflow-analyst-tools-<slug>.tar.gz`(语义更准 —— 现在只剩 pandas/numpy 给 analyst 用);slug 简化为 `pandas<v>-numpy<v>-py<v>`(py-spy 已出 bundle,不在 slug 里);release.sh `--with-forensics` flag 改名 `--with-analyst-tools`。py-spy 段整体砍掉(下载/SHA pin/sha256 文件/README 段 ~100 行 -)。
 
