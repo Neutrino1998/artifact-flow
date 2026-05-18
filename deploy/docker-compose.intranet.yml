@@ -38,6 +38,13 @@ services:
       timeout: 10s
       start_period: 10s
       retries: 3
+    # SYS_PTRACE: lets `docker exec backend py-spy dump --pid 1` work as the
+    # backup attach path (primary is faulthandler deadman → docker logs).
+    # Container-scope capability — only allows ptrace within this container's
+    # PID namespace; does not affect host or other containers. py-spy is
+    # baked into the image (Dockerfile builder stage), so no bind-mount needed.
+    cap_add:
+      - SYS_PTRACE
     depends_on:
       postgres:
         condition: service_healthy

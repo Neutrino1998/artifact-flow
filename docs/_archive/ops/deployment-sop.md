@@ -161,57 +161,52 @@ docker compose -f deploy/docker-compose.intranet.yml exec backend python scripts
 
 ### 取证就绪（首次部署必做，PR-forensics-bundle）
 
-**事故现场诊断的两条路径**：
+**事故现场诊断的三层路径**：
 
-| 路径 | 工具 | 来源 | 何时用 |
+| 层 | 工具 | 来源 | 何时用 |
 |---|---|---|---|
-| **主路径** | `faulthandler` deadman dump | PR-obs-lite 已内置 backend 镜像 | 硬 wedge → `docker logs backend` 看 Python 栈 |
-| **备份路径** | `py-spy` 静态二进制 | 本 PR 的 forensics bundle | deadman 失效 / 想看采样分布 → 宿主机 attach |
+| **主路径** | `faulthandler` deadman dump | backend 进程自己（PR-obs-lite 已内置） | 硬 wedge → `docker logs backend` 看自动 dump 的 Python 栈 |
+| **备份路径** | `py-spy` | backend **镜像里**（Dockerfile builder stage）+ compose `cap_add: [SYS_PTRACE]` | deadman 失效 / 想看采样分布 → `docker exec backend py-spy ...` |
+| **深挖路径** | `gdb` / `strace` / `procps`、宿主机 `iostat` 等 | 宿主机预装（云托管协调） | syscall 序列 / coredump / 全机器视图 |
 
-主路径不依赖任何宿主机权限或额外工具（`faulthandler` 是 backend 进程自己注册的 C 线程定时器，dump 路径不走 GIL）。本节是**为备份路径就绪**做的部署 — 主路径已经覆盖事故现场 90% 场景，备份是给极端情况兜底。
+前两层零云托管依赖（镜像 + 容器级 cap 自洽）；第三层依赖宿主机标准工具，preflight 在 optional 段提示，不阻塞部署。
 
-另外 `pandas`/`numpy` 离线 wheels 是 analyst 工具（`scripts/observability_report.py` 跑离线分析时用），跟 backend 部署解耦 — 装在哪台 analyst 机器都行。
+另外 `pandas`/`numpy` 离线 wheels 是 analyst 工具（`scripts/observability_report.py` 跑离线分析时用），跟 backend 部署解耦 — 装在哪台 analyst 机器都行。release bundle 打成独立 `artifactflow-analyst-tools-<slug>.tar.gz`。
 
 **约束**：构建机有网下载（一次），目标机器全程离线 —— 不允许在内网机器上 `pip install <pkgname>` 或 `curl github`。
 
 **首次部署流程**（在 [前置准备 → 部署] 的"3. 配置"之后、"4. 启动"之前插入）：
 
 ```bash
-# 3.5 取证 bundle 安装
-# release.sh 用 --with-forensics 构建时已经把 py-spy 二进制 + pandas/numpy
-# 离线 wheels 打进 artifactflow-forensics-<slug>.tar.gz；下面在内网机器解包并安装。
+# 3.5 analyst-tools bundle 安装（仅在 analyst 机器上需要，可后做）
+# release.sh 用 --with-analyst-tools 构建时已经把 pandas/numpy 离线 wheels
+# 打进 artifactflow-analyst-tools-<slug>.tar.gz。
 
-tar xzf artifactflow-forensics-pyspy*.tar.gz    # → ./forensics/{bin,wheels,README.md}
+tar xzf artifactflow-analyst-tools-*.tar.gz    # → ./analyst-tools/{wheels,README.md,wheels.lock.txt}
 
-# py-spy：装到宿主机 PATH（备份路径用）
-# 注：默认 ptrace_scope=1 下，宿主机 py-spy 无法 attach 容器内 PID；需要云托管
-# 方允许 ptrace_scope=0 或部署账户 CAP_SYS_PTRACE。详见
-# cloud-service-checklist.md 第四段。若云托管方不允许，备份路径不可用，
-# 完全依赖主路径（faulthandler dump）—— 不阻塞部署。
-sudo install -m 0755 forensics/bin/py-spy /usr/local/bin/py-spy
-py-spy --version    # 验证
-
-# pandas / numpy：装到 analyst 用的 Python 环境（observability_report.py 跑分析时用）
+# pandas / numpy：装到 analyst 用的 Python 环境
 # --no-index 强制不联网，--find-links 指向离线 wheels 目录
-pip install --no-index --find-links forensics/wheels pandas
+pip install --no-index --find-links analyst-tools/wheels pandas
 python -c 'import pandas; print(pandas.__version__)'    # 验证
 
-# 宿主机层全局视图工具（top / vmstat / iostat / docker stats / 深挖时的
-# gdb / strace）由云托管方在宿主机预装或允许 yum/apt 装。preflight 一并检查。
+# 3.6 Preflight 检查
+# Required 段（必通过）：analyst-tools bundle 完整性 + backend 容器有 py-spy
+# Optional 段（warning，不阻塞）：host 深挖工具 gdb/strace/procps
+# 首次部署在 `docker compose up` 之前跑时,backend 容器尚未启动,preflight
+# 会 info "skipping container py-spy check" —— 启动后再跑一次确认容器内 py-spy 可用
 ./deploy/scripts/preflight.sh
-# 期望输出：✓ Preflight passed — host is forensics-ready
+# 期望输出：✓ Preflight passed —— bundle ready（启动后再跑会变成 OK backend ✓）
 ```
 
-**Roll-update 时**：forensics tar 的 slug 编码四个 pin 版本（pyspy + pandas + numpy + python），同 slug 且 `forensics/wheels.lock.txt` diff 干净就不用重传 — 同 slug 本身只是必要条件,wheels.lock 才是充分条件(transitive 可能漂移)。`scripts/release.sh` 默认 `--app-only` 不打 forensics tar,roll-update 体积只有几十 KB。
+**Roll-update 时**：analyst-tools tar 的 slug 编码 pandas/numpy/python 三个 pin 版本，同 slug 且 `analyst-tools/wheels.lock.txt` diff 干净就不用重传 — slug 是必要条件,wheels.lock 是充分条件(transitive 可能漂移)。`scripts/release.sh` 默认 `--app-only` 不打 analyst tar,roll-update 体积只有几十 KB。
 
-**why py-spy 不进 app 镜像**：
-- 主路径已经覆盖事故现场（`faulthandler` 不需要 py-spy）
-- 备份路径低频 — 不值得为低频备份膨胀生产镜像 + 改 compose `cap_add`
-- 镜像精简纪律对运行时全局视图工具（`top`/`gdb`）仍成立
-- 真出现 deadman 失效频发，那时候有数据支持"进镜像"决策
+**why py-spy 进镜像 + cap_add: SYS_PTRACE**：
+- 容器级 cap 作用域仅 backend 容器内,不放大已 RCE 攻击面
+- 镜像 +6MB(~+4%,无感),换来事故时 `docker exec backend py-spy` 秒级可用,无云托管协调依赖
+- 这是**精准而非反射性扩张** —— 只装 py-spy(第三方分发 + 事故现场最常用);gdb/strace/top 仍走宿主机(OS 包 + 深挖路径,频次低)
 
-**why pandas 不进 app 镜像**：
-- pandas 80MB+ 是分析工具，跟业务运行时无关
+**why pandas/numpy 不进 app 镜像**：
+- pandas 80MB+ 是分析工具,跟业务运行时无关
 - analyst 机器跟部署机不一定是同一台
 
 ---

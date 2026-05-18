@@ -624,29 +624,36 @@ df_lag     = pd.read_json("data/observability/loop-lag.jsonl", lines=True)
 - `dee0763` 修 reviewer 反馈:① py-spy GitHub Releases URL 是 404(asset 根本不存在),改走 `pip download py-spy==<ver> --no-deps` 拉 PyPI wheel,unzip 提取 `.data/scripts/py-spy` 二进制;② SHA 口径不一致(release 哈希 tarball、preflight 哈希 binary)→ 统一到**binary** SHA,release 写 `forensics/bin/py-spy.sha256`(sha256sum 标准格式),preflight 走 `sha256sum -c` 同文件零漂移;③ pandas/numpy 未 pin → 顶层加 `PANDAS_VERSION` / `NUMPY_VERSION` + 下载后 `ls *.whl | sort > forensics/wheels.lock.txt` 记录解析全套;④ ptrace_scope 描述偏乐观(把 Yama mode 1 写成"同 UID 即可",实际是 descendant only)→ cloud-service-checklist 重写四模式表 + 当时推荐了 `docker exec backend + cap_add` 路径
 
 第三轮(reviewer round 2,3 条):
-- **P1 修文档承诺不一致**: round 2 reviewer 戳穿"`docker exec backend py-spy` 推荐"在当前 bundle 设计下不可执行 —— py-spy 装在宿主机不在容器、compose 没 `cap_add`。**回退** docker cap_add 推荐路径,回归"宿主机 attach + 依赖云托管 ptrace_scope=0 或 host CAP_SYS_PTRACE",并**重定位** py-spy 为"PR-obs-lite faulthandler deadman 失效时的备份"(主路径是 `docker logs backend` 看 faulthandler dump,不需要任何额外权限)
-- **P2 slug 不全面**: 原 slug `pyspy<ver>-py<ver>` 让 ops 误以为 "同名即等价",但 pandas/numpy 版本和 transitive 都可能漂移。Slug 扩展为 `pyspy<ver>-pandas<ver>-numpy<ver>-py<ver>`(NECESSARY);wheels.lock.txt diff 作 SUFFICIENT 校验。文档措辞同步改"NECESSARY 但不 SUFFICIENT,真等价校验走 wheels.lock"
-- **P3 fix plan 落地记录**: 本节补充三轮 commits + 重定位 note
+- `27d13ee` 修 reviewer round 2 反馈(三条都是落地与文档措辞不一致):① 撤销"`docker exec backend py-spy + cap_add`"虚假推荐(当前 bundle 不动镜像/compose 时这条路径不可执行) → 回归宿主机 attach + 依赖云托管 ptrace_scope 协调,**并重定位 py-spy 为 PR-obs-lite faulthandler deadman 失效时的备份**;② slug `pyspy<v>-py<v>` 加上 `pandas<v>-numpy<v>`(NECESSARY 校验) + 文档明确 wheels.lock.txt 才是 SUFFICIENT;③ fix plan 落地记录补 dee0763 + 重定位
 
-**关键转向(round 2)**: 跟 PR-obs-lite 边界划清。原设计把 py-spy 当事故现场首选工具,实际 PR-obs-lite 的 `faulthandler` deadman switch(C 线程不获取 GIL,硬 wedge 时自动 dump 栈到 `docker logs backend`)已经覆盖事故现场 90% 场景。py-spy 真实定位是**备份路径** + 采样分布查看;pandas/numpy 是 analyst 离线分析(跟 backend 部署解耦)。这个重定位让所有"py-spy 必须 0 延迟可用"假设解除 —— compose 不需要 cap_add、镜像不需要装 py-spy、宿主机层 gdb/strace 依赖云托管协调即可,**整体设计大幅简化**,不为低频备份做反射性的镜像膨胀。
+第四轮(reviewer round 3,3 条 + 用户主导的架构纠偏):
+- **用户主导**: 反复 push "是不是只有 py-spy / gdb 不是在容器里跑吗 / 为啥不一开始打进去 / 打进镜像是不是反而配置更简单",三次戳穿 round 2 那个"装宿主机 + 看云托管脸色"的中间态 —— 把不确定性外推到云托管协调上,真出事故时备份路径可能不可用。**最终走向**: py-spy 进 backend 镜像 + compose `cap_add: [SYS_PTRACE]`,前两层(主路径 faulthandler + 备份 docker exec py-spy)零云托管依赖。这不是 round 2 想避免的"反射性扩张",而是**精准扩张** —— 只装 py-spy(第三方分发 + 事故现场最常用)、不装 gdb/strace/top(OS 包 + 频次低 + 全局视图);+6MB 镜像换运维心智模型大幅简化(SOP/checklist/preflight 整体 -176 行)
+- **P2 反馈**: round 2 后 reviewer 戳穿 preflight 把 host gdb/gcore/strace/ps/top 全当 hard failure → 跟"主路径 faulthandler 不依赖 host 工具"新模型冲突,可能阻塞"云托管不允许装深挖工具但部署完全 OK"的合法场景。**采纳**: preflight 分 required(bundle 完整性 + 容器内 py-spy) / optional(host 深挖工具 warning) 两段,exit 只看 required;output 用 ✓/✗/⚠ 三色分明
+- **P3 反馈**(注释 stale): release.sh 旧注释还说"content-addressed by py-spy + Python version" → py-spy 出镜像 + bundle 改名后这段注释整段重写,语义跟代码同步
+- **P3 反馈**(行尾空格): fix plan 633 行 trailing whitespace → 清理
 
-**验证范围**: 
-- bash syntax + preflight 三态(missing dir / empty / fake-binary / tampered binary)全部测过
-- release.sh `--help` 渲染过、slug 命名规则核对过
-- **未跑** `--with-forensics` 端到端,因为它必触发 docker buildx + 联网下载 py-spy/wheels,留给真正发版时验证;但 reviewer round 1 实测确认了 `py-spy==0.4.1` wheel 下载/解包路径 + `pandas==2.2.3 numpy==1.26.4` 解析路径都可用(reviewer 反馈中提供了实测 SHA `e7c2de2dc54449ec88c086f1859555b4e34e63ccdcf3f8804496f9306cd44de6`)
+**关键转向(round 3,即本轮)**: py-spy 从"forensics bundle 工具(装宿主机)" → "**backend 镜像内置工具**(`docker exec backend py-spy`)"。这是对 round 2 的修正:round 2 想避免"为低频备份做反射性镜像膨胀",但实际效果是把可用性外推给云托管协调;round 3 承认 py-spy 是事故现场最常用 + 第三方分发 + 我们能完全控制的诊断工具,直接打进镜像是**精准而非反射性**的扩张。三层分明:① 主路径 faulthandler dump(零依赖) ② 备份路径 `docker exec backend py-spy`(容器内 cap 自洽,零云托管依赖) ③ 深挖路径 host gdb/strace(云托管协调)。前两层完全自洽,事故时秒级可用。
+
+**bundle 改名 + 减容**: `artifactflow-forensics-<slug>.tar.gz` → `artifactflow-analyst-tools-<slug>.tar.gz`(语义更准 —— 现在只剩 pandas/numpy 给 analyst 用);slug 简化为 `pandas<v>-numpy<v>-py<v>`(py-spy 已出 bundle,不在 slug 里);release.sh `--with-forensics` flag 改名 `--with-analyst-tools`。py-spy 段整体砍掉(下载/SHA pin/sha256 文件/README 段 ~100 行 -)。
+
+**验证范围**:
+- bash syntax + preflight 三态(missing analyst-tools / empty wheels / fake wheel)全测过,docker 不在场时容器内 py-spy 检查 info 跳过(为首次部署 preflight 设计)
+- release.sh `--help` 渲染过、新 slug + bundle 名核对过
+- **未跑** `--with-analyst-tools` 端到端(必触发 docker buildx),但 wheels 下载路径跟 round 1 实测同款(reviewer 之前实测过 pandas/numpy 解析路径)
 
 下方 spec 保留原文作为审计材料。落地与 spec 的差异:
-- spec 写 `deploy/wheels/`,实际走**独立 forensics tar** 而非检入 git(`.gitignore` 已忽略 `wheels/`,且 ~60MB 二进制+wheels 不该污染 git);slug 命名跟 INFRA_ARCHIVE pattern 一致
-- py-spy 走 PyPI wheel 提取(非 GitHub Releases —— GitHub 上根本不存在那个 asset);事故时定位为**备份路径**(主路径 faulthandler deadman),不是 spec 设想的"首选取证工具"
-- preflight 检查 host gdb/strace/procps(深挖工具)+ bundle 完整性,**没有**检查 ptrace_scope —— 后者交云托管方协调,bundle 本身解决不了
-- spec 第 4 条"诊断策略定调:取证走宿主机"修正为:**进程内部取证(py-spy)定位为备份**;深挖工具(gdb/strace)仍走宿主机依赖云托管 yum/apt;全局视图(top/iostat/docker stats)毫无疑问宿主机层
-- **air-gap 硬合约**: release.sh 注释 + SOP + preflight 三处显式"目标机器零联网",`pip install` 永远 `--no-index --find-links`。spec 没显式写但跟用户初始约束对齐
+- spec 写 `deploy/wheels/`,实际走**独立 analyst-tools tar** 而非检入 git(.gitignore 已忽略 `wheels/`)
+- py-spy 走**镜像内置**(round 3 重定位),不是 spec 想象的 release bundle 装宿主机;事故现场用 `docker exec backend py-spy`,无云托管协调依赖
+- preflight 走 required(bundle + 容器内 py-spy)+ optional(host 深挖工具 warning) 分层,**不**把宿主机工具当硬失败 —— 主路径已自洽,host 工具缺位不阻塞部署
+- spec 第 4 条"诊断策略定调:取证走宿主机"修正为三层:① **主路径** faulthandler(进程内,镜像) ② **备份** py-spy(镜像 + 容器 cap) ③ **深挖** host gdb/strace(宿主机)。第 1 + 2 层完全脱离云托管协调
+- **air-gap 硬合约**: release.sh 注释 + SOP + preflight 三处显式"目标机器零联网",`pip install` 永远 `--no-index --find-links`
 
-**目标**(round 2 重定位):
-1. 提供 `py-spy` 作为 PR-obs-lite `faulthandler` deadman 失效时的备份 attach 路径
+**目标**(round 3 重定位):
+1. backend 镜像内置 `py-spy` + compose `cap_add: [SYS_PTRACE]`,事故时 `docker exec backend py-spy` 秒级可用作为 PR-obs-lite `faulthandler` deadman 失效时的备份
 2. 提供 `pandas`/`numpy` 离线 wheels 作为 analyst 机器的零联网安装路径(跑 `observability_report.py`)
+3. preflight 分 required(bundle + 容器 py-spy) / optional(host 深挖工具)两层,部署不被云托管政策卡住
 
-**核心心态**:取证工具的可用性是部署时的保证,不是事故时的指望。但备份路径不为低频场景做反射性扩张 —— 真出现 deadman 失效频发再启动"打进镜像 + cap_add"的下一阶段决策。
+**核心心态**:取证工具的可用性是部署时的保证,不是事故时的指望。精准扩张 ≠ 反射性扩张 —— 选事故现场最常用的一个工具(py-spy)进镜像,代价 6MB / +4%;不为深挖工具(gdb/strace/top)做同等投入,它们仍走宿主机/云托管。
 
 **范围**:`deploy/`(release bundle 脚本)、`deploy/scripts/preflight.sh`(新)、`docs/_archive/ops/deployment-sop.md` / `cloud-service-checklist.md`(增改)。
 

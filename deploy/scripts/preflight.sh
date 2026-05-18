@@ -1,51 +1,127 @@
 #!/usr/bin/env bash
 # preflight.sh — verify forensics readiness on an intranet host.
 #
-# Runs OFFLINE (no network calls). Two layers of checks:
+# Runs OFFLINE (no network calls). Two tiers of checks:
 #
-#   1. Host kernel-level tools: gdb / gcore / strace / ps  must all be in PATH.
-#      These can't live in the app image (would bloat backend Docker layer + we
-#      want forensics that work against the host process, not from inside the
-#      container's mount-ns). Distribution-specific install hint emitted on miss.
+#   1. REQUIRED (hard failures, exit 1):
+#      - analyst-tools/ bundle integrity (wheels resolvable offline)
+#      - backend container has py-spy (`docker exec backend py-spy --version`)
+#      Required = if any of these is missing, deployment can't deliver the
+#      promised forensics model. Blocking.
 #
-#   2. Forensics bundle integrity: forensics/ tree extracted at expected path,
-#      py-spy binary executable and pinned-SHA matches, wheels dir non-empty
-#      and pandas install resolvable via `pip install --no-index --dry-run`.
+#   2. OPTIONAL (warnings, do NOT block exit):
+#      - Host deep-dive tools: gdb / gcore / strace / ps / top in PATH.
+#      These cover the third-tier deep-dive path (strace on syscalls,
+#      gdb on coredumps). PR-obs-lite's faulthandler + the backend's own
+#      py-spy already cover the primary + backup paths, so missing host
+#      tools doesn't block deployment — it just narrows what's available
+#      when the first two tiers don't reveal the answer.
 #
-# Exit code: 0 = all OK, non-zero = at least one check failed.
+# Exit code: 0 = required all pass (optional warnings allowed);
+#            1 = at least one required check failed.
 #
 # Usage:
-#   deploy/scripts/preflight.sh                     # default forensics path: ./forensics
-#   deploy/scripts/preflight.sh /opt/af/forensics   # explicit path
+#   deploy/scripts/preflight.sh                          # default: ./analyst-tools
+#   deploy/scripts/preflight.sh /opt/af/analyst-tools    # explicit path
 #
-# Output style mirrors verify-bundle.sh: per-check ✓/✗ + a fail counter.
+# Output style mirrors verify-bundle.sh: per-check ✓/✗/⚠ + tier counters.
 
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
-FORENSICS_DIR="${1:-$ROOT/forensics}"
+ANALYST_DIR="${1:-$ROOT/analyst-tools}"
 
-# SHA verification uses the bundle's own forensics/bin/py-spy.sha256 file
-# (written by release.sh after binary extraction). Same checksum file format
-# as sha256sum(1), zero drift surface between build-side pin and preflight
-# verification.
-
-fail=0
+required_fail=0
+optional_warn=0
 ok()   { printf '  ✓ %s\n' "$1"; }
-err()  { printf '  ✗ %s\n' "$1"; fail=$((fail + 1)); }
+err()  { printf '  ✗ %s\n' "$1"; required_fail=$((required_fail + 1)); }
+warn() { printf '  ⚠ %s\n' "$1"; optional_warn=$((optional_warn + 1)); }
 info() { printf '      %s\n' "$1"; }
 
-echo "→ Host kernel-level forensics tools (PATH lookup)"
-# `procps` is a Debian/Ubuntu package, on RHEL family it's `procps-ng`.
-# Both ship /bin/ps. We check for the user-visible binaries rather than
-# package names, which keeps the check distribution-agnostic.
+# ============================================================================
+# REQUIRED #1: backend container has py-spy (in-container backup attach path)
+# ============================================================================
+echo "→ [required] backend container has py-spy (backup attach path)"
+if ! command -v docker >/dev/null 2>&1; then
+  # Pre-`docker compose up` first-deploy preflight: docker may be reachable
+  # but the backend container may not exist yet. Don't fail — just inform.
+  info "docker not on PATH; skipping container py-spy check"
+  info "(re-run preflight after \`docker compose up -d backend\` to verify)"
+elif ! docker ps --format '{{.Names}}' 2>/dev/null | grep -q backend; then
+  info "no running 'backend' container; skipping container py-spy check"
+  info "(re-run preflight after \`docker compose up -d backend\` to verify)"
+else
+  # `docker exec` requires container to be running; py-spy --version exits 0
+  # on success, prints to stderr by default. Capture both.
+  if output=$(docker exec "$(docker ps --format '{{.Names}}' | grep backend | head -1)" \
+                py-spy --version 2>&1); then
+    ok "py-spy in backend container ($output)"
+  else
+    err "py-spy missing or not invocable inside backend container"
+    info "expected: \`docker exec backend py-spy --version\` → 'py-spy <version>'"
+    info "actual:   $output"
+    info "fix: rebuild backend image; Dockerfile installs py-spy in builder stage"
+  fi
+fi
+
+# ============================================================================
+# REQUIRED #2: analyst-tools bundle integrity
+# ============================================================================
+echo
+echo "→ [required] analyst-tools bundle integrity ($ANALYST_DIR)"
+
+if [[ ! -d "$ANALYST_DIR" ]]; then
+  err "analyst-tools/ directory not found at $ANALYST_DIR"
+  info "extract: tar xzf artifactflow-analyst-tools-*.tar.gz"
+  info "(creates ./analyst-tools/{wheels,README.md,wheels.lock.txt})"
+else
+  WHEELS="$ANALYST_DIR/wheels"
+  if [[ ! -d "$WHEELS" ]]; then
+    err "wheels/ directory missing: $WHEELS"
+  else
+    wheel_count=$(find "$WHEELS" -maxdepth 1 -name '*.whl' 2>/dev/null | wc -l | tr -d ' ')
+    if [[ "$wheel_count" -gt 0 ]]; then
+      ok "wheels present ($wheel_count files)"
+    else
+      err "wheels/ contains no *.whl files"
+    fi
+
+    # Dry-run install — exercises the actual resolver against offline wheels.
+    # Catches "wheel built for wrong Python ABI" early.
+    # --ignore-installed: forces pip to plan from --find-links instead of
+    # short-circuiting on system-installed pandas (dev/build host case).
+    if command -v pip >/dev/null 2>&1 || command -v pip3 >/dev/null 2>&1; then
+      pip_bin=$(command -v pip || command -v pip3)
+      if output=$("$pip_bin" install --no-index --find-links "$WHEELS" \
+                    --ignore-installed --dry-run pandas 2>&1); then
+        ok "pip install --no-index pandas resolves offline"
+      else
+        err "pip can't resolve pandas from $WHEELS — wheel/Python mismatch?"
+        info "head of pip output:"
+        printf '%s\n' "$output" | head -5 | sed 's/^/        /'
+      fi
+    else
+      info "pip not found on this host; skipping offline-resolve check"
+      info "(analyst machine running observability_report.py needs pip + same wheels)"
+    fi
+  fi
+fi
+
+# ============================================================================
+# OPTIONAL: host deep-dive tools (informational; does NOT block deployment)
+# ============================================================================
+echo
+echo "→ [optional] host deep-dive forensics tools (PATH lookup, warning only)"
+echo "  Primary path: \`docker logs backend\` (faulthandler dump, PR-obs-lite)"
+echo "  Backup path:  \`docker exec backend py-spy ...\` (this preflight req'd)"
+echo "  Deep-dive:    host gdb/strace/procps — useful but not blocking"
 for tool in gdb gcore strace ps top; do
   if command -v "$tool" >/dev/null 2>&1; then
     ok "$tool ($(command -v "$tool"))"
   else
-    err "$tool not found in PATH"
+    warn "$tool not in PATH"
     case "$tool" in
       gdb|gcore)
         info "install: 'yum install gdb' (RHEL/CentOS) or 'apt install gdb' (Debian/Ubuntu)" ;;
@@ -58,96 +134,21 @@ for tool in gdb gcore strace ps top; do
 done
 
 echo
-echo "→ Forensics bundle integrity ($FORENSICS_DIR)"
-
-if [[ ! -d "$FORENSICS_DIR" ]]; then
-  err "forensics/ directory not found at $FORENSICS_DIR"
-  info "extract: tar xzf artifactflow-forensics-*.tar.gz   (lays out forensics/{bin,wheels,README.md})"
-  echo
-  echo "✗ Forensics readiness check failed ($fail issue(s))"
+if (( required_fail > 0 )); then
+  echo "✗ Preflight failed — $required_fail required issue(s)"
+  if (( optional_warn > 0 )); then
+    echo "  ($optional_warn optional warning(s) — fix required issues first)"
+  fi
+  echo "  Address required issues above before continuing deployment."
   exit 1
 fi
 
-# ---- py-spy binary ----
-PYSPY="$FORENSICS_DIR/bin/py-spy"
-PYSPY_SHA_FILE="$FORENSICS_DIR/bin/py-spy.sha256"
-if [[ ! -f "$PYSPY" ]]; then
-  err "py-spy binary missing: $PYSPY"
-elif [[ ! -x "$PYSPY" ]]; then
-  err "py-spy not executable: $PYSPY"
-  info "fix: chmod +x '$PYSPY'"
+if (( optional_warn > 0 )); then
+  echo "✓ Preflight passed — bundle ready, backend container forensics OK"
+  echo "  ⚠ $optional_warn optional warning(s) — host deep-dive path narrowed"
+  echo "  (deployment OK; coordinate with infra to install missing host tools"
+  echo "   if you expect to need strace/gdb-level debugging)"
 else
-  if version=$("$PYSPY" --version 2>&1); then
-    ok "py-spy executable ($version)"
-  else
-    err "py-spy --version failed: $version"
-  fi
-
-  # SHA: re-verify the binary against the build-side pin shipped inside the
-  # bundle. Catches tamper during transit (scp) or local edits.
-  if [[ -f "$PYSPY_SHA_FILE" ]]; then
-    if (cd "$FORENSICS_DIR/bin" && sha256sum -c py-spy.sha256 >/dev/null 2>&1); then
-      ok "py-spy SHA matches bundle's py-spy.sha256"
-    else
-      err "py-spy SHA mismatch — possible tamper, partial scp, or local edit"
-      info "expected (from bundle): $(awk '{print $1}' "$PYSPY_SHA_FILE")"
-      info "actual:                 $(sha256sum "$PYSPY" 2>/dev/null | awk '{print $1}')"
-    fi
-  else
-    err "py-spy.sha256 missing alongside binary: $PYSPY_SHA_FILE"
-    info "release.sh writes this — bundle may be from an old release. Re-extract."
-  fi
-
-  # py-spy installed to host PATH? Recommend but don't fail — some operators
-  # invoke it directly from forensics/bin.
-  if command -v py-spy >/dev/null 2>&1; then
-    ok "py-spy on PATH ($(command -v py-spy))"
-  else
-    info "tip: 'sudo install -m 0755 $PYSPY /usr/local/bin/py-spy' for faster invocation"
-  fi
+  echo "✓ Preflight passed — all required + optional checks OK"
 fi
-
-# ---- wheels dir ----
-WHEELS="$FORENSICS_DIR/wheels"
-if [[ ! -d "$WHEELS" ]]; then
-  err "wheels/ directory missing: $WHEELS"
-else
-  wheel_count=$(find "$WHEELS" -maxdepth 1 -name '*.whl' 2>/dev/null | wc -l | tr -d ' ')
-  if [[ "$wheel_count" -gt 0 ]]; then
-    ok "wheels present ($wheel_count files)"
-  else
-    err "wheels/ contains no *.whl files"
-  fi
-
-  # Dry-run install — exercises the actual resolver against offline wheels.
-  # Catches "wheel built for wrong Python ABI" early. Falls back gracefully
-  # if pip is missing (analyst host may not have pip; that's not a forensics
-  # bundle problem).
-  #
-  # --ignore-installed: without it, pip reports "Requirement already satisfied"
-  # when pandas is system-installed (dev/build host) and our check trivially
-  # passes without exercising the offline wheels. With it, pip is forced to
-  # plan a fresh install from --find-links, which is what runs on the target
-  # host that doesn't have pandas yet.
-  if command -v pip >/dev/null 2>&1 || command -v pip3 >/dev/null 2>&1; then
-    pip_bin=$(command -v pip || command -v pip3)
-    if output=$("$pip_bin" install --no-index --find-links "$WHEELS" \
-                  --ignore-installed --dry-run pandas 2>&1); then
-      ok "pip install --no-index pandas resolves offline"
-    else
-      err "pip can't resolve pandas from $WHEELS — wheel/Python mismatch?"
-      info "head of pip output:"
-      printf '%s\n' "$output" | head -5 | sed 's/^/        /'
-    fi
-  else
-    info "pip not found on this host; skipping offline-resolve check"
-  fi
-fi
-
-echo
-if (( fail )); then
-  echo "✗ Preflight failed ($fail issue(s))"
-  echo "  Address the items above before declaring the host forensics-ready."
-  exit 1
-fi
-echo "✓ Preflight passed — host is forensics-ready"
+exit 0
