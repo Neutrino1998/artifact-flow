@@ -18,6 +18,13 @@ from config import config
 from core.engine import EngineHooks, create_initial_state, execute_loop, finalize_metrics
 from core.events import StreamEventType, ExecutionEvent
 from core.conversation_manager import ConversationManager
+from core.post_processing import (
+    PostProcessState,
+    choose_response_for_terminal,
+    decide_terminal,
+    ensure_terminal,
+    make_external_cancelled_event,
+)
 from tools.base import BaseTool
 from tools.builtin.artifact_ops import ArtifactManager
 from utils.logger import get_logger
@@ -175,33 +182,6 @@ class ExecutionController:
         # ========== 执行引擎 ==========
         event_queue: asyncio.Queue = asyncio.Queue()
         final_state = None
-        # Hoisted to function scope so the outer late-cancel handler (below
-        # post-processing) can read it. Stays False until _persist_events
-        # returns True in the inner try block.
-        events_persisted = False
-        # Tracks whether the success path has *attempted* to write
-        # Message.response (set BEFORE the await, not after). Late-cancel handler
-        # uses this to decide whether to write the CANCELLED_RESPONSE_BY_SYSTEM
-        # placeholder.
-        #
-        # Why "attempted" and not "succeeded":
-        # `await update_response_async(...)` from Python's view is one line, but
-        # the actual sequence is "Python serializes SQL → kernel send → wire →
-        # DB commit → ack back → Python wakes up". CancelledError can land mid-
-        # await AFTER the DB has already committed but BEFORE Python sets a
-        # success flag — asyncio cancellation cannot unsend bytes that already
-        # left the machine. If the flag were set after the await, late-handler
-        # would observe `response_update_attempted=False` and overwrite a
-        # successfully-committed real response with the system-cancel placeholder.
-        # Reviewer reproduced this race; call_args_list went
-        # ['real output', '*Task cancelled by system*'].
-        #
-        # Semantics: "I have claimed the response slot." Whoever sets this first
-        # owns the write. If their attempt fails (transient DB issue, not cancel),
-        # the late-handler still won't retry — Message.response stays NULL, UI
-        # bubble for that turn won't render, events are still in DB. Same shape
-        # as update_metadata failures: partial-write but observable.
-        response_update_attempted = False
 
         async def emit_to_queue(event_dict):
             """emit callback: 实时推送事件到 queue"""
@@ -222,12 +202,12 @@ class ExecutionController:
                 # External cancel cascaded into engine_task (lease fencing / shutdown).
                 # CancelledError is BaseException — bypasses `except Exception` below — so
                 # without this branch the in-memory state["events"] would die with the
-                # task, violating "events persist unconditionally" (CLAUDE.md / bug ④
-                # from 2026-05-14 incident). The cooperative path (RuntimeStore-driven
-                # cancel checked via hooks.check_cancelled) sets state["cancelled"] and
-                # returns normally — it never raises here. This branch fires only when
-                # the outer _wrapped task is cancelled (e.g. _renew_loop fencing) and
-                # stream_execute's finally cancels engine_task to propagate it inward.
+                # task, violating "events persist unconditionally" (CLAUDE.md).
+                # The cooperative path (RuntimeStore-driven cancel checked via
+                # hooks.check_cancelled) sets state["cancelled"] and returns normally —
+                # it never raises here. This branch fires only when the outer _wrapped
+                # task is cancelled (e.g. _renew_loop fencing) and stream_execute's
+                # finally cancels engine_task to propagate it inward.
                 #
                 # engine_task is its own asyncio.Task: once we catch this one cancel,
                 # subsequent awaits in the handler (_persist_events) run normally.
@@ -246,17 +226,11 @@ class ExecutionController:
                     logger.warning(
                         f"finalize_metrics failed on cancel for {message_id}: {fm_err}"
                     )
-                initial_state["events"].append(ExecutionEvent(
-                    event_type=StreamEventType.CANCELLED.value,
-                    agent_name=None,
-                    data={
-                        "success": False,
-                        "cancelled": True,
-                        "conversation_id": conversation_id,
-                        "message_id": message_id,
-                        "reason": "external_cancel",
-                        "execution_metrics": initial_state.get("execution_metrics", {}),
-                    },
+                initial_state["events"].append(make_external_cancelled_event(
+                    conversation_id=conversation_id,
+                    message_id=message_id,
+                    reason="external_cancel",
+                    execution_metrics=initial_state.get("execution_metrics", {}),
                 ))
                 persisted = False
                 try:
@@ -271,22 +245,31 @@ class ExecutionController:
                 # response being non-empty, and the events list is nested
                 # inside AssistantMessage.
                 #
-                # CRITICAL: only write the cancel placeholder when events
-                # actually landed in DB. Otherwise we create a "Message.response
-                # says cancelled, but events table is empty" state — user sees a
-                # cancel bubble, expects the next turn's LLM to know what
-                # happened, and the LLM sees nothing (events are the history
-                # source of truth). This mirrors the success-path invariant
-                # documented at controller.py around the inner try block:
-                # "持久化成功后再更新 Message.response，避免出现'显示成功 + 历史丢失'
-                # 的假成功状态".
+                # CRITICAL: only write when events actually landed in DB.
+                # Otherwise we create a "Message.response says cancelled,
+                # but events table is empty" state — UI shows cancelled, but
+                # next turn's LLM has no history of this turn. Mirrors the
+                # success-path / late-cancel events-first invariant.
+                #
+                # Response text comes from the same decision function as
+                # post-processing / late-cancel — single source of truth for
+                # (terminal_type, cancel_source) → display string.
                 if persisted:
+                    pp_engine = PostProcessState(
+                        conversation_id=conversation_id,
+                        message_id=message_id,
+                        final_state=initial_state,
+                        terminal_type=StreamEventType.CANCELLED.value,
+                        cancel_source="external",
+                        terminal_appended=True,
+                    )
+                    response_to_write = choose_response_for_terminal(pp_engine)
                     try:
                         await self._with_db_retry(
                             lambda cm, er, am: cm.update_response_async(
                                 conv_id=conversation_id,
                                 message_id=message_id,
-                                response=config.CANCELLED_RESPONSE_BY_SYSTEM,
+                                response=response_to_write,
                             )
                         )
                     except Exception as resp_err:
@@ -351,27 +334,31 @@ class ExecutionController:
             except asyncio.CancelledError:
                 pass
 
-        # ========== Late-cancel boundary ==========
-        # Outer cancel (lease fencing / shutdown) can arrive AFTER engine_task
-        # already finished — i.e., during any of the post-processing awaits below
-        # (_on_engine_exit, exists_async, flush_all, _persist_events). At that
-        # point engine_task.done() is already True so the generator's finally
-        # above is a no-op, and run_engine's `except CancelledError` cannot fire
-        # (it has already returned). Without this outer guard, CancelledError
-        # propagates straight through post-processing and skips _persist_events
-        # — re-introducing bug ④ in a narrower window.
+        # ========== Post-processing (with late-cancel boundary) ==========
+        # Outer cancel (lease fencing / shutdown) can land in any of the awaits below
+        # — _on_engine_exit, exists_async, flush_all, _persist_events, update_response,
+        # update_metadata. The pp ledger records phase-by-phase progress so the
+        # late-cancel recovery (_recover_from_late_cancel) doesn't reconstruct state
+        # from scratch — it reads what already completed and continues from there.
         #
-        # Strategy: catch CancelledError, late-persist if events haven't landed
-        # yet, then re-raise so the runner's cleanup still sees a cancelled task.
+        # pp is created BEFORE the first await so late-cancel always has a ledger
+        # to operate on. The only way pp stays None is if cancel lands between
+        # `pp = PostProcessState(...)` construction and the next await — impossible
+        # because there's no await in between.
+        pp: Optional[PostProcessState] = None
         try:
-            # ========== Post-processing ==========
-            # final_state fallback must happen BEFORE any await — otherwise a
-            # late-cancel landing in _on_engine_exit / exists_async on the
-            # engine-error path (run_engine `except Exception` appends ERROR to
-            # initial_state["events"] but never assigns final_state) would hit
-            # the late-cancel handler with final_state=None and skip persistence.
+            # final_state fallback BEFORE any await — covers the engine-error path
+            # (run_engine's `except Exception` appended ERROR to initial_state["events"]
+            # but never assigned final_state). Without this, late-cancel handler
+            # would see final_state=None and skip persistence.
             if final_state is None:
                 final_state = initial_state
+
+            pp = PostProcessState(
+                conversation_id=conversation_id,
+                message_id=message_id,
+                final_state=final_state,
+            )
 
             # Engine 已退出，不会再 drain 消息 — 立即取消活跃映射，
             # 使 /inject 端点正确返回 409 而非假装成功入队
@@ -382,7 +369,7 @@ class ExecutionController:
             # 删除路径不抢 lease，conv 行可能在 engine 跑完前消失（DELETE /chat/{id}
             # 或硬删用户触发的 CASCADE）。早返回跳过后续三段写库，避免撞 FK。
             try:
-                conv_alive = await self._with_db_retry(
+                pp.conv_alive = await self._with_db_retry(
                     lambda cm, er, am: cm.exists_async(conversation_id)
                 )
             except Exception as exists_err:
@@ -391,9 +378,9 @@ class ExecutionController:
                     f"exists() probe failed for {conversation_id} (msg={message_id}), "
                     f"falling through to normal post-processing: {exists_err}"
                 )
-                conv_alive = True
+                pp.conv_alive = True
 
-            if not conv_alive:
+            if not pp.conv_alive:
                 logger.info(
                     f"Conversation {conversation_id} deleted during execution, "
                     f"skip persistence (message_id={message_id})"
@@ -402,25 +389,13 @@ class ExecutionController:
                 return
 
             try:
-                response = final_state.get("response", "")
-                has_error = final_state.get("error", False)
-                is_cancelled = final_state.get("cancelled", False)
-
-                # Display-snapshot backfill. Message.response is display-only, and the
-                # frontend gates AssistantMessage on it being non-empty. The engine only
-                # packs tool-call-free prose into state["response"], so a turn cancelled
-                # mid-tool-call / mid-reasoning / during TTFT arrives here with response
-                # == "". Mirror the error path's placeholder so the turn still renders
-                # (and its execution flow is reconstructed from events).
-                display_response = (response or config.CANCELLED_RESPONSE_BY_USER) if is_cancelled else response
-
                 # Flush dirty artifacts to DB
-                flush_error: Optional[str] = None
                 if self.artifact_manager:
                     try:
                         await self.artifact_manager.flush_all(
                             session_id, db_manager=self._db_manager
                         )
+                        pp.artifacts_flushed = True
                     except IntegrityError as flush_ie:
                         # Layer 2: exists() 之后到 flush 之间 conv 被删（TOCTOU）
                         logger.warning(
@@ -430,62 +405,24 @@ class ExecutionController:
                         return
                     except Exception as flush_err:
                         logger.exception(f"Artifact flush failed after retries: {flush_err}")
-                        flush_error = f"Artifact persistence failed: {flush_err}"
+                        pp.flush_error = f"Artifact persistence failed: {flush_err}"
 
-                # 终态事件：error 路径由 engine 已发（在 state["events"] 中），
-                # controller 负责 success / cancelled / flush_error 路径的终态事件。
-                terminal_event_dict = None
-                if is_cancelled:
-                    terminal_event_dict = {
-                        "type": StreamEventType.CANCELLED.value,
-                        "timestamp": datetime.now().isoformat(),
-                        "data": {
-                            "success": False,
-                            "cancelled": True,
-                            "conversation_id": conversation_id,
-                            "message_id": message_id,
-                            "response": display_response,
-                            "execution_metrics": final_state.get("execution_metrics", {}),
-                        }
-                    }
-                elif flush_error:
-                    terminal_event_dict = {
-                        "type": StreamEventType.ERROR.value,
-                        "timestamp": datetime.now().isoformat(),
-                        "data": {
-                            "success": False,
-                            "conversation_id": conversation_id,
-                            "message_id": message_id,
-                            "error": flush_error,
-                            "execution_metrics": final_state.get("execution_metrics", {}),
-                        }
-                    }
-                elif not has_error:
-                    terminal_event_dict = {
-                        "type": StreamEventType.COMPLETE.value,
-                        "timestamp": datetime.now().isoformat(),
-                        "data": {
-                            "success": True,
-                            "conversation_id": conversation_id,
-                            "message_id": message_id,
-                            "response": response,
-                            "execution_metrics": final_state.get("execution_metrics", {}),
-                        }
-                    }
+                # 决定 terminal（纯函数,无 IO）。engine ERROR 路径已自行 append ERROR 到
+                # events,decide_terminal 在 has_error 分支把 terminal_event 设为 None
+                # 且把 terminal_appended 标 True,防止下面二次 append。
+                decide_terminal(pp)
 
-                if terminal_event_dict:
-                    # 终态事件入库
-                    final_state["events"].append(ExecutionEvent(
-                        event_type=terminal_event_dict["type"],
-                        agent_name=None,
-                        data=terminal_event_dict["data"],
-                    ))
+                if pp.terminal_event is not None and not pp.terminal_appended:
+                    pp.final_state["events"].append(pp.terminal_event)
+                    pp.terminal_appended = True
 
                 # 持久化事件 —— 必须先于 Message.response 更新。
                 # 新架构下 events 是历史 source of truth，持久化失败=下一轮恢复不了本轮。
                 # 持久化成功后再更新 Message.response，避免出现"显示成功 + 历史丢失"的假成功状态。
                 try:
-                    events_persisted = await self._persist_events(message_id, final_state)
+                    pp.events_persisted = await self._persist_events(
+                        message_id, pp.final_state
+                    )
                 except IntegrityError as events_ie:
                     # Layer 2: events 写阶段命中 conv 删除的 TOCTOU
                     logger.warning(
@@ -494,13 +431,13 @@ class ExecutionController:
                     )
                     return
 
-                if not events_persisted:
-                    # 持久化失败 → 整轮判定失败，覆盖终态为 ERROR，跳过 response/metadata 更新
+                if not pp.events_persisted:
+                    # 持久化失败 → 整轮判定失败,覆盖终态为 ERROR,跳过 response/metadata 更新
                     logger.error(
                         f"Aborting turn {message_id}: event persistence failed, "
                         f"Message.response will not be updated"
                     )
-                    terminal_event_dict = {
+                    yield {
                         "type": StreamEventType.ERROR.value,
                         "timestamp": datetime.now().isoformat(),
                         "data": {
@@ -508,56 +445,67 @@ class ExecutionController:
                             "conversation_id": conversation_id,
                             "message_id": message_id,
                             "error": "Event persistence failed — turn aborted, please retry",
-                            "execution_metrics": final_state.get("execution_metrics", {}),
-                        }
+                            "execution_metrics": pp.final_state.get("execution_metrics", {}),
+                        },
                     }
-                else:
-                    # events 已落库 → 可以更新 Message.response 和 metadata（best-effort）
-                    # display_response 已处理 success / cancelled；error 单独兜底文案。
-                    final_response = (response or "An error occurred during execution.") if has_error else display_response
-                    # CLAIM the response slot BEFORE the await — see the
-                    # response_update_attempted declaration at the top of
-                    # stream_execute for the race rationale. If cancel lands
-                    # mid-await (DB commit may have already happened), late
-                    # handler must see the flag set and skip overwriting.
-                    response_update_attempted = True
+                    return
+
+                # events 已落库 → 写 Message.response (单一真相源:
+                # success path 和 late-cancel handler 都调 choose_response_for_terminal,
+                # 不再有"两份计算"。
+                response_to_write = choose_response_for_terminal(pp)
+                if response_to_write:
+                    # CLAIM the slot BEFORE the await — see PostProcessState's
+                    # response_update_attempted docstring for the cancel-mid-await
+                    # race rationale. If cancel lands while the await is suspended,
+                    # the DB may have already committed but Python never reached a
+                    # post-await flag. Late handler checks attempted=True and skips.
+                    pp.response_update_attempted = True
                     try:
                         await self._with_db_retry(
                             lambda cm, er, am: cm.update_response_async(
-                                conv_id=conversation_id, message_id=message_id, response=final_response,
+                                conv_id=conversation_id, message_id=message_id,
+                                response=response_to_write,
                             )
                         )
+                        pp.response_updated = True
                     except Exception as resp_err:
-                        # events 已成功 → 历史正确，仅显示可能短暂落后，不把终态转为 ERROR
+                        # events 已成功 → 历史正确,仅显示可能短暂落后,不把终态转为 ERROR
                         logger.warning(
                             f"Message.response update failed for {message_id} "
                             f"(events already persisted, display may lag): {resp_err}"
                         )
 
-                    metadata_updates = {}
-                    always_allowed = final_state.get("always_allowed_tools", [])
-                    if always_allowed:
-                        metadata_updates["always_allowed_tools"] = always_allowed
-                    execution_metrics = final_state.get("execution_metrics", {})
-                    if execution_metrics:
-                        metadata_updates["execution_metrics"] = execution_metrics
-                    if metadata_updates:
-                        try:
-                            await self._with_db_retry(
-                                lambda cm, er, am: cm.update_message_metadata_async(
-                                    conv_id=conversation_id, message_id=message_id, metadata=metadata_updates,
-                                )
+                metadata_updates = {}
+                always_allowed = pp.final_state.get("always_allowed_tools", [])
+                if always_allowed:
+                    metadata_updates["always_allowed_tools"] = always_allowed
+                execution_metrics = pp.final_state.get("execution_metrics", {})
+                if execution_metrics:
+                    metadata_updates["execution_metrics"] = execution_metrics
+                if metadata_updates:
+                    try:
+                        await self._with_db_retry(
+                            lambda cm, er, am: cm.update_message_metadata_async(
+                                conv_id=conversation_id, message_id=message_id, metadata=metadata_updates,
                             )
-                        except Exception as meta_err:
-                            logger.warning(
-                                f"Message.metadata update failed for {message_id}: {meta_err}"
-                            )
+                        )
+                        pp.metadata_updated = True
+                    except Exception as meta_err:
+                        logger.warning(
+                            f"Message.metadata update failed for {message_id}: {meta_err}"
+                        )
 
-                    logger.info("Streaming execution completed")
+                logger.info("Streaming execution completed")
 
-                # 发送终态到 SSE（error 已由 engine 实时推送）
-                if terminal_event_dict:
-                    yield terminal_event_dict
+                # 发送终态到 SSE。engine ERROR 路径 terminal_event=None (engine 已实时推送过),
+                # 自然跳过。flush_error / cancelled / COMPLETE 都从 pp.terminal_event 取。
+                if pp.terminal_event is not None:
+                    yield {
+                        "type": pp.terminal_event.event_type,
+                        "timestamp": datetime.now().isoformat(),
+                        "data": pp.terminal_event.data,
+                    }
 
             except Exception as e:
                 logger.exception(f"Error in post-processing: {e}")
@@ -572,103 +520,76 @@ class ExecutionController:
                     }
                 }
         except asyncio.CancelledError:
-            # Late-cancel landed mid-post-processing (between engine_task exit and
-            # _persist_events). If events haven't been written yet, do a best-effort
-            # idempotent persist before propagating. `events_persisted` was hoisted
-            # to function scope so we can see whatever the inner try managed to set.
-            #
-            # Idempotency note: _persist_events uses {message_id}-{seq} stable IDs
-            # and batch_create short-circuits to [] when ALL ids already exist.
-            # That short-circuit breaks if we append a NEW event after a partial
-            # write — so only append the CANCELLED terminal when no terminal exists
-            # yet. If post-processing already appended COMPLETE/ERROR before the
-            # cancel hit but persist hadn't yet run, we keep that terminal as-is
-            # (engine semantically completed; cancel only hit infrastructure).
-            # Track whether events end up in DB by ANY path (success-path persist
-            # before cancel, or this late-cancel persist). Gates the response
-            # update below — see "events-in-DB invariant" comment there.
-            events_in_db = events_persisted
-            if not events_persisted:
-                # `final_state or initial_state` — defense-in-depth so this branch
-                # stays safe even if a future change reintroduces the "final_state
-                # is still None" window in post-processing.
-                state_to_persist = final_state if final_state is not None else initial_state
-                terminal_types = {
-                    StreamEventType.COMPLETE.value,
-                    StreamEventType.ERROR.value,
-                    StreamEventType.CANCELLED.value,
-                }
-                has_terminal = any(
-                    e.event_type in terminal_types
-                    for e in state_to_persist.get("events", [])
-                )
-                if not has_terminal:
-                    state_to_persist["cancelled"] = True
-                    state_to_persist["events"].append(ExecutionEvent(
-                        event_type=StreamEventType.CANCELLED.value,
-                        agent_name=None,
-                        data={
-                            "success": False,
-                            "cancelled": True,
-                            "conversation_id": conversation_id,
-                            "message_id": message_id,
-                            "reason": "external_cancel_post_processing",
-                        },
-                    ))
-                try:
-                    events_in_db = await self._persist_events(message_id, state_to_persist)
-                    if events_in_db:
-                        logger.info(
-                            f"Late-cancel persist succeeded for {message_id} "
-                            f"(cancel hit mid-post-processing)"
-                        )
-                except Exception as persist_err:
-                    # Loud-log but never shadow the propagating CancelledError —
-                    # the runner's cleanup needs to see a cancelled task.
-                    logger.exception(
-                        f"Late-cancel persist failed for {message_id}: {persist_err}"
-                    )
-                    events_in_db = False
-            # Sync Message.response too — same reasoning as the engine_task path:
-            # frontend MessageList gates the whole AssistantMessage (and its
-            # events flow) on response non-empty.
-            #
-            # CRITICAL "events-in-DB" invariant: only write the cancel placeholder
-            # when events actually landed (success-path persist OR this late
-            # persist). Without this check, persist failure produces a
-            # "cancel-shown-but-events-missing" state — UI shows cancelled, but
-            # the next turn's LLM has no history of this turn. Mirrors the
-            # success-path's events_persisted gate.
-            #
-            # Also skip when response_update_attempted is True. The flag is set
-            # BEFORE the success-path's `await update_response_async(...)` (not
-            # after) precisely to defeat the cancel-mid-await race: if cancel
-            # lands while the await is suspended, the DB may have already
-            # committed but Python never reached a post-await `flag = True`.
-            # Without the "claim before await" pattern, late-handler here would
-            # observe attempted=False and overwrite the freshly-committed real
-            # response with the system-cancel placeholder.
-            if events_in_db and not response_update_attempted:
-                try:
-                    await self._with_db_retry(
-                        lambda cm, er, am: cm.update_response_async(
-                            conv_id=conversation_id,
-                            message_id=message_id,
-                            response=config.CANCELLED_RESPONSE_BY_SYSTEM,
-                        )
-                    )
-                except Exception as resp_err:
-                    logger.warning(
-                        f"Late-cancel response update failed for {message_id}: {resp_err}"
-                    )
-            elif not events_in_db:
-                logger.error(
-                    f"Skipping update_response for {message_id}: late-cancel "
-                    f"persist failed — refusing to create 'cancel-shown-but-"
-                    f"events-missing' state. UI bubble will be empty; user can "
-                    f"retry from previous turn."
-                )
+            # Late-cancel landed during post-processing. pp ledger has every
+            # phase's "did it complete" recorded — _recover_from_late_cancel
+            # reads pp and continues, doesn't re-scan or recompute.
+            if pp is not None:
+                await self._recover_from_late_cancel(pp)
             raise
+
+    async def _recover_from_late_cancel(self, pp: PostProcessState) -> None:
+        """
+        late-cancel handler — idempotent recovery driven by the pp ledger.
+
+        Invariants (enforced structurally via pp + helpers, not via repeated checks):
+        1. events 落库前不写 Message.response          (gate: pp.events_persisted)
+        2. response slot 一旦 claimed 不再覆盖          (gate: pp.response_update_attempted)
+        3. 已有 semantic terminal 不被 late-cancel 改   (ensure_terminal adopt path)
+        4. 只在无 terminal 时才写 system placeholder    (choose_response_for_terminal 按 cancel_source 分)
+        """
+        # Phase 1: ensure events are in DB
+        if not pp.events_persisted:
+            ensure_terminal(pp)
+            try:
+                pp.events_persisted = await self._persist_events(
+                    pp.message_id, pp.final_state
+                )
+                if pp.events_persisted:
+                    logger.info(
+                        f"Late-cancel persist succeeded for {pp.message_id} "
+                        f"(cancel hit mid-post-processing)"
+                    )
+            except Exception as persist_err:
+                # Loud-log but never shadow the propagating CancelledError —
+                # the runner's cleanup needs to see a cancelled task.
+                logger.exception(
+                    f"Late-cancel persist failed for {pp.message_id}: {persist_err}"
+                )
+                pp.events_persisted = False
+
+        if not pp.events_persisted:
+            logger.error(
+                f"Skipping update_response for {pp.message_id}: late-cancel "
+                f"persist failed — refusing to create 'cancel-shown-but-"
+                f"events-missing' state. UI bubble will be empty; user can "
+                f"retry from previous turn."
+            )
+            return
+
+        # Phase 2: write Message.response when slot not yet claimed
+        if pp.response_update_attempted:
+            # success path already claimed (or attempted) — defeats cancel-mid-await
+            # race where DB committed real response but await raised before post-await
+            # flag could be set
+            return
+
+        response_to_write = choose_response_for_terminal(pp)
+        if not response_to_write:
+            return
+
+        pp.response_update_attempted = True
+        try:
+            await self._with_db_retry(
+                lambda cm, er, am: cm.update_response_async(
+                    conv_id=pp.conversation_id, message_id=pp.message_id,
+                    response=response_to_write,
+                )
+            )
+            pp.response_updated = True
+        except Exception as resp_err:
+            logger.warning(
+                f"Late-cancel response update failed for {pp.message_id}: {resp_err}"
+            )
 
     async def _persist_events(self, message_id: str, final_state: Dict[str, Any]) -> bool:
         """
@@ -725,4 +646,3 @@ class ExecutionController:
                 f"({len(db_events)} events lost): {e}"
             )
             return False
-

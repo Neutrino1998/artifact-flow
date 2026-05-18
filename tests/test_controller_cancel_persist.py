@@ -731,6 +731,86 @@ class TestPersistOnExternalCancel:
         # Mirrors the success-path's `if not events_persisted` ERROR-override.
         cm.update_response_async.assert_not_called()
 
+    async def test_late_cancel_preserves_complete_terminal_response(self):
+        """
+        Round-5 scenario: engine COMPLETE,decide_terminal append 了 COMPLETE,
+        persist 的 `await` 中途 CancelledError 落下(DB 可能已 commit,但 Python
+        没走到 `pp.events_persisted = True`)。late handler 必须:
+        1. 重新跑 persist(stable IDs 幂等)
+        2. 调 choose_response_for_terminal(pp) → COMPLETE → REAL response
+        3. 不写 CANCELLED_RESPONSE_BY_SYSTEM
+
+        重构前 bug:late handler 在这条路径硬编码 BY_SYSTEM,把已经 COMPLETE 的
+        turn 的 Message.response 改写成 "*Task cancelled by system*",造成 UI
+        矛盾(events flow 显示 COMPLETE,response bubble 显示"system cancel")。
+        重构后 success path 和 late handler 都过 choose_response_for_terminal,
+        terminal_type=COMPLETE 自然返回 real response,杜绝漂移。
+        """
+        from config import config
+
+        cm = _make_mock_conversation_manager()
+        am = _make_mock_artifact_manager()
+
+        # batch_create 第一次 raise CancelledError(模拟 DB commit 后 await 被打断),
+        # 第二次(late handler 调用)正常返回。
+        call_count = {"n": 0}
+
+        async def racing_batch_create(events):
+            call_count["n"] += 1
+            if call_count["n"] == 1:
+                raise asyncio.CancelledError()
+            return []
+
+        er = MagicMock()
+        er.batch_create = racing_batch_create
+        ctrl = _make_controller(cm, er, am)
+
+        async def fake_execute_loop(**kwargs):
+            kwargs["state"]["events"].append(ExecutionEvent(
+                event_type=StreamEventType.LLM_COMPLETE.value,
+                agent_name="lead_agent",
+                data={"content": "real engine output"},
+                is_historical=False,
+            ))
+            return {
+                **kwargs["state"],
+                "completed": True,
+                "cancelled": False,
+                "error": False,
+                "response": "real engine output",
+            }
+
+        async def consume():
+            return [event async for event in ctrl.stream_execute(
+                user_input="hi",
+                conversation_id="conv-test",
+                parent_message_id=None,
+                message_id="msg-test",
+            )]
+
+        with patch("core.controller.execute_loop", side_effect=fake_execute_loop):
+            with pytest.raises(asyncio.CancelledError):
+                await consume()
+
+        # batch_create 被调了两次:success path(被 cancel 中断),late handler retry
+        assert call_count["n"] == 2, (
+            f"Expected 2 batch_create calls (success-path racing cancel + "
+            f"late-handler retry), got {call_count['n']}"
+        )
+
+        # CRITICAL: update_response 写的是 REAL response,不是 BY_SYSTEM
+        cm.update_response_async.assert_called_once()
+        response_written = cm.update_response_async.call_args.kwargs["response"]
+        assert response_written == "real engine output", (
+            f"Late handler clobbered COMPLETE terminal's real response with "
+            f"{response_written!r}. Should dispatch via choose_response_for_terminal "
+            f"on terminal_type=COMPLETE → real response."
+        )
+        assert response_written != config.CANCELLED_RESPONSE_BY_SYSTEM, (
+            f"Late handler wrote system-cancel placeholder over a COMPLETE turn — "
+            f"events flow would show COMPLETE but bubble shows 'cancelled by system'."
+        )
+
     async def test_late_cancel_persist_failure_does_not_write_response(self):
         """
         Twin of the previous test, but for the post-processing late-cancel path
