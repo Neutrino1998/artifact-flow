@@ -14,6 +14,7 @@ from datetime import datetime
 
 from sqlalchemy.exc import IntegrityError
 
+from config import config
 from core.engine import EngineHooks, create_initial_state, execute_loop, finalize_metrics
 from core.events import StreamEventType, ExecutionEvent
 from core.conversation_manager import ConversationManager
@@ -178,6 +179,12 @@ class ExecutionController:
         # post-processing) can read it. Stays False until _persist_events
         # returns True in the inner try block.
         events_persisted = False
+        # Tracks whether the success-path update_response_async actually wrote
+        # Message.response. Late-cancel handler uses this to avoid overwriting
+        # a successfully-stored response (cancel hit at update_metadata, AFTER
+        # response already committed) — only writes the CANCELLED_RESPONSE_BY_SYSTEM
+        # placeholder when the response field is still empty.
+        response_updated = False
 
         async def emit_to_queue(event_dict):
             """emit callback: 实时推送事件到 queue"""
@@ -240,6 +247,25 @@ class ExecutionController:
                     # Swallow to preserve CancelledError propagation; loud-log so ops sees it.
                     logger.exception(
                         f"Persist-on-cancel failed for {message_id}: {persist_err}"
+                    )
+                # Sync Message.response so the frontend renders the bubble +
+                # event flow at all — MessageList gates AssistantMessage on
+                # response being non-empty, and the events list is nested
+                # inside AssistantMessage. Without this write, an external
+                # cancel produces a visible turn in the events table that the
+                # user cannot see in the UI.
+                try:
+                    await self._with_db_retry(
+                        lambda cm, er, am: cm.update_response_async(
+                            conv_id=conversation_id,
+                            message_id=message_id,
+                            response=config.CANCELLED_RESPONSE_BY_SYSTEM,
+                        )
+                    )
+                except Exception as resp_err:
+                    logger.warning(
+                        f"update_response on external cancel failed for {message_id} "
+                        f"(events persisted; UI may show empty bubble): {resp_err}"
                     )
                 # SSE is best-effort here (consumer likely gone too); skip yielding a
                 # terminal event. History reconstruction reads from the persisted events.
@@ -352,7 +378,7 @@ class ExecutionController:
                 # mid-tool-call / mid-reasoning / during TTFT arrives here with response
                 # == "". Mirror the error path's placeholder so the turn still renders
                 # (and its execution flow is reconstructed from events).
-                display_response = (response or "*(已取消)*") if is_cancelled else response
+                display_response = (response or config.CANCELLED_RESPONSE_BY_USER) if is_cancelled else response
 
                 # Flush dirty artifacts to DB
                 flush_error: Optional[str] = None
@@ -461,6 +487,7 @@ class ExecutionController:
                                 conv_id=conversation_id, message_id=message_id, response=final_response,
                             )
                         )
+                        response_updated = True
                     except Exception as resp_err:
                         # events 已成功 → 历史正确，仅显示可能短暂落后，不把终态转为 ERROR
                         logger.warning(
@@ -556,6 +583,26 @@ class ExecutionController:
                     # the runner's cleanup needs to see a cancelled task.
                     logger.exception(
                         f"Late-cancel persist failed for {message_id}: {persist_err}"
+                    )
+            # Sync Message.response too — same reasoning as the engine_task path:
+            # frontend MessageList gates the whole AssistantMessage (and its
+            # events flow) on response non-empty. Skip only if the normal-path
+            # update_response_async already committed (cancel hit at the
+            # subsequent update_metadata await, AFTER response landed) —
+            # otherwise we'd overwrite a real response with the cancelled
+            # placeholder.
+            if not response_updated:
+                try:
+                    await self._with_db_retry(
+                        lambda cm, er, am: cm.update_response_async(
+                            conv_id=conversation_id,
+                            message_id=message_id,
+                            response=config.CANCELLED_RESPONSE_BY_SYSTEM,
+                        )
+                    )
+                except Exception as resp_err:
+                    logger.warning(
+                        f"Late-cancel response update failed for {message_id}: {resp_err}"
                     )
             raise
 

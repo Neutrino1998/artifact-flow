@@ -156,11 +156,16 @@ class TestPersistOnExternalCancel:
         assert cancelled[0]["data"]["reason"] == "external_cancel"
         assert cancelled[0]["data"]["message_id"] == "msg-test"
 
-        # Post-processing (exists / flush / update_response) is the cooperative-cancel
-        # path; external cancel propagates out of the generator before reaching it.
+        # Post-processing exists / flush are the cooperative-cancel path —
+        # external cancel propagates out of the generator before reaching them.
         cm.exists_async.assert_not_called()
         am.flush_all.assert_not_called()
-        cm.update_response_async.assert_not_called()
+        # But update_response IS called from engine_task's cancel handler so
+        # the frontend renders the bubble + event flow at all (MessageList
+        # gates on Message.response non-empty; events list is nested inside).
+        from config import config
+        cm.update_response_async.assert_called_once()
+        assert cm.update_response_async.call_args.kwargs["response"] == config.CANCELLED_RESPONSE_BY_SYSTEM
 
     async def test_external_cancel_propagates_engine_task_cancel(self):
         """
@@ -292,8 +297,12 @@ class TestPersistOnExternalCancel:
         assert len(cancelled) == 1
         assert cancelled[0]["data"]["reason"] == "external_cancel_post_processing"
 
-        # Downstream best-effort updates skipped (cancel hit before them)
-        cm.update_response_async.assert_not_called()
+        # Late-cancel handler also writes Message.response so the frontend
+        # actually renders the cancelled turn (MessageList gates on response
+        # non-empty; events flow is nested inside AssistantMessage).
+        from config import config
+        cm.update_response_async.assert_called_once()
+        assert cm.update_response_async.call_args.kwargs["response"] == config.CANCELLED_RESPONSE_BY_SYSTEM
 
     async def test_late_cancel_keeps_existing_terminal_event(self):
         """
@@ -461,6 +470,129 @@ class TestPersistOnExternalCancel:
         cancelled = [e for e in batch if e["event_type"] == StreamEventType.CANCELLED.value]
         assert len(cancelled) == 0, (
             f"Should not overwrite ERROR terminal with CANCELLED, got types: {event_types}"
+        )
+
+    async def test_cooperative_cancel_writes_response_by_user(self):
+        """
+        Cooperative cancel (user clicks cancel — execute_loop's _check_cancelled
+        sets state['cancelled']=True and returns normally) goes through the
+        success-shaped post-processing path. Message.response must be the
+        user-facing placeholder so the frontend renders the bubble (it gates
+        on response being non-empty); CANCELLED_RESPONSE_BY_USER signals
+        "you cancelled this" rather than "system interrupted you".
+        """
+        from config import config
+
+        cm = _make_mock_conversation_manager()
+        am = _make_mock_artifact_manager()
+        er, _ = _capturing_event_repo()
+        ctrl = _make_controller(cm, er, am)
+
+        async def fake_execute_loop(**kwargs):
+            # Mimic the engine's cooperative-cancel exit: cancelled=True,
+            # completed=True, returns normally (no CancelledError raised).
+            state = kwargs["state"]
+            state["events"].append(ExecutionEvent(
+                event_type=StreamEventType.LLM_COMPLETE.value,
+                agent_name="lead_agent",
+                data={"content": "partial"},
+                is_historical=False,
+            ))
+            return {
+                **state,
+                "completed": True,
+                "cancelled": True,
+                "error": False,
+                "response": "",  # cancelled mid-stream → no display content
+            }
+
+        with patch("core.controller.execute_loop", side_effect=fake_execute_loop):
+            events = [event async for event in ctrl.stream_execute(
+                user_input="hi",
+                conversation_id="conv-test",
+                parent_message_id=None,
+                message_id="msg-test",
+            )]
+
+        cm.update_response_async.assert_called_once()
+        assert cm.update_response_async.call_args.kwargs["response"] == config.CANCELLED_RESPONSE_BY_USER, (
+            f"Cooperative cancel should write BY_USER placeholder, got: "
+            f"{cm.update_response_async.call_args.kwargs['response']!r}"
+        )
+        # Sanity: events flow yielded the terminal CANCELLED
+        kinds = [e["type"] for e in events]
+        assert StreamEventType.CANCELLED.value in kinds
+
+    async def test_late_cancel_skips_response_update_when_already_committed(self):
+        """
+        If post-processing's update_response_async already committed (cancel
+        landed at the subsequent update_metadata await), the late-cancel
+        handler must NOT overwrite the real response with the CANCELLED
+        placeholder — that would lose the actual engine output for a turn
+        that semantically completed.
+        """
+        from config import config
+
+        cm = _make_mock_conversation_manager()
+        # First update_response_async succeeds; metadata blocks long enough to cancel
+        metadata_started = asyncio.Event()
+
+        async def slow_metadata(*args, **kwargs):
+            metadata_started.set()
+            await asyncio.sleep(60)
+
+        cm.update_message_metadata_async = AsyncMock(side_effect=slow_metadata)
+
+        am = _make_mock_artifact_manager()
+        er, _ = _capturing_event_repo()
+        ctrl = _make_controller(cm, er, am)
+
+        async def fake_execute_loop(**kwargs):
+            state = kwargs["state"]
+            state["events"].append(ExecutionEvent(
+                event_type=StreamEventType.LLM_COMPLETE.value,
+                agent_name="lead_agent",
+                data={"content": "real engine output"},
+                is_historical=False,
+            ))
+            return {
+                **state,
+                "completed": True,
+                "cancelled": False,
+                "error": False,
+                "response": "real engine output",
+                "always_allowed_tools": [],
+                "execution_metrics": {"total_duration_ms": 100},  # non-empty triggers metadata update
+            }
+
+        async def consume():
+            return [event async for event in ctrl.stream_execute(
+                user_input="hi",
+                conversation_id="conv-test",
+                parent_message_id=None,
+                message_id="msg-test",
+            )]
+
+        with patch("core.controller.execute_loop", side_effect=fake_execute_loop):
+            consume_task = asyncio.create_task(consume())
+            await asyncio.wait_for(metadata_started.wait(), timeout=5)
+            await asyncio.sleep(0)
+            consume_task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await consume_task
+
+        # Exactly ONE update_response_async call — the success-path one — with
+        # the real engine output. Late-cancel handler must NOT have added a
+        # second call with CANCELLED_RESPONSE_BY_SYSTEM (would clobber the real
+        # output for a turn that genuinely completed).
+        assert cm.update_response_async.call_count == 1, (
+            f"Expected 1 update_response_async call (success-path only), got "
+            f"{cm.update_response_async.call_count}. Late-cancel handler must "
+            f"check response_updated flag before writing the placeholder."
+        )
+        assert cm.update_response_async.call_args.kwargs["response"] == "real engine output", (
+            f"Real response was clobbered by late-cancel placeholder: "
+            f"{cm.update_response_async.call_args.kwargs['response']!r}"
         )
 
     async def test_persist_failure_on_cancel_does_not_shadow_cancellederror(self):

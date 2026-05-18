@@ -36,6 +36,15 @@ class Settings(BaseSettings):
     INVENTORY_PREVIEW_LENGTH: int = 200     # artifact 清单内容预览截断长度
     READ_ARTIFACT_MAX_CHARS: int = 50000    # read_artifact 默认字符上限（隐藏，模型不可见）
     TOOL_PERSIST_PREVIEW_LENGTH: int = 1000  # 工具结果落盘后回填给模型的预览长度
+
+    # Cancel-path Message.response placeholders.
+    # 三条 cancel 路径都要写一个非空占位 —— 前端 MessageList 用 node.response 非空
+    # gate AssistantMessage 渲染(同时也是事件流容器),空 response 整条消息+事件流
+    # 不显示。BY_USER 给 cooperative cancel(用户主动)；BY_SYSTEM 给 lease fencing /
+    # shutdown / late-cancel post-processing。Operator 视角的更细分原因走 events 表
+    # 的 reason 字段(external_cancel / external_cancel_post_processing)。
+    CANCELLED_RESPONSE_BY_USER: str = "*Task cancelled by user*"
+    CANCELLED_RESPONSE_BY_SYSTEM: str = "*Task cancelled by system*"
     SESSION_GREP_MAX_TOTAL: int = 200       # grep_artifact session 模式总命中上限（隐藏，不暴露给模型）
 
     # update_artifact Layer 2 fuzzy match（v6 锚定 + RapidFuzz 校验；详见
