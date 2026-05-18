@@ -167,8 +167,20 @@ def ensure_terminal(pp: PostProcessState) -> None:
         StreamEventType.ERROR.value,
         StreamEventType.CANCELLED.value,
     }
+    # 只看本轮(非 historical)的 events —— state["events"] 是 [historical from
+    # parent turns, current turn 实时 append] 的拼接,_persist_events 只写非
+    # historical 段。如果误 adopt parent 轮的 historical terminal,本轮就缺终态:
+    # 合成路径被跳过 → persist 过滤掉 historical → DB 里本轮只有 LLM_COMPLETE 之类,
+    # 没有 COMPLETE/ERROR/CANCELLED 收尾。下一轮 EventHistory 重建会撞到"无终态"
+    # 的半截 turn。
+    # 从后往前扫:同 turn 里同时间只可能有一个 terminal,reverse 是 defense-in-depth
+    # —— 真有多个时 adopt 最新那个语义最对。
     existing = next(
-        (e for e in pp.final_state.get("events", []) if e.event_type in terminal_types),
+        (
+            e for e in reversed(pp.final_state.get("events", []))
+            if e.event_type in terminal_types
+            and not getattr(e, "is_historical", False)
+        ),
         None,
     )
     if existing is not None:

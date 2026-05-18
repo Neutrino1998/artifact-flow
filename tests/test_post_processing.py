@@ -234,6 +234,68 @@ class TestEnsureTerminal:
         assert pp.terminal_type == StreamEventType.CANCELLED.value
         assert pp.cancel_source == "cooperative"
 
+    def test_ignores_historical_terminal_synthesizes_current(self):
+        """多轮场景:state["events"] = [parent turn historical, current turn fresh]。
+        historical COMPLETE 不算本轮 terminal —— 否则 ensure_terminal adopt 后
+        _persist_events 过滤 historical → 本轮 DB 里没有 terminal,EventHistory
+        下一轮重建会撞到无终态的半截 turn。"""
+        historical_complete = ExecutionEvent(
+            event_type=StreamEventType.COMPLETE.value,
+            agent_name=None,
+            data={"success": True, "response": "previous turn"},
+            is_historical=True,
+        )
+        current_llm = ExecutionEvent(
+            event_type=StreamEventType.LLM_COMPLETE.value,
+            agent_name="lead_agent",
+            data={"content": "current turn partial"},
+            is_historical=False,
+        )
+        pp = PostProcessState(
+            conversation_id="c", message_id="m",
+            final_state={"events": [historical_complete, current_llm]},
+        )
+        ensure_terminal(pp)
+        # 必须合成本轮 external CANCELLED,而不是 adopt historical COMPLETE
+        assert pp.terminal_type == StreamEventType.CANCELLED.value
+        assert pp.cancel_source == "external"
+        # historical + current_llm + 新合成的 CANCELLED
+        assert len(pp.final_state["events"]) == 3
+        appended = pp.final_state["events"][-1]
+        assert appended.event_type == StreamEventType.CANCELLED.value
+        assert appended.data["reason"] == "external_cancel_post_processing"
+        assert getattr(appended, "is_historical", False) is False, (
+            "合成的 terminal 必须是本轮事件(非 historical),否则 _persist_events "
+            "会把它过滤掉"
+        )
+
+    def test_adopts_current_terminal_among_historical(self):
+        """defense-in-depth:historical 段里也有 terminal,但本轮也有了 terminal
+        (例如 engine_task cancel handler 已经 append 过 CANCELLED)。adopt 本轮
+        的,不要被 historical 干扰。"""
+        historical_complete = ExecutionEvent(
+            event_type=StreamEventType.COMPLETE.value,
+            agent_name=None,
+            data={"success": True, "response": "previous turn"},
+            is_historical=True,
+        )
+        current_cancelled = ExecutionEvent(
+            event_type=StreamEventType.CANCELLED.value,
+            agent_name=None,
+            data={"cancelled": True, "reason": "external_cancel"},
+            is_historical=False,
+        )
+        pp = PostProcessState(
+            conversation_id="c", message_id="m",
+            final_state={"events": [historical_complete, current_cancelled]},
+        )
+        ensure_terminal(pp)
+        # adopt 本轮的 CANCELLED,推断 cancel_source=external(有 reason)
+        assert pp.terminal_type == StreamEventType.CANCELLED.value
+        assert pp.cancel_source == "external"
+        # 没有新 append
+        assert len(pp.final_state["events"]) == 2
+
     def test_synthesizes_external_cancelled_when_no_terminal(self):
         """events 里没 terminal → 合成 external CANCELLED 并 append。"""
         pp = PostProcessState(

@@ -731,6 +731,117 @@ class TestPersistOnExternalCancel:
         # Mirrors the success-path's `if not events_persisted` ERROR-override.
         cm.update_response_async.assert_not_called()
 
+    async def test_multiturn_late_cancel_skips_historical_terminal(self):
+        """
+        多轮对话:parent turn 已 COMPLETE,events 在 DB 里。turn 启动时
+        controller 通过 load_event_history_async 把 path events 全标 is_historical=True
+        放进 state["events"]。
+
+        当前 turn engine 跑完后,cancel 落在 exists_async(decide_terminal 之前)。
+        ensure_terminal 必须忽略 historical 段的 COMPLETE,合成本轮的 external
+        CANCELLED;否则:
+        - ensure_terminal adopt parent COMPLETE → 不合成 → terminal_appended=True
+        - _persist_events 过滤掉 historical → 本轮 batch 只有 [LLM_COMPLETE],没有
+          任何 terminal
+        - 下一轮 EventHistory 重建会撞到无终态的半截 turn(沉默失败,不抛异常,DB
+          内部不一致)
+
+        Reviewer 复现:不修时 persisted batch 是 ['llm_complete']。
+        """
+        cm = _make_mock_conversation_manager()
+        # 模拟 parent turn 的 historical events(从 DB 载入)
+        parent_events = [
+            ExecutionEvent(
+                event_type=StreamEventType.LLM_COMPLETE.value,
+                agent_name="lead_agent",
+                data={"content": "parent turn output"},
+                is_historical=True,
+            ),
+            ExecutionEvent(
+                event_type=StreamEventType.COMPLETE.value,
+                agent_name=None,
+                data={"success": True, "response": "parent turn output"},
+                is_historical=True,
+            ),
+        ]
+        cm.load_event_history_async = AsyncMock(return_value=parent_events)
+
+        # exists_async 阻塞,让 cancel 落在 decide_terminal 之前
+        exists_started = asyncio.Event()
+
+        async def slow_exists(*args, **kwargs):
+            exists_started.set()
+            await asyncio.sleep(60)
+            return True
+
+        cm.exists_async = AsyncMock(side_effect=slow_exists)
+
+        am = _make_mock_artifact_manager()
+        er, batches = _capturing_event_repo()
+        ctrl = _make_controller(cm, er, am)
+
+        async def fake_execute_loop(**kwargs):
+            # 本轮 engine 跑完,append 一个 non-historical LLM_COMPLETE
+            kwargs["state"]["events"].append(ExecutionEvent(
+                event_type=StreamEventType.LLM_COMPLETE.value,
+                agent_name="lead_agent",
+                data={"content": "current turn output"},
+                is_historical=False,
+            ))
+            return {
+                **kwargs["state"],
+                "completed": True,
+                "response": "current turn output",
+                "error": False,
+                "cancelled": False,
+            }
+
+        async def consume():
+            return [event async for event in ctrl.stream_execute(
+                user_input="hi",
+                conversation_id="conv-test",
+                parent_message_id="parent-msg",   # 触发 load_event_history_async
+                message_id="msg-test",
+            )]
+
+        with patch("core.controller.execute_loop", side_effect=fake_execute_loop):
+            consume_task = asyncio.create_task(consume())
+            await asyncio.wait_for(exists_started.wait(), timeout=5)
+            await asyncio.sleep(0)
+            consume_task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await consume_task
+
+        # late handler 调用了一次 persist
+        assert len(batches) == 1, (
+            f"Expected 1 batch_create call, got {len(batches)}"
+        )
+        batch = batches[0]
+        event_types = [e["event_type"] for e in batch]
+
+        # 本轮 LLM_COMPLETE 存在(它是 non-historical,正常入库)
+        assert StreamEventType.LLM_COMPLETE.value in event_types
+
+        # CRITICAL: 本轮 batch 必须包含 CANCELLED terminal,否则下一轮 EventHistory
+        # 重建会撞到无终态的 turn。Reviewer 复现:不修时 batch == ['llm_complete']。
+        cancelled = [
+            e for e in batch
+            if e["event_type"] == StreamEventType.CANCELLED.value
+        ]
+        assert len(cancelled) == 1, (
+            f"本轮 batch 必须有 terminal。ensure_terminal 误 adopt 父轮 historical "
+            f"COMPLETE → 跳过合成 → _persist_events 过滤 historical → 本轮 DB 里没有 "
+            f"任何 terminal。实际 batch: {event_types}"
+        )
+        assert cancelled[0]["data"]["reason"] == "external_cancel_post_processing"
+
+        # historical events 不应该被重复写入 DB
+        for ev in batch:
+            assert ev["event_id"].startswith("msg-test-"), (
+                f"Persisted event should belong to current turn (msg-test-*), "
+                f"got {ev['event_id']}"
+            )
+
     async def test_late_cancel_preserves_complete_terminal_response(self):
         """
         Round-5 scenario: engine COMPLETE,decide_terminal append 了 COMPLETE,
