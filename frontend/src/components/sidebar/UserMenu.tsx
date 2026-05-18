@@ -198,8 +198,10 @@ export default function UserMenu({ collapsed }: { collapsed?: boolean }) {
                 onClick={handleObservability}
                 className="w-full flex items-center gap-2 px-2.5 py-2 text-text-primary dark:text-text-primary-dark hover:bg-surface dark:hover:bg-[#141414] rounded-lg transition-colors"
               >
-                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
-                  <path d="M1 8h2l2-5 3 10 2-5h2l2-3h1" />
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M2 12a6 6 0 1 1 12 0" />
+                  <path d="M8 12l3-4" />
+                  <circle cx="8" cy="12" r="0.6" fill="currentColor" stroke="none" />
                 </svg>
                 运行监控
               </button>
