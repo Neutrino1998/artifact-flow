@@ -145,7 +145,9 @@ class ExecutionRunner:
                 self._tasks.pop(task_id, None)
                 await self.store.cleanup_execution(conversation_id, task_id)
                 await stream_transport.close_stream(task_id)
-                logger.debug(f"Task {task_id} completed and cleaned up (active: {len(self._tasks)})")
+                # 提到 INFO:与 L152 submit 日志对称(都是任务生命周期边界);
+                # 一个 turn 一条,频率合理,事故诊断必需。
+                logger.info(f"Task {task_id} completed and cleaned up (active: {len(self._tasks)})")
 
         task = asyncio.create_task(_wrapped(), name=f"exec-{task_id}")
         self._tasks[task_id] = task
