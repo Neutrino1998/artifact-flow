@@ -61,6 +61,17 @@ class Settings(BaseSettings):
                                                # 算法侧 m≈400K 后 Step 1-3 Python 开销本身就超 deadline，
                                                # 取 10K 留 ~20× headroom 同时反映 update_artifact 设计意图）
 
+    # Observability(PR-obs-lite,见 docs/_archive/ops/incident-2026-05-14-fix-plan.md)。
+    # 全部隐藏常量,不暴露 API。jsonl 路径必须在持久卷 /app/data 子目录,事故重启不丢。
+    LOOP_LAG_WARN_MS: int = 500                # watchdog 软退化阈值,超即写一行 loop-lag.jsonl + task 栈
+    WATCHDOG_DEADMAN_TIMEOUT_MS: int = 10000   # faulthandler deadman switch 超时(heartbeat 不来即 dump 全栈)
+    OBS_SAMPLE_INTERVAL_SEC: int = 30          # sampler 周期(loop_lag / RSS / DB pool / Redis 等)
+    OBS_LONG_TASK_AGE_SEC: int = 60            # 长时间运行任务门槛(超此值进 /admin/runtime 的 tasks_long_running)
+    OBS_METRICS_LOG_PATH: str = "data/observability/metrics.jsonl"
+    OBS_LOOP_LAG_LOG_PATH: str = "data/observability/loop-lag.jsonl"
+    OBS_JSONL_MAX_MB: int = 50                 # obs jsonl 单文件大小上限,超即 rotate
+    OBS_JSONL_BACKUP_COUNT: int = 10           # obs jsonl 保留备份数(.1 ~ .N);默认覆盖 ~800 天
+
     # Redis（空 = InMemory fallback，非空 = Redis）
     REDIS_URL: str = ""
     REDIS_CLUSTER: bool = False           # 生产 Cluster 模式
