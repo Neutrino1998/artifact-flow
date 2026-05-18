@@ -59,3 +59,27 @@
 7. **Redis 和 TDSQL 单中心的最大连接数和内存上限？**
    我们用连接池 + Redis Stream 缓冲事件数据，需要确认上限。
    参考值：连接池 maxTotal ≈ CPU 核数 × 2 + 冗余系数(3-5)，文档建议 50
+
+---
+
+## 四、宿主机取证工具（事故复盘补，PR-forensics-bundle）
+
+> **背景**：2026-05-14 事件循环卡死事故时，内网现场抓不到 `py-spy`，临时取证额外走了一大圈。复盘后我们把 `py-spy` 静态二进制 + `pandas`/`numpy` 离线 wheels 打进 release bundle（`scripts/release.sh --with-forensics`），目标机器零联网完成安装。**但宿主机层的 `gdb`/`strace`/`procps` 仍需云托管方在主机镜像里预装或允许我们装**。
+
+1. 🌟 **宿主机镜像是否预装 `gdb`、`strace`、`procps`(`ps`/`top`) ？**
+   - 这是排查"服务卡死但未崩溃"的最小工具集（参考 incident-2026-05-14 第 33-41 行）
+   - 若未预装，确认我们能否在不联网情况下走云托管方提供的内部 yum/apt 源安装
+
+2. 🌟 **是否允许我们把 `py-spy` 二进制装到 `/usr/local/bin/`？**
+   - `py-spy` 是 attach-by-PID 的 Python profiler/sampler，需要 `ptrace` 权限对自身进程读栈
+   - 不需要 setuid / root；用部署账户对自家进程 attach 即可
+
+3. **`ptrace_scope` 内核参数 (`/proc/sys/kernel/yama/ptrace_scope`) 当前值是？**
+   - 默认 1（限制 ptrace 给同一 UID 或祖先进程）—— 这个值下 `py-spy attach <自家 PID>` 可以工作
+   - 若为 2（admin-only）或 3（禁用），`py-spy` attach 会失败；需要确认我们能否调整或走 docker `--cap-add SYS_PTRACE`
+
+4. **是否允许 `gcore <pid>` 抓 coredump？**
+   - 同 ptrace；coredump 文件落到我们持久卷下 (`/app/data/`)，不污染宿主机
+   - dump 含进程地址空间，仅在事故现场用，事后人工清理
+
+> 部署侧 SOP 详见 `deployment-sop.md` → "取证就绪"小节；preflight 校验脚本：`deploy/scripts/preflight.sh`

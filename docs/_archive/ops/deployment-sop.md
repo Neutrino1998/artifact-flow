@@ -159,6 +159,43 @@ AF_VERSION=1.0.0 docker compose -f deploy/docker-compose.intranet.yml --profile 
 docker compose -f deploy/docker-compose.intranet.yml exec backend python scripts/create_admin.py admin --password <your-password>
 ```
 
+### 取证就绪（首次部署必做，PR-forensics-bundle）
+
+事故复盘（`docs/_archive/ops/incident-2026-05-14-eventloop-wedge.md`）的核心运维教训：内网机器在事故时**联网拉不到 py-spy**，临时取证走了一大圈。修法是 release bundle 内置 `py-spy` 静态二进制 + `pandas`/`numpy` 离线 wheels，**目标机器零联网完成全部安装**。
+
+**约束**：构建机有网下载（一次），目标机器全程离线 —— 不允许在内网机器上 `pip install <pkgname>` 或 `curl github`。
+
+**首次部署流程**（在 [前置准备 → 部署] 的"3. 配置"之后、"4. 启动"之前插入）：
+
+```bash
+# 3.5 取证 bundle 安装
+# release.sh 用 --with-forensics 构建时已经把 py-spy 二进制 + pandas/numpy
+# 离线 wheels 打进 artifactflow-forensics-<slug>.tar.gz；下面在内网机器解包并安装。
+
+tar xzf artifactflow-forensics-pyspy*.tar.gz    # → ./forensics/{bin,wheels,README.md}
+
+# py-spy：装到宿主机 PATH（不进 app 镜像，事故时直接附加到容器内 PID）
+sudo install -m 0755 forensics/bin/py-spy /usr/local/bin/py-spy
+py-spy --version    # 验证
+
+# pandas / numpy：装到 analyst 用的 Python 环境（observability_report.py 跑分析时用）
+# --no-index 强制不联网，--find-links 指向离线 wheels 目录
+pip install --no-index --find-links forensics/wheels pandas
+python -c 'import pandas; print(pandas.__version__)'    # 验证
+
+# 宿主机层取证工具（gdb / strace / procps）也得在 —— 走目标 OS 的包管理器
+# 离线源或预装。preflight.sh 一并检查。
+./deploy/scripts/preflight.sh
+# 期望输出：✓ Preflight passed — host is forensics-ready
+```
+
+**Roll-update 时**：forensics tar 是按 `pyspy<ver>-py<ver>` 内容寻址的 —— 两个版本都没变就不用重传。`scripts/release.sh` 默认 `--app-only` 不打 forensics tar，roll-update 体积只有几十 KB。bumpy-spy 或 Python 版本时再传一次 forensics tar 即可。
+
+**why 不进 app 镜像**：
+- 镜像精简纪律（容器内 `top`/`gdb` 缺位是部署惯例，运行时镜像只装必需）
+- 事故时常常需要的是"附加到容器外部进程"或"宿主机层 strace"，而非容器内部
+- pandas 80MB+ 是分析工具，业务运行时不需要
+
 ---
 
 ## 运维参考

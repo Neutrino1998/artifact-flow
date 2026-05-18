@@ -16,14 +16,14 @@
 | P0(运维) | 前端 compose 临时覆盖 | — | 非 PR,内网机直接操作 |
 | P1 | PR-obs-lite 轻量可观测性 + 日志持久化 | ✅ 已完成 | watchdog(自动栈 dump)+ sampler(jsonl 采样)+ `/admin/runtime` + 分析脚本 + 主日志迁持久卷 + obs jsonl 循环写;不动 DB schema、不上 Prometheus |
 | P1 | PR-3 fencing 事件持久化 | ✅ 已完成 | 修复 bug ④,恢复审计/回放完整性 |
-| P2 | PR-forensics-bundle 取证工具 + 部署前置 | 待启动 | release 内置 py-spy / preflight 检查 / SOP |
+| P2 | PR-forensics-bundle 取证工具 + 部署前置 | ✅ 已完成 | release.sh `--with-forensics` 打 py-spy + pandas/numpy 离线 wheels(零联网) + preflight.sh + SOP 补"取证就绪" + cloud checklist 补宿主机 forensics 工具确认项 |
 | P2 | PR-5 前端镜像重建 | 待启动 | 正式消除 HOSTNAME 误配 |
 | P3 | PR-tz-unify 事件时间戳时区统一 | 待启动 | events.py 写本地朴素、`server_default=func.now()` 又是 DB 端 UTC,二者不一致;PR-obs-lite 分析脚本在 Shanghai 部署偏 8h。修脚本前先决定全链路用哪个 |
 | P3 | 文档 PR(`docs/runbooks/service-hang.md` + `docs/guides/observability-tuning.md`) | 待启动 | 应急 runbook + obs 调参手册,纯 markdown PR;待 PR-obs-lite + PR-forensics-bundle 代码落地后启动(字段 / 路径稳定后下笔) |
 
 **小版本迭代打包**:整套 fix plan 同一个 release bundle,分两批 ship:
 - **第一批(已合 `main`)**:PR-1(算法根治)+ PR-3(fencing 事件持久化),走"立即修根因"的 release tag
-- **第二批(部分已合 `main`)**:PR-obs-lite ✅ 已合;PR-forensics-bundle + PR-5 + P3 文档 PR 仍待启动。同一个"事故后加固完整体"release tag,**一起 ship**——观测框架 / 取证工具 / 前端镜像 / runbook + 调参手册,所有部件齐了才算闭环
+- **第二批(部分已合 `main`)**:PR-obs-lite ✅ 已合;PR-forensics-bundle ✅ 已合;PR-5 + P3 文档 PR 仍待启动。同一个"事故后加固完整体"release tag,**一起 ship**——观测框架 / 取证工具 / 前端镜像 / runbook + 调参手册,所有部件齐了才算闭环
 
 PR 之间逻辑独立可分别回滚,但**默认一捆发**:避免 "obs-lite 上线后 tuning 手册还没写" / "runbook 提了 py-spy 但内网还没装" 这种部分到位的尴尬态。
 
@@ -612,7 +612,20 @@ df_lag     = pd.read_json("data/observability/loop-lag.jsonl", lines=True)
 
 ---
 
-## PR-forensics-bundle:取证工具与部署前置(P2)
+## PR-forensics-bundle:取证工具与部署前置(P2)✅ 已完成
+
+**落地记录**(commits 在 `main`,待 commit 后回填 SHA):
+- `scripts/release.sh`:新增 `--with-forensics` 开关,产出 `artifactflow-forensics-<slug>.tar.gz`(内容寻址 `pyspy<ver>-py<ver>`,同 INFRA_SLUG 模式);构建机下载 py-spy v0.4.1 静态二进制(SHA 校验,空 SHA 时打印实际值并 abort 让 operator 显式 pin)+ `pip download --platform manylinux2014_x86_64 --python-version 3.11 --only-binary=:all:` 锁目标平台拉 pandas/numpy 离线 wheels;manifest 增 forensics 段;首次部署 / roll-update 帮助文本同步刷新
+- `deploy/scripts/preflight.sh`(新):两层离线检查 — ① 宿主机 `gdb`/`gcore`/`strace`/`ps`/`top` PATH;② forensics bundle 完整性(py-spy 可执行 + SHA + 已装 PATH 提示;wheels 非空 + `pip install --no-index --find-links --ignore-installed --dry-run pandas` 强制走 wheels 不被系统 pandas 干扰)。失败时按 OK/✗ 计数 + 安装提示
+- `docs/_archive/ops/deployment-sop.md`:Mode 3 段后插入"取证就绪(首次部署必做)"小节,含 `tar xzf forensics → install py-spy → pip install --no-index wheels → preflight.sh` 流程,显式"目标机器零联网"承诺;why-not-in-app-image 三条
+- `docs/_archive/ops/cloud-service-checklist.md`:新增"四、宿主机取证工具"段,跟云托管方对齐:`gdb`/`strace`/`procps` 是否预装、`/usr/local/bin` 写入权限、`ptrace_scope` 当前值、`gcore` 抓 coredump 是否允许
+- 验证范围:preflight.sh 三态测过(missing dir / empty / fake-binary);release.sh syntax + flag parsing + `--help` 渲染过;**未跑** `--with-forensics` 端到端,因为它必触发 docker buildx + 联网下载 py-spy/wheels,留给真正发版时验证
+
+下方 spec 保留原文作为审计材料。落地与 spec 的差异:
+- spec 写 `deploy/wheels/`,实际走**独立 forensics tar** 而非检入 git(`.gitignore` 已忽略 `wheels/`,且 ~60MB 二进制+wheels 不该污染 git);content-addressed slug 让 ops 一眼看出"我已经有这版了吗",pattern 跟 INFRA_ARCHIVE 一致
+- py-spy 走 GitHub Releases 静态二进制(musl 链接,Alpine/CentOS/Debian 全 cover),不走 PyPI wheel — 事故时是宿主机层 attach,跟 Python 环境无关
+- preflight 增了 `ptrace_scope` / `gcore` 权限检查项(留在 cloud-service-checklist,因为这是云托管方层面的政策,不是 bundle 本身能解决的)
+- **air-gap 硬合约**:release.sh 注释明确写"target intranet hosts MUST be able to deploy with zero network calls",`pip install` 永远 `--no-index --find-links`,这条贯穿脚本 + SOP + preflight。spec 没显式写但跟用户初始约束对齐
 
 **目标**:消除"内网现抓不到 py-spy"这类事故时的工具就绪缺口。属部署 / 发版工程,不进运行时。
 
