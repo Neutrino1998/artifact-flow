@@ -736,6 +736,12 @@ df_lag     = pd.read_json("data/observability/loop-lag.jsonl", lines=True)
 - **P1 #2 DB 连接层兜底**:compose flag 不覆盖云托管 PG(RDS / Aurora / Aliyun RDS)与 DATABASE_URLS failover 节点 —— 我们不控制服务器 timezone GUC。采纳建议在 `src/db/database.py` 加 session-TZ 强制:新增 `_apply_session_tz_kwargs(driver, kwargs)` 纯函数 helper(setdefault 语义,不覆盖 DSN 显式 timezone / 不破坏已有 server_settings),`initialize()` 非 SQLite 分支按 URL backend 注入 `connect_args`(单 URL 路径),`_failover_creator` per-iteration 注入(`async_creator` 绕过 SQLAlchemy `connect_args`,必须再注一遍)。+ 11 个新测试覆盖 helper 6 个不变量 + 5 个集成场景(failover probe / initialize PG / MySQL / SQLite passthrough)
 - CLAUDE.md "Time convention" bullet 更新一句:云 PG / failover 由 database.py 强制,不只靠 compose flag
 
+第三轮(reviewer round 2,P2 单 URL DSN 覆盖):
+- **P2 单 URL 路径 DSN init_command 静默丢失**:reviewer 戳出 round 1 的单 URL 注入 `self._apply_session_tz_kwargs("mysql", {})` 喂的是空 dict,但 SQLAlchemy 会把 URL 里的 `?init_command=...` 解析成 connect 的 kwargs;`connect_args` 整 key 替换语义把用户的 init_command 静默替成 helper 输出的 timezone 命令。PG 那边同款症状 —— `?application_name=af` 会被 SQLAlchemy 翻成 `server_settings={"application_name": "af"}`,我的 `connect_args["server_settings"]={"timezone":"UTC"}` 整 dict 覆盖,application_name 丢失(reviewer 只点了 MySQL,PG 顺手都修)
+- 修法:`initialize()` 在喂 helper 前从 `make_url(database_url).query` 抽 session-affecting key(PG 用 `_PG_SERVER_SETTINGS` frozenset,MySQL 用 `init_command`),merge 到 existing dict 再传 helper。helper 已有的 setdefault / prepend 语义就能保留 DSN 值。+ 2 个新单 URL 集成测试:`test_initialize_mysql_preserves_dsn_init_command`(`?init_command=SET autocommit=1` → 最终 `"SET time_zone='+00:00'; SET autocommit=1"`)、`test_initialize_pg_preserves_dsn_application_name`(`?application_name=af` → 最终 `server_settings={"application_name": "af", "timezone": "UTC"}`)
+- 既存 helper 测试 `test_pg_preserves_existing_server_settings` / `test_mysql_prepends_existing_init_command` 已经覆盖 helper 这一侧;round 2 补的是 `initialize()` → helper 这一条 wiring(reviewer 原话:"helper itself handles prepending correctly, but initialize() does not feed it the existing URL init_command")
+- 测试 844 → 846 passed(+2)
+
 ---
 
 ### 原始 spec(round 0,差异见上方落地记录)

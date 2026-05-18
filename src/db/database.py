@@ -331,15 +331,39 @@ class DatabaseManager:
             # 和 DATABASE_URLS failover 节点的 server timezone 我们不控制。
             # 单 URL 路径走 connect_args;failover 路径(async_creator)绕过
             # connect_args,在下方循环里 per-iteration 再注一遍。
-            # (Incident 2026-05-14 PR-tz-unify reviewer round 1)
-            backend = make_url(self.database_url).get_backend_name()
+            #
+            # DSN 已有的 session-affecting kwargs 必须先抽出来 merge 给 helper,
+            # 否则 connect_args["server_settings"] / connect_args["init_command"]
+            # 会以 top-level dict 替换的方式整 key 覆盖 SQLAlchemy 从 URL query
+            # 解析出的值(SQLAlchemy doc: "connect_args take precedence over URL
+            # query params with the same key")。具体:`?application_name=af` 会
+            # 被 SQLAlchemy 翻成 server_settings={"application_name":"af"},
+            # 直接给 helper `{}` → helper 输出 {"timezone":"UTC"} → 覆盖,
+            # application_name 静默丢失。MySQL `?init_command=...` 同款症状。
+            # (Incident 2026-05-14 PR-tz-unify reviewer round 2)
+            url = make_url(self.database_url)
+            backend = url.get_backend_name()
             if backend.startswith("postgres"):
+                # 把 _PG_SERVER_SETTINGS 已知的 query key 收集到 server_settings,
+                # 让 helper 走 setdefault 路径而非整 dict 替换。
+                existing: Dict[str, Any] = {}
+                server_settings = {
+                    k: url.query[k] for k in self._PG_SERVER_SETTINGS
+                    if k in url.query
+                }
+                if server_settings:
+                    existing["server_settings"] = server_settings
                 engine_kwargs["connect_args"] = self._apply_session_tz_kwargs(
-                    "postgres", {}
+                    "postgres", existing
                 )
             elif backend.startswith("mysql"):
+                # init_command 是 MySQL 唯一会被 helper 改写的 key(它走 prepend
+                # 合并),把 DSN 已有的喂进去,helper 会保留。
+                existing = {}
+                if "init_command" in url.query:
+                    existing["init_command"] = url.query["init_command"]
                 engine_kwargs["connect_args"] = self._apply_session_tz_kwargs(
-                    "mysql", {}
+                    "mysql", existing
                 )
 
             # 多地址 failover：primary-first 尝试

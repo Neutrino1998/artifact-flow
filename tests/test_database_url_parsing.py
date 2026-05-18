@@ -489,3 +489,52 @@ class TestSessionTzInjection:
         # SQLite path keeps only check_same_thread — no server_settings /
         # init_command leakage.
         assert captured["kwargs"]["connect_args"] == {"check_same_thread": False}
+
+    @pytest.mark.asyncio
+    async def test_initialize_mysql_preserves_dsn_init_command(self):
+        """Reviewer round 2 regression: DSN-supplied `?init_command=...` must
+        survive into aiomysql's connect kwargs. Without the URL-query merge,
+        connect_args["init_command"] would replace SQLAlchemy's URL-parsed
+        value as a whole-key override, silently dropping the user's command."""
+        captured = {}
+
+        def fake_create_engine(url, **kwargs):
+            captured["kwargs"] = kwargs
+            raise RuntimeError("stop")
+
+        dbm = DatabaseManager(
+            database_url="mysql+aiomysql://host/app?init_command=SET%20autocommit%3D1"
+        )
+        with patch("db.database.create_async_engine", side_effect=fake_create_engine):
+            with pytest.raises(RuntimeError, match="stop"):
+                await dbm.initialize()
+
+        # Helper prepends UTC before the user's command — both run, in order.
+        assert captured["kwargs"]["connect_args"] == {
+            "init_command": "SET time_zone='+00:00'; SET autocommit=1"
+        }
+
+    @pytest.mark.asyncio
+    async def test_initialize_pg_preserves_dsn_application_name(self):
+        """Reviewer round 2 regression: DSN-supplied `?application_name=...`
+        must survive into asyncpg's server_settings. SQLAlchemy translates
+        the URL param into server_settings={"application_name": ...}; without
+        the URL-query merge, connect_args["server_settings"] replaces that
+        whole dict, dropping application_name."""
+        captured = {}
+
+        def fake_create_engine(url, **kwargs):
+            captured["kwargs"] = kwargs
+            raise RuntimeError("stop")
+
+        dbm = DatabaseManager(
+            database_url="postgresql+asyncpg://host/app?application_name=af"
+        )
+        with patch("db.database.create_async_engine", side_effect=fake_create_engine):
+            with pytest.raises(RuntimeError, match="stop"):
+                await dbm.initialize()
+
+        # Both application_name (from DSN) and timezone (injected) present.
+        assert captured["kwargs"]["connect_args"] == {
+            "server_settings": {"application_name": "af", "timezone": "UTC"}
+        }
