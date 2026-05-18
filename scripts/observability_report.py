@@ -10,14 +10,20 @@ observability_report.py — 跑一下就能看的 obs 报告
     python scripts/observability_report.py             # 24h 窗口
     python scripts/observability_report.py --hours 72  # 72h 窗口
 
-pandas 是分析工具,不在 runtime requirements.txt;`pip install pandas` 或走
-release bundle 的离线 wheel 安装。硬 wedge dump 看 docker logs backend
-找 faulthandler 的 "Thread 0x..." 行,本脚本不聚合。
+DB 访问复用 app 的 async driver(asyncpg / aiomysql / aiosqlite),通过
+`AsyncConnection.run_sync` 给 pandas 提供同步 Connection 视图,不引入新的
+sync driver(避免再多带一份 psycopg2 / pymysql)。pandas 是分析工具,
+不在 runtime requirements.txt;`pip install pandas` 或走 release bundle
+的离线 wheel 安装。
+
+硬 wedge dump 看 docker logs backend 找 faulthandler 的 "Thread 0x..."
+行,本脚本不聚合。
 """
 
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 import os
 import sys
@@ -43,13 +49,17 @@ def _require_pandas():
         sys.exit(2)
 
 
-from sqlalchemy import create_engine
+from sqlalchemy.ext.asyncio import create_async_engine
 
 
 def _resolve_engine_url() -> str:
     """对齐 config.effective_database_url 的优先级:DATABASE_URLS 优先,DATABASE_URL 兜底。
 
     生产同时设了二者时,主应用写的是 URLS 的第一个;脚本反过来读会查错库。
+
+    URL 原样保留 — script 通过 async engine + run_sync 桥接给 pandas,直接复用
+    app 的 driver(asyncpg / aiomysql / aiosqlite),不做 +asyncpg→+psycopg2
+    一类的翻译,避免引入额外 sync driver 依赖。
     """
     url = ""
     urls = os.getenv("ARTIFACTFLOW_DATABASE_URLS", "")
@@ -60,19 +70,12 @@ def _resolve_engine_url() -> str:
     if not url:
         url = os.getenv("ARTIFACTFLOW_DATABASE_URL", "")
     if not url:
-        url = "sqlite:///data/artifactflow.db"
-    # pd.read_sql 走 sync driver — 把 aiosqlite/asyncpg/aiomysql 换成同步版本
-    url = url.replace("+aiosqlite", "").replace("+asyncpg", "+psycopg2").replace(
-        "+aiomysql", "+pymysql"
-    )
+        url = "sqlite+aiosqlite:///data/artifactflow.db"
     return url
 
 
-def _load_message_events(engine, hours: int) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """返回 (df_llm, df_tool)。"""
-    # 对应 PostgreSQL JSON 运算;SQLite 走 json_extract,语法不同
-    dialect = engine.dialect.name
-
+def _build_sql(dialect: str, hours: int) -> tuple[str, str]:
+    """返回 (llm_sql, tool_sql),按方言生成 JSON 提取语法。"""
     if dialect == "postgresql":
         llm_sql = f"""
             SELECT created_at, agent_name,
@@ -119,8 +122,21 @@ def _load_message_events(engine, hours: int) -> tuple[pd.DataFrame, pd.DataFrame
         # MySQL/MariaDB 用 JSON_EXTRACT;留口子,实际生产是 PG
         raise NotImplementedError(f"Dialect {dialect} not implemented")
 
-    df_llm = pd.read_sql(llm_sql, engine)
-    df_tool = pd.read_sql(tool_sql, engine)
+    return llm_sql, tool_sql
+
+
+async def _load_message_events(async_engine, hours: int):
+    """走 async engine + run_sync 桥接拉两个 DataFrame。
+
+    pd.read_sql 是同步 API,但 AsyncConnection.run_sync 提供的 sync Connection
+    视图底层仍走 async driver,所以不需要 psycopg2 / pymysql 一类 sync driver。
+    """
+    dialect = async_engine.dialect.name
+    llm_sql, tool_sql = _build_sql(dialect, hours)
+
+    async with async_engine.connect() as conn:
+        df_llm = await conn.run_sync(lambda sync_conn: pd.read_sql(llm_sql, sync_conn))
+        df_tool = await conn.run_sync(lambda sync_conn: pd.read_sql(tool_sql, sync_conn))
 
     # SQLite 的 metadata 拿回来是 JSON 文本,要二次解析才能给 json_normalize
     if dialect == "sqlite":
@@ -290,6 +306,37 @@ def _print_lag_events(df_lag: pd.DataFrame) -> None:
     print("    docker logs backend 2>&1 | grep -A 200 'Thread 0x'")
 
 
+async def _run_report(hours: int, obs_dir: str) -> None:
+    print(f"ArtifactFlow observability report (last {hours}h)")
+    print("=" * 70)
+
+    # MessageEvent
+    async_engine = None
+    try:
+        async_engine = create_async_engine(_resolve_engine_url())
+        df_llm, df_tool = await _load_message_events(async_engine, hours)
+        _print_llm_summary(df_llm)
+        _print_tool_summary(df_tool)
+        _print_fuzzy_stats(df_tool)
+    except Exception as e:
+        print(f"\n[skip] MessageEvent: {e}", file=sys.stderr)
+    finally:
+        if async_engine is not None:
+            await async_engine.dispose()
+
+    # Runtime metrics
+    metrics_glob = str(Path(obs_dir) / "metrics.jsonl*")
+    df_runtime = _load_jsonl_glob(metrics_glob)
+    _print_runtime_summary(df_runtime)
+
+    # Loop-lag events
+    lag_glob = str(Path(obs_dir) / "loop-lag.jsonl*")
+    df_lag = _load_jsonl_glob(lag_glob)
+    _print_lag_events(df_lag)
+
+    print()
+
+
 def main():
     parser = argparse.ArgumentParser(description="ArtifactFlow observability report")
     parser.add_argument("--hours", type=int, default=24, help="Lookback window in hours")
@@ -304,30 +351,7 @@ def main():
     global pd
     pd = _require_pandas()
 
-    print(f"ArtifactFlow observability report (last {args.hours}h)")
-    print("=" * 70)
-
-    # MessageEvent
-    try:
-        engine = create_engine(_resolve_engine_url())
-        df_llm, df_tool = _load_message_events(engine, args.hours)
-        _print_llm_summary(df_llm)
-        _print_tool_summary(df_tool)
-        _print_fuzzy_stats(df_tool)
-    except Exception as e:
-        print(f"\n[skip] MessageEvent: {e}", file=sys.stderr)
-
-    # Runtime metrics
-    metrics_glob = str(Path(args.obs_dir) / "metrics.jsonl*")
-    df_runtime = _load_jsonl_glob(metrics_glob)
-    _print_runtime_summary(df_runtime)
-
-    # Loop-lag events
-    lag_glob = str(Path(args.obs_dir) / "loop-lag.jsonl*")
-    df_lag = _load_jsonl_glob(lag_glob)
-    _print_lag_events(df_lag)
-
-    print()
+    asyncio.run(_run_report(args.hours, args.obs_dir))
 
 
 if __name__ == "__main__":

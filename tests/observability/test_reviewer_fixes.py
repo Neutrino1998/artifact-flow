@@ -320,18 +320,21 @@ def test_script_db_url_falls_back_to_database_url(monkeypatch):
     assert "fallback" in resolved
 
 
-def test_script_db_url_default_sqlite(monkeypatch):
-    """Neither env set → default sqlite path."""
+def test_script_db_url_default_sqlite_async(monkeypatch):
+    """Neither env set → default sqlite path with async driver (script bridges
+    via run_sync, so it must keep the async driver suffix that the app uses)."""
     monkeypatch.delenv("ARTIFACTFLOW_DATABASE_URLS", raising=False)
     monkeypatch.delenv("ARTIFACTFLOW_DATABASE_URL", raising=False)
 
     module = _load_script_module()
     resolved = module._resolve_engine_url()
-    assert resolved.startswith("sqlite")
+    assert resolved.startswith("sqlite+aiosqlite")
 
 
-def test_script_db_url_strips_async_drivers(monkeypatch):
-    """pd.read_sql needs sync drivers — async suffixes must be stripped."""
+def test_script_db_url_passthrough_async_driver(monkeypatch):
+    """Script must NOT rewrite async driver suffixes. Translation would
+    re-introduce psycopg2 / pymysql dependencies that are not in
+    requirements.txt; instead the script uses AsyncEngine + run_sync."""
     monkeypatch.setenv(
         "ARTIFACTFLOW_DATABASE_URLS", "postgresql+asyncpg://host/db"
     )
@@ -339,5 +342,69 @@ def test_script_db_url_strips_async_drivers(monkeypatch):
 
     module = _load_script_module()
     resolved = module._resolve_engine_url()
-    assert "+asyncpg" not in resolved
-    assert "psycopg2" in resolved
+    assert resolved == "postgresql+asyncpg://host/db", (
+        f"URL must not be translated; got {resolved!r}"
+    )
+
+
+def test_script_db_url_passthrough_mysql_async(monkeypatch):
+    """Same for aiomysql — translation would have added the missing pymysql."""
+    monkeypatch.setenv(
+        "ARTIFACTFLOW_DATABASE_URL", "mysql+aiomysql://host/db"
+    )
+    monkeypatch.delenv("ARTIFACTFLOW_DATABASE_URLS", raising=False)
+
+    module = _load_script_module()
+    resolved = module._resolve_engine_url()
+    assert resolved == "mysql+aiomysql://host/db"
+
+
+@pytest.mark.asyncio
+async def test_load_message_events_async_bridge(tmp_path):
+    """End-to-end: the async-engine + run_sync bridge actually delivers a
+    DataFrame from a real aiosqlite-backed DB. Skipped where pandas is not
+    installed (analyst-only dependency)."""
+    pytest.importorskip("pandas")
+
+    from sqlalchemy.ext.asyncio import create_async_engine
+
+    db_path = tmp_path / "obs-test.db"
+
+    # Seed schema + a single llm_complete / tool_complete row each so both
+    # _load_message_events queries return something.
+    init_engine = create_async_engine(f"sqlite+aiosqlite:///{db_path}")
+    from sqlalchemy import text as sa_text
+    async with init_engine.begin() as conn:
+        await conn.execute(sa_text("""
+            CREATE TABLE message_events (
+                id TEXT PRIMARY KEY,
+                created_at TEXT,
+                agent_name TEXT,
+                event_type TEXT,
+                data TEXT
+            )
+        """))
+        await conn.execute(sa_text("""
+            INSERT INTO message_events VALUES
+            ('e1', datetime('now'), 'lead', 'llm_complete',
+             '{"model":"gpt","token_usage":{"input_tokens":10,"output_tokens":3},"duration_ms":12}'),
+            ('e2', datetime('now'), 'lead', 'tool_complete',
+             '{"tool":"web_fetch","duration_ms":5,"success":true,"metadata":{"k":"v"}}')
+        """))
+    await init_engine.dispose()
+
+    module = _load_script_module()
+    # Force pandas import via the same path main() uses
+    module.pd = module._require_pandas()
+
+    engine = create_async_engine(f"sqlite+aiosqlite:///{db_path}")
+    try:
+        df_llm, df_tool = await module._load_message_events(engine, hours=24)
+        assert len(df_llm) == 1
+        assert df_llm.iloc[0]["model"] == "gpt"
+        assert len(df_tool) == 1
+        assert df_tool.iloc[0]["tool"] == "web_fetch"
+        # metadata is parsed back to dict by the sqlite branch
+        assert df_tool.iloc[0]["metadata"] == {"k": "v"}
+    finally:
+        await engine.dispose()

@@ -595,7 +595,7 @@ df_lag     = pd.read_json("data/observability/loop-lag.jsonl", lines=True)
 
 **内容**:
 1. release bundle 内置 `py-spy` 静态二进制(单文件几 MB),从根上消除"内网现抓不到"
-2. release bundle 内置 `pandas` / `numpy` 离线 wheel(`deploy/wheels/`),供 `scripts/observability_report.py` 在分析机用 `pip install --no-index --find-links` 安装。**不进 runtime `requirements.txt`** —— pandas+numpy ~80 MB 是分析工具,产品运行时不需要,跟 py-spy 同属"部署时可用 / 运行时不依赖"类别(PR-obs-lite reviewer 决策)。脚本侧 `import pandas` 缺失时已退化为清晰错误提示并退出 2,指向本节
+2. release bundle 内置 `pandas` / `numpy` 离线 wheel(`deploy/wheels/`),供 `scripts/observability_report.py` 在分析机用 `pip install --no-index --find-links` 安装。**不进 runtime `requirements.txt`** —— pandas+numpy ~80 MB 是分析工具,产品运行时不需要,跟 py-spy 同属"部署时可用 / 运行时不依赖"类别。`numpy` 是 pandas 的依赖,顺带;**不**再带 `psycopg2` / `pymysql` 这类 sync DB driver —— 脚本走 `AsyncEngine.run_sync` 桥接复用 app 已有的 asyncpg / aiomysql / aiosqlite,sync driver 没必要再多带一份
 3. preflight 脚本验证宿主机有 `gdb`/`gcore`、`strace`、`procps`
 4. 诊断策略定调:app 镜像保持精简,取证走宿主机(不往镜像塞 `top`)
 5. SOP 增"取证工具就绪"检查项(含 py-spy 二进制 + analyst wheels 已就位)
