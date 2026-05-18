@@ -159,55 +159,43 @@ AF_VERSION=1.0.0 docker compose -f deploy/docker-compose.intranet.yml --profile 
 docker compose -f deploy/docker-compose.intranet.yml exec backend python scripts/create_admin.py admin --password <your-password>
 ```
 
-### 取证就绪（首次部署必做，PR-forensics-bundle）
+### 取证就绪（PR-forensics-bundle）
 
-**事故现场诊断的三层路径**：
+本 bundle 交付两件取证素材：
 
-| 层 | 工具 | 来源 | 何时用 |
-|---|---|---|---|
-| **主路径** | `faulthandler` deadman dump | backend 进程自己（PR-obs-lite 已内置） | 硬 wedge → `docker compose -f deploy/docker-compose.intranet.yml logs backend` 看自动 dump 的 Python 栈 |
-| **备份路径** | `py-spy` | backend **镜像里**（Dockerfile builder stage）+ compose `cap_add: [SYS_PTRACE]` | deadman 失效 / 想看采样分布 → `docker compose -f deploy/docker-compose.intranet.yml exec backend py-spy dump --pid 1` |
-| **深挖路径** | `gdb` / `strace` / `procps`、宿主机 `iostat` 等 | 宿主机预装（云托管协调） | syscall 序列 / coredump / 全机器视图 |
+1. **backend 镜像内置 `py-spy`** + compose `cap_add: [SYS_PTRACE]` —— 事故时
+   `docker compose -f deploy/docker-compose.intranet.yml exec backend py-spy dump --pid 1`
+   直接采样 Python 栈，作为 PR-obs-lite faulthandler deadman 失效时的备份。
+2. **`pandas` + `numpy` 离线 wheels** （`artifactflow-analyst-tools-*.tar.gz`） ——
+   给 analyst 机器跑 `scripts/observability_report.py` 用，跟 backend 部署解耦。
 
-前两层零云托管依赖（镜像 + 容器级 cap 自洽）；第三层依赖宿主机标准工具，preflight 在 optional 段提示，不阻塞部署。
+**约束**：构建机有网下载（一次），目标机器全程离线 —— 不允许在内网机器上
+`pip install <pkgname>` 或 `curl github`。
 
-另外 `pandas`/`numpy` 离线 wheels 是 analyst 工具（`scripts/observability_report.py` 跑离线分析时用），跟 backend 部署解耦 — 装在哪台 analyst 机器都行。release bundle 打成独立 `artifactflow-analyst-tools-<slug>.tar.gz`。
-
-**约束**：构建机有网下载（一次），目标机器全程离线 —— 不允许在内网机器上 `pip install <pkgname>` 或 `curl github`。
-
-**首次部署流程**（在 [前置准备 → 部署] 的"3. 配置"之后、"4. 启动"之前插入）：
+**首次部署流程**（"3. 配置"之后、"4. 启动"之前）：
 
 ```bash
-# 3.5 analyst-tools bundle 安装（仅在 analyst 机器上需要，可后做）
-# release.sh 用 --with-analyst-tools 构建时已经把 pandas/numpy 离线 wheels
-# 打进 artifactflow-analyst-tools-<slug>.tar.gz。
-
+# 3.5 (仅当 release 时带了 --with-analyst-tools)
+#     analyst-tools 解压 + pandas/numpy 装到 analyst Python 环境
 tar xzf artifactflow-analyst-tools-*.tar.gz    # → ./analyst-tools/{wheels,README.md,wheels.lock.txt}
-
-# pandas / numpy：装到 analyst 用的 Python 环境
-# --no-index 强制不联网，--find-links 指向离线 wheels 目录
 pip install --no-index --find-links analyst-tools/wheels pandas
-python -c 'import pandas; print(pandas.__version__)'    # 验证
+python -c 'import pandas; print(pandas.__version__)'
 
-# 3.6 Preflight 检查
-# Required 段（必通过）：analyst-tools bundle 完整性 + backend 容器有 py-spy
-# Optional 段（warning，不阻塞）：host 深挖工具 gdb/strace/procps
-# 首次部署在 `docker compose up` 之前跑时,backend 容器尚未启动,preflight
-# 会 info "skipping container py-spy check" —— 启动后再跑一次确认容器内 py-spy 可用
+# 3.6 Preflight: 两个检查 ——
+#   ① analyst-tools wheels 离线 resolve（不在则 ℹ 跳过）
+#   ② 容器内 py-spy --version（启动前 ℹ 跳过，up 后再跑一次）
 ./deploy/scripts/preflight.sh
-# 期望输出：✓ Preflight passed —— bundle ready（启动后再跑会变成 OK backend ✓）
+# 预期：两项 ✓ 或 ℹ；任一 ✗ 阻塞部署
 ```
 
-**Roll-update 时**：analyst-tools tar 的 slug 编码 pandas/numpy/python 三个 pin 版本，同 slug 且 `analyst-tools/wheels.lock.txt` diff 干净就不用重传 — slug 是必要条件,wheels.lock 是充分条件(transitive 可能漂移)。`scripts/release.sh` 默认 `--app-only` 不打 analyst tar,roll-update 体积只有几十 KB。
+**Roll-update 时**：analyst-tools tar 的 slug 编码 pandas/numpy/python 三个 pin
+版本，同 slug 且 `analyst-tools/wheels.lock.txt` diff 干净就不用重传。
+`scripts/release.sh` 默认不打 analyst tar，roll-update 体积只有几十 KB。
 
-**why py-spy 进镜像 + cap_add: SYS_PTRACE**：
-- 容器级 cap 作用域仅 backend 容器内,不放大已 RCE 攻击面
-- 镜像 +6MB(~+4%,无感),换来事故时 `docker compose ... exec backend py-spy` 秒级可用,无云托管协调依赖
-- 这是**精准而非反射性扩张** —— 只装 py-spy(第三方分发 + 事故现场最常用);gdb/strace/top 仍走宿主机(OS 包 + 深挖路径,频次低)
-
-**why pandas/numpy 不进 app 镜像**：
-- pandas 80MB+ 是分析工具,跟业务运行时无关
-- analyst 机器跟部署机不一定是同一台
+**事故现场深挖**（host 侧 `gdb` / `strace` / `procps` / `iostat` 等）跟本 bundle
+解耦，由云托管运维确认 —— 见
+`docs/_archive/ops/cloud-service-checklist.md` 第四段。同段也涵盖 Yama
+`ptrace_scope` 政策（mode 3 会让备份路径失效，但主路径 faulthandler 仍可用）。
 
 ---
 

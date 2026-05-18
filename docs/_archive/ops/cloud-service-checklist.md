@@ -85,5 +85,10 @@
    - **前两层不依赖** —— Python 栈已经能 dump,coredump 是 C 扩展异常 / 二进制层 bug 进一步深挖
    - coredump 文件可指定落到我们持久卷下 (`/app/data/`),不污染宿主机;dump 含进程地址空间,仅事故现场用,事后人工清理
 
+3. **宿主机 Yama `kernel.yama.ptrace_scope` 设的是几？**
+   - `0/1/2`(常见):容器内 `CAP_SYS_PTRACE` 自动 bypass,备份路径 `docker compose ... exec backend py-spy ...` 正常
+   - `3`(host-wide 禁 ptrace,极少):**备份路径失效** —— py-spy 二进制装了但 attach 不上。**主路径 faulthandler 不受影响**(进程内 SIGSEGV handler,跟 ptrace 无关)。事故时如果备份路径不可用,优先靠 docker logs 拿 faulthandler dump,实在不够再协调云托管临时把 mode 调到 1
+   - 这条 preflight 不查 —— 是云托管政策,事前对齐即可
+
 > 事故现场 SOP 优先级:① `docker compose ... logs backend` 看 faulthandler dump → ② `docker compose ... exec backend py-spy dump --pid 1` 看采样栈 → ③ `tail data/observability/loop-lag.jsonl` 看软退化事件 + `GET /admin/runtime` 看在飞任务 → ④ 都不够时上宿主机 strace / gdb 深挖(`docker compose ...` 在生产/内网部署里实际是 `docker compose -f docker-compose.prod.yml ...` 或 `docker compose -f deploy/docker-compose.intranet.yml ...`,Mode 1 也可直接 `docker exec artifactflow-backend ...`)
 > 部署侧 SOP 详见 `deployment-sop.md` → "取证就绪"小节;preflight 校验脚本: `deploy/scripts/preflight.sh`

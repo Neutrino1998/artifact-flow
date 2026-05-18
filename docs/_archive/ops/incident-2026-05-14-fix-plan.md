@@ -16,7 +16,7 @@
 | P0(运维) | 前端 compose 临时覆盖 | — | 非 PR,内网机直接操作 |
 | P1 | PR-obs-lite 轻量可观测性 + 日志持久化 | ✅ 已完成 | watchdog(自动栈 dump)+ sampler(jsonl 采样)+ `/admin/runtime` + 分析脚本 + 主日志迁持久卷 + obs jsonl 循环写;不动 DB schema、不上 Prometheus |
 | P1 | PR-3 fencing 事件持久化 | ✅ 已完成 | 修复 bug ④,恢复审计/回放完整性 |
-| P2 | PR-forensics-bundle 取证工具 + 部署前置 | ✅ 已完成 | py-spy 进 backend 镜像 + compose `cap_add: SYS_PTRACE`(主+备份路径零云托管依赖); `release.sh --with-analyst-tools` 打 pandas/numpy 离线 wheels(给 analyst 机器零联网); `preflight.sh` 分 required(容器内 py-spy)/optional(Yama mode + host 深挖工具) 两层; SOP + cloud checklist 同步三层模型 |
+| P2 | PR-forensics-bundle 取证工具 + 部署前置 | ✅ 已完成 | 实质交付两件事:① py-spy 进 backend 镜像 + compose `cap_add: SYS_PTRACE`(faulthandler deadman 失效时的备份)② `release.sh --with-analyst-tools` 打 pandas/numpy 离线 wheels(给 analyst 机器零联网装)。`preflight.sh` 只验这两件事;Yama policy / host 深挖工具 由 cloud-service-checklist 第四段对齐云托管 |
 | P2 | PR-5 前端镜像重建 | 待启动 | 正式消除 HOSTNAME 误配 |
 | P3 | PR-tz-unify 事件时间戳时区统一 | 待启动 | events.py 写本地朴素、`server_default=func.now()` 又是 DB 端 UTC,二者不一致;PR-obs-lite 分析脚本在 Shanghai 部署偏 8h。修脚本前先决定全链路用哪个 |
 | P3 | 文档 PR(`docs/runbooks/service-hang.md` + `docs/guides/observability-tuning.md`) | 待启动 | 应急 runbook + obs 调参手册,纯 markdown PR;待 PR-obs-lite + PR-forensics-bundle 代码落地后启动(字段 / 路径稳定后下笔) |
@@ -637,6 +637,19 @@ df_lag     = pd.read_json("data/observability/loop-lag.jsonl", lines=True)
 - **P1 #2**(`py-spy --version` 不证明 attach path): reviewer 担心 cap/seccomp/Yama 任一漂移都让 attach 失败但 `--version` 仍 pass。**用户挑战 + 重新拆解**: 容器内 attach 实际依赖二进制(镜像保证)+ cap_add(compose 声明式)+ seccomp 默认 profile(自动放行有 cap 的 ptrace)+ host Yama(唯一外部变量)。前三环都是我们声明式管住的,从容器内复读是 over-engineering;**只有 Yama mode 3(host-wide ptrace 禁)能绕过我们的 cap**。**采纳收窄**: 不加 CapEff bit / seccomp 探测,只加 host-side Yama 读取(`/proc/sys/kernel/yama/ptrace_scope`),mode 3 时 warn"备份路径失效、依赖主路径 faulthandler",其他 mode + 不可读(非 Linux)都 info-skip
 - **P2**(`docker exec backend` 不会解析): compose 没设 `container_name`(prod/intranet 是 `<project>-backend-1`),Mode 1 设了但是 `artifactflow-backend`。文档六处当前态 `docker exec backend` / `docker logs backend` → 全改 `docker compose -f <file> exec backend` / `docker compose ... logs backend`(service-name-based,跟 container_name 解耦,也支持 `--scale`)。preflight 自己之前就用 `docker ps | grep backend | head -1` 解析,无需改逻辑
 - **P3 半真**(fix plan stale): line 19 优先级总览还在写 `--with-forensics` + "打 py-spy" → 更新为 round 4+5 真实描述。line 660+ 原始 spec 段(reviewer 指 661)**是有意保留的审计原稿**,差异在 644-649 已显式列出 —— 但 reviewer 不该需要读到 644 才理解 661 是历史;**加强方法**: 660 段头从"内容"改为"原始 spec 内容(round 0,差异见 644-649)"明示历史定位
+
+第六轮(用户主导的 scope walk-back):
+- **触发**: 第六轮 reviewer 又戳出 release.sh recipe 和 SOP 命令块都仍然无条件 `scp/tar/pip` analyst-tools,跟"optional"承诺仍然矛盾(round 5 修了 preflight 没修 recipe/SOP)。我准备继续加 compose 自动探测 + skipped/passed 状态机时被用户喊停:**"我有点没懂为什么现在好像这个事情搞得很复杂?就是打一个 bundle 带 pandas/numpy + 容器装 py-spy 应该没别的了吧?"**
+- **诊断**: 用户对。本 PR 实质交付就**两件事**(analyst-tools tar + 镜像 py-spy),round 1-5 累积出来的验证机制(Yama 检查 / host tools 清单 / strict-vs-lenient / required-optional 分层 / 多 compose 探测)比交付物本身还重 —— 验证机制不该比被验证的东西复杂。每一条单独看都有 reviewer 戳过的"合理"理由,但累积起来背离了 PR 初衷
+- **scope 收敛契约**: preflight 只验**两件事**(analyst-tools wheels 离线 resolve + 容器内 `py-spy --version`),其他全部移交或砍掉
+  - **砍**: Yama runtime 检查、host gdb/strace 清单、strict/lenient 模式、required/optional 分层 + 多状态计数器、四态 ✓/✗/⚠/info 输出
+  - **移**: Yama mode policy → `cloud-service-checklist.md` 第四段(问云托管,不是 preflight 跑时查);host 工具清单本来就在第四段
+  - **简化**: 多 compose 探测 → `AF_COMPOSE_FILE` env override,默认 intranet path(zero-config 单一来源)
+  - **保留**: ANALYST_DIR 仍接受位置参数(显式 / 默认两种用法)
+- **release.sh recipe 条件渲染**: heredoc 里的 infra + analyst-tools scp/tar/pip 三组步骤按 `WITH_INFRA` / `WITH_ANALYST_TOOLS` 条件包含/省略;未带 flag 时给 footer 一行 "to add later, rerun with --with-X"。配 4 种 flag 组合实测渲染正确
+- **SOP "取证就绪"重写**: 三层表 + 大段背景 → 二段文字(faulthandler 主 + py-spy 备份),analyst-tools 安装标"仅在 release 带 --with-analyst-tools 时",深挖工具引用 checklist 第四段
+- **行数变化**: preflight ~200 → ~80(-120);recipe + SOP + checklist 增减相抵,fix plan 加本段(+30 净增)。总净减约 -100 行,scope 真正落回"bundle + 镜像 py-spy"
+- **方法论 takeaway**: reviewer 反馈每条都"理论真",但**累积响应**会把简单事做复杂。用户的"step back"是必要的力学纠正 —— 单轮看不出来,跨多轮才能看出"验证机制比交付物还重"的失衡
 
 **关键转向(round 3,即本轮)**: py-spy 从"forensics bundle 工具(装宿主机)" → "**backend 镜像内置工具**(`docker exec backend py-spy`)"。这是对 round 2 的修正:round 2 想避免"为低频备份做反射性镜像膨胀",但实际效果是把可用性外推给云托管协调;round 3 承认 py-spy 是事故现场最常用 + 第三方分发 + 我们能完全控制的诊断工具,直接打进镜像是**精准而非反射性**的扩张。三层分明:① 主路径 faulthandler dump(零依赖) ② 备份路径 `docker exec backend py-spy`(容器内 cap 自洽,零云托管依赖) ③ 深挖路径 host gdb/strace(云托管协调)。前两层完全自洽,事故时秒级可用。
 

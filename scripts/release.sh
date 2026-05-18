@@ -373,18 +373,37 @@ echo ""
 echo "Manifest preview (first 30 lines):"
 head -30 "$MANIFEST" | sed 's/^/  /'
 echo ""
+
+# Recipe is rendered conditionally on the flags actually used this build, so
+# copy-paste-able lines match what was produced (no "scp a tar you didn't
+# build"). Inline lines carry a leading newline + indent + trailing `\` so the
+# enclosing scp/etc. continuation stays unbroken when the chunk is empty.
+if [[ $WITH_INFRA == 1 ]]; then
+  INFRA_SCP_LN=$'\n      dist/artifactflow-infra-'"${INFRA_SLUG}"$'.tar.gz{,.sha256}                     \\'
+  INFRA_LOAD_LN=$'\n    docker load -i artifactflow-infra-'"${INFRA_SLUG}"$'.tar.gz'
+  INFRA_FOOTER=""
+else
+  INFRA_SCP_LN=""
+  INFRA_LOAD_LN=""
+  INFRA_FOOTER="  # (infra tar omitted — re-run release with --with-infra to ship nginx/postgres/redis images)"
+fi
+if [[ $WITH_ANALYST_TOOLS == 1 ]]; then
+  ANALYST_SCP_LN=$'\n      dist/artifactflow-analyst-tools-'"${ANALYST_SLUG}"$'.tar.gz{,.sha256}           \\'
+  ANALYST_RECIPE=$'\n    tar xzf artifactflow-analyst-tools-'"${ANALYST_SLUG}"$'.tar.gz   # → ./analyst-tools/\n    # Offline wheels: install on the machine running observability_report.py.\n    pip install --no-index --find-links analyst-tools/wheels pandas'
+  ANALYST_FOOTER=""
+else
+  ANALYST_SCP_LN=""
+  ANALYST_RECIPE=""
+  ANALYST_FOOTER="  # (analyst-tools tar omitted — re-run release with --with-analyst-tools to ship offline pandas/numpy wheels)"
+fi
+
 cat <<EOF
 To deploy on air-gapped host:
 
   # ---- First-time deployment ----
-  # Build with --with-infra to include the infra tar.
-  # --with-analyst-tools is optional but recommended on first deploy: it
-  # ships pandas/numpy offline wheels for the analyst machine running
-  # scripts/observability_report.py. py-spy is already inside the backend
-  # image — no separate ship needed.
-  scp dist/artifactflow-{app,config,deploy}-${VERSION}.tar.gz{,.sha256}         \\
-      dist/artifactflow-infra-${INFRA_SLUG}.tar.gz{,.sha256}                     \\
-      dist/artifactflow-analyst-tools-${ANALYST_SLUG}.tar.gz{,.sha256}           \\
+$INFRA_FOOTER
+$ANALYST_FOOTER
+  scp dist/artifactflow-{app,config,deploy}-${VERSION}.tar.gz{,.sha256}         \\${INFRA_SCP_LN}${ANALYST_SCP_LN}
       dist/artifactflow-${VERSION}.manifest.txt                                   \\
       target:/opt/artifactflow/
   ssh target
@@ -394,27 +413,15 @@ To deploy on air-gapped host:
     # each .sha256 records its filename.
     sha256sum -c artifactflow-*.tar.gz.sha256
     tar xzf artifactflow-deploy-${VERSION}.tar.gz
-    tar xzf artifactflow-config-${VERSION}.tar.gz
-    tar xzf artifactflow-analyst-tools-${ANALYST_SLUG}.tar.gz   # → ./analyst-tools/
-    docker load -i artifactflow-infra-${INFRA_SLUG}.tar.gz
-    docker load -i artifactflow-app-${VERSION}.tar.gz
-    # Analyst wheels: offline install on whichever machine runs
-    # observability_report.py (often this host, sometimes a separate one).
-    pip install --no-index --find-links analyst-tools/wheels pandas
-    # Preflight verifies bundle integrity + reports host deep-dive tool status.
-    # Nonzero exit means bundle issues (blocking); warnings on host tools are
-    # informational (not blocking — backend image self-contained for the
-    # primary + backup forensics paths).
+    tar xzf artifactflow-config-${VERSION}.tar.gz${INFRA_LOAD_LN}
+    docker load -i artifactflow-app-${VERSION}.tar.gz${ANALYST_RECIPE}
+    # Preflight: 2 checks (analyst-tools wheels resolve + py-spy in backend container).
     ./deploy/scripts/preflight.sh
     cp deploy/.env.intranet.example deploy/.env && vi deploy/.env
     AF_VERSION=${VERSION} docker compose -f deploy/docker-compose.intranet.yml --profile infra up -d
     # No pause/resume here — there's nothing running to pause.
 
-  # ---- Roll-update (most common, no infra, no analyst-tools re-ship) ----
-  # analyst-tools slug encodes pandas/numpy/python versions (NECESSARY). If
-  # the slug matches what's already on target AND analyst-tools/wheels.lock.txt
-  # diffs clean, skip re-shipping. Slug alone is not sufficient — transitive
-  # deps can shift across builds with the same top-level pins.
+  # ---- Roll-update (no infra, no analyst-tools re-ship) ----
   scp dist/artifactflow-{app,config,deploy}-${VERSION}.tar.gz{,.sha256} \\
       dist/artifactflow-${VERSION}.manifest.txt                          \\
       target:/opt/artifactflow/tmp/
