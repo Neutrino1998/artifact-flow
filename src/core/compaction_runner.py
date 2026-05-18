@@ -71,7 +71,9 @@ class CompactionRunner:
             logger.warning("compact_agent not configured, skipping compaction")
             return
 
-        logger.debug(
+        # 提到 INFO:compaction 触发条件是关键状态转移,事故诊断必需(对齐
+        # "工具完成/状态转移"分级原则;尺寸字段而非大体积内容,可常驻 INFO)。
+        logger.info(
             f"[compaction] triggered for {agent_name}: "
             f"threshold={config.COMPACTION_TOKEN_THRESHOLD}, "
             f"last_call input={input_tokens} output={output_tokens} "

@@ -45,7 +45,7 @@ export interface paths {
          * Update My Profile
          * @description 当前用户自助修改非敏感资料字段（目前仅 display_name）。
          *
-         *     设计意图：与 admin 后台 PUT /users/{id} 解耦 —— role / is_active /
+         *     设计意图：与 admin 后台 PUT /admin/users/{id} 解耦 —— role / is_active /
          *     password 这些安全敏感字段走专门端点，profile 字段走这里。任何已登录
          *     用户都能调，不需要 admin 权限。
          */
@@ -66,193 +66,6 @@ export interface paths {
          * @description 当前用户自助修改密码
          */
         post: operations["change_my_password_api_v1_auth_me_password_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/auth/users": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List Users
-         * @description 列出所有用户（仅 Admin）
-         */
-        get: operations["list_users_api_v1_auth_users_get"];
-        put?: never;
-        /**
-         * Create User
-         * @description 创建用户（仅 Admin）
-         */
-        post: operations["create_user_api_v1_auth_users_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/auth/users/bulk-impact": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get Users Bulk Impact
-         * @description 批量删除用户前的影响数据 — 一次 IN 查询。
-         *
-         *     给前端 DangerConfirmModal 显示"将删除 N 个用户、共 M 条会话"。
-         *     user_count 是请求 ids 的去重数（不区分是否真存在），conversation_count
-         *     是这批用户名下当前会话总数。
-         */
-        get: operations["get_users_bulk_impact_api_v1_auth_users_bulk_impact_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/auth/users/bulk-action": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Bulk User Action
-         * @description 批量执行用户管理动作（仅 Admin）。
-         *
-         *     支持 action：disable / enable / delete / set_department。Best-effort：
-         *     单条失败不阻断其余。Self-protection 取代 last-admin 计数 —— admin
-         *     不能对自己执行任何 action（与 PR2b 单条 update_user / delete_user 一致）；
-         *     配合 disabled admin 进不来后台，足以保住至少 1 个活跃 admin。
-         *
-         *     set_department 的 payload.department_id 在 loop 外预校验：非 null 且
-         *     在 DB 中找不到对应部门 → 整批 400（fail-fast，省掉无谓的 N 次失败）。
-         *
-         *     delete 走 hard_delete（DB CASCADE）。若用户当前正在跑 engine，
-         *     被级联删的 conversation 行由 PR2a 的 controller exists() / IntegrityError
-         *     catch 兜住；本端点直接 fire-and-forget。
-         */
-        post: operations["bulk_user_action_api_v1_auth_users_bulk_action_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/auth/users/{user_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get User
-         * @description 单查用户（Admin） — 给前端编辑表单初始化用
-         */
-        get: operations["get_user_api_v1_auth_users__user_id__get"];
-        /**
-         * Update User
-         * @description 更新用户（仅 Admin）
-         *
-         *     防误锁：admin 不能改自己的 role / is_active / password。配合 DELETE
-         *     路径的"不能删自己"保护，足以保证系统始终至少有 1 个活跃 admin
-         *     （操作者必然活跃 → 不能动自己 → 至少剩自己）。
-         *
-         *     Self 改 password 走 POST /me/password —— 该端点强制校验 current_password，
-         *     防止 token 被盗后攻击者无需旧密码就能接管账号。本端点对 self 改 password
-         *     返回 403，避免在 admin 后台绕过该校验。
-         */
-        put: operations["update_user_api_v1_auth_users__user_id__put"];
-        post?: never;
-        /**
-         * Delete User
-         * @description 硬删用户（仅 Admin）
-         *
-         *     FK CASCADE 一并删除其所有会话 / messages / events / artifacts。
-         *     若用户当前有正在跑的 engine，被级联删的 conversation 行会被 controller
-         *     post-processing 的 exists() 检查兜住（PR2a），不会撞 FK。
-         *
-         *     保护：admin 不能删自己。配合"不能改自己 role/is_active"，足以保证
-         *     系统始终至少 1 个活跃 admin。
-         */
-        delete: operations["delete_user_api_v1_auth_users__user_id__delete"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/auth/users/{user_id}/impact": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get User Impact
-         * @description 硬删用户前的影响数据 — 返回会话数。
-         *
-         *     给前端 DangerConfirmModal 显示"将级联删除 N 条会话，操作不可恢复"。
-         */
-        get: operations["get_user_impact_api_v1_auth_users__user_id__impact_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/auth/users/bulk-import": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Bulk Import Users
-         * @description 批量导入用户（仅 Admin）。
-         *
-         *     CSV header 必含 `username`；可选列 `password` / `display_name` /
-         *     `dept_l1` / `dept_l2` / `dept_l3`。其他列被忽略并在 warnings 里上报。
-         *
-         *     语义（best-effort，非原子）：
-         *     - parse 阶段失败（解码 / 缺 username 列 / 行数超限）→ 400
-         *     - 文件内 username 重复 → 400 + duplicate_rows 列出
-         *     - 单行业务校验失败（username 格式 / 部门 gap / 字段超长 / 默认密码过短）
-         *       → failed
-         *     - 单行 username 已在 DB → skipped
-         *     - 其余 → created（每行独立 commit；逐行成功/失败）
-         *
-         *     执行结构（3 段）：
-         *     1. validate + dept resolve：顺序遍历，校验失败的行进 failed，
-         *        通过的行收集到 to_create（含已 resolve 的 department_id）。
-         *        dept_cache 避免同 CSV 内重复路径多次 SELECT。
-         *     2. parallel hash：to_create 里所有 password 通过 asyncio.gather +
-         *        asyncio.to_thread 并行扔给默认 ThreadPoolExecutor 跑 bcrypt。
-         *        bcrypt-python 在 C 层释放 GIL，~8 核机器 300 行 hash 阶段
-         *        从 ~50s 缩到 ~6s，且 event loop 全程不卡（其他请求正常响应）。
-         *     3. INSERT：顺序写库；username UNIQUE 撞上 → 当 skipped 处理（race
-         *        between phase-1 batch-check 和此处之间另一 admin 抢先创建）。
-         */
-        post: operations["bulk_import_users_api_v1_auth_users_bulk_import_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -392,9 +205,19 @@ export interface paths {
          * Bulk Delete Conversations
          * @description 批量删除对话（用户视角，仅删自己的）
          *
-         *     Best-effort：失败一条不阻断其余。Cross-user / 不存在的 id 都归为 `not_found`，
-         *     遵循 "404 not 403" 安全策略避免泄漏会话存在。
-         *     引擎正在执行的会话同样直接 DELETE — 引擎 post-processing 在 PR2a 里 fail-soft 兜底。
+         *     Best-effort 范围：cross-user / 不存在的 id 走 `failed.reason="not_found"`，
+         *     遵循 "404 not 403" 安全策略避免泄漏会话存在。引擎正在执行的会话同样直接
+         *     DELETE — 引擎 post-processing 在 PR2a 里 fail-soft 兜底。
+         *
+         *     单行 FK 违规这条路径不存在，因此不需要 IntegrityError + rollback：所有指向
+         *     `conversations.id` 的外键（Message / ArtifactSession）都是 ondelete=CASCADE，
+         *     下游链 messages / events / artifacts / artifact_versions 也全是 CASCADE
+         *     （src/db/models.py），删 conversation 不会因子行残留而失败，session 状态
+         *     不会被某一行污染到影响后续行。
+         *
+         *     其他异常（OperationalError 等基础设施级故障）冒泡为 5xx loud failure —
+         *     此时第 1 条就会失败、循环本就进不下去；与 CLAUDE.md "不为不会发生的场景
+         *     加防御代码" 一致，故不做广泛 except。
          */
         post: operations["bulk_delete_conversations_api_v1_chat_bulk_delete_post"];
         delete?: never;
@@ -644,6 +467,193 @@ export interface paths {
          * @description Get all events for a conversation, grouped by message.
          */
         get: operations["get_admin_conversation_events_api_v1_admin_conversations__conv_id__events_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/users": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Users
+         * @description 列出所有用户（仅 Admin）
+         */
+        get: operations["list_users_api_v1_admin_users_get"];
+        put?: never;
+        /**
+         * Create User
+         * @description 创建用户（仅 Admin）
+         */
+        post: operations["create_user_api_v1_admin_users_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/users/bulk-impact": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Users Bulk Impact
+         * @description 批量删除用户前的影响数据 — 一次 IN 查询。
+         *
+         *     给前端 DangerConfirmModal 显示"将删除 N 个用户、共 M 条会话"。
+         *     user_count 是请求 ids 的去重数（不区分是否真存在），conversation_count
+         *     是这批用户名下当前会话总数。
+         */
+        get: operations["get_users_bulk_impact_api_v1_admin_users_bulk_impact_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/users/bulk-action": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Bulk User Action
+         * @description 批量执行用户管理动作（仅 Admin）。
+         *
+         *     支持 action：disable / enable / delete / set_department。Best-effort：
+         *     单条失败不阻断其余。Self-protection 取代 last-admin 计数 —— admin
+         *     不能对自己执行任何 action（与 PR2b 单条 update_user / delete_user 一致）；
+         *     配合 disabled admin 进不来后台，足以保住至少 1 个活跃 admin。
+         *
+         *     set_department 的 payload.department_id 在 loop 外预校验：非 null 且
+         *     在 DB 中找不到对应部门 → 整批 400（fail-fast，省掉无谓的 N 次失败）。
+         *
+         *     delete 走 hard_delete（DB CASCADE）。若用户当前正在跑 engine，
+         *     被级联删的 conversation 行由 PR2a 的 controller exists() / IntegrityError
+         *     catch 兜住；本端点直接 fire-and-forget。
+         */
+        post: operations["bulk_user_action_api_v1_admin_users_bulk_action_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/users/bulk-import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Bulk Import Users
+         * @description 批量导入用户（仅 Admin）。
+         *
+         *     CSV header 必含 `username`；可选列 `password` / `display_name` /
+         *     `dept_l1` / `dept_l2` / `dept_l3`。其他列被忽略并在 warnings 里上报。
+         *
+         *     语义（best-effort，非原子）：
+         *     - parse 阶段失败（解码 / 缺 username 列 / 行数超限）→ 400
+         *     - 文件内 username 重复 → 400 + duplicate_rows 列出
+         *     - 单行业务校验失败（username 格式 / 部门 gap / 字段超长 / 默认密码过短）
+         *       → failed
+         *     - 单行 username 已在 DB → skipped
+         *     - 其余 → created（每行独立 commit；逐行成功/失败）
+         *
+         *     执行结构（3 段）：
+         *     1. validate + dept resolve：顺序遍历，校验失败的行进 failed，
+         *        通过的行收集到 to_create（含已 resolve 的 department_id）。
+         *        dept_cache 避免同 CSV 内重复路径多次 SELECT。
+         *     2. parallel hash：to_create 里所有 password 通过 asyncio.gather +
+         *        asyncio.to_thread 并行扔给默认 ThreadPoolExecutor 跑 bcrypt。
+         *        bcrypt-python 在 C 层释放 GIL，~8 核机器 300 行 hash 阶段
+         *        从 ~50s 缩到 ~6s，且 event loop 全程不卡（其他请求正常响应）。
+         *     3. INSERT：顺序写库；username UNIQUE 撞上 → 当 skipped 处理（race
+         *        between phase-1 batch-check 和此处之间另一 admin 抢先创建）。
+         */
+        post: operations["bulk_import_users_api_v1_admin_users_bulk_import_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/users/{user_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get User
+         * @description 单查用户（Admin） — 给前端编辑表单初始化用
+         */
+        get: operations["get_user_api_v1_admin_users__user_id__get"];
+        /**
+         * Update User
+         * @description 更新用户（仅 Admin）
+         *
+         *     防误锁：admin 不能改自己的 role / is_active / password。配合 DELETE
+         *     路径的"不能删自己"保护，足以保证系统始终至少有 1 个活跃 admin
+         *     （操作者必然活跃 → 不能动自己 → 至少剩自己）。
+         *
+         *     Self 改 password 走 POST /auth/me/password —— 该端点强制校验 current_password，
+         *     防止 token 被盗后攻击者无需旧密码就能接管账号。本端点对 self 改 password
+         *     返回 403，避免在 admin 后台绕过该校验。
+         */
+        put: operations["update_user_api_v1_admin_users__user_id__put"];
+        post?: never;
+        /**
+         * Delete User
+         * @description 硬删用户（仅 Admin）
+         *
+         *     FK CASCADE 一并删除其所有会话 / messages / events / artifacts。
+         *     若用户当前有正在跑的 engine，被级联删的 conversation 行会被 controller
+         *     post-processing 的 exists() 检查兜住（PR2a），不会撞 FK。
+         *
+         *     保护：admin 不能删自己。配合"不能改自己 role/is_active"，足以保证
+         *     系统始终至少 1 个活跃 admin。
+         */
+        delete: operations["delete_user_api_v1_admin_users__user_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/users/{user_id}/impact": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get User Impact
+         * @description 硬删用户前的影响数据 — 返回会话数。
+         *
+         *     给前端 DangerConfirmModal 显示"将级联删除 N 条会话，操作不可恢复"。
+         */
+        get: operations["get_user_impact_api_v1_admin_users__user_id__impact_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1052,8 +1062,8 @@ export interface components {
              */
             updated_at: string;
         };
-        /** Body_bulk_import_users_api_v1_auth_users_bulk_import_post */
-        Body_bulk_import_users_api_v1_auth_users_bulk_import_post: {
+        /** Body_bulk_import_users_api_v1_admin_users_bulk_import_post */
+        Body_bulk_import_users_api_v1_admin_users_bulk_import_post: {
             /**
              * File
              * Format: binary
@@ -1094,7 +1104,7 @@ export interface components {
         };
         /**
          * BulkActionRequest
-         * @description POST /api/v1/auth/users/bulk-action request body。
+         * @description POST /api/v1/admin/users/bulk-action request body。
          *
          *     payload 仅在 action="set_department" 时使用，shape = {"department_id": str | null}；
          *     null 表示清空归属。其他 action 忽略 payload。
@@ -1121,7 +1131,7 @@ export interface components {
         };
         /**
          * BulkActionResponse
-         * @description POST /api/v1/auth/users/bulk-action response.
+         * @description POST /api/v1/admin/users/bulk-action response.
          */
         BulkActionResponse: {
             /**
@@ -1177,7 +1187,7 @@ export interface components {
         };
         /**
          * BulkImpactResponse
-         * @description GET /api/v1/auth/users/bulk-impact response。
+         * @description GET /api/v1/admin/users/bulk-impact response。
          *
          *     给前端 DangerConfirmModal 显示"将删除 N 个用户、共 M 条会话"。
          *     user_count = 请求 ids 的去重个数（不区分是否真正存在）；
@@ -1218,7 +1228,7 @@ export interface components {
         };
         /**
          * BulkImportResponse
-         * @description POST /api/v1/auth/users/bulk-import response。
+         * @description POST /api/v1/admin/users/bulk-import response。
          *
          *     best-effort 三分类。total_rows = created + failed + skipped。
          *     warnings 含编码 fallback / unknown 列等非阻断提示。
@@ -1447,7 +1457,7 @@ export interface components {
         };
         /**
          * CreateUserRequest
-         * @description POST /api/v1/auth/users request body
+         * @description POST /api/v1/admin/users request body
          */
         CreateUserRequest: {
             /**
@@ -1750,7 +1760,7 @@ export interface components {
         };
         /**
          * UpdateUserRequest
-         * @description PUT /api/v1/auth/users/{id} request body.
+         * @description PUT /api/v1/admin/users/{id} request body.
          *
          *     All fields optional. department_id semantics: 字段被显式传入时生效（包括
          *     传 null = 清空归属）；字段缺省 → 不改。路由通过 model_fields_set 区分。
@@ -1831,7 +1841,7 @@ export interface components {
         };
         /**
          * UserImpactResponse
-         * @description GET /api/v1/auth/users/{id}/impact response
+         * @description GET /api/v1/admin/users/{id}/impact response
          *
          *     给前端硬删用户前的二次确认弹窗显示影响数据。
          */
@@ -1870,7 +1880,7 @@ export interface components {
         };
         /**
          * UserListResponse
-         * @description GET /api/v1/auth/users response
+         * @description GET /api/v1/admin/users response
          */
         UserListResponse: {
             /** Users */
@@ -2078,295 +2088,6 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    list_users_api_v1_auth_users_get: {
-        parameters: {
-            query?: {
-                limit?: number;
-                offset?: number;
-                q?: string | null;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["UserListResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    create_user_api_v1_auth_users_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CreateUserRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["UserResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_users_bulk_impact_api_v1_auth_users_bulk_impact_get: {
-        parameters: {
-            query: {
-                ids: string[];
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BulkImpactResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    bulk_user_action_api_v1_auth_users_bulk_action_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["BulkActionRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BulkActionResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_user_api_v1_auth_users__user_id__get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                user_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["UserResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    update_user_api_v1_auth_users__user_id__put: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                user_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["UpdateUserRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["UserResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    delete_user_api_v1_auth_users__user_id__delete: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                user_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_user_impact_api_v1_auth_users__user_id__impact_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                user_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["UserImpactResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    bulk_import_users_api_v1_auth_users_bulk_import_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "multipart/form-data": components["schemas"]["Body_bulk_import_users_api_v1_auth_users_bulk_import_post"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BulkImportResponse"];
-                };
             };
             /** @description Validation Error */
             422: {
@@ -2989,6 +2710,295 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AdminConversationEventsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_users_api_v1_admin_users_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                offset?: number;
+                q?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_user_api_v1_admin_users_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateUserRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_users_bulk_impact_api_v1_admin_users_bulk_impact_get: {
+        parameters: {
+            query: {
+                ids: string[];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BulkImpactResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    bulk_user_action_api_v1_admin_users_bulk_action_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BulkActionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BulkActionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    bulk_import_users_api_v1_admin_users_bulk_import_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_bulk_import_users_api_v1_admin_users_bulk_import_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BulkImportResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_user_api_v1_admin_users__user_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_user_api_v1_admin_users__user_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateUserRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_user_api_v1_admin_users__user_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_user_impact_api_v1_admin_users__user_id__impact_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserImpactResponse"];
                 };
             };
             /** @description Validation Error */

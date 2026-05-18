@@ -1,9 +1,10 @@
 # Site config
 
-前端运行时读取的两份纯静态 JSON，用于驱动：
+前端运行时读取的三份纯静态 JSON，用于驱动：
 
 - **左栏通知**（`notifications.json`）—— UserMenu 上方的通知卡片，点击弹 modal 展开 markdown 详情。
 - **欢迎页轮播提示**（`welcome_tips.json`）—— 新对话欢迎页副标题，5s 一条向左滑动切换。
+- **版权 / 业务联系页脚**（`branding.json`）—— 侧栏底部 + 登录页底部的「由 X 开发 · email」一行。
 
 ## 部署 / 工作流
 
@@ -48,3 +49,15 @@
 ```
 
 纯字符串数组。空数组或文件不存在时欢迎页副标题回落到默认文案。
+
+## `branding.json` schema
+
+```jsonc
+{
+  "developer": "同温层",                    // 必填。"由 X 开发" 中的 X。
+  "contact_email": "contact@example.com"   // 可选。给则渲染为可点击的 mailto 链接。
+}
+```
+
+- 文件缺失 / 字段错位 / `developer` 为空 → 整个页脚隐藏（fail-closed）。删文件就能彻底关掉页脚。
+- 应用名（`ArtifactFlow`）和副标题（`多智能体任务工作台`）不在这里——它们是 build-time 常量在 `frontend/src/lib/branding.ts`，因为 HTML `<title>` 是 Next.js server-side metadata，触达不到 runtime fetch。改这两项需要改代码 + 重新打镜像。

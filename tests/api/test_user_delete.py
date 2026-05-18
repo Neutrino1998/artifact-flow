@@ -2,10 +2,10 @@
 PR2b — User hard-delete endpoint tests.
 
 Covers:
-- DELETE /api/v1/auth/users/{id} — happy path, FK CASCADE, self-protection
-- GET /api/v1/auth/users/{id} — single fetch
-- GET /api/v1/auth/users/{id}/impact — conversation count for confirmation UI
-- PUT /api/v1/auth/users/{id} — self-protection on role / is_active
+- DELETE /api/v1/admin/users/{id} — happy path, FK CASCADE, self-protection
+- GET /api/v1/admin/users/{id} — single fetch
+- GET /api/v1/admin/users/{id}/impact — conversation count for confirmation UI
+- PUT /api/v1/admin/users/{id} — self-protection on role / is_active
 """
 
 import uuid
@@ -95,7 +95,7 @@ class TestDeleteUser:
     async def test_delete_user_success_returns_204(
         self, admin_client: AsyncClient, test_user: User
     ):
-        resp = await admin_client.delete(f"/api/v1/auth/users/{test_user.id}")
+        resp = await admin_client.delete(f"/api/v1/admin/users/{test_user.id}")
         assert resp.status_code == 204
 
     async def test_delete_user_removes_row(
@@ -104,7 +104,7 @@ class TestDeleteUser:
         test_user: User,
         db_manager,
     ):
-        await admin_client.delete(f"/api/v1/auth/users/{test_user.id}")
+        await admin_client.delete(f"/api/v1/admin/users/{test_user.id}")
 
         # Use a fresh session — db_session fixture's open transaction may not
         # see commits from the request handler's session.
@@ -124,7 +124,7 @@ class TestDeleteUser:
         """FK CASCADE: 删用户连带删 conversation / messages / events / artifacts。"""
         conv_id, msg_id = await _seed_user_with_conversation(db_session, test_user)
 
-        resp = await admin_client.delete(f"/api/v1/auth/users/{test_user.id}")
+        resp = await admin_client.delete(f"/api/v1/admin/users/{test_user.id}")
         assert resp.status_code == 204
 
         # Use fresh session to avoid stale view from db_session's open txn
@@ -143,7 +143,7 @@ class TestDeleteUser:
         self, admin_client: AsyncClient, test_admin: User
     ):
         """admin 不能删自己（防误锁 + 配合 PUT self-guard 保住至少 1 个活跃 admin）"""
-        resp = await admin_client.delete(f"/api/v1/auth/users/{test_admin.id}")
+        resp = await admin_client.delete(f"/api/v1/admin/users/{test_admin.id}")
         assert resp.status_code == 403
         assert "yourself" in resp.json()["detail"].lower()
 
@@ -154,7 +154,7 @@ class TestDeleteUser:
         db_manager,
     ):
         """删别的 admin 不受限 —— 只要不是删自己即可。"""
-        resp = await admin_client.delete(f"/api/v1/auth/users/{second_admin.id}")
+        resp = await admin_client.delete(f"/api/v1/admin/users/{second_admin.id}")
         assert resp.status_code == 204
         async with db_manager.session() as s:
             result = await s.execute(
@@ -163,19 +163,19 @@ class TestDeleteUser:
             assert result.scalar_one_or_none() is None
 
     async def test_delete_nonexistent_returns_404(self, admin_client: AsyncClient):
-        resp = await admin_client.delete(f"/api/v1/auth/users/nonexistent-{uuid.uuid4().hex}")
+        resp = await admin_client.delete(f"/api/v1/admin/users/nonexistent-{uuid.uuid4().hex}")
         assert resp.status_code == 404
 
     async def test_delete_as_regular_user_forbidden(
         self, client: AsyncClient, test_user: User, second_admin: User
     ):
-        resp = await client.delete(f"/api/v1/auth/users/{second_admin.id}")
+        resp = await client.delete(f"/api/v1/admin/users/{second_admin.id}")
         assert resp.status_code == 403
 
     async def test_delete_unauthenticated(
         self, anon_client: AsyncClient, test_user: User
     ):
-        resp = await anon_client.delete(f"/api/v1/auth/users/{test_user.id}")
+        resp = await anon_client.delete(f"/api/v1/admin/users/{test_user.id}")
         assert resp.status_code == 401
 
 
@@ -190,7 +190,7 @@ class TestUpdateSelfProtection:
         self, admin_client: AsyncClient, test_admin: User
     ):
         resp = await admin_client.put(
-            f"/api/v1/auth/users/{test_admin.id}",
+            f"/api/v1/admin/users/{test_admin.id}",
             json={"role": "user"},
         )
         assert resp.status_code == 403
@@ -200,7 +200,7 @@ class TestUpdateSelfProtection:
         self, admin_client: AsyncClient, test_admin: User
     ):
         resp = await admin_client.put(
-            f"/api/v1/auth/users/{test_admin.id}",
+            f"/api/v1/admin/users/{test_admin.id}",
             json={"is_active": False},
         )
         assert resp.status_code == 403
@@ -214,7 +214,7 @@ class TestUpdateSelfProtection:
         token 被盗场景下，攻击者持 token 也不能直接改 admin 自己密码。
         """
         resp = await admin_client.put(
-            f"/api/v1/auth/users/{test_admin.id}",
+            f"/api/v1/admin/users/{test_admin.id}",
             json={"password": "newpass1234"},
         )
         assert resp.status_code == 403
@@ -225,7 +225,7 @@ class TestUpdateSelfProtection:
     ):
         """display_name / password 这种"非破坏性"字段允许改自己。"""
         resp = await admin_client.put(
-            f"/api/v1/auth/users/{test_admin.id}",
+            f"/api/v1/admin/users/{test_admin.id}",
             json={"display_name": "Captain"},
         )
         assert resp.status_code == 200
@@ -238,7 +238,7 @@ class TestUpdateSelfProtection:
     ):
         """非自身的 demote 仍然允许（self-protection 只防自己）。"""
         resp = await admin_client.put(
-            f"/api/v1/auth/users/{second_admin.id}",
+            f"/api/v1/admin/users/{second_admin.id}",
             json={"role": "user"},
         )
         assert resp.status_code == 200
@@ -250,7 +250,7 @@ class TestUpdateSelfProtection:
         second_admin: User,
     ):
         resp = await admin_client.put(
-            f"/api/v1/auth/users/{second_admin.id}",
+            f"/api/v1/admin/users/{second_admin.id}",
             json={"is_active": False},
         )
         assert resp.status_code == 200
@@ -261,7 +261,7 @@ class TestUpdateSelfProtection:
     ):
         """传相同 role 给自己应该被允许（值未变，不算修改）。"""
         resp = await admin_client.put(
-            f"/api/v1/auth/users/{test_admin.id}",
+            f"/api/v1/admin/users/{test_admin.id}",
             json={"role": "admin"},
         )
         assert resp.status_code == 200
@@ -275,20 +275,20 @@ class TestUpdateSelfProtection:
 class TestGetUser:
 
     async def test_get_user_as_admin(self, admin_client: AsyncClient, test_user: User):
-        resp = await admin_client.get(f"/api/v1/auth/users/{test_user.id}")
+        resp = await admin_client.get(f"/api/v1/admin/users/{test_user.id}")
         assert resp.status_code == 200
         body = resp.json()
         assert body["id"] == test_user.id
         assert body["username"] == test_user.username
 
     async def test_get_user_not_found(self, admin_client: AsyncClient):
-        resp = await admin_client.get(f"/api/v1/auth/users/nope-{uuid.uuid4().hex}")
+        resp = await admin_client.get(f"/api/v1/admin/users/nope-{uuid.uuid4().hex}")
         assert resp.status_code == 404
 
     async def test_get_user_as_regular_user_forbidden(
         self, client: AsyncClient, test_user: User
     ):
-        resp = await client.get(f"/api/v1/auth/users/{test_user.id}")
+        resp = await client.get(f"/api/v1/admin/users/{test_user.id}")
         assert resp.status_code == 403
 
 
@@ -297,7 +297,7 @@ class TestUserImpact:
     async def test_impact_zero_for_user_without_conversations(
         self, admin_client: AsyncClient, test_user: User
     ):
-        resp = await admin_client.get(f"/api/v1/auth/users/{test_user.id}/impact")
+        resp = await admin_client.get(f"/api/v1/admin/users/{test_user.id}/impact")
         assert resp.status_code == 200
         assert resp.json() == {"conversation_count": 0}
 
@@ -310,18 +310,18 @@ class TestUserImpact:
         await _seed_user_with_conversation(db_session, test_user)
         await _seed_user_with_conversation(db_session, test_user)
 
-        resp = await admin_client.get(f"/api/v1/auth/users/{test_user.id}/impact")
+        resp = await admin_client.get(f"/api/v1/admin/users/{test_user.id}/impact")
         assert resp.status_code == 200
         assert resp.json()["conversation_count"] == 2
 
     async def test_impact_user_not_found(self, admin_client: AsyncClient):
         resp = await admin_client.get(
-            f"/api/v1/auth/users/nope-{uuid.uuid4().hex}/impact"
+            f"/api/v1/admin/users/nope-{uuid.uuid4().hex}/impact"
         )
         assert resp.status_code == 404
 
     async def test_impact_as_regular_user_forbidden(
         self, client: AsyncClient, test_user: User
     ):
-        resp = await client.get(f"/api/v1/auth/users/{test_user.id}/impact")
+        resp = await client.get(f"/api/v1/admin/users/{test_user.id}/impact")
         assert resp.status_code == 403

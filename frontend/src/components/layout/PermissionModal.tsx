@@ -82,7 +82,7 @@ export default function PermissionModal() {
     >
       {/* Tool info */}
       <div className="bg-bg dark:bg-bg-dark border border-border dark:border-border-dark rounded-lg p-3 mb-4">
-        <div className="font-medium text-text-primary dark:text-text-primary-dark">
+        <div className="text-xs font-semibold font-mono text-text-primary dark:text-text-primary-dark">
           {permissionRequest.toolName}
         </div>
         {Object.keys(permissionRequest.params).length > 0 && (

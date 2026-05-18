@@ -89,7 +89,9 @@ function ProcessingFlow({ agentStepCount, isActive, defaultExpanded, hasError, t
       {expanded && (
         <div className="relative pl-6 pt-1 pb-2">
           {/* Rail aligned with the header chevron's horizontal center (chevron at px-2 = x:8-20, center 14) */}
-          <div className="absolute left-[13px] top-0 bottom-0 w-px bg-border dark:bg-border-dark" />
+          <div className="absolute left-[13px] top-0 bottom-2 w-px bg-border dark:bg-border-dark" />
+          {/* Hollow circle terminator at the bottom of the rail */}
+          <div className="absolute left-[10px] bottom-0 w-2 h-2 rounded-full border border-border dark:border-border-dark" />
           <div className="relative space-y-2">
             {children}
           </div>

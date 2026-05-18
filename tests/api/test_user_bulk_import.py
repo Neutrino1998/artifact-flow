@@ -1,7 +1,7 @@
 """
 PR3 — Bulk-import users endpoint integration tests.
 
-Covers POST /api/v1/auth/users/bulk-import:
+Covers POST /api/v1/admin/users/bulk-import:
 - Auth (anon 401, regular user 403)
 - Happy path: rows split into created / failed / skipped
 - Department auto-creation via resolve_department_path
@@ -26,7 +26,7 @@ def _csv_bytes(text: str, encoding: str = "utf-8") -> bytes:
 
 def _post_csv(client: AsyncClient, csv_bytes: bytes, filename: str = "users.csv"):
     return client.post(
-        "/api/v1/auth/users/bulk-import",
+        "/api/v1/admin/users/bulk-import",
         files={"file": (filename, csv_bytes, "text/csv")},
     )
 

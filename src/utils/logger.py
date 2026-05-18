@@ -118,7 +118,7 @@ class Logger:
     def __init__(
         self,
         name: str = "ArtifactFlow",
-        log_dir: str = "logs",
+        log_dir: str = "data/logs",
         debug: bool = False,
         console: bool = True,
         file: bool = True,

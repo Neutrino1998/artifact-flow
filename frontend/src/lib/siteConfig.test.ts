@@ -1,5 +1,5 @@
 import { describe, test, expect, vi, beforeEach, afterEach } from 'vitest';
-import { fetchNotifications, fetchWelcomeTips, dismissNotification } from './siteConfig';
+import { fetchNotifications, fetchWelcomeTips, fetchBranding, dismissNotification } from './siteConfig';
 
 /**
  * Tests for siteConfig 静态配置 fetcher。
@@ -13,6 +13,7 @@ import { fetchNotifications, fetchWelcomeTips, dismissNotification } from './sit
 
 const NOTIF_URL = '/site/notifications.json';
 const TIPS_URL = '/site/welcome_tips.json';
+const BRAND_URL = '/site/branding.json';
 
 function mockFetchJson(url: string, body: unknown, ok = true) {
   vi.stubGlobal(
@@ -240,6 +241,63 @@ describe('fetchNotifications: failure modes', () => {
 // ============================================================
 // fetchWelcomeTips
 // ============================================================
+
+// ============================================================
+// fetchBranding
+// ============================================================
+// 与 notifications 一样 fail-closed：fetch / 解析 / schema 任一出错 → null。
+// 组件拿到 null 就整个隐藏，运维删 branding.json 就能彻底关掉页脚。
+
+describe('fetchBranding', () => {
+  test('returns parsed branding on happy path', async () => {
+    mockFetchJson(BRAND_URL, { developer: 'XX 科技', contact_email: 'contact@xx.com' });
+    const result = await fetchBranding();
+    expect(result).toEqual({ developer: 'XX 科技', contact_email: 'contact@xx.com' });
+  });
+
+  test('accepts branding with only developer (contact_email optional)', async () => {
+    mockFetchJson(BRAND_URL, { developer: 'XX 科技' });
+    const result = await fetchBranding();
+    expect(result).toEqual({ developer: 'XX 科技', contact_email: undefined });
+  });
+
+  test('returns null when developer is missing', async () => {
+    mockFetchJson(BRAND_URL, { contact_email: 'a@b.com' });
+    expect(await fetchBranding()).toBeNull();
+  });
+
+  test('returns null when developer is empty string', async () => {
+    mockFetchJson(BRAND_URL, { developer: '   ' });
+    expect(await fetchBranding()).toBeNull();
+  });
+
+  test('returns null when contact_email is present but non-string', async () => {
+    mockFetchJson(BRAND_URL, { developer: 'X', contact_email: 42 });
+    expect(await fetchBranding()).toBeNull();
+  });
+
+  test('returns null when contact_email is empty string', async () => {
+    // 与 dismissible fail-closed 同款：present-but-empty 不当成「未填」，
+    // 整条丢，避免渲染出 "由 X · " 后面挂个空 mailto。
+    mockFetchJson(BRAND_URL, { developer: 'X', contact_email: '   ' });
+    expect(await fetchBranding()).toBeNull();
+  });
+
+  test('returns null when top level is not an object', async () => {
+    mockFetchJson(BRAND_URL, ['not', 'an', 'object']);
+    expect(await fetchBranding()).toBeNull();
+  });
+
+  test('returns null on 404', async () => {
+    mockFetch404();
+    expect(await fetchBranding()).toBeNull();
+  });
+
+  test('returns null on invalid JSON', async () => {
+    mockFetchRaw(BRAND_URL, 'not json {{{');
+    expect(await fetchBranding()).toBeNull();
+  });
+});
 
 describe('fetchWelcomeTips', () => {
   test('returns string array on happy path', async () => {

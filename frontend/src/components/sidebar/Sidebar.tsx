@@ -8,6 +8,8 @@ import ConversationList from './ConversationList';
 import AdminConversationList from './AdminConversationList';
 import UserMenu from './UserMenu';
 import NotificationCenter from './NotificationCenter';
+import BrandingFooter from '@/components/BrandingFooter';
+import { APP_NAME, APP_TAGLINE } from '@/lib/branding';
 
 function IconButton({
   onClick,
@@ -179,11 +181,11 @@ export default function Sidebar() {
       <div className="flex items-center justify-between px-4 py-3 border-b border-border dark:border-border-dark">
         <div className="min-w-0">
           <h1 className="text-lg font-semibold text-text-primary dark:text-text-primary-dark">
-            {inObservability ? '运行监控' : '银清Claw测试版'}
+            {inObservability ? '运行监控' : APP_NAME}
           </h1>
           {!inObservability && (
             <p className="text-xs text-text-secondary dark:text-text-secondary-dark">
-              powered by deepseek-v4-flash
+              {APP_TAGLINE}
             </p>
           )}
         </div>
@@ -272,6 +274,7 @@ export default function Sidebar() {
         <NotificationCenter />
         <UserMenu />
       </div>
+      <BrandingFooter variant="sidebar" />
     </div>
   );
 }

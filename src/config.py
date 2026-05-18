@@ -36,7 +36,43 @@ class Settings(BaseSettings):
     INVENTORY_PREVIEW_LENGTH: int = 200     # artifact 清单内容预览截断长度
     READ_ARTIFACT_MAX_CHARS: int = 50000    # read_artifact 默认字符上限（隐藏，模型不可见）
     TOOL_PERSIST_PREVIEW_LENGTH: int = 1000  # 工具结果落盘后回填给模型的预览长度
+
+    # Cancel-path Message.response placeholders.
+    # 三条 cancel 路径都要写一个非空占位 —— 前端 MessageList 用 node.response 非空
+    # gate AssistantMessage 渲染(同时也是事件流容器),空 response 整条消息+事件流
+    # 不显示。BY_USER 给 cooperative cancel(用户主动)；BY_SYSTEM 给 lease fencing /
+    # shutdown / late-cancel post-processing。Operator 视角的更细分原因走 events 表
+    # 的 reason 字段(external_cancel / external_cancel_post_processing)。
+    CANCELLED_RESPONSE_BY_USER: str = "*Task cancelled by user*"
+    CANCELLED_RESPONSE_BY_SYSTEM: str = "*Task cancelled by system*"
     SESSION_GREP_MAX_TOTAL: int = 200       # grep_artifact session 模式总命中上限（隐藏，不暴露给模型）
+
+    # update_artifact Layer 2 fuzzy match（v6 锚定 + RapidFuzz 校验；详见
+    # docs/_archive/ops/incident-2026-05-14-fix-plan.md PR-1 spec）。
+    # 所有常量隐藏，模型不可见，仅供算法实现使用。
+    ANCHOR_SHINGLE_LEN: int = 6                # shingle 切分长度（最终生效值受鸽巢约束）
+    ANCHOR_MIN_USABLE_LEN: int = 3             # 鸽巢推完的 L 低于此值则当场 bail
+    ANCHOR_MAX_OCCURRENCES: int = 20           # shingle 在 content 内最多接受的出现次数（超即视为 common）
+    MAX_UNIQUE_CENTERS: int = 50               # Step 3 去重后 center 数上限，超即 bail
+    MAX_FUZZY_WALL_CLOCK_MS: int = 500         # Step 4 verify 总 wall-clock 上限，超即 bail
+    FUZZY_MAX_L_DIST: int = 16                 # 校验编辑距离绝对上限
+    FUZZY_MAX_RATIO: float = 0.10              # 校验编辑距离比例上限（取 min）
+    MAX_FUZZY_OLD_STR_LEN: int = 10000         # Layer 2 input 长度硬上界（超即 bail_budget；
+                                               # 算法侧 m≈400K 后 Step 1-3 Python 开销本身就超 deadline，
+                                               # 取 10K 留 ~20× headroom 同时反映 update_artifact 设计意图）
+
+    # Observability 常量(隐藏,不暴露 API)。
+    # jsonl 路径必须在持久卷 /app/data 子目录,容器重启 / autoheal 不丢。
+    LOOP_LAG_WARN_MS: int = 500                # watchdog 软退化阈值,超即写一行 loop-lag.jsonl + task 栈
+    WATCHDOG_DEADMAN_TIMEOUT_MS: int = 10000   # faulthandler deadman switch 超时(heartbeat 不来即 dump 全栈)
+    OBS_SAMPLE_INTERVAL_SEC: int = 30          # sampler 周期(loop_lag / RSS / DB pool / Redis 等)
+    OBS_LONG_TASK_AGE_SEC: int = 60            # 长时间运行任务门槛(超此值进 /admin/runtime 的 tasks_long_running)
+    OBS_METRICS_LOG_PATH: str = "data/observability/metrics.jsonl"
+    OBS_LOOP_LAG_LOG_PATH: str = "data/observability/loop-lag.jsonl"
+    OBS_JSONL_MAX_MB: int = 50                 # obs jsonl 单文件大小上限,超即 rotate
+    OBS_JSONL_BACKUP_COUNT: int = 10           # obs jsonl 保留备份数(.1 ~ .N);默认覆盖 ~800 天
+    OBS_MEM_LIMIT_MB: int = 0                  # RSS 高水位告警上界(MB),0=自动:env > cgroup v2 > cgroup v1 > 不告警。
+                                               # 显式设置等于 docker-compose `mem_limit: 2g` 的镜像(避免重复 source-of-truth)
 
     # Redis（空 = InMemory fallback，非空 = Redis）
     REDIS_URL: str = ""

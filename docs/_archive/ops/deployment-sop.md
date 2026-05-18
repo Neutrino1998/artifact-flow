@@ -159,6 +159,44 @@ AF_VERSION=1.0.0 docker compose -f deploy/docker-compose.intranet.yml --profile 
 docker compose -f deploy/docker-compose.intranet.yml exec backend python scripts/create_admin.py admin --password <your-password>
 ```
 
+### 取证就绪（PR-forensics-bundle）
+
+本 bundle 交付两件取证素材：
+
+1. **backend 镜像内置 `py-spy`** + compose `cap_add: [SYS_PTRACE]` —— 事故时
+   `docker compose -f deploy/docker-compose.intranet.yml exec backend py-spy dump --pid 1`
+   直接采样 Python 栈，作为 PR-obs-lite faulthandler deadman 失效时的备份。
+2. **`pandas` + `numpy` 离线 wheels** （`artifactflow-analyst-tools-*.tar.gz`） ——
+   给 analyst 机器跑 `scripts/observability_report.py` 用，跟 backend 部署解耦。
+
+**约束**：构建机有网下载（一次），目标机器全程离线 —— 不允许在内网机器上
+`pip install <pkgname>` 或 `curl github`。
+
+**首次部署流程**（"3. 配置"之后、"4. 启动"之前）：
+
+```bash
+# 3.5 (仅当 release 时带了 --with-analyst-tools)
+#     analyst-tools 解压 + pandas/numpy 装到 analyst Python 环境
+tar xzf artifactflow-analyst-tools-*.tar.gz    # → ./analyst-tools/{wheels,README.md,wheels.lock.txt}
+pip install --no-index --find-links analyst-tools/wheels pandas
+python -c 'import pandas; print(pandas.__version__)'
+
+# 3.6 Preflight: 两个检查 ——
+#   ① analyst-tools wheels 离线 resolve（不在则 ℹ 跳过）
+#   ② 容器内 py-spy --version（启动前 ℹ 跳过，up 后再跑一次）
+./deploy/scripts/preflight.sh
+# 预期：两项 ✓ 或 ℹ；任一 ✗ 阻塞部署
+```
+
+**Roll-update 时**：analyst-tools tar 的 slug 编码 pandas/numpy/python 三个 pin
+版本，同 slug 且 `analyst-tools/wheels.lock.txt` diff 干净就不用重传。
+`scripts/release.sh` 默认不打 analyst tar，roll-update 体积只有几十 KB。
+
+**事故现场深挖**（host 侧 `gdb` / `strace` / `procps` / `iostat` 等）跟本 bundle
+解耦，由云托管运维确认 —— 见
+`docs/_archive/ops/cloud-service-checklist.md` 第四段。同段也涵盖 Yama
+`ptrace_scope` 政策（mode 3 会让备份路径失效，但主路径 faulthandler 仍可用）。
+
 ---
 
 ## 运维参考

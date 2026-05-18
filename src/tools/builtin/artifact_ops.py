@@ -1,22 +1,22 @@
-"""Artifact 操作工具和管理器（ArtifactManager + write-back cache）"""
+"""Artifact 操作工具和管理器（ArtifactManager + write-back cache）。
+
+本文件原是 artifact 工具集大杂烩；按 "一文件一工具" 拆分进度：
+- ``grep_artifact`` → ``tools/builtin/grep_artifact.py``
+- ``update_artifact`` + Layer 0/1/2 匹配算法 → ``tools/builtin/update_artifact.py``
+- ``create_artifact`` / ``read_artifact`` / ``rewrite_artifact`` 暂留此处
+"""
 
 import math
 import secrets
 from typing import Dict, Any, Optional, List, Tuple
 from datetime import datetime, timezone
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 import re
-import unicodedata
-from fuzzysearch import find_near_matches
 
 from sqlalchemy.exc import IntegrityError
 
 from config import config
-from tools.artifact_envelope import (
-    ArtifactSlice,
-    render_artifact_slice,
-    make_preview_slice,
-)
+from tools.artifact_envelope import ArtifactSlice, render_artifact_slice
 from tools.base import BaseTool, ToolResult, ToolParameter, ToolPermission
 from repositories.artifact_repo import ArtifactRepository
 from repositories.base import NotFoundError, DuplicateError
@@ -24,14 +24,6 @@ from utils.logger import get_logger
 from utils.text_slicing import count_lines, slice_lines_by_offset_limit
 
 logger = get_logger("ArtifactFlow")
-
-
-def _truncate_middle(text: str, max_len: int = 200) -> str:
-    """Truncate long text keeping head and tail with '...' in between."""
-    if len(text) <= max_len:
-        return text
-    half = (max_len - 5) // 2  # 5 chars for "\n...\n"
-    return text[:half] + "\n...\n" + text[-half:]
 
 
 # Artifact ID 合法字符集：letter/digit/underscore + hyphen + dot，1-64 字符。
@@ -61,194 +53,6 @@ def _normalize_filename_to_id(filename: str, max_base_len: int = 56) -> str:
     return base[:max_base_len]
 
 
-# CJK Unicode ranges for normalization
-_CJK_RE = (
-    r'[\u2e80-\u2fdf'   # CJK Radicals
-    r'\u3000-\u303f'     # CJK Symbols & Punctuation
-    r'\u3040-\u309f'     # Hiragana
-    r'\u30a0-\u30ff'     # Katakana
-    r'\u3400-\u4dbf'     # CJK Unified Ext A
-    r'\u4e00-\u9fff'     # CJK Unified
-    r'\uf900-\ufaff'     # CJK Compat Ideographs
-    r'\ufe30-\ufe4f'     # CJK Compat Forms
-    r'\uff00-\uffef'     # Halfwidth/Fullwidth Forms
-    r'\U00020000-\U0002a6df'  # CJK Unified Ext B
-    r']'
-)
-# Space(s) between CJK and Latin/digit, or vice versa
-_CJK_LATIN_SPACE = re.compile(
-    rf'({_CJK_RE})\s+([A-Za-z0-9])|([A-Za-z0-9])\s+({_CJK_RE})'
-)
-
-
-# Smart quotes → ASCII
-_SMART_QUOTES = str.maketrans({
-    '\u2018': "'",   # '
-    '\u2019': "'",   # '
-    '\u201a': "'",   # ‚
-    '\u201c': '"',   # "
-    '\u201d': '"',   # "
-    '\u201e': '"',   # „
-    '\u2039': "'",   # ‹
-    '\u203a': "'",   # ›
-    '\u00ab': '"',   # «
-    '\u00bb': '"',   # »
-})
-
-# Unicode dashes → ASCII hyphen
-_UNICODE_DASHES = str.maketrans({
-    '\u2012': '-',   # figure dash
-    '\u2013': '-',   # en dash –
-    '\u2014': '-',   # em dash —
-    '\u2015': '-',   # horizontal bar ―
-    '\u2212': '-',   # minus sign −
-    '\ufe58': '-',   # small em dash ﹘
-    '\ufe63': '-',   # small hyphen-minus ﹣
-    '\uff0d': '-',   # fullwidth hyphen-minus －
-})
-
-# Special whitespace → regular space
-_SPECIAL_SPACES = str.maketrans({
-    '\u00a0': ' ',   # non-breaking space
-    '\u2000': ' ',   # en quad
-    '\u2001': ' ',   # em quad
-    '\u2002': ' ',   # en space
-    '\u2003': ' ',   # em space
-    '\u2004': ' ',   # three-per-em space
-    '\u2005': ' ',   # four-per-em space
-    '\u2006': ' ',   # six-per-em space
-    '\u2007': ' ',   # figure space
-    '\u2008': ' ',   # punctuation space
-    '\u2009': ' ',   # thin space
-    '\u200a': ' ',   # hair space
-    '\u202f': ' ',   # narrow no-break space
-    '\u205f': ' ',   # medium mathematical space
-    '\u3000': ' ',   # ideographic space
-})
-
-
-# Merged 1-to-1 translation table
-_ALL_CHAR_TRANSLATES = {**_SMART_QUOTES, **_UNICODE_DASHES, **_SPECIAL_SPACES}
-
-
-# Type alias: each normalized char maps to [start, end) in the original text
-Span = Tuple[int, int]
-
-
-def _nfkc_span_map(pre: str, post: str) -> list[Span]:
-    """Build span map for whole-string NFKC: post[i] came from pre[span].
-
-    Uses NFKD as a bridge: NFKD(pre) ≡ NFKD(post), so per-char NFKD
-    on each side gives a shared decomposition we can zip through.
-
-    Returns list of (orig_start, orig_end) spans, one per post char.
-    """
-    # Left: per-char NFKD of pre → each decomposed char knows its pre index
-    left_origins: list[int] = []
-    for idx, ch in enumerate(pre):
-        for _ in unicodedata.normalize('NFKD', ch):
-            left_origins.append(idx)
-
-    # Right: per-char NFKD of post → each decomposed char knows its post index
-    right_origins: list[int] = []
-    for idx, ch in enumerate(post):
-        for _ in unicodedata.normalize('NFKD', ch):
-            right_origins.append(idx)
-
-    # Zip through shared decomposition to find min/max original index per post char
-    span_min: dict[int, int] = {}
-    span_max: dict[int, int] = {}
-    for decomp_pos in range(len(left_origins)):
-        post_idx = right_origins[decomp_pos]
-        orig_idx = left_origins[decomp_pos]
-        if post_idx not in span_min:
-            span_min[post_idx] = orig_idx
-            span_max[post_idx] = orig_idx
-        else:
-            span_min[post_idx] = min(span_min[post_idx], orig_idx)
-            span_max[post_idx] = max(span_max[post_idx], orig_idx)
-
-    return [(span_min[i], span_max[i] + 1) for i in range(len(post))]
-
-
-def _normalize_for_match(text: str) -> tuple[str, list[Span]]:
-    """Normalize text and build a span map back to the original.
-
-    Each normalized character maps to a [start, end) span in the
-    **original** text. This handles all length-changing transforms
-    uniformly: expansions (Ⅳ→IV), contractions (가→가), and
-    deletions (rstrip, CJK-Latin space collapse).
-
-    Transforms (in order):
-    1. Smart quotes, Unicode dashes, special spaces → ASCII (1-to-1)
-    2. Whole-string NFKC (may expand or contract)
-    3. Strip trailing whitespace per line
-    4. Collapse spaces at CJK-Latin/digit boundaries
-
-    Returns:
-        (normalized_text, span_map) where span_map[i] = (start, end)
-        in the **original** text for normalized char i.
-    """
-    # Phase 1: 1-to-1 char translates (preserves length)
-    translated = text.translate(_ALL_CHAR_TRANSLATES)
-
-    # Phase 2: whole-string NFKC + NFKD-bridge span alignment
-    nfkc_text = unicodedata.normalize('NFKC', translated)
-    spans = _nfkc_span_map(translated, nfkc_text)
-    # spans[i] = (start, end) in `translated` = in original `text`
-
-    # Phase 3: rstrip per line (drop trailing spaces, keep spans of survivors)
-    chars = list(nfkc_text)
-    stripped_chars: list[str] = []
-    stripped_spans: list[Span] = []
-    line_chars: list[str] = []
-    line_spans: list[Span] = []
-
-    for c, s in zip(chars, spans):
-        if c == '\n':
-            while line_chars and line_chars[-1] == ' ':
-                line_chars.pop()
-                line_spans.pop()
-            stripped_chars.extend(line_chars)
-            stripped_spans.extend(line_spans)
-            stripped_chars.append(c)
-            stripped_spans.append(s)
-            line_chars.clear()
-            line_spans.clear()
-        else:
-            line_chars.append(c)
-            line_spans.append(s)
-
-    while line_chars and line_chars[-1] == ' ':
-        line_chars.pop()
-        line_spans.pop()
-    stripped_chars.extend(line_chars)
-    stripped_spans.extend(line_spans)
-
-    # Phase 4: collapse CJK-Latin boundary spaces
-    result: list[str] = []
-    result_spans: list[Span] = []
-    i = 0
-    while i < len(stripped_chars):
-        if stripped_chars[i] == ' ' and result and i + 1 < len(stripped_chars):
-            j = i
-            while j < len(stripped_chars) and stripped_chars[j] == ' ':
-                j += 1
-            if j < len(stripped_chars):
-                prev_is_cjk = bool(re.match(_CJK_RE, result[-1]))
-                next_is_cjk = bool(re.match(_CJK_RE, stripped_chars[j]))
-                prev_is_latin = bool(re.match(r'[A-Za-z0-9]', result[-1]))
-                next_is_latin = bool(re.match(r'[A-Za-z0-9]', stripped_chars[j]))
-
-                if (prev_is_cjk and next_is_latin) or (prev_is_latin and next_is_cjk):
-                    i = j
-                    continue
-
-        result.append(stripped_chars[i])
-        result_spans.append(stripped_spans[i])
-        i += 1
-
-    return ''.join(result), result_spans
 
 
 # ============================================================
@@ -293,123 +97,6 @@ class ArtifactMemory:
         self.created_at = created_at or datetime.now()
         self.updated_at = datetime.now()
         self.source = source
-
-    def compute_update(
-        self,
-        old_str: str,
-        new_str: str,
-        max_diff_ratio: float = 0.3
-    ) -> Tuple[bool, str, Optional[str], Optional[Dict]]:
-        """
-        计算更新结果（分层匹配策略）
-
-        Layer 0: 精确匹配
-        Layer 1: CJK-Latin 空格归一化 + 精确匹配
-        Layer 2: fuzzysearch 近似子串搜索（兜底）
-
-        Args:
-            old_str: 要替换的原文本
-            new_str: 新文本
-            max_diff_ratio: 最大允许的差异率（用于 Layer 2）
-
-        Returns:
-            (成功与否, 消息, 新内容, 匹配详情字典)
-        """
-        # Layer 0: 精确匹配
-        if old_str in self.content:
-            count = self.content.count(old_str)
-
-            if count > 1:
-                return False, f"Text '{old_str[:50]}...' appears {count} times (must be unique)", None, None
-
-            new_content = self.content.replace(old_str, new_str, 1)
-
-            return True, "exact match", new_content, {
-                "match_type": "exact",
-                "similarity": 1.0,
-                "changes": [(old_str, new_str)]
-            }
-
-        # Layer 1: 归一化 + 精确匹配
-        logger.debug("Exact match failed, trying normalized match...")
-
-        norm_old, _ = _normalize_for_match(old_str)
-        norm_content, content_span_map = _normalize_for_match(self.content)
-
-        if norm_old in norm_content:
-            count = norm_content.count(norm_old)
-            if count > 1:
-                return False, f"Text '{old_str[:50]}...' appears {count} times after normalization (must be unique)", None, None
-
-            norm_start = norm_content.index(norm_old)
-            norm_end = norm_start + len(norm_old)
-
-            # Span-based boundary safety: reject if match starts or ends
-            # inside a normalization group (chars sharing the same span).
-            if norm_start > 0 and content_span_map[norm_start] == content_span_map[norm_start - 1]:
-                logger.debug("Normalized match starts inside a normalization group, falling through to Layer 2")
-            elif norm_end < len(content_span_map) and content_span_map[norm_end] == content_span_map[norm_end - 1]:
-                logger.debug("Normalized match ends inside a normalization group, falling through to Layer 2")
-            else:
-                orig_start = content_span_map[norm_start][0]
-                orig_end = content_span_map[norm_end - 1][1]
-
-                matched_text = self.content[orig_start:orig_end]
-                new_content = self.content[:orig_start] + new_str + self.content[orig_end:]
-
-                similarity = 1.0 - (abs(len(matched_text) - len(old_str)) / max(len(matched_text), len(old_str)))
-                logger.info(
-                    f"Normalized match succeeded (similarity: {similarity:.1%})\n"
-                    f"Expected: {old_str[:100]}...\n"
-                    f"Actual:   {matched_text[:100]}..."
-                )
-
-                return True, f"normalized match {similarity:.1%}", new_content, {
-                    "match_type": "normalized",
-                    "similarity": similarity,
-                    "expected_text": old_str,
-                    "matched_text": matched_text,
-                    "changes": [(matched_text, new_str)]
-                }
-
-        # Layer 2: fuzzysearch 近似子串搜索
-        logger.debug("Normalized match failed, trying fuzzysearch...")
-
-        max_l_dist = max(5, int(len(old_str) * max_diff_ratio))
-        matches = find_near_matches(old_str, self.content, max_l_dist=max_l_dist)
-
-        if not matches:
-            return False, f"Failed to find matching text '{old_str[:50]}...'", None, None
-
-        if len(matches) > 1:
-            # Pick the best (lowest distance); reject if ambiguous (same distance)
-            matches.sort(key=lambda m: m.dist)
-            if matches[0].dist == matches[1].dist:
-                return False, f"Text '{old_str[:50]}...' has {len(matches)} ambiguous fuzzy matches", None, None
-
-        best = matches[0]
-        matched_text = self.content[best.start:best.end]
-        levenshtein_distance = best.dist
-
-        if levenshtein_distance > len(old_str) * max_diff_ratio:
-            return False, f"Best match difference is too large (edit distance: {levenshtein_distance})", None, None
-
-        new_content = self.content[:best.start] + new_str + self.content[best.end:]
-
-        similarity = 1.0 - (levenshtein_distance / len(old_str))
-        logger.info(
-            f"Fuzzy match succeeded (similarity: {similarity:.1%})\n"
-            f"Expected: {old_str[:100]}...\n"
-            f"Actual:   {matched_text[:100]}..."
-        )
-
-        return True, f"fuzzy match {similarity:.1%}", new_content, {
-            "match_type": "fuzzy",
-            "similarity": similarity,
-            "expected_text": old_str,
-            "matched_text": matched_text,
-            "changes": [(matched_text, new_str)]
-        }
 
 
 # ============================================================
@@ -732,25 +419,54 @@ class ArtifactManager:
         old_str: str,
         new_str: str
     ) -> Tuple[bool, str, Optional[Dict]]:
-        """更新 Artifact 内容（只改内存，标记 dirty）"""
+        """更新 Artifact 内容（只改内存，标记 dirty）。
+
+        third-tuple semantics:
+        * on success → dict with ``match_type`` / ``similarity`` / ...
+          (plus ``fuzzy_stats`` when Layer 2 ran)
+        * on failure → ``None`` for "not found", or
+          ``{"fuzzy_stats": ...}`` when Layer 2 bailed (so the tool
+          layer can surface observability via ``ToolResult.metadata``)
+        """
+        # 局部 import 避免与 update_artifact.py 的 ArtifactManager 类型引用形成循环。
+        from tools.builtin.update_artifact import compute_update
+
         memory = await self.get_artifact(session_id, artifact_id)
         if not memory:
             return False, f"Artifact '{artifact_id}' not found", None
 
-        success, msg, new_content, match_info = memory.compute_update(old_str, new_str)
+        info = compute_update(memory.content, old_str, new_str)
 
-        if not success:
-            return False, msg, None
+        if not info.success:
+            failure_meta = (
+                {"fuzzy_stats": info.fuzzy_stats} if info.fuzzy_stats else None
+            )
+            return False, info.message, failure_meta
 
-        # 只改内存
-        memory.content = new_content
+        memory.content = info.new_content
         memory.current_version += 1
         memory.updated_at = datetime.now()
         memory.source = "agent"
 
         self._dirty[(session_id, artifact_id)] = None
 
-        return True, f"Successfully updated artifact '{artifact_id}' (v{memory.current_version})", match_info
+        match_info: Dict[str, Any] = {
+            "match_type": info.match_type,
+            "similarity": info.similarity,
+            "changes": info.changes,
+        }
+        if info.expected_text is not None:
+            match_info["expected_text"] = info.expected_text
+        if info.matched_text is not None:
+            match_info["matched_text"] = info.matched_text
+        if info.fuzzy_stats is not None:
+            match_info["fuzzy_stats"] = info.fuzzy_stats
+
+        return (
+            True,
+            f"Successfully updated artifact '{artifact_id}' (v{memory.current_version})",
+            match_info,
+        )
 
     async def rewrite_artifact(
         self,
@@ -1068,106 +784,6 @@ class CreateArtifactTool(BaseTool):
         return ToolResult(success=False, error=message)
 
 
-class UpdateArtifactTool(BaseTool):
-    """
-    更新 Artifact 工具
-    通过指定 old_str 和 new_str 来更新内容（支持模糊匹配）
-    """
-
-    def __init__(self, manager: Optional[ArtifactManager] = None):
-        super().__init__(
-            name="update_artifact",
-            description="Update artifact content by replacing old text with new text (supports fuzzy matching). Use for targeted changes.",
-            permission=ToolPermission.AUTO
-        )
-        self._manager = manager
-
-    def set_manager(self, manager: ArtifactManager) -> None:
-        """设置 ArtifactManager（依赖注入）"""
-        self._manager = manager
-
-    def get_parameters(self) -> List[ToolParameter]:
-        return [
-            ToolParameter(
-                name="id",
-                type="string",
-                description="Artifact ID to update",
-                required=True
-            ),
-            ToolParameter(
-                name="old_str",
-                type="string",
-                description="Text to be replaced",
-                required=True
-            ),
-            ToolParameter(
-                name="new_str",
-                type="string",
-                description="New text to replace with",
-                required=True
-            )
-        ]
-
-    async def execute(self, **params) -> ToolResult:
-        if not self._manager:
-            return ToolResult(success=False, error="ArtifactManager not configured")
-
-        session_id = self._manager.current_session_id
-        if not session_id:
-            return ToolResult(success=False, error="No active session")
-
-        success, message, match_info = await self._manager.update_artifact(
-            session_id=session_id,
-            artifact_id=params["id"],
-            old_str=params["old_str"],
-            new_str=params["new_str"]
-        )
-
-        if success:
-            logger.info(message)
-
-            memory = await self._manager.get_artifact(session_id, params["id"])
-            version = memory.current_version if memory else None
-
-            if match_info and match_info.get("match_type") == "fuzzy":
-                similarity = f"{match_info['similarity']:.1%}"
-                expected = _truncate_middle(match_info["expected_text"], 200)
-                matched = _truncate_middle(match_info["matched_text"], 200)
-                xml = (
-                    f'<artifact version="{version}" fuzzy="{similarity}">'
-                    f"\n  <id>{params['id']}</id>"
-                    f"\n  {message}"
-                    f"\n  <fuzzy_detail>"
-                    f"\n    <expected>{expected}</expected>"
-                    f"\n    <matched>{matched}</matched>"
-                    f"\n  </fuzzy_detail>"
-                    f"\n</artifact>"
-                )
-            else:
-                xml = f'<artifact version="{version}"><id>{params["id"]}</id> {message}</artifact>'
-
-            metadata = match_info or {}
-            return ToolResult(success=True, data=xml, metadata=metadata)
-
-        return ToolResult(success=False, error=message)
-
-    def to_xml_example(self) -> str:
-        """生成 XML 调用示例（使用CDATA）"""
-        return """<tool_call>
-  <name>update_artifact</name>
-  <params>
-    <id><![CDATA[task_plan]]></id>
-    <old_str><![CDATA[1. [✗] Research topic X
-   - Status: pending
-   - Assigned: research_agent
-   - Notes: N/A]]></old_str>
-    <new_str><![CDATA[1. [✓] Research topic X
-   - Status: completed
-   - Assigned: research_agent
-   - Notes: See artifact research_topic_x]]></new_str>
-  </params>
-</tool_call>"""
-
 
 class RewriteArtifactTool(BaseTool):
     """重写 Artifact 工具（完全替换内容）"""
@@ -1358,17 +974,13 @@ class ReadArtifactTool(BaseTool):
 # ============================================================
 
 def create_artifact_tools(manager: ArtifactManager) -> List[BaseTool]:
-    """
-    创建所有 Artifact 工具（工厂函数）
+    """创建所有 Artifact 工具（工厂函数）。
 
-    Args:
-        manager: ArtifactManager 实例
-
-    Returns:
-        工具列表
+    GrepArtifactTool / UpdateArtifactTool 局部 import 以避免与各自模块
+    对 ``ArtifactManager`` 的类型引用形成包级循环。
     """
-    # 局部 import 避免与 grep_artifact.py 的 ArtifactManager 类型引用形成循环
     from tools.builtin.grep_artifact import GrepArtifactTool
+    from tools.builtin.update_artifact import UpdateArtifactTool
 
     return [
         CreateArtifactTool(manager),

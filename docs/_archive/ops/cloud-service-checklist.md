@@ -59,3 +59,36 @@
 7. **Redis 和 TDSQL 单中心的最大连接数和内存上限？**
    我们用连接池 + Redis Stream 缓冲事件数据，需要确认上限。
    参考值：连接池 maxTotal ≈ CPU 核数 × 2 + 冗余系数(3-5)，文档建议 50
+
+---
+
+## 四、宿主机深挖工具（事故复盘补，PR-forensics-bundle）
+
+> **背景**：2026-05-14 事件循环卡死事故时，内网现场缺取证工具，临时排查走了一大圈。复盘后我们把取证能力**分三层**铺好,目前已**完全脱离云托管协调**前两层:
+>
+> | 层 | 工具 | 装哪 | 何时用 |
+> |---|---|---|---|
+> | **主路径** | `faulthandler` deadman dump | backend 进程自己(PR-obs-lite 已内置) | 硬 wedge → `docker compose ... logs backend` 看自动 dump 的 Python 栈 |
+> | **备份路径** | `py-spy` | backend **镜像里**(Dockerfile builder stage)+ compose `cap_add: [SYS_PTRACE]` | deadman 失效 / 想看采样分布 → `docker compose ... exec backend py-spy dump --pid 1` |
+> | **深挖路径** | `gdb` / `strace` / `procps` (`ps`/`top`) | 宿主机 yum/apt 装 | syscall 序列 / coredump 分析 / 全机器视图 |
+>
+> 前两层零云托管依赖(镜像 + 容器级 cap 自洽);第三层依赖宿主机标准工具,**本段就是跟云托管方对齐这一层的预装/安装路径**。
+
+1. 🌟 **宿主机镜像是否预装 `gdb`、`strace`、`procps`(`ps`/`top`)？**
+   - 第三层深挖工具,事故复盘里实际用到的就是这套(参考 incident-2026-05-14 第 33-41 行)
+   - 若未预装,确认我们能否在不联网情况下走云托管方提供的内部 yum/apt 源安装
+   - 若云托管方也不允许装,**前两层仍然就绪**(faulthandler dump 在容器内自洽,py-spy 在容器里),只是第三层 syscall/coredump 级别的深挖能力缺失,事故时复杂场景排查会更费劲
+
+2. **是否允许 `gcore <pid>` 抓 coredump？**(可选,真出现需要看进程内存才用)
+   - 内部也是 ptrace —— 但目标是**宿主机层**对容器内 PID,不是容器内 attach 自家进程
+   - 需要宿主机 `CAP_SYS_PTRACE` 或 `ptrace_scope=0`
+   - **前两层不依赖** —— Python 栈已经能 dump,coredump 是 C 扩展异常 / 二进制层 bug 进一步深挖
+   - coredump 文件可指定落到我们持久卷下 (`/app/data/`),不污染宿主机;dump 含进程地址空间,仅事故现场用,事后人工清理
+
+3. **宿主机 Yama `kernel.yama.ptrace_scope` 设的是几？**
+   - `0/1/2`(常见):容器内 `CAP_SYS_PTRACE` 自动 bypass,备份路径 `docker compose ... exec backend py-spy ...` 正常
+   - `3`(host-wide 禁 ptrace,极少):**备份路径失效** —— py-spy 二进制装了但 attach 不上。**主路径 faulthandler 不受影响**(进程内 SIGSEGV handler,跟 ptrace 无关)。事故时如果备份路径不可用,优先靠 docker logs 拿 faulthandler dump,实在不够再协调云托管临时把 mode 调到 1
+   - 这条 preflight 不查 —— 是云托管政策,事前对齐即可
+
+> 事故现场 SOP 优先级:① `docker compose ... logs backend` 看 faulthandler dump → ② `docker compose ... exec backend py-spy dump --pid 1` 看采样栈 → ③ `tail data/observability/loop-lag.jsonl` 看软退化事件 + `GET /admin/runtime` 看在飞任务 → ④ 都不够时上宿主机 strace / gdb 深挖(`docker compose ...` 在生产/内网部署里实际是 `docker compose -f docker-compose.prod.yml ...` 或 `docker compose -f deploy/docker-compose.intranet.yml ...`,Mode 1 也可直接 `docker exec artifactflow-backend ...`)
+> 部署侧 SOP 详见 `deployment-sop.md` → "取证就绪"小节;preflight 校验脚本: `deploy/scripts/preflight.sh`

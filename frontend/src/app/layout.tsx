@@ -1,11 +1,12 @@
 import type { Metadata } from 'next';
 import './globals.css';
 import ThemeInitializer from '@/components/ThemeInitializer';
+import { APP_NAME } from '@/lib/branding';
 
 const themeScript = `(function(){var t=localStorage.getItem('theme');var d=t==='dark'||(t!=='light'&&window.matchMedia('(prefers-color-scheme:dark)').matches);if(d)document.documentElement.classList.add('dark')})()`;
 
 export const metadata: Metadata = {
-  title: '银清Claw测试版',
+  title: APP_NAME,
   description: 'powered by deepseek-v4-flash',
 };
 

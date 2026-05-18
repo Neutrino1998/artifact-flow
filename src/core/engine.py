@@ -390,11 +390,20 @@ async def execute_loop(
         input_tokens = normalized_usage["input_tokens"]
         output_tokens = normalized_usage["output_tokens"]
 
-        # Log reasoning before content — reasoning happens first semantically
+        # Log reasoning before content — reasoning happens first semantically。
+        # 截断必报原始长度,避免日志里分不出完整短消息和被切掉的长消息。
         if reasoning_content:
-            logger.debug(f"[{agent_name}] Reasoning:\n{reasoning_content[:500]}")
+            _r_len = len(reasoning_content)
+            _r_marker = "" if _r_len <= 500 else f" (truncated, {_r_len} chars total)"
+            logger.debug(f"[{agent_name}] Reasoning{_r_marker}:\n{reasoning_content[:500]}")
 
-        logger.debug(f"[{agent_name}] LLM Response (input: {input_tokens}, output: {output_tokens}):\n{response_content[:500]}")
+        _resp_len = len(response_content)
+        _resp_marker = "" if _resp_len <= 500 else f", truncated; {_resp_len} chars total"
+        logger.debug(
+            f"[{agent_name}] LLM Response "
+            f"(input: {input_tokens}, output: {output_tokens}{_resp_marker}):\n"
+            f"{response_content[:500]}"
+        )
 
         return response_content, reasoning_content, normalized_usage
 

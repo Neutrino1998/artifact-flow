@@ -210,7 +210,9 @@ class WebFetchTool(BaseTool):
                                 title = title_match.group(1).strip()
 
                             source_type = self._detect_content_type(url)
-                            logger.debug(f"Jina fetched {url}: {len(content)} chars")
+                            # 提到 INFO 与"工具完成/外部调用结果"一致,事故诊断必需。
+                            # 大体积内容不打,只打来源/尺寸(对齐日志分级原则)。
+                            logger.info(f"Jina fetched {url}: {len(content)} chars")
 
                             return {
                                 "success": True,
@@ -276,7 +278,8 @@ class WebFetchTool(BaseTool):
             # BeautifulSoup 解析是 CPU bound（大页面可达数百 ms），丢线程池避免卡 event loop
             title, content = await asyncio.to_thread(_parse_html_with_bs4, raw)
 
-            logger.debug(f"BS4 fetched {url}: {len(content)} chars")
+            # 提到 INFO,与 Jina 路径对称(都是外部调用结果)。
+            logger.info(f"BS4 fetched {url}: {len(content)} chars")
 
             return {
                 "success": True,

@@ -17,6 +17,17 @@ WORKDIR /build
 COPY requirements.txt .
 RUN pip install --user --no-warn-script-location -r requirements.txt
 
+# py-spy: in-container backup attach path for incident forensics. Kept out
+# of requirements.txt because it's not a runtime dep — the main process
+# never imports it; it's invoked via `docker exec backend py-spy ...` when
+# PR-obs-lite's faulthandler deadman dump isn't enough. ~6MB; rides the
+# existing `COPY --from=builder /root/.local` path into the runtime image.
+# Requires `cap_add: [SYS_PTRACE]` on the backend service to actually
+# attach in-container — see deploy/docker-compose.intranet.yml.
+# Version pin must match what release.sh ships in the analyst-tools tar
+# (pandas+numpy wheels), to avoid ABI surprises across the same release.
+RUN pip install --user --no-warn-script-location py-spy==0.4.1
+
 # --- Stage 2: runtime ---
 FROM python:3.11-slim
 

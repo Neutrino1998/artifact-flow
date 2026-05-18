@@ -49,7 +49,7 @@ class TestLogin:
     ):
         # Deactivate via admin
         resp = await admin_client.put(
-            f"/api/v1/auth/users/{test_user.id}",
+            f"/api/v1/admin/users/{test_user.id}",
             json={"is_active": False},
         )
         assert resp.status_code == 200
@@ -87,7 +87,7 @@ class TestAdminCRUD:
 
     async def test_create_user_as_admin(self, admin_client: AsyncClient):
         resp = await admin_client.post(
-            "/api/v1/auth/users",
+            "/api/v1/admin/users",
             json={
                 "username": f"newuser-{uuid.uuid4().hex[:8]}",
                 "password": "newpass1234",
@@ -103,7 +103,7 @@ class TestAdminCRUD:
         self, admin_client: AsyncClient, test_user: User
     ):
         resp = await admin_client.post(
-            "/api/v1/auth/users",
+            "/api/v1/admin/users",
             json={
                 "username": test_user.username,
                 "password": "somepass1234",
@@ -114,7 +114,7 @@ class TestAdminCRUD:
 
     async def test_create_user_as_regular_user(self, client: AsyncClient):
         resp = await client.post(
-            "/api/v1/auth/users",
+            "/api/v1/admin/users",
             json={
                 "username": "shouldfail",
                 "password": "pass1234",
@@ -125,7 +125,7 @@ class TestAdminCRUD:
 
     async def test_create_user_unauthenticated(self, anon_client: AsyncClient):
         resp = await anon_client.post(
-            "/api/v1/auth/users",
+            "/api/v1/admin/users",
             json={
                 "username": "shouldfail",
                 "password": "pass1234",
@@ -136,7 +136,7 @@ class TestAdminCRUD:
 
     async def test_create_user_invalid_role(self, admin_client: AsyncClient):
         resp = await admin_client.post(
-            "/api/v1/auth/users",
+            "/api/v1/admin/users",
             json={
                 "username": f"badrole-{uuid.uuid4().hex[:8]}",
                 "password": "pass1234",
@@ -148,7 +148,7 @@ class TestAdminCRUD:
     async def test_list_users_as_admin(
         self, admin_client: AsyncClient, test_user: User, test_admin: User
     ):
-        resp = await admin_client.get("/api/v1/auth/users")
+        resp = await admin_client.get("/api/v1/admin/users")
         assert resp.status_code == 200
         body = resp.json()
         assert body["total"] >= 2
@@ -157,11 +157,11 @@ class TestAdminCRUD:
     async def test_list_users_pagination(
         self, admin_client: AsyncClient, test_user: User, test_admin: User
     ):
-        resp0 = await admin_client.get("/api/v1/auth/users?limit=1&offset=0")
+        resp0 = await admin_client.get("/api/v1/admin/users?limit=1&offset=0")
         assert resp0.status_code == 200
         assert len(resp0.json()["users"]) == 1
 
-        resp1 = await admin_client.get("/api/v1/auth/users?limit=1&offset=1")
+        resp1 = await admin_client.get("/api/v1/admin/users?limit=1&offset=1")
         assert resp1.status_code == 200
         assert len(resp1.json()["users"]) == 1
 
@@ -169,14 +169,14 @@ class TestAdminCRUD:
         assert resp0.json()["users"][0]["id"] != resp1.json()["users"][0]["id"]
 
     async def test_list_users_as_regular_user(self, client: AsyncClient):
-        resp = await client.get("/api/v1/auth/users")
+        resp = await client.get("/api/v1/admin/users")
         assert resp.status_code == 403
 
     async def test_update_user_as_admin(
         self, admin_client: AsyncClient, test_user: User
     ):
         resp = await admin_client.put(
-            f"/api/v1/auth/users/{test_user.id}",
+            f"/api/v1/admin/users/{test_user.id}",
             json={"display_name": "Updated Display"},
         )
         assert resp.status_code == 200
@@ -184,7 +184,7 @@ class TestAdminCRUD:
 
     async def test_update_user_not_found(self, admin_client: AsyncClient):
         resp = await admin_client.put(
-            "/api/v1/auth/users/nonexistent-id",
+            "/api/v1/admin/users/nonexistent-id",
             json={"display_name": "x"},
         )
         assert resp.status_code == 404
@@ -193,7 +193,7 @@ class TestAdminCRUD:
         self, client: AsyncClient, test_user: User
     ):
         resp = await client.put(
-            f"/api/v1/auth/users/{test_user.id}",
+            f"/api/v1/admin/users/{test_user.id}",
             json={"display_name": "Nope"},
         )
         assert resp.status_code == 403
@@ -337,7 +337,7 @@ class TestChangeMyPassword:
         assert ok.status_code == 200
 
         resp = await admin_client.put(
-            f"/api/v1/auth/users/{test_user.id}",
+            f"/api/v1/admin/users/{test_user.id}",
             json={"password": "newadminreset"},
         )
         assert resp.status_code == 200
@@ -350,28 +350,28 @@ class TestUsernameValidation:
 
     async def test_create_user_rejects_space(self, admin_client: AsyncClient):
         resp = await admin_client.post(
-            "/api/v1/auth/users",
+            "/api/v1/admin/users",
             json={"username": "bad name", "password": "pass1234", "role": "user"},
         )
         assert resp.status_code == 422
 
     async def test_create_user_rejects_chinese(self, admin_client: AsyncClient):
         resp = await admin_client.post(
-            "/api/v1/auth/users",
+            "/api/v1/admin/users",
             json={"username": "张三", "password": "pass1234", "role": "user"},
         )
         assert resp.status_code == 422
 
     async def test_create_user_rejects_too_short(self, admin_client: AsyncClient):
         resp = await admin_client.post(
-            "/api/v1/auth/users",
+            "/api/v1/admin/users",
             json={"username": "a", "password": "pass1234", "role": "user"},
         )
         assert resp.status_code == 422
 
     async def test_create_user_accepts_special_chars(self, admin_client: AsyncClient):
         resp = await admin_client.post(
-            "/api/v1/auth/users",
+            "/api/v1/admin/users",
             json={"username": "a.b_c-d", "password": "pass1234", "role": "user"},
         )
         assert resp.status_code == 200

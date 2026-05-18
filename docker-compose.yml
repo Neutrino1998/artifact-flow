@@ -24,6 +24,11 @@ services:
       timeout: 10s
       start_period: 5s
       retries: 3
+    # SYS_PTRACE: backup attach path (`docker exec backend py-spy dump --pid 1`).
+    # Container-scope capability — only ptrace within this container's PID ns.
+    # See deploy/docker-compose.intranet.yml for the full rationale.
+    cap_add:
+      - SYS_PTRACE
     restart: unless-stopped
 
   frontend:

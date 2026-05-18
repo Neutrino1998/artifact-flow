@@ -231,16 +231,20 @@ async def astream_with_retry(
 # ========================================
 
 def format_messages_for_debug(messages: list, max_content_len: int = 100000) -> str:
-    """格式化消息用于调试输出"""
+    """格式化消息用于调试输出。截断时附带原始长度,operator 才能分清是完整短消息
+    还是被切掉的长消息。"""
     lines = []
     for msg in messages:
         role = msg["role"]
         content = msg.get("content", "")
         if not content:
             continue
-        if len(content) > max_content_len:
-            content = content[:max_content_len] + "..."
-        lines.append(f"> {role}:")
+        original_len = len(content)
+        if original_len > max_content_len:
+            content = content[:max_content_len] + f"... (truncated, {original_len} chars total)"
+            lines.append(f"> {role} ({original_len} chars, truncated to {max_content_len}):")
+        else:
+            lines.append(f"> {role}:")
         for line in content.split('\n'):
             lines.append(f"  {line}")
         lines.append("")
