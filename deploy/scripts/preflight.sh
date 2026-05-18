@@ -4,25 +4,35 @@
 # Runs OFFLINE (no network calls). Two tiers of checks:
 #
 #   1. REQUIRED (hard failures, exit 1):
-#      - analyst-tools/ bundle integrity (wheels resolvable offline)
-#      - backend container has py-spy (`docker exec backend py-spy --version`)
-#      Required = if any of these is missing, deployment can't deliver the
-#      promised forensics model. Blocking.
+#      - backend container has py-spy (`docker compose ... exec backend py-spy --version`)
+#      - analyst-tools/ bundle integrity — only when its path is given
+#        explicitly OR the default ./analyst-tools exists. analyst-tools is
+#        for the analyst machine (running observability_report.py), which
+#        may be a separate host; if absent at the default path and the
+#        operator didn't pass one, that's treated as "intentionally on
+#        another machine" and skipped with `info`, not failed. Pass an
+#        explicit path to force the strict check.
 #
 #   2. OPTIONAL (warnings, do NOT block exit):
 #      - Host deep-dive tools: gdb / gcore / strace / ps / top in PATH.
-#      These cover the third-tier deep-dive path (strace on syscalls,
-#      gdb on coredumps). PR-obs-lite's faulthandler + the backend's own
-#      py-spy already cover the primary + backup paths, so missing host
-#      tools doesn't block deployment — it just narrows what's available
-#      when the first two tiers don't reveal the answer.
+#      - Yama ptrace_scope: warn only if mode 3 (host-wide ptrace disabled)
+#        — that's the one host-side knob that can defeat the in-container
+#        backup attach path even with cap_add: SYS_PTRACE, because Yama is
+#        host kernel state shared into the container. Modes 0/1/2 are all
+#        bypassed by CAP_SYS_PTRACE (which our compose grants).
+#
+#      Why no CapEff bit / seccomp probe: those are declared by our compose
+#      files; if cap_add is dropped, that's a deliberate operator edit, not
+#      a runtime drift. Re-validating compose declarations from inside the
+#      container is over-engineering — `docker compose config | grep cap_add`
+#      already shows the truth.
 #
 # Exit code: 0 = required all pass (optional warnings allowed);
 #            1 = at least one required check failed.
 #
 # Usage:
-#   deploy/scripts/preflight.sh                          # default: ./analyst-tools
-#   deploy/scripts/preflight.sh /opt/af/analyst-tools    # explicit path
+#   deploy/scripts/preflight.sh                          # default: ./analyst-tools (lenient)
+#   deploy/scripts/preflight.sh /opt/af/analyst-tools    # explicit path (strict)
 #
 # Output style mirrors verify-bundle.sh: per-check ✓/✗/⚠ + tier counters.
 
@@ -31,7 +41,10 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
+# An explicit positional arg flips analyst-tools into strict mode (missing dir = err).
+# Default path = lenient (missing dir = info-skip, deploy may rely on a separate analyst host).
 ANALYST_DIR="${1:-$ROOT/analyst-tools}"
+ANALYST_EXPLICIT=$([[ -n "${1:-}" ]] && echo yes || echo no)
 
 required_fail=0
 optional_warn=0
@@ -49,33 +62,67 @@ if ! command -v docker >/dev/null 2>&1; then
   # but the backend container may not exist yet. Don't fail — just inform.
   info "docker not on PATH; skipping container py-spy check"
   info "(re-run preflight after \`docker compose up -d backend\` to verify)"
-elif ! docker ps --format '{{.Names}}' 2>/dev/null | grep -q backend; then
+elif ! backend_ctr=$(docker ps --format '{{.Names}}' 2>/dev/null | grep backend | head -1) \
+     || [[ -z "$backend_ctr" ]]; then
   info "no running 'backend' container; skipping container py-spy check"
   info "(re-run preflight after \`docker compose up -d backend\` to verify)"
 else
   # `docker exec` requires container to be running; py-spy --version exits 0
   # on success, prints to stderr by default. Capture both.
-  if output=$(docker exec "$(docker ps --format '{{.Names}}' | grep backend | head -1)" \
-                py-spy --version 2>&1); then
-    ok "py-spy in backend container ($output)"
+  if output=$(docker exec "$backend_ctr" py-spy --version 2>&1); then
+    ok "py-spy in backend container '$backend_ctr' ($output)"
   else
-    err "py-spy missing or not invocable inside backend container"
-    info "expected: \`docker exec backend py-spy --version\` → 'py-spy <version>'"
+    err "py-spy missing or not invocable inside backend container '$backend_ctr'"
+    info "expected: \`docker exec $backend_ctr py-spy --version\` → 'py-spy <version>'"
     info "actual:   $output"
     info "fix: rebuild backend image; Dockerfile installs py-spy in builder stage"
   fi
 fi
 
 # ============================================================================
-# REQUIRED #2: analyst-tools bundle integrity
+# OPTIONAL: Yama ptrace_scope (host-side; can defeat in-container backup path)
+# ============================================================================
+# Placed near the py-spy check because semantically it's the one host-side
+# knob that gates the backup attach path. mode 3 is the only blocking value
+# (modes 0/1/2 are all bypassed by CAP_SYS_PTRACE which our compose grants).
+# Warn-not-err: faulthandler primary path stays available regardless, and
+# preflight can't fix sysctl anyway — only host operator can.
+echo
+echo "→ [optional] Yama ptrace_scope (host sysctl, gates backup attach path)"
+if [[ -r /proc/sys/kernel/yama/ptrace_scope ]]; then
+  yama=$(tr -d '[:space:]' < /proc/sys/kernel/yama/ptrace_scope)
+  case "$yama" in
+    0|1|2)
+      ok "yama.ptrace_scope=$yama (CAP_SYS_PTRACE bypasses; backup path OK)" ;;
+    3)
+      warn "yama.ptrace_scope=3 — host-wide ptrace disabled, py-spy backup path inert"
+      info "primary path (faulthandler deadman → docker logs) still works"
+      info "to restore backup: have host operator set kernel.yama.ptrace_scope=1 (or 0/2)"
+      ;;
+    *)
+      info "yama.ptrace_scope=$yama (unexpected value; treat as unknown)"
+      ;;
+  esac
+else
+  info "/proc/sys/kernel/yama/ptrace_scope not readable"
+  info "(non-Linux host / Yama LSM disabled — fine on dev machines)"
+fi
+
+# ============================================================================
+# REQUIRED #2 (conditional): analyst-tools bundle integrity
 # ============================================================================
 echo
-echo "→ [required] analyst-tools bundle integrity ($ANALYST_DIR)"
+echo "→ [required-if-present] analyst-tools bundle integrity ($ANALYST_DIR)"
 
 if [[ ! -d "$ANALYST_DIR" ]]; then
-  err "analyst-tools/ directory not found at $ANALYST_DIR"
-  info "extract: tar xzf artifactflow-analyst-tools-*.tar.gz"
-  info "(creates ./analyst-tools/{wheels,README.md,wheels.lock.txt})"
+  if [[ "$ANALYST_EXPLICIT" == "yes" ]]; then
+    err "analyst-tools/ directory not found at $ANALYST_DIR (explicit path)"
+    info "extract: tar xzf artifactflow-analyst-tools-*.tar.gz"
+    info "(creates ./analyst-tools/{wheels,README.md,wheels.lock.txt})"
+  else
+    info "no analyst-tools/ at default path; skipping (analyst machine may be elsewhere)"
+    info "to enforce: deploy/scripts/preflight.sh /path/to/analyst-tools"
+  fi
 else
   WHEELS="$ANALYST_DIR/wheels"
   if [[ ! -d "$WHEELS" ]]; then
@@ -114,8 +161,8 @@ fi
 # ============================================================================
 echo
 echo "→ [optional] host deep-dive forensics tools (PATH lookup, warning only)"
-echo "  Primary path: \`docker logs backend\` (faulthandler dump, PR-obs-lite)"
-echo "  Backup path:  \`docker exec backend py-spy ...\` (this preflight req'd)"
+echo "  Primary path: \`docker compose ... logs backend\` (faulthandler dump, PR-obs-lite)"
+echo "  Backup path:  \`docker compose ... exec backend py-spy ...\` (req'd above)"
 echo "  Deep-dive:    host gdb/strace/procps — useful but not blocking"
 for tool in gdb gcore strace ps top; do
   if command -v "$tool" >/dev/null 2>&1; then

@@ -68,8 +68,8 @@
 >
 > | 层 | 工具 | 装哪 | 何时用 |
 > |---|---|---|---|
-> | **主路径** | `faulthandler` deadman dump | backend 进程自己(PR-obs-lite 已内置) | 硬 wedge → `docker logs backend` 看自动 dump 的 Python 栈 |
-> | **备份路径** | `py-spy` | backend **镜像里**(Dockerfile builder stage)+ compose `cap_add: [SYS_PTRACE]` | deadman 失效 / 想看采样分布 → `docker exec backend py-spy ...` |
+> | **主路径** | `faulthandler` deadman dump | backend 进程自己(PR-obs-lite 已内置) | 硬 wedge → `docker compose ... logs backend` 看自动 dump 的 Python 栈 |
+> | **备份路径** | `py-spy` | backend **镜像里**(Dockerfile builder stage)+ compose `cap_add: [SYS_PTRACE]` | deadman 失效 / 想看采样分布 → `docker compose ... exec backend py-spy dump --pid 1` |
 > | **深挖路径** | `gdb` / `strace` / `procps` (`ps`/`top`) | 宿主机 yum/apt 装 | syscall 序列 / coredump 分析 / 全机器视图 |
 >
 > 前两层零云托管依赖(镜像 + 容器级 cap 自洽);第三层依赖宿主机标准工具,**本段就是跟云托管方对齐这一层的预装/安装路径**。
@@ -85,5 +85,5 @@
    - **前两层不依赖** —— Python 栈已经能 dump,coredump 是 C 扩展异常 / 二进制层 bug 进一步深挖
    - coredump 文件可指定落到我们持久卷下 (`/app/data/`),不污染宿主机;dump 含进程地址空间,仅事故现场用,事后人工清理
 
-> 事故现场 SOP 优先级:① `docker logs backend` 看 faulthandler dump → ② `docker exec backend py-spy dump --pid 1` 看采样栈 → ③ `tail data/observability/loop-lag.jsonl` 看软退化事件 + `GET /admin/runtime` 看在飞任务 → ④ 都不够时上宿主机 strace / gdb 深挖
+> 事故现场 SOP 优先级:① `docker compose ... logs backend` 看 faulthandler dump → ② `docker compose ... exec backend py-spy dump --pid 1` 看采样栈 → ③ `tail data/observability/loop-lag.jsonl` 看软退化事件 + `GET /admin/runtime` 看在飞任务 → ④ 都不够时上宿主机 strace / gdb 深挖(`docker compose ...` 在生产/内网部署里实际是 `docker compose -f docker-compose.prod.yml ...` 或 `docker compose -f deploy/docker-compose.intranet.yml ...`,Mode 1 也可直接 `docker exec artifactflow-backend ...`)
 > 部署侧 SOP 详见 `deployment-sop.md` → "取证就绪"小节;preflight 校验脚本: `deploy/scripts/preflight.sh`

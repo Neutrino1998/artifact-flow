@@ -16,7 +16,7 @@
 | P0(运维) | 前端 compose 临时覆盖 | — | 非 PR,内网机直接操作 |
 | P1 | PR-obs-lite 轻量可观测性 + 日志持久化 | ✅ 已完成 | watchdog(自动栈 dump)+ sampler(jsonl 采样)+ `/admin/runtime` + 分析脚本 + 主日志迁持久卷 + obs jsonl 循环写;不动 DB schema、不上 Prometheus |
 | P1 | PR-3 fencing 事件持久化 | ✅ 已完成 | 修复 bug ④,恢复审计/回放完整性 |
-| P2 | PR-forensics-bundle 取证工具 + 部署前置 | ✅ 已完成 | release.sh `--with-forensics` 打 py-spy + pandas/numpy 离线 wheels(零联网) + preflight.sh + SOP 补"取证就绪" + cloud checklist 补宿主机 forensics 工具确认项 |
+| P2 | PR-forensics-bundle 取证工具 + 部署前置 | ✅ 已完成 | py-spy 进 backend 镜像 + compose `cap_add: SYS_PTRACE`(主+备份路径零云托管依赖); `release.sh --with-analyst-tools` 打 pandas/numpy 离线 wheels(给 analyst 机器零联网); `preflight.sh` 分 required(容器内 py-spy)/optional(Yama mode + host 深挖工具) 两层; SOP + cloud checklist 同步三层模型 |
 | P2 | PR-5 前端镜像重建 | 待启动 | 正式消除 HOSTNAME 误配 |
 | P3 | PR-tz-unify 事件时间戳时区统一 | 待启动 | events.py 写本地朴素、`server_default=func.now()` 又是 DB 端 UTC,二者不一致;PR-obs-lite 分析脚本在 Shanghai 部署偏 8h。修脚本前先决定全链路用哪个 |
 | P3 | 文档 PR(`docs/runbooks/service-hang.md` + `docs/guides/observability-tuning.md`) | 待启动 | 应急 runbook + obs 调参手册,纯 markdown PR;待 PR-obs-lite + PR-forensics-bundle 代码落地后启动(字段 / 路径稳定后下笔) |
@@ -632,6 +632,12 @@ df_lag     = pd.read_json("data/observability/loop-lag.jsonl", lines=True)
 - **P3 反馈**(注释 stale): release.sh 旧注释还说"content-addressed by py-spy + Python version" → py-spy 出镜像 + bundle 改名后这段注释整段重写,语义跟代码同步
 - **P3 反馈**(行尾空格): fix plan 633 行 trailing whitespace → 清理
 
+第五轮(reviewer round 4,P1×2 + P2 + P3 半真):
+- **P1 #1**(optional `--with-analyst-tools` vs preflight hard-fail 不一致): SOP/release 都说 analyst-tools 可后做、可在另一台机器,但 preflight 缺省就 hard-fail。**采纳**: preflight 改为缺省 lenient(analyst-tools 不在默认路径 → info-skip),显式传路径才 strict(`./preflight.sh /opt/af/analyst-tools` → 缺则 err)。三态(默认无 / 默认有 / 显式无)实测通过
+- **P1 #2**(`py-spy --version` 不证明 attach path): reviewer 担心 cap/seccomp/Yama 任一漂移都让 attach 失败但 `--version` 仍 pass。**用户挑战 + 重新拆解**: 容器内 attach 实际依赖二进制(镜像保证)+ cap_add(compose 声明式)+ seccomp 默认 profile(自动放行有 cap 的 ptrace)+ host Yama(唯一外部变量)。前三环都是我们声明式管住的,从容器内复读是 over-engineering;**只有 Yama mode 3(host-wide ptrace 禁)能绕过我们的 cap**。**采纳收窄**: 不加 CapEff bit / seccomp 探测,只加 host-side Yama 读取(`/proc/sys/kernel/yama/ptrace_scope`),mode 3 时 warn"备份路径失效、依赖主路径 faulthandler",其他 mode + 不可读(非 Linux)都 info-skip
+- **P2**(`docker exec backend` 不会解析): compose 没设 `container_name`(prod/intranet 是 `<project>-backend-1`),Mode 1 设了但是 `artifactflow-backend`。文档六处当前态 `docker exec backend` / `docker logs backend` → 全改 `docker compose -f <file> exec backend` / `docker compose ... logs backend`(service-name-based,跟 container_name 解耦,也支持 `--scale`)。preflight 自己之前就用 `docker ps | grep backend | head -1` 解析,无需改逻辑
+- **P3 半真**(fix plan stale): line 19 优先级总览还在写 `--with-forensics` + "打 py-spy" → 更新为 round 4+5 真实描述。line 660+ 原始 spec 段(reviewer 指 661)**是有意保留的审计原稿**,差异在 644-649 已显式列出 —— 但 reviewer 不该需要读到 644 才理解 661 是历史;**加强方法**: 660 段头从"内容"改为"原始 spec 内容(round 0,差异见 644-649)"明示历史定位
+
 **关键转向(round 3,即本轮)**: py-spy 从"forensics bundle 工具(装宿主机)" → "**backend 镜像内置工具**(`docker exec backend py-spy`)"。这是对 round 2 的修正:round 2 想避免"为低频备份做反射性镜像膨胀",但实际效果是把可用性外推给云托管协调;round 3 承认 py-spy 是事故现场最常用 + 第三方分发 + 我们能完全控制的诊断工具,直接打进镜像是**精准而非反射性**的扩张。三层分明:① 主路径 faulthandler dump(零依赖) ② 备份路径 `docker exec backend py-spy`(容器内 cap 自洽,零云托管依赖) ③ 深挖路径 host gdb/strace(云托管协调)。前两层完全自洽,事故时秒级可用。
 
 **bundle 改名 + 减容**: `artifactflow-forensics-<slug>.tar.gz` → `artifactflow-analyst-tools-<slug>.tar.gz`(语义更准 —— 现在只剩 pandas/numpy 给 analyst 用);slug 简化为 `pandas<v>-numpy<v>-py<v>`(py-spy 已出 bundle,不在 slug 里);release.sh `--with-forensics` flag 改名 `--with-analyst-tools`。py-spy 段整体砍掉(下载/SHA pin/sha256 文件/README 段 ~100 行 -)。
@@ -657,7 +663,7 @@ df_lag     = pd.read_json("data/observability/loop-lag.jsonl", lines=True)
 
 **范围**:`deploy/`(release bundle 脚本)、`deploy/scripts/preflight.sh`(新)、`docs/_archive/ops/deployment-sop.md` / `cloud-service-checklist.md`(增改)。
 
-**内容**:
+**原始 spec 内容(round 0,差异见上方 644-649)**:
 1. release bundle 内置 `py-spy` 静态二进制(单文件几 MB),从根上消除"内网现抓不到"
 2. release bundle 内置 `pandas` / `numpy` 离线 wheel(`deploy/wheels/`),供 `scripts/observability_report.py` 在分析机用 `pip install --no-index --find-links` 安装。**不进 runtime `requirements.txt`** —— pandas+numpy ~80 MB 是分析工具,产品运行时不需要,跟 py-spy 同属"部署时可用 / 运行时不依赖"类别。`numpy` 是 pandas 的依赖,顺带;**不**再带 `psycopg2` / `pymysql` 这类 sync DB driver —— 脚本走 ORM `select(MessageEvent)` + `AsyncSession` 复用 app 已有的 asyncpg / aiomysql / aiosqlite,sync driver 没必要再多带一份
 3. preflight 脚本验证宿主机有 `gdb`/`gcore`、`strace`、`procps`

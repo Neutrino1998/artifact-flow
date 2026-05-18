@@ -165,8 +165,8 @@ docker compose -f deploy/docker-compose.intranet.yml exec backend python scripts
 
 | 层 | 工具 | 来源 | 何时用 |
 |---|---|---|---|
-| **主路径** | `faulthandler` deadman dump | backend 进程自己（PR-obs-lite 已内置） | 硬 wedge → `docker logs backend` 看自动 dump 的 Python 栈 |
-| **备份路径** | `py-spy` | backend **镜像里**（Dockerfile builder stage）+ compose `cap_add: [SYS_PTRACE]` | deadman 失效 / 想看采样分布 → `docker exec backend py-spy ...` |
+| **主路径** | `faulthandler` deadman dump | backend 进程自己（PR-obs-lite 已内置） | 硬 wedge → `docker compose -f deploy/docker-compose.intranet.yml logs backend` 看自动 dump 的 Python 栈 |
+| **备份路径** | `py-spy` | backend **镜像里**（Dockerfile builder stage）+ compose `cap_add: [SYS_PTRACE]` | deadman 失效 / 想看采样分布 → `docker compose -f deploy/docker-compose.intranet.yml exec backend py-spy dump --pid 1` |
 | **深挖路径** | `gdb` / `strace` / `procps`、宿主机 `iostat` 等 | 宿主机预装（云托管协调） | syscall 序列 / coredump / 全机器视图 |
 
 前两层零云托管依赖（镜像 + 容器级 cap 自洽）；第三层依赖宿主机标准工具，preflight 在 optional 段提示，不阻塞部署。
@@ -202,7 +202,7 @@ python -c 'import pandas; print(pandas.__version__)'    # 验证
 
 **why py-spy 进镜像 + cap_add: SYS_PTRACE**：
 - 容器级 cap 作用域仅 backend 容器内,不放大已 RCE 攻击面
-- 镜像 +6MB(~+4%,无感),换来事故时 `docker exec backend py-spy` 秒级可用,无云托管协调依赖
+- 镜像 +6MB(~+4%,无感),换来事故时 `docker compose ... exec backend py-spy` 秒级可用,无云托管协调依赖
 - 这是**精准而非反射性扩张** —— 只装 py-spy(第三方分发 + 事故现场最常用);gdb/strace/top 仍走宿主机(OS 包 + 深挖路径,频次低)
 
 **why pandas/numpy 不进 app 镜像**：
