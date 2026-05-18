@@ -12,6 +12,7 @@ ExecutionRunner — 本地 asyncio 任务调度
 
 import asyncio
 import contextlib
+import time
 from typing import TYPE_CHECKING, Callable, Coroutine
 
 from api.services.runtime_store import InMemoryRuntimeStore, RuntimeStore
@@ -53,6 +54,9 @@ class ExecutionRunner:
         lease_ttl: int = 0,
     ):
         self._tasks: dict[str, asyncio.Task] = {}
+        # task_id → monotonic 起始时刻;observability 的 long_running_count 用。
+        # 与 _tasks 同生同灭(submit set / finally pop),不暴露给业务路径。
+        self._task_started_at: dict[str, float] = {}
         self._semaphore = asyncio.Semaphore(max_concurrent)
         self._max_concurrent = max_concurrent
         self._lease_ttl = lease_ttl  # 0 = 不续租（InMemory 场景）
@@ -143,6 +147,7 @@ class ExecutionRunner:
                         await heartbeat
                 coro.close()
                 self._tasks.pop(task_id, None)
+                self._task_started_at.pop(task_id, None)
                 await self.store.cleanup_execution(conversation_id, task_id)
                 await stream_transport.close_stream(task_id)
                 # 提到 INFO:与 L152 submit 日志对称(都是任务生命周期边界);
@@ -151,6 +156,9 @@ class ExecutionRunner:
 
         task = asyncio.create_task(_wrapped(), name=f"exec-{task_id}")
         self._tasks[task_id] = task
+        # 起始时刻必须在 create_task 之后、return 之前 set,保证 sampler 读到时
+        # 一定能匹配上 _tasks 里的条目(无窗口)。
+        self._task_started_at[task_id] = time.monotonic()
         logger.info(f"Task {task_id} submitted (active: {len(self._tasks)})")
         return task
 
@@ -231,3 +239,19 @@ class ExecutionRunner:
     def active_task_count(self) -> int:
         """获取活跃任务数量"""
         return len(self._tasks)
+
+    def long_running_count(self, threshold_sec: float) -> int:
+        """返回运行时长超过 threshold_sec 的活跃任务数。
+
+        给 observability sampler 用 — /admin/runtime 的半活诊断信号。读
+        _task_started_at 的快照,不持锁(dict get 在 CPython 是 GIL-atomic;
+        sampler 跑在 asyncio 线程,与 submit/finally 同步)。任务在我们计算
+        途中完成也无碍,小数字偏差不影响诊断用途。
+        """
+        if not self._task_started_at:
+            return 0
+        now = time.monotonic()
+        return sum(
+            1 for started in self._task_started_at.values()
+            if now - started > threshold_sec
+        )

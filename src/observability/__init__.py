@@ -14,11 +14,12 @@ Observability — 轻量观测层（PR-obs-lite）
 from observability.jsonl_sink import JsonlSink
 from observability.watchdog import LoopLagWatchdog
 from observability.deadman import DeadmanSwitch
-from observability.sampler import RuntimeSampler
+from observability.sampler import RuntimeSampler, resolve_mem_limit_bytes
 
 __all__ = [
     "JsonlSink",
     "LoopLagWatchdog",
     "DeadmanSwitch",
     "RuntimeSampler",
+    "resolve_mem_limit_bytes",
 ]

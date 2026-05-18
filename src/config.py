@@ -61,8 +61,8 @@ class Settings(BaseSettings):
                                                # 算法侧 m≈400K 后 Step 1-3 Python 开销本身就超 deadline，
                                                # 取 10K 留 ~20× headroom 同时反映 update_artifact 设计意图）
 
-    # Observability(PR-obs-lite,见 docs/_archive/ops/incident-2026-05-14-fix-plan.md)。
-    # 全部隐藏常量,不暴露 API。jsonl 路径必须在持久卷 /app/data 子目录,事故重启不丢。
+    # Observability 常量(隐藏,不暴露 API)。
+    # jsonl 路径必须在持久卷 /app/data 子目录,容器重启 / autoheal 不丢。
     LOOP_LAG_WARN_MS: int = 500                # watchdog 软退化阈值,超即写一行 loop-lag.jsonl + task 栈
     WATCHDOG_DEADMAN_TIMEOUT_MS: int = 10000   # faulthandler deadman switch 超时(heartbeat 不来即 dump 全栈)
     OBS_SAMPLE_INTERVAL_SEC: int = 30          # sampler 周期(loop_lag / RSS / DB pool / Redis 等)
@@ -71,6 +71,8 @@ class Settings(BaseSettings):
     OBS_LOOP_LAG_LOG_PATH: str = "data/observability/loop-lag.jsonl"
     OBS_JSONL_MAX_MB: int = 50                 # obs jsonl 单文件大小上限,超即 rotate
     OBS_JSONL_BACKUP_COUNT: int = 10           # obs jsonl 保留备份数(.1 ~ .N);默认覆盖 ~800 天
+    OBS_MEM_LIMIT_MB: int = 0                  # RSS 高水位告警上界(MB),0=自动:env > cgroup v2 > cgroup v1 > 不告警。
+                                               # 显式设置等于 docker-compose `mem_limit: 2g` 的镜像(避免重复 source-of-truth)
 
     # Redis（空 = InMemory fallback，非空 = Redis）
     REDIS_URL: str = ""

@@ -1,19 +1,14 @@
 """
 JsonlSink — 轮转写盘 + stdout mirror 的 jsonl 写入器
 
-设计要点(详见 docs/_archive/ops/incident-2026-05-14-fix-plan.md PR-obs-lite §持久化与循环写策略):
-
-- 走 stdlib RotatingFileHandler 做大小循环,默认 50MB × 10 = 500MB 总占用,远高于
-  实测每天 ~600 KB 的 metrics.jsonl 增长 → 单切片覆盖 ~80 天 / 总覆盖 ~800 天
-- formatter 仅 %(message)s,不加时间戳前缀,保证 "一行一对象" jsonl 契约
-- propagate=False,不污染根 logger 的 stdout/file handler(根 logger 已有自己的
-  artifactflow.log 文件 handler,observer 输出走独立通道)
-- stdout mirror 走单独的 StreamHandler,作为二级兜底(docker logs 拉得到,即使
-  持久卷意外丢失也还有一份)
-- 写入异常一律吞(observer 不能拖累 observee — observability 失败决不能让业务
-  路径出错;对齐 CLAUDE.md 的 loud-failure 原则反向面:观测自身失败只能 swallow)
-- 单进程同写假设 — backend 单进程,RotatingFileHandler 内置锁就够。日后切多
-  worker / 多进程模式需重新设计(rotate 瞬间互相覆盖)
+设计要点:
+- 走 stdlib RotatingFileHandler 做大小循环;formatter 仅 %(message)s,
+  保证 "一行一对象" 的 jsonl 契约,不加时间戳前缀
+- propagate=False,不污染根 logger 的主应用日志流
+- stdout mirror 是二级兜底通道(docker logs 拉得到),持久卷丢失时还有一份
+- 写入异常一律吞 — observability 失败决不能拖累业务路径
+- 单进程同写假设(backend 单进程,RotatingFileHandler 内置锁就够;
+  日后切多 worker 需重新设计:rotate 瞬间会互相覆盖)
 """
 
 import json

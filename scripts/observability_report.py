@@ -1,7 +1,7 @@
 """
 observability_report.py — 跑一下就能看的 obs 报告
 
-数据源(详见 docs/_archive/ops/incident-2026-05-14-fix-plan.md PR-obs-lite §分析脚本):
+数据源:
   1. MessageEvent JSON 列 (业务侧:LLM / 工具调用)
   2. data/observability/metrics.jsonl* (运行时:loop_lag / RSS / DB pool / Redis)
   3. data/observability/loop-lag.jsonl* (事件:loop 软退化触发记录)
@@ -10,10 +10,9 @@ observability_report.py — 跑一下就能看的 obs 报告
     python scripts/observability_report.py             # 24h 窗口
     python scripts/observability_report.py --hours 72  # 72h 窗口
 
-依赖:
-    pandas、sqlalchemy(同主项目)。
-    硬 wedge 兜底(GIL 攥死场景)不在本脚本聚合 — 看 docker logs backend 找
-    faulthandler 的 "Thread 0x..." dump,单独 grep 即可。
+pandas 是分析工具,不在 runtime requirements.txt;`pip install pandas` 或走
+release bundle 的离线 wheel 安装。硬 wedge dump 看 docker logs backend
+找 faulthandler 的 "Thread 0x..." 行,本脚本不聚合。
 """
 
 from __future__ import annotations
@@ -25,16 +24,41 @@ import sys
 from glob import glob
 from pathlib import Path
 
-import pandas as pd
+# Lazily set by main() — keeps helpers importable when pandas is absent.
+pd = None  # type: ignore[assignment]
+
+
+def _require_pandas():
+    """Lazy import of pandas with friendly install hint on miss."""
+    try:
+        import pandas as pd
+        return pd
+    except ImportError:
+        print(
+            "ERROR: pandas not installed. Install with `pip install pandas` "
+            "or via the release bundle's offline wheels "
+            "(`pip install --no-index --find-links <bundle>/wheels pandas`).",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+
+
 from sqlalchemy import create_engine
 
 
 def _resolve_engine_url() -> str:
-    url = os.getenv("ARTIFACTFLOW_DATABASE_URL", "")
+    """对齐 config.effective_database_url 的优先级:DATABASE_URLS 优先,DATABASE_URL 兜底。
+
+    生产同时设了二者时,主应用写的是 URLS 的第一个;脚本反过来读会查错库。
+    """
+    url = ""
+    urls = os.getenv("ARTIFACTFLOW_DATABASE_URLS", "")
+    if urls:
+        first = urls.split(",")[0].strip()
+        if first:
+            url = first
     if not url:
-        urls = os.getenv("ARTIFACTFLOW_DATABASE_URLS", "")
-        if urls:
-            url = urls.split(",")[0].strip()
+        url = os.getenv("ARTIFACTFLOW_DATABASE_URL", "")
     if not url:
         url = "sqlite:///data/artifactflow.db"
     # pd.read_sql 走 sync driver — 把 aiosqlite/asyncpg/aiomysql 换成同步版本
@@ -153,8 +177,8 @@ def _print_tool_summary(df_tool: pd.DataFrame) -> None:
 
 
 def _print_fuzzy_stats(df_tool: pd.DataFrame) -> None:
-    """update_artifact fuzzy_stats 调参报表(PR-1 承诺产物)。"""
-    print("\n=== update_artifact fuzzy_stats (PR-1 调参报表) ===")
+    """update_artifact fuzzy_stats 调参报表。"""
+    print("\n=== update_artifact fuzzy_stats 调参报表 ===")
     if df_tool.empty:
         print("  (no data)")
         return
@@ -276,6 +300,9 @@ def main():
         help="Path to observability jsonl dir",
     )
     args = parser.parse_args()
+
+    global pd
+    pd = _require_pandas()
 
     print(f"ArtifactFlow observability report (last {args.hours}h)")
     print("=" * 70)

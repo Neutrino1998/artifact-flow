@@ -231,11 +231,8 @@ async def astream_with_retry(
 # ========================================
 
 def format_messages_for_debug(messages: list, max_content_len: int = 100000) -> str:
-    """格式化消息用于调试输出。
-
-    截断时附带原始长度,避免日志里"看 500 字内容"分不清是完整消息还是被切掉
-    的大消息(incident-2026-05-14 bug ① 同款教训:截断必报长度)。
-    """
+    """格式化消息用于调试输出。截断时附带原始长度,operator 才能分清是完整短消息
+    还是被切掉的长消息。"""
     lines = []
     for msg in messages:
         role = msg["role"]

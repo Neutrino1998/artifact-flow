@@ -391,8 +391,7 @@ async def execute_loop(
         output_tokens = normalized_usage["output_tokens"]
 
         # Log reasoning before content — reasoning happens first semantically。
-        # 截断必报原始长度(incident-2026-05-14 bug ① 教训),避免日志里看不出来
-        # 这是完整短消息还是被切掉的长消息。
+        # 截断必报原始长度,避免日志里分不出完整短消息和被切掉的长消息。
         if reasoning_content:
             _r_len = len(reasoning_content)
             _r_marker = "" if _r_len <= 500 else f" (truncated, {_r_len} chars total)"

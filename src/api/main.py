@@ -25,7 +25,10 @@ from api.dependencies import (
     get_execution_runner,
 )
 from api.routers import admin, admin_users, auth, chat, artifacts, departments, stream
-from observability import LoopLagWatchdog, DeadmanSwitch, RuntimeSampler, JsonlSink
+from observability import (
+    LoopLagWatchdog, DeadmanSwitch, RuntimeSampler, JsonlSink,
+    resolve_mem_limit_bytes,
+)
 from observability import admin_runtime
 from utils.doc_converter import DocConverter
 from utils.logger import get_logger
@@ -90,6 +93,20 @@ def _start_observability(loop: asyncio.AbstractEventLoop) -> None:
         max_mb=config.OBS_JSONL_MAX_MB,
         backups=config.OBS_JSONL_BACKUP_COUNT,
     )
+    # mem_limit:env override > cgroup v2 > cgroup v1 > None。读不到时
+    # sampler 不告警(保持现状),不再让 RSS 阈值永远沉默。
+    mem_limit_bytes = resolve_mem_limit_bytes(config.OBS_MEM_LIMIT_MB)
+    if mem_limit_bytes:
+        logger.info(
+            f"Observability mem_limit resolved: "
+            f"{mem_limit_bytes // (1024 * 1024)} MB "
+            f"(source={'env' if config.OBS_MEM_LIMIT_MB else 'cgroup'})"
+        )
+    else:
+        logger.info(
+            "Observability mem_limit unset (no env override and no readable cgroup) — "
+            "RSS high-water WARN disabled"
+        )
     _sampler = RuntimeSampler(
         sink=_metrics_sink,
         watchdog=_watchdog,
@@ -98,6 +115,7 @@ def _start_observability(loop: asyncio.AbstractEventLoop) -> None:
         redis_client=get_redis_client(),
         long_task_age_sec=config.OBS_LONG_TASK_AGE_SEC,
         interval_sec=config.OBS_SAMPLE_INTERVAL_SEC,
+        mem_limit_bytes=mem_limit_bytes,
     )
     _sampler.start()
     admin_runtime.set_sampler(_sampler)

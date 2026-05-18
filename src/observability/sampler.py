@@ -1,8 +1,8 @@
 """
 RuntimeSampler — 周期采样到 jsonl
 
-每 `OBS_SAMPLE_INTERVAL_SEC` 采一次,写一行 JSON 到 `data/observability/metrics.jsonl`。
-字段(详见 docs/_archive/ops/incident-2026-05-14-fix-plan.md PR-obs-lite §注入点 #3):
+每 `OBS_SAMPLE_INTERVAL_SEC` 采一次,写一行 JSON 到 `data/observability/metrics.jsonl`,
+字段示例:
 
     {"ts": "...", "loop_lag_ms": {"p50": 3, "p99": 18, "max_1m": 95},
      "in_flight": 2, "tasks_total": 134, "tasks_long_running": 0,
@@ -11,11 +11,10 @@ RuntimeSampler — 周期采样到 jsonl
      "process": {"rss_mb": 512, "cpu_pct": 12, "open_fds": 87},
      "data_dir_mb": 1843}
 
-逼近上限(RSS > 80% mem_limit / Redis used > 80% maxmemory / DB pool waiters > 0 /
-open_fds > 80% ulimit)→ 额外打一行 WARN 日志(loud failure,对齐
-feedback-loud-failure-over-silent-eviction)。
+逼近上限(RSS > 80% mem_limit / Redis used > 80% maxmemory / DB pool overflow > 0 /
+open_fds > 80% ulimit)→ 额外打一行 WARN 日志,loud failure 而非 LRU 驱逐。
 
-sampler 自身异常一律吞(observer 不能拖累 observee)。
+sampler 自身异常一律吞 — observer 不能拖累 observee。
 """
 
 from __future__ import annotations
@@ -165,7 +164,8 @@ class RuntimeSampler:
         snapshot["process"] = process_stats
 
         # ── data dir 大小 ──
-        snapshot["data_dir_mb"] = self._data_dir_size_mb()
+        # rglob 在卷大时可达秒级,丢线程池避免 observer 自己制造 loop_lag。
+        snapshot["data_dir_mb"] = await asyncio.to_thread(self._data_dir_size_mb)
 
         # 写入 jsonl(swallow on error,JsonlSink 内已防御)
         self._sink.write(snapshot)
@@ -177,7 +177,11 @@ class RuntimeSampler:
         return snapshot
 
     def _collect_runner_state(self) -> tuple[int, int]:
-        """返回 (in_flight, long_running) — long_running 是超 age 阈值的任务数。"""
+        """返回 (in_flight, long_running) — long_running 是超 age 阈值的任务数。
+
+        long_running_count 是 ExecutionRunner 上的可选方法;不存在时(如测试
+        fake)优雅退化为 0,而不是让 sampler 整个采样失败。
+        """
         if self._runner is None:
             return 0, 0
         try:
@@ -186,11 +190,14 @@ class RuntimeSampler:
         except Exception:
             return 0, 0
 
-        # asyncio.Task 没有原生 "started_at" — 我们没存 metadata。
-        # 简化:long_running 当成 in_flight 的一部分,需要 start_time 才能算精确;
-        # MVP 先返回 0,future 在 ExecutionRunner.submit 处加 started_at dict 时再启用。
-        # (避免在本 PR 改 runner 接口;后续补 patch 时即可激活)
-        long_running = 0
+        try:
+            long_running_fn = getattr(self._runner, "long_running_count", None)
+            if callable(long_running_fn):
+                long_running = int(long_running_fn(self._long_task_age_sec))
+            else:
+                long_running = 0
+        except Exception:
+            long_running = 0
         return in_flight, long_running
 
     def _collect_db_pool(self) -> dict:
@@ -309,3 +316,46 @@ def _safe_int(value: Any) -> int:
         return int(value) if value is not None else 0
     except (TypeError, ValueError):
         return 0
+
+
+# cgroup v2 把内存上限放这里,unlimited 时写 "max"。
+_CGROUP_V2_MEMORY_MAX = "/sys/fs/cgroup/memory.max"
+# cgroup v1 hier;unlimited 时是一个巨大数字(常见 9223372036854771712)。
+_CGROUP_V1_MEMORY_LIMIT = "/sys/fs/cgroup/memory/memory.limit_in_bytes"
+# 超过这个值视为 "未设上限"(避免把 ~8 EiB 当成真实限额导致 80% 阈值永远过不去)
+_CGROUP_UNLIMITED_SENTINEL = 1 << 60
+
+
+def resolve_mem_limit_bytes(explicit_mb: int = 0) -> Optional[int]:
+    """决定 RSS 高水位告警的上界。
+
+    优先级:
+        1. explicit_mb > 0 → 直接用(env override / docker-compose mem_limit 镜像)
+        2. cgroup v2 (`/sys/fs/cgroup/memory.max`,值为 "max" 时跳过)
+        3. cgroup v1 (`/sys/fs/cgroup/memory/memory.limit_in_bytes`)
+        4. 都读不到 / 都 unlimited → None(sampler 此时不告警,保持现状)
+
+    任何 IO / 解析错误都返回 None — observer 不能挂应用。
+    """
+    if explicit_mb > 0:
+        return int(explicit_mb) * 1024 * 1024
+
+    try:
+        with open(_CGROUP_V2_MEMORY_MAX, "r", encoding="utf-8") as f:
+            v = f.read().strip()
+        if v and v != "max":
+            n = int(v)
+            if 0 < n < _CGROUP_UNLIMITED_SENTINEL:
+                return n
+    except (OSError, ValueError):
+        pass
+
+    try:
+        with open(_CGROUP_V1_MEMORY_LIMIT, "r", encoding="utf-8") as f:
+            n = int(f.read().strip())
+        if 0 < n < _CGROUP_UNLIMITED_SENTINEL:
+            return n
+    except (OSError, ValueError):
+        pass
+
+    return None
