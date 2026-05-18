@@ -64,9 +64,9 @@ def _resolve_engine_url() -> str:
 
     生产同时设了二者时,主应用写的是 URLS 的第一个;脚本反过来读会查错库。
 
-    URL 原样保留 — script 通过 async engine + run_sync 桥接给 pandas,直接复用
-    app 的 driver(asyncpg / aiomysql / aiosqlite),不做 +asyncpg→+psycopg2
-    一类的翻译,避免引入额外 sync driver 依赖。
+    URL 原样保留(含 +asyncpg / +aiomysql / +aiosqlite 后缀)—— script 走 ORM
+    select(MessageEvent) + AsyncSession 读数据,复用 app 已有的 async driver,
+    不需要 sync driver(psycopg2 / pymysql)。
     """
     url = ""
     urls = os.getenv("ARTIFACTFLOW_DATABASE_URLS", "")
@@ -164,8 +164,8 @@ def _load_jsonl_glob(pattern: str) -> pd.DataFrame:
     return pd.concat(frames, ignore_index=True)
 
 
-def _print_llm_summary(df_llm: pd.DataFrame) -> None:
-    print("\n=== LLM calls (24h, by model × agent) ===")
+def _print_llm_summary(df_llm: pd.DataFrame, hours: int) -> None:
+    print(f"\n=== LLM calls ({hours}h, by model × agent) ===")
     if df_llm.empty:
         print("  (no data)")
         return
@@ -179,8 +179,8 @@ def _print_llm_summary(df_llm: pd.DataFrame) -> None:
     print(g.to_string())
 
 
-def _print_tool_summary(df_tool: pd.DataFrame) -> None:
-    print("\n=== Tool calls (24h, by tool) ===")
+def _print_tool_summary(df_tool: pd.DataFrame, hours: int) -> None:
+    print(f"\n=== Tool calls ({hours}h, by tool) ===")
     if df_tool.empty:
         print("  (no data)")
         return
@@ -317,8 +317,8 @@ async def _run_report(hours: int, obs_dir: str) -> None:
     try:
         async_engine = create_async_engine(_resolve_engine_url())
         df_llm, df_tool = await _load_message_events(async_engine, hours)
-        _print_llm_summary(df_llm)
-        _print_tool_summary(df_tool)
+        _print_llm_summary(df_llm, hours)
+        _print_tool_summary(df_tool, hours)
         _print_fuzzy_stats(df_tool)
     except Exception as e:
         print(f"\n[skip] MessageEvent: {e}", file=sys.stderr)
