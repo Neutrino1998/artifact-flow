@@ -753,6 +753,24 @@ df_lag     = pd.read_json("data/observability/loop-lag.jsonl", lines=True)
 - 为什么没用 reviewer 建议的"patch `asyncpg.connect` 端到端测试":那需要真 AsyncEngine 启动到 pool acquire 才触发 `asyncpg.connect`,中间还要绕过 `_check_alembic_version()` 的 DB 查询。dialect-level 测试隔离了 SQLAlchemy URL → opts 的映射,正是 round 3 修改的 surface,且不依赖 SQLAlchemy 启动栈的具体实现细节
 - 测试 846 → 849 passed(+3)
 
+第五轮(reviewer round 4,结构性统一 —— DSN query 翻译层封装边界):
+- **问题不是单个 key 没补全,而是 *两套* DSN query 解释路径并存**:reviewer 戳出 round 1–3 的修法是"发现一个 key 泄露就打一个补丁",而真正的根因是项目内同一个 DSN 有两条解析路径:
+  - **单 URL 路径**(`initialize()`):依赖 SQLAlchemy dialect 解析 `url.query`,我们只从 query 抽 round 2 列出的少数几个 session-affecting key
+  - **failover 路径**(`_parse_db_url` → `_failover_creator`):自己解析整个 query,直接喂 `asyncpg.connect` / `aiomysql.connect`
+  两条路径对 *同一个 DSN query* 的语义解释会漂移:failover 已知 `sslmode → ssl=`、`command_timeout → float`、`application_name → server_settings`、`ssl_ca → SSLContext`、`charset/autocommit/init_command/...` 翻译规则;但单 URL 那条只截了 `application_name`(PG)和 `init_command`(MySQL),其余 key 全部由 SQLAlchemy asyncpg dialect 当作 verbatim kwargs dump 给 `asyncpg.connect`,asyncpg signature 不接受这些 → TypeError;round 3 修的只是表里的一行(application_name),后面再加任何 key 都会重演同一个 bug
+- **修法(结构性)**:让 `DatabaseManager` 成为 **唯一** 的 DSN query 翻译层,SQLAlchemy dialect 不再"二次解释"任何 query key
+  - 拆出 `_parse_db_query_params(url: URL, driver: str) -> (connect_args, consumed_keys)` 纯函数,作为唯一的 query → driver-kwargs 翻译器
+  - `_parse_db_url`(failover 路径)瘦身,query 段委托给新 helper(只保留 host/port/auth 组装)
+  - `initialize()` 单 URL 路径改成:`_parse_db_query_params(url, driver)` → `_apply_session_tz_kwargs(driver, ...)` → 把 `consumed_keys` 一次性从 URL 上剥掉(`url.difference_update_query(consumed_keys)`)
+  - 单 URL 路径无法识别的 key 现在在 `initialize()` 时立刻 `ValueError`(fail-loud-fail-early),不再延后到 `asyncpg.connect` 的运行时 TypeError;与 failover 路径行为一致
+- **扩展功能而非缩减**:之前单 URL DSN 实际上只能用 `application_name` / `init_command` 而不出问题,其余 query 都是定时炸弹;round 4 后 `sslmode` / `command_timeout` / `ssl_ca` / `charset` / `autocommit` / `unix_socket` / `program_name` 全部可用于单 URL DSN —— 跟 `DATABASE_URLS` failover 列表完全等价
+- 测试 +22:
+  - `TestParseDbQueryParams`(12 条):helper 直接单测,覆盖每个支持 key 的 `(connect_args, consumed_keys)` 配对、空 query、sqlite passthrough、unknown key fail-loud、组合 key、输入 URL 不被 mutate
+  - `TestInitializeUnifiedTranslation`(7 条):单 URL 通过 `initialize()` 的端到端,每个新支持 key 的 translate + URL strip 双断言,unknown key fail-at-init-not-at-connect,以及"单 URL vs failover 在同一 DSN 上 connect_args 全等"的统一性断言
+  - `TestDialectSmokingGunsRound4`(2 条):一条正向(sanitize 后 dialect 不会发出任何被 parser 消费的 key 到 top-level opts)+ 一条负向控制(不 sanitize 至少有一个会 leak,SQLAlchemy 行为漂移哨兵)
+- 测试 849 → 871 passed(+22)
+- CLAUDE.md "Time convention" bullet 维持不变(round 4 是 DSN parsing layer 的内部封装重构,不改对外的时区契约)
+
 ---
 
 ### 原始 spec(round 0,差异见上方落地记录)

@@ -12,6 +12,7 @@ connect() to verify kwargs shape reaching the real driver API.
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from sqlalchemy.engine import make_url
 
 from db.database import DatabaseManager
 
@@ -626,4 +627,389 @@ class TestSessionTzInjection:
             "SQLAlchemy asyncpg dialect no longer leaks application_name "
             "to top-level kwargs — database.py URL sanitization may now be "
             "unnecessary. Re-verify before removing."
+        )
+
+
+# ============================================================
+# Round 4: structural unification — DatabaseManager is the SOLE DSN query
+# translator. _parse_db_query_params is the single source of truth shared
+# by single-URL (initialize) and failover (_parse_db_url). Consumed keys are
+# stripped from the URL handed to SQLAlchemy so the dialect cannot re-emit
+# them as conflicting top-level kwargs. Without this, every new query key
+# we care about would need another round-3-style patch.
+# (Incident 2026-05-14 PR-tz-unify reviewer round 4.)
+# ============================================================
+
+
+class TestParseDbQueryParams:
+    """Direct unit tests for the shared parser.
+
+    Mirrors the assertions made indirectly via _parse_db_url (TestPostgresQueryParams,
+    TestMysqlQueryParams) but also verifies the consumed_keys return value —
+    the single-URL path relies on it to strip query keys from the URL.
+    """
+
+    def test_pg_empty_query_returns_empty(self):
+        url = make_url("postgresql+asyncpg://host/app")
+        result, consumed = DatabaseManager._parse_db_query_params(url, "postgres")
+        assert result == {}
+        assert consumed == frozenset()
+
+    def test_mysql_empty_query_returns_empty(self):
+        url = make_url("mysql+aiomysql://host/app")
+        result, consumed = DatabaseManager._parse_db_query_params(url, "mysql")
+        assert result == {}
+        assert consumed == frozenset()
+
+    def test_sqlite_driver_returns_empty(self):
+        # SQLite has no DSN query semantics we route. Returning empty makes
+        # the helper safe to call unconditionally without special-casing
+        # the driver in the caller.
+        url = make_url("sqlite+aiosqlite:///:memory:")
+        result, consumed = DatabaseManager._parse_db_query_params(url, "sqlite")
+        assert result == {}
+        assert consumed == frozenset()
+
+    def test_pg_sslmode_consumed(self):
+        url = make_url("postgresql+asyncpg://host/app?sslmode=require")
+        result, consumed = DatabaseManager._parse_db_query_params(url, "postgres")
+        assert result == {"ssl": "require"}
+        assert consumed == frozenset({"sslmode"})
+
+    def test_pg_application_name_consumed(self):
+        url = make_url("postgresql+asyncpg://host/app?application_name=af")
+        result, consumed = DatabaseManager._parse_db_query_params(url, "postgres")
+        assert result == {"server_settings": {"application_name": "af"}}
+        assert consumed == frozenset({"application_name"})
+
+    def test_pg_command_timeout_consumed(self):
+        url = make_url("postgresql+asyncpg://host/app?command_timeout=30")
+        result, consumed = DatabaseManager._parse_db_query_params(url, "postgres")
+        assert result == {"command_timeout": 30.0}
+        assert consumed == frozenset({"command_timeout"})
+
+    def test_pg_all_known_consumed_together(self):
+        # Critical: every PG key DatabaseManager knows about must be in
+        # consumed_keys so the single-URL path strips them ALL — otherwise
+        # SQLAlchemy's asyncpg dialect would re-emit the survivors as
+        # top-level asyncpg.connect kwargs (TypeError at startup).
+        url = make_url(
+            "postgresql+asyncpg://host/app"
+            "?sslmode=require&command_timeout=30&application_name=af"
+        )
+        result, consumed = DatabaseManager._parse_db_query_params(url, "postgres")
+        assert result == {
+            "ssl": "require",
+            "command_timeout": 30.0,
+            "server_settings": {"application_name": "af"},
+        }
+        assert consumed == frozenset(
+            {"sslmode", "command_timeout", "application_name"}
+        )
+
+    def test_mysql_charset_consumed(self):
+        url = make_url("mysql+aiomysql://host/app?charset=utf8mb4")
+        result, consumed = DatabaseManager._parse_db_query_params(url, "mysql")
+        assert result == {"charset": "utf8mb4"}
+        assert consumed == frozenset({"charset"})
+
+    def test_mysql_autocommit_consumed_as_bool(self):
+        url = make_url("mysql+aiomysql://host/app?autocommit=false")
+        result, consumed = DatabaseManager._parse_db_query_params(url, "mysql")
+        assert result == {"autocommit": False}
+        assert consumed == frozenset({"autocommit"})
+
+    def test_mysql_init_command_consumed(self):
+        # MySQL init_command is the only key the session-TZ helper also
+        # mutates (prepend). Parser claims it on the way in; helper modifies
+        # the value, not the key. URL strip + connect_args takeover are still
+        # both needed for consistency with PG.
+        url = make_url(
+            "mysql+aiomysql://host/app?init_command=SET%20autocommit%3D1"
+        )
+        result, consumed = DatabaseManager._parse_db_query_params(url, "mysql")
+        assert result == {"init_command": "SET autocommit=1"}
+        assert consumed == frozenset({"init_command"})
+
+    def test_pg_unknown_key_rejected_fail_loud(self):
+        # Round 4 invariant: DatabaseManager is the SOLE translator. Unknown
+        # keys must fail at init time, not silently pass through to SQLAlchemy
+        # (which would then dump them as top-level asyncpg.connect kwargs →
+        # TypeError at the actual connect attempt, much later in startup).
+        url = make_url("postgresql+asyncpg://host/app?bogus=value")
+        with pytest.raises(ValueError, match="Unsupported DSN query param 'bogus'"):
+            DatabaseManager._parse_db_query_params(url, "postgres")
+
+    def test_mysql_unknown_key_rejected_fail_loud(self):
+        url = make_url("mysql+aiomysql://host/app?bogus=value")
+        with pytest.raises(ValueError, match="Unsupported DSN query param 'bogus'"):
+            DatabaseManager._parse_db_query_params(url, "mysql")
+
+    def test_does_not_mutate_input_url(self):
+        # Pure function: caller relies on the original URL still carrying
+        # the query (single-URL path runs difference_update_query on it next).
+        url = make_url(
+            "postgresql+asyncpg://host/app?sslmode=require&application_name=af"
+        )
+        _, _ = DatabaseManager._parse_db_query_params(url, "postgres")
+        assert dict(url.query) == {"sslmode": "require", "application_name": "af"}
+
+
+class TestInitializeUnifiedTranslation:
+    """initialize() single-URL must produce the same connect_args as the
+    failover path for the same DSN query — and strip all consumed keys from
+    the URL handed to create_async_engine.
+
+    Smoking-gun for the round 4 unification: a DSN with sslmode +
+    application_name + command_timeout exercises THREE different translation
+    paths (ssl=, server_settings.application_name, float coercion). Before
+    round 4, initialize() only handled application_name + (MySQL) init_command;
+    the other keys leaked through SQLAlchemy to asyncpg.connect as unsupported
+    top-level kwargs.
+    """
+
+    @pytest.mark.asyncio
+    async def test_initialize_pg_sslmode_translates_and_strips_url(self):
+        captured = {}
+
+        def fake_create_engine(url, **kwargs):
+            captured["url"] = url
+            captured["kwargs"] = kwargs
+            raise RuntimeError("stop")
+
+        dbm = DatabaseManager(
+            database_url="postgresql+asyncpg://host/app?sslmode=require"
+        )
+        with patch("db.database.create_async_engine", side_effect=fake_create_engine):
+            with pytest.raises(RuntimeError, match="stop"):
+                await dbm.initialize()
+
+        # sslmode → ssl in connect_args
+        assert captured["kwargs"]["connect_args"]["ssl"] == "require"
+        # sslmode stripped from URL → SQLAlchemy dialect can't re-emit it
+        assert "sslmode" not in captured["url"].query
+
+    @pytest.mark.asyncio
+    async def test_initialize_pg_command_timeout_coerced_and_strips_url(self):
+        captured = {}
+
+        def fake_create_engine(url, **kwargs):
+            captured["url"] = url
+            captured["kwargs"] = kwargs
+            raise RuntimeError("stop")
+
+        dbm = DatabaseManager(
+            database_url="postgresql+asyncpg://host/app?command_timeout=30"
+        )
+        with patch("db.database.create_async_engine", side_effect=fake_create_engine):
+            with pytest.raises(RuntimeError, match="stop"):
+                await dbm.initialize()
+
+        # Float coercion at parse time, not at connect time
+        assert captured["kwargs"]["connect_args"]["command_timeout"] == 30.0
+        assert isinstance(captured["kwargs"]["connect_args"]["command_timeout"], float)
+        assert "command_timeout" not in captured["url"].query
+
+    @pytest.mark.asyncio
+    async def test_initialize_pg_combined_keys_all_translated_and_stripped(self):
+        """The combined assertion: with all three keys in one DSN, every one
+        of them must be translated to its asyncpg-acceptable form AND removed
+        from the URL. If any key leaks back through the URL, asyncpg.connect
+        would TypeError at startup. This is the regression test we want every
+        time someone adds a new key to _PG_DIRECT_KWARGS or _PG_SERVER_SETTINGS."""
+        captured = {}
+
+        def fake_create_engine(url, **kwargs):
+            captured["url"] = url
+            captured["kwargs"] = kwargs
+            raise RuntimeError("stop")
+
+        dbm = DatabaseManager(
+            database_url=(
+                "postgresql+asyncpg://host/app"
+                "?sslmode=require&command_timeout=30&application_name=af"
+            )
+        )
+        with patch("db.database.create_async_engine", side_effect=fake_create_engine):
+            with pytest.raises(RuntimeError, match="stop"):
+                await dbm.initialize()
+
+        ca = captured["kwargs"]["connect_args"]
+        assert ca["ssl"] == "require"
+        assert ca["command_timeout"] == 30.0
+        assert ca["server_settings"] == {
+            "application_name": "af",
+            "timezone": "UTC",
+        }
+        # And NONE of the consumed keys remain on the URL.
+        for key in ("sslmode", "command_timeout", "application_name"):
+            assert key not in captured["url"].query, (
+                f"'{key}' leaked back to URL query: {dict(captured['url'].query)}"
+            )
+
+    @pytest.mark.asyncio
+    async def test_initialize_mysql_charset_translates_and_strips_url(self):
+        captured = {}
+
+        def fake_create_engine(url, **kwargs):
+            captured["url"] = url
+            captured["kwargs"] = kwargs
+            raise RuntimeError("stop")
+
+        dbm = DatabaseManager(
+            database_url="mysql+aiomysql://host/app?charset=utf8mb4"
+        )
+        with patch("db.database.create_async_engine", side_effect=fake_create_engine):
+            with pytest.raises(RuntimeError, match="stop"):
+                await dbm.initialize()
+
+        assert captured["kwargs"]["connect_args"]["charset"] == "utf8mb4"
+        # Round 4: MySQL too — even though aiomysql.connect accepts charset
+        # verbatim (no TypeError risk like asyncpg's application_name), we
+        # still strip for consistency, single translator, predictable shape.
+        assert "charset" not in captured["url"].query
+
+    @pytest.mark.asyncio
+    async def test_initialize_mysql_autocommit_coerced_and_strips_url(self):
+        captured = {}
+
+        def fake_create_engine(url, **kwargs):
+            captured["url"] = url
+            captured["kwargs"] = kwargs
+            raise RuntimeError("stop")
+
+        dbm = DatabaseManager(
+            database_url="mysql+aiomysql://host/app?autocommit=false"
+        )
+        with patch("db.database.create_async_engine", side_effect=fake_create_engine):
+            with pytest.raises(RuntimeError, match="stop"):
+                await dbm.initialize()
+
+        # The original bug from TestMysqlQueryParams.test_autocommit_false_coerced_to_bool:
+        # without coercion at parse time, "false" reaches aiomysql as truthy str.
+        assert captured["kwargs"]["connect_args"]["autocommit"] is False
+        assert "autocommit" not in captured["url"].query
+
+    @pytest.mark.asyncio
+    async def test_initialize_pg_unknown_key_fails_at_init_not_connect(self):
+        """Fail-loud invariant: bad DSN keys raise immediately, not 10s later
+        when the connection pool tries to acquire a real asyncpg conn."""
+        dbm = DatabaseManager(
+            database_url="postgresql+asyncpg://host/app?bogus=value"
+        )
+        # Patch create_async_engine so the test never tries to actually connect.
+        # We expect _parse_db_query_params to raise BEFORE create_async_engine
+        # is called; if it raises after, our refactor regressed.
+        with patch(
+            "db.database.create_async_engine",
+            side_effect=AssertionError("create_async_engine should not be called"),
+        ):
+            with pytest.raises(ValueError, match="Unsupported DSN query param 'bogus'"):
+                await dbm.initialize()
+
+    @pytest.mark.asyncio
+    async def test_initialize_pg_single_url_matches_failover_kwargs(self):
+        """End-to-end semantic equivalence: same DSN, same shape via either path.
+
+        Round 4's stated goal — DatabaseManager is the *single* DSN translator.
+        Before round 4 this would have failed: single-URL handled application_name
+        only; failover handled the full set. Different paths, different kwargs.
+        """
+        dsn = (
+            "postgresql+asyncpg://host/app"
+            "?sslmode=require&application_name=af&command_timeout=30"
+        )
+
+        # 1) Single-URL path: capture what initialize() builds.
+        captured = {}
+
+        def fake_create_engine(url, **kwargs):
+            captured["kwargs"] = kwargs
+            raise RuntimeError("stop")
+
+        dbm = DatabaseManager(database_url=dsn)
+        with patch("db.database.create_async_engine", side_effect=fake_create_engine):
+            with pytest.raises(RuntimeError, match="stop"):
+                await dbm.initialize()
+
+        single_url_kwargs = captured["kwargs"]["connect_args"]
+
+        # 2) Failover path: parse via _parse_db_url (excluding host/port/auth
+        # which only the failover path needs) + _apply_session_tz_kwargs.
+        _, failover_kwargs = DatabaseManager._parse_db_url(dsn)
+        # Strip the host/port/auth — those are the failover-specific bits
+        # that don't appear in the single-URL connect_args (SQLAlchemy gets
+        # them via the URL itself, not connect_args).
+        for k in ("host", "port", "database", "db", "user", "password"):
+            failover_kwargs.pop(k, None)
+        failover_kwargs = DatabaseManager._apply_session_tz_kwargs(
+            "postgres", failover_kwargs
+        )
+
+        assert single_url_kwargs == failover_kwargs, (
+            f"Single-URL vs failover diverged on the same DSN:\n"
+            f"single: {single_url_kwargs!r}\n"
+            f"failover: {failover_kwargs!r}"
+        )
+
+
+class TestDialectSmokingGunsRound4:
+    """SQLAlchemy asyncpg dialect: after our sanitize step, the opts dict
+    handed to asyncpg.connect must not contain any key that DatabaseManager
+    has claimed. These are the actual TypeError-at-connect-time risks the
+    refactor closes; tests round 3 handled `application_name` only.
+    """
+
+    def _consumed_then_opts(self, url_str: str, driver: str):
+        from sqlalchemy.engine import make_url
+        from sqlalchemy.dialects.postgresql import asyncpg as asyncpg_dialect
+
+        raw_url = make_url(url_str)
+        _, consumed = DatabaseManager._parse_db_query_params(raw_url, driver)
+        sanitized = raw_url.difference_update_query(consumed)
+        _, opts = asyncpg_dialect.dialect().create_connect_args(sanitized)
+        return consumed, opts
+
+    def test_sanitized_url_no_consumed_keys_in_dialect_opts(self):
+        """Composite assertion: ALL keys DatabaseManager consumed are absent
+        from dialect.create_connect_args opts. This is the round 4 invariant
+        in its strongest form — if any single new key is added to a whitelist
+        but the URL strip path is forgotten, this test fails."""
+        consumed, opts = self._consumed_then_opts(
+            "postgresql+asyncpg://host/app"
+            "?sslmode=require&command_timeout=30&application_name=af",
+            "postgres",
+        )
+        for key in consumed:
+            assert key not in opts, (
+                f"Sanitized URL still emits '{key}' to dialect opts: {opts!r}. "
+                "DatabaseManager._parse_db_query_params claimed this key but "
+                "the URL strip step (difference_update_query) didn't take it "
+                "off the URL — single-URL path would TypeError at connect."
+            )
+
+    def test_unsanitized_url_leaks_at_least_one_consumed_key(self):
+        """Negative control across the round 4 set, not just application_name.
+        If SQLAlchemy upstream ever stops dumping these to top-level opts
+        (e.g. translates sslmode → server_settings on its own), at least one
+        of these assertions will start failing and we'll know our strip step
+        for that key has become redundant."""
+        from sqlalchemy.engine import make_url
+        from sqlalchemy.dialects.postgresql import asyncpg as asyncpg_dialect
+
+        raw_url = make_url(
+            "postgresql+asyncpg://host/app"
+            "?sslmode=require&command_timeout=30&application_name=af"
+        )
+        _, opts = asyncpg_dialect.dialect().create_connect_args(raw_url)
+
+        leaked = {
+            key for key in ("sslmode", "command_timeout", "application_name")
+            if key in opts
+        }
+        assert leaked, (
+            "SQLAlchemy asyncpg dialect no longer leaks ANY of "
+            "{sslmode, command_timeout, application_name} to top-level opts. "
+            "Round 4's URL-strip step may now be unnecessary for all of them. "
+            "Re-verify each before simplifying."
         )

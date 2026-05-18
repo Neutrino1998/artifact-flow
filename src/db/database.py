@@ -8,11 +8,11 @@
 - 连接池管理（MySQL/PostgreSQL）
 """
 
-from typing import Any, Dict, List, Optional, AsyncGenerator, Tuple
+from typing import Any, Dict, FrozenSet, List, Optional, AsyncGenerator, Tuple
 from contextlib import asynccontextmanager
 
 from sqlalchemy import event, text
-from sqlalchemy.engine import make_url
+from sqlalchemy.engine import URL, make_url
 from sqlalchemy.ext.asyncio import (
     create_async_engine,
     AsyncSession,
@@ -135,22 +135,143 @@ class DatabaseManager:
         )
 
     @staticmethod
+    def _parse_db_query_params(
+        url: URL, driver: str
+    ) -> Tuple[Dict[str, Any], FrozenSet[str]]:
+        """Translate DSN query params into driver-specific connect() kwargs.
+
+        Single source of truth for DSN query → driver-kwargs translation,
+        shared by the single-URL path (``initialize``) and the failover
+        path (``_parse_db_url`` → ``_failover_creator``). Centralising the
+        translation makes the two paths semantically identical and lets the
+        caller strip consumed keys from the URL so SQLAlchemy's dialect
+        cannot re-emit them as conflicting top-level kwargs.
+
+        Supported keys (others raise ValueError — fail loud, fail early):
+        - Both drivers: ``ssl_ca`` / ``ssl_cert`` / ``ssl_key`` → SSLContext
+        - PostgreSQL: ``sslmode`` (→ asyncpg ``ssl=``), ``command_timeout``
+          (coerced to float), ``application_name`` (routed to
+          ``server_settings={...}`` — asyncpg.connect rejects it as a
+          top-level kwarg)
+        - MySQL: ``charset``, ``unix_socket``, ``init_command``,
+          ``program_name`` (str); ``autocommit`` (coerced bool)
+
+        ``connect_timeout`` is intentionally NOT accepted — the 5s probe
+        timeout in ``_failover_creator`` is architectural and a DSN-supplied
+        value would collide via Python kwarg duplication.
+
+        Returns:
+            (connect_args, consumed_keys) where connect_args is shaped for
+            ``asyncpg.connect`` / ``aiomysql.connect``, and consumed_keys
+            lists the URL query keys this parser claimed. The single-URL
+            caller MUST strip these via ``URL.difference_update_query`` so
+            SQLAlchemy's asyncpg dialect cannot dump them as top-level
+            kwargs (asyncpg.connect rejects unknown kwargs → TypeError at
+            startup).
+
+        Non-PG/MySQL drivers (e.g. sqlite) → ``({}, frozenset())``.
+
+        Pure function — input ``url`` is not mutated.
+        """
+        if driver not in ("postgres", "mysql"):
+            return {}, frozenset()
+        if not url.query:
+            return {}, frozenset()
+
+        is_pg = driver == "postgres"
+        direct_kwargs = (
+            DatabaseManager._PG_DIRECT_KWARGS if is_pg
+            else DatabaseManager._MYSQL_DIRECT_KWARGS
+        )
+
+        result: Dict[str, Any] = {}
+        consumed: set = set()
+        ssl_file_params: Dict[str, str] = {}
+        pg_sslmode: Optional[str] = None
+        pg_server_settings: Dict[str, str] = {}
+
+        for key, value in url.query.items():
+            if key in DatabaseManager._SSL_FILE_KEYS:
+                ssl_file_params[key] = value
+                consumed.add(key)
+            elif is_pg and key == "sslmode":
+                pg_sslmode = value
+                consumed.add(key)
+            elif is_pg and key in DatabaseManager._PG_SERVER_SETTINGS:
+                pg_server_settings[key] = value
+                consumed.add(key)
+            elif key in direct_kwargs:
+                coerce = direct_kwargs[key]
+                if coerce == "bool":
+                    result[key] = DatabaseManager._coerce_bool(value, key=key)
+                else:
+                    try:
+                        result[key] = coerce(value)
+                    except (TypeError, ValueError) as e:
+                        raise ValueError(
+                            f"DSN query param '{key}' cannot be coerced to "
+                            f"{coerce.__name__}: {value!r}"
+                        ) from e
+                consumed.add(key)
+            else:
+                driver_name = "postgres" if is_pg else "mysql"
+                if is_pg:
+                    supported = ", ".join(sorted(
+                        {"ssl_ca", "ssl_cert", "ssl_key", "sslmode"}
+                        | set(DatabaseManager._PG_DIRECT_KWARGS)
+                        | set(DatabaseManager._PG_SERVER_SETTINGS)
+                    ))
+                else:
+                    supported = ", ".join(sorted(
+                        {"ssl_ca", "ssl_cert", "ssl_key"}
+                        | set(DatabaseManager._MYSQL_DIRECT_KWARGS)
+                    ))
+                raise ValueError(
+                    f"Unsupported DSN query param '{key}' for {driver_name}. "
+                    f"Supported: {supported}"
+                )
+
+        # PG: sslmode (string) and ssl_* (file paths → SSLContext) are two
+        # different ways to configure TLS. Mixing them has ambiguous
+        # semantics (e.g. sslmode=disable + ssl_ca= would silently enable
+        # TLS, reversing the user's intent) and asyncpg does not replicate
+        # libpq's prefer/allow fallback behaviour, so merged semantics
+        # cannot be honoured faithfully. Reject the combination.
+        if is_pg and ssl_file_params and pg_sslmode is not None:
+            raise ValueError(
+                "PostgreSQL DSN cannot mix 'sslmode' with file-based SSL "
+                "params (ssl_ca/ssl_cert/ssl_key). Use either "
+                "'?sslmode=require' (or other mode) alone, or "
+                "'?ssl_ca=/path&ssl_cert=/path&ssl_key=/path' alone."
+            )
+
+        if ssl_file_params:
+            import ssl
+            ctx = ssl.create_default_context()
+            if "ssl_ca" in ssl_file_params:
+                ctx.load_verify_locations(cafile=ssl_file_params["ssl_ca"])
+            if "ssl_cert" in ssl_file_params and "ssl_key" in ssl_file_params:
+                ctx.load_cert_chain(
+                    certfile=ssl_file_params["ssl_cert"],
+                    keyfile=ssl_file_params["ssl_key"],
+                )
+            result["ssl"] = ctx
+        elif pg_sslmode is not None:
+            # asyncpg accepts the mode string directly via ssl=
+            result["ssl"] = pg_sslmode
+
+        if pg_server_settings:
+            result["server_settings"] = pg_server_settings
+
+        return result, frozenset(consumed)
+
+    @staticmethod
     def _parse_db_url(url: str) -> Tuple[str, Dict[str, Any]]:
         """Parse SQLAlchemy URL into driver-specific connect kwargs for failover probes.
 
-        Supported DSN query params (others raise ValueError to prevent silent drops):
-        - Both drivers: ``ssl_ca`` / ``ssl_cert`` / ``ssl_key`` (file paths → SSLContext)
-        - PostgreSQL:
-            - ``sslmode`` (→ asyncpg ``ssl=`` string)
-            - ``command_timeout`` (coerced to float)
-            - ``application_name`` (routed to asyncpg ``server_settings={...}``)
-        - MySQL:
-            - ``charset``, ``unix_socket``, ``init_command``, ``program_name`` (str)
-            - ``autocommit`` (coerced bool)
-
-        ``connect_timeout`` is intentionally NOT accepted on MySQL — the 5s
-        probe timeout in ``_failover_creator`` is an architectural choice and
-        would collide with the DSN value via Python kwarg duplication.
+        Delegates DSN query translation to ``_parse_db_query_params`` —
+        same parser as the single-URL path, so semantics never drift.
+        See that method's docstring for supported query keys.
 
         Returns:
             (driver, kwargs) where driver is "mysql" or "postgres" and kwargs
@@ -159,6 +280,7 @@ class DatabaseManager:
         u = make_url(url)
         backend = u.get_backend_name()
         is_pg = backend.startswith("postgres")
+        driver = "postgres" if is_pg else "mysql"
 
         if is_pg:
             result: Dict[str, Any] = {
@@ -178,86 +300,10 @@ class DatabaseManager:
         if u.password:
             result["password"] = u.password
 
-        if u.query:
-            ssl_file_params: Dict[str, str] = {}
-            pg_sslmode: Optional[str] = None
-            pg_server_settings: Dict[str, str] = {}
+        query_kwargs, _ = DatabaseManager._parse_db_query_params(u, driver)
+        result.update(query_kwargs)
 
-            direct_kwargs = (
-                DatabaseManager._PG_DIRECT_KWARGS if is_pg
-                else DatabaseManager._MYSQL_DIRECT_KWARGS
-            )
-
-            for key, value in u.query.items():
-                if key in DatabaseManager._SSL_FILE_KEYS:
-                    ssl_file_params[key] = value
-                elif is_pg and key == "sslmode":
-                    pg_sslmode = value
-                elif is_pg and key in DatabaseManager._PG_SERVER_SETTINGS:
-                    pg_server_settings[key] = value
-                elif key in direct_kwargs:
-                    coerce = direct_kwargs[key]
-                    if coerce == "bool":
-                        result[key] = DatabaseManager._coerce_bool(value, key=key)
-                    else:
-                        try:
-                            result[key] = coerce(value)
-                        except (TypeError, ValueError) as e:
-                            raise ValueError(
-                                f"DSN query param '{key}' cannot be coerced to "
-                                f"{coerce.__name__}: {value!r}"
-                            ) from e
-                else:
-                    driver_name = "postgres" if is_pg else "mysql"
-                    if is_pg:
-                        supported = ", ".join(sorted(
-                            {"ssl_ca", "ssl_cert", "ssl_key", "sslmode"}
-                            | set(DatabaseManager._PG_DIRECT_KWARGS)
-                            | set(DatabaseManager._PG_SERVER_SETTINGS)
-                        ))
-                    else:
-                        supported = ", ".join(sorted(
-                            {"ssl_ca", "ssl_cert", "ssl_key"}
-                            | set(DatabaseManager._MYSQL_DIRECT_KWARGS)
-                        ))
-                    raise ValueError(
-                        f"Unsupported DSN query param '{key}' for {driver_name} "
-                        f"failover path. Supported: {supported}"
-                    )
-
-            # PG: sslmode (string) and ssl_* (file paths → SSLContext) are two
-            # different ways to configure TLS. Mixing them has ambiguous
-            # semantics (e.g. sslmode=disable + ssl_ca= would silently enable
-            # TLS, reversing the user's intent) and asyncpg does not replicate
-            # libpq's prefer/allow fallback behaviour, so merged semantics
-            # cannot be honoured faithfully. Reject the combination.
-            if is_pg and ssl_file_params and pg_sslmode is not None:
-                raise ValueError(
-                    "PostgreSQL DSN cannot mix 'sslmode' with file-based SSL "
-                    "params (ssl_ca/ssl_cert/ssl_key). Use either "
-                    "'?sslmode=require' (or other mode) alone, or "
-                    "'?ssl_ca=/path&ssl_cert=/path&ssl_key=/path' alone."
-                )
-
-            if ssl_file_params:
-                import ssl
-                ctx = ssl.create_default_context()
-                if "ssl_ca" in ssl_file_params:
-                    ctx.load_verify_locations(cafile=ssl_file_params["ssl_ca"])
-                if "ssl_cert" in ssl_file_params and "ssl_key" in ssl_file_params:
-                    ctx.load_cert_chain(
-                        certfile=ssl_file_params["ssl_cert"],
-                        keyfile=ssl_file_params["ssl_key"],
-                    )
-                result["ssl"] = ctx
-            elif pg_sslmode is not None:
-                # asyncpg accepts the mode string directly via ssl=
-                result["ssl"] = pg_sslmode
-
-            if pg_server_settings:
-                result["server_settings"] = pg_server_settings
-
-        return ("postgres" if is_pg else "mysql", result)
+        return (driver, result)
 
     @staticmethod
     def _apply_session_tz_kwargs(driver: str, kwargs: Dict[str, Any]) -> Dict[str, Any]:
@@ -328,59 +374,49 @@ class DatabaseManager:
             engine_kwargs["pool_recycle"] = self._pool_recycle
             engine_kwargs["pool_pre_ping"] = self._pool_pre_ping
 
-            # 强制 session TZ=UTC,确保 server_default=func.now() / onupdate=func.now()
-            # 写 UTC naive(与 Python utils.time.utc_now 对齐)。这是 compose
-            # -c timezone=UTC 的连接层兜底:云托管 PG(RDS / Aurora / Aliyun RDS)
-            # 和 DATABASE_URLS failover 节点的 server timezone 我们不控制。
-            # 单 URL 路径走 connect_args;failover 路径(async_creator)绕过
-            # connect_args,在下方循环里 per-iteration 再注一遍。
+            # DSN query → driver-kwargs 翻译统一走 _parse_db_query_params(单 URL
+            # 路径和 failover 路径共享同一翻译器,语义不再漂移)。然后用
+            # _apply_session_tz_kwargs 兜底注入 UTC,最后 difference_update_query
+            # 把 parser 消费过的 query key 从 URL 上剥掉。
             #
-            # DSN 已有的 session-affecting kwargs 必须先抽出来 merge 给 helper,
-            # 否则 connect_args["server_settings"] / connect_args["init_command"]
-            # 会以 top-level dict 替换的方式整 key 覆盖 SQLAlchemy 从 URL query
-            # 解析出的值(SQLAlchemy doc: "connect_args take precedence over URL
-            # query params with the same key")。具体:`?application_name=af` 会
-            # 被 SQLAlchemy 翻成 server_settings={"application_name":"af"},
-            # 直接给 helper `{}` → helper 输出 {"timezone":"UTC"} → 覆盖,
-            # application_name 静默丢失。MySQL `?init_command=...` 同款症状。
-            # (Incident 2026-05-14 PR-tz-unify reviewer round 2)
+            # 三层封装边界对齐:
+            # 1. DatabaseManager 是 *唯一* DSN query 翻译层,SQLAlchemy dialect
+            #    不再"二次解释"任何 query key。
+            # 2. connect_args 是 driver 接收的最终 kwargs(asyncpg.connect /
+            #    aiomysql.connect),已经包含会话级 setting(timezone, application_name,
+            #    init_command 等)。
+            # 3. engine_url 是 SQLAlchemy 看到的 URL,已剥掉被 parser 消费的 key
+            #    避免 SQLAlchemy asyncpg dialect 的 create_connect_args 把 url.query
+            #    再以 top-level kwarg 形式塞给 asyncpg.connect(asyncpg signature
+            #    不接受 application_name / sslmode 顶层 kwarg → TypeError)。
+            #
+            # 失败模式覆盖(reviewer round 1–4 累积):
+            # - round 1: 云托管 PG / DATABASE_URLS failover 节点的 server timezone
+            #   不在 compose -c timezone=UTC 覆盖范围 → 连接层兜底注入。
+            # - round 2: connect_args 整 dict 覆盖 → 把 DSN 已有 application_name /
+            #   init_command 先抽出来,setdefault / prepend 合并保留。
+            # - round 3: SQLAlchemy asyncpg dialect 把 url.query 整 dict dump 成
+            #   asyncpg.connect 顶层 kwarg → 从 URL 剥掉 _PG_SERVER_SETTINGS 已知 key。
+            # - round 4: 让 DatabaseManager 立为唯一翻译层(本段),sslmode /
+            #   command_timeout / ssl_* 等已知 PG 翻译 key、charset / autocommit
+            #   等 MySQL 翻译 key 也走同一路径剥离,把 round 3 的 application_name
+            #   补全到 reviewer 在 round 3 中列出的整张表。
             url = make_url(self.database_url)
             backend = url.get_backend_name()
+            driver: Optional[str] = None
             if backend.startswith("postgres"):
-                # 把 _PG_SERVER_SETTINGS 已知的 query key 收集到 server_settings,
-                # 让 helper 走 setdefault 路径而非整 dict 替换。
-                existing: Dict[str, Any] = {}
-                server_settings = {
-                    k: url.query[k] for k in self._PG_SERVER_SETTINGS
-                    if k in url.query
-                }
-                if server_settings:
-                    existing["server_settings"] = server_settings
-                    # 抽完必须从 URL 剥掉 —— 否则 SQLAlchemy asyncpg dialect
-                    # 的 create_connect_args 会把 url.query 整 dict 拷到 opts,
-                    # application_name 会作为 top-level kwarg 传给 asyncpg.connect。
-                    # asyncpg.connect signature 不接受 application_name 顶层 kwarg
-                    # (必须经 server_settings),会抛 TypeError 启动失败。
-                    # connect_args["server_settings"] 已经接管这些 key,URL 那条
-                    # 路径是冗余的有害副本。MySQL 不需要 sanitize:aiomysql.connect
-                    # 接受 init_command 作为合法 kwarg,二次传递 connect_args 覆盖
-                    # 即可,无 TypeError 风险。
-                    # (Incident 2026-05-14 PR-tz-unify reviewer round 3)
-                    engine_url = url.difference_update_query(
-                        self._PG_SERVER_SETTINGS
-                    )
-                engine_kwargs["connect_args"] = self._apply_session_tz_kwargs(
-                    "postgres", existing
-                )
+                driver = "postgres"
             elif backend.startswith("mysql"):
-                # init_command 是 MySQL 唯一会被 helper 改写的 key(它走 prepend
-                # 合并),把 DSN 已有的喂进去,helper 会保留。
-                existing = {}
-                if "init_command" in url.query:
-                    existing["init_command"] = url.query["init_command"]
-                engine_kwargs["connect_args"] = self._apply_session_tz_kwargs(
-                    "mysql", existing
+                driver = "mysql"
+            if driver is not None:
+                query_kwargs, consumed_keys = self._parse_db_query_params(
+                    url, driver
                 )
+                engine_kwargs["connect_args"] = self._apply_session_tz_kwargs(
+                    driver, query_kwargs
+                )
+                if consumed_keys:
+                    engine_url = url.difference_update_query(consumed_keys)
 
             # 多地址 failover：primary-first 尝试
             if self._database_urls and len(self._database_urls) > 1:
