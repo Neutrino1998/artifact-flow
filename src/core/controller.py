@@ -179,12 +179,29 @@ class ExecutionController:
         # post-processing) can read it. Stays False until _persist_events
         # returns True in the inner try block.
         events_persisted = False
-        # Tracks whether the success-path update_response_async actually wrote
-        # Message.response. Late-cancel handler uses this to avoid overwriting
-        # a successfully-stored response (cancel hit at update_metadata, AFTER
-        # response already committed) — only writes the CANCELLED_RESPONSE_BY_SYSTEM
-        # placeholder when the response field is still empty.
-        response_updated = False
+        # Tracks whether the success path has *attempted* to write
+        # Message.response (set BEFORE the await, not after). Late-cancel handler
+        # uses this to decide whether to write the CANCELLED_RESPONSE_BY_SYSTEM
+        # placeholder.
+        #
+        # Why "attempted" and not "succeeded":
+        # `await update_response_async(...)` from Python's view is one line, but
+        # the actual sequence is "Python serializes SQL → kernel send → wire →
+        # DB commit → ack back → Python wakes up". CancelledError can land mid-
+        # await AFTER the DB has already committed but BEFORE Python sets a
+        # success flag — asyncio cancellation cannot unsend bytes that already
+        # left the machine. If the flag were set after the await, late-handler
+        # would observe `response_update_attempted=False` and overwrite a
+        # successfully-committed real response with the system-cancel placeholder.
+        # Reviewer reproduced this race; call_args_list went
+        # ['real output', '*Task cancelled by system*'].
+        #
+        # Semantics: "I have claimed the response slot." Whoever sets this first
+        # owns the write. If their attempt fails (transient DB issue, not cancel),
+        # the late-handler still won't retry — Message.response stays NULL, UI
+        # bubble for that turn won't render, events are still in DB. Same shape
+        # as update_metadata failures: partial-write but observable.
+        response_update_attempted = False
 
         async def emit_to_queue(event_dict):
             """emit callback: 实时推送事件到 queue"""
@@ -498,13 +515,18 @@ class ExecutionController:
                     # events 已落库 → 可以更新 Message.response 和 metadata（best-effort）
                     # display_response 已处理 success / cancelled；error 单独兜底文案。
                     final_response = (response or "An error occurred during execution.") if has_error else display_response
+                    # CLAIM the response slot BEFORE the await — see the
+                    # response_update_attempted declaration at the top of
+                    # stream_execute for the race rationale. If cancel lands
+                    # mid-await (DB commit may have already happened), late
+                    # handler must see the flag set and skip overwriting.
+                    response_update_attempted = True
                     try:
                         await self._with_db_retry(
                             lambda cm, er, am: cm.update_response_async(
                                 conv_id=conversation_id, message_id=message_id, response=final_response,
                             )
                         )
-                        response_updated = True
                     except Exception as resp_err:
                         # events 已成功 → 历史正确，仅显示可能短暂落后，不把终态转为 ERROR
                         logger.warning(
@@ -618,10 +640,15 @@ class ExecutionController:
             # the next turn's LLM has no history of this turn. Mirrors the
             # success-path's events_persisted gate.
             #
-            # Also skip when response_updated is True (cancel hit at
-            # update_metadata, AFTER response already committed with real engine
-            # output — overwriting would clobber the real content).
-            if events_in_db and not response_updated:
+            # Also skip when response_update_attempted is True. The flag is set
+            # BEFORE the success-path's `await update_response_async(...)` (not
+            # after) precisely to defeat the cancel-mid-await race: if cancel
+            # lands while the await is suspended, the DB may have already
+            # committed but Python never reached a post-await `flag = True`.
+            # Without the "claim before await" pattern, late-handler here would
+            # observe attempted=False and overwrite the freshly-committed real
+            # response with the system-cancel placeholder.
+            if events_in_db and not response_update_attempted:
                 try:
                     await self._with_db_retry(
                         lambda cm, er, am: cm.update_response_async(

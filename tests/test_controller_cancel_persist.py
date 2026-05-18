@@ -523,6 +523,85 @@ class TestPersistOnExternalCancel:
         kinds = [e["type"] for e in events]
         assert StreamEventType.CANCELLED.value in kinds
 
+    async def test_response_update_race_does_not_double_write(self):
+        """
+        Cancel-mid-await race (reviewer P2): cancel lands during
+        `await update_response_async(...)` — AFTER the DB may have committed
+        but BEFORE the success path can set a "wrote it" flag. asyncio
+        cancellation cannot unsend bytes that already left the machine, so
+        the DB row is updated yet Python observes only CancelledError.
+
+        Without the "claim slot BEFORE the await" pattern, the late-cancel
+        handler observes response_update_attempted=False, calls
+        update_response_async again with CANCELLED_RESPONSE_BY_SYSTEM, and
+        clobbers the freshly-committed real response. Reviewer reproduced
+        this exactly: call_args_list went
+        ['real engine output', '*Task cancelled by system*'].
+
+        We simulate the race by having the mock raise CancelledError after
+        recording the call — equivalent to "DB commit happened, but our
+        await was cancelled before returning". The fix sets
+        response_update_attempted BEFORE the await, so late handler sees
+        True and skips.
+        """
+        cm = _make_mock_conversation_manager()
+        am = _make_mock_artifact_manager()
+        er, _ = _capturing_event_repo()
+        ctrl = _make_controller(cm, er, am)
+
+        update_response_calls = []
+
+        async def racing_update_response(*args, **kwargs):
+            # Record the call first (DB "commit" conceptually happens before
+            # we'd return). Then raise CancelledError mid-await.
+            update_response_calls.append(kwargs.get("response"))
+            raise asyncio.CancelledError()
+
+        cm.update_response_async = AsyncMock(side_effect=racing_update_response)
+
+        async def fake_execute_loop(**kwargs):
+            kwargs["state"]["events"].append(ExecutionEvent(
+                event_type=StreamEventType.LLM_COMPLETE.value,
+                agent_name="lead_agent",
+                data={"content": "real engine output"},
+                is_historical=False,
+            ))
+            return {
+                **kwargs["state"],
+                "completed": True,
+                "cancelled": False,
+                "error": False,
+                "response": "real engine output",
+            }
+
+        async def consume():
+            return [event async for event in ctrl.stream_execute(
+                user_input="hi",
+                conversation_id="conv-test",
+                parent_message_id=None,
+                message_id="msg-test",
+            )]
+
+        with patch("core.controller.execute_loop", side_effect=fake_execute_loop):
+            with pytest.raises(asyncio.CancelledError):
+                await consume()
+
+        # CRITICAL: exactly one call, with the real response. A second call
+        # would mean the late handler observed response_update_attempted=False
+        # and "rescued" by writing the placeholder — overwriting the real
+        # response that the DB already committed.
+        assert len(update_response_calls) == 1, (
+            f"Response slot double-written. Calls: {update_response_calls}. "
+            f"Cancel-mid-await race regression: response_update_attempted must "
+            f"be set BEFORE `await update_response_async`, not after — late "
+            f"handler is observing the post-await flag state."
+        )
+        from config import config
+        assert update_response_calls[0] != config.CANCELLED_RESPONSE_BY_SYSTEM, (
+            f"First (and only) call must be the success-path's real response, "
+            f"got the system-cancel placeholder: {update_response_calls[0]!r}"
+        )
+
     async def test_late_cancel_skips_response_update_when_already_committed(self):
         """
         If post-processing's update_response_async already committed (cancel
