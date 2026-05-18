@@ -710,7 +710,9 @@ df_lag     = pd.read_json("data/observability/loop-lag.jsonl", lines=True)
 
 ## PR-tz-unify:事件时间戳时区统一(P3)✅ 已完成
 
-**落地记录**(commit 在 `main`,待提交):
+**落地记录**(commits 在 `main`):
+
+第一轮(initial 落地,commit `263dc25`):
 - 新增 `src/utils/time.utc_now()` 作为后端 naive UTC 单一入口;新增 `frontend/src/lib/time.parseUtcIso()` 把后端发来的 naive ISO 锚定为 UTC
 - 后端热路径所有 `datetime.now()` → `utc_now()`:`core/events.py:55` `ExecutionEvent.created_at` 默认值、`core/engine.py`(metrics start/completed + 5 处 timestamp/duration 起点)、`core/controller.py`(5 处 timestamp)、`core/compaction_runner.py`(start/duration/timestamp)、`core/conversation_manager.py`(message timestamp)、`tools/builtin/artifact_ops.py`(`ArtifactMemory.created_at/updated_at` + `persisted_at`)、`tools/builtin/web_fetch.py`(3 处 fetched_at)、`api/routers/{chat,artifacts,stream}.py`(error event timestamp + memory fallback)、`api/schemas/events.py`(`SSEEvent.timestamp` default_factory + `from_dict` fallback)、`api/services/{controller_factory,stream_transport}.py`、`observability/{watchdog,sampler,admin_runtime}.py`(jsonl ts 字段从 aware UTC → naive UTC 与 threshold 对齐)
 - 显示侧:`ObservabilityPanel.tsx`(formatTime helper + 三处 created_at + 一处 updated_at)、`sidebar/ConversationItem.tsx`、`sidebar/AdminConversationList.tsx`、`forms/UserDetailForm.tsx`、`chat/ConversationBrowser.tsx`、`artifact/ArtifactList.tsx` 一律 `new Date(...)` → `parseUtcIso(...)`
@@ -727,7 +729,12 @@ df_lag     = pd.read_json("data/observability/loop-lag.jsonl", lines=True)
 
 **与 PR-obs-lite 的约束**:`observability_report.py` threshold 已经是 naive UTC(L121-123),实现层本就对;事故是 Python 写入路径偏了,本 PR 修这一边,threshold 表达式不变、只更新注释。
 
-**PG 部署运维要求**:PG 数据库会话 `TIMEZONE=UTC`(`docker-compose` 的 postgres 服务环境变量加 `PGTZ=UTC` 或 `-c timezone=UTC`),否则 `server_default=func.now()` 在非 UTC PG 上仍会写 session-local naive,跟 Python `utc_now()` 漂。SQLite 自动 UTC,无需配置。
+**PG 部署运维要求**(round 1 后已在代码层兜住,见下):自托管 PG 容器配 `-c timezone=UTC`(四个 compose 全已加);云托管 PG(RDS / Aurora) + DATABASE_URLS failover 节点的 server timezone 由 `src/db/database.py._apply_session_tz_kwargs` 在连接层强制(asyncpg `server_settings={"timezone": "UTC"}` / aiomysql `init_command="SET time_zone='+00:00'"`),不依赖部署者配置。SQLite 自动 UTC,无需配置。
+
+第二轮(reviewer round 1,P1 一条二修):
+- **P1 #1 漏改的 compose**:reviewer 戳出 root 还有三个 compose,intranet 第一轮只覆盖了 `deploy/docker-compose.intranet.yml`。补 `docker-compose.prod.yml`(Mode 2 prod,同款 `command` 加 `-c timezone=UTC`)+ `docker-compose.dev.yml`(dev infra,`postgresql` profile 加 `command: postgres -c timezone=UTC`)。`docker-compose.yml`(Mode 1 Quick Trial)是 SQLite-only,不涉及
+- **P1 #2 DB 连接层兜底**:compose flag 不覆盖云托管 PG(RDS / Aurora / Aliyun RDS)与 DATABASE_URLS failover 节点 —— 我们不控制服务器 timezone GUC。采纳建议在 `src/db/database.py` 加 session-TZ 强制:新增 `_apply_session_tz_kwargs(driver, kwargs)` 纯函数 helper(setdefault 语义,不覆盖 DSN 显式 timezone / 不破坏已有 server_settings),`initialize()` 非 SQLite 分支按 URL backend 注入 `connect_args`(单 URL 路径),`_failover_creator` per-iteration 注入(`async_creator` 绕过 SQLAlchemy `connect_args`,必须再注一遍)。+ 11 个新测试覆盖 helper 6 个不变量 + 5 个集成场景(failover probe / initialize PG / MySQL / SQLite passthrough)
+- CLAUDE.md "Time convention" bullet 更新一句:云 PG / failover 由 database.py 强制,不只靠 compose flag
 
 ---
 

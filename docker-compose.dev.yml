@@ -35,6 +35,11 @@ services:
       POSTGRES_DB: artifactflow
       POSTGRES_USER: artifactflow
       POSTGRES_PASSWORD: artifactflow
+    # timezone=UTC: keep dev-mode PG aligned with prod/intranet so server_default=
+    # func.now() writes UTC naive (matches Python utils.time.utc_now). See
+    # src/db/database.py connect_args server_settings for the cloud-PG fallback.
+    # (Incident 2026-05-14 PR-tz-unify.)
+    command: postgres -c timezone=UTC
     volumes:
       - pg_data:/var/lib/postgresql/data
     healthcheck:

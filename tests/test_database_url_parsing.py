@@ -324,3 +324,168 @@ class TestFailoverProbeKwargs:
         assert call_kwargs["charset"] == "utf8mb4"
         assert call_kwargs["autocommit"] is False  # coerced to bool
         assert call_kwargs["connect_timeout"] == 5  # hardcoded probe value
+
+
+# ============================================================
+# Session TZ injection: defense-in-depth beyond compose -c timezone=UTC.
+# Cloud PG (RDS) / DATABASE_URLS failover targets aren't covered by compose
+# flags — _apply_session_tz_kwargs forces UTC at connect time regardless of
+# server config. (Incident 2026-05-14 PR-tz-unify reviewer round 1.)
+# ============================================================
+
+
+class TestSessionTzInjection:
+    """Unit tests for `_apply_session_tz_kwargs` injection helper."""
+
+    def test_pg_empty_kwargs_gets_timezone_utc(self):
+        out = DatabaseManager._apply_session_tz_kwargs("postgres", {})
+        assert out == {"server_settings": {"timezone": "UTC"}}
+
+    def test_pg_preserves_existing_server_settings(self):
+        # DSN-supplied application_name (via _parse_db_url server_settings
+        # routing) must survive UTC injection.
+        out = DatabaseManager._apply_session_tz_kwargs(
+            "postgres", {"server_settings": {"application_name": "af"}}
+        )
+        assert out["server_settings"] == {
+            "application_name": "af",
+            "timezone": "UTC",
+        }
+
+    def test_pg_user_explicit_timezone_wins(self):
+        # If operator explicitly set timezone in DSN we don't fight them
+        # (setdefault semantics) — covers edge case for cross-TZ debugging.
+        out = DatabaseManager._apply_session_tz_kwargs(
+            "postgres", {"server_settings": {"timezone": "Asia/Tokyo"}}
+        )
+        assert out["server_settings"]["timezone"] == "Asia/Tokyo"
+
+    def test_mysql_empty_kwargs_gets_init_command(self):
+        out = DatabaseManager._apply_session_tz_kwargs("mysql", {})
+        assert out == {"init_command": "SET time_zone='+00:00'"}
+
+    def test_mysql_prepends_existing_init_command(self):
+        # Operator-supplied init_command runs AFTER our SET so they can
+        # override if needed (MySQL parses sequentially).
+        out = DatabaseManager._apply_session_tz_kwargs(
+            "mysql", {"init_command": "SET autocommit=1"}
+        )
+        assert out["init_command"] == "SET time_zone='+00:00'; SET autocommit=1"
+
+    def test_unknown_driver_passthrough(self):
+        # SQLite / unknown drivers untouched — no session TZ concept.
+        out = DatabaseManager._apply_session_tz_kwargs(
+            "sqlite", {"check_same_thread": False}
+        )
+        assert out == {"check_same_thread": False}
+
+    def test_does_not_mutate_input(self):
+        # Failover loop reuses parsed_urls every reconnect; mutation would
+        # accumulate `SET time_zone` prepends or wedge server_settings.
+        src = {"server_settings": {"application_name": "af"}}
+        DatabaseManager._apply_session_tz_kwargs("postgres", src)
+        assert src == {"server_settings": {"application_name": "af"}}
+
+        src_my = {"init_command": "SET autocommit=1"}
+        DatabaseManager._apply_session_tz_kwargs("mysql", src_my)
+        assert src_my == {"init_command": "SET autocommit=1"}
+
+    @pytest.mark.asyncio
+    async def test_failover_probe_applies_session_tz(self):
+        """End-to-end probe path through `_apply_session_tz_kwargs`:
+        the kwargs reaching asyncpg.connect must include UTC even though
+        async_creator bypasses SQLAlchemy connect_args.
+
+        Mirrors test_postgres_probe_passes_translated_kwargs but inserts
+        the session-TZ injection step that runs inside `_failover_creator`
+        before each connect attempt.
+        """
+        dbm = DatabaseManager(
+            database_url="postgresql+asyncpg://primary/app",
+            database_urls=[
+                "postgresql+asyncpg://primary/app?application_name=af",
+                "postgresql+asyncpg://replica/app?application_name=af",
+            ],
+        )
+        parsed = [dbm._parse_db_url(u) for u in dbm._database_urls]
+        driver = parsed[0][0]
+
+        fake_conn = object()
+        mock_connect = AsyncMock(return_value=fake_conn)
+        import types
+        fake_asyncpg = types.SimpleNamespace(connect=mock_connect)
+
+        with patch.dict("sys.modules", {"asyncpg": fake_asyncpg}):
+            async def _probe():
+                import asyncpg
+                for _, kwargs in parsed:
+                    # Mirror _failover_creator's per-iteration injection
+                    kwargs = DatabaseManager._apply_session_tz_kwargs(driver, kwargs)
+                    return await asyncpg.connect(**kwargs, timeout=5)
+
+            await _probe()
+
+        call_kwargs = mock_connect.call_args.kwargs
+        # Both DSN-derived application_name and injected timezone present
+        assert call_kwargs["server_settings"] == {
+            "application_name": "af",
+            "timezone": "UTC",
+        }
+
+    @pytest.mark.asyncio
+    async def test_initialize_pg_engine_kwargs_include_session_tz(self):
+        """Single-URL PG initialize wires session-TZ into connect_args so
+        SQLAlchemy → asyncpg sends `SET TIMEZONE = UTC` at connect time."""
+        captured = {}
+
+        def fake_create_engine(url, **kwargs):
+            captured["url"] = str(url)
+            captured["kwargs"] = kwargs
+            # Raise to stop initialize() before it tries to connect.
+            raise RuntimeError("stop-after-engine-build")
+
+        dbm = DatabaseManager(database_url="postgresql+asyncpg://host/app")
+        with patch("db.database.create_async_engine", side_effect=fake_create_engine):
+            with pytest.raises(RuntimeError, match="stop-after-engine-build"):
+                await dbm.initialize()
+
+        assert "connect_args" in captured["kwargs"]
+        assert captured["kwargs"]["connect_args"] == {
+            "server_settings": {"timezone": "UTC"}
+        }
+
+    @pytest.mark.asyncio
+    async def test_initialize_mysql_engine_kwargs_include_session_tz(self):
+        captured = {}
+
+        def fake_create_engine(url, **kwargs):
+            captured["kwargs"] = kwargs
+            raise RuntimeError("stop")
+
+        dbm = DatabaseManager(database_url="mysql+aiomysql://host/app")
+        with patch("db.database.create_async_engine", side_effect=fake_create_engine):
+            with pytest.raises(RuntimeError, match="stop"):
+                await dbm.initialize()
+
+        assert captured["kwargs"]["connect_args"] == {
+            "init_command": "SET time_zone='+00:00'"
+        }
+
+    @pytest.mark.asyncio
+    async def test_initialize_sqlite_unchanged(self):
+        """SQLite branch must NOT get session-TZ kwargs — SQLite has no
+        session timezone concept and stdlib CURRENT_TIMESTAMP is UTC."""
+        captured = {}
+
+        def fake_create_engine(url, **kwargs):
+            captured["kwargs"] = kwargs
+            raise RuntimeError("stop")
+
+        dbm = DatabaseManager(database_url="sqlite+aiosqlite:///:memory:")
+        with patch("db.database.create_async_engine", side_effect=fake_create_engine):
+            with pytest.raises(RuntimeError, match="stop"):
+                await dbm.initialize()
+
+        # SQLite path keeps only check_same_thread — no server_settings /
+        # init_command leakage.
+        assert captured["kwargs"]["connect_args"] == {"check_same_thread": False}

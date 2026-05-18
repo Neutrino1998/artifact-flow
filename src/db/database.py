@@ -259,6 +259,40 @@ class DatabaseManager:
 
         return ("postgres" if is_pg else "mysql", result)
 
+    @staticmethod
+    def _apply_session_tz_kwargs(driver: str, kwargs: Dict[str, Any]) -> Dict[str, Any]:
+        """Inject UTC session-TZ into driver connect kwargs (shallow copy).
+
+        Defense-in-depth beyond compose `-c timezone=UTC`: cloud-managed PG
+        (RDS / Aurora / Aliyun RDS) and DATABASE_URLS failover targets have
+        server timezone we don't control. Forcing the session GUC at connect
+        time guarantees `server_default=func.now()` / `onupdate=func.now()`
+        match Python `utils.time.utc_now`. (Incident 2026-05-14 PR-tz-unify.)
+
+        - postgres: `setdefault` inside `server_settings` so DSN-supplied
+          keys (application_name etc.) are preserved; user-supplied
+          `timezone` wins on purpose (we don't fight explicit overrides).
+        - mysql: prepend `SET time_zone='+00:00'` to init_command;
+          aiomysql runs it post-handshake, semicolon-joined when user
+          supplied their own (MySQL parses sequentially).
+        - other (sqlite / unknown): returned unchanged.
+
+        Pure function — caller dict is never mutated, enabling reuse on
+        every failover reconnect with the same parsed kwargs.
+        """
+        out = dict(kwargs)
+        if driver == "postgres":
+            server_settings = dict(out.get("server_settings", {}))
+            server_settings.setdefault("timezone", "UTC")
+            out["server_settings"] = server_settings
+        elif driver == "mysql":
+            existing = out.get("init_command")
+            out["init_command"] = (
+                f"SET time_zone='+00:00'; {existing}" if existing
+                else "SET time_zone='+00:00'"
+            )
+        return out
+
     async def initialize(self) -> None:
         """
         初始化数据库
@@ -291,6 +325,23 @@ class DatabaseManager:
             engine_kwargs["pool_recycle"] = self._pool_recycle
             engine_kwargs["pool_pre_ping"] = self._pool_pre_ping
 
+            # 强制 session TZ=UTC,确保 server_default=func.now() / onupdate=func.now()
+            # 写 UTC naive(与 Python utils.time.utc_now 对齐)。这是 compose
+            # -c timezone=UTC 的连接层兜底:云托管 PG(RDS / Aurora / Aliyun RDS)
+            # 和 DATABASE_URLS failover 节点的 server timezone 我们不控制。
+            # 单 URL 路径走 connect_args;failover 路径(async_creator)绕过
+            # connect_args,在下方循环里 per-iteration 再注一遍。
+            # (Incident 2026-05-14 PR-tz-unify reviewer round 1)
+            backend = make_url(self.database_url).get_backend_name()
+            if backend.startswith("postgres"):
+                engine_kwargs["connect_args"] = self._apply_session_tz_kwargs(
+                    "postgres", {}
+                )
+            elif backend.startswith("mysql"):
+                engine_kwargs["connect_args"] = self._apply_session_tz_kwargs(
+                    "mysql", {}
+                )
+
             # 多地址 failover：primary-first 尝试
             if self._database_urls and len(self._database_urls) > 1:
                 parsed_urls = [self._parse_db_url(u) for u in self._database_urls]
@@ -314,6 +365,11 @@ class DatabaseManager:
 
                     errors = []
                     for _, kwargs in parsed_urls:  # 固定顺序，不轮转
+                        # async_creator 绕过 SQLAlchemy connect_args,session TZ
+                        # 必须在每次连接尝试时再注一遍(见 _apply_session_tz_kwargs
+                        # docstring)。pure 函数返回新 dict,parsed_urls 不被改写,
+                        # 后续重连/失败重试可重复调用。
+                        kwargs = self._apply_session_tz_kwargs(driver, kwargs)
                         try:
                             return await connect_fn(**kwargs, **{timeout_kw: 5})
                         except Exception as e:
