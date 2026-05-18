@@ -82,7 +82,7 @@ INFRA_ARCHIVE="$OUTDIR/artifactflow-infra-${INFRA_SLUG}.tar.gz"
 # deployment; the analyst host can be a different machine entirely.
 #
 # Why this is NOT for py-spy anymore: py-spy is baked into the backend image
-# (see Dockerfile builder stage), invoked via `docker exec backend py-spy`.
+# (see Dockerfile builder stage), invoked via `docker compose ... exec backend py-spy`.
 # That collapses the previous "ship binary, install on host, hope cloud
 # allows host ptrace_scope=0" path into a single container-scope cap_add.
 # This tar is now genuinely just analyst-side offline pip install material.
@@ -243,8 +243,10 @@ Role:
                  backend deployment; analyst host can be a separate machine.
 
   NB: py-spy used to ship here too but now lives inside the backend image
-  (Dockerfile + compose cap_add: [SYS_PTRACE]). For in-container forensics
-  use \`docker exec backend py-spy ...\` directly.
+  (Dockerfile + compose cap_add: [SYS_PTRACE]). For in-container forensics:
+    docker compose -f deploy/docker-compose.intranet.yml exec backend \\
+      py-spy dump --pid 1
+  (service-name-based; compose-generated container name is not \`backend\`)
 
 Contents:
   wheels/*.whl    — pandas + numpy + transitive deps for offline install
@@ -357,7 +359,9 @@ fi
   fi
   echo ""
   echo "Backend image embeds py-spy (Dockerfile builder stage); compose enables"
-  echo "cap_add: [SYS_PTRACE] for \`docker exec backend py-spy ...\` backup path."
+  echo "cap_add: [SYS_PTRACE] for the backup attach path:"
+  echo "  docker compose -f deploy/docker-compose.intranet.yml exec backend \\"
+  echo "    py-spy dump --pid 1"
 } > "$MANIFEST"
 
 echo ""
@@ -415,11 +419,14 @@ $ANALYST_FOOTER
     tar xzf artifactflow-deploy-${VERSION}.tar.gz
     tar xzf artifactflow-config-${VERSION}.tar.gz${INFRA_LOAD_LN}
     docker load -i artifactflow-app-${VERSION}.tar.gz${ANALYST_RECIPE}
-    # Preflight: 2 checks (analyst-tools wheels resolve + py-spy in backend container).
+    # Preflight pass 1 — before \`up\`, only analyst-tools wheels can be verified.
+    # The py-spy check ℹ-skips because backend isn't running yet.
     ./deploy/scripts/preflight.sh
     cp deploy/.env.intranet.example deploy/.env && vi deploy/.env
     AF_VERSION=${VERSION} docker compose -f deploy/docker-compose.intranet.yml --profile infra up -d
     # No pause/resume here — there's nothing running to pause.
+    # Preflight pass 2 — after \`up\`, now verifies py-spy lives in the image.
+    ./deploy/scripts/preflight.sh
 
   # ---- Roll-update (no infra, no analyst-tools re-ship) ----
   scp dist/artifactflow-{app,config,deploy}-${VERSION}.tar.gz{,.sha256} \\
