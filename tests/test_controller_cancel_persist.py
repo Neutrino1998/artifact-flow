@@ -644,3 +644,73 @@ class TestPersistOnExternalCancel:
         # batch_create was attempted (and failed) — the swallow must be loud-logged
         # by the controller, but we just assert it was called.
         er.batch_create.assert_called_once()
+
+        # CRITICAL invariant: when events fail to persist, Message.response MUST
+        # NOT be written either. Writing "*Task cancelled by system*" without
+        # corresponding events creates a "cancel-shown-but-events-missing" state
+        # — UI shows cancelled, but next turn's LLM has no history of this turn.
+        # Mirrors the success-path's `if not events_persisted` ERROR-override.
+        cm.update_response_async.assert_not_called()
+
+    async def test_late_cancel_persist_failure_does_not_write_response(self):
+        """
+        Twin of the previous test, but for the post-processing late-cancel path
+        (controller.py late-cancel handler). When the late _persist_events call
+        fails (or raises), the handler must not write the cancel placeholder to
+        Message.response — same "events-in-DB invariant" as the engine_task path.
+        Reviewer reproduced this gap on the engine_task path; the late-cancel
+        handler had the same bug.
+        """
+        cm = _make_mock_conversation_manager()
+        # Slow exists_async so we can land the cancel during post-processing
+        exists_started = asyncio.Event()
+
+        async def slow_exists(*args, **kwargs):
+            exists_started.set()
+            await asyncio.sleep(60)
+            return True
+
+        cm.exists_async = AsyncMock(side_effect=slow_exists)
+
+        am = _make_mock_artifact_manager()
+        # batch_create blows up — late-cancel persist will fail
+        er = MagicMock()
+        er.batch_create = AsyncMock(side_effect=RuntimeError("DB exploded mid-late-cancel"))
+        ctrl = _make_controller(cm, er, am)
+
+        async def fake_execute_loop(**kwargs):
+            kwargs["state"]["events"].append(ExecutionEvent(
+                event_type=StreamEventType.LLM_COMPLETE.value,
+                agent_name="lead_agent",
+                data={"content": "engine done; cancel hits exists_async; DB then dies"},
+                is_historical=False,
+            ))
+            return {
+                **kwargs["state"],
+                "completed": True,
+                "cancelled": False,
+                "error": False,
+                "response": "",
+            }
+
+        async def consume():
+            return [event async for event in ctrl.stream_execute(
+                user_input="hi",
+                conversation_id="conv-test",
+                parent_message_id=None,
+                message_id="msg-test",
+            )]
+
+        with patch("core.controller.execute_loop", side_effect=fake_execute_loop):
+            consume_task = asyncio.create_task(consume())
+            await asyncio.wait_for(exists_started.wait(), timeout=5)
+            await asyncio.sleep(0)
+            consume_task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await consume_task
+
+        # batch_create was attempted (and failed) by the late-cancel handler
+        er.batch_create.assert_called_once()
+        # And update_response_async was NOT called — refusing to create the
+        # cancel-shown-but-events-missing state
+        cm.update_response_async.assert_not_called()

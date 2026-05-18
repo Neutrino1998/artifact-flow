@@ -241,8 +241,9 @@ class ExecutionController:
                         "execution_metrics": initial_state.get("execution_metrics", {}),
                     },
                 ))
+                persisted = False
                 try:
-                    await self._persist_events(message_id, initial_state)
+                    persisted = await self._persist_events(message_id, initial_state)
                 except Exception as persist_err:
                     # Swallow to preserve CancelledError propagation; loud-log so ops sees it.
                     logger.exception(
@@ -251,21 +252,37 @@ class ExecutionController:
                 # Sync Message.response so the frontend renders the bubble +
                 # event flow at all — MessageList gates AssistantMessage on
                 # response being non-empty, and the events list is nested
-                # inside AssistantMessage. Without this write, an external
-                # cancel produces a visible turn in the events table that the
-                # user cannot see in the UI.
-                try:
-                    await self._with_db_retry(
-                        lambda cm, er, am: cm.update_response_async(
-                            conv_id=conversation_id,
-                            message_id=message_id,
-                            response=config.CANCELLED_RESPONSE_BY_SYSTEM,
+                # inside AssistantMessage.
+                #
+                # CRITICAL: only write the cancel placeholder when events
+                # actually landed in DB. Otherwise we create a "Message.response
+                # says cancelled, but events table is empty" state — user sees a
+                # cancel bubble, expects the next turn's LLM to know what
+                # happened, and the LLM sees nothing (events are the history
+                # source of truth). This mirrors the success-path invariant
+                # documented at controller.py around the inner try block:
+                # "持久化成功后再更新 Message.response，避免出现'显示成功 + 历史丢失'
+                # 的假成功状态".
+                if persisted:
+                    try:
+                        await self._with_db_retry(
+                            lambda cm, er, am: cm.update_response_async(
+                                conv_id=conversation_id,
+                                message_id=message_id,
+                                response=config.CANCELLED_RESPONSE_BY_SYSTEM,
+                            )
                         )
-                    )
-                except Exception as resp_err:
-                    logger.warning(
-                        f"update_response on external cancel failed for {message_id} "
-                        f"(events persisted; UI may show empty bubble): {resp_err}"
+                    except Exception as resp_err:
+                        logger.warning(
+                            f"update_response on external cancel failed for {message_id} "
+                            f"(events persisted; UI may show empty bubble): {resp_err}"
+                        )
+                else:
+                    logger.error(
+                        f"Skipping update_response for {message_id}: event persist "
+                        f"failed on cancel path — refusing to create 'cancel-shown-"
+                        f"but-events-missing' state. UI bubble will be empty; user "
+                        f"can retry from previous turn."
                     )
                 # SSE is best-effort here (consumer likely gone too); skip yielding a
                 # terminal event. History reconstruction reads from the persisted events.
@@ -545,6 +562,10 @@ class ExecutionController:
             # yet. If post-processing already appended COMPLETE/ERROR before the
             # cancel hit but persist hadn't yet run, we keep that terminal as-is
             # (engine semantically completed; cancel only hit infrastructure).
+            # Track whether events end up in DB by ANY path (success-path persist
+            # before cancel, or this late-cancel persist). Gates the response
+            # update below — see "events-in-DB invariant" comment there.
+            events_in_db = events_persisted
             if not events_persisted:
                 # `final_state or initial_state` — defense-in-depth so this branch
                 # stays safe even if a future change reintroduces the "final_state
@@ -573,25 +594,34 @@ class ExecutionController:
                         },
                     ))
                 try:
-                    await self._persist_events(message_id, state_to_persist)
-                    logger.info(
-                        f"Late-cancel persist succeeded for {message_id} "
-                        f"(cancel hit mid-post-processing)"
-                    )
+                    events_in_db = await self._persist_events(message_id, state_to_persist)
+                    if events_in_db:
+                        logger.info(
+                            f"Late-cancel persist succeeded for {message_id} "
+                            f"(cancel hit mid-post-processing)"
+                        )
                 except Exception as persist_err:
                     # Loud-log but never shadow the propagating CancelledError —
                     # the runner's cleanup needs to see a cancelled task.
                     logger.exception(
                         f"Late-cancel persist failed for {message_id}: {persist_err}"
                     )
+                    events_in_db = False
             # Sync Message.response too — same reasoning as the engine_task path:
             # frontend MessageList gates the whole AssistantMessage (and its
-            # events flow) on response non-empty. Skip only if the normal-path
-            # update_response_async already committed (cancel hit at the
-            # subsequent update_metadata await, AFTER response landed) —
-            # otherwise we'd overwrite a real response with the cancelled
-            # placeholder.
-            if not response_updated:
+            # events flow) on response non-empty.
+            #
+            # CRITICAL "events-in-DB" invariant: only write the cancel placeholder
+            # when events actually landed (success-path persist OR this late
+            # persist). Without this check, persist failure produces a
+            # "cancel-shown-but-events-missing" state — UI shows cancelled, but
+            # the next turn's LLM has no history of this turn. Mirrors the
+            # success-path's events_persisted gate.
+            #
+            # Also skip when response_updated is True (cancel hit at
+            # update_metadata, AFTER response already committed with real engine
+            # output — overwriting would clobber the real content).
+            if events_in_db and not response_updated:
                 try:
                     await self._with_db_retry(
                         lambda cm, er, am: cm.update_response_async(
@@ -604,6 +634,13 @@ class ExecutionController:
                     logger.warning(
                         f"Late-cancel response update failed for {message_id}: {resp_err}"
                     )
+            elif not events_in_db:
+                logger.error(
+                    f"Skipping update_response for {message_id}: late-cancel "
+                    f"persist failed — refusing to create 'cancel-shown-but-"
+                    f"events-missing' state. UI bubble will be empty; user can "
+                    f"retry from previous turn."
+                )
             raise
 
     async def _persist_events(self, message_id: str, final_state: Dict[str, Any]) -> bool:
