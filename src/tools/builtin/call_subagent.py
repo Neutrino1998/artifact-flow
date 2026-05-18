@@ -80,7 +80,12 @@ class CallSubagentTool(BaseTool):
                 error="instruction parameter cannot be empty"
             )
 
-        logger.info(f"Routing to {agent_name}: {instruction[:100]}...")
+        # 始终打原始长度,便于 operator 区分"完整 100 字内指令"与"被切掉的长指令"
+        # (incident-2026-05-14 bug ① 同款教训:截断必报长度)。
+        _instr_len = len(instruction)
+        _instr_preview = instruction[:100]
+        _truncated = "" if _instr_len <= 100 else f" (truncated, {_instr_len} chars total)"
+        logger.info(f"Routing to {agent_name}: {_instr_preview!r}{_truncated}")
 
         return ToolResult(success=True)
 
