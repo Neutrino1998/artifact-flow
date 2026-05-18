@@ -143,6 +143,43 @@ export async function fetchNotifications(): Promise<Notification[]> {
   return visible.map(toNotification);
 }
 
+// ============================================================
+// Branding（页脚版权 / 业务联系信息）
+// ============================================================
+// 与 notifications / welcome_tips 同源：静态 JSON、运维改文件即生效、
+// 出错一律 null 让组件隐藏 —— 默认部署里 branding.json 自带占位符,
+// 删了文件 / 写坏 schema → 页脚消失（fail-closed），而不是回退到代码常量
+// 掩盖运维错误。
+
+export interface Branding {
+  developer: string;
+  contact_email?: string;
+}
+
+function validateBranding(x: unknown): Branding | null {
+  if (!x || typeof x !== 'object') return null;
+  const b = x as Record<string, unknown>;
+  if (typeof b.developer !== 'string' || b.developer.trim() === '') return null;
+  let contact_email: string | undefined;
+  if (b.contact_email !== undefined) {
+    if (typeof b.contact_email !== 'string' || b.contact_email.trim() === '') return null;
+    contact_email = b.contact_email;
+  }
+  return { developer: b.developer, contact_email };
+}
+
+export async function fetchBranding(): Promise<Branding | null> {
+  let raw: unknown;
+  try {
+    const res = await fetch('/site/branding.json', { cache: 'no-store' });
+    if (!res.ok) return null;
+    raw = await res.json();
+  } catch {
+    return null;
+  }
+  return validateBranding(raw);
+}
+
 export async function fetchWelcomeTips(): Promise<string[]> {
   let raw: unknown;
   try {

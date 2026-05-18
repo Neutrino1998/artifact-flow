@@ -4,6 +4,8 @@ import { useState, FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { login } from '@/lib/api';
 import { useAuthStore } from '@/stores/authStore';
+import { APP_NAME, APP_TAGLINE } from '@/lib/branding';
+import BrandingFooter from '@/components/BrandingFooter';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -30,13 +32,13 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-bg dark:bg-bg-dark">
+    <div className="flex min-h-screen flex-col items-center justify-center bg-bg dark:bg-bg-dark">
       <div className="w-full max-w-sm rounded-card bg-surface dark:bg-surface-dark p-8 shadow-modal">
         <h1 className="text-center text-3xl font-semibold font-serif text-text-primary dark:text-text-primary-dark">
-          ArtifactFlow
+          {APP_NAME}
         </h1>
         <p className="mb-6 mt-1 text-center text-sm text-text-secondary dark:text-text-secondary-dark">
-          多智能体任务工作台
+          {APP_TAGLINE}
         </p>
 
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -88,6 +90,7 @@ export default function LoginPage() {
           </button>
         </form>
       </div>
+      <BrandingFooter variant="login" />
     </div>
   );
 }
