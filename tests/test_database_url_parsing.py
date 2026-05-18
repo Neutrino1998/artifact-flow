@@ -538,3 +538,92 @@ class TestSessionTzInjection:
         assert captured["kwargs"]["connect_args"] == {
             "server_settings": {"application_name": "af", "timezone": "UTC"}
         }
+
+    @pytest.mark.asyncio
+    async def test_initialize_pg_strips_server_settings_keys_from_url(self):
+        """Reviewer round 3 regression: after moving `application_name` into
+        connect_args.server_settings (round 2), the URL still carries it in
+        query. SQLAlchemy's asyncpg dialect dumps url.query verbatim into the
+        opts passed to asyncpg.connect, so `application_name` would leak as
+        an UNSUPPORTED top-level kwarg — asyncpg.connect raises TypeError on
+        unknown kwargs, blocking startup. Fix: strip `_PG_SERVER_SETTINGS`
+        keys from the URL itself before handing to create_async_engine."""
+        captured = {}
+
+        def fake_create_engine(url, **kwargs):
+            captured["url"] = url
+            captured["kwargs"] = kwargs
+            raise RuntimeError("stop")
+
+        dbm = DatabaseManager(
+            database_url="postgresql+asyncpg://host/app?application_name=af"
+        )
+        with patch("db.database.create_async_engine", side_effect=fake_create_engine):
+            with pytest.raises(RuntimeError, match="stop"):
+                await dbm.initialize()
+
+        # The URL passed to create_async_engine has the query stripped.
+        engine_url = captured["url"]
+        # create_async_engine accepts either str or URL; we pass URL object so
+        # sanitization is visible via .query.
+        assert hasattr(engine_url, "query"), (
+            f"engine_url should be a URL object after sanitization, got {type(engine_url)}"
+        )
+        assert "application_name" not in engine_url.query, (
+            f"application_name still present in URL query: {dict(engine_url.query)}"
+        )
+        # And it's still preserved via connect_args (round 2 invariant).
+        assert captured["kwargs"]["connect_args"]["server_settings"] == {
+            "application_name": "af",
+            "timezone": "UTC",
+        }
+
+    def test_pg_asyncpg_dialect_on_sanitized_url_no_toplevel_application_name(self):
+        """Direct dialect verification: feed SQLAlchemy's asyncpg dialect the
+        sanitized URL we'd pass to create_async_engine, confirm the opts it
+        produces for asyncpg.connect do NOT contain `application_name` at top
+        level. This is the smoking-gun assertion — asyncpg.connect's signature
+        rejects this kwarg, so opts containing it would TypeError at startup.
+
+        Patching `asyncpg.connect` end-to-end requires a real AsyncEngine
+        startup (initialize → _check_alembic_version → pool acquire → real
+        connect). The dialect-level test isolates the URL-to-opts mapping
+        which is the actual surface SQLAlchemy controls."""
+        from sqlalchemy.engine import make_url
+        from sqlalchemy.dialects.postgresql import asyncpg as asyncpg_dialect
+
+        raw_url = make_url(
+            "postgresql+asyncpg://host/app?application_name=af"
+        )
+        # Mirror what database.py does
+        sanitized = raw_url.difference_update_query(
+            DatabaseManager._PG_SERVER_SETTINGS
+        )
+
+        _, opts = asyncpg_dialect.dialect().create_connect_args(sanitized)
+
+        assert "application_name" not in opts, (
+            "SQLAlchemy asyncpg dialect emitted unsanitized URL params as "
+            f"top-level kwargs to asyncpg.connect: {opts!r}. asyncpg.connect "
+            "rejects unknown kwargs — startup would TypeError."
+        )
+
+    def test_pg_asyncpg_dialect_on_unsanitized_url_leaks_application_name(self):
+        """Negative control: confirm the leak actually exists without
+        sanitization. If SQLAlchemy upstream ever changes asyncpg dialect to
+        translate `application_name` → `server_settings` automatically, this
+        test fails and tells us round 3's sanitize step is no longer needed.
+        Wedge against silent SQLAlchemy behavior drift."""
+        from sqlalchemy.engine import make_url
+        from sqlalchemy.dialects.postgresql import asyncpg as asyncpg_dialect
+
+        raw_url = make_url(
+            "postgresql+asyncpg://host/app?application_name=af"
+        )
+        _, opts = asyncpg_dialect.dialect().create_connect_args(raw_url)
+
+        assert "application_name" in opts, (
+            "SQLAlchemy asyncpg dialect no longer leaks application_name "
+            "to top-level kwargs — database.py URL sanitization may now be "
+            "unnecessary. Re-verify before removing."
+        )

@@ -742,6 +742,17 @@ df_lag     = pd.read_json("data/observability/loop-lag.jsonl", lines=True)
 - 既存 helper 测试 `test_pg_preserves_existing_server_settings` / `test_mysql_prepends_existing_init_command` 已经覆盖 helper 这一侧;round 2 补的是 `initialize()` → helper 这一条 wiring(reviewer 原话:"helper itself handles prepending correctly, but initialize() does not feed it the existing URL init_command")
 - 测试 844 → 846 passed(+2)
 
+第四轮(reviewer round 3,P2 PG URL 泄露 top-level kwarg):
+- **P2 round 2 修了 `connect_args.server_settings`,但没修 URL 本身**:reviewer 戳出 `create_async_engine(self.database_url, ...)` 仍然拿到 `?application_name=af` 的原始 URL。SQLAlchemy asyncpg dialect 的 `create_connect_args` 把整个 `url.query` dict 拷到 `opts`,`application_name='af'` 作为 **top-level** kwarg 传给 `asyncpg.connect`;asyncpg signature 不接受这个顶层 kwarg(必须经 server_settings),启动会 TypeError。**经实测验证**:`asyncpg_dialect.create_connect_args(make_url('postgresql+asyncpg://host/app?application_name=af'))` 返回的 opts 顶层有 `application_name='af'`
+- MySQL 不需要同款 sanitize:`aiomysql.connect` 接受 `init_command` 作为合法 kwarg,即使 SQLAlchemy 从 URL query 二次传一份,`connect_args["init_command"]` 也只是覆盖而非 TypeError(MySQL 路径 round 2 自洽)
+- 修法:`initialize()` 增 local `engine_url` 变量(默认 `self.database_url`),PG 单 URL 路径抽完 server_settings keys 后 `engine_url = url.difference_update_query(self._PG_SERVER_SETTINGS)` 把这些 key 从 URL 剥掉;`create_async_engine(engine_url, ...)` 接收 sanitized URL。connect_args 那条路径继续接管 application_name(不丢)。SQLite / failover / MySQL 路径 engine_url 保持 self.database_url 不动
+- 测试 +3:
+  - `test_initialize_pg_strips_server_settings_keys_from_url` —— 校验 create_async_engine 拿到的 URL `query` 不含 `application_name`,同时 connect_args 仍含完整 server_settings
+  - `test_pg_asyncpg_dialect_on_sanitized_url_no_toplevel_application_name` —— 直接走 SQLAlchemy asyncpg dialect 的 `create_connect_args(sanitized_url)`,断言 opts 顶层无 `application_name`(这是 reviewer 关心的 smoking gun:asyncpg.connect 的实际 kwarg surface)
+  - `test_pg_asyncpg_dialect_on_unsanitized_url_leaks_application_name` —— **负向控制**:确认未 sanitize 的 URL 走 dialect 确实会 leak。SQLAlchemy 未来若把 asyncpg dialect 改成自动翻 application_name → server_settings,此测试会失败提醒"round 3 的 sanitize 步骤可能可移除",防止静默行为漂移
+- 为什么没用 reviewer 建议的"patch `asyncpg.connect` 端到端测试":那需要真 AsyncEngine 启动到 pool acquire 才触发 `asyncpg.connect`,中间还要绕过 `_check_alembic_version()` 的 DB 查询。dialect-level 测试隔离了 SQLAlchemy URL → opts 的映射,正是 round 3 修改的 surface,且不依赖 SQLAlchemy 启动栈的具体实现细节
+- 测试 846 → 849 passed(+3)
+
 ---
 
 ### 原始 spec(round 0,差异见上方落地记录)

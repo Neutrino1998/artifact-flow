@@ -308,6 +308,9 @@ class DatabaseManager:
         engine_kwargs = {
             "echo": self.echo,
         }
+        # engine_url 默认是 self.database_url;PG 单 URL 路径可能 sanitize 后覆盖
+        # (见非 SQLite 分支 difference_update_query),其余 path 不动。
+        engine_url: Any = self.database_url
 
         if self._is_sqlite():
             engine_kwargs["connect_args"] = {"check_same_thread": False}
@@ -353,6 +356,19 @@ class DatabaseManager:
                 }
                 if server_settings:
                     existing["server_settings"] = server_settings
+                    # 抽完必须从 URL 剥掉 —— 否则 SQLAlchemy asyncpg dialect
+                    # 的 create_connect_args 会把 url.query 整 dict 拷到 opts,
+                    # application_name 会作为 top-level kwarg 传给 asyncpg.connect。
+                    # asyncpg.connect signature 不接受 application_name 顶层 kwarg
+                    # (必须经 server_settings),会抛 TypeError 启动失败。
+                    # connect_args["server_settings"] 已经接管这些 key,URL 那条
+                    # 路径是冗余的有害副本。MySQL 不需要 sanitize:aiomysql.connect
+                    # 接受 init_command 作为合法 kwarg,二次传递 connect_args 覆盖
+                    # 即可,无 TypeError 风险。
+                    # (Incident 2026-05-14 PR-tz-unify reviewer round 3)
+                    engine_url = url.difference_update_query(
+                        self._PG_SERVER_SETTINGS
+                    )
                 engine_kwargs["connect_args"] = self._apply_session_tz_kwargs(
                     "postgres", existing
                 )
@@ -409,7 +425,7 @@ class DatabaseManager:
                     f"({len(self._database_urls)} addresses, driver={driver})"
                 )
 
-        self._engine = create_async_engine(self.database_url, **engine_kwargs)
+        self._engine = create_async_engine(engine_url, **engine_kwargs)
 
         # 配置 SQLite WAL 模式
         if self._is_sqlite():
