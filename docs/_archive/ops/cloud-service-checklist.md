@@ -71,15 +71,36 @@
    - 若未预装，确认我们能否在不联网情况下走云托管方提供的内部 yum/apt 源安装
 
 2. 🌟 **是否允许我们把 `py-spy` 二进制装到 `/usr/local/bin/`？**
-   - `py-spy` 是 attach-by-PID 的 Python profiler/sampler，需要 `ptrace` 权限对自身进程读栈
-   - 不需要 setuid / root；用部署账户对自家进程 attach 即可
+   - `py-spy` 是 attach-by-PID 的 Python profiler/sampler，通过 `ptrace` syscall 读目标进程栈
+   - 不需要 setuid / root；权限由 Yama LSM (`ptrace_scope`) 控制，见下条
 
-3. **`ptrace_scope` 内核参数 (`/proc/sys/kernel/yama/ptrace_scope`) 当前值是？**
-   - 默认 1（限制 ptrace 给同一 UID 或祖先进程）—— 这个值下 `py-spy attach <自家 PID>` 可以工作
-   - 若为 2（admin-only）或 3（禁用），`py-spy` attach 会失败；需要确认我们能否调整或走 docker `--cap-add SYS_PTRACE`
+3. 🌟 **`ptrace_scope` 内核参数 (`/proc/sys/kernel/yama/ptrace_scope`) 当前值是？**
+
+   Yama LSM 四种模式（参考：[kernel.org Yama](https://www.kernel.org/doc/html/latest/admin-guide/LSM/Yama.html)）：
+
+   | mode | 语义 | py-spy 能否 attach docker 内 backend |
+   |---|---|---|
+   | 0 | classic ptrace（同 UID 即可） | ✅ 可直接 attach（最宽松） |
+   | 1 | restricted（**默认**）：仅 descendant，或被 `prctl(PR_SET_PTRACER)` 显式放行，或 CAP_SYS_PTRACE | ⚠️ 默认值下**不能**直接 attach 已运行的容器进程（容器不是 host shell 的子进程） |
+   | 2 | admin only（CAP_SYS_PTRACE） | ❌ 普通用户失败 |
+   | 3 | 禁用 | ❌ 全部失败 |
+
+   **对我们的影响**：mode 1 是 Linux 发行版默认（Ubuntu / RHEL / Debian），意味着部署账户**无法**直接 `py-spy dump --pid <backend container PID>`。三条变通路径，按优先序：
+
+   a. **docker compose 加 `cap_add: [SYS_PTRACE]`**（推荐，最小改动）——给容器一个能在自身 namespace 内 ptrace 的能力。`py-spy dump --pid 1` 在容器内即可工作。事故时 `docker exec backend py-spy dump --pid 1`，无宿主机参与。
+
+   b. **`ptrace_scope` 调到 0**（次选）——影响整机所有进程，攻击面比 a 大。仅在云托管不允许 a 时考虑。
+
+   c. **由 backend 自己调 `prctl(PR_SET_PTRACER, PR_SET_PTRACER_ANY)`**（最后兜底）——需要应用代码改动，跨平台麻烦，不推荐。
+
+   **请云托管方确认**：
+   - 当前 `ptrace_scope` 值
+   - 是否允许我们给 backend 容器加 `cap_add: [SYS_PTRACE]`（这是 docker capabilities 而非 host kernel cap，作用域仅容器内）
+   - 若 b/c 都不允许，确认 a 是接受的
 
 4. **是否允许 `gcore <pid>` 抓 coredump？**
-   - 同 ptrace；coredump 文件落到我们持久卷下 (`/app/data/`)，不污染宿主机
+   - `gcore` 内部也是 ptrace，跟第 3 条一样受 Yama 约束 —— 解法同上（最便利路径：`cap_add: [SYS_PTRACE]` 后 `docker exec backend gcore 1`）
+   - coredump 文件落到我们持久卷下 (`/app/data/`)，不污染宿主机
    - dump 含进程地址空间，仅在事故现场用，事后人工清理
 
 > 部署侧 SOP 详见 `deployment-sop.md` → "取证就绪"小节；preflight 校验脚本：`deploy/scripts/preflight.sh`

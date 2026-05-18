@@ -27,11 +27,10 @@ ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
 FORENSICS_DIR="${1:-$ROOT/forensics}"
 
-# Pinned SHA — must match scripts/release.sh PYSPY_SHA256. If you bumped py-spy
-# in release.sh, bump it here too (or accept that preflight will fail on this
-# check until you do). Empty means "skip py-spy SHA verification" (only for
-# bootstrap; production deployments should always pin).
-PYSPY_EXPECTED_SHA="${PYSPY_EXPECTED_SHA:-}"
+# SHA verification uses the bundle's own forensics/bin/py-spy.sha256 file
+# (written by release.sh after binary extraction). Same checksum file format
+# as sha256sum(1), zero drift surface between build-side pin and preflight
+# verification.
 
 fail=0
 ok()   { printf '  ✓ %s\n' "$1"; }
@@ -71,6 +70,7 @@ fi
 
 # ---- py-spy binary ----
 PYSPY="$FORENSICS_DIR/bin/py-spy"
+PYSPY_SHA_FILE="$FORENSICS_DIR/bin/py-spy.sha256"
 if [[ ! -f "$PYSPY" ]]; then
   err "py-spy binary missing: $PYSPY"
 elif [[ ! -x "$PYSPY" ]]; then
@@ -83,15 +83,19 @@ else
     err "py-spy --version failed: $version"
   fi
 
-  if [[ -n "$PYSPY_EXPECTED_SHA" ]]; then
-    actual_sha=$(sha256sum "$PYSPY" 2>/dev/null | awk '{print $1}')
-    if [[ "$actual_sha" == "$PYSPY_EXPECTED_SHA" ]]; then
-      ok "py-spy SHA matches pinned value"
+  # SHA: re-verify the binary against the build-side pin shipped inside the
+  # bundle. Catches tamper during transit (scp) or local edits.
+  if [[ -f "$PYSPY_SHA_FILE" ]]; then
+    if (cd "$FORENSICS_DIR/bin" && sha256sum -c py-spy.sha256 >/dev/null 2>&1); then
+      ok "py-spy SHA matches bundle's py-spy.sha256"
     else
-      err "py-spy SHA mismatch — possible tamper or wrong bundle version"
-      info "expected: $PYSPY_EXPECTED_SHA"
-      info "actual:   $actual_sha"
+      err "py-spy SHA mismatch — possible tamper, partial scp, or local edit"
+      info "expected (from bundle): $(awk '{print $1}' "$PYSPY_SHA_FILE")"
+      info "actual:                 $(sha256sum "$PYSPY" 2>/dev/null | awk '{print $1}')"
     fi
+  else
+    err "py-spy.sha256 missing alongside binary: $PYSPY_SHA_FILE"
+    info "release.sh writes this — bundle may be from an old release. Re-extract."
   fi
 
   # py-spy installed to host PATH? Recommend but don't fail — some operators
