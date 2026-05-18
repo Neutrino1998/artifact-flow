@@ -10,11 +10,11 @@ observability_report.py — 跑一下就能看的 obs 报告
     python scripts/observability_report.py             # 24h 窗口
     python scripts/observability_report.py --hours 72  # 72h 窗口
 
-DB 访问复用 app 的 async driver(asyncpg / aiomysql / aiosqlite),通过
-`AsyncConnection.run_sync` 给 pandas 提供同步 Connection 视图,不引入新的
-sync driver(避免再多带一份 psycopg2 / pymysql)。pandas 是分析工具,
-不在 runtime requirements.txt;`pip install pandas` 或走 release bundle
-的离线 wheel 安装。
+DB 访问复用 app 的 async driver(asyncpg / aiomysql / aiosqlite)+ ORM
+`select(MessageEvent)`,在 Python 侧拍平 `data` JSON 列到 DataFrame —— 不
+写方言特化 SQL,也不需要 sync driver(psycopg2 / pymysql)。pandas 是分析
+工具,不在 runtime requirements.txt;`pip install pandas` 或走 release
+bundle 的离线 wheel 安装。
 
 硬 wedge dump 看 docker logs backend 找 faulthandler 的 "Thread 0x..."
 行,本脚本不聚合。
