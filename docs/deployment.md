@@ -246,7 +246,7 @@ docker load -i tmp/artifactflow-app-1.0.1.tar.gz
 | `deploy/nginx.conf` | 直接编辑 | `docker compose -f deploy/docker-compose.intranet.yml restart nginx` |
 | `deploy/docker-compose.intranet.yml`（端口、profile 等） | 直接编辑 | `up -d` |
 
-> **关键区别：** 改 `config/*` 用 `restart backend`（让进程重读文件），改 `.env` 用 `up -d`（让 compose 重建容器注入环境变量）。`config/site/` 是例外：挂的是 frontend 容器，前端自己轮询，零运维动作。
+> **关键区别：** 改 `config/*` 用 `restart backend`（让进程重读文件），改 `.env` 用 `up -d`（让 compose 重建容器注入环境变量）。`config/site/` 是例外：挂在 frontend 容器，无需重启；其中 `notifications.json` 前端轮询自动重拉，`welcome_tips.json` / `branding.json` 只在页面加载时读取，运维改完需用户刷新。
 
 ### 仅推送 config 更新（不动镜像）
 
