@@ -18,12 +18,12 @@
 | P1 | PR-3 fencing 事件持久化 | ✅ 已完成 | 修复 bug ④,恢复审计/回放完整性 |
 | P2 | PR-forensics-bundle 取证工具 + 部署前置 | ✅ 已完成 | 实质交付两件事:① py-spy 进 backend 镜像 + compose `cap_add: SYS_PTRACE`(faulthandler deadman 失效时的备份)② `release.sh --with-analyst-tools` 打 pandas/numpy 离线 wheels(给 analyst 机器零联网装)。`preflight.sh` 只验这两件事;Yama policy / host 深挖工具 由 cloud-service-checklist 第四段对齐云托管 |
 | P2 | PR-5 前端镜像重建 | 待启动 | 正式消除 HOSTNAME 误配 |
-| P3 | PR-tz-unify 事件时间戳时区统一 | 待启动 | events.py 写本地朴素、`server_default=func.now()` 又是 DB 端 UTC,二者不一致;PR-obs-lite 分析脚本在 Shanghai 部署偏 8h。修脚本前先决定全链路用哪个 |
+| P3 | PR-tz-unify 事件时间戳时区统一 | ✅ 已完成 | 全链路 naive UTC:新增 `src/utils/time.utc_now()` + `frontend/src/lib/time.parseUtcIso`,后端写入路径所有 `datetime.now()` → `utc_now()`,前端 `new Date(<naive ISO>)` 一律改 `parseUtcIso` 锚定 UTC;observability_report.py 注释对齐,CLAUDE.md 增"时间约定"条目。Schema 不动、不迁数据 |
 | P3 | 文档 PR(`docs/runbooks/service-hang.md` + `docs/guides/observability-tuning.md`) | 待启动 | 应急 runbook + obs 调参手册,纯 markdown PR;待 PR-obs-lite + PR-forensics-bundle 代码落地后启动(字段 / 路径稳定后下笔) |
 
 **小版本迭代打包**:整套 fix plan 同一个 release bundle,分两批 ship:
 - **第一批(已合 `main`)**:PR-1(算法根治)+ PR-3(fencing 事件持久化),走"立即修根因"的 release tag
-- **第二批(部分已合 `main`)**:PR-obs-lite ✅ 已合;PR-forensics-bundle ✅ 已合;PR-5 + P3 文档 PR 仍待启动。同一个"事故后加固完整体"release tag,**一起 ship**——观测框架 / 取证工具 / 前端镜像 / runbook + 调参手册,所有部件齐了才算闭环
+- **第二批(部分已合 `main`)**:PR-obs-lite ✅ 已合;PR-forensics-bundle ✅ 已合;PR-tz-unify ✅ 已合;PR-5 + P3 文档 PR 仍待启动。同一个"事故后加固完整体"release tag,**一起 ship**——观测框架 / 取证工具 / 时区统一 / 前端镜像 / runbook + 调参手册,所有部件齐了才算闭环
 
 PR 之间逻辑独立可分别回滚,但**默认一捆发**:避免 "obs-lite 上线后 tuning 手册还没写" / "runbook 提了 py-spy 但内网还没装" 这种部分到位的尴尬态。
 
@@ -708,7 +708,30 @@ df_lag     = pd.read_json("data/observability/loop-lag.jsonl", lines=True)
 
 ---
 
-## PR-tz-unify:事件时间戳时区统一(P3)
+## PR-tz-unify:事件时间戳时区统一(P3)✅ 已完成
+
+**落地记录**(commit 在 `main`,待提交):
+- 新增 `src/utils/time.utc_now()` 作为后端 naive UTC 单一入口;新增 `frontend/src/lib/time.parseUtcIso()` 把后端发来的 naive ISO 锚定为 UTC
+- 后端热路径所有 `datetime.now()` → `utc_now()`:`core/events.py:55` `ExecutionEvent.created_at` 默认值、`core/engine.py`(metrics start/completed + 5 处 timestamp/duration 起点)、`core/controller.py`(5 处 timestamp)、`core/compaction_runner.py`(start/duration/timestamp)、`core/conversation_manager.py`(message timestamp)、`tools/builtin/artifact_ops.py`(`ArtifactMemory.created_at/updated_at` + `persisted_at`)、`tools/builtin/web_fetch.py`(3 处 fetched_at)、`api/routers/{chat,artifacts,stream}.py`(error event timestamp + memory fallback)、`api/schemas/events.py`(`SSEEvent.timestamp` default_factory + `from_dict` fallback)、`api/services/{controller_factory,stream_transport}.py`、`observability/{watchdog,sampler,admin_runtime}.py`(jsonl ts 字段从 aware UTC → naive UTC 与 threshold 对齐)
+- 显示侧:`ObservabilityPanel.tsx`(formatTime helper + 三处 created_at + 一处 updated_at)、`sidebar/ConversationItem.tsx`、`sidebar/AdminConversationList.tsx`、`forms/UserDetailForm.tsx`、`chat/ConversationBrowser.tsx`、`artifact/ArtifactList.tsx` 一律 `new Date(...)` → `parseUtcIso(...)`
+- 保留本地:`core/context_manager.py:69` 给 LLM 的"当前时间"提示词(UX 要求用户本地)、`api/services/auth.py:54` JWT iat/exp(aware UTC 是 PyJWT 契约)
+- `scripts/observability_report.py:121-123` 注释重写:由"SQLite 用 func.now() 是 naive UTC"改成准确描述"应用写 + DB server_default 都是 UTC naive,PG 部署需 TIMEZONE=UTC"
+- CLAUDE.md "ORM instances" bullet 后新增独立"Time convention" bullet 说明 `utc_now()` 约定 + PG TIMEZONE=UTC 要求 + 两处例外
+- 测试:`tests/utils/test_time.py`(naive UTC + ExecutionEvent default 三条回归)+ `frontend/src/lib/time.test.ts`(naive / Z / +08:00 / 紧凑 -0500 四态)
+- **不迁移历史数据**:Shanghai 部署中 `message_events.created_at` 历史行偏 +8h(本地朴素写入),分界点 = 本 PR 部署时间;observability_report `--hours N` 在跨分界点窗口里有 8h 错位,影响窗口有限,自然衰减
+
+**决策依据**(对应"决策点"三选):
+- 方向 1(naive UTC):改动最小、跟现有 schema + SQLite/PG 默认对齐;方向 2(aware UTC)留给真正出现跨 TZ 部署或 DST 场景再做
+- 纳入显示侧:后端改 UTC 后浏览器对 naive ISO 仍按本地解析,不改前端会反向偏 TZ;集中在 `parseUtcIso` 一处处理便于后续审计
+- 不迁移历史数据:`server_default=func.now()` 在 SQLite 上本就是 UTC naive,真出问题的是 Python 写入路径;backfill 需要按表逐个判断写入来源,复杂度高于回报,接受历史窗口偏移
+
+**与 PR-obs-lite 的约束**:`observability_report.py` threshold 已经是 naive UTC(L121-123),实现层本就对;事故是 Python 写入路径偏了,本 PR 修这一边,threshold 表达式不变、只更新注释。
+
+**PG 部署运维要求**:PG 数据库会话 `TIMEZONE=UTC`(`docker-compose` 的 postgres 服务环境变量加 `PGTZ=UTC` 或 `-c timezone=UTC`),否则 `server_default=func.now()` 在非 UTC PG 上仍会写 session-local naive,跟 Python `utc_now()` 漂。SQLite 自动 UTC,无需配置。
+
+---
+
+### 原始 spec(round 0,差异见上方落地记录)
 
 **发现来源**:PR-obs-lite reviewer 在 Shanghai 部署(UTC+8)测 `scripts/observability_report.py --hours 1`,发现一条本地 2 小时前写入的 `llm_complete` 仍被报告查出来 —— 时间窗口偏差正好 8 小时。
 

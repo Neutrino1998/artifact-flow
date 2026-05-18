@@ -18,12 +18,12 @@ In-engine compaction — 引擎内同步触发的上下文压缩
 """
 
 import asyncio
-from datetime import datetime
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
 from config import config
 from core.events import ExecutionEvent, StreamEventType
 from utils.logger import get_logger
+from utils.time import utc_now
 
 logger = get_logger("ArtifactFlow")
 
@@ -210,7 +210,7 @@ class CompactionRunner:
             f"{len(events_to_compact)} events):\n{format_messages_for_debug(messages)}"
         )
 
-        start = datetime.now()
+        start = utc_now()
         response = ""
         usage = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
 
@@ -241,7 +241,7 @@ class CompactionRunner:
         async with asyncio.timeout(config.COMPACTION_TIMEOUT):
             await _stream()
 
-        duration_ms = int((datetime.now() - start).total_seconds() * 1000)
+        duration_ms = int((utc_now() - start).total_seconds() * 1000)
 
         # The entire response is the summary — compact_agent is instructed to
         # emit the numbered sections directly with no outer wrapper. We do NOT
@@ -272,6 +272,6 @@ class CompactionRunner:
         await self._emit({
             "type": event_type,
             "agent": agent_name,
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": utc_now().isoformat(),
             "data": data,
         })

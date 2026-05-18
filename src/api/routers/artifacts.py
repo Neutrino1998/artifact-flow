@@ -27,6 +27,7 @@ from api.schemas.artifact import (
 from tools.builtin.artifact_ops import ArtifactManager
 from utils.doc_converter import DocConverter
 from utils.logger import get_logger
+from utils.time import utc_now
 
 logger = get_logger("ArtifactFlow")
 
@@ -102,7 +103,7 @@ async def upload_file_new_session(
         current_version=info["current_version"],
         source=info["source"],
         original_filename=info["original_filename"],
-        created_at=memory.created_at if memory else datetime.now(),
+        created_at=memory.created_at if memory else utc_now(),
     )
 
 
@@ -231,7 +232,7 @@ async def upload_file(
         current_version=info["current_version"],
         source=info["source"],
         original_filename=info["original_filename"],
-        created_at=memory.created_at if memory else datetime.now(),
+        created_at=memory.created_at if memory else utc_now(),
     )
 
 

@@ -9,10 +9,10 @@ import os
 import re
 import aiohttp
 from typing import Dict, Any, Optional
-from datetime import datetime
 
 from tools.base import BaseTool, ToolResult, ToolParameter, ToolPermission
 from utils.logger import get_logger
+from utils.time import utc_now
 import random
 
 from bs4 import BeautifulSoup
@@ -220,7 +220,7 @@ class WebFetchTool(BaseTool):
                                 "title": title,
                                 "content": content,
                                 "word_count": len(content.split()),
-                                "fetched_at": datetime.now().isoformat(),
+                                "fetched_at": utc_now().isoformat(),
                                 "source_type": source_type,
                             }
 
@@ -287,7 +287,7 @@ class WebFetchTool(BaseTool):
                 "title": title,
                 "content": content,
                 "word_count": len(content.split()),
-                "fetched_at": datetime.now().isoformat(),
+                "fetched_at": utc_now().isoformat(),
                 "source_type": "html",
             }
 
@@ -341,7 +341,7 @@ class WebFetchTool(BaseTool):
                         "title": "PDF Document",
                         "content": content,
                         "word_count": len(content.split()),
-                        "fetched_at": datetime.now().isoformat(),
+                        "fetched_at": utc_now().isoformat(),
                         "source_type": "pdf",
                         "page_count": page_count,
                     }

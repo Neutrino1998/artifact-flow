@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useCopyFeedback } from '@/hooks/useCopyFeedback';
 import * as api from '@/lib/api';
+import { parseUtcIso } from '@/lib/time';
 import PanelSearchBar from './PanelSearchBar';
 import type {
   AdminConversationSummary,
@@ -61,7 +62,7 @@ function eventSummary(event: AdminEventItem): string {
 
 function formatTime(iso: string): string {
   try {
-    const d = new Date(iso);
+    const d = parseUtcIso(iso);
     return d.toLocaleTimeString('zh-CN', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
   } catch {
     return '';
@@ -272,7 +273,7 @@ function serializeEventToText(event: AdminEventItem): string {
   lines.push(`ID: ${event.id}`);
   lines.push(`类型: ${event.event_type}`);
   lines.push(`Agent: ${event.agent_name || '-'}`);
-  lines.push(`时间: ${new Date(event.created_at).toLocaleString('zh-CN')}`);
+  lines.push(`时间: ${parseUtcIso(event.created_at).toLocaleString('zh-CN')}`);
 
   if (d != null && event.event_type === 'llm_complete') {
     lines.push(`模型: ${(d.model as string) || '-'}`);
@@ -440,7 +441,7 @@ function AdminConversationBrowser({
               <div className="flex items-center gap-2 mt-1 text-xs text-text-tertiary dark:text-text-tertiary-dark">
                 <span>{conv.user_display_name || conv.user_id || '-'}</span>
                 <span>{conv.message_count} messages</span>
-                <span>{new Date(conv.updated_at).toLocaleDateString()}</span>
+                <span>{parseUtcIso(conv.updated_at).toLocaleDateString()}</span>
               </div>
             </div>
           ))}
@@ -557,7 +558,7 @@ function EventDetail({ event }: { event: AdminEventItem }) {
         <DetailRow label="ID" value={String(event.id)} />
         <DetailRow label="类型" value={event.event_type} />
         <DetailRow label="Agent" value={event.agent_name || '-'} />
-        <DetailRow label="时间" value={new Date(event.created_at).toLocaleString('zh-CN')} />
+        <DetailRow label="时间" value={parseUtcIso(event.created_at).toLocaleString('zh-CN')} />
       </div>
 
       {/* Type-specific details */}

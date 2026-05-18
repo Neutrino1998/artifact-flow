@@ -5,6 +5,7 @@ import type { ConversationSummary } from '@/types';
 import { deleteConversation } from '@/lib/api';
 import { useConversationStore } from '@/stores/conversationStore';
 import { useCopyFeedback } from '@/hooks/useCopyFeedback';
+import { parseUtcIso } from '@/lib/time';
 import ConfirmModal from '@/components/layout/ConfirmModal';
 
 interface ConversationItemProps {
@@ -50,7 +51,7 @@ function ConversationItem({ conversation, isActive, onSelect }: ConversationItem
   }, [menuOpen]);
 
   const title = conversation.title || 'Untitled';
-  const date = new Date(conversation.updated_at).toLocaleDateString();
+  const date = parseUtcIso(conversation.updated_at).toLocaleDateString();
 
   return (
     <>

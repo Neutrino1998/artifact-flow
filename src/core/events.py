@@ -5,6 +5,8 @@ from typing import Optional, Any
 from dataclasses import dataclass, field
 from datetime import datetime
 
+from utils.time import utc_now
+
 
 class StreamEventType(Enum):
     """
@@ -52,7 +54,7 @@ class ExecutionEvent:
     agent_name: Optional[str] = None
     data: Any = None
     event_id: Optional[str] = None  # stable dedupe key, set by controller before persist
-    created_at: datetime = field(default_factory=datetime.now)
+    created_at: datetime = field(default_factory=utc_now)
     # True 表示从 DB 载入的历史事件（prior turn）；False 表示本轮新产生的事件。
     # 用于：持久化过滤（只写 False 的）、compaction preserve 边界（不跨轮）、
     # compaction 插入位置合法性校验（只能插在 False 段内）。

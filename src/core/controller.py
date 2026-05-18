@@ -10,7 +10,6 @@
 import asyncio
 from typing import Awaitable, Callable, Dict, Optional, Any, AsyncGenerator
 from uuid import uuid4
-from datetime import datetime
 
 from sqlalchemy.exc import IntegrityError
 
@@ -28,6 +27,7 @@ from core.post_processing import (
 from tools.base import BaseTool
 from tools.builtin.artifact_ops import ArtifactManager
 from utils.logger import get_logger
+from utils.time import utc_now
 
 logger = get_logger("ArtifactFlow")
 
@@ -128,7 +128,7 @@ class ExecutionController:
         # Only needs message_id, not a persisted row
         yield {
             "type": StreamEventType.METADATA.value,
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": utc_now().isoformat(),
             "data": {
                 "conversation_id": conversation_id,
                 "message_id": message_id,
@@ -306,7 +306,7 @@ class ExecutionController:
                 ))
                 await event_queue.put({
                     "type": StreamEventType.ERROR.value,
-                    "timestamp": datetime.now().isoformat(),
+                    "timestamp": utc_now().isoformat(),
                     "data": error_data,
                 })
             finally:
@@ -439,7 +439,7 @@ class ExecutionController:
                     )
                     yield {
                         "type": StreamEventType.ERROR.value,
-                        "timestamp": datetime.now().isoformat(),
+                        "timestamp": utc_now().isoformat(),
                         "data": {
                             "success": False,
                             "conversation_id": conversation_id,
@@ -503,7 +503,7 @@ class ExecutionController:
                 if pp.terminal_event is not None:
                     yield {
                         "type": pp.terminal_event.event_type,
-                        "timestamp": datetime.now().isoformat(),
+                        "timestamp": utc_now().isoformat(),
                         "data": pp.terminal_event.data,
                     }
 
@@ -511,7 +511,7 @@ class ExecutionController:
                 logger.exception(f"Error in post-processing: {e}")
                 yield {
                     "type": StreamEventType.ERROR.value,
-                    "timestamp": datetime.now().isoformat(),
+                    "timestamp": utc_now().isoformat(),
                     "data": {
                         "success": False,
                         "conversation_id": conversation_id,

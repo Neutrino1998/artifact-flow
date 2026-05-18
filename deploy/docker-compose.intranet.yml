@@ -80,7 +80,11 @@ services:
     # max_connections sized for backend pool (POOL_SIZE=20 + MAX_OVERFLOW=40 = 60)
     # plus PG internal workers, alembic, and debug headroom. shared_buffers raised
     # from 128MB default to fit the larger connection count.
-    command: postgres -c max_connections=200 -c shared_buffers=256MB
+    # timezone=UTC: session TZ must match Python utils.time.utc_now() so
+    # server_default=func.now() / onupdate=func.now() write UTC naive (incident
+    # 2026-05-14 PR-tz-unify). /etc/localtime mount below only affects PG log
+    # timestamp rendering, not session timezone — keep for docker-logs readability.
+    command: postgres -c max_connections=200 -c shared_buffers=256MB -c timezone=UTC
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - /etc/localtime:/etc/localtime:ro

@@ -118,8 +118,10 @@ async def _load_message_events(async_engine, hours: int):
     返回 Core Row(列元组),.scalars() 只剪到第一列(id);要拿到 hydrate 后的
     ORM 实例必须走 Session。
     """
-    # SQLite 用 server_default=func.now() 写入的是 naive UTC,PG 写带时区。
-    # 用 naive UTC 比较两边都吃得下;tz-aware 在 SQLite 上会报 can't compare。
+    # 事件 created_at 全链路 naive UTC(utils.time.utc_now,见 incident
+    # 2026-05-14 PR-tz-unify):应用写 / DB server_default 都是 UTC naive
+    # (SQLite 自动 UTC;PG 需 TIMEZONE=UTC 部署对齐)。threshold 同样取
+    # naive UTC,两边对齐;tz-aware 在 SQLite 上会报 can't compare。
     threshold = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=hours)
 
     llm_stmt = (

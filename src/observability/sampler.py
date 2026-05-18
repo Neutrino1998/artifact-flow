@@ -23,11 +23,12 @@ import asyncio
 import os
 import resource
 import time
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
 import psutil
+
+from utils.time import utc_now
 
 from observability.jsonl_sink import JsonlSink
 from observability.watchdog import LoopLagWatchdog
@@ -136,7 +137,7 @@ class RuntimeSampler:
     async def sample_once(self) -> dict:
         """采一次并写 jsonl。返回采集的 snapshot(便于测试与 /admin/runtime 复用)。"""
         snapshot: dict = {
-            "ts": datetime.now(timezone.utc).isoformat(),
+            "ts": utc_now().isoformat(),
         }
 
         # ── loop lag(来自 watchdog 滚动窗口) ──

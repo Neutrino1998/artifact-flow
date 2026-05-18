@@ -28,11 +28,11 @@ import threading
 import time
 import traceback
 from collections import deque
-from datetime import datetime, timezone
 from typing import Optional
 
 from observability.jsonl_sink import JsonlSink
 from utils.logger import get_logger
+from utils.time import utc_now
 
 logger = get_logger("ArtifactFlow")
 
@@ -169,7 +169,7 @@ class LoopLagWatchdog:
 
         try:
             self._sink.write({
-                "ts": datetime.now(timezone.utc).isoformat(),
+                "ts": utc_now().isoformat(),
                 "lag_ms": round(lag_ms, 1),
                 "wedged": wedged,
                 "warn_ms": self._warn_ms,

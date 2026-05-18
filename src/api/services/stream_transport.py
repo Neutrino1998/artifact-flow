@@ -12,6 +12,7 @@ from datetime import datetime
 from dataclasses import dataclass, field
 
 from utils.logger import get_logger
+from utils.time import utc_now
 
 logger = get_logger("ArtifactFlow")
 
@@ -88,7 +89,7 @@ class StreamContext:
     history: List[Tuple[int, Dict[str, Any]]] = field(default_factory=list)
     next_id: int = 0
     new_event: asyncio.Event = field(default_factory=asyncio.Event)
-    created_at: datetime = field(default_factory=datetime.now)
+    created_at: datetime = field(default_factory=utc_now)
     status: Literal["pending", "streaming", "closed"] = "pending"
     ttl_task: Optional[asyncio.Task] = None
     cleanup_task: Optional[asyncio.Task] = None

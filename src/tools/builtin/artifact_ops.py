@@ -9,7 +9,7 @@
 import math
 import secrets
 from typing import Dict, Any, Optional, List, Tuple
-from datetime import datetime, timezone
+from datetime import datetime
 from dataclasses import dataclass
 import re
 
@@ -22,6 +22,7 @@ from repositories.artifact_repo import ArtifactRepository
 from repositories.base import NotFoundError, DuplicateError
 from utils.logger import get_logger
 from utils.text_slicing import count_lines, slice_lines_by_offset_limit
+from utils.time import utc_now
 
 logger = get_logger("ArtifactFlow")
 
@@ -94,8 +95,8 @@ class ArtifactMemory:
         self.content = content
         self.metadata = metadata or {}
         self.current_version = current_version
-        self.created_at = created_at or datetime.now()
-        self.updated_at = datetime.now()
+        self.created_at = created_at or utc_now()
+        self.updated_at = utc_now()
         self.source = source
 
 
@@ -275,7 +276,7 @@ class ArtifactManager:
         title = f"Output of {tool_name}"  # title 不受 ID 规则约束
         metadata = {
             "tool_name": tool_name,  # metadata 保留原始名字便于审计
-            "persisted_at": datetime.now(timezone.utc).isoformat(),
+            "persisted_at": utc_now().isoformat(),
         }
         success, message = await self.create_artifact(
             session_id=session_id,
@@ -445,7 +446,7 @@ class ArtifactManager:
 
         memory.content = info.new_content
         memory.current_version += 1
-        memory.updated_at = datetime.now()
+        memory.updated_at = utc_now()
         memory.source = "agent"
 
         self._dirty[(session_id, artifact_id)] = None
@@ -481,7 +482,7 @@ class ArtifactManager:
 
         memory.content = new_content
         memory.current_version += 1
-        memory.updated_at = datetime.now()
+        memory.updated_at = utc_now()
         memory.source = "agent"
 
         self._dirty[(session_id, artifact_id)] = None
