@@ -872,17 +872,24 @@ PR-obs-lite 的 `observability_report.py` 一开始把 threshold 写成 naive UT
 
 **结论**:按现行 SOP 升级第二批,**nginx / postgres / redis 的新 HostConfig 永远不生效**,docker-logs 仍无上限,PG 仍无 mem_limit tripwire。
 
-**修复方案**(不动 pause/resume 设计,加一次性 ship 步骤):
+**修复方案**(不动 pause/resume 设计,加一次性 ship 步骤;SOP 入口同时落地到 `docs/deployment.md` 滚动更新段的 callout):
 
 ```bash
 # 在 pause.sh 与 resume.sh 之间执行(内网)
 docker compose -f deploy/docker-compose.intranet.yml --profile infra \
-    up -d --force-recreate postgres redis nginx
+    up -d --force-recreate --no-deps postgres redis nginx
 
 # prod 路径同理
 docker compose -f docker-compose.prod.yml --profile infra \
-    up -d --force-recreate postgres redis nginx
+    up -d --force-recreate --no-deps postgres redis nginx
 ```
+
+**`--no-deps` 是关键**(reviewer round-2 反馈):intranet compose 里 nginx `depends_on: backend (service_healthy) + frontend (service_healthy)`。`docker compose up <svc>` **默认会启动该服务的依赖**(深度优先满足),所以不加 `--no-deps` 会:
+- 顺带把 stopped 的 backend / frontend 一并拉起来,违反 pause 的"无活跃应用连接"前提
+- 拉起时 fallback 到 `${AF_VERSION:-latest}`,内网 `docker load` 进来的镜像通常带日期 tag(如 `:20260520`),**没有 `latest` alias** → 直接 image-not-found 失败
+- 即使有 `latest`,也可能指向旧版本
+
+加 `--no-deps` 后 compose 跳过依赖图,只 recreate 指定的三个 infra 服务。nginx 容器本身无 healthcheck(intranet compose 验证过),启动不要求 backend/frontend 在跑;nginx.conf 的维护页路由不依赖 upstream,所以 maintenance window 期间能正常服务。
 
 **时机选择(为什么塞在维护窗口内)**:
 - backend / frontend 已 stopped → PG / Redis 无活跃应用连接,recreate 干净

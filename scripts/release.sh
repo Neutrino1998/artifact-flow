@@ -439,5 +439,11 @@ $ANALYST_FOOTER
     tar xzf tmp/artifactflow-deploy-${VERSION}.tar.gz
     tar xzf tmp/artifactflow-config-${VERSION}.tar.gz
     ./deploy/scripts/pause.sh "升级 ${VERSION}"
+    # If this version changed compose infra (postgres / redis / nginx) service
+    # config — image, logging, mem_limit, volumes, ports, cap_add, command, etc.
+    # — insert a one-shot \`up -d --force-recreate --no-deps <services>\` here.
+    # \`resume.sh\` only ups backend / frontend, so infra HostConfig changes
+    # otherwise never take effect. Most releases skip this step. Full SOP:
+    # docs/deployment.md → 滚动更新已有部署 → "涉及 compose infra 服务 config 变更的升级".
     ./deploy/scripts/resume.sh ${VERSION}
 EOF
