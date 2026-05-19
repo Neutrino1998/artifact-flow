@@ -5,6 +5,8 @@ import { useArtifacts } from '@/hooks/useArtifacts';
 
 const ARTIFACT_SCHEME = 'artifact://';
 
+type ArtifactLinkProps = AnchorHTMLAttributes<HTMLAnchorElement> & { node?: unknown };
+
 /**
  * Custom <a> renderer for ReactMarkdown.
  *
@@ -14,8 +16,12 @@ const ARTIFACT_SCHEME = 'artifact://';
  *
  * Pair with markdownUrlTransform — the default react-markdown URL sanitizer
  * strips non-http(s) schemes to "", which would defeat this interception.
+ *
+ * `node` is dropped: react-markdown passes the hast node as an extra prop,
+ * and spreading it into a real <a> produces an `node="[object Object]"` DOM
+ * attribute plus a React unknown-prop warning.
  */
-export default function ArtifactLink(props: AnchorHTMLAttributes<HTMLAnchorElement>) {
+export default function ArtifactLink({ node: _node, ...props }: ArtifactLinkProps) {
   const { selectArtifact } = useArtifacts();
   const href = props.href ?? '';
 
