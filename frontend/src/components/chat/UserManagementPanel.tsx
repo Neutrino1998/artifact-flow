@@ -82,6 +82,18 @@ export default function UserManagementPanel() {
       const offset = (pageNum - 1) * size;
       const res = await api.listUsers(size, offset, trimmed);
       if (!isLatest()) return;
+      // listVersion bumps may have shrunk total below our page (e.g. last
+      // page had 1 user → right panel deletes that user → bump → we'd fetch
+      // an empty defunct page). Drop to the new last page and re-fetch;
+      // recursive claim() supersedes ours so finally skips setLoading(false)
+      // and the cascade renders as one continuous loading state.
+      const lastPage = Math.max(1, Math.ceil(res.total / size));
+      if (pageNum > lastPage) {
+        pageRef.current = lastPage;
+        setPage(lastPage);
+        void fetchUsers(searchQuery, lastPage, size);
+        return;
+      }
       setUsers(res.users);
       setTotal(res.total);
     } catch (err) {

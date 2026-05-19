@@ -422,6 +422,17 @@ function AdminConversationBrowser({
       const offset = (pageNum - 1) * size;
       const res = await api.listAdminConversations(size, offset, trimmed);
       if (!isLatest()) return;
+      // refreshTick bumps may have shrunk total below our page (admin view
+      // sees deletes from any user). Drop to the new last page and re-fetch;
+      // recursive claim() supersedes ours so finally skips setLoading(false)
+      // and the cascade renders as one continuous loading state.
+      const lastPage = Math.max(1, Math.ceil(res.total / size));
+      if (pageNum > lastPage) {
+        pageRef.current = lastPage;
+        setPage(lastPage);
+        void fetchConversations(q, lastPage, size);
+        return;
+      }
       setConversations(res.conversations);
       setTotal(res.total);
     } catch (err) {

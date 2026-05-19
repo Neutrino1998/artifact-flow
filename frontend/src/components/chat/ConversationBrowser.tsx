@@ -27,6 +27,11 @@ export default function ConversationBrowser() {
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const scrollRef = useRef<HTMLDivElement>(null);
+  // Mirror pageSize into a ref so the debounce timer body reads the
+  // latest value — capturing it in the useCallback closure leaves
+  // an in-flight timer using the pre-change size after the user
+  // bumps "每页 X 项", overwriting the new-size fetch.
+  const pageSizeRef = useRef(pageSize);
 
   // Selection mode state — local only, not in uiStore
   const [selectionMode, setSelectionMode] = useState(false);
@@ -70,9 +75,9 @@ export default function ConversationBrowser() {
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => {
       setPage(1);
-      fetchConversations(value, 1, pageSize);
+      fetchConversations(value, 1, pageSizeRef.current);
     }, 300);
-  }, [fetchConversations, pageSize]);
+  }, [fetchConversations]);
 
   const handlePageChange = useCallback((p: number) => {
     setPage(p);
@@ -82,6 +87,7 @@ export default function ConversationBrowser() {
 
   const handlePageSizeChange = useCallback((size: number) => {
     setPageSize(size);
+    pageSizeRef.current = size;
     setPage(1);
     fetchConversations(query, 1, size);
     scrollRef.current?.scrollTo({ top: 0 });
