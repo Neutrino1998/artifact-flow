@@ -441,13 +441,15 @@ $ANALYST_FOOTER
     # ─── compose infra changes (rare) ────────────────────────────
     # If this version changed compose \`nginx\` / \`postgres\` / \`redis\` service
     # blocks (image / logging / mem_limit / volumes / ports / cap_add / command),
-    # or .env vars consumed by them (POSTGRES_*, AF_HTTP_PORT), resume.sh won't
+    # or .env's AF_HTTP_PORT (nginx ports: interpolation), resume.sh won't
     # propagate the change — see docs/deployment.md → 滚动更新已有部署 →
     # "涉及 compose infra 服务 config 变更的升级". Two-step due to nginx static
     # upstream resolution:
     #   - nginx / AF_HTTP_PORT: recreate BEFORE pause.sh below
-    #   - PG/Redis / POSTGRES_*: recreate between pause and resume
-    # Most releases skip this entirely.
+    #   - PG/Redis: recreate between pause and resume
+    # POSTGRES_* env are init-only — changing user/password/db on a live
+    # cluster needs SQL (\`ALTER USER ...\`), NOT container recreate.
+    # Most releases skip this entire block.
     # ─────────────────────────────────────────────────────────────
     ./deploy/scripts/pause.sh "升级 ${VERSION}"
     ./deploy/scripts/resume.sh ${VERSION}

@@ -877,13 +877,19 @@ PR-obs-lite 的 `observability_report.py` 一开始把 threshold 写成 naive UT
 `d7f26f8` 同时改了 nginx + backend + frontend + postgres 的 HostConfig,**但 nginx 与 PG/Redis 必须在不同时机 recreate**(详见下方"nginx 时机不对称"):
 
 ```bash
+# (0) prep —— bundle 必须先解包,否则后续 recreate 用的是旧 compose / 旧 nginx.conf
+#    (reviewer round-4 P2 反馈,跟 release.sh 打印的 recipe 顺序对齐)
+./deploy/scripts/verify-bundle.sh tmp
+docker load -i tmp/artifactflow-app-${VERSION}.tar.gz
+tar xzf tmp/artifactflow-deploy-${VERSION}.tar.gz   # 新 compose + nginx.conf 就位
+tar xzf tmp/artifactflow-config-${VERSION}.tar.gz
+
 # (1) nginx —— 在 pause.sh 之前 recreate(此时 backend/frontend 还在 DNS 里)
 docker compose -f deploy/docker-compose.intranet.yml --profile infra \
     up -d --force-recreate --no-deps nginx
 
-# (2) 走常规 roll-update 序列
+# (2) pause
 ./deploy/scripts/pause.sh "升级 ${VERSION}"
-# docker load + tar xzf ...(按 release.sh 打印的 recipe 来)
 
 # (3) postgres / redis —— pause 与 resume 之间 recreate(无活跃应用连接)
 docker compose -f deploy/docker-compose.intranet.yml --profile infra \
@@ -913,10 +919,31 @@ docker compose -f deploy/docker-compose.intranet.yml --profile infra \
 
 | 变量 | 谁用 | 走哪条路径 |
 |---|---|---|
-| `ARTIFACTFLOW_*`(JWT / REDIS_URL / DATABASE_POOL_SIZE / MAX_CONCURRENT_TASKS / REDIS_KEY_PREFIX 等) | backend `env_file: .env` | ✅ pause/resume 覆盖(resume up backend → compose 检测 env_file 变化 → recreate backend) |
+| `ARTIFACTFLOW_*`(JWT / REDIS_URL / DATABASE_POOL_SIZE / MAX_CONCURRENT_TASKS / REDIS_KEY_PREFIX / DATABASE_URL 等) | backend `env_file: .env` | ✅ pause/resume 覆盖(resume up backend → compose 检测 env_file 变化 → recreate backend) |
 | `AF_VERSION` | backend/frontend `image:` tag interpolation | ✅ pause/resume 覆盖(resume.sh 显式传 `AF_VERSION=$VERSION`) |
-| `POSTGRES_DB` / `POSTGRES_USER` / `POSTGRES_PASSWORD` | postgres `environment:` 直接 interpolation | ❌ 需要 step (3) recreate postgres |
 | `AF_HTTP_PORT` | nginx `ports:` interpolation | ❌ 需要 step (1) recreate nginx |
+| `POSTGRES_DB` / `POSTGRES_USER` / `POSTGRES_PASSWORD` | postgres image entrypoint(**仅在 `postgres_data` 卷为空时**用于 `initdb`) | ⚠️ **不能走 recreate**(reviewer round-4 P1):见下方"`POSTGRES_*` 是 init-only" |
+
+**`POSTGRES_*` 是 init-only(reviewer round-4 P1)**:`postgres:16-alpine` 的 entrypoint(`docker-entrypoint.sh`)检查 `$PGDATA/PG_VERSION`:不存在(空卷)→ 用 `POSTGRES_*` 跑 `initdb`;**存在(已初始化)→ 直接启动,完全忽略 `POSTGRES_*` 这些 env**。所以现网已有 `postgres_data` 卷的情况下,改 `.env` 里的 `POSTGRES_PASSWORD` / `POSTGRES_USER` 然后 recreate postgres 容器,**库内用户密码不变**。运维若照此操作会出现:backend `DATABASE_URL` 用新密码 → PG 库内还是旧密码 → 认证失败 → backend 起不来。改 `POSTGRES_USER` 同理:`pg_isready -U <user>` 探针不做认证(只看 server 是否响应),所以 PG 容器仍 healthy,但 backend 连不上,**故障表现是"PG healthy 但 backend 起不来",诊断难度更高**。
+
+**改库内用户/密码/库名的正确流程**:
+
+```bash
+# 1. 在 PG 里跑 SQL(用现有 admin 连接进去)
+docker exec -it artifactflow-postgres-1 psql -U <旧 user> -d <db> -c \
+    "ALTER USER <user> WITH PASSWORD '<新密码>';"
+# 或 CREATE DATABASE / CREATE USER / RENAME 等
+
+# 2. 同步 .env:改 ARTIFACTFLOW_DATABASE_URL(走 pause/resume 让 backend 拿到新值)
+#    同时改 POSTGRES_PASSWORD —— 这是为了 .env 文档跟实际值一致,未来 fresh init 用,
+#    本次不会因为这条改动而触发 PG 重建
+
+# 3. 走常规 pause/resume(无需 infra recreate);backend recreate 时读新 DATABASE_URL → 连接成功
+./deploy/scripts/pause.sh "rotate PG password"
+./deploy/scripts/resume.sh ${VERSION}
+```
+
+**`POSTGRES_*` 真正生效的场景**:只有"清空 / 重建 postgres_data 卷"(`docker volume rm artifactflow_postgres_data` 之后 `up -d postgres`)—— 这等同于全新部署的 DB,会用 `POSTGRES_*` 重新 init。生产网络几乎不会做这事(数据全没),只在 dev 重置或灾备演练时出现。
 
 **数据安全**:`postgres_data` / `redis_data` 是 named volume(声明在 compose `volumes:` 顶层),`--force-recreate` 只销毁容器对象、**不动卷**。recreate 后:
 - PG 走 crash recovery 启动(同 host 重启路径,5–15s 视未 checkpoint WAL 量)
