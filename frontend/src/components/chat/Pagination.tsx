@@ -79,7 +79,7 @@ export default function Pagination({
                 aria-current={item === page ? 'page' : undefined}
                 className={`min-w-[28px] px-2 py-1 rounded-md transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
                   item === page
-                    ? 'bg-accent text-white'
+                    ? 'bg-accent/10 dark:bg-accent/15 text-accent font-medium'
                     : 'text-text-secondary dark:text-text-secondary-dark hover:bg-bg dark:hover:bg-bg-dark'
                 }`}
               >
