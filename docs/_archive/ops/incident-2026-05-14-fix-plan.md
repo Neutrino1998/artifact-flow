@@ -17,13 +17,13 @@
 | P1 | PR-obs-lite 轻量可观测性 + 日志持久化 | ✅ 已完成 | watchdog(自动栈 dump)+ sampler(jsonl 采样)+ `/admin/runtime` + 分析脚本 + 主日志迁持久卷 + obs jsonl 循环写;不动 DB schema、不上 Prometheus |
 | P1 | PR-3 fencing 事件持久化 | ✅ 已完成 | 修复 bug ④,恢复审计/回放完整性 |
 | P2 | PR-forensics-bundle 取证工具 + 部署前置 | ✅ 已完成 | 实质交付两件事:① py-spy 进 backend 镜像 + compose `cap_add: SYS_PTRACE`(faulthandler deadman 失效时的备份)② `release.sh --with-analyst-tools` 打 pandas/numpy 离线 wheels(给 analyst 机器零联网装)。`preflight.sh` 只验这两件事;Yama policy / host 深挖工具 由 cloud-service-checklist 第四段对齐云托管 |
-| P2 | PR-5 前端镜像重建 | 待启动 | 正式消除 HOSTNAME 误配 |
+| P2 | PR-5 前端镜像重建 | 代码侧已就绪 / 等 bundle | 正式消除 HOSTNAME 误配(fix `62771b6` 已在 main,缺一次发版) |
 | P3 | PR-tz-unify 事件时间戳时区统一 | ✅ 已完成 | 全链路 naive UTC:新增 `src/utils/time.utc_now()` + `frontend/src/lib/time.parseUtcIso`,后端写入路径所有 `datetime.now()` → `utc_now()`,前端 `new Date(<naive ISO>)` 一律改 `parseUtcIso` 锚定 UTC;observability_report.py 注释对齐,CLAUDE.md 增"时间约定"条目。Schema 不动、不迁数据 |
 | P3 | 文档 PR(`docs/runbooks/service-hang.md` + `docs/guides/observability-tuning.md`) | 待启动 | 应急 runbook + obs 调参手册,纯 markdown PR;待 PR-obs-lite + PR-forensics-bundle 代码落地后启动(字段 / 路径稳定后下笔) |
 
 **小版本迭代打包**:整套 fix plan 同一个 release bundle,分两批 ship:
 - **第一批(已合 `main`)**:PR-1(算法根治)+ PR-3(fencing 事件持久化),走"立即修根因"的 release tag
-- **第二批(部分已合 `main`)**:PR-obs-lite ✅ 已合;PR-forensics-bundle ✅ 已合;PR-tz-unify ✅ 已合;PR-5 + P3 文档 PR 仍待启动。同一个"事故后加固完整体"release tag,**一起 ship**——观测框架 / 取证工具 / 时区统一 / 前端镜像 / runbook + 调参手册,所有部件齐了才算闭环
+- **第二批(部分已合 `main`)**:PR-obs-lite ✅ 已合;PR-forensics-bundle ✅ 已合;PR-tz-unify ✅ 已合;PR-5 ✅ 代码侧已合(fix `62771b6`,缺一次发版);P3 文档 PR 仍待启动。同一个"事故后加固完整体"release tag,**一起 ship**——观测框架 / 取证工具 / 时区统一 / 前端镜像 / runbook + 调参手册,所有部件齐了才算闭环
 
 PR 之间逻辑独立可分别回滚,但**默认一捆发**:避免 "obs-lite 上线后 tuning 手册还没写" / "runbook 提了 py-spy 但内网还没装" 这种部分到位的尴尬态。
 
@@ -697,14 +697,22 @@ df_lag     = pd.read_json("data/observability/loop-lag.jsonl", lines=True)
 
 **目标**:正式消除 HOSTNAME 误配(bug ②)。
 
-**正式修复**:用当前源码(`frontend/Dockerfile:21` 已含 `ENV HOSTNAME=0.0.0.0`)重新构建前端镜像并发版。本质是走一遍正常发版流程,无代码改动。
+**正式修复**:用当前源码(`frontend/Dockerfile:21` 已含 `ENV HOSTNAME=0.0.0.0`,提交 `62771b6` 于 2026-05-12 进 main,事故前 2 天)重新构建前端镜像并发版。本质是走一遍正常发版流程,无代码改动。代码侧无后续工作,等第二批 bundle 一起 ship。
 
-**内网临时缓解**(非 PR,立即可做):在内网机 `deploy/docker-compose.intranet.yml` 的 `frontend` 服务加:
+**2026-05-19 现场验证**:进内网 `deploy-frontend-1` 容器(仍为旧镜像 `artifactflow-frontend:20260512`,在 fix commit 之前构建):
+- `netstat -tlnp` → `172.21.0.5:3000 LISTEN 1/next-server`(eth0),**无** `127.0.0.1:3000`
+- `echo $HOSTNAME` → `ab19609ff9f9`(Docker 默认容器短 ID,Dockerfile fix 未生效)
+
+完美对应 bug ② 的失效路径:Next.js 只绑 eth0(`HOSTNAME` 解析出的那张),localhost 探针打 loopback,得 ECONNREFUSED → 容器 `unhealthy`;但 nginx 通过 service DNS 走 eth0,用户访问正常。
+
+**纵深防御取舍**(2026-05-19 决策):**不**在 compose 文件加 `environment: HOSTNAME=0.0.0.0` 兜底。理由:① 单 source-of-truth(Dockerfile)更清晰,避免"哪层在生效"的歧义;② 现场症状只是监控误报,无用户影响,不构成"立即止血"压力;③ 等第二批 bundle 一起 ship,新镜像本身就带 fix,补丁层多余。
+
+**内网临时缓解**(非 PR,本次未采用):若日后有"必须立即 healthy"的场景,可在 `deploy/docker-compose.intranet.yml` 的 `frontend` 服务加:
 ```yaml
     environment:
       - HOSTNAME=0.0.0.0
 ```
-然后 `docker compose -f deploy/docker-compose.intranet.yml up -d --force-recreate frontend`。新镜像发版后此覆盖可保留(无害)或移除。
+然后 `docker compose -f deploy/docker-compose.intranet.yml up -d --force-recreate frontend`。本次决定不走此路。
 
 ---
 
