@@ -69,6 +69,16 @@ class RuntimeStore(Protocol):
         """Return conversation IDs that currently hold a lease."""
         ...
 
+    async def list_active_executions(self) -> Dict[str, str]:
+        """Return {conversation_id: message_id} for every currently-held lease.
+
+        Distinct from list_active_conversations: callers that need to
+        distinguish *which* execution is active (e.g. sidebar dot vs. compare-
+        and-swap on terminal) cannot use the bool-only flavor, otherwise an
+        old turn's terminal event clobbers a freshly-started new turn's mark.
+        """
+        ...
+
     # ── Lifecycle ──
 
     async def cleanup_execution(self, conversation_id: str, message_id: str) -> None: ...
@@ -213,6 +223,9 @@ class InMemoryRuntimeStore:
 
     async def list_active_conversations(self) -> List[str]:
         return list(self._conversation_leases.keys())
+
+    async def list_active_executions(self) -> Dict[str, str]:
+        return dict(self._conversation_leases)
 
     # ── Lease key ──
 

@@ -5,6 +5,7 @@ function reset() {
   useUIStore.setState({
     sidebarCollapsed: false,
     artifactPanelVisible: false,
+    rightPanelIntentEpoch: 0,
     conversationBrowserVisible: false,
     userManagementVisible: false,
     userManagementRightView: { type: 'empty' },
@@ -76,6 +77,58 @@ describe('uiStore panel mutual exclusion', () => {
     // Other panels untouched (mutual-exclusion only fires on open)
     expect(s.userManagementVisible).toBe(true);
     expect(s.observabilityVisible).toBe(true);
+  });
+});
+
+describe('uiStore rightPanelIntentEpoch', () => {
+  beforeEach(() => reset());
+
+  test('toggleArtifactPanel bumps epoch', () => {
+    const before = useUIStore.getState().rightPanelIntentEpoch;
+    useUIStore.getState().toggleArtifactPanel();
+    useUIStore.getState().toggleArtifactPanel();
+    expect(useUIStore.getState().rightPanelIntentEpoch).toBe(before + 2);
+  });
+
+  test('setArtifactPanelVisible bumps epoch even when value is unchanged', () => {
+    // Conservative: any caller of the setter is signaling user intent;
+    // we don't try to detect no-op writes.
+    const before = useUIStore.getState().rightPanelIntentEpoch;
+    useUIStore.getState().setArtifactPanelVisible(false);
+    expect(useUIStore.getState().rightPanelIntentEpoch).toBe(before + 1);
+  });
+
+  test('opening user management bumps epoch (right panel re-targets to detail)', () => {
+    const before = useUIStore.getState().rightPanelIntentEpoch;
+    useUIStore.getState().setUserManagementVisible(true);
+    expect(useUIStore.getState().rightPanelIntentEpoch).toBe(before + 1);
+  });
+
+  test('closing user management bumps epoch (right panel releases back)', () => {
+    useUIStore.setState({ userManagementVisible: true });
+    const before = useUIStore.getState().rightPanelIntentEpoch;
+    useUIStore.getState().setUserManagementVisible(false);
+    expect(useUIStore.getState().rightPanelIntentEpoch).toBe(before + 1);
+  });
+
+  test('opening observability bumps epoch (full-screen takeover)', () => {
+    const before = useUIStore.getState().rightPanelIntentEpoch;
+    useUIStore.getState().setObservabilityVisible(true);
+    expect(useUIStore.getState().rightPanelIntentEpoch).toBe(before + 1);
+  });
+
+  test('closing observability bumps epoch (right panel released back)', () => {
+    useUIStore.setState({ observabilityVisible: true });
+    const before = useUIStore.getState().rightPanelIntentEpoch;
+    useUIStore.getState().setObservabilityVisible(false);
+    expect(useUIStore.getState().rightPanelIntentEpoch).toBe(before + 1);
+  });
+
+  test('conversationBrowser open does NOT bump (middle-panel takeover, not right)', () => {
+    const before = useUIStore.getState().rightPanelIntentEpoch;
+    useUIStore.getState().setConversationBrowserVisible(true);
+    useUIStore.getState().setConversationBrowserVisible(false);
+    expect(useUIStore.getState().rightPanelIntentEpoch).toBe(before);
   });
 });
 

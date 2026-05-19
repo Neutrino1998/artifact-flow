@@ -46,7 +46,7 @@ export default function AdminConversationList() {
         >
           <div className="flex items-center gap-1.5">
             {conv.is_active && (
-              <span className="inline-block w-2 h-2 rounded-full bg-green-500 flex-shrink-0" title="活跃执行中" />
+              <span className="inline-block w-2 h-2 rounded-full bg-orange-500 flex-shrink-0" title="运行中" />
             )}
             <span className="font-medium truncate text-text-primary dark:text-text-primary-dark">
               {conv.title || 'Untitled'}

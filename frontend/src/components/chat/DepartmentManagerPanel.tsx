@@ -24,6 +24,35 @@ export default function DepartmentManagerPanel() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   /**
+   * 折叠的部门 id 集合 — 默认空（全展开）。在 panel 这一层维护，避免树切到
+   * edit/create 内嵌视图时被卸载、回来全部还原成展开。
+   */
+  const [collapsedIds, setCollapsedIds] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
+  const toggleCollapsed = useCallback((deptId: string) => {
+    setCollapsedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(deptId)) next.delete(deptId);
+      else next.add(deptId);
+      return next;
+    });
+  }, []);
+  const expandAll = useCallback(() => setCollapsedIds(new Set()), []);
+  const collapseAll = useCallback(() => {
+    const next = new Set<string>();
+    const walk = (ns: DepartmentTreeNode[]): void => {
+      for (const n of ns) {
+        if ((n.children ?? []).length > 0) {
+          next.add(n.id);
+          walk(n.children!);
+        }
+      }
+    };
+    walk(tree);
+    setCollapsedIds(next);
+  }, [tree]);
+  /**
    * 部门写入版本号 — 每次创建/改名/搬家/删除后 bump，子组件（DetailForm /
    * Cascader）订阅触发自身重拉。本地 state 不上 uiStore，避免污染全局
    * （部门管理面板生命周期内部的事）。
@@ -116,7 +145,7 @@ export default function DepartmentManagerPanel() {
       <div className="px-4 pt-4">
         <button
           onClick={() => setInnerView({ type: 'create', parentId: null })}
-          className="w-full flex items-center justify-center gap-2 px-4 py-2.5 text-accent bg-chat dark:bg-chat-dark rounded-2xl border border-border dark:border-border-dark hover:bg-panel dark:hover:bg-panel-accent-dark transition-colors"
+          className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-2xl border font-medium text-accent border-border dark:border-border-dark bg-surface dark:bg-surface-dark hover:bg-bg dark:hover:bg-bg-dark transition-colors"
         >
           <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5">
             <path d="M7 2v10M2 7h10" />
@@ -124,6 +153,26 @@ export default function DepartmentManagerPanel() {
           新建一级部门
         </button>
       </div>
+
+      {tree.length > 0 && (
+        <div className="px-6 pt-2 flex items-center gap-3 text-xs text-text-tertiary dark:text-text-tertiary-dark">
+          <button
+            onClick={expandAll}
+            type="button"
+            className="hover:text-accent transition-colors"
+          >
+            全部展开
+          </button>
+          <span className="opacity-40">·</span>
+          <button
+            onClick={collapseAll}
+            type="button"
+            className="hover:text-accent transition-colors"
+          >
+            全部折叠
+          </button>
+        </div>
+      )}
 
       <div className="flex-1 overflow-y-auto px-4 py-3">
         {loading && tree.length === 0 ? (
@@ -139,6 +188,8 @@ export default function DepartmentManagerPanel() {
             nodes={tree}
             onSelect={(deptId) => setInnerView({ type: 'edit', deptId })}
             onCreateChild={(parentId) => setInnerView({ type: 'create', parentId })}
+            collapsedIds={collapsedIds}
+            onToggleCollapsed={toggleCollapsed}
           />
         )}
       </div>

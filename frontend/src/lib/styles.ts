@@ -19,8 +19,11 @@ export const PROSE_CLASSES =
 export const LABEL_CLASS =
   'block text-sm text-text-secondary dark:text-text-secondary-dark mb-1';
 
+// Tailwind emits `dark:` variants AFTER `focus:` variants in the cascade,
+// so `dark:border-border-dark` wins over `focus:border-accent` on focused
+// inputs in dark mode unless we stack them as `dark:focus:border-accent`.
 const INPUT_BASE =
-  'w-full px-3 py-2 rounded-lg border border-border dark:border-border-dark text-text-primary dark:text-text-primary-dark placeholder:text-text-tertiary dark:placeholder:text-text-tertiary-dark focus:outline-none focus:border-accent disabled:opacity-40';
+  'w-full px-3 py-2 rounded-lg border border-border dark:border-border-dark text-text-primary dark:text-text-primary-dark placeholder:text-text-tertiary dark:placeholder:text-text-tertiary-dark focus:outline-none focus:border-accent dark:focus:border-accent disabled:opacity-40';
 
 export const INPUT_ON_PANEL = `${INPUT_BASE} bg-surface dark:bg-surface-dark`;
 export const INPUT_ON_SURFACE = `${INPUT_BASE} bg-bg dark:bg-bg-dark`;
@@ -36,13 +39,13 @@ export const INPUT_ON_SURFACE = `${INPUT_BASE} bg-bg dark:bg-bg-dark`;
 // ---------------------------------------------------------------------------
 
 export const BUTTON_PRIMARY =
-  'bg-accent text-white hover:bg-accent-hover disabled:opacity-40 disabled:cursor-not-allowed transition-colors';
+  'bg-accent text-white font-medium hover:bg-accent-hover disabled:opacity-40 disabled:cursor-not-allowed transition-colors';
 
 export const BUTTON_SECONDARY =
-  'border border-border dark:border-border-dark text-text-primary dark:text-text-primary-dark hover:bg-bg dark:hover:bg-bg-dark disabled:opacity-40 disabled:cursor-not-allowed transition-colors';
+  'border border-border dark:border-border-dark text-text-secondary dark:text-text-secondary-dark font-medium bg-surface dark:bg-surface-dark hover:bg-bg dark:hover:bg-bg-dark disabled:opacity-40 disabled:cursor-not-allowed transition-colors';
 
 export const BUTTON_DANGER =
-  'bg-status-error text-white hover:bg-status-error/80 disabled:opacity-40 disabled:cursor-not-allowed transition-colors';
+  'bg-status-error text-white font-medium hover:bg-status-error/80 disabled:opacity-40 disabled:cursor-not-allowed transition-colors';
 
 export const BUTTON_DANGER_OUTLINE =
-  'border border-status-error text-status-error hover:bg-status-error/10 disabled:opacity-40 disabled:cursor-not-allowed transition-colors';
+  'border border-status-error text-status-error font-medium bg-surface dark:bg-surface-dark hover:bg-status-error/10 disabled:opacity-40 disabled:cursor-not-allowed transition-colors';

@@ -17,6 +17,16 @@ export type UserMgmtRightView =
 interface UIState {
   sidebarCollapsed: boolean;
   artifactPanelVisible: boolean;
+  // Monotonic counter bumped on every write that affects what occupies
+  // the right panel: artifact toggle / explicit set, user-management
+  // open/close (master-detail), observability open/close (full-screen
+  // takeover). Lets deferred callers (e.g. useChat's auto-open-on-switch)
+  // snapshot the value before an await and detect ANY user-driven right-
+  // panel intent change in between — a plain boolean snapshot of
+  // `artifactPanelVisible` cannot distinguish "untouched" from
+  // "toggled and toggled back", and ignores siblings (user-mgmt /
+  // observability) that also re-target the right panel.
+  rightPanelIntentEpoch: number;
   conversationBrowserVisible: boolean;
   userManagementVisible: boolean;
   userManagementRightView: UserMgmtRightView;
@@ -57,6 +67,7 @@ interface UIState {
 export const useUIStore = create<UIState>((set) => ({
   sidebarCollapsed: false,
   artifactPanelVisible: false,
+  rightPanelIntentEpoch: 0,
   conversationBrowserVisible: false,
   userManagementVisible: false,
   userManagementRightView: { type: 'empty' },
@@ -74,8 +85,15 @@ export const useUIStore = create<UIState>((set) => ({
   setSidebarCollapsed: (collapsed) => set({ sidebarCollapsed: collapsed }),
 
   toggleArtifactPanel: () =>
-    set((s) => ({ artifactPanelVisible: !s.artifactPanelVisible })),
-  setArtifactPanelVisible: (visible) => set({ artifactPanelVisible: visible }),
+    set((s) => ({
+      artifactPanelVisible: !s.artifactPanelVisible,
+      rightPanelIntentEpoch: s.rightPanelIntentEpoch + 1,
+    })),
+  setArtifactPanelVisible: (visible) =>
+    set((s) => ({
+      artifactPanelVisible: visible,
+      rightPanelIntentEpoch: s.rightPanelIntentEpoch + 1,
+    })),
   setConversationBrowserVisible: (visible) => set({
     conversationBrowserVisible: visible,
     ...(visible && {
@@ -86,15 +104,19 @@ export const useUIStore = create<UIState>((set) => ({
       observabilityVisible: false,
     }),
   }),
-  setUserManagementVisible: (visible) => set({
+  setUserManagementVisible: (visible) => set((s) => ({
     userManagementVisible: visible,
+    // Bump on both open and close: opening re-targets right panel to
+    // UserManagementDetailPanel; closing releases it back to ArtifactPanel.
+    // Either edge is a user-driven right-panel intent change.
+    rightPanelIntentEpoch: s.rightPanelIntentEpoch + 1,
     ...(visible && { conversationBrowserVisible: false, observabilityVisible: false }),
     ...(!visible && {
       userManagementRightView: { type: 'empty' },
       selectionMode: false,
       userManagementSelection: [],
     }),
-  }),
+  })),
   setUserManagementRightView: (view) => set({ userManagementRightView: view }),
   bumpUserMgmtListVersion: () =>
     set((s) => ({ userMgmtListVersion: s.userMgmtListVersion + 1 })),
@@ -118,8 +140,12 @@ export const useUIStore = create<UIState>((set) => ({
   }),
   setUserManagementSelection: (ids) => set({ userManagementSelection: ids }),
   clearUserSelection: () => set({ userManagementSelection: [] }),
-  setObservabilityVisible: (visible) => set({
+  setObservabilityVisible: (visible) => set((s) => ({
     observabilityVisible: visible,
+    // Bump on both open and close: opening hides the right panel entirely
+    // (full-screen takeover); closing releases it back. Either edge is a
+    // user-driven right-panel intent change.
+    rightPanelIntentEpoch: s.rightPanelIntentEpoch + 1,
     ...(visible && {
       conversationBrowserVisible: false,
       userManagementVisible: false,
@@ -129,7 +155,7 @@ export const useUIStore = create<UIState>((set) => ({
       artifactPanelVisible: false,
     }),
     ...(!visible && { observabilitySelectedConvId: null, observabilityBrowseVisible: false }),
-  }),
+  })),
   setObservabilitySelectedConvId: (id) => set({
     observabilitySelectedConvId: id,
     observabilityBrowseVisible: false,

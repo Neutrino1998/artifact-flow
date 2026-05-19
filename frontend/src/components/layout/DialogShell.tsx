@@ -19,6 +19,8 @@ interface DialogShellProps {
   closeOnBackdrop?: boolean;
   /** ESC key closes the dialog when true (default true). */
   closeOnEscape?: boolean;
+  /** Override the surface bg/border (default `bg-surface dark:bg-surface-dark`). */
+  surfaceClassName?: string;
 }
 
 /**
@@ -38,6 +40,7 @@ export default function DialogShell({
   onClose,
   closeOnBackdrop = true,
   closeOnEscape = true,
+  surfaceClassName = 'bg-surface dark:bg-surface-dark',
 }: DialogShellProps) {
   useEffect(() => {
     if (!closeOnEscape) return;
@@ -56,7 +59,7 @@ export default function DialogShell({
       onClick={closeOnBackdrop ? onClose : undefined}
     >
       <div
-        className={`bg-surface dark:bg-surface-dark border border-border dark:border-border-dark rounded-card shadow-modal ${sizeClass} w-full mx-4 p-6`}
+        className={`${surfaceClassName} border border-border dark:border-border-dark rounded-card shadow-modal ${sizeClass} w-full mx-4 p-6`}
         onClick={(e) => e.stopPropagation()}
       >
         <h2 className="text-lg font-semibold text-text-primary dark:text-text-primary-dark mb-1">

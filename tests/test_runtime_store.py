@@ -47,6 +47,19 @@ class TestLease:
         store = InMemoryRuntimeStore()
         await store.release_lease("conv-x", "msg-x")  # should not raise
 
+    async def test_list_active_executions_includes_message_id(self):
+        store = InMemoryRuntimeStore()
+        assert await store.list_active_executions() == {}
+
+        await store.try_acquire_lease("conv-1", "msg-1")
+        await store.try_acquire_lease("conv-2", "msg-2")
+        active = await store.list_active_executions()
+        assert active == {"conv-1": "msg-1", "conv-2": "msg-2"}
+
+        await store.release_lease("conv-1", "msg-1")
+        active = await store.list_active_executions()
+        assert active == {"conv-2": "msg-2"}
+
 
 # ============================================================
 # TestEngineInteractive

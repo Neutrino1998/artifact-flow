@@ -229,6 +229,7 @@ async def list_conversations(
     q: Optional[str] = Query(default=None, max_length=200),
     current_user: TokenPayload = Depends(get_current_user),
     conversation_manager: ConversationManager = Depends(get_conversation_manager),
+    runner: ExecutionRunner = Depends(get_execution_runner),
 ):
     """列出对话列表"""
     user_id = current_user.user_id
@@ -238,6 +239,14 @@ async def list_conversations(
         limit=limit, offset=offset, user_id=user_id, title_query=title_query
     )
 
+    # lease 是"运行中"的单一事实源。需要返回 message_id(不是 bool)是因为
+    # 前端要用它做 compare-and-clear:terminal SSE 携带 message_id,缓存
+    # 端持有 active_message_id,只有两者相等才清。bool 模式下旧 turn 的
+    # terminal 会误清新 turn 的指示点(详见 ConversationSummary 注释)。
+    # RuntimeStore 不持有 user_id,但返回的 conv_id 与本用户列表求交后天
+    # 然只命中当前用户自己的会话。
+    active_executions = await runner.store.list_active_executions()
+
     return ConversationListResponse(
         conversations=[
             ConversationSummary(
@@ -246,6 +255,7 @@ async def list_conversations(
                 message_count=conv.get("message_count", 0),
                 created_at=datetime.fromisoformat(conv["created_at"]),
                 updated_at=datetime.fromisoformat(conv["updated_at"]),
+                active_message_id=active_executions.get(conv["conversation_id"]),
             )
             for conv in conversations
         ],

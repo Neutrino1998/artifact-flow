@@ -176,7 +176,7 @@ export default function UserDetailForm({ userId }: UserDetailFormProps) {
         <div className="text-sm text-status-error">{loadError ?? '用户不存在'}</div>
         <button
           onClick={loadUser}
-          className="px-4 py-1.5 rounded-lg border border-border dark:border-border-dark text-text-secondary dark:text-text-secondary-dark hover:bg-bg dark:hover:bg-bg-dark transition-colors"
+          className="px-4 py-1.5 rounded-lg border border-border dark:border-border-dark text-text-secondary dark:text-text-secondary-dark font-medium bg-surface dark:bg-surface-dark hover:bg-bg dark:hover:bg-bg-dark transition-colors"
         >
           重试
         </button>

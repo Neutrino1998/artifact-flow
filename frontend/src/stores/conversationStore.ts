@@ -6,6 +6,16 @@ import type {
 } from '@/types';
 import { MessageNode, buildMessageTree, extractBranchPath } from '@/lib/messageTree';
 
+// Sidebar active-dot semantics — kept intentionally lightweight:
+// `conversation.active_message_id` is a best-effort hint, not a strong-
+// consistency state machine. The server list is authoritative on refresh
+// (setConversations replaces unconditionally); send + terminal events apply
+// lightweight optimistic updates (setConversationActiveMessage / CAS clear).
+// We do NOT version list snapshots — under cross-tab divergence, switching
+// away mid-run, or rare out-of-order list responses, the dot may be briefly
+// stale. Strong "is this conversation running?" semantics belong to the
+// streaming view (Stop/Inject UI keyed off streamStore), not this indicator.
+
 interface ConversationState {
   // List
   conversations: ConversationSummary[];
@@ -31,6 +41,14 @@ interface ConversationState {
   setActiveBranch: (messageId: string | null) => void;
   updateMessages: (messages: MessageResponse[]) => void;
   removeConversation: (id: string) => void;
+  /** Optimistically set the cached active_message_id for a conv. Called by
+   *  sendMessage after the server responds with a fresh message_id so the
+   *  sidebar dot lights up without waiting for the next list refresh. */
+  setConversationActiveMessage: (id: string, messageId: string) => void;
+  /** Compare-and-clear the cached active_message_id. Only clears when the
+   *  cached id equals terminalMessageId, so an old turn's terminal event
+   *  cannot wipe out a newer turn's optimistic mark. */
+  clearConversationActiveIfMatch: (id: string, terminalMessageId: string) => void;
   reset: () => void;
 }
 
@@ -100,6 +118,29 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
       total: s.total - 1,
       current: s.current?.id === id ? null : s.current,
     })),
+
+  setConversationActiveMessage: (id, messageId) =>
+    set((s) => {
+      const idx = s.conversations.findIndex((c) => c.id === id);
+      if (idx === -1) return s;
+      if (s.conversations[idx].active_message_id === messageId) return s;
+      const next = [...s.conversations];
+      next[idx] = { ...next[idx], active_message_id: messageId };
+      return { conversations: next };
+    }),
+
+  clearConversationActiveIfMatch: (id, terminalMessageId) =>
+    set((s) => {
+      const idx = s.conversations.findIndex((c) => c.id === id);
+      if (idx === -1) return s;
+      // Compare-and-clear: only clear when the cached id matches the terminal.
+      // If a new turn has already optimistically replaced active_message_id,
+      // the old terminal is a no-op.
+      if (s.conversations[idx].active_message_id !== terminalMessageId) return s;
+      const next = [...s.conversations];
+      next[idx] = { ...next[idx], active_message_id: null };
+      return { conversations: next };
+    }),
 
   reset: () =>
     set({

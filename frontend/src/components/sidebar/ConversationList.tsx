@@ -41,7 +41,32 @@ export default function ConversationList() {
 
   useEffect(() => {
     loadConversations();
-  }, [loadConversations]);
+    // Silent refresh when this tab becomes visible again — covers the gap
+    // where the user starts a run here, switches tabs, the run finishes on
+    // the server, and they come back: this tab has no SSE listening to that
+    // stream (disconnected on switchConversation), so without this listener
+    // the running indicator would stay stuck until the user clicks something.
+    // No setInterval — focus alone is enough for the sidebar UX.
+    //
+    // Known limitation (accepted, not fixed):
+    //   User runs conv A, switches to B, stays on B with the tab visible,
+    //   never tab-switches and never sends another message. A finishes on
+    //   the server. This tab has no SSE on A and visibilitychange doesn't
+    //   fire while the tab stays visible — A's dot stays orange until one
+    //   of the list-refreshing actions runs: switchConversation,
+    //   tab-out-and-back (this listener), or sendMessage's isNew branch.
+    //   No correctness issue, only stale UI. Closing this would need a
+    //   bounded backoff poll or a user-level push channel — both heavier
+    //   than this idle-staring window warrants.
+    const onVisibility = () => {
+      if (document.visibilityState !== 'visible') return;
+      listConversations(20, 0)
+        .then((data) => setConversations(data.conversations, data.total, data.has_more))
+        .catch(() => { /* best-effort background refresh */ });
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => document.removeEventListener('visibilitychange', onVisibility);
+  }, [loadConversations, setConversations]);
 
   return (
     <div className="flex-1 overflow-y-auto">

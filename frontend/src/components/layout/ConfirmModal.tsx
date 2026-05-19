@@ -27,6 +27,7 @@ export default function ConfirmModal({
       title={title}
       description={message}
       onClose={onCancel}
+      surfaceClassName="bg-chat dark:bg-chat-dark"
       footer={
         <>
           <button

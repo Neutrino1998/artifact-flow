@@ -7,7 +7,7 @@ import { useAuthStore } from '@/stores/authStore';
 import {
   BUTTON_PRIMARY,
   BUTTON_SECONDARY,
-  INPUT_ON_SURFACE,
+  INPUT_ON_PANEL,
   LABEL_CLASS,
 } from '@/lib/styles';
 import DialogShell from './DialogShell';
@@ -71,6 +71,7 @@ export default function ChangePasswordDialog({ onClose }: ChangePasswordDialogPr
       onClose={onClose}
       closeOnBackdrop={!submitting}
       closeOnEscape={!submitting}
+      surfaceClassName="bg-chat dark:bg-chat-dark"
     >
       {success ? (
         <div className="py-4 text-center text-status-success">
@@ -88,7 +89,7 @@ export default function ChangePasswordDialog({ onClose }: ChangePasswordDialogPr
               onChange={(e) => setCurrentPassword(e.target.value)}
               autoFocus
               disabled={submitting}
-              className={INPUT_ON_SURFACE}
+              className={INPUT_ON_PANEL}
             />
           </div>
           <div>
@@ -100,7 +101,7 @@ export default function ChangePasswordDialog({ onClose }: ChangePasswordDialogPr
               value={newPassword}
               onChange={(e) => setNewPassword(e.target.value)}
               disabled={submitting}
-              className={INPUT_ON_SURFACE}
+              className={INPUT_ON_PANEL}
             />
           </div>
           <div>
@@ -112,7 +113,7 @@ export default function ChangePasswordDialog({ onClose }: ChangePasswordDialogPr
               value={confirmPassword}
               onChange={(e) => setConfirmPassword(e.target.value)}
               disabled={submitting}
-              className={INPUT_ON_SURFACE}
+              className={INPUT_ON_PANEL}
             />
             {newPasswordMismatch && (
               <p className="text-status-error text-xs mt-1">两次输入的密码不一致</p>

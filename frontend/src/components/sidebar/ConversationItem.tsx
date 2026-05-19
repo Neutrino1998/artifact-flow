@@ -67,8 +67,14 @@ function ConversationItem({ conversation, isActive, onSelect }: ConversationItem
         onMouseEnter={() => setShowMenu(true)}
         onMouseLeave={() => { if (!menuOpen) setShowMenu(false); }}
       >
-        <div className={`font-medium truncate text-text-primary dark:text-text-primary-dark ${showMenu || menuOpen ? 'pr-7' : ''}`}>
-          {title}
+        <div className={`flex items-center gap-1.5 font-medium text-text-primary dark:text-text-primary-dark ${showMenu || menuOpen ? 'pr-7' : ''}`}>
+          {conversation.active_message_id && (
+            <span
+              className="inline-block w-2 h-2 rounded-full bg-orange-500 flex-shrink-0"
+              title="运行中"
+            />
+          )}
+          <span className="truncate">{title}</span>
         </div>
         <div className="flex items-center gap-2 mt-0.5 text-xs text-text-tertiary dark:text-text-tertiary-dark">
           <span>{date}</span>

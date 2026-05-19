@@ -56,6 +56,7 @@ export function useSSE() {
   // Conversation store actions
   const setCurrent = useConversationStore((s) => s.setCurrent);
   const setConversations = useConversationStore((s) => s.setConversations);
+  const clearConversationActiveIfMatch = useConversationStore((s) => s.clearConversationActiveIfMatch);
 
   // Artifact store
   const setArtifactSessionId = useArtifactStore((s) => s.setSessionId);
@@ -72,7 +73,7 @@ export function useSSE() {
   const setArtifactPanelVisible = useUIStore((s) => s.setArtifactPanelVisible);
 
   const refreshAfterComplete = useCallback(
-    async (conversationId: string) => {
+    async (conversationId: string, terminalMessageId: string | null) => {
       // Capture nav-gen BEFORE the await. Both startNewChat() and
       // switchConversation() bump this synchronously on entry, so any
       // navigation event during our await leaves myNavGen != getNavGen().
@@ -92,13 +93,39 @@ export function useSSE() {
       // resurrect the panel after stream end. Costs nothing if there are
       // no fetches outstanding.
       bumpArtifactFetchGen();
+      // Compare-and-clear the sidebar dot for *this* terminal's message_id
+      // only. If the user already kicked off a new turn on the same conv,
+      // its sendMessage() has set active_message_id to the new id, and this
+      // call is a no-op — the new turn's mark survives untouched.
+      if (terminalMessageId) {
+        clearConversationActiveIfMatch(conversationId, terminalMessageId);
+      }
       try {
         const [detail, list] = await Promise.all([
           api.getConversation(conversationId, { force: true }),
           api.listConversations(20, 0),
         ]);
-        // Sidebar list refresh is harmless cross-conversation, so always apply.
+        // List refresh restores the server-authoritative view of
+        // active_message_id (covers cross-tab / cross-device updates that
+        // this tab never saw). This replace is unconditional — if the user
+        // started a new turn on this same conv while the list GET was in
+        // flight, and the snapshot was captured before that new turn took
+        // the lease, the just-written optimistic active_message_id can be
+        // briefly wiped here. The sidebar's running-indicator is a best-
+        // effort UX hint (see conversationStore top-of-file note); the
+        // next refresh restores truth from the server lease store.
         setConversations(list.conversations, list.total, list.has_more);
+        // Belt-and-suspenders CAS after the refresh: the list snapshot may
+        // have been captured before the lease release landed on the server
+        // (lease is released in execution_runner's finally AFTER push_event),
+        // so the server view can still report THIS terminal's message_id
+        // as active right after we got the terminal SSE locally. CAS only
+        // fixes that one direction (ghost dot for an already-finished turn).
+        // The inverse race (stale null-snapshot wiping a new turn) is the
+        // best-effort window noted above — intentionally not closed.
+        if (terminalMessageId) {
+          clearConversationActiveIfMatch(conversationId, terminalMessageId);
+        }
 
         // Everything below mutates state that belongs to "the conversation
         // the user is on". A nav-gen change means they aren't on this conv
@@ -148,7 +175,7 @@ export function useSSE() {
         console.error('Failed to refresh after complete:', err);
       }
     },
-    [setCurrent, setConversations, clearPendingUpdates, setArtifactCurrent, setArtifacts, setArtifactSessionId, setArtifactVersions, setSelectedVersion]
+    [setCurrent, setConversations, clearConversationActiveIfMatch, clearPendingUpdates, setArtifactCurrent, setArtifacts, setArtifactSessionId, setArtifactVersions, setSelectedVersion]
   );
 
   const handleEvent = useCallback(
@@ -438,7 +465,7 @@ export function useSSE() {
           }
           setCancelled(true);
           endStream();
-          refreshAfterComplete(conversationId);
+          refreshAfterComplete(conversationId, messageId);
           break;
         }
 
@@ -450,7 +477,7 @@ export function useSSE() {
             snapshotSegments(messageId);
           }
           endStream();
-          refreshAfterComplete(conversationId);
+          refreshAfterComplete(conversationId, messageId);
           break;
         }
 
@@ -474,7 +501,7 @@ export function useSSE() {
             snapshotSegments(errMsgId);
           }
           endStream();
-          refreshAfterComplete(conversationId);
+          refreshAfterComplete(conversationId, errMsgId);
           break;
         }
 
@@ -541,8 +568,9 @@ export function useSSE() {
                   attemptReconnect(conversationId, connection.lastEventId ?? lastEventId, controller, nextAttempt);
                 } else {
                   setReconnecting(false);
+                  const reconnectMsgId = useStreamStore.getState().messageId;
                   endStream();
-                  refreshAfterComplete(conversationId);
+                  refreshAfterComplete(conversationId, reconnectMsgId);
                 }
               },
               onClose: () => {
@@ -565,8 +593,9 @@ export function useSSE() {
       // Final ownership check before touching shared state
       if (_sharedAbortController !== ownerController) return;
       setReconnecting(false);
+      const exhaustedMsgId = useStreamStore.getState().messageId;
       endStream();
-      refreshAfterComplete(conversationId);
+      refreshAfterComplete(conversationId, exhaustedMsgId);
     },
     [handleEvent, endStream, setReconnecting, refreshAfterComplete],
   );

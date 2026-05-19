@@ -77,6 +77,7 @@ def _start_observability(loop: asyncio.AbstractEventLoop) -> None:
         Path(config.OBS_LOOP_LAG_LOG_PATH),
         max_mb=config.OBS_JSONL_MAX_MB,
         backups=config.OBS_JSONL_BACKUP_COUNT,
+        mirror_stdout=config.OBS_STDOUT_MIRROR,
     )
     _watchdog = LoopLagWatchdog(
         loop=loop,
@@ -92,6 +93,7 @@ def _start_observability(loop: asyncio.AbstractEventLoop) -> None:
         Path(config.OBS_METRICS_LOG_PATH),
         max_mb=config.OBS_JSONL_MAX_MB,
         backups=config.OBS_JSONL_BACKUP_COUNT,
+        mirror_stdout=config.OBS_STDOUT_MIRROR,
     )
     # mem_limit:env override > cgroup v2 > cgroup v1 > None。读不到时
     # sampler 不告警(保持现状),不再让 RSS 阈值永远沉默。

@@ -3328,6 +3328,18 @@
             "format": "date-time",
             "title": "Updated At",
             "description": "Last update time"
+          },
+          "active_message_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Active Message Id",
+            "description": "The message_id of the currently-running execution on this conversation, or null if no execution is in flight. Carries execution identity (not just a boolean) so the frontend can compare-and-clear on terminal events without an old turn's completion clobbering a freshly-started new turn's indicator."
           }
         },
         "type": "object",
@@ -3336,7 +3348,8 @@
           "title",
           "message_count",
           "created_at",
-          "updated_at"
+          "updated_at",
+          "active_message_id"
         ],
         "title": "ConversationSummary",
         "description": "Conversation summary in list response"

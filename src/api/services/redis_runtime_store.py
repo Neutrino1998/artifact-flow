@@ -316,6 +316,35 @@ class RedisRuntimeStore:
             conv_ids.append(k[start:end])
         return conv_ids
 
+    async def list_active_executions(self) -> Dict[str, str]:
+        """Scan lease keys + MGET values to return {conv_id: message_id}.
+
+        Two-step (scan, then MGET batch) is good enough at our scale — lease
+        set is bounded by MAX_CONCURRENT_TASKS so the GET batch is tiny. A
+        lease that expires between scan and MGET drops out of the map
+        naturally (None value), which is the desired semantics ("no longer
+        active").
+        """
+        pattern = f"{{{self._prefix}:*}}:lease"
+        keys: List[str] = []
+        conv_ids: List[str] = []
+        async for key in self._redis.scan_iter(match=pattern, count=100):
+            k = key if isinstance(key, str) else key.decode()
+            start = k.index(":") + 1
+            end = k.index("}")
+            keys.append(k)
+            conv_ids.append(k[start:end])
+        if not keys:
+            return {}
+        values = await self._redis.mget(keys)
+        result: Dict[str, str] = {}
+        for conv_id, raw in zip(conv_ids, values):
+            if raw is None:
+                continue
+            msg_id = raw if isinstance(raw, str) else raw.decode()
+            result[conv_id] = msg_id
+        return result
+
     # ── Lease key ──
 
     def get_lease_key(self, conversation_id: str) -> str:

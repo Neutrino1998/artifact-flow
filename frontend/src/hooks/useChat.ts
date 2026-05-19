@@ -4,12 +4,14 @@ import { useCallback } from 'react';
 import { useConversationStore } from '@/stores/conversationStore';
 import { useStreamStore } from '@/stores/streamStore';
 import { useArtifactStore } from '@/stores/artifactStore';
+import { useUIStore } from '@/stores/uiStore';
 import { useSSE } from '@/hooks/useSSE';
 import type { ChatRequest } from '@/types';
 import * as api from '@/lib/api';
 import { getNavGen, bumpNavGen } from '@/lib/navGen';
 import { bumpArtifactFetchGen } from '@/lib/artifactFetchGen';
 import { bumpArtifactDetailGen } from '@/lib/artifactDetailGen';
+import { refreshArtifactList } from '@/lib/refreshArtifactList';
 
 export function useChat() {
   const current = useConversationStore((s) => s.current);
@@ -17,11 +19,15 @@ export function useChat() {
   const setCurrent = useConversationStore((s) => s.setCurrent);
   const setCurrentLoading = useConversationStore((s) => s.setCurrentLoading);
   const setConversations = useConversationStore((s) => s.setConversations);
+  const setConversationActiveMessage = useConversationStore((s) => s.setConversationActiveMessage);
   const setPendingUserMessage = useStreamStore((s) => s.setPendingUserMessage);
   const setStreamParentId = useStreamStore((s) => s.setStreamParentId);
   const setError = useStreamStore((s) => s.setError);
   const resetStream = useStreamStore((s) => s.reset);
   const resetArtifacts = useArtifactStore((s) => s.reset);
+  const setArtifacts = useArtifactStore((s) => s.setArtifacts);
+  const setArtifactSessionId = useArtifactStore((s) => s.setSessionId);
+  const setArtifactPanelVisible = useUIStore((s) => s.setArtifactPanelVisible);
   const { connect, disconnect, reconnectIfActive } = useSSE();
 
   const isNewConversation = !current;
@@ -73,6 +79,15 @@ export function useChat() {
           api.listConversations(20, 0).then((data) => {
             setConversations(data.conversations, data.total, data.has_more);
           });
+        } else {
+          // Existing conv: optimistically write the cached active_message_id
+          // so the sidebar dot lights up without waiting for the next list
+          // refresh. Cleared by refreshAfterComplete via compare-and-clear:
+          // only the terminal carrying THIS message_id can clear it, so a
+          // late terminal from a previous turn cannot wipe out this mark.
+          // For new convs the list refresh above already brings the field
+          // from the backend response, so no double-write needed.
+          setConversationActiveMessage(res.conversation_id, res.message_id);
         }
 
         if (myNavGen !== getNavGen()) return;
@@ -91,7 +106,7 @@ export function useChat() {
         setError((err as Error).message);
       }
     },
-    [current?.id, lastMessageId, setPendingUserMessage, setStreamParentId, connect, setError, setConversations]
+    [current?.id, lastMessageId, setPendingUserMessage, setStreamParentId, connect, setError, setConversations, setConversationActiveMessage]
   );
 
   // Switch to an existing conversation: tear down the previous conversation's
@@ -117,6 +132,18 @@ export function useChat() {
       resetStream();
       resetArtifacts();
       setCurrentLoading(true);
+      // Fire-and-forget sidebar refresh: the previous conv's SSE was just
+      // disconnected, so any terminal events emitted while we're away will
+      // not reach this tab — the cached active_message_id for that conv
+      // would stay stuck. Re-fetching the list on every nav is the cheap
+      // recovery path (covers cross-tab/device too) — the backend lease
+      // store is authoritative, so the refresh restores truth. Gated by
+      // nav-gen so a stale response can't overwrite a newer switch's data.
+      api.listConversations(20, 0).then((data) => {
+        if (myGen === getNavGen()) {
+          setConversations(data.conversations, data.total, data.has_more);
+        }
+      }).catch(() => {});
       try {
         const detail = await api.getConversation(id);
         // A later switch (or startNewChat) bumped the counter while we were
@@ -126,6 +153,34 @@ export function useChat() {
         if (myGen !== getNavGen()) return;
         setCurrent(detail);
         reconnectIfActive(id);
+        // Auto-open the artifact panel if this conversation has artifacts.
+        // Fire-and-forget so a slow / large artifact list does not delay
+        // clearing `currentLoading` (the chat panel must surface as soon
+        // as the conversation detail is in). refreshArtifactList carries
+        // its own gen + session-stamp guard, so ArtifactPanel's mount
+        // effect (if already visible) and this call settle latest-wins.
+        //
+        // Snapshot rightPanelIntentEpoch BEFORE the probe and bail in the
+        // callback if it moved — any user-driven right-panel intent change
+        // in the interim (artifact toggle, user-mgmt open/close, or
+        // observability open/close) means the user has expressed intent
+        // and our late auto-open must not override it. Plain
+        // `artifactPanelVisible` snapshot would miss (a) toggled-and-back
+        // because final value matches initial and (b) sibling panels
+        // (user-mgmt / observability) re-targeting the right panel.
+        const epochBefore = useUIStore.getState().rightPanelIntentEpoch;
+        refreshArtifactList(
+          detail.session_id,
+          setArtifacts,
+          setArtifactSessionId,
+          () => useArtifactStore.getState().sessionId,
+        ).then(() => {
+          if (myGen !== getNavGen()) return;
+          if (useUIStore.getState().rightPanelIntentEpoch !== epochBefore) return;
+          if (useUIStore.getState().artifactPanelVisible) return;
+          if (useArtifactStore.getState().artifacts.length === 0) return;
+          setArtifactPanelVisible(true);
+        });
       } catch (err) {
         if (myGen !== getNavGen()) return;
         console.error('Failed to load conversation:', err);
@@ -135,7 +190,7 @@ export function useChat() {
         }
       }
     },
-    [current?.id, disconnect, resetStream, resetArtifacts, setCurrentLoading, setCurrent, reconnectIfActive]
+    [current?.id, disconnect, resetStream, resetArtifacts, setCurrentLoading, setCurrent, setConversations, reconnectIfActive, setArtifacts, setArtifactSessionId, setArtifactPanelVisible]
   );
 
   // Drop into the new-conversation flow: same teardown as switchConversation

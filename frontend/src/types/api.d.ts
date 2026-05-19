@@ -1526,6 +1526,11 @@ export interface components {
              * @description Last update time
              */
             updated_at: string;
+            /**
+             * Active Message Id
+             * @description The message_id of the currently-running execution on this conversation, or null if no execution is in flight. Carries execution identity (not just a boolean) so the frontend can compare-and-clear on terminal events without an old turn's completion clobbering a freshly-started new turn's indicator.
+             */
+            active_message_id: string | null;
         };
         /**
          * CreateDepartmentRequest

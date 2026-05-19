@@ -337,7 +337,7 @@ function UploadStage({
             <button
               onClick={onPick}
               type="button"
-              className="mt-2 px-4 py-1.5 rounded-lg border border-border dark:border-border-dark text-sm text-text-primary dark:text-text-primary-dark hover:bg-panel dark:hover:bg-panel-accent-dark transition-colors"
+              className="mt-2 px-4 py-1.5 rounded-lg border border-border dark:border-border-dark text-sm font-medium text-text-secondary dark:text-text-secondary-dark bg-surface dark:bg-surface-dark hover:bg-bg dark:hover:bg-bg-dark transition-colors"
             >
               选择文件
             </button>

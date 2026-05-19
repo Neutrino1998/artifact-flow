@@ -73,6 +73,9 @@ class Settings(BaseSettings):
     OBS_JSONL_BACKUP_COUNT: int = 10           # obs jsonl 保留备份数(.1 ~ .N);默认覆盖 ~800 天
     OBS_MEM_LIMIT_MB: int = 0                  # RSS 高水位告警上界(MB),0=自动:env > cgroup v2 > cgroup v1 > 不告警。
                                                # 显式设置等于 docker-compose `mem_limit: 2g` 的镜像(避免重复 source-of-truth)
+    OBS_STDOUT_MIRROR: bool = False            # 是否把 obs jsonl 镜像到 stdout(默认 False:主通道是持久卷;
+                                               # 打开作为 "持久卷未挂载" 的兜底,代价是污染主应用日志流 / docker logs)
+                                               # env 覆盖:`ARTIFACTFLOW_OBS_STDOUT_MIRROR=true`(env_prefix 强制带前缀)
 
     # Redis（空 = InMemory fallback，非空 = Redis）
     REDIS_URL: str = ""

@@ -93,6 +93,16 @@ class ConversationSummary(BaseModel):
     message_count: int = Field(0, description="Number of messages")
     created_at: datetime = Field(..., description="Creation time")
     updated_at: datetime = Field(..., description="Last update time")
+    active_message_id: Optional[str] = Field(
+        None,
+        description=(
+            "The message_id of the currently-running execution on this "
+            "conversation, or null if no execution is in flight. Carries "
+            "execution identity (not just a boolean) so the frontend can "
+            "compare-and-clear on terminal events without an old turn's "
+            "completion clobbering a freshly-started new turn's indicator."
+        ),
+    )
 
 
 class ConversationListResponse(BaseModel):

@@ -191,7 +191,7 @@ export default function DepartmentCascader({
   if (loadError) {
     return (
       <div className="text-xs text-status-error">
-        {loadError} <button onClick={reload} className="underline">重试</button>
+        {loadError} <button type="button" onClick={reload} className="underline">重试</button>
       </div>
     );
   }
@@ -211,7 +211,7 @@ export default function DepartmentCascader({
                 value={selected}
                 onChange={(e) => handleSelectChange(i, level.parentId, e.target.value)}
                 disabled={disabled || creating}
-                className="w-full appearance-none px-3 py-1.5 pr-9 rounded-lg bg-surface dark:bg-surface-dark border border-border dark:border-border-dark text-sm text-text-primary dark:text-text-primary-dark focus:outline-none focus:border-accent disabled:opacity-40"
+                className="w-full appearance-none px-3 py-1.5 pr-9 rounded-lg bg-surface dark:bg-surface-dark border border-border dark:border-border-dark text-sm text-text-primary dark:text-text-primary-dark focus:outline-none focus:border-accent dark:focus:border-accent disabled:opacity-40"
               >
                 <option value="">— 不选 —</option>
                 {visibleOptions.map((o) => (
@@ -240,24 +240,32 @@ export default function DepartmentCascader({
             value={createName}
             onChange={(e) => setCreateName(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === 'Enter') handleCreateSubmit();
-              if (e.key === 'Escape') setCreatingAtParent(null);
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                handleCreateSubmit();
+              }
+              if (e.key === 'Escape') {
+                e.preventDefault();
+                setCreatingAtParent(null);
+              }
             }}
             disabled={creating}
             placeholder="新部门名称"
-            className="flex-1 px-3 py-1.5 rounded-lg bg-surface dark:bg-surface-dark border border-border dark:border-border-dark text-sm text-text-primary dark:text-text-primary-dark focus:outline-none focus:border-accent disabled:opacity-40"
+            className="flex-1 px-3 py-1.5 rounded-lg bg-surface dark:bg-surface-dark border border-border dark:border-border-dark text-sm text-text-primary dark:text-text-primary-dark focus:outline-none focus:border-accent dark:focus:border-accent disabled:opacity-40"
           />
           <button
+            type="button"
             onClick={handleCreateSubmit}
             disabled={creating || !createName.trim()}
-            className="px-3 py-1.5 rounded-lg bg-accent text-white text-sm hover:bg-accent-hover disabled:opacity-40 transition-colors"
+            className="px-3 py-1.5 rounded-lg bg-accent text-white text-sm font-medium hover:bg-accent-hover disabled:opacity-40 transition-colors"
           >
             {creating ? '创建中...' : '创建'}
           </button>
           <button
+            type="button"
             onClick={() => { setCreatingAtParent(null); setCreateName(''); setCreateError(null); }}
             disabled={creating}
-            className="px-2 py-1.5 text-sm text-text-tertiary dark:text-text-tertiary-dark hover:text-text-secondary dark:hover:text-text-secondary-dark"
+            className="px-2 py-1.5 text-sm font-medium text-text-tertiary dark:text-text-tertiary-dark hover:text-text-secondary dark:hover:text-text-secondary-dark"
           >
             取消
           </button>

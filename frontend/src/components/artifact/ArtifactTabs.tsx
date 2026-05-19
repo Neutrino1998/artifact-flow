@@ -20,15 +20,15 @@ export default function ArtifactTabs() {
   }, [contentType]);
 
   return (
-    <div className="flex border-b border-border dark:border-border-dark">
+    <div className="inline-flex p-0.5 rounded-lg bg-panel-accent dark:bg-surface-dark text-xs">
       {tabs.map(({ mode, label }) => (
         <button
           key={mode}
           onClick={() => setViewMode(mode)}
-          className={`px-4 py-2 text-xs font-medium transition-colors ${
+          className={`px-3 py-1 rounded-md transition-colors ${
             viewMode === mode
-              ? 'text-accent border-b-2 border-accent'
-              : 'text-text-secondary dark:text-text-secondary-dark hover:text-text-primary dark:hover:text-text-primary-dark'
+              ? 'bg-surface dark:bg-bg-dark text-accent font-medium shadow-sm'
+              : 'text-text-tertiary dark:text-text-tertiary-dark hover:text-text-secondary dark:hover:text-text-secondary-dark'
           }`}
         >
           {label}

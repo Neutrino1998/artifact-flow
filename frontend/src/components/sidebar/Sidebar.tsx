@@ -92,6 +92,10 @@ export default function Sidebar() {
     setObservabilityVisible(false);
   };
 
+  const handleExitUserMgmt = () => {
+    setUserManagementVisible(false);
+  };
+
   const inObservability = observabilityVisible && isAdmin;
   // While user-management owns the right panel (master-detail on desktop,
   // force-hidden on mobile), the artifact toggle would just flip a hidden
@@ -159,6 +163,15 @@ export default function Sidebar() {
                 <path d="M8 3v10M3 8h10" />
               </svg>
             </IconButton>
+
+            {/* Exit user management */}
+            {inUserMgmt && (
+              <IconButton onClick={handleExitUserMgmt} label="退出用户管理">
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+                  <path d="M4 4l8 8M12 4l-8 8" />
+                </svg>
+              </IconButton>
+            )}
           </>
         )}
 
@@ -181,9 +194,9 @@ export default function Sidebar() {
       <div className="flex items-center justify-between px-4 py-3 border-b border-border dark:border-border-dark">
         <div className="min-w-0">
           <h1 className="text-lg font-semibold text-text-primary dark:text-text-primary-dark">
-            {inObservability ? '运行监控' : APP_NAME}
+            {inObservability ? '运行监控' : inUserMgmt ? '用户管理' : APP_NAME}
           </h1>
-          {!inObservability && (
+          {!inObservability && !inUserMgmt && (
             <p className="text-xs text-text-secondary dark:text-text-secondary-dark">
               {APP_TAGLINE}
             </p>
@@ -262,6 +275,17 @@ export default function Sidebar() {
               </svg>
               新建对话
             </button>
+            {inUserMgmt && (
+              <button
+                onClick={handleExitUserMgmt}
+                className="w-full flex items-center gap-2 px-3 py-2 font-medium text-red-500 bg-chat dark:bg-panel-accent-dark rounded-card border border-border dark:border-border-dark hover:bg-red-50 dark:hover:bg-red-900/10 transition-colors"
+              >
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+                  <path d="M9 3H4a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h5M7 8h6m0 0l-2-2m2 2l-2 2" />
+                </svg>
+                退出用户管理
+              </button>
+            )}
           </>
         )}
       </div>

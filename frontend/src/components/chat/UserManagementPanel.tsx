@@ -8,6 +8,7 @@ import { useUIStore } from '@/stores/uiStore';
 import { useLatestOnly } from '@/hooks/useLatestOnly';
 import Checkbox from '@/components/forms/Checkbox';
 import PanelSearchBar from './PanelSearchBar';
+import Pagination from './Pagination';
 
 interface DeptNode {
   name: string;
@@ -38,18 +39,24 @@ function buildDeptPath(leafId: string, index: Map<string, DeptNode>): string[] {
   return chain;
 }
 
-const PAGE_SIZE = 20;
+const DEFAULT_PAGE_SIZE = 20;
 
 export default function UserManagementPanel() {
   const [users, setUsers] = useState<UserResponse[]>([]);
   const [total, setTotal] = useState(0);
-  const [hasMore, setHasMore] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState('');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
   const [deptIndex, setDeptIndex] = useState<Map<string, DeptNode>>(new Map());
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const queryRef = useRef(query);
+  // Refs let the listVersion effect refresh the current page without
+  // re-firing every time the user navigates.
+  const pageRef = useRef(page);
+  const pageSizeRef = useRef(pageSize);
+  const scrollRef = useRef<HTMLDivElement>(null);
 
   const currentUserId = useAuthStore((s) => s.user?.id);
   const setUserManagementVisible = useUIStore((s) => s.setUserManagementVisible);
@@ -64,24 +71,31 @@ export default function UserManagementPanel() {
   const setUserManagementSelection = useUIStore((s) => s.setUserManagementSelection);
   const claim = useLatestOnly();
 
-  const fetchUsers = useCallback(async (searchQuery: string, offset = 0, append = false) => {
-    // Initial load / debounced search / load-more / listVersion-bump all
-    // funnel through here. Latest-only drops slow older queries (and stale
-    // load-more pages) that would otherwise overwrite a newer result set.
+  const fetchUsers = useCallback(async (searchQuery: string, pageNum: number, size: number) => {
+    // Latest-only drops slow older fetches (debounced search, stale page
+    // changes, listVersion bumps) so they can't overwrite a newer result set.
     const isLatest = claim();
     setLoading(true);
     setError(null);
     try {
       const trimmed = searchQuery.trim() || undefined;
-      const res = await api.listUsers(PAGE_SIZE, offset, trimmed);
+      const offset = (pageNum - 1) * size;
+      const res = await api.listUsers(size, offset, trimmed);
       if (!isLatest()) return;
-      if (append) {
-        setUsers((prev) => [...prev, ...res.users]);
-      } else {
-        setUsers(res.users);
+      // listVersion bumps may have shrunk total below our page (e.g. last
+      // page had 1 user → right panel deletes that user → bump → we'd fetch
+      // an empty defunct page). Drop to the new last page and re-fetch;
+      // recursive claim() supersedes ours so finally skips setLoading(false)
+      // and the cascade renders as one continuous loading state.
+      const lastPage = Math.max(1, Math.ceil(res.total / size));
+      if (pageNum > lastPage) {
+        pageRef.current = lastPage;
+        setPage(lastPage);
+        void fetchUsers(searchQuery, lastPage, size);
+        return;
       }
+      setUsers(res.users);
       setTotal(res.total);
-      setHasMore(offset + res.users.length < res.total);
     } catch (err) {
       if (!isLatest()) return;
       setError(err instanceof Error ? err.message : '加载用户列表失败');
@@ -91,13 +105,15 @@ export default function UserManagementPanel() {
   }, [claim]);
 
   useEffect(() => {
-    fetchUsers('');
-  }, [fetchUsers]);
+    fetchUsers('', 1, DEFAULT_PAGE_SIZE);
+    // Mount-only initial load — handlers below own all subsequent fetches.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  // 右面板表单成功后 bumpUserMgmtListVersion → 触发列表刷新（保留搜索词）
+  // 右面板表单成功后 bumpUserMgmtListVersion → 触发列表刷新（保留搜索词 + 当前页）
   useEffect(() => {
     if (listVersion === 0) return;
-    fetchUsers(queryRef.current);
+    fetchUsers(queryRef.current, pageRef.current, pageSizeRef.current);
   }, [listVersion, fetchUsers]);
 
   // 拉部门树 — 给 UserRow 显示部门名用。dept 改名/搬家后 listVersion bump
@@ -122,14 +138,27 @@ export default function UserManagementPanel() {
     queryRef.current = value;
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => {
-      fetchUsers(value);
+      setPage(1);
+      pageRef.current = 1;
+      fetchUsers(value, 1, pageSizeRef.current);
     }, 300);
   }, [fetchUsers]);
 
-  const handleLoadMore = useCallback(() => {
-    if (loading || !hasMore) return;
-    fetchUsers(query, users.length, true);
-  }, [loading, hasMore, query, users.length, fetchUsers]);
+  const handlePageChange = useCallback((p: number) => {
+    setPage(p);
+    pageRef.current = p;
+    fetchUsers(queryRef.current, p, pageSizeRef.current);
+    scrollRef.current?.scrollTo({ top: 0 });
+  }, [fetchUsers]);
+
+  const handlePageSizeChange = useCallback((size: number) => {
+    setPageSize(size);
+    pageSizeRef.current = size;
+    setPage(1);
+    pageRef.current = 1;
+    fetchUsers(queryRef.current, 1, size);
+    scrollRef.current?.scrollTo({ top: 0 });
+  }, [fetchUsers]);
 
   const handleClose = useCallback(() => {
     setUserManagementVisible(false);
@@ -169,7 +198,7 @@ export default function UserManagementPanel() {
       />
 
       {/* Content */}
-      <div className="flex-1 overflow-y-auto px-4">
+      <div ref={scrollRef} className="flex-1 overflow-y-auto px-4">
         <div className="max-w-3xl mx-auto">
           {/* Error */}
           {error && (
@@ -183,10 +212,10 @@ export default function UserManagementPanel() {
             <div className="mb-3 flex items-center gap-2">
               <button
                 onClick={() => setRightView({ type: 'create-user' })}
-                className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-2xl border transition-colors ${
+                className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-2xl border font-medium transition-colors ${
                   rightView.type === 'create-user'
-                    ? 'text-accent border-accent bg-panel dark:bg-panel-accent-dark'
-                    : 'text-accent border-border dark:border-border-dark bg-chat dark:bg-chat-dark hover:bg-panel dark:hover:bg-panel-accent-dark'
+                    ? 'text-accent border-accent bg-bg dark:bg-bg-dark'
+                    : 'text-accent border-border dark:border-border-dark bg-surface dark:bg-surface-dark hover:bg-bg dark:hover:bg-bg-dark'
                 }`}
               >
                 <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5">
@@ -196,10 +225,10 @@ export default function UserManagementPanel() {
               </button>
               <button
                 onClick={() => setRightView({ type: 'bulk-import' })}
-                className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-2xl border transition-colors ${
+                className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-2xl border font-medium transition-colors ${
                   rightView.type === 'bulk-import'
-                    ? 'text-accent border-accent bg-panel dark:bg-panel-accent-dark'
-                    : 'text-text-secondary dark:text-text-secondary-dark border-border dark:border-border-dark bg-chat dark:bg-chat-dark hover:bg-panel dark:hover:bg-panel-accent-dark'
+                    ? 'text-accent border-accent bg-bg dark:bg-bg-dark'
+                    : 'text-text-secondary dark:text-text-secondary-dark border-border dark:border-border-dark bg-surface dark:bg-surface-dark hover:bg-bg dark:hover:bg-bg-dark'
                 }`}
               >
                 <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5">
@@ -209,10 +238,10 @@ export default function UserManagementPanel() {
               </button>
               <button
                 onClick={() => setRightView({ type: 'dept-manager' })}
-                className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-2xl border transition-colors ${
+                className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-2xl border font-medium transition-colors ${
                   rightView.type === 'dept-manager'
-                    ? 'text-accent border-accent bg-panel dark:bg-panel-accent-dark'
-                    : 'text-text-secondary dark:text-text-secondary-dark border-border dark:border-border-dark bg-chat dark:bg-chat-dark hover:bg-panel dark:hover:bg-panel-accent-dark'
+                    ? 'text-accent border-accent bg-bg dark:bg-bg-dark'
+                    : 'text-text-secondary dark:text-text-secondary-dark border-border dark:border-border-dark bg-surface dark:bg-surface-dark hover:bg-bg dark:hover:bg-bg-dark'
                 }`}
               >
                 <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5">
@@ -222,7 +251,7 @@ export default function UserManagementPanel() {
               </button>
               <button
                 onClick={enterSelectionMode}
-                className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-2xl border text-text-secondary dark:text-text-secondary-dark border-border dark:border-border-dark bg-chat dark:bg-chat-dark hover:bg-panel dark:hover:bg-panel-accent-dark transition-colors"
+                className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-2xl border font-medium text-text-secondary dark:text-text-secondary-dark border-border dark:border-border-dark bg-surface dark:bg-surface-dark hover:bg-bg dark:hover:bg-bg-dark transition-colors"
               >
                 <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5">
                   <rect x="2" y="2" width="10" height="10" rx="1.5" />
@@ -277,25 +306,27 @@ export default function UserManagementPanel() {
                   onOpenDetail={() => setRightView({ type: 'edit-user', userId: user.id })}
                 />
               ))}
-
-              {loading && (
-                <div className="py-4 text-center text-xs text-text-tertiary dark:text-text-tertiary-dark">
-                  Loading...
-                </div>
-              )}
-
-              {hasMore && !loading && (
-                <button
-                  onClick={handleLoadMore}
-                  className="w-full py-2.5 text-sm text-text-secondary dark:text-text-secondary-dark rounded-lg hover:bg-panel/60 dark:hover:bg-panel-accent-dark/60 transition-colors"
-                >
-                  显示更多
-                </button>
-              )}
             </>
           )}
         </div>
       </div>
+
+      {total > 0 && (
+        <div className="px-4 pt-2 pb-4">
+          <div className="max-w-3xl mx-auto">
+            <div className="bg-surface dark:bg-surface-dark rounded-2xl px-4">
+              <Pagination
+                page={page}
+                pageSize={pageSize}
+                total={total}
+                onPageChange={handlePageChange}
+                onPageSizeChange={handlePageSizeChange}
+                disabled={loading}
+              />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

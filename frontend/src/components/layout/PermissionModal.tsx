@@ -54,6 +54,7 @@ export default function PermissionModal() {
       onClose={handleClose}
       closeOnBackdrop={!loading}
       closeOnEscape={!loading}
+      surfaceClassName="bg-chat dark:bg-chat-dark"
       footer={
         <>
           <button
@@ -81,7 +82,7 @@ export default function PermissionModal() {
       }
     >
       {/* Tool info */}
-      <div className="bg-bg dark:bg-bg-dark border border-border dark:border-border-dark rounded-lg p-3 mb-4">
+      <div className="bg-surface dark:bg-surface-dark border border-border dark:border-border-dark rounded-lg p-3 mb-4">
         <div className="text-xs font-semibold font-mono text-text-primary dark:text-text-primary-dark">
           {permissionRequest.toolName}
         </div>
