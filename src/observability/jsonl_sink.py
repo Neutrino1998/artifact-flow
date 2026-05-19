@@ -7,7 +7,9 @@ JsonlSink — 轮转写盘 + 可选 stdout mirror 的 jsonl 写入器
 - propagate=False,不污染根 logger 的主应用日志流
 - 主通道是持久卷上的 jsonl 文件;stdout mirror 默认关,作为
   "持久卷未挂载 / 挂错路径" 的二级兜底通道(docker logs 拉得到)
-  按需通过 `mirror_stdout=True` 或 `OBS_STDOUT_MIRROR` 配置打开
+  按需通过构造参数 `mirror_stdout=True` 或环境变量
+  `ARTIFACTFLOW_OBS_STDOUT_MIRROR=true` 打开(Settings 强制
+  `env_prefix="ARTIFACTFLOW_"`,裸 `OBS_STDOUT_MIRROR` 不会生效)
 - 写入异常一律吞 — observability 失败决不能拖累业务路径
 - 单进程同写假设(backend 单进程,RotatingFileHandler 内置锁就够;
   日后切多 worker 需重新设计:rotate 瞬间会互相覆盖)
