@@ -4,12 +4,14 @@ import { useCallback } from 'react';
 import { useConversationStore } from '@/stores/conversationStore';
 import { useStreamStore } from '@/stores/streamStore';
 import { useArtifactStore } from '@/stores/artifactStore';
+import { useUIStore } from '@/stores/uiStore';
 import { useSSE } from '@/hooks/useSSE';
 import type { ChatRequest } from '@/types';
 import * as api from '@/lib/api';
 import { getNavGen, bumpNavGen } from '@/lib/navGen';
 import { bumpArtifactFetchGen } from '@/lib/artifactFetchGen';
 import { bumpArtifactDetailGen } from '@/lib/artifactDetailGen';
+import { refreshArtifactList } from '@/lib/refreshArtifactList';
 
 export function useChat() {
   const current = useConversationStore((s) => s.current);
@@ -23,6 +25,9 @@ export function useChat() {
   const setError = useStreamStore((s) => s.setError);
   const resetStream = useStreamStore((s) => s.reset);
   const resetArtifacts = useArtifactStore((s) => s.reset);
+  const setArtifacts = useArtifactStore((s) => s.setArtifacts);
+  const setArtifactSessionId = useArtifactStore((s) => s.setSessionId);
+  const setArtifactPanelVisible = useUIStore((s) => s.setArtifactPanelVisible);
   const { connect, disconnect, reconnectIfActive } = useSSE();
 
   const isNewConversation = !current;
@@ -148,6 +153,22 @@ export function useChat() {
         if (myGen !== getNavGen()) return;
         setCurrent(detail);
         reconnectIfActive(id);
+        // Auto-open the artifact panel if this conversation has any artifacts.
+        // Single-shot on switch: only fires here, so once the user closes the
+        // panel it stays closed for the remainder of this conversation visit.
+        // refreshArtifactList carries its own gen + session-stamp guard, so
+        // ArtifactPanel's mount effect (if it was already visible) and this
+        // call resolve in deterministic latest-wins order without overwrite.
+        await refreshArtifactList(
+          detail.session_id,
+          setArtifacts,
+          setArtifactSessionId,
+          () => useArtifactStore.getState().sessionId,
+        );
+        if (myGen !== getNavGen()) return;
+        if (useArtifactStore.getState().artifacts.length > 0) {
+          setArtifactPanelVisible(true);
+        }
       } catch (err) {
         if (myGen !== getNavGen()) return;
         console.error('Failed to load conversation:', err);
@@ -157,7 +178,7 @@ export function useChat() {
         }
       }
     },
-    [current?.id, disconnect, resetStream, resetArtifacts, setCurrentLoading, setCurrent, setConversations, reconnectIfActive]
+    [current?.id, disconnect, resetStream, resetArtifacts, setCurrentLoading, setCurrent, setConversations, reconnectIfActive, setArtifacts, setArtifactSessionId, setArtifactPanelVisible]
   );
 
   // Drop into the new-conversation flow: same teardown as switchConversation
