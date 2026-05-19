@@ -6,23 +6,22 @@ import type {
 } from '@/types';
 import { MessageNode, buildMessageTree, extractBranchPath } from '@/lib/messageTree';
 
+// Sidebar active-dot semantics — kept intentionally lightweight:
+// `conversation.active_message_id` is a best-effort hint, not a strong-
+// consistency state machine. The server list is authoritative on refresh
+// (setConversations replaces unconditionally); send + terminal events apply
+// lightweight optimistic updates (setConversationActiveMessage / CAS clear).
+// We do NOT version list snapshots — under cross-tab divergence, switching
+// away mid-run, or rare out-of-order list responses, the dot may be briefly
+// stale. Strong "is this conversation running?" semantics belong to the
+// streaming view (Stop/Inject UI keyed off streamStore), not this indicator.
+
 interface ConversationState {
   // List
   conversations: ConversationSummary[];
   total: number;
   hasMore: boolean;
   listLoading: boolean;
-  /** Per-conv "last local mutation" wall-clock timestamp. Bumped by
-   *  setConversationActiveMessage / clearConversationActiveIfMatch.
-   *  setConversations / appendConversations compare each incoming snapshot's
-   *  `snapshotTakenAt` against this map; if the snapshot is older, the
-   *  conv's `active_message_id` is preserved from cache (other fields take
-   *  the server value). Defeats the race where a list GET sent BEFORE a
-   *  local optimistic write returns AFTER it and silently wipes the mark.
-   *  Single-threaded JS + monotonic Date.now() on one tab → no clock drift
-   *  to worry about (cross-tab races are settled by the next list refresh
-   *  reading the authoritative lease store). */
-  localMutationTimes: Map<string, number>;
 
   // Current conversation
   current: ConversationDetail | null;
@@ -34,18 +33,8 @@ interface ConversationState {
   activeBranch: string | null;
 
   // Actions
-  setConversations: (
-    convs: ConversationSummary[],
-    total: number,
-    hasMore: boolean,
-    snapshotTakenAt: number,
-  ) => void;
-  appendConversations: (
-    convs: ConversationSummary[],
-    total: number,
-    hasMore: boolean,
-    snapshotTakenAt: number,
-  ) => void;
+  setConversations: (convs: ConversationSummary[], total: number, hasMore: boolean) => void;
+  appendConversations: (convs: ConversationSummary[], total: number, hasMore: boolean) => void;
   setListLoading: (loading: boolean) => void;
   setCurrent: (conv: ConversationDetail | null) => void;
   setCurrentLoading: (loading: boolean) => void;
@@ -63,27 +52,11 @@ interface ConversationState {
   reset: () => void;
 }
 
-/** Apply the version-aware merge for a single incoming conv summary.
- *  If `snapshotTakenAt` predates the per-conv local mutation, keep the
- *  cached `active_message_id` (other fields still take the server value). */
-function mergeIncomingConv(
-  incoming: ConversationSummary,
-  cached: ConversationSummary | undefined,
-  localMutationAt: number | undefined,
-  snapshotTakenAt: number,
-): ConversationSummary {
-  if (cached && localMutationAt !== undefined && snapshotTakenAt < localMutationAt) {
-    return { ...incoming, active_message_id: cached.active_message_id };
-  }
-  return incoming;
-}
-
 export const useConversationStore = create<ConversationState>((set, get) => ({
   conversations: [],
   total: 0,
   hasMore: false,
   listLoading: false,
-  localMutationTimes: new Map(),
 
   current: null,
   currentLoading: false,
@@ -92,23 +65,15 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
   branchPath: [],
   activeBranch: null,
 
-  setConversations: (convs, total, hasMore, snapshotTakenAt) =>
-    set((s) => {
-      const cachedById = new Map(s.conversations.map((c) => [c.id, c]));
-      const merged = convs.map((c) =>
-        mergeIncomingConv(c, cachedById.get(c.id), s.localMutationTimes.get(c.id), snapshotTakenAt)
-      );
-      return { conversations: merged, total, hasMore };
-    }),
+  setConversations: (convs, total, hasMore) =>
+    set({ conversations: convs, total, hasMore }),
 
-  appendConversations: (convs, total, hasMore, snapshotTakenAt) =>
-    set((s) => {
-      const cachedById = new Map(s.conversations.map((c) => [c.id, c]));
-      const merged = convs.map((c) =>
-        mergeIncomingConv(c, cachedById.get(c.id), s.localMutationTimes.get(c.id), snapshotTakenAt)
-      );
-      return { conversations: [...s.conversations, ...merged], total, hasMore };
-    }),
+  appendConversations: (convs, total, hasMore) =>
+    set((s) => ({
+      conversations: [...s.conversations, ...convs],
+      total,
+      hasMore,
+    })),
 
   setListLoading: (loading) => set({ listLoading: loading }),
 
@@ -148,34 +113,20 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
   },
 
   removeConversation: (id) =>
-    set((s) => {
-      const localMutationTimes = new Map(s.localMutationTimes);
-      localMutationTimes.delete(id);
-      return {
-        conversations: s.conversations.filter((c) => c.id !== id),
-        total: s.total - 1,
-        current: s.current?.id === id ? null : s.current,
-        localMutationTimes,
-      };
-    }),
+    set((s) => ({
+      conversations: s.conversations.filter((c) => c.id !== id),
+      total: s.total - 1,
+      current: s.current?.id === id ? null : s.current,
+    })),
 
   setConversationActiveMessage: (id, messageId) =>
     set((s) => {
       const idx = s.conversations.findIndex((c) => c.id === id);
       if (idx === -1) return s;
-      // Always bump localMutationTimes — even when active_message_id is
-      // unchanged, the bump expresses "the current cached value is my
-      // intent; in-flight server snapshots taken before now must not
-      // overwrite it." Skipping the bump on equality would let a stale
-      // snapshot whose server view is null still win.
-      const localMutationTimes = new Map(s.localMutationTimes);
-      localMutationTimes.set(id, Date.now());
-      if (s.conversations[idx].active_message_id === messageId) {
-        return { localMutationTimes };
-      }
+      if (s.conversations[idx].active_message_id === messageId) return s;
       const next = [...s.conversations];
       next[idx] = { ...next[idx], active_message_id: messageId };
-      return { conversations: next, localMutationTimes };
+      return { conversations: next };
     }),
 
   clearConversationActiveIfMatch: (id, terminalMessageId) =>
@@ -184,14 +135,11 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
       if (idx === -1) return s;
       // Compare-and-clear: only clear when the cached id matches the terminal.
       // If a new turn has already optimistically replaced active_message_id,
-      // the old terminal is a no-op (and we don't bump localMutationTimes
-      // either — the new turn's bump should win the merge guard).
+      // the old terminal is a no-op.
       if (s.conversations[idx].active_message_id !== terminalMessageId) return s;
       const next = [...s.conversations];
       next[idx] = { ...next[idx], active_message_id: null };
-      const localMutationTimes = new Map(s.localMutationTimes);
-      localMutationTimes.set(id, Date.now());
-      return { conversations: next, localMutationTimes };
+      return { conversations: next };
     }),
 
   reset: () =>
@@ -199,7 +147,6 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
       conversations: [],
       total: 0,
       hasMore: false,
-      localMutationTimes: new Map(),
       current: null,
       nodeMap: new Map(),
       branchPath: [],

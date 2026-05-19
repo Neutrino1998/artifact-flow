@@ -96,29 +96,32 @@ export function useSSE() {
       // Compare-and-clear the sidebar dot for *this* terminal's message_id
       // only. If the user already kicked off a new turn on the same conv,
       // its sendMessage() has set active_message_id to the new id, and this
-      // call is a no-op — the new turn's mark survives untouched. The
-      // backend list refresh below will eventually sync truth either way.
+      // call is a no-op — the new turn's mark survives untouched.
       if (terminalMessageId) {
         clearConversationActiveIfMatch(conversationId, terminalMessageId);
       }
-      // Capture BEFORE the await so a local sendMessage interleaving between
-      // here and the response can win the store-side merge guard — its
-      // localMutationTimes bump will be later than this snapshotTakenAt, so
-      // setConversations preserves the new turn's active_message_id even
-      // though this list snapshot saw "no active".
-      const snapshotTakenAt = Date.now();
       try {
         const [detail, list] = await Promise.all([
           api.getConversation(conversationId, { force: true }),
           api.listConversations(20, 0),
         ]);
-        // Sidebar list refresh is harmless cross-conversation, so always apply.
-        // The backend list endpoint reads active_message_id from the lease
-        // store (single source of truth for execution state), so setConversations
-        // restores the authoritative view. Combined with the per-conv merge
-        // guard in conversationStore, a stale snapshot can't clobber a fresher
-        // local optimistic write — see mergeIncomingConv there for the rule.
-        setConversations(list.conversations, list.total, list.has_more, snapshotTakenAt);
+        // List refresh restores the server-authoritative view of
+        // active_message_id (covers cross-tab / cross-device updates that
+        // this tab never saw).
+        setConversations(list.conversations, list.total, list.has_more);
+        // Belt-and-suspenders CAS after the refresh: the list snapshot may
+        // have been captured before the lease release landed on the server
+        // (lease is released in execution_runner's finally AFTER push_event),
+        // so the server view can still say "msg-terminal is active" right
+        // after we got the terminal SSE locally. CAS is safe — only clears
+        // when the (possibly stale) server snapshot still names THIS
+        // terminal's id; a newer turn's optimistic write is untouched.
+        // We intentionally do NOT guard against the inverse race (stale
+        // null-snapshot landing after a new turn's optimistic write); see
+        // top-of-file note in conversationStore — this dot is best-effort.
+        if (terminalMessageId) {
+          clearConversationActiveIfMatch(conversationId, terminalMessageId);
+        }
 
         // Everything below mutates state that belongs to "the conversation
         // the user is on". A nav-gen change means they aren't on this conv

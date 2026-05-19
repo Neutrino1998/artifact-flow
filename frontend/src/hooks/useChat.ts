@@ -71,13 +71,8 @@ export function useChat() {
         // The write itself is cross-conv safe (only touches the global
         // sidebar list, no per-conv UI state).
         if (isNew) {
-          // Capture wall-clock BEFORE the request so the store can detect
-          // "snapshot stale relative to a later local mutation" and skip
-          // overwriting active_message_id on this conv. See conversationStore
-          // mergeIncomingConv for the full rule.
-          const snapshotTakenAt = Date.now();
           api.listConversations(20, 0).then((data) => {
-            setConversations(data.conversations, data.total, data.has_more, snapshotTakenAt);
+            setConversations(data.conversations, data.total, data.has_more);
           });
         } else {
           // Existing conv: optimistically write the cached active_message_id
@@ -139,10 +134,9 @@ export function useChat() {
       // recovery path (covers cross-tab/device too) — the backend lease
       // store is authoritative, so the refresh restores truth. Gated by
       // nav-gen so a stale response can't overwrite a newer switch's data.
-      const switchSnapshotTakenAt = Date.now();
       api.listConversations(20, 0).then((data) => {
         if (myGen === getNavGen()) {
-          setConversations(data.conversations, data.total, data.has_more, switchSnapshotTakenAt);
+          setConversations(data.conversations, data.total, data.has_more);
         }
       }).catch(() => {});
       try {
@@ -205,9 +199,8 @@ export function useChat() {
 
   const refreshConversationList = useCallback(async () => {
     try {
-      const snapshotTakenAt = Date.now();
       const data = await api.listConversations(20, 0);
-      setConversations(data.conversations, data.total, data.has_more, snapshotTakenAt);
+      setConversations(data.conversations, data.total, data.has_more);
     } catch (err) {
       console.error('Failed to refresh conversations list:', err);
     }

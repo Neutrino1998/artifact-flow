@@ -68,12 +68,11 @@ export function useUpload() {
             // conv) is gated by nav-gen.
             result = await uploadFileNewSession(file);
             currentSessionId = result.session_id;
-            const snapshotTakenAt = Date.now();
             const [detail, list] = await Promise.all([
               getConversation(result.session_id),
               listConversations(20, 0),
             ]);
-            setConversations(list.conversations, list.total, list.has_more, snapshotTakenAt);
+            setConversations(list.conversations, list.total, list.has_more);
             if (myNavGen === getNavGen()) {
               setCurrent(detail);
             }
