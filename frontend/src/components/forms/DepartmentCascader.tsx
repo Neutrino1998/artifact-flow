@@ -250,14 +250,14 @@ export default function DepartmentCascader({
           <button
             onClick={handleCreateSubmit}
             disabled={creating || !createName.trim()}
-            className="px-3 py-1.5 rounded-lg bg-accent text-white text-sm hover:bg-accent-hover disabled:opacity-40 transition-colors"
+            className="px-3 py-1.5 rounded-lg bg-accent text-white text-sm font-medium hover:bg-accent-hover disabled:opacity-40 transition-colors"
           >
             {creating ? '创建中...' : '创建'}
           </button>
           <button
             onClick={() => { setCreatingAtParent(null); setCreateName(''); setCreateError(null); }}
             disabled={creating}
-            className="px-2 py-1.5 text-sm text-text-tertiary dark:text-text-tertiary-dark hover:text-text-secondary dark:hover:text-text-secondary-dark"
+            className="px-2 py-1.5 text-sm font-medium text-text-tertiary dark:text-text-tertiary-dark hover:text-text-secondary dark:hover:text-text-secondary-dark"
           >
             取消
           </button>

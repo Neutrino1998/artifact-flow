@@ -212,10 +212,10 @@ export default function UserManagementPanel() {
             <div className="mb-3 flex items-center gap-2">
               <button
                 onClick={() => setRightView({ type: 'create-user' })}
-                className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-2xl border transition-colors ${
+                className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-2xl border font-medium transition-colors ${
                   rightView.type === 'create-user'
                     ? 'text-accent border-accent bg-panel dark:bg-panel-accent-dark'
-                    : 'text-accent border-border dark:border-border-dark bg-chat dark:bg-chat-dark hover:bg-panel dark:hover:bg-panel-accent-dark'
+                    : 'text-accent border-border dark:border-border-dark bg-panel dark:bg-panel-accent-dark hover:bg-panel dark:hover:bg-panel-accent-dark'
                 }`}
               >
                 <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5">
@@ -225,10 +225,10 @@ export default function UserManagementPanel() {
               </button>
               <button
                 onClick={() => setRightView({ type: 'bulk-import' })}
-                className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-2xl border transition-colors ${
+                className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-2xl border font-medium transition-colors ${
                   rightView.type === 'bulk-import'
                     ? 'text-accent border-accent bg-panel dark:bg-panel-accent-dark'
-                    : 'text-text-secondary dark:text-text-secondary-dark border-border dark:border-border-dark bg-chat dark:bg-chat-dark hover:bg-panel dark:hover:bg-panel-accent-dark'
+                    : 'text-text-secondary dark:text-text-secondary-dark border-border dark:border-border-dark bg-panel dark:bg-panel-accent-dark hover:bg-panel dark:hover:bg-panel-accent-dark'
                 }`}
               >
                 <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5">
@@ -238,10 +238,10 @@ export default function UserManagementPanel() {
               </button>
               <button
                 onClick={() => setRightView({ type: 'dept-manager' })}
-                className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-2xl border transition-colors ${
+                className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-2xl border font-medium transition-colors ${
                   rightView.type === 'dept-manager'
                     ? 'text-accent border-accent bg-panel dark:bg-panel-accent-dark'
-                    : 'text-text-secondary dark:text-text-secondary-dark border-border dark:border-border-dark bg-chat dark:bg-chat-dark hover:bg-panel dark:hover:bg-panel-accent-dark'
+                    : 'text-text-secondary dark:text-text-secondary-dark border-border dark:border-border-dark bg-panel dark:bg-panel-accent-dark hover:bg-panel dark:hover:bg-panel-accent-dark'
                 }`}
               >
                 <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5">
@@ -251,7 +251,7 @@ export default function UserManagementPanel() {
               </button>
               <button
                 onClick={enterSelectionMode}
-                className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-2xl border text-text-secondary dark:text-text-secondary-dark border-border dark:border-border-dark bg-chat dark:bg-chat-dark hover:bg-panel dark:hover:bg-panel-accent-dark transition-colors"
+                className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-2xl border font-medium text-text-secondary dark:text-text-secondary-dark border-border dark:border-border-dark bg-panel dark:bg-panel-accent-dark hover:bg-panel dark:hover:bg-panel-accent-dark transition-colors"
               >
                 <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5">
                   <rect x="2" y="2" width="10" height="10" rx="1.5" />
