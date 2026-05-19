@@ -9,11 +9,33 @@ import { useLatestOnly } from '@/hooks/useLatestOnly';
 import Checkbox from '@/components/forms/Checkbox';
 import PanelSearchBar from './PanelSearchBar';
 
-function flattenDeptNames(nodes: DepartmentTreeNode[], out: Map<string, string>): void {
+interface DeptNode {
+  name: string;
+  parent_id: string | null;
+}
+
+function flattenDeptIndex(nodes: DepartmentTreeNode[], out: Map<string, DeptNode>): void {
   for (const n of nodes) {
-    out.set(n.id, n.name);
-    if (n.children?.length) flattenDeptNames(n.children, out);
+    out.set(n.id, { name: n.name, parent_id: n.parent_id ?? null });
+    if (n.children?.length) flattenDeptIndex(n.children, out);
   }
+}
+
+/**
+ * 给定叶子部门 id，沿 parent_id 链一路向上，返回 root → leaf 的名字数组。
+ * id 找不到 / 链中途断 → 返回已收集的部分（仍是 root → leaf 顺序）。
+ * 100 层硬上限防脏数据导致死循环（与后端 would_create_cycle 上限一致）。
+ */
+function buildDeptPath(leafId: string, index: Map<string, DeptNode>): string[] {
+  const chain: string[] = [];
+  let cursor: string | null = leafId;
+  for (let i = 0; i < 100 && cursor; i++) {
+    const node = index.get(cursor);
+    if (!node) break;
+    chain.unshift(node.name);
+    cursor = node.parent_id;
+  }
+  return chain;
 }
 
 const PAGE_SIZE = 20;
@@ -25,7 +47,7 @@ export default function UserManagementPanel() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState('');
-  const [deptNames, setDeptNames] = useState<Map<string, string>>(new Map());
+  const [deptIndex, setDeptIndex] = useState<Map<string, DeptNode>>(new Map());
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const queryRef = useRef(query);
 
@@ -85,9 +107,9 @@ export default function UserManagementPanel() {
     api.getDepartmentTree()
       .then((r) => {
         if (cancelled) return;
-        const m = new Map<string, string>();
-        flattenDeptNames(r.nodes, m);
-        setDeptNames(m);
+        const m = new Map<string, DeptNode>();
+        flattenDeptIndex(r.nodes, m);
+        setDeptIndex(m);
       })
       .catch(() => {
         // 静默：部门名只是辅助信息，加载失败不阻断用户列表
@@ -248,7 +270,7 @@ export default function UserManagementPanel() {
                   user={user}
                   isSelf={user.id === currentUserId}
                   isSelected={user.id === selectedUserId}
-                  deptName={user.department_id ? deptNames.get(user.department_id) ?? null : null}
+                  deptPath={user.department_id ? buildDeptPath(user.department_id, deptIndex) : []}
                   selectionMode={selectionMode}
                   isChecked={selectedSet.has(user.id)}
                   onToggleSelect={() => toggleUserSelection(user.id)}
@@ -282,7 +304,7 @@ function UserRow({
   user,
   isSelf,
   isSelected,
-  deptName,
+  deptPath,
   selectionMode,
   isChecked,
   onToggleSelect,
@@ -291,12 +313,14 @@ function UserRow({
   user: UserResponse;
   isSelf: boolean;
   isSelected: boolean;
-  deptName: string | null;
+  /** root → leaf 部门名链路；空数组 = 无部门或部门已被删 */
+  deptPath: string[];
   selectionMode: boolean;
   isChecked: boolean;
   onToggleSelect: () => void;
   onOpenDetail: () => void;
 }) {
+  const deptLabel = deptPath.length > 0 ? deptPath.join('-') : null;
   // 选择模式下：自己不可选（self-protection 在后端兜底，前端先打 affordance）；
   // 行点击切换选中而不是打开详情。
   const handleClick = () => {
@@ -345,7 +369,7 @@ function UserRow({
         </div>
         <div className="text-xs text-text-tertiary dark:text-text-tertiary-dark truncate">
           @{user.username}
-          {deptName && <span className="ml-2">{deptName}</span>}
+          {deptLabel && <span className="ml-2">{deptLabel}</span>}
           <span className="ml-2 opacity-60">{user.id}</span>
         </div>
       </div>

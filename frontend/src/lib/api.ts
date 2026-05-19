@@ -537,6 +537,10 @@ export function updateMyProfile(body: UpdateMyProfileRequest) {
   });
 }
 
+export function getMe() {
+  return request<UserInfo>('/api/v1/auth/me');
+}
+
 // Departments (Admin)
 export function listDepartments(parentId?: string | null) {
   const params = new URLSearchParams();

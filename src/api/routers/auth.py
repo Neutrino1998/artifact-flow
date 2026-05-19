@@ -12,12 +12,14 @@ Auth Router
 """
 
 import asyncio
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 
 from config import config
 from api.dependencies import (
     get_current_user,
+    get_department_repository,
     get_user_repository,
 )
 from api.schemas.auth import (
@@ -33,6 +35,7 @@ from api.services.auth import (
     verify_password,
     create_access_token,
 )
+from repositories.department_repo import DepartmentRepository
 from repositories.user_repo import UserRepository
 from utils.logger import get_logger
 
@@ -41,10 +44,27 @@ logger = get_logger("ArtifactFlow")
 router = APIRouter()
 
 
+async def _resolve_dept_path(
+    department_id: Optional[str],
+    dept_repo: DepartmentRepository,
+) -> Optional[list[str]]:
+    """
+    给 UserInfo.department_path 用 — 把用户的 department_id 翻译成 root → leaf
+    的部门名链路。未分配 → None；FK 还没 SET NULL 时遇到孤儿 id → None。
+    """
+    if not department_id:
+        return None
+    chain = await dept_repo.get_ancestor_chain(department_id)
+    if not chain:
+        return None
+    return [d.name for d in chain]
+
+
 @router.post("/login", response_model=LoginResponse)
 async def login(
     request: LoginRequest,
     user_repo: UserRepository = Depends(get_user_repository),
+    dept_repo: DepartmentRepository = Depends(get_department_repository),
 ):
     """用户登录，返回 JWT Token"""
     user = await user_repo.get_by_username(request.username)
@@ -66,6 +86,7 @@ async def login(
             username=user.username,
             display_name=user.display_name,
             role=user.role,
+            department_path=await _resolve_dept_path(user.department_id, dept_repo),
         ),
     )
 
@@ -74,6 +95,7 @@ async def login(
 async def get_me(
     current_user: TokenPayload = Depends(get_current_user),
     user_repo: UserRepository = Depends(get_user_repository),
+    dept_repo: DepartmentRepository = Depends(get_department_repository),
 ):
     """获取当前用户信息"""
     user = await user_repo.get_by_id(current_user.user_id)
@@ -82,6 +104,9 @@ async def get_me(
         username=current_user.username,
         display_name=user.display_name if user else None,
         role=current_user.role,
+        department_path=await _resolve_dept_path(
+            user.department_id if user else None, dept_repo
+        ),
     )
 
 
@@ -111,6 +136,7 @@ async def update_my_profile(
     request: UpdateMyProfileRequest,
     current_user: TokenPayload = Depends(get_current_user),
     user_repo: UserRepository = Depends(get_user_repository),
+    dept_repo: DepartmentRepository = Depends(get_department_repository),
 ):
     """
     当前用户自助修改非敏感资料字段（目前仅 display_name）。
@@ -136,4 +162,5 @@ async def update_my_profile(
         username=user.username,
         display_name=user.display_name,
         role=user.role,
+        department_path=await _resolve_dept_path(user.department_id, dept_repo),
     )

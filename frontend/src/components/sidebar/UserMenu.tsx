@@ -22,6 +22,11 @@ export default function UserMenu({ collapsed }: { collapsed?: boolean }) {
 
   const isAdmin = user?.role === 'admin';
   const initial = (user?.display_name || user?.username || '?')[0].toUpperCase();
+  // 显示用户所属部门（叶子部门名）— 后端通过 UserInfo.department_path 一并返回，
+  // sidebar 不必再拉一次部门树。无部门 → 留空，回退到原 "@username"。
+  const deptLeaf = user?.department_path?.length
+    ? user.department_path[user.department_path.length - 1]
+    : null;
 
   const togglePopover = () => {
     setPopoverOpen((prev) => {
@@ -112,6 +117,7 @@ export default function UserMenu({ collapsed }: { collapsed?: boolean }) {
                 )}
               </div>
               <div className="text-xs text-text-secondary dark:text-text-secondary-dark truncate">
+                {deptLeaf && <span>{deptLeaf} </span>}
                 @{user.username}
               </div>
             </div>
