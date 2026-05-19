@@ -229,6 +229,7 @@ async def list_conversations(
     q: Optional[str] = Query(default=None, max_length=200),
     current_user: TokenPayload = Depends(get_current_user),
     conversation_manager: ConversationManager = Depends(get_conversation_manager),
+    runner: ExecutionRunner = Depends(get_execution_runner),
 ):
     """列出对话列表"""
     user_id = current_user.user_id
@@ -238,6 +239,11 @@ async def list_conversations(
         limit=limit, offset=offset, user_id=user_id, title_query=title_query
     )
 
+    # 同 admin observability:lease 是"运行中"的单一事实源,跟列表求交集
+    # 即可标记。RuntimeStore 不持有 user_id,但返回的 conv_id 与本用户列表
+    # 求交后天然只命中当前用户自己的会话。
+    active_conv_ids = set(await runner.store.list_active_conversations())
+
     return ConversationListResponse(
         conversations=[
             ConversationSummary(
@@ -246,6 +252,7 @@ async def list_conversations(
                 message_count=conv.get("message_count", 0),
                 created_at=datetime.fromisoformat(conv["created_at"]),
                 updated_at=datetime.fromisoformat(conv["updated_at"]),
+                is_active=conv["conversation_id"] in active_conv_ids,
             )
             for conv in conversations
         ],

@@ -1526,6 +1526,12 @@ export interface components {
              * @description Last update time
              */
             updated_at: string;
+            /**
+             * Is Active
+             * @description Whether an execution is currently running for this conversation
+             * @default false
+             */
+            is_active: boolean;
         };
         /**
          * CreateDepartmentRequest

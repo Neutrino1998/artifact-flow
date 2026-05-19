@@ -93,6 +93,7 @@ class ConversationSummary(BaseModel):
     message_count: int = Field(0, description="Number of messages")
     created_at: datetime = Field(..., description="Creation time")
     updated_at: datetime = Field(..., description="Last update time")
+    is_active: bool = Field(False, description="Whether an execution is currently running for this conversation")
 
 
 class ConversationListResponse(BaseModel):

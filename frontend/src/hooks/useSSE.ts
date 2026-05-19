@@ -56,6 +56,7 @@ export function useSSE() {
   // Conversation store actions
   const setCurrent = useConversationStore((s) => s.setCurrent);
   const setConversations = useConversationStore((s) => s.setConversations);
+  const markConversationActive = useConversationStore((s) => s.markConversationActive);
 
   // Artifact store
   const setArtifactSessionId = useArtifactStore((s) => s.setSessionId);
@@ -92,6 +93,13 @@ export function useSSE() {
       // resurrect the panel after stream end. Costs nothing if there are
       // no fetches outstanding.
       bumpArtifactFetchGen();
+      // Instant sidebar clear: terminal event already signaled "done", so flip
+      // the cached is_active immediately. The backend's lease release races
+      // the terminal SSE event (lease is released in execution_runner's finally
+      // block AFTER push_event), so the list refresh below may still report
+      // is_active=true and overwrite this. We re-apply after setConversations
+      // for a defensive final write.
+      markConversationActive(conversationId, false);
       try {
         const [detail, list] = await Promise.all([
           api.getConversation(conversationId, { force: true }),
@@ -99,6 +107,9 @@ export function useSSE() {
         ]);
         // Sidebar list refresh is harmless cross-conversation, so always apply.
         setConversations(list.conversations, list.total, list.has_more);
+        // Defensive: backend may have raced (see comment above setConversations
+        // invalidation block). The conv is semantically done; force is_active=false.
+        markConversationActive(conversationId, false);
 
         // Everything below mutates state that belongs to "the conversation
         // the user is on". A nav-gen change means they aren't on this conv
@@ -148,7 +159,7 @@ export function useSSE() {
         console.error('Failed to refresh after complete:', err);
       }
     },
-    [setCurrent, setConversations, clearPendingUpdates, setArtifactCurrent, setArtifacts, setArtifactSessionId, setArtifactVersions, setSelectedVersion]
+    [setCurrent, setConversations, markConversationActive, clearPendingUpdates, setArtifactCurrent, setArtifacts, setArtifactSessionId, setArtifactVersions, setSelectedVersion]
   );
 
   const handleEvent = useCallback(

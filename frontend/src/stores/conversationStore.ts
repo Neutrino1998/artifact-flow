@@ -31,6 +31,9 @@ interface ConversationState {
   setActiveBranch: (messageId: string | null) => void;
   updateMessages: (messages: MessageResponse[]) => void;
   removeConversation: (id: string) => void;
+  /** Flip is_active on a single cached conv. Used to drive the sidebar
+   *  running-indicator without waiting for the next list refresh. */
+  markConversationActive: (id: string, active: boolean) => void;
   reset: () => void;
 }
 
@@ -100,6 +103,16 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
       total: s.total - 1,
       current: s.current?.id === id ? null : s.current,
     })),
+
+  markConversationActive: (id, active) =>
+    set((s) => {
+      const idx = s.conversations.findIndex((c) => c.id === id);
+      if (idx === -1) return s;
+      if (s.conversations[idx].is_active === active) return s;
+      const next = [...s.conversations];
+      next[idx] = { ...next[idx], is_active: active };
+      return { conversations: next };
+    }),
 
   reset: () =>
     set({

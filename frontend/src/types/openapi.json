@@ -3328,6 +3328,12 @@
             "format": "date-time",
             "title": "Updated At",
             "description": "Last update time"
+          },
+          "is_active": {
+            "type": "boolean",
+            "title": "Is Active",
+            "description": "Whether an execution is currently running for this conversation",
+            "default": false
           }
         },
         "type": "object",
@@ -3336,7 +3342,8 @@
           "title",
           "message_count",
           "created_at",
-          "updated_at"
+          "updated_at",
+          "is_active"
         ],
         "title": "ConversationSummary",
         "description": "Conversation summary in list response"
