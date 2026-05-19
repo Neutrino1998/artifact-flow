@@ -17,13 +17,13 @@
 | P1 | PR-obs-lite 轻量可观测性 + 日志持久化 | ✅ 已完成 | watchdog(自动栈 dump)+ sampler(jsonl 采样)+ `/admin/runtime` + 分析脚本 + 主日志迁持久卷 + obs jsonl 循环写;不动 DB schema、不上 Prometheus |
 | P1 | PR-3 fencing 事件持久化 | ✅ 已完成 | 修复 bug ④,恢复审计/回放完整性 |
 | P2 | PR-forensics-bundle 取证工具 + 部署前置 | ✅ 已完成 | 实质交付两件事:① py-spy 进 backend 镜像 + compose `cap_add: SYS_PTRACE`(faulthandler deadman 失效时的备份)② `release.sh --with-analyst-tools` 打 pandas/numpy 离线 wheels(给 analyst 机器零联网装)。`preflight.sh` 只验这两件事;Yama policy / host 深挖工具 由 cloud-service-checklist 第四段对齐云托管 |
-| P2 | PR-5 前端镜像重建 | 待启动 | 正式消除 HOSTNAME 误配 |
-| P3 | PR-tz-unify 事件时间戳时区统一 | 待启动 | events.py 写本地朴素、`server_default=func.now()` 又是 DB 端 UTC,二者不一致;PR-obs-lite 分析脚本在 Shanghai 部署偏 8h。修脚本前先决定全链路用哪个 |
-| P3 | 文档 PR(`docs/runbooks/service-hang.md` + `docs/guides/observability-tuning.md`) | 待启动 | 应急 runbook + obs 调参手册,纯 markdown PR;待 PR-obs-lite + PR-forensics-bundle 代码落地后启动(字段 / 路径稳定后下笔) |
+| P2 | PR-5 前端镜像重建 | 代码侧已就绪 / 等 bundle | 正式消除 HOSTNAME 误配(fix `62771b6` 已在 main,缺一次发版) |
+| P3 | PR-tz-unify 事件时间戳时区统一 | ✅ 已完成 | 全链路 naive UTC:新增 `src/utils/time.utc_now()` + `frontend/src/lib/time.parseUtcIso`,后端写入路径所有 `datetime.now()` → `utc_now()`,前端 `new Date(<naive ISO>)` 一律改 `parseUtcIso` 锚定 UTC;observability_report.py 注释对齐,CLAUDE.md 增"时间约定"条目。Schema 不动、不迁数据 |
+| P3 | 文档 PR(`docs/runbooks/service-hang.md` + `docs/guides/observability-tuning.md`) | ✅ 已完成 | 应急 runbook + obs 调参手册,纯 markdown PR;在 PR-obs-lite + PR-forensics-bundle + PR-tz-unify 代码落地后下笔(字段 / 路径已稳定) |
 
 **小版本迭代打包**:整套 fix plan 同一个 release bundle,分两批 ship:
 - **第一批(已合 `main`)**:PR-1(算法根治)+ PR-3(fencing 事件持久化),走"立即修根因"的 release tag
-- **第二批(部分已合 `main`)**:PR-obs-lite ✅ 已合;PR-forensics-bundle ✅ 已合;PR-5 + P3 文档 PR 仍待启动。同一个"事故后加固完整体"release tag,**一起 ship**——观测框架 / 取证工具 / 前端镜像 / runbook + 调参手册,所有部件齐了才算闭环
+- **第二批(全部已合 `main`)**:PR-obs-lite ✅ 已合;PR-forensics-bundle ✅ 已合;PR-tz-unify ✅ 已合;PR-5 ✅ 代码侧已合(fix `62771b6`,缺一次发版);资源限额加固 ✅ 已合(chore `d7f26f8`:docker-logs cap + frontend/postgres mem_limit;**ship 时需要一次性 infra force-recreate**,见下方"第二批 ship 步骤");P3 文档 PR ✅ 已合(`500e13c`)。同一个"事故后加固完整体"release tag,**一起 ship**——观测框架 / 取证工具 / 时区统一 / 前端镜像 / 资源限额 / runbook + 调参手册,所有部件齐了才算闭环
 
 PR 之间逻辑独立可分别回滚,但**默认一捆发**:避免 "obs-lite 上线后 tuning 手册还没写" / "runbook 提了 py-spy 但内网还没装" 这种部分到位的尴尬态。
 
@@ -697,18 +697,97 @@ df_lag     = pd.read_json("data/observability/loop-lag.jsonl", lines=True)
 
 **目标**:正式消除 HOSTNAME 误配(bug ②)。
 
-**正式修复**:用当前源码(`frontend/Dockerfile:21` 已含 `ENV HOSTNAME=0.0.0.0`)重新构建前端镜像并发版。本质是走一遍正常发版流程,无代码改动。
+**正式修复**:用当前源码(`frontend/Dockerfile:21` 已含 `ENV HOSTNAME=0.0.0.0`,提交 `62771b6` 于 2026-05-12 进 main,事故前 2 天)重新构建前端镜像并发版。本质是走一遍正常发版流程,无代码改动。代码侧无后续工作,等第二批 bundle 一起 ship。
 
-**内网临时缓解**(非 PR,立即可做):在内网机 `deploy/docker-compose.intranet.yml` 的 `frontend` 服务加:
+**2026-05-19 现场验证**:进内网 `deploy-frontend-1` 容器(仍为旧镜像 `artifactflow-frontend:20260512`,在 fix commit 之前构建):
+- `netstat -tlnp` → `172.21.0.5:3000 LISTEN 1/next-server`(eth0),**无** `127.0.0.1:3000`
+- `echo $HOSTNAME` → `ab19609ff9f9`(Docker 默认容器短 ID,Dockerfile fix 未生效)
+
+完美对应 bug ② 的失效路径:Next.js 只绑 eth0(`HOSTNAME` 解析出的那张),localhost 探针打 loopback,得 ECONNREFUSED → 容器 `unhealthy`;但 nginx 通过 service DNS 走 eth0,用户访问正常。
+
+**纵深防御取舍**(2026-05-19 决策):**不**在 compose 文件加 `environment: HOSTNAME=0.0.0.0` 兜底。理由:① 单 source-of-truth(Dockerfile)更清晰,避免"哪层在生效"的歧义;② 现场症状只是监控误报,无用户影响,不构成"立即止血"压力;③ 等第二批 bundle 一起 ship,新镜像本身就带 fix,补丁层多余。
+
+**内网临时缓解**(非 PR,本次未采用):若日后有"必须立即 healthy"的场景,可在 `deploy/docker-compose.intranet.yml` 的 `frontend` 服务加:
 ```yaml
     environment:
       - HOSTNAME=0.0.0.0
 ```
-然后 `docker compose -f deploy/docker-compose.intranet.yml up -d --force-recreate frontend`。新镜像发版后此覆盖可保留(无害)或移除。
+然后 `docker compose -f deploy/docker-compose.intranet.yml up -d --force-recreate frontend`。本次决定不走此路。
 
 ---
 
-## PR-tz-unify:事件时间戳时区统一(P3)
+## PR-tz-unify:事件时间戳时区统一(P3)✅ 已完成
+
+**落地记录**(commits 在 `main`,5 轮串行,最终 test suite 871 / 26):
+
+- `263dc25` initial — 热路径 `datetime.now()` → `utc_now()` + 前端 `parseUtcIso` + 显示侧改写
+- `d785e49` reviewer round 1 — 补 root 三个 compose 的 `-c timezone=UTC` + 加 `_apply_session_tz_kwargs` 连接层兜底(+11 测试)
+- `c1730c3` reviewer round 2 — 单 URL 路径 DSN session-affecting kwargs 保留(`?application_name=af` / `?init_command=...` 不再被 connect_args 整 dict 覆盖,+2 测试)
+- `c13446f` reviewer round 3 — PG 单 URL 路径 sanitize:`difference_update_query` 把 `_PG_SERVER_SETTINGS` 已知 key 从 URL 剥掉,防止 SQLAlchemy asyncpg dialect 当 top-level kwarg dump 给 `asyncpg.connect`(+3 测试)
+- `eb2a2a8` reviewer round 4 — **结构性统一**:`_parse_db_query_params` 立为唯一 DSN query 翻译层,单 URL 与 failover 共享同一翻译器,所有 consumed_keys 都从 URL 剥掉,跳出"一个 key 一个补丁"的循环(+22 测试)
+
+第一轮(initial 落地,commit `263dc25`):
+- 新增 `src/utils/time.utc_now()` 作为后端 naive UTC 单一入口;新增 `frontend/src/lib/time.parseUtcIso()` 把后端发来的 naive ISO 锚定为 UTC
+- 后端热路径所有 `datetime.now()` → `utc_now()`:`core/events.py:55` `ExecutionEvent.created_at` 默认值、`core/engine.py`(metrics start/completed + 5 处 timestamp/duration 起点)、`core/controller.py`(5 处 timestamp)、`core/compaction_runner.py`(start/duration/timestamp)、`core/conversation_manager.py`(message timestamp)、`tools/builtin/artifact_ops.py`(`ArtifactMemory.created_at/updated_at` + `persisted_at`)、`tools/builtin/web_fetch.py`(3 处 fetched_at)、`api/routers/{chat,artifacts,stream}.py`(error event timestamp + memory fallback)、`api/schemas/events.py`(`SSEEvent.timestamp` default_factory + `from_dict` fallback)、`api/services/{controller_factory,stream_transport}.py`、`observability/{watchdog,sampler,admin_runtime}.py`(jsonl ts 字段从 aware UTC → naive UTC 与 threshold 对齐)
+- 显示侧:`ObservabilityPanel.tsx`(formatTime helper + 三处 created_at + 一处 updated_at)、`sidebar/ConversationItem.tsx`、`sidebar/AdminConversationList.tsx`、`forms/UserDetailForm.tsx`、`chat/ConversationBrowser.tsx`、`artifact/ArtifactList.tsx` 一律 `new Date(...)` → `parseUtcIso(...)`
+- 保留本地:`core/context_manager.py:69` 给 LLM 的"当前时间"提示词(UX 要求用户本地)、`api/services/auth.py:54` JWT iat/exp(aware UTC 是 PyJWT 契约)
+- `scripts/observability_report.py:121-123` 注释重写:由"SQLite 用 func.now() 是 naive UTC"改成准确描述"应用写 + DB server_default 都是 UTC naive,PG 部署需 TIMEZONE=UTC"
+- CLAUDE.md "ORM instances" bullet 后新增独立"Time convention" bullet 说明 `utc_now()` 约定 + PG TIMEZONE=UTC 要求 + 两处例外
+- 测试:`tests/utils/test_time.py`(naive UTC + ExecutionEvent default 三条回归)+ `frontend/src/lib/time.test.ts`(naive / Z / +08:00 / 紧凑 -0500 四态)
+- **不迁移历史数据**:Shanghai 部署中 `message_events.created_at` 历史行偏 +8h(本地朴素写入),分界点 = 本 PR 部署时间;observability_report `--hours N` 在跨分界点窗口里有 8h 错位,影响窗口有限,自然衰减
+
+**决策依据**(对应"决策点"三选):
+- 方向 1(naive UTC):改动最小、跟现有 schema + SQLite/PG 默认对齐;方向 2(aware UTC)留给真正出现跨 TZ 部署或 DST 场景再做
+- 纳入显示侧:后端改 UTC 后浏览器对 naive ISO 仍按本地解析,不改前端会反向偏 TZ;集中在 `parseUtcIso` 一处处理便于后续审计
+- 不迁移历史数据:`server_default=func.now()` 在 SQLite 上本就是 UTC naive,真出问题的是 Python 写入路径;backfill 需要按表逐个判断写入来源,复杂度高于回报,接受历史窗口偏移
+
+**与 PR-obs-lite 的约束**:`observability_report.py` threshold 已经是 naive UTC(L121-123),实现层本就对;事故是 Python 写入路径偏了,本 PR 修这一边,threshold 表达式不变、只更新注释。
+
+**PG 部署运维要求**(round 1 后已在代码层兜住,见下):自托管 PG 容器配 `-c timezone=UTC`(四个 compose 全已加);云托管 PG(RDS / Aurora) + DATABASE_URLS failover 节点的 server timezone 由 `src/db/database.py._apply_session_tz_kwargs` 在连接层强制(asyncpg `server_settings={"timezone": "UTC"}` / aiomysql `init_command="SET time_zone='+00:00'"`),不依赖部署者配置。SQLite 自动 UTC,无需配置。
+
+第二轮(reviewer round 1,P1 一条二修):
+- **P1 #1 漏改的 compose**:reviewer 戳出 root 还有三个 compose,intranet 第一轮只覆盖了 `deploy/docker-compose.intranet.yml`。补 `docker-compose.prod.yml`(Mode 2 prod,同款 `command` 加 `-c timezone=UTC`)+ `docker-compose.dev.yml`(dev infra,`postgresql` profile 加 `command: postgres -c timezone=UTC`)。`docker-compose.yml`(Mode 1 Quick Trial)是 SQLite-only,不涉及
+- **P1 #2 DB 连接层兜底**:compose flag 不覆盖云托管 PG(RDS / Aurora / Aliyun RDS)与 DATABASE_URLS failover 节点 —— 我们不控制服务器 timezone GUC。采纳建议在 `src/db/database.py` 加 session-TZ 强制:新增 `_apply_session_tz_kwargs(driver, kwargs)` 纯函数 helper(setdefault 语义,不覆盖 DSN 显式 timezone / 不破坏已有 server_settings),`initialize()` 非 SQLite 分支按 URL backend 注入 `connect_args`(单 URL 路径),`_failover_creator` per-iteration 注入(`async_creator` 绕过 SQLAlchemy `connect_args`,必须再注一遍)。+ 11 个新测试覆盖 helper 6 个不变量 + 5 个集成场景(failover probe / initialize PG / MySQL / SQLite passthrough)
+- CLAUDE.md "Time convention" bullet 更新一句:云 PG / failover 由 database.py 强制,不只靠 compose flag
+
+第三轮(reviewer round 2,P2 单 URL DSN 覆盖):
+- **P2 单 URL 路径 DSN init_command 静默丢失**:reviewer 戳出 round 1 的单 URL 注入 `self._apply_session_tz_kwargs("mysql", {})` 喂的是空 dict,但 SQLAlchemy 会把 URL 里的 `?init_command=...` 解析成 connect 的 kwargs;`connect_args` 整 key 替换语义把用户的 init_command 静默替成 helper 输出的 timezone 命令。PG 那边同款症状 —— `?application_name=af` 会被 SQLAlchemy 翻成 `server_settings={"application_name": "af"}`,我的 `connect_args["server_settings"]={"timezone":"UTC"}` 整 dict 覆盖,application_name 丢失(reviewer 只点了 MySQL,PG 顺手都修)
+- 修法:`initialize()` 在喂 helper 前从 `make_url(database_url).query` 抽 session-affecting key(PG 用 `_PG_SERVER_SETTINGS` frozenset,MySQL 用 `init_command`),merge 到 existing dict 再传 helper。helper 已有的 setdefault / prepend 语义就能保留 DSN 值。+ 2 个新单 URL 集成测试:`test_initialize_mysql_preserves_dsn_init_command`(`?init_command=SET autocommit=1` → 最终 `"SET time_zone='+00:00'; SET autocommit=1"`)、`test_initialize_pg_preserves_dsn_application_name`(`?application_name=af` → 最终 `server_settings={"application_name": "af", "timezone": "UTC"}`)
+- 既存 helper 测试 `test_pg_preserves_existing_server_settings` / `test_mysql_prepends_existing_init_command` 已经覆盖 helper 这一侧;round 2 补的是 `initialize()` → helper 这一条 wiring(reviewer 原话:"helper itself handles prepending correctly, but initialize() does not feed it the existing URL init_command")
+- 测试 844 → 846 passed(+2)
+
+第四轮(reviewer round 3,P2 PG URL 泄露 top-level kwarg):
+- **P2 round 2 修了 `connect_args.server_settings`,但没修 URL 本身**:reviewer 戳出 `create_async_engine(self.database_url, ...)` 仍然拿到 `?application_name=af` 的原始 URL。SQLAlchemy asyncpg dialect 的 `create_connect_args` 把整个 `url.query` dict 拷到 `opts`,`application_name='af'` 作为 **top-level** kwarg 传给 `asyncpg.connect`;asyncpg signature 不接受这个顶层 kwarg(必须经 server_settings),启动会 TypeError。**经实测验证**:`asyncpg_dialect.create_connect_args(make_url('postgresql+asyncpg://host/app?application_name=af'))` 返回的 opts 顶层有 `application_name='af'`
+- MySQL 不需要同款 sanitize:`aiomysql.connect` 接受 `init_command` 作为合法 kwarg,即使 SQLAlchemy 从 URL query 二次传一份,`connect_args["init_command"]` 也只是覆盖而非 TypeError(MySQL 路径 round 2 自洽)
+- 修法:`initialize()` 增 local `engine_url` 变量(默认 `self.database_url`),PG 单 URL 路径抽完 server_settings keys 后 `engine_url = url.difference_update_query(self._PG_SERVER_SETTINGS)` 把这些 key 从 URL 剥掉;`create_async_engine(engine_url, ...)` 接收 sanitized URL。connect_args 那条路径继续接管 application_name(不丢)。SQLite / failover / MySQL 路径 engine_url 保持 self.database_url 不动
+- 测试 +3:
+  - `test_initialize_pg_strips_server_settings_keys_from_url` —— 校验 create_async_engine 拿到的 URL `query` 不含 `application_name`,同时 connect_args 仍含完整 server_settings
+  - `test_pg_asyncpg_dialect_on_sanitized_url_no_toplevel_application_name` —— 直接走 SQLAlchemy asyncpg dialect 的 `create_connect_args(sanitized_url)`,断言 opts 顶层无 `application_name`(这是 reviewer 关心的 smoking gun:asyncpg.connect 的实际 kwarg surface)
+  - `test_pg_asyncpg_dialect_on_unsanitized_url_leaks_application_name` —— **负向控制**:确认未 sanitize 的 URL 走 dialect 确实会 leak。SQLAlchemy 未来若把 asyncpg dialect 改成自动翻 application_name → server_settings,此测试会失败提醒"round 3 的 sanitize 步骤可能可移除",防止静默行为漂移
+- 为什么没用 reviewer 建议的"patch `asyncpg.connect` 端到端测试":那需要真 AsyncEngine 启动到 pool acquire 才触发 `asyncpg.connect`,中间还要绕过 `_check_alembic_version()` 的 DB 查询。dialect-level 测试隔离了 SQLAlchemy URL → opts 的映射,正是 round 3 修改的 surface,且不依赖 SQLAlchemy 启动栈的具体实现细节
+- 测试 846 → 849 passed(+3)
+
+第五轮(reviewer round 4,结构性统一 —— DSN query 翻译层封装边界):
+- **问题不是单个 key 没补全,而是 *两套* DSN query 解释路径并存**:reviewer 戳出 round 1–3 的修法是"发现一个 key 泄露就打一个补丁",而真正的根因是项目内同一个 DSN 有两条解析路径:
+  - **单 URL 路径**(`initialize()`):依赖 SQLAlchemy dialect 解析 `url.query`,我们只从 query 抽 round 2 列出的少数几个 session-affecting key
+  - **failover 路径**(`_parse_db_url` → `_failover_creator`):自己解析整个 query,直接喂 `asyncpg.connect` / `aiomysql.connect`
+  两条路径对 *同一个 DSN query* 的语义解释会漂移:failover 已知 `sslmode → ssl=`、`command_timeout → float`、`application_name → server_settings`、`ssl_ca → SSLContext`、`charset/autocommit/init_command/...` 翻译规则;但单 URL 那条只截了 `application_name`(PG)和 `init_command`(MySQL),其余 key 全部由 SQLAlchemy asyncpg dialect 当作 verbatim kwargs dump 给 `asyncpg.connect`,asyncpg signature 不接受这些 → TypeError;round 3 修的只是表里的一行(application_name),后面再加任何 key 都会重演同一个 bug
+- **修法(结构性)**:让 `DatabaseManager` 成为 **唯一** 的 DSN query 翻译层,SQLAlchemy dialect 不再"二次解释"任何 query key
+  - 拆出 `_parse_db_query_params(url: URL, driver: str) -> (connect_args, consumed_keys)` 纯函数,作为唯一的 query → driver-kwargs 翻译器
+  - `_parse_db_url`(failover 路径)瘦身,query 段委托给新 helper(只保留 host/port/auth 组装)
+  - `initialize()` 单 URL 路径改成:`_parse_db_query_params(url, driver)` → `_apply_session_tz_kwargs(driver, ...)` → 把 `consumed_keys` 一次性从 URL 上剥掉(`url.difference_update_query(consumed_keys)`)
+  - 单 URL 路径无法识别的 key 现在在 `initialize()` 时立刻 `ValueError`(fail-loud-fail-early),不再延后到 `asyncpg.connect` 的运行时 TypeError;与 failover 路径行为一致
+- **扩展功能而非缩减**:之前单 URL DSN 实际上只能用 `application_name` / `init_command` 而不出问题,其余 query 都是定时炸弹;round 4 后 `sslmode` / `command_timeout` / `ssl_ca` / `charset` / `autocommit` / `unix_socket` / `program_name` 全部可用于单 URL DSN —— 跟 `DATABASE_URLS` failover 列表完全等价
+- 测试 +22:
+  - `TestParseDbQueryParams`(12 条):helper 直接单测,覆盖每个支持 key 的 `(connect_args, consumed_keys)` 配对、空 query、sqlite passthrough、unknown key fail-loud、组合 key、输入 URL 不被 mutate
+  - `TestInitializeUnifiedTranslation`(7 条):单 URL 通过 `initialize()` 的端到端,每个新支持 key 的 translate + URL strip 双断言,unknown key fail-at-init-not-at-connect,以及"单 URL vs failover 在同一 DSN 上 connect_args 全等"的统一性断言
+  - `TestDialectSmokingGunsRound4`(2 条):一条正向(sanitize 后 dialect 不会发出任何被 parser 消费的 key 到 top-level opts)+ 一条负向控制(不 sanitize 至少有一个会 leak,SQLAlchemy 行为漂移哨兵)
+- 测试 849 → 871 passed(+22)
+- CLAUDE.md "Time convention" bullet 维持不变(round 4 是 DSN parsing layer 的内部封装重构,不改对外的时区契约)
+
+---
+
+### 原始 spec(round 0,差异见上方落地记录)
 
 **发现来源**:PR-obs-lite reviewer 在 Shanghai 部署(UTC+8)测 `scripts/observability_report.py --hours 1`,发现一条本地 2 小时前写入的 `llm_complete` 仍被报告查出来 —— 时间窗口偏差正好 8 小时。
 
@@ -784,6 +863,117 @@ PR-obs-lite 的 `observability_report.py` 一开始把 threshold 写成 naive UT
 - 何时调 `OBS_JSONL_MAX_MB` / `OBS_JSONL_BACKUP_COUNT`(看实际占用)
 
 放 `docs/guides/` 跟 `add-tool.md` / `add-agent.md` 同位置,语义"日常操作型 how-to"匹配。
+
+---
+
+## 第二批 bundle ship 步骤(reviewer 反馈,2026-05-19)
+
+**背景**:`d7f26f8`(资源限额加固)给所有 5 个服务加了 `logging`,给 frontend / postgres 加了 `mem_limit`。Docker 的 `LogConfig` / `Memory` 是容器创建时固化的 `HostConfig`,**`docker restart` 不重建容器、新 compose 配置不会同步**。现行升级路径 `deploy/scripts/pause.sh` + `resume.sh:86` 只 stop / recreate backend + frontend(`pause.sh` 注释明确"`postgres / redis 仍在运行`"),按设计**保留 PG / Redis / nginx 运行**(维护页驻留 + DB 热数据)。
+
+**结论**:按现行 SOP 升级第二批,**nginx / postgres / redis 的新 HostConfig 永远不生效**,docker-logs 仍无上限,PG 仍无 mem_limit tripwire。
+
+**修复方案**(不动 pause/resume 设计,加一次性 ship 步骤;SOP 入口同时落地到 `docs/deployment.md` 滚动更新段的 callout):
+
+`d7f26f8` 同时改了 nginx + backend + frontend + postgres 的 HostConfig,**但 nginx 与 PG/Redis 必须在不同时机 recreate**(详见下方"nginx 时机不对称"):
+
+```bash
+# (0) prep —— bundle 必须先解包,否则后续 recreate 用的是旧 compose / 旧 nginx.conf
+#    (reviewer round-4 P2 反馈,跟 release.sh 打印的 recipe 顺序对齐)
+./deploy/scripts/verify-bundle.sh tmp
+docker load -i tmp/artifactflow-app-${VERSION}.tar.gz
+tar xzf tmp/artifactflow-deploy-${VERSION}.tar.gz   # 新 compose + nginx.conf 就位
+tar xzf tmp/artifactflow-config-${VERSION}.tar.gz
+
+# (1) nginx —— 在 pause.sh 之前 recreate(此时 backend/frontend 还在 DNS 里)
+docker compose -f deploy/docker-compose.intranet.yml --profile infra \
+    up -d --force-recreate --no-deps nginx
+
+# (2) pause
+./deploy/scripts/pause.sh "升级 ${VERSION}"
+
+# (3) postgres / redis —— pause 与 resume 之间 recreate(无活跃应用连接)
+docker compose -f deploy/docker-compose.intranet.yml --profile infra \
+    up -d --force-recreate --no-deps postgres redis
+
+# (4) resume
+./deploy/scripts/resume.sh ${VERSION}
+
+# prod 路径(Mode 2A)同理,把 compose 文件换成 docker-compose.prod.yml
+```
+
+**nginx 时机不对称(reviewer round-3 反馈)**:`deploy/nginx.conf:1-7` 用静态 `upstream backend { server backend:8000; }` / `upstream frontend { server frontend:3000; }`。OSS nginx 对这种写法**启动时一次性解析 upstream 名称**(`nginx.conf:20` 的 `resolver 127.0.0.11 valid=10s` 只对 `proxy_pass http://$variable` 变量写法生效;静态 upstream 块的运行时重解析需要 nginx-plus 的 `resolve` flag,OSS 没有)。pause.sh 把 backend/frontend stop 之后,这两个 service name 从 Docker embedded DNS 消失(stopped 容器没 IP)。此时再 recreate nginx → 启动时 upstream 解析失败("host not found in upstream `backend`")→ nginx 进程退出 → **维护页连同 nginx 一起掉**。所以 nginx 必须**在 pause 之前** recreate,代价是 1–2 秒 nginx 重启的连接 RST,跟任意一次 nginx restart 同等量级,可由维护窗口公告吸收。根治这一不对称需要把 nginx.conf 改成 `set $upstream backend:8000; proxy_pass http://$upstream` 的变量写法(让 `resolver` 真正接管运行时解析),scope 略大且改完要 reload 验证,暂未做,只在 SOP 上规避。
+
+**`--no-deps` 是关键**(reviewer round-2 反馈):intranet compose 里 nginx `depends_on: backend (service_healthy) + frontend (service_healthy)`。`docker compose up <svc>` **默认会启动该服务的依赖**(深度优先满足),所以不加 `--no-deps` 会:
+- 顺带把 stopped 的 backend / frontend 一并拉起来,违反 pause 的"无活跃应用连接"前提
+- 拉起时 fallback 到 `${AF_VERSION:-latest}`,内网 `docker load` 进来的镜像通常带日期 tag(如 `:20260520`),**没有 `latest` alias** → 直接 image-not-found 失败
+- 即使有 `latest`,也可能指向旧版本
+
+加 `--no-deps` 后 compose 跳过依赖图,**只** recreate 指定的服务,不联动 backend/frontend。注意 `--no-deps` 不解决 nginx 自己的 upstream DNS 解析问题(那是 nginx 启动逻辑,不是 compose 依赖图),所以 nginx 还得靠"pause 之前"的时机来保证 DNS 里有 backend/frontend。
+
+**时机选择**:
+- **nginx — pause 之前**:理由见上面"nginx 时机不对称"
+- **postgres / redis — pause 与 resume 之间**:backend/frontend 已 stopped → 无活跃应用连接,recreate 干净;PG 走 crash recovery 启动(5–15s 视 WAL 量),Redis 控制状态 TTL 自愈
+- 不在 pause/resume 脚本里固化,因为 pause/resume 是为后续日常热更新设计的;**本次 force-recreate 是 d7f26f8 这一次 config 变更专属的一次性步骤**,ship 完成后即结束,后续升级回归正常 pause/resume 流程
+
+**.env 变量的归属(reviewer round-3 反馈)**:`.env` 变了不一定都走 infra recreate,看变量给谁用:
+
+| 变量 | 谁用 | 走哪条路径 |
+|---|---|---|
+| `ARTIFACTFLOW_*`(JWT / REDIS_URL / DATABASE_POOL_SIZE / MAX_CONCURRENT_TASKS / REDIS_KEY_PREFIX / DATABASE_URL 等) | backend `env_file: .env` | ✅ pause/resume 覆盖(resume up backend → compose 检测 env_file 变化 → recreate backend) |
+| `AF_VERSION` | backend/frontend `image:` tag interpolation | ✅ pause/resume 覆盖(resume.sh 显式传 `AF_VERSION=$VERSION`) |
+| `AF_HTTP_PORT` | nginx `ports:` interpolation | ❌ 需要 step (1) recreate nginx |
+| `POSTGRES_DB` / `POSTGRES_USER` / `POSTGRES_PASSWORD` | postgres image entrypoint(**仅在 `postgres_data` 卷为空时**用于 `initdb`) | ⚠️ **不能走 recreate**(reviewer round-4 P1):见下方"`POSTGRES_*` 是 init-only" |
+
+**`POSTGRES_*` 是 init-only(reviewer round-4 P1)**:`postgres:16-alpine` 的 entrypoint(`docker-entrypoint.sh`)检查 `$PGDATA/PG_VERSION`:不存在(空卷)→ 用 `POSTGRES_*` 跑 `initdb`;**存在(已初始化)→ 直接启动,完全忽略 `POSTGRES_*` 这些 env**。所以现网已有 `postgres_data` 卷的情况下,改 `.env` 里的 `POSTGRES_PASSWORD` / `POSTGRES_USER` 然后 recreate postgres 容器,**库内用户密码不变**。运维若照此操作会出现:backend `DATABASE_URL` 用新密码 → PG 库内还是旧密码 → 认证失败 → backend 起不来。改 `POSTGRES_USER` 同理:`pg_isready -U <user>` 探针不做认证(只看 server 是否响应),所以 PG 容器仍 healthy,但 backend 连不上,**故障表现是"PG healthy 但 backend 起不来",诊断难度更高**。
+
+**改库内用户/密码/库名的正确流程**:
+
+```bash
+# 1. 在 PG 里跑 SQL(用现有 admin 连接进去)
+docker exec -it artifactflow-postgres-1 psql -U <旧 user> -d <db> -c \
+    "ALTER USER <user> WITH PASSWORD '<新密码>';"
+# 或 CREATE DATABASE / CREATE USER / RENAME 等
+
+# 2. 同步 .env:改 ARTIFACTFLOW_DATABASE_URL(走 pause/resume 让 backend 拿到新值)
+#    同时改 POSTGRES_PASSWORD —— 这是为了 .env 文档跟实际值一致,未来 fresh init 用,
+#    本次不会因为这条改动而触发 PG 重建
+
+# 3. 走常规 pause/resume(无需 infra recreate);backend recreate 时读新 DATABASE_URL → 连接成功
+./deploy/scripts/pause.sh "rotate PG password"
+./deploy/scripts/resume.sh ${VERSION}
+```
+
+**`POSTGRES_*` 真正生效的场景**:只有"清空 / 重建 postgres_data 卷"(`docker volume rm artifactflow_postgres_data` 之后 `up -d postgres`)—— 这等同于全新部署的 DB,会用 `POSTGRES_*` 重新 init。生产网络几乎不会做这事(数据全没),只在 dev 重置或灾备演练时出现。
+
+**数据安全**:`postgres_data` / `redis_data` 是 named volume(声明在 compose `volumes:` 顶层),`--force-recreate` 只销毁容器对象、**不动卷**。recreate 后:
+- PG 走 crash recovery 启动(同 host 重启路径,5–15s 视未 checkpoint WAL 量)
+- Redis 内存清空 —— 但 lease / interrupt / cancel / queue / stream 全是控制状态,应用层重连自愈
+- 只有 `docker compose down -v` 或 `docker volume rm` 才会真正删数据
+
+**验证**(recreate 完毕后,resume 之前):
+
+```bash
+# 1. 新 HostConfig 已生效(logging + mem_limit)
+for s in nginx backend frontend postgres redis; do
+  echo "--- deploy-${s}-1 ---"
+  docker inspect deploy-${s}-1 --format \
+    '{{.HostConfig.LogConfig.Type}} {{.HostConfig.LogConfig.Config}} mem={{.HostConfig.Memory}}'
+done
+# 期望:LogConfig.Type=json-file,Config 含 max-size:100m / max-file:3;
+# Memory(单位字节):nginx=0 / backend=2147483648 / frontend=1073741824 /
+# postgres=2147483648 / redis=805306368
+
+# 2. PG 卷未动(Mountpoint 应与 recreate 前一致)
+docker volume inspect deploy_postgres_data --format '{{.Mountpoint}}'
+
+# 3. PG / Redis healthy 后再 resume
+docker compose -f deploy/docker-compose.intranet.yml --profile infra ps
+```
+
+ship 时一并检查的其它项(不属于 d7f26f8 范围,但同窗口可顺手核对):
+1. nginx 镜像版本是否为最新(之前升级过 `nginx:1.30.1-alpine`)
+2. `deploy/.env` 中关键调参未被覆盖丢失:`ARTIFACTFLOW_MAX_CONCURRENT_TASKS` / `ARTIFACTFLOW_REDIS_MAX_CONNECTIONS` / `ARTIFACTFLOW_DATABASE_POOL_SIZE` / `ARTIFACTFLOW_DATABASE_MAX_OVERFLOW`
+3. PR-5 fix `62771b6` 已通过新 frontend 镜像生效:`docker exec deploy-frontend-1 sh -c 'echo $HOSTNAME'` 应输出 `0.0.0.0`(而非容器短 ID);`docker exec deploy-frontend-1 netstat -tlnp` 应显示 `0.0.0.0:3000 LISTEN next-server`(全网卡,而非旧镜像那种只绑 eth0 IP 如 `172.21.0.5:3000`)
 
 ---
 

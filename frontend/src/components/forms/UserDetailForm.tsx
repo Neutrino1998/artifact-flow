@@ -13,6 +13,7 @@ import {
 } from '@/lib/styles';
 import type { UserResponse } from '@/types';
 import DangerConfirmModal from '@/components/layout/DangerConfirmModal';
+import { parseUtcIso } from '@/lib/time';
 import PanelShell from '@/components/layout/PanelShell';
 import DepartmentCascader from '@/components/forms/DepartmentCascader';
 import Checkbox from '@/components/forms/Checkbox';
@@ -244,7 +245,7 @@ export default function UserDetailForm({ userId }: UserDetailFormProps) {
           <div>
             <div className="text-text-tertiary dark:text-text-tertiary-dark">创建时间</div>
             <div className="text-text-secondary dark:text-text-secondary-dark">
-              {new Date(user.created_at).toLocaleString()}
+              {parseUtcIso(user.created_at).toLocaleString()}
             </div>
           </div>
         </div>

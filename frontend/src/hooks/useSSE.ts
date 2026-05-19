@@ -51,6 +51,7 @@ export function useSSE() {
   const setExecutionMetrics = useStreamStore((s) => s.setExecutionMetrics);
   const setCancelled = useStreamStore((s) => s.setCancelled);
   const setReconnecting = useStreamStore((s) => s.setReconnecting);
+  const setQueuedInfo = useStreamStore((s) => s.setQueuedInfo);
 
   // Conversation store actions
   const setCurrent = useConversationStore((s) => s.setCurrent);
@@ -171,6 +172,18 @@ export function useSSE() {
           // Mark previous segment as complete — a new turn implies the prior is done
           updateCurrentSegment({ status: 'complete' });
           pushSegment(event.agent ?? 'Agent');
+          // Engine started executing — clear the concurrency-queue banner if any.
+          setQueuedInfo(null);
+          break;
+        }
+
+        case StreamEventType.EXECUTION_QUEUED: {
+          const ahead = data?.ahead as number | undefined;
+          const maxConcurrent = data?.max_concurrent as number | undefined;
+          setQueuedInfo({
+            ahead: ahead ?? 0,
+            maxConcurrent: maxConcurrent ?? 0,
+          });
           break;
         }
 
@@ -477,6 +490,7 @@ export function useSSE() {
       setArtifactCurrentAuto, refreshArtifactCurrent, setArtifacts,
       setArtifactVersions, setSelectedVersion,
       pushNonAgentBlock, updateNonAgentBlock, setExecutionMetrics, setCancelled,
+      setQueuedInfo,
     ]
   );
 

@@ -4,6 +4,7 @@ import { useEffect, useCallback, useState } from 'react';
 import { useUIStore } from '@/stores/uiStore';
 import { listAdminConversations } from '@/lib/api';
 import type { AdminConversationSummary } from '@/lib/api';
+import { parseUtcIso } from '@/lib/time';
 
 export default function AdminConversationList() {
   const [conversations, setConversations] = useState<AdminConversationSummary[]>([]);
@@ -54,7 +55,7 @@ export default function AdminConversationList() {
           <div className="flex items-center gap-2 mt-0.5 text-xs text-text-tertiary dark:text-text-tertiary-dark">
             <span>{conv.user_display_name || conv.user_id || '-'}</span>
             <span>{conv.message_count} msgs</span>
-            <span>{new Date(conv.updated_at).toLocaleDateString()}</span>
+            <span>{parseUtcIso(conv.updated_at).toLocaleDateString()}</span>
           </div>
         </div>
       ))}

@@ -2,6 +2,7 @@
 
 import { useArtifactStore } from '@/stores/artifactStore';
 import { useArtifacts } from '@/hooks/useArtifacts';
+import { parseUtcIso } from '@/lib/time';
 
 export default function ArtifactList() {
   const artifacts = useArtifactStore((s) => s.artifacts);
@@ -56,7 +57,7 @@ export default function ArtifactList() {
               <div className="flex items-center gap-2 mt-0.5 text-xs text-text-tertiary dark:text-text-tertiary-dark">
                 <span>{artifact.content_type}</span>
                 <span>v{artifact.current_version}</span>
-                <span>{new Date(artifact.updated_at).toLocaleDateString()}</span>
+                <span>{parseUtcIso(artifact.updated_at).toLocaleDateString()}</span>
                 {artifact.original_filename && (
                   <span className="flex items-center gap-1 truncate" title={artifact.original_filename}>
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="flex-shrink-0">

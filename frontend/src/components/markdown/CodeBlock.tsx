@@ -4,11 +4,17 @@ import { useRef, useCallback, type HTMLAttributes } from 'react';
 import { useCopyFeedback } from '@/hooks/useCopyFeedback';
 import { CopyIcon } from '@/components/ui/CopyIcon';
 
+type CodeBlockProps = HTMLAttributes<HTMLPreElement> & { node?: unknown };
+
 /**
  * Custom <pre> renderer for ReactMarkdown.
  * Wraps code blocks with a copy button in the top-right corner.
+ *
+ * `node` is dropped: react-markdown passes the hast node as an extra prop,
+ * and spreading it into a real <pre> produces an `node="[object Object]"` DOM
+ * attribute plus a React unknown-prop warning.
  */
-export default function CodeBlock(props: HTMLAttributes<HTMLPreElement>) {
+export default function CodeBlock({ node: _node, ...props }: CodeBlockProps) {
   const { copied, copy } = useCopyFeedback();
   const preRef = useRef<HTMLPreElement>(null);
 

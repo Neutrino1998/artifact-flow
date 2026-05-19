@@ -24,6 +24,7 @@ from tools.artifact_envelope import make_preview_slice, render_artifact_slice
 from tools.xml_parser import parse_tool_calls
 from tools.base import BaseTool, ToolPermission, ToolResult
 from utils.logger import get_logger
+from utils.time import utc_now
 
 logger = get_logger("ArtifactFlow")
 
@@ -62,7 +63,7 @@ class ExecutionMetrics(TypedDict):
 
 def create_initial_metrics() -> ExecutionMetrics:
     return {
-        "started_at": datetime.now(),
+        "started_at": utc_now(),
         "completed_at": None,
         "total_duration_ms": None,
         "first_input_tokens": 0,
@@ -74,7 +75,7 @@ def create_initial_metrics() -> ExecutionMetrics:
 
 def finalize_metrics(metrics: ExecutionMetrics) -> None:
     started_at = metrics["started_at"]
-    completed_at = datetime.now()
+    completed_at = utc_now()
     metrics["total_duration_ms"] = int((completed_at - started_at).total_seconds() * 1000)
     metrics["started_at"] = started_at.isoformat()
     metrics["completed_at"] = completed_at.isoformat()
@@ -171,7 +172,7 @@ async def execute_loop(
         event_dict = {
             "type": event_type,
             "agent": agent,
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": utc_now().isoformat(),
             "data": data,
         }
 
@@ -273,7 +274,7 @@ async def execute_loop(
         Returns:
             (response_content, reasoning_content, token_usage) 或 None（LLM 出错，state 已设置）
         """
-        llm_start_time = datetime.now()
+        llm_start_time = utc_now()
 
         response_content = ""
         reasoning_content = None
@@ -340,7 +341,7 @@ async def execute_loop(
             # 把已累积的部分内容作为 llm_complete 持久化 —— events 是历史 source of
             # truth，下一轮恢复时模型能看到自己说到一半的内容。流式中途通常还没收到
             # usage chunk，token_usage 置零即可（本轮 metrics 不再补算）。
-            llm_duration_ms = int((datetime.now() - llm_start_time).total_seconds() * 1000)
+            llm_duration_ms = int((utc_now() - llm_start_time).total_seconds() * 1000)
             await _emit(StreamEventType.LLM_COMPLETE.value, agent_name, {
                 "content": response_content,
                 "reasoning_content": reasoning_content,
@@ -359,7 +360,7 @@ async def execute_loop(
             logger.info(f"[{agent_name}] LLM stream cancelled mid-flight, partial content persisted")
             return None
 
-        llm_end_time = datetime.now()
+        llm_end_time = utc_now()
         llm_duration_ms = int((llm_end_time - llm_start_time).total_seconds() * 1000)
 
         # Map LiteLLM keys (prompt_tokens/completion_tokens) to unified keys (input_tokens/output_tokens)
@@ -675,7 +676,7 @@ async def execute_loop(
                         continue
 
             # 执行工具
-            tool_start_time = datetime.now()
+            tool_start_time = utc_now()
             await _emit(StreamEventType.TOOL_START.value, agent_name, {
                 "tool": tool_name, "params": params,
             })
@@ -686,7 +687,7 @@ async def execute_loop(
                 logger.exception(f"Tool '{tool_name}' execution error: {e}")
                 tool_result = ToolResult(success=False, error=str(e))
 
-            tool_end_time = datetime.now()
+            tool_end_time = utc_now()
             tool_duration_ms = int((tool_end_time - tool_start_time).total_seconds() * 1000)
 
             # 超长成功结果统一落盘为 artifact，回填预览（fail-open）

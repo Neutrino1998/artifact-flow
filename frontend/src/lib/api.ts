@@ -420,6 +420,28 @@ export function getAdminConversationEvents(convId: string) {
   );
 }
 
+export function listAdminConversationArtifacts(convId: string) {
+  return request<ArtifactListResponse>(
+    `/api/v1/admin/conversations/${convId}/artifacts`
+  );
+}
+
+export function getAdminConversationArtifact(convId: string, artifactId: string) {
+  return request<ArtifactDetail>(
+    `/api/v1/admin/conversations/${convId}/artifacts/${artifactId}`
+  );
+}
+
+export function getAdminConversationArtifactVersion(
+  convId: string,
+  artifactId: string,
+  version: number,
+) {
+  return request<VersionDetail>(
+    `/api/v1/admin/conversations/${convId}/artifacts/${artifactId}/versions/${version}`
+  );
+}
+
 // User Management (Admin)
 export function listUsers(limit = 50, offset = 0, query?: string) {
   const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
@@ -513,6 +535,10 @@ export function updateMyProfile(body: UpdateMyProfileRequest) {
     method: 'PATCH',
     body: JSON.stringify(body),
   });
+}
+
+export function getMe() {
+  return request<UserInfo>('/api/v1/auth/me');
 }
 
 // Departments (Admin)

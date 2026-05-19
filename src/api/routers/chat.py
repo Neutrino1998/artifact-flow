@@ -15,6 +15,8 @@ from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
+from utils.time import utc_now
+
 from api.dependencies import (
     get_conversation_manager,
     get_current_user,
@@ -113,7 +115,7 @@ async def send_message(
             logger.exception(f"Failed to initialize execution: {e}")
             await stream_transport.push_event(message_id, sanitize_error_event({
                 "type": "error",
-                "timestamp": datetime.now().isoformat(),
+                "timestamp": utc_now().isoformat(),
                 "data": {"success": False, "error": str(e)}
             }))
             await stream_transport.close_stream(message_id)

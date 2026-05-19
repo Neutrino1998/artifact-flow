@@ -18,6 +18,14 @@ services:
         condition: service_healthy
       frontend:
         condition: service_healthy
+    # docker-logs disk cap. Default json-file driver is unbounded — long-running
+    # containers can pile up GBs of logs and fill the host disk. 100m × 3 = 300MB
+    # ceiling per service; same block repeated on every service below.
+    logging:
+      driver: json-file
+      options:
+        max-size: "100m"
+        max-file: "3"
     restart: unless-stopped
 
   backend:
@@ -54,6 +62,11 @@ services:
       redis:
         condition: service_healthy
         required: false
+    logging:
+      driver: json-file
+      options:
+        max-size: "100m"
+        max-file: "3"
     restart: unless-stopped
 
   frontend:
@@ -65,6 +78,7 @@ services:
     image: artifactflow-frontend:latest
     expose:
       - "3000"
+    mem_limit: 1g
     volumes:
       - /etc/localtime:/etc/localtime:ro
       - ./config/site:/app/public/site:ro
@@ -79,15 +93,27 @@ services:
     depends_on:
       backend:
         condition: service_healthy
+    logging:
+      driver: json-file
+      options:
+        max-size: "100m"
+        max-file: "3"
     restart: unless-stopped
 
   postgres:
     image: postgres:16-alpine
     profiles: ["infra"]
+    mem_limit: 2g
     # max_connections sized for backend pool (POOL_SIZE=20 + MAX_OVERFLOW=40 = 60)
     # plus PG internal workers, alembic, and debug headroom. shared_buffers raised
     # from 128MB default to fit the larger connection count.
-    command: postgres -c max_connections=200 -c shared_buffers=256MB
+    # timezone=UTC: session TZ must match Python utils.time.utc_now() so
+    # server_default=func.now() / onupdate=func.now() write UTC naive. /etc/localtime
+    # mount below only affects PG log timestamp rendering, not session timezone.
+    # Cloud-managed PG (RDS / Aurora) + DATABASE_URLS failover nodes are NOT
+    # covered here — see src/db/database.py connect_args server_settings for the
+    # belt-and-suspenders defense. (Incident 2026-05-14 PR-tz-unify.)
+    command: postgres -c max_connections=200 -c shared_buffers=256MB -c timezone=UTC
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - /etc/localtime:/etc/localtime:ro
@@ -100,6 +126,11 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    logging:
+      driver: json-file
+      options:
+        max-size: "100m"
+        max-file: "3"
     restart: unless-stopped
 
   redis:
@@ -124,6 +155,11 @@ services:
       interval: 10s
       timeout: 5s
       retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "100m"
+        max-file: "3"
     restart: unless-stopped
 
 volumes:

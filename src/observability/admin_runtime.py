@@ -13,12 +13,12 @@ DeadmanSwitch 的 stderr dump + docker healthcheck 状态 + `kill -USR1 <pid>`
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends
 
 from api.dependencies import get_runtime_store, get_execution_runner, require_admin
+from utils.time import utc_now
 from api.services.auth import TokenPayload
 
 router = APIRouter()
@@ -65,7 +65,7 @@ async def get_runtime(
     snapshot = sampler.latest_snapshot() if sampler is not None else {}
 
     return {
-        "ts": datetime.now(timezone.utc).isoformat(),
+        "ts": utc_now().isoformat(),
         "sampler": snapshot,
         "active_conversations": active_conv_ids,
         "active_tasks": runner.active_task_count,

@@ -6,7 +6,6 @@ Controller Factory — ExecutionController 组装 + 执行推送
 
 import asyncio
 from contextlib import asynccontextmanager
-from datetime import datetime
 from typing import AsyncGenerator, AsyncIterator
 
 from config import config
@@ -18,6 +17,7 @@ from api.dependencies import (
 )
 from api.services.stream_transport import StreamTransport
 from utils.logger import get_logger
+from utils.time import utc_now
 
 logger = get_logger("ArtifactFlow")
 
@@ -148,7 +148,7 @@ async def run_and_push(
         logger.error(f"Execution timed out after {config.EXECUTION_TIMEOUT}s for {stream_id}")
         await stream_transport.push_event(stream_id, sanitize_error_event({
             "type": "error",
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": utc_now().isoformat(),
             "data": {"success": False, "error": f"Execution timed out after {config.EXECUTION_TIMEOUT}s"}
         }))
 
@@ -156,7 +156,7 @@ async def run_and_push(
         logger.exception(f"Error in execution: {e}")
         await stream_transport.push_event(stream_id, sanitize_error_event({
             "type": "error",
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": utc_now().isoformat(),
             "data": {"success": False, "error": str(e)}
         }))
 

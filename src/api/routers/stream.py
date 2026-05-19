@@ -17,6 +17,7 @@ from api.services.auth import TokenPayload
 from api.services.stream_transport import StreamNotFoundError
 from api.services.stream_transport import StreamTransport
 from api.utils.sse import format_sse_event, format_sse_comment
+from utils.time import utc_now
 from utils.logger import get_logger
 
 logger = get_logger("ArtifactFlow")
@@ -87,7 +88,7 @@ async def stream_events(
             # stream 不存在（可能已过期）
             error_event = {
                 "type": "error",
-                "timestamp": __import__("datetime").datetime.now().isoformat(),
+                "timestamp": utc_now().isoformat(),
                 "data": {
                     "success": False,
                     "error": f"Stream '{stream_id}' not found or expired"
@@ -106,7 +107,7 @@ async def stream_events(
             error_detail = str(e) if config.DEBUG else "Internal server error"
             error_event = {
                 "type": "error",
-                "timestamp": __import__("datetime").datetime.now().isoformat(),
+                "timestamp": utc_now().isoformat(),
                 "data": {
                     "success": False,
                     "error": error_detail

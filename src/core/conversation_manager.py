@@ -8,13 +8,13 @@
 """
 
 from typing import Dict, List, Optional, Any
-from datetime import datetime
 
 from repositories.conversation_repo import ConversationRepository
 from repositories.message_event_repo import MessageEventRepository
 from repositories.base import NotFoundError, DuplicateError
 from db.models import Conversation, Message, MessageEvent
 from utils.logger import get_logger
+from utils.time import utc_now
 
 logger = get_logger("ArtifactFlow")
 
@@ -152,7 +152,7 @@ class ConversationManager:
         """
         await self.ensure_conversation_exists(conv_id)
 
-        now = datetime.now().isoformat()
+        now = utc_now().isoformat()
 
         if self.repository:
             await self.repository.add_message(

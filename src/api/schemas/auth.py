@@ -74,6 +74,14 @@ class UserInfo(BaseModel):
     username: str = Field(..., description="Username")
     display_name: Optional[str] = Field(None, description="Display name")
     role: str = Field(..., description="Role")
+    department_path: Optional[List[str]] = Field(
+        None,
+        description=(
+            "Names of the user's department ancestors, root → leaf. "
+            "None when the user has no department. Sidebar shows the leaf; "
+            "future UIs can render the full chain without a second request."
+        ),
+    )
 
 
 class LoginResponse(BaseModel):

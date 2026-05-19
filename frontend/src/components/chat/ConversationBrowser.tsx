@@ -7,6 +7,7 @@ import { useChat } from '@/hooks/useChat';
 import { useCopyFeedback } from '@/hooks/useCopyFeedback';
 import { useLatestOnly } from '@/hooks/useLatestOnly';
 import { listConversations, deleteConversation, bulkDeleteConversations } from '@/lib/api';
+import { parseUtcIso } from '@/lib/time';
 import type { ConversationSummary } from '@/types';
 import { BUTTON_DANGER } from '@/lib/styles';
 import ConfirmModal from '@/components/layout/ConfirmModal';
@@ -288,7 +289,7 @@ function BrowserItem({
   const { copied: copyFeedback, copy } = useCopyFeedback();
   const menuRef = useRef<HTMLDivElement>(null);
   const title = conversation.title || 'Untitled';
-  const date = new Date(conversation.updated_at).toLocaleDateString();
+  const date = parseUtcIso(conversation.updated_at).toLocaleDateString();
 
   const handleCopyId = async () => {
     await copy(conversation.id);

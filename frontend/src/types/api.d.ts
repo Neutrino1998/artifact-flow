@@ -475,6 +475,66 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/conversations/{conv_id}/artifacts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Admin Conversation Artifacts
+         * @description List all artifacts in a conversation (DB-only, no in-memory overlay).
+         */
+        get: operations["list_admin_conversation_artifacts_api_v1_admin_conversations__conv_id__artifacts_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/conversations/{conv_id}/artifacts/{artifact_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Admin Conversation Artifact
+         * @description Get current artifact content + version list (DB-only).
+         */
+        get: operations["get_admin_conversation_artifact_api_v1_admin_conversations__conv_id__artifacts__artifact_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/conversations/{conv_id}/artifacts/{artifact_id}/versions/{version}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Admin Conversation Artifact Version
+         * @description Get a specific historical version's content (DB-only).
+         */
+        get: operations["get_admin_conversation_artifact_version_api_v1_admin_conversations__conv_id__artifacts__artifact_id__versions__version__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/users": {
         parameters: {
             query?: never;
@@ -654,6 +714,34 @@ export interface paths {
          *     给前端 DangerConfirmModal 显示"将级联删除 N 条会话，操作不可恢复"。
          */
         get: operations["get_user_impact_api_v1_admin_users__user_id__impact_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/runtime": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Runtime
+         * @description 实时水位 + 活跃任务诊断快照。
+         *
+         *     Response:
+         *         {
+         *             "ts": ISO8601,
+         *             "sampler": {<sampler.latest_snapshot 结构,见 sampler.py 文档>},
+         *             "active_conversations": [conv_id, ...],
+         *             "active_tasks": int,
+         *         }
+         */
+        get: operations["get_runtime_api_v1_admin_runtime_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1877,6 +1965,11 @@ export interface components {
              * @description Role
              */
             role: string;
+            /**
+             * Department Path
+             * @description Names of the user's department ancestors, root → leaf. None when the user has no department. Sidebar shows the leaf; future UIs can render the full chain without a second request.
+             */
+            department_path: string[] | null;
         };
         /**
          * UserListResponse
@@ -2723,6 +2816,102 @@ export interface operations {
             };
         };
     };
+    list_admin_conversation_artifacts_api_v1_admin_conversations__conv_id__artifacts_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                conv_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArtifactListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_admin_conversation_artifact_api_v1_admin_conversations__conv_id__artifacts__artifact_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                conv_id: string;
+                artifact_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArtifactResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_admin_conversation_artifact_version_api_v1_admin_conversations__conv_id__artifacts__artifact_id__versions__version__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                conv_id: string;
+                artifact_id: string;
+                version: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VersionDetailResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_users_api_v1_admin_users_get: {
         parameters: {
             query?: {
@@ -3008,6 +3197,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_runtime_api_v1_admin_runtime_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
         };

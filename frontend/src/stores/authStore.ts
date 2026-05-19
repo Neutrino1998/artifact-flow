@@ -15,6 +15,8 @@ interface AuthState {
   login: (token: string, user: UserInfo) => void;
   logout: () => void;
   hydrate: () => void;
+  /** 用最新 UserInfo 覆盖 store + localStorage 缓存 — 用于 hydrate 后追平后端新增字段 */
+  setUser: (user: UserInfo) => void;
 }
 
 export const useAuthStore = create<AuthState>((set) => ({
@@ -36,6 +38,11 @@ export const useAuthStore = create<AuthState>((set) => ({
     useArtifactStore.getState().reset();
     useStreamStore.getState().reset();
     set({ token: null, user: null, isAuthenticated: false });
+  },
+
+  setUser: (user) => {
+    localStorage.setItem('af_user', JSON.stringify(user));
+    set({ user });
   },
 
   hydrate: () => {

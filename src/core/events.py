@@ -5,6 +5,8 @@ from typing import Optional, Any
 from dataclasses import dataclass, field
 from datetime import datetime
 
+from utils.time import utc_now
+
 
 class StreamEventType(Enum):
     """
@@ -40,6 +42,11 @@ class StreamEventType(Enum):
     COMPACTION_START = "compaction_start"      # compaction 开始（持久化，便于 replay 看到"压缩进行中"指示）
     COMPACTION_SUMMARY = "compaction_summary"  # compaction 结果（持久化，作为历史 boundary）
 
+    # ========== Runtime / 排队层 ==========
+    # 任务进入 ExecutionRunner 的并发信号量等待队列时由 runner 推送（SSE-only，不持久化）。
+    # 抵达 agent_start 后前端应自行清理 — 历史 replay 不需要这个事件。
+    EXECUTION_QUEUED = "execution_queued"
+
 
 # ============================================================
 # 内存事件（执行过程中累积，最终 batch write）
@@ -52,7 +59,7 @@ class ExecutionEvent:
     agent_name: Optional[str] = None
     data: Any = None
     event_id: Optional[str] = None  # stable dedupe key, set by controller before persist
-    created_at: datetime = field(default_factory=datetime.now)
+    created_at: datetime = field(default_factory=utc_now)
     # True 表示从 DB 载入的历史事件（prior turn）；False 表示本轮新产生的事件。
     # 用于：持久化过滤（只写 False 的）、compaction preserve 边界（不跨轮）、
     # compaction 插入位置合法性校验（只能插在 False 段内）。

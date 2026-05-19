@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useCopyFeedback } from '@/hooks/useCopyFeedback';
 import * as api from '@/lib/api';
+import { parseUtcIso } from '@/lib/time';
 import PanelSearchBar from './PanelSearchBar';
 import type {
   AdminConversationSummary,
@@ -10,6 +11,7 @@ import type {
   AdminEventItem,
   AdminConversationEventsResponse,
 } from '@/lib/api';
+import type { ArtifactSummary, ArtifactDetail, VersionDetail } from '@/types';
 import { useUIStore } from '@/stores/uiStore';
 import { useLatestOnly } from '@/hooks/useLatestOnly';
 
@@ -61,7 +63,7 @@ function eventSummary(event: AdminEventItem): string {
 
 function formatTime(iso: string): string {
   try {
-    const d = new Date(iso);
+    const d = parseUtcIso(iso);
     return d.toLocaleTimeString('zh-CN', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
   } catch {
     return '';
@@ -139,6 +141,11 @@ export default function ObservabilityPanel() {
   const [collapsedMessages, setCollapsedMessages] = useState<Set<string>>(new Set());
   const [selectedEvent, setSelectedEvent] = useState<AdminEventItem | null>(null);
   const refreshTick = useUIStore((s) => s.observabilityRefreshTick);
+  const [viewMode, setViewMode] = useState<'events' | 'artifacts'>('events');
+
+  useEffect(() => {
+    setViewMode('events');
+  }, [selectedConvId]);
 
   // Fetch events when selected conversation changes or refresh is triggered
   useEffect(() => {
@@ -202,67 +209,96 @@ export default function ObservabilityPanel() {
     );
   }
 
-  // Loading events
-  if (eventsLoading) {
-    return (
-      <div className="flex-1 flex items-center justify-center bg-chat dark:bg-chat-dark">
-        <div className="text-text-tertiary dark:text-text-tertiary-dark text-sm">
-          加载事件中...
-        </div>
-      </div>
-    );
-  }
-
-  // Aggregate stats
+  // Aggregate stats (events view)
   const stats = eventsData != null ? aggregateStats(eventsData.messages) : null;
+  const headerTitle = eventsData?.title || selectedConvId;
 
   // Timeline + Detail
   return (
     <div className="flex-1 flex min-h-0 bg-chat dark:bg-chat-dark">
-      {/* Timeline */}
+      {/* Main column */}
       <div className="flex-1 flex flex-col min-w-0">
-        {eventsData != null && stats != null ? (
-          <>
-            {/* Header */}
-            <div className="px-4 pt-3 pb-2 border-b border-border dark:border-border-dark">
-              <div className="text-sm font-semibold text-text-primary dark:text-text-primary-dark truncate">
-                {eventsData.title || selectedConvId}
+        {/* Header (title + tabs) */}
+        <div className="px-4 pt-3 pb-2 border-b border-border dark:border-border-dark">
+          <div className="text-sm font-semibold text-text-primary dark:text-text-primary-dark truncate">
+            {headerTitle}
+          </div>
+          <div className="mt-2 flex gap-1 text-xs">
+            <TabButton active={viewMode === 'events'} onClick={() => setViewMode('events')}>
+              Events
+            </TabButton>
+            <TabButton active={viewMode === 'artifacts'} onClick={() => setViewMode('artifacts')}>
+              Artifacts
+            </TabButton>
+          </div>
+        </div>
+
+        {viewMode === 'events' ? (
+          eventsLoading ? (
+            <div className="flex-1 flex items-center justify-center text-text-tertiary dark:text-text-tertiary-dark text-sm">
+              加载事件中...
+            </div>
+          ) : eventsData != null && stats != null ? (
+            <>
+              {/* Stats cards */}
+              <div className="px-4 py-2 border-b border-border dark:border-border-dark flex gap-3 flex-wrap">
+                <StatCard label="Messages" value={String(eventsData.messages.length)} />
+                <StatCard label="Events" value={String(eventsData.messages.reduce((n, m) => n + m.events.length, 0))} />
+                <StatCard label="Tokens In" value={formatNumber(stats.inputTokens)} />
+                <StatCard label="Tokens Out" value={formatNumber(stats.outputTokens)} />
+                <StatCard label="LLM Calls" value={String(stats.llmCalls)} />
+                <StatCard label="Tool Calls" value={stats.toolFails > 0 ? `${stats.toolCalls} (${stats.toolFails} fail)` : String(stats.toolCalls)} />
+                <StatCard label="Total Time" value={formatDuration(stats.totalDurationMs)} />
               </div>
-            </div>
 
-            {/* Stats cards */}
-            <div className="px-4 py-2 border-b border-border dark:border-border-dark flex gap-3 flex-wrap">
-              <StatCard label="Messages" value={String(eventsData.messages.length)} />
-              <StatCard label="Events" value={String(eventsData.messages.reduce((n, m) => n + m.events.length, 0))} />
-              <StatCard label="Tokens In" value={formatNumber(stats.inputTokens)} />
-              <StatCard label="Tokens Out" value={formatNumber(stats.outputTokens)} />
-              <StatCard label="LLM Calls" value={String(stats.llmCalls)} />
-              <StatCard label="Tool Calls" value={stats.toolFails > 0 ? `${stats.toolCalls} (${stats.toolFails} fail)` : String(stats.toolCalls)} />
-              <StatCard label="Total Time" value={formatDuration(stats.totalDurationMs)} />
-            </div>
-
-            {/* Messages & events */}
-            <div className="flex-1 overflow-y-auto px-4 py-2">
-              {eventsData.messages.map((msg) => (
-                <MessageGroupView
-                  key={msg.message_id}
-                  group={msg}
-                  collapsed={collapsedMessages.has(msg.message_id)}
-                  onToggle={() => toggleMessageCollapse(msg.message_id)}
-                  selectedEventId={selectedEvent?.id ?? null}
-                  onSelectEvent={setSelectedEvent}
-                />
-              ))}
-            </div>
-          </>
-        ) : null}
+              {/* Messages & events */}
+              <div className="flex-1 overflow-y-auto px-4 py-2">
+                {eventsData.messages.map((msg) => (
+                  <MessageGroupView
+                    key={msg.message_id}
+                    group={msg}
+                    collapsed={collapsedMessages.has(msg.message_id)}
+                    onToggle={() => toggleMessageCollapse(msg.message_id)}
+                    selectedEventId={selectedEvent?.id ?? null}
+                    onSelectEvent={setSelectedEvent}
+                  />
+                ))}
+              </div>
+            </>
+          ) : null
+        ) : (
+          <ArtifactsTab convId={selectedConvId} refreshTick={refreshTick} />
+        )}
       </div>
 
-      {/* Detail panel */}
-      {selectedEvent != null ? (
+      {/* Right detail panel — only for events tab */}
+      {viewMode === 'events' && selectedEvent != null ? (
         <DetailPanel key={selectedEvent.id} event={selectedEvent} onClose={() => setSelectedEvent(null)} />
       ) : null}
     </div>
+  );
+}
+
+function TabButton({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={`px-3 py-1 rounded-md transition-colors ${
+        active
+          ? 'bg-accent/10 text-accent font-medium'
+          : 'text-text-tertiary dark:text-text-tertiary-dark hover:text-text-secondary dark:hover:text-text-secondary-dark hover:bg-surface dark:hover:bg-bg-dark'
+      }`}
+    >
+      {children}
+    </button>
   );
 }
 
@@ -272,7 +308,7 @@ function serializeEventToText(event: AdminEventItem): string {
   lines.push(`ID: ${event.id}`);
   lines.push(`类型: ${event.event_type}`);
   lines.push(`Agent: ${event.agent_name || '-'}`);
-  lines.push(`时间: ${new Date(event.created_at).toLocaleString('zh-CN')}`);
+  lines.push(`时间: ${parseUtcIso(event.created_at).toLocaleString('zh-CN')}`);
 
   if (d != null && event.event_type === 'llm_complete') {
     lines.push(`模型: ${(d.model as string) || '-'}`);
@@ -440,7 +476,7 @@ function AdminConversationBrowser({
               <div className="flex items-center gap-2 mt-1 text-xs text-text-tertiary dark:text-text-tertiary-dark">
                 <span>{conv.user_display_name || conv.user_id || '-'}</span>
                 <span>{conv.message_count} messages</span>
-                <span>{new Date(conv.updated_at).toLocaleDateString()}</span>
+                <span>{parseUtcIso(conv.updated_at).toLocaleDateString()}</span>
               </div>
             </div>
           ))}
@@ -557,7 +593,7 @@ function EventDetail({ event }: { event: AdminEventItem }) {
         <DetailRow label="ID" value={String(event.id)} />
         <DetailRow label="类型" value={event.event_type} />
         <DetailRow label="Agent" value={event.agent_name || '-'} />
-        <DetailRow label="时间" value={new Date(event.created_at).toLocaleString('zh-CN')} />
+        <DetailRow label="时间" value={parseUtcIso(event.created_at).toLocaleString('zh-CN')} />
       </div>
 
       {/* Type-specific details */}
@@ -618,6 +654,219 @@ function DetailRow({ label, value }: { label: string; value: string }) {
     <div className="flex gap-2">
       <span className="flex-shrink-0 w-14 text-text-tertiary dark:text-text-tertiary-dark text-xs">{label}</span>
       <span className="text-text-primary dark:text-text-primary-dark text-xs break-all">{value}</span>
+    </div>
+  );
+}
+
+// ── Artifacts Tab ──
+function ArtifactsTab({ convId, refreshTick }: { convId: string; refreshTick: number }) {
+  const [list, setList] = useState<ArtifactSummary[] | null>(null);
+  const [listLoading, setListLoading] = useState(false);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [detail, setDetail] = useState<ArtifactDetail | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [viewingVersion, setViewingVersion] = useState<number | null>(null);
+  const [versionContent, setVersionContent] = useState<VersionDetail | null>(null);
+  const [versionLoading, setVersionLoading] = useState(false);
+
+  // Load artifact list when conv changes
+  useEffect(() => {
+    setList(null);
+    setSelectedId(null);
+    setDetail(null);
+    setViewingVersion(null);
+    setVersionContent(null);
+    let cancelled = false;
+    setListLoading(true);
+    api.listAdminConversationArtifacts(convId).then((res) => {
+      if (!cancelled) setList(res.artifacts);
+    }).catch((err) => {
+      if (!cancelled) {
+        console.error('Failed to load artifacts:', err);
+        setList([]);
+      }
+    }).finally(() => {
+      if (!cancelled) setListLoading(false);
+    });
+    return () => { cancelled = true; };
+  }, [convId, refreshTick]);
+
+  // Load artifact detail when selection changes
+  useEffect(() => {
+    if (selectedId == null) {
+      setDetail(null);
+      setViewingVersion(null);
+      setVersionContent(null);
+      return;
+    }
+    let cancelled = false;
+    setDetailLoading(true);
+    setDetail(null);
+    setViewingVersion(null);
+    setVersionContent(null);
+    api.getAdminConversationArtifact(convId, selectedId).then((res) => {
+      if (!cancelled) {
+        setDetail(res);
+        setViewingVersion(res.current_version);
+      }
+    }).catch((err) => {
+      if (!cancelled) {
+        console.error('Failed to load artifact:', err);
+        setDetail(null);
+      }
+    }).finally(() => {
+      if (!cancelled) setDetailLoading(false);
+    });
+    return () => { cancelled = true; };
+  }, [convId, selectedId]);
+
+  // Load specific version content when viewing a non-current version
+  useEffect(() => {
+    // Early-return branches must also clear versionLoading: the in-flight
+    // fetch's `.finally` is gated on `!cancelled`, so switching away from a
+    // loading version (e.g. v3 → current) leaves the spinner hanging.
+    if (selectedId == null || detail == null || viewingVersion == null) {
+      setVersionContent(null);
+      setVersionLoading(false);
+      return;
+    }
+    if (viewingVersion === detail.current_version) {
+      setVersionContent(null);
+      setVersionLoading(false);
+      return;
+    }
+    let cancelled = false;
+    // Clear stale content before fetching so the viewer shows a loading
+    // state instead of the previously-displayed version's content.
+    setVersionContent(null);
+    setVersionLoading(true);
+    api.getAdminConversationArtifactVersion(convId, selectedId, viewingVersion).then((res) => {
+      if (!cancelled) setVersionContent(res);
+    }).catch((err) => {
+      if (!cancelled) {
+        console.error('Failed to load version:', err);
+        setVersionContent(null);
+      }
+    }).finally(() => {
+      if (!cancelled) setVersionLoading(false);
+    });
+    return () => { cancelled = true; };
+  }, [convId, selectedId, detail, viewingVersion]);
+
+  // Showing a non-current version: require the loaded content to match the
+  // selected version, otherwise show a loading state (defends against the
+  // gap between selecting a version and the fetch resolving).
+  const isViewingCurrent =
+    detail != null && viewingVersion != null && viewingVersion === detail.current_version;
+  const versionContentMatches =
+    versionContent != null && versionContent.version === viewingVersion;
+  const versionContentReady = isViewingCurrent || versionContentMatches;
+  const displayedContent = isViewingCurrent
+    ? detail?.content ?? ''
+    : versionContentMatches
+      ? versionContent!.content
+      : '';
+
+  return (
+    <div className="flex-1 flex min-h-0">
+      {/* List */}
+      <div className="w-[280px] flex-shrink-0 border-r border-border dark:border-border-dark overflow-y-auto">
+        {listLoading ? (
+          <div className="p-4 text-xs text-text-tertiary dark:text-text-tertiary-dark">加载中...</div>
+        ) : list == null || list.length === 0 ? (
+          <div className="p-4 text-xs text-text-tertiary dark:text-text-tertiary-dark">该会话暂无 artifacts</div>
+        ) : (
+          <div className="py-1">
+            {list.map((art) => (
+              <button
+                key={art.id}
+                onClick={() => setSelectedId(art.id)}
+                className={`w-full text-left px-3 py-2 transition-colors ${
+                  selectedId === art.id
+                    ? 'bg-accent/10'
+                    : 'hover:bg-surface dark:hover:bg-bg-dark'
+                }`}
+              >
+                <div className="text-xs font-medium text-text-primary dark:text-text-primary-dark truncate">
+                  {art.title}
+                </div>
+                <div className="mt-0.5 flex items-center gap-1.5 text-[10px] text-text-tertiary dark:text-text-tertiary-dark">
+                  <span className="font-mono">{art.content_type}</span>
+                  <span>v{art.current_version}</span>
+                  {art.source ? <span>· {art.source}</span> : null}
+                </div>
+                <div className="mt-0.5 text-[10px] text-text-tertiary dark:text-text-tertiary-dark truncate">
+                  {parseUtcIso(art.updated_at).toLocaleString('zh-CN')}
+                </div>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Viewer */}
+      <div className="flex-1 flex flex-col min-w-0">
+        {selectedId == null ? (
+          <div className="flex-1 flex items-center justify-center text-xs text-text-tertiary dark:text-text-tertiary-dark">
+            从左侧选择一个 artifact 查看内容
+          </div>
+        ) : detailLoading ? (
+          <div className="flex-1 flex items-center justify-center text-xs text-text-tertiary dark:text-text-tertiary-dark">
+            加载中...
+          </div>
+        ) : detail == null ? (
+          <div className="flex-1 flex items-center justify-center text-xs text-text-tertiary dark:text-text-tertiary-dark">
+            加载失败
+          </div>
+        ) : (
+          <>
+            {/* Artifact header */}
+            <div className="px-4 pt-3 pb-2 border-b border-border dark:border-border-dark">
+              <div className="text-sm font-semibold text-text-primary dark:text-text-primary-dark truncate">
+                {detail.title}
+              </div>
+              <div className="mt-1 flex items-center gap-2 text-[11px] text-text-tertiary dark:text-text-tertiary-dark flex-wrap">
+                <span className="font-mono">{detail.content_type}</span>
+                <span>·</span>
+                <span>ID: {detail.id}</span>
+                {detail.source ? <><span>·</span><span>{detail.source}</span></> : null}
+                {detail.original_filename ? <><span>·</span><span>{detail.original_filename}</span></> : null}
+              </div>
+              {/* Version selector */}
+              {detail.versions.length > 0 ? (
+                <div className="mt-2 flex items-center gap-2 text-xs">
+                  <span className="text-text-tertiary dark:text-text-tertiary-dark">版本</span>
+                  <select
+                    value={viewingVersion ?? detail.current_version}
+                    onChange={(e) => setViewingVersion(Number(e.target.value))}
+                    className="px-2 py-1 rounded bg-surface dark:bg-surface-dark border border-border dark:border-border-dark text-text-primary dark:text-text-primary-dark"
+                  >
+                    {detail.versions.map((v) => (
+                      <option key={v.version} value={v.version}>
+                        v{v.version} ({v.update_type}){v.version === detail.current_version ? ' · current' : ''}
+                      </option>
+                    ))}
+                  </select>
+                  {versionLoading ? <span className="text-text-tertiary dark:text-text-tertiary-dark">加载...</span> : null}
+                </div>
+              ) : null}
+            </div>
+
+            {/* Content */}
+            <div className="flex-1 overflow-y-auto px-4 py-3">
+              {versionContentReady ? (
+                <pre className="text-xs text-text-primary dark:text-text-primary-dark whitespace-pre-wrap break-words font-mono">
+                  {displayedContent}
+                </pre>
+              ) : (
+                <div className="text-xs text-text-tertiary dark:text-text-tertiary-dark">
+                  加载版本内容中...
+                </div>
+              )}
+            </div>
+          </>
+        )}
+      </div>
     </div>
   );
 }

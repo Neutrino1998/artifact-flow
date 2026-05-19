@@ -6,7 +6,7 @@ import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
 import FlowBlock from './FlowBlock';
 import { PROSE_CLASSES } from '@/lib/styles';
-import { markdownComponents } from '@/components/markdown';
+import { markdownComponents, markdownUrlTransform } from '@/components/markdown';
 import type { CompactionBlock } from '@/stores/streamStore';
 
 interface CompactionFlowBlockProps {
@@ -123,6 +123,7 @@ function Body({ block }: { block: CompactionBlock }) {
         remarkPlugins={[remarkGfm]}
         rehypePlugins={[rehypeHighlight]}
         components={markdownComponents}
+        urlTransform={markdownUrlTransform}
       >
         {block.summary}
       </ReactMarkdown>

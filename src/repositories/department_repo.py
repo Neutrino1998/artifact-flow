@@ -68,6 +68,29 @@ class DepartmentRepository(BaseRepository[Department]):
         )
         return result.scalar_one()
 
+    async def get_ancestor_chain(self, dept_id: str) -> List[Department]:
+        """
+        从 dept_id 沿 parent_id 链一路向上，返回 root → leaf 顺序的 Department 列表。
+
+        dept_id 找不到 → 返回 []。链路超过 100 层（数据异常）→ 截断返回当前累积。
+        给 /auth/me 拼 department_path 用，单次 /me 至多 ~10 次 SELECT，可接受。
+        """
+        chain: List[Department] = []
+        cursor: Optional[str] = dept_id
+        for _ in range(100):
+            if cursor is None:
+                break
+            result = await self._session.execute(
+                select(Department).where(Department.id == cursor)
+            )
+            node = result.scalar_one_or_none()
+            if node is None:
+                break
+            chain.append(node)
+            cursor = node.parent_id
+        chain.reverse()
+        return chain
+
     async def would_create_cycle(
         self, dept_id: str, new_parent_id: Optional[str]
     ) -> bool:

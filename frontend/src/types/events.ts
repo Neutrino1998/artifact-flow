@@ -28,6 +28,9 @@ export enum StreamEventType {
   // Compaction layer
   COMPACTION_START = 'compaction_start',      // context compression started
   COMPACTION_SUMMARY = 'compaction_summary',  // context compression finished (persisted as history boundary)
+
+  // Runtime layer
+  EXECUTION_QUEUED = 'execution_queued',      // SSE-only: task waiting on concurrency semaphore
 }
 
 // ============================================================
@@ -115,6 +118,13 @@ export interface CompactionStartData {
   last_input_tokens: number;
   /** output tokens of the same call */
   last_output_tokens: number;
+}
+
+export interface ExecutionQueuedData {
+  /** upper-bound number of tasks ahead in the concurrency queue */
+  ahead: number;
+  /** server's MAX_CONCURRENT_TASKS — shown for context */
+  max_concurrent: number;
 }
 
 export interface CompactionSummaryData {

@@ -19,8 +19,7 @@ interface EditDisplayNameDialogProps {
 
 export default function EditDisplayNameDialog({ onClose }: EditDisplayNameDialogProps) {
   const user = useAuthStore((s) => s.user);
-  const token = useAuthStore((s) => s.token);
-  const login = useAuthStore((s) => s.login);
+  const setUser = useAuthStore((s) => s.setUser);
   const bumpListVersion = useUIStore((s) => s.bumpUserMgmtListVersion);
 
   const [displayName, setDisplayName] = useState(user?.display_name ?? '');
@@ -40,10 +39,9 @@ export default function EditDisplayNameDialog({ onClose }: EditDisplayNameDialog
     try {
       // 后端用空字符串清空 display_name；trimmed=='' 时也走这条路径
       const updated = await api.updateMyProfile({ display_name: trimmed });
-      // 同步 authStore — sidebar 头像名等立即刷新
-      if (token && user) {
-        login(token, { ...user, display_name: updated.display_name ?? null });
-      }
+      // 用后端返回的完整 UserInfo 覆盖 store — 不能 spread 旧 user，否则
+      // 期间被 admin 移过的 department_path 会被回写成过期值
+      setUser(updated);
       // 通知其他持有 UserResponse 副本的组件刷新（UserManagementPanel 列表 +
       // UserDetailForm 详情）。authStore 不是这些组件的真相来源，必须显式 bump
       bumpListVersion();
