@@ -2,6 +2,8 @@
 
 > 仅对**已部署过 pre-pin 版本**的内网机有效(volume 真实名前缀是 `deploy_`)。新部署不需要做。本次为一次性动作,跑完之后未来 project 改名不会再要求迁移(volume 名已显式钉死)。
 
+> **范围:** 默认覆盖 **3A**(自建 PG/Redis,三个 `deploy_*` volume 都在)。**3B**(外部 DB)只有 `deploy_artifactflow_data` 一个本地 volume,步骤 2-3 中 PG/Redis 两块整体跳过,起服命令不带 `--profile infra`,helper image 改用任一已 load 的镜像(例如 `nginx:1.30.1-alpine`)。其余步骤同。
+
 ## 背景
 
 旧版 compose 没显式声明 project name,Docker Compose v2 默认拿 compose 文件目录的 basename → `deploy` → 容器名 `deploy-backend-1` / volume 名 `deploy_postgres_data` 等。
@@ -16,7 +18,7 @@ PG 大小决定 copy 时间。3GB / SSD 大致几十秒;HDD 内网机预留 5-10
 
 ```bash
 # 1. 当前用的项目名应是 deploy
-docker compose -p deploy -f deploy/docker-compose.intranet.yml ps
+docker compose -p deploy -f deploy/docker-compose.intranet.yml --profile infra ps
 
 # 2. 三个旧 volume 都在
 docker volume ls --format '{{.Name}}' | grep -E '^deploy_(artifactflow|postgres|redis)_data$'
@@ -35,9 +37,11 @@ docker volume ls --format '{{.Name}}' | grep -E '^artifactflow_(data|postgres_da
 cd /path/to/artifact-flow
 
 # ── 1. 停服(NOT `-v`!否则连数据一起删) ──
-docker compose -p deploy -f deploy/docker-compose.intranet.yml down
+#    `--profile infra` 必带:不加的话部分 compose 版本会跳过带 profile 的服务,
+#    PG / Redis 在 step 3 cp 期间仍在写,copy 出脏数据。
+docker compose -p deploy -f deploy/docker-compose.intranet.yml --profile infra down
 # 验证全停:
-docker compose -p deploy -f deploy/docker-compose.intranet.yml ps -a
+docker compose -p deploy -f deploy/docker-compose.intranet.yml --profile infra ps -a
 
 # ── 2. 创建空的新 volume ──
 docker volume create artifactflow_data
@@ -45,29 +49,35 @@ docker volume create artifactflow_postgres_data
 docker volume create artifactflow_redis_data
 
 # ── 3. 通过临时容器把数据 cp 过去(-a 保元数据 / 权限 / 时间戳) ──
+#    Helper image 必须用**已经 docker load 进来的**镜像 — 内网机离线,没法 pull
+#    `alpine:latest`。下面用 `postgres:16-alpine` / `redis:7-alpine`(都有 sh + cp -a)。
+#    3B 无 PG/Redis volume,本节只跑 data 那一块,helper 可改 nginx:1.30.1-alpine。
 #    Postgres:
 docker run --rm \
   -v deploy_postgres_data:/from:ro \
   -v artifactflow_postgres_data:/to \
-  alpine sh -c 'cp -a /from/. /to/ && echo "PG copy done: $(du -sh /to)"'
+  postgres:16-alpine sh -c 'cp -a /from/. /to/ && echo "PG copy done: $(du -sh /to)"'
 
 #    Backend 持久数据(uploads + observability jsonl + sqlite if any):
 docker run --rm \
   -v deploy_artifactflow_data:/from:ro \
   -v artifactflow_data:/to \
-  alpine sh -c 'cp -a /from/. /to/ && echo "data copy done: $(du -sh /to)"'
+  postgres:16-alpine sh -c 'cp -a /from/. /to/ && echo "data copy done: $(du -sh /to)"'
 
 #    Redis(AOF + RDB):
 docker run --rm \
   -v deploy_redis_data:/from:ro \
   -v artifactflow_redis_data:/to \
-  alpine sh -c 'cp -a /from/. /to/ && echo "redis copy done: $(du -sh /to)"'
+  redis:7-alpine sh -c 'cp -a /from/. /to/ && echo "redis copy done: $(du -sh /to)"'
 
 # ── 4. 起服(不带 -p,name: artifactflow 自动生效) ──
-docker compose -f deploy/docker-compose.intranet.yml --profile infra up -d
+#    AF_VERSION 必显式:compose 里 fallback 是 ${AF_VERSION:-latest},但内网机
+#    docker load 出来只有具体 tag,没有 :latest,会起失败或起错版本。
+#    把 <x.y.z> 换成本次 release 的版本号(看 release tar 文件名或 .env 里的 AF_VERSION)。
+AF_VERSION=<x.y.z> docker compose -f deploy/docker-compose.intranet.yml --profile infra up -d
 
 # ── 5. 验证 ──
-docker compose -f deploy/docker-compose.intranet.yml ps
+docker compose -f deploy/docker-compose.intranet.yml --profile infra ps
 #   名字应全是 artifactflow-X-1
 docker compose -f deploy/docker-compose.intranet.yml exec postgres \
   psql -U "${POSTGRES_USER:-artifactflow}" -d "${POSTGRES_DB:-artifactflow}" \
@@ -90,10 +100,10 @@ docker volume rm deploy_artifactflow_data deploy_postgres_data deploy_redis_data
 只要还没执行第 6 步,旧 volume 没动:
 
 ```bash
-docker compose -f deploy/docker-compose.intranet.yml down
+docker compose -f deploy/docker-compose.intranet.yml --profile infra down
 docker volume rm artifactflow_data artifactflow_postgres_data artifactflow_redis_data
-# 恢复旧 project 跑:
-docker compose -p deploy -f deploy/docker-compose.intranet.yml --profile infra up -d
+# 恢复旧 project 跑(AF_VERSION 用回滚目标版本):
+AF_VERSION=<旧版本> docker compose -p deploy -f deploy/docker-compose.intranet.yml --profile infra up -d
 # 同时 git revert 本次 compose 改动
 ```
 
