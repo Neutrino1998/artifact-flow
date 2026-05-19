@@ -2,7 +2,7 @@
 
 > 仅对**已部署过 pre-pin 版本**的内网机有效(volume 真实名前缀是 `deploy_`)。新部署不需要做。本次为一次性动作,跑完之后未来 project 改名不会再要求迁移(volume 名已显式钉死)。
 
-> **范围:** 默认覆盖 **3A**(自建 PG/Redis,三个 `deploy_*` volume 都在)。**3B**(外部 DB)只有 `deploy_artifactflow_data` 一个本地 volume,步骤 2-3 中 PG/Redis 两块整体跳过,起服命令不带 `--profile infra`,helper image 改用任一已 load 的镜像(例如 `nginx:1.30.1-alpine`)。其余步骤同。
+> **范围:** 默认覆盖 **3A**(自建 PG/Redis,三个 `deploy_*` volume 都在)。**3B**(外部 DB)只有 `deploy_artifactflow_data` 一个本地 volume,差异点:步骤 2-3 中 PG/Redis 两块整体跳过(helper image 改用任一已 load 的镜像,例如 `nginx:1.30.1-alpine`),步骤 4 起服命令不带 `--profile infra`,步骤 5 / 6 / 回滚段都有 3B 注释或独立子节。
 
 ## 背景
 
@@ -79,32 +79,51 @@ AF_VERSION=<x.y.z> docker compose -f deploy/docker-compose.intranet.yml --profil
 # ── 5. 验证 ──
 docker compose -f deploy/docker-compose.intranet.yml --profile infra ps
 #   名字应全是 artifactflow-X-1
+
+# 3B 跳过 postgres / redis 两块(无本地容器,数据由外部 DB 验证):
 docker compose -f deploy/docker-compose.intranet.yml exec postgres \
   psql -U "${POSTGRES_USER:-artifactflow}" -d "${POSTGRES_DB:-artifactflow}" \
   -c "SELECT count(*) FROM conversations; SELECT count(*) FROM message_events;"
 #   行数应与停服前一致(`-p deploy` 时跑同样的查询记录一下做对照)
-docker compose -f deploy/docker-compose.intranet.yml exec backend \
-  ls /app/data /app/data/observability
-#   观测 jsonl 文件应在
 docker compose -f deploy/docker-compose.intranet.yml exec redis redis-cli DBSIZE
 #   key 数应非零(if 之前有数据)
 
+# 这块 3A / 3B 都跑:
+docker compose -f deploy/docker-compose.intranet.yml exec backend \
+  ls /app/data /app/data/observability
+#   观测 jsonl 文件应在
+
 # ── 6. 通过冒烟测试,真的没问题再删旧 volume ──
 #    跑 1-2 个真实对话,看历史能不能拉出来、新消息能不能落库
-#    再删:
+#    再删(3B 只有第一个,删 deploy_artifactflow_data 一个即可):
 docker volume rm deploy_artifactflow_data deploy_postgres_data deploy_redis_data
 ```
 
 ## 回滚
 
-只要还没执行第 6 步,旧 volume 没动:
+只要还没执行第 6 步,旧 volume 没动。
+
+**关键前置:必须先把 compose 文件切回 pre-pin 版本。** 新版 compose 里 volume 的 `name:` 字段把名字钉死成 `artifactflow_*`,`-p deploy` 只改 project name **不改 volume name**(已用 `docker compose -p deploy ... config` 验证);照搬旧命令会让上一行刚删的新卷被空建,旧 `deploy_*` 数据无人挂载。
+
+### 3A 回滚
 
 ```bash
 docker compose -f deploy/docker-compose.intranet.yml --profile infra down
 docker volume rm artifactflow_data artifactflow_postgres_data artifactflow_redis_data
-# 恢复旧 project 跑(AF_VERSION 用回滚目标版本):
+# 切回 pre-pin 的 compose 文件(SHA 44d00e4 是引入 pin 的 commit,工作区改动,不提交):
+git checkout 44d00e4^ -- deploy/docker-compose.intranet.yml
+# 旧 compose 没有 `name:` 字段,volume 名 fallback 到 `<project>_<volume>` 即 deploy_*:
 AF_VERSION=<旧版本> docker compose -p deploy -f deploy/docker-compose.intranet.yml --profile infra up -d
-# 同时 git revert 本次 compose 改动
+# 验证 OK 后再决定是否 `git revert <pin commit>` 入主线
+```
+
+### 3B 回滚
+
+```bash
+docker compose -f deploy/docker-compose.intranet.yml down
+docker volume rm artifactflow_data
+git checkout 44d00e4^ -- deploy/docker-compose.intranet.yml
+AF_VERSION=<旧版本> docker compose -p deploy -f deploy/docker-compose.intranet.yml up -d
 ```
 
 ## 常见踩坑
