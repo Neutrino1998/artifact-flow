@@ -1,0 +1,105 @@
+# 迁移:`deploy_*` volumes → `artifactflow_*`
+
+> 仅对**已部署过 pre-pin 版本**的内网机有效(volume 真实名前缀是 `deploy_`)。新部署不需要做。本次为一次性动作,跑完之后未来 project 改名不会再要求迁移(volume 名已显式钉死)。
+
+## 背景
+
+旧版 compose 没显式声明 project name,Docker Compose v2 默认拿 compose 文件目录的 basename → `deploy` → 容器名 `deploy-backend-1` / volume 名 `deploy_postgres_data` 等。
+
+新版加了 `name: artifactflow` 顶层字段,容器变 `artifactflow-backend-1`,顺手把 volume 也显式钉成 `artifactflow_*`(`name:` 字段,无 project 前缀)。**新 volume 名 ≠ 旧 volume 名**,直接 `up -d` 会被挂上空 volume,PG 触发 initdb、上传 / observability jsonl 全空。本文档把数据原样搬过来。
+
+## 必要 downtime
+
+PG 大小决定 copy 时间。3GB / SSD 大致几十秒;HDD 内网机预留 5-10 分钟稳妥。Redis AOF / `artifactflow_data` 上传通常更快(MB 级)。
+
+## 前置:确认现状
+
+```bash
+# 1. 当前用的项目名应是 deploy
+docker compose -p deploy -f deploy/docker-compose.intranet.yml ps
+
+# 2. 三个旧 volume 都在
+docker volume ls --format '{{.Name}}' | grep -E '^deploy_(artifactflow|postgres|redis)_data$'
+#   deploy_artifactflow_data
+#   deploy_postgres_data
+#   deploy_redis_data
+
+# 3. 新 volume 不应存在(否则上次升级已经创建了空 volume,见 §回滚)
+docker volume ls --format '{{.Name}}' | grep -E '^artifactflow_(data|postgres_data|redis_data)$' || echo "OK: no new volumes yet"
+```
+
+## 步骤
+
+```bash
+# 进仓库根目录
+cd /path/to/artifact-flow
+
+# ── 1. 停服(NOT `-v`!否则连数据一起删) ──
+docker compose -p deploy -f deploy/docker-compose.intranet.yml down
+# 验证全停:
+docker compose -p deploy -f deploy/docker-compose.intranet.yml ps -a
+
+# ── 2. 创建空的新 volume ──
+docker volume create artifactflow_data
+docker volume create artifactflow_postgres_data
+docker volume create artifactflow_redis_data
+
+# ── 3. 通过临时容器把数据 cp 过去(-a 保元数据 / 权限 / 时间戳) ──
+#    Postgres:
+docker run --rm \
+  -v deploy_postgres_data:/from:ro \
+  -v artifactflow_postgres_data:/to \
+  alpine sh -c 'cp -a /from/. /to/ && echo "PG copy done: $(du -sh /to)"'
+
+#    Backend 持久数据(uploads + observability jsonl + sqlite if any):
+docker run --rm \
+  -v deploy_artifactflow_data:/from:ro \
+  -v artifactflow_data:/to \
+  alpine sh -c 'cp -a /from/. /to/ && echo "data copy done: $(du -sh /to)"'
+
+#    Redis(AOF + RDB):
+docker run --rm \
+  -v deploy_redis_data:/from:ro \
+  -v artifactflow_redis_data:/to \
+  alpine sh -c 'cp -a /from/. /to/ && echo "redis copy done: $(du -sh /to)"'
+
+# ── 4. 起服(不带 -p,name: artifactflow 自动生效) ──
+docker compose -f deploy/docker-compose.intranet.yml --profile infra up -d
+
+# ── 5. 验证 ──
+docker compose -f deploy/docker-compose.intranet.yml ps
+#   名字应全是 artifactflow-X-1
+docker compose -f deploy/docker-compose.intranet.yml exec postgres \
+  psql -U "${POSTGRES_USER:-artifactflow}" -d "${POSTGRES_DB:-artifactflow}" \
+  -c "SELECT count(*) FROM conversations; SELECT count(*) FROM message_events;"
+#   行数应与停服前一致(`-p deploy` 时跑同样的查询记录一下做对照)
+docker compose -f deploy/docker-compose.intranet.yml exec backend \
+  ls /app/data /app/data/observability
+#   观测 jsonl 文件应在
+docker compose -f deploy/docker-compose.intranet.yml exec redis redis-cli DBSIZE
+#   key 数应非零(if 之前有数据)
+
+# ── 6. 通过冒烟测试,真的没问题再删旧 volume ──
+#    跑 1-2 个真实对话,看历史能不能拉出来、新消息能不能落库
+#    再删:
+docker volume rm deploy_artifactflow_data deploy_postgres_data deploy_redis_data
+```
+
+## 回滚
+
+只要还没执行第 6 步,旧 volume 没动:
+
+```bash
+docker compose -f deploy/docker-compose.intranet.yml down
+docker volume rm artifactflow_data artifactflow_postgres_data artifactflow_redis_data
+# 恢复旧 project 跑:
+docker compose -p deploy -f deploy/docker-compose.intranet.yml --profile infra up -d
+# 同时 git revert 本次 compose 改动
+```
+
+## 常见踩坑
+
+- **`down` 后 `ps` 还显示容器**:用 `-p deploy` 才查到旧 project 的容器,新 project name 看不到。`down -p deploy` 即可。
+- **`up -d` 后 PG 启动失败、log 里 `database files are incompatible with server`**:旧数据是 PG 主版本与镜像不一致。Mode 3 镜像是 `postgres:16-alpine`;如果旧部署是 PG 15,不能直接 copy,要走 pg_dumpall → restore。本仓库一直 pinned 在 16,正常不会踩。
+- **copy 报 `cp: can't preserve ownership`**:文件系统不支持(罕见,内网 ext4/xfs 都没问题)。换 `cp -r` + 后续 `chown -R 999:999 /to`(PG uid)、`999:1000`(redis)、`root:root`(backend data)。
+- **新 volume 已经被 `up -d` 创建过(`ls` 看见空 volume)**:`rm` 掉再走第 2-4 步。
