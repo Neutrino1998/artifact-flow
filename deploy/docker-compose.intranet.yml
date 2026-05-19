@@ -17,6 +17,14 @@ services:
         condition: service_healthy
       frontend:
         condition: service_healthy
+    # docker-logs disk cap. Default json-file driver is unbounded — long-running
+    # containers can pile up GBs of logs and fill the host disk. 100m × 3 = 300MB
+    # ceiling per service; same block repeated on every service below.
+    logging:
+      driver: json-file
+      options:
+        max-size: "100m"
+        max-file: "3"
     restart: unless-stopped
 
   backend:
@@ -52,12 +60,18 @@ services:
       redis:
         condition: service_healthy
         required: false
+    logging:
+      driver: json-file
+      options:
+        max-size: "100m"
+        max-file: "3"
     restart: unless-stopped
 
   frontend:
     image: artifactflow-frontend:${AF_VERSION:-latest}
     expose:
       - "3000"
+    mem_limit: 1g
     volumes:
       - /etc/localtime:/etc/localtime:ro
       - ../config/site:/app/public/site:ro
@@ -72,11 +86,17 @@ services:
     depends_on:
       backend:
         condition: service_healthy
+    logging:
+      driver: json-file
+      options:
+        max-size: "100m"
+        max-file: "3"
     restart: unless-stopped
 
   postgres:
     image: postgres:16-alpine
     profiles: ["infra"]
+    mem_limit: 2g
     # max_connections sized for backend pool (POOL_SIZE=20 + MAX_OVERFLOW=40 = 60)
     # plus PG internal workers, alembic, and debug headroom. shared_buffers raised
     # from 128MB default to fit the larger connection count.
@@ -97,6 +117,11 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    logging:
+      driver: json-file
+      options:
+        max-size: "100m"
+        max-file: "3"
     restart: unless-stopped
 
   redis:
@@ -121,6 +146,11 @@ services:
       interval: 10s
       timeout: 5s
       retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "100m"
+        max-file: "3"
     restart: unless-stopped
 
 volumes:
