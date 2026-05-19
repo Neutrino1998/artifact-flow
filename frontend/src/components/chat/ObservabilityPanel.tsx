@@ -5,6 +5,7 @@ import { useCopyFeedback } from '@/hooks/useCopyFeedback';
 import * as api from '@/lib/api';
 import { parseUtcIso } from '@/lib/time';
 import PanelSearchBar from './PanelSearchBar';
+import Pagination from './Pagination';
 import type {
   AdminConversationSummary,
   AdminMessageGroup,
@@ -15,7 +16,7 @@ import type { ArtifactSummary, ArtifactDetail, VersionDetail } from '@/types';
 import { useUIStore } from '@/stores/uiStore';
 import { useLatestOnly } from '@/hooks/useLatestOnly';
 
-const PAGE_SIZE = 20;
+const DEFAULT_PAGE_SIZE = 20;
 
 // ── Event type colors ──
 function eventColor(type: string): string {
@@ -397,30 +398,32 @@ function AdminConversationBrowser({
 }) {
   const [conversations, setConversations] = useState<AdminConversationSummary[]>([]);
   const [total, setTotal] = useState(0);
-  const [hasMore, setHasMore] = useState(false);
   const [loading, setLoading] = useState(false);
   const [query, setQuery] = useState('');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  // Refs let the refreshTick effect refresh the current page without
+  // re-firing every time the user navigates.
+  const queryRef = useRef(query);
+  const pageRef = useRef(page);
+  const pageSizeRef = useRef(pageSize);
   const refreshTick = useUIStore((s) => s.observabilityRefreshTick);
   const claim = useLatestOnly();
 
-  const fetchConversations = useCallback(async (q: string, offset = 0, append = false) => {
-    // Initial load / debounced search / load-more / refreshTick-bump all
-    // funnel through here. Latest-only drops slow older queries (and stale
-    // load-more pages) that would otherwise overwrite a newer result set.
+  const fetchConversations = useCallback(async (q: string, pageNum: number, size: number) => {
+    // Latest-only drops slow older fetches (debounced search, stale page
+    // changes, refreshTick bumps) so they can't overwrite a newer result set.
     const isLatest = claim();
     setLoading(true);
     try {
       const trimmed = q.trim() || undefined;
-      const res = await api.listAdminConversations(PAGE_SIZE, offset, trimmed);
+      const offset = (pageNum - 1) * size;
+      const res = await api.listAdminConversations(size, offset, trimmed);
       if (!isLatest()) return;
-      if (append) {
-        setConversations((prev) => [...prev, ...res.conversations]);
-      } else {
-        setConversations(res.conversations);
-      }
+      setConversations(res.conversations);
       setTotal(res.total);
-      setHasMore(res.has_more);
     } catch (err) {
       if (!isLatest()) return;
       console.error('Failed to load admin conversations:', err);
@@ -430,21 +433,35 @@ function AdminConversationBrowser({
   }, [claim]);
 
   useEffect(() => {
-    fetchConversations(query);
-  }, [fetchConversations, refreshTick]); // eslint-disable-line react-hooks/exhaustive-deps
+    fetchConversations(queryRef.current, pageRef.current, pageSizeRef.current);
+  }, [fetchConversations, refreshTick]);
 
   const handleQueryChange = useCallback((value: string) => {
     setQuery(value);
+    queryRef.current = value;
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => {
-      fetchConversations(value);
+      setPage(1);
+      pageRef.current = 1;
+      fetchConversations(value, 1, pageSizeRef.current);
     }, 300);
   }, [fetchConversations]);
 
-  const handleLoadMore = useCallback(() => {
-    if (loading || !hasMore) return;
-    fetchConversations(query, conversations.length, true);
-  }, [loading, hasMore, query, conversations.length, fetchConversations]);
+  const handlePageChange = useCallback((p: number) => {
+    setPage(p);
+    pageRef.current = p;
+    fetchConversations(queryRef.current, p, pageSizeRef.current);
+    scrollRef.current?.scrollTo({ top: 0 });
+  }, [fetchConversations]);
+
+  const handlePageSizeChange = useCallback((size: number) => {
+    setPageSize(size);
+    pageSizeRef.current = size;
+    setPage(1);
+    pageRef.current = 1;
+    fetchConversations(queryRef.current, 1, size);
+    scrollRef.current?.scrollTo({ top: 0 });
+  }, [fetchConversations]);
 
   return (
     <div className="flex-1 flex flex-col min-h-0 bg-chat dark:bg-chat-dark">
@@ -457,7 +474,7 @@ function AdminConversationBrowser({
       />
 
       {/* List */}
-      <div className="flex-1 overflow-y-auto px-4">
+      <div ref={scrollRef} className="flex-1 overflow-y-auto px-4">
         <div className="max-w-3xl mx-auto">
           {conversations.map((conv) => (
             <div
@@ -481,19 +498,10 @@ function AdminConversationBrowser({
             </div>
           ))}
 
-          {loading && (
+          {loading && conversations.length === 0 && (
             <div className="py-4 text-center text-xs text-text-tertiary dark:text-text-tertiary-dark">
               Loading...
             </div>
-          )}
-
-          {hasMore && !loading && (
-            <button
-              onClick={handleLoadMore}
-              className="w-full py-2.5 text-sm text-text-secondary dark:text-text-secondary-dark rounded-lg hover:bg-panel/60 dark:hover:bg-panel-accent-dark/60 transition-colors"
-            >
-              显示更多
-            </button>
           )}
 
           {!loading && conversations.length === 0 && (
@@ -503,6 +511,23 @@ function AdminConversationBrowser({
           )}
         </div>
       </div>
+
+      {total > 0 && (
+        <div className="px-4 pt-2 pb-4">
+          <div className="max-w-3xl mx-auto">
+            <div className="bg-surface dark:bg-surface-dark border border-border dark:border-border-dark rounded-2xl shadow-float px-4">
+              <Pagination
+                page={page}
+                pageSize={pageSize}
+                total={total}
+                onPageChange={handlePageChange}
+                onPageSizeChange={handlePageSizeChange}
+                disabled={loading}
+              />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

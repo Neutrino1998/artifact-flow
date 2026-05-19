@@ -14,16 +14,19 @@ import ConfirmModal from '@/components/layout/ConfirmModal';
 import DangerConfirmModal from '@/components/layout/DangerConfirmModal';
 import Checkbox from '@/components/forms/Checkbox';
 import PanelSearchBar from './PanelSearchBar';
+import Pagination from './Pagination';
 
-const PAGE_SIZE = 20;
+const DEFAULT_PAGE_SIZE = 20;
 
 export default function ConversationBrowser() {
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [total, setTotal] = useState(0);
-  const [hasMore, setHasMore] = useState(false);
   const [loading, setLoading] = useState(false);
   const [query, setQuery] = useState('');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const scrollRef = useRef<HTMLDivElement>(null);
 
   // Selection mode state — local only, not in uiStore
   const [selectionMode, setSelectionMode] = useState(false);
@@ -36,23 +39,18 @@ export default function ConversationBrowser() {
   const { switchConversation } = useChat();
   const claim = useLatestOnly();
 
-  const fetchConversations = useCallback(async (searchQuery: string, offset = 0, append = false) => {
-    // Initial load / debounced search / load-more all funnel through here.
-    // Without latest-only, a slow older query (or load-more page) returning
-    // after a newer query can replace/append into the wrong result set.
+  const fetchConversations = useCallback(async (searchQuery: string, pageNum: number, size: number) => {
+    // Latest-only drops slow older fetches (debounced search, stale page
+    // changes) so they can't overwrite a newer result set.
     const isLatest = claim();
     setLoading(true);
     try {
       const trimmed = searchQuery.trim() || undefined;
-      const data = await listConversations(PAGE_SIZE, offset, trimmed);
+      const offset = (pageNum - 1) * size;
+      const data = await listConversations(size, offset, trimmed);
       if (!isLatest()) return;
-      if (append) {
-        setConversations((prev) => [...prev, ...data.conversations]);
-      } else {
-        setConversations(data.conversations);
-      }
+      setConversations(data.conversations);
       setTotal(data.total);
-      setHasMore(data.has_more);
     } catch (err) {
       if (!isLatest()) return;
       console.error('Failed to load conversations:', err);
@@ -61,24 +59,33 @@ export default function ConversationBrowser() {
     }
   }, [claim]);
 
-  // Initial load
   useEffect(() => {
-    fetchConversations('');
-  }, [fetchConversations]);
+    fetchConversations('', 1, DEFAULT_PAGE_SIZE);
+    // Mount-only initial load — handlers below own all subsequent fetches.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  // Debounced search
   const handleQueryChange = useCallback((value: string) => {
     setQuery(value);
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => {
-      fetchConversations(value);
+      setPage(1);
+      fetchConversations(value, 1, pageSize);
     }, 300);
-  }, [fetchConversations]);
+  }, [fetchConversations, pageSize]);
 
-  const handleLoadMore = useCallback(() => {
-    if (loading || !hasMore) return;
-    fetchConversations(query, conversations.length, true);
-  }, [loading, hasMore, query, conversations.length, fetchConversations]);
+  const handlePageChange = useCallback((p: number) => {
+    setPage(p);
+    fetchConversations(query, p, pageSize);
+    scrollRef.current?.scrollTo({ top: 0 });
+  }, [fetchConversations, query, pageSize]);
+
+  const handlePageSizeChange = useCallback((size: number) => {
+    setPageSize(size);
+    setPage(1);
+    fetchConversations(query, 1, size);
+    scrollRef.current?.scrollTo({ top: 0 });
+  }, [fetchConversations, query]);
 
   const handleSelect = useCallback(async (id: string) => {
     setConversationBrowserVisible(false);
@@ -88,13 +95,17 @@ export default function ConversationBrowser() {
   const handleDelete = useCallback(async (id: string) => {
     try {
       await deleteConversation(id);
-      setConversations((prev) => prev.filter((c) => c.id !== id));
-      setTotal((prev) => prev - 1);
       removeConversation(id);
+      // Re-fetch current page so the empty slot fills from the next page;
+      // step back if we just emptied the last page.
+      const lastPage = Math.max(1, Math.ceil((total - 1) / pageSize));
+      const nextPage = Math.min(page, lastPage);
+      if (nextPage !== page) setPage(nextPage);
+      fetchConversations(query, nextPage, pageSize);
     } catch (err) {
       console.error('Failed to delete conversation:', err);
     }
-  }, [removeConversation]);
+  }, [removeConversation, total, page, pageSize, query, fetchConversations]);
 
   const handleClose = useCallback(() => {
     setConversationBrowserVisible(false);
@@ -131,16 +142,18 @@ export default function ConversationBrowser() {
     const ids = Array.from(selectedIds);
     if (ids.length === 0) return;
     const res = await bulkDeleteConversations(ids);
-    const deletedSet = new Set(res.deleted);
-    setConversations((prev) => prev.filter((c) => !deletedSet.has(c.id)));
-    setTotal((prev) => prev - res.deleted.length);
     for (const id of res.deleted) removeConversation(id);
     setConfirmBulkDelete(false);
     exitSelectionMode();
     if (res.failed.length > 0) {
       console.warn(`Bulk delete: ${res.failed.length} failed`, res.failed);
     }
-  }, [selectedIds, removeConversation, exitSelectionMode]);
+    // Re-fetch — total may have shifted enough to invalidate the current page.
+    const lastPage = Math.max(1, Math.ceil((total - res.deleted.length) / pageSize));
+    const nextPage = Math.min(page, lastPage);
+    if (nextPage !== page) setPage(nextPage);
+    fetchConversations(query, nextPage, pageSize);
+  }, [selectedIds, removeConversation, exitSelectionMode, total, page, pageSize, query, fetchConversations]);
 
   // Esc to exit selection mode (when no modal is open — modals own their own Esc)
   useEffect(() => {
@@ -183,8 +196,36 @@ export default function ConversationBrowser() {
       />
 
       {/* List */}
-      <div className="flex-1 overflow-y-auto px-4">
+      <div ref={scrollRef} className="flex-1 overflow-y-auto px-4">
         <div className="max-w-3xl mx-auto">
+        {selectionMode && (
+          <div className="mb-3 flex items-center gap-2 px-4 py-2.5 rounded-2xl border border-accent/40 bg-accent/5 dark:bg-accent/10">
+            <span className="text-sm text-text-secondary dark:text-text-secondary-dark">
+              已选 <span className="text-text-primary dark:text-text-primary-dark font-medium">{selectedCount}</span> 项
+            </span>
+            <button
+              onClick={selectAllOnPage}
+              disabled={allOnPageSelected || conversations.length === 0}
+              className="px-3 py-1 text-xs rounded-md border border-border dark:border-border-dark text-text-secondary dark:text-text-secondary-dark hover:bg-bg dark:hover:bg-bg-dark disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            >
+              全选当前页
+            </button>
+            <div className="flex-1" />
+            <button
+              onClick={exitSelectionMode}
+              className="px-3 py-1 text-xs rounded-md border border-border dark:border-border-dark text-text-secondary dark:text-text-secondary-dark hover:bg-bg dark:hover:bg-bg-dark transition-colors"
+            >
+              退出
+            </button>
+            <button
+              onClick={() => setConfirmBulkDelete(true)}
+              disabled={selectedCount === 0}
+              className={`${BUTTON_DANGER} rounded-md px-3 py-1 text-xs`}
+            >
+              删除 ({selectedCount})
+            </button>
+          </div>
+        )}
         {conversations.map((conv) => (
           <BrowserItem
             key={conv.id}
@@ -198,19 +239,10 @@ export default function ConversationBrowser() {
           />
         ))}
 
-        {loading && (
+        {loading && conversations.length === 0 && (
           <div className="py-4 text-center text-xs text-text-tertiary dark:text-text-tertiary-dark">
             Loading...
           </div>
-        )}
-
-        {hasMore && !loading && (
-          <button
-            onClick={handleLoadMore}
-            className="w-full py-2.5 text-sm text-text-secondary dark:text-text-secondary-dark rounded-lg hover:bg-panel/60 dark:hover:bg-panel-accent-dark/60 transition-colors"
-          >
-            显示更多
-          </button>
         )}
 
         {!loading && conversations.length === 0 && (
@@ -221,34 +253,19 @@ export default function ConversationBrowser() {
         </div>
       </div>
 
-      {/* Selection-mode bottom toolbar */}
-      {selectionMode && (
-        <div className="border-t border-border dark:border-border-dark bg-surface dark:bg-surface-dark px-4 py-3">
-          <div className="max-w-3xl mx-auto flex items-center gap-3">
-            <span className="text-sm text-text-secondary dark:text-text-secondary-dark">
-              已选 <span className="text-text-primary dark:text-text-primary-dark font-medium">{selectedCount}</span> 项
-            </span>
-            <button
-              onClick={selectAllOnPage}
-              disabled={allOnPageSelected || conversations.length === 0}
-              className="px-3 py-1.5 text-xs rounded-md border border-border dark:border-border-dark text-text-secondary dark:text-text-secondary-dark hover:bg-bg dark:hover:bg-bg-dark disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-            >
-              全选当前页
-            </button>
-            <div className="flex-1" />
-            <button
-              onClick={exitSelectionMode}
-              className="px-3 py-1.5 text-xs rounded-md border border-border dark:border-border-dark text-text-secondary dark:text-text-secondary-dark hover:bg-bg dark:hover:bg-bg-dark transition-colors"
-            >
-              退出
-            </button>
-            <button
-              onClick={() => setConfirmBulkDelete(true)}
-              disabled={selectedCount === 0}
-              className={`${BUTTON_DANGER} rounded-md px-4 py-1.5 text-xs`}
-            >
-              删除 ({selectedCount})
-            </button>
+      {total > 0 && (
+        <div className="px-4 pt-2 pb-4">
+          <div className="max-w-3xl mx-auto">
+            <div className="bg-surface dark:bg-surface-dark border border-border dark:border-border-dark rounded-2xl shadow-float px-4">
+              <Pagination
+                page={page}
+                pageSize={pageSize}
+                total={total}
+                onPageChange={handlePageChange}
+                onPageSizeChange={handlePageSizeChange}
+                disabled={loading}
+              />
+            </div>
           </div>
         </div>
       )}
