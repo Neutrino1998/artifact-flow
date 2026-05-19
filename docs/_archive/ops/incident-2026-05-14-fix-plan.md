@@ -23,7 +23,7 @@
 
 **小版本迭代打包**:整套 fix plan 同一个 release bundle,分两批 ship:
 - **第一批(已合 `main`)**:PR-1(算法根治)+ PR-3(fencing 事件持久化),走"立即修根因"的 release tag
-- **第二批(部分已合 `main`)**:PR-obs-lite ✅ 已合;PR-forensics-bundle ✅ 已合;PR-tz-unify ✅ 已合;PR-5 ✅ 代码侧已合(fix `62771b6`,缺一次发版);P3 文档 PR ✅ 已合。同一个"事故后加固完整体"release tag,**一起 ship**——观测框架 / 取证工具 / 时区统一 / 前端镜像 / runbook + 调参手册,所有部件齐了才算闭环
+- **第二批(全部已合 `main`)**:PR-obs-lite ✅ 已合;PR-forensics-bundle ✅ 已合;PR-tz-unify ✅ 已合;PR-5 ✅ 代码侧已合(fix `62771b6`,缺一次发版);资源限额加固 ✅ 已合(chore `d7f26f8`:docker-logs cap + frontend/postgres mem_limit;**ship 时需要一次性 infra force-recreate**,见下方"第二批 ship 步骤");P3 文档 PR ✅ 已合(`500e13c`)。同一个"事故后加固完整体"release tag,**一起 ship**——观测框架 / 取证工具 / 时区统一 / 前端镜像 / 资源限额 / runbook + 调参手册,所有部件齐了才算闭环
 
 PR 之间逻辑独立可分别回滚,但**默认一捆发**:避免 "obs-lite 上线后 tuning 手册还没写" / "runbook 提了 py-spy 但内网还没装" 这种部分到位的尴尬态。
 
@@ -863,6 +863,61 @@ PR-obs-lite 的 `observability_report.py` 一开始把 threshold 写成 naive UT
 - 何时调 `OBS_JSONL_MAX_MB` / `OBS_JSONL_BACKUP_COUNT`(看实际占用)
 
 放 `docs/guides/` 跟 `add-tool.md` / `add-agent.md` 同位置,语义"日常操作型 how-to"匹配。
+
+---
+
+## 第二批 bundle ship 步骤(reviewer 反馈,2026-05-19)
+
+**背景**:`d7f26f8`(资源限额加固)给所有 5 个服务加了 `logging`,给 frontend / postgres 加了 `mem_limit`。Docker 的 `LogConfig` / `Memory` 是容器创建时固化的 `HostConfig`,**`docker restart` 不重建容器、新 compose 配置不会同步**。现行升级路径 `deploy/scripts/pause.sh` + `resume.sh:86` 只 stop / recreate backend + frontend(`pause.sh` 注释明确"`postgres / redis 仍在运行`"),按设计**保留 PG / Redis / nginx 运行**(维护页驻留 + DB 热数据)。
+
+**结论**:按现行 SOP 升级第二批,**nginx / postgres / redis 的新 HostConfig 永远不生效**,docker-logs 仍无上限,PG 仍无 mem_limit tripwire。
+
+**修复方案**(不动 pause/resume 设计,加一次性 ship 步骤):
+
+```bash
+# 在 pause.sh 与 resume.sh 之间执行(内网)
+docker compose -f deploy/docker-compose.intranet.yml --profile infra \
+    up -d --force-recreate postgres redis nginx
+
+# prod 路径同理
+docker compose -f docker-compose.prod.yml --profile infra \
+    up -d --force-recreate postgres redis nginx
+```
+
+**时机选择(为什么塞在维护窗口内)**:
+- backend / frontend 已 stopped → PG / Redis 无活跃应用连接,recreate 干净
+- 维护页期间无用户流量,nginx 重启可吸收
+- 不在 pause/resume 脚本里固化,因为 pause/resume 是为后续日常热更新设计的;**本次 force-recreate 是 d7f26f8 这一次 config 变更专属的一次性步骤**,ship 完成后即结束,后续升级回归正常 pause/resume 流程
+
+**数据安全**:`postgres_data` / `redis_data` 是 named volume(声明在 compose `volumes:` 顶层),`--force-recreate` 只销毁容器对象、**不动卷**。recreate 后:
+- PG 走 crash recovery 启动(同 host 重启路径,5–15s 视未 checkpoint WAL 量)
+- Redis 内存清空 —— 但 lease / interrupt / cancel / queue / stream 全是控制状态,应用层重连自愈
+- 只有 `docker compose down -v` 或 `docker volume rm` 才会真正删数据
+
+**验证**(recreate 完毕后,resume 之前):
+
+```bash
+# 1. 新 HostConfig 已生效(logging + mem_limit)
+for s in nginx backend frontend postgres redis; do
+  echo "--- deploy-${s}-1 ---"
+  docker inspect deploy-${s}-1 --format \
+    '{{.HostConfig.LogConfig.Type}} {{.HostConfig.LogConfig.Config}} mem={{.HostConfig.Memory}}'
+done
+# 期望:LogConfig.Type=json-file,Config 含 max-size:100m / max-file:3;
+# Memory(单位字节):nginx=0 / backend=2147483648 / frontend=1073741824 /
+# postgres=2147483648 / redis=805306368
+
+# 2. PG 卷未动(Mountpoint 应与 recreate 前一致)
+docker volume inspect deploy_postgres_data --format '{{.Mountpoint}}'
+
+# 3. PG / Redis healthy 后再 resume
+docker compose -f deploy/docker-compose.intranet.yml --profile infra ps
+```
+
+ship 时一并检查的其它项(不属于 d7f26f8 范围,但同窗口可顺手核对):
+1. nginx 镜像版本是否为最新(之前升级过 `nginx:1.30.1-alpine`)
+2. `deploy/.env` 中关键调参未被覆盖丢失:`ARTIFACTFLOW_MAX_CONCURRENT_TASKS` / `ARTIFACTFLOW_REDIS_MAX_CONNECTIONS` / `ARTIFACTFLOW_DATABASE_POOL_SIZE` / `ARTIFACTFLOW_DATABASE_MAX_OVERFLOW`
+3. PR-5 fix `62771b6` 已通过新 frontend 镜像生效:`docker exec deploy-frontend-1 sh -c 'echo $HOSTNAME'` 应输出 `0.0.0.0`(而非容器短 ID);`docker exec deploy-frontend-1 netstat -tlnp` 应显示 `0.0.0.0:3000 LISTEN next-server`(全网卡,而非旧镜像那种只绑 eth0 IP 如 `172.21.0.5:3000`)
 
 ---
 
