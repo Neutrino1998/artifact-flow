@@ -438,12 +438,17 @@ $ANALYST_FOOTER
     docker load -i tmp/artifactflow-app-${VERSION}.tar.gz
     tar xzf tmp/artifactflow-deploy-${VERSION}.tar.gz
     tar xzf tmp/artifactflow-config-${VERSION}.tar.gz
+    # ─── compose infra changes (rare) ────────────────────────────
+    # If this version changed compose \`nginx\` / \`postgres\` / \`redis\` service
+    # blocks (image / logging / mem_limit / volumes / ports / cap_add / command),
+    # or .env vars consumed by them (POSTGRES_*, AF_HTTP_PORT), resume.sh won't
+    # propagate the change — see docs/deployment.md → 滚动更新已有部署 →
+    # "涉及 compose infra 服务 config 变更的升级". Two-step due to nginx static
+    # upstream resolution:
+    #   - nginx / AF_HTTP_PORT: recreate BEFORE pause.sh below
+    #   - PG/Redis / POSTGRES_*: recreate between pause and resume
+    # Most releases skip this entirely.
+    # ─────────────────────────────────────────────────────────────
     ./deploy/scripts/pause.sh "升级 ${VERSION}"
-    # If this version changed compose infra (postgres / redis / nginx) service
-    # config — image, logging, mem_limit, volumes, ports, cap_add, command, etc.
-    # — insert a one-shot \`up -d --force-recreate --no-deps <services>\` here.
-    # \`resume.sh\` only ups backend / frontend, so infra HostConfig changes
-    # otherwise never take effect. Most releases skip this step. Full SOP:
-    # docs/deployment.md → 滚动更新已有部署 → "涉及 compose infra 服务 config 变更的升级".
     ./deploy/scripts/resume.sh ${VERSION}
 EOF

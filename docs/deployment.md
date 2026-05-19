@@ -233,12 +233,23 @@ docker load -i tmp/artifactflow-app-1.0.1.tar.gz
 > ```
 > 之后 `pause.sh` 写的 flag 文件才能被 nginx 看到。后续升级直接 pause/resume 即可，不再需要 force-recreate。
 
-> **涉及 compose infra 服务 config 变更的升级（罕见，按需）：** 多数升级只动 backend/frontend 镜像和 `.env`，`pause/resume` 已覆盖（resume.sh `up backend frontend` → compose 自动 diff config-hash → 改了就 recreate）。但若本版本动了 compose 文件里 `postgres` / `redis` / `nginx` 服务块的 `image` / `logging` / `mem_limit` / `volumes` / `ports` / `cap_add` / `command` 等字段（典型例：commit `d7f26f8` 给所有 infra 加 `logging` block + frontend/postgres `mem_limit`），`resume.sh` 不触碰 infra 容器，新配置永远不生效。在 `pause` 与 `resume` 之间针对实际变化的服务插入一步：
+> **涉及 compose infra config 变更的升级（罕见）：** 多数升级只改 backend / frontend 镜像和它们用到的 `ARTIFACTFLOW_*` env，`pause/resume` 已覆盖（resume.sh `up backend frontend` → compose 自动 diff config-hash → 改了就 recreate）。但若本版本动了 `postgres` / `redis` / `nginx` 服务块的 HostConfig 字段（`image` / `logging` / `mem_limit` / `volumes` / `ports` / `cap_add` / `command`，典型例：commit `d7f26f8`），或 `.env` 里 infra 服务直接引用的变量（`POSTGRES_*` 用于 postgres `environment:`，`AF_HTTP_PORT` 用于 nginx `ports:`），resume.sh 不触碰 infra 容器，新配置永远不生效。需要按下面**两个时机**分开做（nginx 与 PG/Redis 时机不同，见下方说明）：
+>
+> **(a) nginx 块或 `AF_HTTP_PORT` 变了 → 在 `pause.sh` 之前 recreate**：
 > ```bash
 > docker compose -f deploy/docker-compose.intranet.yml --profile infra \
->     up -d --force-recreate --no-deps <实际变了的服务列表>
+>     up -d --force-recreate --no-deps nginx
 > ```
-> `--no-deps` 是关键：不加的话 compose 会顺手把 backend/frontend 也起来（nginx `depends_on` 它俩），违反 pause 的「无活跃应用连接」前提，而且会用 `${AF_VERSION:-latest}` 拉镜像（可能根本没有 `latest` tag）。数据安全：`postgres_data` / `redis_data` / `artifactflow_data` 是 named volume，recreate 只销毁容器、不动卷；PG 走 crash recovery 启动（5–15s），Redis 控制状态全是 TTL key 应用层自愈，nginx 无状态。完整原理、验证命令、bug ② 现场对比见 `docs/_archive/ops/incident-2026-05-14-fix-plan.md` 的「第二批 bundle ship 步骤」段。
+> 接受 1–2 秒 nginx 重启的连接 RST（量级跟任意一次 nginx restart 一致，可由维护窗口公告吸收）。**为什么不能放到 pause 之后**：`deploy/nginx.conf:1-7` 用静态 `upstream backend { server backend:8000; }`，OSS nginx 启动时**一次性**解析 upstream 名称（`resolver 127.0.0.11` 只对 `proxy_pass http://$variable` 这种变量写法生效；静态 upstream 块的运行时重解析需要 nginx-plus 的 `resolve` flag，OSS 没有）。pause 后 backend/frontend 已 stopped，从 Docker DNS 消失 → nginx 启动时 upstream 解析失败 → nginx 进程退出 → 维护页连同 nginx 一起掉。
+>
+> **(b) postgres / redis 块（或 `POSTGRES_*` env）变了 → 在 `pause` 与 `resume` 之间 recreate**：
+> ```bash
+> docker compose -f deploy/docker-compose.intranet.yml --profile infra \
+>     up -d --force-recreate --no-deps <postgres redis 中实际变了的>
+> ```
+> 此时 backend/frontend 已 stop，无活跃应用连接，recreate 干净。
+>
+> 两条都必须 `--no-deps`：不加 compose 会顺手把 backend/frontend 也起来（nginx `depends_on` 它俩），违反前提，且会用 `${AF_VERSION:-latest}` 拉镜像（内网通常没有 `latest` tag）。数据安全：`postgres_data` / `redis_data` / `artifactflow_data` 是 named volume，recreate 只销毁容器、不动卷；PG 走 crash recovery 启动（5–15s），Redis 控制状态全是 TTL key 应用层自愈，nginx 无状态。完整原理、验证命令、`.env` 各类变量的归属判断见 `docs/_archive/ops/incident-2026-05-14-fix-plan.md` 的「第二批 bundle ship 步骤」段。
 
 ### 运行时配置变更（无需 rebuild / 重新传镜像）
 

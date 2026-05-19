@@ -874,27 +874,49 @@ PR-obs-lite 的 `observability_report.py` 一开始把 threshold 写成 naive UT
 
 **修复方案**(不动 pause/resume 设计,加一次性 ship 步骤;SOP 入口同时落地到 `docs/deployment.md` 滚动更新段的 callout):
 
-```bash
-# 在 pause.sh 与 resume.sh 之间执行(内网)
-docker compose -f deploy/docker-compose.intranet.yml --profile infra \
-    up -d --force-recreate --no-deps postgres redis nginx
+`d7f26f8` 同时改了 nginx + backend + frontend + postgres 的 HostConfig,**但 nginx 与 PG/Redis 必须在不同时机 recreate**(详见下方"nginx 时机不对称"):
 
-# prod 路径同理
-docker compose -f docker-compose.prod.yml --profile infra \
-    up -d --force-recreate --no-deps postgres redis nginx
+```bash
+# (1) nginx —— 在 pause.sh 之前 recreate(此时 backend/frontend 还在 DNS 里)
+docker compose -f deploy/docker-compose.intranet.yml --profile infra \
+    up -d --force-recreate --no-deps nginx
+
+# (2) 走常规 roll-update 序列
+./deploy/scripts/pause.sh "升级 ${VERSION}"
+# docker load + tar xzf ...(按 release.sh 打印的 recipe 来)
+
+# (3) postgres / redis —— pause 与 resume 之间 recreate(无活跃应用连接)
+docker compose -f deploy/docker-compose.intranet.yml --profile infra \
+    up -d --force-recreate --no-deps postgres redis
+
+# (4) resume
+./deploy/scripts/resume.sh ${VERSION}
+
+# prod 路径(Mode 2A)同理,把 compose 文件换成 docker-compose.prod.yml
 ```
+
+**nginx 时机不对称(reviewer round-3 反馈)**:`deploy/nginx.conf:1-7` 用静态 `upstream backend { server backend:8000; }` / `upstream frontend { server frontend:3000; }`。OSS nginx 对这种写法**启动时一次性解析 upstream 名称**(`nginx.conf:20` 的 `resolver 127.0.0.11 valid=10s` 只对 `proxy_pass http://$variable` 变量写法生效;静态 upstream 块的运行时重解析需要 nginx-plus 的 `resolve` flag,OSS 没有)。pause.sh 把 backend/frontend stop 之后,这两个 service name 从 Docker embedded DNS 消失(stopped 容器没 IP)。此时再 recreate nginx → 启动时 upstream 解析失败("host not found in upstream `backend`")→ nginx 进程退出 → **维护页连同 nginx 一起掉**。所以 nginx 必须**在 pause 之前** recreate,代价是 1–2 秒 nginx 重启的连接 RST,跟任意一次 nginx restart 同等量级,可由维护窗口公告吸收。根治这一不对称需要把 nginx.conf 改成 `set $upstream backend:8000; proxy_pass http://$upstream` 的变量写法(让 `resolver` 真正接管运行时解析),scope 略大且改完要 reload 验证,暂未做,只在 SOP 上规避。
 
 **`--no-deps` 是关键**(reviewer round-2 反馈):intranet compose 里 nginx `depends_on: backend (service_healthy) + frontend (service_healthy)`。`docker compose up <svc>` **默认会启动该服务的依赖**(深度优先满足),所以不加 `--no-deps` 会:
 - 顺带把 stopped 的 backend / frontend 一并拉起来,违反 pause 的"无活跃应用连接"前提
 - 拉起时 fallback 到 `${AF_VERSION:-latest}`,内网 `docker load` 进来的镜像通常带日期 tag(如 `:20260520`),**没有 `latest` alias** → 直接 image-not-found 失败
 - 即使有 `latest`,也可能指向旧版本
 
-加 `--no-deps` 后 compose 跳过依赖图,只 recreate 指定的三个 infra 服务。nginx 容器本身无 healthcheck(intranet compose 验证过),启动不要求 backend/frontend 在跑;nginx.conf 的维护页路由不依赖 upstream,所以 maintenance window 期间能正常服务。
+加 `--no-deps` 后 compose 跳过依赖图,**只** recreate 指定的服务,不联动 backend/frontend。注意 `--no-deps` 不解决 nginx 自己的 upstream DNS 解析问题(那是 nginx 启动逻辑,不是 compose 依赖图),所以 nginx 还得靠"pause 之前"的时机来保证 DNS 里有 backend/frontend。
 
-**时机选择(为什么塞在维护窗口内)**:
-- backend / frontend 已 stopped → PG / Redis 无活跃应用连接,recreate 干净
-- 维护页期间无用户流量,nginx 重启可吸收
+**时机选择**:
+- **nginx — pause 之前**:理由见上面"nginx 时机不对称"
+- **postgres / redis — pause 与 resume 之间**:backend/frontend 已 stopped → 无活跃应用连接,recreate 干净;PG 走 crash recovery 启动(5–15s 视 WAL 量),Redis 控制状态 TTL 自愈
 - 不在 pause/resume 脚本里固化,因为 pause/resume 是为后续日常热更新设计的;**本次 force-recreate 是 d7f26f8 这一次 config 变更专属的一次性步骤**,ship 完成后即结束,后续升级回归正常 pause/resume 流程
+
+**.env 变量的归属(reviewer round-3 反馈)**:`.env` 变了不一定都走 infra recreate,看变量给谁用:
+
+| 变量 | 谁用 | 走哪条路径 |
+|---|---|---|
+| `ARTIFACTFLOW_*`(JWT / REDIS_URL / DATABASE_POOL_SIZE / MAX_CONCURRENT_TASKS / REDIS_KEY_PREFIX 等) | backend `env_file: .env` | ✅ pause/resume 覆盖(resume up backend → compose 检测 env_file 变化 → recreate backend) |
+| `AF_VERSION` | backend/frontend `image:` tag interpolation | ✅ pause/resume 覆盖(resume.sh 显式传 `AF_VERSION=$VERSION`) |
+| `POSTGRES_DB` / `POSTGRES_USER` / `POSTGRES_PASSWORD` | postgres `environment:` 直接 interpolation | ❌ 需要 step (3) recreate postgres |
+| `AF_HTTP_PORT` | nginx `ports:` interpolation | ❌ 需要 step (1) recreate nginx |
 
 **数据安全**:`postgres_data` / `redis_data` 是 named volume(声明在 compose `volumes:` 顶层),`--force-recreate` 只销毁容器对象、**不动卷**。recreate 后:
 - PG 走 crash recovery 启动(同 host 重启路径,5–15s 视未 checkpoint WAL 量)
