@@ -1,6 +1,5 @@
 'use client';
 
-import { useState } from 'react';
 import type { DepartmentTreeNode } from '@/types';
 
 interface DepartmentTreeViewProps {
@@ -8,6 +7,13 @@ interface DepartmentTreeViewProps {
   selectedId?: string | null;
   onSelect: (deptId: string) => void;
   onCreateChild: (parentId: string) => void;
+  /**
+   * Set of node ids that should render collapsed. Default = expanded. Owned by
+   * the parent so state survives switching to the edit/create inner view (which
+   * unmounts this tree).
+   */
+  collapsedIds: ReadonlySet<string>;
+  onToggleCollapsed: (deptId: string) => void;
 }
 
 export default function DepartmentTreeView({
@@ -15,6 +21,8 @@ export default function DepartmentTreeView({
   selectedId,
   onSelect,
   onCreateChild,
+  collapsedIds,
+  onToggleCollapsed,
 }: DepartmentTreeViewProps) {
   if (nodes.length === 0) {
     return (
@@ -33,6 +41,8 @@ export default function DepartmentTreeView({
           selectedId={selectedId ?? null}
           onSelect={onSelect}
           onCreateChild={onCreateChild}
+          collapsedIds={collapsedIds}
+          onToggleCollapsed={onToggleCollapsed}
         />
       ))}
     </ul>
@@ -45,14 +55,18 @@ function TreeNodeItem({
   selectedId,
   onSelect,
   onCreateChild,
+  collapsedIds,
+  onToggleCollapsed,
 }: {
   node: DepartmentTreeNode;
   depth: number;
   selectedId: string | null;
   onSelect: (deptId: string) => void;
   onCreateChild: (parentId: string) => void;
+  collapsedIds: ReadonlySet<string>;
+  onToggleCollapsed: (deptId: string) => void;
 }) {
-  const [expanded, setExpanded] = useState(true);
+  const expanded = !collapsedIds.has(node.id);
   const hasChildren = (node.children ?? []).length > 0;
   const isSelected = node.id === selectedId;
 
@@ -77,7 +91,7 @@ function TreeNodeItem({
       >
         {hasChildren ? (
           <button
-            onClick={(e) => { e.stopPropagation(); setExpanded((v) => !v); }}
+            onClick={(e) => { e.stopPropagation(); onToggleCollapsed(node.id); }}
             className="flex-shrink-0 w-4 h-4 flex items-center justify-center text-text-tertiary dark:text-text-tertiary-dark hover:text-text-secondary"
             aria-label={expanded ? '折叠' : '展开'}
           >
@@ -116,6 +130,8 @@ function TreeNodeItem({
               selectedId={selectedId}
               onSelect={onSelect}
               onCreateChild={onCreateChild}
+              collapsedIds={collapsedIds}
+              onToggleCollapsed={onToggleCollapsed}
             />
           ))}
         </ul>

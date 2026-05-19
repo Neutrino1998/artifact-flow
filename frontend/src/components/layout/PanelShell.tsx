@@ -24,7 +24,7 @@ interface PanelShellProps {
  */
 export default function PanelShell({ header, footer, children }: PanelShellProps) {
   return (
-    <div className="flex-1 flex flex-col min-h-0 bg-chat dark:bg-chat-dark">
+    <div className="h-full flex flex-col min-h-0 bg-chat dark:bg-chat-dark">
       {header && (
         <div className="px-6 pt-5 pb-3 border-b border-border dark:border-border-dark">
           {header}
