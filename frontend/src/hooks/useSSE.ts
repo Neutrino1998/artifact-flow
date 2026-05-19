@@ -56,7 +56,7 @@ export function useSSE() {
   // Conversation store actions
   const setCurrent = useConversationStore((s) => s.setCurrent);
   const setConversations = useConversationStore((s) => s.setConversations);
-  const markConversationActive = useConversationStore((s) => s.markConversationActive);
+  const clearConversationActiveIfMatch = useConversationStore((s) => s.clearConversationActiveIfMatch);
 
   // Artifact store
   const setArtifactSessionId = useArtifactStore((s) => s.setSessionId);
@@ -93,41 +93,26 @@ export function useSSE() {
       // resurrect the panel after stream end. Costs nothing if there are
       // no fetches outstanding.
       bumpArtifactFetchGen();
-      // Instant sidebar clear: terminal event already signaled "done", so flip
-      // the cached is_active immediately. The backend's lease release races
-      // the terminal SSE event (lease is released in execution_runner's finally
-      // block AFTER push_event), so the list refresh below may still report
-      // is_active=true and overwrite this. We re-apply after setConversations
-      // for a defensive final write.
-      markConversationActive(conversationId, false);
+      // Compare-and-clear the sidebar dot for *this* terminal's message_id
+      // only. If the user already kicked off a new turn on the same conv,
+      // its sendMessage() has set active_message_id to the new id, and this
+      // call is a no-op — the new turn's mark survives untouched. The
+      // backend list refresh below will eventually sync truth either way.
+      if (terminalMessageId) {
+        clearConversationActiveIfMatch(conversationId, terminalMessageId);
+      }
       try {
         const [detail, list] = await Promise.all([
           api.getConversation(conversationId, { force: true }),
           api.listConversations(20, 0),
         ]);
         // Sidebar list refresh is harmless cross-conversation, so always apply.
+        // The backend list endpoint reads active_message_id from the lease
+        // store, which is the single source of truth for execution state, so
+        // setConversations(...) restores the authoritative view (covers cross-
+        // tab/device + the race window where this tab's optimistic write was
+        // staler than the server view). No defensive second write needed.
         setConversations(list.conversations, list.total, list.has_more);
-        // Authoritative final write for this conv's is_active. Two reasons we
-        // can't trust setConversations alone:
-        //   1. Backend lease release races push_event in execution_runner's
-        //      finally block — list may still report is_active=true even
-        //      though the engine just emitted COMPLETE/CANCELLED/ERROR.
-        //   2. If the list GET was sent BEFORE the user kicked off a new
-        //      turn on this same conv (fast-click + slow refresh), the GET
-        //      snapshot has is_active=false; meanwhile sendMessage has
-        //      already markActive(true)'d for the new message_id, which
-        //      setConversations above just clobbered.
-        // streamStore.messageId distinguishes the two: endStream() leaves
-        // messageId alone (matches the just-terminal'd turn); a subsequent
-        // connect() → startStream() replaces it. So if the stream is now
-        // attached to a *different* message_id on the *same* conv, a newer
-        // turn has taken over → assert true; otherwise → assert false.
-        const stream = useStreamStore.getState();
-        const newTurnOnSameConv =
-          stream.isStreaming &&
-          stream.conversationId === conversationId &&
-          stream.messageId !== terminalMessageId;
-        markConversationActive(conversationId, newTurnOnSameConv);
 
         // Everything below mutates state that belongs to "the conversation
         // the user is on". A nav-gen change means they aren't on this conv
@@ -177,7 +162,7 @@ export function useSSE() {
         console.error('Failed to refresh after complete:', err);
       }
     },
-    [setCurrent, setConversations, markConversationActive, clearPendingUpdates, setArtifactCurrent, setArtifacts, setArtifactSessionId, setArtifactVersions, setSelectedVersion]
+    [setCurrent, setConversations, clearConversationActiveIfMatch, clearPendingUpdates, setArtifactCurrent, setArtifacts, setArtifactSessionId, setArtifactVersions, setSelectedVersion]
   );
 
   const handleEvent = useCallback(

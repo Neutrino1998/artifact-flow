@@ -89,6 +89,19 @@ class TestLease:
         msg = await store.get_leased_message_id("test_conv_2")
         assert msg == "test_msg_a"
 
+    async def test_list_active_executions_pairs_conv_with_msg(self, store):
+        await store.try_acquire_lease("test_conv_listA", "msg-A")
+        await store.try_acquire_lease("test_conv_listB", "msg-B")
+        active = await store.list_active_executions()
+        assert active.get("test_conv_listA") == "msg-A"
+        assert active.get("test_conv_listB") == "msg-B"
+
+        await store.release_lease("test_conv_listA", "msg-A")
+        active = await store.list_active_executions()
+        assert "test_conv_listA" not in active
+        assert active.get("test_conv_listB") == "msg-B"
+        await store.release_lease("test_conv_listB", "msg-B")
+
     async def test_ttl_expiry(self, store, redis_client):
         """Lease should expire after TTL."""
         await store.try_acquire_lease("test_conv_3", "test_msg_ttl")

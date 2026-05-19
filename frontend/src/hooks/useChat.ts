@@ -17,7 +17,7 @@ export function useChat() {
   const setCurrent = useConversationStore((s) => s.setCurrent);
   const setCurrentLoading = useConversationStore((s) => s.setCurrentLoading);
   const setConversations = useConversationStore((s) => s.setConversations);
-  const markConversationActive = useConversationStore((s) => s.markConversationActive);
+  const setConversationActiveMessage = useConversationStore((s) => s.setConversationActiveMessage);
   const setPendingUserMessage = useStreamStore((s) => s.setPendingUserMessage);
   const setStreamParentId = useStreamStore((s) => s.setStreamParentId);
   const setError = useStreamStore((s) => s.setError);
@@ -75,12 +75,14 @@ export function useChat() {
             setConversations(data.conversations, data.total, data.has_more);
           });
         } else {
-          // Existing conv: optimistically flip the cached is_active so the
-          // sidebar running-indicator persists across nav. Cleared by
-          // refreshAfterComplete (COMPLETE/CANCELLED/ERROR re-fetches the list).
-          // For new convs the list refresh above already brings is_active=true
+          // Existing conv: optimistically write the cached active_message_id
+          // so the sidebar dot lights up without waiting for the next list
+          // refresh. Cleared by refreshAfterComplete via compare-and-clear:
+          // only the terminal carrying THIS message_id can clear it, so a
+          // late terminal from a previous turn cannot wipe out this mark.
+          // For new convs the list refresh above already brings the field
           // from the backend response, so no double-write needed.
-          markConversationActive(res.conversation_id, true);
+          setConversationActiveMessage(res.conversation_id, res.message_id);
         }
 
         if (myNavGen !== getNavGen()) return;
@@ -99,7 +101,7 @@ export function useChat() {
         setError((err as Error).message);
       }
     },
-    [current?.id, lastMessageId, setPendingUserMessage, setStreamParentId, connect, setError, setConversations, markConversationActive]
+    [current?.id, lastMessageId, setPendingUserMessage, setStreamParentId, connect, setError, setConversations, setConversationActiveMessage]
   );
 
   // Switch to an existing conversation: tear down the previous conversation's
@@ -127,10 +129,11 @@ export function useChat() {
       setCurrentLoading(true);
       // Fire-and-forget sidebar refresh: the previous conv's SSE was just
       // disconnected, so any terminal events emitted while we're away will
-      // not reach this tab — the cached is_active for that conv would stay
-      // stuck. Re-fetching the list on every nav is the cheap recovery path
-      // (covers cross-tab/device too). Gated by nav-gen so a stale response
-      // can't overwrite a newer switch's data.
+      // not reach this tab — the cached active_message_id for that conv
+      // would stay stuck. Re-fetching the list on every nav is the cheap
+      // recovery path (covers cross-tab/device too) — the backend lease
+      // store is authoritative, so the refresh restores truth. Gated by
+      // nav-gen so a stale response can't overwrite a newer switch's data.
       api.listConversations(20, 0).then((data) => {
         if (myGen === getNavGen()) {
           setConversations(data.conversations, data.total, data.has_more);

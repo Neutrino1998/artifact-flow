@@ -239,10 +239,13 @@ async def list_conversations(
         limit=limit, offset=offset, user_id=user_id, title_query=title_query
     )
 
-    # 同 admin observability:lease 是"运行中"的单一事实源,跟列表求交集
-    # 即可标记。RuntimeStore 不持有 user_id,但返回的 conv_id 与本用户列表
-    # 求交后天然只命中当前用户自己的会话。
-    active_conv_ids = set(await runner.store.list_active_conversations())
+    # lease 是"运行中"的单一事实源。需要返回 message_id(不是 bool)是因为
+    # 前端要用它做 compare-and-clear:terminal SSE 携带 message_id,缓存
+    # 端持有 active_message_id,只有两者相等才清。bool 模式下旧 turn 的
+    # terminal 会误清新 turn 的指示点(详见 ConversationSummary 注释)。
+    # RuntimeStore 不持有 user_id,但返回的 conv_id 与本用户列表求交后天
+    # 然只命中当前用户自己的会话。
+    active_executions = await runner.store.list_active_executions()
 
     return ConversationListResponse(
         conversations=[
@@ -252,7 +255,7 @@ async def list_conversations(
                 message_count=conv.get("message_count", 0),
                 created_at=datetime.fromisoformat(conv["created_at"]),
                 updated_at=datetime.fromisoformat(conv["updated_at"]),
-                is_active=conv["conversation_id"] in active_conv_ids,
+                active_message_id=active_executions.get(conv["conversation_id"]),
             )
             for conv in conversations
         ],

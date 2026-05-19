@@ -1527,11 +1527,10 @@ export interface components {
              */
             updated_at: string;
             /**
-             * Is Active
-             * @description Whether an execution is currently running for this conversation
-             * @default false
+             * Active Message Id
+             * @description The message_id of the currently-running execution on this conversation, or null if no execution is in flight. Carries execution identity (not just a boolean) so the frontend can compare-and-clear on terminal events without an old turn's completion clobbering a freshly-started new turn's indicator.
              */
-            is_active: boolean;
+            active_message_id: string | null;
         };
         /**
          * CreateDepartmentRequest

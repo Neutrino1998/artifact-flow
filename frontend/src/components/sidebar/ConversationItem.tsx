@@ -68,7 +68,7 @@ function ConversationItem({ conversation, isActive, onSelect }: ConversationItem
         onMouseLeave={() => { if (!menuOpen) setShowMenu(false); }}
       >
         <div className={`flex items-center gap-1.5 font-medium text-text-primary dark:text-text-primary-dark ${showMenu || menuOpen ? 'pr-7' : ''}`}>
-          {conversation.is_active && (
+          {conversation.active_message_id && (
             <span
               className="inline-block w-2 h-2 rounded-full bg-orange-500 flex-shrink-0"
               title="运行中"

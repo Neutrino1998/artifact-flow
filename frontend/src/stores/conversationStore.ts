@@ -31,9 +31,14 @@ interface ConversationState {
   setActiveBranch: (messageId: string | null) => void;
   updateMessages: (messages: MessageResponse[]) => void;
   removeConversation: (id: string) => void;
-  /** Flip is_active on a single cached conv. Used to drive the sidebar
-   *  running-indicator without waiting for the next list refresh. */
-  markConversationActive: (id: string, active: boolean) => void;
+  /** Optimistically set the cached active_message_id for a conv. Called by
+   *  sendMessage after the server responds with a fresh message_id so the
+   *  sidebar dot lights up without waiting for the next list refresh. */
+  setConversationActiveMessage: (id: string, messageId: string) => void;
+  /** Compare-and-clear the cached active_message_id. Only clears when the
+   *  cached id equals terminalMessageId, so an old turn's terminal event
+   *  cannot wipe out a newer turn's optimistic mark. */
+  clearConversationActiveIfMatch: (id: string, terminalMessageId: string) => void;
   reset: () => void;
 }
 
@@ -104,13 +109,26 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
       current: s.current?.id === id ? null : s.current,
     })),
 
-  markConversationActive: (id, active) =>
+  setConversationActiveMessage: (id, messageId) =>
     set((s) => {
       const idx = s.conversations.findIndex((c) => c.id === id);
       if (idx === -1) return s;
-      if (s.conversations[idx].is_active === active) return s;
+      if (s.conversations[idx].active_message_id === messageId) return s;
       const next = [...s.conversations];
-      next[idx] = { ...next[idx], is_active: active };
+      next[idx] = { ...next[idx], active_message_id: messageId };
+      return { conversations: next };
+    }),
+
+  clearConversationActiveIfMatch: (id, terminalMessageId) =>
+    set((s) => {
+      const idx = s.conversations.findIndex((c) => c.id === id);
+      if (idx === -1) return s;
+      // Compare-and-clear: only clear when the cached id matches the terminal.
+      // If a new turn has already optimistically replaced active_message_id,
+      // the old terminal is a no-op.
+      if (s.conversations[idx].active_message_id !== terminalMessageId) return s;
+      const next = [...s.conversations];
+      next[idx] = { ...next[idx], active_message_id: null };
       return { conversations: next };
     }),
 
