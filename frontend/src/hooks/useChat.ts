@@ -153,22 +153,31 @@ export function useChat() {
         if (myGen !== getNavGen()) return;
         setCurrent(detail);
         reconnectIfActive(id);
-        // Auto-open the artifact panel if this conversation has any artifacts.
-        // Single-shot on switch: only fires here, so once the user closes the
-        // panel it stays closed for the remainder of this conversation visit.
-        // refreshArtifactList carries its own gen + session-stamp guard, so
-        // ArtifactPanel's mount effect (if it was already visible) and this
-        // call resolve in deterministic latest-wins order without overwrite.
-        await refreshArtifactList(
+        // Auto-open the artifact panel if this conversation has artifacts.
+        // Fire-and-forget so a slow / large artifact list does not delay
+        // clearing `currentLoading` (the chat panel must surface as soon
+        // as the conversation detail is in). refreshArtifactList carries
+        // its own gen + session-stamp guard, so ArtifactPanel's mount
+        // effect (if already visible) and this call settle latest-wins.
+        //
+        // Snapshot panel visibility BEFORE the probe so we only auto-open
+        // when it was closed AND is still closed when the list lands —
+        // if the user manually closes the panel mid-probe (e.g. via the
+        // mobile overlay backdrop), our late callback must not clobber
+        // that intent. Matches the "single-shot on switch" contract.
+        const panelClosedBeforeProbe = !useUIStore.getState().artifactPanelVisible;
+        refreshArtifactList(
           detail.session_id,
           setArtifacts,
           setArtifactSessionId,
           () => useArtifactStore.getState().sessionId,
-        );
-        if (myGen !== getNavGen()) return;
-        if (useArtifactStore.getState().artifacts.length > 0) {
+        ).then(() => {
+          if (myGen !== getNavGen()) return;
+          if (!panelClosedBeforeProbe) return;
+          if (useUIStore.getState().artifactPanelVisible) return;
+          if (useArtifactStore.getState().artifacts.length === 0) return;
           setArtifactPanelVisible(true);
-        }
+        });
       } catch (err) {
         if (myGen !== getNavGen()) return;
         console.error('Failed to load conversation:', err);
