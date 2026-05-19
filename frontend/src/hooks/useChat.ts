@@ -160,13 +160,15 @@ export function useChat() {
         // its own gen + session-stamp guard, so ArtifactPanel's mount
         // effect (if already visible) and this call settle latest-wins.
         //
-        // Snapshot artifactPanelEpoch BEFORE the probe and bail in the
-        // callback if it moved — any user-driven visibility change in the
-        // interim (open, close, or open-then-close in the same window)
-        // means the user has expressed intent and our late auto-open must
-        // not override it. A boolean snapshot wouldn't catch the open→close
-        // case since the final value matches the initial value.
-        const epochBefore = useUIStore.getState().artifactPanelEpoch;
+        // Snapshot rightPanelIntentEpoch BEFORE the probe and bail in the
+        // callback if it moved — any user-driven right-panel intent change
+        // in the interim (artifact toggle, user-mgmt open/close, or
+        // observability open/close) means the user has expressed intent
+        // and our late auto-open must not override it. Plain
+        // `artifactPanelVisible` snapshot would miss (a) toggled-and-back
+        // because final value matches initial and (b) sibling panels
+        // (user-mgmt / observability) re-targeting the right panel.
+        const epochBefore = useUIStore.getState().rightPanelIntentEpoch;
         refreshArtifactList(
           detail.session_id,
           setArtifacts,
@@ -174,7 +176,7 @@ export function useChat() {
           () => useArtifactStore.getState().sessionId,
         ).then(() => {
           if (myGen !== getNavGen()) return;
-          if (useUIStore.getState().artifactPanelEpoch !== epochBefore) return;
+          if (useUIStore.getState().rightPanelIntentEpoch !== epochBefore) return;
           if (useUIStore.getState().artifactPanelVisible) return;
           if (useArtifactStore.getState().artifacts.length === 0) return;
           setArtifactPanelVisible(true);
