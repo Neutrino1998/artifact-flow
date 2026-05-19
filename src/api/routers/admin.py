@@ -4,13 +4,18 @@ Admin Router
 Admin-only endpoints for observability and monitoring:
 - GET /api/v1/admin/conversations — list all conversations with active status
 - GET /api/v1/admin/conversations/{conv_id}/events — event timeline grouped by message
+- GET /api/v1/admin/conversations/{conv_id}/artifacts — flushed artifact list (no in-memory overlay)
+- GET /api/v1/admin/conversations/{conv_id}/artifacts/{artifact_id} — current content + version list
+- GET /api/v1/admin/conversations/{conv_id}/artifacts/{artifact_id}/versions/{version} — specific version
 """
 
+from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from api.dependencies import (
+    get_artifact_manager,
     get_conversation_manager,
     get_runtime_store,
     require_admin,
@@ -23,7 +28,15 @@ from api.schemas.admin import (
     AdminMessageGroup,
     AdminConversationEventsResponse,
 )
+from api.schemas.artifact import (
+    ArtifactListResponse,
+    ArtifactResponse,
+    ArtifactSummary,
+    VersionDetailResponse,
+    VersionSummary,
+)
 from core.conversation_manager import ConversationManager
+from tools.builtin.artifact_ops import ArtifactManager
 from utils.logger import get_logger
 
 logger = get_logger("ArtifactFlow")
@@ -122,4 +135,118 @@ async def get_admin_conversation_events(
         conversation_id=conv_id,
         title=conv.title,
         messages=groups,
+    )
+
+
+# ============================================================
+# Artifacts (admin view)
+#
+# Reads DB-only flushed state — no overlay of `ArtifactManager.get_active()`
+# in-memory cache. Matches the rest of admin observability, which views
+# persisted history rather than live execution state. No ownership check
+# (admin sees all users' conversations); `require_admin` still gates access.
+# ============================================================
+
+
+@router.get(
+    "/conversations/{conv_id}/artifacts",
+    response_model=ArtifactListResponse,
+)
+async def list_admin_conversation_artifacts(
+    conv_id: str,
+    _admin: TokenPayload = Depends(require_admin),
+    artifact_manager: ArtifactManager = Depends(get_artifact_manager),
+):
+    """List all artifacts in a conversation (DB-only, no in-memory overlay)."""
+    artifacts = await artifact_manager.list_artifacts(
+        session_id=conv_id,
+        include_content=False,
+    )
+    return ArtifactListResponse(
+        session_id=conv_id,
+        artifacts=[
+            ArtifactSummary(
+                id=art["id"],
+                content_type=art["content_type"],
+                title=art["title"],
+                current_version=art["version"],
+                source=art.get("source"),
+                original_filename=art.get("original_filename"),
+                created_at=datetime.fromisoformat(art["created_at"]),
+                updated_at=datetime.fromisoformat(art["updated_at"]),
+            )
+            for art in artifacts
+        ],
+    )
+
+
+@router.get(
+    "/conversations/{conv_id}/artifacts/{artifact_id}",
+    response_model=ArtifactResponse,
+)
+async def get_admin_conversation_artifact(
+    conv_id: str,
+    artifact_id: str,
+    _admin: TokenPayload = Depends(require_admin),
+    artifact_manager: ArtifactManager = Depends(get_artifact_manager),
+):
+    """Get current artifact content + version list (DB-only)."""
+    result = await artifact_manager.read_artifact(
+        session_id=conv_id,
+        artifact_id=artifact_id,
+    )
+    if result is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Artifact '{artifact_id}' not found in conversation '{conv_id}'",
+        )
+
+    versions = await artifact_manager.list_versions(conv_id, artifact_id)
+    version_summaries = [
+        VersionSummary(
+            version=v.version,
+            update_type=v.update_type,
+            created_at=v.created_at,
+        )
+        for v in versions
+    ]
+
+    return ArtifactResponse(
+        id=result["id"],
+        session_id=conv_id,
+        content_type=result["content_type"],
+        title=result["title"],
+        content=result["content"],
+        current_version=result["version"],
+        source=result.get("source"),
+        original_filename=result.get("original_filename"),
+        created_at=datetime.fromisoformat(result["created_at"]),
+        updated_at=datetime.fromisoformat(result["updated_at"]),
+        versions=version_summaries,
+    )
+
+
+@router.get(
+    "/conversations/{conv_id}/artifacts/{artifact_id}/versions/{version}",
+    response_model=VersionDetailResponse,
+)
+async def get_admin_conversation_artifact_version(
+    conv_id: str,
+    artifact_id: str,
+    version: int,
+    _admin: TokenPayload = Depends(require_admin),
+    artifact_manager: ArtifactManager = Depends(get_artifact_manager),
+):
+    """Get a specific historical version's content (DB-only)."""
+    ver = await artifact_manager.get_version(conv_id, artifact_id, version)
+    if ver is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Version {version} of artifact '{artifact_id}' not found",
+        )
+    return VersionDetailResponse(
+        version=ver.version,
+        content=ver.content,
+        update_type=ver.update_type,
+        created_at=ver.created_at,
     )
