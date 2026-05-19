@@ -114,8 +114,8 @@ bail_deadline      1
 
 **调参信号**:
 
-- 最末桶 > 5% → 真实输入比设计假设密;先确认不是病态输入,再考虑放宽到 80 / 100,**不要无脑加大**(50 这个值是 Step 3 去重后 center 数上限,直接乘到 Step 4 的 `(2k+1)²` 偏移枚举里——常量翻倍 = 最坏 CPU 翻倍)
-- 高分桶集中在 30-50 → 余量不够;`MAX_FUZZY_WALL_CLOCK_MS` 还没跳,但下一个边界用例就会跳
+- `(50, 100]` + `(100, 10000]` 合计 > 5%(即 unique_centers > `MAX_UNIQUE_CENTERS=50` 总占比)→ 真实输入比设计假设密,这批一定走了 `bail_budget` 路径;先确认不是病态输入,再考虑放宽到 80 / 100,**不要无脑加大**(50 这个值是 Step 3 去重后 center 数上限,直接乘到 Step 4 的 `(2k+1)²` 偏移枚举里——常量翻倍 = 最坏 CPU 翻倍)
+- 高分桶集中在 `(30, 50]` → 余量不够;`MAX_FUZZY_WALL_CLOCK_MS` 还没跳,但下一个边界用例就会跳
 
 ### 3.3 `elapsed_ms` vs `MAX_FUZZY_WALL_CLOCK_MS`
 
@@ -210,7 +210,7 @@ ab19...    8
     2026-05-13T08:22:11+00:00  lag=620ms  tasks=15
     ...
   Hard wedge (GIL held by C extension) dump 入口:
-    docker logs backend 2>&1 | grep -A 200 'Thread 0x'
+    see docs/runbooks/service-hang.md Step 3 (compose mode varies)
 ```
 
 数据源 `LoopLagWatchdog._record_wedge`(`watchdog.py:163`)。一行 = 一次循环 lag 超 `LOOP_LAG_WARN_MS`(默认 500ms)。

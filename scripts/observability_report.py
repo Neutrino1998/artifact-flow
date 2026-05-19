@@ -307,7 +307,7 @@ def _print_lag_events(df_lag: pd.DataFrame) -> None:
         print(f"    {row.get('ts', '?')}  lag={row.get('lag_ms', '?')}ms  tasks={tasks_count}")
 
     print("\n  Hard wedge (GIL held by C extension) dump 入口:")
-    print("    docker logs backend 2>&1 | grep -A 200 'Thread 0x'")
+    print("    see docs/runbooks/service-hang.md Step 3 (compose mode varies)")
 
 
 async def _run_report(hours: int, obs_dir: str) -> None:
