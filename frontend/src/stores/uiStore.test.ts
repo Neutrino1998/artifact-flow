@@ -5,6 +5,7 @@ function reset() {
   useUIStore.setState({
     sidebarCollapsed: false,
     artifactPanelVisible: false,
+    artifactPanelEpoch: 0,
     conversationBrowserVisible: false,
     userManagementVisible: false,
     userManagementRightView: { type: 'empty' },
@@ -76,6 +77,38 @@ describe('uiStore panel mutual exclusion', () => {
     // Other panels untouched (mutual-exclusion only fires on open)
     expect(s.userManagementVisible).toBe(true);
     expect(s.observabilityVisible).toBe(true);
+  });
+});
+
+describe('uiStore artifactPanelEpoch', () => {
+  beforeEach(() => reset());
+
+  test('toggleArtifactPanel bumps epoch', () => {
+    const before = useUIStore.getState().artifactPanelEpoch;
+    useUIStore.getState().toggleArtifactPanel();
+    useUIStore.getState().toggleArtifactPanel();
+    expect(useUIStore.getState().artifactPanelEpoch).toBe(before + 2);
+  });
+
+  test('setArtifactPanelVisible bumps epoch even when value is unchanged', () => {
+    // Conservative: any caller of the setter is signaling user intent;
+    // we don't try to detect no-op writes.
+    const before = useUIStore.getState().artifactPanelEpoch;
+    useUIStore.getState().setArtifactPanelVisible(false);
+    expect(useUIStore.getState().artifactPanelEpoch).toBe(before + 1);
+  });
+
+  test('opening observability bumps epoch (forces artifactPanel closed)', () => {
+    const before = useUIStore.getState().artifactPanelEpoch;
+    useUIStore.getState().setObservabilityVisible(true);
+    expect(useUIStore.getState().artifactPanelEpoch).toBe(before + 1);
+  });
+
+  test('closing observability does NOT bump epoch (no write to artifactPanelVisible)', () => {
+    useUIStore.setState({ observabilityVisible: true });
+    const before = useUIStore.getState().artifactPanelEpoch;
+    useUIStore.getState().setObservabilityVisible(false);
+    expect(useUIStore.getState().artifactPanelEpoch).toBe(before);
   });
 });
 

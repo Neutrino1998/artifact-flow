@@ -160,12 +160,13 @@ export function useChat() {
         // its own gen + session-stamp guard, so ArtifactPanel's mount
         // effect (if already visible) and this call settle latest-wins.
         //
-        // Snapshot panel visibility BEFORE the probe so we only auto-open
-        // when it was closed AND is still closed when the list lands —
-        // if the user manually closes the panel mid-probe (e.g. via the
-        // mobile overlay backdrop), our late callback must not clobber
-        // that intent. Matches the "single-shot on switch" contract.
-        const panelClosedBeforeProbe = !useUIStore.getState().artifactPanelVisible;
+        // Snapshot artifactPanelEpoch BEFORE the probe and bail in the
+        // callback if it moved — any user-driven visibility change in the
+        // interim (open, close, or open-then-close in the same window)
+        // means the user has expressed intent and our late auto-open must
+        // not override it. A boolean snapshot wouldn't catch the open→close
+        // case since the final value matches the initial value.
+        const epochBefore = useUIStore.getState().artifactPanelEpoch;
         refreshArtifactList(
           detail.session_id,
           setArtifacts,
@@ -173,7 +174,7 @@ export function useChat() {
           () => useArtifactStore.getState().sessionId,
         ).then(() => {
           if (myGen !== getNavGen()) return;
-          if (!panelClosedBeforeProbe) return;
+          if (useUIStore.getState().artifactPanelEpoch !== epochBefore) return;
           if (useUIStore.getState().artifactPanelVisible) return;
           if (useArtifactStore.getState().artifacts.length === 0) return;
           setArtifactPanelVisible(true);

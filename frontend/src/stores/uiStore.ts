@@ -17,6 +17,13 @@ export type UserMgmtRightView =
 interface UIState {
   sidebarCollapsed: boolean;
   artifactPanelVisible: boolean;
+  // Monotonic counter bumped on every write to `artifactPanelVisible`
+  // (toggle, explicit set, or sibling-panel side effect). Lets deferred
+  // callers (e.g. useChat's auto-open-on-switch) snapshot the value
+  // before an await and detect ANY user-driven visibility change in
+  // between — a plain boolean snapshot cannot distinguish "untouched"
+  // from "toggled open and closed again".
+  artifactPanelEpoch: number;
   conversationBrowserVisible: boolean;
   userManagementVisible: boolean;
   userManagementRightView: UserMgmtRightView;
@@ -57,6 +64,7 @@ interface UIState {
 export const useUIStore = create<UIState>((set) => ({
   sidebarCollapsed: false,
   artifactPanelVisible: false,
+  artifactPanelEpoch: 0,
   conversationBrowserVisible: false,
   userManagementVisible: false,
   userManagementRightView: { type: 'empty' },
@@ -74,8 +82,15 @@ export const useUIStore = create<UIState>((set) => ({
   setSidebarCollapsed: (collapsed) => set({ sidebarCollapsed: collapsed }),
 
   toggleArtifactPanel: () =>
-    set((s) => ({ artifactPanelVisible: !s.artifactPanelVisible })),
-  setArtifactPanelVisible: (visible) => set({ artifactPanelVisible: visible }),
+    set((s) => ({
+      artifactPanelVisible: !s.artifactPanelVisible,
+      artifactPanelEpoch: s.artifactPanelEpoch + 1,
+    })),
+  setArtifactPanelVisible: (visible) =>
+    set((s) => ({
+      artifactPanelVisible: visible,
+      artifactPanelEpoch: s.artifactPanelEpoch + 1,
+    })),
   setConversationBrowserVisible: (visible) => set({
     conversationBrowserVisible: visible,
     ...(visible && {
@@ -118,7 +133,7 @@ export const useUIStore = create<UIState>((set) => ({
   }),
   setUserManagementSelection: (ids) => set({ userManagementSelection: ids }),
   clearUserSelection: () => set({ userManagementSelection: [] }),
-  setObservabilityVisible: (visible) => set({
+  setObservabilityVisible: (visible) => set((s) => ({
     observabilityVisible: visible,
     ...(visible && {
       conversationBrowserVisible: false,
@@ -127,9 +142,10 @@ export const useUIStore = create<UIState>((set) => ({
       selectionMode: false,
       userManagementSelection: [],
       artifactPanelVisible: false,
+      artifactPanelEpoch: s.artifactPanelEpoch + 1,
     }),
     ...(!visible && { observabilitySelectedConvId: null, observabilityBrowseVisible: false }),
-  }),
+  })),
   setObservabilitySelectedConvId: (id) => set({
     observabilitySelectedConvId: id,
     observabilityBrowseVisible: false,
