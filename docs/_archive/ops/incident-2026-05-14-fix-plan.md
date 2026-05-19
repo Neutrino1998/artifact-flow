@@ -19,11 +19,11 @@
 | P2 | PR-forensics-bundle 取证工具 + 部署前置 | ✅ 已完成 | 实质交付两件事:① py-spy 进 backend 镜像 + compose `cap_add: SYS_PTRACE`(faulthandler deadman 失效时的备份)② `release.sh --with-analyst-tools` 打 pandas/numpy 离线 wheels(给 analyst 机器零联网装)。`preflight.sh` 只验这两件事;Yama policy / host 深挖工具 由 cloud-service-checklist 第四段对齐云托管 |
 | P2 | PR-5 前端镜像重建 | 代码侧已就绪 / 等 bundle | 正式消除 HOSTNAME 误配(fix `62771b6` 已在 main,缺一次发版) |
 | P3 | PR-tz-unify 事件时间戳时区统一 | ✅ 已完成 | 全链路 naive UTC:新增 `src/utils/time.utc_now()` + `frontend/src/lib/time.parseUtcIso`,后端写入路径所有 `datetime.now()` → `utc_now()`,前端 `new Date(<naive ISO>)` 一律改 `parseUtcIso` 锚定 UTC;observability_report.py 注释对齐,CLAUDE.md 增"时间约定"条目。Schema 不动、不迁数据 |
-| P3 | 文档 PR(`docs/runbooks/service-hang.md` + `docs/guides/observability-tuning.md`) | 待启动 | 应急 runbook + obs 调参手册,纯 markdown PR;待 PR-obs-lite + PR-forensics-bundle 代码落地后启动(字段 / 路径稳定后下笔) |
+| P3 | 文档 PR(`docs/runbooks/service-hang.md` + `docs/guides/observability-tuning.md`) | ✅ 已完成 | 应急 runbook + obs 调参手册,纯 markdown PR;在 PR-obs-lite + PR-forensics-bundle + PR-tz-unify 代码落地后下笔(字段 / 路径已稳定) |
 
 **小版本迭代打包**:整套 fix plan 同一个 release bundle,分两批 ship:
 - **第一批(已合 `main`)**:PR-1(算法根治)+ PR-3(fencing 事件持久化),走"立即修根因"的 release tag
-- **第二批(部分已合 `main`)**:PR-obs-lite ✅ 已合;PR-forensics-bundle ✅ 已合;PR-tz-unify ✅ 已合;PR-5 ✅ 代码侧已合(fix `62771b6`,缺一次发版);P3 文档 PR 仍待启动。同一个"事故后加固完整体"release tag,**一起 ship**——观测框架 / 取证工具 / 时区统一 / 前端镜像 / runbook + 调参手册,所有部件齐了才算闭环
+- **第二批(部分已合 `main`)**:PR-obs-lite ✅ 已合;PR-forensics-bundle ✅ 已合;PR-tz-unify ✅ 已合;PR-5 ✅ 代码侧已合(fix `62771b6`,缺一次发版);P3 文档 PR ✅ 已合。同一个"事故后加固完整体"release tag,**一起 ship**——观测框架 / 取证工具 / 时区统一 / 前端镜像 / runbook + 调参手册,所有部件齐了才算闭环
 
 PR 之间逻辑独立可分别回滚,但**默认一捆发**:避免 "obs-lite 上线后 tuning 手册还没写" / "runbook 提了 py-spy 但内网还没装" 这种部分到位的尴尬态。
 
