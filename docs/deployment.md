@@ -249,9 +249,33 @@ docker load -i tmp/artifactflow-app-1.0.1.tar.gz
 > ```
 > 此时 backend/frontend 已 stop，无活跃应用连接，recreate 干净。
 >
-> ⚠️ **`POSTGRES_*` 不属于本流程**：`POSTGRES_DB` / `POSTGRES_USER` / `POSTGRES_PASSWORD` 是 init-only —— `postgres:16-alpine` 的 entrypoint 只在 `postgres_data` 卷**为空**时用这些 env 跑 `initdb`，已有卷的情况下完全忽略。改 .env 里这些值然后 recreate postgres，**库内用户/密码不会变**：backend 会用 `DATABASE_URL` 里的新密码、PG 库内仍是旧密码 → 认证失败 → backend 起不来。旋转密码 / 改用户的正确流程是 SQL `ALTER USER ... WITH PASSWORD '...';`，改完同步 `.env` 里的 `ARTIFACTFLOW_DATABASE_URL`（backend 用），然后走 pause/resume（无需 infra recreate）。`POSTGRES_*` 真正生效的场景只有清空数据卷重新 init（生产几乎不会做）。详见 `docs/_archive/ops/incident-2026-05-14-fix-plan.md` 的「`POSTGRES_*` 是 init-only」段。
+> ⚠️ **`POSTGRES_*` 不属于本流程**：`POSTGRES_DB` / `POSTGRES_USER` / `POSTGRES_PASSWORD` 是 init-only —— `postgres:16-alpine` 的 entrypoint 只在 `postgres_data` 卷**为空**时用这些 env 跑 `initdb`，已有卷的情况下完全忽略。改 .env 里这些值然后 recreate postgres，**库内用户/密码不会变**：backend 会用 `DATABASE_URL` 里的新密码、PG 库内仍是旧密码 → 认证失败 → backend 起不来（`pg_isready` 不做认证 → PG healthy 但 backend 连不上，故障表现更隐蔽）。旋转密码 / 改用户的正确流程：连进 PG 跑 `ALTER USER artifactflow WITH PASSWORD '...';`（或 `CREATE USER` / `CREATE DATABASE`），改完同步 `.env` 里 `ARTIFACTFLOW_DATABASE_URL`（backend 真正用的值）和 `POSTGRES_PASSWORD`（仅作 .env 文档，给未来 fresh-init 用），然后走 pause/resume（无需 infra recreate）。`POSTGRES_*` 真正生效的场景只有清空数据卷重新 init（生产几乎不会做）。
 >
-> 两条 recreate 都必须 `--no-deps`：不加 compose 会顺手把 backend/frontend 也起来（nginx `depends_on` 它俩），违反前提，且会用 `${AF_VERSION:-latest}` 拉镜像（内网通常没有 `latest` tag）。数据安全：named volume 在 recreate 中不动；PG 走 crash recovery 启动（5–15s），Redis 控制状态全是 TTL key 应用层自愈，nginx 无状态。完整原理、验证命令、`.env` 各类变量的归属判断见 `docs/_archive/ops/incident-2026-05-14-fix-plan.md` 的「第二批 bundle ship 步骤」段。
+> 两条 recreate 都必须 `--no-deps`：不加 compose 会顺手把 backend/frontend 也起来（nginx `depends_on` 它俩），违反前提，且会用 `${AF_VERSION:-latest}` 拉镜像（内网通常没有 `latest` tag）。数据安全：named volume 在 recreate 中不动；PG 走 crash recovery 启动（5–15s），Redis 控制状态全是 TTL key 应用层自愈，nginx 无状态。
+>
+> **`.env` 变量归属(`.env.{intranet,prod}.example` 头注释也复述了同样规则)**：
+>
+> | 变量 | 走哪条路径 |
+> |---|---|
+> | `ARTIFACTFLOW_*`（JWT / DATABASE_URL / REDIS_URL / MAX_CONCURRENT_TASKS / API keys 等） | 常规 pause/resume（resume.sh up backend → compose 检测 env_file 变化 → recreate backend） |
+> | `AF_HTTP_PORT`（仅 prod 模板有；nginx `ports:` interpolation） | 上面 (a) —— nginx pre-pause force-recreate |
+> | `POSTGRES_*` | 见上方 ⚠ 块 —— **不能**走 recreate，必须 SQL `ALTER USER` |
+> | `AF_VERSION` | `resume.sh <VERSION>` 显式传入即可 |
+>
+> **验证 HostConfig 已生效**（recreate 完毕后、resume 之前；容器名按当前 compose project 实际命名，默认 `artifactflow-<svc>-1`）：
+>
+> ```bash
+> for s in nginx backend frontend postgres redis; do
+>   echo "--- $s ---"
+>   docker inspect artifactflow-${s}-1 --format \
+>     '{{.HostConfig.LogConfig.Type}} {{.HostConfig.LogConfig.Config}} mem={{.HostConfig.Memory}}'
+> done
+> # 期望 LogConfig.Type=json-file，Config 含 max-size:100m / max-file:3；
+> # Memory（字节）：nginx=0 / backend=2147483648 / frontend=1073741824 /
+> # postgres=2147483648 / redis=805306368
+> ```
+>
+> 完整事故背景（2026-05-14 内网卡死、bug ② 现场对比、reviewer 多轮反馈演进）见 `docs/_archive/ops/incident-2026-05-14-eventloop-wedge.md` + `incident-2026-05-14-fix-plan.md`（已 archive，作历史背景参考，不再维护）。
 
 ### 运行时配置变更（无需 rebuild / 重新传镜像）
 
