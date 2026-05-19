@@ -101,6 +101,12 @@ export function useSSE() {
       if (terminalMessageId) {
         clearConversationActiveIfMatch(conversationId, terminalMessageId);
       }
+      // Capture BEFORE the await so a local sendMessage interleaving between
+      // here and the response can win the store-side merge guard — its
+      // localMutationTimes bump will be later than this snapshotTakenAt, so
+      // setConversations preserves the new turn's active_message_id even
+      // though this list snapshot saw "no active".
+      const snapshotTakenAt = Date.now();
       try {
         const [detail, list] = await Promise.all([
           api.getConversation(conversationId, { force: true }),
@@ -108,11 +114,11 @@ export function useSSE() {
         ]);
         // Sidebar list refresh is harmless cross-conversation, so always apply.
         // The backend list endpoint reads active_message_id from the lease
-        // store, which is the single source of truth for execution state, so
-        // setConversations(...) restores the authoritative view (covers cross-
-        // tab/device + the race window where this tab's optimistic write was
-        // staler than the server view). No defensive second write needed.
-        setConversations(list.conversations, list.total, list.has_more);
+        // store (single source of truth for execution state), so setConversations
+        // restores the authoritative view. Combined with the per-conv merge
+        // guard in conversationStore, a stale snapshot can't clobber a fresher
+        // local optimistic write — see mergeIncomingConv there for the rule.
+        setConversations(list.conversations, list.total, list.has_more, snapshotTakenAt);
 
         // Everything below mutates state that belongs to "the conversation
         // the user is on". A nav-gen change means they aren't on this conv

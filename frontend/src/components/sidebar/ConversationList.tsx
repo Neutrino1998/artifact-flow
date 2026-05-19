@@ -20,9 +20,10 @@ export default function ConversationList() {
 
   const loadConversations = useCallback(async () => {
     setListLoading(true);
+    const snapshotTakenAt = Date.now();
     try {
       const data = await listConversations(20, 0);
-      setConversations(data.conversations, data.total, data.has_more);
+      setConversations(data.conversations, data.total, data.has_more, snapshotTakenAt);
     } catch (err) {
       console.error('Failed to load conversations:', err);
     } finally {
@@ -60,8 +61,11 @@ export default function ConversationList() {
     //   than this idle-staring window warrants.
     const onVisibility = () => {
       if (document.visibilityState !== 'visible') return;
+      const snapshotTakenAt = Date.now();
       listConversations(20, 0)
-        .then((data) => setConversations(data.conversations, data.total, data.has_more))
+        .then((data) =>
+          setConversations(data.conversations, data.total, data.has_more, snapshotTakenAt)
+        )
         .catch(() => { /* best-effort background refresh */ });
     };
     document.addEventListener('visibilitychange', onVisibility);
