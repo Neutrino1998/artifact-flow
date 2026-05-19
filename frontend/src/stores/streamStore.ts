@@ -289,8 +289,12 @@ export const useStreamStore = create<StreamState>((set, get) => {
       set((s) => ({
         segments: [
           ...s.segments,
+          // Insertion index suffix is the collision-resistance bit: SSE replay
+          // can deliver multiple agent_start events through handleEvent in the
+          // same JS tick, so Date.now() alone would collide and trip React's
+          // duplicate-key warning.
           {
-            id: `${agent}-${Date.now()}`,
+            id: `${agent}-${Date.now()}-${s.segments.length}`,
             agent,
             status: 'running',
             reasoningContent: '',
