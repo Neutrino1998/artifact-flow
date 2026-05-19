@@ -224,7 +224,7 @@ export default function ObservabilityPanel() {
           <div className="text-sm font-semibold text-text-primary dark:text-text-primary-dark truncate">
             {headerTitle}
           </div>
-          <div className="mt-2 flex gap-1 text-xs">
+          <div className="mt-2 inline-flex p-0.5 rounded-lg bg-panel-accent dark:bg-surface-dark text-xs">
             <TabButton active={viewMode === 'events'} onClick={() => setViewMode('events')}>
               Events
             </TabButton>
@@ -294,8 +294,8 @@ function TabButton({
       onClick={onClick}
       className={`px-3 py-1 rounded-md transition-colors ${
         active
-          ? 'bg-accent/10 text-accent font-medium'
-          : 'text-text-tertiary dark:text-text-tertiary-dark hover:text-text-secondary dark:hover:text-text-secondary-dark hover:bg-surface dark:hover:bg-bg-dark'
+          ? 'bg-surface dark:bg-bg-dark text-accent font-medium shadow-sm'
+          : 'text-text-tertiary dark:text-text-tertiary-dark hover:text-text-secondary dark:hover:text-text-secondary-dark'
       }`}
     >
       {children}

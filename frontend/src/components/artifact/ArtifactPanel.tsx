@@ -5,7 +5,6 @@ import { useArtifactStore } from '@/stores/artifactStore';
 import { useConversationStore } from '@/stores/conversationStore';
 import { useArtifacts } from '@/hooks/useArtifacts';
 import ArtifactToolbar from './ArtifactToolbar';
-import ArtifactTabs from './ArtifactTabs';
 import ArtifactList from './ArtifactList';
 import MarkdownPreview from './MarkdownPreview';
 import SourceView from './SourceView';
@@ -53,7 +52,6 @@ export default function ArtifactPanel() {
   return (
     <div className="h-full flex flex-col bg-chat dark:bg-chat-dark">
       <ArtifactToolbar />
-      <ArtifactTabs />
       <div className="flex-1 overflow-auto">
         {viewMode === 'preview' && <MarkdownPreview content={content} />}
         {viewMode === 'source' && <SourceView content={content} />}
