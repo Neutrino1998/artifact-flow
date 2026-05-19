@@ -19,8 +19,14 @@ from api.services.runtime_store import InMemoryRuntimeStore, _InterruptState
 
 class _MockStreamTransport:
     """Minimal mock for StreamTransport — satisfies submit() orchestration."""
+    def __init__(self):
+        self.events: list[tuple[str, dict]] = []
+
     async def create_stream(self, stream_id, owner_user_id=None, lease_check_key=None, lease_expected_owner=None): pass
     async def close_stream(self, stream_id): return True
+    async def push_event(self, stream_id, event):
+        self.events.append((stream_id, event))
+        return True
 
 
 _mock_transport = _MockStreamTransport()
@@ -110,6 +116,56 @@ class TestSubmit:
         assert t3_started.is_set()
 
         release2.set()
+        await runner.shutdown(timeout=2)
+
+    async def test_emits_execution_queued_when_semaphore_full(self):
+        """3rd task with max_concurrent=2 should receive an execution_queued event."""
+        transport = _MockStreamTransport()
+        runner = ExecutionRunner(max_concurrent=2)
+        release = asyncio.Event()
+        started1 = asyncio.Event()
+        started2 = asyncio.Event()
+
+        async def coro1():
+            started1.set()
+            await release.wait()
+
+        async def coro2():
+            started2.set()
+            await release.wait()
+
+        await runner.submit("c1", "t1", coro1, user_id="u", stream_transport=transport)
+        await runner.submit("c2", "t2", coro2, user_id="u", stream_transport=transport)
+        await started1.wait()
+        await started2.wait()
+
+        # Pre-3rd-submit: no queued events should have been pushed (capacity available).
+        assert all(ev["type"] != "execution_queued" for _, ev in transport.events)
+
+        async def coro3():
+            pass
+
+        await runner.submit("c3", "t3", coro3, user_id="u", stream_transport=transport)
+        # Give _wrapped() a tick to run the locked() check + push_event.
+        await asyncio.sleep(0.05)
+
+        queued = [(sid, ev) for sid, ev in transport.events if ev["type"] == "execution_queued"]
+        assert len(queued) == 1, f"expected exactly one execution_queued event, got {queued}"
+        sid, ev = queued[0]
+        assert sid == "t3"
+        assert ev["data"]["max_concurrent"] == 2
+        # ahead = max(0, len(_tasks) - max_concurrent - 1) = max(0, 3-2-1) = 0
+        assert ev["data"]["ahead"] == 0
+
+        release.set()
+        await runner.shutdown(timeout=2)
+
+    async def test_no_execution_queued_when_capacity_available(self):
+        transport = _MockStreamTransport()
+        runner = ExecutionRunner(max_concurrent=5)
+        await runner.submit("c1", "t1", _noop_coro, user_id="u", stream_transport=transport)
+        await asyncio.sleep(0.05)
+        assert all(ev["type"] != "execution_queued" for _, ev in transport.events)
         await runner.shutdown(timeout=2)
 
     async def test_exception_cleans_up(self):

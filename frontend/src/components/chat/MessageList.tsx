@@ -68,7 +68,8 @@ export default function MessageList() {
           </div>
         )}
 
-        {/* Streaming message */}
+        {/* Streaming message — also renders the queued-state header while waiting
+            on the backend concurrency semaphore (before agent_start). */}
         {isStreamingHere && <StreamingMessage />}
 
         <div ref={bottomRef} />

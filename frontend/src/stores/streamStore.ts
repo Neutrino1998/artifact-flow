@@ -148,6 +148,9 @@ interface StreamState {
   // Error
   error: string | null;
 
+  // Concurrency queue indicator (SSE-only, cleared on first agent_start / end / reset)
+  queuedInfo: { ahead: number; maxConcurrent: number } | null;
+
   // Actions
   startStream: (url: string, messageId: string, conversationId: string) => void;
   endStream: () => void;
@@ -182,6 +185,9 @@ interface StreamState {
   setCancelling: (val: boolean) => void;
   setPermissionRequest: (req: PermissionRequest | null) => void;
   setError: (error: string | null) => void;
+
+  // Queue indicator
+  setQueuedInfo: (info: { ahead: number; maxConcurrent: number } | null) => void;
 }
 
 // RAF-based throttle for segment content updates
@@ -239,6 +245,7 @@ export const useStreamStore = create<StreamState>((set, get) => {
     cancelling: false,
     permissionRequest: null,
     error: null,
+    queuedInfo: null,
 
     startStream: (url, messageId, conversationId) => {
       cancelPendingFlush();
@@ -255,12 +262,13 @@ export const useStreamStore = create<StreamState>((set, get) => {
         cancelling: false,
         permissionRequest: null,
         error: null,
+        queuedInfo: null,
       });
     },
 
     endStream: () => {
       cancelPendingFlush();
-      set({ isStreaming: false, streamUrl: null, conversationId: null, reconnecting: false, cancelled: false, cancelling: false, permissionRequest: null, streamParentId: undefined });
+      set({ isStreaming: false, streamUrl: null, conversationId: null, reconnecting: false, cancelled: false, cancelling: false, permissionRequest: null, streamParentId: undefined, queuedInfo: null });
     },
 
     reset: () =>
@@ -274,6 +282,7 @@ export const useStreamStore = create<StreamState>((set, get) => {
         streamParentId: undefined,
         permissionRequest: null,
         error: null,
+        queuedInfo: null,
       }),
 
     pushSegment: (agent) =>
@@ -384,6 +393,7 @@ export const useStreamStore = create<StreamState>((set, get) => {
     setCancelling: (val) => set({ cancelling: val }),
     setPermissionRequest: (req) => set({ permissionRequest: req }),
     setError: (error) => set({ error }),
+    setQueuedInfo: (info) => set({ queuedInfo: info }),
   };
 });
 

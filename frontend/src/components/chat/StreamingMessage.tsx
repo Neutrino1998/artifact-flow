@@ -12,10 +12,13 @@ export default function StreamingMessage() {
   const isStreaming = useStreamStore((s) => s.isStreaming);
   const nonAgentBlocks = useStreamStore((s) => s.nonAgentBlocks);
   const error = useStreamStore((s) => s.error);
+  const queuedInfo = useStreamStore((s) => s.queuedInfo);
 
   const flowItems = interleaveFlowItems(segments, nonAgentBlocks);
 
-  if (flowItems.length === 0 && !error) return null;
+  // Render while queued even though there are no flow items yet — the header
+  // alone serves as the "排队中" indicator.
+  if (flowItems.length === 0 && !error && !queuedInfo) return null;
 
   const agentStepCount = segments.length;
 
@@ -27,6 +30,7 @@ export default function StreamingMessage() {
       isActive={isStreaming}
       defaultExpanded={true}
       hasError={!!error}
+      queuedAhead={queuedInfo?.ahead}
     >
       {flowItems.map((item) => {
         if (item.kind === 'agent') {

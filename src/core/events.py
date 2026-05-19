@@ -42,6 +42,11 @@ class StreamEventType(Enum):
     COMPACTION_START = "compaction_start"      # compaction 开始（持久化，便于 replay 看到"压缩进行中"指示）
     COMPACTION_SUMMARY = "compaction_summary"  # compaction 结果（持久化，作为历史 boundary）
 
+    # ========== Runtime / 排队层 ==========
+    # 任务进入 ExecutionRunner 的并发信号量等待队列时由 runner 推送（SSE-only，不持久化）。
+    # 抵达 agent_start 后前端应自行清理 — 历史 replay 不需要这个事件。
+    EXECUTION_QUEUED = "execution_queued"
+
 
 # ============================================================
 # 内存事件（执行过程中累积，最终 batch write）

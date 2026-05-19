@@ -16,6 +16,8 @@ import time
 from typing import TYPE_CHECKING, Callable, Coroutine
 
 from api.services.runtime_store import InMemoryRuntimeStore, RuntimeStore
+from core.events import StreamEventType
+from utils.time import utc_now
 
 if TYPE_CHECKING:
     from api.services.stream_transport import StreamTransport
@@ -134,6 +136,20 @@ class ExecutionRunner:
                         self._renew_loop(conversation_id, task_id),
                         name=f"heartbeat-{task_id}",
                     )
+                # 信号量已满 → 先推一条 execution_queued 让前端显示排队 UI;
+                # 否则到 agent_start 之间是静默挂起。SSE-only,不持久化。
+                # ahead 是上界估计:_tasks 包含本任务+排队中+运行中,asyncio.Semaphore
+                # 的 _waiters 是私有且 FIFO,无法精确算我的真实位次。
+                if self._semaphore.locked():
+                    ahead = max(0, len(self._tasks) - self._max_concurrent - 1)
+                    await stream_transport.push_event(task_id, {
+                        "type": StreamEventType.EXECUTION_QUEUED.value,
+                        "timestamp": utc_now().isoformat(),
+                        "data": {
+                            "ahead": ahead,
+                            "max_concurrent": self._max_concurrent,
+                        },
+                    })
                 async with self._semaphore:
                     await coro
             except asyncio.CancelledError:
