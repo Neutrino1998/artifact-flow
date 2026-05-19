@@ -242,7 +242,7 @@ ab19...    8
 | `FUZZY_MAX_RATIO` | 0.10 | k 比例上界;调大 = 短串容易过松误匹配,见 Section 3.4 |
 | `MAX_FUZZY_OLD_STR_LEN` | 10000 | input 硬上界,m > 此值立即 `bail_budget`;**这是事故根因防线**,改之前看 incident doc PR-1 §决策依据 |
 
-### Observability(`src/config.py:65-75`)
+### Observability(`src/config.py:65-78`)
 
 | 常量 | 默认 | 调整信号 |
 |---|---|---|
@@ -255,6 +255,7 @@ ab19...    8
 | `OBS_JSONL_MAX_MB` | 50 | 单文件大小上限,超即 rotate(`logging.handlers.RotatingFileHandler`);看实际占用 |
 | `OBS_JSONL_BACKUP_COUNT` | 10 | 保留备份数 `.1 ~ .N`;默认 metrics ~600KB/天 × 50MB × 10 ≈ 800 天覆盖 |
 | `OBS_MEM_LIMIT_MB` | 0 | RSS 高水位告警上界;0 = 自动 resolve(`sampler.py:330`),显式设需匹配 docker-compose `mem_limit`(避免重复 SoT) |
+| `OBS_STDOUT_MIRROR` | `False` | 是否把 obs jsonl 镜像到 stdout;主通道是持久卷,默认关。**事故现场打开**作为 "持久卷未挂载 / 挂错路径" 的兜底通道(docker logs 拉得到),代价是污染主应用日志流。env 覆盖必须带前缀:`ARTIFACTFLOW_OBS_STDOUT_MIRROR=true`(裸 `OBS_STDOUT_MIRROR` 不生效) |
 
 ### Time convention(相关,非 obs 常量)
 
