@@ -42,10 +42,10 @@ export const BUTTON_PRIMARY =
   'bg-accent text-white font-medium hover:bg-accent-hover disabled:opacity-40 disabled:cursor-not-allowed transition-colors';
 
 export const BUTTON_SECONDARY =
-  'border border-border dark:border-border-dark text-text-primary dark:text-text-primary-dark font-medium hover:bg-bg dark:hover:bg-bg-dark disabled:opacity-40 disabled:cursor-not-allowed transition-colors';
+  'border border-border dark:border-border-dark text-text-secondary dark:text-text-secondary-dark font-medium bg-surface dark:bg-surface-dark hover:bg-bg dark:hover:bg-bg-dark disabled:opacity-40 disabled:cursor-not-allowed transition-colors';
 
 export const BUTTON_DANGER =
   'bg-status-error text-white font-medium hover:bg-status-error/80 disabled:opacity-40 disabled:cursor-not-allowed transition-colors';
 
 export const BUTTON_DANGER_OUTLINE =
-  'border border-status-error text-status-error font-medium hover:bg-status-error/10 disabled:opacity-40 disabled:cursor-not-allowed transition-colors';
+  'border border-status-error text-status-error font-medium bg-surface dark:bg-surface-dark hover:bg-status-error/10 disabled:opacity-40 disabled:cursor-not-allowed transition-colors';

@@ -145,7 +145,7 @@ export default function DepartmentManagerPanel() {
       <div className="px-4 pt-4">
         <button
           onClick={() => setInnerView({ type: 'create', parentId: null })}
-          className="w-full flex items-center justify-center gap-2 px-4 py-2.5 text-accent bg-chat dark:bg-chat-dark rounded-2xl border border-border dark:border-border-dark hover:bg-panel dark:hover:bg-panel-accent-dark transition-colors"
+          className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-2xl border font-medium text-accent border-border dark:border-border-dark bg-surface dark:bg-surface-dark hover:bg-bg dark:hover:bg-bg-dark transition-colors"
         >
           <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5">
             <path d="M7 2v10M2 7h10" />

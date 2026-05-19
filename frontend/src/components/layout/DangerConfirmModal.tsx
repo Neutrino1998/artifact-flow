@@ -63,6 +63,7 @@ export default function DangerConfirmModal({
       onClose={onCancel}
       closeOnBackdrop={!submitting}
       closeOnEscape={!submitting}
+      surfaceClassName="bg-chat dark:bg-chat-dark"
       footer={
         <>
           <button

@@ -8,7 +8,7 @@ import { useUIStore } from '@/stores/uiStore';
 import {
   BUTTON_PRIMARY,
   BUTTON_SECONDARY,
-  INPUT_ON_SURFACE,
+  INPUT_ON_PANEL,
   LABEL_CLASS,
 } from '@/lib/styles';
 import DialogShell from './DialogShell';
@@ -70,6 +70,7 @@ export default function EditDisplayNameDialog({ onClose }: EditDisplayNameDialog
       onClose={onClose}
       closeOnBackdrop={!submitting}
       closeOnEscape={!submitting}
+      surfaceClassName="bg-chat dark:bg-chat-dark"
     >
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
@@ -84,7 +85,7 @@ export default function EditDisplayNameDialog({ onClose }: EditDisplayNameDialog
             disabled={submitting}
             maxLength={128}
             placeholder={user.username}
-            className={INPUT_ON_SURFACE}
+            className={INPUT_ON_PANEL}
           />
         </div>
 
