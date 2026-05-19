@@ -5,7 +5,7 @@ import type { ReactNode } from 'react';
 interface PanelShellProps {
   /** Rendered inside the header chrome (`px-6 pt-5 pb-3 border-b ...`). Omit for header-less panels. */
   header?: ReactNode;
-  /** Rendered inside the footer chrome (`border-t ... px-6 py-4 flex justify-end gap-3`). Omit for footer-less panels. */
+  /** Rendered inside the footer chrome (`px-6 py-4 flex justify-end gap-3`). Omit for footer-less panels. */
   footer?: ReactNode;
   /**
    * Body content. Caller controls padding / scrolling because variation here
@@ -17,9 +17,8 @@ interface PanelShellProps {
 }
 
 /**
- * Right-side management panel shell. Owns the three pieces that are 100%
- * identical across right-panel forms: the outer container, the header
- * `border-b` chrome, and the footer `border-t` chrome. Header inner layout
+ * Right-side management panel shell. Owns the outer container, the header
+ * `border-b` chrome, and the footer padding chrome. Header inner layout
  * (title+close vs back-button) and body padding stay at the call site.
  */
 export default function PanelShell({ header, footer, children }: PanelShellProps) {
@@ -32,7 +31,7 @@ export default function PanelShell({ header, footer, children }: PanelShellProps
       )}
       {children}
       {footer && (
-        <div className="border-t border-border dark:border-border-dark px-6 py-4 flex justify-end gap-3">
+        <div className="px-6 py-4 flex justify-end gap-3">
           {footer}
         </div>
       )}
