@@ -867,25 +867,24 @@ function ArtifactsTab({ convId, refreshTick }: { convId: string; refreshTick: nu
                 <span>ID: {detail.id}</span>
                 {detail.source ? <><span>·</span><span>{detail.source}</span></> : null}
                 {detail.original_filename ? <><span>·</span><span>{detail.original_filename}</span></> : null}
+                {detail.versions.length > 0 ? (
+                  <>
+                    <span>·</span>
+                    <select
+                      value={viewingVersion ?? detail.current_version}
+                      onChange={(e) => setViewingVersion(Number(e.target.value))}
+                      className="text-xs bg-bg dark:bg-bg-dark border border-border dark:border-border-dark rounded px-1.5 py-0.5 text-text-secondary dark:text-text-secondary-dark"
+                    >
+                      {detail.versions.map((v) => (
+                        <option key={v.version} value={v.version}>
+                          v{v.version} ({v.update_type}){v.version === detail.current_version ? ' · current' : ''}
+                        </option>
+                      ))}
+                    </select>
+                    {versionLoading ? <span>加载...</span> : null}
+                  </>
+                ) : null}
               </div>
-              {/* Version selector */}
-              {detail.versions.length > 0 ? (
-                <div className="mt-2 flex items-center gap-2 text-xs">
-                  <span className="text-text-tertiary dark:text-text-tertiary-dark">版本</span>
-                  <select
-                    value={viewingVersion ?? detail.current_version}
-                    onChange={(e) => setViewingVersion(Number(e.target.value))}
-                    className="px-2 py-1 rounded bg-surface dark:bg-surface-dark border border-border dark:border-border-dark text-text-primary dark:text-text-primary-dark"
-                  >
-                    {detail.versions.map((v) => (
-                      <option key={v.version} value={v.version}>
-                        v{v.version} ({v.update_type}){v.version === detail.current_version ? ' · current' : ''}
-                      </option>
-                    ))}
-                  </select>
-                  {versionLoading ? <span className="text-text-tertiary dark:text-text-tertiary-dark">加载...</span> : null}
-                </div>
-              ) : null}
             </div>
 
             {/* Content */}
