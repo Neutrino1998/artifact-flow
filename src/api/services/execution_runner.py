@@ -140,6 +140,15 @@ class ExecutionRunner:
                 # 否则到 agent_start 之间是静默挂起。SSE-only,不持久化。
                 # ahead 是上界估计:_tasks 包含本任务+排队中+运行中,asyncio.Semaphore
                 # 的 _waiters 是私有且 FIFO,无法精确算我的真实位次。
+                #
+                # 已知 FIFO 抖动:Redis transport 下 push_event 是真异步(HGET+XADD
+                # ~ms 级),`await` 会让出事件循环,理论上让稍晚入队的 task 抢先到
+                # `async with self._semaphore` 的 acquire() 排号点(InMemory 下
+                # push_event 全同步,无此问题)。窗口仅 ~ms 级,影响是 ±1 位次的
+                # FIFO 抖动,不是 starvation;ahead 本身已是上界估计,接受现状。
+                # 若未来换更慢的 transport 触发明显不公平,可改 fire-and-forget
+                # (asyncio.create_task) + 前端按 segments.length 守卫晚到的
+                # execution_queued 事件。
                 if self._semaphore.locked():
                     ahead = max(0, len(self._tasks) - self._max_concurrent - 1)
                     await stream_transport.push_event(task_id, {
