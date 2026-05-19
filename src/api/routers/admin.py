@@ -156,8 +156,14 @@ async def list_admin_conversation_artifacts(
     conv_id: str,
     _admin: TokenPayload = Depends(require_admin),
     artifact_manager: ArtifactManager = Depends(get_artifact_manager),
+    conversation_manager: ConversationManager = Depends(get_conversation_manager),
 ):
     """List all artifacts in a conversation (DB-only, no in-memory overlay)."""
+    # Match events endpoint: 404 when conv doesn't exist so admin UI can tell
+    # "no artifacts" apart from "no such conversation".
+    if not await conversation_manager.exists_async(conv_id):
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
     artifacts = await artifact_manager.list_artifacts(
         session_id=conv_id,
         include_content=False,

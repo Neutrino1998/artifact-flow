@@ -731,6 +731,9 @@ function ArtifactsTab({ convId, refreshTick }: { convId: string; refreshTick: nu
       return;
     }
     let cancelled = false;
+    // Clear stale content before fetching so the viewer shows a loading
+    // state instead of the previously-displayed version's content.
+    setVersionContent(null);
     setVersionLoading(true);
     api.getAdminConversationArtifactVersion(convId, selectedId, viewingVersion).then((res) => {
       if (!cancelled) setVersionContent(res);
@@ -745,7 +748,19 @@ function ArtifactsTab({ convId, refreshTick }: { convId: string; refreshTick: nu
     return () => { cancelled = true; };
   }, [convId, selectedId, detail, viewingVersion]);
 
-  const displayedContent = versionContent?.content ?? detail?.content ?? '';
+  // Showing a non-current version: require the loaded content to match the
+  // selected version, otherwise show a loading state (defends against the
+  // gap between selecting a version and the fetch resolving).
+  const isViewingCurrent =
+    detail != null && viewingVersion != null && viewingVersion === detail.current_version;
+  const versionContentMatches =
+    versionContent != null && versionContent.version === viewingVersion;
+  const versionContentReady = isViewingCurrent || versionContentMatches;
+  const displayedContent = isViewingCurrent
+    ? detail?.content ?? ''
+    : versionContentMatches
+      ? versionContent!.content
+      : '';
 
   return (
     <div className="flex-1 flex min-h-0">
@@ -834,9 +849,15 @@ function ArtifactsTab({ convId, refreshTick }: { convId: string; refreshTick: nu
 
             {/* Content */}
             <div className="flex-1 overflow-y-auto px-4 py-3">
-              <pre className="text-xs text-text-primary dark:text-text-primary-dark whitespace-pre-wrap break-words font-mono">
-                {displayedContent}
-              </pre>
+              {versionContentReady ? (
+                <pre className="text-xs text-text-primary dark:text-text-primary-dark whitespace-pre-wrap break-words font-mono">
+                  {displayedContent}
+                </pre>
+              ) : (
+                <div className="text-xs text-text-tertiary dark:text-text-tertiary-dark">
+                  加载版本内容中...
+                </div>
+              )}
             </div>
           </>
         )}
