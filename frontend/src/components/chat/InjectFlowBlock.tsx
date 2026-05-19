@@ -6,7 +6,7 @@ import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
 import FlowBlock from './FlowBlock';
 import { PROSE_CLASSES } from '@/lib/styles';
-import { markdownComponents } from '@/components/markdown';
+import { markdownComponents, markdownUrlTransform } from '@/components/markdown';
 
 interface InjectFlowBlockProps {
   content?: string;
@@ -37,6 +37,7 @@ function InjectFlowBlock({ content }: InjectFlowBlockProps) {
         remarkPlugins={[remarkGfm]}
         rehypePlugins={[rehypeHighlight]}
         components={markdownComponents}
+        urlTransform={markdownUrlTransform}
       >
         {content}
       </ReactMarkdown>
