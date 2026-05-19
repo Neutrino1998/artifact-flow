@@ -107,18 +107,22 @@ export function useSSE() {
         ]);
         // List refresh restores the server-authoritative view of
         // active_message_id (covers cross-tab / cross-device updates that
-        // this tab never saw).
+        // this tab never saw). This replace is unconditional — if the user
+        // started a new turn on this same conv while the list GET was in
+        // flight, and the snapshot was captured before that new turn took
+        // the lease, the just-written optimistic active_message_id can be
+        // briefly wiped here. The sidebar's running-indicator is a best-
+        // effort UX hint (see conversationStore top-of-file note); the
+        // next refresh restores truth from the server lease store.
         setConversations(list.conversations, list.total, list.has_more);
         // Belt-and-suspenders CAS after the refresh: the list snapshot may
         // have been captured before the lease release landed on the server
         // (lease is released in execution_runner's finally AFTER push_event),
-        // so the server view can still say "msg-terminal is active" right
-        // after we got the terminal SSE locally. CAS is safe — only clears
-        // when the (possibly stale) server snapshot still names THIS
-        // terminal's id; a newer turn's optimistic write is untouched.
-        // We intentionally do NOT guard against the inverse race (stale
-        // null-snapshot landing after a new turn's optimistic write); see
-        // top-of-file note in conversationStore — this dot is best-effort.
+        // so the server view can still report THIS terminal's message_id
+        // as active right after we got the terminal SSE locally. CAS only
+        // fixes that one direction (ghost dot for an already-finished turn).
+        // The inverse race (stale null-snapshot wiping a new turn) is the
+        // best-effort window noted above — intentionally not closed.
         if (terminalMessageId) {
           clearConversationActiveIfMatch(conversationId, terminalMessageId);
         }
