@@ -1,11 +1,13 @@
 """
-JsonlSink — 轮转写盘 + stdout mirror 的 jsonl 写入器
+JsonlSink — 轮转写盘 + 可选 stdout mirror 的 jsonl 写入器
 
 设计要点:
 - 走 stdlib RotatingFileHandler 做大小循环;formatter 仅 %(message)s,
   保证 "一行一对象" 的 jsonl 契约,不加时间戳前缀
 - propagate=False,不污染根 logger 的主应用日志流
-- stdout mirror 是二级兜底通道(docker logs 拉得到),持久卷丢失时还有一份
+- 主通道是持久卷上的 jsonl 文件;stdout mirror 默认关,作为
+  "持久卷未挂载 / 挂错路径" 的二级兜底通道(docker logs 拉得到)
+  按需通过 `mirror_stdout=True` 或 `OBS_STDOUT_MIRROR` 配置打开
 - 写入异常一律吞 — observability 失败决不能拖累业务路径
 - 单进程同写假设(backend 单进程,RotatingFileHandler 内置锁就够;
   日后切多 worker 需重新设计:rotate 瞬间会互相覆盖)
@@ -32,14 +34,15 @@ class JsonlSink:
         path: Path,
         max_mb: int,
         backups: int,
-        mirror_stdout: bool = True,
+        mirror_stdout: bool = False,
     ):
         """
         Args:
             path: jsonl 写入路径(目录自动创建)
             max_mb: 单文件大小上限(MB),超即 rotate
             backups: 保留备份数(.1 ~ .N)
-            mirror_stdout: 是否同步镜像到 stdout(docker logs 兜底通道)
+            mirror_stdout: 是否同步镜像到 stdout(默认 False;打开作为
+                docker logs 兜底通道,代价是污染主应用日志流)
         """
         path.parent.mkdir(parents=True, exist_ok=True)
 
