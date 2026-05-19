@@ -9,15 +9,13 @@
 ```bash
 # Mode 1 (Quick Trial,根 docker-compose.yml,backend 直暴 8000)
 export COMPOSE=docker-compose.yml
-export HEALTH=http://localhost:8000        # backend 直连
+export HEALTH=http://localhost:8000        # backend 直连,无 nginx
 
 # Mode 2 (Production,docker-compose.prod.yml,backend expose 8000 内网,nginx 暴 host AF_HTTP_PORT:-80)
-export COMPOSE=docker-compose.prod.yml
-export HEALTH="http://localhost:${AF_HTTP_PORT:-80}"   # 走 nginx (/health/* + /api/* 都已配 proxy_pass)
-
-# Mode 3 (Intranet,deploy/docker-compose.intranet.yml)
-export COMPOSE=deploy/docker-compose.intranet.yml
-export HEALTH="http://localhost:${AF_HTTP_PORT:-80}"   # 同 Mode 2
+# Mode 3 (Intranet,deploy/docker-compose.intranet.yml)同款
+export COMPOSE=docker-compose.prod.yml                       # 或 deploy/docker-compose.intranet.yml
+# 走 nginx;直接查活实例的端口映射,不依赖 .env / shell 里 AF_HTTP_PORT 是否 export
+export HEALTH="http://localhost:$(docker compose -f "$COMPOSE" port nginx 80 | cut -d: -f2)"
 
 # ── 挑要诊断的 backend 副本 ──
 # 默认是 1 个 backend;但生产可能 `--scale backend=2` 起多副本(见
@@ -28,7 +26,7 @@ docker compose -f "$COMPOSE" ps backend
 export CID=<上面 NAME 或 CONTAINER ID 列任一>
 ```
 
-为什么 nginx 端口要 `${AF_HTTP_PORT:-80}`:prod / intranet compose 把 nginx 映射成 `"${AF_HTTP_PORT:-80}:80"`(`docker-compose.prod.yml:11`),部署侧 export 了 `AF_HTTP_PORT=8080` 就只在 8080 收;hardcode `localhost` 在这种部署上 connection refused。
+`HEALTH` 推导用 `compose port nginx 80` 而不是 `${AF_HTTP_PORT:-80}`:Compose 读 `.env` 文件做变量替换,但 oncall 的 shell **不会** auto-source `.env`(`AF_HTTP_PORT=8080` 写在 `.env` 里 / oncall 没 export → `${AF_HTTP_PORT:-80}` 拿到 80,然后 curl 错端口)。`compose port nginx 80` 直接问活着的 docker network,返回真实 host 映射端口,不依赖 shell env。nginx 自己挂了不能用时回退 `${AF_HTTP_PORT:-80}` 并先 `set -a; . deploy/.env; set +a`。
 
 为什么要手动挑 CID 而不让脚本自动 `$(compose ps -q backend)`:`compose ps -q` 多副本时输出多行,`docker stats "$CID"` 会把多行字符串当一个不存在的容器名报错。Oncall 必须自己判定要诊断的是哪个副本——卡死通常只是其中一个,另几个正常服务用户。
 
@@ -45,21 +43,25 @@ export CID=<上面 NAME 或 CONTAINER ID 列任一>
 
 ## Step 1:判别"循环卡死"还是"依赖问题"
 
+`$HEALTH` 走 nginx 是**整体服务**检查——多副本时 nginx upstream `backend:8000` 会 LB(`deploy/nginx.conf:1` upstream 块),命中健康副本就返 200,**不能用来证明 `$CID` 的循环活着**。诊断目标副本必须 `docker exec "$CID"` 走 127.0.0.1。
+
 ```bash
-# /health/live 不碰任何依赖,只测事件循环本身
-curl -m 3 "$HEALTH/health/live"
-# 200 → 循环活着,问题在依赖或慢操作,跳 Step 5
-# 超时 / 卡住 → 事件循环被饿死,继续 Step 2
-
-# /health/ready 跑 DB + Redis 探针
-curl -m 5 "$HEALTH/health/ready"
-
-# 如果走 nginx 也卡(可能是 nginx → backend 间被堵 / backend 真死),
-# 退一步用 docker exec 直连本副本的 127.0.0.1:8000:
+# ── 权威:目标副本自身的 /health/live ──
+# 直连 127.0.0.1:8000,不经过 nginx,锁死打的是 $CID 而非随机副本
 docker exec "$CID" curl -m 3 http://127.0.0.1:8000/health/live
+# 200 → $CID 循环活着,问题在依赖或慢操作,跳 Step 5
+# 超时 / 卡住 → $CID 事件循环被饿死,继续 Step 2
+
+# 同副本 /health/ready 测 DB + Redis
+docker exec "$CID" curl -m 5 http://127.0.0.1:8000/health/ready
+
+# ── 旁证:整体服务还能不能用(nginx + 全部 backend 副本) ──
+# 多副本时此处仍 200 说明至少有一个副本能服务,但不告诉你 $CID 的状态;
+# 单副本部署里就是权威检查的等价物
+curl -m 3 "$HEALTH/health/live"
 ```
 
-`/health/live` 卡住即可定性:**事件循环死锁**。`/api/v1/admin/runtime`(`src/observability/admin_runtime.py:42`)同理是 FastAPI 协程端点,循环卡时它也无响应——它的定位是"还活但变慢"水位 triage,不是硬 wedge 入口。
+`/health/live` 卡住即可定性:**目标副本的事件循环死锁**。`/api/v1/admin/runtime`(`src/observability/admin_runtime.py:42`)同理是 FastAPI 协程端点,循环卡时它也无响应——它的定位是"还活但变慢"水位 triage,不是硬 wedge 入口。
 
 ## Step 2:确认是 CPU 型卡死(GIL 被攥住)
 
@@ -128,10 +130,14 @@ for l in sys.stdin:
 
 # 要回看更早(包含轮转):RotatingFileHandler 的命名是
 # loop-lag.jsonl(当前最新)、loop-lag.jsonl.1(最近一次轮转)、.2(更旧)、...
-# `cat loop-lag.jsonl*` 的 glob 排序会把当前文件排在最前,旧的在后 ——
-# 直接 `| tail` 反而显示最旧的事件。要按时间顺序拼接需 reverse:
-docker exec "$CID" sh -c \
-  "ls -1 /app/data/observability/loop-lag.jsonl* | sort -r | xargs cat | tail -50"
+# 一直到 .N(N = OBS_JSONL_BACKUP_COUNT,默认 10)。要按时间顺序拼接需把
+# `.10` 排到最前(最旧),`.1` 中间,无后缀的 current 末尾。
+# `sort -r` 是字典序反转,在 `.10` / `.1` / `.2` 三者顺序上会乱;用数字字段排序:
+docker exec "$CID" sh -c '
+  ls -1 /app/data/observability/loop-lag.jsonl* |
+    sort -t. -k3,3rn |    # 第 3 段(".N" 的数字)reverse-numeric 排序;无 .N = 0,排最后
+    xargs cat | tail -50
+'
 
 # 拷整个 obs 目录到宿主机分析。`docker cp` 在容器停止状态也能跑(只要容器
 # 没被 compose down --rmf / rm 掉),所以"backend 已 unhealthy 还没 kill"
@@ -148,14 +154,17 @@ docker volume ls --format '{{.Name}}' | grep -E 'artifactflow_data$'
 
 ## Step 5:服务还活但变慢——`/admin/runtime` 水位检查
 
-`/health/live` 200 但请求慢、SSE 卡顿,跑这个看实时水位(`src/observability/admin_runtime.py:42`,需 admin token):
+`/health/live` 200 但请求慢、SSE 卡顿,跑这个看实时水位(`src/observability/admin_runtime.py:42`,需 admin token)。同 Step 1 的理由,**多副本场景下必须 docker exec `$CID`**——nginx LB 会把 admin 请求转给任意一个副本,看到的 sampler snapshot 不一定来自卡死的那个。
 
 ```bash
 TOKEN=<admin JWT>
-curl -s -H "Authorization: Bearer $TOKEN" "$HEALTH/api/v1/admin/runtime" | jq
-# nginx 走不通时 fallback(直击当前要诊断的副本):
+
+# 权威:目标副本自身的 sampler
 docker exec "$CID" curl -s \
   -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8000/api/v1/admin/runtime | jq
+
+# 旁证(单副本 / 想顺手看整体状态)
+curl -s -H "Authorization: Bearer $TOKEN" "$HEALTH/api/v1/admin/runtime" | jq
 ```
 
 关注字段(对齐 `RuntimeSampler` snapshot,见 `src/observability/sampler.py:137`):

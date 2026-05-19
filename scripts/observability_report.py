@@ -16,8 +16,8 @@ DB 访问复用 app 的 async driver(asyncpg / aiomysql / aiosqlite)+ ORM
 工具,不在 runtime requirements.txt;`pip install pandas` 或走 release
 bundle 的离线 wheel 安装。
 
-硬 wedge dump 看 docker logs backend 找 faulthandler 的 "Thread 0x..."
-行,本脚本不聚合。
+硬 wedge dump 见 docs/runbooks/service-hang.md Step 3(`docker logs` 的精确
+形式因 compose mode 而异),本脚本不聚合。
 """
 
 from __future__ import annotations
@@ -151,7 +151,14 @@ async def _load_message_events(async_engine, hours: int):
 
 
 def _load_jsonl_glob(pattern: str) -> pd.DataFrame:
-    """读所有切片(`.jsonl`, `.jsonl.1` ...),拼成一个 DF。"""
+    """读所有切片(`.jsonl`, `.jsonl.1` ...),拼成一个 DF。
+
+    拼好后按 `ts` 升序排,_print_lag_events.tail(5) / _print_runtime_summary
+    的窗口聚合才反映"最新"语义。`sorted(glob(...))` 的字典序会把当前文件排
+    在 .1/.2 前面,直接 concat 后 tail 拿到的是最旧的事件;且 `.10` 在字典
+    序里夹在 `.1` 与 `.2` 之间,后缀数字感知排序也救不了所有 case。`ts` 是
+    事件源头的时间戳,排它是 source of truth。
+    """
     files = sorted(glob(pattern))
     if not files:
         return pd.DataFrame()
@@ -163,7 +170,12 @@ def _load_jsonl_glob(pattern: str) -> pd.DataFrame:
             continue
     if not frames:
         return pd.DataFrame()
-    return pd.concat(frames, ignore_index=True)
+    df = pd.concat(frames, ignore_index=True)
+    if "ts" in df.columns:
+        # `ts` 是 ISO8601 字符串(naive UTC,见 PR-tz-unify);lexical 排序对
+        # 同一时区的 ISO8601 与时间排序等价,不需要 parse 成 datetime。
+        df = df.sort_values("ts", kind="stable", ignore_index=True)
+    return df
 
 
 def _print_llm_summary(df_llm: pd.DataFrame, hours: int) -> None:
