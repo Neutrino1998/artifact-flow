@@ -722,12 +722,17 @@ function ArtifactsTab({ convId, refreshTick }: { convId: string; refreshTick: nu
 
   // Load specific version content when viewing a non-current version
   useEffect(() => {
+    // Early-return branches must also clear versionLoading: the in-flight
+    // fetch's `.finally` is gated on `!cancelled`, so switching away from a
+    // loading version (e.g. v3 → current) leaves the spinner hanging.
     if (selectedId == null || detail == null || viewingVersion == null) {
       setVersionContent(null);
+      setVersionLoading(false);
       return;
     }
     if (viewingVersion === detail.current_version) {
       setVersionContent(null);
+      setVersionLoading(false);
       return;
     }
     let cancelled = false;
