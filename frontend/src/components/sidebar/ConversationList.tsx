@@ -50,12 +50,17 @@ export default function ConversationList() {
     //
     // Known limitation (accepted, not fixed):
     //   User runs conv A, switches to B, stays on B with the tab visible,
-    //   never clicks anything. A finishes on the server. This tab has no
-    //   SSE on A and visibilitychange doesn't fire because tab stays
-    //   visible — A's dot will stay orange until the user does anything
-    //   (switchConversation / send / tab-out-and-back). No correctness
-    //   issue, only stale UI. A bounded backoff poll would close this gap
-    //   but reintroduces a timer; decided the trade-off favors no-timer
+    //   never switches conv and never tab-switches away. A finishes on the
+    //   server. This tab has no SSE on A and visibilitychange doesn't fire
+    //   while the tab stays visible — A's dot will stay orange until one
+    //   of the list-refreshing actions runs: switchConversation,
+    //   tab-out-and-back (this listener), or sendMessage's isNew branch
+    //   (i.e. starting a fresh new chat from no current conv).
+    //   Sending another message inside an existing conv does NOT clear it
+    //   — sendMessage's else branch only flips is_active for the conv
+    //   being sent to, not the whole list. No correctness issue, only
+    //   stale UI. A bounded backoff poll would close this gap but
+    //   reintroduces a timer; decided the trade-off favors no-timer
     //   simplicity given how brief this idle-staring window typically is.
     const onVisibility = () => {
       if (document.visibilityState !== 'visible') return;

@@ -107,25 +107,27 @@ export function useSSE() {
         ]);
         // Sidebar list refresh is harmless cross-conversation, so always apply.
         setConversations(list.conversations, list.total, list.has_more);
-        // Defensive: backend may have raced (see comment above setConversations
-        // invalidation block). The conv is semantically done; force is_active=false.
-        //
-        // Guard: if the user already kicked off a *new* turn on this same
-        // conv while we were awaiting (fast-click + slow refresh), the
-        // sendMessage path has already markActive(true)'d for the new
-        // message_id. Re-asserting false here would erase that — leaving
-        // the next running turn without a sidebar dot until something else
-        // refreshes the list. Use streamStore.messageId to distinguish:
-        // endStream() leaves messageId alone (matches the just-terminal'd
-        // turn); a subsequent connect() → startStream() replaces it.
+        // Authoritative final write for this conv's is_active. Two reasons we
+        // can't trust setConversations alone:
+        //   1. Backend lease release races push_event in execution_runner's
+        //      finally block — list may still report is_active=true even
+        //      though the engine just emitted COMPLETE/CANCELLED/ERROR.
+        //   2. If the list GET was sent BEFORE the user kicked off a new
+        //      turn on this same conv (fast-click + slow refresh), the GET
+        //      snapshot has is_active=false; meanwhile sendMessage has
+        //      already markActive(true)'d for the new message_id, which
+        //      setConversations above just clobbered.
+        // streamStore.messageId distinguishes the two: endStream() leaves
+        // messageId alone (matches the just-terminal'd turn); a subsequent
+        // connect() → startStream() replaces it. So if the stream is now
+        // attached to a *different* message_id on the *same* conv, a newer
+        // turn has taken over → assert true; otherwise → assert false.
         const stream = useStreamStore.getState();
         const newTurnOnSameConv =
           stream.isStreaming &&
           stream.conversationId === conversationId &&
           stream.messageId !== terminalMessageId;
-        if (!newTurnOnSameConv) {
-          markConversationActive(conversationId, false);
-        }
+        markConversationActive(conversationId, newTurnOnSameConv);
 
         // Everything below mutates state that belongs to "the conversation
         // the user is on". A nav-gen change means they aren't on this conv
