@@ -52,7 +52,7 @@ export default function Pagination({
   const canNext = page < totalPages && !disabled;
 
   return (
-    <div className="flex items-center justify-between gap-3 py-3 text-sm">
+    <div className="flex items-center justify-between gap-3 py-2 text-sm">
       {totalPages > 1 ? (
         <div className="flex items-center gap-1">
           <button
@@ -108,14 +108,14 @@ export default function Pagination({
             value={pageSize}
             onChange={(e) => onPageSizeChange(Number(e.target.value))}
             disabled={disabled}
-            className="appearance-none pr-9 px-3 py-1.5 rounded-lg border border-border dark:border-border-dark bg-surface dark:bg-surface-dark text-text-primary dark:text-text-primary-dark focus:outline-none focus:border-accent dark:focus:border-accent disabled:opacity-40"
+            className="appearance-none pl-2 pr-7 py-1 rounded-md border border-border dark:border-border-dark bg-surface dark:bg-surface-dark text-text-primary dark:text-text-primary-dark text-right focus:outline-none focus:border-accent dark:focus:border-accent disabled:opacity-40"
           >
             {pageSizeOptions.map((opt) => (
               <option key={opt} value={opt}>{opt}</option>
             ))}
           </select>
           <svg
-            className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-text-tertiary dark:text-text-tertiary-dark"
+            className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-text-tertiary dark:text-text-tertiary-dark"
             width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5"
           >
             <path d="M3 4.5l3 3 3-3" strokeLinecap="round" strokeLinejoin="round" />

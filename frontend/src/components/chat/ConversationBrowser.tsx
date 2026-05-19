@@ -262,7 +262,7 @@ export default function ConversationBrowser() {
       {total > 0 && (
         <div className="px-4 pt-2 pb-4">
           <div className="max-w-3xl mx-auto">
-            <div className="bg-surface dark:bg-surface-dark border border-border dark:border-border-dark rounded-2xl shadow-float px-4">
+            <div className="bg-surface dark:bg-surface-dark border border-border dark:border-border-dark rounded-2xl px-4">
               <Pagination
                 page={page}
                 pageSize={pageSize}
