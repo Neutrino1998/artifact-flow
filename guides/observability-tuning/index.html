@@ -1,0 +1,1593 @@
+
+<!doctype html>
+<html lang="zh" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Pi-style 可配置 Agent 引擎 + 双 Artifact 架构的多智能体 SaaS">
+      
+      
+      
+        <link rel="canonical" href="https://neutrino1998.github.io/artifact-flow/guides/observability-tuning/">
+      
+      
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>可观测性报告解读与调参 - ArtifactFlow</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../stylesheets/custom.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="custom">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#可观测性报告解读与调参" class="md-skip">
+          跳转至
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="页眉">
+    <a href="../.." title="ArtifactFlow" class="md-header__button md-logo" aria-label="ArtifactFlow" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            ArtifactFlow
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              可观测性报告解读与调参
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="custom"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="custom" data-md-color-accent="custom"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="搜索" placeholder="搜索" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="查找">
+        
+        <button type="reset" class="md-search__icon md-icon" title="清空当前内容" aria-label="清空当前内容" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            正在初始化搜索引擎
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/Neutrino1998/artifact-flow" title="前往仓库" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    Neutrino1998/artifact-flow
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="标签" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../deployment/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Deployment
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../architecture/overview/" class="md-tabs__link">
+          
+  
+  
+  Architecture
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../add-agent/" class="md-tabs__link">
+          
+  
+  
+  Guides
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../frontend/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Frontend
+
+      </a>
+    </li>
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="导航栏" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="ArtifactFlow" class="md-nav__button md-logo" aria-label="ArtifactFlow" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    ArtifactFlow
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/Neutrino1998/artifact-flow" title="前往仓库" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    Neutrino1998/artifact-flow
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../deployment/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deployment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Architecture
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../architecture/overview/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../architecture/engine/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Engine
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../architecture/agents/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Agents
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../architecture/tools/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tools
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../architecture/artifacts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Artifacts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../architecture/data-layer/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data Layer
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../architecture/streaming/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Streaming
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../architecture/concurrency/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Concurrency
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../architecture/observability/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Observability
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Guides
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Guides
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../add-agent/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Add Agent
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../add-tool/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Add Tool
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../add-model/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Add Model
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api-reference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../frontend/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Frontend
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="目录">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      目录
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#跑一下" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        跑一下
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#section-1llm-calls" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Section 1:LLM calls
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#section-2tool-calls" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Section 2:Tool calls
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#section-3update_artifact-fuzzy_stats-调参报表" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Section 3:update_artifact fuzzy_stats 调参报表
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Section 3:update_artifact fuzzy_stats 调参报表">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#31-outcome-distribution" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.1 outcome distribution
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#32-unique_centers-直方图" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.2 unique_centers 直方图
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#33-elapsed_ms-vs-max_fuzzy_wall_clock_ms" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.3 elapsed_ms vs MAX_FUZZY_WALL_CLOCK_MS
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#34-similarity_pct-直方图仅-matched" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.4 similarity_pct 直方图(仅 matched)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#35-old_str_hash-top-10" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.5 old_str_hash Top-10
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#section-4runtime-metrics" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Section 4:Runtime metrics
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Section 4:Runtime metrics">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#41-loop_lag-三个聚合" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.1 loop_lag 三个聚合
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#42-rss--cpu--open-fds" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.2 RSS / CPU / Open FDs
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#43-db_pool" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.3 db_pool
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#section-5loop-lag-events软退化" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Section 5:Loop-lag events(软退化)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#隐藏常量速查" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        隐藏常量速查
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="隐藏常量速查">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#update_artifact-layer-2srcconfigpy53-62" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        update_artifact Layer 2(src/config.py:53-62)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#observabilitysrcconfigpy65-75" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Observability(src/config.py:65-75)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#time-convention相关非-obs-常量" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Time convention(相关,非 obs 常量)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#调参-sop" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        调参 SOP
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="可观测性报告解读与调参">可观测性报告解读与调参</h1>
+<blockquote>
+<p><code>scripts/observability_report.py</code> 的输出怎么读 + 哪些隐藏常量在什么信号下要调。报告读出来再回来调常量,<strong>不要凭印象先动</strong>。</p>
+</blockquote>
+<p><code>observability_report.py</code> 数据源三处:<code>MessageEvent</code> 表(LLM / 工具调用)、<code>data/observability/metrics.jsonl*</code>(<code>RuntimeSampler</code> 周期采样)、<code>data/observability/loop-lag.jsonl*</code>(<code>LoopLagWatchdog</code> 软退化事件)。脚本对齐见 <code>scripts/observability_report.py:9-21</code> 的 docstring。</p>
+<h2 id="跑一下">跑一下</h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1"># 默认 24h 窗口</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>python<span class="w"> </span>scripts/observability_report.py
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="c1"># 拉长到 72h</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>python<span class="w"> </span>scripts/observability_report.py<span class="w"> </span>--hours<span class="w"> </span><span class="m">72</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="c1"># pandas 缺失时:走 release bundle 的离线 wheel</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>pip<span class="w"> </span>install<span class="w"> </span>--no-index<span class="w"> </span>--find-links<span class="w"> </span>analyst-tools/wheels<span class="w"> </span>pandas
+</code></pre></div>
+<p>pandas 不在 runtime <code>requirements.txt</code>(<code>observability_report.py:14-17</code>),只有分析机要装;release bundle <code>--with-analyst-tools</code> 跟 backend 镜像 ABI 对齐(<code>scripts/release.sh:27-30</code>)。</p>
+<p>数据库 URL 优先级:<code>ARTIFACTFLOW_DATABASE_URLS</code> 第一个 → <code>ARTIFACTFLOW_DATABASE_URL</code> → <code>sqlite+aiosqlite:///data/artifactflow.db</code>(<code>observability_report.py:62-81</code>,与 app 一致,生产同时设两者时不会查错库)。</p>
+<hr />
+<h2 id="section-1llm-calls">Section 1:<code>LLM calls</code></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>=== LLM calls (24h, by model × agent) ===
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>              calls  in_tok  out_tok  p50_ms  p99_ms
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>model  agent_name
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>...
+</code></pre></div>
+<p>字段定义(<code>observability_report.py:84-94, 169-181</code>):</p>
+<ul>
+<li><code>calls</code> — 24h 内 <code>llm_complete</code> 事件计数,按 <code>(model, agent_name)</code> 分组</li>
+<li><code>in_tok</code> / <code>out_tok</code> — <code>data.token_usage.input_tokens / output_tokens</code> 求和(成本核算的基础)</li>
+<li><code>p50_ms</code> / <code>p99_ms</code> — <code>data.duration_ms</code> 的 0.5 / 0.99 分位</li>
+</ul>
+<p><strong>调参信号</strong>:</p>
+<ul>
+<li>同一 model 在不同 agent 下 p99 差距大 → 系统 prompt 长度差异或 tool round 多;看是否需要 per-agent <code>max_tool_rounds</code> 配置(<code>config/agents/*.md</code> frontmatter)</li>
+<li>p99 <code>&gt; 60000ms</code> 且 calls 多 → compaction 阈值偏低,频繁触发;<strong>单独看下方 <code>COMPACTION_TOKEN_THRESHOLD</code></strong>(在 <code>src/config.py</code>)</li>
+<li><code>out_tok / calls</code> 异常低 → 模型早停或 cancel 多</li>
+</ul>
+<h2 id="section-2tool-calls">Section 2:<code>Tool calls</code></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>=== Tool calls (24h, by tool) ===
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>              calls  p50_ms  p99_ms  max_ms  failures
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>tool
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>update_artifact   12     45     320     510         0
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>read_artifact     34     12      28      55         0
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>...
+</code></pre></div>
+<p>字段(<code>observability_report.py:97-106, 184-196</code>):</p>
+<ul>
+<li><code>failures</code> — <code>data.success</code> 为 false 的计数;<strong>任一非零都值得追</strong></li>
+<li><code>max_ms</code> — 单次最慢(p99 平均化容易掩盖个别 outlier)</li>
+</ul>
+<p><strong>调参信号</strong>:</p>
+<ul>
+<li><code>update_artifact max_ms</code> 接近 <code>MAX_FUZZY_WALL_CLOCK_MS</code>(默认 500ms)→ Layer 2 在踩 deadline,转看 Section 3</li>
+<li>任何工具 <code>max_ms &gt; 30s</code> 但循环没卡 → 工具内部已经在 <code>await</code>,但应该看是否能拆 / pagination</li>
+<li><code>failures</code> 突增配合 LLM <code>p99_ms</code> 抬升 → 可能是上游接口异常,看应用日志</li>
+</ul>
+<h2 id="section-3update_artifact-fuzzy_stats-调参报表">Section 3:<code>update_artifact fuzzy_stats</code> 调参报表</h2>
+<p>这是事故后专为 Layer 2 fuzzy match 加的报表,字段来自 <code>update_artifact.py:288-312</code> 的 <code>_build_stats</code>,经 <code>ToolResult.metadata.fuzzy_stats</code> 透传(<code>observability_report.py:199-251</code>)。</p>
+<h3 id="31-outcome-distribution">3.1 <code>outcome distribution</code></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>-- outcome distribution --
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>matched           87
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>bail_no_anchor     3
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>bail_deadline      1
+</code></pre></div>
+<p>枚举值(完整集合见 <code>update_artifact.py</code>,grep <code>outcome=</code>):</p>
+<table>
+<thead>
+<tr>
+<th>outcome</th>
+<th>含义</th>
+<th>健康线</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>matched</code></td>
+<td>Layer 2 找到唯一匹配</td>
+<td>进 Layer 2 的样本里应是主项</td>
+</tr>
+<tr>
+<td><code>bail_low_entropy</code></td>
+<td>鸽巢推完 L 低于 <code>ANCHOR_MIN_USABLE_LEN</code>,无可用锚点</td>
+<td>极少</td>
+</tr>
+<tr>
+<td><code>bail_no_anchor</code></td>
+<td>锚点全在 <code>ANCHOR_MAX_OCCURRENCES</code> 之上被标 common,或 content 里找不到</td>
+<td>零星</td>
+</tr>
+<tr>
+<td><code>bail_budget</code></td>
+<td><code>m &gt; MAX_FUZZY_OLD_STR_LEN</code>(input 长度上界) 或 unique_centers 超 <code>MAX_UNIQUE_CENTERS</code></td>
+<td>零星</td>
+</tr>
+<tr>
+<td><code>bail_deadline</code></td>
+<td>Step 4 内循环超 <code>MAX_FUZZY_WALL_CLOCK_MS</code> wall-clock</td>
+<td>零星</td>
+</tr>
+<tr>
+<td><code>bail_ambiguous</code></td>
+<td>多个区域无法区分(Layer 2 不能比 Layer 0/1 更松)</td>
+<td>零星,模型应改 old_str 重试</td>
+</tr>
+<tr>
+<td><code>bail_no_window</code></td>
+<td>候选 center 全部被 verify 拒绝</td>
+<td>零星</td>
+</tr>
+</tbody>
+</table>
+<p><strong>只有 Layer 2 路径设 <code>fuzzy_stats</code></strong>——Layer 0(exact)/ Layer 1(normalized)成功不进这张表(见 <code>update_artifact.py:639-718</code> 的 compute_update,Layer 0/1 的 <code>MatchInfo</code> 不带 <code>fuzzy_stats</code>)。这张表反映的是"进到 Layer 2 的样本"分布。</p>
+<p><strong>注意</strong>:Section 2 的 <code>update_artifact.calls</code> 减去这张表的总数 <strong>不等于</strong> Layer 0/1 命中量。<code>calls</code> 还包含一批没有 <code>fuzzy_stats</code> 的失败路径——precondition 失败(<code>ArtifactManager not configured</code> / <code>No active session</code>,见 <code>update_artifact.py:819-824</code>)、Layer 0 / Layer 1 唯一性失败(<code>appears N times</code>,<code>update_artifact.py:650-653</code> / <code>update_artifact.py:673-679</code>)、artifact_id 不存在等。要精确算 Layer 0/1 命中量,需在 <code>update_artifact.py</code> 显式记 <code>match_type=exact/normalized</code> 的成功事件,目前没有这个 metric。</p>
+<p><code>bail_*</code> 持续上涨表示模型在踩边界——通常不是常量调小了,<strong>先看是不是 prompt 让模型给的 <code>old_str</code> 上下文太短</strong>。</p>
+<h3 id="32-unique_centers-直方图">3.2 <code>unique_centers</code> 直方图</h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>-- unique_centers histogram (vs MAX_UNIQUE_CENTERS) --
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>(-0.001, 5.0]     72
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>(5.0, 10.0]       11
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>(10.0, 20.0]       4
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>(20.0, 30.0]       0
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>(30.0, 50.0]       0
+<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a>(50.0, 100.0]      2    ← unique_centers 已超 MAX_UNIQUE_CENTERS=50,bail_budget
+<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a>(100.0, 10000.0]   0
+</code></pre></div>
+<p>分箱写死 <code>[0, 5, 10, 20, 30, 50, 100, 10000]</code>(<code>observability_report.py:222</code>),共 7 桶。<code>(50, 100]</code> 桶 = 已经踩穿 <code>MAX_UNIQUE_CENTERS=50</code>,这批是 <code>bail_budget</code>;<code>(100, 10000]</code> 是更极端的输入(中心数破百)。<code>MAX_UNIQUE_CENTERS</code> 不变的话这两个桶都应该是 0。</p>
+<p><strong>调参信号</strong>:</p>
+<ul>
+<li><code>(50, 100]</code> + <code>(100, 10000]</code> 合计 &gt; 5%(即 unique_centers &gt; <code>MAX_UNIQUE_CENTERS=50</code> 总占比)→ 真实输入比设计假设密,这批一定走了 <code>bail_budget</code> 路径;先确认不是病态输入,再考虑放宽到 80 / 100,<strong>不要无脑加大</strong>(50 这个值是 Step 3 去重后 center 数上限,直接乘到 Step 4 的 <code>(2k+1)²</code> 偏移枚举里——常量翻倍 = 最坏 CPU 翻倍)</li>
+<li>高分桶集中在 <code>(30, 50]</code> → 余量不够;<code>MAX_FUZZY_WALL_CLOCK_MS</code> 还没跳,但下一个边界用例就会跳</li>
+</ul>
+<h3 id="33-elapsed_ms-vs-max_fuzzy_wall_clock_ms">3.3 <code>elapsed_ms</code> vs <code>MAX_FUZZY_WALL_CLOCK_MS</code></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>-- elapsed_ms vs MAX_FUZZY_WALL_CLOCK_MS --
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>  p50=12.3  p99=180.5  max=498.2
+</code></pre></div>
+<p><code>MAX_FUZZY_WALL_CLOCK_MS</code> 默认 500ms。max 贴近 500 表示 deadline 在救场——是 deadline 应该工作的方式,不是 bug;但要看 <code>outcome</code> 里有几个 <code>bail_deadline</code>,持续多就转 3.1 找原因。</p>
+<h3 id="34-similarity_pct-直方图仅-matched">3.4 <code>similarity_pct</code> 直方图(仅 matched)</h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>-- similarity_pct histogram (matched only) --
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>(-0.001, 70.0]    0
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>(70.0, 80.0]      1
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a>(80.0, 90.0]      3
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a>(90.0, 95.0]      11
+<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a>(95.0, 99.0]      42
+<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a>(99.0, 100.0]    30
+</code></pre></div>
+<p>分箱写死(<code>observability_report.py:241</code>)。<code>&lt;90%</code> 命中堆积可能是 <code>FUZZY_MAX_RATIO</code>(0.10)放得太松——拒绝太弱,可能误匹配;<code>&gt;99%</code> 占主流是预期。</p>
+<h3 id="35-old_str_hash-top-10">3.5 <code>old_str_hash</code> Top-10</h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>-- top-10 most frequently triggered old_str hashes --
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>3f2a...   23
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>ab19...    8
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>...
+</code></pre></div>
+<p>只存 hash,不存原文(<code>update_artifact.py:295-296</code> 的设计契约)。同一 hash 反复触发 = 同一 old_str 被反复编辑 / 反复 fuzzy 救场,可能值得查 conversation 看模型在不在打转。</p>
+<hr />
+<h2 id="section-4runtime-metrics">Section 4:<code>Runtime metrics</code></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>=== Runtime metrics (data/observability/metrics.jsonl*) ===
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>  rows=2880, window=[2026-05-12 ... ~ 2026-05-13 ...]
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>  loop_lag p50_ms: median=3.0  p99=8.0  max=18.0
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>  loop_lag p99_ms: median=8.0  p99=22.0  max=120.0
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>  loop_lag max_1m_ms: median=18.0  p99=95.0  max=520.0
+<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a>  RSS (MB): min=180.0  p50=420.0  p99=510.0  max=520.0
+<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a>  CPU %: min=0.5  p50=8.0  p99=42.0  max=98.0
+<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a>  Open FDs: min=80.0  p50=110.0  p99=130.0  max=145.0
+<a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a>  db_pool.in_use: p99=4.0  max=5.0
+<a id="__codelineno-8-10" name="__codelineno-8-10" href="#__codelineno-8-10"></a>  db_pool.overflow: p99=0.0  max=0.0
+</code></pre></div>
+<p>数据来源:<code>RuntimeSampler.sample_once</code>(<code>src/observability/sampler.py:137</code>),每 <code>OBS_SAMPLE_INTERVAL_SEC</code>(默认 30s)采一次。打印逻辑 <code>observability_report.py:254-287</code>。</p>
+<h3 id="41-loop_lag-三个聚合">4.1 <code>loop_lag</code> 三个聚合</h3>
+<p>每条 sample 自带 <code>loop_lag_ms.{p50_ms,p99_ms,max_1m_ms}</code>(<code>watchdog.py:148-161</code>,1 分钟滚动窗 60 样本)。报告里对<strong>这三个字段</strong>再做跨 sample 聚合——所以 <code>p99 of p99</code> 看的是"1 分钟最坏延迟"的 24h 分布。</p>
+<p><strong>调参信号 / <code>LOOP_LAG_WARN_MS</code>(默认 500ms)</strong>:</p>
+<ul>
+<li><code>max_1m_ms.p99</code> 贴近 <code>LOOP_LAG_WARN_MS</code> → 阈值偏紧,系统接近误报;放宽到 800-1000</li>
+<li><code>max_1m_ms.p99</code> &lt;&lt; <code>LOOP_LAG_WARN_MS</code> 且持续没事件 → 阈值偏松,降到 300 试探</li>
+<li><code>max_1m_ms.max &gt; 5s</code> → loop wedge 事件;查 Section 5</li>
+</ul>
+<h3 id="42-rss--cpu--open-fds">4.2 <code>RSS / CPU / Open FDs</code></h3>
+<p><code>process</code> 字段(<code>sampler.py:237-251</code>)。</p>
+<p><strong>调参信号 / <code>OBS_MEM_LIMIT_MB</code></strong>:</p>
+<ul>
+<li>默认 <code>OBS_MEM_LIMIT_MB=0</code> 走自动 resolve:env &gt; cgroup v2 &gt; cgroup v1 &gt; 不告警(<code>sampler.py:330-362</code>)</li>
+<li>高水位 ratio <code>_RSS_WARN_RATIO=0.80</code>(<code>sampler.py:60</code>)写死,不是隐藏常量</li>
+<li>RSS p99 持续 &gt; 80% mem_limit → 容量规划信号,先看 <code>MAX_CONCURRENT_TASKS</code>(默认 10);别先加 mem_limit</li>
+<li>Open FDs 趋势上涨不下降 → connection / file 泄漏,看 <code>db_pool.size</code> 是否同涨</li>
+</ul>
+<h3 id="43-db_pool">4.3 <code>db_pool</code></h3>
+<p>字段 <code>in_use / size / overflow</code>(<code>sampler.py:204-221</code>)。</p>
+<ul>
+<li><code>overflow &gt; 0</code> p99 = 已经在用 <code>max_overflow</code> 兜底 → 调 <code>DATABASE_POOL_SIZE</code>(默认 5)</li>
+<li><code>in_use.max &gt;= size + max_overflow - 1</code> 持续 → 接近耗尽,加 pool 或查长事务</li>
+</ul>
+<hr />
+<h2 id="section-5loop-lag-events软退化">Section 5:<code>Loop-lag events</code>(软退化)</h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>=== Loop-lag events (软退化, data/observability/loop-lag.jsonl*) ===
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>  total events: 3
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>  lag_ms: p50=620  p99=1850  max=2100
+<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a>  -- last 5 events (truncated) --
+<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a>    2026-05-13T08:22:11+00:00  lag=620ms  tasks=15
+<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a>    ...
+<a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a>  Hard wedge (GIL held by C extension) dump 入口:
+<a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a>    see docs/runbooks/service-hang.md Step 3 (compose mode varies)
+</code></pre></div>
+<p>数据源 <code>LoopLagWatchdog._record_wedge</code>(<code>watchdog.py:163</code>)。一行 = 一次循环 lag 超 <code>LOOP_LAG_WARN_MS</code>(默认 500ms)。</p>
+<p><strong>调参信号</strong>:</p>
+<ul>
+<li><code>total events / 24h &gt; 10</code> → 系统经常软退化,看 last 5 events 的 <code>tasks</code> 字段哪个 task 持续出现(<code>watchdog.py:192-220</code> 收集每个 task 的栈截断 8 帧)</li>
+<li><code>wedged: true</code> 行 → 4× warn_ms 内回调没回来(<code>watchdog.py:135-139</code>),已经在 deadman 范围内,转 <a href="../../runbooks/service-hang/">service-hang.md</a></li>
+<li>0 事件持续多日 → watchdog 没在跑(检查 <code>_start_observability</code> 启动日志)或阈值过松</li>
+</ul>
+<p><strong>watchdog 的失效场景</strong>(必须明确):C 扩展持 GIL 时所有 Python 线程一起 <code>futex_wait</code>,本组件也睡死,<strong>这种场景 jsonl 不增长</strong>。这是设计上的失效面(<code>watchdog.py:7-12</code>),由 <code>DeadmanSwitch</code> 走 C 线程兜底。</p>
+<hr />
+<h2 id="隐藏常量速查">隐藏常量速查</h2>
+<p>所有常量在 <code>src/config.py</code>,不暴露给模型,只能改源码 + 重启。改之前先有数据(本文档对应 section 的信号)。</p>
+<h3 id="update_artifact-layer-2srcconfigpy53-62">update_artifact Layer 2(<code>src/config.py:53-62</code>)</h3>
+<table>
+<thead>
+<tr>
+<th>常量</th>
+<th>默认</th>
+<th>调整信号</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ANCHOR_SHINGLE_LEN</code></td>
+<td>6</td>
+<td>调小 = 更密集锚点(候选爆炸);调大 = 鸽巢可能不满足,bail_low_entropy 增</td>
+</tr>
+<tr>
+<td><code>ANCHOR_MIN_USABLE_LEN</code></td>
+<td>3</td>
+<td>鸽巢推完 L 的最低门槛;<code>bail_low_entropy</code> 高于预期可降到 2,但<strong>风险</strong>:锚点更易在低熵文本被打 common</td>
+</tr>
+<tr>
+<td><code>ANCHOR_MAX_OCCURRENCES</code></td>
+<td>20</td>
+<td>一个 shingle 在 content 内最多出现几次仍视为可用锚点;<code>bail_no_anchor</code> 多且 content 有大量重复时,放宽到 30 试</td>
+</tr>
+<tr>
+<td><code>MAX_UNIQUE_CENTERS</code></td>
+<td>50</td>
+<td>见 Section 3.2</td>
+</tr>
+<tr>
+<td><code>MAX_FUZZY_WALL_CLOCK_MS</code></td>
+<td>500</td>
+<td>见 Section 3.3</td>
+</tr>
+<tr>
+<td><code>FUZZY_MAX_L_DIST</code></td>
+<td>16</td>
+<td>k 绝对上界;调大 = 允许更大编辑距离,但 Step 4 <code>(2k+1)²</code> 偏移枚举平方增,wall-clock 必然涨</td>
+</tr>
+<tr>
+<td><code>FUZZY_MAX_RATIO</code></td>
+<td>0.10</td>
+<td>k 比例上界;调大 = 短串容易过松误匹配,见 Section 3.4</td>
+</tr>
+<tr>
+<td><code>MAX_FUZZY_OLD_STR_LEN</code></td>
+<td>10000</td>
+<td>input 硬上界,m &gt; 此值立即 <code>bail_budget</code>;<strong>这是事故根因防线</strong>,改之前看 incident doc PR-1 §决策依据</td>
+</tr>
+</tbody>
+</table>
+<h3 id="observabilitysrcconfigpy65-75">Observability(<code>src/config.py:65-75</code>)</h3>
+<table>
+<thead>
+<tr>
+<th>常量</th>
+<th>默认</th>
+<th>调整信号</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>LOOP_LAG_WARN_MS</code></td>
+<td>500</td>
+<td>见 Section 4.1</td>
+</tr>
+<tr>
+<td><code>WATCHDOG_DEADMAN_TIMEOUT_MS</code></td>
+<td>10000</td>
+<td>faulthandler dump 倒计时;偏保守,出现"长但合法的同步段"误触再加(目前主要风险已被 PR-1 覆盖);改前看 deadman 设计 <code>deadman.py:14-18</code></td>
+</tr>
+<tr>
+<td><code>OBS_SAMPLE_INTERVAL_SEC</code></td>
+<td>30</td>
+<td>sampler 周期;调小 = jsonl 增长加速 + 多一份 IO 自扰动观测者;调大 = 颗粒粗</td>
+</tr>
+<tr>
+<td><code>OBS_LONG_TASK_AGE_SEC</code></td>
+<td>60</td>
+<td>task 超此值进 <code>tasks_long_running</code>;按业务正常 turn 时长设</td>
+</tr>
+<tr>
+<td><code>OBS_METRICS_LOG_PATH</code></td>
+<td><code>data/observability/metrics.jsonl</code></td>
+<td>必须在持久卷子目录(默认 <code>/app/data</code> 已在),容器重启 / autoheal 不丢</td>
+</tr>
+<tr>
+<td><code>OBS_LOOP_LAG_LOG_PATH</code></td>
+<td><code>data/observability/loop-lag.jsonl</code></td>
+<td>同上</td>
+</tr>
+<tr>
+<td><code>OBS_JSONL_MAX_MB</code></td>
+<td>50</td>
+<td>单文件大小上限,超即 rotate(<code>logging.handlers.RotatingFileHandler</code>);看实际占用</td>
+</tr>
+<tr>
+<td><code>OBS_JSONL_BACKUP_COUNT</code></td>
+<td>10</td>
+<td>保留备份数 <code>.1 ~ .N</code>;默认 metrics ~600KB/天 × 50MB × 10 ≈ 800 天覆盖</td>
+</tr>
+<tr>
+<td><code>OBS_MEM_LIMIT_MB</code></td>
+<td>0</td>
+<td>RSS 高水位告警上界;0 = 自动 resolve(<code>sampler.py:330</code>),显式设需匹配 docker-compose <code>mem_limit</code>(避免重复 SoT)</td>
+</tr>
+</tbody>
+</table>
+<h3 id="time-convention相关非-obs-常量">Time convention(相关,非 obs 常量)</h3>
+<p>事件 <code>created_at</code> 全链路 naive UTC(<code>utils/time.utc_now</code>),<code>observability_report.py:121-125</code> 的 threshold 同 naive UTC——两边对齐,跨地域部署 / Shanghai (UTC+8) 不再有 8 小时偏差。详见 CLAUDE.md "Time convention" 段。</p>
+<hr />
+<h2 id="调参-sop">调参 SOP</h2>
+<ol>
+<li><strong>先看 24h 报告</strong>——<code>python scripts/observability_report.py</code></li>
+<li><strong>定位异常 section</strong> 而非常量(报告每个 section 告诉你哪个常量在被踩)</li>
+<li><strong>改一个常量、改一倍以内</strong>——<code>MAX_UNIQUE_CENTERS 50 → 80</code>,不要 50 → 200</li>
+<li><strong>重启 backend、跑 24h、再看报告</strong></li>
+<li><strong>保留前后两份报告 diff</strong>——做小版本 ship 笔记的素材</li>
+</ol>
+<p>不要试图通过 jsonl 直接接告警 / Prometheus——目前体系是 <code>jsonl + 报告 + 人工巡检</code>(决策见 incident fix-plan §待决策项 4)。Sampler 字段已就位,需要 exporter 时是平移工作。</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  回到页面顶部
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.tabs", "navigation.sections", "navigation.expand", "navigation.top", "search.highlight", "content.code.copy"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "\u5df2\u590d\u5236", "clipboard.copy": "\u590d\u5236", "search.result.more.one": "\u5728\u8be5\u9875\u4e0a\u8fd8\u6709 1 \u4e2a\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.more.other": "\u5728\u8be5\u9875\u4e0a\u8fd8\u6709 # \u4e2a\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.none": "\u6ca1\u6709\u627e\u5230\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.one": "\u627e\u5230 1 \u4e2a\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.other": "# \u4e2a\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.placeholder": "\u952e\u5165\u4ee5\u5f00\u59cb\u641c\u7d22", "search.result.term.missing": "\u7f3a\u5c11", "select.version": "\u9009\u62e9\u5f53\u524d\u7248\u672c"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>
