@@ -1140,10 +1140,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#observabilitysrcconfigpy65-75" class="md-nav__link">
+  <a href="#observabilitysrcconfigpy65-78" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Observability(src/config.py:65-75)
+        Observability(src/config.py:65-78)
       
     </span>
   </a>
@@ -1459,7 +1459,7 @@
 </tr>
 </tbody>
 </table>
-<h3 id="observabilitysrcconfigpy65-75">Observability(<code>src/config.py:65-75</code>)</h3>
+<h3 id="observabilitysrcconfigpy65-78">Observability(<code>src/config.py:65-78</code>)</h3>
 <table>
 <thead>
 <tr>
@@ -1513,6 +1513,11 @@
 <td><code>OBS_MEM_LIMIT_MB</code></td>
 <td>0</td>
 <td>RSS 高水位告警上界;0 = 自动 resolve(<code>sampler.py:330</code>),显式设需匹配 docker-compose <code>mem_limit</code>(避免重复 SoT)</td>
+</tr>
+<tr>
+<td><code>OBS_STDOUT_MIRROR</code></td>
+<td><code>False</code></td>
+<td>是否把 obs jsonl 镜像到 stdout;主通道是持久卷,默认关。<strong>事故现场打开</strong>作为 "持久卷未挂载 / 挂错路径" 的兜底通道(docker logs 拉得到),代价是污染主应用日志流。env 覆盖必须带前缀:<code>ARTIFACTFLOW_OBS_STDOUT_MIRROR=true</code>(裸 <code>OBS_STDOUT_MIRROR</code> 不生效)</td>
 </tr>
 </tbody>
 </table>
