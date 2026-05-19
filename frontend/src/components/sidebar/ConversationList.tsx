@@ -47,6 +47,16 @@ export default function ConversationList() {
     // stream (disconnected on switchConversation), so without this listener
     // the running indicator would stay stuck until the user clicks something.
     // No setInterval — focus alone is enough for the sidebar UX.
+    //
+    // Known limitation (accepted, not fixed):
+    //   User runs conv A, switches to B, stays on B with the tab visible,
+    //   never clicks anything. A finishes on the server. This tab has no
+    //   SSE on A and visibilitychange doesn't fire because tab stays
+    //   visible — A's dot will stay orange until the user does anything
+    //   (switchConversation / send / tab-out-and-back). No correctness
+    //   issue, only stale UI. A bounded backoff poll would close this gap
+    //   but reintroduces a timer; decided the trade-off favors no-timer
+    //   simplicity given how brief this idle-staring window typically is.
     const onVisibility = () => {
       if (document.visibilityState !== 'visible') return;
       listConversations(20, 0)
