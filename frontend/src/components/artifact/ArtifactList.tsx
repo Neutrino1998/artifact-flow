@@ -58,6 +58,14 @@ export default function ArtifactList() {
                 <span>{artifact.content_type}</span>
                 <span>v{artifact.current_version}</span>
                 <span>{parseUtcIso(artifact.updated_at).toLocaleDateString()}</span>
+                {artifact.source && artifact.source !== 'user_upload' && (
+                  <span className="flex items-center gap-1 truncate" title={artifact.source}>
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="flex-shrink-0">
+                      <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z" />
+                    </svg>
+                    <span className="truncate">{artifact.source}</span>
+                  </span>
+                )}
                 {artifact.original_filename && (
                   <span className="flex items-center gap-1 truncate" title={artifact.original_filename}>
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="flex-shrink-0">
