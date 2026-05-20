@@ -32,7 +32,7 @@ export default function DiagramPre({ node: _node, ...props }: DiagramPreProps) {
   const child = Children.toArray(props.children).find(isValidElement);
   const className = (child?.props as { className?: string } | undefined)?.className ?? '';
 
-  if (/\blanguage-mermaid\b/.test(className)) {
+  if (/\blanguage-(?:mermaid|mmd)\b/i.test(className)) {
     return <MermaidBlock code={nodeText(props.children).replace(/\n$/, '')} />;
   }
 

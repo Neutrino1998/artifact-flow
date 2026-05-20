@@ -109,7 +109,7 @@ export default function MermaidBlock({ code }: MermaidBlockProps) {
       {svg && (
         <button
           onClick={downloadSvg}
-          className="absolute top-2 right-2 p-1.5 rounded-md opacity-0 group-hover/mermaid:opacity-100 transition-opacity bg-surface/80 dark:bg-surface-dark/80 text-text-tertiary dark:text-text-tertiary-dark hover:text-text-primary dark:hover:text-text-primary-dark"
+          className="absolute top-2 right-2 p-1.5 rounded-md opacity-0 group-hover/mermaid:opacity-100 focus:opacity-100 [@media(pointer:coarse)]:opacity-100 transition-opacity bg-surface/80 dark:bg-surface-dark/80 text-text-tertiary dark:text-text-tertiary-dark hover:text-text-primary dark:hover:text-text-primary-dark"
           aria-label="Download SVG"
           title="下载 SVG"
         >
