@@ -1,10 +1,23 @@
 import type { Components, UrlTransform } from 'react-markdown';
 import { defaultUrlTransform } from 'react-markdown';
 import CodeBlock from './CodeBlock';
+import DiagramPre from './DiagramPre';
 import ArtifactLink from './ArtifactLink';
 
 export const markdownComponents: Partial<Components> = {
   pre: CodeBlock as Components['pre'],
+  a: ArtifactLink as Components['a'],
+};
+
+/**
+ * Variant that renders ```mermaid blocks as diagrams (other code blocks fall
+ * back to CodeBlock). Use ONLY on non-streaming surfaces — artifact preview
+ * and the persisted final response — where content is complete and stable.
+ * The streaming flow uses `markdownComponents` so half-written mermaid never
+ * flickers a parse error.
+ */
+export const markdownComponentsWithDiagrams: Partial<Components> = {
+  pre: DiagramPre as Components['pre'],
   a: ArtifactLink as Components['a'],
 };
 
