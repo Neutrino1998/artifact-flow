@@ -173,6 +173,25 @@ services:
         max-file: "3"
     restart: unless-stopped
 
+networks:
+  # Pin the project network to a fixed subnet instead of Docker's
+  # auto-allocation. This host's corporate LAN carves up 172.16/12 for real
+  # client segments (172.22.20.0/22, 172.22.168.0/21, 172.22.196.0/21) AND
+  # other servers (e.g. 172.22.80.35). Docker had auto-grabbed 172.22.0.0/16
+  # for this network, so the host's longest-prefix-match routed BOTH the
+  # return packets to those clients AND this host's outbound packets to
+  # 172.22.80.35 into the local bridge instead of the gateway — clients in
+  # 172.22 couldn't reach the service and the host couldn't reach 172.22.80.35
+  # (ops on a non-172.22 segment were unaffected, which masked it). Moving off
+  # 172.22 makes that /16 bridge route disappear so all of 172.22 falls back
+  # to the default gateway. 192.168 is not used by this host's network (only
+  # 192.168.122/24 is, by libvirt). Intranet-host-specific, like the
+  # security_opt overlay above — kept on this branch only.
+  default:
+    ipam:
+      config:
+        - subnet: 192.168.222.0/24
+
 volumes:
   # Explicit `name:` pins the resource name (no project prefix). Pre-pin
   # deployments must migrate `deploy_*` → these names first; see
