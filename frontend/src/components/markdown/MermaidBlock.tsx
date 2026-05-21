@@ -17,7 +17,7 @@ interface MermaidBlockProps {
 //     when hit, the SVG's preserveAspectRatio shrinks the content to fit and
 //     centers it — no distortion.
 const MAX_WIDTH_PX = 640;
-const MAX_HEIGHT_PX = 960; // ~1.5 × MAX_WIDTH_PX
+const MAX_HEIGHT_PX = MAX_WIDTH_PX * 1.2; // 768 — keeps tall diagrams compact without squashing them
 const UPSCALE_FACTOR = 1.5;
 
 function constrainSize(svg: string): string {
