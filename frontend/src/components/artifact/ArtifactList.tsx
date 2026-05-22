@@ -31,13 +31,13 @@ export default function ArtifactList() {
   }
 
   return (
-    <div className="h-full bg-chat dark:bg-chat-dark">
+    <div className="h-full flex flex-col min-h-0 bg-chat dark:bg-chat-dark">
       <div className="px-4 py-3 border-b border-border dark:border-border-dark">
         <h3 className="font-semibold text-text-primary dark:text-text-primary-dark">
           文稿列表
         </h3>
       </div>
-      <div className="overflow-y-auto px-2 py-2 space-y-2">
+      <div className="flex-1 overflow-y-auto px-2 py-2 space-y-2">
         {artifacts.map((artifact) => {
           const hasPending = pendingUpdates.includes(artifact.id);
           return (
