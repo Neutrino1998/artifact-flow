@@ -56,12 +56,26 @@ async def convert_and_create_artifact(
     POST /artifacts/{session_id}/upload (panel single-upload) — the caller is
     responsible for ensuring the session/conversation exists first.
     """
+    # Size-check BEFORE read so an oversize part is rejected without
+    # materializing it in RAM. Starlette's multipart parser spools each part to
+    # a temp file (rolls to disk past ~1MB) and sets UploadFile.size to the full
+    # part length — so reading a 1GB part here would spike RAM even though
+    # parsing kept it on disk. nginx caps the body (25MB) at the edge; this is
+    # the in-app guard for anything that bypasses it.
+    max_mb = config.MAX_UPLOAD_SIZE / 1024 / 1024
+    if file.size is not None and file.size > config.MAX_UPLOAD_SIZE:
+        raise HTTPException(
+            status_code=422,
+            detail=f"File too large: {file.size / 1024 / 1024:.1f}MB (max {max_mb:.0f}MB)",
+        )
     file_bytes = await file.read()
+    # Fallback if the parser didn't populate .size (keeps the 422 contract;
+    # the bytes are already in RAM by here, so the pre-check above is the real
+    # memory guard).
     if len(file_bytes) > config.MAX_UPLOAD_SIZE:
         raise HTTPException(
             status_code=422,
-            detail=f"File too large: {len(file_bytes) / 1024 / 1024:.1f}MB "
-                   f"(max {config.MAX_UPLOAD_SIZE / 1024 / 1024:.0f}MB)"
+            detail=f"File too large: {len(file_bytes) / 1024 / 1024:.1f}MB (max {max_mb:.0f}MB)",
         )
 
     converter = DocConverter()
