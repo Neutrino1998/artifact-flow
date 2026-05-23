@@ -7,7 +7,7 @@ import { useUIStore } from '@/stores/uiStore';
 import { useConversationStore } from '@/stores/conversationStore';
 import { useStagedFilesStore } from '@/stores/stagedFilesStore';
 import { injectMessage, cancelExecution } from '@/lib/api';
-import { MAX_MESSAGE_CHARS } from '@/lib/constants';
+import { MAX_MESSAGE_CHARS, MAX_CHAT_ATTACHMENTS } from '@/lib/constants';
 
 export default function MessageInput() {
   const [content, setContent] = useState('');
@@ -73,12 +73,16 @@ export default function MessageInput() {
       return;
     }
 
-    // New-message send: allow files-only (empty text + attachments).
+    // New-message send: allow files-only (empty text + attachments). Clear the
+    // composer only on success so a failed send (e.g. 422) preserves the user's
+    // text and staged attachments instead of discarding them.
     const filesToSend = stagedFiles.map((s) => s.file);
     if (!trimmed && filesToSend.length === 0) return;
-    setContent('');
-    clearStaged();
-    await sendMessage(trimmed, undefined, filesToSend.length ? filesToSend : undefined);
+    const ok = await sendMessage(trimmed, undefined, filesToSend.length ? filesToSend : undefined);
+    if (ok) {
+      setContent('');
+      clearStaged();
+    }
   }, [content, isStreaming, cancelling, setCancelling, sendMessage, conversationId, streamConversationId, stagedFiles, clearStaged]);
 
   const handleCompositionStart = useCallback(() => {
@@ -111,14 +115,17 @@ export default function MessageInput() {
     (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
       if (isStreaming) return;
       const text = e.clipboardData?.getData('text/plain') ?? '';
-      if (text.length > MAX_MESSAGE_CHARS) {
+      // Divert a huge paste to a staged file only if there's room; at the
+      // attachment cap, let it paste inline (textarea maxLength caps it)
+      // rather than silently dropping it.
+      if (text.length > MAX_MESSAGE_CHARS && stagedFiles.length < MAX_CHAT_ATTACHMENTS) {
         e.preventDefault();
         const ts = new Date().toISOString().replace(/[:.]/g, '-');
         const file = new File([text], `pasted-${ts}.txt`, { type: 'text/plain' });
         addFiles([file]);
       }
     },
-    [isStreaming, addFiles]
+    [isStreaming, addFiles, stagedFiles.length]
   );
 
   const handleFileSelect = useCallback(() => {
@@ -137,7 +144,8 @@ export default function MessageInput() {
     [addFiles]
   );
 
-  const attachDisabled = isStreaming;
+  const atAttachmentCap = stagedFiles.length >= MAX_CHAT_ATTACHMENTS;
+  const attachDisabled = isStreaming || atAttachmentCap;
   const nearLimit = content.length > MAX_MESSAGE_CHARS * 0.8;
   const hasStaged = stagedFiles.length > 0;
 
@@ -173,6 +181,9 @@ export default function MessageInput() {
                   </button>
                 </span>
               ))}
+              <span className="inline-flex items-center px-1 text-xs tabular-nums text-text-tertiary dark:text-text-tertiary-dark">
+                {stagedFiles.length}/{MAX_CHAT_ATTACHMENTS}
+              </span>
             </div>
           )}
 
@@ -213,7 +224,7 @@ export default function MessageInput() {
                 disabled={attachDisabled}
                 className="p-1.5 rounded-lg text-text-secondary dark:text-text-secondary-dark hover:bg-surface dark:hover:bg-bg-dark transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                 aria-label="Attach file"
-                title="添加附件（随消息发送，支持多选）"
+                title={atAttachmentCap ? `最多 ${MAX_CHAT_ATTACHMENTS} 个附件` : '添加附件（随消息发送，支持多选）'}
               >
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />

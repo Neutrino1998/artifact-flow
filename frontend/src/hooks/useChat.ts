@@ -37,7 +37,7 @@ export function useChat() {
   const lastMessageId = branchPath.length > 0 ? branchPath[branchPath.length - 1].id : null;
 
   const sendMessage = useCallback(
-    async (content: string, parentMessageId?: string | null, files?: File[]) => {
+    async (content: string, parentMessageId?: string | null, files?: File[]): Promise<boolean> => {
       // Capture nav-gen BEFORE the await. If the user clicks New Chat or
       // switches to another conversation while api.sendMessage() is in
       // flight, the engine still runs server-side (runner.submit is
@@ -91,7 +91,9 @@ export function useChat() {
           setConversationActiveMessage(res.conversation_id, res.message_id);
         }
 
-        if (myNavGen !== getNavGen()) return;
+        // Send already succeeded server-side; nav changed so we don't redirect
+        // into the abandoned context, but report success so the composer clears.
+        if (myNavGen !== getNavGen()) return true;
 
         setPendingUserMessage(content);
         // Track rerun/edit parent for branchPath truncation
@@ -115,9 +117,13 @@ export function useChat() {
           );
           setArtifactPanelVisible(true);
         }
+        return true;
       } catch (err) {
-        if (myNavGen !== getNavGen()) return;
+        // Failure: report it so the caller preserves composer state (text +
+        // staged attachments) instead of discarding the user's input.
+        if (myNavGen !== getNavGen()) return false;
         setError((err as Error).message);
+        return false;
       }
     },
     [current?.id, lastMessageId, setPendingUserMessage, setStreamParentId, connect, setError, setConversations, setConversationActiveMessage, setArtifacts, setArtifactSessionId, setArtifactPanelVisible]
