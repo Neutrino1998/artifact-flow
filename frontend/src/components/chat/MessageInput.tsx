@@ -33,7 +33,7 @@ export default function MessageInput() {
   const stagedFiles = useStagedFilesStore((s) => s.files);
   const addFiles = useStagedFilesStore((s) => s.addFiles);
   const removeFile = useStagedFilesStore((s) => s.removeFile);
-  const clearStaged = useStagedFilesStore((s) => s.clear);
+  const removeFiles = useStagedFilesStore((s) => s.removeFiles);
 
   // Auto-resize textarea
   useEffect(() => {
@@ -75,9 +75,13 @@ export default function MessageInput() {
       if (convId) {
         if (injectingRef.current) return;  // block rapid double-fire of the same inject
         injectingRef.current = true;
+        const sentText = content;
         try {
           await injectMessage(convId, trimmed);
-          setContent('');
+          // Clear only if the box still holds exactly what we sent — a slow
+          // inject followed by the user typing a new instruction must not be
+          // silently wiped.
+          setContent((prev) => (prev === sentText ? '' : prev));
         } catch (err) {
           console.error('Inject failed:', err);
         } finally {
@@ -94,19 +98,24 @@ export default function MessageInput() {
     if (sendingRef.current) return;
     const filesToSend = stagedFiles.map((s) => s.file);
     if (!trimmed && filesToSend.length === 0) return;
+    const sentText = content;
+    const sentIds = stagedFiles.map((s) => s.id);
     sendingRef.current = true;
     setSending(true);
     try {
       const ok = await sendMessage(trimmed, undefined, filesToSend.length ? filesToSend : undefined);
       if (ok) {
-        setContent('');
-        clearStaged();
+        // Reconcile, don't blindly clear: only wipe the text if it's still
+        // exactly what we sent, and only remove the files we actually sent —
+        // so anything typed/staged during the in-flight window survives.
+        setContent((prev) => (prev === sentText ? '' : prev));
+        removeFiles(sentIds);
       }
     } finally {
       sendingRef.current = false;
       setSending(false);
     }
-  }, [content, isStreaming, cancelling, setCancelling, sendMessage, conversationId, streamConversationId, stagedFiles, clearStaged]);
+  }, [content, isStreaming, cancelling, setCancelling, sendMessage, conversationId, streamConversationId, stagedFiles, removeFiles]);
 
   const handleCompositionStart = useCallback(() => {
     isComposingRef.current = true;

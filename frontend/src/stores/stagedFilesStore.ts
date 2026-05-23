@@ -16,6 +16,9 @@ interface StagedFilesState {
   files: StagedFile[];
   addFiles: (files: File[]) => void;
   removeFile: (id: string) => void;
+  // Remove a specific set of ids — used to clear exactly the files that a send
+  // consumed, preserving any the user staged during the in-flight window.
+  removeFiles: (ids: string[]) => void;
   clear: () => void;
 }
 
@@ -39,5 +42,6 @@ export const useStagedFilesStore = create<StagedFilesState>((set) => ({
       return { files: [...s.files, ...toAdd] };
     }),
   removeFile: (id) => set((s) => ({ files: s.files.filter((f) => f.id !== id) })),
+  removeFiles: (ids) => set((s) => ({ files: s.files.filter((f) => !ids.includes(f.id)) })),
   clear: () => set({ files: [] }),
 }));

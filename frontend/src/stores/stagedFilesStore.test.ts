@@ -40,4 +40,14 @@ describe('stagedFilesStore attachment cap', () => {
     useStagedFilesStore.getState().clear();
     expect(useStagedFilesStore.getState().files.length).toBe(0);
   });
+
+  test('removeFiles removes only the given ids, preserving the rest', () => {
+    useStagedFilesStore.getState().addFiles(makeFiles(3));
+    const ids = useStagedFilesStore.getState().files.map((f) => f.id);
+    // Remove the first two (simulating "the files a send consumed"); the third
+    // (e.g. staged during the in-flight window) must survive.
+    useStagedFilesStore.getState().removeFiles([ids[0], ids[1]]);
+    const remaining = useStagedFilesStore.getState().files;
+    expect(remaining.map((f) => f.id)).toEqual([ids[2]]);
+  });
 });
