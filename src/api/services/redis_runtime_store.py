@@ -18,6 +18,8 @@ from typing import Any, Dict, List, Literal, Optional, Set
 
 import redis.asyncio as aioredis
 
+from config import config
+from api.services.runtime_store import InjectQueueFull
 from utils.logger import get_logger
 
 logger = get_logger("ArtifactFlow")
@@ -62,6 +64,18 @@ end
 return items
 """
 
+# inject-capped: 原子地 LLEN < cap ? RPUSH + EXPIRE → 新长度 : -1（满）
+# 等价于 InMemory 的 put_nowait(maxsize) —— 队列满返回 -1，调用方抛 InjectQueueFull → 429。
+_LUA_INJECT_CAPPED = """
+local len = redis.call('LLEN', KEYS[1])
+if len >= tonumber(ARGV[2]) then
+    return -1
+end
+redis.call('RPUSH', KEYS[1], ARGV[1])
+redis.call('EXPIRE', KEYS[1], tonumber(ARGV[3]))
+return len + 1
+"""
+
 # resolve-interrupt: 检查 status=pending → 设 resume_data + status=resolved → PUBLISH
 _LUA_RESOLVE_INTERRUPT = """
 local status = redis.call('HGET', KEYS[1], 'status')
@@ -99,6 +113,7 @@ class RedisRuntimeStore:
         self._script_compare_and_del = None
         self._script_compare_and_expire = None
         self._script_drain_all = None
+        self._script_inject_capped = None
         self._script_resolve_interrupt = None
 
         # 本 Worker 已知的 interrupt subscription，用于 shutdown_cleanup
@@ -110,6 +125,7 @@ class RedisRuntimeStore:
         self._script_compare_and_del = self._redis.register_script(_LUA_COMPARE_AND_DEL)
         self._script_compare_and_expire = self._redis.register_script(_LUA_COMPARE_AND_EXPIRE)
         self._script_drain_all = self._redis.register_script(_LUA_DRAIN_ALL)
+        self._script_inject_capped = self._redis.register_script(_LUA_INJECT_CAPPED)
         self._script_resolve_interrupt = self._redis.register_script(_LUA_RESOLVE_INTERRUPT)
         logger.info("Redis Lua scripts registered")
 
@@ -281,9 +297,20 @@ class RedisRuntimeStore:
     # ── Message queue ──
 
     async def inject_message(self, message_id: str, content: str) -> None:
+        # Atomic LLEN/RPUSH/EXPIRE via Lua — no TOCTOU between the cap check and
+        # the push. Returns -1 when the queue is already at MAX_INJECT_QUEUE_SIZE.
+        # (Redis-down propagates as ConnectionError → 5xx; we do NOT silently drop
+        # an inject, mirroring the loud-failure stance of the rest of the path.)
         key = self._queue_key(message_id)
-        await self._redis.rpush(key, content)
-        await self._redis.expire(key, self._execution_timeout)
+        result = await self._script_inject_capped(
+            keys=[key],
+            args=[content, config.MAX_INJECT_QUEUE_SIZE, self._execution_timeout],
+        )
+        if result == -1:
+            raise InjectQueueFull(
+                f"Inject queue full for {message_id} "
+                f"(max {config.MAX_INJECT_QUEUE_SIZE} pending)"
+            )
         logger.debug(f"Message injected for {message_id}")
 
     async def drain_messages(self, message_id: str) -> List[str]:

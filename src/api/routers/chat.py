@@ -16,6 +16,7 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from pydantic import ValidationError
 
+from config import config
 from utils.time import utc_now
 
 from api.dependencies import (
@@ -94,6 +95,15 @@ async def send_message(
             f"{'.'.join(str(x) for x in err['loc'])}: {err['msg']}" for err in e.errors()
         )
         raise HTTPException(status_code=422, detail=f"Invalid chat payload: {msgs}")
+
+    # 附件数量上限：尽早拒绝（在建会话 / 转换之前），避免无界附件导致长时间串行
+    # 转换 + DB 写入 + USER_INPUT 归属串膨胀。每个文件的 20MB 大小限制仍在转换处生效。
+    attachment_count = sum(1 for f in files if f.filename)
+    if attachment_count > config.MAX_CHAT_ATTACHMENTS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Too many attachments: {attachment_count} (max {config.MAX_CHAT_ATTACHMENTS})",
+        )
 
     # 为新消息准备 ID
     conversation_id = request.conversation_id

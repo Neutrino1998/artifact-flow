@@ -320,3 +320,13 @@ class TestChatInputCap:
             files={"payload": (None, json.dumps({"user_input": huge}))},
         )
         assert resp.status_code == 422
+
+    async def test_too_many_attachments_rejected(self, client: AsyncClient):
+        # Count cap is enforced at the top of the handler (before conversation
+        # creation / conversion), so no background engine task is spawned.
+        n = config.MAX_CHAT_ATTACHMENTS + 1
+        parts = [("payload", (None, json.dumps({"user_input": "hi"})))]
+        for i in range(n):
+            parts.append(("files", (f"f{i}.txt", b"x", "text/plain")))
+        resp = await client.post("/api/v1/chat", files=parts)
+        assert resp.status_code == 422
