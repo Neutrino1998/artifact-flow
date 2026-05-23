@@ -17,6 +17,10 @@ export default function MessageInput() {
   // POST returns — a gap that's long when attachments are converted server-side.
   const [sending, setSending] = useState(false);
   const sendingRef = useRef(false);
+  // Re-entrancy guard for inject (lighter than the new-message lock: no button
+  // disable / spinner, since inject is ms-fast and the button doubles as Stop
+  // once the box is empty). Just blocks a rapid double-fire of the same inject.
+  const injectingRef = useRef(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const isComposingRef = useRef(false);
@@ -69,11 +73,15 @@ export default function MessageInput() {
       if (!trimmed) return;
       const convId = streamConversationId || conversationId;
       if (convId) {
+        if (injectingRef.current) return;  // block rapid double-fire of the same inject
+        injectingRef.current = true;
         try {
           await injectMessage(convId, trimmed);
           setContent('');
         } catch (err) {
           console.error('Inject failed:', err);
+        } finally {
+          injectingRef.current = false;
         }
       }
       return;
