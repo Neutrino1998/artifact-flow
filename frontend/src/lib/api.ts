@@ -205,11 +205,30 @@ export function getConversation(convId: string, options?: GetConversationOptions
   return req;
 }
 
-export async function sendMessage(body: ChatRequest) {
-  const res = await request<ChatResponse>('/api/v1/chat', {
+export async function sendMessage(body: ChatRequest, files?: File[]) {
+  // multipart/form-data: `payload` is the ChatRequest JSON, `files` are optional
+  // attachments. Do NOT set Content-Type — the browser must set the multipart
+  // boundary itself.
+  const formData = new FormData();
+  formData.append('payload', JSON.stringify(body));
+  if (files) {
+    for (const f of files) formData.append('files', f);
+  }
+
+  const httpRes = await fetch(`${BASE_URL}/api/v1/chat`, {
     method: 'POST',
-    body: JSON.stringify(body),
+    headers: authHeaders(),
+    body: formData,
   });
+  if (httpRes.status === 401) {
+    useAuthStore.getState().logout();
+    throw new ApiError(401, 'Session expired');
+  }
+  if (!httpRes.ok) {
+    const errBody = await httpRes.text().catch(() => '');
+    throw new ApiError(httpRes.status, formatApiError(httpRes.status, errBody));
+  }
+  const res = (await httpRes.json()) as ChatResponse;
   // Message/branch updates make cached conversation detail stale.
   invalidateConversationCache(body.conversation_id ?? res.conversation_id);
   return res;
@@ -282,27 +301,6 @@ export async function uploadFile(sessionId: string, file: File): Promise<UploadR
   formData.append('file', file);
 
   const res = await fetch(`${BASE_URL}/api/v1/artifacts/${sessionId}/upload`, {
-    method: 'POST',
-    headers: authHeaders(),
-    body: formData,
-  });
-
-  if (res.status === 401) {
-    useAuthStore.getState().logout();
-    throw new Error('Session expired');
-  }
-  if (!res.ok) {
-    const body = await res.text().catch(() => '');
-    throw new Error(`Upload failed: ${body}`);
-  }
-  return res.json();
-}
-
-export async function uploadFileNewSession(file: File): Promise<UploadResponse> {
-  const formData = new FormData();
-  formData.append('file', file);
-
-  const res = await fetch(`${BASE_URL}/api/v1/artifacts/upload`, {
     method: 'POST',
     headers: authHeaders(),
     body: formData,

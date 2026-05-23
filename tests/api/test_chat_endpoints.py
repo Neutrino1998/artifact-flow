@@ -357,10 +357,12 @@ class TestChatStreamE2E:
 
         try:
             with patch("models.llm.astream_with_retry", _make_fake_llm_stream("Hello from agent")):
-                # 1. POST /chat — starts background execution
+                # 1. POST /chat — multipart: `payload` form field carries the
+                # ChatRequest JSON; (None, value) sends it as a form field (no
+                # file attachments here). Starts background execution.
                 resp = await client.post(
                     "/api/v1/chat",
-                    json={"user_input": "Hi there"},
+                    files={"payload": (None, json.dumps({"user_input": "Hi there"}))},
                 )
                 assert resp.status_code == 200
                 body = resp.json()
@@ -414,6 +416,71 @@ class TestChatStreamE2E:
                 # 5. Verify lease was cleaned up
                 assert await runner.store.get_leased_message_id(conv_id) is None
                 assert await runner.store.get_interactive_message_id(conv_id) is None
+        finally:
+            deps._agents = old_agents
+            deps._tools = old_tools
+            deps._execution_runner = old_runner
+
+    async def test_chat_with_attachment_creates_artifact_and_attribution(
+        self, client: AsyncClient, app, db_manager: DatabaseManager
+    ):
+        """A file attached to POST /chat becomes a user_upload artifact, and the
+        USER_INPUT event (LLM-facing) carries an attribution block — while the
+        display field Message.user_input stays the raw user text."""
+        fake_agents = {"lead_agent": _FakeAgentConfig()}
+        runner: ExecutionRunner = app.dependency_overrides[get_execution_runner]()
+
+        old_agents = deps._agents
+        old_tools = deps._tools
+        old_runner = deps._execution_runner
+        deps._agents = fake_agents
+        deps._tools = {}
+        deps._execution_runner = runner
+
+        try:
+            with patch("models.llm.astream_with_retry", _make_fake_llm_stream("Done")):
+                resp = await client.post(
+                    "/api/v1/chat",
+                    files={
+                        "payload": (None, json.dumps({"user_input": "Summarize the file"})),
+                        "files": ("notes.txt", b"hello world from attachment", "text/plain"),
+                    },
+                )
+                assert resp.status_code == 200
+                body = resp.json()
+                conv_id = body["conversation_id"]
+                message_id = body["message_id"]
+
+                for _ in range(50):
+                    if message_id not in runner._tasks:
+                        break
+                    await asyncio.sleep(0.1)
+
+                # Artifact was created from the attachment (committed before the turn).
+                art_resp = await client.get(f"/api/v1/artifacts/{conv_id}")
+                assert art_resp.status_code == 200
+                artifacts = art_resp.json()["artifacts"]
+                uploaded = [a for a in artifacts if a.get("source") == "user_upload"]
+                assert len(uploaded) == 1, f"expected 1 user_upload artifact, got: {artifacts}"
+                assert uploaded[0]["original_filename"] == "notes.txt"
+                artifact_id = uploaded[0]["id"]
+
+                # Display field stays the raw user text (no attribution leakage).
+                async with db_manager.session() as session:
+                    msg = await ConversationRepository(session).get_message(message_id)
+                    assert msg.user_input == "Summarize the file"
+
+                # LLM-facing USER_INPUT event carries the attribution block.
+                from repositories.message_event_repo import MessageEventRepository
+                async with db_manager.session() as session:
+                    db_events = await MessageEventRepository(session).get_by_message(message_id)
+                user_input_events = [e for e in db_events if e.event_type == "user_input"]
+                assert len(user_input_events) == 1
+                content = user_input_events[0].data["content"]
+                assert content.startswith("Summarize the file")
+                assert "notes.txt" in content
+                assert artifact_id in content
+                assert "read_artifact" in content
         finally:
             deps._agents = old_agents
             deps._tools = old_tools

@@ -8,6 +8,8 @@ from typing import Optional, List, Dict, Any
 from datetime import datetime
 from pydantic import BaseModel, Field
 
+from config import config
+
 
 # ============================================================
 # Request Models
@@ -15,14 +17,14 @@ from pydantic import BaseModel, Field
 
 class ChatRequest(BaseModel):
     """POST /api/v1/chat request body"""
-    user_input: str = Field(..., description="User message content")
+    user_input: str = Field(..., max_length=config.MAX_MESSAGE_CHARS, description="User message content")
     conversation_id: Optional[str] = Field(None, description="Continue existing conversation")
     parent_message_id: Optional[str] = Field(None, description="Branch from specific message")
 
 
 class InjectRequest(BaseModel):
     """POST /api/v1/chat/{conv_id}/inject request body"""
-    content: str = Field(..., description="Message content to inject into the active execution")
+    content: str = Field(..., max_length=config.MAX_MESSAGE_CHARS, description="Message content to inject into the active execution")
 
 
 class InjectResponse(BaseModel):

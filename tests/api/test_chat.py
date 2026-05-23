@@ -7,11 +7,14 @@ After commit, API's independent session can see the data.
 """
 
 import asyncio
+import json
 import uuid
 from typing import Tuple, List
 
 import pytest
 from httpx import AsyncClient
+
+from config import config
 
 from db.models import User
 from db.database import DatabaseManager
@@ -301,3 +304,19 @@ class TestResumeInterrupt:
             "always_allow": False,
         })
         assert resp.status_code == 404
+
+
+class TestChatInputCap:
+    """Input-size guardrail: oversized user_input is rejected at the boundary
+    (before any execution) so it can't overflow the first LLM call."""
+
+    async def test_oversized_user_input_rejected(self, client: AsyncClient):
+        # Over-cap is rejected by the schema validator inside the endpoint,
+        # before conversation creation / submit — so no background engine task
+        # is spawned by this request.
+        huge = "x" * (config.MAX_MESSAGE_CHARS + 1)
+        resp = await client.post(
+            "/api/v1/chat",
+            files={"payload": (None, json.dumps({"user_input": huge}))},
+        )
+        assert resp.status_code == 422

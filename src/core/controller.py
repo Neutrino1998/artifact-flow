@@ -8,7 +8,7 @@
 """
 
 import asyncio
-from typing import Awaitable, Callable, Dict, Optional, Any, AsyncGenerator
+from typing import Awaitable, Callable, Dict, List, Optional, Any, AsyncGenerator
 from uuid import uuid4
 
 from sqlalchemy.exc import IntegrityError
@@ -91,6 +91,7 @@ class ExecutionController:
         conversation_id: Optional[str] = None,
         parent_message_id: Any = _UNSET,
         message_id: Optional[str] = None,
+        uploaded_artifacts: Optional[List[Dict[str, str]]] = None,
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """
         流式执行接口（新消息）
@@ -100,6 +101,9 @@ class ExecutionController:
             conversation_id: 对话ID
             parent_message_id: 父消息ID
             message_id: 消息ID
+            uploaded_artifacts: 本轮随消息上传的 artifact [{"id", "filename"}, ...]，
+                                用于在 USER_INPUT 事件正文（仅 LLM 可见，不入 display）
+                                追加归属说明，让 agent 知道哪些 artifact 是本轮新传的
 
         Yields:
             流式事件字典
@@ -167,6 +171,7 @@ class ExecutionController:
             message_id=message_id,
             path_events=path_events,
             always_allowed_tools=parent_always_allowed,
+            uploaded_artifacts=uploaded_artifacts,
         )
 
         logger.info(f"Processing new message (streaming) in conversation {conversation_id}")
