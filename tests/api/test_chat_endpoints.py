@@ -425,8 +425,11 @@ class TestChatStreamE2E:
         self, client: AsyncClient, app, db_manager: DatabaseManager
     ):
         """A file attached to POST /chat becomes a user_upload artifact, and the
-        USER_INPUT event (LLM-facing) carries an attribution block — while the
-        display field Message.user_input stays the raw user text."""
+        USER_INPUT event (LLM-facing) carries an attribution block listing the
+        artifact id — while the display field Message.user_input stays the raw
+        user text. The original filename is kept as a record (original_filename)
+        but NOT surfaced in the prompt (the model identifies a doc by id; the
+        human-readable name is already in the artifacts inventory title)."""
         fake_agents = {"lead_agent": _FakeAgentConfig()}
         runner: ExecutionRunner = app.dependency_overrides[get_execution_runner]()
 
@@ -443,7 +446,10 @@ class TestChatStreamE2E:
                     "/api/v1/chat",
                     files={
                         "payload": (None, json.dumps({"user_input": "Summarize the file"})),
-                        "files": ("notes.txt", b"hello world from attachment", "text/plain"),
+                        # Filename whose normalized id differs (space + caps →
+                        # meeting_notes.txt) so we can assert the prompt carries
+                        # the id, not the original filename.
+                        "files": ("Meeting Notes.txt", b"hello world from attachment", "text/plain"),
                     },
                 )
                 assert resp.status_code == 200
@@ -462,8 +468,11 @@ class TestChatStreamE2E:
                 artifacts = art_resp.json()["artifacts"]
                 uploaded = [a for a in artifacts if a.get("source") == "user_upload"]
                 assert len(uploaded) == 1, f"expected 1 user_upload artifact, got: {artifacts}"
-                assert uploaded[0]["original_filename"] == "notes.txt"
+                # Original filename is kept as a record on the artifact...
+                assert uploaded[0]["original_filename"] == "Meeting Notes.txt"
                 artifact_id = uploaded[0]["id"]
+                # ...but the id is a normalized derivation (space+caps folded).
+                assert artifact_id == "meeting_notes.txt"
 
                 # Display field stays the raw user text (no attribution leakage).
                 async with db_manager.session() as session:
@@ -478,9 +487,12 @@ class TestChatStreamE2E:
                 assert len(user_input_events) == 1
                 content = user_input_events[0].data["content"]
                 assert content.startswith("Summarize the file")
-                assert "notes.txt" in content
+                # Prompt lists the artifact id and points to read_artifact...
                 assert artifact_id in content
                 assert "read_artifact" in content
+                # ...but does NOT surface the original filename (it's a record,
+                # and the inventory title already carries the human-readable name).
+                assert "Meeting Notes.txt" not in content
         finally:
             deps._agents = old_agents
             deps._tools = old_tools

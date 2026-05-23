@@ -169,10 +169,10 @@ async def execute_loop(
     user_input_content = state["current_task"]
     _uploaded = state.get("uploaded_artifacts") or []
     if _uploaded:
-        _listing = ", ".join(
-            f'{a["id"]} (originally {a["filename"]})' if a.get("filename") else a["id"]
-            for a in _uploaded
-        )
+        # 提示词只列 id —— 模型靠 artifact id 识别文档即可；人读的原始文件名已在
+        # artifacts inventory 里(渲染为 artifact title)。uploaded_artifacts 仍保留
+        # filename 作为 record，只是不进提示词,避免与 inventory title 近似重复的噪音。
+        _listing = ", ".join(a["id"] for a in _uploaded)
         user_input_content = (
             f"{user_input_content}\n\n"
             f"[The user attached {len(_uploaded)} file(s) to this message: {_listing}. "
