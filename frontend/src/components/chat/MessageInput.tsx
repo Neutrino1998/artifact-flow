@@ -2,6 +2,7 @@
 
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { useChat } from '@/hooks/useChat';
+import { useComposerSend } from '@/hooks/useComposerSend';
 import { useStreamStore } from '@/stores/streamStore';
 import { useUIStore } from '@/stores/uiStore';
 import { useConversationStore } from '@/stores/conversationStore';
@@ -11,16 +12,6 @@ import { MAX_MESSAGE_CHARS, MAX_CHAT_ATTACHMENTS } from '@/lib/constants';
 
 export default function MessageInput() {
   const [content, setContent] = useState('');
-  // In-flight lock for the new-message POST. Ref is the actual guard (synchronous,
-  // immune to stale closures on a fast double-click/Enter); state drives the
-  // button's disabled/spinner. Needed because isStreaming only engages after the
-  // POST returns — a gap that's long when attachments are converted server-side.
-  const [sending, setSending] = useState(false);
-  const sendingRef = useRef(false);
-  // Re-entrancy guard for inject (lighter than the new-message lock: no button
-  // disable / spinner, since inject is ms-fast and the button doubles as Stop
-  // once the box is empty). Just blocks a rapid double-fire of the same inject.
-  const injectingRef = useRef(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const isComposingRef = useRef(false);
@@ -34,6 +25,10 @@ export default function MessageInput() {
   const addFiles = useStagedFilesStore((s) => s.addFiles);
   const removeFile = useStagedFilesStore((s) => s.removeFile);
   const removeFiles = useStagedFilesStore((s) => s.removeFiles);
+
+  // Snapshot → lock → await → reconcile/keep for both send and inject lives in
+  // this hook (single enforcement point); see useComposerSend.ts.
+  const { sending, submit, inject } = useComposerSend(content, setContent, stagedFiles, removeFiles);
 
   // Auto-resize textarea
   useEffect(() => {
@@ -65,57 +60,18 @@ export default function MessageInput() {
       return;
     }
 
-    const trimmed = content.trim();
-
     if (isStreaming) {
       // Inject mode: text only (attachments ride a new message, not an
-      // in-flight turn). Empty inject is a no-op.
-      if (!trimmed) return;
+      // in-flight turn). The hook owns the empty-guard / lock / reconcile.
       const convId = streamConversationId || conversationId;
-      if (convId) {
-        if (injectingRef.current) return;  // block rapid double-fire of the same inject
-        injectingRef.current = true;
-        const sentText = content;
-        try {
-          await injectMessage(convId, trimmed);
-          // Clear only if the box still holds exactly what we sent — a slow
-          // inject followed by the user typing a new instruction must not be
-          // silently wiped.
-          setContent((prev) => (prev === sentText ? '' : prev));
-        } catch (err) {
-          console.error('Inject failed:', err);
-        } finally {
-          injectingRef.current = false;
-        }
-      }
+      if (!convId) return;
+      await inject((text) => injectMessage(convId, text));
       return;
     }
 
-    // New-message send: allow files-only (empty text + attachments). Lock
-    // against double-submit for the whole in-flight POST (button + Enter both
-    // gate on `sending`). Clear the composer only on success so a failed send
-    // (e.g. 422) preserves the user's text and staged attachments.
-    if (sendingRef.current) return;
-    const filesToSend = stagedFiles.map((s) => s.file);
-    if (!trimmed && filesToSend.length === 0) return;
-    const sentText = content;
-    const sentIds = stagedFiles.map((s) => s.id);
-    sendingRef.current = true;
-    setSending(true);
-    try {
-      const ok = await sendMessage(trimmed, undefined, filesToSend.length ? filesToSend : undefined);
-      if (ok) {
-        // Reconcile, don't blindly clear: only wipe the text if it's still
-        // exactly what we sent, and only remove the files we actually sent —
-        // so anything typed/staged during the in-flight window survives.
-        setContent((prev) => (prev === sentText ? '' : prev));
-        removeFiles(sentIds);
-      }
-    } finally {
-      sendingRef.current = false;
-      setSending(false);
-    }
-  }, [content, isStreaming, cancelling, setCancelling, sendMessage, conversationId, streamConversationId, stagedFiles, removeFiles]);
+    // New-message send: text and/or staged attachments ride one POST.
+    await submit((text, files) => sendMessage(text, undefined, files));
+  }, [content, isStreaming, cancelling, setCancelling, conversationId, streamConversationId, inject, submit, sendMessage]);
 
   const handleCompositionStart = useCallback(() => {
     isComposingRef.current = true;
