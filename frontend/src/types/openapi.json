@@ -166,7 +166,7 @@
           "chat"
         ],
         "summary": "Send Message",
-        "description": "\u53d1\u9001\u65b0\u6d88\u606f\n\n\u542f\u52a8\u6267\u884c\uff0c\u8fd4\u56de stream_url \u4f9b\u524d\u7aef\u8ba2\u9605\u3002",
+        "description": "\u53d1\u9001\u65b0\u6d88\u606f\uff08multipart/form-data\uff09\n\n`payload` \u4e3a ChatRequest \u7684 JSON \u5b57\u7b26\u4e32\uff1b`files` \u4e3a\u53ef\u9009\u9644\u4ef6\u3002\u9644\u4ef6\u5728\u8d77 turn\n\u524d\u540c\u6b65\u8f6c\u6210 artifact\uff08source=user_upload\uff09\u843d\u5e93\uff0c\u5e76\u628a (id, filename) \u900f\u4f20\u8fdb\nUSER_INPUT \u4e8b\u4ef6\u6b63\u6587\uff0c\u8ba9 agent \u77e5\u9053\u54ea\u4e9b\u662f\u672c\u8f6e\u65b0\u4f20\u7684\u3002\u8fd4\u56de stream_url \u4f9b\u524d\u7aef\u8ba2\u9605\u3002",
         "operationId": "send_message_api_v1_chat_post",
         "security": [
           {
@@ -176,9 +176,9 @@
         "requestBody": {
           "required": true,
           "content": {
-            "application/json": {
+            "multipart/form-data": {
               "schema": {
-                "$ref": "#/components/schemas/ChatRequest"
+                "$ref": "#/components/schemas/Body_send_message_api_v1_chat_post"
               }
             }
           }
@@ -704,53 +704,6 @@
             }
           }
         }
-      }
-    },
-    "/api/v1/artifacts/upload": {
-      "post": {
-        "tags": [
-          "artifacts"
-        ],
-        "summary": "Upload File New Session",
-        "description": "Upload a file and create a new conversation for it.\nUse this when no session/conversation exists yet.",
-        "operationId": "upload_file_new_session_api_v1_artifacts_upload_post",
-        "requestBody": {
-          "content": {
-            "multipart/form-data": {
-              "schema": {
-                "$ref": "#/components/schemas/Body_upload_file_new_session_api_v1_artifacts_upload_post"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UploadResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ]
       }
     },
     "/api/v1/artifacts/{session_id}": {
@@ -2756,6 +2709,29 @@
         ],
         "title": "Body_bulk_import_users_api_v1_admin_users_bulk_import_post"
       },
+      "Body_send_message_api_v1_chat_post": {
+        "properties": {
+          "payload": {
+            "type": "string",
+            "title": "Payload"
+          },
+          "files": {
+            "items": {
+              "type": "string",
+              "format": "binary"
+            },
+            "type": "array",
+            "title": "Files",
+            "default": []
+          }
+        },
+        "type": "object",
+        "required": [
+          "payload",
+          "files"
+        ],
+        "title": "Body_send_message_api_v1_chat_post"
+      },
       "Body_upload_file_api_v1_artifacts__session_id__upload_post": {
         "properties": {
           "file": {
@@ -2769,20 +2745,6 @@
           "file"
         ],
         "title": "Body_upload_file_api_v1_artifacts__session_id__upload_post"
-      },
-      "Body_upload_file_new_session_api_v1_artifacts_upload_post": {
-        "properties": {
-          "file": {
-            "type": "string",
-            "format": "binary",
-            "title": "File"
-          }
-        },
-        "type": "object",
-        "required": [
-          "file"
-        ],
-        "title": "Body_upload_file_new_session_api_v1_artifacts_upload_post"
       },
       "BulkActionFailedItem": {
         "properties": {
@@ -3125,45 +3087,6 @@
         ],
         "title": "ChangePasswordRequest",
         "description": "POST /api/v1/auth/me/password request body"
-      },
-      "ChatRequest": {
-        "properties": {
-          "user_input": {
-            "type": "string",
-            "title": "User Input",
-            "description": "User message content"
-          },
-          "conversation_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Conversation Id",
-            "description": "Continue existing conversation"
-          },
-          "parent_message_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Parent Message Id",
-            "description": "Branch from specific message"
-          }
-        },
-        "type": "object",
-        "required": [
-          "user_input"
-        ],
-        "title": "ChatRequest",
-        "description": "POST /api/v1/chat request body"
       },
       "ChatResponse": {
         "properties": {
@@ -3593,6 +3516,7 @@
         "properties": {
           "content": {
             "type": "string",
+            "maxLength": 20000,
             "title": "Content",
             "description": "Message content to inject into the active execution"
           }

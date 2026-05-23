@@ -22,9 +22,19 @@ import asyncio
 from dataclasses import dataclass, field
 from typing import Protocol, runtime_checkable, Optional, Dict, Any, List, Literal
 
+from config import config
 from utils.logger import get_logger
 
 logger = get_logger("ArtifactFlow")
+
+
+class InjectQueueFull(Exception):
+    """Raised by inject_message when the pending-message queue is at capacity.
+
+    The engine loop only ever drains this queue; a rejected enqueue never
+    reaches the loop. Callers (the inject endpoint) map this to HTTP 429 —
+    transient backpressure, since drain_messages empties the queue each round.
+    """
 
 
 @runtime_checkable
@@ -56,7 +66,13 @@ class RuntimeStore(Protocol):
 
     # ── Message queue ──
 
-    async def inject_message(self, message_id: str, content: str) -> None: ...
+    async def inject_message(self, message_id: str, content: str) -> None:
+        """Enqueue a message for the active execution.
+
+        Raises InjectQueueFull if the pending queue is at capacity
+        (config.MAX_INJECT_QUEUE_SIZE) — caller maps this to HTTP 429.
+        """
+        ...
     async def drain_messages(self, message_id: str) -> List[str]: ...
 
     # ── Lease key (for stream transport lease check) ──
@@ -202,8 +218,18 @@ class InMemoryRuntimeStore:
 
     async def inject_message(self, message_id: str, content: str) -> None:
         if message_id not in self._queues:
-            self._queues[message_id] = asyncio.Queue()
-        self._queues[message_id].put_nowait(content)
+            self._queues[message_id] = asyncio.Queue(maxsize=config.MAX_INJECT_QUEUE_SIZE)
+        # put_nowait (non-blocking) on purpose: a full queue must fail fast as
+        # 429 backpressure, not block the request until the loop drains. The
+        # engine loop only drains this queue, so a rejected enqueue is invisible
+        # to it — the running turn is unaffected.
+        try:
+            self._queues[message_id].put_nowait(content)
+        except asyncio.QueueFull:
+            raise InjectQueueFull(
+                f"Inject queue full for {message_id} "
+                f"(max {config.MAX_INJECT_QUEUE_SIZE} pending)"
+            )
         logger.debug(f"Message injected for {message_id}")
 
     async def drain_messages(self, message_id: str) -> List[str]:

@@ -8,7 +8,8 @@ import asyncio
 
 import pytest
 
-from api.services.runtime_store import InMemoryRuntimeStore, _InterruptState
+from config import config
+from api.services.runtime_store import InjectQueueFull, InMemoryRuntimeStore, _InterruptState
 
 
 # ============================================================
@@ -208,6 +209,29 @@ class TestMessageQueue:
         assert "msg-1" not in store._queues
         await store.inject_message("msg-1", "auto")
         assert "msg-1" in store._queues
+
+    async def test_inject_full_queue_raises(self):
+        # Filling to MAX_INJECT_QUEUE_SIZE is fine; the next inject is rejected
+        # loudly (mapped to HTTP 429 by the endpoint) rather than blocking.
+        store = InMemoryRuntimeStore()
+        for i in range(config.MAX_INJECT_QUEUE_SIZE):
+            await store.inject_message("msg-1", f"m{i}")
+        with pytest.raises(InjectQueueFull):
+            await store.inject_message("msg-1", "overflow")
+
+    async def test_inject_full_is_transient_after_drain(self):
+        # 429 is backpressure, not a permanent failure: draining empties the
+        # queue (what the engine loop does each round) and injecting works again.
+        store = InMemoryRuntimeStore()
+        for i in range(config.MAX_INJECT_QUEUE_SIZE):
+            await store.inject_message("msg-1", f"m{i}")
+
+        drained = await store.drain_messages("msg-1")
+        assert len(drained) == config.MAX_INJECT_QUEUE_SIZE
+
+        # Queue is empty now — inject succeeds again.
+        await store.inject_message("msg-1", "after-drain")
+        assert await store.drain_messages("msg-1") == ["after-drain"]
 
 
 # ============================================================

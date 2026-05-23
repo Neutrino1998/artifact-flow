@@ -90,6 +90,15 @@ class Settings(BaseSettings):
     # 上传限制
     MAX_UPLOAD_SIZE: int = 20 * 1024 * 1024  # 20MB
 
+    # 输入限制
+    MAX_MESSAGE_CHARS: int = 20000   # 单条用户输入 / inject 内容字符上限（超即 422）；
+                                     # 超大粘贴在前端转为暂存附件而非 inline 消息
+    MAX_INJECT_QUEUE_SIZE: int = 5   # 单轮执行待处理 inject 队列深度上限（满即 429 背压；
+                                     # 最坏单次 drain = MAX_MESSAGE_CHARS × 此值，详见输入挡板设计）
+    MAX_CHAT_ATTACHMENTS: int = 10   # 单条 /chat 消息附件数量上限（超即 422）；上传后逐个
+                                     # 串行转换落库，限制总转换时长 / DB 写入 / 归属串膨胀。
+                                     # 注：原始上传带宽 / 临时盘占用属代理层（nginx client_max_body_size）
+
     # 批量导入用户（CSV）
     MAX_BULK_IMPORT_ROWS: int = 1000          # 行数上限，超过整体拒绝（防误传）
     MAX_BULK_IMPORT_BYTES: int = 5 * 1024 * 1024  # 5MB 字节上限（先于行数检查，防恶意大文件）

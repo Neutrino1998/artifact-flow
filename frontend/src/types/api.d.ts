@@ -87,9 +87,11 @@ export interface paths {
         put?: never;
         /**
          * Send Message
-         * @description 发送新消息
+         * @description 发送新消息（multipart/form-data）
          *
-         *     启动执行，返回 stream_url 供前端订阅。
+         *     `payload` 为 ChatRequest 的 JSON 字符串；`files` 为可选附件。附件在起 turn
+         *     前同步转成 artifact（source=user_upload）落库，并把 (id, filename) 透传进
+         *     USER_INPUT 事件正文，让 agent 知道哪些是本轮新传的。返回 stream_url 供前端订阅。
          */
         post: operations["send_message_api_v1_chat_post"];
         delete?: never;
@@ -262,27 +264,6 @@ export interface paths {
          *     通过 RuntimeStore.resolve_interrupt() 唤醒暂停的 coroutine。
          */
         post: operations["resume_execution_api_v1_chat__conv_id__resume_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/artifacts/upload": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Upload File New Session
-         * @description Upload a file and create a new conversation for it.
-         *     Use this when no session/conversation exists yet.
-         */
-        post: operations["upload_file_new_session_api_v1_artifacts_upload_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1158,16 +1139,18 @@ export interface components {
              */
             file: string;
         };
+        /** Body_send_message_api_v1_chat_post */
+        Body_send_message_api_v1_chat_post: {
+            /** Payload */
+            payload: string;
+            /**
+             * Files
+             * @default []
+             */
+            files: string[];
+        };
         /** Body_upload_file_api_v1_artifacts__session_id__upload_post */
         Body_upload_file_api_v1_artifacts__session_id__upload_post: {
-            /**
-             * File
-             * Format: binary
-             */
-            file: string;
-        };
-        /** Body_upload_file_new_session_api_v1_artifacts_upload_post */
-        Body_upload_file_new_session_api_v1_artifacts_upload_post: {
             /**
              * File
              * Format: binary
@@ -1386,27 +1369,6 @@ export interface components {
              * @description New password
              */
             new_password: string;
-        };
-        /**
-         * ChatRequest
-         * @description POST /api/v1/chat request body
-         */
-        ChatRequest: {
-            /**
-             * User Input
-             * @description User message content
-             */
-            user_input: string;
-            /**
-             * Conversation Id
-             * @description Continue existing conversation
-             */
-            conversation_id?: string | null;
-            /**
-             * Parent Message Id
-             * @description Branch from specific message
-             */
-            parent_message_id?: string | null;
         };
         /**
          * ChatResponse
@@ -2240,7 +2202,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["ChatRequest"];
+                "multipart/form-data": components["schemas"]["Body_send_message_api_v1_chat_post"];
             };
         };
         responses: {
@@ -2513,39 +2475,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ResumeResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    upload_file_new_session_api_v1_artifacts_upload_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "multipart/form-data": components["schemas"]["Body_upload_file_new_session_api_v1_artifacts_upload_post"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["UploadResponse"];
                 };
             };
             /** @description Validation Error */

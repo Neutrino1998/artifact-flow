@@ -77,7 +77,13 @@ class APIClient:
             if parent_message_id:
                 payload["parent_message_id"] = parent_message_id
 
-            resp = await client.post("/api/v1/chat", json=payload, headers=self._auth_headers())
+            # /chat is multipart: the ChatRequest JSON goes in a `payload` form
+            # field; (None, value) sends it as a form field (no attachments).
+            resp = await client.post(
+                "/api/v1/chat",
+                files={"payload": (None, json.dumps(payload))},
+                headers=self._auth_headers(),
+            )
             resp.raise_for_status()
             data = resp.json()
 

@@ -2,16 +2,16 @@
 
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { useChat } from '@/hooks/useChat';
+import { useComposerSend } from '@/hooks/useComposerSend';
 import { useStreamStore } from '@/stores/streamStore';
 import { useUIStore } from '@/stores/uiStore';
-import { useArtifactStore } from '@/stores/artifactStore';
 import { useConversationStore } from '@/stores/conversationStore';
+import { useStagedFilesStore } from '@/stores/stagedFilesStore';
 import { injectMessage, cancelExecution } from '@/lib/api';
-import { useUpload } from '@/hooks/useUpload';
+import { MAX_MESSAGE_CHARS, MAX_CHAT_ATTACHMENTS } from '@/lib/constants';
 
 export default function MessageInput() {
   const [content, setContent] = useState('');
-  const [uploadProgress, setUploadProgress] = useState<{ current: number; total: number } | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const isComposingRef = useRef(false);
@@ -21,8 +21,14 @@ export default function MessageInput() {
   const setCancelling = useStreamStore((s) => s.setCancelling);
   const toggleArtifactPanel = useUIStore((s) => s.toggleArtifactPanel);
 
-  const uploading = useArtifactStore((s) => s.uploading);
-  const upload = useUpload();
+  const stagedFiles = useStagedFilesStore((s) => s.files);
+  const addFiles = useStagedFilesStore((s) => s.addFiles);
+  const removeFile = useStagedFilesStore((s) => s.removeFile);
+  const removeFiles = useStagedFilesStore((s) => s.removeFiles);
+
+  // Snapshot → lock → await → reconcile/keep for both send and inject lives in
+  // this hook (single enforcement point); see useComposerSend.ts.
+  const { sending, submit, inject } = useComposerSend(content, setContent, stagedFiles, removeFiles);
 
   // Auto-resize textarea
   useEffect(() => {
@@ -54,26 +60,18 @@ export default function MessageInput() {
       return;
     }
 
-    const trimmed = content.trim();
-    if (!trimmed) return;
-
     if (isStreaming) {
-      // Inject mode: send to active execution
+      // Inject mode: text only (attachments ride a new message, not an
+      // in-flight turn). The hook owns the empty-guard / lock / reconcile.
       const convId = streamConversationId || conversationId;
-      if (convId) {
-        try {
-          await injectMessage(convId, trimmed);
-          setContent('');
-        } catch (err) {
-          console.error('Inject failed:', err);
-        }
-      }
+      if (!convId) return;
+      await inject((text) => injectMessage(convId, text));
       return;
     }
 
-    setContent('');
-    await sendMessage(trimmed);
-  }, [content, isStreaming, cancelling, setCancelling, sendMessage, conversationId, streamConversationId]);
+    // New-message send: text and/or staged attachments ride one POST.
+    await submit((text, files) => sendMessage(text, undefined, files));
+  }, [content, isStreaming, cancelling, setCancelling, conversationId, streamConversationId, inject, submit, sendMessage]);
 
   const handleCompositionStart = useCallback(() => {
     isComposingRef.current = true;
@@ -97,20 +95,47 @@ export default function MessageInput() {
     [handleSend]
   );
 
+  // A paste larger than the message cap is diverted to a staged .txt
+  // attachment instead of being inlined (which would hit the 422 cap and
+  // bloat context). Smaller pastes fall through to normal insertion (capped
+  // by the textarea maxLength).
+  const handlePaste = useCallback(
+    (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+      if (isStreaming) return;
+      const text = e.clipboardData?.getData('text/plain') ?? '';
+      // Divert a huge paste to a staged file only if there's room; at the
+      // attachment cap, let it paste inline (textarea maxLength caps it)
+      // rather than silently dropping it.
+      if (text.length > MAX_MESSAGE_CHARS && stagedFiles.length < MAX_CHAT_ATTACHMENTS) {
+        e.preventDefault();
+        const ts = new Date().toISOString().replace(/[:.]/g, '-');
+        const file = new File([text], `pasted-${ts}.txt`, { type: 'text/plain' });
+        addFiles([file]);
+      }
+    },
+    [isStreaming, addFiles, stagedFiles.length]
+  );
+
   const handleFileSelect = useCallback(() => {
     fileInputRef.current?.click();
   }, []);
 
-  const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (files && files.length > 0) {
-      upload(Array.from(files), { onProgress: setUploadProgress });
-    }
-    // Reset input so the same files can be selected again
-    e.target.value = '';
-  }, [upload]);
+  const handleFileChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const files = e.target.files;
+      if (files && files.length > 0) {
+        addFiles(Array.from(files));
+      }
+      // Reset input so the same files can be selected again
+      e.target.value = '';
+    },
+    [addFiles]
+  );
 
-  const uploadDisabled = uploading || isStreaming;
+  const atAttachmentCap = stagedFiles.length >= MAX_CHAT_ATTACHMENTS;
+  const attachDisabled = isStreaming || atAttachmentCap;
+  const nearLimit = content.length > MAX_MESSAGE_CHARS * 0.8;
+  const hasStaged = stagedFiles.length > 0;
 
   return (
     <div className="relative px-4 pt-4 pb-5">
@@ -120,13 +145,45 @@ export default function MessageInput() {
         <div
           className="bg-surface dark:bg-surface-dark border border-border dark:border-border-dark focus-within:border-accent dark:focus-within:border-accent rounded-2xl shadow-float px-4 py-3 transition-colors"
         >
+          {/* Staged attachment chips */}
+          {hasStaged && (
+            <div className="flex flex-wrap gap-1.5 mb-2">
+              {stagedFiles.map((sf) => (
+                <span
+                  key={sf.id}
+                  className="inline-flex items-center gap-1 max-w-[200px] pl-2 pr-1 py-1 rounded-lg bg-bg dark:bg-bg-dark border border-border dark:border-border-dark text-xs text-text-secondary dark:text-text-secondary-dark"
+                  title={sf.file.name}
+                >
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
+                    <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+                  </svg>
+                  <span className="truncate">{sf.file.name}</span>
+                  <button
+                    onClick={() => removeFile(sf.id)}
+                    className="shrink-0 p-0.5 rounded hover:bg-surface dark:hover:bg-surface-dark text-text-tertiary dark:text-text-tertiary-dark"
+                    aria-label={`Remove ${sf.file.name}`}
+                  >
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                      <path d="M18 6L6 18M6 6l12 12" />
+                    </svg>
+                  </button>
+                </span>
+              ))}
+              <span className="inline-flex items-center px-1 text-xs tabular-nums text-text-tertiary dark:text-text-tertiary-dark">
+                {stagedFiles.length}/{MAX_CHAT_ATTACHMENTS}
+              </span>
+            </div>
+          )}
+
           <textarea
             ref={textareaRef}
             value={content}
             onChange={(e) => setContent(e.target.value)}
             onKeyDown={handleKeyDown}
+            onPaste={handlePaste}
             onCompositionStart={handleCompositionStart}
             onCompositionEnd={handleCompositionEnd}
+            maxLength={MAX_MESSAGE_CHARS}
             placeholder={
               isStreaming
                 ? '输入追加指令，按 Enter 发送...'
@@ -149,28 +206,17 @@ export default function MessageInput() {
                 className="hidden"
               />
 
-              {/* Upload file */}
+              {/* Attach file (stages — sent with the next message) */}
               <button
                 onClick={handleFileSelect}
-                disabled={uploadDisabled}
+                disabled={attachDisabled}
                 className="p-1.5 rounded-lg text-text-secondary dark:text-text-secondary-dark hover:bg-surface dark:hover:bg-bg-dark transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                aria-label="Upload file"
-                title="上传文件（支持多选）"
+                aria-label="Attach file"
+                title={atAttachmentCap ? `最多 ${MAX_CHAT_ATTACHMENTS} 个附件` : '添加附件（随消息发送，支持多选）'}
               >
-                {uploading ? (
-                  <span className="flex items-center gap-1">
-                    <svg width="16" height="16" viewBox="0 0 16 16" className="animate-spin">
-                      <circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" strokeWidth="2" strokeDasharray="28" strokeDashoffset="8" />
-                    </svg>
-                    {uploadProgress && (
-                      <span className="text-xs tabular-nums">{uploadProgress.current}/{uploadProgress.total}</span>
-                    )}
-                  </span>
-                ) : (
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
-                  </svg>
-                )}
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+                </svg>
               </button>
 
               {/* Artifact panel toggle */}
@@ -185,26 +231,35 @@ export default function MessageInput() {
                   <path d="M9.5 2v12" />
                 </svg>
               </button>
+
+              {/* Char counter — only when approaching the cap */}
+              {nearLimit && (
+                <span className="ml-1 text-xs tabular-nums text-text-tertiary dark:text-text-tertiary-dark">
+                  {content.length}/{MAX_MESSAGE_CHARS}
+                </span>
+              )}
             </div>
 
             {/* Unified Send / Stop / Cancelling / Inject button */}
             {(() => {
               const isStop = isStreaming && !content.trim() && !cancelling;
+              const sendDisabled =
+                (!isStreaming && !content.trim() && !hasStaged) || cancelling || sending;
               return (
                 <button
                   onClick={handleSend}
-                  disabled={(!isStreaming && !content.trim()) || cancelling}
+                  disabled={sendDisabled}
                   className={`w-8 h-8 flex items-center justify-center rounded-full transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
                     isStop || cancelling
                       ? 'bg-red-500 text-white hover:bg-red-600'
                       : 'bg-accent text-white hover:bg-accent-hover'
                   }`}
                   aria-label={
-                    cancelling ? 'Cancelling' : isStop ? 'Stop generation' : isStreaming ? 'Inject message' : 'Send message'
+                    cancelling ? 'Cancelling' : sending ? 'Sending' : isStop ? 'Stop generation' : isStreaming ? 'Inject message' : 'Send message'
                   }
-                  title={cancelling ? '正在停止…' : isStop ? '停止生成' : isStreaming ? '追加指令' : '发送消息'}
+                  title={cancelling ? '正在停止…' : sending ? '发送中…' : isStop ? '停止生成' : isStreaming ? '追加指令' : '发送消息'}
                 >
-                  {cancelling ? (
+                  {cancelling || sending ? (
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="animate-spin">
                       <path d="M21 12a9 9 0 1 1-6.219-8.56" strokeLinecap="round" />
                     </svg>

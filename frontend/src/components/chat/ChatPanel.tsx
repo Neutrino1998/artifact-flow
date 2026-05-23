@@ -4,7 +4,7 @@ import { useState, useCallback } from 'react';
 import { useConversationStore } from '@/stores/conversationStore';
 import { useStreamStore } from '@/stores/streamStore';
 import { useUIStore } from '@/stores/uiStore';
-import { useUpload } from '@/hooks/useUpload';
+import { useStagedFilesStore } from '@/stores/stagedFilesStore';
 import MessageList from './MessageList';
 import MessageInput from './MessageInput';
 import WelcomeTips from './WelcomeTips';
@@ -33,14 +33,18 @@ export default function ChatPanel() {
   const observabilityVisible = useUIStore((s) => s.observabilityVisible);
   const isAdmin = useAuthStore((s) => s.user?.role === 'admin');
 
-  const upload = useUpload();
+  const addFiles = useStagedFilesStore((s) => s.addFiles);
   const [isDragOver, setIsDragOver] = useState(false);
 
-  const handleDrop = useCallback(async (e: React.DragEvent) => {
+  const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     setIsDragOver(false);
-    await upload(Array.from(e.dataTransfer.files));
-  }, [upload]);
+    // Attachments ride a new message, not an in-flight turn — ignore drops
+    // while streaming (matches the disabled attach button during streaming).
+    if (isStreaming) return;
+    const files = Array.from(e.dataTransfer.files);
+    if (files.length > 0) addFiles(files);
+  }, [isStreaming, addFiles]);
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();

@@ -4,6 +4,7 @@ import { useCallback } from 'react';
 import { useConversationStore } from '@/stores/conversationStore';
 import { useStreamStore } from '@/stores/streamStore';
 import { useArtifactStore } from '@/stores/artifactStore';
+import { useStagedFilesStore } from '@/stores/stagedFilesStore';
 import { useUIStore } from '@/stores/uiStore';
 import { useSSE } from '@/hooks/useSSE';
 import type { ChatRequest } from '@/types';
@@ -36,7 +37,7 @@ export function useChat() {
   const lastMessageId = branchPath.length > 0 ? branchPath[branchPath.length - 1].id : null;
 
   const sendMessage = useCallback(
-    async (content: string, parentMessageId?: string | null) => {
+    async (content: string, parentMessageId?: string | null, files?: File[]): Promise<boolean> => {
       // Capture nav-gen BEFORE the await. If the user clicks New Chat or
       // switches to another conversation while api.sendMessage() is in
       // flight, the engine still runs server-side (runner.submit is
@@ -66,7 +67,7 @@ export function useChat() {
         }
 
         const isNew = !current?.id;
-        const res = await api.sendMessage(body);
+        const res = await api.sendMessage(body, files);
 
         // Sidebar refresh fires BEFORE the nav-gen check on purpose.
         // The server has created the conversation regardless of whether
@@ -90,7 +91,9 @@ export function useChat() {
           setConversationActiveMessage(res.conversation_id, res.message_id);
         }
 
-        if (myNavGen !== getNavGen()) return;
+        // Send already succeeded server-side; nav changed so we don't redirect
+        // into the abandoned context, but report success so the composer clears.
+        if (myNavGen !== getNavGen()) return true;
 
         setPendingUserMessage(content);
         // Track rerun/edit parent for branchPath truncation
@@ -101,12 +104,29 @@ export function useChat() {
         // connect() now also flips streamStore into streaming state, so
         // sendMessage no longer needs to call startStream itself.
         connect(res.stream_url, res.conversation_id, res.message_id);
+
+        // Attachments became user_upload artifacts server-side before the turn
+        // started; surface them in the panel now — the SSE stream won't
+        // re-emit pre-created artifacts. Mirrors the prior upload UX.
+        if (files && files.length > 0) {
+          refreshArtifactList(
+            res.conversation_id,
+            setArtifacts,
+            setArtifactSessionId,
+            () => useArtifactStore.getState().sessionId,
+          );
+          setArtifactPanelVisible(true);
+        }
+        return true;
       } catch (err) {
-        if (myNavGen !== getNavGen()) return;
+        // Failure: report it so the caller preserves composer state (text +
+        // staged attachments) instead of discarding the user's input.
+        if (myNavGen !== getNavGen()) return false;
         setError((err as Error).message);
+        return false;
       }
     },
-    [current?.id, lastMessageId, setPendingUserMessage, setStreamParentId, connect, setError, setConversations, setConversationActiveMessage]
+    [current?.id, lastMessageId, setPendingUserMessage, setStreamParentId, connect, setError, setConversations, setConversationActiveMessage, setArtifacts, setArtifactSessionId, setArtifactPanelVisible]
   );
 
   // Switch to an existing conversation: tear down the previous conversation's
@@ -131,6 +151,7 @@ export function useChat() {
       disconnect();
       resetStream();
       resetArtifacts();
+      useStagedFilesStore.getState().clear();  // composer attachments don't carry across conversations
       setCurrentLoading(true);
       // Fire-and-forget sidebar refresh: the previous conv's SSE was just
       // disconnected, so any terminal events emitted while we're away will
@@ -214,6 +235,7 @@ export function useChat() {
     disconnect();
     resetStream();
     resetArtifacts();
+    useStagedFilesStore.getState().clear();  // composer attachments don't carry into a new chat
     setCurrent(null);
     setCurrentLoading(false);
   }, [disconnect, resetStream, resetArtifacts, setCurrent, setCurrentLoading]);

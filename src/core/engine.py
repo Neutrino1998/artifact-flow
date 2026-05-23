@@ -100,6 +100,7 @@ def create_initial_state(
     message_id: str,
     path_events: Optional[List[Any]] = None,  # List[ExecutionEvent] with is_historical=True
     always_allowed_tools: Optional[List[str]] = None,
+    uploaded_artifacts: Optional[List[Dict[str, str]]] = None,
 ) -> Dict[str, Any]:
     """
     创建初始执行状态
@@ -111,6 +112,8 @@ def create_initial_state(
         path_events: 当前 conversation path 上的历史事件（is_historical=True），
                      作为 state["events"] 的初始内容；执行中新追加的事件 is_historical=False
         always_allowed_tools: 本会话已允许的工具列表
+        uploaded_artifacts: 本轮随消息上传的 artifact [{"id", "filename"}, ...]，
+                            execute_loop 据此在 USER_INPUT 事件正文追加归属说明（仅 LLM 可见）
     """
     return {
         "current_task": task,
@@ -123,6 +126,7 @@ def create_initial_state(
         "events": list(path_events) if path_events else [],
         "execution_metrics": create_initial_metrics(),
         "response": "",
+        "uploaded_artifacts": list(uploaded_artifacts) if uploaded_artifacts else [],
     }
 
 
@@ -159,10 +163,25 @@ async def execute_loop(
     compaction_runner = CompactionRunner(agents=agents, emit=emit)
 
     # 3a. 记录用户原始输入为事件（统一 context 构建路径）
+    # 本轮随消息上传的 artifact 在事件正文（仅 LLM 可见，不入 Message.user_input
+    # display）追加归属说明 —— 让 agent 能把"分析这个"对应到刚传的文件，并知道用
+    # read_artifact 读全文。不改 state["current_task"]：它还被 compaction 复用。
+    user_input_content = state["current_task"]
+    _uploaded = state.get("uploaded_artifacts") or []
+    if _uploaded:
+        # 提示词只列 id —— 模型靠 artifact id 识别文档即可；人读的原始文件名已在
+        # artifacts inventory 里(渲染为 artifact title)。uploaded_artifacts 仍保留
+        # filename 作为 record，只是不进提示词,避免与 inventory title 近似重复的噪音。
+        _listing = ", ".join(a["id"] for a in _uploaded)
+        user_input_content = (
+            f"{user_input_content}\n\n"
+            f"[The user attached {len(_uploaded)} file(s) to this message: {_listing}. "
+            f"Use read_artifact with the id for full content.]"
+        )
     state["events"].append(ExecutionEvent(
         event_type=StreamEventType.USER_INPUT.value,
         agent_name="lead_agent",
-        data={"content": state["current_task"]},
+        data={"content": user_input_content},
     ))
 
     # ── closures ──

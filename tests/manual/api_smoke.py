@@ -124,8 +124,9 @@ async def test_chat_send_message() -> Optional[dict]:
     log("Testing POST /api/v1/chat...")
 
     async with httpx.AsyncClient(base_url=BASE_URL, timeout=TIMEOUT, headers=auth_headers()) as client:
-        resp = await client.post("/api/v1/chat", json={
-            "content": "你好，请简单介绍一下你自己"
+        # /chat is multipart: ChatRequest JSON in a `payload` form field.
+        resp = await client.post("/api/v1/chat", files={
+            "payload": (None, json.dumps({"user_input": "你好，请简单介绍一下你自己"})),
         })
 
         if resp.status_code == 200:

@@ -227,6 +227,23 @@ class TestMessageQueue:
         messages = await store.drain_messages("test_msg_q_none")
         assert messages == []
 
+    async def test_inject_full_queue_raises_and_recovers(self, store):
+        # Mirrors the InMemory contract: full queue raises InjectQueueFull
+        # (→ 429), and draining makes it transient (inject works again).
+        from config import config
+        from api.services.runtime_store import InjectQueueFull
+
+        mid = "test_msg_q_cap"
+        for i in range(config.MAX_INJECT_QUEUE_SIZE):
+            await store.inject_message(mid, f"m{i}")
+        with pytest.raises(InjectQueueFull):
+            await store.inject_message(mid, "overflow")
+
+        drained = await store.drain_messages(mid)
+        assert len(drained) == config.MAX_INJECT_QUEUE_SIZE
+        await store.inject_message(mid, "after")
+        assert await store.drain_messages(mid) == ["after"]
+
 
 class TestCleanup:
     async def test_cleanup_execution(self, store):

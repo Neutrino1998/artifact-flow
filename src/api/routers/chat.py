@@ -10,14 +10,17 @@ Chat Router
 - POST /api/v1/chat/{conv_id}/resume - 恢复中断执行
 """
 
-from typing import Optional
+from typing import List, Optional
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
+from pydantic import ValidationError
 
+from config import config
 from utils.time import utc_now
 
 from api.dependencies import (
+    get_artifact_manager,
     get_conversation_manager,
     get_current_user,
     get_db_session,
@@ -44,7 +47,10 @@ from api.schemas.chat import (
 from api.services.controller_factory import create_controller, run_and_push, sanitize_error_event
 from api.services.stream_transport import StreamTransport
 from api.services.execution_runner import ConflictError, ExecutionRunner
+from api.services.runtime_store import InjectQueueFull
+from api.routers.artifacts import convert_and_create_artifact
 from core.conversation_manager import ConversationManager
+from tools.builtin.artifact_ops import ArtifactManager
 from repositories.base import NotFoundError
 from utils.logger import get_logger, set_request_context
 
@@ -63,18 +69,41 @@ async def _verify_ownership(
 
 @router.post("", response_model=ChatResponse)
 async def send_message(
-    request: ChatRequest,
+    payload: str = Form(...),
+    files: List[UploadFile] = File(default=[]),
     current_user: TokenPayload = Depends(get_current_user),
     conversation_manager: ConversationManager = Depends(get_conversation_manager),
+    artifact_manager: ArtifactManager = Depends(get_artifact_manager),
     stream_transport: StreamTransport = Depends(get_stream_transport),
     runner: ExecutionRunner = Depends(get_execution_runner),
 ):
     """
-    发送新消息
+    发送新消息（multipart/form-data）
 
-    启动执行，返回 stream_url 供前端订阅。
+    `payload` 为 ChatRequest 的 JSON 字符串；`files` 为可选附件。附件在起 turn
+    前同步转成 artifact（source=user_upload）落库，并把 (id, filename) 透传进
+    USER_INPUT 事件正文，让 agent 知道哪些是本轮新传的。返回 stream_url 供前端订阅。
     """
     from uuid import uuid4
+
+    # 解析 + 校验 JSON payload：model_validate_json 保留 model_fields_set，
+    # 故 parent_message_id 的 omit/null/id 三态语义不变；超 max_length 等失败 → 422
+    try:
+        request = ChatRequest.model_validate_json(payload)
+    except ValidationError as e:
+        msgs = "; ".join(
+            f"{'.'.join(str(x) for x in err['loc'])}: {err['msg']}" for err in e.errors()
+        )
+        raise HTTPException(status_code=422, detail=f"Invalid chat payload: {msgs}")
+
+    # 附件数量上限：尽早拒绝（在建会话 / 转换之前），避免无界附件导致长时间串行
+    # 转换 + DB 写入 + USER_INPUT 归属串膨胀。每个文件的 20MB 大小限制仍在转换处生效。
+    attachment_count = sum(1 for f in files if f.filename)
+    if attachment_count > config.MAX_CHAT_ATTACHMENTS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Too many attachments: {attachment_count} (max {config.MAX_CHAT_ATTACHMENTS})",
+        )
 
     # 为新消息准备 ID
     conversation_id = request.conversation_id
@@ -90,6 +119,17 @@ async def send_message(
 
     # 确保 conversation 存在（失败需返回 HTTP 错误，保留在路由层）
     await conversation_manager.ensure_conversation_exists(conversation_id, user_id=user_id)
+
+    # 附件 → artifact：在 submit 前同步处理，文件错误直接返回 HTTP 422/500，且保证
+    # artifact 在本轮首次 _build_context 之前已 commit 进 inventory。上传成功后若
+    # submit 抛 409 会留下孤儿 artifact —— 罕见（前端 streaming 时走 inject 而非
+    # /chat）且无害（下一轮 inventory 拾起），符合既有 "artifact 可无 event 支撑" 取舍。
+    uploaded_artifacts: List[dict] = []
+    for f in files:
+        if not f.filename:
+            continue  # 空 file part（前端无附件时不应出现，防御性跳过）
+        info = await convert_and_create_artifact(artifact_manager, conversation_id, f)
+        uploaded_artifacts.append({"id": info["id"], "filename": info["original_filename"]})
 
     # 设置请求上下文
     set_request_context(message_id=message_id, conv_id=conversation_id)
@@ -108,6 +148,7 @@ async def send_message(
                         user_input=request.user_input,
                         conversation_id=conversation_id,
                         message_id=message_id,
+                        uploaded_artifacts=uploaded_artifacts,
                         **parent_kwargs,
                     ),
                 )
@@ -191,7 +232,15 @@ async def inject_message(
     if not active_msg_id:
         raise HTTPException(status_code=409, detail="No active execution for this conversation")
 
-    await runner.store.inject_message(active_msg_id, request.content)
+    try:
+        await runner.store.inject_message(active_msg_id, request.content)
+    except InjectQueueFull:
+        # Transient backpressure: the queue drains every LLM round, so the
+        # client can retry shortly. The running turn is unaffected.
+        raise HTTPException(
+            status_code=429,
+            detail="Too many pending messages; the agent is still consuming the queue, retry shortly.",
+        )
 
     return InjectResponse(
         message_id=active_msg_id,

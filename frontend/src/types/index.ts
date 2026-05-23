@@ -46,7 +46,15 @@ export type ResolveDepartmentResponse = S['ResolveDepartmentResponse'];
 // Chat Types
 // ============================================================
 
-export type ChatRequest = S['ChatRequest'];
+// POST /chat is multipart/form-data (a JSON `payload` field + optional file
+// attachments), so ChatRequest is no longer an OpenAPI body schema. It's the
+// shape of the JSON `payload` field — kept in sync by hand with the backend
+// Pydantic ChatRequest (src/api/schemas/chat.py).
+export type ChatRequest = {
+  user_input: string;
+  conversation_id?: string | null;
+  parent_message_id?: string | null;
+};
 export type ChatResponse = S['ChatResponse'];
 export type InjectResponse = S['InjectResponse'];
 export type CancelResponse = S['CancelResponse'];

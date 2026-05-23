@@ -181,3 +181,53 @@ class TestVersions:
             f"/api/v1/artifacts/{session_id}/{artifact_id}/versions/1"
         )
         assert resp.status_code == 404
+
+
+class TestUploadSizeGuard:
+    """convert_and_create_artifact must reject an oversize part BEFORE reading
+    it into RAM — otherwise a 1GB upload spikes memory just to be 422'd, even
+    though multipart parsing kept it spooled on disk."""
+
+    class _FakeUpload:
+        """Minimal UploadFile stand-in: tracks whether read() was awaited."""
+
+        def __init__(self, size, read_bytes=b"", filename="big.bin"):
+            self.size = size
+            self.filename = filename
+            self._read_bytes = read_bytes
+            self.read_called = False
+
+        async def read(self):
+            self.read_called = True
+            return self._read_bytes
+
+    async def test_oversize_rejected_before_read(self, monkeypatch):
+        from fastapi import HTTPException
+        from config import config as cfg
+        from api.routers import artifacts as art
+
+        monkeypatch.setattr(cfg, "MAX_UPLOAD_SIZE", 10)
+        f = self._FakeUpload(size=11)  # parser-reported part length over the cap
+        with pytest.raises(HTTPException) as ei:
+            await art.convert_and_create_artifact(
+                artifact_manager=None, session_id="s", file=f
+            )
+        assert ei.value.status_code == 422
+        assert "too large" in ei.value.detail.lower()
+        # The whole point: the body was never materialized.
+        assert f.read_called is False
+
+    async def test_fallback_len_check_when_size_unset(self, monkeypatch):
+        from fastapi import HTTPException
+        from config import config as cfg
+        from api.routers import artifacts as art
+
+        monkeypatch.setattr(cfg, "MAX_UPLOAD_SIZE", 10)
+        # .size is None → pre-check skipped; the post-read len() guard catches it.
+        f = self._FakeUpload(size=None, read_bytes=b"a" * 11)
+        with pytest.raises(HTTPException) as ei:
+            await art.convert_and_create_artifact(
+                artifact_manager=None, session_id="s", file=f
+            )
+        assert ei.value.status_code == 422
+        assert f.read_called is True
