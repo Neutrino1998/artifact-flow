@@ -11,6 +11,12 @@ import { MAX_MESSAGE_CHARS, MAX_CHAT_ATTACHMENTS } from '@/lib/constants';
 
 export default function MessageInput() {
   const [content, setContent] = useState('');
+  // In-flight lock for the new-message POST. Ref is the actual guard (synchronous,
+  // immune to stale closures on a fast double-click/Enter); state drives the
+  // button's disabled/spinner. Needed because isStreaming only engages after the
+  // POST returns — a gap that's long when attachments are converted server-side.
+  const [sending, setSending] = useState(false);
+  const sendingRef = useRef(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const isComposingRef = useRef(false);
@@ -73,15 +79,24 @@ export default function MessageInput() {
       return;
     }
 
-    // New-message send: allow files-only (empty text + attachments). Clear the
-    // composer only on success so a failed send (e.g. 422) preserves the user's
-    // text and staged attachments instead of discarding them.
+    // New-message send: allow files-only (empty text + attachments). Lock
+    // against double-submit for the whole in-flight POST (button + Enter both
+    // gate on `sending`). Clear the composer only on success so a failed send
+    // (e.g. 422) preserves the user's text and staged attachments.
+    if (sendingRef.current) return;
     const filesToSend = stagedFiles.map((s) => s.file);
     if (!trimmed && filesToSend.length === 0) return;
-    const ok = await sendMessage(trimmed, undefined, filesToSend.length ? filesToSend : undefined);
-    if (ok) {
-      setContent('');
-      clearStaged();
+    sendingRef.current = true;
+    setSending(true);
+    try {
+      const ok = await sendMessage(trimmed, undefined, filesToSend.length ? filesToSend : undefined);
+      if (ok) {
+        setContent('');
+        clearStaged();
+      }
+    } finally {
+      sendingRef.current = false;
+      setSending(false);
     }
   }, [content, isStreaming, cancelling, setCancelling, sendMessage, conversationId, streamConversationId, stagedFiles, clearStaged]);
 
@@ -256,7 +271,7 @@ export default function MessageInput() {
             {(() => {
               const isStop = isStreaming && !content.trim() && !cancelling;
               const sendDisabled =
-                (!isStreaming && !content.trim() && !hasStaged) || cancelling;
+                (!isStreaming && !content.trim() && !hasStaged) || cancelling || sending;
               return (
                 <button
                   onClick={handleSend}
@@ -267,11 +282,11 @@ export default function MessageInput() {
                       : 'bg-accent text-white hover:bg-accent-hover'
                   }`}
                   aria-label={
-                    cancelling ? 'Cancelling' : isStop ? 'Stop generation' : isStreaming ? 'Inject message' : 'Send message'
+                    cancelling ? 'Cancelling' : sending ? 'Sending' : isStop ? 'Stop generation' : isStreaming ? 'Inject message' : 'Send message'
                   }
-                  title={cancelling ? '正在停止…' : isStop ? '停止生成' : isStreaming ? '追加指令' : '发送消息'}
+                  title={cancelling ? '正在停止…' : sending ? '发送中…' : isStop ? '停止生成' : isStreaming ? '追加指令' : '发送消息'}
                 >
-                  {cancelling ? (
+                  {cancelling || sending ? (
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="animate-spin">
                       <path d="M21 12a9 9 0 1 1-6.219-8.56" strokeLinecap="round" />
                     </svg>
