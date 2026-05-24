@@ -15,7 +15,7 @@
 | 章 | 门类 | 优先级 | 建议分支 |
 |----|------|--------|----------|
 | 一 | SSRF / 外联工具(6 项) | ✅ 已修(2026-05-24, 落 main) | ~~`fix/sec-ssrf`~~ → main |
-| 二 | grep ReDoS / 事件循环(3 项) | 🔴 移交前必修 | `fix/sec-grep-redos` |
+| 二 | grep ReDoS / 事件循环(3 项) | ✅ 已修(2026-05-24, 落 main) | ~~`fix/sec-grep-redos`~~ → main |
 | 三 | 账户与认证(6 项 + 首次强制改密) | 🟡 建议修(部分待测试中心定标) | `feat/sec-account-auth` |
 | 四 | 部署与配置(2 项) | 🟡 | `chore/sec-deploy` |
 | 五 | 前端加固(3 项) | 🟢 防御纵深 | `feat/sec-frontend-csp` |
@@ -103,9 +103,21 @@
 
 ---
 
-# 二、grep ReDoS / 事件循环 🔴 `fix/sec-grep-redos`
+# 二、grep ReDoS / 事件循环 ✅ 已修(2026-05-24, 落 main)
 
 > 与 2026-05-14 事件循环卡死事故(`docs/_archive/ops/incident-2026-05-14-eventloop-wedge.md`)**同源失败模式**——同步 CPU-bound 操作钉死 GIL,击穿引擎 cancel/timeout/lease 整套协作式取消栈。本处比已修的 `update_artifact` 连一道界都没有。
+
+> **✅ 修复状态(2026-05-24,已落 main):** GREP-01/02/03 全部修复。
+> 采用评审「优先前者」的**换线性时间引擎**路线,但实证选型后落在 `google-re2`(RE2):
+> - **GREP-01**:`_compile_pattern` 底层 Python `re`(回溯) → `re2`(线性自动机,与 ripgrep 同族)。实测 `(a+)+$` 对 `a*50+X` 从 Python re 的 ~49s(`a*30`)降到 **0.026ms**,**结构性免疫 ReDoS**。关键事实(改前必读):
+>   - **不需要墙钟 timeout**——RE2 线性,40MB 内容扫描仅 113ms;输入封顶(`GREP_CONTENT_MAX_CHARS` / `GREP_SESSION_SCAN_BUDGET_CHARS`)即算法界,worst-case loop stall < watchdog `LOOP_LAG_WARN_MS`。这与 `update_artifact` 回溯型 fuzzy 必须靠墙钟兜底是**两种机制**。
+>   - **中文/emoji 安全**:实测 `google-re2` 1.1.x 对 `str` 输入返回**字符偏移**(非字节),`_scan_content` 的 `bisect` 行号映射不受多字节影响(评审未覆盖、采用前专门验证的硬伤,已排除)。
+>   - **方言切换(刻意,已告知模型)**:RE2 不支持 backreference / look-around(编译期 `re2.error` 响亮失败),end-of-input 用 `\z` 而非 `\Z`。这正是工具自称「ripgrep 语义」的本意(ripgrep 底层 Rust regex 同样无回溯/无 backref);旧的 Python `re` 才是异类。tool/参数 description 已更新为 RE2 语义。
+>   - **STDERR 噪音**:`re2.Options(log_errors=False)` 压住 RE2 编译失败打到 STDERR 的 absl 日志(否则每个非法 pattern 污染 docker logs)。
+> - **GREP-02**:session 模式改 `list_artifacts(include_content=False)` 取 id → 循环内逐个 `read_artifact` 载入单份 content → 扫描 → 释放;加单 artifact 截断 + 单次调用聚合扫描预算(`GREP_SESSION_SCAN_BUDGET_CHARS`),峰值内存收敛到单 artifact。`read_artifact` 走 `get_artifact` 同样 cache-merged,in-memory 可见性不变量保持。
+> - **GREP-03**:`context` / `max_count` 加 `GREP_MAX_CONTEXT` / `GREP_MAX_COUNT` 上界 clamp;另加 `GREP_MAX_PATTERN_CHARS` pattern 长度上界。
+>
+> 新增依赖 `google-re2>=1.1.0`(自带 manylinux wheel 打包 abseil,装进 `python:3.11-slim` 容器无需系统库;CentOS 7 宿主机无关)。新增隐藏 config 常量见 `src/config.py`。测试 `tests/test_grep_artifact.py` 新增 RE2 方言 / 抗 ReDoS / 中文偏移 / 资源护栏共 12 例;全量 **944 passed / 28 skipped**。
 
 ## GREP-01 🔴 LLM 正则无 ReDoS / 超时护栏 — 可卡死整个事件循环
 

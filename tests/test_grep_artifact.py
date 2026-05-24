@@ -4,6 +4,7 @@ Tests for GrepArtifactTool (ripgrep-faithful artifact content search).
 依赖 conftest.py 的 artifact_repo + test_user，与 test_read_artifact_pagination.py 同款。
 """
 
+import time
 import uuid
 
 import pytest
@@ -189,12 +190,13 @@ class TestPureFunctions:
         hits = _scan_content("foo\nbar\n", rx, context=0, max_count=20)
         assert hits == [(1, "foo", True)]
 
-    def test_scan_anchor_Z_only_matches_artifact_end(self):
-        r"""\Z 应该只匹配 artifact 结尾；旧实现会在每一行末尾误报。"""
-        rx = _compile_pattern(r"bar\Z", fixed_strings=False, ignore_case=False)
+    def test_scan_anchor_z_only_matches_artifact_end(self):
+        r"""\z 只匹配 artifact 结尾。RE2 用 \z 表示 end-of-input（Python 的 \Z 在
+        RE2 下非法、编译报错）—— 这是工具切到 RE2/ripgrep 方言后的契约。"""
+        rx = _compile_pattern(r"bar\z", fixed_strings=False, ignore_case=False)
         # bar 不在末尾 → 0 命中
         assert _scan_content("bar\nfoo\n", rx, context=0, max_count=20) == []
-        # bar 在末尾（注意末尾换行不算 'after Z'，Python re 的 \Z 行为）
+        # bar 在末尾
         hits = _scan_content("foo\nbar", rx, context=0, max_count=20)
         assert hits == [(2, "bar", True)]
 
@@ -213,12 +215,13 @@ class TestPureFunctions:
         assert hits == [(1, "XXX", True), (3, "XXX", True)]
 
     def test_scan_zero_width_matches_dropped_uniformly(self):
-        r"""所有零宽匹配整体 drop —— 不管 pattern 形态(`\A` / `\b` / `^` / `\Z` /
+        r"""所有零宽匹配整体 drop —— 不管 pattern 形态(`\A` / `\b` / `^` / `\z` /
         `^$`)、不管落在空行还是非空行,统统不报。
 
         理由(详见 _scan_content docstring):从源码启发式判 anchor 意图
         做不到无 false positive,选择"全 drop"换简单和可证明。失去的
         capability 是 `^$` 找空行,ArtifactFlow 里没真实用例。
+        附:RE2 在行边界会**重复**返回零宽 anchor 命中,这条 drop 一并中和。
         """
         # bare \A 落在非空行
         rx = _compile_pattern(r"\A", fixed_strings=False, ignore_case=False)
@@ -226,8 +229,8 @@ class TestPureFunctions:
         # bare \A 落在前导空行(之前补丁链的一个反例)
         assert _scan_content("\nfoo\n", rx, context=0, max_count=20) == []
 
-        # bare \Z 落在末尾空行
-        rx = _compile_pattern(r"\Z", fixed_strings=False, ignore_case=False)
+        # bare \z 落在末尾空行(RE2 用 \z,非 Python \Z)
+        rx = _compile_pattern(r"\z", fixed_strings=False, ignore_case=False)
         assert _scan_content("foo\n\n", rx, context=0, max_count=20) == []
 
         # bare ^ 不会把每行都标 match
@@ -566,3 +569,192 @@ class TestEdgeCases:
         """grep_artifact 默认 50000，溢出由引擎中间件落盘兜底。"""
         tool = GrepArtifactTool(manager=None)
         assert tool.max_result_size_chars == 50000
+
+
+# ============================================================
+# RE2 方言 + 抗 ReDoS（GREP-01：引擎切到 RE2）
+# ============================================================
+
+
+class TestRe2Dialect:
+
+    def test_redos_pattern_completes_fast(self):
+        """灾难性回溯 pattern 在 RE2 上是线性的：旧 Python re 对 'a'*30 就要 ~50s,
+        这里 'a'*2000+X 必须毫秒级完成（结构性免疫，是本次修复的核心）。"""
+        rx = _compile_pattern(r"(a+)+$", fixed_strings=False, ignore_case=False)
+        victim = "a" * 2000 + "X"
+        start = time.perf_counter()
+        hits = _scan_content(victim, rx, context=0, max_count=20)
+        elapsed = time.perf_counter() - start
+        assert elapsed < 1.0, f"RE2 scan took {elapsed:.3f}s — 疑似回退到回溯引擎"
+        assert hits == []  # X 在末尾,锚定 $ 不命中
+
+    def test_nested_quantifier_on_repetitive_content_fast(self):
+        """另一类经典 ReDoS：'(a|aa)+b' 对长重复串。RE2 线性，必须秒内完成。"""
+        rx = _compile_pattern(r"(a|aa)+b", fixed_strings=False, ignore_case=False)
+        start = time.perf_counter()
+        _scan_content("a" * 100_000, rx, context=0, max_count=20)
+        assert time.perf_counter() - start < 1.0
+
+    async def test_backreference_rejected_loudly(
+        self,
+        grep_tool: GrepArtifactTool,
+        artifact_manager: ArtifactManager,
+        session_id: str,
+    ):
+        """RE2 不支持 backreference → 编译期响亮失败，错误文案点明方言。"""
+        aid = await _create_artifact(artifact_manager, session_id, "foo foo\n")
+        result = await grep_tool(pattern=r"(\w+)\s\1", id=aid)
+        assert not result.success
+        assert "Invalid regex" in (result.error or "")
+        assert "RE2" in (result.error or "")
+
+    async def test_lookahead_rejected_loudly(
+        self,
+        grep_tool: GrepArtifactTool,
+        artifact_manager: ArtifactManager,
+        session_id: str,
+    ):
+        """RE2 不支持 look-around → 编译期响亮失败。"""
+        aid = await _create_artifact(artifact_manager, session_id, "foobar\n")
+        result = await grep_tool(pattern=r"foo(?=bar)", id=aid)
+        assert not result.success
+        assert "Invalid regex" in (result.error or "")
+
+    async def test_capital_Z_rejected_with_z_hint(
+        self,
+        grep_tool: GrepArtifactTool,
+        artifact_manager: ArtifactManager,
+        session_id: str,
+    ):
+        r"""Python 习惯的 \Z 在 RE2 下非法；错误文案引导改用 \z。"""
+        aid = await _create_artifact(artifact_manager, session_id, "foo\nbar")
+        result = await grep_tool(pattern=r"bar\Z", id=aid)
+        assert not result.success
+        assert r"\z" in (result.error or "")
+
+    async def test_z_anchor_works_via_tool(
+        self,
+        grep_tool: GrepArtifactTool,
+        artifact_manager: ArtifactManager,
+        session_id: str,
+    ):
+        r"""\z 走完工具栈应只匹配 artifact 末尾。"""
+        aid = await _create_artifact(artifact_manager, session_id, "foo\nbar")
+        result = await grep_tool(pattern=r"bar\z", id=aid)
+        assert result.success
+        assert "2:bar" in result.data
+
+
+# ============================================================
+# Unicode 偏移正确性（re2 字符偏移 vs 字节偏移，本项目大量中文）
+# ============================================================
+
+
+class TestUnicodeOffsets:
+
+    async def test_chinese_content_line_numbers_correct(
+        self,
+        grep_tool: GrepArtifactTool,
+        artifact_manager: ArtifactManager,
+        session_id: str,
+    ):
+        """多字节中文内容下,命中行号必须按字符(非字节)正确映射。
+        若 re2 返回字节偏移,这里行号会错乱。"""
+        content = "第一行中文内容\n第二行也是中文\n目标TARGET在这里\n第四行结尾\n"
+        aid = await _create_artifact(artifact_manager, session_id, content)
+        result = await grep_tool(pattern="TARGET", id=aid)
+        assert result.success
+        # TARGET 在第 3 行
+        assert "3:目标TARGET在这里" in result.data
+        assert "1 matches" in result.data
+
+    async def test_emoji_astral_plane_line_numbers_correct(
+        self,
+        grep_tool: GrepArtifactTool,
+        artifact_manager: ArtifactManager,
+        session_id: str,
+    ):
+        """星平面字符(4 字节 UTF-8 / Python 1 code point)下行号仍正确。"""
+        content = "abc😀def\n第二行🎉表情\nNEEDLE命中行\n"
+        aid = await _create_artifact(artifact_manager, session_id, content)
+        result = await grep_tool(pattern="NEEDLE", id=aid)
+        assert result.success
+        assert "3:NEEDLE命中行" in result.data
+
+
+# ============================================================
+# 资源护栏（GREP-02 聚合预算 / GREP-03 上界 / 输入封顶）
+# ============================================================
+
+
+class TestResourceGuards:
+
+    async def test_pattern_length_capped(
+        self,
+        grep_tool: GrepArtifactTool,
+        artifact_manager: ArtifactManager,
+        session_id: str,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        monkeypatch.setattr(config, "GREP_MAX_PATTERN_CHARS", 10)
+        aid = await _create_artifact(artifact_manager, session_id, "anything\n")
+        result = await grep_tool(pattern="a" * 50, id=aid)
+        assert not result.success
+        assert "too long" in (result.error or "").lower()
+
+    async def test_context_clamped_to_upper_bound(
+        self,
+        grep_tool: GrepArtifactTool,
+        artifact_manager: ArtifactManager,
+        session_id: str,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        """超大 context 被 clamp,不会铺满全文（GREP-03）。"""
+        monkeypatch.setattr(config, "GREP_MAX_CONTEXT", 1)
+        content = "a\nb\nc\nX\nd\ne\nf\n"
+        aid = await _create_artifact(artifact_manager, session_id, content)
+        # 传 context=1000 → clamp 到 1 → 只展开 X 上下各 1 行
+        result = await grep_tool(pattern="X", id=aid, context=1000)
+        assert result.success
+        assert "4:X" in result.data
+        assert "3-c" in result.data and "5-d" in result.data
+        # context=1 不应触及更远的行
+        assert "1-a" not in result.data
+
+    async def test_content_truncation_emits_hint(
+        self,
+        grep_tool: GrepArtifactTool,
+        artifact_manager: ArtifactManager,
+        session_id: str,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        """单 artifact 超 GREP_CONTENT_MAX_CHARS → 截断 + 给模型 hint。"""
+        monkeypatch.setattr(config, "GREP_CONTENT_MAX_CHARS", 20)
+        # 前 20 字符内无命中,后段有 → 截断后 No matches + hint
+        content = "x" * 30 + "NEEDLE\n"
+        aid = await _create_artifact(artifact_manager, session_id, content)
+        result = await grep_tool(pattern="NEEDLE", id=aid)
+        assert result.success
+        assert "No matches" in result.data
+        assert "searched first 20 chars" in result.data
+
+    async def test_session_scan_budget_emits_hint(
+        self,
+        grep_tool: GrepArtifactTool,
+        artifact_manager: ArtifactManager,
+        session_id: str,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        """session 聚合扫描超 budget → summary 给 'Hit scan budget' hint。"""
+        monkeypatch.setattr(config, "GREP_SESSION_SCAN_BUDGET_CHARS", 15)
+        # 第一个 artifact 就吃掉预算并命中,第二个因预算耗尽不再载入
+        await _create_artifact(
+            artifact_manager, session_id, "NEEDLE here padding\n", aid="a1"
+        )
+        await _create_artifact(
+            artifact_manager, session_id, "NEEDLE also here\n", aid="a2"
+        )
+        result = await grep_tool(pattern="NEEDLE")
+        assert result.success
+        assert "Hit scan budget" in result.data

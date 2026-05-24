@@ -46,6 +46,14 @@ class Settings(BaseSettings):
     CANCELLED_RESPONSE_BY_USER: str = "*Task cancelled by user*"
     CANCELLED_RESPONSE_BY_SYSTEM: str = "*Task cancelled by system*"
     SESSION_GREP_MAX_TOTAL: int = 200       # grep_artifact session 模式总命中上限（隐藏，不暴露给模型）
+    # grep_artifact 资源护栏（隐藏常量，模型不可见）。RE2 是线性引擎，输入封顶即算法界
+    # —— 单 artifact ≤2000 万字符 ≈60ms、session 聚合 ≤6400 万字符 ≈180ms，均低于
+    # watchdog LOOP_LAG_WARN_MS=500，无需墙钟 timeout（详见 grep_artifact 模块注释）。
+    GREP_CONTENT_MAX_CHARS: int = 20_000_000        # 单 artifact 扫描字符上限（超即截断 + 给模型 hint）
+    GREP_SESSION_SCAN_BUDGET_CHARS: int = 64_000_000  # session 模式单次调用聚合扫描预算（控内存峰值 + 总 CPU）
+    GREP_MAX_PATTERN_CHARS: int = 1000              # pattern 长度上界（挡病态超长 pattern；RE2 另有 max_mem=8MiB 编译侧兜底）
+    GREP_MAX_CONTEXT: int = 100                     # context 行数上界（防超大窗口铺满全文）
+    GREP_MAX_COUNT: int = 1000                      # max_count 上界
 
     # update_artifact Layer 2 fuzzy match（v6 锚定 + RapidFuzz 校验；详见
     # docs/_archive/ops/incident-2026-05-14-fix-plan.md PR-1 spec）。

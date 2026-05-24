@@ -28,6 +28,11 @@ psutil>=5.9.0
 # 文本模糊匹配（update_artifact Layer 2，锚定 + 有界 Levenshtein 校验）
 rapidfuzz>=3.0.0
 
+# RE2 正则引擎（grep_artifact）—— 线性时间、无回溯，结构性免疫 ReDoS。
+# 替代 Python `re` 回溯引擎：LLM 可控 pattern 不再能用灾难性回溯卡死事件循环。
+# 自带 manylinux wheel（打包 abseil），装进 python:3.11-slim 容器无需系统库。
+google-re2>=1.1.0
+
 # YAML 解析（Agent MD 文件）
 pyyaml>=6.0
 
