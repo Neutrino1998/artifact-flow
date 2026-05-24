@@ -114,10 +114,17 @@
 >   - **中文/emoji 安全**:实测 `google-re2` 1.1.x 对 `str` 输入返回**字符偏移**(非字节),`_scan_content` 的 `bisect` 行号映射不受多字节影响(评审未覆盖、采用前专门验证的硬伤,已排除)。
 >   - **方言切换(刻意,已告知模型)**:RE2 不支持 backreference / look-around(编译期 `re2.error` 响亮失败),end-of-input 用 `\z` 而非 `\Z`。这正是工具自称「ripgrep 语义」的本意(ripgrep 底层 Rust regex 同样无回溯/无 backref);旧的 Python `re` 才是异类。tool/参数 description 已更新为 RE2 语义。
 >   - **STDERR 噪音**:`re2.Options(log_errors=False)` 压住 RE2 编译失败打到 STDERR 的 absl 日志(否则每个非法 pattern 污染 docker logs)。
-> - **GREP-02**:session 模式改 `list_artifacts(include_content=False)` 取 id → 循环内逐个 `read_artifact` 载入单份 content → 扫描 → 释放;加单 artifact 截断 + 单次调用聚合扫描预算(`GREP_SESSION_SCAN_BUDGET_CHARS`),峰值内存收敛到单 artifact。`read_artifact` 走 `get_artifact` 同样 cache-merged,in-memory 可见性不变量保持。
+> - **GREP-02**:session 模式 `list_artifacts` + 单 artifact 截断 + 单次调用聚合扫描预算(`GREP_SESSION_SCAN_BUDGET_CHARS`)。**内存定位为 best-effort**(见下「Reviewer 复审收口」第 2 条):这些是 **CPU/扫描护栏**(限"扫多少"),非内存护栏(内存由"载入多少"决定)。
 > - **GREP-03**:`context` / `max_count` 加 `GREP_MAX_CONTEXT` / `GREP_MAX_COUNT` 上界 clamp;另加 `GREP_MAX_PATTERN_CHARS` pattern 长度上界。
 >
-> 新增依赖 `google-re2>=1.1.0`(自带 manylinux wheel 打包 abseil,装进 `python:3.11-slim` 容器无需系统库;CentOS 7 宿主机无关)。新增隐藏 config 常量见 `src/config.py`。测试 `tests/test_grep_artifact.py` 新增 RE2 方言 / 抗 ReDoS / 中文偏移 / 资源护栏共 12 例;全量 **944 passed / 28 skipped**。
+> 新增依赖 `google-re2>=1.1.0`(自带 manylinux wheel 打包 abseil,装进 `python:3.11-slim` 容器无需系统库;CentOS 7 宿主机无关)。新增隐藏 config 常量见 `src/config.py`。
+
+> **Reviewer 复审收口(2026-05-24,3 项,已落 main):**
+> - **P1 raw-match wedge(GREP-01 漏的轴)**:换 RE2 干掉了**回溯**,但没拦 **`finditer` 迭代次数**。`max_count` 只数去重后的**行**,单行海量命中(`"a"*20M` 配 `a`)全 collapse 到一行 → break 永不触发 → `finditer` 被全部迭代,纯同步 CPU 钉死 GIL(实测 20M 单行 ≈35s)。加 `GREP_MAX_SCAN_MATCHES`(原始命中迭代上界,mirror `update_artifact` 的 `MAX_UNIQUE_CENTERS`):20M 单行从 ≈35s 收到 **≈380ms**(< watchdog 500ms),legit 密集文档(~100K 命中)仍放行。
+> - **P1 GREP-02 内存"修复"实际无效 → 退到 best-effort**:`repo.list_artifacts` 是 `select(Artifact)`,`Artifact.content` 普通 `Text` 列 → 查询即 eager-load 全部 content;且 `get_artifact` 把每次读到的 content **缓存累积**。故原「惰性逐 artifact 载入」两个轴都没 bound 住内存,只白添 per-id 查询。**回退**为一次性 `list_artifacts(include_content=True)`,聚合预算**正名为 CPU 护栏**;内存峰值 ≈ 全 session content 写明为有意 best-effort(真 bound 需 repo 列投影 + 绕 cache,对内存从未在事故中爆过的 🟡 不划算)。
+> - **P2 部分搜索却返回确定性 No matches**:budget 在任何命中前耗尽时,`if not grouped` 直接返回 `No matches` 丢掉信号;单 artifact 截断也从不进 summary → 误导模型/用户。改为统一 `partial` 标志(budget / 截断 / raw-cap 任一触发),在**「No matches」路径和 summary 两处都 surface** `search incomplete — not all content searched`,绝不发确定性无命中。
+>
+> 测试 `tests/test_grep_artifact.py` 累计新增 RE2 方言 / 抗 ReDoS / 中文偏移 / 资源护栏 / 部分搜索共 16 例;全量 **948 passed / 28 skipped**。
 
 ## GREP-01 🔴 LLM 正则无 ReDoS / 超时护栏 — 可卡死整个事件循环
 

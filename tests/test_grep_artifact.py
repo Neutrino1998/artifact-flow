@@ -148,6 +148,26 @@ class TestPureFunctions:
         assert all(h[2] for h in hits)  # 全部是命中
         assert [h[0] for h in hits] == [1, 2, 3]
 
+    def test_scan_raw_match_cap_bounds_single_dense_line(self, monkeypatch):
+        """Finding 1:单行海量命中时 max_count(去重行)永远到不了,raw-match 上界
+        必须接管,否则 finditer 被全部迭代(同步 CPU wedge)。触顶置 stats[scan_capped]。"""
+        monkeypatch.setattr(config, "GREP_MAX_SCAN_MATCHES", 50)
+        rx = _compile_pattern("a", fixed_strings=False, ignore_case=False)
+        content = "a" * 10_000  # 单行,1 个去重行 / 10000 个原始命中
+        stats: dict = {}
+        hits = _scan_content(content, rx, context=0, max_count=20, stats=stats)
+        # 全 collapse 到 line 1 → 1 个命中行,但扫描提前触顶
+        assert hits == [(1, content, True)]
+        assert stats.get("scan_capped") is True
+
+    def test_scan_no_cap_signal_when_under_budget(self, monkeypatch):
+        """未触顶时不置 scan_capped(避免误报 incomplete)。"""
+        monkeypatch.setattr(config, "GREP_MAX_SCAN_MATCHES", 50)
+        rx = _compile_pattern("X", fixed_strings=False, ignore_case=False)
+        stats: dict = {}
+        _scan_content("X\nX\nX\n", rx, context=0, max_count=20, stats=stats)
+        assert "scan_capped" not in stats
+
     def test_format_flat_inserts_separator_on_gap(self):
         hits = [
             (1, "a", False),
@@ -729,26 +749,26 @@ class TestResourceGuards:
         session_id: str,
         monkeypatch: pytest.MonkeyPatch,
     ):
-        """单 artifact 超 GREP_CONTENT_MAX_CHARS → 截断 + 给模型 hint。"""
+        """单 artifact 超 GREP_CONTENT_MAX_CHARS → 截断扫描量 + surface 'search incomplete'。"""
         monkeypatch.setattr(config, "GREP_CONTENT_MAX_CHARS", 20)
-        # 前 20 字符内无命中,后段有 → 截断后 No matches + hint
+        # 前 20 字符内无命中,后段有 → 截断后 No matches,但必须带 incomplete 提示
         content = "x" * 30 + "NEEDLE\n"
         aid = await _create_artifact(artifact_manager, session_id, content)
         result = await grep_tool(pattern="NEEDLE", id=aid)
         assert result.success
         assert "No matches" in result.data
-        assert "searched first 20 chars" in result.data
+        assert "search incomplete" in result.data.lower()
 
-    async def test_session_scan_budget_emits_hint(
+    async def test_session_scan_budget_surfaces_incomplete(
         self,
         grep_tool: GrepArtifactTool,
         artifact_manager: ArtifactManager,
         session_id: str,
         monkeypatch: pytest.MonkeyPatch,
     ):
-        """session 聚合扫描超 budget → summary 给 'Hit scan budget' hint。"""
+        """session 聚合扫描超 budget → summary surface 'not all content searched'。"""
         monkeypatch.setattr(config, "GREP_SESSION_SCAN_BUDGET_CHARS", 15)
-        # 第一个 artifact 就吃掉预算并命中,第二个因预算耗尽不再载入
+        # 第一个 artifact 就吃掉预算并命中,第二个因预算耗尽不再扫描
         await _create_artifact(
             artifact_manager, session_id, "NEEDLE here padding\n", aid="a1"
         )
@@ -757,4 +777,43 @@ class TestResourceGuards:
         )
         result = await grep_tool(pattern="NEEDLE")
         assert result.success
-        assert "Hit scan budget" in result.data
+        assert "not all content searched" in result.data
+
+    async def test_session_budget_before_match_not_definitive_no_match(
+        self,
+        grep_tool: GrepArtifactTool,
+        artifact_manager: ArtifactManager,
+        session_id: str,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        """Finding 3a:budget 在任何命中前耗尽 → 不能返回确定性 No matches
+        (未搜的内容里可能有命中)。"""
+        monkeypatch.setattr(config, "GREP_SESSION_SCAN_BUDGET_CHARS", 10)
+        # NEEDLE 在第 10 字符之后 → 截断后扫不到 → No matches,但必须标 incomplete
+        await _create_artifact(
+            artifact_manager, session_id, "zzzzzzzzzzzzNEEDLE\n", aid="a1"
+        )
+        result = await grep_tool(pattern="NEEDLE")
+        assert result.success
+        assert "No matches" in result.data
+        # 关键:不是确定性无命中,必须带 incomplete 提示
+        assert "not all content searched" in result.data
+
+    async def test_dense_same_line_matches_bounded_and_surfaced(
+        self,
+        grep_tool: GrepArtifactTool,
+        artifact_manager: ArtifactManager,
+        session_id: str,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        """Finding 1:单行海量命中被 raw-match 上界拦住 + surface incomplete。
+        无上界时 finditer 会被抽干(同步 CPU wedge)。"""
+        monkeypatch.setattr(config, "GREP_MAX_SCAN_MATCHES", 100)
+        content = "a" * 5000  # 单行 5000 个 'a' 命中,全 collapse 到 line 1
+        aid = await _create_artifact(artifact_manager, session_id, content)
+        start = time.perf_counter()
+        result = await grep_tool(pattern="a", id=aid)
+        assert time.perf_counter() - start < 1.0
+        assert result.success
+        # 单行 → 1 行级命中,但扫描提前触顶 → 必须 surface
+        assert "search incomplete" in result.data.lower()

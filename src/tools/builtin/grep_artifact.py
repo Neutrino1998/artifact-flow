@@ -7,10 +7,15 @@ Grep across artifact content with ripgrep-faithful semantics.
   ReDoS）；`fixed_strings=true` 走 `re2.escape` 切 literal。换 RE2 是这个工具的本意
   —— 它自称 "ripgrep 语义"，而 ripgrep 底层正是不回溯、无 backref 的自动机引擎；旧的
   Python `re` 才是会被 `(a+)+$` 卡死事件循环的那个（2026-05-14 事故同源失败模式）。
-- 资源护栏：RE2 线性 → 输入封顶（`GREP_CONTENT_MAX_CHARS` / `GREP_SESSION_SCAN_BUDGET_CHARS`）
-  即算法界，**无需墙钟 timeout**（与 update_artifact 的回溯型 fuzzy 不同——那里墙钟是
-  唯一能兜底的手段，这里结构性线性，封顶即够）。session 模式惰性逐 artifact 载入，峰值
-  内存收敛到单份 content。
+- 资源护栏：纯同步扫描跑在 loop 线程上，全部护栏都是 **CPU/扫描护栏**（限"扫多少 +
+  迭代多少命中"）——`GREP_MAX_SCAN_MATCHES`（raw-match 迭代上界，防"单行海量命中把
+  finditer 抽干"，mirror update_artifact 的 `MAX_UNIQUE_CENTERS`）+ `GREP_CONTENT_MAX_CHARS`
+  / `GREP_SESSION_SCAN_BUDGET_CHARS`（限扫描字符量）。RE2 线性故**无需墙钟 timeout**
+  （回溯型才需，见 update_artifact）。session **峰值内存 ≈ 全 session content（有意
+  best-effort）**：内存由"载入多少"决定（list eager-load + cache 累积），不是扫描护栏
+  能管的；真 bound 需 repo 列投影 + 绕 cache，对内存从未爆过的 🟡 不划算。
+- 部分搜索必 surface：任何 budget / 截断 / raw-cap 触发 → 结果带"search incomplete"
+  提示，**绝不返回确定性的 No matches 误导模型**。
 - 参数表面只暴露模型有语义意图的项；护栏常量全隐藏在 config
 - 输出对齐 ripgrep TTY 行为：单 flat、session heading；命中行 `:`、context 行 `-`、
   group 间 `--`
@@ -59,24 +64,34 @@ def _scan_content(
     regex: "re2._Regexp",
     context: int,
     max_count: int,
+    stats: Optional[dict] = None,
 ) -> List[Tuple[int, str, bool]]:
     """对整 artifact 跑 `regex.finditer(content)`，再把 match.start() 映射回行号。
 
-    - 全文匹配（不是逐行）兑现 description 的 "Python `re` syntax" 契约:
-      `\\A`/`\\Z` 真正指 artifact 边界、`foo\\nbar` 这类跨行 pattern 也能命中
+    - 全文匹配（不是逐行）兑现 description 的 RE2/ripgrep 契约:
+      `\\A`/`\\z` 真正指 artifact 边界、`foo\\nbar` 这类跨行 pattern 也能命中
     - 跨行 match 只在**起始行**打点（ripgrep `-U` 多行模式行为，避免一次匹配同时
       标记多行带来命中计数歧义）
     - 同一行多次命中去重（按行算 1 个命中）
-    - **零宽匹配整体 drop** —— `\\A` / `^` / `\\b` / `\\Z` / `^$` 等无可见内容的
+    - **零宽匹配整体 drop** —— `\\A` / `^` / `\\b` / `\\z` / `^$` 等无可见内容的
       命中不进结果。这避免了"从源码字符串启发式判 anchor 意图"的不可靠路径
-      (Python `re` 没暴露 AST,任何 string-level 判断都有 false positive)。
+      (引擎没暴露 AST,任何 string-level 判断都有 false positive)。
       若需"找被空行分隔的段落",改用内容侧锚点(例:markdown 的 `^# `、小说的
       `^第.*章`、Python 的 `^class `),都是非零宽 pattern,正常工作。
-    - max_count 限制 **行级命中** 数；context 行不计入
+    - max_count 限制 **行级命中** 数（去重后）；context 行不计入
+    - **raw-match 迭代上界 `GREP_MAX_SCAN_MATCHES`**（算法上界，Finding 1）:
+      `max_count` 只数去重后的**行**，单行海量命中（如 `"a"*20M` 配 `a`）会全 collapse
+      到一行 → `max_count` 的 break 永不触发 → `finditer` 被抽干（纯同步 CPU 钉死 GIL,
+      2026-05-14 wedge 的另一个轴）。这里 cap 真正烧 CPU 的量——迭代到的**原始**命中数
+      （非去重行数）。mirror update_artifact 的 `MAX_UNIQUE_CENTERS`。提前触顶即 break,
+      并置 `stats["scan_capped"]=True` 供调用方 surface（结果是部分的）。
 
     返回 [(line_no_1indexed, line_text, is_match), ...]:
     - is_match=True 是命中行；False 是 context 行
     - 相邻命中的 context 重叠 → sliding skip 合并去重
+
+    `stats`（可选 out-param）：若提供且扫描提前触顶 raw-match 上界，写入
+    `stats["scan_capped"]=True`。不提供（默认）则行为不变，纯函数单测无需感知。
     """
     if not content or max_count <= 0:
         return []
@@ -97,7 +112,16 @@ def _scan_content(
     # 全文跑 finditer，把每个 match.start() 通过 bisect 映射到行号
     match_line_indices: List[int] = []  # 按命中顺序、已去重
     seen_lines = set()
+    max_scan = config.GREP_MAX_SCAN_MATCHES
+    raw_seen = 0
     for m in regex.finditer(content):
+        # raw-match 迭代上界:数的是**原始**命中(含零宽/去重前),这才是 finditer
+        # 的真实迭代成本。触顶即停 —— max_count 只数去重行,单行海量命中时拦不住。
+        if raw_seen >= max_scan:
+            if stats is not None:
+                stats["scan_capped"] = True
+            break
+        raw_seen += 1
         # 零宽匹配整体 drop。从源码启发式判 anchor 意图(`^$` 找空行 vs `\A`
         # 只是起始锚)做不到无 false positive —— 引擎没暴露 AST,任何 string-level
         # 判断都有边界。换 "全 drop" 换简单 + 可证明:跨 reviewer 任何反例,零宽
@@ -304,29 +328,32 @@ class GrepArtifactTool(BaseTool):
             truncated = len(content) > config.GREP_CONTENT_MAX_CHARS
             if truncated:
                 content = content[: config.GREP_CONTENT_MAX_CHARS]
-            hits = _scan_content(content, regex, context_lines, max_count)
+            stats: dict = {}
+            hits = _scan_content(content, regex, context_lines, max_count, stats)
             match_count = sum(1 for _, _, is_match in hits if is_match)
 
-            trunc_note = (
-                f" (searched first {config.GREP_CONTENT_MAX_CHARS} chars only; "
-                f"artifact is larger)"
-                if truncated
+            # 任一护栏触发 → 搜的是部分内容，必须 surface（绝不发确定性 No matches）
+            partial = truncated or stats.get("scan_capped", False)
+            note = (
+                " (search incomplete — scan limits hit; results may be missing later matches)"
+                if partial
                 else ""
             )
 
             if match_count == 0:
-                return ToolResult(success=True, data=f"No matches for {pattern!r}{trunc_note}")
+                return ToolResult(success=True, data=f"No matches for {pattern!r}{note}")
 
             body = _format_flat(hits)
-            data = f"{body}\n\n{match_count} matches{trunc_note}"
+            data = f"{body}\n\n{match_count} matches{note}"
             return ToolResult(success=True, data=data)
 
-        # ─── Session 模式（惰性逐 artifact 载入，GREP-02）──────────────
-        # 只取 id 列表（include_content=False 不物化 content），循环内逐个
-        # read_artifact 载入单份 → 扫描 → 下一轮覆盖释放，峰值内存收敛到单 artifact。
-        # read_artifact 走 get_artifact，同样 cache-merged → in-memory 可见性不变。
-        metas = await self._manager.list_artifacts(
-            session_id=session_id, include_content=False
+        # ─── Session 模式 ──────────────────────────────────────────
+        # 一次性载入(include_content=True)。**峰值内存 ≈ 全 session content,有意 best-effort**:
+        # 内存由"载入多少"决定(repo.list_artifacts 是 select(Artifact),content 列 eager-load;
+        # 且 get_artifact 会 cache),不是下面的 scan 护栏能管的 —— 那些限的是"扫多少"(CPU)。
+        # 真 bound 内存需 repo 列投影 + 绕 cache,对内存从未爆过的 🟡 不划算(详见 GREP-02)。
+        artifacts = await self._manager.list_artifacts(
+            session_id=session_id, include_content=True
         )
 
         grouped: List[Tuple[str, List[Tuple[int, str, bool]]]] = []
@@ -334,47 +361,56 @@ class GrepArtifactTool(BaseTool):
         scanned_chars = 0
         session_cap = config.SESSION_GREP_MAX_TOTAL
         scan_budget = config.GREP_SESSION_SCAN_BUDGET_CHARS
-        budget_hit = False
+        partial = False  # 任何 budget / 截断 / raw-cap → 搜的是部分内容,必须 surface
 
-        for meta in metas:
+        for art in artifacts:
+            content = art.get("content", "") or ""
+            if not content:
+                continue
+
             remaining = session_cap - total_hits
             if remaining <= 0:
                 break
             if scanned_chars >= scan_budget:
-                budget_hit = True
+                partial = True
                 break
 
-            loaded = await self._manager.read_artifact(
-                session_id=session_id, artifact_id=meta["id"], version=None
-            )
-            if loaded is None:
-                continue
-            content = loaded.get("content", "") or ""
-            if not content:
-                continue
-
-            # 单 artifact 截断 + 聚合预算双重收口
+            # per-artifact + 聚合预算双重 CPU 护栏(截断"扫描量",非内存)
             if len(content) > config.GREP_CONTENT_MAX_CHARS:
                 content = content[: config.GREP_CONTENT_MAX_CHARS]
+                partial = True
             allowed = scan_budget - scanned_chars
             if len(content) > allowed:
                 content = content[:allowed]
-                budget_hit = True
+                partial = True
             scanned_chars += len(content)
 
             effective_cap = min(max_count, remaining)
-            hits = _scan_content(content, regex, context_lines, effective_cap)
+            stats: dict = {}
+            hits = _scan_content(content, regex, context_lines, effective_cap, stats)
+            if stats.get("scan_capped"):
+                partial = True
             match_count = sum(1 for _, _, is_match in hits if is_match)
             if match_count == 0:
                 continue
 
-            grouped.append((meta["id"], hits))
+            grouped.append((art["id"], hits))
             total_hits += match_count
 
             if total_hits >= session_cap:
                 break
 
         if not grouped:
+            # Finding 3a:部分搜索时绝不发确定性 No matches —— 未搜的内容里可能有命中
+            if partial:
+                return ToolResult(
+                    success=True,
+                    data=(
+                        f"No matches for {pattern!r} in the searched portion "
+                        f"(search incomplete — scan limits hit, not all content searched; "
+                        f"pass id=... to target a specific artifact)"
+                    ),
+                )
             return ToolResult(success=True, data=f"No matches for {pattern!r}")
 
         body = _format_heading(grouped)
@@ -384,9 +420,9 @@ class GrepArtifactTool(BaseTool):
                 f". Hit session cap ({session_cap}). "
                 f"Refine pattern or pass id=... to narrow."
             )
-        elif budget_hit:
+        elif partial:
             summary += (
-                ". Hit scan budget — not all artifacts fully searched. "
+                ". Search incomplete — scan limits hit, not all content searched. "
                 "Pass id=... to target a specific artifact."
             )
 
