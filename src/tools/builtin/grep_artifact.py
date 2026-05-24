@@ -7,13 +7,20 @@ Grep across artifact content with ripgrep-faithful semantics.
   ReDoS）；`fixed_strings=true` 走 `re2.escape` 切 literal。换 RE2 是这个工具的本意
   —— 它自称 "ripgrep 语义"，而 ripgrep 底层正是不回溯、无 backref 的自动机引擎；旧的
   Python `re` 才是会被 `(a+)+$` 卡死事件循环的那个（2026-05-14 事故同源失败模式）。
-- 资源护栏：纯同步扫描跑在 loop 线程上，全部护栏都是 **CPU/扫描护栏**（限"扫多少 +
-  迭代多少命中"）——`GREP_MAX_SCAN_MATCHES`（raw-match 迭代上界，防"单行海量命中把
-  finditer 抽干"，mirror update_artifact 的 `MAX_UNIQUE_CENTERS`）+ `GREP_CONTENT_MAX_CHARS`
-  / `GREP_SESSION_SCAN_BUDGET_CHARS`（限扫描字符量）。RE2 线性故**无需墙钟 timeout**
-  （回溯型才需，见 update_artifact）。session **峰值内存 ≈ 全 session content（有意
-  best-effort）**：内存由"载入多少"决定（list eager-load + cache 累积），不是扫描护栏
-  能管的；真 bound 需 repo 列投影 + 绕 cache，对内存从未爆过的 🟡 不划算。
+- 资源护栏（line-oriented best-effort 搜索：定死**输入/输出 envelope**，envelope 内
+  全物化才安全，超出即截断 + surface；不为对抗性巨输入逐 pass 补 cap）：
+  - **输入** `GREP_CONTENT_MAX_CHARS`（2MB）—— 值由"`_scan_content` 的 pre-scan
+    物化（splitlines×2 + line_starts，成本 O(行数)）保持有界"反推，**非** artifact
+    最大尺寸；20MB 会 ~1GB（reviewer P1）。`GREP_SESSION_SCAN_BUDGET_CHARS` 限 session
+    总扫描功。
+  - **迭代** `GREP_MAX_SCAN_MATCHES`（raw-match 迭代上界，防"单行海量命中把 finditer
+    抽干"，mirror update_artifact 的 `MAX_UNIQUE_CENTERS`）。
+  - **输出** `GREP_MAX_LINE_CHARS`（ripgrep `--max-columns` 式单行封顶，防"单条巨行
+    命中→整行塞进结果"，reviewer P2）。
+  全部是 **CPU/扫描护栏**，不是内存护栏。RE2 线性故**无需墙钟 timeout**（回溯型才需，
+  见 update_artifact）。session **峰值内存 ≈ 全 session content（有意 best-effort）**：
+  内存由"载入多少"决定（list eager-load + cache 累积），不是扫描护栏能管的；真 bound
+  需 repo 列投影 + 绕 cache，对内存从未爆过的 🟡 不划算。
 - 部分搜索必 surface：任何 budget / 截断 / raw-cap 触发 → 结果带"search incomplete"
   提示，**绝不返回确定性的 No matches 误导模型**。
 - 参数表面只暴露模型有语义意图的项；护栏常量全隐藏在 config
@@ -163,9 +170,20 @@ def _scan_content(
     return hits
 
 
+def _truncate_line(text: str) -> str:
+    """单行输出截断（ripgrep `--max-columns` 式）。挡"单条巨行命中 → 整行原样塞进
+    ToolResult"——5M 字符的一行会先构造成 5M 的 body 再交给引擎落盘中间件,且若落盘
+    fail-open 会直接进 SSE。超 `GREP_MAX_LINE_CHARS` 即截断 + 标记总长（命中可能在
+    截断点之后,标记提示模型可 refine）。"""
+    cap = config.GREP_MAX_LINE_CHARS
+    if len(text) <= cap:
+        return text
+    return f"{text[:cap]} …[line truncated to {cap} of {len(text)} chars]"
+
+
 def _format_flat(hits: List[Tuple[int, str, bool]]) -> str:
     """单 artifact 输出格式。命中行 `N:content`，context 行 `N-content`，
-    相邻行号间断 → 插入 `--`（ripgrep 行为）。
+    相邻行号间断 → 插入 `--`（ripgrep 行为）。每行经 `_truncate_line` 封顶。
 
     空 hits 返回空串（调用方应在调用前判 No-matches，不应进到这里）。
     """
@@ -175,7 +193,7 @@ def _format_flat(hits: List[Tuple[int, str, bool]]) -> str:
         if prev_lineno is not None and lineno > prev_lineno + 1:
             out.append("--")
         sep = ":" if is_match else "-"
-        out.append(f"{lineno}{sep}{text}")
+        out.append(f"{lineno}{sep}{_truncate_line(text)}")
         prev_lineno = lineno
     return "\n".join(out)
 

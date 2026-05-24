@@ -119,12 +119,17 @@
 >
 > 新增依赖 `google-re2>=1.1.0`(自带 manylinux wheel 打包 abseil,装进 `python:3.11-slim` 容器无需系统库;CentOS 7 宿主机无关)。新增隐藏 config 常量见 `src/config.py`。
 
-> **Reviewer 复审收口(2026-05-24,3 项,已落 main):**
+> **Reviewer 复审收口 ①(2026-05-24,3 项,已落 main):**
 > - **P1 raw-match wedge(GREP-01 漏的轴)**:换 RE2 干掉了**回溯**,但没拦 **`finditer` 迭代次数**。`max_count` 只数去重后的**行**,单行海量命中(`"a"*20M` 配 `a`)全 collapse 到一行 → break 永不触发 → `finditer` 被全部迭代,纯同步 CPU 钉死 GIL(实测 20M 单行 ≈35s)。加 `GREP_MAX_SCAN_MATCHES`(原始命中迭代上界,mirror `update_artifact` 的 `MAX_UNIQUE_CENTERS`):20M 单行从 ≈35s 收到 **≈380ms**(< watchdog 500ms),legit 密集文档(~100K 命中)仍放行。
 > - **P1 GREP-02 内存"修复"实际无效 → 退到 best-effort**:`repo.list_artifacts` 是 `select(Artifact)`,`Artifact.content` 普通 `Text` 列 → 查询即 eager-load 全部 content;且 `get_artifact` 把每次读到的 content **缓存累积**。故原「惰性逐 artifact 载入」两个轴都没 bound 住内存,只白添 per-id 查询。**回退**为一次性 `list_artifacts(include_content=True)`,聚合预算**正名为 CPU 护栏**;内存峰值 ≈ 全 session content 写明为有意 best-effort(真 bound 需 repo 列投影 + 绕 cache,对内存从未在事故中爆过的 🟡 不划算)。
 > - **P2 部分搜索却返回确定性 No matches**:budget 在任何命中前耗尽时,`if not grouped` 直接返回 `No matches` 丢掉信号;单 artifact 截断也从不进 summary → 误导模型/用户。改为统一 `partial` 标志(budget / 截断 / raw-cap 任一触发),在**「No matches」路径和 summary 两处都 surface** `search incomplete — not all content searched`,绝不发确定性无命中。
+
+> **Reviewer 复审收口 ②(2026-05-24,第 3 轮,2 项,已落 main):**
+> 第 3 轮仍是**同一形状**(大输入下又一条没界的轴:① pre-scan 物化 ② 输出构造)。诊断:根因不是某条轴,而是 `_scan_content` 的契约「接受任意大小 content、整篇全物化后再扫」——逐 pass 补 cap 补不完。**退到架构,把边界定在「输入/输出 envelope」上**(line-oriented best-effort 搜索:envelope 内全物化才安全,超出即截断 + surface):
+> - **P1 pre-scan 物化 spike**:`_scan_content` 在 finditer/raw-cap **之前**就对整篇 `splitlines()`×2 + 建 `line_starts`,成本 O(行数)、与命中无关(无命中也烧)。实测 20MB(`"x\n"*10M`)≈ **1GB / 0.56s**。**调低 `GREP_CONTENT_MAX_CHARS` 20MB→2MB**(值由"pre-scan 物化保持有界"反推,非"artifact 最大尺寸"):同输入降到 **104MB / 531ms**。execute() 早已在进 `_scan_content` 前把 content 截到该上限 + surface「incomplete」,故仅改常量即生效。(刻意没上「惰性增量扫描」重写——它要严格复刻 `splitlines` 的全部 Unicode 换行边界,高风险、易引出第 4 轮;best-effort envelope 一次性收口更稳。)
+> - **P2 单条巨行进输出**:巨行命中时整行原样进 `ToolResult`(5M 行 → 5M body),在引擎落盘中间件前就构造完,且落盘 fail-open 时会进 SSE。加 `GREP_MAX_LINE_CHARS`(1000,ripgrep `--max-columns` 式)+ `_truncate_line`,在 `_format_flat` 单行封顶 + 标记总长:5M 行 → **1,045 字符 body**。
 >
-> 测试 `tests/test_grep_artifact.py` 累计新增 RE2 方言 / 抗 ReDoS / 中文偏移 / 资源护栏 / 部分搜索共 16 例;全量 **948 passed / 28 skipped**。
+> 测试 `tests/test_grep_artifact.py` 累计新增 RE2 方言 / 抗 ReDoS / 中文偏移 / 资源护栏 / 部分搜索 / envelope 截断共 18 例;全量 **950 passed / 28 skipped**。
 
 ## GREP-01 🔴 LLM 正则无 ReDoS / 超时护栏 — 可卡死整个事件循环
 

@@ -46,13 +46,19 @@ class Settings(BaseSettings):
     CANCELLED_RESPONSE_BY_USER: str = "*Task cancelled by user*"
     CANCELLED_RESPONSE_BY_SYSTEM: str = "*Task cancelled by system*"
     SESSION_GREP_MAX_TOTAL: int = 200       # grep_artifact session 模式总命中上限（隐藏，不暴露给模型）
-    # grep_artifact 资源护栏（隐藏常量，模型不可见）。纯同步扫描跑在引擎 loop 线程上 →
-    # 全部护栏都是 **CPU/扫描护栏**（限"扫多少字符 + 迭代多少命中"），不是内存护栏:
-    # session 峰值内存由"载入多少"决定（list 查询 eager-load `Artifact.content` + cache
-    # 累积），那是**有意接受的 best-effort** —— 真 bound 需改 repo 列投影 + 绕 cache,对
-    # 内存从未在事故中爆过的 🟡 不划算（详见 docs/_archive/reviews/sec-review-findings.md
-    # GREP-02）。RE2 线性，故无需墙钟 timeout（回溯型才需，见 update_artifact）。
-    GREP_CONTENT_MAX_CHARS: int = 20_000_000        # 单 artifact 扫描字符上限（超即截断扫描量,非内存）
+    # grep_artifact 资源护栏（隐藏常量，模型不可见）。设计原则:grep 是 line-oriented 的
+    # best-effort 搜索 —— 把**输入/输出 envelope** 一次性定死,envelope 内全物化才安全,
+    # 超出即截断 + surface "search incomplete"。不为对抗性巨输入逐 pass 补 cap（详见
+    # docs/_archive/reviews/sec-review-findings.md「Reviewer 复审收口」第 3 轮）。
+    # 注意全部是 **CPU/扫描护栏**,不是内存护栏:session 峰值内存由"载入多少"决定（list
+    # 查询 eager-load `Artifact.content` + cache 累积）,那是**有意接受的 best-effort**
+    # （真 bound 需 repo 列投影 + 绕 cache,对内存从未爆过的 🟡 不划算,见 GREP-02）。
+    GREP_CONTENT_MAX_CHARS: int = 2_000_000         # 单 artifact 扫描字符上限。**值由"pre-scan 物化保持有界"反推,
+                                                    # 非"artifact 最大能多大"**:_scan_content 先对整篇 splitlines×2 +
+                                                    # 建 line_starts,成本 O(行数)。2MB 最坏(全 "x\n",100万行)≈102MB /
+                                                    # 520ms,有界;20MB 会 ~1GB(reviewer P1)。超即截断扫描量 + surface
+    GREP_MAX_LINE_CHARS: int = 1000                 # 单行进结果的字符上限（ripgrep --max-columns 式）。挡"单条巨行
+                                                    # 命中→整行塞进 ToolResult"（reviewer P2:5M 行→5M body）。超即截断 + 标记
     GREP_SESSION_SCAN_BUDGET_CHARS: int = 64_000_000  # session 单次调用聚合扫描字符预算（很多中等 artifact 时限总扫描功）
     GREP_MAX_SCAN_MATCHES: int = 200_000            # 单次扫描 finditer 原始命中迭代上界。max_count 只数"去重后的行",
                                                     # 单行海量命中时永远到不了它 → finditer 被抽干（同步 CPU wedge,

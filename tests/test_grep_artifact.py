@@ -196,6 +196,16 @@ class TestPureFunctions:
         assert "--" not in out
         assert out == "1:a\n2:b\n3:c"
 
+    def test_format_flat_truncates_long_line(self, monkeypatch):
+        """单行超 GREP_MAX_LINE_CHARS → 截断 + 标记总长（reviewer P2，ripgrep --max-columns 式）。"""
+        monkeypatch.setattr(config, "GREP_MAX_LINE_CHARS", 10)
+        out = _format_flat([(1, "x" * 100, True)])
+        assert out.startswith("1:" + "x" * 10 + " ")
+        assert "100 chars" in out
+        assert len(out) < 60  # 远小于原始 100 + 行号
+        # 不超限的行不受影响
+        assert _format_flat([(2, "short", False)]) == "2-short"
+
     # ─── 全文 finditer 语义回归（P1 修复）────────────────────────────
     # 旧实现是逐行 search，把每行当独立字符串喂给 regex，导致 \A/\Z
     # 在每行边界都误命中、跨行 pattern 永远 0 命中。新实现对整文跑
@@ -817,3 +827,21 @@ class TestResourceGuards:
         assert result.success
         # 单行 → 1 行级命中,但扫描提前触顶 → 必须 surface
         assert "search incomplete" in result.data.lower()
+
+    async def test_single_huge_line_output_bounded(
+        self,
+        grep_tool: GrepArtifactTool,
+        artifact_manager: ArtifactManager,
+        session_id: str,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        """Reviewer P2:单条巨行命中,输出 body 不再是整行 —— 交给引擎落盘前就封顶。"""
+        monkeypatch.setattr(config, "GREP_MAX_LINE_CHARS", 100)
+        monkeypatch.setattr(config, "GREP_MAX_SCAN_MATCHES", 100)  # 加速,免抽 100万命中
+        content = "a" * 1_000_000  # 单行百万字符
+        aid = await _create_artifact(artifact_manager, session_id, content)
+        result = await grep_tool(pattern="a", id=aid)
+        assert result.success
+        # 改前 body ≈ 100万;现在远小于,命中行被截断 + 标记
+        assert len(result.data) < 5000
+        assert "line truncated" in result.data
