@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from tools.base import BaseTool, ToolResult, ToolParameter, ToolPermission
 from tools.custom.secrets import resolve_secrets, SecretResolutionError
 from utils.logger import get_logger
-from utils.url_guard import validate_public_url, SsrfBlockedError
+from utils.url_guard import validate_public_url, safe_url_label, SsrfBlockedError
 
 logger = get_logger("ArtifactFlow")
 
@@ -92,8 +92,12 @@ class HttpTool(BaseTool):
             )
 
         try:
-            # follow_redirects 显式关闭：杜绝 302 → 内网 / 元数据 的重定向绕过
-            async with httpx.AsyncClient(timeout=self._timeout, follow_redirects=False) as client:
+            # follow_redirects=False：杜绝 302 → 内网 / 元数据 的重定向绕过
+            # trust_env=False：httpx 默认 True 会读 HTTP(S)_PROXY/.netrc，污染后可把已校验的
+            #   公网请求改道内网代理，绕过 IP 校验。与 web_fetch(aiohttp 默认 False)对齐。
+            async with httpx.AsyncClient(
+                timeout=self._timeout, follow_redirects=False, trust_env=False
+            ) as client:
                 if self._method in ("POST", "PUT", "PATCH"):
                     response = await client.request(
                         self._method,
@@ -140,7 +144,9 @@ class HttpTool(BaseTool):
                 data=result_text,
                 metadata={
                     "status_code": response.status_code,
-                    "endpoint": endpoint,
+                    # 脱敏:endpoint 经 {{TOOL_SECRET_*}} 解析后可能含密钥(query/userinfo)，
+                    # 而 metadata 会进 tool_complete 事件 → SSE/浏览器 + DB 事件历史。只留 host。
+                    "endpoint": safe_url_label(endpoint),
                 },
             )
 

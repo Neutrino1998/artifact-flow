@@ -513,6 +513,34 @@ class TestValidateParams:
 # HttpTool SSRF — endpoint 必须公网
 # ============================================================
 
+class _FakeHttpxResponse:
+    def __init__(self):
+        self.status_code = 200
+        self.headers = {"content-type": "application/json"}
+        self.text = '{"ok": 1}'
+
+    def raise_for_status(self):
+        pass
+
+    def json(self):
+        return {"ok": 1}
+
+
+class _FakeAsyncClient:
+    """替身 httpx.AsyncClient：不发真实请求，固定返回 200 JSON。"""
+    def __init__(self, *args, **kwargs):
+        self.kwargs = kwargs
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *args):
+        return False
+
+    async def request(self, method, url, **kwargs):
+        return _FakeHttpxResponse()
+
+
 class TestHttpToolSsrf:
     def _tool(self, endpoint: str) -> HttpTool:
         return HttpTool(HttpToolConfig(
@@ -542,3 +570,15 @@ class TestHttpToolSsrf:
         result = await tool.execute()
         assert result.success is False
         assert "public URL" in result.error
+
+    async def test_endpoint_secret_not_leaked_to_metadata(self, monkeypatch):
+        # endpoint query 里的密钥不得进 metadata（会经 tool_complete → SSE/DB 泄露）。
+        # 用公网 IP 字面量避免真实 DNS/网络；httpx 用替身。
+        monkeypatch.setattr(
+            "tools.custom.http_tool.httpx.AsyncClient", _FakeAsyncClient
+        )
+        tool = self._tool("https://93.184.216.34/v1/data?api_key=SUPERSECRET")
+        result = await tool.execute()
+        assert result.success is True
+        assert result.metadata["endpoint"] == "https://93.184.216.34"
+        assert "SUPERSECRET" not in str(result.metadata)

@@ -195,6 +195,19 @@ class WebFetchTool(BaseTool):
         if jina_result is not None:
             return jina_result
 
+        # Jina 失败 → 即将本机直连 fallback。入口的 validate_public_url 与此刻之间隔了
+        # Jina 最坏 ~60s(429 sleep / timeout),DNS-rebinding 窗口被放大且时机可控
+        # (攻击者让 Jina 失败再翻 DNS)。直连前再校验一次,把窗口收回到函数调用级 ms。
+        try:
+            await validate_public_url(url)
+        except SsrfBlockedError as e:
+            logger.warning(f"web_fetch fallback blocked non-public URL: {e}")
+            return {
+                "success": False,
+                "url": url,
+                "error": "URL is not an allowed public address",
+            }
+
         # 降级路径：按类型分别处理
         content_type = self._detect_content_type(url)
         if content_type == 'pdf':
