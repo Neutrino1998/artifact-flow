@@ -10,8 +10,9 @@ from typing import Any, Dict, List, Optional
 from dataclasses import dataclass, field
 
 from tools.base import BaseTool, ToolResult, ToolParameter, ToolPermission
-from tools.custom.secrets import resolve_secrets
+from tools.custom.secrets import resolve_secrets, SecretResolutionError
 from utils.logger import get_logger
+from utils.url_guard import validate_public_url, SsrfBlockedError
 
 logger = get_logger("ArtifactFlow")
 
@@ -69,12 +70,30 @@ class HttpTool(BaseTool):
         if not self._endpoint:
             return ToolResult(success=False, error="Tool endpoint not configured")
 
-        # 运行时注入 secrets
-        headers = resolve_secrets(self._headers)
-        endpoint = resolve_secrets(self._endpoint)
+        # 运行时注入 secrets（缺失 / 非白名单前缀 → 拒绝，不外发占位符）
+        try:
+            headers = resolve_secrets(self._headers)
+            endpoint = resolve_secrets(self._endpoint)
+        except SecretResolutionError as e:
+            logger.error(f"HttpTool '{self.name}' secret resolution failed: {e}")
+            return ToolResult(
+                success=False,
+                error="Tool configuration error: a required secret is unavailable",
+            )
+
+        # SSRF 防护：解析后的 endpoint 必须指向公网（内网 / 元数据地址一律拒绝）
+        try:
+            await validate_public_url(endpoint)
+        except SsrfBlockedError as e:
+            logger.warning(f"HttpTool '{self.name}' blocked non-public endpoint: {e}")
+            return ToolResult(
+                success=False,
+                error="Tool endpoint is not an allowed public URL",
+            )
 
         try:
-            async with httpx.AsyncClient(timeout=self._timeout) as client:
+            # follow_redirects 显式关闭：杜绝 302 → 内网 / 元数据 的重定向绕过
+            async with httpx.AsyncClient(timeout=self._timeout, follow_redirects=False) as client:
                 if self._method in ("POST", "PUT", "PATCH"):
                     response = await client.request(
                         self._method,
@@ -126,14 +145,21 @@ class HttpTool(BaseTool):
             )
 
         except httpx.HTTPStatusError as e:
+            # 仅回状态码给 LLM；上游响应体可能含内网主机名 / 栈 / token，仅入 debug 日志
+            logger.debug(
+                f"HttpTool '{self.name}' upstream HTTP {e.response.status_code}: "
+                f"{e.response.text[:500]}"
+            )
             return ToolResult(
                 success=False,
-                error=f"HTTP {e.response.status_code}: {e.response.text[:500]}",
+                error=f"HTTP {e.response.status_code}",
             )
         except httpx.RequestError as e:
+            # str(e) 可能含内网地址/连接细节，不回显给 LLM
+            logger.warning(f"HttpTool '{self.name}' request error: {e}")
             return ToolResult(
                 success=False,
-                error=f"Request failed: {str(e)}",
+                error="Request failed: could not reach the endpoint",
             )
         except Exception as e:
             logger.exception(f"HttpTool '{self.name}' execution error")

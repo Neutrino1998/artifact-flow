@@ -14,7 +14,7 @@
 
 | 章 | 门类 | 优先级 | 建议分支 |
 |----|------|--------|----------|
-| 一 | SSRF / 外联工具(6 项) | 🔴 移交前必修 | `fix/sec-ssrf` |
+| 一 | SSRF / 外联工具(6 项) | ✅ 已修(2026-05-24, 落 main) | ~~`fix/sec-ssrf`~~ → main |
 | 二 | grep ReDoS / 事件循环(3 项) | 🔴 移交前必修 | `fix/sec-grep-redos` |
 | 三 | 账户与认证(6 项 + 首次强制改密) | 🟡 建议修(部分待测试中心定标) | `feat/sec-account-auth` |
 | 四 | 部署与配置(2 项) | 🟡 | `chore/sec-deploy` |
@@ -26,6 +26,23 @@
 
 > 服务端请求伪造(SSRF)及相关外联工具加固。SSRF-01/02/03 是**同一根因**(只校验 scheme、不校验目标主机),一处 `validate_public_url()` + 关重定向即可统一解决;04/05/06 是同链路放大项,顺手一并修。
 > 背景:`web_fetch`/`http_tool` 由本机发起请求,"服务器视角"可达云元数据 / 本机 / 内网,攻击者只要能影响 agent 输入即可读回内网内容(可读 SSRF)。
+
+> **✅ 修复状态(2026-05-24,已落 main,未单独建分支):** SSRF-01~06 全部修复。
+> 共享原语 `src/utils/url_guard.py` 的 `validate_public_url` —— **单层 pre-flight**:解析 URL → 主机 → 全部 IP 逐个查危险网段;`config.py` 新增 `WEB_FETCH_MAX_BYTES` / `CUSTOM_TOOL_SECRET_PREFIX`。
+> 防护用「pre-flight 校验 + 关重定向」组合,**刻意不上**连接时校验的自定义 resolver(评审中权衡:复杂度不划算,见下「设计取舍」)。
+> - **01** web_fetch `execute` 入口跑 `validate_public_url`(覆盖 Jina 主路径 + bs4/PDF fallback)
+> - **02** http_tool endpoint 跑 `validate_public_url` + `{{VAR}}` 限 `TOOL_SECRET_` 前缀(loader **load 时** fail-fast + secrets 运行时拒绝;非白名单 / 缺失即报错,不外发占位符)
+> - **03** fallback `allow_redirects=False`(不跟随 → 302 到内网也不被跟);http_tool 显式 `follow_redirects=False`
+> - **04** `_read_capped` 流式封顶(Content-Length 预检 + 分块累计中断,封**解压后**字节 → 挡 gzip 炸弹)
+> - **05** 删 web_fetch 三处 `trust_env=True`(已核实全仓库无 proxy env 依赖、base URL 硬编码)
+> - **06** http_tool / web_fetch / web_search 回 agent 的错误改通用文案,上游响应体 / `str(e)` 仅入 debug 日志
+>
+> **IP 黑名单口径(重要,改前必读):** 只拦真正危险段(loopback / link-local-元数据 / RFC1918 / CGNAT / ULA / multicast),**刻意不用** `is_private`/`is_reserved` 全集 —— 否则 `198.18.0.0/15`(基准测试段)被拦,而那正是 **fake-IP 代理(Clash/Surge/sing-box)给域名分配的占位 IP**,会在代理环境(如本地开发)误伤一切外联(`github.com → 198.18.x.x` 即被拒)。注:阿里云 ECS 元数据 `100.100.100.200 ∈ 100.64.0.0/10`、AWS/GCP `169.254.169.254 ∈ 169.254/16` 都在拦截内 —— 这是本防护的 crown-jewel(防 STS/IAM 凭证外泄)。详见 `url_guard.py` 网段定义注释。
+>
+> **设计取舍(权限 vs IP 校验):** 工具权限(`web_fetch` = CONFIRM)作为互补纵深保留,但**不能**替代 IP 校验 —— 危险目标(元数据)在审批界面不显眼、且重定向/rebinding 绕过审批。故保留轻量 pre-flight 拦截 crown-jewel。同时**接受 DNS-rebinding 作为 best-effort 残留**(pre-flight 解析与实际 connect 之间 DNS 翻转):关它需连接时 resolver,复杂度不划算,rebinding 属罕见边角。
+>
+> 测试:新增 `tests/test_url_guard.py` + `tests/test_web_fetch.py`,更新 `tests/test_custom_tools.py`;全量 **924 passed / 28 skipped**。
+> **未做(按决定暂缓):** `ARTIFACTFLOW_OFFLINE` fail-closed 硬开关、容器 egress 防火墙(部署面)。
 
 ## SSRF-01 🔴 `web_fetch` 无主机校验 — 可读云元数据 / 内网凭证
 

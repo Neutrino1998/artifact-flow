@@ -90,6 +90,13 @@ class Settings(BaseSettings):
     # 上传限制
     MAX_UPLOAD_SIZE: int = 20 * 1024 * 1024  # 20MB
 
+    # SSRF / 外联工具防护（隐藏常量，不暴露 API / 工具参数）
+    WEB_FETCH_MAX_BYTES: int = 20 * 1024 * 1024   # fallback 下载体上限（解压后字节），
+                                                  # 超即中断 —— 防 gzip 炸弹 / 大响应 OOM；
+                                                  # 与 MAX_UPLOAD_SIZE / DocConverter 对齐
+    CUSTOM_TOOL_SECRET_PREFIX: str = "TOOL_SECRET_"  # 自定义工具 {{VAR}} 只能解析此前缀的环境变量；
+                                                     # 把签名密钥 / DB 密码挡在自定义工具可触及范围外
+
     # 输入限制
     MAX_MESSAGE_CHARS: int = 20000   # 单条用户输入 / inject 内容字符上限（超即 422）；
                                      # 超大粘贴在前端转为暂存附件而非 inline 消息

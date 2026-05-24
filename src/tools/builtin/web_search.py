@@ -158,7 +158,9 @@ class WebSearchTool(BaseTool):
 
                 if response.status != 200:
                     error_text = await response.text()
-                    logger.error(f"Search API error: {response.status} - {error_text}")
+                    # 状态码进 ERROR；完整上游响应体仅入 debug（截断），不打到主日志
+                    logger.error(f"Search API error: HTTP {response.status}")
+                    logger.debug(f"Search API error body: {error_text[:500]}")
 
                     # Retryable HTTP errors — raise to trigger retry loop
                     if response.status in self._RETRYABLE_STATUS_CODES:
