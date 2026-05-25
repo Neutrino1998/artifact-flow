@@ -8,6 +8,7 @@ from typing import Any, Dict, Literal, Optional, List
 from datetime import datetime
 from pydantic import BaseModel, Field, field_validator
 
+from utils.password_policy import validate_password_strength
 from utils.validators import validate_username
 
 
@@ -27,7 +28,8 @@ class LoginRequest(BaseModel):
 class CreateUserRequest(BaseModel):
     """POST /api/v1/admin/users request body"""
     username: str = Field(..., min_length=2, max_length=64, description="Username")
-    password: str = Field(..., min_length=4, max_length=128, description="Password")
+    # 长度下限/复杂度交给 validate_password_strength（config 驱动）,Field 只兜 max。
+    password: str = Field(..., max_length=128, description="Password")
     display_name: Optional[str] = Field(None, max_length=128, description="Display name")
     role: str = Field("user", description="Role (admin or user)")
     department_id: Optional[str] = Field(None, description="Department id; null = unassigned")
@@ -36,6 +38,12 @@ class CreateUserRequest(BaseModel):
     @classmethod
     def _check_username(cls, v: str) -> str:
         validate_username(v)
+        return v
+
+    @field_validator("password")
+    @classmethod
+    def _check_password(cls, v: str) -> str:
+        validate_password_strength(v)
         return v
 
 
@@ -47,16 +55,31 @@ class UpdateUserRequest(BaseModel):
     传 null = 清空归属）；字段缺省 → 不改。路由通过 model_fields_set 区分。
     """
     display_name: Optional[str] = Field(None, max_length=128, description="Display name")
-    password: Optional[str] = Field(None, min_length=4, max_length=128, description="New password")
+    password: Optional[str] = Field(None, max_length=128, description="New password")
     role: Optional[str] = Field(None, description="Role (admin or user)")
     is_active: Optional[bool] = Field(None, description="Whether user is active")
     department_id: Optional[str] = Field(None, description="Department id; explicit null clears")
+
+    @field_validator("password")
+    @classmethod
+    def _check_password(cls, v: Optional[str]) -> Optional[str]:
+        # 缺省（不改密码）跳过;显式传入才校验强度。
+        if v is None:
+            return v
+        validate_password_strength(v)
+        return v
 
 
 class ChangePasswordRequest(BaseModel):
     """POST /api/v1/auth/me/password request body"""
     current_password: str = Field(..., min_length=1, max_length=128, description="Current password")
-    new_password: str = Field(..., min_length=4, max_length=128, description="New password")
+    new_password: str = Field(..., max_length=128, description="New password")
+
+    @field_validator("new_password")
+    @classmethod
+    def _check_new_password(cls, v: str) -> str:
+        validate_password_strength(v)
+        return v
 
 
 class UpdateMyProfileRequest(BaseModel):
@@ -74,6 +97,13 @@ class UserInfo(BaseModel):
     username: str = Field(..., description="Username")
     display_name: Optional[str] = Field(None, description="Display name")
     role: str = Field(..., description="Role")
+    must_change_password: bool = Field(
+        False,
+        description=(
+            "True 时前端须强制弹出改密框,且除改密/登出外的请求会被后端 403 "
+            "(首次登录 / 管理员重置 / 口令到期)。改密成功后清除。"
+        ),
+    )
     department_path: Optional[List[str]] = Field(
         None,
         description=(
@@ -138,6 +168,19 @@ class BulkImportSkippedRow(BaseModel):
     reason: str = Field("username_exists", description="Skip reason")
 
 
+class BulkImportCreatedUser(UserResponse):
+    """批量导入新建成功的用户。
+
+    initial_password 仅在该行**未提供** password 列、由系统生成随机临时密码时
+    回带,供 admin 带外分发(显式提供密码的行为 None —— admin 已知道)。所有
+    导入用户都置 must_change_password=True,首次登录强制改密(根治 ACC-03)。
+    """
+    initial_password: Optional[str] = Field(
+        None,
+        description="系统生成的初始临时密码（仅未提供 password 列时回带,供分发）",
+    )
+
+
 class BulkImportResponse(BaseModel):
     """
     POST /api/v1/admin/users/bulk-import response。
@@ -145,7 +188,7 @@ class BulkImportResponse(BaseModel):
     best-effort 三分类。total_rows = created + failed + skipped。
     warnings 含编码 fallback / unknown 列等非阻断提示。
     """
-    created: List[UserResponse] = Field(default_factory=list)
+    created: List[BulkImportCreatedUser] = Field(default_factory=list)
     failed: List[BulkImportFailedRow] = Field(default_factory=list)
     skipped: List[BulkImportSkippedRow] = Field(default_factory=list)
     total_rows: int = Field(..., description="Total data rows processed (excluding header)")

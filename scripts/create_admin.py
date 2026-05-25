@@ -30,6 +30,7 @@ async def main(username: str, password: str, no_claim: bool) -> None:
     from repositories.user_repo import UserRepository
     from api.services.auth import hash_password
     from config import config
+    from utils.time import utc_now
 
     db_urls = [u.strip() for u in config.DATABASE_URLS.split(",") if u.strip()] if config.DATABASE_URLS else []
     db = DatabaseManager(
@@ -68,6 +69,9 @@ async def main(username: str, password: str, no_claim: bool) -> None:
                     display_name=None,
                     role="admin",
                     is_active=True,
+                    # bootstrap admin 自选强口令、已知,不强制改密;记改密时间避免
+                    # 「password_changed_at IS NULL → 视为到期」误触发首次强制改密。
+                    password_changed_at=utc_now(),
                 )
                 await user_repo.add(user)
                 print(f"Admin user created: {username} (id={user_id})")
@@ -110,8 +114,12 @@ if __name__ == "__main__":
             print("Passwords do not match")
             sys.exit(1)
 
-    if len(password) < 4:
-        print("Password must be at least 4 characters")
+    # 与 API 写入口同一套强度策略（config 驱动）。bootstrap admin 也不放行弱口令。
+    from utils.password_policy import validate_password_strength
+    try:
+        validate_password_strength(password)
+    except ValueError as e:
+        print(f"Password does not meet policy: {e}")
         sys.exit(1)
 
     asyncio.run(main(args.username, password, args.no_claim))

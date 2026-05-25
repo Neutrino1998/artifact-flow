@@ -1277,6 +1277,43 @@ export interface components {
             conversation_count: number;
         };
         /**
+         * BulkImportCreatedUser
+         * @description 批量导入新建成功的用户。
+         *
+         *     initial_password 仅在该行**未提供** password 列、由系统生成随机临时密码时
+         *     回带,供 admin 带外分发(显式提供密码的行为 None —— admin 已知道)。所有
+         *     导入用户都置 must_change_password=True,首次登录强制改密(根治 ACC-03)。
+         */
+        BulkImportCreatedUser: {
+            /** Id */
+            id: string;
+            /** Username */
+            username: string;
+            /** Display Name */
+            display_name: string | null;
+            /** Role */
+            role: string;
+            /** Is Active */
+            is_active: boolean;
+            /** Department Id */
+            department_id: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /**
+             * Initial Password
+             * @description 系统生成的初始临时密码（仅未提供 password 列时回带,供分发）
+             */
+            initial_password: string | null;
+        };
+        /**
          * BulkImportFailedRow
          * @description 单行业务校验失败 — 行号 + username（可能为空）+ 原因。
          */
@@ -1306,7 +1343,7 @@ export interface components {
          */
         BulkImportResponse: {
             /** Created */
-            created: components["schemas"]["UserResponse"][];
+            created: components["schemas"]["BulkImportCreatedUser"][];
             /** Failed */
             failed: components["schemas"]["BulkImportFailedRow"][];
             /** Skipped */
@@ -1932,6 +1969,12 @@ export interface components {
              * @description Role
              */
             role: string;
+            /**
+             * Must Change Password
+             * @description True 时前端须强制弹出改密框,且除改密/登出外的请求会被后端 403 (首次登录 / 管理员重置 / 口令到期)。改密成功后清除。
+             * @default false
+             */
+            must_change_password: boolean;
             /**
              * Department Path
              * @description Names of the user's department ancestors, root → leaf. None when the user has no department. Sidebar shows the leaf; future UIs can render the full chain without a second request.

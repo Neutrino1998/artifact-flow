@@ -16,7 +16,7 @@ type Stage =
 const TEMPLATE_HEADER = 'username,password,display_name,dept_l1,dept_l2,dept_l3';
 const TEMPLATE_SAMPLE =
   'alice,,Alice Cooper,部门A,子部门A1,小组A1a\n' +
-  'bobby,custompw,,部门A,子部门A1,\n' +
+  'bobby,Bobby#2026,,部门A,子部门A1,\n' +
   'carol,,Carol,部门B,,';
 
 function downloadCsv(filename: string, content: string) {
@@ -152,7 +152,7 @@ export default function BulkImportForm() {
               批量导入用户
             </div>
             <div className="text-xs text-text-tertiary dark:text-text-tertiary-dark">
-              上传 CSV 文件；密码留空时默认 = 用户名
+              上传 CSV；密码留空则自动生成临时密码，用户首次登录强制改密
             </div>
           </div>
           <button
@@ -381,8 +381,9 @@ function UploadStage({
             字母 / 数字 / <span className="font-mono">. _ -</span>）
           </li>
           <li>
-            <span className="font-mono">password</span>（可选，留空则默认 =
-            username，最少 4 字符）
+            <span className="font-mono">password</span>（可选，留空则自动生成
+            临时密码并在结果中回显；填写须 ≥8 位且含字母、数字、符号。所有导入
+            用户首次登录强制改密）
           </li>
           <li><span className="font-mono">display_name</span>（可选，可中文）</li>
           <li>
@@ -439,6 +440,16 @@ function ResultStage({
         </div>
       )}
 
+      {/* 系统生成的初始临时密码 —— 仅留空 password 列的行有;供 admin 带外分发。
+          这是唯一一次展示明文的机会(不入库明文),关闭后无法再取回。 */}
+      {data.created.some((c) => c.initial_password) && (
+        <CredentialsList
+          rows={data.created
+            .filter((c) => c.initial_password)
+            .map((c) => ({ username: c.username, password: c.initial_password as string }))}
+        />
+      )}
+
       {data.skipped.length > 0 && (
         <DetailList
           title={`跳过（${data.skipped.length}） — username 已存在`}
@@ -473,6 +484,44 @@ function ResultStage({
           </button>
         </div>
       )}
+    </div>
+  );
+}
+
+function CredentialsList({
+  rows,
+}: {
+  rows: Array<{ username: string; password: string }>;
+}) {
+  const asCsv = `username,initial_password\n${rows
+    .map((r) => `${r.username},${r.password}`)
+    .join('\n')}\n`;
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between">
+        <div className="text-xs font-medium text-text-secondary dark:text-text-secondary-dark">
+          初始临时密码（{rows.length}） — 请安全分发，关闭后无法再次查看
+        </div>
+        <button
+          onClick={() => downloadCsv('initial-passwords.csv', asCsv)}
+          type="button"
+          className="text-xs text-accent hover:underline"
+        >
+          下载初始密码 CSV
+        </button>
+      </div>
+      <div className="rounded-lg border border-border dark:border-border-dark divide-y divide-border dark:divide-border-dark max-h-48 overflow-y-auto">
+        {rows.map((r, i) => (
+          <div key={i} className="px-3 py-2 text-xs flex items-baseline justify-between gap-3">
+            <span className="font-medium text-text-primary dark:text-text-primary-dark">
+              {r.username}
+            </span>
+            <span className="font-mono text-text-secondary dark:text-text-secondary-dark select-all">
+              {r.password}
+            </span>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

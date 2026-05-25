@@ -153,6 +153,24 @@ class Settings(BaseSettings):
     JWT_ALGORITHM: str = "HS256"
     JWT_EXPIRY_DAYS: int = 7
 
+    # 密码策略（等保 9.1.4.1 身份鉴别;隐藏常量,operator 可调,不暴露 API/工具参数）。
+    # 强度档(2026-05-25 定标):等保四级基线 —— ≥8 位、须含字母+数字+符号三类全、
+    # 拒弱口令/键盘序列黑名单。周期改密(降等保三级):全部用户 180 天到期 + 不重用前 1 次。
+    PASSWORD_MIN_LENGTH: int = 8              # 静态口令长度下限(等保「8 位以上」)
+    PASSWORD_REQUIRE_LETTER: bool = True      # 须含字母(大小写均算)
+    PASSWORD_REQUIRE_DIGIT: bool = True       # 须含数字
+    PASSWORD_REQUIRE_SYMBOL: bool = True      # 须含符号(等保「字母、数字、符号混合」三类全)
+    PASSWORD_EXPIRY_DAYS: int = 180           # 口令到期天数,超期登录即置 must_change_password;0=不强制到期
+    PASSWORD_HISTORY_COUNT: int = 1           # 新密码不得与「最近 N 个用过的口令(含当前)」相同;1=仅当前
+    PASSWORD_HISTORY_RETAIN: int = 5          # password_history 列保留的历史 hash 数。从 day 1 起维护,
+                                              # 故调高 PASSWORD_HISTORY_COUNT(≤RETAIN+1)即生效、无需再迁移。
+                                              # 这是 history-count 解耦 retain 的关键:列存得比当前查得多。
+
+    # 登录频控(ACC-01;隐藏常量)。per-username + per-IP 各自单键计数,Cluster 安全
+    # (绝不跨键 multi-key)。失败累计超阈 → 429 锁定至窗口过期。
+    LOGIN_MAX_FAILURES: int = 5               # 窗口内最大失败次数,达到即拒
+    LOGIN_FAILURE_WINDOW_SEC: int = 900       # 失败计数滑窗 / 锁定时长(秒),15 分钟
+
     @property
     def effective_database_url(self) -> str:
         """统一的有效数据库 URL — 所有消费者（应用、Alembic、脚本）都应使用此属性。

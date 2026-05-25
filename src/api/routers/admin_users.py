@@ -38,13 +38,15 @@ from api.schemas.auth import (
     UserImpactResponse,
     BulkImportFailedRow,
     BulkImportSkippedRow,
+    BulkImportCreatedUser,
     BulkImportResponse,
     BulkActionRequest,
     BulkActionResponse,
     BulkActionFailedItem,
     BulkImpactResponse,
 )
-from api.services.auth import TokenPayload, hash_password
+from api.services.auth import TokenPayload, apply_new_password, hash_password
+from utils.password_policy import generate_temp_password, validate_password_strength
 from core.conversation_manager import ConversationManager
 from repositories.user_repo import UserRepository
 from repositories.department_repo import DepartmentRepository
@@ -92,11 +94,12 @@ async def create_user(
     user = User(
         id=f"user-{uuid4().hex}",
         username=request.username,
-        hashed_password=hashed,
         display_name=request.display_name,
         role=request.role,
         department_id=request.department_id,
     )
+    # 管理员建号 → 首次登录强制改密(等保首次强制 + 根治 ACC-03 弱初始口令)
+    apply_new_password(user, hashed, mark_must_change=True)
     await user_repo.add(user)
 
     logger.info(f"User created: {user.username} (role={user.role})")
@@ -416,8 +419,10 @@ async def bulk_import_users(
     dept_cache: dict[tuple[str, ...], Optional[str]] = {}
 
     # ---------- Phase 1: validate + dept resolve ----------
-    # 收集通过校验的行；password 此时只挑出来不 hash
-    to_create: list[tuple[ParsedRow, str, Optional[str]]] = []  # (row, password, dept_id)
+    # 收集通过校验的行；password 此时只挑出来不 hash。
+    # 元组:(row, password, dept_id, generated_password)。generated 非 None 表示
+    # 系统生成的临时密码,需在响应回带给 admin 分发。
+    to_create: list[tuple[ParsedRow, str, Optional[str], Optional[str]]] = []
 
     for row in parsed.rows:
         # username 必填 + 格式
@@ -452,17 +457,23 @@ async def bulk_import_users(
             ))
             continue
 
-        # 默认密码 = username；强制最短 4 位（与 CreateUserRequest 一致）
-        password = row.password if row.password else row.username
-        if len(password) < 4:
-            failed.append(BulkImportFailedRow(
-                row=row.row_number, username=row.username,
-                reason=(
-                    f"password too short (min 4 chars); "
-                    f"default = username '{row.username}' has only {len(row.username)} chars"
-                ),
-            ))
-            continue
+        # 密码(ACC-03 根治):不再「缺省 = 用户名」。显式提供 → 强度校验;
+        # 未提供 → 生成随机合规临时密码并在响应回带,供 admin 带外分发。
+        # 两种情况都置 must_change_password=True,首次登录强制改密。
+        if row.password:
+            try:
+                validate_password_strength(row.password)
+            except ValueError as e:
+                failed.append(BulkImportFailedRow(
+                    row=row.row_number, username=row.username,
+                    reason=f"password does not meet policy: {e}",
+                ))
+                continue
+            password = row.password
+            generated_password: Optional[str] = None
+        else:
+            password = generate_temp_password()
+            generated_password = password
 
         # 部门路径：gap 校验 + cache + resolve
         try:
@@ -482,7 +493,7 @@ async def bulk_import_users(
                 department_id = await resolve_department_path(dept_repo, path)
                 dept_cache[cache_key] = department_id
 
-        to_create.append((row, password, department_id))
+        to_create.append((row, password, department_id, generated_password))
         # phase-1 内同 CSV 后续行不再尝试同 username（防 inter-row 冲突）
         existing.add(row.username)
 
@@ -491,21 +502,22 @@ async def bulk_import_users(
     # gather 失败（极罕见）→ 整体 500 是正确行为（系统级问题，不静默吞）。
     hashed_passwords: list[str] = (
         await asyncio.gather(*(
-            asyncio.to_thread(hash_password, pw) for _, pw, _ in to_create
+            asyncio.to_thread(hash_password, pw) for _, pw, _, _ in to_create
         ))
         if to_create else []
     )
 
     # ---------- Phase 3: INSERT ----------
-    for (row, _password, dept_id), hashed in zip(to_create, hashed_passwords):
+    for (row, _password, dept_id, generated_password), hashed in zip(to_create, hashed_passwords):
         new_user = User(
             id=f"user-{uuid4().hex}",
             username=row.username,
-            hashed_password=hashed,
             display_name=row.display_name or None,
             role="user",
             department_id=dept_id,
         )
+        # 导入用户 → 首次登录强制改密(等保 + ACC-03)
+        apply_new_password(new_user, hashed, mark_must_change=True)
         try:
             await user_repo.add(new_user)
         except IntegrityError:
@@ -517,7 +529,7 @@ async def bulk_import_users(
             ))
             continue
 
-        created.append(UserResponse(
+        created.append(BulkImportCreatedUser(
             id=new_user.id,
             username=new_user.username,
             display_name=new_user.display_name,
@@ -526,6 +538,7 @@ async def bulk_import_users(
             department_id=new_user.department_id,
             created_at=new_user.created_at,
             updated_at=new_user.updated_at,
+            initial_password=generated_password,
         ))
 
     logger.info(
@@ -625,9 +638,9 @@ async def update_user(
                 status_code=403,
                 detail="Use POST /auth/me/password to change your own password",
             )
-        user.hashed_password = await asyncio.to_thread(hash_password, request.password)
-        # admin 重置密码同样吊销该用户的旧 token
-        user.password_version = (user.password_version or 0) + 1
+        new_hash = await asyncio.to_thread(hash_password, request.password)
+        # admin 重置 → 用户首次登录强制改密 + 吊销旧 token(pwd_v++)+ 旧 hash 进历史
+        apply_new_password(user, new_hash, mark_must_change=True)
     if request.role is not None:
         if request.role not in ("admin", "user"):
             raise HTTPException(status_code=400, detail="Role must be 'admin' or 'user'")

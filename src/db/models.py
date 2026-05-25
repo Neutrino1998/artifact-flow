@@ -25,6 +25,7 @@ from sqlalchemy import (
     Index,
     Computed,
     func,
+    text,
 )
 from sqlalchemy.orm import (
     DeclarativeBase,
@@ -58,6 +59,25 @@ class User(Base):
     # 不是 blacklist —— 单调递增计数器，无需 Redis / 持久化吊销集合。
     password_version: Mapped[int] = mapped_column(
         Integer, nullable=False, default=0, server_default="0"
+    )
+
+    # 等保密码策略（门类三）。三者归一在一道闸门 + 一个时间戳 + 一个历史列：
+    #   - must_change_password: 建用户/导入/admin 重置/登录超期 → True;
+    #     get_current_user 闸门在 True 时除改密/登出外一律 403,改密成功清。
+    #     根治 ACC-03(缺省密码)、承载首次强制改密 + 周期到期强制改密。
+    must_change_password: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
+    #   - password_changed_at: 每次设置口令时写 utc_now();登录时算龄 > 到期天数
+    #     即置 must_change_password。NULL 视为「未知 → 已过期」。
+    password_changed_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime, nullable=True
+    )
+    #   - password_history: 最近若干个**旧** hash(most-recent-first,trim 到
+    #     PASSWORD_HISTORY_RETAIN)。改密查重候选 = [当前 hash] + history[:COUNT-1]。
+    #     从 day 1 起维护,故调高 PASSWORD_HISTORY_COUNT 无需再迁移(列存得比查得多)。
+    password_history: Mapped[Optional[list]] = mapped_column(
+        JSON, nullable=True, default=list
     )
 
     created_at: Mapped[datetime] = mapped_column(

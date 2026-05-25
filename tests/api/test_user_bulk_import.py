@@ -6,8 +6,8 @@ Covers POST /api/v1/admin/users/bulk-import:
 - Happy path: rows split into created / failed / skipped
 - Department auto-creation via resolve_department_path
 - File-internal duplicate → 400
-- Default password = username (login round-trip)
-- Username < 4 chars + empty password → failed (default too short)
+- Empty password → system-generated temp password (returned for distribution)
+- Explicit password must meet strength policy; all imported users must_change on first login
 - Department gap → failed
 - Row count over limit → 400
 - Byte size over limit → 422
@@ -81,7 +81,7 @@ class TestHappyPath:
     ):
         csv = _csv_bytes(
             "username,password,display_name\n"
-            "alice,custompw,Alice Cooper\n"
+            "alice,Custompw1!,Alice Cooper\n"
         )
         resp = await _post_csv(admin_client, csv)
         assert resp.status_code == 200
@@ -93,21 +93,27 @@ class TestHappyPath:
             )).scalar_one()
             assert user.display_name == "Alice Cooper"
 
-    async def test_default_password_login_roundtrip(
+    async def test_generated_temp_password_returned_and_login_roundtrip(
         self, admin_client: AsyncClient, anon_client: AsyncClient
     ):
-        """Empty password → default = username; user can log in with username."""
-        csv = _csv_bytes("username\nlongenough\n")  # 10 chars > 4
+        """空 password → 系统生成随机合规临时密码,在 created.initial_password
+        回带;该临时密码可登录,且用户被标记首次强制改密(ACC-03 根治)。"""
+        csv = _csv_bytes("username\nlongenough\n")
         resp = await _post_csv(admin_client, csv)
         assert resp.status_code == 200
-        assert len(resp.json()["created"]) == 1
+        created = resp.json()["created"]
+        assert len(created) == 1
+        temp_pw = created[0]["initial_password"]
+        assert temp_pw  # 非空临时密码,供 admin 分发
 
         login = await anon_client.post(
             "/api/v1/auth/login",
-            json={"username": "longenough", "password": "longenough"},
+            json={"username": "longenough", "password": temp_pw},
         )
         assert login.status_code == 200
         assert "access_token" in login.json()
+        # 导入用户首次登录强制改密
+        assert login.json()["user"]["must_change_password"] is True
 
 
 # ============================================================
@@ -183,25 +189,36 @@ class TestValidationFailures:
         assert "中文用户" in failed_usernames
         assert "ab cd" in failed_usernames
 
-    async def test_short_username_with_empty_password_fails(
-        self, admin_client: AsyncClient
-    ):
-        csv = _csv_bytes("username\nab\n")  # 2 chars, default pwd would also be 2
+    async def test_too_short_username_fails(self, admin_client: AsyncClient):
+        # 1 字符用户名 < validate_username 下限(2)→ 失败。
+        # (空 password 不再导致失败 —— 现在会生成随机临时密码。)
+        csv = _csv_bytes("username\na\n")
         resp = await _post_csv(admin_client, csv)
         assert resp.status_code == 200
         body = resp.json()
         assert body["created"] == []
         assert len(body["failed"]) == 1
-        assert body["failed"][0]["username"] == "ab"
-        assert "password too short" in body["failed"][0]["reason"]
+        assert body["failed"][0]["username"] == "a"
+        assert "2-64" in body["failed"][0]["reason"]
 
     async def test_short_username_with_explicit_password_ok(
         self, admin_client: AsyncClient
     ):
-        csv = _csv_bytes("username,password\nab,longpass\n")
+        # 2 字符用户名合法(下限 2);显式强口令 → 创建成功
+        csv = _csv_bytes("username,password\nab,Longpass1!\n")
         resp = await _post_csv(admin_client, csv)
         assert resp.status_code == 200
         assert len(resp.json()["created"]) == 1
+
+    async def test_weak_explicit_password_fails(self, admin_client: AsyncClient):
+        # 显式但不达标的口令 → 该行 failed(策略校验)
+        csv = _csv_bytes("username,password\nalice,weakpass\n")
+        resp = await _post_csv(admin_client, csv)
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["created"] == []
+        assert len(body["failed"]) == 1
+        assert "policy" in body["failed"][0]["reason"].lower()
 
     async def test_display_name_over_length_fails(
         self, admin_client: AsyncClient
@@ -251,7 +268,7 @@ class TestValidationFailures:
         csv = _csv_bytes(
             "username,password\n"
             f"alice,{long_pw}\n"
-            "bobby,sane_pw\n"  # control
+            "bobby,Sane_pw1\n"  # control: strong + within length
         )
         resp = await _post_csv(admin_client, csv)
         assert resp.status_code == 200
@@ -351,7 +368,7 @@ class TestMisc:
     ):
         csv = _csv_bytes(
             "username,password,notes,extra\n"
-            "alice,longpass,internal note,xyz\n"
+            "alice,Longpass1!,internal note,xyz\n"
         )
         resp = await _post_csv(admin_client, csv)
         assert resp.status_code == 200

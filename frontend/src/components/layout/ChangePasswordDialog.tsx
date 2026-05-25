@@ -5,6 +5,10 @@ import * as api from '@/lib/api';
 import { ApiError } from '@/lib/api';
 import { useAuthStore } from '@/stores/authStore';
 import {
+  PASSWORD_POLICY_HINT,
+  validatePasswordStrength,
+} from '@/lib/passwordPolicy';
+import {
   BUTTON_PRIMARY,
   BUTTON_SECONDARY,
   INPUT_ON_PANEL,
@@ -14,9 +18,14 @@ import DialogShell from './DialogShell';
 
 interface ChangePasswordDialogProps {
   onClose: () => void;
+  /**
+   * 强制模式（首次登录 / 管理员重置 / 口令到期）。隐藏取消、禁用背景/ESC 关闭,
+   * 文案改为强制语气。由 AuthGuard 在 user.must_change_password 时渲染。
+   */
+  forced?: boolean;
 }
 
-export default function ChangePasswordDialog({ onClose }: ChangePasswordDialogProps) {
+export default function ChangePasswordDialog({ onClose, forced = false }: ChangePasswordDialogProps) {
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -24,9 +33,15 @@ export default function ChangePasswordDialog({ onClose }: ChangePasswordDialogPr
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
 
+  // 客户端强度提示(后端权威);新口令非空时才校验,避免初始就报红。
+  const policyError = newPassword ? validatePasswordStrength(newPassword) : null;
+  const newPasswordMismatch =
+    confirmPassword.length > 0 && newPassword !== confirmPassword;
+
   const canSubmit =
     currentPassword.length > 0 &&
-    newPassword.length >= 4 &&
+    newPassword.length > 0 &&
+    policyError === null &&
     newPassword === confirmPassword &&
     !submitting;
 
@@ -46,11 +61,10 @@ export default function ChangePasswordDialog({ onClose }: ChangePasswordDialogPr
       setTimeout(() => useAuthStore.getState().logout(), 1500);
     } catch (err) {
       if (err instanceof ApiError) {
-        if (err.status === 400) {
+        if (err.status === 400 && /current password/i.test(err.message)) {
           setError('当前密码错误');
-        } else if (err.status === 422) {
-          setError('新密码不符合要求（至少 4 个字符）');
         } else {
+          // 不重用(400)、强度(422)等后端已返回中文具体原因,直接展示。
           setError(err.message || '修改失败，请重试');
         }
       } else {
@@ -61,16 +75,17 @@ export default function ChangePasswordDialog({ onClose }: ChangePasswordDialogPr
     }
   };
 
-  const newPasswordMismatch =
-    confirmPassword.length > 0 && newPassword !== confirmPassword;
-
   return (
     <DialogShell
-      title="修改密码"
-      description="修改后所有已登录的设备（包括当前页）都会被强制重新登录。"
+      title={forced ? '请先修改密码' : '修改密码'}
+      description={
+        forced
+          ? '出于安全要求（首次登录 / 管理员重置 / 口令到期），请先设置新密码后再继续使用。'
+          : '修改后所有已登录的设备（包括当前页）都会被强制重新登录。'
+      }
       onClose={onClose}
-      closeOnBackdrop={!submitting}
-      closeOnEscape={!submitting}
+      closeOnBackdrop={!forced && !submitting}
+      closeOnEscape={!forced && !submitting}
       surfaceClassName="bg-chat dark:bg-chat-dark"
     >
       {success ? (
@@ -94,7 +109,7 @@ export default function ChangePasswordDialog({ onClose }: ChangePasswordDialogPr
           </div>
           <div>
             <label className={LABEL_CLASS}>
-              新密码（至少 4 个字符）
+              新密码
             </label>
             <input
               type="password"
@@ -103,6 +118,13 @@ export default function ChangePasswordDialog({ onClose }: ChangePasswordDialogPr
               disabled={submitting}
               className={INPUT_ON_PANEL}
             />
+            {policyError ? (
+              <p className="text-status-error text-xs mt-1">{policyError}</p>
+            ) : (
+              <p className="text-text-tertiary dark:text-text-tertiary-dark text-xs mt-1">
+                {PASSWORD_POLICY_HINT}
+              </p>
+            )}
           </div>
           <div>
             <label className={LABEL_CLASS}>
@@ -125,14 +147,16 @@ export default function ChangePasswordDialog({ onClose }: ChangePasswordDialogPr
           )}
 
           <div className="flex justify-end gap-3 pt-2">
-            <button
-              type="button"
-              onClick={onClose}
-              disabled={submitting}
-              className={`${BUTTON_SECONDARY} rounded-lg px-6 py-2`}
-            >
-              取消
-            </button>
+            {!forced && (
+              <button
+                type="button"
+                onClick={onClose}
+                disabled={submitting}
+                className={`${BUTTON_SECONDARY} rounded-lg px-6 py-2`}
+              >
+                取消
+              </button>
+            )}
             <button
               type="submit"
               disabled={!canSubmit}

@@ -31,11 +31,14 @@ from api.dependencies import (
     get_db_manager,
     get_stream_transport,
     get_execution_runner,
+    get_login_rate_limiter,
 )
 from api.services.auth import create_access_token
 from api.services.stream_transport import InMemoryStreamTransport
 from api.services.execution_runner import ExecutionRunner
 from api.services.runtime_store import InMemoryRuntimeStore
+from api.services.login_rate_limiter import InMemoryLoginRateLimiter
+from config import config
 from db.database import DatabaseManager
 from db.models import User
 
@@ -54,6 +57,12 @@ async def app(db_manager: DatabaseManager):
 
     stream_transport = InMemoryStreamTransport(ttl_seconds=30)
     execution_runner = ExecutionRunner(max_concurrent=5, store=InMemoryRuntimeStore())
+    # 每个 test 一个全新 InMemory 频控器 —— 失败计数不跨 test 泄漏(尤其
+    # per-IP key:ASGITransport 下所有请求共享同一 client IP)。
+    login_rate_limiter = InMemoryLoginRateLimiter(
+        max_failures=config.LOGIN_MAX_FAILURES,
+        window_sec=config.LOGIN_FAILURE_WINDOW_SEC,
+    )
 
     # Set module-level global so get_db_session()'s direct call works
     old_db_manager = deps._db_manager
@@ -62,6 +71,7 @@ async def app(db_manager: DatabaseManager):
     application.dependency_overrides[get_db_manager] = lambda: db_manager
     application.dependency_overrides[get_stream_transport] = lambda: stream_transport
     application.dependency_overrides[get_execution_runner] = lambda: execution_runner
+    application.dependency_overrides[get_login_rate_limiter] = lambda: login_rate_limiter
 
     yield application
 

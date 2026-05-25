@@ -16,7 +16,7 @@
 |----|------|--------|----------|
 | 一 | SSRF / 外联工具(6 项) | ✅ 已修(2026-05-24, 落 main) | ~~`fix/sec-ssrf`~~ → main |
 | 二 | grep ReDoS / 事件循环(3 项) | ✅ 已修(2026-05-24, 落 main) | ~~`fix/sec-grep-redos`~~ → main |
-| 三 | 账户与认证(6 项 + 首次强制改密) | 🟡 建议修(部分待测试中心定标) | `feat/sec-account-auth` |
+| 三 | 账户与认证(6 项 + 首次强制改密) | ✅ 已修(2026-05-25, 落 main) | ~~`feat/sec-account-auth`~~ → main |
 | 四 | 部署与配置(2 项) | 🟡 | `chore/sec-deploy` |
 | 五 | 前端加固(3 项) | 🟢 防御纵深 | `feat/sec-frontend-csp` |
 
@@ -174,9 +174,38 @@
 
 ---
 
-# 三、账户与认证 🟡 `feat/sec-account-auth`
+# 三、账户与认证 ✅ 已修(2026-05-25, 落 main)
 
 > ACC-02(弱密码标准)需测试中心拍板合规口径;计划中的"首次登录强制改密"正好根治 ACC-03,设计见末节。
+
+> **✅ 修复状态(2026-05-25,已落 main):** ACC-01~06 + 首次强制改密全部修复。
+>
+> **定标决策(2026-05-25 用户拍板,原"待测试中心定标"已确定):**
+> - **强度档 = 等保四级基线**:≥8 位、须同时含 字母+数字+符号(三类全)、+ 弱口令/键盘序列黑名单。
+> - **周期改密 = 降等保三级、应用到全部用户**:口令 **180 天**(半年)到期强制改;**不重用前 1 次**(= 新口令 ≠ 当前口令)。
+> - **存量老用户 = 下次登录即强制改密**(迁移 backfill `must_change_password=True`)。
+>
+> **架构主张:三机制归一**(避免平行造轮子)——
+> - **一个标志 `must_change_password`** 同时承载:ACC-03 缺省密码、首次强制改密、180 天到期。`get_current_user` 闸门在标志为 True 时除 `GET /auth/me` + `POST /auth/me/password` 外一律 **403**(单点覆盖所有 router,前端配合弹不可关闭的改密框)。
+> - **一个策略模块 `src/utils/password_policy.py`**(`validate_password_strength` + 弱口令/键盘黑名单 + `generate_temp_password`),在所有写入口复用(schema field_validator + CSV 导入 + `create_admin`)。
+> - **新增状态仅 `password_history`**(JSON 列,非新表;most-recent-first,trim 到 `PASSWORD_HISTORY_RETAIN=5`)。当前 `PASSWORD_HISTORY_COUNT=1`(仅查当前),但列**从 day 1 起维护** → 日后调高 COUNT 即生效、**无需再迁移**。
+> - 策略值全进 `config.py` 隐藏常量:`PASSWORD_MIN_LENGTH / REQUIRE_LETTER|DIGIT|SYMBOL / PASSWORD_EXPIRY_DAYS=180 / PASSWORD_HISTORY_COUNT=1 / PASSWORD_HISTORY_RETAIN=5 / LOGIN_MAX_FAILURES=5 / LOGIN_FAILURE_WINDOW_SEC=900`(operator/测试中心可调,不改码)。
+>
+> **逐项:**
+> - **ACC-01** 登录频控:`src/api/services/login_rate_limiter.py`(Redis 单键 + InMemory 双实现,Cluster 安全 —— per-username + per-IP 各自单键,绝不跨键 multi-key)。验证前预检超阈 → 429(带 `Retry-After`);失败两键各 +1;成功重置 username 键。IP 取 XFF 首跳(per-username 为主防线,XFF 可伪造仅作二级,见下 runbook 可信代理前提)。
+> - **ACC-02 + 强度** 见上「强度档」;`schemas/auth.py` 三处密码字段加 `field_validator`,`create_admin.py` 同步。
+> - **ACC-03** CSV 缺省密码=用户名 **已删除**:显式密码走强度校验,缺省则**生成随机合规临时密码**(`generate_temp_password`)并在 `BulkImportResponse.created[].initial_password` 回带供 admin 带外分发;所有导入用户 `must_change_password=True`。
+> - **ACC-04** bcrypt>72 字节:`hash_password`/`verify_password` 统一 `encode[:72]`;`main.py` 加全局 `ValueError→400` handler 兜底。
+> - **ACC-05** 登录时序枚举:用户不存在时也对 `DUMMY_PASSWORD_HASH` 跑一次 `verify_password` 等时。
+> - **ACC-06** token 7 天不可吊销:**接受现状**,文档化「登出=前端清 token;`pwd_v` 提供改密/重置后的全端登出;改密入口的强制要求 + 频控已显著收敛被盗 token 的可利用面」。未上 refresh token / jti 黑名单(大特性,YAGNI)。
+>
+> **迁移(`0002_password_policy.py`,3 列 + backfill):** `must_change_password` / `password_changed_at` / `password_history`。
+> **部署 runbook(重要):**
+> - **本地 dev(SQLite)**:`create_all` 只建缺表、不改已有表 → 已有 `data/artifactflow.db` 不会自动加列。二选一:(A) 删库重建 `rm data/artifactflow.db*` + 重启 + `python scripts/create_admin.py admin`;(B) 保留数据 `alembic stamp 0001 && alembic upgrade head`(该库由 create_all 建、无 alembic_version,须先 stamp)。
+> - **内网/生产(PG/MySQL,容器部署)**:`deploy/entrypoint.sh` 在容器启动时**自动** `alembic upgrade head`(PG advisory lock 保证多副本只迁一次,详见 `docs/deployment.md`→运维参考→数据库迁移),redeploy 新镜像即自动应用 `0002`。**注意业务影响**:backfill 把存量用户全部置 `must_change_password=True` → 升级后所有用户(含持有效 token 者)下次请求被 403 引导改密(决策③),发版窗口需提前告知用户。XFF per-IP 频控需可信代理(nginx 覆写 `X-Forwarded-For`)才准。
+> - **非容器 / 手工部署**:`alembic upgrade head` 后再起服务(应用层只校验 alembic_version 非空、不自动迁移,列缺会运行时崩)。
+>
+> 测试:新增 `tests/utils/test_password_policy.py` / `tests/api/test_login_rate_limit.py` / `tests/api/test_password_lifecycle.py` + 更新 `test_auth.py` / `test_user_bulk_import.py` / `test_departments.py` 等密码 fixture。后端全量 **972 passed / 28 skipped**;前端 `passwordPolicy.test.ts` + 全量 **177 passed**,`next build` 通过。
 
 ## ACC-01 🟡 登录无频率限制 / 锁定 — 可无限撞库
 
@@ -226,14 +255,15 @@
 
 **修复建议**:可接受现状;若测试中心有要求,考虑缩短 token 寿命 + refresh token,或 Redis jti 黑名单支持"全端登出"。至少文档化"登出是前端行为"。
 
-## 🆕 配套特性 — 首次登录强制改密
+## 🆕 配套特性 — 首次登录强制改密 ✅ 已实现
 
-直接根治 ACC-03 与 ACC-02——首次强制重置后,弱/缺省初始密码不再是可利用窗口。
+直接根治 ACC-03 与 ACC-02——首次强制重置后,弱/缺省初始密码不再是可利用窗口。同一标志亦承载 180 天周期到期(见上「定标决策」)。
 
-**实现要点**:
-- `User` 表加 `must_change_password: bool`,建用户 / 批量导入 / 管理员重置密码时置 `True`。
-- 加一道依赖/中间件:标志为 `True` 时,除 `POST /auth/me/password`(及登出)外的请求一律 403 引导改密;改密成功清标志。
-- 复用现有 `password_version` 吊销链路,无需新增会话机制。
+**落地(对照原计划):**
+- `User` 表加 `must_change_password: bool`(+ `password_changed_at` / `password_history`,迁移 `0002`),建用户 / 批量导入 / 管理员重置 / 登录超期时置 `True`。
+- 闸门做在 `get_current_user` 单点(非中间件):标志为 `True` 时,除 **`GET /auth/me`**(前端读标志)+ **`POST /auth/me/password`**(改密)外一律 403;改密成功清标志。〔与原计划差异:额外豁免 `GET /auth/me`,否则前端拉不到 `must_change_password` 无法弹框。登出是前端清 token,无需端点豁免。〕
+- 复用现有 `password_version` 吊销链路(`apply_new_password` 改密即 `pwd_v++`),无需新增会话机制。
+- 前端:`AuthGuard` 在 `must_change_password` 时渲染**不可关闭**的 `ChangePasswordDialog`(forced 模式),挡住整个应用。
 
 ---
 

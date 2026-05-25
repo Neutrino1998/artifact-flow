@@ -4,9 +4,10 @@ import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuthStore } from '@/stores/authStore';
 import * as api from '@/lib/api';
+import ChangePasswordDialog from '@/components/layout/ChangePasswordDialog';
 
 export default function AuthGuard({ children }: { children: React.ReactNode }) {
-  const { isAuthenticated, isHydrated, hydrate, setUser } = useAuthStore();
+  const { isAuthenticated, isHydrated, hydrate, setUser, user } = useAuthStore();
   const router = useRouter();
 
   useEffect(() => {
@@ -37,6 +38,17 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-bg dark:bg-bg-dark">
         <div className="text-text-tertiary dark:text-text-tertiary-dark">Loading...</div>
+      </div>
+    );
+  }
+
+  // 强制改密(门类三):must_change_password 为 True 时,挡住整个应用,只渲染
+  // 不可关闭的改密框。后端闸门已对受保护端点 403 兜底;这里是 UX 引导。
+  // user 经 hydrate(localStorage)初值可能缺该字段,getMe() 刷新后会补上 → 重渲染。
+  if (user?.must_change_password) {
+    return (
+      <div className="min-h-screen bg-bg dark:bg-bg-dark">
+        <ChangePasswordDialog forced onClose={() => { /* forced: 无关闭 */ }} />
       </div>
     );
   }
