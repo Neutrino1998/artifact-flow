@@ -1,8 +1,8 @@
 """ACC-01: 登录频控 —— per-username + per-IP 失败计数,超阈临时锁定。
 
 每个 test 拿到全新 InMemory 频控器(见 tests/api/conftest.py 的 override),
-计数不跨 test 泄漏。用唯一 X-Forwarded-For 可把 per-IP 锁排除,单独验
-per-username 行为。
+计数不跨 test 泄漏。后端只认 X-Real-IP(不认可伪造的 XFF,见 _client_ip),
+用唯一 X-Real-IP 可把 per-IP 锁排除,单独验 per-username 行为。
 """
 
 from httpx import AsyncClient

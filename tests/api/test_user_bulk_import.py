@@ -6,8 +6,8 @@ Covers POST /api/v1/admin/users/bulk-import:
 - Happy path: rows split into created / failed / skipped
 - Department auto-creation via resolve_department_path
 - File-internal duplicate → 400
-- Empty password → system-generated temp password (returned for distribution)
-- Explicit password must meet strength policy; all imported users must_change on first login
+- password column is required per-row: empty/weak → that row failed (per-row best-effort)
+- all imported users must_change_password on first login
 - Department gap → failed
 - Row count over limit → 400
 - Byte size over limit → 422
