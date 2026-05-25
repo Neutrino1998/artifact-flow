@@ -25,6 +25,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import os
+import re
 import sys
 from datetime import datetime, timedelta, timezone
 from glob import glob
@@ -101,6 +102,8 @@ def _tool_row_to_dict(row: MessageEvent) -> dict:
         "tool": data.get("tool"),
         "dur_ms": data.get("duration_ms"),
         "success": data.get("success"),
+        # 失败时 engine 把 ToolResult.error 写进 data["error"](engine.py);成功为 None
+        "error": data.get("error"),
         # metadata 已经是 dict(ORM JSON 列自动 deserialize);后续 json_normalize 直接吃
         "metadata": data.get("metadata"),
     }
@@ -247,6 +250,46 @@ def _print_tool_summary(df_tool: pd.DataFrame, hours: int) -> None:
     print(g.to_string())
 
 
+# 归一化 error 文本以便聚类:模板化报错的可变部分(引号内容 / 数字 / 十六进制 id)
+# 替换成占位符,这样 "Artifact 'abc' already exists" 与 "...'xyz'..." 归到一类。
+_ERR_NORM = [
+    (re.compile(r"'[^']*'"), "'<x>'"),
+    (re.compile(r'"[^"]*"'), '"<x>"'),
+    (re.compile(r"\b[0-9a-f]{8,}\b"), "<hash>"),
+    (re.compile(r"\d+"), "<n>"),
+]
+
+
+def _normalize_err(e) -> str:
+    if not e:
+        return "(no error message)"
+    s = str(e)
+    for pat, repl in _ERR_NORM:
+        s = pat.sub(repl, s)
+    s = " ".join(s.split())  # 折叠空白/换行
+    return s[:140]
+
+
+def _print_tool_failures(df_tool: pd.DataFrame, hours: int) -> None:
+    """失败 tool_complete 按 tool × 归一化 error 聚类 —— 看残留失败的 pattern。"""
+    print(f"\n=== Tool failure patterns ({hours}h, by tool × normalized error) ===")
+    if df_tool.empty:
+        print("  (no data)")
+        return
+    fails = df_tool[df_tool["success"] == False].copy()  # noqa: E712 — pandas mask
+    if fails.empty:
+        print("  (no failures)")
+        return
+    fails["err_pattern"] = fails["error"].apply(_normalize_err)
+    g = (
+        fails.groupby(["tool", "err_pattern"])
+        .size()
+        .reset_index(name="count")
+        .sort_values(["tool", "count"], ascending=[True, False])
+    )
+    print(g.to_string(index=False))
+
+
 def _print_fuzzy_stats(df_tool: pd.DataFrame) -> None:
     """update_artifact fuzzy_stats 调参报表。"""
     print("\n=== update_artifact fuzzy_stats 调参报表 ===")
@@ -373,6 +416,7 @@ async def _run_report(hours: int, obs_dir: str) -> None:
         _print_llm_summary(df_llm, hours)
         _print_token_distribution(df_llm, hours)
         _print_tool_summary(df_tool, hours)
+        _print_tool_failures(df_tool, hours)
         _print_fuzzy_stats(df_tool)
     except Exception as e:
         print(f"\n[skip] MessageEvent: {e}", file=sys.stderr)
