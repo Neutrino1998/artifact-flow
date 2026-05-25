@@ -510,7 +510,7 @@ class TestValidateParams:
 
 
 # ============================================================
-# HttpTool SSRF — endpoint 必须公网
+# HttpTool endpoint —— 运维配置面（刻意不做公网校验）+ metadata 脱敏
 # ============================================================
 
 class _FakeHttpxResponse:
@@ -541,7 +541,7 @@ class _FakeAsyncClient:
         return _FakeHttpxResponse()
 
 
-class TestHttpToolSsrf:
+class TestHttpToolEndpoint:
     def _tool(self, endpoint: str) -> HttpTool:
         return HttpTool(HttpToolConfig(
             name="probe",
@@ -552,24 +552,15 @@ class TestHttpToolSsrf:
             parameters=[],
         ))
 
-    async def test_internal_ip_endpoint_blocked(self):
-        # IP 字面量内网地址：在 validate_public_url 阶段拒绝，不发起网络请求
-        tool = self._tool("http://169.254.169.254/latest/meta-data/")
+    async def test_internal_endpoint_is_allowed(self, monkeypatch):
+        # endpoint 是运维可信配置、LLM 不可控 → 刻意不做公网校验。
+        # 内网 gateway（如 172.22.x.x）必须能正常调用,不被 SSRF 守卫误伤。
+        monkeypatch.setattr(
+            "tools.custom.http_tool.httpx.AsyncClient", _FakeAsyncClient
+        )
+        tool = self._tool("http://172.22.80.35/gateway/api")
         result = await tool.execute()
-        assert result.success is False
-        assert "public URL" in result.error
-
-    async def test_loopback_endpoint_blocked(self):
-        tool = self._tool("http://127.0.0.1:6379/")
-        result = await tool.execute()
-        assert result.success is False
-        assert "public URL" in result.error
-
-    async def test_localhost_endpoint_blocked(self):
-        tool = self._tool("http://localhost/admin")
-        result = await tool.execute()
-        assert result.success is False
-        assert "public URL" in result.error
+        assert result.success is True
 
     async def test_endpoint_secret_not_leaked_to_metadata(self, monkeypatch):
         # endpoint query 里的密钥不得进 metadata（会经 tool_complete → SSE/DB 泄露）。
