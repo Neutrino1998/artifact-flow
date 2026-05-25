@@ -845,3 +845,23 @@ class TestResourceGuards:
         # 改前 body ≈ 100万;现在远小于,命中行被截断 + 标记
         assert len(result.data) < 5000
         assert "line truncated" in result.data
+
+    async def test_session_raw_budget_shared_across_artifacts(
+        self,
+        grep_tool: GrepArtifactTool,
+        artifact_manager: ArtifactManager,
+        session_id: str,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        """Reviewer round 4:raw-match 预算 **per-tool-call 跨 artifact 累计共享**,不是
+        每个 artifact 重置 —— 否则多个密集单行 artifact 累积无界 raw 迭代、同步 wedge
+        事件循环(200 个 ≈86s)。预算被第一个 artifact 吃满后,后续不再扫 + surface。"""
+        monkeypatch.setattr(config, "GREP_MAX_SCAN_MATCHES", 100)
+        # 3 个单行各 200 个 'a' → 第一个就吃满 100 的 raw 预算
+        for i in range(3):
+            await _create_artifact(artifact_manager, session_id, "a" * 200, aid=f"d{i}")
+        result = await grep_tool(pattern="a")
+        assert result.success
+        # per-call 共享:只第一个 artifact 被扫(若 per-artifact 重置则会扫满 3 个)
+        assert "across 1 artifacts" in result.data
+        assert "not all content searched" in result.data

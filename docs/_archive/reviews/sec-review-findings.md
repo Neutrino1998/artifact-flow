@@ -131,6 +131,16 @@
 >
 > 测试 `tests/test_grep_artifact.py` 累计新增 RE2 方言 / 抗 ReDoS / 中文偏移 / 资源护栏 / 部分搜索 / envelope 截断共 18 例;全量 **950 passed / 28 skipped**。
 
+> **Reviewer 复审收口 ③(2026-05-25,第 4 轮,1 项,已落 main):**
+> 仍是同形状的 **session 级聚合**:round 3 把护栏定在**单 artifact**,但 `GREP_MAX_SCAN_MATCHES` 在 session 循环里**每个 artifact 重新计数**,且整个循环是一坨**没有 `await`** 的同步 CPU。200 个 `"a"*200001` 单行 artifact 各产 1 个 distinct line(到 `SESSION_GREP_MAX_TOTAL=200` 前 char 预算不触发),累计 200×200K = **40M raw 迭代 ≈ 77-86s 连续 wedge**(reviewer 实测 20 个 8.6s)。
+> **反思:安全属性是「事件循环不被连续饿死」,不是「总 CPU 为零」。** round 1-3 把单个连续块做有限;round 4 是它们在 session 循环里首尾相接、中间不让出 → 又拼成跨 artifact 的连续 wedge(正是 2026-05-14 lease-fencing `task.cancel()` 96 分钟打不动的成因:全程无 `await` 落点)。修法(reviewer 建议 + 反思):
+> - **`GREP_MAX_SCAN_MATCHES` 改 per-tool-CALL**:在 session 循环里**累计共享**(`_scan_content` 新增 `max_scan` 参数,传剩余预算;回报 `stats["raw_scanned"]`)。总 raw 迭代封到 200K → reviewer 场景从 **~77s 收到 ≈402ms**(实测),与 artifact 数无关。单 artifact 模式不传 = 整 budget,不变。
+> - **session 循环每个 artifact 间 `await asyncio.sleep(0)`**:①不 wedge(健康探针/其他 session 能跑);②**恢复外部可取消性**——`task.cancel()` 能在此 await 落点生效(事故缺的落点)。把「跨 artifact 连续 wedge」拆成「每 artifact 有界小块、之间可取消」。
+> - 顺带 `GREP_SESSION_SCAN_BUDGET_CHARS` 64MB→16MB(给总 splitlines/scan 功理智上限)。
+> - **刻意没上**「`\n` 增量扫描重写、彻底去 splitlines」(round 3 否过的 Option B):有了 per-call 预算 + yield,wedge 属性已满足,按 step-back-on-design-creep 不再为残余轴上重写。
+>
+> 测试累计 +1(session 跨 artifact 共享预算);全量 **951 passed / 28 skipped**。
+
 ## GREP-01 🔴 LLM 正则无 ReDoS / 超时护栏 — 可卡死整个事件循环
 
 **问题**:`pattern` 用 Python `re`(回溯引擎)编译(`grep_artifact.py:250`)后对全文 `regex.finditer(content)`(`:263`/`:292` → `_scan_content`),**无墙钟、无输入上限、无算法界**。`(a+)+$`、`(.*a){20}`、`(\w+\s?)*$` 这类灾难性回溯对中等长度内容即可跑到事实无界。工具在 `engine.py:704` 直接 `await`,`re.finditer` 是同步 C 代码、钉死 GIL → **直接击穿 cancel/timeout/lease 全栈**。`fixed_strings=true` 会转义规避,但默认 `false`。

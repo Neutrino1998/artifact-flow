@@ -59,13 +59,16 @@ class Settings(BaseSettings):
                                                     # 520ms,有界;20MB 会 ~1GB(reviewer P1)。超即截断扫描量 + surface
     GREP_MAX_LINE_CHARS: int = 1000                 # 单行进结果的字符上限（ripgrep --max-columns 式）。挡"单条巨行
                                                     # 命中→整行塞进 ToolResult"（reviewer P2:5M 行→5M body）。超即截断 + 标记
-    GREP_SESSION_SCAN_BUDGET_CHARS: int = 64_000_000  # session 单次调用聚合扫描字符预算（很多中等 artifact 时限总扫描功）
-    GREP_MAX_SCAN_MATCHES: int = 200_000            # 单次扫描 finditer 原始命中迭代上界。max_count 只数"去重后的行",
-                                                    # 单行海量命中时永远到不了它 → finditer 被抽干（同步 CPU wedge,
-                                                    # 2026-05-14 同源失败模式的另一个轴）。mirror update_artifact 的
+    GREP_SESSION_SCAN_BUDGET_CHARS: int = 16_000_000  # session 单次调用聚合扫描字符预算（很多中等 artifact 时限总扫描功 + splitlines）
+    GREP_MAX_SCAN_MATCHES: int = 200_000            # finditer 原始命中迭代上界,**per 工具调用**(session 模式跨 artifact
+                                                    # 累计共享,不是每个 artifact 重置 —— 否则 200 个密集单行 artifact 累计
+                                                    # 40M 迭代、~86s 同步 wedge,reviewer round 4)。max_count 只数"去重后的
+                                                    # 行",单行海量命中时永远到不了它 → finditer 被抽干(同步 CPU wedge,
+                                                    # 2026-05-14 同源失败模式的另一个轴)。mirror update_artifact 的
                                                     # MAX_UNIQUE_CENTERS:cap 真正烧 CPU 的量。实测 200K 原始命中 ≈380ms
-                                                    # < watchdog 500ms（20M 单行从 ~35s 收到 ≈380ms）;legit 密集文档
-                                                    # （如 1000 行×100 列 CSV grep "," ≈100K）仍放行
+                                                    # < watchdog 500ms(20M 单行从 ~35s 收到 ≈380ms);legit 密集文档
+                                                    # (如 1000 行×100 列 CSV grep "," ≈100K)仍放行。session 循环另在每
+                                                    # artifact 间 `await asyncio.sleep(0)` 让出事件循环(不 wedge + 可取消)
     GREP_MAX_PATTERN_CHARS: int = 1000              # pattern 长度上界（挡病态超长 pattern；RE2 另有 max_mem=8MiB 编译侧兜底）
     GREP_MAX_CONTEXT: int = 100                     # context 行数上界（防超大窗口铺满全文）
     GREP_MAX_COUNT: int = 1000                      # max_count 上界（去重后行级命中数）

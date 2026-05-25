@@ -28,6 +28,7 @@ Grep across artifact content with ripgrep-faithful semantics.
   group 间 `--`
 """
 
+import asyncio
 import bisect
 from typing import TYPE_CHECKING, List, Optional, Tuple
 
@@ -72,6 +73,7 @@ def _scan_content(
     context: int,
     max_count: int,
     stats: Optional[dict] = None,
+    max_scan: Optional[int] = None,
 ) -> List[Tuple[int, str, bool]]:
     """对整 artifact 跑 `regex.finditer(content)`，再把 match.start() 映射回行号。
 
@@ -86,19 +88,22 @@ def _scan_content(
       若需"找被空行分隔的段落",改用内容侧锚点(例:markdown 的 `^# `、小说的
       `^第.*章`、Python 的 `^class `),都是非零宽 pattern,正常工作。
     - max_count 限制 **行级命中** 数（去重后）；context 行不计入
-    - **raw-match 迭代上界 `GREP_MAX_SCAN_MATCHES`**（算法上界，Finding 1）:
-      `max_count` 只数去重后的**行**，单行海量命中（如 `"a"*20M` 配 `a`）会全 collapse
-      到一行 → `max_count` 的 break 永不触发 → `finditer` 被抽干（纯同步 CPU 钉死 GIL,
-      2026-05-14 wedge 的另一个轴）。这里 cap 真正烧 CPU 的量——迭代到的**原始**命中数
-      （非去重行数）。mirror update_artifact 的 `MAX_UNIQUE_CENTERS`。提前触顶即 break,
-      并置 `stats["scan_capped"]=True` 供调用方 surface（结果是部分的）。
+    - **raw-match 迭代上界**（算法上界，Finding 1）:`max_count` 只数去重后的**行**，
+      单行海量命中（如 `"a"*20M` 配 `a`）会全 collapse 到一行 → `max_count` 的 break
+      永不触发 → `finditer` 被抽干（纯同步 CPU 钉死 GIL，2026-05-14 wedge 的另一个轴）。
+      这里 cap 真正烧 CPU 的量——迭代到的**原始**命中数（非去重行数）。mirror
+      update_artifact 的 `MAX_UNIQUE_CENTERS`。提前触顶即 break，置 `stats["scan_capped"]=True`。
+      上界来源:`max_scan` 显式传入（session 模式传**剩余**预算，使 raw 预算跨 artifact
+      累计共享 —— 否则每个 artifact 重置会累积无界 wedge，reviewer round 4）；不传则用
+      `config.GREP_MAX_SCAN_MATCHES`（单 artifact 模式 = 整 budget）。
 
     返回 [(line_no_1indexed, line_text, is_match), ...]:
     - is_match=True 是命中行；False 是 context 行
     - 相邻命中的 context 重叠 → sliding skip 合并去重
 
-    `stats`（可选 out-param）：若提供且扫描提前触顶 raw-match 上界，写入
-    `stats["scan_capped"]=True`。不提供（默认）则行为不变，纯函数单测无需感知。
+    `stats`（可选 out-param）：若提供，写入 `stats["raw_scanned"]`（本次迭代的原始命中
+    数，供 session 累计预算）；提前触顶 raw-match 上界时另置 `stats["scan_capped"]=True`。
+    不提供（默认）则行为不变，纯函数单测无需感知。
     """
     if not content or max_count <= 0:
         return []
@@ -119,12 +124,12 @@ def _scan_content(
     # 全文跑 finditer，把每个 match.start() 通过 bisect 映射到行号
     match_line_indices: List[int] = []  # 按命中顺序、已去重
     seen_lines = set()
-    max_scan = config.GREP_MAX_SCAN_MATCHES
+    cap = max_scan if max_scan is not None else config.GREP_MAX_SCAN_MATCHES
     raw_seen = 0
     for m in regex.finditer(content):
         # raw-match 迭代上界:数的是**原始**命中(含零宽/去重前),这才是 finditer
         # 的真实迭代成本。触顶即停 —— max_count 只数去重行,单行海量命中时拦不住。
-        if raw_seen >= max_scan:
+        if raw_seen >= cap:
             if stats is not None:
                 stats["scan_capped"] = True
             break
@@ -148,6 +153,9 @@ def _scan_content(
         match_line_indices.append(idx)
         if len(match_line_indices) >= max_count:
             break
+
+    if stats is not None:
+        stats["raw_scanned"] = raw_seen
 
     if not match_line_indices:
         return []
@@ -377,11 +385,20 @@ class GrepArtifactTool(BaseTool):
         grouped: List[Tuple[str, List[Tuple[int, str, bool]]]] = []
         total_hits = 0
         scanned_chars = 0
+        raw_used = 0  # 跨 artifact 累计的原始命中数（raw-match 预算 per-tool-call 共享）
         session_cap = config.SESSION_GREP_MAX_TOTAL
         scan_budget = config.GREP_SESSION_SCAN_BUDGET_CHARS
+        raw_budget = config.GREP_MAX_SCAN_MATCHES
         partial = False  # 任何 budget / 截断 / raw-cap → 搜的是部分内容,必须 surface
 
         for art in artifacts:
+            # 每个 artifact 间让出事件循环:① 不 wedge(整个 session 扫描原本是一坨无
+            # await 的同步 CPU,健康探针/其他 session 全饿死);② 恢复**外部可取消性** ——
+            # task.cancel() 能在此 await 落点生效,正是 2026-05-14 lease-fencing 96 分钟
+            # 打不动的那个缺失落点。配合下面 per-call 累计预算,把"跨 artifact 连续 wedge"
+            # 拆成"每 artifact ≤~一个有界小块、之间可取消"。
+            await asyncio.sleep(0)
+
             content = art.get("content", "") or ""
             if not content:
                 continue
@@ -390,6 +407,10 @@ class GrepArtifactTool(BaseTool):
             if remaining <= 0:
                 break
             if scanned_chars >= scan_budget:
+                partial = True
+                break
+            remaining_raw = raw_budget - raw_used
+            if remaining_raw <= 0:  # 跨 artifact 累计的 raw 预算耗尽 → 停 + surface
                 partial = True
                 break
 
@@ -405,7 +426,11 @@ class GrepArtifactTool(BaseTool):
 
             effective_cap = min(max_count, remaining)
             stats: dict = {}
-            hits = _scan_content(content, regex, context_lines, effective_cap, stats)
+            # max_scan=remaining_raw → raw 预算跨 artifact 累计共享,而非每个 artifact 重置
+            hits = _scan_content(
+                content, regex, context_lines, effective_cap, stats, max_scan=remaining_raw
+            )
+            raw_used += stats.get("raw_scanned", 0)
             if stats.get("scan_capped"):
                 partial = True
             match_count = sum(1 for _, _, is_match in hits if is_match)
