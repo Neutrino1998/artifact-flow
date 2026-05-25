@@ -330,3 +330,32 @@ class TestChatInputCap:
             parts.append(("files", (f"f{i}.txt", b"x", "text/plain")))
         resp = await client.post("/api/v1/chat", files=parts)
         assert resp.status_code == 422
+
+
+class TestChatUploadAtomicity:
+    """A bad file in a multi-file batch must abort with zero DB state — no ghost
+    conversation, no orphan artifacts. The handler converts ALL attachments
+    (phase 1, pure, no DB) before creating the conversation or any artifact
+    (phase 2), so an unsupported file fails before any write. Regression for the
+    old interleaved convert+commit loop, which created the conversation up front
+    and committed the files preceding the bad one, leaving a ghost conversation."""
+
+    async def test_bad_file_aborts_batch_with_no_db_state(self, client: AsyncClient):
+        before = (await client.get("/api/v1/chat")).json()["total"]
+
+        # New conversation (no conversation_id). Good file FIRST so the old code
+        # would have created the conversation + committed good.txt before the
+        # .doc (rejected on extension by DocConverter) raised 422.
+        parts = [
+            ("payload", (None, json.dumps({"user_input": "hi"}))),
+            ("files", ("good.txt", b"hello", "text/plain")),
+            ("files", ("report.doc", b"\xd0\xcf\x11\xe0", "application/msword")),
+        ]
+        resp = await client.post("/api/v1/chat", files=parts)
+        assert resp.status_code == 422
+
+        # No conversation created (list returns ALL of the user's convs, with no
+        # message-count filter). No conversation ⇒ no orphan artifacts either,
+        # since an artifact FK-depends on its (absent) conversation's session.
+        after = (await client.get("/api/v1/chat")).json()["total"]
+        assert after == before
