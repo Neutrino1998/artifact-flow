@@ -190,10 +190,13 @@ def _print_llm_summary(df_llm: pd.DataFrame, hours: int) -> None:
         calls=("dur_ms", "count"),
         in_tok=("in_tok", "sum"),
         out_tok=("out_tok", "sum"),
+        min_ms=("dur_ms", "min"),
+        avg_ms=("dur_ms", "mean"),
         p50_ms=("dur_ms", lambda s: s.quantile(0.5)),
         p99_ms=("dur_ms", lambda s: s.quantile(0.99)),
+        max_ms=("dur_ms", "max"),
     )
-    print(g.to_string())
+    print(g.round(0).to_string())
 
 
 def _print_token_distribution(df_llm: pd.DataFrame, hours: int) -> None:
