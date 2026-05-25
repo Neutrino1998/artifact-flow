@@ -31,7 +31,7 @@
 > 共享原语 `src/utils/url_guard.py` 的 `validate_public_url` —— **单层 pre-flight**:解析 URL → 主机 → 全部 IP 逐个查危险网段;`config.py` 新增 `WEB_FETCH_MAX_BYTES` / `CUSTOM_TOOL_SECRET_PREFIX`。
 > 防护用「pre-flight 校验 + 关重定向」组合,**刻意不上**连接时校验的自定义 resolver(评审中权衡:复杂度不划算,见下「设计取舍」)。
 > - **01** web_fetch `execute` 入口跑 `validate_public_url`(覆盖 Jina 主路径 + bs4/PDF fallback)
-> - **02** http_tool endpoint 跑 `validate_public_url` + `{{VAR}}` 限 `TOOL_SECRET_` 前缀(loader **load 时** fail-fast + secrets 运行时拒绝;非白名单 / 缺失即报错,不外发占位符)
+> - **02** `{{VAR}}` 限 `TOOL_SECRET_` 前缀(loader **load 时** fail-fast + secrets 运行时拒绝;非白名单 / 缺失即报错,不外发占位符)。〔**2026-05-25 收口修正**:原一并加的"endpoint 跑 `validate_public_url`"已**移除** —— endpoint 是运维在 `:ro` 配置里固定的、LLM 不可控(只填 params 进 body/query),不是 SSRF 面;公网校验只会误伤合法内网 gateway(如 `172.22.x.x ∈ 172.16/12`)。真正威胁(exfil 敏感 env)由前缀白名单挡;`validate_public_url` 仍守在 `web_fetch`,那里 URL 才 LLM 可控。详见 SSRF-02 节末。〕
 > - **03** fallback `allow_redirects=False`(不跟随 → 302 到内网也不被跟);http_tool 显式 `follow_redirects=False`
 > - **04** `_read_capped` 流式封顶(Content-Length 预检 + 分块累计中断,封**解压后**字节 → 挡 gzip 炸弹)
 > - **05** 删 web_fetch 三处 `trust_env=True`(已核实全仓库无 proxy env 依赖、base URL 硬编码)
@@ -46,7 +46,7 @@
 > - **P2 httpx 信任环境代理**:`httpx.AsyncClient` 默认 `trust_env=True`(读 `HTTP(S)_PROXY`/`.netrc`)→ egress hardening 没闭合;显式 `trust_env=False`,与 web_fetch(aiohttp 默认 False)对齐。需代理时走显式配置项(YAGNI,暂不加)。
 > - **P2 rebinding 窗口被 Jina 放大**:入口校验后先走 Jina(最坏 ~60s 429 sleep/timeout)才直连 fallback,攻击者可在此间翻 DNS。在 `_fetch_single_url` 直连前**再校验一次**,把窗口从"~60s 可控"收回到毫秒级(不复活 resolver)。
 >
-> 测试:新增 `tests/test_url_guard.py` + `tests/test_web_fetch.py`,更新 `tests/test_custom_tools.py`(含 endpoint-密钥-不进-metadata、Jina 失败后翻内网被拦);全量 **932 passed / 28 skipped**。
+> 测试:新增 `tests/test_url_guard.py` + `tests/test_web_fetch.py`,更新 `tests/test_custom_tools.py`(含 endpoint-密钥-不进-metadata、内网 endpoint 放行、Jina 失败后翻内网被拦)。SSRF 收口当时全量 932 passed;并入 grep 修复 + 本次 endpoint-guard 撤回后,现 **949 passed / 28 skipped**。
 > **未做(按决定暂缓):** `ARTIFACTFLOW_OFFLINE` fail-closed 硬开关、容器 egress 防火墙(部署面)。
 
 ## SSRF-01 🔴 `web_fetch` 无主机校验 — 可读云元数据 / 内网凭证
@@ -64,6 +64,8 @@
 **涉及文件**:`src/tools/custom/http_tool.py:77-91`、`src/tools/custom/loader.py:110-120`、`src/tools/custom/secrets.py:40-47`。
 
 **修复建议**:① resolve_secrets 后对解析出的 `endpoint` 跑同一 `validate_public_url`;② `{{VAR}}` 限定只能解析白名单前缀(如 `TOOL_SECRET_`),缺失即工具加载失败而非把占位符发出去。`config/tools/` 维持 `:ro` 挂载。
+
+**收口修正(2026-05-25,撤回 ①):** ① 已移除,不再对 endpoint 跑 `validate_public_url`。理由:本条原始威胁是"config 作者把敏感 env exfil 到**外部**",而 `validate_public_url` 只拦**内网**目标 —— `evil.com` 是公网,照样通过,故 ① 根本不挡此威胁;真正挡它的是 ②(前缀白名单,已保留)。同时 endpoint 是运维在 `:ro` 可信目录里固定配置的,LLM 只能填 params(进 body/query),**无法影响目标主机**,不构成 SSRF 攻击面。强加公网校验只会误伤合法用途 —— 内网 gateway(如 `172.22.80.35 ∈ 172.16/12`)在出网恢复后被运行时拒(`Tool endpoint is not an allowed public URL`)。自定义工具的真实防线是:② 前缀白名单 + `permission: confirm` 默认 + `:ro` 可信挂载 + `follow_redirects=False`(挡 302→内网)+ `trust_env=False`(挡代理劫持)+ `safe_url_label` metadata 脱敏。`validate_public_url` 继续守 `web_fetch`(URL 由 LLM 提供,才是真正可控的 SSRF 面)。代码:`http_tool.execute` 删去校验块,改留刻意说明注释;测试 `TestHttpToolEndpoint.test_internal_endpoint_is_allowed` 固化此约定。
 
 ## SSRF-03 🔴 `aiohttp` 默认跟随重定向 — 绕过任何主机白名单
 

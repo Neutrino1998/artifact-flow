@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from tools.base import BaseTool, ToolResult, ToolParameter, ToolPermission
 from tools.custom.secrets import resolve_secrets, SecretResolutionError
 from utils.logger import get_logger
-from utils.url_guard import validate_public_url, safe_url_label, SsrfBlockedError
+from utils.url_guard import safe_url_label
 
 logger = get_logger("ArtifactFlow")
 
@@ -81,16 +81,11 @@ class HttpTool(BaseTool):
                 error="Tool configuration error: a required secret is unavailable",
             )
 
-        # SSRF 防护：解析后的 endpoint 必须指向公网（内网 / 元数据地址一律拒绝）
-        try:
-            await validate_public_url(endpoint)
-        except SsrfBlockedError as e:
-            logger.warning(f"HttpTool '{self.name}' blocked non-public endpoint: {e}")
-            return ToolResult(
-                success=False,
-                error="Tool endpoint is not an allowed public URL",
-            )
-
+        # 注意:此处**刻意不**跑 validate_public_url。endpoint 是运维在 config/tools/*.md
+        # （:ro 挂载、来源可信)里固定配置的,LLM 只能填 params(进 body / query),无法
+        # 影响目标主机 —— 不是 SSRF 攻击面。内网 gateway 是合法用途,公网校验只会误伤它。
+        # 密钥外泄由 {{TOOL_SECRET_}} 前缀白名单防,302→内网由 follow_redirects=False 防。
+        # (validate_public_url 仍守在 web_fetch,那里 URL 才是 LLM 可控的真正 SSRF 面。)
         try:
             # follow_redirects=False：杜绝 302 → 内网 / 元数据 的重定向绕过
             # trust_env=False：httpx 默认 True 会读 HTTP(S)_PROXY/.netrc，污染后可把已校验的
