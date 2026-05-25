@@ -3,15 +3,36 @@ Grep across artifact content with ripgrep-faithful semantics.
 
 设计要点（详见 plan/CLAUDE.md "Minimize tool parameter surface"）:
 - 单 / session 范围由 `id` 是否传入区分（对应 `rg pattern path` vs `rg pattern`）
-- pattern 默认 Python `re` regex；`fixed_strings=true` 走 `re.escape` 切 literal
-- 参数表面只暴露模型有语义意图的项；`SESSION_GREP_MAX_TOTAL` 隐藏在 config
+- pattern 默认 **RE2 regex**（ripgrep / Rust-regex 同族：线性时间、无回溯 → 结构性免疫
+  ReDoS）；`fixed_strings=true` 走 `re2.escape` 切 literal。换 RE2 是这个工具的本意
+  —— 它自称 "ripgrep 语义"，而 ripgrep 底层正是不回溯、无 backref 的自动机引擎；旧的
+  Python `re` 才是会被 `(a+)+$` 卡死事件循环的那个（2026-05-14 事故同源失败模式）。
+- 资源护栏（line-oriented best-effort 搜索：定死**输入/输出 envelope**，envelope 内
+  全物化才安全，超出即截断 + surface；不为对抗性巨输入逐 pass 补 cap）：
+  - **输入** `GREP_CONTENT_MAX_CHARS`（2MB）—— 值由"`_scan_content` 的 pre-scan
+    物化（splitlines×2 + line_starts，成本 O(行数)）保持有界"反推，**非** artifact
+    最大尺寸；20MB 会 ~1GB（reviewer P1）。`GREP_SESSION_SCAN_BUDGET_CHARS` 限 session
+    总扫描功。
+  - **迭代** `GREP_MAX_SCAN_MATCHES`（raw-match 迭代上界，防"单行海量命中把 finditer
+    抽干"，mirror update_artifact 的 `MAX_UNIQUE_CENTERS`）。
+  - **输出** `GREP_MAX_LINE_CHARS`（ripgrep `--max-columns` 式单行封顶，防"单条巨行
+    命中→整行塞进结果"，reviewer P2）。
+  全部是 **CPU/扫描护栏**，不是内存护栏。RE2 线性故**无需墙钟 timeout**（回溯型才需，
+  见 update_artifact）。session **峰值内存 ≈ 全 session content（有意 best-effort）**：
+  内存由"载入多少"决定（list eager-load + cache 累积），不是扫描护栏能管的；真 bound
+  需 repo 列投影 + 绕 cache，对内存从未爆过的 🟡 不划算。
+- 部分搜索必 surface：任何 budget / 截断 / raw-cap 触发 → 结果带"search incomplete"
+  提示，**绝不返回确定性的 No matches 误导模型**。
+- 参数表面只暴露模型有语义意图的项；护栏常量全隐藏在 config
 - 输出对齐 ripgrep TTY 行为：单 flat、session heading；命中行 `:`、context 行 `-`、
   group 间 `--`
 """
 
+import asyncio
 import bisect
-import re
 from typing import TYPE_CHECKING, List, Optional, Tuple
+
+import re2
 
 from config import config
 from tools.base import BaseTool, ToolParameter, ToolPermission, ToolResult
@@ -25,41 +46,64 @@ if TYPE_CHECKING:
 # ============================================================
 
 
-def _compile_pattern(pattern: str, fixed_strings: bool, ignore_case: bool) -> "re.Pattern[str]":
-    """编译 pattern。`fixed_strings=True` 先 `re.escape` 再编译，把 regex 元字符
-    全部当字面看。`re.MULTILINE` 让 `^`/`$` 按行匹配（虽然我们是逐行 scan，但
-    模型可能仍写 `^foo`/`bar$` 这样的 anchor）。"""
-    flags = re.MULTILINE
-    if ignore_case:
-        flags |= re.IGNORECASE
+def _compile_pattern(pattern: str, fixed_strings: bool, ignore_case: bool) -> "re2._Regexp":
+    """编译 pattern（RE2 引擎，线性时间、无回溯 → 抗 ReDoS）。
+
+    - `fixed_strings=True` 先 `re2.escape` 把 regex 元字符全部当字面看。
+    - flags 用内联前缀（RE2 不暴露 `re.MULTILINE` 那样的模块常量）：始终 `(?m)`
+      让 `^`/`$` 按行匹配（对齐旧 `re.MULTILINE` 行为，模型可能写 `^foo`/`bar$`），
+      `ignore_case` 时再加 `(?i)`。
+    - `Options(log_errors=False)` 压住 RE2 编译失败时打到 STDERR 的 absl 日志
+      （否则每个非法 pattern 都会污染 docker logs / 主应用日志流）。
+
+    注意方言差异（已在 description 告知模型）：RE2 不支持 backreference / look-around
+    （编译期 `re2.error` 响亮失败），end-of-input 用 `\\z` 而非 Python 的 `\\Z`。
+    """
     if fixed_strings:
-        pattern = re.escape(pattern)
-    return re.compile(pattern, flags)
+        pattern = re2.escape(pattern)
+    prefix = "(?m)" + ("(?i)" if ignore_case else "")
+    options = re2.Options()
+    options.log_errors = False
+    return re2.compile(prefix + pattern, options)
 
 
 def _scan_content(
     content: str,
-    regex: "re.Pattern[str]",
+    regex: "re2._Regexp",
     context: int,
     max_count: int,
+    stats: Optional[dict] = None,
+    max_scan: Optional[int] = None,
 ) -> List[Tuple[int, str, bool]]:
     """对整 artifact 跑 `regex.finditer(content)`，再把 match.start() 映射回行号。
 
-    - 全文匹配（不是逐行）兑现 description 的 "Python `re` syntax" 契约:
-      `\\A`/`\\Z` 真正指 artifact 边界、`foo\\nbar` 这类跨行 pattern 也能命中
+    - 全文匹配（不是逐行）兑现 description 的 RE2/ripgrep 契约:
+      `\\A`/`\\z` 真正指 artifact 边界、`foo\\nbar` 这类跨行 pattern 也能命中
     - 跨行 match 只在**起始行**打点（ripgrep `-U` 多行模式行为，避免一次匹配同时
       标记多行带来命中计数歧义）
     - 同一行多次命中去重（按行算 1 个命中）
-    - **零宽匹配整体 drop** —— `\\A` / `^` / `\\b` / `\\Z` / `^$` 等无可见内容的
+    - **零宽匹配整体 drop** —— `\\A` / `^` / `\\b` / `\\z` / `^$` 等无可见内容的
       命中不进结果。这避免了"从源码字符串启发式判 anchor 意图"的不可靠路径
-      (Python `re` 没暴露 AST,任何 string-level 判断都有 false positive)。
+      (引擎没暴露 AST,任何 string-level 判断都有 false positive)。
       若需"找被空行分隔的段落",改用内容侧锚点(例:markdown 的 `^# `、小说的
       `^第.*章`、Python 的 `^class `),都是非零宽 pattern,正常工作。
-    - max_count 限制 **行级命中** 数；context 行不计入
+    - max_count 限制 **行级命中** 数（去重后）；context 行不计入
+    - **raw-match 迭代上界**（算法上界，Finding 1）:`max_count` 只数去重后的**行**，
+      单行海量命中（如 `"a"*20M` 配 `a`）会全 collapse 到一行 → `max_count` 的 break
+      永不触发 → `finditer` 被抽干（纯同步 CPU 钉死 GIL，2026-05-14 wedge 的另一个轴）。
+      这里 cap 真正烧 CPU 的量——迭代到的**原始**命中数（非去重行数）。mirror
+      update_artifact 的 `MAX_UNIQUE_CENTERS`。提前触顶即 break，置 `stats["scan_capped"]=True`。
+      上界来源:`max_scan` 显式传入（session 模式传**剩余**预算，使 raw 预算跨 artifact
+      累计共享 —— 否则每个 artifact 重置会累积无界 wedge，reviewer round 4）；不传则用
+      `config.GREP_MAX_SCAN_MATCHES`（单 artifact 模式 = 整 budget）。
 
     返回 [(line_no_1indexed, line_text, is_match), ...]:
     - is_match=True 是命中行；False 是 context 行
     - 相邻命中的 context 重叠 → sliding skip 合并去重
+
+    `stats`（可选 out-param）：若提供，写入 `stats["raw_scanned"]`（本次迭代的原始命中
+    数，供 session 累计预算）；提前触顶 raw-match 上界时另置 `stats["scan_capped"]=True`。
+    不提供（默认）则行为不变，纯函数单测无需感知。
     """
     if not content or max_count <= 0:
         return []
@@ -80,12 +124,24 @@ def _scan_content(
     # 全文跑 finditer，把每个 match.start() 通过 bisect 映射到行号
     match_line_indices: List[int] = []  # 按命中顺序、已去重
     seen_lines = set()
+    cap = max_scan if max_scan is not None else config.GREP_MAX_SCAN_MATCHES
+    raw_seen = 0
     for m in regex.finditer(content):
+        # raw-match 迭代上界:数的是**原始**命中(含零宽/去重前),这才是 finditer
+        # 的真实迭代成本。触顶即停 —— max_count 只数去重行,单行海量命中时拦不住。
+        if raw_seen >= cap:
+            if stats is not None:
+                stats["scan_capped"] = True
+            break
+        raw_seen += 1
         # 零宽匹配整体 drop。从源码启发式判 anchor 意图(`^$` 找空行 vs `\A`
-        # 只是起始锚)做不到无 false positive —— Python `re` 没暴露 AST,
-        # 任何 string-level 判断都有边界。换 "全 drop" 换简单 + 可证明:
-        # 跨 reviewer 任何反例,零宽就是零宽,不报。失去的能力(`^$` 找空行)
-        # agent 在 ArtifactFlow 里没有真实用法,可用内容侧锚点替代。
+        # 只是起始锚)做不到无 false positive —— 引擎没暴露 AST,任何 string-level
+        # 判断都有边界。换 "全 drop" 换简单 + 可证明:跨 reviewer 任何反例,零宽
+        # 就是零宽,不报。失去的能力(`^$` 找空行)agent 在 ArtifactFlow 里没有真实
+        # 用法,可用内容侧锚点替代。
+        # 附带好处:RE2 的 finditer 会在行边界**重复**返回零宽 anchor 命中
+        # (实测 `(?m)^` 对 "foo\nbar\n" 给 [(0,0),(4,4),(4,4),(8,8),(8,8)]),
+        # 这条 drop 把差异一并中和 —— 无需为 RE2 单独处理。
         if m.start() == m.end():
             continue
         idx = bisect.bisect_right(line_starts, m.start()) - 1
@@ -97,6 +153,9 @@ def _scan_content(
         match_line_indices.append(idx)
         if len(match_line_indices) >= max_count:
             break
+
+    if stats is not None:
+        stats["raw_scanned"] = raw_seen
 
     if not match_line_indices:
         return []
@@ -119,9 +178,20 @@ def _scan_content(
     return hits
 
 
+def _truncate_line(text: str) -> str:
+    """单行输出截断（ripgrep `--max-columns` 式）。挡"单条巨行命中 → 整行原样塞进
+    ToolResult"——5M 字符的一行会先构造成 5M 的 body 再交给引擎落盘中间件,且若落盘
+    fail-open 会直接进 SSE。超 `GREP_MAX_LINE_CHARS` 即截断 + 标记总长（命中可能在
+    截断点之后,标记提示模型可 refine）。"""
+    cap = config.GREP_MAX_LINE_CHARS
+    if len(text) <= cap:
+        return text
+    return f"{text[:cap]} …[line truncated to {cap} of {len(text)} chars]"
+
+
 def _format_flat(hits: List[Tuple[int, str, bool]]) -> str:
     """单 artifact 输出格式。命中行 `N:content`，context 行 `N-content`，
-    相邻行号间断 → 插入 `--`（ripgrep 行为）。
+    相邻行号间断 → 插入 `--`（ripgrep 行为）。每行经 `_truncate_line` 封顶。
 
     空 hits 返回空串（调用方应在调用前判 No-matches，不应进到这里）。
     """
@@ -131,7 +201,7 @@ def _format_flat(hits: List[Tuple[int, str, bool]]) -> str:
         if prev_lineno is not None and lineno > prev_lineno + 1:
             out.append("--")
         sep = ":" if is_match else "-"
-        out.append(f"{lineno}{sep}{text}")
+        out.append(f"{lineno}{sep}{_truncate_line(text)}")
         prev_lineno = lineno
     return "\n".join(out)
 
@@ -159,7 +229,9 @@ class GrepArtifactTool(BaseTool):
                 "Search artifact content. Pass id=... to scope to a single artifact "
                 "(flat 'lineno:content' output); omit to search all artifacts in the current "
                 "session (heading-style output, one block per artifact). "
-                "Pattern is a Python `re` regex by default; set fixed_strings=true to match literally. "
+                "Pattern is an RE2 regex by default (ripgrep-style: linear-time, no "
+                "backreferences or look-around; use \\z, not \\Z, for end-of-input); set "
+                "fixed_strings=true to match literally. "
                 "Returns 'No matches for <pattern>' on empty hit; invalid regex returns success=false."
             ),
             permission=ToolPermission.AUTO,
@@ -178,8 +250,9 @@ class GrepArtifactTool(BaseTool):
                 name="pattern",
                 type="string",
                 description=(
-                    "Search pattern. Python `re` regex by default — use fixed_strings=true "
-                    "to disable regex semantics and match literally."
+                    "Search pattern. RE2 regex by default (ripgrep-style; no backreferences "
+                    "or look-around; \\z for end-of-input) — use fixed_strings=true to disable "
+                    "regex semantics and match literally."
                 ),
                 required=True,
             ),
@@ -239,17 +312,35 @@ class GrepArtifactTool(BaseTool):
         context_lines: int = int(params.get("context", 0))
         max_count: int = int(params.get("max_count", 20))
 
-        # context 负数无意义；clamp 到 0
-        if context_lines < 0:
-            context_lines = 0
+        # pattern 长度上界 —— 挡病态超长 pattern（RE2 编译侧另有 max_mem=8MiB 兜底）
+        if len(pattern) > config.GREP_MAX_PATTERN_CHARS:
+            return ToolResult(
+                success=False,
+                error=f"Pattern too long (>{config.GREP_MAX_PATTERN_CHARS} chars). Simplify it.",
+            )
+
+        # context 负数无意义 clamp 到 0；上界 clamp 防超大窗口铺满全文（GREP-03）
+        context_lines = max(0, min(context_lines, config.GREP_MAX_CONTEXT))
         # max_count <= 0 等价于"不要任何结果"；视作 0 命中，给个明确信号
         if max_count <= 0:
             return ToolResult(success=True, data=f"No matches for {pattern!r}")
+        max_count = min(max_count, config.GREP_MAX_COUNT)
 
         try:
             regex = _compile_pattern(pattern, fixed_strings, ignore_case)
-        except re.error as e:
-            return ToolResult(success=False, error=f"Invalid regex: {e}")
+        except re2.error as e:
+            # re2.error 的 args[0] 是 bytes（如 b'missing ): ...'）；解码成模型可读文案
+            detail = e.args[0] if getattr(e, "args", None) else e
+            if isinstance(detail, (bytes, bytearray)):
+                detail = detail.decode("utf-8", "replace")
+            return ToolResult(
+                success=False,
+                error=(
+                    f"Invalid regex: {detail}. This tool uses RE2 syntax (ripgrep-style): "
+                    f"backreferences and look-around are unsupported; use \\z (not \\Z) for "
+                    f"end-of-input."
+                ),
+            )
 
         # ─── 单 artifact 模式 ──────────────────────────────────────
         if aid is not None:
@@ -260,26 +351,54 @@ class GrepArtifactTool(BaseTool):
                 return ToolResult(success=False, error=f"Artifact '{aid}' not found")
 
             content = result.get("content", "") or ""
-            hits = _scan_content(content, regex, context_lines, max_count)
+            truncated = len(content) > config.GREP_CONTENT_MAX_CHARS
+            if truncated:
+                content = content[: config.GREP_CONTENT_MAX_CHARS]
+            stats: dict = {}
+            hits = _scan_content(content, regex, context_lines, max_count, stats)
             match_count = sum(1 for _, _, is_match in hits if is_match)
 
+            # 任一护栏触发 → 搜的是部分内容，必须 surface（绝不发确定性 No matches）
+            partial = truncated or stats.get("scan_capped", False)
+            note = (
+                " (search incomplete — scan limits hit; results may be missing later matches)"
+                if partial
+                else ""
+            )
+
             if match_count == 0:
-                return ToolResult(success=True, data=f"No matches for {pattern!r}")
+                return ToolResult(success=True, data=f"No matches for {pattern!r}{note}")
 
             body = _format_flat(hits)
-            data = f"{body}\n\n{match_count} matches"
+            data = f"{body}\n\n{match_count} matches{note}"
             return ToolResult(success=True, data=data)
 
         # ─── Session 模式 ──────────────────────────────────────────
+        # 一次性载入(include_content=True)。**峰值内存 ≈ 全 session content,有意 best-effort**:
+        # 内存由"载入多少"决定(repo.list_artifacts 是 select(Artifact),content 列 eager-load;
+        # 且 get_artifact 会 cache),不是下面的 scan 护栏能管的 —— 那些限的是"扫多少"(CPU)。
+        # 真 bound 内存需 repo 列投影 + 绕 cache,对内存从未爆过的 🟡 不划算(详见 GREP-02)。
         artifacts = await self._manager.list_artifacts(
             session_id=session_id, include_content=True
         )
 
         grouped: List[Tuple[str, List[Tuple[int, str, bool]]]] = []
         total_hits = 0
+        scanned_chars = 0
+        raw_used = 0  # 跨 artifact 累计的原始命中数（raw-match 预算 per-tool-call 共享）
         session_cap = config.SESSION_GREP_MAX_TOTAL
+        scan_budget = config.GREP_SESSION_SCAN_BUDGET_CHARS
+        raw_budget = config.GREP_MAX_SCAN_MATCHES
+        partial = False  # 任何 budget / 截断 / raw-cap → 搜的是部分内容,必须 surface
 
         for art in artifacts:
+            # 每个 artifact 间让出事件循环:① 不 wedge(整个 session 扫描原本是一坨无
+            # await 的同步 CPU,健康探针/其他 session 全饿死);② 恢复**外部可取消性** ——
+            # task.cancel() 能在此 await 落点生效,正是 2026-05-14 lease-fencing 96 分钟
+            # 打不动的那个缺失落点。配合下面 per-call 累计预算,把"跨 artifact 连续 wedge"
+            # 拆成"每 artifact ≤~一个有界小块、之间可取消"。
+            await asyncio.sleep(0)
+
             content = art.get("content", "") or ""
             if not content:
                 continue
@@ -287,9 +406,33 @@ class GrepArtifactTool(BaseTool):
             remaining = session_cap - total_hits
             if remaining <= 0:
                 break
+            if scanned_chars >= scan_budget:
+                partial = True
+                break
+            remaining_raw = raw_budget - raw_used
+            if remaining_raw <= 0:  # 跨 artifact 累计的 raw 预算耗尽 → 停 + surface
+                partial = True
+                break
+
+            # per-artifact + 聚合预算双重 CPU 护栏(截断"扫描量",非内存)
+            if len(content) > config.GREP_CONTENT_MAX_CHARS:
+                content = content[: config.GREP_CONTENT_MAX_CHARS]
+                partial = True
+            allowed = scan_budget - scanned_chars
+            if len(content) > allowed:
+                content = content[:allowed]
+                partial = True
+            scanned_chars += len(content)
 
             effective_cap = min(max_count, remaining)
-            hits = _scan_content(content, regex, context_lines, effective_cap)
+            stats: dict = {}
+            # max_scan=remaining_raw → raw 预算跨 artifact 累计共享,而非每个 artifact 重置
+            hits = _scan_content(
+                content, regex, context_lines, effective_cap, stats, max_scan=remaining_raw
+            )
+            raw_used += stats.get("raw_scanned", 0)
+            if stats.get("scan_capped"):
+                partial = True
             match_count = sum(1 for _, _, is_match in hits if is_match)
             if match_count == 0:
                 continue
@@ -301,6 +444,16 @@ class GrepArtifactTool(BaseTool):
                 break
 
         if not grouped:
+            # Finding 3a:部分搜索时绝不发确定性 No matches —— 未搜的内容里可能有命中
+            if partial:
+                return ToolResult(
+                    success=True,
+                    data=(
+                        f"No matches for {pattern!r} in the searched portion "
+                        f"(search incomplete — scan limits hit, not all content searched; "
+                        f"pass id=... to target a specific artifact)"
+                    ),
+                )
             return ToolResult(success=True, data=f"No matches for {pattern!r}")
 
         body = _format_heading(grouped)
@@ -309,6 +462,11 @@ class GrepArtifactTool(BaseTool):
             summary += (
                 f". Hit session cap ({session_cap}). "
                 f"Refine pattern or pass id=... to narrow."
+            )
+        elif partial:
+            summary += (
+                ". Search incomplete — scan limits hit, not all content searched. "
+                "Pass id=... to target a specific artifact."
             )
 
         data = f"{body}\n\n{summary}"

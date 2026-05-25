@@ -11,8 +11,10 @@ import aiohttp
 from typing import Dict, Any, Optional
 
 from tools.base import BaseTool, ToolResult, ToolParameter, ToolPermission
+from config import config
 from utils.logger import get_logger
 from utils.time import utc_now
+from utils.url_guard import validate_public_url, SsrfBlockedError
 import random
 
 from bs4 import BeautifulSoup
@@ -20,6 +22,31 @@ from bs4 import BeautifulSoup
 from utils.doc_converter import DocConverter
 
 logger = get_logger("ArtifactFlow")
+
+
+class _ResponseTooLargeError(Exception):
+    """fallback 下载体超过 WEB_FETCH_MAX_BYTES。"""
+
+
+async def _read_capped(response, max_bytes: int) -> bytes:
+    """流式读取响应体并封顶字节数。
+
+    先查声明的 Content-Length(诚实大响应早退),再分块累计实际(解压后)字节,
+    超限即中断 —— 防 gzip 炸弹 / 超大响应打爆 worker 内存。
+    """
+    if response.content_length is not None and response.content_length > max_bytes:
+        raise _ResponseTooLargeError(
+            f"Content-Length {response.content_length} exceeds cap {max_bytes}"
+        )
+
+    chunks: list[bytes] = []
+    total = 0
+    async for chunk in response.content.iter_chunked(64 * 1024):
+        total += len(chunk)
+        if total > max_bytes:
+            raise _ResponseTooLargeError(f"Body exceeded cap {max_bytes} bytes")
+        chunks.append(chunk)
+    return b"".join(chunks)
 
 # Jina Reader API配置
 JINA_API_KEY = os.getenv("JINA_API_KEY")
@@ -108,11 +135,15 @@ class WebFetchTool(BaseTool):
         if not url:
             return ToolResult(success=False, error="url parameter is required")
 
-        # SSRF 防护：仅允许 http/https 协议
-        if not url.lower().startswith(("http://", "https://")):
+        # SSRF 防护：scheme 限 http(s) + 主机解析后必须全部指向公网。
+        # fallback 路径另设 allow_redirects=False，杜绝 302 → 内网 绕过本次校验。
+        try:
+            await validate_public_url(url)
+        except SsrfBlockedError as e:
+            logger.warning(f"web_fetch blocked non-public URL: {e}")
             return ToolResult(
                 success=False,
-                error=f"Unsupported URL scheme: {url}. Only http:// and https:// are allowed."
+                error="URL is not an allowed public address",
             )
 
         logger.info(f"Fetching URL: {url}")
@@ -164,6 +195,19 @@ class WebFetchTool(BaseTool):
         if jina_result is not None:
             return jina_result
 
+        # Jina 失败 → 即将本机直连 fallback。入口的 validate_public_url 与此刻之间隔了
+        # Jina 最坏 ~60s(429 sleep / timeout),DNS-rebinding 窗口被放大且时机可控
+        # (攻击者让 Jina 失败再翻 DNS)。直连前再校验一次,把窗口收回到函数调用级 ms。
+        try:
+            await validate_public_url(url)
+        except SsrfBlockedError as e:
+            logger.warning(f"web_fetch fallback blocked non-public URL: {e}")
+            return {
+                "success": False,
+                "url": url,
+                "error": "URL is not an allowed public address",
+            }
+
         # 降级路径：按类型分别处理
         content_type = self._detect_content_type(url)
         if content_type == 'pdf':
@@ -198,7 +242,7 @@ class WebFetchTool(BaseTool):
 
         for attempt in range(1 + JINA_RETRY_MAX):
             try:
-                async with aiohttp.ClientSession(trust_env=True) as session:
+                async with aiohttp.ClientSession() as session:
                     async with session.get(jina_url, headers=headers, timeout=timeout) as response:
                         if response.status == 200:
                             content = await response.text()
@@ -263,8 +307,14 @@ class WebFetchTool(BaseTool):
             timeout = aiohttp.ClientTimeout(total=30)
             headers = {"User-Agent": random.choice(self.user_agents)}
 
-            async with aiohttp.ClientSession(trust_env=True) as session:
-                async with session.get(url, headers=headers, timeout=timeout) as response:
+            # allow_redirects=False：不跟随重定向，杜绝 302 → 内网 / 元数据 绕过 pre-flight
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    url,
+                    headers=headers,
+                    timeout=timeout,
+                    allow_redirects=False,
+                ) as response:
                     if response.status != 200:
                         return {
                             "success": False,
@@ -272,8 +322,8 @@ class WebFetchTool(BaseTool):
                             "error": f"HTTP {response.status}"
                         }
 
-                    # Read raw bytes and let BS4 detect encoding
-                    raw = await response.read()
+                    # 流式读取并封顶字节（防 gzip 炸弹 / 大响应 OOM）
+                    raw = await _read_capped(response, config.WEB_FETCH_MAX_BYTES)
 
             # BeautifulSoup 解析是 CPU bound（大页面可达数百 ms），丢线程池避免卡 event loop
             title, content = await asyncio.to_thread(_parse_html_with_bs4, raw)
@@ -291,13 +341,13 @@ class WebFetchTool(BaseTool):
                 "source_type": "html",
             }
 
+        except _ResponseTooLargeError as e:
+            logger.warning(f"BS4 fetch too large for {url}: {e}")
+            return {"success": False, "url": url, "error": "Response too large"}
         except Exception as e:
+            # str(e) 可能含内网地址/连接细节，不回显给 LLM（SSRF-06）
             logger.warning(f"BS4 fetch failed for {url}: {e}")
-            return {
-                "success": False,
-                "url": url,
-                "error": f"Fetch failed: {str(e)}"
-            }
+            return {"success": False, "url": url, "error": "Failed to fetch content"}
 
     async def _fetch_pdf(self, url: str) -> Dict[str, Any]:
         """
@@ -313,11 +363,12 @@ class WebFetchTool(BaseTool):
             logger.info(f"Fetching PDF: {url}")
 
             timeout = aiohttp.ClientTimeout(total=60)
-            async with aiohttp.ClientSession(trust_env=True) as session:
+            async with aiohttp.ClientSession() as session:
                 async with session.get(
                     url,
                     timeout=timeout,
-                    headers={'User-Agent': random.choice(self.user_agents)}
+                    headers={'User-Agent': random.choice(self.user_agents)},
+                    allow_redirects=False,
                 ) as response:
                     if response.status != 200:
                         return {
@@ -326,7 +377,8 @@ class WebFetchTool(BaseTool):
                             "error": f"HTTP {response.status}"
                         }
 
-                    pdf_bytes = await response.read()
+                    # 流式读取并封顶字节（先于全量入内存，保护下载本身）
+                    pdf_bytes = await _read_capped(response, config.WEB_FETCH_MAX_BYTES)
 
                     converter = DocConverter()
                     result = await converter.convert(pdf_bytes, "document.pdf")
@@ -346,13 +398,13 @@ class WebFetchTool(BaseTool):
                         "page_count": page_count,
                     }
 
+        except _ResponseTooLargeError as e:
+            logger.warning(f"PDF fetch too large for {url}: {e}")
+            return {"success": False, "url": url, "error": "PDF too large"}
         except Exception as e:
+            # 不回显 str(e)（可能含内网地址/路径），仅入 server 日志（SSRF-06）
             logger.exception(f"PDF fetch failed for {url}")
-            return {
-                "success": False,
-                "url": url,
-                "error": f"PDF extraction failed: {str(e)}"
-            }
+            return {"success": False, "url": url, "error": "PDF extraction failed"}
 
     def _format_result_to_xml(self, result: Dict[str, Any]) -> str:
         """将单个抓取结果格式化为 XML"""
