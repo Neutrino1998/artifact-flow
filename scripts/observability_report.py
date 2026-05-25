@@ -193,6 +193,45 @@ def _print_llm_summary(df_llm: pd.DataFrame, hours: int) -> None:
     print(g.to_string())
 
 
+def _print_token_distribution(df_llm: pd.DataFrame, hours: int) -> None:
+    """每次 LLM 调用的 input(=上下文长度)/ output token 分布画像。
+
+    与 _print_llm_summary 的区别:那张表给 sum(成本视角)+ 延迟分位;这里给
+    单次调用的 avg/median/min/max(容量视角)。input_tokens 即喂进模型的全部
+    上下文,max 能看出最坏情况离模型上限 / COMPACTION_TOKEN_THRESHOLD 多近。
+    """
+    print(f"\n=== Per-call token distribution ({hours}h) ===")
+    if df_llm.empty:
+        print("  (no data)")
+        return
+
+    def _fmt(col: str) -> str:
+        s = df_llm[col].dropna()
+        if s.empty:
+            return "n=0 (provider 未回 usage 且估算缺失)"
+        return (
+            f"n={len(s)}  avg={s.mean():.0f}  median={s.median():.0f}  "
+            f"min={s.min():.0f}  max={s.max():.0f}"
+        )
+
+    print(f"  input  (context): {_fmt('in_tok')}")
+    print(f"  output          : {_fmt('out_tok')}")
+
+    print("\n  -- by model × agent --")
+    g = df_llm.groupby(["model", "agent_name"]).agg(
+        calls=("in_tok", "count"),
+        in_avg=("in_tok", "mean"),
+        in_med=("in_tok", "median"),
+        in_min=("in_tok", "min"),
+        in_max=("in_tok", "max"),
+        out_avg=("out_tok", "mean"),
+        out_med=("out_tok", "median"),
+        out_min=("out_tok", "min"),
+        out_max=("out_tok", "max"),
+    )
+    print(g.round(0).to_string())
+
+
 def _print_tool_summary(df_tool: pd.DataFrame, hours: int) -> None:
     print(f"\n=== Tool calls ({hours}h, by tool) ===")
     if df_tool.empty:
@@ -332,6 +371,7 @@ async def _run_report(hours: int, obs_dir: str) -> None:
         async_engine = create_async_engine(_resolve_engine_url())
         df_llm, df_tool = await _load_message_events(async_engine, hours)
         _print_llm_summary(df_llm, hours)
+        _print_token_distribution(df_llm, hours)
         _print_tool_summary(df_tool, hours)
         _print_fuzzy_stats(df_tool)
     except Exception as e:
