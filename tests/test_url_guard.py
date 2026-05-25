@@ -13,7 +13,6 @@ import pytest
 from utils.url_guard import (
     ip_is_blocked,
     validate_public_url,
-    safe_url_label,
     SsrfBlockedError,
 )
 from utils import url_guard
@@ -119,36 +118,3 @@ class TestValidatePublicUrl:
         monkeypatch.setattr(url_guard, "_resolve_host_ips", fake_resolve)
         with pytest.raises(SsrfBlockedError, match="DNS resolution failed"):
             await validate_public_url("http://nxdomain.example.com/")
-
-
-# ============================================================
-# safe_url_label —— 脱敏(防 endpoint 密钥经 metadata 泄露)
-# ============================================================
-
-class TestSafeUrlLabel:
-    def test_strips_query_secret(self):
-        assert safe_url_label(
-            "https://api.example.com/v1/data?api_key=SUPERSECRET"
-        ) == "https://api.example.com"
-
-    def test_strips_userinfo(self):
-        assert safe_url_label(
-            "https://user:pass@api.example.com/x"
-        ) == "https://api.example.com"
-
-    def test_keeps_port(self):
-        assert safe_url_label(
-            "https://api.example.com:8443/x?k=s"
-        ) == "https://api.example.com:8443"
-
-    def test_no_secret_substring_survives(self):
-        for url in [
-            "https://h.example.com/p?token=ABC123SECRET",
-            "https://k3y:s3cr3t@h.example.com/",
-            "https://h.example.com/ABC123SECRET/x",
-        ]:
-            assert "SECRET" not in safe_url_label(url)
-            assert "s3cr3t" not in safe_url_label(url)
-
-    def test_garbage_returns_empty(self):
-        assert safe_url_label("not a url") == ""

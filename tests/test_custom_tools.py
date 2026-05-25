@@ -562,14 +562,16 @@ class TestHttpToolEndpoint:
         result = await tool.execute()
         assert result.success is True
 
-    async def test_endpoint_secret_not_leaked_to_metadata(self, monkeypatch):
-        # endpoint query 里的密钥不得进 metadata（会经 tool_complete → SSE/DB 泄露）。
-        # 用公网 IP 字面量避免真实 DNS/网络；httpx 用替身。
+    async def test_endpoint_not_in_metadata(self, monkeypatch):
+        # metadata 不再带 endpoint —— host(内网拓扑)与 query 密钥都不得进
+        # tool_complete 事件流 / MessageEvent.data。httpx 用替身,不发真实请求。
         monkeypatch.setattr(
             "tools.custom.http_tool.httpx.AsyncClient", _FakeAsyncClient
         )
         tool = self._tool("https://93.184.216.34/v1/data?api_key=SUPERSECRET")
         result = await tool.execute()
         assert result.success is True
-        assert result.metadata["endpoint"] == "https://93.184.216.34"
-        assert "SUPERSECRET" not in str(result.metadata)
+        assert "endpoint" not in result.metadata
+        meta_str = str(result.metadata)
+        assert "93.184.216.34" not in meta_str   # host(拓扑)不外泄
+        assert "SUPERSECRET" not in meta_str      # query 密钥不外泄

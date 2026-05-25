@@ -42,11 +42,11 @@
 > **设计取舍(权限 vs IP 校验):** 工具权限(`web_fetch` = CONFIRM)作为互补纵深保留,但**不能**替代 IP 校验 —— 危险目标(元数据)在审批界面不显眼、且重定向/rebinding 绕过审批。故保留轻量 pre-flight 拦截 crown-jewel。**接受 DNS-rebinding 的毫秒级 TOCTOU 残留**(校验与 connect 之间),关它需连接时 resolver,复杂度不划算。
 >
 > **Reviewer 复审收口(同日,3 项):**
-> - **P1 endpoint 密钥泄露**:`http_tool` 把**解析后** endpoint 放进 `ToolResult.metadata` → `tool_complete` 事件 → SSE/浏览器 + `MessageEvent.data` 入库,`?key={{TOOL_SECRET_*}}` 这类会泄露真实 key。改为 `url_guard.safe_url_label` 脱敏(仅 `scheme://host[:port]`,丢 userinfo/path/query)。
+> - **P1 endpoint 密钥泄露**:`http_tool` 把**解析后** endpoint 放进 `ToolResult.metadata` → `tool_complete` 事件 → SSE/浏览器 + `MessageEvent.data` 入库,`?key={{TOOL_SECRET_*}}` 这类会泄露真实 key。改为 `url_guard.safe_url_label` 脱敏(仅 `scheme://host[:port]`,丢 userinfo/path/query)。〔**2026-05-25 再收口(撤回 ① 的连带)**:允许内网 endpoint 后 host 本身即内网拓扑,同样经 SSE/DB 外泄,故**直接从 metadata 删除 endpoint 字段**(只留 `status_code`)—— 比 `safe_url_label` 脱敏更彻底(无字段=无密钥+无拓扑);调用身份已由 `tool_complete` 的 `"tool"` 字段标识,host 无额外价值。`safe_url_label` 随之无调用方,连同其测试一并移除。〕
 > - **P2 httpx 信任环境代理**:`httpx.AsyncClient` 默认 `trust_env=True`(读 `HTTP(S)_PROXY`/`.netrc`)→ egress hardening 没闭合;显式 `trust_env=False`,与 web_fetch(aiohttp 默认 False)对齐。需代理时走显式配置项(YAGNI,暂不加)。
 > - **P2 rebinding 窗口被 Jina 放大**:入口校验后先走 Jina(最坏 ~60s 429 sleep/timeout)才直连 fallback,攻击者可在此间翻 DNS。在 `_fetch_single_url` 直连前**再校验一次**,把窗口从"~60s 可控"收回到毫秒级(不复活 resolver)。
 >
-> 测试:新增 `tests/test_url_guard.py` + `tests/test_web_fetch.py`,更新 `tests/test_custom_tools.py`(含 endpoint-密钥-不进-metadata、内网 endpoint 放行、Jina 失败后翻内网被拦)。SSRF 收口当时全量 932 passed;并入 grep 修复 + 本次 endpoint-guard 撤回后,现 **949 passed / 28 skipped**。
+> 测试:新增 `tests/test_url_guard.py` + `tests/test_web_fetch.py`,更新 `tests/test_custom_tools.py`(含 endpoint-密钥-不进-metadata、内网 endpoint 放行、Jina 失败后翻内网被拦)。SSRF 收口当时全量 932 passed;并入 grep 修复 + endpoint-guard 撤回 + metadata 删 endpoint 字段后,现 **944 passed / 28 skipped**。
 > **未做(按决定暂缓):** `ARTIFACTFLOW_OFFLINE` fail-closed 硬开关、容器 egress 防火墙(部署面)。
 
 ## SSRF-01 🔴 `web_fetch` 无主机校验 — 可读云元数据 / 内网凭证
