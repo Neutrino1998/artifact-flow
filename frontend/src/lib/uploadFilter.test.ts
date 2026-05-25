@@ -29,6 +29,17 @@ describe('uploadFilter.rejectionReason', () => {
     expect(rejectionReason('A.DOC')).not.toBeNull();
     expect(rejectionReason('B.XlSx')).not.toBeNull();
   });
+
+  test('leading-dot names are dotfiles with no extension (matches os.path.splitext)', () => {
+    // Backend: splitext('.doc') == ('.doc', '') → attempted as text. We must
+    // accept these, not reject them, to honor "only block what the backend rejects".
+    expect(rejectionReason('.doc')).toBeNull();
+    expect(rejectionReason('..doc')).toBeNull();
+    expect(rejectionReason('.xlsx')).toBeNull();
+    // ...but a real extension after a non-dot char still rejects.
+    expect(rejectionReason('a..doc')).not.toBeNull(); // splitext → '.doc'
+    expect(rejectionReason('archive.tar.doc')).not.toBeNull();
+  });
 });
 
 describe('uploadFilter.partitionStageable', () => {

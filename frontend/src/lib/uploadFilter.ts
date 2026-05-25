@@ -63,8 +63,17 @@ export interface StageRejection {
 }
 
 function extOf(filename: string): string {
-  const i = filename.lastIndexOf('.');
-  return i >= 0 ? filename.slice(i).toLowerCase() : '';
+  // Mirror Python os.path.splitext: leading dots are part of the name, not an
+  // extension separator — ".doc", "..doc", ".gitignore" have NO extension, so
+  // the backend attempts them as text. Only treat the last dot as an extension
+  // boundary if at least one non-dot char precedes it in the name. (File.name
+  // is a basename — browsers strip any path — so no separator handling needed.)
+  const lastDot = filename.lastIndexOf('.');
+  if (lastDot <= 0) return '';
+  for (let i = 0; i < lastDot; i++) {
+    if (filename[i] !== '.') return filename.slice(lastDot).toLowerCase();
+  }
+  return '';
 }
 
 /**

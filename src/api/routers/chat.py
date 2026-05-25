@@ -125,9 +125,16 @@ async def send_message(
     #   相二 ensure_conversation_exists + create_artifact_from_converted —— 全部
     #     转换通过后才建会话并逐个落库；artifact 落库要求 conversation 已存在
     #     （FK: artifact_session → conversation），故 ensure 放相二开头。
-    # 残留窗口（均罕见且无害）：相二内 DB 写到一半失败、或 submit 抛 409，仍可能留
-    # 下已 commit 的 artifact —— 下一轮 inventory 拾起，符合既有 "artifact 可无
-    # event 支撑" 取舍。
+    # 原子性边界：只保证「转换阶段全有或全无」，不覆盖提交之后的 submit 阶段。残留
+    # 窗口均罕见，按 best-effort 处理（不做补偿清理）：
+    #   - submit 抛 409（会话已有活跃执行——仅已存在会话可能，新会话是全新 uuid 不会
+    #     冲突；且前端 streaming 时走 /inject，正常不触发）或 create_stream 等基础
+    #     设施 500：本次已 commit 的 artifact 会留下，新建会话还会多留一条空会话。
+    #   - artifact 符合既有 "artifact 可无 event 支撑" 取舍，下一轮 inventory 拾起；
+    #     空会话仅是侧栏里一条无消息记录。前端失败后保留 staged files，重试会因 id
+    #     去重生成 _N 副本——已知且接受。
+    #   - 不引入 delete_artifact / 提交前抢 lease：那是为前端已规避的竞态写强一致机器，
+    #     不划算（见 CLAUDE.md 事务所有权取舍）。
     converted = [
         await convert_uploaded_file(f)
         for f in files
