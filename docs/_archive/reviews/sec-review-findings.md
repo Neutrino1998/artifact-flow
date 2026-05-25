@@ -65,7 +65,7 @@
 
 **修复建议**:① resolve_secrets 后对解析出的 `endpoint` 跑同一 `validate_public_url`;② `{{VAR}}` 限定只能解析白名单前缀(如 `TOOL_SECRET_`),缺失即工具加载失败而非把占位符发出去。`config/tools/` 维持 `:ro` 挂载。
 
-**收口修正(2026-05-25,撤回 ①):** ① 已移除,不再对 endpoint 跑 `validate_public_url`。理由:本条原始威胁是"config 作者把敏感 env exfil 到**外部**",而 `validate_public_url` 只拦**内网**目标 —— `evil.com` 是公网,照样通过,故 ① 根本不挡此威胁;真正挡它的是 ②(前缀白名单,已保留)。同时 endpoint 是运维在 `:ro` 可信目录里固定配置的,LLM 只能填 params(进 body/query),**无法影响目标主机**,不构成 SSRF 攻击面。强加公网校验只会误伤合法用途 —— 内网 gateway(如 `172.22.80.35 ∈ 172.16/12`)在出网恢复后被运行时拒(`Tool endpoint is not an allowed public URL`)。自定义工具的真实防线是:② 前缀白名单 + `permission: confirm` 默认 + `:ro` 可信挂载 + `follow_redirects=False`(挡 302→内网)+ `trust_env=False`(挡代理劫持)+ `safe_url_label` metadata 脱敏。`validate_public_url` 继续守 `web_fetch`(URL 由 LLM 提供,才是真正可控的 SSRF 面)。代码:`http_tool.execute` 删去校验块,改留刻意说明注释;测试 `TestHttpToolEndpoint.test_internal_endpoint_is_allowed` 固化此约定。
+**收口修正(2026-05-25,撤回 ①):** ① 已移除,不再对 endpoint 跑 `validate_public_url`。理由:本条原始威胁是"config 作者把敏感 env exfil 到**外部**",而 `validate_public_url` 只拦**内网**目标 —— `evil.com` 是公网,照样通过,故 ① 根本不挡此威胁;真正挡它的是 ②(前缀白名单,已保留)。同时 endpoint 是运维在 `:ro` 可信目录里固定配置的,LLM 只能填 params(进 body/query),**无法影响目标主机**,不构成 SSRF 攻击面。强加公网校验只会误伤合法用途 —— 内网 gateway(如 `172.22.80.35 ∈ 172.16/12`)在出网恢复后被运行时拒(`Tool endpoint is not an allowed public URL`)。自定义工具的真实防线是:② 前缀白名单 + `permission: confirm` 默认 + `:ro` 可信挂载 + `follow_redirects=False`(挡 302→内网)+ `trust_env=False`(挡代理劫持)+ metadata 不含 `endpoint`(host 是内网拓扑,不外泄到 SSE/DB 事件历史;`safe_url_label` 随该字段一并移除)。`validate_public_url` 继续守 `web_fetch`(URL 由 LLM 提供,才是真正可控的 SSRF 面)。代码:`http_tool.execute` 删去校验块,改留刻意说明注释;测试 `TestHttpToolEndpoint.test_internal_endpoint_is_allowed` 固化此约定。
 
 ## SSRF-03 🔴 `aiohttp` 默认跟随重定向 — 绕过任何主机白名单
 
