@@ -130,17 +130,3 @@ async def validate_public_url(url: str) -> None:
     for ip_str in ips:
         if ip_is_blocked(ip_str):
             raise SsrfBlockedError(f"Host {host} resolves to a non-public address")
-
-
-def safe_url_label(url: str) -> str:
-    """脱敏的 URL 标签:仅 `scheme://host[:port]`,丢弃 userinfo / path / query。
-
-    用于日志 / 事件 metadata —— endpoint 经 `{{TOOL_SECRET_*}}` 解析后可能把真实
-    密钥带进 query 或 userinfo(如 `?key=REAL` / `user:pass@host`),原样回显会经
-    SSE → 浏览器、`MessageEvent.data` → DB/事件历史 泄露。保留 host 供调试。
-    """
-    parts = urlsplit(url)
-    host = parts.hostname or ""
-    if host and parts.port:
-        host = f"{host}:{parts.port}"
-    return f"{parts.scheme}://{host}" if host else ""

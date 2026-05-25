@@ -12,7 +12,6 @@ from dataclasses import dataclass, field
 from tools.base import BaseTool, ToolResult, ToolParameter, ToolPermission
 from tools.custom.secrets import resolve_secrets, SecretResolutionError
 from utils.logger import get_logger
-from utils.url_guard import safe_url_label
 
 logger = get_logger("ArtifactFlow")
 
@@ -138,10 +137,10 @@ class HttpTool(BaseTool):
                 success=True,
                 data=result_text,
                 metadata={
+                    # 刻意不带 endpoint:host 是内网拓扑(允许内网 gateway 后更敏感),且会随
+                    # metadata 进 tool_complete SSE → 浏览器 + MessageEvent.data 入库/事件历史。
+                    # 调用身份已由 tool_complete 事件的 "tool" 字段标识,host 无额外价值。
                     "status_code": response.status_code,
-                    # 脱敏:endpoint 经 {{TOOL_SECRET_*}} 解析后可能含密钥(query/userinfo)，
-                    # 而 metadata 会进 tool_complete 事件 → SSE/浏览器 + DB 事件历史。只留 host。
-                    "endpoint": safe_url_label(endpoint),
                 },
             )
 
