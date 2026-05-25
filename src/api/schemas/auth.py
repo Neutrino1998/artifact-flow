@@ -168,19 +168,6 @@ class BulkImportSkippedRow(BaseModel):
     reason: str = Field("username_exists", description="Skip reason")
 
 
-class BulkImportCreatedUser(UserResponse):
-    """批量导入新建成功的用户。
-
-    initial_password 仅在该行**未提供** password 列、由系统生成随机临时密码时
-    回带,供 admin 带外分发(显式提供密码的行为 None —— admin 已知道)。所有
-    导入用户都置 must_change_password=True,首次登录强制改密(根治 ACC-03)。
-    """
-    initial_password: Optional[str] = Field(
-        None,
-        description="系统生成的初始临时密码（仅未提供 password 列时回带,供分发）",
-    )
-
-
 class BulkImportResponse(BaseModel):
     """
     POST /api/v1/admin/users/bulk-import response。
@@ -188,7 +175,7 @@ class BulkImportResponse(BaseModel):
     best-effort 三分类。total_rows = created + failed + skipped。
     warnings 含编码 fallback / unknown 列等非阻断提示。
     """
-    created: List[BulkImportCreatedUser] = Field(default_factory=list)
+    created: List[UserResponse] = Field(default_factory=list)
     failed: List[BulkImportFailedRow] = Field(default_factory=list)
     skipped: List[BulkImportSkippedRow] = Field(default_factory=list)
     total_rows: int = Field(..., description="Total data rows processed (excluding header)")

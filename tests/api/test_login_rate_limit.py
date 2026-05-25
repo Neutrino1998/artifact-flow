@@ -50,13 +50,14 @@ class TestLoginRateLimit:
     async def test_success_resets_username_counter(
         self, anon_client: AsyncClient, test_user: User
     ):
-        # 每次请求用唯一 XFF → per-IP 锁不触发,单独验 per-username 计数。
+        # 每次请求用唯一 X-Real-IP → per-IP 锁不触发,单独验 per-username 计数。
+        # (后端只信 X-Real-IP,不信 XFF —— 见 _client_ip。)
         # max-1 次失败(未到锁定线)
         for i in range(config.LOGIN_MAX_FAILURES - 1):
             r = await anon_client.post(
                 "/api/v1/auth/login",
                 json={"username": "testuser", "password": "wrong-pw-1!"},
-                headers={"X-Forwarded-For": f"10.0.0.{i}"},
+                headers={"X-Real-IP": f"10.0.0.{i}"},
             )
             assert r.status_code == 401
 
@@ -64,7 +65,7 @@ class TestLoginRateLimit:
         r = await anon_client.post(
             "/api/v1/auth/login",
             json={"username": "testuser", "password": "testpass"},
-            headers={"X-Forwarded-For": "10.0.1.1"},
+            headers={"X-Real-IP": "10.0.1.1"},
         )
         assert r.status_code == 200
 
@@ -74,9 +75,30 @@ class TestLoginRateLimit:
             r = await anon_client.post(
                 "/api/v1/auth/login",
                 json={"username": "testuser", "password": "wrong-pw-1!"},
-                headers={"X-Forwarded-For": f"10.0.2.{i}"},
+                headers={"X-Real-IP": f"10.0.2.{i}"},
             )
             assert r.status_code == 401
+
+    async def test_forged_xff_does_not_bypass_ip_limit(
+        self, anon_client: AsyncClient, test_user: User
+    ):
+        """P1 回归:每次换不同 X-Forwarded-For **不应**绕过 per-IP 锁 —— 后端只认
+        X-Real-IP / client.host,不认可伪造的 XFF。所有请求实际共享同一 client.host
+        → IP 计数照样打满。"""
+        for i in range(config.LOGIN_MAX_FAILURES):
+            r = await anon_client.post(
+                "/api/v1/auth/login",
+                json={"username": "testuser", "password": "wrong-pw-1!"},
+                headers={"X-Forwarded-For": f"9.9.9.{i}"},
+            )
+            assert r.status_code == 401
+        # 再换个 XFF 也已被锁
+        r = await anon_client.post(
+            "/api/v1/auth/login",
+            json={"username": "testuser", "password": "testpass"},
+            headers={"X-Forwarded-For": "9.9.9.250"},
+        )
+        assert r.status_code == 429
 
     async def test_disabled_user_correct_password_not_counted(
         self, admin_client: AsyncClient, anon_client: AsyncClient, test_user: User

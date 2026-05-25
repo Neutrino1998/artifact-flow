@@ -54,13 +54,21 @@ router = APIRouter()
 def _client_ip(request: Request) -> str:
     """提取客户端 IP 用于 per-IP 频控。
 
-    生产在 nginx 之后,真实 IP 在 X-Forwarded-For 首跳;直连时回落 request.client。
-    安全注记:XFF 可被客户端伪造(除非可信代理覆写),故 per-IP 仅作 best-effort
-    二级防线;per-username 计数才是主防线(不可伪造)。可信代理前提见部署文档。
+    读 `X-Real-IP`(nginx 用 `proxy_set_header X-Real-IP $remote_addr` **覆写**),
+    无则回落 `request.client.host`。
+
+    安全前提:prod / intranet 里 backend 是 `expose`(不 publish 主机端口),只经
+    nginx 可达 → nginx 覆写的 `X-Real-IP` **不可被客户端伪造**。SQLite/dev 模式直接
+    发布 app 端口、无 nginx,这里会回落 client.host;该模式仅供开发测试,per-IP 不
+    做加固(可被伪造但无实际威胁)。
+
+    **刻意不读 `X-Forwarded-For`** —— nginx 用 `$proxy_add_x_forwarded_for` 是
+    *追加* 语义,首段是客户端自带的、可伪造(reviewer P1)。per-username 计数才是
+    不可伪造的主防线;per-IP 是补抓"同 IP 喷多个用户名"的二级防线。
     """
-    xff = request.headers.get("x-forwarded-for")
-    if xff:
-        return xff.split(",")[0].strip()
+    real_ip = request.headers.get("x-real-ip")
+    if real_ip:
+        return real_ip.strip()
     return request.client.host if request.client else "unknown"
 
 

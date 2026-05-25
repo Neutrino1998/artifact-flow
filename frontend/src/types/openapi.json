@@ -1592,7 +1592,7 @@
           "admin"
         ],
         "summary": "Bulk Import Users",
-        "description": "\u6279\u91cf\u5bfc\u5165\u7528\u6237\uff08\u4ec5 Admin\uff09\u3002\n\nCSV header \u5fc5\u542b `username`\uff1b\u53ef\u9009\u5217 `password` / `display_name` /\n`dept_l1` / `dept_l2` / `dept_l3`\u3002\u5176\u4ed6\u5217\u88ab\u5ffd\u7565\u5e76\u5728 warnings \u91cc\u4e0a\u62a5\u3002\n\n\u8bed\u4e49\uff08best-effort\uff0c\u975e\u539f\u5b50\uff09\uff1a\n- parse \u9636\u6bb5\u5931\u8d25\uff08\u89e3\u7801 / \u7f3a username \u5217 / \u884c\u6570\u8d85\u9650\uff09\u2192 400\n- \u6587\u4ef6\u5185 username \u91cd\u590d \u2192 400 + duplicate_rows \u5217\u51fa\n- \u5355\u884c\u4e1a\u52a1\u6821\u9a8c\u5931\u8d25\uff08username \u683c\u5f0f / \u90e8\u95e8 gap / \u5b57\u6bb5\u8d85\u957f / \u9ed8\u8ba4\u5bc6\u7801\u8fc7\u77ed\uff09\n  \u2192 failed\n- \u5355\u884c username \u5df2\u5728 DB \u2192 skipped\n- \u5176\u4f59 \u2192 created\uff08\u6bcf\u884c\u72ec\u7acb commit\uff1b\u9010\u884c\u6210\u529f/\u5931\u8d25\uff09\n\n\u6267\u884c\u7ed3\u6784\uff083 \u6bb5\uff09\uff1a\n1. validate + dept resolve\uff1a\u987a\u5e8f\u904d\u5386\uff0c\u6821\u9a8c\u5931\u8d25\u7684\u884c\u8fdb failed\uff0c\n   \u901a\u8fc7\u7684\u884c\u6536\u96c6\u5230 to_create\uff08\u542b\u5df2 resolve \u7684 department_id\uff09\u3002\n   dept_cache \u907f\u514d\u540c CSV \u5185\u91cd\u590d\u8def\u5f84\u591a\u6b21 SELECT\u3002\n2. parallel hash\uff1ato_create \u91cc\u6240\u6709 password \u901a\u8fc7 asyncio.gather +\n   asyncio.to_thread \u5e76\u884c\u6254\u7ed9\u9ed8\u8ba4 ThreadPoolExecutor \u8dd1 bcrypt\u3002\n   bcrypt-python \u5728 C \u5c42\u91ca\u653e GIL\uff0c~8 \u6838\u673a\u5668 300 \u884c hash \u9636\u6bb5\n   \u4ece ~50s \u7f29\u5230 ~6s\uff0c\u4e14 event loop \u5168\u7a0b\u4e0d\u5361\uff08\u5176\u4ed6\u8bf7\u6c42\u6b63\u5e38\u54cd\u5e94\uff09\u3002\n3. INSERT\uff1a\u987a\u5e8f\u5199\u5e93\uff1busername UNIQUE \u649e\u4e0a \u2192 \u5f53 skipped \u5904\u7406\uff08race\n   between phase-1 batch-check \u548c\u6b64\u5904\u4e4b\u95f4\u53e6\u4e00 admin \u62a2\u5148\u521b\u5efa\uff09\u3002",
+        "description": "\u6279\u91cf\u5bfc\u5165\u7528\u6237\uff08\u4ec5 Admin\uff09\u3002\n\nCSV header \u5fc5\u542b `username`\uff1b\u53ef\u9009\u5217 `password` / `display_name` /\n`dept_l1` / `dept_l2` / `dept_l3`\u3002\u5176\u4ed6\u5217\u88ab\u5ffd\u7565\u5e76\u5728 warnings \u91cc\u4e0a\u62a5\u3002\n\u6ce8:`password` \u5217\u867d\u975e parse \u9636\u6bb5\u5fc5\u586b,\u4f46**\u6bcf\u884c\u5fc5\u987b\u6709\u975e\u7a7a\u5bc6\u7801**(\u7559\u7a7a \u2192 \u8be5\u884c\nfailed),\u4e0d\u518d\u300c\u7f3a\u7701 = \u7528\u6237\u540d\u300d;admin \u81ea\u5df1\u586b\u521d\u59cb\u53e3\u4ee4\u5e76\u5e26\u5916\u5206\u53d1,\u6240\u6709\u5bfc\u5165\n\u7528\u6237\u9996\u6b21\u767b\u5f55\u5f3a\u5236\u6539\u5bc6\u3002\n\n\u8bed\u4e49\uff08best-effort\uff0c\u975e\u539f\u5b50\uff09\uff1a\n- parse \u9636\u6bb5\u5931\u8d25\uff08\u89e3\u7801 / \u7f3a username \u5217 / \u884c\u6570\u8d85\u9650\uff09\u2192 400\n- \u6587\u4ef6\u5185 username \u91cd\u590d \u2192 400 + duplicate_rows \u5217\u51fa\n- \u5355\u884c\u4e1a\u52a1\u6821\u9a8c\u5931\u8d25\uff08username \u683c\u5f0f / \u90e8\u95e8 gap / \u5b57\u6bb5\u8d85\u957f / \u5bc6\u7801\u7f3a\u5931\u6216\u4e0d\u8fbe\u6807\uff09\n  \u2192 failed\n- \u5355\u884c username \u5df2\u5728 DB \u2192 skipped\n- \u5176\u4f59 \u2192 created\uff08\u6bcf\u884c\u72ec\u7acb commit\uff1b\u9010\u884c\u6210\u529f/\u5931\u8d25\uff09\n\n\u6267\u884c\u7ed3\u6784\uff083 \u6bb5\uff09\uff1a\n1. validate + dept resolve\uff1a\u987a\u5e8f\u904d\u5386\uff0c\u6821\u9a8c\u5931\u8d25\u7684\u884c\u8fdb failed\uff0c\n   \u901a\u8fc7\u7684\u884c\u6536\u96c6\u5230 to_create\uff08\u542b\u5df2 resolve \u7684 department_id\uff09\u3002\n   dept_cache \u907f\u514d\u540c CSV \u5185\u91cd\u590d\u8def\u5f84\u591a\u6b21 SELECT\u3002\n2. parallel hash\uff1ato_create \u91cc\u6240\u6709 password \u901a\u8fc7 asyncio.gather +\n   asyncio.to_thread \u5e76\u884c\u6254\u7ed9\u9ed8\u8ba4 ThreadPoolExecutor \u8dd1 bcrypt\u3002\n   bcrypt-python \u5728 C \u5c42\u91ca\u653e GIL\uff0c~8 \u6838\u673a\u5668 300 \u884c hash \u9636\u6bb5\n   \u4ece ~50s \u7f29\u5230 ~6s\uff0c\u4e14 event loop \u5168\u7a0b\u4e0d\u5361\uff08\u5176\u4ed6\u8bf7\u6c42\u6b63\u5e38\u54cd\u5e94\uff09\u3002\n3. INSERT\uff1a\u987a\u5e8f\u5199\u5e93\uff1busername UNIQUE \u649e\u4e0a \u2192 \u5f53 skipped \u5904\u7406\uff08race\n   between phase-1 batch-check \u548c\u6b64\u5904\u4e4b\u95f4\u53e6\u4e00 admin \u62a2\u5148\u521b\u5efa\uff09\u3002",
         "operationId": "bulk_import_users_api_v1_admin_users_bulk_import_post",
         "requestBody": {
           "content": {
@@ -2927,84 +2927,6 @@
         "title": "BulkImpactResponse",
         "description": "GET /api/v1/admin/users/bulk-impact response\u3002\n\n\u7ed9\u524d\u7aef DangerConfirmModal \u663e\u793a\"\u5c06\u5220\u9664 N \u4e2a\u7528\u6237\u3001\u5171 M \u6761\u4f1a\u8bdd\"\u3002\nuser_count = \u8bf7\u6c42 ids \u7684\u53bb\u91cd\u4e2a\u6570\uff08\u4e0d\u533a\u5206\u662f\u5426\u771f\u6b63\u5b58\u5728\uff09\uff1b\nconversation_count = \u8fd9\u6279\u7528\u6237\u540d\u4e0b\u5f53\u524d\u4f1a\u8bdd\u603b\u6570\uff08CASCADE \u7ea7\u8054\u4f1a\u4e22\u5931\u7684\uff09\u3002"
       },
-      "BulkImportCreatedUser": {
-        "properties": {
-          "id": {
-            "type": "string",
-            "title": "Id"
-          },
-          "username": {
-            "type": "string",
-            "title": "Username"
-          },
-          "display_name": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Display Name"
-          },
-          "role": {
-            "type": "string",
-            "title": "Role"
-          },
-          "is_active": {
-            "type": "boolean",
-            "title": "Is Active"
-          },
-          "department_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Department Id"
-          },
-          "created_at": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Created At"
-          },
-          "updated_at": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Updated At"
-          },
-          "initial_password": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Initial Password",
-            "description": "\u7cfb\u7edf\u751f\u6210\u7684\u521d\u59cb\u4e34\u65f6\u5bc6\u7801\uff08\u4ec5\u672a\u63d0\u4f9b password \u5217\u65f6\u56de\u5e26,\u4f9b\u5206\u53d1\uff09"
-          }
-        },
-        "type": "object",
-        "required": [
-          "id",
-          "username",
-          "display_name",
-          "role",
-          "is_active",
-          "department_id",
-          "created_at",
-          "updated_at",
-          "initial_password"
-        ],
-        "title": "BulkImportCreatedUser",
-        "description": "\u6279\u91cf\u5bfc\u5165\u65b0\u5efa\u6210\u529f\u7684\u7528\u6237\u3002\n\ninitial_password \u4ec5\u5728\u8be5\u884c**\u672a\u63d0\u4f9b** password \u5217\u3001\u7531\u7cfb\u7edf\u751f\u6210\u968f\u673a\u4e34\u65f6\u5bc6\u7801\u65f6\n\u56de\u5e26,\u4f9b admin \u5e26\u5916\u5206\u53d1(\u663e\u5f0f\u63d0\u4f9b\u5bc6\u7801\u7684\u884c\u4e3a None \u2014\u2014 admin \u5df2\u77e5\u9053)\u3002\u6240\u6709\n\u5bfc\u5165\u7528\u6237\u90fd\u7f6e must_change_password=True,\u9996\u6b21\u767b\u5f55\u5f3a\u5236\u6539\u5bc6(\u6839\u6cbb ACC-03)\u3002"
-      },
       "BulkImportFailedRow": {
         "properties": {
           "row": {
@@ -3043,7 +2965,7 @@
         "properties": {
           "created": {
             "items": {
-              "$ref": "#/components/schemas/BulkImportCreatedUser"
+              "$ref": "#/components/schemas/UserResponse"
             },
             "type": "array",
             "title": "Created"

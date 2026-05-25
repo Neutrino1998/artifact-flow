@@ -187,14 +187,14 @@
 >
 > **架构主张:三机制归一**(避免平行造轮子)——
 > - **一个标志 `must_change_password`** 同时承载:ACC-03 缺省密码、首次强制改密、180 天到期。`get_current_user` 闸门在标志为 True 时除 `GET /auth/me` + `POST /auth/me/password` 外一律 **403**(单点覆盖所有 router,前端配合弹不可关闭的改密框)。
-> - **一个策略模块 `src/utils/password_policy.py`**(`validate_password_strength` + 弱口令/键盘黑名单 + `generate_temp_password`),在所有写入口复用(schema field_validator + CSV 导入 + `create_admin`)。
+> - **一个策略模块 `src/utils/password_policy.py`**(`validate_password_strength` + 弱口令/键盘黑名单),在所有写入口复用(schema field_validator + CSV 导入 + `create_admin`)。
 > - **新增状态仅 `password_history`**(JSON 列,非新表;most-recent-first,trim 到 `PASSWORD_HISTORY_RETAIN=5`)。当前 `PASSWORD_HISTORY_COUNT=1`(仅查当前),但列**从 day 1 起维护** → 日后调高 COUNT 即生效、**无需再迁移**。
 > - 策略值全进 `config.py` 隐藏常量:`PASSWORD_MIN_LENGTH / REQUIRE_LETTER|DIGIT|SYMBOL / PASSWORD_EXPIRY_DAYS=180 / PASSWORD_HISTORY_COUNT=1 / PASSWORD_HISTORY_RETAIN=5 / LOGIN_MAX_FAILURES=5 / LOGIN_FAILURE_WINDOW_SEC=900`(operator/测试中心可调,不改码)。
 >
 > **逐项:**
-> - **ACC-01** 登录频控:`src/api/services/login_rate_limiter.py`(Redis 单键 + InMemory 双实现,Cluster 安全 —— per-username + per-IP 各自单键,绝不跨键 multi-key)。验证前预检超阈 → 429(带 `Retry-After`);失败两键各 +1;成功重置 username 键。IP 取 XFF 首跳(per-username 为主防线,XFF 可伪造仅作二级,见下 runbook 可信代理前提)。
+> - **ACC-01** 登录频控:`src/api/services/login_rate_limiter.py`(Redis 单键 + InMemory 双实现,Cluster 安全 —— per-username + per-IP 各自单键,绝不跨键 multi-key)。验证前预检超阈 → 429(带 `Retry-After`);失败两键各 +1;成功重置 username 键。IP 取 `X-Real-IP`(nginx 覆写、不可伪造;见下「复审收口」P1)。
 > - **ACC-02 + 强度** 见上「强度档」;`schemas/auth.py` 三处密码字段加 `field_validator`,`create_admin.py` 同步。
-> - **ACC-03** CSV 缺省密码=用户名 **已删除**:显式密码走强度校验,缺省则**生成随机合规临时密码**(`generate_temp_password`)并在 `BulkImportResponse.created[].initial_password` 回带供 admin 带外分发;所有导入用户 `must_change_password=True`。
+> - **ACC-03** CSV 缺省密码=用户名 **已删除**:`password` 列改为**每行必填**(留空/不达标 → 该行 failed,per-row best-effort 不阻断其余),admin 自填初始口令并带外分发;所有导入用户 `must_change_password=True`,首次登录强制改密。〔**复审收口**:原"留空→系统生成随机临时密码 + 响应回显 `initial_password`"方案已撤回 —— 每人独立临时口令的分发是运维噩梦;改为 admin 填。一并删除 `generate_temp_password`(其固定 16 位长度在 `PASSWORD_MIN_LENGTH` 调高后会死循环,reviewer P2;函数删除即根除)。〕
 > - **ACC-04** bcrypt>72 字节:`hash_password`/`verify_password` 统一 `encode[:72]`;`main.py` 加全局 `ValueError→400` handler 兜底。
 > - **ACC-05** 登录时序枚举:用户不存在时也对 `DUMMY_PASSWORD_HASH` 跑一次 `verify_password` 等时。
 > - **ACC-06** token 7 天不可吊销:**接受现状**,文档化「登出=前端清 token;`pwd_v` 提供改密/重置后的全端登出;改密入口的强制要求 + 频控已显著收敛被盗 token 的可利用面」。未上 refresh token / jti 黑名单(大特性,YAGNI)。
@@ -202,10 +202,17 @@
 > **迁移(`0002_password_policy.py`,3 列 + backfill):** `must_change_password` / `password_changed_at` / `password_history`。
 > **部署 runbook(重要):**
 > - **本地 dev(SQLite)**:`create_all` 只建缺表、不改已有表 → 已有 `data/artifactflow.db` 不会自动加列。二选一:(A) 删库重建 `rm data/artifactflow.db*` + 重启 + `python scripts/create_admin.py admin`;(B) 保留数据 `alembic stamp 0001 && alembic upgrade head`(该库由 create_all 建、无 alembic_version,须先 stamp)。
-> - **内网/生产(PG/MySQL,容器部署)**:`deploy/entrypoint.sh` 在容器启动时**自动** `alembic upgrade head`(PG advisory lock 保证多副本只迁一次,详见 `docs/deployment.md`→运维参考→数据库迁移),redeploy 新镜像即自动应用 `0002`。**注意业务影响**:backfill 把存量用户全部置 `must_change_password=True` → 升级后所有用户(含持有效 token 者)下次请求被 403 引导改密(决策③),发版窗口需提前告知用户。XFF per-IP 频控需可信代理(nginx 覆写 `X-Forwarded-For`)才准。
+> - **内网/生产(PG/MySQL,容器部署)**:`deploy/entrypoint.sh` 在容器启动时**自动** `alembic upgrade head`(PG advisory lock 保证多副本只迁一次,详见 `docs/deployment.md`→运维参考→数据库迁移),redeploy 新镜像即自动应用 `0002`。**注意业务影响**:backfill 把存量用户全部置 `must_change_password=True` → 升级后所有用户(含持有效 token 者)下次请求被 403 引导改密(决策③),发版窗口需提前告知用户。per-IP 频控读 `X-Real-IP`(nginx 已覆写),backend `expose`-only 不直接暴露 → 不可伪造。
 > - **非容器 / 手工部署**:`alembic upgrade head` 后再起服务(应用层只校验 alembic_version 非空、不自动迁移,列缺会运行时崩)。
 >
 > 测试:新增 `tests/utils/test_password_policy.py` / `tests/api/test_login_rate_limit.py` / `tests/api/test_password_lifecycle.py` + 更新 `test_auth.py` / `test_user_bulk_import.py` / `test_departments.py` 等密码 fixture。后端全量 **972 passed / 28 skipped**;前端 `passwordPolicy.test.ts` + 全量 **177 passed**,`next build` 通过。
+>
+> **Reviewer 复审收口(2026-05-25,3 项):**
+> - **P1 per-IP 限流被伪造 XFF 绕过**:原 `_client_ip` 取 `X-Forwarded-For` 首段,但 nginx 用 `$proxy_add_x_forwarded_for` 是**追加**语义、首段是客户端自带的、可伪造 → 客户端每请求换个 XFF 即打不满 per-IP 计数。改为只读 `X-Real-IP`(nginx 用 `proxy_set_header X-Real-IP $remote_addr` **覆写**,且 prod/intranet 的 backend 是 `expose`-only、只经 nginx 可达 → 不可伪造),**彻底弃用 XFF**;无该头时回落 `request.client.host`。SQLite/dev(直发布端口、无 nginx)不做 per-IP 加固(dev-only)。不加配置开关、不动 nginx。新增回归测试 `test_forged_xff_does_not_bypass_ip_limit`。
+> - **P2 临时密码生成在调高 `PASSWORD_MIN_LENGTH` 后死循环**:`generate_temp_password` 固定 16 位 + `while True` 校验重试,`MIN_LENGTH>16` 时永不返回(无界循环,事件循环 wedge 同源)。随 ACC-03 改为"password 必填"该函数已无调用方 → **直接删除**,根除。
+> - **P2 前端密码策略与后端可调策略漂移**:前端把 8 位+三类硬编码并**阻断提交**,后端策略调整后会误拒/误放;管理端 `CreateUserForm` / `UserDetailForm` 还卡旧的 4 字符规则。改为**前端只提示不阻断**(仅"空/两次不一致"禁用提交),提交被拒时**原样展示后端的具体中文原因**(覆盖弱口令/键盘/不重用等前端查不了的);删掉两个管理端表单的 4 字符规则。刻意不加 `password-policy` 元信息端点(后端已返回具体原因,清晰度够)。
+>
+> 收口后:后端 **974 passed / 28 skipped**(+2 回归);前端 **177 passed** + `next build` 通过。
 
 ## ACC-01 🟡 登录无频率限制 / 锁定 — 可无限撞库
 

@@ -38,10 +38,12 @@ export default function ChangePasswordDialog({ onClose, forced = false }: Change
   const newPasswordMismatch =
     confirmPassword.length > 0 && newPassword !== confirmPassword;
 
+  // 不因本地强度判断硬阻断(后端策略 operator 可调,本地可能漂移)—— 只在
+  // 「空 / 两次不一致」时禁用;强度由后端权威校验,被拒时显示后端具体原因。
+  // policyError 仍作为输入时的即时提示展示(见下),帮用户提前发现问题。
   const canSubmit =
     currentPassword.length > 0 &&
     newPassword.length > 0 &&
-    policyError === null &&
     newPassword === confirmPassword &&
     !submitting;
 

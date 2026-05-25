@@ -611,11 +611,14 @@ export interface paths {
          *
          *     CSV header 必含 `username`；可选列 `password` / `display_name` /
          *     `dept_l1` / `dept_l2` / `dept_l3`。其他列被忽略并在 warnings 里上报。
+         *     注:`password` 列虽非 parse 阶段必填,但**每行必须有非空密码**(留空 → 该行
+         *     failed),不再「缺省 = 用户名」;admin 自己填初始口令并带外分发,所有导入
+         *     用户首次登录强制改密。
          *
          *     语义（best-effort，非原子）：
          *     - parse 阶段失败（解码 / 缺 username 列 / 行数超限）→ 400
          *     - 文件内 username 重复 → 400 + duplicate_rows 列出
-         *     - 单行业务校验失败（username 格式 / 部门 gap / 字段超长 / 默认密码过短）
+         *     - 单行业务校验失败（username 格式 / 部门 gap / 字段超长 / 密码缺失或不达标）
          *       → failed
          *     - 单行 username 已在 DB → skipped
          *     - 其余 → created（每行独立 commit；逐行成功/失败）
@@ -1277,43 +1280,6 @@ export interface components {
             conversation_count: number;
         };
         /**
-         * BulkImportCreatedUser
-         * @description 批量导入新建成功的用户。
-         *
-         *     initial_password 仅在该行**未提供** password 列、由系统生成随机临时密码时
-         *     回带,供 admin 带外分发(显式提供密码的行为 None —— admin 已知道)。所有
-         *     导入用户都置 must_change_password=True,首次登录强制改密(根治 ACC-03)。
-         */
-        BulkImportCreatedUser: {
-            /** Id */
-            id: string;
-            /** Username */
-            username: string;
-            /** Display Name */
-            display_name: string | null;
-            /** Role */
-            role: string;
-            /** Is Active */
-            is_active: boolean;
-            /** Department Id */
-            department_id: string | null;
-            /**
-             * Created At
-             * Format: date-time
-             */
-            created_at: string;
-            /**
-             * Updated At
-             * Format: date-time
-             */
-            updated_at: string;
-            /**
-             * Initial Password
-             * @description 系统生成的初始临时密码（仅未提供 password 列时回带,供分发）
-             */
-            initial_password: string | null;
-        };
-        /**
          * BulkImportFailedRow
          * @description 单行业务校验失败 — 行号 + username（可能为空）+ 原因。
          */
@@ -1343,7 +1309,7 @@ export interface components {
          */
         BulkImportResponse: {
             /** Created */
-            created: components["schemas"]["BulkImportCreatedUser"][];
+            created: components["schemas"]["UserResponse"][];
             /** Failed */
             failed: components["schemas"]["BulkImportFailedRow"][];
             /** Skipped */

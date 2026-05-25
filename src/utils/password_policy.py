@@ -21,8 +21,6 @@ CSV 批量导入、create_admin 脚本。失败抛 ValueError（带具体原因)
 from __future__ import annotations
 
 import re
-import secrets
-import string
 
 from config import config
 
@@ -118,23 +116,3 @@ def validate_password_strength(plain: str) -> None:
     for walk in _KEYBOARD_WALKS:
         if walk in lowered:
             raise ValueError("口令包含键盘相邻按键序列，易被猜测，请更换")
-
-
-# 临时密码符号集:可读、复制粘贴不易出错(避开易混淆 / shell 敏感字符)。
-_TEMP_PW_SYMBOLS = "!@#$%^&*-_=+"
-
-
-def generate_temp_password(length: int = 16) -> str:
-    """生成一个满足当前策略的随机临时密码（CSV 批量导入无显式密码时用）。
-
-    随机抽样 + 兜底校验:对随机长串而言 validate_password_strength 几乎必过,
-    极小概率不含某类时重抽 —— 保证返回值一定通过策略(策略调严也自适应)。
-    """
-    alphabet = string.ascii_letters + string.digits + _TEMP_PW_SYMBOLS
-    while True:
-        candidate = "".join(secrets.choice(alphabet) for _ in range(length))
-        try:
-            validate_password_strength(candidate)
-            return candidate
-        except ValueError:
-            continue
