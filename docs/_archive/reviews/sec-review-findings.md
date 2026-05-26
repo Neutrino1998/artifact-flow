@@ -18,7 +18,7 @@
 | 二 | grep ReDoS / 事件循环(3 项) | ✅ 已修(2026-05-24, 落 main) | ~~`fix/sec-grep-redos`~~ → main |
 | 三 | 账户与认证(6 项 + 首次强制改密) | ✅ 已修(2026-05-25, 落 main) | ~~`feat/sec-account-auth`~~ → main |
 | 四 | 部署与配置(2 项) | ✅ 已修(2026-05-26, 落 main) | ~~`chore/sec-deploy`~~ → main |
-| 五 | 前端加固(3 项) | 🟢 防御纵深 | `feat/sec-frontend-csp` |
+| 五 | 前端加固(3 项) | ✅ 已修(2026-05-26, 落 main) | ~~`feat/sec-frontend-csp`~~ → main |
 
 ---
 
@@ -306,9 +306,29 @@
 
 ---
 
-# 五、前端加固 🟢 `feat/sec-frontend-csp`
+# 五、前端加固 ✅ 已修(2026-05-26, 落 main)
 
 > LLM/artifact 生成内容**从不作为活动 HTML 渲染**(无 `rehype-raw`、无 iframe 预览、走转义文本路径),XSS 主轴已干净。本类是"万一未来出现 XSS / 恶意依赖"时的防御纵深。
+
+> **✅ 修复状态(2026-05-26,已落 main,未单独建分支):** FE-02 已修;FE-01 转「已接受风险 + CSP 补偿」;FE-03 接受。提交 `4f663cc`(CSP 地基)+ `92a43f7`(reviewer P1 + hydration 收口)。
+> 全站 Content-Security-Policy + 配套加固头(`X-Frame-Options: DENY` / `X-Content-Type-Options: nosniff` / `Referrer-Policy` / `Permissions-Policy`),作为 FE-01 的补偿控制。
+>
+> **方向定调(用户拍板,FE-01 不上 httpOnly cookie):** 生产虽同源(nginx 单门 80,`/`→前端、`/api/`→后端)使 cookie 可行,但会凭空引入 **CSRF 面**(Bearer 不自动发 → CSRF=0;cookie 自动发就需 SameSite/CSRF token)、**dev/prod 分叉**(dev 跨源须 `SameSite=None; Secure` 破本地 http 开发)、后端 `get_current_user` 兼读 cookie —— 为一个 🟢、无活跃 XSS sink 的项加这么多机制 + 新攻击面不划算。改为**接受 localStorage,以严格 CSP 收紧外带通道补偿**(评审 fallback)。token 维持 ACC-06 已接受的 7d + `pwd_v` 吊销,**不缩短 TTL**(无 refresh 会伤 UX)。
+>
+> **FE-02 关键实现:**
+> - **nonce CSP 放 Next middleware(`frontend/src/middleware.ts`)而非 nginx**:nonce 必须匹配 App Router 每次渲染的内联 bootstrap 脚本,nginx 看不到 per-request nonce → 放那里只能退到 `script-src 'unsafe-inline'`,等于白做。`script-src 'self' 'nonce-…' 'strict-dynamic'`(dev 加 `'unsafe-eval'`);`layout.tsx` 读 `x-nonce` 给内联主题脚本打 nonce + `suppressHydrationWarning`(浏览器解析后清空 nonce 属性是 CSP 防外带的预期良性 mismatch,脚本此时早已执行)。
+> - **`connect-src` 由 `frontend/src/lib/apiBase.ts` 的 `API_URL` 单一来源推导**:prod `NEXT_PUBLIC_API_URL=` 空 → 同源相对 `/api` → `'self'`;dev/跨源 → 白名单后端源 + `ws:`/`wss:`。值与 REST/SSE 客户端共用同一常量(`??` 非 `||`,保空串=同源),杜绝「CSP 漏掉客户端实际打的源 → 浏览器拦 API」漂移(见 reviewer P1)。
+> - **`img-src 'self' data: blob:` 刻意不放 `https:`**:开放 https 会重开 `<img src=attacker/?token>` 信标外带通道,直接削弱 FE-01 补偿。代价是远程 markdown 图不渲染 —— 接受(内网纯离线,LLM 内容极少依赖关键远程图)。
+> - `style-src 'self' 'unsafe-inline'`(React style 属性 + mermaid 内联 `<style>` 无法 nonce);`font-src 'self'`(字体自托管);`frame-ancestors`/`frame-src`/`object-src 'none'`、`base-uri 'none'`、`form-action 'self'`。
+>
+> **FE-03 接受**:下载 `.html` 风险在应用源外(下载后本地 `file://`),强制 `.txt` 会劣化正当下载功能,维持现状。
+>
+> **Reviewer 复审收口(2026-05-26,2 项,落 `92a43f7`):**
+> - **P1 connect-src 漏默认 API 源**:middleware 原传原始 `NEXT_PUBLIC_API_URL`,fresh clone 无 `.env.local`(值 `undefined`)时 connect-src 漏掉客户端 `?? 'http://localhost:8000'` 实际打的源 → 浏览器拦所有 REST/SSE。根因:默认值在 `api.ts`/`sse.ts` 重复、CSP 没复用 → 漂移。抽 `apiBase.API_URL` 作三方单一来源修复。
+> - **nonce hydration warning**:见上 `suppressHydrationWarning`。
+>
+> 测试:新增 `frontend/src/lib/csp.test.ts`(11 例:nonce/strict-dynamic、connect-src 各源、空串=同源、img-src 关 https、dev unsafe-eval+ws 等);前端全量 **188 passed**,`next build` 通过,live header 实测 `connect-src 'self' http://localhost:8000`。活体点击回归(登录 / SSE / mermaid 实渲 / 下载导出 / 主题)**无阻塞、无被迫放宽**任何 CSP 指令(mermaid 11 在 strict CSP 无 `unsafe-eval` 下正常渲染,与 dist 无 eval/`new Function` 的静态判断一致)。
+> **未做(按决定接受):** FE-01 httpOnly cookie(见上);FE-03 `.html` 下载加固。
 
 ## FE-01 🟡 JWT 存 localStorage — 未来任何 XSS 可窃取 token
 
