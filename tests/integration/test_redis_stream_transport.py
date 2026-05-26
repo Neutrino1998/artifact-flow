@@ -261,12 +261,21 @@ class TestOrphanKeyFix:
         exists = await redis_client.exists(stream_key)
         assert exists == 0
 
-        # After first push, stream key should exist with TTL
+        # After first push, stream key should exist with TTL set in the same
+        # pipeline as the XADD (no orphan window between XADD and EXPIRE).
         await transport.push_event(stream_id, {"type": "metadata", "data": {}})
         exists = await redis_client.exists(stream_key)
         assert exists == 1
         ttl = await redis_client.ttl(stream_key)
-        assert ttl > 0  # TTL should be set
+        # TTL set and bounded by execution_timeout (60 in fixture) — not the -1
+        # "no expiry" sentinel a missed EXPIRE would leave behind.
+        assert 0 < ttl <= 60
+
+        # A subsequent (non-first) push must NOT refresh the TTL — the stream key
+        # must not outlive the meta_key, whose TTL is set once at create_stream.
+        await transport.push_event(stream_id, {"type": "llm_chunk", "data": {}})
+        ttl2 = await redis_client.ttl(stream_key)
+        assert 0 < ttl2 <= ttl
 
 
 class TestStreamClose:

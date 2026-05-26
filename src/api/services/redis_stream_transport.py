@@ -113,18 +113,22 @@ class RedisStreamTransport:
 
         # 检查 stream key 是否已存在（首次 XADD 后需设 TTL 防孤儿 key）
         first_push = not await self._redis.exists(stream_key)
-
         # XADD with MAXLEN ~ 1000（近似修剪，性能更好）
-        entry_id = await self._redis.xadd(
-            stream_key,
-            {"type": event_type, "data": event_json},
-            maxlen=1000,
-            approximate=True,
-        )
+        fields = {"type": event_type, "data": event_json}
 
-        # 首次 XADD 后设 stream key 的 TTL（与 meta_key 对齐，跟随执行生命周期）
         if first_push:
-            await self._redis.expire(stream_key, self._execution_timeout)
+            # 首推：XADD + EXPIRE 合进一个 pipeline，消除两步之间 producer 崩溃 /
+            # 断连留下无 TTL 孤儿 stream key 的窗口。两命令同一 stream_key（同 slot），
+            # pipeline 在 standalone/Cluster 均安全。仅首推设 TTL：后续推送复用既有 TTL，
+            # 不刷新 → stream key 寿命不会超出 create 时设定的 meta_key（同 EXECUTION_TIMEOUT）。
+            pipe = self._redis.pipeline(transaction=False)
+            pipe.xadd(stream_key, fields, maxlen=1000, approximate=True)
+            pipe.expire(stream_key, self._execution_timeout)
+            entry_id = (await pipe.execute())[0]  # results in command order: [xadd_id, expire]
+        else:
+            entry_id = await self._redis.xadd(
+                stream_key, fields, maxlen=1000, approximate=True
+            )
 
         # 注入 _stream_id 到原始 event dict（供 SSE 层使用）
         event["_stream_id"] = entry_id

@@ -344,13 +344,22 @@ class RedisRuntimeStore:
         return conv_ids
 
     async def list_active_executions(self) -> Dict[str, str]:
-        """Scan lease keys + MGET values to return {conv_id: message_id}.
+        """Scan lease keys + pipelined GET to return {conv_id: message_id}.
 
-        Two-step (scan, then MGET batch) is good enough at our scale — lease
-        set is bounded by MAX_CONCURRENT_TASKS so the GET batch is tiny. A
-        lease that expires between scan and MGET drops out of the map
-        naturally (None value), which is the desired semantics ("no longer
-        active").
+        Cluster-safety: lease keys are hash-tagged by conv_id, so distinct
+        conversations land on distinct Cluster slots. A single MGET is a
+        single-slot primitive → it raises CROSSSLOT on Cluster. We instead
+        fan out per-key GETs through a non-transactional pipeline: redis-py
+        routes each GET to its owning node (Cluster splits by node;
+        standalone/Sentinel send them back-to-back), so the same code is
+        correct on every deployment form. (mget_nonatomic is rejected: it is
+        a RedisCluster-only method and would AttributeError on a standalone
+        client — see CLAUDE.md "Redis Cluster-safety".)
+
+        Two-step (scan, then GET batch) is good enough at our scale — the lease
+        set is bounded by MAX_CONCURRENT_TASKS so the batch is tiny. A lease
+        that expires between scan and GET drops out of the map naturally (None
+        value), which is the desired semantics ("no longer active").
         """
         pattern = f"{{{self._prefix}:*}}:lease"
         keys: List[str] = []
@@ -363,7 +372,10 @@ class RedisRuntimeStore:
             conv_ids.append(k[start:end])
         if not keys:
             return {}
-        values = await self._redis.mget(keys)
+        pipe = self._redis.pipeline(transaction=False)
+        for k in keys:
+            pipe.get(k)
+        values = await pipe.execute()  # results in command order
         result: Dict[str, str] = {}
         for conv_id, raw in zip(conv_ids, values):
             if raw is None:

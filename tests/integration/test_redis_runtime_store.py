@@ -102,6 +102,29 @@ class TestLease:
         assert active.get("test_conv_listB") == "msg-B"
         await store.release_lease("test_conv_listB", "msg-B")
 
+    async def test_list_active_executions_is_cluster_safe_no_mget(self, store, monkeypatch):
+        """Cluster-safety pin: must NOT issue a single cross-entity MGET.
+
+        Lease keys are hash-tagged by conv_id → distinct conversations land on
+        distinct Cluster slots, so a single MGET would raise CROSSSLOT. The impl
+        must fan out via pipelined per-key GET instead. A single-node test Redis
+        can't reproduce CROSSSLOT, so we trip a tripwire on .mget: a regression to
+        MGET fails loudly here regardless of deployment form.
+        """
+        async def _boom(*args, **kwargs):
+            raise AssertionError(
+                "list_active_executions must not call MGET (cross-slot on Cluster)"
+            )
+        monkeypatch.setattr(store._redis, "mget", _boom)
+
+        await store.try_acquire_lease("test_conv_csA", "msg-cs-A")
+        await store.try_acquire_lease("test_conv_csB", "msg-cs-B")
+        active = await store.list_active_executions()
+        assert active.get("test_conv_csA") == "msg-cs-A"
+        assert active.get("test_conv_csB") == "msg-cs-B"
+        await store.release_lease("test_conv_csA", "msg-cs-A")
+        await store.release_lease("test_conv_csB", "msg-cs-B")
+
     async def test_ttl_expiry(self, store, redis_client):
         """Lease should expire after TTL."""
         await store.try_acquire_lease("test_conv_3", "test_msg_ttl")
