@@ -31,7 +31,7 @@
 |---|---|---|---|
 | P1 | **PR-A** Redis 层 Cluster-safety + hygiene | ✅ 已修（`6a8cc93`+`7a1c3c5`） | `list_active_executions` 跨实体 `MGET` → pipeline 逐 key `GET`；`push_event` 首推 `XADD`+`EXPIRE` 改单 key Lua（review 指出 pipeline 非原子,见 A-2）；过期 fixture 实已在 `89cb419` 修掉,本 PR 补 Cluster-safe 回归断言 |
 | P1 | **PR-B** 执行生命周期状态机文档 + `TIMED_OUT` 终态 | ✅ 已修 | 模型落 `docs/architecture/execution-lifecycle.md` + CLAUDE.md 一条；`TIMED_OUT` 成一等终态，超时下沉到 engine_task 的 `asyncio.timeout`→`decide_terminal`，`run_and_push` 退回纯转发器；含 待决策项 2 的 DB `command_timeout` 兜底（PG 默认注入）。全量 998 passed |
-| P2 | **PR-C** `QUEUED`/`RUNNING` 前半场建模 | 待修 | `mark_interactive` 移到 semaphore 之后；`inject`/`cancel` gate 在 RUNNING；queued cancel 直接 `task.cancel()` |
+| P2 | **PR-C** `QUEUED`/`RUNNING` 前半场建模 | 待修 | **开篇先写跨层生命周期模型（C-0）**，再落代码：`mark_interactive` 移到 semaphore 之后；`inject`/`cancel` gate 在 RUNNING；queued cancel 直接 `task.cancel()` |
 | — | F-24 执行崩溃 reconciliation（`ORPHANED`） | **维持 defer** | 沿用 r3：只命名状态，不建 startup reconciler（best-effort 契约） |
 
 **为什么拆 3 个而不是 1～2 个**：
@@ -163,6 +163,30 @@ if pp.terminal_type == StreamEventType.TIMED_OUT.value:
 
 ## PR-C：`QUEUED`/`RUNNING` 前半场建模（P2，后续）
 
+### C-0 先把跨层生命周期模型写下来（PR-C 开篇，先于前半场代码）
+
+> **缘由**：PR-B review round-1 的 P1#1（stream TTL 绑死引擎 deadline）与 P1#2（`timed_out` 漏在 transport/router 终态集合）是**同一形状的 bug** —— 「一条跨层不变量是隐式的，于是漂移」。按 step-back 规则（同形状到第二轮 → 退到架构），PR-C 不直接写前半场代码，**先把模型落下来，前半场代码对着它实现**。模型与代码同 PR 落地，模型才不失真。
+
+把 `docs/architecture/execution-lifecycle.md`（今天是引擎/终态视角）扩成完整跨层模型：
+
+1. **一条主轴，投影到多个载体**（不是 N 个独立状态机）：
+   `SUBMITTED → QUEUED → RUNNING → POST_PROCESSING → CLOSED`，结果 ∈ `{COMPLETE, CANCELLED, TIMED_OUT, ERROR}`（在 POST_PROCESSING 裁定），崩溃逃逸 = `ORPHANED`。
+2. **四个投影**（修正最初的「三层」草图）：
+   - **DB = 持久权威**（不是状态机）：开始读 path events，结束 dump events/response/metadata/artifacts；它对一个执行的「状态」只是 `{有无终态事件 + response}`（response NULL = `ORPHANED`）。其他层向它收敛。
+   - **lease**（`conv_id` 维度，管互斥/所有权）与 **stream**（`msg_id` 维度，管传输）**拆成两台机器** —— 把它们混作「Redis 层」正是 P1#1 被藏住的原因。
+   - **engine task = 驱动器**（不是同级层）：推进其他投影（acquire lease / create stream / write DB / decide terminal）。
+   - **agent 运行细节是 RUNNING 的子状态**，在生命周期抽象之下（见 `engine.md`），不画进主轴。
+3. **跨层不变量表**（核心产物，每条注明「结构保证」还是「测试守护」）：
+   | 不变量 | 跨层绑定 | 隐式则触发 |
+   |---|---|---|
+   | stream key 存活 ≥ 引擎 deadline + post-processing | stream ↔ engine | **P1#1**（已修：`STREAM_TTL_GRACE`） |
+   | 每个执行终态也是 stream 停止事件 | DB-终态 ↔ stream/router | **P1#2**（已修：`TERMINAL_EVENT_TYPES` + `test_terminal_event_sync.py` 守护） |
+   | `Message.response` 写入 ⟺ 终态事件已落库（events-first） | engine ↔ DB | cancel 路径漂移（已修） |
+   | lease 贯穿 RUNNING+POST_PROCESSING，仅 @CLOSED 释放 | lease ↔ engine | fencing 正确性 |
+   | 当前（非 historical）段恰有一个终态 | engine ↔ DB | `ensure_terminal` 误 adopt historical |
+
+   目标：把「这里有没有 race」变成「这个 transition 碰了哪条不变量、是否被保证」。
+
 **问题**：`submit()` 一拿到 lease 就 `mark_engine_interactive`（`execution_runner.py:114`）+ `create_stream`（`:115`），但真正执行要等 `async with self._semaphore`（`:162`）。后果：
 - 还没跑的任务也能被 `/inject`（`chat.py:231`）/ `/cancel`（`chat.py:265`）当运行态处理。
 - `/cancel` 只写 cancel flag（`request_cancel`），而 flag 只在 `execute_loop` 内被 `hooks.check_cancelled` 读到——排队中的本地 task 挂在 semaphore 上，flag 没人读，**无法即时取消**。
@@ -175,7 +199,7 @@ if pp.terminal_type == StreamEventType.TIMED_OUT.value:
 | transition | 唯一 authority | 必须发生的副作用 |
 |---|---|---|
 | `SUBMITTED → QUEUED` | `runner.submit` | acquire lease；create stream meta（`pending`，短 TTL）；注册 task |
-| `QUEUED → RUNNING` | `_wrapped`（`async with semaphore` 之后）| **此处** `mark_interactive`；stream TTL 抬到 `EXECUTION_TIMEOUT`；启动 engine |
+| `QUEUED → RUNNING` | `_wrapped`（`async with semaphore` 之后）| **此处** `mark_interactive`；stream TTL 抬到 `EXECUTION_TIMEOUT + STREAM_TTL_GRACE`（**非裸 deadline** —— P1#1：key 须活过 post-processing）；启动 engine |
 | `QUEUED → CANCELLED` | cancel 路由 | 直接 `task.cancel()`（task 正挂 semaphore）；release lease；可选写 `CANCELLED` 终态 `reason="cancelled_while_queued"` |
 | `RUNNING → {COMPLETE, CANCELLED, TIMED_OUT, ERROR}` | controller `decide_terminal` | PR-B 的 dispatcher |
 | `* → CLOSED` | `_wrapped` finally | release lease；clear interactive；close stream |
@@ -184,7 +208,7 @@ if pp.terminal_type == StreamEventType.TIMED_OUT.value:
 1. `mark_engine_interactive` 从 `submit()` 移到 `_wrapped` 内 semaphore 获取之后；clear 仍走既有 `_on_engine_exit` / `cleanup`。
 2. `inject` 与 flag 式 `cancel` 改 gate 在 interactive（RUNNING）状态，而非 lease。
 3. cancel 一个 QUEUED turn：runner 暴露一个直接 `task.cancel()` 的入口（runner 持有 `self._tasks[task_id]`）；cancel 路由先判 RUNNING vs QUEUED 再分流。
-4. stream TTL：create 时给短 TTL，进 RUNNING 再 bump 到 `EXECUTION_TIMEOUT`（或干脆把 `create_stream` 推迟到 RUNNING）。
+4. stream TTL：create 时给短 TTL，进 RUNNING 再 bump 到 `EXECUTION_TIMEOUT + STREAM_TTL_GRACE`（或干脆把 `create_stream` 推迟到 RUNNING）。**注意保留 grace** —— PR-C 改的是时钟起点（submit→RUNNING），但「key 须活过 deadline 之后的 post-processing」这条不变量不变（P1#1 已在 PR-B 用 `STREAM_TTL_GRACE` 兜，PR-C 不能回退成裸 `EXECUTION_TIMEOUT`）。
 
 **范围**：`api/services/execution_runner.py`、`api/routers/chat.py`、`api/services/runtime_store.py` 接口 + `redis_runtime_store.py` + `InMemoryRuntimeStore`（可能新增「判断执行处于 QUEUED 还是 RUNNING」/「取消本地 queued task」方法）、前端（queued cancel 的 UX）、测试。
 
