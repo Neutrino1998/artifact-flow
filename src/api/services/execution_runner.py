@@ -165,19 +165,32 @@ class ExecutionRunner:
                 async with self._semaphore:
                     # QUEUED → RUNNING 边：取得并发槽位后才标记 interactive，使
                     # interactive 窗口恰好等于 RUNNING（与 _on_engine_exit 处的 clear
-                    # 对称）。inject/cancel 据此判定执行是否真正在跑（inject gate 在
-                    # 此，cancel gate 在更外层的 lease）。
-                    # best-effort：interactive 只 gate inject/cancel 这类 UX 便利，
-                    # 不是正确性不变量。标记失败（Redis 瞬断）不该让一个本可正常跑完的
-                    # turn 静默消失（违反"loud failure / 不丢 turn"）——记一条 warning
-                    # 后继续，该轮 inject/cancel 退化为 409，但引擎照常产出终态。
+                    # 对称）。inject gate 在此 interactive，cancel gate 在更外层的 lease。
+                    #
+                    # compare-and-set against lease owner：只有仍持有 conversation
+                    # lease 时才标记并启动引擎。若排队期间 lease 已过期 / 被新一轮接管
+                    # （而 heartbeat 还没来得及 fence 本 task），则**不能**启动 —— 否则会
+                    # (a) 覆盖新 owner 的 interactive key（misroute inject）、(b) 在该
+                    # 会话上跑成第二写者（破坏 lease 单写不变量）。此时 abort 退出，finally
+                    # 走 cleanup（compare-and-del 不会动到新 owner 的 key），本轮成为
+                    # ORPHANED（罕见 lease-loss race，已命名的可接受边界）。
                     try:
-                        await self.store.mark_engine_interactive(conversation_id, task_id)
+                        owns_lease = await self.store.mark_engine_interactive(conversation_id, task_id)
                     except Exception:
+                        # Redis 瞬断 → 归属未知。best-effort 放行（interactive 没标上，
+                        # 该轮 inject/cancel 退化为 409；heartbeat 若发现 lease 真丢了会
+                        # fence 掉本 task）。不因一次瞬断静默丢一个本可跑完的 turn。
                         logger.warning(
-                            f"mark_engine_interactive failed for {task_id} "
+                            f"mark_engine_interactive errored for {task_id} "
                             f"(inject/cancel will 409 this turn); continuing"
                         )
+                        owns_lease = True
+                    if not owns_lease:
+                        logger.warning(
+                            f"Task {task_id} lost its conversation lease while queued "
+                            f"(expired / taken over); aborting before run to avoid a second writer"
+                        )
+                        return
                     await coro
             except asyncio.CancelledError:
                 logger.warning(f"Task {task_id} cancelled (lease fencing or shutdown)")

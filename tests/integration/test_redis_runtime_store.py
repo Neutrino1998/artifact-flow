@@ -144,6 +144,32 @@ class TestLease:
         ttl = await redis_client.ttl(store._lease_key("test_conv_4"))
         assert ttl > 2
 
+    async def test_mark_interactive_only_when_lease_owner(self, store):
+        """mark_engine_interactive is a CAS against the lease owner (QUEUED→RUNNING).
+
+        A stale queued task that lost its lease must not overwrite the new owner's
+        interactive key — mark returns False and leaves interactive untouched.
+        """
+        conv = "test_conv_mark_owner"
+        await store.try_acquire_lease(conv, "owner-A")
+
+        # A different (stale) msg id must NOT be able to mark interactive.
+        assert await store.mark_engine_interactive(conv, "stale-B") is False
+        assert await store.get_interactive_message_id(conv) is None
+
+        # The real owner can.
+        assert await store.mark_engine_interactive(conv, "owner-A") is True
+        assert await store.get_interactive_message_id(conv) == "owner-A"
+
+        # After a takeover, the new owner marks interactive; the stale task must
+        # not be able to clobber it.
+        await store.release_lease(conv, "owner-A")
+        await store.try_acquire_lease(conv, "owner-C")
+        assert await store.mark_engine_interactive(conv, "owner-C") is True
+        assert await store.get_interactive_message_id(conv) == "owner-C"
+        assert await store.mark_engine_interactive(conv, "owner-A") is False
+        assert await store.get_interactive_message_id(conv) == "owner-C"  # stale mark didn't clobber
+
 
 class TestLeaseAtomicity:
     async def test_concurrent_acquire_no_orphan(self, store):
@@ -234,6 +260,33 @@ class TestCancel:
         assert resume_data is not None
         assert resume_data.get("approved") is False
         assert resume_data.get("reason") == "cancelled"
+
+    async def test_renew_lease_refreshes_cancel_flag(self, store, redis_client):
+        """Heartbeat must keep a pending cancel flag alive across a long QUEUED wait.
+
+        request_cancel sets the flag with EX=EXECUTION_TIMEOUT, but queue wait can
+        exceed it under saturation. renew_lease (called by the heartbeat) must
+        refresh the cancel key's TTL so the flag survives until the queued turn
+        starts and the engine reads it — otherwise the cancel is silently lost.
+        """
+        conv, msg = "test_conv_cancel_renew", "test_msg_cancel_renew"
+        await store.try_acquire_lease(conv, msg)
+        await store.request_cancel(msg)
+        # Simulate the flag nearly expiring while the turn is still queued.
+        await redis_client.expire(store._cancel_key(msg), 1)
+        # Heartbeat fires → must bump the cancel flag's TTL back up.
+        await store.renew_lease(conv, msg, ttl=store._lease_ttl)
+        ttl = await redis_client.ttl(store._cancel_key(msg))
+        assert ttl > 1, "renew_lease should have refreshed the cancel flag TTL"
+        assert await store.is_cancelled(msg) is True
+
+    async def test_renew_lease_does_not_resurrect_absent_cancel_flag(self, store, redis_client):
+        """EXPIRE on a missing key is a no-op — renew must not create a cancel flag."""
+        conv, msg = "test_conv_no_cancel", "test_msg_no_cancel"
+        await store.try_acquire_lease(conv, msg)
+        await store.renew_lease(conv, msg, ttl=store._lease_ttl)
+        assert await store.is_cancelled(msg) is False
+        assert await redis_client.exists(store._cancel_key(msg)) == 0
 
 
 class TestMessageQueue:

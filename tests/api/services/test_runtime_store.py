@@ -73,11 +73,21 @@ class TestEngineInteractive:
         store = InMemoryRuntimeStore()
         assert await store.get_interactive_message_id("conv-1") is None
 
-        await store.mark_engine_interactive("conv-1", "msg-1")
+        # mark is a CAS against the lease owner — acquire the lease first.
+        await store.try_acquire_lease("conv-1", "msg-1")
+        assert await store.mark_engine_interactive("conv-1", "msg-1") is True
         assert await store.get_interactive_message_id("conv-1") == "msg-1"
+
+    async def test_mark_rejected_when_not_lease_owner(self):
+        store = InMemoryRuntimeStore()
+        await store.try_acquire_lease("conv-1", "owner")
+        # A different message id (e.g. a stale queued turn) cannot mark interactive.
+        assert await store.mark_engine_interactive("conv-1", "stale") is False
+        assert await store.get_interactive_message_id("conv-1") is None
 
     async def test_clear(self):
         store = InMemoryRuntimeStore()
+        await store.try_acquire_lease("conv-1", "msg-1")
         await store.mark_engine_interactive("conv-1", "msg-1")
         await store.clear_engine_interactive("conv-1", "msg-1")
         assert await store.get_interactive_message_id("conv-1") is None

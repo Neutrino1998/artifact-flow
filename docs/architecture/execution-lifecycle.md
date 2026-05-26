@@ -34,8 +34,8 @@ COMPLETED | CANCELLED_BY_USER | CANCELLED_BY_SYSTEM | TIMED_OUT | FAILED | ORPHA
 | transition | 唯一 authority | 必须发生的副作用 |
 |---|---|---|
 | `SUBMITTED → QUEUED` | `runner.submit` | acquire lease（同步）；create stream meta（承载 `execution_queued` 事件）；注册 task。**不** mark_interactive |
-| `QUEUED → RUNNING` | `_wrapped`（`async with semaphore` 之后） | `mark_interactive`（best-effort：失败只记 warning，不丢 turn）；启动 engine。stream/meta key 仍按固定 TTL（`EXECUTION_TIMEOUT + STREAM_TTL_GRACE`，best-effort，见「三条正交的时间轴」） |
-| `QUEUED → CANCELLED` | cancel 路由（gate 在 lease） | 置 Redis cancel flag（**不** `task.cancel()`）；待取得 semaphore、引擎首个 `check_cancelled` 即看到 → 走协作式 CANCELLED 终态。flag 跨 worker 共享（排队 task 只在某一 worker），故跨 worker 正确；lease 到 `* → CLOSED` 才释放 |
+| `QUEUED → RUNNING` | `_wrapped`（`async with semaphore` 之后） | `mark_interactive` 是对 lease owner 的 **compare-and-set**：仍持 lease 才标记并启动 engine；排队期间 lease 已过期/被接管则 **abort**（不启动引擎，避免第二写者 + 不覆盖新 owner 的 interactive key）。Redis 瞬断（归属未知）→ best-effort 放行（不静默丢 turn），heartbeat 兜底 fence。stream/meta key 仍按固定 TTL（`EXECUTION_TIMEOUT + STREAM_TTL_GRACE`，best-effort，见「三条正交的时间轴」） |
+| `QUEUED → CANCELLED` | cancel 路由（gate 在 lease） | 置 Redis cancel flag（**不** `task.cancel()`）；待取得 semaphore、引擎首个 `check_cancelled` 即看到 → 走协作式 CANCELLED 终态。flag 跨 worker 共享（排队 task 只在某一 worker），故跨 worker 正确。**cancel flag 随 lease heartbeat 续期**（liveness 轴）——排队等待超 `EXECUTION_TIMEOUT` 也不丢，否则 flag 会先于 turn 起跑过期、cancel 被静默吞掉。lease 到 `* → CLOSED` 才释放 |
 | `RUNNING → COMPLETE` | controller `decide_terminal` | append `COMPLETE`；events 落库；`Message.response = state.response`；SSE 转发终态 |
 | `RUNNING → TIMED_OUT` | controller `decide_terminal` | append `TIMED_OUT`；events 落库；`Message.response = TIMED_OUT_RESPONSE`；SSE 转发终态。flush_all 照常跑（best-effort 保留部分 artifact） |
 | `RUNNING → CANCELLED` | controller `decide_terminal` / `ensure_terminal` / engine_task | append `CANCELLED`(+reason)；events 落库；`Message.response = CANCELLED_RESPONSE_BY_{USER,SYSTEM}` |
@@ -89,7 +89,9 @@ COMPLETED | CANCELLED_BY_USER | CANCELLED_BY_SYSTEM | TIMED_OUT | FAILED | ORPHA
 
    能同时击穿「DB per-query 超时 + app retry + lease fencing」三者的病态网络黑洞，需 socket 层 TCP keepalive —— 接受为 out-of-scope best-effort。理由：不为很少触发的基础设施卡死在应用层搭第二个 deadline authority（会重新引入「两个终态 authority」混乱）。
 
-5. **lease 存活属 liveness 轴，靠心跳续期（`_renew_loop`）、横跨 queue→run→post，与 `EXECUTION_TIMEOUT` 解耦**（见「三条正交的时间轴」）。`EXECUTION_TIMEOUT` 只决定 TIMED_OUT，不决定 lease TTL。stream key 概念上同属 liveness 轴，但**实现上保留固定 TTL 近似**（`EXECUTION_TIMEOUT + STREAM_TTL_GRACE`）作为 accepted best-effort —— 心跳续期是 deferred 非目标（理由见上「为什么不上心跳续期」）。
+5. **lease 存活属 liveness 轴，靠心跳续期（`_renew_loop`）、横跨 queue→run→post，与 `EXECUTION_TIMEOUT` 解耦**（见「三条正交的时间轴」）。`EXECUTION_TIMEOUT` 只决定 TIMED_OUT，不决定 lease TTL。**cancel flag 同属 liveness 轴**：随 lease heartbeat 一起续期（`renew_lease` 对 `{prefix:msg_id}:cancel` 做条件 `EXPIRE`），否则一个在 QUEUED 期间下发的取消会在 turn 起跑前先过期（queue wait 可超 `EXECUTION_TIMEOUT`）、被静默吞掉。stream key 概念上同属 liveness 轴，但**实现上保留固定 TTL 近似**（`EXECUTION_TIMEOUT + STREAM_TTL_GRACE`）作为 accepted best-effort —— 心跳续期是 deferred 非目标（理由见上「为什么不上心跳续期」）。
+
+6. **单写者：`QUEUED → RUNNING` 只在仍持有 lease 时发生（compare-and-set）**。`mark_interactive` 原子校验 lease owner == 本 msg_id 才标记 interactive + 启动引擎；排队期间 lease 过期/被接管则 abort，绝不在他人持有的会话上跑成第二写者、也不覆盖新 owner 的 interactive key。这把 lease 的「单对话互斥」不变量从「靠 heartbeat fence 的延迟撤销」收紧为「起跑前的前置闸」。Redis 瞬断使归属不可知时 best-effort 放行（不丢 turn），heartbeat 仍是兜底 fence。
 
 ## 测试矩阵
 

@@ -222,8 +222,9 @@ sequenceDiagram
 
 ### Cancellation
 
-- `request_cancel(msg_id)` 设置 Event 标志
-- 引擎在每次循环顶部和工具执行前调用 `check_cancelled` hook 检查
+- cancel 路由 gate 在 **lease**（横跨 QUEUED→RUNNING→post），故排队中的 turn 也可取消
+- `request_cancel(msg_id)` 设置 Event 标志（Redis flag 随 lease heartbeat 续期，见上）
+- 引擎在每次循环顶部和工具执行前调用 `check_cancelled` hook 检查；QUEUED 时无引擎在读，待取得槽位、首个检查点即看到 → 干净 CANCELLED
 - 取消时引擎 emit `cancelled` 终端事件，释放资源，lease 随后在 finally 块释放
 
 ### 消息注入
@@ -268,7 +269,7 @@ sequenceDiagram
 | `{af:conv_id}:lease` | STRING (msg_id) | `LEASE_TTL` = 90s | Conversation 持有 |
 | `{af:conv_id}:interactive` | STRING (msg_id) | `LEASE_TTL` | Engine interactive |
 | `{af:msg_id}:interrupt` | HASH | `PERM_TIMEOUT + 60` | Interrupt 状态 |
-| `{af:msg_id}:cancel` | STRING "1" | `EXECUTION_TIMEOUT` | 取消标记 |
+| `{af:msg_id}:cancel` | STRING "1" | `EXECUTION_TIMEOUT`（随 lease heartbeat 续期） | 取消标记 |
 | `{af:msg_id}:queue` | LIST | `EXECUTION_TIMEOUT` | 消息队列 |
 | `{af:msg_id}:interrupt_ch` | Pub/Sub channel | — | Interrupt 唤醒通知 |
 
@@ -277,6 +278,7 @@ sequenceDiagram
 | 脚本 | 用途 |
 |------|------|
 | `acquire-lease` | `SET NX EX` 原子获取或返回现有持有者（避免 SET NX + GET 竞态） |
+| `mark-interactive-if-owner` | 仅当 lease 仍归本 msg_id 时才 SET interactive（QUEUED→RUNNING 的 compare-and-set，防排队中丢 lease 的旧 task 覆盖新 owner / 跑成第二写者）。KEYS = lease + interactive，同 `{conv_id}` slot |
 | `compare-and-del` | 仅当 owner 匹配时 DEL（防止误释放他人持有的 lease） |
 | `compare-and-expire` | 仅当 owner 匹配时续期 |
 | `drain-all` | `LRANGE + DEL` 原子取出队列 |
@@ -299,6 +301,7 @@ Controller 启动后台任务每 `LEASE_TTL / 3 = 30s` 调用 `renew_lease()`：
 
 - InMemory 永远成功
 - Redis 通过 `compare-and-expire` 脚本：owner 不匹配返回 0 → 续租失败 → Controller 感知到"lease 被抢" → 主动终止执行
+- 同一次心跳还会续 interactive 与 **cancel flag**（`EXPIRE` 仅作用于已存在的 key）——cancel flag 属 liveness 轴，否则 QUEUED 期间下发的取消会在 turn 起跑前先过期（queue wait 可超 `EXECUTION_TIMEOUT`）、被静默吞掉
 
 这允许在 Pod 崩溃时（心跳停止）90s 内 lease 自动释放，其他实例可接管该对话的新请求。
 

@@ -49,7 +49,7 @@ class RuntimeStore(Protocol):
 
     # ── Engine interactive（inject/cancel 有效）──
 
-    async def mark_engine_interactive(self, conversation_id: str, message_id: str) -> None: ...
+    async def mark_engine_interactive(self, conversation_id: str, message_id: str) -> bool: ...
     async def clear_engine_interactive(self, conversation_id: str, message_id: str) -> None: ...
     async def get_interactive_message_id(self, conversation_id: str) -> Optional[str]: ...
 
@@ -148,8 +148,18 @@ class InMemoryRuntimeStore:
 
     # ── Engine interactive ──
 
-    async def mark_engine_interactive(self, conversation_id: str, message_id: str) -> None:
+    async def mark_engine_interactive(self, conversation_id: str, message_id: str) -> bool:
+        """Mark RUNNING only if this message still owns the conversation lease.
+
+        Returns True if marked, False if the lease was lost/taken over (runner
+        then aborts). Single process → the check is a plain dict comparison; it
+        still matters because a fenced/superseded queued task could otherwise
+        clobber a new owner's interactive key on the QUEUED→RUNNING edge.
+        """
+        if self._conversation_leases.get(conversation_id) != message_id:
+            return False
         self._engine_interactive[conversation_id] = message_id
+        return True
 
     async def clear_engine_interactive(self, conversation_id: str, message_id: str) -> None:
         """清除 engine 可交互状态。InMemory 忽略 msg_id（单进程无竞争）。"""

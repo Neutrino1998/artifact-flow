@@ -55,6 +55,20 @@ end
 return redis.call('GET', KEYS[1])
 """
 
+# mark-interactive-if-owner: 仅当 lease 仍归 ARGV[1] 时才 SET interactive。
+# QUEUED→RUNNING 边的原子 compare-and-set —— 防止「排队中丢了 lease 的旧 task
+# 取得 semaphore 后覆盖新 owner 的 interactive key」（misroute inject + 跑无 fence 旧轮）。
+# 不是 owner 返回 0 → runner 据此 abort，不启动引擎（避免第二写者）。
+# KEYS[1]=lease_key, KEYS[2]=interactive_key —— 二者都 {prefix:conv_id} hash-tag、
+# 同 slot，多 key Lua 在 Cluster 安全。ARGV[1]=msg_id, ARGV[2]=ttl
+_LUA_MARK_INTERACTIVE_IF_OWNER = """
+if redis.call('GET', KEYS[1]) == ARGV[1] then
+    redis.call('SET', KEYS[2], ARGV[1], 'EX', tonumber(ARGV[2]))
+    return 1
+end
+return 0
+"""
+
 # drain-all: LRANGE + DEL 原子取出队列
 _LUA_DRAIN_ALL = """
 local items = redis.call('LRANGE', KEYS[1], 0, -1)
@@ -110,6 +124,7 @@ class RedisRuntimeStore:
 
         # Lua scripts（register_script 对象，自动处理 NOSCRIPT 重试）
         self._script_acquire_lease = None
+        self._script_mark_interactive_if_owner = None
         self._script_compare_and_del = None
         self._script_compare_and_expire = None
         self._script_drain_all = None
@@ -122,6 +137,7 @@ class RedisRuntimeStore:
     def init_scripts(self) -> None:
         """注册所有 Lua 脚本（register_script 是同步方法，自动处理 NOSCRIPT 重试）"""
         self._script_acquire_lease = self._redis.register_script(_LUA_ACQUIRE_LEASE)
+        self._script_mark_interactive_if_owner = self._redis.register_script(_LUA_MARK_INTERACTIVE_IF_OWNER)
         self._script_compare_and_del = self._redis.register_script(_LUA_COMPARE_AND_DEL)
         self._script_compare_and_expire = self._redis.register_script(_LUA_COMPARE_AND_EXPIRE)
         self._script_drain_all = self._redis.register_script(_LUA_DRAIN_ALL)
@@ -169,9 +185,19 @@ class RedisRuntimeStore:
 
     # ── Engine interactive ──
 
-    async def mark_engine_interactive(self, conversation_id: str, message_id: str) -> None:
-        key = self._interactive_key(conversation_id)
-        await self._redis.set(key, message_id, ex=self._lease_ttl)
+    async def mark_engine_interactive(self, conversation_id: str, message_id: str) -> bool:
+        """Mark RUNNING **only if** this message still owns the conversation lease.
+
+        Atomic compare-and-set (lease owner → SET interactive). Returns True if
+        marked (still owner), False if the lease was lost/taken over while queued
+        — in which case the runner must abort instead of clobbering the new
+        owner's interactive key and running a second writer on the conversation.
+        """
+        result = await self._script_mark_interactive_if_owner(
+            keys=[self._lease_key(conversation_id), self._interactive_key(conversation_id)],
+            args=[message_id, str(self._lease_ttl)],
+        )
+        return result == 1
 
     async def clear_engine_interactive(self, conversation_id: str, message_id: str) -> None:
         key = self._interactive_key(conversation_id)
@@ -436,5 +462,14 @@ class RedisRuntimeStore:
             keys=[self._interactive_key(conversation_id)],
             args=[message_id, str(ttl_int)],
         )
+        # Refresh the cancel flag's TTL too (liveness axis — same as the lease).
+        # request_cancel sets it with EX=EXECUTION_TIMEOUT, but queue wait can
+        # exceed EXECUTION_TIMEOUT under saturation; without this refresh the flag
+        # could expire while a cancelled turn is still QUEUED → the turn would then
+        # run normally (cancel silently lost). EXPIRE on a missing key is a no-op,
+        # so this only extends a flag that actually exists; cleanup_execution stays
+        # the normal delete path at turn end. Single-key op (msg_id-tagged) — its own
+        # slot, separate from the conv_id lease keys → Cluster-safe (not multi-key).
+        await self._redis.expire(self._cancel_key(message_id), self._execution_timeout)
         # lease_result == 1 means lease key EXPIRE succeeded (we're still owner)
         return lease_result == 1

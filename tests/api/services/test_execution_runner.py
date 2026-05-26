@@ -210,13 +210,19 @@ class TestShutdown:
 
     async def test_shutdown_waits_for_active(self):
         runner = ExecutionRunner()
+        started = asyncio.Event()
         completed = asyncio.Event()
 
         async def slow_coro():
+            started.set()
             await asyncio.sleep(0.1)
             completed.set()
 
         await runner.submit("conv-1", "t1", slow_coro, user_id="u1", stream_transport=_mock_transport)
+        # Ensure the task is genuinely RUNNING (past the QUEUED→RUNNING mark) before
+        # shutting down — otherwise shutdown_cleanup clears the InMemory lease first and
+        # the not-yet-started task correctly aborts (CAS finds no lease) instead of running.
+        await started.wait()
         await runner.shutdown(timeout=5)
         assert completed.is_set()
 
@@ -329,6 +335,47 @@ class TestSubmitOrchestration:
         assert await store.get_interactive_message_id("conv-2") == "t2"
 
         b2.set()
+        await runner.shutdown(timeout=2)
+
+    async def test_queued_turn_aborts_if_lease_lost_before_running(self):
+        """排队中丢了 lease 的旧 task 取得槽位后必须 abort：不跑、不覆盖新 owner 的 interactive。"""
+        store = InMemoryRuntimeStore()
+        runner = ExecutionRunner(max_concurrent=1, store=store)
+        b1 = asyncio.Event()
+        t1_started = asyncio.Event()
+        t2_ran = asyncio.Event()
+
+        async def coro1():
+            t1_started.set()
+            await b1.wait()
+
+        async def coro2():
+            t2_ran.set()  # 绝不应运行
+
+        # t1 占住唯一槽位
+        await runner.submit("conv-1", "t1", coro1, user_id="u1", stream_transport=_mock_transport)
+        await t1_started.wait()
+
+        # t2 排在 semaphore 后面
+        await runner.submit("conv-2", "t2", coro2, user_id="u1", stream_transport=_mock_transport)
+        await asyncio.sleep(0.05)
+        assert await store.get_leased_message_id("conv-2") == "t2"
+
+        # 模拟 t2 排队期间丢了 lease：新一轮 t2-new 接管 conv-2（lease 过期 + 被抢）
+        store._conversation_leases["conv-2"] = "t2-new"
+        assert await store.mark_engine_interactive("conv-2", "t2-new") is True
+
+        # 释放槽位 → t2 取得 semaphore，但发现已不持有 lease → abort（不跑 coro、不覆盖 interactive）
+        b1.set()
+        await asyncio.sleep(0.1)
+
+        assert not t2_ran.is_set(), "丢了 lease 的旧 t2 不应运行"
+        assert await store.get_interactive_message_id("conv-2") == "t2-new", \
+            "t2 不应覆盖新 owner 的 interactive key"
+        assert "t2" not in runner._tasks, "t2 应已清理"
+        # 新 owner 的 lease 未被 t2 的 cleanup（compare-and-del）误删
+        assert await store.get_leased_message_id("conv-2") == "t2-new"
+
         await runner.shutdown(timeout=2)
 
     async def test_submit_conflict_error(self):
