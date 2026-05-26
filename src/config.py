@@ -152,6 +152,12 @@ class Settings(BaseSettings):
     DATABASE_MAX_OVERFLOW: int = 10
     DATABASE_POOL_TIMEOUT: int = 30
     DATABASE_POOL_RECYCLE: int = 300       # 缩短回收周期，加速故障检测和恢复回切
+    # PG per-语句 wall-clock(秒)。后处理不在引擎超时(EXECUTION_TIMEOUT)内 —— per-query
+    # 上界是 DB 层职责。仅 PostgreSQL(asyncpg)生效:setdefault 注入 connect_args,DSN
+    # 显式 ?command_timeout= 可覆盖,设 0 禁用。取"比最慢的合法查询还宽、远小于
+    # EXECUTION_TIMEOUT"。MySQL/TDSQL 无等价 driver 钩子(靠 server innodb_lock_wait_timeout),
+    # SQLite 无此缺口。详见 docs/architecture/execution-lifecycle.md「不变量 4」。
+    DB_COMMAND_TIMEOUT: float = 30.0
 
     # JWT 认证配置
     JWT_SECRET: str = ""

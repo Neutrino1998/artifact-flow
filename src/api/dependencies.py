@@ -88,6 +88,7 @@ async def init_globals() -> None:
         max_overflow=config.DATABASE_MAX_OVERFLOW,
         pool_timeout=config.DATABASE_POOL_TIMEOUT,
         pool_recycle=config.DATABASE_POOL_RECYCLE,
+        command_timeout=config.DB_COMMAND_TIMEOUT,
     )
     await _db_manager.initialize()
     logger.info("Database manager initialized")
