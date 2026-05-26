@@ -481,6 +481,21 @@ export function useSSE() {
           break;
         }
 
+        case StreamEventType.TIMED_OUT: {
+          // 执行超时(后端 engine_task 的 asyncio.timeout → TIMED_OUT 终态)。
+          // 终态外观复用 COMPLETE 的收尾(snapshot + endStream + refresh):气泡
+          // 文案来自刷新后的 Message.response(= TIMED_OUT_RESPONSE),无需单独标志。
+          const metrics = data?.execution_metrics;
+          if (metrics) setExecutionMetrics(metrics as import('@/types/events').ExecutionMetrics);
+          const messageId = useStreamStore.getState().messageId;
+          if (messageId) {
+            snapshotSegments(messageId);
+          }
+          endStream();
+          refreshAfterComplete(conversationId, messageId);
+          break;
+        }
+
         case StreamEventType.ERROR: {
           const errMsg = (data?.error as string) ?? 'Unknown error';
           // Push as a flow block FIRST so snapshotSegments captures it into
@@ -554,7 +569,7 @@ export function useSSE() {
                 if (controller.signal.aborted) return;
                 handleEvent(event, conversationId);
                 const t = event.type;
-                if (t === 'complete' || t === 'cancelled' || t === 'error') {
+                if (t === 'complete' || t === 'cancelled' || t === 'timed_out' || t === 'error') {
                   receivedTerminal = true;
                 }
               },
@@ -627,7 +642,7 @@ export function useSSE() {
             if (controller.signal.aborted) return;
             handleEvent(event, conversationId);
             const t = event.type;
-            if (t === 'complete' || t === 'cancelled' || t === 'error') {
+            if (t === 'complete' || t === 'cancelled' || t === 'timed_out' || t === 'error') {
               receivedTerminal = true;
             }
           },

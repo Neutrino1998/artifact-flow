@@ -88,6 +88,7 @@ def decide_terminal(pp: PostProcessState) -> None:
     s = pp.final_state
     has_error = s.get("error", False)
     is_cancelled = s.get("cancelled", False)
+    timed_out = s.get("timed_out", False)
     metrics = s.get("execution_metrics", {})
     response = s.get("response", "")
 
@@ -101,6 +102,27 @@ def decide_terminal(pp: PostProcessState) -> None:
                 "conversation_id": pp.conversation_id,
                 "message_id": pp.message_id,
                 "error": pp.flush_error,
+                "execution_metrics": metrics,
+            },
+        )
+        return
+
+    # timed_out 与 is_cancelled 是兄弟终因(都"非错误地中止执行"),互斥:超时路径
+    # (run_engine 的 except TimeoutError)只置 timed_out,协作式取消只置 cancelled。
+    # 放在 flush_error 之后保持"持久化失败即便在超时轮也以 ERROR 暴露"的既有
+    # 优先级(flush_error > 终因 > has_error > complete)。
+    if timed_out:
+        pp.terminal_type = StreamEventType.TIMED_OUT.value
+        pp.terminal_event = ExecutionEvent(
+            event_type=StreamEventType.TIMED_OUT.value,
+            agent_name=None,
+            data={
+                "success": False,
+                "timed_out": True,
+                "conversation_id": pp.conversation_id,
+                "message_id": pp.message_id,
+                # SSE data 带 response 是历史约定(前端用作 snapshot,与 CANCELLED 同构)
+                "response": config.TIMED_OUT_RESPONSE,
                 "execution_metrics": metrics,
             },
         )
@@ -166,6 +188,7 @@ def ensure_terminal(pp: PostProcessState) -> None:
         StreamEventType.COMPLETE.value,
         StreamEventType.ERROR.value,
         StreamEventType.CANCELLED.value,
+        StreamEventType.TIMED_OUT.value,
     }
     # 只看本轮(非 historical)的 events —— state["events"] 是 [historical from
     # parent turns, current turn 实时 append] 的拼接,_persist_events 只写非
@@ -224,6 +247,7 @@ def choose_response_for_terminal(pp: PostProcessState) -> str:
 
     映射:
     - COMPLETE           → state["response"](engine 的真实输出)
+    - TIMED_OUT          → TIMED_OUT_RESPONSE(基础设施事件,忽略 state.response)
     - ERROR              → state["response"] 或 "An error occurred during execution."
     - CANCELLED (coop)   → state["response"] 或 CANCELLED_RESPONSE_BY_USER
     - CANCELLED (ext)    → CANCELLED_RESPONSE_BY_SYSTEM
@@ -235,6 +259,11 @@ def choose_response_for_terminal(pp: PostProcessState) -> str:
 
     if pp.terminal_type == StreamEventType.COMPLETE.value:
         return response
+
+    if pp.terminal_type == StreamEventType.TIMED_OUT.value:
+        # 超时是基础设施事件,跟 engine 是否产出无关(与 external cancel 同理):
+        # 始终写 TIMED_OUT_RESPONSE 标记"超时中止",忽略 state.response。
+        return config.TIMED_OUT_RESPONSE
 
     if pp.terminal_type == StreamEventType.ERROR.value:
         return response or "An error occurred during execution."

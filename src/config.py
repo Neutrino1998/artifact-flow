@@ -45,6 +45,11 @@ class Settings(BaseSettings):
     # 的 reason 字段(external_cancel / external_cancel_post_processing)。
     CANCELLED_RESPONSE_BY_USER: str = "*Task cancelled by user*"
     CANCELLED_RESPONSE_BY_SYSTEM: str = "*Task cancelled by system*"
+    # 超时占位:执行超过 EXECUTION_TIMEOUT 时 Message.response 写入的显示串。
+    # 与 CANCELLED_RESPONSE_BY_* 同构 —— 前端 MessageList 用 response 非空 gate
+    # AssistantMessage 渲染,超时同样需要非空占位。operator 视角的"超时"语义走
+    # events 表的 TIMED_OUT 终态事件,不靠这个串区分。
+    TIMED_OUT_RESPONSE: str = "*Task timed out*"
     SESSION_GREP_MAX_TOTAL: int = 200       # grep_artifact session 模式总命中上限（隐藏，不暴露给模型）
     # grep_artifact 资源护栏（隐藏常量，模型不可见）。设计原则:grep 是 line-oriented 的
     # best-effort 搜索 —— 把**输入/输出 envelope** 一次性定死,envelope 内全物化才安全,

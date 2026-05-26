@@ -984,3 +984,83 @@ class TestPersistOnExternalCancel:
         # And update_response_async was NOT called — refusing to create the
         # cancel-shown-but-events-missing state
         cm.update_response_async.assert_not_called()
+
+
+# ============================================================
+# PR-B — execution timeout → TIMED_OUT terminal (single authority)
+# ============================================================
+
+
+class TestTimeoutTerminal:
+    """超时不再停在传输层(run_and_push 的裸 SSE error),而是下沉到 engine_task 的
+    asyncio.timeout → run_engine 的 except TimeoutError「带 flag 正常返回」→ 走完整
+    post-processing → decide_terminal 产出唯一的 TIMED_OUT 终态。SSE 与 DB 同源。"""
+
+    async def test_engine_timeout_produces_timed_out_terminal(self):
+        """execute_loop 超过 EXECUTION_TIMEOUT → TIMED_OUT 终态落库 + Message.response
+        = TIMED_OUT_RESPONSE + SSE 只产一条 timed_out(不是 error/cancelled/complete)。
+        正常返回路径 → flush_all 照常跑(best-effort 保留部分 artifact)。"""
+        from config import config
+
+        cm = _make_mock_conversation_manager()
+        am = _make_mock_artifact_manager()
+        er, batches = _capturing_event_repo()
+        ctrl = _make_controller(cm, er, am)
+
+        started = asyncio.Event()
+
+        async def slow_execute_loop(**kwargs):
+            # 先 append 一个本轮事件(超时后应被保留),再挂起超过 deadline
+            kwargs["state"]["events"].append(ExecutionEvent(
+                event_type=StreamEventType.LLM_COMPLETE.value,
+                agent_name="lead_agent",
+                data={"content": "partial work before timeout"},
+                is_historical=False,
+            ))
+            started.set()
+            await asyncio.sleep(60)
+            raise AssertionError("execute_loop should have been timed out")
+
+        async def consume():
+            return [event async for event in ctrl.stream_execute(
+                user_input="hi",
+                conversation_id="conv-test",
+                parent_message_id=None,
+                message_id="msg-test",
+            )]
+
+        # 把 deadline 压到很小,让 asyncio.timeout 在 slow_execute_loop 挂起时触发。
+        # 注意:这是内层 engine_task 的超时,consume 正常结束(无需手动 cancel)。
+        with patch.object(config, "EXECUTION_TIMEOUT", 0.1):
+            with patch("core.controller.execute_loop", side_effect=slow_execute_loop):
+                events = await asyncio.wait_for(consume(), timeout=5)
+
+        # events 落库一次,含本轮 LLM_COMPLETE + TIMED_OUT 终态
+        assert len(batches) == 1, f"expected 1 batch_create, got {len(batches)}"
+        batch = batches[0]
+        event_types = [e["event_type"] for e in batch]
+        assert StreamEventType.LLM_COMPLETE.value in event_types, (
+            f"pre-timeout work must survive: {event_types}"
+        )
+        timed_out = [e for e in batch if e["event_type"] == StreamEventType.TIMED_OUT.value]
+        assert len(timed_out) == 1, f"expected exactly one TIMED_OUT terminal: {event_types}"
+        assert timed_out[0]["data"]["timed_out"] is True
+        assert timed_out[0]["data"]["success"] is False
+        # 没有被误记成 CANCELLED / COMPLETE
+        assert StreamEventType.CANCELLED.value not in event_types
+        assert StreamEventType.COMPLETE.value not in event_types
+
+        # Message.response = TIMED_OUT_RESPONSE
+        cm.update_response_async.assert_called_once()
+        assert cm.update_response_async.call_args.kwargs["response"] == config.TIMED_OUT_RESPONSE
+
+        # best-effort flush 照常跑(正常返回路径,非 external-cancel 的跳过 flush 路径)
+        am.flush_all.assert_called_once()
+
+        # SSE 终态:恰一条 timed_out,无 error / cancelled
+        kinds = [e["type"] for e in events]
+        assert kinds.count(StreamEventType.TIMED_OUT.value) == 1, f"SSE kinds: {kinds}"
+        assert StreamEventType.ERROR.value not in kinds, (
+            f"超时不应再产生传输层裸 error 事件(两个 authority 的旧行为): {kinds}"
+        )
+        assert StreamEventType.CANCELLED.value not in kinds

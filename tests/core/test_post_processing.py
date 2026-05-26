@@ -88,6 +88,19 @@ class TestChooseResponseMatrix:
         )
         assert choose_response_for_terminal(pp) == config.CANCELLED_RESPONSE_BY_SYSTEM
 
+    @pytest.mark.parametrize("cancel_source", [None, "external", "cooperative"])
+    @pytest.mark.parametrize("state_response", ["", "engine had partial output before timeout"])
+    def test_timed_out_always_returns_timeout_placeholder(self, cancel_source, state_response):
+        """超时是基础设施事件:始终写 TIMED_OUT_RESPONSE,与 cancel_source / state.response 无关。
+        (adopt 路径下 cancel_source 可能为 None;无论如何都走同一占位串。)"""
+        pp = PostProcessState(
+            conversation_id="c", message_id="m",
+            final_state={"response": state_response},
+            terminal_type=StreamEventType.TIMED_OUT.value,
+            cancel_source=cancel_source,
+        )
+        assert choose_response_for_terminal(pp) == config.TIMED_OUT_RESPONSE
+
     def test_no_terminal_returns_empty(self):
         """无 terminal_type 时 fail-safe 返回空串(理论上不该被 caller 走到)。"""
         pp = PostProcessState(
@@ -149,6 +162,33 @@ class TestDecideTerminal:
         decide_terminal(pp)
         assert pp.terminal_type == StreamEventType.ERROR.value
         assert pp.terminal_event is not None
+        assert "disk full" in pp.terminal_event.data["error"]
+
+    def test_timed_out_path(self):
+        """timed_out → 一等 TIMED_OUT 终态,success=False,data 带 TIMED_OUT_RESPONSE。"""
+        pp = PostProcessState(
+            conversation_id="c", message_id="m",
+            final_state={"response": "partial", "timed_out": True,
+                         "execution_metrics": {"ms": 1800000}},
+        )
+        decide_terminal(pp)
+        assert pp.terminal_type == StreamEventType.TIMED_OUT.value
+        assert pp.terminal_event is not None
+        assert pp.terminal_event.data["success"] is False
+        assert pp.terminal_event.data["timed_out"] is True
+        assert pp.terminal_event.data["response"] == config.TIMED_OUT_RESPONSE
+        assert pp.cancel_source is None
+
+    def test_flush_error_overrides_timed_out(self):
+        """优先级 flush_error > timed_out:超时轮里 artifact 持久化失败仍以 ERROR 暴露,
+        与 flush_error > cancelled 的既有优先级一致。"""
+        pp = PostProcessState(
+            conversation_id="c", message_id="m",
+            final_state={"response": "", "timed_out": True},
+            flush_error="Artifact persistence failed: disk full",
+        )
+        decide_terminal(pp)
+        assert pp.terminal_type == StreamEventType.ERROR.value
         assert "disk full" in pp.terminal_event.data["error"]
 
 
@@ -295,6 +335,27 @@ class TestEnsureTerminal:
         assert pp.cancel_source == "external"
         # 没有新 append
         assert len(pp.final_state["events"]) == 2
+
+    def test_adopts_existing_timed_out_terminal(self):
+        """events 已有本轮 TIMED_OUT(post-processing append 后 cancel 落在 persist 前),
+        late-cancel adopt 它而非合成 CANCELLED。cancel_source 留 None,choose_response
+        对 TIMED_OUT 不依赖 cancel_source。"""
+        existing = ExecutionEvent(
+            event_type=StreamEventType.TIMED_OUT.value,
+            agent_name=None,
+            data={"success": False, "timed_out": True,
+                  "response": config.TIMED_OUT_RESPONSE},
+        )
+        pp = PostProcessState(
+            conversation_id="c", message_id="m",
+            final_state={"events": [existing]},
+        )
+        ensure_terminal(pp)
+        assert pp.terminal_appended is True
+        assert pp.terminal_type == StreamEventType.TIMED_OUT.value
+        assert pp.cancel_source is None
+        # 没有合成第二个 terminal
+        assert len(pp.final_state["events"]) == 1
 
     def test_synthesizes_external_cancelled_when_no_terminal(self):
         """events 里没 terminal → 合成 external CANCELLED 并 append。"""

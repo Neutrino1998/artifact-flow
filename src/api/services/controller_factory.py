@@ -121,36 +121,31 @@ async def run_and_push(
                 stream_closed = True
         last_flush_time = asyncio.get_event_loop().time()
 
+    # 纯转发器:不再裹 asyncio.timeout —— 超时裁判已下沉到 controller 的 engine_task
+    # (run_engine 的 asyncio.timeout(EXECUTION_TIMEOUT) → TIMED_OUT 终态),与 DB 终态
+    # 同源、经同一个 decide_terminal dispatcher 产出。这里只转发包括 TIMED_OUT 在内的
+    # 所有事件。(后处理的 wall-clock 上界由 DB 层负责,见 controller.run_engine 注释。)
     try:
-        async with asyncio.timeout(config.EXECUTION_TIMEOUT):
-            async for event in event_stream:
+        async for event in event_stream:
+            if stream_closed:
+                continue
+
+            if event.get("type") == "llm_chunk":
+                data = event.get("data", {})
+                chunk_key = "reasoning_content" if "reasoning_content" in data else "content"
+                pending_chunks[chunk_key] = event
+                now = asyncio.get_event_loop().time()
+                if now - last_flush_time >= 0.08:
+                    await flush_pending()
+            else:
+                await flush_pending()  # 非 chunk 前先 flush
                 if stream_closed:
                     continue
+                if not await stream_transport.push_event(stream_id, sanitize_error_event(event)):
+                    logger.info(f"Stream {stream_id} closed, execution continues")
+                    stream_closed = True
 
-                if event.get("type") == "llm_chunk":
-                    data = event.get("data", {})
-                    chunk_key = "reasoning_content" if "reasoning_content" in data else "content"
-                    pending_chunks[chunk_key] = event
-                    now = asyncio.get_event_loop().time()
-                    if now - last_flush_time >= 0.08:
-                        await flush_pending()
-                else:
-                    await flush_pending()  # 非 chunk 前先 flush
-                    if stream_closed:
-                        continue
-                    if not await stream_transport.push_event(stream_id, sanitize_error_event(event)):
-                        logger.info(f"Stream {stream_id} closed, execution continues")
-                        stream_closed = True
-
-            await flush_pending()  # 流结束 flush 残余
-
-    except TimeoutError:
-        logger.error(f"Execution timed out after {config.EXECUTION_TIMEOUT}s for {stream_id}")
-        await stream_transport.push_event(stream_id, sanitize_error_event({
-            "type": "error",
-            "timestamp": utc_now().isoformat(),
-            "data": {"success": False, "error": f"Execution timed out after {config.EXECUTION_TIMEOUT}s"}
-        }))
+        await flush_pending()  # 流结束 flush 残余
 
     except Exception as e:
         logger.exception(f"Error in execution: {e}")

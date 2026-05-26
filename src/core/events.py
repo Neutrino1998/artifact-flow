@@ -19,6 +19,7 @@ class StreamEventType(Enum):
     METADATA = "metadata"                # 会话元数据（conversation_id, message_id）
     COMPLETE = "complete"                # 整体完成（含 execution_metrics）
     CANCELLED = "cancelled"              # 用户主动取消执行
+    TIMED_OUT = "timed_out"              # 执行超时（EXECUTION_TIMEOUT，经 controller 既有 dispatcher 产出的一等终态）
     ERROR = "error"                      # 错误
 
     # ========== Agent 层 ==========

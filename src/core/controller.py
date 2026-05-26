@@ -195,14 +195,44 @@ class ExecutionController:
         async def run_engine():
             nonlocal final_state
             try:
-                final_state = await execute_loop(
-                    state=initial_state,
-                    agents=self.agents,
-                    tools=self.tools,
-                    hooks=self.hooks,
-                    artifact_manager=self.artifact_manager,
-                    emit=emit_to_queue,
+                # 超时裹在引擎循环外层(engine_task 自己的 deadline)—— 无界工作
+                # 的所在。超时后像协作式 cancel 一样"带 flag 正常返回",走完整
+                # post-processing → decide_terminal 产出唯一的 TIMED_OUT 终态,
+                # 而不是停在传输层当第二个 authority。Python 3.11+ 下 asyncio.timeout
+                # 只把自己 deadline 触发的取消转成 TimeoutError;外部 task.cancel()
+                # (lease fencing/shutdown)原样以 CancelledError 再抛 → 两个 except
+                # 分支天然不混淆(超时在内层 engine_task,外部 cancel 来自外层 _wrapped)。
+                # post-processing 本身不在此 deadline 内(只裹引擎):它是有界 DB 写 +
+                # 函数级重试 + late-cancel 兜底,per-query wall-clock 由 DB 层负责
+                # (PG command_timeout / MySQL server GUC,见 docs/architecture/execution-lifecycle.md)。
+                async with asyncio.timeout(config.EXECUTION_TIMEOUT):
+                    final_state = await execute_loop(
+                        state=initial_state,
+                        agents=self.agents,
+                        tools=self.tools,
+                        hooks=self.hooks,
+                        artifact_manager=self.artifact_manager,
+                        emit=emit_to_queue,
+                    )
+            except TimeoutError:
+                # 引擎执行超时。模仿协作式 cancel:置 flag 正常返回,让 post-processing
+                # 经 decide_terminal 产出 TIMED_OUT。注意只置 timed_out(不置 cancelled),
+                # 否则会落进 decide_terminal 的 is_cancelled 分支被记成 CANCELLED。
+                logger.warning(
+                    f"Engine execution timed out after {config.EXECUTION_TIMEOUT}s "
+                    f"for {message_id}; finalizing as TIMED_OUT"
                 )
+                initial_state["timed_out"] = True
+                initial_state["completed"] = True
+                # finalize_metrics 正常由 execute_loop 调;超时中断了它,这里补一次
+                # 让 execution_metrics 可序列化(datetimes → isoformat)。
+                try:
+                    finalize_metrics(initial_state["execution_metrics"])
+                except Exception as fm_err:
+                    logger.warning(
+                        f"finalize_metrics failed on timeout for {message_id}: {fm_err}"
+                    )
+                final_state = initial_state    # 正常返回 → 走完整 post-processing
             except asyncio.CancelledError:
                 # External cancel cascaded into engine_task (lease fencing / shutdown).
                 # CancelledError is BaseException — bypasses `except Exception` below — so
