@@ -1585,7 +1585,11 @@
 </code></pre></div>
 <h3 id="容错解析">容错解析</h3>
 <p><code>XMLToolCallParser</code>（<code>src/tools/xml_parser.py</code>）面对小模型常见的格式错误提供多层容错：</p>
-<p><strong>标准解析</strong> → <strong>修复后重试</strong> → <strong>正则 Fallback</strong> → <strong>错误 ToolCall</strong></p>
+<p><strong>CDATA-aware 拆分</strong> → <strong>标准解析</strong> → <strong>修复后重试</strong> → <strong>诚实错误 ToolCall</strong></p>
+<p>第一步拆分是 <strong>CDATA-aware</strong> 的：扫描 <code>&lt;/tool_call&gt;</code> 终止符时跳过 <code>&lt;![CDATA[...]]&gt;</code> 区，所以
+artifact 正文里出现字面 <code>&lt;/tool_call&gt;</code> / <code>&lt;/params&gt;</code> 不会把一个完整调用误拆。<strong>修复策略本身也
+对 CDATA 盲区免疫</strong>——结构判定（缺 <code>&lt;/params&gt;</code>、散落参数等）在「遮蔽 CDATA 的副本」上做，绝不
+把内容里的字面标签当结构。</p>
 <p>修复策略覆盖以下常见问题：</p>
 <table>
 <thead>
@@ -1621,14 +1625,14 @@
 <td>没有 params 闭合标签</td>
 <td>追加闭合标签</td>
 </tr>
-<tr>
-<td>未闭合 <code>&lt;tool_call&gt;</code></td>
-<td>末尾缺少 <code>&lt;/tool_call&gt;</code></td>
-<td>检测并解析未闭合块</td>
-</tr>
 </tbody>
 </table>
-<p>所有解析手段均失败时，返回 <code>ToolCall(name="__malformed__", error=...)</code> 而非静默忽略，确保 engine 将解析错误反馈给 agent。</p>
+<p><strong>截断（输出撞 max_tokens）单独处理</strong>：截断只可能命中输出流尾部那一个未终止的 <code>&lt;tool_call&gt;</code>，
+拆分层据此识别。尾部块若是真截断（CDATA 未闭合 / 末尾字段未闭合）→ 直接返回<strong>清晰的截断错误
+ToolCall</strong>（不再 salvage 残缺内容，因为残缺的 <code>new_str</code> 之类无法可靠应用），提示模型缩小单次输出
+或分多次写入。仅漏了 <code>&lt;/tool_call&gt;</code> 但字段都完整的尾部块，仍正常解析。</p>
+<p>所有解析手段均失败时，返回 <code>ToolCall(name="__malformed__", error=...)</code>（<strong>不</strong>用正则 fallback 去
+捏造残缺参数）而非静默忽略，确保 engine 将解析错误反馈给 agent。</p>
 <h2 id="权限模型">权限模型</h2>
 <h3 id="toolpermission-两级模型">ToolPermission 两级模型</h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="k">class</span><span class="w"> </span><span class="nc">ToolPermission</span><span class="p">(</span><span class="n">Enum</span><span class="p">):</span>
