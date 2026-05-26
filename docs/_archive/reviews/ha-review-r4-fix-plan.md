@@ -219,6 +219,16 @@ if pp.terminal_type == StreamEventType.TIMED_OUT.value:
 
 `execute_loop` 的扁平 `while not completed` 循环**完全不动**——本轮全部改动都在它外围的 controller / runner / 传输层。
 
+### PR-C 验收项（收尾必做）
+
+review round-2 结论：上述 finding **不挡 `d0b9a07`**（PR-B 的 grace 是有效 stopgap），但作为 PR-C 的**显式验收项**：
+
+1. **`EXECUTION_TIMEOUT` 只管 engine run deadline** —— 不管 queue / post-processing / stream lifetime。代码与文档都按此口径。
+2. **stream/meta key 属于 liveness，随 lease heartbeat 续期**；PR-C 完成后**删除 / 废弃 `STREAM_TTL_GRACE`** 这层近似（含 `config.py` 常量 + 传输层用法 + 相关测试）。
+3. **收尾做一次整体文档 review** —— 至少同步 `concurrency.md`、`streaming.md`、`deployment.md`、`index.md`，避免 canonical docs 互相打架（如 `streaming.md` 仍写「stream TTL = EXECUTION_TIMEOUT」之类的旧 current-state 描述）。
+
+> **关于 current-state 文档残留（刻意 deferred，非漏）**：`d0b9a07` 只更新了 `execution-lifecycle.md`（标注「目标模型 / 计划中」）+ 本 fix-plan，**未**改其他 canonical docs。若 `d0b9a07` 单独 merge，PR-C 落地前其余 current-state 文档（`streaming.md` / `concurrency.md` 等）仍是旧 TTL 模型 —— 这是**有意推迟到 PR-C 收尾统一刷新**，不是遗漏。reviewer 看到旧描述时以本条为准。
+
 ---
 
 ## 约束沉淀（随 PR-A 写入项目惯例）
