@@ -269,18 +269,66 @@ class TestShutdown:
 
 class TestSubmitOrchestration:
 
-    async def test_submit_acquires_lease_and_marks_interactive(self):
+    async def test_submit_acquires_lease_immediately_marks_interactive_when_running(self):
         store = InMemoryRuntimeStore()
         runner = ExecutionRunner(store=store)
+        started = asyncio.Event()
         blocker = asyncio.Event()
 
-        await runner.submit("conv-1", "t1", _blocking_factory(blocker), user_id="u1", stream_transport=_mock_transport)
+        async def coro():
+            started.set()
+            await blocker.wait()
 
-        # Verify lease + interactive were set
+        await runner.submit("conv-1", "t1", coro, user_id="u1", stream_transport=_mock_transport)
+
+        # lease 在 submit 内同步获取（QUEUED 起就持有）→ 立即可见
         assert await store.get_leased_message_id("conv-1") == "t1"
+
+        # interactive 标记在取得 semaphore 之后（QUEUED→RUNNING 边）→ 等 coro 真正
+        # 开始跑才可见（mark_interactive 紧挨在 `await coro` 之前）
+        await started.wait()
         assert await store.get_interactive_message_id("conv-1") == "t1"
 
         blocker.set()
+        await runner.shutdown(timeout=2)
+
+    async def test_queued_turn_marks_interactive_only_after_acquiring_slot(self):
+        """排队态与运行态分离：QUEUED = 持 lease 但未 interactive；取得槽位后才 interactive。"""
+        store = InMemoryRuntimeStore()
+        runner = ExecutionRunner(max_concurrent=1, store=store)
+        b1 = asyncio.Event()
+        b2 = asyncio.Event()
+        t1_started = asyncio.Event()
+        t2_started = asyncio.Event()
+
+        async def coro1():
+            t1_started.set()
+            await b1.wait()
+
+        async def coro2():
+            t2_started.set()
+            await b2.wait()
+
+        # t1 占住唯一槽位并运行 → RUNNING
+        await runner.submit("conv-1", "t1", coro1, user_id="u1", stream_transport=_mock_transport)
+        await t1_started.wait()
+        assert await store.get_interactive_message_id("conv-1") == "t1"
+
+        # t2 排在 semaphore 后面（不同会话 → 独立 lease）
+        await runner.submit("conv-2", "t2", coro2, user_id="u1", stream_transport=_mock_transport)
+        await asyncio.sleep(0.05)
+
+        # t2 处于 QUEUED：lease 已持有，但 interactive 未标记（引擎尚未起跑）
+        assert not t2_started.is_set()
+        assert await store.get_leased_message_id("conv-2") == "t2"
+        assert await store.get_interactive_message_id("conv-2") is None
+
+        # 释放 t1 → t2 取得槽位 → 进入 RUNNING → interactive 此时才标记
+        b1.set()
+        await t2_started.wait()
+        assert await store.get_interactive_message_id("conv-2") == "t2"
+
+        b2.set()
         await runner.shutdown(timeout=2)
 
     async def test_submit_conflict_error(self):

@@ -78,8 +78,10 @@ class ExecutionRunner:
         """
         提交一个后台任务
 
-        编排生命周期：acquire lease → mark interactive → create stream → run task.
-        失败时自动回滚 lease + interactive 状态。
+        编排生命周期：acquire lease → create stream（QUEUED）→ [semaphore] →
+        mark interactive（RUNNING 起点）→ run task。submit 阶段只持 lease + 建
+        stream（承载 execution_queued 事件），失败时回滚两者。mark_interactive
+        不在此处 —— 它标记 QUEUED→RUNNING 边，移到 _wrapped 取得 semaphore 之后。
 
         接收 coroutine factory 而非 coroutine 对象，确保 coroutine 仅在编排成功后
         才被创建，避免预调度失败路径产生未被 await 的孤儿 coroutine。
@@ -109,9 +111,11 @@ class ExecutionRunner:
                 "Use POST /chat/{conv_id}/inject to send input to the running execution."
             )
 
-        # lease 之后的所有步骤失败时必须回滚（含 coro_factory 调用）
+        # lease 之后的所有步骤失败时必须回滚（含 coro_factory 调用）。
+        # 此处只做 QUEUED 阶段的副作用：create stream（必须在 submit 建好，因为
+        # execution_queued 事件在取 semaphore 之前就推到它上面）。interactive 留到
+        # _wrapped 取得 semaphore 之后再标记，所以回滚里也不需要 clear interactive。
         try:
-            await self.store.mark_engine_interactive(conversation_id, task_id)
             await stream_transport.create_stream(
                 task_id,
                 owner_user_id=user_id,
@@ -125,7 +129,6 @@ class ExecutionRunner:
             except Exception:
                 logger.warning(f"Best-effort close_stream failed for {task_id}")
             await self.store.release_lease(conversation_id, task_id)
-            await self.store.clear_engine_interactive(conversation_id, task_id)
             raise
 
         async def _wrapped():
@@ -160,6 +163,21 @@ class ExecutionRunner:
                         },
                     })
                 async with self._semaphore:
+                    # QUEUED → RUNNING 边：取得并发槽位后才标记 interactive，使
+                    # interactive 窗口恰好等于 RUNNING（与 _on_engine_exit 处的 clear
+                    # 对称）。inject/cancel 据此判定执行是否真正在跑（inject gate 在
+                    # 此，cancel gate 在更外层的 lease）。
+                    # best-effort：interactive 只 gate inject/cancel 这类 UX 便利，
+                    # 不是正确性不变量。标记失败（Redis 瞬断）不该让一个本可正常跑完的
+                    # turn 静默消失（违反"loud failure / 不丢 turn"）——记一条 warning
+                    # 后继续，该轮 inject/cancel 退化为 409，但引擎照常产出终态。
+                    try:
+                        await self.store.mark_engine_interactive(conversation_id, task_id)
+                    except Exception:
+                        logger.warning(
+                            f"mark_engine_interactive failed for {task_id} "
+                            f"(inject/cancel will 409 this turn); continuing"
+                        )
                     await coro
             except asyncio.CancelledError:
                 logger.warning(f"Task {task_id} cancelled (lease fencing or shutdown)")

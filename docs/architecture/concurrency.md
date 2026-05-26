@@ -134,7 +134,7 @@ class RuntimeStore(Protocol):
     async def try_acquire_lease(self, conv_id, msg_id) -> Optional[str]: ...
     async def release_lease(self, conv_id, msg_id) -> None: ...
 
-    # Engine interactive — inject / cancel 的有效窗口
+    # Engine interactive — RUNNING 窗口（inject 的有效窗口；cancel 走 lease）
     async def mark_engine_interactive(self, conv_id, msg_id) -> None: ...
     async def clear_engine_interactive(self, conv_id, msg_id) -> None: ...
 
@@ -170,7 +170,10 @@ gantt
     acquire_lease      :a1, 0, 30
     post_processing    :a2, 25, 30
 
-    section Interactive
+    section Queued (满载时)
+    wait_semaphore     :q1, 0, 2
+
+    section Interactive (== RUNNING)
     mark_interactive   :b1, 2, 23
     engine_loop        :b2, 2, 23
 
@@ -179,10 +182,12 @@ gantt
     release_lease      :milestone, 30, 0
 ```
 
-- **Lease** 覆盖**整个请求生命周期**（含 post-processing、flush、终端事件推送）
-- **Interactive** 仅覆盖**引擎 loop 期间**（退出后 inject/cancel 返回 409）
+- **Lease** 覆盖**整个请求生命周期**（QUEUED 排队 + RUNNING + post-processing + 终端事件推送），仅在 `* → CLOSED` 释放。
+- **Interactive** == **RUNNING**：取得并发 semaphore 后才 `mark_engine_interactive`（QUEUED→RUNNING 边，best-effort），引擎退出即清除。submit 拿到 lease 但 semaphore 满时，turn 处于 **QUEUED**（持 lease、未 interactive）。
+- **inject** gate 在 interactive → 仅 RUNNING 放行；QUEUED 与 post-processing 均返回 409（没有正在跑的引擎来 drain 队列）。
+- **cancel** gate 在 **lease** → QUEUED + RUNNING 都能取消（协作式 flag：QUEUED 时待取得槽位、引擎首个 `check_cancelled` 即生效，跨 worker 正确）。post-processing 窗口引擎已退出，cancel 返回 200 但为良性 no-op（该轮本就在收尾）。
 
-这个分离允许 post-processing 阶段拒绝新的 inject/cancel（此时引擎已退出无法响应），但仍阻止并发 POST /chat（lease 未释放）。
+这个分离让 QUEUED/post-processing 拒绝 inject（无引擎可响应），同时 cancel 在 lease 全程可达；并发 POST /chat 始终被 lease 阻止。
 
 ### Interrupt 机制
 

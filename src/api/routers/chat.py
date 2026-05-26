@@ -246,6 +246,9 @@ async def inject_message(
     """
     await _verify_ownership(conv_id, current_user, conversation_manager)
 
+    # inject gate 在 interactive（== RUNNING：semaphore 取得后 → 引擎退出）。
+    # 还在排队（持 lease 但未 interactive）的 turn 返回 409 —— inject 的语义是
+    # "给一个正在跑的引擎追加输入"，引擎没起跑前没有消费者来 drain 这个队列。
     active_msg_id = await runner.store.get_interactive_message_id(conv_id)
     if not active_msg_id:
         raise HTTPException(status_code=409, detail="No active execution for this conversation")
@@ -280,7 +283,15 @@ async def cancel_execution(
     """
     await _verify_ownership(conv_id, current_user, conversation_manager)
 
-    active_msg_id = await runner.store.get_interactive_message_id(conv_id)
+    # cancel gate 在 lease（横跨 QUEUED→RUNNING→post），不是 interactive（仅 RUNNING）——
+    # 这样还在排队的 turn 也能被取消。取消是协作式的：只置 Redis cancel flag。
+    #   - RUNNING：引擎在下个 hooks.check_cancelled 检查点看到 flag，优雅退出。
+    #   - QUEUED：flag 共享在 Redis（排队的 asyncio.Task 只在某一个 worker 上，但 flag
+    #     跨 worker 可见），待该 turn 取得槽位、引擎首个检查点即看到 → 干净的 CANCELLED
+    #     终态（不用 task.cancel()，跨 worker 正确）。
+    #   - post-processing 窗口：引擎已退出，flag 无人读 → 良性 no-op（该轮本就在收尾）。
+    #     接受这里返回 200，而不为区分 QUEUED/POST 给 store 加判别器。
+    active_msg_id = await runner.store.get_leased_message_id(conv_id)
     if not active_msg_id:
         raise HTTPException(status_code=409, detail="No active execution for this conversation")
 

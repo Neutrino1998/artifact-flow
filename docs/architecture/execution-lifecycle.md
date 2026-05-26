@@ -8,7 +8,7 @@
 
 后半场（终态）已经是一台正确的状态机 —— `core/post_processing.py` 的 `PostProcessState` ledger + `decide_terminal()`（唯一裁判）+ `choose_response_for_terminal()`（`(terminal_type, cancel_source) → display` 的单一映射），三条 cancel 路径都汇入它。
 
-> 标注**【计划中】**的部分（前半场 `QUEUED`/`RUNNING` 建模、stream key 心跳续期）尚未落地；本文档描述目标模型，已落地部分按现状描述。
+> 前半场 `QUEUED`/`RUNNING` 建模已落地（PR-C：`mark_interactive` 移到取得 semaphore 之后；inject gate 在 RUNNING、cancel gate 在 lease）。**stream key 心跳续期是明确 deferred 的非目标** —— 保留 `STREAM_TTL_GRACE` 固定 TTL 作为 sanctioned best-effort 近似（理由见「三条正交的时间轴」与「维持 defer 的边界」）。
 
 ## 终态 taxonomy
 
@@ -33,9 +33,9 @@ COMPLETED | CANCELLED_BY_USER | CANCELLED_BY_SYSTEM | TIMED_OUT | FAILED | ORPHA
 
 | transition | 唯一 authority | 必须发生的副作用 |
 |---|---|---|
-| `SUBMITTED → QUEUED` | `runner.submit` | acquire lease；create stream meta；注册 task |
-| `QUEUED → RUNNING` | `_wrapped`（semaphore 获取之后） | 启动 engine。**【计划中】** `mark_interactive` 移到此处（当前在 `submit`）。stream key 不锚 `EXECUTION_TIMEOUT`，靠心跳续期（见「三条正交的时间轴」） |
-| `QUEUED → CANCELLED` | cancel 路由 | **【计划中】** 直接 `task.cancel()`（task 正挂 semaphore）；release lease |
+| `SUBMITTED → QUEUED` | `runner.submit` | acquire lease（同步）；create stream meta（承载 `execution_queued` 事件）；注册 task。**不** mark_interactive |
+| `QUEUED → RUNNING` | `_wrapped`（`async with semaphore` 之后） | `mark_interactive`（best-effort：失败只记 warning，不丢 turn）；启动 engine。stream/meta key 仍按固定 TTL（`EXECUTION_TIMEOUT + STREAM_TTL_GRACE`，best-effort，见「三条正交的时间轴」） |
+| `QUEUED → CANCELLED` | cancel 路由（gate 在 lease） | 置 Redis cancel flag（**不** `task.cancel()`）；待取得 semaphore、引擎首个 `check_cancelled` 即看到 → 走协作式 CANCELLED 终态。flag 跨 worker 共享（排队 task 只在某一 worker），故跨 worker 正确；lease 到 `* → CLOSED` 才释放 |
 | `RUNNING → COMPLETE` | controller `decide_terminal` | append `COMPLETE`；events 落库；`Message.response = state.response`；SSE 转发终态 |
 | `RUNNING → TIMED_OUT` | controller `decide_terminal` | append `TIMED_OUT`；events 落库；`Message.response = TIMED_OUT_RESPONSE`；SSE 转发终态。flush_all 照常跑（best-effort 保留部分 artifact） |
 | `RUNNING → CANCELLED` | controller `decide_terminal` / `ensure_terminal` / engine_task | append `CANCELLED`(+reason)；events 落库；`Message.response = CANCELLED_RESPONSE_BY_{USER,SYSTEM}` |
@@ -66,9 +66,11 @@ COMPLETED | CANCELLED_BY_USER | CANCELLED_BY_SYSTEM | TIMED_OUT | FAILED | ORPHA
 
 关键：**lease 管「任务做完没」（① 横跨 queue→run→post），timeout 管「run 跑多久」（② 只 run）** —— 两条不同的轴。lease 不因 timeout 而 fence；TIMED_OUT 时引擎正常返回、lease 持有到 post 结束才释放。② 的 `asyncio.timeout` 在 `_wrapped` 取得 semaphore **之后**才起算，所以排队时间天然不计入 `EXECUTION_TIMEOUT`。
 
-**stream key 属于 ①，不是 ②**：它的寿命该跟 lease 一样靠**心跳续期**（只要 producer 活着就续），与 `EXECUTION_TIMEOUT` 彻底解耦 —— 排队 / post-processing 再长，只要任务没 done、心跳还在续，key 就不过期；崩溃后心跳停，key 在 ~`lease_ttl` 内过期（孤儿清理有界）。静态定值盖不住 ① 的无界跨度。
+**stream key 概念上属于 ①，不是 ②**：它的寿命语义上只跟「producer 是否还活着」走，与 `EXECUTION_TIMEOUT` 解耦。但**实现上刻意保留固定 TTL 近似**（见下），不上心跳续期机器。
 
-> **现状 vs 目标**：当前 stream/meta key TTL 是创建时设定的固定值 `EXECUTION_TIMEOUT + STREAM_TTL_GRACE`（`STREAM_TTL_GRACE` 兜引擎 deadline 之后的 post-processing）—— 这是 liveness 的**近似**，对正常场景有效；极端排队 / 重度 DB 退化下仍可能丢**实时** SSE 终态（DB 终态始终正确，刷新 / 重连即恢复）。**【计划中】** 改为与 lease 共用心跳续期、删除 `STREAM_TTL_GRACE`，随前半场 `QUEUED`/`RUNNING` 建模一起落地。
+> **现状（accepted best-effort，非过渡态）**：stream/meta key TTL 是创建时设定的固定值 `EXECUTION_TIMEOUT + STREAM_TTL_GRACE`（`STREAM_TTL_GRACE` 兜引擎 deadline 之后的 post-processing）。这是 liveness 轴的**近似**：正常场景有效；唯一残余缺口是「单实例饱和（> `MAX_CONCURRENT`）时，排队等待 + 本轮 run + post 之和超过该固定 TTL」，后果**仅是丢实时 SSE 终态** —— DB 终态始终正确，刷新 / 重连即恢复。
+>
+> **为什么不上心跳续期（PR-C 决策，deferred 非目标）**：stream key 是 glance-only 的传输键（用户在它上面 glance，不 act），失败模式自愈、可恢复。把 lease↔stream 统一成心跳续期要给 `StreamTransport`（Protocol + InMemory + Redis）加 `refresh_ttl`、接进 `_renew_loop`、删 `STREAM_TTL_GRACE` —— 为很少触发、glance-only、可自愈的边缘搭强一致机器。按 step-back-on-design-creep 接受固定 TTL 近似为长期契约；若该缺口在实测中真咬人，再单独立 PR。
 
 ## 不变量
 
@@ -87,7 +89,7 @@ COMPLETED | CANCELLED_BY_USER | CANCELLED_BY_SYSTEM | TIMED_OUT | FAILED | ORPHA
 
    能同时击穿「DB per-query 超时 + app retry + lease fencing」三者的病态网络黑洞，需 socket 层 TCP keepalive —— 接受为 out-of-scope best-effort。理由：不为很少触发的基础设施卡死在应用层搭第二个 deadline authority（会重新引入「两个终态 authority」混乱）。
 
-5. **Redis key 存活属 liveness 轴，靠心跳续期，与 `EXECUTION_TIMEOUT` 解耦**（见「三条正交的时间轴」）。stream key 与 lease 共用心跳、横跨 queue→run→post；`EXECUTION_TIMEOUT` 只决定 TIMED_OUT，不决定任何 Redis key TTL。把 stream key TTL 锚在 `EXECUTION_TIMEOUT` 上是错误抽象（静态定值盖不住 liveness 的无界跨度）。**【计划中】**（当前为固定 TTL 近似，见上「现状 vs 目标」）。
+5. **lease 存活属 liveness 轴，靠心跳续期（`_renew_loop`）、横跨 queue→run→post，与 `EXECUTION_TIMEOUT` 解耦**（见「三条正交的时间轴」）。`EXECUTION_TIMEOUT` 只决定 TIMED_OUT，不决定 lease TTL。stream key 概念上同属 liveness 轴，但**实现上保留固定 TTL 近似**（`EXECUTION_TIMEOUT + STREAM_TTL_GRACE`）作为 accepted best-effort —— 心跳续期是 deferred 非目标（理由见上「为什么不上心跳续期」）。
 
 ## 测试矩阵
 
@@ -105,4 +107,5 @@ COMPLETED | CANCELLED_BY_USER | CANCELLED_BY_SYSTEM | TIMED_OUT | FAILED | ORPHA
 ## 维持 defer 的边界
 
 - **`ORPHANED` reconciliation**：系统支持**故障收敛**，不支持 in-flight turn **恢复**。崩溃后 `response=NULL` 仅命名为 `ORPHANED`，不建 startup reconciler（best-effort 契约）。
-- **前半场 `QUEUED`/`RUNNING` 建模**：`mark_interactive` 移到 semaphore 之后、queued cancel 即时生效、stream key 心跳续期等，均为 **【计划中】**；本文档已写下目标 transition 表与不变量。
+- **stream key 心跳续期**：stream key 概念上属 liveness 轴，但实现保留固定 TTL 近似（`EXECUTION_TIMEOUT + STREAM_TTL_GRACE`，accepted best-effort）。把 lease↔stream 统一成心跳续期是 deferred 非目标 —— glance-only 传输键的自愈缺口不值得跨 Protocol/InMemory/Redis 搭强一致机器（理由见「三条正交的时间轴 → 为什么不上心跳续期」）。
+- **queued turn 的即时取消**：取消一个 QUEUED turn 走协作式（置 flag，待取得槽位、引擎首检查点即看到 → 干净 CANCELLED），**不**用同 worker 的 `task.cancel()` 快路径。理由：排队 task 只在某一 worker，cancel 请求经负载均衡可能落到别的 worker → `task.cancel()` 跨 worker 本就不成立；协作式 flag 跨 worker 正确，且省掉「为排队 turn 在 runner 里合成终态」的机器。
