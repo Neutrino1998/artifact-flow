@@ -176,13 +176,18 @@ if pp.terminal_type == StreamEventType.TIMED_OUT.value:
    - **lease**（`conv_id` 维度，管互斥/所有权）与 **stream**（`msg_id` 维度，管传输）**拆成两台机器** —— 把它们混作「Redis 层」正是 P1#1 被藏住的原因。
    - **engine task = 驱动器**（不是同级层）：推进其他投影（acquire lease / create stream / write DB / decide terminal）。
    - **agent 运行细节是 RUNNING 的子状态**，在生命周期抽象之下（见 `engine.md`），不画进主轴。
-3. **跨层不变量表**（核心产物，每条注明「结构保证」还是「测试守护」）：
+3. **三条正交的时间轴**（review round-2 厘清，dissolve 掉 grace 的纠结）：
+   - **① Liveness**（lease + stream key 存在）：「还有活着的 producer 在做吗」→ 心跳续期，横跨 queue→run→post。
+   - **② Deadline（TIMED_OUT）**：「*引擎 run* 跑太久了吗」→ `asyncio.timeout(EXECUTION_TIMEOUT)` 只裹 `execute_loop`。
+   - **③ Cleanup 窗口**：结束后残余事件读取期 → `STREAM_CLEANUP_TTL`。
+   **stream key 属于 ①，不是 ②** —— 寿命该跟 lease 一样靠心跳续期，与 `EXECUTION_TIMEOUT` 彻底解耦。把它锚在 timeout 上（PR-A best-effort → P1#1 grace → review round-2 的 P2 排队/post-processing 超 grace）是反复踩同一坑：静态定值盖不住 ① 的无界跨度。这正是 lease↔stream 统一（共用一个心跳）。
+4. **跨层不变量表**（核心产物，每条注明「结构保证」还是「测试守护」）：
    | 不变量 | 跨层绑定 | 隐式则触发 |
    |---|---|---|
-   | stream key 存活 ≥ 引擎 deadline + post-processing | stream ↔ engine | **P1#1**（已修：`STREAM_TTL_GRACE`） |
+   | stream key 存活 = liveness（心跳续期，横跨 queue→run→post），与 `EXECUTION_TIMEOUT` 解耦 | stream ↔ lease | **P1#1 + round-2 P2**（PR-B `STREAM_TTL_GRACE` 是 stopgap；PR-C 挂心跳续期并删 grace） |
    | 每个执行终态也是 stream 停止事件 | DB-终态 ↔ stream/router | **P1#2**（已修：`TERMINAL_EVENT_TYPES` + `test_terminal_event_sync.py` 守护） |
    | `Message.response` 写入 ⟺ 终态事件已落库（events-first） | engine ↔ DB | cancel 路径漂移（已修） |
-   | lease 贯穿 RUNNING+POST_PROCESSING，仅 @CLOSED 释放 | lease ↔ engine | fencing 正确性 |
+   | lease 贯穿 queue→run→post，仅 @CLOSED 释放；不因 timeout 而 fence | lease ↔ engine | fencing 正确性 |
    | 当前（非 historical）段恰有一个终态 | engine ↔ DB | `ensure_terminal` 误 adopt historical |
 
    目标：把「这里有没有 race」变成「这个 transition 碰了哪条不变量、是否被保证」。
@@ -198,8 +203,8 @@ if pp.terminal_type == StreamEventType.TIMED_OUT.value:
 
 | transition | 唯一 authority | 必须发生的副作用 |
 |---|---|---|
-| `SUBMITTED → QUEUED` | `runner.submit` | acquire lease；create stream meta（`pending`，短 TTL）；注册 task |
-| `QUEUED → RUNNING` | `_wrapped`（`async with semaphore` 之后）| **此处** `mark_interactive`；stream TTL 抬到 `EXECUTION_TIMEOUT + STREAM_TTL_GRACE`（**非裸 deadline** —— P1#1：key 须活过 post-processing）；启动 engine |
+| `SUBMITTED → QUEUED` | `runner.submit` | acquire lease；create stream meta（`pending`，短 TTL，靠心跳续期）；注册 task |
+| `QUEUED → RUNNING` | `_wrapped`（`async with semaphore` 之后）| **此处** `mark_interactive`；启动 engine。stream key **不锚 `EXECUTION_TIMEOUT`**，与 lease 共用心跳续期（review round-2：liveness 轴，非 deadline 轴） |
 | `QUEUED → CANCELLED` | cancel 路由 | 直接 `task.cancel()`（task 正挂 semaphore）；release lease；可选写 `CANCELLED` 终态 `reason="cancelled_while_queued"` |
 | `RUNNING → {COMPLETE, CANCELLED, TIMED_OUT, ERROR}` | controller `decide_terminal` | PR-B 的 dispatcher |
 | `* → CLOSED` | `_wrapped` finally | release lease；clear interactive；close stream |
@@ -208,9 +213,9 @@ if pp.terminal_type == StreamEventType.TIMED_OUT.value:
 1. `mark_engine_interactive` 从 `submit()` 移到 `_wrapped` 内 semaphore 获取之后；clear 仍走既有 `_on_engine_exit` / `cleanup`。
 2. `inject` 与 flag 式 `cancel` 改 gate 在 interactive（RUNNING）状态，而非 lease。
 3. cancel 一个 QUEUED turn：runner 暴露一个直接 `task.cancel()` 的入口（runner 持有 `self._tasks[task_id]`）；cancel 路由先判 RUNNING vs QUEUED 再分流。
-4. stream TTL：create 时给短 TTL，进 RUNNING 再 bump 到 `EXECUTION_TIMEOUT + STREAM_TTL_GRACE`（或干脆把 `create_stream` 推迟到 RUNNING）。**注意保留 grace** —— PR-C 改的是时钟起点（submit→RUNNING），但「key 须活过 deadline 之后的 post-processing」这条不变量不变（P1#1 已在 PR-B 用 `STREAM_TTL_GRACE` 兜，PR-C 不能回退成裸 `EXECUTION_TIMEOUT`）。
+4. **stream key TTL 改为心跳续期**（review round-2 厘清，取代 PR-B 的 `STREAM_TTL_GRACE` stopgap）：`create_stream` 给小 TTL（≈ `lease_ttl`，够撑到下次心跳），`_renew_loop` 每跳同时续 lease + stream key TTL，结束由 `close_stream` 设 `STREAM_CLEANUP_TTL`。**删除 `STREAM_TTL_GRACE`**。理由：stream key 属 liveness 轴（只要 producer 活就续），不该锚在 `EXECUTION_TIMEOUT`（deadline 轴）—— 静态定值盖不住排队 / post-processing 的无界跨度（P1#1 + round-2 P2 的共同根因）。这就是 C-0「lease↔stream 统一」。附带：孤儿 key 清理从 ~`EXECUTION_TIMEOUT+grace` 降到 ~`lease_ttl`。
 
-**范围**：`api/services/execution_runner.py`、`api/routers/chat.py`、`api/services/runtime_store.py` 接口 + `redis_runtime_store.py` + `InMemoryRuntimeStore`（可能新增「判断执行处于 QUEUED 还是 RUNNING」/「取消本地 queued task」方法）、前端（queued cancel 的 UX）、测试。
+**范围**：`api/services/execution_runner.py`（`_renew_loop` 加 stream key 续期）、`api/services/stream_transport.py`（Protocol + InMemory）+ `redis_stream_transport.py`（新增 `refresh_ttl`，`create_stream` 改小 TTL，删 `STREAM_TTL_GRACE`）、`api/routers/chat.py`、`api/services/runtime_store.py` 接口 + `redis_runtime_store.py` + `InMemoryRuntimeStore`（可能新增「判断执行处于 QUEUED 还是 RUNNING」/「取消本地 queued task」方法）、`config.py`（删 `STREAM_TTL_GRACE`）、前端（queued cancel 的 UX）、测试。
 
 `execute_loop` 的扁平 `while not completed` 循环**完全不动**——本轮全部改动都在它外围的 controller / runner / 传输层。
 
