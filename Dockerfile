@@ -14,8 +14,12 @@ ENV PIP_NO_CACHE_DIR=1 \
 
 WORKDIR /build
 
-COPY requirements.txt .
-RUN pip install --user --no-warn-script-location -r requirements.txt
+# Install from the pinned lockfile (DEP-02), not the abstract requirements.txt,
+# so the image audited on the build host == the image deployed (no `>=` drift).
+# requirements.lock is regenerated from requirements.txt via pip-compile inside
+# this same python:3.11-slim image — see CLAUDE.md "Essential Commands".
+COPY requirements.lock .
+RUN pip install --user --no-warn-script-location -r requirements.lock
 
 # py-spy: in-container backup attach path for incident forensics. Kept out
 # of requirements.txt because it's not a runtime dep — the main process

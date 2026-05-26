@@ -17,7 +17,7 @@
 | 一 | SSRF / 外联工具(6 项) | ✅ 已修(2026-05-24, 落 main) | ~~`fix/sec-ssrf`~~ → main |
 | 二 | grep ReDoS / 事件循环(3 项) | ✅ 已修(2026-05-24, 落 main) | ~~`fix/sec-grep-redos`~~ → main |
 | 三 | 账户与认证(6 项 + 首次强制改密) | ✅ 已修(2026-05-25, 落 main) | ~~`feat/sec-account-auth`~~ → main |
-| 四 | 部署与配置(2 项) | 🟡 | `chore/sec-deploy` |
+| 四 | 部署与配置(2 项) | ✅ 已修(2026-05-26, 落 main) | ~~`chore/sec-deploy`~~ → main |
 | 五 | 前端加固(3 项) | 🟢 防御纵深 | `feat/sec-frontend-csp` |
 
 ---
@@ -274,7 +274,13 @@
 
 ---
 
-# 四、部署与配置 🟡 `chore/sec-deploy`
+# 四、部署与配置 ✅ 已修(2026-05-26, 落 main)
+
+> **✅ 修复状态(2026-05-26,已落 main,未单独建分支):** DEP-01 / DEP-02 均修复;root + `SYS_PTRACE` 维持「暂缓接受」(留待 gVisor 执行容器,见本章末「暂缓/接受」节)。
+> - **DEP-01** `validate_config()`(`src/config.py`)加 footgun 断言:`CORS_ALLOW_CREDENTIALS=True` 且 `CORS_ORIGINS` 含 `"*"` → 启动期 `RuntimeError`。默认是具体白名单(本就安全),断言只堵 **env 覆盖误配**(`ARTIFACTFLOW_CORS_ORIGINS=["*"]` → Starlette 回显 Origin → 带凭证跨源读)。**`CORS_ALLOW_HEADERS` 刻意保持 `["*"]`**:origins 断言已消除反射风险(反射只在通配 origins 时发生),收敛 headers 是纯卫生项、却会断 SSE 的 `Last-Event-ID` 跨源重连(`frontend/src/lib/sse.ts`),按 step-back-on-design-creep 不做。
+> - **DEP-02** 新增 `requirements.lock`:`pip-compile` **在 `python:3.11-slim` 容器内**生成(匹配部署解释器 3.11 + linux 平台,避免在 macOS/3.12 build host 上生成导致的环境标记漂移),82 包钉死,`pip-audit` **0 CVE**。`Dockerfile` builder 改从 lock 安装,`docker build --target builder` 实测安装干净(端到端验证,非仅解析)。`requirements.txt` 仍为人维护的抽象源;CLAUDE.md 记录「改依赖即重生成 lock」规则。**刻意不上 `--require-hashes`**:版本钉死已满足「审计版本=上线版本」核心诉求,而 google-re2 多 arch wheel + analyst-tools 离线 wheel 流会被哈希复杂化(完整性校验后续可单列)。
+>
+> 测试:新增 `tests/test_config.py`(3 例:拒绝凭证+通配组合 / 放行具体白名单 / 放行无凭证通配)。
 
 ## DEP-01 🟢 CORS 凭证 + 通配组合无护栏(当前安全,缺断言)
 

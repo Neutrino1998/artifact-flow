@@ -206,3 +206,17 @@ def validate_config() -> None:
             "ARTIFACTFLOW_JWT_SECRET environment variable is not set. "
             "Generate one with: python -c \"import secrets; print(secrets.token_urlsafe(32))\""
         )
+    # CORS footgun guard (DEP-01): with credentials enabled, Starlette reflects
+    # the request Origin whenever CORS_ORIGINS contains "*", which silently turns
+    # an env misconfig (ARTIFACTFLOW_CORS_ORIGINS='["*"]') into "any site may read
+    # authenticated responses". The default config is a concrete allowlist (safe);
+    # this assertion stops the env override from being applied silently. Wildcard
+    # origins are only ever valid with credentials disabled.
+    if config.CORS_ALLOW_CREDENTIALS and "*" in config.CORS_ORIGINS:
+        raise RuntimeError(
+            "CORS_ALLOW_CREDENTIALS=True is incompatible with a '*' entry in "
+            "CORS_ORIGINS. Starlette reflects the request Origin in this combination, "
+            "allowing any site to read authenticated responses. List explicit origins "
+            "(e.g. ARTIFACTFLOW_CORS_ORIGINS='[\"https://app.example.com\"]'), or set "
+            "ARTIFACTFLOW_CORS_ALLOW_CREDENTIALS=false if wildcard origins are truly intended."
+        )

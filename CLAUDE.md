@@ -18,6 +18,22 @@ cd frontend && npm run generate-types           # Regenerate TS types
 
 # Debug logging
 ARTIFACTFLOW_DEBUG=true
+
+# Dependency lockfile (DEP-02): requirements.txt is the abstract source of truth
+# (>= constraints); requirements.lock is the pinned set the Docker image installs.
+# RULE: any time you add / remove / bump a dependency in requirements.txt, also
+# regenerate requirements.lock — otherwise the image keeps installing the old
+# pinned versions and your new dependency is silently absent from the build.
+# Regenerate inside python:3.11-slim so the lock matches the deploy interpreter +
+# linux platform (avoids host-platform marker drift); the command below uses
+# pip-compile but the lock format is plain `pkg==ver`, no tool lock-in:
+docker run --rm -v "$PWD":/w -w /w python:3.11-slim sh -c \
+  "pip install -q pip-tools && pip-compile --quiet --no-emit-index-url \
+   --output-file=requirements.lock requirements.txt"
+# (to bump existing pins: add --upgrade for all, or --upgrade-package <name> for one)
+# Then CVE-audit the pinned set before committing:
+docker run --rm -v "$PWD":/w -w /w python:3.11-slim sh -c \
+  "pip install -q pip-audit && pip-audit -r requirements.lock"
 ```
 
 ## Architecture Decisions
