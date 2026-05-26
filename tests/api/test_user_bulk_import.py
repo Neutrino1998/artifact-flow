@@ -6,8 +6,8 @@ Covers POST /api/v1/admin/users/bulk-import:
 - Happy path: rows split into created / failed / skipped
 - Department auto-creation via resolve_department_path
 - File-internal duplicate → 400
-- Default password = username (login round-trip)
-- Username < 4 chars + empty password → failed (default too short)
+- password column is required per-row: empty/weak → that row failed (per-row best-effort)
+- all imported users must_change_password on first login
 - Department gap → failed
 - Row count over limit → 400
 - Byte size over limit → 422
@@ -55,7 +55,10 @@ class TestHappyPath:
     async def test_minimal_csv_creates_users(
         self, admin_client: AsyncClient, db_manager
     ):
-        csv = _csv_bytes("username\nalice\nbobby\ncarol\n")
+        csv = _csv_bytes(
+            "username,password\n"
+            "alice,Imp0rt#2026\nbobby,Imp0rt#2026\ncarol,Imp0rt#2026\n"
+        )
         resp = await _post_csv(admin_client, csv)
         assert resp.status_code == 200
         body = resp.json()
@@ -81,7 +84,7 @@ class TestHappyPath:
     ):
         csv = _csv_bytes(
             "username,password,display_name\n"
-            "alice,custompw,Alice Cooper\n"
+            "alice,Custompw1!,Alice Cooper\n"
         )
         resp = await _post_csv(admin_client, csv)
         assert resp.status_code == 200
@@ -93,21 +96,33 @@ class TestHappyPath:
             )).scalar_one()
             assert user.display_name == "Alice Cooper"
 
-    async def test_default_password_login_roundtrip(
+    async def test_imported_user_must_change_on_first_login(
         self, admin_client: AsyncClient, anon_client: AsyncClient
     ):
-        """Empty password → default = username; user can log in with username."""
-        csv = _csv_bytes("username\nlongenough\n")  # 10 chars > 4
+        """admin 提供初始口令导入 → 用该口令可登录,且被标记首次强制改密。"""
+        csv = _csv_bytes("username,password\nlongenough,Imp0rt#2026\n")
         resp = await _post_csv(admin_client, csv)
         assert resp.status_code == 200
         assert len(resp.json()["created"]) == 1
 
         login = await anon_client.post(
             "/api/v1/auth/login",
-            json={"username": "longenough", "password": "longenough"},
+            json={"username": "longenough", "password": "Imp0rt#2026"},
         )
         assert login.status_code == 200
         assert "access_token" in login.json()
+        assert login.json()["user"]["must_change_password"] is True
+
+    async def test_empty_password_row_fails(self, admin_client: AsyncClient):
+        """password 必填:留空 → 该行 failed(per-row best-effort,不阻断其余)。"""
+        csv = _csv_bytes("username,password\nlongenough,\nbobby,Imp0rt#2026\n")
+        resp = await _post_csv(admin_client, csv)
+        assert resp.status_code == 200
+        body = resp.json()
+        assert {u["username"] for u in body["created"]} == {"bobby"}
+        assert len(body["failed"]) == 1
+        assert body["failed"][0]["username"] == "longenough"
+        assert "password is required" in body["failed"][0]["reason"]
 
 
 # ============================================================
@@ -120,10 +135,10 @@ class TestDepartments:
         self, admin_client: AsyncClient, db_manager
     ):
         csv = _csv_bytes(
-            "username,dept_l1,dept_l2,dept_l3\n"
-            "alice,部门A,子部门A1,小组A1a\n"
-            "bobby,部门A,子部门A1,小组A1a\n"  # share leaf with alice
-            "carol,部门B,,\n"                  # root-only
+            "username,password,dept_l1,dept_l2,dept_l3\n"
+            "alice,Imp0rt#2026,部门A,子部门A1,小组A1a\n"
+            "bobby,Imp0rt#2026,部门A,子部门A1,小组A1a\n"  # share leaf with alice
+            "carol,Imp0rt#2026,部门B,,\n"                  # root-only
         )
         resp = await _post_csv(admin_client, csv)
         assert resp.status_code == 200
@@ -147,9 +162,9 @@ class TestDepartments:
 
     async def test_dept_gap_fails_row(self, admin_client: AsyncClient):
         csv = _csv_bytes(
-            "username,dept_l1,dept_l2,dept_l3\n"
-            "alice,,,小组A1a\n"     # gap: l1 empty, l3 set
-            "bobby,部门A,,小组X\n"  # gap: l2 empty, l3 set
+            "username,password,dept_l1,dept_l2,dept_l3\n"
+            "alice,Imp0rt#2026,,,小组A1a\n"     # gap: l1 empty, l3 set
+            "bobby,Imp0rt#2026,部门A,,小组X\n"  # gap: l2 empty, l3 set
         )
         resp = await _post_csv(admin_client, csv)
         assert resp.status_code == 200
@@ -168,11 +183,11 @@ class TestDepartments:
 class TestValidationFailures:
     async def test_invalid_username_fails(self, admin_client: AsyncClient):
         csv = _csv_bytes(
-            "username\n"
-            "alice\n"          # ok
-            "中文用户\n"        # non-ASCII
-            "ab cd\n"          # space
-            "valid.user_2\n"   # ok
+            "username,password\n"
+            "alice,Imp0rt#2026\n"          # ok
+            "中文用户,Imp0rt#2026\n"        # non-ASCII
+            "ab cd,Imp0rt#2026\n"          # space
+            "valid.user_2,Imp0rt#2026\n"   # ok
         )
         resp = await _post_csv(admin_client, csv)
         assert resp.status_code == 200
@@ -183,25 +198,35 @@ class TestValidationFailures:
         assert "中文用户" in failed_usernames
         assert "ab cd" in failed_usernames
 
-    async def test_short_username_with_empty_password_fails(
-        self, admin_client: AsyncClient
-    ):
-        csv = _csv_bytes("username\nab\n")  # 2 chars, default pwd would also be 2
+    async def test_too_short_username_fails(self, admin_client: AsyncClient):
+        # 1 字符用户名 < validate_username 下限(2)→ 失败(username 校验早于 password)。
+        csv = _csv_bytes("username\na\n")
         resp = await _post_csv(admin_client, csv)
         assert resp.status_code == 200
         body = resp.json()
         assert body["created"] == []
         assert len(body["failed"]) == 1
-        assert body["failed"][0]["username"] == "ab"
-        assert "password too short" in body["failed"][0]["reason"]
+        assert body["failed"][0]["username"] == "a"
+        assert "2-64" in body["failed"][0]["reason"]
 
     async def test_short_username_with_explicit_password_ok(
         self, admin_client: AsyncClient
     ):
-        csv = _csv_bytes("username,password\nab,longpass\n")
+        # 2 字符用户名合法(下限 2);显式强口令 → 创建成功
+        csv = _csv_bytes("username,password\nab,Longpass1!\n")
         resp = await _post_csv(admin_client, csv)
         assert resp.status_code == 200
         assert len(resp.json()["created"]) == 1
+
+    async def test_weak_explicit_password_fails(self, admin_client: AsyncClient):
+        # 显式但不达标的口令 → 该行 failed(策略校验)
+        csv = _csv_bytes("username,password\nalice,weakpass\n")
+        resp = await _post_csv(admin_client, csv)
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["created"] == []
+        assert len(body["failed"]) == 1
+        assert "policy" in body["failed"][0]["reason"].lower()
 
     async def test_display_name_over_length_fails(
         self, admin_client: AsyncClient
@@ -209,9 +234,9 @@ class TestValidationFailures:
         """display_name > 128 chars → failed (would otherwise crash on PG/MySQL)."""
         long_name = "x" * 200
         csv = _csv_bytes(
-            "username,display_name\n"
-            f"alice,{long_name}\n"
-            "bobby,正常名字\n"  # control: should still create
+            "username,password,display_name\n"
+            f"alice,Imp0rt#2026,{long_name}\n"
+            "bobby,Imp0rt#2026,正常名字\n"  # control: should still create
         )
         resp = await _post_csv(admin_client, csv)
         assert resp.status_code == 200
@@ -229,10 +254,10 @@ class TestValidationFailures:
         """Any dept_l* > 128 chars → failed."""
         long_dept = "y" * 200
         csv = _csv_bytes(
-            "username,dept_l1,dept_l2\n"
-            f"alice,部门A,{long_dept}\n"
-            f"bobby,{long_dept},\n"
-            "carol,部门A,子部门A1\n"  # control
+            "username,password,dept_l1,dept_l2\n"
+            f"alice,Imp0rt#2026,部门A,{long_dept}\n"
+            f"bobby,Imp0rt#2026,{long_dept},\n"
+            "carol,Imp0rt#2026,部门A,子部门A1\n"  # control
         )
         resp = await _post_csv(admin_client, csv)
         assert resp.status_code == 200
@@ -251,7 +276,7 @@ class TestValidationFailures:
         csv = _csv_bytes(
             "username,password\n"
             f"alice,{long_pw}\n"
-            "bobby,sane_pw\n"  # control
+            "bobby,Sane_pw1\n"  # control: strong + within length
         )
         resp = await _post_csv(admin_client, csv)
         assert resp.status_code == 200
@@ -272,9 +297,9 @@ class TestSkipExisting:
     ):
         # test_user has username "testuser"
         csv = _csv_bytes(
-            "username\n"
-            f"{test_user.username}\n"
-            "newuser\n"
+            "username,password\n"
+            f"{test_user.username},Imp0rt#2026\n"
+            "newuser,Imp0rt#2026\n"
         )
         resp = await _post_csv(admin_client, csv)
         assert resp.status_code == 200
@@ -351,7 +376,7 @@ class TestMisc:
     ):
         csv = _csv_bytes(
             "username,password,notes,extra\n"
-            "alice,longpass,internal note,xyz\n"
+            "alice,Longpass1!,internal note,xyz\n"
         )
         resp = await _post_csv(admin_client, csv)
         assert resp.status_code == 200
@@ -364,7 +389,7 @@ class TestMisc:
         self, admin_client: AsyncClient, db_manager
     ):
         """role / is_active are hardcoded — CSV cannot promote to admin."""
-        csv = _csv_bytes("username\nalice\n")
+        csv = _csv_bytes("username,password\nalice,Imp0rt#2026\n")
         await _post_csv(admin_client, csv)
         async with db_manager.session() as s:
             user = (await s.execute(

@@ -44,7 +44,8 @@ from api.schemas.auth import (
     BulkActionFailedItem,
     BulkImpactResponse,
 )
-from api.services.auth import TokenPayload, hash_password
+from api.services.auth import TokenPayload, apply_new_password, hash_password
+from utils.password_policy import validate_password_strength
 from core.conversation_manager import ConversationManager
 from repositories.user_repo import UserRepository
 from repositories.department_repo import DepartmentRepository
@@ -92,11 +93,12 @@ async def create_user(
     user = User(
         id=f"user-{uuid4().hex}",
         username=request.username,
-        hashed_password=hashed,
         display_name=request.display_name,
         role=request.role,
         department_id=request.department_id,
     )
+    # 管理员建号 → 首次登录强制改密(等保首次强制 + 根治 ACC-03 弱初始口令)
+    apply_new_password(user, hashed, mark_must_change=True)
     await user_repo.add(user)
 
     logger.info(f"User created: {user.username} (role={user.role})")
@@ -353,11 +355,14 @@ async def bulk_import_users(
 
     CSV header 必含 `username`；可选列 `password` / `display_name` /
     `dept_l1` / `dept_l2` / `dept_l3`。其他列被忽略并在 warnings 里上报。
+    注:`password` 列虽非 parse 阶段必填,但**每行必须有非空密码**(留空 → 该行
+    failed),不再「缺省 = 用户名」;admin 自己填初始口令并带外分发,所有导入
+    用户首次登录强制改密。
 
     语义（best-effort，非原子）：
     - parse 阶段失败（解码 / 缺 username 列 / 行数超限）→ 400
     - 文件内 username 重复 → 400 + duplicate_rows 列出
-    - 单行业务校验失败（username 格式 / 部门 gap / 字段超长 / 默认密码过短）
+    - 单行业务校验失败（username 格式 / 部门 gap / 字段超长 / 密码缺失或不达标）
       → failed
     - 单行 username 已在 DB → skipped
     - 其余 → created（每行独立 commit；逐行成功/失败）
@@ -416,7 +421,7 @@ async def bulk_import_users(
     dept_cache: dict[tuple[str, ...], Optional[str]] = {}
 
     # ---------- Phase 1: validate + dept resolve ----------
-    # 收集通过校验的行；password 此时只挑出来不 hash
+    # 收集通过校验的行；password 此时只挑出来不 hash。
     to_create: list[tuple[ParsedRow, str, Optional[str]]] = []  # (row, password, dept_id)
 
     for row in parsed.rows:
@@ -452,17 +457,24 @@ async def bulk_import_users(
             ))
             continue
 
-        # 默认密码 = username；强制最短 4 位（与 CreateUserRequest 一致）
-        password = row.password if row.password else row.username
-        if len(password) < 4:
+        # 密码(ACC-03 根治):password 列必填、逐行校验(best-effort —— 坏行进
+        # failed,不阻断其余行)。留空 → 该行 failed;显式提供 → 强度校验。所有
+        # 导入用户均置 must_change_password=True,首次登录强制改密。
+        if not row.password:
             failed.append(BulkImportFailedRow(
                 row=row.row_number, username=row.username,
-                reason=(
-                    f"password too short (min 4 chars); "
-                    f"default = username '{row.username}' has only {len(row.username)} chars"
-                ),
+                reason="password is required (column must not be empty)",
             ))
             continue
+        try:
+            validate_password_strength(row.password)
+        except ValueError as e:
+            failed.append(BulkImportFailedRow(
+                row=row.row_number, username=row.username,
+                reason=f"password does not meet policy: {e}",
+            ))
+            continue
+        password = row.password
 
         # 部门路径：gap 校验 + cache + resolve
         try:
@@ -501,11 +513,12 @@ async def bulk_import_users(
         new_user = User(
             id=f"user-{uuid4().hex}",
             username=row.username,
-            hashed_password=hashed,
             display_name=row.display_name or None,
             role="user",
             department_id=dept_id,
         )
+        # 导入用户 → 首次登录强制改密(等保 + ACC-03)
+        apply_new_password(new_user, hashed, mark_must_change=True)
         try:
             await user_repo.add(new_user)
         except IntegrityError:
@@ -625,9 +638,9 @@ async def update_user(
                 status_code=403,
                 detail="Use POST /auth/me/password to change your own password",
             )
-        user.hashed_password = await asyncio.to_thread(hash_password, request.password)
-        # admin 重置密码同样吊销该用户的旧 token
-        user.password_version = (user.password_version or 0) + 1
+        new_hash = await asyncio.to_thread(hash_password, request.password)
+        # admin 重置 → 用户首次登录强制改密 + 吊销旧 token(pwd_v++)+ 旧 hash 进历史
+        apply_new_password(user, new_hash, mark_must_change=True)
     if request.role is not None:
         if request.role not in ("admin", "user"):
             raise HTTPException(status_code=400, detail="Role must be 'admin' or 'user'")

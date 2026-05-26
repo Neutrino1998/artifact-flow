@@ -12,6 +12,10 @@ import {
 } from '@/lib/styles';
 import DepartmentCascader from '@/components/forms/DepartmentCascader';
 import PanelShell from '@/components/layout/PanelShell';
+import {
+  PASSWORD_POLICY_HINT,
+  validatePasswordStrength,
+} from '@/lib/passwordPolicy';
 
 const ROLE_OPTIONS = [
   { value: 'user', label: 'user' },
@@ -30,9 +34,12 @@ export default function CreateUserForm() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // 强度不在前端硬阻断(后端策略可调,以免漂移导致误拒)—— 只要求非空,
+  // 后端权威校验,被拒时显示后端具体原因。policyError 仅作即时提示。
+  const policyError = password ? validatePasswordStrength(password) : null;
   const canSubmit =
     username.trim().length >= 2 &&
-    password.length >= 4 &&
+    password.length > 0 &&
     !submitting;
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -134,9 +141,16 @@ export default function CreateUserForm() {
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             disabled={submitting}
-            placeholder="至少 4 个字符"
+            placeholder={PASSWORD_POLICY_HINT}
             className={INPUT_ON_PANEL}
           />
+          {policyError ? (
+            <p className="text-status-error text-xs mt-1">{policyError}</p>
+          ) : (
+            <p className="text-text-tertiary dark:text-text-tertiary-dark text-xs mt-1">
+              {PASSWORD_POLICY_HINT}；用户首次登录将被要求改密
+            </p>
+          )}
         </div>
 
         <div>

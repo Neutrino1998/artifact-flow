@@ -40,6 +40,32 @@ class TestLogin:
         )
         assert resp.status_code == 401
 
+    async def test_unknown_username_still_runs_bcrypt(
+        self, anon_client: AsyncClient, monkeypatch
+    ):
+        """ACC-05: 用户不存在也对固定假 hash 跑一次 verify_password(等时防枚举)。
+
+        不做脆弱的墙钟断言 —— 用 spy 直接验证「verify_password 被调用一次,
+        且 hash 参数 = DUMMY_PASSWORD_HASH」即证明两分支都过 bcrypt。
+        """
+        import api.routers.auth as auth_router
+
+        calls: list[str] = []
+        real = auth_router.verify_password
+
+        def _spy(plain: str, hashed: str) -> bool:
+            calls.append(hashed)
+            return real(plain, hashed)
+
+        monkeypatch.setattr(auth_router, "verify_password", _spy)
+
+        resp = await anon_client.post(
+            "/api/v1/auth/login",
+            json={"username": "no-such-user-xyz", "password": "whatever1!"},
+        )
+        assert resp.status_code == 401
+        assert calls == [auth_router.DUMMY_PASSWORD_HASH]
+
     async def test_login_inactive_user(
         self,
         admin_client: AsyncClient,
@@ -90,7 +116,7 @@ class TestAdminCRUD:
             "/api/v1/admin/users",
             json={
                 "username": f"newuser-{uuid.uuid4().hex[:8]}",
-                "password": "newpass1234",
+                "password": "Newpass1234!",
                 "role": "user",
             },
         )
@@ -106,7 +132,7 @@ class TestAdminCRUD:
             "/api/v1/admin/users",
             json={
                 "username": test_user.username,
-                "password": "somepass1234",
+                "password": "Somepass1234!",
                 "role": "user",
             },
         )
@@ -139,7 +165,7 @@ class TestAdminCRUD:
             "/api/v1/admin/users",
             json={
                 "username": f"badrole-{uuid.uuid4().hex[:8]}",
-                "password": "pass1234",
+                "password": "Pass1234!",
                 "role": "superuser",
             },
         )
@@ -264,14 +290,14 @@ class TestChangeMyPassword:
     ):
         resp = await client.post(
             "/api/v1/auth/me/password",
-            json={"current_password": "testpass", "new_password": "newpass1234"},
+            json={"current_password": "testpass", "new_password": "Newpass1234!"},
         )
         assert resp.status_code == 204
 
         # New password works
         ok = await anon_client.post(
             "/api/v1/auth/login",
-            json={"username": "testuser", "password": "newpass1234"},
+            json={"username": "testuser", "password": "Newpass1234!"},
         )
         assert ok.status_code == 200
 
@@ -285,7 +311,7 @@ class TestChangeMyPassword:
     async def test_wrong_current_password(self, client: AsyncClient, test_user: User):
         resp = await client.post(
             "/api/v1/auth/me/password",
-            json={"current_password": "wrongpass", "new_password": "newpass1234"},
+            json={"current_password": "wrongpass", "new_password": "Newpass1234!"},
         )
         assert resp.status_code == 400
         assert "current password" in resp.json()["detail"].lower()
@@ -318,7 +344,7 @@ class TestChangeMyPassword:
         # Change password
         resp = await client.post(
             "/api/v1/auth/me/password",
-            json={"current_password": "testpass", "new_password": "newpass1234"},
+            json={"current_password": "testpass", "new_password": "Newpass1234!"},
         )
         assert resp.status_code == 204
 
@@ -338,12 +364,36 @@ class TestChangeMyPassword:
 
         resp = await admin_client.put(
             f"/api/v1/admin/users/{test_user.id}",
-            json={"password": "newadminreset"},
+            json={"password": "Reset1234!"},
         )
         assert resp.status_code == 200
 
         stale = await client.get("/api/v1/auth/me")
         assert stale.status_code == 401
+
+
+class TestLongPasswordBcrypt:
+    """ACC-04: >72 字节口令不应 500（bcrypt 5.0 会抛 ValueError;我们截到 72 字节
+    + 全局 handler 兜底）。多字节口令在 72 字节边界被切断不影响 bcrypt。"""
+
+    async def test_create_and_login_with_long_multibyte_password(
+        self, admin_client: AsyncClient, anon_client: AsyncClient
+    ):
+        uname = f"longpw-{uuid.uuid4().hex[:8]}"
+        long_pw = "Aa1!" + "中" * 30  # 94 字节 / 34 字符,强度达标且超 72 字节
+
+        resp = await admin_client.post(
+            "/api/v1/admin/users",
+            json={"username": uname, "password": long_pw, "role": "user"},
+        )
+        assert resp.status_code == 200  # 不是 500
+
+        # 完整明文登录成功(hash 与 verify 用同样的 72 字节截断)
+        ok = await anon_client.post(
+            "/api/v1/auth/login",
+            json={"username": uname, "password": long_pw},
+        )
+        assert ok.status_code == 200
 
 
 class TestUsernameValidation:
@@ -372,7 +422,7 @@ class TestUsernameValidation:
     async def test_create_user_accepts_special_chars(self, admin_client: AsyncClient):
         resp = await admin_client.post(
             "/api/v1/admin/users",
-            json={"username": "a.b_c-d", "password": "pass1234", "role": "user"},
+            json={"username": "a.b_c-d", "password": "Pass1234!", "role": "user"},
         )
         assert resp.status_code == 200
         assert resp.json()["username"] == "a.b_c-d"

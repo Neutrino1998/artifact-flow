@@ -48,7 +48,7 @@ from api.services.controller_factory import create_controller, run_and_push, san
 from api.services.stream_transport import StreamTransport
 from api.services.execution_runner import ConflictError, ExecutionRunner
 from api.services.runtime_store import InjectQueueFull
-from api.routers.artifacts import convert_and_create_artifact
+from api.routers.artifacts import convert_uploaded_file, create_artifact_from_converted
 from core.conversation_manager import ConversationManager
 from tools.builtin.artifact_ops import ArtifactManager
 from repositories.base import NotFoundError
@@ -113,22 +113,40 @@ async def send_message(
     message_id = f"msg-{uuid4().hex}"
     user_id = current_user.user_id
 
-    # 已有会话：校验归属
+    # 已有会话：校验归属（只读检查，尽早拒绝；不在此创建任何行）
     if request.conversation_id:
         await _verify_ownership(conversation_id, current_user, conversation_manager)
+
+    # 附件处理分两相，核心是「先全部校验/转换，再落库」：
+    #   相一 convert_uploaded_file —— 纯转换（bytes → 文本），不碰 DB。任一附件
+    #     格式不支持 / 无法解码 / 转换失败 → 在此抛 422/500，此时 conversation 行
+    #     与 artifact 都尚未创建，批次「全有或全无」，不会留下幽灵空对话或孤儿
+    #     artifact（旧实现按文件 convert+commit 交错，坏文件之前已 commit 的会漏出）。
+    #   相二 ensure_conversation_exists + create_artifact_from_converted —— 全部
+    #     转换通过后才建会话并逐个落库；artifact 落库要求 conversation 已存在
+    #     （FK: artifact_session → conversation），故 ensure 放相二开头。
+    # 原子性边界：只保证「转换阶段全有或全无」，不覆盖提交之后的 submit 阶段。残留
+    # 窗口均罕见，按 best-effort 处理（不做补偿清理）：
+    #   - submit 抛 409（会话已有活跃执行——仅已存在会话可能，新会话是全新 uuid 不会
+    #     冲突；且前端 streaming 时走 /inject，正常不触发）或 create_stream 等基础
+    #     设施 500：本次已 commit 的 artifact 会留下，新建会话还会多留一条空会话。
+    #   - artifact 符合既有 "artifact 可无 event 支撑" 取舍，下一轮 inventory 拾起；
+    #     空会话仅是侧栏里一条无消息记录。前端失败后保留 staged files，重试会因 id
+    #     去重生成 _N 副本——已知且接受。
+    #   - 不引入 delete_artifact / 提交前抢 lease：那是为前端已规避的竞态写强一致机器，
+    #     不划算（见 CLAUDE.md 事务所有权取舍）。
+    converted = [
+        await convert_uploaded_file(f)
+        for f in files
+        if f.filename  # 空 file part（前端无附件时不应出现，防御性跳过）
+    ]
 
     # 确保 conversation 存在（失败需返回 HTTP 错误，保留在路由层）
     await conversation_manager.ensure_conversation_exists(conversation_id, user_id=user_id)
 
-    # 附件 → artifact：在 submit 前同步处理，文件错误直接返回 HTTP 422/500，且保证
-    # artifact 在本轮首次 _build_context 之前已 commit 进 inventory。上传成功后若
-    # submit 抛 409 会留下孤儿 artifact —— 罕见（前端 streaming 时走 inject 而非
-    # /chat）且无害（下一轮 inventory 拾起），符合既有 "artifact 可无 event 支撑" 取舍。
     uploaded_artifacts: List[dict] = []
-    for f in files:
-        if not f.filename:
-            continue  # 空 file part（前端无附件时不应出现，防御性跳过）
-        info = await convert_and_create_artifact(artifact_manager, conversation_id, f)
+    for c in converted:
+        info = await create_artifact_from_converted(artifact_manager, conversation_id, c)
         uploaded_artifacts.append({"id": info["id"], "filename": info["original_filename"]})
 
     # 设置请求上下文

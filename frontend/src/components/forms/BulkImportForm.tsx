@@ -15,9 +15,9 @@ type Stage =
 
 const TEMPLATE_HEADER = 'username,password,display_name,dept_l1,dept_l2,dept_l3';
 const TEMPLATE_SAMPLE =
-  'alice,,Alice Cooper,部门A,子部门A1,小组A1a\n' +
-  'bobby,custompw,,部门A,子部门A1,\n' +
-  'carol,,Carol,部门B,,';
+  'alice,Alice#2026,Alice Cooper,部门A,子部门A1,小组A1a\n' +
+  'bobby,Bobby#2026,,部门A,子部门A1,\n' +
+  'carol,Carol#2026,Carol,部门B,,';
 
 function downloadCsv(filename: string, content: string) {
   // Excel 中文环境识别 UTF-8 BOM 为 UTF-8；不带 BOM 会被当 GBK 乱码
@@ -152,7 +152,7 @@ export default function BulkImportForm() {
               批量导入用户
             </div>
             <div className="text-xs text-text-tertiary dark:text-text-tertiary-dark">
-              上传 CSV 文件；密码留空时默认 = 用户名
+              上传 CSV；password 列必填，用户首次登录将被要求改密
             </div>
           </div>
           <button
@@ -381,8 +381,10 @@ function UploadStage({
             字母 / 数字 / <span className="font-mono">. _ -</span>）
           </li>
           <li>
-            <span className="font-mono">password</span>（可选，留空则默认 =
-            username，最少 4 字符）
+            <span className="font-mono">password</span>{' '}
+            <span className="text-status-error">*</span>（必填，≥8 位且含字母、
+            数字、符号；留空或不达标该行失败。<strong>勿整批用同一口令</strong>，
+            尽快通知、批次间更换。所有导入用户首次登录将被要求改密）
           </li>
           <li><span className="font-mono">display_name</span>（可选，可中文）</li>
           <li>

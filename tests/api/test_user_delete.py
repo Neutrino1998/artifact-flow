@@ -215,7 +215,7 @@ class TestUpdateSelfProtection:
         """
         resp = await admin_client.put(
             f"/api/v1/admin/users/{test_admin.id}",
-            json={"password": "newpass1234"},
+            json={"password": "Newpass1234!"},
         )
         assert resp.status_code == 403
         assert "/me/password" in resp.json()["detail"].lower()

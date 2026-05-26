@@ -7,6 +7,7 @@ Artifacts Router
 - GET /api/v1/artifacts/{session_id}/{artifact_id}/versions/{version} - 特定版本
 """
 
+from dataclasses import dataclass
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query
@@ -42,19 +43,31 @@ async def _verify_session_ownership(
         raise HTTPException(status_code=404, detail=f"Session '{session_id}' not found")
 
 
-async def convert_and_create_artifact(
-    artifact_manager: ArtifactManager,
-    session_id: str,
-    file: UploadFile,
-) -> dict:
-    """Read + size-check + convert + create_from_upload for one uploaded file.
+@dataclass
+class ConvertedUpload:
+    """One uploaded file after size-check + conversion, before any DB write.
 
-    Returns the `create_from_upload` info dict (id / content_type / title /
-    current_version / source / original_filename). Raises HTTPException on
-    oversize (422), unsupported/invalid file (422), or conversion/create
-    failure (500). Shared by POST /chat (message attachments) and
-    POST /artifacts/{session_id}/upload (panel single-upload) — the caller is
-    responsible for ensuring the session/conversation exists first.
+    Phase-1 output of POST /chat's two-phase attachment flow (convert-all →
+    commit-all). Holds the converted text, not the raw bytes — the bytes are
+    freed per file inside convert_uploaded_file, so accumulating a batch of
+    these does not pin every upload's raw bytes in RAM at once.
+    """
+    filename: str
+    content: str
+    content_type: str
+    metadata: dict
+
+
+async def convert_uploaded_file(file: UploadFile) -> ConvertedUpload:
+    """Size-check + read + convert ONE uploaded file. Performs NO DB writes.
+
+    Raises HTTPException on oversize (422), unsupported/invalid file (422), or
+    conversion failure (500). Separated from the DB commit so POST /chat can
+    validate+convert every attachment BEFORE creating the conversation or any
+    artifact row: a bad file in the batch then aborts with zero DB state (no
+    ghost conversation, no orphan artifacts) instead of leaving committed the
+    files that happened to precede it in the loop. convert() is pure (bytes →
+    text, no DB / session needed), which is what makes the early phase possible.
     """
     # Size-check BEFORE read so an oversize part is rejected without
     # materializing it in RAM. Starlette's multipart parser spools each part to
@@ -87,17 +100,54 @@ async def convert_and_create_artifact(
         error_detail = str(e) if config.DEBUG else "Internal server error"
         raise HTTPException(status_code=500, detail=error_detail)
 
-    success, message, info = await artifact_manager.create_from_upload(
-        session_id=session_id,
+    return ConvertedUpload(
         filename=file.filename or "untitled",
         content=result.content,
         content_type=result.content_type,
-        metadata=result.metadata,
+        metadata=result.metadata or {},
+    )
+
+
+async def create_artifact_from_converted(
+    artifact_manager: ArtifactManager,
+    session_id: str,
+    converted: ConvertedUpload,
+) -> dict:
+    """Commit one already-converted upload as a user_upload artifact.
+
+    Immediate commit (bypasses flush_all). Returns the `create_from_upload` info
+    dict (id / content_type / title / current_version / source /
+    original_filename). Raises HTTPException(500) on failure. The
+    session/conversation MUST already exist (FK: artifact_session → conversation).
+    """
+    success, message, info = await artifact_manager.create_from_upload(
+        session_id=session_id,
+        filename=converted.filename,
+        content=converted.content,
+        content_type=converted.content_type,
+        metadata=converted.metadata,
     )
     if not success:
         error_detail = message if config.DEBUG else "Internal server error"
         raise HTTPException(status_code=500, detail=error_detail)
     return info
+
+
+async def convert_and_create_artifact(
+    artifact_manager: ArtifactManager,
+    session_id: str,
+    file: UploadFile,
+) -> dict:
+    """Convert + create one uploaded file in a single step.
+
+    Used by the single-file panel upload (POST /artifacts/{session_id}/upload),
+    where the session already exists and there is no batch to keep atomic.
+    POST /chat does NOT use this — it runs convert_uploaded_file (phase 1) and
+    create_artifact_from_converted (phase 2) separately so a bad file in a batch
+    leaves no DB state.
+    """
+    converted = await convert_uploaded_file(file)
+    return await create_artifact_from_converted(artifact_manager, session_id, converted)
 
 
 @router.get("/{session_id}", response_model=ArtifactListResponse)

@@ -16,9 +16,9 @@
 |----|------|--------|----------|
 | 一 | SSRF / 外联工具(6 项) | ✅ 已修(2026-05-24, 落 main) | ~~`fix/sec-ssrf`~~ → main |
 | 二 | grep ReDoS / 事件循环(3 项) | ✅ 已修(2026-05-24, 落 main) | ~~`fix/sec-grep-redos`~~ → main |
-| 三 | 账户与认证(6 项 + 首次强制改密) | 🟡 建议修(部分待测试中心定标) | `feat/sec-account-auth` |
-| 四 | 部署与配置(2 项) | 🟡 | `chore/sec-deploy` |
-| 五 | 前端加固(3 项) | 🟢 防御纵深 | `feat/sec-frontend-csp` |
+| 三 | 账户与认证(6 项 + 首次强制改密) | ✅ 已修(2026-05-25, 落 main) | ~~`feat/sec-account-auth`~~ → main |
+| 四 | 部署与配置(2 项) | ✅ 已修(2026-05-26, 落 main) | ~~`chore/sec-deploy`~~ → main |
+| 五 | 前端加固(3 项) | ✅ 已修(2026-05-26, 落 main) | ~~`feat/sec-frontend-csp`~~ → main |
 
 ---
 
@@ -174,9 +174,45 @@
 
 ---
 
-# 三、账户与认证 🟡 `feat/sec-account-auth`
+# 三、账户与认证 ✅ 已修(2026-05-25, 落 main)
 
 > ACC-02(弱密码标准)需测试中心拍板合规口径;计划中的"首次登录强制改密"正好根治 ACC-03,设计见末节。
+
+> **✅ 修复状态(2026-05-25,已落 main):** ACC-01~06 + 首次强制改密全部修复。
+>
+> **定标决策(2026-05-25 用户拍板,原"待测试中心定标"已确定):**
+> - **强度档 = 等保四级基线**:≥8 位、须同时含 字母+数字+符号(三类全)、+ 弱口令/键盘序列黑名单。
+> - **周期改密 = 降等保三级、应用到全部用户**:口令 **180 天**(半年)到期强制改;**不重用前 1 次**(= 新口令 ≠ 当前口令)。
+> - **存量老用户 = 下次登录即强制改密**(迁移 backfill `must_change_password=True`)。
+>
+> **架构主张:三机制归一**(避免平行造轮子)——
+> - **一个标志 `must_change_password`** 同时承载:ACC-03 缺省密码、首次强制改密、180 天到期。`get_current_user` 闸门在标志为 True 时除 `GET /auth/me` + `POST /auth/me/password` 外一律 **403**(单点覆盖所有 router,前端配合弹不可关闭的改密框)。
+> - **一个策略模块 `src/utils/password_policy.py`**(`validate_password_strength` + 弱口令/键盘黑名单),在所有写入口复用(schema field_validator + CSV 导入 + `create_admin`)。
+> - **新增状态仅 `password_history`**(JSON 列,非新表;most-recent-first,trim 到 `PASSWORD_HISTORY_RETAIN=5`)。当前 `PASSWORD_HISTORY_COUNT=1`(仅查当前),但列**从 day 1 起维护** → 日后调高 COUNT 即生效、**无需再迁移**。
+> - 策略值全进 `config.py` 隐藏常量:`PASSWORD_MIN_LENGTH / REQUIRE_LETTER|DIGIT|SYMBOL / PASSWORD_EXPIRY_DAYS=180 / PASSWORD_HISTORY_COUNT=1 / PASSWORD_HISTORY_RETAIN=5 / LOGIN_MAX_FAILURES=5 / LOGIN_FAILURE_WINDOW_SEC=900`(operator/测试中心可调,不改码)。
+>
+> **逐项:**
+> - **ACC-01** 登录频控:`src/api/services/login_rate_limiter.py`(Redis 单键 + InMemory 双实现,Cluster 安全 —— per-username + per-IP 各自单键,绝不跨键 multi-key)。验证前预检超阈 → 429(带 `Retry-After`);失败两键各 +1;成功重置 username 键。IP 取 `X-Real-IP`(nginx 覆写、不可伪造;见下「复审收口」P1)。
+> - **ACC-02 + 强度** 见上「强度档」;`schemas/auth.py` 三处密码字段加 `field_validator`,`create_admin.py` 同步。
+> - **ACC-03** CSV 缺省密码=用户名 **已删除**:`password` 列改为**每行必填**(留空/不达标 → 该行 failed,per-row best-effort 不阻断其余),admin 自填初始口令并带外分发;所有导入用户 `must_change_password=True`,首次登录强制改密。〔**复审收口**:原"留空→系统生成随机临时密码 + 响应回显 `initial_password`"方案已撤回 —— 每人独立临时口令的分发是运维噩梦;改为 admin 填。一并删除 `generate_temp_password`(其固定 16 位长度在 `PASSWORD_MIN_LENGTH` 调高后会死循环,reviewer P2;函数删除即根除)。〕
+> - **ACC-04** bcrypt>72 字节:`hash_password`/`verify_password` 统一 `encode[:72]`;`main.py` 加全局 `ValueError→400` handler 兜底。
+> - **ACC-05** 登录时序枚举:用户不存在时也对 `DUMMY_PASSWORD_HASH` 跑一次 `verify_password` 等时。
+> - **ACC-06** token 7 天不可吊销:**接受现状**,文档化「登出=前端清 token;`pwd_v` 提供改密/重置后的全端登出;改密入口的强制要求 + 频控已显著收敛被盗 token 的可利用面」。未上 refresh token / jti 黑名单(大特性,YAGNI)。
+>
+> **迁移(`0002_password_policy.py`,3 列 + backfill):** `must_change_password` / `password_changed_at` / `password_history`。
+> **部署 runbook(重要):**
+> - **本地 dev(SQLite)**:`create_all` 只建缺表、不改已有表 → 已有 `data/artifactflow.db` 不会自动加列。二选一:(A) 删库重建 `rm data/artifactflow.db*` + 重启 + `python scripts/create_admin.py admin`;(B) 保留数据 `alembic stamp 0001 && alembic upgrade head`(该库由 create_all 建、无 alembic_version,须先 stamp)。
+> - **内网/生产(PG/MySQL,容器部署)**:`deploy/entrypoint.sh` 在容器启动时**自动** `alembic upgrade head`(PG advisory lock 保证多副本只迁一次,详见 `docs/deployment.md`→运维参考→数据库迁移),redeploy 新镜像即自动应用 `0002`。**注意业务影响**:backfill 把存量用户全部置 `must_change_password=True` → 升级后所有用户(含持有效 token 者)下次请求被 403 引导改密(决策③),发版窗口需提前告知用户。per-IP 频控读 `X-Real-IP`(nginx 已覆写),backend `expose`-only 不直接暴露 → 不可伪造。
+> - **非容器 / 手工部署**:`alembic upgrade head` 后再起服务(应用层只校验 alembic_version 非空、不自动迁移,列缺会运行时崩)。
+>
+> 测试:新增 `tests/utils/test_password_policy.py` / `tests/api/test_login_rate_limit.py` / `tests/api/test_password_lifecycle.py` + 更新 `test_auth.py` / `test_user_bulk_import.py` / `test_departments.py` 等密码 fixture。后端全量 **972 passed / 28 skipped**;前端 `passwordPolicy.test.ts` + 全量 **177 passed**,`next build` 通过。
+>
+> **Reviewer 复审收口(2026-05-25,3 项):**
+> - **P1 per-IP 限流被伪造 XFF 绕过**:原 `_client_ip` 取 `X-Forwarded-For` 首段,但 nginx 用 `$proxy_add_x_forwarded_for` 是**追加**语义、首段是客户端自带的、可伪造 → 客户端每请求换个 XFF 即打不满 per-IP 计数。改为只读 `X-Real-IP`(nginx 用 `proxy_set_header X-Real-IP $remote_addr` **覆写**,且 prod/intranet 的 backend 是 `expose`-only、只经 nginx 可达 → 不可伪造),**彻底弃用 XFF**;无该头时回落 `request.client.host`。SQLite/dev(直发布端口、无 nginx)不做 per-IP 加固(dev-only)。不加配置开关、不动 nginx。新增回归测试 `test_forged_xff_does_not_bypass_ip_limit`。
+> - **P2 临时密码生成在调高 `PASSWORD_MIN_LENGTH` 后死循环**:`generate_temp_password` 固定 16 位 + `while True` 校验重试,`MIN_LENGTH>16` 时永不返回(无界循环,事件循环 wedge 同源)。随 ACC-03 改为"password 必填"该函数已无调用方 → **直接删除**,根除。
+> - **P2 前端密码策略与后端可调策略漂移**:前端把 8 位+三类硬编码并**阻断提交**,后端策略调整后会误拒/误放;管理端 `CreateUserForm` / `UserDetailForm` 还卡旧的 4 字符规则。改为**前端只提示不阻断**(仅"空/两次不一致"禁用提交),提交被拒时**原样展示后端的具体中文原因**(覆盖弱口令/键盘/不重用等前端查不了的);删掉两个管理端表单的 4 字符规则。刻意不加 `password-policy` 元信息端点(后端已返回具体原因,清晰度够)。
+>
+> 收口后:后端 **974 passed / 28 skipped**(+2 回归);前端 **177 passed** + `next build` 通过。
 
 ## ACC-01 🟡 登录无频率限制 / 锁定 — 可无限撞库
 
@@ -226,18 +262,25 @@
 
 **修复建议**:可接受现状;若测试中心有要求,考虑缩短 token 寿命 + refresh token,或 Redis jti 黑名单支持"全端登出"。至少文档化"登出是前端行为"。
 
-## 🆕 配套特性 — 首次登录强制改密
+## 🆕 配套特性 — 首次登录强制改密 ✅ 已实现
 
-直接根治 ACC-03 与 ACC-02——首次强制重置后,弱/缺省初始密码不再是可利用窗口。
+直接根治 ACC-03 与 ACC-02——首次强制重置后,弱/缺省初始密码不再是可利用窗口。同一标志亦承载 180 天周期到期(见上「定标决策」)。
 
-**实现要点**:
-- `User` 表加 `must_change_password: bool`,建用户 / 批量导入 / 管理员重置密码时置 `True`。
-- 加一道依赖/中间件:标志为 `True` 时,除 `POST /auth/me/password`(及登出)外的请求一律 403 引导改密;改密成功清标志。
-- 复用现有 `password_version` 吊销链路,无需新增会话机制。
+**落地(对照原计划):**
+- `User` 表加 `must_change_password: bool`(+ `password_changed_at` / `password_history`,迁移 `0002`),建用户 / 批量导入 / 管理员重置 / 登录超期时置 `True`。
+- 闸门做在 `get_current_user` 单点(非中间件):标志为 `True` 时,除 **`GET /auth/me`**(前端读标志)+ **`POST /auth/me/password`**(改密)外一律 403;改密成功清标志。〔与原计划差异:额外豁免 `GET /auth/me`,否则前端拉不到 `must_change_password` 无法弹框。登出是前端清 token,无需端点豁免。〕
+- 复用现有 `password_version` 吊销链路(`apply_new_password` 改密即 `pwd_v++`),无需新增会话机制。
+- 前端:`AuthGuard` 在 `must_change_password` 时渲染**不可关闭**的 `ChangePasswordDialog`(forced 模式),挡住整个应用。
 
 ---
 
-# 四、部署与配置 🟡 `chore/sec-deploy`
+# 四、部署与配置 ✅ 已修(2026-05-26, 落 main)
+
+> **✅ 修复状态(2026-05-26,已落 main,未单独建分支):** DEP-01 / DEP-02 均修复;root + `SYS_PTRACE` 维持「暂缓接受」(留待 gVisor 执行容器,见本章末「暂缓/接受」节)。
+> - **DEP-01** `validate_config()`(`src/config.py`)加 footgun 断言:`CORS_ALLOW_CREDENTIALS=True` 且 `CORS_ORIGINS` 含 `"*"` → 启动期 `RuntimeError`。默认是具体白名单(本就安全),断言只堵 **env 覆盖误配**(`ARTIFACTFLOW_CORS_ORIGINS=["*"]` → Starlette 回显 Origin → 带凭证跨源读)。**`CORS_ALLOW_HEADERS` 刻意保持 `["*"]`**:origins 断言已消除反射风险(反射只在通配 origins 时发生),收敛 headers 是纯卫生项、却会断 SSE 的 `Last-Event-ID` 跨源重连(`frontend/src/lib/sse.ts`),按 step-back-on-design-creep 不做。
+> - **DEP-02** 新增 `requirements.lock`:`pip-compile` **在 `python:3.11-slim` 容器内**生成(匹配部署解释器 3.11 + linux 平台,避免在 macOS/3.12 build host 上生成导致的环境标记漂移),82 包钉死,`pip-audit` **0 CVE**。`Dockerfile` builder 改从 lock 安装,`docker build --target builder` 实测安装干净(端到端验证,非仅解析)。`requirements.txt` 仍为人维护的抽象源;CLAUDE.md 记录「改依赖即重生成 lock」规则。**刻意不上 `--require-hashes`**:版本钉死已满足「审计版本=上线版本」核心诉求,而 google-re2 多 arch wheel + analyst-tools 离线 wheel 流会被哈希复杂化(完整性校验后续可单列)。
+>
+> 测试:新增 `tests/test_config.py`(3 例:拒绝凭证+通配组合 / 放行具体白名单 / 放行无凭证通配)。
 
 ## DEP-01 🟢 CORS 凭证 + 通配组合无护栏(当前安全,缺断言)
 
@@ -263,9 +306,29 @@
 
 ---
 
-# 五、前端加固 🟢 `feat/sec-frontend-csp`
+# 五、前端加固 ✅ 已修(2026-05-26, 落 main)
 
 > LLM/artifact 生成内容**从不作为活动 HTML 渲染**(无 `rehype-raw`、无 iframe 预览、走转义文本路径),XSS 主轴已干净。本类是"万一未来出现 XSS / 恶意依赖"时的防御纵深。
+
+> **✅ 修复状态(2026-05-26,已落 main,未单独建分支):** FE-02 已修;FE-01 转「已接受风险 + CSP 补偿」;FE-03 接受。提交 `4f663cc`(CSP 地基)+ `92a43f7`(reviewer P1 + hydration 收口)。
+> 全站 Content-Security-Policy + 配套加固头(`X-Frame-Options: DENY` / `X-Content-Type-Options: nosniff` / `Referrer-Policy` / `Permissions-Policy`),作为 FE-01 的补偿控制。
+>
+> **方向定调(用户拍板,FE-01 不上 httpOnly cookie):** 生产虽同源(nginx 单门 80,`/`→前端、`/api/`→后端)使 cookie 可行,但会凭空引入 **CSRF 面**(Bearer 不自动发 → CSRF=0;cookie 自动发就需 SameSite/CSRF token)、**dev/prod 分叉**(dev 跨源须 `SameSite=None; Secure` 破本地 http 开发)、后端 `get_current_user` 兼读 cookie —— 为一个 🟢、无活跃 XSS sink 的项加这么多机制 + 新攻击面不划算。改为**接受 localStorage,以严格 CSP 收紧外带通道补偿**(评审 fallback)。token 维持 ACC-06 已接受的 7d + `pwd_v` 吊销,**不缩短 TTL**(无 refresh 会伤 UX)。
+>
+> **FE-02 关键实现:**
+> - **nonce CSP 放 Next middleware(`frontend/src/middleware.ts`)而非 nginx**:nonce 必须匹配 App Router 每次渲染的内联 bootstrap 脚本,nginx 看不到 per-request nonce → 放那里只能退到 `script-src 'unsafe-inline'`,等于白做。`script-src 'self' 'nonce-…' 'strict-dynamic'`(dev 加 `'unsafe-eval'`);`layout.tsx` 读 `x-nonce` 给内联主题脚本打 nonce + `suppressHydrationWarning`(浏览器解析后清空 nonce 属性是 CSP 防外带的预期良性 mismatch,脚本此时早已执行)。
+> - **`connect-src` 由 `frontend/src/lib/apiBase.ts` 的 `API_URL` 单一来源推导**:prod `NEXT_PUBLIC_API_URL=` 空 → 同源相对 `/api` → `'self'`;dev/跨源 → 白名单后端源 + `ws:`/`wss:`。值与 REST/SSE 客户端共用同一常量(`??` 非 `||`,保空串=同源),杜绝「CSP 漏掉客户端实际打的源 → 浏览器拦 API」漂移(见 reviewer P1)。
+> - **`img-src 'self' data: blob:` 刻意不放 `https:`**:开放 https 会重开 `<img src=attacker/?token>` 信标外带通道,直接削弱 FE-01 补偿。代价是远程 markdown 图不渲染 —— 接受(内网纯离线,LLM 内容极少依赖关键远程图)。
+> - `style-src 'self' 'unsafe-inline'`(React style 属性 + mermaid 内联 `<style>` 无法 nonce);`font-src 'self'`(字体自托管);`frame-ancestors`/`frame-src`/`object-src 'none'`、`base-uri 'none'`、`form-action 'self'`。
+>
+> **FE-03 接受**:下载 `.html` 风险在应用源外(下载后本地 `file://`),强制 `.txt` 会劣化正当下载功能,维持现状。
+>
+> **Reviewer 复审收口(2026-05-26,2 项,落 `92a43f7`):**
+> - **P1 connect-src 漏默认 API 源**:middleware 原传原始 `NEXT_PUBLIC_API_URL`,fresh clone 无 `.env.local`(值 `undefined`)时 connect-src 漏掉客户端 `?? 'http://localhost:8000'` 实际打的源 → 浏览器拦所有 REST/SSE。根因:默认值在 `api.ts`/`sse.ts` 重复、CSP 没复用 → 漂移。抽 `apiBase.API_URL` 作三方单一来源修复。
+> - **nonce hydration warning**:见上 `suppressHydrationWarning`。
+>
+> 测试:新增 `frontend/src/lib/csp.test.ts`(11 例:nonce/strict-dynamic、connect-src 各源、空串=同源、img-src 关 https、dev unsafe-eval+ws 等);前端全量 **188 passed**,`next build` 通过,live header 实测 `connect-src 'self' http://localhost:8000`。活体点击回归(登录 / SSE / mermaid 实渲 / 下载导出 / 主题)**无阻塞、无被迫放宽**任何 CSP 指令(mermaid 11 在 strict CSP 无 `unsafe-eval` 下正常渲染,与 dist 无 eval/`new Function` 的静态判断一致)。
+> **未做(按决定接受):** FE-01 httpOnly cookie(见上);FE-03 `.html` 下载加固。
 
 ## FE-01 🟡 JWT 存 localStorage — 未来任何 XSS 可窃取 token
 

@@ -31,7 +31,7 @@ if TYPE_CHECKING:
     from api.services.runtime_store import RuntimeStore
     from api.services.execution_runner import ExecutionRunner
 
-from fastapi import Depends, HTTPException
+from fastapi import Depends, HTTPException, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -55,6 +55,7 @@ _db_manager: Optional[DatabaseManager] = None
 _stream_transport: Optional["StreamTransport"] = None
 _execution_runner: Optional["ExecutionRunner"] = None
 _redis_client: Optional[Any] = None               # redis.asyncio.Redis (optional)
+_login_rate_limiter: Optional[Any] = None         # Redis / InMemory LoginRateLimiter
 
 # Agent configs + tools（启动时加载一次）
 _agents: Optional[dict] = None                    # {name: AgentConfig}
@@ -70,6 +71,7 @@ async def init_globals() -> None:
     from pathlib import Path
 
     global _db_manager, _stream_transport, _execution_runner, _redis_client, _agents, _tools
+    global _login_rate_limiter
 
     # 0. 确保 data 目录存在
     data_dir = Path("data")
@@ -154,6 +156,24 @@ async def init_globals() -> None:
         )
         logger.info("InMemory runtime initialized (no REDIS_URL)")
 
+    # 3.5 登录频控器（ACC-01）。Redis(多 worker 共享)或 InMemory(单机)。
+    if _redis_client is not None:
+        from api.services.login_rate_limiter import RedisLoginRateLimiter
+        _login_rate_limiter = RedisLoginRateLimiter(
+            _redis_client,
+            max_failures=config.LOGIN_MAX_FAILURES,
+            window_sec=config.LOGIN_FAILURE_WINDOW_SEC,
+            key_prefix=config.REDIS_KEY_PREFIX,
+        )
+        logger.info("Login rate limiter: Redis")
+    else:
+        from api.services.login_rate_limiter import InMemoryLoginRateLimiter
+        _login_rate_limiter = InMemoryLoginRateLimiter(
+            max_failures=config.LOGIN_MAX_FAILURES,
+            window_sec=config.LOGIN_FAILURE_WINDOW_SEC,
+        )
+        logger.info("Login rate limiter: InMemory")
+
     # 4. 加载 Agent 配置
     from agents.loader import load_all_agents
     _agents = load_all_agents()
@@ -195,7 +215,7 @@ async def close_globals() -> None:
 
     在 FastAPI lifespan 中调用。
     """
-    global _db_manager, _stream_transport, _execution_runner, _redis_client
+    global _db_manager, _stream_transport, _execution_runner, _redis_client, _login_rate_limiter
 
     # 1. 先关闭 ExecutionRunner（等待运行中的任务完成）
     if _execution_runner:
@@ -216,6 +236,7 @@ async def close_globals() -> None:
     _redis_client = None
     _db_manager = None
     _stream_transport = None
+    _login_rate_limiter = None
 
 
 def get_execution_runner() -> "ExecutionRunner":
@@ -247,6 +268,13 @@ def get_db_manager() -> DatabaseManager:
 def get_redis_client() -> Optional[Any]:
     """获取 Redis 客户端（未配置 Redis 时返回 None）"""
     return _redis_client
+
+
+def get_login_rate_limiter() -> Any:
+    """获取登录频控器单例（Redis / InMemory）。"""
+    if _login_rate_limiter is None:
+        raise RuntimeError("LoginRateLimiter not initialized. Call init_globals() first.")
+    return _login_rate_limiter
 
 
 def get_agents() -> dict:
@@ -296,8 +324,16 @@ async def get_conversation_manager(
 
 _bearer_scheme = HTTPBearer(auto_error=False)
 
+# must_change_password 闸门豁免:仅这两个 (method, path) 在标志为 True 时仍放行,
+# 让用户能拉到自己的状态(GET /me)并完成改密(POST /me/password)。其余一律 403。
+_PASSWORD_GATE_EXEMPT: set[tuple[str, str]] = {
+    ("GET", "/api/v1/auth/me"),
+    ("POST", "/api/v1/auth/me/password"),
+}
+
 
 async def get_current_user(
+    request: Request,
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(_bearer_scheme),
     session: AsyncSession = Depends(get_db_session),
 ) -> "TokenPayload":
@@ -324,6 +360,12 @@ async def get_current_user(
     # 密码已被修改 → 老 token 失效（pwd_v 比对）
     if payload.password_version != user.password_version:
         raise HTTPException(status_code=401, detail="Token invalidated; please log in again")
+
+    # 强制改密闸门(门类三):首次登录 / admin 重置 / 口令到期 → 除改密+查自身
+    # 状态外一律 403。前端据此弹不可关闭的改密框;这是后端侧的防御兜底
+    # (即便绕过前端,业务端点也进不去)。
+    if user.must_change_password and (request.method, request.url.path) not in _PASSWORD_GATE_EXEMPT:
+        raise HTTPException(status_code=403, detail="Password change required")
 
     return TokenPayload(
         user_id=user.id,

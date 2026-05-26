@@ -6,11 +6,19 @@
 """
 
 import asyncio
+import os
 from pathlib import Path
 from typing import Optional, Dict, Any, AsyncIterator
 
 import yaml
 from dotenv import load_dotenv
+
+# litellm 的 __init__ 会在 import 时联网拉远程 model-cost-map;气隙部署里这个
+# HTTP 请求会卡在 getaddrinfo 直到连接超时,而 import 是同步跑在事件循环线程上的
+# → 冻住整个 loop(2026-05-14 监控验证时由 deadman dump 定位)。强制用 litellm
+# 自带的本地价目表。必须在下面 import litellm 之前设;setdefault 让显式 env 覆盖优先。
+os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
+
 from litellm import acompletion
 
 load_dotenv()

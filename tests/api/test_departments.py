@@ -134,7 +134,7 @@ class TestListAndTree:
         await admin_client.post(
             "/api/v1/admin/users",
             json={
-                "username": "alice", "password": "pass1234",
+                "username": "alice", "password": "Pass1234!",
                 "display_name": "Alice", "department_id": a["id"],
             },
         )
@@ -273,7 +273,7 @@ class TestDelete:
         await admin_client.post(
             "/api/v1/admin/users",
             json={
-                "username": "alice", "password": "pass1234",
+                "username": "alice", "password": "Pass1234!",
                 "department_id": a["id"],
             },
         )
@@ -329,7 +329,7 @@ class TestUserDepartmentIntegration:
         resp = await admin_client.post(
             "/api/v1/admin/users",
             json={
-                "username": "alice", "password": "pass1234",
+                "username": "alice", "password": "Pass1234!",
                 "department_id": a["id"],
             },
         )
@@ -340,7 +340,7 @@ class TestUserDepartmentIntegration:
         resp = await admin_client.post(
             "/api/v1/admin/users",
             json={
-                "username": "alice", "password": "pass1234",
+                "username": "alice", "password": "Pass1234!",
                 "department_id": "dept-nope",
             },
         )
@@ -352,7 +352,7 @@ class TestUserDepartmentIntegration:
         u = (await admin_client.post(
             "/api/v1/admin/users",
             json={
-                "username": "alice", "password": "pass1234",
+                "username": "alice", "password": "Pass1234!",
                 "department_id": a["id"],
             },
         )).json()
@@ -368,7 +368,7 @@ class TestUserDepartmentIntegration:
         u = (await admin_client.post(
             "/api/v1/admin/users",
             json={
-                "username": "alice", "password": "pass1234",
+                "username": "alice", "password": "Pass1234!",
                 "department_id": a["id"],
             },
         )).json()
@@ -386,7 +386,7 @@ class TestUserDepartmentIntegration:
         u = (await admin_client.post(
             "/api/v1/admin/users",
             json={
-                "username": "alice", "password": "pass1234",
+                "username": "alice", "password": "Pass1234!",
                 "department_id": a["id"],
             },
         )).json()
@@ -409,7 +409,7 @@ class TestUserDepartmentIntegration:
         await admin_client.post(
             "/api/v1/admin/users",
             json={
-                "username": "alice", "password": "pass1234",
+                "username": "alice", "password": "Pass1234!",
                 "department_id": a["id"],
             },
         )
@@ -424,7 +424,7 @@ class TestUserDepartmentIntegration:
         u = (await admin_client.post(
             "/api/v1/admin/users",
             json={
-                "username": "alice", "password": "pass1234",
+                "username": "alice", "password": "Pass1234!",
                 "department_id": a["id"],
             },
         )).json()
@@ -465,7 +465,7 @@ class TestUserSearchSubtree:
             await admin_client.post(
                 "/api/v1/admin/users",
                 json={
-                    "username": uname, "password": "pass1234",
+                    "username": uname, "password": "Pass1234!",
                     "display_name": dn, "department_id": dept_id,
                 },
             )

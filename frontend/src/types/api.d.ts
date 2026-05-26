@@ -611,11 +611,14 @@ export interface paths {
          *
          *     CSV header 必含 `username`；可选列 `password` / `display_name` /
          *     `dept_l1` / `dept_l2` / `dept_l3`。其他列被忽略并在 warnings 里上报。
+         *     注:`password` 列虽非 parse 阶段必填,但**每行必须有非空密码**(留空 → 该行
+         *     failed),不再「缺省 = 用户名」;admin 自己填初始口令并带外分发,所有导入
+         *     用户首次登录强制改密。
          *
          *     语义（best-effort，非原子）：
          *     - parse 阶段失败（解码 / 缺 username 列 / 行数超限）→ 400
          *     - 文件内 username 重复 → 400 + duplicate_rows 列出
-         *     - 单行业务校验失败（username 格式 / 部门 gap / 字段超长 / 默认密码过短）
+         *     - 单行业务校验失败（username 格式 / 部门 gap / 字段超长 / 密码缺失或不达标）
          *       → failed
          *     - 单行 username 已在 DB → skipped
          *     - 其余 → created（每行独立 commit；逐行成功/失败）
@@ -1932,6 +1935,12 @@ export interface components {
              * @description Role
              */
             role: string;
+            /**
+             * Must Change Password
+             * @description True 时前端须强制弹出改密框,且除改密/登出外的请求会被后端 403 (首次登录 / 管理员重置 / 口令到期)。改密成功后清除。
+             * @default false
+             */
+            must_change_password: boolean;
             /**
              * Department Path
              * @description Names of the user's department ancestors, root → leaf. None when the user has no department. Sidebar shows the leaf; future UIs can render the full chain without a second request.

@@ -3,7 +3,7 @@ import { useStagedFilesStore } from './stagedFilesStore';
 import { MAX_CHAT_ATTACHMENTS } from '@/lib/constants';
 
 function reset() {
-  useStagedFilesStore.setState({ files: [] });
+  useStagedFilesStore.setState({ files: [], notice: null });
 }
 
 function makeFiles(n: number): File[] {
@@ -49,5 +49,47 @@ describe('stagedFilesStore attachment cap', () => {
     useStagedFilesStore.getState().removeFiles([ids[0], ids[1]]);
     const remaining = useStagedFilesStore.getState().files;
     expect(remaining.map((f) => f.id)).toEqual([ids[2]]);
+  });
+});
+
+describe('stagedFilesStore format gate + notice', () => {
+  beforeEach(() => reset());
+
+  test('rejects unsupported office files by extension and records a per-file notice', () => {
+    useStagedFilesStore.getState().addFiles([
+      new File(['x'], 'a.txt', { type: 'text/plain' }),
+      new File(['x'], 'b.doc'),
+      new File(['x'], 'c.xlsx'),
+    ]);
+    const st = useStagedFilesStore.getState();
+    expect(st.files.map((f) => f.file.name)).toEqual(['a.txt']);
+    expect(st.notice?.rejected.map((r) => r.name)).toEqual(['b.doc', 'c.xlsx']);
+    expect(st.notice?.overflow).toBe(0);
+  });
+
+  test('over-cap files (e.g. dropped past the disabled button) are reported as overflow', () => {
+    useStagedFilesStore.getState().addFiles(makeFiles(MAX_CHAT_ATTACHMENTS + 3));
+    const st = useStagedFilesStore.getState();
+    expect(st.files.length).toBe(MAX_CHAT_ATTACHMENTS);
+    expect(st.notice?.overflow).toBe(3);
+    expect(st.notice?.rejected).toEqual([]);
+  });
+
+  test('a fully-clean add clears a prior notice', () => {
+    useStagedFilesStore.getState().addFiles([new File(['x'], 'bad.doc')]);
+    expect(useStagedFilesStore.getState().notice).not.toBeNull();
+    useStagedFilesStore.getState().addFiles(makeFiles(1));
+    expect(useStagedFilesStore.getState().notice).toBeNull();
+  });
+
+  test('dismissNotice clears the notice without touching staged files', () => {
+    useStagedFilesStore.getState().addFiles([
+      new File(['x'], 'ok.txt', { type: 'text/plain' }),
+      new File(['x'], 'bad.doc'),
+    ]);
+    expect(useStagedFilesStore.getState().notice).not.toBeNull();
+    useStagedFilesStore.getState().dismissNotice();
+    expect(useStagedFilesStore.getState().notice).toBeNull();
+    expect(useStagedFilesStore.getState().files.length).toBe(1);
   });
 });

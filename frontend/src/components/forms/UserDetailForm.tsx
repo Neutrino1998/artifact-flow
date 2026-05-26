@@ -17,6 +17,10 @@ import { parseUtcIso } from '@/lib/time';
 import PanelShell from '@/components/layout/PanelShell';
 import DepartmentCascader from '@/components/forms/DepartmentCascader';
 import Checkbox from '@/components/forms/Checkbox';
+import {
+  PASSWORD_POLICY_HINT,
+  validatePasswordStrength,
+} from '@/lib/passwordPolicy';
 
 interface UserDetailFormProps {
   userId: string;
@@ -93,9 +97,10 @@ export default function UserDetailForm({ userId }: UserDetailFormProps) {
     loadUser();
   }, [listVersion, loadUser]);
 
-  // 非空 < 4 字符视作无效；空值表示不修改密码
-  const passwordInvalid = newPassword.length > 0 && newPassword.length < 4;
+  // 空值表示不修改密码。强度不在前端硬阻断(后端策略可调,避免漂移误拒)——
+  // policyError 仅作即时提示;真正的强度/不重用由后端权威校验,被拒显示后端原因。
   const passwordChanged = newPassword.length > 0;
+  const policyError = passwordChanged ? validatePasswordStrength(newPassword) : null;
 
   const dirty =
     user !== null &&
@@ -108,7 +113,7 @@ export default function UserDetailForm({ userId }: UserDetailFormProps) {
     );
 
   const handleSave = async () => {
-    if (!user || !dirty || saving || passwordInvalid) return;
+    if (!user || !dirty || saving) return;
     setSaving(true);
     setSaveError(null);
     try {
@@ -225,7 +230,7 @@ export default function UserDetailForm({ userId }: UserDetailFormProps) {
             </button>
             <button
               onClick={handleSave}
-              disabled={!dirty || saving || passwordInvalid}
+              disabled={!dirty || saving}
               className={`${BUTTON_PRIMARY} rounded-lg px-6 py-2`}
             >
               {saving ? '保存中...' : '保存'}
@@ -330,12 +335,18 @@ export default function UserDetailForm({ userId }: UserDetailFormProps) {
               value={newPassword}
               onChange={(e) => setNewPassword(e.target.value)}
               disabled={saving}
-              placeholder="新密码至少 4 个字符"
+              placeholder={PASSWORD_POLICY_HINT}
               autoComplete="new-password"
               className={INPUT_ON_PANEL}
             />
-            {passwordInvalid && (
-              <p className="text-status-error text-xs mt-1">密码至少需要 4 个字符</p>
+            {passwordChanged && (
+              policyError ? (
+                <p className="text-status-error text-xs mt-1">{policyError}</p>
+              ) : (
+                <p className="text-text-tertiary dark:text-text-tertiary-dark text-xs mt-1">
+                  {PASSWORD_POLICY_HINT}；重置后该用户首次登录将被要求改密
+                </p>
+              )
             )}
           </div>
         )}
