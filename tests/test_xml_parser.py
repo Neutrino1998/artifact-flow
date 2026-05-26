@@ -141,6 +141,57 @@ This long content was cut here because max_tokens hit and"""
             f"spurious truncation warning on abandoned-mid-content case, got: {tc.warnings}"
         )
 
+    def test_truncated_field_with_embedded_literal_tags_fails_loudly(self):
+        """截断发生在 new_str 内，且 artifact 内容本身含字面 </content>/</params>/</tool_call>
+        （task_plan 这类 XML 式正文常见）。两道非贪婪正则（<tool_call>(.*?)</tool_call> /
+        <params>(.*?)</params>）对 CDATA 盲，会在字面标签处提前收口、丢掉被截断的 new_str。
+
+        正确行为：不再 lossy 地抠出半套参数报误导性的 'Missing new_str'，而是老实报截断，
+        让模型缩小输出。回归自内网 2026-05 观测（update_artifact 8 条 'Missing new_str' 里 7
+        条实为截断）。"""
+        text = """<tool_call>
+<name>update_artifact</name>
+<params>
+<id><![CDATA[task_plan]]></id>
+<old_str><![CDATA[10. done
+
+</content>
+</team_task_plan>]]></old_str>
+<new_str><![CDATA[10. done
+11. wip
+
+</content>
+</team_task_plan>
+</params>
+</tool_call>"""
+        results = parse_tool_calls(text)
+        assert len(results) == 1
+        tc = results[0]
+        # 报错而非静默丢字段：不能再出现"抠到 id/old_str、独独缺 new_str"的误导态
+        assert tc.error is not None
+        assert "truncat" in tc.error.lower() or "incomplete" in tc.error.lower()
+        assert tc.params == {}, f"must not hand back a half-extracted param set, got: {tc.params}"
+        # 工具名保留，便于 observability 仍归到 update_artifact 名下
+        assert tc.name == "update_artifact"
+
+    def test_partial_content_still_preserved_when_repair_yields_valid_xml(self):
+        """对照组：截断但内容不含字面结构标签 → repair 后 etree 成功 → partial content
+        必须照旧保留（B 不能误伤 create/rewrite 的有用兜底）。"""
+        text = """<tool_call>
+<name>create_artifact</name>
+<params>
+<id><![CDATA[doc_xxx]]></id>
+<content><![CDATA[# Title
+
+partial body cut mid-sentence and"""
+        results = parse_tool_calls(text)
+        assert len(results) == 1
+        tc = results[0]
+        assert tc.error is None
+        assert tc.params["id"] == "doc_xxx"
+        assert "partial body cut mid-sentence" in tc.params["content"]
+        assert any("truncated" in w.lower() for w in tc.warnings)
+
 
 # ============================================================
 # Existing repairs now register warnings

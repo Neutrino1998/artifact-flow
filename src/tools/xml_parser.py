@@ -86,8 +86,12 @@ class XMLToolCallParser:
         warnings: List[str] = []
         repaired = XMLToolCallParser._repair_tool_name_as_tag(content, warnings)
         repaired = XMLToolCallParser._repair_tag_equals_syntax(repaired, warnings)
-        # 截断修复要先于 _repair_unclosed_cdata_tags：补 ]]> 后者才有可能 anchor
+        # 截断修复要先于 _repair_unclosed_cdata_tags：补 ]]> 后者才有可能 anchor。
+        # 用 warnings 增量（而非匹配文案）判定"截断修复是否真的触发"——_repair_truncated_cdata
+        # 的三个分支命中时各 append 恰好一条 warning，无操作时不 append。
+        _warns_before_trunc = len(warnings)
         repaired = XMLToolCallParser._repair_truncated_cdata(repaired, warnings)
+        truncated = len(warnings) > _warns_before_trunc
         repaired = XMLToolCallParser._repair_unclosed_cdata_tags(repaired, warnings)
         # _repair_missing_closing_tags 要先于 _repair_scattered_params：
         # 否则只缺 </params> 时会被误判为 "params 散落"，触发不相干的 warning
@@ -100,6 +104,25 @@ class XMLToolCallParser:
                 result = XMLToolCallParser._parse_with_etree(repaired)
             except ET.ParseError:
                 pass
+
+        # 截断 + etree 仍救不活 → 老实报截断，不再走 lossy 的 _fallback_parse。
+        # fallback 的非贪婪正则（<params>(.*?)</params> 等）对 CDATA 盲：被截断的内容里若含
+        # 字面 </params>/</tool_call>，正则会在那儿提前收口、丢掉被截断的字段，最终报误导性的
+        # "Missing <field>"，诱导模型原样重试 → 再次截断。这里报清晰截断错让模型缩小输出。
+        # 注意：create/rewrite 截断但内容不含字面结构标签的常态，repair 后 etree 成功（result
+        # 非 None），走不到这里——partial content + 续写提示的有用兜底保持不变。
+        if result is None and truncated:
+            nm = re.search(r'<name>\s*(.*?)\s*</name>', content, re.DOTALL)
+            return ToolCall(
+                name=(nm.group(1).strip() if nm else "__truncated__"),
+                params={},
+                error=(
+                    "Output appears truncated or incomplete (likely max_tokens limit), so this "
+                    "tool call could not be reliably parsed. Reduce the output size: for edits "
+                    "replace a smaller snippet; for large rewrites split into multiple writes."
+                ),
+                warnings=warnings,
+            )
 
         # Fallback: 正则解析（处理 LLM 格式不严格的情况）
         if result is None:

@@ -784,7 +784,8 @@ class UpdateArtifactTool(BaseTool):
             name="update_artifact",
             description=(
                 "Update artifact content by replacing old text with new text "
-                "(supports fuzzy matching). Use for targeted changes."
+                "(supports fuzzy matching). Use for small, targeted edits — make "
+                "several small old_str/new_str replacements rather than one large one."
             ),
             permission=ToolPermission.AUTO,
         )
