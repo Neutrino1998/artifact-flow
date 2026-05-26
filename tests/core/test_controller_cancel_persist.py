@@ -25,7 +25,7 @@ from core.events import ExecutionEvent, StreamEventType
 
 
 # ============================================================
-# Helpers (mirror tests/test_controller_skip_on_delete.py)
+# Helpers (mirror tests/core/test_controller_skip_on_delete.py)
 # ============================================================
 
 

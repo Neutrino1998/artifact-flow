@@ -8,7 +8,7 @@ post_processing.py 纯函数单元测试 — 参数化矩阵锁定 4 条 invaria
 
 invariant 1/2 由 controller 调用方负责检查,不在这里测;矩阵测试覆盖 3/4 的核心决策
 函数 (decide_terminal / ensure_terminal / choose_response_for_terminal)。controller
-集成行为见 tests/test_controller_cancel_persist.py。
+集成行为见 tests/core/test_controller_cancel_persist.py。
 """
 
 import pytest

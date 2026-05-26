@@ -135,7 +135,7 @@ artifact-flow/
 ├── frontend/          # Next.js 15 + Zustand + Tailwind
 ├── config/            # agents/ models/ tools/（运行时只读）
 ├── scripts/           # export_openapi / create_admin
-├── tests/             # repositories / api / concurrent / manual
+├── tests/             # 镜像 src/ 分层：core / tools / api / repositories / db / utils / integration / manual
 └── docs/              # MkDocs 文档站源码
 ```
 
@@ -145,7 +145,7 @@ artifact-flow/
 pytest                           # 全部
 pytest tests/repositories/       # Repository 合约测试
 pytest tests/api/                # API 集成测试
-pytest tests/test_concurrent.py  # 并发测试
+pytest tests/db/test_concurrent.py  # 并发测试
 ```
 
 手动 / 交互式测试（需 LLM 后端）：

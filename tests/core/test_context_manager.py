@@ -262,7 +262,7 @@ class TestLeadVsSubagent:
 
 # ContextManager.truncate_messages was removed — token-budget truncation is no
 # longer a main-path concern. Compaction handles context overflow in-engine via
-# CompactionRunner (see tests/test_compaction_runner.py); there is no separate
+# CompactionRunner (see tests/core/test_compaction_runner.py); there is no separate
 # fallback truncation code path.
 
 
@@ -310,7 +310,7 @@ class TestStripMeta:
 
 # _find_last_ai_and_trailing and _build_tool_interactions were removed along
 # with truncate_messages — event→message conversion and history scanning now
-# live in core/event_history.py and are covered by tests/test_event_history.py.
+# live in core/event_history.py and are covered by tests/core/test_event_history.py.
 
 
 # ============================================================
