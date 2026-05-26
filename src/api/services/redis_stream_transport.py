@@ -41,6 +41,23 @@ end
 return 0
 """
 
+# XADD + 首次 EXPIRE 原子合一。pipeline(transaction=False) 只是批量发送、非原子：
+# 半包只送到 XADD 而没送到 EXPIRE（连接中途断/failover）会留下无 TTL 的孤儿
+# stream key（永不自愈）。Lua 整段原子执行 → 要么 XADD+EXPIRE 都发生、要么键根本没创建。
+# 判据 TTL==-1（键在但无过期）才设 TTL：既识别首推，又自愈任何历史遗留的无 TTL 键，
+# 且保留「后续推送不刷新 TTL」（不延长 stream 寿命）。
+# 单 key 操作（KEYS[1]=stream_key），Cluster 安全。
+# 与 meta_key 剩余 TTL 的精确对齐是 best-effort 之外的目标，留给 PR-C 的生命周期重构。
+# KEYS[1]=stream_key, ARGV[1]=event_type, ARGV[2]=event_json, ARGV[3]=ttl
+_LUA_XADD_WITH_TTL = """
+local id = redis.call('XADD', KEYS[1], 'MAXLEN', '~', '1000', '*',
+                      'type', ARGV[1], 'data', ARGV[2])
+if redis.call('TTL', KEYS[1]) == -1 then
+    redis.call('EXPIRE', KEYS[1], tonumber(ARGV[3]))
+end
+return id
+"""
+
 
 class RedisStreamTransport:
     """Redis Streams-backed StreamTransport 实现"""
@@ -57,11 +74,15 @@ class RedisStreamTransport:
         self._execution_timeout = execution_timeout
         self._prefix = key_prefix
         self._script_revert_to_pending = None
+        self._script_xadd_with_ttl = None
 
     def init_scripts(self) -> None:
         """注册 Lua 脚本（register_script 是同步方法，自动处理 NOSCRIPT 重试）"""
         self._script_revert_to_pending = self._redis.register_script(
             _LUA_REVERT_TO_PENDING
+        )
+        self._script_xadd_with_ttl = self._redis.register_script(
+            _LUA_XADD_WITH_TTL
         )
 
     # ── Key helpers ──
@@ -111,24 +132,14 @@ class RedisStreamTransport:
         event_json = json.dumps(event, ensure_ascii=False, default=str)
         event_type = event.get("type", "")
 
-        # 检查 stream key 是否已存在（首次 XADD 后需设 TTL 防孤儿 key）
-        first_push = not await self._redis.exists(stream_key)
-        # XADD with MAXLEN ~ 1000（近似修剪，性能更好）
-        fields = {"type": event_type, "data": event_json}
-
-        if first_push:
-            # 首推：XADD + EXPIRE 合进一个 pipeline，消除两步之间 producer 崩溃 /
-            # 断连留下无 TTL 孤儿 stream key 的窗口。两命令同一 stream_key（同 slot），
-            # pipeline 在 standalone/Cluster 均安全。仅首推设 TTL：后续推送复用既有 TTL，
-            # 不刷新 → stream key 寿命不会超出 create 时设定的 meta_key（同 EXECUTION_TIMEOUT）。
-            pipe = self._redis.pipeline(transaction=False)
-            pipe.xadd(stream_key, fields, maxlen=1000, approximate=True)
-            pipe.expire(stream_key, self._execution_timeout)
-            entry_id = (await pipe.execute())[0]  # results in command order: [xadd_id, expire]
-        else:
-            entry_id = await self._redis.xadd(
-                stream_key, fields, maxlen=1000, approximate=True
-            )
+        # XADD + 首推 EXPIRE 原子合一（单 key Lua）。脚本内 TTL==-1 判据负责首推
+        # 检测，省去单独的 exists 预查，并消除 XADD 与 EXPIRE 之间的孤儿窗口。
+        # best-effort 契约：stream key 必带 TTL 且不超过 EXECUTION_TIMEOUT；与 meta_key
+        # 剩余 TTL 的精确对齐留给 PR-C（届时 create_stream / TTL bump 移到 RUNNING）。
+        entry_id = await self._script_xadd_with_ttl(
+            keys=[stream_key],
+            args=[event_type, event_json, self._execution_timeout],
+        )
 
         # 注入 _stream_id 到原始 event dict（供 SSE 层使用）
         event["_stream_id"] = entry_id
