@@ -25,8 +25,14 @@ class Settings(BaseSettings):
 
     # SSE 配置
     SSE_PING_INTERVAL: int = 15  # 秒，保持连接活跃
-    EXECUTION_TIMEOUT: int = 1800   # 秒，总执行上限（含 permission 等待），同时用作 stream lifetime
+    EXECUTION_TIMEOUT: int = 1800   # 秒，引擎循环执行上限（含 permission 等待）；超时 → TIMED_OUT 终态
     STREAM_CLEANUP_TTL: int = 60    # 秒，执行结束后 consumer 读取剩余事件的清理窗口
+    # Redis stream/meta key 寿命 = EXECUTION_TIMEOUT + 此余量。必须覆盖引擎 deadline
+    # 之后的 post-processing —— 终态(含 TIMED_OUT)在引擎超时后才由 post-processing
+    # push,key 不能在那之前过期(否则 push_event 落在已过期 key 上 → 终态丢失 / SSE 挂)。
+    # 取 post-processing 的宽松上界(几次 DB 写 × retry × command_timeout);给太长仅让
+    # 崩溃残留 key 多活一会儿(有界自清)。close_stream 正常结束时会重置为 STREAM_CLEANUP_TTL。
+    STREAM_TTL_GRACE: int = 300
     PERMISSION_TIMEOUT: int = 300  # 秒，单次 permission 等待超时
     CANCEL_CHECK_INTERVAL: float = 0.5  # 秒，LLM 流式输出期间轮询 cancel 的最小间隔（避免每 chunk 一次 Redis GET）
 
@@ -153,10 +159,13 @@ class Settings(BaseSettings):
     DATABASE_POOL_TIMEOUT: int = 30
     DATABASE_POOL_RECYCLE: int = 300       # 缩短回收周期，加速故障检测和恢复回切
     # PG per-语句 wall-clock(秒)。后处理不在引擎超时(EXECUTION_TIMEOUT)内 —— per-query
-    # 上界是 DB 层职责。仅 PostgreSQL(asyncpg)生效:setdefault 注入 connect_args,DSN
-    # 显式 ?command_timeout= 可覆盖,设 0 禁用。取"比最慢的合法查询还宽、远小于
-    # EXECUTION_TIMEOUT"。MySQL/TDSQL 无等价 driver 钩子(靠 server innodb_lock_wait_timeout),
-    # SQLite 无此缺口。详见 docs/architecture/execution-lifecycle.md「不变量 4」。
+    # 上界是 DB 层职责。仅 PostgreSQL(asyncpg)生效:setdefault 注入 connect_args。取"比最慢
+    # 的合法查询还宽、远小于 EXECUTION_TIMEOUT"。
+    # 禁用:设本项=0(ARTIFACTFLOW_DB_COMMAND_TIMEOUT=0)→ 不注入。
+    # ⚠️ 不能用 DSN ?command_timeout=0 禁用 —— asyncpg 拒绝 ≤0(connect_utils.py),会启动失败;
+    #    DSN 若显式给值必须 >0,它会覆盖此默认。
+    # MySQL/TDSQL 无等价 driver 钩子(靠 server innodb_lock_wait_timeout),SQLite 无此缺口。
+    # 详见 docs/architecture/execution-lifecycle.md「不变量 4」。
     DB_COMMAND_TIMEOUT: float = 30.0
 
     # JWT 认证配置

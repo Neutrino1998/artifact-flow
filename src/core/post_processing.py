@@ -29,7 +29,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, Optional
 
 from config import config
-from core.events import ExecutionEvent, StreamEventType
+from core.events import ExecutionEvent, StreamEventType, TERMINAL_EVENT_TYPES
 
 
 @dataclass
@@ -184,12 +184,7 @@ def ensure_terminal(pp: PostProcessState) -> None:
     if pp.terminal_appended:
         return
 
-    terminal_types = {
-        StreamEventType.COMPLETE.value,
-        StreamEventType.ERROR.value,
-        StreamEventType.CANCELLED.value,
-        StreamEventType.TIMED_OUT.value,
-    }
+    terminal_types = TERMINAL_EVENT_TYPES  # 权威集合(core.events),含 TIMED_OUT
     # 只看本轮(非 historical)的 events —— state["events"] 是 [historical from
     # parent turns, current turn 实时 append] 的拼接,_persist_events 只写非
     # historical 段。如果误 adopt parent 轮的 historical terminal,本轮就缺终态:

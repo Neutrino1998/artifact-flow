@@ -65,7 +65,7 @@ COMPLETED | CANCELLED_BY_USER | CANCELLED_BY_SYSTEM | TIMED_OUT | FAILED | ORPHA
 
    | driver | per-query 上界 |
    |---|---|
-   | **PostgreSQL**（默认提供的部署形态） | 代码注入 `command_timeout` 默认（`config.DB_COMMAND_TIMEOUT`，setdefault，DSN 可覆盖/禁用），开箱即有界。这是协议安全的 per-语句超时（asyncpg 内置 server 端取消 + 连接回收）。**不要在应用层裸 `asyncio.wait_for` 包 DB 写** —— 会污染池化连接 + 留 commit 歧义。 |
+   | **PostgreSQL**（默认提供的部署形态） | 代码注入 `command_timeout` 默认（`config.DB_COMMAND_TIMEOUT`，setdefault），开箱即有界。这是协议安全的 per-语句超时（asyncpg 内置 server 端取消 + 连接回收）。禁用：`ARTIFACTFLOW_DB_COMMAND_TIMEOUT=0`（跳过注入）；**不能**用 DSN `?command_timeout=0` —— asyncpg 拒绝 ≤0、会启动失败；DSN 若显式给值须 >0 且覆盖默认。**不要在应用层裸 `asyncio.wait_for` 包 DB 写** —— 会污染池化连接 + 留 commit 歧义。 |
    | **MySQL / TDSQL**（兼容目标） | driver 无等价钩子（aiomysql 不吃 `read/write_timeout`）→ per-查询上界由**部署方基础设施**负责：`innodb_lock_wait_timeout`（写锁等待，默认 ~50s）+ 中间件/server 超时。原因同 timezone：我们够不到托管实例的 server GUC。 |
    | **SQLite** | 无此缺口（进程内，`PRAGMA busy_timeout` 兜锁）。 |
 

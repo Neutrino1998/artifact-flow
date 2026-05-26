@@ -5,8 +5,11 @@ RedisStreamTransport — Redis Streams-backed StreamTransport 实现
 使用 Redis Streams (XADD/XREAD) 实现事件缓冲和消费。
 
 Key 设计（{prefix:id} 为 hash tag，确保同 entity 同 slot）：
-    {prefix:msg_id}:stream       STREAM    TTL=EXECUTION_TIMEOUT  事件流
-    {prefix:msg_id}:stream_meta  HASH      TTL=EXECUTION_TIMEOUT  stream 元数据 {owner, status}
+    {prefix:msg_id}:stream       STREAM    TTL=EXECUTION_TIMEOUT+STREAM_TTL_GRACE  事件流
+    {prefix:msg_id}:stream_meta  HASH      TTL=EXECUTION_TIMEOUT+STREAM_TTL_GRACE  stream 元数据 {owner, status}
+
+注意 TTL 含 STREAM_TTL_GRACE：key 必须活过引擎 deadline 之后的 post-processing
+（终态——含 TIMED_OUT——在那时才 push），否则 push_event 落在已过期 key 上 → 终态丢失。
 """
 
 import asyncio
@@ -21,11 +24,12 @@ from utils.logger import get_logger
 
 logger = get_logger("ArtifactFlow")
 
-# 终结事件类型
-_TERMINAL_EVENTS = frozenset(("complete", "cancelled", "error"))
+# 终结事件类型(consumer 见到即 return)。本地副本——传输层不依赖执行语义;
+# 与 core.events.TERMINAL_EVENT_TYPES 的一致性由 tests/core/test_terminal_event_sync.py 守护。
+_TERMINAL_EVENTS = frozenset(("complete", "cancelled", "timed_out", "error"))
 
 # Lua CAS: 仅当 consumer_id 匹配 且 status 仍为 streaming 时回退到 pending。
-# 不缩短 TTL — stream 生命周期由 EXECUTION_TIMEOUT 决定，consumer 断连不影响。
+# 不缩短 TTL — stream 生命周期由 stream TTL（EXECUTION_TIMEOUT+STREAM_TTL_GRACE）决定，consumer 断连不影响。
 # 双重条件防止两类竞态：
 #   - consumer_id 不匹配 → 新 consumer 已接管，旧 finally 不动
 #   - status != streaming → producer 已 close，consumer finally 不动
@@ -68,10 +72,13 @@ class RedisStreamTransport:
         key_prefix: str,
         cleanup_ttl: int = 60,
         execution_timeout: int = 1800,
+        ttl_grace: int = 0,
     ):
         self._redis = redis_client
         self._cleanup_ttl = cleanup_ttl
-        self._execution_timeout = execution_timeout
+        # stream/meta key 寿命 = 引擎 deadline + 余量,必须覆盖 deadline 之后的
+        # post-processing(终态在那时才 push)。不要用裸 execution_timeout 当 key TTL。
+        self._stream_ttl = execution_timeout + ttl_grace
         self._prefix = key_prefix
         self._script_revert_to_pending = None
         self._script_xadd_with_ttl = None
@@ -110,7 +117,7 @@ class RedisStreamTransport:
             "lease_check_key": lease_check_key or "",
             "lease_expected_owner": lease_expected_owner or "",
         })
-        await self._redis.expire(meta_key, self._execution_timeout)
+        await self._redis.expire(meta_key, self._stream_ttl)
         # 注意：不对尚未创建的 stream key 做 EXPIRE（EXPIRE 对不存在的 key 是 no-op，
         # 会导致后续 XADD 创建的 key 没有 TTL → 孤儿 key）。
         # stream key 的 TTL 在 push_event 首次 XADD 后设置。
@@ -134,11 +141,12 @@ class RedisStreamTransport:
 
         # XADD + 首推 EXPIRE 原子合一（单 key Lua）。脚本内 TTL==-1 判据负责首推
         # 检测，省去单独的 exists 预查，并消除 XADD 与 EXPIRE 之间的孤儿窗口。
-        # best-effort 契约：stream key 必带 TTL 且不超过 EXECUTION_TIMEOUT；与 meta_key
-        # 剩余 TTL 的精确对齐留给 PR-C（届时 create_stream / TTL bump 移到 RUNNING）。
+        # best-effort 契约：stream key 必带 TTL（= EXECUTION_TIMEOUT + STREAM_TTL_GRACE，
+        # 覆盖 post-processing）；与 meta_key 剩余 TTL 的精确对齐留给 PR-C（届时
+        # create_stream / TTL bump 移到 RUNNING，时钟起点统一）。
         entry_id = await self._script_xadd_with_ttl(
             keys=[stream_key],
-            args=[event_type, event_json, self._execution_timeout],
+            args=[event_type, event_json, self._stream_ttl],
         )
 
         # 注入 _stream_id 到原始 event dict（供 SSE 层使用）
@@ -167,7 +175,7 @@ class RedisStreamTransport:
             raise StreamNotFoundError(stream_id)
 
         # 生成 consumer_id，标记为 streaming
-        # 不移除 TTL — stream 生命周期由 EXECUTION_TIMEOUT 决定，
+        # 不移除 TTL — stream 生命周期由 stream TTL（EXECUTION_TIMEOUT+STREAM_TTL_GRACE）决定，
         # 如果 producer crash 未调 close_stream，不会产生永久孤儿 key
         consumer_id = os.urandom(8).hex()
         await self._redis.hset(meta_key, mapping={
@@ -246,7 +254,7 @@ class RedisStreamTransport:
             # Consumer 断连：CAS 回退 meta 到 pending（单 key Lua，Cluster 安全）。
             # 仅当 consumer_id 仍匹配（说明没有新 consumer 接管）时才回退，
             # 避免覆盖新 consumer 的 streaming 或 producer 的 closed。
-            # 不缩短 TTL — stream 生命周期由 EXECUTION_TIMEOUT 决定。
+            # 不缩短 TTL — stream 生命周期由 stream TTL（EXECUTION_TIMEOUT+STREAM_TTL_GRACE）决定。
             # 注意：break 退出 async for 不会自动触发 aclose()，调用方需显式
             # await gen.aclose() 以确保此 finally 块执行。
             await self._script_revert_to_pending(

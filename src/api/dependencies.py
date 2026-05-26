@@ -137,6 +137,7 @@ async def init_globals() -> None:
             _redis_client,
             cleanup_ttl=config.STREAM_CLEANUP_TTL,
             execution_timeout=config.EXECUTION_TIMEOUT,
+            ttl_grace=config.STREAM_TTL_GRACE,
             key_prefix=config.REDIS_KEY_PREFIX,
         )
         _stream_transport.init_scripts()

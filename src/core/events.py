@@ -49,6 +49,19 @@ class StreamEventType(Enum):
     EXECUTION_QUEUED = "execution_queued"
 
 
+# 终态事件类型 —— 执行到达最终状态（也是 stream 的停止条件）。
+# 这是这个概念的**权威定义**(single source of truth)。core 层(decide_terminal /
+# ensure_terminal)直接引用;传输/路由层故意保留各自的本地副本(不依赖执行语义),
+# 由 tests/core/test_terminal_event_sync.py 交叉校验防漂移。新增终态类型时改这里,
+# 测试会红线提示哪些本地副本忘了同步(P1#2: TIMED_OUT 当初就漏在传输/路由层)。
+TERMINAL_EVENT_TYPES = frozenset({
+    StreamEventType.COMPLETE.value,
+    StreamEventType.CANCELLED.value,
+    StreamEventType.TIMED_OUT.value,
+    StreamEventType.ERROR.value,
+})
+
+
 # ============================================================
 # 内存事件（执行过程中累积，最终 batch write）
 # ============================================================
