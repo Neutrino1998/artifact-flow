@@ -77,6 +77,12 @@ describe('buildContentSecurityPolicy', () => {
     expect(d.get('base-uri')).toBe("'none'");
   });
 
+  it('treats empty-string apiUrl as same-origin (prod build sets "")', () => {
+    // prod sets NEXT_PUBLIC_API_URL="" → apiBase preserves it via ?? → same-origin.
+    const csp = buildContentSecurityPolicy({ nonce: 'n', isDev: false, apiUrl: '' });
+    expect(directives(csp).get('connect-src')).toBe("'self'");
+  });
+
   it('tolerates an unparseable apiUrl (falls back to self)', () => {
     const csp = buildContentSecurityPolicy({ nonce: 'n', isDev: false, apiUrl: 'not a url' });
     expect(directives(csp).get('connect-src')).toBe("'self'");

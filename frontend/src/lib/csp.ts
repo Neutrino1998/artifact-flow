@@ -19,7 +19,10 @@ export interface CspOptions {
   nonce: string;
   /** Relaxes the policy for the dev server (HMR eval + websocket). */
   isDev: boolean;
-  /** NEXT_PUBLIC_API_URL value; empty/undefined in prod (same-origin). */
+  /**
+   * Resolved backend origin (apiBase.API_URL). "" → same-origin (prod), so
+   * connect-src stays 'self'; a concrete origin gets whitelisted.
+   */
   apiUrl?: string;
 }
 

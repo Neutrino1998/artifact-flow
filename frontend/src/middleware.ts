@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { buildContentSecurityPolicy, buildSecurityHeaders } from '@/lib/csp';
+import { API_URL } from '@/lib/apiBase';
 
 /**
  * Per-request CSP + hardening headers. The nonce is generated here and pushed
@@ -12,7 +13,10 @@ export function middleware(request: NextRequest): NextResponse {
   const csp = buildContentSecurityPolicy({
     nonce,
     isDev: process.env.NODE_ENV !== 'production',
-    apiUrl: process.env.NEXT_PUBLIC_API_URL,
+    // Same resolved origin the REST/SSE client uses (api.ts/sse.ts) — see
+    // apiBase.ts. '' stays same-origin (→ connect-src 'self'); undefined falls
+    // back to the localhost default so a fresh clone isn't CSP-blocked.
+    apiUrl: API_URL,
   });
 
   const requestHeaders = new Headers(request.headers);

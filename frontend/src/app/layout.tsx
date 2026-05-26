@@ -22,7 +22,15 @@ export default async function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
-        <script nonce={nonce} dangerouslySetInnerHTML={{ __html: themeScript }} />
+        {/* suppressHydrationWarning: the browser blanks the nonce attribute after
+            parse (CSP anti-exfiltration), so the client reads nonce="" while the
+            server markup has the real nonce — an expected, benign mismatch. The
+            script has already executed by then. */}
+        <script
+          nonce={nonce}
+          suppressHydrationWarning
+          dangerouslySetInnerHTML={{ __html: themeScript }}
+        />
       </head>
       <body className="min-h-screen bg-chat dark:bg-chat-dark text-text-primary dark:text-text-primary-dark">
         <ThemeInitializer />
