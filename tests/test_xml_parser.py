@@ -205,6 +205,32 @@ class TestCdataAwareSplit:
 
 
 # ============================================================
+# 需要 repair 且结果无参的合法调用不应误判 __malformed__（review P2 回归）
+# ============================================================
+
+class TestParamlessRepairableCalls:
+    def test_tag_equals_syntax_with_empty_params(self):
+        """<name=ping</name> 需要 = 修复，params 为空 —— 修复后应返回 ping/{}，而非 __malformed__。"""
+        text = "<tool_call><name=ping</name><params></params></tool_call>"
+        results = parse_tool_calls(text)
+        assert len(results) == 1
+        tc = results[0]
+        assert tc.name == "ping"
+        assert tc.params == {}
+        assert tc.error is None
+
+    def test_tool_name_as_tag_with_empty_params(self):
+        """<ping><params></params></ping> 需要 tool-name-as-tag 修复，params 为空 —— 同上。"""
+        text = "<tool_call><ping><params></params></ping></tool_call>"
+        results = parse_tool_calls(text)
+        assert len(results) == 1
+        tc = results[0]
+        assert tc.name == "ping"
+        assert tc.params == {}
+        assert tc.error is None
+
+
+# ============================================================
 # Existing repairs now register warnings
 # ============================================================
 

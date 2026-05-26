@@ -140,13 +140,18 @@ class XMLToolCallParser:
         if repaired != content:
             try:
                 repaired_result = XMLToolCallParser._parse_with_etree(repaired)
-                if repaired_result is not None and repaired_result.params:
+                # repair 后只要解析成功就返回——**不**用 params 是否非空判定。否则"需要 repair
+                # 才能解析、且结果无参"的合法调用（如 `<name=ping</name><params></params>`、
+                # `<ping><params></params></ping>`，或参数全可选的 custom HTTP tool）会被误判
+                # __malformed__。repair 已经跑过（含 _repair_scattered_params 收散落标签），无参
+                # 即最终结果。
+                if repaired_result is not None:
                     repaired_result.warnings = warnings
                     return repaired_result
             except ET.ParseError:
                 pass
 
-        # repair 未能补出带参解析 → 回退到首次严格解析的干净结果（含无参工具调用，params={}）。
+        # repair 没改动内容 / 重解析失败 → 回退到首次严格解析的干净结果（含无参工具调用，params={}）。
         if etree_result is not None:
             etree_result.warnings = warnings
             return etree_result

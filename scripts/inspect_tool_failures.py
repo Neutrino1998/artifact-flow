@@ -39,6 +39,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
 from db.models import MessageEvent
+from tools.xml_parser import XMLToolCallParser
 
 
 def _resolve_engine_url() -> str:
@@ -52,22 +53,18 @@ def _resolve_engine_url() -> str:
 
 
 def _extract_tool_block(content: str, tool_name: str) -> str | None:
-    """从 llm_complete 原文里抽出 <name>tool_name</name> 的那个 <tool_call> 块。
+    """从 llm_complete 原文里抽出 <name>tool_name</name> 的那个 <tool_call> 块(raw,含包裹)。
 
-    末尾未闭合(漏 </tool_call>,小模型常见)也兜一把。
+    复用 parser 的 CDATA-aware 拆分:CDATA 内的字面 </tool_call> 不会让"留尾看 XML 收尾"截错位
+    (否则会截到内容里的假闭合,看到的不是真实尾部)。末尾未闭合(漏 </tool_call>)由
+    _split_tool_calls 作为 trailing 块兜住。
     """
     if not content:
         return None
-    for m in re.finditer(r"<tool_call>(.*?)</tool_call>", content, re.DOTALL | re.IGNORECASE):
-        nm = re.search(r"<name>\s*(\w+)\s*</name>", m.group(1))
+    for inner, raw, _is_trailing in XMLToolCallParser._split_tool_calls(content):
+        nm = re.search(r"<name>\s*(\w+)\s*</name>", inner)
         if nm and nm.group(1) == tool_name:
-            return m.group(0)
-    opens = list(re.finditer(r"<tool_call>", content, re.IGNORECASE))
-    if opens:
-        tail = content[opens[-1].start():]
-        nm = re.search(r"<name>\s*(\w+)\s*</name>", tail)
-        if nm and nm.group(1) == tool_name:
-            return tail
+            return raw
     return None
 
 
