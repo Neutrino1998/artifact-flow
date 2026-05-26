@@ -76,6 +76,17 @@ def _short(v, n: int = 100) -> str:
     return s if len(s) <= n else s[:n] + f"…(+{len(s) - n})"
 
 
+def _head_tail(s: str, n: int, head_frac: float = 0.6) -> str:
+    """留头留尾、挖掉中段 —— 头部看模型填了哪些参数,尾部看 XML 是否正常收尾
+    (闭合标签齐不齐;输出撞 4096 截断时尾部会缺 </content>/</tool_call> 或半截 CDATA)。"""
+    if len(s) <= n:
+        return s
+    head_n = int(n * head_frac)
+    tail_n = n - head_n
+    marker = f"…(中间省略 {len(s) - n} 字 —— 留头留尾,重点看下方尾部 XML 是否正常闭合)…"
+    return s[:head_n] + "\n" + marker + "\n" + s[-tail_n:]
+
+
 async def _run(args) -> None:
     threshold = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=args.hours)
     engine = create_async_engine(_resolve_engine_url())
@@ -131,12 +142,9 @@ async def _run(args) -> None:
                 llm_row = (await session.execute(llm_stmt)).scalars().first()
                 raw = _extract_tool_block((llm_row.data or {}).get("content") or "", args.tool) if llm_row else None
                 if raw:
-                    snippet = raw[: args.max_chars]
-                    print("  --- raw <tool_call> the model actually generated ---")
-                    for line in snippet.splitlines():
+                    print(f"  --- raw <tool_call> the model actually generated (len={len(raw)}) ---")
+                    for line in _head_tail(raw, args.max_chars).splitlines():
                         print("    " + line)
-                    if len(raw) > args.max_chars:
-                        print(f"    …(truncated, +{len(raw) - args.max_chars} chars)")
                 else:
                     print("  (raw tool_call 无法从前序 llm_complete 回捞)")
                 print()
@@ -155,7 +163,7 @@ def main():
     p.add_argument("--error-contains", default="Missing required parameter", help="substring filter on error")
     p.add_argument("--hours", type=int, default=720, help="lookback window in hours")
     p.add_argument("--limit", type=int, default=3, help="how many raw examples to print")
-    p.add_argument("--max-chars", type=int, default=2500, help="cap on each raw block printed")
+    p.add_argument("--max-chars", type=int, default=2500, help="raw block 字符预算(留头留尾,中段省略)")
     asyncio.run(_run(p.parse_args()))
 
 
