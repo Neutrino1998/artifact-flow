@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import { headers } from 'next/headers';
 import './globals.css';
 import ThemeInitializer from '@/components/ThemeInitializer';
 import { APP_NAME } from '@/lib/branding';
@@ -10,15 +11,18 @@ export const metadata: Metadata = {
   description: 'Multi-agent research system',
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
+  // CSP nonce set by middleware — applied to the inline theme script so it runs
+  // under `script-src 'nonce-…'` (no 'unsafe-inline').
+  const nonce = (await headers()).get('x-nonce') ?? undefined;
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
-        <script dangerouslySetInnerHTML={{ __html: themeScript }} />
+        <script nonce={nonce} dangerouslySetInnerHTML={{ __html: themeScript }} />
       </head>
       <body className="min-h-screen bg-chat dark:bg-chat-dark text-text-primary dark:text-text-primary-dark">
         <ThemeInitializer />
