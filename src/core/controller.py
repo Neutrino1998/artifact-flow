@@ -110,6 +110,14 @@ class ExecutionController:
         """
         if user_input is None:
             raise ValueError("'user_input' is required for new message execution")
+        # 不变量下沉到核心入口：空文本且无附件 = 本轮无可处理输入，会让 USER_INPUT 正文
+        # 为空 → 被 EventHistory 过滤 → 空 history → ContextManager.build 在 [-1] 崩。
+        # 在此（任何 yield / DB 写之前）拒掉，不依赖调用方校验；router 另留 422 作为 HTTP
+        # 快速边界。带附件时 execute_loop 会给 USER_INPUT 拼归属串（非空），故仅无附件时要求非空。
+        if not user_input.strip() and not uploaded_artifacts:
+            raise ValueError(
+                "'user_input' must be non-empty when no artifacts are attached"
+            )
 
         # ========== 准备工作 ==========
         if not conversation_id:
