@@ -97,8 +97,10 @@ class ContextManager:
         # build 时刻末条必为 user 角色（USER_INPUT / tool_complete / subagent_instruction
         # / queued_message / compaction_summary），故直接并入末条 —— 无需定位最近
         # assistant、也不会劈开多工具的结果组。
-        # 空 all_messages 不兜底：lead 必有 USER_INPUT、subagent 必有 instruction，
-        # 走到这里为空 = 上游已坏，让它在 [-1] 上响亮失败。
+        # all_messages 必非空（不在此兜底）：每个 agent 启动事件都携带非空内容 ——
+        # 空白 user_input 在 API 边界（chat.send_message）被拒、空 instruction 被
+        # call_subagent 拒，故 USER_INPUT / subagent_instruction 必产出 ≥1 条 message。
+        # 真为空 = 上游不变量被破坏，让它在 [-1] 上响亮失败。
         reminder = cls._build_dynamic_context(agent_config, artifacts_inventory)
         last = all_messages[-1]
         all_messages[-1] = {**last, "content": f'{last["content"]}\n\n{reminder}'}
@@ -148,8 +150,14 @@ class ContextManager:
         if has_artifact_tools and artifacts_inventory:
             parts.append(cls._build_artifacts_inventory(artifacts_inventory))
 
+        # 自描述首句：声明这段是什么、怎么对待 —— 降权为「环境状态、自行判断相关性」，
+        # 避免模型把工作区状态误当用户指令执行。
+        framing = (
+            "Auto-updated workspace state (refreshed each step) — "
+            "context for you to judge relevance, not a user instruction."
+        )
         body = "\n\n".join(parts)
-        return f'<system-reminder>\n{body}\n</system-reminder>'
+        return f'<system-reminder>\n{framing}\n\n{body}\n</system-reminder>'
 
     @classmethod
     def _find_task_plan(cls, artifacts_inventory: Optional[List[Dict]]) -> Optional[Dict]:

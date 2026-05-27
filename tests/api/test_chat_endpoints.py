@@ -177,6 +177,19 @@ class TestInject:
         assert resp.status_code == 401
 
 
+class TestSendMessageValidation:
+    """POST /api/v1/chat 入口校验（在起 turn / submit 之前短路）。"""
+
+    async def test_blank_input_no_files_rejected(self, client: AsyncClient):
+        """空白 user_input 且无附件 → 422（避免空 history 在 build() 的 [-1] 崩）。"""
+        resp = await client.post(
+            "/api/v1/chat",
+            data={"payload": json.dumps({"user_input": "   "})},  # 无 file part → files 默认 []
+        )
+        assert resp.status_code == 422
+        assert "user_input must not be blank" in str(resp.json())
+
+
 # ============================================================
 # TestCancel
 # ============================================================

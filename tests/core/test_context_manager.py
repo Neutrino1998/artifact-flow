@@ -111,6 +111,8 @@ class TestSystemPrompt:
         reminder = messages[-1]["content"]
         assert "<system-reminder>" in reminder
         assert "<system_time>" in reminder
+        # 自描述首句：声明这是工作区状态、降权为非指令
+        assert "workspace state" in reminder and "not a user instruction" in reminder
 
     def test_with_tools_includes_tool_instruction(self):
         from tools.base import BaseTool, ToolPermission, ToolResult, ToolParameter

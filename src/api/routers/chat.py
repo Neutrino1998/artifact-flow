@@ -105,6 +105,15 @@ async def send_message(
             detail=f"Too many attachments: {attachment_count} (max {config.MAX_CHAT_ATTACHMENTS})",
         )
 
+    # 空白正文且无附件 = 本轮无可处理输入：USER_INPUT 正文为空 → 被 EventHistory 过滤
+    # → history 为空 → build() 在 [-1] 崩。边界即拒（前端 sendDisabled 同条件，这里是
+    # 非 UI 客户端的兜底）；带附件时由归属串补足正文，故仅无附件时要求非空。
+    if not request.user_input.strip() and attachment_count == 0:
+        raise HTTPException(
+            status_code=422,
+            detail="user_input must not be blank when no files are attached",
+        )
+
     # 为新消息准备 ID
     conversation_id = request.conversation_id
     if not conversation_id:
