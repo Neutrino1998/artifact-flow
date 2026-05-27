@@ -19,6 +19,13 @@ export default function MessageInput() {
   const isStreaming = useStreamStore((s) => s.isStreaming);
   const cancelling = useStreamStore((s) => s.cancelling);
   const setCancelling = useStreamStore((s) => s.setCancelling);
+  // QUEUED marker: set on the execution_queued SSE event, cleared on the first
+  // agent_start (turn started RUNNING) / endStream / reset. While set, the turn
+  // is parked in a worker-local concurrency semaphore and is neither cancellable
+  // nor injectable — both endpoints gate on the engine being interactive (RUNNING)
+  // and 409 otherwise. We use it to disable the composer action button so it
+  // doesn't silently no-op during the wait.
+  const queuedInfo = useStreamStore((s) => s.queuedInfo);
   const toggleArtifactPanel = useUIStore((s) => s.toggleArtifactPanel);
 
   const stagedFiles = useStagedFilesStore((s) => s.files);
@@ -278,8 +285,12 @@ export default function MessageInput() {
             {/* Unified Send / Stop / Cancelling / Inject button */}
             {(() => {
               const isStop = isStreaming && !content.trim() && !cancelling;
+              // A queued turn can be neither stopped nor injected into until it
+              // starts running; disable the button so the click doesn't 409 into
+              // a silent no-op. Re-enables when agent_start clears queuedInfo.
+              const queued = queuedInfo !== null;
               const sendDisabled =
-                (!isStreaming && !content.trim() && !hasStaged) || cancelling || sending;
+                (!isStreaming && !content.trim() && !hasStaged) || cancelling || sending || queued;
               return (
                 <button
                   onClick={handleSend}
@@ -290,9 +301,9 @@ export default function MessageInput() {
                       : 'bg-accent text-white hover:bg-accent-hover'
                   }`}
                   aria-label={
-                    cancelling ? 'Cancelling' : sending ? 'Sending' : isStop ? 'Stop generation' : isStreaming ? 'Inject message' : 'Send message'
+                    queued ? 'Queued' : cancelling ? 'Cancelling' : sending ? 'Sending' : isStop ? 'Stop generation' : isStreaming ? 'Inject message' : 'Send message'
                   }
-                  title={cancelling ? '正在停止…' : sending ? '发送中…' : isStop ? '停止生成' : isStreaming ? '追加指令' : '发送消息'}
+                  title={queued ? '排队中，开始运行后可操作' : cancelling ? '正在停止…' : sending ? '发送中…' : isStop ? '停止生成' : isStreaming ? '追加指令' : '发送消息'}
                 >
                   {cancelling || sending ? (
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="animate-spin">
