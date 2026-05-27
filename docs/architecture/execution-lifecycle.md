@@ -8,7 +8,7 @@
 
 后半场（终态）已经是一台正确的状态机 —— `core/post_processing.py` 的 `PostProcessState` ledger + `decide_terminal()`（唯一裁判）+ `choose_response_for_terminal()`（`(terminal_type, cancel_source) → display` 的单一映射），三条 cancel 路径都汇入它。
 
-> 前半场 `QUEUED`/`RUNNING` 建模已落地（PR-C：`mark_interactive` 移到取得 semaphore 之后、对 lease owner 做 fail-closed CAS；**inject 与 cancel 都 gate 在 RUNNING（interactive）**）。**stream key 心跳续期是明确 deferred 的非目标** —— 保留 `STREAM_TTL_GRACE` 固定 TTL 作为 sanctioned best-effort 近似（理由见「三条正交的时间轴」与「维持 defer 的边界」）。
+> 前半场 `QUEUED`/`RUNNING` 建模已落地：`mark_interactive` 移到取得 semaphore 之后、对 lease owner 做 fail-closed CAS；**inject 与 cancel 都 gate 在 RUNNING（interactive）**。**stream key 心跳续期是明确 deferred 的非目标** —— 保留 `STREAM_TTL_GRACE` 固定 TTL 作为 sanctioned best-effort 近似（理由见「三条正交的时间轴」与「维持 defer 的边界」）。
 
 ## 终态 taxonomy
 
@@ -29,7 +29,7 @@ COMPLETED | CANCELLED_BY_USER | CANCELLED_BY_SYSTEM | TIMED_OUT | FAILED | ORPHA
 
 ## Transition 表（authority + 必须一起发生的副作用）
 
-后半场（`RUNNING → 终态`）已落地；前半场（`SUBMITTED → QUEUED → RUNNING`）的行为**目标模型**，前半场拆分尚未实现（见 transition 内 **【计划中】** 标注）。
+`SUBMITTED → QUEUED → RUNNING → 终态` 全程已落地为一等状态机。下表每行给出该 transition 的**唯一 authority** 与**必须一起发生的副作用**。
 
 | transition | 唯一 authority | 必须发生的副作用 |
 |---|---|---|
@@ -80,7 +80,7 @@ COMPLETED | CANCELLED_BY_USER | CANCELLED_BY_SYSTEM | TIMED_OUT | FAILED | ORPHA
 
 > **现状（accepted best-effort，非过渡态）**：stream/meta key TTL 是创建时设定的固定值 `EXECUTION_TIMEOUT + STREAM_TTL_GRACE`（`STREAM_TTL_GRACE` 兜引擎 deadline 之后的 post-processing）。这是 liveness 轴的**近似**：正常场景有效；唯一残余缺口是「单实例饱和（> `MAX_CONCURRENT`）时，排队等待 + 本轮 run + post 之和超过该固定 TTL」，后果**仅是丢实时 SSE 终态** —— DB 终态始终正确，刷新 / 重连即恢复。
 >
-> **为什么不上心跳续期（PR-C 决策，deferred 非目标）**：stream key 是 glance-only 的传输键（用户在它上面 glance，不 act），失败模式自愈、可恢复。把 lease↔stream 统一成心跳续期要给 `StreamTransport`（Protocol + InMemory + Redis）加 `refresh_ttl`、接进 `_renew_loop`、删 `STREAM_TTL_GRACE` —— 为很少触发、glance-only、可自愈的边缘搭强一致机器。按 step-back-on-design-creep 接受固定 TTL 近似为长期契约；若该缺口在实测中真咬人，再单独立 PR。
+> **为什么不上心跳续期（deferred 非目标）**：stream key 是 glance-only 的传输键（用户在它上面 glance，不 act），失败模式自愈、可恢复。把 lease↔stream 统一成心跳续期要给 `StreamTransport`（Protocol + InMemory + Redis）加 `refresh_ttl`、接进 `_renew_loop`、删 `STREAM_TTL_GRACE` —— 为很少触发、glance-only、可自愈的边缘搭强一致机器。按 step-back-on-design-creep 接受固定 TTL 近似为长期契约；若该缺口在实测中真咬人，再单独处理。
 
 ## 不变量
 

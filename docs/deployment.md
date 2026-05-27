@@ -274,8 +274,6 @@ docker load -i tmp/artifactflow-app-1.0.1.tar.gz
 > # Memory（字节）：nginx=0 / backend=2147483648 / frontend=1073741824 /
 > # postgres=2147483648 / redis=805306368
 > ```
->
-> 完整事故背景（2026-05-14 内网卡死、bug ② 现场对比、reviewer 多轮反馈演进）见 `docs/_archive/ops/incident-2026-05-14-eventloop-wedge.md` + `incident-2026-05-14-fix-plan.md`（已 archive，作历史背景参考，不再维护）。
 
 ### 运行时配置变更（无需 rebuild / 重新传镜像）
 
@@ -376,6 +374,8 @@ ssh target 'cd /opt/artifactflow && \
 | `ARTIFACTFLOW_CORS_ALLOW_METHODS` | `["*"]` | 允许的 HTTP 方法 |
 | `ARTIFACTFLOW_CORS_ALLOW_HEADERS` | `["*"]` | 允许的请求头 |
 
+> **启动期 footgun 守卫**：`CORS_ALLOW_CREDENTIALS=true`（默认）与 `CORS_ORIGINS` 含 `"*"` **不兼容** —— Starlette 在该组合下反射请求 Origin，等于"任意站点都能读到携带凭证的响应"。命中即**拒绝启动**（`config.py` 启动校验）。要放开跨域，显式列出 origin（`ARTIFACTFLOW_CORS_ORIGINS='["https://app.example.com"]'`）；确需通配时须同时设 `ARTIFACTFLOW_CORS_ALLOW_CREDENTIALS=false`。
+
 ### 其他
 
 | 变量 | 默认值 | 说明 |
@@ -404,6 +404,7 @@ ssh target 'cd /opt/artifactflow && \
 1. `ARTIFACTFLOW_JWT_SECRET` 必须设置
 2. `ARTIFACTFLOW_DATABASE_URL` 或 `ARTIFACTFLOW_DATABASE_URLS` 必须设置
 3. 启用 Redis（`ARTIFACTFLOW_REDIS_URL` 非空）时，`ARTIFACTFLOW_REDIS_KEY_PREFIX` 必须设置
+4. `ARTIFACTFLOW_CORS_ALLOW_CREDENTIALS=true` 时 `ARTIFACTFLOW_CORS_ORIGINS` 不得含 `"*"`（见上方 [CORS](#cors) footgun 守卫）
 
 ---
 
@@ -514,6 +515,7 @@ flowchart TD
 - Swagger 文档：生产环境下 `/docs`、`/redoc`、`/openapi.json` 返回 404
 - `--scale` 支持：使用 Docker 内部 DNS resolver `127.0.0.11`
 - 维护开关：`deploy/maintenance/MAINTENANCE_ON` flag 文件控制（详见下方"维护模式"）
+- **`X-Real-IP`（登录频控依赖）**：各 location 必须设 `proxy_set_header X-Real-IP $remote_addr` —— 后端 per-IP 登录频控**只读这个头**（刻意不信可被客户端伪造的 `X-Forwarded-For`）。安全前提是 backend 仅 `expose`、不发布主机端口，只经 nginx 可达，故这个头不可伪造。换自定义代理 / 删掉它 → per-IP 限流静默退化成"所有请求共用 nginx 容器一个 IP 桶"（per-username 主防线仍在）。`deploy/nginx.conf` 已在各 location 设好。
 
 ### 维护模式（无停机更新窗口）
 

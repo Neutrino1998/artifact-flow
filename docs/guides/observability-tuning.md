@@ -4,6 +4,17 @@
 
 `observability_report.py` 数据源三处:`MessageEvent` 表(LLM / 工具调用)、`data/observability/metrics.jsonl*`(`RuntimeSampler` 周期采样)、`data/observability/loop-lag.jsonl*`(`LoopLagWatchdog` 软退化事件)。脚本对齐见 `scripts/observability_report.py:9-21` 的 docstring。
 
+## 背景:这套观测 + 兜底为什么存在
+
+整套机制(报表 + `LoopLagWatchdog` + `DeadmanSwitch` + `update_artifact` 的几个输入硬上界)是针对一次**同步 CPU 死算卡死 event loop** 的事故加的:`update_artifact` 的 Layer 2 fuzzy match 在超大输入下进入平方级偏移枚举,纯用户态死算并攥住 GIL,把整个 asyncio loop 冻了约 96 分钟、`/health/live` 全程无响应。
+
+关键认知:引擎的 cancel / timeout / lease-fencing 全建立在 `asyncio.Task.cancel()` 上,是**协作式**的——一个不 `await`、或在 C 扩展里攥着 GIL 的同步段会**同时穿透这三层**。所以防线只能分层:
+
+- **工具侧**给算法上界 + wall-clock 兜底(`MAX_FUZZY_OLD_STR_LEN` / `MAX_UNIQUE_CENTERS` / `MAX_FUZZY_WALL_CLOCK_MS`)——引擎语义上兜不住只有工具作者才理解的 CPU 成本;
+- **loop 侧**用 `LoopLagWatchdog` 软退化预警,`DeadmanSwitch` 在独立 C 线程兜底 faulthandler dump(C 扩展持 GIL 时连 watchdog 自己都睡死,见 Section 4)。
+
+本文档「隐藏常量速查」里的常量大多是这套防线的旋钮,所以反复强调**改之前先有数据**。
+
 ## 跑一下
 
 ```bash
@@ -240,14 +251,14 @@ ab19...    8
 | `MAX_FUZZY_WALL_CLOCK_MS` | 500 | 见 Section 3.3 |
 | `FUZZY_MAX_L_DIST` | 16 | k 绝对上界;调大 = 允许更大编辑距离,但 Step 4 `(2k+1)²` 偏移枚举平方增,wall-clock 必然涨 |
 | `FUZZY_MAX_RATIO` | 0.10 | k 比例上界;调大 = 短串容易过松误匹配,见 Section 3.4 |
-| `MAX_FUZZY_OLD_STR_LEN` | 10000 | input 硬上界,m > 此值立即 `bail_budget`;**这是事故根因防线**,改之前看 incident doc PR-1 §决策依据 |
+| `MAX_FUZZY_OLD_STR_LEN` | 10000 | input 硬上界,m > 此值立即 `bail_budget`;**这是事故根因防线**(见顶部「背景」)——是硬 bail 不是性能旋钮,放大前先确认偏移枚举的平方代价仍可控 |
 
 ### Observability(`src/config.py:65-78`)
 
 | 常量 | 默认 | 调整信号 |
 |---|---|---|
 | `LOOP_LAG_WARN_MS` | 500 | 见 Section 4.1 |
-| `WATCHDOG_DEADMAN_TIMEOUT_MS` | 10000 | faulthandler dump 倒计时;偏保守,出现"长但合法的同步段"误触再加(目前主要风险已被 PR-1 覆盖);改前看 deadman 设计 `deadman.py:14-18` |
+| `WATCHDOG_DEADMAN_TIMEOUT_MS` | 10000 | faulthandler dump 倒计时;偏保守,出现"长但合法的同步段"误触再加(目前主要风险已被 `update_artifact` 的输入上界覆盖,见顶部「背景」);改前看 deadman 设计 `deadman.py:14-18` |
 | `OBS_SAMPLE_INTERVAL_SEC` | 30 | sampler 周期;调小 = jsonl 增长加速 + 多一份 IO 自扰动观测者;调大 = 颗粒粗 |
 | `OBS_LONG_TASK_AGE_SEC` | 60 | task 超此值进 `tasks_long_running`;按业务正常 turn 时长设 |
 | `OBS_METRICS_LOG_PATH` | `data/observability/metrics.jsonl` | 必须在持久卷子目录(默认 `/app/data` 已在),容器重启 / autoheal 不丢 |
@@ -271,4 +282,4 @@ ab19...    8
 4. **重启 backend、跑 24h、再看报告**
 5. **保留前后两份报告 diff**——做小版本 ship 笔记的素材
 
-不要试图通过 jsonl 直接接告警 / Prometheus——目前体系是 `jsonl + 报告 + 人工巡检`(决策见 incident fix-plan §待决策项 4)。Sampler 字段已就位,需要 exporter 时是平移工作。
+不要试图通过 jsonl 直接接告警 / Prometheus——这是刻意的范围决策:当前体系是 `jsonl + 报告 + 人工巡检`,先用人工巡检兜住,不预先搭 exporter/告警管线。Sampler 字段已就位,真正需要时是平移工作。

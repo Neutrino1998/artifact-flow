@@ -1,6 +1,6 @@
 # Runbook · 服务卡死(后端无响应)
 
-> 现场参照:2026-05-14 `compute_update` 卡死事件循环 96 分钟事故,见 `docs/_archive/ops/incident-2026-05-14-eventloop-wedge.md`。本 runbook 把当次实战命令固化下来,oncall 直接 copy-paste。
+> 现场参照:2026-05-14 一次 `update_artifact` 同步 CPU 死算攥住 GIL、卡死 event loop 约 96 分钟、`/health/live` 全程无响应的事故。本 runbook 把当次实战命令固化下来,oncall 直接 copy-paste;wedge 形态与工具作者纪律见文末。
 
 ## 前置:挑 compose 文件 + 选目标副本
 
@@ -191,13 +191,13 @@ sudo gcore -o /tmp/backend-hang "$PID"   # 等几秒到几分钟,看 RSS 大小
 # gcore 之后进程继续运行,不杀;杀进程用 docker restart "$CID"
 ```
 
-`unhealthy ≠ 自动 restart`——`HEALTHCHECK` 翻红只改状态,要靠 autoheal 容器或编排层补救;事故当时干挂 96 分钟零自动恢复,见 incident doc §B.6。
+`unhealthy ≠ 自动 restart`——`HEALTHCHECK` 翻红只改状态,要靠 autoheal 容器或编排层补救;事故当时干挂 96 分钟零自动恢复(无 autoheal 即无人值守时段全程不可用)。
 
 ## Step 7:留痕
 
 - `docker logs "$CID" > backend-<ts>.log` 落盘(带 `Thread 0x` dump 行)
 - `data/observability/loop-lag.jsonl*` / `metrics.jsonl*` 通过 Step 4 末尾的 `docker cp` 拷出来 — 持久卷里有,但 rotate 后老切片会丢
-- 触发输入:看 `MessageEvent` 表当前 turn 的 `tool_call` 事件——cancel 路径事件持久化已在 PR-3 修(`docs/_archive/ops/incident-2026-05-14-fix-plan.md` §PR-3),事故现场是丢的,现在不丢
+- 触发输入:看 `MessageEvent` 表当前 turn 的 `tool_call` 事件——cancel 路径现在无条件持久化事件(事故现场曾因 cancel 抢先而丢失触发输入,现已修复,不再丢)
 - 后续分析跑 `python scripts/observability_report.py --hours 24`(数据源:`MessageEvent` + `data/observability/*.jsonl`),解读见 [observability-tuning.md](../guides/observability-tuning.md)
 
 ## 已知 wedge 形态参考
@@ -214,7 +214,7 @@ sudo gcore -o /tmp/backend-hang "$PID"   # 等几秒到几分钟,看 RSS 大小
 
 CLAUDE.md 已写:**asyncio cancel / timeout / fencing 全是协作式的**,同步 CPU 工具(无 `await` 或 C 扩展持 GIL)能同时击穿所有这些安全机制。工具作者必须自负 CPU 成本:
 
-- 算法侧给上界(本次 PR-1 给 `MAX_UNIQUE_CENTERS` 静态 budget)
+- 算法侧给上界(如 `update_artifact` 的 `MAX_UNIQUE_CENTERS` 静态 budget)
 - 第二层挂 wall-clock deadline(`MAX_FUZZY_WALL_CLOCK_MS`),内循环检查
 - 引擎兜不住——和 compaction 不兜底 tool-result 溢出同理
 
