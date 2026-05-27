@@ -8,6 +8,8 @@
 
 ```mermaid
 erDiagram
+    Department ||--o{ Department : "parent (RESTRICT)"
+    Department ||--o{ User : "groups (SET NULL)"
     User ||--o{ Conversation : owns
     Conversation ||--o{ Message : contains
     Conversation ||--o| ArtifactSession : "1:1"
@@ -19,8 +21,20 @@ erDiagram
         string id PK
         string username UK
         string hashed_password
+        string display_name
         string role "user / admin"
         bool is_active
+        int password_version "改密 +1，旧 JWT 比对失败即 401"
+        bool must_change_password "强制改密闸门"
+        datetime password_changed_at "口令龄；NULL=已过期"
+        json password_history "最近旧 hash，most-recent-first，查重用"
+        string department_id FK "ondelete SET NULL"
+    }
+    Department {
+        string id PK
+        string parent_id FK "自引用，ondelete RESTRICT"
+        string name
+        string root_name_key "生成列：根级=name 否则 NULL，跨方言根级去重"
     }
     Conversation {
         string id PK
@@ -54,7 +68,8 @@ erDiagram
 
 | 表 | 角色 | 生命周期 |
 |----|------|---------|
-| `users` | 认证主体 | 用户创建即存在 |
+| `users` | 认证主体（含等保口令策略列：`password_version` / `must_change_password` / `password_changed_at` / `password_history`） | 用户创建即存在 |
+| `departments` | 邻接表组织树，用户按 `department_id` 归属 | 删部门 `RESTRICT` 非空、`SET NULL` 解绑用户 |
 | `conversations` | 对话容器，含 `active_branch` 指向当前叶 | 级联删除 messages + artifact_session |
 | `messages` | 用户输入 + 助手响应，树结构 | 级联由 conversation 触发 |
 | `message_events` | Append-only 执行事件流 | FK 跟随 message |

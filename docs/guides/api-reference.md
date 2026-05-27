@@ -15,12 +15,14 @@
 | 码 | 含义 | 触发 |
 |----|------|------|
 | `200` | 成功 | 正常响应 |
-| `401` | 未鉴权 | 缺 token / token 失效 / 用户被禁用 |
-| `403` | 权限不足 | 非 admin 访问 `/admin/*` 端点 |
+| `400` | 请求/状态错误 | 旧密码错误 / 新密码与历史重用 / 全局 `ValueError`→400 兜底（如 bcrypt >72 字节、非 schema 路径的口令策略） |
+| `401` | 未鉴权 | 缺 token / token 失效（含改密后 JWT 内嵌 `password_version` 与库不符）/ 用户被禁用 |
+| `403` | 权限不足 | 非 admin 访问 `/admin/*` 端点；**或当前用户 `must_change_password=True`**（除查自身状态/改密外一律 403，见 [强制改密闸门](#强制改密闸门)） |
 | `404` | 资源不存在 | **也覆盖"跨用户访问"** — 见 Design Decision |
 | `409` | 冲突 | Lease 冲突 / interrupt 已解决 |
 | `410` | 资源失效 | `active-stream` 指向的 stream 已过期 |
-| `422` | 请求不合法 | 参数校验、文件过大、格式不支持 |
+| `422` | 请求不合法 | 参数校验（含口令强度、用户名字符）、文件过大、格式不支持 |
+| `429` | 请求过频 | 登录失败累计超阈，锁定窗口内（per-username / per-IP） |
 | `503` | 服务不可用 | Health ready 降级 |
 
 ### 404-not-403 原则
@@ -52,13 +54,39 @@ POST /api/v1/auth/login
 {
   "access_token": "eyJhbGc...",
   "token_type": "bearer",
-  "expires_in": 86400,
-  "user": {"id": "...", "username": "alice", "display_name": "Alice", "role": "user"}
+  "expires_in": 604800,                  // = JWT_EXPIRY_DAYS(默认 7) × 86400
+  "user": {
+    "id": "...", "username": "alice", "display_name": "Alice", "role": "user",
+    "must_change_password": false,       // true → 前端须弹强制改密框（见下）
+    "department_path": ["技术部", "后端组"] // root → leaf 部门名链；未分配 → null
+  }
 }
 ```
 
-- 失败统一返回 **401**（用户不存在 / 密码错 / 账号禁用），不区分原因
+- 失败统一返回 **401**（用户不存在 / 密码错 / 账号禁用），不区分原因；用户不存在时也对固定假 hash 跑一次 bcrypt，使两条分支耗时恒定，避免时序枚举用户名
+- **登录频控**：每次失败对 `user:{username}` 与 `ip:{client_ip}` 两个 key 各 +1；任一在 `LOGIN_FAILURE_WINDOW_SEC`（默认 900s）窗口内累计达 `LOGIN_MAX_FAILURES`（默认 5）→ 锁定窗口内一律 **429**（带 `Retry-After`），连正确密码也拒。per-username 是主防线，per-IP 补抓"同 IP 喷多个用户名"。per-IP 的 `client_ip` 只读 nginx 覆写的 `X-Real-IP`（**刻意不读可伪造的 `X-Forwarded-For`**），dev 无 nginx 时回落 `request.client.host`
 - **无 `/refresh` 端点**：token 过期后客户端需重新 login
+
+### 强制改密闸门
+
+用户的 `must_change_password` 在三种情况下被置 True：admin 创建/批量导入的新用户（首次登录）、admin 重置其密码、口令龄超过 `PASSWORD_EXPIRY_DAYS`（默认 180 天；登录时判定，`password_changed_at` 为 NULL 视为已过期；`0` = 不强制到期）。
+
+标志为 True 时，`get_current_user` 对该用户的**所有请求返回 403 `Password change required`**，仅放行两个端点让其脱困：
+
+| 仍放行 | 用途 |
+|---|---|
+| `GET /api/v1/auth/me` | 拉取自身状态（含 `must_change_password`） |
+| `POST /api/v1/auth/me/password` | 完成改密（成功即清除标志） |
+
+前端据 `must_change_password` 弹不可关闭的改密框；后端 403 是绕过前端时的兜底。
+
+### 口令强度策略
+
+所有"写入新口令"的入口（`POST /me/password`、admin `POST /users`、`PUT /users/{id}` 带 password、CSV 导入）共用 `validate_password_strength`，由 config 常量驱动（operator 可调，非 API 参数）：长度 ≥ `PASSWORD_MIN_LENGTH`（默认 8）、同时含字母+数字+符号、拒弱口令黑名单 / 键盘行走 / 单一重复 / 连续序列。
+
+- schema 字段校验失败（Pydantic validator 抛 `ValueError`）→ **422**
+- CSV 导入逐行捕获 → 该行进 `failed`（不抛 HTTP 错）
+- **登录不做强度校验**：老用户旧口令可能不达标，登录只鉴别、不二次卡策略
 
 ### POST `/me/password` — 自助改密
 
@@ -69,9 +97,10 @@ POST /api/v1/auth/me/password
 204 No Content
 ```
 
-- 校验失败 → `400 Current password is incorrect`
-- `new_password` 服务端要求 `min_length=4`（与 admin 重置一致）
-- 改密后 `password_version++`；旧 token 立即失效（`get_current_user` 查 `password_version` 字段对比 JWT 内嵌版本号）
+- 旧密码校验失败 → `400 Current password is incorrect`
+- `new_password` 走口令强度策略（floor 8 + 复杂度，**非旧版 `min_length=4`**），不达标 → `422`
+- **不重用查重**：新口令不得与"最近 `PASSWORD_HISTORY_COUNT` 个用过的口令（含当前）"相同（默认 `1` = 仅 ≠ 当前），命中 → `400 新密码不能与最近使用过的密码相同`
+- 改密后 `password_version++`；旧 token 立即失效（`get_current_user` 查 `password_version` 字段对比 JWT 内嵌版本号）。自助改密同时清除 `must_change_password`
 
 ### PATCH `/me` — 自助改 display_name
 
@@ -169,7 +198,7 @@ POST /api/v1/departments/resolve
 {"id": "dept-xyz"}                          // 末级 id；空 path / 全空字符串 → null
 ```
 
-供前端 cascader "+ 新建当前级" 与 PR3 批量导入按行解析时复用；**自动建 dept** 是合法 admin 行为，不走 `POST /` 的 409 路径。并发同路径插入由 `IntegrityError` 重试 SELECT 兜住（最多 1 次）。
+供前端 cascader "+ 新建当前级" 与批量导入按行解析时复用；**自动建 dept** 是合法 admin 行为，不走 `POST /` 的 409 路径。并发同路径插入由 `IntegrityError` 重试 SELECT 兜住（最多 1 次）。
 
 ### 用户搜索按部门子树扩展
 
@@ -259,7 +288,7 @@ POST /api/v1/chat/{conv_id}/resume
 ### DELETE `/{conv_id}` — 单条删除
 
 - 不预查 active execution，**fire-and-forget**
-- 若引擎正在跑：被删的 conversation 行被 controller post-processing 的 `exists()` 检查兜住（PR2a），引擎跳过持久化，不抛 FK
+- 若引擎正在跑：被删的 conversation 行被 controller post-processing 的 `exists()` 检查兜住，引擎跳过持久化，不抛 FK
 - `404`：不存在 / 不属于当前用户（404-not-403）
 
 ### POST `/bulk-delete` — 批量删除
@@ -403,8 +432,9 @@ Query：`limit` (1-100, 默认 20), `offset`, `q` (title 搜索), `user_id` (按
 
 ### POST `/users` — 创建用户
 
-- 字段：`username` (2-64, regex `^[A-Za-z0-9._-]+$`), `password` (4-128), `display_name?`, `role?` ∈ `user`/`admin`, `department_id?`
-- `409` 用户名已存在；`400` 非法 role / 非法 username 字符 / `department_id` 不存在
+- 字段：`username` (2-64, regex `^[A-Za-z0-9._-]+$`), `password`（≤128，且过[口令强度策略](#口令强度策略)）, `display_name?`, `role?` ∈ `user`/`admin`, `department_id?`
+- 新建用户 `must_change_password=True` —— 首次登录即被[强制改密闸门](#强制改密闸门)拦下
+- `409` 用户名已存在；`422` 口令不达标 / 用户名字符非法（schema 校验）；`400` 非法 role / `department_id` 不存在
 
 ### PUT `/users/{user_id}` — 更新
 
@@ -427,12 +457,14 @@ PUT /api/v1/admin/users/u-abc
 
 非自身 admin 可以 demote / disable —— 仅自身被 self-protection 守住。
 
+> 重置他人密码（传 `password`，同样过[口令强度策略](#口令强度策略)）→ 该用户 `must_change_password=True` + `password_version++`：强制其下次登录改密，且旧 token 全端立即失效。
+
 ### DELETE `/users/{user_id}` — 硬删
 
 - `403 Cannot delete yourself`
 - `404 User not found`
 - 成功 → `204`，**FK CASCADE** 连带删该用户的全部 conversations / messages / events / artifacts
-- 若该用户当前有正在跑的 engine：被级联删的 conversation 行由 controller post-processing 的 `exists()` 检查兜住（PR2a），engine 静默跳过持久化、不抛 FK 异常
+- 若该用户当前有正在跑的 engine：被级联删的 conversation 行由 controller post-processing 的 `exists()` 检查兜住，engine 静默跳过持久化、不抛 FK 异常
 
 ### GET `/users/{user_id}/impact` — 删前 impact
 
@@ -451,7 +483,8 @@ GET /api/v1/admin/users/u-abc/impact
 **关键语义：**
 
 - **best-effort 三分类**：`created` / `failed` / `skipped`
-- **默认密码**：`password` 留空 → 默认值 = `username`（如果 username 长度 < 4，该行进 `failed`）
+- **密码每行必填**（`password` 列虽非 parse 阶段必填，但每行值不能空）：留空 → 该行进 `failed`（`reason="password is required (column must not be empty)"`）；提供则走[口令强度策略](#口令强度策略)，不达标 → `failed`（`reason="password does not meet policy: ..."`）。**不再有"留空 = 用户名"的默认行为**——admin 自填初始口令并带外分发
+- **所有导入用户 `must_change_password=True`**：首次登录即被强制改密
 - **部门路径**：`(dept_l1, dept_l2, dept_l3)` 走 `resolve_department_path` 自动建表；gap（中间空、后面非空）严格拒绝
 - **文件内 username 重复 → 整体 400**（admin 必须先在源文件去重）
 - **行数上限**：`MAX_BULK_IMPORT_ROWS=1000`，超 → 400
@@ -534,7 +567,7 @@ GET /api/v1/admin/users/bulk-impact?ids=u-1&ids=u-2&ids=u-3
 ### 为什么没有 `/auth/register` / `/auth/refresh`
 
 - 产品定位是团队内 SaaS，用户由 admin 主动创建；开放自助注册会放大滥用面
-- JWT 直接用较长 `expires_in`（默认 86400s），过期重新 login — 省掉 refresh token 的存储与撤销复杂度
+- JWT 直接用较长 `expires_in`（默认 `JWT_EXPIRY_DAYS=7` → 604800s），过期重新 login — 省掉 refresh token 的存储与撤销复杂度。改密 / admin 重置通过 `password_version` 实现"软撤销"（旧 token 比对失败即 401），无需吊销集合
 - 有强制失效需求可由 admin 通过 PUT `/users/{id}` 设 `is_active=false` 实现
 
 ### 为什么 Stream 用 `stream_id == message_id`

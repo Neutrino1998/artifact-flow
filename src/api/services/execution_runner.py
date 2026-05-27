@@ -78,8 +78,10 @@ class ExecutionRunner:
         """
         提交一个后台任务
 
-        编排生命周期：acquire lease → mark interactive → create stream → run task.
-        失败时自动回滚 lease + interactive 状态。
+        编排生命周期：acquire lease → create stream（QUEUED）→ [semaphore] →
+        mark interactive（RUNNING 起点）→ run task。submit 阶段只持 lease + 建
+        stream（承载 execution_queued 事件），失败时回滚两者。mark_interactive
+        不在此处 —— 它标记 QUEUED→RUNNING 边，移到 _wrapped 取得 semaphore 之后。
 
         接收 coroutine factory 而非 coroutine 对象，确保 coroutine 仅在编排成功后
         才被创建，避免预调度失败路径产生未被 await 的孤儿 coroutine。
@@ -109,9 +111,11 @@ class ExecutionRunner:
                 "Use POST /chat/{conv_id}/inject to send input to the running execution."
             )
 
-        # lease 之后的所有步骤失败时必须回滚（含 coro_factory 调用）
+        # lease 之后的所有步骤失败时必须回滚（含 coro_factory 调用）。
+        # 此处只做 QUEUED 阶段的副作用：create stream（必须在 submit 建好，因为
+        # execution_queued 事件在取 semaphore 之前就推到它上面）。interactive 留到
+        # _wrapped 取得 semaphore 之后再标记，所以回滚里也不需要 clear interactive。
         try:
-            await self.store.mark_engine_interactive(conversation_id, task_id)
             await stream_transport.create_stream(
                 task_id,
                 owner_user_id=user_id,
@@ -125,7 +129,6 @@ class ExecutionRunner:
             except Exception:
                 logger.warning(f"Best-effort close_stream failed for {task_id}")
             await self.store.release_lease(conversation_id, task_id)
-            await self.store.clear_engine_interactive(conversation_id, task_id)
             raise
 
         async def _wrapped():
@@ -160,6 +163,34 @@ class ExecutionRunner:
                         },
                     })
                 async with self._semaphore:
+                    # QUEUED → RUNNING 边：取得并发槽位后，对 lease owner 做 compare-and-set。
+                    # 只有仍持有 conversation lease 时才标记 interactive 并启动引擎。
+                    # interactive 窗口因此恰好等于 RUNNING（与 _on_engine_exit 处的 clear
+                    # 对称）；inject / cancel 都 gate 在它。
+                    #
+                    # 若排队期间 lease 已过期 / 被新一轮接管（而 heartbeat 还没来得及 fence
+                    # 本 task），则**不能**启动 —— 否则会 (a) 覆盖新 owner 的 interactive key、
+                    # (b) 在该会话上跑成第二写者（破坏 lease 单写不变量）。此时 abort，finally
+                    # 走 cleanup（compare-and-del 不会动到新 owner 的 key），本轮成为 ORPHANED。
+                    #
+                    # fail-closed：CAS 抛异常时归属不可知 —— 宁可 abort（本轮成 ORPHANED，
+                    # 响亮可见、可刷新恢复）也不能 fail-open 跑成静默的第二写者（破坏单写不变量，
+                    # 远比丢一个 turn 严重；codebase 偏好 loud failure over silent corruption）。
+                    # redis-py client 已对瞬断重试；仍抛即视为持续故障 → abort。
+                    try:
+                        owns_lease = await self.store.mark_engine_interactive(conversation_id, task_id)
+                    except Exception:
+                        logger.warning(
+                            f"mark_engine_interactive errored for {task_id}; cannot confirm "
+                            f"lease ownership — aborting before run (fail-closed)"
+                        )
+                        owns_lease = False
+                    if not owns_lease:
+                        logger.warning(
+                            f"Task {task_id} no longer owns its conversation lease "
+                            f"(lost while queued / unconfirmed); aborting before run to avoid a second writer"
+                        )
+                        return
                     await coro
             except asyncio.CancelledError:
                 logger.warning(f"Task {task_id} cancelled (lease fencing or shutdown)")

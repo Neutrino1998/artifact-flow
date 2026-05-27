@@ -25,8 +25,14 @@ class Settings(BaseSettings):
 
     # SSE 配置
     SSE_PING_INTERVAL: int = 15  # 秒，保持连接活跃
-    EXECUTION_TIMEOUT: int = 1800   # 秒，总执行上限（含 permission 等待），同时用作 stream lifetime
+    EXECUTION_TIMEOUT: int = 1800   # 秒，引擎循环执行上限（含 permission 等待）；超时 → TIMED_OUT 终态
     STREAM_CLEANUP_TTL: int = 60    # 秒，执行结束后 consumer 读取剩余事件的清理窗口
+    # Redis stream/meta key 寿命 = EXECUTION_TIMEOUT + 此余量。必须覆盖引擎 deadline
+    # 之后的 post-processing —— 终态(含 TIMED_OUT)在引擎超时后才由 post-processing
+    # push,key 不能在那之前过期(否则 push_event 落在已过期 key 上 → 终态丢失 / SSE 挂)。
+    # 取 post-processing 的宽松上界(几次 DB 写 × retry × command_timeout);给太长仅让
+    # 崩溃残留 key 多活一会儿(有界自清)。close_stream 正常结束时会重置为 STREAM_CLEANUP_TTL。
+    STREAM_TTL_GRACE: int = 300
     PERMISSION_TIMEOUT: int = 300  # 秒，单次 permission 等待超时
     CANCEL_CHECK_INTERVAL: float = 0.5  # 秒，LLM 流式输出期间轮询 cancel 的最小间隔（避免每 chunk 一次 Redis GET）
 
@@ -45,6 +51,11 @@ class Settings(BaseSettings):
     # 的 reason 字段(external_cancel / external_cancel_post_processing)。
     CANCELLED_RESPONSE_BY_USER: str = "*Task cancelled by user*"
     CANCELLED_RESPONSE_BY_SYSTEM: str = "*Task cancelled by system*"
+    # 超时占位:执行超过 EXECUTION_TIMEOUT 时 Message.response 写入的显示串。
+    # 与 CANCELLED_RESPONSE_BY_* 同构 —— 前端 MessageList 用 response 非空 gate
+    # AssistantMessage 渲染,超时同样需要非空占位。operator 视角的"超时"语义走
+    # events 表的 TIMED_OUT 终态事件,不靠这个串区分。
+    TIMED_OUT_RESPONSE: str = "*Task timed out*"
     SESSION_GREP_MAX_TOTAL: int = 200       # grep_artifact session 模式总命中上限（隐藏，不暴露给模型）
     # grep_artifact 资源护栏（隐藏常量，模型不可见）。设计原则:grep 是 line-oriented 的
     # best-effort 搜索 —— 把**输入/输出 envelope** 一次性定死,envelope 内全物化才安全,
@@ -147,6 +158,15 @@ class Settings(BaseSettings):
     DATABASE_MAX_OVERFLOW: int = 10
     DATABASE_POOL_TIMEOUT: int = 30
     DATABASE_POOL_RECYCLE: int = 300       # 缩短回收周期，加速故障检测和恢复回切
+    # PG per-语句 wall-clock(秒)。后处理不在引擎超时(EXECUTION_TIMEOUT)内 —— per-query
+    # 上界是 DB 层职责。仅 PostgreSQL(asyncpg)生效:setdefault 注入 connect_args。取"比最慢
+    # 的合法查询还宽、远小于 EXECUTION_TIMEOUT"。
+    # 禁用:设本项=0(ARTIFACTFLOW_DB_COMMAND_TIMEOUT=0)→ 不注入。
+    # ⚠️ 不能用 DSN ?command_timeout=0 禁用 —— asyncpg 拒绝 ≤0(connect_utils.py),会启动失败;
+    #    DSN 若显式给值必须 >0,它会覆盖此默认。
+    # MySQL/TDSQL 无等价 driver 钩子(靠 server innodb_lock_wait_timeout),SQLite 无此缺口。
+    # 详见 docs/architecture/execution-lifecycle.md「不变量 4」。
+    DB_COMMAND_TIMEOUT: float = 30.0
 
     # JWT 认证配置
     JWT_SECRET: str = ""

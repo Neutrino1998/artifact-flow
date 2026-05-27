@@ -56,20 +56,26 @@ class _MockStreamTransport:
 
 async def _simulate_active_task(app, conv_id: str, msg_id: str) -> asyncio.Event:
     """
-    Submit a sleeping coroutine to simulate an active task.
-    submit() now handles lease + interactive internally.
+    Submit a sleeping coroutine to simulate an active (RUNNING) task.
+    submit() acquires the lease synchronously; interactive is marked only once
+    the task reaches the semaphore (QUEUED→RUNNING). We wait on a `started`
+    event so the task is genuinely RUNNING before returning — otherwise inject
+    (which gates on interactive) would race the not-yet-scheduled _wrapped.
     Returns a blocker event that can be set to let the task complete.
     """
     runner: ExecutionRunner = app.dependency_overrides[get_execution_runner]()
 
     blocker = asyncio.Event()
+    started = asyncio.Event()
 
     def sleeping_factory():
         async def sleeping():
+            started.set()
             await blocker.wait()
         return sleeping()
 
     await runner.submit(conv_id, msg_id, sleeping_factory, user_id="test-user", stream_transport=_MockStreamTransport())
+    await started.wait()
     return blocker
 
 
@@ -124,6 +130,28 @@ class TestInject:
         )
         assert resp.status_code == 409
 
+    async def test_inject_rejected_while_queued(
+        self, client: AsyncClient, app, conv_with_messages
+    ):
+        """QUEUED (lease held, interactive NOT yet marked) → inject 409.
+
+        inject gates on interactive (== RUNNING); a turn still waiting on the
+        concurrency semaphore has no engine consuming the queue, so injecting
+        into it is rejected until it starts running.
+        """
+        conv_id, msg_ids = conv_with_messages
+        runner: ExecutionRunner = app.dependency_overrides[get_execution_runner]()
+        # Simulate QUEUED directly: acquire the lease without marking interactive.
+        await runner.store.try_acquire_lease(conv_id, msg_ids[0])
+        try:
+            resp = await client.post(
+                f"/api/v1/chat/{conv_id}/inject",
+                json={"content": "additional input"},
+            )
+            assert resp.status_code == 409
+        finally:
+            await runner.store.release_lease(conv_id, msg_ids[0])
+
     async def test_inject_cross_user(
         self, admin_client: AsyncClient, app, conv_with_messages
     ):
@@ -147,6 +175,19 @@ class TestInject:
             json={"content": "test"},
         )
         assert resp.status_code == 401
+
+
+class TestSendMessageValidation:
+    """POST /api/v1/chat 入口校验（在起 turn / submit 之前短路）。"""
+
+    async def test_blank_input_no_files_rejected(self, client: AsyncClient):
+        """空白 user_input 且无附件 → 422（避免空 history 在 build() 的 [-1] 崩）。"""
+        resp = await client.post(
+            "/api/v1/chat",
+            data={"payload": json.dumps({"user_input": "   "})},  # 无 file part → files 默认 []
+        )
+        assert resp.status_code == 422
+        assert "user_input must not be blank" in str(resp.json())
 
 
 # ============================================================
@@ -179,6 +220,29 @@ class TestCancel:
         conv_id, _ = conv_with_messages
         resp = await client.post(f"/api/v1/chat/{conv_id}/cancel")
         assert resp.status_code == 409
+
+    async def test_cancel_rejected_while_queued(
+        self, client: AsyncClient, app, conv_with_messages
+    ):
+        """QUEUED (lease held, interactive NOT yet marked) → cancel 409, no flag set.
+
+        cancel gates on interactive (== RUNNING), same as inject. A queued turn is
+        not cancellable until it starts running — we must not set a Redis cancel
+        flag that would then have to be kept alive across the worker-local queue
+        wait (the cross-layer tear that the r4 round-1/2 findings kept exposing).
+        """
+        conv_id, msg_ids = conv_with_messages
+        runner: ExecutionRunner = app.dependency_overrides[get_execution_runner]()
+        # Simulate QUEUED directly: acquire the lease without marking interactive.
+        await runner.store.try_acquire_lease(conv_id, msg_ids[0])
+        try:
+            resp = await client.post(f"/api/v1/chat/{conv_id}/cancel")
+            assert resp.status_code == 409
+            assert "queued" in resp.json()["detail"].lower()
+            # No cancel flag must have been set for a queued turn.
+            assert await runner.store.is_cancelled(msg_ids[0]) is False
+        finally:
+            await runner.store.release_lease(conv_id, msg_ids[0])
 
     async def test_cancel_cross_user(
         self, admin_client: AsyncClient, app, conv_with_messages

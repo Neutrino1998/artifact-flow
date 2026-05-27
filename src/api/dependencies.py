@@ -88,6 +88,7 @@ async def init_globals() -> None:
         max_overflow=config.DATABASE_MAX_OVERFLOW,
         pool_timeout=config.DATABASE_POOL_TIMEOUT,
         pool_recycle=config.DATABASE_POOL_RECYCLE,
+        command_timeout=config.DB_COMMAND_TIMEOUT,
     )
     await _db_manager.initialize()
     logger.info("Database manager initialized")
@@ -136,6 +137,7 @@ async def init_globals() -> None:
             _redis_client,
             cleanup_ttl=config.STREAM_CLEANUP_TTL,
             execution_timeout=config.EXECUTION_TIMEOUT,
+            ttl_grace=config.STREAM_TTL_GRACE,
             key_prefix=config.REDIS_KEY_PREFIX,
         )
         _stream_transport.init_scripts()

@@ -134,8 +134,8 @@ class RuntimeStore(Protocol):
     async def try_acquire_lease(self, conv_id, msg_id) -> Optional[str]: ...
     async def release_lease(self, conv_id, msg_id) -> None: ...
 
-    # Engine interactive — inject / cancel 的有效窗口
-    async def mark_engine_interactive(self, conv_id, msg_id) -> None: ...
+    # Engine interactive — RUNNING 窗口（inject 与 cancel 的有效窗口都 gate 在此）
+    async def mark_engine_interactive(self, conv_id, msg_id) -> bool: ...  # QUEUED→RUNNING CAS：仍持 lease 才标记，返回是否成功（fail-closed）
     async def clear_engine_interactive(self, conv_id, msg_id) -> None: ...
 
     # Interrupts — permission 确认等待
@@ -170,7 +170,10 @@ gantt
     acquire_lease      :a1, 0, 30
     post_processing    :a2, 25, 30
 
-    section Interactive
+    section Queued (满载时)
+    wait_semaphore     :q1, 0, 2
+
+    section Interactive (== RUNNING)
     mark_interactive   :b1, 2, 23
     engine_loop        :b2, 2, 23
 
@@ -179,10 +182,12 @@ gantt
     release_lease      :milestone, 30, 0
 ```
 
-- **Lease** 覆盖**整个请求生命周期**（含 post-processing、flush、终端事件推送）
-- **Interactive** 仅覆盖**引擎 loop 期间**（退出后 inject/cancel 返回 409）
+- **Lease** 覆盖**整个请求生命周期**（QUEUED 排队 + RUNNING + post-processing + 终端事件推送），仅在 `* → CLOSED` 释放。
+- **Interactive** == **RUNNING**：取得并发 semaphore 后才 `mark_engine_interactive`（QUEUED→RUNNING 边，best-effort），引擎退出即清除。submit 拿到 lease 但 semaphore 满时，turn 处于 **QUEUED**（持 lease、未 interactive）。
+- **inject 与 cancel 都 gate 在 interactive（== RUNNING）** → 仅 RUNNING 放行；QUEUED 与 post-processing 均返回 409。两者对称：都是「作用于正在跑的执行」的操作。
+- QUEUED 不可 inject（无引擎来 drain 队列），也不可 cancel（排队是 worker 本地 in-memory 等待，Redis 中介的 cancel 够不到、强行支持会撕裂 cancel 语义 —— 详见 [execution-lifecycle.md → 为什么 cancel 只作用于 RUNNING](execution-lifecycle.md)）。排队轮起跑（RUNNING）后即可 cancel。
 
-这个分离允许 post-processing 阶段拒绝新的 inject/cancel（此时引擎已退出无法响应），但仍阻止并发 POST /chat（lease 未释放）。
+这个分离让 inject/cancel 都只作用于 RUNNING（对称、各自的 flag 都在几秒内被读）；QUEUED / post-processing 一律 409；并发 POST /chat 始终被 lease 阻止。
 
 ### Interrupt 机制
 
@@ -217,8 +222,9 @@ sequenceDiagram
 
 ### Cancellation
 
-- `request_cancel(msg_id)` 设置 Event 标志
-- 引擎在每次循环顶部和工具执行前调用 `check_cancelled` hook 检查
+- cancel 路由 gate 在 **interactive**（== RUNNING），与 inject 对称：只作用于正在跑的执行；QUEUED 返回 409、不置 flag
+- `request_cancel(msg_id)` 设置 Event 标志（Redis flag `EX=EXECUTION_TIMEOUT`，无需续期 —— 只在 RUNNING 下置，几秒内即被引擎读取，不会跨越任何 Redis 观察不到的等待）
+- 引擎在每次循环顶部和工具执行前调用 `check_cancelled` hook 检查；跨 worker 正确（flag 共享在 Redis，由持有该轮的 worker 读取）
 - 取消时引擎 emit `cancelled` 终端事件，释放资源，lease 随后在 finally 块释放
 
 ### 消息注入
@@ -263,7 +269,7 @@ sequenceDiagram
 | `{af:conv_id}:lease` | STRING (msg_id) | `LEASE_TTL` = 90s | Conversation 持有 |
 | `{af:conv_id}:interactive` | STRING (msg_id) | `LEASE_TTL` | Engine interactive |
 | `{af:msg_id}:interrupt` | HASH | `PERM_TIMEOUT + 60` | Interrupt 状态 |
-| `{af:msg_id}:cancel` | STRING "1" | `EXECUTION_TIMEOUT` | 取消标记 |
+| `{af:msg_id}:cancel` | STRING "1" | `EXECUTION_TIMEOUT` | 取消标记（仅 RUNNING 下置，几秒内被读，无需续期） |
 | `{af:msg_id}:queue` | LIST | `EXECUTION_TIMEOUT` | 消息队列 |
 | `{af:msg_id}:interrupt_ch` | Pub/Sub channel | — | Interrupt 唤醒通知 |
 
@@ -272,6 +278,7 @@ sequenceDiagram
 | 脚本 | 用途 |
 |------|------|
 | `acquire-lease` | `SET NX EX` 原子获取或返回现有持有者（避免 SET NX + GET 竞态） |
+| `mark-interactive-if-owner` | 仅当 lease 仍归本 msg_id 时才 SET interactive（QUEUED→RUNNING 的 compare-and-set，防排队中丢 lease 的旧 task 覆盖新 owner / 跑成第二写者）。KEYS = lease + interactive，同 `{conv_id}` slot |
 | `compare-and-del` | 仅当 owner 匹配时 DEL（防止误释放他人持有的 lease） |
 | `compare-and-expire` | 仅当 owner 匹配时续期 |
 | `drain-all` | `LRANGE + DEL` 原子取出队列 |
@@ -294,6 +301,7 @@ Controller 启动后台任务每 `LEASE_TTL / 3 = 30s` 调用 `renew_lease()`：
 
 - InMemory 永远成功
 - Redis 通过 `compare-and-expire` 脚本：owner 不匹配返回 0 → 续租失败 → Controller 感知到"lease 被抢" → 主动终止执行
+- 同一次心跳也续 interactive（owner 匹配才续）。cancel flag **不**在此续期 —— cancel 只作用于 RUNNING，flag 几秒内即被读，无需跨排队等待续命
 
 这允许在 Pod 崩溃时（心跳停止）90s 内 lease 自动释放，其他实例可接管该对话的新请求。
 

@@ -102,6 +102,29 @@ class TestLease:
         assert active.get("test_conv_listB") == "msg-B"
         await store.release_lease("test_conv_listB", "msg-B")
 
+    async def test_list_active_executions_is_cluster_safe_no_mget(self, store, monkeypatch):
+        """Cluster-safety pin: must NOT issue a single cross-entity MGET.
+
+        Lease keys are hash-tagged by conv_id → distinct conversations land on
+        distinct Cluster slots, so a single MGET would raise CROSSSLOT. The impl
+        must fan out via pipelined per-key GET instead. A single-node test Redis
+        can't reproduce CROSSSLOT, so we trip a tripwire on .mget: a regression to
+        MGET fails loudly here regardless of deployment form.
+        """
+        async def _boom(*args, **kwargs):
+            raise AssertionError(
+                "list_active_executions must not call MGET (cross-slot on Cluster)"
+            )
+        monkeypatch.setattr(store._redis, "mget", _boom)
+
+        await store.try_acquire_lease("test_conv_csA", "msg-cs-A")
+        await store.try_acquire_lease("test_conv_csB", "msg-cs-B")
+        active = await store.list_active_executions()
+        assert active.get("test_conv_csA") == "msg-cs-A"
+        assert active.get("test_conv_csB") == "msg-cs-B"
+        await store.release_lease("test_conv_csA", "msg-cs-A")
+        await store.release_lease("test_conv_csB", "msg-cs-B")
+
     async def test_ttl_expiry(self, store, redis_client):
         """Lease should expire after TTL."""
         await store.try_acquire_lease("test_conv_3", "test_msg_ttl")
@@ -120,6 +143,32 @@ class TestLease:
         await store.renew_lease("test_conv_4", "test_msg_renew", ttl=10)
         ttl = await redis_client.ttl(store._lease_key("test_conv_4"))
         assert ttl > 2
+
+    async def test_mark_interactive_only_when_lease_owner(self, store):
+        """mark_engine_interactive is a CAS against the lease owner (QUEUED→RUNNING).
+
+        A stale queued task that lost its lease must not overwrite the new owner's
+        interactive key — mark returns False and leaves interactive untouched.
+        """
+        conv = "test_conv_mark_owner"
+        await store.try_acquire_lease(conv, "owner-A")
+
+        # A different (stale) msg id must NOT be able to mark interactive.
+        assert await store.mark_engine_interactive(conv, "stale-B") is False
+        assert await store.get_interactive_message_id(conv) is None
+
+        # The real owner can.
+        assert await store.mark_engine_interactive(conv, "owner-A") is True
+        assert await store.get_interactive_message_id(conv) == "owner-A"
+
+        # After a takeover, the new owner marks interactive; the stale task must
+        # not be able to clobber it.
+        await store.release_lease(conv, "owner-A")
+        await store.try_acquire_lease(conv, "owner-C")
+        assert await store.mark_engine_interactive(conv, "owner-C") is True
+        assert await store.get_interactive_message_id(conv) == "owner-C"
+        assert await store.mark_engine_interactive(conv, "owner-A") is False
+        assert await store.get_interactive_message_id(conv) == "owner-C"  # stale mark didn't clobber
 
 
 class TestLeaseAtomicity:
@@ -211,6 +260,18 @@ class TestCancel:
         assert resume_data is not None
         assert resume_data.get("approved") is False
         assert resume_data.get("reason") == "cancelled"
+
+    async def test_renew_lease_does_not_touch_cancel_flag(self, store, redis_client):
+        """Cancel only targets RUNNING turns, so renew_lease must NOT manage the
+        cancel flag (no renewal coupling). A pending flag keeps its own TTL; renew
+        neither extends nor resurrects it."""
+        conv, msg = "test_conv_cancel_norenew", "test_msg_cancel_norenew"
+        await store.try_acquire_lease(conv, msg)
+        await store.request_cancel(msg)
+        await redis_client.expire(store._cancel_key(msg), 5)
+        await store.renew_lease(conv, msg, ttl=store._lease_ttl)
+        ttl = await redis_client.ttl(store._cancel_key(msg))
+        assert 0 < ttl <= 5, "renew_lease must not extend the cancel flag TTL"
 
 
 class TestMessageQueue:

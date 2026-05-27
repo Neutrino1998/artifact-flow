@@ -10,7 +10,7 @@ failed repeatedly. Two failure classes:
    and Latin/digit characters (e.g. "普恵 AI" vs "普恵AI").
 
 These exercise the free ``compute_update`` dispatcher (Layer 0/1/2). The
-algorithm-level v6 tests live in ``tests/builtin/test_update_artifact.py``.
+algorithm-level v6 tests live in ``tests/tools/builtin/test_update_artifact.py``.
 """
 
 import pytest

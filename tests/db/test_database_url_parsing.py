@@ -848,6 +848,83 @@ class TestInitializeUnifiedTranslation:
             )
 
     @pytest.mark.asyncio
+    async def test_initialize_pg_injects_command_timeout_default(self):
+        """构造器 command_timeout 默认 → PG connect_args 注入(DSN 未带时)。
+        后处理 per-query 上界的兜底(见 execution-lifecycle.md「不变量 4」)。"""
+        captured = {}
+
+        def fake_create_engine(url, **kwargs):
+            captured["kwargs"] = kwargs
+            raise RuntimeError("stop")
+
+        dbm = DatabaseManager(
+            database_url="postgresql+asyncpg://host/app",
+            command_timeout=30.0,
+        )
+        with patch("db.database.create_async_engine", side_effect=fake_create_engine):
+            with pytest.raises(RuntimeError, match="stop"):
+                await dbm.initialize()
+
+        assert captured["kwargs"]["connect_args"]["command_timeout"] == 30.0
+
+    @pytest.mark.asyncio
+    async def test_dsn_command_timeout_overrides_injected_default(self):
+        """DSN 显式 ?command_timeout= 优先于构造器默认(setdefault 语义)。"""
+        captured = {}
+
+        def fake_create_engine(url, **kwargs):
+            captured["kwargs"] = kwargs
+            raise RuntimeError("stop")
+
+        dbm = DatabaseManager(
+            database_url="postgresql+asyncpg://host/app?command_timeout=5",
+            command_timeout=30.0,
+        )
+        with patch("db.database.create_async_engine", side_effect=fake_create_engine):
+            with pytest.raises(RuntimeError, match="stop"):
+                await dbm.initialize()
+
+        assert captured["kwargs"]["connect_args"]["command_timeout"] == 5.0
+
+    @pytest.mark.asyncio
+    async def test_command_timeout_zero_disables_injection(self):
+        """command_timeout=0 → 不注入(opt-out)。"""
+        captured = {}
+
+        def fake_create_engine(url, **kwargs):
+            captured["kwargs"] = kwargs
+            raise RuntimeError("stop")
+
+        dbm = DatabaseManager(
+            database_url="postgresql+asyncpg://host/app",
+            command_timeout=0.0,
+        )
+        with patch("db.database.create_async_engine", side_effect=fake_create_engine):
+            with pytest.raises(RuntimeError, match="stop"):
+                await dbm.initialize()
+
+        assert "command_timeout" not in captured["kwargs"]["connect_args"]
+
+    @pytest.mark.asyncio
+    async def test_command_timeout_not_injected_for_mysql(self):
+        """command_timeout 是 asyncpg 专属 — MySQL 路径绝不注入(aiomysql 不吃此 kwarg)。"""
+        captured = {}
+
+        def fake_create_engine(url, **kwargs):
+            captured["kwargs"] = kwargs
+            raise RuntimeError("stop")
+
+        dbm = DatabaseManager(
+            database_url="mysql+aiomysql://host/app",
+            command_timeout=30.0,
+        )
+        with patch("db.database.create_async_engine", side_effect=fake_create_engine):
+            with pytest.raises(RuntimeError, match="stop"):
+                await dbm.initialize()
+
+        assert "command_timeout" not in captured["kwargs"]["connect_args"]
+
+    @pytest.mark.asyncio
     async def test_initialize_mysql_charset_translates_and_strips_url(self):
         captured = {}
 

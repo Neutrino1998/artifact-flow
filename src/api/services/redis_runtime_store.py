@@ -55,6 +55,20 @@ end
 return redis.call('GET', KEYS[1])
 """
 
+# mark-interactive-if-owner: 仅当 lease 仍归 ARGV[1] 时才 SET interactive。
+# QUEUED→RUNNING 边的原子 compare-and-set —— 防止「排队中丢了 lease 的旧 task
+# 取得 semaphore 后覆盖新 owner 的 interactive key」（misroute inject + 跑无 fence 旧轮）。
+# 不是 owner 返回 0 → runner 据此 abort，不启动引擎（避免第二写者）。
+# KEYS[1]=lease_key, KEYS[2]=interactive_key —— 二者都 {prefix:conv_id} hash-tag、
+# 同 slot，多 key Lua 在 Cluster 安全。ARGV[1]=msg_id, ARGV[2]=ttl
+_LUA_MARK_INTERACTIVE_IF_OWNER = """
+if redis.call('GET', KEYS[1]) == ARGV[1] then
+    redis.call('SET', KEYS[2], ARGV[1], 'EX', tonumber(ARGV[2]))
+    return 1
+end
+return 0
+"""
+
 # drain-all: LRANGE + DEL 原子取出队列
 _LUA_DRAIN_ALL = """
 local items = redis.call('LRANGE', KEYS[1], 0, -1)
@@ -110,6 +124,7 @@ class RedisRuntimeStore:
 
         # Lua scripts（register_script 对象，自动处理 NOSCRIPT 重试）
         self._script_acquire_lease = None
+        self._script_mark_interactive_if_owner = None
         self._script_compare_and_del = None
         self._script_compare_and_expire = None
         self._script_drain_all = None
@@ -122,6 +137,7 @@ class RedisRuntimeStore:
     def init_scripts(self) -> None:
         """注册所有 Lua 脚本（register_script 是同步方法，自动处理 NOSCRIPT 重试）"""
         self._script_acquire_lease = self._redis.register_script(_LUA_ACQUIRE_LEASE)
+        self._script_mark_interactive_if_owner = self._redis.register_script(_LUA_MARK_INTERACTIVE_IF_OWNER)
         self._script_compare_and_del = self._redis.register_script(_LUA_COMPARE_AND_DEL)
         self._script_compare_and_expire = self._redis.register_script(_LUA_COMPARE_AND_EXPIRE)
         self._script_drain_all = self._redis.register_script(_LUA_DRAIN_ALL)
@@ -169,9 +185,19 @@ class RedisRuntimeStore:
 
     # ── Engine interactive ──
 
-    async def mark_engine_interactive(self, conversation_id: str, message_id: str) -> None:
-        key = self._interactive_key(conversation_id)
-        await self._redis.set(key, message_id, ex=self._lease_ttl)
+    async def mark_engine_interactive(self, conversation_id: str, message_id: str) -> bool:
+        """Mark RUNNING **only if** this message still owns the conversation lease.
+
+        Atomic compare-and-set (lease owner → SET interactive). Returns True if
+        marked (still owner), False if the lease was lost/taken over while queued
+        — in which case the runner must abort instead of clobbering the new
+        owner's interactive key and running a second writer on the conversation.
+        """
+        result = await self._script_mark_interactive_if_owner(
+            keys=[self._lease_key(conversation_id), self._interactive_key(conversation_id)],
+            args=[message_id, str(self._lease_ttl)],
+        )
+        return result == 1
 
     async def clear_engine_interactive(self, conversation_id: str, message_id: str) -> None:
         key = self._interactive_key(conversation_id)
@@ -344,13 +370,22 @@ class RedisRuntimeStore:
         return conv_ids
 
     async def list_active_executions(self) -> Dict[str, str]:
-        """Scan lease keys + MGET values to return {conv_id: message_id}.
+        """Scan lease keys + pipelined GET to return {conv_id: message_id}.
 
-        Two-step (scan, then MGET batch) is good enough at our scale — lease
-        set is bounded by MAX_CONCURRENT_TASKS so the GET batch is tiny. A
-        lease that expires between scan and MGET drops out of the map
-        naturally (None value), which is the desired semantics ("no longer
-        active").
+        Cluster-safety: lease keys are hash-tagged by conv_id, so distinct
+        conversations land on distinct Cluster slots. A single MGET is a
+        single-slot primitive → it raises CROSSSLOT on Cluster. We instead
+        fan out per-key GETs through a non-transactional pipeline: redis-py
+        routes each GET to its owning node (Cluster splits by node;
+        standalone/Sentinel send them back-to-back), so the same code is
+        correct on every deployment form. (mget_nonatomic is rejected: it is
+        a RedisCluster-only method and would AttributeError on a standalone
+        client — see CLAUDE.md "Redis Cluster-safety".)
+
+        Two-step (scan, then GET batch) is good enough at our scale — the lease
+        set is bounded by MAX_CONCURRENT_TASKS so the batch is tiny. A lease
+        that expires between scan and GET drops out of the map naturally (None
+        value), which is the desired semantics ("no longer active").
         """
         pattern = f"{{{self._prefix}:*}}:lease"
         keys: List[str] = []
@@ -363,7 +398,10 @@ class RedisRuntimeStore:
             conv_ids.append(k[start:end])
         if not keys:
             return {}
-        values = await self._redis.mget(keys)
+        pipe = self._redis.pipeline(transaction=False)
+        for k in keys:
+            pipe.get(k)
+        values = await pipe.execute()  # results in command order
         result: Dict[str, str] = {}
         for conv_id, raw in zip(conv_ids, values):
             if raw is None:
@@ -424,5 +462,9 @@ class RedisRuntimeStore:
             keys=[self._interactive_key(conversation_id)],
             args=[message_id, str(ttl_int)],
         )
+        # No cancel-flag renewal: cancel only ever targets a RUNNING turn (gated on
+        # interactive), whose engine reads the flag within seconds — the flag never
+        # has to outlive the worker-local queue wait, so EX=EXECUTION_TIMEOUT is
+        # always sufficient and needs no heartbeat coupling.
         # lease_result == 1 means lease key EXPIRE succeeded (we're still owner)
         return lease_result == 1

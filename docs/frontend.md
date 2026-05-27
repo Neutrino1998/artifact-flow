@@ -20,19 +20,21 @@
 
 ```
 frontend/src/
+├── middleware.ts               # 每请求生成 CSP nonce + 安全响应头（见「安全响应头与 CSP」）
 ├── app/
-│   ├── layout.tsx              # Root layout + ThemeInitializer + auth hydration
-│   ├── page.tsx                # 主聊天页
+│   ├── layout.tsx              # Root layout + ThemeInitializer + 把 nonce 盖到内联脚本
+│   ├── page.tsx                # 主聊天页（外层包 AuthGuard）
 │   └── login/page.tsx
 ├── components/
+│   ├── AuthGuard.tsx           # 鉴权水合 + must_change_password 强制改密闸门
 │   ├── chat/                   # 消息、流式、工具卡片、admin 面板
 │   ├── artifact/               # 面板、Tabs、预览 / Source / Diff
-│   ├── layout/                 # ThreeColumnLayout、Modals
+│   ├── layout/                 # ThreeColumnLayout、Modals、ChangePasswordDialog
 │   ├── sidebar/                # 对话列表、用户菜单
 │   └── markdown/CodeBlock.tsx
 ├── stores/                     # 5 个 Zustand store
 ├── hooks/                      # useSSE / useChat / useArtifacts / useMediaQuery
-├── lib/                        # sse.ts / api.ts / messageTree.ts / reconstructSegments.ts
+├── lib/                        # sse.ts / api.ts / messageTree.ts / csp.ts / passwordPolicy.ts …
 └── types/
     ├── api.d.ts                # 自动生成（不要手改）
     ├── events.ts               # StreamEventType 镜像 + 各事件 data 接口
@@ -55,7 +57,7 @@ frontend/src/
 
 - **Sidebar**：`ConversationList` + `UserMenu`；admin 可打开 `AdminConversationList`（只读 observability，不删数据）/ `ObservabilityPanel` / `UserManagementPanel`
 - **Chat**：`ChatPanel` 组合 `MessageList`（含分支导航 `BranchNavigator`）+ `MessageInput`；流式期间由 `ProcessingFlow` 渲染各 agent 的 `AgentSegmentBlock` / `ToolCallCard` / `ThinkingBlock` / `CompactionFlowBlock` / `InjectFlowBlock` / `ErrorFlowBlock`
-- **Right panel — mode-aware**（PR0+）：`userManagementVisible && isAdmin` 时右栏从 `ArtifactPanel` 切换为 `UserManagementDetailPanel`，按 `userManagementRightView` 类型分发到 `UserDetailForm` / `CreateUserForm` / `BulkImportForm`(PR3) / `BulkActionPanel`(PR5a) / `DepartmentManagerPanel`(PR4)；退出用户管理模式自动恢复 `ArtifactPanel`
+- **Right panel — mode-aware**：`userManagementVisible && isAdmin` 时右栏从 `ArtifactPanel` 切换为 `UserManagementDetailPanel`，按 `userManagementRightView` 类型分发到 `UserDetailForm` / `CreateUserForm` / `BulkImportForm` / `BulkActionPanel` / `DepartmentManagerPanel`；退出用户管理模式自动恢复 `ArtifactPanel`
 - **Artifacts**：`ArtifactPanel` → `ArtifactTabs` → `MarkdownPreview | SourceView | DiffView`，顶栏 `ArtifactToolbar` 提供版本切换与 DOCX 导出
 
 ## 状态管理（Zustand Stores）
@@ -66,10 +68,12 @@ frontend/src/
 
 | State | 说明 |
 |-------|------|
-| `token`, `user`, `isAuthenticated` | JWT 与当前用户 |
+| `token`, `user`, `isAuthenticated` | JWT 与当前用户（`user.must_change_password` 驱动强制改密闸门） |
 | `isHydrated` | localStorage 恢复完成标志（避免 SSR mismatch） |
 
-Actions：`login(token, user)`, `logout()`, `hydrate()`。
+Actions：`login(token, user)`, `logout()`, `hydrate()`, `setUser(user)`（改密成功 / `/me` 刷新后就地更新用户，使 `must_change_password` 清除后无需重登）。
+
+> **强制改密闸门**：`AuthGuard`（包在主页外层）水合后拉 `/me`；当 `user.must_change_password` 为 True 时，挡住整个应用、只渲染不可关闭的 `ChangePasswordDialog forced`（禁用 backdrop / Esc / 取消按钮）。这是与后端 403 闸门对称的前端侧；改密成功 `setUser` 清标志后恢复正常。表单的客户端口令强度提示来自 `lib/passwordPolicy.ts`（镜像后端 `PASSWORD_MIN_LENGTH` + 字母/数字/符号，仅提示不阻断，最终以后端校验为准）。
 
 ### `conversationStore`
 
@@ -100,9 +104,9 @@ Actions：`login(token, user)`, `logout()`, `hydrate()`。
 |-------|------|
 | `sidebarCollapsed`, `artifactPanelVisible` | 布局折叠 |
 | `conversationBrowserVisible`, `userManagementVisible`, `observabilityVisible` | Admin 面板互斥可见性（同时只能开一个） |
-| `userManagementRightView` | 右面板内容（discriminated union）：`empty` / `create-user` / `edit-user` / `bulk-import`(PR3) / `bulk-action`(PR5a) / `dept-manager`(PR4) |
+| `userManagementRightView` | 右面板内容（discriminated union）：`empty` / `create-user` / `edit-user` / `bulk-import` / `bulk-action` / `dept-manager` |
 | `userMgmtListVersion` | 右面板表单成功后 bump，触发 `UserManagementPanel` refetch（避免 prop 钻透） |
-| `selectionMode`, `userManagementSelection` | PR5a 用户管理多选模式开关 + 选中 ID 列表；进入 `enterSelectionMode()` 自动把 RightView 切到 `bulk-action`，退出时回 `empty` |
+| `selectionMode`, `userManagementSelection` | 用户管理多选模式开关 + 选中 ID 列表；进入 `enterSelectionMode()` 自动把 RightView 切到 `bulk-action`，退出时回 `empty` |
 | `observabilitySelectedConvId`, `observabilityBrowseVisible`, `observabilityRefreshTick` | Admin 观测面板：选中 conv id / 完整列表浏览 / 轮询触发 tick |
 | `theme` | `light` / `dark`，持久化到 localStorage |
 
@@ -120,6 +124,8 @@ Actions：`login(token, user)`, `logout()`, `hydrate()`。
 | `executionMetrics` | 从 `complete` 事件提取 |
 | `permissionRequest` | 等待用户审批的当前项（null 表示无） |
 | `cancelled`, `reconnecting`, `error` | 终端/中间态 |
+| `cancelling` | cancel 已请求、引擎尚未确认终止 —— 驱动 Stop 按钮 "cancelling…" spinner（action `setCancelling`） |
+| `queuedInfo` | `{ ahead, maxConcurrent } \| null`：执行排队等并发信号量时的位置；`null` = 已进入 RUNNING 或无执行。由 `execution_queued` 事件置位、`agent_start` 清除 |
 
 关键 action：`appendCurrentSegmentContent(chunk)` 是 `llm_chunk` 的入口，内部走 RAF 节流（见下文性能小节）。
 
@@ -164,6 +170,7 @@ while (true) {
 
 - 按 `event.type` 分派到 `streamStore` 的对应 action
 - `llm_chunk` 走 RAF 节流
+- `execution_queued`（SSE-only 类型，见 `types/events.ts`）→ 置 `queuedInfo`；`agent_start` 时清除。排队中 `MessageInput` 的统一发送/停止/注入按钮被禁用——排队态既不可 cancel 也不可 inject（两端点在进入 RUNNING 前返回 409）
 - 终端事件（`complete` / `cancelled` / `error`）触发 `endStream()` 并清理资源
 - 自动重连：非终端断开时最多 3 次，指数退避 1s / 2s / 4s，携带 `lastEventId`
 - 共享 `AbortController` 防止切换对话时出现孤立连接
@@ -223,7 +230,16 @@ cd frontend && npm run generate-types   # openapi-typescript 生成 api.d.ts
   - `chat.light = #FAF9F6` / `chat.dark = #1e1e1e`
   - status 色：`success #4a8c6f` / `error #c25d4e` / `warning #c49a3c`
 
-文档站（MkDocs Material）的 CSS 从同一组 token 派生，见 `docs/stylesheets/custom.css`（PR 6 交付）。
+文档站（MkDocs Material）的 CSS 从同一组 token 派生，见 `docs/stylesheets/custom.css`。
+
+## 安全响应头与 CSP
+
+`src/middleware.ts`（Next middleware，每请求执行）+ `src/lib/csp.ts` 注入 Content-Security-Policy 与一组静态加固头：
+
+- **每请求随机 nonce**：middleware 生成 base64 nonce 写进 `script-src 'nonce-<nonce>' 'strict-dynamic'`，并经 `x-nonce` 请求头传给 `app/layout.tsx`，盖到那条内联主题 bootstrap 脚本上（暗色无闪烁那段）。**CSP 放 Next 而非 nginx**：nonce 必须与渲染同源生成，nginx 看不到它、只能退回 `'unsafe-inline'`，失去意义。
+- **`connect-src` 从 `NEXT_PUBLIC_API_URL` 派生**：prod 同源部署时为空 → 退回 `'self'`；配置独立后端域时把该 origin 显式列入（dev 放宽）。
+- **`img-src 'self' data: blob:`**（**刻意不含 `https:`**）：作为补偿控制收窄信标外泄面；导出 / 预览用图走 data/blob。
+- `frame-ancestors 'none'` 防点击劫持；另有静态头 `X-Frame-Options: DENY` / `X-Content-Type-Options` / `Referrer-Policy` / `Permissions-Policy`。
 
 ## REST Client 缓存
 

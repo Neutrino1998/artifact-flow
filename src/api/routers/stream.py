@@ -24,6 +24,10 @@ logger = get_logger("ArtifactFlow")
 
 router = APIRouter()
 
+# 终态事件 → SSE 连接关闭。本地副本(路由层不依赖执行语义);与
+# core.events.TERMINAL_EVENT_TYPES 的一致性由 tests/core/test_terminal_event_sync.py 守护。
+_TERMINAL_EVENTS = ("complete", "cancelled", "timed_out", "error")
+
 
 @router.get("/{stream_id}")
 async def stream_events(
@@ -80,7 +84,7 @@ async def stream_events(
 
                 # 检查是否是终结事件
                 event_type = event.get("type", "")
-                if event_type in ("complete", "cancelled", "error"):
+                if event_type in _TERMINAL_EVENTS:
                     logger.info(f"Stream {stream_id}: terminal event '{event_type}', closing connection")
                     break
 

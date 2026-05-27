@@ -19,6 +19,7 @@ class StreamEventType(Enum):
     METADATA = "metadata"                # 会话元数据（conversation_id, message_id）
     COMPLETE = "complete"                # 整体完成（含 execution_metrics）
     CANCELLED = "cancelled"              # 用户主动取消执行
+    TIMED_OUT = "timed_out"              # 执行超时（EXECUTION_TIMEOUT，经 controller 既有 dispatcher 产出的一等终态）
     ERROR = "error"                      # 错误
 
     # ========== Agent 层 ==========
@@ -46,6 +47,19 @@ class StreamEventType(Enum):
     # 任务进入 ExecutionRunner 的并发信号量等待队列时由 runner 推送（SSE-only，不持久化）。
     # 抵达 agent_start 后前端应自行清理 — 历史 replay 不需要这个事件。
     EXECUTION_QUEUED = "execution_queued"
+
+
+# 终态事件类型 —— 执行到达最终状态（也是 stream 的停止条件）。
+# 这是这个概念的**权威定义**(single source of truth)。core 层(decide_terminal /
+# ensure_terminal)直接引用;传输/路由层故意保留各自的本地副本(不依赖执行语义),
+# 由 tests/core/test_terminal_event_sync.py 交叉校验防漂移。新增终态类型时改这里,
+# 测试会红线提示哪些本地副本忘了同步(P1#2: TIMED_OUT 当初就漏在传输/路由层)。
+TERMINAL_EVENT_TYPES = frozenset({
+    StreamEventType.COMPLETE.value,
+    StreamEventType.CANCELLED.value,
+    StreamEventType.TIMED_OUT.value,
+    StreamEventType.ERROR.value,
+})
 
 
 # ============================================================

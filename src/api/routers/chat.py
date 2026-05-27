@@ -105,6 +105,15 @@ async def send_message(
             detail=f"Too many attachments: {attachment_count} (max {config.MAX_CHAT_ATTACHMENTS})",
         )
 
+    # 空白正文且无附件 = 本轮无可处理输入：USER_INPUT 正文为空 → 被 EventHistory 过滤
+    # → history 为空 → build() 在 [-1] 崩。边界即拒（前端 sendDisabled 同条件，这里是
+    # 非 UI 客户端的兜底）；带附件时由归属串补足正文，故仅无附件时要求非空。
+    if not request.user_input.strip() and attachment_count == 0:
+        raise HTTPException(
+            status_code=422,
+            detail="user_input must not be blank when no files are attached",
+        )
+
     # 为新消息准备 ID
     conversation_id = request.conversation_id
     if not conversation_id:
@@ -246,6 +255,9 @@ async def inject_message(
     """
     await _verify_ownership(conv_id, current_user, conversation_manager)
 
+    # inject gate 在 interactive（== RUNNING：semaphore 取得后 → 引擎退出）。
+    # 还在排队（持 lease 但未 interactive）的 turn 返回 409 —— inject 的语义是
+    # "给一个正在跑的引擎追加输入"，引擎没起跑前没有消费者来 drain 这个队列。
     active_msg_id = await runner.store.get_interactive_message_id(conv_id)
     if not active_msg_id:
         raise HTTPException(status_code=409, detail="No active execution for this conversation")
@@ -280,8 +292,25 @@ async def cancel_execution(
     """
     await _verify_ownership(conv_id, current_user, conversation_manager)
 
+    # cancel gate 在 interactive（== RUNNING），与 inject 对称：只作用于正在跑的执行。
+    # 引擎在 hooks.check_cancelled 检查点读 flag；跨 worker 正确（flag 共享在 Redis，由
+    # 持有该轮的 worker 读取），且 flag 在 RUNNING 期间几秒内即被读取、不会跨越任何
+    # Redis 观察不到的等待。
+    #
+    # 为什么 QUEUED 不允许取消：排队是 worker 本地的 in-memory semaphore 等待，Redis
+    # 看不到「谁在排队、在哪个 worker」。让 Redis 中介的 cancel 去够 worker 本地状态，
+    # 就得把 cancel flag 跨「Redis 观察不到的等待」续命 —— 反复制造 cancel 语义撕裂
+    # （HA review r4 round-1/2 同形状反复的根因）。排队轮无害、瞬态、很快起跑，起跑后
+    # 即可取消。故 QUEUED 返回 409（显式 best-effort 契约），且**不**置任何 flag。
     active_msg_id = await runner.store.get_interactive_message_id(conv_id)
     if not active_msg_id:
+        # 仅为给更清楚的 409 而读一次 lease（只读、不置 flag）：区分「排队中」与「无执行」。
+        if await runner.store.get_leased_message_id(conv_id):
+            raise HTTPException(
+                status_code=409,
+                detail="Execution is queued (waiting for a concurrency slot); "
+                       "it becomes cancellable once it starts running.",
+            )
         raise HTTPException(status_code=409, detail="No active execution for this conversation")
 
     await runner.store.request_cancel(active_msg_id)

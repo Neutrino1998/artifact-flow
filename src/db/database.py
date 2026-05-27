@@ -51,6 +51,7 @@ class DatabaseManager:
         pool_timeout: int = 30,
         pool_recycle: int = 300,
         pool_pre_ping: bool = True,
+        command_timeout: float = 0.0,
     ):
         """
         初始化数据库管理器
@@ -64,6 +65,10 @@ class DatabaseManager:
             pool_timeout: 连接池获取超时秒数（仅 MySQL/PG）
             pool_recycle: 连接回收秒数（仅 MySQL/PG）
             pool_pre_ping: 是否启用连接存活检测（仅 MySQL/PG）
+            command_timeout: PG per-语句 wall-clock 秒（仅 PostgreSQL/asyncpg；
+                setdefault 注入 connect_args，DSN 显式 command_timeout>0 优先覆盖；
+                **本参数 = 0 → 不注入**（禁用入口）。注意 DSN ?command_timeout=0 不是禁用：
+                asyncpg 拒绝 ≤0 会启动失败。）
         """
         assert database_url, "database_url must be provided"
         self.database_url = database_url
@@ -74,6 +79,7 @@ class DatabaseManager:
         self._pool_timeout = pool_timeout
         self._pool_recycle = pool_recycle
         self._pool_pre_ping = pool_pre_ping
+        self._command_timeout = command_timeout
         self._engine: Optional[AsyncEngine] = None
         self._session_factory: Optional[async_sessionmaker[AsyncSession]] = None
         self._initialized = False
@@ -415,6 +421,15 @@ class DatabaseManager:
                 engine_kwargs["connect_args"] = self._apply_session_tz_kwargs(
                     driver, query_kwargs
                 )
+                # PG per-语句 wall-clock 兜底:后处理不在引擎超时内,per-query 上界归
+                # DB 层。setdefault → DSN 显式 ?command_timeout=(必须 >0)优先(parser 已放进
+                # connect_args)。本参数 =0 → 跳过注入(禁用入口)。DSN 给 0 不是禁用 —— asyncpg
+                # 拒绝 ≤0 会启动失败。仅 PostgreSQL(asyncpg);MySQL 无等价钩子。
+                # 见 docs/architecture/execution-lifecycle.md「不变量 4」。
+                if driver == "postgres" and self._command_timeout > 0:
+                    engine_kwargs["connect_args"].setdefault(
+                        "command_timeout", self._command_timeout
+                    )
                 if consumed_keys:
                     engine_url = url.difference_update_query(consumed_keys)
 
@@ -446,6 +461,10 @@ class DatabaseManager:
                         # docstring)。pure 函数返回新 dict,parsed_urls 不被改写,
                         # 后续重连/失败重试可重复调用。
                         kwargs = self._apply_session_tz_kwargs(driver, kwargs)
+                        # PG per-语句 wall-clock 兜底(同单 URL 路径);DSN 显式优先,
+                        # 0 = 不注入。仅 PostgreSQL。
+                        if driver == "postgres" and self._command_timeout > 0:
+                            kwargs.setdefault("command_timeout", self._command_timeout)
                         try:
                             return await connect_fn(**kwargs, **{timeout_kw: 5})
                         except Exception as e:
