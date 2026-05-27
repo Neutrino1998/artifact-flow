@@ -102,6 +102,10 @@ export interface ExecutionMetrics {
   completed_at?: string;
   total_duration_ms?: number;
   total_token_usage: TokenUsage;
+  /** input tokens of the turn's last LLM call = context size carried into the
+   *  next turn. Used by the composer's context-usage gauge (vs the compaction
+   *  threshold). Optional: pre-existing records / partial turns may omit it. */
+  last_input_tokens?: number;
 }
 
 export interface CompleteData {

@@ -867,6 +867,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/meta": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Client Config
+         * @description 返回前端所需的后端常量（单一真相源）。值静态，前端取一次缓存即可。
+         */
+        get: operations["get_client_config_api_v1_meta_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/health/live": {
         parameters: {
             query?: never;
@@ -1393,6 +1413,17 @@ export interface components {
              * @description SSE endpoint URL for streaming
              */
             stream_url: string;
+        };
+        /**
+         * ClientConfigResponse
+         * @description GET /api/v1/meta response — runtime constants for the frontend.
+         */
+        ClientConfigResponse: {
+            /**
+             * Compaction Token Threshold
+             * @description Token sum (a single LLM call's input+output) at which the engine auto-compacts. Used by the frontend as the context-usage gauge denominator so it doesn't hardcode a value that could drift from the server.
+             */
+            compaction_token_threshold: number;
         };
         /**
          * ConversationDetailResponse
@@ -3408,6 +3439,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_client_config_api_v1_meta_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClientConfigResponse"];
                 };
             };
         };

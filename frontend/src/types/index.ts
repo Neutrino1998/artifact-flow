@@ -54,6 +54,10 @@ export type ChatRequest = {
   user_input: string;
   conversation_id?: string | null;
   parent_message_id?: string | null;
+  // User pressed "compact": force a one-shot context compaction this turn.
+  // Relaxes the empty-input requirement (backend injects a directive), so a
+  // compact-only send with no text is allowed.
+  force_compact?: boolean;
 };
 export type ChatResponse = S['ChatResponse'];
 export type InjectResponse = S['InjectResponse'];
@@ -67,6 +71,14 @@ export type ConversationDetail = S['ConversationDetailResponse'];
 export type BulkDeleteRequest = S['BulkDeleteRequest'];
 export type BulkDeleteResponse = S['BulkDeleteResponse'];
 export type BulkDeleteFailedItem = S['BulkDeleteFailedItem'];
+
+// ============================================================
+// Meta / client-config Types
+// ============================================================
+
+// Backend-owned runtime constants (GET /api/v1/meta). Single source of truth —
+// fetched once and cached so the frontend never hardcodes server values.
+export type ClientConfigResponse = S['ClientConfigResponse'];
 
 // ============================================================
 // Artifact Types

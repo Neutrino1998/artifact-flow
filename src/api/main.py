@@ -24,7 +24,7 @@ from api.dependencies import (
     get_db_manager, get_redis_client,
     get_execution_runner,
 )
-from api.routers import admin, admin_users, auth, chat, artifacts, departments, stream
+from api.routers import admin, admin_users, auth, chat, artifacts, departments, meta, stream
 from observability import (
     LoopLagWatchdog, DeadmanSwitch, RuntimeSampler, JsonlSink,
     resolve_mem_limit_bytes,
@@ -258,6 +258,11 @@ def create_app() -> FastAPI:
         departments.router,
         prefix="/api/v1/departments",
         tags=["departments"]
+    )
+    app.include_router(
+        meta.router,
+        prefix="/api/v1/meta",
+        tags=["meta"]
     )
 
     # 健康检查端点

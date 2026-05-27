@@ -92,6 +92,7 @@ class ExecutionController:
         parent_message_id: Any = _UNSET,
         message_id: Optional[str] = None,
         uploaded_artifacts: Optional[List[Dict[str, str]]] = None,
+        force_compact: bool = False,
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """
         流式执行接口（新消息）
@@ -114,7 +115,8 @@ class ExecutionController:
         # 为空 → 被 EventHistory 过滤 → 空 history → ContextManager.build 在 [-1] 崩。
         # 在此（任何 yield / DB 写之前）拒掉，不依赖调用方校验；router 另留 422 作为 HTTP
         # 快速边界。带附件时 execute_loop 会给 USER_INPUT 拼归属串（非空），故仅无附件时要求非空。
-        if not user_input.strip() and not uploaded_artifacts:
+        # force_compact 同理：execute_loop 会注入压缩指令补足正文，纯压缩轮次（无文本无附件）放行。
+        if not user_input.strip() and not uploaded_artifacts and not force_compact:
             raise ValueError(
                 "'user_input' must be non-empty when no artifacts are attached"
             )
@@ -180,6 +182,7 @@ class ExecutionController:
             path_events=path_events,
             always_allowed_tools=parent_always_allowed,
             uploaded_artifacts=uploaded_artifacts,
+            force_compact=force_compact,
         )
 
         logger.info(f"Processing new message (streaming) in conversation {conversation_id}")

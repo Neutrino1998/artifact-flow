@@ -22,7 +22,10 @@ interface AssistantMessageProps {
   content: string;
   messageId?: string;
   /** Persisted turn metrics from the message row; shape matches ExecutionMetrics in events.ts. */
-  executionMetrics?: { total_duration_ms?: number | null } | null;
+  executionMetrics?: {
+    total_duration_ms?: number | null;
+    total_token_usage?: { total_tokens?: number | null } | null;
+  } | null;
 }
 
 function AssistantMessage({ content, messageId, executionMetrics }: AssistantMessageProps) {
@@ -84,6 +87,7 @@ function AssistantMessage({ content, messageId, executionMetrics }: AssistantMes
             defaultExpanded={false}
             hasError={hasError}
             totalDurationMs={executionMetrics?.total_duration_ms ?? null}
+            totalTokens={executionMetrics?.total_token_usage?.total_tokens ?? null}
           >
             {flowItems.map((item) => {
               if (item.kind === 'agent') {

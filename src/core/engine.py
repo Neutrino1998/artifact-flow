@@ -101,6 +101,7 @@ def create_initial_state(
     path_events: Optional[List[Any]] = None,  # List[ExecutionEvent] with is_historical=True
     always_allowed_tools: Optional[List[str]] = None,
     uploaded_artifacts: Optional[List[Dict[str, str]]] = None,
+    force_compact: bool = False,
 ) -> Dict[str, Any]:
     """
     创建初始执行状态
@@ -114,6 +115,8 @@ def create_initial_state(
         always_allowed_tools: 本会话已允许的工具列表
         uploaded_artifacts: 本轮随消息上传的 artifact [{"id", "filename"}, ...]，
                             execute_loop 据此在 USER_INPUT 事件正文追加归属说明（仅 LLM 可见）
+        force_compact: 用户手动触发的一次性压缩。execute_loop 据此在 USER_INPUT 正文注入压缩
+                       指令；compaction_runner 在 lead 回答后无视阈值强制压缩一次并消费此标志。
     """
     return {
         "current_task": task,
@@ -127,6 +130,7 @@ def create_initial_state(
         "execution_metrics": create_initial_metrics(),
         "response": "",
         "uploaded_artifacts": list(uploaded_artifacts) if uploaded_artifacts else [],
+        "force_compact": force_compact,
     }
 
 
@@ -177,6 +181,19 @@ async def execute_loop(
             f"{user_input_content}\n\n"
             f"[The user attached {len(_uploaded)} file(s) to this message: {_listing}. "
             f"Use read_artifact with the id for full content.]"
+        )
+    # 用户手动触发压缩：在 USER_INPUT 正文注入指令（仅 LLM 可见，同上传文件的归属串路径）。
+    # 始终注入 —— 有正文则追加、纯压缩轮次（无正文）则指令即正文，让 lead 总有可回应的输入。
+    # 本轮回答 + 这段指令都会被随后的强制压缩折叠进 summary，故无需对模型行为做更多约束。
+    if state.get("force_compact"):
+        _compact_directive = (
+            "[Note: the conversation history will be compacted into a summary "
+            "right after your response.]"
+        )
+        user_input_content = (
+            f"{user_input_content}\n\n{_compact_directive}"
+            if user_input_content.strip()
+            else _compact_directive
         )
     state["events"].append(ExecutionEvent(
         event_type=StreamEventType.USER_INPUT.value,

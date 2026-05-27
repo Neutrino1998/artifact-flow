@@ -62,8 +62,15 @@ class CompactionRunner:
 
         超阈值则生成 compaction_summary 并**追加到 state["events"] 尾部**。
         非超阈值 / 无 compact_agent 时静默跳过。
+
+        state["force_compact"]（用户手动触发）为真且 agent 为 lead 时无视阈值强制压缩一次：
+        在此立即消费标志（置 False），故一轮内只压一次、后续 LLM call 不会重复触发。
         """
-        if input_tokens + output_tokens <= config.COMPACTION_TOKEN_THRESHOLD:
+        forced = bool(state.get("force_compact")) and agent_name == "lead_agent"
+        if forced:
+            state["force_compact"] = False
+
+        if not forced and input_tokens + output_tokens <= config.COMPACTION_TOKEN_THRESHOLD:
             return
 
         compact_agent = self._agents.get("compact_agent")
@@ -75,6 +82,7 @@ class CompactionRunner:
         # "工具完成/状态转移"分级原则;尺寸字段而非大体积内容,可常驻 INFO)。
         logger.info(
             f"[compaction] triggered for {agent_name}: "
+            f"trigger={'forced' if forced else 'threshold'}, "
             f"threshold={config.COMPACTION_TOKEN_THRESHOLD}, "
             f"last_call input={input_tokens} output={output_tokens} "
             f"(sum={input_tokens + output_tokens}), "
@@ -83,9 +91,11 @@ class CompactionRunner:
 
         # compaction_start 同时入 state["events"]（持久化）+ SSE，便于中途重连的 replay
         # 看到"压缩进行中"指示器，而不是看完最后一个 llm_complete 就等到 summary。
+        # forced 标记手动触发，供前端/replay 区分「用户压缩」与「超阈值自动压缩」。
         start_data = {
             "last_input_tokens": input_tokens,
             "last_output_tokens": output_tokens,
+            "forced": forced,
         }
         start_event = ExecutionEvent(
             event_type=StreamEventType.COMPACTION_START.value,

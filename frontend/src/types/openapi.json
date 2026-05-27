@@ -2226,6 +2226,33 @@
         ]
       }
     },
+    "/api/v1/meta": {
+      "get": {
+        "tags": [
+          "meta"
+        ],
+        "summary": "Get Client Config",
+        "description": "\u8fd4\u56de\u524d\u7aef\u6240\u9700\u7684\u540e\u7aef\u5e38\u91cf\uff08\u5355\u4e00\u771f\u76f8\u6e90\uff09\u3002\u503c\u9759\u6001\uff0c\u524d\u7aef\u53d6\u4e00\u6b21\u7f13\u5b58\u5373\u53ef\u3002",
+        "operationId": "get_client_config_api_v1_meta_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientConfigResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
     "/health/live": {
       "get": {
         "summary": "Liveness",
@@ -3113,6 +3140,21 @@
         ],
         "title": "ChatResponse",
         "description": "POST /api/v1/chat response"
+      },
+      "ClientConfigResponse": {
+        "properties": {
+          "compaction_token_threshold": {
+            "type": "integer",
+            "title": "Compaction Token Threshold",
+            "description": "Token sum (a single LLM call's input+output) at which the engine auto-compacts. Used by the frontend as the context-usage gauge denominator so it doesn't hardcode a value that could drift from the server."
+          }
+        },
+        "type": "object",
+        "required": [
+          "compaction_token_threshold"
+        ],
+        "title": "ClientConfigResponse",
+        "description": "GET /api/v1/meta response \u2014 runtime constants for the frontend."
       },
       "ConversationDetailResponse": {
         "properties": {

@@ -6,12 +6,17 @@ import { useComposerSend } from '@/hooks/useComposerSend';
 import { useStreamStore } from '@/stores/streamStore';
 import { useUIStore } from '@/stores/uiStore';
 import { useConversationStore } from '@/stores/conversationStore';
+import { useConfigStore } from '@/stores/configStore';
 import { useStagedFilesStore } from '@/stores/stagedFilesStore';
 import { injectMessage, cancelExecution } from '@/lib/api';
+import { formatTokens } from '@/lib/formatTokens';
 import { MAX_MESSAGE_CHARS, MAX_CHAT_ATTACHMENTS } from '@/lib/constants';
 
 export default function MessageInput() {
   const [content, setContent] = useState('');
+  // Armed by the "compact" toggle; rides the next send as force_compact and is
+  // cleared on a successful send. A compact-only send (no text) is allowed.
+  const [forceCompact, setForceCompact] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const isComposingRef = useRef(false);
@@ -50,6 +55,21 @@ export default function MessageInput() {
   const conversationId = useConversationStore((s) => s.current?.id);
   const streamConversationId = useStreamStore((s) => s.conversationId);
 
+  // Context-usage gauge: last turn's last-LLM-call input tokens (= context size
+  // carried into the next message) vs the backend auto-compaction threshold.
+  // Non-live: sourced from the persisted branch tail, so it reflects what the
+  // next send will carry and updates after each completed turn / on load.
+  const branchPath = useConversationStore((s) => s.branchPath);
+  const compactionThreshold = useConfigStore((s) => s.compactionThreshold);
+  const fetchConfig = useConfigStore((s) => s.fetchConfig);
+  useEffect(() => {
+    fetchConfig();
+  }, [fetchConfig]);
+  const lastNode = branchPath.length > 0 ? branchPath[branchPath.length - 1] : null;
+  const contextTokens =
+    (lastNode?.execution_metrics as { last_input_tokens?: number | null } | null | undefined)
+      ?.last_input_tokens ?? null;
+
   const handleSend = useCallback(async () => {
     if (isStreaming && !content.trim()) {
       // Stop: cancel backend execution. The cancel signal queues into the
@@ -78,9 +98,16 @@ export default function MessageInput() {
       return;
     }
 
-    // New-message send: text and/or staged attachments ride one POST.
-    await submit((text, files) => sendMessage(text, undefined, files));
-  }, [content, isStreaming, cancelling, setCancelling, conversationId, streamConversationId, inject, submit, sendMessage]);
+    // New-message send: text and/or staged attachments ride one POST. When the
+    // compact toggle is armed, force_compact rides along (and allowEmpty lets a
+    // compact-only send through); clear the toggle only on a successful send.
+    const compact = forceCompact;
+    await submit(async (text, files) => {
+      const ok = await sendMessage(text, undefined, files, compact);
+      if (ok && compact) setForceCompact(false);
+      return ok;
+    }, compact);
+  }, [content, isStreaming, cancelling, setCancelling, conversationId, streamConversationId, inject, submit, sendMessage, forceCompact]);
 
   const handleCompositionStart = useCallback(() => {
     isComposingRef.current = true;
@@ -217,6 +244,28 @@ export default function MessageInput() {
             </div>
           )}
 
+          {/* Compact-armed chip — visible cue that the next send will compact. */}
+          {forceCompact && (
+            <div className="flex flex-wrap gap-1.5 mb-2">
+              <span className="inline-flex items-center gap-1 pl-2 pr-1 py-1 rounded-lg bg-accent/10 border border-accent/40 text-xs text-accent">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
+                  <polyline points="4 14 10 14 10 20" />
+                  <polyline points="20 10 14 10 14 4" />
+                </svg>
+                <span>本轮回答后压缩上下文</span>
+                <button
+                  onClick={() => setForceCompact(false)}
+                  className="shrink-0 p-0.5 rounded hover:bg-accent/20"
+                  aria-label="取消压缩"
+                >
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                    <path d="M18 6L6 18M6 6l12 12" />
+                  </svg>
+                </button>
+              </span>
+            </div>
+          )}
+
           <textarea
             ref={textareaRef}
             value={content}
@@ -274,6 +323,33 @@ export default function MessageInput() {
                 </svg>
               </button>
 
+              {/* Compact context — arms a one-shot compaction on the next send.
+                  Disabled while streaming (compaction rides a fresh turn, and the
+                  composer can't start one mid-stream). */}
+              <button
+                onClick={() => setForceCompact((v) => !v)}
+                disabled={isStreaming}
+                className={`p-1.5 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+                  forceCompact
+                    ? 'bg-accent/15 text-accent'
+                    : 'text-text-secondary dark:text-text-secondary-dark hover:bg-surface dark:hover:bg-bg-dark'
+                }`}
+                aria-label="Compact context"
+                aria-pressed={forceCompact}
+                title={
+                  forceCompact
+                    ? '已开启压缩：本轮回答后把之前的对话压缩成摘要（点击取消）'
+                    : '压缩上下文：本轮回答后把之前的对话压缩成摘要'
+                }
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="4 14 10 14 10 20" />
+                  <polyline points="20 10 14 10 14 4" />
+                  <line x1="14" y1="10" x2="21" y2="3" />
+                  <line x1="3" y1="21" x2="10" y2="14" />
+                </svg>
+              </button>
+
               {/* Char counter — only when approaching the cap */}
               {nearLimit && (
                 <span className="ml-1 text-xs tabular-nums text-text-tertiary dark:text-text-tertiary-dark">
@@ -281,6 +357,24 @@ export default function MessageInput() {
                 </span>
               )}
             </div>
+
+            {/* Right group: context-usage gauge + unified Send/Stop/Inject button */}
+            <div className="flex items-center gap-2">
+            {compactionThreshold != null && contextTokens != null && contextTokens > 0 && (() => {
+              const pct = Math.min(100, Math.round((contextTokens / compactionThreshold) * 100));
+              const near = pct >= 85;
+              return (
+                <div
+                  className="hidden sm:flex items-center gap-1.5 text-xs text-text-tertiary dark:text-text-tertiary-dark select-none"
+                  title={`上下文用量：上一轮末次模型调用输入约 ${contextTokens.toLocaleString()} tokens / 自动压缩阈值 ${compactionThreshold.toLocaleString()}（达到阈值会自动压缩历史）`}
+                >
+                  <div className="w-12 h-1 rounded-full bg-border dark:bg-border-dark overflow-hidden">
+                    <div className={`h-full rounded-full ${near ? 'bg-amber-500' : 'bg-accent'}`} style={{ width: `${pct}%` }} />
+                  </div>
+                  <span className="font-mono tabular-nums">{formatTokens(contextTokens)}/{formatTokens(compactionThreshold)}</span>
+                </div>
+              );
+            })()}
 
             {/* Unified Send / Stop / Cancelling / Inject button */}
             {(() => {
@@ -290,7 +384,7 @@ export default function MessageInput() {
               // a silent no-op. Re-enables when agent_start clears queuedInfo.
               const queued = queuedInfo !== null;
               const sendDisabled =
-                (!isStreaming && !content.trim() && !hasStaged) || cancelling || sending || queued;
+                (!isStreaming && !content.trim() && !hasStaged && !forceCompact) || cancelling || sending || queued;
               return (
                 <button
                   onClick={handleSend}
@@ -330,6 +424,7 @@ export default function MessageInput() {
                 </button>
               );
             })()}
+            </div>
           </div>
         </div>
       </div>

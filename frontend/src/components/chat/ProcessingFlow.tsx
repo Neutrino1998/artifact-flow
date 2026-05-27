@@ -2,6 +2,7 @@
 
 import { memo, useState, useEffect } from 'react';
 import CyclingDots from './CyclingDots';
+import { formatTokens } from '@/lib/formatTokens';
 
 interface ProcessingFlowProps {
   agentStepCount: number;
@@ -10,6 +11,8 @@ interface ProcessingFlowProps {
   hasError?: boolean;
   /** Total turn duration in ms; only shown when not active. */
   totalDurationMs?: number | null;
+  /** Cumulative token usage for the turn; only shown when not active. */
+  totalTokens?: number | null;
   /** When set, the header shows a queued state instead of Processing/Error/Completed.
    *  Value = upper-bound count of tasks ahead in the concurrency queue. Step count
    *  is hidden (it's always 0 in this state). */
@@ -29,7 +32,7 @@ function formatDuration(ms: number): string {
   return `${m}m ${rem}s`;
 }
 
-function ProcessingFlow({ agentStepCount, isActive, defaultExpanded, hasError, totalDurationMs, queuedAhead, children }: ProcessingFlowProps) {
+function ProcessingFlow({ agentStepCount, isActive, defaultExpanded, hasError, totalDurationMs, totalTokens, queuedAhead, children }: ProcessingFlowProps) {
   const isQueued = queuedAhead != null;
   const [expanded, setExpanded] = useState(defaultExpanded);
 
@@ -93,6 +96,9 @@ function ProcessingFlow({ agentStepCount, isActive, defaultExpanded, hasError, t
             (step count is always 0 until the engine actually starts). */}
         {!isQueued && (
           <span className="ml-auto text-text-tertiary dark:text-text-tertiary-dark">
+            {!isActive && totalTokens != null && totalTokens > 0 && (
+              <span className="font-mono">{formatTokens(totalTokens)} tokens · </span>
+            )}
             {agentStepCount} {agentStepCount === 1 ? 'step' : 'steps'}
             {!isActive && totalDurationMs != null && totalDurationMs > 0 && (
               <span className="ml-2 font-mono">· {formatDuration(totalDurationMs)}</span>

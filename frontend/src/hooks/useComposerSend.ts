@@ -37,6 +37,10 @@ export interface ComposerOpDeps {
   lockRef: { current: boolean };
   // Optional UI busy flag (only the new-message send shows a spinner).
   setSending?: (busy: boolean) => void;
+  // Permit an empty send (no text, no files). Used by a compact-only turn:
+  // force_compact rides the request and the backend injects a directive body,
+  // so the "nothing to send" bail must not fire.
+  allowEmpty?: boolean;
   // The network op. Returns true on success → reconcile; false or throw → keep.
   run: (text: string, files: File[] | undefined) => Promise<boolean>;
 }
@@ -48,13 +52,15 @@ export async function runComposerOp({
   removeFiles,
   lockRef,
   setSending,
+  allowEmpty,
   run,
 }: ComposerOpDeps): Promise<void> {
   if (lockRef.current) return;
   const trimmed = content.trim();
   const files = staged.map((s) => s.file);
-  // Allow files-only (empty text + attachments); bail only if there's nothing.
-  if (!trimmed && files.length === 0) return;
+  // Allow files-only (empty text + attachments) and, when allowEmpty (compact-only
+  // send), a fully empty send; otherwise bail when there's nothing to send.
+  if (!trimmed && files.length === 0 && !allowEmpty) return;
 
   const sentText = content;
   const sentIds = staged.map((s) => s.id);
@@ -100,8 +106,9 @@ export function useComposerSend(
   const injectingRef = useRef(false);
 
   // New-message send: text and/or staged attachments ride one POST.
+  // allowEmpty=true permits a compact-only send (no text, no files).
   const submit = useCallback(
-    (run: (text: string, files: File[] | undefined) => Promise<boolean>) =>
+    (run: (text: string, files: File[] | undefined) => Promise<boolean>, allowEmpty = false) =>
       runComposerOp({
         content,
         staged: stagedFiles,
@@ -109,6 +116,7 @@ export function useComposerSend(
         removeFiles,
         lockRef: sendingRef,
         setSending,
+        allowEmpty,
         run,
       }),
     [content, stagedFiles, setContent, removeFiles],
