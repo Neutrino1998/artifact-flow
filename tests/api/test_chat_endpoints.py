@@ -208,14 +208,15 @@ class TestCancel:
         resp = await client.post(f"/api/v1/chat/{conv_id}/cancel")
         assert resp.status_code == 409
 
-    async def test_cancel_accepted_while_queued(
+    async def test_cancel_rejected_while_queued(
         self, client: AsyncClient, app, conv_with_messages
     ):
-        """QUEUED (lease held, interactive NOT yet marked) → cancel 200 + flag set.
+        """QUEUED (lease held, interactive NOT yet marked) → cancel 409, no flag set.
 
-        cancel gates on the lease (spans QUEUED→RUNNING→post), not interactive,
-        so a still-queued turn can be cancelled. The flag is honored cooperatively
-        the instant the engine starts (no task.cancel(), cross-worker correct).
+        cancel gates on interactive (== RUNNING), same as inject. A queued turn is
+        not cancellable until it starts running — we must not set a Redis cancel
+        flag that would then have to be kept alive across the worker-local queue
+        wait (the cross-layer tear that the r4 round-1/2 findings kept exposing).
         """
         conv_id, msg_ids = conv_with_messages
         runner: ExecutionRunner = app.dependency_overrides[get_execution_runner]()
@@ -223,9 +224,10 @@ class TestCancel:
         await runner.store.try_acquire_lease(conv_id, msg_ids[0])
         try:
             resp = await client.post(f"/api/v1/chat/{conv_id}/cancel")
-            assert resp.status_code == 200
-            assert resp.json()["message_id"] == msg_ids[0]
-            assert await runner.store.is_cancelled(msg_ids[0]) is True
+            assert resp.status_code == 409
+            assert "queued" in resp.json()["detail"].lower()
+            # No cancel flag must have been set for a queued turn.
+            assert await runner.store.is_cancelled(msg_ids[0]) is False
         finally:
             await runner.store.release_lease(conv_id, msg_ids[0])
 

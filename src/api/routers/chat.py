@@ -283,16 +283,25 @@ async def cancel_execution(
     """
     await _verify_ownership(conv_id, current_user, conversation_manager)
 
-    # cancel gate 在 lease（横跨 QUEUED→RUNNING→post），不是 interactive（仅 RUNNING）——
-    # 这样还在排队的 turn 也能被取消。取消是协作式的：只置 Redis cancel flag。
-    #   - RUNNING：引擎在下个 hooks.check_cancelled 检查点看到 flag，优雅退出。
-    #   - QUEUED：flag 共享在 Redis（排队的 asyncio.Task 只在某一个 worker 上，但 flag
-    #     跨 worker 可见），待该 turn 取得槽位、引擎首个检查点即看到 → 干净的 CANCELLED
-    #     终态（不用 task.cancel()，跨 worker 正确）。
-    #   - post-processing 窗口：引擎已退出，flag 无人读 → 良性 no-op（该轮本就在收尾）。
-    #     接受这里返回 200，而不为区分 QUEUED/POST 给 store 加判别器。
-    active_msg_id = await runner.store.get_leased_message_id(conv_id)
+    # cancel gate 在 interactive（== RUNNING），与 inject 对称：只作用于正在跑的执行。
+    # 引擎在 hooks.check_cancelled 检查点读 flag；跨 worker 正确（flag 共享在 Redis，由
+    # 持有该轮的 worker 读取），且 flag 在 RUNNING 期间几秒内即被读取、不会跨越任何
+    # Redis 观察不到的等待。
+    #
+    # 为什么 QUEUED 不允许取消：排队是 worker 本地的 in-memory semaphore 等待，Redis
+    # 看不到「谁在排队、在哪个 worker」。让 Redis 中介的 cancel 去够 worker 本地状态，
+    # 就得把 cancel flag 跨「Redis 观察不到的等待」续命 —— 反复制造 cancel 语义撕裂
+    # （HA review r4 round-1/2 同形状反复的根因）。排队轮无害、瞬态、很快起跑，起跑后
+    # 即可取消。故 QUEUED 返回 409（显式 best-effort 契约），且**不**置任何 flag。
+    active_msg_id = await runner.store.get_interactive_message_id(conv_id)
     if not active_msg_id:
+        # 仅为给更清楚的 409 而读一次 lease（只读、不置 flag）：区分「排队中」与「无执行」。
+        if await runner.store.get_leased_message_id(conv_id):
+            raise HTTPException(
+                status_code=409,
+                detail="Execution is queued (waiting for a concurrency slot); "
+                       "it becomes cancellable once it starts running.",
+            )
         raise HTTPException(status_code=409, detail="No active execution for this conversation")
 
     await runner.store.request_cancel(active_msg_id)

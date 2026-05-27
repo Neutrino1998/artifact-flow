@@ -462,14 +462,9 @@ class RedisRuntimeStore:
             keys=[self._interactive_key(conversation_id)],
             args=[message_id, str(ttl_int)],
         )
-        # Refresh the cancel flag's TTL too (liveness axis — same as the lease).
-        # request_cancel sets it with EX=EXECUTION_TIMEOUT, but queue wait can
-        # exceed EXECUTION_TIMEOUT under saturation; without this refresh the flag
-        # could expire while a cancelled turn is still QUEUED → the turn would then
-        # run normally (cancel silently lost). EXPIRE on a missing key is a no-op,
-        # so this only extends a flag that actually exists; cleanup_execution stays
-        # the normal delete path at turn end. Single-key op (msg_id-tagged) — its own
-        # slot, separate from the conv_id lease keys → Cluster-safe (not multi-key).
-        await self._redis.expire(self._cancel_key(message_id), self._execution_timeout)
+        # No cancel-flag renewal: cancel only ever targets a RUNNING turn (gated on
+        # interactive), whose engine reads the flag within seconds — the flag never
+        # has to outlive the worker-local queue wait, so EX=EXECUTION_TIMEOUT is
+        # always sufficient and needs no heartbeat coupling.
         # lease_result == 1 means lease key EXPIRE succeeded (we're still owner)
         return lease_result == 1

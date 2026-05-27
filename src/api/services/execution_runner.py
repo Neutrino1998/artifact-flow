@@ -163,32 +163,32 @@ class ExecutionRunner:
                         },
                     })
                 async with self._semaphore:
-                    # QUEUED → RUNNING 边：取得并发槽位后才标记 interactive，使
-                    # interactive 窗口恰好等于 RUNNING（与 _on_engine_exit 处的 clear
-                    # 对称）。inject gate 在此 interactive，cancel gate 在更外层的 lease。
+                    # QUEUED → RUNNING 边：取得并发槽位后，对 lease owner 做 compare-and-set。
+                    # 只有仍持有 conversation lease 时才标记 interactive 并启动引擎。
+                    # interactive 窗口因此恰好等于 RUNNING（与 _on_engine_exit 处的 clear
+                    # 对称）；inject / cancel 都 gate 在它。
                     #
-                    # compare-and-set against lease owner：只有仍持有 conversation
-                    # lease 时才标记并启动引擎。若排队期间 lease 已过期 / 被新一轮接管
-                    # （而 heartbeat 还没来得及 fence 本 task），则**不能**启动 —— 否则会
-                    # (a) 覆盖新 owner 的 interactive key（misroute inject）、(b) 在该
-                    # 会话上跑成第二写者（破坏 lease 单写不变量）。此时 abort 退出，finally
-                    # 走 cleanup（compare-and-del 不会动到新 owner 的 key），本轮成为
-                    # ORPHANED（罕见 lease-loss race，已命名的可接受边界）。
+                    # 若排队期间 lease 已过期 / 被新一轮接管（而 heartbeat 还没来得及 fence
+                    # 本 task），则**不能**启动 —— 否则会 (a) 覆盖新 owner 的 interactive key、
+                    # (b) 在该会话上跑成第二写者（破坏 lease 单写不变量）。此时 abort，finally
+                    # 走 cleanup（compare-and-del 不会动到新 owner 的 key），本轮成为 ORPHANED。
+                    #
+                    # fail-closed：CAS 抛异常时归属不可知 —— 宁可 abort（本轮成 ORPHANED，
+                    # 响亮可见、可刷新恢复）也不能 fail-open 跑成静默的第二写者（破坏单写不变量，
+                    # 远比丢一个 turn 严重；codebase 偏好 loud failure over silent corruption）。
+                    # redis-py client 已对瞬断重试；仍抛即视为持续故障 → abort。
                     try:
                         owns_lease = await self.store.mark_engine_interactive(conversation_id, task_id)
                     except Exception:
-                        # Redis 瞬断 → 归属未知。best-effort 放行（interactive 没标上，
-                        # 该轮 inject/cancel 退化为 409；heartbeat 若发现 lease 真丢了会
-                        # fence 掉本 task）。不因一次瞬断静默丢一个本可跑完的 turn。
                         logger.warning(
-                            f"mark_engine_interactive errored for {task_id} "
-                            f"(inject/cancel will 409 this turn); continuing"
+                            f"mark_engine_interactive errored for {task_id}; cannot confirm "
+                            f"lease ownership — aborting before run (fail-closed)"
                         )
-                        owns_lease = True
+                        owns_lease = False
                     if not owns_lease:
                         logger.warning(
-                            f"Task {task_id} lost its conversation lease while queued "
-                            f"(expired / taken over); aborting before run to avoid a second writer"
+                            f"Task {task_id} no longer owns its conversation lease "
+                            f"(lost while queued / unconfirmed); aborting before run to avoid a second writer"
                         )
                         return
                     await coro

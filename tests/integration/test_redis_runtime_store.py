@@ -261,32 +261,17 @@ class TestCancel:
         assert resume_data.get("approved") is False
         assert resume_data.get("reason") == "cancelled"
 
-    async def test_renew_lease_refreshes_cancel_flag(self, store, redis_client):
-        """Heartbeat must keep a pending cancel flag alive across a long QUEUED wait.
-
-        request_cancel sets the flag with EX=EXECUTION_TIMEOUT, but queue wait can
-        exceed it under saturation. renew_lease (called by the heartbeat) must
-        refresh the cancel key's TTL so the flag survives until the queued turn
-        starts and the engine reads it — otherwise the cancel is silently lost.
-        """
-        conv, msg = "test_conv_cancel_renew", "test_msg_cancel_renew"
+    async def test_renew_lease_does_not_touch_cancel_flag(self, store, redis_client):
+        """Cancel only targets RUNNING turns, so renew_lease must NOT manage the
+        cancel flag (no renewal coupling). A pending flag keeps its own TTL; renew
+        neither extends nor resurrects it."""
+        conv, msg = "test_conv_cancel_norenew", "test_msg_cancel_norenew"
         await store.try_acquire_lease(conv, msg)
         await store.request_cancel(msg)
-        # Simulate the flag nearly expiring while the turn is still queued.
-        await redis_client.expire(store._cancel_key(msg), 1)
-        # Heartbeat fires → must bump the cancel flag's TTL back up.
+        await redis_client.expire(store._cancel_key(msg), 5)
         await store.renew_lease(conv, msg, ttl=store._lease_ttl)
         ttl = await redis_client.ttl(store._cancel_key(msg))
-        assert ttl > 1, "renew_lease should have refreshed the cancel flag TTL"
-        assert await store.is_cancelled(msg) is True
-
-    async def test_renew_lease_does_not_resurrect_absent_cancel_flag(self, store, redis_client):
-        """EXPIRE on a missing key is a no-op — renew must not create a cancel flag."""
-        conv, msg = "test_conv_no_cancel", "test_msg_no_cancel"
-        await store.try_acquire_lease(conv, msg)
-        await store.renew_lease(conv, msg, ttl=store._lease_ttl)
-        assert await store.is_cancelled(msg) is False
-        assert await redis_client.exists(store._cancel_key(msg)) == 0
+        assert 0 < ttl <= 5, "renew_lease must not extend the cancel flag TTL"
 
 
 class TestMessageQueue:

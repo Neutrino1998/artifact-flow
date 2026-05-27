@@ -378,6 +378,25 @@ class TestSubmitOrchestration:
 
         await runner.shutdown(timeout=2)
 
+    async def test_aborts_when_mark_interactive_errors(self):
+        """CAS 抛异常（归属不可确认）→ fail-closed abort，coro 绝不运行。"""
+        class _MarkErrorStore(InMemoryRuntimeStore):
+            async def mark_engine_interactive(self, conversation_id, message_id):
+                raise ConnectionError("redis blip")
+
+        store = _MarkErrorStore()
+        runner = ExecutionRunner(store=store)
+        ran = asyncio.Event()
+
+        async def coro():
+            ran.set()
+
+        await runner.submit("conv-1", "t1", coro, user_id="u1", stream_transport=_mock_transport)
+        await asyncio.sleep(0.05)
+        assert not ran.is_set(), "归属不可确认时引擎不应启动（fail-closed）"
+        assert "t1" not in runner._tasks
+        await runner.shutdown(timeout=2)
+
     async def test_submit_conflict_error(self):
         store = InMemoryRuntimeStore()
         runner = ExecutionRunner(store=store)

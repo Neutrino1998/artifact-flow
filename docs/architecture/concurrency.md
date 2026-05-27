@@ -184,10 +184,10 @@ gantt
 
 - **Lease** 覆盖**整个请求生命周期**（QUEUED 排队 + RUNNING + post-processing + 终端事件推送），仅在 `* → CLOSED` 释放。
 - **Interactive** == **RUNNING**：取得并发 semaphore 后才 `mark_engine_interactive`（QUEUED→RUNNING 边，best-effort），引擎退出即清除。submit 拿到 lease 但 semaphore 满时，turn 处于 **QUEUED**（持 lease、未 interactive）。
-- **inject** gate 在 interactive → 仅 RUNNING 放行；QUEUED 与 post-processing 均返回 409（没有正在跑的引擎来 drain 队列）。
-- **cancel** gate 在 **lease** → QUEUED + RUNNING 都能取消（协作式 flag：QUEUED 时待取得槽位、引擎首个 `check_cancelled` 即生效，跨 worker 正确）。post-processing 窗口引擎已退出，cancel 返回 200 但为良性 no-op（该轮本就在收尾）。
+- **inject 与 cancel 都 gate 在 interactive（== RUNNING）** → 仅 RUNNING 放行；QUEUED 与 post-processing 均返回 409。两者对称：都是「作用于正在跑的执行」的操作。
+- QUEUED 不可 inject（无引擎来 drain 队列），也不可 cancel（排队是 worker 本地 in-memory 等待，Redis 中介的 cancel 够不到、强行支持会撕裂 cancel 语义 —— 详见 [execution-lifecycle.md → 为什么 cancel 只作用于 RUNNING](execution-lifecycle.md)）。排队轮起跑（RUNNING）后即可 cancel。
 
-这个分离让 QUEUED/post-processing 拒绝 inject（无引擎可响应），同时 cancel 在 lease 全程可达；并发 POST /chat 始终被 lease 阻止。
+这个分离让 inject/cancel 都只作用于 RUNNING（对称、各自的 flag 都在几秒内被读）；QUEUED / post-processing 一律 409；并发 POST /chat 始终被 lease 阻止。
 
 ### Interrupt 机制
 
@@ -222,9 +222,9 @@ sequenceDiagram
 
 ### Cancellation
 
-- cancel 路由 gate 在 **lease**（横跨 QUEUED→RUNNING→post），故排队中的 turn 也可取消
-- `request_cancel(msg_id)` 设置 Event 标志（Redis flag 随 lease heartbeat 续期，见上）
-- 引擎在每次循环顶部和工具执行前调用 `check_cancelled` hook 检查；QUEUED 时无引擎在读，待取得槽位、首个检查点即看到 → 干净 CANCELLED
+- cancel 路由 gate 在 **interactive**（== RUNNING），与 inject 对称：只作用于正在跑的执行；QUEUED 返回 409、不置 flag
+- `request_cancel(msg_id)` 设置 Event 标志（Redis flag `EX=EXECUTION_TIMEOUT`，无需续期 —— 只在 RUNNING 下置，几秒内即被引擎读取，不会跨越任何 Redis 观察不到的等待）
+- 引擎在每次循环顶部和工具执行前调用 `check_cancelled` hook 检查；跨 worker 正确（flag 共享在 Redis，由持有该轮的 worker 读取）
 - 取消时引擎 emit `cancelled` 终端事件，释放资源，lease 随后在 finally 块释放
 
 ### 消息注入
@@ -269,7 +269,7 @@ sequenceDiagram
 | `{af:conv_id}:lease` | STRING (msg_id) | `LEASE_TTL` = 90s | Conversation 持有 |
 | `{af:conv_id}:interactive` | STRING (msg_id) | `LEASE_TTL` | Engine interactive |
 | `{af:msg_id}:interrupt` | HASH | `PERM_TIMEOUT + 60` | Interrupt 状态 |
-| `{af:msg_id}:cancel` | STRING "1" | `EXECUTION_TIMEOUT`（随 lease heartbeat 续期） | 取消标记 |
+| `{af:msg_id}:cancel` | STRING "1" | `EXECUTION_TIMEOUT` | 取消标记（仅 RUNNING 下置，几秒内被读，无需续期） |
 | `{af:msg_id}:queue` | LIST | `EXECUTION_TIMEOUT` | 消息队列 |
 | `{af:msg_id}:interrupt_ch` | Pub/Sub channel | — | Interrupt 唤醒通知 |
 
@@ -301,7 +301,7 @@ Controller 启动后台任务每 `LEASE_TTL / 3 = 30s` 调用 `renew_lease()`：
 
 - InMemory 永远成功
 - Redis 通过 `compare-and-expire` 脚本：owner 不匹配返回 0 → 续租失败 → Controller 感知到"lease 被抢" → 主动终止执行
-- 同一次心跳还会续 interactive 与 **cancel flag**（`EXPIRE` 仅作用于已存在的 key）——cancel flag 属 liveness 轴，否则 QUEUED 期间下发的取消会在 turn 起跑前先过期（queue wait 可超 `EXECUTION_TIMEOUT`）、被静默吞掉
+- 同一次心跳也续 interactive（owner 匹配才续）。cancel flag **不**在此续期 —— cancel 只作用于 RUNNING，flag 几秒内即被读，无需跨排队等待续命
 
 这允许在 Pod 崩溃时（心跳停止）90s 内 lease 自动释放，其他实例可接管该对话的新请求。
 
