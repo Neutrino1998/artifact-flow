@@ -1557,7 +1557,7 @@
 <tr>
 <td><code>{af:msg_id}:stream</code></td>
 <td>Stream (XADD)</td>
-<td><code>EXECUTION_TIMEOUT</code>（1800s）</td>
+<td><code>EXECUTION_TIMEOUT + STREAM_TTL_GRACE</code>（1800s + 300s）</td>
 <td>事件主体</td>
 </tr>
 <tr>
@@ -1568,6 +1568,9 @@
 </tr>
 </tbody>
 </table>
+<blockquote>
+<p>TTL 含 <code>STREAM_TTL_GRACE</code>：key 必须活过引擎 deadline 之后的 post-processing —— 终态（含 <code>TIMED_OUT</code>）在那时才推上 stream。这是 liveness 轴的 <strong>accepted best-effort 固定近似</strong>；心跳续期是 deferred 非目标（见 <a href="../execution-lifecycle/">execution-lifecycle.md → 三条正交的时间轴</a>）。结束时 <code>close_stream</code> 把 TTL 重置为 <code>STREAM_CLEANUP_TTL</code>。</p>
+</blockquote>
 <p><strong>写入</strong>：</p>
 <ul>
 <li><code>XADD ... MAXLEN ~ 1000</code> — 近似裁剪，限制单 stream 最大事件数（长任务超过会丢最旧事件，前端须在终止前消费完）</li>

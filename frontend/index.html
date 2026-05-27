@@ -1156,6 +1156,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#安全响应头与-csp" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        安全响应头与 CSP
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#rest-client-缓存" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1450,6 +1461,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#安全响应头与-csp" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        安全响应头与 CSP
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#rest-client-缓存" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1595,23 +1617,25 @@
 <p><strong>不使用</strong> <code>@tanstack/react-virtual</code>——对话树长度实测不触发虚拟化收益，暂保持常规渲染；将来长会话场景可再引入。</p>
 <h2 id="目录结构">目录结构</h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>frontend/src/
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>├── app/
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>│   ├── layout.tsx              # Root layout + ThemeInitializer + auth hydration
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>│   ├── page.tsx                # 主聊天页
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>│   └── login/page.tsx
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>├── components/
-<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>│   ├── chat/                   # 消息、流式、工具卡片、admin 面板
-<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>│   ├── artifact/               # 面板、Tabs、预览 / Source / Diff
-<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>│   ├── layout/                 # ThreeColumnLayout、Modals
-<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>│   ├── sidebar/                # 对话列表、用户菜单
-<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>│   └── markdown/CodeBlock.tsx
-<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>├── stores/                     # 5 个 Zustand store
-<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>├── hooks/                      # useSSE / useChat / useArtifacts / useMediaQuery
-<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>├── lib/                        # sse.ts / api.ts / messageTree.ts / reconstructSegments.ts
-<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a>└── types/
-<a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a>    ├── api.d.ts                # 自动生成（不要手改）
-<a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a>    ├── events.ts               # StreamEventType 镜像 + 各事件 data 接口
-<a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a>    └── index.ts                # 从 api.d.ts 抽取的常用类型 re-export
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>├── middleware.ts               # 每请求生成 CSP nonce + 安全响应头（见「安全响应头与 CSP」）
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>├── app/
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>│   ├── layout.tsx              # Root layout + ThemeInitializer + 把 nonce 盖到内联脚本
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>│   ├── page.tsx                # 主聊天页（外层包 AuthGuard）
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>│   └── login/page.tsx
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>├── components/
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>│   ├── AuthGuard.tsx           # 鉴权水合 + must_change_password 强制改密闸门
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>│   ├── chat/                   # 消息、流式、工具卡片、admin 面板
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>│   ├── artifact/               # 面板、Tabs、预览 / Source / Diff
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>│   ├── layout/                 # ThreeColumnLayout、Modals、ChangePasswordDialog
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>│   ├── sidebar/                # 对话列表、用户菜单
+<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>│   └── markdown/CodeBlock.tsx
+<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>├── stores/                     # 5 个 Zustand store
+<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a>├── hooks/                      # useSSE / useChat / useArtifacts / useMediaQuery
+<a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a>├── lib/                        # sse.ts / api.ts / messageTree.ts / csp.ts / passwordPolicy.ts …
+<a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a>└── types/
+<a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a>    ├── api.d.ts                # 自动生成（不要手改）
+<a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a>    ├── events.ts               # StreamEventType 镜像 + 各事件 data 接口
+<a id="__codelineno-0-20" name="__codelineno-0-20" href="#__codelineno-0-20"></a>    └── index.ts                # 从 api.d.ts 抽取的常用类型 re-export
 </code></pre></div>
 <h2 id="三栏布局">三栏布局</h2>
 <p><code>components/layout/ThreeColumnLayout.tsx</code> 固定三栏，宽度由 <code>uiStore</code> 控制折叠：</p>
@@ -1626,7 +1650,7 @@
 <ul>
 <li><strong>Sidebar</strong>：<code>ConversationList</code> + <code>UserMenu</code>；admin 可打开 <code>AdminConversationList</code>（只读 observability，不删数据）/ <code>ObservabilityPanel</code> / <code>UserManagementPanel</code></li>
 <li><strong>Chat</strong>：<code>ChatPanel</code> 组合 <code>MessageList</code>（含分支导航 <code>BranchNavigator</code>）+ <code>MessageInput</code>；流式期间由 <code>ProcessingFlow</code> 渲染各 agent 的 <code>AgentSegmentBlock</code> / <code>ToolCallCard</code> / <code>ThinkingBlock</code> / <code>CompactionFlowBlock</code> / <code>InjectFlowBlock</code> / <code>ErrorFlowBlock</code></li>
-<li><strong>Right panel — mode-aware</strong>（PR0+）：<code>userManagementVisible &amp;&amp; isAdmin</code> 时右栏从 <code>ArtifactPanel</code> 切换为 <code>UserManagementDetailPanel</code>，按 <code>userManagementRightView</code> 类型分发到 <code>UserDetailForm</code> / <code>CreateUserForm</code> / <code>BulkImportForm</code>(PR3) / <code>BulkActionPanel</code>(PR5a) / <code>DepartmentManagerPanel</code>(PR4)；退出用户管理模式自动恢复 <code>ArtifactPanel</code></li>
+<li><strong>Right panel — mode-aware</strong>：<code>userManagementVisible &amp;&amp; isAdmin</code> 时右栏从 <code>ArtifactPanel</code> 切换为 <code>UserManagementDetailPanel</code>，按 <code>userManagementRightView</code> 类型分发到 <code>UserDetailForm</code> / <code>CreateUserForm</code> / <code>BulkImportForm</code> / <code>BulkActionPanel</code> / <code>DepartmentManagerPanel</code>；退出用户管理模式自动恢复 <code>ArtifactPanel</code></li>
 <li><strong>Artifacts</strong>：<code>ArtifactPanel</code> → <code>ArtifactTabs</code> → <code>MarkdownPreview | SourceView | DiffView</code>，顶栏 <code>ArtifactToolbar</code> 提供版本切换与 DOCX 导出</li>
 </ul>
 <h2 id="状态管理zustand-stores">状态管理（Zustand Stores）</h2>
@@ -1642,7 +1666,7 @@
 <tbody>
 <tr>
 <td><code>token</code>, <code>user</code>, <code>isAuthenticated</code></td>
-<td>JWT 与当前用户</td>
+<td>JWT 与当前用户（<code>user.must_change_password</code> 驱动强制改密闸门）</td>
 </tr>
 <tr>
 <td><code>isHydrated</code></td>
@@ -1650,7 +1674,10 @@
 </tr>
 </tbody>
 </table>
-<p>Actions：<code>login(token, user)</code>, <code>logout()</code>, <code>hydrate()</code>。</p>
+<p>Actions：<code>login(token, user)</code>, <code>logout()</code>, <code>hydrate()</code>, <code>setUser(user)</code>（改密成功 / <code>/me</code> 刷新后就地更新用户，使 <code>must_change_password</code> 清除后无需重登）。</p>
+<blockquote>
+<p><strong>强制改密闸门</strong>：<code>AuthGuard</code>（包在主页外层）水合后拉 <code>/me</code>；当 <code>user.must_change_password</code> 为 True 时，挡住整个应用、只渲染不可关闭的 <code>ChangePasswordDialog forced</code>（禁用 backdrop / Esc / 取消按钮）。这是与后端 403 闸门对称的前端侧；改密成功 <code>setUser</code> 清标志后恢复正常。表单的客户端口令强度提示来自 <code>lib/passwordPolicy.ts</code>（镜像后端 <code>PASSWORD_MIN_LENGTH</code> + 字母/数字/符号，仅提示不阻断，最终以后端校验为准）。</p>
+</blockquote>
 <h3 id="conversationstore"><code>conversationStore</code></h3>
 <table>
 <thead>
@@ -1730,7 +1757,7 @@
 </tr>
 <tr>
 <td><code>userManagementRightView</code></td>
-<td>右面板内容（discriminated union）：<code>empty</code> / <code>create-user</code> / <code>edit-user</code> / <code>bulk-import</code>(PR3) / <code>bulk-action</code>(PR5a) / <code>dept-manager</code>(PR4)</td>
+<td>右面板内容（discriminated union）：<code>empty</code> / <code>create-user</code> / <code>edit-user</code> / <code>bulk-import</code> / <code>bulk-action</code> / <code>dept-manager</code></td>
 </tr>
 <tr>
 <td><code>userMgmtListVersion</code></td>
@@ -1738,7 +1765,7 @@
 </tr>
 <tr>
 <td><code>selectionMode</code>, <code>userManagementSelection</code></td>
-<td>PR5a 用户管理多选模式开关 + 选中 ID 列表；进入 <code>enterSelectionMode()</code> 自动把 RightView 切到 <code>bulk-action</code>，退出时回 <code>empty</code></td>
+<td>用户管理多选模式开关 + 选中 ID 列表；进入 <code>enterSelectionMode()</code> 自动把 RightView 切到 <code>bulk-action</code>，退出时回 <code>empty</code></td>
 </tr>
 <tr>
 <td><code>observabilitySelectedConvId</code>, <code>observabilityBrowseVisible</code>, <code>observabilityRefreshTick</code></td>
@@ -1785,6 +1812,14 @@
 <td><code>cancelled</code>, <code>reconnecting</code>, <code>error</code></td>
 <td>终端/中间态</td>
 </tr>
+<tr>
+<td><code>cancelling</code></td>
+<td>cancel 已请求、引擎尚未确认终止 —— 驱动 Stop 按钮 "cancelling…" spinner（action <code>setCancelling</code>）</td>
+</tr>
+<tr>
+<td><code>queuedInfo</code></td>
+<td><code>{ ahead, maxConcurrent } \| null</code>：执行排队等并发信号量时的位置；<code>null</code> = 已进入 RUNNING 或无执行。由 <code>execution_queued</code> 事件置位、<code>agent_start</code> 清除</td>
+</tr>
 </tbody>
 </table>
 <p>关键 action：<code>appendCurrentSegmentContent(chunk)</code> 是 <code>llm_chunk</code> 的入口，内部走 RAF 节流（见下文性能小节）。</p>
@@ -1824,6 +1859,7 @@
 <ul>
 <li>按 <code>event.type</code> 分派到 <code>streamStore</code> 的对应 action</li>
 <li><code>llm_chunk</code> 走 RAF 节流</li>
+<li><code>execution_queued</code>（SSE-only 类型，见 <code>types/events.ts</code>）→ 置 <code>queuedInfo</code>；<code>agent_start</code> 时清除。排队中 <code>MessageInput</code> 的统一发送/停止/注入按钮被禁用——排队态既不可 cancel 也不可 inject（两端点在进入 RUNNING 前返回 409）</li>
 <li>终端事件（<code>complete</code> / <code>cancelled</code> / <code>error</code>）触发 <code>endStream()</code> 并清理资源</li>
 <li>自动重连：非终端断开时最多 3 次，指数退避 1s / 2s / 4s，携带 <code>lastEventId</code></li>
 <li>共享 <code>AbortController</code> 防止切换对话时出现孤立连接</li>
@@ -1866,7 +1902,15 @@
 <li><code>chat.light = #FAF9F6</code> / <code>chat.dark = #1e1e1e</code></li>
 <li>status 色：<code>success #4a8c6f</code> / <code>error #c25d4e</code> / <code>warning #c49a3c</code></li>
 </ul>
-<p>文档站（MkDocs Material）的 CSS 从同一组 token 派生，见 <code>docs/stylesheets/custom.css</code>（PR 6 交付）。</p>
+<p>文档站（MkDocs Material）的 CSS 从同一组 token 派生，见 <code>docs/stylesheets/custom.css</code>。</p>
+<h2 id="安全响应头与-csp">安全响应头与 CSP</h2>
+<p><code>src/middleware.ts</code>（Next middleware，每请求执行）+ <code>src/lib/csp.ts</code> 注入 Content-Security-Policy 与一组静态加固头：</p>
+<ul>
+<li><strong>每请求随机 nonce</strong>：middleware 生成 base64 nonce 写进 <code>script-src 'nonce-&lt;nonce&gt;' 'strict-dynamic'</code>，并经 <code>x-nonce</code> 请求头传给 <code>app/layout.tsx</code>，盖到那条内联主题 bootstrap 脚本上（暗色无闪烁那段）。<strong>CSP 放 Next 而非 nginx</strong>：nonce 必须与渲染同源生成，nginx 看不到它、只能退回 <code>'unsafe-inline'</code>，失去意义。</li>
+<li><strong><code>connect-src</code> 从 <code>NEXT_PUBLIC_API_URL</code> 派生</strong>：prod 同源部署时为空 → 退回 <code>'self'</code>；配置独立后端域时把该 origin 显式列入（dev 放宽）。</li>
+<li><strong><code>img-src 'self' data: blob:</code></strong>（<strong>刻意不含 <code>https:</code></strong>）：作为补偿控制收窄信标外泄面；导出 / 预览用图走 data/blob。</li>
+<li><code>frame-ancestors 'none'</code> 防点击劫持；另有静态头 <code>X-Frame-Options: DENY</code> / <code>X-Content-Type-Options</code> / <code>Referrer-Policy</code> / <code>Permissions-Policy</code>。</li>
+</ul>
 <h2 id="rest-client-缓存">REST Client 缓存</h2>
 <p><code>lib/api.ts</code> 做了两件事防抖：</p>
 <ul>

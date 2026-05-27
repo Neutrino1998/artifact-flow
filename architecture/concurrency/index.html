@@ -1822,8 +1822,8 @@
 <a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">try_acquire_lease</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">conv_id</span><span class="p">,</span> <span class="n">msg_id</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">]:</span> <span class="o">...</span>
 <a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">release_lease</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">conv_id</span><span class="p">,</span> <span class="n">msg_id</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span> <span class="o">...</span>
 <a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>
-<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>    <span class="c1"># Engine interactive — inject / cancel 的有效窗口</span>
-<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">mark_engine_interactive</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">conv_id</span><span class="p">,</span> <span class="n">msg_id</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span> <span class="o">...</span>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>    <span class="c1"># Engine interactive — RUNNING 窗口（inject 与 cancel 的有效窗口都 gate 在此）</span>
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">mark_engine_interactive</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">conv_id</span><span class="p">,</span> <span class="n">msg_id</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span> <span class="o">...</span>  <span class="c1"># QUEUED→RUNNING CAS：仍持 lease 才标记，返回是否成功（fail-closed）</span>
 <a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">clear_engine_interactive</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">conv_id</span><span class="p">,</span> <span class="n">msg_id</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span> <span class="o">...</span>
 <a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a>
 <a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a>    <span class="c1"># Interrupts — permission 确认等待</span>
@@ -1854,7 +1854,10 @@
     acquire_lease      :a1, 0, 30
     post_processing    :a2, 25, 30
 
-    section Interactive
+    section Queued (满载时)
+    wait_semaphore     :q1, 0, 2
+
+    section Interactive (== RUNNING)
     mark_interactive   :b1, 2, 23
     engine_loop        :b2, 2, 23
 
@@ -1862,10 +1865,12 @@
     receive_request    :milestone, 0, 0
     release_lease      :milestone, 30, 0</code></pre>
 <ul>
-<li><strong>Lease</strong> 覆盖<strong>整个请求生命周期</strong>（含 post-processing、flush、终端事件推送）</li>
-<li><strong>Interactive</strong> 仅覆盖<strong>引擎 loop 期间</strong>（退出后 inject/cancel 返回 409）</li>
+<li><strong>Lease</strong> 覆盖<strong>整个请求生命周期</strong>（QUEUED 排队 + RUNNING + post-processing + 终端事件推送），仅在 <code>* → CLOSED</code> 释放。</li>
+<li><strong>Interactive</strong> == <strong>RUNNING</strong>：取得并发 semaphore 后才 <code>mark_engine_interactive</code>（QUEUED→RUNNING 边，best-effort），引擎退出即清除。submit 拿到 lease 但 semaphore 满时，turn 处于 <strong>QUEUED</strong>（持 lease、未 interactive）。</li>
+<li><strong>inject 与 cancel 都 gate 在 interactive（== RUNNING）</strong> → 仅 RUNNING 放行；QUEUED 与 post-processing 均返回 409。两者对称：都是「作用于正在跑的执行」的操作。</li>
+<li>QUEUED 不可 inject（无引擎来 drain 队列），也不可 cancel（排队是 worker 本地 in-memory 等待，Redis 中介的 cancel 够不到、强行支持会撕裂 cancel 语义 —— 详见 <a href="../execution-lifecycle/">execution-lifecycle.md → 为什么 cancel 只作用于 RUNNING</a>）。排队轮起跑（RUNNING）后即可 cancel。</li>
 </ul>
-<p>这个分离允许 post-processing 阶段拒绝新的 inject/cancel（此时引擎已退出无法响应），但仍阻止并发 POST /chat（lease 未释放）。</p>
+<p>这个分离让 inject/cancel 都只作用于 RUNNING（对称、各自的 flag 都在几秒内被读）；QUEUED / post-processing 一律 409；并发 POST /chat 始终被 lease 阻止。</p>
 <h3 id="interrupt-机制">Interrupt 机制</h3>
 <p>Permission CONFIRM 工具执行前，工具处理器调用 <code>wait_for_interrupt()</code> 挂起引擎，等待用户从前端 <code>POST /chat/{id}/resume</code> 响应：</p>
 <pre class="mermaid"><code>sequenceDiagram
@@ -1893,8 +1898,9 @@
 <p>这保证引擎永远不会"死在 interrupt 上"。</p>
 <h3 id="cancellation">Cancellation</h3>
 <ul>
-<li><code>request_cancel(msg_id)</code> 设置 Event 标志</li>
-<li>引擎在每次循环顶部和工具执行前调用 <code>check_cancelled</code> hook 检查</li>
+<li>cancel 路由 gate 在 <strong>interactive</strong>（== RUNNING），与 inject 对称：只作用于正在跑的执行；QUEUED 返回 409、不置 flag</li>
+<li><code>request_cancel(msg_id)</code> 设置 Event 标志（Redis flag <code>EX=EXECUTION_TIMEOUT</code>，无需续期 —— 只在 RUNNING 下置，几秒内即被引擎读取，不会跨越任何 Redis 观察不到的等待）</li>
+<li>引擎在每次循环顶部和工具执行前调用 <code>check_cancelled</code> hook 检查；跨 worker 正确（flag 共享在 Redis，由持有该轮的 worker 读取）</li>
 <li>取消时引擎 emit <code>cancelled</code> 终端事件，释放资源，lease 随后在 finally 块释放</li>
 </ul>
 <h3 id="消息注入">消息注入</h3>
@@ -1982,7 +1988,7 @@
 <td><code>{af:msg_id}:cancel</code></td>
 <td>STRING "1"</td>
 <td><code>EXECUTION_TIMEOUT</code></td>
-<td>取消标记</td>
+<td>取消标记（仅 RUNNING 下置，几秒内被读，无需续期）</td>
 </tr>
 <tr>
 <td><code>{af:msg_id}:queue</code></td>
@@ -2010,6 +2016,10 @@
 <tr>
 <td><code>acquire-lease</code></td>
 <td><code>SET NX EX</code> 原子获取或返回现有持有者（避免 SET NX + GET 竞态）</td>
+</tr>
+<tr>
+<td><code>mark-interactive-if-owner</code></td>
+<td>仅当 lease 仍归本 msg_id 时才 SET interactive（QUEUED→RUNNING 的 compare-and-set，防排队中丢 lease 的旧 task 覆盖新 owner / 跑成第二写者）。KEYS = lease + interactive，同 <code>{conv_id}</code> slot</td>
 </tr>
 <tr>
 <td><code>compare-and-del</code></td>
@@ -2041,6 +2051,7 @@
 <ul>
 <li>InMemory 永远成功</li>
 <li>Redis 通过 <code>compare-and-expire</code> 脚本：owner 不匹配返回 0 → 续租失败 → Controller 感知到"lease 被抢" → 主动终止执行</li>
+<li>同一次心跳也续 interactive（owner 匹配才续）。cancel flag <strong>不</strong>在此续期 —— cancel 只作用于 RUNNING，flag 几秒内即被读，无需跨排队等待续命</li>
 </ul>
 <p>这允许在 Pod 崩溃时（心跳停止）90s 内 lease 自动释放，其他实例可接管该对话的新请求。</p>
 <h2 id="超时参数总览">超时参数总览</h2>

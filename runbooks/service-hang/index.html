@@ -1093,7 +1093,7 @@
 
 <h1 id="runbook--服务卡死后端无响应">Runbook · 服务卡死(后端无响应)</h1>
 <blockquote>
-<p>现场参照:2026-05-14 <code>compute_update</code> 卡死事件循环 96 分钟事故,见 <code>docs/_archive/ops/incident-2026-05-14-eventloop-wedge.md</code>。本 runbook 把当次实战命令固化下来,oncall 直接 copy-paste。</p>
+<p>现场参照:2026-05-14 一次 <code>update_artifact</code> 同步 CPU 死算攥住 GIL、卡死 event loop 约 96 分钟、<code>/health/live</code> 全程无响应的事故。本 runbook 把当次实战命令固化下来,oncall 直接 copy-paste;wedge 形态与工具作者纪律见文末。</p>
 </blockquote>
 <h2 id="前置挑-compose-文件--选目标副本">前置:挑 compose 文件 + 选目标副本</h2>
 <p>不同部署模式 backend 容器名 / 端口暴露不一致。<strong>先按部署模式 export 三个变量,后续所有命令引用</strong>:</p>
@@ -1249,12 +1249,12 @@
 <a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a>sudo<span class="w"> </span>gcore<span class="w"> </span>-o<span class="w"> </span>/tmp/backend-hang<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PID</span><span class="s2">&quot;</span><span class="w">   </span><span class="c1"># 等几秒到几分钟,看 RSS 大小</span>
 <a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a><span class="c1"># gcore 之后进程继续运行,不杀;杀进程用 docker restart &quot;$CID&quot;</span>
 </code></pre></div>
-<p><code>unhealthy ≠ 自动 restart</code>——<code>HEALTHCHECK</code> 翻红只改状态,要靠 autoheal 容器或编排层补救;事故当时干挂 96 分钟零自动恢复,见 incident doc §B.6。</p>
+<p><code>unhealthy ≠ 自动 restart</code>——<code>HEALTHCHECK</code> 翻红只改状态,要靠 autoheal 容器或编排层补救;事故当时干挂 96 分钟零自动恢复(无 autoheal 即无人值守时段全程不可用)。</p>
 <h2 id="step-7留痕">Step 7:留痕</h2>
 <ul>
 <li><code>docker logs "$CID" &gt; backend-&lt;ts&gt;.log</code> 落盘(带 <code>Thread 0x</code> dump 行)</li>
 <li><code>data/observability/loop-lag.jsonl*</code> / <code>metrics.jsonl*</code> 通过 Step 4 末尾的 <code>docker cp</code> 拷出来 — 持久卷里有,但 rotate 后老切片会丢</li>
-<li>触发输入:看 <code>MessageEvent</code> 表当前 turn 的 <code>tool_call</code> 事件——cancel 路径事件持久化已在 PR-3 修(<code>docs/_archive/ops/incident-2026-05-14-fix-plan.md</code> §PR-3),事故现场是丢的,现在不丢</li>
+<li>触发输入:看 <code>MessageEvent</code> 表当前 turn 的 <code>tool_call</code> 事件——cancel 路径现在无条件持久化事件(事故现场曾因 cancel 抢先而丢失触发输入,现已修复,不再丢)</li>
 <li>后续分析跑 <code>python scripts/observability_report.py --hours 24</code>(数据源:<code>MessageEvent</code> + <code>data/observability/*.jsonl</code>),解读见 <a href="../../guides/observability-tuning/">observability-tuning.md</a></li>
 </ul>
 <h2 id="已知-wedge-形态参考">已知 wedge 形态参考</h2>
@@ -1291,7 +1291,7 @@
 <h2 id="工具作者纪律防止再踩">工具作者纪律(防止再踩)</h2>
 <p>CLAUDE.md 已写:<strong>asyncio cancel / timeout / fencing 全是协作式的</strong>,同步 CPU 工具(无 <code>await</code> 或 C 扩展持 GIL)能同时击穿所有这些安全机制。工具作者必须自负 CPU 成本:</p>
 <ul>
-<li>算法侧给上界(本次 PR-1 给 <code>MAX_UNIQUE_CENTERS</code> 静态 budget)</li>
+<li>算法侧给上界(如 <code>update_artifact</code> 的 <code>MAX_UNIQUE_CENTERS</code> 静态 budget)</li>
 <li>第二层挂 wall-clock deadline(<code>MAX_FUZZY_WALL_CLOCK_MS</code>),内循环检查</li>
 <li>引擎兜不住——和 compaction 不兜底 tool-result 溢出同理</li>
 </ul>

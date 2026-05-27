@@ -2273,7 +2273,6 @@
 <a id="__codelineno-14-7" name="__codelineno-14-7" href="#__codelineno-14-7"></a><span class="c1"># Memory（字节）：nginx=0 / backend=2147483648 / frontend=1073741824 /</span>
 <a id="__codelineno-14-8" name="__codelineno-14-8" href="#__codelineno-14-8"></a><span class="c1"># postgres=2147483648 / redis=805306368</span>
 </code></pre></div>
-<p>完整事故背景（2026-05-14 内网卡死、bug ② 现场对比、reviewer 多轮反馈演进）见 <code>docs/_archive/ops/incident-2026-05-14-eventloop-wedge.md</code> + <code>incident-2026-05-14-fix-plan.md</code>（已 archive，作历史背景参考，不再维护）。</p>
 </blockquote>
 <h3 id="运行时配置变更无需-rebuild--重新传镜像">运行时配置变更（无需 rebuild / 重新传镜像）</h3>
 <table>
@@ -2563,6 +2562,9 @@
 </tr>
 </tbody>
 </table>
+<blockquote>
+<p><strong>启动期 footgun 守卫</strong>：<code>CORS_ALLOW_CREDENTIALS=true</code>（默认）与 <code>CORS_ORIGINS</code> 含 <code>"*"</code> <strong>不兼容</strong> —— Starlette 在该组合下反射请求 Origin，等于"任意站点都能读到携带凭证的响应"。命中即<strong>拒绝启动</strong>（<code>config.py</code> 启动校验）。要放开跨域，显式列出 origin（<code>ARTIFACTFLOW_CORS_ORIGINS='["https://app.example.com"]'</code>）；确需通配时须同时设 <code>ARTIFACTFLOW_CORS_ALLOW_CREDENTIALS=false</code>。</p>
+</blockquote>
 <h3 id="其他">其他</h3>
 <table>
 <thead>
@@ -2633,6 +2635,7 @@
 <li><code>ARTIFACTFLOW_JWT_SECRET</code> 必须设置</li>
 <li><code>ARTIFACTFLOW_DATABASE_URL</code> 或 <code>ARTIFACTFLOW_DATABASE_URLS</code> 必须设置</li>
 <li>启用 Redis（<code>ARTIFACTFLOW_REDIS_URL</code> 非空）时，<code>ARTIFACTFLOW_REDIS_KEY_PREFIX</code> 必须设置</li>
+<li><code>ARTIFACTFLOW_CORS_ALLOW_CREDENTIALS=true</code> 时 <code>ARTIFACTFLOW_CORS_ORIGINS</code> 不得含 <code>"*"</code>（见上方 <a href="#cors">CORS</a> footgun 守卫）</li>
 </ol>
 <hr />
 <h2 id="容量规划">容量规划</h2>
@@ -2780,6 +2783,7 @@
 <li>Swagger 文档：生产环境下 <code>/docs</code>、<code>/redoc</code>、<code>/openapi.json</code> 返回 404</li>
 <li><code>--scale</code> 支持：使用 Docker 内部 DNS resolver <code>127.0.0.11</code></li>
 <li>维护开关：<code>deploy/maintenance/MAINTENANCE_ON</code> flag 文件控制（详见下方"维护模式"）</li>
+<li><strong><code>X-Real-IP</code>（登录频控依赖）</strong>：各 location 必须设 <code>proxy_set_header X-Real-IP $remote_addr</code> —— 后端 per-IP 登录频控<strong>只读这个头</strong>（刻意不信可被客户端伪造的 <code>X-Forwarded-For</code>）。安全前提是 backend 仅 <code>expose</code>、不发布主机端口，只经 nginx 可达，故这个头不可伪造。换自定义代理 / 删掉它 → per-IP 限流静默退化成"所有请求共用 nginx 容器一个 IP 桶"（per-username 主防线仍在）。<code>deploy/nginx.conf</code> 已在各 location 设好。</li>
 </ul>
 <h3 id="维护模式无停机更新窗口">维护模式（无停机更新窗口）</h3>
 <p>适用于 <strong>Mode 3</strong>（内网，有 Nginx 反向代理）。Mode 1 无 Nginx，不适用；Mode 2（生产）暂未适配——<code>pause.sh</code> / <code>resume.sh</code> 硬编码 <code>docker-compose.intranet.yml</code>，硬套会驱动错文件。</p>

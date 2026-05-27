@@ -1733,6 +1733,8 @@
 <h2 id="orm-模型总览">ORM 模型总览</h2>
 <p>所有模型定义在 <code>src/db/models.py</code>，继承自 <code>Base = DeclarativeBase()</code>：</p>
 <pre class="mermaid"><code>erDiagram
+    Department ||--o{ Department : "parent (RESTRICT)"
+    Department ||--o{ User : "groups (SET NULL)"
     User ||--o{ Conversation : owns
     Conversation ||--o{ Message : contains
     Conversation ||--o| ArtifactSession : "1:1"
@@ -1744,8 +1746,20 @@
         string id PK
         string username UK
         string hashed_password
+        string display_name
         string role "user / admin"
         bool is_active
+        int password_version "改密 +1，旧 JWT 比对失败即 401"
+        bool must_change_password "强制改密闸门"
+        datetime password_changed_at "口令龄；NULL=已过期"
+        json password_history "最近旧 hash，most-recent-first，查重用"
+        string department_id FK "ondelete SET NULL"
+    }
+    Department {
+        string id PK
+        string parent_id FK "自引用，ondelete RESTRICT"
+        string name
+        string root_name_key "生成列：根级=name 否则 NULL，跨方言根级去重"
     }
     Conversation {
         string id PK
@@ -1785,8 +1799,13 @@
 <tbody>
 <tr>
 <td><code>users</code></td>
-<td>认证主体</td>
+<td>认证主体（含等保口令策略列：<code>password_version</code> / <code>must_change_password</code> / <code>password_changed_at</code> / <code>password_history</code>）</td>
 <td>用户创建即存在</td>
+</tr>
+<tr>
+<td><code>departments</code></td>
+<td>邻接表组织树，用户按 <code>department_id</code> 归属</td>
+<td>删部门 <code>RESTRICT</code> 非空、<code>SET NULL</code> 解绑用户</td>
 </tr>
 <tr>
 <td><code>conversations</code></td>

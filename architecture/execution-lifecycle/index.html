@@ -1,0 +1,1391 @@
+
+<!doctype html>
+<html lang="zh" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Pi-style 可配置 Agent 引擎 + 双 Artifact 架构的多智能体 SaaS">
+      
+      
+      
+        <link rel="canonical" href="https://neutrino1998.github.io/artifact-flow/architecture/execution-lifecycle/">
+      
+      
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>执行生命周期状态机 - ArtifactFlow</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../stylesheets/custom.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="custom">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#执行生命周期状态机" class="md-skip">
+          跳转至
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="页眉">
+    <a href="../.." title="ArtifactFlow" class="md-header__button md-logo" aria-label="ArtifactFlow" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            ArtifactFlow
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              执行生命周期状态机
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="custom"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="custom" data-md-color-accent="custom"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="搜索" placeholder="搜索" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="查找">
+        
+        <button type="reset" class="md-search__icon md-icon" title="清空当前内容" aria-label="清空当前内容" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            正在初始化搜索引擎
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/Neutrino1998/artifact-flow" title="前往仓库" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    Neutrino1998/artifact-flow
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="标签" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../deployment/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Deployment
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../overview/" class="md-tabs__link">
+          
+  
+  
+  Architecture
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../guides/add-agent/" class="md-tabs__link">
+          
+  
+  
+  Guides
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../frontend/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Frontend
+
+      </a>
+    </li>
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="导航栏" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="ArtifactFlow" class="md-nav__button md-logo" aria-label="ArtifactFlow" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    ArtifactFlow
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/Neutrino1998/artifact-flow" title="前往仓库" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    Neutrino1998/artifact-flow
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../deployment/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deployment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Architecture
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../overview/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../engine/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Engine
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../agents/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Agents
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tools/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tools
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../artifacts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Artifacts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../data-layer/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data Layer
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../streaming/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Streaming
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../concurrency/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Concurrency
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../observability/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Observability
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Guides
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Guides
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/add-agent/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Add Agent
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/add-tool/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Add Tool
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/add-model/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Add Model
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/api-reference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../frontend/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Frontend
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="目录">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      目录
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#为什么需要这份文档" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        为什么需要这份文档
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#终态-taxonomy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        终态 taxonomy
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#transition-表authority--必须一起发生的副作用" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Transition 表（authority + 必须一起发生的副作用）
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#为什么-cancel-只作用于-running" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        为什么 cancel 只作用于 RUNNING
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#timed_out-的产出" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        TIMED_OUT 的产出
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#三条正交的时间轴liveness--deadline--cleanup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        三条正交的时间轴（liveness / deadline / cleanup）
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#不变量" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        不变量
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#测试矩阵" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        测试矩阵
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#维持-defer-的边界" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        维持 defer 的边界
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="执行生命周期状态机">执行生命周期状态机</h1>
+<blockquote>
+<p>一个执行从提交到结束有哪些状态、谁有权推进、推进后哪些副作用必须一起发生 —— 把这件事固定下来，让 review 从「这里有没有 race」变成「这个 transition 合法吗、副作用完整吗」。</p>
+</blockquote>
+<h2 id="为什么需要这份文档">为什么需要这份文档</h2>
+<p>历轮改造补掉了很多具体竞态洞，但同一<strong>形状</strong>的 bug 反复出现。根因不在单点，而在「执行生命周期从未被建模成一等状态机」—— 状态散落在 Redis key（lease / interactive）、in-memory semaphore、SSE stream meta、DB <code>MessageEvent</code> 终态、<code>Message.response</code> 这些局部机制里，彼此弱绑定。把模型写下来，让跨层不变量显式、可机械评审。</p>
+<p>后半场（终态）已经是一台正确的状态机 —— <code>core/post_processing.py</code> 的 <code>PostProcessState</code> ledger + <code>decide_terminal()</code>（唯一裁判）+ <code>choose_response_for_terminal()</code>（<code>(terminal_type, cancel_source) → display</code> 的单一映射），三条 cancel 路径都汇入它。</p>
+<blockquote>
+<p>前半场 <code>QUEUED</code>/<code>RUNNING</code> 建模已落地：<code>mark_interactive</code> 移到取得 semaphore 之后、对 lease owner 做 fail-closed CAS；<strong>inject 与 cancel 都 gate 在 RUNNING（interactive）</strong>。<strong>stream key 心跳续期是明确 deferred 的非目标</strong> —— 保留 <code>STREAM_TTL_GRACE</code> 固定 TTL 作为 sanctioned best-effort 近似（理由见「三条正交的时间轴」与「维持 defer 的边界」）。</p>
+</blockquote>
+<h2 id="终态-taxonomy">终态 taxonomy</h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>COMPLETED | CANCELLED_BY_USER | CANCELLED_BY_SYSTEM | TIMED_OUT | FAILED | ORPHANED
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>概念终态</th>
+<th>触发</th>
+<th>线上/存储表示</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>COMPLETED</code></td>
+<td>lead agent 无 tool call，引擎正常退出</td>
+<td><code>COMPLETE</code> 事件</td>
+</tr>
+<tr>
+<td><code>CANCELLED_BY_USER</code></td>
+<td>用户点取消（协作式：<code>hooks.check_cancelled</code> → <code>state["cancelled"]=True</code> 正常返回）</td>
+<td><code>CANCELLED</code> 事件，<code>cancel_source="cooperative"</code>，无 <code>reason</code> 字段</td>
+</tr>
+<tr>
+<td><code>CANCELLED_BY_SYSTEM</code></td>
+<td>lease fencing / shutdown / late-cancel（外部 <code>task.cancel()</code>）</td>
+<td><code>CANCELLED</code> 事件，<code>cancel_source="external"</code>，<code>reason=external_cancel</code> / <code>external_cancel_post_processing</code></td>
+</tr>
+<tr>
+<td><code>TIMED_OUT</code></td>
+<td>引擎 run 超过 <code>EXECUTION_TIMEOUT</code></td>
+<td><code>TIMED_OUT</code> 事件，<code>success=False</code>，<code>timed_out=True</code></td>
+</tr>
+<tr>
+<td><code>FAILED</code></td>
+<td>LLM retry 耗尽 / compaction 失败 / flush 失败等</td>
+<td><code>ERROR</code> 事件，<code>success=False</code></td>
+</tr>
+<tr>
+<td><code>ORPHANED</code></td>
+<td>实例崩溃，turn 在途但无 terminal（<code>response=NULL</code>）</td>
+<td><strong>仅命名</strong>，不建 reconciler</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p><strong>存储表示不重命名</strong>：<code>CANCELLED_BY_USER</code> / <code>CANCELLED_BY_SYSTEM</code> 是<strong>概念层</strong>区分，线上是单一 <code>CANCELLED</code> 事件 + <code>cancel_source</code>/<code>reason</code> 编码。线上真实事件类型见 <code>StreamEventType</code>（<code>COMPLETE</code> / <code>CANCELLED</code> / <code>TIMED_OUT</code> / <code>ERROR</code>）。<code>ORPHANED</code> 不落任何事件。</p>
+</blockquote>
+<h2 id="transition-表authority--必须一起发生的副作用">Transition 表（authority + 必须一起发生的副作用）</h2>
+<p><code>SUBMITTED → QUEUED → RUNNING → 终态</code> 全程已落地为一等状态机。下表每行给出该 transition 的<strong>唯一 authority</strong> 与<strong>必须一起发生的副作用</strong>。</p>
+<table>
+<thead>
+<tr>
+<th>transition</th>
+<th>唯一 authority</th>
+<th>必须发生的副作用</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>SUBMITTED → QUEUED</code></td>
+<td><code>runner.submit</code></td>
+<td>acquire lease（同步）；create stream meta（承载 <code>execution_queued</code> 事件）；注册 task。<strong>不</strong> mark_interactive</td>
+</tr>
+<tr>
+<td><code>QUEUED → RUNNING</code></td>
+<td><code>_wrapped</code>（<code>async with semaphore</code> 之后）</td>
+<td><code>mark_interactive</code> 对 lease owner 做 <strong>compare-and-set</strong>：仍持 lease 才标记 + 启动 engine。<strong>fail-closed</strong>：lease 已过期/被接管、或 CAS 抛异常（归属不可知）一律 <strong>abort</strong>（不启动引擎 → 不覆盖新 owner 的 interactive key、不跑成静默第二写者；本轮成 ORPHANED，响亮可见）。stream/meta key 仍按固定 TTL（<code>EXECUTION_TIMEOUT + STREAM_TTL_GRACE</code>，best-effort，见「三条正交的时间轴」）</td>
+</tr>
+<tr>
+<td><code>QUEUED → ORPHANED</code>（abort / fence）</td>
+<td><code>_wrapped</code> / heartbeat / shutdown</td>
+<td>排队轮被 CAS abort（丢 lease）、心跳 fencing 或 shutdown 取消 → 引擎从未起跑 → 无 controller 后处理 → 无终态事件（<code>response=NULL</code>）= ORPHANED。<strong>用户 cancel 不作用于 QUEUED</strong>（gate 在 interactive == RUNNING，与 inject 对称；排队轮返回 409、不置任何 flag），理由见下「为什么 cancel 只作用于 RUNNING」</td>
+</tr>
+<tr>
+<td><code>RUNNING → COMPLETE</code></td>
+<td>controller <code>decide_terminal</code></td>
+<td>append <code>COMPLETE</code>；events 落库；<code>Message.response = state.response</code>；SSE 转发终态</td>
+</tr>
+<tr>
+<td><code>RUNNING → TIMED_OUT</code></td>
+<td>controller <code>decide_terminal</code></td>
+<td>append <code>TIMED_OUT</code>；events 落库；<code>Message.response = TIMED_OUT_RESPONSE</code>；SSE 转发终态。flush_all 照常跑（best-effort 保留部分 artifact）</td>
+</tr>
+<tr>
+<td><code>RUNNING → CANCELLED</code></td>
+<td>controller <code>decide_terminal</code> / <code>ensure_terminal</code> / engine_task</td>
+<td>append <code>CANCELLED</code>(+reason)；events 落库；<code>Message.response = CANCELLED_RESPONSE_BY_{USER,SYSTEM}</code></td>
+</tr>
+<tr>
+<td><code>RUNNING → ERROR</code></td>
+<td>engine（自 append ERROR）/ controller（flush_error）</td>
+<td>events 落库；<code>Message.response = state.response or fallback</code></td>
+</tr>
+<tr>
+<td><code>* → CLOSED</code></td>
+<td><code>_wrapped</code> finally</td>
+<td>release lease；clear interactive；close stream</td>
+</tr>
+</tbody>
+</table>
+<h2 id="为什么-cancel-只作用于-running">为什么 cancel 只作用于 RUNNING</h2>
+<p><code>cancel</code> 与 <code>inject</code> 都 gate 在 <code>interactive</code>（== RUNNING）；一个还在 <code>QUEUED</code> 的轮返回 409、<strong>不置任何 cancel flag</strong>。这是刻意的边界，不是缺失：</p>
+<ul>
+<li><strong><code>QUEUED</code> 是唯一纯 worker 本地的状态</strong> —— 一个 task park 在某个 worker 进程内的 <code>asyncio.Semaphore</code> 上。Redis 看不到「谁在排队、在哪个 worker、排第几」。</li>
+<li><strong>cancel 是 Redis 中介的信号</strong>。若允许它作用于 <code>QUEUED</code>，就得把 cancel flag 跨越「Redis 观察不到的 in-memory 等待」续命（排队等待在 <code>EXECUTION_TIMEOUT</code> 之外、可无界），并和 worker 本地的 dequeue 时序对齐 —— 这正是 r4 review round-1/2 反复冒出同形状 bug 的根因（flag 过期、CAS 覆盖、续期与心跳耦合）。<strong>跨层中介一个本地状态，cancel 语义必然撕裂。</strong></li>
+<li><strong>代价极小</strong>：排队轮消耗零算力、只会排在<em>其他会话</em>后面（同一会话 lease 单写、排不起队）、且很快起槽起跑；起跑（RUNNING）后 cancel 即刻可用 —— 此时 flag 在持有该轮的 worker 上、几秒内即被 <code>check_cancelled</code> 读到，跨 worker 正确、无需续期。</li>
+</ul>
+<p>所以一个排队轮要么 advance 到 RUNNING（之后可 cancel），要么被 abort/fence → ORPHANED；用户在排队期间的「取消」诉求由「起跑后立即可取消」承接（best-effort 契约）。</p>
+<h2 id="timed_out-的产出"><code>TIMED_OUT</code> 的产出</h2>
+<p>超时裁判<strong>在引擎内</strong>，不停在传输层：</p>
+<ol>
+<li><strong>超时在 <code>run_engine</code> 内、只裹 <code>execute_loop</code></strong>（<code>controller.py</code>）：<code>async with asyncio.timeout(config.EXECUTION_TIMEOUT)</code>。超时后 <code>except TimeoutError</code> 像协作式 cancel 一样「带 flag 正常返回」—— 置 <code>state["timed_out"]=True</code> + <code>completed=True</code>，<code>finalize_metrics()</code>，<code>final_state = initial_state</code>，走完整 post-processing。</li>
+<li><strong><code>decide_terminal</code> 产出唯一 TIMED_OUT 终态</strong>（<code>post_processing.py</code>）：<code>timed_out</code> 分支在 <code>flush_error</code> 之后、<code>is_cancelled</code> 之前 —— 保持「持久化失败即便在超时轮也以 ERROR 暴露」的优先级（<code>flush_error &gt; {timed_out, cancelled} &gt; error &gt; complete</code>）。<code>timed_out</code> 与 <code>cancelled</code> 互斥（超时路径只置前者）。</li>
+<li><strong><code>run_and_push</code> 是纯转发器</strong>（<code>controller_factory.py</code>）：不再裹 <code>asyncio.timeout</code>。SSE 终态即 <code>pp.terminal_event</code>，与 DB 终态同源。</li>
+</ol>
+<p><strong>为什么干净（Python 3.11+）</strong>：<code>asyncio.timeout</code> 只把<strong>自己</strong> deadline 触发的取消转成 <code>TimeoutError</code>；外部 <code>task.cancel()</code>（lease fencing）原样以 <code>CancelledError</code> 再抛 → 两个 <code>except</code> 分支不混淆（超时在内层 engine_task，外部 cancel 来自外层 <code>_wrapped</code>）。</p>
+<p><strong>GIL 警告</strong>：<code>asyncio.timeout</code> 底层是 <code>task.cancel()</code>，无法打断钉住 GIL 的同步 CPU 工具；工具作者仍自己兜 wall-clock（见 CLAUDE.md「Tool authors own CPU-cost discipline」）。</p>
+<h2 id="三条正交的时间轴liveness--deadline--cleanup">三条正交的时间轴（liveness / deadline / cleanup）</h2>
+<p>把它们搅在一起（用 <code>EXECUTION_TIMEOUT</code> 同时当引擎 deadline <strong>和</strong> stream key TTL）会反复制造「排队 / post-processing 超过某个静态 TTL → 终态丢失」的洞。三者其实正交：</p>
+<table>
+<thead>
+<tr>
+<th>轴</th>
+<th>问的问题</th>
+<th>机制</th>
+<th>跨度</th>
+<th>owner</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>① Liveness</strong></td>
+<td>还有活着的 producer 在做这个任务吗？</td>
+<td>心跳续期</td>
+<td>queue→run→post 全程</td>
+<td>lease（<code>_renew_loop</code>）</td>
+</tr>
+<tr>
+<td><strong>② Deadline（TIMED_OUT）</strong></td>
+<td><em>引擎 run</em> 跑太久了吗？</td>
+<td><code>asyncio.timeout(EXECUTION_TIMEOUT)</code> 裹 <code>execute_loop</code></td>
+<td><strong>只 run</strong></td>
+<td>engine</td>
+</tr>
+<tr>
+<td><strong>③ Cleanup 窗口</strong></td>
+<td>结束后残余事件给重连 consumer 读多久？</td>
+<td><code>close_stream</code> 设 <code>STREAM_CLEANUP_TTL</code></td>
+<td>post 之后</td>
+<td><code>close_stream</code></td>
+</tr>
+</tbody>
+</table>
+<p>关键：<strong>lease 管「任务做完没」（① 横跨 queue→run→post），timeout 管「run 跑多久」（② 只 run）</strong> —— 两条不同的轴。lease 不因 timeout 而 fence；TIMED_OUT 时引擎正常返回、lease 持有到 post 结束才释放。② 的 <code>asyncio.timeout</code> 在 <code>_wrapped</code> 取得 semaphore <strong>之后</strong>才起算，所以排队时间天然不计入 <code>EXECUTION_TIMEOUT</code>。</p>
+<p><strong>stream key 概念上属于 ①，不是 ②</strong>：它的寿命语义上只跟「producer 是否还活着」走，与 <code>EXECUTION_TIMEOUT</code> 解耦。但<strong>实现上刻意保留固定 TTL 近似</strong>（见下），不上心跳续期机器。</p>
+<blockquote>
+<p><strong>现状（accepted best-effort，非过渡态）</strong>：stream/meta key TTL 是创建时设定的固定值 <code>EXECUTION_TIMEOUT + STREAM_TTL_GRACE</code>（<code>STREAM_TTL_GRACE</code> 兜引擎 deadline 之后的 post-processing）。这是 liveness 轴的<strong>近似</strong>：正常场景有效；唯一残余缺口是「单实例饱和（&gt; <code>MAX_CONCURRENT</code>）时，排队等待 + 本轮 run + post 之和超过该固定 TTL」，后果<strong>仅是丢实时 SSE 终态</strong> —— DB 终态始终正确，刷新 / 重连即恢复。</p>
+<p><strong>为什么不上心跳续期（deferred 非目标）</strong>：stream key 是 glance-only 的传输键（用户在它上面 glance，不 act），失败模式自愈、可恢复。把 lease↔stream 统一成心跳续期要给 <code>StreamTransport</code>（Protocol + InMemory + Redis）加 <code>refresh_ttl</code>、接进 <code>_renew_loop</code>、删 <code>STREAM_TTL_GRACE</code> —— 为很少触发、glance-only、可自愈的边缘搭强一致机器。按 step-back-on-design-creep 接受固定 TTL 近似为长期契约；若该缺口在实测中真咬人，再单独处理。</p>
+</blockquote>
+<h2 id="不变量">不变量</h2>
+<ol>
+<li><strong>events-first</strong>：<code>Message.response</code> 只在 <code>_persist_events</code> 返回 True 后才写（无「终态已显示但 events 缺失」状态）。</li>
+<li><strong>slot-claim before await</strong>：<code>pp.response_update_attempted</code> 在 <code>await update_response_async</code> <strong>之前</strong> set，防 cancel-mid-await 竞态。</li>
+<li><strong>单一 dispatcher</strong>：任何路径想写 <code>Message.response</code>，都过 <code>choose_response_for_terminal(pp)</code>；<code>ensure_terminal</code> adopt-or-synthesize 保证已有 semantic terminal 不被 late-cancel 改写。</li>
+<li><strong>超时是产品级终态，后处理卡死是基础设施故障 —— 分层兜底（best-effort）</strong>：</li>
+</ol>
+<p>超时<strong>只裹引擎循环</strong>（无界工作所在），<strong>不裹 post-processing</strong>。后处理是有界 DB 写 + 函数级重试（<code>with_retry</code>，3 次瞬断重试）+ late-cancel 兜底；它<strong>没有 app 级 wall-clock 上界</strong>。per-query 上界是 <strong>DB 层职责</strong>：</p>
+<table>
+<thead>
+<tr>
+<th>driver</th>
+<th>per-query 上界</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>PostgreSQL</strong>（默认提供的部署形态）</td>
+<td>代码注入 <code>command_timeout</code> 默认（<code>config.DB_COMMAND_TIMEOUT</code>，setdefault），开箱即有界。这是协议安全的 per-语句超时（asyncpg 内置 server 端取消 + 连接回收）。禁用：<code>ARTIFACTFLOW_DB_COMMAND_TIMEOUT=0</code>（跳过注入）；<strong>不能</strong>用 DSN <code>?command_timeout=0</code> —— asyncpg 拒绝 ≤0、会启动失败；DSN 若显式给值须 &gt;0 且覆盖默认。<strong>不要在应用层裸 <code>asyncio.wait_for</code> 包 DB 写</strong> —— 会污染池化连接 + 留 commit 歧义。</td>
+</tr>
+<tr>
+<td><strong>MySQL / TDSQL</strong>（兼容目标）</td>
+<td>driver 无等价钩子（aiomysql 不吃 <code>read/write_timeout</code>）→ per-查询上界由<strong>部署方基础设施</strong>负责：<code>innodb_lock_wait_timeout</code>（写锁等待，默认 ~50s）+ 中间件/server 超时。原因同 timezone：我们够不到托管实例的 server GUC。</td>
+</tr>
+<tr>
+<td><strong>SQLite</strong></td>
+<td>无此缺口（进程内，<code>PRAGMA busy_timeout</code> 兜锁）。</td>
+</tr>
+</tbody>
+</table>
+<p>能同时击穿「DB per-query 超时 + app retry + lease fencing」三者的病态网络黑洞，需 socket 层 TCP keepalive —— 接受为 out-of-scope best-effort。理由：不为很少触发的基础设施卡死在应用层搭第二个 deadline authority（会重新引入「两个终态 authority」混乱）。</p>
+<ol>
+<li>
+<p><strong>lease 存活属 liveness 轴，靠心跳续期（<code>_renew_loop</code>）、横跨 queue→run→post，与 <code>EXECUTION_TIMEOUT</code> 解耦</strong>（见「三条正交的时间轴」）。<code>EXECUTION_TIMEOUT</code> 只决定 TIMED_OUT，不决定 lease TTL。stream key 概念上同属 liveness 轴，但<strong>实现上保留固定 TTL 近似</strong>（<code>EXECUTION_TIMEOUT + STREAM_TTL_GRACE</code>）作为 accepted best-effort —— 心跳续期是 deferred 非目标（理由见上「为什么不上心跳续期」）。cancel flag <strong>不</strong>跨越排队等待续命：cancel 只作用于 RUNNING（见「为什么 cancel 只作用于 RUNNING」），flag 在几秒内被读取，<code>EX=EXECUTION_TIMEOUT</code> 恒够、无需 heartbeat 耦合。</p>
+</li>
+<li>
+<p><strong>单写者：<code>QUEUED → RUNNING</code> 只在确认仍持有 lease 时发生（compare-and-set，fail-closed）</strong>。<code>mark_interactive</code> 原子校验 lease owner == 本 msg_id 才标记 interactive + 启动引擎；排队期间 lease 过期/被接管则 abort，绝不在他人持有的会话上跑成第二写者、也不覆盖新 owner 的 interactive key。这把 lease 的「单对话互斥」从「靠 heartbeat fence 的延迟撤销」收紧为「起跑前的前置闸」。<strong>CAS 抛异常（归属不可知）= fail-closed abort</strong> —— 宁可丢一个 turn（ORPHANED，响亮可见、可刷新恢复）也不 fail-open 跑成静默第二写者（codebase 偏好 loud failure over silent corruption）；redis-py client 已对瞬断重试，仍抛即视为持续故障。</p>
+</li>
+</ol>
+<h2 id="测试矩阵">测试矩阵</h2>
+<table>
+<thead>
+<tr>
+<th>场景</th>
+<th>单元（<code>tests/core/test_post_processing.py</code>）</th>
+<th>集成（<code>tests/core/test_controller_cancel_persist.py</code>）</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>success / COMPLETE</td>
+<td><code>decide_terminal</code> complete + <code>choose_response</code> complete</td>
+<td>—</td>
+</tr>
+<tr>
+<td>cooperative cancel</td>
+<td>cooperative 分支 + adopt cooperative</td>
+<td><code>test_cooperative_cancel_writes_response_by_user</code></td>
+</tr>
+<tr>
+<td>external cancel（执行中）</td>
+<td>adopt external（带 reason）</td>
+<td><code>test_external_cancel_persists_accumulated_events</code></td>
+</tr>
+<tr>
+<td>late-cancel（后处理中）</td>
+<td>adopt / synthesize</td>
+<td><code>test_external_cancel_during_exists_async_persists_events</code> 等</td>
+</tr>
+<tr>
+<td>timeout</td>
+<td><code>test_timed_out_path</code> / <code>test_flush_error_overrides_timed_out</code> / <code>test_adopts_existing_timed_out_terminal</code> / <code>test_timed_out_always_returns_timeout_placeholder</code></td>
+<td><code>test_engine_timeout_produces_timed_out_terminal</code></td>
+</tr>
+<tr>
+<td>ERROR</td>
+<td><code>test_error_path_does_not_double_append</code></td>
+<td><code>test_late_cancel_on_engine_error_path_still_persists</code></td>
+</tr>
+</tbody>
+</table>
+<p>终态集合跨层一致性（<code>core.events.TERMINAL_EVENT_TYPES</code> ↔ 传输/路由层本地副本）由 <code>tests/core/test_terminal_event_sync.py</code> 守护。</p>
+<h2 id="维持-defer-的边界">维持 defer 的边界</h2>
+<ul>
+<li><strong><code>ORPHANED</code> reconciliation</strong>：系统支持<strong>故障收敛</strong>，不支持 in-flight turn <strong>恢复</strong>。崩溃后 <code>response=NULL</code> 仅命名为 <code>ORPHANED</code>，不建 startup reconciler（best-effort 契约）。</li>
+<li><strong>stream key 心跳续期</strong>：stream key 概念上属 liveness 轴，但实现保留固定 TTL 近似（<code>EXECUTION_TIMEOUT + STREAM_TTL_GRACE</code>，accepted best-effort）。把 lease↔stream 统一成心跳续期是 deferred 非目标 —— glance-only 传输键的自愈缺口不值得跨 Protocol/InMemory/Redis 搭强一致机器（理由见「三条正交的时间轴 → 为什么不上心跳续期」）。</li>
+<li><strong>QUEUED 期间取消</strong>：用户 cancel 不作用于 QUEUED（gate 在 interactive == RUNNING，排队轮 409、不置 flag）。这是刻意边界，不是缺失 —— 排队是 worker 本地的 in-memory semaphore 等待，Redis 中介的 cancel 够不到，强行支持需把 cancel flag 跨「Redis 观察不到的等待」续命，必然撕裂 cancel 语义（详见「为什么 cancel 只作用于 RUNNING」）。排队轮起跑（RUNNING）后即可 cancel；这也顺带排除了同 worker <code>task.cancel()</code> 快路径（跨 worker 本就不成立）。</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  回到页面顶部
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.tabs", "navigation.sections", "navigation.expand", "navigation.top", "search.highlight", "content.code.copy"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "\u5df2\u590d\u5236", "clipboard.copy": "\u590d\u5236", "search.result.more.one": "\u5728\u8be5\u9875\u4e0a\u8fd8\u6709 1 \u4e2a\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.more.other": "\u5728\u8be5\u9875\u4e0a\u8fd8\u6709 # \u4e2a\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.none": "\u6ca1\u6709\u627e\u5230\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.one": "\u627e\u5230 1 \u4e2a\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.other": "# \u4e2a\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.placeholder": "\u952e\u5165\u4ee5\u5f00\u59cb\u641c\u7d22", "search.result.term.missing": "\u7f3a\u5c11", "select.version": "\u9009\u62e9\u5f53\u524d\u7248\u672c"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>

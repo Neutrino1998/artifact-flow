@@ -1000,6 +1000,28 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#强制改密闸门" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        强制改密闸门
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#口令强度策略" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        口令强度策略
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#post-mepassword--自助改密" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1595,6 +1617,28 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#强制改密闸门" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        强制改密闸门
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#口令强度策略" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        口令强度策略
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#post-mepassword--自助改密" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2106,14 +2150,19 @@
 <td>正常响应</td>
 </tr>
 <tr>
+<td><code>400</code></td>
+<td>请求/状态错误</td>
+<td>旧密码错误 / 新密码与历史重用 / 全局 <code>ValueError</code>→400 兜底（如 bcrypt &gt;72 字节、非 schema 路径的口令策略）</td>
+</tr>
+<tr>
 <td><code>401</code></td>
 <td>未鉴权</td>
-<td>缺 token / token 失效 / 用户被禁用</td>
+<td>缺 token / token 失效（含改密后 JWT 内嵌 <code>password_version</code> 与库不符）/ 用户被禁用</td>
 </tr>
 <tr>
 <td><code>403</code></td>
 <td>权限不足</td>
-<td>非 admin 访问 <code>/admin/*</code> 端点</td>
+<td>非 admin 访问 <code>/admin/*</code> 端点；<strong>或当前用户 <code>must_change_password=True</code></strong>（除查自身状态/改密外一律 403，见 <a href="#强制改密闸门">强制改密闸门</a>）</td>
 </tr>
 <tr>
 <td><code>404</code></td>
@@ -2133,7 +2182,12 @@
 <tr>
 <td><code>422</code></td>
 <td>请求不合法</td>
-<td>参数校验、文件过大、格式不支持</td>
+<td>参数校验（含口令强度、用户名字符）、文件过大、格式不支持</td>
+</tr>
+<tr>
+<td><code>429</code></td>
+<td>请求过频</td>
+<td>登录失败累计超阈，锁定窗口内（per-username / per-IP）</td>
 </tr>
 <tr>
 <td><code>503</code></td>
@@ -2194,13 +2248,47 @@
 <a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="err">{</span>
 <a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="err">  &quot;access_token&quot;: &quot;eyJhbGc...&quot;,</span>
 <a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="err">  &quot;token_type&quot;: &quot;bearer&quot;,</span>
-<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="err">  &quot;expires_in&quot;: 86400,</span>
-<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="err">  &quot;user&quot;: {&quot;id&quot;: &quot;...&quot;, &quot;username&quot;: &quot;alice&quot;, &quot;display_name&quot;: &quot;Alice&quot;, &quot;role&quot;: &quot;user&quot;}</span>
-<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="err">}</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="err">  &quot;expires_in&quot;: 604800,                  // = JWT_EXPIRY_DAYS(默认 7) × 86400</span>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="err">  &quot;user&quot;: {</span>
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="err">    &quot;id&quot;: &quot;...&quot;, &quot;username&quot;: &quot;alice&quot;, &quot;display_name&quot;: &quot;Alice&quot;, &quot;role&quot;: &quot;user&quot;,</span>
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="err">    &quot;must_change_password&quot;: false,       // true → 前端须弹强制改密框（见下）</span>
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a><span class="err">    &quot;department_path&quot;: [&quot;技术部&quot;, &quot;后端组&quot;] // root → leaf 部门名链；未分配 → null</span>
+<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a><span class="err">  }</span>
+<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a><span class="err">}</span>
 </code></pre></div>
 <ul>
-<li>失败统一返回 <strong>401</strong>（用户不存在 / 密码错 / 账号禁用），不区分原因</li>
+<li>失败统一返回 <strong>401</strong>（用户不存在 / 密码错 / 账号禁用），不区分原因；用户不存在时也对固定假 hash 跑一次 bcrypt，使两条分支耗时恒定，避免时序枚举用户名</li>
+<li><strong>登录频控</strong>：每次失败对 <code>user:{username}</code> 与 <code>ip:{client_ip}</code> 两个 key 各 +1；任一在 <code>LOGIN_FAILURE_WINDOW_SEC</code>（默认 900s）窗口内累计达 <code>LOGIN_MAX_FAILURES</code>（默认 5）→ 锁定窗口内一律 <strong>429</strong>（带 <code>Retry-After</code>），连正确密码也拒。per-username 是主防线，per-IP 补抓"同 IP 喷多个用户名"。per-IP 的 <code>client_ip</code> 只读 nginx 覆写的 <code>X-Real-IP</code>（<strong>刻意不读可伪造的 <code>X-Forwarded-For</code></strong>），dev 无 nginx 时回落 <code>request.client.host</code></li>
 <li><strong>无 <code>/refresh</code> 端点</strong>：token 过期后客户端需重新 login</li>
+</ul>
+<h3 id="强制改密闸门">强制改密闸门</h3>
+<p>用户的 <code>must_change_password</code> 在三种情况下被置 True：admin 创建/批量导入的新用户（首次登录）、admin 重置其密码、口令龄超过 <code>PASSWORD_EXPIRY_DAYS</code>（默认 180 天；登录时判定，<code>password_changed_at</code> 为 NULL 视为已过期；<code>0</code> = 不强制到期）。</p>
+<p>标志为 True 时，<code>get_current_user</code> 对该用户的<strong>所有请求返回 403 <code>Password change required</code></strong>，仅放行两个端点让其脱困：</p>
+<table>
+<thead>
+<tr>
+<th>仍放行</th>
+<th>用途</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>GET /api/v1/auth/me</code></td>
+<td>拉取自身状态（含 <code>must_change_password</code>）</td>
+</tr>
+<tr>
+<td><code>POST /api/v1/auth/me/password</code></td>
+<td>完成改密（成功即清除标志）</td>
+</tr>
+</tbody>
+</table>
+<p>前端据 <code>must_change_password</code> 弹不可关闭的改密框；后端 403 是绕过前端时的兜底。</p>
+<h3 id="口令强度策略">口令强度策略</h3>
+<p>所有"写入新口令"的入口（<code>POST /me/password</code>、admin <code>POST /users</code>、<code>PUT /users/{id}</code> 带 password、CSV 导入）共用 <code>validate_password_strength</code>，由 config 常量驱动（operator 可调，非 API 参数）：长度 ≥ <code>PASSWORD_MIN_LENGTH</code>（默认 8）、同时含字母+数字+符号、拒弱口令黑名单 / 键盘行走 / 单一重复 / 连续序列。</p>
+<ul>
+<li>schema 字段校验失败（Pydantic validator 抛 <code>ValueError</code>）→ <strong>422</strong></li>
+<li>CSV 导入逐行捕获 → 该行进 <code>failed</code>（不抛 HTTP 错）</li>
+<li><strong>登录不做强度校验</strong>：老用户旧口令可能不达标，登录只鉴别、不二次卡策略</li>
 </ul>
 <h3 id="post-mepassword--自助改密">POST <code>/me/password</code> — 自助改密</h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="err">POST /api/v1/auth/me/password</span>
@@ -2209,9 +2297,10 @@
 <a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="err">204 No Content</span>
 </code></pre></div>
 <ul>
-<li>校验失败 → <code>400 Current password is incorrect</code></li>
-<li><code>new_password</code> 服务端要求 <code>min_length=4</code>（与 admin 重置一致）</li>
-<li>改密后 <code>password_version++</code>；旧 token 立即失效（<code>get_current_user</code> 查 <code>password_version</code> 字段对比 JWT 内嵌版本号）</li>
+<li>旧密码校验失败 → <code>400 Current password is incorrect</code></li>
+<li><code>new_password</code> 走口令强度策略（floor 8 + 复杂度，<strong>非旧版 <code>min_length=4</code></strong>），不达标 → <code>422</code></li>
+<li><strong>不重用查重</strong>：新口令不得与"最近 <code>PASSWORD_HISTORY_COUNT</code> 个用过的口令（含当前）"相同（默认 <code>1</code> = 仅 ≠ 当前），命中 → <code>400 新密码不能与最近使用过的密码相同</code></li>
+<li>改密后 <code>password_version++</code>；旧 token 立即失效（<code>get_current_user</code> 查 <code>password_version</code> 字段对比 JWT 内嵌版本号）。自助改密同时清除 <code>must_change_password</code></li>
 </ul>
 <h3 id="patch-me--自助改-display_name">PATCH <code>/me</code> — 自助改 display_name</h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="err">PATCH /api/v1/auth/me</span>
@@ -2320,7 +2409,7 @@
 <a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="err">200 OK</span>
 <a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a><span class="err">{&quot;id&quot;: &quot;dept-xyz&quot;}                          // 末级 id；空 path / 全空字符串 → null</span>
 </code></pre></div>
-<p>供前端 cascader "+ 新建当前级" 与 PR3 批量导入按行解析时复用；<strong>自动建 dept</strong> 是合法 admin 行为，不走 <code>POST /</code> 的 409 路径。并发同路径插入由 <code>IntegrityError</code> 重试 SELECT 兜住（最多 1 次）。</p>
+<p>供前端 cascader "+ 新建当前级" 与批量导入按行解析时复用；<strong>自动建 dept</strong> 是合法 admin 行为，不走 <code>POST /</code> 的 409 路径。并发同路径插入由 <code>IntegrityError</code> 重试 SELECT 兜住（最多 1 次）。</p>
 <h3 id="用户搜索按部门子树扩展">用户搜索按部门子树扩展</h3>
 <p><code>GET /api/v1/admin/users?q=...</code> 的 <code>q</code> 不只匹配 <code>username</code> / <code>display_name</code>，也匹配部门名 ILIKE，并<strong>展开整个子树</strong>（搜根部门名返回该条线下全部用户）。实现见 <code>src/utils/department_tree.expand_subtree</code>。</p>
 <hr />
@@ -2456,7 +2545,7 @@
 <h3 id="delete-conv_id--单条删除">DELETE <code>/{conv_id}</code> — 单条删除</h3>
 <ul>
 <li>不预查 active execution，<strong>fire-and-forget</strong></li>
-<li>若引擎正在跑：被删的 conversation 行被 controller post-processing 的 <code>exists()</code> 检查兜住（PR2a），引擎跳过持久化，不抛 FK</li>
+<li>若引擎正在跑：被删的 conversation 行被 controller post-processing 的 <code>exists()</code> 检查兜住，引擎跳过持久化，不抛 FK</li>
 <li><code>404</code>：不存在 / 不属于当前用户（404-not-403）</li>
 </ul>
 <h3 id="post-bulk-delete--批量删除">POST <code>/bulk-delete</code> — 批量删除</h3>
@@ -2681,8 +2770,9 @@
 <p>见 <a href="../../architecture/observability/#get-apiv1adminconversationsconv_idevents">../architecture/observability.md → Admin API</a>.</p>
 <h3 id="post-users--创建用户">POST <code>/users</code> — 创建用户</h3>
 <ul>
-<li>字段：<code>username</code> (2-64, regex <code>^[A-Za-z0-9._-]+$</code>), <code>password</code> (4-128), <code>display_name?</code>, <code>role?</code> ∈ <code>user</code>/<code>admin</code>, <code>department_id?</code></li>
-<li><code>409</code> 用户名已存在；<code>400</code> 非法 role / 非法 username 字符 / <code>department_id</code> 不存在</li>
+<li>字段：<code>username</code> (2-64, regex <code>^[A-Za-z0-9._-]+$</code>), <code>password</code>（≤128，且过<a href="#口令强度策略">口令强度策略</a>）, <code>display_name?</code>, <code>role?</code> ∈ <code>user</code>/<code>admin</code>, <code>department_id?</code></li>
+<li>新建用户 <code>must_change_password=True</code> —— 首次登录即被<a href="#强制改密闸门">强制改密闸门</a>拦下</li>
+<li><code>409</code> 用户名已存在；<code>422</code> 口令不达标 / 用户名字符非法（schema 校验）；<code>400</code> 非法 role / <code>department_id</code> 不存在</li>
 </ul>
 <h3 id="put-usersuser_id--更新">PUT <code>/users/{user_id}</code> — 更新</h3>
 <p>所有字段可选（<code>UpdateUserRequest</code>）。<strong>self-protection</strong> 阻止三类自我修改：</p>
@@ -2718,12 +2808,15 @@
 <a id="__codelineno-17-3" name="__codelineno-17-3" href="#__codelineno-17-3"></a><span class="err">{&quot;display_name&quot;: &quot;...&quot;}              // 仅改 display_name，不动 department_id</span>
 </code></pre></div>
 <p>非自身 admin 可以 demote / disable —— 仅自身被 self-protection 守住。</p>
+<blockquote>
+<p>重置他人密码（传 <code>password</code>，同样过<a href="#口令强度策略">口令强度策略</a>）→ 该用户 <code>must_change_password=True</code> + <code>password_version++</code>：强制其下次登录改密，且旧 token 全端立即失效。</p>
+</blockquote>
 <h3 id="delete-usersuser_id--硬删">DELETE <code>/users/{user_id}</code> — 硬删</h3>
 <ul>
 <li><code>403 Cannot delete yourself</code></li>
 <li><code>404 User not found</code></li>
 <li>成功 → <code>204</code>，<strong>FK CASCADE</strong> 连带删该用户的全部 conversations / messages / events / artifacts</li>
-<li>若该用户当前有正在跑的 engine：被级联删的 conversation 行由 controller post-processing 的 <code>exists()</code> 检查兜住（PR2a），engine 静默跳过持久化、不抛 FK 异常</li>
+<li>若该用户当前有正在跑的 engine：被级联删的 conversation 行由 controller post-processing 的 <code>exists()</code> 检查兜住，engine 静默跳过持久化、不抛 FK 异常</li>
 </ul>
 <h3 id="get-usersuser_idimpact--删前-impact">GET <code>/users/{user_id}/impact</code> — 删前 impact</h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a><span class="err">GET /api/v1/admin/users/u-abc/impact</span>
@@ -2736,7 +2829,8 @@
 <p><strong>关键语义：</strong></p>
 <ul>
 <li><strong>best-effort 三分类</strong>：<code>created</code> / <code>failed</code> / <code>skipped</code></li>
-<li><strong>默认密码</strong>：<code>password</code> 留空 → 默认值 = <code>username</code>（如果 username 长度 &lt; 4，该行进 <code>failed</code>）</li>
+<li><strong>密码每行必填</strong>（<code>password</code> 列虽非 parse 阶段必填，但每行值不能空）：留空 → 该行进 <code>failed</code>（<code>reason="password is required (column must not be empty)"</code>）；提供则走<a href="#口令强度策略">口令强度策略</a>，不达标 → <code>failed</code>（<code>reason="password does not meet policy: ..."</code>）。<strong>不再有"留空 = 用户名"的默认行为</strong>——admin 自填初始口令并带外分发</li>
+<li><strong>所有导入用户 <code>must_change_password=True</code></strong>：首次登录即被强制改密</li>
 <li><strong>部门路径</strong>：<code>(dept_l1, dept_l2, dept_l3)</code> 走 <code>resolve_department_path</code> 自动建表；gap（中间空、后面非空）严格拒绝</li>
 <li><strong>文件内 username 重复 → 整体 400</strong>（admin 必须先在源文件去重）</li>
 <li><strong>行数上限</strong>：<code>MAX_BULK_IMPORT_ROWS=1000</code>，超 → 400</li>
@@ -2821,7 +2915,7 @@
 <h3 id="为什么没有-authregister--authrefresh">为什么没有 <code>/auth/register</code> / <code>/auth/refresh</code></h3>
 <ul>
 <li>产品定位是团队内 SaaS，用户由 admin 主动创建；开放自助注册会放大滥用面</li>
-<li>JWT 直接用较长 <code>expires_in</code>（默认 86400s），过期重新 login — 省掉 refresh token 的存储与撤销复杂度</li>
+<li>JWT 直接用较长 <code>expires_in</code>（默认 <code>JWT_EXPIRY_DAYS=7</code> → 604800s），过期重新 login — 省掉 refresh token 的存储与撤销复杂度。改密 / admin 重置通过 <code>password_version</code> 实现"软撤销"（旧 token 比对失败即 401），无需吊销集合</li>
 <li>有强制失效需求可由 admin 通过 PUT <code>/users/{id}</code> 设 <code>is_active=false</code> 实现</li>
 </ul>
 <h3 id="为什么-stream-用-stream_id--message_id">为什么 Stream 用 <code>stream_id == message_id</code></h3>

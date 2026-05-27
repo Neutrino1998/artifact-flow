@@ -951,6 +951,17 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#背景这套观测--兜底为什么存在" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        背景:这套观测 + 兜底为什么存在
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#跑一下" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1202,6 +1213,14 @@
 <p><code>scripts/observability_report.py</code> 的输出怎么读 + 哪些隐藏常量在什么信号下要调。报告读出来再回来调常量,<strong>不要凭印象先动</strong>。</p>
 </blockquote>
 <p><code>observability_report.py</code> 数据源三处:<code>MessageEvent</code> 表(LLM / 工具调用)、<code>data/observability/metrics.jsonl*</code>(<code>RuntimeSampler</code> 周期采样)、<code>data/observability/loop-lag.jsonl*</code>(<code>LoopLagWatchdog</code> 软退化事件)。脚本对齐见 <code>scripts/observability_report.py:9-21</code> 的 docstring。</p>
+<h2 id="背景这套观测--兜底为什么存在">背景:这套观测 + 兜底为什么存在</h2>
+<p>整套机制(报表 + <code>LoopLagWatchdog</code> + <code>DeadmanSwitch</code> + <code>update_artifact</code> 的几个输入硬上界)是针对一次<strong>同步 CPU 死算卡死 event loop</strong> 的事故加的:<code>update_artifact</code> 的 Layer 2 fuzzy match 在超大输入下进入平方级偏移枚举,纯用户态死算并攥住 GIL,把整个 asyncio loop 冻了约 96 分钟、<code>/health/live</code> 全程无响应。</p>
+<p>关键认知:引擎的 cancel / timeout / lease-fencing 全建立在 <code>asyncio.Task.cancel()</code> 上,是<strong>协作式</strong>的——一个不 <code>await</code>、或在 C 扩展里攥着 GIL 的同步段会<strong>同时穿透这三层</strong>。所以防线只能分层:</p>
+<ul>
+<li><strong>工具侧</strong>给算法上界 + wall-clock 兜底(<code>MAX_FUZZY_OLD_STR_LEN</code> / <code>MAX_UNIQUE_CENTERS</code> / <code>MAX_FUZZY_WALL_CLOCK_MS</code>)——引擎语义上兜不住只有工具作者才理解的 CPU 成本;</li>
+<li><strong>loop 侧</strong>用 <code>LoopLagWatchdog</code> 软退化预警,<code>DeadmanSwitch</code> 在独立 C 线程兜底 faulthandler dump(C 扩展持 GIL 时连 watchdog 自己都睡死,见 Section 4)。</li>
+</ul>
+<p>本文档「隐藏常量速查」里的常量大多是这套防线的旋钮,所以反复强调<strong>改之前先有数据</strong>。</p>
 <h2 id="跑一下">跑一下</h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1"># 默认 24h 窗口</span>
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>python<span class="w"> </span>scripts/observability_report.py
@@ -1455,7 +1474,7 @@
 <tr>
 <td><code>MAX_FUZZY_OLD_STR_LEN</code></td>
 <td>10000</td>
-<td>input 硬上界,m &gt; 此值立即 <code>bail_budget</code>;<strong>这是事故根因防线</strong>,改之前看 incident doc PR-1 §决策依据</td>
+<td>input 硬上界,m &gt; 此值立即 <code>bail_budget</code>;<strong>这是事故根因防线</strong>(见顶部「背景」)——是硬 bail 不是性能旋钮,放大前先确认偏移枚举的平方代价仍可控</td>
 </tr>
 </tbody>
 </table>
@@ -1477,7 +1496,7 @@
 <tr>
 <td><code>WATCHDOG_DEADMAN_TIMEOUT_MS</code></td>
 <td>10000</td>
-<td>faulthandler dump 倒计时;偏保守,出现"长但合法的同步段"误触再加(目前主要风险已被 PR-1 覆盖);改前看 deadman 设计 <code>deadman.py:14-18</code></td>
+<td>faulthandler dump 倒计时;偏保守,出现"长但合法的同步段"误触再加(目前主要风险已被 <code>update_artifact</code> 的输入上界覆盖,见顶部「背景」);改前看 deadman 设计 <code>deadman.py:14-18</code></td>
 </tr>
 <tr>
 <td><code>OBS_SAMPLE_INTERVAL_SEC</code></td>
@@ -1532,7 +1551,7 @@
 <li><strong>重启 backend、跑 24h、再看报告</strong></li>
 <li><strong>保留前后两份报告 diff</strong>——做小版本 ship 笔记的素材</li>
 </ol>
-<p>不要试图通过 jsonl 直接接告警 / Prometheus——目前体系是 <code>jsonl + 报告 + 人工巡检</code>(决策见 incident fix-plan §待决策项 4)。Sampler 字段已就位,需要 exporter 时是平移工作。</p>
+<p>不要试图通过 jsonl 直接接告警 / Prometheus——这是刻意的范围决策:当前体系是 <code>jsonl + 报告 + 人工巡检</code>,先用人工巡检兜住,不预先搭 exporter/告警管线。Sampler 字段已就位,真正需要时是平移工作。</p>
 
 
 
