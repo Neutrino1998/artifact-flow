@@ -63,6 +63,7 @@ nav:
   - Architecture:
       - Overview: architecture/overview.md
       - Engine: architecture/engine.md
+      - Execution Lifecycle: architecture/execution-lifecycle.md
       - Agents: architecture/agents.md
       - Tools: architecture/tools.md
       - Artifacts: architecture/artifacts.md
@@ -75,4 +76,7 @@ nav:
       - Add Tool: guides/add-tool.md
       - Add Model: guides/add-model.md
       - API Reference: guides/api-reference.md
+      - Observability Tuning: guides/observability-tuning.md
+  - Runbooks:
+      - Service Hang: runbooks/service-hang.md
   - Frontend: frontend.md
