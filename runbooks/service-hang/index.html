@@ -13,6 +13,10 @@
         <link rel="canonical" href="https://neutrino1998.github.io/artifact-flow/runbooks/service-hang/">
       
       
+        <link rel="prev" href="../../guides/observability-tuning/">
+      
+      
+        <link rel="next" href="../../frontend/">
       
       
         
@@ -23,7 +27,7 @@
     
     
       
-        <title>Runbook · 服务卡死(后端无响应) - ArtifactFlow</title>
+        <title>Service Hang - ArtifactFlow</title>
       
     
     
@@ -110,7 +114,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Runbook · 服务卡死(后端无响应)
+              Service Hang
             
           </span>
         </div>
@@ -286,6 +290,28 @@
   
   
   Guides
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="./" class="md-tabs__link">
+          
+  
+  
+  Runbooks
 
         </a>
       </li>
@@ -508,6 +534,34 @@
     
   
     Engine
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../architecture/execution-lifecycle/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Execution Lifecycle
   
 
     
@@ -885,6 +939,294 @@
   
 
       </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/observability-tuning/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Observability Tuning
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Runbooks
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Runbooks
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Service Hang
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Service Hang
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="目录">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      目录
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#前置挑-compose-文件--选目标副本" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        前置:挑 compose 文件 + 选目标副本
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#适用症状" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        适用症状
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-1判别循环卡死还是依赖问题" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 1:判别"循环卡死"还是"依赖问题"
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-2确认是-cpu-型卡死gil-被攥住" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 2:确认是 CPU 型卡死(GIL 被攥住)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-3抓-python-栈取证重启之前必跑" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 3:抓 Python 栈(取证,重启之前必跑)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-4看刚才有没有软退化事件" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 4:看刚才有没有"软退化"事件
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-5服务还活但变慢adminruntime-水位检查" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 5:服务还活但变慢——/admin/runtime 水位检查
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-6止血取证完了再重启" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 6:止血——取证完了再重启
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-7留痕" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 7:留痕
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#已知-wedge-形态参考" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        已知 wedge 形态参考
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#工具作者纪律防止再踩" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        工具作者纪律(防止再踩)
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
