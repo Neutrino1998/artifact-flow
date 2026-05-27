@@ -99,15 +99,18 @@ class TestSystemPrompt:
         assert system_msg["role"] == "system"
         assert "research assistant" in system_msg["content"]
 
-    def test_includes_system_time(self):
+    def test_system_time_in_trailing_reminder_not_system_prompt(self):
         agent = _FakeAgentConfig()
         state = _make_state(events=[
             _make_event(StreamEventType.USER_INPUT.value, data={"content": "hi"}),
         ])
 
         messages = _build(agent, state=state, tools={})
-        system_content = messages[0]["content"]
-        assert "system_time" in system_content
+        # 系统时间已移出 system prompt，作为 ephemeral <system-reminder> 并入末条消息
+        assert "system_time" not in messages[0]["content"]
+        reminder = messages[-1]["content"]
+        assert "<system-reminder>" in reminder
+        assert "<system_time>" in reminder
 
     def test_with_tools_includes_tool_instruction(self):
         from tools.base import BaseTool, ToolPermission, ToolResult, ToolParameter
@@ -140,9 +143,8 @@ class TestSystemPrompt:
         ])
 
         messages = _build(agent, state=state, tools={})
-        system_content = messages[0]["content"]
-        # Should not contain tool_call instruction
-        assert "tool_call" not in system_content.lower() or "tool" not in system_content.split("<system_time>")[0].lower()
+        # 无工具 → system prompt 不注入 tool 说明（system prompt 现只含 role/agents/tools）
+        assert "tool_call" not in messages[0]["content"].lower()
 
 
 # ============================================================
@@ -320,7 +322,7 @@ class TestStripMeta:
 
 class TestArtifactsAndAgents:
 
-    def test_task_plan_in_system_prompt(self):
+    def test_task_plan_in_trailing_reminder(self):
         agent = _FakeAgentConfig(tools={"create_artifact": "auto"})
         artifacts = [
             {"id": "task_plan", "title": "Plan", "version": 1, "content_type": "text/markdown",
@@ -334,12 +336,14 @@ class TestArtifactsAndAgents:
             agent, state=state, tools={},
             artifacts_inventory=artifacts,
         )
-        system_content = messages[0]["content"]
-        assert "<content>\nStep 1: Do X\n</content>" in system_content
+        # task_plan 现随动态上下文进入末条 <system-reminder>，不再在 system prompt
+        assert "task_plan" not in messages[0]["content"]
+        reminder = messages[-1]["content"]
+        assert "<content>\nStep 1: Do X\n</content>" in reminder
         # id as child element, meta as attributes
-        assert '<id>task_plan</id>' in system_content
-        assert 'version="1"' in system_content
-        assert 'type="text/markdown"' in system_content
+        assert '<id>task_plan</id>' in reminder
+        assert 'version="1"' in reminder
+        assert 'type="text/markdown"' in reminder
 
     def test_task_plan_full_in_dedicated_section_preview_in_inventory(self):
         """<team_task_plan> wraps full content; inventory uses <artifact_slice> with truncated body."""
@@ -359,13 +363,14 @@ class TestArtifactsAndAgents:
             agent, state=state, tools={},
             artifacts_inventory=artifacts,
         )
-        system_content = messages[0]["content"]
+        # 动态上下文整体在末条 <system-reminder> 内（不再在 system prompt）
+        reminder = messages[-1]["content"]
         # <team_task_plan> 仍然 wraps full content in <content>（独立 section，不变）
-        assert f"<content>\n{long_content}\n</content>" in system_content
+        assert f"<content>\n{long_content}\n</content>" in reminder
         # Inventory 用 <artifact_slice> envelope 渲染
-        inv_start = system_content.index("<artifacts_inventory>")
-        inv_end = system_content.index("</artifacts_inventory>")
-        inventory_section = system_content[inv_start:inv_end]
+        inv_start = reminder.index("<artifacts_inventory>")
+        inv_end = reminder.index("</artifacts_inventory>")
+        inventory_section = reminder[inv_start:inv_end]
         # task_plan 在 inventory 里被截断为 preview
         assert '<artifact_slice id="task_plan"' in inventory_section
         assert 'truncated_by="preview"' in inventory_section
@@ -376,7 +381,7 @@ class TestArtifactsAndAgents:
         # 短 artifact: 全文显示，has_more=false
         assert '<artifact_slice id="doc1"' in inventory_section
         assert '<title>Document</title>\nShort\n</artifact_slice>' in inventory_section
-        assert "2 artifact(s)" in system_content
+        assert "2 artifact(s)" in reminder
 
     def test_artifact_tools_show_inventory(self):
         agent = _FakeAgentConfig(tools={"read_artifact": "auto"})
@@ -392,9 +397,9 @@ class TestArtifactsAndAgents:
             agent, state=state, tools={},
             artifacts_inventory=artifacts,
         )
-        system_content = messages[0]["content"]
-        assert "artifacts_inventory" in system_content
-        assert "Document" in system_content
+        reminder = messages[-1]["content"]
+        assert "artifacts_inventory" in reminder
+        assert "Document" in reminder
 
     def test_no_artifact_tools_no_inventory(self):
         agent = _FakeAgentConfig(tools={"web_search": "auto"})
@@ -410,8 +415,9 @@ class TestArtifactsAndAgents:
             agent, state=state, tools={},
             artifacts_inventory=artifacts,
         )
-        system_content = messages[0]["content"]
-        assert "artifacts_inventory" not in system_content
+        # 无 artifact 工具 → 动态上下文里也不含清单（system prompt 同样没有）
+        assert "artifacts_inventory" not in messages[0]["content"]
+        assert "artifacts_inventory" not in messages[-1]["content"]
 
     def test_call_subagent_shows_available_agents(self):
         lead = _FakeAgentConfig(tools={"call_subagent": "auto"})
@@ -447,3 +453,55 @@ class TestArtifactsAndAgents:
         )
         system_content = messages[0]["content"]
         assert "compact_agent" not in system_content
+
+
+# ============================================================
+# TestDynamicContextReminder
+# ============================================================
+
+
+class TestDynamicContextReminder:
+    """动态上下文（时间 / task_plan / 清单）作为 ephemeral <system-reminder> 并入末条消息。"""
+
+    def test_reminder_merged_into_last_message_no_extra_message(self):
+        agent = _FakeAgentConfig()
+        state = _make_state(events=[
+            _make_event(StreamEventType.USER_INPUT.value, data={"content": "hi there"}),
+        ])
+
+        messages = _build(agent, state=state, tools={})
+        # [system, user] —— reminder 并入末条 user，不新增独立消息、不劈开历史
+        assert len(messages) == 2
+        last = messages[-1]
+        assert last["role"] == "user"
+        assert "hi there" in last["content"]            # 原内容保留
+        assert "<system-reminder>" in last["content"]   # reminder 并入同一条
+
+    def test_reminder_is_ephemeral_not_written_to_events(self):
+        agent = _FakeAgentConfig()
+        user_event = _make_event(StreamEventType.USER_INPUT.value, data={"content": "hi"})
+        state = _make_state(events=[user_event])
+
+        ContextManager.build(
+            agent_name=agent.name, agents={agent.name: agent}, state=state, tools={},
+        )
+        # build 不得把 reminder 写回 event —— 否则过期时间/清单会冻进历史
+        assert user_event.data["content"] == "hi"
+        assert "<system-reminder>" not in user_event.data["content"]
+
+    def test_system_prompt_has_no_dynamic_content(self):
+        agent = _FakeAgentConfig(tools={"create_artifact": "auto"})
+        artifacts = [
+            {"id": "task_plan", "title": "Plan", "version": 1, "content_type": "text/markdown",
+             "content": "Step 1", "updated_at": "2024-01-01", "source": "agent"},
+        ]
+        state = _make_state(events=[
+            _make_event(StreamEventType.USER_INPUT.value, data={"content": "hi"}),
+        ])
+
+        messages = _build(agent, state=state, tools={}, artifacts_inventory=artifacts)
+        # system prompt 是稳定可缓存前缀：不含时间 / task_plan / 清单
+        system_content = messages[0]["content"]
+        assert "<system_time>" not in system_content
+        assert "<team_task_plan" not in system_content
+        assert "artifacts_inventory" not in system_content
