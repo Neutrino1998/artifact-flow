@@ -207,8 +207,15 @@ export default function MessageInput() {
       {/* Gradient fade above input */}
       <div className="absolute inset-x-0 -top-6 h-6 bg-gradient-to-t from-chat dark:from-chat-dark to-transparent pointer-events-none" />
       <div className="max-w-3xl mx-auto">
+        {/* @container marks the composer as a container-query root: the gauge
+            and model badge below measure THIS composer's width, not the viewport.
+            Viewport breakpoints (`sm:`) were wrong for this layout — chat column
+            width is a function of (viewport − sidebar − artifact-panel − whatever
+            other side panel happens to be open), and combining all of those
+            into a single dynamic breakpoint was brittle. @container makes the
+            composer self-aware: it only shows what fits in its own box. */}
         <div
-          className="bg-surface dark:bg-surface-dark border border-border dark:border-border-dark focus-within:border-accent dark:focus-within:border-accent rounded-2xl shadow-float px-4 py-3 transition-colors"
+          className="@container bg-surface dark:bg-surface-dark border border-border dark:border-border-dark focus-within:border-accent dark:focus-within:border-accent rounded-2xl shadow-float px-4 py-3 transition-colors"
         >
           {/* Why some picked files weren't staged (unsupported format / over
               the attachment cap). Covers drag-drop too, which bypasses the
@@ -403,7 +410,7 @@ export default function MessageInput() {
               const near = pct >= 85;
               return (
                 <div
-                  className="hidden sm:flex h-8 items-center gap-1.5 text-xs text-text-tertiary dark:text-text-tertiary-dark select-none"
+                  className="hidden @sm:flex h-8 items-center gap-1.5 text-xs text-text-tertiary dark:text-text-tertiary-dark select-none"
                   title={`下一轮将带入的上下文约 ${contextTokens.toLocaleString()} tokens / 自动压缩阈值 ${compactionThreshold.toLocaleString()}（达到阈值会自动压缩历史；若该轮以压缩结束，此值为压缩摘要大小的实测代理）`}
                 >
                   {/* Ring geometry: 16x16 to match the attach/artifact/compact icon
@@ -443,13 +450,16 @@ export default function MessageInput() {
 
             {/* Lead agent model badge — same metric font / color as the gauge so
                 eye reads "info strip" not a separate widget. Sourced from /meta
-                (lead_agent's MD frontmatter); hidden on small screens to avoid
-                competing with the input area, and skipped entirely while config
-                is still loading (best-effort fail). truncate at max-w prevents
-                a very long identifier from pushing the send button off-screen. */}
+                (lead_agent's MD frontmatter). @lg threshold = 32rem (512px)
+                composer width: at that point left tools (~104px) + gauge (~80px)
+                + badge (~140px) + send (32px) + gaps + padding all comfortably
+                fit; below that the badge is the first to fold (gauge survives
+                down to @sm). truncate at max-w prevents a very long identifier
+                from pushing send off-screen even at @lg. Skipped entirely while
+                config is still loading (best-effort fail). */}
             {leadAgentModel && (
               <span
-                className="hidden sm:inline-flex h-8 items-center font-mono text-xs text-text-tertiary dark:text-text-tertiary-dark select-none truncate max-w-[140px] translate-y-[0.5px]"
+                className="hidden @lg:inline-flex h-8 items-center font-mono text-xs text-text-tertiary dark:text-text-tertiary-dark select-none truncate max-w-[140px] translate-y-[0.5px]"
                 title={`Lead agent 当前模型：${leadAgentModel}`}
               >
                 {leadAgentModel}
