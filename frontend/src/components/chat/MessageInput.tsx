@@ -6,12 +6,17 @@ import { useComposerSend } from '@/hooks/useComposerSend';
 import { useStreamStore } from '@/stores/streamStore';
 import { useUIStore } from '@/stores/uiStore';
 import { useConversationStore } from '@/stores/conversationStore';
+import { useConfigStore } from '@/stores/configStore';
 import { useStagedFilesStore } from '@/stores/stagedFilesStore';
 import { injectMessage, cancelExecution } from '@/lib/api';
+import { formatTokens } from '@/lib/formatTokens';
 import { MAX_MESSAGE_CHARS, MAX_CHAT_ATTACHMENTS } from '@/lib/constants';
 
 export default function MessageInput() {
   const [content, setContent] = useState('');
+  // Armed by the "compact" toggle; rides the next send as force_compact and is
+  // cleared on a successful send. A compact-only send (no text) is allowed.
+  const [forceCompact, setForceCompact] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const isComposingRef = useRef(false);
@@ -50,6 +55,48 @@ export default function MessageInput() {
   const conversationId = useConversationStore((s) => s.current?.id);
   const streamConversationId = useStreamStore((s) => s.conversationId);
 
+  // Context-usage gauge: how much context the next message will carry, vs the
+  // backend auto-compaction threshold. Sourced from the persisted branch tail's
+  // `execution_metrics.last_input_tokens` — normally the last lead LLM call's
+  // input, but if the turn ended on a compaction (compaction triggered on the
+  // final response, no further lead call), the backend overrides this field
+  // with the compaction summary's `output_tokens` as a measured proxy, so the
+  // gauge correctly drops post-compaction. lead-only by convention; subagent
+  // compaction does not pollute this field. See docs/architecture/engine.md.
+  // Non-live: updates after each completed turn / on conversation load.
+  const branchPath = useConversationStore((s) => s.branchPath);
+  const compactionThreshold = useConfigStore((s) => s.compactionThreshold);
+  const leadAgentModel = useConfigStore((s) => s.leadAgentModel);
+  const fetchConfig = useConfigStore((s) => s.fetchConfig);
+  useEffect(() => {
+    fetchConfig();
+  }, [fetchConfig]);
+  const lastNode = branchPath.length > 0 ? branchPath[branchPath.length - 1] : null;
+  const contextTokens =
+    (lastNode?.execution_metrics as { last_input_tokens?: number | null } | null | undefined)
+      ?.last_input_tokens ?? null;
+
+  // Compact is meaningless with no history to summarize — and worse, the
+  // injected directive ("history will be compacted right after your response")
+  // tends to hallucinate on a blank first turn (model invents prior context to
+  // describe).
+  //
+  // branchPath is derived from persisted `current`, so length>0 ⇔ "at least
+  // one turn already landed in DB" — covers both the blank-new-chat state and
+  // the first-turn-in-flight state (where `current` is still null pre-refresh).
+  //
+  // Correctness goes through the derived `effectiveForceCompact`, never raw
+  // `forceCompact` — because the useEffect cleanup below is async (one render
+  // late), keyboard Enter would otherwise punch through the button-disabled
+  // guard in the one-frame window where `forceCompact=true && !hasPersisted`.
+  // The effect stays as UX cleanup (chip animates away on conv switch) but
+  // can't be relied on for behavior.
+  const hasPersistedHistory = branchPath.length > 0;
+  const effectiveForceCompact = forceCompact && hasPersistedHistory;
+  useEffect(() => {
+    if (!hasPersistedHistory && forceCompact) setForceCompact(false);
+  }, [hasPersistedHistory, forceCompact]);
+
   const handleSend = useCallback(async () => {
     if (isStreaming && !content.trim()) {
       // Stop: cancel backend execution. The cancel signal queues into the
@@ -78,9 +125,18 @@ export default function MessageInput() {
       return;
     }
 
-    // New-message send: text and/or staged attachments ride one POST.
-    await submit((text, files) => sendMessage(text, undefined, files));
-  }, [content, isStreaming, cancelling, setCancelling, conversationId, streamConversationId, inject, submit, sendMessage]);
+    // New-message send: text and/or staged attachments ride one POST. When the
+    // compact toggle is armed AND there's history to compact, force_compact
+    // rides along (and allowEmpty lets a compact-only send through). Clear the
+    // raw `forceCompact` on any successful armed send, even if it didn't take
+    // effect this turn (state hygiene — don't leave stale armed state behind).
+    const compact = effectiveForceCompact;
+    await submit(async (text, files) => {
+      const ok = await sendMessage(text, undefined, files, compact);
+      if (ok && forceCompact) setForceCompact(false);
+      return ok;
+    }, compact);
+  }, [content, isStreaming, cancelling, setCancelling, conversationId, streamConversationId, inject, submit, sendMessage, forceCompact, effectiveForceCompact]);
 
   const handleCompositionStart = useCallback(() => {
     isComposingRef.current = true;
@@ -151,8 +207,15 @@ export default function MessageInput() {
       {/* Gradient fade above input */}
       <div className="absolute inset-x-0 -top-6 h-6 bg-gradient-to-t from-chat dark:from-chat-dark to-transparent pointer-events-none" />
       <div className="max-w-3xl mx-auto">
+        {/* @container marks the composer as a container-query root: the gauge
+            and model badge below measure THIS composer's width, not the viewport.
+            Viewport breakpoints (`sm:`) were wrong for this layout — chat column
+            width is a function of (viewport − sidebar − artifact-panel − whatever
+            other side panel happens to be open), and combining all of those
+            into a single dynamic breakpoint was brittle. @container makes the
+            composer self-aware: it only shows what fits in its own box. */}
         <div
-          className="bg-surface dark:bg-surface-dark border border-border dark:border-border-dark focus-within:border-accent dark:focus-within:border-accent rounded-2xl shadow-float px-4 py-3 transition-colors"
+          className="@container bg-surface dark:bg-surface-dark border border-border dark:border-border-dark focus-within:border-accent dark:focus-within:border-accent rounded-2xl shadow-float px-4 py-3 transition-colors"
         >
           {/* Why some picked files weren't staged (unsupported format / over
               the attachment cap). Covers drag-drop too, which bypasses the
@@ -217,6 +280,30 @@ export default function MessageInput() {
             </div>
           )}
 
+          {/* Compact-armed chip — visible cue that the next send will compact.
+              Gated on effectiveForceCompact (not raw forceCompact) so the chip
+              never lies about what the send path will actually do. */}
+          {effectiveForceCompact && (
+            <div className="flex flex-wrap gap-1.5 mb-2">
+              <span className="inline-flex items-center gap-1 pl-2 pr-1 py-1 rounded-lg bg-accent/10 border border-accent/40 text-xs text-accent">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
+                  <polyline points="4 14 10 14 10 20" />
+                  <polyline points="20 10 14 10 14 4" />
+                </svg>
+                <span>本轮回答后压缩上下文</span>
+                <button
+                  onClick={() => setForceCompact(false)}
+                  className="shrink-0 p-0.5 rounded hover:bg-accent/20"
+                  aria-label="取消压缩"
+                >
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                    <path d="M18 6L6 18M6 6l12 12" />
+                  </svg>
+                </button>
+              </span>
+            </div>
+          )}
+
           <textarea
             ref={textareaRef}
             value={content}
@@ -248,11 +335,14 @@ export default function MessageInput() {
                 className="hidden"
               />
 
-              {/* Attach file (stages — sent with the next message) */}
+              {/* Attach file (stages — sent with the next message).
+                  h-8 w-8 (not p-1.5) so the hover/focus box matches the Send
+                  button's 32×32 outer size — eyes read all four interactive
+                  targets in this row as one aligned strip. */}
               <button
                 onClick={handleFileSelect}
                 disabled={attachDisabled}
-                className="p-1.5 rounded-lg text-text-secondary dark:text-text-secondary-dark hover:bg-surface dark:hover:bg-bg-dark transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                className="h-8 w-8 flex items-center justify-center rounded-lg text-text-secondary dark:text-text-secondary-dark hover:bg-surface dark:hover:bg-bg-dark transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                 aria-label="Attach file"
                 title={atAttachmentCap ? `最多 ${MAX_CHAT_ATTACHMENTS} 个附件` : '添加附件（随消息发送，支持多选）'}
               >
@@ -264,13 +354,42 @@ export default function MessageInput() {
               {/* Artifact panel toggle */}
               <button
                 onClick={toggleArtifactPanel}
-                className="p-1.5 rounded-lg text-text-secondary dark:text-text-secondary-dark hover:bg-surface dark:hover:bg-bg-dark transition-colors"
+                className="h-8 w-8 flex items-center justify-center rounded-lg text-text-secondary dark:text-text-secondary-dark hover:bg-surface dark:hover:bg-bg-dark transition-colors"
                 aria-label="Toggle artifact panel"
                 title="切换文稿面板"
               >
                 <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
                   <rect x="1.5" y="2" width="13" height="12" rx="1.5" />
                   <path d="M9.5 2v12" />
+                </svg>
+              </button>
+
+              {/* Compact context — arms a one-shot compaction on the next send.
+                  Disabled while streaming (compaction rides a fresh turn, and the
+                  composer can't start one mid-stream). */}
+              <button
+                onClick={() => setForceCompact((v) => !v)}
+                disabled={isStreaming || !hasPersistedHistory}
+                className={`h-8 w-8 flex items-center justify-center rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+                  effectiveForceCompact
+                    ? 'bg-accent/15 text-accent'
+                    : 'text-text-secondary dark:text-text-secondary-dark hover:bg-surface dark:hover:bg-bg-dark'
+                }`}
+                aria-label="Compact context"
+                aria-pressed={effectiveForceCompact}
+                title={
+                  !hasPersistedHistory
+                    ? '当前会话无历史可压缩'
+                    : effectiveForceCompact
+                      ? '已开启压缩：本轮回答后把之前的对话压缩成摘要（点击取消）'
+                      : '压缩上下文：本轮回答后把之前的对话压缩成摘要'
+                }
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="4 14 10 14 10 20" />
+                  <polyline points="20 10 14 10 14 4" />
+                  <line x1="14" y1="10" x2="21" y2="3" />
+                  <line x1="3" y1="21" x2="10" y2="14" />
                 </svg>
               </button>
 
@@ -282,6 +401,71 @@ export default function MessageInput() {
               )}
             </div>
 
+            {/* Right group: context-usage gauge + unified Send/Stop/Inject button.
+                gap-3 (not gap-2) gives the gauge breathing room from the Enter
+                button so the eye reads it as info, not a button label. */}
+            <div className="flex items-center gap-3">
+            {compactionThreshold != null && contextTokens != null && contextTokens > 0 && (() => {
+              const pct = Math.min(100, Math.round((contextTokens / compactionThreshold) * 100));
+              const near = pct >= 85;
+              return (
+                <div
+                  className="hidden @sm:flex h-8 items-center gap-1.5 text-xs text-text-tertiary dark:text-text-tertiary-dark select-none"
+                  title={`下一轮将带入的上下文约 ${contextTokens.toLocaleString()} tokens / 自动压缩阈值 ${compactionThreshold.toLocaleString()}（达到阈值会自动压缩历史；若该轮以压缩结束，此值为压缩摘要大小的实测代理）`}
+                >
+                  {/* Ring geometry: 16x16 to match the attach/artifact/compact icon
+                      glyphs on the left. r=6.5, sw=1.75 keeps stroke inside the viewBox
+                      (6.5 + 1.75/2 = 7.375 < 8). -rotate-90 starts the arc at 12 o'clock;
+                      dashoffset = circumference * (1 - pct/100) draws it. */}
+                  <svg width="16" height="16" viewBox="0 0 16 16" className="-rotate-90 shrink-0">
+                    <circle
+                      cx="8"
+                      cy="8"
+                      r={6.5}
+                      fill="none"
+                      strokeWidth="1.75"
+                      stroke="currentColor"
+                      className="text-border dark:text-border-dark"
+                    />
+                    <circle
+                      cx="8"
+                      cy="8"
+                      r={6.5}
+                      fill="none"
+                      strokeWidth="1.75"
+                      strokeLinecap="round"
+                      stroke="currentColor"
+                      strokeDasharray={2 * Math.PI * 6.5}
+                      strokeDashoffset={2 * Math.PI * 6.5 * (1 - pct / 100)}
+                      className={near ? 'text-amber-500' : 'text-accent'}
+                    />
+                  </svg>
+                  {/* translate-y-[0.5px]: mono digits 的 cap-center 比 line-box
+                      center 略高，flex items-center 居中的是 line-box，所以肉眼
+                      看着偏上。亚像素下移补回视觉重心。 */}
+                  <span className="font-mono tabular-nums translate-y-[0.5px]">{formatTokens(contextTokens)}/{formatTokens(compactionThreshold)}</span>
+                </div>
+              );
+            })()}
+
+            {/* Lead agent model badge — same metric font / color as the gauge so
+                eye reads "info strip" not a separate widget. Sourced from /meta
+                (lead_agent's MD frontmatter). @lg threshold = 32rem (512px)
+                composer width: at that point left tools (~104px) + gauge (~80px)
+                + badge (~140px) + send (32px) + gaps + padding all comfortably
+                fit; below that the badge is the first to fold (gauge survives
+                down to @sm). truncate at max-w prevents a very long identifier
+                from pushing send off-screen even at @lg. Skipped entirely while
+                config is still loading (best-effort fail). */}
+            {leadAgentModel && (
+              <span
+                className="hidden @lg:inline-flex h-8 items-center font-mono text-xs text-text-tertiary dark:text-text-tertiary-dark select-none truncate max-w-[140px] translate-y-[0.5px]"
+                title={`Lead agent 当前模型：${leadAgentModel}`}
+              >
+                {leadAgentModel}
+              </span>
+            )}
+
             {/* Unified Send / Stop / Cancelling / Inject button */}
             {(() => {
               const isStop = isStreaming && !content.trim() && !cancelling;
@@ -290,7 +474,7 @@ export default function MessageInput() {
               // a silent no-op. Re-enables when agent_start clears queuedInfo.
               const queued = queuedInfo !== null;
               const sendDisabled =
-                (!isStreaming && !content.trim() && !hasStaged) || cancelling || sending || queued;
+                (!isStreaming && !content.trim() && !hasStaged && !effectiveForceCompact) || cancelling || sending || queued;
               return (
                 <button
                   onClick={handleSend}
@@ -330,6 +514,7 @@ export default function MessageInput() {
                 </button>
               );
             })()}
+            </div>
           </div>
         </div>
       </div>

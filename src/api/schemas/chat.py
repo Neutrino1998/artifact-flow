@@ -20,6 +20,15 @@ class ChatRequest(BaseModel):
     user_input: str = Field(..., max_length=config.MAX_MESSAGE_CHARS, description="User message content")
     conversation_id: Optional[str] = Field(None, description="Continue existing conversation")
     parent_message_id: Optional[str] = Field(None, description="Branch from specific message")
+    force_compact: bool = Field(
+        False,
+        description=(
+            "Force a one-shot context compaction on this turn (user pressed 'compact'). "
+            "The lead agent answers as usual, then compaction fires once regardless of the "
+            "token threshold, folding this turn into the summary. Like file attachments, it "
+            "relaxes the empty-input guard so a compact-only turn (no text) is allowed."
+        ),
+    )
 
 
 class InjectRequest(BaseModel):

@@ -155,6 +155,7 @@ async def _run_engine(
     store=None,
     permission_timeout=1,
     cancel_check_interval=None,
+    force_compact=False,
 ):
     """Helper to run engine with given LLM factory and return (state, emitted).
 
@@ -167,6 +168,7 @@ async def _run_engine(
         session_id="sess-1",
         message_id=message_id,
         path_events=path_events or [],
+        force_compact=force_compact,
     )
 
     if store is None:
@@ -1109,3 +1111,155 @@ class TestInEngineCompaction:
 
         event_types = [e.event_type for e in result["events"]]
         assert "compaction_summary" not in event_types
+
+    async def test_force_compact_fires_below_threshold(self):
+        """
+        force_compact=True bypasses the token threshold: compaction fires after
+        the first lead LLM call even when usage is far below the threshold.
+        Anti-regression for the manual-compaction trigger.
+        """
+        lead = _FakeAgentConfig(tools={})
+        compact = _FakeAgentConfig(name="compact_agent", role_prompt="Compactor.", tools={})
+
+        rounds = [
+            _simple_llm_chunks("Done", input_tokens=10, output_tokens=5),
+            [
+                {"type": "content", "content": "<summary>manually compacted</summary>"},
+                {"type": "usage", "token_usage": {
+                    "prompt_tokens": 50, "completion_tokens": 20, "total_tokens": 70,
+                }},
+                {"type": "final", "content": "<summary>manually compacted</summary>",
+                 "reasoning_content": None, "token_usage": {
+                    "prompt_tokens": 50, "completion_tokens": 20, "total_tokens": 70,
+                 }},
+            ],
+        ]
+
+        # Threshold deliberately way above usage — only the force flag can fire compaction.
+        with patch("core.compaction_runner.config.COMPACTION_TOKEN_THRESHOLD", 100_000):
+            result, _, _ = await _run_engine(
+                _make_fake_stream_sequence(rounds),
+                agents={"lead_agent": lead, "compact_agent": compact},
+                force_compact=True,
+            )
+
+        event_types = [e.event_type for e in result["events"]]
+        assert "compaction_start" in event_types
+        assert "compaction_summary" in event_types
+
+    async def test_force_compact_with_tool_calls_keeps_tail_fresh(self):
+        """
+        Partial-compaction intent (the engineering choice documented at the
+        engine.py maybe_trigger call site): when forced compaction fires after
+        a lead response that carries a tool call, the in-flight work (tool
+        result + the continuation LLM call) must land AFTER the
+        compaction_summary boundary, NOT be folded into it.
+
+        Reviewer asked for this case explicitly — it pins down that "保留 last
+        turn 在干什么" survives moving the manual compaction feature around.
+        """
+        echo_tool = _FakeTool("echo", ToolResult(success=True, data="echo result"))
+        lead = _FakeAgentConfig(tools={"echo": "auto"})
+        compact = _FakeAgentConfig(name="compact_agent", role_prompt="Compactor.", tools={})
+
+        rounds = [
+            # R1: lead calls a tool. Forced compaction fires after this call
+            # (using R1's input_tokens as the measurement); R1 itself is folded.
+            _tool_call_chunks(_tool_call_xml("echo", text="hi"), input_tokens=10, output_tokens=5),
+            # R2: compact_agent produces the summary.
+            [
+                {"type": "content", "content": "<summary>compacted prior + R1</summary>"},
+                {"type": "usage", "token_usage": {
+                    "prompt_tokens": 50, "completion_tokens": 20, "total_tokens": 70,
+                }},
+                {"type": "final", "content": "<summary>compacted prior + R1</summary>",
+                 "reasoning_content": None, "token_usage": {
+                    "prompt_tokens": 50, "completion_tokens": 20, "total_tokens": 70,
+                 }},
+            ],
+            # R3: lead's continuation after tool_result — must end up AFTER the summary.
+            _simple_llm_chunks("Final after tool", input_tokens=15, output_tokens=8),
+        ]
+
+        with patch("core.compaction_runner.config.COMPACTION_TOKEN_THRESHOLD", 100_000):
+            result, _, _ = await _run_engine(
+                _make_fake_stream_sequence(rounds),
+                agents={"lead_agent": lead, "compact_agent": compact},
+                tools={"echo": echo_tool},
+                force_compact=True,
+            )
+
+        event_types = [e.event_type for e in result["events"]]
+        summary_idx = event_types.index("compaction_summary")
+
+        # Tail AFTER the summary boundary must contain the tool execution + the
+        # final lead response — proving that the in-flight tool work is NOT
+        # folded into the summary (the whole point of the partial-compaction
+        # design). The order matters: it must be summary FIRST, then tail.
+        tail_types = event_types[summary_idx + 1:]
+        assert "tool_complete" in tail_types, (
+            f"tool_complete should land after compaction_summary boundary; "
+            f"got tail={tail_types}"
+        )
+        assert "llm_complete" in tail_types, (
+            f"continuation llm_complete should land after compaction_summary boundary; "
+            f"got tail={tail_types}"
+        )
+        # And the final response should be the post-summary one, not the folded R1.
+        assert result["response"] == "Final after tool"
+
+    async def test_force_compact_final_response_writes_summary_size_to_last_input(self):
+        """
+        P2 fix: when compaction fires on the final (no-tool-call) lead response,
+        loop ends right after — there's no subsequent real LLM call to overwrite
+        `last_input_tokens` via engine.py:425. The unconditional write inside
+        compaction_runner therefore sticks, so the persisted value equals the
+        compact call's output_tokens (= summary size, a real measured number).
+
+        This is the only window where the composer's context-usage gauge would
+        otherwise show the stale pre-compaction input ("near threshold right
+        after the user explicitly compacted"). Verifying the value here pins
+        down both the fix and the asymmetry — the write is harmless in any
+        other case because a real later call overwrites it.
+        """
+        lead = _FakeAgentConfig(tools={})
+        compact = _FakeAgentConfig(name="compact_agent", role_prompt="Compactor.", tools={})
+
+        rounds = [
+            # R1: final answer (no tool call). Forced compaction fires after this;
+            # since R1 had no tool calls the loop ends with no later LLM call.
+            _simple_llm_chunks("Final", input_tokens=12345, output_tokens=42),
+            # R2: compact_agent — its completion_tokens=99 is the summary size
+            # that should land in last_input_tokens.
+            [
+                {"type": "content", "content": "<summary>compacted</summary>"},
+                {"type": "usage", "token_usage": {
+                    "prompt_tokens": 500, "completion_tokens": 99, "total_tokens": 599,
+                }},
+                {"type": "final", "content": "<summary>compacted</summary>",
+                 "reasoning_content": None, "token_usage": {
+                    "prompt_tokens": 500, "completion_tokens": 99, "total_tokens": 599,
+                 }},
+            ],
+        ]
+
+        with patch("core.compaction_runner.config.COMPACTION_TOKEN_THRESHOLD", 100_000):
+            result, _, _ = await _run_engine(
+                _make_fake_stream_sequence(rounds),
+                agents={"lead_agent": lead, "compact_agent": compact},
+                force_compact=True,
+            )
+
+        # Pre-condition: compaction actually ran.
+        event_types = [e.event_type for e in result["events"]]
+        assert "compaction_summary" in event_types
+
+        # P2 invariant: last_input_tokens reflects the post-compaction context
+        # estimate (= compact call's output_tokens), NOT the pre-compaction R1
+        # input (12345) that engine.py:425 wrote first.
+        assert result["execution_metrics"]["last_input_tokens"] == 99, (
+            f"expected last_input_tokens to be the summary size (99); "
+            f"got {result['execution_metrics']['last_input_tokens']} — "
+            "if this is 12345, the post-compaction write in compaction_runner is gone "
+            "and the gauge will show stale pre-compaction tokens."
+        )

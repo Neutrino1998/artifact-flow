@@ -235,6 +235,70 @@ class TestMissingCompactAgent:
         assert StreamEventType.COMPACTION_SUMMARY.value not in types
 
 
+class TestLeadOnlyMetricWrite:
+    """
+    The post-compaction write to execution_metrics.last_input_tokens (P2 fix)
+    must respect the lead-only convention established by engine.py:425 and
+    documented at docs/architecture/engine.md. Subagent compaction must NOT
+    touch this lead-scoped field — otherwise, if a subagent compaction is
+    followed by error/cancel/timeout before the next lead call overwrites,
+    the persisted value carries the subagent summary's tiny token count and
+    the composer's context gauge wildly under-reports lead context.
+    """
+
+    async def test_subagent_compaction_does_not_write_last_input_tokens(self):
+        agents = {"compact_agent": _FakeAgent()}
+        runner = CompactionRunner(agents, emit=None)
+
+        # Pre-existing lead value must survive the subagent compaction below.
+        state = {
+            "events": [
+                _ev(StreamEventType.SUBAGENT_INSTRUCTION.value, "search_agent", {"instruction": "find X"}),
+                _ev(StreamEventType.LLM_COMPLETE.value, "search_agent", {
+                    "content": "searching",
+                    "token_usage": {"input_tokens": 100, "output_tokens": 20},
+                }),
+            ],
+            "execution_metrics": {"last_input_tokens": 50000},
+        }
+
+        with patch("models.llm.astream_with_retry", _fake_stream_ok), \
+             patch("core.compaction_runner.config.COMPACTION_TOKEN_THRESHOLD", 100):
+            await runner.maybe_trigger(state, "search_agent", input_tokens=80, output_tokens=30)
+
+        # Compaction itself still runs — we only block the metric pollution.
+        types = [e.event_type for e in state["events"]]
+        assert StreamEventType.COMPACTION_SUMMARY.value in types
+        assert state["events"][-1].agent_name == "search_agent"
+
+        # Lead-scoped metric must be untouched: NOT _fake_stream_ok's
+        # completion_tokens (100), which the unguarded write would have used.
+        assert state["execution_metrics"]["last_input_tokens"] == 50000
+
+    async def test_lead_compaction_writes_summary_size_to_last_input_tokens(self):
+        """Positive case: lead compaction *does* write the summary-size proxy."""
+        agents = {"compact_agent": _FakeAgent()}
+        runner = CompactionRunner(agents, emit=None)
+        state = {
+            "events": [
+                _ev(StreamEventType.USER_INPUT.value, data={"content": "hi"}),
+                _ev(StreamEventType.LLM_COMPLETE.value, data={
+                    "content": "reply",
+                    "token_usage": {"input_tokens": 100, "output_tokens": 20},
+                }),
+            ],
+            "execution_metrics": {"last_input_tokens": 50000},
+        }
+
+        with patch("models.llm.astream_with_retry", _fake_stream_ok), \
+             patch("core.compaction_runner.config.COMPACTION_TOKEN_THRESHOLD", 100):
+            await runner.maybe_trigger(state, "lead_agent", input_tokens=80, output_tokens=30)
+
+        # _fake_stream_ok returns completion_tokens=100 → that's the summary-
+        # size proxy written by the lead-only branch.
+        assert state["execution_metrics"]["last_input_tokens"] == 100
+
+
 class TestSSEEmission:
 
     async def test_both_start_and_summary_sent_to_sse(self):

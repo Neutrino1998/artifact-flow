@@ -37,7 +37,7 @@ export function useChat() {
   const lastMessageId = branchPath.length > 0 ? branchPath[branchPath.length - 1].id : null;
 
   const sendMessage = useCallback(
-    async (content: string, parentMessageId?: string | null, files?: File[]): Promise<boolean> => {
+    async (content: string, parentMessageId?: string | null, files?: File[], forceCompact?: boolean): Promise<boolean> => {
       // Capture nav-gen BEFORE the await. If the user clicks New Chat or
       // switches to another conversation while api.sendMessage() is in
       // flight, the engine still runs server-side (runner.submit is
@@ -57,6 +57,9 @@ export function useChat() {
           user_input: content,
           conversation_id: current?.id ?? undefined,
         };
+        // User pressed "compact": force a one-shot compaction this turn. Lets a
+        // compact-only send (empty text) through too — backend injects a directive.
+        if (forceCompact) body.force_compact = true;
 
         if (parentMessageId === undefined) {
           // Default: use last message in current branch

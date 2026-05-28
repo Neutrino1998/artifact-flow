@@ -34,6 +34,7 @@ import type {
   ResolveDepartmentRequest,
   ResolveDepartmentResponse,
   UploadResponse,
+  ClientConfigResponse,
 } from '@/types';
 import { useAuthStore } from '@/stores/authStore';
 import { API_URL } from './apiBase';
@@ -143,6 +144,12 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
     return undefined as T;
   }
   return res.json();
+}
+
+// Meta — backend-owned runtime constants (single source of truth). Static for
+// the session; the configStore fetches this once and caches it.
+export function getClientConfig(): Promise<ClientConfigResponse> {
+  return request<ClientConfigResponse>('/api/v1/meta');
 }
 
 // Auth

@@ -12,5 +12,7 @@
  */
 
 // intranet 品牌覆盖（main 上是 ArtifactFlow / 多智能体任务工作台）
+// tagline 不再绑定具体模型名 —— composer 右侧 badge 已经实时显示当前 lead
+// agent 模型（/meta.lead_agent_model），tagline 改回中性身份描述。
 export const APP_NAME = '银清Claw测试版';
-export const APP_TAGLINE = 'powered by deepseek-v4-flash';
+export const APP_TAGLINE = '银清小助手智能工作台';

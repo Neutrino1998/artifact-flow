@@ -62,8 +62,15 @@ class CompactionRunner:
 
         超阈值则生成 compaction_summary 并**追加到 state["events"] 尾部**。
         非超阈值 / 无 compact_agent 时静默跳过。
+
+        state["force_compact"]（用户手动触发）为真且 agent 为 lead 时无视阈值强制压缩一次：
+        在此立即消费标志（置 False），故一轮内只压一次、后续 LLM call 不会重复触发。
         """
-        if input_tokens + output_tokens <= config.COMPACTION_TOKEN_THRESHOLD:
+        forced = bool(state.get("force_compact")) and agent_name == "lead_agent"
+        if forced:
+            state["force_compact"] = False
+
+        if not forced and input_tokens + output_tokens <= config.COMPACTION_TOKEN_THRESHOLD:
             return
 
         compact_agent = self._agents.get("compact_agent")
@@ -75,6 +82,7 @@ class CompactionRunner:
         # "工具完成/状态转移"分级原则;尺寸字段而非大体积内容,可常驻 INFO)。
         logger.info(
             f"[compaction] triggered for {agent_name}: "
+            f"trigger={'forced' if forced else 'threshold'}, "
             f"threshold={config.COMPACTION_TOKEN_THRESHOLD}, "
             f"last_call input={input_tokens} output={output_tokens} "
             f"(sum={input_tokens + output_tokens}), "
@@ -83,9 +91,11 @@ class CompactionRunner:
 
         # compaction_start 同时入 state["events"]（持久化）+ SSE，便于中途重连的 replay
         # 看到"压缩进行中"指示器，而不是看完最后一个 llm_complete 就等到 summary。
+        # forced 标记手动触发，供前端/replay 区分「用户压缩」与「超阈值自动压缩」。
         start_data = {
             "last_input_tokens": input_tokens,
             "last_output_tokens": output_tokens,
+            "forced": forced,
         }
         start_event = ExecutionEvent(
             event_type=StreamEventType.COMPACTION_START.value,
@@ -155,6 +165,22 @@ class CompactionRunner:
             is_historical=False,
         )
         state["events"].append(summary_event)
+
+        # 下一轮 gauge 准确性：把 compaction call 的 output_tokens（= summary 大小，
+        # 亦即折叠后下一次 call 实际载入的「历史」内容大小）回写为 last_input_tokens,
+        # 作为「下一次 lead call 输入大小」的实测代理（纯依赖 usage,不调 tokenizer,
+        # 对齐与 maybe_trigger 同源的可移植性约束）。
+        # 这条写入只在「compaction 触发在 final response 之后、loop 即将结束」这一窗口
+        # 实际生效 —— 其他情况后续 lead call 会以真实 input_tokens 覆盖（engine.py:425）,
+        # 本写入被自然丢弃；故无需特判「是不是终态前一次」。
+        # 仅对 lead 写入：last_input_tokens 是 lead-only 字段（约束见 engine.py:425 +
+        # docs/architecture/engine.md），subagent compaction 不能污染此字段 —— 否则若
+        # subagent 压缩后、下次 lead call 覆盖前发生 cancel/timeout/error,持久化会留下
+        # subagent summary 的 token 数,导致 composer gauge 显著低估 lead 上下文。
+        if agent_name == "lead_agent":
+            metrics = state.get("execution_metrics")
+            if metrics is not None:
+                metrics["last_input_tokens"] = usage.get("output_tokens", 0)
 
         await self._emit_sse(
             StreamEventType.COMPACTION_SUMMARY.value,
