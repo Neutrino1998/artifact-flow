@@ -78,12 +78,23 @@ export default function MessageInput() {
   // Compact is meaningless with no history to summarize — and worse, the
   // injected directive ("history will be compacted right after your response")
   // tends to hallucinate on a blank first turn (model invents prior context to
-  // describe). Ban the toggle until there's at least one persisted turn, and
-  // auto-disarm any leftover armed state on conv switch / new chat.
-  const hasHistory = branchPath.length > 0;
+  // describe).
+  //
+  // branchPath is derived from persisted `current`, so length>0 ⇔ "at least
+  // one turn already landed in DB" — covers both the blank-new-chat state and
+  // the first-turn-in-flight state (where `current` is still null pre-refresh).
+  //
+  // Correctness goes through the derived `effectiveForceCompact`, never raw
+  // `forceCompact` — because the useEffect cleanup below is async (one render
+  // late), keyboard Enter would otherwise punch through the button-disabled
+  // guard in the one-frame window where `forceCompact=true && !hasPersisted`.
+  // The effect stays as UX cleanup (chip animates away on conv switch) but
+  // can't be relied on for behavior.
+  const hasPersistedHistory = branchPath.length > 0;
+  const effectiveForceCompact = forceCompact && hasPersistedHistory;
   useEffect(() => {
-    if (!hasHistory && forceCompact) setForceCompact(false);
-  }, [hasHistory, forceCompact]);
+    if (!hasPersistedHistory && forceCompact) setForceCompact(false);
+  }, [hasPersistedHistory, forceCompact]);
 
   const handleSend = useCallback(async () => {
     if (isStreaming && !content.trim()) {
@@ -114,15 +125,17 @@ export default function MessageInput() {
     }
 
     // New-message send: text and/or staged attachments ride one POST. When the
-    // compact toggle is armed, force_compact rides along (and allowEmpty lets a
-    // compact-only send through); clear the toggle only on a successful send.
-    const compact = forceCompact;
+    // compact toggle is armed AND there's history to compact, force_compact
+    // rides along (and allowEmpty lets a compact-only send through). Clear the
+    // raw `forceCompact` on any successful armed send, even if it didn't take
+    // effect this turn (state hygiene — don't leave stale armed state behind).
+    const compact = effectiveForceCompact;
     await submit(async (text, files) => {
       const ok = await sendMessage(text, undefined, files, compact);
-      if (ok && compact) setForceCompact(false);
+      if (ok && forceCompact) setForceCompact(false);
       return ok;
     }, compact);
-  }, [content, isStreaming, cancelling, setCancelling, conversationId, streamConversationId, inject, submit, sendMessage, forceCompact]);
+  }, [content, isStreaming, cancelling, setCancelling, conversationId, streamConversationId, inject, submit, sendMessage, forceCompact, effectiveForceCompact]);
 
   const handleCompositionStart = useCallback(() => {
     isComposingRef.current = true;
@@ -259,8 +272,10 @@ export default function MessageInput() {
             </div>
           )}
 
-          {/* Compact-armed chip — visible cue that the next send will compact. */}
-          {forceCompact && (
+          {/* Compact-armed chip — visible cue that the next send will compact.
+              Gated on effectiveForceCompact (not raw forceCompact) so the chip
+              never lies about what the send path will actually do. */}
+          {effectiveForceCompact && (
             <div className="flex flex-wrap gap-1.5 mb-2">
               <span className="inline-flex items-center gap-1 pl-2 pr-1 py-1 rounded-lg bg-accent/10 border border-accent/40 text-xs text-accent">
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
@@ -346,18 +361,18 @@ export default function MessageInput() {
                   composer can't start one mid-stream). */}
               <button
                 onClick={() => setForceCompact((v) => !v)}
-                disabled={isStreaming || !hasHistory}
+                disabled={isStreaming || !hasPersistedHistory}
                 className={`h-8 w-8 flex items-center justify-center rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
-                  forceCompact
+                  effectiveForceCompact
                     ? 'bg-accent/15 text-accent'
                     : 'text-text-secondary dark:text-text-secondary-dark hover:bg-surface dark:hover:bg-bg-dark'
                 }`}
                 aria-label="Compact context"
-                aria-pressed={forceCompact}
+                aria-pressed={effectiveForceCompact}
                 title={
-                  !hasHistory
+                  !hasPersistedHistory
                     ? '当前会话无历史可压缩'
-                    : forceCompact
+                    : effectiveForceCompact
                       ? '已开启压缩：本轮回答后把之前的对话压缩成摘要（点击取消）'
                       : '压缩上下文：本轮回答后把之前的对话压缩成摘要'
                 }
@@ -433,7 +448,7 @@ export default function MessageInput() {
               // a silent no-op. Re-enables when agent_start clears queuedInfo.
               const queued = queuedInfo !== null;
               const sendDisabled =
-                (!isStreaming && !content.trim() && !hasStaged && !forceCompact) || cancelling || sending || queued;
+                (!isStreaming && !content.trim() && !hasStaged && !effectiveForceCompact) || cancelling || sending || queued;
               return (
                 <button
                   onClick={handleSend}
