@@ -1,7 +1,6 @@
-# 默认参数（所有模型共享，模型级 params 覆盖）
-defaults:
-  temperature: 0.7
-  max_tokens: 4096
+# 采样参数策略:不在这一层设全局默认。每个模型如需特定 temperature/top_p/...
+# 在该模型 params 里显式声明;未声明的参数交给 provider/模型默认决定(OpenAI/DeepSeek
+# 默认 1.0、vLLM 用 max_model_len 兜 max_tokens 等)。详见 src/models/llm.py 注释。
 
 # 模型配置
 models:

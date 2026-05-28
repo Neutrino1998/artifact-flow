@@ -56,15 +56,22 @@ def _resolve_model_params(
     api_key: Optional[str] = None,
 ) -> dict:
     """
-    解析模型参数，合并 defaults → model-level params → 构建 litellm 调用参数
+    解析模型参数,合并 defaults → model-level params → 构建 litellm 调用参数
+
+    采样参数(temperature/max_tokens/top_p/...) 仅当 yaml 显式配置时才传给 litellm;
+    没配置就不传 → provider/模型用各自合理默认(OpenAI 1.0、DeepSeek 1.0、vLLM 用
+    max_model_len 作为 max_tokens 上界等)。这一层不再强加"温和默认值",避免
+    defaults.max_tokens=4096 这类 cap 偷偷咬掉 reasoning 模型的输出(2026-05-28
+    在 intranet 部署上发现 deepseek-v4-flash thinking 输出被精确切在 4096)。
+    上层有 EXECUTION_TIMEOUT + compaction 兜底,不需要这一层再加一道。
 
     Args:
-        model: 模型别名（如 "qwen3.5-plus"）或 litellm 格式（如 "deepseek/deepseek-chat"）
+        model: 模型别名(如 "qwen3.5-plus")或 litellm 格式(如 "deepseek/deepseek-chat")
         base_url: 自部署 OpenAI 兼容接口地址
         api_key: API 密钥
 
     Returns:
-        litellm.acompletion() 所需的完整参数字典（不含 messages）
+        litellm.acompletion() 所需的完整参数字典(不含 messages)
     """
     config = _load_config()
     defaults = config.get("defaults", {})
@@ -74,26 +81,23 @@ def _resolve_model_params(
         model_config = models[model]
         model_id = model_config["model"]
         model_params = model_config.get("params", {})
-        # YAML 级 base_url/api_key（函数参数优先）
+        # YAML 级 base_url/api_key(函数参数优先)
         base_url = base_url or model_config.get("base_url")
         api_key = api_key or model_config.get("api_key")
     else:
         model_id = model
         model_params = {}
 
-    # 合并: defaults → model params
-    params = {
+    params: dict = {
         "model": model_id,
-        "temperature": model_params.get("temperature", defaults.get("temperature", 0.7)),
-        "max_tokens": model_params.get("max_tokens", defaults.get("max_tokens", 4096)),
         "stream": True,
         "stream_options": {"include_usage": True},
     }
 
-    # 合并 model-level extra params（除 temperature/max_tokens 外）
-    for key, value in model_params.items():
-        if key not in ("temperature", "max_tokens"):
-            params[key] = value
+    # defaults → model_params(model 级覆盖 defaults 级);
+    # 两边都没写的 key 就完全不传,交给 provider/模型默认。
+    for key, value in {**defaults, **model_params}.items():
+        params[key] = value
 
     # 自定义 base_url（Ollama/vLLM 等）
     if base_url:
