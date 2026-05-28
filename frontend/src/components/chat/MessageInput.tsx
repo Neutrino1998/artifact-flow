@@ -55,10 +55,15 @@ export default function MessageInput() {
   const conversationId = useConversationStore((s) => s.current?.id);
   const streamConversationId = useStreamStore((s) => s.conversationId);
 
-  // Context-usage gauge: last turn's last-LLM-call input tokens (= context size
-  // carried into the next message) vs the backend auto-compaction threshold.
-  // Non-live: sourced from the persisted branch tail, so it reflects what the
-  // next send will carry and updates after each completed turn / on load.
+  // Context-usage gauge: how much context the next message will carry, vs the
+  // backend auto-compaction threshold. Sourced from the persisted branch tail's
+  // `execution_metrics.last_input_tokens` — normally the last lead LLM call's
+  // input, but if the turn ended on a compaction (compaction triggered on the
+  // final response, no further lead call), the backend overrides this field
+  // with the compaction summary's `output_tokens` as a measured proxy, so the
+  // gauge correctly drops post-compaction. lead-only by convention; subagent
+  // compaction does not pollute this field. See docs/architecture/engine.md.
+  // Non-live: updates after each completed turn / on conversation load.
   const branchPath = useConversationStore((s) => s.branchPath);
   const compactionThreshold = useConfigStore((s) => s.compactionThreshold);
   const fetchConfig = useConfigStore((s) => s.fetchConfig);
@@ -366,7 +371,7 @@ export default function MessageInput() {
               return (
                 <div
                   className="hidden sm:flex items-center gap-1.5 text-xs text-text-tertiary dark:text-text-tertiary-dark select-none"
-                  title={`上下文用量：上一轮末次模型调用输入约 ${contextTokens.toLocaleString()} tokens / 自动压缩阈值 ${compactionThreshold.toLocaleString()}（达到阈值会自动压缩历史）`}
+                  title={`下一轮将带入的上下文约 ${contextTokens.toLocaleString()} tokens / 自动压缩阈值 ${compactionThreshold.toLocaleString()}（达到阈值会自动压缩历史；若该轮以压缩结束，此值为压缩摘要大小的实测代理）`}
                 >
                   <div className="w-12 h-1 rounded-full bg-border dark:bg-border-dark overflow-hidden">
                     <div className={`h-full rounded-full ${near ? 'bg-amber-500' : 'bg-accent'}`} style={{ width: `${pct}%` }} />

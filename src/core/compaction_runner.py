@@ -170,12 +170,17 @@ class CompactionRunner:
         # 亦即折叠后下一次 call 实际载入的「历史」内容大小）回写为 last_input_tokens,
         # 作为「下一次 lead call 输入大小」的实测代理（纯依赖 usage,不调 tokenizer,
         # 对齐与 maybe_trigger 同源的可移植性约束）。
-        # 这条无条件写入只在「compaction 触发在 final response 之后、loop 即将结束」
-        # 这一窗口实际生效 —— 其他情况后续 lead call 会以真实 input_tokens 覆盖
-        # （engine.py:425）,本写入被自然丢弃；故无需特判「是不是终态前一次」。
-        metrics = state.get("execution_metrics")
-        if metrics is not None:
-            metrics["last_input_tokens"] = usage.get("output_tokens", 0)
+        # 这条写入只在「compaction 触发在 final response 之后、loop 即将结束」这一窗口
+        # 实际生效 —— 其他情况后续 lead call 会以真实 input_tokens 覆盖（engine.py:425）,
+        # 本写入被自然丢弃；故无需特判「是不是终态前一次」。
+        # 仅对 lead 写入：last_input_tokens 是 lead-only 字段（约束见 engine.py:425 +
+        # docs/architecture/engine.md），subagent compaction 不能污染此字段 —— 否则若
+        # subagent 压缩后、下次 lead call 覆盖前发生 cancel/timeout/error,持久化会留下
+        # subagent summary 的 token 数,导致 composer gauge 显著低估 lead 上下文。
+        if agent_name == "lead_agent":
+            metrics = state.get("execution_metrics")
+            if metrics is not None:
+                metrics["last_input_tokens"] = usage.get("output_tokens", 0)
 
         await self._emit_sse(
             StreamEventType.COMPACTION_SUMMARY.value,

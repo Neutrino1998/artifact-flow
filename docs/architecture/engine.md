@@ -258,7 +258,7 @@ class EngineHooks:
 | `last_output_tokens` | 最后一次 LLM 调用的 output token 数 |
 | `total_token_usage` | 累计 token（input + output + total） |
 
-注意：`first_input_tokens` 和 `last_input_tokens` 仅对 lead_agent 追踪，作为上下文预算评估的观测指标。**Compaction 触发依据不是这些 metric** — `CompactionRunner` 在每次 LLM 调用后直接拿该次调用的 `input_tokens + output_tokens` 比对阈值，不读 metrics。
+注意：`first_input_tokens` 和 `last_input_tokens` 仅对 lead_agent 追踪，作为上下文预算评估的观测指标。**Compaction 触发依据不是这些 metric** — `CompactionRunner` 在每次 LLM 调用后直接拿该次调用的 `input_tokens + output_tokens` 比对阈值，不读 metrics。**特例**：若 lead 一次 compaction 触发在 final response 之后（loop 即将结束、后续无 lead call 覆盖），`CompactionRunner` 会把该次 compact_agent 调用的 `output_tokens`（= summary 大小）回写到 `last_input_tokens`，作为下一轮带入上下文的实测代理（供前端 composer 的 context 用量 gauge 显示压缩后的下降）。仍是 lead-only：subagent compaction 不写此字段，避免在 cancel/timeout 窗口把 subagent summary 的 token 数泄漏成 lead 上下文估算。
 
 ### 事件收集
 
