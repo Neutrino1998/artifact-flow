@@ -9,6 +9,7 @@ import { useUIStore } from '@/stores/uiStore';
 import { useSSE } from '@/hooks/useSSE';
 import type { ChatRequest } from '@/types';
 import * as api from '@/lib/api';
+import type { UploadEvent } from '@/lib/api';
 import { getNavGen, bumpNavGen } from '@/lib/navGen';
 import { bumpArtifactFetchGen } from '@/lib/artifactFetchGen';
 import { bumpArtifactDetailGen } from '@/lib/artifactDetailGen';
@@ -37,7 +38,16 @@ export function useChat() {
   const lastMessageId = branchPath.length > 0 ? branchPath[branchPath.length - 1].id : null;
 
   const sendMessage = useCallback(
-    async (content: string, parentMessageId?: string | null, files?: File[], forceCompact?: boolean): Promise<boolean> => {
+    async (
+      content: string,
+      parentMessageId?: string | null,
+      files?: File[],
+      forceCompact?: boolean,
+      // Forwarded to api.sendMessage's XHR-based upload-progress callback.
+      // Only meaningful when files.length > 0 — for a text-only send the
+      // request body is tiny and the events fire once and finish instantly.
+      onUpload?: (ev: UploadEvent) => void,
+    ): Promise<boolean> => {
       // Capture nav-gen BEFORE the await. If the user clicks New Chat or
       // switches to another conversation while api.sendMessage() is in
       // flight, the engine still runs server-side (runner.submit is
@@ -70,7 +80,7 @@ export function useChat() {
         }
 
         const isNew = !current?.id;
-        const res = await api.sendMessage(body, files);
+        const res = await api.sendMessage(body, files, onUpload);
 
         // Sidebar refresh fires BEFORE the nav-gen check on purpose.
         // The server has created the conversation regardless of whether

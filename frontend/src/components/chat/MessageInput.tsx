@@ -9,14 +9,30 @@ import { useConversationStore } from '@/stores/conversationStore';
 import { useConfigStore } from '@/stores/configStore';
 import { useStagedFilesStore } from '@/stores/stagedFilesStore';
 import { injectMessage, cancelExecution } from '@/lib/api';
+import type { UploadEvent } from '@/lib/api';
 import { formatTokens } from '@/lib/formatTokens';
+import { formatBytes } from '@/lib/formatBytes';
 import { MAX_MESSAGE_CHARS, MAX_CHAT_ATTACHMENTS } from '@/lib/constants';
+
+// Composer upload-progress state. `uploading` carries live byte counts from
+// xhr.upload.onprogress; `processing` is the gap between "last byte sent"
+// (xhr.upload.onload) and the server's ChatResponse — the bar sits at 100%
+// in that window and switches its label so the user knows we're not stuck.
+// Only allocated when the send carried files; cleared in finally so a
+// success/failure/throw all converge to the same idle state.
+type UploadProgress =
+  | { phase: 'uploading'; loaded: number; total: number; lengthComputable: boolean }
+  | { phase: 'processing' };
 
 export default function MessageInput() {
   const [content, setContent] = useState('');
   // Armed by the "compact" toggle; rides the next send as force_compact and is
   // cleared on a successful send. A compact-only send (no text) is allowed.
   const [forceCompact, setForceCompact] = useState(false);
+  // null when idle; only set when a send carried files (text-only sends finish
+  // too fast for a progress bar to be useful). Lifecycle is owned by handleSend
+  // — it sets this in the onUpload callback and clears it in the finally branch.
+  const [uploadProgress, setUploadProgress] = useState<UploadProgress | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const isComposingRef = useRef(false);
@@ -132,9 +148,33 @@ export default function MessageInput() {
     // effect this turn (state hygiene — don't leave stale armed state behind).
     const compact = effectiveForceCompact;
     await submit(async (text, files) => {
-      const ok = await sendMessage(text, undefined, files, compact);
-      if (ok && forceCompact) setForceCompact(false);
-      return ok;
+      // Only show progress for sends that actually carry files — a text-only
+      // POST's body is small enough that the bar would flash and vanish.
+      const onUpload = files && files.length > 0
+        ? (ev: UploadEvent) => {
+            if (ev.type === 'progress') {
+              setUploadProgress({
+                phase: 'uploading',
+                loaded: ev.loaded,
+                total: ev.total,
+                lengthComputable: ev.lengthComputable,
+              });
+            } else {
+              setUploadProgress({ phase: 'processing' });
+            }
+          }
+        : undefined;
+      try {
+        const ok = await sendMessage(text, undefined, files, compact, onUpload);
+        if (ok && forceCompact) setForceCompact(false);
+        return ok;
+      } finally {
+        // Single convergence point: success / failure / throw all clear the
+        // bar. The error itself is already surfaced via streamStore.setError
+        // by useChat.sendMessage; composer state (text + chips) is preserved
+        // by useComposerSend's reconcile-on-success rule.
+        setUploadProgress(null);
+      }
     }, compact);
   }, [content, isStreaming, cancelling, setCancelling, conversationId, streamConversationId, inject, submit, sendMessage, forceCompact, effectiveForceCompact]);
 
@@ -300,6 +340,44 @@ export default function MessageInput() {
                     <path d="M18 6L6 18M6 6l12 12" />
                   </svg>
                 </button>
+              </span>
+            </div>
+          )}
+
+          {/* Upload progress — visible only while the attached-files POST is
+              in flight. Aggregate (single multipart body, all files together);
+              per-file granularity would require N parallel POSTs and break the
+              "attachments ride one turn" invariant. Two phases:
+                • uploading: bar tracks loaded/total from xhr.upload.onprogress
+                • processing: bar pinned at 100% with a different label while
+                              the server reads the body + creates user_upload
+                              artifacts + enqueues the turn (the gap between
+                              last byte sent and ChatResponse received). */}
+          {uploadProgress && (
+            <div
+              className="mb-2 flex items-center gap-2 text-xs text-text-tertiary dark:text-text-tertiary-dark"
+              role="status"
+              aria-live="polite"
+            >
+              <div className="flex-1 h-1 rounded-full bg-bg dark:bg-bg-dark overflow-hidden">
+                <div
+                  className="h-full bg-accent transition-[width] duration-200 ease-out"
+                  style={{
+                    width:
+                      uploadProgress.phase === 'processing'
+                        ? '100%'
+                        : uploadProgress.lengthComputable && uploadProgress.total > 0
+                          ? `${Math.min(100, Math.round((uploadProgress.loaded / uploadProgress.total) * 100))}%`
+                          : '15%', // indeterminate fallback — show *something*
+                  }}
+                />
+              </div>
+              <span className="font-mono tabular-nums shrink-0 whitespace-nowrap">
+                {uploadProgress.phase === 'processing'
+                  ? '服务器处理中…'
+                  : uploadProgress.lengthComputable && uploadProgress.total > 0
+                    ? `上传中 ${Math.min(100, Math.round((uploadProgress.loaded / uploadProgress.total) * 100))}% · ${formatBytes(uploadProgress.loaded)} / ${formatBytes(uploadProgress.total)}`
+                    : `上传中 · ${formatBytes(uploadProgress.loaded)}`}
               </span>
             </div>
           )}
