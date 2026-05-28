@@ -11,11 +11,24 @@ interface UserMessageProps {
   content: string;
   messageId: string;
   parentId: string | null;
-  siblingIndex: number;
-  siblingCount: number;
+  /**
+   * Sibling info comes from branchPath, only available after the turn is
+   * persisted + conversation refreshed. Optional with safe defaults so the
+   * same component can render the live (pre-refresh) bubble during streaming.
+   */
+  siblingIndex?: number;
+  siblingCount?: number;
+  /**
+   * Live (in-flight) render: no persistent message_id yet, no sibling info,
+   * editing/rerun/branching all forbidden by definition (turn already running).
+   * Suppresses the entire hover-actions overlay so live and persisted bubbles
+   * share one layout source — preventing the live/final drift that comes from
+   * maintaining two parallel JSX trees.
+   */
+  pending?: boolean;
 }
 
-function UserMessage({ content, messageId, parentId, siblingIndex, siblingCount }: UserMessageProps) {
+function UserMessage({ content, messageId, parentId, siblingIndex = 0, siblingCount = 1, pending = false }: UserMessageProps) {
   const { copied, copy } = useCopyFeedback();
   const [editing, setEditing] = useState(false);
   const [editContent, setEditContent] = useState(content);
@@ -115,7 +128,9 @@ function UserMessage({ content, messageId, parentId, siblingIndex, siblingCount 
         <div className="bg-panel-accent dark:bg-surface-dark rounded-bubble px-4 py-3 text-text-primary dark:text-text-primary-dark whitespace-pre-wrap break-words">
           {content}
         </div>
-        {/* Action buttons and branch navigator on hover */}
+        {/* Action buttons and branch navigator on hover. Skipped entirely when
+            pending — turn is in flight, none of these actions are valid yet. */}
+        {!pending && (
         <div className="absolute -bottom-7 right-2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
           <button
             onClick={handleEdit}
@@ -159,6 +174,7 @@ function UserMessage({ content, messageId, parentId, siblingIndex, siblingCount 
             </>
           )}
         </div>
+        )}
       </div>
     </div>
   );

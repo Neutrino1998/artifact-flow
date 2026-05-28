@@ -59,13 +59,20 @@ export default function MessageList() {
             </div>
           ))}
 
-        {/* Show pending user message during streaming (before conversation refresh) */}
-        {isStreamingHere && pendingUserMessage && (
-          <div className="flex justify-end">
-            <div className="max-w-[80%] bg-panel-accent dark:bg-surface-dark rounded-bubble px-4 py-3 text-text-primary dark:text-text-primary-dark whitespace-pre-wrap break-words">
-              {pendingUserMessage}
-            </div>
-          </div>
+        {/* Live (pre-refresh) user bubble — same UserMessage component as the
+            persisted path, just with pending=true to skip the edit/rerun/branch
+            actions overlay. Single layout source means live and final can't
+            drift. `!== null` (not truthy) so empty content still renders a
+            bubble for compact-only / upload-only sends, matching the persisted
+            view's behavior. endStream() flips isStreaming false before
+            refreshAfterComplete fills branchPath, so the two never overlap. */}
+        {isStreamingHere && pendingUserMessage !== null && (
+          <UserMessage
+            content={pendingUserMessage}
+            messageId=""
+            parentId={streamParentId ?? null}
+            pending
+          />
         )}
 
         {/* Streaming message — also renders the queued-state header while waiting

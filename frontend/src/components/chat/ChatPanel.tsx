@@ -9,6 +9,7 @@ import MessageList from './MessageList';
 import MessageInput from './MessageInput';
 import WelcomeTips from './WelcomeTips';
 import StreamingMessage from './StreamingMessage';
+import UserMessage from './UserMessage';
 import ConversationBrowser from './ConversationBrowser';
 import UserManagementPanel from './UserManagementPanel';
 import ObservabilityPanel from './ObservabilityPanel';
@@ -90,15 +91,23 @@ export default function ChatPanel() {
       {current ? (
         <MessageList />
       ) : isStreaming ? (
-        // New conversation: no history yet, but stream is active
+        // New conversation, first message in flight — `current` only lands when
+        // refreshAfterComplete runs at terminal, so MessageList (gated on
+        // current) would render nothing. Render the pending bubble + stream
+        // inline here, but via the same UserMessage component as the persisted
+        // and post-refresh-live paths so all three share one layout source.
+        // `!== null` (not truthy) so empty content still renders a bubble for
+        // compact-only / upload-only sends — was the source of the "first
+        // upload-only message has no bubble" bug pre-unification.
         <div className="flex-1 overflow-y-auto">
           <div className="max-w-3xl mx-auto pl-8 pr-4 py-6 space-y-6">
-            {pendingUserMessage && (
-              <div className="flex justify-end">
-                <div className="max-w-[80%] bg-panel-accent dark:bg-surface-dark rounded-bubble px-4 py-3 text-text-primary dark:text-text-primary-dark whitespace-pre-wrap break-words">
-                  {pendingUserMessage}
-                </div>
-              </div>
+            {pendingUserMessage !== null && (
+              <UserMessage
+                content={pendingUserMessage}
+                messageId=""
+                parentId={null}
+                pending
+              />
             )}
             <StreamingMessage />
           </div>
