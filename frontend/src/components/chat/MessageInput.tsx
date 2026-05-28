@@ -75,6 +75,16 @@ export default function MessageInput() {
     (lastNode?.execution_metrics as { last_input_tokens?: number | null } | null | undefined)
       ?.last_input_tokens ?? null;
 
+  // Compact is meaningless with no history to summarize — and worse, the
+  // injected directive ("history will be compacted right after your response")
+  // tends to hallucinate on a blank first turn (model invents prior context to
+  // describe). Ban the toggle until there's at least one persisted turn, and
+  // auto-disarm any leftover armed state on conv switch / new chat.
+  const hasHistory = branchPath.length > 0;
+  useEffect(() => {
+    if (!hasHistory && forceCompact) setForceCompact(false);
+  }, [hasHistory, forceCompact]);
+
   const handleSend = useCallback(async () => {
     if (isStreaming && !content.trim()) {
       // Stop: cancel backend execution. The cancel signal queues into the
@@ -336,7 +346,7 @@ export default function MessageInput() {
                   composer can't start one mid-stream). */}
               <button
                 onClick={() => setForceCompact((v) => !v)}
-                disabled={isStreaming}
+                disabled={isStreaming || !hasHistory}
                 className={`h-8 w-8 flex items-center justify-center rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
                   forceCompact
                     ? 'bg-accent/15 text-accent'
@@ -345,9 +355,11 @@ export default function MessageInput() {
                 aria-label="Compact context"
                 aria-pressed={forceCompact}
                 title={
-                  forceCompact
-                    ? '已开启压缩：本轮回答后把之前的对话压缩成摘要（点击取消）'
-                    : '压缩上下文：本轮回答后把之前的对话压缩成摘要'
+                  !hasHistory
+                    ? '当前会话无历史可压缩'
+                    : forceCompact
+                      ? '已开启压缩：本轮回答后把之前的对话压缩成摘要（点击取消）'
+                      : '压缩上下文：本轮回答后把之前的对话压缩成摘要'
                 }
               >
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
