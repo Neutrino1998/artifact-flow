@@ -213,7 +213,29 @@ export function getConversation(convId: string, options?: GetConversationOptions
   return req;
 }
 
-export async function sendMessage(body: ChatRequest, files?: File[]) {
+/**
+ * Lifecycle of a single chat-message POST, as observed by the composer:
+ *
+ *   progress (loaded < total) → ... → progress (loaded == total)
+ *     → complete (all bytes sent, server is now ingesting + creating
+ *                 user_upload artifacts + enqueueing the turn)
+ *     → (promise resolves with ChatResponse)
+ *
+ * 'complete' is fired by xhr.upload.onload right before we start waiting on
+ * the server response, so the UI can switch the bar's label from "上传中"
+ * to "服务器处理中…" without sitting at 100% with no explanation while the
+ * server does its work. Cleanup (resetting the bar to null) is the caller's
+ * job, in the same try/finally that owns the await.
+ */
+export type UploadEvent =
+  | { type: 'progress'; loaded: number; total: number; lengthComputable: boolean }
+  | { type: 'complete' };
+
+export async function sendMessage(
+  body: ChatRequest,
+  files?: File[],
+  onUpload?: (ev: UploadEvent) => void,
+) {
   // multipart/form-data: `payload` is the ChatRequest JSON, `files` are optional
   // attachments. Do NOT set Content-Type — the browser must set the multipart
   // boundary itself.
@@ -223,20 +245,57 @@ export async function sendMessage(body: ChatRequest, files?: File[]) {
     for (const f of files) formData.append('files', f);
   }
 
-  const httpRes = await fetch(`${BASE_URL}/api/v1/chat`, {
-    method: 'POST',
-    headers: authHeaders(),
-    body: formData,
+  // XHR (not fetch) so we can observe xhr.upload.onprogress — fetch has no
+  // standard upload-progress hook (Streams-body upload monitoring is recent
+  // Chrome only and needs server cooperation). One callback, two event types,
+  // keeps the caller from poking at raw XHR ProgressEvents.
+  const res = await new Promise<ChatResponse>((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', `${BASE_URL}/api/v1/chat`);
+    for (const [k, v] of Object.entries(authHeaders())) {
+      xhr.setRequestHeader(k, v);
+    }
+    // No Content-Type header — XHR + FormData lets the browser set the
+    // multipart boundary, same as the fetch path it replaces.
+
+    if (onUpload) {
+      xhr.upload.addEventListener('progress', (ev) => {
+        onUpload({
+          type: 'progress',
+          loaded: ev.loaded,
+          total: ev.total,
+          lengthComputable: ev.lengthComputable,
+        });
+      });
+      // upload.load (not loadend) — fires only on a fully-successful upload;
+      // loadend would also fire on abort/error and confuse the phase switch.
+      xhr.upload.addEventListener('load', () => {
+        onUpload({ type: 'complete' });
+      });
+    }
+
+    xhr.onload = () => {
+      if (xhr.status === 401) {
+        useAuthStore.getState().logout();
+        reject(new ApiError(401, 'Session expired'));
+        return;
+      }
+      if (xhr.status < 200 || xhr.status >= 300) {
+        reject(new ApiError(xhr.status, formatApiError(xhr.status, xhr.responseText || '')));
+        return;
+      }
+      try {
+        resolve(JSON.parse(xhr.responseText) as ChatResponse);
+      } catch (e) {
+        reject(new ApiError(xhr.status, `Invalid JSON response: ${(e as Error).message}`));
+      }
+    };
+    xhr.onerror = () => reject(new ApiError(0, 'Network error'));
+    xhr.ontimeout = () => reject(new ApiError(0, 'Request timeout'));
+
+    xhr.send(formData);
   });
-  if (httpRes.status === 401) {
-    useAuthStore.getState().logout();
-    throw new ApiError(401, 'Session expired');
-  }
-  if (!httpRes.ok) {
-    const errBody = await httpRes.text().catch(() => '');
-    throw new ApiError(httpRes.status, formatApiError(httpRes.status, errBody));
-  }
-  const res = (await httpRes.json()) as ChatResponse;
+
   // Message/branch updates make cached conversation detail stale.
   invalidateConversationCache(body.conversation_id ?? res.conversation_id);
   return res;
