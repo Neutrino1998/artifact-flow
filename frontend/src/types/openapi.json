@@ -3147,11 +3147,17 @@
             "type": "integer",
             "title": "Compaction Token Threshold",
             "description": "Token sum (a single LLM call's input+output) at which the engine auto-compacts. Used by the frontend as the context-usage gauge denominator so it doesn't hardcode a value that could drift from the server."
+          },
+          "lead_agent_model": {
+            "type": "string",
+            "title": "Lead Agent Model",
+            "description": "Model identifier configured for the lead_agent (e.g. 'qwen3.6-plus'). Surfaced in the composer so the user can see which model is driving the current conversation without digging into agent MD files."
           }
         },
         "type": "object",
         "required": [
-          "compaction_token_threshold"
+          "compaction_token_threshold",
+          "lead_agent_model"
         ],
         "title": "ClientConfigResponse",
         "description": "GET /api/v1/meta response \u2014 runtime constants for the frontend."

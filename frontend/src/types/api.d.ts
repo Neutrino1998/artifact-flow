@@ -1424,6 +1424,11 @@ export interface components {
              * @description Token sum (a single LLM call's input+output) at which the engine auto-compacts. Used by the frontend as the context-usage gauge denominator so it doesn't hardcode a value that could drift from the server.
              */
             compaction_token_threshold: number;
+            /**
+             * Lead Agent Model
+             * @description Model identifier configured for the lead_agent (e.g. 'qwen3.6-plus'). Surfaced in the composer so the user can see which model is driving the current conversation without digging into agent MD files.
+             */
+            lead_agent_model: string;
         };
         /**
          * ConversationDetailResponse

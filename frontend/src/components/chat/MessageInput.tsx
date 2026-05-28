@@ -66,6 +66,7 @@ export default function MessageInput() {
   // Non-live: updates after each completed turn / on conversation load.
   const branchPath = useConversationStore((s) => s.branchPath);
   const compactionThreshold = useConfigStore((s) => s.compactionThreshold);
+  const leadAgentModel = useConfigStore((s) => s.leadAgentModel);
   const fetchConfig = useConfigStore((s) => s.fetchConfig);
   useEffect(() => {
     fetchConfig();
@@ -439,6 +440,21 @@ export default function MessageInput() {
                 </div>
               );
             })()}
+
+            {/* Lead agent model badge — same metric font / color as the gauge so
+                eye reads "info strip" not a separate widget. Sourced from /meta
+                (lead_agent's MD frontmatter); hidden on small screens to avoid
+                competing with the input area, and skipped entirely while config
+                is still loading (best-effort fail). truncate at max-w prevents
+                a very long identifier from pushing the send button off-screen. */}
+            {leadAgentModel && (
+              <span
+                className="hidden sm:inline-flex h-8 items-center font-mono text-xs text-text-tertiary dark:text-text-tertiary-dark select-none truncate max-w-[140px] translate-y-[0.5px]"
+                title={`Lead agent 当前模型：${leadAgentModel}`}
+              >
+                {leadAgentModel}
+              </span>
+            )}
 
             {/* Unified Send / Stop / Cancelling / Inject button */}
             {(() => {

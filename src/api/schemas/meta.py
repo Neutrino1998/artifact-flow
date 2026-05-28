@@ -19,3 +19,11 @@ class ClientConfigResponse(BaseModel):
             "so it doesn't hardcode a value that could drift from the server."
         ),
     )
+    lead_agent_model: str = Field(
+        ...,
+        description=(
+            "Model identifier configured for the lead_agent (e.g. 'qwen3.6-plus'). "
+            "Surfaced in the composer so the user can see which model is driving the "
+            "current conversation without digging into agent MD files."
+        ),
+    )
