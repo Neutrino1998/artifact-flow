@@ -785,6 +785,15 @@ async def execute_loop(
             response_content, reasoning_content, normalized_usage = llm_result
 
             # 引擎内 compaction 检查：本次 LLM 调用 input+output 超阈值则立即压缩。
+            # 触发点选「每次 LLM call 后」是两点工程选择：
+            #   (1) 可移植性 —— 私有部署模型（vllm 等）无独立 token 计数 API，token
+            #       用量只能从已完成 call 返回的 usage 取，故触发必须钩在 call 完成
+            #       这一点（既无法预测、也无法事后补测）。
+            #   (2) 部分压缩 —— 用此 call 的 input_tokens 判断「response 之前的历史」
+            #       是否过大并折叠该段；此 call 之后的 tool result / 续答留在 summary
+            #       之后，「上一轮在干什么」的在飞状态由 compact_agent 的 Current Work
+            #       段 + 边界后的 fresh events 共同承担。force_compact 同此触发点
+            #       （不搬到回合末：那样既丢测量点，又会过度折叠本轮的工具工作）。
             # 失败时 maybe_trigger 已经追加了 success=False 的 compaction_summary 占位
             # （配对 compaction_start），这里把 turn 标 ERROR 退出 —— 对齐 _call_llm 的
             # 失败处理路径，避免在已损坏的 context 上继续跑下个工具/LLM。

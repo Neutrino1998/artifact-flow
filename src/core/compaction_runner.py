@@ -166,6 +166,17 @@ class CompactionRunner:
         )
         state["events"].append(summary_event)
 
+        # 下一轮 gauge 准确性：把 compaction call 的 output_tokens（= summary 大小，
+        # 亦即折叠后下一次 call 实际载入的「历史」内容大小）回写为 last_input_tokens,
+        # 作为「下一次 lead call 输入大小」的实测代理（纯依赖 usage,不调 tokenizer,
+        # 对齐与 maybe_trigger 同源的可移植性约束）。
+        # 这条无条件写入只在「compaction 触发在 final response 之后、loop 即将结束」
+        # 这一窗口实际生效 —— 其他情况后续 lead call 会以真实 input_tokens 覆盖
+        # （engine.py:425）,本写入被自然丢弃；故无需特判「是不是终态前一次」。
+        metrics = state.get("execution_metrics")
+        if metrics is not None:
+            metrics["last_input_tokens"] = usage.get("output_tokens", 0)
+
         await self._emit_sse(
             StreamEventType.COMPACTION_SUMMARY.value,
             agent_name,
