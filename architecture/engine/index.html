@@ -2098,7 +2098,7 @@
 </tr>
 </tbody>
 </table>
-<p>注意：<code>first_input_tokens</code> 和 <code>last_input_tokens</code> 仅对 lead_agent 追踪，作为上下文预算评估的观测指标。<strong>Compaction 触发依据不是这些 metric</strong> — <code>CompactionRunner</code> 在每次 LLM 调用后直接拿该次调用的 <code>input_tokens + output_tokens</code> 比对阈值，不读 metrics。</p>
+<p>注意：<code>first_input_tokens</code> 和 <code>last_input_tokens</code> 仅对 lead_agent 追踪，作为上下文预算评估的观测指标。<strong>Compaction 触发依据不是这些 metric</strong> — <code>CompactionRunner</code> 在每次 LLM 调用后直接拿该次调用的 <code>input_tokens + output_tokens</code> 比对阈值，不读 metrics。<strong>特例</strong>：若 lead 一次 compaction 触发在 final response 之后（loop 即将结束、后续无 lead call 覆盖），<code>CompactionRunner</code> 会把该次 compact_agent 调用的 <code>output_tokens</code>（= summary 大小）回写到 <code>last_input_tokens</code>，作为下一轮带入上下文的实测代理（供前端 composer 的 context 用量 gauge 显示压缩后的下降）。仍是 lead-only：subagent compaction 不写此字段，避免在 cancel/timeout 窗口把 subagent summary 的 token 数泄漏成 lead 上下文估算。</p>
 <h3 id="事件收集">事件收集</h3>
 <p>所有执行事件在引擎运行期间累积到 <code>state["events"]</code> 列表中：</p>
 <ul>
