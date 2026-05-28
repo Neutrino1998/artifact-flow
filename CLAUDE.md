@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-ArtifactFlow is a multi-agent system with a [Pi-style](https://github.com/badlogic/pi-mono) execution engine. It uses a dual-artifact architecture (Task Plan Artifact + Result Artifact) with a `lead_agent` coordinator that can delegate to `research_agent` for context-isolated multi-source exploration.
+ArtifactFlow is a multi-agent system for **private-deployment AI services** (see README §项目定位 for positioning). Built on a [Pi-style](https://github.com/badlogic/pi-mono) execution engine, fully configured via MD/YAML (agents/tools/models — no Python for extensions). A `lead_agent` coordinator delegates to subagents (e.g. `research_agent`) for context-isolated multi-source exploration; Task Plan + Result artifacts persist execution state across turns.
 
 **Requirements:** Python 3.11+
 
