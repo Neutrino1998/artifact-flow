@@ -1,12 +1,25 @@
 # ArtifactFlow
 
-> Pi-style 可配置 Agent 引擎 + 双 Artifact 架构的多智能体 SaaS
+> Pi-style 可配置 Agent 引擎 + 双 Artifact 架构,面向私有化部署的多智能体技术栈
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![SQLite/PostgreSQL](https://img.shields.io/badge/SQLite%20%7C%20PostgreSQL-Persistent-blue.svg)]()
 [![Development Status](https://img.shields.io/badge/Status-Alpha%20Development-orange.svg)]()
 
 ArtifactFlow 是一个基于扁平 while loop 执行引擎的多 Agent 协作系统。采用双 Artifact 架构（Task Plan + Result），通过配置化的 Agent / Tool / Model 体系，让团队无需编写代码即可扩展 AI 能力。执行引擎参考 [Pi-mono](https://github.com/badlogic/pi-mono) 设计。
+
+## 项目定位
+
+占据「本地个人 agent」和「全托管企业级平台」之间的中间生态位：
+
+- **下** · 本地 CLI agent（Claude Code / pi-mono 等）—— 极致 dev loop 体验，但单用户、无私有化部署形态。
+- **上** · 全托管平台（Claude Managed Agents / OpenAI Assistants 等）—— 能力强，但数据出域、定价模型、深度定制对政企 / 合规场景是硬约束。
+- **中** · 本项目 —— **为具体 AI 赋能需求快速搭起稳定的私有化服务**的技术栈。每个部署服务单一组织/客户，不试图做公开 SaaS。
+
+由此带来的边界：
+
+- 覆盖**单 turn / 短链路闭环**的任务（数据处理、文档转换、信息整合、多 agent 协作流程）。**不替代** Claude Code 那类本地持续 dev loop —— per-turn 沙盒 + 跨中心持久化与"跨轮持久工作目录"在架构上根本不兼容。
+- 跨中心 DR、事件溯源、权限中断、统一 cancel/timeout 是为「小团队稳定运维一套部署」做的，不是为流量增长 —— 这些"看起来重"的基础设施在私有化场景下恰好够用。
 
 ## 预览
 
