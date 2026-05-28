@@ -302,11 +302,14 @@ export default function MessageInput() {
                 className="hidden"
               />
 
-              {/* Attach file (stages — sent with the next message) */}
+              {/* Attach file (stages — sent with the next message).
+                  h-8 w-8 (not p-1.5) so the hover/focus box matches the Send
+                  button's 32×32 outer size — eyes read all four interactive
+                  targets in this row as one aligned strip. */}
               <button
                 onClick={handleFileSelect}
                 disabled={attachDisabled}
-                className="p-1.5 rounded-lg text-text-secondary dark:text-text-secondary-dark hover:bg-surface dark:hover:bg-bg-dark transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                className="h-8 w-8 flex items-center justify-center rounded-lg text-text-secondary dark:text-text-secondary-dark hover:bg-surface dark:hover:bg-bg-dark transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                 aria-label="Attach file"
                 title={atAttachmentCap ? `最多 ${MAX_CHAT_ATTACHMENTS} 个附件` : '添加附件（随消息发送，支持多选）'}
               >
@@ -318,7 +321,7 @@ export default function MessageInput() {
               {/* Artifact panel toggle */}
               <button
                 onClick={toggleArtifactPanel}
-                className="p-1.5 rounded-lg text-text-secondary dark:text-text-secondary-dark hover:bg-surface dark:hover:bg-bg-dark transition-colors"
+                className="h-8 w-8 flex items-center justify-center rounded-lg text-text-secondary dark:text-text-secondary-dark hover:bg-surface dark:hover:bg-bg-dark transition-colors"
                 aria-label="Toggle artifact panel"
                 title="切换文稿面板"
               >
@@ -334,7 +337,7 @@ export default function MessageInput() {
               <button
                 onClick={() => setForceCompact((v) => !v)}
                 disabled={isStreaming}
-                className={`p-1.5 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+                className={`h-8 w-8 flex items-center justify-center rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
                   forceCompact
                     ? 'bg-accent/15 text-accent'
                     : 'text-text-secondary dark:text-text-secondary-dark hover:bg-surface dark:hover:bg-bg-dark'
@@ -363,20 +366,49 @@ export default function MessageInput() {
               )}
             </div>
 
-            {/* Right group: context-usage gauge + unified Send/Stop/Inject button */}
-            <div className="flex items-center gap-2">
+            {/* Right group: context-usage gauge + unified Send/Stop/Inject button.
+                gap-3 (not gap-2) gives the gauge breathing room from the Enter
+                button so the eye reads it as info, not a button label. */}
+            <div className="flex items-center gap-3">
             {compactionThreshold != null && contextTokens != null && contextTokens > 0 && (() => {
               const pct = Math.min(100, Math.round((contextTokens / compactionThreshold) * 100));
               const near = pct >= 85;
               return (
                 <div
-                  className="hidden sm:flex items-center gap-1.5 text-xs text-text-tertiary dark:text-text-tertiary-dark select-none"
+                  className="hidden sm:flex h-8 items-center gap-1.5 text-xs text-text-tertiary dark:text-text-tertiary-dark select-none"
                   title={`下一轮将带入的上下文约 ${contextTokens.toLocaleString()} tokens / 自动压缩阈值 ${compactionThreshold.toLocaleString()}（达到阈值会自动压缩历史；若该轮以压缩结束，此值为压缩摘要大小的实测代理）`}
                 >
-                  <div className="w-12 h-1 rounded-full bg-border dark:bg-border-dark overflow-hidden">
-                    <div className={`h-full rounded-full ${near ? 'bg-amber-500' : 'bg-accent'}`} style={{ width: `${pct}%` }} />
-                  </div>
-                  <span className="font-mono tabular-nums">{formatTokens(contextTokens)}/{formatTokens(compactionThreshold)}</span>
+                  {/* Ring geometry: 16x16 to match the attach/artifact/compact icon
+                      glyphs on the left. r=6.5, sw=1.75 keeps stroke inside the viewBox
+                      (6.5 + 1.75/2 = 7.375 < 8). -rotate-90 starts the arc at 12 o'clock;
+                      dashoffset = circumference * (1 - pct/100) draws it. */}
+                  <svg width="16" height="16" viewBox="0 0 16 16" className="-rotate-90 shrink-0">
+                    <circle
+                      cx="8"
+                      cy="8"
+                      r={6.5}
+                      fill="none"
+                      strokeWidth="1.75"
+                      stroke="currentColor"
+                      className="text-border dark:text-border-dark"
+                    />
+                    <circle
+                      cx="8"
+                      cy="8"
+                      r={6.5}
+                      fill="none"
+                      strokeWidth="1.75"
+                      strokeLinecap="round"
+                      stroke="currentColor"
+                      strokeDasharray={2 * Math.PI * 6.5}
+                      strokeDashoffset={2 * Math.PI * 6.5 * (1 - pct / 100)}
+                      className={near ? 'text-amber-500' : 'text-accent'}
+                    />
+                  </svg>
+                  {/* translate-y-[0.5px]: mono digits 的 cap-center 比 line-box
+                      center 略高，flex items-center 居中的是 line-box，所以肉眼
+                      看着偏上。亚像素下移补回视觉重心。 */}
+                  <span className="font-mono tabular-nums translate-y-[0.5px]">{formatTokens(contextTokens)}/{formatTokens(compactionThreshold)}</span>
                 </div>
               );
             })()}
