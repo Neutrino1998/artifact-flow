@@ -55,9 +55,13 @@ export default function StreamingMessage() {
         }
         return null;
       })}
-      {/* Standalone fallback for non-event errors (e.g. SSE 401/404 transport
-          failures that never reach the ERROR handler). When ERROR did fire,
-          the block is already in nonAgentBlocks and rendered via interleave. */}
+      {/* Standalone fallback for non-event errors that surface AFTER the stream
+          connected (e.g. SSE 401/404 transport failures that never reach the
+          ERROR handler). When ERROR did fire, the block is already in
+          nonAgentBlocks and rendered via interleave. NOTE: this only covers
+          post-connect errors — this whole component is gated on isStreaming, so
+          a send that fails in the POST /api/v1/chat phase (before connect flips
+          isStreaming) never reaches here; ChatPanel renders that case. */}
       {error && !nonAgentBlocks.some((b) => b.kind === 'error') && (
         <ErrorFlowBlock message={error} />
       )}

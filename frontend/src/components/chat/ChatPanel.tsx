@@ -9,6 +9,7 @@ import MessageList from './MessageList';
 import MessageInput from './MessageInput';
 import WelcomeTips from './WelcomeTips';
 import StreamingMessage from './StreamingMessage';
+import ErrorFlowBlock from './ErrorFlowBlock';
 import UserMessage from './UserMessage';
 import ConversationBrowser from './ConversationBrowser';
 import UserManagementPanel from './UserManagementPanel';
@@ -28,6 +29,7 @@ export default function ChatPanel() {
   const currentLoading = useConversationStore((s) => s.currentLoading);
   const isStreaming = useStreamStore((s) => s.isStreaming);
   const pendingUserMessage = useStreamStore((s) => s.pendingUserMessage);
+  const sendError = useStreamStore((s) => s.sendError);
 
   const conversationBrowserVisible = useUIStore((s) => s.conversationBrowserVisible);
   const userManagementVisible = useUIStore((s) => s.userManagementVisible);
@@ -132,6 +134,27 @@ export default function ChatPanel() {
           <WelcomeTips />
         </div>
       )}
+
+      {/* Pre-stream send failures (the POST /api/v1/chat phase — nginx 413,
+          backend 422 oversize / unparseable upload, or a network drop) fail
+          BEFORE connect() flips isStreaming, so no stream/message exists to host
+          the error and the user just sees the spinner blink. They land in a
+          dedicated `sendError` (NOT the stream's `error`, which already renders
+          inside the message flow) so surfacing them here can't double-render a
+          terminal SSE error. Cleared on the next send, on startStream, and on
+          conversation switch (reset), so it can't linger or cross conversations. */}
+      {sendError && (
+        // relative z-10 lifts the banner above MessageInput's top fade overlay
+        // (an absolutely-positioned -top-6 gradient, later in DOM so it would
+        // otherwise paint over the banner's lower edge). ErrorFlowBlock's solid
+        // bg-chat then fully covers, so no half-faded card.
+        <div className="relative z-10 px-4 pb-2">
+          <div className="max-w-3xl mx-auto">
+            <ErrorFlowBlock message={sendError} />
+          </div>
+        </div>
+      )}
+
       <MessageInput />
 
       {/* Drag overlay */}
