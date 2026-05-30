@@ -123,7 +123,14 @@ services:
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-artifactflow}
       POSTGRES_USER: ${POSTGRES_USER:-artifactflow}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      # NOT `:?` — Compose interpolates this at PARSE time regardless of which
+      # profile runs, so a `:?` guard would make Mode 3B (internal DB, no infra
+      # profile, POSTGRES_* removed from .env) fail `up`/`config` before it even
+      # starts. The image itself is the loud guard: postgres:16-alpine refuses to
+      # init with an empty password, so a 3A user who forgets it still fails hard,
+      # just at container start. (Mirrors docker-compose.prod.yml — same bug,
+      # sibling file.)
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-}
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-artifactflow}"]
       interval: 10s
