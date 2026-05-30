@@ -145,8 +145,16 @@ interface StreamState {
   // Reconnecting (SSE auto-reconnect in progress)
   reconnecting: boolean;
 
-  // Error
+  // Error — surfaced AFTER a stream connected (SSE ERROR event / transport
+  // failure). Rendered inside the message flow (StreamingMessage live,
+  // AssistantMessage once persisted), so it must NOT be re-surfaced globally.
   error: string | null;
+
+  // Pre-stream send failure — the POST /api/v1/chat failed before connect()
+  // ever flipped isStreaming, so no stream/message exists to host it. Distinct
+  // from `error` precisely so the composer banner (ChatPanel) can show it
+  // without double-rendering a terminal `error` that already lives in the flow.
+  sendError: string | null;
 
   // Concurrency queue indicator (SSE-only, cleared on first agent_start / end / reset)
   queuedInfo: { ahead: number; maxConcurrent: number } | null;
@@ -185,6 +193,7 @@ interface StreamState {
   setCancelling: (val: boolean) => void;
   setPermissionRequest: (req: PermissionRequest | null) => void;
   setError: (error: string | null) => void;
+  setSendError: (sendError: string | null) => void;
 
   // Queue indicator
   setQueuedInfo: (info: { ahead: number; maxConcurrent: number } | null) => void;
@@ -245,6 +254,7 @@ export const useStreamStore = create<StreamState>((set, get) => {
     cancelling: false,
     permissionRequest: null,
     error: null,
+    sendError: null,
     queuedInfo: null,
 
     startStream: (url, messageId, conversationId) => {
@@ -262,6 +272,7 @@ export const useStreamStore = create<StreamState>((set, get) => {
         cancelling: false,
         permissionRequest: null,
         error: null,
+        sendError: null,
         queuedInfo: null,
       });
     },
@@ -282,6 +293,7 @@ export const useStreamStore = create<StreamState>((set, get) => {
         streamParentId: undefined,
         permissionRequest: null,
         error: null,
+        sendError: null,
         queuedInfo: null,
       }),
 
@@ -397,6 +409,7 @@ export const useStreamStore = create<StreamState>((set, get) => {
     setCancelling: (val) => set({ cancelling: val }),
     setPermissionRequest: (req) => set({ permissionRequest: req }),
     setError: (error) => set({ error }),
+    setSendError: (sendError) => set({ sendError }),
     setQueuedInfo: (info) => set({ queuedInfo: info }),
   };
 });

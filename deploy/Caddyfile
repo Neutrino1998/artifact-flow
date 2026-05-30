@@ -1,0 +1,130 @@
+# ArtifactFlow — Caddy reverse proxy (Mode 2 / public deployment)
+#
+# Replaces the nginx container. Caddy terminates TLS (auto Let's Encrypt),
+# reverse-proxies to backend/frontend, blocks Swagger in prod, gates the
+# maintenance window via the SAME flag file the nginx setup used
+# (deploy/maintenance/MAINTENANCE_ON, written by maintenance.sh), and forwards
+# the real client IP as X-Real-IP (the backend login throttle reads ONLY that
+# header — it deliberately ignores the spoofable X-Forwarded-For).
+#
+# Domain + ACME email come from the root .env (AF_DOMAIN / AF_ACME_EMAIL).
+# Grey-cloud (CF "DNS only") assumed: clients connect directly, so {remote_host}
+# IS the real client IP. If you later switch CF to orange-cloud (proxied), the
+# real client moves into X-Forwarded-For and {remote_host} becomes Cloudflare's
+# edge — add `trusted_proxies` (CF ranges) and switch to {client_ip}, else the
+# per-IP login throttle degrades to one shared bucket.
+{
+	# ACME account email — Let's Encrypt sends cert-expiry warnings here as a
+	# backstop. Caddy auto-renews ~30 days before expiry; you normally never act
+	# on these mails.
+	email {$AF_ACME_EMAIL}
+}
+
+# Reusable snippet: forward the genuine client IP as X-Real-IP. Imported into
+# every backend proxy below so the rule lives in exactly one place.
+(backend_real_ip) {
+	header_up X-Real-IP {remote_host}
+}
+
+{$AF_DOMAIN} {
+	# Batched upload ceiling. POST /api/v1/chat sends ALL attachments in ONE
+	# multipart request (not one request per file), so the body is the SUM of
+	# the batch, not a single file. Backend contract is per-file ≤20MB
+	# (MAX_UPLOAD_SIZE) × ≤10 files (MAX_CHAT_ATTACHMENTS) = 200MB max valid
+	# batch. Set 210MB so Caddy never 413s ahead of an app-valid batch — per-file
+	# + count stay the sole authoritative limits, and a real oversize file still
+	# gets the backend's clean 422. The 10MB over 200MB absorbs multipart
+	# boundary/header overhead. (Mirrors deploy/nginx.conf client_max_body_size.)
+	request_body {
+		max_size 210MB
+	}
+
+	# Maintenance flag: present iff `maintenance.sh on` has run. Stat'd
+	# per-request (no reload needed), exactly like nginx's `if (-f ...)`.
+	@maintenance_on file {
+		root /etc/caddy/maintenance
+		try_files /MAINTENANCE_ON
+	}
+
+	# Swagger / OpenAPI are 404'd in production.
+	@docs path /docs /redoc /openapi.json
+
+	# `route` evaluates handles top-to-bottom, first match wins and terminates
+	# — same mental model as nginx location ordering.
+	route {
+		# 1. Maintenance page's own assets — ALWAYS reachable, even mid-window,
+		#    or the page's own <img>/note.txt would 503 too. handle_path strips
+		#    the /__maintenance prefix before hitting the file root.
+		handle_path /__maintenance/* {
+			root * /etc/caddy/maintenance
+			header Cache-Control "no-store"
+			file_server
+		}
+
+		# 2. Health — intentionally NOT gated by maintenance. Container
+		#    healthchecks + external monitors must keep seeing real status.
+		#    Placed before the maintenance gate so it always passes through;
+		#    real upstream 503s (e.g. /health/ready dep-failure JSON) are
+		#    untouched.
+		handle /health/* {
+			reverse_proxy backend:8000 {
+				import backend_real_ip
+			}
+		}
+
+		# 3. Block Swagger in production.
+		handle @docs {
+			respond 404
+		}
+
+		# 4. Maintenance gate: flag present → everything below returns the 503
+		#    page instead of proxying (API, SSE, frontend all caught here).
+		handle @maintenance_on {
+			root * /etc/caddy/maintenance
+			rewrite * /maintenance.html
+			header Cache-Control "no-store"
+			header Retry-After "60"
+			file_server {
+				status 503
+			}
+		}
+
+		# 5. SSE streaming: disable response buffering so chunks flush live
+		#    (flush_interval -1 == nginx proxy_buffering off).
+		handle /api/v1/stream/* {
+			reverse_proxy backend:8000 {
+				import backend_real_ip
+				flush_interval -1
+			}
+		}
+
+		# 6. Backend API.
+		handle /api/* {
+			reverse_proxy backend:8000 {
+				import backend_real_ip
+			}
+		}
+
+		# 7. Frontend catch-all.
+		handle {
+			reverse_proxy frontend:3000
+		}
+	}
+}
+
+# Internal health listener — HTTP, NO TLS, and deliberately NOT published to the
+# host (docker-compose.prod.yml only maps 80/443). Reachable only from inside the
+# caddy container / docker network. resume-prod.sh probes this so the health
+# check flows through Caddy's real reverse_proxy machinery (proving the config
+# loaded + Caddy → backend works), instead of bypassing Caddy entirely by
+# hitting backend:8000 from caddy's netns. A port-only address makes Caddy serve
+# plain HTTP (no automatic-HTTPS redirect), so the busybox-wget probe needs no
+# cert / SNI / Host-header gymnastics.
+:2021 {
+	handle /health/* {
+		reverse_proxy backend:8000
+	}
+	handle {
+		respond "not found" 404
+	}
+}

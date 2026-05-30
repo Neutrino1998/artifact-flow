@@ -24,7 +24,7 @@ export function useChat() {
   const setConversationActiveMessage = useConversationStore((s) => s.setConversationActiveMessage);
   const setPendingUserMessage = useStreamStore((s) => s.setPendingUserMessage);
   const setStreamParentId = useStreamStore((s) => s.setStreamParentId);
-  const setError = useStreamStore((s) => s.setError);
+  const setSendError = useStreamStore((s) => s.setSendError);
   const resetStream = useStreamStore((s) => s.reset);
   const resetArtifacts = useArtifactStore((s) => s.reset);
   const setArtifacts = useArtifactStore((s) => s.setArtifacts);
@@ -59,6 +59,13 @@ export function useChat() {
       // in MessageInput (keyed off global isStreaming + streamConversationId)
       // would target the wrong turn.
       const myNavGen = getNavGen();
+      // Clear any prior pre-stream send error before this attempt: it shows a
+      // standalone banner in ChatPanel, so a stale message must not linger over
+      // a fresh attempt. On success startStream clears it again; on failure the
+      // catch below overwrites it. Kept separate from the stream's `error` so a
+      // terminal SSE error (which lives in the message flow) is never re-shown
+      // as a global banner.
+      setSendError(null);
       try {
         // undefined = use default (last message in branch), omit from body
         // null = explicitly no parent (create new root), send as null
@@ -135,11 +142,11 @@ export function useChat() {
         // Failure: report it so the caller preserves composer state (text +
         // staged attachments) instead of discarding the user's input.
         if (myNavGen !== getNavGen()) return false;
-        setError((err as Error).message);
+        setSendError((err as Error).message);
         return false;
       }
     },
-    [current?.id, lastMessageId, setPendingUserMessage, setStreamParentId, connect, setError, setConversations, setConversationActiveMessage, setArtifacts, setArtifactSessionId, setArtifactPanelVisible]
+    [current?.id, lastMessageId, setPendingUserMessage, setStreamParentId, connect, setSendError, setConversations, setConversationActiveMessage, setArtifacts, setArtifactSessionId, setArtifactPanelVisible]
   );
 
   // Switch to an existing conversation: tear down the previous conversation's
