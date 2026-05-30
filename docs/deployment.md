@@ -620,7 +620,9 @@ tar xzf tmp/artifactflow-config-v2.3.0.tar.gz   # 如果 config 也变了
 >
 > # 要维护页包住整个窗口：
 > ./deploy/scripts/pause-prod.sh "升级中，约 5 分钟"   # 起维护页 + 停 backend/frontend
-> ./deploy/scripts/deploy-prod.sh --build             # 维护页期间重建并拉起（2B 加 --no-infra）
+> ./deploy/scripts/deploy-prod.sh --build --no-cert-watch  # 重建并拉起（2B 加 --no-infra）
+> #   ↑ 维护窗口里必须 --no-cert-watch：否则脚本结尾会 tail caddy 日志阻塞，
+> #     后面的 resume 不会自动执行（证书已签发过，无需再盯）
 > ./deploy/scripts/resume-prod.sh                     # 等 healthy + 经 Caddy(:2021) 探针 → 关维护页
 > ```
 > `deploy-prod.sh` 默认带 `--profile infra` 拉起捆绑 PG/Redis（Mode 2A）；**Mode 2B

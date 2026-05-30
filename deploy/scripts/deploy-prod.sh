@@ -40,7 +40,7 @@ for arg in "$@"; do
     --build)         DO_BUILD=1 ;;
     --no-infra)      WITH_INFRA=0 ;;
     --no-cert-watch) CERT_WATCH=0 ;;
-    -h|--help)       sed -n '2,32p' "$0"; exit 0 ;;
+    -h|--help)       sed -n '2,24p' "$0"; exit 0 ;;
     *)               echo "Unknown arg: $arg (use -h for usage)" >&2; exit 2 ;;
   esac
 done
