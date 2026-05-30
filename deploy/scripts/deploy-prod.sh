@@ -9,12 +9,14 @@
 # cert. No tarballs, no checksums.
 #
 # Usage:
-#   deploy/scripts/deploy-prod.sh [--pull] [--build] [--no-cert-watch]
+#   deploy/scripts/deploy-prod.sh [--pull] [--build] [--no-infra] [--no-cert-watch]
 #
 #   --pull           git pull --ff-only before deploying (default: skip; deploy
 #                    whatever's in the working tree, so you can deploy local edits)
 #   --build          docker compose build before up (default: skip; reuse existing
 #                    images. Use after code changes that need a fresh image)
+#   --no-infra       don't start the bundled postgres/redis (Mode 2B: external
+#                    DB/Redis). Default starts them via --profile infra (Mode 2A).
 #   --no-cert-watch  don't tail caddy logs for the cert-acquisition line at the end
 #
 # For a graceful zero-surprise window (maintenance page during the swap), use
@@ -30,13 +32,15 @@ ENV_FILE="$ROOT/.env"
 
 DO_PULL=0
 DO_BUILD=0
+WITH_INFRA=1
 CERT_WATCH=1
 for arg in "$@"; do
   case "$arg" in
     --pull)          DO_PULL=1 ;;
     --build)         DO_BUILD=1 ;;
+    --no-infra)      WITH_INFRA=0 ;;
     --no-cert-watch) CERT_WATCH=0 ;;
-    -h|--help)       sed -n '2,30p' "$0"; exit 0 ;;
+    -h|--help)       sed -n '2,32p' "$0"; exit 0 ;;
     *)               echo "Unknown arg: $arg (use -h for usage)" >&2; exit 2 ;;
   esac
 done
@@ -84,13 +88,21 @@ if (( DO_BUILD )); then
   "${DC[@]}" -f "$COMPOSE_FILE" build backend frontend
 fi
 
-echo "→ Bringing the stack up (--profile infra)"
-"${DC[@]}" -f "$COMPOSE_FILE" --profile infra up -d
+if (( WITH_INFRA )); then
+  echo "→ Bringing the stack up (--profile infra: bundled postgres + redis, Mode 2A)"
+  "${DC[@]}" -f "$COMPOSE_FILE" --profile infra up -d
+else
+  echo "→ Bringing the stack up (--no-infra: external DB/Redis, Mode 2B)"
+  "${DC[@]}" -f "$COMPOSE_FILE" up -d
+fi
 
 echo
 echo "✓ Stack is up (Mode 2 / 公网)"
 echo "  域名: https://${AF_DOMAIN_VAL:-<AF_DOMAIN>}"
-echo "  健康: ${DC[*]} -f $COMPOSE_FILE exec caddy wget -qO- http://backend:8000/health/ready"
+# Probe through Caddy's internal :2021 health listener (HTTP, not host-published)
+# — same path resume-prod.sh uses, so it proves Caddy's config loaded + the
+# reverse_proxy to backend works, not just backend liveness.
+echo "  健康: ${DC[*]} -f $COMPOSE_FILE exec caddy wget -qO- http://localhost:2021/health/ready"
 
 if (( CERT_WATCH )); then
   echo

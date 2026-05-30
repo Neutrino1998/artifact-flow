@@ -120,9 +120,10 @@ docker compose -f docker-compose.prod.yml exec backend \
 ### 验证
 
 ```bash
-# 健康检查（在 caddy 容器内直连 backend，避开 TLS-on-localhost 域名不匹配）
+# 健康检查（经 Caddy 内部端口 :2021 真正过反代，验证配置已加载 + Caddy→backend
+# 通；该端口不发布到宿主机，避开 TLS-on-localhost 域名不匹配）
 docker compose -f docker-compose.prod.yml exec caddy \
-  wget -qO- http://backend:8000/health/ready
+  wget -qO- http://localhost:2021/health/ready
 # 预期: {"status":"ok","db":"ok","redis":"ok"}
 
 # 公网（DNS 已解析 + 证书已签发后）
@@ -164,6 +165,9 @@ cp deploy/.env.prod.example .env
 ```bash
 # 不加 --profile infra，不启动 PG/Redis 容器
 docker compose -f docker-compose.prod.yml up -d
+
+# 或用一键脚本（2B 必须 --no-infra，否则会多起没用的本地 PG/Redis）：
+# ./deploy/scripts/deploy-prod.sh --no-infra
 ```
 
 ---
@@ -612,15 +616,17 @@ tar xzf tmp/artifactflow-config-v2.3.0.tar.gz   # 如果 config 也变了
 > ```bash
 > # 低流量：直接重建拉起（几秒停机，无维护页）
 > git pull --ff-only                                  # 或 git checkout <ref>
-> ./deploy/scripts/deploy-prod.sh --pull --build
+> ./deploy/scripts/deploy-prod.sh --pull --build      # 2B 外部 DB 追加 --no-infra
 >
 > # 要维护页包住整个窗口：
 > ./deploy/scripts/pause-prod.sh "升级中，约 5 分钟"   # 起维护页 + 停 backend/frontend
-> ./deploy/scripts/deploy-prod.sh --build             # 维护页期间重建并拉起
+> ./deploy/scripts/deploy-prod.sh --build             # 维护页期间重建并拉起（2B 加 --no-infra）
 > ./deploy/scripts/resume-prod.sh                     # 等 healthy + 经 Caddy(:2021) 探针 → 关维护页
 > ```
-> `pause-prod.sh` / `resume-prod.sh` 本身只包"维护页 + 停/起当前镜像"，不改版本——
-> 用于改 `.env` 等不换镜像的维护窗口。
+> `deploy-prod.sh` 默认带 `--profile infra` 拉起捆绑 PG/Redis（Mode 2A）；**Mode 2B
+> 用外部 DB/Redis，必须加 `--no-infra`**，否则会多起一对没用的本地 PG/Redis（空密码
+> PG 还会起不来）。`pause-prod.sh` / `resume-prod.sh` 本身只包"维护页 + 停/起当前镜像"，
+> 不改版本、不接参数——用于改 `.env` 等不换镜像的维护窗口。
 
 `resume*.sh` 兼容 V1（`docker-compose`）和 V2（`docker compose`），自动探测，CentOS 7 老服务器和 Docker Desktop 都能用。
 
