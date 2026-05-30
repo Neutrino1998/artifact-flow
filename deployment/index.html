@@ -893,10 +893,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#nginx-配置" class="md-nav__link">
+  <a href="#反向代理配置" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Nginx 配置
+        反向代理配置
       
     </span>
   </a>
@@ -2072,10 +2072,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#nginx-配置" class="md-nav__link">
+  <a href="#反向代理配置" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Nginx 配置
+        反向代理配置
       
     </span>
   </a>
@@ -2198,21 +2198,21 @@
 <tr>
 <td><strong>2A: Prod 自建</strong></td>
 <td>生产 + 自建基础设施</td>
-<td>nginx + backend + frontend + PG + Redis</td>
+<td>Caddy + backend + frontend + PG + Redis</td>
 <td>容器化</td>
 <td><code>docker-compose.prod.yml --profile infra</code></td>
 </tr>
 <tr>
 <td><strong>2B: Prod 云数据库</strong></td>
 <td>生产 + RDS/ElastiCache</td>
-<td>nginx + backend + frontend</td>
+<td>Caddy + backend + frontend</td>
 <td>外部托管</td>
 <td><code>docker-compose.prod.yml</code></td>
 </tr>
 <tr>
 <td><strong>3A: 内网 自建</strong></td>
 <td>离线/内网部署</td>
-<td>同 2A</td>
+<td>nginx + backend + frontend + PG + Redis</td>
 <td>容器化</td>
 <td><code>deploy/docker-compose.intranet.yml --profile infra</code></td>
 </tr>
@@ -2227,8 +2227,9 @@
 </table>
 <p><strong>关键区别：</strong></p>
 <ul>
-<li><strong>Mode 2 vs 1：</strong> Nginx 反向代理（单端口 80）、PG + Redis 持久化、Alembic 自动迁移</li>
-<li><strong>Mode 3 vs 2：</strong> <code>image:</code> 替代 <code>build:</code>，通过 <code>docker save/load</code> 离线部署，无需访问外部镜像仓库</li>
+<li><strong>Mode 2 vs 1：</strong> Caddy 反向代理（自动 HTTPS / Let's Encrypt，端口 80+443）、PG + Redis 持久化、Alembic 自动迁移</li>
+<li><strong>Mode 3 vs 2：</strong> 反向代理用 <strong>nginx</strong>（内网无公网域名 / 不签证书，HTTP 单端口 80 即可）；<code>image:</code> 替代 <code>build:</code>，通过 <code>docker save/load</code> 离线部署，无需访问外部镜像仓库</li>
+<li><strong>代理分叉的原因：</strong> 公网（Mode 2）需要自动签发 / 续期 TLS 证书 → Caddy 一行配置搞定；内网（Mode 3）是气隙环境，Let's Encrypt 不可达、也不需要域名证书 → 保留零依赖的 nginx。两套反向代理共用同一套维护页 flag 机制（<code>deploy/maintenance/</code>）。</li>
 <li><strong>2A/3A vs 2B/3B：</strong> <code>--profile infra</code> 控制是否启动 PG/Redis 容器</li>
 </ul>
 <hr />
@@ -2256,7 +2257,7 @@
 </ul>
 <hr />
 <h2 id="mode-2a-production自建基础设施">Mode 2A: Production（自建基础设施）</h2>
-<p>完整生产部署，PG + Redis 容器化，Nginx 反向代理。</p>
+<p>完整生产部署，PG + Redis 容器化，Caddy 反向代理（自动 HTTPS）。</p>
 <h3 id="前置准备">前置准备</h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="c1"># 1. 从模板创建 .env</span>
 <a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>cp<span class="w"> </span>deploy/.env.prod.example<span class="w"> </span>.env
@@ -2265,10 +2266,32 @@
 <a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="c1">#    - ARTIFACTFLOW_JWT_SECRET（生成: python -c &quot;import secrets; print(secrets.token_urlsafe(32))&quot;）</span>
 <a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="c1">#    - POSTGRES_PASSWORD（强密码）</span>
 <a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="c1">#    - DASHSCOPE_API_KEY（默认模型必填）</span>
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="c1">#    - AF_DOMAIN（公网域名，如 app.example.com — Caddy 给它签证书）</span>
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="c1">#    - AF_ACME_EMAIL（Let&#39;s Encrypt 账户邮箱，到期提醒发这里）</span>
+<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a>
+<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a><span class="c1"># 3. 域名 DNS 必须先解析到本机公网 IP，再启动 —— 否则 Caddy 的 ACME</span>
+<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a><span class="c1">#    HTTP-01 验证失败、拿不到证书。主机防火墙需放行 80（ACME 验证 + 跳 https）</span>
+<a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a><span class="c1">#    和 443（HTTPS）。</span>
+<a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a><span class="c1">#</span>
+<a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a><span class="c1"># 4. 【首次迁移一次性】确保宿主机 80 / 443 没有别的进程占用 —— Caddy 要独占这两</span>
+<a id="__codelineno-1-16" name="__codelineno-1-16" href="#__codelineno-1-16"></a><span class="c1">#    个端口。若机器上原本跑着裸 nginx / apache（或旧版本用 nginx 容器的 compose），</span>
+<a id="__codelineno-1-17" name="__codelineno-1-17" href="#__codelineno-1-17"></a><span class="c1">#    先停掉再启动，否则 Caddy 绑端口失败起不来：</span>
+<a id="__codelineno-1-18" name="__codelineno-1-18" href="#__codelineno-1-18"></a><span class="c1">#      sudo systemctl stop nginx &amp;&amp; sudo systemctl disable nginx   # 宿主机 nginx</span>
+<a id="__codelineno-1-19" name="__codelineno-1-19" href="#__codelineno-1-19"></a><span class="c1">#      # 或：docker rm -f &lt;旧 nginx 容器&gt;</span>
 </code></pre></div>
 <h3 id="启动">启动</h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>docker-compose.prod.yml<span class="w"> </span>--profile<span class="w"> </span>infra<span class="w"> </span>up<span class="w"> </span>-d
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="c1"># 或用一键脚本（带 .env 必填项预检 + tail caddy 证书日志）：</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="c1"># ./deploy/scripts/deploy-prod.sh</span>
 </code></pre></div>
+<blockquote>
+<p><strong>首次启动看证书签发：</strong> <code>docker compose -f docker-compose.prod.yml logs -f caddy</code>，
+看到 <code>certificate obtained successfully</code> 即成功。卡住通常是 DNS 未生效或 80 端口
+未放行（ACME HTTP-01 需要 80 可达）。证书写入 <code>caddy_data</code> 卷，到期前 30 天 Caddy
+自动续期，无需运维。<strong><code>caddy_data</code> 卷务必持久化</strong>（compose 已声明）—— 丢卷会触发
+重新签发，频繁重建可能撞 Let's Encrypt 每域每周 50 张的频控。</p>
+</blockquote>
 <h3 id="首次初始化">首次初始化</h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="c1"># Alembic 自动迁移（容器 entrypoint 自动完成，无需手动）</span>
 <a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="c1"># 确认迁移成功：</span>
@@ -2279,15 +2302,18 @@
 <a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="w">  </span>python<span class="w"> </span>scripts/create_admin.py<span class="w"> </span>admin<span class="w"> </span>--password<span class="w"> </span>&lt;your-password&gt;
 </code></pre></div>
 <h3 id="验证">验证</h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="c1"># 健康检查（通过 Nginx）</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>curl<span class="w"> </span>http://localhost/health/ready
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="c1"># 预期: {&quot;status&quot;:&quot;ok&quot;,&quot;db&quot;:&quot;ok&quot;,&quot;redis&quot;:&quot;ok&quot;}</span>
-<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>
-<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="c1"># 前端</span>
-<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>open<span class="w"> </span>http://localhost
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="c1"># 健康检查（经 Caddy 内部端口 :2021 真正过反代，验证配置已加载 + Caddy→backend</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="c1"># 通；该端口不发布到宿主机，避开 TLS-on-localhost 域名不匹配）</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>docker-compose.prod.yml<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>caddy<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="w">  </span>wget<span class="w"> </span>-qO-<span class="w"> </span>http://localhost:2021/health/ready
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="c1"># 预期: {&quot;status&quot;:&quot;ok&quot;,&quot;db&quot;:&quot;ok&quot;,&quot;redis&quot;:&quot;ok&quot;}</span>
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>
+<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="c1"># 公网（DNS 已解析 + 证书已签发后）</span>
+<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a>curl<span class="w"> </span>https://<span class="nv">$AF_DOMAIN</span>/health/ready
+<a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a>open<span class="w"> </span>https://<span class="nv">$AF_DOMAIN</span>
 </code></pre></div>
 <h3 id="扩缩容">扩缩容</h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="c1"># 水平扩展 backend（Nginx 自动负载均衡）</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="c1"># 水平扩展 backend（Caddy 自动负载均衡）</span>
 <a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>docker-compose.prod.yml<span class="w"> </span>--profile<span class="w"> </span>infra<span class="w"> </span>up<span class="w"> </span>-d<span class="w"> </span>--scale<span class="w"> </span><span class="nv">backend</span><span class="o">=</span><span class="m">2</span>
 <a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>
 <a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="c1"># 注意：首次启动多副本时，Alembic 迁移通过 PG advisory lock 串行化</span>
@@ -2295,17 +2321,23 @@
 </code></pre></div>
 <hr />
 <h2 id="mode-2b-production云数据库">Mode 2B: Production（云数据库）</h2>
-<p>使用外部 RDS + ElastiCache/Redis，不启动数据库容器。</p>
+<p>使用外部 RDS + ElastiCache/Redis，不启动数据库容器。Caddy / backend / frontend
+与 2A 相同，仅数据库来源不同。</p>
 <h3 id="配置">配置</h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>cp<span class="w"> </span>deploy/.env.prod.example<span class="w"> </span>.env
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="c1"># 编辑 .env，修改连接地址：</span>
-<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="c1"># ARTIFACTFLOW_DATABASE_URL=postgresql+asyncpg://user:pass@your-rds-endpoint:5432/artifactflow</span>
-<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="c1"># ARTIFACTFLOW_REDIS_URL=redis://your-redis-endpoint:6379</span>
-<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="c1"># 删除或注释掉 POSTGRES_* 相关变量</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="c1"># 编辑 .env：</span>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="c1"># - AF_DOMAIN / AF_ACME_EMAIL（同 2A，Caddy 自动 HTTPS 必填）</span>
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="c1"># - 修改连接地址：</span>
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="c1">#   ARTIFACTFLOW_DATABASE_URL=postgresql+asyncpg://user:pass@your-rds-endpoint:5432/artifactflow</span>
+<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a><span class="c1">#   ARTIFACTFLOW_REDIS_URL=redis://your-redis-endpoint:6379</span>
+<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a><span class="c1"># - 删除或注释掉 POSTGRES_* 相关变量</span>
 </code></pre></div>
 <h3 id="启动_1">启动</h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="c1"># 不加 --profile infra，不启动 PG/Redis 容器</span>
 <a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>docker-compose.prod.yml<span class="w"> </span>up<span class="w"> </span>-d
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="c1"># 或用一键脚本（2B 必须 --no-infra，否则会多起没用的本地 PG/Redis）：</span>
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="c1"># ./deploy/scripts/deploy-prod.sh --no-infra</span>
 </code></pre></div>
 <hr />
 <h2 id="mode-3-内网离线部署">Mode 3: 内网离线部署</h2>
@@ -2913,7 +2945,7 @@
 </tbody>
 </table>
 <p><code>mem_limit</code> 在这里<strong>是 tripwire 不是分配额度</strong>（loud-failure 原则，与上一节 Redis <code>noeviction</code> 同一思路）：触上限 → OOM kill → 容器 restart → 运维收到告警，而不是悄无声息吃满 host 把同机服务一起拖死。Postgres <code>2g</code> 的稳态保守估算 <code>256MB shared_buffers + 200 connection × 典型 work_mem + 内核 buffer ≈ 1.2–1.5g</code>，留 ~30% safety margin。若 p99 RSS 长期超过 1.5g，先排查异常（慢查询/连接泄漏）再谈调参，不要直接放宽。</p>
-<p>nginx 不设 <code>mem_limit</code>：长期 &lt; 50 MB，加了纯属冗余。</p>
+<p>反向代理（nginx / Caddy）不设 <code>mem_limit</code>：长期 &lt; 50 MB，加了纯属冗余。</p>
 <hr />
 <h2 id="运维参考">运维参考</h2>
 <h3 id="数据库迁移">数据库迁移</h3>
@@ -2941,32 +2973,115 @@
 <li><strong>失败处理：</strong> Leader 迁移失败后不释放 lock（连接关闭自动释放），Follower 检测到 schema 未到 head 后退出，容器 restart policy 会重试</li>
 <li><strong>Fallback：</strong> 如果 advisory lock 不可用（如 MySQL），直接执行 <code>alembic upgrade head</code></li>
 </ul>
-<h3 id="nginx-配置">Nginx 配置</h3>
-<p>生产模式使用 Nginx 反向代理（配置文件：<code>deploy/nginx.conf</code>）：</p>
+<h3 id="反向代理配置">反向代理配置</h3>
+<p>两种部署用不同的反向代理，但职责（SSE 不缓冲、挡 Swagger、维护页 flag、真实 IP 透传、上传上限）一一对应：</p>
+<table>
+<thead>
+<tr>
+<th>维度</th>
+<th><strong>Mode 2（公网）= Caddy</strong></th>
+<th><strong>Mode 3（内网）= nginx</strong></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>配置文件</td>
+<td><code>deploy/Caddyfile</code></td>
+<td><code>deploy/nginx.conf</code></td>
+</tr>
+<tr>
+<td>TLS</td>
+<td><strong>自动 HTTPS</strong>（Let's Encrypt，端口 80+443）</td>
+<td>无（HTTP 单端口 80，内网气隙环境）</td>
+</tr>
+<tr>
+<td>SSE</td>
+<td><code>flush_interval -1</code>（关响应缓冲）</td>
+<td><code>proxy_buffering off</code>，超时 1800s</td>
+</tr>
+<tr>
+<td>Swagger</td>
+<td><code>/docs</code>、<code>/redoc</code>、<code>/openapi.json</code> → 404</td>
+<td>同左</td>
+</tr>
+<tr>
+<td>上传上限</td>
+<td><code>request_body max_size 210MB</code></td>
+<td><code>client_max_body_size 210M</code></td>
+</tr>
+<tr>
+<td>维护开关</td>
+<td><code>file</code> matcher 每请求 stat <code>MAINTENANCE_ON</code></td>
+<td><code>if (-f ... MAINTENANCE_ON) return 503</code></td>
+</tr>
+<tr>
+<td>真实 IP</td>
+<td><code>header_up X-Real-IP {remote_host}</code></td>
+<td><code>proxy_set_header X-Real-IP $remote_addr</code></td>
+</tr>
+</tbody>
+</table>
 <ul>
-<li>SSE 流式连接：<code>/api/v1/stream/</code> 路径关闭 <code>proxy_buffering</code>，超时 1800s</li>
-<li>Swagger 文档：生产环境下 <code>/docs</code>、<code>/redoc</code>、<code>/openapi.json</code> 返回 404</li>
-<li><code>--scale</code> 支持：使用 Docker 内部 DNS resolver <code>127.0.0.11</code></li>
-<li>维护开关：<code>deploy/maintenance/MAINTENANCE_ON</code> flag 文件控制（详见下方"维护模式"）</li>
-<li><strong><code>X-Real-IP</code>（登录频控依赖）</strong>：各 location 必须设 <code>proxy_set_header X-Real-IP $remote_addr</code> —— 后端 per-IP 登录频控<strong>只读这个头</strong>（刻意不信可被客户端伪造的 <code>X-Forwarded-For</code>）。安全前提是 backend 仅 <code>expose</code>、不发布主机端口，只经 nginx 可达，故这个头不可伪造。换自定义代理 / 删掉它 → per-IP 限流静默退化成"所有请求共用 nginx 容器一个 IP 桶"（per-username 主防线仍在）。<code>deploy/nginx.conf</code> 已在各 location 设好。</li>
+<li><strong>上传上限 210MB</strong>：<code>POST /api/v1/chat</code> 把整批附件放进<strong>一个</strong> multipart 请求，body 是整批之和（per-file ≤20MB × ≤10 文件 = 200MB + 10MB multipart 开销）。代理层放到 210MB，让后端的 per-file / count 校验做唯一权威、超大文件拿到干净的 422 而非代理层抢先 413。两份配置数值一致。</li>
+<li><strong><code>X-Real-IP</code>（登录频控依赖）</strong>：后端 per-IP 登录频控<strong>只读这个头</strong>（刻意不信可被客户端伪造的 <code>X-Forwarded-For</code>）。安全前提是 backend 仅 <code>expose</code>、不发布主机端口，只经反向代理可达，故这个头不可伪造。删掉它 / 换不写该头的代理 → per-IP 限流静默退化成"所有请求共用代理容器一个 IP 桶"（per-username 主防线仍在）。</li>
+<li><strong>Mode 2 灰云（CF DNS only）直连</strong>：<code>{remote_host}</code> 就是真实客户端 IP，直接写进 <code>X-Real-IP</code>，不退化。</li>
+<li><strong>Mode 2 若改用 CF 橙云（proxied）</strong>：真实客户端 IP 移到 <code>X-Forwarded-For</code>、<code>{remote_host}</code> 变成 CF 边缘 IP —— 需在 Caddyfile 加 <code>trusted_proxies</code>（CF IP 段）并改用 <code>{client_ip}</code>，否则 per-IP 限流退化。<code>deploy/Caddyfile</code> 头部注释了这一点。</li>
+<li><strong><code>--scale</code> 支持</strong>：nginx 用 Docker 内部 DNS resolver <code>127.0.0.11</code>；Caddy 用服务名 <code>backend:8000</code> / <code>frontend:3000</code>，运行时按需解析，原生支持多副本。</li>
 </ul>
 <h3 id="维护模式无停机更新窗口">维护模式（无停机更新窗口）</h3>
-<p>适用于 <strong>Mode 3</strong>（内网，有 Nginx 反向代理）。Mode 1 无 Nginx，不适用；Mode 2（生产）暂未适配——<code>pause.sh</code> / <code>resume.sh</code> 硬编码 <code>docker-compose.intranet.yml</code>，硬套会驱动错文件。</p>
-<p><strong>两层接口：</strong> 镜像升级（典型场景）用 <code>pause.sh</code> / <code>resume.sh</code>，它们封装了"维护页 + 停服务 → 起新版本 + 关维护页"的全套动作；config-only 改动不需要停服务，直接用底层的 <code>maintenance.sh on|off</code>。</p>
+<p>适用于 <strong>Mode 2（公网 / Caddy）</strong> 和 <strong>Mode 3（内网 / nginx）</strong>。Mode 1 无反向代理，不适用。</p>
+<p><strong>脚本分两套，机制完全相同（共享 <code>deploy/scripts/_maint_lib.sh</code>），只差 compose 文件与健康探针：</strong></p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>Mode 2（公网）</th>
+<th>Mode 3（内网）</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>进维护窗口</td>
+<td><code>pause-prod.sh</code></td>
+<td><code>pause.sh</code></td>
+</tr>
+<tr>
+<td>退维护窗口</td>
+<td><code>resume-prod.sh</code></td>
+<td><code>resume.sh</code></td>
+</tr>
+<tr>
+<td>compose 文件</td>
+<td><code>docker-compose.prod.yml</code></td>
+<td><code>deploy/docker-compose.intranet.yml</code></td>
+</tr>
+<tr>
+<td>resume 健康探针</td>
+<td>caddy 容器内经 Caddy 内部端口 <code>wget localhost:2021/health</code>（真正过 Caddy 反代 → 验证配置已加载 + Caddy→backend 通；该端口不发布到宿主机，避开 TLS-on-localhost 域名不匹配）</td>
+<td>host → nginx 发布端口 <code>localhost:${AF_HTTP_PORT}/health</code>（顺带验证 nginx 静态 upstream 解析未过期）</td>
+</tr>
+</tbody>
+</table>
+<p><strong>两层接口：</strong> 镜像升级（典型场景）用 <code>pause*.sh</code> / <code>resume*.sh</code>，封装"维护页 + 停服务 → 起新版本 + 关维护页"全套；config-only 改动不需要停服务，直接用底层的 <code>maintenance.sh on|off</code>（公网内网共用同一个）。</p>
 <p><strong>机制：</strong></p>
 <ul>
-<li><code>deploy/scripts/maintenance.sh on|off|status</code> 在宿主机 <code>deploy/maintenance/</code> 下写入 / 删除 <code>MAINTENANCE_ON</code> flag 文件</li>
-<li>Nginx 在每个 gated location 头部 <code>if (-f /etc/nginx/maintenance/MAINTENANCE_ON) { return 503; }</code>，触发后 <code>error_page 503 @maintenance</code> 渲染 <code>maintenance.html</code>（带睡猫的静态页）</li>
+<li><code>deploy/scripts/maintenance.sh on|off|status</code> 在宿主机 <code>deploy/maintenance/</code> 下写入 / 删除 <code>MAINTENANCE_ON</code> flag 文件（两套部署共用同一目录、同一脚本）</li>
+<li>反向代理每请求检查该 flag → 命中渲染 <code>maintenance.html</code>（带睡猫的静态页）：</li>
+<li><strong>nginx</strong>：每个 gated location 头部 <code>if (-f ... MAINTENANCE_ON) { return 503; }</code> → <code>error_page 503 @maintenance</code></li>
+<li><strong>Caddy</strong>：<code>file</code> matcher stat <code>MAINTENANCE_ON</code> → <code>file_server { status 503 }</code> 直接服务维护页</li>
 <li>检查是 per-request 的，<strong>无需 reload</strong>，切换秒级生效</li>
 <li><code>/health/</code> 故意不挡——容器 healthcheck 和外部监控仍要看到真实状态</li>
-<li><code>error_page 503 @maintenance</code> 只在 gated location 内生效（不放在 server 级），加上 <code>proxy_intercept_errors</code> 默认 <code>off</code>，<strong>上游真实 503 原样穿透</strong>（如 <code>/health/ready</code> 在 DB/Redis 异常时返回的 JSON 503，契约不会被改写为 HTML）</li>
+<li><strong>上游真实 503 原样穿透</strong>：维护页 503 只在 gated 路径内产生，<code>/health/ready</code> 在 DB/Redis 异常时返回的 JSON 503 不会被改写为 HTML（nginx 靠 <code>error_page</code> 不放 server 级 + <code>proxy_intercept_errors off</code>；Caddy 靠 <code>/health</code> 在 handle 链里排在维护 gate 之前）</li>
 </ul>
-<p><strong>首次启用（仅一次）：</strong> intranet compose 已声明 <code>deploy/maintenance</code> 卷挂载，但既有 nginx 容器需要 force-recreate 一次才会挂上：</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>deploy/docker-compose.intranet.yml<span class="w"> </span>up<span class="w"> </span>-d<span class="w"> </span>--force-recreate<span class="w"> </span>nginx
+<p><strong>首次启用（仅一次）：</strong> compose 已声明 <code>deploy/maintenance</code> 卷挂载，但既有代理容器需要 force-recreate 一次才会挂上：</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a><span class="c1"># Mode 3（内网 / nginx）</span>
+<a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>deploy/docker-compose.intranet.yml<span class="w"> </span>up<span class="w"> </span>-d<span class="w"> </span>--force-recreate<span class="w"> </span>nginx
+<a id="__codelineno-17-3" name="__codelineno-17-3" href="#__codelineno-17-3"></a><span class="c1"># Mode 2（公网 / Caddy）</span>
+<a id="__codelineno-17-4" name="__codelineno-17-4" href="#__codelineno-17-4"></a>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>docker-compose.prod.yml<span class="w"> </span>--profile<span class="w"> </span>infra<span class="w"> </span>up<span class="w"> </span>-d<span class="w"> </span>--force-recreate<span class="w"> </span>caddy
 </code></pre></div>
 <p>之后所有切换不需要碰 docker。</p>
-<p><strong>镜像升级（典型场景）—— <code>pause.sh</code> / <code>resume.sh</code>：</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a><span class="c1"># 1. 加载新镜像（不影响在跑容器）</span>
+<p><strong>镜像升级（典型场景）：</strong> 内网用 <code>pause.sh</code> / <code>resume.sh</code>，公网用 <code>pause-prod.sh</code> / <code>resume-prod.sh</code>。下面以内网气隙升级为例（公网无 docker load / tar 步骤，把脚本名换成 <code>-prod</code> 版即可）：</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a><span class="c1"># 1. 加载新镜像（不影响在跑容器）—— 仅内网气隙需要</span>
 <a id="__codelineno-18-2" name="__codelineno-18-2" href="#__codelineno-18-2"></a>docker<span class="w"> </span>load<span class="w"> </span>-i<span class="w"> </span>tmp/artifactflow-v2.3.0.tar.gz
 <a id="__codelineno-18-3" name="__codelineno-18-3" href="#__codelineno-18-3"></a>tar<span class="w"> </span>xzf<span class="w"> </span>tmp/artifactflow-deploy-v2.3.0.tar.gz<span class="w">   </span><span class="c1"># 如果 deploy 也变了</span>
 <a id="__codelineno-18-4" name="__codelineno-18-4" href="#__codelineno-18-4"></a>tar<span class="w"> </span>xzf<span class="w"> </span>tmp/artifactflow-config-v2.3.0.tar.gz<span class="w">   </span><span class="c1"># 如果 config 也变了</span>
@@ -2978,19 +3093,39 @@
 <a id="__codelineno-18-10" name="__codelineno-18-10" href="#__codelineno-18-10"></a><span class="c1">#    backend 或 frontend 60s 内不 healthy → 维护页保持开启，运维有时间排查</span>
 <a id="__codelineno-18-11" name="__codelineno-18-11" href="#__codelineno-18-11"></a>./deploy/scripts/resume.sh<span class="w"> </span>v2.3.0
 </code></pre></div>
-<p><code>resume.sh</code> 兼容 V1（<code>docker-compose</code>）和 V2（<code>docker compose</code>），自动探测，CentOS 7 老服务器和 Docker Desktop 都能用。</p>
+<blockquote>
+<p><strong>公网（Mode 2）升级：镜像本地构建，没有 docker load / tar / 版本 tag。</strong> prod compose
+的 backend/frontend 固定是 <code>:latest</code>，所以<strong>升级 = 切代码再重建</strong>，<code>resume-prod.sh</code>
+<strong>不接版本号</strong>（传了也无效——没有版本化镜像可切）：
+<div class="highlight"><pre><span></span><code><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a><span class="c1"># 低流量：直接重建拉起（几秒停机，无维护页）</span>
+<a id="__codelineno-19-2" name="__codelineno-19-2" href="#__codelineno-19-2"></a>git<span class="w"> </span>pull<span class="w"> </span>--ff-only<span class="w">                                  </span><span class="c1"># 或 git checkout &lt;ref&gt;</span>
+<a id="__codelineno-19-3" name="__codelineno-19-3" href="#__codelineno-19-3"></a>./deploy/scripts/deploy-prod.sh<span class="w"> </span>--pull<span class="w"> </span>--build<span class="w">      </span><span class="c1"># 2B 外部 DB 追加 --no-infra</span>
+<a id="__codelineno-19-4" name="__codelineno-19-4" href="#__codelineno-19-4"></a>
+<a id="__codelineno-19-5" name="__codelineno-19-5" href="#__codelineno-19-5"></a><span class="c1"># 要维护页包住整个窗口：</span>
+<a id="__codelineno-19-6" name="__codelineno-19-6" href="#__codelineno-19-6"></a>./deploy/scripts/pause-prod.sh<span class="w"> </span><span class="s2">&quot;升级中，约 5 分钟&quot;</span><span class="w">   </span><span class="c1"># 起维护页 + 停 backend/frontend</span>
+<a id="__codelineno-19-7" name="__codelineno-19-7" href="#__codelineno-19-7"></a>./deploy/scripts/deploy-prod.sh<span class="w"> </span>--build<span class="w"> </span>--no-cert-watch<span class="w">  </span><span class="c1"># 重建并拉起（2B 加 --no-infra）</span>
+<a id="__codelineno-19-8" name="__codelineno-19-8" href="#__codelineno-19-8"></a><span class="c1">#   ↑ 维护窗口里必须 --no-cert-watch：否则脚本结尾会 tail caddy 日志阻塞，</span>
+<a id="__codelineno-19-9" name="__codelineno-19-9" href="#__codelineno-19-9"></a><span class="c1">#     后面的 resume 不会自动执行（证书已签发过，无需再盯）</span>
+<a id="__codelineno-19-10" name="__codelineno-19-10" href="#__codelineno-19-10"></a>./deploy/scripts/resume-prod.sh<span class="w">                     </span><span class="c1"># 等 healthy + 经 Caddy(:2021) 探针 → 关维护页</span>
+</code></pre></div>
+<code>deploy-prod.sh</code> 默认带 <code>--profile infra</code> 拉起捆绑 PG/Redis（Mode 2A）；<strong>Mode 2B
+用外部 DB/Redis，必须加 <code>--no-infra</code></strong>，否则会多起一对没用的本地 PG/Redis（空密码
+PG 还会起不来）。<code>pause-prod.sh</code> / <code>resume-prod.sh</code> 本身只包"维护页 + 停/起当前镜像"，
+不改版本、不接参数——用于改 <code>.env</code> 等不换镜像的维护窗口。</p>
+</blockquote>
+<p><code>resume*.sh</code> 兼容 V1（<code>docker-compose</code>）和 V2（<code>docker compose</code>），自动探测，CentOS 7 老服务器和 Docker Desktop 都能用。</p>
 <blockquote>
 <p><strong>慢盘机器调长超时：</strong> 默认每个服务等 60s healthy；若机器磁盘慢、Next.js / FastAPI 冷启动会超过 60s，超时后看日志没发现真错误，直接重跑并加大超时：
-<div class="highlight"><pre><span></span><code><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a><span class="nv">RESUME_HEALTHY_TIMEOUT</span><span class="o">=</span><span class="m">120</span><span class="w"> </span>./deploy/scripts/resume.sh<span class="w"> </span>v2.3.0
+<div class="highlight"><pre><span></span><code><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a><span class="nv">RESUME_HEALTHY_TIMEOUT</span><span class="o">=</span><span class="m">120</span><span class="w"> </span>./deploy/scripts/resume.sh<span class="w"> </span>v2.3.0
 </code></pre></div>
 最小允许值 10s（再小就会比容器 healthcheck 的 <code>start_period=15s</code> 还短，必假阴性）。</p>
 </blockquote>
 <p><strong>Config-only 变更 —— 直接 <code>maintenance.sh</code>：</strong></p>
 <p>只调 prompt / <code>models.yaml</code> 这种 <code>restart backend</code> 就能生效的场景，不需要 <code>pause.sh</code> 那种"停服务"操作，开关 flag 的同时 <code>restart backend</code> 就够：</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a>./deploy/scripts/maintenance.sh<span class="w"> </span>on<span class="w"> </span><span class="s2">&quot;调整 agent 配置，约 1 分钟&quot;</span>
-<a id="__codelineno-20-2" name="__codelineno-20-2" href="#__codelineno-20-2"></a>vim<span class="w"> </span>config/agents/lead_agent.md
-<a id="__codelineno-20-3" name="__codelineno-20-3" href="#__codelineno-20-3"></a>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>deploy/docker-compose.intranet.yml<span class="w"> </span>restart<span class="w"> </span>backend
-<a id="__codelineno-20-4" name="__codelineno-20-4" href="#__codelineno-20-4"></a>./deploy/scripts/maintenance.sh<span class="w"> </span>off
+<div class="highlight"><pre><span></span><code><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a>./deploy/scripts/maintenance.sh<span class="w"> </span>on<span class="w"> </span><span class="s2">&quot;调整 agent 配置，约 1 分钟&quot;</span>
+<a id="__codelineno-21-2" name="__codelineno-21-2" href="#__codelineno-21-2"></a>vim<span class="w"> </span>config/agents/lead_agent.md
+<a id="__codelineno-21-3" name="__codelineno-21-3" href="#__codelineno-21-3"></a>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>deploy/docker-compose.intranet.yml<span class="w"> </span>restart<span class="w"> </span>backend
+<a id="__codelineno-21-4" name="__codelineno-21-4" href="#__codelineno-21-4"></a>./deploy/scripts/maintenance.sh<span class="w"> </span>off
 </code></pre></div>
 <blockquote>
 <p><strong>注意：</strong> <code>.env</code> 变更不能走 <code>restart</code>——<code>docker compose restart</code> 不会重读 <code>.env</code> interpolation，容器还在用旧值。需要改环境变量时，请走 <code>pause.sh → 改 .env → resume.sh</code>（resume 内部 <code>up -d</code> 会重建容器并注入新环境变量），或者短维护窗口下手动 <code>maintenance.sh on → up -d backend → maintenance.sh off</code>。</p>
@@ -3038,38 +3173,46 @@
 <td><code>redis_data</code></td>
 <td>Redis AOF 持久化（Mode 2A/3A）</td>
 </tr>
+<tr>
+<td><code>caddy_data</code></td>
+<td>Caddy 证书 + ACME 账户密钥（Mode 2）。<strong>务必持久化</strong> —— 丢卷触发证书重新签发，频繁重建可能撞 Let's Encrypt 每域每周 50 张频控</td>
+</tr>
+<tr>
+<td><code>caddy_config</code></td>
+<td>Caddy 运行时自管配置（Mode 2）</td>
+</tr>
 </tbody>
 </table>
 <h3 id="停止与清理">停止与清理</h3>
 <blockquote>
 <p><strong><code>--profile infra</code> 必须与启动时一致</strong>，否则 PG/Redis 容器不在 Compose 作用域内，<code>down</code> 会跳过它们。</p>
 </blockquote>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a><span class="c1"># Mode 1</span>
-<a id="__codelineno-21-2" name="__codelineno-21-2" href="#__codelineno-21-2"></a>docker<span class="w"> </span>compose<span class="w"> </span>down
-<a id="__codelineno-21-3" name="__codelineno-21-3" href="#__codelineno-21-3"></a>
-<a id="__codelineno-21-4" name="__codelineno-21-4" href="#__codelineno-21-4"></a><span class="c1"># Mode 2A（启动时带了 --profile infra，停止也必须带）</span>
-<a id="__codelineno-21-5" name="__codelineno-21-5" href="#__codelineno-21-5"></a>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>docker-compose.prod.yml<span class="w"> </span>--profile<span class="w"> </span>infra<span class="w"> </span>down
-<a id="__codelineno-21-6" name="__codelineno-21-6" href="#__codelineno-21-6"></a>
-<a id="__codelineno-21-7" name="__codelineno-21-7" href="#__codelineno-21-7"></a><span class="c1"># Mode 2B（无 --profile）</span>
-<a id="__codelineno-21-8" name="__codelineno-21-8" href="#__codelineno-21-8"></a>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>docker-compose.prod.yml<span class="w"> </span>down
-<a id="__codelineno-21-9" name="__codelineno-21-9" href="#__codelineno-21-9"></a>
-<a id="__codelineno-21-10" name="__codelineno-21-10" href="#__codelineno-21-10"></a><span class="c1"># Mode 3A</span>
-<a id="__codelineno-21-11" name="__codelineno-21-11" href="#__codelineno-21-11"></a>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>deploy/docker-compose.intranet.yml<span class="w"> </span>--profile<span class="w"> </span>infra<span class="w"> </span>down
-<a id="__codelineno-21-12" name="__codelineno-21-12" href="#__codelineno-21-12"></a>
-<a id="__codelineno-21-13" name="__codelineno-21-13" href="#__codelineno-21-13"></a><span class="c1"># Mode 3B</span>
-<a id="__codelineno-21-14" name="__codelineno-21-14" href="#__codelineno-21-14"></a>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>deploy/docker-compose.intranet.yml<span class="w"> </span>down
+<div class="highlight"><pre><span></span><code><a id="__codelineno-22-1" name="__codelineno-22-1" href="#__codelineno-22-1"></a><span class="c1"># Mode 1</span>
+<a id="__codelineno-22-2" name="__codelineno-22-2" href="#__codelineno-22-2"></a>docker<span class="w"> </span>compose<span class="w"> </span>down
+<a id="__codelineno-22-3" name="__codelineno-22-3" href="#__codelineno-22-3"></a>
+<a id="__codelineno-22-4" name="__codelineno-22-4" href="#__codelineno-22-4"></a><span class="c1"># Mode 2A（启动时带了 --profile infra，停止也必须带）</span>
+<a id="__codelineno-22-5" name="__codelineno-22-5" href="#__codelineno-22-5"></a>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>docker-compose.prod.yml<span class="w"> </span>--profile<span class="w"> </span>infra<span class="w"> </span>down
+<a id="__codelineno-22-6" name="__codelineno-22-6" href="#__codelineno-22-6"></a>
+<a id="__codelineno-22-7" name="__codelineno-22-7" href="#__codelineno-22-7"></a><span class="c1"># Mode 2B（无 --profile）</span>
+<a id="__codelineno-22-8" name="__codelineno-22-8" href="#__codelineno-22-8"></a>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>docker-compose.prod.yml<span class="w"> </span>down
+<a id="__codelineno-22-9" name="__codelineno-22-9" href="#__codelineno-22-9"></a>
+<a id="__codelineno-22-10" name="__codelineno-22-10" href="#__codelineno-22-10"></a><span class="c1"># Mode 3A</span>
+<a id="__codelineno-22-11" name="__codelineno-22-11" href="#__codelineno-22-11"></a>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>deploy/docker-compose.intranet.yml<span class="w"> </span>--profile<span class="w"> </span>infra<span class="w"> </span>down
+<a id="__codelineno-22-12" name="__codelineno-22-12" href="#__codelineno-22-12"></a>
+<a id="__codelineno-22-13" name="__codelineno-22-13" href="#__codelineno-22-13"></a><span class="c1"># Mode 3B</span>
+<a id="__codelineno-22-14" name="__codelineno-22-14" href="#__codelineno-22-14"></a>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>deploy/docker-compose.intranet.yml<span class="w"> </span>down
 </code></pre></div>
 <p>如需同时删除数据卷（<strong>不可逆，会丢失数据库和 Redis 数据</strong>）：</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-22-1" name="__codelineno-22-1" href="#__codelineno-22-1"></a>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>docker-compose.prod.yml<span class="w"> </span>--profile<span class="w"> </span>infra<span class="w"> </span>down<span class="w"> </span>-v
+<div class="highlight"><pre><span></span><code><a id="__codelineno-23-1" name="__codelineno-23-1" href="#__codelineno-23-1"></a>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>docker-compose.prod.yml<span class="w"> </span>--profile<span class="w"> </span>infra<span class="w"> </span>down<span class="w"> </span>-v
 </code></pre></div>
 <h3 id="日志">日志</h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-23-1" name="__codelineno-23-1" href="#__codelineno-23-1"></a><span class="c1"># 查看所有服务日志</span>
-<a id="__codelineno-23-2" name="__codelineno-23-2" href="#__codelineno-23-2"></a>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>&lt;compose-file&gt;<span class="w"> </span>logs<span class="w"> </span>-f
-<a id="__codelineno-23-3" name="__codelineno-23-3" href="#__codelineno-23-3"></a>
-<a id="__codelineno-23-4" name="__codelineno-23-4" href="#__codelineno-23-4"></a><span class="c1"># 单服务日志</span>
-<a id="__codelineno-23-5" name="__codelineno-23-5" href="#__codelineno-23-5"></a>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>&lt;compose-file&gt;<span class="w"> </span>logs<span class="w"> </span>-f<span class="w"> </span>backend
-<a id="__codelineno-23-6" name="__codelineno-23-6" href="#__codelineno-23-6"></a>
-<a id="__codelineno-23-7" name="__codelineno-23-7" href="#__codelineno-23-7"></a><span class="c1"># 开启 debug 日志：.env 中设置 ARTIFACTFLOW_DEBUG=true</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-24-1" name="__codelineno-24-1" href="#__codelineno-24-1"></a><span class="c1"># 查看所有服务日志</span>
+<a id="__codelineno-24-2" name="__codelineno-24-2" href="#__codelineno-24-2"></a>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>&lt;compose-file&gt;<span class="w"> </span>logs<span class="w"> </span>-f
+<a id="__codelineno-24-3" name="__codelineno-24-3" href="#__codelineno-24-3"></a>
+<a id="__codelineno-24-4" name="__codelineno-24-4" href="#__codelineno-24-4"></a><span class="c1"># 单服务日志</span>
+<a id="__codelineno-24-5" name="__codelineno-24-5" href="#__codelineno-24-5"></a>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>&lt;compose-file&gt;<span class="w"> </span>logs<span class="w"> </span>-f<span class="w"> </span>backend
+<a id="__codelineno-24-6" name="__codelineno-24-6" href="#__codelineno-24-6"></a>
+<a id="__codelineno-24-7" name="__codelineno-24-7" href="#__codelineno-24-7"></a><span class="c1"># 开启 debug 日志：.env 中设置 ARTIFACTFLOW_DEBUG=true</span>
 </code></pre></div>
 <p><strong>Docker 日志磁盘上限</strong>：两个 compose 文件给全部 5 个服务都配了 <code>logging: { driver: json-file, options: { max-size: "100m", max-file: "3" } }</code>，单服务最多 300 MB（旧切片滚动丢弃）。默认 json-file driver <strong>无上限</strong>，长跑容器能把 <code>/var/lib/docker/containers/*/&lt;id&gt;-json.log</code> 撑到几十 GB 填满宿主机盘 —— 这套配置是兜底。注意这只覆盖 stdout/stderr 那一层；backend 自己写到 <code>/app/data/observability/*.jsonl</code> 的文件由 Python <code>RotatingFileHandler</code> 单独管（见 <code>OBS_JSONL_MAX_MB</code> × <code>OBS_JSONL_BACKUP_COUNT</code>），两条路径独立。</p>
 
