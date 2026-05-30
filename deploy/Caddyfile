@@ -111,3 +111,20 @@
 		}
 	}
 }
+
+# Internal health listener — HTTP, NO TLS, and deliberately NOT published to the
+# host (docker-compose.prod.yml only maps 80/443). Reachable only from inside the
+# caddy container / docker network. resume-prod.sh probes this so the health
+# check flows through Caddy's real reverse_proxy machinery (proving the config
+# loaded + Caddy → backend works), instead of bypassing Caddy entirely by
+# hitting backend:8000 from caddy's netns. A port-only address makes Caddy serve
+# plain HTTP (no automatic-HTTPS redirect), so the busybox-wget probe needs no
+# cert / SNI / Host-header gymnastics.
+:2021 {
+	handle /health/* {
+		reverse_proxy backend:8000
+	}
+	handle {
+		respond "not found" 404
+	}
+}

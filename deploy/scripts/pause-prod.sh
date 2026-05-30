@@ -24,6 +24,9 @@ MAINT_MODE_LABEL="Mode 2 / 公网"
 MAINT_PROXY_LABEL="Caddy"
 MAINT_PROXY_EXTRA="，HTTPS 不中断"
 MAINT_RESUME_HINT="resume-prod.sh"
+# Public resume takes no VERSION arg (images are locally-built :latest) — suppress
+# the " [VERSION]" suffix the shared lib appends by default for the intranet flow.
+MAINT_RESUME_ARGHINT=""
 
 # shellcheck source=_maint_lib.sh
 source "$SCRIPT_DIR/_maint_lib.sh"

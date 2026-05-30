@@ -136,7 +136,13 @@ services:
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-artifactflow}
       POSTGRES_USER: ${POSTGRES_USER:-artifactflow}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      # NOT `:?` — Compose interpolates this at PARSE time regardless of which
+      # profile runs, so a `:?` guard would make Mode 2B (external DB, no infra
+      # profile, POSTGRES_* removed from .env) fail `up` before it even starts.
+      # The image itself is the loud guard: postgres:16-alpine refuses to init
+      # with an empty password ("superuser password is not specified"), so a
+      # 2A user who forgets it still fails hard, just at container start.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-}
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-artifactflow}"]
       interval: 10s

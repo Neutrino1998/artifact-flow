@@ -3,34 +3,42 @@
 # Thin entrypoint — shared logic lives in _maint_lib.sh.
 #
 # Usage:
-#   deploy/scripts/resume-prod.sh [VERSION]
+#   deploy/scripts/resume-prod.sh
 #
-# VERSION is optional:
-#   - provided → sets AF_VERSION, backend/frontend recreate with that image tag.
-#   - omitted  → AF_VERSION env var, else compose default ("latest").
+# No VERSION argument (unlike the intranet resume.sh): public images are built
+# locally and pinned to :latest in docker-compose.prod.yml — there is no
+# versioned tag to switch to. To upgrade public, change code then rebuild:
+#   git pull --ff-only   # or git checkout <ref>
+#   ./deploy/scripts/deploy-prod.sh --build
+# resume-prod.sh just brings the CURRENT images back up after a maintenance
+# window (e.g. an .env edit), it does not change versions.
 #
 # Env knobs:
 #   RESUME_HEALTHY_TIMEOUT  per-service healthy wait, seconds (default 60).
 #
-# Simpler probe than the intranet resume.sh: Caddy owns fixed ports 80/443 (no
-# AF_HTTP_PORT host-port resolution), and probing localhost:443 from the host
+# Probe note: Caddy owns fixed ports 80/443; probing localhost:443 from the host
 # would fail TLS hostname verification (cert is for AF_DOMAIN, not localhost).
-# So the probe runs INSIDE the caddy container against backend:8000 instead.
+# So the probe runs INSIDE the caddy container against Caddy's OWN internal
+# health listener (Caddyfile `:2021`, not published to the host) — this exercises
+# the real Caddy → backend reverse_proxy path (config loaded + routing works),
+# not just backend's liveness on caddy's network.
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 COMPOSE_FILE="$ROOT/docker-compose.prod.yml"
-VERSION="${1:-${AF_VERSION:-latest}}"
 
 MAINT_MODE_LABEL="Mode 2 / 公网"
 
-# Through-proxy health probe: exec into the caddy container and hit the backend
-# health endpoint over Caddy's own network. /health is not gated by maintenance,
-# so this confirms Caddy → backend is alive before lifting the flag. Run
-# in-container so it doesn't depend on the host firewall exposing 80/443, and to
-# sidestep TLS-on-localhost hostname mismatch.
+# Through-proxy health probe: exec into the caddy container and hit Caddy's
+# internal health listener (`:2021` in the Caddyfile — HTTP, no TLS, NOT
+# published to the host). The request flows client → Caddy(:2021) →
+# reverse_proxy → backend:8000, so a green result means Caddy is up, its config
+# loaded, and the proxy path to backend works. /health is not gated by
+# maintenance, so this is safe to run before lifting the flag. Running
+# in-container also avoids depending on the host firewall exposing 80/443 and
+# sidesteps the TLS-on-localhost hostname mismatch.
 maint_probe() {
   local caddy_cid
   caddy_cid=$("${DC[@]}" -f "$COMPOSE_FILE" ps -q caddy 2>/dev/null || true)
@@ -40,8 +48,8 @@ maint_probe() {
     return 1
   fi
   # caddy:alpine ships busybox wget (no curl). -q --spider = HEAD-ish probe.
-  if ! docker exec "$caddy_cid" wget -q --spider -T 5 http://backend:8000/health/ready; then
-    echo "⚠ /health/ready 经 Caddy→backend 不可达，维护页保持开启"
+  if ! docker exec "$caddy_cid" wget -q --spider -T 5 http://localhost:2021/health/ready; then
+    echo "⚠ /health/ready 经 Caddy(:2021)→backend 不可达，维护页保持开启"
     echo "  排查：${DC[*]} -f $COMPOSE_FILE logs --tail=40 caddy backend"
     return 1
   fi
@@ -50,4 +58,4 @@ maint_probe() {
 # shellcheck source=_maint_lib.sh
 source "$SCRIPT_DIR/_maint_lib.sh"
 
-maint_resume "$VERSION"
+maint_resume

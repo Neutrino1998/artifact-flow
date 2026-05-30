@@ -82,6 +82,12 @@ cp deploy/.env.prod.example .env
 # 3. 域名 DNS 必须先解析到本机公网 IP，再启动 —— 否则 Caddy 的 ACME
 #    HTTP-01 验证失败、拿不到证书。主机防火墙需放行 80（ACME 验证 + 跳 https）
 #    和 443（HTTPS）。
+#
+# 4. 【首次迁移一次性】确保宿主机 80 / 443 没有别的进程占用 —— Caddy 要独占这两
+#    个端口。若机器上原本跑着裸 nginx / apache（或旧版本用 nginx 容器的 compose），
+#    先停掉再启动，否则 Caddy 绑端口失败起不来：
+#      sudo systemctl stop nginx && sudo systemctl disable nginx   # 宿主机 nginx
+#      # 或：docker rm -f <旧 nginx 容器>
 ```
 
 ### 启动
@@ -559,7 +565,7 @@ flowchart TD
 | 进维护窗口 | `pause-prod.sh` | `pause.sh` |
 | 退维护窗口 | `resume-prod.sh` | `resume.sh` |
 | compose 文件 | `docker-compose.prod.yml` | `deploy/docker-compose.intranet.yml` |
-| resume 健康探针 | caddy 容器内 `wget backend:8000/health`（避开 TLS-on-localhost 域名不匹配） | host → nginx 发布端口 `localhost:${AF_HTTP_PORT}/health`（顺带验证 nginx 静态 upstream 解析未过期） |
+| resume 健康探针 | caddy 容器内经 Caddy 内部端口 `wget localhost:2021/health`（真正过 Caddy 反代 → 验证配置已加载 + Caddy→backend 通；该端口不发布到宿主机，避开 TLS-on-localhost 域名不匹配） | host → nginx 发布端口 `localhost:${AF_HTTP_PORT}/health`（顺带验证 nginx 静态 upstream 解析未过期） |
 
 **两层接口：** 镜像升级（典型场景）用 `pause*.sh` / `resume*.sh`，封装"维护页 + 停服务 → 起新版本 + 关维护页"全套；config-only 改动不需要停服务，直接用底层的 `maintenance.sh on|off`（公网内网共用同一个）。
 
@@ -600,12 +606,21 @@ tar xzf tmp/artifactflow-config-v2.3.0.tar.gz   # 如果 config 也变了
 ./deploy/scripts/resume.sh v2.3.0
 ```
 
-> **公网（Mode 2）对应命令：** 镜像本地构建 / docker hub 拉取，没有 docker load / tar 步骤。
+> **公网（Mode 2）升级：镜像本地构建，没有 docker load / tar / 版本 tag。** prod compose
+> 的 backend/frontend 固定是 `:latest`，所以**升级 = 切代码再重建**，`resume-prod.sh`
+> **不接版本号**（传了也无效——没有版本化镜像可切）：
 > ```bash
-> ./deploy/scripts/pause-prod.sh "升级中，约 5 分钟"
-> ./deploy/scripts/resume-prod.sh v2.3.0    # 省略版本号则用 .env 的 AF_VERSION / latest
+> # 低流量：直接重建拉起（几秒停机，无维护页）
+> git pull --ff-only                                  # 或 git checkout <ref>
+> ./deploy/scripts/deploy-prod.sh --pull --build
+>
+> # 要维护页包住整个窗口：
+> ./deploy/scripts/pause-prod.sh "升级中，约 5 分钟"   # 起维护页 + 停 backend/frontend
+> ./deploy/scripts/deploy-prod.sh --build             # 维护页期间重建并拉起
+> ./deploy/scripts/resume-prod.sh                     # 等 healthy + 经 Caddy(:2021) 探针 → 关维护页
 > ```
-> 或不要维护窗口、直接拉起：`./deploy/scripts/deploy-prod.sh [--pull] [--build]`。
+> `pause-prod.sh` / `resume-prod.sh` 本身只包"维护页 + 停/起当前镜像"，不改版本——
+> 用于改 `.env` 等不换镜像的维护窗口。
 
 `resume*.sh` 兼容 V1（`docker-compose`）和 V2（`docker compose`），自动探测，CentOS 7 老服务器和 Docker Desktop 都能用。
 

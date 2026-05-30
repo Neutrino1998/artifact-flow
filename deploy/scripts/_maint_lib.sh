@@ -8,6 +8,10 @@
 #   - define: SCRIPT_DIR, COMPOSE_FILE
 #   - define: MAINT_MODE_LABEL, MAINT_PROXY_LABEL, MAINT_RESUME_HINT
 #   - (optional) MAINT_PROXY_EXTRA — appended after the proxy name in messages
+#   - (optional) MAINT_RESUME_ARGHINT — the arg suffix shown after the resume
+#     hint. Defaults to " [VERSION]" (intranet, versioned images). Public sets
+#     it to "" because its images are built locally as :latest, with no
+#     AF_VERSION tag to switch to (see maint_resume).
 #   - for resume: define a `maint_probe` function — the mode-specific
 #     through-proxy health check, returning 0 on success / non-zero on failure.
 #     It may use the globals DC and COMPOSE_FILE (set by the time it's called).
@@ -57,7 +61,7 @@ maint_pause() {
   echo "  • backend / frontend 已停止"
   echo "  • ${MAINT_PROXY_LABEL} / postgres / redis 仍在运行"
   echo
-  echo "下一步：${MAINT_RESUME_HINT} [VERSION]"
+  echo "下一步：${MAINT_RESUME_HINT}${MAINT_RESUME_ARGHINT- [VERSION]}"
   echo "  仅修改 .env 中 ARTIFACTFLOW_* (backend 用) → 在此编辑 .env 后再 resume。"
 }
 
@@ -90,10 +94,12 @@ _maint_wait_healthy() {
 # image tag), wait for both healthy, run the mode-specific through-proxy probe,
 # then lower the maintenance flag. If anything fails within the timeout the
 # maintenance page stays on so a half-broken service is never exposed.
-# Arg $1 = version (AF_VERSION). Relies on the entrypoint having defined
+# Arg $1 = version (AF_VERSION), OPTIONAL. Empty/omitted → bring services up at
+# whatever the compose file pins (public images are :latest, built locally —
+# there is no version tag to switch to). Relies on the entrypoint having defined
 # a `maint_probe` function.
 maint_resume() {
-  local version="$1"
+  local version="${1:-}"
   RESUME_VERSION="$version"   # surfaced in _maint_wait_healthy retry hint
   maint_pick_compose_cli
 
@@ -107,8 +113,13 @@ maint_resume() {
   fi
   local healthy_iters=$(( (healthy_timeout + 1) / 2 ))
 
-  echo "→ Starting backend / frontend (AF_VERSION=$version)"
-  AF_VERSION="$version" "${DC[@]}" -f "$COMPOSE_FILE" up -d backend frontend
+  if [[ -n "$version" ]]; then
+    echo "→ Starting backend / frontend (AF_VERSION=$version)"
+    AF_VERSION="$version" "${DC[@]}" -f "$COMPOSE_FILE" up -d backend frontend
+  else
+    echo "→ Starting backend / frontend"
+    "${DC[@]}" -f "$COMPOSE_FILE" up -d backend frontend
+  fi
 
   # Backend AND frontend must both be healthy — the proxy routes `/` to frontend,
   # so a crash-looping frontend would error users the instant maintenance lifts.
@@ -122,5 +133,9 @@ maint_resume() {
 
   "$SCRIPT_DIR/maintenance.sh" off
   echo
-  echo "✓ 服务已恢复 (${MAINT_MODE_LABEL})，AF_VERSION=$version"
+  if [[ -n "$version" ]]; then
+    echo "✓ 服务已恢复 (${MAINT_MODE_LABEL})，AF_VERSION=$version"
+  else
+    echo "✓ 服务已恢复 (${MAINT_MODE_LABEL})"
+  fi
 }
