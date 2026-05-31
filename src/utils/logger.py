@@ -26,6 +26,35 @@ _request_ctx: contextvars.ContextVar[dict] = contextvars.ContextVar(
     'request_ctx', default={}
 )
 
+# request_id 是独立 contextvar，刻意不并入 _request_ctx：
+# set_request_context 是整体替换（.set(ctx)），并入会被一次 chat 调用冲掉。
+# 覆盖面也不同：request_id 是「每个 HTTP 请求」的通用兜底（上传 / auth / admin
+# 等无 message_id 的路径都有），message_id / conv_id 是「一整轮对话」的桥（横跨
+# 多个请求 + 后台引擎任务，且是日志 ↔ admin 监控页 ↔ MessageEvent 表的唯一关联）。
+_request_id_ctx: contextvars.ContextVar[str] = contextvars.ContextVar(
+    'request_id', default=""
+)
+
+
+def set_request_id(request_id: str):
+    """设置当前 async context 的 request_id，返回可用于 reset 的 token。
+
+    由 RequestContextMiddleware 在请求入口调用，finally 中 reset。
+    asyncio.create_task 会拷贝创建时的 context，故后台引擎任务里
+    get_request_id() 仍能拿到发起该任务的请求的 request_id。
+    """
+    return _request_id_ctx.set(request_id)
+
+
+def reset_request_id(token) -> None:
+    """恢复 request_id contextvar 到 set 之前的值"""
+    _request_id_ctx.reset(token)
+
+
+def get_request_id() -> str:
+    """读取当前 context 的 request_id（无则空字符串）"""
+    return _request_id_ctx.get("")
+
 
 def set_request_context(*, message_id: str = "", conv_id: str = "") -> None:
     """
@@ -51,11 +80,13 @@ class RequestContextFilter(logging.Filter):
     """
     从 contextvars 读取请求上下文，自动注入到每条日志记录
 
-    注入字段（完整）：
-    - record.message_id: 消息 ID（完整，用于文件日志）
-    - record.conv_id: 对话 ID（完整，用于文件日志）
+    注入字段（完整，用于文件日志）：
+    - record.request_id: 请求 ID（每个 HTTP 请求，空值 'no-req'）
+    - record.message_id: 消息 ID（一整轮对话，空值 'no-ctx'）
+    - record.conv_id: 对话 ID（一整轮对话，空值 'no-ctx'）
 
-    注入字段（截短，前缀 + 8 字符，用于控制台）：
+    注入字段（截短，前缀 + 4 字符，控制台只显示 request_id 避免挤爆行）：
+    - record.request_id_short
     - record.message_id_short
     - record.conv_id_short
     """
@@ -74,8 +105,10 @@ class RequestContextFilter(logging.Filter):
         ctx = _request_ctx.get({})
         record.message_id = ctx.get("message_id", "no-ctx")
         record.conv_id = ctx.get("conv_id", "no-ctx")
+        record.request_id = _request_id_ctx.get("") or "no-req"
         record.message_id_short = self._shorten_id(record.message_id)
         record.conv_id_short = self._shorten_id(record.conv_id)
+        record.request_id_short = self._shorten_id(record.request_id)
         return True
 
 
@@ -153,7 +186,7 @@ class Logger:
         if console:
             console_handler = logging.StreamHandler(sys.stdout)
             console_formatter = ColoredFormatter(
-                '%(asctime)s [%(levelname)s] [%(conv_id_short)s|%(message_id_short)s] %(filename)s:%(funcName)s:%(lineno)d - %(message)s',
+                '%(asctime)s [%(levelname)s] [%(request_id_short)s] %(filename)s:%(funcName)s:%(lineno)d - %(message)s',
                 datefmt='%H:%M:%S'
             )
             console_formatter._for_console = True  # 启用颜色
@@ -172,7 +205,7 @@ class Logger:
             )
             # 文件使用无颜色的普通formatter
             file_formatter = logging.Formatter(
-                '%(asctime)s - %(name)s - %(levelname)s - [%(conv_id)s|%(message_id)s] %(filename)s:%(funcName)s:%(lineno)d - %(message)s'
+                '%(asctime)s - %(name)s - %(levelname)s - [%(request_id)s|%(conv_id)s|%(message_id)s] %(filename)s:%(funcName)s:%(lineno)d - %(message)s'
             )
             file_handler.addFilter(context_filter)
             file_handler.setFormatter(file_formatter)

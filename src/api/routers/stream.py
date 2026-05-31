@@ -18,7 +18,7 @@ from api.services.stream_transport import StreamNotFoundError
 from api.services.stream_transport import StreamTransport
 from api.utils.sse import format_sse_event, format_sse_comment
 from utils.time import utc_now
-from utils.logger import get_logger
+from utils.logger import get_logger, get_request_id
 
 logger = get_logger("ArtifactFlow")
 
@@ -90,12 +90,14 @@ async def stream_events(
 
         except StreamNotFoundError:
             # stream 不存在（可能已过期）
+            logger.warning(f"Stream {stream_id}: not found or expired")
             error_event = {
                 "type": "error",
                 "timestamp": utc_now().isoformat(),
                 "data": {
                     "success": False,
-                    "error": f"Stream '{stream_id}' not found or expired"
+                    "error": f"Stream '{stream_id}' not found or expired",
+                    "request_id": get_request_id() or None,
                 }
             }
             yield format_sse_event(error_event, event="error")
@@ -114,7 +116,8 @@ async def stream_events(
                 "timestamp": utc_now().isoformat(),
                 "data": {
                     "success": False,
-                    "error": error_detail
+                    "error": error_detail,
+                    "request_id": get_request_id() or None,
                 }
             }
             yield format_sse_event(error_event, event="error")

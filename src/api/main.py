@@ -24,6 +24,7 @@ from api.dependencies import (
     get_db_manager, get_redis_client,
     get_execution_runner,
 )
+from api.middleware import RequestContextMiddleware
 from api.routers import admin, admin_users, auth, chat, artifacts, departments, meta, stream
 from observability import (
     LoopLagWatchdog, DeadmanSwitch, RuntimeSampler, JsonlSink,
@@ -31,7 +32,7 @@ from observability import (
 )
 from observability import admin_runtime
 from utils.doc_converter import DocConverter
-from utils.logger import get_logger
+from utils.logger import get_logger, get_request_id
 
 logger = get_logger("ArtifactFlow")
 
@@ -200,13 +201,21 @@ def create_app() -> FastAPI:
         redoc_url="/redoc" if config.DEBUG else None,
     )
 
-    # 配置 CORS
+    # request_id 中间件:必须在 CORS 之前 add_middleware,因为 Starlette 中
+    # 后注册 = 更外层。我们要 CORS 在最外层,否则本中间件生成的兜底 500 因缺
+    # CORS 头,浏览器读不到 body(也读不到 request_id)。
+    app.add_middleware(RequestContextMiddleware)
+
+    # 配置 CORS（最外层）。expose_headers 暴露 X-Request-ID,否则跨域下前端
+    # res.headers.get('X-Request-ID') 返回 null(allow_headers 管请求头,
+    # expose_headers 才管 JS 可读的响应头)。
     app.add_middleware(
         CORSMiddleware,
         allow_origins=config.CORS_ORIGINS,
         allow_credentials=config.CORS_ALLOW_CREDENTIALS,
         allow_methods=config.CORS_ALLOW_METHODS,
         allow_headers=config.CORS_ALLOW_HEADERS,
+        expose_headers=["X-Request-ID"],
     )
 
     # 全局 ValueError → 400(防御纵深;ACC-04)。业务校验失败大多在 Pydantic
@@ -216,7 +225,10 @@ def create_app() -> FastAPI:
     @app.exception_handler(ValueError)
     async def _value_error_handler(request, exc: ValueError):  # noqa: ANN001
         logger.warning(f"Unhandled ValueError → 400: {exc}")
-        return JSONResponse(status_code=400, content={"detail": str(exc)})
+        return JSONResponse(
+            status_code=400,
+            content={"detail": str(exc), "request_id": get_request_id() or None},
+        )
 
     # 注册路由
     app.include_router(
