@@ -18,10 +18,10 @@
 # NOT collected by pytest (no test_ prefix, lives in tests/manual/).
 #
 # Contract checked (mirror of deploy/nginx.conf ⇆ deploy/Caddyfile):
-#   1. Swagger 404            5. maintenance gate → 503 + page
-#   2. /health NOT gated      6. /__maintenance/* reachable mid-window
-#   3. routing (api→8000,/→3000)  7. upload cap 210MB → 413
-#   4. X-Real-IP injected + anti-spoof   8. SSE buffering off (incremental flush)
+#   1. Swagger 404                          5. maintenance gate → 503 for /, /api, SSE
+#   2. /health ungated AND routed to backend   6. /__maintenance/* reachable mid-window
+#   3. routing (api & health→8000, /→3000)  7. upload: 211MiB→413, 200MiB legit→backend 200
+#   4. X-Real-IP injected + anti-spoof       8. SSE buffering off (incremental flush)
 
 set -uo pipefail  # NOT -e: run every assertion, tally at the end
 
@@ -53,6 +53,10 @@ declare -a FAILED_TARGETS
 # before the request ever reaches the container.
 hc() { curl -s -m 10 --noproxy '*' -H "Host: test.local" "$@"; }
 code_of() { hc -o /dev/null -w "%{http_code}" "$@"; }
+# served_by_port from the stub's JSON echo — proves WHICH upstream served the
+# path (8000 backend / 3000 frontend), not just that something returned 200.
+# Empty if the response isn't the stub's JSON (e.g. the 503 maintenance page).
+port_of() { hc "$BASE$1" | python3 -c "import sys,json;print(json.load(sys.stdin).get('served_by_port',''))" 2>/dev/null; }
 
 ok()   { PASS=$((PASS+1)); echo "  ✓ $1"; }
 no()   { FAIL=$((FAIL+1)); echo "  ✗ $1"; }
@@ -137,13 +141,15 @@ wait_ready() {
 
 # ---------------------------------------------------------------------------
 assert_routing() {
-  local body port
-  body="$(hc "$BASE/api/ping")"
-  port="$(echo "$body" | python3 -c "import sys,json;print(json.load(sys.stdin).get('served_by_port'))" 2>/dev/null)"
-  [[ "$port" == "8000" ]] && ok "routing: /api/* → backend:8000" || no "routing: /api/* 应到 8000，实得 '$port'"
-  body="$(hc "$BASE/")"
-  port="$(echo "$body" | python3 -c "import sys,json;print(json.load(sys.stdin).get('served_by_port'))" 2>/dev/null)"
-  [[ "$port" == "3000" ]] && ok "routing: / → frontend:3000" || no "routing: / 应到 3000，实得 '$port'"
+  local p
+  p="$(port_of /api/ping)"
+  [[ "$p" == "8000" ]] && ok "routing: /api/* → backend:8000" || no "routing: /api/* 应到 8000，实得 '$p'"
+  # /health must reach backend, not merely return 200 — the stub answers 200 on
+  # BOTH ports, so a /health misrouted to frontend would otherwise pass silently.
+  p="$(port_of /health/ready)"
+  [[ "$p" == "8000" ]] && ok "routing: /health/* → backend:8000" || no "routing: /health/* 应到 8000，实得 '$p'"
+  p="$(port_of /)"
+  [[ "$p" == "3000" ]] && ok "routing: / → frontend:3000" || no "routing: / 应到 3000，实得 '$p'"
 }
 
 assert_swagger_404() {
@@ -189,10 +195,19 @@ assert_maintenance() {
   else
     no "维护门: flag 开后 / 未变 503"
   fi
-  # Still mid-window: health ungated, maintenance assets reachable.
-  [[ "$(code_of "$BASE/health/ready")" == "200" ]] \
-    && ok "维护门: /health 不被拦(窗口内仍 200)" \
-    || no "维护门: /health 窗口内应仍 200"
+  # Mid-window the gate also catches API + SSE (only /health and /__maintenance
+  # bypass it). Without these, a drift to "frontend gated but API/SSE still live"
+  # would pass.
+  [[ "$(code_of "$BASE/api/ping")" == "503" ]] \
+    && ok "维护门: /api/* 窗口内 → 503" \
+    || no "维护门: /api/* 窗口内应 503"
+  [[ "$(code_of "$BASE/api/v1/stream/x")" == "503" ]] \
+    && ok "维护门: /api/v1/stream/* 窗口内 → 503" \
+    || no "维护门: /api/v1/stream/* 窗口内应 503"
+  # /health stays ungated AND correctly routed to backend (not just any 200).
+  [[ "$(port_of /health/ready)" == "8000" ]] \
+    && ok "维护门: /health 不被拦且仍达 backend:8000" \
+    || no "维护门: /health 窗口内应达 backend:8000"
   [[ "$(code_of "$BASE/__maintenance/cat-sleep-dark.svg")" == "200" ]] \
     && ok "维护门: /__maintenance/* 资产窗口内可达" \
     || no "维护门: /__maintenance/* 窗口内应 200"
@@ -202,17 +217,36 @@ assert_upload_cap() {
   if [[ -n "${SMOKE_SKIP_UPLOAD:-}" ]]; then
     echo "  ⊘ upload-cap: 跳过 (SMOKE_SKIP_UPLOAD)"; return
   fi
-  local big code
+  local big code resp port
+  # Negative: 211MiB (> the 210MiB cap) → proxy 413s before the body reaches
+  # backend. Sparse file → ~0 disk; curl streams the zeros over loopback.
   big="$(mktemp)"
-  # 211MB sparse file (> 210MB cap). Sparse → ~0 disk; curl streams the zeros.
   dd if=/dev/null of="$big" bs=1 count=0 seek=$((211*1024*1024)) 2>/dev/null
   code="$(curl -s -m 30 --noproxy '*' -H "Host: test.local" -o /dev/null -w "%{http_code}" \
             -H "Content-Type: application/octet-stream" \
             --data-binary @"$big" "$BASE/api/upload")"
   rm -f "$big"
   [[ "$code" == "413" ]] \
-    && ok "upload-cap: 211MB → 413" \
-    || no "upload-cap: 211MB 应 413，实得 '$code'"
+    && ok "upload-cap: 211MiB(超限) → 413" \
+    || no "upload-cap: 211MiB 应 413，实得 '$code'"
+  # Positive: a max legit batch (200MiB = the 20MB×10 ceiling) must pass the proxy
+  # and REACH backend. Guards against the cap being silently lowered below the
+  # valid-batch ceiling (e.g. to 20MB), which would 413 legitimate uploads while
+  # the negative check above still passes. -w prints code on its own trailing
+  # line; the body is the stub's small JSON echo (NOT the 200MiB upload).
+  big="$(mktemp)"
+  dd if=/dev/null of="$big" bs=1 count=0 seek=$((200*1024*1024)) 2>/dev/null
+  resp="$(curl -s -m 30 --noproxy '*' -H "Host: test.local" -w $'\n%{http_code}' \
+            -H "Content-Type: application/octet-stream" \
+            --data-binary @"$big" "$BASE/api/upload")"
+  rm -f "$big"
+  code="${resp##*$'\n'}"
+  port="$(printf '%s' "${resp%$'\n'*}" | python3 -c "import sys,json;print(json.load(sys.stdin).get('served_by_port',''))" 2>/dev/null)"
+  if [[ "$code" == "200" && "$port" == "8000" ]]; then
+    ok "upload-cap: 200MiB(合法批量) → 透传至 backend:8000(200)"
+  else
+    no "upload-cap: 200MiB 合法批量应透传 backend(200/8000)，实得 code=$code port=$port"
+  fi
 }
 
 assert_sse() {
