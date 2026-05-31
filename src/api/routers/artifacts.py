@@ -133,6 +133,10 @@ async def create_artifact_from_converted(
         metadata=converted.metadata,
     )
     if not success:
+        # create_from_upload 返回 (success, message, info) 状态元组而非抛异常,
+        # 故无栈可落 —— 用 error 级把 message(失败原因)绑到 req-id。否则 prod
+        # 下 message 被脱敏成 "Internal server error",grep req-id 看不到原因。
+        logger.error(f"create_from_upload failed for {converted.filename!r} in {session_id}: {message}")
         error_detail = message if config.DEBUG else "Internal server error"
         raise HTTPException(status_code=500, detail=error_detail)
     return info
