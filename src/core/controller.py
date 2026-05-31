@@ -26,7 +26,7 @@ from core.post_processing import (
 )
 from tools.base import BaseTool
 from tools.builtin.artifact_ops import ArtifactManager
-from utils.logger import get_logger
+from utils.logger import get_logger, get_request_id
 from utils.time import utc_now
 
 logger = get_logger("ArtifactFlow")
@@ -346,6 +346,8 @@ class ExecutionController:
                     "conversation_id": conversation_id,
                     "message_id": message_id,
                     "error": str(e),
+                    # 持久化可回传定位码,让 replay 也带码(read 边界脱敏后保留)。
+                    "request_id": get_request_id() or None,
                 }
                 # Persist error event (will be written via _persist_events on initial_state)
                 initial_state["events"].append(ExecutionEvent(

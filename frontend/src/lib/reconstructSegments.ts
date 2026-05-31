@@ -178,6 +178,8 @@ export function reconstructNonAgentBlocks(events: MessageEventItem[]): NonAgentB
         kind: 'error',
         id: `error-${evt.created_at}`,
         error: (data?.error as string) ?? 'Unknown error',
+        // 持久化的可回传定位码(live 与 replay 一致;旧数据可能缺省)。
+        requestId: (data?.request_id as string | undefined) || undefined,
         timestamp: evt.created_at,
         position: agentSegmentCount,
       });

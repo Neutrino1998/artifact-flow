@@ -23,7 +23,7 @@ from core.compaction_runner import CompactionRunner
 from tools.artifact_envelope import make_preview_slice, render_artifact_slice
 from tools.xml_parser import parse_tool_calls
 from tools.base import BaseTool, ToolPermission, ToolResult
-from utils.logger import get_logger
+from utils.logger import get_logger, get_request_id
 from utils.time import utc_now
 
 logger = get_logger("ArtifactFlow")
@@ -205,6 +205,17 @@ async def execute_loop(
 
     async def _emit(event_type: str, agent: Optional[str] = None, data: Any = None, *, sse_only: bool = False) -> None:
         """推送事件。sse_only=True 仅推 SSE 不入内存事件列表（如 llm_chunk）"""
+        # 错误事件统一在此戳入 request_id（发起轮 POST 的 req-id，引擎任务继承），
+        # 让 live SSE 与持久化/replay 都带可回传定位码 —— replay 经 read 边界脱敏后
+        # 仍保留此码（sanitize 不覆盖已有 request_id）。
+        if (
+            event_type == StreamEventType.ERROR.value
+            and isinstance(data, dict)
+            and not data.get("request_id")
+        ):
+            _rid = get_request_id()
+            if _rid:
+                data = {**data, "request_id": _rid}
         event_dict = {
             "type": event_type,
             "agent": agent,
