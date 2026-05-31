@@ -97,6 +97,7 @@ async def convert_uploaded_file(file: UploadFile) -> ConvertedUpload:
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
     except RuntimeError as e:
+        logger.exception(f"File conversion failed for {file.filename!r}: {e}")
         error_detail = str(e) if config.DEBUG else "Internal server error"
         raise HTTPException(status_code=500, detail=error_detail)
 
@@ -282,6 +283,7 @@ async def export_artifact(
     try:
         docx_bytes = await converter.export_docx(result["content"])
     except RuntimeError as e:
+        logger.exception(f"docx export failed for artifact {artifact_id} in {session_id}: {e}")
         error_detail = str(e) if config.DEBUG else "Internal server error"
         raise HTTPException(status_code=500, detail=error_detail)
 

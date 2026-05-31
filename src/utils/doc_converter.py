@@ -214,6 +214,17 @@ class DocConverter:
 
     async def _convert_docx(self, file_bytes: bytes, filename: str) -> ConvertResult:
         """Convert .docx to markdown via pandoc."""
+        # zip 预检:.docx 是 OOXML(zip 容器),合法文件以 PK\x03\x04 开头。
+        # 改后缀的 .doc 是 OLE2(D0CF11E0），pandoc 会以晦涩的 "couldn't unpack
+        # docx container" RuntimeError(→500)失败。这里提前判「是不是合法 zip」
+        # 抛 ValueError(→422 + 可操作提示)。注意:这不违反模块顶部「不走
+        # magic-byte 区分 OOXML *种类*」——区分 docx/xlsx/pptx 才需解压看
+        # [Content_Types].xml;这里只判容器是不是 zip,代价极低。
+        if not file_bytes.startswith(b"PK\x03\x04"):
+            raise ValueError(
+                f"{filename!r} 不是有效的 .docx 文件(可能是改了后缀的旧版 .doc 或损坏文件)。"
+                "请用 Word 另存为 .docx 后重新上传。"
+            )
         try:
             proc = await asyncio.create_subprocess_exec(
                 "pandoc", "-f", "docx", "-t", "markdown",

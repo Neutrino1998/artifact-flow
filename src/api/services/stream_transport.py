@@ -149,13 +149,21 @@ class InMemoryStreamTransport:
             return context
 
     async def _ttl_cleanup(self, message_id: str) -> None:
-        await asyncio.sleep(self.ttl_seconds)
+        # fire-and-forget task（create_task 起，无人 await）：未捕获异常只会进
+        # asyncio stderr，不进 error.log。CancelledError 是预期路径（close 时
+        # 主动 cancel ttl_task）静默放行，其余异常 logger.exception 落堆栈。
+        try:
+            await asyncio.sleep(self.ttl_seconds)
 
-        async with self._lock:
-            context = self.streams.get(message_id)
-            if context and context.status == "pending":
-                logger.warning(f"Stream {message_id} expired (TTL={self.ttl_seconds}s, status=pending)")
-                await self._close_stream_internal(message_id)
+            async with self._lock:
+                context = self.streams.get(message_id)
+                if context and context.status == "pending":
+                    logger.warning(f"Stream {message_id} expired (TTL={self.ttl_seconds}s, status=pending)")
+                    await self._close_stream_internal(message_id)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception(f"_ttl_cleanup failed for stream {message_id}")
 
     async def push_event(self, message_id: str, event: Dict[str, Any]) -> bool:
         context = self.streams.get(message_id)
@@ -321,14 +329,20 @@ class InMemoryStreamTransport:
         return True
 
     async def _delayed_cleanup(self, message_id: str, delay: float = 5.0) -> None:
-        await asyncio.sleep(delay)
+        # 同 _ttl_cleanup：fire-and-forget，CancelledError 放行其余落堆栈。
+        try:
+            await asyncio.sleep(delay)
 
-        async with self._lock:
-            context = self.streams.get(message_id)
-            if context and context.status == "closed":
-                del self.streams[message_id]
-                self._closed_streams.discard(message_id)
-                logger.debug(f"Stream {message_id} cleaned up from memory")
+            async with self._lock:
+                context = self.streams.get(message_id)
+                if context and context.status == "closed":
+                    del self.streams[message_id]
+                    self._closed_streams.discard(message_id)
+                    logger.debug(f"Stream {message_id} cleaned up from memory")
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception(f"_delayed_cleanup failed for stream {message_id}")
 
     async def get_stream_status(self, message_id: str) -> Optional[str]:
         context = self.streams.get(message_id)
