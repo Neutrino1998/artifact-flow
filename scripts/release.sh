@@ -167,7 +167,12 @@ fi
 # bind-mounts ../config:/app/config:ro, so config/ must sit next to deploy/
 # on the target host.
 echo "Packaging config/ to ${CONFIG_ARCHIVE}..."
-tar -czf "$CONFIG_ARCHIVE" config/
+# --no-xattrs / --no-fflags: this runs on a macOS build host where /usr/bin/tar
+# is bsdtar, which otherwise records macOS metadata as pax headers (SCHILY.fflags,
+# LIBARCHIVE.xattr.com.apple.*) that GNU tar on the Linux target warns about on
+# extract. --exclude='.DS_Store' drops the Finder turd that carries those xattrs
+# (and which has no business on the target anyway).
+tar --no-xattrs --no-fflags --exclude='.DS_Store' -czf "$CONFIG_ARCHIVE" config/
 
 # Package deploy/ (compose file, nginx.conf, scripts, maintenance assets).
 # Three exclusions:
@@ -176,7 +181,12 @@ tar -czf "$CONFIG_ARCHIVE" config/
 #     written by maintenance.sh — shipping a "maintenance ON" flag would put
 #     a freshly-deployed host into maintenance mode on first boot.
 echo "Packaging deploy/ to ${DEPLOY_ARCHIVE}..."
-tar --exclude='deploy/.env' \
+# --no-xattrs / --no-fflags / --exclude='.DS_Store': see config tar above —
+# silence the GNU-tar "unknown extended header keyword" warnings on the target
+# by not emitting macOS metadata + not shipping .DS_Store.
+tar --no-xattrs --no-fflags \
+    --exclude='.DS_Store' \
+    --exclude='deploy/.env' \
     --exclude='deploy/.env.local' \
     --exclude='deploy/maintenance/MAINTENANCE_ON' \
     --exclude='deploy/maintenance/note.txt' \
