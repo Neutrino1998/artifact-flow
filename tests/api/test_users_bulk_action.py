@@ -326,13 +326,14 @@ class TestSetDepartment:
         monkeypatch,
     ):
         """
-        非 IntegrityError 的异常（编程错误 / 真正的基础设施故障）不被静默 catch，
-        冒泡为未处理异常 → 由 FastAPI 转 500（loud failure）。与 CLAUDE.md
-        "不为不会发生的场景加防御代码" 一致 —— 我们故意让这条路径炸出来，
-        而不是吞成 per-id internal_error 假装好了。
+        非 IntegrityError 的异常（编程错误 / 真正的基础设施故障）不被路由静默 catch，
+        而是冒泡到 app 边界。RequestContextMiddleware（app 级 catch-all）在边界上
+        logger.exception 落完整堆栈（loud failure 落日志），并返回带 request_id 的
+        脱敏 500 —— 而不是吞成 per-id internal_error 假装好了。
 
-        测试客户端 ASGITransport 默认 raise_app_exceptions=True，不在意 FastAPI
-        的 500 转换；用 pytest.raises 验证异常已经从 endpoint 跳出。
+        注:本测试此前断言「异常裸传出 ASGI app」(ASGITransport raise_app_exceptions),
+        那是 request-id 中间件落地前的行为。现在 loud 体现在服务端日志,客户端拿到
+        干净的可定位 500。
         """
         dept = await _seed_department(db_manager)
         u = await _seed_user(db_manager)
@@ -342,15 +343,21 @@ class TestSetDepartment:
 
         monkeypatch.setattr(UserRepository, "update", boom_update)
 
-        with pytest.raises(RuntimeError, match="unexpected programming error"):
-            await admin_client.post(
-                "/api/v1/admin/users/bulk-action",
-                json={
-                    "ids": [u.id],
-                    "action": "set_department",
-                    "payload": {"department_id": dept.id},
-                },
-            )
+        resp = await admin_client.post(
+            "/api/v1/admin/users/bulk-action",
+            json={
+                "ids": [u.id],
+                "action": "set_department",
+                "payload": {"department_id": dept.id},
+            },
+        )
+        assert resp.status_code == 500
+        body = resp.json()
+        assert body["detail"] == "Internal server error"  # 脱敏,不泄漏内部细节
+        assert "unexpected programming error" not in resp.text
+        # 可回传定位码:body + 响应头都带且一致
+        assert body["request_id"].startswith("req-")
+        assert body["request_id"] == resp.headers.get("X-Request-ID")
 
 
 # ============================================================
