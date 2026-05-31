@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# Toggle maintenance mode for the intranet deployment.
+# Toggle maintenance mode — shared by Mode 2 (Caddy) and Mode 3 (nginx).
 #
 # Usage:
 #   maintenance.sh on  ["运维说明文案"]   # enable, optional note
 #   maintenance.sh off                    # disable
 #   maintenance.sh status                 # report state
 #
-# Mechanism: writes/removes a flag file under deploy/maintenance/.
-# Nginx checks `if (-f ... MAINTENANCE_ON)` per-request — no reload needed.
+# Mechanism: writes/removes a flag file under deploy/maintenance/. The proxy
+# stat's it per-request (nginx `if (-f ...)` / Caddy `file` matcher) — no reload.
 
 set -euo pipefail
 
