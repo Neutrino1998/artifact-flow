@@ -108,7 +108,7 @@ function AssistantMessage({ content, messageId, executionMetrics }: AssistantMes
                 return <CompactionFlowBlock key={item.id} block={item} />;
               }
               if (item.kind === 'error') {
-                return <ErrorFlowBlock key={item.id} message={item.error} />;
+                return <ErrorFlowBlock key={item.id} message={item.error} requestId={item.requestId} />;
               }
               return null;
             })}

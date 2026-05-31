@@ -6,10 +6,14 @@ import { CopyIcon } from '@/components/ui/CopyIcon';
 
 interface ErrorFlowBlockProps {
   message?: string;
+  /** 可回传错误码（req-xxxx）；存在时展示为可复制的定位码。 */
+  requestId?: string;
 }
 
-function ErrorFlowBlock({ message }: ErrorFlowBlockProps) {
+function ErrorFlowBlock({ message, requestId }: ErrorFlowBlockProps) {
   const { copied, copy } = useCopyFeedback();
+  // 有错误码时优先复制错误码(运维 grep 的对象);否则退回复制错误文本。
+  const copyTarget = requestId ?? message;
 
   return (
     <div className="bg-chat dark:bg-chat-dark border border-red-500/40 rounded-card overflow-hidden">
@@ -22,16 +26,23 @@ function ErrorFlowBlock({ message }: ErrorFlowBlockProps) {
           </svg>
           error
         </span>
-        {message && (
-          <button
-            onClick={() => copy(message)}
-            className="shrink-0 p-1 rounded text-red-600/70 dark:text-red-400/70 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-500/10"
-            aria-label="Copy error"
-            title={copied ? '已复制' : '复制'}
-          >
-            <CopyIcon copied={copied} />
-          </button>
-        )}
+        <div className="flex items-center gap-2 min-w-0">
+          {requestId && (
+            <code className="shrink-0 font-mono text-[11px] text-red-600/80 dark:text-red-400/80 truncate" title={requestId}>
+              错误码 {requestId}
+            </code>
+          )}
+          {copyTarget && (
+            <button
+              onClick={() => copy(copyTarget)}
+              className="shrink-0 p-1 rounded text-red-600/70 dark:text-red-400/70 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-500/10"
+              aria-label={requestId ? 'Copy error code' : 'Copy error'}
+              title={copied ? '已复制' : requestId ? '复制错误码' : '复制'}
+            >
+              <CopyIcon copied={copied} />
+            </button>
+          )}
+        </div>
       </div>
       {message && (
         <div className="px-3 pb-3 text-xs text-red-600 dark:text-red-400 whitespace-pre-wrap break-words">
