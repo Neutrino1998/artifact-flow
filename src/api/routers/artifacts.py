@@ -95,6 +95,10 @@ async def convert_uploaded_file(file: UploadFile) -> ConvertedUpload:
     try:
         result = await converter.convert(file_bytes, file.filename or "untitled")
     except ValueError as e:
+        # 预期内的客户端错误(改后缀 / 超限 / 编码失败):用 WARNING 落原因,把
+        # req-id ↔ 拒绝理由绑起来(否则 grep req-id 只看到一条 422 access log,
+        # 看不出为什么)。不用 exception —— 无需堆栈,reason 字符串足够。
+        logger.warning(f"Upload rejected (422) for {file.filename!r}: {e}")
         raise HTTPException(status_code=422, detail=str(e))
     except RuntimeError as e:
         logger.exception(f"File conversion failed for {file.filename!r}: {e}")
