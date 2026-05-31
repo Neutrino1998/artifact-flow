@@ -382,11 +382,12 @@ export async function uploadFile(sessionId: string, file: File): Promise<UploadR
 
   if (res.status === 401) {
     useAuthStore.getState().logout();
-    throw new Error('Session expired');
+    throw new ApiError(401, 'Session expired');
   }
   if (!res.ok) {
     const body = await res.text().catch(() => '');
-    throw new Error(`Upload failed: ${body}`);
+    const requestId = res.headers.get('X-Request-ID') ?? undefined;
+    throw new ApiError(res.status, formatApiError(res.status, body, requestId), undefined, requestId);
   }
   return res.json();
 }
@@ -403,11 +404,12 @@ export async function exportArtifact(
 
   if (res.status === 401) {
     useAuthStore.getState().logout();
-    throw new Error('Session expired');
+    throw new ApiError(401, 'Session expired');
   }
   if (!res.ok) {
     const body = await res.text().catch(() => '');
-    throw new Error(`Export failed: ${body}`);
+    const requestId = res.headers.get('X-Request-ID') ?? undefined;
+    throw new ApiError(res.status, formatApiError(res.status, body, requestId), undefined, requestId);
   }
   return res.blob();
 }
