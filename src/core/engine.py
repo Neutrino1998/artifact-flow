@@ -246,7 +246,7 @@ async def execute_loop(
                     include_content=True,
                 )
             except Exception as e:
-                logger.warning(f"Failed to get artifacts inventory: {e}")
+                logger.exception(f"Failed to get artifacts inventory: {e}")
 
         messages = ContextManager.build(
             state=state,
@@ -358,7 +358,7 @@ async def execute_loop(
                         break
 
         except Exception as llm_error:
-            logger.error(f"LLM call failed: {llm_error}")
+            logger.exception(f"LLM call failed: {llm_error}")
             await _emit(StreamEventType.ERROR.value, agent_name, {
                 "error": f"LLM call failed: {str(llm_error)}",
                 "agent": agent_name,
