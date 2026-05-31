@@ -20,7 +20,7 @@ from typing import Any, AsyncGenerator, Dict, Literal, Optional
 import redis.asyncio as aioredis
 
 from api.services.stream_transport import StreamAlreadyExistsError, StreamNotFoundError
-from utils.logger import get_logger
+from utils.logger import get_logger, get_request_id
 
 logger = get_logger("ArtifactFlow")
 
@@ -231,6 +231,9 @@ class RedisStreamTransport:
                                 "data": {
                                     "success": False,
                                     "error": "Execution lease expired (producer lost)",
+                                    # transport 自产的 error 不经 sanitize_error_event,
+                                    # 这里直接注入 consumer(SSE GET)的 req-id 当定位码。
+                                    "request_id": get_request_id() or None,
                                 },
                             }
                             return

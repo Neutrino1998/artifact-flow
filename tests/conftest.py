@@ -9,6 +9,10 @@ import os
 
 # --- env must be set before any api import ---
 os.environ.setdefault("ARTIFACTFLOW_JWT_SECRET", "test-secret-do-not-use-in-production")
+# 测试日志隔离到 tests/logs,别污染生产 data/logs(尤其故意抛异常的中间件/路由
+# 测试会写整段 traceback)。必须在任何 app import 前设置,否则 import 时已建好的
+# logger 还是指向 data/logs。
+os.environ.setdefault("ARTIFACTFLOW_LOG_DIR", "tests/logs")
 
 import uuid
 

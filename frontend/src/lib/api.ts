@@ -90,11 +90,14 @@ export class ApiError extends Error {
    * Undefined if the body wasn't JSON or wasn't parsed.
    */
   body?: unknown;
-  constructor(status: number, message: string, body?: unknown) {
+  /** 可回传错误码（req-xxxx），取自响应头 X-Request-ID。运维凭它 grep 堆栈。 */
+  requestId?: string;
+  constructor(status: number, message: string, body?: unknown, requestId?: string) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
     this.body = body;
+    this.requestId = requestId;
   }
 }
 
@@ -104,23 +107,25 @@ export class ApiError extends Error {
  * - {"detail": [{msg, ...}, ...]}（422）   → 拼接 msg 字段，去掉 Pydantic 的 "Value error, " 前缀
  * - 其他非 JSON / 无 detail                  → 退回原始 body
  */
-function formatApiError(status: number, body: string): string {
-  if (!body) return `API ${status}`;
+function formatApiError(status: number, body: string, requestId?: string): string {
+  const withCode = (msg: string) =>
+    requestId ? `${msg}（错误码 ${requestId}）` : msg;
+  if (!body) return withCode(`API ${status}`);
   try {
     const parsed = JSON.parse(body);
     const detail = parsed?.detail;
-    if (typeof detail === 'string') return detail;
+    if (typeof detail === 'string') return withCode(detail);
     if (Array.isArray(detail)) {
       const msgs = detail
         .map((d: { msg?: string }) => d?.msg)
         .filter((m): m is string => typeof m === 'string')
         .map((m) => m.replace(/^Value error,\s*/i, ''));
-      if (msgs.length) return msgs.join('；');
+      if (msgs.length) return withCode(msgs.join('；'));
     }
   } catch {
     // not JSON, fall through
   }
-  return `API ${status}: ${body}`;
+  return withCode(`API ${status}: ${body}`);
 }
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
@@ -138,7 +143,8 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   }
   if (!res.ok) {
     const body = await res.text().catch(() => '');
-    throw new ApiError(res.status, formatApiError(res.status, body));
+    const requestId = res.headers.get('X-Request-ID') ?? undefined;
+    throw new ApiError(res.status, formatApiError(res.status, body, requestId), undefined, requestId);
   }
   if (res.status === 204) {
     return undefined as T;
@@ -281,7 +287,8 @@ export async function sendMessage(
         return;
       }
       if (xhr.status < 200 || xhr.status >= 300) {
-        reject(new ApiError(xhr.status, formatApiError(xhr.status, xhr.responseText || '')));
+        const requestId = xhr.getResponseHeader('X-Request-ID') ?? undefined;
+        reject(new ApiError(xhr.status, formatApiError(xhr.status, xhr.responseText || '', requestId), undefined, requestId));
         return;
       }
       try {
@@ -375,11 +382,12 @@ export async function uploadFile(sessionId: string, file: File): Promise<UploadR
 
   if (res.status === 401) {
     useAuthStore.getState().logout();
-    throw new Error('Session expired');
+    throw new ApiError(401, 'Session expired');
   }
   if (!res.ok) {
     const body = await res.text().catch(() => '');
-    throw new Error(`Upload failed: ${body}`);
+    const requestId = res.headers.get('X-Request-ID') ?? undefined;
+    throw new ApiError(res.status, formatApiError(res.status, body, requestId), undefined, requestId);
   }
   return res.json();
 }
@@ -396,11 +404,12 @@ export async function exportArtifact(
 
   if (res.status === 401) {
     useAuthStore.getState().logout();
-    throw new Error('Session expired');
+    throw new ApiError(401, 'Session expired');
   }
   if (!res.ok) {
     const body = await res.text().catch(() => '');
-    throw new Error(`Export failed: ${body}`);
+    const requestId = res.headers.get('X-Request-ID') ?? undefined;
+    throw new ApiError(res.status, formatApiError(res.status, body, requestId), undefined, requestId);
   }
   return res.blob();
 }
@@ -580,9 +589,10 @@ export async function bulkImportUsers(file: File): Promise<BulkImportResponse> {
 
   if (!res.ok) {
     const text = await res.text().catch(() => '');
+    const requestId = res.headers.get('X-Request-ID') ?? undefined;
     let parsed: unknown = undefined;
     try { parsed = JSON.parse(text); } catch { /* not JSON */ }
-    throw new ApiError(res.status, formatApiError(res.status, text), parsed);
+    throw new ApiError(res.status, formatApiError(res.status, text, requestId), parsed, requestId);
   }
 
   return res.json() as Promise<BulkImportResponse>;

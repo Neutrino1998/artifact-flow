@@ -500,13 +500,18 @@ async def bulk_import_users(
 
     # ---------- Phase 2: parallel hash ----------
     # bcrypt 是 CPU bound；丢线程池并行跑 + 释放 event loop。
-    # gather 失败（极罕见）→ 整体 500 是正确行为（系统级问题，不静默吞）。
-    hashed_passwords: list[str] = (
-        await asyncio.gather(*(
-            asyncio.to_thread(hash_password, pw) for _, pw, _ in to_create
-        ))
-        if to_create else []
-    )
+    # gather 失败（极罕见）→ 整体 500 是正确行为（系统级问题，不静默吞）；
+    # 但要 logger.exception 落完整堆栈再 re-raise，否则只剩裸 500、运维无从定位。
+    try:
+        hashed_passwords: list[str] = (
+            await asyncio.gather(*(
+                asyncio.to_thread(hash_password, pw) for _, pw, _ in to_create
+            ))
+            if to_create else []
+        )
+    except Exception:
+        logger.exception(f"Bulk password hashing failed ({len(to_create)} users)")
+        raise
 
     # ---------- Phase 3: INSERT ----------
     for (row, _password, dept_id), hashed in zip(to_create, hashed_passwords):

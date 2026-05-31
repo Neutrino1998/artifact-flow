@@ -121,3 +121,35 @@ class TestSizeLimit:
         oversize = b"a" * (DocConverter.MAX_FILE_SIZE + 1)
         with pytest.raises(ValueError, match="too large"):
             await converter.convert(oversize, "huge.txt")
+
+
+# ============================================================
+# .docx zip 预检（改后缀的 .doc → 可操作 422，而非晦涩 500）
+# ============================================================
+
+
+class TestDocxZipPrecheck:
+    """_convert_docx 入口判「是不是合法 zip」：非 PK\\x03\\x04 → ValueError。"""
+
+    async def test_ole2_doc_renamed_to_docx_raises_value_error(self):
+        # 旧版 .doc 是 OLE2 复合文档（magic D0CF11E0），改后缀成 .docx 上传。
+        # 旧行为:pandoc 抛 "couldn't unpack docx container" RuntimeError → 500。
+        # 新行为:入口预检抛 ValueError（路由映射 422 + 可操作提示）。
+        converter = DocConverter()
+        ole2 = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1" + b"\x00" * 64
+        with pytest.raises(ValueError, match="不是有效的 .docx"):
+            await converter._convert_docx(ole2, "report.docx")
+
+    async def test_garbage_bytes_raise_value_error(self):
+        converter = DocConverter()
+        with pytest.raises(ValueError, match="不是有效的 .docx"):
+            await converter._convert_docx(b"not a zip at all", "x.docx")
+
+    async def test_valid_zip_header_passes_precheck(self):
+        # PK\x03\x04 开头通过预检（后续 pandoc 阶段可能因内容/缺二进制再失败，
+        # 但绝不能是「不是有效的 .docx」这条 ValueError）。
+        converter = DocConverter()
+        zipped = b"PK\x03\x04" + b"\x00" * 64
+        with pytest.raises(Exception) as exc_info:
+            await converter._convert_docx(zipped, "ok.docx")
+        assert "不是有效的 .docx" not in str(exc_info.value)

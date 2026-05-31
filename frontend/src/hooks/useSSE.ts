@@ -498,6 +498,7 @@ export function useSSE() {
 
         case StreamEventType.ERROR: {
           const errMsg = (data?.error as string) ?? 'Unknown error';
+          const reqId = (data?.request_id as string | undefined) || undefined;
           // Push as a flow block FIRST so snapshotSegments captures it into
           // completedNonAgentBlocks. Without this, AssistantMessage's
           // lazy-load gate (completedSegs !== undefined → skip refetch)
@@ -507,10 +508,13 @@ export function useSSE() {
             kind: 'error',
             id: `error-${event.timestamp}`,
             error: errMsg,
+            requestId: reqId,
             timestamp: event.timestamp,
             position: useStreamStore.getState().segments.length,
           });
-          setError(errMsg);
+          // 标准 error 块由 interleave 渲染(带 requestId);standalone 字符串
+          // 兜底路径(StreamingMessage 无结构化 requestId)把错误码缀入文本保可见。
+          setError(reqId ? `${errMsg}（错误码 ${reqId}）` : errMsg);
           const errMsgId = useStreamStore.getState().messageId;
           if (errMsgId) {
             snapshotSegments(errMsgId);

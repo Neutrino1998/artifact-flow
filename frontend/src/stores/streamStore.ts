@@ -56,6 +56,9 @@ export interface ErrorBlock {
   kind: 'error';
   id: string;
   error: string;
+  /** 可回传的请求级错误码（req-xxxx），运维凭它 grep 完整堆栈。
+   *  实时路径由 SSE error 事件 data.request_id 填充；replay 重建可能缺省。 */
+  requestId?: string;
   timestamp: string;
   position: number;
 }

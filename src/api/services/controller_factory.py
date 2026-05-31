@@ -16,19 +16,28 @@ from api.dependencies import (
     get_tools,
 )
 from api.services.stream_transport import StreamTransport
-from utils.logger import get_logger
+from utils.logger import get_logger, get_request_id
 from utils.time import utc_now
 
 logger = get_logger("ArtifactFlow")
 
 
 def sanitize_error_event(event: dict) -> dict:
-    """Strip internal error details from error events in production."""
-    if config.DEBUG:
+    """脱敏 error 事件并注入 request_id 定位码。
+
+    request_id 不论 DEBUG 都注入(prod 回传给用户安全,是可回传的错误码);
+    脱敏只删 error 文本,绝不删定位码。request_id 取自当前 context —— 后台
+    引擎任务由 chat 请求 create_task 起,会继承发起请求的 request_id。
+    """
+    if event.get("type") != "error" or not isinstance(event.get("data"), dict):
         return event
-    if event.get("type") == "error" and isinstance(event.get("data"), dict):
-        event = {**event, "data": {**event["data"], "error": "Internal server error"}}
-    return event
+    data = {**event["data"]}
+    req_id = get_request_id()
+    if req_id and not data.get("request_id"):
+        data["request_id"] = req_id
+    if not config.DEBUG:
+        data["error"] = "Internal server error"
+    return {**event, "data": data}
 
 
 @asynccontextmanager

@@ -77,26 +77,31 @@ async def convert_uploaded_file(file: UploadFile) -> ConvertedUpload:
     # the in-app guard for anything that bypasses it.
     max_mb = config.MAX_UPLOAD_SIZE / 1024 / 1024
     if file.size is not None and file.size > config.MAX_UPLOAD_SIZE:
-        raise HTTPException(
-            status_code=422,
-            detail=f"File too large: {file.size / 1024 / 1024:.1f}MB (max {max_mb:.0f}MB)",
-        )
+        detail = f"File too large: {file.size / 1024 / 1024:.1f}MB (max {max_mb:.0f}MB)"
+        # 体积超限在进 converter 前就拒,也要落原因(同 ValueError 分支),否则
+        # grep req-id 对超大文件仍只看到一条裸 422 access log。
+        logger.warning(f"Upload rejected (422) for {file.filename!r}: {detail}")
+        raise HTTPException(status_code=422, detail=detail)
     file_bytes = await file.read()
     # Fallback if the parser didn't populate .size (keeps the 422 contract;
     # the bytes are already in RAM by here, so the pre-check above is the real
     # memory guard).
     if len(file_bytes) > config.MAX_UPLOAD_SIZE:
-        raise HTTPException(
-            status_code=422,
-            detail=f"File too large: {len(file_bytes) / 1024 / 1024:.1f}MB (max {max_mb:.0f}MB)",
-        )
+        detail = f"File too large: {len(file_bytes) / 1024 / 1024:.1f}MB (max {max_mb:.0f}MB)"
+        logger.warning(f"Upload rejected (422) for {file.filename!r}: {detail}")
+        raise HTTPException(status_code=422, detail=detail)
 
     converter = DocConverter()
     try:
         result = await converter.convert(file_bytes, file.filename or "untitled")
     except ValueError as e:
+        # 预期内的客户端错误(改后缀 / 超限 / 编码失败):用 WARNING 落原因,把
+        # req-id ↔ 拒绝理由绑起来(否则 grep req-id 只看到一条 422 access log,
+        # 看不出为什么)。不用 exception —— 无需堆栈,reason 字符串足够。
+        logger.warning(f"Upload rejected (422) for {file.filename!r}: {e}")
         raise HTTPException(status_code=422, detail=str(e))
     except RuntimeError as e:
+        logger.exception(f"File conversion failed for {file.filename!r}: {e}")
         error_detail = str(e) if config.DEBUG else "Internal server error"
         raise HTTPException(status_code=500, detail=error_detail)
 
@@ -128,6 +133,10 @@ async def create_artifact_from_converted(
         metadata=converted.metadata,
     )
     if not success:
+        # create_from_upload 返回 (success, message, info) 状态元组而非抛异常,
+        # 故无栈可落 —— 用 error 级把 message(失败原因)绑到 req-id。否则 prod
+        # 下 message 被脱敏成 "Internal server error",grep req-id 看不到原因。
+        logger.error(f"create_from_upload failed for {converted.filename!r} in {session_id}: {message}")
         error_detail = message if config.DEBUG else "Internal server error"
         raise HTTPException(status_code=500, detail=error_detail)
     return info
@@ -282,6 +291,7 @@ async def export_artifact(
     try:
         docx_bytes = await converter.export_docx(result["content"])
     except RuntimeError as e:
+        logger.exception(f"docx export failed for artifact {artifact_id} in {session_id}: {e}")
         error_detail = str(e) if config.DEBUG else "Internal server error"
         raise HTTPException(status_code=500, detail=error_detail)
 

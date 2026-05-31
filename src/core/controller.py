@@ -26,7 +26,7 @@ from core.post_processing import (
 )
 from tools.base import BaseTool
 from tools.builtin.artifact_ops import ArtifactManager
-from utils.logger import get_logger
+from utils.logger import get_logger, get_request_id
 from utils.time import utc_now
 
 logger = get_logger("ArtifactFlow")
@@ -241,7 +241,8 @@ class ExecutionController:
                     finalize_metrics(initial_state["execution_metrics"])
                 except Exception as fm_err:
                     logger.warning(
-                        f"finalize_metrics failed on timeout for {message_id}: {fm_err}"
+                        f"finalize_metrics failed on timeout for {message_id}: {fm_err}",
+                        exc_info=True,
                     )
                 final_state = initial_state    # 正常返回 → 走完整 post-processing
             except asyncio.CancelledError:
@@ -270,7 +271,8 @@ class ExecutionController:
                     finalize_metrics(initial_state["execution_metrics"])
                 except Exception as fm_err:
                     logger.warning(
-                        f"finalize_metrics failed on cancel for {message_id}: {fm_err}"
+                        f"finalize_metrics failed on cancel for {message_id}: {fm_err}",
+                        exc_info=True,
                     )
                 initial_state["events"].append(make_external_cancelled_event(
                     conversation_id=conversation_id,
@@ -321,7 +323,8 @@ class ExecutionController:
                     except Exception as resp_err:
                         logger.warning(
                             f"update_response on external cancel failed for {message_id} "
-                            f"(events persisted; UI may show empty bubble): {resp_err}"
+                            f"(events persisted; UI may show empty bubble): {resp_err}",
+                            exc_info=True,
                         )
                 else:
                     logger.error(
@@ -343,6 +346,8 @@ class ExecutionController:
                     "conversation_id": conversation_id,
                     "message_id": message_id,
                     "error": str(e),
+                    # 持久化可回传定位码,让 replay 也带码(read 边界脱敏后保留)。
+                    "request_id": get_request_id() or None,
                 }
                 # Persist error event (will be written via _persist_events on initial_state)
                 initial_state["events"].append(ExecutionEvent(
@@ -419,8 +424,9 @@ class ExecutionController:
                     lambda cm, er, am: cm.exists_async(conversation_id)
                 )
             except Exception as exists_err:
-                # exists 探测的瞬断不应阻塞 post-processing —— 当作 alive 走原流程
-                logger.warning(
+                # exists 探测的瞬断不应阻塞 post-processing —— 当作 alive 走原流程。
+                # 用 exception 落堆栈:这里能藏真 bug(DB 连接/查询逻辑错),不只是瞬断。
+                logger.exception(
                     f"exists() probe failed for {conversation_id} (msg={message_id}), "
                     f"falling through to normal post-processing: {exists_err}"
                 )
@@ -519,7 +525,8 @@ class ExecutionController:
                         # events 已成功 → 历史正确,仅显示可能短暂落后,不把终态转为 ERROR
                         logger.warning(
                             f"Message.response update failed for {message_id} "
-                            f"(events already persisted, display may lag): {resp_err}"
+                            f"(events already persisted, display may lag): {resp_err}",
+                            exc_info=True,
                         )
 
                 metadata_updates = {}
@@ -539,7 +546,8 @@ class ExecutionController:
                         pp.metadata_updated = True
                     except Exception as meta_err:
                         logger.warning(
-                            f"Message.metadata update failed for {message_id}: {meta_err}"
+                            f"Message.metadata update failed for {message_id}: {meta_err}",
+                            exc_info=True,
                         )
 
                 logger.info("Streaming execution completed")
@@ -634,7 +642,8 @@ class ExecutionController:
             pp.response_updated = True
         except Exception as resp_err:
             logger.warning(
-                f"Late-cancel response update failed for {pp.message_id}: {resp_err}"
+                f"Late-cancel response update failed for {pp.message_id}: {resp_err}",
+                exc_info=True,
             )
 
     async def _persist_events(self, message_id: str, final_state: Dict[str, Any]) -> bool:
@@ -687,7 +696,8 @@ class ExecutionController:
             # 当作普通持久化失败而错误地把整轮转 ERROR 给前端。
             raise
         except Exception as e:
-            logger.error(
+            # 事件丢失 = 最该定位的失败:用 exception 落完整堆栈(原先 error 无堆栈)。
+            logger.exception(
                 f"Event persistence failed after retries for {message_id} "
                 f"({len(db_events)} events lost): {e}"
             )
