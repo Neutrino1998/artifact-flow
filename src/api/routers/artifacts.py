@@ -77,19 +77,19 @@ async def convert_uploaded_file(file: UploadFile) -> ConvertedUpload:
     # the in-app guard for anything that bypasses it.
     max_mb = config.MAX_UPLOAD_SIZE / 1024 / 1024
     if file.size is not None and file.size > config.MAX_UPLOAD_SIZE:
-        raise HTTPException(
-            status_code=422,
-            detail=f"File too large: {file.size / 1024 / 1024:.1f}MB (max {max_mb:.0f}MB)",
-        )
+        detail = f"File too large: {file.size / 1024 / 1024:.1f}MB (max {max_mb:.0f}MB)"
+        # 体积超限在进 converter 前就拒,也要落原因(同 ValueError 分支),否则
+        # grep req-id 对超大文件仍只看到一条裸 422 access log。
+        logger.warning(f"Upload rejected (422) for {file.filename!r}: {detail}")
+        raise HTTPException(status_code=422, detail=detail)
     file_bytes = await file.read()
     # Fallback if the parser didn't populate .size (keeps the 422 contract;
     # the bytes are already in RAM by here, so the pre-check above is the real
     # memory guard).
     if len(file_bytes) > config.MAX_UPLOAD_SIZE:
-        raise HTTPException(
-            status_code=422,
-            detail=f"File too large: {len(file_bytes) / 1024 / 1024:.1f}MB (max {max_mb:.0f}MB)",
-        )
+        detail = f"File too large: {len(file_bytes) / 1024 / 1024:.1f}MB (max {max_mb:.0f}MB)"
+        logger.warning(f"Upload rejected (422) for {file.filename!r}: {detail}")
+        raise HTTPException(status_code=422, detail=detail)
 
     converter = DocConverter()
     try:
