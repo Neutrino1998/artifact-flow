@@ -8,6 +8,7 @@
 - 请求级上下文追踪（contextvars）
 """
 
+import os
 import sys
 import json
 import logging
@@ -168,7 +169,12 @@ class Logger:
         """
         self.name = name
         self.debug_mode = debug  # 改为 debug_mode 避免与方法名冲突
-        
+
+        # ARTIFACTFLOW_LOG_DIR 全局重定向日志目录,优先级高于构造参数:
+        # 测试隔离到 tests/logs(否则 pytest 故意抛异常的路由把 traceback 灌进
+        # 生产 data/logs),部署时也可落到挂载卷。
+        log_dir = os.environ.get("ARTIFACTFLOW_LOG_DIR") or log_dir
+
         # 创建日志目录
         if file:
             self.log_dir = Path(log_dir)
