@@ -4,7 +4,7 @@ description: |
   Internal agent for conversation compaction.
   Generates a single structured summary covering an entire prefix of the conversation.
 internal: true
-model: qwen3.6-plus
+model: qwen3.7-max
 tools: {}
 max_tool_rounds: 0
 ---
