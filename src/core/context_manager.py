@@ -143,11 +143,13 @@ class ContextManager:
                 f'</team_task_plan>'
             )
 
-        # Artifact 清单（条件注入：仅有 artifact 工具的 agent）
+        # Artifact 清单（仅有 artifact 工具的 agent 注入）—— 即使为空也要给出
+        # 显式的 live 清单（"暂无 artifact"），否则模型找不到当前状态会回退去读
+        # system prompt 里静态的 <artifact_authoring> 创作指引，误当成空清单。
         has_artifact_tools = any(t in agent_config.tools for t in [
             "create_artifact", "update_artifact", "rewrite_artifact", "read_artifact"
         ])
-        if has_artifact_tools and artifacts_inventory:
+        if has_artifact_tools:
             parts.append(cls._build_artifacts_inventory(artifacts_inventory))
 
         # 自描述首句：声明这段是什么、怎么对待 —— 降权为「环境状态、自行判断相关性」，
@@ -171,9 +173,20 @@ class ContextManager:
         return None
 
     @classmethod
-    def _build_artifacts_inventory(cls, artifacts_inventory: List[Dict]) -> str:
-        """构建 artifacts 清单部分（每个 artifact 用 render_artifact_slice 渲染预览）"""
+    def _build_artifacts_inventory(cls, artifacts_inventory: Optional[List[Dict]]) -> str:
+        """构建 artifacts 清单部分（每个 artifact 用 render_artifact_slice 渲染预览）。
+
+        空清单也显式渲染（"0 artifact(s)"），让模型对"当前工作区有什么"始终有一个
+        权威的 live 答案，不必从静态创作指引里推断。
+        """
+        artifacts_inventory = artifacts_inventory or []
         count = len(artifacts_inventory)
+        if count == 0:
+            return (
+                '<artifacts_inventory>\n'
+                'No artifacts in this session yet.\n'
+                '</artifacts_inventory>'
+            )
         lines = [f'{count} artifact(s) in this session.']
         lines.append('<artifacts_inventory>')
         for artifact in artifacts_inventory:

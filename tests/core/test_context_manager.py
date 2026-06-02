@@ -403,6 +403,22 @@ class TestArtifactsAndAgents:
         assert "artifacts_inventory" in reminder
         assert "Document" in reminder
 
+    def test_artifact_tools_empty_inventory_shows_explicit_none(self):
+        """有 artifact 工具但工作区为空 → 仍输出显式 live 清单，避免模型回退去读静态创作指引。"""
+        agent = _FakeAgentConfig(tools={"create_artifact": "auto"})
+        state = _make_state(events=[
+            _make_event(StreamEventType.USER_INPUT.value, data={"content": "hi"}),
+        ])
+
+        for inventory in ([], None):
+            messages = _build(
+                agent, state=state, tools={},
+                artifacts_inventory=inventory,
+            )
+            reminder = messages[-1]["content"]
+            assert "<artifacts_inventory>" in reminder
+            assert "No artifacts in this session yet." in reminder
+
     def test_no_artifact_tools_no_inventory(self):
         agent = _FakeAgentConfig(tools={"web_search": "auto"})
         artifacts = [
