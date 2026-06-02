@@ -15,7 +15,7 @@ from sqlalchemy.exc import IntegrityError
 
 from config import config
 from core.engine import EngineHooks, create_initial_state, execute_loop, finalize_metrics
-from core.events import StreamEventType, ExecutionEvent
+from core.events import StreamEventType
 from core.conversation_manager import ConversationManager
 from core.post_processing import (
     PostProcessState,
@@ -343,25 +343,16 @@ class ExecutionController:
                 # Mark error on initial_state (final_state is still None at this point)
                 initial_state["error"] = True
                 initial_state["response"] = f"Engine error: {str(e)}"
-                error_data = {
-                    "success": False,
-                    "conversation_id": conversation_id,
-                    "message_id": message_id,
+                # record-not-emit:不在此 append/yield ERROR。统一终态发射点是 post-processing
+                # 的 decide_terminal —— 它在 flush 之后读 error_detail 构建唯一的 ERROR 终态
+                # (带 request_id + artifacts_flushed),controller 再 append + yield。若这里也
+                # 自行 emit,会与 decide_terminal 双发 ERROR。request_id 在此 contextvar still
+                # 有效(engine_task 继承发起轮 POST 的 id),先冻结进 error_detail。
+                initial_state["error_detail"] = {
                     "error": str(e),
-                    # 持久化可回传定位码,让 replay 也带码(read 边界脱敏后保留)。
+                    "agent": None,
                     "request_id": get_request_id() or None,
                 }
-                # Persist error event (will be written via _persist_events on initial_state)
-                initial_state["events"].append(ExecutionEvent(
-                    event_type=StreamEventType.ERROR.value,
-                    agent_name=None,
-                    data=error_data,
-                ))
-                await event_queue.put({
-                    "type": StreamEventType.ERROR.value,
-                    "timestamp": utc_now().isoformat(),
-                    "data": error_data,
-                })
             finally:
                 await event_queue.put(_SENTINEL)
 

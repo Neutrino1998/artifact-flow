@@ -41,20 +41,23 @@ let _toolCallSeq = 0;
 const MAX_RECONNECT_ATTEMPTS = 3;
 const RECONNECT_BASE_DELAY_MS = 1000;
 
-// Resolve composer attachments at a turn's terminal. The backend stamps
-// `artifacts_flushed` onto terminal event data (post_processing.decide_terminal):
-//   - explicit false → uploads were NOT persisted (flush failed, or staging
-//     aborted the turn) → unmarkSent() keeps the files staged for retry.
-//   - true OR absent → uploads landed (or, on the engine real-time ERROR path
-//     which carries no field, flush_all still ran in post-processing) →
-//     clearSent() drops the in-flight files.
-// Defaulting absent→clear is safe: every frontend-visible terminal where flush
-// genuinely did NOT run (flush_error ERROR, external cancel) carries an explicit
-// false; the only field-absent terminal is engine-error, where flush did run.
+// Resolve composer attachments at a turn's terminal, keyed off the backend's
+// `artifacts_flushed` bit. post_processing.decide_terminal is the SINGLE terminal
+// authority and stamps the bit (= "the turn's uploads got persisted") on EVERY
+// terminal it builds — COMPLETE / cancel / timeout / error / flush_error alike,
+// always post-flush. So a real turn terminal always carries it:
+//   - explicit true  → uploads persisted → clearSent() drops the files.
+//   - anything else  → keep them staged (unmarkSent) so the user can retry.
+// The ONLY field-absent terminals are transport-layer errors emitted OUTSIDE
+// decide_terminal with unknown flush state (stream not-found/expired in
+// routers/stream.py, the forwarder exception in controller_factory.py). For those,
+// default-KEEP is the safe direction: clearing could silently drop a user's
+// attachment; keeping at worst re-stages an already-persisted file, and re-send
+// dedups it (a deletable _N), never data loss.
 function resolveStagedAfterTerminal(data: Record<string, unknown> | undefined): void {
   const store = useStagedFilesStore.getState();
-  if (data?.artifacts_flushed === false) store.unmarkSent();
-  else store.clearSent();
+  if (data?.artifacts_flushed === true) store.clearSent();
+  else store.unmarkSent();
 }
 
 export function useSSE() {
@@ -535,8 +538,10 @@ export function useSSE() {
             snapshotSegments(errMsgId);
           }
           endStream();
-          // Engine error flushed uploads (clearSent via absent field); staging
-          // abort / flush_error carry artifacts_flushed=false → keep for retry.
+          // ERROR from decide_terminal (engine error / flush_error / staging abort)
+          // carries an explicit artifacts_flushed; transport-layer ERRORs (stream
+          // not-found, forwarder) don't. Only explicit true clears; absent/false
+          // keeps the attachment for retry (safe direction — see helper).
           resolveStagedAfterTerminal(data as Record<string, unknown> | undefined);
           refreshAfterComplete(conversationId, errMsgId);
           break;

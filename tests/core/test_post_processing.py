@@ -140,16 +140,49 @@ class TestDecideTerminal:
         # SSE data carries display fallback for snapshot
         assert pp.terminal_event.data["response"] == config.CANCELLED_RESPONSE_BY_USER
 
-    def test_error_path_does_not_double_append(self):
-        """engine 已 append ERROR,decide_terminal 设 type 但留 event=None 防二次 append。"""
+    def test_error_path_builds_terminal_from_detail(self):
+        """统一终态发射点:engine 内部错误只记 state["error_detail"],decide_terminal
+        在此构建唯一的 ERROR 终态(带 error/agent/request_id + artifacts_flushed),
+        由 controller append+yield。不再像旧版那样留 event=None 等 engine 自发。"""
         pp = PostProcessState(
             conversation_id="c", message_id="m",
-            final_state={"response": "Engine error: x", "error": True},
+            final_state={
+                "response": "Engine error: x",
+                "error": True,
+                "error_detail": {
+                    "error": "LLM call failed: boom",
+                    "agent": "lead_agent",
+                    "request_id": "req-123",
+                },
+            },
         )
+        pp.artifacts_flushed = True  # flush 成功(无上传或上传已落库)
         decide_terminal(pp)
         assert pp.terminal_type == StreamEventType.ERROR.value
-        assert pp.terminal_event is None
-        assert pp.terminal_appended is True
+        assert pp.terminal_event is not None
+        assert pp.terminal_event.data["error"] == "LLM call failed: boom"
+        assert pp.terminal_event.data["agent"] == "lead_agent"
+        assert pp.terminal_event.data["request_id"] == "req-123"
+        # flush 成功且未回滚 → uploads_persisted=True
+        assert pp.terminal_event.data["artifacts_flushed"] is True
+        # 不预先标 appended —— 留给 controller append(与 COMPLETE/CANCELLED 一致)
+        assert pp.terminal_appended is False
+
+    def test_error_with_rolled_back_uploads_marks_not_persisted(self):
+        """staging-abort 回滚了上传 → flush 空转成功(artifacts_flushed=True)但上传没落库;
+        uploads_rolled_back 把终态的 artifacts_flushed 修正为 False,前端据此保留附件。"""
+        pp = PostProcessState(
+            conversation_id="c", message_id="m",
+            final_state={
+                "error": True,
+                "uploads_rolled_back": True,
+                "error_detail": {"error": "Failed to attach file 'x.md': boom", "agent": "lead_agent"},
+            },
+        )
+        pp.artifacts_flushed = True  # 空集 flush 成功
+        decide_terminal(pp)
+        assert pp.terminal_type == StreamEventType.ERROR.value
+        assert pp.terminal_event.data["artifacts_flushed"] is False
 
     def test_flush_error_overrides_cancelled(self):
         """flush_error 在 controller 里产生,作为新的 ERROR terminal append。
@@ -354,6 +387,26 @@ class TestEnsureTerminal:
         assert pp.terminal_appended is True
         assert pp.terminal_type == StreamEventType.TIMED_OUT.value
         assert pp.cancel_source is None
+
+    def test_late_cancel_on_errored_turn_preserves_error_not_cancelled(self):
+        """统一后 engine 错误只记 state["error"]+error_detail、不再实时 append ERROR。
+        若 external cancel 落在 decide_terminal 之前,events 里没有 ERROR 可 adopt ——
+        ensure_terminal 必须委托 decide_terminal 保留真实的 ERROR 终因,而不是一律
+        合成 external CANCELLED 把错误静默掩成取消。"""
+        pp = PostProcessState(
+            conversation_id="c", message_id="m",
+            final_state={
+                "events": [],
+                "error": True,
+                "error_detail": {"error": "LLM call failed: boom", "agent": "lead_agent"},
+            },
+        )
+        ensure_terminal(pp)
+        assert pp.terminal_type == StreamEventType.ERROR.value
+        assert pp.terminal_event.data["error"] == "LLM call failed: boom"
+        # 合成的 ERROR 已 append 进本轮 events
+        assert pp.terminal_appended is True
+        assert pp.final_state["events"][-1].event_type == StreamEventType.ERROR.value
         # 没有合成第二个 terminal
         assert len(pp.final_state["events"]) == 1
 

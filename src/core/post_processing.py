@@ -92,6 +92,13 @@ def decide_terminal(pp: PostProcessState) -> None:
     metrics = s.get("execution_metrics", {})
     response = s.get("response", "")
 
+    # uploads_persisted = 前端"要不要清掉输入框附件"的依据(终态 data 里叫 artifacts_flushed)。
+    # 它回答"用户这轮的上传真的落库了吗",不是字面的"flush 动作成没成":
+    #   pp.artifacts_flushed = flush_all 调用成功(对空集也 True);
+    #   uploads_rolled_back   = staging 失败时引擎回滚了上传(WS 已摘除,flush 空转成功却没东西落)。
+    # 二者相减才是真相 —— 其余路径 uploads_rolled_back=False,退化回 pp.artifacts_flushed。
+    uploads_persisted = pp.artifacts_flushed and not s.get("uploads_rolled_back", False)
+
     if pp.flush_error:
         pp.terminal_type = StreamEventType.ERROR.value
         pp.terminal_event = ExecutionEvent(
@@ -103,8 +110,8 @@ def decide_terminal(pp: PostProcessState) -> None:
                 "message_id": pp.message_id,
                 "error": pp.flush_error,
                 "execution_metrics": metrics,
-                # flush 失败 → 上传未落库,前端据此保留输入框附件供重试(见下方各终态)
-                "artifacts_flushed": pp.artifacts_flushed,
+                # flush 失败 → uploads_persisted=False → 前端保留输入框附件供重试
+                "artifacts_flushed": uploads_persisted,
             },
         )
         return
@@ -126,7 +133,7 @@ def decide_terminal(pp: PostProcessState) -> None:
                 # SSE data 带 response 是历史约定(前端用作 snapshot,与 CANCELLED 同构)
                 "response": config.TIMED_OUT_RESPONSE,
                 "execution_metrics": metrics,
-                "artifacts_flushed": pp.artifacts_flushed,
+                "artifacts_flushed": uploads_persisted,
             },
         )
         return
@@ -146,20 +153,34 @@ def decide_terminal(pp: PostProcessState) -> None:
                 "message_id": pp.message_id,
                 "response": display,
                 "execution_metrics": metrics,
-                "artifacts_flushed": pp.artifacts_flushed,
+                "artifacts_flushed": uploads_persisted,
             },
         )
         return
 
     if has_error:
-        # engine 已 append 过 ERROR(实时 _emit,且早于本函数前的 flush_all);不重复
-        # append,terminal_event 留 None → controller 不再 yield 终态。该实时 ERROR 事件
-        # 不带 artifacts_flushed,前端缺字段时默认按"已落库"处理(clearSent)—— 正确,
-        # 因为 engine-error 路径 post-processing 的 flush_all 已跑过(上传已落库)。
-        # 唯一"未落库"的前端可见终态是 flush_error ERROR,它走上面分支带 False。
+        # 统一终态发射点:engine/controller 的内部错误不再自己 emit ERROR,只把详情记进
+        # state["error_detail"];这里(flush 之后)构建并发射唯一的 ERROR 终态,带
+        # request_id + artifacts_flushed。controller 现有的 append + yield 自动接手。
+        # 好处:engine-error 也走 flush 后路径 → artifacts_flushed 必带且正确,前端不再
+        # 靠"缺字段"猜测。(transport 层错误 —— stream not-found / forwarder 异常 —— 仍
+        # 在 decide_terminal 之外、无此 bit,前端对缺字段 error 默认保留附件兜底。)
+        detail = s.get("error_detail") or {}
         pp.terminal_type = StreamEventType.ERROR.value
-        pp.terminal_event = None
-        pp.terminal_appended = True
+        pp.terminal_event = ExecutionEvent(
+            event_type=StreamEventType.ERROR.value,
+            agent_name=detail.get("agent"),
+            data={
+                "success": False,
+                "conversation_id": pp.conversation_id,
+                "message_id": pp.message_id,
+                "error": detail.get("error") or response or "An error occurred during execution.",
+                "agent": detail.get("agent"),
+                "request_id": detail.get("request_id"),
+                "execution_metrics": metrics,
+                "artifacts_flushed": uploads_persisted,
+            },
+        )
         return
 
     pp.terminal_type = StreamEventType.COMPLETE.value
@@ -172,7 +193,7 @@ def decide_terminal(pp: PostProcessState) -> None:
             "message_id": pp.message_id,
             "response": response,
             "execution_metrics": metrics,
-            "artifacts_flushed": pp.artifacts_flushed,
+            "artifacts_flushed": uploads_persisted,
         },
     )
 
@@ -223,7 +244,21 @@ def ensure_terminal(pp: PostProcessState) -> None:
                 pp.cancel_source = "external" if data.get("reason") else "cooperative"
         return
 
-    # synthesize
+    # 没有现成 terminal 可 adopt。engine 是否已记录了真实终因?
+    # 统一后 engine 内部错误只记 state["error"]+error_detail、不再实时 append ERROR,
+    # 所以 late-cancel 落在 decide_terminal 之前时,events 里没有 ERROR 可 adopt。此时若
+    # engine 语义上已到达 error/timeout/cooperative-cancel(只是还没被 decide_terminal
+    # 发射),应保留该真实终因 —— 委托 decide_terminal 统一构建,而不是一律掩成 external
+    # CANCELLED 把错误/超时丢掉(那是"事实上出错的轮被记成取消"的静默失真)。
+    s = pp.final_state
+    if s.get("error") or s.get("timed_out") or s.get("cancelled"):
+        decide_terminal(pp)
+        if pp.terminal_event is not None and not pp.terminal_appended:
+            pp.final_state["events"].append(pp.terminal_event)
+            pp.terminal_appended = True
+        return
+
+    # engine 啥终因都没记 → cancel 真的中断了执行中途 → 合成 external CANCELLED
     pp.final_state["cancelled"] = True  # 同步 state,future code path 看得到
     pp.terminal_type = StreamEventType.CANCELLED.value
     pp.cancel_source = "external"

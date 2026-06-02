@@ -254,57 +254,68 @@ async def execute_loop(
                 break
 
         if staging_error is not None:
-            # Loud, atomic abort. 静默吞掉一个 stage 失败 = 用户附件在 COMPLETE 的
-            # clearSent 里凭空消失而无任何信号(违反 loud-failure)。原子性:回滚本轮
-            # 已 stage 的文件,使 flush_all 一个都不落 → 用户重试时不会撞 _N 副本。
+            # Loud, atomic abort. 静默吞掉一个 stage 失败 = 用户附件在 clearSent 里
+            # 凭空消失而无任何信号(违反 loud-failure)。原子性:回滚本轮已 stage 的
+            # 文件(纯内存,几个 dict pop),使 flush_all 一个都不落 → 用户重试时不撞 _N。
             discard = getattr(artifact_manager, "discard_staged", None)
             if discard:
                 for sid in staged_ids:
                     discard(stage_session, sid)
             state["uploaded_artifacts"] = []
-            await _emit(StreamEventType.ERROR.value, "lead_agent", {
+            # uploads_rolled_back:回滚后 flush_all 对空集仍 vacuously 成功
+            # (pp.artifacts_flushed=True),但上传其实没落库 —— 这个 flag 让
+            # decide_terminal 把 artifacts_flushed 修正为 False(详见 post_processing
+            # 顶部 uploads_persisted 计算),前端据此保留输入框附件。
+            state["uploads_rolled_back"] = True
+            # record-not-emit:不在此发 ERROR;只记错误详情,turn 末由 decide_terminal
+            # 作为唯一终态发射点统一构建 + 发射 ERROR(带 request_id + artifacts_flushed)。
+            state["error_detail"] = {
                 "error": staging_error,
                 "agent": "lead_agent",
-                # 上传未落库 → 前端保留输入框附件供重试(见 post_processing 的
-                # artifacts_flushed 约定:显式 False = 不要 clearSent)
-                "artifacts_flushed": False,
-            })
+                "request_id": get_request_id() or None,
+            }
             state["completed"] = True
             state["error"] = True
-            return state
+            # 不 early-return:置 completed 后落到下方统一尾部(主循环因 completed=True
+            # 自然跳过 → finally 解绑 emit → finalize_metrics 序列化 datetime metrics)。
+            # 下方 USER_INPUT 构建块由 `if not state["completed"]` 跳过(turn 已在 setup 终止)。
 
     # 3a. 记录用户原始输入为事件（统一 context 构建路径）。本轮随消息上传的 artifact 在
     # 事件正文（仅 LLM 可见，不入 Message.user_input display）追加归属说明，让 agent 把
     # "分析这个"对应到刚传的文件、并知道用 read_artifact 读全文。不改 state["current_task"]
     # （compaction 复用）。
-    user_input_content = state["current_task"]
-    _uploaded = state.get("uploaded_artifacts") or []
-    if _uploaded:
-        # 提示词只列 id —— 模型靠 id 识别文档即可；人读的文件名已在 artifacts inventory
-        # 的 title 里。uploaded_artifacts 仍保 filename 作 record，不进提示词避免与 title 重复。
-        _listing = ", ".join(a["id"] for a in _uploaded)
-        user_input_content = (
-            f"{user_input_content}\n\n"
-            f"[The user attached {len(_uploaded)} file(s) to this message: {_listing}. "
-            f"Use read_artifact with the id for full content.]"
-        )
-    # 用户手动触发压缩：在 USER_INPUT 正文注入指令（仅 LLM 可见，同上传归属串路径）。始终
-    # 注入 —— 有正文则追加、纯压缩轮次则指令即正文，让 lead 总有可回应的输入。
-    if state.get("force_compact"):
-        _compact_directive = (
-            "[Note: the conversation history will be compacted into a summary "
-            "right after your response.]"
-        )
-        user_input_content = (
-            f"{user_input_content}\n\n{_compact_directive}"
-            if user_input_content.strip()
-            else _compact_directive
-        )
-    state["events"].append(ExecutionEvent(
-        event_type=StreamEventType.USER_INPUT.value,
-        agent_name="lead_agent",
-        data={"content": user_input_content},
-    ))
+    # `if not completed`: staging 失败已置 completed/error 并 emit 过 ERROR —— turn 在
+    # setup 阶段就终止,不再构建 USER_INPUT(否则事件流会变成 [ERROR, USER_INPUT] 的
+    # 错序,且把一条本轮根本没跑的用户输入塞进历史)。下方主循环同样因 completed 跳过。
+    if not state["completed"]:
+        user_input_content = state["current_task"]
+        _uploaded = state.get("uploaded_artifacts") or []
+        if _uploaded:
+            # 提示词只列 id —— 模型靠 id 识别文档即可；人读的文件名已在 artifacts inventory
+            # 的 title 里。uploaded_artifacts 仍保 filename 作 record，不进提示词避免与 title 重复。
+            _listing = ", ".join(a["id"] for a in _uploaded)
+            user_input_content = (
+                f"{user_input_content}\n\n"
+                f"[The user attached {len(_uploaded)} file(s) to this message: {_listing}. "
+                f"Use read_artifact with the id for full content.]"
+            )
+        # 用户手动触发压缩：在 USER_INPUT 正文注入指令（仅 LLM 可见，同上传归属串路径）。始终
+        # 注入 —— 有正文则追加、纯压缩轮次则指令即正文，让 lead 总有可回应的输入。
+        if state.get("force_compact"):
+            _compact_directive = (
+                "[Note: the conversation history will be compacted into a summary "
+                "right after your response.]"
+            )
+            user_input_content = (
+                f"{user_input_content}\n\n{_compact_directive}"
+                if user_input_content.strip()
+                else _compact_directive
+            )
+        state["events"].append(ExecutionEvent(
+            event_type=StreamEventType.USER_INPUT.value,
+            agent_name="lead_agent",
+            data={"content": user_input_content},
+        ))
 
     def _resolve_tool(name: str):
         """从合并后的 tools dict 查找工具"""
@@ -443,10 +454,12 @@ async def execute_loop(
 
         except Exception as llm_error:
             logger.exception(f"LLM call failed: {llm_error}")
-            await _emit(StreamEventType.ERROR.value, agent_name, {
+            # record-not-emit:错误详情记入 state,turn 末由 decide_terminal 统一发射 ERROR。
+            state["error_detail"] = {
                 "error": f"LLM call failed: {str(llm_error)}",
                 "agent": agent_name,
-            })
+                "request_id": get_request_id() or None,
+            }
             state["completed"] = True
             state["error"] = True
             state["response"] = f"LLM call failed: {str(llm_error)}"
@@ -849,9 +862,12 @@ async def execute_loop(
                 logger.error(f"Agent '{current_agent_name}' not found")
                 state["error"] = True
                 state["response"] = f"Agent '{current_agent_name}' not found"
-                await _emit(StreamEventType.ERROR.value, current_agent_name, {
-                    "error": f"Agent '{current_agent_name}' not found"
-                })
+                # record-not-emit:turn 末由 decide_terminal 统一发射 ERROR。
+                state["error_detail"] = {
+                    "error": f"Agent '{current_agent_name}' not found",
+                    "agent": current_agent_name,
+                    "request_id": get_request_id() or None,
+                }
                 break
 
             messages = await _build_context(current_agent_name)
@@ -892,10 +908,12 @@ async def execute_loop(
                 )
             except Exception as compact_error:
                 logger.error(f"Compaction failed for {current_agent_name}: {compact_error}")
-                await _emit(StreamEventType.ERROR.value, current_agent_name, {
+                # record-not-emit:turn 末由 decide_terminal 统一发射 ERROR。
+                state["error_detail"] = {
                     "error": f"Compaction failed: {str(compact_error)}",
                     "agent": current_agent_name,
-                })
+                    "request_id": get_request_id() or None,
+                }
                 state["completed"] = True
                 state["error"] = True
                 state["response"] = f"Compaction failed: {str(compact_error)}"
@@ -929,10 +947,12 @@ async def execute_loop(
 
     except Exception as e:
         logger.exception(f"Execution loop error: {e}")
-        await _emit(StreamEventType.ERROR.value, state.get("current_agent"), {
+        # record-not-emit:turn 末由 decide_terminal 统一发射 ERROR。
+        state["error_detail"] = {
             "error": str(e),
             "agent": state.get("current_agent"),
-        })
+            "request_id": get_request_id() or None,
+        }
         state["error"] = True
         state["response"] = f"Execution failed: {str(e)}"
 
