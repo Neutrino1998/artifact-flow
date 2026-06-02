@@ -45,7 +45,7 @@ class PostProcessState:
     final_state: Dict[str, Any]
 
     # 决策(decide_terminal / ensure_terminal 设置)
-    terminal_event: Optional[ExecutionEvent] = None  # None = "engine 已自己 append 了,别再 append"
+    terminal_event: Optional[ExecutionEvent] = None  # None = 尚未决策;decide_terminal 后必非 None
     terminal_type: Optional[str] = None              # COMPLETE / ERROR / CANCELLED
     cancel_source: Optional[str] = None              # "cooperative" / "external" (仅 terminal_type=CANCELLED 时有效)
     flush_error: Optional[str] = None                # artifact flush 异常文本,被 decide_terminal 转成 ERROR terminal
@@ -95,11 +95,12 @@ def decide_terminal(pp: PostProcessState) -> None:
     cancel handler 都读 pp。
 
     特殊语义:
-    - has_error 时 engine 已经把 ERROR 事件 append 到 final_state["events"](见
-      run_engine 的 except Exception 分支)。decide_terminal 设 terminal_type=ERROR
-      + terminal_appended=True,但留 terminal_event=None 防止 controller 二次 append。
+    - has_error 时 engine/controller 不再自己 append ERROR,只把详情记进
+      state["error_detail"](见 run_engine / controller 的 except 分支)。decide_terminal
+      在 flush 之后据此构建唯一的 ERROR terminal_event,由 controller 统一 append + yield
+      —— 好处是 ERROR 也走 flush 后路径,artifacts_flushed 必带且正确。
     - flush_error 优先于 has_error / is_cancelled:artifact 持久化失败是 controller
-      自己产生的 ERROR,要 append 新事件。
+      自己产生的 ERROR,同样构建新的 terminal_event。
     """
     s = pp.final_state
     has_error = s.get("error", False)
