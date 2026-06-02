@@ -27,7 +27,7 @@ async def session_id(conversation_repo: ConversationRepository, test_user: User)
 
 
 @pytest.fixture
-def artifact_manager(artifact_repo: ArtifactRepository) -> ArtifactService:
+def artifact_service(artifact_repo: ArtifactRepository) -> ArtifactService:
     return ArtifactService(artifact_repo)
 
 
@@ -37,18 +37,18 @@ class TestReadArtifactInMemoryVersion:
     """
 
     async def test_explicit_version_matches_in_memory(
-        self, artifact_manager: ArtifactService, session_id: str
+        self, artifact_service: ArtifactService, session_id: str
     ):
         """刚创建未 flush 的 artifact，version=1 读取应命中内存。"""
-        artifact_manager.set_session(session_id)
-        ok, _ = await artifact_manager.create_artifact(
+        artifact_service.set_session(session_id)
+        ok, _ = await artifact_service.create_artifact(
             session_id=session_id, artifact_id="doc1",
             content_type="text/plain", title="T", content="hello",
         )
         assert ok
 
         # 显式 version=1（envelope 里看到的版本号）应返回内存内容
-        result = await artifact_manager.read_artifact(
+        result = await artifact_service.read_artifact(
             session_id=session_id, artifact_id="doc1", version=1
         )
         assert result is not None
@@ -56,34 +56,34 @@ class TestReadArtifactInMemoryVersion:
         assert result["version"] == 1
 
     async def test_explicit_version_after_flush(
-        self, artifact_manager: ArtifactService, session_id: str
+        self, artifact_service: ArtifactService, session_id: str
     ):
         """flush 后显式 version=1 走 DB 路径，仍能拿到内容。"""
-        artifact_manager.set_session(session_id)
-        await artifact_manager.create_artifact(
+        artifact_service.set_session(session_id)
+        await artifact_service.create_artifact(
             session_id=session_id, artifact_id="doc2",
             content_type="text/plain", title="T", content="v1 content",
         )
-        await artifact_manager.flush_all(session_id)
+        await artifact_service.flush_all(session_id)
 
-        result = await artifact_manager.read_artifact(
+        result = await artifact_service.read_artifact(
             session_id=session_id, artifact_id="doc2", version=1
         )
         assert result is not None
         assert result["content"] == "v1 content"
 
     async def test_explicit_nonexistent_version_returns_none(
-        self, artifact_manager: ArtifactService, session_id: str
+        self, artifact_service: ArtifactService, session_id: str
     ):
         """请求一个从未存在过的版本号 → None（404）。"""
-        artifact_manager.set_session(session_id)
-        await artifact_manager.create_artifact(
+        artifact_service.set_session(session_id)
+        await artifact_service.create_artifact(
             session_id=session_id, artifact_id="doc3",
             content_type="text/plain", title="T", content="x",
         )
 
         # 内存里只有 v1，请求 v99 应该是 None
-        result = await artifact_manager.read_artifact(
+        result = await artifact_service.read_artifact(
             session_id=session_id, artifact_id="doc3", version=99
         )
         assert result is None
@@ -98,11 +98,11 @@ class TestPersistToolResult:
     """
 
     async def test_long_tool_name(
-        self, artifact_manager: ArtifactService, session_id: str
+        self, artifact_service: ArtifactService, session_id: str
     ):
-        artifact_manager.set_session(session_id)
+        artifact_service.set_session(session_id)
         long_name = "very_long_custom_http_tool_name_" * 3  # ~96 chars
-        aid, version = await artifact_manager.persist_tool_result(
+        aid, version = await artifact_service.persist_tool_result(
             session_id=session_id, tool_name=long_name, content="x" * 1000,
         )
         assert len(aid) <= 64
@@ -110,10 +110,10 @@ class TestPersistToolResult:
         assert version == 1
 
     async def test_tool_name_with_special_chars(
-        self, artifact_manager: ArtifactService, session_id: str
+        self, artifact_service: ArtifactService, session_id: str
     ):
         """MCP 工具名常含 `:`、`.`，自定义工具可能含 `/` 等。"""
-        artifact_manager.set_session(session_id)
+        artifact_service.set_session(session_id)
         names = [
             "mcp:server:tool",
             "mcp__github__create_issue",
@@ -121,7 +121,7 @@ class TestPersistToolResult:
             "tool.with.dots",
         ]
         for name in names:
-            aid, _ = await artifact_manager.persist_tool_result(
+            aid, _ = await artifact_service.persist_tool_result(
                 session_id=session_id, tool_name=name, content="x",
             )
             # ID 通过 create_artifact 校验意味着只含 [\w\-.]
@@ -129,25 +129,25 @@ class TestPersistToolResult:
             assert re.match(r"^[\w\-.]{1,64}$", aid), f"invalid id for {name!r}: {aid}"
 
     async def test_short_tool_name_unchanged_in_id(
-        self, artifact_manager: ArtifactService, session_id: str
+        self, artifact_service: ArtifactService, session_id: str
     ):
-        artifact_manager.set_session(session_id)
-        aid, _ = await artifact_manager.persist_tool_result(
+        artifact_service.set_session(session_id)
+        aid, _ = await artifact_service.persist_tool_result(
             session_id=session_id, tool_name="web_fetch", content="x",
         )
         assert aid.startswith("tool_web_fetch_")
 
     async def test_metadata_preserves_original_tool_name(
-        self, artifact_manager: ArtifactService, session_id: str
+        self, artifact_service: ArtifactService, session_id: str
     ):
         """sanitize 后的名字进 ID，但原始名字必须留在 metadata 里供审计。"""
-        artifact_manager.set_session(session_id)
+        artifact_service.set_session(session_id)
         original = "mcp:server:tool"
-        aid, _ = await artifact_manager.persist_tool_result(
+        aid, _ = await artifact_service.persist_tool_result(
             session_id=session_id, tool_name=original, content="x",
         )
         # 从 manager 缓存里读 metadata
-        memory = artifact_manager.working_set.peek(session_id, aid)
+        memory = artifact_service.working_set.peek(session_id, aid)
         assert memory.metadata["tool_name"] == original
 
 
@@ -156,11 +156,11 @@ class TestCreateFromUpload:
     长文件名会让 ID 超 64 字符进 DB）。"""
 
     async def test_long_filename_normalized(
-        self, artifact_manager: ArtifactService, session_id: str
+        self, artifact_service: ArtifactService, session_id: str
     ):
         # 80 字符的 base name + .txt 扩展名
         long_filename = ("a" * 80) + ".txt"
-        ok, _, info = await artifact_manager.create_from_upload(
+        ok, _, info = await artifact_service.create_from_upload(
             session_id=session_id, filename=long_filename,
             content="hello", content_type="text/plain",
         )
@@ -173,9 +173,9 @@ class TestCreateFromUpload:
         assert re.match(r"^[\w\-.]{1,64}$", aid)
 
     async def test_filename_with_special_chars(
-        self, artifact_manager: ArtifactService, session_id: str
+        self, artifact_service: ArtifactService, session_id: str
     ):
-        ok, _, info = await artifact_manager.create_from_upload(
+        ok, _, info = await artifact_service.create_from_upload(
             session_id=session_id, filename="report (final) v2!.txt",
             content="x", content_type="text/plain",
         )
@@ -184,13 +184,13 @@ class TestCreateFromUpload:
         assert re.match(r"^[\w\-.]{1,64}$", info["id"])
 
     async def test_dedup_suffix_stays_within_cap(
-        self, artifact_manager: ArtifactService, session_id: str
+        self, artifact_service: ArtifactService, session_id: str
     ):
         """长文件名连续上传同名，dedup 后 ID 仍 ≤ 64。"""
         long_filename = ("b" * 70) + ".txt"
         ids = []
         for _ in range(3):
-            ok, _, info = await artifact_manager.create_from_upload(
+            ok, _, info = await artifact_service.create_from_upload(
                 session_id=session_id, filename=long_filename,
                 content="x", content_type="text/plain",
             )
@@ -201,10 +201,10 @@ class TestCreateFromUpload:
         assert len(set(ids)) == 3
 
     async def test_all_punctuation_filename(
-        self, artifact_manager: ArtifactService, session_id: str
+        self, artifact_service: ArtifactService, session_id: str
     ):
         """全标点文件名 → 全部变 _，仍合法（_ 是 \\w）不触发 'upload' fallback。"""
-        ok, _, info = await artifact_manager.create_from_upload(
+        ok, _, info = await artifact_service.create_from_upload(
             session_id=session_id, filename="!!!@@@",
             content="x", content_type="text/plain",
         )
@@ -214,10 +214,10 @@ class TestCreateFromUpload:
         assert info["id"] == "______"  # 6 个 _
 
     async def test_empty_filename_sanitized(
-        self, artifact_manager: ArtifactService, session_id: str
+        self, artifact_service: ArtifactService, session_id: str
     ):
         """空文件名 → 走 fallback 'upload'。"""
-        ok, _, info = await artifact_manager.create_from_upload(
+        ok, _, info = await artifact_service.create_from_upload(
             session_id=session_id, filename="",
             content="x", content_type="text/plain",
         )
@@ -225,14 +225,14 @@ class TestCreateFromUpload:
         assert info["id"] == "upload"
 
     async def test_chinese_filename_preserved(
-        self, artifact_manager: ArtifactService, session_id: str
+        self, artifact_service: ArtifactService, session_id: str
     ):
         """中文文件名：Python 3 默认 \\w 是 Unicode-aware，中文应被保留。
 
         Regression guard：如果以后有人加了 re.ASCII 或改了正则，中文会
         全部变成 _，让所有中文上传变成相同 ID 互相 dedup 冲突。
         """
-        ok, _, info = await artifact_manager.create_from_upload(
+        ok, _, info = await artifact_service.create_from_upload(
             session_id=session_id, filename="季度报告.txt",
             content="x", content_type="text/plain",
         )
@@ -245,10 +245,10 @@ class TestCreateFromUpload:
         assert re.match(r"^[\w\-.]{1,64}$", info["id"])
 
     async def test_chinese_filename_with_punctuation(
-        self, artifact_manager: ArtifactService, session_id: str
+        self, artifact_service: ArtifactService, session_id: str
     ):
         """中文 + 标点符号：中文保留，全角 / 半角标点变 _。"""
-        ok, _, info = await artifact_manager.create_from_upload(
+        ok, _, info = await artifact_service.create_from_upload(
             session_id=session_id, filename="报告（V2）.txt",
             content="x", content_type="text/plain",
         )
@@ -272,10 +272,10 @@ class TestArtifactIdValidation:
         "x" * 65,           # 超长（上限 64）
     ])
     async def test_invalid_id_rejected(
-        self, artifact_manager: ArtifactService, session_id: str, bad_id: str,
+        self, artifact_service: ArtifactService, session_id: str, bad_id: str,
     ):
-        artifact_manager.set_session(session_id)
-        ok, msg = await artifact_manager.create_artifact(
+        artifact_service.set_session(session_id)
+        ok, msg = await artifact_service.create_artifact(
             session_id=session_id, artifact_id=bad_id,
             content_type="text/plain", title="t", content="x",
         )
@@ -291,10 +291,10 @@ class TestArtifactIdValidation:
         "x" * 64,  # 上限
     ])
     async def test_valid_id_accepted(
-        self, artifact_manager: ArtifactService, session_id: str, good_id: str,
+        self, artifact_service: ArtifactService, session_id: str, good_id: str,
     ):
-        artifact_manager.set_session(session_id)
-        ok, msg = await artifact_manager.create_artifact(
+        artifact_service.set_session(session_id)
+        ok, msg = await artifact_service.create_artifact(
             session_id=session_id, artifact_id=good_id,
             content_type="text/plain", title="t", content="x",
         )
@@ -305,13 +305,13 @@ class TestWriteBackFlush:
     """Verify that flush_all collapses in-memory edits into a single DB version."""
 
     async def test_create_then_updates_produce_single_version(
-        self, artifact_manager: ArtifactService, artifact_repo: ArtifactRepository, session_id: str
+        self, artifact_service: ArtifactService, artifact_repo: ArtifactRepository, session_id: str
     ):
         """create -> update -> update -> flush produces one version record at v3."""
-        artifact_manager.set_session(session_id)
+        artifact_service.set_session(session_id)
 
         # In-memory create (v1)
-        ok, _ = await artifact_manager.create_artifact(
+        ok, _ = await artifact_service.create_artifact(
             session_id=session_id,
             artifact_id="task_plan",
             content_type="text/markdown",
@@ -321,7 +321,7 @@ class TestWriteBackFlush:
         assert ok
 
         # In-memory update (v2)
-        ok, _, _ = await artifact_manager.update_artifact(
+        ok, _, _ = await artifact_service.update_artifact(
             session_id=session_id,
             artifact_id="task_plan",
             old_str="# Step 1",
@@ -330,7 +330,7 @@ class TestWriteBackFlush:
         assert ok
 
         # In-memory update (v3)
-        ok, _, _ = await artifact_manager.update_artifact(
+        ok, _, _ = await artifact_service.update_artifact(
             session_id=session_id,
             artifact_id="task_plan",
             old_str="# Step 1\n# Step 2",
@@ -339,7 +339,7 @@ class TestWriteBackFlush:
         assert ok
 
         # Verify memory state
-        memory = await artifact_manager.get_artifact(session_id, "task_plan")
+        memory = await artifact_service.get_artifact(session_id, "task_plan")
         assert memory is not None
         assert memory.current_version == 3
 
@@ -348,7 +348,7 @@ class TestWriteBackFlush:
         assert db_art is None
 
         # Flush
-        await artifact_manager.flush_all(session_id)
+        await artifact_service.flush_all(session_id)
 
         # DB should now have the artifact at v3
         db_art = await artifact_repo.get_artifact(session_id, "task_plan")
@@ -364,7 +364,7 @@ class TestWriteBackFlush:
         assert versions[0].content == "# Step 1\n# Step 2\n# Step 3"
 
     async def test_existing_artifact_update_flush(
-        self, artifact_manager: ArtifactService, artifact_repo: ArtifactRepository, session_id: str
+        self, artifact_service: ArtifactService, artifact_repo: ArtifactRepository, session_id: str
     ):
         """Pre-existing artifact updated twice in-memory flushes as one new version."""
         # Pre-create in DB (v1)
@@ -376,10 +376,10 @@ class TestWriteBackFlush:
             content="initial",
         )
 
-        artifact_manager.set_session(session_id)
+        artifact_service.set_session(session_id)
 
         # Two in-memory updates (v2, v3)
-        ok, _, _ = await artifact_manager.update_artifact(
+        ok, _, _ = await artifact_service.update_artifact(
             session_id=session_id,
             artifact_id="report",
             old_str="initial",
@@ -387,7 +387,7 @@ class TestWriteBackFlush:
         )
         assert ok
 
-        ok, _, _ = await artifact_manager.update_artifact(
+        ok, _, _ = await artifact_service.update_artifact(
             session_id=session_id,
             artifact_id="report",
             old_str="updated once",
@@ -395,7 +395,7 @@ class TestWriteBackFlush:
         )
         assert ok
 
-        await artifact_manager.flush_all(session_id)
+        await artifact_service.flush_all(session_id)
 
         db_art = await artifact_repo.get_artifact(session_id, "report")
         assert db_art.current_version == 3
@@ -408,12 +408,12 @@ class TestWriteBackFlush:
         assert [v.version for v in versions] == [1, 3]
 
     async def test_flush_is_idempotent(
-        self, artifact_manager: ArtifactService, artifact_repo: ArtifactRepository, session_id: str
+        self, artifact_service: ArtifactService, artifact_repo: ArtifactRepository, session_id: str
     ):
         """Calling flush_all twice does not create duplicate records."""
-        artifact_manager.set_session(session_id)
+        artifact_service.set_session(session_id)
 
-        ok, _ = await artifact_manager.create_artifact(
+        ok, _ = await artifact_service.create_artifact(
             session_id=session_id,
             artifact_id="doc",
             content_type="text/markdown",
@@ -422,8 +422,8 @@ class TestWriteBackFlush:
         )
         assert ok
 
-        await artifact_manager.flush_all(session_id)
-        await artifact_manager.flush_all(session_id)  # no-op
+        await artifact_service.flush_all(session_id)
+        await artifact_service.flush_all(session_id)  # no-op
 
         versions = await artifact_repo.list_versions(session_id, "doc")
         assert len(versions) == 1
@@ -433,12 +433,12 @@ class TestWriteBackInventory:
     """Verify that list_artifacts merges in-memory state during execution."""
 
     async def test_list_includes_unflushed_new_artifact(
-        self, artifact_manager: ArtifactService, session_id: str
+        self, artifact_service: ArtifactService, session_id: str
     ):
         """New in-memory artifact appears in list_artifacts before flush."""
-        artifact_manager.set_session(session_id)
+        artifact_service.set_session(session_id)
 
-        ok, _ = await artifact_manager.create_artifact(
+        ok, _ = await artifact_service.create_artifact(
             session_id=session_id,
             artifact_id="plan",
             content_type="text/markdown",
@@ -447,13 +447,13 @@ class TestWriteBackInventory:
         )
         assert ok
 
-        artifacts = await artifact_manager.list_artifacts(session_id)
+        artifacts = await artifact_service.list_artifacts(session_id)
         assert len(artifacts) == 1
         assert artifacts[0]["id"] == "plan"
         assert artifacts[0]["content"] == "# Plan"
 
     async def test_list_preserves_insertion_order_for_unflushed(
-        self, artifact_manager: ArtifactService, session_id: str
+        self, artifact_service: ArtifactService, session_id: str
     ):
         """In-memory new artifacts must come back in creation order.
 
@@ -461,14 +461,14 @@ class TestWriteBackInventory:
         not insertion-ordered — so session-scope consumers (grep session-mode cap
         truncation, inventory rendering) saw a non-deterministic order across runs.
         """
-        artifact_manager.set_session(session_id)
+        artifact_service.set_session(session_id)
         # Use 10 IDs whose hash order is essentially guaranteed to differ
         # from creation order — short alphanumeric strings reshuffle under
         # PYTHONHASHSEED randomization. 10 entries makes accidental same-order
         # vanishingly unlikely.
         ids = [f"art_{i:02d}" for i in range(10)]
         for aid in ids:
-            ok, _ = await artifact_manager.create_artifact(
+            ok, _ = await artifact_service.create_artifact(
                 session_id=session_id,
                 artifact_id=aid,
                 content_type="text/plain",
@@ -477,11 +477,11 @@ class TestWriteBackInventory:
             )
             assert ok
 
-        artifacts = await artifact_manager.list_artifacts(session_id)
+        artifacts = await artifact_service.list_artifacts(session_id)
         assert [a["id"] for a in artifacts] == ids
 
     async def test_list_returns_stable_order_across_flush(
-        self, artifact_manager: ArtifactService,
+        self, artifact_service: ArtifactService,
         artifact_repo: ArtifactRepository, session_id: str
     ):
         """flush_all 后下一 turn 读 DB 应得到稳定顺序(可复现,不受 PYTHONHASHSEED 影响)。
@@ -499,10 +499,10 @@ class TestWriteBackInventory:
         strict creation-order preservation. The intentional design trade-off is
         documented in repo.list_artifacts.
         """
-        artifact_manager.set_session(session_id)
+        artifact_service.set_session(session_id)
         ids = [f"art_{i:02d}" for i in range(10)]
         for aid in ids:
-            ok, _ = await artifact_manager.create_artifact(
+            ok, _ = await artifact_service.create_artifact(
                 session_id=session_id,
                 artifact_id=aid,
                 content_type="text/plain",
@@ -512,7 +512,7 @@ class TestWriteBackInventory:
             assert ok
 
         # Flush to DB — simulates end of turn
-        await artifact_manager.flush_all(session_id)
+        await artifact_service.flush_all(session_id)
 
         # Read back through a fresh manager — simulates next turn
         fresh = ArtifactService(artifact_repo)
@@ -520,7 +520,7 @@ class TestWriteBackInventory:
         assert [a["id"] for a in artifacts] == ids
 
     async def test_list_post_flush_id_tiebreaker_known_limitation(
-        self, artifact_manager: ArtifactService,
+        self, artifact_service: ArtifactService,
         artifact_repo: ArtifactRepository, session_id: str
     ):
         """文档化已知限制:同秒创建 + id 字典序与创建顺序冲突 → 后者赢。
@@ -529,11 +529,11 @@ class TestWriteBackInventory:
         executable doc 的形式锁住契约:跨 turn 读出的顺序是 `(created_at, id)`
         排序,而非创建顺序。如果哪天加 `creation_seq` 列改契约,这个测试需要更新。
         """
-        artifact_manager.set_session(session_id)
+        artifact_service.set_session(session_id)
         # 故意让创建顺序与 id 字典序相反
         creation_order = ["zebra_doc", "monkey_doc", "apple_doc"]
         for aid in creation_order:
-            ok, _ = await artifact_manager.create_artifact(
+            ok, _ = await artifact_service.create_artifact(
                 session_id=session_id,
                 artifact_id=aid,
                 content_type="text/plain",
@@ -542,7 +542,7 @@ class TestWriteBackInventory:
             )
             assert ok
 
-        await artifact_manager.flush_all(session_id)
+        await artifact_service.flush_all(session_id)
 
         fresh = ArtifactService(artifact_repo)
         artifacts = await fresh.list_artifacts(session_id)
@@ -553,7 +553,7 @@ class TestWriteBackInventory:
         assert observed != creation_order
 
     async def test_list_shows_dirty_content_over_db(
-        self, artifact_manager: ArtifactService, artifact_repo: ArtifactRepository, session_id: str
+        self, artifact_service: ArtifactService, artifact_repo: ArtifactRepository, session_id: str
     ):
         """In-memory edits override DB content in list_artifacts."""
         # Pre-create in DB
@@ -565,9 +565,9 @@ class TestWriteBackInventory:
             content="old content",
         )
 
-        artifact_manager.set_session(session_id)
+        artifact_service.set_session(session_id)
 
-        ok, _, _ = await artifact_manager.update_artifact(
+        ok, _, _ = await artifact_service.update_artifact(
             session_id=session_id,
             artifact_id="report",
             old_str="old content",
@@ -575,7 +575,7 @@ class TestWriteBackInventory:
         )
         assert ok
 
-        artifacts = await artifact_manager.list_artifacts(session_id)
+        artifacts = await artifact_service.list_artifacts(session_id)
         assert len(artifacts) == 1
         assert artifacts[0]["content"] == "new content"
         assert artifacts[0]["version"] == 2
@@ -585,12 +585,12 @@ class TestWriteBackFlushFailure:
     """Verify that failed flushes retain dirty state."""
 
     async def test_failed_flush_keeps_dirty(
-        self, artifact_manager: ArtifactService, artifact_repo: ArtifactRepository, session_id: str
+        self, artifact_service: ArtifactService, artifact_repo: ArtifactRepository, session_id: str
     ):
         """If flush fails for one artifact, it stays in dirty set."""
-        artifact_manager.set_session(session_id)
+        artifact_service.set_session(session_id)
 
-        ok, _ = await artifact_manager.create_artifact(
+        ok, _ = await artifact_service.create_artifact(
             session_id=session_id,
             artifact_id="will_fail",
             content_type="text/markdown",
@@ -609,7 +609,7 @@ class TestWriteBackFlushFailure:
         )
 
         with pytest.raises(RuntimeError, match="Failed to flush"):
-            await artifact_manager.flush_all(session_id)
+            await artifact_service.flush_all(session_id)
 
         # Dirty entry should still be present
-        assert artifact_manager.working_set.is_dirty(session_id, "will_fail")
+        assert artifact_service.working_set.is_dirty(session_id, "will_fail")

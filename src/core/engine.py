@@ -150,7 +150,7 @@ async def execute_loop(
     agents: Dict[str, Any],  # {name: AgentConfig}
     tools: Dict[str, Any],   # {name: BaseTool}
     hooks: EngineHooks,
-    artifact_manager: Optional[Any] = None,
+    artifact_service: Optional[Any] = None,
     emit: Optional[EmitFn] = None,
 ) -> Dict[str, Any]:
     """
@@ -161,8 +161,8 @@ async def execute_loop(
         agents: {name: AgentConfig} 字典
         tools: {name: BaseTool} 字典（全局 + 请求级工具已合并）
         hooks: EngineHooks（check_cancelled / create_interrupt / wait_for_resume / drain_messages）
-        artifact_manager: ArtifactService 实例（duck-typed 协作者：set_session /
-            list_artifacts / persist_tool_result / bind_emit；参数名保留以兼容测试注入）
+        artifact_service: ArtifactService 实例（duck-typed 协作者：set_session /
+            list_artifacts / persist_tool_result / bind_emit）
         emit: 事件推送回调（推 SSE）
     Returns:
         最终执行状态
@@ -215,7 +215,7 @@ async def execute_loop(
 
     # ── bind artifact-event emit (must precede upload staging so staged uploads
     #    emit ARTIFACT_CREATED) + unbind at loop end in the main-loop finally ──
-    _bind_emit = getattr(artifact_manager, "bind_emit", None) if artifact_manager else None
+    _bind_emit = getattr(artifact_service, "bind_emit", None) if artifact_service else None
     if _bind_emit:
         _bind_emit(_emit)
 
@@ -226,13 +226,13 @@ async def execute_loop(
     # cold-start client sees an upload before flush_all) → all flush together at
     # turn end. This is the unified single lifecycle (see artifact-layer plan
     # decision 1 / stage C). _normalize + dedup happen inside create_from_upload.
-    if artifact_manager is not None and state.get("uploaded_files"):
+    if artifact_service is not None and state.get("uploaded_files"):
         stage_session = state["session_id"]
         staged_ids: List[str] = []
         staging_error: Optional[str] = None
         for f in state["uploaded_files"]:
             try:
-                ok, _msg, info = await artifact_manager.create_from_upload(
+                ok, _msg, info = await artifact_service.create_from_upload(
                     session_id=stage_session,
                     filename=f["filename"],
                     content=f["content"],
@@ -257,7 +257,7 @@ async def execute_loop(
             # Loud, atomic abort. 静默吞掉一个 stage 失败 = 用户附件在 clearSent 里
             # 凭空消失而无任何信号(违反 loud-failure)。原子性:回滚本轮已 stage 的
             # 文件(纯内存,几个 dict pop),使 flush_all 一个都不落 → 用户重试时不撞 _N。
-            discard = getattr(artifact_manager, "discard_staged", None)
+            discard = getattr(artifact_service, "discard_staged", None)
             if discard:
                 for sid in staged_ids:
                     discard(stage_session, sid)
@@ -333,10 +333,10 @@ async def execute_loop(
                 await _emit(StreamEventType.QUEUED_MESSAGE.value, "lead_agent", {"content": wrapped})
 
         artifacts_inventory = None
-        if artifact_manager and state.get("session_id"):
+        if artifact_service and state.get("session_id"):
             try:
-                artifact_manager.set_session(state["session_id"])
-                artifacts_inventory = await artifact_manager.list_artifacts(
+                artifact_service.set_session(state["session_id"])
+                artifacts_inventory = await artifact_service.list_artifacts(
                     session_id=state["session_id"],
                     include_content=True,
                 )
@@ -636,7 +636,7 @@ async def execute_loop(
         data = result.data or ""
         if len(data) <= tool.max_result_size_chars:
             return result
-        if artifact_manager is None or not state.get("session_id"):
+        if artifact_service is None or not state.get("session_id"):
             logger.warning(
                 f"Cannot persist large tool result for '{tool_name}' "
                 f"(size={len(data)}): manager or session unavailable"
@@ -644,7 +644,7 @@ async def execute_loop(
             return result
 
         try:
-            aid, version = await artifact_manager.persist_tool_result(
+            aid, version = await artifact_service.persist_tool_result(
                 session_id=state["session_id"],
                 tool_name=tool_name,
                 content=data,
@@ -849,7 +849,7 @@ async def execute_loop(
         return False
 
     # ── main loop ──
-    # (_emit already bound to artifact_manager above, before upload staging;
+    # (_emit already bound to artifact_service above, before upload staging;
     #  unbound in the finally below.)
 
     try:

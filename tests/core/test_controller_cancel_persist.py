@@ -43,7 +43,7 @@ def _make_mock_conversation_manager():
     return cm
 
 
-def _make_mock_artifact_manager():
+def _make_mock_artifact_service():
     am = MagicMock()
     am.set_session = MagicMock()
     am.flush_all = AsyncMock()
@@ -108,7 +108,7 @@ class TestPersistOnExternalCancel:
         owns the persistence contract here.
         """
         cm = _make_mock_conversation_manager()
-        am = _make_mock_artifact_manager()
+        am = _make_mock_artifact_service()
         er, batches = _capturing_event_repo()
         ctrl = _make_controller(cm, er, am)
 
@@ -186,7 +186,7 @@ class TestPersistOnExternalCancel:
         completion). We verify by checking execute_loop saw CancelledError.
         """
         cm = _make_mock_conversation_manager()
-        am = _make_mock_artifact_manager()
+        am = _make_mock_artifact_service()
         er, _ = _capturing_event_repo()
         ctrl = _make_controller(cm, er, am)
 
@@ -245,7 +245,7 @@ class TestPersistOnExternalCancel:
             return True
         cm.exists_async = AsyncMock(side_effect=slow_exists)
 
-        am = _make_mock_artifact_manager()
+        am = _make_mock_artifact_service()
         er, batches = _capturing_event_repo()
         ctrl = _make_controller(cm, er, am)
 
@@ -325,7 +325,7 @@ class TestPersistOnExternalCancel:
         new event after a partial write would break idempotency.
         """
         cm = _make_mock_conversation_manager()
-        am = _make_mock_artifact_manager()
+        am = _make_mock_artifact_service()
 
         # Make _persist_events block — we cancel after the terminal has been
         # appended (line 397) but before the persist completes.
@@ -423,7 +423,7 @@ class TestPersistOnExternalCancel:
         the late-cancel handler also falls back to initial_state defensively.
         """
         cm = _make_mock_conversation_manager()
-        am = _make_mock_artifact_manager()
+        am = _make_mock_artifact_service()
         er, batches = _capturing_event_repo()
         ctrl = _make_controller(cm, er, am)
 
@@ -496,7 +496,7 @@ class TestPersistOnExternalCancel:
         the attachments (they're already in DB; retry won't dup them).
         """
         cm = _make_mock_conversation_manager()
-        am = _make_mock_artifact_manager()  # flush_all is an AsyncMock → succeeds
+        am = _make_mock_artifact_service()  # flush_all is an AsyncMock → succeeds
         ctrl = _make_controller(cm, _make_failing_event_repo(), am)
 
         async def fake_execute_loop(**kwargs):
@@ -542,7 +542,7 @@ class TestPersistOnExternalCancel:
         from config import config
 
         cm = _make_mock_conversation_manager()
-        am = _make_mock_artifact_manager()
+        am = _make_mock_artifact_service()
         er, _ = _capturing_event_repo()
         ctrl = _make_controller(cm, er, am)
 
@@ -603,7 +603,7 @@ class TestPersistOnExternalCancel:
         True and skips.
         """
         cm = _make_mock_conversation_manager()
-        am = _make_mock_artifact_manager()
+        am = _make_mock_artifact_service()
         er, _ = _capturing_event_repo()
         ctrl = _make_controller(cm, er, am)
 
@@ -680,7 +680,7 @@ class TestPersistOnExternalCancel:
 
         cm.update_message_metadata_async = AsyncMock(side_effect=slow_metadata)
 
-        am = _make_mock_artifact_manager()
+        am = _make_mock_artifact_service()
         er, _ = _capturing_event_repo()
         ctrl = _make_controller(cm, er, am)
 
@@ -740,7 +740,7 @@ class TestPersistOnExternalCancel:
         normal task-cancellation semantics for the runner's cleanup path.
         """
         cm = _make_mock_conversation_manager()
-        am = _make_mock_artifact_manager()
+        am = _make_mock_artifact_service()
 
         # Repo whose batch_create blows up — the on-cancel persist attempt
         # should log and continue, not propagate this exception in place of
@@ -834,7 +834,7 @@ class TestPersistOnExternalCancel:
 
         cm.exists_async = AsyncMock(side_effect=slow_exists)
 
-        am = _make_mock_artifact_manager()
+        am = _make_mock_artifact_service()
         er, batches = _capturing_event_repo()
         ctrl = _make_controller(cm, er, am)
 
@@ -918,7 +918,7 @@ class TestPersistOnExternalCancel:
         from config import config
 
         cm = _make_mock_conversation_manager()
-        am = _make_mock_artifact_manager()
+        am = _make_mock_artifact_service()
 
         # batch_create 第一次 raise CancelledError(模拟 DB commit 后 await 被打断),
         # 第二次(late handler 调用)正常返回。
@@ -1000,7 +1000,7 @@ class TestPersistOnExternalCancel:
 
         cm.exists_async = AsyncMock(side_effect=slow_exists)
 
-        am = _make_mock_artifact_manager()
+        am = _make_mock_artifact_service()
         # batch_create blows up — late-cancel persist will fail
         er = MagicMock()
         er.batch_create = AsyncMock(side_effect=RuntimeError("DB exploded mid-late-cancel"))
@@ -1061,7 +1061,7 @@ class TestTimeoutTerminal:
         from config import config
 
         cm = _make_mock_conversation_manager()
-        am = _make_mock_artifact_manager()
+        am = _make_mock_artifact_service()
         er, batches = _capturing_event_repo()
         ctrl = _make_controller(cm, er, am)
 

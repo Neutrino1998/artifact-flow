@@ -225,7 +225,7 @@ class ExecutionController:
                         agents=self.agents,
                         tools=self.tools,
                         hooks=self.hooks,
-                        artifact_manager=self.artifact_service,
+                        artifact_service=self.artifact_service,
                         emit=emit_to_queue,
                     )
             except TimeoutError:

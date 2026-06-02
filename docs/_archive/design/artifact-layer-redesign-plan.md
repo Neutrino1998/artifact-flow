@@ -112,8 +112,9 @@
 - 2026-06-02 **实现落地(ABC 一个 PR,在 main 上)**。要点 / 与 plan 的偏差与补充:
   - **四层**:`artifact_working_set.py`(纯状态)+ `artifact_service.py`(编排+发事件,自带独占
     WorkingSet)+ 既有 `ArtifactRepository` + 纯算法模块;`ArtifactManager` 删除,`_active_managers`
-    注册表与两个 GET 的 overlay 删除,REST = 纯 DB。`artifact_manager` 变量统一改名 `artifact_service`;
-    **唯一例外**:`execute_loop(artifact_manager=...)` 形参名保留(duck-typed 协作者,免改测试注入)。
+    注册表与两个 GET 的 overlay 删除,REST = 纯 DB。`artifact_manager` 变量统一改名 `artifact_service`
+    (含 `execute_loop` 形参 + 各测试 fixture —— 2026-06-02 收尾补齐,先前为免改测试注入暂留的"唯一例外"
+    已消除;`tests/manual/engine.py` 因仍 import 已删除的 `ArtifactManager` 类、属独立 stale 项,不在此列)。
   - **emit seam(锁 B 方案)**:引擎 `execute_loop` 起点 `service.bind_emit(_emit)`、loop 末 finally 解绑;
     Service 在 create/rewrite/update/上传 stage 直接发 `ARTIFACT_*`(`sse_only=True`)。**决策 3 理由修正**
     (采纳 review 意见):不是「避免撑爆事件表」(模型 create/rewrite 正文本就随 `llm_complete` 持久化一次),

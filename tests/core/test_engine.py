@@ -194,7 +194,7 @@ class TestUploadStagingAbort:
             agents={"lead_agent": _FakeAgentConfig()},
             tools={},
             hooks=_noop_hooks(),
-            artifact_manager=svc,
+            artifact_service=svc,
             emit=capture_emit,
         )
 
