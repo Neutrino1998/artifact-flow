@@ -23,7 +23,8 @@ from core.events import StreamEventType
 from core.conversation_manager import ConversationManager
 from agents.loader import load_all_agents
 from tools.base import BaseTool, build_tool_map
-from tools.builtin.artifact_ops import ArtifactManager, create_artifact_tools
+from tools.builtin.artifact_service import ArtifactService
+from tools.builtin.artifact_ops import create_artifact_tools
 from tools.builtin.call_subagent import CallSubagentTool
 from tools.builtin.web_search import WebSearchTool
 from tools.builtin.web_fetch import WebFetchTool
@@ -262,10 +263,10 @@ class TestEnvironment:
 
         async with self.db_manager.session() as session:
             artifact_repo = ArtifactRepository(session)
-            artifact_manager = ArtifactManager(artifact_repo)
+            artifact_service = ArtifactService(artifact_repo)
 
             # 合并全局工具 + 请求级 artifact 工具
-            all_tools = {**self._tools, **{t.name: t for t in create_artifact_tools(artifact_manager)}}
+            all_tools = {**self._tools, **{t.name: t for t in create_artifact_tools(artifact_service)}}
 
             conv_repo = ConversationRepository(session)
             conv_manager = ConversationManager(conv_repo)
@@ -280,7 +281,7 @@ class TestEnvironment:
                 agents=self._agents,
                 tools=all_tools,
                 hooks=hooks,
-                artifact_manager=artifact_manager,
+                artifact_service=artifact_service,
                 conversation_manager=conv_manager,
             )
 

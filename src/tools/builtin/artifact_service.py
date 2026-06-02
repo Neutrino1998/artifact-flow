@@ -18,6 +18,7 @@ import math  # noqa: F401  (保留:历史上 ReadArtifactTool 用过,避免无�
 import os
 import re
 import secrets
+from functools import lru_cache
 from typing import Any, Dict, List, Optional, Tuple
 
 from sqlalchemy.exc import IntegrityError
@@ -31,12 +32,20 @@ from utils.time import utc_now
 
 logger = get_logger("ArtifactFlow")
 
-# Artifact live 事件类型值(string)。**不在顶层 import core.events**:tools 包被
-# core 先 import,顶层引 core 会触发 core/__init__ → controller → 本模块的循环
-# import。这两个常量与 ``StreamEventType.ARTIFACT_CREATED/UPDATED.value`` 对齐,
-# 由 tests/tools/builtin/test_artifact_events.py 交叉校验防漂移(同终态事件做法)。
-_EVT_ARTIFACT_CREATED = "artifact_created"
-_EVT_ARTIFACT_UPDATED = "artifact_updated"
+# Artifact live 事件类型值。**不在顶层 import core.events**:tools 包被 core 先
+# import,顶层引 core 会触发 core/__init__ → controller → 本模块的循环 import。
+# 故延迟到首次调用(那时各模块都加载完了)再从权威 enum 取值并缓存 —— 值由 enum
+# 直接派生,字面量复制带来的 drift 结构上不再可能(无需再靠 drift 测兜底)。
+@lru_cache(maxsize=1)
+def _evt_artifact_created() -> str:
+    from core.events import StreamEventType
+    return StreamEventType.ARTIFACT_CREATED.value
+
+
+@lru_cache(maxsize=1)
+def _evt_artifact_updated() -> str:
+    from core.events import StreamEventType
+    return StreamEventType.ARTIFACT_UPDATED.value
 
 
 # Artifact ID 合法字符集:letter/digit/underscore + hyphen + dot,1-64 字符。
@@ -133,7 +142,7 @@ class ArtifactService:
         self._ws.put(session_id, memory)
         self._ws.mark_new(session_id, memory.id)
         payload = self._content_payload(memory.content)
-        await self._emit_artifact(_EVT_ARTIFACT_CREATED, {
+        await self._emit_artifact(_evt_artifact_created(), {
             "id": memory.id,
             "title": memory.title,
             "content_type": memory.content_type,
@@ -472,7 +481,7 @@ class ArtifactService:
         else:
             update_payload = self._content_payload(memory.content)
             self._note_base(artifact_id, update_payload)
-        await self._emit_artifact(_EVT_ARTIFACT_UPDATED, {
+        await self._emit_artifact(_evt_artifact_updated(), {
             "id": artifact_id,
             "current_version": memory.current_version,
             **update_payload,
@@ -516,7 +525,7 @@ class ArtifactService:
 
         # rewrite = 整文替换:发整文(无 span delta),刷新 base。
         rewrite_payload = self._content_payload(new_content)
-        await self._emit_artifact(_EVT_ARTIFACT_UPDATED, {
+        await self._emit_artifact(_evt_artifact_updated(), {
             "id": artifact_id,
             "current_version": memory.current_version,
             **rewrite_payload,

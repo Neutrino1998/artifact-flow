@@ -1,10 +1,13 @@
 """ArtifactService SSE-only ARTIFACT_* event contract.
 
-Covers: (1) the local event-type string constants stay aligned with
-StreamEventType (drift guard, same pattern as terminal-event-sync);
-(2) create/rewrite/update emit the right payloads when emit is bound;
-(3) the span delta reconstructs new content; (4) REST-style (no emit bound)
-stays silent; (5) the live-content cap omits oversized bodies.
+Covers: (1) create/rewrite/update emit the right payloads when emit is bound;
+(2) the span delta reconstructs new content; (3) REST-style (no emit bound)
+stays silent; (4) the live-content cap omits oversized bodies.
+
+Note: the old "drift guard" test is gone — the event-type values now derive
+directly from StreamEventType via the deferred-import accessors
+(_evt_artifact_created/_evt_artifact_updated), so literal drift is structurally
+impossible rather than test-enforced.
 """
 
 import uuid
@@ -15,18 +18,12 @@ from core.events import StreamEventType
 from db.models import User
 from repositories.artifact_repo import ArtifactRepository
 from repositories.conversation_repo import ConversationRepository
-from tools.builtin.artifact_service import (
-    ArtifactService,
-    _EVT_ARTIFACT_CREATED,
-    _EVT_ARTIFACT_UPDATED,
-)
+from tools.builtin.artifact_service import ArtifactService
 
-
-def test_event_type_constants_match_enum():
-    """Drift guard: the module-local string constants (kept local to avoid a
-    tools→core circular import) must equal the authoritative enum values."""
-    assert _EVT_ARTIFACT_CREATED == StreamEventType.ARTIFACT_CREATED.value
-    assert _EVT_ARTIFACT_UPDATED == StreamEventType.ARTIFACT_UPDATED.value
+# 本测试用枚举值断言已发事件类型;Service 内部经 _evt_artifact_* 访问器(延迟 import)
+# 取的就是这两个同源值。
+_EVT_ARTIFACT_CREATED = StreamEventType.ARTIFACT_CREATED.value
+_EVT_ARTIFACT_UPDATED = StreamEventType.ARTIFACT_UPDATED.value
 
 
 @pytest.fixture

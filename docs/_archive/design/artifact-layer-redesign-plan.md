@@ -142,8 +142,11 @@
     `markSent`→COMPLETE `clearSent`/非成功终态 `unmarkSent`,保留到 COMPLETE 成功作上传丢失兜底。
   - **测试**:后端 1053 passed / 31 skipped;前端 187 passed + tsc 干净。新增 `test_artifact_events.py`
     (emit/delta/base-tracking/上传 stage)、`compute_update` span 测、`artifactStore`/`stagedFilesStore` reduce 测。
-  - **遗留**:`tools→core` 顶层 import 环 → `artifact_service` 用本地字符串常量 `_EVT_ARTIFACT_*`(drift 测交叉校验);
-    多 worker 真机回归(GET 打到非执行 worker 仍正确)尚需手动跑。
+  - ~~**遗留**:`tools→core` 顶层 import 环 → `artifact_service` 用本地字符串常量 `_EVT_ARTIFACT_*`(drift 测交叉校验)~~
+    **(2026-06-02 已消除)**:改为延迟 import 的访问器 `_evt_artifact_created/_evt_artifact_updated`
+    (`@lru_cache`,首次调用时各模块已加载完、环不成立),值由 `StreamEventType` 直接派生 → 字面量复制 + drift 测
+    一并删除(drift 结构上不再可能)。根因(`core/__init__` eager re-export controller)未动,仅做外科消环。
+  - **遗留**:多 worker 真机回归(GET 打到非执行 worker 仍正确)尚需手动跑。
 - 2026-06-02 加决策 6 并校正读/写边界:turn 中禁用**读类** durable-acting 操作(下载/导出/版本查看,**纯前端 UX 锁、非后端边界**)、`COMPLETE` 后启用——删 overlay 后 REST=纯 DB、turn 中落后于 live,这类功能会拿到旧版。判据:读类绕过只伤自己 → 前端锁够;写/执行类(发消息/cancel/conversation tree 开分支/delete)绕过会冲突 → 后端 lease(409)/ownership(404)强制,不在本决策。**去掉先前误列的 revert**(当前无此功能,只有 conversation tree)。记未来拐点:导出入沙盒后从读升级为 lease-gated 执行。
 - 2026-06-02 定交付方式:ABC **一个 PR 整体交付**(`feat/artifact-layer`),不拆阶段、不留 `ArtifactManager` 兼容壳、死端点随 PR 一并删——避免半迁移假缝与待删脚手架。A/B/C 降为逻辑分组/自检清单。
 - 2026-06-02 补缺口:明确上传必须 emit `ARTIFACT_CREATED`(收回即时 commit 后,上传在 flush 前不在 DB,不发事件则对冷启动「DB+流」重建隐形)。落法=上传 stage 走 `ArtifactService.create_artifact(source=user_upload)` 同一路径,事件随之自动发出(WorkingSet 纯状态不发、Service 才发)。同步更新目标态步骤 1 / 决策 1 / 阶段 C。
