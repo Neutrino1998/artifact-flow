@@ -31,6 +31,13 @@ let _sharedAbortController: AbortController | null = null;
 // pairing). Cleared on stream start/end via endStream() consumer.
 let _pendingPermissionResult: { approved: boolean; reason?: string } | null = null;
 
+// Monotonic suffix making each live tool-call id unique. `Date.now()` alone
+// collides when the same tool is invoked twice within one ms (e.g. two
+// create_artifact calls in one multi-tool turn, both tool_start frames parsed
+// in the same tick) → duplicate React keys. Matching of tool_complete is by
+// (toolName, running status), not id, so a unique id is safe.
+let _toolCallSeq = 0;
+
 const MAX_RECONNECT_ATTEMPTS = 3;
 const RECONNECT_BASE_DELAY_MS = 1000;
 
@@ -293,7 +300,7 @@ export function useSSE() {
           _pendingPermissionResult = null;
 
           addToolCallToSegment({
-            id: `${toolName}-${Date.now()}`,
+            id: `${toolName}-${Date.now()}-${_toolCallSeq++}`,
             toolName,
             params,
             agent,
