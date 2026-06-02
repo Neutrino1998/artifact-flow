@@ -15,7 +15,7 @@ function deps(over: Partial<Parameters<typeof runComposerOp>[0]> = {}) {
     content: 'hello',
     staged: [] as StagedFile[],
     setContent: vi.fn(),
-    removeFiles: vi.fn(),
+    markSent: vi.fn(),
     lockRef: { current: false },
     setSending: vi.fn(),
     run: vi.fn(async () => true),
@@ -51,20 +51,20 @@ describe('runComposerOp', () => {
     expect(updater('hello')).toBe('');                 // unchanged → cleared
     expect(updater('hello, more typed since')).toBe('hello, more typed since'); // changed → kept
     // only the ids this send consumed are removed
-    expect(d.removeFiles).toHaveBeenCalledWith(['s0', 's1']);
+    expect(d.markSent).toHaveBeenCalledWith(['s0', 's1']);
   });
 
-  test('does not call removeFiles when nothing was staged', async () => {
+  test('does not call markSent when nothing was staged', async () => {
     const d = deps({ content: 'hello', staged: [] });
     await runComposerOp(d);
-    expect(d.removeFiles).not.toHaveBeenCalled();
+    expect(d.markSent).not.toHaveBeenCalled();
   });
 
   test('on failure (run returns false), preserves text and files', async () => {
     const d = deps({ content: 'hello', staged: makeStaged(1), run: vi.fn(async () => false) });
     await runComposerOp(d);
     expect(d.setContent).not.toHaveBeenCalled();
-    expect(d.removeFiles).not.toHaveBeenCalled();
+    expect(d.markSent).not.toHaveBeenCalled();
   });
 
   test('on throw, preserves composer and still releases the lock', async () => {
@@ -77,7 +77,7 @@ describe('runComposerOp', () => {
     });
     await runComposerOp(d);
     expect(d.setContent).not.toHaveBeenCalled();
-    expect(d.removeFiles).not.toHaveBeenCalled();
+    expect(d.markSent).not.toHaveBeenCalled();
     expect(d.lockRef.current).toBe(false);
     expect(d.setSending).toHaveBeenLastCalledWith(false);
   });

@@ -38,7 +38,7 @@ from config import config
 from tools.base import BaseTool, ToolParameter, ToolPermission, ToolResult
 
 if TYPE_CHECKING:
-    from tools.builtin.artifact_ops import ArtifactManager
+    from tools.builtin.artifact_service import ArtifactService
 
 
 # ============================================================
@@ -222,7 +222,7 @@ def _format_heading(grouped: List[Tuple[str, List[Tuple[int, str, bool]]]]) -> s
 class GrepArtifactTool(BaseTool):
     """跨 artifact 内容检索，ripgrep 语义。"""
 
-    def __init__(self, manager: "Optional[ArtifactManager]" = None):
+    def __init__(self, service: "Optional[ArtifactService]" = None):
         super().__init__(
             name="grep_artifact",
             description=(
@@ -238,11 +238,11 @@ class GrepArtifactTool(BaseTool):
             # 沿用 BaseTool 默认 max_result_size_chars=50000：grep 结果若超阈值，
             # 引擎中间件会把它落盘成新 artifact，模型下次用 read_artifact 分段取。
         )
-        self._manager = manager
+        self._service = service
 
-    def set_manager(self, manager: "ArtifactManager") -> None:
+    def set_service(self, service: "ArtifactService") -> None:
         """依赖注入入口（跟其他 artifact 工具一致）。"""
-        self._manager = manager
+        self._service = service
 
     def get_parameters(self) -> List[ToolParameter]:
         return [
@@ -297,10 +297,10 @@ class GrepArtifactTool(BaseTool):
         ]
 
     async def execute(self, **params) -> ToolResult:
-        if not self._manager:
-            return ToolResult(success=False, error="ArtifactManager not configured")
+        if not self._service:
+            return ToolResult(success=False, error="ArtifactService not configured")
 
-        session_id = self._manager.current_session_id
+        session_id = self._service.current_session_id
         if not session_id:
             return ToolResult(success=False, error="No active session")
 
@@ -344,7 +344,7 @@ class GrepArtifactTool(BaseTool):
 
         # ─── 单 artifact 模式 ──────────────────────────────────────
         if aid is not None:
-            result = await self._manager.read_artifact(
+            result = await self._service.read_artifact(
                 session_id=session_id, artifact_id=aid, version=None
             )
             if result is None:
@@ -378,7 +378,7 @@ class GrepArtifactTool(BaseTool):
         # 内存由"载入多少"决定(repo.list_artifacts 是 select(Artifact),content 列 eager-load;
         # 且 get_artifact 会 cache),不是下面的 scan 护栏能管的 —— 那些限的是"扫多少"(CPU)。
         # 真 bound 内存需 repo 列投影 + 绕 cache,对内存从未爆过的 🟡 不划算(详见 GREP-02)。
-        artifacts = await self._manager.list_artifacts(
+        artifacts = await self._service.list_artifacts(
             session_id=session_id, include_content=True
         )
 

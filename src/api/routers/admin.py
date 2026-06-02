@@ -15,7 +15,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from api.dependencies import (
-    get_artifact_manager,
+    get_artifact_service,
     get_conversation_manager,
     get_runtime_store,
     require_admin,
@@ -36,7 +36,7 @@ from api.schemas.artifact import (
     VersionSummary,
 )
 from core.conversation_manager import ConversationManager
-from tools.builtin.artifact_ops import ArtifactManager
+from tools.builtin.artifact_service import ArtifactService
 from utils.logger import get_logger
 
 logger = get_logger("ArtifactFlow")
@@ -141,9 +141,10 @@ async def get_admin_conversation_events(
 # ============================================================
 # Artifacts (admin view)
 #
-# Reads DB-only flushed state — no overlay of `ArtifactManager.get_active()`
-# in-memory cache. Matches the rest of admin observability, which views
-# persisted history rather than live execution state. No ownership check
+# Reads DB-only flushed state. After the artifact-layer refactor (removal of
+# the _active_managers process registry) ALL REST reads are DB-only — there is
+# no in-memory overlay anywhere. Matches the rest of admin observability, which
+# views persisted history rather than live execution state. No ownership check
 # (admin sees all users' conversations); `require_admin` still gates access.
 # ============================================================
 
@@ -155,7 +156,7 @@ async def get_admin_conversation_events(
 async def list_admin_conversation_artifacts(
     conv_id: str,
     _admin: TokenPayload = Depends(require_admin),
-    artifact_manager: ArtifactManager = Depends(get_artifact_manager),
+    artifact_service: ArtifactService = Depends(get_artifact_service),
     conversation_manager: ConversationManager = Depends(get_conversation_manager),
 ):
     """List all artifacts in a conversation (DB-only, no in-memory overlay)."""
@@ -164,7 +165,7 @@ async def list_admin_conversation_artifacts(
     if not await conversation_manager.exists_async(conv_id):
         raise HTTPException(status_code=404, detail="Conversation not found")
 
-    artifacts = await artifact_manager.list_artifacts(
+    artifacts = await artifact_service.list_artifacts(
         session_id=conv_id,
         include_content=False,
     )
@@ -194,10 +195,10 @@ async def get_admin_conversation_artifact(
     conv_id: str,
     artifact_id: str,
     _admin: TokenPayload = Depends(require_admin),
-    artifact_manager: ArtifactManager = Depends(get_artifact_manager),
+    artifact_service: ArtifactService = Depends(get_artifact_service),
 ):
     """Get current artifact content + version list (DB-only)."""
-    result = await artifact_manager.read_artifact(
+    result = await artifact_service.read_artifact(
         session_id=conv_id,
         artifact_id=artifact_id,
     )
@@ -207,7 +208,7 @@ async def get_admin_conversation_artifact(
             detail=f"Artifact '{artifact_id}' not found in conversation '{conv_id}'",
         )
 
-    versions = await artifact_manager.list_versions(conv_id, artifact_id)
+    versions = await artifact_service.list_versions(conv_id, artifact_id)
     version_summaries = [
         VersionSummary(
             version=v.version,
@@ -241,10 +242,10 @@ async def get_admin_conversation_artifact_version(
     artifact_id: str,
     version: int,
     _admin: TokenPayload = Depends(require_admin),
-    artifact_manager: ArtifactManager = Depends(get_artifact_manager),
+    artifact_service: ArtifactService = Depends(get_artifact_service),
 ):
     """Get a specific historical version's content (DB-only)."""
-    ver = await artifact_manager.get_version(conv_id, artifact_id, version)
+    ver = await artifact_service.get_version(conv_id, artifact_id, version)
     if ver is None:
         raise HTTPException(
             status_code=404,

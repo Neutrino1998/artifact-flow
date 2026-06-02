@@ -65,15 +65,3 @@ class ArtifactResponse(BaseModel):
     created_at: datetime = Field(..., description="Creation time")
     updated_at: datetime = Field(..., description="Last update time")
     versions: List[VersionSummary] = Field(default_factory=list, description="All version summaries")
-
-
-class UploadResponse(BaseModel):
-    """POST /api/v1/artifacts/{session_id}/upload response"""
-    id: str = Field(..., description="Artifact ID")
-    session_id: str = Field(..., description="Session ID")
-    content_type: str = Field(..., description="MIME type (after conversion)")
-    title: str = Field(..., description="Artifact title")
-    current_version: int = Field(..., description="Current version number")
-    source: str = Field(..., description="Source (user_upload)")
-    original_filename: str = Field(..., description="Original uploaded filename")
-    created_at: datetime = Field(..., description="Creation time")

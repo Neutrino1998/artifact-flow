@@ -132,18 +132,22 @@ export default function ArtifactToolbar() {
             </select>
           )}
 
-          {/* Refresh */}
-          <button
-            onClick={handleRefresh}
-            className="p-1.5 rounded text-text-secondary dark:text-text-secondary-dark hover:bg-surface dark:hover:bg-bg-dark transition-colors"
-            aria-label="Refresh artifact"
-            title="刷新"
-          >
-            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5">
-              <path d="M1.5 7a5.5 5.5 0 0 1 9.37-3.9M12.5 7a5.5 5.5 0 0 1-9.37 3.9" />
-              <path d="M11 1v2.5h-2.5M3 11v-2.5h2.5" />
-            </svg>
-          </button>
+          {/* Refresh — hidden during streaming: it re-reads via REST (pure DB now,
+              lags the live event stream) and would clobber live content with a
+              stale snapshot. Live content auto-refreshes from ARTIFACT_* events. */}
+          {!isStreaming && (
+            <button
+              onClick={handleRefresh}
+              className="p-1.5 rounded text-text-secondary dark:text-text-secondary-dark hover:bg-surface dark:hover:bg-bg-dark transition-colors"
+              aria-label="Refresh artifact"
+              title="刷新"
+            >
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <path d="M1.5 7a5.5 5.5 0 0 1 9.37-3.9M12.5 7a5.5 5.5 0 0 1-9.37 3.9" />
+                <path d="M11 1v2.5h-2.5M3 11v-2.5h2.5" />
+              </svg>
+            </button>
+          )}
 
           {/* Copy */}
           <button
@@ -164,7 +168,12 @@ export default function ArtifactToolbar() {
             )}
           </button>
 
-          {/* Download (dropdown) */}
+          {/* Download / export — hidden during streaming (decision 6): both are
+              durable-acting reads. Raw download would emit live-but-uncommitted
+              content; docx export reads pure DB (the last flushed version, not the
+              live edits) AND converts possibly half-edited content. Re-enabled
+              after COMPLETE, when the DB re-pull has aligned everything. */}
+          {!isStreaming && (
           <div className="relative" ref={downloadMenuRef}>
             <button
               onClick={() => setShowDownloadMenu((v) => !v)}
@@ -196,6 +205,7 @@ export default function ArtifactToolbar() {
               </div>
             )}
           </div>
+          )}
 
           {/* Back to list */}
           <button

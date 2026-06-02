@@ -59,7 +59,8 @@ async def create_controller(conversation_id: str, message_id: str) -> AsyncGener
     from core.controller import ExecutionController
     from core.engine import EngineHooks
     from core.conversation_manager import ConversationManager as CM
-    from tools.builtin.artifact_ops import ArtifactManager, create_artifact_tools
+    from tools.builtin.artifact_service import ArtifactService
+    from tools.builtin.artifact_ops import create_artifact_tools
     from repositories.artifact_repo import ArtifactRepository
     from repositories.conversation_repo import ConversationRepository as CR
     from repositories.message_event_repo import MessageEventRepository
@@ -71,10 +72,10 @@ async def create_controller(conversation_id: str, message_id: str) -> AsyncGener
 
     async with db_manager.session() as session:
         artifact_repo = ArtifactRepository(session)
-        artifact_manager = ArtifactManager(artifact_repo)
+        artifact_service = ArtifactService(artifact_repo)
 
         # 合并全局工具 + 请求级 artifact 工具
-        artifact_tools = create_artifact_tools(artifact_manager)
+        artifact_tools = create_artifact_tools(artifact_service)
         all_tools = {**get_tools(), **{t.name: t for t in artifact_tools}}
 
         conv_repo = CR(session)
@@ -94,7 +95,7 @@ async def create_controller(conversation_id: str, message_id: str) -> AsyncGener
             agents=agents,
             tools=all_tools,
             hooks=hooks,
-            artifact_manager=artifact_manager,
+            artifact_service=artifact_service,
             conversation_manager=conv_manager,
             message_event_repo=event_repo,
             on_engine_exit=_on_engine_exit,

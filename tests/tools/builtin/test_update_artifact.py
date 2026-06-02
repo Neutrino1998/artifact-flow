@@ -54,6 +54,49 @@ class TestAlgorithm:
         assert info.new_content == "X"
         assert info.fuzzy_stats is None  # Layer 2 did not run
 
+    # ---- span delta contract (offset / deleted_len) ----
+    # The matched span is the authoritative source for ARTIFACT_UPDATED deltas.
+    # Core invariant the frontend relies on: replacing [offset, offset+deleted_len)
+    # in the ORIGINAL content with new_str reproduces new_content exactly.
+
+    @staticmethod
+    def _assert_span_reconstructs(content: str, old: str, new: str):
+        info = compute_update(content, old, new)
+        assert info.success
+        assert info.offset is not None and info.deleted_len is not None
+        reconstructed = (
+            content[: info.offset] + new + content[info.offset + info.deleted_len:]
+        )
+        assert reconstructed == info.new_content
+        return info
+
+    def test_span_layer0_exact(self):
+        info = self._assert_span_reconstructs("hello world", "world", "WORLD")
+        assert info.match_type == "exact"
+        assert (info.offset, info.deleted_len) == (6, 5)
+
+    def test_span_layer0_first_of_unique(self):
+        # leading context so offset != 0 — guards against a hard-coded 0
+        info = self._assert_span_reconstructs("aaa TARGET bbb", "TARGET", "X")
+        assert info.offset == 4
+
+    def test_span_layer1_normalized(self):
+        # NFKC Ⅳ→IV: matched span is in ORIGINAL coords (the single char Ⅳ)
+        info = self._assert_span_reconstructs("章节Ⅳ结束", "章节IV结束", "X")
+        assert info.match_type == "normalized"
+
+    def test_span_layer2_fuzzy(self):
+        content = "这是一段关于人工智能技术的详细介绍。"
+        info = self._assert_span_reconstructs(content, "关于人工智能枝术的详细介绍", "替换后")
+        assert info.match_type == "fuzzy"
+        # span maps to the matched (correct-spelling) region in the original
+        assert content[info.offset: info.offset + info.deleted_len] == info.matched_text
+
+    def test_span_absent_on_failure(self):
+        info = compute_update("aaa BANANA bbb BANANA ccc", "BANANA", "X")
+        assert not info.success
+        assert info.offset is None and info.deleted_len is None
+
     # ---- Layer 2 v6: 'matched' path ----
 
     def test_layer2_single_char_substitution_m13(self):

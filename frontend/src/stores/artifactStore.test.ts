@@ -153,3 +153,87 @@ describe('artifactStore.addPendingUpdate', () => {
     expect(useArtifactStore.getState().pendingUpdates).toEqual([]);
   });
 });
+
+describe('artifactStore live reduce (ARTIFACT_* events)', () => {
+  beforeEach(() => useArtifactStore.getState().reset());
+
+  test('CREATED stores live content, upserts list, auto-opens (source=agent)', () => {
+    const s = useArtifactStore.getState();
+    s.setSessionId('sess-1');
+    s.applyArtifactCreated({
+      id: 'doc', title: 'Doc', content_type: 'text/markdown',
+      source: 'agent', current_version: 1, content: 'hello',
+    });
+    const st = useArtifactStore.getState();
+    expect(st.liveContent['doc'].content).toBe('hello');
+    expect(st.artifacts.some((a) => a.id === 'doc')).toBe(true);
+    expect(st.current?.id).toBe('doc');
+    expect(st.autoSelected).toBe(true);
+    expect(st.pendingUpdates).toContain('doc');
+  });
+
+  test('CREATED with source=tool does NOT grab the panel', () => {
+    const s = useArtifactStore.getState();
+    s.applyArtifactCreated({
+      id: 'tool_out', title: 'Output', content_type: 'text/plain',
+      source: 'tool', current_version: 1, content: 'log',
+    });
+    const st = useArtifactStore.getState();
+    expect(st.current).toBeNull();            // not auto-opened
+    expect(st.artifacts.some((a) => a.id === 'tool_out')).toBe(true);  // but listed
+  });
+
+  test('UPDATED span delta applies onto the live base', () => {
+    const s = useArtifactStore.getState();
+    s.applyArtifactCreated({
+      id: 'doc', title: 'Doc', content_type: 'text/markdown',
+      source: 'agent', current_version: 1, content: 'alpha beta gamma',
+    });
+    useArtifactStore.getState().applyArtifactUpdated({
+      id: 'doc', current_version: 2,
+      delta: { offset: 6, deleted_len: 4, inserted_text: 'BETA' },
+    });
+    const st = useArtifactStore.getState();
+    expect(st.liveContent['doc'].content).toBe('alpha BETA gamma');
+    expect(st.current?.content).toBe('alpha BETA gamma');
+    expect(st.current?.current_version).toBe(2);
+  });
+
+  test('UPDATED full content (rewrite) replaces base', () => {
+    const s = useArtifactStore.getState();
+    s.applyArtifactCreated({
+      id: 'doc', title: 'Doc', content_type: 'text/markdown',
+      source: 'agent', current_version: 1, content: 'old',
+    });
+    useArtifactStore.getState().applyArtifactUpdated({
+      id: 'doc', current_version: 2, content: 'brand new',
+    });
+    expect(useArtifactStore.getState().liveContent['doc'].content).toBe('brand new');
+  });
+
+  test('selectFromLive returns true and opens user-picked (not auto)', () => {
+    const s = useArtifactStore.getState();
+    s.applyArtifactCreated({
+      id: 'doc', title: 'Doc', content_type: 'text/markdown',
+      source: 'tool', current_version: 1, content: 'body',  // tool → not auto-opened
+    });
+    const handled = useArtifactStore.getState().selectFromLive('doc');
+    expect(handled).toBe(true);
+    expect(useArtifactStore.getState().current?.id).toBe('doc');
+    expect(useArtifactStore.getState().autoSelected).toBe(false);
+  });
+
+  test('selectFromLive returns false when no live entry', () => {
+    expect(useArtifactStore.getState().selectFromLive('missing')).toBe(false);
+  });
+
+  test('clearLiveContent empties the map', () => {
+    const s = useArtifactStore.getState();
+    s.applyArtifactCreated({
+      id: 'doc', title: 'Doc', content_type: 'text/markdown',
+      source: 'agent', current_version: 1, content: 'x',
+    });
+    useArtifactStore.getState().clearLiveContent();
+    expect(useArtifactStore.getState().liveContent).toEqual({});
+  });
+});

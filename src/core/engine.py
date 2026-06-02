@@ -100,7 +100,7 @@ def create_initial_state(
     message_id: str,
     path_events: Optional[List[Any]] = None,  # List[ExecutionEvent] with is_historical=True
     always_allowed_tools: Optional[List[str]] = None,
-    uploaded_artifacts: Optional[List[Dict[str, str]]] = None,
+    uploaded_files: Optional[List[Dict[str, Any]]] = None,
     force_compact: bool = False,
 ) -> Dict[str, Any]:
     """
@@ -113,8 +113,11 @@ def create_initial_state(
         path_events: 当前 conversation path 上的历史事件（is_historical=True），
                      作为 state["events"] 的初始内容；执行中新追加的事件 is_historical=False
         always_allowed_tools: 本会话已允许的工具列表
-        uploaded_artifacts: 本轮随消息上传的 artifact [{"id", "filename"}, ...]，
-                            execute_loop 据此在 USER_INPUT 事件正文追加归属说明（仅 LLM 可见）
+        uploaded_files: 本轮随消息上传、已转换的文件 [{"filename", "content",
+                        "content_type", "metadata"}, ...]。execute_loop 在 turn 起点经
+                        ArtifactService.create_from_upload stage 进 WorkingSet（发
+                        ARTIFACT_CREATED、随 turn 末 flush 落库），并据回填的 id 在
+                        USER_INPUT 正文追加归属说明（仅 LLM 可见）。不在 chat 路由即时 commit。
         force_compact: 用户手动触发的一次性压缩。execute_loop 据此在 USER_INPUT 正文注入压缩
                        指令；compaction_runner 在 lead 回答后无视阈值强制压缩一次并消费此标志。
     """
@@ -129,7 +132,10 @@ def create_initial_state(
         "events": list(path_events) if path_events else [],
         "execution_metrics": create_initial_metrics(),
         "response": "",
-        "uploaded_artifacts": list(uploaded_artifacts) if uploaded_artifacts else [],
+        # uploaded_files = 转换后待 stage 的内容;uploaded_artifacts = stage 后回填的
+        # [{id, filename}](execute_loop 填充,供 USER_INPUT 归属说明用)。
+        "uploaded_files": list(uploaded_files) if uploaded_files else [],
+        "uploaded_artifacts": [],
         "force_compact": force_compact,
     }
 
@@ -155,7 +161,8 @@ async def execute_loop(
         agents: {name: AgentConfig} 字典
         tools: {name: BaseTool} 字典（全局 + 请求级工具已合并）
         hooks: EngineHooks（check_cancelled / create_interrupt / wait_for_resume / drain_messages）
-        artifact_manager: ArtifactManager 实例（用于 artifacts 清单）
+        artifact_manager: ArtifactService 实例（duck-typed 协作者：set_session /
+            list_artifacts / persist_tool_result / bind_emit；参数名保留以兼容测试注入）
         emit: 事件推送回调（推 SSE）
     Returns:
         最终执行状态
@@ -166,40 +173,13 @@ async def execute_loop(
     tool_round_count: Dict[str, int] = {}  # per-agent tool round counter
     compaction_runner = CompactionRunner(agents=agents, emit=emit)
 
-    # 3a. 记录用户原始输入为事件（统一 context 构建路径）
-    # 本轮随消息上传的 artifact 在事件正文（仅 LLM 可见，不入 Message.user_input
-    # display）追加归属说明 —— 让 agent 能把"分析这个"对应到刚传的文件，并知道用
-    # read_artifact 读全文。不改 state["current_task"]：它还被 compaction 复用。
-    user_input_content = state["current_task"]
-    _uploaded = state.get("uploaded_artifacts") or []
-    if _uploaded:
-        # 提示词只列 id —— 模型靠 artifact id 识别文档即可；人读的原始文件名已在
-        # artifacts inventory 里(渲染为 artifact title)。uploaded_artifacts 仍保留
-        # filename 作为 record，只是不进提示词,避免与 inventory title 近似重复的噪音。
-        _listing = ", ".join(a["id"] for a in _uploaded)
-        user_input_content = (
-            f"{user_input_content}\n\n"
-            f"[The user attached {len(_uploaded)} file(s) to this message: {_listing}. "
-            f"Use read_artifact with the id for full content.]"
-        )
-    # 用户手动触发压缩：在 USER_INPUT 正文注入指令（仅 LLM 可见，同上传文件的归属串路径）。
-    # 始终注入 —— 有正文则追加、纯压缩轮次（无正文）则指令即正文，让 lead 总有可回应的输入。
-    # 本轮回答 + 这段指令都会被随后的强制压缩折叠进 summary，故无需对模型行为做更多约束。
-    if state.get("force_compact"):
-        _compact_directive = (
-            "[Note: the conversation history will be compacted into a summary "
-            "right after your response.]"
-        )
-        user_input_content = (
-            f"{user_input_content}\n\n{_compact_directive}"
-            if user_input_content.strip()
-            else _compact_directive
-        )
-    state["events"].append(ExecutionEvent(
-        event_type=StreamEventType.USER_INPUT.value,
-        agent_name="lead_agent",
-        data={"content": user_input_content},
-    ))
+    # NOTE: the USER_INPUT event (+ uploaded-file attribution + force_compact
+    # directive) is built AFTER `_emit` is defined and uploads are staged —— see
+    # the "stage uploads + USER_INPUT" block below. It must run after staging so
+    # the attribution listing can reference the freshly-assigned upload ids, and
+    # after `_emit`/bind so staging can emit ARTIFACT_CREATED. It still lands in
+    # state["events"] before the first _build_context (main loop), so ordering
+    # vs. LLM context assembly is unchanged.
 
     # ── closures ──
 
@@ -232,6 +212,73 @@ async def execute_loop(
 
         if emit:
             await emit(event_dict)
+
+    # ── bind artifact-event emit (must precede upload staging so staged uploads
+    #    emit ARTIFACT_CREATED) + unbind at loop end in the main-loop finally ──
+    _bind_emit = getattr(artifact_manager, "bind_emit", None) if artifact_manager else None
+    if _bind_emit:
+        _bind_emit(_emit)
+
+    # ── stage uploads + build USER_INPUT ──
+    # Uploaded files are staged into the WorkingSet here (turn start), NOT
+    # committed in the chat router. They go through the SAME create path as model
+    # artifacts (source=user_upload) → each emits ARTIFACT_CREATED (the only way a
+    # cold-start client sees an upload before flush_all) → all flush together at
+    # turn end. This is the unified single lifecycle (see artifact-layer plan
+    # decision 1 / stage C). _normalize + dedup happen inside create_from_upload.
+    if artifact_manager is not None and state.get("uploaded_files"):
+        stage_session = state["session_id"]
+        for f in state["uploaded_files"]:
+            try:
+                ok, _msg, info = await artifact_manager.create_from_upload(
+                    session_id=stage_session,
+                    filename=f["filename"],
+                    content=f["content"],
+                    content_type=f["content_type"],
+                    metadata=f.get("metadata"),
+                )
+            except Exception as e:  # defensive: never let one upload wedge the turn
+                logger.exception(f"Failed to stage upload '{f.get('filename')}': {e}")
+                continue
+            if ok and info:
+                state["uploaded_artifacts"].append(
+                    {"id": info["id"], "filename": info["original_filename"]}
+                )
+            else:
+                logger.warning(f"Upload staging skipped for '{f.get('filename')}': {_msg}")
+
+    # 3a. 记录用户原始输入为事件（统一 context 构建路径）。本轮随消息上传的 artifact 在
+    # 事件正文（仅 LLM 可见，不入 Message.user_input display）追加归属说明，让 agent 把
+    # "分析这个"对应到刚传的文件、并知道用 read_artifact 读全文。不改 state["current_task"]
+    # （compaction 复用）。
+    user_input_content = state["current_task"]
+    _uploaded = state.get("uploaded_artifacts") or []
+    if _uploaded:
+        # 提示词只列 id —— 模型靠 id 识别文档即可；人读的文件名已在 artifacts inventory
+        # 的 title 里。uploaded_artifacts 仍保 filename 作 record，不进提示词避免与 title 重复。
+        _listing = ", ".join(a["id"] for a in _uploaded)
+        user_input_content = (
+            f"{user_input_content}\n\n"
+            f"[The user attached {len(_uploaded)} file(s) to this message: {_listing}. "
+            f"Use read_artifact with the id for full content.]"
+        )
+    # 用户手动触发压缩：在 USER_INPUT 正文注入指令（仅 LLM 可见，同上传归属串路径）。始终
+    # 注入 —— 有正文则追加、纯压缩轮次则指令即正文，让 lead 总有可回应的输入。
+    if state.get("force_compact"):
+        _compact_directive = (
+            "[Note: the conversation history will be compacted into a summary "
+            "right after your response.]"
+        )
+        user_input_content = (
+            f"{user_input_content}\n\n{_compact_directive}"
+            if user_input_content.strip()
+            else _compact_directive
+        )
+    state["events"].append(ExecutionEvent(
+        event_type=StreamEventType.USER_INPUT.value,
+        agent_name="lead_agent",
+        data={"content": user_input_content},
+    ))
 
     def _resolve_tool(name: str):
         """从合并后的 tools dict 查找工具"""
@@ -763,6 +810,8 @@ async def execute_loop(
         return False
 
     # ── main loop ──
+    # (_emit already bound to artifact_manager above, before upload staging;
+    #  unbound in the finally below.)
 
     try:
         while not state["completed"]:
@@ -860,6 +909,10 @@ async def execute_loop(
         })
         state["error"] = True
         state["response"] = f"Execution failed: {str(e)}"
+
+    finally:
+        if _bind_emit:
+            _bind_emit(None)
 
     # 完成 metrics
     finalize_metrics(state["execution_metrics"])

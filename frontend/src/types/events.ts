@@ -22,6 +22,11 @@ export enum StreamEventType {
   PERMISSION_REQUEST = 'permission_request',
   PERMISSION_RESULT = 'permission_result',
 
+  // Artifact live layer (SSE-only, not persisted — reduced into the live panel;
+  // backstopped by a single DB re-pull after COMPLETE)
+  ARTIFACT_CREATED = 'artifact_created',
+  ARTIFACT_UPDATED = 'artifact_updated',
+
   // Input / injection layer
   QUEUED_MESSAGE = 'queued_message',
   SUBAGENT_INSTRUCTION = 'subagent_instruction',
@@ -79,6 +84,35 @@ export interface ToolCompleteData {
   duration_ms: number;
   params?: Record<string, unknown>;
   metadata?: Record<string, unknown>;
+}
+
+/** ARTIFACT_CREATED: a new artifact (model-created, tool-persisted, or user upload)
+ *  appeared this turn. Carries full content unless it exceeds the live-content cap
+ *  (then content_omitted=true and the body arrives via the post-COMPLETE DB re-pull). */
+export interface ArtifactCreatedData {
+  id: string;
+  title: string;
+  content_type: string;
+  source: string;
+  current_version: number;
+  content?: string;
+  content_omitted?: boolean;
+}
+
+/** ARTIFACT_UPDATED: rewrite → full `content`; targeted update → authoritative span
+ *  `delta` (the frontend cannot derive the matched span from tool params — fuzzy match).
+ *  Apply: newContent = old.slice(0, offset) + inserted_text + old.slice(offset + deleted_len).
+ *  Oversized rewrite → content_omitted=true (rely on post-COMPLETE DB re-pull). */
+export interface ArtifactUpdatedData {
+  id: string;
+  current_version: number;
+  content?: string;
+  content_omitted?: boolean;
+  delta?: {
+    offset: number;
+    deleted_len: number;
+    inserted_text: string;
+  };
 }
 
 export interface PermissionRequestData {

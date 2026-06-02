@@ -20,7 +20,6 @@ from config import config
 from utils.time import utc_now
 
 from api.dependencies import (
-    get_artifact_manager,
     get_conversation_manager,
     get_current_user,
     get_db_session,
@@ -48,10 +47,9 @@ from api.services.controller_factory import create_controller, run_and_push, san
 from api.services.stream_transport import StreamTransport
 from api.services.execution_runner import ConflictError, ExecutionRunner
 from api.services.runtime_store import InjectQueueFull
-from api.routers.artifacts import convert_uploaded_file, create_artifact_from_converted
+from api.routers.artifacts import convert_uploaded_file
 from core.conversation_manager import ConversationManager
 from core.events import StreamEventType
-from tools.builtin.artifact_ops import ArtifactManager
 from repositories.base import NotFoundError
 from utils.logger import get_logger, set_request_context
 
@@ -74,7 +72,6 @@ async def send_message(
     files: List[UploadFile] = File(default=[]),
     current_user: TokenPayload = Depends(get_current_user),
     conversation_manager: ConversationManager = Depends(get_conversation_manager),
-    artifact_manager: ArtifactManager = Depends(get_artifact_manager),
     stream_transport: StreamTransport = Depends(get_stream_transport),
     runner: ExecutionRunner = Depends(get_execution_runner),
 ):
@@ -129,37 +126,36 @@ async def send_message(
     if request.conversation_id:
         await _verify_ownership(conversation_id, current_user, conversation_manager)
 
-    # 附件处理分两相，核心是「先全部校验/转换，再落库」：
-    #   相一 convert_uploaded_file —— 纯转换（bytes → 文本），不碰 DB。任一附件
-    #     格式不支持 / 无法解码 / 转换失败 → 在此抛 422/500，此时 conversation 行
-    #     与 artifact 都尚未创建，批次「全有或全无」，不会留下幽灵空对话或孤儿
-    #     artifact（旧实现按文件 convert+commit 交错，坏文件之前已 commit 的会漏出）。
-    #   相二 ensure_conversation_exists + create_artifact_from_converted —— 全部
-    #     转换通过后才建会话并逐个落库；artifact 落库要求 conversation 已存在
-    #     （FK: artifact_session → conversation），故 ensure 放相二开头。
-    # 原子性边界：只保证「转换阶段全有或全无」，不覆盖提交之后的 submit 阶段。残留
-    # 窗口均罕见，按 best-effort 处理（不做补偿清理）：
-    #   - submit 抛 409（会话已有活跃执行——仅已存在会话可能，新会话是全新 uuid 不会
-    #     冲突；且前端 streaming 时走 /inject，正常不触发）或 create_stream 等基础
-    #     设施 500：本次已 commit 的 artifact 会留下，新建会话还会多留一条空会话。
-    #   - artifact 符合既有 "artifact 可无 event 支撑" 取舍，下一轮 inventory 拾起；
-    #     空会话仅是侧栏里一条无消息记录。前端失败后保留 staged files，重试会因 id
-    #     去重生成 _N 副本——已知且接受。
-    #   - 不引入 delete_artifact / 提交前抢 lease：那是为前端已规避的竞态写强一致机器，
-    #     不划算（见 CLAUDE.md 事务所有权取舍）。
+    # 附件:相一 **纯转换**（bytes → 文本），不碰 DB、不 commit 任何 artifact。任一附件
+    # 格式不支持 / 无法解码 / 转换失败 → 在此抛 422/500，此时 conversation 与 artifact 都
+    # 未创建，批次「全有或全无」。转换后的内容 closure-carry 进控制器，由 execute_loop 在
+    # turn 起点 stage 进 WorkingSet（统一生命周期：发 ARTIFACT_CREATED、随 turn 末 flush
+    # 落库）——**不在此即时 commit**。
+    # 由此「上传即时 commit」退场带来的两个好处:
+    #   - `_N` 去重副本 bug 消失:submit 抛 409（已有活跃执行）时尚未 stage 任何东西，
+    #     execute_and_push 根本不会跑 → 重发不产生副本（旧实现在 submit 前已 commit）。
+    #   - 上传与模型产物的「turn 中途死即丢失」语义一致（皆 ephemeral，随 lease 重启而失）；
+    #     用户侧由前端 staged 文件保留到 COMPLETE 兜底。
     converted = [
         await convert_uploaded_file(f)
         for f in files
         if f.filename  # 空 file part（前端无附件时不应出现，防御性跳过）
     ]
 
-    # 确保 conversation 存在（失败需返回 HTTP 错误，保留在路由层）
+    # 确保 conversation 存在（失败需返回 HTTP 错误，保留在路由层；FK: artifact_session
+    # → conversation，但 artifact 现在 turn 末才落库，ensure 仍需在 submit 前建好会话行）
     await conversation_manager.ensure_conversation_exists(conversation_id, user_id=user_id)
 
-    uploaded_artifacts: List[dict] = []
-    for c in converted:
-        info = await create_artifact_from_converted(artifact_manager, conversation_id, c)
-        uploaded_artifacts.append({"id": info["id"], "filename": info["original_filename"]})
+    # 转换后内容打包 closure-carry 给控制器（不 commit）。
+    uploaded_files: List[dict] = [
+        {
+            "filename": c.filename,
+            "content": c.content,
+            "content_type": c.content_type,
+            "metadata": c.metadata,
+        }
+        for c in converted
+    ]
 
     # 设置请求上下文
     set_request_context(message_id=message_id, conv_id=conversation_id)
@@ -178,7 +174,7 @@ async def send_message(
                         user_input=request.user_input,
                         conversation_id=conversation_id,
                         message_id=message_id,
-                        uploaded_artifacts=uploaded_artifacts,
+                        uploaded_files=uploaded_files,
                         force_compact=request.force_compact,
                         **parent_kwargs,
                     ),

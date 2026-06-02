@@ -754,64 +754,6 @@
         }
       }
     },
-    "/api/v1/artifacts/{session_id}/upload": {
-      "post": {
-        "tags": [
-          "artifacts"
-        ],
-        "summary": "Upload File",
-        "description": "Upload a file and create an artifact from it.\nSupports text files, markdown, code, PDF, and Word documents.",
-        "operationId": "upload_file_api_v1_artifacts__session_id__upload_post",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "session_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Session Id"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "multipart/form-data": {
-              "schema": {
-                "$ref": "#/components/schemas/Body_upload_file_api_v1_artifacts__session_id__upload_post"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UploadResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/v1/artifacts/{session_id}/{artifact_id}/export": {
       "get": {
         "tags": [
@@ -2759,20 +2701,6 @@
         ],
         "title": "Body_send_message_api_v1_chat_post"
       },
-      "Body_upload_file_api_v1_artifacts__session_id__upload_post": {
-        "properties": {
-          "file": {
-            "type": "string",
-            "format": "binary",
-            "title": "File"
-          }
-        },
-        "type": "object",
-        "required": [
-          "file"
-        ],
-        "title": "Body_upload_file_api_v1_artifacts__session_id__upload_post"
-      },
       "BulkActionFailedItem": {
         "properties": {
           "id": {
@@ -3932,64 +3860,6 @@
         "type": "object",
         "title": "UpdateUserRequest",
         "description": "PUT /api/v1/admin/users/{id} request body.\n\nAll fields optional. department_id semantics: \u5b57\u6bb5\u88ab\u663e\u5f0f\u4f20\u5165\u65f6\u751f\u6548\uff08\u5305\u62ec\n\u4f20 null = \u6e05\u7a7a\u5f52\u5c5e\uff09\uff1b\u5b57\u6bb5\u7f3a\u7701 \u2192 \u4e0d\u6539\u3002\u8def\u7531\u901a\u8fc7 model_fields_set \u533a\u5206\u3002"
-      },
-      "UploadResponse": {
-        "properties": {
-          "id": {
-            "type": "string",
-            "title": "Id",
-            "description": "Artifact ID"
-          },
-          "session_id": {
-            "type": "string",
-            "title": "Session Id",
-            "description": "Session ID"
-          },
-          "content_type": {
-            "type": "string",
-            "title": "Content Type",
-            "description": "MIME type (after conversion)"
-          },
-          "title": {
-            "type": "string",
-            "title": "Title",
-            "description": "Artifact title"
-          },
-          "current_version": {
-            "type": "integer",
-            "title": "Current Version",
-            "description": "Current version number"
-          },
-          "source": {
-            "type": "string",
-            "title": "Source",
-            "description": "Source (user_upload)"
-          },
-          "original_filename": {
-            "type": "string",
-            "title": "Original Filename",
-            "description": "Original uploaded filename"
-          },
-          "created_at": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Created At",
-            "description": "Creation time"
-          }
-        },
-        "type": "object",
-        "required": [
-          "id",
-          "session_id",
-          "content_type",
-          "title",
-          "current_version",
-          "source",
-          "original_filename",
-          "created_at"
-        ],
-        "title": "UploadResponse",
-        "description": "POST /api/v1/artifacts/{session_id}/upload response"
       },
       "UserImpactResponse": {
         "properties": {

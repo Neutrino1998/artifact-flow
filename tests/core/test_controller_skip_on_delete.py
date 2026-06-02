@@ -85,7 +85,7 @@ def _make_controller(conv_mgr, event_repo, art_mgr):
         agents={},
         tools={},
         hooks=hooks,
-        artifact_manager=art_mgr,
+        artifact_service=art_mgr,
         conversation_manager=conv_mgr,
         message_event_repo=event_repo,
         db_manager=None,  # use bound instances → mocks above

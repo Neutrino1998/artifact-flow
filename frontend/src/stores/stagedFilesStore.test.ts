@@ -93,3 +93,42 @@ describe('stagedFilesStore format gate + notice', () => {
     expect(useStagedFilesStore.getState().files.length).toBe(1);
   });
 });
+
+describe('stagedFilesStore sent lifecycle (keep-until-COMPLETE backstop)', () => {
+  beforeEach(reset);
+
+  function stage(n: number): string[] {
+    useStagedFilesStore.getState().addFiles(
+      Array.from({ length: n }, (_, i) => new File(['x'], `f${i}.md`, { type: 'text/markdown' }))
+    );
+    return useStagedFilesStore.getState().files.map((f) => f.id);
+  }
+
+  test('markSent flags only the sent ids; files stay visible', () => {
+    const ids = stage(2);
+    useStagedFilesStore.getState().markSent([ids[0]]);
+    const files = useStagedFilesStore.getState().files;
+    expect(files.length).toBe(2);                 // not removed
+    expect(files.find((f) => f.id === ids[0])?.sent).toBe(true);
+    expect(files.find((f) => f.id === ids[1])?.sent).toBeFalsy();
+  });
+
+  test('clearSent (COMPLETE) drops only sent files, keeps newly-staged', () => {
+    const ids = stage(1);
+    useStagedFilesStore.getState().markSent(ids);
+    stage(1); // a file staged during the in-flight window (sent=false)
+    useStagedFilesStore.getState().clearSent();
+    const files = useStagedFilesStore.getState().files;
+    expect(files.length).toBe(1);
+    expect(files[0].sent).toBeFalsy();
+  });
+
+  test('unmarkSent (cancel/error/timeout) reverts sent → staged for retry', () => {
+    const ids = stage(2);
+    useStagedFilesStore.getState().markSent(ids);
+    useStagedFilesStore.getState().unmarkSent();
+    const files = useStagedFilesStore.getState().files;
+    expect(files.length).toBe(2);                 // kept, retryable
+    expect(files.every((f) => !f.sent)).toBe(true);
+  });
+});

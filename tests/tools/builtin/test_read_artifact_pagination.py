@@ -12,7 +12,8 @@ from config import config
 from db.models import User
 from repositories.artifact_repo import ArtifactRepository
 from repositories.conversation_repo import ConversationRepository
-from tools.builtin.artifact_ops import ArtifactManager, ReadArtifactTool
+from tools.builtin.artifact_service import ArtifactService
+from tools.builtin.artifact_ops import ReadArtifactTool
 
 
 @pytest.fixture
@@ -25,16 +26,16 @@ async def session_id(conversation_repo: ConversationRepository, test_user: User)
 
 
 @pytest.fixture
-def artifact_manager(artifact_repo: ArtifactRepository) -> ArtifactManager:
-    return ArtifactManager(artifact_repo)
+def artifact_manager(artifact_repo: ArtifactRepository) -> ArtifactService:
+    return ArtifactService(artifact_repo)
 
 
 @pytest.fixture
-def read_tool(artifact_manager: ArtifactManager) -> ReadArtifactTool:
+def read_tool(artifact_manager: ArtifactService) -> ReadArtifactTool:
     return ReadArtifactTool(artifact_manager)
 
 
-async def _create_artifact(manager: ArtifactManager, session_id: str, content: str) -> str:
+async def _create_artifact(manager: ArtifactService, session_id: str, content: str) -> str:
     """Helper: create artifact, return its id."""
     manager.set_session(session_id)
     aid = f"doc_{uuid.uuid4().hex[:8]}"
@@ -52,7 +53,7 @@ async def _create_artifact(manager: ArtifactManager, session_id: str, content: s
 class TestReadArtifactPagination:
 
     async def test_read_full_under_cap(
-        self, read_tool: ReadArtifactTool, artifact_manager: ArtifactManager, session_id: str
+        self, read_tool: ReadArtifactTool, artifact_manager: ArtifactService, session_id: str
     ):
         """短 artifact 无参调用 → 返回全文，truncated_by=none, has_more=false。"""
         content = "line_1\nline_2\nline_3\n"
@@ -67,7 +68,7 @@ class TestReadArtifactPagination:
         assert "line_1\nline_2\nline_3\n" in result.data
 
     async def test_read_with_offset_and_limit(
-        self, read_tool: ReadArtifactTool, artifact_manager: ArtifactManager, session_id: str
+        self, read_tool: ReadArtifactTool, artifact_manager: ArtifactService, session_id: str
     ):
         """带 offset+limit 范围读取。"""
         content = "".join(f"line_{i}\n" for i in range(1, 11))
@@ -87,7 +88,7 @@ class TestReadArtifactPagination:
         assert "offset=7" in result.data
 
     async def test_read_offset_past_eof(
-        self, read_tool: ReadArtifactTool, artifact_manager: ArtifactManager, session_id: str
+        self, read_tool: ReadArtifactTool, artifact_manager: ArtifactService, session_id: str
     ):
         """offset 超出文件末尾 → 空 body，has_more=false，不报错。"""
         content = "line_1\nline_2\n"
@@ -100,7 +101,7 @@ class TestReadArtifactPagination:
         assert 'shown_lines' not in result.data
 
     async def test_read_offset_zero_clamped(
-        self, read_tool: ReadArtifactTool, artifact_manager: ArtifactManager, session_id: str
+        self, read_tool: ReadArtifactTool, artifact_manager: ArtifactService, session_id: str
     ):
         """offset=0 应 clamp 到 1。"""
         content = "line_1\nline_2\n"
@@ -111,7 +112,7 @@ class TestReadArtifactPagination:
         assert 'shown_lines="1-2"' in result.data
 
     async def test_read_truncated_by_char_cap(
-        self, read_tool: ReadArtifactTool, artifact_manager: ArtifactManager, session_id: str,
+        self, read_tool: ReadArtifactTool, artifact_manager: ArtifactService, session_id: str,
         monkeypatch: pytest.MonkeyPatch,
     ):
         """无 limit 时 char_cap 触发截断，hint 给出下次 offset。"""
@@ -129,7 +130,7 @@ class TestReadArtifactPagination:
         assert "offset=" in result.data
 
     async def test_read_nonexistent_artifact(
-        self, read_tool: ReadArtifactTool, artifact_manager: ArtifactManager, session_id: str
+        self, read_tool: ReadArtifactTool, artifact_manager: ArtifactService, session_id: str
     ):
         """不存在的 id → success=False, error 友好提示。"""
         artifact_manager.set_session(session_id)
@@ -138,7 +139,7 @@ class TestReadArtifactPagination:
         assert "not found" in (result.error or "").lower()
 
     async def test_read_envelope_uses_artifact_slice(
-        self, read_tool: ReadArtifactTool, artifact_manager: ArtifactManager, session_id: str
+        self, read_tool: ReadArtifactTool, artifact_manager: ArtifactService, session_id: str
     ):
         """渲染输出确认是新 envelope 格式。"""
         aid = await _create_artifact(artifact_manager, session_id, "hello\n")
@@ -154,7 +155,7 @@ class TestReadArtifactPagination:
         assert math.isinf(read_tool.max_result_size_chars)
 
     async def test_read_body_not_escaped(
-        self, read_tool: ReadArtifactTool, artifact_manager: ArtifactManager, session_id: str
+        self, read_tool: ReadArtifactTool, artifact_manager: ArtifactService, session_id: str
     ):
         """body 不转义 → update_artifact 后续匹配能用 read 出的内容作 old_string。"""
         content = '<script>alert("x")</script>\n& more & content\n'
@@ -175,7 +176,7 @@ class TestReadArtifactPagination:
         return m.group(1)
 
     async def test_continuation_hint_preserves_limit(
-        self, read_tool: ReadArtifactTool, artifact_manager: ArtifactManager, session_id: str
+        self, read_tool: ReadArtifactTool, artifact_manager: ArtifactService, session_id: str
     ):
         """has_more 续读 hint 必须保留 caller 的 limit，避免下次 silently 切到读到 cap 模式。"""
         content = "".join(f"line_{i}\n" for i in range(1, 21))
@@ -189,7 +190,7 @@ class TestReadArtifactPagination:
         assert "limit=5" in hint  # 关键：limit 被透传
 
     async def test_continuation_hint_preserves_version(
-        self, read_tool: ReadArtifactTool, artifact_manager: ArtifactManager, session_id: str,
+        self, read_tool: ReadArtifactTool, artifact_manager: ArtifactService, session_id: str,
         monkeypatch: pytest.MonkeyPatch,
     ):
         """has_more 续读 hint 必须保留 caller 的 version，避免下次跳到 latest。"""
@@ -207,7 +208,7 @@ class TestReadArtifactPagination:
         assert "version=1" in hint  # version 被透传
 
     async def test_continuation_hint_default_no_extra_args(
-        self, read_tool: ReadArtifactTool, artifact_manager: ArtifactManager, session_id: str,
+        self, read_tool: ReadArtifactTool, artifact_manager: ArtifactService, session_id: str,
         monkeypatch: pytest.MonkeyPatch,
     ):
         """无 limit / 无 version 时 hint 只带 id + offset，不引入冗余参数。"""

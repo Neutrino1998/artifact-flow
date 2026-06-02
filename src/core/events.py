@@ -34,6 +34,14 @@ class StreamEventType(Enum):
     PERMISSION_REQUEST = "permission_request"  # 请求权限确认
     PERMISSION_RESULT = "permission_result"    # 权限确认结果
 
+    # ========== Artifact live 层（仅 SSE，不持久化）==========
+    # artifact 内容已有专属持久家(artifact 表 + ArtifactVersion);事件表存正文无读者,
+    # 故这两个事件 SSE-only(同 llm_chunk)。前端订阅它们 reduce live 面板,turn 末用
+    # COMPLETE 后的一次 DB 对齐兜底。create_artifact / 上传 stage 发 CREATED(整文);
+    # rewrite 发 UPDATED(整文);update 发 UPDATED(权威 span delta)。详见 plan 决策 2/3。
+    ARTIFACT_CREATED = "artifact_created"
+    ARTIFACT_UPDATED = "artifact_updated"
+
     # ========== 输入 / 消息注入层 ==========
     USER_INPUT = "user_input"                        # 用户原始输入 → lead 首条消息
     QUEUED_MESSAGE = "queued_message"                # 执行中注入的用户消息 → lead

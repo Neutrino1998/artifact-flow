@@ -68,6 +68,14 @@ export function useArtifacts() {
     async (artifactId: string) => {
       const sid = resolveSessionId();
       if (!sid) return;
+      // During a turn, prefer the live (event-reduced) content for artifacts
+      // edited this turn — REST GET is pure-DB now and would show a stale
+      // snapshot. Untouched artifacts (no live entry) fall through to REST,
+      // whose DB content is accurate (they weren't edited this turn).
+      setArtifactPanelVisible(true);
+      if (useArtifactStore.getState().selectFromLive(artifactId)) {
+        return;
+      }
       // Bump-before-await: claim "the detail view will belong to this
       // selection". Late responses (fast A→B clicks, or any selection
       // followed by a conversation switch) check this after the await

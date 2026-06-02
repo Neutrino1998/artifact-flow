@@ -1,6 +1,6 @@
 # Artifact 层重构 —— 实施计划(live 态上事件轨,单一生命周期)
 
-> 状态:规划完成,实现未启动
+> 状态:**已实现(单 PR,在 main 上;待多 worker 真机回归)**
 > 起草:2026-06-02 · 最后更新:2026-06-02
 > 前序产物:
 > - `sandbox-implementation-plan.md`(本目录)—— 沙盒 plan;其原则 1「持久态归 TDSQL / 易失态归 Redis+worker」与本重构同源,本重构是沙盒回写/挂载的底座。
@@ -109,6 +109,40 @@
 
 ## 变更日志
 
+- 2026-06-02 **实现落地(ABC 一个 PR,在 main 上)**。要点 / 与 plan 的偏差与补充:
+  - **四层**:`artifact_working_set.py`(纯状态)+ `artifact_service.py`(编排+发事件,自带独占
+    WorkingSet)+ 既有 `ArtifactRepository` + 纯算法模块;`ArtifactManager` 删除,`_active_managers`
+    注册表与两个 GET 的 overlay 删除,REST = 纯 DB。`artifact_manager` 变量统一改名 `artifact_service`;
+    **唯一例外**:`execute_loop(artifact_manager=...)` 形参名保留(duck-typed 协作者,免改测试注入)。
+  - **emit seam(锁 B 方案)**:引擎 `execute_loop` 起点 `service.bind_emit(_emit)`、loop 末 finally 解绑;
+    Service 在 create/rewrite/update/上传 stage 直接发 `ARTIFACT_*`(`sse_only=True`)。**决策 3 理由修正**
+    (采纳 review 意见):不是「避免撑爆事件表」(模型 create/rewrite 正文本就随 `llm_complete` 持久化一次),
+    真正理由是 **artifact 有专属持久家(artifact 表+版本),MessageEvent 里的副本无任何读者** + 与非工具来源
+    (上传/persist_tool_result)统一单 emit 站点 + 两受众解耦。
+  - **补缺口①(plan 未点破)**:`compute_update` 原**不回传命中位置**,`ARTIFACT_UPDATED` 的权威 span
+    无来源 → 扩 `MatchInfo` 加 `offset`/`deleted_len`(三层均填),含 reconstruct 不变量测试。
+  - **补缺口②(plan 未点破):delta 重建的同步 base 由后端负责**。delta 的 offset 是相对**本轮前几次
+    编辑之后**的内容(非 pre-turn DB),故 DB 只能当**第一条** delta 的 base;要 live 正确须从一个已同步
+    base 按序重放每条 delta。这个"同步 base"放后端:`_emitted_base` 让任一 artifact 本 turn 的**首个** live
+    事件强制发整文(create/rewrite/首-update 皆整文),其后才发 delta → 前端是个**纯同步 reducer**,
+    不必在 live 路径上做 async DB-base 取数 + 乱序 delta 排队,事件流**自包含**(断线重连重放即可重建)。
+    替代方案(前端在首条 delta 触发 DB read 当 base)同样可行但把 async 竞态推给前端,故选后端。
+    打开中 / 跨轮的文档其 base 本就是 `current.content`(上轮 COMPLETE 已对齐 DB),不靠此机制;它只为
+    "从未打开却被后台改"的旧文档兜底。大正文超 `ARTIFACT_LIVE_CONTENT_MAX_CHARS` 则省略正文发信号、靠
+    COMPLETE 对齐。
+  - **前端**:`artifactStore.liveContent` 事件 reduce(span delta apply / 整文替换 / 自动开面板,
+    source='tool' 不抢面板);`selectFromLive` 让 turn 中点列表项也看 live;下载/导出/版本/刷新 turn 中
+    隐藏(推广版本选择器既有 guard);COMPLETE 后 `clearLiveContent` + 一次 DB 对齐。
+  - **上传并入(C)**:chat 路由只 convert(相一)、不再即时 commit;转换后内容 closure-carry 进引擎,
+    `execute_loop` 起点经 `create_from_upload` stage(发 `ARTIFACT_CREATED`、随 flush 落库)。`_N` 重复
+    bug 随「提交退到 submit 之后」消失。死代码删除:`POST /artifacts/{sid}/upload` + `create_from_upload`
+    的即时-commit 版 + `create_artifact_from_converted`/`convert_and_create_artifact` + 前端 `uploadFile()` +
+    `UploadResponse` schema + 孤立的 `artifactAutoOpen` lib;OpenAPI types 已重生成。前端 staged 文件
+    `markSent`→COMPLETE `clearSent`/非成功终态 `unmarkSent`,保留到 COMPLETE 成功作上传丢失兜底。
+  - **测试**:后端 1053 passed / 31 skipped;前端 187 passed + tsc 干净。新增 `test_artifact_events.py`
+    (emit/delta/base-tracking/上传 stage)、`compute_update` span 测、`artifactStore`/`stagedFilesStore` reduce 测。
+  - **遗留**:`tools→core` 顶层 import 环 → `artifact_service` 用本地字符串常量 `_EVT_ARTIFACT_*`(drift 测交叉校验);
+    多 worker 真机回归(GET 打到非执行 worker 仍正确)尚需手动跑。
 - 2026-06-02 加决策 6 并校正读/写边界:turn 中禁用**读类** durable-acting 操作(下载/导出/版本查看,**纯前端 UX 锁、非后端边界**)、`COMPLETE` 后启用——删 overlay 后 REST=纯 DB、turn 中落后于 live,这类功能会拿到旧版。判据:读类绕过只伤自己 → 前端锁够;写/执行类(发消息/cancel/conversation tree 开分支/delete)绕过会冲突 → 后端 lease(409)/ownership(404)强制,不在本决策。**去掉先前误列的 revert**(当前无此功能,只有 conversation tree)。记未来拐点:导出入沙盒后从读升级为 lease-gated 执行。
 - 2026-06-02 定交付方式:ABC **一个 PR 整体交付**(`feat/artifact-layer`),不拆阶段、不留 `ArtifactManager` 兼容壳、死端点随 PR 一并删——避免半迁移假缝与待删脚手架。A/B/C 降为逻辑分组/自检清单。
 - 2026-06-02 补缺口:明确上传必须 emit `ARTIFACT_CREATED`(收回即时 commit 后,上传在 flush 前不在 DB,不发事件则对冷启动「DB+流」重建隐形)。落法=上传 stage 走 `ArtifactService.create_artifact(source=user_upload)` 同一路径,事件随之自动发出(WorkingSet 纯状态不发、Service 才发)。同步更新目标态步骤 1 / 决策 1 / 阶段 C。

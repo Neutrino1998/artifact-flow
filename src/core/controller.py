@@ -25,7 +25,7 @@ from core.post_processing import (
     make_external_cancelled_event,
 )
 from tools.base import BaseTool
-from tools.builtin.artifact_ops import ArtifactManager
+from tools.builtin.artifact_service import ArtifactService
 from utils.logger import get_logger, get_request_id
 from utils.time import utc_now
 
@@ -46,7 +46,7 @@ class ExecutionController:
         agents: Dict[str, Any],           # {name: AgentConfig}
         tools: Dict[str, BaseTool],        # {name: BaseTool}
         hooks: EngineHooks,
-        artifact_manager: Optional[ArtifactManager] = None,
+        artifact_service: Optional[ArtifactService] = None,
         conversation_manager: Optional[ConversationManager] = None,
         message_event_repo: Optional[Any] = None,  # MessageEventRepository
         on_engine_exit: Optional[Callable[[str, str], Awaitable[None]]] = None,
@@ -55,7 +55,7 @@ class ExecutionController:
         self.agents = agents
         self.tools = tools
         self.hooks = hooks
-        self.artifact_manager = artifact_manager
+        self.artifact_service = artifact_service
         self.conversation_manager = conversation_manager or ConversationManager()
         self.message_event_repo = message_event_repo
         self._on_engine_exit = on_engine_exit
@@ -71,7 +71,7 @@ class ExecutionController:
         无 db_manager 时回退到 bound 实例（不重试）。
         """
         if not self._db_manager:
-            return await fn(self.conversation_manager, self.message_event_repo, self.artifact_manager)
+            return await fn(self.conversation_manager, self.message_event_repo, self.artifact_service)
 
         from repositories.conversation_repo import ConversationRepository
         from repositories.message_event_repo import MessageEventRepository
@@ -80,8 +80,8 @@ class ExecutionController:
         async def _with_session(session):
             conv_mgr = ConversationManager(ConversationRepository(session))
             event_repo = MessageEventRepository(session)
-            art_mgr = ArtifactManager(ArtifactRepository(session))
-            return await fn(conv_mgr, event_repo, art_mgr)
+            art_svc = ArtifactService(ArtifactRepository(session))
+            return await fn(conv_mgr, event_repo, art_svc)
 
         return await self._db_manager.with_retry(_with_session)
 
@@ -91,7 +91,7 @@ class ExecutionController:
         conversation_id: Optional[str] = None,
         parent_message_id: Any = _UNSET,
         message_id: Optional[str] = None,
-        uploaded_artifacts: Optional[List[Dict[str, str]]] = None,
+        uploaded_files: Optional[List[Dict[str, Any]]] = None,
         force_compact: bool = False,
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """
@@ -102,9 +102,11 @@ class ExecutionController:
             conversation_id: 对话ID
             parent_message_id: 父消息ID
             message_id: 消息ID
-            uploaded_artifacts: 本轮随消息上传的 artifact [{"id", "filename"}, ...]，
-                                用于在 USER_INPUT 事件正文（仅 LLM 可见，不入 display）
-                                追加归属说明，让 agent 知道哪些 artifact 是本轮新传的
+            uploaded_files: 本轮随消息上传、已转换的文件 [{"filename","content",
+                            "content_type","metadata"}, ...]（closure-carry 自 chat 路由，
+                            未即时 commit）。execute_loop 在 turn 起点 stage 进 WorkingSet
+                            （发 ARTIFACT_CREATED、随 turn 末 flush），并据回填 id 在
+                            USER_INPUT 正文追加归属说明。
 
         Yields:
             流式事件字典
@@ -116,7 +118,7 @@ class ExecutionController:
         # 在此（任何 yield / DB 写之前）拒掉，不依赖调用方校验；router 另留 422 作为 HTTP
         # 快速边界。带附件时 execute_loop 会给 USER_INPUT 拼归属串（非空），故仅无附件时要求非空。
         # force_compact 同理：execute_loop 会注入压缩指令补足正文，纯压缩轮次（无文本无附件）放行。
-        if not user_input.strip() and not uploaded_artifacts and not force_compact:
+        if not user_input.strip() and not uploaded_files and not force_compact:
             raise ValueError(
                 "'user_input' must be non-empty when no artifacts are attached"
             )
@@ -165,8 +167,8 @@ class ExecutionController:
         session_id = conversation_id  # session_id = conversation_id
 
         # 设置 artifact session
-        if self.artifact_manager:
-            self.artifact_manager.set_session(session_id)
+        if self.artifact_service:
+            self.artifact_service.set_session(session_id)
 
         # 从父消息 metadata 中恢复 always_allowed_tools
         parent_always_allowed = []
@@ -181,7 +183,7 @@ class ExecutionController:
             message_id=message_id,
             path_events=path_events,
             always_allowed_tools=parent_always_allowed,
-            uploaded_artifacts=uploaded_artifacts,
+            uploaded_files=uploaded_files,
             force_compact=force_compact,
         )
 
@@ -222,7 +224,7 @@ class ExecutionController:
                         agents=self.agents,
                         tools=self.tools,
                         hooks=self.hooks,
-                        artifact_manager=self.artifact_manager,
+                        artifact_manager=self.artifact_service,
                         emit=emit_to_queue,
                     )
             except TimeoutError:
@@ -442,9 +444,9 @@ class ExecutionController:
 
             try:
                 # Flush dirty artifacts to DB
-                if self.artifact_manager:
+                if self.artifact_service:
                     try:
-                        await self.artifact_manager.flush_all(
+                        await self.artifact_service.flush_all(
                             session_id, db_manager=self._db_manager
                         )
                         pp.artifacts_flushed = True

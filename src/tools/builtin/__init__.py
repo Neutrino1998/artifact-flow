@@ -8,11 +8,14 @@ from .web_search import WebSearchTool
 # Web抓取工具
 from .web_fetch import WebFetchTool
 
-# Artifact操作工具
-from .artifact_ops import (
+# Artifact 层(重构后四层:纯状态 / 编排 / 工具 / 算法)
+from .artifact_working_set import (
     ArtifactMemory,
     ArtifactVersionMemory,
-    ArtifactManager,
+    ArtifactWorkingSet,
+)
+from .artifact_service import ArtifactService
+from .artifact_ops import (
     CreateArtifactTool,
     RewriteArtifactTool,
     ReadArtifactTool,
@@ -32,7 +35,8 @@ __all__ = [
     # Artifact工具
     "ArtifactMemory",
     "ArtifactVersionMemory",
-    "ArtifactManager",
+    "ArtifactWorkingSet",
+    "ArtifactService",
     "CreateArtifactTool",
     "UpdateArtifactTool",
     "RewriteArtifactTool",

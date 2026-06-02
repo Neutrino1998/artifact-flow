@@ -12,7 +12,7 @@ FastAPI 依赖注入
 
 请求级依赖（每次 HTTP 请求独立创建）：
     get_db_session()            # AsyncSession
-        ├──► get_artifact_manager()
+        ├──► get_artifact_service()
         ├──► get_conversation_manager()
         └──► get_user_repository()
 
@@ -38,7 +38,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from config import config
 from core.conversation_manager import ConversationManager
 from tools.base import BaseTool, build_tool_map
-from tools.builtin.artifact_ops import ArtifactManager
+from tools.builtin.artifact_service import ArtifactService
 from db.database import DatabaseManager
 from repositories.artifact_repo import ArtifactRepository
 from repositories.conversation_repo import ConversationRepository
@@ -304,12 +304,17 @@ async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
         yield session
 
 
-async def get_artifact_manager(
+async def get_artifact_service(
     session: AsyncSession = Depends(get_db_session)
-) -> ArtifactManager:
-    """每个请求获得独立的 ArtifactManager"""
+) -> ArtifactService:
+    """每个请求获得独立的 ArtifactService(自带空 WorkingSet)。
+
+    请求级实例 WorkingSet 恒空、不 bind_emit → 读写自然落到纯 DB。这正是删掉
+    旧 _active_managers overlay 后的目标态:REST 读 DB 权威态,turn 中 live 由
+    事件流补(见 artifact-layer-redesign-plan 决策 1/6)。
+    """
     repo = ArtifactRepository(session)
-    return ArtifactManager(repo)
+    return ArtifactService(repo)
 
 
 async def get_conversation_manager(

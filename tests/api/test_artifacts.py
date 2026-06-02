@@ -209,9 +209,10 @@ class TestUploadSizeGuard:
         monkeypatch.setattr(cfg, "MAX_UPLOAD_SIZE", 10)
         f = self._FakeUpload(size=11)  # parser-reported part length over the cap
         with pytest.raises(HTTPException) as ei:
-            await art.convert_and_create_artifact(
-                artifact_manager=None, session_id="s", file=f
-            )
+            # The size guard lives in convert_uploaded_file (phase 1, pure
+            # transform). The old convert_and_create_artifact wrapper was removed
+            # when uploads moved to in-engine staging (no immediate commit).
+            await art.convert_uploaded_file(f)
         assert ei.value.status_code == 422
         assert "too large" in ei.value.detail.lower()
         # The whole point: the body was never materialized.
@@ -226,8 +227,9 @@ class TestUploadSizeGuard:
         # .size is None → pre-check skipped; the post-read len() guard catches it.
         f = self._FakeUpload(size=None, read_bytes=b"a" * 11)
         with pytest.raises(HTTPException) as ei:
-            await art.convert_and_create_artifact(
-                artifact_manager=None, session_id="s", file=f
-            )
+            # The size guard lives in convert_uploaded_file (phase 1, pure
+            # transform). The old convert_and_create_artifact wrapper was removed
+            # when uploads moved to in-engine staging (no immediate commit).
+            await art.convert_uploaded_file(f)
         assert ei.value.status_code == 422
         assert f.read_called is True
