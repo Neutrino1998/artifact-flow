@@ -80,6 +80,17 @@ def _capturing_event_repo():
     return er, batches
 
 
+def _make_failing_event_repo():
+    """An event repo whose batch_create raises → _persist_events returns False."""
+    er = MagicMock()
+
+    async def boom_batch(events):
+        raise RuntimeError("db write failed")
+
+    er.batch_create = boom_batch
+    return er
+
+
 # ============================================================
 # Tests
 # ============================================================
@@ -471,6 +482,53 @@ class TestPersistOnExternalCancel:
         assert len(cancelled) == 0, (
             f"Should not overwrite ERROR terminal with CANCELLED, got types: {event_types}"
         )
+
+    async def test_persist_failure_error_carries_flush_bit(self):
+        """
+        Reviewer P2 (round-3): the events-persist-failure ERROR is emitted at the
+        transport layer (controller.py:485, bypassing decide_terminal because the
+        event stream itself couldn't be written). It must STILL carry
+        artifacts_flushed so the frontend doesn't mistake "missing field" for
+        "uploads not persisted" and re-stage on retry → _N duplicates.
+
+        Scenario: flush_all succeeds (artifacts land in DB), then _persist_events
+        fails. The ERROR must carry artifacts_flushed=True so the composer drops
+        the attachments (they're already in DB; retry won't dup them).
+        """
+        cm = _make_mock_conversation_manager()
+        am = _make_mock_artifact_manager()  # flush_all is an AsyncMock → succeeds
+        ctrl = _make_controller(cm, _make_failing_event_repo(), am)
+
+        async def fake_execute_loop(**kwargs):
+            state = kwargs["state"]
+            state["events"].append(ExecutionEvent(
+                event_type=StreamEventType.LLM_COMPLETE.value,
+                agent_name="lead_agent",
+                data={"content": "done"},
+                is_historical=False,
+            ))
+            state["completed"] = True
+            state["response"] = "all done"
+            return state
+
+        async def consume():
+            return [event async for event in ctrl.stream_execute(
+                user_input="hi",
+                conversation_id="conv-test",
+                parent_message_id=None,
+                message_id="msg-test",
+            )]
+
+        with patch("core.controller.execute_loop", side_effect=fake_execute_loop):
+            events = await asyncio.create_task(consume())
+
+        am.flush_all.assert_called_once()  # flush ran → artifacts in DB
+        errors = [e for e in events if e["type"] == StreamEventType.ERROR.value]
+        assert len(errors) == 1, f"expected one transport ERROR, got: {[e['type'] for e in events]}"
+        # flush succeeded + no rollback → bit True → frontend clears composer attachments
+        assert errors[0]["data"]["artifacts_flushed"] is True
+        # Message.response must NOT be written (events-first invariant: no history → no display)
+        cm.update_response_async.assert_not_called()
 
     async def test_cooperative_cancel_writes_response_by_user(self):
         """

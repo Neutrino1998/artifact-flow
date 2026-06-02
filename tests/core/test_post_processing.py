@@ -21,7 +21,46 @@ from core.post_processing import (
     decide_terminal,
     ensure_terminal,
     make_external_cancelled_event,
+    uploads_persisted,
 )
+
+
+# ============================================================================
+# uploads_persisted — artifacts_flushed bit 的单一真相源
+# ============================================================================
+
+
+class TestUploadsPersisted:
+    """前端"清/留输入框附件"的依据。decide_terminal 的四个终态 + controller 两个
+    transport 层直发 ERROR 都过这个函数 —— 锁定三态语义,任何一处漂移都会被这里抓到。
+    """
+
+    def _pp(self, *, flushed: bool, rolled_back: bool) -> PostProcessState:
+        pp = PostProcessState(
+            conversation_id="conv-1",
+            message_id="msg-1",
+            final_state={"uploads_rolled_back": rolled_back},
+        )
+        pp.artifacts_flushed = flushed
+        return pp
+
+    def test_flushed_not_rolled_back_is_true(self):
+        # 正常落库 → 清掉输入框附件
+        assert uploads_persisted(self._pp(flushed=True, rolled_back=False)) is True
+
+    def test_flushed_but_rolled_back_is_false(self):
+        # staging abort 回滚上传 → flush 空转成功却没东西落 → 保留附件供重试
+        assert uploads_persisted(self._pp(flushed=True, rolled_back=True)) is False
+
+    def test_not_flushed_is_false(self):
+        # flush 从未成功(异常 / 外部取消跳过 flush)→ 保留附件
+        assert uploads_persisted(self._pp(flushed=False, rolled_back=False)) is False
+
+    def test_missing_rolled_back_key_defaults_false(self):
+        # uploads_rolled_back 未设(绝大多数轮)→ 退化回 artifacts_flushed
+        pp = PostProcessState(conversation_id="c", message_id="m", final_state={})
+        pp.artifacts_flushed = True
+        assert uploads_persisted(pp) is True
 
 
 # ============================================================================

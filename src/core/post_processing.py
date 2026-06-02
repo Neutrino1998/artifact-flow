@@ -72,6 +72,22 @@ class PostProcessState:
 # ============================================================================
 
 
+def uploads_persisted(pp: PostProcessState) -> bool:
+    """前端"要不要清掉输入框附件"的唯一真相:用户这轮的上传是否真的落库。
+
+    不是字面"flush 动作成没成":
+      pp.artifacts_flushed = flush_all 调用成功(对空集也 True);
+      uploads_rolled_back   = staging 失败时引擎回滚了上传(WS 摘除,flush 空转
+                              成功却没东西落)。
+    二者相减才是真相 —— 其余路径 uploads_rolled_back=False,退化回 pp.artifacts_flushed。
+
+    单一真相源:decide_terminal 的四个终态、以及 controller 两个 transport 层直发
+    ERROR(events 持久化失败 / post-processing 异常)都经此函数,确保 artifacts_flushed
+    bit 在所有终态一致 —— 否则缺 bit 的 ERROR 会被前端当"未落库"处理而重复 staging。
+    """
+    return pp.artifacts_flushed and not pp.final_state.get("uploads_rolled_back", False)
+
+
 def decide_terminal(pp: PostProcessState) -> None:
     """根据 final_state 决定 terminal_event + terminal_type + cancel_source。
 
@@ -92,12 +108,9 @@ def decide_terminal(pp: PostProcessState) -> None:
     metrics = s.get("execution_metrics", {})
     response = s.get("response", "")
 
-    # uploads_persisted = 前端"要不要清掉输入框附件"的依据(终态 data 里叫 artifacts_flushed)。
-    # 它回答"用户这轮的上传真的落库了吗",不是字面的"flush 动作成没成":
-    #   pp.artifacts_flushed = flush_all 调用成功(对空集也 True);
-    #   uploads_rolled_back   = staging 失败时引擎回滚了上传(WS 已摘除,flush 空转成功却没东西落)。
-    # 二者相减才是真相 —— 其余路径 uploads_rolled_back=False,退化回 pp.artifacts_flushed。
-    uploads_persisted = pp.artifacts_flushed and not s.get("uploads_rolled_back", False)
+    # 前端"要不要清掉输入框附件"的依据(终态 data 里叫 artifacts_flushed)。
+    # 见 uploads_persisted() —— controller 的 transport 层直发 ERROR 也复用同一函数。
+    persisted = uploads_persisted(pp)
 
     if pp.flush_error:
         pp.terminal_type = StreamEventType.ERROR.value
@@ -111,7 +124,7 @@ def decide_terminal(pp: PostProcessState) -> None:
                 "error": pp.flush_error,
                 "execution_metrics": metrics,
                 # flush 失败 → uploads_persisted=False → 前端保留输入框附件供重试
-                "artifacts_flushed": uploads_persisted,
+                "artifacts_flushed": persisted,
             },
         )
         return
@@ -133,7 +146,7 @@ def decide_terminal(pp: PostProcessState) -> None:
                 # SSE data 带 response 是历史约定(前端用作 snapshot,与 CANCELLED 同构)
                 "response": config.TIMED_OUT_RESPONSE,
                 "execution_metrics": metrics,
-                "artifacts_flushed": uploads_persisted,
+                "artifacts_flushed": persisted,
             },
         )
         return
@@ -153,7 +166,7 @@ def decide_terminal(pp: PostProcessState) -> None:
                 "message_id": pp.message_id,
                 "response": display,
                 "execution_metrics": metrics,
-                "artifacts_flushed": uploads_persisted,
+                "artifacts_flushed": persisted,
             },
         )
         return
@@ -178,7 +191,7 @@ def decide_terminal(pp: PostProcessState) -> None:
                 "agent": detail.get("agent"),
                 "request_id": detail.get("request_id"),
                 "execution_metrics": metrics,
-                "artifacts_flushed": uploads_persisted,
+                "artifacts_flushed": persisted,
             },
         )
         return
@@ -193,7 +206,7 @@ def decide_terminal(pp: PostProcessState) -> None:
             "message_id": pp.message_id,
             "response": response,
             "execution_metrics": metrics,
-            "artifacts_flushed": uploads_persisted,
+            "artifacts_flushed": persisted,
         },
     )
 

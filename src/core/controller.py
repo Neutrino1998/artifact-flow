@@ -23,6 +23,7 @@ from core.post_processing import (
     decide_terminal,
     ensure_terminal,
     make_external_cancelled_event,
+    uploads_persisted,
 )
 from tools.base import BaseTool
 from tools.builtin.artifact_service import ArtifactService
@@ -452,9 +453,9 @@ class ExecutionController:
                         logger.exception(f"Artifact flush failed after retries: {flush_err}")
                         pp.flush_error = f"Artifact persistence failed: {flush_err}"
 
-                # 决定 terminal（纯函数,无 IO）。engine ERROR 路径已自行 append ERROR 到
-                # events,decide_terminal 在 has_error 分支把 terminal_event 设为 None
-                # 且把 terminal_appended 标 True,防止下面二次 append。
+                # 决定 terminal（纯函数,无 IO）。统一后 engine/controller 的内部错误只把
+                # 详情记进 state["error_detail"],由 decide_terminal 在 flush 之后构建唯一的
+                # 终态事件(含 ERROR),controller 下面统一 append + yield。
                 decide_terminal(pp)
 
                 if pp.terminal_event is not None and not pp.terminal_appended:
@@ -491,6 +492,9 @@ class ExecutionController:
                             "message_id": message_id,
                             "error": "Event persistence failed — turn aborted, please retry",
                             "execution_metrics": pp.final_state.get("execution_metrics", {}),
+                            # transport 层直发 ERROR(绕过 decide_terminal),但仍须带 bit:
+                            # flush 已成功 → 附件在 DB → 前端清掉输入框附件,重试不再重复 staging。
+                            "artifacts_flushed": uploads_persisted(pp),
                         },
                     }
                     return
@@ -545,8 +549,8 @@ class ExecutionController:
 
                 logger.info("Streaming execution completed")
 
-                # 发送终态到 SSE。engine ERROR 路径 terminal_event=None (engine 已实时推送过),
-                # 自然跳过。flush_error / cancelled / COMPLETE 都从 pp.terminal_event 取。
+                # 发送终态到 SSE。统一后 ERROR 也由 decide_terminal 构建为 pp.terminal_event,
+                # 与 flush_error / cancelled / TIMED_OUT / COMPLETE 走同一路径。
                 if pp.terminal_event is not None:
                     yield {
                         "type": pp.terminal_event.event_type,
@@ -564,6 +568,9 @@ class ExecutionController:
                         "conversation_id": conversation_id,
                         "message_id": message_id,
                         "error": str(e),
+                        # transport 层直发 ERROR:带 bit 反映 flush 真实进度(异常可能落在
+                        # flush 前或后),前端据此决定保留/清掉输入框附件,避免重复 staging。
+                        "artifacts_flushed": uploads_persisted(pp),
                     }
                 }
         except asyncio.CancelledError:
