@@ -18,6 +18,16 @@ def generate_tool_instruction(tools: List[BaseTool]) -> str:
 <format>
 You may make one or more tool calls per turn. They execute sequentially.
 Wrap ALL parameter values in <![CDATA[...]]>.
+
+For multiple calls, emit each <tool_call> block one after another — there is NO wrapping container tag:
+<tool_call>
+  <name>first_tool</name>
+  <params>...</params>
+</tool_call>
+<tool_call>
+  <name>second_tool</name>
+  <params>...</params>
+</tool_call>
 </format>
 """
 
