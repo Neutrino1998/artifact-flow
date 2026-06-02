@@ -228,6 +228,8 @@ async def execute_loop(
     # decision 1 / stage C). _normalize + dedup happen inside create_from_upload.
     if artifact_manager is not None and state.get("uploaded_files"):
         stage_session = state["session_id"]
+        staged_ids: List[str] = []
+        staging_error: Optional[str] = None
         for f in state["uploaded_files"]:
             try:
                 ok, _msg, info = await artifact_manager.create_from_upload(
@@ -237,15 +239,39 @@ async def execute_loop(
                     content_type=f["content_type"],
                     metadata=f.get("metadata"),
                 )
-            except Exception as e:  # defensive: never let one upload wedge the turn
+            except Exception as e:
                 logger.exception(f"Failed to stage upload '{f.get('filename')}': {e}")
-                continue
+                staging_error = f"Failed to attach file '{f.get('filename')}': {e}"
+                break
             if ok and info:
+                staged_ids.append(info["id"])
                 state["uploaded_artifacts"].append(
                     {"id": info["id"], "filename": info["original_filename"]}
                 )
             else:
-                logger.warning(f"Upload staging skipped for '{f.get('filename')}': {_msg}")
+                logger.error(f"Upload staging failed for '{f.get('filename')}': {_msg}")
+                staging_error = f"Failed to attach file '{f.get('filename')}': {_msg}"
+                break
+
+        if staging_error is not None:
+            # Loud, atomic abort. 静默吞掉一个 stage 失败 = 用户附件在 COMPLETE 的
+            # clearSent 里凭空消失而无任何信号(违反 loud-failure)。原子性:回滚本轮
+            # 已 stage 的文件,使 flush_all 一个都不落 → 用户重试时不会撞 _N 副本。
+            discard = getattr(artifact_manager, "discard_staged", None)
+            if discard:
+                for sid in staged_ids:
+                    discard(stage_session, sid)
+            state["uploaded_artifacts"] = []
+            await _emit(StreamEventType.ERROR.value, "lead_agent", {
+                "error": staging_error,
+                "agent": "lead_agent",
+                # 上传未落库 → 前端保留输入框附件供重试(见 post_processing 的
+                # artifacts_flushed 约定:显式 False = 不要 clearSent)
+                "artifacts_flushed": False,
+            })
+            state["completed"] = True
+            state["error"] = True
+            return state
 
     # 3a. 记录用户原始输入为事件（统一 context 构建路径）。本轮随消息上传的 artifact 在
     # 事件正文（仅 LLM 可见，不入 Message.user_input display）追加归属说明，让 agent 把

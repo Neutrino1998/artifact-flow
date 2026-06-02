@@ -11,11 +11,13 @@ import { partitionStageable, type StageRejection } from '@/lib/uploadFilter';
 export interface StagedFile {
   id: string;
   file: File;
-  // True once this file has ridden a send POST but the turn hasn't COMPLETEd.
-  // Kept (not removed) until COMPLETE so that if the turn dies before flush_all
-  // — uploads are ephemeral now (staged in-engine, lost on lease restart) — the
-  // user still has the file in the composer to retry. Cleared on COMPLETE;
-  // reverted (kept as normal staged) on cancel/error/timeout.
+  // True once this file has ridden a send POST but the turn hasn't reached a
+  // terminal. Kept (not removed) until the terminal resolves so that if the turn
+  // dies before flush_all — uploads are ephemeral (staged in-engine, lost on
+  // lease restart) — the user still has the file in the composer to retry.
+  // Resolution is driven by the terminal's `artifacts_flushed` bit, NOT the
+  // terminal type (see useSSE.resolveStagedAfterTerminal): flushed → clearSent
+  // (drop); not flushed → unmarkSent (revert to normal staged for retry).
   sent?: boolean;
 }
 
@@ -43,10 +45,11 @@ interface StagedFilesState {
   // Mark the ids a send just consumed as in-flight (sent=true). They stay
   // visible until the turn's terminal event resolves them (see below).
   markSent: (ids: string[]) => void;
-  // COMPLETE: drop the in-flight files (turn succeeded → uploads flushed).
+  // Terminal with uploads flushed (COMPLETE, cooperative cancel, timeout,
+  // engine error): drop the in-flight files.
   clearSent: () => void;
-  // Non-success terminal (cancel/error/timeout): revert in-flight files to
-  // normal staged so the user can retry — uploads weren't flushed.
+  // Terminal with uploads NOT flushed (staging abort, flush_error, external
+  // cancel): revert in-flight files to normal staged so the user can retry.
   unmarkSent: () => void;
   dismissNotice: () => void;
   clear: () => void;

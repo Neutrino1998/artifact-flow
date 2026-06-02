@@ -525,6 +525,15 @@ class ArtifactService:
 
         return True, f"Successfully rewritten artifact '{artifact_id}' (v{memory.current_version})"
 
+    def discard_staged(self, session_id: str, artifact_id: str) -> None:
+        """摘掉一个本轮 stage 的 artifact 的 dirty/new 标记,使其不会被 flush_all 落库。
+
+        给上传 staging 的原子回滚用:多文件上传中途失败时,engine 调它把已 stage 的
+        文件撤销,保证本轮"要么全落库、要么一个都不落",避免用户重试时撞 _N 副本
+        (缓存条目保留无妨——本轮已 abort,不会再被读)。
+        """
+        self._ws.clear_one(session_id, artifact_id)
+
     # ========================================
     # 持久化(flush)
     # ========================================

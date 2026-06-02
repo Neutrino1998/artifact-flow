@@ -41,6 +41,22 @@ let _toolCallSeq = 0;
 const MAX_RECONNECT_ATTEMPTS = 3;
 const RECONNECT_BASE_DELAY_MS = 1000;
 
+// Resolve composer attachments at a turn's terminal. The backend stamps
+// `artifacts_flushed` onto terminal event data (post_processing.decide_terminal):
+//   - explicit false → uploads were NOT persisted (flush failed, or staging
+//     aborted the turn) → unmarkSent() keeps the files staged for retry.
+//   - true OR absent → uploads landed (or, on the engine real-time ERROR path
+//     which carries no field, flush_all still ran in post-processing) →
+//     clearSent() drops the in-flight files.
+// Defaulting absent→clear is safe: every frontend-visible terminal where flush
+// genuinely did NOT run (flush_error ERROR, external cancel) carries an explicit
+// false; the only field-absent terminal is engine-error, where flush did run.
+function resolveStagedAfterTerminal(data: Record<string, unknown> | undefined): void {
+  const store = useStagedFilesStore.getState();
+  if (data?.artifacts_flushed === false) store.unmarkSent();
+  else store.clearSent();
+}
+
 export function useSSE() {
 
   // Stream store actions
@@ -456,9 +472,9 @@ export function useSSE() {
           }
           setCancelled(true);
           endStream();
-          // Cancelled → uploads weren't flushed; revert sent files to staged so
-          // the user can retry (don't wipe them).
-          useStagedFilesStore.getState().unmarkSent();
+          // Cooperative cancel flushed uploads, external cancel didn't — the
+          // backend's artifacts_flushed bit disambiguates (see helper).
+          resolveStagedAfterTerminal(data as Record<string, unknown> | undefined);
           refreshAfterComplete(conversationId, messageId);
           break;
         }
@@ -472,7 +488,7 @@ export function useSSE() {
           }
           endStream();
           // Turn succeeded → staged uploads were flushed; drop the in-flight files.
-          useStagedFilesStore.getState().clearSent();
+          resolveStagedAfterTerminal(data as Record<string, unknown> | undefined);
           refreshAfterComplete(conversationId, messageId);
           break;
         }
@@ -488,8 +504,9 @@ export function useSSE() {
             snapshotSegments(messageId);
           }
           endStream();
-          // Timed out → uploads not flushed; keep files for retry.
-          useStagedFilesStore.getState().unmarkSent();
+          // Timeout runs full post-processing → uploads were flushed; the
+          // artifacts_flushed bit reflects that (clearSent).
+          resolveStagedAfterTerminal(data as Record<string, unknown> | undefined);
           refreshAfterComplete(conversationId, messageId);
           break;
         }
@@ -518,8 +535,9 @@ export function useSSE() {
             snapshotSegments(errMsgId);
           }
           endStream();
-          // Errored → uploads not flushed; keep files for retry.
-          useStagedFilesStore.getState().unmarkSent();
+          // Engine error flushed uploads (clearSent via absent field); staging
+          // abort / flush_error carry artifacts_flushed=false → keep for retry.
+          resolveStagedAfterTerminal(data as Record<string, unknown> | undefined);
           refreshAfterComplete(conversationId, errMsgId);
           break;
         }

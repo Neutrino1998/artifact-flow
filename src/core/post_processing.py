@@ -103,6 +103,8 @@ def decide_terminal(pp: PostProcessState) -> None:
                 "message_id": pp.message_id,
                 "error": pp.flush_error,
                 "execution_metrics": metrics,
+                # flush 失败 → 上传未落库,前端据此保留输入框附件供重试(见下方各终态)
+                "artifacts_flushed": pp.artifacts_flushed,
             },
         )
         return
@@ -124,6 +126,7 @@ def decide_terminal(pp: PostProcessState) -> None:
                 # SSE data 带 response 是历史约定(前端用作 snapshot,与 CANCELLED 同构)
                 "response": config.TIMED_OUT_RESPONSE,
                 "execution_metrics": metrics,
+                "artifacts_flushed": pp.artifacts_flushed,
             },
         )
         return
@@ -143,12 +146,17 @@ def decide_terminal(pp: PostProcessState) -> None:
                 "message_id": pp.message_id,
                 "response": display,
                 "execution_metrics": metrics,
+                "artifacts_flushed": pp.artifacts_flushed,
             },
         )
         return
 
     if has_error:
-        # engine 已 append 过 ERROR;不重复 append,但要让后续路径知道 terminal_type=ERROR
+        # engine 已 append 过 ERROR(实时 _emit,且早于本函数前的 flush_all);不重复
+        # append,terminal_event 留 None → controller 不再 yield 终态。该实时 ERROR 事件
+        # 不带 artifacts_flushed,前端缺字段时默认按"已落库"处理(clearSent)—— 正确,
+        # 因为 engine-error 路径 post-processing 的 flush_all 已跑过(上传已落库)。
+        # 唯一"未落库"的前端可见终态是 flush_error ERROR,它走上面分支带 False。
         pp.terminal_type = StreamEventType.ERROR.value
         pp.terminal_event = None
         pp.terminal_appended = True
@@ -164,6 +172,7 @@ def decide_terminal(pp: PostProcessState) -> None:
             "message_id": pp.message_id,
             "response": response,
             "execution_metrics": metrics,
+            "artifacts_flushed": pp.artifacts_flushed,
         },
     )
 
@@ -227,6 +236,8 @@ def ensure_terminal(pp: PostProcessState) -> None:
             "conversation_id": pp.conversation_id,
             "message_id": pp.message_id,
             "reason": "external_cancel_post_processing",
+            # late-cancel 可能落在 flush 之前或之后,读 ledger 的真值
+            "artifacts_flushed": pp.artifacts_flushed,
         },
     )
     pp.final_state["events"].append(pp.terminal_event)
@@ -291,6 +302,9 @@ def make_external_cancelled_event(
         "conversation_id": conversation_id,
         "message_id": message_id,
         "reason": reason,
+        # 外部取消发生在 execute_loop 内,post-processing 的 flush_all 从未运行 →
+        # 上传未落库,前端据此保留输入框附件(虽此终态通常因 consumer 已断而不下发)
+        "artifacts_flushed": False,
     }
     if execution_metrics is not None:
         data["execution_metrics"] = execution_metrics
