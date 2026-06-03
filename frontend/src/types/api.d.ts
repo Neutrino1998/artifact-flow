@@ -290,27 +290,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/artifacts/{session_id}/upload": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Upload File
-         * @description Upload a file and create an artifact from it.
-         *     Supports text files, markdown, code, PDF, and Word documents.
-         */
-        post: operations["upload_file_api_v1_artifacts__session_id__upload_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/artifacts/{session_id}/{artifact_id}/export": {
         parameters: {
             query?: never;
@@ -1172,14 +1151,6 @@ export interface components {
              */
             files: string[];
         };
-        /** Body_upload_file_api_v1_artifacts__session_id__upload_post */
-        Body_upload_file_api_v1_artifacts__session_id__upload_post: {
-            /**
-             * File
-             * Format: binary
-             */
-            file: string;
-        };
         /**
          * BulkActionFailedItem
          * @description 单条 bulk-action 失败项。
@@ -1887,53 +1858,6 @@ export interface components {
             department_id?: string | null;
         };
         /**
-         * UploadResponse
-         * @description POST /api/v1/artifacts/{session_id}/upload response
-         */
-        UploadResponse: {
-            /**
-             * Id
-             * @description Artifact ID
-             */
-            id: string;
-            /**
-             * Session Id
-             * @description Session ID
-             */
-            session_id: string;
-            /**
-             * Content Type
-             * @description MIME type (after conversion)
-             */
-            content_type: string;
-            /**
-             * Title
-             * @description Artifact title
-             */
-            title: string;
-            /**
-             * Current Version
-             * @description Current version number
-             */
-            current_version: number;
-            /**
-             * Source
-             * @description Source (user_upload)
-             */
-            source: string;
-            /**
-             * Original Filename
-             * @description Original uploaded filename
-             */
-            original_filename: string;
-            /**
-             * Created At
-             * Format: date-time
-             * @description Creation time
-             */
-            created_at: string;
-        };
-        /**
          * UserImpactResponse
          * @description GET /api/v1/admin/users/{id}/impact response
          *
@@ -2551,41 +2475,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ArtifactListResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    upload_file_api_v1_artifacts__session_id__upload_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                session_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "multipart/form-data": components["schemas"]["Body_upload_file_api_v1_artifacts__session_id__upload_post"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["UploadResponse"];
                 };
             };
             /** @description Validation Error */

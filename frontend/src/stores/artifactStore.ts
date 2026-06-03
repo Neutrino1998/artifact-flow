@@ -1,7 +1,53 @@
 import { create } from 'zustand';
 import type { ArtifactSummary, ArtifactDetail, VersionSummary, VersionDetail } from '@/types';
+import type { ArtifactCreatedData, ArtifactUpdatedData } from '@/types/events';
 
 export type ArtifactViewMode = 'preview' | 'source' | 'diff';
+
+/** Live (in-turn) content for one artifact, reduced from ARTIFACT_* SSE events.
+ *  This is the source of truth for the panel DURING a turn — REST GET is now
+ *  pure-DB (no overlay) and lags live. Cleared + replaced by the DB re-pull on
+ *  COMPLETE (the single alignment point). `omitted` = content exceeded the live
+ *  cap server-side; show stale + wait for the COMPLETE re-pull. */
+export interface LiveArtifact {
+  content: string;
+  version: number;
+  contentType: string;
+  title: string;
+  source: string | null;
+  omitted: boolean;
+}
+
+/** Apply an authoritative span delta (from compute_update): replace
+ *  [offset, offset+deleted_len) with inserted_text. */
+function applySpanDelta(
+  content: string,
+  delta: { offset: number; deleted_len: number; inserted_text: string }
+): string {
+  return (
+    content.slice(0, delta.offset) +
+    delta.inserted_text +
+    content.slice(delta.offset + delta.deleted_len)
+  );
+}
+
+/** Build a panel-ready ArtifactDetail from live state. versions=[] is fine:
+ *  the toolbar hides the version selector while streaming (decision 6). */
+function liveToDetail(id: string, live: LiveArtifact, sessionId: string | null): ArtifactDetail {
+  return {
+    id,
+    session_id: sessionId ?? '',
+    content_type: live.contentType,
+    title: live.title,
+    content: live.content,
+    current_version: live.version,
+    source: live.source,
+    original_filename: null,
+    created_at: '',
+    updated_at: '',
+    versions: [],
+  };
+}
 
 interface ArtifactState {
   // Session context (set during streaming when conversation store may not have it yet)
@@ -38,6 +84,9 @@ interface ArtifactState {
   // Pending updates from streaming
   pendingUpdates: string[];
 
+  // Live (in-turn) content reduced from ARTIFACT_* events, keyed by artifact id.
+  liveContent: Record<string, LiveArtifact>;
+
   // Upload state
   uploading: boolean;
   uploadError: string | null;
@@ -56,6 +105,13 @@ interface ArtifactState {
   setViewMode: (mode: ArtifactViewMode) => void;
   addPendingUpdate: (identifier: string) => void;
   clearPendingUpdates: () => void;
+  applyArtifactCreated: (data: ArtifactCreatedData) => void;
+  applyArtifactUpdated: (data: ArtifactUpdatedData) => void;
+  /** Open an artifact from live (in-turn) content if we have it. Returns true
+   *  when handled (caller should skip the REST fetch — REST is pure-DB and would
+   *  show stale content for an artifact edited this turn). User-picked → not auto. */
+  selectFromLive: (id: string) => boolean;
+  clearLiveContent: () => void;
   setUploading: (uploading: boolean) => void;
   setUploadError: (error: string | null) => void;
   reset: () => void;
@@ -66,7 +122,7 @@ function defaultViewMode(contentType?: string): ArtifactViewMode {
   return 'source';
 }
 
-export const useArtifactStore = create<ArtifactState>((set) => ({
+export const useArtifactStore = create<ArtifactState>((set, get) => ({
   sessionId: null,
 
   artifacts: [],
@@ -83,6 +139,7 @@ export const useArtifactStore = create<ArtifactState>((set) => ({
   viewMode: 'preview',
 
   pendingUpdates: [],
+  liveContent: {},
 
   uploading: false,
   uploadError: null,
@@ -124,6 +181,125 @@ export const useArtifactStore = create<ArtifactState>((set) => ({
         : [...s.pendingUpdates, identifier],
     })),
   clearPendingUpdates: () => set({ pendingUpdates: [] }),
+
+  // ARTIFACT_CREATED: a new artifact appeared this turn. REST list no longer
+  // surfaces unflushed artifacts (overlay removed), so we upsert it into the
+  // list FROM the event. Auto-open it unless the user has actively picked
+  // another artifact, mirroring the old tool-completion behavior — except
+  // tool-persisted outputs (source='tool') only list, never grab the panel.
+  applyArtifactCreated: (d) =>
+    set((s) => {
+      const live: LiveArtifact = {
+        content: d.content ?? '',
+        version: d.current_version,
+        contentType: d.content_type,
+        title: d.title,
+        source: d.source,
+        omitted: !!d.content_omitted,
+      };
+      const liveContent = { ...s.liveContent, [d.id]: live };
+      const exists = s.artifacts.some((a) => a.id === d.id);
+      const summary: ArtifactSummary = {
+        id: d.id,
+        content_type: d.content_type,
+        title: d.title,
+        current_version: d.current_version,
+        source: d.source,
+        original_filename: null,
+        created_at: '',
+        updated_at: '',
+      };
+      const artifacts = exists
+        ? s.artifacts.map((a) =>
+            a.id === d.id ? { ...a, title: d.title, current_version: d.current_version } : a
+          )
+        : [...s.artifacts, summary];
+      const pendingUpdates = s.pendingUpdates.includes(d.id)
+        ? s.pendingUpdates
+        : [...s.pendingUpdates, d.id];
+
+      const next: Partial<ArtifactState> = { liveContent, artifacts, pendingUpdates };
+      const autoOpen = d.source !== 'tool';
+      if (autoOpen && (!s.current || s.autoSelected)) {
+        next.current = liveToDetail(d.id, live, s.sessionId);
+        next.autoSelected = true;
+        next.viewMode = defaultViewMode(d.content_type);
+        next.versions = [];
+        next.selectedVersion = null;
+      } else if (s.current && s.current.id === d.id) {
+        next.current = liveToDetail(d.id, live, s.sessionId);
+      }
+      return next;
+    }),
+
+  // ARTIFACT_UPDATED: rewrite (full content) or targeted update (span delta).
+  // Apply onto the live base (the backend guarantees a full-content event for
+  // an artifact precedes any delta this turn, so a delta always has a base).
+  applyArtifactUpdated: (d) =>
+    set((s) => {
+      const base = s.liveContent[d.id];
+      let content: string;
+      let omitted = false;
+      if (d.delta && base && !base.omitted) {
+        content = applySpanDelta(base.content, d.delta);
+      } else if (typeof d.content === 'string') {
+        content = d.content;
+      } else if (d.content_omitted) {
+        // oversized full-content event: keep stale base, flag for COMPLETE re-pull
+        content = base?.content ?? '';
+        omitted = true;
+      } else {
+        // delta with no base (e.g. missed the full event on reconnect): can't
+        // apply; keep base and rely on the COMPLETE DB re-pull. Still dot it.
+        content = base?.content ?? '';
+        omitted = base?.omitted ?? true;
+      }
+      const live: LiveArtifact = {
+        content,
+        version: d.current_version,
+        contentType: base?.contentType ?? 'text/markdown',
+        title: base?.title ?? d.id,
+        source: base?.source ?? 'agent',
+        omitted,
+      };
+      const liveContent = { ...s.liveContent, [d.id]: live };
+      const artifacts = s.artifacts.map((a) =>
+        a.id === d.id ? { ...a, current_version: d.current_version } : a
+      );
+      const pendingUpdates = s.pendingUpdates.includes(d.id)
+        ? s.pendingUpdates
+        : [...s.pendingUpdates, d.id];
+
+      const next: Partial<ArtifactState> = { liveContent, artifacts, pendingUpdates };
+      if (s.current && s.current.id === d.id) {
+        // keep the user's view mode / selection ownership; just refresh content
+        next.current = { ...s.current, content: live.content, current_version: live.version };
+      } else if (!s.current || s.autoSelected) {
+        next.current = liveToDetail(d.id, live, s.sessionId);
+        next.autoSelected = true;
+        next.viewMode = defaultViewMode(live.contentType);
+        next.versions = [];
+        next.selectedVersion = null;
+      }
+      return next;
+    }),
+
+  selectFromLive: (id) => {
+    const live = get().liveContent[id];
+    if (!live || live.omitted) return false;
+    set({
+      current: liveToDetail(id, live, get().sessionId),
+      autoSelected: false, // user-picked: keep them here at COMPLETE
+      viewMode: defaultViewMode(live.contentType),
+      versions: [],
+      selectedVersion: null,
+      diffBaseContent: null,
+    });
+    return true;
+  },
+
+  clearLiveContent: () => set({ liveContent: {} }),
+
   setUploading: (uploading) => set({ uploading }),
   setUploadError: (error) => set({ uploadError: error }),
   reset: () =>
@@ -138,6 +314,7 @@ export const useArtifactStore = create<ArtifactState>((set) => ({
       diffBaseContent: null,
       viewMode: 'preview',
       pendingUpdates: [],
+      liveContent: {},
       uploading: false,
       uploadError: null,
     }),

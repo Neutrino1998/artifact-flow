@@ -8,6 +8,10 @@ import type { TokenUsage, LLMCompleteData } from '@/types/events';
  */
 export function reconstructSegments(events: MessageEventItem[]): ExecutionSegment[] {
   const segments: ExecutionSegment[] = [];
+  // Monotonic suffix keeping each tool-call id unique within a reconstruction.
+  // `created_at` alone collides when the same tool runs twice in one turn at the
+  // same timestamp granularity → duplicate React keys (mirrors useSSE._toolCallSeq).
+  let toolCallSeq = 0;
   // Latched on permission_result, consumed by the next tool_start. Mirrors
   // useSSE._pendingPermissionResult — engine emits permission_result
   // immediately before the relevant tool_start, so serial pairing is correct.
@@ -65,7 +69,7 @@ export function reconstructSegments(events: MessageEventItem[]): ExecutionSegmen
         const permission = pendingPermission ?? undefined;
         pendingPermission = null;
         seg.toolCalls.push({
-          id: `${toolName}-${evt.created_at}`,
+          id: `${toolName}-${evt.created_at}-${toolCallSeq++}`,
           toolName,
           params: (data?.params as Record<string, unknown>) ?? {},
           agent: agent_name ?? '',

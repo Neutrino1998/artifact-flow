@@ -116,24 +116,118 @@ class TestAgentNotFound:
             emit=capture_emit,
         )
 
-        # State must be marked as error
+        # State must be marked as error, with the detail recorded for the
+        # unified terminal authority (decide_terminal) to build the ERROR event.
         assert result["error"] is True
         assert "nonexistent_agent" in result["response"]
+        assert "nonexistent_agent" in result["error_detail"]["error"]
+        assert result["error_detail"]["agent"] == "nonexistent_agent"
 
-        # Exactly one error event in state["events"] (no duplicate)
-        error_events = [
+        # Unified terminal emission: the engine records-not-emits. It must NOT
+        # append an ERROR event to state nor push one via SSE — decide_terminal
+        # (post-flush) is the single producer of the ERROR terminal.
+        assert not [e for e in result["events"] if e.event_type == StreamEventType.ERROR.value]
+        assert not [e for e in emitted if e["type"] == StreamEventType.ERROR.value]
+        assert not [e for e in emitted if e["type"] == StreamEventType.COMPLETE.value]
+
+
+class _FakeArtifactService:
+    """Minimal duck-typed ArtifactService for staging tests.
+
+    bind_emit / set_session are no-ops; create_from_upload is scripted to fail
+    on a chosen index; discard_staged records rollback calls.
+    """
+
+    def __init__(self, fail_at: int = 0, raise_exc: bool = False):
+        self.fail_at = fail_at
+        self.raise_exc = raise_exc
+        self.calls = 0
+        self.discarded: list = []
+
+    def bind_emit(self, emit):  # noqa: D401
+        pass
+
+    def set_session(self, session_id):
+        pass
+
+    async def create_from_upload(self, session_id, filename, content, content_type, metadata=None):
+        idx = self.calls
+        self.calls += 1
+        if idx == self.fail_at:
+            if self.raise_exc:
+                raise RuntimeError("boom")
+            return False, "rejected by gatekeeper", None
+        aid = f"{filename.replace('.', '_')}"
+        return True, "ok", {"id": aid, "original_filename": filename}
+
+    def discard_staged(self, session_id, artifact_id):
+        self.discarded.append((session_id, artifact_id))
+
+
+class TestUploadStagingAbort:
+    """A failed upload staging must abort the turn loudly AND atomically, then
+    fall through to the unified tail (unbind + finalize_metrics) — never early
+    return past cleanup (reviewer P2)."""
+
+    @pytest.mark.parametrize("raise_exc", [True, False])
+    async def test_staging_failure_aborts_atomically_and_finalizes(self, raise_exc):
+        state = create_initial_state(
+            task="analyze these",
+            session_id="sess-1",
+            message_id="msg-1",
+            path_events=[],
+            uploaded_files=[
+                {"filename": "a.md", "content": "one", "content_type": "text/markdown"},
+                {"filename": "b.md", "content": "two", "content_type": "text/markdown"},
+            ],
+        )
+        # Fail on the SECOND file so the first is already staged → must roll back.
+        svc = _FakeArtifactService(fail_at=1, raise_exc=raise_exc)
+
+        emitted: list = []
+
+        async def capture_emit(event_dict):
+            emitted.append(event_dict)
+
+        result = await execute_loop(
+            state=state,
+            agents={"lead_agent": _FakeAgentConfig()},
+            tools={},
+            hooks=_noop_hooks(),
+            artifact_service=svc,
+            emit=capture_emit,
+        )
+
+        # Loud abort: turn marked error + completed.
+        assert result["error"] is True
+        assert result["completed"] is True
+
+        # Atomic: the already-staged first file was rolled back so flush_all
+        # persists nothing this turn (no _N collision on the user's retry).
+        assert svc.discarded == [("sess-1", "a_md")]
+        assert result["uploaded_artifacts"] == []
+
+        # uploads_rolled_back signals decide_terminal to mark the terminal's
+        # artifacts_flushed=False even though flush_all vacuously succeeds on the
+        # (now empty) WS — so the frontend keeps the composer attachments.
+        assert result["uploads_rolled_back"] is True
+
+        # record-not-emit: the engine records the detail but does NOT emit/append
+        # ERROR — decide_terminal (post-flush) is the single terminal producer.
+        assert "Failed to attach file 'b.md'" in result["error_detail"]["error"]
+        assert result["error_detail"]["agent"] == "lead_agent"
+        assert not [e for e in emitted if e["type"] == StreamEventType.ERROR.value]
+
+        # Turn aborted at setup → no USER_INPUT event was built.
+        assert not [
             e for e in result["events"]
-            if e.event_type == StreamEventType.ERROR.value
+            if e.event_type == StreamEventType.USER_INPUT.value
         ]
-        assert len(error_events) == 1
 
-        # Exactly one error event emitted via SSE
-        sse_errors = [e for e in emitted if e["type"] == StreamEventType.ERROR.value]
-        assert len(sse_errors) == 1
-
-        # No complete event should be emitted
-        sse_completes = [e for e in emitted if e["type"] == StreamEventType.COMPLETE.value]
-        assert len(sse_completes) == 0
+        # Reached the unified tail: finalize_metrics ran → started_at serialized
+        # to an ISO string (datetime would break controller's metadata write).
+        assert isinstance(result["execution_metrics"]["started_at"], str)
+        assert "total_duration_ms" in result["execution_metrics"]
 
 
 class TestLlmChunkAccumulation:

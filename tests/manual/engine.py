@@ -23,7 +23,8 @@ from core.events import StreamEventType
 from core.conversation_manager import ConversationManager
 from agents.loader import load_all_agents
 from tools.base import BaseTool, build_tool_map
-from tools.builtin.artifact_ops import ArtifactManager, create_artifact_tools
+from tools.builtin.artifact_service import ArtifactService
+from tools.builtin.artifact_ops import create_artifact_tools
 from tools.builtin.call_subagent import CallSubagentTool
 from tools.builtin.web_search import WebSearchTool
 from tools.builtin.web_fetch import WebFetchTool
@@ -262,10 +263,10 @@ class TestEnvironment:
 
         async with self.db_manager.session() as session:
             artifact_repo = ArtifactRepository(session)
-            artifact_manager = ArtifactManager(artifact_repo)
+            artifact_service = ArtifactService(artifact_repo)
 
             # 合并全局工具 + 请求级 artifact 工具
-            all_tools = {**self._tools, **{t.name: t for t in create_artifact_tools(artifact_manager)}}
+            all_tools = {**self._tools, **{t.name: t for t in create_artifact_tools(artifact_service)}}
 
             conv_repo = ConversationRepository(session)
             conv_manager = ConversationManager(conv_repo)
@@ -280,7 +281,7 @@ class TestEnvironment:
                 agents=self._agents,
                 tools=all_tools,
                 hooks=hooks,
-                artifact_manager=artifact_manager,
+                artifact_service=artifact_service,
                 conversation_manager=conv_manager,
             )
 
@@ -312,7 +313,7 @@ async def demo_basic():
         async with env.request_scope() as controller:
             await handler.process_stream(
                 controller.stream_execute(
-                    content="Hello! What can you do? (Keep your response brief, 2 sentences max)"
+                    user_input="Hello! What can you do? (Keep your response brief, 2 sentences max)"
                 )
             )
     finally:
@@ -334,7 +335,7 @@ async def demo_multi_turn():
         print("\n用户: 什么是量子计算？请简要回答，3句话以内。")
         async with env.request_scope() as controller:
             result1 = await handler.process_stream(
-                controller.stream_execute(content="什么是量子计算？请简要回答，3句话以内。")
+                controller.stream_execute(user_input="什么是量子计算？请简要回答，3句话以内。")
             )
             conv_id = result1["conversation_id"]
 
@@ -343,7 +344,7 @@ async def demo_multi_turn():
         async with env.request_scope() as controller:
             result2 = await handler.process_stream(
                 controller.stream_execute(
-                    content="它和经典计算有什么区别？同样简要回答。",
+                    user_input="它和经典计算有什么区别？同样简要回答。",
                     conversation_id=conv_id,
                 )
             )
@@ -368,7 +369,7 @@ async def demo_artifact():
         print("\n用户: Python 的 async/await 是什么？简要解释。")
         async with env.request_scope() as controller:
             result1 = await handler.process_stream(
-                controller.stream_execute(content="Python 的 async/await 是什么？简要解释。")
+                controller.stream_execute(user_input="Python 的 async/await 是什么？简要解释。")
             )
             conv_id = result1["conversation_id"]
 
@@ -377,7 +378,7 @@ async def demo_artifact():
         async with env.request_scope() as controller:
             result2 = await handler.process_stream(
                 controller.stream_execute(
-                    content="帮我整理到 artifact 中",
+                    user_input="帮我整理到 artifact 中",
                     conversation_id=conv_id,
                 )
             )
@@ -429,7 +430,7 @@ async def demo_permission():
         async with env.request_scope() as controller:
             result = await handler.process_stream(
                 controller.stream_execute(
-                    content="请抓取 https://example.com 的内容"
+                    user_input="请抓取 https://example.com 的内容"
                 )
             )
 
@@ -456,7 +457,7 @@ async def demo_branch():
         print("\n用户: 计算 15 + 28 等于多少")
         async with env.request_scope() as controller:
             result1 = await handler.process_stream(
-                controller.stream_execute(content="计算 15 + 28 等于多少")
+                controller.stream_execute(user_input="计算 15 + 28 等于多少")
             )
             conv_id = result1["conversation_id"]
             msg1_id = result1["message_id"]
@@ -466,7 +467,7 @@ async def demo_branch():
         async with env.request_scope() as controller:
             result2 = await handler.process_stream(
                 controller.stream_execute(
-                    content="再乘以 2",
+                    user_input="再乘以 2",
                     conversation_id=conv_id,
                 )
             )
@@ -477,7 +478,7 @@ async def demo_branch():
         async with env.request_scope() as controller:
             result3 = await handler.process_stream(
                 controller.stream_execute(
-                    content="再减去一万",
+                    user_input="再减去一万",
                     conversation_id=conv_id,
                     parent_message_id=msg1_id,  # 从 msg1 分支
                 )

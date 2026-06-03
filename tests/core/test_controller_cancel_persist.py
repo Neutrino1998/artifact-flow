@@ -43,7 +43,7 @@ def _make_mock_conversation_manager():
     return cm
 
 
-def _make_mock_artifact_manager():
+def _make_mock_artifact_service():
     am = MagicMock()
     am.set_session = MagicMock()
     am.flush_all = AsyncMock()
@@ -60,7 +60,7 @@ def _make_controller(conv_mgr, event_repo, art_mgr):
         agents={},
         tools={},
         hooks=hooks,
-        artifact_manager=art_mgr,
+        artifact_service=art_mgr,
         conversation_manager=conv_mgr,
         message_event_repo=event_repo,
         db_manager=None,
@@ -80,6 +80,17 @@ def _capturing_event_repo():
     return er, batches
 
 
+def _make_failing_event_repo():
+    """An event repo whose batch_create raises → _persist_events returns False."""
+    er = MagicMock()
+
+    async def boom_batch(events):
+        raise RuntimeError("db write failed")
+
+    er.batch_create = boom_batch
+    return er
+
+
 # ============================================================
 # Tests
 # ============================================================
@@ -97,7 +108,7 @@ class TestPersistOnExternalCancel:
         owns the persistence contract here.
         """
         cm = _make_mock_conversation_manager()
-        am = _make_mock_artifact_manager()
+        am = _make_mock_artifact_service()
         er, batches = _capturing_event_repo()
         ctrl = _make_controller(cm, er, am)
 
@@ -175,7 +186,7 @@ class TestPersistOnExternalCancel:
         completion). We verify by checking execute_loop saw CancelledError.
         """
         cm = _make_mock_conversation_manager()
-        am = _make_mock_artifact_manager()
+        am = _make_mock_artifact_service()
         er, _ = _capturing_event_repo()
         ctrl = _make_controller(cm, er, am)
 
@@ -234,7 +245,7 @@ class TestPersistOnExternalCancel:
             return True
         cm.exists_async = AsyncMock(side_effect=slow_exists)
 
-        am = _make_mock_artifact_manager()
+        am = _make_mock_artifact_service()
         er, batches = _capturing_event_repo()
         ctrl = _make_controller(cm, er, am)
 
@@ -314,7 +325,7 @@ class TestPersistOnExternalCancel:
         new event after a partial write would break idempotency.
         """
         cm = _make_mock_conversation_manager()
-        am = _make_mock_artifact_manager()
+        am = _make_mock_artifact_service()
 
         # Make _persist_events block — we cancel after the terminal has been
         # appended (line 397) but before the persist completes.
@@ -412,7 +423,7 @@ class TestPersistOnExternalCancel:
         the late-cancel handler also falls back to initial_state defensively.
         """
         cm = _make_mock_conversation_manager()
-        am = _make_mock_artifact_manager()
+        am = _make_mock_artifact_service()
         er, batches = _capturing_event_repo()
         ctrl = _make_controller(cm, er, am)
 
@@ -472,6 +483,53 @@ class TestPersistOnExternalCancel:
             f"Should not overwrite ERROR terminal with CANCELLED, got types: {event_types}"
         )
 
+    async def test_persist_failure_error_carries_flush_bit(self):
+        """
+        Reviewer P2 (round-3): the events-persist-failure ERROR is emitted at the
+        transport layer (controller.py:485, bypassing decide_terminal because the
+        event stream itself couldn't be written). It must STILL carry
+        artifacts_flushed so the frontend doesn't mistake "missing field" for
+        "uploads not persisted" and re-stage on retry → _N duplicates.
+
+        Scenario: flush_all succeeds (artifacts land in DB), then _persist_events
+        fails. The ERROR must carry artifacts_flushed=True so the composer drops
+        the attachments (they're already in DB; retry won't dup them).
+        """
+        cm = _make_mock_conversation_manager()
+        am = _make_mock_artifact_service()  # flush_all is an AsyncMock → succeeds
+        ctrl = _make_controller(cm, _make_failing_event_repo(), am)
+
+        async def fake_execute_loop(**kwargs):
+            state = kwargs["state"]
+            state["events"].append(ExecutionEvent(
+                event_type=StreamEventType.LLM_COMPLETE.value,
+                agent_name="lead_agent",
+                data={"content": "done"},
+                is_historical=False,
+            ))
+            state["completed"] = True
+            state["response"] = "all done"
+            return state
+
+        async def consume():
+            return [event async for event in ctrl.stream_execute(
+                user_input="hi",
+                conversation_id="conv-test",
+                parent_message_id=None,
+                message_id="msg-test",
+            )]
+
+        with patch("core.controller.execute_loop", side_effect=fake_execute_loop):
+            events = await asyncio.create_task(consume())
+
+        am.flush_all.assert_called_once()  # flush ran → artifacts in DB
+        errors = [e for e in events if e["type"] == StreamEventType.ERROR.value]
+        assert len(errors) == 1, f"expected one transport ERROR, got: {[e['type'] for e in events]}"
+        # flush succeeded + no rollback → bit True → frontend clears composer attachments
+        assert errors[0]["data"]["artifacts_flushed"] is True
+        # Message.response must NOT be written (events-first invariant: no history → no display)
+        cm.update_response_async.assert_not_called()
+
     async def test_cooperative_cancel_writes_response_by_user(self):
         """
         Cooperative cancel (user clicks cancel — execute_loop's _check_cancelled
@@ -484,7 +542,7 @@ class TestPersistOnExternalCancel:
         from config import config
 
         cm = _make_mock_conversation_manager()
-        am = _make_mock_artifact_manager()
+        am = _make_mock_artifact_service()
         er, _ = _capturing_event_repo()
         ctrl = _make_controller(cm, er, am)
 
@@ -545,7 +603,7 @@ class TestPersistOnExternalCancel:
         True and skips.
         """
         cm = _make_mock_conversation_manager()
-        am = _make_mock_artifact_manager()
+        am = _make_mock_artifact_service()
         er, _ = _capturing_event_repo()
         ctrl = _make_controller(cm, er, am)
 
@@ -622,7 +680,7 @@ class TestPersistOnExternalCancel:
 
         cm.update_message_metadata_async = AsyncMock(side_effect=slow_metadata)
 
-        am = _make_mock_artifact_manager()
+        am = _make_mock_artifact_service()
         er, _ = _capturing_event_repo()
         ctrl = _make_controller(cm, er, am)
 
@@ -682,7 +740,7 @@ class TestPersistOnExternalCancel:
         normal task-cancellation semantics for the runner's cleanup path.
         """
         cm = _make_mock_conversation_manager()
-        am = _make_mock_artifact_manager()
+        am = _make_mock_artifact_service()
 
         # Repo whose batch_create blows up — the on-cancel persist attempt
         # should log and continue, not propagate this exception in place of
@@ -776,7 +834,7 @@ class TestPersistOnExternalCancel:
 
         cm.exists_async = AsyncMock(side_effect=slow_exists)
 
-        am = _make_mock_artifact_manager()
+        am = _make_mock_artifact_service()
         er, batches = _capturing_event_repo()
         ctrl = _make_controller(cm, er, am)
 
@@ -860,7 +918,7 @@ class TestPersistOnExternalCancel:
         from config import config
 
         cm = _make_mock_conversation_manager()
-        am = _make_mock_artifact_manager()
+        am = _make_mock_artifact_service()
 
         # batch_create 第一次 raise CancelledError(模拟 DB commit 后 await 被打断),
         # 第二次(late handler 调用)正常返回。
@@ -942,7 +1000,7 @@ class TestPersistOnExternalCancel:
 
         cm.exists_async = AsyncMock(side_effect=slow_exists)
 
-        am = _make_mock_artifact_manager()
+        am = _make_mock_artifact_service()
         # batch_create blows up — late-cancel persist will fail
         er = MagicMock()
         er.batch_create = AsyncMock(side_effect=RuntimeError("DB exploded mid-late-cancel"))
@@ -1003,7 +1061,7 @@ class TestTimeoutTerminal:
         from config import config
 
         cm = _make_mock_conversation_manager()
-        am = _make_mock_artifact_manager()
+        am = _make_mock_artifact_service()
         er, batches = _capturing_event_repo()
         ctrl = _make_controller(cm, er, am)
 

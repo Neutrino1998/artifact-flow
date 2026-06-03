@@ -52,13 +52,15 @@ export default function MessageInput() {
   const stagedFiles = useStagedFilesStore((s) => s.files);
   const addFiles = useStagedFilesStore((s) => s.addFiles);
   const removeFile = useStagedFilesStore((s) => s.removeFile);
-  const removeFiles = useStagedFilesStore((s) => s.removeFiles);
+  const markSent = useStagedFilesStore((s) => s.markSent);
   const stageNotice = useStagedFilesStore((s) => s.notice);
   const dismissNotice = useStagedFilesStore((s) => s.dismissNotice);
 
   // Snapshot → lock → await → reconcile/keep for both send and inject lives in
-  // this hook (single enforcement point); see useComposerSend.ts.
-  const { sending, submit, inject } = useComposerSend(content, setContent, stagedFiles, removeFiles);
+  // this hook (single enforcement point); see useComposerSend.ts. On send-ok the
+  // consumed files are marked sent (kept visible until the turn's terminal event:
+  // COMPLETE clears them, cancel/error/timeout reverts — uploads are ephemeral).
+  const { sending, submit, inject } = useComposerSend(content, setContent, stagedFiles, markSent);
 
   // Auto-resize textarea
   useEffect(() => {

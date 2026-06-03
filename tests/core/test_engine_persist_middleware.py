@@ -128,7 +128,7 @@ def _hooks(store: InMemoryRuntimeStore) -> EngineHooks:
 async def _run_engine(
     *,
     tool: BaseTool,
-    artifact_manager=None,
+    artifact_service=None,
     session_id: str = "sess-1",
     tool_size_threshold: float = 50000,
 ):
@@ -168,7 +168,7 @@ async def _run_engine(
             agents=agents,
             tools={tool.name: tool},
             hooks=_hooks(store),
-            artifact_manager=artifact_manager,
+            artifact_service=artifact_service,
             emit=capture,
         )
     return state, emitted
@@ -191,7 +191,7 @@ class TestPersistMiddleware:
         """size <= max_result_size_chars → 不落盘，data 原样回填。"""
         tool = _FixedTool("small_tool", ToolResult(success=True, data="short output"))
         manager = _FakeArtifactManager()
-        _, emitted = await _run_engine(tool=tool, artifact_manager=manager)
+        _, emitted = await _run_engine(tool=tool, artifact_service=manager)
         assert manager.calls == []  # 没调用持久化
         complete = _find_tool_complete(emitted, "small_tool")
         assert complete["data"]["result_data"] == "short output"
@@ -202,7 +202,7 @@ class TestPersistMiddleware:
         big = "X" * 100_000
         tool = _FixedTool("fetch_tool", ToolResult(success=True, data=big), max_result_size_chars=1000)
         manager = _FakeArtifactManager()
-        _, emitted = await _run_engine(tool=tool, artifact_manager=manager)
+        _, emitted = await _run_engine(tool=tool, artifact_service=manager)
 
         # Manager 被调用一次
         assert len(manager.calls) == 1
@@ -231,7 +231,7 @@ class TestPersistMiddleware:
         big = "X" * 100_000
         tool = _FixedTool("read_like", ToolResult(success=True, data=big), max_result_size_chars=math.inf)
         manager = _FakeArtifactManager()
-        _, emitted = await _run_engine(tool=tool, artifact_manager=manager)
+        _, emitted = await _run_engine(tool=tool, artifact_service=manager)
         assert manager.calls == []
         complete = _find_tool_complete(emitted, "read_like")
         assert complete["data"]["result_data"] == big
@@ -245,17 +245,17 @@ class TestPersistMiddleware:
             max_result_size_chars=1000,
         )
         manager = _FakeArtifactManager()
-        _, emitted = await _run_engine(tool=tool, artifact_manager=manager)
+        _, emitted = await _run_engine(tool=tool, artifact_service=manager)
         assert manager.calls == []
         complete = _find_tool_complete(emitted, "broken_tool")
         # 失败时 result_data=None（原引擎逻辑），error 仍传出
         assert complete["data"]["error"] == "something broke"
 
-    async def test_no_artifact_manager_fail_open(self):
-        """artifact_manager=None → log warning，不阻断，data 原样。"""
+    async def test_no_artifact_service_fail_open(self):
+        """artifact_service=None → log warning，不阻断，data 原样。"""
         big = "X" * 100_000
         tool = _FixedTool("tool", ToolResult(success=True, data=big), max_result_size_chars=1000)
-        _, emitted = await _run_engine(tool=tool, artifact_manager=None)
+        _, emitted = await _run_engine(tool=tool, artifact_service=None)
         complete = _find_tool_complete(emitted, "tool")
         # 没落盘 → 长输出原样回填
         assert complete["data"]["result_data"] == big
@@ -265,7 +265,7 @@ class TestPersistMiddleware:
         big = "X" * 100_000
         tool = _FixedTool("tool", ToolResult(success=True, data=big), max_result_size_chars=1000)
         manager = _FakeArtifactManager(raise_exc=True)
-        _, emitted = await _run_engine(tool=tool, artifact_manager=manager)
+        _, emitted = await _run_engine(tool=tool, artifact_service=manager)
         complete = _find_tool_complete(emitted, "tool")
         # 持久化失败 → fail-open，原文回填
         assert complete["data"]["result_data"] == big

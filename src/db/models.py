@@ -527,7 +527,7 @@ class ArtifactVersion(Base):
     存储 Artifact 的历史版本，用于版本回溯和 diff 展示。
 
     版本号可以是稀疏的（不保证 1..N 连续存在）。执行期间 artifact
-    的多次内存编辑由 ArtifactManager write-back 机制折叠为一个最终快照，
+    的多次内存编辑由 ArtifactService/WorkingSet write-back 机制折叠为一个最终快照，
     因此同一轮执行内的中间版本不会产生持久化记录。
     """
     __tablename__ = "artifact_versions"

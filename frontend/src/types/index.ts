@@ -89,4 +89,3 @@ export type ArtifactListResponse = S['ArtifactListResponse'];
 export type ArtifactDetail = S['ArtifactResponse'];
 export type VersionSummary = S['VersionSummary'];
 export type VersionDetail = S['VersionDetailResponse'];
-export type UploadResponse = S['UploadResponse'];

@@ -56,7 +56,7 @@ def _make_mock_conversation_manager(exists_value: bool = True):
     return cm
 
 
-def _make_mock_artifact_manager(flush_side_effect=None):
+def _make_mock_artifact_service(flush_side_effect=None):
     am = MagicMock()
     am.set_session = MagicMock()
     if flush_side_effect is not None:
@@ -85,7 +85,7 @@ def _make_controller(conv_mgr, event_repo, art_mgr):
         agents={},
         tools={},
         hooks=hooks,
-        artifact_manager=art_mgr,
+        artifact_service=art_mgr,
         conversation_manager=conv_mgr,
         message_event_repo=event_repo,
         db_manager=None,  # use bound instances → mocks above
@@ -109,7 +109,7 @@ class TestPostProcessingSkipOnDelete:
         three persistence phases skipped. No terminal event yielded.
         """
         cm = _make_mock_conversation_manager(exists_value=False)
-        am = _make_mock_artifact_manager()
+        am = _make_mock_artifact_service()
         er = _make_mock_event_repo()
         ctrl = _make_controller(cm, er, am)
 
@@ -143,7 +143,7 @@ class TestPostProcessingSkipOnDelete:
         no event persistence, no Message.response update.
         """
         cm = _make_mock_conversation_manager(exists_value=True)
-        am = _make_mock_artifact_manager(
+        am = _make_mock_artifact_service(
             flush_side_effect=IntegrityError("FK violation", None, None)
         )
         er = _make_mock_event_repo()
@@ -175,7 +175,7 @@ class TestPostProcessingSkipOnDelete:
         returns. No Message.response update.
         """
         cm = _make_mock_conversation_manager(exists_value=True)
-        am = _make_mock_artifact_manager()
+        am = _make_mock_artifact_service()
         er = _make_mock_event_repo(
             batch_create_side_effect=IntegrityError("FK violation", None, None)
         )
@@ -217,7 +217,7 @@ class TestPostProcessingSkipOnDelete:
         post-processing runs end-to-end and emits COMPLETE terminal event.
         """
         cm = _make_mock_conversation_manager(exists_value=True)
-        am = _make_mock_artifact_manager()
+        am = _make_mock_artifact_service()
         er = _make_mock_event_repo()
         ctrl = _make_controller(cm, er, am)
 

@@ -11,6 +11,14 @@ import { partitionStageable, type StageRejection } from '@/lib/uploadFilter';
 export interface StagedFile {
   id: string;
   file: File;
+  // True once this file has ridden a send POST but the turn hasn't reached a
+  // terminal. Kept (not removed) until the terminal resolves so that if the turn
+  // dies before flush_all — uploads are ephemeral (staged in-engine, lost on
+  // lease restart) — the user still has the file in the composer to retry.
+  // Resolution is driven by the terminal's `artifacts_flushed` bit, NOT the
+  // terminal type (see useSSE.resolveStagedAfterTerminal): flushed → clearSent
+  // (drop); not flushed → unmarkSent (revert to normal staged for retry).
+  sent?: boolean;
 }
 
 // Why a file the user picked didn't make it into the staged set, surfaced once
@@ -34,6 +42,15 @@ interface StagedFilesState {
   // Remove a specific set of ids — used to clear exactly the files that a send
   // consumed, preserving any the user staged during the in-flight window.
   removeFiles: (ids: string[]) => void;
+  // Mark the ids a send just consumed as in-flight (sent=true). They stay
+  // visible until the turn's terminal event resolves them (see below).
+  markSent: (ids: string[]) => void;
+  // Terminal with uploads flushed (COMPLETE, cooperative cancel, timeout,
+  // engine error): drop the in-flight files.
+  clearSent: () => void;
+  // Terminal with uploads NOT flushed (staging abort, flush_error, external
+  // cancel): revert in-flight files to normal staged so the user can retry.
+  unmarkSent: () => void;
   dismissNotice: () => void;
   clear: () => void;
 }
@@ -72,6 +89,17 @@ export const useStagedFilesStore = create<StagedFilesState>((set) => ({
     }),
   removeFile: (id) => set((s) => ({ files: s.files.filter((f) => f.id !== id) })),
   removeFiles: (ids) => set((s) => ({ files: s.files.filter((f) => !ids.includes(f.id)) })),
+  markSent: (ids) =>
+    set((s) => ({
+      files: s.files.map((f) => (ids.includes(f.id) ? { ...f, sent: true } : f)),
+    })),
+  clearSent: () => set((s) => ({ files: s.files.filter((f) => !f.sent) })),
+  unmarkSent: () =>
+    set((s) => ({
+      files: s.files.some((f) => f.sent)
+        ? s.files.map((f) => (f.sent ? { ...f, sent: false } : f))
+        : s.files,
+    })),
   dismissNotice: () => set({ notice: null }),
   clear: () => set({ files: [], notice: null }),
 }));

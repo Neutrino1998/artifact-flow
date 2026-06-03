@@ -4,13 +4,13 @@ import { useCallback } from 'react';
 import { useStreamStore, scheduleContentUpdate } from '@/stores/streamStore';
 import { useConversationStore } from '@/stores/conversationStore';
 import { useArtifactStore } from '@/stores/artifactStore';
+import { useStagedFilesStore } from '@/stores/stagedFilesStore';
 import { useUIStore } from '@/stores/uiStore';
 import { connectSSE } from '@/lib/sse';
 import { StreamEventType } from '@/types/events';
-import type { SSEEvent, LLMCompleteData } from '@/types/events';
+import type { SSEEvent, LLMCompleteData, ArtifactCreatedData, ArtifactUpdatedData } from '@/types/events';
 import * as api from '@/lib/api';
 import { refreshArtifactList } from '@/lib/refreshArtifactList';
-import { autoOpenArtifact } from '@/lib/artifactAutoOpen';
 import { bumpArtifactFetchGen } from '@/lib/artifactFetchGen';
 import { getNavGen } from '@/lib/navGen';
 
@@ -31,8 +31,34 @@ let _sharedAbortController: AbortController | null = null;
 // pairing). Cleared on stream start/end via endStream() consumer.
 let _pendingPermissionResult: { approved: boolean; reason?: string } | null = null;
 
+// Monotonic suffix making each live tool-call id unique. `Date.now()` alone
+// collides when the same tool is invoked twice within one ms (e.g. two
+// create_artifact calls in one multi-tool turn, both tool_start frames parsed
+// in the same tick) → duplicate React keys. Matching of tool_complete is by
+// (toolName, running status), not id, so a unique id is safe.
+let _toolCallSeq = 0;
+
 const MAX_RECONNECT_ATTEMPTS = 3;
 const RECONNECT_BASE_DELAY_MS = 1000;
+
+// Resolve composer attachments at a turn's terminal, keyed off the backend's
+// `artifacts_flushed` bit. post_processing.decide_terminal is the SINGLE terminal
+// authority and stamps the bit (= "the turn's uploads got persisted") on EVERY
+// terminal it builds — COMPLETE / cancel / timeout / error / flush_error alike,
+// always post-flush. So a real turn terminal always carries it:
+//   - explicit true  → uploads persisted → clearSent() drops the files.
+//   - anything else  → keep them staged (unmarkSent) so the user can retry.
+// The ONLY field-absent terminals are transport-layer errors emitted OUTSIDE
+// decide_terminal with unknown flush state (stream not-found/expired in
+// routers/stream.py, the forwarder exception in controller_factory.py). For those,
+// default-KEEP is the safe direction: clearing could silently drop a user's
+// attachment; keeping at worst re-stages an already-persisted file, and re-send
+// dedups it (a deletable _N), never data loss.
+function resolveStagedAfterTerminal(data: Record<string, unknown> | undefined): void {
+  const store = useStagedFilesStore.getState();
+  if (data?.artifacts_flushed === true) store.clearSent();
+  else store.unmarkSent();
+}
 
 export function useSSE() {
 
@@ -62,12 +88,12 @@ export function useSSE() {
   const setArtifactSessionId = useArtifactStore((s) => s.setSessionId);
   const setArtifacts = useArtifactStore((s) => s.setArtifacts);
   const setArtifactCurrent = useArtifactStore((s) => s.setCurrent);
-  const setArtifactCurrentAuto = useArtifactStore((s) => s.setCurrentAuto);
-  const refreshArtifactCurrent = useArtifactStore((s) => s.refreshCurrent);
   const setArtifactVersions = useArtifactStore((s) => s.setVersions);
   const setSelectedVersion = useArtifactStore((s) => s.setSelectedVersion);
-  const addPendingUpdate = useArtifactStore((s) => s.addPendingUpdate);
   const clearPendingUpdates = useArtifactStore((s) => s.clearPendingUpdates);
+  const applyArtifactCreated = useArtifactStore((s) => s.applyArtifactCreated);
+  const applyArtifactUpdated = useArtifactStore((s) => s.applyArtifactUpdated);
+  const clearLiveContent = useArtifactStore((s) => s.clearLiveContent);
 
   // UI store
   const setArtifactPanelVisible = useUIStore((s) => s.setArtifactPanelVisible);
@@ -134,6 +160,10 @@ export function useSSE() {
 
         setCurrent(detail);
         clearPendingUpdates();
+        // Turn ended → live event reduce is over. Drop in-turn live content so
+        // the panel reads the DB-aligned snapshot re-pulled below (the single
+        // alignment point; decision 4). Stale live could otherwise shadow it.
+        clearLiveContent();
 
         // Artifact refresh is further gated by artifactStore.sessionId so
         // that conversations without artifact tools don't trigger a useless
@@ -175,7 +205,7 @@ export function useSSE() {
         console.error('Failed to refresh after complete:', err);
       }
     },
-    [setCurrent, setConversations, clearConversationActiveIfMatch, clearPendingUpdates, setArtifactCurrent, setArtifacts, setArtifactSessionId, setArtifactVersions, setSelectedVersion]
+    [setCurrent, setConversations, clearConversationActiveIfMatch, clearPendingUpdates, clearLiveContent, setArtifactCurrent, setArtifacts, setArtifactSessionId, setArtifactVersions, setSelectedVersion]
   );
 
   const handleEvent = useCallback(
@@ -289,7 +319,7 @@ export function useSSE() {
           _pendingPermissionResult = null;
 
           addToolCallToSegment({
-            id: `${toolName}-${Date.now()}`,
+            id: `${toolName}-${Date.now()}-${_toolCallSeq++}`,
             toolName,
             params,
             agent,
@@ -338,56 +368,36 @@ export function useSSE() {
             });
           }
 
-          // Auto-open artifact panel and update content on artifact tool completion.
-          // REST overlays in-memory cache via ArtifactManager.get_active(), so
-          // GET returns the just-written content even before flush_all.
-          if (ARTIFACT_TOOLS.has(toolName) && success) {
+          // NOTE: artifact panel open / list upsert / live content are now driven
+          // entirely by ARTIFACT_CREATED / ARTIFACT_UPDATED events (see those
+          // cases below), NOT by tool_complete + a REST re-fetch. The old path
+          // relied on REST overlaying the in-memory cache via
+          // ArtifactManager.get_active(), which was removed in the artifact-layer
+          // refactor (process-local registry → silently broken across workers).
+          // Just surface the panel when an artifact tool ran; the event carries
+          // the content. (Tool-persisted outputs emit ARTIFACT_CREATED too.)
+          if (success && ARTIFACT_TOOLS.has(toolName)) {
+            setArtifactSessionId(conversationId);
             setArtifactPanelVisible(true);
-            const params = data?.params as Record<string, unknown> | undefined;
-            const artifactId = params?.id as string | undefined;
-            if (artifactId) {
-              addPendingUpdate(artifactId);
-              const sessionId = conversationId;
-              setArtifactSessionId(sessionId);
-              setSelectedVersion(null);
-              // All the race/ownership logic (per-fetch gen, same-id refresh,
-              // cross-id ownership) lives in `autoOpenArtifact` — see that
-              // helper for the full decision matrix and its unit tests.
-              autoOpenArtifact(sessionId, artifactId, {
-                getCurrent: () => useArtifactStore.getState().current,
-                getAutoSelected: () => useArtifactStore.getState().autoSelected,
-                setCurrentAuto: setArtifactCurrentAuto,
-                refreshCurrent: refreshArtifactCurrent,
-                setVersions: setArtifactVersions,
-                setSelectedVersion: setSelectedVersion,
-              });
-            }
           }
+          break;
+        }
 
-          // Refresh the artifact LIST whenever an artifact has been created or
-          // mutated in this tool turn. Two trigger sources:
-          //   (1) Explicit artifact tools (create / update / rewrite) — fixes
-          //       a pre-existing gap where new agent artifacts didn't appear
-          //       in the list view until stream complete.
-          //   (2) Auto-persist middleware — tool result was saved as artifact;
-          //       result_data carries metadata.persisted_artifact_id.
-          // The REST endpoint overlays the active manager's in-memory cache,
-          // so the new entry shows up before flush_all has run.
-          // Guarded refresh: rapid back-to-back tool completions in one turn
-          // can otherwise produce out-of-order responses overwriting newer
-          // state with older snapshots.
-          const metadata = data?.metadata as Record<string, unknown> | undefined;
-          const persistedId = metadata?.persisted_artifact_id as string | undefined;
-          if (success && (ARTIFACT_TOOLS.has(toolName) || persistedId)) {
-            // refreshArtifactList handles the session-id stamping internally
-            // (claim-before-await), so no separate setArtifactSessionId here.
-            refreshArtifactList(
-              conversationId,
-              setArtifacts,
-              setArtifactSessionId,
-              () => useArtifactStore.getState().sessionId,
-            );
-          }
+        case StreamEventType.ARTIFACT_CREATED: {
+          // Live source of truth during a turn (REST GET is pure-DB now and lags).
+          // Reducer upserts the list, auto-opens (unless source='tool' or the user
+          // picked another artifact), and stores live content. DB re-pull on
+          // COMPLETE realigns.
+          setArtifactSessionId(conversationId);
+          setArtifactPanelVisible(true);
+          applyArtifactCreated(data as unknown as ArtifactCreatedData);
+          break;
+        }
+
+        case StreamEventType.ARTIFACT_UPDATED: {
+          setArtifactSessionId(conversationId);
+          setArtifactPanelVisible(true);
+          applyArtifactUpdated(data as unknown as ArtifactUpdatedData);
           break;
         }
 
@@ -465,6 +475,9 @@ export function useSSE() {
           }
           setCancelled(true);
           endStream();
+          // Cooperative cancel flushed uploads, external cancel didn't — the
+          // backend's artifacts_flushed bit disambiguates (see helper).
+          resolveStagedAfterTerminal(data as Record<string, unknown> | undefined);
           refreshAfterComplete(conversationId, messageId);
           break;
         }
@@ -477,6 +490,8 @@ export function useSSE() {
             snapshotSegments(messageId);
           }
           endStream();
+          // Turn succeeded → staged uploads were flushed; drop the in-flight files.
+          resolveStagedAfterTerminal(data as Record<string, unknown> | undefined);
           refreshAfterComplete(conversationId, messageId);
           break;
         }
@@ -492,6 +507,9 @@ export function useSSE() {
             snapshotSegments(messageId);
           }
           endStream();
+          // Timeout runs full post-processing → uploads were flushed; the
+          // artifacts_flushed bit reflects that (clearSent).
+          resolveStagedAfterTerminal(data as Record<string, unknown> | undefined);
           refreshAfterComplete(conversationId, messageId);
           break;
         }
@@ -520,6 +538,11 @@ export function useSSE() {
             snapshotSegments(errMsgId);
           }
           endStream();
+          // ERROR from decide_terminal (engine error / flush_error / staging abort)
+          // carries an explicit artifacts_flushed; transport-layer ERRORs (stream
+          // not-found, forwarder) don't. Only explicit true clears; absent/false
+          // keeps the attachment for retry (safe direction — see helper).
+          resolveStagedAfterTerminal(data as Record<string, unknown> | undefined);
           refreshAfterComplete(conversationId, errMsgId);
           break;
         }
@@ -532,9 +555,9 @@ export function useSSE() {
       pushSegment, updateCurrentSegment, addToolCallToSegment,
       updateToolCallInSegment, snapshotSegments, setPermissionRequest,
       setError, endStream, refreshAfterComplete, setArtifactPanelVisible,
-      addPendingUpdate, setArtifactSessionId, setArtifactCurrent,
-      setArtifactCurrentAuto, refreshArtifactCurrent, setArtifacts,
+      setArtifactSessionId, setArtifactCurrent, setArtifacts,
       setArtifactVersions, setSelectedVersion,
+      applyArtifactCreated, applyArtifactUpdated,
       pushNonAgentBlock, updateNonAgentBlock, setExecutionMetrics, setCancelled,
       setQueuedInfo,
     ]

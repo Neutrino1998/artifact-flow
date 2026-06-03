@@ -10,11 +10,11 @@ Artifacts Router
 from dataclasses import dataclass
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, Query
 from fastapi.responses import Response
 
 from config import config
-from api.dependencies import get_artifact_manager, get_conversation_manager, get_current_user
+from api.dependencies import get_artifact_service, get_conversation_manager, get_current_user
 from api.services.auth import TokenPayload
 from core.conversation_manager import ConversationManager
 from api.schemas.artifact import (
@@ -23,12 +23,10 @@ from api.schemas.artifact import (
     ArtifactSummary,
     VersionDetailResponse,
     VersionSummary,
-    UploadResponse,
 )
-from tools.builtin.artifact_ops import ArtifactManager
+from tools.builtin.artifact_service import ArtifactService
 from utils.doc_converter import DocConverter
 from utils.logger import get_logger
-from utils.time import utc_now
 
 logger = get_logger("ArtifactFlow")
 
@@ -113,57 +111,11 @@ async def convert_uploaded_file(file: UploadFile) -> ConvertedUpload:
     )
 
 
-async def create_artifact_from_converted(
-    artifact_manager: ArtifactManager,
-    session_id: str,
-    converted: ConvertedUpload,
-) -> dict:
-    """Commit one already-converted upload as a user_upload artifact.
-
-    Immediate commit (bypasses flush_all). Returns the `create_from_upload` info
-    dict (id / content_type / title / current_version / source /
-    original_filename). Raises HTTPException(500) on failure. The
-    session/conversation MUST already exist (FK: artifact_session → conversation).
-    """
-    success, message, info = await artifact_manager.create_from_upload(
-        session_id=session_id,
-        filename=converted.filename,
-        content=converted.content,
-        content_type=converted.content_type,
-        metadata=converted.metadata,
-    )
-    if not success:
-        # create_from_upload 返回 (success, message, info) 状态元组而非抛异常,
-        # 故无栈可落 —— 用 error 级把 message(失败原因)绑到 req-id。否则 prod
-        # 下 message 被脱敏成 "Internal server error",grep req-id 看不到原因。
-        logger.error(f"create_from_upload failed for {converted.filename!r} in {session_id}: {message}")
-        error_detail = message if config.DEBUG else "Internal server error"
-        raise HTTPException(status_code=500, detail=error_detail)
-    return info
-
-
-async def convert_and_create_artifact(
-    artifact_manager: ArtifactManager,
-    session_id: str,
-    file: UploadFile,
-) -> dict:
-    """Convert + create one uploaded file in a single step.
-
-    Used by the single-file panel upload (POST /artifacts/{session_id}/upload),
-    where the session already exists and there is no batch to keep atomic.
-    POST /chat does NOT use this — it runs convert_uploaded_file (phase 1) and
-    create_artifact_from_converted (phase 2) separately so a bad file in a batch
-    leaves no DB state.
-    """
-    converted = await convert_uploaded_file(file)
-    return await create_artifact_from_converted(artifact_manager, session_id, converted)
-
-
 @router.get("/{session_id}", response_model=ArtifactListResponse)
 async def list_artifacts(
     session_id: str,
     current_user: TokenPayload = Depends(get_current_user),
-    artifact_manager: ArtifactManager = Depends(get_artifact_manager),
+    artifact_service: ArtifactService = Depends(get_artifact_service),
     conversation_manager: ConversationManager = Depends(get_conversation_manager),
 ):
     """
@@ -172,35 +124,13 @@ async def list_artifacts(
     await _verify_session_ownership(session_id, current_user, conversation_manager)
 
     try:
-        # DB query via request-scoped manager (own session)
-        artifacts = await artifact_manager.list_artifacts(
+        # 纯 DB 读(请求级 Service,自带空 WorkingSet)。删 _active_managers overlay 后,
+        # turn 中的 live 态由前端订阅 ARTIFACT_* 事件流 reduce,不再靠 REST 轮询
+        # 跨进程读执行 worker 的内存——后者在多 worker 下静默失效(见重构 plan 决策 1)。
+        artifacts = await artifact_service.list_artifacts(
             session_id=session_id,
             include_content=False
         )
-
-        # Overlay / append in-memory artifacts from active engine execution.
-        # Covers both new (not yet in DB) and dirty (updated since last flush).
-        # Only reads the cache dict — no DB calls on the controller's session.
-        active = ArtifactManager.get_active(session_id)
-        if active:
-            cache = active.get_cached_artifacts(session_id)
-            if cache:
-                db_index = {art["id"]: i for i, art in enumerate(artifacts)}
-                for aid, memory in cache.items():
-                    entry = {
-                        "id": memory.id,
-                        "content_type": memory.content_type,
-                        "title": memory.title,
-                        "version": memory.current_version,
-                        "source": memory.source,
-                        "original_filename": (memory.metadata or {}).get("original_filename"),
-                        "created_at": memory.created_at.isoformat(),
-                        "updated_at": memory.updated_at.isoformat(),
-                    }
-                    if aid in db_index:
-                        artifacts[db_index[aid]] = entry  # overlay dirty
-                    else:
-                        artifacts.append(entry)  # new
 
         return ArtifactListResponse(
             session_id=session_id,
@@ -225,44 +155,13 @@ async def list_artifacts(
         raise HTTPException(status_code=500, detail=error_detail)
 
 
-@router.post("/{session_id}/upload", response_model=UploadResponse)
-async def upload_file(
-    session_id: str,
-    file: UploadFile = File(...),
-    current_user: TokenPayload = Depends(get_current_user),
-    artifact_manager: ArtifactManager = Depends(get_artifact_manager),
-    conversation_manager: ConversationManager = Depends(get_conversation_manager),
-):
-    """
-    Upload a file and create an artifact from it.
-    Supports text files, markdown, code, PDF, and Word documents.
-    """
-    await _verify_session_ownership(session_id, current_user, conversation_manager)
-
-    info = await convert_and_create_artifact(artifact_manager, session_id, file)
-
-    # Get created_at from DB
-    memory = await artifact_manager.get_artifact(session_id, info["id"])
-
-    return UploadResponse(
-        id=info["id"],
-        session_id=session_id,
-        content_type=info["content_type"],
-        title=info["title"],
-        current_version=info["current_version"],
-        source=info["source"],
-        original_filename=info["original_filename"],
-        created_at=memory.created_at if memory else utc_now(),
-    )
-
-
 @router.get("/{session_id}/{artifact_id}/export")
 async def export_artifact(
     session_id: str,
     artifact_id: str,
     format: str = Query(..., description="Export format (docx)"),
     current_user: TokenPayload = Depends(get_current_user),
-    artifact_manager: ArtifactManager = Depends(get_artifact_manager),
+    artifact_service: ArtifactService = Depends(get_artifact_service),
     conversation_manager: ConversationManager = Depends(get_conversation_manager),
 ):
     """
@@ -277,7 +176,7 @@ async def export_artifact(
     if format != "docx":
         raise HTTPException(status_code=422, detail=f"Unsupported export format: {format}")
 
-    result = await artifact_manager.read_artifact(session_id, artifact_id)
+    result = await artifact_service.read_artifact(session_id, artifact_id)
     if result is None:
         raise HTTPException(status_code=404, detail=f"Artifact '{artifact_id}' not found")
 
@@ -320,7 +219,7 @@ async def get_artifact(
     session_id: str,
     artifact_id: str,
     current_user: TokenPayload = Depends(get_current_user),
-    artifact_manager: ArtifactManager = Depends(get_artifact_manager),
+    artifact_service: ArtifactService = Depends(get_artifact_service),
     conversation_manager: ConversationManager = Depends(get_conversation_manager),
 ):
     """
@@ -328,29 +227,12 @@ async def get_artifact(
     """
     await _verify_session_ownership(session_id, current_user, conversation_manager)
 
-    # Try DB first via request-scoped manager
-    result = await artifact_manager.read_artifact(
+    # 纯 DB 读(无 overlay)。turn 中的 live 内容由前端事件流 reduce;此端点返回
+    # 已 flush 的 DB 权威态,turn 中故意落后于 live(见重构 plan 决策 6)。
+    result = await artifact_service.read_artifact(
         session_id=session_id,
         artifact_id=artifact_id
     )
-
-    # Overlay or supply from active engine's in-memory cache (cache-only, no DB).
-    # Handles both new artifacts (DB miss) and dirty ones (DB hit but stale).
-    active = ArtifactManager.get_active(session_id)
-    if active:
-        memory = active.get_cached_artifacts(session_id).get(artifact_id)
-        if memory:
-            result = {
-                "id": memory.id,
-                "content_type": memory.content_type,
-                "title": memory.title,
-                "content": memory.content,
-                "version": memory.current_version,
-                "source": memory.source,
-                "original_filename": (memory.metadata or {}).get("original_filename"),
-                "created_at": memory.created_at.isoformat(),
-                "updated_at": memory.updated_at.isoformat(),
-            }
 
     if result is None:
         raise HTTPException(
@@ -361,7 +243,7 @@ async def get_artifact(
     # Fetch persisted version list from DB.
     # During execution, current_version (from cache) may be ahead of this list.
     # This is intentional — frontend hides the version selector while streaming.
-    versions = await artifact_manager.list_versions(session_id, artifact_id)
+    versions = await artifact_service.list_versions(session_id, artifact_id)
     version_summaries = [
         VersionSummary(
             version=v.version,
@@ -394,7 +276,7 @@ async def get_version(
     artifact_id: str,
     version: int,
     current_user: TokenPayload = Depends(get_current_user),
-    artifact_manager: ArtifactManager = Depends(get_artifact_manager),
+    artifact_service: ArtifactService = Depends(get_artifact_service),
     conversation_manager: ConversationManager = Depends(get_conversation_manager),
 ):
     """
@@ -406,7 +288,7 @@ async def get_version(
     """
     await _verify_session_ownership(session_id, current_user, conversation_manager)
 
-    ver = await artifact_manager.get_version(session_id, artifact_id, version)
+    ver = await artifact_service.get_version(session_id, artifact_id, version)
 
     if ver is None:
         raise HTTPException(

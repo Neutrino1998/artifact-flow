@@ -23,6 +23,9 @@ checkpoints/
 # CLI 状态文件
 .cli_state
 
+# Claude Code（整个目录不入库:本地设置 + 运行时锁）
+.claude/
+
 # ==========================
 # 2. Python 开发环境 (Python Standard)
 # ==========================

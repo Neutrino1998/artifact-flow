@@ -13,7 +13,7 @@ from config import config
 from db.models import User
 from repositories.artifact_repo import ArtifactRepository
 from repositories.conversation_repo import ConversationRepository
-from tools.builtin.artifact_ops import ArtifactManager
+from tools.builtin.artifact_service import ArtifactService
 from tools.builtin.grep_artifact import (
     GrepArtifactTool,
     _compile_pattern,
@@ -32,17 +32,17 @@ async def session_id(conversation_repo: ConversationRepository, test_user: User)
 
 
 @pytest.fixture
-def artifact_manager(artifact_repo: ArtifactRepository) -> ArtifactManager:
-    return ArtifactManager(artifact_repo)
+def artifact_service(artifact_repo: ArtifactRepository) -> ArtifactService:
+    return ArtifactService(artifact_repo)
 
 
 @pytest.fixture
-def grep_tool(artifact_manager: ArtifactManager) -> GrepArtifactTool:
-    return GrepArtifactTool(artifact_manager)
+def grep_tool(artifact_service: ArtifactService) -> GrepArtifactTool:
+    return GrepArtifactTool(artifact_service)
 
 
 async def _create_artifact(
-    manager: ArtifactManager,
+    manager: ArtifactService,
     session_id: str,
     content: str,
     aid: str = None,
@@ -294,11 +294,11 @@ class TestSingleArtifactMode:
     async def test_default_regex(
         self,
         grep_tool: GrepArtifactTool,
-        artifact_manager: ArtifactManager,
+        artifact_service: ArtifactService,
         session_id: str,
     ):
         content = "import re\ndef foo(x):\n    return x\n\ndef baz():\n    pass\n"
-        aid = await _create_artifact(artifact_manager, session_id, content)
+        aid = await _create_artifact(artifact_service, session_id, content)
 
         result = await grep_tool(pattern=r"def \w+\(", id=aid)
         assert result.success
@@ -312,11 +312,11 @@ class TestSingleArtifactMode:
     async def test_fixed_strings_disables_regex(
         self,
         grep_tool: GrepArtifactTool,
-        artifact_manager: ArtifactManager,
+        artifact_service: ArtifactService,
         session_id: str,
     ):
         content = "alpha.beta\nalphaXbeta\n"
-        aid = await _create_artifact(artifact_manager, session_id, content)
+        aid = await _create_artifact(artifact_service, session_id, content)
 
         # 默认 regex → `.` 匹配任意字符 → 两行都命中
         result_regex = await grep_tool(pattern="alpha.beta", id=aid)
@@ -335,11 +335,11 @@ class TestSingleArtifactMode:
     async def test_ignore_case(
         self,
         grep_tool: GrepArtifactTool,
-        artifact_manager: ArtifactManager,
+        artifact_service: ArtifactService,
         session_id: str,
     ):
         content = "Hello World\nHELLO again\nhi there\n"
-        aid = await _create_artifact(artifact_manager, session_id, content)
+        aid = await _create_artifact(artifact_service, session_id, content)
 
         result = await grep_tool(pattern="hello", id=aid, ignore_case=True)
         assert result.success
@@ -350,12 +350,12 @@ class TestSingleArtifactMode:
     async def test_context_lines_and_gap(
         self,
         grep_tool: GrepArtifactTool,
-        artifact_manager: ArtifactManager,
+        artifact_service: ArtifactService,
         session_id: str,
     ):
         # 命中行远离 → 验证 -- 分隔
         content = "a\nX\nb\nc\nd\ne\nf\nX\ng\n"
-        aid = await _create_artifact(artifact_manager, session_id, content)
+        aid = await _create_artifact(artifact_service, session_id, content)
 
         result = await grep_tool(pattern="X", id=aid, context=1)
         assert result.success
@@ -369,11 +369,11 @@ class TestSingleArtifactMode:
     async def test_max_count_per_artifact(
         self,
         grep_tool: GrepArtifactTool,
-        artifact_manager: ArtifactManager,
+        artifact_service: ArtifactService,
         session_id: str,
     ):
         content = "X\nX\nX\nX\nX\n"
-        aid = await _create_artifact(artifact_manager, session_id, content)
+        aid = await _create_artifact(artifact_service, session_id, content)
 
         result = await grep_tool(pattern="X", id=aid, max_count=3)
         assert result.success
@@ -388,10 +388,10 @@ class TestSingleArtifactMode:
     async def test_no_match_returns_success(
         self,
         grep_tool: GrepArtifactTool,
-        artifact_manager: ArtifactManager,
+        artifact_service: ArtifactService,
         session_id: str,
     ):
-        aid = await _create_artifact(artifact_manager, session_id, "foo\nbar\n")
+        aid = await _create_artifact(artifact_service, session_id, "foo\nbar\n")
 
         result = await grep_tool(pattern="zzz", id=aid)
         assert result.success
@@ -401,10 +401,10 @@ class TestSingleArtifactMode:
     async def test_id_not_found(
         self,
         grep_tool: GrepArtifactTool,
-        artifact_manager: ArtifactManager,
+        artifact_service: ArtifactService,
         session_id: str,
     ):
-        artifact_manager.set_session(session_id)
+        artifact_service.set_session(session_id)
         result = await grep_tool(pattern="x", id="does_not_exist")
         assert not result.success
         assert "not found" in (result.error or "").lower()
@@ -412,10 +412,10 @@ class TestSingleArtifactMode:
     async def test_invalid_regex_fails_loud(
         self,
         grep_tool: GrepArtifactTool,
-        artifact_manager: ArtifactManager,
+        artifact_service: ArtifactService,
         session_id: str,
     ):
-        aid = await _create_artifact(artifact_manager, session_id, "anything\n")
+        aid = await _create_artifact(artifact_service, session_id, "anything\n")
 
         result = await grep_tool(pattern="(unclosed", id=aid)
         assert not result.success
@@ -424,11 +424,11 @@ class TestSingleArtifactMode:
     async def test_artifact_anchor_via_tool(
         self,
         grep_tool: GrepArtifactTool,
-        artifact_manager: ArtifactManager,
+        artifact_service: ArtifactService,
         session_id: str,
     ):
         """End-to-end: `\\Afoo` 走完工具栈后只匹配 artifact 起始，不在每行误报。"""
-        aid = await _create_artifact(artifact_manager, session_id, "bar\nfoo\nbaz\n")
+        aid = await _create_artifact(artifact_service, session_id, "bar\nfoo\nbaz\n")
         result = await grep_tool(pattern=r"\Afoo", id=aid)
         assert result.success
         # 没有 'foo' 在 artifact 开头 → No matches
@@ -445,14 +445,14 @@ class TestSessionMode:
     async def test_heading_output_across_artifacts(
         self,
         grep_tool: GrepArtifactTool,
-        artifact_manager: ArtifactManager,
+        artifact_service: ArtifactService,
         session_id: str,
     ):
         aid1 = await _create_artifact(
-            artifact_manager, session_id, "alpha\nneedle\ngamma\n", aid="art_a"
+            artifact_service, session_id, "alpha\nneedle\ngamma\n", aid="art_a"
         )
         aid2 = await _create_artifact(
-            artifact_manager, session_id, "delta\nepsilon\nneedle here\n", aid="art_b"
+            artifact_service, session_id, "delta\nepsilon\nneedle here\n", aid="art_b"
         )
 
         result = await grep_tool(pattern="needle")
@@ -470,11 +470,11 @@ class TestSessionMode:
     async def test_no_match_session_wide(
         self,
         grep_tool: GrepArtifactTool,
-        artifact_manager: ArtifactManager,
+        artifact_service: ArtifactService,
         session_id: str,
     ):
-        await _create_artifact(artifact_manager, session_id, "alpha\nbeta\n", aid="a1")
-        await _create_artifact(artifact_manager, session_id, "gamma\ndelta\n", aid="a2")
+        await _create_artifact(artifact_service, session_id, "alpha\nbeta\n", aid="a1")
+        await _create_artifact(artifact_service, session_id, "gamma\ndelta\n", aid="a2")
 
         result = await grep_tool(pattern="zzz_no_such_word")
         assert result.success
@@ -483,12 +483,12 @@ class TestSessionMode:
     async def test_skip_empty_content_artifacts(
         self,
         grep_tool: GrepArtifactTool,
-        artifact_manager: ArtifactManager,
+        artifact_service: ArtifactService,
         session_id: str,
     ):
-        await _create_artifact(artifact_manager, session_id, "", aid="empty_one")
+        await _create_artifact(artifact_service, session_id, "", aid="empty_one")
         await _create_artifact(
-            artifact_manager, session_id, "hit_here\n", aid="real_one"
+            artifact_service, session_id, "hit_here\n", aid="real_one"
         )
 
         result = await grep_tool(pattern="hit_here")
@@ -501,12 +501,12 @@ class TestSessionMode:
     async def test_in_memory_cache_visible(
         self,
         grep_tool: GrepArtifactTool,
-        artifact_manager: ArtifactManager,
+        artifact_service: ArtifactService,
         session_id: str,
     ):
         """新建 artifact 在 flush 前应该也能被 grep 到（list_artifacts 已 merge cache）。"""
         await _create_artifact(
-            artifact_manager,
+            artifact_service,
             session_id,
             "freshly_written_token\n",
             aid="cached_art",
@@ -521,7 +521,7 @@ class TestSessionMode:
     async def test_session_cap_truncation(
         self,
         grep_tool: GrepArtifactTool,
-        artifact_manager: ArtifactManager,
+        artifact_service: ArtifactService,
         session_id: str,
         monkeypatch: pytest.MonkeyPatch,
     ):
@@ -530,7 +530,7 @@ class TestSessionMode:
 
         content = "X\n" * 50  # 50 个命中行
         await _create_artifact(
-            artifact_manager, session_id, content, aid="huge_art"
+            artifact_service, session_id, content, aid="huge_art"
         )
 
         # max_count=100 > session cap → 真正生效的应该是 session cap 5
@@ -554,27 +554,27 @@ class TestSessionMode:
 class TestEdgeCases:
 
     async def test_no_active_session(
-        self, artifact_manager: ArtifactManager
+        self, artifact_service: ArtifactService
     ):
         # 故意不 set_session
-        tool = GrepArtifactTool(artifact_manager)
+        tool = GrepArtifactTool(artifact_service)
         result = await tool(pattern="x")
         assert not result.success
         assert "No active session" in (result.error or "")
 
     async def test_no_manager(self):
-        tool = GrepArtifactTool(manager=None)
+        tool = GrepArtifactTool(service=None)
         result = await tool(pattern="x")
         assert not result.success
-        assert "ArtifactManager not configured" in (result.error or "")
+        assert "ArtifactService not configured" in (result.error or "")
 
     async def test_max_count_zero_returns_no_match(
         self,
         grep_tool: GrepArtifactTool,
-        artifact_manager: ArtifactManager,
+        artifact_service: ArtifactService,
         session_id: str,
     ):
-        aid = await _create_artifact(artifact_manager, session_id, "X\nX\nX\n")
+        aid = await _create_artifact(artifact_service, session_id, "X\nX\nX\n")
         result = await grep_tool(pattern="X", id=aid, max_count=0)
         assert result.success
         assert "No matches for" in result.data
@@ -582,11 +582,11 @@ class TestEdgeCases:
     async def test_negative_context_treated_as_zero(
         self,
         grep_tool: GrepArtifactTool,
-        artifact_manager: ArtifactManager,
+        artifact_service: ArtifactService,
         session_id: str,
     ):
         aid = await _create_artifact(
-            artifact_manager, session_id, "a\nX\nb\n"
+            artifact_service, session_id, "a\nX\nb\n"
         )
         result = await grep_tool(pattern="X", id=aid, context=-3)
         assert result.success
@@ -597,7 +597,7 @@ class TestEdgeCases:
 
     async def test_grep_default_max_result_size_chars(self):
         """grep_artifact 默认 50000，溢出由引擎中间件落盘兜底。"""
-        tool = GrepArtifactTool(manager=None)
+        tool = GrepArtifactTool(service=None)
         assert tool.max_result_size_chars == 50000
 
 
@@ -629,11 +629,11 @@ class TestRe2Dialect:
     async def test_backreference_rejected_loudly(
         self,
         grep_tool: GrepArtifactTool,
-        artifact_manager: ArtifactManager,
+        artifact_service: ArtifactService,
         session_id: str,
     ):
         """RE2 不支持 backreference → 编译期响亮失败，错误文案点明方言。"""
-        aid = await _create_artifact(artifact_manager, session_id, "foo foo\n")
+        aid = await _create_artifact(artifact_service, session_id, "foo foo\n")
         result = await grep_tool(pattern=r"(\w+)\s\1", id=aid)
         assert not result.success
         assert "Invalid regex" in (result.error or "")
@@ -642,11 +642,11 @@ class TestRe2Dialect:
     async def test_lookahead_rejected_loudly(
         self,
         grep_tool: GrepArtifactTool,
-        artifact_manager: ArtifactManager,
+        artifact_service: ArtifactService,
         session_id: str,
     ):
         """RE2 不支持 look-around → 编译期响亮失败。"""
-        aid = await _create_artifact(artifact_manager, session_id, "foobar\n")
+        aid = await _create_artifact(artifact_service, session_id, "foobar\n")
         result = await grep_tool(pattern=r"foo(?=bar)", id=aid)
         assert not result.success
         assert "Invalid regex" in (result.error or "")
@@ -654,11 +654,11 @@ class TestRe2Dialect:
     async def test_capital_Z_rejected_with_z_hint(
         self,
         grep_tool: GrepArtifactTool,
-        artifact_manager: ArtifactManager,
+        artifact_service: ArtifactService,
         session_id: str,
     ):
         r"""Python 习惯的 \Z 在 RE2 下非法；错误文案引导改用 \z。"""
-        aid = await _create_artifact(artifact_manager, session_id, "foo\nbar")
+        aid = await _create_artifact(artifact_service, session_id, "foo\nbar")
         result = await grep_tool(pattern=r"bar\Z", id=aid)
         assert not result.success
         assert r"\z" in (result.error or "")
@@ -666,11 +666,11 @@ class TestRe2Dialect:
     async def test_z_anchor_works_via_tool(
         self,
         grep_tool: GrepArtifactTool,
-        artifact_manager: ArtifactManager,
+        artifact_service: ArtifactService,
         session_id: str,
     ):
         r"""\z 走完工具栈应只匹配 artifact 末尾。"""
-        aid = await _create_artifact(artifact_manager, session_id, "foo\nbar")
+        aid = await _create_artifact(artifact_service, session_id, "foo\nbar")
         result = await grep_tool(pattern=r"bar\z", id=aid)
         assert result.success
         assert "2:bar" in result.data
@@ -686,13 +686,13 @@ class TestUnicodeOffsets:
     async def test_chinese_content_line_numbers_correct(
         self,
         grep_tool: GrepArtifactTool,
-        artifact_manager: ArtifactManager,
+        artifact_service: ArtifactService,
         session_id: str,
     ):
         """多字节中文内容下,命中行号必须按字符(非字节)正确映射。
         若 re2 返回字节偏移,这里行号会错乱。"""
         content = "第一行中文内容\n第二行也是中文\n目标TARGET在这里\n第四行结尾\n"
-        aid = await _create_artifact(artifact_manager, session_id, content)
+        aid = await _create_artifact(artifact_service, session_id, content)
         result = await grep_tool(pattern="TARGET", id=aid)
         assert result.success
         # TARGET 在第 3 行
@@ -702,12 +702,12 @@ class TestUnicodeOffsets:
     async def test_emoji_astral_plane_line_numbers_correct(
         self,
         grep_tool: GrepArtifactTool,
-        artifact_manager: ArtifactManager,
+        artifact_service: ArtifactService,
         session_id: str,
     ):
         """星平面字符(4 字节 UTF-8 / Python 1 code point)下行号仍正确。"""
         content = "abc😀def\n第二行🎉表情\nNEEDLE命中行\n"
-        aid = await _create_artifact(artifact_manager, session_id, content)
+        aid = await _create_artifact(artifact_service, session_id, content)
         result = await grep_tool(pattern="NEEDLE", id=aid)
         assert result.success
         assert "3:NEEDLE命中行" in result.data
@@ -723,12 +723,12 @@ class TestResourceGuards:
     async def test_pattern_length_capped(
         self,
         grep_tool: GrepArtifactTool,
-        artifact_manager: ArtifactManager,
+        artifact_service: ArtifactService,
         session_id: str,
         monkeypatch: pytest.MonkeyPatch,
     ):
         monkeypatch.setattr(config, "GREP_MAX_PATTERN_CHARS", 10)
-        aid = await _create_artifact(artifact_manager, session_id, "anything\n")
+        aid = await _create_artifact(artifact_service, session_id, "anything\n")
         result = await grep_tool(pattern="a" * 50, id=aid)
         assert not result.success
         assert "too long" in (result.error or "").lower()
@@ -736,14 +736,14 @@ class TestResourceGuards:
     async def test_context_clamped_to_upper_bound(
         self,
         grep_tool: GrepArtifactTool,
-        artifact_manager: ArtifactManager,
+        artifact_service: ArtifactService,
         session_id: str,
         monkeypatch: pytest.MonkeyPatch,
     ):
         """超大 context 被 clamp,不会铺满全文（GREP-03）。"""
         monkeypatch.setattr(config, "GREP_MAX_CONTEXT", 1)
         content = "a\nb\nc\nX\nd\ne\nf\n"
-        aid = await _create_artifact(artifact_manager, session_id, content)
+        aid = await _create_artifact(artifact_service, session_id, content)
         # 传 context=1000 → clamp 到 1 → 只展开 X 上下各 1 行
         result = await grep_tool(pattern="X", id=aid, context=1000)
         assert result.success
@@ -755,7 +755,7 @@ class TestResourceGuards:
     async def test_content_truncation_emits_hint(
         self,
         grep_tool: GrepArtifactTool,
-        artifact_manager: ArtifactManager,
+        artifact_service: ArtifactService,
         session_id: str,
         monkeypatch: pytest.MonkeyPatch,
     ):
@@ -763,7 +763,7 @@ class TestResourceGuards:
         monkeypatch.setattr(config, "GREP_CONTENT_MAX_CHARS", 20)
         # 前 20 字符内无命中,后段有 → 截断后 No matches,但必须带 incomplete 提示
         content = "x" * 30 + "NEEDLE\n"
-        aid = await _create_artifact(artifact_manager, session_id, content)
+        aid = await _create_artifact(artifact_service, session_id, content)
         result = await grep_tool(pattern="NEEDLE", id=aid)
         assert result.success
         assert "No matches" in result.data
@@ -772,7 +772,7 @@ class TestResourceGuards:
     async def test_session_scan_budget_surfaces_incomplete(
         self,
         grep_tool: GrepArtifactTool,
-        artifact_manager: ArtifactManager,
+        artifact_service: ArtifactService,
         session_id: str,
         monkeypatch: pytest.MonkeyPatch,
     ):
@@ -780,10 +780,10 @@ class TestResourceGuards:
         monkeypatch.setattr(config, "GREP_SESSION_SCAN_BUDGET_CHARS", 15)
         # 第一个 artifact 就吃掉预算并命中,第二个因预算耗尽不再扫描
         await _create_artifact(
-            artifact_manager, session_id, "NEEDLE here padding\n", aid="a1"
+            artifact_service, session_id, "NEEDLE here padding\n", aid="a1"
         )
         await _create_artifact(
-            artifact_manager, session_id, "NEEDLE also here\n", aid="a2"
+            artifact_service, session_id, "NEEDLE also here\n", aid="a2"
         )
         result = await grep_tool(pattern="NEEDLE")
         assert result.success
@@ -792,7 +792,7 @@ class TestResourceGuards:
     async def test_session_budget_before_match_not_definitive_no_match(
         self,
         grep_tool: GrepArtifactTool,
-        artifact_manager: ArtifactManager,
+        artifact_service: ArtifactService,
         session_id: str,
         monkeypatch: pytest.MonkeyPatch,
     ):
@@ -801,7 +801,7 @@ class TestResourceGuards:
         monkeypatch.setattr(config, "GREP_SESSION_SCAN_BUDGET_CHARS", 10)
         # NEEDLE 在第 10 字符之后 → 截断后扫不到 → No matches,但必须标 incomplete
         await _create_artifact(
-            artifact_manager, session_id, "zzzzzzzzzzzzNEEDLE\n", aid="a1"
+            artifact_service, session_id, "zzzzzzzzzzzzNEEDLE\n", aid="a1"
         )
         result = await grep_tool(pattern="NEEDLE")
         assert result.success
@@ -812,7 +812,7 @@ class TestResourceGuards:
     async def test_dense_same_line_matches_bounded_and_surfaced(
         self,
         grep_tool: GrepArtifactTool,
-        artifact_manager: ArtifactManager,
+        artifact_service: ArtifactService,
         session_id: str,
         monkeypatch: pytest.MonkeyPatch,
     ):
@@ -820,7 +820,7 @@ class TestResourceGuards:
         无上界时 finditer 会被抽干(同步 CPU wedge)。"""
         monkeypatch.setattr(config, "GREP_MAX_SCAN_MATCHES", 100)
         content = "a" * 5000  # 单行 5000 个 'a' 命中,全 collapse 到 line 1
-        aid = await _create_artifact(artifact_manager, session_id, content)
+        aid = await _create_artifact(artifact_service, session_id, content)
         start = time.perf_counter()
         result = await grep_tool(pattern="a", id=aid)
         assert time.perf_counter() - start < 1.0
@@ -831,7 +831,7 @@ class TestResourceGuards:
     async def test_single_huge_line_output_bounded(
         self,
         grep_tool: GrepArtifactTool,
-        artifact_manager: ArtifactManager,
+        artifact_service: ArtifactService,
         session_id: str,
         monkeypatch: pytest.MonkeyPatch,
     ):
@@ -839,7 +839,7 @@ class TestResourceGuards:
         monkeypatch.setattr(config, "GREP_MAX_LINE_CHARS", 100)
         monkeypatch.setattr(config, "GREP_MAX_SCAN_MATCHES", 100)  # 加速,免抽 100万命中
         content = "a" * 1_000_000  # 单行百万字符
-        aid = await _create_artifact(artifact_manager, session_id, content)
+        aid = await _create_artifact(artifact_service, session_id, content)
         result = await grep_tool(pattern="a", id=aid)
         assert result.success
         # 改前 body ≈ 100万;现在远小于,命中行被截断 + 标记
@@ -849,7 +849,7 @@ class TestResourceGuards:
     async def test_session_raw_budget_shared_across_artifacts(
         self,
         grep_tool: GrepArtifactTool,
-        artifact_manager: ArtifactManager,
+        artifact_service: ArtifactService,
         session_id: str,
         monkeypatch: pytest.MonkeyPatch,
     ):
@@ -859,7 +859,7 @@ class TestResourceGuards:
         monkeypatch.setattr(config, "GREP_MAX_SCAN_MATCHES", 100)
         # 3 个单行各 200 个 'a' → 第一个就吃满 100 的 raw 预算
         for i in range(3):
-            await _create_artifact(artifact_manager, session_id, "a" * 200, aid=f"d{i}")
+            await _create_artifact(artifact_service, session_id, "a" * 200, aid=f"d{i}")
         result = await grep_tool(pattern="a")
         assert result.success
         # per-call 共享:只第一个 artifact 被扫(若 per-artifact 重置则会扫满 3 个)

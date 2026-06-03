@@ -32,7 +32,7 @@ export interface ComposerOpDeps {
   staged: StagedFile[];
   // Reconcile outputs.
   setContent: SetContent;
-  removeFiles: (ids: string[]) => void;
+  markSent: (ids: string[]) => void;
   // Re-entrancy lock; a ref-like cell so it's shared across renders.
   lockRef: { current: boolean };
   // Optional UI busy flag (only the new-message send shows a spinner).
@@ -49,7 +49,7 @@ export async function runComposerOp({
   content,
   staged,
   setContent,
-  removeFiles,
+  markSent,
   lockRef,
   setSending,
   allowEmpty,
@@ -71,7 +71,7 @@ export async function runComposerOp({
     if (ok) {
       // Reconcile against live state, don't blind-clear.
       setContent((prev) => (prev === sentText ? '' : prev));
-      if (sentIds.length) removeFiles(sentIds);
+      if (sentIds.length) markSent(sentIds);
     }
   } catch (err) {
     // Keep the composer intact so the user can retry; the network layer
@@ -89,13 +89,14 @@ export async function runComposerOp({
  * @param content      current textarea value (the snapshot source)
  * @param setContent   textarea setter (functional form is used for reconcile)
  * @param stagedFiles  staged attachments
- * @param removeFiles  store action to drop the ids a send consumed
+ * @param markSent  store action marking the ids a send consumed as in-flight
+ *                  (kept visible until the turn's terminal event resolves them)
  */
 export function useComposerSend(
   content: string,
   setContent: SetContent,
   stagedFiles: StagedFile[],
-  removeFiles: (ids: string[]) => void,
+  markSent: (ids: string[]) => void,
 ) {
   // `sending` drives the button spinner/disable; `sendingRef` is the actual
   // re-entrancy guard (state updates lag a render; the ref does not).
@@ -113,13 +114,13 @@ export function useComposerSend(
         content,
         staged: stagedFiles,
         setContent,
-        removeFiles,
+        markSent,
         lockRef: sendingRef,
         setSending,
         allowEmpty,
         run,
       }),
-    [content, stagedFiles, setContent, removeFiles],
+    [content, stagedFiles, setContent, markSent],
   );
 
   // Inject into a running turn: text only (attachments don't ride an in-flight
@@ -130,14 +131,14 @@ export function useComposerSend(
         content,
         staged: [],
         setContent,
-        removeFiles,
+        markSent,
         lockRef: injectingRef,
         run: async (text) => {
           await run(text);
           return true;
         },
       }),
-    [content, setContent, removeFiles],
+    [content, setContent, markSent],
   );
 
   return { sending, submit, inject };

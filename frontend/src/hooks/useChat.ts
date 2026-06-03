@@ -125,16 +125,15 @@ export function useChat() {
         // sendMessage no longer needs to call startStream itself.
         connect(res.stream_url, res.conversation_id, res.message_id);
 
-        // Attachments became user_upload artifacts server-side before the turn
-        // started; surface them in the panel now — the SSE stream won't
-        // re-emit pre-created artifacts. Mirrors the prior upload UX.
+        // Uploads are now staged INSIDE the engine at turn start and surfaced via
+        // ARTIFACT_CREATED (the live source of truth); REST is pure-DB and lags
+        // until flush_all at turn end. So do NOT pull the DB list here — a refresh
+        // resolving after ARTIFACT_CREATED would overwrite the reducer's freshly
+        // upserted live upload with a DB list that doesn't contain it yet. Just
+        // open the panel for snappiness; ARTIFACT_CREATED (arrives within ms of
+        // turn start) fills the list, and COMPLETE's refresh realigns with DB.
         if (files && files.length > 0) {
-          refreshArtifactList(
-            res.conversation_id,
-            setArtifacts,
-            setArtifactSessionId,
-            () => useArtifactStore.getState().sessionId,
-          );
+          setArtifactSessionId(res.conversation_id);
           setArtifactPanelVisible(true);
         }
         return true;
@@ -146,7 +145,7 @@ export function useChat() {
         return false;
       }
     },
-    [current?.id, lastMessageId, setPendingUserMessage, setStreamParentId, connect, setSendError, setConversations, setConversationActiveMessage, setArtifacts, setArtifactSessionId, setArtifactPanelVisible]
+    [current?.id, lastMessageId, setPendingUserMessage, setStreamParentId, connect, setSendError, setConversations, setConversationActiveMessage, setArtifactSessionId, setArtifactPanelVisible]
   );
 
   // Switch to an existing conversation: tear down the previous conversation's

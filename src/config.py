@@ -42,6 +42,10 @@ class Settings(BaseSettings):
     INVENTORY_PREVIEW_LENGTH: int = 200     # artifact 清单内容预览截断长度
     READ_ARTIFACT_MAX_CHARS: int = 50000    # read_artifact 默认字符上限（隐藏，模型不可见）
     TOOL_PERSIST_PREVIEW_LENGTH: int = 1000  # 工具结果落盘后回填给模型的预览长度
+    # ARTIFACT_CREATED / ARTIFACT_UPDATED(rewrite)整文事件的体积上限。超限则事件
+    # 只带"已变更"信号(content 省略、content_omitted=True),前端靠 COMPLETE 后的
+    # DB 对齐补全(对齐本就兜底)。update 的 span delta 不受此限(权威且体量随模型输出)。
+    ARTIFACT_LIVE_CONTENT_MAX_CHARS: int = 256000
 
     # Cancel-path Message.response placeholders.
     # 三条 cancel 路径都要写一个非空占位 —— 前端 MessageList 用 node.response 非空

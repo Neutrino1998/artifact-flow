@@ -33,7 +33,6 @@ import type {
   MoveDepartmentRequest,
   ResolveDepartmentRequest,
   ResolveDepartmentResponse,
-  UploadResponse,
   ClientConfigResponse,
 } from '@/types';
 import { useAuthStore } from '@/stores/authStore';
@@ -368,28 +367,6 @@ export function getVersion(
   return request<VersionDetail>(
     `/api/v1/artifacts/${sessionId}/${artifactId}/versions/${version}`
   );
-}
-
-export async function uploadFile(sessionId: string, file: File): Promise<UploadResponse> {
-  const formData = new FormData();
-  formData.append('file', file);
-
-  const res = await fetch(`${BASE_URL}/api/v1/artifacts/${sessionId}/upload`, {
-    method: 'POST',
-    headers: authHeaders(),
-    body: formData,
-  });
-
-  if (res.status === 401) {
-    useAuthStore.getState().logout();
-    throw new ApiError(401, 'Session expired');
-  }
-  if (!res.ok) {
-    const body = await res.text().catch(() => '');
-    const requestId = res.headers.get('X-Request-ID') ?? undefined;
-    throw new ApiError(res.status, formatApiError(res.status, body, requestId), undefined, requestId);
-  }
-  return res.json();
 }
 
 export async function exportArtifact(

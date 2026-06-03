@@ -6,6 +6,8 @@
 > - `sandbox-gvisor-evaluation-2026-05.md`(本目录)—— gVisor 选型 + Kylin 兼容性诊断(已完成)
 > - `tool-result-artifact-mount.md`(本目录)—— 工具结果溢出转 artifact 的先例(`source` 字段 / 构造函数注入 `ArtifactManager`)
 > - 离线包 `dist/sandbox-gvisor-20260512.tar.gz`(未入 git)
+> 底座依赖:
+> - `artifact-layer-redesign-plan.md`(本目录)—— artifact 层重构(live 上事件轨 / 单一生命周期 / 删 `ArtifactManager`)。**本重构先于本 plan C 阶段落地**;沙盒回写/挂载建在新四层(`ArtifactService`/`WorkingSet`/`Repository`)上,A 阶段二进制存储复用其「binary 只发元数据事件」的溢出口。详见该 plan「与沙盒 plan 的衔接」节。
 
 ## 本文档定位
 
@@ -55,7 +57,7 @@
 1. **持久态归 TDSQL(跨中心同步),易失态归本地 worker + 单中心 Redis。** blob 是持久态 → 进 DB;沙盒容器是易失态 → per-turn、绑 worker、跟 lease 一起生灭。
 2. **runtime 是 config 开关,不是硬编码。** 本机开发用默认 `runc`,生产换 `runsc`;引擎集成代码对 runtime 无感。这让"内网只验 gVisor,集成回本机做"成立(开发机 macOS 跑不了 runsc)。
 3. **资源上限一律大声失败,不静默丢弃。** 文件大小 / 文件数 / 总字节 / 超时,超限即 loud-fail 并把后果写进给模型的提示;阈值是隐藏常量,不做模型可调参数。
-4. **挂载进容器自动,回写显式。** session artifact 自动物化进挂载目录;回写由模型显式调工具,不 diff 整个目录。
+4. **沙盒是显式 stage 进出的工作区,不是 artifact store 的自动镜像。** mount-in 与回写**都显式**:模型显式把指定 artifact 物化进工作区、显式调工具回写,不自动物化整 session、也不 diff 整个目录。**关键是定性**——容器 fs 不是"artifact 的第三态",而是 scratch 工作区:copy-in → 容器内随便改(发散是工作本身)→ 显式 persist,persist 落回来就**变成一次普通 artifact 写**(进 dirty cache,随 `flush_all` 落盘,与 `update_artifact` 同路)。工作区对 artifact store 没有同步义务,故没有三态一致性问题。对比 Claude Code:磁盘工作副本 vs git 记录,`commit` 是显式桥;沙盒文件在 persist 前就是个临时拷贝。理由:① 内存态是 artifact 系统的脊柱(多数 turn 不开沙盒、BLOCKED 节点也要能写 artifact),不能耦合到"有沙盒在跑";② per-turn ephemeral 决定每轮都要重新物化,auto vs 显式只差"谁命名",显式更省更清楚、且对小模型 legibility 更好;③ 显式 by construction 关掉"挂哪些 artifact"的待决项,避免 auto-mount 整 session blob 的 scaling footgun;④ 失败模式从"两份副本哪份权威"的静默困惑变成"忘 mount 就报错→补 mount"的响亮自纠(合原则 3)。
 5. **带目录结构的多文件 = 一个 zip blob,只在 ephemeral 容器里解压/打包,从不进 DB 表。** 用户传整个仓库、或回写一个目录的"几千行炸库"问题,用这一条根除。
 6. **artifact 层是文件源的承载方,不是转换器。** 用户传 Word 就是个 Word(blob),传图就是个图;要 md 让模型在沙盒里 word→md,要 Word 让模型写 md 再转 word。前端/后端**不提供固定格式转换功能**,一切转换是模型在沙盒里的职责。**目标态**:Word 导出等转换为沙盒专属能力;现有 md→Word 在**沙盒成熟前保留作过渡、成熟后下线**。推论:无可用沙盒的部署里,富格式上传只能当不可读 blob 存(连读 docx→md 也属沙盒能力)。
 
@@ -100,11 +102,11 @@
 - **容器生命周期**:per-turn ephemeral,绑 message_id 的 lease,turn 结束销毁。**最关键的纪律**:bash 工具本身是 IO 等待、天然可取消,**但容器在协程被取消后仍在烧 CPU**——所以容器拆除必须挂在"每条退出路径(成功 / 超时 / 协作取消 / 外部取消 / 崩溃)都会跑到"的那个清理点上,**不能放在会被 late-cancel 抢占的后处理里**,否则漏拆 = 孤儿容器烧 CPU(2026-05-14 事故的同款失效模式)。
 - **bash 工具**:CONFIRM 权限(跑不可信代码)。
 - **持久化工具**(模型显式调用,描述 present 给用户):落实决策 3 的回写二分,文件数与字节数上限兜底。
-- **挂载**:session artifact 自动物化进容器(zip 作 blob 进、容器内解压),回写显式。
+- **挂载(显式 stage 进出)**:模型显式把指定 artifact 物化进工作区(zip 作 blob 进、容器内解压),回写也显式;不自动物化整 session。见原则 4 的定性。
 - **DooD + 配额**:backend 挂 docker.sock 起沙盒,资源配额(内存 / CPU / pids / 网络);**容器创建参数不可被模型生成内容污染**(镜像/挂载/runtime 固定在代码侧)。
-- **文档转换走沙盒**:pandoc 装进沙盒镜像(B 验过),富格式读(docx→md)和写都由 agent 在沙盒里跑 pandoc。**驱动场景**:用户要带格式的 Word 时,模型以用户上传/原有 docx 作 `--reference-doc` 样式模版,在沙盒里 md→docx 生成,产物回写成可下载 blob——比固定的 md→docx 导出保真,可能取代现有的 md→Word 导出路径。
+- **文档转换走沙盒**:pandoc 装进沙盒镜像(B 验过),富格式读(docx→md)和写都由 agent 在沙盒里跑 pandoc。**驱动场景**:用户要带格式的 Word 时,模型以用户上传/原有 docx 作 `--reference-doc` 样式模版,在沙盒里 md→docx 生成,产物回写成可下载 blob——比固定的 md→docx 导出保真,可能取代现有的 md→Word 导出路径。**门控变化(衔接 artifact plan 决策 6)**:现有 `/export` 是同步 REST 读,turn 中按「前端 UX 锁的读」处理;一旦导出搬进沙盒 = 起容器 = **执行**,就从读升级为 **lease 挡的写/执行**(跟 bash 工具同级),门控责任从前端移到后端 lease。替换 md→Word 路径时一并改门控,别留前端旧锁。
 
-**到时再敲定**:挂哪些 artifact(全部 vs 被引用);并发上限;bash 输出溢出是截断还是转 artifact;zip 命名与"可单独查看"白名单。
+**到时再敲定**:并发上限;bash 输出溢出是截断还是转 artifact;zip 命名与"可单独查看"白名单。(原"挂哪些 artifact:全部 vs 被引用"已由原则 4 的显式 mount 关闭——模型 mount 谁就有谁。)
 
 ### D — 上线前 Kylin 端到端冒烟
 
@@ -124,4 +126,6 @@
 - 2026-05-21 用户给出驱动场景:富格式(Word)按 blob 存 + pandoc-in-sandbox 当统一转换层(读 docx→md;写 md→docx 以原 docx 作 `--reference-doc` 模版保真生成)。据此拍定:pandoc 落点=沙盒镜像(非 backend);A3 的"上传预转 md"降级为可选面板预览、非架构必需(故"额外字段"不必现在决定);Non-goal 收窄为"不自动反向同步源 blob"(显式生成新 docx 是 in-scope)。
 - 2026-05-21 拍定:确立 philosophy「artifact 层只承载文件源、转换全归模型沙盒」(新增为原则 6),前端/后端不做固定转换。Word 导出 = 沙盒专属能力(目标态),现有 md→Word 过渡期保留、沙盒成熟后下线。已确认接受推论:无沙盒部署里富格式连"读"都没有(读也属沙盒能力)。原 C 的"Word 导出是否改走沙盒"待决项随之关闭。
 - 2026-05-21 明确分支策略:全程在 `feat/sandbox` 做,沙盒成熟后整体 merge 回 main,不增量合(避免半迁移态漏到生产)。撤销先前"A 可先行合 main"的提法。
+- 2026-06-02 新增底座依赖 `artifact-layer-redesign-plan.md`:本次挂载/回写显式化的讨论顺藤摸出 artifact 层(`ArtifactManager`)与多 worker 架构错配(live overlay 跨 worker 静默失效,单 worker 潜伏),另起该重构 plan。两条约束:① 重构先于本 plan C 阶段;A 阶段二进制存储建在新四层、非已删的 `ArtifactManager`;② 二进制(docx/zip)走「元数据事件 + REST 取字节」,复用重构 plan 的溢出口,不另造。本 plan 方向/决策/阶段不变,仅底座换干净。
+- 2026-06-02 挂载改显式:原则 4 从"挂载进容器自动(镜像)"重写为"沙盒是显式 stage 进出的工作区,不是 artifact store 的自动镜像"。核心是定性——容器 fs 是 scratch 工作区而非 artifact 的第三态,persist 落回即一次普通 artifact 写,工作区对 store 无同步义务,三态一致性问题消解。保留内存态(它是 artifact 脊柱,不能耦合到"有沙盒在跑";砍内存态会让无沙盒/BLOCKED 部署失去 artifact 能力、违反原则 1)。顺带关闭 C 阶段"挂哪些 artifact:全部 vs 被引用"待决项(显式 by construction)。同步改 C 阶段「挂载」条目。
 - 2026-05-28 新增「能力边界(产品定位推论)」节:把 ArtifactFlow 定位为多用户中心的 agent 编排平台,显式排除「持续工作态 dev loop」(跨轮代码库增删改 / 低延迟 read-edit-debug / 长任务中间态),不试图替代 Claude Code 那类本地形态。沙盒覆盖的是单 turn 闭环的一次性任务(重不重不是问题,"持续"才是)。作为后续遇到此类功能诉求时的产品边界判断指南——本质冲突应先质疑场景,再考虑技术方案。

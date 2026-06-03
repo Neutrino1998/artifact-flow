@@ -15,7 +15,7 @@ from sqlalchemy.exc import IntegrityError
 
 from config import config
 from core.engine import EngineHooks, create_initial_state, execute_loop, finalize_metrics
-from core.events import StreamEventType, ExecutionEvent
+from core.events import StreamEventType
 from core.conversation_manager import ConversationManager
 from core.post_processing import (
     PostProcessState,
@@ -23,9 +23,10 @@ from core.post_processing import (
     decide_terminal,
     ensure_terminal,
     make_external_cancelled_event,
+    uploads_persisted,
 )
 from tools.base import BaseTool
-from tools.builtin.artifact_ops import ArtifactManager
+from tools.builtin.artifact_service import ArtifactService
 from utils.logger import get_logger, get_request_id
 from utils.time import utc_now
 
@@ -46,7 +47,7 @@ class ExecutionController:
         agents: Dict[str, Any],           # {name: AgentConfig}
         tools: Dict[str, BaseTool],        # {name: BaseTool}
         hooks: EngineHooks,
-        artifact_manager: Optional[ArtifactManager] = None,
+        artifact_service: Optional[ArtifactService] = None,
         conversation_manager: Optional[ConversationManager] = None,
         message_event_repo: Optional[Any] = None,  # MessageEventRepository
         on_engine_exit: Optional[Callable[[str, str], Awaitable[None]]] = None,
@@ -55,7 +56,7 @@ class ExecutionController:
         self.agents = agents
         self.tools = tools
         self.hooks = hooks
-        self.artifact_manager = artifact_manager
+        self.artifact_service = artifact_service
         self.conversation_manager = conversation_manager or ConversationManager()
         self.message_event_repo = message_event_repo
         self._on_engine_exit = on_engine_exit
@@ -71,7 +72,7 @@ class ExecutionController:
         无 db_manager 时回退到 bound 实例（不重试）。
         """
         if not self._db_manager:
-            return await fn(self.conversation_manager, self.message_event_repo, self.artifact_manager)
+            return await fn(self.conversation_manager, self.message_event_repo, self.artifact_service)
 
         from repositories.conversation_repo import ConversationRepository
         from repositories.message_event_repo import MessageEventRepository
@@ -80,8 +81,8 @@ class ExecutionController:
         async def _with_session(session):
             conv_mgr = ConversationManager(ConversationRepository(session))
             event_repo = MessageEventRepository(session)
-            art_mgr = ArtifactManager(ArtifactRepository(session))
-            return await fn(conv_mgr, event_repo, art_mgr)
+            art_svc = ArtifactService(ArtifactRepository(session))
+            return await fn(conv_mgr, event_repo, art_svc)
 
         return await self._db_manager.with_retry(_with_session)
 
@@ -91,7 +92,7 @@ class ExecutionController:
         conversation_id: Optional[str] = None,
         parent_message_id: Any = _UNSET,
         message_id: Optional[str] = None,
-        uploaded_artifacts: Optional[List[Dict[str, str]]] = None,
+        uploaded_files: Optional[List[Dict[str, Any]]] = None,
         force_compact: bool = False,
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """
@@ -102,9 +103,11 @@ class ExecutionController:
             conversation_id: 对话ID
             parent_message_id: 父消息ID
             message_id: 消息ID
-            uploaded_artifacts: 本轮随消息上传的 artifact [{"id", "filename"}, ...]，
-                                用于在 USER_INPUT 事件正文（仅 LLM 可见，不入 display）
-                                追加归属说明，让 agent 知道哪些 artifact 是本轮新传的
+            uploaded_files: 本轮随消息上传、已转换的文件 [{"filename","content",
+                            "content_type","metadata"}, ...]（closure-carry 自 chat 路由，
+                            未即时 commit）。execute_loop 在 turn 起点 stage 进 WorkingSet
+                            （发 ARTIFACT_CREATED、随 turn 末 flush），并据回填 id 在
+                            USER_INPUT 正文追加归属说明。
 
         Yields:
             流式事件字典
@@ -116,7 +119,7 @@ class ExecutionController:
         # 在此（任何 yield / DB 写之前）拒掉，不依赖调用方校验；router 另留 422 作为 HTTP
         # 快速边界。带附件时 execute_loop 会给 USER_INPUT 拼归属串（非空），故仅无附件时要求非空。
         # force_compact 同理：execute_loop 会注入压缩指令补足正文，纯压缩轮次（无文本无附件）放行。
-        if not user_input.strip() and not uploaded_artifacts and not force_compact:
+        if not user_input.strip() and not uploaded_files and not force_compact:
             raise ValueError(
                 "'user_input' must be non-empty when no artifacts are attached"
             )
@@ -165,8 +168,8 @@ class ExecutionController:
         session_id = conversation_id  # session_id = conversation_id
 
         # 设置 artifact session
-        if self.artifact_manager:
-            self.artifact_manager.set_session(session_id)
+        if self.artifact_service:
+            self.artifact_service.set_session(session_id)
 
         # 从父消息 metadata 中恢复 always_allowed_tools
         parent_always_allowed = []
@@ -181,7 +184,7 @@ class ExecutionController:
             message_id=message_id,
             path_events=path_events,
             always_allowed_tools=parent_always_allowed,
-            uploaded_artifacts=uploaded_artifacts,
+            uploaded_files=uploaded_files,
             force_compact=force_compact,
         )
 
@@ -222,7 +225,7 @@ class ExecutionController:
                         agents=self.agents,
                         tools=self.tools,
                         hooks=self.hooks,
-                        artifact_manager=self.artifact_manager,
+                        artifact_service=self.artifact_service,
                         emit=emit_to_queue,
                     )
             except TimeoutError:
@@ -341,25 +344,16 @@ class ExecutionController:
                 # Mark error on initial_state (final_state is still None at this point)
                 initial_state["error"] = True
                 initial_state["response"] = f"Engine error: {str(e)}"
-                error_data = {
-                    "success": False,
-                    "conversation_id": conversation_id,
-                    "message_id": message_id,
+                # record-not-emit:不在此 append/yield ERROR。统一终态发射点是 post-processing
+                # 的 decide_terminal —— 它在 flush 之后读 error_detail 构建唯一的 ERROR 终态
+                # (带 request_id + artifacts_flushed),controller 再 append + yield。若这里也
+                # 自行 emit,会与 decide_terminal 双发 ERROR。request_id 在此 contextvar still
+                # 有效(engine_task 继承发起轮 POST 的 id),先冻结进 error_detail。
+                initial_state["error_detail"] = {
                     "error": str(e),
-                    # 持久化可回传定位码,让 replay 也带码(read 边界脱敏后保留)。
+                    "agent": None,
                     "request_id": get_request_id() or None,
                 }
-                # Persist error event (will be written via _persist_events on initial_state)
-                initial_state["events"].append(ExecutionEvent(
-                    event_type=StreamEventType.ERROR.value,
-                    agent_name=None,
-                    data=error_data,
-                ))
-                await event_queue.put({
-                    "type": StreamEventType.ERROR.value,
-                    "timestamp": utc_now().isoformat(),
-                    "data": error_data,
-                })
             finally:
                 await event_queue.put(_SENTINEL)
 
@@ -442,9 +436,9 @@ class ExecutionController:
 
             try:
                 # Flush dirty artifacts to DB
-                if self.artifact_manager:
+                if self.artifact_service:
                     try:
-                        await self.artifact_manager.flush_all(
+                        await self.artifact_service.flush_all(
                             session_id, db_manager=self._db_manager
                         )
                         pp.artifacts_flushed = True
@@ -459,9 +453,9 @@ class ExecutionController:
                         logger.exception(f"Artifact flush failed after retries: {flush_err}")
                         pp.flush_error = f"Artifact persistence failed: {flush_err}"
 
-                # 决定 terminal（纯函数,无 IO）。engine ERROR 路径已自行 append ERROR 到
-                # events,decide_terminal 在 has_error 分支把 terminal_event 设为 None
-                # 且把 terminal_appended 标 True,防止下面二次 append。
+                # 决定 terminal（纯函数,无 IO）。统一后 engine/controller 的内部错误只把
+                # 详情记进 state["error_detail"],由 decide_terminal 在 flush 之后构建唯一的
+                # 终态事件(含 ERROR),controller 下面统一 append + yield。
                 decide_terminal(pp)
 
                 if pp.terminal_event is not None and not pp.terminal_appended:
@@ -498,6 +492,9 @@ class ExecutionController:
                             "message_id": message_id,
                             "error": "Event persistence failed — turn aborted, please retry",
                             "execution_metrics": pp.final_state.get("execution_metrics", {}),
+                            # transport 层直发 ERROR(绕过 decide_terminal),但仍须带 bit:
+                            # flush 已成功 → 附件在 DB → 前端清掉输入框附件,重试不再重复 staging。
+                            "artifacts_flushed": uploads_persisted(pp),
                         },
                     }
                     return
@@ -552,8 +549,8 @@ class ExecutionController:
 
                 logger.info("Streaming execution completed")
 
-                # 发送终态到 SSE。engine ERROR 路径 terminal_event=None (engine 已实时推送过),
-                # 自然跳过。flush_error / cancelled / COMPLETE 都从 pp.terminal_event 取。
+                # 发送终态到 SSE。统一后 ERROR 也由 decide_terminal 构建为 pp.terminal_event,
+                # 与 flush_error / cancelled / TIMED_OUT / COMPLETE 走同一路径。
                 if pp.terminal_event is not None:
                     yield {
                         "type": pp.terminal_event.event_type,
@@ -571,6 +568,9 @@ class ExecutionController:
                         "conversation_id": conversation_id,
                         "message_id": message_id,
                         "error": str(e),
+                        # transport 层直发 ERROR:带 bit 反映 flush 真实进度(异常可能落在
+                        # flush 前或后),前端据此决定保留/清掉输入框附件,避免重复 staging。
+                        "artifacts_flushed": uploads_persisted(pp),
                     }
                 }
         except asyncio.CancelledError:

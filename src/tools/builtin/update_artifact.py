@@ -34,7 +34,7 @@ from tools.base import BaseTool, ToolParameter, ToolPermission, ToolResult
 from utils.logger import get_logger
 
 if TYPE_CHECKING:
-    from tools.builtin.artifact_ops import ArtifactManager
+    from tools.builtin.artifact_service import ArtifactService
 
 logger = get_logger("ArtifactFlow")
 
@@ -252,6 +252,13 @@ class MatchInfo:
     # Present only when Layer 2 ran (success OR bail). Identity is preserved
     # by ``UpdateArtifactTool`` so MessageEvent metadata == the same dict.
     fuzzy_stats: Optional[Dict[str, Any]] = None
+    # 命中 span,坐标在**原始 content**(替换前)里:replace [offset, offset+deleted_len)
+    # with new_str。仅 success 时填。这是 ARTIFACT_UPDATED 权威 delta 的来源——前端
+    # 无法从工具 params 反推(模糊匹配命中的真实位置只有这里知道)。三层都填:
+    # Layer 0 exact = content.index(old_str)(count==1 唯一);Layer 1 = 归一化 span
+    # map 回原文的 orig_start;Layer 2 = fuzzy 命中的 start。
+    offset: Optional[int] = None
+    deleted_len: Optional[int] = None
 
 
 # ============================================================
@@ -651,6 +658,7 @@ def compute_update(content: str, old_str: str, new_str: str) -> MatchInfo:
                 success=False,
                 message=f"Text '{old_str[:50]}...' appears {count} times (must be unique)",
             )
+        offset = content.index(old_str)  # count==1 → 唯一命中
         new_content = content.replace(old_str, new_str, 1)
         return MatchInfo(
             success=True,
@@ -659,6 +667,8 @@ def compute_update(content: str, old_str: str, new_str: str) -> MatchInfo:
             match_type="exact",
             similarity=1.0,
             changes=[(old_str, new_str)],
+            offset=offset,
+            deleted_len=len(old_str),
         )
 
     # ---- Layer 1: normalized exact match ----
@@ -714,6 +724,8 @@ def compute_update(content: str, old_str: str, new_str: str) -> MatchInfo:
                 expected_text=old_str,
                 matched_text=matched_text,
                 changes=[(matched_text, new_str)],
+                offset=orig_start,
+                deleted_len=orig_end - orig_start,
             )
         logger.debug("Normalized match boundary fell inside a normalization group, falling through to Layer 2")
 
@@ -745,6 +757,8 @@ def compute_update(content: str, old_str: str, new_str: str) -> MatchInfo:
         matched_text=fuzzy_result.matched_text,
         changes=[(fuzzy_result.matched_text, new_str)],
         fuzzy_stats=fuzzy_result.fuzzy_stats,
+        offset=fuzzy_result.start,
+        deleted_len=fuzzy_result.end - fuzzy_result.start,
     )
 
 
@@ -779,7 +793,7 @@ class UpdateArtifactTool(BaseTool):
     ``data->'metadata'->'fuzzy_stats'``.
     """
 
-    def __init__(self, manager: Optional["ArtifactManager"] = None):
+    def __init__(self, service: Optional["ArtifactService"] = None):
         super().__init__(
             name="update_artifact",
             description=(
@@ -789,10 +803,10 @@ class UpdateArtifactTool(BaseTool):
             ),
             permission=ToolPermission.AUTO,
         )
-        self._manager = manager
+        self._service = service
 
-    def set_manager(self, manager: "ArtifactManager") -> None:
-        self._manager = manager
+    def set_service(self, service: "ArtifactService") -> None:
+        self._service = service
 
     def get_parameters(self) -> List[ToolParameter]:
         return [
@@ -817,14 +831,14 @@ class UpdateArtifactTool(BaseTool):
         ]
 
     async def execute(self, **params) -> ToolResult:
-        if not self._manager:
-            return ToolResult(success=False, error="ArtifactManager not configured")
+        if not self._service:
+            return ToolResult(success=False, error="ArtifactService not configured")
 
-        session_id = self._manager.current_session_id
+        session_id = self._service.current_session_id
         if not session_id:
             return ToolResult(success=False, error="No active session")
 
-        success, message, match_info = await self._manager.update_artifact(
+        success, message, match_info = await self._service.update_artifact(
             session_id=session_id,
             artifact_id=params["id"],
             old_str=params["old_str"],
@@ -842,7 +856,7 @@ class UpdateArtifactTool(BaseTool):
 
         logger.info(message)
 
-        memory = await self._manager.get_artifact(session_id, params["id"])
+        memory = await self._service.get_artifact(session_id, params["id"])
         version = memory.current_version if memory else None
         match_type = (match_info or {}).get("match_type")
 
