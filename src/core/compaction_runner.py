@@ -177,10 +177,14 @@ class CompactionRunner:
         # docs/architecture/engine.md），subagent compaction 不能污染此字段 —— 否则若
         # subagent 压缩后、下次 lead call 覆盖前发生 cancel/timeout/error,持久化会留下
         # subagent summary 的 token 数,导致 composer gauge 显著低估 lead 上下文。
+        # gauge 分子 = last_input + last_output（与 compaction 触发口径 input+output 对齐）,
+        # 故这里把 output 项一并归零：压缩后上下文只剩 summary（= 下一次 call 的 input,
+        # 尚无 output 分量),不归零会让 stale last_output 叠进 gauge,削弱「压缩后回落」。
         if agent_name == "lead_agent":
             metrics = state.get("execution_metrics")
             if metrics is not None:
                 metrics["last_input_tokens"] = usage.get("output_tokens", 0)
+                metrics["last_output_tokens"] = 0
 
         await self._emit_sse(
             StreamEventType.COMPACTION_SUMMARY.value,

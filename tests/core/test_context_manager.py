@@ -10,6 +10,7 @@ from unittest.mock import patch
 
 import pytest
 
+from config import config
 from core.context_manager import ContextManager
 from core.events import StreamEventType, ExecutionEvent
 
@@ -48,6 +49,23 @@ def _make_state(
         "events": events or [],
         "response": "",
     }
+
+
+def _llm_complete(input_tokens, output_tokens, agent_name="lead_agent", content="ok"):
+    """An llm_complete event carrying token_usage (the context-usage gauge source)."""
+    return _make_event(
+        StreamEventType.LLM_COMPLETE.value, agent_name,
+        {"content": content, "token_usage": {
+            "input_tokens": input_tokens, "output_tokens": output_tokens}},
+    )
+
+
+def _tool_complete(agent_name="lead_agent", tool="some_tool"):
+    """A trailing tool_complete (user-role) so build()'s last message is user, as in real flow."""
+    return _make_event(
+        StreamEventType.TOOL_COMPLETE.value, agent_name,
+        {"tool": tool, "success": True, "result_data": "done"},
+    )
 
 
 def _make_event(event_type, agent_name="lead_agent", data=None, is_historical=False):
@@ -523,3 +541,92 @@ class TestDynamicContextReminder:
         assert "<system_time>" not in system_content
         assert "<team_task_plan" not in system_content
         assert "artifacts_inventory" not in system_content
+
+
+class TestContextUsageWarning:
+    """<context_usage> 水位预警：数字取自历史最近一次 llm_complete 的 input+output
+    （compaction 触发口径），仅 ≥ WARN_RATIO×阈值 时整段出现，per-agent 取数。"""
+
+    def _reminder(self, messages):
+        return messages[-1]["content"]
+
+    def test_absent_when_no_prior_llm_call(self):
+        # agent 首轮（历史里没有 llm_complete）→ 整段不出现
+        agent = _FakeAgentConfig()
+        state = _make_state(events=[
+            _make_event(StreamEventType.USER_INPUT.value, data={"content": "hi"}),
+        ])
+        messages = _build(agent, state=state, tools={})
+        assert "<context_usage>" not in self._reminder(messages)
+
+    def test_absent_below_band(self):
+        # 上一次 call input+output < 0.8×阈值 → 不出现，避免每轮 cry-wolf
+        threshold = config.COMPACTION_TOKEN_THRESHOLD
+        below = int(config.CONTEXT_USAGE_WARN_RATIO * threshold) - 1
+        agent = _FakeAgentConfig()
+        state = _make_state(events=[
+            _make_event(StreamEventType.USER_INPUT.value, data={"content": "hi"}),
+            _llm_complete(below - 200, 200),
+            _tool_complete(),
+        ])
+        messages = _build(agent, state=state, tools={})
+        assert "<context_usage>" not in self._reminder(messages)
+
+    def test_present_at_band_uses_input_plus_output(self):
+        # input+output 达到 band → 整段出现，含水位数字 + 落 artifact 的 advice。
+        # 关键：分子是 input+output（触发口径），不是 input-only。
+        threshold = config.COMPACTION_TOKEN_THRESHOLD
+        at = int(config.CONTEXT_USAGE_WARN_RATIO * threshold)
+        in_tok, out_tok = at - 500, 500   # input-only(at-500) 低于 band，但 input+output=at 达标
+        agent = _FakeAgentConfig()
+        state = _make_state(events=[
+            _make_event(StreamEventType.USER_INPUT.value, data={"content": "hi"}),
+            _llm_complete(in_tok, out_tok),
+            _tool_complete(),
+        ])
+        reminder = self._reminder(_build(agent, state=state, tools={}))
+        assert "<context_usage>" in reminder
+        assert f"{at:,}" in reminder          # 分子 = input+output
+        assert f"{threshold:,}" in reminder    # 分母 = 阈值
+        assert "artifact" in reminder          # 落盘 advice
+
+    def test_uses_most_recent_call_not_earlier(self):
+        # 多次 call 取最近一次：早期高位、最近低位（如压缩后）→ 不出现
+        threshold = config.COMPACTION_TOKEN_THRESHOLD
+        agent = _FakeAgentConfig()
+        state = _make_state(events=[
+            _make_event(StreamEventType.USER_INPUT.value, data={"content": "hi"}),
+            _llm_complete(threshold, 1000),   # 早期高位
+            _tool_complete(),
+            _llm_complete(2000, 200),          # 最近低位
+            _tool_complete(),
+        ])
+        assert "<context_usage>" not in self._reminder(_build(agent, state=state, tools={}))
+
+    def test_per_agent_uses_own_usage(self):
+        # subagent 用自己历史里的 llm_complete，不蹭 lead 的（EventHistory 已按 agent 过滤）
+        sub = _FakeAgentConfig(name="research_agent", description="researcher")
+        state = _make_state(
+            current_agent="research_agent",
+            events=[
+                # lead 高位 —— 对 sub 不可见
+                _llm_complete(config.COMPACTION_TOKEN_THRESHOLD, 1000, agent_name="lead_agent"),
+                _make_event(StreamEventType.SUBAGENT_INSTRUCTION.value, "research_agent",
+                            {"instruction": "go"}),
+                _llm_complete(2000, 200, agent_name="research_agent"),  # sub 低位
+                _tool_complete("research_agent"),
+            ],
+        )
+        messages = _build(sub, agents={sub.name: sub}, state=state, tools={})
+        assert "<context_usage>" not in self._reminder(messages)
+
+    def test_warning_is_ephemeral_not_written_to_events(self):
+        # 与其余动态上下文一致：预警不得写回 event
+        threshold = config.COMPACTION_TOKEN_THRESHOLD
+        user_event = _make_event(StreamEventType.USER_INPUT.value, data={"content": "hi"})
+        agent = _FakeAgentConfig()
+        state = _make_state(events=[user_event, _llm_complete(threshold, 0), _tool_complete()])
+        ContextManager.build(
+            agent_name=agent.name, agents={agent.name: agent}, state=state, tools={},
+        )
+        assert "<context_usage>" not in user_event.data["content"]

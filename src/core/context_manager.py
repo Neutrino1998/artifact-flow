@@ -88,7 +88,8 @@ class ContextManager:
         # ========== Messages ==========
         # 历史 + 当前轮统一来自 state["events"]，EventHistory 处理 boundary / 过滤；
         # 发给 LLM 前剥离 _meta。
-        all_messages = cls._strip_meta(build_event_history(state.get("events", []), agent_name))
+        history = build_event_history(state.get("events", []), agent_name)
+        all_messages = cls._strip_meta(history)
 
         # 动态上下文（系统时间 / task_plan / artifact 清单）作为 ephemeral
         # <system-reminder> 并入最后一条消息正文：每次 build 现拼、即用即丢、绝不入
@@ -101,7 +102,12 @@ class ContextManager:
         # 空文本且无附件的 user_input 被核心入口 stream_execute 拒（router 另有 422 快速
         # 边界校验）、空 instruction 被 call_subagent 拒，故 USER_INPUT / subagent_instruction
         # 必产出 ≥1 条 message。真为空 = 上游不变量被破坏，让它在 [-1] 上响亮失败。
-        reminder = cls._build_dynamic_context(agent_config, artifacts_inventory)
+        # 上一次 call 的 input+output(compaction 触发口径)——build 在 LLM call 之前拼，
+        # 本轮数字尚不存在，用历史里最近一次 llm_complete 的 token_usage 做水位估计(历史
+        # 单调增长，是「这次会不会越界」的合理下界)。取自 history(已按 agent 过滤 + 在最近
+        # compaction 边界处截断)：刚压缩完、边界后还没新 llm_complete → None，预警段省略。
+        last_usage = cls._last_usage_from_history(history)
+        reminder = cls._build_dynamic_context(agent_config, artifacts_inventory, last_usage)
         last = all_messages[-1]
         all_messages[-1] = {**last, "content": f'{last["content"]}\n\n{reminder}'}
 
@@ -112,11 +118,13 @@ class ContextManager:
         cls,
         agent_config: Any,
         artifacts_inventory: Optional[List[Dict]],
+        last_usage: Optional[int] = None,
     ) -> str:
         """组装每轮刷新的动态上下文，包裹为 ephemeral <system-reminder>。
 
         内容：系统时间（始终）+ task_plan（存在时）+ artifact 清单（仅有 artifact
-        工具的 agent）。由 build() 并入消息尾部，不进 system prompt、不持久化为 event。
+        工具的 agent）+ context_usage 预警（仅临近 compaction 时）。由 build() 并入消息
+        尾部，不进 system prompt、不持久化为 event。
 
         语义定位是「当前世界状态的一瞥」（glance, don't act）—— 与需要 uptake 的
         持久化 meta 帧（用户上传提示 / 注入消息 / compaction frame，均用 [...] 行动帧
@@ -152,6 +160,13 @@ class ContextManager:
         if has_artifact_tools:
             parts.append(cls._build_artifacts_inventory(artifacts_inventory))
 
+        # Context 水位预警（仅临近 compaction 时整段出现）—— last_usage 是上一轮 call 的
+        # input+output（compaction 触发值），≥ WARN_RATIO×阈值才注入；水位以下完全不出现，
+        # 避免每轮 cry-wolf。band 内每轮都出、不设次数上限（数字每轮刷新）。
+        context_usage = cls._build_context_usage(last_usage)
+        if context_usage:
+            parts.append(context_usage)
+
         # 自描述首句：声明这段是什么、怎么对待 —— 降权为「环境状态、自行判断相关性」，
         # 避免模型把工作区状态误当用户指令执行。
         framing = (
@@ -160,6 +175,51 @@ class ContextManager:
         )
         body = "\n\n".join(parts)
         return f'<system-reminder>\n{framing}\n\n{body}\n</system-reminder>'
+
+    @classmethod
+    def _last_usage_from_history(cls, history: List[Dict[str, Any]]) -> Optional[int]:
+        """历史里最近一次 assistant(llm_complete) 的 input+output —— compaction 触发口径。
+
+        history 是 build_event_history 的产出(已按 agent 过滤 + 在最近 compaction 边界
+        处截断)。从右往左取第一条带 _meta 的 assistant 消息；边界后还没有 llm_complete
+        (刚压缩完 / agent 首轮)→ None，调用方据此省略预警段。
+        """
+        for msg in reversed(history):
+            if msg.get("role") == "assistant" and "_meta" in msg:
+                meta = msg["_meta"]
+                return meta.get("input_tokens", 0) + meta.get("output_tokens", 0)
+        return None
+
+    @classmethod
+    def _build_context_usage(cls, last_usage: Optional[int]) -> Optional[str]:
+        """临近 compaction 的水位预警段；水位以下返回 None（整段不出现）。
+
+        分子 last_usage = 上一轮 call 的 input+output（compaction 触发值，见
+        compaction_runner.maybe_trigger）；分母 = COMPACTION_TOKEN_THRESHOLD（与前端
+        gauge、与真正绊倒 compaction 的判定同源）。≥ WARN_RATIO 才注入。
+
+        advice 措辞刻意指向「要据此**动作**的状态」（plans / 收集的数据 / 中间结果）
+        而非「瞄一眼的上下文」：artifact 活在 compaction 边界之外（每轮在 inventory 里），
+        summary 则可能丢细节 —— 对齐「act vs glance」分界。
+        """
+        threshold = config.COMPACTION_TOKEN_THRESHOLD
+        if not last_usage or threshold <= 0:
+            return None
+        if last_usage < config.CONTEXT_USAGE_WARN_RATIO * threshold:
+            return None
+
+        pct = round(last_usage / threshold * 100)
+        return (
+            '<context_usage>\n'
+            f'Context {pct}% full ({last_usage:,} / {threshold:,} tokens). Approaching '
+            f'compaction — when a call exceeds {threshold:,}, the older conversation is '
+            'summarized and its detail becomes invisible to you.\n'
+            "Persist anything you'll need to ACT on (the task plan, collected data, "
+            'intermediate results) into an artifact now to control what survives — '
+            'artifacts stay in your inventory across compaction; the summary may not '
+            'preserve full detail.\n'
+            '</context_usage>'
+        )
 
     @classmethod
     def _find_task_plan(cls, artifacts_inventory: Optional[List[Dict]]) -> Optional[Dict]:

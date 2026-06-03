@@ -140,6 +140,11 @@ export interface ExecutionMetrics {
    *  next turn. Used by the composer's context-usage gauge (vs the compaction
    *  threshold). Optional: pre-existing records / partial turns may omit it. */
   last_input_tokens?: number;
+  /** output tokens of the same call. The gauge numerator is
+   *  last_input_tokens + last_output_tokens, matching the compaction trigger
+   *  (input+output > threshold). Post-compaction the backend zeroes this so the
+   *  gauge drops to the summary size. Optional: older records may omit it. */
+  last_output_tokens?: number;
 }
 
 export interface CompleteData {

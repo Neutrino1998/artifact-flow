@@ -37,8 +37,11 @@ class Settings(BaseSettings):
     CANCEL_CHECK_INTERVAL: float = 0.5  # 秒，LLM 流式输出期间轮询 cancel 的最小间隔（避免每 chunk 一次 Redis GET）
 
     # Compaction / Context 配置
-    COMPACTION_TOKEN_THRESHOLD: int = 80000  # tokens, LLM 单次调用 input+output 超此值触发引擎内 compaction
-    COMPACTION_TIMEOUT: int = 300            # 秒, 单次 compact LLM 调用超时（thinking 模型压缩 ~80k token 输入需较长 TTFT+生成时间，120s 偏紧）
+    COMPACTION_TOKEN_THRESHOLD: int = 100000  # tokens, LLM 单次调用 input+output 超此值触发引擎内 compaction
+    # 上一轮 input+output / 阈值 ≥ 此比例时，向 agent 注入 <context_usage> 预警(临近 compaction
+    # → 提示把要据此动作的状态落 artifact)。隐藏实现旋钮，模型不可见(见 CLAUDE.md 工具参数面最小化)。
+    CONTEXT_USAGE_WARN_RATIO: float = 0.8
+    COMPACTION_TIMEOUT: int = 300            # 秒, 单次 compact LLM 调用超时（thinking 模型压缩 ~100k token 输入需较长 TTFT+生成时间，120s 偏紧）
     INVENTORY_PREVIEW_LENGTH: int = 200     # artifact 清单内容预览截断长度
     READ_ARTIFACT_MAX_CHARS: int = 50000    # read_artifact 默认字符上限（隐藏，模型不可见）
     TOOL_PERSIST_PREVIEW_LENGTH: int = 1000  # 工具结果落盘后回填给模型的预览长度
