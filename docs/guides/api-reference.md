@@ -324,28 +324,30 @@ POST /api/v1/chat/bulk-delete
 
 ## Artifacts
 
-`/api/v1/artifacts` — 上传、读取、导出、版本管理。
+`/api/v1/artifacts` — 读取、导出、版本管理。**只读（全是 GET）**：artifact 的产生（agent 创建 / 用户上传）都不经此路由。
 
 | 方法 | 路径 | 鉴权 | 说明 |
 |------|------|------|------|
-| POST | `/upload` | 用户 | 新建对话并上传首个 artifact |
 | GET | `/{session_id}` | 用户 | 列出 session 下所有 artifacts |
-| POST | `/{session_id}/upload` | 用户 | 向已有 session 追加 artifact |
 | GET | `/{session_id}/{artifact_id}` | 用户 | 获取内容 + 版本列表 |
 | GET | `/{session_id}/{artifact_id}/versions/{version}` | 用户 | 获取指定版本 |
 | GET | `/{session_id}/{artifact_id}/export?format=docx` | 用户 | 导出为 DOCX |
 
-### 上传约定
+### 上传走 `POST /chat`，不在本路由
 
-- `multipart/form-data`，字段名 `file`
-- 大小上限：`config.MAX_UPLOAD_SIZE`（环境可配，默认见 [deployment.md](../deployment.md)）
-- `422` 触发：超限、格式不支持
-- 走 `create_from_upload` 路径绕过 write-back cache，直接 commit 到 DB（见 [../architecture/artifacts.md](../architecture/artifacts.md)）
+旧的 `POST /artifacts/upload` 与 `POST /{session_id}/upload`（即时 commit）已删除。上传现在并入消息提交：
+
+- `POST /api/v1/chat`，`multipart/form-data`，文件字段名 `files`（可多文件），与文本 `message` 同一请求
+- 大小上限：`config.MAX_UPLOAD_SIZE`（环境可配，默认见 [deployment.md](../deployment.md)）；`422` 触发：超限、格式不支持（`convert_uploaded_file` 在写库前做 size-check + 转换）
+- 转换后的内容 closure-carry 进引擎，在 turn 起点经 `create_from_upload` **stage 进 WorkingSet**（发 `ARTIFACT_CREATED`、随 turn 末 `flush_all` 落库），与 agent 自建 artifact 走**同一统一生命周期**——不再绕过 write-back、不再即时 commit（见 [../architecture/artifacts.md](../architecture/artifacts.md)）
 
 ### 读取的即时性
 
-- `GET /{session_id}` 和 `GET /{session_id}/{artifact_id}` 会**合并 DB + 当前 engine 的内存缓存**，返回最新快照
-- `GET .../versions/{version}` 与 `GET .../export` **只读 DB**：执行中未 flush 的中间版本返回 `404`
+删除 `_active_managers` overlay 后，所有 GET **均为纯 DB 读**（请求级 `ArtifactService` 自带空 WorkingSet）：
+
+- turn **执行中**，REST 返回的是上一次 `flush_all` 的快照，**落后于 live**；turn 内的实时内容由 SSE 的 `ARTIFACT_CREATED` / `ARTIFACT_UPDATED` 事件推给前端 reduce（见 [streaming.md](../architecture/streaming.md) / [artifacts.md](../architecture/artifacts.md)），不经 REST
+- `GET .../versions/{version}` 与 `GET .../export` 同样只读 DB：执行中未 flush 的中间版本返回 `404`
+- 前端据此在流式执行期间隐藏版本选择器 / 导出入口（纯前端读类 UX 锁，后端保持宽松）
 
 ---
 

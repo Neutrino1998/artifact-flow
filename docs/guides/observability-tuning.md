@@ -104,7 +104,7 @@ bail_deadline      1
 
 **只有 Layer 2 路径设 `fuzzy_stats`**——Layer 0(exact)/ Layer 1(normalized)成功不进这张表(见 `update_artifact.py:639-718` 的 compute_update,Layer 0/1 的 `MatchInfo` 不带 `fuzzy_stats`)。这张表反映的是"进到 Layer 2 的样本"分布。
 
-**注意**:Section 2 的 `update_artifact.calls` 减去这张表的总数 **不等于** Layer 0/1 命中量。`calls` 还包含一批没有 `fuzzy_stats` 的失败路径——precondition 失败(`ArtifactManager not configured` / `No active session`,见 `update_artifact.py:819-824`)、Layer 0 / Layer 1 唯一性失败(`appears N times`,`update_artifact.py:650-653` / `update_artifact.py:673-679`)、artifact_id 不存在等。要精确算 Layer 0/1 命中量,需在 `update_artifact.py` 显式记 `match_type=exact/normalized` 的成功事件,目前没有这个 metric。
+**注意**:Section 2 的 `update_artifact.calls` 减去这张表的总数 **不等于** Layer 0/1 命中量。`calls` 还包含一批没有 `fuzzy_stats` 的失败路径——precondition 失败(`ArtifactService not configured` / `No active session`)、Layer 0 / Layer 1 唯一性失败(`appears N times`)、artifact_id 不存在等。要精确算 Layer 0/1 命中量,需在 `update_artifact.py` 显式记 `match_type=exact/normalized` 的成功事件,目前没有这个 metric。
 
 `bail_*` 持续上涨表示模型在踩边界——通常不是常量调小了,**先看是不是 prompt 让模型给的 `old_str` 上下文太短**。
 

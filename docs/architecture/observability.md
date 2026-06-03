@@ -87,11 +87,14 @@ async def _persist_events(state):
 | 事件 | `data` 字段 |
 |------|------------|
 | `METADATA` | `conversation_id`, `message_id` |
-| `COMPLETE` | `success=true`, `conversation_id`, `message_id`, `response`, `execution_metrics` |
-| `CANCELLED` | `success=false`, `cancelled=true`, `conversation_id`, `message_id`, `response`, `execution_metrics` |
-| `ERROR` | `success=false`, `conversation_id`, `message_id`, `error`, `execution_metrics` |
+| `COMPLETE` | `success=true`, `conversation_id`, `message_id`, `response`, `execution_metrics`, `artifacts_flushed` |
+| `CANCELLED` | `success=false`, `cancelled=true`, `conversation_id`, `message_id`, `response`, `execution_metrics`, `artifacts_flushed`, `reason?`（external cancel 时为 `external_cancel` / `external_cancel_post_processing`） |
+| `TIMED_OUT` | `success=false`, `timed_out=true`, `conversation_id`, `message_id`, `response`（=`TIMED_OUT_RESPONSE`）, `execution_metrics`, `artifacts_flushed` |
+| `ERROR` | `success=false`, `conversation_id`, `message_id`, `error`, `agent?`, `request_id?`, `execution_metrics`, `artifacts_flushed` |
 
 `execution_metrics` 汇总整次执行指标（总耗时、总 token、每 agent 轮数等），是监控面板的核心字段。
+
+四个终态都由后处理的 `decide_terminal`（flush 之后、单一裁判）构建，故都带 `artifacts_flushed`（= 本轮用户上传是否真的落库；前端据此决定清掉 / 保留输入框附件，见 [execution-lifecycle.md](execution-lifecycle.md)）。`ERROR` 的 `request_id` 在错误创建时冻结写入 `data`（不是读边界注入），是日志定位锚点。两处 transport 层直发的 ERROR（events 持久化失败 / post-processing 异常）绕过 `decide_terminal` 但仍带 `artifacts_flushed`。**注意**：`MessageEvent` 表存的是**未脱敏**的原始 `error` 文本（事件溯源 = 完整审计 + DEBUG replay）；脱敏（`error` → `"Internal server error"`）只在用户面读边界 DEBUG-gated 施加，admin 观测端点不脱敏。
 
 ### Agent 层
 
@@ -113,9 +116,18 @@ async def _persist_events(state):
 | `PERMISSION_REQUEST` | `permission_level`, `tool`, `params` |
 | `PERMISSION_RESULT` | `approved`, `tool`, `reason?` |
 
-`tool_complete.metadata` 里携带 `artifact_snapshot` 时，前端据此实时刷新 Artifact 面板（不等 DB flush），见 [artifacts.md → Write-Back](artifacts.md#write-back-cache-机制).
+`TOOL_COMPLETE.metadata` 携带工具自定义诊断（如 `update_artifact` 的模糊匹配统计），LLM 看不到、仅前端 / replay 可见。**不再**携带 artifact 快照——artifact 的 live 内容走下方独立的 `ARTIFACT_*` 事件。
 
 Permission 事件的阻塞语义属于 RuntimeStore，见 [concurrency.md → Interrupt 机制](concurrency.md#interrupt-机制).
+
+### Artifact 层（SSE-only，不持久化）
+
+| 事件 | `data` 字段 |
+|------|------------|
+| `ARTIFACT_CREATED` | `id`, `title`, `content_type`, `source`（`agent`/`user_upload`/`tool`）, `current_version`, 以及 `content` **或** `content_omitted=true`（正文超 `ARTIFACT_LIVE_CONTENT_MAX_CHARS` 时省略） |
+| `ARTIFACT_UPDATED` | `id`, `current_version`, 以及二选一：整文 `content`/`content_omitted`（rewrite、或本轮首次触碰该 artifact），**或** `delta={offset, deleted_len, inserted_text}`（已发过 base 后的 `update_artifact` 模糊命中 span） |
+
+这两条由 `ArtifactService` 在 create/update/rewrite/上传 stage 时发射，`agent_name=None`（artifact 事件按 `id` 归并、不依赖 agent）。**`sse_only=True` → 不写 `MessageEvent` 表**：artifact 有专属持久家（artifact 表 + 版本），`MessageEvent` 里的副本无读者；冷启动 / replay 靠 `flush_all` 后的 DB 权威态重建，turn 中的 live 由前端事件流 reduce。首个 live 事件强制整文（前端 base），其后才发 delta（见 [artifacts.md → SSE 实时推送](artifacts.md#sse-实时推送)）。
 
 ### Compaction 层
 

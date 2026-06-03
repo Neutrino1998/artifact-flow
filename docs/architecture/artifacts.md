@@ -99,48 +99,54 @@ erDiagram
 
 ### 语义
 
-引擎执行期间，`create_artifact` / `update_artifact` / `rewrite_artifact` **只改内存缓存 + 标记 dirty**，不写数据库。`ArtifactManager.flush_all()` 在 Controller 后处理阶段（引擎 loop 退出后、终端 SSE 事件推送前）统一持久化。
+引擎执行期间，`create_artifact` / `update_artifact` / `rewrite_artifact` **只改内存工作集（`ArtifactWorkingSet`）+ 标记 dirty**，不写数据库；同时由 `ArtifactService` 发一条 SSE-only 的 `ARTIFACT_CREATED` / `ARTIFACT_UPDATED` 事件给前端做 live 渲染（见下文 [SSE 实时推送](#sse-实时推送)）。`ArtifactService.flush_all()` 在 Controller 后处理阶段（引擎 loop 退出后、终端 SSE 事件推送前）统一持久化。
+
+> **四层职责**（重构后，已删除 `ArtifactManager` god-object）：`ArtifactWorkingSet`（纯状态：缓存 + dirty/new，无 IO）+ `ArtifactService`（用例编排 + 发事件，**各自独占**一个 WorkingSet）+ `ArtifactRepository`（数据访问）+ 纯算法模块（`compute_update` 模糊匹配 / grep 扫描，Service 只调用）。
 
 ```mermaid
 sequenceDiagram
     participant Agent as Agent（LLM 工具调用）
-    participant Manager as ArtifactManager
-    participant Cache as _cache / _dirty / _new
+    participant Service as ArtifactService
+    participant WS as ArtifactWorkingSet<br/>(_cache / _dirty / _new)
+    participant SSE as 前端（SSE）
     participant Repo as ArtifactRepository
     participant DB
 
-    Agent->>Manager: create_artifact(task_plan, v1)
-    Manager->>Cache: 写入 ArtifactMemory + 标 dirty/new
-    Note over Cache: v1 in memory
+    Agent->>Service: create_artifact(task_plan, v1)
+    Service->>WS: put + mark_new（同时 dirty）
+    Service-->>SSE: ARTIFACT_CREATED（整文 base）
+    Note over WS: v1 in memory
 
-    Agent->>Manager: update_artifact(task_plan, old→new)
-    Manager->>Cache: content 替换 + v2, 仍 dirty
-    Agent->>Manager: update_artifact(task_plan, old→new)
-    Manager->>Cache: content 替换 + v3, 仍 dirty
+    Agent->>Service: update_artifact(task_plan, old→new)
+    Service->>WS: content 替换 + v2, 仍 dirty
+    Service-->>SSE: ARTIFACT_UPDATED（span delta）
+    Agent->>Service: update_artifact(task_plan, old→new)
+    Service->>WS: content 替换 + v3, 仍 dirty
+    Service-->>SSE: ARTIFACT_UPDATED（span delta）
 
     Note over Agent,DB: 引擎 loop 退出
 
-    Manager->>Manager: flush_all(session_id, db_manager)
-    Manager->>Repo: create_artifact(target_version=3)
+    Service->>Service: flush_all(session_id, db_manager)
+    Service->>Repo: create_artifact(target_version=3)
     Repo->>DB: INSERT artifact + ArtifactVersion(v=3)
     Note over DB: v1 / v2 不产生记录<br/>版本号稀疏
 ```
 
 ### 关键字段
 
-`ArtifactManager` 持有三个进程内数据结构：
+`ArtifactWorkingSet`（每个 `ArtifactService` 独占一个）持有三个进程内数据结构：
 
 | 字段 | 类型 | 作用 |
 |------|------|------|
 | `_cache` | `{session_id: {artifact_id: ArtifactMemory}}` | 内存快照，含 content/version/metadata |
-| `_dirty` | `set[(session_id, artifact_id)]` | 需要 flush 的条目 |
-| `_new` | `set[(session_id, artifact_id)]` | 执行期间新建（未入 DB） |
+| `_dirty` | `{(session_id, artifact_id): None}`（保序） | 需要 flush 的条目 |
+| `_new` | `{(session_id, artifact_id): None}`（保序） | 执行期间新建（未入 DB） |
 
-`_new` 与 `_dirty` 的区别决定 flush 路径：`_new` → `repo.create_artifact`，否则 → `repo.upsert_artifact_content`（传 `target_version=memory.current_version`）。
+`mark_new()` 同时置 `_dirty` 与 `_new`；`mark_dirty()` 只置 `_dirty`。`flush_all` 遍历 `dirty_keys`，`_flush_one` 用 `is_new()` 决定 flush 路径：`_new` → `repo.create_artifact`，否则 → `repo.upsert_artifact_content`（均传 `target_version=memory.current_version`）。`clear_one()` 在 flush 成功后清除 dirty/new 标记但**保留缓存**，供同轮后续读取。
 
 ### Flush 弹性
 
-`flush_one()` 在 `db_manager` 可用时走 `with_retry()`：每次 attempt 创建独立 session，捕获 `DuplicateError / IntegrityError` 视为"前次 attempt 已提交"视作成功。这保证了终端事件之前 artifact 一定落盘，即使遇到 DB 瞬断也能恢复。
+`_flush_one()` 在 `db_manager` 可用时走 `with_retry()`：每次 attempt 创建独立 session，捕获 `DuplicateError / IntegrityError` 视为"前次 attempt 已提交"视作成功。这保证了终端事件之前 artifact 一定落盘，即使遇到 DB 瞬断也能恢复。`flush_all` 逐条 flush，成功即 `clear_one`；任一失败收集到 `failed` 后整体 `raise`，由后处理的 `decide_terminal` 转成 `ERROR` 终态（`flush_error` 优先级最高，见 [execution-lifecycle.md](execution-lifecycle.md)）。
 
 ### 版本号稀疏的后果
 
@@ -152,20 +158,23 @@ sequenceDiagram
 
 ## 执行期间的 REST API 读取
 
-`ArtifactManager._active_managers` 是**类级别注册表**（`Dict[session_id, ArtifactManager]`）：
+旧设计有一个进程级 `ArtifactManager._active_managers` 注册表 + `get_active()` overlay，让 REST 在执行中读到未 flush 的内存态。**该机制已删除**——它在多 worker 下静默失效：REST 请求可能打到非执行 worker，进程级注册表读不到执行 worker 的内存，overlay 形同虚设却让人以为有一致性保证。
 
-- 引擎执行开始时 `manager.set_session(session_id)` → `register()`
-- `flush_all()` 结束时 `unregister()`
+现在 **REST artifact 读取一律是纯 DB 读**（`get_artifact_service` 每请求新建一个 `ArtifactService`，自带空 WorkingSet、无 emit）：
 
-作用：REST API（`GET /artifacts`）在引擎执行中被调用时，可通过 `ArtifactManager.get_active(session_id)` 拿到正在执行的 manager，调用 `get_cached_artifacts()` 读取未 flush 的内存内容，避免用户看到"陈旧"的 DB 状态。
+- turn **执行中**，REST 返回上一次 `flush_all` 的快照，**落后于 live**；turn 内的实时内容由 SSE 的 `ARTIFACT_*` 事件推给前端 reduce（见下文），不经 REST
+- turn 结束（`flush_all` 落库）后，REST 即拿到权威最新态
+
+这是有意的权衡（plan 决策 6）：读类操作绕过只会让调用者自己看到稍旧的内容，伤不到别人 → 用前端 UX 锁（流式中隐藏版本选择器 / 导出）兜，后端保持纯 DB、宽松、多 worker 安全。对比写 / 执行类（发消息 / cancel / 开分支 / delete）绕过会冲突 → 必须后端 lease（409）/ ownership（404）强制。
 
 ## Operations 语义
 
 ### create_artifact
 
-- 幂等检查：同时查缓存和 DB，任一存在即拒绝
-- 成功后 memory 入 `_cache`，`_dirty` 和 `_new` 均置位
+- 幂等检查：同时查 WorkingSet 缓存和 DB，任一存在即拒绝
+- 成功后 memory 入 WorkingSet（`put` + `mark_new` → 同时 dirty/new），并发 `ARTIFACT_CREATED`（整文 base）
 - 返回 XML：`<artifact version="1"><id>task_plan</id> Created...</artifact>`
+- 模型自建（`source="agent"`）与用户上传（`source="user_upload"`）共用此路径（`_register_new`），统一生命周期
 
 ### update_artifact（分层模糊匹配）
 
@@ -201,36 +210,37 @@ flowchart TD
 
 ### read_artifact
 
-- 无 version 参数 → 读当前 memory（可能含未 flush 修改）
+- 无 version 参数 → 读当前 memory（执行轮内的 Service 持有 live WorkingSet，故含未 flush 修改；REST 路径的 Service 自带空 WS → 落到纯 DB）
 - 指定 version → 走 `repo.get_version_content()` 查历史表
 - 行级分页：`offset`（1-indexed，默认 1）+ 可选 `limit`，再受隐藏字符上限 `READ_ARTIFACT_MAX_CHARS`（默认 50000）兜底
 - 返回 `<artifact_slice>` 包含 `shown_lines / total_lines / shown_chars / total_chars / truncated_by`；未读完时 `has_more=true` 并附续读 `hint`（透传调用者原始的 `limit` / `version`，避免续读悄悄换页大小或跳到 latest 版本）
 
 ## SSE 实时推送
 
-每次 artifact 操作成功后，`ArtifactManager.build_snapshot()` 构建完整快照（含 content），通过 `ToolResult.metadata["artifact_snapshot"]` 随 `tool_complete` 事件推送到前端。前端由此在执行期间实时看到 artifact 变化，无需等待执行结束后再 REST 拉取。
+turn 内 artifact 的实时内容**不走 REST，也不走 `tool_complete`**（旧的 `build_snapshot()` → `tool_complete.metadata["artifact_snapshot"]` 机制已删除）。`ArtifactService` 在 create/update/rewrite 成功后直接发一条 **SSE-only** 的 artifact 事件，前端 reduce 进 `artifactStore.liveContent`：
 
-REST API 在执行期间的一致性**按接口分**：
+| 事件 | 载荷 |
+|------|------|
+| `ARTIFACT_CREATED` | `id`, `title`, `content_type`, `source`, `current_version` + 整文 `content`（或 `content_omitted=true`，正文超 `ARTIFACT_LIVE_CONTENT_MAX_CHARS` 时） |
+| `ARTIFACT_UPDATED` | `id`, `current_version` + 二选一：整文（rewrite / 本轮首次触碰）**或** `delta={offset, deleted_len, inserted_text}`（已发过 base 后的 `update_artifact` 模糊命中 span） |
 
-| REST 接口 | 执行中行为 |
-|----------|----------|
-| `GET /artifacts` (列表) | ✅ `list_artifacts()` 合并 DB 和内存 dirty/new 条目 |
-| `GET /artifacts/{id}` 的当前内容 | ✅ `ArtifactManager.get_active()` overlay 内存态 |
-| `GET /artifacts/{id}` 返回的 `versions[]` | ❌ DB-only — 未 flush 的中间版本不可见 |
-| `GET /versions/{version}` | ❌ DB-only — 未 flush 的版本返回 404 |
-| `GET /export` (docx) | ❌ DB-only — 导出最后一次已 flush 的快照 |
+**为什么 SSE-only 不持久化**：artifact 有专属持久家（artifact 表 + 版本表），`MessageEvent` 里再存一份正文无任何读者；冷启动 / 断线重连靠 `flush_all` 后的 DB 权威态重建。
 
-前端通过"流式执行期间隐藏版本选择器和 export 入口"规避 DB-only 接口的滞后问题；列表和当前内容通道在执行期间与 SSE 保持一致。
+**同步 base 由后端负责**（关键不变量）：`delta` 的 offset 是相对"本轮前几次编辑之后"的内容，DB 只能当第一条 delta 的 base。Service 用 `_emitted_base` 集合跟踪"前端是否已拿到该 artifact 的整文 base"——任一 artifact 本轮的**首个** live 事件强制发整文（create / rewrite / 首次 update 皆整文），其后才发 delta。于是前端是个**纯同步 reducer**（先有 base 再 apply delta），无需在 live 路径上查 DB 取 base，事件流自包含（断线重连重放即可重建）。正文超上限省略时退化为发信号、靠 `COMPLETE` 后 DB 对齐。
 
-## Upload 旁路
+REST 一致性见上文 [执行期间的 REST API 读取](#执行期间的-rest-api-读取)：所有 GET 纯 DB，turn 中落后于 live；`versions[]` / `export` 同样 DB-only，未 flush 的中间版本返回 404。前端在流式执行期间隐藏版本选择器和 export 入口规避滞后。
 
-用户上传文件（`POST /artifacts/upload`）走 `create_from_upload()`，**绕过 write-back**，直接调用 `repo.create_artifact()` 立即 commit。原因：
+## Upload 并入统一生命周期
 
-- 上传不在 engine loop 内，没有"折叠多次编辑"的需求
-- 上传用户期望是同步操作（文件传完就该可用），write-back 语义不符合
-- 文件名中特殊字符经 `re.sub(r'[^\w\-.]', '_', filename)` 清洗后作为 artifact_id，冲突时追加 `_1` / `_2` 后缀自动去重
+> 旧设计有一个独立的 `POST /artifacts/upload` 端点，`create_from_upload()` **绕过 write-back** 直接 commit。该端点已删除，上传并入消息提交的统一生命周期。
 
-上传 artifact 的 `source="user_upload"`，在 Artifact Inventory 中与 agent 创建的条目区分展示。
+用户上传随 `POST /chat`（multipart `files`）一起提交：chat 路由只做 size-check + 转换（`convert_uploaded_file`，**不写库**），转换后的内容 closure-carry 进引擎。`execute_loop` 在 turn 起点经 `ArtifactService.create_from_upload()` 把每个文件 **stage 进 WorkingSet**（走 `_register_new` → 发 `ARTIFACT_CREATED`、随 turn 末 `flush_all` 落库），与 agent 自建 artifact **完全同路径**。
+
+- 文件名中特殊字符经 `_normalize_filename_to_id()`（`re.sub(r'[^\w\-.]', '_', ...)` + 长度截断）清洗成 artifact_id base；与 WorkingSet + DB 现有 id 冲突时追加 `_N` 后缀自动去重
+- 上传 artifact 的 `source="user_upload"`，在 Artifact Inventory 中与 agent 创建的条目区分展示
+- staging 失败（gatekeeper 拒绝 / 异常）→ 引擎回滚已 stage 的上传（`discard_staged`）并 loud-abort 本轮；终态的 `artifacts_flushed` 据 `uploads_rolled_back` 修正为 false，前端保留输入框附件供重试
+
+> **历史包袱已消除**：旧的"先即时 commit 再在 submit 时重复 staging"会产生 `_N` 副本 bug——把提交退到 submit 之后、并入引擎生命周期后该 bug 自然消失。
 
 ## Design Decisions
 
@@ -255,8 +265,11 @@ REST API 在执行期间的一致性**按接口分**：
 - System Prompt 保证每次 LLM 调用都能看到完整 Task Plan，无需模型记忆或 `read_artifact` 重读
 - 这是用"配置化双 Artifact 约定"换取"模型任务追踪能力"的核心交易点
 
-### 为什么 Upload 要旁路 Write-Back
+### 为什么 Upload 并入 Write-Back（而非旁路即时 commit）
 
-- Upload 不在 engine 事务边界内，若延迟 flush 则用户看到"上传成功但列表无此项"的时间窗
-- Upload 是幂等的用户操作，即时 commit 更符合心智模型
-- 与 agent 创建的 artifact 走不同路径也让 `source` 字段语义清晰
+旧设计让 upload 旁路 write-back 即时 commit，理由是"上传成功就该立刻可见"。重构后反过来并入统一生命周期，因为：
+
+- **消除 `_N` 副本 bug**：旧路径"上传时即时 commit + submit 时又 staging"会造成同一文件两份（`name` + `name_1`）。并入引擎、提交点退到 submit 之后，bug 自然消失
+- **单一持久化路径**：上传与 agent 自建走同一条 `_register_new` → 发 `ARTIFACT_CREATED` → `flush_all`，无需为上传另造 commit 路径，也让"冷启动靠 DB+事件流重建"对上传同样成立（即时 commit 而不发事件会让上传在重建时隐形）
+- **即时可见性由 SSE 补足**：staging 时立刻发 `ARTIFACT_CREATED`，前端 live 渲染——不靠即时 commit 也没有"上传成功但列表无此项"的时间窗
+- `source="user_upload"` 仍清晰区分来源，不依赖"走不同路径"

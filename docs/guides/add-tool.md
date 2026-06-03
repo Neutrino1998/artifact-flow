@@ -233,7 +233,7 @@ tools:
 - **异步执行** — `execute()` 必须是 `async`，不要写阻塞调用（用 `asyncio.to_thread` 包同步库）
 - **不抛异常** — 错误应返回 `ToolResult(success=False, error=...)`；抛出的异常会被 `__call__()` 兜底包装，但失去上下文
 - **`data` 是字符串** — LLM 看到的是文本；结构化数据请序列化为 XML/JSON/表格等 LLM 友好格式
-- **`metadata` 是 dict** — 前端 SSE 可拿到，但 LLM 看不到。Artifact 工具通过 `metadata["artifact_snapshot"]` 推送实时更新
+- **`metadata` 是 dict** — 前端 SSE 可拿到，但 LLM 看不到（如 `update_artifact` 的模糊匹配诊断）。注意 artifact 的实时内容**不走** `metadata`，而是 `ArtifactService` 发独立的 `ARTIFACT_CREATED` / `ARTIFACT_UPDATED` 事件
 - **参数类型** — `ToolParameter.type` 只支持 `string` / `integer` / `number` / `boolean`；复杂结构拆成多个参数或序列化为 string
 
 ### 权限级别选择

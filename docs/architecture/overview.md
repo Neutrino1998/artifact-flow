@@ -16,7 +16,7 @@ graph TB
     subgraph Business["业务层"]
         Controller["ExecutionController"]
         ConvManager["ConversationManager"]
-        ArtifactManager["ArtifactManager"]
+        ArtifactService["ArtifactService<br/>(自带 ArtifactWorkingSet)"]
     end
 
     subgraph Core["引擎层"]
@@ -39,7 +39,7 @@ graph TB
     Router --> Controller
     Controller --> Engine
     Controller --> ConvManager
-    Controller --> ArtifactManager
+    Controller --> ArtifactService
     Engine --> ContextManager
     ContextManager --> EventHistory
     Engine --> CompactionRunner
@@ -47,7 +47,7 @@ graph TB
     Engine --> Tools
     Engine -->|events| SSE
     ConvManager --> Repo
-    ArtifactManager --> Repo
+    ArtifactService --> Repo
     Repo --> DB
     Engine -->|hooks| RuntimeStore
 ```
@@ -116,7 +116,7 @@ sequenceDiagram
         end
     end
 
-    Ctrl->>Ctrl: ArtifactManager.flush_all()
+    Ctrl->>Ctrl: ArtifactService.flush_all()
     Ctrl->>DB: 持久化消息 + 事件 + Artifact
     Ctrl-->>SSE: complete 事件
     SSE-->>C: complete
@@ -172,7 +172,7 @@ graph LR
     Approve --> Stream
     Inject -->|POST /inject| Stream
     Cancel -->|POST /cancel| Complete
-    Stream -->|artifact_snapshot| Artifact
+    Stream -->|ARTIFACT_CREATED / ARTIFACT_UPDATED| Artifact
     Stream -->|complete 事件| Complete
 ```
 
