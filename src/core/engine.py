@@ -160,7 +160,7 @@ async def execute_loop(
         state: 执行状态（from create_initial_state）
         agents: {name: AgentConfig} 字典
         tools: {name: BaseTool} 字典（全局 + 请求级工具已合并）
-        hooks: EngineHooks（check_cancelled / create_interrupt / wait_for_resume / drain_messages）
+        hooks: EngineHooks（check_cancelled / wait_for_interrupt / drain_messages）
         artifact_service: ArtifactService 实例（duck-typed 协作者：set_session /
             list_artifacts / persist_tool_result / bind_emit）
         emit: 事件推送回调（推 SSE）
