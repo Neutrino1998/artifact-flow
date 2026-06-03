@@ -75,12 +75,14 @@ export default function MessageInput() {
 
   // Context-usage gauge: how much context the next message will carry, vs the
   // backend auto-compaction threshold. Sourced from the persisted branch tail's
-  // `execution_metrics.last_input_tokens` — normally the last lead LLM call's
-  // input, but if the turn ended on a compaction (compaction triggered on the
-  // final response, no further lead call), the backend overrides this field
-  // with the compaction summary's `output_tokens` as a measured proxy, so the
-  // gauge correctly drops post-compaction. lead-only by convention; subagent
-  // compaction does not pollute this field. See docs/architecture/engine.md.
+  // `execution_metrics` — the last lead LLM call's `last_input_tokens +
+  // last_output_tokens`, matching the compaction trigger (input+output >
+  // threshold) so the gauge and the model-facing <context_usage> warning read
+  // the same number. If the turn ended on a compaction (triggered on the final
+  // response, no further lead call), the backend overrides last_input_tokens
+  // with the summary size and zeroes last_output_tokens, so the gauge correctly
+  // drops post-compaction. lead-only by convention; subagent compaction does
+  // not pollute these fields. See docs/architecture/engine.md.
   // Non-live: updates after each completed turn / on conversation load.
   const branchPath = useConversationStore((s) => s.branchPath);
   const compactionThreshold = useConfigStore((s) => s.compactionThreshold);
@@ -90,9 +92,14 @@ export default function MessageInput() {
     fetchConfig();
   }, [fetchConfig]);
   const lastNode = branchPath.length > 0 ? branchPath[branchPath.length - 1] : null;
+  const lastMetrics = lastNode?.execution_metrics as
+    | { last_input_tokens?: number | null; last_output_tokens?: number | null }
+    | null
+    | undefined;
   const contextTokens =
-    (lastNode?.execution_metrics as { last_input_tokens?: number | null } | null | undefined)
-      ?.last_input_tokens ?? null;
+    lastMetrics?.last_input_tokens != null
+      ? lastMetrics.last_input_tokens + (lastMetrics.last_output_tokens ?? 0)
+      : null;
 
   // Compact is meaningless with no history to summarize — and worse, the
   // injected directive ("history will be compacted right after your response")
