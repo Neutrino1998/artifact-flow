@@ -17,7 +17,7 @@ from typing import Dict, Any, List, Optional
 from datetime import datetime
 
 from config import config
-from core.event_history import build_event_history
+from core.event_history import build_event_history, last_llm_usage
 from tools.artifact_envelope import make_preview_slice, render_artifact_slice
 from utils.logger import get_logger
 
@@ -88,8 +88,7 @@ class ContextManager:
         # ========== Messages ==========
         # 历史 + 当前轮统一来自 state["events"]，EventHistory 处理 boundary / 过滤；
         # 发给 LLM 前剥离 _meta。
-        history = build_event_history(state.get("events", []), agent_name)
-        all_messages = cls._strip_meta(history)
+        all_messages = cls._strip_meta(build_event_history(state.get("events", []), agent_name))
 
         # 动态上下文（系统时间 / task_plan / artifact 清单）作为 ephemeral
         # <system-reminder> 并入最后一条消息正文：每次 build 现拼、即用即丢、绝不入
@@ -104,9 +103,10 @@ class ContextManager:
         # 必产出 ≥1 条 message。真为空 = 上游不变量被破坏，让它在 [-1] 上响亮失败。
         # 上一次 call 的 input+output(compaction 触发口径)——build 在 LLM call 之前拼，
         # 本轮数字尚不存在，用历史里最近一次 llm_complete 的 token_usage 做水位估计(历史
-        # 单调增长，是「这次会不会越界」的合理下界)。取自 history(已按 agent 过滤 + 在最近
-        # compaction 边界处截断)：刚压缩完、边界后还没新 llm_complete → None，预警段省略。
-        last_usage = cls._last_usage_from_history(history)
+        # 单调增长，是「这次会不会越界」的合理下界)。last_llm_usage 已按 agent 过滤 + 在最近
+        # compaction 边界后取数(刚压缩完 → None)，且直接读原始事件 token_usage，不受
+        # 「content 空则丢 _meta」影响(高 input+空 content 也能预警)。
+        last_usage = last_llm_usage(state.get("events", []), agent_name)
         reminder = cls._build_dynamic_context(agent_config, artifacts_inventory, last_usage)
         last = all_messages[-1]
         all_messages[-1] = {**last, "content": f'{last["content"]}\n\n{reminder}'}
@@ -175,20 +175,6 @@ class ContextManager:
         )
         body = "\n\n".join(parts)
         return f'<system-reminder>\n{framing}\n\n{body}\n</system-reminder>'
-
-    @classmethod
-    def _last_usage_from_history(cls, history: List[Dict[str, Any]]) -> Optional[int]:
-        """历史里最近一次 assistant(llm_complete) 的 input+output —— compaction 触发口径。
-
-        history 是 build_event_history 的产出(已按 agent 过滤 + 在最近 compaction 边界
-        处截断)。从右往左取第一条带 _meta 的 assistant 消息；边界后还没有 llm_complete
-        (刚压缩完 / agent 首轮)→ None，调用方据此省略预警段。
-        """
-        for msg in reversed(history):
-            if msg.get("role") == "assistant" and "_meta" in msg:
-                meta = msg["_meta"]
-                return meta.get("input_tokens", 0) + meta.get("output_tokens", 0)
-        return None
 
     @classmethod
     def _build_context_usage(cls, last_usage: Optional[int]) -> Optional[str]:

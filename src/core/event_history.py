@@ -41,6 +41,28 @@ def build_event_history(
     return _events_to_messages(filtered[boundary_idx:])
 
 
+def last_llm_usage(events: List[ExecutionEvent], agent_name: str) -> int | None:
+    """最近一次 llm_complete 的 input+output（compaction 触发口径），无则 None。
+
+    与 build_event_history 同样按 agent 过滤、并只看最近 compaction 边界之后的事件
+    （刚压缩完、边界后还没新 call → None）。但**直接读原始 ExecutionEvent 的
+    token_usage**，不经 _events_to_messages —— 后者仅在 content 非空时才保留 _meta，
+    会让「高 input + 空 content（如仅 reasoning 的回复）」漏报。token 记账与 response
+    文本是否为空无关，故在此解耦。供 context_manager 的 <context_usage> 水位预警取数。
+    """
+    filtered = [e for e in events if e.agent_name == agent_name]
+    if not filtered:
+        return None
+
+    boundary_idx = _find_boundary(filtered, is_subagent=agent_name != LEAD_AGENT)
+    for ev in reversed(filtered[boundary_idx:]):
+        if ev.event_type == StreamEventType.LLM_COMPLETE.value:
+            token_usage = (ev.data or {}).get("token_usage")
+            if token_usage:
+                return token_usage.get("input_tokens", 0) + token_usage.get("output_tokens", 0)
+    return None
+
+
 def _find_boundary(events: List[ExecutionEvent], is_subagent: bool) -> int:
     """
     从右往左扫描，返回第一个边界事件的索引（含）。

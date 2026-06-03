@@ -116,29 +116,30 @@ flowchart LR
 
 `ContextManager.build()`（`src/core/context_manager.py`）是一个纯静态类方法，为每次 LLM 调用构建完整的 messages 列表。
 
-### System Prompt 组装
+### System Prompt 组装（稳定可缓存前缀）
 
-System prompt 由六层拼接而成，每层按条件注入：
+System prompt 只放**全 session 稳定**的内容，作为 prompt cache 的可缓存前缀；每轮刷新的动态上下文（系统时间 / task_plan / artifact 清单 / context 水位）一律移到消息尾部的 `<system-reminder>`（见下节），避免它们坐在前缀里把后续历史的缓存全部打掉。
 
 ```
 ┌─────────────────────────────────────────┐
 │ 1. Role Prompt (AgentConfig.role_prompt) │  ← 始终注入
 ├─────────────────────────────────────────┤
-│ 2. System Time                           │  ← 始终注入
+│ 2. Available Subagents                   │  ← 有 call_subagent 的 agent
 ├─────────────────────────────────────────┤
-│ 3. Task Plan (artifact id="task_plan")   │  ← 有 task_plan artifact 时
-├─────────────────────────────────────────┤
-│ 4. Artifacts Inventory                   │  ← 有 artifact 工具的 agent
-├─────────────────────────────────────────┤
-│ 5. Available Subagents                   │  ← 有 call_subagent 的 agent
-├─────────────────────────────────────────┤
-│ 6. Tool Instructions                     │  ← 有工具的 agent
+│ 3. Tool Instructions                     │  ← 有工具的 agent
 └─────────────────────────────────────────┘
 ```
 
-- **Task Plan**：从 artifacts 清单中查找 `id="task_plan"` 的 artifact，注入全文（版本号、内容类型、来源、更新时间）
-- **Artifacts Inventory**：每个 artifact 的内容截断到 `INVENTORY_PREVIEW_LENGTH`（预览），超长内容用 `<content_preview>` 标签
 - **Available Subagents**：排除当前 agent 和 `internal=true` 的 agent
+
+### 动态上下文（`<system-reminder>`）
+
+每轮 `build()` 现拼一个 ephemeral `<system-reminder>`，**并入最后一条 user 消息正文**（不进 system prompt、不持久化为 event），语义是「当前世界状态的一瞥」（glance, don't act）：
+
+- **System Time**：始终注入（刻意用本地时间，属 UX）
+- **Task Plan**：有 `id="task_plan"` artifact 时注入全文（版本号、内容类型、来源、更新时间）
+- **Artifacts Inventory**：有 artifact 工具的 agent 注入；每个 artifact 内容截断到 `INVENTORY_PREVIEW_LENGTH`（预览）
+- **Context Usage**：仅当上一次 LLM 调用的 `input+output ≥ CONTEXT_USAGE_WARN_RATIO × COMPACTION_TOKEN_THRESHOLD`（默认 0.8）时，注入 `<context_usage>` 水位预警 —— 显示 `X / 阈值 (NN%)`，并提示把要据此**动作**的状态落 artifact（artifact 活在 compaction 边界之外、每轮在 inventory 里，summary 可能丢细节）。水位以下整段不出现，避免每轮 cry-wolf。取数走 `last_llm_usage(events, agent_name)`：按 agent 过滤 + 在最近 compaction 边界后取最近一次 `llm_complete` 的 `token_usage`（与触发口径 input+output 一致；直接读原始事件，**不受**「content 空则丢 `_meta`」影响，故「高 input + 空 content」也能预警）。前端 composer 的 gauge 用同一口径（见下文 *Compaction 机制* 的 metrics 说明）。
 
 ### 消息构建
 
@@ -178,7 +179,7 @@ System prompt 由六层拼接而成，每层按条件注入：
 
 每次 `_call_llm` 返回后，`compaction_runner.maybe_trigger(state, agent_name, input_tokens, output_tokens)` 被立即调用：
 
-- 条件：`input_tokens + output_tokens > COMPACTION_TOKEN_THRESHOLD`（默认 80,000，本次 LLM 调用的 I/O 合计）
+- 条件：`input_tokens + output_tokens > COMPACTION_TOKEN_THRESHOLD`（默认 100,000，本次 LLM 调用的 I/O 合计）
 - 满足条件 → 立即（blocking）执行 `compact_agent`，append `COMPACTION_SUMMARY` 到 tail
 
 ### 处理流程
@@ -258,7 +259,9 @@ class EngineHooks:
 | `last_output_tokens` | 最后一次 LLM 调用的 output token 数 |
 | `total_token_usage` | 累计 token（input + output + total） |
 
-注意：`first_input_tokens` 和 `last_input_tokens` 仅对 lead_agent 追踪，作为上下文预算评估的观测指标。**Compaction 触发依据不是这些 metric** — `CompactionRunner` 在每次 LLM 调用后直接拿该次调用的 `input_tokens + output_tokens` 比对阈值，不读 metrics。**特例**：若 lead 一次 compaction 触发在 final response 之后（loop 即将结束、后续无 lead call 覆盖），`CompactionRunner` 会把该次 compact_agent 调用的 `output_tokens`（= summary 大小）回写到 `last_input_tokens`，作为下一轮带入上下文的实测代理（供前端 composer 的 context 用量 gauge 显示压缩后的下降）。仍是 lead-only：subagent compaction 不写此字段，避免在 cancel/timeout 窗口把 subagent summary 的 token 数泄漏成 lead 上下文估算。
+注意：`first_input_tokens` / `last_input_tokens` / `last_output_tokens` 仅对 lead_agent 追踪，作为上下文预算评估的观测指标。**Compaction 触发依据不是这些 metric** — `CompactionRunner` 在每次 LLM 调用后直接拿该次调用的 `input_tokens + output_tokens` 比对阈值，不读 metrics。
+
+**前端 composer 的 context 用量 gauge**：分子 = `last_input_tokens + last_output_tokens`，与 compaction 的触发口径（input+output）对齐，使 gauge 与注入给模型的 `<context_usage>` 预警显示同一个数（详见 ContextManager 一节）。**特例**：若 lead 一次 compaction 触发在 final response 之后（loop 即将结束、后续无 lead call 覆盖），`CompactionRunner` 会把该次 compact_agent 调用的 `output_tokens`（= summary 大小）回写到 `last_input_tokens`、并同时把 `last_output_tokens` 归零，作为下一轮带入上下文的实测代理（压缩后只剩 summary、尚无 output 分量，故归零以保留 gauge 的「压缩后回落」，不让 stale output 叠进来）。仍是 lead-only：subagent compaction 不写此字段，避免在 cancel/timeout 窗口把 subagent summary 的 token 数泄漏成 lead 上下文估算。
 
 ### 事件收集
 

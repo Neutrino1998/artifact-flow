@@ -590,6 +590,22 @@ class TestContextUsageWarning:
         assert f"{threshold:,}" in reminder    # 分母 = 阈值
         assert "artifact" in reminder          # 落盘 advice
 
+    def test_present_even_when_last_call_content_empty(self):
+        # 回归(reviewer P3)：高 input + 空 content（如仅 reasoning 的回复）也要预警。
+        # build_event_history 在 content 空时会丢弃该 llm_complete（连同 _meta），但
+        # last_llm_usage 直接读原始事件 token_usage，不受影响。
+        threshold = config.COMPACTION_TOKEN_THRESHOLD
+        high = threshold
+        agent = _FakeAgentConfig()
+        state = _make_state(events=[
+            _make_event(StreamEventType.USER_INPUT.value, data={"content": "hi"}),
+            _llm_complete(high - 200, 200, content=""),   # 空 content
+            _tool_complete(),
+        ])
+        reminder = self._reminder(_build(agent, state=state, tools={}))
+        assert "<context_usage>" in reminder
+        assert f"{high:,}" in reminder
+
     def test_uses_most_recent_call_not_earlier(self):
         # 多次 call 取最近一次：早期高位、最近低位（如压缩后）→ 不出现
         threshold = config.COMPACTION_TOKEN_THRESHOLD
