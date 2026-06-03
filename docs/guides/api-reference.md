@@ -227,13 +227,15 @@ POST /api/v1/departments/resolve
 
 ### POST `` — 发送消息
 
+**始终是 `multipart/form-data`**（即使无附件）：一个 `payload` 表单字段装 `ChatRequest` 的 JSON 字符串，加可选的 `files`。**没有名为 `message` 的字段**——文本在 JSON 里叫 `user_input`。
+
 ```http
-POST /api/v1/chat
-{
-  "user_input": "...",
-  "conversation_id": "..." | null,        // null → 新建对话
-  "parent_message_id": "..." | null       // 可指定分支父节点
-}
+POST /api/v1/chat        Content-Type: multipart/form-data
+
+payload = '{"user_input":"...","conversation_id":null,"parent_message_id":null,"force_compact":false}'
+          # ChatRequest JSON 字符串(Form 字段)。conversation_id=null → 新建对话;
+          # parent_message_id 指定分支父节点;force_compact=true 本轮强制压缩一次
+files    = <可选附件，可多个>   # 起 turn 前同步转成 artifact(source=user_upload)
 
 200 OK
 {
@@ -337,7 +339,7 @@ POST /api/v1/chat/bulk-delete
 
 旧的 `POST /artifacts/upload` 与 `POST /{session_id}/upload`（即时 commit）已删除。上传现在并入消息提交：
 
-- `POST /api/v1/chat`，`multipart/form-data`，文件字段名 `files`（可多文件），与文本 `message` 同一请求
+- `POST /api/v1/chat`，`multipart/form-data`：文本走 `payload` 表单字段（`ChatRequest` JSON，文本键为 `user_input`），附件走 `files`（可多文件），同一请求。**没有 `message` 字段**——按 `message + files` 调会因缺 `payload` 直接 422
 - 大小上限：`config.MAX_UPLOAD_SIZE`（环境可配，默认见 [deployment.md](../deployment.md)）；`422` 触发：超限、格式不支持（`convert_uploaded_file` 在写库前做 size-check + 转换）
 - 转换后的内容 closure-carry 进引擎，在 turn 起点经 `create_from_upload` **stage 进 WorkingSet**（发 `ARTIFACT_CREATED`、随 turn 末 `flush_all` 落库），与 agent 自建 artifact 走**同一统一生命周期**——不再绕过 write-back、不再即时 commit（见 [../architecture/artifacts.md](../architecture/artifacts.md)）
 
