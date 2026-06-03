@@ -1885,7 +1885,7 @@ ToolCall</strong>（不再 salvage 残缺内容，因为残缺的 <code>new_str<
 <li><strong>事件推送</strong>：每个工具推送 <code>TOOL_START</code> 和 <code>TOOL_COMPLETE</code> 事件（含参数、结果、耗时）</li>
 </ol>
 <h3 id="超长工具结果自动落盘">超长工具结果自动落盘</h3>
-<p>避免单个工具调用一次性把上下文撑爆——引擎在每次 <code>tool_result.success=True</code> 后检查 <code>len(result.data) &gt; tool.max_result_size_chars</code>（<code>BaseTool</code> 默认 <code>50000</code> 字符），命中即调用 <code>ArtifactManager.persist_tool_result()</code>：</p>
+<p>避免单个工具调用一次性把上下文撑爆——引擎在每次 <code>tool_result.success=True</code> 后检查 <code>len(result.data) &gt; tool.max_result_size_chars</code>（<code>BaseTool</code> 默认 <code>50000</code> 字符），命中即调用 <code>ArtifactService.persist_tool_result()</code>：</p>
 <ol>
 <li>全文写入新 artifact，ID 形如 <code>tool_&lt;sanitized_name&gt;_&lt;12hex&gt;</code>，<code>source="tool"</code>，<code>content_type="text/plain"</code></li>
 <li>用 <code>make_preview_slice()</code> 把回填给模型的 <code>tool_result.data</code> 替换为 <code>&lt;artifact_slice&gt;</code> 预览（前 <code>TOOL_PERSIST_PREVIEW_LENGTH=1000</code> 字符）+ <code>hint</code>，告知模型用 <code>read_artifact(id='...')</code> 取全文</li>
@@ -1907,7 +1907,7 @@ ToolCall</strong>（不再 salvage 残缺内容，因为残缺的 <code>new_str<
 <a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>    <span class="n">error</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span>             <span class="c1"># 失败时的错误信息</span>
 <a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>    <span class="n">metadata</span><span class="p">:</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]</span> <span class="o">=</span> <span class="n">field</span><span class="p">(</span><span class="o">...</span><span class="p">)</span>   <span class="c1"># 附加元数据</span>
 </code></pre></div>
-<p><code>metadata</code> 可携带 <code>artifact_snapshot</code>（Artifact 操作工具在内存更新后附带完整快照），通过 <code>TOOL_COMPLETE</code> 事件的 <code>metadata</code> 字段推送给前端，实现执行期间的实时 Artifact 更新。</p>
+<p><code>metadata</code> 通过 <code>TOOL_COMPLETE</code> 事件推送给前端、LLM 看不到（如权限、<code>update_artifact</code> 的模糊匹配诊断）。注意：执行期间的实时 Artifact 更新<strong>不再走这里</strong>——<code>ArtifactService</code> 在内存更新后直接发独立的 <code>ARTIFACT_CREATED</code> / <code>ARTIFACT_UPDATED</code> SSE 事件（见 <a href="../artifacts/#sse-实时推送">artifacts.md → SSE 实时推送</a>），<code>tool_complete</code> 不再附带 artifact 快照。</p>
 <h3 id="toolparameter">ToolParameter</h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="nd">@dataclass</span>
 <a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="k">class</span><span class="w"> </span><span class="nc">ToolParameter</span><span class="p">:</span>
@@ -1990,7 +1990,7 @@ ToolCall</strong>（不再 salvage 残缺内容，因为残缺的 <code>new_str<
 </table>
 <p><strong>注意：</strong></p>
 <ul>
-<li>Artifact 工具（create/update/rewrite/read/grep）是请求级创建的（绑定 <code>ArtifactManager</code> 实例），名称为保留名（<code>RESERVED_TOOL_NAMES</code>），自定义工具不可同名</li>
+<li>Artifact 工具（create/update/rewrite/read/grep）是请求级创建的（绑定 <code>ArtifactService</code> 实例），名称为保留名（<code>RESERVED_TOOL_NAMES</code>），自定义工具不可同名</li>
 <li><code>read_artifact</code> 不分页 / 无 <code>limit</code> 时仍受隐藏字符上限 <code>READ_ARTIFACT_MAX_CHARS</code>（默认 50000）保护，超出后 <code>has_more=true</code> 并附续读 hint，模型按 hint 调用下一段</li>
 <li><code>call_subagent</code> 的 <code>execute()</code> 仅做路由验证（目标 agent 是否存在、是否非 internal），实际的 agent 切换由引擎的 <code>_execute_tools</code> 处理</li>
 </ul>

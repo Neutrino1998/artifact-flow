@@ -1308,10 +1308,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#上传约定" class="md-nav__link">
+  <a href="#上传走-post-chat不在本路由" class="md-nav__link">
     <span class="md-ellipsis">
       
-        上传约定
+        上传走 POST /chat，不在本路由
       
     </span>
   </a>
@@ -2042,10 +2042,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#上传约定" class="md-nav__link">
+  <a href="#上传走-post-chat不在本路由" class="md-nav__link">
     <span class="md-ellipsis">
       
-        上传约定
+        上传走 POST /chat，不在本路由
       
     </span>
   </a>
@@ -2656,12 +2656,13 @@
 <p>Compaction 现为<strong>引擎内同步执行</strong>（单次 LLM 调用 <code>input+output</code> 超阈值时触发），不再有手动触发端点；详见 <a href="../../architecture/engine/#compaction-机制">engine.md → Compaction 机制</a>。</p>
 </blockquote>
 <h3 id="post---发送消息">POST `` — 发送消息</h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="err">POST /api/v1/chat</span>
-<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="err">{</span>
-<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="err">  &quot;user_input&quot;: &quot;...&quot;,</span>
-<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="err">  &quot;conversation_id&quot;: &quot;...&quot; | null,        // null → 新建对话</span>
-<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="err">  &quot;parent_message_id&quot;: &quot;...&quot; | null       // 可指定分支父节点</span>
-<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a><span class="err">}</span>
+<p><strong>始终是 <code>multipart/form-data</code></strong>（即使无附件）：一个 <code>payload</code> 表单字段装 <code>ChatRequest</code> 的 JSON 字符串，加可选的 <code>files</code>。<strong>没有名为 <code>message</code> 的字段</strong>——文本在 JSON 里叫 <code>user_input</code>。</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="err">POST /api/v1/chat        Content-Type: multipart/form-data</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="err">payload = &#39;{&quot;user_input&quot;:&quot;...&quot;,&quot;conversation_id&quot;:null,&quot;parent_message_id&quot;:null,&quot;force_compact&quot;:false}&#39;</span>
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="err">          # ChatRequest JSON 字符串(Form 字段)。conversation_id=null → 新建对话;</span>
+<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="err">          # parent_message_id 指定分支父节点;force_compact=true 本轮强制压缩一次</span>
+<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a><span class="err">files    = &lt;可选附件，可多个&gt;   # 起 turn 前同步转成 artifact(source=user_upload)</span>
 <a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a>
 <a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a><span class="err">200 OK</span>
 <a id="__codelineno-10-9" name="__codelineno-10-9" href="#__codelineno-10-9"></a><span class="err">{</span>
@@ -2742,7 +2743,7 @@
 </ul>
 <hr />
 <h2 id="artifacts">Artifacts</h2>
-<p><code>/api/v1/artifacts</code> — 上传、读取、导出、版本管理。</p>
+<p><code>/api/v1/artifacts</code> — 读取、导出、版本管理。<strong>只读（全是 GET）</strong>：artifact 的产生（agent 创建 / 用户上传）都不经此路由。</p>
 <table>
 <thead>
 <tr>
@@ -2754,22 +2755,10 @@
 </thead>
 <tbody>
 <tr>
-<td>POST</td>
-<td><code>/upload</code></td>
-<td>用户</td>
-<td>新建对话并上传首个 artifact</td>
-</tr>
-<tr>
 <td>GET</td>
 <td><code>/{session_id}</code></td>
 <td>用户</td>
 <td>列出 session 下所有 artifacts</td>
-</tr>
-<tr>
-<td>POST</td>
-<td><code>/{session_id}/upload</code></td>
-<td>用户</td>
-<td>向已有 session 追加 artifact</td>
 </tr>
 <tr>
 <td>GET</td>
@@ -2791,17 +2780,19 @@
 </tr>
 </tbody>
 </table>
-<h3 id="上传约定">上传约定</h3>
+<h3 id="上传走-post-chat不在本路由">上传走 <code>POST /chat</code>，不在本路由</h3>
+<p>旧的 <code>POST /artifacts/upload</code> 与 <code>POST /{session_id}/upload</code>（即时 commit）已删除。上传现在并入消息提交：</p>
 <ul>
-<li><code>multipart/form-data</code>，字段名 <code>file</code></li>
-<li>大小上限：<code>config.MAX_UPLOAD_SIZE</code>（环境可配，默认见 <a href="../../deployment/">deployment.md</a>）</li>
-<li><code>422</code> 触发：超限、格式不支持</li>
-<li>走 <code>create_from_upload</code> 路径绕过 write-back cache，直接 commit 到 DB（见 <a href="../../architecture/artifacts/">../architecture/artifacts.md</a>）</li>
+<li><code>POST /api/v1/chat</code>，<code>multipart/form-data</code>：文本走 <code>payload</code> 表单字段（<code>ChatRequest</code> JSON，文本键为 <code>user_input</code>），附件走 <code>files</code>（可多文件），同一请求。<strong>没有 <code>message</code> 字段</strong>——按 <code>message + files</code> 调会因缺 <code>payload</code> 直接 422</li>
+<li>大小上限：<code>config.MAX_UPLOAD_SIZE</code>（环境可配，默认见 <a href="../../deployment/">deployment.md</a>）；<code>422</code> 触发：超限、格式不支持（<code>convert_uploaded_file</code> 在写库前做 size-check + 转换）</li>
+<li>转换后的内容 closure-carry 进引擎，在 turn 起点经 <code>create_from_upload</code> <strong>stage 进 WorkingSet</strong>（发 <code>ARTIFACT_CREATED</code>、随 turn 末 <code>flush_all</code> 落库），与 agent 自建 artifact 走<strong>同一统一生命周期</strong>——不再绕过 write-back、不再即时 commit（见 <a href="../../architecture/artifacts/">../architecture/artifacts.md</a>）</li>
 </ul>
 <h3 id="读取的即时性">读取的即时性</h3>
+<p>删除 <code>_active_managers</code> overlay 后，所有 GET <strong>均为纯 DB 读</strong>（请求级 <code>ArtifactService</code> 自带空 WorkingSet）：</p>
 <ul>
-<li><code>GET /{session_id}</code> 和 <code>GET /{session_id}/{artifact_id}</code> 会<strong>合并 DB + 当前 engine 的内存缓存</strong>，返回最新快照</li>
-<li><code>GET .../versions/{version}</code> 与 <code>GET .../export</code> <strong>只读 DB</strong>：执行中未 flush 的中间版本返回 <code>404</code></li>
+<li>turn <strong>执行中</strong>，REST 返回的是上一次 <code>flush_all</code> 的快照，<strong>落后于 live</strong>；turn 内的实时内容由 SSE 的 <code>ARTIFACT_CREATED</code> / <code>ARTIFACT_UPDATED</code> 事件推给前端 reduce（见 <a href="../../architecture/streaming/">streaming.md</a> / <a href="../../architecture/artifacts/">artifacts.md</a>），不经 REST</li>
+<li><code>GET .../versions/{version}</code> 与 <code>GET .../export</code> 同样只读 DB：执行中未 flush 的中间版本返回 <code>404</code></li>
+<li>前端据此在流式执行期间隐藏版本选择器 / 导出入口（纯前端读类 UX 锁，后端保持宽松）</li>
 </ul>
 <hr />
 <h2 id="stream-sse">Stream (SSE)</h2>

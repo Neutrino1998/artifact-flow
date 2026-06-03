@@ -1932,7 +1932,7 @@
 <li><strong>异步执行</strong> — <code>execute()</code> 必须是 <code>async</code>，不要写阻塞调用（用 <code>asyncio.to_thread</code> 包同步库）</li>
 <li><strong>不抛异常</strong> — 错误应返回 <code>ToolResult(success=False, error=...)</code>；抛出的异常会被 <code>__call__()</code> 兜底包装，但失去上下文</li>
 <li><strong><code>data</code> 是字符串</strong> — LLM 看到的是文本；结构化数据请序列化为 XML/JSON/表格等 LLM 友好格式</li>
-<li><strong><code>metadata</code> 是 dict</strong> — 前端 SSE 可拿到，但 LLM 看不到。Artifact 工具通过 <code>metadata["artifact_snapshot"]</code> 推送实时更新</li>
+<li><strong><code>metadata</code> 是 dict</strong> — 前端 SSE 可拿到，但 LLM 看不到（如 <code>update_artifact</code> 的模糊匹配诊断）。注意 artifact 的实时内容<strong>不走</strong> <code>metadata</code>，而是 <code>ArtifactService</code> 发独立的 <code>ARTIFACT_CREATED</code> / <code>ARTIFACT_UPDATED</code> 事件</li>
 <li><strong>参数类型</strong> — <code>ToolParameter.type</code> 只支持 <code>string</code> / <code>integer</code> / <code>number</code> / <code>boolean</code>；复杂结构拆成多个参数或序列化为 string</li>
 </ul>
 <h3 id="权限级别选择">权限级别选择</h3>

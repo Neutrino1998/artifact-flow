@@ -1786,7 +1786,7 @@
 </tbody>
 </table>
 <p><strong>只有 Layer 2 路径设 <code>fuzzy_stats</code></strong>——Layer 0(exact)/ Layer 1(normalized)成功不进这张表(见 <code>update_artifact.py:639-718</code> 的 compute_update,Layer 0/1 的 <code>MatchInfo</code> 不带 <code>fuzzy_stats</code>)。这张表反映的是"进到 Layer 2 的样本"分布。</p>
-<p><strong>注意</strong>:Section 2 的 <code>update_artifact.calls</code> 减去这张表的总数 <strong>不等于</strong> Layer 0/1 命中量。<code>calls</code> 还包含一批没有 <code>fuzzy_stats</code> 的失败路径——precondition 失败(<code>ArtifactManager not configured</code> / <code>No active session</code>,见 <code>update_artifact.py:819-824</code>)、Layer 0 / Layer 1 唯一性失败(<code>appears N times</code>,<code>update_artifact.py:650-653</code> / <code>update_artifact.py:673-679</code>)、artifact_id 不存在等。要精确算 Layer 0/1 命中量,需在 <code>update_artifact.py</code> 显式记 <code>match_type=exact/normalized</code> 的成功事件,目前没有这个 metric。</p>
+<p><strong>注意</strong>:Section 2 的 <code>update_artifact.calls</code> 减去这张表的总数 <strong>不等于</strong> Layer 0/1 命中量。<code>calls</code> 还包含一批没有 <code>fuzzy_stats</code> 的失败路径——precondition 失败(<code>ArtifactService not configured</code> / <code>No active session</code>)、Layer 0 / Layer 1 唯一性失败(<code>appears N times</code>)、artifact_id 不存在等。要精确算 Layer 0/1 命中量,需在 <code>update_artifact.py</code> 显式记 <code>match_type=exact/normalized</code> 的成功事件,目前没有这个 metric。</p>
 <p><code>bail_*</code> 持续上涨表示模型在踩边界——通常不是常量调小了,<strong>先看是不是 prompt 让模型给的 <code>old_str</code> 上下文太短</strong>。</p>
 <h3 id="32-unique_centers-直方图">3.2 <code>unique_centers</code> 直方图</h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>-- unique_centers histogram (vs MAX_UNIQUE_CENTERS) --

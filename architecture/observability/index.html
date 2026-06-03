@@ -891,6 +891,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#artifact-层sse-only不持久化" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Artifact 层（SSE-only，不持久化）
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#compaction-层" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1505,6 +1516,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#artifact-层sse-only不持久化" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Artifact 层（SSE-only，不持久化）
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#compaction-层" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1818,19 +1840,24 @@
 </tr>
 <tr>
 <td><code>COMPLETE</code></td>
-<td><code>success=true</code>, <code>conversation_id</code>, <code>message_id</code>, <code>response</code>, <code>execution_metrics</code></td>
+<td><code>success=true</code>, <code>conversation_id</code>, <code>message_id</code>, <code>response</code>, <code>execution_metrics</code>, <code>artifacts_flushed</code></td>
 </tr>
 <tr>
 <td><code>CANCELLED</code></td>
-<td><code>success=false</code>, <code>cancelled=true</code>, <code>conversation_id</code>, <code>message_id</code>, <code>response</code>, <code>execution_metrics</code></td>
+<td><code>success=false</code>, <code>cancelled=true</code>, <code>conversation_id</code>, <code>message_id</code>, <code>response</code>, <code>execution_metrics</code>, <code>artifacts_flushed</code>, <code>reason?</code>（external cancel 时为 <code>external_cancel</code> / <code>external_cancel_post_processing</code>）</td>
+</tr>
+<tr>
+<td><code>TIMED_OUT</code></td>
+<td><code>success=false</code>, <code>timed_out=true</code>, <code>conversation_id</code>, <code>message_id</code>, <code>response</code>（=<code>TIMED_OUT_RESPONSE</code>）, <code>execution_metrics</code>, <code>artifacts_flushed</code></td>
 </tr>
 <tr>
 <td><code>ERROR</code></td>
-<td><code>success=false</code>, <code>conversation_id</code>, <code>message_id</code>, <code>error</code>, <code>execution_metrics</code></td>
+<td><code>success=false</code>, <code>conversation_id</code>, <code>message_id</code>, <code>error</code>, <code>agent?</code>, <code>request_id?</code>, <code>execution_metrics</code>, <code>artifacts_flushed</code></td>
 </tr>
 </tbody>
 </table>
 <p><code>execution_metrics</code> 汇总整次执行指标（总耗时、总 token、每 agent 轮数等），是监控面板的核心字段。</p>
+<p>四个终态都由后处理的 <code>decide_terminal</code>（flush 之后、单一裁判）构建，故都带 <code>artifacts_flushed</code>（= 本轮用户上传是否真的落库；前端据此决定清掉 / 保留输入框附件，见 <a href="../execution-lifecycle/">execution-lifecycle.md</a>）。<code>ERROR</code> 的 <code>request_id</code> 在错误创建时冻结写入 <code>data</code>（不是读边界注入），是日志定位锚点。两处 transport 层直发的 ERROR（events 持久化失败 / post-processing 异常）绕过 <code>decide_terminal</code> 但仍带 <code>artifacts_flushed</code>。<strong>注意</strong>：<code>MessageEvent</code> 表存的是<strong>未脱敏</strong>的原始 <code>error</code> 文本（事件溯源 = 完整审计 + DEBUG replay）；脱敏（<code>error</code> → <code>"Internal server error"</code>）只在用户面读边界 DEBUG-gated 施加，admin 观测端点不脱敏。</p>
 <h3 id="agent-层">Agent 层</h3>
 <table>
 <thead>
@@ -1886,8 +1913,28 @@
 </tr>
 </tbody>
 </table>
-<p><code>tool_complete.metadata</code> 里携带 <code>artifact_snapshot</code> 时，前端据此实时刷新 Artifact 面板（不等 DB flush），见 <a href="../artifacts/#write-back-cache-机制">artifacts.md → Write-Back</a>.</p>
+<p><code>TOOL_COMPLETE.metadata</code> 携带工具自定义诊断（如 <code>update_artifact</code> 的模糊匹配统计），LLM 看不到、仅前端 / replay 可见。<strong>不再</strong>携带 artifact 快照——artifact 的 live 内容走下方独立的 <code>ARTIFACT_*</code> 事件。</p>
 <p>Permission 事件的阻塞语义属于 RuntimeStore，见 <a href="../concurrency/#interrupt-机制">concurrency.md → Interrupt 机制</a>.</p>
+<h3 id="artifact-层sse-only不持久化">Artifact 层（SSE-only，不持久化）</h3>
+<table>
+<thead>
+<tr>
+<th>事件</th>
+<th><code>data</code> 字段</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ARTIFACT_CREATED</code></td>
+<td><code>id</code>, <code>title</code>, <code>content_type</code>, <code>source</code>（<code>agent</code>/<code>user_upload</code>/<code>tool</code>）, <code>current_version</code>, 以及 <code>content</code> <strong>或</strong> <code>content_omitted=true</code>（正文超 <code>ARTIFACT_LIVE_CONTENT_MAX_CHARS</code> 时省略）</td>
+</tr>
+<tr>
+<td><code>ARTIFACT_UPDATED</code></td>
+<td><code>id</code>, <code>current_version</code>, 以及二选一：整文 <code>content</code>/<code>content_omitted</code>（rewrite、或本轮首次触碰该 artifact），<strong>或</strong> <code>delta={offset, deleted_len, inserted_text}</code>（已发过 base 后的 <code>update_artifact</code> 模糊命中 span）</td>
+</tr>
+</tbody>
+</table>
+<p>这两条由 <code>ArtifactService</code> 在 create/update/rewrite/上传 stage 时发射，<code>agent_name=None</code>（artifact 事件按 <code>id</code> 归并、不依赖 agent）。<strong><code>sse_only=True</code> → 不写 <code>MessageEvent</code> 表</strong>：artifact 有专属持久家（artifact 表 + 版本），<code>MessageEvent</code> 里的副本无读者；冷启动 / replay 靠 <code>flush_all</code> 后的 DB 权威态重建，turn 中的 live 由前端事件流 reduce。首个 live 事件强制整文（前端 base），其后才发 delta（见 <a href="../artifacts/#sse-实时推送">artifacts.md → SSE 实时推送</a>）。</p>
 <h3 id="compaction-层">Compaction 层</h3>
 <table>
 <thead>

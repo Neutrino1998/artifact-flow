@@ -1817,7 +1817,7 @@
 <p><strong>1. 构建上下文</strong>（<code>_build_context</code>）</p>
 <ul>
 <li>为 lead_agent 排空消息队列（<code>hooks.drain_messages</code>），将注入消息包装为 <code>QUEUED_MESSAGE</code> 事件</li>
-<li>加载 Artifact 清单（通过 <code>ArtifactManager.list_artifacts</code>）</li>
+<li>加载 Artifact 清单（通过 <code>ArtifactService.list_artifacts</code>）</li>
 <li>调用 <code>ContextManager.build()</code> 组装完整 messages 列表</li>
 <li>若当前 agent 已达 <code>max_tool_rounds</code>，注入 system 消息提醒总结</li>
 </ul>
@@ -2131,7 +2131,7 @@
 <h3 id="错误处理end-turn-不等于阻断下一轮-continuation">错误处理：end turn 不等于阻断下一轮 continuation</h3>
 <p>错误处理基于两个独立判定：</p>
 <ul>
-<li><strong>不可恢复 → end turn（loud fail）</strong>：<code>astream_with_retry</code> 用尽后仍失败、compaction 失败、agent 不存在等 → engine emit ERROR、<code>state["error"]=True</code>、break loop。turn 终止是 loud 的，用户能感知失败并选择 retry / 换思路。</li>
+<li><strong>不可恢复 → end turn（loud fail）</strong>：<code>astream_with_retry</code> 用尽后仍失败、compaction 失败、agent 不存在等 → engine <strong>不自己 emit ERROR</strong>，只置 <code>state["error"]=True</code> + 把详情记进 <code>state["error_detail"]</code>（<code>error</code>/<code>agent</code>/<code>request_id</code>）后 break loop。终态由 controller 后处理的 <code>decide_terminal</code>（flush 之后、单一裁判）统一构建唯一的 <code>ERROR</code> 终态事件并发射（见 <a href="../execution-lifecycle/">execution-lifecycle.md</a>）。这样 engine-error 也走 flush 后路径 → 终态 <code>artifacts_flushed</code> 必带且正确，不再有"引擎实时推一个 ERROR、controller 又推一个"的双发。turn 终止仍是 loud 的，用户能感知失败并选择 retry / 换思路。</li>
 <li><strong>end turn ≠ 阻断下一轮 continuation</strong>：events 在 <code>controller.post_process</code> 中<strong>无条件 persist</strong>（不论 <code>has_error</code>），失败 turn 的 <code>user_input</code> / <code>llm_complete</code> / <code>tool_complete</code> / 失败标记事件全部入库。下一条 user message 加载 <code>path_events</code> 时天然包含这些事件，<code>EventHistory</code> 跳过 <code>success=False</code> 的边界标记 → LLM 看到"上轮我做到这里、然后是新 user_input"，可以从 left off 处继续。除非用户主动 retry 失败 turn 或开新分支。</li>
 </ul>
 <p>推论（非显然，容易踩坑）：</p>

@@ -1893,8 +1893,12 @@
 <td>diff 模式的基线</td>
 </tr>
 <tr>
+<td><code>liveContent</code></td>
+<td><code>Record&lt;id, LiveArtifact&gt;</code> —— 引擎执行中由 <code>ARTIFACT_CREATED</code> / <code>ARTIFACT_UPDATED</code> 事件 reduce 出的 live 内容（span delta apply / 整文替换）</td>
+</tr>
+<tr>
 <td><code>pendingUpdates[]</code></td>
-<td>引擎执行中来自 <code>tool_complete.metadata.artifact_snapshot</code> 的增量覆盖</td>
+<td>本 turn 被触碰过的 artifact id 列表（驱动"有未落库更新"的 UI 提示）</td>
 </tr>
 <tr>
 <td><code>uploading</code>, <code>uploadError</code></td>
@@ -1902,7 +1906,7 @@
 </tr>
 </tbody>
 </table>
-<p><code>pendingUpdates</code> 是"DB 还未 flush、但 SSE 已推过来"的中间态（见 <a href="../architecture/artifacts/">architecture/artifacts.md</a>）—— 执行终止后由 <code>clearPendingUpdates()</code> 清掉，REST 再次拉取拿到 flush 后的权威数据。</p>
+<p>turn 中 artifact 的实时内容<strong>不再走</strong> <code>tool_complete.metadata.artifact_snapshot</code>（该机制已删）。<code>ArtifactService</code> 在 create/update/rewrite 时直接发 SSE-only 的 <code>ARTIFACT_CREATED</code> / <code>ARTIFACT_UPDATED</code>，<code>useSSE</code> 调 <code>applyArtifactCreated</code> / <code>applyArtifactUpdated</code> reduce 进 <code>liveContent</code>：首个 live 事件强制带整文（base），其后才发 span delta（<code>{offset, deleted_len, inserted_text}</code>），故前端永远先有 base 再 apply delta，无需中途查 DB（见 <a href="../architecture/artifacts/">architecture/artifacts.md</a> / <a href="../architecture/streaming/">architecture/streaming.md</a>）。执行终止后 <code>clearLiveContent()</code> 清掉，REST 再次拉取拿到 flush 后的权威数据。</p>
 <h3 id="uistore"><code>uiStore</code></h3>
 <table>
 <thead>
@@ -2029,7 +2033,7 @@
 <li>自动重连：非终端断开时最多 3 次，指数退避 1s / 2s / 4s，携带 <code>lastEventId</code></li>
 <li>共享 <code>AbortController</code> 防止切换对话时出现孤立连接</li>
 </ul>
-<p>Tool 事件副作用：<code>create_artifact</code> / <code>update_artifact</code> / <code>rewrite_artifact</code> 的 <code>tool_complete</code> 会触发 <code>uiStore.setArtifactPanelVisible(true)</code> 并把 <code>metadata.artifact_snapshot</code>（如果有）覆盖到 <code>artifactStore.pendingUpdates</code>；没有 snapshot 则走 REST 拉取。</p>
+<p>Tool 事件副作用：artifact 工具（<code>create_artifact</code> / <code>update_artifact</code> / <code>rewrite_artifact</code>）的 <code>tool_complete</code> 只用于自动开面板（<code>uiStore.setArtifactPanelVisible(true)</code>），<strong>不再携带内容</strong>——内容完全由独立的 <code>ARTIFACT_CREATED</code> / <code>ARTIFACT_UPDATED</code> 事件 reduce 进 <code>liveContent</code>（见上 <code>artifactStore</code>）。工具落盘的超长结果（<code>source="tool"</code>）同样发 <code>ARTIFACT_CREATED</code>。</p>
 <h2 id="性能优化">性能优化</h2>
 <h3 id="raf-节流-llm_chunk">RAF 节流 <code>llm_chunk</code></h3>
 <p>每个 token 都触发一次 React state 更新会把对话窗口卡死。<code>streamStore</code> 用模块级 <code>_rafId</code> / <code>_pendingContent</code> 缓存增量：</p>
