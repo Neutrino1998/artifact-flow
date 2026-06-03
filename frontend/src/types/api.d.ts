@@ -913,6 +913,27 @@ export interface components {
             conversation_id: string;
             /** Title */
             title: string | null;
+            /** User Id */
+            user_id: string | null;
+            /** User Display Name */
+            user_display_name: string | null;
+            /** Active Branch */
+            active_branch: string | null;
+            /**
+             * Is Active
+             * @default false
+             */
+            is_active: boolean;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
             /** Messages */
             messages: components["schemas"]["AdminMessageGroup"][];
         };

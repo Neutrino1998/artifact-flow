@@ -450,6 +450,12 @@ export interface AdminMessageGroup {
 export interface AdminConversationEventsResponse {
   conversation_id: string;
   title: string | null;
+  user_id: string | null;
+  user_display_name: string | null;
+  active_branch: string | null;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
   messages: AdminMessageGroup[];
 }
 

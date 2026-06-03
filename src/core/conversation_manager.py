@@ -473,12 +473,17 @@ class ConversationManager:
     async def get_admin_conversation_events(
         self,
         conv_id: str,
-    ) -> Optional[tuple[Conversation, List[Message], List[MessageEvent]]]:
+    ) -> Optional[tuple[Conversation, List[Message], List[MessageEvent], Optional[str]]]:
         """Admin 视图：取对话 + 所有消息 + 跨消息事件流（按 id 升序）。
 
         Returns:
-            (conversation, messages, events) 元组；对话不存在时返回 None。
+            (conversation, messages, events, owner_display_name) 元组；
+            对话不存在时返回 None。owner_display_name 在 session 内解析，
+            避免 router 触碰 lazy 的 owner 关系（MissingGreenlet）。
         """
+        from sqlalchemy import select
+        from db.models import User
+
         repo = self._ensure_repository()
         conv = await repo.get_conversation(conv_id)
         if not conv:
@@ -487,7 +492,15 @@ class ConversationManager:
         messages = await repo.get_conversation_messages(conv_id)
         event_repo = MessageEventRepository(repo.session)
         events = await event_repo.get_by_conversation(conv_id)
-        return conv, messages, events
+
+        owner_display_name: Optional[str] = None
+        if conv.user_id:
+            stmt = select(User.display_name, User.username).where(User.id == conv.user_id)
+            row = (await repo.session.execute(stmt)).first()
+            if row:
+                owner_display_name = row[0] or row[1]
+
+        return conv, messages, events, owner_display_name
 
     async def delete_conversation(self, conversation_id: str) -> bool:
         """
