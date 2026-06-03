@@ -668,10 +668,21 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#system-prompt-组装" class="md-nav__link">
+  <a href="#system-prompt-组装稳定可缓存前缀" class="md-nav__link">
     <span class="md-ellipsis">
       
-        System Prompt 组装
+        System Prompt 组装（稳定可缓存前缀）
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#动态上下文" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        动态上下文（&lt;system-reminder&gt;）
       
     </span>
   </a>
@@ -1518,10 +1529,21 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#system-prompt-组装" class="md-nav__link">
+  <a href="#system-prompt-组装稳定可缓存前缀" class="md-nav__link">
     <span class="md-ellipsis">
       
-        System Prompt 组装
+        System Prompt 组装（稳定可缓存前缀）
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#动态上下文" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        动态上下文（&lt;system-reminder&gt;）
       
     </span>
   </a>
@@ -1891,26 +1913,26 @@
 <p><strong>设计意图：</strong> Lead Agent 是唯一出口。Subagent 完成后必须经过 Lead 决定是否继续。</p>
 <h2 id="上下文加载策略">上下文加载策略</h2>
 <p><code>ContextManager.build()</code>（<code>src/core/context_manager.py</code>）是一个纯静态类方法，为每次 LLM 调用构建完整的 messages 列表。</p>
-<h3 id="system-prompt-组装">System Prompt 组装</h3>
-<p>System prompt 由六层拼接而成，每层按条件注入：</p>
+<h3 id="system-prompt-组装稳定可缓存前缀">System Prompt 组装（稳定可缓存前缀）</h3>
+<p>System prompt 只放<strong>全 session 稳定</strong>的内容，作为 prompt cache 的可缓存前缀；每轮刷新的动态上下文（系统时间 / task_plan / artifact 清单 / context 水位）一律移到消息尾部的 <code>&lt;system-reminder&gt;</code>（见下节），避免它们坐在前缀里把后续历史的缓存全部打掉。</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>┌─────────────────────────────────────────┐
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>│ 1. Role Prompt (AgentConfig.role_prompt) │  ← 始终注入
 <a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>├─────────────────────────────────────────┤
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>│ 2. System Time                           │  ← 始终注入
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>│ 2. Available Subagents                   │  ← 有 call_subagent 的 agent
 <a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>├─────────────────────────────────────────┤
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>│ 3. Task Plan (artifact id=&quot;task_plan&quot;)   │  ← 有 task_plan artifact 时
-<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>├─────────────────────────────────────────┤
-<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>│ 4. Artifacts Inventory                   │  ← 有 artifact 工具的 agent
-<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>├─────────────────────────────────────────┤
-<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>│ 5. Available Subagents                   │  ← 有 call_subagent 的 agent
-<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>├─────────────────────────────────────────┤
-<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>│ 6. Tool Instructions                     │  ← 有工具的 agent
-<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>└─────────────────────────────────────────┘
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>│ 3. Tool Instructions                     │  ← 有工具的 agent
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>└─────────────────────────────────────────┘
 </code></pre></div>
 <ul>
-<li><strong>Task Plan</strong>：从 artifacts 清单中查找 <code>id="task_plan"</code> 的 artifact，注入全文（版本号、内容类型、来源、更新时间）</li>
-<li><strong>Artifacts Inventory</strong>：每个 artifact 的内容截断到 <code>INVENTORY_PREVIEW_LENGTH</code>（预览），超长内容用 <code>&lt;content_preview&gt;</code> 标签</li>
 <li><strong>Available Subagents</strong>：排除当前 agent 和 <code>internal=true</code> 的 agent</li>
+</ul>
+<h3 id="动态上下文">动态上下文（<code>&lt;system-reminder&gt;</code>）</h3>
+<p>每轮 <code>build()</code> 现拼一个 ephemeral <code>&lt;system-reminder&gt;</code>，<strong>并入最后一条 user 消息正文</strong>（不进 system prompt、不持久化为 event），语义是「当前世界状态的一瞥」（glance, don't act）：</p>
+<ul>
+<li><strong>System Time</strong>：始终注入（刻意用本地时间，属 UX）</li>
+<li><strong>Task Plan</strong>：有 <code>id="task_plan"</code> artifact 时注入全文（版本号、内容类型、来源、更新时间）</li>
+<li><strong>Artifacts Inventory</strong>：有 artifact 工具的 agent 注入；每个 artifact 内容截断到 <code>INVENTORY_PREVIEW_LENGTH</code>（预览）</li>
+<li><strong>Context Usage</strong>：仅当上一次 LLM 调用的 <code>input+output ≥ CONTEXT_USAGE_WARN_RATIO × COMPACTION_TOKEN_THRESHOLD</code>（默认 0.8）时，注入 <code>&lt;context_usage&gt;</code> 水位预警 —— 显示 <code>X / 阈值 (NN%)</code>，并提示把要据此<strong>动作</strong>的状态落 artifact（artifact 活在 compaction 边界之外、每轮在 inventory 里，summary 可能丢细节）。水位以下整段不出现，避免每轮 cry-wolf。取数走 <code>last_llm_usage(events, agent_name)</code>：按 agent 过滤 + 在最近 compaction 边界后取最近一次 <code>llm_complete</code> 的 <code>token_usage</code>（与触发口径 input+output 一致；直接读原始事件，<strong>不受</strong>「content 空则丢 <code>_meta</code>」影响，故「高 input + 空 content」也能预警）。前端 composer 的 gauge 用同一口径（见下文 <em>Compaction 机制</em> 的 metrics 说明）。</li>
 </ul>
 <h3 id="消息构建">消息构建</h3>
 <p>历史与当前轮事件<strong>统一来源</strong>：都从 <code>state["events"]</code> 读出，<code>EventHistory.build_event_history(events, agent_name)</code>（<code>src/core/event_history.py</code>）负责 boundary 扫描 + agent 过滤，返回 LLM-ready 的 messages 列表。</p>
@@ -1986,7 +2008,7 @@
 <h3 id="触发条件">触发条件</h3>
 <p>每次 <code>_call_llm</code> 返回后，<code>compaction_runner.maybe_trigger(state, agent_name, input_tokens, output_tokens)</code> 被立即调用：</p>
 <ul>
-<li>条件：<code>input_tokens + output_tokens &gt; COMPACTION_TOKEN_THRESHOLD</code>（默认 80,000，本次 LLM 调用的 I/O 合计）</li>
+<li>条件：<code>input_tokens + output_tokens &gt; COMPACTION_TOKEN_THRESHOLD</code>（默认 100,000，本次 LLM 调用的 I/O 合计）</li>
 <li>满足条件 → 立即（blocking）执行 <code>compact_agent</code>，append <code>COMPACTION_SUMMARY</code> 到 tail</li>
 </ul>
 <h3 id="处理流程">处理流程</h3>
@@ -2098,7 +2120,8 @@
 </tr>
 </tbody>
 </table>
-<p>注意：<code>first_input_tokens</code> 和 <code>last_input_tokens</code> 仅对 lead_agent 追踪，作为上下文预算评估的观测指标。<strong>Compaction 触发依据不是这些 metric</strong> — <code>CompactionRunner</code> 在每次 LLM 调用后直接拿该次调用的 <code>input_tokens + output_tokens</code> 比对阈值，不读 metrics。<strong>特例</strong>：若 lead 一次 compaction 触发在 final response 之后（loop 即将结束、后续无 lead call 覆盖），<code>CompactionRunner</code> 会把该次 compact_agent 调用的 <code>output_tokens</code>（= summary 大小）回写到 <code>last_input_tokens</code>，作为下一轮带入上下文的实测代理（供前端 composer 的 context 用量 gauge 显示压缩后的下降）。仍是 lead-only：subagent compaction 不写此字段，避免在 cancel/timeout 窗口把 subagent summary 的 token 数泄漏成 lead 上下文估算。</p>
+<p>注意：<code>first_input_tokens</code> / <code>last_input_tokens</code> / <code>last_output_tokens</code> 仅对 lead_agent 追踪，作为上下文预算评估的观测指标。<strong>Compaction 触发依据不是这些 metric</strong> — <code>CompactionRunner</code> 在每次 LLM 调用后直接拿该次调用的 <code>input_tokens + output_tokens</code> 比对阈值，不读 metrics。</p>
+<p><strong>前端 composer 的 context 用量 gauge</strong>：分子 = <code>last_input_tokens + last_output_tokens</code>，与 compaction 的触发口径（input+output）对齐，使 gauge 与注入给模型的 <code>&lt;context_usage&gt;</code> 预警显示同一个数（详见 ContextManager 一节）。<strong>特例</strong>：若 lead 一次 compaction 触发在 final response 之后（loop 即将结束、后续无 lead call 覆盖），<code>CompactionRunner</code> 会把该次 compact_agent 调用的 <code>output_tokens</code>（= summary 大小）回写到 <code>last_input_tokens</code>、并同时把 <code>last_output_tokens</code> 归零，作为下一轮带入上下文的实测代理（压缩后只剩 summary、尚无 output 分量，故归零以保留 gauge 的「压缩后回落」，不让 stale output 叠进来）。仍是 lead-only：subagent compaction 不写此字段，避免在 cancel/timeout 窗口把 subagent summary 的 token 数泄漏成 lead 上下文估算。</p>
 <h3 id="事件收集">事件收集</h3>
 <p>所有执行事件在引擎运行期间累积到 <code>state["events"]</code> 列表中：</p>
 <ul>
