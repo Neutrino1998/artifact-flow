@@ -32,6 +32,13 @@ function IconButton({
   );
 }
 
+// Plain text-row nav buttons (no border/fill) — icon + label with a subtle hover highlight.
+const navRowClass =
+  'w-full flex items-center gap-2.5 px-2 py-1.5 font-medium text-text-primary dark:text-text-primary-dark hover:bg-chat/70 dark:hover:bg-panel-accent-dark/60 rounded-lg transition-colors';
+
+const navRowDangerClass =
+  'w-full flex items-center gap-2.5 px-2 py-1.5 font-medium text-red-500 hover:bg-red-50 dark:hover:bg-red-900/10 rounded-lg transition-colors';
+
 const RefreshIcon = ({ size = 16, spinning = false }: { size?: number; spinning?: boolean }) => (
   <svg
     width={size}
@@ -211,14 +218,14 @@ export default function Sidebar() {
       </div>
 
       {/* Action buttons */}
-      <div className="px-3 pt-3 pb-3 space-y-2">
+      <div className="px-3 pt-3 pb-3 space-y-0.5">
         {inObservability ? (
           <>
             <button
               onClick={handleSearchAdmin}
-              className="w-full flex items-center gap-2 px-3 py-2 font-medium text-text-primary bg-chat dark:bg-panel-accent-dark dark:text-text-primary-dark rounded-card border border-border dark:border-border-dark hover:bg-surface dark:hover:bg-[#141414] transition-colors"
+              className={navRowClass}
             >
-              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
                 <circle cx="7" cy="7" r="5" />
                 <path d="M11 11l3.5 3.5" />
               </svg>
@@ -226,16 +233,16 @@ export default function Sidebar() {
             </button>
             <button
               onClick={handleRefresh}
-              className="w-full flex items-center gap-2 px-3 py-2 font-medium text-text-primary bg-chat dark:bg-panel-accent-dark dark:text-text-primary-dark rounded-card border border-border dark:border-border-dark hover:bg-surface dark:hover:bg-[#141414] transition-colors"
+              className={navRowClass}
             >
-              <RefreshIcon size={14} spinning={refreshSpinning} />
+              <RefreshIcon size={16} spinning={refreshSpinning} />
               刷新对话
             </button>
             <button
               onClick={handleExitObservability}
-              className="w-full flex items-center gap-2 px-3 py-2 font-medium text-red-500 bg-chat dark:bg-panel-accent-dark rounded-card border border-border dark:border-border-dark hover:bg-red-50 dark:hover:bg-red-900/10 transition-colors"
+              className={navRowDangerClass}
             >
-              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
                 <path d="M9 3H4a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h5M7 8h6m0 0l-2-2m2 2l-2 2" />
               </svg>
               退出监控
@@ -247,9 +254,9 @@ export default function Sidebar() {
             {!inUserMgmt && (
               <button
                 onClick={toggleArtifactPanel}
-                className="w-full flex items-center gap-2 px-3 py-2 font-medium text-text-primary bg-chat dark:bg-panel-accent-dark dark:text-text-primary-dark rounded-card border border-border dark:border-border-dark hover:bg-surface dark:hover:bg-[#141414] transition-colors"
+                className={navRowClass}
               >
-                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
                   <rect x="2" y="2" width="12" height="12" rx="1.5" />
                   <path d="M5 6h6M5 8.5h4" />
                 </svg>
@@ -258,9 +265,9 @@ export default function Sidebar() {
             )}
             <button
               onClick={handleSearchChat}
-              className="w-full flex items-center gap-2 px-3 py-2 font-medium text-text-primary bg-chat dark:bg-panel-accent-dark dark:text-text-primary-dark rounded-card border border-border dark:border-border-dark hover:bg-surface dark:hover:bg-[#141414] transition-colors"
+              className={navRowClass}
             >
-              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
                 <circle cx="7" cy="7" r="5" />
                 <path d="M11 11l3.5 3.5" />
               </svg>
@@ -268,9 +275,9 @@ export default function Sidebar() {
             </button>
             <button
               onClick={handleNewChat}
-              className="w-full flex items-center gap-2 px-3 py-2 font-medium text-text-primary bg-chat dark:bg-panel-accent-dark dark:text-text-primary-dark rounded-card border border-border dark:border-border-dark hover:bg-surface dark:hover:bg-[#141414] transition-colors"
+              className={navRowClass}
             >
-              <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5">
+              <svg width="16" height="16" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5">
                 <path d="M7 2v10M2 7h10" />
               </svg>
               新建对话
@@ -278,9 +285,9 @@ export default function Sidebar() {
             {inUserMgmt && (
               <button
                 onClick={handleExitUserMgmt}
-                className="w-full flex items-center gap-2 px-3 py-2 font-medium text-red-500 bg-chat dark:bg-panel-accent-dark rounded-card border border-border dark:border-border-dark hover:bg-red-50 dark:hover:bg-red-900/10 transition-colors"
+                className={navRowDangerClass}
               >
-                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
                   <path d="M9 3H4a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h5M7 8h6m0 0l-2-2m2 2l-2 2" />
                 </svg>
                 退出用户管理
@@ -291,6 +298,9 @@ export default function Sidebar() {
       </div>
 
       {/* Conversation list */}
+      <div className="px-5 pt-2 pb-1 text-xs font-semibold text-text-tertiary dark:text-text-tertiary-dark">
+        对话列表
+      </div>
       {inObservability ? <AdminConversationList /> : <ConversationList />}
 
       {/* Notifications + user menu at bottom */}
