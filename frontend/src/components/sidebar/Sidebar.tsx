@@ -113,7 +113,7 @@ export default function Sidebar() {
   // ── Collapsed: 48px icon bar ──
   if (sidebarCollapsed) {
     return (
-      <div className="flex flex-col items-center h-full bg-panel-accent dark:bg-panel-dark py-3 gap-1 w-12">
+      <div className="flex flex-col items-center h-full bg-panel-accent dark:bg-panel-dark py-3 gap-1 w-full">
         {/* Expand */}
         <IconButton onClick={toggleSidebar} label="展开侧栏">
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
