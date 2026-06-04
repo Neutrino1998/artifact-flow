@@ -76,6 +76,7 @@ const config: Config = {
         modal: 'var(--shadow-modal)',
         float: 'var(--shadow-float)',
         sidebar: 'var(--shadow-sidebar)',
+        'sidebar-card': 'var(--shadow-sidebar-card)',
       },
       keyframes: {
         'slide-in-right': {

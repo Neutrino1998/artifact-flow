@@ -57,7 +57,8 @@ export default function ThreeColumnLayout({
       if (!isDragging.current || !containerRef.current) return;
       const containerRect = containerRef.current.getBoundingClientRect();
       const newArtifactWidth = containerRect.right - e.clientX;
-      const sidebarWidth = sidebarCollapsed ? (isMd ? 48 : 0) : 256;
+      // Card widths include the p-2 gutter: collapsed w-16=64px, expanded w-[17rem]=272px.
+      const sidebarWidth = sidebarCollapsed ? (isMd ? 64 : 0) : 272;
       const maxArtifactWidth = containerRect.width - sidebarWidth - MIN_CHAT_WIDTH;
       const clamped = Math.max(MIN_ARTIFACT_WIDTH, Math.min(maxArtifactWidth, newArtifactWidth));
       setArtifactWidth(clamped);
@@ -116,14 +117,17 @@ export default function ThreeColumnLayout({
         </>
       )}
 
-      {/* Sidebar — hidden below md, icon-bar when collapsed */}
+      {/* Sidebar — floating rounded card; hidden below md, icon-bar when collapsed.
+          The p-2 gutter is the gap that separates the card from the backdrop and
+          the chat column, replacing the old border-r divider. Wrapper widths
+          include the 16px gutter (card = wrapper − p-2): w-14→48px, w-[17rem]→256px. */}
       {showSidebar && (
         <div
-          className={`flex-shrink-0 transition-[width] duration-150 ease-out overflow-hidden relative z-10 border-r border-border dark:border-border-dark ${
-            sidebarCollapsed ? 'w-12' : 'w-64'
+          className={`flex-shrink-0 transition-[width] duration-150 ease-out relative z-10 p-2 ${
+            sidebarCollapsed ? 'w-16' : 'w-[17rem]'
           }`}
         >
-          <div className={`${sidebarCollapsed ? 'w-12' : 'w-64'} h-full`}>
+          <div className="h-full w-full rounded-card overflow-hidden bg-panel-accent dark:bg-panel-dark border border-border dark:border-border-dark shadow-sidebar-card">
             {sidebar}
           </div>
         </div>

@@ -41,12 +41,15 @@
   :root {
     --shadow-float: 0 2px 12px rgba(0,0,0,0.08), 0 0 1px rgba(0,0,0,0.05);
     --shadow-sidebar: 2px 0 12px rgba(0,0,0,0.08);
+    /* Floating left card: layered for a wide, gradual falloff (vs the tight --shadow-sidebar). */
+    --shadow-sidebar-card: 4px 0 16px rgba(0,0,0,0.035), 12px 0 40px rgba(0,0,0,0.03);
     --shadow-modal: 0 4px 12px rgba(0,0,0,0.08);
     --shadow-hover: 0 1px 2px rgba(0,0,0,0.05);
   }
   .dark {
     --shadow-float: 0 2px 12px rgba(0,0,0,0.3), 0 0 1px rgba(0,0,0,0.15);
     --shadow-sidebar: 2px 0 12px rgba(0,0,0,0.18);
+    --shadow-sidebar-card: 4px 0 18px rgba(0,0,0,0.13), 14px 0 48px rgba(0,0,0,0.10);
     --shadow-modal: 0 4px 12px rgba(0,0,0,0.3);
     --shadow-hover: 0 1px 2px rgba(0,0,0,0.2);
   }
