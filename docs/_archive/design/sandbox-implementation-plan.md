@@ -96,17 +96,25 @@
 
 ### C — 沙盒引擎集成(本机 runc 连调;依赖 A 的二进制存储 + B 的镜像)
 
-**做什么**:把沙盒接进引擎,给 agent 两个工具。
+**做什么**:把沙盒接进引擎,给 agent **三个分立的模型面工具**(`bash` / `mount` / `persist`),底下共享**一个 per-turn `SandboxSession`**。
+
+**工具面 = 三个动词,实现 = 一个共享 session**(拍定 2026-06-03):三者是语义不同的动词、参数形状各异(bash 吃 `command`、mount 吃 `artifact_id`、persist 吃 `path`+命名/zip),分立比合成单一 `sandbox(action=...)` 工具参数面更小、对小模型更可读,也与现有 `*_artifact` 工具 idiom 及 per-verb 权限粒度一致(见原则:Minimize tool parameter surface)。「共用启动/沙盒交互」是**实现层**事实(本就该有),不构成合并工具面的理由。`SandboxSession`(per-turn)owns 容器生命周期 + bind-mount 工作区/uid 映射 + reap 注册 + 绑定本 turn 的 `ArtifactWorkingSet`;三个工具都是其上的薄操作。推论:**lazy 创建 key 在「首个沙盒工具调用」而非「首个 bash」**——模型可能先 mount 再 bash。
 
 **包含**:
-- **容器生命周期**:per-turn ephemeral,绑 message_id 的 lease,turn 结束销毁。**最关键的纪律**:bash 工具本身是 IO 等待、天然可取消,**但容器在协程被取消后仍在烧 CPU**——所以容器拆除必须挂在"每条退出路径(成功 / 超时 / 协作取消 / 外部取消 / 崩溃)都会跑到"的那个清理点上,**不能放在会被 late-cancel 抢占的后处理里**,否则漏拆 = 孤儿容器烧 CPU(2026-05-14 事故的同款失效模式)。
+- **容器生命周期(生 lazy / 灭跟 lease 同层)**:per-turn ephemeral,绑 message_id。
+  - **生 = lazy**:首个沙盒工具调用时才起容器(多数 turn 不开沙盒,eager 等于在多数 turn 上空转创建+销毁 runsc),本 turn 内后续调用复用同一 scratch 工作区;创建失败 → **tool 级 loud-fail**,该 turn 沙盒工具不可用(模型据 tool result 改道),不拖垮非沙盒工作。
+  - **灭 = 跟 lease 同一层**:bash 本身 IO 等待、天然可取消,**但容器在协程被取消后仍在烧 CPU**——拆除必须挂执行器 `_wrapped` 的 `finally`(`cleanup_execution` 隔壁),它是**真 `finally`**,成功 / 超时 / 协作取消 / 外部取消 / 崩溃五条退出都在解栈时执行,与 lease 释放同生灭(容器与 lease 都是绑 turn 的易失态,贯穿原则 1)。**绝不放 post-processing**——那是被设计成可被 late-cancel 抢占、靠重试补的区域,其单发 `except CancelledError` 恢复是"尽力补审计记录",兜不住会烧 CPU 的活资源;漏拆 = 孤儿容器(2026-05-14 同款失效模式)。
+  - **进程死亡的二级兜底 = lease-anchored reap**:worker 被 SIGKILL / OOM 时 `finally` 不执行,容器归 daemon(DooD)不随 worker 死 → 孤儿继续烧 CPU。**lease 是唯一 liveness 真相源**(它恰在"turn 合法地在活 worker 上跑"期间被持续续租,正是容器应活的充要条件,故零误杀、无需猜固定余量)。reaper 启动时 + 定期把**带 label 的活容器集**与 `list_active_executions` 做**差集**,差集即孤儿 → `docker rm -f`。复用 `list_active_executions` 既有的 Cluster-safe scan+pipeline fan-out,**别 N 个容器各查一次 lease**。
+    - **对账粒度必须 per-turn**:label 带到 turn 粒度(`af-sandbox-{conversation_id}-{message_id}` / 绑 task_id),对账问的是"**这个 message_id/task 还在 `list_active_executions` 里吗**"——**不能按会话**查,否则同会话紧接的新 turn 持着活 lease,会让上一 turn 漏拆的孤儿被误判"有主"而永不回收。
+    - **自觉取舍**:最坏烧 CPU 时长 = lease TTL 剩余 + reaper 间隔(有界,~分钟级,对照 2026-05-14 的 96 分钟可忽略);加小 grace(只 reap 已存活 > N 秒且无对应活跃执行的容器)躲开"刚 lazy 创建、执行注册可见性差一拍"的竞态;reap 顺带兜住"创建到一半被 cancel、handle 未注册"的漏网(它以 daemon 为真相源、按 label 查,不靠内存句柄)。
+    - **残留洞(决定要不要保留固定上限)**:reap 起效前提是"有活 reaper 能扫到孤儿所在 daemon"。worker 崩后重启(启动扫)/ 同 daemon 有活 sibling(周期扫)都覆盖;唯独"一 worker 独占一 daemon 且死不重启"够不着——**仅此场景**才需保留一个宽松固定上限(容器内 `timeout`+`--rm`)当最后兜底。是否需要取决于部署拓扑,留 TODO 到 B/D 阶段按真实拓扑拍。
 - **bash 工具**:CONFIRM 权限(跑不可信代码)。
 - **持久化工具**(模型显式调用,描述 present 给用户):落实决策 3 的回写二分,文件数与字节数上限兜底。
 - **挂载(显式 stage 进出)**:模型显式把指定 artifact 物化进工作区(zip 作 blob 进、容器内解压),回写也显式;不自动物化整 session。见原则 4 的定性。
 - **DooD + 配额**:backend 挂 docker.sock 起沙盒,资源配额(内存 / CPU / pids / 网络);**容器创建参数不可被模型生成内容污染**(镜像/挂载/runtime 固定在代码侧)。
 - **文档转换走沙盒**:pandoc 装进沙盒镜像(B 验过),富格式读(docx→md)和写都由 agent 在沙盒里跑 pandoc。**驱动场景**:用户要带格式的 Word 时,模型以用户上传/原有 docx 作 `--reference-doc` 样式模版,在沙盒里 md→docx 生成,产物回写成可下载 blob——比固定的 md→docx 导出保真,可能取代现有的 md→Word 导出路径。**门控变化(衔接 artifact plan 决策 6)**:现有 `/export` 是同步 REST 读,turn 中按「前端 UX 锁的读」处理;一旦导出搬进沙盒 = 起容器 = **执行**,就从读升级为 **lease 挡的写/执行**(跟 bash 工具同级),门控责任从前端移到后端 lease。替换 md→Word 路径时一并改门控,别留前端旧锁。
 
-**到时再敲定**:并发上限;bash 输出溢出是截断还是转 artifact;zip 命名与"可单独查看"白名单。(原"挂哪些 artifact:全部 vs 被引用"已由原则 4 的显式 mount 关闭——模型 mount 谁就有谁。)
+**到时再敲定**:并发上限;bash 输出溢出是截断还是转 artifact;zip 命名与"可单独查看"白名单。(原"挂哪些 artifact:全部 vs 被引用"已由原则 4 的显式 mount 关闭——模型 mount 谁就有谁;原"沙盒工具是否合并"已拍定分立三工具 + 共享 `SandboxSession`,见上。)
 
 ### D — 上线前 Kylin 端到端冒烟
 
@@ -126,6 +134,8 @@
 - 2026-05-21 用户给出驱动场景:富格式(Word)按 blob 存 + pandoc-in-sandbox 当统一转换层(读 docx→md;写 md→docx 以原 docx 作 `--reference-doc` 模版保真生成)。据此拍定:pandoc 落点=沙盒镜像(非 backend);A3 的"上传预转 md"降级为可选面板预览、非架构必需(故"额外字段"不必现在决定);Non-goal 收窄为"不自动反向同步源 blob"(显式生成新 docx 是 in-scope)。
 - 2026-05-21 拍定:确立 philosophy「artifact 层只承载文件源、转换全归模型沙盒」(新增为原则 6),前端/后端不做固定转换。Word 导出 = 沙盒专属能力(目标态),现有 md→Word 过渡期保留、沙盒成熟后下线。已确认接受推论:无沙盒部署里富格式连"读"都没有(读也属沙盒能力)。原 C 的"Word 导出是否改走沙盒"待决项随之关闭。
 - 2026-05-21 明确分支策略:全程在 `feat/sandbox` 做,沙盒成熟后整体 merge 回 main,不增量合(避免半迁移态漏到生产)。撤销先前"A 可先行合 main"的提法。
+- 2026-05-28 新增「能力边界(产品定位推论)」节:把 ArtifactFlow 定位为多用户中心的 agent 编排平台,显式排除「持续工作态 dev loop」(跨轮代码库增删改 / 低延迟 read-edit-debug / 长任务中间态),不试图替代 Claude Code 那类本地形态。沙盒覆盖的是单 turn 闭环的一次性任务(重不重不是问题,"持续"才是)。作为后续遇到此类功能诉求时的产品边界判断指南——本质冲突应先质疑场景,再考虑技术方案。
 - 2026-06-02 新增底座依赖 `artifact-layer-redesign-plan.md`:本次挂载/回写显式化的讨论顺藤摸出 artifact 层(`ArtifactManager`)与多 worker 架构错配(live overlay 跨 worker 静默失效,单 worker 潜伏),另起该重构 plan。两条约束:① 重构先于本 plan C 阶段;A 阶段二进制存储建在新四层、非已删的 `ArtifactManager`;② 二进制(docx/zip)走「元数据事件 + REST 取字节」,复用重构 plan 的溢出口,不另造。本 plan 方向/决策/阶段不变,仅底座换干净。
 - 2026-06-02 挂载改显式:原则 4 从"挂载进容器自动(镜像)"重写为"沙盒是显式 stage 进出的工作区,不是 artifact store 的自动镜像"。核心是定性——容器 fs 是 scratch 工作区而非 artifact 的第三态,persist 落回即一次普通 artifact 写,工作区对 store 无同步义务,三态一致性问题消解。保留内存态(它是 artifact 脊柱,不能耦合到"有沙盒在跑";砍内存态会让无沙盒/BLOCKED 部署失去 artifact 能力、违反原则 1)。顺带关闭 C 阶段"挂哪些 artifact:全部 vs 被引用"待决项(显式 by construction)。同步改 C 阶段「挂载」条目。
-- 2026-05-28 新增「能力边界(产品定位推论)」节:把 ArtifactFlow 定位为多用户中心的 agent 编排平台,显式排除「持续工作态 dev loop」(跨轮代码库增删改 / 低延迟 read-edit-debug / 长任务中间态),不试图替代 Claude Code 那类本地形态。沙盒覆盖的是单 turn 闭环的一次性任务(重不重不是问题,"持续"才是)。作为后续遇到此类功能诉求时的产品边界判断指南——本质冲突应先质疑场景,再考虑技术方案。
+- 2026-06-03 敲定容器创建/销毁时机(C 阶段「容器生命周期」条):**生 = lazy**(首个沙盒工具调用才起容器,本 turn 复用;创建失败→tool 级 loud-fail、沙盒工具该 turn 不可用);**灭 = 跟 lease 同一层**(挂执行器 `_wrapped` 的真 `finally`/`cleanup_execution`,五条退出路径都解栈执行,与 lease 同生灭——非 post-processing,后者是可被 late-cancel 抢占、靠重试补的区域);进程死亡靠 **lease-anchored reap** 二级兜底:**lease 是唯一 liveness 真相源**(turn 合法跑期间持续续租=容器应活的充要条件,零误杀、无需固定余量),reaper 把"带 label 活容器集 ⨯ `list_active_executions`"做差集杀孤儿,**对账须 per-turn 粒度**(label 带 conv+message_id,否则同会话新 turn 的活 lease 会让上轮漏拆孤儿被误判有主)。最坏烧时=lease TTL+reaper 间隔(有界);固定上限(容器内 `timeout`+`--rm`)降级为"仅当 daemon 拓扑可能无活 reaper 扫(一 worker 独占 daemon 且死不重启)"的可选最后兜底,B/D 阶段按真实拓扑拍。澄清两轴正交:lazy vs eager=资源/延迟轴(lazy 赢);robustness=拆除锚定轴(与创建时机正交)。修正前稿"label reap 镜像 TTL fencing"的不准确表述(主动轮巡≠被动 TTL;容器运行时无可续租 TTL 原语,生命周期是编排层而非 runsc 的事)。
+- 2026-06-03 拍定沙盒工具面:**分立三个模型面工具(`bash`/`mount`/`persist`)+ 底下共享一个 per-turn `SandboxSession`**。分立胜出因三者动词/参数形状各异,合成 `sandbox(action=...)` 会撑大参数面、违反「Minimize tool parameter surface」、坏小模型 legibility,且不一致于现有 `*_artifact` 工具 idiom 与 per-verb 权限粒度。「共用启动/交互」是实现层共享(本就该有),非合并工具面的理由——共享 session 恰是让分立工具保持薄的东西。推论:lazy 创建 key 在「首个沙盒工具调用」(mount 可能先于 bash)。关闭 C 阶段「沙盒工具是否合并」待敲定。
