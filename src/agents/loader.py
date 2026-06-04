@@ -97,6 +97,7 @@ def load_all_agents(agents_dir: Optional[str] = None) -> dict[str, AgentConfig]:
         agents_dir = os.path.join(project_root, "config", "agents")
 
     agents = {}
+    errors = []
     for filename in sorted(os.listdir(agents_dir)):
         if not filename.endswith(".md"):
             continue
@@ -107,6 +108,17 @@ def load_all_agents(agents_dir: Optional[str] = None) -> dict[str, AgentConfig]:
             agents[config.name] = config
             logger.info(f"Loaded agent: {config.name} from {filename}")
         except Exception as e:
+            # 静默丢弃坏 agent 也是一种 silent fallback:operator 把文件放进
+            # config/agents/ 就期望它加载,丢失要到 /meta 或执行路径才暴露(若丢的是
+            # lead_agent 更难定位)。聚合全部错误后启动期 loud-fail —— 一次看全所有坏
+            # 文件,而非逐个修。与 JWT_SECRET/DATABASE_URL 缺失即停一致。
             logger.error(f"Failed to load agent from {filename}: {e}")
+            errors.append(f"{filename}: {e}")
+
+    if errors:
+        raise ValueError(
+            "Failed to load agent config(s) — fix before startup:\n  "
+            + "\n  ".join(errors)
+        )
 
     return agents

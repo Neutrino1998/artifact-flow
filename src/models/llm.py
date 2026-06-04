@@ -84,18 +84,21 @@ def _resolve_model_params(
         # YAML 级 base_url/api_key(函数参数优先)
         base_url = base_url or model_config.get("base_url")
         api_key = api_key or model_config.get("api_key")
-    elif "/" in model:
-        # 原始 litellm 格式(带 provider 前缀,如 deepseek/deepseek-chat、ollama/llama3)。
-        # 故意支持,直接透传。
+    elif "/" in model or base_url:
+        # 故意支持的两条直传路径,都不经 yaml:
+        #   1. 原始 litellm 格式(带 provider 前缀,如 deepseek/deepseek-chat、ollama/llama3)
+        #   2. 自部署直传:给了 base_url 时,裸 model 是自部署 OpenAI 兼容端点的 model id
+        #      (由下方自动加 openai/ 前缀)。这是函数签名承诺的用法,不能被 guard 打断。
         model_id = model
         model_params = {}
     else:
-        # 裸名且不在 models.yaml —— 几乎必是 typo(写错别名/残留旧别名)。
+        # 裸名 + 不在 models.yaml + 无 base_url —— 几乎必是 typo(写错别名/残留旧别名)。
         # 静默透传会让 litellm 拿它当原始 model id 去调 → 用户以为在用 A 实际跑了 B
         # (behavior-different silent fallback)。loud-fail,让 operator 当场发现。
         raise ValueError(
-            f"Unknown model '{model}': not a configured alias in models.yaml and not a "
-            f"litellm provider-prefixed id (no '/'). Available aliases: {sorted(models)}"
+            f"Unknown model '{model}': not a configured alias in models.yaml, not a "
+            f"litellm provider-prefixed id (no '/'), and no base_url for direct passthrough. "
+            f"Available aliases: {sorted(models)}"
         )
 
     params: dict = {

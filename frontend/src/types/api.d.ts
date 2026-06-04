@@ -1418,7 +1418,7 @@ export interface components {
             compaction_token_threshold: number;
             /**
              * Lead Agent Model
-             * @description Model identifier configured for the lead_agent (e.g. 'qwen3.6-plus'). Surfaced in the composer so the user can see which model is driving the current conversation without digging into agent MD files.
+             * @description Model identifier configured for the lead_agent (e.g. 'qwen3.7-max'). Surfaced in the composer so the user can see which model is driving the current conversation without digging into agent MD files.
              */
             lead_agent_model: string;
         };
