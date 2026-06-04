@@ -2247,6 +2247,54 @@
             ],
             "title": "Title"
           },
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
+          },
+          "user_display_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Display Name"
+          },
+          "active_branch": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Active Branch"
+          },
+          "is_active": {
+            "type": "boolean",
+            "title": "Is Active",
+            "default": false
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          },
           "messages": {
             "items": {
               "$ref": "#/components/schemas/AdminMessageGroup"
@@ -2259,6 +2307,12 @@
         "required": [
           "conversation_id",
           "title",
+          "user_id",
+          "user_display_name",
+          "active_branch",
+          "is_active",
+          "created_at",
+          "updated_at",
           "messages"
         ],
         "title": "AdminConversationEventsResponse",

@@ -51,4 +51,10 @@ class AdminConversationEventsResponse(BaseModel):
     """GET /api/v1/admin/conversations/{conv_id}/events response"""
     conversation_id: str
     title: Optional[str] = None
+    user_id: Optional[str] = None
+    user_display_name: Optional[str] = None
+    active_branch: Optional[str] = None
+    is_active: bool = False
+    created_at: datetime
+    updated_at: datetime
     messages: List[AdminMessageGroup]

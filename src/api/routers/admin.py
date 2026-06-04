@@ -98,7 +98,10 @@ async def get_admin_conversation_events(
     result = await conversation_manager.get_admin_conversation_events(conv_id)
     if result is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
-    conv, messages, all_events = result
+    conv, messages, all_events, owner_display_name = result
+
+    store = get_runtime_store()
+    is_active = conv_id in set(await store.list_active_conversations())
 
     # Group events by message_id
     events_by_msg: dict[str, list] = {}
@@ -134,6 +137,12 @@ async def get_admin_conversation_events(
     return AdminConversationEventsResponse(
         conversation_id=conv_id,
         title=conv.title,
+        user_id=conv.user_id,
+        user_display_name=owner_display_name,
+        active_branch=conv.active_branch,
+        is_active=is_active,
+        created_at=conv.created_at,
+        updated_at=conv.updated_at,
         messages=groups,
     )
 

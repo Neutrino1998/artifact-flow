@@ -18,7 +18,7 @@ function ConversationItem({ conversation, isActive, onSelect }: ConversationItem
   const [showMenu, setShowMenu] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const { copied: copyFeedback, copy } = useCopyFeedback();
+  const { copy } = useCopyFeedback();
   const removeConversation = useConversationStore((s) => s.removeConversation);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -79,7 +79,6 @@ function ConversationItem({ conversation, isActive, onSelect }: ConversationItem
         <div className="flex items-center gap-2 mt-0.5 text-xs text-text-tertiary dark:text-text-tertiary-dark">
           <span>{date}</span>
           <span>{conversation.message_count} messages</span>
-          {copyFeedback && <span className="text-accent">ID copied</span>}
         </div>
 
         {/* ··· menu trigger */}

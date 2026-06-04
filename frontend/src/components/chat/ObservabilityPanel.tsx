@@ -1,7 +1,9 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
+import type { ReactNode } from 'react';
 import { useCopyFeedback } from '@/hooks/useCopyFeedback';
+import { CopyIcon } from '@/components/ui/CopyIcon';
 import * as api from '@/lib/api';
 import { parseUtcIso } from '@/lib/time';
 import PanelSearchBar from './PanelSearchBar';
@@ -129,6 +131,67 @@ function StatCard({ label, value }: { label: string; value: string }) {
   );
 }
 
+function formatDateTime(iso: string): string {
+  try {
+    return parseUtcIso(iso).toLocaleString('zh-CN', { hour12: false });
+  } catch {
+    return iso;
+  }
+}
+
+// Copyable id (conv id / active branch) — swaps to a checkmark on copy, like
+// the chat copy button. `mono` shows the value verbatim for ids.
+function CopyableValue({ value, mono = false }: { value: string; mono?: boolean }) {
+  const { copied, copy } = useCopyFeedback();
+  return (
+    <button
+      type="button"
+      onClick={() => copy(value)}
+      title="点击复制"
+      className={`inline-flex items-center gap-1 hover:text-text-secondary dark:hover:text-text-secondary-dark transition-colors max-w-full align-bottom ${mono ? 'font-mono' : ''}`}
+    >
+      <span className="truncate">{value}</span>
+      <CopyIcon copied={copied} size={11} />
+    </button>
+  );
+}
+
+// One "label: value" cell in the header meta row.
+function MetaItem({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <span className="inline-flex items-center gap-1 min-w-0">
+      <span className="text-text-tertiary dark:text-text-tertiary-dark">{label}</span>
+      <span className="text-text-secondary dark:text-text-secondary-dark min-w-0 truncate">{children}</span>
+    </span>
+  );
+}
+
+// Header metadata block: conv id + owner + branch + timestamps.
+function ConvMetaBlock({ data, fallbackConvId }: {
+  data: AdminConversationEventsResponse | null;
+  fallbackConvId: string | null;
+}) {
+  const convId = data?.conversation_id || fallbackConvId;
+  if (!convId) return null;
+  return (
+    <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-text-tertiary dark:text-text-tertiary-dark">
+      <MetaItem label="ID"><CopyableValue value={convId} mono /></MetaItem>
+      {data?.user_display_name && (
+        <MetaItem label="属主">{data.user_display_name}</MetaItem>
+      )}
+      {data?.active_branch && (
+        <MetaItem label="活跃分支"><CopyableValue value={data.active_branch} mono /></MetaItem>
+      )}
+      {data?.created_at && (
+        <MetaItem label="创建">{formatDateTime(data.created_at)}</MetaItem>
+      )}
+      {data?.updated_at && (
+        <MetaItem label="更新">{formatDateTime(data.updated_at)}</MetaItem>
+      )}
+    </div>
+  );
+}
+
 // ── Main Panel ──
 export default function ObservabilityPanel() {
   const selectedConvId = useUIStore((s) => s.observabilitySelectedConvId);
@@ -219,11 +282,12 @@ export default function ObservabilityPanel() {
     <div className="flex-1 flex min-h-0 bg-chat dark:bg-chat-dark">
       {/* Main column */}
       <div className="flex-1 flex flex-col min-w-0">
-        {/* Header (title + tabs) */}
+        {/* Header (title + conv id + tabs) */}
         <div className="px-4 pt-3 pb-2 border-b border-border dark:border-border-dark">
           <div className="text-sm font-semibold text-text-primary dark:text-text-primary-dark truncate">
             {headerTitle}
           </div>
+          <ConvMetaBlock data={eventsData} fallbackConvId={selectedConvId} />
           <div className="mt-2 inline-flex p-0.5 rounded-lg bg-panel-accent dark:bg-surface-dark text-xs">
             <TabButton active={viewMode === 'events'} onClick={() => setViewMode('events')}>
               Events

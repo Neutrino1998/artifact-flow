@@ -309,7 +309,7 @@ function BrowserItem({
   const [showMenu, setShowMenu] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const { copied: copyFeedback, copy } = useCopyFeedback();
+  const { copy } = useCopyFeedback();
   const menuRef = useRef<HTMLDivElement>(null);
   const title = conversation.title || 'Untitled';
   const date = parseUtcIso(conversation.updated_at).toLocaleDateString();
@@ -371,7 +371,6 @@ function BrowserItem({
             <div className="flex items-center gap-2 mt-1 text-xs text-text-tertiary dark:text-text-tertiary-dark">
               <span>{date}</span>
               <span>{conversation.message_count} messages</span>
-              {copyFeedback && <span className="text-accent">ID copied</span>}
             </div>
           </div>
         </div>
