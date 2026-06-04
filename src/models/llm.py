@@ -84,9 +84,19 @@ def _resolve_model_params(
         # YAML 级 base_url/api_key(函数参数优先)
         base_url = base_url or model_config.get("base_url")
         api_key = api_key or model_config.get("api_key")
-    else:
+    elif "/" in model:
+        # 原始 litellm 格式(带 provider 前缀,如 deepseek/deepseek-chat、ollama/llama3)。
+        # 故意支持,直接透传。
         model_id = model
         model_params = {}
+    else:
+        # 裸名且不在 models.yaml —— 几乎必是 typo(写错别名/残留旧别名)。
+        # 静默透传会让 litellm 拿它当原始 model id 去调 → 用户以为在用 A 实际跑了 B
+        # (behavior-different silent fallback)。loud-fail,让 operator 当场发现。
+        raise ValueError(
+            f"Unknown model '{model}': not a configured alias in models.yaml and not a "
+            f"litellm provider-prefixed id (no '/'). Available aliases: {sorted(models)}"
+        )
 
     params: dict = {
         "model": model_id,

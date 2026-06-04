@@ -82,6 +82,9 @@
 
 **到时再敲定**:blob 是否随版本走;大小上限取值;是否仍在上传时**预转一份 md 仅供面板预览**(已非架构必需,纯 UX 取舍,可后加);多图/大图的 token 成本与上限。
 
+**进展**(后续 refer 的细节落点):
+- 2026-06-04 多模态识图最底层验通:`astream_with_retry` 不改即可透传 content-blocks(`[{type:text},{type:image_url}]` 块列表 + base64 data URI),`qwen3.7-plus` 流式+usage 正常、自证读到图中数字。结论:识图改动不在 LLM 调用层,在上游全链路(ToolResult 携图块 / 事件存图片引用非字节 / `EventHistory` 重建时还原)。复跑脚本 `tests/manual/multimodal_vision.py`。顺带:模型别名 3.6→3.7-plus、未知模型名改 loud-fail。
+
 ### B — Kylin gVisor 功能验证(内网,验完即撤出)
 
 **做什么**:在健康 Kylin 节点上把 gVisor 这侧的不确定性一次清掉,产出一个**冻结的沙盒镜像**和确定的 runtime 配置。之后引擎集成回本机用 runc 做(见原则 2)。
@@ -129,13 +132,17 @@
 
 ## 变更日志
 
-- 2026-05-21 起草。锁定 4 项决策(blob 存 DB / 身份轻解耦 / 回写二分 / 识图折进 A)。摸底确认:迁移走 Alembic;message 内容全链路目前是纯字符串(识图需扩成块列表);容器拆除应挂在执行器恒跑的清理点而非控制器后处理。粒度定为 plan 级,实现细节留到各阶段开工再敲定。
-- 2026-05-21 B 阶段验证项加入 pandoc 金丝雀(仅 docx/html↔md,PDF 不在本期范围)。
-- 2026-05-21 用户给出驱动场景:富格式(Word)按 blob 存 + pandoc-in-sandbox 当统一转换层(读 docx→md;写 md→docx 以原 docx 作 `--reference-doc` 模版保真生成)。据此拍定:pandoc 落点=沙盒镜像(非 backend);A3 的"上传预转 md"降级为可选面板预览、非架构必需(故"额外字段"不必现在决定);Non-goal 收窄为"不自动反向同步源 blob"(显式生成新 docx 是 in-scope)。
-- 2026-05-21 拍定:确立 philosophy「artifact 层只承载文件源、转换全归模型沙盒」(新增为原则 6),前端/后端不做固定转换。Word 导出 = 沙盒专属能力(目标态),现有 md→Word 过渡期保留、沙盒成熟后下线。已确认接受推论:无沙盒部署里富格式连"读"都没有(读也属沙盒能力)。原 C 的"Word 导出是否改走沙盒"待决项随之关闭。
-- 2026-05-21 明确分支策略:全程在 `feat/sandbox` 做,沙盒成熟后整体 merge 回 main,不增量合(避免半迁移态漏到生产)。撤销先前"A 可先行合 main"的提法。
-- 2026-05-28 新增「能力边界(产品定位推论)」节:把 ArtifactFlow 定位为多用户中心的 agent 编排平台,显式排除「持续工作态 dev loop」(跨轮代码库增删改 / 低延迟 read-edit-debug / 长任务中间态),不试图替代 Claude Code 那类本地形态。沙盒覆盖的是单 turn 闭环的一次性任务(重不重不是问题,"持续"才是)。作为后续遇到此类功能诉求时的产品边界判断指南——本质冲突应先质疑场景,再考虑技术方案。
-- 2026-06-02 新增底座依赖 `artifact-layer-redesign-plan.md`:本次挂载/回写显式化的讨论顺藤摸出 artifact 层(`ArtifactManager`)与多 worker 架构错配(live overlay 跨 worker 静默失效,单 worker 潜伏),另起该重构 plan。两条约束:① 重构先于本 plan C 阶段;A 阶段二进制存储建在新四层、非已删的 `ArtifactManager`;② 二进制(docx/zip)走「元数据事件 + REST 取字节」,复用重构 plan 的溢出口,不另造。本 plan 方向/决策/阶段不变,仅底座换干净。
-- 2026-06-02 挂载改显式:原则 4 从"挂载进容器自动(镜像)"重写为"沙盒是显式 stage 进出的工作区,不是 artifact store 的自动镜像"。核心是定性——容器 fs 是 scratch 工作区而非 artifact 的第三态,persist 落回即一次普通 artifact 写,工作区对 store 无同步义务,三态一致性问题消解。保留内存态(它是 artifact 脊柱,不能耦合到"有沙盒在跑";砍内存态会让无沙盒/BLOCKED 部署失去 artifact 能力、违反原则 1)。顺带关闭 C 阶段"挂哪些 artifact:全部 vs 被引用"待决项(显式 by construction)。同步改 C 阶段「挂载」条目。
-- 2026-06-03 敲定容器创建/销毁时机(C 阶段「容器生命周期」条):**生 = lazy**(首个沙盒工具调用才起容器,本 turn 复用;创建失败→tool 级 loud-fail、沙盒工具该 turn 不可用);**灭 = 跟 lease 同一层**(挂执行器 `_wrapped` 的真 `finally`/`cleanup_execution`,五条退出路径都解栈执行,与 lease 同生灭——非 post-processing,后者是可被 late-cancel 抢占、靠重试补的区域);进程死亡靠 **lease-anchored reap** 二级兜底:**lease 是唯一 liveness 真相源**(turn 合法跑期间持续续租=容器应活的充要条件,零误杀、无需固定余量),reaper 把"带 label 活容器集 ⨯ `list_active_executions`"做差集杀孤儿,**对账须 per-turn 粒度**(label 带 conv+message_id,否则同会话新 turn 的活 lease 会让上轮漏拆孤儿被误判有主)。最坏烧时=lease TTL+reaper 间隔(有界);固定上限(容器内 `timeout`+`--rm`)降级为"仅当 daemon 拓扑可能无活 reaper 扫(一 worker 独占 daemon 且死不重启)"的可选最后兜底,B/D 阶段按真实拓扑拍。澄清两轴正交:lazy vs eager=资源/延迟轴(lazy 赢);robustness=拆除锚定轴(与创建时机正交)。修正前稿"label reap 镜像 TTL fencing"的不准确表述(主动轮巡≠被动 TTL;容器运行时无可续租 TTL 原语,生命周期是编排层而非 runsc 的事)。
-- 2026-06-03 拍定沙盒工具面:**分立三个模型面工具(`bash`/`mount`/`persist`)+ 底下共享一个 per-turn `SandboxSession`**。分立胜出因三者动词/参数形状各异,合成 `sandbox(action=...)` 会撑大参数面、违反「Minimize tool parameter surface」、坏小模型 legibility,且不一致于现有 `*_artifact` 工具 idiom 与 per-verb 权限粒度。「共用启动/交互」是实现层共享(本就该有),非合并工具面的理由——共享 session 恰是让分立工具保持薄的东西。推论:lazy 创建 key 在「首个沙盒工具调用」(mount 可能先于 bash)。关闭 C 阶段「沙盒工具是否合并」待敲定。
+- 2026-05-21 起草。锁定 4 决策(blob 存 DB / 身份轻解耦 / 回写二分 / 识图折进 A);摸底:迁移走 Alembic、message 全链路目前纯字符串(识图需扩块列表)、容器拆除挂执行器清理点。粒度=plan 级。
+- 2026-05-21 B 阶段加 pandoc 金丝雀(仅 docx/html↔md,PDF 不在本期)。
+- 2026-05-21 驱动场景定:富格式按 blob 存 + pandoc-in-sandbox 作统一转换层(读 docx→md、写 md→docx 以原 docx 作 `--reference-doc` 模版)。pandoc 落沙盒镜像(非 backend);"上传预转 md"降为可选预览;Non-goal 收窄为"不自动反向同步源 blob"。
+- 2026-05-21 确立原则 6「artifact 只承载文件源、转换全归沙盒」;Word 导出=沙盒能力(现有 md→Word 过渡保留、成熟后下线);无沙盒部署连富格式"读"都没有。
+- 2026-05-21 分支策略:全程 `feat/sandbox`,成熟后整体 merge 回 main、不增量合(撤销"A 可先合 main")。
+- 2026-05-28 新增「能力边界」节:定位多用户 agent 编排平台,显式排除持续 dev loop,只覆盖单 turn 闭环任务(遇此类诉求先质疑场景)。
+- 2026-06-02 新增底座依赖 `artifact-layer-redesign-plan.md`(发现 `ArtifactManager` 与多 worker 错配)。约束:重构先于 C 阶段、A 的二进制存储建在新四层、二进制走「元数据事件+REST 取字节」。本 plan 方向不变,仅换底座。
+- 2026-06-02 挂载改显式(原则 4):沙盒=显式 stage 进出的 scratch 工作区,非 artifact store 自动镜像;persist=普通 artifact 写;保留内存态。关闭"挂哪些 artifact"待决项。
+- 2026-06-03 容器生命周期(C 阶段):生=lazy(首个沙盒工具调用);灭=跟 lease 同层(执行器 `_wrapped` 真 `finally`,非 post-processing);进程死亡靠 lease-anchored reap(lease=唯一 liveness 真相源,对账须 per-turn 粒度)。固定上限降为可选最后兜底。
+- 2026-06-03 沙盒工具面:分立三工具(`bash`/`mount`/`persist`)+ 共享 per-turn `SandboxSession`(分立胜出因参数面更小、合「Minimize tool parameter surface」);lazy 创建 key=首个沙盒工具调用。
+- 2026-06-04 A 阶段识图最底层(litellm 透传 content-blocks)验通,详见 A 段「进展」。
+
+<!-- 新日志按日期顺序追加到此行上方 -->
+

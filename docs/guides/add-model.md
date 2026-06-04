@@ -92,8 +92,8 @@ gpt-4o:
 deepseek-reasoner:
   model: deepseek/deepseek-reasoner
 
-qwen3.6-plus:
-  model: dashscope/qwen3.6-plus
+qwen3.7-plus:
+  model: dashscope/qwen3.7-plus
   params:
     enable_thinking: true
     temperature: 0.6

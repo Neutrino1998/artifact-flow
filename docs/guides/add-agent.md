@@ -20,7 +20,7 @@ description: |
   - Chinese/English bidirectional translation
   - Preserves tone and technical terminology
 tools: {}                        # 空对象表示无工具
-model: qwen3.6-plus-no-thinking
+model: qwen3.7-plus-no-thinking
 max_tool_rounds: 3
 ---
 ```
@@ -62,7 +62,7 @@ name: translator_agent
 description: |
   Translation specialist — Chinese/English bidirectional
 tools: {}
-model: qwen3.6-plus-no-thinking
+model: qwen3.7-plus-no-thinking
 max_tool_rounds: 3
 ---
 

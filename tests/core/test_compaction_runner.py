@@ -25,7 +25,7 @@ from core.events import ExecutionEvent, StreamEventType
 @dataclass
 class _FakeAgent:
     role_prompt: str = "You are a compactor."
-    model: str = "fake-model"
+    model: str = "openai/fake-model"
 
 
 def _make_state(events=None):
@@ -112,7 +112,7 @@ class TestAppendSemantics:
         assert "mocked summary text" in summary_ev.data["content"]
         assert summary_ev.data["success"] is True
         assert summary_ev.data["error"] is None
-        assert summary_ev.data["model"] == "fake-model"
+        assert summary_ev.data["model"] == "openai/fake-model"
         assert summary_ev.agent_name == "lead_agent"
         assert summary_ev.is_historical is False
 

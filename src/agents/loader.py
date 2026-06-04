@@ -21,8 +21,8 @@ class AgentConfig:
     """Agent 配置（从 MD 文件加载）"""
     name: str
     description: str
+    model: str  # 必填,无默认 — 缺失即 loud-fail(见 load_agent),不静默兜底到某个别名
     tools: dict[str, str] = field(default_factory=dict)  # {tool_name: permission_level}
-    model: str = "qwen3.6-plus-no-thinking"
     max_tool_rounds: int = 3
     internal: bool = False
     role_prompt: str = ""  # MD body（纯文本）
@@ -39,7 +39,7 @@ def load_agent(md_path: str) -> AgentConfig:
     tools:
       web_search: auto
       web_fetch: confirm
-    model: qwen3.6-plus
+    model: qwen3.7-plus
     max_tool_rounds: 100
     ---
 
@@ -65,11 +65,16 @@ def load_agent(md_path: str) -> AgentConfig:
 
     frontmatter = yaml.safe_load(frontmatter_str)
 
+    # model 必填:静默兜底到某个默认别名会让 agent 在用户没察觉时跑错模型
+    # (配置与体验不一致)。缺失即 loud-fail,让 operator 在加载期就发现。
+    if not frontmatter.get("model"):
+        raise ValueError(f"Agent MD missing required 'model' field: {md_path}")
+
     return AgentConfig(
         name=frontmatter["name"],
         description=frontmatter.get("description", ""),
+        model=frontmatter["model"],
         tools=frontmatter.get("tools", {}),
-        model=frontmatter.get("model", "qwen3.6-plus-no-thinking"),
         max_tool_rounds=frontmatter.get("max_tool_rounds", 3),
         internal=frontmatter.get("internal", False),
         role_prompt=body,

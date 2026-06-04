@@ -29,7 +29,7 @@ class _FakeAgentConfig:
     name: str = "lead_agent"
     description: str = "test lead"
     tools: dict = field(default_factory=dict)
-    model: str = "fake-model"
+    model: str = "openai/fake-model"
     max_tool_rounds: int = 3
     role_prompt: str = "You are a test agent."
     internal: bool = False
@@ -995,7 +995,7 @@ class TestMetrics:
              patch("litellm.token_counter", return_value=42):
             chunks = []
             async for chunk in astream_with_retry(
-                [{"role": "user", "content": "hi"}], model="fake-model"
+                [{"role": "user", "content": "hi"}], model="openai/fake-model"
             ):
                 chunks.append(chunk)
 
@@ -1068,7 +1068,7 @@ class TestInEngineCompaction:
         # Content = memory-aid frame + raw summary from compact_agent
         assert summary_ev.data["content"].startswith("[Prior conversation has been compacted")
         assert "compacted prior turn" in summary_ev.data["content"]
-        assert summary_ev.data["model"] == "fake-model"
+        assert summary_ev.data["model"] == "openai/fake-model"
         assert summary_ev.data["error"] is None
 
     async def test_under_threshold_no_compaction(self):

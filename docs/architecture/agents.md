@@ -23,7 +23,7 @@ class AgentConfig:
     name: str                                        # Agent 唯一标识
     description: str                                 # Agent 描述（用于 call_subagent 候选列表）
     tools: dict[str, str] = field(default_factory=dict)  # {tool_name: permission_level}
-    model: str = "qwen3.6-plus-no-thinking"          # LLM 模型别名
+    model: str = "qwen3.7-plus-no-thinking"          # LLM 模型别名
     max_tool_rounds: int = 3                         # 最大工具调用轮数
     internal: bool = False                           # 内部 Agent（不出现在候选列表）
     role_prompt: str = ""                            # MD body（角色提示词）
@@ -45,7 +45,7 @@ tools:
   web_fetch: confirm
   read_artifact: auto
   grep_artifact: auto
-model: qwen3.6-plus
+model: qwen3.7-plus
 max_tool_rounds: 50
 ---
 ```
@@ -57,7 +57,7 @@ max_tool_rounds: 50
 | `name` | string | 是 | — | Agent 唯一标识（与文件名无关，以此字段为准） |
 | `description` | string | 否 | `""` | Agent 描述，注入到 `<available_subagents>` 列表中 |
 | `tools` | dict | 否 | `{}` | 工具白名单 + 权限覆盖，格式 `{tool_name: auto\|confirm}` |
-| `model` | string | 否 | `"qwen3.6-plus-no-thinking"` | 引用 `config/models/models.yaml` 中的模型别名 |
+| `model` | string | 是 | — | 引用 `config/models/models.yaml` 中的模型别名;未指定则加载失败(不静默兜底) |
 | `max_tool_rounds` | int | 否 | `3` | 最大工具调用轮数，超过后注入系统提示要求总结 |
 | `internal` | bool | 否 | `false` | 内部 Agent，不出现在 `call_subagent` 的可用候选列表中 |
 
@@ -120,9 +120,9 @@ You can create MULTIPLE result artifacts...
 
 | Agent | 职责 | 工具 | 模型 | 最大轮数 | 内部 |
 |-------|------|------|------|---------|------|
-| `lead_agent` | 任务协调、规划、Artifact 管理、subagent 路由 | create/update/rewrite/read/grep_artifact + web_search + web_fetch + call_subagent | qwen3.6-plus | 100 | 否 |
-| `research_agent` | 大型知识探索 / 多源整合，在隔离上下文中执行 | create/update/rewrite/read/grep_artifact + web_search + web_fetch | qwen3.6-plus | 50 | 否 |
-| `compact_agent` | 对话摘要生成（Compaction） | 无 | qwen3.6-plus | 0 | 是 |
+| `lead_agent` | 任务协调、规划、Artifact 管理、subagent 路由 | create/update/rewrite/read/grep_artifact + web_search + web_fetch + call_subagent | qwen3.7-max | 100 | 否 |
+| `research_agent` | 大型知识探索 / 多源整合，在隔离上下文中执行 | create/update/rewrite/read/grep_artifact + web_search + web_fetch | qwen3.7-max | 50 | 否 |
+| `compact_agent` | 对话摘要生成（Compaction） | 无 | qwen3.7-max | 0 | 是 |
 
 ### 角色分工
 
