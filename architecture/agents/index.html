@@ -1587,7 +1587,7 @@
 <a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>    <span class="n">name</span><span class="p">:</span> <span class="nb">str</span>                                        <span class="c1"># Agent 唯一标识</span>
 <a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>    <span class="n">description</span><span class="p">:</span> <span class="nb">str</span>                                 <span class="c1"># Agent 描述（用于 call_subagent 候选列表）</span>
 <a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>    <span class="n">tools</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="n">field</span><span class="p">(</span><span class="n">default_factory</span><span class="o">=</span><span class="nb">dict</span><span class="p">)</span>  <span class="c1"># {tool_name: permission_level}</span>
-<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>    <span class="n">model</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;qwen3.6-plus-no-thinking&quot;</span>          <span class="c1"># LLM 模型别名</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>    <span class="n">model</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;qwen3.7-plus-no-thinking&quot;</span>          <span class="c1"># LLM 模型别名</span>
 <a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>    <span class="n">max_tool_rounds</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">3</span>                         <span class="c1"># 最大工具调用轮数</span>
 <a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>    <span class="n">internal</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span>                           <span class="c1"># 内部 Agent（不出现在候选列表）</span>
 <a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>    <span class="n">role_prompt</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span>                            <span class="c1"># MD body（角色提示词）</span>
@@ -1605,7 +1605,7 @@
 <a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="w">  </span><span class="nt">web_fetch</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">confirm</span>
 <a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="w">  </span><span class="nt">read_artifact</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">auto</span>
 <a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="w">  </span><span class="nt">grep_artifact</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">auto</span>
-<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a><span class="nt">model</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">qwen3.6-plus</span>
+<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a><span class="nt">model</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">qwen3.7-plus</span>
 <a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a><span class="nt">max_tool_rounds</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">50</span>
 <a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a><span class="nn">---</span>
 </code></pre></div>
@@ -1645,9 +1645,9 @@
 <tr>
 <td><code>model</code></td>
 <td>string</td>
-<td>否</td>
-<td><code>"qwen3.6-plus-no-thinking"</code></td>
-<td>引用 <code>config/models/models.yaml</code> 中的模型别名</td>
+<td>是</td>
+<td>—</td>
+<td>引用 <code>config/models/models.yaml</code> 中的模型别名;未指定则加载失败(不静默兜底)</td>
 </tr>
 <tr>
 <td><code>max_tool_rounds</code></td>
@@ -1728,7 +1728,7 @@
 <td><code>lead_agent</code></td>
 <td>任务协调、规划、Artifact 管理、subagent 路由</td>
 <td>create/update/rewrite/read/grep_artifact + web_search + web_fetch + call_subagent</td>
-<td>qwen3.6-plus</td>
+<td>qwen3.7-max</td>
 <td>100</td>
 <td>否</td>
 </tr>
@@ -1736,7 +1736,7 @@
 <td><code>research_agent</code></td>
 <td>大型知识探索 / 多源整合，在隔离上下文中执行</td>
 <td>create/update/rewrite/read/grep_artifact + web_search + web_fetch</td>
-<td>qwen3.6-plus</td>
+<td>qwen3.7-max</td>
 <td>50</td>
 <td>否</td>
 </tr>
@@ -1744,7 +1744,7 @@
 <td><code>compact_agent</code></td>
 <td>对话摘要生成（Compaction）</td>
 <td>无</td>
-<td>qwen3.6-plus</td>
+<td>qwen3.7-max</td>
 <td>0</td>
 <td>是</td>
 </tr>
