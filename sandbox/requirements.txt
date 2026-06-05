@@ -1,0 +1,20 @@
+# Sandbox runtime deps — tier-1 baked scientific stack (plan §B "验什么" / 原则 7).
+#
+# DECOUPLED from the backend's requirements.txt / requirements.lock on purpose:
+# the sandbox is its own runtime, not the app. Do NOT fold these into the app
+# lockfile (DEP-02 governs the backend image only).
+#
+# All pins have manylinux2014 cp311 wheels (self-contained: Pillow bundles
+# libjpeg/zlib, matplotlib bundles freetype), so the image builds with no
+# compiler and the intranet load needs zero network.
+#
+# The headline ENOSYS gamble under runsc is the C-extension set
+# (numpy/pandas/matplotlib/Pillow); openpyxl/pypdf are pure-Python (low risk,
+# verified anyway because xlsx/pdf are core upload scenarios).
+
+numpy==1.26.4
+pandas==2.2.3
+matplotlib==3.9.2
+Pillow==10.4.0
+openpyxl==3.1.5
+pypdf==4.3.1
