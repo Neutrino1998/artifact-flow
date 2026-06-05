@@ -22,8 +22,10 @@ ROOT="$(cd "$HERE/../.." && pwd)"
 OUTDIR="$ROOT/dist"
 BASEURL="https://storage.googleapis.com/gvisor/releases/release/${GVISOR_VERSION}/${ARCH}"
 STAMP="$(date +%Y%m%d)"
-STAGE="$OUTDIR/sandbox-gvisor-${STAMP}"
-TAR="$OUTDIR/sandbox-gvisor-${STAMP}.tar.gz"
+# arch in the name so x86_64 + aarch64 packages coexist in dist/ (a target node
+# is single-arch — the gVisor binary is arch-specific, unlike the verify probes).
+STAGE="$OUTDIR/sandbox-gvisor-${STAMP}-${ARCH}"
+TAR="$OUTDIR/sandbox-gvisor-${STAMP}-${ARCH}.tar.gz"
 
 mkdir -p "$STAGE/bin"
 
@@ -42,7 +44,7 @@ cp "$HERE/install.sh" "$HERE/smoke-test.sh" "$HERE/uninstall.sh" "$HERE/README.m
 chmod +x "$STAGE"/*.sh
 echo "release-${GVISOR_VERSION}, ${ARCH}" > "$STAGE/VERSION"
 
-tar -czf "$TAR" -C "$OUTDIR" "sandbox-gvisor-${STAMP}"
+tar -czf "$TAR" -C "$OUTDIR" "sandbox-gvisor-${STAMP}-${ARCH}"
 ( cd "$OUTDIR" && sha256sum "$(basename "$TAR")" > "$(basename "$TAR").sha256" )
 rm -rf "$STAGE"
 
@@ -50,4 +52,4 @@ echo
 echo "✓ $TAR"
 echo "✓ $TAR.sha256"
 echo
-echo "Carry to the intranet node, then: tar xzf $(basename "$TAR") && cd sandbox-gvisor-${STAMP} && sudo ./install.sh"
+echo "Carry to the intranet node, then: tar xzf $(basename "$TAR") && cd sandbox-gvisor-${STAMP}-${ARCH} && sudo ./install.sh"

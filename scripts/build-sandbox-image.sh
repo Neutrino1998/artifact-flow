@@ -27,24 +27,32 @@ CTX="$ROOT/sandbox"
 OUTDIR="$ROOT/dist"
 
 VERSION="${1:-$(date +%Y%m%d)}"
-IMAGE="artifactflow-sandbox:${VERSION}"
-ARCHIVE="$OUTDIR/artifactflow-sandbox-${VERSION}.tar.gz"
-VERIFY_ARCHIVE="$OUTDIR/artifactflow-sandbox-verify-${VERSION}.tar.gz"
-LOCK="$OUTDIR/artifactflow-sandbox-${VERSION}.wheels.lock"
-MANIFEST="$OUTDIR/artifactflow-sandbox-${VERSION}.manifest.txt"
 
-# linux/amd64 — intranet target is x86_64. On Apple Silicon this means QEMU
-# emulation: the apt layer + numpy/pandas/matplotlib wheel pulls run emulated
-# and are SLOW (expect several minutes, occasionally 10min+). If the build dies
-# mid-pull with SSL/EOF against deb.debian.org or PyPI, that's the build-host
-# proxy flapping (memory: release-build-proxy-flap), NOT the Dockerfile — just
-# re-run; buildx layer cache makes the retry fast.
+# Target arch. Default linux/amd64 (x86_64 intranet). For Kylin arm (Kunpeng)
+# pass PLATFORM=linux/arm64. On Apple Silicon, arm64 builds NATIVE (fast) while
+# amd64 is QEMU-emulated and SLOW (several min, occasionally 10min+). A mid-pull
+# SSL/EOF against deb.debian.org/PyPI is the build-host proxy flapping (memory:
+# release-build-proxy-flap), NOT the Dockerfile — re-run, buildx cache is fast.
 PLATFORM="${PLATFORM:-linux/amd64}"
+case "$PLATFORM" in
+  *amd64)         ARCH_TAG=amd64 ;;
+  *arm64|*aarch64) ARCH_TAG=arm64 ;;
+  *)              ARCH_TAG="${PLATFORM##*/}" ;;
+esac
+
+# Arch-suffixed names so amd64 + arm64 artifacts coexist in dist/ (a Kylin box is
+# single-arch — loading one tar is unambiguous). The verify tar is arch-AGNOSTIC
+# (Python/bash probes) → shared, no suffix.
+IMAGE="artifactflow-sandbox:${VERSION}-${ARCH_TAG}"
+ARCHIVE="$OUTDIR/artifactflow-sandbox-${VERSION}-${ARCH_TAG}.tar.gz"
+VERIFY_ARCHIVE="$OUTDIR/artifactflow-sandbox-verify-${VERSION}.tar.gz"
+LOCK="$OUTDIR/artifactflow-sandbox-${VERSION}-${ARCH_TAG}.wheels.lock"
+MANIFEST="$OUTDIR/artifactflow-sandbox-${VERSION}-${ARCH_TAG}.manifest.txt"
 
 mkdir -p "$OUTDIR"
 
-echo "=== ArtifactFlow sandbox image: ${VERSION} (platform: ${PLATFORM}) ==="
-echo "Building ${IMAGE} (QEMU cross-build on arm64 hosts — be patient)..."
+echo "=== ArtifactFlow sandbox image: ${VERSION} (platform: ${PLATFORM}, tag: ${ARCH_TAG}) ==="
+echo "Building ${IMAGE} (native if build-host arch == ${ARCH_TAG}, else QEMU — be patient)..."
 docker buildx build --platform "${PLATFORM}" \
   -t "${IMAGE}" -t artifactflow-sandbox:latest \
   --load "$CTX"
@@ -98,7 +106,7 @@ Role: tier-1 baked sandbox environment for gVisor (runsc) verification (plan §B
 Decoupled from the backend requirements.lock — this is the sandbox runtime, not the app.
 
 Deploy on the intranet test node (zero network):
-  gunzip -c artifactflow-sandbox-${VERSION}.tar.gz | docker load
+  gunzip -c $(basename "$ARCHIVE") | docker load
   # then run the §B probes under runsc, e.g.:
   docker run --rm --runtime=runsc --network=none \\
     -v "\$PWD/sandbox/verify:/opt/verify:ro" ${IMAGE} \\
