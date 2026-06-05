@@ -17,14 +17,15 @@
 
 ## 进度
 
-- **当前**:规划完成,实现未启动。
-- **下一步**:待定 —— A(地基)先动,还是 B(Kylin 验证)先动,由用户拍。两者可并行。
+- **当前**:**B 完成**(2026-06-05 milvus2 `run-all.sh` 全绿 + 已撤出 runsc/镜像,见 B 段「进展」)—— ENOSYS 核心赌注赢、镜像 id 冻结、内网零残留。A 仅识图最底层验通(litellm 透传)。
+- **下一步**:C 阶段引擎集成依 B 冻结镜像开工,或先补 A 地基余下部分 —— 由用户拍。
+- **产物处置(2026-06-05 拍定)**:`feat/sandbox` 这批已验收产物(`sandbox/` 探针 + 构建脚本)**暂留分支不动**,不单独提早合 main。「是否把就绪探针子集(`unshare -U` 闸 + smoke + ENOSYS/uid)提升为通用部署机预检工具」**推迟到 C/D 阶段**——届时有真实第二调用点(每台新沙盒宿主预检 + D 端到端冒烟)再校准边界,现在抽象属投机(YAGNI)。
 
 | 阶段 | 内容 | 状态 |
 |---|---|---|
-| A | artifact 地基(二进制存储 + 多格式上传 + 识图) | 未开始 |
-| B | Kylin gVisor 功能验证(内网) | 未开始 |
-| C | 沙盒引擎集成(本机 runc 连调) | 未开始 |
+| A | artifact 地基(二进制存储 + 多格式上传 + 识图) | 进行中(仅识图最底层验通) |
+| B | Kylin gVisor 功能验证(内网) | **完成**(验证通过 + 已撤出) |
+| C | 沙盒引擎集成(本机 runc 连调) | 未开始(依 B 冻结镜像) |
 | D | 上线前 Kylin 端到端冒烟 | 未开始 |
 
 依赖:C 依赖 A 的二进制存储 + B 的冻结镜像。A 逻辑独立(识图本身就有价值),可先做,但本期不单独合 main —— 见分支策略。
@@ -61,6 +62,8 @@
 5. **带目录结构的多文件 = 一个 zip blob,只在 ephemeral 容器里解压/打包,从不进 DB 表。** 用户传整个仓库、或回写一个目录的"几千行炸库"问题,用这一条根除。
 6. **artifact 层是文件源的承载方,不是转换器。** 用户传 Word 就是个 Word(blob),传图就是个图;要 md 让模型在沙盒里 word→md,要 Word 让模型写 md 再转 word。前端/后端**不提供固定格式转换功能**,一切转换是模型在沙盒里的职责。**目标态**:Word 导出等转换为沙盒专属能力;现有 md→Word 在**沙盒成熟前保留作过渡、成熟后下线**。推论:无可用沙盒的部署里,富格式上传只能当不可读 blob 存(连读 docx→md 也属沙盒能力)。
 
+7. **沙盒默认全禁网;依赖走三层离线投递,绝不靠出网。** 沙盒跑不可信 LLM 代码,**网络出网是独立的第三条边界**——与「逃逸隔离(gVisor 管)」「DooD socket = backend 有 host root(创建参数防污染管)」正交,必须在**网络边界**封,**不能降级成「靠 CONFIRM 对命令授权来控」**:授权是 *consent*(人同意了某条命令的**意图**),网络是 *confinement*(不管谁同意,容器代码**够得着什么**);开网后 ① 被授权命令的传递行为对用户不可见(`pip install` = 任意代码执行),② 同容器里**没被授权**的代码(传递 import / 被污染 wheel / 生成代码任意一行)也拿到网做外泄/横移。内网 web 工具已禁、沙盒无任何合法公网需求,故默认 `--network=none` 是零成本纯收益。依赖因此**全离线投递,分三层**:① **烤进镜像**——跨场景通用、属「环境定义」而非某场景的选择、per-turn 现装太贵的(python / 科学栈 / pandoc / ripgrep);② **离线 wheel bundle 挂固定位**(`pip install --no-index --find-links`)——通用但太重、不值得人人烤的常驻 extras;③ **skill 自带 asset**——场景 specific 的长尾,骑 skill 的富态 bundle、仅该 skill 激活时按需挂。②③ 是**同一套 find-links 机制、不同生命周期**(常驻 vs 随 skill),别造两套。**类别纪律**:依赖 ≠ artifact——artifact 是用户拥有的**数据**(走 mount-in / persist,blob 进 DB),依赖是**执行环境**(走镜像 / bundle),别把依赖塞进 artifact 系统。**护栏**:skill bundle **只做加法、不 re-pin 基础栈版本**——否则一个 turn 内多 skill 版本冲突会逼出版本解析 / per-skill venv 的机器;用「基础栈全局固定、skill 只增量」的约定在源头掐掉(合「fix 复杂度超过 feature 价值就退回 scope」)。
+
 ## 已锁定的决策
 
 1. **blob 存 DB(TDSQL)。** 生产是跨中心同步的 TDSQL + 单中心非同步 Redis,无对象存储;落盘只能单中心、破坏京沪 DR。所以二进制进 TDSQL,与文本/inventory 热路径隔离,并设大小上限(卡在 MySQL 包大小与跨中心复制成本之下)。
@@ -90,12 +93,39 @@
 **做什么**:在健康 Kylin 节点上把 gVisor 这侧的不确定性一次清掉,产出一个**冻结的沙盒镜像**和确定的 runtime 配置。之后引擎集成回本机用 runc 做(见原则 2)。
 
 **验什么**:
-- **真实数据科学 workload 在 runsc 下不踩 ENOSYS**(numpy / pandas / matplotlib 出图 / Pillow / openpyxl / pdf 解析)。**这是最大风险**,也是"保留 Firecracker 作后手"的依据来源——必须用真实负载验,而非 `echo`。
+- **真实数据科学 workload 在 runsc 下不踩 ENOSYS**(numpy / pandas / matplotlib 出图 / Pillow / openpyxl / pdf 解析)。**这是最大风险**,也是"保留 Firecracker 作后手"的依据来源——必须用真实负载验,而非 `echo`。每个库**独立 try 段**,踩 ENOSYS 时打印是哪个库哪个 syscall(回退判断的依据)。头号风险是 C 扩展项(numpy/pandas/matplotlib/Pillow);openpyxl/pypdf 纯 Python、风险低,报告要能区分,别让纯 Python 的 PASS 掩盖 C 扩展项。
+- **ripgrep(tier-1 工具,顺手当 FS 遍历探针)**:它是静态 Rust 二进制,syscall 画像与数值 C 扩展不同——密集 `getdents64 / statx / openat` + 线程(`clone/futex`),覆盖**文件系统遍历**这块 Sentry 兼容面(理论低风险,但 5MB 二进制顺手验掉胜过假设)。与 bind-mount 项二合一(`rg` 一个挂入目录)。
 - **pandoc 金丝雀(docx/html ↔ md)**:作为 Word↔Markdown 互转工具一并验。它是静态 Haskell 二进制 + 重文件 IO,比纯 Python 多覆盖 exec/文件这块的 Sentry 兼容性,顺带当金丝雀。PDF 输出(需 LaTeX 引擎)本期不管。
-- **bind-mount 文件往返 + uid 映射**:沙盒内写文件、host 读回、权限/属主正确。
-- **网络策略**:先定(无网 / 仅内部 / allowlist),再验它与 runsc 组合及 DNS 行为。
+- **离线依赖投递机制(验原则 7 的 tier 2/3 投递路径)**:挂一个 stub wheel 目录到固定位,在 runsc 沙盒内跑 `pip install --no-index --find-links <dir> <一个纯 Python 包>`,确认 pip 离线安装(纯文件 IO、无网)在 Sentry 下行为正常。便宜地**提前验掉 skill-asset 依赖路径**,免得 skill 架构落地才发现 offline-install 在 gVisor 下有坑。
+- **bind-mount 文件往返 + uid 映射**:沙盒内写文件、host 读回、权限/属主正确(gofer 文件系统上的 `getdents/statx` 路径与容器内 tmpfs 不同,单独验)。
+- **网络策略 = 默认全禁网(`--network=none`,见原则 7),保留 allowlist 作退路**:验 ① none 下确无任何 egress;② **allowlist 到单一 stub host** 时只该 host 可达、公网仍封(退路验证:将来离线 bundle 太重时,可放行单台内部镜像在线装包,故 `verify-network.sh` 保留此分支);③ runsc 自带 netstack,DNS 解析路径与 runc 不同,**实测** DNS 行为。
 
-**完成 =** 冻结镜像 + 文档化 runtime 配置。部署前预检 `sudo unshare -U /bin/true`,BLOCKED 节点禁入沙盒服务池(详见 gVisor 评估文档 §5)。
+**镜像内容(tier-1 定稿)**:`python:3.11-slim` + numpy / pandas / matplotlib / Pillow / openpyxl / pypdf + `apt: pandoc` + ripgrep。与 backend 的 `requirements.lock` **解耦**(沙盒是独立 runtime,非 backend 镜像,别共用 app lock),自带一份 `sandbox-wheels.lock.txt` 记可复现的传递依赖集(仿 analyst-tools 的 `wheels.lock` 范式)。
+
+**完成 =** 冻结镜像(`docker save` tar + image digest 作冻结锚点)+ 文档化 runtime 配置(daemon.json 的 runsc 注册 + 固定 `docker run` 参数面:`--runtime=runsc` / 资源配额 / `--network=none` / uid 映射)。部署前预检 `sudo unshare -U /bin/true`,BLOCKED 节点禁入沙盒服务池(详见 gVisor 评估文档 §5)。验完即撤:`uninstall.sh` 卸 runsc + `docker rmi` 沙盒镜像 + `systemctl reload docker`,不留 runsc 在测试机。
+
+**准备(介质与脚本,后续 refer 的落点)**:内网测试机不能联网 ⇒ 一切在有网构建机烤进 tar,内网只 `docker load` / `install.sh`、零网络。
+- **介质**:① gVisor 离线包(装 runsc)—— **原 `dist/sandbox-gvisor-20260512.tar.gz` 已被删、且其 install/smoke/uninstall 脚本只存在于该 tar 内(dist/ 全 git-ignore),未入 repo → 需重建**:`runsc`+shim 从评估文档 §3 的 URL(`release-20260504.0`)重下,三个脚本按评估文档附录 A 规格重写;② **沙盒镜像 tar**(本期最大新介质,内容见上);③ 验证脚本(建议直接烤进镜像 `/opt/verify/`,与库版本同源;host 侧编排脚本单独带);④ **测试 fixture 无需携带任何二进制**——docx 用 pandoc 自身 `md→docx`(正好是金丝雀)、html 内联字符串、xlsx 用 openpyxl(本就是被测项)、png 用 Pillow、**pdf 用 matplotlib `savefig('.pdf')` 矢量后端生成**(不需 LaTeX,与"PDF 输出 out-of-scope"不冲突)再回喂 pypdf。气隙网零外部样本。
+- **脚本**:(a) 构建机在线 —— `Dockerfile.sandbox` + `build-sandbox-image.sh`(照搬 release.sh 的 buildx/save 段)。**构建机定 = 本机 Mac + QEMU**,故脚本须带 `docker buildx --platform linux/amd64`(否则 arm64 → 内网 `exec format error`,release.sh 已踩);numpy/pandas/matplotlib 跨架构拉取慢,脚本加耗时预期 + 失败重试提示(对照 `release-build-proxy-flap`)。(b) 容器内(真实负载 = Tier 6,接在 gVisor 包 `smoke-test.sh` 的 Tier 1–5 之上、不重复)—— `verify-enosys.py`、`verify-pandoc.sh`、offline find-links 探针。(c) host 侧 —— `run-all.sh`(`docker run --runtime=runsc` 编排各探针收报告)、`verify-bindmount.sh`(含 ripgrep 二合一)、`verify-network.sh`。
+
+**进展**(已落地实现 + 后续 refer 的落点):
+- 2026-06-04 工具链落地于分支 `feat/sandbox`,本机 runc 彩排全绿。文件:
+  - `sandbox/Dockerfile` + `sandbox/requirements.txt` —— tier-1 镜像。**已固化决策**:① deps 与 backend `requirements.lock` **解耦**(沙盒是独立 runtime);② 跑非 root `sandbox`(uid **1000**,固定值供 bind-mount uid 断言);③ `MPLBACKEND=Agg`;④ `pip freeze`→`/opt/sandbox-wheels.lock.txt`;⑤ offline-install stub wheel 烤进 `/opt/stub-wheels`(源 `sandbox/stub-pkg/`)。pin:numpy1.26.4/pandas2.2.3/matplotlib3.9.2/Pillow10.4.0/openpyxl3.1.5/pypdf4.3.1。
+  - `scripts/build-sandbox-image.sh` —— 仿 release.sh:buildx `--platform linux/amd64`→`docker save`→`dist/artifactflow-sandbox-<date>.tar.gz` + `.sha256`/`.wheels.lock`/`.manifest.txt`(manifest 里的 **image id = C 阶段构建所依赖的冻结锚点**)。
+  - `sandbox/gvisor-pkg/` —— 重建的 gVisor 包(原 dist tar 已删、脚本从未入 repo)。`fetch-and-package.sh`(构建机从评估文档 §3 URL 重下 runsc `release-20260504.0`→出 tar,二进制仍 git-ignore、脚本入 repo)、`install.sh`/`smoke-test.sh`(Tier0=`unshare -U` 闸门,失败即停)/`uninstall.sh`。
+  - `sandbox/verify/` —— 五探针 + `run-all.sh`。**验证脚本走 bind-mount 进 `/opt/verify`(非烤进镜像)**:B 期可改即跑、且顺带验 bind-mount 路径;stub wheel 则必须烤进(离线 fixture)。
+  - `sandbox/README.md` —— 内网一次过 runbook(装 gVisor→烟测→load 镜像→`run-all.sh`→撤)。
+- **彩排范围**:native-arch build + `RUNTIME=runc bash run-all.sh` 全绿(ENOSYS 7/7、pandoc 3/3、offline-install、bind-mount+ripgrep)。network 三档需内网用真实内部 host 填 `PROBE_HOST`/`PROBE_NAME` 才实测(逻辑已通,本机 skip)。
+- **介质 = 三个传输单元**(2026-06-04 上 milvus2 时踩出):gVisor 包 tar、镜像 tar、**verify tar**。探针**不烤进镜像**(host 侧 bindmount/network/run-all 必须在宿主跑),故 `sandbox/verify/` 自带一个 tar(`build-sandbox-image.sh` 现一并产出 `artifactflow-sandbox-verify-<date>.tar.gz`),内网 `tar xzf` 出 `./verify/` 再 `run-all.sh`。另:`docker save` 现同存 `:latest`(否则 load 后只有 `:<date>`,smoke/run-all 默认 `:latest` 落空——本期镜像只有 `:<date>`,须显式传 tag)。
+- **已知差异**:`verify-bindmount.sh` 的 uid 用 GNU `stat -c`,Mac 彩排显示 `?` 属 host 工具差异,Linux 目标(Kylin)正常。
+- **进度**:amd64 镜像 tar(image id `sha256:3b43b839…`,arch=amd64,17 deps)+ gVisor 包 tar 均已出并校验;**milvus2 已装 gVisor,smoke Tier0–3 全 ✓**(unshare -U / runsc / systrap+kvm / runsc 注册)——milvus2 = 健康参考节点。
+- **2026-06-05 milvus2 `run-all.sh` 全绿,B 验收通过**(`IMAGE=artifactflow-sandbox:20260604`,RUNTIME=runsc):
+  - **ENOSYS 7/7 PASS** —— numpy/pandas/matplotlib(PNG+PDF)/Pillow 这 4 个 C 扩展在 Sentry 下零 ENOSYS,openpyxl/pypdf(纯 Python)亦过。**核心赌注赢:gVisor-as-MVP 成立,不回退 Firecracker。**
+  - **bind-mount + uid 3/3** —— 容器写→宿主读回,**host 侧属主 uid = 1000(无 remap)**,ripgrep 在 gofer 挂载上 getdents/statx 正常。
+  - pandoc 3/3(docx/html↔md)、offline-install ✓(`--no-index --find-links` 在 runsc 下成立)。
+  - **network 2/3**:`--network=none` 正确隔离(111.1.30.17:22 Errno101 BLOCKED)✓、bridge 出网可达 ✓;**DNS-under-runsc 判 N/A 而非失败** —— 测试内网无 DNS 服务器(容器 `/etc/resolv.conf` 空,milvus2 宿主纯靠 `/etc/hosts`),换 runc 同样无从解析,与 gVisor 无关。生产默认 `--network=none` 不需 DNS;allowlist 回退按 IP 放行亦不涉及 DNS。**follow-up(非 B 阻塞)**:若将来 allowlist 要按**域名**放行,需在一台**有内网 DNS**的节点补验 runsc netstack 的容器内解析。
+- **冻结锚点(C 阶段构建依此)**:image id `sha256:3b43b83999c2547f84ff9b0b93d0861d0c9a854d9046e54b6c623750c0e57421`(`dist/artifactflow-sandbox-20260604.manifest.txt`,platform linux/amd64,built 2026-06-04T08:25:20Z)。**固定 runtime 配置**:daemon.json 注册 runsc(`install.sh` 合并)+ `docker run --runtime=runsc --network=none` + uid 1000 工作区 + 资源配额(C 阶段定额)。部署前预检 `sudo unshare -U /bin/true`,BLOCKED 节点禁入服务池。
+- **撤出(2026-06-05 已执行)**:`uninstall.sh` 卸 runsc + `systemctl reload docker` + `docker rmi artifactflow-sandbox:20260604`,milvus2 零残留。B 阶段闭环。
 
 ### C — 沙盒引擎集成(本机 runc 连调;依赖 A 的二进制存储 + B 的镜像)
 
@@ -114,7 +144,9 @@
 - **bash 工具**:CONFIRM 权限(跑不可信代码)。
 - **持久化工具**(模型显式调用,描述 present 给用户):落实决策 3 的回写二分,文件数与字节数上限兜底。
 - **挂载(显式 stage 进出)**:模型显式把指定 artifact 物化进工作区(zip 作 blob 进、容器内解压),回写也显式;不自动物化整 session。见原则 4 的定性。
-- **DooD + 配额**:backend 挂 docker.sock 起沙盒,资源配额(内存 / CPU / pids / 网络);**容器创建参数不可被模型生成内容污染**(镜像/挂载/runtime 固定在代码侧)。
+- **DooD + 配额**:backend 挂 docker.sock,经 **aiodocker**(Docker daemon HTTP API 的 asyncio 原生客户端——选它因容器生灭要 `await`、直接挂进引擎的 `asyncio.Task.cancel()` 取消/超时/lease 栈,而 `docker` CLI/同步 `docker-py` 与之对不上)起沙盒;资源配额(内存 / CPU / pids / `--network=none`,见原则 7);**容器创建参数不可被模型生成内容污染**(镜像/挂载/runtime 固定在代码侧)。
+  - **编排器可换性(收口在 `SandboxSession`)**:gVisor 是 OCI runtime、**不挑编排器**(containerd / CRI-O / k8s RuntimeClass=gvisor / podman 均可)。两个可换轴量级不同:**runc↔runsc = 一个 config 开关**(原则 2);**Docker↔k8s = 换控制面 client**(aiodocker → k8s API,per-turn 容器 → per-turn Pod,reap/socket-root 全重画)。当前单机 DooD 形态**不做 k8s**,但 aiodocker 调用须**收在 `SandboxSession` 这一个 seam 后**、不散进引擎——将来真上 k8s 只换该层,引擎无感(YAGNI:现在只保 seam、不抽象)。
+    - **「应用与沙盒分机部署」并入此轴、有需求再做**(2026-06-05):分机不是改 aiodocker 连接串能办的——真正的耦合是 **bind-mount 工作区 daemon-local**(路径在 daemon 那台机解析,不在客户端机;uid 属主断言同理),aiodocker 本身可连远程 TCP+TLS daemon,但单远程 daemon = 无调度/无故障转移、bind-mount 还是断。**正解是 k8s**(per-turn Pod + volume/PVC stage 替代宿主 bind-mount),即本条上面那根「换控制面」轴。两个可能驱动都推迟到真有需求:① 专用沙盒主机池(隔离烧 CPU 的不可信执行);② 切掉「应用机经 docker.sock 拿 host root」的爆炸半径(正当安全驱动,但代价仍是换控制面)。在此之前结论不变:单机 DooD、seam 留着。
 - **文档转换走沙盒**:pandoc 装进沙盒镜像(B 验过),富格式读(docx→md)和写都由 agent 在沙盒里跑 pandoc。**驱动场景**:用户要带格式的 Word 时,模型以用户上传/原有 docx 作 `--reference-doc` 样式模版,在沙盒里 md→docx 生成,产物回写成可下载 blob——比固定的 md→docx 导出保真,可能取代现有的 md→Word 导出路径。**门控变化(衔接 artifact plan 决策 6)**:现有 `/export` 是同步 REST 读,turn 中按「前端 UX 锁的读」处理;一旦导出搬进沙盒 = 起容器 = **执行**,就从读升级为 **lease 挡的写/执行**(跟 bash 工具同级),门控责任从前端移到后端 lease。替换 md→Word 路径时一并改门控,别留前端旧锁。
 
 **到时再敲定**:并发上限;bash 输出溢出是截断还是转 artifact;zip 命名与"可单独查看"白名单。(原"挂哪些 artifact:全部 vs 被引用"已由原则 4 的显式 mount 关闭——模型 mount 谁就有谁;原"沙盒工具是否合并"已拍定分立三工具 + 共享 `SandboxSession`,见上。)
@@ -143,6 +175,13 @@
 - 2026-06-03 容器生命周期(C 阶段):生=lazy(首个沙盒工具调用);灭=跟 lease 同层(执行器 `_wrapped` 真 `finally`,非 post-processing);进程死亡靠 lease-anchored reap(lease=唯一 liveness 真相源,对账须 per-turn 粒度)。固定上限降为可选最后兜底。
 - 2026-06-03 沙盒工具面:分立三工具(`bash`/`mount`/`persist`)+ 共享 per-turn `SandboxSession`(分立胜出因参数面更小、合「Minimize tool parameter surface」);lazy 创建 key=首个沙盒工具调用。
 - 2026-06-04 A 阶段识图最底层(litellm 透传 content-blocks)验通,详见 A 段「进展」。
+- 2026-06-04 新增原则 7「沙盒默认全禁网 + 依赖三层离线投递」:网络是独立于逃逸隔离/socket-root 的第三条边界,只能在网络边界封不能降级成命令授权(consent≠confinement);依赖分镜像/wheel-bundle/skill-asset 三层,依赖≠artifact,skill bundle 只加法不 re-pin。详见原则 7。
+- 2026-06-04 B 阶段细化(介质/脚本/验证项):镜像 tier-1 定稿(+ripgrep,与 backend lock 解耦)、加 ripgrep FS 遍历探针 + offline find-links 投递探针、网络默认 `--network=none`、fixture 全自生成无需携带二进制、构建机=Mac+QEMU(须 `--platform linux/amd64`)。详见 B 段「验什么」「准备」。
+- 2026-06-04 网络拍定:默认 `--network=none`,**保留 allowlist 作退路**(将来离线 bundle 太重可放行单台内部镜像在线装包);`verify-network.sh` 保留 allowlist 分支。详见 B 段网络项。
+- 2026-06-04 C 阶段补 aiodocker 定性(async Docker API 客户端,挂取消栈)+ 编排器可换性收口在 `SandboxSession`(gVisor 不挑编排器;runc↔runsc=config 开关、Docker↔k8s=换控制面,当前不做 k8s 只保 seam)。详见 C 段 DooD 条。
 
+- 2026-06-04 B 阶段工具链落地(分支 `feat/sandbox`:`sandbox/` + `scripts/build-sandbox-image.sh`)+ 本机 runc 彩排全绿;gVisor 离线包已删→重建入 repo。文件清单 / 已固化决策 / 彩排结果 / 剩余步骤详见 B 段「进展」。
+- 2026-06-05 **B 验收通过**:milvus2 `run-all.sh` 全绿,ENOSYS 7/7(C 扩展零 ENOSYS,gVisor-as-MVP 成立)、uid 1000 无 remap;DNS-under-runsc 判 N/A(测试内网无 DNS,与 gVisor 无关)。冻结 image id `sha256:3b43b839…`。milvus2 已撤出,B 闭环。详见 B 段「进展」。
+- 2026-06-05 「应用与沙盒分机部署」并入 C 段「换控制面(Docker↔k8s)」轴、有需求再做:真正耦合是 bind-mount daemon-local 非 aiodocker;正解 k8s(Pod+PVC),非远程 Docker daemon。详见 C 段编排器可换性条。
 <!-- 新日志按日期顺序追加到此行上方 -->
 
