@@ -18,12 +18,12 @@
 ## 进度
 
 - **当前**:**B(x86_64)完成**(2026-06-05 milvus2 `run-all.sh` 全绿 + 已撤出,见 B 段「进展」)—— ENOSYS 核心赌注赢、镜像 id 冻结、内网零残留。**B(arm64/鲲鹏)完成**(2026-06-08,经 64K→4K 在位换核后 `run-all.sh` 全绿,见 B 段「进展 · arm」)—— 双架构 §B 闭环。A 仅识图最底层验通(litellm 透传)。
-- **下一步**:① arm §B 上机验证(机器到位后);② C 阶段引擎集成依 B 冻结镜像开工,或先补 A 地基余下部分 —— 由用户拍。
+- **下一步**:**A 地基开工**(2026-06-08 决策已锁,见 A 段「进展」;切片 A-bin→A-upload→A-vision)。并行待办:arm §B 镜像 id 冻结(机器在位时)。C 阶段引擎集成依 B 冻结镜像,排在 A 之后。
 - **产物处置(2026-06-05 拍定)**:`feat/sandbox` 这批已验收产物(`sandbox/` 探针 + 构建脚本)**暂留分支不动**,不单独提早合 main。「是否把就绪探针子集(`unshare -U` 闸 + smoke + ENOSYS/uid)提升为通用部署机预检工具」**推迟到 C/D 阶段**——届时有真实第二调用点(每台新沙盒宿主预检 + D 端到端冒烟)再校准边界,现在抽象属投机(YAGNI)。
 
 | 阶段 | 内容 | 状态 |
 |---|---|---|
-| A | artifact 地基(二进制存储 + 多格式上传 + 识图) | 进行中(仅识图最底层验通) |
+| A | artifact 地基(二进制存储 + 多格式上传 + 识图) | 进行中(识图最底层验通 + 2026-06-08 决策锁定,开工) |
 | B | Kylin gVisor 功能验证(内网) | x86_64 **完成**(验证通过+已撤出);arm64 **完成**(2026-06-08,64K→4K 换核后全绿) |
 | C | 沙盒引擎集成(本机 runc 连调) | 未开始(依 B 冻结镜像) |
 | D | 上线前 Kylin 端到端冒烟 | 未开始 |
@@ -86,7 +86,15 @@
 **到时再敲定**:blob 是否随版本走;大小上限取值;是否仍在上传时**预转一份 md 仅供面板预览**(已非架构必需,纯 UX 取舍,可后加);多图/大图的 token 成本与上限。
 
 **进展**(后续 refer 的细节落点):
-- 2026-06-04 多模态识图最底层验通:`astream_with_retry` 不改即可透传 content-blocks(`[{type:text},{type:image_url}]` 块列表 + base64 data URI),`qwen3.7-plus` 流式+usage 正常、自证读到图中数字。结论:识图改动不在 LLM 调用层,在上游全链路(ToolResult 携图块 / 事件存图片引用非字节 / `EventHistory` 重建时还原)。复跑脚本 `tests/manual/multimodal_vision.py`。顺带:模型别名 3.6→3.7-plus、未知模型名改 loud-fail。
+- 2026-06-04 多模态识图最底层验通:`astream_with_retry` 不改即可透传 content-blocks(`[{type:text},{type:image_url}]` 块列表 + base64 data URI),`qwen3.7-plus` 流式+usage 正常、自证读到图中数字。结论:识图改动不在 LLM 调用层,在上游全链路(ToolResult 携图块 / 事件存图片引用非字节 / `EventHistory` 重建时还原)。复跑脚本 `tests/manual/multimodal_vision.py`(2026-06-08 补 `multiturn`/`multiimage` 模式:直调 `astream_with_retry` 验透传层、非复原层——与下条「turn 内瞬态不重建」一致)。顺带:模型别名 3.6→3.7-plus、未知模型名改 loud-fail。
+- **2026-06-08 A 开工前决策锁定**(逐项拍定,随即开工):
+  - **二进制存储 = 独立 1:1 `ArtifactBlob` 表**(非在 Artifact 上加 nullable 列):彻底隔离 list/inventory 热路径,字节仅在显式 raw-fetch 时 lazy 载入。大小上限 = 隐藏 config 常量(loud-fail,卡在 MySQL 包大小 + 跨中心复制成本之下)。仍走「元数据事件 + REST 取字节」(2026-06-02 既定):`ARTIFACT_CREATED` 对 blob 只发元数据(仿 `content_omitted`),字节经新 `GET …/raw` 端点取。
+  - **上传 = 加法,不拆现有转换**:富格式(docx/pdf)既存不可变原始 blob、**又保留**现有 `DocConverter` md 转换作过渡期可读 content/预览,直到 C 的 pandoc-in-sandbox 落地再下线(原则 6「沙盒成熟前保留」)。A 不做 blob-only(否则无沙盒期 docx 不可读)。
+  - **识图 = turn 内瞬态,不跨轮重建**(关键简化,推翻原 A「跨轮历史重建时还原」设想):图仅在「读它的那一轮」可见——`read_artifact` 让该轮内存 `state["events"]` 的 tool_result 携图块(本轮后续 LLM 调用都看得到);**持久化事件只存引用**(artifact_id+version+content_type,非字节);`build_event_history` 保持纯函数(零 DB 取字节);下一轮重放只得占位文本 `[image: <id> — re-read to view if needed]`,要再看就再 `read_artifact`。引用→图块的还原放 `context_manager` 对 **turn-local WorkingSet** 做(本轮命中→图块,跨轮 miss→占位)。收益:① `build_event_history` 不被注入 DB 依赖;② 图 token 永不跨轮累积,compaction 天然正确;③ 合原则 4(显式/瞬态/scratch)。
+  - **图像格式 + 尺寸**:识图路径**只认 png/jpeg**,其它 `image/*` 上传即拒 + remediation(仿 `DocConverter` 既有 idiom)。**resize-on-read**(原始 blob 不可变,只对注入上下文的 data-URI 降采样)到隐藏常量 `VISION_IMAGE_MAX_EDGE`,token 成本应用侧可控(不靠 provider 的 HF processor 不可控)。Pillow = backend 新依赖 → **DEP-02**(requirements.txt + 在 `python:3.11-slim` 内重生 lock + pip-audit);CPU 纪律(2026-05-14 教训):`Image.MAX_IMAGE_PIXELS` 解压炸弹闸 + `to_thread`,叠加上传字节上限。
+  - **身份轻解耦(决策 2)= 现状已满足,A 无需新列**:`_normalize_filename_to_id` 现产出的 id 已是「清洗 + 带扩展名 + 小写 + 去重」的 fs-safe 句柄,可直接当沙盒 on-disk 名(无认知分裂);真实展示名已在 `title` + `metadata.original_filename`,去重只改 id、不动 `original_filename`——决策 2 实质已成立。余项仅:C 的 `mount` 用 id 当 on-disk 名;UI 展示 `original_filename`。
+  - **上传图首轮不 auto-inject**:图与 artifact 行为对齐,模型须 `read_artifact` 才看见;提示面改动 = `read_artifact` 工具描述 + inventory 标注图像项(保持 agent-agnostic,不进 lead prompt)。
+  - **切片**:A-bin(`ArtifactBlob` 表 + cap + raw 端点 + 元数据-only SSE)→ A-upload(图/富格式 blob,加法)→ A-vision(ToolResult 携图字段 + 引用事件 + `context_manager` 还原 + `context_manager.py:112` 块列表 concat 修复)。无深坑遗留,多次 sitting 完成。
 
 ### B — Kylin gVisor 功能验证(内网,验完即撤出)
 
@@ -198,5 +206,6 @@
 - 2026-06-05 「应用与沙盒分机部署」并入 C 段「换控制面(Docker↔k8s)」轴、有需求再做:真正耦合是 bind-mount daemon-local 非 aiodocker;正解 k8s(Pod+PVC),非远程 Docker daemon。详见 C 段编排器可换性条。
 - 2026-06-05 启动 **arm(鲲鹏)§B 补验**:ENOSYS/平台结论 per-arch 不迁移,目标 2×Kylin V10 arm(bare 机)。脚本 arch 化(产物带 `-amd64`/`-arm64` 后缀并存)+ 新增 `sandbox/docker-pkg/`(bare 节点离线装 docker+compose)。风险节加「arch 假设」。详见 B 段「进展 · arm」。
 - 2026-06-08 **B(arm)验收通过**:发现 arm 阻断=64K 页(Sentry 拒 non-4K host),解=在位换 4K 内核(厂商 RPM 集,不重建/不需 KVM)。新增 `sandbox/kernel-4k-pkg/`(preflight/install/postcheck)。`89.11→89.38.4k` 后 smoke 5/5 + `run-all.sh` 全绿(ENOSYS 7/7)。双架构 §B 闭环。详见 B 段「进展 · arm」。
+- 2026-06-08 **A 开工决策锁定**:blob = 独立 `ArtifactBlob` 表(热路径隔离)+ 元数据事件/REST 取字节;上传加法(blob + 留 md 转换过渡,不做 blob-only);**识图 = turn 内瞬态、不跨轮重建**(事件存引用、`build_event_history` 保持纯、下轮占位 re-read,compaction 天然正确);png/jpeg only + resize-on-read(Pillow,DEP-02);身份解耦已由现状满足、无需新列;首轮上传图不 auto-inject。切片 A-bin→A-upload→A-vision。详见 A 段「进展」。
 <!-- 新日志按日期顺序追加到此行上方 -->
 
