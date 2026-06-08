@@ -58,7 +58,13 @@ export default function ArtifactPanel() {
       <ArtifactToolbar />
       <div className="flex-1 overflow-auto">
         {viewMode === 'preview' && (isImage
-          ? <ImagePreview sessionId={imgSession} artifactId={current.id} />
+          ? <ImagePreview
+              sessionId={imgSession}
+              artifactId={current.id}
+              // updated_at: '' while live (mid-turn upload 404s) → real timestamp on the
+              // COMPLETE DB re-pull, re-firing the fetch so the image finally resolves.
+              refreshKey={current.updated_at || undefined}
+            />
           : <MarkdownPreview content={content} />)}
         {viewMode === 'source' && <SourceView content={content} />}
         {viewMode === 'diff' && (
