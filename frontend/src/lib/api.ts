@@ -391,6 +391,33 @@ export async function exportArtifact(
   return res.blob();
 }
 
+/** Fetch an artifact's raw binary blob (uploaded image / rich-format source) as an
+ *  object URL for an <img>. An `<img src>` can't carry the Authorization header, so
+ *  we fetch with auth → blob → createObjectURL (same pattern as exportArtifact + SSE).
+ *  The blob is DB-only server-side: an image uploaded *this* turn is available only
+ *  after the turn flushes (COMPLETE), mirroring the REST-lags-live tradeoff for all
+ *  artifacts. Caller MUST URL.revokeObjectURL() the returned URL when done. */
+export async function fetchArtifactRawObjectUrl(
+  sessionId: string,
+  artifactId: string
+): Promise<string> {
+  const res = await fetch(
+    `${BASE_URL}/api/v1/artifacts/${sessionId}/${artifactId}/raw`,
+    { headers: authHeaders() }
+  );
+
+  if (res.status === 401) {
+    useAuthStore.getState().logout();
+    throw new ApiError(401, 'Session expired');
+  }
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    const requestId = res.headers.get('X-Request-ID') ?? undefined;
+    throw new ApiError(res.status, formatApiError(res.status, body, requestId), undefined, requestId);
+  }
+  return URL.createObjectURL(await res.blob());
+}
+
 // Message Events (historical replay)
 export interface MessageEventItem {
   id: string;

@@ -16,6 +16,8 @@ export default function ArtifactTabs() {
 
   const tabs = useMemo(() => {
     if (contentType === 'text/markdown') return allTabs;
+    // 图片只有 preview(无文本 source/diff)
+    if (contentType?.startsWith('image/')) return allTabs.filter((t) => t.mode === 'preview');
     return allTabs.filter((t) => t.mode !== 'preview');
   }, [contentType]);
 

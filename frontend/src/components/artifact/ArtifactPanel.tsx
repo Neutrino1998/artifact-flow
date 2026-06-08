@@ -9,6 +9,7 @@ import ArtifactList from './ArtifactList';
 import MarkdownPreview from './MarkdownPreview';
 import SourceView from './SourceView';
 import DiffView from './DiffView';
+import ImagePreview from './ImagePreview';
 
 export default function ArtifactPanel() {
   const current = useArtifactStore((s) => s.current);
@@ -48,12 +49,17 @@ export default function ArtifactPanel() {
   }
 
   const content = selectedVersion?.content ?? current.content;
+  // 图片 artifact 无文本内容,preview 走 ImagePreview(authed fetch /raw → objectURL)。
+  const isImage = (current.content_type ?? '').startsWith('image/');
+  const imgSession = current.session_id || sessionId || '';
 
   return (
     <div className="h-full flex flex-col bg-chat dark:bg-chat-dark">
       <ArtifactToolbar />
       <div className="flex-1 overflow-auto">
-        {viewMode === 'preview' && <MarkdownPreview content={content} />}
+        {viewMode === 'preview' && (isImage
+          ? <ImagePreview sessionId={imgSession} artifactId={current.id} />
+          : <MarkdownPreview content={content} />)}
         {viewMode === 'source' && <SourceView content={content} />}
         {viewMode === 'diff' && (
           <DiffView

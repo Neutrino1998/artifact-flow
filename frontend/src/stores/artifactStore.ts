@@ -119,6 +119,7 @@ interface ArtifactState {
 
 function defaultViewMode(contentType?: string): ArtifactViewMode {
   if (contentType === 'text/markdown') return 'preview';
+  if (contentType?.startsWith('image/')) return 'preview';  // 图片走 ImagePreview
   return 'source';
 }
 
