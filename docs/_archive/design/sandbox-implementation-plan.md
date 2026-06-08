@@ -23,7 +23,7 @@
 
 | 阶段 | 内容 | 状态 |
 |---|---|---|
-| A | artifact 地基(二进制存储 + 多格式上传 + 识图) | 进行中(识图最底层验通 + 2026-06-08 决策锁定,开工) |
+| A | artifact 地基(二进制存储 + 多格式上传 + 识图) | 进行中(2026-06-08 三切片实现落地,单元/集成验过,待 live E2E) |
 | B | Kylin gVisor 功能验证(内网) | x86_64 **完成**(验证通过+已撤出);arm64 **完成**(2026-06-08,64K→4K 换核后全绿) |
 | C | 沙盒引擎集成(本机 runc 连调) | 未开始(依 B 冻结镜像) |
 | D | 上线前 Kylin 端到端冒烟 | 未开始 |
@@ -95,6 +95,12 @@
   - **身份轻解耦(决策 2)= 现状已满足,A 无需新列**:`_normalize_filename_to_id` 现产出的 id 已是「清洗 + 带扩展名 + 小写 + 去重」的 fs-safe 句柄,可直接当沙盒 on-disk 名(无认知分裂);真实展示名已在 `title` + `metadata.original_filename`,去重只改 id、不动 `original_filename`——决策 2 实质已成立。余项仅:C 的 `mount` 用 id 当 on-disk 名;UI 展示 `original_filename`。
   - **上传图首轮不 auto-inject**:图与 artifact 行为对齐,模型须 `read_artifact` 才看见;提示面改动 = `read_artifact` 工具描述 + inventory 标注图像项(保持 agent-agnostic,不进 lead prompt)。
   - **切片**:A-bin(`ArtifactBlob` 表 + cap + raw 端点 + 元数据-only SSE)→ A-upload(图/富格式 blob,加法)→ A-vision(ToolResult 携图字段 + 引用事件 + `context_manager` 还原 + `context_manager.py:112` 块列表 concat 修复)。无深坑遗留,多次 sitting 完成。
+- **2026-06-08 A 实现落地**(三切片 backend + 前端 view 全落;本机单元/集成验过,**待真实 server+LLM 端到端**):
+  - **A-bin**:`ArtifactBlob` 独立表(泛型 `LargeBinary(length=100MB)` → MySQL LONGBLOB / PG BYTEA / SQLite BLOB,**零 dialect import**)+ `Artifact.blob` lazy 关系/ORM 级联 + migration `0003` + `repo/service.get_blob` + `GET …/raw`(图 inline、其它 attachment)。
+  - **A-upload**:`DocConverter` 收 png/jpeg(Pillow 按**内容**探测 MIME + 解压炸弹闸)、拒其它 `image/*`;docx/pdf additive(原件 blob + md content)。blob 经 `ConvertedUpload`→chat→engine→`create_from_upload`(大小 loud-fail)→`ArtifactMemory.blob`→`create_artifact` **同事务**落 `ArtifactBlob`。`ARTIFACT_CREATED` 只发 blob 元数据、不发字节。
+  - **A-vision**:`read_artifact` 图分支 resize-on-read(`utils/image.py`,executor + 炸弹闸)→ data-URI 进 `ToolResult.metadata`;引擎把 data-URI 移入内存 `state["vision_blocks"]`、事件只存**引用**;`event_history` 对照缓存还原——本轮命中→图块、跨轮→占位(**保持纯函数、无 DB IO**);`context_manager` 处理块列表 reminder 拼接 + inventory 图项标注。前端:authed `/raw` fetch→objectURL 的 `ImagePreview`,图 artifact 路由到 preview-only tab(上传无需改 —— 本就无 `accept` 过滤)。
+  - **依赖**:Pillow 入 requirements + lock(12.2.0);顺带修 aiohttp CVE(3.13.5→3.14.1,pip-audit 全绿)。
+  - **验证**:读→事件→历史→build 全链(turn 内图块 / 跨轮占位)、前端 tsc、**181 后端测试全过**。**未做**:真实 server+LLM 上传真图→模型识图的 live 回归;mid-turn 上传图的 panel 渲染待 turn flush(`/raw` DB-only,与 REST-lags-live 同一权衡);可选「本地缩略图即时显示」(前端已缓存 `File`)未做、留 follow-up。
 
 ### B — Kylin gVisor 功能验证(内网,验完即撤出)
 
@@ -207,5 +213,6 @@
 - 2026-06-05 启动 **arm(鲲鹏)§B 补验**:ENOSYS/平台结论 per-arch 不迁移,目标 2×Kylin V10 arm(bare 机)。脚本 arch 化(产物带 `-amd64`/`-arm64` 后缀并存)+ 新增 `sandbox/docker-pkg/`(bare 节点离线装 docker+compose)。风险节加「arch 假设」。详见 B 段「进展 · arm」。
 - 2026-06-08 **B(arm)验收通过**:发现 arm 阻断=64K 页(Sentry 拒 non-4K host),解=在位换 4K 内核(厂商 RPM 集,不重建/不需 KVM)。新增 `sandbox/kernel-4k-pkg/`(preflight/install/postcheck)。`89.11→89.38.4k` 后 smoke 5/5 + `run-all.sh` 全绿(ENOSYS 7/7)。双架构 §B 闭环。详见 B 段「进展 · arm」。
 - 2026-06-08 **A 开工决策锁定**:blob = 独立 `ArtifactBlob` 表(热路径隔离)+ 元数据事件/REST 取字节;上传加法(blob + 留 md 转换过渡,不做 blob-only);**识图 = turn 内瞬态、不跨轮重建**(事件存引用、`build_event_history` 保持纯、下轮占位 re-read,compaction 天然正确);png/jpeg only + resize-on-read(Pillow,DEP-02);身份解耦已由现状满足、无需新列;首轮上传图不 auto-inject。切片 A-bin→A-upload→A-vision。详见 A 段「进展」。
+- 2026-06-08 **A 实现落地**(backend 三切片 + 前端 image view):`ArtifactBlob` 独立表(泛型 `LargeBinary(length=100MB)`,零 dialect import)+ `/raw` 端点;png/jpeg + docx/pdf additive 上传(同事务落 blob);识图 turn 内瞬态(事件存引用、`event_history` 对 `state["vision_blocks"]` 还原、跨轮占位、`build_event_history` 保持纯)。Pillow 入 lock(12.2.0)+ 顺带修 aiohttp CVE(→3.14.1)。单元/集成验过(181 测试 + 前端 tsc),待真实 server+LLM live E2E。详见 A 段「进展」。
 <!-- 新日志按日期顺序追加到此行上方 -->
 
