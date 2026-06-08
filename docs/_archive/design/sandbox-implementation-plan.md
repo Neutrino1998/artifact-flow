@@ -17,14 +17,14 @@
 
 ## 进度
 
-- **当前**:**B(x86_64)完成**(2026-06-05 milvus2 `run-all.sh` 全绿 + 已撤出,见 B 段「进展」)—— ENOSYS 核心赌注赢、镜像 id 冻结、内网零残留。**B(arm64/鲲鹏)进行中**:已申请 2×Kylin V10 arm 16c/32G,产物已打包待上机(见 B 段「进展 · arm」)。A 仅识图最底层验通(litellm 透传)。
+- **当前**:**B(x86_64)完成**(2026-06-05 milvus2 `run-all.sh` 全绿 + 已撤出,见 B 段「进展」)—— ENOSYS 核心赌注赢、镜像 id 冻结、内网零残留。**B(arm64/鲲鹏)完成**(2026-06-08,经 64K→4K 在位换核后 `run-all.sh` 全绿,见 B 段「进展 · arm」)—— 双架构 §B 闭环。A 仅识图最底层验通(litellm 透传)。
 - **下一步**:① arm §B 上机验证(机器到位后);② C 阶段引擎集成依 B 冻结镜像开工,或先补 A 地基余下部分 —— 由用户拍。
 - **产物处置(2026-06-05 拍定)**:`feat/sandbox` 这批已验收产物(`sandbox/` 探针 + 构建脚本)**暂留分支不动**,不单独提早合 main。「是否把就绪探针子集(`unshare -U` 闸 + smoke + ENOSYS/uid)提升为通用部署机预检工具」**推迟到 C/D 阶段**——届时有真实第二调用点(每台新沙盒宿主预检 + D 端到端冒烟)再校准边界,现在抽象属投机(YAGNI)。
 
 | 阶段 | 内容 | 状态 |
 |---|---|---|
 | A | artifact 地基(二进制存储 + 多格式上传 + 识图) | 进行中(仅识图最底层验通) |
-| B | Kylin gVisor 功能验证(内网) | x86_64 **完成**(验证通过+已撤出);arm64 **进行中**(产物已打包,待上机) |
+| B | Kylin gVisor 功能验证(内网) | x86_64 **完成**(验证通过+已撤出);arm64 **完成**(2026-06-08,64K→4K 换核后全绿) |
 | C | 沙盒引擎集成(本机 runc 连调) | 未开始(依 B 冻结镜像) |
 | D | 上线前 Kylin 端到端冒烟 | 未开始 |
 
@@ -133,7 +133,11 @@
 - **脚本已 arch 化**(本次):`build-sandbox-image.sh` 凭 `PLATFORM`、`gvisor-pkg/fetch-and-package.sh` 凭 `ARCH` 产出**带 arch 后缀**的产物(`-amd64`/`-arm64`/`-aarch64`),x86 与 arm 两套并存不覆盖;verify tar arch 无关、共享。arm64 在 Apple Silicon 上**原生构建**(比 amd64 的 QEMU 快)。
 - **新增 `sandbox/docker-pkg/`**:静态二进制离线装 docker engine+compose(bare 节点前置),`install.sh` 写 systemd units + 起 dockerd,README 记 Kylin 坑(SELinux/overlay/iptables)。**bare 节点供给顺序**:docker-pkg → gvisor-pkg → smoke → load 镜像 → run-all。
 - **传输单元(arm 趟,4 个)**:docker-offline tar、gVisor tar、镜像 tar(arm64)、verify tar(共享)。
-- **待办**:机器到位 → 上机跑 docker-pkg/gvisor-pkg/smoke/run-all → arm 全绿则冻结 arm 镜像 id + 文档化;若 ENOSYS 在 arm 出现 syscall 缺口,即"该 arch 回退 Firecracker"的信号。
+- **上机结果(2026-06-08)**:发现 **arm 阻断 = 64K 页** —— Kylin V10 SP3 鲲鹏默认内核按 64K 页编译(`getconf PAGE_SIZE`=65536),gVisor Sentry 拒起(`host page size mismatch - running on non-4K host`),smoke Tier 2(systrap)/4/5 全挂。**这是 per-arch 真阻断,非 x86 那种 DNS 伪失败。**
+- **解 = 在位换 4K 内核(不重建实例、不需 KVM)**:厂商把 4K 页内核作独立 RPM 集供(`update.cs2c.com.cn/CS/V10/V10SP3-2403/kernel-4k/`,非另封 ISO)。判别确认该实例是「镜像内自带内核 + GRUB 启动」(`/proc/cmdline` 有 `BOOT_IMAGE=`、UEFI、根在 LVM)⇒ 装 4K 内核 RPM + grubby 设默认 + 重启即生效,老 64K 内核留作回滚。gVisor 的 systrap 平台是用户态(ptrace),**不需要 `/dev/kvm`**,纯 VM 即可。
+- **新增 `sandbox/kernel-4k-pkg/`**:离线 4K 内核包,`fetch-and-package.sh` 重现下载 4 个 boot-essential RPM(core/modules/modules-extra/meta)+ 三段运维脚本——`preflight.sh`(只读门禁:arch / 页大小 / `BOOT_IMAGE` 自带内核 / grubby / 介质校验)→ `install.sh`(并存装 + 确保 initramfs + grubby 设默认,**不自动重启**)→ `postcheck.sh`(重启后验 `PAGE_SIZE=4096`)。LVM 根必须确认 `initramfs-...4k.img` 已生成再重启(脚本会查),故装与重启分离。
+- **验收(2026-06-08,`89.11(64K) → 89.38.4k`)**:smoke 5/5;`run-all.sh` **全绿** —— ENOSYS **7/7**(numpy/pandas/matplotlib(PNG+PDF)/Pillow 五个 C-ext 无 syscall 缺口,核心赌注 arm 上也赢)、pandoc 3/3、offline-install ✓、bind-mount 3/3(host 属主 uid=1000)、network 2 pass/1 skip(`--network=none` 隔离生效 + bridge egress 通;DNS 因内网无 DNS server 而 skip,同 x86 判 N/A)。**arm §B 闭环,与 x86 对齐。**
+- **结论**:gVisor-as-MVP 在鲲鹏 arm **成立**,前置 = 目标节点跑 4K 页内核(一次性换核、可回滚);ENOSYS 未现 C-ext 缺口 ⇒ arm 无需走 Firecracker 回退。arm 镜像 id 冻结待操作;**两台 arm 不撤**(`ai-agent-app` 等),留作**沙盒版应用落地机** + 双机高可用验证(与 x86「验完即撤」不同——x86 那趟是借机验证,arm 这两台是目标部署机)。
 
 ### C — 沙盒引擎集成(本机 runc 连调;依赖 A 的二进制存储 + B 的镜像)
 
@@ -169,7 +173,7 @@
 - **容器拆除漏路径**(C 阶段)—— 必须每条退出路径都拆,C 阶段专门测 `while-true` + 各种取消/超时确认无孤儿。
 - **DooD socket = backend 有 host root** —— 创建参数严防被模型内容污染。
 - **gVisor 仅健康 Kylin 节点可用** —— 部署预检不可省。
-- **arch 假设(x86_64 ≠ arm64)** —— §B 的 ENOSYS/平台验证结论是 per-arch 的,**不跨架构迁移**;每个目标 arch(x86 / 鲲鹏 arm)须各自跑一遍 §B 才能信"gVisor-as-MVP 成立"。沙盒镜像(C 扩展 wheel)、gVisor 二进制、docker 静态包均分 arch 打。x86 已绿,arm 验证进行中(见 B 段「进展 · arm」)。
+- **arch 假设(x86_64 ≠ arm64)** —— §B 的 ENOSYS/平台验证结论是 per-arch 的,**不跨架构迁移**;每个目标 arch(x86 / 鲲鹏 arm)须各自跑一遍 §B 才能信"gVisor-as-MVP 成立"。沙盒镜像(C 扩展 wheel)、gVisor 二进制、docker 静态包均分 arch 打。x86 已绿;**arm 已绿(2026-06-08)**——但**额外前置**:鲲鹏 arm 节点须跑 **4K 页内核**(`sandbox/kernel-4k-pkg/` 在位换核),64K 默认内核会让 gVisor Sentry 拒起(`non-4K host`)。见 B 段「进展 · arm」。
 
 ## 变更日志
 
@@ -193,5 +197,6 @@
 - 2026-06-05 **B 验收通过**:milvus2 `run-all.sh` 全绿,ENOSYS 7/7(C 扩展零 ENOSYS,gVisor-as-MVP 成立)、uid 1000 无 remap;DNS-under-runsc 判 N/A(测试内网无 DNS,与 gVisor 无关)。冻结 image id `sha256:3b43b839…`。milvus2 已撤出,B 闭环。详见 B 段「进展」。
 - 2026-06-05 「应用与沙盒分机部署」并入 C 段「换控制面(Docker↔k8s)」轴、有需求再做:真正耦合是 bind-mount daemon-local 非 aiodocker;正解 k8s(Pod+PVC),非远程 Docker daemon。详见 C 段编排器可换性条。
 - 2026-06-05 启动 **arm(鲲鹏)§B 补验**:ENOSYS/平台结论 per-arch 不迁移,目标 2×Kylin V10 arm(bare 机)。脚本 arch 化(产物带 `-amd64`/`-arm64` 后缀并存)+ 新增 `sandbox/docker-pkg/`(bare 节点离线装 docker+compose)。风险节加「arch 假设」。详见 B 段「进展 · arm」。
+- 2026-06-08 **B(arm)验收通过**:发现 arm 阻断=64K 页(Sentry 拒 non-4K host),解=在位换 4K 内核(厂商 RPM 集,不重建/不需 KVM)。新增 `sandbox/kernel-4k-pkg/`(preflight/install/postcheck)。`89.11→89.38.4k` 后 smoke 5/5 + `run-all.sh` 全绿(ENOSYS 7/7)。双架构 §B 闭环。详见 B 段「进展 · arm」。
 <!-- 新日志按日期顺序追加到此行上方 -->
 

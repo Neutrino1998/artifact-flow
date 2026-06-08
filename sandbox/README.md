@@ -12,6 +12,7 @@ sandbox/
 ├── requirements.txt        sandbox python deps — DECOUPLED from backend requirements.lock
 ├── stub-pkg/               trivial pure-Python pkg → baked wheel for the offline-install probe
 ├── docker-pkg/             offline Docker Engine + compose (static) for a BARE node (see its README)
+├── kernel-4k-pkg/          offline 4K-page kernel swap for Kylin arm (gVisor needs 4K pages; see its README)
 ├── gvisor-pkg/             runsc install/smoke/uninstall + fetch-and-package.sh (see its README)
 └── verify/                 the five §B probes + run-all.sh orchestrator
 scripts/build-sandbox-image.sh   build + docker-save the image tar (mirrors release.sh)
@@ -61,6 +62,11 @@ per-arch — it does NOT transfer x86↔arm; each arch must run `run-all.sh` its
 
 `<arch>` = `x86_64`/`aarch64` for the gVisor/docker tars, `amd64`/`arm64` for the
 image tar + tag. A box is single-arch — use one consistently.
+
+**arm/Kunpeng prerequisite:** Kylin V10 arm ships a **64K-page** kernel, on which
+gVisor's Sentry refuses to start (`non-4K host`). Swap to a 4K-page kernel FIRST
+(`kernel-4k-pkg/`: `preflight.sh` → `install.sh` → reboot → `postcheck.sh` shows
+`PAGE_SIZE=4096`), then proceed. x86/C86 already run 4K pages — skip this.
 
 ```bash
 # 0. BARE node only (no docker): install engine + compose first
