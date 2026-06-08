@@ -14,7 +14,7 @@ tools:
   call_subagent: auto
   web_search: auto
   web_fetch: confirm
-model: qwen3.7-max
+model: qwen3.7-plus
 max_tool_rounds: 100
 ---
 

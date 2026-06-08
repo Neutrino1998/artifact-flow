@@ -316,7 +316,7 @@ class DocConverter:
         """图片(png/jpeg)→ blob 存储。
 
         真实格式由 Pillow **按内容**探测(非按扩展名),改后缀/伪装的图也能纠正到
-        正确 MIME;探测顺带挡损坏、截断、解压炸弹(MAX_IMAGE_PIXELS)。`content`
+        正确 MIME;探测顺带挡损坏、截断、解压炸弹(显式 w*h ≤ VISION_IMAGE_MAX_PIXELS)。`content`
         留空 —— 图无文本表示,模型靠 read_artifact 取图块(A-vision)。非 png/jpeg
         的真实格式(探测出 GIF/WEBP 等)同样 loud-fail。
         """
@@ -373,20 +373,26 @@ class DocConverter:
 
 
 def _probe_image(file_bytes: bytes) -> Optional[str]:
-    """同步 Pillow 探测:返回真实图片格式（'PNG' / 'JPEG' / ...），非法/损坏返回 None。
+    """同步 Pillow 探测:返回真实图片格式（'PNG' / 'JPEG' / ...），非法/损坏/超像素返回 None。
 
-    跑在 executor 里（CPU 纪律:校验可能解码、且 Pillow 是 C 扩展）。Pillow 全局
-    `Image.MAX_IMAGE_PIXELS` 解压炸弹闸在 open/verify 时对超大像素图抛
-    `DecompressionBombError` → 归入 None（loud-fail 给可操作提示）。verify() 做结构
-    校验（截断/损坏即抛）;它会使 image 对象失效,故先取 format 再 verify。
+    跑在 executor 里（CPU 纪律:校验可能解码、且 Pillow 是 C 扩展）。解压炸弹闸不依赖
+    Pillow 默认的 `MAX_IMAGE_PIXELS`(89–178M 段只 warn 不抛,会漏过 100M 像素的小文件炸弹),
+    而是在 **解码前** 用 `img.size`(open 只读头、不解码)显式校验 `w*h ≤ VISION_IMAGE_MAX_PIXELS`,
+    超限即 None(loud-fail 给可操作提示)。verify() 做结构校验（截断/损坏即抛）;它会使 image
+    对象失效,故先取 format/size 再 verify。
     """
     import io
 
     from PIL import Image
 
+    from config import config
+
     try:
         with Image.open(io.BytesIO(file_bytes)) as img:
             fmt = img.format
+            w, h = img.size
+            if w * h > config.VISION_IMAGE_MAX_PIXELS:
+                return None
             img.verify()
         return fmt
     except Exception:

@@ -4,14 +4,18 @@
 LLM 上下文前的副本)。原始 blob 永不被改,这里只产生一个降采样的注入副本。
 
 CPU 纪律(CLAUDE.md / 2026-05-14 事故):Pillow 是 C 扩展、resize 会解码,**务必由
-调用方放 executor**;Pillow 全局 ``Image.MAX_IMAGE_PIXELS`` 解压炸弹闸在 open 时对
-超大像素图抛 ``DecompressionBombError`` → 调用方 try 捕获转 loud-fail。
+调用方放 executor**;解压炸弹闸不靠 Pillow 默认 ``MAX_IMAGE_PIXELS``(89–178M 段只 warn
+不抛),而是在 **解码前** 用 ``img.size`` 显式校验 ``w*h ≤ VISION_IMAGE_MAX_PIXELS`` →
+超限抛 ``ValueError``,调用方 try 捕获转 loud-fail。这是上传校验(_probe_image)之外的
+第二道防御 —— blob 已落盘后(如配置调小、或历史 blob)read 仍不被超大图打穿。
 """
 
 import base64
 import io
 
 from PIL import Image
+
+from config import config
 
 
 def resize_to_vision_data_uri(data: bytes, max_edge: int) -> str:
@@ -23,6 +27,12 @@ def resize_to_vision_data_uri(data: bytes, max_edge: int) -> str:
     with Image.open(io.BytesIO(data)) as img:
         fmt = (img.format or "").upper()
         w, h = img.size
+        # 解码前的解压炸弹防御(见模块 docstring):超像素即拒,绝不进 resize/decode。
+        if w * h > config.VISION_IMAGE_MAX_PIXELS:
+            raise ValueError(
+                f"image too large to view: {w}x{h} exceeds "
+                f"{config.VISION_IMAGE_MAX_PIXELS} pixel cap"
+            )
         longest = max(w, h)
         if longest <= max_edge:
             out_bytes = data

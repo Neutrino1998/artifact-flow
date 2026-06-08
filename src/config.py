@@ -59,6 +59,12 @@ class Settings(BaseSettings):
     # token 成本可预测(不靠 provider 的 HF processor)。原始 blob 不变,只降采样注入副本。
     # 1568 对齐主流 VLM 的高分辨率 tile 上限,既清晰又不爆 token。隐藏常量,非模型可调。
     VISION_IMAGE_MAX_EDGE: int = 1568
+    # 解压炸弹闸:像素总数(w*h)上限。Pillow 默认仅在 ~178M 像素抛错、89–178M 段只
+    # `warnings.warn`(图照常打开)——一张纯色 10000×10000(100M 像素)PNG 可压到十几 KB,
+    # 轻松绕过 MAX_UPLOAD_SIZE,落到 read 路径 resize 时才解码,撑爆 CPU/内存。故在**解码前**
+    # (Image.open 只读头、拿 size,不解码)显式校验 w*h:上传校验侧拒(loud-fail)、read 侧防御性
+    # 再校验。50M 像素 ≈ 50MP,宽于真实相机/截图,远低于 DoS 量级。隐藏常量,operator 可调。
+    VISION_IMAGE_MAX_PIXELS: int = 50 * 1000 * 1000
 
     # Cancel-path Message.response placeholders.
     # 三条 cancel 路径都要写一个非空占位 —— 前端 MessageList 用 node.response 非空

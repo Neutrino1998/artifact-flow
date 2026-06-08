@@ -10,12 +10,22 @@ Unit tests for src/utils/doc_converter.py
 属于 integration 测试范畴，不在这里。
 """
 
-import pytest
+import io
 
+import pytest
+from PIL import Image
+
+from config import config
 from utils.doc_converter import (
     DocConverter,
     _UNSUPPORTED_OFFICE,
 )
+
+
+def _png_bytes(w: int, h: int) -> bytes:
+    buf = io.BytesIO()
+    Image.new("RGB", (w, h), (10, 20, 30)).save(buf, format="PNG")
+    return buf.getvalue()
 
 
 # ============================================================
@@ -153,3 +163,39 @@ class TestDocxZipPrecheck:
         with pytest.raises(Exception) as exc_info:
             await converter._convert_docx(zipped, "ok.docx")
         assert "不是有效的 .docx" not in str(exc_info.value)
+
+
+# ============================================================
+# 图片(png/jpeg)→ blob 存储 + 内容探测 + 解压炸弹拒绝
+# ============================================================
+
+
+class TestImageConversion:
+    """A 识图地基:有效 png/jpeg 存为不可读 blob(content 空);损坏/超像素 loud-fail。"""
+
+    async def test_valid_png_stored_as_blob(self):
+        converter = DocConverter()
+        data = _png_bytes(40, 30)
+        result = await converter.convert(data, "shot.png")
+        assert result.content == ""               # 图无文本表示
+        assert result.content_type == "image/png"
+        assert result.blob == data                # 原件不变
+        assert result.blob_content_type == "image/png"
+
+    async def test_content_sniffed_not_extension(self):
+        """真 PNG 字节改名 .jpg → 探测纠正到 image/png(按内容、非扩展名)。"""
+        converter = DocConverter()
+        result = await converter.convert(_png_bytes(16, 16), "mislabeled.jpg")
+        assert result.content_type == "image/png"
+
+    async def test_corrupt_image_loud_fails(self):
+        converter = DocConverter()
+        with pytest.raises(ValueError, match="PNG/JPEG"):
+            await converter.convert(b"\x89PNG\r\n\x1a\n" + b"garbage", "broken.png")
+
+    async def test_pixel_bomb_rejected(self, monkeypatch):
+        """小文件大像素图(解压炸弹):显式 w*h 闸在解码前拒,归入 loud-fail。"""
+        monkeypatch.setattr(config, "VISION_IMAGE_MAX_PIXELS", 100)  # 20x20=400px 超
+        converter = DocConverter()
+        with pytest.raises(ValueError, match="PNG/JPEG"):
+            await converter.convert(_png_bytes(20, 20), "bomb.png")

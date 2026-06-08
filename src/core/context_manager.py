@@ -18,6 +18,7 @@ from datetime import datetime
 
 from config import config
 from core.event_history import build_event_history, last_llm_usage
+from models.llm import model_supports_vision
 from tools.artifact_envelope import make_preview_slice, render_artifact_slice
 from utils.logger import get_logger
 
@@ -89,7 +90,8 @@ class ContextManager:
         # 历史 + 当前轮统一来自 state["events"]，EventHistory 处理 boundary / 过滤；
         # 发给 LLM 前剥离 _meta。
         all_messages = cls._strip_meta(build_event_history(
-            state.get("events", []), agent_name, state.get("vision_blocks")
+            state.get("events", []), agent_name, state.get("vision_blocks"),
+            vision_capable=model_supports_vision(agent_config.model),
         ))
 
         # 动态上下文（系统时间 / task_plan / artifact 清单）作为 ephemeral

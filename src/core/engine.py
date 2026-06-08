@@ -895,7 +895,10 @@ async def execute_loop(
                 "system_prompt": messages[0]["content"] if messages and messages[0].get("role") == "system" else None,
             })
 
-            logger.debug(f"[{current_agent_name}] Messages:\n{format_messages_for_debug(messages)}")
+            # 守卫:format_messages_for_debug 会遍历 messages,识图块列表里若有图(已压成
+            # 摘要、不吐 base64,但仍要遍历)——非 DEBUG 时跳过 eager 求值。
+            if logger.debug_mode:
+                logger.debug(f"[{current_agent_name}] Messages:\n{format_messages_for_debug(messages)}")
 
             # 调用 LLM（流式）
             llm_result = await _call_llm(messages, current_agent_name, agents[current_agent_name].model)

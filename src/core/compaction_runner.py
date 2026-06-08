@@ -235,10 +235,11 @@ class CompactionRunner:
             ),
         })
 
-        logger.debug(
-            f"[compact_agent] Messages (for {agent_name} compaction, "
-            f"{len(events_to_compact)} events):\n{format_messages_for_debug(messages)}"
-        )
+        if logger.debug_mode:
+            logger.debug(
+                f"[compact_agent] Messages (for {agent_name} compaction, "
+                f"{len(events_to_compact)} events):\n{format_messages_for_debug(messages)}"
+            )
 
         start = utc_now()
         response = ""

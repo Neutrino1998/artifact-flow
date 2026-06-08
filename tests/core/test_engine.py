@@ -150,7 +150,10 @@ class _FakeArtifactService:
     def set_session(self, session_id):
         pass
 
-    async def create_from_upload(self, session_id, filename, content, content_type, metadata=None):
+    async def create_from_upload(
+        self, session_id, filename, content, content_type, metadata=None,
+        blob=None, blob_content_type=None,
+    ):
         idx = self.calls
         self.calls += 1
         if idx == self.fail_at:
