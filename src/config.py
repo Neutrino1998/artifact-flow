@@ -49,6 +49,16 @@ class Settings(BaseSettings):
     # 只带"已变更"信号(content 省略、content_omitted=True),前端靠 COMPLETE 后的
     # DB 对齐补全(对齐本就兜底)。update 的 span delta 不受此限(权威且体量随模型输出)。
     ARTIFACT_LIVE_CONTENT_MAX_CHARS: int = 256000
+    # Artifact 二进制存储(ArtifactBlob)单条字节上限。写入侧 loud-fail(不静默截断)。
+    # 隐藏常量,非模型可调。刻意高于 MAX_UPLOAD_SIZE(20MB):留余量给 C 阶段沙盒
+    # 回写的 blob,免得再调一次。**ops 依赖**:100MB 单行要求 MySQL/TDSQL 服务端
+    # max_allowed_packet 抬到其上(默认常仅 16–64MB),否则大 insert 在驱动层失败;
+    # 且跨中心复制 100MB 行成本不低,值随该上限演进再核。
+    ARTIFACT_BLOB_MAX_BYTES: int = 100 * 1024 * 1024
+    # 识图:read_artifact 把图注入上下文前 resize 到最长边 ≤ 此值(像素),应用侧控
+    # token 成本可预测(不靠 provider 的 HF processor)。原始 blob 不变,只降采样注入副本。
+    # 1568 对齐主流 VLM 的高分辨率 tile 上限,既清晰又不爆 token。隐藏常量,非模型可调。
+    VISION_IMAGE_MAX_EDGE: int = 1568
 
     # Cancel-path Message.response placeholders.
     # 三条 cancel 路径都要写一个非空占位 —— 前端 MessageList 用 node.response 非空

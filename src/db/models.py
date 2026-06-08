@@ -17,6 +17,7 @@ from sqlalchemy import (
     String,
     Text,
     Integer,
+    LargeBinary,
     DateTime,
     ForeignKey,
     ForeignKeyConstraint,
@@ -33,6 +34,12 @@ from sqlalchemy.orm import (
     mapped_column,
     relationship,
 )
+
+# 二进制列的类型长度 hint（见 ArtifactBlob.data）：仅用于在 MySQL 上把列推到
+# LONGBLOB 这一 tier，PG/SQLite 忽略长度。app 侧 config.ARTIFACT_BLOB_MAX_BYTES
+# 才是真正的大小闸门。取 >16MB(MEDIUMBLOB 上限)即可保证 LONGBLOB；这里取 100MB
+# 与当前 cap 对齐、自文档化(LONGBLOB 物理可达 4GB,M 只选 tier 不限长)。
+_BLOB_TYPE_TIER_HINT = 100 * 1024 * 1024
 
 
 class Base(DeclarativeBase):
@@ -515,7 +522,20 @@ class Artifact(Base):
         lazy="selectin",
         order_by="ArtifactVersion.version"
     )
-    
+
+    # 关系：一对一 -> blob（二进制存储，与热路径隔离）。
+    # **刻意 lazy="select"（非 selectin）**：list/inventory 查询绝不能把 MB 级字节
+    # 拖进每次列表读——只有显式访问 `.blob`（仅 raw-fetch 路径）才发 SQL 载入。
+    # cascade 由 ORM 驱动（SQLite dev 不开 FK pragma，DB 级 ondelete 不生效）；
+    # DB 级 ondelete=CASCADE 作 prod 兜底。除 raw 端点外，任何序列化都不得碰 .blob。
+    blob: Mapped[Optional["ArtifactBlob"]] = relationship(
+        "ArtifactBlob",
+        back_populates="artifact",
+        cascade="all, delete-orphan",
+        uselist=False,
+        lazy="select",
+    )
+
     def __repr__(self) -> str:
         return f"<Artifact(id={self.id}, title={self.title}, version={self.current_version})>"
 
@@ -585,3 +605,62 @@ class ArtifactVersion(Base):
     
     def __repr__(self) -> str:
         return f"<ArtifactVersion(artifact={self.artifact_id}, version={self.version})>"
+
+
+class ArtifactBlob(Base):
+    """
+    Artifact 二进制存储表（与文本/inventory 热路径隔离）
+
+    1:1 绑定 Artifact（复合主键 = 复合外键 (artifact_id, session_id)），承载用户
+    上传的富格式原始字节（docx/pdf）与图片（png/jpeg）—— **源不可变，A 阶段不随
+    版本走**（一个 artifact 一条 blob；版本化 blob 是 C 阶段沙盒回写才有的问题）。
+
+    刻意独立成表而非在 Artifact 上加 nullable 列：list/inventory 查询永不 JOIN
+    此表，字节仅在显式 raw-fetch（`Artifact.blob` 关系 lazy 载入）时进内存，避免
+    把 MB 级 blob 拖进每次列表读。
+
+    类型(刻意不依赖方言):泛型 `LargeBinary(length=...)` —— PG → `BYTEA`(忽略
+    长度,~1GB),SQLite → `BLOB`(忽略长度)。MySQL/TDSQL 上 `LargeBinary` **不带
+    长度**会映射成 64KB 的 `BLOB` 静默截断;带长度则 emit `BLOB(M)`,而 MySQL 按
+    `BLOB(M)` 选**能容下 M 字节的最小 blob tier**——M=100MB>16MB ⇒ 落 `LONGBLOB`
+    (4GB)。于是一条泛型声明在三库都对、零 dialect import。大小由
+    `config.ARTIFACT_BLOB_MAX_BYTES` 在写入侧 loud-fail 兜底(M 只选 tier 不限长)。
+    """
+    __tablename__ = "artifact_blobs"
+
+    # 复合主键 = 复合外键 → artifacts(id, session_id)，1:1
+    artifact_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    session_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+
+    # 原始字节。length hint 仅为在 MySQL 上把列推到 LONGBLOB tier(见类 docstring)。
+    data: Mapped[bytes] = mapped_column(
+        LargeBinary(length=_BLOB_TYPE_TIER_HINT),
+        nullable=False,
+    )
+
+    # 字节数冗余存：metadata / 校验 / 展示不必把 data 载入内存
+    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        server_default=func.now(),
+        nullable=False
+    )
+
+    # 关系：一对一 -> artifact
+    artifact: Mapped["Artifact"] = relationship(
+        "Artifact",
+        back_populates="blob",
+    )
+
+    __table_args__ = (
+        # 复合外键 → artifacts，prod(PG/MySQL) DB 级级联兜底；SQLite dev 靠 ORM cascade
+        ForeignKeyConstraint(
+            ["artifact_id", "session_id"],
+            ["artifacts.id", "artifacts.session_id"],
+            ondelete="CASCADE"
+        ),
+    )
+
+    def __repr__(self) -> str:
+        return f"<ArtifactBlob(artifact={self.artifact_id}, size_bytes={self.size_bytes})>"

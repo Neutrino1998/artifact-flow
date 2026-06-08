@@ -153,6 +153,8 @@ async def send_message(
             "content": c.content,
             "content_type": c.content_type,
             "metadata": c.metadata,
+            "blob": c.blob,                          # 二进制源(图片/富格式),纯文本为 None
+            "blob_content_type": c.blob_content_type,
         }
         for c in converted
     ]

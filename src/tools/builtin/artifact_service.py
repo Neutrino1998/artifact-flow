@@ -142,12 +142,24 @@ class ArtifactService:
         self._ws.put(session_id, memory)
         self._ws.mark_new(session_id, memory.id)
         payload = self._content_payload(memory.content)
+        # 二进制 artifact:事件只带元数据(has_blob/size/真实 MIME),**绝不带字节**——
+        # 前端据 has_blob 去 GET …/raw 取图渲染或下载原件(blob 有专属持久家,事件流
+        # 里再塞一份字节无读者、且撑爆 SSE)。图片 content="" 本就天然 metadata-only。
+        blob = getattr(memory, "blob", None)
+        blob_meta: Dict[str, Any] = {}
+        if blob is not None:
+            blob_meta = {
+                "has_blob": True,
+                "blob_size": len(blob),
+                "blob_content_type": (memory.metadata or {}).get("blob_content_type"),
+            }
         await self._emit_artifact(_evt_artifact_created(), {
             "id": memory.id,
             "title": memory.title,
             "content_type": memory.content_type,
             "source": memory.source,
             "current_version": memory.current_version,
+            **blob_meta,
             **payload,
         })
         self._note_base(memory.id, payload)
@@ -273,6 +285,8 @@ class ArtifactService:
         content: str,
         content_type: str,
         metadata: Optional[Dict] = None,
+        blob: Optional[bytes] = None,
+        blob_content_type: Optional[str] = None,
     ) -> Tuple[bool, str, Optional[Dict]]:
         """从用户上传文件 **stage** 一个 artifact 进 WorkingSet(不即时 commit)。
 
@@ -307,9 +321,22 @@ class ArtifactService:
                 f"{artifact_id!r} (must match {_ARTIFACT_ID_PATTERN.pattern})"
             ), None
 
+        # blob 大小上限 loud-fail(写入侧,不静默截断)。上传本已受 MAX_UPLOAD_SIZE
+        # 约束,此处是 blob 存储边界的兜底守门(C 阶段沙盒回写也走 blob 时同样受护)。
+        if blob is not None and len(blob) > config.ARTIFACT_BLOB_MAX_BYTES:
+            max_mb = config.ARTIFACT_BLOB_MAX_BYTES / 1024 / 1024
+            return False, (
+                f"Binary too large for storage: {len(blob) / 1024 / 1024:.1f}MB "
+                f"(max {max_mb:.0f}MB)"
+            ), None
+
         title = os.path.splitext(filename)[0]
         upload_metadata = dict(metadata or {})
         upload_metadata["original_filename"] = filename
+        # blob 的真实 MIME 存入 metadata,供 raw 端点按原件 MIME 发(additive 富格式下
+        # artifact.content_type 可能是转换后的 text/markdown,与 blob 真实类型不同)。
+        if blob is not None:
+            upload_metadata["blob_content_type"] = blob_content_type or content_type
 
         try:
             await self.ensure_session_exists(session_id)
@@ -321,6 +348,7 @@ class ArtifactService:
                 current_version=1,
                 metadata=upload_metadata,
                 source="user_upload",
+                blob=blob,
             )
             await self._register_new(session_id, memory)
 
@@ -332,6 +360,7 @@ class ArtifactService:
                 "current_version": 1,
                 "source": "user_upload",
                 "original_filename": filename,
+                "has_blob": blob is not None,
             }
         except Exception as e:
             logger.exception(f"Failed to stage upload artifact: {e}")
@@ -423,6 +452,44 @@ class ArtifactService:
             "source": memory.source if memory else "agent",
             "created_at": memory.created_at.isoformat() if memory else None,
             "updated_at": None,
+        }
+
+    async def get_blob(
+        self,
+        session_id: str,
+        artifact_id: str,
+    ) -> Optional[Dict[str, Any]]:
+        """读取 artifact 的二进制原始字节 + 取字节所需的元数据。raw-fetch(REST)专用。
+
+        返回 None = artifact 不存在或无 blob(纯文本 artifact)。元数据走 get_artifact
+        (REST 路径自带空 WorkingSet → 落 DB),字节走 repo.get_blob(显式 SELECT,不
+        碰 `Artifact.blob` 关系)。
+
+        `content_type` 优先取 `metadata.blob_content_type`(A-upload 写入原始 blob 的
+        真实 MIME),回落 artifact 自身 content_type —— 富格式 additive 存储下 artifact
+        的 content_type 可能是转换后的 text/markdown,而 raw 必须发原始 blob 的 MIME。
+        """
+        memory = await self.get_artifact(session_id, artifact_id)
+        if not memory:
+            return None
+        meta = memory.metadata or {}
+        # 字节来源二选一:① 本轮 staged 但**未 flush** 的上传 → 在 WorkingSet memory.blob
+        # (用户传图即问的常见场景:upload→read 同一 turn,DB 里此时还没有行);② 否则
+        # 查 DB(往轮已 flush / REST 路径空 WorkingSet)。两条都没有 → None(纯文本 artifact)。
+        staged = getattr(memory, "blob", None)
+        if staged is not None:
+            data, size = staged, len(staged)
+        else:
+            repo = self._ensure_repository()
+            row = await repo.get_blob(session_id, artifact_id)
+            if row is None:
+                return None
+            data, size = row.data, row.size_bytes
+        return {
+            "data": data,
+            "size_bytes": size,
+            "content_type": meta.get("blob_content_type") or memory.content_type,
+            "filename": meta.get("original_filename") or memory.id,
         }
 
     # ========================================
@@ -590,11 +657,14 @@ class ArtifactService:
 
         async def _write(repo):
             if is_new:
+                # 新建时连同暂存的二进制源一并写(同一事务,原子)。blob=None 即纯文本/
+                # 模型自建,不写 ArtifactBlob 行。
                 await repo.create_artifact(
                     session_id=sid, artifact_id=aid,
                     content_type=memory.content_type, title=memory.title,
                     content=memory.content, metadata=memory.metadata,
                     source=memory.source, target_version=memory.current_version,
+                    blob=getattr(memory, "blob", None),
                 )
             else:
                 await repo.upsert_artifact_content(

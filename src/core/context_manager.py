@@ -88,7 +88,9 @@ class ContextManager:
         # ========== Messages ==========
         # 历史 + 当前轮统一来自 state["events"]，EventHistory 处理 boundary / 过滤；
         # 发给 LLM 前剥离 _meta。
-        all_messages = cls._strip_meta(build_event_history(state.get("events", []), agent_name))
+        all_messages = cls._strip_meta(build_event_history(
+            state.get("events", []), agent_name, state.get("vision_blocks")
+        ))
 
         # 动态上下文（系统时间 / task_plan / artifact 清单）作为 ephemeral
         # <system-reminder> 并入最后一条消息正文：每次 build 现拼、即用即丢、绝不入
@@ -109,7 +111,14 @@ class ContextManager:
         last_usage = last_llm_usage(state.get("events", []), agent_name)
         reminder = cls._build_dynamic_context(agent_config, artifacts_inventory, last_usage)
         last = all_messages[-1]
-        all_messages[-1] = {**last, "content": f'{last["content"]}\n\n{reminder}'}
+        last_content = last["content"]
+        if isinstance(last_content, list):
+            # 末条是图块列表(本轮刚 read 图的 tool_result):reminder 作为附加 text block
+            # 追加,不能字符串拼接(会把整个 list stringify、毁掉图块结构)。
+            new_content = last_content + [{"type": "text", "text": reminder}]
+        else:
+            new_content = f'{last_content}\n\n{reminder}'
+        all_messages[-1] = {**last, "content": new_content}
 
         return [system_message] + all_messages
 
@@ -236,13 +245,18 @@ class ContextManager:
         lines = [f'{count} artifact(s) in this session.']
         lines.append('<artifacts_inventory>')
         for artifact in artifacts_inventory:
+            # 图片 artifact 的 content 为空(图无文本表示),给一条合成预览,让清单行有
+            # 信息量 + 明确提示「read 即可看图」(否则空 body 易被忽略)。
+            preview_content = artifact.get("content", "")
+            if not preview_content and artifact["content_type"].startswith("image/"):
+                preview_content = "[image — use read_artifact to view it]"
             slice = make_preview_slice(
                 artifact_id=artifact["id"],
                 version=artifact["version"],
                 content_type=artifact["content_type"],
                 source=artifact.get("source", "agent"),
                 title=artifact["title"],
-                full_content=artifact.get("content", ""),
+                full_content=preview_content,
                 preview_len=config.INVENTORY_PREVIEW_LENGTH,
                 updated_at=artifact["updated_at"],
             )

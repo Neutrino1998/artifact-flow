@@ -12,6 +12,7 @@ from sqlalchemy.orm import selectinload
 
 from db.models import (
     Artifact,
+    ArtifactBlob,
     ArtifactSession,
     ArtifactVersion,
 )
@@ -100,6 +101,7 @@ class ArtifactRepository(BaseRepository[Artifact]):
         metadata: Optional[Dict[str, Any]] = None,
         source: str = "agent",
         target_version: int = 1,
+        blob: Optional[bytes] = None,
     ) -> Artifact:
         """
         创建 Artifact（同时创建初始版本）
@@ -113,6 +115,8 @@ class ArtifactRepository(BaseRepository[Artifact]):
             metadata: 扩展元数据
             source: 来源 (agent, user_upload)
             target_version: 版本号（默认 1）。flush 折叠内存编辑时可传更大值。
+            blob: 可选的二进制源字节。提供时在**同一事务**写入 ArtifactBlob 行
+                  (与 artifact + version 原子),保证「artifact 在则 blob 在」。
 
         Returns:
             创建的 Artifact
@@ -150,6 +154,15 @@ class ArtifactRepository(BaseRepository[Artifact]):
         )
 
         self._session.add(version)
+
+        if blob is not None:
+            self._session.add(ArtifactBlob(
+                artifact_id=artifact_id,
+                session_id=session_id,
+                data=blob,
+                size_bytes=len(blob),
+            ))
+
         await self._session.flush()
         await self._session.commit()
         await self._session.refresh(artifact)
@@ -257,6 +270,30 @@ class ArtifactRepository(BaseRepository[Artifact]):
 
         result = await self._session.execute(query)
         return list(result.scalars().all())
+
+    # ========================================
+    # 二进制存储 (ArtifactBlob)
+    # ========================================
+
+    async def get_blob(
+        self,
+        session_id: str,
+        artifact_id: str,
+    ) -> Optional[ArtifactBlob]:
+        """获取 artifact 的二进制 blob（含字节）。
+
+        **仅 raw-fetch 路径调用**：显式 SELECT 而非走 `Artifact.blob` 关系，使
+        「载入 MB 级字节」永远是一次有意的调用，杜绝任何热路径(list/inventory/
+        get_artifact)经关系误触发字节载入。
+        """
+        query = select(ArtifactBlob).where(
+            and_(
+                ArtifactBlob.session_id == session_id,
+                ArtifactBlob.artifact_id == artifact_id,
+            )
+        )
+        result = await self._session.execute(query)
+        return result.scalar_one_or_none()
 
     # ========================================
     # 内容更新

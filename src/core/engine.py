@@ -238,6 +238,8 @@ async def execute_loop(
                     content=f["content"],
                     content_type=f["content_type"],
                     metadata=f.get("metadata"),
+                    blob=f.get("blob"),
+                    blob_content_type=f.get("blob_content_type"),
                 )
             except Exception as e:
                 logger.exception(f"Failed to stage upload '{f.get('filename')}': {e}")
@@ -826,6 +828,22 @@ async def execute_loop(
             # 超长成功结果统一落盘为 artifact，回填预览（fail-open）
             tool_result = await _maybe_persist_tool_result(tool_name, tool, tool_result)
 
+            # 识图:把图块 data-URI 从将入事件的 metadata 里摘出 → 存进本 turn 的
+            # state["vision_blocks"](仅内存、不持久化、跨轮自然失效);事件只留引用
+            # (artifact_id/version/content_type)。context build 据 state 还原:本轮命中
+            # → 注入图块;下一轮 state 已空 → 占位文本(模型再 read_artifact 即可重看)。
+            # 字节绝不进事件表(撑爆 + 与「blob 有专属持久家」冲突)。
+            tc_metadata = tool_result.metadata or None
+            _img = tc_metadata.get("image") if tc_metadata else None
+            if isinstance(_img, dict) and "data_uri" in _img:
+                state.setdefault("vision_blocks", {})[
+                    (_img.get("artifact_id"), _img.get("version"))
+                ] = _img["data_uri"]
+                tc_metadata = {
+                    **tc_metadata,
+                    "image": {k: v for k, v in _img.items() if k != "data_uri"},
+                }
+
             await _emit(StreamEventType.TOOL_COMPLETE.value, agent_name, {
                 "tool": tool_name,
                 "success": tool_result.success,
@@ -833,7 +851,7 @@ async def execute_loop(
                 "error": tool_result.error if not tool_result.success else None,
                 "duration_ms": tool_duration_ms,
                 "params": params,
-                "metadata": tool_result.metadata or None,
+                "metadata": tc_metadata,
                 "parser_warnings": parser_warnings,
             })
 

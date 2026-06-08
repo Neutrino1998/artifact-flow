@@ -11,7 +11,7 @@ import os
 import shutil
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
-from typing import Dict, Tuple
+from typing import Dict, Optional, Tuple
 
 from utils.logger import get_logger
 
@@ -80,6 +80,21 @@ _ODF_TEXT: _Cat = ("ODF 文档", "请另存为 .docx 或 .pdf 后再上传")
 _ODF_CALC: _Cat = ("ODF 表格", "请导出为 .csv，或将需要的内容复制到对话框")
 _ODF_IMPRESS: _Cat = ("ODF 演示", "请导出为 PDF（文字版），或将需要的内容复制到对话框")
 
+# 图片:识图路径只认 png/jpeg(见 sandbox plan A 决策)。真实 MIME 由 Pillow 按内容
+# 探测、非按扩展名,故这里只用扩展名圈定"走图片分支"。其它图片格式存为不可读 blob 无
+# 意义,上传即拒 + 转换建议(仿 _UNSUPPORTED_OFFICE 的 idiom)。
+_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg"}
+_UNSUPPORTED_IMAGE: Dict[str, str] = {
+    ext: "请另存为 PNG 或 JPG 后再上传"
+    for ext in (".gif", ".webp", ".bmp", ".tiff", ".tif",
+                ".heic", ".heif", ".svg", ".ico", ".avif")
+}
+
+# 富格式原始 blob 的真实 MIME(additive 存储:artifact.content 是转换后的 md,
+# blob 是不可变原件 → raw 端点按这个 MIME 发)。
+_DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+_PDF_MIME = "application/pdf"
+
 _UNSUPPORTED_OFFICE: Dict[str, _Cat] = {
     # Word（老二进制 + 模板 + 宏）
     ".doc": _WORD_TO_DOCX,
@@ -118,10 +133,18 @@ _UNSUPPORTED_OFFICE: Dict[str, _Cat] = {
 
 @dataclass
 class ConvertResult:
-    """Result of a document conversion."""
+    """Result of a document conversion.
+
+    `content`/`content_type` 是**可读文本表示**(artifact 主体:图片为空、富格式为
+    pandoc/pymupdf 转出的 md、纯文本即原文)。`blob`/`blob_content_type` 是需要**二进制
+    存储**时的原始不可变字节 + 真实 MIME(图片本体 / 富格式原件 additive 保留);纯文本
+    类无 blob。两者分离 = artifact 既承载可读表示又保留原始源(sandbox plan 原则 6)。
+    """
     content: str
-    content_type: str  # MIME type
+    content_type: str  # MIME type of the readable text representation
     metadata: Dict = field(default_factory=dict)
+    blob: Optional[bytes] = None              # 原始字节(需 blob 存储时;纯文本为 None)
+    blob_content_type: Optional[str] = None   # 原始 blob 的真实 MIME
 
 
 class DocConverter:
@@ -170,6 +193,12 @@ class DocConverter:
             return await self._convert_docx(file_bytes, filename)
         elif ext == ".pdf":
             return await self._convert_pdf(file_bytes, filename)
+        elif ext in _IMAGE_EXTENSIONS:
+            return await self._convert_image(file_bytes, filename)
+        elif ext in _UNSUPPORTED_IMAGE:
+            raise ValueError(
+                f"暂不支持 {ext} 图片格式。{_UNSUPPORTED_IMAGE[ext]}。"
+            )
         elif ext in _UNSUPPORTED_OFFICE:
             category, advice = _UNSUPPORTED_OFFICE[ext]
             raise ValueError(
@@ -251,6 +280,9 @@ class DocConverter:
                     "converter_used": "pandoc",
                     "word_count": word_count,
                 },
+                # additive:保留 docx 原件作不可变源 + 未来 pandoc --reference-doc 样式模版
+                blob=file_bytes,
+                blob_content_type=_DOCX_MIME,
             )
 
         except asyncio.TimeoutError:
@@ -275,6 +307,36 @@ class DocConverter:
                 "page_count": page_count,
                 "word_count": word_count,
             },
+            # additive:保留 pdf 原件作不可变源(可下载、未来沙盒重新解析)
+            blob=file_bytes,
+            blob_content_type=_PDF_MIME,
+        )
+
+    async def _convert_image(self, file_bytes: bytes, filename: str) -> ConvertResult:
+        """图片(png/jpeg)→ blob 存储。
+
+        真实格式由 Pillow **按内容**探测(非按扩展名),改后缀/伪装的图也能纠正到
+        正确 MIME;探测顺带挡损坏、截断、解压炸弹(MAX_IMAGE_PIXELS)。`content`
+        留空 —— 图无文本表示,模型靠 read_artifact 取图块(A-vision)。非 png/jpeg
+        的真实格式(探测出 GIF/WEBP 等)同样 loud-fail。
+        """
+        loop = asyncio.get_running_loop()
+        fmt = await loop.run_in_executor(None, _probe_image, file_bytes)
+        if fmt == "PNG":
+            mime = "image/png"
+        elif fmt == "JPEG":
+            mime = "image/jpeg"
+        else:
+            raise ValueError(
+                f"{filename!r} 不是有效的 PNG/JPEG 图片(可能改了后缀、损坏、超大像素、"
+                "或实为其它图片格式)。请另存为 PNG 或 JPG 后重新上传。"
+            )
+        return ConvertResult(
+            content="",
+            content_type=mime,
+            metadata={"original_filename": filename, "converter_used": "pillow"},
+            blob=file_bytes,
+            blob_content_type=mime,
         )
 
     async def _convert_text(
@@ -308,6 +370,27 @@ class DocConverter:
                 "word_count": word_count,
             },
         )
+
+
+def _probe_image(file_bytes: bytes) -> Optional[str]:
+    """同步 Pillow 探测:返回真实图片格式（'PNG' / 'JPEG' / ...），非法/损坏返回 None。
+
+    跑在 executor 里（CPU 纪律:校验可能解码、且 Pillow 是 C 扩展）。Pillow 全局
+    `Image.MAX_IMAGE_PIXELS` 解压炸弹闸在 open/verify 时对超大像素图抛
+    `DecompressionBombError` → 归入 None（loud-fail 给可操作提示）。verify() 做结构
+    校验（截断/损坏即抛）;它会使 image 对象失效,故先取 format 再 verify。
+    """
+    import io
+
+    from PIL import Image
+
+    try:
+        with Image.open(io.BytesIO(file_bytes)) as img:
+            fmt = img.format
+            img.verify()
+        return fmt
+    except Exception:
+        return None
 
 
 def _extract_pdf_text(file_bytes: bytes, max_pages: int) -> tuple[str, int]:
