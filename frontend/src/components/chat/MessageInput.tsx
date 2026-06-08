@@ -8,6 +8,7 @@ import { useUIStore } from '@/stores/uiStore';
 import { useConversationStore } from '@/stores/conversationStore';
 import { useConfigStore } from '@/stores/configStore';
 import { useStagedFilesStore } from '@/stores/stagedFilesStore';
+import StagedFileChip from './StagedFileChip';
 import { injectMessage, cancelExecution } from '@/lib/api';
 import type { UploadEvent } from '@/lib/api';
 import { formatTokens } from '@/lib/formatTokens';
@@ -303,25 +304,7 @@ export default function MessageInput() {
           {hasStaged && (
             <div className="flex flex-wrap gap-1.5 mb-2">
               {stagedFiles.map((sf) => (
-                <span
-                  key={sf.id}
-                  className="inline-flex items-center gap-1 max-w-[200px] pl-2 pr-1 py-1 rounded-lg bg-bg dark:bg-bg-dark border border-border dark:border-border-dark text-xs text-text-secondary dark:text-text-secondary-dark"
-                  title={sf.file.name}
-                >
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
-                    <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
-                  </svg>
-                  <span className="truncate">{sf.file.name}</span>
-                  <button
-                    onClick={() => removeFile(sf.id)}
-                    className="shrink-0 p-0.5 rounded hover:bg-surface dark:hover:bg-surface-dark text-text-tertiary dark:text-text-tertiary-dark"
-                    aria-label={`Remove ${sf.file.name}`}
-                  >
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
-                      <path d="M18 6L6 18M6 6l12 12" />
-                    </svg>
-                  </button>
-                </span>
+                <StagedFileChip key={sf.id} sf={sf} onRemove={() => removeFile(sf.id)} />
               ))}
               <span className="inline-flex items-center px-1 text-xs tabular-nums text-text-tertiary dark:text-text-tertiary-dark">
                 {stagedFiles.length}/{MAX_CHAT_ATTACHMENTS}

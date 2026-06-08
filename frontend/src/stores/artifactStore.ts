@@ -16,6 +16,9 @@ export interface LiveArtifact {
   title: string;
   source: string | null;
   omitted: boolean;
+  // user_upload only: original file name, for correlating to the staged File
+  // (local render before the blob is flushed). null for model-created artifacts.
+  originalFilename: string | null;
 }
 
 /** Apply an authoritative span delta (from compute_update): replace
@@ -42,7 +45,7 @@ function liveToDetail(id: string, live: LiveArtifact, sessionId: string | null):
     content: live.content,
     current_version: live.version,
     source: live.source,
-    original_filename: null,
+    original_filename: live.originalFilename,
     created_at: '',
     updated_at: '',
     versions: [],
@@ -197,6 +200,7 @@ export const useArtifactStore = create<ArtifactState>((set, get) => ({
         title: d.title,
         source: d.source,
         omitted: !!d.content_omitted,
+        originalFilename: d.original_filename ?? null,
       };
       const liveContent = { ...s.liveContent, [d.id]: live };
       const exists = s.artifacts.some((a) => a.id === d.id);
@@ -206,7 +210,7 @@ export const useArtifactStore = create<ArtifactState>((set, get) => ({
         title: d.title,
         current_version: d.current_version,
         source: d.source,
-        original_filename: null,
+        original_filename: d.original_filename ?? null,
         created_at: '',
         updated_at: '',
       };
@@ -262,6 +266,7 @@ export const useArtifactStore = create<ArtifactState>((set, get) => ({
         title: base?.title ?? d.id,
         source: base?.source ?? 'agent',
         omitted,
+        originalFilename: base?.originalFilename ?? null,
       };
       const liveContent = { ...s.liveContent, [d.id]: live };
       const artifacts = s.artifacts.map((a) =>

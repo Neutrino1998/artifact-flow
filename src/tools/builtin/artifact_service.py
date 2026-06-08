@@ -153,12 +153,19 @@ class ArtifactService:
                 "blob_size": len(blob),
                 "blob_content_type": (memory.metadata or {}).get("blob_content_type"),
             }
+        # 用户上传件带 original_filename:前端据此把本轮 ARTIFACT_CREATED 关联回 composer
+        # 里仍持有的 staged File,turn 内(blob 未落库、/raw 还 404)直接用本地副本渲染
+        # 缩略图/预览,COMPLETE 后再切回 DB(见前端 ImagePreview 本地优先解析)。模型自建
+        # 无此字段 → 不带,事件保持干净。
+        original_filename = (memory.metadata or {}).get("original_filename")
+        name_meta = {"original_filename": original_filename} if original_filename else {}
         await self._emit_artifact(_evt_artifact_created(), {
             "id": memory.id,
             "title": memory.title,
             "content_type": memory.content_type,
             "source": memory.source,
             "current_version": memory.current_version,
+            **name_meta,
             **blob_meta,
             **payload,
         })

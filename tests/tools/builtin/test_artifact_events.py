@@ -145,10 +145,24 @@ class TestEmitBehavior:
         e = rec.of(_EVT_ARTIFACT_CREATED)[0]
         assert e["data"]["source"] == "user_upload"
         assert e["data"]["content"] == "uploaded body"
+        # original_filename rides the event so the frontend can correlate this
+        # artifact back to the staged File (local render before flush).
+        assert e["data"]["original_filename"] == "Report.md"
         # not in DB yet (staged only)
         assert await artifact_repo.get_artifact(session_id, info["id"]) is None
         await service.flush_all(session_id)
         assert await artifact_repo.get_artifact(session_id, info["id"]) is not None
+
+    async def test_model_created_artifact_has_no_original_filename(
+        self, service: ArtifactService, session_id: str
+    ):
+        """模型自建件不带 original_filename(只有用户上传件有)——事件保持干净。"""
+        service.set_session(session_id)
+        rec = _Recorder()
+        service.bind_emit(rec)
+        await service.create_artifact(session_id, "plan", "text/markdown", "Plan", "body")
+        e = rec.of(_EVT_ARTIFACT_CREATED)[0]
+        assert "original_filename" not in e["data"]
 
     async def test_upload_dedups_within_workingset(self, service: ArtifactService, session_id: str):
         """Two same-name uploads in one turn dedup in the WorkingSet (not just DB):

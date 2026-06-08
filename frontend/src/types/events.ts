@@ -97,6 +97,10 @@ export interface ArtifactCreatedData {
   current_version: number;
   content?: string;
   content_omitted?: boolean;
+  // Present only for user_upload artifacts: the original file name, used to
+  // correlate this event back to the staged File still held in the composer so
+  // the panel can render it locally before the blob is flushed to the DB.
+  original_filename?: string;
 }
 
 /** ARTIFACT_UPDATED: rewrite → full `content`; targeted update → authoritative span

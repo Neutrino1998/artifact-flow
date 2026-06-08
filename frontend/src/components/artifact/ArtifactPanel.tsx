@@ -61,8 +61,11 @@ export default function ArtifactPanel() {
           ? <ImagePreview
               sessionId={imgSession}
               artifactId={current.id}
-              // updated_at: '' while live (mid-turn upload 404s) → real timestamp on the
-              // COMPLETE DB re-pull, re-firing the fetch so the image finally resolves.
+              // While the turn runs, render from the staged File matched by this name
+              // (instant, no /raw 404 before flush); cleared at terminal → falls to /raw.
+              originalFilename={current.original_filename}
+              // updated_at: '' while live → real timestamp on the COMPLETE DB re-pull,
+              // re-firing the effect so the image resolves from the DB blob.
               refreshKey={current.updated_at || undefined}
             />
           : <MarkdownPreview content={content} />)}
