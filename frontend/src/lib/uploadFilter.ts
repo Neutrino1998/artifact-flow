@@ -88,9 +88,23 @@ export function rejectionReason(filename: string): string | null {
   return `暂不支持 ${extOf(filename)} 格式（${label} 文件）。${advice}。`;
 }
 
-/** Split files into those the backend would accept (by extension) and those it
- *  rejects on sight, with a per-file reason for the rejected ones. */
-export function partitionStageable(files: File[]): {
+/** Human-readable MB, one decimal — for the oversize message. */
+function mb(bytes: number): string {
+  return (bytes / 1024 / 1024).toFixed(1).replace(/\.0$/, '');
+}
+
+/** Split files into those the backend would accept and those it rejects on
+ *  sight, with a per-file reason for the rejected ones. Two gates, in order:
+ *  (1) extension blacklist (mirrors doc_converter.py), then (2) per-file byte
+ *  size when `maxBytes` is given (mirrors backend MAX_UPLOAD_SIZE, surfaced via
+ *  /api/v1/meta). The size gate is UX only — it spares the user a staged-then-
+ *  422 round-trip; the backend stays the authoritative limit, and the batch
+ *  TOTAL is enforced separately at the proxy (413). `maxBytes` omitted (limit
+ *  not yet fetched) → size gate skipped, never blocks on a missing value. */
+export function partitionStageable(
+  files: File[],
+  maxBytes?: number,
+): {
   accepted: File[];
   rejected: StageRejection[];
 } {
@@ -98,8 +112,16 @@ export function partitionStageable(files: File[]): {
   const rejected: StageRejection[] = [];
   for (const file of files) {
     const reason = rejectionReason(file.name);
-    if (reason) rejected.push({ name: file.name, reason });
-    else accepted.push(file);
+    if (reason) {
+      rejected.push({ name: file.name, reason });
+    } else if (maxBytes && file.size > maxBytes) {
+      rejected.push({
+        name: file.name,
+        reason: `文件过大：${mb(file.size)}MB（单文件上限 ${mb(maxBytes)}MB）。`,
+      });
+    } else {
+      accepted.push(file);
+    }
   }
   return { accepted, rejected };
 }

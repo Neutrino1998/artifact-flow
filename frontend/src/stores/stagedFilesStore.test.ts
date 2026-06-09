@@ -1,5 +1,6 @@
-import { describe, test, expect, beforeEach } from 'vitest';
+import { describe, test, expect, beforeEach, afterEach } from 'vitest';
 import { useStagedFilesStore } from './stagedFilesStore';
+import { useConfigStore } from './configStore';
 import { MAX_CHAT_ATTACHMENTS } from '@/lib/constants';
 
 function reset() {
@@ -99,6 +100,32 @@ describe('stagedFilesStore filename dedup (mirror backend _N)', () => {
     const second = useStagedFilesStore.getState().files[1].file;
     expect(second.name).toBe('a_1.png');
     expect(second.type).toBe('image/png');
+  });
+});
+
+describe('stagedFilesStore per-file size gate (mirrors backend MAX_UPLOAD_SIZE via /meta)', () => {
+  beforeEach(() => reset());
+  afterEach(() => useConfigStore.setState({ maxUploadSize: null }));
+
+  test('rejects an over-limit file and records a size notice; under-limit stages', () => {
+    useConfigStore.setState({ maxUploadSize: 4 }); // 4-byte limit
+    useStagedFilesStore.getState().addFiles([
+      new File(['ab'], 'small.txt', { type: 'text/plain' }),     // 2B → ok
+      new File(['abcdef'], 'big.txt', { type: 'text/plain' }),   // 6B → over
+    ]);
+    const st = useStagedFilesStore.getState();
+    expect(st.files.map((f) => f.file.name)).toEqual(['small.txt']);
+    expect(st.notice?.rejected.map((r) => r.name)).toEqual(['big.txt']);
+    expect(st.notice?.rejected[0].reason).toContain('文件过大');
+  });
+
+  test('no limit fetched (null) → size gate skipped, oversize stages', () => {
+    // maxUploadSize stays null (afterEach default) — best-effort: don't block on
+    // a value the meta fetch hasn't delivered; the backend 422s if truly over.
+    useStagedFilesStore.getState().addFiles([
+      new File(['abcdef'], 'big.txt', { type: 'text/plain' }),
+    ]);
+    expect(useStagedFilesStore.getState().files.map((f) => f.file.name)).toEqual(['big.txt']);
   });
 });
 

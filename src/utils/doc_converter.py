@@ -13,6 +13,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Dict, Optional, Tuple
 
+from config import config
 from utils.logger import get_logger
 
 logger = get_logger("ArtifactFlow")
@@ -152,7 +153,15 @@ class DocConverter:
     Unified document converter for import (file -> text) and export (markdown -> docx).
     """
 
-    MAX_FILE_SIZE = 20 * 1024 * 1024   # 20MB
+    # Single source of truth = config.MAX_UPLOAD_SIZE. This is a defensive backstop
+    # inside convert(), NOT an independent cap: the two callers each enforce their
+    # own authoritative ingress limit BEFORE we see the bytes — the upload path
+    # (artifacts.py) at MAX_UPLOAD_SIZE, the web_fetch PDF fallback at
+    # WEB_FETCH_MAX_BYTES — so this only ever fires if a caller forgot to. Tying it
+    # to the upload constant avoids the drift of two hardcoded 20MB that must move
+    # together. Conversion COST is bounded separately (MAX_PDF_PAGES + CONVERT_TIMEOUT),
+    # so raising this with the upload limit doesn't widen the CPU surface.
+    MAX_FILE_SIZE = config.MAX_UPLOAD_SIZE
     MAX_PDF_PAGES = 200
     CONVERT_TIMEOUT = 60               # seconds
 

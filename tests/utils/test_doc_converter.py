@@ -126,11 +126,15 @@ class TestTextFallback:
 
 
 class TestSizeLimit:
-    async def test_oversize_raises(self):
+    async def test_oversize_raises(self, monkeypatch):
+        # Shrink the limit instead of allocating a real >MAX_FILE_SIZE buffer
+        # (now 100MB — building it in RAM would be wasteful). The constant tracks
+        # config.MAX_UPLOAD_SIZE; the check reads the class attr, so patching it
+        # exercises the same branch.
+        monkeypatch.setattr(DocConverter, "MAX_FILE_SIZE", 8)
         converter = DocConverter()
-        oversize = b"a" * (DocConverter.MAX_FILE_SIZE + 1)
         with pytest.raises(ValueError, match="too large"):
-            await converter.convert(oversize, "huge.txt")
+            await converter.convert(b"a" * 9, "huge.txt")
 
 
 # ============================================================

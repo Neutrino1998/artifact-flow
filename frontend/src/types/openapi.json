@@ -754,6 +754,61 @@
         }
       }
     },
+    "/api/v1/artifacts/{session_id}/{artifact_id}/raw": {
+      "get": {
+        "tags": [
+          "artifacts"
+        ],
+        "summary": "Get Artifact Raw",
+        "description": "Serve an artifact's raw binary blob (uploaded image / rich-format source).\n\nDB-only read (request-scoped Service, empty WorkingSet) \u2014 like all GETs here,\nduring execution it serves the last flushed blob. 404 when the artifact has no\nblob (pure-text artifacts) or doesn't exist; not logged (self-evident 404).\n\nImages are served `inline` so a frontend `<img src=.../raw>` renders in place;\neverything else `attachment` (download). Content-Type is the blob's true MIME\n(from the Service, which prefers metadata.blob_content_type over the artifact's\npossibly-converted content_type).",
+        "operationId": "get_artifact_raw_api_v1_artifacts__session_id___artifact_id__raw_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          },
+          {
+            "name": "artifact_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Artifact Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/artifacts/{session_id}/{artifact_id}/export": {
       "get": {
         "tags": [
@@ -3134,12 +3189,18 @@
             "type": "string",
             "title": "Lead Agent Model",
             "description": "Model identifier configured for the lead_agent (e.g. 'qwen3.7-max'). Surfaced in the composer so the user can see which model is driving the current conversation without digging into agent MD files."
+          },
+          "max_upload_size": {
+            "type": "integer",
+            "title": "Max Upload Size",
+            "description": "Per-file upload byte limit (MAX_UPLOAD_SIZE). The composer uses it to pre-reject an oversize file with instant feedback instead of staging + POSTing it for a backend 422. Backend stays authoritative; the batch TOTAL is capped separately at the proxy layer (not surfaced here \u2014 it lives in nginx/Caddy config, outside src/config.py)."
           }
         },
         "type": "object",
         "required": [
           "compaction_token_threshold",
-          "lead_agent_model"
+          "lead_agent_model",
+          "max_upload_size"
         ],
         "title": "ClientConfigResponse",
         "description": "GET /api/v1/meta response \u2014 runtime constants for the frontend."

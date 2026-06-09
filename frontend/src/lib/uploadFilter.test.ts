@@ -53,4 +53,26 @@ describe('uploadFilter.partitionStageable', () => {
     expect(accepted.map((f) => f.name)).toEqual(['a.txt', 'c.md']);
     expect(rejected.map((r) => r.name)).toEqual(['b.doc', 'd.ods']);
   });
+
+  test('rejects files over maxBytes with a size reason; under-limit pass', () => {
+    const small = new File(['ab'], 'small.txt'); // 2 bytes
+    const big = new File(['abcdef'], 'big.txt'); // 6 bytes
+    const { accepted, rejected } = partitionStageable([small, big], 4);
+    expect(accepted.map((f) => f.name)).toEqual(['small.txt']);
+    expect(rejected.map((r) => r.name)).toEqual(['big.txt']);
+    expect(rejected[0].reason).toContain('文件过大');
+  });
+
+  test('format rejection takes precedence over size (one reason, not both)', () => {
+    // A .doc over the limit reports the format reason, not the size one.
+    const { rejected } = partitionStageable([new File(['abcdef'], 'x.doc')], 4);
+    expect(rejected).toHaveLength(1);
+    expect(rejected[0].reason).toContain('暂不支持');
+  });
+
+  test('maxBytes omitted → size gate skipped (limit not yet fetched)', () => {
+    const big = new File(['abcdef'], 'big.txt');
+    const { accepted } = partitionStageable([big]);
+    expect(accepted.map((f) => f.name)).toEqual(['big.txt']);
+  });
 });

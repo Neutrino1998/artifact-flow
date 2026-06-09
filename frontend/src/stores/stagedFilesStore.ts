@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { MAX_CHAT_ATTACHMENTS } from '@/lib/constants';
 import { partitionStageable, type StageRejection } from '@/lib/uploadFilter';
+import { useConfigStore } from '@/stores/configStore';
 
 // Files staged in the composer (via the file button, drag-drop, or a huge
 // paste) but not yet uploaded. They ride the next message: useChat.sendMessage
@@ -83,8 +84,9 @@ export const useStagedFilesStore = create<StagedFilesState>((set) => ({
   notice: null,
   // Gate then cap, in that order, so every entry point (button / drag-drop /
   // paste-to-stage) behaves identically:
-  //   1. drop extensions the backend rejects on sight (avoids a doomed 422 +
-  //      the partial-batch orphan it could leave behind);
+  //   1. drop what the backend rejects on sight — unsupported extension OR a
+  //      file over the per-file size limit (avoids a doomed 422 + the partial-
+  //      batch orphan it could leave behind);
   //   2. cap the remainder at MAX_CHAT_ATTACHMENTS (the backend also 422s past
   //      this, but staging caps it so that's unreachable in normal use).
   // Anything dropped by either step is reported via `notice` (a drop that
@@ -92,7 +94,10 @@ export const useStagedFilesStore = create<StagedFilesState>((set) => ({
   // each call — set to null on a fully-clean add so a stale message clears.
   addFiles: (incoming) =>
     set((s) => {
-      const { accepted, rejected } = partitionStageable(incoming);
+      // maxUploadSize (backend MAX_UPLOAD_SIZE via /meta) drives the per-file
+      // size gate; null until fetched → partitionStageable skips it.
+      const maxBytes = useConfigStore.getState().maxUploadSize ?? undefined;
+      const { accepted, rejected } = partitionStageable(incoming, maxBytes);
       const room = Math.max(0, MAX_CHAT_ATTACHMENTS - s.files.length);
       const toStage = accepted.slice(0, room);
       const overflow = accepted.length - toStage.length;

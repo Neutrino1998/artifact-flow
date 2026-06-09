@@ -50,11 +50,11 @@ class Settings(BaseSettings):
     # DB 对齐补全(对齐本就兜底)。update 的 span delta 不受此限(权威且体量随模型输出)。
     ARTIFACT_LIVE_CONTENT_MAX_CHARS: int = 256000
     # Artifact 二进制存储(ArtifactBlob)单条字节上限。写入侧 loud-fail(不静默截断)。
-    # 隐藏常量,非模型可调。刻意高于 MAX_UPLOAD_SIZE(20MB):留余量给 C 阶段沙盒
-    # 回写的 blob,免得再调一次。**ops 依赖**:100MB 单行要求 MySQL/TDSQL 服务端
-    # max_allowed_packet 抬到其上(默认常仅 16–64MB),否则大 insert 在驱动层失败;
-    # 且跨中心复制 100MB 行成本不低,值随该上限演进再核。
-    ARTIFACT_BLOB_MAX_BYTES: int = 100 * 1024 * 1024
+    # 隐藏常量,非模型可调。刻意高于 MAX_UPLOAD_SIZE(100MB):留 2× 余量给 C 阶段沙盒
+    # 回写的 blob(模型自生成,不走上传路径),免得再调一次。**ops 依赖**:200MB 单行
+    # 要求 MySQL/TDSQL 服务端 max_allowed_packet 抬到其上(默认常仅 16–64MB),否则大
+    # insert 在驱动层失败;且跨中心复制 200MB 行成本不低,值随该上限演进再核。
+    ARTIFACT_BLOB_MAX_BYTES: int = 200 * 1024 * 1024
     # 识图:read_artifact 把图注入上下文前 resize 到最长边 ≤ 此值(像素),应用侧控
     # token 成本可预测(不靠 provider 的 HF processor)。原始 blob 不变,只降采样注入副本。
     # 1568 对齐主流 VLM 的高分辨率 tile 上限,既清晰又不爆 token。隐藏常量,非模型可调。
@@ -147,13 +147,17 @@ class Settings(BaseSettings):
     # 并发控制
     MAX_CONCURRENT_TASKS: int = 10  # 最大并发引擎执行数
 
-    # 上传限制
-    MAX_UPLOAD_SIZE: int = 20 * 1024 * 1024  # 20MB
+    # 上传限制。单文件字节上限(API 边界 loud 422)。批量**总**字节由代理层
+    # client_max_body_size 独立封顶(200MB,见 deploy/nginx.conf|Caddyfile):
+    # 允许「1 个大文件 or 多个小文件」但控总量——单文件 100MB、数量 10、总量 200MB
+    # 三轴独立,总量刻意 < 100MB×10。前端经 /api/v1/meta 取此值做 UX 预挡(后端权威)。
+    MAX_UPLOAD_SIZE: int = 100 * 1024 * 1024  # 100MB
 
     # SSRF / 外联工具防护（隐藏常量，不暴露 API / 工具参数）
     WEB_FETCH_MAX_BYTES: int = 20 * 1024 * 1024   # fallback 下载体上限（解压后字节），
-                                                  # 超即中断 —— 防 gzip 炸弹 / 大响应 OOM；
-                                                  # 与 MAX_UPLOAD_SIZE / DocConverter 对齐
+                                                  # 超即中断 —— 防 gzip 炸弹 / 大响应 OOM。
+                                                  # 出网下载是独立威胁面,与 MAX_UPLOAD_SIZE
+                                                  #（上传,已抬到 100MB）解耦,各自取值。
     CUSTOM_TOOL_SECRET_PREFIX: str = "TOOL_SECRET_"  # 自定义工具 {{VAR}} 只能解析此前缀的环境变量；
                                                      # 把签名密钥 / DB 密码挡在自定义工具可触及范围外
 
@@ -164,7 +168,8 @@ class Settings(BaseSettings):
                                      # 最坏单次 drain = MAX_MESSAGE_CHARS × 此值，详见输入挡板设计）
     MAX_CHAT_ATTACHMENTS: int = 10   # 单条 /chat 消息附件数量上限（超即 422）；上传后逐个
                                      # 串行转换落库，限制总转换时长 / DB 写入 / 归属串膨胀。
-                                     # 注：原始上传带宽 / 临时盘占用属代理层（nginx client_max_body_size）
+                                     # 注：批量**总**字节由代理层 client_max_body_size(200MB)
+                                     # 独立封顶——数量轴管「几个」,总量轴管「多大」,两轴独立。
 
     # 批量导入用户（CSV）
     MAX_BULK_IMPORT_ROWS: int = 1000          # 行数上限，超过整体拒绝（防误传）

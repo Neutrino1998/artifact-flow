@@ -95,7 +95,8 @@ async def send_message(
         raise HTTPException(status_code=422, detail=f"Invalid chat payload: {msgs}")
 
     # 附件数量上限：尽早拒绝（在建会话 / 转换之前），避免无界附件导致长时间串行
-    # 转换 + DB 写入 + USER_INPUT 归属串膨胀。每个文件的 20MB 大小限制仍在转换处生效。
+    # 转换 + DB 写入 + USER_INPUT 归属串膨胀。每个文件的大小限制（MAX_UPLOAD_SIZE）
+    # 仍在转换处生效；批量总字节由代理层独立封顶。
     attachment_count = sum(1 for f in files if f.filename)
     if attachment_count > config.MAX_CHAT_ATTACHMENTS:
         raise HTTPException(

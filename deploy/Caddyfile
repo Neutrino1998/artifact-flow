@@ -27,14 +27,15 @@
 }
 
 {$AF_DOMAIN} {
-	# Batched upload ceiling. POST /api/v1/chat sends ALL attachments in ONE
-	# multipart request (not one request per file), so the body is the SUM of
-	# the batch, not a single file. Backend contract is per-file ≤20MB
-	# (MAX_UPLOAD_SIZE) × ≤10 files (MAX_CHAT_ATTACHMENTS) = 200MiB max valid
-	# batch. Set 210MiB so Caddy never 413s ahead of an app-valid batch — per-file
-	# + count stay the sole authoritative limits, and a real oversize file still
-	# gets the backend's clean 422. The 10MiB over 200MiB absorbs multipart
-	# boundary/header overhead.
+	# Batched upload ceiling — the AUTHORITATIVE total-bytes cap. POST /api/v1/chat
+	# sends ALL attachments in ONE multipart request, so the body is the SUM of the
+	# batch. Three INDEPENDENT axes: per-file ≤100MB (MAX_UPLOAD_SIZE, app 422),
+	# count ≤10 (MAX_CHAT_ATTACHMENTS, app 422), and total ≤200MiB (THIS cap, 413).
+	# Total is deliberately LESS than per-file×count (100MB×10=1GB): the design
+	# intent is "one big file OR many small ones, but a bounded total". So — unlike
+	# the old contract — this DOES fire ahead of the per-file/count checks for a
+	# large batch, by design (a single oversize file still gets the backend's clean
+	# 422). 210MiB = 200MiB content + 10MiB multipart boundary/header overhead.
 	# UNITS — must be MiB, not MB: nginx's `210M` is binary (210·2^20 =
 	# 220,200,960 B), but Caddy parses `MB` as decimal 10^6 (210,000,000 B) and
 	# only `MiB` as 2^20. `210MB` would set the cap BELOW nginx's and shrink the
