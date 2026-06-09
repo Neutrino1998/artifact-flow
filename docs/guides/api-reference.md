@@ -340,7 +340,7 @@ POST /api/v1/chat/bulk-delete
 旧的 `POST /artifacts/upload` 与 `POST /{session_id}/upload`（即时 commit）已删除。上传现在并入消息提交：
 
 - `POST /api/v1/chat`，`multipart/form-data`：文本走 `payload` 表单字段（`ChatRequest` JSON，文本键为 `user_input`），附件走 `files`（可多文件），同一请求。**没有 `message` 字段**——按 `message + files` 调会因缺 `payload` 直接 422
-- 大小上限：`config.MAX_UPLOAD_SIZE`（环境可配，默认见 [deployment.md](../deployment.md)）；`422` 触发：超限、格式不支持（`convert_uploaded_file` 在写库前做 size-check + 转换）
+- 大小上限：单文件 `config.MAX_UPLOAD_SIZE`（环境可配，默认 100MB，见 [deployment.md](../deployment.md)）；批量总字节由代理层独立封顶（200MB → `413`）。**注**：纯文本/未知扩展走转换兜底路径的文件另有更低的独立上限 `config.MAX_TEXT_CONVERT_BYTES`（默认 20MB）——文本整份变成 artifact `content`（无 blob），故比图片/PDF/docx 收得紧；超限同样 `422`。`422` 触发：超限（含文本闸）、格式不支持（`convert_uploaded_file` 在写库前做 size-check + 转换）
 - 转换后的内容 closure-carry 进引擎，在 turn 起点经 `create_from_upload` **stage 进 WorkingSet**（发 `ARTIFACT_CREATED`、随 turn 末 `flush_all` 落库），与 agent 自建 artifact 走**同一统一生命周期**——不再绕过 write-back、不再即时 commit（见 [../architecture/artifacts.md](../architecture/artifacts.md)）
 
 ### 读取的即时性

@@ -791,13 +791,7 @@
           "200": {
             "description": "Raw artifact blob (image inline, else attachment).",
             "content": {
-              "application/octet-stream": {
-                "schema": {
-                  "type": "string",
-                  "format": "binary"
-                }
-              },
-              "image/*": {
+              "*/*": {
                 "schema": {
                   "type": "string",
                   "format": "binary"

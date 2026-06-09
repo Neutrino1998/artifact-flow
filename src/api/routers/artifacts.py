@@ -171,10 +171,13 @@ async def list_artifacts(
     responses={
         200: {
             "content": {
-                # schema type=string/format=binary → generated clients type this
-                # as a binary body (string/Blob), not `unknown`.
-                "application/octet-stream": {"schema": {"type": "string", "format": "binary"}},
-                "image/*": {"schema": {"type": "string", "format": "binary"}},
+                # The handler returns the blob's TRUE content_type — image/png,
+                # image/jpeg, application/pdf, the docx OOXML MIME, the octet-
+                # stream fallback, and (C-phase) arbitrary sandbox-written types.
+                # `*/*` covers any media type without enumerating a drift-prone
+                # list; schema type=string/format=binary types the body as binary
+                # (string/Blob) in generated clients, not `unknown`.
+                "*/*": {"schema": {"type": "string", "format": "binary"}},
             },
             "description": "Raw artifact blob (image inline, else attachment).",
         }
