@@ -54,10 +54,16 @@ const RECONNECT_BASE_DELAY_MS = 1000;
 // default-KEEP is the safe direction: clearing could silently drop a user's
 // attachment; keeping at worst re-stages an already-persisted file, and re-send
 // dedups it (a deletable _N), never data loss.
-function resolveStagedAfterTerminal(data: Record<string, unknown> | undefined): void {
+function resolveStagedAfterTerminal(
+  conversationId: string,
+  data: Record<string, unknown> | undefined,
+): void {
   const store = useStagedFilesStore.getState();
-  if (data?.artifacts_flushed === true) store.clearSent();
-  else store.unmarkSent();
+  // Owner-keyed: resolve THIS conversation's draft. By terminal time a new
+  // conversation has been promoted from its temp key to conversationId
+  // (sendMessage, on the POST return), so the sent files live under this key.
+  if (data?.artifacts_flushed === true) store.clearSent(conversationId);
+  else store.unmarkSent(conversationId);
 }
 
 export function useSSE() {
@@ -477,7 +483,7 @@ export function useSSE() {
           endStream();
           // Cooperative cancel flushed uploads, external cancel didn't — the
           // backend's artifacts_flushed bit disambiguates (see helper).
-          resolveStagedAfterTerminal(data as Record<string, unknown> | undefined);
+          resolveStagedAfterTerminal(conversationId, data as Record<string, unknown> | undefined);
           refreshAfterComplete(conversationId, messageId);
           break;
         }
@@ -491,7 +497,7 @@ export function useSSE() {
           }
           endStream();
           // Turn succeeded → staged uploads were flushed; drop the in-flight files.
-          resolveStagedAfterTerminal(data as Record<string, unknown> | undefined);
+          resolveStagedAfterTerminal(conversationId, data as Record<string, unknown> | undefined);
           refreshAfterComplete(conversationId, messageId);
           break;
         }
@@ -509,7 +515,7 @@ export function useSSE() {
           endStream();
           // Timeout runs full post-processing → uploads were flushed; the
           // artifacts_flushed bit reflects that (clearSent).
-          resolveStagedAfterTerminal(data as Record<string, unknown> | undefined);
+          resolveStagedAfterTerminal(conversationId, data as Record<string, unknown> | undefined);
           refreshAfterComplete(conversationId, messageId);
           break;
         }
@@ -542,7 +548,7 @@ export function useSSE() {
           // carries an explicit artifacts_flushed; transport-layer ERRORs (stream
           // not-found, forwarder) don't. Only explicit true clears; absent/false
           // keeps the attachment for retry (safe direction — see helper).
-          resolveStagedAfterTerminal(data as Record<string, unknown> | undefined);
+          resolveStagedAfterTerminal(conversationId, data as Record<string, unknown> | undefined);
           refreshAfterComplete(conversationId, errMsgId);
           break;
         }

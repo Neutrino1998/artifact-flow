@@ -38,7 +38,9 @@ export default function ImagePreview({
   // re-renders when it appears/disappears). undefined for any image not uploaded
   // this turn (model/tool-generated, or a past-turn artifact).
   const localFile = useStagedFilesStore((s) =>
-    originalFilename ? s.files.find((f) => f.file.name === originalFilename)?.file : undefined
+    originalFilename
+      ? s.drafts[s.activeKey]?.files.find((f) => f.file.name === originalFilename)?.file
+      : undefined
   );
   // Live this turn, not yet flushed (created/updated this turn). Cleared at COMPLETE.
   const pendingFlush = useArtifactStore((s) => !!s.liveContent[artifactId]);

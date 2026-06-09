@@ -1,14 +1,13 @@
 'use client';
 
 import { useState, useRef, useCallback, useEffect } from 'react';
-import type { Dispatch, SetStateAction } from 'react';
 import { useChat } from '@/hooks/useChat';
 import { useComposerSend } from '@/hooks/useComposerSend';
 import { useStreamStore } from '@/stores/streamStore';
 import { useUIStore } from '@/stores/uiStore';
 import { useConversationStore } from '@/stores/conversationStore';
 import { useConfigStore } from '@/stores/configStore';
-import { useStagedFilesStore } from '@/stores/stagedFilesStore';
+import { useStagedFilesStore, type StagedFile } from '@/stores/stagedFilesStore';
 import StagedFileChip from './StagedFileChip';
 import { injectMessage, cancelExecution } from '@/lib/api';
 import type { UploadEvent } from '@/lib/api';
@@ -33,24 +32,19 @@ type UploadProgress =
 // (e.g. "vacation.jpg") and must be left untouched.
 const GENERIC_CLIPBOARD_IMAGE = /^image\.(png|jpe?g|gif|webp|bmp)$/i;
 
+// Stable empty ref for the absent-draft case, so the files selector doesn't
+// return a fresh [] each render (which would thrash zustand's equality check).
+const EMPTY_FILES: StagedFile[] = [];
+
 export default function MessageInput() {
-  // Composer text lives in the staged-files store, not local state: switching
-  // conversations flips currentLoading, which unmounts this component (the
-  // loading placeholder), so local state can't survive a switch. The store
-  // keeps it as a per-conversation draft (see stagedFilesStore). setContent
-  // adapts the store setter to the SetStateAction signature useComposerSend's
-  // reconcile expects (it calls the functional updater form against live text).
-  const content = useStagedFilesStore((s) => s.text);
+  // Composer text + files live in the draft store keyed by conversation, not in
+  // local state: switching conversations flips currentLoading, which unmounts
+  // this component (the loading placeholder), so local state can't survive a
+  // switch. The active conversation is `activeKey`; its draft is drafts[activeKey]
+  // (absent ⇒ blank). activeKey is also the send's OWNER key (see useComposerSend).
+  const activeKey = useStagedFilesStore((s) => s.activeKey);
+  const content = useStagedFilesStore((s) => s.drafts[s.activeKey]?.text ?? '');
   const setText = useStagedFilesStore((s) => s.setText);
-  const setContent = useCallback<Dispatch<SetStateAction<string>>>(
-    (v) =>
-      setText(
-        typeof v === 'function'
-          ? (v as (prev: string) => string)(useStagedFilesStore.getState().text)
-          : v,
-      ),
-    [setText],
-  );
   // Armed by the "compact" toggle; rides the next send as force_compact and is
   // cleared on a successful send. A compact-only send (no text) is allowed.
   const [forceCompact, setForceCompact] = useState(false);
@@ -74,23 +68,19 @@ export default function MessageInput() {
   const queuedInfo = useStreamStore((s) => s.queuedInfo);
   const toggleArtifactPanel = useUIStore((s) => s.toggleArtifactPanel);
 
-  const stagedFiles = useStagedFilesStore((s) => s.files);
+  const stagedFiles = useStagedFilesStore((s) => s.drafts[s.activeKey]?.files ?? EMPTY_FILES);
   const addFiles = useStagedFilesStore((s) => s.addFiles);
   const removeFile = useStagedFilesStore((s) => s.removeFile);
-  const markSent = useStagedFilesStore((s) => s.markSent);
   const stageNotice = useStagedFilesStore((s) => s.notice);
   const dismissNotice = useStagedFilesStore((s) => s.dismissNotice);
-  // A composer send is mid-flight (POST not yet returned). isStreaming only
-  // flips after connect(), so during a file upload there's a window where the
-  // turn isn't "streaming" yet — gate the add paths on this too so attach /
-  // drag-drop / paste lock consistently for the whole in-flight window.
-  const sendInFlight = useStagedFilesStore((s) => s.pendingSendKey !== null);
 
-  // Snapshot → lock → await → reconcile/keep for both send and inject lives in
-  // this hook (single enforcement point); see useComposerSend.ts. On send-ok the
-  // consumed files are marked sent (kept visible until the turn's terminal event:
-  // COMPLETE clears them, cancel/error/timeout reverts — uploads are ephemeral).
-  const { sending, submit, inject } = useComposerSend(content, setContent, stagedFiles, markSent);
+  // The send lifecycle (lock → claim → await → restore-on-failure) for both send
+  // and inject lives in this hook (single enforcement point); see useComposerSend.
+  // It's OWNER-keyed on activeKey: the send claims (clears text + marks files
+  // sent) and, on failure, restores THAT conversation's draft, so it stays correct
+  // even if the user navigates mid-send. The turn's terminal then resolves the
+  // sent files (COMPLETE drops them, cancel/error/timeout reverts for retry).
+  const { sending, submit, inject } = useComposerSend(activeKey, content, stagedFiles);
 
   // Auto-resize textarea
   useEffect(() => {
@@ -242,9 +232,8 @@ export default function MessageInput() {
   const handlePaste = useCallback(
     (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
       // Match the disabled attach button: attachments ride a new turn, not an
-      // in-flight one, so a paste while a send is in flight or streaming falls
-      // through to plain text rather than staging a file.
-      if (isStreaming || sendInFlight) {
+      // in-flight one, so a paste while streaming falls through to plain text.
+      if (isStreaming) {
         return;
       }
       const clip = e.clipboardData;
@@ -301,7 +290,7 @@ export default function MessageInput() {
         addFiles([file]);
       }
     },
-    [isStreaming, sendInFlight, addFiles, stagedFiles.length]
+    [isStreaming, addFiles, stagedFiles.length]
   );
 
   const handleFileSelect = useCallback(() => {
@@ -321,7 +310,7 @@ export default function MessageInput() {
   );
 
   const atAttachmentCap = stagedFiles.length >= MAX_CHAT_ATTACHMENTS;
-  const attachDisabled = isStreaming || atAttachmentCap || sendInFlight;
+  const attachDisabled = isStreaming || atAttachmentCap;
   const nearLimit = content.length > MAX_MESSAGE_CHARS * 0.8;
   const hasStaged = stagedFiles.length > 0;
 
@@ -450,7 +439,7 @@ export default function MessageInput() {
           <textarea
             ref={textareaRef}
             value={content}
-            onChange={(e) => setContent(e.target.value)}
+            onChange={(e) => setText(e.target.value)}
             onKeyDown={handleKeyDown}
             onPaste={handlePaste}
             onCompositionStart={handleCompositionStart}

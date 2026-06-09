@@ -12,10 +12,11 @@ function makeStaged(n: number): StagedFile[] {
 // Minimal deps with vi.fn() spies; override per test.
 function deps(over: Partial<Parameters<typeof runComposerOp>[0]> = {}) {
   return {
+    ownerKey: 'conv-1',
     content: 'hello',
     staged: [] as StagedFile[],
-    setContent: vi.fn(),
-    markSent: vi.fn(),
+    claimSend: vi.fn(),
+    restoreSend: vi.fn(),
     lockRef: { current: false },
     setSending: vi.fn(),
     run: vi.fn(async () => true),
@@ -24,10 +25,11 @@ function deps(over: Partial<Parameters<typeof runComposerOp>[0]> = {}) {
 }
 
 describe('runComposerOp', () => {
-  test('bails (no run, no lock, no spinner) when text and files are both empty', async () => {
+  test('bails (no run, no claim, no lock, no spinner) when text and files are both empty', async () => {
     const d = deps({ content: '   ', staged: [] });
     await runComposerOp(d);
     expect(d.run).not.toHaveBeenCalled();
+    expect(d.claimSend).not.toHaveBeenCalled();
     expect(d.setSending).not.toHaveBeenCalled();
     expect(d.lockRef.current).toBe(false);
   });
@@ -42,33 +44,35 @@ describe('runComposerOp', () => {
     expect(files).toHaveLength(2);
   });
 
-  test('on success, reconciles instead of blind-clearing (the R4 fix)', async () => {
-    const d = deps({ content: 'hello', staged: makeStaged(2), run: vi.fn(async () => true) });
+  test('claims the OWNER draft BEFORE the await (clear text + mark files sent)', async () => {
+    const claimSend = vi.fn();
+    let claimedBeforeRun = false;
+    const run = vi.fn(async () => {
+      claimedBeforeRun = claimSend.mock.calls.length > 0;
+      return true;
+    });
+    const d = deps({ ownerKey: 'conv-9', content: 'hello', staged: makeStaged(2), claimSend, run });
     await runComposerOp(d);
-    // text reconcile is a functional updater, not a blind setContent('')
-    expect(d.setContent).toHaveBeenCalledTimes(1);
-    const updater = vi.mocked(d.setContent).mock.calls[0][0] as (prev: string) => string;
-    expect(updater('hello')).toBe('');                 // unchanged → cleared
-    expect(updater('hello, more typed since')).toBe('hello, more typed since'); // changed → kept
-    // only the ids this send consumed are removed
-    expect(d.markSent).toHaveBeenCalledWith(['s0', 's1']);
+    expect(claimedBeforeRun).toBe(true);
+    expect(claimSend).toHaveBeenCalledWith('conv-9', 'hello', ['s0', 's1']);
   });
 
-  test('does not call markSent when nothing was staged', async () => {
-    const d = deps({ content: 'hello', staged: [] });
+  test('on success, does not restore (the content already left the draft at claim)', async () => {
+    const d = deps({ content: 'hello', staged: makeStaged(1), run: vi.fn(async () => true) });
     await runComposerOp(d);
-    expect(d.markSent).not.toHaveBeenCalled();
+    expect(d.claimSend).toHaveBeenCalledTimes(1);
+    expect(d.restoreSend).not.toHaveBeenCalled();
   });
 
-  test('on failure (run returns false), preserves text and files', async () => {
-    const d = deps({ content: 'hello', staged: makeStaged(1), run: vi.fn(async () => false) });
+  test('on failure (run returns false), restores the OWNER draft', async () => {
+    const d = deps({ ownerKey: 'conv-9', content: 'hello', staged: makeStaged(1), run: vi.fn(async () => false) });
     await runComposerOp(d);
-    expect(d.setContent).not.toHaveBeenCalled();
-    expect(d.markSent).not.toHaveBeenCalled();
+    expect(d.restoreSend).toHaveBeenCalledWith('conv-9', 'hello', ['s0']);
   });
 
-  test('on throw, preserves composer and still releases the lock', async () => {
+  test('on throw, restores the OWNER draft and still releases the lock', async () => {
     const d = deps({
+      ownerKey: 'conv-9',
       content: 'hello',
       staged: makeStaged(1),
       run: vi.fn(async () => {
@@ -76,8 +80,7 @@ describe('runComposerOp', () => {
       }),
     });
     await runComposerOp(d);
-    expect(d.setContent).not.toHaveBeenCalled();
-    expect(d.markSent).not.toHaveBeenCalled();
+    expect(d.restoreSend).toHaveBeenCalledWith('conv-9', 'hello', ['s0']);
     expect(d.lockRef.current).toBe(false);
     expect(d.setSending).toHaveBeenLastCalledWith(false);
   });

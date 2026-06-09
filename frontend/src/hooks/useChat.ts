@@ -4,7 +4,7 @@ import { useCallback } from 'react';
 import { useConversationStore } from '@/stores/conversationStore';
 import { useStreamStore } from '@/stores/streamStore';
 import { useArtifactStore } from '@/stores/artifactStore';
-import { useStagedFilesStore, NEW_DRAFT_KEY } from '@/stores/stagedFilesStore';
+import { useStagedFilesStore } from '@/stores/stagedFilesStore';
 import { useUIStore } from '@/stores/uiStore';
 import { useSSE } from '@/hooks/useSSE';
 import type { ChatRequest } from '@/types';
@@ -116,13 +116,12 @@ export function useChat() {
         if (myNavGen !== getNavGen()) return true;
 
         // A brand-new conversation just got its real id. Promote the composer
-        // draft key from the NEW_DRAFT_KEY sentinel to it NOW — not at the
-        // terminal — so a follow-up typed during streaming archives under this
-        // conversation instead of leaking into the next new chat (a new-chat
-        // click during streaming would otherwise activate(NEW_DRAFT_KEY) onto
-        // the still-sentinel slot and adopt the follow-up). No-op for an
-        // existing conv; gated by the nav-gen check above (no promote if the
-        // user navigated away from the new chat mid-POST).
+        // draft from its temporary new-chat key to this id NOW — not at the
+        // terminal — so a follow-up typed during streaming, and any later
+        // switch back here, key off the real conversation. No-op for an existing
+        // conv (its key is already the id); gated by the nav-gen check above, so
+        // if the user navigated away from the new chat mid-POST we don't promote
+        // (their fresh new chat already has its own distinct temp key).
         if (isNew) {
           useStagedFilesStore.getState().promoteNewDraft(res.conversation_id);
         }
@@ -266,7 +265,7 @@ export function useChat() {
     disconnect();
     resetStream();
     resetArtifacts();
-    useStagedFilesStore.getState().activate(NEW_DRAFT_KEY);  // stash the leaving conv's draft, load the new-chat draft
+    useStagedFilesStore.getState().startNewDraft();  // leave current draft intact, open a fresh new-chat slot (unique key)
     setCurrent(null);
     setCurrentLoading(false);
   }, [disconnect, resetStream, resetArtifacts, setCurrent, setCurrentLoading]);

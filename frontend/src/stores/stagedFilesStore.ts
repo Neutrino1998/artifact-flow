@@ -3,31 +3,41 @@ import { MAX_CHAT_ATTACHMENTS } from '@/lib/constants';
 import { partitionStageable, type StageRejection } from '@/lib/uploadFilter';
 import { useConfigStore } from '@/stores/configStore';
 
-// The composer draft store: the unsent text + files staged in the composer
-// (via the file button, drag-drop, or a huge paste). Files ride the next
-// message: useChat.sendMessage posts them as multipart attachments to POST
-// /chat, which converts each into a user_upload artifact before the turn
-// starts. Shared store because drag-drop lives in ChatPanel while the button /
-// paste / chips / text live in MessageInput.
+// The composer draft store. Holds every conversation's UNSENT composer content
+// (text + staged files) in one keyed map; the active conversation's draft is
+// just `drafts[activeKey]` (absent ⇒ blank). In-memory only — File bytes can't
+// round-trip localStorage and the feature is scoped to in-page caching, so a
+// reload starts every composer blank, by design. Shared store because drag-drop
+// lives in ChatPanel while the button / paste / chips / text live in MessageInput.
 //
-// Per-conversation drafts (in-memory only): the live slot (`text` + `files`)
-// holds the active conversation's draft; `archive` stashes other conversations'
-// unsent drafts keyed by conversation id. `activate()` swaps the live slot on
-// navigation (replacing the old clear()-on-switch), so an unsent draft survives
-// glancing at another conversation and coming back. NOT persisted across reload
-// — File bytes can't round-trip localStorage and the feature was scoped to
-// in-page caching, so a reload starts every composer blank, by design.
+// Why a store, not MessageInput-local state: switchConversation flips
+// currentLoading, which unmounts MessageInput (the loading placeholder), so
+// component-local state can't survive a switch. Store state can.
 //
-// `text` also had to move OFF MessageInput's local useState into this store:
-// switchConversation flips currentLoading, which unmounts MessageInput (the
-// loading placeholder), so component-local state can't survive a switch. Store
-// state can.
+// Send model — CLAIM AT SEND START, reconcile by OWNER key (see useComposerSend):
+//   A send belongs to a specific conversation (the activeKey when it started),
+//   NOT "whatever's on screen now". So the composer claims the OWNER draft —
+//   clears its sent text + marks its files in-flight — the instant the user hits
+//   send, BEFORE the network await; on failure it restores the OWNER draft.
+//   Consequences that kill a whole class of bug at once: navigating away
+//   mid-send can't resurface the outgoing content (it already left the draft) or
+//   clobber another conversation (every send op is owner-keyed, never the "live
+//   slot"), and two conversations' sends are independent. This replaced an
+//   earlier "single live slot + post-await reconcile + in-flight flag" model
+//   whose every manifestation (resurfaced content → duplicate upload,
+//   cross-conversation clobber, concurrent-send flag overwrite) was its own bug.
 
-// Sentinel key for the not-yet-persisted "new conversation" composer. Real
-// conversations key their draft by id; the new chat has no id until its first
-// turn completes — at which point promoteNewDraft() relabels the live slot to
-// the real id so the draft doesn't leak back into the next new chat.
-export const NEW_DRAFT_KEY = '__new__';
+// New chats have no id until their first turn lands one, so each gets its OWN
+// unique temp key (not a shared sentinel). That way a failed first send restores
+// into THAT abandoned new chat's key, never into the next blank new chat; and
+// two new chats can't collide. Promoted to the real id by promoteNewDraft() once
+// the POST returns it.
+const NEW_KEY_PREFIX = 'new:';
+let _newSeq = 0;
+function nextNewKey(): string {
+  _newSeq += 1;
+  return `${NEW_KEY_PREFIX}${_newSeq}`;
+}
 
 export interface StagedFile {
   id: string;
@@ -55,57 +65,42 @@ export interface StageNotice {
   overflow: number;
 }
 
-// A single conversation's unsent composer draft, as archived while another
-// conversation is active.
+// One conversation's unsent composer draft.
 interface Draft {
   text: string;
   files: StagedFile[];
 }
 
-interface StagedFilesState {
-  // Live slot — the active conversation's draft. Every existing action below
-  // mutates this slot, unchanged; the per-conversation keying lives entirely in
-  // `activate` / `archive`, so the file lifecycle (sent/markSent/…) is untouched.
-  text: string;
-  files: StagedFile[];
-  notice: StageNotice | null;
-  // The conversation key the live slot belongs to (NEW_DRAFT_KEY or a conv id).
+interface ComposerState {
+  // All conversations' unsent drafts, keyed by conversation id (or a new-chat
+  // temp key). The active composer is drafts[activeKey] — absent means blank.
+  drafts: Record<string, Draft>;
   activeKey: string;
-  // Other conversations' archived unsent drafts. In-memory only (see header).
-  archive: Record<string, Draft>;
-  // The activeKey of a composer send that's mid-flight (POST not yet returned),
-  // or null. Set before the network await, cleared after. While set and equal
-  // to activeKey, the live slot holds already-committed outgoing content (the
-  // post-await reconcile clears text + marks files sent only afterwards), so
-  // navigating away must NOT archive it as a draft — see activate().
-  pendingSendKey: string | null;
+  // Transient, active-view only: why a picked file didn't stage. Cleared on switch.
+  notice: StageNotice | null;
+
+  // --- active-view composer edits (operate on activeKey) ---
   setText: (text: string) => void;
   addFiles: (files: File[]) => void;
   removeFile: (id: string) => void;
-  // Remove a specific set of ids — used to clear exactly the files that a send
-  // consumed, preserving any the user staged during the in-flight window.
-  removeFiles: (ids: string[]) => void;
-  // Mark the ids a send just consumed as in-flight (sent=true). They stay
-  // visible until the turn's terminal event resolves them (see below).
-  markSent: (ids: string[]) => void;
-  // Terminal with uploads flushed (COMPLETE, cooperative cancel, timeout,
-  // engine error): drop the in-flight files.
-  clearSent: () => void;
-  // Terminal with uploads NOT flushed (staging abort, flush_error, external
-  // cancel): revert in-flight files to normal staged so the user can retry.
-  unmarkSent: () => void;
   dismissNotice: () => void;
-  // Bracket the in-flight send window: markSendStart records the current
-  // activeKey as pendingSendKey (before the network await); markSendEnd clears
-  // it (in the send's finally). Wired by useComposerSend around runComposerOp.
-  markSendStart: () => void;
-  markSendEnd: () => void;
-  // Navigation hook (replaces the old clear()-on-switch): stash the live draft
-  // under the current key and load `key`'s archived draft (or a blank one).
-  activate: (key: string) => void;
-  // A new conversation just got its real id: relabel the live slot so its draft
-  // archives under the real id, not the shared NEW_DRAFT_KEY sentinel.
-  promoteNewDraft: (id: string) => void;
+
+  // --- send lifecycle, OWNER-keyed (key captured at send start) ---
+  // claimSend: the send is committed → clear its text + mark its files in-flight,
+  // before the await. restoreSend: the send failed → revert (text only if the
+  // slot is still empty, so typing during the in-flight window isn't clobbered).
+  claimSend: (key: string, sentText: string, sentIds: string[]) => void;
+  restoreSend: (key: string, sentText: string, sentIds: string[]) => void;
+
+  // --- turn terminal, conversation-keyed (see useSSE.resolveStagedAfterTerminal) ---
+  // flushed → drop the sent files; not flushed → revert to staged for retry.
+  clearSent: (key: string) => void;
+  unmarkSent: (key: string) => void;
+
+  // --- navigation ---
+  activate: (key: string) => void; // switch to an existing conversation
+  startNewDraft: () => void; // open a fresh new chat (unique temp key)
+  promoteNewDraft: (id: string) => void; // a new chat's POST returned its real id
 }
 
 let _seq = 0;
@@ -131,14 +126,38 @@ function uniqueFileName(name: string, used: Set<string>): string {
   return `${stem}_${n}${ext}`;
 }
 
-export const useStagedFilesStore = create<StagedFilesState>((set) => ({
-  text: '',
-  files: [],
+// Immutably replace drafts[key] with fn(current), pruning the entry when the
+// result is blank (no text, no files) so the map doesn't accumulate empties for
+// every conversation ever visited. Keep is exact-empty, not trimmed, so typing
+// whitespace doesn't vanish.
+function withDraft(
+  drafts: Record<string, Draft>,
+  key: string,
+  fn: (d: Draft) => Draft,
+): Record<string, Draft> {
+  const next = fn(drafts[key] ?? { text: '', files: [] });
+  const out = { ...drafts };
+  if (next.text !== '' || next.files.length > 0) out[key] = next;
+  else delete out[key];
+  return out;
+}
+
+// Dropping the sent (committed/in-flight) files from a draft on leave: they
+// belong to the turn, not the draft, and are resolved via the terminal only
+// while the conversation is active (its SSE is torn down on switch) — keeping
+// them would leave stale "sent" chips. Unsent text/files remain the draft.
+function dropSentOnLeave(drafts: Record<string, Draft>, key: string): Record<string, Draft> {
+  return withDraft(drafts, key, (d) => ({ ...d, files: d.files.filter((f) => !f.sent) }));
+}
+
+export const useStagedFilesStore = create<ComposerState>((set) => ({
+  drafts: {},
+  activeKey: nextNewKey(),
   notice: null,
-  activeKey: NEW_DRAFT_KEY,
-  archive: {},
-  pendingSendKey: null,
-  setText: (text) => set({ text }),
+
+  setText: (text) =>
+    set((s) => ({ drafts: withDraft(s.drafts, s.activeKey, (d) => ({ ...d, text })) })),
+
   // Gate then cap, in that order, so every entry point (button / drag-drop /
   // paste-to-stage) behaves identically:
   //   1. drop what the backend rejects on sight — unsupported extension OR a
@@ -151,6 +170,7 @@ export const useStagedFilesStore = create<StagedFilesState>((set) => ({
   // each call — set to null on a fully-clean add so a stale message clears.
   addFiles: (incoming) =>
     set((s) => {
+      const cur = s.drafts[s.activeKey] ?? { text: '', files: [] };
       // maxUploadSize (backend MAX_UPLOAD_SIZE via /meta) drives the per-file
       // size gate; null until fetched → partitionStageable skips it. This is the
       // ONE general cap; the backend's tighter text-path limit
@@ -158,7 +178,7 @@ export const useStagedFilesStore = create<StagedFilesState>((set) => ({
       // partitionStageable's doc for why we don't mirror it here.
       const maxBytes = useConfigStore.getState().maxUploadSize ?? undefined;
       const { accepted, rejected } = partitionStageable(incoming, maxBytes);
-      const room = Math.max(0, MAX_CHAT_ATTACHMENTS - s.files.length);
+      const room = Math.max(0, MAX_CHAT_ATTACHMENTS - cur.files.length);
       const toStage = accepted.slice(0, room);
       const overflow = accepted.length - toStage.length;
       // Dedup names against the existing staged set AND within this batch. On a
@@ -166,7 +186,7 @@ export const useStagedFilesStore = create<StagedFilesState>((set) => ({
       // bytes by reference — cheap); file.name then carries the unique name, so
       // every consumer (chip display, multipart upload, ImagePreview name-match)
       // stays unchanged. Non-colliding files keep their original File identity.
-      const used = new Set(s.files.map((f) => f.file.name));
+      const used = new Set(cur.files.map((f) => f.file.name));
       const toAdd = toStage.map((file) => {
         const name = uniqueFileName(file.name, used);
         used.add(name);
@@ -178,62 +198,89 @@ export const useStagedFilesStore = create<StagedFilesState>((set) => ({
       });
       const notice: StageNotice | null =
         rejected.length || overflow ? { rejected, overflow } : null;
+      const drafts = toAdd.length
+        ? withDraft(s.drafts, s.activeKey, (d) => ({ ...d, files: [...d.files, ...toAdd] }))
+        : s.drafts;
+      return { drafts, notice };
+    }),
+
+  removeFile: (id) =>
+    set((s) => ({
+      drafts: withDraft(s.drafts, s.activeKey, (d) => ({
+        ...d,
+        files: d.files.filter((f) => f.id !== id),
+      })),
+    })),
+
+  dismissNotice: () => set({ notice: null }),
+
+  claimSend: (key, sentText, sentIds) =>
+    set((s) => ({
+      drafts: withDraft(s.drafts, key, (d) => ({
+        // The text we just sent equals sentText at send time → clear it; mark
+        // the sent files in-flight (kept visible until the turn's terminal).
+        text: d.text === sentText ? '' : d.text,
+        files: d.files.map((f) => (sentIds.includes(f.id) ? { ...f, sent: true } : f)),
+      })),
+    })),
+
+  restoreSend: (key, sentText, sentIds) =>
+    set((s) => ({
+      drafts: withDraft(s.drafts, key, (d) => ({
+        // Restore the sent text only if the slot is still empty — anything typed
+        // during the in-flight window wins. Revert the sent files to staged.
+        text: d.text === '' ? sentText : d.text,
+        files: d.files.map((f) => (sentIds.includes(f.id) ? { ...f, sent: false } : f)),
+      })),
+    })),
+
+  clearSent: (key) =>
+    set((s) => {
+      const d = s.drafts[key];
+      if (!d || !d.files.some((f) => f.sent)) return s;
       return {
-        files: toAdd.length ? [...s.files, ...toAdd] : s.files,
-        notice,
+        drafts: withDraft(s.drafts, key, (dd) => ({
+          ...dd,
+          files: dd.files.filter((f) => !f.sent),
+        })),
       };
     }),
-  removeFile: (id) => set((s) => ({ files: s.files.filter((f) => f.id !== id) })),
-  removeFiles: (ids) => set((s) => ({ files: s.files.filter((f) => !ids.includes(f.id)) })),
-  markSent: (ids) =>
-    set((s) => ({
-      files: s.files.map((f) => (ids.includes(f.id) ? { ...f, sent: true } : f)),
-    })),
-  clearSent: () => set((s) => ({ files: s.files.filter((f) => !f.sent) })),
-  unmarkSent: () =>
-    set((s) => ({
-      files: s.files.some((f) => f.sent)
-        ? s.files.map((f) => (f.sent ? { ...f, sent: false } : f))
-        : s.files,
-    })),
-  dismissNotice: () => set({ notice: null }),
-  markSendStart: () => set((s) => ({ pendingSendKey: s.activeKey })),
-  markSendEnd: () => set({ pendingSendKey: null }),
+
+  unmarkSent: (key) =>
+    set((s) => {
+      const d = s.drafts[key];
+      if (!d || !d.files.some((f) => f.sent)) return s;
+      return {
+        drafts: withDraft(s.drafts, key, (dd) => ({
+          ...dd,
+          files: dd.files.map((f) => (f.sent ? { ...f, sent: false } : f)),
+        })),
+      };
+    }),
+
   activate: (key) =>
     set((s) => {
       if (key === s.activeKey) return s;
-      const archive = { ...s.archive };
-      // If the conversation we're leaving has a send in flight, its live slot
-      // holds already-committed outgoing content — the post-await reconcile
-      // (clear text + markSent) can no longer reach it once the live slot
-      // swaps, so archiving it would resurface the just-sent text/files and
-      // risk a duplicate upload on return. Drop the whole slot instead (the
-      // pre-draft clear()-on-switch did the same for in-flight sends). The
-      // composer locks all add paths (attach / drag-drop / paste) while a send
-      // is in flight — gated on this same pendingSendKey — so the slot holds
-      // ONLY outgoing content here; there is no separately-staged draft file to
-      // preserve, and dropping the whole slot is exact, not lossy.
-      const inFlight = s.pendingSendKey === s.activeKey;
-      const draftFiles = s.files.filter((f) => !f.sent);
-      // A draft is unsent content only; sent files belong to an in-flight turn
-      // whose SSE is torn down on switch (the old clear() dropped them too).
-      // Stash the live slot under the old key when it holds a real draft;
-      // otherwise drop any stale entry so the map doesn't accumulate blanks.
-      if (!inFlight && (s.text.trim() || draftFiles.length)) {
-        archive[s.activeKey] = { text: s.text, files: draftFiles };
-      } else {
-        delete archive[s.activeKey];
-      }
-      const restored = archive[key] ?? { text: '', files: [] };
-      delete archive[key];
-      return {
-        activeKey: key,
-        text: restored.text,
-        files: restored.files,
-        notice: null,
-        archive,
-      };
+      return { activeKey: key, notice: null, drafts: dropSentOnLeave(s.drafts, s.activeKey) };
     }),
+
+  startNewDraft: () =>
+    set((s) => ({
+      activeKey: nextNewKey(),
+      notice: null,
+      drafts: dropSentOnLeave(s.drafts, s.activeKey),
+    })),
+
   promoteNewDraft: (id) =>
-    set((s) => (s.activeKey === NEW_DRAFT_KEY ? { activeKey: id } : s)),
+    set((s) => {
+      // Only a not-yet-saved new chat carries a temp key; an existing conv's
+      // activeKey is already its id (no-op).
+      if (!s.activeKey.startsWith(NEW_KEY_PREFIX)) return s;
+      const drafts = { ...s.drafts };
+      if (s.activeKey in drafts) {
+        drafts[id] = drafts[s.activeKey];
+        delete drafts[s.activeKey];
+      }
+      return { drafts, activeKey: id };
+    }),
 }));
