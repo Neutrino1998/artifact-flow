@@ -4,7 +4,6 @@ import { useCallback } from 'react';
 import { useStreamStore, scheduleContentUpdate } from '@/stores/streamStore';
 import { useConversationStore } from '@/stores/conversationStore';
 import { useArtifactStore } from '@/stores/artifactStore';
-import { useStagedFilesStore } from '@/stores/stagedFilesStore';
 import { useUIStore } from '@/stores/uiStore';
 import { connectSSE } from '@/lib/sse';
 import { StreamEventType } from '@/types/events';
@@ -40,31 +39,6 @@ let _toolCallSeq = 0;
 
 const MAX_RECONNECT_ATTEMPTS = 3;
 const RECONNECT_BASE_DELAY_MS = 1000;
-
-// Resolve composer attachments at a turn's terminal, keyed off the backend's
-// `artifacts_flushed` bit. post_processing.decide_terminal is the SINGLE terminal
-// authority and stamps the bit (= "the turn's uploads got persisted") on EVERY
-// terminal it builds — COMPLETE / cancel / timeout / error / flush_error alike,
-// always post-flush. So a real turn terminal always carries it:
-//   - explicit true  → uploads persisted → clearSent() drops the files.
-//   - anything else  → keep them staged (unmarkSent) so the user can retry.
-// The ONLY field-absent terminals are transport-layer errors emitted OUTSIDE
-// decide_terminal with unknown flush state (stream not-found/expired in
-// routers/stream.py, the forwarder exception in controller_factory.py). For those,
-// default-KEEP is the safe direction: clearing could silently drop a user's
-// attachment; keeping at worst re-stages an already-persisted file, and re-send
-// dedups it (a deletable _N), never data loss.
-function resolveStagedAfterTerminal(
-  conversationId: string,
-  data: Record<string, unknown> | undefined,
-): void {
-  const store = useStagedFilesStore.getState();
-  // Owner-keyed: resolve THIS conversation's draft. By terminal time a new
-  // conversation has been promoted from its temp key to conversationId
-  // (sendMessage, on the POST return), so the sent files live under this key.
-  if (data?.artifacts_flushed === true) store.clearSent(conversationId);
-  else store.unmarkSent(conversationId);
-}
 
 export function useSSE() {
 
@@ -481,9 +455,6 @@ export function useSSE() {
           }
           setCancelled(true);
           endStream();
-          // Cooperative cancel flushed uploads, external cancel didn't — the
-          // backend's artifacts_flushed bit disambiguates (see helper).
-          resolveStagedAfterTerminal(conversationId, data as Record<string, unknown> | undefined);
           refreshAfterComplete(conversationId, messageId);
           break;
         }
@@ -496,8 +467,6 @@ export function useSSE() {
             snapshotSegments(messageId);
           }
           endStream();
-          // Turn succeeded → staged uploads were flushed; drop the in-flight files.
-          resolveStagedAfterTerminal(conversationId, data as Record<string, unknown> | undefined);
           refreshAfterComplete(conversationId, messageId);
           break;
         }
@@ -513,9 +482,6 @@ export function useSSE() {
             snapshotSegments(messageId);
           }
           endStream();
-          // Timeout runs full post-processing → uploads were flushed; the
-          // artifacts_flushed bit reflects that (clearSent).
-          resolveStagedAfterTerminal(conversationId, data as Record<string, unknown> | undefined);
           refreshAfterComplete(conversationId, messageId);
           break;
         }
@@ -544,11 +510,6 @@ export function useSSE() {
             snapshotSegments(errMsgId);
           }
           endStream();
-          // ERROR from decide_terminal (engine error / flush_error / staging abort)
-          // carries an explicit artifacts_flushed; transport-layer ERRORs (stream
-          // not-found, forwarder) don't. Only explicit true clears; absent/false
-          // keeps the attachment for retry (safe direction — see helper).
-          resolveStagedAfterTerminal(conversationId, data as Record<string, unknown> | undefined);
           refreshAfterComplete(conversationId, errMsgId);
           break;
         }

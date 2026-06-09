@@ -238,7 +238,7 @@ REST 一致性见上文 [执行期间的 REST API 读取](#执行期间的-rest-
 
 - 文件名中特殊字符经 `_normalize_filename_to_id()`（`re.sub(r'[^\w\-.]', '_', ...)` + 长度截断）清洗成 artifact_id base；与 WorkingSet + DB 现有 id 冲突时追加 `_N` 后缀自动去重
 - 上传 artifact 的 `source="user_upload"`，在 Artifact Inventory 中与 agent 创建的条目区分展示
-- staging 失败（gatekeeper 拒绝 / 异常）→ 引擎回滚已 stage 的上传（`discard_staged`）并 loud-abort 本轮；终态的 `artifacts_flushed` 据 `uploads_rolled_back` 修正为 false，前端保留输入框附件供重试
+- staging 失败（gatekeeper 拒绝 / 异常）→ 引擎回滚已 stage 的上传（`discard_staged`）并 loud-abort 本轮（记 `error_detail`，由 `decide_terminal` 统一发 ERROR 终态）
 
 > **历史包袱已消除**：旧的"先即时 commit 再在 submit 时重复 staging"会产生 `_N` 副本 bug——把提交退到 submit 之后、并入引擎生命周期后该 bug 自然消失。
 

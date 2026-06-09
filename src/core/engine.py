@@ -256,21 +256,16 @@ async def execute_loop(
                 break
 
         if staging_error is not None:
-            # Loud, atomic abort. 静默吞掉一个 stage 失败 = 用户附件在 clearSent 里
-            # 凭空消失而无任何信号(违反 loud-failure)。原子性:回滚本轮已 stage 的
-            # 文件(纯内存,几个 dict pop),使 flush_all 一个都不落 → 用户重试时不撞 _N。
+            # Loud, atomic abort. 静默吞掉一个 stage 失败 = 用户附件凭空消失而无任何
+            # 信号(违反 loud-failure)。原子性:回滚本轮已 stage 的文件(纯内存,几个
+            # dict pop),使 flush_all 一个都不落 → 用户重试时不撞 _N。
             discard = getattr(artifact_service, "discard_staged", None)
             if discard:
                 for sid in staged_ids:
                     discard(stage_session, sid)
             state["uploaded_artifacts"] = []
-            # uploads_rolled_back:回滚后 flush_all 对空集仍 vacuously 成功
-            # (pp.artifacts_flushed=True),但上传其实没落库 —— 这个 flag 让
-            # decide_terminal 把 artifacts_flushed 修正为 False(详见 post_processing
-            # 顶部 uploads_persisted 计算),前端据此保留输入框附件。
-            state["uploads_rolled_back"] = True
             # record-not-emit:不在此发 ERROR;只记错误详情,turn 末由 decide_terminal
-            # 作为唯一终态发射点统一构建 + 发射 ERROR(带 request_id + artifacts_flushed)。
+            # 作为唯一终态发射点统一构建 + 发射 ERROR(带 request_id)。
             state["error_detail"] = {
                 "error": staging_error,
                 "agent": "lead_agent",

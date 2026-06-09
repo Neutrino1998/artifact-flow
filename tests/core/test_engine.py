@@ -210,11 +210,6 @@ class TestUploadStagingAbort:
         assert svc.discarded == [("sess-1", "a_md")]
         assert result["uploaded_artifacts"] == []
 
-        # uploads_rolled_back signals decide_terminal to mark the terminal's
-        # artifacts_flushed=False even though flush_all vacuously succeeds on the
-        # (now empty) WS — so the frontend keeps the composer attachments.
-        assert result["uploads_rolled_back"] is True
-
         # record-not-emit: the engine records the detail but does NOT emit/append
         # ERROR — decide_terminal (post-flush) is the single terminal producer.
         assert "Failed to attach file 'b.md'" in result["error_detail"]["error"]

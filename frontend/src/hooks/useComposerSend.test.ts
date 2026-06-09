@@ -15,8 +15,7 @@ function deps(over: Partial<Parameters<typeof runComposerOp>[0]> = {}) {
     ownerKey: 'conv-1',
     content: 'hello',
     staged: [] as StagedFile[],
-    claimSend: vi.fn(),
-    restoreSend: vi.fn(),
+    clearDraft: vi.fn(),
     lockRef: { current: false },
     setSending: vi.fn(),
     run: vi.fn(async () => true),
@@ -25,11 +24,11 @@ function deps(over: Partial<Parameters<typeof runComposerOp>[0]> = {}) {
 }
 
 describe('runComposerOp', () => {
-  test('bails (no run, no claim, no lock, no spinner) when text and files are both empty', async () => {
+  test('bails (no run, no clear, no lock, no spinner) when text and files are both empty', async () => {
     const d = deps({ content: '   ', staged: [] });
     await runComposerOp(d);
     expect(d.run).not.toHaveBeenCalled();
-    expect(d.claimSend).not.toHaveBeenCalled();
+    expect(d.clearDraft).not.toHaveBeenCalled();
     expect(d.setSending).not.toHaveBeenCalled();
     expect(d.lockRef.current).toBe(false);
   });
@@ -44,33 +43,34 @@ describe('runComposerOp', () => {
     expect(files).toHaveLength(2);
   });
 
-  test('claims the OWNER draft BEFORE the await (clear text + mark files sent)', async () => {
-    const claimSend = vi.fn();
-    let claimedBeforeRun = false;
+  test('clears the OWNER draft BEFORE the await (drop text + the sent file ids)', async () => {
+    const clearDraft = vi.fn();
+    let clearedBeforeRun = false;
     const run = vi.fn(async () => {
-      claimedBeforeRun = claimSend.mock.calls.length > 0;
+      clearedBeforeRun = clearDraft.mock.calls.length > 0;
       return true;
     });
-    const d = deps({ ownerKey: 'conv-9', content: 'hello', staged: makeStaged(2), claimSend, run });
+    const d = deps({ ownerKey: 'conv-9', content: 'hello', staged: makeStaged(2), clearDraft, run });
     await runComposerOp(d);
-    expect(claimedBeforeRun).toBe(true);
-    expect(claimSend).toHaveBeenCalledWith('conv-9', 'hello', ['s0', 's1']);
+    expect(clearedBeforeRun).toBe(true);
+    expect(clearDraft).toHaveBeenCalledWith('conv-9', 'hello', ['s0', 's1']);
   });
 
-  test('on success, does not restore (the content already left the draft at claim)', async () => {
+  test('on success, clears exactly once — there is no restore counterpart', async () => {
     const d = deps({ content: 'hello', staged: makeStaged(1), run: vi.fn(async () => true) });
     await runComposerOp(d);
-    expect(d.claimSend).toHaveBeenCalledTimes(1);
-    expect(d.restoreSend).not.toHaveBeenCalled();
+    expect(d.clearDraft).toHaveBeenCalledTimes(1);
   });
 
-  test('on failure (run returns false), restores the OWNER draft', async () => {
+  test('on failure (run returns false), does NOT restore — the draft is a best-effort loss', async () => {
     const d = deps({ ownerKey: 'conv-9', content: 'hello', staged: makeStaged(1), run: vi.fn(async () => false) });
     await runComposerOp(d);
-    expect(d.restoreSend).toHaveBeenCalledWith('conv-9', 'hello', ['s0']);
+    // cleared once at send start; nothing put back on failure
+    expect(d.clearDraft).toHaveBeenCalledTimes(1);
+    expect(d.clearDraft).toHaveBeenCalledWith('conv-9', 'hello', ['s0']);
   });
 
-  test('on throw, restores the OWNER draft and still releases the lock', async () => {
+  test('on throw, does not restore but still releases the lock + spinner', async () => {
     const d = deps({
       ownerKey: 'conv-9',
       content: 'hello',
@@ -80,7 +80,7 @@ describe('runComposerOp', () => {
       }),
     });
     await runComposerOp(d);
-    expect(d.restoreSend).toHaveBeenCalledWith('conv-9', 'hello', ['s0']);
+    expect(d.clearDraft).toHaveBeenCalledTimes(1);
     expect(d.lockRef.current).toBe(false);
     expect(d.setSending).toHaveBeenLastCalledWith(false);
   });

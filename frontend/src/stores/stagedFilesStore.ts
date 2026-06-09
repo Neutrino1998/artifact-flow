@@ -14,42 +14,32 @@ import { useConfigStore } from '@/stores/configStore';
 // currentLoading, which unmounts MessageInput (the loading placeholder), so
 // component-local state can't survive a switch. Store state can.
 //
-// Send model — CLAIM AT SEND START, reconcile by OWNER key (see useComposerSend):
+// Send model — CLEAR ON SEND, by OWNER key (see useComposerSend):
 //   A send belongs to a specific conversation (the activeKey when it started),
-//   NOT "whatever's on screen now". So the composer claims the OWNER draft —
-//   clears its sent text + marks its files in-flight — the instant the user hits
-//   send, BEFORE the network await; on failure it restores the OWNER draft.
-//   Consequences that kill a whole class of bug at once: navigating away
-//   mid-send can't resurface the outgoing content (it already left the draft) or
-//   clobber another conversation (every send op is owner-keyed, never the "live
-//   slot"), and two conversations' sends are independent. This replaced an
-//   earlier "single live slot + post-await reconcile + in-flight flag" model
-//   whose every manifestation (resurfaced content → duplicate upload,
-//   cross-conversation clobber, concurrent-send flag overwrite) was its own bug.
+//   NOT "whatever's on screen now". The instant the user hits send the composer
+//   clears the OWNER draft — drops its text + the files that rode the POST —
+//   before the network await. There is deliberately NO restore: a failed send is
+//   a best-effort loss (the error is surfaced; the user retypes). This is the
+//   explicit scope contract that replaced an earlier "claim + restore-on-failure"
+//   reconcile whose every manifestation (restore with no File snapshot after a
+//   leave dropped the bytes; a shared new-chat key letting one failed send's
+//   content restore into another) was its own reviewer round. Clearing by OWNER
+//   key keeps the one property worth keeping: navigating away mid-send can't
+//   resurface the outgoing content (it already left the draft) or touch another
+//   conversation, and two sends are independent.
 
-// The new chat has no id until its first turn lands one, so its draft lives
-// under a single stable sentinel key — NOT a per-click unique key. There's only
-// one "new chat" entry in the UI (the new-chat button), so a stable key is what
-// lets an unsent new-chat draft survive navigating away and clicking back into
-// the new chat. A successful first send promotes this key to the real id (so the
-// next new chat starts blank); a failed send simply restores the content here,
-// which is the same new chat the user sent from — retry, not a cross-conversation
-// leak. (An earlier per-click unique key fixed that failure path by stashing the
-// content under a key the user could never navigate back to — i.e. it just hid
-// it — at the cost of losing the draft on every new-chat click. Not worth it.)
+// The new chat has no id until its first turn lands one, so its draft lives under
+// a single stable sentinel key — NOT a per-click unique key. There's only one
+// "new chat" entry in the UI (the new-chat button), so a stable key is what lets
+// an unsent new-chat draft survive navigating away and clicking back into the new
+// chat. A successful first send promotes this key to the real id (so the next new
+// chat starts blank); a failed send cleared the draft like any other (retype) —
+// no cross-conversation leak because there's no restore to misfire.
 export const NEW_DRAFT_KEY = '__new__';
 
 export interface StagedFile {
   id: string;
   file: File;
-  // True once this file has ridden a send POST but the turn hasn't reached a
-  // terminal. Kept (not removed) until the terminal resolves so that if the turn
-  // dies before flush_all — uploads are ephemeral (staged in-engine, lost on
-  // lease restart) — the user still has the file in the composer to retry.
-  // Resolution is driven by the terminal's `artifacts_flushed` bit, NOT the
-  // terminal type (see useSSE.resolveStagedAfterTerminal): flushed → clearSent
-  // (drop); not flushed → unmarkSent (revert to normal staged for retry).
-  sent?: boolean;
 }
 
 // Why a file the user picked didn't make it into the staged set, surfaced once
@@ -85,21 +75,16 @@ interface ComposerState {
   removeFile: (id: string) => void;
   dismissNotice: () => void;
 
-  // --- send lifecycle, OWNER-keyed (key captured at send start) ---
-  // claimSend: the send is committed → clear its text + mark its files in-flight,
-  // before the await. restoreSend: the send failed → revert (text only if the
-  // slot is still empty, so typing during the in-flight window isn't clobbered).
-  claimSend: (key: string, sentText: string, sentIds: string[]) => void;
-  restoreSend: (key: string, sentText: string, sentIds: string[]) => void;
-
-  // --- turn terminal, conversation-keyed (see useSSE.resolveStagedAfterTerminal) ---
-  // flushed → drop the sent files; not flushed → revert to staged for retry.
-  clearSent: (key: string) => void;
-  unmarkSent: (key: string) => void;
+  // --- send, OWNER-keyed (key captured at send start) ---
+  // The send is committed → clear the owner draft's text + drop the files that
+  // rode the POST, before the await. No restore: a failed send is a best-effort
+  // loss (see header). Text is cleared only if it still equals sentText, so
+  // typing during the in-flight window isn't clobbered.
+  clearDraft: (key: string, sentText: string, sentIds: string[]) => void;
 
   // --- navigation ---
   activate: (key: string) => void; // switch to an existing conversation
-  startNewDraft: () => void; // open a fresh new chat (unique temp key)
+  startNewDraft: () => void; // open the new chat (stable sentinel key)
   promoteNewDraft: (id: string) => void; // a new chat's POST returned its real id
 }
 
@@ -140,14 +125,6 @@ function withDraft(
   if (next.text !== '' || next.files.length > 0) out[key] = next;
   else delete out[key];
   return out;
-}
-
-// Dropping the sent (committed/in-flight) files from a draft on leave: they
-// belong to the turn, not the draft, and are resolved via the terminal only
-// while the conversation is active (its SSE is torn down on switch) — keeping
-// them would leave stale "sent" chips. Unsent text/files remain the draft.
-function dropSentOnLeave(drafts: Record<string, Draft>, key: string): Record<string, Draft> {
-  return withDraft(drafts, key, (d) => ({ ...d, files: d.files.filter((f) => !f.sent) }));
 }
 
 export const useStagedFilesStore = create<ComposerState>((set) => ({
@@ -214,66 +191,25 @@ export const useStagedFilesStore = create<ComposerState>((set) => ({
 
   dismissNotice: () => set({ notice: null }),
 
-  claimSend: (key, sentText, sentIds) =>
+  clearDraft: (key, sentText, sentIds) =>
     set((s) => ({
       drafts: withDraft(s.drafts, key, (d) => ({
-        // The text we just sent equals sentText at send time → clear it; mark
-        // the sent files in-flight (kept visible until the turn's terminal).
+        // Clear the text we just sent (only if it still equals sentText, so
+        // typing during the in-flight window isn't clobbered) and drop the files
+        // that rode the POST. No restore counterpart — see header.
         text: d.text === sentText ? '' : d.text,
-        files: d.files.map((f) => (sentIds.includes(f.id) ? { ...f, sent: true } : f)),
+        files: d.files.filter((f) => !sentIds.includes(f.id)),
       })),
     })),
 
-  restoreSend: (key, sentText, sentIds) =>
-    set((s) => ({
-      drafts: withDraft(s.drafts, key, (d) => ({
-        // Restore the sent text only if the slot is still empty — anything typed
-        // during the in-flight window wins. Revert the sent files to staged.
-        text: d.text === '' ? sentText : d.text,
-        files: d.files.map((f) => (sentIds.includes(f.id) ? { ...f, sent: false } : f)),
-      })),
-    })),
-
-  clearSent: (key) =>
-    set((s) => {
-      const d = s.drafts[key];
-      if (!d || !d.files.some((f) => f.sent)) return s;
-      return {
-        drafts: withDraft(s.drafts, key, (dd) => ({
-          ...dd,
-          files: dd.files.filter((f) => !f.sent),
-        })),
-      };
-    }),
-
-  unmarkSent: (key) =>
-    set((s) => {
-      const d = s.drafts[key];
-      if (!d || !d.files.some((f) => f.sent)) return s;
-      return {
-        drafts: withDraft(s.drafts, key, (dd) => ({
-          ...dd,
-          files: dd.files.map((f) => (f.sent ? { ...f, sent: false } : f)),
-        })),
-      };
-    }),
-
+  // Navigation just swaps the active key + clears the transient notice. Each
+  // conversation's unsent draft persists in `drafts` untouched (that's the
+  // feature); the new chat's stable key means clicking back into it restores any
+  // in-progress draft.
   activate: (key) =>
-    set((s) => {
-      if (key === s.activeKey) return s;
-      return { activeKey: key, notice: null, drafts: dropSentOnLeave(s.drafts, s.activeKey) };
-    }),
+    set((s) => (key === s.activeKey ? s : { activeKey: key, notice: null })),
 
-  startNewDraft: () =>
-    set((s) => ({
-      // Open the new chat (stable key). Drop the leaving conversation's sent
-      // files (incl. the new chat's own, if a send is in flight — abandoning it
-      // for a fresh start), but KEEP any unsent new-chat draft: clicking the
-      // new-chat button is also how the user returns to an in-progress new chat.
-      activeKey: NEW_DRAFT_KEY,
-      notice: null,
-      drafts: dropSentOnLeave(s.drafts, s.activeKey),
-    })),
+  startNewDraft: () => set({ activeKey: NEW_DRAFT_KEY, notice: null }),
 
   promoteNewDraft: (id) =>
     set((s) => {

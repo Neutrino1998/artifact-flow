@@ -87,14 +87,14 @@ async def _persist_events(state):
 | 事件 | `data` 字段 |
 |------|------------|
 | `METADATA` | `conversation_id`, `message_id` |
-| `COMPLETE` | `success=true`, `conversation_id`, `message_id`, `response`, `execution_metrics`, `artifacts_flushed` |
-| `CANCELLED` | `success=false`, `cancelled=true`, `conversation_id`, `message_id`, `response`, `execution_metrics`, `artifacts_flushed`, `reason?`（external cancel 时为 `external_cancel` / `external_cancel_post_processing`） |
-| `TIMED_OUT` | `success=false`, `timed_out=true`, `conversation_id`, `message_id`, `response`（=`TIMED_OUT_RESPONSE`）, `execution_metrics`, `artifacts_flushed` |
-| `ERROR` | `success=false`, `conversation_id`, `message_id`, `error`, `agent?`, `request_id?`, `execution_metrics`, `artifacts_flushed` |
+| `COMPLETE` | `success=true`, `conversation_id`, `message_id`, `response`, `execution_metrics` |
+| `CANCELLED` | `success=false`, `cancelled=true`, `conversation_id`, `message_id`, `response`, `execution_metrics`, `reason?`（external cancel 时为 `external_cancel` / `external_cancel_post_processing`） |
+| `TIMED_OUT` | `success=false`, `timed_out=true`, `conversation_id`, `message_id`, `response`（=`TIMED_OUT_RESPONSE`）, `execution_metrics` |
+| `ERROR` | `success=false`, `conversation_id`, `message_id`, `error`, `agent?`, `request_id?`, `execution_metrics` |
 
 `execution_metrics` 汇总整次执行指标（总耗时、总 token、每 agent 轮数等），是监控面板的核心字段。
 
-四个终态都由后处理的 `decide_terminal`（flush 之后、单一裁判）构建，故都带 `artifacts_flushed`（= 本轮用户上传是否真的落库；前端据此决定清掉 / 保留输入框附件，见 [execution-lifecycle.md](execution-lifecycle.md)）。`ERROR` 的 `request_id` 在错误创建时冻结写入 `data`（不是读边界注入），是日志定位锚点。两处 transport 层直发的 ERROR（events 持久化失败 / post-processing 异常）绕过 `decide_terminal` 但仍带 `artifacts_flushed`。**注意**：`MessageEvent` 表存的是**未脱敏**的原始 `error` 文本（事件溯源 = 完整审计 + DEBUG replay）；脱敏（`error` → `"Internal server error"`）只在用户面读边界 DEBUG-gated 施加，admin 观测端点不脱敏。
+四个终态都由后处理的 `decide_terminal`（flush 之后、单一裁判）构建。`ERROR` 的 `request_id` 在错误创建时冻结写入 `data`（不是读边界注入），是日志定位锚点。两处 transport 层直发的 ERROR（events 持久化失败 / post-processing 异常）绕过 `decide_terminal`。**注意**：`MessageEvent` 表存的是**未脱敏**的原始 `error` 文本（事件溯源 = 完整审计 + DEBUG replay）；脱敏（`error` → `"Internal server error"`）只在用户面读边界 DEBUG-gated 施加，admin 观测端点不脱敏。
 
 ### Agent 层
 

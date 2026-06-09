@@ -11,22 +11,21 @@ import { useStagedFilesStore, type StagedFile } from '@/stores/stagedFilesStore'
 //                  immune to stale closures).
 //   2. snapshot  — capture text + staged ids + the OWNER key (the conversation
 //                  this send belongs to = activeKey now) BEFORE the await.
-//   3. claim     — clear the owner draft's sent text + mark its files in-flight
-//                  NOW, before the await. The send is committed the instant it
-//                  starts, so its content leaves the draft immediately. This is
-//                  the ordinary "clear the box on send" — and it's what makes
-//                  navigate-during-send safe: there's nothing left in the draft
-//                  for a navigation to resurface, and ops are OWNER-keyed, never
-//                  "whatever's on screen now".
+//   3. clear     — clear the owner draft's sent text + drop the files that rode
+//                  the POST NOW, before the await. The send is committed the
+//                  instant it starts, so its content leaves the draft. This is
+//                  the ordinary "clear the box on send" — and OWNER-keying it is
+//                  what makes navigate-during-send safe: there's nothing left for
+//                  a navigation to resurface, never "whatever's on screen now".
 //   4. await     — run the network op.
-//   5. on result — failure (false / throw): restore the OWNER draft (text only
-//                  if the slot is still empty, so typing during the in-flight
-//                  window isn't clobbered). Success: nothing — the content is
-//                  already gone and the turn's terminal resolves the sent files.
+//   5. on result — nothing. A failed send is a best-effort loss (the network
+//                  layer surfaces the error; the user retypes). There is NO
+//                  restore — see stagedFilesStore's send-model note for why that
+//                  whole reconcile path was removed.
 //
-// Owner-keying is the whole point: two conversations' sends are independent (no
-// shared in-flight flag), and a return that arrives after the user navigated
-// away touches only the owner's draft. See stagedFilesStore's send-model note.
+// Owner-keying is the whole point: two conversations' sends are independent, and
+// a clear that fires after the user navigated away touches only the owner's
+// draft. See stagedFilesStore's send-model note.
 
 type RunFn = (text: string, files: File[] | undefined) => Promise<boolean>;
 
@@ -36,9 +35,8 @@ export interface ComposerOpDeps {
   // Snapshot inputs (read once, at call time).
   content: string;
   staged: StagedFile[];
-  // Owner-keyed draft mutations (claim before await; restore on failure).
-  claimSend: (key: string, sentText: string, sentIds: string[]) => void;
-  restoreSend: (key: string, sentText: string, sentIds: string[]) => void;
+  // Owner-keyed clear: drop the sent text + files before the await. No restore.
+  clearDraft: (key: string, sentText: string, sentIds: string[]) => void;
   // Re-entrancy lock; a ref-like cell so it's shared across renders.
   lockRef: { current: boolean };
   // Optional UI busy flag (only the new-message send shows a spinner).
@@ -55,8 +53,7 @@ export async function runComposerOp({
   ownerKey,
   content,
   staged,
-  claimSend,
-  restoreSend,
+  clearDraft,
   lockRef,
   setSending,
   allowEmpty,
@@ -73,16 +70,15 @@ export async function runComposerOp({
   const sentIds = staged.map((s) => s.id);
   lockRef.current = true;
   setSending?.(true);
-  // Claim before the await (see header): the content leaves the owner draft now.
-  claimSend(ownerKey, sentText, sentIds);
+  // Clear before the await (see header): the content leaves the owner draft now
+  // and does not come back — a failed send is a best-effort loss.
+  clearDraft(ownerKey, sentText, sentIds);
   try {
-    const ok = await run(trimmed, files.length ? files : undefined);
-    if (!ok) restoreSend(ownerKey, sentText, sentIds);
+    await run(trimmed, files.length ? files : undefined);
   } catch (err) {
-    // Network layer (useChat / injectMessage) owns surfacing the error; we just
-    // put the composer back so the user can retry.
+    // Network layer (useChat / injectMessage) owns surfacing the error. Nothing
+    // to undo here — the draft was cleared on send by design.
     console.error('Composer send failed:', err);
-    restoreSend(ownerKey, sentText, sentIds);
   } finally {
     lockRef.current = false;
     setSending?.(false);
@@ -104,8 +100,7 @@ export function useComposerSend(ownerKey: string, content: string, stagedFiles: 
   // Inject is lighter — no spinner (the button doubles as Stop once the box is
   // empty) — but still needs its own lock against a rapid double-fire.
   const injectingRef = useRef(false);
-  const claimSend = useStagedFilesStore((s) => s.claimSend);
-  const restoreSend = useStagedFilesStore((s) => s.restoreSend);
+  const clearDraft = useStagedFilesStore((s) => s.clearDraft);
 
   // New-message send: text and/or staged attachments ride one POST.
   // allowEmpty=true permits a compact-only send (no text, no files).
@@ -115,14 +110,13 @@ export function useComposerSend(ownerKey: string, content: string, stagedFiles: 
         ownerKey,
         content,
         staged: stagedFiles,
-        claimSend,
-        restoreSend,
+        clearDraft,
         lockRef: sendingRef,
         setSending,
         allowEmpty,
         run,
       }),
-    [ownerKey, content, stagedFiles, claimSend, restoreSend],
+    [ownerKey, content, stagedFiles, clearDraft],
   );
 
   // Inject into a running turn: text only (attachments don't ride an in-flight
@@ -133,15 +127,14 @@ export function useComposerSend(ownerKey: string, content: string, stagedFiles: 
         ownerKey,
         content,
         staged: [],
-        claimSend,
-        restoreSend,
+        clearDraft,
         lockRef: injectingRef,
         run: async (text) => {
           await run(text);
           return true;
         },
       }),
-    [ownerKey, content, claimSend, restoreSend],
+    [ownerKey, content, clearDraft],
   );
 
   return { sending, submit, inject };

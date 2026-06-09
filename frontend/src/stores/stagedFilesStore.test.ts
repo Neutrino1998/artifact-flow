@@ -3,8 +3,8 @@ import { useStagedFilesStore, NEW_DRAFT_KEY } from './stagedFilesStore';
 import { useConfigStore } from './configStore';
 import { MAX_CHAT_ATTACHMENTS } from '@/lib/constants';
 
-// A real-conversation-like active key (not a 'new:' temp key) for the common
-// tests; promote/new-chat tests allocate temp keys via startNewDraft().
+// A real-conversation-like active key (not the new-chat sentinel) for the common
+// tests; new-chat tests set activeKey to NEW_DRAFT_KEY explicitly.
 const KEY = 'conv-test';
 
 function reset() {
@@ -146,7 +146,7 @@ describe('stagedFilesStore format gate + notice', () => {
   });
 });
 
-describe('stagedFilesStore send lifecycle (claim → terminal)', () => {
+describe('stagedFilesStore send (clear on send, owner-keyed, no restore)', () => {
   beforeEach(reset);
 
   function stage(n: number): string[] {
@@ -156,60 +156,45 @@ describe('stagedFilesStore send lifecycle (claim → terminal)', () => {
     return files().map((f) => f.id);
   }
 
-  test('claimSend clears the sent text and marks only the sent ids in-flight', () => {
+  test('clearDraft clears the sent text and drops only the sent ids', () => {
     st().setText('hello');
     const ids = stage(2);
-    st().claimSend(KEY, 'hello', [ids[0]]);
+    st().clearDraft(KEY, 'hello', [ids[0]]);
     expect(text()).toBe('');                                  // sent text cleared
-    expect(files().length).toBe(2);                           // not removed
-    expect(files().find((f) => f.id === ids[0])?.sent).toBe(true);
-    expect(files().find((f) => f.id === ids[1])?.sent).toBeFalsy();
+    expect(files().length).toBe(1);                           // only the sent id removed
+    expect(files()[0].id).toBe(ids[1]);                       // the unsent one stays
   });
 
-  test('clearSent (flushed) drops only sent files, keeps newly-staged', () => {
-    const ids = stage(1);
-    st().claimSend(KEY, '', ids);
-    stage(1); // staged during the in-flight window (sent=false)
-    st().clearSent(KEY);
-    expect(files().length).toBe(1);
-    expect(files()[0].sent).toBeFalsy();
+  test('clearDraft only clears text that still matches what was sent', () => {
+    // Defensive guard: clearing keys off the snapshot, so a stale sentText that
+    // no longer matches the draft (e.g. the box was edited) leaves it untouched.
+    st().setText('current text');
+    st().clearDraft(KEY, 'a different, stale send', []);
+    expect(text()).toBe('current text');
   });
 
-  test('unmarkSent (not flushed) reverts sent → staged for retry', () => {
+  test('files-only clear empties the draft entirely (text already empty)', () => {
     const ids = stage(2);
-    st().claimSend(KEY, '', ids);
-    st().unmarkSent(KEY);
-    expect(files().length).toBe(2);
-    expect(files().every((f) => !f.sent)).toBe(true);
+    st().clearDraft(KEY, '', ids);
+    expect(files().length).toBe(0);
+    expect(st().drafts[KEY]).toBeUndefined(); // pruned when fully blank
   });
 
-  test('restoreSend (failed send) puts the text back and reverts the files', () => {
-    st().setText('retry me');
-    const ids = stage(1);
-    st().claimSend(KEY, 'retry me', ids); // claim clears text + marks sent
-    expect(text()).toBe('');
-    st().restoreSend(KEY, 'retry me', ids);
-    expect(text()).toBe('retry me');
-    expect(files()[0].sent).toBeFalsy();
-  });
-
-  test('restoreSend does not clobber text typed during the in-flight window', () => {
-    st().setText('original');
-    st().claimSend(KEY, 'original', []); // text cleared at send start
-    st().setText('typed during await'); // user types something new
-    st().restoreSend(KEY, 'original', []);
-    expect(text()).toBe('typed during await'); // new text wins, not restored
-  });
-
-  test('send ops are owner-keyed: claiming one conversation does not touch another', () => {
+  test('clearing one conversation does not touch another (owner-keyed)', () => {
     st().setText('A draft');
     st().activate('conv-b');
     st().setText('B draft');
-    // A send for conv-b is claimed while we sit on conv-b...
-    st().claimSend('conv-b', 'B draft', []);
-    // ...the (still-viewing) conv-b text is cleared, conv-a's archived draft is intact.
+    // A send for conv-b clears conv-b while we sit on it...
+    st().clearDraft('conv-b', 'B draft', []);
     expect(text()).toBe('');
+    // ...conv-a's draft is intact.
     st().activate(KEY);
+    expect(text()).toBe('A draft');
+  });
+
+  test('a clear keyed to a non-active owner leaves the active draft alone', () => {
+    st().setText('A draft');           // active = KEY
+    st().clearDraft('conv-b', '', []); // a different conversation's send resolves
     expect(text()).toBe('A draft');
   });
 });
@@ -236,13 +221,14 @@ describe('stagedFilesStore per-conversation drafts (in-memory)', () => {
     expect(st().drafts[KEY]).toBeUndefined();
   });
 
-  test('leaving a conversation drops its sent (in-flight) files, keeps unsent', () => {
+  test('a send drops its files from the draft immediately; the rest persist across nav', () => {
     st().addFiles(makeFiles(2));
     const ids = files().map((f) => f.id);
-    st().claimSend(KEY, '', [ids[0]]); // one file in-flight, one still staged
-    st().activate('conv-b');
+    st().clearDraft(KEY, '', [ids[0]]); // one file rode the POST → dropped now
+    expect(files().length).toBe(1);
+    st().activate('conv-b'); // navigation no longer drops anything
     st().activate(KEY);
-    expect(files().length).toBe(1); // only the unsent file survived
+    expect(files().length).toBe(1); // the un-sent file is still here
     expect(files()[0].id).toBe(ids[1]);
   });
 
@@ -290,15 +276,14 @@ describe('stagedFilesStore per-conversation drafts (in-memory)', () => {
     expect(st().activeKey).toBe('conv-a');
   });
 
-  test('a failed new-chat send restores its content into the new chat for retry', () => {
-    // Success would promote the sentinel to a real id (freeing it); a failure
-    // keeps the user on the same new chat, so restoring the content there is the
-    // retry affordance — not a cross-conversation leak.
+  test('a new-chat send clears the draft on send; a failed send does not restore it', () => {
+    // Clear-on-send is unconditional. There is no restore counterpart — a failed
+    // send is a best-effort loss (the user retypes), which is also why no failed
+    // send can leak content into the next new chat.
     useStagedFilesStore.setState({ drafts: {}, activeKey: NEW_DRAFT_KEY, notice: null });
     st().setText('hi');
-    st().claimSend(NEW_DRAFT_KEY, 'hi', []); // claim at send start clears it
+    st().clearDraft(NEW_DRAFT_KEY, 'hi', []); // clear at send start
     expect(text()).toBe('');
-    st().restoreSend(NEW_DRAFT_KEY, 'hi', []); // the POST failed
-    expect(text()).toBe('hi'); // back in the new chat for retry
+    expect(st().drafts[NEW_DRAFT_KEY]).toBeUndefined(); // nothing brings it back
   });
 });

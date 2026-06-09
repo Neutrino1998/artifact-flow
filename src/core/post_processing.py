@@ -52,7 +52,6 @@ class PostProcessState:
 
     # IO 进度
     conv_alive: Optional[bool] = None
-    artifacts_flushed: bool = False
     terminal_appended: bool = False                  # terminal_event 已加入 final_state["events"]
     events_persisted: bool = False                   # _persist_events 返回 True
     # response_update_attempted 必须在 `await update_response_async` 之前 set,
@@ -72,22 +71,6 @@ class PostProcessState:
 # ============================================================================
 
 
-def uploads_persisted(pp: PostProcessState) -> bool:
-    """前端"要不要清掉输入框附件"的唯一真相:用户这轮的上传是否真的落库。
-
-    不是字面"flush 动作成没成":
-      pp.artifacts_flushed = flush_all 调用成功(对空集也 True);
-      uploads_rolled_back   = staging 失败时引擎回滚了上传(WS 摘除,flush 空转
-                              成功却没东西落)。
-    二者相减才是真相 —— 其余路径 uploads_rolled_back=False,退化回 pp.artifacts_flushed。
-
-    单一真相源:decide_terminal 的四个终态、以及 controller 两个 transport 层直发
-    ERROR(events 持久化失败 / post-processing 异常)都经此函数,确保 artifacts_flushed
-    bit 在所有终态一致 —— 否则缺 bit 的 ERROR 会被前端当"未落库"处理而重复 staging。
-    """
-    return pp.artifacts_flushed and not pp.final_state.get("uploads_rolled_back", False)
-
-
 def decide_terminal(pp: PostProcessState) -> None:
     """根据 final_state 决定 terminal_event + terminal_type + cancel_source。
 
@@ -98,7 +81,7 @@ def decide_terminal(pp: PostProcessState) -> None:
     - has_error 时 engine/controller 不再自己 append ERROR,只把详情记进
       state["error_detail"](见 run_engine / controller 的 except 分支)。decide_terminal
       在 flush 之后据此构建唯一的 ERROR terminal_event,由 controller 统一 append + yield
-      —— 好处是 ERROR 也走 flush 后路径,artifacts_flushed 必带且正确。
+      —— 好处是 ERROR 也走 flush 后路径,无 decide_terminal 之外的第二个 ERROR 发射点。
     - flush_error 优先于 has_error / is_cancelled:artifact 持久化失败是 controller
       自己产生的 ERROR,同样构建新的 terminal_event。
     """
@@ -108,10 +91,6 @@ def decide_terminal(pp: PostProcessState) -> None:
     timed_out = s.get("timed_out", False)
     metrics = s.get("execution_metrics", {})
     response = s.get("response", "")
-
-    # 前端"要不要清掉输入框附件"的依据(终态 data 里叫 artifacts_flushed)。
-    # 见 uploads_persisted() —— controller 的 transport 层直发 ERROR 也复用同一函数。
-    persisted = uploads_persisted(pp)
 
     if pp.flush_error:
         pp.terminal_type = StreamEventType.ERROR.value
@@ -124,8 +103,6 @@ def decide_terminal(pp: PostProcessState) -> None:
                 "message_id": pp.message_id,
                 "error": pp.flush_error,
                 "execution_metrics": metrics,
-                # flush 失败 → uploads_persisted=False → 前端保留输入框附件供重试
-                "artifacts_flushed": persisted,
             },
         )
         return
@@ -147,7 +124,6 @@ def decide_terminal(pp: PostProcessState) -> None:
                 # SSE data 带 response 是历史约定(前端用作 snapshot,与 CANCELLED 同构)
                 "response": config.TIMED_OUT_RESPONSE,
                 "execution_metrics": metrics,
-                "artifacts_flushed": persisted,
             },
         )
         return
@@ -167,7 +143,6 @@ def decide_terminal(pp: PostProcessState) -> None:
                 "message_id": pp.message_id,
                 "response": display,
                 "execution_metrics": metrics,
-                "artifacts_flushed": persisted,
             },
         )
         return
@@ -175,10 +150,8 @@ def decide_terminal(pp: PostProcessState) -> None:
     if has_error:
         # 统一终态发射点:engine/controller 的内部错误不再自己 emit ERROR,只把详情记进
         # state["error_detail"];这里(flush 之后)构建并发射唯一的 ERROR 终态,带
-        # request_id + artifacts_flushed。controller 现有的 append + yield 自动接手。
-        # 好处:engine-error 也走 flush 后路径 → artifacts_flushed 必带且正确,前端不再
-        # 靠"缺字段"猜测。(transport 层错误 —— stream not-found / forwarder 异常 —— 仍
-        # 在 decide_terminal 之外、无此 bit,前端对缺字段 error 默认保留附件兜底。)
+        # request_id。controller 现有的 append + yield 自动接手 —— engine-error 也走
+        # flush 后路径,不再有 decide_terminal 之外的第二个 ERROR 发射点。
         detail = s.get("error_detail") or {}
         pp.terminal_type = StreamEventType.ERROR.value
         pp.terminal_event = ExecutionEvent(
@@ -192,7 +165,6 @@ def decide_terminal(pp: PostProcessState) -> None:
                 "agent": detail.get("agent"),
                 "request_id": detail.get("request_id"),
                 "execution_metrics": metrics,
-                "artifacts_flushed": persisted,
             },
         )
         return
@@ -207,7 +179,6 @@ def decide_terminal(pp: PostProcessState) -> None:
             "message_id": pp.message_id,
             "response": response,
             "execution_metrics": metrics,
-            "artifacts_flushed": persisted,
         },
     )
 
@@ -285,8 +256,6 @@ def ensure_terminal(pp: PostProcessState) -> None:
             "conversation_id": pp.conversation_id,
             "message_id": pp.message_id,
             "reason": "external_cancel_post_processing",
-            # late-cancel 可能落在 flush 之前或之后,读 ledger 的真值
-            "artifacts_flushed": pp.artifacts_flushed,
         },
     )
     pp.final_state["events"].append(pp.terminal_event)
@@ -351,9 +320,6 @@ def make_external_cancelled_event(
         "conversation_id": conversation_id,
         "message_id": message_id,
         "reason": reason,
-        # 外部取消发生在 execute_loop 内,post-processing 的 flush_all 从未运行 →
-        # 上传未落库,前端据此保留输入框附件(虽此终态通常因 consumer 已断而不下发)
-        "artifacts_flushed": False,
     }
     if execution_metrics is not None:
         data["execution_metrics"] = execution_metrics

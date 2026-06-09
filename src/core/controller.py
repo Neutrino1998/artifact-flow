@@ -23,7 +23,6 @@ from core.post_processing import (
     decide_terminal,
     ensure_terminal,
     make_external_cancelled_event,
-    uploads_persisted,
 )
 from tools.base import BaseTool
 from tools.builtin.artifact_service import ArtifactService
@@ -346,8 +345,8 @@ class ExecutionController:
                 initial_state["response"] = f"Engine error: {str(e)}"
                 # record-not-emit:不在此 append/yield ERROR。统一终态发射点是 post-processing
                 # 的 decide_terminal —— 它在 flush 之后读 error_detail 构建唯一的 ERROR 终态
-                # (带 request_id + artifacts_flushed),controller 再 append + yield。若这里也
-                # 自行 emit,会与 decide_terminal 双发 ERROR。request_id 在此 contextvar still
+                # (带 request_id),controller 再 append + yield。若这里也自行 emit,会与
+                # decide_terminal 双发 ERROR。request_id 在此 contextvar still
                 # 有效(engine_task 继承发起轮 POST 的 id),先冻结进 error_detail。
                 initial_state["error_detail"] = {
                     "error": str(e),
@@ -441,7 +440,6 @@ class ExecutionController:
                         await self.artifact_service.flush_all(
                             session_id, db_manager=self._db_manager
                         )
-                        pp.artifacts_flushed = True
                     except IntegrityError as flush_ie:
                         # Layer 2: exists() 之后到 flush 之间 conv 被删（TOCTOU）
                         logger.warning(
@@ -492,9 +490,6 @@ class ExecutionController:
                             "message_id": message_id,
                             "error": "Event persistence failed — turn aborted, please retry",
                             "execution_metrics": pp.final_state.get("execution_metrics", {}),
-                            # transport 层直发 ERROR(绕过 decide_terminal),但仍须带 bit:
-                            # flush 已成功 → 附件在 DB → 前端清掉输入框附件,重试不再重复 staging。
-                            "artifacts_flushed": uploads_persisted(pp),
                         },
                     }
                     return
@@ -568,9 +563,6 @@ class ExecutionController:
                         "conversation_id": conversation_id,
                         "message_id": message_id,
                         "error": str(e),
-                        # transport 层直发 ERROR:带 bit 反映 flush 真实进度(异常可能落在
-                        # flush 前或后),前端据此决定保留/清掉输入框附件,避免重复 staging。
-                        "artifacts_flushed": uploads_persisted(pp),
                     }
                 }
         except asyncio.CancelledError:
