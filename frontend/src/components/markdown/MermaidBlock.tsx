@@ -2,6 +2,7 @@
 
 import { useEffect, useId, useRef, useState, useCallback } from 'react';
 import { useUIStore } from '@/stores/uiStore';
+import ErrorFlowBlock from '@/components/chat/ErrorFlowBlock';
 
 interface MermaidBlockProps {
   code: string;
@@ -43,7 +44,7 @@ export default function MermaidBlock({ code }: MermaidBlockProps) {
   const isDark = theme === 'dark';
   const containerRef = useRef<HTMLDivElement>(null);
   const [svg, setSvg] = useState('');
-  const [error, setError] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   // mermaid.render(id) injects a temp DOM node it locates via querySelector,
   // so the id must be selector-safe — useId() returns colons, strip them.
   const renderId = `mermaid-${useId().replace(/[:]/g, '')}`;
@@ -57,16 +58,24 @@ export default function MermaidBlock({ code }: MermaidBlockProps) {
           startOnLoad: false,
           theme: isDark ? 'dark' : 'default',
           securityLevel: 'strict',
+          // On a parse error mermaid otherwise draws its "bomb" error SVG and
+          // appends it to document.body (orphaned at the page bottom) before
+          // throwing. This makes it call removeTempElements() and rethrow
+          // instead, so our catch below owns the fallback (show source).
+          suppressErrorRendering: true,
         });
         const { svg: out } = await mermaid.render(renderId, code);
         if (!cancelled) {
           setSvg(constrainSize(out));
-          setError(false);
+          setError(null);
         }
-      } catch {
+      } catch (e) {
         if (!cancelled) {
           setSvg('');
-          setError(true);
+          // mermaid throws a string-ish error; .message usually carries the
+          // "Parse error on line N" detail. Fall back to a generic label.
+          const msg = e instanceof Error ? e.message : String(e);
+          setError(msg.trim() || '未知错误');
         }
       }
     })();
@@ -90,11 +99,12 @@ export default function MermaidBlock({ code }: MermaidBlockProps) {
     URL.revokeObjectURL(url);
   }, []);
 
-  if (error) {
+  if (error !== null) {
     return (
-      <div className="my-2">
-        <div className="mb-1 text-xs text-status-error">图表渲染失败,显示源码:</div>
+      <div className="my-2 space-y-1">
+        <div className="text-xs text-status-error">图表渲染失败,显示源码:</div>
         <pre><code className="language-mermaid">{code}</code></pre>
+        <ErrorFlowBlock message={error} />
       </div>
     );
   }
