@@ -170,7 +170,12 @@ async def list_artifacts(
     response_class=Response,
     responses={
         200: {
-            "content": {"application/octet-stream": {}, "image/*": {}},
+            "content": {
+                # schema type=string/format=binary → generated clients type this
+                # as a binary body (string/Blob), not `unknown`.
+                "application/octet-stream": {"schema": {"type": "string", "format": "binary"}},
+                "image/*": {"schema": {"type": "string", "format": "binary"}},
+            },
             "description": "Raw artifact blob (image inline, else attachment).",
         }
     },

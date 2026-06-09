@@ -95,7 +95,10 @@ export const useStagedFilesStore = create<StagedFilesState>((set) => ({
   addFiles: (incoming) =>
     set((s) => {
       // maxUploadSize (backend MAX_UPLOAD_SIZE via /meta) drives the per-file
-      // size gate; null until fetched → partitionStageable skips it.
+      // size gate; null until fetched → partitionStageable skips it. This is the
+      // ONE general cap; the backend's tighter text-path limit
+      // (MAX_TEXT_CONVERT_BYTES) is intentionally backend-only — see
+      // partitionStageable's doc for why we don't mirror it here.
       const maxBytes = useConfigStore.getState().maxUploadSize ?? undefined;
       const { accepted, rejected } = partitionStageable(incoming, maxBytes);
       const room = Math.max(0, MAX_CHAT_ATTACHMENTS - s.files.length);

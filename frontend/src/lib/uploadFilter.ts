@@ -100,7 +100,16 @@ function mb(bytes: number): string {
  *  /api/v1/meta). The size gate is UX only — it spares the user a staged-then-
  *  422 round-trip; the backend stays the authoritative limit, and the batch
  *  TOTAL is enforced separately at the proxy (413). `maxBytes` omitted (limit
- *  not yet fetched) → size gate skipped, never blocks on a missing value. */
+ *  not yet fetched) → size gate skipped, never blocks on a missing value.
+ *
+ *  Deliberately ONE cap (the general MAX_UPLOAD_SIZE, ~100MB): the backend's
+ *  raw-text path has a tighter limit (MAX_TEXT_CONVERT_BYTES, ~20MB) because a
+ *  text upload becomes the artifact's full `content` (no blob), but that's a
+ *  backend-only sanity bound. We do NOT pre-gate it here — doing so would mean
+ *  mirroring the converter's image/pdf/docx classification (drift-prone) for a
+ *  rare case (who uploads a 20–100MB plain-text artifact). A large text file
+ *  gets a clean backend 422 instead; the wasted round-trip is the accepted cost
+ *  of not growing a classification mirror for an edge. */
 export function partitionStageable(
   files: File[],
   maxBytes?: number,

@@ -2561,8 +2561,8 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/octet-stream": unknown;
-                    "image/*": unknown;
+                    "application/octet-stream": string;
+                    "image/*": string;
                 };
             };
             /** @description Validation Error */
