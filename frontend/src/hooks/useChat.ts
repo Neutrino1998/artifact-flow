@@ -146,6 +146,11 @@ export function useChat() {
         if (files && files.length > 0) {
           setArtifactSessionId(res.conversation_id);
           setArtifactPanelVisible(true);
+          // Stash the sent images as send-local previews so ImagePreview can show
+          // them instantly until COMPLETE flushes the blob — the composer draft
+          // was cleared on send, so this display-only cache is their only source.
+          // (getState: the action is a stable ref; avoids churning the deps array.)
+          useArtifactStore.getState().setLocalPreviews(files);
         }
         return true;
       } catch (err) {

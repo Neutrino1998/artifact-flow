@@ -90,6 +90,14 @@ interface ArtifactState {
   // Live (in-turn) content reduced from ARTIFACT_* events, keyed by artifact id.
   liveContent: Record<string, LiveArtifact>;
 
+  // Send-local image preview cache, keyed by upload filename → the File the user
+  // just sent. Display-only and wholly separate from the composer draft (which is
+  // cleared on send): it lets ImagePreview show an uploaded image instantly for
+  // the live-this-turn window, before the blob is flushed and /raw works. Shares
+  // liveContent's exact lifecycle — cleared at COMPLETE (clearLiveContent) and on
+  // nav (reset) — so a later turn's same-named upload can't shadow it.
+  localPreviews: Record<string, File>;
+
   // Upload state
   uploading: boolean;
   uploadError: string | null;
@@ -115,6 +123,9 @@ interface ArtifactState {
    *  show stale content for an artifact edited this turn). User-picked → not auto. */
   selectFromLive: (id: string) => boolean;
   clearLiveContent: () => void;
+  /** Stash the just-sent images (filtered from a send's files) as send-local
+   *  previews. Non-images are ignored (nothing reads them). */
+  setLocalPreviews: (files: File[]) => void;
   setUploading: (uploading: boolean) => void;
   setUploadError: (error: string | null) => void;
   reset: () => void;
@@ -144,6 +155,7 @@ export const useArtifactStore = create<ArtifactState>((set, get) => ({
 
   pendingUpdates: [],
   liveContent: {},
+  localPreviews: {},
 
   uploading: false,
   uploadError: null,
@@ -304,7 +316,18 @@ export const useArtifactStore = create<ArtifactState>((set, get) => ({
     return true;
   },
 
-  clearLiveContent: () => set({ liveContent: {} }),
+  // Cleared together with liveContent at COMPLETE: the live-this-turn window is
+  // over, so the local previews are no longer needed (settled artifacts read /raw).
+  clearLiveContent: () => set({ liveContent: {}, localPreviews: {} }),
+
+  setLocalPreviews: (files) =>
+    set((s) => {
+      const next = { ...s.localPreviews };
+      for (const f of files) {
+        if (f.type.startsWith('image/')) next[f.name] = f;
+      }
+      return { localPreviews: next };
+    }),
 
   setUploading: (uploading) => set({ uploading }),
   setUploadError: (error) => set({ uploadError: error }),
@@ -321,6 +344,7 @@ export const useArtifactStore = create<ArtifactState>((set, get) => ({
       viewMode: 'preview',
       pendingUpdates: [],
       liveContent: {},
+      localPreviews: {},
       uploading: false,
       uploadError: null,
     }),

@@ -3,20 +3,21 @@
 import { useEffect, useState } from 'react';
 import { fetchArtifactRawObjectUrl } from '@/lib/api';
 import { useArtifactStore } from '@/stores/artifactStore';
-import { useStagedFilesStore } from '@/stores/stagedFilesStore';
 
 /** Render an image artifact (content_type image/*). Source depends on whether the
  *  artifact is live THIS turn (pendingFlush = liveContent[id], cleared at COMPLETE):
  *
  *  - Live this turn:
- *      · user upload → the staged File still in the composer (instant, no fetch);
- *        matched by name, which is unique per turn (composer dedups, backend echoes
- *        it as original_filename), so it can't bind to the wrong upload.
- *      · tool/model-generated (no local copy) → "being saved" hint, NOT an error
+ *      · user upload → the send-local preview File (artifactStore.localPreviews,
+ *        instant, no fetch); matched by name, which is unique per turn (composer
+ *        dedups, backend echoes it as original_filename), so it can't bind to the
+ *        wrong upload. The cache shares liveContent's lifecycle (cleared at
+ *        COMPLETE), so a later turn's same-named upload can't shadow it.
+ *      · tool/model-generated (no local copy) → "being loaded" hint, NOT an error
  *        (blob isn't flushed yet → /raw would 404). COMPLETE re-runs us → /raw.
  *  - Settled (past-turn, or post-COMPLETE) → authed /raw fetch (an <img src> can't
- *    carry the JWT) → object URL. Never uses a staged File — a same-named file
- *    staged for a later turn must not shadow this artifact's own DB blob.
+ *    carry the JWT) → object URL. Never uses a local preview — a same-named file
+ *    sent for a later turn must not shadow this artifact's own DB blob.
  *
  *  The user never sees a raw backend error mid-turn; a real failure shows a clean
  *  generic message — the detailed error + request id stay in the server log. */
@@ -34,13 +35,11 @@ export default function ImagePreview({
   const [url, setUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // The staged File for this upload, matched by original name (stable ref → only
-  // re-renders when it appears/disappears). undefined for any image not uploaded
-  // this turn (model/tool-generated, or a past-turn artifact).
-  const localFile = useStagedFilesStore((s) =>
-    originalFilename
-      ? s.drafts[s.activeKey]?.files.find((f) => f.file.name === originalFilename)?.file
-      : undefined
+  // The send-local preview File for this upload, matched by original name (stable
+  // ref → only re-renders when it appears/disappears). undefined for any image not
+  // uploaded this turn (model/tool-generated, or a past-turn artifact).
+  const localFile = useArtifactStore((s) =>
+    originalFilename ? s.localPreviews[originalFilename] : undefined
   );
   // Live this turn, not yet flushed (created/updated this turn). Cleared at COMPLETE.
   const pendingFlush = useArtifactStore((s) => !!s.liveContent[artifactId]);
@@ -49,9 +48,9 @@ export default function ImagePreview({
     setUrl(null);
     setError(null);
 
-    // Live this turn (created/updated, blob not yet flushed). The staged-File
+    // Live this turn (created/updated, blob not yet flushed). The local-preview
     // fallback is scoped to THIS branch deliberately: a settled / past-turn
-    // artifact must read its OWN DB blob, never a same-named File staged for a
+    // artifact must read its OWN DB blob, never a same-named preview from a
     // *later* turn (cross-turn duplicate name → wrong image). Cleared at COMPLETE,
     // which flips pendingFlush false + refreshKey → re-run → /raw.
     if (pendingFlush) {
@@ -99,7 +98,7 @@ export default function ImagePreview({
   if (!url) {
     return (
       <div className="h-full flex items-center justify-center text-text-tertiary dark:text-text-tertiary-dark">
-        {pendingFlush ? '图片生成中，完成后显示…' : '加载图片中...'}
+        {pendingFlush ? '图片加载中，完成后显示…' : '加载图片中...'}
       </div>
     );
   }
