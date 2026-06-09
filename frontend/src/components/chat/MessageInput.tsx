@@ -26,6 +26,13 @@ type UploadProgress =
   | { phase: 'uploading'; loaded: number; total: number; lengthComputable: boolean }
   | { phase: 'processing' };
 
+// The synthetic name browsers attach to a clipboard image that has no backing
+// file (a screenshot or a "copy image" — Chrome/Edge/Firefox all use
+// "image.<ext>"). We rename only these placeholders, NOT every image/* paste:
+// an actual image file copied from the OS file manager carries its real name
+// (e.g. "vacation.jpg") and must be left untouched.
+const GENERIC_CLIPBOARD_IMAGE = /^image\.(png|jpe?g|gif|webp|bmp)$/i;
+
 export default function MessageInput() {
   // Composer text lives in the staged-files store, not local state: switching
   // conversations flips currentLoading, which unmounts this component (the
@@ -256,12 +263,18 @@ export default function MessageInput() {
       if (pasted.length > 0) {
         e.preventDefault();
         const ts = new Date().toISOString().replace(/[:.]/g, '-');
-        // Clipboard images often arrive unnamed or as a generic "image.png";
-        // give the unnamed ones a stable name (derived from the MIME subtype)
-        // so the chip and the upload artifact aren't blank. The store still
-        // dedups any name collisions.
+        // Give a stable, timestamped name to clipboard files that arrive
+        // unnamed OR as a browser-synthetic image placeholder ("image.png" —
+        // see GENERIC_CLIPBOARD_IMAGE). Without this, repeated screenshot
+        // pastes all read "image.png" / "image_1.png" (the store dedups
+        // collisions but the names stay generic) and the upload artifact is
+        // likewise generic. Each paste event has its own `ts`, so successive
+        // pastes get distinct names. Files with a real name (incl. OS-file
+        // copies) pass through unchanged.
         const named = pasted.map((f) => {
-          if (f.name) return f;
+          const generic =
+            !f.name || (f.type.startsWith('image/') && GENERIC_CLIPBOARD_IMAGE.test(f.name));
+          if (!generic) return f;
           const ext = f.type.split('/')[1] || 'bin';
           return new File([f], `pasted-${ts}.${ext}`, { type: f.type });
         });
