@@ -265,7 +265,7 @@ export function useChat() {
     disconnect();
     resetStream();
     resetArtifacts();
-    useStagedFilesStore.getState().startNewDraft();  // leave current draft intact, open a fresh new-chat slot (unique key)
+    useStagedFilesStore.getState().startNewDraft();  // open the new chat (stable key) — restores an in-progress new-chat draft, or blank
     setCurrent(null);
     setCurrentLoading(false);
   }, [disconnect, resetStream, resetArtifacts, setCurrent, setCurrentLoading]);

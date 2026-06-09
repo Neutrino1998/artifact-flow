@@ -27,17 +27,17 @@ import { useConfigStore } from '@/stores/configStore';
 //   whose every manifestation (resurfaced content → duplicate upload,
 //   cross-conversation clobber, concurrent-send flag overwrite) was its own bug.
 
-// New chats have no id until their first turn lands one, so each gets its OWN
-// unique temp key (not a shared sentinel). That way a failed first send restores
-// into THAT abandoned new chat's key, never into the next blank new chat; and
-// two new chats can't collide. Promoted to the real id by promoteNewDraft() once
-// the POST returns it.
-const NEW_KEY_PREFIX = 'new:';
-let _newSeq = 0;
-function nextNewKey(): string {
-  _newSeq += 1;
-  return `${NEW_KEY_PREFIX}${_newSeq}`;
-}
+// The new chat has no id until its first turn lands one, so its draft lives
+// under a single stable sentinel key — NOT a per-click unique key. There's only
+// one "new chat" entry in the UI (the new-chat button), so a stable key is what
+// lets an unsent new-chat draft survive navigating away and clicking back into
+// the new chat. A successful first send promotes this key to the real id (so the
+// next new chat starts blank); a failed send simply restores the content here,
+// which is the same new chat the user sent from — retry, not a cross-conversation
+// leak. (An earlier per-click unique key fixed that failure path by stashing the
+// content under a key the user could never navigate back to — i.e. it just hid
+// it — at the cost of losing the draft on every new-chat click. Not worth it.)
+export const NEW_DRAFT_KEY = '__new__';
 
 export interface StagedFile {
   id: string;
@@ -152,7 +152,7 @@ function dropSentOnLeave(drafts: Record<string, Draft>, key: string): Record<str
 
 export const useStagedFilesStore = create<ComposerState>((set) => ({
   drafts: {},
-  activeKey: nextNewKey(),
+  activeKey: NEW_DRAFT_KEY,
   notice: null,
 
   setText: (text) =>
@@ -266,16 +266,22 @@ export const useStagedFilesStore = create<ComposerState>((set) => ({
 
   startNewDraft: () =>
     set((s) => ({
-      activeKey: nextNewKey(),
+      // Open the new chat (stable key). Drop the leaving conversation's sent
+      // files (incl. the new chat's own, if a send is in flight — abandoning it
+      // for a fresh start), but KEEP any unsent new-chat draft: clicking the
+      // new-chat button is also how the user returns to an in-progress new chat.
+      activeKey: NEW_DRAFT_KEY,
       notice: null,
       drafts: dropSentOnLeave(s.drafts, s.activeKey),
     })),
 
   promoteNewDraft: (id) =>
     set((s) => {
-      // Only a not-yet-saved new chat carries a temp key; an existing conv's
-      // activeKey is already its id (no-op).
-      if (!s.activeKey.startsWith(NEW_KEY_PREFIX)) return s;
+      // Only the not-yet-saved new chat carries the sentinel key; an existing
+      // conv's activeKey is already its id (no-op). Relabel the draft to the
+      // real id so the sentinel is free for the next new chat and a later switch
+      // back keys off the conversation.
+      if (s.activeKey !== NEW_DRAFT_KEY) return s;
       const drafts = { ...s.drafts };
       if (s.activeKey in drafts) {
         drafts[id] = drafts[s.activeKey];

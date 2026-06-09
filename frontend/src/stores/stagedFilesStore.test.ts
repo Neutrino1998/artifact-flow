@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeEach, afterEach } from 'vitest';
-import { useStagedFilesStore } from './stagedFilesStore';
+import { useStagedFilesStore, NEW_DRAFT_KEY } from './stagedFilesStore';
 import { useConfigStore } from './configStore';
 import { MAX_CHAT_ATTACHMENTS } from '@/lib/constants';
 
@@ -246,49 +246,59 @@ describe('stagedFilesStore per-conversation drafts (in-memory)', () => {
     expect(files()[0].id).toBe(ids[1]);
   });
 
-  test('startNewDraft opens a fresh unique key and preserves the leaving draft', () => {
+  test('the new-chat draft survives navigating away and clicking back into the new chat', () => {
+    // The headline feature: there's one stable new-chat key, so an unsent draft
+    // returns when the user clicks the new-chat button after glancing elsewhere.
+    useStagedFilesStore.setState({ drafts: {}, activeKey: NEW_DRAFT_KEY, notice: null });
+    st().setText('my new-chat draft');
+    st().addFiles(makeFiles(1));
+    st().activate('conv-a'); // glance at an existing conversation
+    expect(text()).toBe('');
+    st().startNewDraft(); // click "new chat" to return
+    expect(st().activeKey).toBe(NEW_DRAFT_KEY);
+    expect(text()).toBe('my new-chat draft');
+    expect(files().length).toBe(1);
+  });
+
+  test('startNewDraft preserves the leaving conversation’s unsent draft', () => {
     st().setText('existing conv draft');
     const before = st().activeKey;
     st().startNewDraft();
-    expect(st().activeKey).not.toBe(before);
-    expect(st().activeKey.startsWith('new:')).toBe(true);
+    expect(st().activeKey).toBe(NEW_DRAFT_KEY);
     expect(text()).toBe('');
     st().activate(before);
     expect(text()).toBe('existing conv draft');
   });
 
-  test('promoteNewDraft relabels a new-chat draft to its real id (no leak to next new chat)', () => {
-    st().startNewDraft();
-    const tempKey = st().activeKey;
-    expect(tempKey.startsWith('new:')).toBe(true);
+  test('promoteNewDraft relabels the new-chat draft to its real id; next new chat is blank', () => {
+    useStagedFilesStore.setState({ drafts: {}, activeKey: NEW_DRAFT_KEY, notice: null });
     st().setText('first-turn follow-up');
     st().promoteNewDraft('conv-x');
     expect(st().activeKey).toBe('conv-x');
     expect(text()).toBe('first-turn follow-up');
-    expect(st().drafts[tempKey]).toBeUndefined();
+    expect(st().drafts[NEW_DRAFT_KEY]).toBeUndefined(); // sentinel freed
     st().startNewDraft(); // a fresh new chat...
-    expect(text()).toBe(''); // ...is blank — no leak
+    expect(st().activeKey).toBe(NEW_DRAFT_KEY);
+    expect(text()).toBe(''); // ...is blank
     st().activate('conv-x'); // ...and the draft is under the real id
     expect(text()).toBe('first-turn follow-up');
   });
 
   test('promoteNewDraft is a no-op for an existing conversation', () => {
-    st().activate('conv-a'); // a real id, not a temp key
+    st().activate('conv-a'); // a real id, not the sentinel
     st().promoteNewDraft('conv-z');
     expect(st().activeKey).toBe('conv-a');
   });
 
-  test('a failed first send restores into the abandoned new chat, not the next one', () => {
-    st().startNewDraft();
-    const tempKey = st().activeKey;
+  test('a failed new-chat send restores its content into the new chat for retry', () => {
+    // Success would promote the sentinel to a real id (freeing it); a failure
+    // keeps the user on the same new chat, so restoring the content there is the
+    // retry affordance — not a cross-conversation leak.
+    useStagedFilesStore.setState({ drafts: {}, activeKey: NEW_DRAFT_KEY, notice: null });
     st().setText('hi');
-    st().claimSend(tempKey, 'hi', []); // claim at send start clears it
+    st().claimSend(NEW_DRAFT_KEY, 'hi', []); // claim at send start clears it
     expect(text()).toBe('');
-    st().startNewDraft(); // user opens a new chat while the POST is in flight
-    expect(text()).toBe(''); // fresh, blank
-    st().restoreSend(tempKey, 'hi', []); // the send then fails
-    expect(text()).toBe(''); // current new chat untouched (no leak)
-    st().activate(tempKey); // the abandoned chat holds the restored draft
-    expect(text()).toBe('hi');
+    st().restoreSend(NEW_DRAFT_KEY, 'hi', []); // the POST failed
+    expect(text()).toBe('hi'); // back in the new chat for retry
   });
 });
