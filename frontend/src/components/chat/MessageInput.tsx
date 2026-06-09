@@ -80,6 +80,11 @@ export default function MessageInput() {
   const markSent = useStagedFilesStore((s) => s.markSent);
   const stageNotice = useStagedFilesStore((s) => s.notice);
   const dismissNotice = useStagedFilesStore((s) => s.dismissNotice);
+  // A composer send is mid-flight (POST not yet returned). isStreaming only
+  // flips after connect(), so during a file upload there's a window where the
+  // turn isn't "streaming" yet — gate the add paths on this too so attach /
+  // drag-drop / paste lock consistently for the whole in-flight window.
+  const sendInFlight = useStagedFilesStore((s) => s.pendingSendKey !== null);
 
   // Snapshot → lock → await → reconcile/keep for both send and inject lives in
   // this hook (single enforcement point); see useComposerSend.ts. On send-ok the
@@ -237,8 +242,9 @@ export default function MessageInput() {
   const handlePaste = useCallback(
     (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
       // Match the disabled attach button: attachments ride a new turn, not an
-      // in-flight one, so a paste while streaming falls through to plain text.
-      if (isStreaming) {
+      // in-flight one, so a paste while a send is in flight or streaming falls
+      // through to plain text rather than staging a file.
+      if (isStreaming || sendInFlight) {
         return;
       }
       const clip = e.clipboardData;
@@ -295,7 +301,7 @@ export default function MessageInput() {
         addFiles([file]);
       }
     },
-    [isStreaming, addFiles, stagedFiles.length]
+    [isStreaming, sendInFlight, addFiles, stagedFiles.length]
   );
 
   const handleFileSelect = useCallback(() => {
@@ -315,7 +321,7 @@ export default function MessageInput() {
   );
 
   const atAttachmentCap = stagedFiles.length >= MAX_CHAT_ATTACHMENTS;
-  const attachDisabled = isStreaming || atAttachmentCap;
+  const attachDisabled = isStreaming || atAttachmentCap || sendInFlight;
   const nearLimit = content.length > MAX_MESSAGE_CHARS * 0.8;
   const hasStaged = stagedFiles.length > 0;
 

@@ -10,6 +10,7 @@ function reset() {
     notice: null,
     activeKey: NEW_DRAFT_KEY,
     archive: {},
+    pendingSendKey: null,
   });
 }
 
@@ -274,5 +275,28 @@ describe('stagedFilesStore per-conversation drafts (in-memory)', () => {
     s().activate('conv-a');                 // activeKey is a real id, not the sentinel
     s().promoteNewDraft('conv-z');
     expect(s().activeKey).toBe('conv-a');
+  });
+
+  test('a conversation with a send in flight is dropped on switch, not archived', () => {
+    // The outgoing text/files are still in the live slot (reconcile runs only
+    // after the POST returns); switching away must not archive them as a draft
+    // or they'd resurface and risk a duplicate upload on return.
+    s().setText('outgoing message');
+    s().addFiles(makeFiles(2));
+    s().markSendStart();                    // a send for the new chat is in flight
+    s().activate('conv-a');                 // user switches away mid-send
+    s().activate(NEW_DRAFT_KEY);            // ...and comes back
+    expect(s().text).toBe('');
+    expect(s().files.length).toBe(0);
+    expect(s().archive[NEW_DRAFT_KEY]).toBeUndefined();
+  });
+
+  test('after the send settles (markSendEnd), kept content archives as a normal draft', () => {
+    s().setText('failed send, kept for retry');
+    s().markSendStart();
+    s().markSendEnd();                      // POST returned (e.g. failed → composer kept)
+    s().activate('conv-a');
+    s().activate(NEW_DRAFT_KEY);
+    expect(s().text).toBe('failed send, kept for retry');
   });
 });

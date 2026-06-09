@@ -37,17 +37,21 @@ export default function ChatPanel() {
   const isAdmin = useAuthStore((s) => s.user?.role === 'admin');
 
   const addFiles = useStagedFilesStore((s) => s.addFiles);
+  // A composer send is mid-flight (POST not yet returned, isStreaming not yet
+  // flipped by connect()). Lock drops for this window too, so attach / paste /
+  // drag-drop stay consistent (see MessageInput sendInFlight).
+  const sendInFlight = useStagedFilesStore((s) => s.pendingSendKey !== null);
   const [isDragOver, setIsDragOver] = useState(false);
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     setIsDragOver(false);
     // Attachments ride a new message, not an in-flight turn — ignore drops
-    // while streaming (matches the disabled attach button during streaming).
-    if (isStreaming) return;
+    // while a send is in flight or streaming (matches the disabled attach button).
+    if (isStreaming || sendInFlight) return;
     const files = Array.from(e.dataTransfer.files);
     if (files.length > 0) addFiles(files);
-  }, [isStreaming, addFiles]);
+  }, [isStreaming, sendInFlight, addFiles]);
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();

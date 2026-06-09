@@ -2,7 +2,7 @@
 
 import { useState, useRef, useCallback } from 'react';
 import type { Dispatch, SetStateAction } from 'react';
-import type { StagedFile } from '@/stores/stagedFilesStore';
+import { useStagedFilesStore, type StagedFile } from '@/stores/stagedFilesStore';
 
 // The composer send lifecycle, in one place. Sending a message (new turn) and
 // injecting into a running turn both follow the same shape across an async gap:
@@ -41,6 +41,14 @@ export interface ComposerOpDeps {
   // force_compact rides the request and the backend injects a directive body,
   // so the "nothing to send" bail must not fire.
   allowEmpty?: boolean;
+  // Optional bracket around the in-flight window (after the lock is taken,
+  // before the await; released in finally). The composer uses it to flag the
+  // draft store that the active conversation has a send in flight, so a
+  // navigation during the await drops the outgoing content instead of
+  // archiving it as a draft. Only fires when a send actually happens (past the
+  // empty-bail), so it stays paired.
+  onSendStart?: () => void;
+  onSendEnd?: () => void;
   // The network op. Returns true on success → reconcile; false or throw → keep.
   run: (text: string, files: File[] | undefined) => Promise<boolean>;
 }
@@ -53,6 +61,8 @@ export async function runComposerOp({
   lockRef,
   setSending,
   allowEmpty,
+  onSendStart,
+  onSendEnd,
   run,
 }: ComposerOpDeps): Promise<void> {
   if (lockRef.current) return;
@@ -66,6 +76,7 @@ export async function runComposerOp({
   const sentIds = staged.map((s) => s.id);
   lockRef.current = true;
   setSending?.(true);
+  onSendStart?.();
   try {
     const ok = await run(trimmed, files.length ? files : undefined);
     if (ok) {
@@ -80,6 +91,7 @@ export async function runComposerOp({
   } finally {
     lockRef.current = false;
     setSending?.(false);
+    onSendEnd?.();
   }
 }
 
@@ -105,6 +117,11 @@ export function useComposerSend(
   // Inject is lighter — no spinner (the button doubles as Stop once the box is
   // empty) — but still needs its own lock against a rapid double-fire.
   const injectingRef = useRef(false);
+  // Flag the draft store across the in-flight window (stable zustand actions),
+  // so navigating away mid-send drops the outgoing content instead of archiving
+  // it as a draft (see stagedFilesStore.activate). Covers both send and inject.
+  const markSendStart = useStagedFilesStore((s) => s.markSendStart);
+  const markSendEnd = useStagedFilesStore((s) => s.markSendEnd);
 
   // New-message send: text and/or staged attachments ride one POST.
   // allowEmpty=true permits a compact-only send (no text, no files).
@@ -118,9 +135,11 @@ export function useComposerSend(
         lockRef: sendingRef,
         setSending,
         allowEmpty,
+        onSendStart: markSendStart,
+        onSendEnd: markSendEnd,
         run,
       }),
-    [content, stagedFiles, setContent, markSent],
+    [content, stagedFiles, setContent, markSent, markSendStart, markSendEnd],
   );
 
   // Inject into a running turn: text only (attachments don't ride an in-flight
@@ -133,12 +152,14 @@ export function useComposerSend(
         setContent,
         markSent,
         lockRef: injectingRef,
+        onSendStart: markSendStart,
+        onSendEnd: markSendEnd,
         run: async (text) => {
           await run(text);
           return true;
         },
       }),
-    [content, setContent, markSent],
+    [content, setContent, markSent, markSendStart, markSendEnd],
   );
 
   return { sending, submit, inject };

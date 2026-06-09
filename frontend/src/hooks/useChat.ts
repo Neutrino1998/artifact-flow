@@ -115,6 +115,18 @@ export function useChat() {
         // into the abandoned context, but report success so the composer clears.
         if (myNavGen !== getNavGen()) return true;
 
+        // A brand-new conversation just got its real id. Promote the composer
+        // draft key from the NEW_DRAFT_KEY sentinel to it NOW — not at the
+        // terminal — so a follow-up typed during streaming archives under this
+        // conversation instead of leaking into the next new chat (a new-chat
+        // click during streaming would otherwise activate(NEW_DRAFT_KEY) onto
+        // the still-sentinel slot and adopt the follow-up). No-op for an
+        // existing conv; gated by the nav-gen check above (no promote if the
+        // user navigated away from the new chat mid-POST).
+        if (isNew) {
+          useStagedFilesStore.getState().promoteNewDraft(res.conversation_id);
+        }
+
         setPendingUserMessage(content);
         // Track rerun/edit parent for branchPath truncation
         if (parentMessageId !== undefined) {

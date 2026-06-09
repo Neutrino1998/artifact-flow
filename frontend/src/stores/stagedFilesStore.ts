@@ -73,6 +73,12 @@ interface StagedFilesState {
   activeKey: string;
   // Other conversations' archived unsent drafts. In-memory only (see header).
   archive: Record<string, Draft>;
+  // The activeKey of a composer send that's mid-flight (POST not yet returned),
+  // or null. Set before the network await, cleared after. While set and equal
+  // to activeKey, the live slot holds already-committed outgoing content (the
+  // post-await reconcile clears text + marks files sent only afterwards), so
+  // navigating away must NOT archive it as a draft — see activate().
+  pendingSendKey: string | null;
   setText: (text: string) => void;
   addFiles: (files: File[]) => void;
   removeFile: (id: string) => void;
@@ -89,6 +95,11 @@ interface StagedFilesState {
   // cancel): revert in-flight files to normal staged so the user can retry.
   unmarkSent: () => void;
   dismissNotice: () => void;
+  // Bracket the in-flight send window: markSendStart records the current
+  // activeKey as pendingSendKey (before the network await); markSendEnd clears
+  // it (in the send's finally). Wired by useComposerSend around runComposerOp.
+  markSendStart: () => void;
+  markSendEnd: () => void;
   // Navigation hook (replaces the old clear()-on-switch): stash the live draft
   // under the current key and load `key`'s archived draft (or a blank one).
   activate: (key: string) => void;
@@ -126,6 +137,7 @@ export const useStagedFilesStore = create<StagedFilesState>((set) => ({
   notice: null,
   activeKey: NEW_DRAFT_KEY,
   archive: {},
+  pendingSendKey: null,
   setText: (text) => set({ text }),
   // Gate then cap, in that order, so every entry point (button / drag-drop /
   // paste-to-stage) behaves identically:
@@ -185,17 +197,29 @@ export const useStagedFilesStore = create<StagedFilesState>((set) => ({
         : s.files,
     })),
   dismissNotice: () => set({ notice: null }),
+  markSendStart: () => set((s) => ({ pendingSendKey: s.activeKey })),
+  markSendEnd: () => set({ pendingSendKey: null }),
   activate: (key) =>
     set((s) => {
       if (key === s.activeKey) return s;
-      // A draft is unsent content only: sent files belong to an in-flight turn
-      // whose SSE is torn down on switch (the old clear() dropped them too), so
-      // they are not archived. Stash the live slot under the old key when it
-      // holds something; otherwise drop any stale archive entry so the map
-      // doesn't accumulate blank drafts for every conversation ever visited.
-      const draftFiles = s.files.filter((f) => !f.sent);
       const archive = { ...s.archive };
-      if (s.text.trim() || draftFiles.length) {
+      // If the conversation we're leaving has a send in flight, its live slot
+      // holds already-committed outgoing content — the post-await reconcile
+      // (clear text + markSent) can no longer reach it once the live slot
+      // swaps, so archiving it would resurface the just-sent text/files and
+      // risk a duplicate upload on return. Drop the whole slot instead (the
+      // pre-draft clear()-on-switch did the same for in-flight sends). The
+      // composer locks all add paths (attach / drag-drop / paste) while a send
+      // is in flight — gated on this same pendingSendKey — so the slot holds
+      // ONLY outgoing content here; there is no separately-staged draft file to
+      // preserve, and dropping the whole slot is exact, not lossy.
+      const inFlight = s.pendingSendKey === s.activeKey;
+      const draftFiles = s.files.filter((f) => !f.sent);
+      // A draft is unsent content only; sent files belong to an in-flight turn
+      // whose SSE is torn down on switch (the old clear() dropped them too).
+      // Stash the live slot under the old key when it holds a real draft;
+      // otherwise drop any stale entry so the map doesn't accumulate blanks.
+      if (!inFlight && (s.text.trim() || draftFiles.length)) {
         archive[s.activeKey] = { text: s.text, files: draftFiles };
       } else {
         delete archive[s.activeKey];
