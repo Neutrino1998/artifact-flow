@@ -210,17 +210,54 @@ export default function MessageInput() {
     [handleSend]
   );
 
-  // A paste larger than the message cap is diverted to a staged .txt
-  // attachment instead of being inlined (which would hit the 422 cap and
-  // bloat context). Smaller pastes fall through to normal insertion (capped
-  // by the textarea maxLength).
   const handlePaste = useCallback(
     (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
-      if (isStreaming) return;
-      const text = e.clipboardData?.getData('text/plain') ?? '';
-      // Divert a huge paste to a staged file only if there's room; at the
-      // attachment cap, let it paste inline (textarea maxLength caps it)
-      // rather than silently dropping it.
+      // Match the disabled attach button: attachments ride a new turn, not an
+      // in-flight one, so a paste while streaming falls through to plain text.
+      if (isStreaming) {
+        return;
+      }
+      const clip = e.clipboardData;
+      if (!clip) return;
+
+      // Real files on the clipboard → stage them as attachments. Prefer
+      // `clipboardData.files` (modern browsers populate it for both pasted
+      // images/screenshots and files copied from the OS file manager); fall
+      // back to scanning `items` for kind==='file' for sources that only
+      // expose the file there. Reliable case is images/screenshots — copying a
+      // file in the OS file manager only reaches the browser on some
+      // OS/browser combos (notably not macOS Finder), a platform limit we
+      // can't work around. addFiles owns the gate/cap/dedup, so an unsupported
+      // or oversize paste surfaces via `notice` like any other add.
+      let pasted: File[] = Array.from(clip.files ?? []);
+      if (pasted.length === 0 && clip.items) {
+        pasted = Array.from(clip.items)
+          .filter((it) => it.kind === 'file')
+          .map((it) => it.getAsFile())
+          .filter((f): f is File => f != null);
+      }
+      if (pasted.length > 0) {
+        e.preventDefault();
+        const ts = new Date().toISOString().replace(/[:.]/g, '-');
+        // Clipboard images often arrive unnamed or as a generic "image.png";
+        // give the unnamed ones a stable name (derived from the MIME subtype)
+        // so the chip and the upload artifact aren't blank. The store still
+        // dedups any name collisions.
+        const named = pasted.map((f) => {
+          if (f.name) return f;
+          const ext = f.type.split('/')[1] || 'bin';
+          return new File([f], `pasted-${ts}.${ext}`, { type: f.type });
+        });
+        addFiles(named);
+        return;
+      }
+
+      // A text paste larger than the message cap is diverted to a staged .txt
+      // attachment instead of being inlined (which would hit the 422 cap and
+      // bloat context). Divert only if there's room; at the attachment cap,
+      // let it paste inline (textarea maxLength caps it) rather than silently
+      // dropping it. Smaller pastes fall through to normal insertion.
+      const text = clip.getData('text/plain') ?? '';
       if (text.length > MAX_MESSAGE_CHARS && stagedFiles.length < MAX_CHAT_ATTACHMENTS) {
         e.preventDefault();
         const ts = new Date().toISOString().replace(/[:.]/g, '-');
