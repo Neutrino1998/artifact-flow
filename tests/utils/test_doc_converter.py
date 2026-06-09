@@ -136,6 +136,26 @@ class TestSizeLimit:
         with pytest.raises(ValueError, match="too large"):
             await converter.convert(b"a" * 9, "huge.txt")
 
+    async def test_text_path_has_its_own_tighter_cap(self, monkeypatch):
+        """The raw-text path rejects above MAX_TEXT_CONVERT_BYTES even when well
+        under MAX_FILE_SIZE — it's the one route that materializes content+wordlist."""
+        monkeypatch.setattr(config, "MAX_TEXT_CONVERT_BYTES", 8)
+        converter = DocConverter()
+        with pytest.raises(ValueError, match="Text file too large"):
+            await converter.convert(b"a" * 9, "notes.txt")
+        # At/under the text cap still converts fine.
+        result = await converter.convert(b"hello", "notes.txt")
+        assert result.content == "hello"
+
+    async def test_text_cap_does_not_gate_images(self, monkeypatch):
+        """An image over the *text* cap is NOT rejected by it — images go through
+        the blob path, not _convert_text, so the tight text cap must not apply."""
+        monkeypatch.setattr(config, "MAX_TEXT_CONVERT_BYTES", 8)
+        png = _png_bytes(16, 16)
+        assert len(png) > 8  # comfortably over the (shrunken) text cap
+        result = await DocConverter().convert(png, "shot.png")
+        assert result.content_type.startswith("image/")
+
 
 # ============================================================
 # .docx zip 预检（改后缀的 .doc → 可操作 422，而非晦涩 500）

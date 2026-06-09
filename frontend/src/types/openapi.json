@@ -789,11 +789,10 @@
         ],
         "responses": {
           "200": {
-            "description": "Successful Response",
+            "description": "Raw artifact blob (image inline, else attachment).",
             "content": {
-              "application/json": {
-                "schema": {}
-              }
+              "application/octet-stream": {},
+              "image/*": {}
             }
           },
           "422": {

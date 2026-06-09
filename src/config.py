@@ -152,6 +152,13 @@ class Settings(BaseSettings):
     # 允许「1 个大文件 or 多个小文件」但控总量——单文件 100MB、数量 10、总量 200MB
     # 三轴独立,总量刻意 < 100MB×10。前端经 /api/v1/meta 取此值做 UX 预挡(后端权威)。
     MAX_UPLOAD_SIZE: int = 100 * 1024 * 1024  # 100MB
+    # 文本转换路径(DocConverter._convert_text)的独立、更低字节闸。文本是唯一无自身
+    # 成本 envelope 的转换路径:charset 检测 + str(best) + split() 会**物化整份解码
+    # 内容 + 词列表**,内存放大远超输入字节,且跑在 event loop 上(2026-05-14 wedge 同类)。
+    # docx/pdf 由 pandoc-timeout / MAX_PDF_PAGES 兜底、图片存原 blob 不物化文本,只有裸
+    # 文本会随 100MB 上传上限线性放大 → 给它保留旧的 20MB envelope。字节上界是首要护栏
+    # (to_thread 只缓解 loop 阻塞,解不了内存)。隐藏常量,operator 可调。
+    MAX_TEXT_CONVERT_BYTES: int = 20 * 1024 * 1024  # 20MB
 
     # SSRF / 外联工具防护（隐藏常量，不暴露 API / 工具参数）
     WEB_FETCH_MAX_BYTES: int = 20 * 1024 * 1024   # fallback 下载体上限（解压后字节），

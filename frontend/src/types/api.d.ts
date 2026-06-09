@@ -2555,13 +2555,14 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful Response */
+            /** @description Raw artifact blob (image inline, else attachment). */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/octet-stream": unknown;
+                    "image/*": unknown;
                 };
             };
             /** @description Validation Error */

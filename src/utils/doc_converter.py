@@ -153,14 +153,15 @@ class DocConverter:
     Unified document converter for import (file -> text) and export (markdown -> docx).
     """
 
-    # Single source of truth = config.MAX_UPLOAD_SIZE. This is a defensive backstop
-    # inside convert(), NOT an independent cap: the two callers each enforce their
-    # own authoritative ingress limit BEFORE we see the bytes — the upload path
-    # (artifacts.py) at MAX_UPLOAD_SIZE, the web_fetch PDF fallback at
-    # WEB_FETCH_MAX_BYTES — so this only ever fires if a caller forgot to. Tying it
-    # to the upload constant avoids the drift of two hardcoded 20MB that must move
-    # together. Conversion COST is bounded separately (MAX_PDF_PAGES + CONVERT_TIMEOUT),
-    # so raising this with the upload limit doesn't widen the CPU surface.
+    # Absolute convert() backstop = config.MAX_UPLOAD_SIZE (the ingress ceiling).
+    # The two callers each enforce their own authoritative limit BEFORE we see the
+    # bytes — upload path (artifacts.py) at MAX_UPLOAD_SIZE, web_fetch PDF fallback
+    # at WEB_FETCH_MAX_BYTES — so this only fires if a caller forgot to; tying it to
+    # the upload constant avoids two hardcoded values drifting apart. NOTE: this is
+    # NOT the per-path cost guard. Each path owns its own: docx/pdf via pandoc-
+    # timeout + MAX_PDF_PAGES, images via the pixel cap + raw-blob store (no text),
+    # and the raw-text path via MAX_TEXT_CONVERT_BYTES (it's the only one that
+    # materializes full content+wordlist, so it keeps a tighter cap than this one).
     MAX_FILE_SIZE = config.MAX_UPLOAD_SIZE
     MAX_PDF_PAGES = 200
     CONVERT_TIMEOUT = 60               # seconds
@@ -353,21 +354,40 @@ class DocConverter:
     ) -> ConvertResult:
         """
         Try to read file as text with charset detection.
-        Raises ValueError if the file cannot be decoded.
+        Raises ValueError if the file cannot be decoded or exceeds the text cap.
         """
-        from charset_normalizer import from_bytes
-
-        result = from_bytes(file_bytes)
-        best = result.best()
-
-        if best is None:
+        # The text path is the one conversion route with NO cost envelope of its
+        # own: charset detection + str() + word-count materialize the full decoded
+        # content AND a word list, which amplifies memory well past the input size.
+        # docx/pdf are bounded by pandoc-timeout / MAX_PDF_PAGES, images store the
+        # blob raw (no text) — only raw text scales with the 100MB upload ceiling.
+        # So it keeps a tighter, independent cap (MAX_TEXT_CONVERT_BYTES, the old
+        # 20MB envelope). The byte cap is the PRIMARY guard (an input upper bound);
+        # to_thread below is the secondary one (keeps the loop responsive +
+        # cancellable during the bounded sync work — it does NOT bound memory).
+        if len(file_bytes) > config.MAX_TEXT_CONVERT_BYTES:
+            cap_mb = config.MAX_TEXT_CONVERT_BYTES / 1024 / 1024
             raise ValueError(
-                f"Cannot decode file '{filename}': not a valid text file"
+                f"Text file too large: {len(file_bytes) / 1024 / 1024:.1f}MB "
+                f"(max {cap_mb:.0f}MB for text; images / PDF / docx may be larger)"
             )
 
-        content = str(best)
+        def _decode() -> tuple[str, str, int]:
+            """Sync decode + word count, run in a worker thread so the loop stays
+            responsive and the work is cancellable. All the materialization (the
+            decoded str + the split() word list) happens here, off the loop."""
+            from charset_normalizer import from_bytes
+
+            best = from_bytes(file_bytes).best()
+            if best is None:
+                raise ValueError(
+                    f"Cannot decode file '{filename}': not a valid text file"
+                )
+            text = str(best)
+            return text, best.encoding, len(text.split())
+
+        content, detected_encoding, word_count = await asyncio.to_thread(_decode)
         content_type = EXTENSION_MIME_MAP.get(ext, "text/plain")
-        word_count = len(content.split())
 
         return ConvertResult(
             content=content,
@@ -375,7 +395,7 @@ class DocConverter:
             metadata={
                 "original_filename": filename,
                 "converter_used": "charset-normalizer",
-                "detected_encoding": best.encoding,
+                "detected_encoding": detected_encoding,
                 "word_count": word_count,
             },
         )

@@ -161,7 +161,20 @@ async def list_artifacts(
         raise HTTPException(status_code=500, detail=error_detail)
 
 
-@router.get("/{session_id}/{artifact_id}/raw")
+@router.get(
+    "/{session_id}/{artifact_id}/raw",
+    # The handler returns a binary `Response` (the blob bytes), NOT JSON.
+    # response_class=Response drops FastAPI's default application/json 200 media
+    # type; `responses` then declares the real binary content types so the
+    # generated OpenAPI / TS client advertises the correct contract.
+    response_class=Response,
+    responses={
+        200: {
+            "content": {"application/octet-stream": {}, "image/*": {}},
+            "description": "Raw artifact blob (image inline, else attachment).",
+        }
+    },
+)
 async def get_artifact_raw(
     session_id: str,
     artifact_id: str,
