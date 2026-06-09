@@ -4,7 +4,7 @@ import { useCallback } from 'react';
 import { useConversationStore } from '@/stores/conversationStore';
 import { useStreamStore } from '@/stores/streamStore';
 import { useArtifactStore } from '@/stores/artifactStore';
-import { useStagedFilesStore } from '@/stores/stagedFilesStore';
+import { useStagedFilesStore, NEW_DRAFT_KEY } from '@/stores/stagedFilesStore';
 import { useUIStore } from '@/stores/uiStore';
 import { useSSE } from '@/hooks/useSSE';
 import type { ChatRequest } from '@/types';
@@ -170,7 +170,7 @@ export function useChat() {
       disconnect();
       resetStream();
       resetArtifacts();
-      useStagedFilesStore.getState().clear();  // composer attachments don't carry across conversations
+      useStagedFilesStore.getState().activate(id);  // stash this conv's draft, load the target's (per-conversation, in-memory)
       setCurrentLoading(true);
       // Fire-and-forget sidebar refresh: the previous conv's SSE was just
       // disconnected, so any terminal events emitted while we're away will
@@ -254,7 +254,7 @@ export function useChat() {
     disconnect();
     resetStream();
     resetArtifacts();
-    useStagedFilesStore.getState().clear();  // composer attachments don't carry into a new chat
+    useStagedFilesStore.getState().activate(NEW_DRAFT_KEY);  // stash the leaving conv's draft, load the new-chat draft
     setCurrent(null);
     setCurrentLoading(false);
   }, [disconnect, resetStream, resetArtifacts, setCurrent, setCurrentLoading]);

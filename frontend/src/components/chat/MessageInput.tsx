@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useRef, useCallback, useEffect } from 'react';
+import type { Dispatch, SetStateAction } from 'react';
 import { useChat } from '@/hooks/useChat';
 import { useComposerSend } from '@/hooks/useComposerSend';
 import { useStreamStore } from '@/stores/streamStore';
@@ -26,7 +27,23 @@ type UploadProgress =
   | { phase: 'processing' };
 
 export default function MessageInput() {
-  const [content, setContent] = useState('');
+  // Composer text lives in the staged-files store, not local state: switching
+  // conversations flips currentLoading, which unmounts this component (the
+  // loading placeholder), so local state can't survive a switch. The store
+  // keeps it as a per-conversation draft (see stagedFilesStore). setContent
+  // adapts the store setter to the SetStateAction signature useComposerSend's
+  // reconcile expects (it calls the functional updater form against live text).
+  const content = useStagedFilesStore((s) => s.text);
+  const setText = useStagedFilesStore((s) => s.setText);
+  const setContent = useCallback<Dispatch<SetStateAction<string>>>(
+    (v) =>
+      setText(
+        typeof v === 'function'
+          ? (v as (prev: string) => string)(useStagedFilesStore.getState().text)
+          : v,
+      ),
+    [setText],
+  );
   // Armed by the "compact" toggle; rides the next send as force_compact and is
   // cleared on a successful send. A compact-only send (no text) is allowed.
   const [forceCompact, setForceCompact] = useState(false);

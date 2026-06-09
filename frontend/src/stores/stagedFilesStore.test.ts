@@ -1,10 +1,16 @@
 import { describe, test, expect, beforeEach, afterEach } from 'vitest';
-import { useStagedFilesStore } from './stagedFilesStore';
+import { useStagedFilesStore, NEW_DRAFT_KEY } from './stagedFilesStore';
 import { useConfigStore } from './configStore';
 import { MAX_CHAT_ATTACHMENTS } from '@/lib/constants';
 
 function reset() {
-  useStagedFilesStore.setState({ files: [], notice: null });
+  useStagedFilesStore.setState({
+    text: '',
+    files: [],
+    notice: null,
+    activeKey: NEW_DRAFT_KEY,
+    archive: {},
+  });
 }
 
 function makeFiles(n: number): File[] {
@@ -33,13 +39,11 @@ describe('stagedFilesStore attachment cap', () => {
     expect(useStagedFilesStore.getState().files.length).toBe(MAX_CHAT_ATTACHMENTS);
   });
 
-  test('removeFile and clear work', () => {
+  test('removeFile drops the given file', () => {
     useStagedFilesStore.getState().addFiles(makeFiles(3));
     const firstId = useStagedFilesStore.getState().files[0].id;
     useStagedFilesStore.getState().removeFile(firstId);
     expect(useStagedFilesStore.getState().files.length).toBe(2);
-    useStagedFilesStore.getState().clear();
-    expect(useStagedFilesStore.getState().files.length).toBe(0);
   });
 
   test('removeFiles removes only the given ids, preserving the rest', () => {
@@ -207,5 +211,68 @@ describe('stagedFilesStore sent lifecycle (keep-until-COMPLETE backstop)', () =>
     const files = useStagedFilesStore.getState().files;
     expect(files.length).toBe(2);                 // kept, retryable
     expect(files.every((f) => !f.sent)).toBe(true);
+  });
+});
+
+describe('stagedFilesStore per-conversation drafts (in-memory)', () => {
+  beforeEach(reset);
+  const s = () => useStagedFilesStore.getState();
+
+  test('activate stashes the live draft and loads the target conversation’s', () => {
+    s().setText('draft for new chat');
+    s().addFiles(makeFiles(1));
+    s().activate('conv-a');                 // switch away from the new chat
+    expect(s().activeKey).toBe('conv-a');
+    expect(s().text).toBe('');              // conv-a starts blank
+    expect(s().files.length).toBe(0);
+    s().setText('hello A');
+    s().activate(NEW_DRAFT_KEY);            // back to the new chat
+    expect(s().text).toBe('draft for new chat');
+    expect(s().files.length).toBe(1);
+    s().activate('conv-a');                 // conv-a's draft survived too
+    expect(s().text).toBe('hello A');
+  });
+
+  test('activate is a no-op when the key equals the active key (keeps draft)', () => {
+    s().setText('keep me');
+    s().activate(NEW_DRAFT_KEY);            // already the active key
+    expect(s().text).toBe('keep me');
+  });
+
+  test('a blank live slot is not archived (no stale blank drafts accumulate)', () => {
+    s().activate('conv-a');                 // leave the (blank) new chat
+    s().setText('A');
+    s().activate(NEW_DRAFT_KEY);            // back: new chat had nothing to restore
+    expect(s().text).toBe('');
+    expect(s().archive[NEW_DRAFT_KEY]).toBeUndefined();
+  });
+
+  test('activate archives only unsent files; in-flight (sent) ones are dropped', () => {
+    s().addFiles(makeFiles(2));
+    const ids = s().files.map((f) => f.id);
+    s().markSent([ids[0]]);                 // one rode an in-flight send
+    s().activate('conv-a');
+    s().activate(NEW_DRAFT_KEY);            // come back
+    const files = s().files;
+    expect(files.length).toBe(1);           // only the unsent file was archived
+    expect(files[0].id).toBe(ids[1]);
+  });
+
+  test('promoteNewDraft relabels the live slot so the draft does not leak into the next new chat', () => {
+    s().setText('first-turn follow-up');
+    s().promoteNewDraft('conv-x');          // new conv landed its real id
+    expect(s().activeKey).toBe('conv-x');
+    expect(s().text).toBe('first-turn follow-up'); // live slot text untouched
+    s().activate('conv-b');
+    s().activate(NEW_DRAFT_KEY);            // a fresh new chat is blank...
+    expect(s().text).toBe('');
+    s().activate('conv-x');                 // ...and the draft is under conv-x
+    expect(s().text).toBe('first-turn follow-up');
+  });
+
+  test('promoteNewDraft is a no-op for an existing conversation', () => {
+    s().activate('conv-a');                 // activeKey is a real id, not the sentinel
+    s().promoteNewDraft('conv-z');
+    expect(s().activeKey).toBe('conv-a');
   });
 });

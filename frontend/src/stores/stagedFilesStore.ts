@@ -3,11 +3,31 @@ import { MAX_CHAT_ATTACHMENTS } from '@/lib/constants';
 import { partitionStageable, type StageRejection } from '@/lib/uploadFilter';
 import { useConfigStore } from '@/stores/configStore';
 
-// Files staged in the composer (via the file button, drag-drop, or a huge
-// paste) but not yet uploaded. They ride the next message: useChat.sendMessage
-// posts them as multipart attachments to POST /chat, which converts each into a
-// user_upload artifact before the turn starts. Shared store because drag-drop
-// lives in ChatPanel while the button / paste / chips live in MessageInput.
+// The composer draft store: the unsent text + files staged in the composer
+// (via the file button, drag-drop, or a huge paste). Files ride the next
+// message: useChat.sendMessage posts them as multipart attachments to POST
+// /chat, which converts each into a user_upload artifact before the turn
+// starts. Shared store because drag-drop lives in ChatPanel while the button /
+// paste / chips / text live in MessageInput.
+//
+// Per-conversation drafts (in-memory only): the live slot (`text` + `files`)
+// holds the active conversation's draft; `archive` stashes other conversations'
+// unsent drafts keyed by conversation id. `activate()` swaps the live slot on
+// navigation (replacing the old clear()-on-switch), so an unsent draft survives
+// glancing at another conversation and coming back. NOT persisted across reload
+// — File bytes can't round-trip localStorage and the feature was scoped to
+// in-page caching, so a reload starts every composer blank, by design.
+//
+// `text` also had to move OFF MessageInput's local useState into this store:
+// switchConversation flips currentLoading, which unmounts MessageInput (the
+// loading placeholder), so component-local state can't survive a switch. Store
+// state can.
+
+// Sentinel key for the not-yet-persisted "new conversation" composer. Real
+// conversations key their draft by id; the new chat has no id until its first
+// turn completes — at which point promoteNewDraft() relabels the live slot to
+// the real id so the draft doesn't leak back into the next new chat.
+export const NEW_DRAFT_KEY = '__new__';
 
 export interface StagedFile {
   id: string;
@@ -35,9 +55,25 @@ export interface StageNotice {
   overflow: number;
 }
 
+// A single conversation's unsent composer draft, as archived while another
+// conversation is active.
+interface Draft {
+  text: string;
+  files: StagedFile[];
+}
+
 interface StagedFilesState {
+  // Live slot — the active conversation's draft. Every existing action below
+  // mutates this slot, unchanged; the per-conversation keying lives entirely in
+  // `activate` / `archive`, so the file lifecycle (sent/markSent/…) is untouched.
+  text: string;
   files: StagedFile[];
   notice: StageNotice | null;
+  // The conversation key the live slot belongs to (NEW_DRAFT_KEY or a conv id).
+  activeKey: string;
+  // Other conversations' archived unsent drafts. In-memory only (see header).
+  archive: Record<string, Draft>;
+  setText: (text: string) => void;
   addFiles: (files: File[]) => void;
   removeFile: (id: string) => void;
   // Remove a specific set of ids — used to clear exactly the files that a send
@@ -53,7 +89,12 @@ interface StagedFilesState {
   // cancel): revert in-flight files to normal staged so the user can retry.
   unmarkSent: () => void;
   dismissNotice: () => void;
-  clear: () => void;
+  // Navigation hook (replaces the old clear()-on-switch): stash the live draft
+  // under the current key and load `key`'s archived draft (or a blank one).
+  activate: (key: string) => void;
+  // A new conversation just got its real id: relabel the live slot so its draft
+  // archives under the real id, not the shared NEW_DRAFT_KEY sentinel.
+  promoteNewDraft: (id: string) => void;
 }
 
 let _seq = 0;
@@ -80,8 +121,12 @@ function uniqueFileName(name: string, used: Set<string>): string {
 }
 
 export const useStagedFilesStore = create<StagedFilesState>((set) => ({
+  text: '',
   files: [],
   notice: null,
+  activeKey: NEW_DRAFT_KEY,
+  archive: {},
+  setText: (text) => set({ text }),
   // Gate then cap, in that order, so every entry point (button / drag-drop /
   // paste-to-stage) behaves identically:
   //   1. drop what the backend rejects on sight — unsupported extension OR a
@@ -140,5 +185,31 @@ export const useStagedFilesStore = create<StagedFilesState>((set) => ({
         : s.files,
     })),
   dismissNotice: () => set({ notice: null }),
-  clear: () => set({ files: [], notice: null }),
+  activate: (key) =>
+    set((s) => {
+      if (key === s.activeKey) return s;
+      // A draft is unsent content only: sent files belong to an in-flight turn
+      // whose SSE is torn down on switch (the old clear() dropped them too), so
+      // they are not archived. Stash the live slot under the old key when it
+      // holds something; otherwise drop any stale archive entry so the map
+      // doesn't accumulate blank drafts for every conversation ever visited.
+      const draftFiles = s.files.filter((f) => !f.sent);
+      const archive = { ...s.archive };
+      if (s.text.trim() || draftFiles.length) {
+        archive[s.activeKey] = { text: s.text, files: draftFiles };
+      } else {
+        delete archive[s.activeKey];
+      }
+      const restored = archive[key] ?? { text: '', files: [] };
+      delete archive[key];
+      return {
+        activeKey: key,
+        text: restored.text,
+        files: restored.files,
+        notice: null,
+        archive,
+      };
+    }),
+  promoteNewDraft: (id) =>
+    set((s) => (s.activeKey === NEW_DRAFT_KEY ? { activeKey: id } : s)),
 }));

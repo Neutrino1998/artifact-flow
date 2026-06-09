@@ -159,6 +159,14 @@ export function useSSE() {
         if (myNavGen !== getNavGen()) return;
 
         setCurrent(detail);
+        // A new conversation's first turn just landed it a real id. Relabel the
+        // composer's live draft from the NEW_DRAFT_KEY sentinel to this id (no-op
+        // for an existing conv, where activeKey is already the id) so any draft
+        // the user types here archives under the conversation, not back into the
+        // next new chat. Guarded internally by activeKey === NEW_DRAFT_KEY, and
+        // only reachable past the nav-gen guard above (i.e. the user is still on
+        // this conversation), so a switch/new-chat away can't mis-promote.
+        useStagedFilesStore.getState().promoteNewDraft(conversationId);
         clearPendingUpdates();
         // Turn ended → live event reduce is over. Drop in-turn live content so
         // the panel reads the DB-aligned snapshot re-pulled below (the single
