@@ -17,13 +17,13 @@
 
 ## 进度
 
-- **当前**:**B(x86_64)完成**(2026-06-05 milvus2 `run-all.sh` 全绿 + 已撤出,见 B 段「进展」)—— ENOSYS 核心赌注赢、镜像 id 冻结、内网零残留。**B(arm64/鲲鹏)完成**(2026-06-08,经 64K→4K 在位换核后 `run-all.sh` 全绿,见 B 段「进展 · arm」)—— 双架构 §B 闭环。A 仅识图最底层验通(litellm 透传)。
-- **下一步**:**A 地基开工**(2026-06-08 决策已锁,见 A 段「进展」;切片 A-bin→A-upload→A-vision)。并行待办:arm §B 镜像 id 冻结(机器在位时)。C 阶段引擎集成依 B 冻结镜像,排在 A 之后。
+- **当前**:**B(x86_64)完成**(2026-06-05 milvus2 `run-all.sh` 全绿 + 已撤出,见 B 段「进展」)—— ENOSYS 核心赌注赢、镜像 id 冻结、内网零残留。**B(arm64/鲲鹏)完成**(2026-06-08,经 64K→4K 在位换核后 `run-all.sh` 全绿,见 B 段「进展 · arm」)—— 双架构 §B 闭环。**A 完成**(三切片实现 + 2026-06-09 review 加固 + live E2E 用户实测通过;外部 review 无阻塞)。
+- **下一步**:**C 阶段引擎集成**(本机 runc 连调,依 B 冻结镜像)。并行待办:arm §B 镜像 id 冻结(机器在位时)。
 - **产物处置(2026-06-05 拍定)**:`feat/sandbox` 这批已验收产物(`sandbox/` 探针 + 构建脚本)**暂留分支不动**,不单独提早合 main。「是否把就绪探针子集(`unshare -U` 闸 + smoke + ENOSYS/uid)提升为通用部署机预检工具」**推迟到 C/D 阶段**——届时有真实第二调用点(每台新沙盒宿主预检 + D 端到端冒烟)再校准边界,现在抽象属投机(YAGNI)。
 
 | 阶段 | 内容 | 状态 |
 |---|---|---|
-| A | artifact 地基(二进制存储 + 多格式上传 + 识图) | 进行中(2026-06-08 三切片实现落地,单元/集成验过,待 live E2E) |
+| A | artifact 地基(二进制存储 + 多格式上传 + 识图) | **完成**(2026-06-08 三切片 + 2026-06-09 review 加固 + live E2E 用户实测通过) |
 | B | Kylin gVisor 功能验证(内网) | x86_64 **完成**(验证通过+已撤出);arm64 **完成**(2026-06-08,64K→4K 换核后全绿) |
 | C | 沙盒引擎集成(本机 runc 连调) | 未开始(依 B 冻结镜像) |
 | D | 上线前 Kylin 端到端冒烟 | 未开始 |
@@ -100,7 +100,15 @@
   - **A-upload**:`DocConverter` 收 png/jpeg(Pillow 按**内容**探测 MIME + 解压炸弹闸)、拒其它 `image/*`;docx/pdf additive(原件 blob + md content)。blob 经 `ConvertedUpload`→chat→engine→`create_from_upload`(大小 loud-fail)→`ArtifactMemory.blob`→`create_artifact` **同事务**落 `ArtifactBlob`。`ARTIFACT_CREATED` 只发 blob 元数据、不发字节。
   - **A-vision**:`read_artifact` 图分支 resize-on-read(`utils/image.py`,executor + 炸弹闸)→ data-URI 进 `ToolResult.metadata`;引擎把 data-URI 移入内存 `state["vision_blocks"]`、事件只存**引用**;`event_history` 对照缓存还原——本轮命中→图块、跨轮→占位(**保持纯函数、无 DB IO**);`context_manager` 处理块列表 reminder 拼接 + inventory 图项标注。前端:authed `/raw` fetch→objectURL 的 `ImagePreview`,图 artifact 路由到 preview-only tab(上传无需改 —— 本就无 `accept` 过滤)。
   - **依赖**:Pillow 入 requirements + lock(12.2.0);顺带修 aiohttp CVE(3.13.5→3.14.1,pip-audit 全绿)。
-  - **验证**:读→事件→历史→build 全链(turn 内图块 / 跨轮占位)、前端 tsc、**181 后端测试全过**。**未做**:真实 server+LLM 上传真图→模型识图的 live 回归;mid-turn 上传图的 panel 渲染待 turn flush(`/raw` DB-only,与 REST-lags-live 同一权衡);可选「本地缩略图即时显示」(前端已缓存 `File`)未做、留 follow-up。
+  - **验证**:读→事件→历史→build 全链(turn 内图块 / 跨轮占位)、前端 tsc、**181 后端测试全过**。**未做**:真实 server+LLM 上传真图→模型识图的 live 回归。(原列「mid-turn panel 渲染待 flush」「本地缩略图」两项,已于 2026-06-09 review 加固一并补上,见下条。)
+- **2026-06-09 A review 修复 + mid-turn 上传 UX 加固**(外部 review 过、无阻塞;`feat/sandbox` commits `f7b7d4d`→`3476e5e`):
+  - **识图能力门控**(review P1):默认 agent 用文本档 `qwen3.7-max`,`read_artifact` 却无条件注图块 → provider 拒。改:`models.yaml` 加 `vision` 标志 + `model_supports_vision`,`build_event_history(vision_capable=)` 由 `context_manager` 按 agent 模型传入——仅识图模型注图块,否则占位「你非多模态、看不到图」;**lead/research/compact 切 `qwen3.7-plus`**(识图 out of box)。
+  - **解压炸弹闸改显式像素上限**(review P2,**取代** A-vision 原依赖 Pillow `MAX_IMAGE_PIXELS` 的写法):Pillow 89–178M 像素段只 warn 不抛,小文件大像素图绕过;改隐藏常量 `VISION_IMAGE_MAX_PIXELS`(50MP),**解码前**(`Image.open` 只读头)校验 `w*h`,上传侧拒 + read 侧防御。
+  - **LLM 重试收窄**(review):`astream_with_retry` 旧按 `str(e)` 子串匹配、除 auth 外全重试(BadRequest/400 图块、ContextWindow 都白重试 3 次)→ 改 litellm **类型化异常**,仅瞬态(网络/超时/429/5xx)重试,其余立即 loud-fail。
+  - **debug 格式化容忍块列表**(review P1):`format_messages_for_debug` 旧假设 content 是 str、遇图块列表 `.split()` 崩(且每轮 eager 求值)→ 块列表压成摘要(不吐 base64)+ `logger.debug_mode` 守卫。
+  - **mid-turn 上传图本地优先渲染**(取代原「未做」两项):图 artifact auto-open 后 `/raw` 在 flush 前 404、旧版把后端原始错误串(含 req-id)吐给用户像系统坏了。改:`ARTIFACT_CREATED` 带 `original_filename`,前端按名关联 composer 仍持有的 staged `File` 本地直接渲染;本轮生成、无本地副本的图(未来工具产物)显示「生成中」提示而非报错;真实失败显示干净文案(req-id 进日志)。chip 显示图片缩略图。
+  - **同名图串图修复**(review P2 + 跨轮变体):暂存区文件名 `_N` dedup(修同轮)+ 本地预览限定 `pendingFlush` 本轮(修跨轮——往轮 artifact 一律读自己 DB blob,不被后续轮同名 staged File 串掉)。双管缺一不可。
+  - **验证**:后端 **1095 passed**(+ 识图门控 / 重试瞬态-vs-确定性 / 像素闸 / 事件 `original_filename` 回归)、前端 **191 passed** + tsc/lint clean。**live E2E:用户实测通过**(2026-06-09,真实 server+LLM 上传真图→模型识图)。**A 阶段完成。**
 
 ### B — Kylin gVisor 功能验证(内网,验完即撤出)
 
@@ -214,5 +222,6 @@
 - 2026-06-08 **B(arm)验收通过**:发现 arm 阻断=64K 页(Sentry 拒 non-4K host),解=在位换 4K 内核(厂商 RPM 集,不重建/不需 KVM)。新增 `sandbox/kernel-4k-pkg/`(preflight/install/postcheck)。`89.11→89.38.4k` 后 smoke 5/5 + `run-all.sh` 全绿(ENOSYS 7/7)。双架构 §B 闭环。详见 B 段「进展 · arm」。
 - 2026-06-08 **A 开工决策锁定**:blob = 独立 `ArtifactBlob` 表(热路径隔离)+ 元数据事件/REST 取字节;上传加法(blob + 留 md 转换过渡,不做 blob-only);**识图 = turn 内瞬态、不跨轮重建**(事件存引用、`build_event_history` 保持纯、下轮占位 re-read,compaction 天然正确);png/jpeg only + resize-on-read(Pillow,DEP-02);身份解耦已由现状满足、无需新列;首轮上传图不 auto-inject。切片 A-bin→A-upload→A-vision。详见 A 段「进展」。
 - 2026-06-08 **A 实现落地**(backend 三切片 + 前端 image view):`ArtifactBlob` 独立表(泛型 `LargeBinary(length=100MB)`,零 dialect import)+ `/raw` 端点;png/jpeg + docx/pdf additive 上传(同事务落 blob);识图 turn 内瞬态(事件存引用、`event_history` 对 `state["vision_blocks"]` 还原、跨轮占位、`build_event_history` 保持纯)。Pillow 入 lock(12.2.0)+ 顺带修 aiohttp CVE(→3.14.1)。单元/集成验过(181 测试 + 前端 tsc),待真实 server+LLM live E2E。详见 A 段「进展」。
+- 2026-06-09 **A 完成**(review 修复 + mid-turn 上传 UX 加固 + live E2E 通过):外部 review 无阻塞,修识图能力门控(`models.yaml` `vision` 标志 + lead/research/compact 切 `qwen3.7-plus`)、解压炸弹改显式 `VISION_IMAGE_MAX_PIXELS`、LLM 重试收窄到瞬态(类型化异常)、debug 格式化容忍块列表;mid-turn 上传图本地优先渲染(staged `File` 按 `original_filename` 关联)+ chip 缩略图 + 同名 dedup(`_N`)/本轮限定(`pendingFlush`)修同轮+跨轮串图。后端 1095 / 前端 191 全过;**live E2E 用户实测通过**(上传真图→模型识图)。**A 阶段闭环**,下一步 C。commits `f7b7d4d`→`3476e5e`。详见 A 段「进展」。
 <!-- 新日志按日期顺序追加到此行上方 -->
 
