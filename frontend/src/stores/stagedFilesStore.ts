@@ -61,6 +61,23 @@ function nextId(): string {
   return `staged-${Date.now()}-${_seq}`;
 }
 
+// Mirror the backend's `name_N.ext` dedup so two same-named files (e.g. an
+// `a.png` dragged from two folders) get distinct names in the staged set. The
+// uploaded filename is our correlation key: the backend echoes it verbatim as
+// ARTIFACT_CREATED.original_filename (it only dedupes the artifact *id*), so the
+// panel/chip match files by name — a name collision would mis-bind the preview
+// to the wrong File until COMPLETE. This is decoupled from the backend's id
+// dedup: we don't need identical strings, only uniqueness within the active set.
+function uniqueFileName(name: string, used: Set<string>): string {
+  if (!used.has(name)) return name;
+  const dot = name.lastIndexOf('.');
+  const stem = dot > 0 ? name.slice(0, dot) : name;
+  const ext = dot > 0 ? name.slice(dot) : '';
+  let n = 1;
+  while (used.has(`${stem}_${n}${ext}`)) n += 1;
+  return `${stem}_${n}${ext}`;
+}
+
 export const useStagedFilesStore = create<StagedFilesState>((set) => ({
   files: [],
   notice: null,
@@ -79,7 +96,21 @@ export const useStagedFilesStore = create<StagedFilesState>((set) => ({
       const room = Math.max(0, MAX_CHAT_ATTACHMENTS - s.files.length);
       const toStage = accepted.slice(0, room);
       const overflow = accepted.length - toStage.length;
-      const toAdd = toStage.map((file) => ({ id: nextId(), file }));
+      // Dedup names against the existing staged set AND within this batch. On a
+      // collision, replace the File with a renamed clone (new File wraps the same
+      // bytes by reference — cheap); file.name then carries the unique name, so
+      // every consumer (chip display, multipart upload, ImagePreview name-match)
+      // stays unchanged. Non-colliding files keep their original File identity.
+      const used = new Set(s.files.map((f) => f.file.name));
+      const toAdd = toStage.map((file) => {
+        const name = uniqueFileName(file.name, used);
+        used.add(name);
+        const staged =
+          name === file.name
+            ? file
+            : new File([file], name, { type: file.type, lastModified: file.lastModified });
+        return { id: nextId(), file: staged };
+      });
       const notice: StageNotice | null =
         rejected.length || overflow ? { rejected, overflow } : null;
       return {

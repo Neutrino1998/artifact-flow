@@ -52,6 +52,56 @@ describe('stagedFilesStore attachment cap', () => {
   });
 });
 
+describe('stagedFilesStore filename dedup (mirror backend _N)', () => {
+  beforeEach(() => reset());
+
+  test('same-name files in one batch get distinct names', () => {
+    useStagedFilesStore.getState().addFiles([
+      new File(['x'], 'a.png', { type: 'image/png' }),
+      new File(['y'], 'a.png', { type: 'image/png' }),
+      new File(['z'], 'a.png', { type: 'image/png' }),
+    ]);
+    expect(useStagedFilesStore.getState().files.map((f) => f.file.name)).toEqual([
+      'a.png',
+      'a_1.png',
+      'a_2.png',
+    ]);
+  });
+
+  test('dedup spans batches (collision with already-staged file)', () => {
+    const add = useStagedFilesStore.getState().addFiles;
+    add([new File(['x'], 'shot.png', { type: 'image/png' })]);
+    add([new File(['y'], 'shot.png', { type: 'image/png' })]);
+    expect(useStagedFilesStore.getState().files.map((f) => f.file.name)).toEqual([
+      'shot.png',
+      'shot_1.png',
+    ]);
+  });
+
+  test('extensionless names dedup too; distinct names untouched', () => {
+    useStagedFilesStore.getState().addFiles([
+      new File(['x'], 'README', { type: 'text/plain' }),
+      new File(['y'], 'README', { type: 'text/plain' }),
+      new File(['z'], 'notes.txt', { type: 'text/plain' }),
+    ]);
+    expect(useStagedFilesStore.getState().files.map((f) => f.file.name)).toEqual([
+      'README',
+      'README_1',
+      'notes.txt',
+    ]);
+  });
+
+  test('renamed clone preserves type (so image detection still works)', () => {
+    useStagedFilesStore.getState().addFiles([
+      new File(['x'], 'a.png', { type: 'image/png' }),
+      new File(['y'], 'a.png', { type: 'image/png' }),
+    ]);
+    const second = useStagedFilesStore.getState().files[1].file;
+    expect(second.name).toBe('a_1.png');
+    expect(second.type).toBe('image/png');
+  });
+});
+
 describe('stagedFilesStore format gate + notice', () => {
   beforeEach(() => reset());
 

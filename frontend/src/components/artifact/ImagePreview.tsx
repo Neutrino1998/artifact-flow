@@ -5,19 +5,21 @@ import { fetchArtifactRawObjectUrl } from '@/lib/api';
 import { useArtifactStore } from '@/stores/artifactStore';
 import { useStagedFilesStore } from '@/stores/stagedFilesStore';
 
-/** Render an image artifact (content_type image/*). Three sources, in order:
+/** Render an image artifact (content_type image/*). Source depends on whether the
+ *  artifact is live THIS turn (pendingFlush = liveContent[id], cleared at COMPLETE):
  *
- *  1. Staged File (user upload, this turn) — the File is still in the composer
- *     until the turn's terminal resolves; render it locally (instant, no fetch).
- *  2. Pending flush (any image live this turn with no local copy — e.g. a
- *     tool/model-generated image): the blob has no durable home until flush_all
- *     at COMPLETE, so /raw would 404. Show a "being saved" hint, NOT an error —
- *     liveContent[id] is the signal (cleared at COMPLETE), at which point we re-run.
- *  3. DB blob — authed /raw fetch (an <img src> can't carry the JWT) → object URL.
+ *  - Live this turn:
+ *      · user upload → the staged File still in the composer (instant, no fetch);
+ *        matched by name, which is unique per turn (composer dedups, backend echoes
+ *        it as original_filename), so it can't bind to the wrong upload.
+ *      · tool/model-generated (no local copy) → "being saved" hint, NOT an error
+ *        (blob isn't flushed yet → /raw would 404). COMPLETE re-runs us → /raw.
+ *  - Settled (past-turn, or post-COMPLETE) → authed /raw fetch (an <img src> can't
+ *    carry the JWT) → object URL. Never uses a staged File — a same-named file
+ *    staged for a later turn must not shadow this artifact's own DB blob.
  *
- *  The user never sees a raw backend error during a normal mid-turn image; a real
- *  failure (post-turn, genuinely missing) shows a clean generic message — the
- *  detailed error + request id stay in the server log, not the preview pane. */
+ *  The user never sees a raw backend error mid-turn; a real failure shows a clean
+ *  generic message — the detailed error + request id stay in the server log. */
 export default function ImagePreview({
   sessionId,
   artifactId,
@@ -45,16 +47,19 @@ export default function ImagePreview({
     setUrl(null);
     setError(null);
 
-    if (localFile) {
-      const objectUrl = URL.createObjectURL(localFile);
-      setUrl(objectUrl);
-      return () => URL.revokeObjectURL(objectUrl);
-    }
-
-    // No local copy yet and the blob isn't flushed → don't fetch (guaranteed
-    // 404); the pending hint renders below. The COMPLETE re-pull flips
-    // pendingFlush false + refreshKey, re-running this effect to hit /raw.
+    // Live this turn (created/updated, blob not yet flushed). The staged-File
+    // fallback is scoped to THIS branch deliberately: a settled / past-turn
+    // artifact must read its OWN DB blob, never a same-named File staged for a
+    // *later* turn (cross-turn duplicate name → wrong image). Cleared at COMPLETE,
+    // which flips pendingFlush false + refreshKey → re-run → /raw.
     if (pendingFlush) {
+      if (localFile) {
+        const objectUrl = URL.createObjectURL(localFile);
+        setUrl(objectUrl);
+        return () => URL.revokeObjectURL(objectUrl);
+      }
+      // Fresh non-upload image (tool/model-generated): no local copy and blob not
+      // flushed → /raw would 404. Show the pending hint below, not an error.
       return;
     }
 
