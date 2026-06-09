@@ -45,7 +45,8 @@ export interface ComposerOpDeps {
   // force_compact rides the request and the backend injects a directive body,
   // so the "nothing to send" bail must not fire.
   allowEmpty?: boolean;
-  // The network op. Returns true on success; false or throw → restore.
+  // The network op. Returns true on success; false or throw is surfaced by the
+  // network layer — the draft was already cleared on send, nothing to undo.
   run: RunFn;
 }
 
@@ -120,7 +121,8 @@ export function useComposerSend(ownerKey: string, content: string, stagedFiles: 
   );
 
   // Inject into a running turn: text only (attachments don't ride an in-flight
-  // turn), no spinner. `run` throws on failure → runComposerOp catches → restore.
+  // turn), no spinner. `run` throws on failure → runComposerOp catches + logs;
+  // the draft was cleared on send, so there's nothing to restore.
   const inject = useCallback(
     (run: (text: string) => Promise<unknown>) =>
       runComposerOp({

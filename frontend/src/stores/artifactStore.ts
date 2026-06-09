@@ -16,8 +16,8 @@ export interface LiveArtifact {
   title: string;
   source: string | null;
   omitted: boolean;
-  // user_upload only: original file name, for correlating to the staged File
-  // (local render before the blob is flushed). null for model-created artifacts.
+  // user_upload only: original file name, for correlating to the send-local
+  // preview File (local render before the blob is flushed). null for model-created.
   originalFilename: string | null;
 }
 

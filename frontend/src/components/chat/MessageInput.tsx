@@ -74,12 +74,11 @@ export default function MessageInput() {
   const stageNotice = useStagedFilesStore((s) => s.notice);
   const dismissNotice = useStagedFilesStore((s) => s.dismissNotice);
 
-  // The send lifecycle (lock → claim → await → restore-on-failure) for both send
-  // and inject lives in this hook (single enforcement point); see useComposerSend.
-  // It's OWNER-keyed on activeKey: the send claims (clears text + marks files
-  // sent) and, on failure, restores THAT conversation's draft, so it stays correct
-  // even if the user navigates mid-send. The turn's terminal then resolves the
-  // sent files (COMPLETE drops them, cancel/error/timeout reverts for retry).
+  // The send lifecycle (lock → clear → await) for both send and inject lives in
+  // this hook (single enforcement point); see useComposerSend. It's OWNER-keyed on
+  // activeKey: the send clears THAT conversation's draft (text + the files that
+  // ride the POST) at send start, so it stays correct even if the user navigates
+  // mid-send. A failed send is a best-effort loss — there is no restore.
   const { sending, submit, inject } = useComposerSend(activeKey, content, stagedFiles);
 
   // Auto-resize textarea
@@ -163,7 +162,7 @@ export default function MessageInput() {
 
     if (isStreaming) {
       // Inject mode: text only (attachments ride a new message, not an
-      // in-flight turn). The hook owns the empty-guard / lock / reconcile.
+      // in-flight turn). The hook owns the empty-guard / lock / clear-on-send.
       const convId = streamConversationId || conversationId;
       if (!convId) return;
       await inject((text) => injectMessage(convId, text));

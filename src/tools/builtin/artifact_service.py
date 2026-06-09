@@ -153,10 +153,10 @@ class ArtifactService:
                 "blob_size": len(blob),
                 "blob_content_type": (memory.metadata or {}).get("blob_content_type"),
             }
-        # 用户上传件带 original_filename:前端据此把本轮 ARTIFACT_CREATED 关联回 composer
-        # 里仍持有的 staged File,turn 内(blob 未落库、/raw 还 404)直接用本地副本渲染
-        # 缩略图/预览,COMPLETE 后再切回 DB(见前端 ImagePreview 本地优先解析)。模型自建
-        # 无此字段 → 不带,事件保持干净。
+        # 用户上传件带 original_filename:前端据此把本轮 ARTIFACT_CREATED 关联回 send-local
+        # 预览缓存里的图片 File(发送时存入、与 liveContent 同生命周期),turn 内(blob 未落库、
+        # /raw 还 404)直接用本地副本渲染缩略图/预览,COMPLETE 后再切回 DB(见前端 ImagePreview
+        # 本地优先解析)。模型自建无此字段 → 不带,事件保持干净。
         original_filename = (memory.metadata or {}).get("original_filename")
         name_meta = {"original_filename": original_filename} if original_filename else {}
         await self._emit_artifact(_evt_artifact_created(), {
@@ -299,8 +299,8 @@ class ArtifactService:
 
         与模型自建走同一 write-back 路径:mark_new → 发 ARTIFACT_CREATED → 随 turn 末
         flush_all 落库。由 execute_loop 在 turn 起点调用(uploads closure-carry 进引擎)。
-        因此上传 turn 中途死 = 与模型产物一致地丢失(ephemeral 语义),用户侧由前端
-        staged 文件保留到 COMPLETE 兜底。`_normalize` + dedup 在此完成。
+        因此上传 turn 中途死 = 与模型产物一致地丢失(ephemeral 语义),用户从本地重新
+        选文件重试(composer 发送即清空,不做保留)。`_normalize` + dedup 在此完成。
         """
         artifact_id = _normalize_filename_to_id(filename)
 

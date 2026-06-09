@@ -136,7 +136,7 @@ async def send_message(
     #   - `_N` 去重副本 bug 消失:submit 抛 409（已有活跃执行）时尚未 stage 任何东西，
     #     execute_and_push 根本不会跑 → 重发不产生副本（旧实现在 submit 前已 commit）。
     #   - 上传与模型产物的「turn 中途死即丢失」语义一致（皆 ephemeral，随 lease 重启而失）；
-    #     用户侧由前端 staged 文件保留到 COMPLETE 兜底。
+    #     turn 中途死则上传丢失，用户从本地重新选文件重试（composer 发送即清空，不做保留）。
     converted = [
         await convert_uploaded_file(f)
         for f in files

@@ -98,8 +98,9 @@ export interface ArtifactCreatedData {
   content?: string;
   content_omitted?: boolean;
   // Present only for user_upload artifacts: the original file name, used to
-  // correlate this event back to the staged File still held in the composer so
-  // the panel can render it locally before the blob is flushed to the DB.
+  // correlate this event back to the send-local preview File (artifactStore
+  // .localPreviews) so the panel can render it locally before the blob is
+  // flushed to the DB.
   original_filename?: string;
 }
 
