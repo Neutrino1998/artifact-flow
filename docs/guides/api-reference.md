@@ -326,14 +326,16 @@ POST /api/v1/chat/bulk-delete
 
 ## Artifacts
 
-`/api/v1/artifacts` — 读取、导出、版本管理。**只读（全是 GET）**：artifact 的产生（agent 创建 / 用户上传）都不经此路由。
+`/api/v1/artifacts` — 读取、版本管理、二进制原件下载。**只读（全是 GET）**：artifact 的产生（agent 创建 / 用户上传）都不经此路由。
 
 | 方法 | 路径 | 鉴权 | 说明 |
 |------|------|------|------|
 | GET | `/{session_id}` | 用户 | 列出 session 下所有 artifacts |
 | GET | `/{session_id}/{artifact_id}` | 用户 | 获取内容 + 版本列表 |
 | GET | `/{session_id}/{artifact_id}/versions/{version}` | 用户 | 获取指定版本 |
-| GET | `/{session_id}/{artifact_id}/export?format=docx` | 用户 | 导出为 DOCX |
+| GET | `/{session_id}/{artifact_id}/raw` | 用户 | 二进制原件字节（图片 inline，其余 attachment 下载；纯文本 artifact 无 blob → `404`） |
+
+artifact 分两类，由响应里的 `has_blob` 判别：**文本类**（md/py/csv 等）`content` 即正文、可编辑可版本化；**二进制类**（上传的图片 / docx / pdf）`content` 为空、源不可变单版，字节走 `/raw`，`content_type` 即原件真实 MIME。富格式不做服务端文本转换——读/转换是沙盒能力（见 [../architecture/artifacts.md](../architecture/artifacts.md)）。
 
 ### 上传走 `POST /chat`，不在本路由
 
@@ -348,8 +350,8 @@ POST /api/v1/chat/bulk-delete
 删除 `_active_managers` overlay 后，所有 GET **均为纯 DB 读**（请求级 `ArtifactService` 自带空 WorkingSet）：
 
 - turn **执行中**，REST 返回的是上一次 `flush_all` 的快照，**落后于 live**；turn 内的实时内容由 SSE 的 `ARTIFACT_CREATED` / `ARTIFACT_UPDATED` 事件推给前端 reduce（见 [streaming.md](../architecture/streaming.md) / [artifacts.md](../architecture/artifacts.md)），不经 REST
-- `GET .../versions/{version}` 与 `GET .../export` 同样只读 DB：执行中未 flush 的中间版本返回 `404`
-- 前端据此在流式执行期间隐藏版本选择器 / 导出入口（纯前端读类 UX 锁，后端保持宽松）
+- `GET .../versions/{version}` 与 `GET .../raw` 同样只读 DB：执行中未 flush 的中间版本 / 本轮刚上传未落库的 blob 返回 `404`
+- 前端据此在流式执行期间隐藏版本选择器 / 下载入口（纯前端读类 UX 锁，后端保持宽松）；本轮上传的图片由前端 send-local File 缓存即时渲染、二进制卡片只靠事件元数据渲染，均不在 turn 内打 `/raw`
 
 ---
 
