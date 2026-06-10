@@ -149,14 +149,23 @@ def _read_file_under(workspace_dir: str, rel: str, max_bytes: int) -> bytes:
                 raise IsADirectoryError(rel)
             if not stat.S_ISREG(st.st_mode):
                 raise _WorkspaceEscape(rel)
+            # fstat 早拒诚实大文件(不必读、能报真实大小)。但 fstat 只看一眼,
+            # 容器后台进程能在 fstat 后继续 append → 读循环必须**累计复核**,
+            # 否则把超限内容读进内存(size guard 形同虚设)。读到 max_bytes+1
+            # 即停并抛:内存占用钉死在 max_bytes+1,与文件实际涨多大无关。
             if st.st_size > max_bytes:
                 raise _FileTooLarge(st.st_size)
+            limit = max_bytes + 1
             chunks: List[bytes] = []
-            while True:
-                block = os.read(fd, 1 << 20)
+            total = 0
+            while total < limit:
+                block = os.read(fd, min(1 << 20, limit - total))
                 if not block:
                     break
+                total += len(block)
                 chunks.append(block)
+            if total > max_bytes:
+                raise _FileTooLarge(total)  # 竞态 append:实际大小不可信,只报超限
             return b"".join(chunks)
         finally:
             os.close(fd)

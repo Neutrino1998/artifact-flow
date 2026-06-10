@@ -390,9 +390,37 @@ class TestDirUsage:
         usage = _dir_usage_bytes(str(tmp_path))
         assert usage > 0  # 旧实现(只数 filenames)这里会是 0
 
+    def test_symlink_dirs_are_counted_not_followed(self, tmp_path):
+        """指向目录的 symlink 也耗 inode/目录项 —— os.walk 把它丢进 dirnames 既不
+        递归也不计;scandir 统一 lstat 计费(P2 第 2 轮,弃 os.walk 的盲区)。"""
+        target = tmp_path / "real_target"
+        target.mkdir()
+        (target / "big.bin").write_bytes(b"x" * 100_000)  # 链不该被跟进去计这块
+        links = tmp_path / "links"
+        links.mkdir()
+        for i in range(100):
+            (links / f"l{i}").symlink_to(target, target_is_directory=True)
+
+        usage = _dir_usage_bytes(str(links))
+        # 100 条 symlink 各计一块(≈400KB),且**没有**跟链把 100KB 的 target 内容
+        # 重复计进来(否则会暴涨)
+        assert usage >= 100 * 4096
+        assert usage < 100 * 4096 + 50_000
+
     def test_missing_entries_skipped(self, tmp_path):
         # 不存在的路径不抛(容器并发增删)
         assert _dir_usage_bytes(str(tmp_path / "nope")) == 0
+
+    def test_nested_real_dirs_recursed(self, tmp_path):
+        """真实深目录树正常递归计费(scandir 不误伤合法深路径)。"""
+        d = tmp_path
+        for level in range(5):
+            d = d / f"lvl{level}"
+            d.mkdir()
+        (d / "leaf.txt").write_bytes(b"y" * 100)
+        usage = _dir_usage_bytes(str(tmp_path))
+        # 根 + 5 层目录 + 1 文件 = 7 条目,各至少一块
+        assert usage >= 7 * 4096
 
 
 class TestQuota:

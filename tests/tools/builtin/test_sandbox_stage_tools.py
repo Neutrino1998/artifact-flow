@@ -11,7 +11,12 @@ import pytest
 
 from config import config
 from tools.base import ToolPermission
-from tools.builtin.sandbox_ops import MountArtifactTool, PersistFileTool
+from tools.builtin.sandbox_ops import (
+    MountArtifactTool,
+    PersistFileTool,
+    _FileTooLarge,
+    _read_file_under,
+)
 from tools.builtin.sandbox_session import SandboxUnavailableError
 
 
@@ -320,3 +325,40 @@ class TestPersistTool:
         await session.ensure_container()
         result = await PersistFileTool(session, service)(path="  ")
         assert not result.success
+
+
+class TestReadFileUnderCap:
+    """_read_file_under 的累计上限(size TOCTOU:fstat 后后台进程 append)。"""
+
+    def test_honest_small_file_reads_fully(self, tmp_path):
+        ws = tmp_path / "workspace"
+        ws.mkdir()
+        (ws / "f.txt").write_bytes(b"hello")
+        assert _read_file_under(str(ws), "f.txt", 1024) == b"hello"
+
+    def test_read_loop_caps_when_fstat_lies(self, tmp_path, monkeypatch):
+        """fstat 报小、文件实大(模拟读前被 append):读循环累计复核必须拦下,
+        不能把超限内容读进内存。"""
+        ws = tmp_path / "workspace"
+        ws.mkdir()
+        (ws / "big.bin").write_bytes(b"x" * 10_000)
+
+        real_fstat = os.fstat
+
+        def lying_fstat(fd):
+            st = real_fstat(fd)
+            # 伪造一个 st_size=4 的结果(其余字段照旧),骗过 fstat 早拒
+            return os.stat_result(
+                (st.st_mode, st.st_ino, st.st_dev, st.st_nlink, st.st_uid,
+                 st.st_gid, 4, st.st_atime, st.st_mtime, st.st_ctime)
+            )
+
+        monkeypatch.setattr(os, "fstat", lying_fstat)
+        with pytest.raises(_FileTooLarge):
+            _read_file_under(str(ws), "big.bin", 4)
+
+    def test_at_limit_exact_ok(self, tmp_path):
+        ws = tmp_path / "workspace"
+        ws.mkdir()
+        (ws / "f").write_bytes(b"abcd")
+        assert _read_file_under(str(ws), "f", 4) == b"abcd"  # 恰好等于上限,放行

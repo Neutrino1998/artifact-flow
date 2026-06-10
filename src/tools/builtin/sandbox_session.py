@@ -20,6 +20,7 @@ import asyncio
 import codecs
 import os
 import shutil
+import stat
 from dataclasses import dataclass
 from typing import Callable, Optional
 
@@ -68,10 +69,9 @@ def scratch_dir_name(conversation_id: str, message_id: str) -> str:
 _ENTRY_MIN_BYTES = 4096
 
 
-def _lstat_charge(path: str) -> int:
-    """单条目的计费字节 = max(块占用 st_blocks×512, 每条目最低)。
+def _charge_blocks(st: os.stat_result) -> int:
+    """一条 stat 结果的计费字节 = max(块占用 st_blocks×512, 每条目最低)。
     取不到块数时以表观大小代块占用。"""
-    st = os.lstat(path)
     blocks = getattr(st, "st_blocks", None)
     usage = blocks * 512 if blocks is not None else st.st_size
     return max(usage, _ENTRY_MIN_BYTES)
@@ -82,22 +82,37 @@ def _dir_usage_bytes(root: str) -> int:
 
     watchdog 软配额按它计:小文件每个至少占一个 fs 块,表观大小会低估池子
     真实消耗(探针①实测 50k×100B 表观 4.8MB / 块占用 195MB,~40×)。
-    **目录自身也是文件**(其内容是目录项,空目录在 ext4 也占一个块),故每个
-    dirpath 一并计入 —— 否则海量空目录/深目录树能消耗块与 inode 而 usage 不涨,
-    绕过 per-turn 配额只剩池子硬墙兜底。os.walk 每个目录恰访问一次,天然去重。
-    lstat 不追 symlink,容器植的链不把池外目标算进配额。
+    **目录自身也是文件**(其内容是目录项,空目录在 ext4 也占一个块),海量空目录/
+    深树能消耗块与 inode 而表观大小不涨 → 绕过 per-turn 配额只剩池子硬墙兜底。
+
+    **不用 os.walk**:它按 dirnames/filenames/followlinks 给条目分类,每个分类语义
+    都是潜在盲区(空目录、指向目录的 symlink 先后两轮被发现漏计)。改显式 scandir:
+    **每个目录项一律先 lstat 计费,再只对真实目录递归** —— 计量与条目类型解耦,
+    symlink(指 dir 或 file,lstat 看到链本体故 S_ISDIR 为 False)只计费不递归,
+    既不漏计也不顺链递归出工作区;fifo/设备等特殊文件同理。lstat 不追 symlink,
+    容器植的链不把池外目标算进配额。
     """
     total = 0
-    for dirpath, _dirnames, filenames in os.walk(root):
+    try:
+        total += _charge_blocks(os.lstat(root))  # 根自身(无父目录代它计费)
+    except OSError:
+        return 0
+    stack = [root]
+    while stack:
+        current = stack.pop()
         try:
-            total += _lstat_charge(dirpath)
+            entries = os.scandir(current)
         except OSError:
-            pass
-        for name in filenames:
-            try:
-                total += _lstat_charge(os.path.join(dirpath, name))
-            except OSError:
-                pass  # 容器并发增删文件,消失的条目跳过
+            continue  # 目录消失/无权限,跳过(容器并发增删)
+        with entries:
+            for entry in entries:
+                try:
+                    st = entry.stat(follow_symlinks=False)  # = lstat
+                except OSError:
+                    continue  # 条目在枚举与 stat 之间消失
+                total += _charge_blocks(st)
+                if stat.S_ISDIR(st.st_mode):  # 真实目录才递归;symlink-dir 不进栈
+                    stack.append(entry.path)
     return total
 
 
