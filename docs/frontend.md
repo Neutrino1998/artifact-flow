@@ -58,7 +58,7 @@ frontend/src/
 - **Sidebar**：`ConversationList` + `UserMenu`；admin 可打开 `AdminConversationList`（只读 observability，不删数据）/ `ObservabilityPanel` / `UserManagementPanel`
 - **Chat**：`ChatPanel` 组合 `MessageList`（含分支导航 `BranchNavigator`）+ `MessageInput`；流式期间由 `ProcessingFlow` 渲染各 agent 的 `AgentSegmentBlock` / `ToolCallCard` / `ThinkingBlock` / `CompactionFlowBlock` / `InjectFlowBlock` / `ErrorFlowBlock`
 - **Right panel — mode-aware**：`userManagementVisible && isAdmin` 时右栏从 `ArtifactPanel` 切换为 `UserManagementDetailPanel`，按 `userManagementRightView` 类型分发到 `UserDetailForm` / `CreateUserForm` / `BulkImportForm` / `BulkActionPanel` / `DepartmentManagerPanel`；退出用户管理模式自动恢复 `ArtifactPanel`
-- **Artifacts**：`ArtifactPanel` → `ArtifactTabs` → `MarkdownPreview | SourceView | DiffView`，顶栏 `ArtifactToolbar` 提供版本切换与 DOCX 导出
+- **Artifacts**：`ArtifactPanel` → `ArtifactTabs` → `MarkdownPreview | SourceView | DiffView | ImagePreview | BinaryFilePreview`（blob 类 artifact 仅 preview：图片渲染图、其它二进制为下载卡片），顶栏 `ArtifactToolbar` 提供版本切换与下载（文本下载 content，blob 经 authed `/raw`）
 
 ## 状态管理（Zustand Stores）
 
@@ -239,7 +239,7 @@ cd frontend && npm run generate-types   # openapi-typescript 生成 api.d.ts
 
 - **每请求随机 nonce**：middleware 生成 base64 nonce 写进 `script-src 'nonce-<nonce>' 'strict-dynamic'`，并经 `x-nonce` 请求头传给 `app/layout.tsx`，盖到那条内联主题 bootstrap 脚本上（暗色无闪烁那段）。**CSP 放 Next 而非 nginx**：nonce 必须与渲染同源生成，nginx 看不到它、只能退回 `'unsafe-inline'`，失去意义。
 - **`connect-src` 从 `NEXT_PUBLIC_API_URL` 派生**：prod 同源部署时为空 → 退回 `'self'`；配置独立后端域时把该 origin 显式列入（dev 放宽）。
-- **`img-src 'self' data: blob:`**（**刻意不含 `https:`**）：作为补偿控制收窄信标外泄面；导出 / 预览用图走 data/blob。
+- **`img-src 'self' data: blob:`**（**刻意不含 `https:`**）：作为补偿控制收窄信标外泄面；下载 / 预览用图走 data/blob。
 - `frame-ancestors 'none'` 防点击劫持；另有静态头 `X-Frame-Options: DENY` / `X-Content-Type-Options` / `Referrer-Policy` / `Permissions-Policy`。
 
 ## REST Client 缓存
