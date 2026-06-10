@@ -6,7 +6,7 @@
 镜像默认 config.SANDBOX_IMAGE(artifactflow-sandbox:latest);没构建本地沙盒镜
 像时可传 python:3.11-slim(有 bash/timeout/sleep,足够本矩阵)。
 
-矩阵(C 验收标准 ②④ 的本机子集;SIGKILL worker 条留给 C-reap 的 reaper):
+矩阵(C 验收标准 ②③④ 的本机子集):
   1. 正常路径        exec → close
   2. while-true      容器内 timeout --signal=KILL 真杀(exit 137,时长≈上限)
   3. 协作/外部取消   exec 进行中 task.cancel(),finally close
@@ -16,6 +16,9 @@
                      (验收④:本机普通目录模拟池子,loop host-prep 真机验归 D)
   7. stage 往返      mount(宿主写)→ bash 读改(容器)→ persist(宿主读回)
                      —— 真 bind + ReadonlyRootfs + /tmp 入池下全链路
+  8. SIGKILL 孤儿    起容器+scratch 后**不 close**(模拟 worker 被杀、finally 不跑)
+                     → SandboxReaper.reap_once 双源差集回收孤儿(验收②③);
+                     另起一个活跃 turn 验 reaper 零误杀(grace 外仍不碰活资源)
 
 每条跑完断言:daemon 上无该 turn label 的容器 + scratch 目录已删(双零残留)。
 顺带自验 aiodocker exec multiplexed stream 的 demux(stdout/stderr 分流)。
@@ -287,6 +290,69 @@ async def case_7_stage_roundtrip():
     await assert_no_residue("stage 往返", session)
 
 
+async def case_8_reaper_collects_orphan():
+    print("\n=== 8. SIGKILL 孤儿 → reaper 回收(验收②③)===")
+    from api.services.sandbox_reaper import SandboxReaper
+
+    # --- 制造一个真孤儿:起容器+scratch,绝不 close()(模拟 worker 被 SIGKILL)---
+    conv, msg = _ids()
+    session = SandboxSession(conv, msg)
+    await session.ensure_container()
+    await session.exec("echo orphan > f.txt")  # 容器在跑、scratch 落地
+    # SIGKILL 下 _wrapped finally 不执行 = close() 不跑。这里只取消 watchdog task
+    # 免 pending-task 警告(它不删容器),容器+目录留作孤儿;不碰 close。
+    if session._watchdog_task is not None:
+        session._watchdog_task.cancel()
+        await asyncio.gather(session._watchdog_task, return_exceptions=True)
+
+    # --- 另起一个"活跃"turn:持 lease,验 reaper 零误杀 ---
+    runner = ExecutionRunner(max_concurrent=2)
+    live_conv, live_msg = _ids()
+    live = SandboxSession(live_conv, live_msg)
+    runner.register_cleanup(live_msg, live.close)  # 与生产一致:_wrapped finally 拆除
+    live_done = asyncio.Event()
+
+    async def live_turn():
+        await live.exec("echo alive > f.txt")
+        await live_done.wait()  # 卡住,持 lease 不放,直到 reaper 扫完
+
+    live_task = await runner.submit(
+        live_conv, live_msg, live_turn, user_id="u1", stream_transport=_NullTransport()
+    )
+    await asyncio.sleep(3)  # live 容器起好、lease 在握
+
+    # reaper:孤儿无 lease → 回收;live 有 lease → 即便 grace 外也不碰
+    reaper = SandboxReaper(runner.store, grace_sec=0, interval_sec=1)
+    reaper._docker = aiodocker.Docker()
+    try:
+        stats = await reaper.reap_once()
+    finally:
+        await reaper._docker.close()
+
+    print(f"  reap: 容器×{stats.containers_reaped} 目录×{stats.dirs_reaped} "
+          f"(seen 容器{stats.containers_seen}/目录{stats.dirs_seen})")
+    orphan_reaped = stats.containers_reaped >= 1 and stats.dirs_reaped >= 1
+    results.append(("reaper 回收孤儿", orphan_reaped,
+                    "" if orphan_reaped else " 未回收孤儿!"))
+    print(f"  [{PASS if orphan_reaped else FAIL}] reaper 回收孤儿")
+
+    # 孤儿确实没了
+    await assert_no_residue("孤儿双零残留", session)
+    # live 资源没被误杀(reaper 跑完它仍在)
+    live_alive = await asyncio.to_thread(os.path.exists, live.scratch_dir)
+    results.append(("reaper 零误杀(活资源在)", live_alive,
+                    "" if live_alive else " 活资源被误杀!"))
+    print(f"  [{PASS if live_alive else FAIL}] reaper 零误杀(活 turn 资源未被碰)")
+
+    # 收尾 live turn
+    live_done.set()
+    await asyncio.gather(live_task, return_exceptions=True)
+    await assert_no_residue("live turn 正常收尾", live)
+    # 孤儿 session 残留的 aiodocker client(close 没跑过)单独关掉,免泄漏警告
+    if session._docker is not None:
+        await session._docker.close()
+
+
 async def main():
     print(f"镜像: {config.SANDBOX_IMAGE}")
     print(f"scratch 根: {config.SANDBOX_SCRATCH_ROOT}")
@@ -298,6 +364,7 @@ async def main():
     await case_5_runner_integrated()
     await case_6_over_quota()
     await case_7_stage_roundtrip()
+    await case_8_reaper_collects_orphan()
 
     print("\n" + "=" * 50)
     failed = [name for name, ok, _ in results if not ok]

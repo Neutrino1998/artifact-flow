@@ -43,6 +43,9 @@ _sampler: Optional[RuntimeSampler] = None
 _loop_lag_sink: Optional[JsonlSink] = None
 _metrics_sink: Optional[JsonlSink] = None
 
+# lease-anchored 沙盒孤儿回收器(C-reap);生命周期跨 lifespan
+_sandbox_reaper = None  # type: ignore[var-annotated]
+
 
 def _enable_faulthandler() -> None:
     """启用 faulthandler:致命信号 stderr dump + SIGUSR1 手动 dump。
@@ -169,12 +172,30 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         # 观测层失败不挂应用启动 — 但留 ERROR 便于发现
         logger.exception("Observability bootstrap failed; continuing without it")
 
+    # 沙盒孤儿回收器(在 init_globals 之后:依赖 ExecutionRunner.store 取活跃集)。
+    # 启动失败不挂应用 —— 它是兜底,缺它只是 SIGKILL 路径少一层防护。
+    global _sandbox_reaper
+    if config.SANDBOX_REAP_ENABLED:
+        try:
+            from api.services.sandbox_reaper import SandboxReaper
+            _sandbox_reaper = SandboxReaper(get_execution_runner().store)
+            _sandbox_reaper.start()
+        except Exception:
+            logger.exception("Sandbox reaper bootstrap failed; continuing without it")
+            _sandbox_reaper = None
+
     logger.info("ArtifactFlow API started successfully")
 
     yield
 
     # 关闭
     logger.info("Shutting down ArtifactFlow API...")
+    if _sandbox_reaper is not None:
+        try:
+            await _sandbox_reaper.stop()
+        except Exception:
+            logger.exception("Sandbox reaper shutdown failed; continuing")
+        _sandbox_reaper = None
     try:
         await _stop_observability()
     except Exception:

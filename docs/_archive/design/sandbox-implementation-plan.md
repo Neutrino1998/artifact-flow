@@ -18,14 +18,14 @@
 ## 进度
 
 - **当前**:**A / B(双架构)完成**(详见各段进展)。**C 开工**(2026-06-10 开工决策锁定,切片 C-0→C-wire,见 C 段「进展」)。
-- **下一步**:**C-reap**(lease-anchored reaper)。C-0 / C-session / C-stage 已落地(2026-06-10,见 C 段进展;真机无孤儿矩阵 8/8,含超额杀与 stage 往返)。C-stage 落地同时解锁:**上传路由翻转**(独立工作包,见「到时再敲定」,可在 C-wire 前后做)。并行待办:arm §B 镜像 id 冻结(机器在位时;注意 C 镜像加 git 后锚点作废,统一在 D 重冻结);沙盒镜像加 git(Dockerfile + verify 探针,可与 C-reap 并行)。
+- **下一步**:**C-wire**(agent MD 权限 + 工具描述能力清单 + mount 契约文案,沙盒首次 live 暴露)。C-0 / C-session / C-stage / C-reap 已落地(2026-06-10,见 C 段进展;真机无孤儿矩阵 12/12,含超额杀、stage 往返、SIGKILL 孤儿 reaper 回收 + 零误杀)。C-stage 落地同时解锁:**上传路由翻转**(独立工作包,见「到时再敲定」,可在 C-wire 前后做)。并行待办:arm §B 镜像 id 冻结(机器在位时;注意 C 镜像加 git 后锚点作废,统一在 D 重冻结);沙盒镜像加 git(Dockerfile + verify 探针,可与 C-wire 并行)。
 - **产物处置(2026-06-05 拍定)**:`feat/sandbox` 这批已验收产物(`sandbox/` 探针 + 构建脚本)**暂留分支不动**,不单独提早合 main。「是否把就绪探针子集(`unshare -U` 闸 + smoke + ENOSYS/uid)提升为通用部署机预检工具」**推迟到 C/D 阶段**——届时有真实第二调用点(每台新沙盒宿主预检 + D 端到端冒烟)再校准边界,现在抽象属投机(YAGNI)。
 
 | 阶段 | 内容 | 状态 |
 |---|---|---|
 | A | artifact 地基(二进制存储 + 多格式上传 + 识图) | **完成**(2026-06-08 三切片 + 2026-06-09 review 加固 + live E2E 用户实测通过) |
 | B | Kylin gVisor 功能验证(内网) | x86_64 **完成**(验证通过+已撤出);arm64 **完成**(2026-06-08,64K→4K 换核后全绿) |
-| C | 沙盒引擎集成(本机 runc 连调) | **进行中**(C-0 / C-session / C-stage 已落地,下一刀 C-reap) |
+| C | 沙盒引擎集成(本机 runc 连调) | **进行中**(C-0 / C-session / C-stage / C-reap 已落地,下一刀 C-wire) |
 | D | 上线前 Kylin 端到端冒烟 | 未开始 |
 
 依赖:C 依赖 A 的二进制存储 + B 的冻结镜像。A 逻辑独立(识图本身就有价值),可先做,但本期不单独合 main —— 见分支策略。
@@ -241,6 +241,13 @@
   - **[架构,用户拍板] host 侧工作区 FS 访问收成一个模块 `sandbox_fs`**:五轮 review 同根(路径 TOCTOU → 目录 TOCTOU → depth fail-open → EMFILE fail-open),元病不是 seam 锋利、是 **fd 钉住 + fail-closed 这两条纪律手写在每个调用点**(persist/mount 在 `sandbox_ops`、watchdog 在 `sandbox_session`),每轮只修一个点、漏掉兄弟点——正是"同型 bug 跨轮 = 抽象边界错了"。把 `read_file`/`write_file`/`measure_usage` + 异常 + 常量收进 `tools/builtin/sandbox_fs.py`(纪律写一次、测一次),persist/mount/watchdog 全迁过去,**业务代码不得再手写 os.walk/open/path 访问工作区**。`measure_usage` 返回 `(bytes, incomplete)`,`incomplete=True` 即 fail-closed。**watchdog 角色明确降级**:它是 best-effort 软配额/可观测,**硬保证是 loop 池子(第 1 层)**;不再要求 host 递归扫描刀枪不入,只要不危险(不走出池 / 不 DoS)+ 不少算(fail-closed)。单测 `test_sandbox_fs.py`(含 RLIMIT 真降 fd 复现)。
   - **真正的 per-turn 强制下沉存储层 = D 段**:host 递归计量从根上是"没有 per-turn FS 配额时的可移植替身";部署侧上 XFS project quota / per-turn loop image 后,`measure_usage` 退化为纯可观测(见 D 段追加 ⑤)。
 
+- **2026-06-10 C-reap 落地**(后端 1205 测试全过 + **真机无孤儿矩阵 12/12 双零残留**,新增 SIGKILL 孤儿 reaper 回收 + 零误杀两条;C 验收标准 ②③ 闭环):
+  - **`SandboxReaper`**(`src/api/services/sandbox_reaper.py`):进程死亡(SIGKILL/OOM,`_wrapped` finally 不执行 → close 不跑、容器归 daemon 不随 worker 死)的二级兜底。**孤儿 = 资源侧双源枚举 − lease 活跃集**:① daemon 上带本命名空间 label 的容器(`containers.list(all=True, filters=...)`,filters 必须 `json.dumps`),② scratch 根直属的 `{conv}__{msg}` 目录,各自减去 `list_active_executions()` 的活跃 (conv,msg)。从 Redis 出发永远发现不了无 lease 的孤儿,故枚举必须资源侧、lease 作减法掩码。
+  - **两条纪律**(plan 锁定 + 前序 review 外推):**① 对账粒度 per-turn**——活跃谓词 `active.get(conv)==msg`(非"conv 有没有活跃 turn"),否则同会话紧接的新 turn 持活 lease 会让上一 turn 漏拆的孤儿被误判有主、永不回收(矩阵 case 8 的 live turn 专验零误杀)。**② scratch 根枚举走 `sandbox_fs.list_dir`(fd 钉住、单层不递归)**——活跃容器能把自己 workspace 内子目录换成池外链,按名字递归会重蹈 watchdog 第 3 轮的目录 TOCTOU;reaper 只需根直属名做差集,够不着这个洞(rmtree 按名安全:scratch 根只 backend 写,容器只 bind 到 workspace/+tmp/、够不着父目录)。
+  - **零误杀靠 lease + grace**:lease 是唯一 liveness 真相源(它恰在 turn 合法在活 worker 跑的期间被续租);资源恒在 lease 之后创建(lease 在 `_wrapped` 入口、容器 lazy 于其后),故"资源在、lease 不在"通常意味 turn 已结束。`SANDBOX_REAP_GRACE_SEC=60` 只回收存活 > 此值的资源,躲开 Redis 副本/scan 可见性差一拍的误杀窗口。**namespace 防御纵深**:daemon filters 已按 `LABEL_NAMESPACE` 过滤,reaper 侧再核一遍(误杀别部署的活容器后果跨部署严重,label 在手边、零成本)。
+  - **多 worker / 韧性**:每 worker 各跑一个 reaper,共享 daemon + Redis 活跃集,重复回收幂等(容器 404 / 目录 FileNotFoundError 当成功);这也缓解"独占 daemon 的 worker 死不重启"残留洞(有 sibling 就扫得到)。单跳异常不杀循环(daemon 不可达 warning 去重:首跳 + 每 10 跳)。`SANDBOX_REAP_ENABLED`(无沙盒部署关掉免空轮询),lifespan 起停(仿 observability,启动失败不挂应用)。单测 `test_sandbox_reaper.py`(fake docker + fake store,12 例覆盖 per-turn 差集/grace/namespace/双源独立/幂等/label 残缺)。
+  - **残留洞**(plan 已记):reap 起效前提是有活 reaper 能扫到孤儿所在 daemon;"一 worker 独占一 daemon 且死不重启"够不着——是否保留宽松固定上限(容器内 `timeout`+`--rm`)当最后兜底,取决于部署拓扑,留 D 按真实拓扑拍。
+
 **C 验收标准**(2026-06-10 定):① 三工具 runc 下 live E2E,含「mount 原 docx → pandoc 转 md → 改 → `--reference-doc` 生成新 docx → persist 新 artifact → 前端可下载」闭环;② **无孤儿矩阵**——`while true`、tool 超时、协作取消、外部取消、SIGKILL worker 五条退出路径各跑一遍,`docker ps` + scratch 根目录双零残留(SIGKILL 条靠 reaper 收);③ reaper 零误杀(活跃 turn 的容器/目录不被收);④ 磁盘配额——超额写入的 turn 被 watchdog 杀(沙盒 sticky 失败、宿主分区无恙;本机以普通目录模拟池子,loop 池子 host-prep 真机验归 D)。
 
 ### D — 上线前 Kylin 端到端冒烟
@@ -292,5 +299,6 @@
 - 2026-06-10 **C-stage review 第 4 轮收口**(一条):第 3 轮加的 depth cap 命中 fail-open(只计浅层)→ 深埋大文件绕过 per-turn 软配额、伤其他 turn。改 `_dir_usage_bytes` 返回 `(total, capped)`,watchdog 命中 capped fail-closed 当超额杀。不取 bounded-fd 重写(可移植版退化 O(D²) syscall,fd-DoS 换 CPU-DoS);depth cap 是对的机制(限 fd 真实资源)、错的是 policy。fail-closed 后计量无"少算"路径。后端 1179 全过;真机矩阵 8/8。详见 C 段「进展」。
 - 2026-06-10 **C-stage review 第 5 轮 + 架构收口**:[P2] openat 失败仍 fail-open(第 4 轮只修显式 depth cap,EMFILE/EACCES 漏了)→ 取反默认:唯一良性 ENOENT,其余 OSError 全 incomplete=True fail-closed,四个测不准点统一。[架构,用户拍板] 五轮同根 = fd 钉住+fail-closed 两条纪律手写在每个调用点、每轮漏一个兄弟点 → 把 host 侧工作区 FS 访问收成 `tools/builtin/sandbox_fs.py`(read_file/write_file/measure_usage,纪律写一次测一次),persist/mount/watchdog 全迁,业务代码不得再手写 os.walk/open/path;watchdog 角色降级为 best-effort 软配额(硬保证=loop 池子)。真正的 per-turn 强制下沉存储层(XFS project quota / per-turn loop)归 D(段加 ⑤)。后端 1191 全过;真机矩阵 8/8;新增 test_sandbox_fs.py(含 RLIMIT 真降 fd 复现)。详见 C 段「进展」。
 - 2026-06-10 **C-stage review 第 6 轮收口**(一条,落在收口后的 `sandbox_fs`):[P2] `write_file` 单调 `os.write` 不看返回值——POSIX 允许短写(大 buffer / 信号中断返回 < len(data) 且不抛),mount 会报成功+原始字节数而 workspace 文件已静默截断(monkeypatch 让 os.write 只吐 3 字节复现)→ 抽 `_write_all` 循环写完,非空 buffer 返 0 字节(磁盘满/内核异常)loud-fail。同母题外延:乐观假设单个 syscall 的契约、未 fail-closed——但这轮收在已集中化的一处、加回归测试即闭(短写完成 + 0 字节 loud)。后端 sandbox 86 全过(+2)。详见 C 段「进展」。
+- 2026-06-10 **C-reap 落地**:`SandboxReaper`(lease-anchored 孤儿回收,进程死亡 finally 不执行的二级兜底)——资源侧双源枚举(daemon 命名空间 label 容器 + scratch 根直属 `{conv}__{msg}` 目录)− `list_active_executions` 活跃集 = 孤儿 → 删。两条纪律:对账粒度 per-turn(`active.get(conv)==msg`,防同会话新 turn 让旧孤儿误判有主)、scratch 根枚举走 `sandbox_fs.list_dir`(fd 钉住单层不递归,继承第 3 轮纪律)。零误杀靠 lease(唯一 liveness 真相源)+ grace(60s 躲可见性差一拍)+ namespace 防御复核;多 worker 幂等;单跳异常不杀循环、失败去重;`SANDBOX_REAP_ENABLED` 关掉免空轮询;lifespan 起停仿 observability。后端 1205 全过(+14);真机矩阵 12/12(新增 SIGKILL 孤儿回收 + 活 turn 零误杀)。C 验收 ②③ 闭环;下一刀 C-wire(沙盒首次 live 暴露)。详见 C 段「进展」。
 <!-- 新日志按日期顺序追加到此行上方 -->
 

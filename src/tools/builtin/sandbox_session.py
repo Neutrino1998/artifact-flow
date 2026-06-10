@@ -61,6 +61,18 @@ def scratch_dir_name(conversation_id: str, message_id: str) -> str:
     return f"{conversation_id}__{message_id}"
 
 
+def parse_scratch_dir_name(name: str) -> Optional[tuple]:
+    """`scratch_dir_name` 的逆 —— reaper 把 scratch 根的目录名反解成 (conv, msg)。
+
+    恰好两段(单个 "__" 分隔)且两段非空才算本系统的 scratch 目录;其余(无 "__"、
+    多段、空段)返回 None,reaper 跳过(不是我们建的,不碰)。
+    """
+    parts = name.split("__")
+    if len(parts) != 2 or not parts[0] or not parts[1]:
+        return None
+    return parts[0], parts[1]
+
+
 class SandboxError(Exception):
     """沙盒错误基类(工具层 catch 它转 loud-fail ToolResult)。"""
 

@@ -186,6 +186,36 @@ def read_file(workspace_dir: str, rel: str, max_bytes: int) -> bytes:
             os.close(fd)
 
 
+def list_dir(root: str) -> List[Tuple[str, bool, float]]:
+    """fd 钉住列 root 的**直属条目**(只一层,绝不递归)→ [(name, is_dir, mtime)]。
+
+    C-reap 的 scratch 第二枚举源。开 `O_DIRECTORY|O_NOFOLLOW` + `scandir(fd)`,
+    每条目 `entry.stat(follow_symlinks=False)` —— 与 measure_usage 同纪律,但**刻意
+    不下探**:reaper 只需根目录直属的 `{conv}__{msg}` 目录名做 label 反解差集,
+    按名字递归进子目录会重蹈 watchdog 的目录 TOCTOU(活跃容器能把子目录换成池外链)。
+    要看子树内容才走 measure_usage。
+
+    root 不存在 → []。其余 OSError 上抛(reaper 这一跳 fail-soft 记日志,与计量的
+    fail-closed 语义不同:枚举不全只是少收一个孤儿,下个 tick 再收,不影响安全)。
+    """
+    try:
+        root_fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    except FileNotFoundError:
+        return []
+    out: List[Tuple[str, bool, float]] = []
+    try:
+        with os.scandir(root_fd) as scan:
+            for entry in scan:
+                try:
+                    st = entry.stat(follow_symlinks=False)
+                except OSError:
+                    continue  # 条目刚消失/不可 stat:跳过,下个 tick 再说
+                out.append((entry.name, stat.S_ISDIR(st.st_mode), st.st_mtime))
+    finally:
+        os.close(root_fd)
+    return out
+
+
 def _charge_blocks(st: os.stat_result) -> int:
     """一条 stat 结果的计费字节 = max(块占用 st_blocks×512, 每条目最低)。
     取不到块数时以表观大小代块占用。"""

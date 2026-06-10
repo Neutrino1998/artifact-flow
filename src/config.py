@@ -187,6 +187,13 @@ class Settings(BaseSettings):
     SANDBOX_PERSIST_MAX_TEXT_BYTES: int = 20 * 1024 * 1024  # persist 文本判定上限:超此即使可解码也按 blob 存
                                                             # (对齐 MAX_TEXT_CONVERT_BYTES 的量级;blob 上限
                                                             # 复用 ARTIFACT_BLOB_MAX_BYTES,写入侧守门)
+    # lease-anchored reaper(C-reap):进程死亡(SIGKILL/OOM,_wrapped finally 不执行)
+    # 的二级兜底。资源侧双源枚举(daemon label 容器 + scratch 根目录)− list_active_executions
+    # 活跃集 = 孤儿 → 删。最坏烧 CPU 时长 = lease TTL 剩余 + 本间隔(有界,~分钟级)。
+    SANDBOX_REAP_ENABLED: bool = True        # 无沙盒部署(无 docker / 不授 bash)置 False,免空轮询刷日志
+    SANDBOX_REAP_INTERVAL_SEC: int = 60      # reaper 周期扫间隔(启动立即先扫一次)
+    SANDBOX_REAP_GRACE_SEC: int = 60         # 只回收存活 > 此值且无活跃 lease 的资源:躲开
+                                             # "刚 lazy 创建 / scratch 刚建、lease 可见性差一拍"的误杀竞态
 
     # SSRF / 外联工具防护（隐藏常量，不暴露 API / 工具参数）
     WEB_FETCH_MAX_BYTES: int = 20 * 1024 * 1024   # fallback 下载体上限（解压后字节），
