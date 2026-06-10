@@ -42,8 +42,8 @@ class TestBashTool:
         assert [p.name for p in params] == ["command"]
 
     def test_factory(self):
-        tools = create_sandbox_tools(FakeSession())
-        assert [t.name for t in tools] == ["bash"]
+        tools = create_sandbox_tools(FakeSession(), object())
+        assert [t.name for t in tools] == ["bash", "mount", "persist"]
 
     async def test_zero_exit_returns_plain_output(self):
         session = FakeSession(result=_result())

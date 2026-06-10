@@ -60,6 +60,25 @@ def scratch_dir_name(conversation_id: str, message_id: str) -> str:
     return f"{conversation_id}__{message_id}"
 
 
+def _dir_usage_bytes(root: str) -> int:
+    """目录树的**块占用**(st_blocks×512),非表观大小。
+
+    watchdog 软配额按它计:小文件每个至少占一个 fs 块,表观大小会低估池子
+    真实消耗(探针①实测 50k×100B 表观 4.8MB / 块占用 195MB,~40×)。
+    lstat 不追 symlink —— 容器内造的链接不会把池外目标算进配额。
+    """
+    total = 0
+    for dirpath, _dirnames, filenames in os.walk(root):
+        for name in filenames:
+            try:
+                st = os.lstat(os.path.join(dirpath, name))
+                blocks = getattr(st, "st_blocks", None)
+                total += blocks * 512 if blocks is not None else st.st_size
+            except OSError:
+                pass  # 容器并发增删文件,消失的条目跳过
+    return total
+
+
 class SandboxError(Exception):
     """沙盒错误基类(工具层 catch 它转 loud-fail ToolResult)。"""
 
@@ -104,14 +123,16 @@ class SandboxSession:
         self._docker: Optional["aiodocker.Docker"] = None
         self._container = None
         self._closed = False
-        # 创建失败后本 turn 不重试(loud-fail 一次,后续调用立即复述原因):
-        # 失败原因多为环境性(镜像缺失/daemon 不可达),turn 内重试只会重复烧启动超时。
-        self._start_failure: Optional[str] = None
+        # sticky 失败通道:创建失败 / 准入水位拒绝 / watchdog 超额杀,本 turn 不重试
+        # (loud-fail 一次,后续调用立即复述原因)。失败原因多为环境性(镜像缺失 /
+        # daemon 不可达 / 池子满),turn 内重试只会重复烧启动超时或重蹈超额。
+        self._sticky_failure: Optional[str] = None
         self._scratch_dir = os.path.join(
             config.SANDBOX_SCRATCH_ROOT,
             scratch_dir_name(conversation_id, message_id),
         )
         self._scratch_created = False
+        self._watchdog_task: Optional[asyncio.Task] = None
 
     @property
     def started(self) -> bool:
@@ -121,6 +142,22 @@ class SandboxSession:
     def scratch_dir(self) -> str:
         return self._scratch_dir
 
+    @property
+    def workspace_dir(self) -> str:
+        """宿主侧工作区目录(容器内 /workspace 的 bind 源)。
+
+        mount 在此物化 artifact、persist 从此读回 —— host 直写直读,不走
+        docker cp/exec(C′ 锁定 staging 机制不变的理由之一)。
+        """
+        return os.path.join(self._scratch_dir, "workspace")
+
+    @property
+    def tmp_dir(self) -> str:
+        """宿主侧 /tmp bind 源:堵 rootfs overlay upper 的无界写洞 —— ReadonlyRootfs
+        下容器所有可写路径(/workspace、/tmp、HOME=/tmp/home)全落本 turn scratch,
+        统一进池子、统一受 watchdog 计量。"""
+        return os.path.join(self._scratch_dir, "tmp")
+
     # ------------------------------------------------------------------
     # 容器生命周期
     # ------------------------------------------------------------------
@@ -128,8 +165,15 @@ class SandboxSession:
     def _container_config(self) -> dict:
         mem_bytes = config.SANDBOX_MEM_LIMIT_MB * 1024 * 1024
         host_config = {
-            "Binds": [f"{self._scratch_dir}:{WORKSPACE_MOUNT}:rw"],
+            "Binds": [
+                f"{self.workspace_dir}:{WORKSPACE_MOUNT}:rw",
+                # /tmp 入池:ReadonlyRootfs 堵死 overlay upper(容器 /tmp 本会写
+                # 宿主 /var/lib/docker,无界),可写路径全部显式 bind 进本 turn
+                # scratch → 统一受 loop 池子硬墙 + watchdog 软配额管辖。
+                f"{self.tmp_dir}:/tmp:rw",
+            ],
             "NetworkMode": "none",                # 原则 7:默认全禁网
+            "ReadonlyRootfs": True,
             "Memory": mem_bytes,
             "MemorySwap": mem_bytes,              # 同值 = 禁 swap
             "NanoCpus": int(config.SANDBOX_CPU_LIMIT * 1_000_000_000),
@@ -143,6 +187,14 @@ class SandboxSession:
             # 常驻待 exec;镜像默认 CMD 是裸 python3 REPL,显式覆盖
             "Cmd": ["sleep", "infinity"],
             "WorkingDir": WORKSPACE_MOUNT,
+            # HOME/缓存写点重定向进 /tmp(镜像 HOME=/home/sandbox 在只读 rootfs 下
+            # 不可写)。探针③:matplotlib 无此重定向会降级到逐次建临时缓存目录+警告,
+            # 设 MPLCONFIGDIR/XDG_CACHE_HOME 后全绿;pandoc 本就不依赖 HOME。
+            "Env": [
+                "HOME=/tmp/home",
+                "XDG_CACHE_HOME=/tmp/home/.cache",
+                "MPLCONFIGDIR=/tmp/home/.mpl",
+            ],
             "Labels": {
                 SANDBOX_LABEL: "1",
                 LABEL_NAMESPACE: config.REDIS_KEY_PREFIX or "default",
@@ -153,24 +205,52 @@ class SandboxSession:
         }
 
     def _prepare_scratch_dir(self) -> None:
-        os.makedirs(self._scratch_dir, exist_ok=True)
         # 容器内 uid 1000(sandbox)要可写,backend 进程 uid 不定 → 0o777。
         # makedirs 的 mode 被 umask 掩掉,必须显式 chmod。真实 Linux 上的属主/
         # 权限策略是 D 阶段验收项(本机 Docker Desktop 感知不到 uid 错配)。
-        os.chmod(self._scratch_dir, 0o777)
+        # tmp/home 预建:HOME 重定向指向它,部分工具不自建 HOME 目录。
+        for d in (
+            self._scratch_dir,
+            self.workspace_dir,
+            self.tmp_dir,
+            os.path.join(self.tmp_dir, "home"),
+        ):
+            os.makedirs(d, exist_ok=True)
+            os.chmod(d, 0o777)
         self._scratch_created = True
+
+    def _check_pool_admission(self) -> None:
+        """起容器准入水位:scratch 根所在 fs(prod=loop 池子)剩余空间低于阈值时
+        拒绝新沙盒(O(1) statvfs)。已在跑的 turn 不受影响 —— 软配额归 watchdog。"""
+        st = os.statvfs(config.SANDBOX_SCRATCH_ROOT)
+        free_bytes = st.f_bavail * st.f_frsize
+        min_free = config.SANDBOX_POOL_MIN_FREE_MB * 1024 * 1024
+        if free_bytes < min_free:
+            # 容量问题 ops 必须看到,但属预期内防护(非故障)→ warning
+            logger.warning(
+                f"Sandbox pool low: {free_bytes / 1024 / 1024:.0f}MB free at "
+                f"{config.SANDBOX_SCRATCH_ROOT} (admission floor "
+                f"{config.SANDBOX_POOL_MIN_FREE_MB}MB); refusing sandbox for "
+                f"{self.message_id}"
+            )
+            raise SandboxUnavailableError(
+                "Sandbox storage is currently exhausted. "
+                "Sandbox tools are unavailable for this turn."
+            )
 
     async def ensure_container(self) -> None:
         """lazy 起容器(幂等)。失败 → SandboxUnavailableError,本 turn 不再重试。"""
         if self._closed:
             raise SandboxUnavailableError("Sandbox session is already closed for this turn.")
-        if self._start_failure is not None:
-            raise SandboxUnavailableError(self._start_failure)
+        if self._sticky_failure is not None:
+            raise SandboxUnavailableError(self._sticky_failure)
         if self._container is not None:
             return
 
         try:
             async with asyncio.timeout(config.SANDBOX_START_TIMEOUT):
+                os.makedirs(config.SANDBOX_SCRATCH_ROOT, exist_ok=True)
+                self._check_pool_admission()
                 self._prepare_scratch_dir()
                 if self._docker is None:
                     self._docker = self._docker_factory()
@@ -182,7 +262,11 @@ class SandboxSession:
                 self._container = container
                 await container.start()
         except asyncio.CancelledError:
-            # 取消不是失败:不写 _start_failure,半成品交给 turn 末 close()/reaper
+            # 取消不是失败:不写 _sticky_failure,半成品交给 turn 末 close()/reaper
+            raise
+        except SandboxUnavailableError as e:
+            # 准入水位拒绝:消息已是模型面文案、日志已记,只补 sticky,不再 rewrap
+            self._sticky_failure = str(e)
             raise
         except DockerError as e:
             if e.status == 404 and config.SANDBOX_IMAGE in str(e.message):
@@ -203,7 +287,7 @@ class SandboxSession:
                 logger.exception(
                     f"Sandbox container create/start failed for {self.message_id}: {e}"
                 )
-            self._start_failure = msg
+            self._sticky_failure = msg
             raise SandboxUnavailableError(msg) from e
         except TimeoutError as e:
             msg = (
@@ -214,18 +298,90 @@ class SandboxSession:
                 f"Sandbox container start timed out for {self.message_id} "
                 f"(daemon unresponsive?)"
             )
-            self._start_failure = msg
+            self._sticky_failure = msg
             raise SandboxUnavailableError(msg) from e
         except Exception as e:
             msg = "Sandbox container failed to start. Sandbox tools are unavailable for this turn."
             logger.exception(f"Sandbox container create/start failed for {self.message_id}: {e}")
-            self._start_failure = msg
+            self._sticky_failure = msg
             raise SandboxUnavailableError(msg) from e
+
+        # 软配额 watchdog:容器活着的期间周期巡检本 turn scratch 的块占用,
+        # 超额 → 杀容器 + sticky。close() 先 cancel 它再拆容器。
+        self._watchdog_task = asyncio.create_task(self._watchdog_loop())
 
         logger.info(
             f"Sandbox container started for {self.message_id} "
             f"(image={config.SANDBOX_IMAGE}, runtime={config.SANDBOX_RUNTIME or 'default'})"
         )
+
+    async def _watchdog_loop(self) -> None:
+        """per-turn 软配额巡检(C′ 第二层;第一层 loop 池子硬墙兜住其 race 窗口)。
+
+        du(块占用)在 to_thread 跑;超 SANDBOX_WORKSPACE_QUOTA_MB → sticky +
+        杀容器。探针②:杀容器时 in-flight exec 的 stream 正常 EOF、exit=137,
+        exec() 末尾的 sticky 检查负责把它归因成配额失败而非裸 137。
+        """
+        quota_bytes = config.SANDBOX_WORKSPACE_QUOTA_MB * 1024 * 1024
+        try:
+            while True:
+                await asyncio.sleep(config.SANDBOX_WATCHDOG_INTERVAL_SEC)
+                try:
+                    usage = await asyncio.to_thread(_dir_usage_bytes, self._scratch_dir)
+                except Exception:
+                    logger.exception(
+                        f"Sandbox watchdog scan failed for {self.message_id}; retrying next tick"
+                    )
+                    continue
+                if usage > quota_bytes:
+                    await self._kill_over_quota(usage)
+                    return
+        except asyncio.CancelledError:
+            raise
+
+    async def _kill_over_quota(self, usage: int) -> None:
+        """超额处置:先置 sticky(in-flight exec 与后续调用都按它归因),再杀容器。"""
+        self._sticky_failure = (
+            f"Sandbox workspace exceeded the "
+            f"{config.SANDBOX_WORKSPACE_QUOTA_MB}MB disk quota and was terminated. "
+            "Sandbox tools are unavailable for this turn."
+        )
+        # 模型行为触发、预期内防护、已处置 → warning
+        logger.warning(
+            f"Sandbox workspace over quota for {self.message_id}: "
+            f"{usage / 1024 / 1024:.0f}MB used "
+            f"(quota {config.SANDBOX_WORKSPACE_QUOTA_MB}MB); killing container"
+        )
+        container = self._container
+        if container is None:
+            return
+        # 删**成功**才交出所有权(置 None):失败 / 弃等 / 被 close() cancel 打断时
+        # 句柄必须留着,close() 会重删(404 容忍)—— 否则两边都不删 = 孤儿
+        # (真机矩阵 case 6 实测踩中:close cancel 了 await 中的 delete)。
+        try:
+            # 有界弃等:daemon 卡死时不挂死 watchdog task(残留等 close()/reaper)
+            async with asyncio.timeout(EXEC_ABANDON_GRACE_SEC):
+                await container.delete(force=True)
+            self._container = None
+        except asyncio.CancelledError:
+            raise
+        except DockerError as e:
+            if e.status == 404:
+                self._container = None
+            else:
+                logger.error(
+                    f"Over-quota sandbox container delete failed for {self.message_id} "
+                    f"(status={e.status}); close()/reaper will collect it"
+                )
+        except TimeoutError:
+            logger.error(
+                f"Over-quota sandbox container delete timed out for {self.message_id}; "
+                "close()/reaper will collect it"
+            )
+        except Exception:
+            logger.exception(
+                f"Over-quota sandbox container delete failed for {self.message_id}"
+            )
 
     async def close(self) -> None:
         """拆容器 + 删 scratch + 关 client。幂等;每步独立 best-effort。
@@ -236,6 +392,17 @@ class SandboxSession:
         if self._closed:
             return
         self._closed = True
+
+        # 先停 watchdog 再拆容器:避免它和 close 并发删同一容器 / 扫已删目录
+        watchdog, self._watchdog_task = self._watchdog_task, None
+        if watchdog is not None:
+            watchdog.cancel()
+            try:
+                await watchdog
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                logger.exception(f"Sandbox watchdog teardown failed for {self.message_id}")
 
         container, self._container = self._container, None
         if container is not None:
@@ -278,6 +445,13 @@ class SandboxSession:
         command 整体是一个 argv 元素,无 shell 引号问题;到点 KILL 真杀。
         """
         await self.ensure_container()
+        # 局部引用:watchdog 超额杀会把 self._container 置 None(与本协程并发)
+        container = self._container
+        if container is None:
+            raise SandboxUnavailableError(
+                self._sticky_failure
+                or "Sandbox session is already closed for this turn."
+            )
 
         argv = [
             "timeout",
@@ -291,7 +465,7 @@ class SandboxSession:
         started_at = loop.time()
         try:
             async with asyncio.timeout(config.SANDBOX_COMMAND_TIMEOUT + EXEC_ABANDON_GRACE_SEC):
-                exec_ = await self._container.exec(
+                exec_ = await container.exec(
                     argv, stdout=True, stderr=True, workdir=WORKSPACE_MOUNT
                 )
                 output, truncated = await self._drain_exec(exec_)
@@ -308,6 +482,24 @@ class SandboxSession:
                 f"{config.SANDBOX_COMMAND_TIMEOUT}s command timeout). "
                 "The sandbox will be torn down at the end of this turn."
             ) from e
+        except DockerError as e:
+            # 容器中途消失(watchdog 超额杀 / 外力 rm):优先按 sticky 归因
+            if self._sticky_failure is not None:
+                raise SandboxUnavailableError(self._sticky_failure) from e
+            logger.error(
+                f"Sandbox container died during exec for {self.message_id} "
+                f"(Docker error {e.status})"
+            )
+            self._sticky_failure = (
+                "The sandbox container died while the command was running. "
+                "Sandbox tools are unavailable for this turn."
+            )
+            raise SandboxUnavailableError(self._sticky_failure) from e
+
+        # 探针②:watchdog 杀容器时 in-flight exec 多半正常返回 exit=137(stream
+        # EOF、ExitCode 可解析)—— 裸 137 会被误读;sticky 已置时按配额失败归因。
+        if self._sticky_failure is not None:
+            raise SandboxUnavailableError(self._sticky_failure)
 
         return SandboxExecResult(
             exit_code=exit_code,

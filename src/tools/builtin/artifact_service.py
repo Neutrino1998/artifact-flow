@@ -294,13 +294,15 @@ class ArtifactService:
         metadata: Optional[Dict] = None,
         blob: Optional[bytes] = None,
         blob_content_type: Optional[str] = None,
+        source: str = "user_upload",
     ) -> Tuple[bool, str, Optional[Dict]]:
-        """从用户上传文件 **stage** 一个 artifact 进 WorkingSet(不即时 commit)。
+        """从一个「文件」**stage** 一个 artifact 进 WorkingSet(不即时 commit)。
 
         与模型自建走同一 write-back 路径:mark_new → 发 ARTIFACT_CREATED → 随 turn 末
-        flush_all 落库。由 execute_loop 在 turn 起点调用(uploads closure-carry 进引擎)。
-        因此上传 turn 中途死 = 与模型产物一致地丢失(ephemeral 语义),用户从本地重新
-        选文件重试(composer 发送即清空,不做保留)。`_normalize` + dedup 在此完成。
+        flush_all 落库。两个调用方:① 用户上传(execute_loop 在 turn 起点调用,uploads
+        closure-carry 进引擎;turn 中途死 = 与模型产物一致地丢失,用户重选文件重试);
+        ② 沙盒 persist(source="sandbox",同一套 `_normalize` + `_N` dedup —— persist
+        永远产新 artifact 的机制即在此)。
         """
         artifact_id = _normalize_filename_to_id(filename)
 
@@ -339,7 +341,7 @@ class ArtifactService:
 
         title = os.path.splitext(filename)[0]
         upload_metadata = dict(metadata or {})
-        upload_metadata["original_filename"] = filename
+        upload_metadata["original_filename"] = filename  # 下载文件名;persist 件同样适用
         # blob 的真实 MIME 存入 metadata,供 raw 端点按原件 MIME 发(additive 富格式下
         # artifact.content_type 可能是转换后的 text/markdown,与 blob 真实类型不同)。
         if blob is not None:
@@ -354,7 +356,7 @@ class ArtifactService:
                 content=content,
                 current_version=1,
                 metadata=upload_metadata,
-                source="user_upload",
+                source=source,
                 blob=blob,
             )
             await self._register_new(session_id, memory)
@@ -365,7 +367,7 @@ class ArtifactService:
                 "content_type": content_type,
                 "title": title,
                 "current_version": 1,
-                "source": "user_upload",
+                "source": source,
                 "original_filename": filename,
                 "has_blob": blob is not None,
             }

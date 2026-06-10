@@ -3,24 +3,68 @@
 
 三个分立动词(bash / mount / persist)共享一个 per-turn SandboxSession
 (拍定 2026-06-03:分立参数面更小、对小模型更可读;共享 session 是实现层事实)。
-本切片(C-session)先落 bash;mount / persist 在 C-stage。
+lazy 创建 key 在「首个沙盒工具调用」—— mount 也会起容器(模型可能先 mount 再 bash)。
 
 工厂 create_sandbox_tools 由 controller_factory 按请求调用(同
-create_artifact_tools idiom),session 构造注入。
+create_artifact_tools idiom),session / artifact_service 构造注入。
+
+staging 走宿主直写直读(mount 写 / persist 读 session.workspace_dir),不走
+docker cp/exec —— C′ 锁定 loop 池子方案时保住的机制(tmpfs 方案会逼 staging
+改 exec+tar 流)。读写两侧都做 realpath 圈地 + O_NOFOLLOW:容器内代码(含
+bash 留下的后台进程)能在工作区造任意 symlink,宿主侧跟链会读/写池外文件。
 """
 
-from typing import List
+import asyncio
+import mimetypes
+import os
+from typing import List, Optional, Tuple
 
 from config import config
 from tools.base import BaseTool, ToolParameter, ToolPermission, ToolResult
+from tools.builtin.artifact_service import ArtifactService
 from tools.builtin.sandbox_session import (
     SandboxError,
     SandboxSession,
     WORKSPACE_MOUNT,
 )
+from utils.doc_converter import EXTENSION_MIME_MAP
 from utils.logger import get_logger
 
 logger = get_logger("ArtifactFlow")
+
+
+def _resolve_in_workspace(workspace_dir: str, rel: str) -> Optional[str]:
+    """把工作区相对路径解析成宿主路径;逃逸(../、symlink 指池外)→ None。
+
+    realpath 解析全部链接后做前缀圈地 —— 圈地对象是解析**后**的真实路径,
+    容器内造的 symlink 指向池外时在此被拒。
+    """
+    ws_real = os.path.realpath(workspace_dir)
+    target = os.path.realpath(os.path.join(ws_real, rel))
+    if target == ws_real or not target.startswith(ws_real + os.sep):
+        return None
+    return target
+
+
+def _write_file_nofollow(path: str, data: bytes) -> None:
+    """O_NOFOLLOW 写(同步,调用方 to_thread):先摘旧条目再建新文件,
+    最终组件是 symlink 时 ELOOP 失败而非跟链写池外。"""
+    try:
+        os.unlink(path)
+    except FileNotFoundError:
+        pass
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o666)
+    try:
+        os.write(fd, data)
+    finally:
+        os.close(fd)
+
+
+def _read_file_nofollow(path: str) -> bytes:
+    """O_NOFOLLOW 读(同步,调用方 to_thread)。"""
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+    with os.fdopen(fd, "rb") as f:
+        return f.read()
 
 
 class BashTool(BaseTool):
@@ -99,8 +143,274 @@ class BashTool(BaseTool):
         )
 
 
-def create_sandbox_tools(session: SandboxSession) -> List[BaseTool]:
-    """创建沙盒工具(工厂,按请求调用;C-stage 在此追加 mount/persist)。"""
+class MountArtifactTool(BaseTool):
+    """把一个 artifact 物化进沙盒工作区(显式 stage-in,原则 4)。
+
+    - 文本 artifact:WorkingSet overlay 的当前内容(本轮 dirty/new 必须可 mount,
+      直读 DB 是空的)按 UTF-8 写盘;blob artifact:原始字节(本轮 staged 上传
+      经 get_blob 读 ArtifactMemory.blob,其余走 DB)。格式判别 = 有无 blob。
+    - on-disk 名 = artifact id(决策 2:id 已是 fs-safe 句柄);重复 mount 同一
+      id = 刷新副本(覆写)。
+    - 返回纯事实(容器内路径/字节/MIME);"binary 须 mount" 的契约文案归
+      inventory/read_artifact(C-wire),场景 how-to 归 skill。
+    """
+
+    def __init__(self, session: SandboxSession, service: ArtifactService):
+        super().__init__(
+            name="mount",
+            description=(
+                "Copy an artifact into the sandbox workspace as a file at "
+                f"{WORKSPACE_MOUNT}/<artifact_id>, so bash commands can operate on it. "
+                "Text artifacts are written as UTF-8 (including edits made earlier in "
+                "this turn); binary artifacts (docx/pdf/images) are written as their "
+                "original bytes. Mounting the same artifact again refreshes the copy."
+            ),
+            permission=ToolPermission.AUTO,
+        )
+        self._session = session
+        self._service = service
+
+    def get_parameters(self) -> List[ToolParameter]:
+        return [
+            ToolParameter(
+                name="artifact_id",
+                type="string",
+                description="ID of the artifact to copy into the sandbox workspace.",
+                required=True,
+            ),
+        ]
+
+    async def execute(self, artifact_id: str) -> ToolResult:
+        artifact_id = artifact_id.strip()
+        if not artifact_id:
+            return ToolResult(success=False, error="Parameter 'artifact_id' must not be empty.")
+
+        session_id = self._service.current_session_id
+        if not session_id:
+            return ToolResult(success=False, error="No active session")
+
+        memory = await self._service.get_artifact(session_id, artifact_id)
+        if memory is None:
+            return ToolResult(
+                success=False, error=f"Artifact '{artifact_id}' not found in this session."
+            )
+
+        # 字节来源二分(决策:blob-only 后每 artifact 单一权威载体)
+        if (memory.metadata or {}).get("blob_content_type"):
+            blob_info = await self._service.get_blob(session_id, artifact_id)
+            if blob_info is None:
+                return ToolResult(
+                    success=False,
+                    error=f"Artifact '{artifact_id}' has no stored binary content.",
+                )
+            data, mime = blob_info["data"], blob_info["content_type"]
+        else:
+            data, mime = memory.content.encode("utf-8"), memory.content_type
+
+        try:
+            await self._session.ensure_container()
+        except SandboxError as e:
+            return ToolResult(success=False, error=str(e))
+
+        # 圈地:id 模式([\w\-.]{1,64})已排除路径分隔符,只需挡 "."/".."。
+        # 这里**不用** realpath(persist 那套):目标位置可能被容器内代码植了指向
+        # 池外的 symlink,realpath 会把"待替换的恶意链接"误判为逃逸;mount 语义是
+        # 替换该条目 —— _write_file_nofollow 先 unlink 再 O_NOFOLLOW 新建,链接
+        # 本体被摘除、绝不跟链写池外。
+        if artifact_id in (".", "..") or "/" in artifact_id or os.sep in artifact_id:
+            return ToolResult(
+                success=False,
+                error=f"Artifact id '{artifact_id}' does not map to a valid workspace filename.",
+            )
+        target = os.path.join(self._session.workspace_dir, artifact_id)
+        try:
+            await asyncio.to_thread(_write_file_nofollow, target, data)
+        except OSError as e:
+            logger.error(
+                f"Sandbox mount write failed for '{artifact_id}' "
+                f"(msg={self._session.message_id}): {e}"
+            )
+            return ToolResult(
+                success=False, error=f"Failed to write '{artifact_id}' into the workspace."
+            )
+
+        container_path = f"{WORKSPACE_MOUNT}/{artifact_id}"
+        return ToolResult(
+            success=True,
+            data=f"Mounted artifact '{artifact_id}' at {container_path} ({len(data)} bytes, {mime}).",
+            metadata={"path": container_path, "bytes": len(data), "content_type": mime},
+        )
+
+
+class PersistFileTool(BaseTool):
+    """把工作区文件回写成**新 artifact**(显式 stage-out,原则 4)。
+
+    - 永远产新 artifact(同名 `_N` dedup;blob 不版本化、不覆写 —— 二进制
+      契约 = 不可变单版,文本 = 可编辑版本化)。
+    - persist 落回来就是一次普通 artifact 写:进 WorkingSet,随 turn 末
+      flush_all 落库,与 create_artifact 同路。
+    - 文本/二进制二分:可严格 UTF-8 解码且 ≤ SANDBOX_PERSIST_MAX_TEXT_BYTES
+      → 文本 artifact;否则 blob(MIME 按扩展名猜,兜底 octet-stream)。
+    """
+
+    def __init__(self, session: SandboxSession, service: ArtifactService):
+        super().__init__(
+            name="persist",
+            description=(
+                "Save a file from the sandbox workspace as a NEW artifact. The sandbox "
+                "workspace is discarded when the turn ends — persist is the only way to "
+                "keep results. Text files become editable text artifacts; binary files "
+                "(docx/xlsx/images/archives...) become artifacts the user can download. "
+                "Always creates a new artifact; an existing id gets a numeric suffix."
+            ),
+            permission=ToolPermission.AUTO,
+        )
+        self._session = session
+        self._service = service
+
+    def get_parameters(self) -> List[ToolParameter]:
+        return [
+            ToolParameter(
+                name="path",
+                type="string",
+                description=(
+                    f"Path of the file to save, relative to {WORKSPACE_MOUNT} "
+                    "(e.g. 'report.docx' or 'out/plot.png')."
+                ),
+                required=True,
+            ),
+        ]
+
+    @staticmethod
+    def _classify(filename: str, data: bytes) -> Tuple[Optional[str], str]:
+        """(text_content, mime):text_content=None 表示按 blob 存。"""
+        if len(data) <= config.SANDBOX_PERSIST_MAX_TEXT_BYTES:
+            try:
+                text = data.decode("utf-8", errors="strict")
+            except UnicodeDecodeError:
+                text = None
+            if text is not None:
+                ext = os.path.splitext(filename)[1].lower()
+                return text, EXTENSION_MIME_MAP.get(ext, "text/plain")
+        mime = mimetypes.guess_type(filename)[0] or "application/octet-stream"
+        return None, mime
+
+    async def execute(self, path: str) -> ToolResult:
+        raw_path = path.strip()
+        if not raw_path:
+            return ToolResult(success=False, error="Parameter 'path' must not be empty.")
+
+        session_id = self._service.current_session_id
+        if not session_id:
+            return ToolResult(success=False, error="No active session")
+
+        if not self._session.started:
+            return ToolResult(
+                success=False,
+                error="The sandbox has not been used this turn; there is nothing to persist.",
+            )
+
+        rel = raw_path
+        if rel.startswith("/"):
+            if rel == WORKSPACE_MOUNT or rel.startswith(WORKSPACE_MOUNT + "/"):
+                rel = rel[len(WORKSPACE_MOUNT):].lstrip("/")
+            else:
+                return ToolResult(
+                    success=False,
+                    error=f"Only files under {WORKSPACE_MOUNT} can be persisted.",
+                )
+        if not rel:
+            return ToolResult(success=False, error="Parameter 'path' must name a file.")
+
+        host_path = _resolve_in_workspace(self._session.workspace_dir, rel)
+        if host_path is None:
+            return ToolResult(
+                success=False,
+                error=f"Path '{raw_path}' escapes the sandbox workspace.",
+            )
+
+        try:
+            st = os.lstat(host_path)
+        except FileNotFoundError:
+            return ToolResult(
+                success=False, error=f"File '{raw_path}' not found in the workspace."
+            )
+        if os.path.isdir(host_path):
+            return ToolResult(
+                success=False,
+                error=(
+                    f"'{raw_path}' is a directory. Archive it first via bash "
+                    "(e.g. `zip -r out.zip <dir>`) and persist the archive."
+                ),
+            )
+        if st.st_size > config.ARTIFACT_BLOB_MAX_BYTES:
+            max_mb = config.ARTIFACT_BLOB_MAX_BYTES / 1024 / 1024
+            return ToolResult(
+                success=False,
+                error=(
+                    f"File too large to persist: {st.st_size / 1024 / 1024:.1f}MB "
+                    f"(max {max_mb:.0f}MB)"
+                ),
+            )
+
+        try:
+            data = await asyncio.to_thread(_read_file_nofollow, host_path)
+        except OSError as e:
+            logger.error(
+                f"Sandbox persist read failed for '{raw_path}' "
+                f"(msg={self._session.message_id}): {e}"
+            )
+            return ToolResult(
+                success=False, error=f"Failed to read '{raw_path}' from the workspace."
+            )
+
+        filename = os.path.basename(rel)
+        text, mime = self._classify(filename, data)
+        if text is not None:
+            success, message, info = await self._service.create_from_upload(
+                session_id=session_id,
+                filename=filename,
+                content=text,
+                content_type=mime,
+                source="sandbox",
+            )
+        else:
+            # C-0 blob-only 约定:无文本表示,content="",content_type=真实 MIME
+            success, message, info = await self._service.create_from_upload(
+                session_id=session_id,
+                filename=filename,
+                content="",
+                content_type=mime,
+                blob=data,
+                blob_content_type=mime,
+                source="sandbox",
+            )
+        if not success:
+            return ToolResult(success=False, error=message)
+
+        artifact_id = info["id"]
+        kind = "editable text artifact" if text is not None else "binary artifact (user-downloadable)"
+        return ToolResult(
+            success=True,
+            data=(
+                f"Persisted '{raw_path}' as new artifact '{artifact_id}' "
+                f"({len(data)} bytes, {mime}, {kind})."
+            ),
+            metadata={
+                "artifact_id": artifact_id,
+                "bytes": len(data),
+                "content_type": mime,
+                "has_blob": text is None,
+            },
+        )
+
+
+def create_sandbox_tools(
+    session: SandboxSession, artifact_service: ArtifactService
+) -> List[BaseTool]:
+    """创建沙盒工具(工厂,按请求调用,同 create_artifact_tools idiom)。"""
     return [
         BashTool(session),
+        MountArtifactTool(session, artifact_service),
+        PersistFileTool(session, artifact_service),
     ]

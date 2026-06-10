@@ -154,8 +154,13 @@ class TestLifecycle:
         await session.ensure_container()
         assert os.path.isdir(session.scratch_dir)
         assert os.path.basename(session.scratch_dir) == scratch_dir_name("conv-abc", "msg-def")
+        # workspace/tmp 子目录布局(双 bind 源)+ HOME 预建(部分工具不自建)
+        assert os.path.isdir(session.workspace_dir)
+        assert os.path.isdir(session.tmp_dir)
+        assert os.path.isdir(os.path.join(session.tmp_dir, "home"))
         # 容器内 uid 1000 须可写(D 阶段在真实 Linux 上复验属主策略)
-        assert os.stat(session.scratch_dir).st_mode & 0o777 == 0o777
+        for d in (session.scratch_dir, session.workspace_dir, session.tmp_dir):
+            assert os.stat(d).st_mode & 0o777 == 0o777
 
     async def test_container_config_is_code_sided(self, session, fake_docker, monkeypatch):
         monkeypatch.setattr(config, "SANDBOX_RUNTIME", "runsc")
@@ -168,7 +173,14 @@ class TestLifecycle:
         assert cfg["Cmd"] == ["sleep", "infinity"]
         assert cfg["WorkingDir"] == WORKSPACE_MOUNT
         assert host["NetworkMode"] == "none"
-        assert host["Binds"] == [f"{session.scratch_dir}:{WORKSPACE_MOUNT}:rw"]
+        # 双 bind:workspace + /tmp 入池;rootfs 只读堵 overlay upper 无界写
+        assert host["Binds"] == [
+            f"{session.workspace_dir}:{WORKSPACE_MOUNT}:rw",
+            f"{session.tmp_dir}:/tmp:rw",
+        ]
+        assert host["ReadonlyRootfs"] is True
+        # HOME/缓存写点重定向进 /tmp(探针③:matplotlib 否则降级+警告)
+        assert "HOME=/tmp/home" in cfg["Env"]
         assert host["Runtime"] == "runsc"
         assert host["AutoRemove"] is False
         assert host["Memory"] == host["MemorySwap"]  # 禁 swap
@@ -341,3 +353,85 @@ class TestExec:
         container.next_exec = HangingExec([], [{"ExitCode": None, "Running": True}])
         with pytest.raises(SandboxExecTimeoutError):
             await session.exec("hang")
+
+    async def test_container_died_mid_exec_is_loud_and_sticky(self, session, fake_docker):
+        """容器中途消失(外力 rm 等,无 sticky 前因)→ loud-fail + 后续不再撞死手柄。"""
+        await session.ensure_container()
+        container = fake_docker.created_containers[0]
+
+        class DeadExec(FakeExec):
+            def start(self, detach=False):
+                raise DockerError(409, {"message": "container is not running"})
+
+        container.next_exec = DeadExec([], [{"ExitCode": None, "Running": True}])
+        with pytest.raises(SandboxUnavailableError, match="died"):
+            await session.exec("whatever")
+        with pytest.raises(SandboxUnavailableError, match="died"):
+            await session.exec("again")
+
+
+# ============================================================
+# 磁盘配额(C′ 软配额层;loop 池子硬墙是部署侧,D 段验)
+# ============================================================
+
+
+class TestQuota:
+
+    async def test_pool_admission_refuses_when_low(self, session, fake_docker, monkeypatch):
+        """准入水位:池子剩余低于阈值 → 拒起容器,sticky,不打 daemon。"""
+        monkeypatch.setattr(config, "SANDBOX_POOL_MIN_FREE_MB", 10 ** 9)  # 1PB,必触发
+        with pytest.raises(SandboxUnavailableError, match="storage"):
+            await session.exec("echo hi")
+        with pytest.raises(SandboxUnavailableError, match="storage"):
+            await session.exec("echo hi")
+        assert fake_docker.create_calls == []
+
+    async def test_watchdog_kills_over_quota_and_failure_is_sticky(
+        self, session, fake_docker, monkeypatch
+    ):
+        monkeypatch.setattr(config, "SANDBOX_WORKSPACE_QUOTA_MB", 0)  # 任何写入即超额
+        monkeypatch.setattr(config, "SANDBOX_WATCHDOG_INTERVAL_SEC", 0.01)
+        await session.ensure_container()
+        with open(os.path.join(session.workspace_dir, "blob.bin"), "wb") as f:
+            f.write(b"x" * 4096)
+
+        for _ in range(100):  # watchdog 异步触发,有界等待
+            await asyncio.sleep(0.02)
+            if not session.started:
+                break
+        assert fake_docker.created_containers[0].deleted_with == {"force": True}
+        with pytest.raises(SandboxUnavailableError, match="quota"):
+            await session.exec("echo hi")
+
+    async def test_inflight_exec_attributed_to_quota_kill(
+        self, session, fake_docker, monkeypatch
+    ):
+        """探针②:watchdog 杀容器时 in-flight exec 正常返回 exit=137 —— 裸 137
+        会被误读,sticky 已置时必须按配额失败归因。"""
+        monkeypatch.setattr(config, "SANDBOX_WORKSPACE_QUOTA_MB", 0)
+        monkeypatch.setattr(config, "SANDBOX_WATCHDOG_INTERVAL_SEC", 0.01)
+        await session.ensure_container()
+        container = fake_docker.created_containers[0]
+        with open(os.path.join(session.workspace_dir, "blob.bin"), "wb") as f:
+            f.write(b"x" * 4096)
+
+        class SlowStream(FakeStream):
+            async def read_out(self):
+                await asyncio.sleep(0.2)  # 给 watchdog 时间触发
+                return None
+
+        class SlowExec(FakeExec):
+            def start(self, detach=False):
+                return SlowStream([])
+
+        container.next_exec = SlowExec([], [{"ExitCode": 137, "Running": False}])
+        with pytest.raises(SandboxUnavailableError, match="quota"):
+            await session.exec("dd if=/dev/zero of=big")
+
+    async def test_close_cancels_watchdog(self, session):
+        await session.ensure_container()
+        watchdog = session._watchdog_task
+        assert watchdog is not None and not watchdog.done()
+        await session.close()
+        assert watchdog.cancelled()
+        assert session._watchdog_task is None

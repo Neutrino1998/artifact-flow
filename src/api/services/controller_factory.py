@@ -85,7 +85,7 @@ async def create_controller(conversation_id: str, message_id: str) -> AsyncGener
 
         # 合并全局工具 + 请求级 artifact / 沙盒工具
         artifact_tools = create_artifact_tools(artifact_service)
-        sandbox_tools = create_sandbox_tools(sandbox_session)
+        sandbox_tools = create_sandbox_tools(sandbox_session, artifact_service)
         all_tools = {
             **get_tools(),
             **{t.name: t for t in artifact_tools},

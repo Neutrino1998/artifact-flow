@@ -18,14 +18,14 @@
 ## 进度
 
 - **当前**:**A / B(双架构)完成**(详见各段进展)。**C 开工**(2026-06-10 开工决策锁定,切片 C-0→C-wire,见 C 段「进展」)。
-- **下一步**:**C-stage**(`mount`/`persist`)。C-0 / C-session 已落地(2026-06-10,见 C 段进展;C-session 含 runc 真机无孤儿矩阵 6/6)。并行待办:arm §B 镜像 id 冻结(机器在位时;注意 C 镜像加 git 后锚点作废,统一在 D 重冻结);沙盒镜像加 git(Dockerfile + verify 探针,可与 C-stage 并行)。
+- **下一步**:**C-reap**(lease-anchored reaper)。C-0 / C-session / C-stage 已落地(2026-06-10,见 C 段进展;真机无孤儿矩阵 8/8,含超额杀与 stage 往返)。C-stage 落地同时解锁:**上传路由翻转**(独立工作包,见「到时再敲定」,可在 C-wire 前后做)。并行待办:arm §B 镜像 id 冻结(机器在位时;注意 C 镜像加 git 后锚点作废,统一在 D 重冻结);沙盒镜像加 git(Dockerfile + verify 探针,可与 C-reap 并行)。
 - **产物处置(2026-06-05 拍定)**:`feat/sandbox` 这批已验收产物(`sandbox/` 探针 + 构建脚本)**暂留分支不动**,不单独提早合 main。「是否把就绪探针子集(`unshare -U` 闸 + smoke + ENOSYS/uid)提升为通用部署机预检工具」**推迟到 C/D 阶段**——届时有真实第二调用点(每台新沙盒宿主预检 + D 端到端冒烟)再校准边界,现在抽象属投机(YAGNI)。
 
 | 阶段 | 内容 | 状态 |
 |---|---|---|
 | A | artifact 地基(二进制存储 + 多格式上传 + 识图) | **完成**(2026-06-08 三切片 + 2026-06-09 review 加固 + live E2E 用户实测通过) |
 | B | Kylin gVisor 功能验证(内网) | x86_64 **完成**(验证通过+已撤出);arm64 **完成**(2026-06-08,64K→4K 换核后全绿) |
-| C | 沙盒引擎集成(本机 runc 连调) | **进行中**(C-0 / C-session 已落地,下一刀 C-stage) |
+| C | 沙盒引擎集成(本机 runc 连调) | **进行中**(C-0 / C-session / C-stage 已落地,下一刀 C-reap) |
 | D | 上线前 Kylin 端到端冒烟 | 未开始 |
 
 依赖:C 依赖 A 的二进制存储 + B 的冻结镜像。A 逻辑独立(识图本身就有价值),可先做,但本期不单独合 main —— 见分支策略。
@@ -215,6 +215,13 @@
   - **[P1 已修] cleanup 回调有界弃等**:`container.delete()` 走 aiohttp 默认无超时,daemon/socket 卡死时 cleanup 永不返回 → Redis 下 stream 不关/任务泄漏、InMemory 下**会话永久死锁**(heartbeat 已 cancel,无 TTL 兜底);且这是沙盒路径里唯一无界的环节(start 60s / exec 有弃等护栏)。修复:runner 对每个 cleanup 回调包 `asyncio.timeout(30s)`(放 runner 层,对未来任何注册回调都生效);超时=弃等不是修复,残留等 reaper;to_thread 里的 rmtree 弃等后线程自行跑完,无正确性问题。
   - **[P2 方向锁定] 磁盘配额 = loop 池子(硬墙)+ watchdog(软配额)+ ReadonlyRootfs,实现归 C-stage**。威胁面比 review 指出的更大:bind mount 无界之外,**容器 rootfs overlay upper 同样无界**(容器内 /tmp 写的是宿主 /var/lib/docker)。三层方案:① **loop 池子** = 部署时 `truncate/fallocate + mkfs.ext4 + mount -o loop` 一个定容文件系统作 `SANDBOX_SCRATCH_ROOT`(硬墙在正确的爆炸半径边界:race 窗口写穿也只是池子满,宿主无恙;独立 inode 表顺带兜住百万小文件轴;host-prep 几行进部署脚本/fstab,dev mac 不做、风险接受);② **per-turn watchdog** = worker 周期对自己活跃 session 的 scratch `du -s`(to_thread),超 `SANDBOX_WORKSPACE_QUOTA` 杀容器 + sticky 失败(软配额管 turn 间公平,池子兜住其 race 缺陷后够用);另对池子 `statvfs` 做起容器准入水位(O(1))。③ **ReadonlyRootfs + 容器 /tmp bind 到该 turn scratch 子目录**(堵 rootfs upper 洞,所有可写路径落池子,零内存开销;HOME 缓存类写点重定向细节实现时定)。**否决 tmpfs 方案**:内存账难看(额度×并发预留 RAM、冷文件全程占内存、工作区被内存预算压制),且连带 staging 改 exec+tar 流 + runsc tmpfs `size=` enforce 是 D 才能验的未知;C′ 对 plan 已锁的 scratch 机制零改动、无 runsc 赌注。**先后顺序**:watchdog/ReadonlyRootfs/配额常量与 mount/persist 同一套文件量纲,归 C-stage 工作包;开工先跑三条本机探针(du 节奏与开销 / exec 进行中杀容器的收尾行为 / ReadonlyRootfs 下 pandoc/matplotlib 兼容);**bash 在配额落地前不挂进 agent MD**(本就留给 C-wire,无 live 暴露窗口)。
   - **[确认] bash 未挂 agent MD 是刻意**:C-wire 才接 agent 权限;当前 bash 只在请求级工具表,模型不可见。
+- **2026-06-10 C-stage 落地**(后端 1163 测试全过 + **真机无孤儿矩阵 8/8 双零残留**,新增超额杀 + stage 往返两条):
+  - **三探针结论**(`tests/manual/sandbox_quota_probes.py`):① du 开销 —— 50k 小文件最坏档 os.walk ~150ms / `du -sk` ~50ms,线程内 5s 节奏无感;**关键发现:表观大小低估池子真实消耗 ~40×**(50k×100B 表观 4.8MB / 块占用 195MB)→ watchdog 按 `st_blocks×512` 计块占用。② exec 进行中杀容器 —— `delete(force)` 0.1s 返回,**in-flight exec 正常返回 exit=137**(stream EOF、ExitCode 可解析、无异常)→ 杀后只需 sticky + exec 末尾按 sticky 归因,裸 137 不会漏给模型误读。③ ReadonlyRootfs —— pandoc 裸只读 rootfs 即可跑;matplotlib 无重定向时降级建临时缓存+警告;**/tmp bind + `HOME=/tmp/home` + `XDG_CACHE_HOME` + `MPLCONFIGDIR` 全绿无警告** = 最终形态(host 侧预建 `tmp/home`,部分工具不自建 HOME)。
+  - **配额三层进 `SandboxSession`**:scratch 拆 `workspace/` + `tmp/` 子目录双 bind(`/tmp` 入池堵 rootfs overlay upper 无界写)+ `ReadonlyRootfs=True` + 写点重定向;**per-session watchdog task**(`SANDBOX_WATCHDOG_INTERVAL_SEC=5` 周期 to_thread 扫块占用,超 `SANDBOX_WORKSPACE_QUOTA_MB=2048` → 置 sticky → 杀容器;**删成功才交出容器所有权** —— 矩阵实测踩中"close cancel 掉 await 中的 delete 后两边都不删"的孤儿窗口,句柄留给 close() 重删收口);`statvfs` 准入水位(`SANDBOX_POOL_MIN_FREE_MB=1024`,O(1),拒绝即 sticky)。`_start_failure` 升级为通用 sticky 通道(创建失败/准入拒绝/超额杀/容器中途死,统一"本 turn 不重试、立即复述")。
+  - **`mount`**(AUTO):吃 `artifact_id`;文本 = WorkingSet overlay 当前内容 UTF-8 写盘(本轮 dirty/new 可 mount),blob = `get_blob`(staged 上传自动走 `ArtifactMemory.blob`);on-disk 名 = id,重复 mount = 刷新副本;lazy 起容器(先 mount 再 bash 成立);返回纯事实(容器内路径/字节/MIME)。
+  - **`persist`**(AUTO):吃 `path`(realpath 圈地防 `../`/symlink 指池外 —— 容器内代码可植链,宿主侧跟链 = 读宿主文件进 artifact 的外流面;mount 写侧反向同理,unlink + `O_NOFOLLOW` 不跟链);文本/二进制二分 = 严格 UTF-8 可解码且 ≤ `SANDBOX_PERSIST_MAX_TEXT_BYTES`(20MB)→ 可编辑文本 artifact(MIME 按扩展名查 `EXTENSION_MIME_MAP`),否则 blob(MIME `mimetypes` 猜、兜底 octet-stream;上限复用 `ARTIFACT_BLOB_MAX_BYTES`,**读前按 lstat 拒超大**);落库走 `create_from_upload`(加 `source` 参数,persist 件 `source="sandbox"`,前端 source 徽标自然显示)—— `_N` dedup 即"永远产新 artifact"的机制,目录给 zip-it-first 提示。`mount`/`persist` 入 `RESERVED_TOOL_NAMES`;工厂改 `create_sandbox_tools(session, artifact_service)`。
+  - **矩阵新增**:case 6 超额杀(50MB > 10MB 配额 → watchdog 杀、in-flight exec 按配额归因、sticky、双零残留 = 验收④本机形态);case 7 stage 往返(mount → 容器内 `tr` 改写 → persist 回读断言,顺带验 rootfs 只读生效 + /tmp 可写入池)。
+  - 单测:配额四条(准入拒绝/超额杀+sticky/in-flight 归因/close 取消 watchdog)+ 容器中途死 sticky + mount/persist 23 条(含 `..` id、植链覆写不跟链、symlink 外流拒绝、超大拒读、超文本上限转 blob)。
 
 **C 验收标准**(2026-06-10 定):① 三工具 runc 下 live E2E,含「mount 原 docx → pandoc 转 md → 改 → `--reference-doc` 生成新 docx → persist 新 artifact → 前端可下载」闭环;② **无孤儿矩阵**——`while true`、tool 超时、协作取消、外部取消、SIGKILL worker 五条退出路径各跑一遍,`docker ps` + scratch 根目录双零残留(SIGKILL 条靠 reaper 收);③ reaper 零误杀(活跃 turn 的容器/目录不被收);④ 磁盘配额——超额写入的 turn 被 watchdog 杀(沙盒 sticky 失败、宿主分区无恙;本机以普通目录模拟池子,loop 池子 host-prep 真机验归 D)。
 
@@ -260,5 +267,6 @@
 - 2026-06-10 **C-0 落地**:docx/pdf 上传 blob-only(magic 预检 loud-fail)、pandoc 退出 backend、pymupdf 保留为 web_fetch 专用 `extract_pdf_text`、删 `/export`、read/inventory 二进制契约文案(success=True 防重试)、update/rewrite 拒改 blob artifact(不可变单版守门)、REST/事件/store 全链 `has_blob`、前端 `BinaryFilePreview`(复用 pendingFlush 闸,turn 内零 /raw 404)。后端 1098 / 前端 205 全过。详见 C 段「进展」。
 - 2026-06-10 **C-session 落地**:`SandboxSession`(aiodocker seam、容器 lazy、创建失败 sticky、close 幂等 best-effort、turn 粒度 label + namespace label)+ `bash` 工具(CONFIRM、非零退出=信息、137 按时长归因)+ `register_cleanup` 拆除 plumbing(_wrapped 真 finally、先拆资源后放 lease)+ aiodocker==0.27.0 入 lock(audit 零漏洞)。后端 1136 全过;**runc 真机无孤儿矩阵 6/6 双零残留**(while-true 由容器内 timeout 准点 KILL)。下一刀 C-stage(mount/persist)。详见 C 段「进展」。
 - 2026-06-10 **C-session review 收口**:[P1 已修] cleanup 回调加 30s 有界弃等(aiodocker delete 无默认超时,daemon 卡死曾会扣死 lease/stream);[P2 方向锁定] 磁盘配额 = **loop 池子(硬墙,host-prep 部署一次性)+ per-turn watchdog du 超额杀容器(软配额)+ ReadonlyRootfs / 容器 /tmp 入池**(rootfs upper 同样无界,一并堵),否决 tmpfs(内存账 + staging 改道 + runsc `size=` 未知),实现归 C-stage、host-prep 验证归 D(各自验收标准已加 ④);[确认] bash 未挂 agent MD 刻意留 C-wire,配额落地前无 live 暴露。详见 C 段「进展」。
+- 2026-06-10 **C-stage 落地**:三探针(du 按**块占用**计 —— 表观大小低估池子消耗 ~40×;杀容器时 in-flight exec 正常返回 137 → sticky 归因;ReadonlyRootfs + /tmp bind + HOME/MPLCONFIGDIR 重定向 = pandoc/matplotlib 全绿)→ 配额三层进 SandboxSession(workspace/tmp 双 bind 入池 + ReadonlyRootfs;watchdog 5s 块占用巡检超 2GB 杀容器,**删成功才交所有权**防 close-cancel 孤儿窗口;statvfs 准入水位;sticky 升级为通用失败通道)+ `mount`/`persist` 工具(staging 宿主直写直读,realpath 圈地 + O_NOFOLLOW 防容器植链双向逃逸;persist 文本/二进制二分、`source="sandbox"`、`_N` dedup 产新件)。后端 1163 全过;**真机矩阵 8/8 双零残留**(新增超额杀=验收④本机形态、stage 往返)。解锁上传路由翻转;下一刀 C-reap。详见 C 段「进展」。
 <!-- 新日志按日期顺序追加到此行上方 -->
 

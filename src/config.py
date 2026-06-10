@@ -179,6 +179,14 @@ class Settings(BaseSettings):
     SANDBOX_PIDS_LIMIT: int = 256       # fork 炸弹闸
     SANDBOX_MAX_OUTPUT_CHARS: int = 200_000  # 单命令输出捕获硬帽:超出继续 drain 但丢弃(防内存放大),
                                              # 截断显式标记。>50k 的部分由引擎溢出转 artifact idiom 接手。
+    # 磁盘配额(2026-06-10 C′ 方向:loop 池子=硬墙、以下=软配额与准入;host-prep 见 D 段)。
+    # prod 把 SANDBOX_SCRATCH_ROOT 挂成定容 loop 文件系统,race 窗口写穿只伤池子不伤宿主。
+    SANDBOX_WORKSPACE_QUOTA_MB: int = 2048   # per-turn scratch 软配额:watchdog du 超额 → 杀容器 + sticky 失败
+    SANDBOX_WATCHDOG_INTERVAL_SEC: int = 5   # watchdog 巡检周期。探针①:50k 小文件 os.walk ~150ms(线程内),无感
+    SANDBOX_POOL_MIN_FREE_MB: int = 1024     # 起容器准入水位:scratch 根所在 fs 剩余低于此拒绝新沙盒(statvfs,O(1))
+    SANDBOX_PERSIST_MAX_TEXT_BYTES: int = 20 * 1024 * 1024  # persist 文本判定上限:超此即使可解码也按 blob 存
+                                                            # (对齐 MAX_TEXT_CONVERT_BYTES 的量级;blob 上限
+                                                            # 复用 ARTIFACT_BLOB_MAX_BYTES,写入侧守门)
 
     # SSRF / 外联工具防护（隐藏常量，不暴露 API / 工具参数）
     WEB_FETCH_MAX_BYTES: int = 20 * 1024 * 1024   # fallback 下载体上限（解压后字节），
