@@ -18,10 +18,8 @@ tool 侧的 asyncio 超时只是弃等(进程不死,2026-05-14 同型),残留进
 
 import asyncio
 import codecs
-import errno
 import os
 import shutil
-import stat
 from dataclasses import dataclass
 from typing import Callable, Optional
 
@@ -29,6 +27,7 @@ import aiodocker
 from aiodocker.exceptions import DockerError
 
 from config import config
+from tools.builtin import sandbox_fs
 from utils.logger import get_logger
 
 logger = get_logger("ArtifactFlow")
@@ -60,120 +59,6 @@ def scratch_dir_name(conversation_id: str, message_id: str) -> str:
     conv-* / msg-* id 内部无双下划线,"__" 分隔无歧义。
     """
     return f"{conversation_id}__{message_id}"
-
-
-# 每个目录项(文件或目录)的最低计费 = 一个 ext4 块。块占用本身已含此量级,
-# 但有些 fs(APFS / tmpfs)对空目录报 st_blocks=0,会留下"海量空目录/inode 耗尽
-# 但 usage 不涨"的盲区。取 max(块占用, 此值)把每个条目锚到至少一个块 —— 既贴合
-# 部署用的 ext4 池子真实成本,又让计量与 fs 的块上报方式无关,顺带把 inode 压力
-# 折进同一个字节度量(无需独立 inode 旋钮)。
-_ENTRY_MIN_BYTES = 4096
-
-# 遍历最大深度。fd 钉住的递归每层持一个目录 fd,而容器能极廉价地 mkdir -p 任意
-# 深目录(每层 ≈ 一块)→ 不设防会耗尽**整个 backend 进程**的 fd(比配额绕过更糟
-# 的 DoS)。超此深度停止下探,深埋内容由 loop 池子硬墙兜底,loud log。512 远超
-# 真实沙盒用途(解压工程 / 构建树深度通常 < 50),又把 fd 占用钉在安全范围。
-_MAX_WALK_DEPTH = 512
-
-
-def _charge_blocks(st: os.stat_result) -> int:
-    """一条 stat 结果的计费字节 = max(块占用 st_blocks×512, 每条目最低)。
-    取不到块数时以表观大小代块占用。"""
-    blocks = getattr(st, "st_blocks", None)
-    usage = blocks * 512 if blocks is not None else st.st_size
-    return max(usage, _ENTRY_MIN_BYTES)
-
-
-def _dir_usage_bytes(root: str) -> tuple:
-    """目录树的计费占用 → (总字节, 命中深度上限 bool)。每条目 max(块占用, 一块)。
-
-    watchdog 软配额按它计:小文件每个至少占一个 fs 块,表观大小会低估池子
-    真实消耗(探针①实测 50k×100B 表观 4.8MB / 块占用 195MB,~40×)。
-    **目录自身也是文件**(其内容是目录项,空目录在 ext4 也占一个块),海量空目录/
-    深树能消耗块与 inode 而表观大小不涨 → 绕过 per-turn 配额只剩池子硬墙兜底。
-
-    **全程 fd 钉住,绝不按名字重解析路径**(与 persist 的 openat 逐级走同一纪律):
-    根 `O_DIRECTORY|O_NOFOLLOW` 开一次,每次下探都 `openat(name, dir_fd, O_NOFOLLOW)`
-    拿子目录 fd 再 `scandir(fd)`。否则按 `entry.path` 字符串重扫会有目录 TOCTOU ——
-    容器后台进程能在"判定真目录"与"重扫该路径"之间把目录名换成指向池外的 symlink,
-    重扫就跟链遍历宿主文件系统(I/O 放大 + 错误 quota 归因)。fd 钉的是 inode 不是
-    名字,换名/换链都动不了已持有的 fd;openat 的 `O_NOFOLLOW` 在下探时拒掉被换成的
-    symlink(ELOOP/ENOTDIR → 跳过、不跟)。
-
-    每个目录项一律先 `entry.stat(follow_symlinks=False)`(fstatat,race-free)计费,
-    只对 `S_ISDIR` 真实目录递归 —— 计量与条目类型解耦:文件 / 空目录 / symlink(指
-    dir 或 file,lstat 看链本体故 S_ISDIR 为 False,只计费不递归)/ fifo / 设备全走
-    同一路径,无分类盲区。
-
-    **测不准 = fail-closed,默认取反**:不再枚举"哪些错误危险"(白名单总会漏一种
-    → 又一轮:EMFILE/EACCES 时静默少算就是这么漏的),而是枚举唯一**良性**的错误
-    —— `ENOENT`(条目在枚举后消失 = 已被 rm,本就不占空间,跳过正确)—— 其余一切
-    OSError(EMFILE/ENFILE 开不出 fd、EACCES 容器 chmod 000 藏子树、ELOOP/ENOTDIR
-    被换成链、深度上限)都置 `capped=True`,调用方 fail-closed 当超额杀。原则:
-    **能完成计量就计,完成不了就保守杀,绝不返回一个可能偏低的数让 watchdog 信任。**
-    （depth cap 是其中一例:DFS 下开着的 fd 数=深度,容器能廉价 `mkdir -p` 任意深 →
-    不限会耗尽整个 backend 进程的 fd;512 层远超真实用途、误判不可达。）
-    """
-    capped = False
-
-    def _benign(e: OSError) -> bool:
-        # 唯一良性:条目已消失(容器自己 rm,内容确实不再占空间)。其余 = 测不准。
-        return e.errno == errno.ENOENT
-
-    def walk(dir_fd: int, depth: int) -> int:
-        nonlocal capped
-        subtotal = 0
-        try:
-            scan = os.scandir(dir_fd)  # 不夺 fd 所有权,调用方仍负责 close(dir_fd)
-        except OSError as e:
-            if not _benign(e):
-                capped = True  # 扫不动这棵子树 → 测不准 → fail-closed
-            return 0
-        with scan:
-            for entry in scan:
-                try:
-                    st = entry.stat(follow_symlinks=False)
-                except OSError as e:
-                    if not _benign(e):
-                        capped = True
-                    continue
-                subtotal += _charge_blocks(st)
-                if not stat.S_ISDIR(st.st_mode):
-                    continue
-                if depth >= _MAX_WALK_DEPTH:
-                    capped = True
-                    continue  # 不再下探(防 fd 耗尽);capped → 调用方 fail-closed 杀
-                try:
-                    child_fd = os.open(
-                        entry.name,
-                        os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
-                        dir_fd=dir_fd,
-                    )
-                except OSError as e:
-                    # 已被 rm → 跳过;EMFILE/EACCES/被换链等 → 测不准 → fail-closed
-                    if not _benign(e):
-                        capped = True
-                    continue
-                try:
-                    subtotal += walk(child_fd, depth + 1)
-                finally:
-                    os.close(child_fd)
-        return subtotal
-
-    try:
-        root_fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
-    except OSError as e:
-        # 根不存在 = 本 turn 还没写过沙盒,usage 真为 0;其余(EMFILE/EACCES)= 测不准
-        return 0, not _benign(e)
-    try:
-        try:
-            total = _charge_blocks(os.fstat(root_fd))  # 根自身(无父目录代它计费)
-        except OSError:
-            total = 0
-        total += walk(root_fd, 1)
-    finally:
-        os.close(root_fd)
-    return total, capped
 
 
 class SandboxError(Exception):
@@ -431,18 +316,19 @@ class SandboxSession:
             while True:
                 await asyncio.sleep(config.SANDBOX_WATCHDOG_INTERVAL_SEC)
                 try:
-                    usage, capped = await asyncio.to_thread(
-                        _dir_usage_bytes, self._scratch_dir
+                    usage, incomplete = await asyncio.to_thread(
+                        sandbox_fs.measure_usage, self._scratch_dir
                     )
                 except Exception:
                     logger.exception(
                         f"Sandbox watchdog scan failed for {self.message_id}; retrying next tick"
                     )
                     continue
-                # capped = 目录树深过 _MAX_WALK_DEPTH,计量无法穷尽 → fail-closed 当超额
-                # (绝不 fail-open 只计浅层:深埋大文件会绕软配额伤其他 turn)。
-                if capped:
-                    await self._kill_over_quota(usage, depth_capped=True)
+                # incomplete = 计量穷不尽(树太深 / 开不出 fd / chmod 000 藏子树 /
+                # 被换链)→ fail-closed 当超额(绝不 fail-open 只计浅层:深埋大文件会
+                # 绕软配额伤其他 turn,池子硬墙是最后而非唯一防线)。
+                if incomplete:
+                    await self._kill_over_quota(usage, measure_incomplete=True)
                     return
                 if usage > quota_bytes:
                     await self._kill_over_quota(usage)
@@ -450,7 +336,7 @@ class SandboxSession:
         except asyncio.CancelledError:
             raise
 
-    async def _kill_over_quota(self, usage: int, *, depth_capped: bool = False) -> None:
+    async def _kill_over_quota(self, usage: int, *, measure_incomplete: bool = False) -> None:
         """超额处置:先置 sticky(in-flight exec 与后续调用都按它归因),再杀容器。"""
         self._sticky_failure = (
             f"Sandbox workspace exceeded the "
@@ -458,11 +344,11 @@ class SandboxSession:
             "Sandbox tools are unavailable for this turn."
         )
         # 模型行为触发、预期内防护、已处置 → warning
-        if depth_capped:
+        if measure_incomplete:
             logger.warning(
-                f"Sandbox workspace directory tree exceeded the {_MAX_WALK_DEPTH}-level "
-                f"depth cap for {self.message_id} ({usage / 1024 / 1024:.0f}MB counted "
-                "before cap); treated as over quota (fail-closed), killing container"
+                f"Sandbox workspace usage could not be fully measured for {self.message_id} "
+                f"({usage / 1024 / 1024:.0f}MB counted; tree too deep / fd-exhausted / "
+                "unreadable subtree); treated as over quota (fail-closed), killing container"
             )
         else:
             logger.warning(

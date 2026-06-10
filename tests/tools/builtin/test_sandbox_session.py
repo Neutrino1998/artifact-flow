@@ -6,7 +6,6 @@ sandbox_no_orphan_matrix.py 自验。
 """
 
 import asyncio
-import errno
 import os
 from types import SimpleNamespace
 
@@ -20,7 +19,6 @@ from tools.builtin.sandbox_session import (
     SandboxSession,
     SandboxUnavailableError,
     WORKSPACE_MOUNT,
-    _dir_usage_bytes,
     scratch_dir_name,
 )
 
@@ -374,127 +372,8 @@ class TestExec:
 
 # ============================================================
 # 磁盘配额(C′ 软配额层;loop 池子硬墙是部署侧,D 段验)
+# 计量函数 measure_usage 的单测在 test_sandbox_fs.py(收口模块)。
 # ============================================================
-
-
-class TestDirUsage:
-
-    def test_counts_file_block_usage(self, tmp_path):
-        (tmp_path / "f").write_bytes(b"x" * 100)
-        usage, capped = _dir_usage_bytes(str(tmp_path))
-        assert usage >= 100  # 块占用 ≥ 表观大小(小文件占整块)
-        assert not capped
-
-    def test_empty_dirs_are_counted(self, tmp_path):
-        """海量空目录也消耗块/inode —— 不计入 = 绕过 per-turn 配额(P2)。"""
-        for i in range(200):
-            (tmp_path / f"d{i}").mkdir()
-        usage, _ = _dir_usage_bytes(str(tmp_path))
-        assert usage > 0  # 旧实现(只数 filenames)这里会是 0
-
-    def test_symlink_dirs_are_counted_not_followed(self, tmp_path):
-        """指向目录的 symlink 也耗 inode/目录项 —— os.walk 把它丢进 dirnames 既不
-        递归也不计;scandir 统一 lstat 计费(P2 第 2 轮,弃 os.walk 的盲区)。"""
-        target = tmp_path / "real_target"
-        target.mkdir()
-        (target / "big.bin").write_bytes(b"x" * 100_000)  # 链不该被跟进去计这块
-        links = tmp_path / "links"
-        links.mkdir()
-        for i in range(100):
-            (links / f"l{i}").symlink_to(target, target_is_directory=True)
-
-        usage, _ = _dir_usage_bytes(str(links))
-        # 100 条 symlink 各计一块(≈400KB),且**没有**跟链把 100KB 的 target 内容
-        # 重复计进来(否则会暴涨)
-        assert usage >= 100 * 4096
-        assert usage < 100 * 4096 + 50_000
-
-    def test_missing_entries_skipped(self, tmp_path):
-        # 不存在的路径不抛(容器并发增删)
-        assert _dir_usage_bytes(str(tmp_path / "nope")) == (0, False)
-
-    def test_nested_real_dirs_recursed(self, tmp_path):
-        """真实深目录树正常递归计费(scandir 不误伤合法深路径)。"""
-        d = tmp_path
-        for level in range(5):
-            d = d / f"lvl{level}"
-            d.mkdir()
-        (d / "leaf.txt").write_bytes(b"y" * 100)
-        usage, capped = _dir_usage_bytes(str(tmp_path))
-        # 根 + 5 层目录 + 1 文件 = 7 条目,各至少一块
-        assert usage >= 7 * 4096
-        assert not capped
-
-    def test_recursion_does_not_follow_symlinked_subdir(self, tmp_path):
-        """子目录是 symlink 指池外 → openat O_NOFOLLOW 拒下探,不跟链遍历宿主
-        文件系统(目录递归 TOCTOU 修复:fd 钉住、下探不按名字重解析)。"""
-        outside = tmp_path / "outside"
-        outside.mkdir()
-        for i in range(50):
-            (outside / f"host_file_{i}").write_bytes(b"z" * 100_000)  # 5MB,跟进去会暴涨
-        ws = tmp_path / "ws"
-        ws.mkdir()
-        (ws / "link").symlink_to(outside, target_is_directory=True)
-        usage, _ = _dir_usage_bytes(str(ws))
-        # 只计 ws 自身 + link 条目各一块,绝不跟链把 outside 的 5MB 算进来
-        assert usage < 50_000
-
-    def test_depth_cap_signals_capped_not_undercount(self, tmp_path, monkeypatch):
-        """超深树:不抛不挂,且返回 capped=True —— 调用方据此 fail-closed 杀,
-        绝不 fail-open 只计浅层(否则深埋大文件绕过软配额)。"""
-        monkeypatch.setattr("tools.builtin.sandbox_session._MAX_WALK_DEPTH", 3)
-        d = tmp_path
-        for level in range(10):
-            d = d / f"l{level}"
-            d.mkdir()
-        (d / "deep.txt").write_bytes(b"x" * 100)
-        usage, capped = _dir_usage_bytes(str(tmp_path))
-        assert capped  # 关键:命中即上报,不静默少算
-        assert usage > 0  # 浅层仍计
-
-    def test_depth_within_cap_not_flagged(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("tools.builtin.sandbox_session._MAX_WALK_DEPTH", 20)
-        d = tmp_path
-        for level in range(5):
-            d = d / f"l{level}"
-            d.mkdir()
-        _, capped = _dir_usage_bytes(str(tmp_path))
-        assert not capped
-
-    def test_openat_failure_fails_closed_not_open(self, tmp_path, monkeypatch):
-        """openat 下探失败(EMFILE/EACCES 等非 ENOENT)→ capped=True,不静默少算。
-        reviewer 复现:RLIMIT_NOFILE=64 扫 80 层树曾返回 capped=False。"""
-        import os as _os
-        sub = tmp_path / "sub"
-        sub.mkdir()
-        (sub / "f").write_bytes(b"x" * 100)
-        real_open = _os.open
-
-        def emfile_on_subdir(path, flags, *a, **k):
-            # 模拟下探子目录时 fd 耗尽(对 sub 这一级 openat 抛 EMFILE)
-            if k.get("dir_fd") is not None and path == "sub":
-                raise OSError(errno.EMFILE, "Too many open files")
-            return real_open(path, flags, *a, **k)
-
-        monkeypatch.setattr(_os, "open", emfile_on_subdir)
-        usage, capped = _dir_usage_bytes(str(tmp_path))
-        assert capped  # 测不准 → fail-closed(旧实现这里 capped=False)
-
-    def test_vanished_entry_is_benign_not_capped(self, tmp_path, monkeypatch):
-        """条目在枚举后被 rm(ENOENT)是良性 —— 内容已不占空间,跳过且不 fail-closed。"""
-        import os as _os
-        sub = tmp_path / "gone"
-        sub.mkdir()
-        real_open = _os.open
-
-        def enoent_on_subdir(path, flags, *a, **k):
-            if k.get("dir_fd") is not None and path == "gone":
-                raise OSError(errno.ENOENT, "No such file or directory")
-            return real_open(path, flags, *a, **k)
-
-        monkeypatch.setattr(_os, "open", enoent_on_subdir)
-        _, capped = _dir_usage_bytes(str(tmp_path))
-        assert not capped  # ENOENT 不触发 fail-closed
 
 
 class TestQuota:
@@ -554,7 +433,7 @@ class TestQuota:
         """目录树过深(计量无法穷尽)→ fail-closed 当超额杀,不放过深埋占用。"""
         monkeypatch.setattr(config, "SANDBOX_WORKSPACE_QUOTA_MB", 10**9)  # 字节配额绝不触发
         monkeypatch.setattr(config, "SANDBOX_WATCHDOG_INTERVAL_SEC", 0.01)
-        monkeypatch.setattr("tools.builtin.sandbox_session._MAX_WALK_DEPTH", 3)
+        monkeypatch.setattr("tools.builtin.sandbox_fs.MAX_WALK_DEPTH", 3)
         await session.ensure_container()
         d = session.workspace_dir
         for level in range(8):
