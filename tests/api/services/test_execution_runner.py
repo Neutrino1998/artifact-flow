@@ -193,6 +193,25 @@ class TestCleanupRegistry:
         # lease 确实已释放
         assert await store.get_leased_message_id("conv-1") is None
 
+    async def test_hung_cleanup_is_bounded_and_lease_still_released(self, monkeypatch):
+        """daemon 卡死型 cleanup(无限 await)不能扣住 lease/stream —— 有界弃等。"""
+        from api.services import execution_runner as runner_module
+        monkeypatch.setattr(runner_module, "CLEANUP_CALLBACK_TIMEOUT_SEC", 0.05)
+
+        store = _OrderRecordingStore()
+        runner = ExecutionRunner(store=store)
+
+        async def hang_forever():
+            store.order.append("hang")
+            await asyncio.sleep(300)
+
+        runner.register_cleanup("t1", hang_forever)
+        runner.register_cleanup("t1", self._record(store.order, "cb2"))
+        await self._submit_and_finish(runner, _noop_coro)
+        # 卡死的回调被弃等,其余回调 + lease 释放照常
+        assert store.order == ["cb2", "hang", "cleanup_execution"]
+        assert await store.get_leased_message_id("conv-1") is None
+
     async def test_no_registration_is_zero_cost(self):
         store = _OrderRecordingStore()
         runner = ExecutionRunner(store=store)

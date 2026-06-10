@@ -25,6 +25,13 @@ from utils.logger import get_logger
 
 logger = get_logger("ArtifactFlow")
 
+# 单个 turn 级清理回调的硬上限(秒)。cleanup 跑在释放 lease 之前,而回调里的
+# 外部调用(aiodocker delete 走 aiohttp,默认无超时)在 daemon/socket 卡死时会
+# 无限等 —— 没有这个界,InMemory 下会话永久死锁、Redis 下 stream 不关/任务泄漏。
+# 超时 = 弃等不是修复:残留容器等 reaper 收;to_thread 里的 rmtree 弃等后线程
+# 会自行跑完,无正确性问题。30s 对"杀容器+删目录"非常宽裕,卡过它基本必是 daemon 级故障。
+CLEANUP_CALLBACK_TIMEOUT_SEC = 30
+
 
 class DuplicateExecutionError(Exception):
     """重复执行错误（message_id 已存在活跃任务）"""
@@ -225,11 +232,18 @@ class ExecutionRunner:
                 # 后面的 cleanup_execution / close_stream 不能被跳过。
                 for cleanup in reversed(self._task_cleanups.pop(task_id, [])):
                     try:
-                        await cleanup()
+                        async with asyncio.timeout(CLEANUP_CALLBACK_TIMEOUT_SEC):
+                            await cleanup()
                     except asyncio.CancelledError:
                         logger.warning(
                             f"Task {task_id} cleanup callback interrupted by cancel; "
                             f"continuing teardown (reaper backstops leftovers)"
+                        )
+                    except TimeoutError:
+                        logger.error(
+                            f"Task {task_id} cleanup callback timed out after "
+                            f"{CLEANUP_CALLBACK_TIMEOUT_SEC}s; abandoning it so the "
+                            f"lease/stream can be released (reaper backstops leftovers)"
                         )
                     except Exception:
                         logger.exception(f"Task {task_id} cleanup callback failed")
