@@ -41,6 +41,10 @@ class InjectQueueFull(Exception):
 class RuntimeStore(Protocol):
     """运行时状态存储协议 — 可替换为 Redis 实现。"""
 
+    # 跨进程共享?Redis=True(多 worker 共享真相源),InMemory=False(进程本地)。
+    # 沙盒 reaper 据此判定能否安全跑(进程本地 store 下它会误删兄弟进程的活沙盒)。
+    is_shared: bool
+
     # ── Conversation lease（阻止并发 POST /chat）──
 
     async def try_acquire_lease(self, conversation_id: str, message_id: str) -> Optional[str]: ...
@@ -122,6 +126,8 @@ class InMemoryRuntimeStore:
     双状态（lease + interactive）各有独立生命周期。
     所有方法 async（dict 操作本身不阻塞，async 为接口一致性）。
     """
+
+    is_shared = False  # 进程本地:多副本下状态不互通(契约 = 单进程部署)
 
     def __init__(self):
         self._conversation_leases: dict[str, str] = {}   # conv_id → message_id

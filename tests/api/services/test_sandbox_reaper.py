@@ -11,6 +11,7 @@ import time
 import pytest
 from aiodocker.exceptions import DockerError
 
+from api.main import _should_start_reaper
 from api.services.sandbox_reaper import SandboxReaper
 from tools.builtin.sandbox_session import (
     LABEL_CONVERSATION,
@@ -71,17 +72,18 @@ class FakeDocker:
 
 
 class FakeStore:
-    def __init__(self, active):
+    def __init__(self, active, is_shared=False):
         self._active = active  # {conv: msg}
+        self.is_shared = is_shared
 
     async def list_active_executions(self):
         return dict(self._active)
 
 
-def _mk_reaper(tmp_path, containers, active, *, namespace="default", grace=60):
+def _mk_reaper(tmp_path, containers, active, *, namespace="default", grace=60, is_shared=False):
     docker = FakeDocker(containers)
     reaper = SandboxReaper(
-        FakeStore(active),
+        FakeStore(active, is_shared=is_shared),
         scratch_root=str(tmp_path),
         namespace=namespace,
         interval_sec=1,
@@ -210,6 +212,28 @@ class TestIdempotenceAndResilience:
         assert stats.dirs_seen == 0
         assert stats.dirs_reaped == 0
 
+    async def test_final_sweep_ignores_grace_under_local_store(self, tmp_path):
+        """进程本地 store 的 final_sweep:runner 已停 = 无在途 turn,grace 内的新鲜
+        残留也收(否则单副本停机漏拆的孤儿要等下次启动)。"""
+        c = FakeContainer("fresh", "conv-1", "msg-1", created=time.time())
+        _mk_scratch(tmp_path, "conv-1", "msg-1", age_sec=0)
+        reaper, _ = _mk_reaper(tmp_path, [c], active={}, grace=60, is_shared=False)
+        stats = await reaper.final_sweep()
+        assert c.deleted
+        assert stats.containers_reaped == 1 and stats.dirs_reaped == 1
+        assert stats.skipped_young == 0
+
+    async def test_final_sweep_keeps_grace_under_shared_store(self, tmp_path):
+        """共享 store(多 worker)的 final_sweep:兄弟进程可能正起新 turn,grace 内的
+        新鲜资源不能误删 —— 保留 grace。"""
+        c = FakeContainer("fresh", "conv-1", "msg-1", created=time.time())
+        _mk_scratch(tmp_path, "conv-1", "msg-1", age_sec=0)
+        reaper, _ = _mk_reaper(tmp_path, [c], active={}, grace=60, is_shared=True)
+        stats = await reaper.final_sweep()
+        assert not c.deleted
+        assert stats.containers_reaped == 0
+        assert stats.skipped_young >= 2
+
     async def test_label_incomplete_container_treated_inactive(self, tmp_path):
         """label 残缺(无 conv/msg)的容器按不活跃处置,但仍在 grace 外才删。"""
         c = FakeContainer("weird", None, None)
@@ -219,3 +243,33 @@ class TestIdempotenceAndResilience:
         # conv/msg 缺失 → _is_active=False → grace 外 → 回收(它本不该带我们的 label 却没归属)
         assert c.deleted
         assert stats.containers_reaped == 1
+
+
+class TestReaperGate:
+    """_should_start_reaper:破坏性默认关、共享 store 自动开、本地 store opt-in。"""
+
+    def test_disabled_flag_wins(self):
+        start, _ = _should_start_reaper(
+            enabled=False, store_is_shared=True, allow_local_store=True
+        )
+        assert not start
+
+    def test_shared_store_starts(self):
+        start, reason = _should_start_reaper(
+            enabled=True, store_is_shared=True, allow_local_store=False
+        )
+        assert start and "shared" in reason
+
+    def test_local_store_off_by_default(self):
+        """InMemory 默认不起 —— 破坏性误删的安全默认。"""
+        start, reason = _should_start_reaper(
+            enabled=True, store_is_shared=False, allow_local_store=False
+        )
+        assert not start
+        assert "Redis" in reason or "SANDBOX_REAP_ALLOW_LOCAL_STORE" in reason
+
+    def test_local_store_opt_in(self):
+        start, reason = _should_start_reaper(
+            enabled=True, store_is_shared=False, allow_local_store=True
+        )
+        assert start and "single-worker" in reason

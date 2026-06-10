@@ -194,6 +194,11 @@ class Settings(BaseSettings):
     SANDBOX_REAP_INTERVAL_SEC: int = 60      # reaper 周期扫间隔(启动立即先扫一次)
     SANDBOX_REAP_GRACE_SEC: int = 60         # 只回收存活 > 此值且无活跃 lease 的资源:躲开
                                              # "刚 lazy 创建 / scratch 刚建、lease 可见性差一拍"的误杀竞态
+    # reaper 的跨进程安全要求**共享** liveness 源(Redis):活跃集来自 list_active_executions,
+    # InMemory store 只反映本进程 → 多副本/多 worker 下每个进程把兄弟的活沙盒看成无 lease
+    # 孤儿、60s 后误删(破坏性,非仅降级)。故 InMemory 下默认不起 reaper;单进程 InMemory
+    # (如 Mode-1 轻量部署)要用,操作者在此显式 affirm "我只跑一个进程"。多 worker 一律配 Redis。
+    SANDBOX_REAP_ALLOW_LOCAL_STORE: bool = False
 
     # SSRF / 外联工具防护（隐藏常量，不暴露 API / 工具参数）
     WEB_FETCH_MAX_BYTES: int = 20 * 1024 * 1024   # fallback 下载体上限（解压后字节），

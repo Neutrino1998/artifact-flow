@@ -108,6 +108,8 @@ return 'resolved'
 class RedisRuntimeStore:
     """Redis-backed RuntimeStore 实现"""
 
+    is_shared = True  # 跨进程共享真相源:多 worker 安全(沙盒 reaper 可据此放心跑)
+
     def __init__(
         self,
         redis_client: aioredis.Redis,

@@ -104,7 +104,8 @@ class SandboxReaper:
             f"interval={self._interval}s, grace={self._grace}s)"
         )
 
-    async def stop(self) -> None:
+    async def _stop_loop(self) -> None:
+        """只停周期 task,保留 docker client(final_sweep 还要用)。幂等。"""
         task, self._task = self._task, None
         if task is not None:
             task.cancel()
@@ -114,12 +115,30 @@ class SandboxReaper:
                 pass
             except Exception:
                 logger.exception("Sandbox reaper task teardown raised")
+
+    async def stop(self) -> None:
+        await self._stop_loop()
         docker, self._docker = self._docker, None
         if docker is not None:
             try:
                 await docker.close()
             except Exception:
                 logger.exception("Sandbox reaper aiodocker client close failed")
+
+    async def final_sweep(self) -> "ReapStats":
+        """停机最后一扫(main lifespan 在 runner.shutdown 之后、close 之前调)。
+
+        兜住 shutdown 期间 SandboxSession.close() 超时/失败漏下的孤儿 —— 单副本停机后
+        不会再有 reaper 收尾,这些孤儿会一直跑到下次启动(P2)。先停周期 task 免与本扫
+        并发,docker client 留到随后的 stop() 关。
+
+        **grace 策略按 store 分**:进程本地 store(单进程契约,此刻 runner 已 shutdown =
+        无任何在途 turn)忽略 grace,新鲜残留也收;共享 store(多 worker)保留 grace ——
+        兄弟进程可能正起新 turn,grace=0 会把它没来得及写 lease 的容器误删。
+        """
+        await self._stop_loop()
+        ignore_grace = not getattr(self._store, "is_shared", False)
+        return await self.reap_once(ignore_grace=ignore_grace)
 
     async def _run(self) -> None:
         """启动立即扫一次,之后每 interval 扫一次。单跳异常不杀循环。"""
@@ -146,11 +165,14 @@ class SandboxReaper:
     # 扫描
     # ------------------------------------------------------------------
 
-    async def reap_once(self) -> ReapStats:
+    async def reap_once(self, *, ignore_grace: bool = False) -> ReapStats:
         """一次完整对账:枚举资源 → 读活跃集 → 删孤儿。返回统计。
 
         活跃集**在枚举之后**读:让 mask 尽量贴近回收决策时刻;且 grace 已挡住
         "枚举期间新建的资源"(其年龄 < grace),两重保险。
+
+        ignore_grace 仅供 final_sweep 在进程本地 store(确无在途 turn)下用,周期扫
+        恒为 False。
         """
         stats = ReapStats()
         now = time.time()
@@ -166,7 +188,7 @@ class SandboxReaper:
         for container, conv, msg, created in containers:
             if self._is_active(active, conv, msg):
                 continue
-            if now - created <= self._grace:
+            if not ignore_grace and now - created <= self._grace:
                 stats.skipped_young += 1
                 continue
             if await self._delete_container(container, conv, msg):
@@ -184,7 +206,7 @@ class SandboxReaper:
             stats.dirs_seen += 1
             if self._is_active(active, conv, msg):
                 continue
-            if now - mtime <= self._grace:
+            if not ignore_grace and now - mtime <= self._grace:
                 stats.skipped_young += 1
                 continue
             if await self._remove_scratch_dir(name):
