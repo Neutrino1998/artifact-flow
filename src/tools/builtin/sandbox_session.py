@@ -18,6 +18,7 @@ tool 侧的 asyncio 超时只是弃等(进程不死,2026-05-14 同型),残留进
 
 import asyncio
 import codecs
+import errno
 import os
 import shutil
 import stat
@@ -104,28 +105,38 @@ def _dir_usage_bytes(root: str) -> tuple:
     dir 或 file,lstat 看链本体故 S_ISDIR 为 False,只计费不递归)/ fifo / 设备全走
     同一路径,无分类盲区。
 
-    **深度上限 = fd 资源闸,命中即 fail-closed**:DFS 下开着的 fd 数 = 深度,容器能
-    廉价 `mkdir -p` 任意深(每层 ≈ 一块)→ 不限会耗尽**整个 backend 进程**的 fd。
-    命中 `_MAX_WALK_DEPTH` 返回 `capped=True`,调用方按超额杀 —— **不能 fail-open 只
-    计浅层**(否则深埋大文件绕过软配额、伤其他 turn,池子硬墙是最后而非唯一防线)。
-    fail-closed 后计量再无"少算"路径:每条目要么被计、要么触发杀。512 层远超真实
-    沙盒用途(解压工程/构建树深度 < 50),误判不可达。
+    **测不准 = fail-closed,默认取反**:不再枚举"哪些错误危险"(白名单总会漏一种
+    → 又一轮:EMFILE/EACCES 时静默少算就是这么漏的),而是枚举唯一**良性**的错误
+    —— `ENOENT`(条目在枚举后消失 = 已被 rm,本就不占空间,跳过正确)—— 其余一切
+    OSError(EMFILE/ENFILE 开不出 fd、EACCES 容器 chmod 000 藏子树、ELOOP/ENOTDIR
+    被换成链、深度上限)都置 `capped=True`,调用方 fail-closed 当超额杀。原则:
+    **能完成计量就计,完成不了就保守杀,绝不返回一个可能偏低的数让 watchdog 信任。**
+    （depth cap 是其中一例:DFS 下开着的 fd 数=深度,容器能廉价 `mkdir -p` 任意深 →
+    不限会耗尽整个 backend 进程的 fd;512 层远超真实用途、误判不可达。）
     """
     capped = False
+
+    def _benign(e: OSError) -> bool:
+        # 唯一良性:条目已消失(容器自己 rm,内容确实不再占空间)。其余 = 测不准。
+        return e.errno == errno.ENOENT
 
     def walk(dir_fd: int, depth: int) -> int:
         nonlocal capped
         subtotal = 0
         try:
             scan = os.scandir(dir_fd)  # 不夺 fd 所有权,调用方仍负责 close(dir_fd)
-        except OSError:
+        except OSError as e:
+            if not _benign(e):
+                capped = True  # 扫不动这棵子树 → 测不准 → fail-closed
             return 0
         with scan:
             for entry in scan:
                 try:
                     st = entry.stat(follow_symlinks=False)
-                except OSError:
-                    continue  # 条目在枚举与 stat 之间消失
+                except OSError as e:
+                    if not _benign(e):
+                        capped = True
+                    continue
                 subtotal += _charge_blocks(st)
                 if not stat.S_ISDIR(st.st_mode):
                     continue
@@ -138,8 +149,11 @@ def _dir_usage_bytes(root: str) -> tuple:
                         os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
                         dir_fd=dir_fd,
                     )
-                except OSError:
-                    continue  # 名字被换链/换成非目录/消失/EMFILE → 不跟、跳过
+                except OSError as e:
+                    # 已被 rm → 跳过;EMFILE/EACCES/被换链等 → 测不准 → fail-closed
+                    if not _benign(e):
+                        capped = True
+                    continue
                 try:
                     subtotal += walk(child_fd, depth + 1)
                 finally:
@@ -148,8 +162,9 @@ def _dir_usage_bytes(root: str) -> tuple:
 
     try:
         root_fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
-    except OSError:
-        return 0, False
+    except OSError as e:
+        # 根不存在 = 本 turn 还没写过沙盒,usage 真为 0;其余(EMFILE/EACCES)= 测不准
+        return 0, not _benign(e)
     try:
         try:
             total = _charge_blocks(os.fstat(root_fd))  # 根自身(无父目录代它计费)

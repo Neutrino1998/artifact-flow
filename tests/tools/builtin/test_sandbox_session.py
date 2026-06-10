@@ -6,6 +6,7 @@ sandbox_no_orphan_matrix.py 自验。
 """
 
 import asyncio
+import errno
 import os
 from types import SimpleNamespace
 
@@ -459,6 +460,41 @@ class TestDirUsage:
             d.mkdir()
         _, capped = _dir_usage_bytes(str(tmp_path))
         assert not capped
+
+    def test_openat_failure_fails_closed_not_open(self, tmp_path, monkeypatch):
+        """openat 下探失败(EMFILE/EACCES 等非 ENOENT)→ capped=True,不静默少算。
+        reviewer 复现:RLIMIT_NOFILE=64 扫 80 层树曾返回 capped=False。"""
+        import os as _os
+        sub = tmp_path / "sub"
+        sub.mkdir()
+        (sub / "f").write_bytes(b"x" * 100)
+        real_open = _os.open
+
+        def emfile_on_subdir(path, flags, *a, **k):
+            # 模拟下探子目录时 fd 耗尽(对 sub 这一级 openat 抛 EMFILE)
+            if k.get("dir_fd") is not None and path == "sub":
+                raise OSError(errno.EMFILE, "Too many open files")
+            return real_open(path, flags, *a, **k)
+
+        monkeypatch.setattr(_os, "open", emfile_on_subdir)
+        usage, capped = _dir_usage_bytes(str(tmp_path))
+        assert capped  # 测不准 → fail-closed(旧实现这里 capped=False)
+
+    def test_vanished_entry_is_benign_not_capped(self, tmp_path, monkeypatch):
+        """条目在枚举后被 rm(ENOENT)是良性 —— 内容已不占空间,跳过且不 fail-closed。"""
+        import os as _os
+        sub = tmp_path / "gone"
+        sub.mkdir()
+        real_open = _os.open
+
+        def enoent_on_subdir(path, flags, *a, **k):
+            if k.get("dir_fd") is not None and path == "gone":
+                raise OSError(errno.ENOENT, "No such file or directory")
+            return real_open(path, flags, *a, **k)
+
+        monkeypatch.setattr(_os, "open", enoent_on_subdir)
+        _, capped = _dir_usage_bytes(str(tmp_path))
+        assert not capped  # ENOENT 不触发 fail-closed
 
 
 class TestQuota:
