@@ -13,13 +13,16 @@ export default function ArtifactTabs() {
   const viewMode = useArtifactStore((s) => s.viewMode);
   const setViewMode = useArtifactStore((s) => s.setViewMode);
   const contentType = useArtifactStore((s) => s.current?.content_type);
+  const hasBlob = useArtifactStore((s) => s.current?.has_blob);
 
   const tabs = useMemo(() => {
     if (contentType === 'text/markdown') return allTabs;
-    // 图片只有 preview(无文本 source/diff)
-    if (contentType?.startsWith('image/')) return allTabs.filter((t) => t.mode === 'preview');
+    // blob 类(图片/二进制)只有 preview(无文本 source/diff)
+    if (hasBlob || contentType?.startsWith('image/')) {
+      return allTabs.filter((t) => t.mode === 'preview');
+    }
     return allTabs.filter((t) => t.mode !== 'preview');
-  }, [contentType]);
+  }, [contentType, hasBlob]);
 
   return (
     <div className="inline-flex p-0.5 rounded-lg bg-panel-accent dark:bg-surface-dark text-xs">

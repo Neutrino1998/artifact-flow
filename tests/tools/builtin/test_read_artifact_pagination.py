@@ -223,3 +223,36 @@ class TestReadArtifactPagination:
         assert "offset=" in hint
         assert "limit=" not in hint
         assert "version=" not in hint
+
+
+# ============================================================
+# blob-only artifact(docx/pdf 上传,C-0)→ 契约文案,非空 content
+# ============================================================
+
+_DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+
+
+class TestReadBinaryBlobArtifact:
+    """非图片 blob-only artifact:read 返回契约说明(success=True,避免模型重试),
+    不返回空文本切片。"""
+
+    async def test_read_docx_blob_returns_contract_message(
+        self, read_tool: ReadArtifactTool, artifact_service: ArtifactService, session_id: str
+    ):
+        artifact_service.set_session(session_id)
+        ok, _, info = await artifact_service.create_from_upload(
+            session_id=session_id,
+            filename="report.docx",
+            content="",
+            content_type=_DOCX_MIME,
+            blob=b"PK\x03\x04" + b"\x00" * 16,
+            blob_content_type=_DOCX_MIME,
+        )
+        assert ok
+
+        result = await read_tool.execute(id=info["id"])
+        assert result.success
+        assert "binary file" in result.data
+        assert "report.docx" in result.data
+        # 不能把空 content 当文本切片吐回去
+        assert "<artifact_slice" not in result.data

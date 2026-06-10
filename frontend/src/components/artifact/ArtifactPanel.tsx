@@ -10,6 +10,7 @@ import MarkdownPreview from './MarkdownPreview';
 import SourceView from './SourceView';
 import DiffView from './DiffView';
 import ImagePreview from './ImagePreview';
+import BinaryFilePreview from './BinaryFilePreview';
 
 export default function ArtifactPanel() {
   const current = useArtifactStore((s) => s.current);
@@ -49,8 +50,10 @@ export default function ArtifactPanel() {
   }
 
   const content = selectedVersion?.content ?? current.content;
-  // 图片 artifact 无文本内容,preview 走 ImagePreview(authed fetch /raw → objectURL)。
+  // blob 类 artifact 无文本内容:图片 preview 走 ImagePreview(authed fetch /raw →
+  // objectURL),其它二进制(docx/pdf 上传,C-0 blob-only)走 BinaryFilePreview(下载卡片)。
   const isImage = (current.content_type ?? '').startsWith('image/');
+  const isBinary = !!current.has_blob && !isImage;
   const imgSession = current.session_id || sessionId || '';
 
   return (
@@ -67,6 +70,13 @@ export default function ArtifactPanel() {
               // updated_at: '' while live → real timestamp on the COMPLETE DB re-pull,
               // re-firing the effect so the image resolves from the DB blob.
               refreshKey={current.updated_at || undefined}
+            />
+          : isBinary
+          ? <BinaryFilePreview
+              sessionId={imgSession}
+              artifactId={current.id}
+              originalFilename={current.original_filename}
+              contentType={current.content_type}
             />
           : <MarkdownPreview content={content} />)}
         {viewMode === 'source' && <SourceView content={content} />}

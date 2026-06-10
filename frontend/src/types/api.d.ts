@@ -319,30 +319,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/artifacts/{session_id}/{artifact_id}/export": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Export Artifact
-         * @description Export an artifact to a different format.
-         *     Currently supports exporting text/markdown artifacts to docx.
-         *
-         *     Note: reads from DB only — during execution, exports the last flushed
-         *     version, not in-memory edits.  Frontend hides export while streaming.
-         */
-        get: operations["export_artifact_api_v1_artifacts__session_id___artifact_id__export_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/artifacts/{session_id}/{artifact_id}": {
         parameters: {
             query?: never;
@@ -1118,6 +1094,12 @@ export interface components {
              */
             original_filename: string | null;
             /**
+             * Has Blob
+             * @description True for blob-backed artifacts (images / rich-format uploads): no text content; raw bytes via GET …/raw.
+             * @default false
+             */
+            has_blob: boolean;
+            /**
              * Created At
              * Format: date-time
              * @description Creation time
@@ -1170,6 +1152,12 @@ export interface components {
              * @description For source=user_upload artifacts: the filename the user uploaded. From metadata['original_filename'].
              */
             original_filename: string | null;
+            /**
+             * Has Blob
+             * @description True for blob-backed artifacts (images / rich-format uploads): no text content; raw bytes via GET …/raw.
+             * @default false
+             */
+            has_blob: boolean;
             /**
              * Created At
              * Format: date-time
@@ -2562,41 +2550,6 @@ export interface operations {
                 };
                 content: {
                     "*/*": string;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    export_artifact_api_v1_artifacts__session_id___artifact_id__export_get: {
-        parameters: {
-            query: {
-                /** @description Export format (docx) */
-                format: string;
-            };
-            header?: never;
-            path: {
-                session_id: string;
-                artifact_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */

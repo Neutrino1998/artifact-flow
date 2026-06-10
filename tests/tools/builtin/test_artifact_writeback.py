@@ -613,3 +613,57 @@ class TestWriteBackFlushFailure:
 
         # Dirty entry should still be present
         assert artifact_service.working_set.is_dirty(session_id, "will_fail")
+
+
+# ============================================================
+# blob 类 artifact = 不可变单版(C-0):文本编辑工具一律拒
+# ============================================================
+
+_DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+
+
+class TestBinaryArtifactImmutable:
+    """update/rewrite 在 blob artifact 上会长出文本 content,与不可变 blob 形成
+    双轨 —— service 层统一拒绝;改 = persist/create 新 artifact。"""
+
+    async def _upload_docx(self, artifact_service: ArtifactService, session_id: str) -> str:
+        artifact_service.set_session(session_id)
+        ok, _, info = await artifact_service.create_from_upload(
+            session_id=session_id,
+            filename="spec.docx",
+            content="",
+            content_type=_DOCX_MIME,
+            blob=b"PK\x03\x04" + b"\x00" * 16,
+            blob_content_type=_DOCX_MIME,
+        )
+        assert ok
+        return info["id"]
+
+    async def test_update_refused(
+        self, artifact_service: ArtifactService, session_id: str
+    ):
+        aid = await self._upload_docx(artifact_service, session_id)
+        ok, msg, _ = await artifact_service.update_artifact(
+            session_id, aid, old_str="a", new_str="b"
+        )
+        assert not ok
+        assert "immutable" in msg
+
+    async def test_rewrite_refused(
+        self, artifact_service: ArtifactService, session_id: str
+    ):
+        aid = await self._upload_docx(artifact_service, session_id)
+        ok, msg = await artifact_service.rewrite_artifact(
+            session_id, aid, new_content="injected text"
+        )
+        assert not ok
+        assert "immutable" in msg
+
+    async def test_read_dict_carries_blob_content_type(
+        self, artifact_service: ArtifactService, session_id: str
+    ):
+        """read_artifact 序列化带 blob_content_type —— 工具层契约文案 + REST
+        has_blob 的共同判别字段。"""
+        aid = await self._upload_docx(artifact_service, session_id)
+        result = await artifact_service.read_artifact(session_id, aid)
+        assert result["blob_content_type"] == _DOCX_MIME

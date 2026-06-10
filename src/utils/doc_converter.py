@@ -1,14 +1,16 @@
 """
-Document converter for file import/export.
+Document converter for file import.
 
 Supports:
-- Import: .docx (pandoc), .pdf (pymupdf), text files (charset-normalizer)
-- Export: markdown -> .docx (pandoc)
+- Import: text files (charset-normalizer), images (png/jpeg → blob),
+  rich formats .docx/.pdf (→ immutable blob, NO text conversion — reading
+  rich formats is a sandbox capability, see sandbox plan principle 6 / C-0)
+- PDF text extraction (pymupdf) survives as a standalone helper for
+  web_fetch's PDF fallback — that is web-content reading, not upload.
 """
 
 import asyncio
 import os
-import shutil
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Dict, Optional, Tuple
@@ -91,8 +93,8 @@ _UNSUPPORTED_IMAGE: Dict[str, str] = {
                 ".heic", ".heif", ".svg", ".ico", ".avif")
 }
 
-# 富格式原始 blob 的真实 MIME(additive 存储:artifact.content 是转换后的 md,
-# blob 是不可变原件 → raw 端点按这个 MIME 发)。
+# 富格式原始 blob 的真实 MIME(blob-only 存储:artifact 无文本表示,content_type
+# 即原件 MIME → raw 端点按它发,读/转换归沙盒)。
 _DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 _PDF_MIME = "application/pdf"
 
@@ -136,10 +138,11 @@ _UNSUPPORTED_OFFICE: Dict[str, _Cat] = {
 class ConvertResult:
     """Result of a document conversion.
 
-    `content`/`content_type` 是**可读文本表示**(artifact 主体:图片为空、富格式为
-    pandoc/pymupdf 转出的 md、纯文本即原文)。`blob`/`blob_content_type` 是需要**二进制
-    存储**时的原始不可变字节 + 真实 MIME(图片本体 / 富格式原件 additive 保留);纯文本
-    类无 blob。两者分离 = artifact 既承载可读表示又保留原始源(sandbox plan 原则 6)。
+    `content`/`content_type` 是**可读文本表示**(纯文本即原文;图片与富格式
+    docx/pdf 为空 —— 无文本表示,content_type 即真实 MIME)。`blob`/
+    `blob_content_type` 是需要**二进制存储**时的原始不可变字节 + 真实 MIME;
+    纯文本类无 blob。富格式的读/写/转换全归沙盒(sandbox plan 原则 6,C-0
+    起 blob-only,不再预转 md)。
     """
     content: str
     content_type: str  # MIME type of the readable text representation
@@ -150,32 +153,20 @@ class ConvertResult:
 
 class DocConverter:
     """
-    Unified document converter for import (file -> text) and export (markdown -> docx).
+    Unified document converter for import (file -> text or blob).
     """
 
     # Absolute convert() backstop = config.MAX_UPLOAD_SIZE (the ingress ceiling).
-    # The two callers each enforce their own authoritative limit BEFORE we see the
-    # bytes — upload path (artifacts.py) at MAX_UPLOAD_SIZE, web_fetch PDF fallback
-    # at WEB_FETCH_MAX_BYTES — so this only fires if a caller forgot to; tying it to
-    # the upload constant avoids two hardcoded values drifting apart. NOTE: this is
-    # NOT the per-path cost guard. Each path owns its own: docx/pdf via pandoc-
-    # timeout + MAX_PDF_PAGES, images via the pixel cap + raw-blob store (no text),
-    # and the raw-text path via MAX_TEXT_CONVERT_BYTES (it's the only one that
-    # materializes full content+wordlist, so it keeps a tighter cap than this one).
+    # The upload path (artifacts.py) enforces its own authoritative limit BEFORE
+    # we see the bytes, so this only fires if a caller forgot to; tying it to
+    # the upload constant avoids two hardcoded values drifting apart. NOTE: this
+    # is NOT the per-path cost guard. Each path owns its own: docx/pdf store the
+    # blob raw (magic-byte check only, no parsing), images via the pixel cap +
+    # raw-blob store (no text), and the raw-text path via MAX_TEXT_CONVERT_BYTES
+    # (it's the only one that materializes full content+wordlist, so it keeps a
+    # tighter cap than this one).
     MAX_FILE_SIZE = config.MAX_UPLOAD_SIZE
-    MAX_PDF_PAGES = 200
-    CONVERT_TIMEOUT = 60               # seconds
-
-    @classmethod
-    def check_pandoc(cls) -> None:
-        """Check pandoc availability at startup. Raises RuntimeError if not found."""
-        if not shutil.which("pandoc"):
-            raise RuntimeError(
-                "pandoc is not installed or not in PATH. "
-                "Install it with: brew install pandoc (macOS) or apt-get install pandoc (Linux)"
-            )
-        logger.info("pandoc check passed")
-
+    MAX_PDF_PAGES = 200                # extract_pdf_text (web_fetch fallback) only
 
     async def convert(self, file_bytes: bytes, filename: str) -> ConvertResult:
         """
@@ -217,107 +208,52 @@ class DocConverter:
         else:
             return await self._convert_text(file_bytes, filename, ext)
 
-    async def export_docx(self, markdown_content: str) -> bytes:
+    async def extract_pdf_text(self, file_bytes: bytes) -> Tuple[str, int]:
+        """Extract text from PDF bytes via pymupdf. Returns (text, page_count).
+
+        web_fetch 的 PDF 降级路径专用(网页内容阅读,非上传)。上传的 .pdf 走
+        blob-only(`_convert_pdf`),不经此函数 —— 富格式的读归沙盒(原则 6)。
         """
-        Export markdown content to docx bytes.
-
-        Args:
-            markdown_content: Markdown text
-
-        Returns:
-            docx file bytes
-
-        Raises:
-            RuntimeError: pandoc conversion failed
-        """
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                "pandoc", "-f", "markdown", "-t", "docx", "-o", "-",
-                stdin=asyncio.subprocess.PIPE,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            stdout, stderr = await asyncio.wait_for(
-                proc.communicate(input=markdown_content.encode("utf-8")),
-                timeout=self.CONVERT_TIMEOUT,
-            )
-
-            if proc.returncode != 0:
-                raise RuntimeError(f"pandoc export failed: {stderr.decode()}")
-
-            return stdout
-
-        except asyncio.TimeoutError:
-            proc.kill()
-            raise RuntimeError(f"pandoc export timed out ({self.CONVERT_TIMEOUT}s)")
+        # PyMuPDF 必须串行（见模块顶部 _PYMUPDF_EXECUTOR 注释），同时不卡 event loop
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            _PYMUPDF_EXECUTOR, _extract_pdf_text, file_bytes, self.MAX_PDF_PAGES
+        )
 
     async def _convert_docx(self, file_bytes: bytes, filename: str) -> ConvertResult:
-        """Convert .docx to markdown via pandoc."""
-        # zip 预检:.docx 是 OOXML(zip 容器),合法文件以 PK\x03\x04 开头。
-        # 改后缀的 .doc 是 OLE2(D0CF11E0），pandoc 会以晦涩的 "couldn't unpack
-        # docx container" RuntimeError(→500)失败。这里提前判「是不是合法 zip」
-        # 抛 ValueError(→422 + 可操作提示)。注意:这不违反模块顶部「不走
-        # magic-byte 区分 OOXML *种类*」——区分 docx/xlsx/pptx 才需解压看
-        # [Content_Types].xml;这里只判容器是不是 zip,代价极低。
+        """.docx → 不可变 blob(无文本转换;读 docx 是沙盒能力,C-0 起 blob-only)。"""
+        # zip 预检:.docx 是 OOXML(zip 容器),合法文件以 PK\x03\x04 开头。改后缀的
+        # .doc 是 OLE2(D0CF11E0)——存成 blob 后模型在沙盒里也打不开,上传即拒 +
+        # 可操作提示。注意:这不违反模块顶部「不走 magic-byte 区分 OOXML *种类*」——
+        # 区分 docx/xlsx/pptx 才需解压看 [Content_Types].xml;这里只判容器是不是
+        # zip,代价极低。
         if not file_bytes.startswith(b"PK\x03\x04"):
             raise ValueError(
                 f"{filename!r} 不是有效的 .docx 文件(可能是改了后缀的旧版 .doc 或损坏文件)。"
                 "请用 Word 另存为 .docx 后重新上传。"
             )
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                "pandoc", "-f", "docx", "-t", "markdown",
-                stdin=asyncio.subprocess.PIPE,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            stdout, stderr = await asyncio.wait_for(
-                proc.communicate(input=file_bytes),
-                timeout=self.CONVERT_TIMEOUT,
-            )
-
-            if proc.returncode != 0:
-                raise RuntimeError(f"pandoc conversion failed: {stderr.decode()}")
-
-            content = stdout.decode("utf-8")
-            word_count = len(content.split())
-
-            return ConvertResult(
-                content=content,
-                content_type="text/markdown",
-                metadata={
-                    "original_filename": filename,
-                    "converter_used": "pandoc",
-                    "word_count": word_count,
-                },
-                # additive:保留 docx 原件作不可变源 + 未来 pandoc --reference-doc 样式模版
-                blob=file_bytes,
-                blob_content_type=_DOCX_MIME,
-            )
-
-        except asyncio.TimeoutError:
-            proc.kill()
-            raise RuntimeError(f"pandoc conversion timed out ({self.CONVERT_TIMEOUT}s)")
+        return ConvertResult(
+            content="",
+            content_type=_DOCX_MIME,
+            metadata={"original_filename": filename, "converter_used": "blob"},
+            # 不可变源 + 未来沙盒 pandoc --reference-doc 样式模版,一物两用
+            blob=file_bytes,
+            blob_content_type=_DOCX_MIME,
+        )
 
     async def _convert_pdf(self, file_bytes: bytes, filename: str) -> ConvertResult:
-        """Convert .pdf to markdown via pymupdf."""
-        # PyMuPDF 必须串行（见模块顶部 _PYMUPDF_EXECUTOR 注释），同时不卡 event loop
-        loop = asyncio.get_running_loop()
-        content, page_count = await loop.run_in_executor(
-            _PYMUPDF_EXECUTOR, _extract_pdf_text, file_bytes, self.MAX_PDF_PAGES
-        )
-        word_count = len(content.split())
-
+        """.pdf → 不可变 blob(无文本转换;读 pdf 是沙盒能力,C-0 起 blob-only)。"""
+        # magic 预检(对齐 docx 的 idiom):合法 PDF 以 %PDF- 开头,改后缀/损坏文件
+        # 存成 blob 后沙盒里也解析不了,上传即拒。
+        if not file_bytes.startswith(b"%PDF-"):
+            raise ValueError(
+                f"{filename!r} 不是有效的 .pdf 文件(可能改了后缀或已损坏)。"
+                "请确认文件可正常打开后重新上传。"
+            )
         return ConvertResult(
-            content=content,
-            content_type="text/markdown",
-            metadata={
-                "original_filename": filename,
-                "converter_used": "pymupdf",
-                "page_count": page_count,
-                "word_count": word_count,
-            },
-            # additive:保留 pdf 原件作不可变源(可下载、未来沙盒重新解析)
+            content="",
+            content_type=_PDF_MIME,
+            metadata={"original_filename": filename, "converter_used": "blob"},
             blob=file_bytes,
             blob_content_type=_PDF_MIME,
         )
@@ -359,7 +295,7 @@ class DocConverter:
         # The text path is the one conversion route with NO cost envelope of its
         # own: charset detection + str() + word-count materialize the full decoded
         # content AND a word list, which amplifies memory well past the input size.
-        # docx/pdf are bounded by pandoc-timeout / MAX_PDF_PAGES, images store the
+        # docx/pdf store the blob raw (magic check only), images store the
         # blob raw (no text) — only raw text scales with the 100MB upload ceiling.
         # So it keeps a tighter, independent cap (MAX_TEXT_CONVERT_BYTES, the old
         # 20MB envelope). The byte cap is the PRIMARY guard (an input upper bound);

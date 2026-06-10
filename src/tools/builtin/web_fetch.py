@@ -380,11 +380,10 @@ class WebFetchTool(BaseTool):
                     # 流式读取并封顶字节（先于全量入内存，保护下载本身）
                     pdf_bytes = await _read_capped(response, config.WEB_FETCH_MAX_BYTES)
 
+                    # PDF 文本抽取(网页内容阅读路径)。不走 convert() 上传入口——
+                    # 上传的 .pdf 自 C-0 起 blob-only,文本抽取仅 web_fetch 保留。
                     converter = DocConverter()
-                    result = await converter.convert(pdf_bytes, "document.pdf")
-
-                    content = result.content
-                    page_count = result.metadata.get("page_count", 0)
+                    content, page_count = await converter.extract_pdf_text(pdf_bytes)
                     logger.info(f"PDF extracted: {page_count} pages, {len(content)} chars")
 
                     return {

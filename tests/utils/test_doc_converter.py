@@ -5,9 +5,7 @@ Unit tests for src/utils/doc_converter.py
 - Unsupported Office / ODF：每个扩展名都抛 ValueError，文案带分类 + 针对性 advice
 - Text fallback：纯文本扩展（.txt/.md/.csv）成功并标对 MIME 类型
 - 未知扩展名：能解码为文本 → 走兜底；不能解码 → ValueError
-
-不覆盖 .docx / .pdf 的 happy path —— 需要真实 pandoc / pymupdf 二进制做 fixture，
-属于 integration 测试范畴，不在这里。
+- .docx / .pdf：blob-only(C-0,无文本转换,magic 预检 loud-fail)
 """
 
 import io
@@ -158,17 +156,18 @@ class TestSizeLimit:
 
 
 # ============================================================
-# .docx zip 预检（改后缀的 .doc → 可操作 422，而非晦涩 500）
+# .docx / .pdf → blob-only(C-0:无文本转换,magic 预检 loud-fail)
 # ============================================================
 
+_DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 
-class TestDocxZipPrecheck:
-    """_convert_docx 入口判「是不是合法 zip」：非 PK\\x03\\x04 → ValueError。"""
+
+class TestRichFormatBlobOnly:
+    """富格式上传 = 不可变 blob,无文本表示;magic 预检拒改后缀/损坏文件。"""
 
     async def test_ole2_doc_renamed_to_docx_raises_value_error(self):
-        # 旧版 .doc 是 OLE2 复合文档（magic D0CF11E0），改后缀成 .docx 上传。
-        # 旧行为:pandoc 抛 "couldn't unpack docx container" RuntimeError → 500。
-        # 新行为:入口预检抛 ValueError（路由映射 422 + 可操作提示）。
+        # 旧版 .doc 是 OLE2 复合文档（magic D0CF11E0），改后缀成 .docx 上传 →
+        # 入口预检抛 ValueError（路由映射 422 + 可操作提示）。
         converter = DocConverter()
         ole2 = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1" + b"\x00" * 64
         with pytest.raises(ValueError, match="不是有效的 .docx"):
@@ -179,14 +178,31 @@ class TestDocxZipPrecheck:
         with pytest.raises(ValueError, match="不是有效的 .docx"):
             await converter._convert_docx(b"not a zip at all", "x.docx")
 
-    async def test_valid_zip_header_passes_precheck(self):
-        # PK\x03\x04 开头通过预检（后续 pandoc 阶段可能因内容/缺二进制再失败，
-        # 但绝不能是「不是有效的 .docx」这条 ValueError）。
+    async def test_valid_docx_stored_as_blob(self):
+        # PK\x03\x04 开头通过预检 → blob-only:content 空、content_type=真实 MIME、
+        # 原件原样进 blob(不可变源 + 未来 --reference-doc 样式模版)。
         converter = DocConverter()
         zipped = b"PK\x03\x04" + b"\x00" * 64
-        with pytest.raises(Exception) as exc_info:
-            await converter._convert_docx(zipped, "ok.docx")
-        assert "不是有效的 .docx" not in str(exc_info.value)
+        result = await converter.convert(zipped, "ok.docx")
+        assert result.content == ""               # 无文本表示(读归沙盒)
+        assert result.content_type == _DOCX_MIME
+        assert result.blob == zipped              # 原件不变
+        assert result.blob_content_type == _DOCX_MIME
+        assert result.metadata["original_filename"] == "ok.docx"
+
+    async def test_valid_pdf_stored_as_blob(self):
+        converter = DocConverter()
+        pdf = b"%PDF-1.7\n" + b"\x00" * 64
+        result = await converter.convert(pdf, "doc.pdf")
+        assert result.content == ""
+        assert result.content_type == "application/pdf"
+        assert result.blob == pdf
+        assert result.blob_content_type == "application/pdf"
+
+    async def test_renamed_non_pdf_raises_value_error(self):
+        converter = DocConverter()
+        with pytest.raises(ValueError, match="不是有效的 .pdf"):
+            await converter.convert(b"not a pdf", "fake.pdf")
 
 
 # ============================================================

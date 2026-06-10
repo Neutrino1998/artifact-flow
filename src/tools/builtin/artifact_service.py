@@ -424,6 +424,9 @@ class ArtifactService:
                 "version": memory.current_version,
                 "source": memory.source,
                 "original_filename": (memory.metadata or {}).get("original_filename"),
+                # blob-only artifact(docx/pdf 等富格式上传)的判别字段:有 = 二进制、
+                # 无文本表示,read_artifact 据此给契约文案而非空 content。
+                "blob_content_type": (memory.metadata or {}).get("blob_content_type"),
                 "created_at": memory.created_at.isoformat(),
                 "updated_at": memory.updated_at.isoformat(),
             }
@@ -441,6 +444,7 @@ class ArtifactService:
                 "version": memory.current_version,
                 "source": memory.source,
                 "original_filename": (memory.metadata or {}).get("original_filename"),
+                "blob_content_type": (memory.metadata or {}).get("blob_content_type"),
                 "created_at": memory.created_at.isoformat(),
                 "updated_at": memory.updated_at.isoformat(),
             }
@@ -503,6 +507,21 @@ class ArtifactService:
     # 更新 / 重写
     # ========================================
 
+    @staticmethod
+    def _binary_immutable_error(memory: ArtifactMemory) -> Optional[str]:
+        """blob 类 artifact(图片/docx/pdf 等)= 不可变单版,文本编辑一律拒。
+
+        否则 update/rewrite 会在二进制 artifact 上长出一份文本 content —— 与不可变
+        blob 形成"哪份权威"的双轨(C-0 刚删掉的状态借编辑工具还魂)。改 = 产新
+        artifact(沙盒 persist / create_artifact),源永不变。
+        """
+        if (memory.metadata or {}).get("blob_content_type"):
+            return (
+                f"Artifact '{memory.id}' is a binary file and is immutable. "
+                "Create a new artifact for derived content instead of editing it."
+            )
+        return None
+
     async def update_artifact(
         self,
         session_id: str,
@@ -524,6 +543,10 @@ class ArtifactService:
         memory = await self.get_artifact(session_id, artifact_id)
         if not memory:
             return False, f"Artifact '{artifact_id}' not found", None
+
+        blocked = self._binary_immutable_error(memory)
+        if blocked:
+            return False, blocked, None
 
         info = compute_update(memory.content, old_str, new_str)
 
@@ -589,6 +612,10 @@ class ArtifactService:
         memory = await self.get_artifact(session_id, artifact_id)
         if not memory:
             return False, f"Artifact '{artifact_id}' not found"
+
+        blocked = self._binary_immutable_error(memory)
+        if blocked:
+            return False, blocked
 
         memory.content = new_content
         memory.current_version += 1
@@ -739,6 +766,7 @@ class ArtifactService:
                     "version": art.current_version,
                     "source": art.source,
                     "original_filename": (art.metadata_ or {}).get("original_filename"),
+                    "blob_content_type": (art.metadata_ or {}).get("blob_content_type"),
                     "created_at": art.created_at.isoformat(),
                     "updated_at": art.updated_at.isoformat(),
                 }
@@ -769,6 +797,7 @@ class ArtifactService:
             "version": memory.current_version,
             "source": memory.source,
             "original_filename": (memory.metadata or {}).get("original_filename"),
+            "blob_content_type": (memory.metadata or {}).get("blob_content_type"),
             "created_at": memory.created_at.isoformat(),
             "updated_at": memory.updated_at.isoformat(),
         }

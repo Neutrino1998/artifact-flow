@@ -17,15 +17,15 @@
 
 ## 进度
 
-- **当前**:**B(x86_64)完成**(2026-06-05 milvus2 `run-all.sh` 全绿 + 已撤出,见 B 段「进展」)—— ENOSYS 核心赌注赢、镜像 id 冻结、内网零残留。**B(arm64/鲲鹏)完成**(2026-06-08,经 64K→4K 在位换核后 `run-all.sh` 全绿,见 B 段「进展 · arm」)—— 双架构 §B 闭环。**A 完成**(三切片实现 + 2026-06-09 review 加固 + live E2E 用户实测通过;外部 review 无阻塞)。
-- **下一步**:**C 阶段引擎集成**(本机 runc 连调,依 B 冻结镜像)。并行待办:arm §B 镜像 id 冻结(机器在位时)。
+- **当前**:**A / B(双架构)完成**(详见各段进展)。**C 开工**(2026-06-10 开工决策锁定,切片 C-0→C-wire,见 C 段「进展」)。
+- **下一步**:**C-session**(`SandboxSession` + aiodocker + finally 拆除 plumbing + `bash` 工具)。C-0 已落地(2026-06-10,见 C 段进展)。并行待办:arm §B 镜像 id 冻结(机器在位时;注意 C 镜像加 git 后锚点作废,统一在 D 重冻结)。
 - **产物处置(2026-06-05 拍定)**:`feat/sandbox` 这批已验收产物(`sandbox/` 探针 + 构建脚本)**暂留分支不动**,不单独提早合 main。「是否把就绪探针子集(`unshare -U` 闸 + smoke + ENOSYS/uid)提升为通用部署机预检工具」**推迟到 C/D 阶段**——届时有真实第二调用点(每台新沙盒宿主预检 + D 端到端冒烟)再校准边界,现在抽象属投机(YAGNI)。
 
 | 阶段 | 内容 | 状态 |
 |---|---|---|
 | A | artifact 地基(二进制存储 + 多格式上传 + 识图) | **完成**(2026-06-08 三切片 + 2026-06-09 review 加固 + live E2E 用户实测通过) |
 | B | Kylin gVisor 功能验证(内网) | x86_64 **完成**(验证通过+已撤出);arm64 **完成**(2026-06-08,64K→4K 换核后全绿) |
-| C | 沙盒引擎集成(本机 runc 连调) | 未开始(依 B 冻结镜像) |
+| C | 沙盒引擎集成(本机 runc 连调) | **开工**(2026-06-10 决策锁定,切片 C-0→C-wire) |
 | D | 上线前 Kylin 端到端冒烟 | 未开始 |
 
 依赖:C 依赖 A 的二进制存储 + B 的冻结镜像。A 逻辑独立(识图本身就有价值),可先做,但本期不单独合 main —— 见分支策略。
@@ -183,11 +183,32 @@
     - **「应用与沙盒分机部署」并入此轴、有需求再做**(2026-06-05):分机不是改 aiodocker 连接串能办的——真正的耦合是 **bind-mount 工作区 daemon-local**(路径在 daemon 那台机解析,不在客户端机;uid 属主断言同理),aiodocker 本身可连远程 TCP+TLS daemon,但单远程 daemon = 无调度/无故障转移、bind-mount 还是断。**正解是 k8s**(per-turn Pod + volume/PVC stage 替代宿主 bind-mount),即本条上面那根「换控制面」轴。两个可能驱动都推迟到真有需求:① 专用沙盒主机池(隔离烧 CPU 的不可信执行);② 切掉「应用机经 docker.sock 拿 host root」的爆炸半径(正当安全驱动,但代价仍是换控制面)。在此之前结论不变:单机 DooD、seam 留着。
 - **文档转换走沙盒**:pandoc 装进沙盒镜像(B 验过),富格式读(docx→md)和写都由 agent 在沙盒里跑 pandoc。**驱动场景**:用户要带格式的 Word 时,模型以用户上传/原有 docx 作 `--reference-doc` 样式模版,在沙盒里 md→docx 生成,产物回写成可下载 blob——比固定的 md→docx 导出保真,可能取代现有的 md→Word 导出路径。**门控变化(衔接 artifact plan 决策 6)**:现有 `/export` 是同步 REST 读,turn 中按「前端 UX 锁的读」处理;一旦导出搬进沙盒 = 起容器 = **执行**,就从读升级为 **lease 挡的写/执行**(跟 bash 工具同级),门控责任从前端移到后端 lease。替换 md→Word 路径时一并改门控,别留前端旧锁。
 
-**到时再敲定**:并发上限;bash 输出溢出是截断还是转 artifact;zip 命名与"可单独查看"白名单。(原"挂哪些 artifact:全部 vs 被引用"已由原则 4 的显式 mount 关闭——模型 mount 谁就有谁;原"沙盒工具是否合并"已拍定分立三工具 + 共享 `SandboxSession`,见上。)
+**到时再敲定**:并发上限;persist 多文件 zip 的命名与"可单独查看"白名单;**上传路由翻转(挂 C-stage mount 落地后)**——现状是 blob 白名单(docx/pdf/png/jpeg)+ 显式拒绝名单(Office/ODF/异型图)+ 默认文本解码兜底,沙盒可用后翻为「文本类白名单→content,其余→blob」:zip(原则 5)/xlsx/pptx 等出拒绝名单入 blob(沙盒里 openpyxl/解压直接处理,"请导出为 csv"类 remediation 同步过时),docx/pdf magic 闸保留;**沙盒落地前不翻**——blob-default 会产不可用死物 + 吞掉改后缀/损坏文件的 loud-fail。(原"挂哪些 artifact:全部 vs 被引用"已由原则 4 的显式 mount 关闭——模型 mount 谁就有谁;原"沙盒工具是否合并"已拍定分立三工具 + 共享 `SandboxSession`,见上;原"bash 输出溢出"已拍定复用既有 idiom,见下「进展」。)
+
+**进展**:
+- **2026-06-10 C 开工决策锁定**(集成点已逐一核实存在:`_wrapped` finally=`execution_runner.py` cleanup_execution 旁、`list_active_executions` 返回 `{conv_id: message_id}` 故 per-turn 对账零新接口、工具构造注入仿 `create_artifact_tools`、CONFIRM 仿 `web_fetch`):
+  - **切片顺序**:**C-0**(blob-only 上传一步到位:删 docx/pdf→md 自动转换 + **整删 `/export` md→Word**,先行、不依赖沙盒代码)→ **C-session**(`SandboxSession` 壳 + aiodocker + finally 拆除 plumbing + `bash` 工具 + `SANDBOX_*` 常量,跑无孤儿矩阵)→ **C-stage**(`mount`/`persist`)→ **C-reap**(lease-anchored reaper)→ **C-wire**(agent MD 权限、工具描述、文档)。
+  - **blob-only 一步到位(C-0),不留过渡双轨**:中间态(同一 artifact 既有 md content 又有 blob)的唯一受害者是模型认知与 E2E 调试,受益人不存在(feat/sandbox 未合 main、mount/pandoc 调试走 blob 路径用不上 md)。上传按格式二分:文本类→content(可编辑、版本化),二进制类→blob-only(png/jpeg 识图不动);`read_artifact` 对 blob-only 给契约文案("binary,mount 进沙盒操作");前端预览退化为下载入口(文本下载=content,blob 下载=既有 `/raw`)。
+  - **`/export` 整删,非搬沙盒**:原"门控升级(读→lease 挡执行)"账随之消失——agent 在沙盒生成 docx 走 bash,天然 lease 挡。**代价进验收**:「成熟」定义新增——"用户要带格式 Word"场景须由 agent 流程(mount 原 docx → pandoc `--reference-doc` → persist)在 D/live 真实跑通,merge 后无一键导出按钮,替代物必须先站住。
+  - **persist 永远产新 artifact,blob 不版本化**(回答 `ArtifactBlob` docstring 留的问号):二进制 artifact 契约=不可变单版,改=persist 新建(`_N` dedup 已有);文本=可编辑版本化。否决 blob 版本化(glance 态不值强一致机器)与 blob 覆写(毁"原 blob=不可变源+`--reference-doc` 样式模版"一物两用)。
+  - **mount 语义(blob-only 后每 artifact 单一权威载体)**:文本→WorkingSet overlay(本轮 dirty/new 必须可 mount,直读 DB 是空的);blob→DB `get_blob`(唯一例外:本轮 staged 上传读 `ArtifactMemory.blob`)。格式判别=有无 blob,无需白名单。
+  - **mount 返回纯事实,提示分层**:返回值只报物化清单(容器内路径/字节/MIME);"binary 须 mount 操作"的**契约**文案进 inventory 标注 + `read_artifact` 拒绝文案(仿 A 图像项);**环境能力**清单(pandoc/git/科学栈)一次性进 bash 工具描述;**场景 how-to**(reference-doc 用法等)留 skill 系统,不做 per-type 提示表。
+  - **拆除 plumbing(C 阶段唯一真架构决策)**:Session **对象壳** per-request 在 controller_factory 创建(同 ArtifactService,构造注入三工具),**容器** lazy 于首个沙盒工具调用;cleanup 句柄从 factory 递到 `execution_runner._wrapped` 的 finally(`cleanup_execution` 旁),无沙盒 turn = 空列表零成本。
+  - **per-command 超时=容器内 `timeout` 包 argv**:exec API 收 argv 数组(`["timeout","--signal=KILL",N,"bash","-c",cmd]`),cmd 整体一个 argv 元素、无宿主侧 shell、无引号问题;tool 侧 asyncio 超时只负责提前返回(await 弃等 ≠ 进程死,2026-05-14 同型)。后台逃逸进程由 turn 末拆容器兜底。
+  - **reaper 枚举方向=资源侧,lease=减法掩码**:孤儿定义=无 lease 的容器,从 Redis 出发永远发现不了;正确=daemon `ps --filter label` 枚举 − `list_active_executions` 活跃集。**scratch 目录是第二类残留**(容器先没了目录还在:mkdir 后/起容器前被 SIGKILL、`--rm` 自删、daemon 重启),需第二枚举源=scratch 根目录列目录,同一 lease 差集谓词、目录名同带 `{conv}-{msg}`。
+  - **bash 输出溢出**:复用 `max_result_size_chars` + `_maybe_persist_tool_result` 溢出转 artifact idiom,引擎零改动。
+  - **镜像加 git**(tier ①:通用、环境定义、无网无法现装):apt 入 `sandbox/Dockerfile` + 烤默认 git identity(无 user.name `commit` 即报错)+ `sandbox/verify/` 加探针(init/add/commit/diff);用途=本地仓库操作(zip 解压后 log/diff/blame/apply),`--network=none` 下 clone/fetch 死属 by design。**B 冻结锚点 `sha256:3b43b839…` 作废**,D 重跑 `run-all.sh` 重新冻结(本就既定动作,不为 git 单独回内网)。
+  - **依赖**:aiodocker 入 requirements → DEP-02(slim 内重生 lock + pip-audit);exec multiplexed stream demux 自验。
+- **2026-06-10 C-0 落地**(blob-only 一步到位,后端 1098 / 前端 205 测试全过 + tsc/lint clean):
+  - **后端**:`DocConverter` docx/pdf 改 blob-only(content="" + content_type=真实 MIME + magic 预检 loud-fail,pdf 补 `%PDF-` 闸对齐 docx);pandoc 退出 backend(删 `export_docx`/`check_pandoc`,main.py 不再依赖);**pymupdf 文本抽取保留为独立 `extract_pdf_text` 供 web_fetch PDF 降级**(网页阅读路径,非上传,convert() 不再可达);删 `/export` 端点(连 `Query` import);`read_artifact` 序列化加 `blob_content_type` 判别字段 → ReadArtifactTool 对非图片 blob 返回契约文案(**success=True 防重试循环**)、inventory 二进制项标注;**新增 `_binary_immutable_error` 守门**——update/rewrite 在 blob artifact 上一律拒(否则文本编辑会让"双轨"借尸还魂),改=产新 artifact。
+  - **REST/前端**:`ArtifactSummary`/`ArtifactResponse` 加 `has_blob`(由 `blob_content_type` 推导,OpenAPI types 重生成);事件 `ArtifactCreatedData` 补 `has_blob`/`blob_size`/`blob_content_type` 类型;store `LiveArtifact.hasBlob` 全链贯通(`defaultViewMode` 收 hasBlob);删 `exportArtifact`/「导出为 Word」菜单;下载原格式按 `has_blob` 分流(blob → authed `/raw` objectURL,文件名用 `original_filename`);新增 `BinaryFilePreview`(文件卡片 + 下载),**turn 内复用 ImagePreview 的 `pendingFlush` 闸**——卡片只靠事件元数据即可渲染(filename/MIME),仅下载按钮 flush 前换成「本回合完成后可下载」提示,不发 /raw、无 404;blob artifact 隐藏复制按钮、tabs 限 preview-only。
+  - **TODO(C-wire)**:read_artifact 契约文案与 inventory 标注当前只说「可下载」,mount 工具落地后改为指引 mount 进沙盒(代码内已留 TODO 注释)。
+
+**C 验收标准**(2026-06-10 定):① 三工具 runc 下 live E2E,含「mount 原 docx → pandoc 转 md → 改 → `--reference-doc` 生成新 docx → persist 新 artifact → 前端可下载」闭环;② **无孤儿矩阵**——`while true`、tool 超时、协作取消、外部取消、SIGKILL worker 五条退出路径各跑一遍,`docker ps` + scratch 根目录双零残留(SIGKILL 条靠 reaper 收);③ reaper 零误杀(活跃 turn 的容器/目录不被收)。
 
 ### D — 上线前 Kylin 端到端冒烟
 
-**做什么**:本机 runc 开发完成后,上线前在 Kylin 用**真 runsc + 真 artifact 挂载 + cancel-kill** 跑一次端到端回归;部署前跑 `unshare -U` 预检。这是开发期不回内网的代价里留的最后一道关。
+**做什么**:本机 runc 开发完成后,上线前在 Kylin 用**真 runsc + 真 artifact 挂载 + cancel-kill** 跑一次端到端回归;部署前跑 `unshare -U` 预检。这是开发期不回内网的代价里留的最后一道关。**追加(2026-06-10)**:① 加 git 后的新镜像在 Kylin 重跑 `run-all.sh` 并**重新冻结 image id**(双架构);② bind-mount 工作区 uid 1000 属主/权限在真实 Linux 上验(backend 进程 uid ≠ 1000 时的 chmod/chown 策略,本机 runc 感知不到);③ 「用户要带格式 Word」场景由 agent 流程真实跑通(merge 后无 `/export`,替代物必须先站住)。
 
 ## 关键风险
 
@@ -223,5 +244,7 @@
 - 2026-06-08 **A 开工决策锁定**:blob = 独立 `ArtifactBlob` 表(热路径隔离)+ 元数据事件/REST 取字节;上传加法(blob + 留 md 转换过渡,不做 blob-only);**识图 = turn 内瞬态、不跨轮重建**(事件存引用、`build_event_history` 保持纯、下轮占位 re-read,compaction 天然正确);png/jpeg only + resize-on-read(Pillow,DEP-02);身份解耦已由现状满足、无需新列;首轮上传图不 auto-inject。切片 A-bin→A-upload→A-vision。详见 A 段「进展」。
 - 2026-06-08 **A 实现落地**(backend 三切片 + 前端 image view):`ArtifactBlob` 独立表(泛型 `LargeBinary(length=100MB)`,零 dialect import)+ `/raw` 端点;png/jpeg + docx/pdf additive 上传(同事务落 blob);识图 turn 内瞬态(事件存引用、`event_history` 对 `state["vision_blocks"]` 还原、跨轮占位、`build_event_history` 保持纯)。Pillow 入 lock(12.2.0)+ 顺带修 aiohttp CVE(→3.14.1)。单元/集成验过(181 测试 + 前端 tsc),待真实 server+LLM live E2E。详见 A 段「进展」。
 - 2026-06-09 **A 完成**(review 修复 + mid-turn 上传 UX 加固 + live E2E 通过):外部 review 无阻塞,修识图能力门控(`models.yaml` `vision` 标志 + lead/research/compact 切 `qwen3.7-plus`)、解压炸弹改显式 `VISION_IMAGE_MAX_PIXELS`、LLM 重试收窄到瞬态(类型化异常)、debug 格式化容忍块列表;mid-turn 上传图本地优先渲染(staged `File` 按 `original_filename` 关联)+ chip 缩略图 + 同名 dedup(`_N`)/本轮限定(`pendingFlush`)修同轮+跨轮串图。后端 1095 / 前端 191 全过;**live E2E 用户实测通过**(上传真图→模型识图)。**A 阶段闭环**,下一步 C。commits `f7b7d4d`→`3476e5e`。详见 A 段「进展」。
+- 2026-06-10 **C 开工决策锁定**:切片 C-0(blob-only 一步到位 + 整删 `/export`,不留双轨过渡)→ C-session → C-stage → C-reap → C-wire;persist 永远产新 artifact(blob 不版本化、不覆写,二进制=不可变单版/文本=版本化);mount 语义单一权威载体(文本=WorkingSet overlay、blob=DB,本轮 staged 上传例外);mount 返回纯事实、提示分层(契约→inventory/read_artifact,能力→bash 工具描述,场景 how-to→skill);拆除 plumbing=Session 壳 factory 创建+容器 lazy+cleanup 句柄递 `_wrapped` finally;per-command 超时=容器内 `timeout` 包 argv(exec argv 数组无引号问题);reaper=资源侧枚举(daemon label + scratch 根目录双源)− lease 掩码;镜像加 git(锚点作废、D 重冻结);aiodocker 入依赖(DEP-02)。C 验收标准三条 + D 追加三项(git 重冻结/uid 实验证/Word 场景站住)。详见 C 段「进展」。
+- 2026-06-10 **C-0 落地**:docx/pdf 上传 blob-only(magic 预检 loud-fail)、pandoc 退出 backend、pymupdf 保留为 web_fetch 专用 `extract_pdf_text`、删 `/export`、read/inventory 二进制契约文案(success=True 防重试)、update/rewrite 拒改 blob artifact(不可变单版守门)、REST/事件/store 全链 `has_blob`、前端 `BinaryFilePreview`(复用 pendingFlush 闸,turn 内零 /raw 404)。后端 1098 / 前端 205 全过。详见 C 段「进展」。
 <!-- 新日志按日期顺序追加到此行上方 -->
 

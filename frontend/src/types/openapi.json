@@ -812,72 +812,6 @@
         }
       }
     },
-    "/api/v1/artifacts/{session_id}/{artifact_id}/export": {
-      "get": {
-        "tags": [
-          "artifacts"
-        ],
-        "summary": "Export Artifact",
-        "description": "Export an artifact to a different format.\nCurrently supports exporting text/markdown artifacts to docx.\n\nNote: reads from DB only \u2014 during execution, exports the last flushed\nversion, not in-memory edits.  Frontend hides export while streaming.",
-        "operationId": "export_artifact_api_v1_artifacts__session_id___artifact_id__export_get",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "session_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Session Id"
-            }
-          },
-          {
-            "name": "artifact_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Artifact Id"
-            }
-          },
-          {
-            "name": "format",
-            "in": "query",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "description": "Export format (docx)",
-              "title": "Format"
-            },
-            "description": "Export format (docx)"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/v1/artifacts/{session_id}/{artifact_id}": {
       "get": {
         "tags": [
@@ -2665,6 +2599,12 @@
             "title": "Original Filename",
             "description": "For source=user_upload artifacts: the filename the user uploaded. From metadata['original_filename']."
           },
+          "has_blob": {
+            "type": "boolean",
+            "title": "Has Blob",
+            "description": "True for blob-backed artifacts (images / rich-format uploads): no text content; raw bytes via GET \u2026/raw.",
+            "default": false
+          },
           "created_at": {
             "type": "string",
             "format": "date-time",
@@ -2696,6 +2636,7 @@
           "current_version",
           "source",
           "original_filename",
+          "has_blob",
           "created_at",
           "updated_at",
           "versions"
@@ -2749,6 +2690,12 @@
             "title": "Original Filename",
             "description": "For source=user_upload artifacts: the filename the user uploaded. From metadata['original_filename']."
           },
+          "has_blob": {
+            "type": "boolean",
+            "title": "Has Blob",
+            "description": "True for blob-backed artifacts (images / rich-format uploads): no text content; raw bytes via GET \u2026/raw.",
+            "default": false
+          },
           "created_at": {
             "type": "string",
             "format": "date-time",
@@ -2770,6 +2717,7 @@
           "current_version",
           "source",
           "original_filename",
+          "has_blob",
           "created_at",
           "updated_at"
         ],

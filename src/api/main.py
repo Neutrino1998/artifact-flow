@@ -31,7 +31,6 @@ from observability import (
     resolve_mem_limit_bytes,
 )
 from observability import admin_runtime
-from utils.doc_converter import DocConverter
 from utils.logger import get_logger, get_request_id
 
 logger = get_logger("ArtifactFlow")
@@ -157,7 +156,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # 启动
     logger.info("Starting ArtifactFlow API...")
     validate_config()
-    DocConverter.check_pandoc()
     await init_globals()
 
     # Sync logger debug level from API config (single source of truth)

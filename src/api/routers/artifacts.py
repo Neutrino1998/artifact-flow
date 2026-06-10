@@ -10,7 +10,7 @@ Artifacts Router
 from dataclasses import dataclass
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, Query
+from fastapi import APIRouter, Depends, HTTPException, UploadFile
 from fastapi.responses import Response
 
 from config import config
@@ -148,6 +148,7 @@ async def list_artifacts(
                     current_version=art["version"],
                     source=art.get("source"),
                     original_filename=art.get("original_filename"),
+                    has_blob=bool(art.get("blob_content_type")),
                     created_at=datetime.fromisoformat(art["created_at"]),
                     updated_at=datetime.fromisoformat(art["updated_at"]),
                 )
@@ -211,7 +212,7 @@ async def get_artifact_raw(
     disposition = "inline" if content_type.startswith("image/") else "attachment"
 
     filename = blob["filename"].replace("/", "-").replace("\\", "-")
-    # RFC 5987: filename* for non-ASCII, with sanitized ASCII fallback (mirror export).
+    # RFC 5987: filename* for non-ASCII, with sanitized ASCII fallback.
     from urllib.parse import quote
     import re as _re
     ascii_fallback = filename.encode("ascii", errors="replace").decode("ascii")
@@ -223,65 +224,6 @@ async def get_artifact_raw(
         headers={
             "Content-Disposition": (
                 f'{disposition}; filename="{ascii_fallback}"; '
-                f"filename*=UTF-8''{utf8_encoded}"
-            )
-        },
-    )
-
-
-@router.get("/{session_id}/{artifact_id}/export")
-async def export_artifact(
-    session_id: str,
-    artifact_id: str,
-    format: str = Query(..., description="Export format (docx)"),
-    current_user: TokenPayload = Depends(get_current_user),
-    artifact_service: ArtifactService = Depends(get_artifact_service),
-    conversation_manager: ConversationManager = Depends(get_conversation_manager),
-):
-    """
-    Export an artifact to a different format.
-    Currently supports exporting text/markdown artifacts to docx.
-
-    Note: reads from DB only — during execution, exports the last flushed
-    version, not in-memory edits.  Frontend hides export while streaming.
-    """
-    await _verify_session_ownership(session_id, current_user, conversation_manager)
-
-    if format != "docx":
-        raise HTTPException(status_code=422, detail=f"Unsupported export format: {format}")
-
-    result = await artifact_service.read_artifact(session_id, artifact_id)
-    if result is None:
-        raise HTTPException(status_code=404, detail=f"Artifact '{artifact_id}' not found")
-
-    if result["content_type"] != "text/markdown":
-        raise HTTPException(
-            status_code=422,
-            detail=f"Only text/markdown artifacts can be exported to docx (got {result['content_type']})"
-        )
-
-    converter = DocConverter()
-    try:
-        docx_bytes = await converter.export_docx(result["content"])
-    except RuntimeError as e:
-        logger.exception(f"docx export failed for artifact {artifact_id} in {session_id}: {e}")
-        error_detail = str(e) if config.DEBUG else "Internal server error"
-        raise HTTPException(status_code=500, detail=error_detail)
-
-    filename = result["title"].replace("/", "-").replace("\\", "-") + ".docx"
-    # RFC 5987: use filename* for non-ASCII names, with ASCII fallback
-    from urllib.parse import quote
-    import re as _re
-    ascii_fallback = filename.encode("ascii", errors="replace").decode("ascii")
-    # Sanitize quotes and control characters for safe Content-Disposition
-    ascii_fallback = _re.sub(r'["\x00-\x1f\x7f]', "_", ascii_fallback)
-    utf8_encoded = quote(filename, safe="")
-    return Response(
-        content=docx_bytes,
-        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        headers={
-            "Content-Disposition": (
-                f'attachment; filename="{ascii_fallback}"; '
                 f"filename*=UTF-8''{utf8_encoded}"
             )
         },
@@ -338,6 +280,7 @@ async def get_artifact(
         current_version=current_ver,
         source=result.get("source"),
         original_filename=result.get("original_filename"),
+        has_blob=bool(result.get("blob_content_type")),
         created_at=datetime.fromisoformat(result["created_at"]),
         updated_at=datetime.fromisoformat(result["updated_at"]),
         versions=version_summaries,

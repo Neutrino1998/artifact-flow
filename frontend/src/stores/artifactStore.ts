@@ -19,6 +19,8 @@ export interface LiveArtifact {
   // user_upload only: original file name, for correlating to the send-local
   // preview File (local render before the blob is flushed). null for model-created.
   originalFilename: string | null;
+  // blob-backed (image / rich-format upload): no text content, raw via /raw.
+  hasBlob: boolean;
 }
 
 /** Apply an authoritative span delta (from compute_update): replace
@@ -46,6 +48,7 @@ function liveToDetail(id: string, live: LiveArtifact, sessionId: string | null):
     current_version: live.version,
     source: live.source,
     original_filename: live.originalFilename,
+    has_blob: live.hasBlob,
     created_at: '',
     updated_at: '',
     versions: [],
@@ -131,9 +134,10 @@ interface ArtifactState {
   reset: () => void;
 }
 
-function defaultViewMode(contentType?: string): ArtifactViewMode {
+function defaultViewMode(contentType?: string, hasBlob?: boolean): ArtifactViewMode {
   if (contentType === 'text/markdown') return 'preview';
-  if (contentType?.startsWith('image/')) return 'preview';  // 图片走 ImagePreview
+  if (hasBlob) return 'preview';  // 图片走 ImagePreview,其它二进制走 BinaryFilePreview
+  if (contentType?.startsWith('image/')) return 'preview';
   return 'source';
 }
 
@@ -167,13 +171,13 @@ export const useArtifactStore = create<ArtifactState>((set, get) => ({
     set({
       current: artifact,
       autoSelected: false,
-      viewMode: artifact ? defaultViewMode(artifact.content_type) : 'preview',
+      viewMode: artifact ? defaultViewMode(artifact.content_type, artifact.has_blob) : 'preview',
     }),
   setCurrentAuto: (artifact) =>
     set({
       current: artifact,
       autoSelected: true,
-      viewMode: defaultViewMode(artifact.content_type),
+      viewMode: defaultViewMode(artifact.content_type, artifact.has_blob),
     }),
   // Same-artifact content refresh: write the new ArtifactDetail through
   // WITHOUT touching `autoSelected` or `viewMode`. Used when a stream
@@ -213,6 +217,7 @@ export const useArtifactStore = create<ArtifactState>((set, get) => ({
         source: d.source,
         omitted: !!d.content_omitted,
         originalFilename: d.original_filename ?? null,
+        hasBlob: !!d.has_blob,
       };
       const liveContent = { ...s.liveContent, [d.id]: live };
       const exists = s.artifacts.some((a) => a.id === d.id);
@@ -223,6 +228,7 @@ export const useArtifactStore = create<ArtifactState>((set, get) => ({
         current_version: d.current_version,
         source: d.source,
         original_filename: d.original_filename ?? null,
+        has_blob: !!d.has_blob,
         created_at: '',
         updated_at: '',
       };
@@ -240,7 +246,7 @@ export const useArtifactStore = create<ArtifactState>((set, get) => ({
       if (autoOpen && (!s.current || s.autoSelected)) {
         next.current = liveToDetail(d.id, live, s.sessionId);
         next.autoSelected = true;
-        next.viewMode = defaultViewMode(d.content_type);
+        next.viewMode = defaultViewMode(d.content_type, d.has_blob);
         next.versions = [];
         next.selectedVersion = null;
       } else if (s.current && s.current.id === d.id) {
@@ -279,6 +285,7 @@ export const useArtifactStore = create<ArtifactState>((set, get) => ({
         source: base?.source ?? 'agent',
         omitted,
         originalFilename: base?.originalFilename ?? null,
+        hasBlob: base?.hasBlob ?? false,
       };
       const liveContent = { ...s.liveContent, [d.id]: live };
       const artifacts = s.artifacts.map((a) =>
@@ -295,7 +302,7 @@ export const useArtifactStore = create<ArtifactState>((set, get) => ({
       } else if (!s.current || s.autoSelected) {
         next.current = liveToDetail(d.id, live, s.sessionId);
         next.autoSelected = true;
-        next.viewMode = defaultViewMode(live.contentType);
+        next.viewMode = defaultViewMode(live.contentType, live.hasBlob);
         next.versions = [];
         next.selectedVersion = null;
       }
@@ -308,7 +315,7 @@ export const useArtifactStore = create<ArtifactState>((set, get) => ({
     set({
       current: liveToDetail(id, live, get().sessionId),
       autoSelected: false, // user-picked: keep them here at COMPLETE
-      viewMode: defaultViewMode(live.contentType),
+      viewMode: defaultViewMode(live.contentType, live.hasBlob),
       versions: [],
       selectedVersion: null,
       diffBaseContent: null,
