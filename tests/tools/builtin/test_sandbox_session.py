@@ -380,14 +380,15 @@ class TestDirUsage:
 
     def test_counts_file_block_usage(self, tmp_path):
         (tmp_path / "f").write_bytes(b"x" * 100)
-        # 块占用 ≥ 表观大小(小文件占整块)
-        assert _dir_usage_bytes(str(tmp_path)) >= 100
+        usage, capped = _dir_usage_bytes(str(tmp_path))
+        assert usage >= 100  # 块占用 ≥ 表观大小(小文件占整块)
+        assert not capped
 
     def test_empty_dirs_are_counted(self, tmp_path):
         """海量空目录也消耗块/inode —— 不计入 = 绕过 per-turn 配额(P2)。"""
         for i in range(200):
             (tmp_path / f"d{i}").mkdir()
-        usage = _dir_usage_bytes(str(tmp_path))
+        usage, _ = _dir_usage_bytes(str(tmp_path))
         assert usage > 0  # 旧实现(只数 filenames)这里会是 0
 
     def test_symlink_dirs_are_counted_not_followed(self, tmp_path):
@@ -401,7 +402,7 @@ class TestDirUsage:
         for i in range(100):
             (links / f"l{i}").symlink_to(target, target_is_directory=True)
 
-        usage = _dir_usage_bytes(str(links))
+        usage, _ = _dir_usage_bytes(str(links))
         # 100 条 symlink 各计一块(≈400KB),且**没有**跟链把 100KB 的 target 内容
         # 重复计进来(否则会暴涨)
         assert usage >= 100 * 4096
@@ -409,7 +410,7 @@ class TestDirUsage:
 
     def test_missing_entries_skipped(self, tmp_path):
         # 不存在的路径不抛(容器并发增删)
-        assert _dir_usage_bytes(str(tmp_path / "nope")) == 0
+        assert _dir_usage_bytes(str(tmp_path / "nope")) == (0, False)
 
     def test_nested_real_dirs_recursed(self, tmp_path):
         """真实深目录树正常递归计费(scandir 不误伤合法深路径)。"""
@@ -418,9 +419,10 @@ class TestDirUsage:
             d = d / f"lvl{level}"
             d.mkdir()
         (d / "leaf.txt").write_bytes(b"y" * 100)
-        usage = _dir_usage_bytes(str(tmp_path))
+        usage, capped = _dir_usage_bytes(str(tmp_path))
         # 根 + 5 层目录 + 1 文件 = 7 条目,各至少一块
         assert usage >= 7 * 4096
+        assert not capped
 
     def test_recursion_does_not_follow_symlinked_subdir(self, tmp_path):
         """子目录是 symlink 指池外 → openat O_NOFOLLOW 拒下探,不跟链遍历宿主
@@ -432,25 +434,31 @@ class TestDirUsage:
         ws = tmp_path / "ws"
         ws.mkdir()
         (ws / "link").symlink_to(outside, target_is_directory=True)
-        usage = _dir_usage_bytes(str(ws))
+        usage, _ = _dir_usage_bytes(str(ws))
         # 只计 ws 自身 + link 条目各一块,绝不跟链把 outside 的 5MB 算进来
         assert usage < 50_000
 
-    def test_depth_cap_stops_descending(self, tmp_path, monkeypatch):
-        """超深树停止下探(防 fd 耗尽 DoS),浅层仍计费。"""
-        monkeypatch.setattr(
-            "tools.builtin.sandbox_session._MAX_WALK_DEPTH", 3
-        )
+    def test_depth_cap_signals_capped_not_undercount(self, tmp_path, monkeypatch):
+        """超深树:不抛不挂,且返回 capped=True —— 调用方据此 fail-closed 杀,
+        绝不 fail-open 只计浅层(否则深埋大文件绕过软配额)。"""
+        monkeypatch.setattr("tools.builtin.sandbox_session._MAX_WALK_DEPTH", 3)
         d = tmp_path
         for level in range(10):
             d = d / f"l{level}"
             d.mkdir()
         (d / "deep.txt").write_bytes(b"x" * 100)
-        # 不抛、不挂;返回有界(只计到深度上限),deep.txt 在上限外不计
-        usage = _dir_usage_bytes(str(tmp_path))
-        assert usage > 0
-        # 计到的条目数 ≤ 根 + ~3 层,远少于 11 层全计
-        assert usage < 6 * 4096
+        usage, capped = _dir_usage_bytes(str(tmp_path))
+        assert capped  # 关键:命中即上报,不静默少算
+        assert usage > 0  # 浅层仍计
+
+    def test_depth_within_cap_not_flagged(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("tools.builtin.sandbox_session._MAX_WALK_DEPTH", 20)
+        d = tmp_path
+        for level in range(5):
+            d = d / f"l{level}"
+            d.mkdir()
+        _, capped = _dir_usage_bytes(str(tmp_path))
+        assert not capped
 
 
 class TestQuota:
@@ -505,6 +513,26 @@ class TestQuota:
         container.next_exec = SlowExec([], [{"ExitCode": 137, "Running": False}])
         with pytest.raises(SandboxUnavailableError, match="quota"):
             await session.exec("dd if=/dev/zero of=big")
+
+    async def test_watchdog_depth_cap_fails_closed(self, session, fake_docker, monkeypatch):
+        """目录树过深(计量无法穷尽)→ fail-closed 当超额杀,不放过深埋占用。"""
+        monkeypatch.setattr(config, "SANDBOX_WORKSPACE_QUOTA_MB", 10**9)  # 字节配额绝不触发
+        monkeypatch.setattr(config, "SANDBOX_WATCHDOG_INTERVAL_SEC", 0.01)
+        monkeypatch.setattr("tools.builtin.sandbox_session._MAX_WALK_DEPTH", 3)
+        await session.ensure_container()
+        d = session.workspace_dir
+        for level in range(8):
+            d = os.path.join(d, f"l{level}")
+            os.makedirs(d)
+
+        for _ in range(100):
+            await asyncio.sleep(0.02)
+            if not session.started:
+                break
+        assert fake_docker.created_containers[0].deleted_with == {"force": True}
+        # sticky 复述配额失败(深度命中也归到配额语义,模型 remediation 一致)
+        with pytest.raises(SandboxUnavailableError, match="quota"):
+            await session.exec("echo hi")
 
     async def test_close_cancels_watchdog(self, session):
         await session.ensure_container()

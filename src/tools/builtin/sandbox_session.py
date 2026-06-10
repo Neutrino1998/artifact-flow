@@ -83,8 +83,8 @@ def _charge_blocks(st: os.stat_result) -> int:
     return max(usage, _ENTRY_MIN_BYTES)
 
 
-def _dir_usage_bytes(root: str) -> int:
-    """目录树的计费占用(每条目 max(块占用, 一块),非表观大小)。
+def _dir_usage_bytes(root: str) -> tuple:
+    """目录树的计费占用 → (总字节, 命中深度上限 bool)。每条目 max(块占用, 一块)。
 
     watchdog 软配额按它计:小文件每个至少占一个 fs 块,表观大小会低估池子
     真实消耗(探针①实测 50k×100B 表观 4.8MB / 块占用 195MB,~40×)。
@@ -103,6 +103,13 @@ def _dir_usage_bytes(root: str) -> int:
     只对 `S_ISDIR` 真实目录递归 —— 计量与条目类型解耦:文件 / 空目录 / symlink(指
     dir 或 file,lstat 看链本体故 S_ISDIR 为 False,只计费不递归)/ fifo / 设备全走
     同一路径,无分类盲区。
+
+    **深度上限 = fd 资源闸,命中即 fail-closed**:DFS 下开着的 fd 数 = 深度,容器能
+    廉价 `mkdir -p` 任意深(每层 ≈ 一块)→ 不限会耗尽**整个 backend 进程**的 fd。
+    命中 `_MAX_WALK_DEPTH` 返回 `capped=True`,调用方按超额杀 —— **不能 fail-open 只
+    计浅层**(否则深埋大文件绕过软配额、伤其他 turn,池子硬墙是最后而非唯一防线)。
+    fail-closed 后计量再无"少算"路径:每条目要么被计、要么触发杀。512 层远超真实
+    沙盒用途(解压工程/构建树深度 < 50),误判不可达。
     """
     capped = False
 
@@ -124,7 +131,7 @@ def _dir_usage_bytes(root: str) -> int:
                     continue
                 if depth >= _MAX_WALK_DEPTH:
                     capped = True
-                    continue  # 浅层已计费,不再下探(防 fd 耗尽)
+                    continue  # 不再下探(防 fd 耗尽);capped → 调用方 fail-closed 杀
                 try:
                     child_fd = os.open(
                         entry.name,
@@ -142,7 +149,7 @@ def _dir_usage_bytes(root: str) -> int:
     try:
         root_fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
     except OSError:
-        return 0
+        return 0, False
     try:
         try:
             total = _charge_blocks(os.fstat(root_fd))  # 根自身(无父目录代它计费)
@@ -151,12 +158,7 @@ def _dir_usage_bytes(root: str) -> int:
         total += walk(root_fd, 1)
     finally:
         os.close(root_fd)
-    if capped:
-        logger.warning(
-            f"Sandbox watchdog walk hit max depth {_MAX_WALK_DEPTH} under {root}; "
-            "deeper entries uncounted (loop pool hard wall backstops)"
-        )
-    return total
+    return total, capped
 
 
 class SandboxError(Exception):
@@ -414,19 +416,26 @@ class SandboxSession:
             while True:
                 await asyncio.sleep(config.SANDBOX_WATCHDOG_INTERVAL_SEC)
                 try:
-                    usage = await asyncio.to_thread(_dir_usage_bytes, self._scratch_dir)
+                    usage, capped = await asyncio.to_thread(
+                        _dir_usage_bytes, self._scratch_dir
+                    )
                 except Exception:
                     logger.exception(
                         f"Sandbox watchdog scan failed for {self.message_id}; retrying next tick"
                     )
                     continue
+                # capped = 目录树深过 _MAX_WALK_DEPTH,计量无法穷尽 → fail-closed 当超额
+                # (绝不 fail-open 只计浅层:深埋大文件会绕软配额伤其他 turn)。
+                if capped:
+                    await self._kill_over_quota(usage, depth_capped=True)
+                    return
                 if usage > quota_bytes:
                     await self._kill_over_quota(usage)
                     return
         except asyncio.CancelledError:
             raise
 
-    async def _kill_over_quota(self, usage: int) -> None:
+    async def _kill_over_quota(self, usage: int, *, depth_capped: bool = False) -> None:
         """超额处置:先置 sticky(in-flight exec 与后续调用都按它归因),再杀容器。"""
         self._sticky_failure = (
             f"Sandbox workspace exceeded the "
@@ -434,11 +443,18 @@ class SandboxSession:
             "Sandbox tools are unavailable for this turn."
         )
         # 模型行为触发、预期内防护、已处置 → warning
-        logger.warning(
-            f"Sandbox workspace over quota for {self.message_id}: "
-            f"{usage / 1024 / 1024:.0f}MB used "
-            f"(quota {config.SANDBOX_WORKSPACE_QUOTA_MB}MB); killing container"
-        )
+        if depth_capped:
+            logger.warning(
+                f"Sandbox workspace directory tree exceeded the {_MAX_WALK_DEPTH}-level "
+                f"depth cap for {self.message_id} ({usage / 1024 / 1024:.0f}MB counted "
+                "before cap); treated as over quota (fail-closed), killing container"
+            )
+        else:
+            logger.warning(
+                f"Sandbox workspace over quota for {self.message_id}: "
+                f"{usage / 1024 / 1024:.0f}MB used "
+                f"(quota {config.SANDBOX_WORKSPACE_QUOTA_MB}MB); killing container"
+            )
         container = self._container
         if container is None:
             return
