@@ -262,6 +262,29 @@ class TestWriteFile:
         assert outside.read_text() == "untouched"  # 池外没被改
         assert (ws / "a.txt").read_bytes() == b"new"
 
+    def test_short_write_is_completed(self, tmp_path, monkeypatch):
+        """os.write 短写(POSIX 允许)→ 循环写完,文件不被静默截断。
+        reviewer 复现:monkeypatch 让 os.write 每次只吐 3 字节。"""
+        ws = tmp_path / "ws"
+        ws.mkdir()
+        real_write = os.write
+
+        def short_write(fd, buf):
+            return real_write(fd, bytes(buf)[:3])
+
+        monkeypatch.setattr(os, "write", short_write)
+        payload = b"abcdefghijklmnopqrstuvwxyz"
+        write_file(str(ws), "a.txt", payload)
+        assert (ws / "a.txt").read_bytes() == payload
+
+    def test_zero_write_fails_loud(self, tmp_path, monkeypatch):
+        """非空 buffer 却写入 0 字节(磁盘满 / 内核异常)→ loud-fail,不空转。"""
+        ws = tmp_path / "ws"
+        ws.mkdir()
+        monkeypatch.setattr(os, "write", lambda fd, buf: 0)
+        with pytest.raises(OSError):
+            write_file(str(ws), "a.txt", b"data")
+
     def test_dotdot_rejected(self, tmp_path):
         ws = tmp_path / "ws"
         ws.mkdir()

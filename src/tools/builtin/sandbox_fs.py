@@ -93,6 +93,21 @@ def _walk_to_parent(workspace_dir: str, rel: str) -> Tuple[List[int], str]:
     return fds, parts[-1]
 
 
+def _write_all(fd: int, data: bytes) -> None:
+    """写完整个 buffer。os.write 是 POSIX write 的薄包装,**允许短写** ——
+    返回实际写入字节数,大 buffer / 被信号打断时可能 < len(data),且不抛异常。
+    单调一次会静默截断(mount 报成功+原始字节数,workspace 文件已残缺)。循环写到
+    耗尽;非空 buffer 却返回 0 = 无进展(磁盘满 / 内核异常),loud-fail 而非空转。
+    """
+    view = memoryview(data)
+    written = 0
+    while written < len(data):
+        n = os.write(fd, view[written:])
+        if n == 0:
+            raise OSError(errno.EIO, "short write: os.write returned 0", None)
+        written += n
+
+
 def write_file(workspace_dir: str, rel: str, data: bytes) -> None:
     """逐级 openat 写(同步,调用方 to_thread)。先摘旧叶子(摘掉容器可能植的
     symlink)再 O_CREAT|O_NOFOLLOW 新建;fchmod 绕 umask 授 0o666。
@@ -116,7 +131,7 @@ def write_file(workspace_dir: str, rel: str, data: bytes) -> None:
         )
         try:
             os.fchmod(fd, 0o666)
-            os.write(fd, data)
+            _write_all(fd, data)
         finally:
             os.close(fd)
     finally:
