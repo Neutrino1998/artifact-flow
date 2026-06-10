@@ -19,6 +19,7 @@ from tools.builtin.sandbox_session import (
     SandboxSession,
     SandboxUnavailableError,
     WORKSPACE_MOUNT,
+    _dir_usage_bytes,
     scratch_dir_name,
 )
 
@@ -373,6 +374,25 @@ class TestExec:
 # ============================================================
 # 磁盘配额(C′ 软配额层;loop 池子硬墙是部署侧,D 段验)
 # ============================================================
+
+
+class TestDirUsage:
+
+    def test_counts_file_block_usage(self, tmp_path):
+        (tmp_path / "f").write_bytes(b"x" * 100)
+        # 块占用 ≥ 表观大小(小文件占整块)
+        assert _dir_usage_bytes(str(tmp_path)) >= 100
+
+    def test_empty_dirs_are_counted(self, tmp_path):
+        """海量空目录也消耗块/inode —— 不计入 = 绕过 per-turn 配额(P2)。"""
+        for i in range(200):
+            (tmp_path / f"d{i}").mkdir()
+        usage = _dir_usage_bytes(str(tmp_path))
+        assert usage > 0  # 旧实现(只数 filenames)这里会是 0
+
+    def test_missing_entries_skipped(self, tmp_path):
+        # 不存在的路径不抛(容器并发增删)
+        assert _dir_usage_bytes(str(tmp_path / "nope")) == 0
 
 
 class TestQuota:

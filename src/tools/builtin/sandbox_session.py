@@ -60,20 +60,42 @@ def scratch_dir_name(conversation_id: str, message_id: str) -> str:
     return f"{conversation_id}__{message_id}"
 
 
+# 每个目录项(文件或目录)的最低计费 = 一个 ext4 块。块占用本身已含此量级,
+# 但有些 fs(APFS / tmpfs)对空目录报 st_blocks=0,会留下"海量空目录/inode 耗尽
+# 但 usage 不涨"的盲区。取 max(块占用, 此值)把每个条目锚到至少一个块 —— 既贴合
+# 部署用的 ext4 池子真实成本,又让计量与 fs 的块上报方式无关,顺带把 inode 压力
+# 折进同一个字节度量(无需独立 inode 旋钮)。
+_ENTRY_MIN_BYTES = 4096
+
+
+def _lstat_charge(path: str) -> int:
+    """单条目的计费字节 = max(块占用 st_blocks×512, 每条目最低)。
+    取不到块数时以表观大小代块占用。"""
+    st = os.lstat(path)
+    blocks = getattr(st, "st_blocks", None)
+    usage = blocks * 512 if blocks is not None else st.st_size
+    return max(usage, _ENTRY_MIN_BYTES)
+
+
 def _dir_usage_bytes(root: str) -> int:
-    """目录树的**块占用**(st_blocks×512),非表观大小。
+    """目录树的计费占用(每条目 max(块占用, 一块),非表观大小)。
 
     watchdog 软配额按它计:小文件每个至少占一个 fs 块,表观大小会低估池子
     真实消耗(探针①实测 50k×100B 表观 4.8MB / 块占用 195MB,~40×)。
-    lstat 不追 symlink —— 容器内造的链接不会把池外目标算进配额。
+    **目录自身也是文件**(其内容是目录项,空目录在 ext4 也占一个块),故每个
+    dirpath 一并计入 —— 否则海量空目录/深目录树能消耗块与 inode 而 usage 不涨,
+    绕过 per-turn 配额只剩池子硬墙兜底。os.walk 每个目录恰访问一次,天然去重。
+    lstat 不追 symlink,容器植的链不把池外目标算进配额。
     """
     total = 0
     for dirpath, _dirnames, filenames in os.walk(root):
+        try:
+            total += _lstat_charge(dirpath)
+        except OSError:
+            pass
         for name in filenames:
             try:
-                st = os.lstat(os.path.join(dirpath, name))
-                blocks = getattr(st, "st_blocks", None)
-                total += blocks * 512 if blocks is not None else st.st_size
+                total += _lstat_charge(os.path.join(dirpath, name))
             except OSError:
                 pass  # 容器并发增删文件,消失的条目跳过
     return total
@@ -137,6 +159,13 @@ class SandboxSession:
     @property
     def started(self) -> bool:
         return self._container is not None
+
+    @property
+    def sticky_failure(self) -> Optional[str]:
+        """本 turn 已记录的沙盒不可用原因(创建失败 / 准入拒绝 / 超额杀 /
+        容器中途死),None = 无。供不触发 ensure_container 的工具(persist)在
+        其前置检查里复述配额失败,与 bash/mount 的 sticky 行为一致(P3)。"""
+        return self._sticky_failure
 
     @property
     def scratch_dir(self) -> str:

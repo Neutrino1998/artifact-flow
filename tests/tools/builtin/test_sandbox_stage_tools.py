@@ -16,12 +16,14 @@ from tools.builtin.sandbox_session import SandboxUnavailableError
 
 
 class FakeStageSession:
-    """只提供 mount/persist 依赖的最小面:workspace_dir / ensure_container / started。"""
+    """只提供 mount/persist 依赖的最小面:workspace_dir / ensure_container /
+    started / sticky_failure。"""
 
-    def __init__(self, tmp_path, fail_ensure=None):
+    def __init__(self, tmp_path, fail_ensure=None, sticky=None):
         self.message_id = "msg-stage"
         self._ws = str(tmp_path / "workspace")
         self._fail_ensure = fail_ensure
+        self._sticky = sticky
         self._started = False
 
     @property
@@ -31,6 +33,10 @@ class FakeStageSession:
     @property
     def started(self):
         return self._started
+
+    @property
+    def sticky_failure(self):
+        return self._sticky
 
     async def ensure_container(self):
         if self._fail_ensure is not None:
@@ -155,6 +161,19 @@ class TestMountTool:
         with open(os.path.join(session.workspace_dir, "a.txt")) as f:
             assert f.read() == "mounted content"  # symlink 被换成真文件
 
+    async def test_mount_file_readable_under_restrictive_umask(self, session, service):
+        """fchmod 绕 umask:backend umask 077 下文件仍 world-readable(容器 uid 1000
+        要读得到),否则落 0600 → mount 报成功、后续 bash permission denied。"""
+        old = os.umask(0o077)
+        try:
+            service.add_text("notes.md", "x")
+            result = await MountArtifactTool(session, service)(artifact_id="notes.md")
+            assert result.success
+            mode = os.stat(os.path.join(session.workspace_dir, "notes.md")).st_mode & 0o777
+            assert mode == 0o666
+        finally:
+            os.umask(old)
+
 
 # ============================================================
 # persist
@@ -221,13 +240,46 @@ class TestPersistTool:
         assert "escape" in result.error
 
     async def test_persist_symlink_to_outside_rejected(self, session, service, tmp_path):
-        """工作区内 symlink 指池外 → realpath 圈地拒绝(防宿主文件外流进 artifact)。"""
+        """工作区内 symlink 指池外 → 叶子 O_NOFOLLOW 拒(防宿主文件外流进 artifact)。"""
         await session.ensure_container()
         secret = tmp_path / "host-secret"
         secret.write_text("leak me")
         os.symlink(str(secret), os.path.join(session.workspace_dir, "innocent.txt"))
         result = await PersistFileTool(session, service)(path="innocent.txt")
         assert not result.success
+
+    async def test_persist_parent_dir_symlink_rejected(self, session, service, tmp_path):
+        """父目录是 symlink 指池外 → 中间组件 O_DIRECTORY|O_NOFOLLOW 拒(P1 TOCTOU
+        修复的核心:单次 O_NOFOLLOW 只保护叶子,逐级 openat 才挡得住换父目录)。"""
+        await session.ensure_container()
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        (outside / "file.txt").write_text("host secret")
+        os.symlink(str(outside), os.path.join(session.workspace_dir, "d"))
+        result = await PersistFileTool(session, service)(path="d/file.txt")
+        assert not result.success
+        assert "escape" in result.error
+
+    async def test_persist_real_subdir_file_ok(self, session, service):
+        """真实子目录(非链)下的文件正常 persist —— 逐级 openat 不误伤合法深路径。"""
+        await session.ensure_container()
+        _write_ws(session, "out/report.md", b"# ok\n")
+        result = await PersistFileTool(session, service)(path="out/report.md")
+        assert result.success
+        assert service.create_calls[0]["content"] == "# ok\n"
+
+    async def test_persist_reflects_sticky_over_nothing_to_persist(self, tmp_path, service):
+        """超额杀后 _container=None(started=False),persist 须复述 sticky 配额失败,
+        而非吞成"没用过沙盒"(P3:与 bash/mount sticky 行为一致)。"""
+        session = FakeStageSession(
+            tmp_path,
+            sticky="Sandbox workspace exceeded the 2048MB disk quota and was terminated.",
+        )
+        # started=False(从未 ensure),但 sticky 已置
+        result = await PersistFileTool(session, service)(path="out.txt")
+        assert not result.success
+        assert "quota" in result.error
+        assert "nothing to persist" not in result.error
 
     async def test_persist_missing_file(self, session, service):
         await session.ensure_container()
