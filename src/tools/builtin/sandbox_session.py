@@ -68,6 +68,12 @@ def scratch_dir_name(conversation_id: str, message_id: str) -> str:
 # 折进同一个字节度量(无需独立 inode 旋钮)。
 _ENTRY_MIN_BYTES = 4096
 
+# 遍历最大深度。fd 钉住的递归每层持一个目录 fd,而容器能极廉价地 mkdir -p 任意
+# 深目录(每层 ≈ 一块)→ 不设防会耗尽**整个 backend 进程**的 fd(比配额绕过更糟
+# 的 DoS)。超此深度停止下探,深埋内容由 loop 池子硬墙兜底,loud log。512 远超
+# 真实沙盒用途(解压工程 / 构建树深度通常 < 50),又把 fd 占用钉在安全范围。
+_MAX_WALK_DEPTH = 512
+
 
 def _charge_blocks(st: os.stat_result) -> int:
     """一条 stat 结果的计费字节 = max(块占用 st_blocks×512, 每条目最低)。
@@ -85,34 +91,71 @@ def _dir_usage_bytes(root: str) -> int:
     **目录自身也是文件**(其内容是目录项,空目录在 ext4 也占一个块),海量空目录/
     深树能消耗块与 inode 而表观大小不涨 → 绕过 per-turn 配额只剩池子硬墙兜底。
 
-    **不用 os.walk**:它按 dirnames/filenames/followlinks 给条目分类,每个分类语义
-    都是潜在盲区(空目录、指向目录的 symlink 先后两轮被发现漏计)。改显式 scandir:
-    **每个目录项一律先 lstat 计费,再只对真实目录递归** —— 计量与条目类型解耦,
-    symlink(指 dir 或 file,lstat 看到链本体故 S_ISDIR 为 False)只计费不递归,
-    既不漏计也不顺链递归出工作区;fifo/设备等特殊文件同理。lstat 不追 symlink,
-    容器植的链不把池外目标算进配额。
+    **全程 fd 钉住,绝不按名字重解析路径**(与 persist 的 openat 逐级走同一纪律):
+    根 `O_DIRECTORY|O_NOFOLLOW` 开一次,每次下探都 `openat(name, dir_fd, O_NOFOLLOW)`
+    拿子目录 fd 再 `scandir(fd)`。否则按 `entry.path` 字符串重扫会有目录 TOCTOU ——
+    容器后台进程能在"判定真目录"与"重扫该路径"之间把目录名换成指向池外的 symlink,
+    重扫就跟链遍历宿主文件系统(I/O 放大 + 错误 quota 归因)。fd 钉的是 inode 不是
+    名字,换名/换链都动不了已持有的 fd;openat 的 `O_NOFOLLOW` 在下探时拒掉被换成的
+    symlink(ELOOP/ENOTDIR → 跳过、不跟)。
+
+    每个目录项一律先 `entry.stat(follow_symlinks=False)`(fstatat,race-free)计费,
+    只对 `S_ISDIR` 真实目录递归 —— 计量与条目类型解耦:文件 / 空目录 / symlink(指
+    dir 或 file,lstat 看链本体故 S_ISDIR 为 False,只计费不递归)/ fifo / 设备全走
+    同一路径,无分类盲区。
     """
-    total = 0
-    try:
-        total += _charge_blocks(os.lstat(root))  # 根自身(无父目录代它计费)
-    except OSError:
-        return 0
-    stack = [root]
-    while stack:
-        current = stack.pop()
+    capped = False
+
+    def walk(dir_fd: int, depth: int) -> int:
+        nonlocal capped
+        subtotal = 0
         try:
-            entries = os.scandir(current)
+            scan = os.scandir(dir_fd)  # 不夺 fd 所有权,调用方仍负责 close(dir_fd)
         except OSError:
-            continue  # 目录消失/无权限,跳过(容器并发增删)
-        with entries:
-            for entry in entries:
+            return 0
+        with scan:
+            for entry in scan:
                 try:
-                    st = entry.stat(follow_symlinks=False)  # = lstat
+                    st = entry.stat(follow_symlinks=False)
                 except OSError:
                     continue  # 条目在枚举与 stat 之间消失
-                total += _charge_blocks(st)
-                if stat.S_ISDIR(st.st_mode):  # 真实目录才递归;symlink-dir 不进栈
-                    stack.append(entry.path)
+                subtotal += _charge_blocks(st)
+                if not stat.S_ISDIR(st.st_mode):
+                    continue
+                if depth >= _MAX_WALK_DEPTH:
+                    capped = True
+                    continue  # 浅层已计费,不再下探(防 fd 耗尽)
+                try:
+                    child_fd = os.open(
+                        entry.name,
+                        os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                        dir_fd=dir_fd,
+                    )
+                except OSError:
+                    continue  # 名字被换链/换成非目录/消失/EMFILE → 不跟、跳过
+                try:
+                    subtotal += walk(child_fd, depth + 1)
+                finally:
+                    os.close(child_fd)
+        return subtotal
+
+    try:
+        root_fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    except OSError:
+        return 0
+    try:
+        try:
+            total = _charge_blocks(os.fstat(root_fd))  # 根自身(无父目录代它计费)
+        except OSError:
+            total = 0
+        total += walk(root_fd, 1)
+    finally:
+        os.close(root_fd)
+    if capped:
+        logger.warning(
+            f"Sandbox watchdog walk hit max depth {_MAX_WALK_DEPTH} under {root}; "
+            "deeper entries uncounted (loop pool hard wall backstops)"
+        )
     return total
 
 

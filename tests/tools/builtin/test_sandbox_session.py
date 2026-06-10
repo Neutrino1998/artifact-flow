@@ -422,6 +422,36 @@ class TestDirUsage:
         # 根 + 5 层目录 + 1 文件 = 7 条目,各至少一块
         assert usage >= 7 * 4096
 
+    def test_recursion_does_not_follow_symlinked_subdir(self, tmp_path):
+        """子目录是 symlink 指池外 → openat O_NOFOLLOW 拒下探,不跟链遍历宿主
+        文件系统(目录递归 TOCTOU 修复:fd 钉住、下探不按名字重解析)。"""
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        for i in range(50):
+            (outside / f"host_file_{i}").write_bytes(b"z" * 100_000)  # 5MB,跟进去会暴涨
+        ws = tmp_path / "ws"
+        ws.mkdir()
+        (ws / "link").symlink_to(outside, target_is_directory=True)
+        usage = _dir_usage_bytes(str(ws))
+        # 只计 ws 自身 + link 条目各一块,绝不跟链把 outside 的 5MB 算进来
+        assert usage < 50_000
+
+    def test_depth_cap_stops_descending(self, tmp_path, monkeypatch):
+        """超深树停止下探(防 fd 耗尽 DoS),浅层仍计费。"""
+        monkeypatch.setattr(
+            "tools.builtin.sandbox_session._MAX_WALK_DEPTH", 3
+        )
+        d = tmp_path
+        for level in range(10):
+            d = d / f"l{level}"
+            d.mkdir()
+        (d / "deep.txt").write_bytes(b"x" * 100)
+        # 不抛、不挂;返回有界(只计到深度上限),deep.txt 在上限外不计
+        usage = _dir_usage_bytes(str(tmp_path))
+        assert usage > 0
+        # 计到的条目数 ≤ 根 + ~3 层,远少于 11 层全计
+        assert usage < 6 * 4096
+
 
 class TestQuota:
 
