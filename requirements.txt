@@ -28,6 +28,11 @@ Pillow>=10.4.0
 # 可观测性（PR-obs-lite sampler：进程 RSS / CPU% / FD / disk usage）
 psutil>=5.9.0
 
+# 沙盒（C 阶段）：Docker daemon HTTP API 的 asyncio 原生客户端。
+# 选它因容器生灭要 await、直接挂引擎的 asyncio.Task.cancel() 取消/超时/lease 栈；
+# docker CLI / 同步 docker-py 与之对不上。调用全部收口在 SandboxSession seam。
+aiodocker>=0.24.0
+
 # 文本模糊匹配（update_artifact Layer 2，锚定 + 有界 Levenshtein 校验）
 rapidfuzz>=3.0.0
 

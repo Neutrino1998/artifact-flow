@@ -270,8 +270,9 @@ class BaseTool(ABC):
 </tool_call>"""
 
 
-# Artifact 工具名字固定（请求级创建），但需要在启动时排除自定义工具同名冲突
-RESERVED_TOOL_NAMES = {"create_artifact", "update_artifact", "rewrite_artifact", "read_artifact", "grep_artifact"}
+# 请求级创建的工具名字固定（artifact 工具 + 沙盒工具），需要在启动时排除自定义
+# 工具同名冲突。沙盒的 mount/persist 落地时(C-stage)同步加入。
+RESERVED_TOOL_NAMES = {"create_artifact", "update_artifact", "rewrite_artifact", "read_artifact", "grep_artifact", "bash"}
 
 
 def build_tool_map(

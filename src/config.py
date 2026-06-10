@@ -160,6 +160,26 @@ class Settings(BaseSettings):
     # (to_thread 只缓解 loop 阻塞,解不了内存)。隐藏常量,operator 可调。
     MAX_TEXT_CONVERT_BYTES: int = 20 * 1024 * 1024  # 20MB
 
+    # 沙盒（C 阶段;隐藏常量,operator 经 env 可调,模型不可见）。
+    # DooD:镜像 / 挂载 / runtime 全部固定在代码侧 —— 容器创建参数绝不可被模型
+    # 生成内容污染(backend 持 docker.sock = host root,这是硬安全边界)。
+    SANDBOX_IMAGE: str = "artifactflow-sandbox:latest"  # scripts/build-sandbox-image.sh 产物
+    SANDBOX_RUNTIME: str = ""        # Docker runtime;"" = daemon 默认(本机 dev=runc),prod="runsc"(gVisor)
+    # 宿主侧 scratch 工作区根目录。DooD 下 bind-mount 源路径在 **daemon 那台机**解析:
+    # backend 容器化部署时必须把同一宿主路径以**相同路径**挂进 backend 容器(经典
+    # DooD 同路径要求)。多套部署共用一个 daemon 时各自配不同根目录 —— reaper(C-reap)
+    # 以本根目录为第二枚举源,共用根目录会互删对方的 scratch。
+    SANDBOX_SCRATCH_ROOT: str = "/tmp/artifactflow-sandbox"
+    SANDBOX_COMMAND_TIMEOUT: int = 120  # 秒,单条 bash 命令上限。容器内 `timeout --signal=KILL` 强杀
+                                        # (真杀进程);tool 侧另有 +grace 的 asyncio 弃等护栏,只负责
+                                        # 提前返回(进程不死,2026-05-14 同型),残留交由 turn 末拆容器兜底。
+    SANDBOX_START_TIMEOUT: int = 60     # 秒,容器 create+start 上限(daemon 卡死时 loud-fail,不 wedge 整 turn)
+    SANDBOX_MEM_LIMIT_MB: int = 1024    # 容器内存上限;MemorySwap 设同值 = 禁 swap
+    SANDBOX_CPU_LIMIT: float = 1.0      # CPU 核数上限(换算 NanoCpus)
+    SANDBOX_PIDS_LIMIT: int = 256       # fork 炸弹闸
+    SANDBOX_MAX_OUTPUT_CHARS: int = 200_000  # 单命令输出捕获硬帽:超出继续 drain 但丢弃(防内存放大),
+                                             # 截断显式标记。>50k 的部分由引擎溢出转 artifact idiom 接手。
+
     # SSRF / 外联工具防护（隐藏常量，不暴露 API / 工具参数）
     WEB_FETCH_MAX_BYTES: int = 20 * 1024 * 1024   # fallback 下载体上限（解压后字节），
                                                   # 超即中断 —— 防 gzip 炸弹 / 大响应 OOM。

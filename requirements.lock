@@ -4,6 +4,8 @@
 #
 #    pip-compile --no-emit-index-url --output-file=requirements.lock requirements.txt
 #
+aiodocker==0.27.0
+    # via -r requirements.txt
 aiofiles==25.1.0
     # via -r requirements.txt
 aiohappyeyeballs==2.6.2
@@ -11,6 +13,7 @@ aiohappyeyeballs==2.6.2
 aiohttp==3.14.1
     # via
     #   -r requirements.txt
+    #   aiodocker
     #   litellm
 aiomysql==0.3.2
     # via -r requirements.txt

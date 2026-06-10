@@ -61,6 +61,8 @@ async def create_controller(conversation_id: str, message_id: str) -> AsyncGener
     from core.conversation_manager import ConversationManager as CM
     from tools.builtin.artifact_service import ArtifactService
     from tools.builtin.artifact_ops import create_artifact_tools
+    from tools.builtin.sandbox_session import SandboxSession
+    from tools.builtin.sandbox_ops import create_sandbox_tools
     from repositories.artifact_repo import ArtifactRepository
     from repositories.conversation_repo import ConversationRepository as CR
     from repositories.message_event_repo import MessageEventRepository
@@ -70,13 +72,25 @@ async def create_controller(conversation_id: str, message_id: str) -> AsyncGener
     store = runner.store
     agents = get_agents()
 
+    # per-turn 沙盒 session:对象壳在此创建(同 ArtifactService,构造注入工具),
+    # 容器 lazy 于首个沙盒工具调用 —— 无沙盒 turn 壳零成本。拆除句柄注册进
+    # runner,在 _wrapped 真 finally(cleanup_execution 旁)执行,与 lease 同生灭;
+    # close 幂等不依赖 DB session,故晚于本 context manager 退出也安全。
+    sandbox_session = SandboxSession(conversation_id, message_id)
+    runner.register_cleanup(message_id, sandbox_session.close)
+
     async with db_manager.session() as session:
         artifact_repo = ArtifactRepository(session)
         artifact_service = ArtifactService(artifact_repo)
 
-        # 合并全局工具 + 请求级 artifact 工具
+        # 合并全局工具 + 请求级 artifact / 沙盒工具
         artifact_tools = create_artifact_tools(artifact_service)
-        all_tools = {**get_tools(), **{t.name: t for t in artifact_tools}}
+        sandbox_tools = create_sandbox_tools(sandbox_session)
+        all_tools = {
+            **get_tools(),
+            **{t.name: t for t in artifact_tools},
+            **{t.name: t for t in sandbox_tools},
+        }
 
         conv_repo = CR(session)
         conv_manager = CM(conv_repo)

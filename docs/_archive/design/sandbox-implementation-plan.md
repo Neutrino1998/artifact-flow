@@ -18,14 +18,14 @@
 ## 进度
 
 - **当前**:**A / B(双架构)完成**(详见各段进展)。**C 开工**(2026-06-10 开工决策锁定,切片 C-0→C-wire,见 C 段「进展」)。
-- **下一步**:**C-session**(`SandboxSession` + aiodocker + finally 拆除 plumbing + `bash` 工具)。C-0 已落地(2026-06-10,见 C 段进展)。并行待办:arm §B 镜像 id 冻结(机器在位时;注意 C 镜像加 git 后锚点作废,统一在 D 重冻结)。
+- **下一步**:**C-stage**(`mount`/`persist`)。C-0 / C-session 已落地(2026-06-10,见 C 段进展;C-session 含 runc 真机无孤儿矩阵 6/6)。并行待办:arm §B 镜像 id 冻结(机器在位时;注意 C 镜像加 git 后锚点作废,统一在 D 重冻结);沙盒镜像加 git(Dockerfile + verify 探针,可与 C-stage 并行)。
 - **产物处置(2026-06-05 拍定)**:`feat/sandbox` 这批已验收产物(`sandbox/` 探针 + 构建脚本)**暂留分支不动**,不单独提早合 main。「是否把就绪探针子集(`unshare -U` 闸 + smoke + ENOSYS/uid)提升为通用部署机预检工具」**推迟到 C/D 阶段**——届时有真实第二调用点(每台新沙盒宿主预检 + D 端到端冒烟)再校准边界,现在抽象属投机(YAGNI)。
 
 | 阶段 | 内容 | 状态 |
 |---|---|---|
 | A | artifact 地基(二进制存储 + 多格式上传 + 识图) | **完成**(2026-06-08 三切片 + 2026-06-09 review 加固 + live E2E 用户实测通过) |
 | B | Kylin gVisor 功能验证(内网) | x86_64 **完成**(验证通过+已撤出);arm64 **完成**(2026-06-08,64K→4K 换核后全绿) |
-| C | 沙盒引擎集成(本机 runc 连调) | **开工**(2026-06-10 决策锁定,切片 C-0→C-wire) |
+| C | 沙盒引擎集成(本机 runc 连调) | **进行中**(C-0 / C-session 已落地,下一刀 C-stage) |
 | D | 上线前 Kylin 端到端冒烟 | 未开始 |
 
 依赖:C 依赖 A 的二进制存储 + B 的冻结镜像。A 逻辑独立(识图本身就有价值),可先做,但本期不单独合 main —— 见分支策略。
@@ -203,6 +203,14 @@
   - **后端**:`DocConverter` docx/pdf 改 blob-only(content="" + content_type=真实 MIME + magic 预检 loud-fail,pdf 补 `%PDF-` 闸对齐 docx);pandoc 退出 backend(删 `export_docx`/`check_pandoc`,main.py 不再依赖);**pymupdf 文本抽取保留为独立 `extract_pdf_text` 供 web_fetch PDF 降级**(网页阅读路径,非上传,convert() 不再可达);删 `/export` 端点(连 `Query` import);`read_artifact` 序列化加 `blob_content_type` 判别字段 → ReadArtifactTool 对非图片 blob 返回契约文案(**success=True 防重试循环**)、inventory 二进制项标注;**新增 `_binary_immutable_error` 守门**——update/rewrite 在 blob artifact 上一律拒(否则文本编辑会让"双轨"借尸还魂),改=产新 artifact。
   - **REST/前端**:`ArtifactSummary`/`ArtifactResponse` 加 `has_blob`(由 `blob_content_type` 推导,OpenAPI types 重生成);事件 `ArtifactCreatedData` 补 `has_blob`/`blob_size`/`blob_content_type` 类型;store `LiveArtifact.hasBlob` 全链贯通(`defaultViewMode` 收 hasBlob);删 `exportArtifact`/「导出为 Word」菜单;下载原格式按 `has_blob` 分流(blob → authed `/raw` objectURL,文件名用 `original_filename`);新增 `BinaryFilePreview`(文件卡片 + 下载),**turn 内复用 ImagePreview 的 `pendingFlush` 闸**——卡片只靠事件元数据即可渲染(filename/MIME),仅下载按钮 flush 前换成「本回合完成后可下载」提示,不发 /raw、无 404;blob artifact 隐藏复制按钮、tabs 限 preview-only。
   - **TODO(C-wire)**:read_artifact 契约文案与 inventory 标注当前只说「可下载」,mount 工具落地后改为指引 mount 进沙盒(代码内已留 TODO 注释)。
+- **2026-06-10 C-session 落地**(后端 1136 测试全过 + **本机 runc 真机无孤儿矩阵 6/6 双零残留**):
+  - **`SandboxSession`**(`src/tools/builtin/sandbox_session.py`):per-turn 对象壳,aiodocker 全收口在此 seam(编排器可换性);容器 lazy 于首个 exec(壳零成本:不碰 docker、不建目录);创建参数全代码侧(`--network=none`、Memory=MemorySwap 禁 swap、NanoCpus、PidsLimit、Runtime 按 `SANDBOX_RUNTIME`);label 到 turn 粒度(`artifactflow.sandbox.{conversation,message}-id` + **namespace label**=`REDIS_KEY_PREFIX`,隔离共用 daemon 的多套部署,C-reap 按它过滤);scratch 目录 `{root}/{conv}__{msg}`(reaper 第二枚举源按此反解)。**创建失败 sticky**:本 turn 不重试,后续调用立即复述原因(失败多为环境性,重试只重复烧启动超时);**create 成功 start 失败的半成品句柄先记**,close 仍删得到。`close()` 幂等、每步独立 best-effort(容器→scratch→client),任一步失败只记日志等 reaper。
+  - **exec = 容器内 `timeout --signal=KILL` 包 argv**(真机验证 exit 137、3.0s 准点杀);tool 侧 `asyncio.timeout(命令上限+30s grace)` 弃等护栏只兜 exec 通道卡死。输出 stdout/stderr 按到达序合流、**每流独立 incremental decoder**(frame 劈断多字节字符不出 �)、超 `SANDBOX_MAX_OUTPUT_CHARS`(200k)继续 drain 但丢弃+显式截断标记;ExitCode EOF 后有界轮询(daemon 落账延迟)。
+  - **`bash` 工具**(`sandbox_ops.py`,CONFIRM):唯一参数 `command`;**非零退出码 = 信息不是故障**(success=True + `[exit code: N]`,grep 无命中不该触发失败语义);exit 137 按时长归因(≥上限才标 timeout 杀,避免误归因 OOM-kill);>50k 由引擎溢出转 artifact idiom 接手(引擎零改动)。`bash` 入 `RESERVED_TOOL_NAMES`。
+  - **拆除 plumbing**:`ExecutionRunner.register_cleanup(task_id, cb)` 注册表;`_wrapped` 真 finally 在 `cleanup_execution` **之前**逐个 best-effort 执行(**先拆资源后放 lease**,"无 lease 即孤儿"谓词无窗口;CancelledError 也只记日志继续,绝不跳过 lease 释放/close_stream);controller_factory 创建壳 + 注册 + `create_sandbox_tools` 合入 all_tools(close 不依赖 DB session,晚于 factory context 退出安全)。
+  - **矩阵**(`tests/manual/sandbox_no_orphan_matrix.py`,真 daemon):正常路径(顺带自验 exec multiplexed demux + workspace 跨调用持久)/ while-true 真杀 / exec 中取消 / 起容器中取消 / runner 成功+外部取消,每条断言 daemon 无 label 容器 + scratch 已删。SIGKILL worker 条留 C-reap。
+  - **依赖**:aiodocker==0.27.0 入 lock(slim 内重生,pip-audit 零漏洞)。
+  - 单测:session(fake aiodocker:lazy/配置/sticky 失败/close 幂等/截断/demux 解码)+ bash 契约 + runner cleanup 注册表(成功/异常/取消三路径 + 顺序断言)。
 
 **C 验收标准**(2026-06-10 定):① 三工具 runc 下 live E2E,含「mount 原 docx → pandoc 转 md → 改 → `--reference-doc` 生成新 docx → persist 新 artifact → 前端可下载」闭环;② **无孤儿矩阵**——`while true`、tool 超时、协作取消、外部取消、SIGKILL worker 五条退出路径各跑一遍,`docker ps` + scratch 根目录双零残留(SIGKILL 条靠 reaper 收);③ reaper 零误杀(活跃 turn 的容器/目录不被收)。
 
@@ -246,5 +254,6 @@
 - 2026-06-09 **A 完成**(review 修复 + mid-turn 上传 UX 加固 + live E2E 通过):外部 review 无阻塞,修识图能力门控(`models.yaml` `vision` 标志 + lead/research/compact 切 `qwen3.7-plus`)、解压炸弹改显式 `VISION_IMAGE_MAX_PIXELS`、LLM 重试收窄到瞬态(类型化异常)、debug 格式化容忍块列表;mid-turn 上传图本地优先渲染(staged `File` 按 `original_filename` 关联)+ chip 缩略图 + 同名 dedup(`_N`)/本轮限定(`pendingFlush`)修同轮+跨轮串图。后端 1095 / 前端 191 全过;**live E2E 用户实测通过**(上传真图→模型识图)。**A 阶段闭环**,下一步 C。commits `f7b7d4d`→`3476e5e`。详见 A 段「进展」。
 - 2026-06-10 **C 开工决策锁定**:切片 C-0(blob-only 一步到位 + 整删 `/export`,不留双轨过渡)→ C-session → C-stage → C-reap → C-wire;persist 永远产新 artifact(blob 不版本化、不覆写,二进制=不可变单版/文本=版本化);mount 语义单一权威载体(文本=WorkingSet overlay、blob=DB,本轮 staged 上传例外);mount 返回纯事实、提示分层(契约→inventory/read_artifact,能力→bash 工具描述,场景 how-to→skill);拆除 plumbing=Session 壳 factory 创建+容器 lazy+cleanup 句柄递 `_wrapped` finally;per-command 超时=容器内 `timeout` 包 argv(exec argv 数组无引号问题);reaper=资源侧枚举(daemon label + scratch 根目录双源)− lease 掩码;镜像加 git(锚点作废、D 重冻结);aiodocker 入依赖(DEP-02)。C 验收标准三条 + D 追加三项(git 重冻结/uid 实验证/Word 场景站住)。详见 C 段「进展」。
 - 2026-06-10 **C-0 落地**:docx/pdf 上传 blob-only(magic 预检 loud-fail)、pandoc 退出 backend、pymupdf 保留为 web_fetch 专用 `extract_pdf_text`、删 `/export`、read/inventory 二进制契约文案(success=True 防重试)、update/rewrite 拒改 blob artifact(不可变单版守门)、REST/事件/store 全链 `has_blob`、前端 `BinaryFilePreview`(复用 pendingFlush 闸,turn 内零 /raw 404)。后端 1098 / 前端 205 全过。详见 C 段「进展」。
+- 2026-06-10 **C-session 落地**:`SandboxSession`(aiodocker seam、容器 lazy、创建失败 sticky、close 幂等 best-effort、turn 粒度 label + namespace label)+ `bash` 工具(CONFIRM、非零退出=信息、137 按时长归因)+ `register_cleanup` 拆除 plumbing(_wrapped 真 finally、先拆资源后放 lease)+ aiodocker==0.27.0 入 lock(audit 零漏洞)。后端 1136 全过;**runc 真机无孤儿矩阵 6/6 双零残留**(while-true 由容器内 timeout 准点 KILL)。下一刀 C-stage(mount/persist)。详见 C 段「进展」。
 <!-- 新日志按日期顺序追加到此行上方 -->
 
