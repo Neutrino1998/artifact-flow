@@ -18,6 +18,7 @@ from datetime import datetime
 
 from config import config
 from core.event_history import build_event_history, last_llm_usage
+from utils.image import VISION_VIEWABLE_MIMES
 from models.llm import model_supports_vision
 from tools.artifact_envelope import make_preview_slice, render_artifact_slice
 from utils.logger import get_logger
@@ -248,10 +249,11 @@ class ContextManager:
         lines.append('<artifacts_inventory>')
         for artifact in artifacts_inventory:
             # blob 类 artifact 的 content 为空(无文本表示),给一条合成预览,让清单行
-            # 有信息量:图片提示「read 即可看图」,其它二进制(docx/pdf 等)说明契约
-            # (否则空 body 易被忽略)。
+            # 有信息量:png/jpeg 提示「read 即可看图」(识图白名单,与 read_artifact
+            # 的 VISION_VIEWABLE_MIMES gate 一致),其余二进制(docx/pdf/异型图等)
+            # 说明 mount 契约(否则空 body 易被忽略)。
             preview_content = artifact.get("content", "")
-            if not preview_content and artifact["content_type"].startswith("image/"):
+            if not preview_content and artifact["content_type"] in VISION_VIEWABLE_MIMES:
                 preview_content = "[image — use read_artifact to view it]"
             elif not preview_content and artifact.get("blob_content_type"):
                 preview_content = (

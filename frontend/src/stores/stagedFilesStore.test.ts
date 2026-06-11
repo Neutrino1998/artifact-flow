@@ -106,18 +106,18 @@ describe('stagedFilesStore per-file size gate (mirrors backend MAX_UPLOAD_SIZE v
   });
 });
 
-describe('stagedFilesStore format gate + notice', () => {
+describe('stagedFilesStore notice (post-flip: no format gate, size is the only reject)', () => {
   beforeEach(() => reset());
+  afterEach(() => useConfigStore.setState({ maxUploadSize: null }));
 
-  test('rejects unsupported office files by extension and records a per-file notice', () => {
+  test('all formats stage — upload-route flip removed the extension blacklist', () => {
     st().addFiles([
       new File(['x'], 'a.txt', { type: 'text/plain' }),
       new File(['x'], 'b.doc'),
       new File(['x'], 'c.xlsx'),
     ]);
-    expect(files().map((f) => f.file.name)).toEqual(['a.txt']);
-    expect(st().notice?.rejected.map((r) => r.name)).toEqual(['b.doc', 'c.xlsx']);
-    expect(st().notice?.overflow).toBe(0);
+    expect(files().map((f) => f.file.name)).toEqual(['a.txt', 'b.doc', 'c.xlsx']);
+    expect(st().notice).toBeNull();
   });
 
   test('over-cap files (e.g. dropped past the disabled button) are reported as overflow', () => {
@@ -127,17 +127,19 @@ describe('stagedFilesStore format gate + notice', () => {
     expect(st().notice?.rejected).toEqual([]);
   });
 
-  test('a fully-clean add clears a prior notice', () => {
-    st().addFiles([new File(['x'], 'bad.doc')]);
+  test('a fully-clean add clears a prior (size) notice', () => {
+    useConfigStore.setState({ maxUploadSize: 4 });
+    st().addFiles([new File(['abcdef'], 'big.bin')]); // 6B > 4B → size notice
     expect(st().notice).not.toBeNull();
-    st().addFiles(makeFiles(1));
+    st().addFiles([new File(['ab'], 'ok.txt', { type: 'text/plain' })]);
     expect(st().notice).toBeNull();
   });
 
   test('dismissNotice clears the notice without touching staged files', () => {
+    useConfigStore.setState({ maxUploadSize: 4 });
     st().addFiles([
-      new File(['x'], 'ok.txt', { type: 'text/plain' }),
-      new File(['x'], 'bad.doc'),
+      new File(['ab'], 'ok.txt', { type: 'text/plain' }),
+      new File(['abcdef'], 'big.bin'),
     ]);
     expect(st().notice).not.toBeNull();
     st().dismissNotice();

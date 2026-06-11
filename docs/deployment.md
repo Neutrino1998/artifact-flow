@@ -412,7 +412,7 @@ ssh target 'cd /opt/artifactflow && \
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
 | `ARTIFACTFLOW_MAX_CONCURRENT_TASKS` | `10` | 最大并发引擎执行数 |
-| `ARTIFACTFLOW_MAX_UPLOAD_SIZE` | `104857600` | 单文件上传大小限制（字节，默认 100MB）；批量总字节由代理层独立封顶（200MB）。注：文本文件转换另有更低的独立闸 20MB |
+| `ARTIFACTFLOW_MAX_UPLOAD_SIZE` | `104857600` | 单文件上传大小限制（字节，默认 100MB）；批量总字节由代理层独立封顶（200MB）。注：文本转换另有更低的独立闸 20MB——超闸**不 422、落为二进制 blob artifact**（可下载、可 mount 进沙盒处理） |
 | `ARTIFACTFLOW_DEFAULT_PAGE_SIZE` | `20` | 分页默认每页条数 |
 | `ARTIFACTFLOW_MAX_PAGE_SIZE` | `100` | 分页最大每页条数 |
 
@@ -552,7 +552,7 @@ flowchart TD
 | 维护开关 | `file` matcher 每请求 stat `MAINTENANCE_ON` | `if (-f ... MAINTENANCE_ON) return 503` |
 | 真实 IP | `header_up X-Real-IP {remote_host}` | `proxy_set_header X-Real-IP $remote_addr` |
 
-- **上传上限（代理层是总量权威闸）**：`POST /api/v1/chat` 把整批附件放进**一个** multipart 请求，body 是整批之和。三轴**独立**：单文件 ≤100MB（`MAX_UPLOAD_SIZE`，后端 422）、数量 ≤10（`MAX_CHAT_ATTACHMENTS`，后端 422）、**总量 ≤200MB（代理层 413）**。总量**刻意小于** per-file×count（100MB×10=1GB）——设计意图是"1 个大文件 or 多个小文件，但控总量"，故大批量时代理层**会按设计抢先** 413（单个超大文件仍由后端给干净 422）。`210M`/`210MiB` = 200MiB 内容 + 10MiB multipart 开销。**单位注意**：nginx `210M` 与 Caddy `210MiB` 都是二进制 2²⁰；Caddy 的 `MB` 会被当 decimal 10⁶（偏小），故必须写 `MiB`。另：文本文件转换路径有更低的独立闸 `MAX_TEXT_CONVERT_BYTES`（20MB，防解码+词表物化的内存放大），图片/PDF/docx 不受此限。
+- **上传上限（代理层是总量权威闸）**：`POST /api/v1/chat` 把整批附件放进**一个** multipart 请求，body 是整批之和。三轴**独立**：单文件 ≤100MB（`MAX_UPLOAD_SIZE`，后端 422）、数量 ≤10（`MAX_CHAT_ATTACHMENTS`，后端 422）、**总量 ≤200MB（代理层 413）**。总量**刻意小于** per-file×count（100MB×10=1GB）——设计意图是"1 个大文件 or 多个小文件，但控总量"，故大批量时代理层**会按设计抢先** 413（单个超大文件仍由后端给干净 422）。`210M`/`210MiB` = 200MiB 内容 + 10MiB multipart 开销。**单位注意**：nginx `210M` 与 Caddy `210MiB` 都是二进制 2²⁰；Caddy 的 `MB` 会被当 decimal 10⁶（偏小），故必须写 `MiB`。另：文本转换路径有更低的独立闸 `MAX_TEXT_CONVERT_BYTES`（20MB，防解码+词表物化的内存放大），blob 路径（图片/PDF/docx/其它二进制）不受此限；**超文本闸不 422**，文件落为二进制 blob artifact（可下载、可 mount 进沙盒处理）。
 - **`X-Real-IP`（登录频控依赖）**：后端 per-IP 登录频控**只读这个头**（刻意不信可被客户端伪造的 `X-Forwarded-For`）。安全前提是 backend 仅 `expose`、不发布主机端口，只经反向代理可达，故这个头不可伪造。删掉它 / 换不写该头的代理 → per-IP 限流静默退化成"所有请求共用代理容器一个 IP 桶"（per-username 主防线仍在）。
   - **Mode 2 灰云（CF DNS only）直连**：`{remote_host}` 就是真实客户端 IP，直接写进 `X-Real-IP`，不退化。
   - **Mode 2 若改用 CF 橙云（proxied）**：真实客户端 IP 移到 `X-Forwarded-For`、`{remote_host}` 变成 CF 边缘 IP —— 需在 Caddyfile 加 `trusted_proxies`（CF IP 段）并改用 `{client_ip}`，否则 per-IP 限流退化。`deploy/Caddyfile` 头部注释了这一点。

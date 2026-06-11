@@ -256,3 +256,45 @@ class TestReadBinaryBlobArtifact:
         assert "report.docx" in result.data
         # 不能把空 content 当文本切片吐回去
         assert "<artifact_slice" not in result.data
+
+
+class TestReadArtifactVisionGate:
+    """识图分支白名单(VISION_VIEWABLE_MIMES)回归:上传翻转后异型图照收 blob,
+    但只有 png/jpeg 进识图;其余 image/* 必须落 blob 契约文案(不进 _read_image
+    的"试试看"——动图首帧/多页 tiff 等语义坑),文案给 mount+转 PNG 指引。"""
+
+    async def test_gif_blob_gets_contract_message_not_vision(
+        self, read_tool: ReadArtifactTool, artifact_service: ArtifactService, session_id: str
+    ):
+        artifact_service.set_session(session_id)
+        ok, _, info = await artifact_service.create_from_upload(
+            session_id=session_id,
+            filename="anim.gif",
+            content="",
+            content_type="image/gif",
+            blob=b"GIF89a fake bytes",
+            blob_content_type="image/gif",
+        )
+        assert ok
+        result = await read_tool.execute(id=info["id"])
+        assert result.success is True              # 契约回答,非失败(防重试循环)
+        assert "metadata" not in result.__dict__ or not (result.metadata or {}).get("image")
+        assert "PNG/JPEG" in result.data           # 说清识图白名单
+        assert "mount" in result.data              # mount + 转 PNG 指引
+
+    async def test_unknown_binary_blob_message_has_mount_hint(
+        self, read_tool: ReadArtifactTool, artifact_service: ArtifactService, session_id: str
+    ):
+        artifact_service.set_session(session_id)
+        ok, _, info = await artifact_service.create_from_upload(
+            session_id=session_id,
+            filename="data.bin",
+            content="",
+            content_type="application/octet-stream",
+            blob=b"\x00\x01",
+            blob_content_type="application/octet-stream",
+        )
+        assert ok
+        result = await read_tool.execute(id=info["id"])
+        assert result.success is True
+        assert "mount" in result.data

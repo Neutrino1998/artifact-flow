@@ -1,12 +1,14 @@
 """
 Unit tests for src/utils/doc_converter.py
 
-上传翻转后(2026-06-11)的路由契约:**文本类 → content,png/jpeg → 识图 blob,
-其余一律 → blob**。上传口对格式零预判:
-- 已知二进制扩展(Office/ODF/异型图/压缩包/docx/pdf)→ 直进 blob,真实 MIME,
-  不验 magic(改后缀/损坏照收,诊断归沙盒里的模型)
-- Text fallback:纯文本扩展(.txt/.md/.csv)成功并标对 MIME;未知扩展能解码
-  → 文本,解不出 / 超文本帽 → blob(不再 422)
+上传翻转后(2026-06-11)的路由契约:**文本白名单(EXTENSION_MIME_MAP)→
+content,png/jpeg → 识图 blob,其余一律 → blob**。路由纯声明式(按扩展名),
+charset 启发式不参与路由判定:
+- 非白名单扩展(含无扩展名/未知扩展)→ 直进 blob,不试解码、不验 magic
+  (近 ASCII 二进制试解码会"成功"并丢原始字节 —— review P2;改后缀/损坏
+  照收,诊断归沙盒里的模型);MIME 取 _BINARY_EXTENSION_MIME 显式表 →
+  mimetypes 猜 → octet-stream
+- 文本白名单:成功标对 MIME;声明文本但解不出 / 超文本帽 → blob(不再 422)
 - png/jpg 扩展:Pillow 内容探测仍 loud-fail(识图路由是上传期决策,这道闸是
   路由正确性、不是格式预判)
 """
@@ -120,11 +122,15 @@ class TestTextFallback:
         assert "蓝湾科技" in result.content
         assert result.metadata["detected_encoding"].lower().startswith("utf")
 
-    async def test_unknown_extension_falls_to_plain(self):
+    async def test_unknown_extension_goes_to_blob_even_if_texty(self):
+        """路由纯声明式:非白名单扩展不试解码,纯 ASCII 内容也进 blob。
+        (MIME 不钉死 —— mimetypes 对长尾扩展的认知平台相关,.xyz 在部分平台
+        是化学格式 chemical/x-xyz;契约只要求"非文本、原字节保住"。)"""
         converter = DocConverter()
         result = await converter.convert(b"raw text content", "weird.xyz")
-        assert result.content_type == "text/plain"
-        assert "raw text content" in result.content
+        assert result.content == ""
+        assert result.blob == b"raw text content"
+        assert not result.content_type.startswith("text/")
 
     async def test_svg_is_text_not_image(self):
         """svg 是 XML 文本:走文本路径、不标 image/*(text artifact 无 blob,
@@ -138,16 +144,34 @@ class TestTextFallback:
 
 
 # ============================================================
-# Text 兜底失败 → blob(翻转:不再 422)
+# 路由声明式 + 文本路径兜底落 blob(翻转:不再 422)
 # ============================================================
 
 
-class TestTextFallbackToBlob:
-    async def test_undecodable_unknown_ext_falls_to_blob(self):
-        """未知扩展 + 解不出文本 = 未知二进制 → blob octet-stream(原拒,现收)。"""
+class TestDeclarativeRoutingToBlob:
+    @pytest.mark.parametrize(
+        "data,filename",
+        [
+            (b"MZ\x90\x00 this exe header is pure ascii", "tool.exe"),
+            (b"plain ascii pretending to be binary", "data.bin"),
+            (b"\x00\x00\x00\x18ftypmp42 tiny mp4 head", "clip.mp4"),
+            (b"#!/bin/sh\necho extensionless", "Makefile"),
+        ],
+    )
+    async def test_non_whitelist_never_decodes_to_text(self, data, filename):
+        """review P2 回归:近 ASCII 的二进制(charset-normalizer 能"成功"解码)
+        绝不能变成文本 artifact 丢掉原始字节 —— 非白名单一律 blob,不试解码。"""
+        converter = DocConverter()
+        result = await converter.convert(data, filename)
+        assert result.content == ""
+        assert result.blob == data  # 原始字节保住
+
+    async def test_undecodable_whitelisted_ext_falls_to_blob(self):
+        """白名单扩展但内容非文本(改后缀的二进制)→ blob octet-stream
+        (按声明扩展猜 text/* 反而撒谎),沙盒里诊断。"""
         converter = DocConverter()
         data = bytes(range(256)) * 8  # 充分非文本
-        result = await converter.convert(data, "mystery.bin")
+        result = await converter.convert(data, "mystery.txt")
         assert result.content == ""
         assert result.blob == data
         assert result.content_type == "application/octet-stream"
@@ -155,7 +179,7 @@ class TestTextFallbackToBlob:
 
     async def test_oversize_text_falls_to_blob(self, monkeypatch):
         """超 MAX_TEXT_CONVERT_BYTES 的文本类 → blob(可下载、可 mount 进沙盒
-        grep/拆分),不再 422。MIME 按扩展名猜。"""
+        grep/拆分),不再 422。MIME 按扩展名猜(真文本,text/plain 诚实)。"""
         monkeypatch.setattr(config, "MAX_TEXT_CONVERT_BYTES", 8)
         converter = DocConverter()
         result = await converter.convert(b"a" * 9, "notes.txt")

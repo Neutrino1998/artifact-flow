@@ -1,9 +1,10 @@
 """
 Document converter for file import.
 
-路由(上传翻转后,2026-06-11):**文本类 → content,png/jpeg → 识图 blob,
-其余一律 → blob**。上传口对格式零预判 —— 改后缀 / 损坏 / 不认识的字节照收进
-blob,模型 mount 进沙盒后自己检视、诊断、转换(remediation 提示归 skill 系统);
+路由(上传翻转后,2026-06-11):**文本白名单(EXTENSION_MIME_MAP)→ content,
+png/jpeg → 识图 blob,其余一律 → blob**。路由纯声明式(按扩展名三分),
+charset 启发式不参与路由判定 —— 改后缀 / 损坏 / 不认识的字节照收进 blob,
+模型 mount 进沙盒后自己检视、诊断、转换(remediation 提示归 skill 系统);
 "loud-fail at upload" 随沙盒落地降级为 "loud-fail at first use",不再需要
 magic 闸与拒绝名单。仅存的上传期 ValueError:体积超限、png/jpg 扩展名但
 Pillow 探不出合法 PNG/JPEG(识图路由是上传期决策,这道闸是路由正确性、
@@ -85,11 +86,10 @@ _IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg"}
 _DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 _PDF_MIME = "application/pdf"
 
-# 已知二进制扩展名 → 真实 MIME:**不是接受闸**(任何文件都收),只是路由正确性 ——
-# 已知二进制直进 blob、跳过文本解码尝试。没有这张表,小体积 PDF 之类近 ASCII 的
-# 二进制可能被 charset-normalizer "成功"解码成文本 artifact,原始字节就丢了
-# (不可下载、模型编辑的是乱码)。不在表里的未知扩展仍先试文本解码、失败落 blob。
-# MIME 给真实值是为 /raw 端点按它发(浏览器下载/内联行为正确)。
+# 已知二进制扩展名 → 真实 MIME:**不是接受闸也不是路由表**(路由 = 文本白名单
+# 之外一律 blob,见 convert()),只管 MIME 正确性 —— mimetypes 对 OOXML/heic/avif
+# 等的认知因平台而异,显式表保证 /raw 端点按真实 MIME 发(浏览器下载/内联行为
+# 正确)。不在表里的未知扩展由 mimetypes 猜、兜底 octet-stream。
 _BINARY_EXTENSION_MIME: Dict[str, str] = {
     # Word
     ".docx": _DOCX_MIME,
@@ -209,12 +209,18 @@ class DocConverter:
 
         if ext in _IMAGE_EXTENSIONS:
             return await self._convert_image(file_bytes, filename)
-        elif ext in _BINARY_EXTENSION_MIME:
-            # 已知二进制:直进 blob,不试解码、不验 magic(改后缀/损坏照收,
-            # 模型 mount 进沙盒后自己诊断 —— 见模块 docstring)。
-            return _blob_result(file_bytes, filename, _BINARY_EXTENSION_MIME[ext])
-        else:
+        elif ext in EXTENSION_MIME_MAP:
+            # 文本白名单:唯一进解码的路由(白名单内解不出/超帽仍落 blob)。
             return await self._convert_text(file_bytes, filename, ext)
+        else:
+            # 非白名单一律 blob —— 路由纯声明式(按扩展名),charset 启发式
+            # 不参与路由判定:近 ASCII 的二进制(.exe 头/小 mp4/ascii .bin)能被
+            # charset-normalizer "成功"解码,试一下就会把原始字节丢成文本
+            # artifact(不可下载/不可 mount)。无扩展名(README/Makefile)同落
+            # blob,契约一致;不验 magic,改后缀/损坏照收,模型 mount 进沙盒
+            # 后自己诊断(见模块 docstring)。
+            mime = _BINARY_EXTENSION_MIME.get(ext) or _guess_blob_mime(filename)
+            return _blob_result(file_bytes, filename, mime)
 
     async def extract_pdf_text(self, file_bytes: bytes) -> Tuple[str, int]:
         """Extract text from PDF bytes via pymupdf. Returns (text, page_count).
@@ -293,10 +299,10 @@ class DocConverter:
 
         decoded = await asyncio.to_thread(_decode)
         if decoded is None:
-            # 未知扩展 + 解不出文本 = 未知二进制:照收 blob(MIME 按扩展名猜,
-            # 兜底 octet-stream),模型 mount 后用沙盒诊断。
+            # 白名单扩展但解不出文本(声明是文本、内容不是,如改后缀的二进制):
+            # 落 blob(octet-stream —— 按声明扩展猜 text/* 反而撒谎),沙盒里诊断。
             logger.info(f"Upload '{filename}' is not decodable text, storing as blob")
-            return _blob_result(file_bytes, filename, _guess_blob_mime(filename))
+            return _blob_result(file_bytes, filename, "application/octet-stream")
 
         content, detected_encoding, word_count = decoded
         content_type = EXTENSION_MIME_MAP.get(ext, "text/plain")

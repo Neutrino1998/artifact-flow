@@ -17,15 +17,21 @@ from PIL import Image
 
 from config import config
 
+# 识图白名单:只有这两种 MIME 的 blob 走 read_artifact 识图分支(plan A 决策,
+# 上传翻转后重申:gif/webp 等异型图照收 blob 但**不**进识图 —— 语义坑太多,
+# 动图取首帧/多页 tiff 取首页都是"试试看"启发式;要看就 mount 进沙盒转 PNG
+# 再 persist)。read_artifact 契约文案与 inventory 标注同步引用此集合。
+VISION_VIEWABLE_MIMES = frozenset({"image/png", "image/jpeg"})
+
 
 def resize_to_vision_data_uri(data: bytes, max_edge: int) -> str:
     """把图片字节降采样到最长边 ≤ ``max_edge``,返回 ``data:<mime>;base64,<...>``。
 
-    PNG/JPEG 且原图已小于上限 → 原样编码(不放大、不重编码丢质量)。其余 Pillow
-    能解的格式(gif/webp/bmp/tiff…,上传翻转后异型图入 blob、会流到 read 路径)
-    一律重编码成 PNG —— 绝不把非 png/jpeg 字节原样塞进 data-URI(MIME 错配),
-    vision provider 也只吃 png/jpeg。Pillow 解不了的(heic/avif…)在 open 即抛,
-    调用方 loud-fail 提示 mount 进沙盒转换。**同步**函数,调用方放 executor。
+    PNG/JPEG 且原图已小于上限 → 原样编码(不放大、不重编码丢质量)。识图分支
+    已按 VISION_VIEWABLE_MIMES 限死 png/jpeg,正常不会有其它格式进来;万一进来
+    (MIME 错标的历史 blob 等)也一律重编码成 PNG 兜住 —— 绝不把非 png/jpeg
+    字节原样塞进 data-URI(MIME 错配),这是第二道防御非主闸。Pillow 解不了的
+    在 open 即抛,调用方 loud-fail。**同步**函数,调用方放 executor。
     """
     with Image.open(io.BytesIO(data)) as img:
         fmt = (img.format or "").upper()

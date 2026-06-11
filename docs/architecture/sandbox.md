@@ -4,7 +4,7 @@
 
 ## 定位
 
-沙盒解决两类工作：跑模型生成的任意 shell / Python，和处理二进制上传——上传路由（2026-06-11 翻转后）对格式零预判：文本类解码为 content，png/jpeg 走识图，**其余任意格式一律存为 blob**（docx / pdf / xlsx / 压缩包 / 异型图 / 未知二进制）。这些字节在 artifact 系统里没有文本表示，只有 mount 进沙盒才能被检视 / 转换；改后缀、损坏的文件也照收，模型在沙盒里 loud-fail 后自行诊断（remediation 提示归 skill 系统）。镜像预装 Python 3.11 + 科学栈（numpy/pandas/matplotlib/openpyxl）+ pandoc + ripgrep。
+沙盒解决两类工作：跑模型生成的任意 shell / Python，和处理二进制上传——上传路由（2026-06-11 翻转后）纯声明式按扩展名三分：文本白名单解码为 content，png/jpeg 走识图（识图白名单限死这两种——gif/webp 等异型图照收 blob 但不进识图，要看就 mount 进沙盒转 PNG 再 persist），**其余任意格式一律存为 blob**（docx / pdf / xlsx / 压缩包 / 异型图 / 未知二进制，不试解码不验 magic）。这些字节在 artifact 系统里没有文本表示，只有 mount 进沙盒才能被检视 / 转换；改后缀、损坏的文件也照收，模型在沙盒里 loud-fail 后自行诊断（remediation 提示归 skill 系统）。镜像预装 Python 3.11 + 科学栈（numpy/pandas/matplotlib/openpyxl）+ pandoc + ripgrep。
 
 **沙盒是显式 stage 进出的 scratch 工作区，不是 artifact store 的自动镜像。** mount-in 与回写都显式：模型显式把指定 artifact 物化进工作区、显式调 `persist` 回写，不自动物化整 session、也不 diff 整个目录。容器 fs 不是「artifact 的第三态」，而是临时工作区——copy-in → 容器内随便改 → 显式 `persist`，persist 落回来就**变成一次普通 artifact 写**（进 `ArtifactWorkingSet`，随 turn 末 `flush_all` 落盘，与 `update_artifact` 同路）。工作区对 artifact store 没有同步义务，故没有三态一致性问题（对比 Claude Code：磁盘工作副本 vs git 记录，`commit` 是显式桥）。
 

@@ -18,7 +18,7 @@ from config import config
 from tools.artifact_envelope import ArtifactSlice, render_artifact_slice
 from tools.base import BaseTool, ToolResult, ToolParameter, ToolPermission
 from tools.builtin.artifact_service import ArtifactService
-from utils.image import resize_to_vision_data_uri
+from utils.image import VISION_VIEWABLE_MIMES, resize_to_vision_data_uri
 from utils.logger import get_logger
 from utils.text_slicing import count_lines, slice_lines_by_offset_limit
 
@@ -239,26 +239,39 @@ class ReadArtifactTool(BaseTool):
         artifact_id = result.get("id", "")
         content_type = result.get("content_type", "")
 
-        # 图片 artifact:走识图路径(非文本分页)。取 blob → 降采样 → 返回携 data-URI
+        # 图片 artifact:识图路径(非文本分页)**白名单限死 png/jpeg**(上传翻转后
+        # gif/webp 等异型图照收 blob 但不进识图 —— 语义坑多,见 VISION_VIEWABLE_MIMES
+        # 注释),其余 image/* 落下方 blob 契约文案。取 blob → 降采样 → 返回携 data-URI
         # 引用的 ToolResult。引擎把 data-URI 摘进本 turn 的 state["vision_blocks"]、事件
         # 只留引用:本轮模型看得到图,下一轮 state 已空 → 占位文本(再 read 即重看)。
-        if content_type.startswith("image/"):
+        if content_type in VISION_VIEWABLE_MIMES:
             return await self._read_image(session_id, artifact_id, result.get("version", 1))
 
-        # 非图片的 blob-only artifact(docx/pdf 等富格式上传,C-0 起无文本表示):
+        # blob-only artifact(docx/pdf/异型图/未知二进制等上传,无文本表示):
         # 返回契约文案而非空 content。success=True —— 这是对"它是什么"的准确回答,
         # 不是失败(success=False 易诱发模型重试同一调用)。
         if result.get("blob_content_type"):
             original = result.get("original_filename") or artifact_id
+            bct = result["blob_content_type"]
+            if bct.startswith("image/"):
+                how = (
+                    "Only PNG/JPEG images can be viewed directly with read_artifact. "
+                    "To view this image, mount it into the sandbox with the `mount` "
+                    "tool, convert it to PNG via bash, persist the result, then read "
+                    "the new artifact."
+                )
+            else:
+                how = (
+                    "To inspect or convert it, mount it into the sandbox with the "
+                    "`mount` tool and process it via bash."
+                )
             return ToolResult(
                 success=True,
                 data=(
                     f"Artifact '{artifact_id}' is a binary file "
-                    f"({result['blob_content_type']}, original file '{original}'). "
-                    "It has no text representation and cannot be read as text. "
-                    "To inspect or convert it, mount it into the sandbox with the "
-                    "`mount` tool and process it via bash. The user can also download "
-                    "the original file from the artifact panel."
+                    f"({bct}, original file '{original}'). "
+                    f"It has no text representation and cannot be read as text. {how} "
+                    "The user can also download the original file from the artifact panel."
                 ),
             )
 
