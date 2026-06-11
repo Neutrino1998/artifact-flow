@@ -4,7 +4,7 @@
 
 ## 定位
 
-沙盒解决两类工作：跑模型生成的任意 shell / Python，和处理富格式上传（docx / pdf / xlsx / 图片）——这些字节在 artifact 系统里是无文本表示的 blob，只有进沙盒才能被检视 / 转换。镜像预装 Python 3.11 + 科学栈（numpy/pandas/matplotlib/openpyxl）+ pandoc + ripgrep。
+沙盒解决两类工作：跑模型生成的任意 shell / Python，和处理富格式上传（当前可上传 docx / pdf / 图片）——这些字节在 artifact 系统里是无文本表示的 blob，只有进沙盒才能被检视 / 转换。镜像预装 Python 3.11 + 科学栈（numpy/pandas/matplotlib/openpyxl）+ pandoc + ripgrep，故沙盒**能**处理的格式（如 openpyxl 读写 xlsx）比当前**能上传**的更广——更多 office 格式随「上传路由翻转」工作包入 blob 上传后即可 mount 进来。
 
 **沙盒是显式 stage 进出的 scratch 工作区，不是 artifact store 的自动镜像。** mount-in 与回写都显式：模型显式把指定 artifact 物化进工作区、显式调 `persist` 回写，不自动物化整 session、也不 diff 整个目录。容器 fs 不是「artifact 的第三态」，而是临时工作区——copy-in → 容器内随便改 → 显式 `persist`，persist 落回来就**变成一次普通 artifact 写**（进 `ArtifactWorkingSet`，随 turn 末 `flush_all` 落盘，与 `update_artifact` 同路）。工作区对 artifact store 没有同步义务，故没有三态一致性问题（对比 Claude Code：磁盘工作副本 vs git 记录，`commit` 是显式桥）。
 
@@ -63,6 +63,16 @@ controller_factory（每 turn）
 
 其余容器硬约束：`ReadonlyRootfs`（rootfs 只读）、非 root（uid 1000）、`SANDBOX_MEM_LIMIT_MB` 内存上限（MemorySwap 设同值 = 禁 swap）、`SANDBOX_CPU_LIMIT` CPU 核数、`SANDBOX_PIDS_LIMIT` fork 炸弹闸。
 
+### bash 的 CONFIRM 是同意闸，不是 containment
+
+接上面的 consent / confinement 之分：bash = CONFIRM 让用户在不可信代码跑之前看一眼**具体命令**，是一道**知情 / 同意**闸；它**不**是安全边界。沙盒的安全靠上面三条（gVisor / DooD 参数防污染 / `--network=none`）+ per-turn ephemeral——一条 bash 命令不管确没确认，都跑在同一个无网、无逃逸、不可触宿主、turn 末即焚的容器里。
+
+推论：用户可对 bash 勾 `always_allow`（写进 `state["always_allowed_tools"]`，按工具名生效，跨 agent、并经 message metadata 跨 turn 继承），后续 bash 跳过确认。这是**用户（防御方）自己弃权 per-command review**，不是对手绕过——① 触发 always_allow 的只能是用户，模型无法自授；② 弃权后代码照样 contained，爆炸半径仍是用户自己的 per-turn 沙盒 + 自己的 artifact，外泄 / 逃逸 / 宿主 / 跨 turn 留存全部够不着（就算被无害命令骗取了 always_allow，之后的恶意命令最多烧被配额 / 超时 / pids 限住的算力、读写已挂入的工作区，仍出不了沙盒）。
+
+故按「前端锁 = UX / 后端锁 = 正确性，谁被绕过会受伤」判别，bash 的 confirm 落在 **UX 侧**：它在 containment **内**，弃权只让用户自己少一道审阅。对比 `web_fetch` 的 confirm——那道闸把守的是**真实出网**这条独立边界，弃权会让另一个 actor / 数据外泄受害，故必须严防绕过。两道 confirm 同级别名、不同性质，根因就在「闸后面是不是还有 containment」。
+
+> 若某部署出于合规要对 bash 逐命令强制审查、不容弃权，那是一个独立的 operator 策略特性（per-tool「不可弃权」声明），不是这道闸当前的语义。
+
 ## Staging：宿主直读直写
 
 `mount` 写、`persist` 读，**都走宿主侧直接读写 scratch 目录**（`session.workspace_dir`），不走 `docker cp` / `exec`。这是为保住该机制（tmpfs 方案会逼 staging 改 exec+tar 流）。
@@ -89,7 +99,7 @@ bind mount 无界之外，容器 rootfs overlay upper 同样无界（容器内 `
 - **每条命令超时** = 容器内 `timeout --signal=KILL` 包 argv（exec argv 数组无引号问题），`SANDBOX_COMMAND_TIMEOUT` 秒。超时强杀 → exit 137，按时长归因为超时（与 OOM-kill 的同码区分）。
 - **输出溢出两层**：session 侧 `SANDBOX_MAX_OUTPUT_CHARS` 硬帽（超出继续 drain 但丢弃，防内存放大，带显式截断标记）；剩下 > `max_result_size_chars`（50k）的部分由引擎的[超长工具结果落盘](tools.md#超长工具结果自动落盘) idiom 接手，引擎零改动。
 
-## 孤儿回收（reaper）
+## 孤儿回收 reaper
 
 进程死亡时 `finally` / `close()` 不执行（SIGKILL / OOM）会留下孤儿容器 + scratch 目录。`SandboxReaper`（`src/api/services/sandbox_reaper.py`）是这条路径的二级兜底，在 FastAPI lifespan 起停（仿 observability bootstrap）。
 
