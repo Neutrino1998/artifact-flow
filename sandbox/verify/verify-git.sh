@@ -46,6 +46,15 @@ else
   no "log ($(tr '\n' ' ' < err))"
 fi
 
+# The functional dubious-ownership scenario (bind-mounted repo with owner uid
+# != 1000) is host-driven — see verify-bindmount.sh. Here just assert the baked
+# /etc/gitconfig still carries the waiver.
+if git config --system --get-all safe.directory 2>err | grep -qx '\*'; then
+  ok "baked safe.directory='*'"
+else
+  no "baked safe.directory='*' ($(tr '\n' ' ' < err))"
+fi
+
 echo
 echo "git: $pass passed, $fail failed"
 [[ $fail -eq 0 ]]

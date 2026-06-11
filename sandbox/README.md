@@ -24,9 +24,9 @@ scripts/build-sandbox-image.sh   build + docker-save the image tar (mirrors rele
 |---|---|---|
 | `verify-enosys.py` | in-container | numpy/pandas/matplotlib(PNG+PDF)/Pillow/openpyxl/pypdf — the real ENOSYS gamble; C-ext failure = Firecracker-fallback signal |
 | `verify-pandoc.sh` | in-container | docx/html↔md round trip (self-generated fixtures) |
-| `verify-git.sh` | in-container | local repo lifecycle (init/add/commit/diff/log) + baked `--system` identity; clone/fetch dead under `--network=none` by design |
+| `verify-git.sh` | in-container | local repo lifecycle (init/add/commit/diff/log) + baked `--system` identity + `safe.directory='*'` presence; clone/fetch dead under `--network=none` by design |
 | `verify-offline-install.sh` | in-container | `pip install --no-index --find-links` survives Sentry (tier-2/3 delivery path) |
-| `verify-bindmount.sh` | host | container writes → host reads back, uid mapping, ripgrep over the gofer mount |
+| `verify-bindmount.sh` | host | container writes → host reads back, uid mapping, ripgrep over the gofer mount, git on a root-owned mounted repo (dubious-ownership waiver) |
 | `verify-network.sh` | host | `--network=none` isolated; bridge egress + runsc netstack DNS; allowlist = host firewall (documented) |
 
 ## Build (networked build host — Mac)
@@ -56,8 +56,10 @@ Arch note: `build-sandbox-image.sh` builds `linux/arm64` NATIVE on Apple Silicon
 (fast); `linux/amd64` is QEMU-emulated (slow — a mid-build SSL/EOF is usually the
 build-host proxy flapping, not the Dockerfile; just re-run, layer cache is fast).
 Local rehearsal off-Kylin: build native arch + run with `RUNTIME=runc` (validates
-everything except gVisor-specific syscall behavior). **The §B ENOSYS result is
-per-arch — it does NOT transfer x86↔arm; each arch must run `run-all.sh` itself.**
+everything except gVisor-specific syscall behavior; on macOS, virtiofs also maps
+bind-mount ownership to the accessing uid, so the bindmount git/uid checks can't
+discriminate there — Linux only). **The §B ENOSYS result is per-arch — it does
+NOT transfer x86↔arm; each arch must run `run-all.sh` itself.**
 
 ## Run on the intranet node
 

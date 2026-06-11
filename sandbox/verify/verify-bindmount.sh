@@ -46,7 +46,28 @@ else
   no "ripgrep over bind-mount"
 fi
 
-rm -rf "$HOSTDIR"
+# 5. git over a bind-mounted repo whose .git owner != container uid 1000 — the
+#    scenario the baked safe.directory='*' exists for (mounted trees carry a
+#    host uid; git's dubious-ownership check would otherwise reject every op).
+#    Repo is created by the image's OWN git as in-container root (-u 0), so the
+#    probe needs no git on the host and the .git owner (0) != 1000 by
+#    construction. Without the waiver this errors "detected dubious ownership".
+#    macOS caveat: Docker Desktop's virtiofs presents bind-mounted files as
+#    owned by the ACCESSING uid, so this check cannot fail on a mac rehearsal —
+#    the discriminating run is on Linux (Kylin), where ownership is preserved.
+if docker run --rm --runtime="$RUNTIME" --network=none -v "$HOSTDIR:/work" -u 0 "$IMAGE" \
+     sh -c 'cd /work && git init -q rootrepo && cd rootrepo && echo x > f.txt && git add f.txt && git commit -qm seed' \
+   && docker run --rm --runtime="$RUNTIME" --network=none -v "$HOSTDIR:/work" "$IMAGE" \
+     sh -c 'cd /work/rootrepo && git status --short >/dev/null && git log --oneline | grep -q seed'; then
+  ok "git on root-owned bind-mounted repo (safe.directory waiver)"
+else
+  no "git on root-owned bind-mounted repo (dubious-ownership? check baked safe.directory='*')"
+fi
+
+# probe dir now contains root-owned files (check 5) — plain rm -rf may fail for
+# a non-root host user; fall back to deleting from a root container.
+rm -rf "$HOSTDIR" 2>/dev/null || docker run --rm --network=none -v "$HOSTDIR:/work" -u 0 "$IMAGE" \
+  sh -c 'rm -rf /work/rootrepo' && rm -rf "$HOSTDIR"
 echo
 echo "bindmount: $pass passed, $fail failed"
 [[ $fail -eq 0 ]]
