@@ -71,15 +71,23 @@ def scratch_dir_name(conversation_id: str, message_id: str, worker_id: str = WOR
 
 
 def parse_scratch_dir_name(name: str) -> Optional[tuple]:
-    """`scratch_dir_name` 的逆 → (conv, msg, worker) 或 None。
+    """`scratch_dir_name` 的逆 → (conv, msg, worker) 或 None;worker 可能为 None。
 
-    恰好三段(两个 "__" 分隔)且段段非空才算本系统的 scratch 目录;其余返回 None,
-    reaper 跳过(不是我们建的,不碰)。
+    接受**两种**格式:当前三段 `{conv}__{msg}__{worker}`,与 worker-id 引入前的两段
+    legacy `{conv}__{msg}`(worker=None)。conv/msg 内部无 "__" 保证前两段无歧义。
+    段段非空、且恰好 2 或 3 段才算我们的目录;真正陌生的名字返回 None → reaper 跳过
+    (不碰不是我们建的东西,免误删错配到共享根的别人目录)。
+
+    为何认 legacy / 不收窄到 exact-3:final_sweep 只对 `worker==WORKER_ID` 绕 grace,
+    worker=None 的目录照走普通周期 grace 即可回收。若 parse 只认三段,任何它不识别的
+    名字(legacy、或将来再改格式)就被**静默永久跳过** —— 容器还能靠 label 收,纯目录
+    残留却没有第二兜底来源 = silent leak(正是本项目反复在消灭的失败类)。
     """
     parts = name.split("__")
-    if len(parts) != 3 or not all(parts):
+    if len(parts) not in (2, 3) or not all(parts):
         return None
-    return parts[0], parts[1], parts[2]
+    worker = parts[2] if len(parts) == 3 else None
+    return parts[0], parts[1], worker
 
 
 class SandboxError(Exception):

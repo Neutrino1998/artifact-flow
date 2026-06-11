@@ -183,13 +183,38 @@ class TestReapPredicate:
         assert not (tmp_path / scratch_dir_name("conv-1", "msg-1")).exists()
 
     async def test_unrelated_dir_name_ignored(self, tmp_path):
-        """scratch 根里非 {conv}__{msg} 命名的目录(或单文件)不碰。"""
-        (tmp_path / "not-ours").mkdir()
+        """scratch 根里真正陌生(非 2/3 段)的目录(或单文件)不碰。"""
+        (tmp_path / "not-ours").mkdir()           # 0 个 "__" → 1 段 → None
+        (tmp_path / "a__b__c__d").mkdir()         # 4 段 → None
         (tmp_path / "stray-file").write_text("x")
         reaper, _ = _mk_reaper(tmp_path, [], active={})
         stats = await reaper.reap_once()
         assert stats.dirs_reaped == 0
         assert (tmp_path / "not-ours").exists()
+        assert (tmp_path / "a__b__c__d").exists()
+
+    async def test_legacy_two_segment_dir_reaped_via_grace(self, tmp_path):
+        """worker-id 引入前的两段 legacy 目录:周期扫按普通 grace 仍回收(否则纯目录
+        残留无第二兜底来源 → 永久 silent leak)。"""
+        legacy = tmp_path / "conv-1__msg-1"       # 无 worker 段
+        legacy.mkdir()
+        old = time.time() - 10_000                # grace 外
+        os.utime(legacy, (old, old))
+        reaper, _ = _mk_reaper(tmp_path, [], active={})
+        stats = await reaper.reap_once()
+        assert stats.dirs_reaped == 1
+        assert not legacy.exists()
+
+    async def test_legacy_dir_not_no_grace_in_final_sweep(self, tmp_path):
+        """legacy 目录(worker=None)在 final_sweep 不被绕 grace —— 只有本 WORKER_ID
+        的资源才无 grace;legacy 走普通 grace,新鲜的本轮放过(不误删)。"""
+        legacy = tmp_path / "conv-1__msg-1"
+        legacy.mkdir()                            # mtime=now,grace 内
+        reaper, _ = _mk_reaper(tmp_path, [], active={}, grace=60)
+        stats = await reaper.final_sweep()
+        assert stats.dirs_reaped == 0
+        assert stats.skipped_young >= 1
+        assert legacy.exists()
 
 
 class TestIdempotenceAndResilience:

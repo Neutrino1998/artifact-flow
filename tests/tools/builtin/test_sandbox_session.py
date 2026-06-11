@@ -18,9 +18,27 @@ from tools.builtin.sandbox_session import (
     SandboxExecTimeoutError,
     SandboxSession,
     SandboxUnavailableError,
+    WORKER_ID,
     WORKSPACE_MOUNT,
+    parse_scratch_dir_name,
     scratch_dir_name,
 )
+
+
+class TestScratchDirName:
+    """名字 ↔ (conv, msg, worker) 往返;legacy 两段兼容;陌生名拒识。"""
+
+    def test_roundtrip_current_format(self):
+        name = scratch_dir_name("conv-1", "msg-1")
+        assert name == f"conv-1__msg-1__{WORKER_ID}"
+        assert parse_scratch_dir_name(name) == ("conv-1", "msg-1", WORKER_ID)
+
+    def test_legacy_two_segment(self):
+        assert parse_scratch_dir_name("conv-1__msg-1") == ("conv-1", "msg-1", None)
+
+    def test_foreign_names_rejected(self):
+        for bad in ("not-ours", "a__b__c__d", "__b__c", "a____c", ""):
+            assert parse_scratch_dir_name(bad) is None
 
 
 # ============================================================
