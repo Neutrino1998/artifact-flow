@@ -5,7 +5,7 @@ set -uo pipefail
 #   1. gVisor installed + `smoke-test.sh` passed   (sandbox/gvisor-pkg/)
 #   2. sandbox image loaded                          (docker load < dist/artifactflow-sandbox-*.tar.gz)
 #
-# Runs all five §B probes under runsc and prints a single PASS/FAIL summary.
+# Runs all §B probes under runsc and prints a single PASS/FAIL summary.
 # In-container probes are bind-mounted from this dir into /opt/verify (so they
 # stay editable without a rebuild, and exercise the bind-mount path).
 #
@@ -32,6 +32,7 @@ incontainer(){ # title interpreter script
 
 incontainer "ENOSYS (in-container)"          python3 verify-enosys.py
 incontainer "pandoc canary (in-container)"   bash    verify-pandoc.sh
+incontainer "git local repo (in-container)"  bash    verify-git.sh
 incontainer "offline install (in-container)" bash    verify-offline-install.sh
 
 echo; echo "=== bind-mount + uid (host-driven) ==="

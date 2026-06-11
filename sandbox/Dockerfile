@@ -30,10 +30,25 @@ ENV PYTHONUNBUFFERED=1 \
 #             (PDF output needs LaTeX, out-of-scope this phase).
 #   ripgrep — FS-traversal syscall probe (getdents64/statx, distinct from the
 #             numerical C-ext surface) + general search over mounted files.
+#   git     — LOCAL repo operations only (init/log/diff/blame/apply over mounted
+#             or unzipped trees); clone/fetch are dead under --network=none by
+#             design. Tier-1 because it's generic + environment-definition and
+#             can't be installed at runtime with zero network.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     pandoc \
     ripgrep \
+    git \
     && rm -rf /var/lib/apt/lists/*
+
+# Baked git defaults — `git commit` hard-errors without user.name/email and the
+# sandbox has no interactive way to set one. --system so it applies to uid 1000.
+# safe.directory '*': the dubious-ownership check protects multi-user hosts;
+# here the container IS the trust boundary, and bind-mounted trees may carry a
+# host uid ≠ 1000 that would otherwise make every git op error out.
+RUN git config --system user.name "sandbox" && \
+    git config --system user.email "sandbox@artifactflow.local" && \
+    git config --system init.defaultBranch main && \
+    git config --system safe.directory '*'
 
 # Scientific stack — the real ENOSYS workload under runsc (plan §B "验什么").
 COPY requirements.txt /tmp/requirements.txt

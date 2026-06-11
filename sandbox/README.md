@@ -7,14 +7,14 @@ intranet trip**, then withdraw. Background + decisions:
 
 ```
 sandbox/
-├── Dockerfile              tier-1 sandbox image (py3.11 + sci stack + pandoc + ripgrep,
+├── Dockerfile              tier-1 sandbox image (py3.11 + sci stack + pandoc + ripgrep + git,
 │                           non-root uid1000, baked offline-install stub wheel)
 ├── requirements.txt        sandbox python deps — DECOUPLED from backend requirements.lock
 ├── stub-pkg/               trivial pure-Python pkg → baked wheel for the offline-install probe
 ├── docker-pkg/             offline Docker Engine + compose (static) for a BARE node (see its README)
 ├── kernel-4k-pkg/          offline 4K-page kernel swap for Kylin arm (gVisor needs 4K pages; see its README)
 ├── gvisor-pkg/             runsc install/smoke/uninstall + fetch-and-package.sh (see its README)
-└── verify/                 the five §B probes + run-all.sh orchestrator
+└── verify/                 the §B probes + run-all.sh orchestrator
 scripts/build-sandbox-image.sh   build + docker-save the image tar (mirrors release.sh)
 ```
 
@@ -24,6 +24,7 @@ scripts/build-sandbox-image.sh   build + docker-save the image tar (mirrors rele
 |---|---|---|
 | `verify-enosys.py` | in-container | numpy/pandas/matplotlib(PNG+PDF)/Pillow/openpyxl/pypdf — the real ENOSYS gamble; C-ext failure = Firecracker-fallback signal |
 | `verify-pandoc.sh` | in-container | docx/html↔md round trip (self-generated fixtures) |
+| `verify-git.sh` | in-container | local repo lifecycle (init/add/commit/diff/log) + baked `--system` identity; clone/fetch dead under `--network=none` by design |
 | `verify-offline-install.sh` | in-container | `pip install --no-index --find-links` survives Sentry (tier-2/3 delivery path) |
 | `verify-bindmount.sh` | host | container writes → host reads back, uid mapping, ripgrep over the gofer mount |
 | `verify-network.sh` | host | `--network=none` isolated; bridge egress + runsc netstack DNS; allowlist = host firewall (documented) |

@@ -65,6 +65,7 @@ docker run --rm -u 0 "${IMAGE}" cat /opt/sandbox-wheels.lock.txt > "$LOCK"
 PY_VER=$(docker run --rm "${IMAGE}" python3 --version)
 PANDOC_VER=$(docker run --rm "${IMAGE}" pandoc --version | head -1)
 RG_VER=$(docker run --rm "${IMAGE}" rg --version | head -1)
+GIT_VER=$(docker run --rm "${IMAGE}" git --version)
 # Locally-built --load images have no RepoDigests (those come from a registry);
 # .Id (the config digest) is the right freeze anchor for an air-gapped image.
 IMAGE_ID=$(docker image inspect "${IMAGE}" --format '{{.Id}}')
@@ -99,6 +100,7 @@ Tools:
   ${PY_VER}
   ${PANDOC_VER}
   ${RG_VER}
+  ${GIT_VER}
 
 Python deps: artifactflow-sandbox-${VERSION}.wheels.lock (${WHEEL_COUNT} pkgs)
 
