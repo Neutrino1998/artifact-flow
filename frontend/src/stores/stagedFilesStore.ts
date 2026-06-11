@@ -43,8 +43,8 @@ export interface StagedFile {
 }
 
 // Why a file the user picked didn't make it into the staged set, surfaced once
-// per addFiles batch so the user isn't left guessing. `rejected` = files the
-// backend would 422 on by extension (see lib/uploadFilter); `overflow` = count
+// per addFiles batch so the user isn't left guessing. `rejected` = files over
+// the per-file size cap (see lib/uploadFilter); `overflow` = count
 // dropped because the batch would exceed MAX_CHAT_ATTACHMENTS. The drag-drop
 // path bypasses the disabled attach button, so the cap can be hit by a drop
 // even when the button is locked — both paths funnel through addFiles, so the

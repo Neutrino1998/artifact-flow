@@ -21,7 +21,7 @@
 | `404` | 资源不存在 | **也覆盖"跨用户访问"** — 见 Design Decision |
 | `409` | 冲突 | Lease 冲突 / interrupt 已解决 |
 | `410` | 资源失效 | `active-stream` 指向的 stream 已过期 |
-| `422` | 请求不合法 | 参数校验（含口令强度、用户名字符）、文件过大、格式不支持 |
+| `422` | 请求不合法 | 参数校验（含口令强度、用户名字符）、文件过大、png/jpg 图片探测失败 |
 | `429` | 请求过频 | 登录失败累计超阈，锁定窗口内（per-username / per-IP） |
 | `503` | 服务不可用 | Health ready 降级 |
 
@@ -342,7 +342,8 @@ artifact 分两类，由响应里的 `has_blob` 判别：**文本类**（md/py/c
 旧的 `POST /artifacts/upload` 与 `POST /{session_id}/upload`（即时 commit）已删除。上传现在并入消息提交：
 
 - `POST /api/v1/chat`，`multipart/form-data`：文本走 `payload` 表单字段（`ChatRequest` JSON，文本键为 `user_input`），附件走 `files`（可多文件），同一请求。**没有 `message` 字段**——按 `message + files` 调会因缺 `payload` 直接 422
-- 大小上限：单文件 `config.MAX_UPLOAD_SIZE`（环境可配，默认 100MB，见 [deployment.md](../deployment.md)）；批量总字节由代理层独立封顶（200MB → `413`）。**注**：纯文本/未知扩展走转换兜底路径的文件另有更低的独立上限 `config.MAX_TEXT_CONVERT_BYTES`（默认 20MB）——文本整份变成 artifact `content`（无 blob），故比图片/PDF/docx 收得紧；超限同样 `422`。`422` 触发：超限（含文本闸）、格式不支持（`convert_uploaded_file` 在写库前做 size-check + 转换）
+- **格式：任意文件都收**（上传路由翻转，2026-06-11）——文本类解码为 artifact `content`；png/jpeg 走识图路由；**其余一律存为二进制 blob artifact**（真实 MIME，模型可 `mount` 进沙盒检视/转换，用户可下载原件）。没有扩展名拒绝名单
+- 大小上限：单文件 `config.MAX_UPLOAD_SIZE`（环境可配，默认 100MB，见 [deployment.md](../deployment.md)）；批量总字节由代理层独立封顶（200MB → `413`）。**注**：文本路径另有更低的独立上限 `config.MAX_TEXT_CONVERT_BYTES`（默认 20MB）——文本整份变成 artifact `content`（无 blob），故比 blob 路径收得紧；**超文本帽不再 422，落为 blob**（可下载、可 mount 进沙盒处理）。`422` 触发仅剩两类：单文件超 `MAX_UPLOAD_SIZE`、png/jpg 扩展名但 Pillow 探不出合法 PNG/JPEG（含超像素炸弹；识图路由是上传期决策，这道闸保证路由正确性）
 - 转换后的内容 closure-carry 进引擎，在 turn 起点经 `create_from_upload` **stage 进 WorkingSet**（发 `ARTIFACT_CREATED`、随 turn 末 `flush_all` 落库），与 agent 自建 artifact 走**同一统一生命周期**——不再绕过 write-back、不再即时 commit（见 [../architecture/artifacts.md](../architecture/artifacts.md)）
 
 ### 读取的即时性

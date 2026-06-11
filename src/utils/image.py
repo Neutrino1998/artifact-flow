@@ -21,29 +21,36 @@ from config import config
 def resize_to_vision_data_uri(data: bytes, max_edge: int) -> str:
     """把图片字节降采样到最长边 ≤ ``max_edge``,返回 ``data:<mime>;base64,<...>``。
 
-    原图已小于上限则原样编码(不放大、不重编码丢质量)。PNG→PNG、JPEG→JPEG(read
-    路径只会遇到这两种,上传已挡其它)。**同步**函数,调用方放 executor。
+    PNG/JPEG 且原图已小于上限 → 原样编码(不放大、不重编码丢质量)。其余 Pillow
+    能解的格式(gif/webp/bmp/tiff…,上传翻转后异型图入 blob、会流到 read 路径)
+    一律重编码成 PNG —— 绝不把非 png/jpeg 字节原样塞进 data-URI(MIME 错配),
+    vision provider 也只吃 png/jpeg。Pillow 解不了的(heic/avif…)在 open 即抛,
+    调用方 loud-fail 提示 mount 进沙盒转换。**同步**函数,调用方放 executor。
     """
     with Image.open(io.BytesIO(data)) as img:
         fmt = (img.format or "").upper()
         w, h = img.size
         # 解码前的解压炸弹防御(见模块 docstring):超像素即拒,绝不进 resize/decode。
+        # 异型图未经上传口的 _probe_image 闸,这道是它们唯一的像素闸。
         if w * h > config.VISION_IMAGE_MAX_PIXELS:
             raise ValueError(
                 f"image too large to view: {w}x{h} exceeds "
                 f"{config.VISION_IMAGE_MAX_PIXELS} pixel cap"
             )
         longest = max(w, h)
-        if longest <= max_edge:
+        if longest <= max_edge and fmt in ("PNG", "JPEG"):
             out_bytes = data
             mime = "image/jpeg" if fmt == "JPEG" else "image/png"
         else:
-            scale = max_edge / longest
+            scale = min(1.0, max_edge / longest)
             new_size = (max(1, round(w * scale)), max(1, round(h * scale)))
             if fmt == "JPEG":
                 img = img.convert("RGB")
                 out_fmt, mime = "JPEG", "image/jpeg"
             else:
+                # PNG 不支持 CMYK/YCbCr 等模式(tiff/异型图可能带),先归一
+                if img.mode not in ("1", "L", "LA", "I", "P", "RGB", "RGBA"):
+                    img = img.convert("RGBA")
                 out_fmt, mime = "PNG", "image/png"
             buf = io.BytesIO()
             img.resize(new_size, Image.LANCZOS).save(buf, format=out_fmt)

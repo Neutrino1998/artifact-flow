@@ -1,11 +1,14 @@
 """
 Unit tests for src/utils/doc_converter.py
 
-覆盖 import 流程的扩展名分支：
-- Unsupported Office / ODF：每个扩展名都抛 ValueError，文案带分类 + 针对性 advice
-- Text fallback：纯文本扩展（.txt/.md/.csv）成功并标对 MIME 类型
-- 未知扩展名：能解码为文本 → 走兜底；不能解码 → ValueError
-- .docx / .pdf：blob-only(C-0,无文本转换,magic 预检 loud-fail)
+上传翻转后(2026-06-11)的路由契约:**文本类 → content,png/jpeg → 识图 blob,
+其余一律 → blob**。上传口对格式零预判:
+- 已知二进制扩展(Office/ODF/异型图/压缩包/docx/pdf)→ 直进 blob,真实 MIME,
+  不验 magic(改后缀/损坏照收,诊断归沙盒里的模型)
+- Text fallback:纯文本扩展(.txt/.md/.csv)成功并标对 MIME;未知扩展能解码
+  → 文本,解不出 / 超文本帽 → blob(不再 422)
+- png/jpg 扩展:Pillow 内容探测仍 loud-fail(识图路由是上传期决策,这道闸是
+  路由正确性、不是格式预判)
 """
 
 import io
@@ -16,7 +19,7 @@ from PIL import Image
 from config import config
 from utils.doc_converter import (
     DocConverter,
-    _UNSUPPORTED_OFFICE,
+    _BINARY_EXTENSION_MIME,
 )
 
 
@@ -27,53 +30,59 @@ def _png_bytes(w: int, h: int) -> bytes:
 
 
 # ============================================================
-# Unsupported Office / ODF 拒绝
+# 已知二进制扩展 → blob(零预判,真实 MIME)
 # ============================================================
 
 
-class TestUnsupportedOfficeRejection:
-    """每个不支持的 ext 都要早返回 + 文案带分类 + advice。"""
+class TestKnownBinaryToBlob:
+    """每个已知二进制 ext 都直进 blob:content 空、原件不变、MIME=表里的真实值。"""
 
-    @pytest.mark.parametrize("ext", sorted(_UNSUPPORTED_OFFICE.keys()))
-    async def test_each_unsupported_ext_raises_value_error(self, ext: str):
+    @pytest.mark.parametrize("ext", sorted(_BINARY_EXTENSION_MIME.keys()))
+    async def test_each_known_binary_ext_stored_as_blob(self, ext: str):
         converter = DocConverter()
-        # 文件内容随便给 —— 入口按扩展名拦截，根本不会到解码这一步
-        with pytest.raises(ValueError) as exc_info:
-            await converter.convert(b"irrelevant binary blob", f"file{ext}")
+        data = b"\x00\x01\x02 arbitrary bytes, no magic expected"
+        result = await converter.convert(data, f"file{ext}")
+        assert result.content == ""                      # 无文本表示
+        assert result.blob == data                       # 原件不变
+        assert result.content_type == _BINARY_EXTENSION_MIME[ext]
+        assert result.blob_content_type == _BINARY_EXTENSION_MIME[ext]
+        assert result.metadata["original_filename"] == f"file{ext}"
 
-        msg = str(exc_info.value)
-        # 文案必须带 ext 本身（让用户知道什么文件被拒）
-        assert ext in msg
-        # 必须带分类（Word / Excel / PowerPoint / ODF *）
-        category, advice = _UNSUPPORTED_OFFICE[ext]
-        assert category in msg
-        # 必须带 advice（remediation 建议）
-        assert advice in msg
-
-    async def test_uppercase_extension_also_rejected(self):
-        """扩展名比较前会 .lower()，大小写要一致命中。"""
+    async def test_uppercase_extension_also_routed(self):
+        """扩展名比较前会 .lower(),大小写要一致命中。"""
         converter = DocConverter()
-        with pytest.raises(ValueError, match="Word"):
-            await converter.convert(b"\x00\x01\x02", "REPORT.DOC")
+        result = await converter.convert(b"\x00\x01\x02", "REPORT.DOC")
+        assert result.blob is not None
+        assert result.content_type == "application/msword"
 
-    async def test_excel_advice_mentions_csv(self):
+    async def test_renamed_ole2_doc_as_docx_accepted(self):
+        """改后缀的旧版 .doc(OLE2 magic)→ 照收 blob,不再 magic 拒。
+        模型 mount 进沙盒后 pandoc 报错、自己诊断(翻转决策 2026-06-11)。"""
         converter = DocConverter()
-        with pytest.raises(ValueError) as exc:
-            await converter.convert(b"\x00", "data.xlsx")
-        assert ".csv" in str(exc.value)
+        ole2 = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1" + b"\x00" * 64
+        result = await converter.convert(ole2, "report.docx")
+        assert result.blob == ole2
+        assert result.content_type.endswith("wordprocessingml.document")
 
-    async def test_powerpoint_advice_mentions_pdf(self):
+    async def test_garbage_pdf_accepted_as_blob(self):
+        """非 %PDF- 开头照收(同上:loud-fail at upload → loud-fail at first use)。"""
         converter = DocConverter()
-        with pytest.raises(ValueError) as exc:
-            await converter.convert(b"\x00", "slides.pptx")
-        assert "PDF" in str(exc.value)
+        result = await converter.convert(b"not a pdf", "fake.pdf")
+        assert result.blob == b"not a pdf"
+        assert result.content_type == "application/pdf"
 
-    async def test_docm_advice_mentions_macro(self):
-        """带宏的 Word 文件 advice 要提示取消宏，避免用户存出又一个 .docm。"""
+    async def test_gif_routed_to_blob_with_image_mime(self):
+        """异型图入 blob、标真实 image/*(read 路径 Pillow 能解的直接可看)。"""
         converter = DocConverter()
-        with pytest.raises(ValueError) as exc:
-            await converter.convert(b"\x00", "macros.docm")
-        assert "宏" in str(exc.value)
+        result = await converter.convert(b"GIF89a fake", "anim.gif")
+        assert result.blob is not None
+        assert result.content_type == "image/gif"
+
+    async def test_zip_routed_to_blob(self):
+        converter = DocConverter()
+        result = await converter.convert(b"PK\x03\x04zipbytes", "bundle.zip")
+        assert result.content_type == "application/zip"
+        assert result.blob is not None
 
 
 # ============================================================
@@ -117,9 +126,50 @@ class TestTextFallback:
         assert result.content_type == "text/plain"
         assert "raw text content" in result.content
 
+    async def test_svg_is_text_not_image(self):
+        """svg 是 XML 文本:走文本路径、不标 image/*(text artifact 无 blob,
+        标 image/* 会误入 read_artifact 识图分支)。"""
+        converter = DocConverter()
+        svg = b'<svg xmlns="http://www.w3.org/2000/svg"><rect/></svg>'
+        result = await converter.convert(svg, "logo.svg")
+        assert result.content_type == "text/xml"
+        assert result.blob is None
+        assert "<svg" in result.content
+
 
 # ============================================================
-# Size limit
+# Text 兜底失败 → blob(翻转:不再 422)
+# ============================================================
+
+
+class TestTextFallbackToBlob:
+    async def test_undecodable_unknown_ext_falls_to_blob(self):
+        """未知扩展 + 解不出文本 = 未知二进制 → blob octet-stream(原拒,现收)。"""
+        converter = DocConverter()
+        data = bytes(range(256)) * 8  # 充分非文本
+        result = await converter.convert(data, "mystery.bin")
+        assert result.content == ""
+        assert result.blob == data
+        assert result.content_type == "application/octet-stream"
+        assert result.metadata["converter_used"] == "blob"
+
+    async def test_oversize_text_falls_to_blob(self, monkeypatch):
+        """超 MAX_TEXT_CONVERT_BYTES 的文本类 → blob(可下载、可 mount 进沙盒
+        grep/拆分),不再 422。MIME 按扩展名猜。"""
+        monkeypatch.setattr(config, "MAX_TEXT_CONVERT_BYTES", 8)
+        converter = DocConverter()
+        result = await converter.convert(b"a" * 9, "notes.txt")
+        assert result.content == ""
+        assert result.blob == b"a" * 9
+        assert result.content_type == "text/plain"  # mimetypes 按 .txt 猜
+        # At/under the text cap still converts fine.
+        result = await converter.convert(b"hello", "notes.txt")
+        assert result.content == "hello"
+        assert result.blob is None
+
+
+# ============================================================
+# Size limit(入口绝对上限,唯一的体积 422)
 # ============================================================
 
 
@@ -134,19 +184,8 @@ class TestSizeLimit:
         with pytest.raises(ValueError, match="too large"):
             await converter.convert(b"a" * 9, "huge.txt")
 
-    async def test_text_path_has_its_own_tighter_cap(self, monkeypatch):
-        """The raw-text path rejects above MAX_TEXT_CONVERT_BYTES even when well
-        under MAX_FILE_SIZE — it's the one route that materializes content+wordlist."""
-        monkeypatch.setattr(config, "MAX_TEXT_CONVERT_BYTES", 8)
-        converter = DocConverter()
-        with pytest.raises(ValueError, match="Text file too large"):
-            await converter.convert(b"a" * 9, "notes.txt")
-        # At/under the text cap still converts fine.
-        result = await converter.convert(b"hello", "notes.txt")
-        assert result.content == "hello"
-
     async def test_text_cap_does_not_gate_images(self, monkeypatch):
-        """An image over the *text* cap is NOT rejected by it — images go through
+        """An image over the *text* cap is NOT affected by it — images go through
         the blob path, not _convert_text, so the tight text cap must not apply."""
         monkeypatch.setattr(config, "MAX_TEXT_CONVERT_BYTES", 8)
         png = _png_bytes(16, 16)
@@ -156,62 +195,13 @@ class TestSizeLimit:
 
 
 # ============================================================
-# .docx / .pdf → blob-only(C-0:无文本转换,magic 预检 loud-fail)
-# ============================================================
-
-_DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-
-
-class TestRichFormatBlobOnly:
-    """富格式上传 = 不可变 blob,无文本表示;magic 预检拒改后缀/损坏文件。"""
-
-    async def test_ole2_doc_renamed_to_docx_raises_value_error(self):
-        # 旧版 .doc 是 OLE2 复合文档（magic D0CF11E0），改后缀成 .docx 上传 →
-        # 入口预检抛 ValueError（路由映射 422 + 可操作提示）。
-        converter = DocConverter()
-        ole2 = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1" + b"\x00" * 64
-        with pytest.raises(ValueError, match="不是有效的 .docx"):
-            await converter._convert_docx(ole2, "report.docx")
-
-    async def test_garbage_bytes_raise_value_error(self):
-        converter = DocConverter()
-        with pytest.raises(ValueError, match="不是有效的 .docx"):
-            await converter._convert_docx(b"not a zip at all", "x.docx")
-
-    async def test_valid_docx_stored_as_blob(self):
-        # PK\x03\x04 开头通过预检 → blob-only:content 空、content_type=真实 MIME、
-        # 原件原样进 blob(不可变源 + 未来 --reference-doc 样式模版)。
-        converter = DocConverter()
-        zipped = b"PK\x03\x04" + b"\x00" * 64
-        result = await converter.convert(zipped, "ok.docx")
-        assert result.content == ""               # 无文本表示(读归沙盒)
-        assert result.content_type == _DOCX_MIME
-        assert result.blob == zipped              # 原件不变
-        assert result.blob_content_type == _DOCX_MIME
-        assert result.metadata["original_filename"] == "ok.docx"
-
-    async def test_valid_pdf_stored_as_blob(self):
-        converter = DocConverter()
-        pdf = b"%PDF-1.7\n" + b"\x00" * 64
-        result = await converter.convert(pdf, "doc.pdf")
-        assert result.content == ""
-        assert result.content_type == "application/pdf"
-        assert result.blob == pdf
-        assert result.blob_content_type == "application/pdf"
-
-    async def test_renamed_non_pdf_raises_value_error(self):
-        converter = DocConverter()
-        with pytest.raises(ValueError, match="不是有效的 .pdf"):
-            await converter.convert(b"not a pdf", "fake.pdf")
-
-
-# ============================================================
 # 图片(png/jpeg)→ blob 存储 + 内容探测 + 解压炸弹拒绝
 # ============================================================
 
 
 class TestImageConversion:
-    """A 识图地基:有效 png/jpeg 存为不可读 blob(content 空);损坏/超像素 loud-fail。"""
+    """A 识图地基:有效 png/jpeg 存为不可读 blob(content 空);损坏/超像素 loud-fail。
+    这道闸在翻转后保留 —— 识图路由是上传期决策(路由正确性,非格式预判)。"""
 
     async def test_valid_png_stored_as_blob(self):
         converter = DocConverter()

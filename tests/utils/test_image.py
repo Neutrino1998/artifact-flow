@@ -46,3 +46,24 @@ def test_pixel_bomb_rejected_before_decode(monkeypatch):
     monkeypatch.setattr(config, "VISION_IMAGE_MAX_PIXELS", 100)  # 10x10 ok, 20x20(400px) 超
     with pytest.raises(ValueError, match="too large"):
         resize_to_vision_data_uri(_png_bytes(20, 20), max_edge=1568)
+
+
+def test_small_non_png_jpeg_is_reencoded_to_png():
+    """上传翻转后异型图 blob 会流到 read 路径:小尺寸 gif/webp 不得走原样
+    passthrough(原字节 + image/png 标签 = MIME 错配的 data-URI),必须重编码 PNG。"""
+    buf = io.BytesIO()
+    Image.new("P", (40, 30)).save(buf, format="GIF")
+    uri = resize_to_vision_data_uri(buf.getvalue(), max_edge=1568)
+    assert uri.startswith("data:image/png;base64,")
+    decoded = _decode_data_uri(uri)
+    with Image.open(io.BytesIO(decoded)) as img:
+        assert img.format == "PNG"          # 真 PNG 字节,不是改标签的 GIF
+        assert img.size == (40, 30)         # 小图不放大
+
+
+def test_cmyk_tiff_mode_normalized():
+    """PNG 不支持 CMYK:重编码前须归一模式,否则 save 抛错打断识图。"""
+    buf = io.BytesIO()
+    Image.new("CMYK", (50, 40)).save(buf, format="TIFF")
+    uri = resize_to_vision_data_uri(buf.getvalue(), max_edge=1568)
+    assert uri.startswith("data:image/png;base64,")

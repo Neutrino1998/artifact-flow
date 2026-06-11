@@ -331,7 +331,11 @@ class ReadArtifactTool(BaseTool):
             logger.warning(f"Failed to prepare image '{artifact_id}' for viewing: {e}")
             return ToolResult(
                 success=False,
-                error=f"Failed to prepare image '{artifact_id}' for viewing: {e}",
+                error=(
+                    f"Failed to prepare image '{artifact_id}' for viewing: {e}. "
+                    "If the format cannot be decoded, mount it into the sandbox "
+                    "with the `mount` tool and convert it (e.g. to PNG) via bash."
+                ),
             )
         ct = blob["content_type"]
         return ToolResult(

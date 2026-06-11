@@ -18,7 +18,7 @@
 ## 进度
 
 - **当前**:**A / B(双架构)完成**(详见各段进展)。**C 全切片落地**(2026-06-10→11,C-0→C-wire,见 C 段「进展」)。沙盒**已 live 暴露**(lead/research 拿到 bash=CONFIRM/mount/persist)。
-- **下一步**:剩工作包不分先后——① **上传路由翻转**(独立工作包,C-stage mount 已解锁,见「到时再敲定」);② **沙盒镜像加 git**(Dockerfile + verify 探针 + bash 描述补 git 一行);③ **D 段**(Kylin 端到端冒烟:真 runsc + Word 场景 + loop 池子 host-prep + git 镜像重冻结双架构 id + uid 1000 属主验)。并行待办:arm §B 镜像 id 冻结统一并入 D 重冻结(C 镜像加 git 后旧锚点作废)。
+- **下一步**:剩工作包不分先后——① **沙盒镜像加 git**(Dockerfile + verify 探针 + bash 描述补 git 一行);② **D 段**(Kylin 端到端冒烟:真 runsc + Word 场景 + loop 池子 host-prep + git 镜像重冻结双架构 id + uid 1000 属主验)。**上传路由翻转已落地**(2026-06-11,见 C 段进展)。并行待办:arm §B 镜像 id 冻结统一并入 D 重冻结(C 镜像加 git 后旧锚点作废)。后续大方向:**skill 系统**(用户已自备一套 skill;上传翻转后的格式 remediation 提示归 skill)。
 - **产物处置(2026-06-05 拍定)**:`feat/sandbox` 这批已验收产物(`sandbox/` 探针 + 构建脚本)**暂留分支不动**,不单独提早合 main。「是否把就绪探针子集(`unshare -U` 闸 + smoke + ENOSYS/uid)提升为通用部署机预检工具」**推迟到 C/D 阶段**——届时有真实第二调用点(每台新沙盒宿主预检 + D 端到端冒烟)再校准边界,现在抽象属投机(YAGNI)。
 
 | 阶段 | 内容 | 状态 |
@@ -183,7 +183,7 @@
     - **「应用与沙盒分机部署」并入此轴、有需求再做**(2026-06-05):分机不是改 aiodocker 连接串能办的——真正的耦合是 **bind-mount 工作区 daemon-local**(路径在 daemon 那台机解析,不在客户端机;uid 属主断言同理),aiodocker 本身可连远程 TCP+TLS daemon,但单远程 daemon = 无调度/无故障转移、bind-mount 还是断。**正解是 k8s**(per-turn Pod + volume/PVC stage 替代宿主 bind-mount),即本条上面那根「换控制面」轴。两个可能驱动都推迟到真有需求:① 专用沙盒主机池(隔离烧 CPU 的不可信执行);② 切掉「应用机经 docker.sock 拿 host root」的爆炸半径(正当安全驱动,但代价仍是换控制面)。在此之前结论不变:单机 DooD、seam 留着。
 - **文档转换走沙盒**:pandoc 装进沙盒镜像(B 验过),富格式读(docx→md)和写都由 agent 在沙盒里跑 pandoc。**驱动场景**:用户要带格式的 Word 时,模型以用户上传/原有 docx 作 `--reference-doc` 样式模版,在沙盒里 md→docx 生成,产物回写成可下载 blob——比固定的 md→docx 导出保真,可能取代现有的 md→Word 导出路径。**门控变化(衔接 artifact plan 决策 6)**:现有 `/export` 是同步 REST 读,turn 中按「前端 UX 锁的读」处理;一旦导出搬进沙盒 = 起容器 = **执行**,就从读升级为 **lease 挡的写/执行**(跟 bash 工具同级),门控责任从前端移到后端 lease。替换 md→Word 路径时一并改门控,别留前端旧锁。
 
-**到时再敲定**:并发上限;persist 多文件 zip 的命名与"可单独查看"白名单;**上传路由翻转(挂 C-stage mount 落地后)**——现状是 blob 白名单(docx/pdf/png/jpeg)+ 显式拒绝名单(Office/ODF/异型图)+ 默认文本解码兜底,沙盒可用后翻为「文本类白名单→content,其余→blob」:zip(原则 5)/xlsx/pptx 等出拒绝名单入 blob(沙盒里 openpyxl/解压直接处理,"请导出为 csv"类 remediation 同步过时),`_UNSUPPORTED_IMAGE` 异型图(gif/webp 等)同理出名单入 blob(沙盒里转 png 可看),docx/pdf magic 闸保留;**翻转是一个工作包,须同步**:① `frontend/src/lib/uploadFilter.ts` 是后端拒绝名单的**前端镜像**(预挡+remediation 文案复制品),只翻后端则前端继续拒掉后端已收的格式;② api-reference.md 上传段 422 触发面描述;③ read_artifact/inventory 契约文案升级为指引 mount(**已在 C-wire 提前完成,翻转时无需再动**)。**沙盒落地前不翻**——blob-default 会产不可用死物 + 吞掉改后缀/损坏文件的 loud-fail。(原"挂哪些 artifact:全部 vs 被引用"已由原则 4 的显式 mount 关闭——模型 mount 谁就有谁;原"沙盒工具是否合并"已拍定分立三工具 + 共享 `SandboxSession`,见上;原"bash 输出溢出"已拍定复用既有 idiom,见下「进展」。)
+**到时再敲定**:并发上限;persist 多文件 zip 的命名与"可单独查看"白名单。(原**上传路由翻转**已于 2026-06-11 落地,含 magic 闸移除决策,见「进展」与变更日志;原"挂哪些 artifact:全部 vs 被引用"已由原则 4 的显式 mount 关闭——模型 mount 谁就有谁;原"沙盒工具是否合并"已拍定分立三工具 + 共享 `SandboxSession`,见上;原"bash 输出溢出"已拍定复用既有 idiom,见下「进展」。)
 
 **进展**:
 - **2026-06-10 C 开工决策锁定**(集成点已逐一核实存在:`_wrapped` finally=`execution_runner.py` cleanup_execution 旁、`list_active_executions` 返回 `{conv_id: message_id}` 故 per-turn 对账零新接口、工具构造注入仿 `create_artifact_tools`、CONFIRM 仿 `web_fetch`):
@@ -266,6 +266,12 @@
   - **回归 guard**:`tests/agents/test_shipped_sandbox_wiring.py`——锁出厂配置 lead/research 授全三工具、**bash 必须 confirm**(误设 auto = 不可信代码绕过 CONFIRM 的安全回归)、compact 绝不渗到。
   - **C 段就此完成**;剩工作包(上传翻转/git 镜像/D 冒烟)不分先后,见「进度」。
 
+- **2026-06-11 上传路由翻转落地**(独立工作包;后端 1240 全过 + vitest/tsc 绿):路由翻为「文本类 → content,png/jpeg → 识图 blob,**其余一律 → blob**」,上传口对格式零预判。
+  - **magic 闸移除(决策升级,用户拍)**:原计划"docx/pdf magic 闸保留",落地时拍掉——"loud-fail at upload 优于静默死物"的前提是 blob 是死端(沙盒前没人能读),沙盒落地后 blob 不再是死端,失败从「上传时报」推迟到「首次使用时报」:模型 mount 后 pandoc/openpyxl 报错、自己诊断并解释给用户,remediation 提示归 **skill 系统**(下一个大方向,用户已自备一套 skill)。改后缀的 OLE2 `.doc`、损坏 PDF 照收。这同时隐式解决了 `.doc/.odt` 去向(原拟三选一):统一 blob + 模型诊断,不加 libreoffice、不特判(pandoc 本身可读 odt)。
+  - **新路由**:`_BINARY_EXTENSION_MIME`(已知二进制 ext → 真实 MIME;Office/ODF 全家 + docx/pdf + 异型图 + 压缩包)直进 blob 跳过解码尝试——**不是接受闸**,是路由正确性(近 ASCII 的小 PDF 可能被 charset-normalizer "成功"解码成文本 artifact、丢原始字节);未知 ext 仍先试文本解码,**解不出 / 超 MAX_TEXT_CONVERT_BYTES → 落 blob 不再 422**(超大文本可下载、可 mount 进沙盒 grep)。`.svg` 例外走文本路径标 `text/xml`(它是 XML;text artifact 无 blob,标 image/* 会误入识图分支)。仅存上传期 422:体积超限、png/jpg 扩展 Pillow 探不出合法图(识图路由是上传期决策,此闸是路由正确性非格式预判,保留)。
+  - **识图链路适配**:异型图带真实 image/* MIME 流进 read_artifact 识图分支——`resize_to_vision_data_uri` 修小图 passthrough 的 MIME 错配(原假设"read 只遇 png/jpeg",小 gif 会原字节错标 image/png;现非 png/jpeg 一律重编码 PNG,CMYK 等模式先归一),Pillow 能解的(gif/webp/bmp/tiff)直接可看,解不了的(heic/avif)loud-fail 文案补 mount 指引。其像素闸成为异型图唯一的炸弹闸(原设计就是"第二道防御",现独挑)。
+  - **同步面**:`uploadFilter.ts` 前端镜像删黑名单(仅剩体积闸)+ stagedFilesStore 注释;api-reference 422 触发面重写;sandbox.md 定位句更新;原子性测试的 422 触发器换损坏 png。
+
 **C 验收标准**(2026-06-10 定):① 三工具 runc 下 live E2E,含「mount 原 docx → pandoc 转 md → 改 → `--reference-doc` 生成新 docx → persist 新 artifact → 前端可下载」闭环;② **无孤儿矩阵**——`while true`、tool 超时、协作取消、外部取消、SIGKILL worker 五条退出路径各跑一遍,`docker ps` + scratch 根目录双零残留(SIGKILL 条靠 reaper 收);③ reaper 零误杀(活跃 turn 的容器/目录不被收);④ 磁盘配额——超额写入的 turn 被 watchdog 杀(沙盒 sticky 失败、宿主分区无恙;本机以普通目录模拟池子,loop 池子 host-prep 真机验归 D)。
 
 ### D — 上线前 Kylin 端到端冒烟
@@ -323,5 +329,6 @@
 - 2026-06-11 **C-reap review 第 3 轮收口**(一条;parse 格式韧性):reviewer 指 worker-id 引入(三段目录名)后 `parse_scratch_dir_name` 只认三段,两段 legacy 目录被静默永久跳过。**具体迁移场景 moot**(沙盒 pre-live、C-wire 前从未创建过持久 scratch 目录,两段格式只活在未发布分支),但底层缺口真实:目录枚举源对任何不识别的名字 = silent skip forever、纯目录残留无第二兜底(容器有 label 兜底),且 exact-3-only 对将来再改格式同样脆 —— 与本项目反复消灭的 silent under-collection 不一致。修=`parse` 接受 2 或 3 段(前两段恒 conv/msg、内部无 "__" 无歧义,第三段有则 worker 无则 None),`final_sweep` 绕 grace 严格只认 `worker==WORKER_ID`,legacy/无 worker 目录走普通周期 grace 回收、绝不被 no-grace 误删。后端 1216 全过;真机矩阵 14/14;增 parse 往返/legacy/陌生名 + reaper legacy 二态测试。详见 C 段「进展」。
 - 2026-06-11 **C-wire 落地(C 末刀,沙盒首次 live 暴露)**:`lead`/`research` agent MD 各加 `bash: confirm`/`mount: auto`/`persist: auto`(白名单=引擎可见性闸 + 权限覆盖源;配额三件套已落、前置满足才挂)。bash 描述能力清单按镜像现状列全(git 待并行包补)、版本号刻意不写;mount 契约文案落 `read_artifact`/inventory 二进制项(「mount 进沙盒检视/转换」),三处 TODO(C-wire) 清空;agent prompt 不加沙盒散文(提示分层)。新增自包含 `docs/architecture/sandbox.md` + nav 注册,`tools.md`/`overview.md` 补沙盒。回归 guard `test_shipped_sandbox_wiring.py` 锁 bash=confirm 安全闸 + 白名单授予 + compact 不渗。后端 1221 全过(无新运行时路径,不重跑真机矩阵)。**C 段完成**;剩工作包(上传翻转/git 镜像/D 冒烟)不分先后。
 - 2026-06-11 **C-wire review 收口**(三条,纯文档;无代码/机器改动):[P1 措辞] reviewer 指 commit 把 bash 的 CONFIRM oversell 成「不可信代码必经 Permission Interrupt」,与 `always_allow` 可按工具名跨 agent/跨 turn(engine `always_allowed_tools` + controller message-metadata 继承)弃权确认不一致。核实机制属实,但**定性 = 我的 overclaim,非可利用洞**:沙盒安全靠 gVisor/DooD/`--network=none`+ephemeral 三正交边界,CONFIRM 不提供 containment;且 always_allow 只能用户触发(模型无法自授)、弃权后代码照样 contained → 按「前端锁 UX/后端锁正确性」落 UX 侧(对比 web_fetch confirm 把守真实出网=必须严防绕过)。**定向不加防绕过机器**(那是把 UX 闸当安全边界、属 fix>feature 的 creep),改 sandbox.md 加「bash 的 CONFIRM 是同意闸不是 containment」子节澄清;operator 合规级「不可弃权」留独立策略特性、点头才做。[P3] 坏锚点 `孤儿回收（reaper）`(全角括号 slug 丢分隔)→ heading 改空格,`mkdocs build --strict` 验过;[P3] 定位句 xlsx 当前不可上传(doc_converter 拒)→ 改「可上传 docx/pdf/图片」+ 点明沙盒可处理 ⊋ 可上传(更多 office 随上传翻转入 blob)。
+- 2026-06-11 **上传路由翻转落地**:「文本→content,png/jpeg→识图,其余一律→blob」,上传口零格式预判。**magic 闸移除**(决策升级,用户拍:loud-fail at upload 的前提——blob 是死端——随沙盒落地消失,诊断归沙盒里的模型、remediation 归 skill 系统);`.doc/.odt` 去向隐式解决=统一 blob+模型诊断。`_BINARY_EXTENSION_MIME` 已知二进制直进 blob(防近 ASCII 二进制被误解码成文本,非接受闸);解不出/超文本帽→blob 不再 422;`.svg` 走文本 `text/xml`;仅剩 422=超限+png/jpg 探测失败(识图路由闸保留)。识图链路适配:`resize_to_vision_data_uri` 修非 png/jpeg 小图 passthrough MIME 错配(一律重编码 PNG+模式归一),read 失败文案补 mount 指引,像素闸独挑异型图炸弹。前端 `uploadFilter.ts` 删黑名单镜像;api-reference 422 面重写。后端 1240 全过 + vitest/tsc 绿。skill 系统定为下一个大方向(用户已自备一套 skill)。
 <!-- 新日志按日期顺序追加到此行上方 -->
 

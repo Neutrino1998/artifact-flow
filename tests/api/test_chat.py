@@ -345,11 +345,12 @@ class TestChatUploadAtomicity:
 
         # New conversation (no conversation_id). Good file FIRST so the old code
         # would have created the conversation + committed good.txt before the
-        # .doc (rejected on extension by DocConverter) raised 422.
+        # bad file raised 422. 上传翻转(2026-06-11)后格式不再拒,仍 422 的
+        # 触发器 = 损坏 png(识图路由闸:png/jpg 扩展但 Pillow 探不出合法图)。
         parts = [
             ("payload", (None, json.dumps({"user_input": "hi"}))),
             ("files", ("good.txt", b"hello", "text/plain")),
-            ("files", ("report.doc", b"\xd0\xcf\x11\xe0", "application/msword")),
+            ("files", ("broken.png", b"\x89PNG\r\n\x1a\n" + b"garbage", "image/png")),
         ]
         resp = await client.post("/api/v1/chat", files=parts)
         assert resp.status_code == 422
