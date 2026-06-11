@@ -167,9 +167,11 @@ class ReadArtifactTool(BaseTool):
                 "Returns content wrapped in <artifact_slice> with metadata "
                 "(shown_lines/total_lines/has_more). When has_more=true, use "
                 "the offset hint to read the next slice. "
-                "For an image artifact (content_type image/*, e.g. an uploaded "
-                "photo or screenshot), this returns the actual image so you can "
-                "see it — read the image artifact whenever you need to view it."
+                "PNG/JPEG image artifacts (e.g. an uploaded photo or screenshot) "
+                "are returned as the actual image so you can see it. Other "
+                "binary/image formats (gif/webp/tiff, docx, pdf, archives...) "
+                "cannot be viewed directly — mount them into the sandbox and "
+                "convert via bash (e.g. to PNG, then persist and read it)."
             ),
             permission=ToolPermission.AUTO,
             # Infinity = 永不落盘。read_artifact 自身的输出若被中间件再次落盘，
