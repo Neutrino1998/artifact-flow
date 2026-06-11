@@ -250,14 +250,13 @@ class ContextManager:
             # blob 类 artifact 的 content 为空(无文本表示),给一条合成预览,让清单行
             # 有信息量:图片提示「read 即可看图」,其它二进制(docx/pdf 等)说明契约
             # (否则空 body 易被忽略)。
-            # TODO(C-wire): 二进制项文案在沙盒 mount 工具落地后改为指引 mount。
             preview_content = artifact.get("content", "")
             if not preview_content and artifact["content_type"].startswith("image/"):
                 preview_content = "[image — use read_artifact to view it]"
             elif not preview_content and artifact.get("blob_content_type"):
                 preview_content = (
-                    "[binary file — no text representation; "
-                    "the user can download it from the artifact panel]"
+                    "[binary file — no text representation; mount it into the sandbox "
+                    "to inspect/convert, or the user can download it from the artifact panel]"
                 )
             slice = make_preview_slice(
                 artifact_id=artifact["id"],

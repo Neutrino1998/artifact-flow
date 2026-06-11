@@ -17,6 +17,9 @@ tools:
   grep_artifact: auto
   web_search: auto
   web_fetch: confirm
+  bash: confirm
+  mount: auto
+  persist: auto
 model: qwen3.7-plus
 max_tool_rounds: 50
 ---

@@ -48,8 +48,9 @@ class BashTool(BaseTool):
     """
 
     def __init__(self, session: SandboxSession):
-        # TODO(C-wire): 描述补环境能力清单(python 科学栈/pandoc/ripgrep/git 版本)
-        # —— 一次性事实进描述,场景 how-to 留 skill 系统。
+        # 能力清单按镜像现状列全(python 科学栈/pandoc/ripgrep);git 待「沙盒镜像
+        # 加 git」并行工作包落地后补一行。版本号刻意不写 —— 会与镜像漂移,且非模型
+        # 决策所需(CLAUDE.md:一次性事实进描述、克制噪声)。场景 how-to 留 skill 系统。
         super().__init__(
             name="bash",
             description=(

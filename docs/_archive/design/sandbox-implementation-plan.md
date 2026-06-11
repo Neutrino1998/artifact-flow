@@ -17,15 +17,15 @@
 
 ## 进度
 
-- **当前**:**A / B(双架构)完成**(详见各段进展)。**C 开工**(2026-06-10 开工决策锁定,切片 C-0→C-wire,见 C 段「进展」)。
-- **下一步**:**C-wire**(agent MD 权限 + 工具描述能力清单 + mount 契约文案,沙盒首次 live 暴露)。C-0 / C-session / C-stage / C-reap 已落地(2026-06-10,见 C 段进展;真机无孤儿矩阵 12/12,含超额杀、stage 往返、SIGKILL 孤儿 reaper 回收 + 零误杀)。C-stage 落地同时解锁:**上传路由翻转**(独立工作包,见「到时再敲定」,可在 C-wire 前后做)。并行待办:arm §B 镜像 id 冻结(机器在位时;注意 C 镜像加 git 后锚点作废,统一在 D 重冻结);沙盒镜像加 git(Dockerfile + verify 探针,可与 C-wire 并行)。
+- **当前**:**A / B(双架构)完成**(详见各段进展)。**C 全切片落地**(2026-06-10→11,C-0→C-wire,见 C 段「进展」)。沙盒**已 live 暴露**(lead/research 拿到 bash=CONFIRM/mount/persist)。
+- **下一步**:剩工作包不分先后——① **上传路由翻转**(独立工作包,C-stage mount 已解锁,见「到时再敲定」);② **沙盒镜像加 git**(Dockerfile + verify 探针 + bash 描述补 git 一行);③ **D 段**(Kylin 端到端冒烟:真 runsc + Word 场景 + loop 池子 host-prep + git 镜像重冻结双架构 id + uid 1000 属主验)。并行待办:arm §B 镜像 id 冻结统一并入 D 重冻结(C 镜像加 git 后旧锚点作废)。
 - **产物处置(2026-06-05 拍定)**:`feat/sandbox` 这批已验收产物(`sandbox/` 探针 + 构建脚本)**暂留分支不动**,不单独提早合 main。「是否把就绪探针子集(`unshare -U` 闸 + smoke + ENOSYS/uid)提升为通用部署机预检工具」**推迟到 C/D 阶段**——届时有真实第二调用点(每台新沙盒宿主预检 + D 端到端冒烟)再校准边界,现在抽象属投机(YAGNI)。
 
 | 阶段 | 内容 | 状态 |
 |---|---|---|
 | A | artifact 地基(二进制存储 + 多格式上传 + 识图) | **完成**(2026-06-08 三切片 + 2026-06-09 review 加固 + live E2E 用户实测通过) |
 | B | Kylin gVisor 功能验证(内网) | x86_64 **完成**(验证通过+已撤出);arm64 **完成**(2026-06-08,64K→4K 换核后全绿) |
-| C | 沙盒引擎集成(本机 runc 连调) | **进行中**(C-0 / C-session / C-stage / C-reap 已落地,下一刀 C-wire) |
+| C | 沙盒引擎集成(本机 runc 连调) | **完成**(C-0 / C-session / C-stage / C-reap / C-wire 全落地;沙盒已 live 暴露) |
 | D | 上线前 Kylin 端到端冒烟 | 未开始 |
 
 依赖:C 依赖 A 的二进制存储 + B 的冻结镜像。A 逻辑独立(识图本身就有价值),可先做,但本期不单独合 main —— 见分支策略。
@@ -183,7 +183,7 @@
     - **「应用与沙盒分机部署」并入此轴、有需求再做**(2026-06-05):分机不是改 aiodocker 连接串能办的——真正的耦合是 **bind-mount 工作区 daemon-local**(路径在 daemon 那台机解析,不在客户端机;uid 属主断言同理),aiodocker 本身可连远程 TCP+TLS daemon,但单远程 daemon = 无调度/无故障转移、bind-mount 还是断。**正解是 k8s**(per-turn Pod + volume/PVC stage 替代宿主 bind-mount),即本条上面那根「换控制面」轴。两个可能驱动都推迟到真有需求:① 专用沙盒主机池(隔离烧 CPU 的不可信执行);② 切掉「应用机经 docker.sock 拿 host root」的爆炸半径(正当安全驱动,但代价仍是换控制面)。在此之前结论不变:单机 DooD、seam 留着。
 - **文档转换走沙盒**:pandoc 装进沙盒镜像(B 验过),富格式读(docx→md)和写都由 agent 在沙盒里跑 pandoc。**驱动场景**:用户要带格式的 Word 时,模型以用户上传/原有 docx 作 `--reference-doc` 样式模版,在沙盒里 md→docx 生成,产物回写成可下载 blob——比固定的 md→docx 导出保真,可能取代现有的 md→Word 导出路径。**门控变化(衔接 artifact plan 决策 6)**:现有 `/export` 是同步 REST 读,turn 中按「前端 UX 锁的读」处理;一旦导出搬进沙盒 = 起容器 = **执行**,就从读升级为 **lease 挡的写/执行**(跟 bash 工具同级),门控责任从前端移到后端 lease。替换 md→Word 路径时一并改门控,别留前端旧锁。
 
-**到时再敲定**:并发上限;persist 多文件 zip 的命名与"可单独查看"白名单;**上传路由翻转(挂 C-stage mount 落地后)**——现状是 blob 白名单(docx/pdf/png/jpeg)+ 显式拒绝名单(Office/ODF/异型图)+ 默认文本解码兜底,沙盒可用后翻为「文本类白名单→content,其余→blob」:zip(原则 5)/xlsx/pptx 等出拒绝名单入 blob(沙盒里 openpyxl/解压直接处理,"请导出为 csv"类 remediation 同步过时),`_UNSUPPORTED_IMAGE` 异型图(gif/webp 等)同理出名单入 blob(沙盒里转 png 可看),docx/pdf magic 闸保留;**翻转是一个工作包,须同步**:① `frontend/src/lib/uploadFilter.ts` 是后端拒绝名单的**前端镜像**(预挡+remediation 文案复制品),只翻后端则前端继续拒掉后端已收的格式;② api-reference.md 上传段 422 触发面描述;③ read_artifact/inventory 契约文案升级为指引 mount(代码已留 TODO(C-wire))。**沙盒落地前不翻**——blob-default 会产不可用死物 + 吞掉改后缀/损坏文件的 loud-fail。(原"挂哪些 artifact:全部 vs 被引用"已由原则 4 的显式 mount 关闭——模型 mount 谁就有谁;原"沙盒工具是否合并"已拍定分立三工具 + 共享 `SandboxSession`,见上;原"bash 输出溢出"已拍定复用既有 idiom,见下「进展」。)
+**到时再敲定**:并发上限;persist 多文件 zip 的命名与"可单独查看"白名单;**上传路由翻转(挂 C-stage mount 落地后)**——现状是 blob 白名单(docx/pdf/png/jpeg)+ 显式拒绝名单(Office/ODF/异型图)+ 默认文本解码兜底,沙盒可用后翻为「文本类白名单→content,其余→blob」:zip(原则 5)/xlsx/pptx 等出拒绝名单入 blob(沙盒里 openpyxl/解压直接处理,"请导出为 csv"类 remediation 同步过时),`_UNSUPPORTED_IMAGE` 异型图(gif/webp 等)同理出名单入 blob(沙盒里转 png 可看),docx/pdf magic 闸保留;**翻转是一个工作包,须同步**:① `frontend/src/lib/uploadFilter.ts` 是后端拒绝名单的**前端镜像**(预挡+remediation 文案复制品),只翻后端则前端继续拒掉后端已收的格式;② api-reference.md 上传段 422 触发面描述;③ read_artifact/inventory 契约文案升级为指引 mount(**已在 C-wire 提前完成,翻转时无需再动**)。**沙盒落地前不翻**——blob-default 会产不可用死物 + 吞掉改后缀/损坏文件的 loud-fail。(原"挂哪些 artifact:全部 vs 被引用"已由原则 4 的显式 mount 关闭——模型 mount 谁就有谁;原"沙盒工具是否合并"已拍定分立三工具 + 共享 `SandboxSession`,见上;原"bash 输出溢出"已拍定复用既有 idiom,见下「进展」。)
 
 **进展**:
 - **2026-06-10 C 开工决策锁定**(集成点已逐一核实存在:`_wrapped` finally=`execution_runner.py` cleanup_execution 旁、`list_active_executions` 返回 `{conv_id: message_id}` 故 per-turn 对账零新接口、工具构造注入仿 `create_artifact_tools`、CONFIRM 仿 `web_fetch`):
@@ -202,7 +202,7 @@
 - **2026-06-10 C-0 落地**(blob-only 一步到位,后端 1098 / 前端 205 测试全过 + tsc/lint clean):
   - **后端**:`DocConverter` docx/pdf 改 blob-only(content="" + content_type=真实 MIME + magic 预检 loud-fail,pdf 补 `%PDF-` 闸对齐 docx);pandoc 退出 backend(删 `export_docx`/`check_pandoc`,main.py 不再依赖);**pymupdf 文本抽取保留为独立 `extract_pdf_text` 供 web_fetch PDF 降级**(网页阅读路径,非上传,convert() 不再可达);删 `/export` 端点(连 `Query` import);`read_artifact` 序列化加 `blob_content_type` 判别字段 → ReadArtifactTool 对非图片 blob 返回契约文案(**success=True 防重试循环**)、inventory 二进制项标注;**新增 `_binary_immutable_error` 守门**——update/rewrite 在 blob artifact 上一律拒(否则文本编辑会让"双轨"借尸还魂),改=产新 artifact。
   - **REST/前端**:`ArtifactSummary`/`ArtifactResponse` 加 `has_blob`(由 `blob_content_type` 推导,OpenAPI types 重生成);事件 `ArtifactCreatedData` 补 `has_blob`/`blob_size`/`blob_content_type` 类型;store `LiveArtifact.hasBlob` 全链贯通(`defaultViewMode` 收 hasBlob);删 `exportArtifact`/「导出为 Word」菜单;下载原格式按 `has_blob` 分流(blob → authed `/raw` objectURL,文件名用 `original_filename`);新增 `BinaryFilePreview`(文件卡片 + 下载),**turn 内复用 ImagePreview 的 `pendingFlush` 闸**——卡片只靠事件元数据即可渲染(filename/MIME),仅下载按钮 flush 前换成「本回合完成后可下载」提示,不发 /raw、无 404;blob artifact 隐藏复制按钮、tabs 限 preview-only。
-  - **TODO(C-wire)**:read_artifact 契约文案与 inventory 标注当前只说「可下载」,mount 工具落地后改为指引 mount 进沙盒(代码内已留 TODO 注释)。
+  - **~~TODO(C-wire)~~ 已完成(2026-06-11)**:read_artifact 契约文案 + inventory 二进制项已从「只可下载」升级为「mount 进沙盒检视/转换,或下载」,代码 TODO 注释清空。
 - **2026-06-10 C-session 落地**(后端 1136 测试全过 + **本机 runc 真机无孤儿矩阵 6/6 双零残留**):
   - **`SandboxSession`**(`src/tools/builtin/sandbox_session.py`):per-turn 对象壳,aiodocker 全收口在此 seam(编排器可换性);容器 lazy 于首个 exec(壳零成本:不碰 docker、不建目录);创建参数全代码侧(`--network=none`、Memory=MemorySwap 禁 swap、NanoCpus、PidsLimit、Runtime 按 `SANDBOX_RUNTIME`);label 到 turn 粒度(`artifactflow.sandbox.{conversation,message}-id` + **namespace label**=`REDIS_KEY_PREFIX`,隔离共用 daemon 的多套部署,C-reap 按它过滤);scratch 目录 `{root}/{conv}__{msg}`(reaper 第二枚举源按此反解)。**创建失败 sticky**:本 turn 不重试,后续调用立即复述原因(失败多为环境性,重试只重复烧启动超时);**create 成功 start 失败的半成品句柄先记**,close 仍删得到。`close()` 幂等、每步独立 best-effort(容器→scratch→client),任一步失败只记日志等 reaper。
   - **exec = 容器内 `timeout --signal=KILL` 包 argv**(真机验证 exit 137、3.0s 准点杀);tool 侧 `asyncio.timeout(命令上限+30s grace)` 弃等护栏只兜 exec 通道卡死。输出 stdout/stderr 按到达序合流、**每流独立 incremental decoder**(frame 劈断多字节字符不出 �)、超 `SANDBOX_MAX_OUTPUT_CHARS`(200k)继续 drain 但丢弃+显式截断标记;ExitCode EOF 后有界轮询(daemon 落账延迟)。
@@ -257,6 +257,14 @@
 
 - **2026-06-11 C-reap review 第 3 轮收口**(一条;parse 格式韧性):
   - **[P2 接续] 两段 legacy 目录格式不兼容 → parse 接受 2/3 段**。worker-id 把目录名升到三段后,`parse_scratch_dir_name` 只认三段、其余静默跳过。**具体迁移场景 moot**:沙盒 pre-live(C-wire 前从未创建持久 scratch 目录),两段格式只活在未发布分支,没有"升级前→后"的真实目录可迁移。但 reviewer 点出的**底层缺口真实**:目录枚举源对任何不识别的名字 = silent skip forever,而纯目录残留(容器有 label 第二源兜底、目录没有)就此永久漏收;且 exact-3-only 对将来再改格式同样脆——这条静默跳过路径与全项目反复消灭的 silent under-collection 不一致。修=`parse` 接受 2 或 3 段(前两段恒 conv/msg、id 内部无 "__" 故无歧义;第三段有=worker、无=None),`final_sweep` 绕 grace **严格只认 `worker==WORKER_ID`**,legacy/无 worker 目录走普通周期 grace 回收、绝不被 no-grace 误删;真正陌生(非 2/3 段)的名字仍 None→跳过(不碰错配到共享根的别人目录)。定性=让解析从脆变韧 + 关一条静默泄漏路径,非 live bug。后端 1216 全过;真机矩阵 14/14;增 parse 往返/legacy/陌生名(3)+ reaper legacy 二态(2)测试。
+
+- **2026-06-11 C-wire 落地**(C 末刀,沙盒首次 live 暴露;后端 1216→1221 全过,无新运行时路径故不重跑真机矩阵):
+  - **agent MD 权限**(真正的暴露面):`lead_agent` / `research_agent` 的 `tools` 白名单各加 `bash: confirm` / `mount: auto` / `persist: auto`。白名单是引擎对模型的可见性闸(`engine.py` 工具不在 `agents[name].tools` → 直接拒)兼 per-agent 权限覆盖源(同 dict 的 value 覆工具默认权限)。C-stage/C-reap 全程刻意不挂(配额未落、无 live 暴露窗口),配额三件套 C-stage 落地后前置已满足。bash=CONFIRM 显式声明——这是唯一暴露面,跑不可信代码必经 Permission Interrupt。
+  - **bash 描述能力清单**:按镜像现状已列全(python 科学栈/pandoc/ripgrep);git 待「沙盒镜像加 git」并行包落地补一行。版本号刻意不写(与镜像漂移 + 非模型决策所需)。删 TODO(C-wire) 注释,改为指明 git 待补。
+  - **mount 契约文案**(提示分层:契约归 inventory/read_artifact):`read_artifact` 命中 blob artifact、`context_manager` 的 inventory 二进制项,文案从「只能下载」升级为「mount 进沙盒检视/转换,或下载」。两处 TODO(C-wire) 删除。agent role prompt **不**加沙盒散文(能力归工具描述、场景 how-to 归 skill,prompt 保持 agent-agnostic)。
+  - **文档**:新增自包含 `docs/architecture/sandbox.md`(定位/三工具一 session/生命周期拆除/三正交隔离边界/staging 直读写/三层配额/超时溢出/reaper/常量表),注册 mkdocs nav;`tools.md` 内置工具清单补三行 + 请求级说明;`overview.md` agent 清单补沙盒列。
+  - **回归 guard**:`tests/agents/test_shipped_sandbox_wiring.py`——锁出厂配置 lead/research 授全三工具、**bash 必须 confirm**(误设 auto = 不可信代码绕过 CONFIRM 的安全回归)、compact 绝不渗到。
+  - **C 段就此完成**;剩工作包(上传翻转/git 镜像/D 冒烟)不分先后,见「进度」。
 
 **C 验收标准**(2026-06-10 定):① 三工具 runc 下 live E2E,含「mount 原 docx → pandoc 转 md → 改 → `--reference-doc` 生成新 docx → persist 新 artifact → 前端可下载」闭环;② **无孤儿矩阵**——`while true`、tool 超时、协作取消、外部取消、SIGKILL worker 五条退出路径各跑一遍,`docker ps` + scratch 根目录双零残留(SIGKILL 条靠 reaper 收);③ reaper 零误杀(活跃 turn 的容器/目录不被收);④ 磁盘配额——超额写入的 turn 被 watchdog 杀(沙盒 sticky 失败、宿主分区无恙;本机以普通目录模拟池子,loop 池子 host-prep 真机验归 D)。
 
@@ -313,5 +321,6 @@
 - 2026-06-10 **C-reap review 收口**(两条):[P1] InMemory 多 worker 下 reaper 误删兄弟进程活沙盒 —— app 既有契约(Redis=共享多worker / InMemory=单进程)没在 reaper enforce,且该误配对 reaper 是破坏性(删活资源)非仅降级。修=给 RuntimeStore 加 `is_shared`,`_should_start_reaper` 判定:共享 store 自动开、InMemory 默认不起(安全默认),单进程 InMemory 须 affirm `SANDBOX_REAP_ALLOW_LOCAL_STORE=true`。[P2] 停机时 reaper 先于 runner shutdown 停,兜不住 shutdown 期 close() 失败的孤儿 —— 改顺序:runner 先 shutdown → reaper `final_sweep` 最后一扫(grace 按 store 分:本地忽略/共享保留)→ 再 stop → close_globals。后端 1211 全过(+6);真机矩阵 12/12。详见 C 段「进展」。
 - 2026-06-10 **C-reap review 第 2 轮收口**(一条):final_sweep 上版按 `is_shared` 二分 grace,共享 store 保留 grace → 单副本 Redis 刚建 < grace 的沙盒 close() 失败时漏收(且那条 grace 理由不成立:lease 先于容器创建数秒、Redis 可见性竞态不真实)。改 per-resource worker-id(采纳 reviewer 方向):每进程 `WORKER_ID`,容器打 `LABEL_WORKER` + scratch 目录名加第三段,final_sweep 只对本 worker 资源绕 grace、别人走 grace —— 与副本数无关地正确。`is_shared` 退回只服务 P1 启动 gate。后端 1211 全过;真机矩阵 14/14(新增 case 9 新鲜孤儿)。详见 C 段「进展」。
 - 2026-06-11 **C-reap review 第 3 轮收口**(一条;parse 格式韧性):reviewer 指 worker-id 引入(三段目录名)后 `parse_scratch_dir_name` 只认三段,两段 legacy 目录被静默永久跳过。**具体迁移场景 moot**(沙盒 pre-live、C-wire 前从未创建过持久 scratch 目录,两段格式只活在未发布分支),但底层缺口真实:目录枚举源对任何不识别的名字 = silent skip forever、纯目录残留无第二兜底(容器有 label 兜底),且 exact-3-only 对将来再改格式同样脆 —— 与本项目反复消灭的 silent under-collection 不一致。修=`parse` 接受 2 或 3 段(前两段恒 conv/msg、内部无 "__" 无歧义,第三段有则 worker 无则 None),`final_sweep` 绕 grace 严格只认 `worker==WORKER_ID`,legacy/无 worker 目录走普通周期 grace 回收、绝不被 no-grace 误删。后端 1216 全过;真机矩阵 14/14;增 parse 往返/legacy/陌生名 + reaper legacy 二态测试。详见 C 段「进展」。
+- 2026-06-11 **C-wire 落地(C 末刀,沙盒首次 live 暴露)**:`lead`/`research` agent MD 各加 `bash: confirm`/`mount: auto`/`persist: auto`(白名单=引擎可见性闸 + 权限覆盖源;配额三件套已落、前置满足才挂)。bash 描述能力清单按镜像现状列全(git 待并行包补)、版本号刻意不写;mount 契约文案落 `read_artifact`/inventory 二进制项(「mount 进沙盒检视/转换」),三处 TODO(C-wire) 清空;agent prompt 不加沙盒散文(提示分层)。新增自包含 `docs/architecture/sandbox.md` + nav 注册,`tools.md`/`overview.md` 补沙盒。回归 guard `test_shipped_sandbox_wiring.py` 锁 bash=confirm 安全闸 + 白名单授予 + compact 不渗。后端 1221 全过(无新运行时路径,不重跑真机矩阵)。**C 段完成**;剩工作包(上传翻转/git 镜像/D 冒烟)不分先后。
 <!-- 新日志按日期顺序追加到此行上方 -->
 

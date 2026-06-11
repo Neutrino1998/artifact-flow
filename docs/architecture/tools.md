@@ -205,10 +205,14 @@ class ToolParameter:
 | `read_artifact` | `ReadArtifactTool` | AUTO | `id` (string), `version` (integer, 可选), `offset` (integer, 默认 1), `limit` (integer, 可选) | 读取 Artifact 内容，按行分页；返回 `<artifact_slice>` 含 `shown_lines / total_lines / has_more` 和续读 hint |
 | `grep_artifact` | `GrepArtifactTool` | AUTO | `pattern` (string), `id` (string, 可选), `fixed_strings` (boolean, 默认 false), `ignore_case` (boolean, 默认 false), `context` (integer, 默认 0), `max_count` (integer, 默认 20) | 跨 / 单 artifact 搜索，ripgrep 语义；省略 `id` 时遍历当前 session 全部 artifact，输出 heading-style 块 |
 | `call_subagent` | `CallSubagentTool` | AUTO | `agent_name` (string), `instruction` (string) | 调用 subagent（仅路由验证，不执行） |
+| `bash` | `BashTool` | **CONFIRM** | `command` (string) | 在本轮沙盒容器内执行 bash（跑不可信模型代码 → CONFIRM）。详见 [sandbox.md](sandbox.md) |
+| `mount` | `MountArtifactTool` | AUTO | `artifact_id` (string) | 把一个 artifact 物化进沙盒工作区（显式 stage-in） |
+| `persist` | `PersistFileTool` | AUTO | `path` (string) | 把工作区文件回写成**新 artifact**（显式 stage-out） |
 
 **注意：**
 
 - Artifact 工具（create/update/rewrite/read/grep）是请求级创建的（绑定 `ArtifactService` 实例），名称为保留名（`RESERVED_TOOL_NAMES`），自定义工具不可同名
+- **沙盒工具（`bash` / `mount` / `persist`）也是请求级创建的**（`create_sandbox_tools`，绑定一个 per-turn `SandboxSession` + `ArtifactService`），容器 **lazy** 于首个沙盒工具调用。三者是语义不同的动词、共享一个 session；只挂在拥有它们的 agent（当前 `lead` / `research`）的 `tools` 白名单里。机制全貌见 [sandbox.md](sandbox.md)
 - `read_artifact` 不分页 / 无 `limit` 时仍受隐藏字符上限 `READ_ARTIFACT_MAX_CHARS`（默认 50000）保护，超出后 `has_more=true` 并附续读 hint，模型按 hint 调用下一段
 - `call_subagent` 的 `execute()` 仅做路由验证（目标 agent 是否存在、是否非 internal），实际的 agent 切换由引擎的 `_execute_tools` 处理
 

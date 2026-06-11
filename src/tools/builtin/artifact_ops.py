@@ -248,7 +248,6 @@ class ReadArtifactTool(BaseTool):
         # 非图片的 blob-only artifact(docx/pdf 等富格式上传,C-0 起无文本表示):
         # 返回契约文案而非空 content。success=True —— 这是对"它是什么"的准确回答,
         # 不是失败(success=False 易诱发模型重试同一调用)。
-        # TODO(C-wire): 沙盒 mount 工具落地后,文案改为指引 mount 进沙盒操作。
         if result.get("blob_content_type"):
             original = result.get("original_filename") or artifact_id
             return ToolResult(
@@ -257,7 +256,9 @@ class ReadArtifactTool(BaseTool):
                     f"Artifact '{artifact_id}' is a binary file "
                     f"({result['blob_content_type']}, original file '{original}'). "
                     "It has no text representation and cannot be read as text. "
-                    "The user can download the original file from the artifact panel."
+                    "To inspect or convert it, mount it into the sandbox with the "
+                    "`mount` tool and process it via bash. The user can also download "
+                    "the original file from the artifact panel."
                 ),
             )
 
