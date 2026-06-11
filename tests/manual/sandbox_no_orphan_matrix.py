@@ -19,6 +19,8 @@
   8. SIGKILL 孤儿    起容器+scratch 后**不 close**(模拟 worker 被杀、finally 不跑)
                      → SandboxReaper.reap_once 双源差集回收孤儿(验收②③);
                      另起一个活跃 turn 验 reaper 零误杀(grace 外仍不碰活资源)
+  9. 停机新鲜孤儿    grace 内(age << grace)的本进程孤儿:周期扫 skip,但 final_sweep
+                     按 worker-id 绕 grace 收(闭合单副本 Redis 刚建即漏缺口)
 
 每条跑完断言:daemon 上无该 turn label 的容器 + scratch 目录已删(双零残留)。
 顺带自验 aiodocker exec multiplexed stream 的 demux(stdout/stderr 分流)。
@@ -353,6 +355,42 @@ async def case_8_reaper_collects_orphan():
         await session._docker.close()
 
 
+async def case_9_final_sweep_fresh_orphan():
+    print("\n=== 9. 停机新鲜孤儿 → final_sweep 按 worker-id 绕 grace 收 ===")
+    from api.services.sandbox_reaper import SandboxReaper
+
+    conv, msg = _ids()
+    session = SandboxSession(conv, msg)
+    await session.ensure_container()
+    await session.exec("echo fresh-orphan > f.txt")  # 刚建,age << grace
+    if session._watchdog_task is not None:
+        session._watchdog_task.cancel()
+        await asyncio.gather(session._watchdog_task, return_exceptions=True)
+
+    runner = ExecutionRunner(max_concurrent=1)  # 空 store
+    # grace 留默认 60s:新鲜孤儿(age 几秒)远在 grace 内
+    reaper = SandboxReaper(runner.store, interval_sec=1)
+    reaper._docker = aiodocker.Docker()
+    try:
+        # 周期扫:grace 护着,新鲜孤儿不动
+        periodic = await reaper.reap_once()
+        skipped_ok = periodic.containers_reaped == 0 and periodic.skipped_young >= 1
+        print(f"  周期扫 skip 新鲜孤儿: reaped={periodic.containers_reaped} "
+              f"skipped_young={periodic.skipped_young}")
+        # final_sweep:按 worker-id(本进程)绕 grace 收
+        swept = await reaper.final_sweep()
+    finally:
+        await reaper._docker.close()
+    print(f"  final_sweep: 容器×{swept.containers_reaped} 目录×{swept.dirs_reaped}")
+    ok = skipped_ok and swept.containers_reaped >= 1 and swept.dirs_reaped >= 1
+    results.append(("final_sweep 收新鲜孤儿", ok,
+                    "" if ok else " 周期扫该 skip / final_sweep 该收!"))
+    print(f"  [{PASS if ok else FAIL}] final_sweep 按 worker-id 收新鲜孤儿")
+    await assert_no_residue("新鲜孤儿双零残留", session)
+    if session._docker is not None:
+        await session._docker.close()
+
+
 async def main():
     print(f"镜像: {config.SANDBOX_IMAGE}")
     print(f"scratch 根: {config.SANDBOX_SCRATCH_ROOT}")
@@ -365,6 +403,7 @@ async def main():
     await case_6_over_quota()
     await case_7_stage_roundtrip()
     await case_8_reaper_collects_orphan()
+    await case_9_final_sweep_fresh_orphan()
 
     print("\n" + "=" * 50)
     failed = [name for name, ok, _ in results if not ok]

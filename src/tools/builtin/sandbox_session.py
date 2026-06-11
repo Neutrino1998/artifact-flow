@@ -20,6 +20,7 @@ import asyncio
 import codecs
 import os
 import shutil
+import uuid
 from dataclasses import dataclass
 from typing import Callable, Optional
 
@@ -43,6 +44,12 @@ SANDBOX_LABEL = "artifactflow.sandbox"
 LABEL_NAMESPACE = f"{SANDBOX_LABEL}.namespace"
 LABEL_CONVERSATION = f"{SANDBOX_LABEL}.conversation-id"
 LABEL_MESSAGE = f"{SANDBOX_LABEL}.message-id"
+LABEL_WORKER = f"{SANDBOX_LABEL}.worker-id"
+
+# 本进程(worker/副本)代次唯一标识,import 时生成一次。每个容器/scratch 目录都打上它,
+# reaper 的停机 final_sweep 据此**只无 grace 回收本进程自己的**资源(我的 turn 此刻都已
+# shutdown 完 = 必是孤儿),别人的留给 grace —— 与副本数无关地正确,不靠 lease 时序论证。
+WORKER_ID = uuid.uuid4().hex
 
 # tool 侧 asyncio 弃等护栏 = 命令超时 + 此余量。正常路径由容器内 timeout 在
 # SANDBOX_COMMAND_TIMEOUT 处收口;护栏只兜 daemon/exec 通道卡死。
@@ -53,24 +60,26 @@ _EXIT_CODE_POLLS = 20
 _EXIT_CODE_POLL_INTERVAL = 0.05
 
 
-def scratch_dir_name(conversation_id: str, message_id: str) -> str:
-    """scratch 子目录名 —— reaper 的第二枚举源按此格式反解 per-turn 归属。
+def scratch_dir_name(conversation_id: str, message_id: str, worker_id: str = WORKER_ID) -> str:
+    """scratch 子目录名 —— reaper 的第二枚举源按此格式反解归属。
 
-    conv-* / msg-* id 内部无双下划线,"__" 分隔无歧义。
+    `{conv}__{msg}__{worker}`:前两段供 per-turn 活跃集差集,第三段(worker-id)供
+    final_sweep 判定"是不是本进程的"。conv-* / msg-* id 内部无双下划线、worker 是
+    hex,"__" 分隔三段无歧义。
     """
-    return f"{conversation_id}__{message_id}"
+    return f"{conversation_id}__{message_id}__{worker_id}"
 
 
 def parse_scratch_dir_name(name: str) -> Optional[tuple]:
-    """`scratch_dir_name` 的逆 —— reaper 把 scratch 根的目录名反解成 (conv, msg)。
+    """`scratch_dir_name` 的逆 → (conv, msg, worker) 或 None。
 
-    恰好两段(单个 "__" 分隔)且两段非空才算本系统的 scratch 目录;其余(无 "__"、
-    多段、空段)返回 None,reaper 跳过(不是我们建的,不碰)。
+    恰好三段(两个 "__" 分隔)且段段非空才算本系统的 scratch 目录;其余返回 None,
+    reaper 跳过(不是我们建的,不碰)。
     """
     parts = name.split("__")
-    if len(parts) != 2 or not parts[0] or not parts[1]:
+    if len(parts) != 3 or not all(parts):
         return None
-    return parts[0], parts[1]
+    return parts[0], parts[1], parts[2]
 
 
 class SandboxError(Exception):
@@ -201,6 +210,7 @@ class SandboxSession:
                 LABEL_NAMESPACE: config.REDIS_KEY_PREFIX or "default",
                 LABEL_CONVERSATION: self.conversation_id,
                 LABEL_MESSAGE: self.message_id,
+                LABEL_WORKER: WORKER_ID,
             },
             "HostConfig": host_config,
         }

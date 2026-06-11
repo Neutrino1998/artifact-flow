@@ -17,7 +17,9 @@ from tools.builtin.sandbox_session import (
     LABEL_CONVERSATION,
     LABEL_MESSAGE,
     LABEL_NAMESPACE,
+    LABEL_WORKER,
     SANDBOX_LABEL,
+    WORKER_ID,
     scratch_dir_name,
 )
 
@@ -28,7 +30,8 @@ from tools.builtin.sandbox_session import (
 class FakeContainer:
     """仿 aiodocker DockerContainer:_container dict + _id + __getitem__ + delete。"""
 
-    def __init__(self, cid, conv, msg, namespace="default", created=None, delete_error=None):
+    def __init__(self, cid, conv, msg, namespace="default", created=None,
+                 delete_error=None, worker=WORKER_ID):
         self._id = cid
         self._container = {
             "Id": cid,
@@ -38,6 +41,7 @@ class FakeContainer:
                 LABEL_NAMESPACE: namespace,
                 LABEL_CONVERSATION: conv,
                 LABEL_MESSAGE: msg,
+                LABEL_WORKER: worker,
             },
         }
         self._delete_error = delete_error
@@ -212,23 +216,28 @@ class TestIdempotenceAndResilience:
         assert stats.dirs_seen == 0
         assert stats.dirs_reaped == 0
 
-    async def test_final_sweep_ignores_grace_under_local_store(self, tmp_path):
-        """进程本地 store 的 final_sweep:runner 已停 = 无在途 turn,grace 内的新鲜
-        残留也收(否则单副本停机漏拆的孤儿要等下次启动)。"""
-        c = FakeContainer("fresh", "conv-1", "msg-1", created=time.time())
-        _mk_scratch(tmp_path, "conv-1", "msg-1", age_sec=0)
-        reaper, _ = _mk_reaper(tmp_path, [c], active={}, grace=60, is_shared=False)
+    async def test_final_sweep_no_grace_for_own_fresh_resources(self, tmp_path):
+        """final_sweep 对**本进程(WORKER_ID)**的新鲜资源绕过 grace —— 闭合单副本
+        Redis 刚建即漏的缺口。runner 已停 = 我的 turn 必已结束 = 孤儿。"""
+        c = FakeContainer("fresh", "conv-1", "msg-1", created=time.time())  # worker=WORKER_ID 默认
+        _mk_scratch(tmp_path, "conv-1", "msg-1", age_sec=0)  # 名字含 WORKER_ID
+        reaper, _ = _mk_reaper(tmp_path, [c], active={}, grace=60)
         stats = await reaper.final_sweep()
         assert c.deleted
         assert stats.containers_reaped == 1 and stats.dirs_reaped == 1
         assert stats.skipped_young == 0
 
-    async def test_final_sweep_keeps_grace_under_shared_store(self, tmp_path):
-        """共享 store(多 worker)的 final_sweep:兄弟进程可能正起新 turn,grace 内的
-        新鲜资源不能误删 —— 保留 grace。"""
-        c = FakeContainer("fresh", "conv-1", "msg-1", created=time.time())
-        _mk_scratch(tmp_path, "conv-1", "msg-1", age_sec=0)
-        reaper, _ = _mk_reaper(tmp_path, [c], active={}, grace=60, is_shared=True)
+    async def test_final_sweep_keeps_grace_for_other_worker_fresh(self, tmp_path):
+        """别的 worker 的新鲜资源:final_sweep 仍走 grace,不误删兄弟的活资源
+        (与副本数无关地正确,不靠 lease 时序)。"""
+        other = "deadbeefworker"
+        c = FakeContainer("fresh", "conv-1", "msg-1", created=time.time(), worker=other)
+        # 别的 worker 的 scratch 目录(名字第三段是它的 id)
+        d = tmp_path / scratch_dir_name("conv-1", "msg-1", worker_id=other)
+        d.mkdir()
+        old = time.time()
+        os.utime(d, (old, old))
+        reaper, _ = _mk_reaper(tmp_path, [c], active={}, grace=60)
         stats = await reaper.final_sweep()
         assert not c.deleted
         assert stats.containers_reaped == 0

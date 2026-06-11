@@ -48,7 +48,9 @@ from tools.builtin.sandbox_session import (
     LABEL_CONVERSATION,
     LABEL_MESSAGE,
     LABEL_NAMESPACE,
+    LABEL_WORKER,
     SANDBOX_LABEL,
+    WORKER_ID,
     parse_scratch_dir_name,
 )
 from utils.logger import get_logger
@@ -132,13 +134,13 @@ class SandboxReaper:
         不会再有 reaper 收尾,这些孤儿会一直跑到下次启动(P2)。先停周期 task 免与本扫
         并发,docker client 留到随后的 stop() 关。
 
-        **grace 策略按 store 分**:进程本地 store(单进程契约,此刻 runner 已 shutdown =
-        无任何在途 turn)忽略 grace,新鲜残留也收;共享 store(多 worker)保留 grace ——
-        兄弟进程可能正起新 turn,grace=0 会把它没来得及写 lease 的容器误删。
+        **只对本进程(WORKER_ID)自己的资源无 grace**:runner 已 shutdown = 我的 turn
+        全部结束,带我 worker-id 的容器/目录必是孤儿,新鲜的也立即收(闭合单副本 Redis
+        刚建即漏的缺口)。别的 worker 的资源照常走 grace —— 与副本数无关地正确,不靠
+        lease 时序论证(兄弟的活资源即便 lease 暂不可见,也因 worker-id 不同而被 grace 护住)。
         """
         await self._stop_loop()
-        ignore_grace = not getattr(self._store, "is_shared", False)
-        return await self.reap_once(ignore_grace=ignore_grace)
+        return await self.reap_once(no_grace_worker=WORKER_ID)
 
     async def _run(self) -> None:
         """启动立即扫一次,之后每 interval 扫一次。单跳异常不杀循环。"""
@@ -165,14 +167,15 @@ class SandboxReaper:
     # 扫描
     # ------------------------------------------------------------------
 
-    async def reap_once(self, *, ignore_grace: bool = False) -> ReapStats:
+    async def reap_once(self, *, no_grace_worker: Optional[str] = None) -> ReapStats:
         """一次完整对账:枚举资源 → 读活跃集 → 删孤儿。返回统计。
 
         活跃集**在枚举之后**读:让 mask 尽量贴近回收决策时刻;且 grace 已挡住
         "枚举期间新建的资源"(其年龄 < grace),两重保险。
 
-        ignore_grace 仅供 final_sweep 在进程本地 store(确无在途 turn)下用,周期扫
-        恒为 False。
+        no_grace_worker(仅 final_sweep 传):匹配该 worker-id 的资源**绕过 grace**
+        (本进程自己的、已确认结束的孤儿,新鲜也立即收);其余资源照常走 grace。
+        周期扫为 None = 所有资源都走 grace。
         """
         stats = ReapStats()
         now = time.time()
@@ -185,10 +188,11 @@ class SandboxReaper:
         stats.containers_seen = len(containers)
 
         # ① 容器:先回收(杀掉可能还在写 scratch 的僵尸),再处置目录
-        for container, conv, msg, created in containers:
+        for container, conv, msg, worker, created in containers:
             if self._is_active(active, conv, msg):
                 continue
-            if not ignore_grace and now - created <= self._grace:
+            bypass = no_grace_worker is not None and worker == no_grace_worker
+            if not bypass and now - created <= self._grace:
                 stats.skipped_young += 1
                 continue
             if await self._delete_container(container, conv, msg):
@@ -202,11 +206,12 @@ class SandboxReaper:
             parsed = parse_scratch_dir_name(name)
             if parsed is None:
                 continue
-            conv, msg = parsed
+            conv, msg, worker = parsed
             stats.dirs_seen += 1
             if self._is_active(active, conv, msg):
                 continue
-            if not ignore_grace and now - mtime <= self._grace:
+            bypass = no_grace_worker is not None and worker == no_grace_worker
+            if not bypass and now - mtime <= self._grace:
                 stats.skipped_young += 1
                 continue
             if await self._remove_scratch_dir(name):
@@ -229,8 +234,10 @@ class SandboxReaper:
             return False
         return active.get(conv) == msg
 
-    async def _list_sandbox_containers(self) -> List[Tuple[object, Optional[str], Optional[str], float]]:
-        """列本命名空间的沙盒容器(含已停止)→ [(container, conv, msg, created_unix)]。
+    async def _list_sandbox_containers(
+        self,
+    ) -> List[Tuple[object, Optional[str], Optional[str], Optional[str], float]]:
+        """列本命名空间的沙盒容器(含已停止)→ [(container, conv, msg, worker, created_unix)]。
 
         filters 必须 JSON 编码(Docker API 契约);namespace label 把共用 daemon 的
         其他部署挡在外面。
@@ -242,7 +249,7 @@ class SandboxReaper:
             ]
         })
         containers = await self._docker.containers.list(all=True, filters=filters)
-        out: List[Tuple[object, Optional[str], Optional[str], float]] = []
+        out: List[Tuple[object, Optional[str], Optional[str], Optional[str], float]] = []
         for c in containers:
             labels = c["Labels"] if "Labels" in c._container else {}
             labels = labels or {}
@@ -251,7 +258,13 @@ class SandboxReaper:
             if labels.get(LABEL_NAMESPACE) != self._namespace:
                 continue
             created = float(c["Created"]) if "Created" in c._container else 0.0
-            out.append((c, labels.get(LABEL_CONVERSATION), labels.get(LABEL_MESSAGE), created))
+            out.append((
+                c,
+                labels.get(LABEL_CONVERSATION),
+                labels.get(LABEL_MESSAGE),
+                labels.get(LABEL_WORKER),
+                created,
+            ))
         return out
 
     async def _delete_container(self, container, conv: Optional[str], msg: Optional[str]) -> bool:
