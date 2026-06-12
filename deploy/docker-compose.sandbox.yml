@@ -1,0 +1,37 @@
+# Sandbox DooD overlay — OPT-IN. Stack with the base compose file:
+#
+#   docker compose -f deploy/docker-compose.intranet.yml \
+#                  -f deploy/docker-compose.sandbox.yml [--profile infra] up -d
+#
+# Why a separate overlay: /var/run/docker.sock equals HOST ROOT for whoever
+# holds it. A deployment that doesn't grant the sandbox tools (bash/mount/
+# persist) must not carry that standing exposure, so the mount lives here,
+# not in the base file. The backend's only defense once the sock is mounted
+# is the DooD discipline (docs/architecture/sandbox.md): container-creation
+# params are backend constants, never model content.
+#
+# Path identity (the non-obvious constraint): the backend passes the per-turn
+# workspace dir as a bind SOURCE to the daemon, and the daemon resolves that
+# path on the HOST — so the scratch root must be mounted into the backend
+# container at the SAME absolute path it has on the host. One env var
+# (ARTIFACTFLOW_SANDBOX_SCRATCH_ROOT in deploy/.env) feeds both sides of the
+# bind below AND the app config, keeping the three in lockstep.
+#
+# Host prerequisites (docs/deployment.md → 沙盒执行环境): runsc installed +
+# registered in daemon.json (sandbox/gvisor-pkg), the sandbox image
+# docker-load'ed, and the scratch root prepared as a fixed-size loop
+# filesystem (the disk-quota hard wall).
+#
+# Sandbox containers are SIBLINGS of the backend (created via the daemon),
+# not children — backend mem_limit does not bound them; per-sandbox limits
+# come from ARTIFACTFLOW_SANDBOX_MEM_LIMIT_MB etc.
+
+services:
+  backend:
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${ARTIFACTFLOW_SANDBOX_SCRATCH_ROOT:-/var/lib/artifactflow/sandbox-scratch}:${ARTIFACTFLOW_SANDBOX_SCRATCH_ROOT:-/var/lib/artifactflow/sandbox-scratch}
+    environment:
+      # "" would mean daemon-default runc — prod sandboxes must run under gVisor.
+      - ARTIFACTFLOW_SANDBOX_RUNTIME=${ARTIFACTFLOW_SANDBOX_RUNTIME:-runsc}
+      - ARTIFACTFLOW_SANDBOX_SCRATCH_ROOT=${ARTIFACTFLOW_SANDBOX_SCRATCH_ROOT:-/var/lib/artifactflow/sandbox-scratch}

@@ -338,6 +338,53 @@ ssh target 'cd /opt/artifactflow && \
 
 ---
 
+## 沙盒执行环境（可选 overlay）
+
+`bash` / `mount` / `persist` 三个沙盒工具需要宿主侧前置 + 一个 compose overlay。**没有沙盒需求的部署跳过本节**——基础 compose 不挂 `docker.sock`，没有这个暴露面。架构与全部 `SANDBOX_*` 旋钮见 [架构 · 沙盒执行](architecture/sandbox.md)。
+
+随发布包额外携带三个传输单元（与应用包同一构建机产出）：**沙盒镜像** tar（`scripts/build-sandbox-image.sh`，注意按目标机选 `PLATFORM`）、**verify 探针** tar（同脚本产出，arch 无关）、**gVisor 包** tar（`sandbox/gvisor-pkg/fetch-and-package.sh`）。
+
+### 宿主前置（一次性，按顺序）
+
+1. **gVisor（runsc）**：解开 gVisor 包，`sudo ./install.sh && sudo systemctl reload docker && sudo ./smoke-test.sh`（内含 `unshare -U` 预检）。arm / 鲲鹏注意：Kylin V10 arm 默认 64K 页内核，gVisor 拒启——先用 `sandbox/kernel-4k-pkg/` 换 4K 内核再装（x86 跳过）。
+2. **沙盒镜像**：`gunzip -c artifactflow-sandbox-<ver>-<arch>.tar.gz | docker load`。
+3. **scratch 根 = 定容 loop 文件系统**（磁盘配额的硬墙层：watchdog race 窗口内写穿也只是池子满，宿主盘无恙；独立 inode 表顺带兜住海量小文件）：
+
+   ```bash
+   POOL=/var/lib/artifactflow/sandbox-pool.img
+   ROOT=/var/lib/artifactflow/sandbox-scratch
+   sudo mkdir -p "$(dirname "$POOL")" "$ROOT"
+   sudo fallocate -l 20G "$POOL"          # 容量 ≈ 并发 turn 数 × SANDBOX_WORKSPACE_QUOTA_MB(默认2G) + 余量
+   sudo mkfs.ext4 -m 0 "$POOL"
+   echo "$POOL $ROOT ext4 loop,nosuid,nodev 0 0" | sudo tee -a /etc/fstab
+   sudo mount "$ROOT" && df -h "$ROOT"    # 期望:定容 ext4 挂载成功
+   ```
+
+   不加 `noexec`——模型在工作区 `chmod +x` 后直接执行脚本是合法用法。
+4. **验证**：`tar xzf artifactflow-sandbox-verify-<ver>.tar.gz`，`IMAGE=artifactflow-sandbox:<ver>-<arch> bash verify/run-all.sh`，全绿后记录 manifest 里的 image id 作为本部署的冻结锚点。
+
+### 启动
+
+`deploy/.env` 增加（**路径必须与宿主一致**——overlay 把 scratch 根以同一绝对路径挂进 backend 容器，因为 backend 把工作区路径作为 bind source 传给 daemon、daemon 按宿主路径解析；改路径只改这一处 env，compose 两侧与应用配置同步取值）：
+
+```bash
+ARTIFACTFLOW_SANDBOX_SCRATCH_ROOT=/var/lib/artifactflow/sandbox-scratch
+# ARTIFACTFLOW_SANDBOX_RUNTIME 默认 runsc(overlay 内兜底),无需显式写
+```
+
+```bash
+docker compose -f deploy/docker-compose.intranet.yml \
+               -f deploy/docker-compose.sandbox.yml [--profile infra] up -d
+```
+
+> **安全提醒**：overlay 把 `/var/run/docker.sock` 挂进 backend 容器（等同宿主 root）。这是 DooD 架构的固有前提，防线是代码侧纪律——容器创建参数全为 backend 常量、绝不被模型内容污染（见架构文档「隔离边界」）。不要把这个 overlay 用在不需要沙盒的部署上。
+
+### 验证沙盒链路
+
+前端对话里让 agent 在沙盒里跑一条命令（例如"用 bash 运行 echo ok"）：应弹出权限确认 → 批准后返回输出。turn 结束后 `docker ps -a --filter label=artifactflow.sandbox` 应无残留容器、scratch 根下无残留目录（崩溃残留由 reaper 周期回收）。
+
+---
+
 ## 环境变量完整参考
 
 所有应用级变量使用 `ARTIFACTFLOW_` 前缀（通过 Pydantic Settings 自动映射），定义在 `src/config.py`。
