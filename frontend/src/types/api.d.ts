@@ -1777,6 +1777,11 @@ export interface components {
             execution_metrics: {
                 [key: string]: unknown;
             } | null;
+            /**
+             * Uploaded Files
+             * @description Files the user attached this turn, from Message.metadata_['uploaded_files']. Display-only (best-effort): absent for turns that failed before artifact flush.
+             */
+            uploaded_files: components["schemas"]["UploadedFileRef"][] | null;
         };
         /**
          * MoveDepartmentRequest
@@ -1899,6 +1904,22 @@ export interface components {
              * @description Department id; explicit null clears
              */
             department_id?: string | null;
+        };
+        /**
+         * UploadedFileRef
+         * @description File the user attached to a message (display-only snapshot)
+         */
+        UploadedFileRef: {
+            /**
+             * Id
+             * @description Artifact ID the upload was staged as
+             */
+            id: string;
+            /**
+             * Filename
+             * @description Original filename
+             */
+            filename: string;
         };
         /**
          * UserImpactResponse

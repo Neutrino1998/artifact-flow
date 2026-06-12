@@ -532,6 +532,13 @@ class ExecutionController:
                 execution_metrics = pp.final_state.get("execution_metrics", {})
                 if execution_metrics:
                     metadata_updates["execution_metrics"] = execution_metrics
+                # 本轮上传文件 [{id, filename}] — display-only 快照,供用户气泡在重载/
+                # 切分支后渲染附件(LLM 侧的归属在 USER_INPUT 事件里,与此互不依赖)。
+                # flush 失败不写:artifact 没落库,气泡不该声称附件存在(staging 失败
+                # 路径 uploaded_artifacts 已被 engine 清空,空列表自然跳过)。
+                uploaded_files = pp.final_state.get("uploaded_artifacts") or []
+                if uploaded_files and not pp.flush_error:
+                    metadata_updates["uploaded_files"] = uploaded_files
                 if metadata_updates:
                     try:
                         await self._with_db_retry(

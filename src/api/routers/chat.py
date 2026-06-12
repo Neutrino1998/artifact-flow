@@ -399,6 +399,7 @@ async def get_conversation(
                     created_at=msg.created_at,
                     children=children_map.get(msg.id, []),
                     execution_metrics=(msg.metadata_ or {}).get("execution_metrics"),
+                    uploaded_files=(msg.metadata_ or {}).get("uploaded_files"),
                 )
                 for msg in messages
             ],

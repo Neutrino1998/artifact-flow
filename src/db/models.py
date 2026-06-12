@@ -337,7 +337,8 @@ class Message(Base):
         nullable=False
     )
 
-    # 扩展元数据（顶层 keys: always_allowed_tools, execution_metrics；
+    # 扩展元数据（顶层 keys: always_allowed_tools, execution_metrics,
+    # uploaded_files=[{id, filename}] 本轮上传文件 display 快照；
     # last_input_tokens 嵌在 execution_metrics 内部）
     metadata_: Mapped[Optional[Dict[str, Any]]] = mapped_column(
         "metadata",

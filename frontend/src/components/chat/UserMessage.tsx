@@ -26,9 +26,15 @@ interface UserMessageProps {
    * maintaining two parallel JSX trees.
    */
   pending?: boolean;
+  /**
+   * Files the user attached this turn. Persisted path: MessageResponse.uploaded_files
+   * (best-effort — absent for turns that failed before artifact flush). Live path:
+   * filenames mirrored from the send-local staged files (streamStore.pendingUserFiles).
+   */
+  attachments?: { filename: string }[] | null;
 }
 
-function UserMessage({ content, messageId, parentId, siblingIndex = 0, siblingCount = 1, pending = false }: UserMessageProps) {
+function UserMessage({ content, messageId, parentId, siblingIndex = 0, siblingCount = 1, pending = false, attachments = null }: UserMessageProps) {
   const { copied, copy } = useCopyFeedback();
   const [editing, setEditing] = useState(false);
   const [editContent, setEditContent] = useState(content);
@@ -126,6 +132,23 @@ function UserMessage({ content, messageId, parentId, siblingIndex = 0, siblingCo
     <div className="flex justify-end group">
       <div className="relative max-w-[80%]">
         <div className="bg-panel-accent dark:bg-surface-dark rounded-bubble px-4 py-3 text-text-primary dark:text-text-primary-dark whitespace-pre-wrap break-words">
+          {attachments && attachments.length > 0 && (
+            <div className={`flex flex-wrap justify-end gap-1.5 ${content ? 'mb-2' : ''}`}>
+              {attachments.map((f, i) => (
+                <span
+                  key={`${f.filename}-${i}`}
+                  className="inline-flex items-center gap-1 max-w-[16rem] px-2 py-0.5 rounded bg-surface dark:bg-bg-dark text-xs text-text-secondary dark:text-text-secondary-dark"
+                  title={f.filename}
+                >
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                    <path d="M14 2v6h6" />
+                  </svg>
+                  <span className="truncate">{f.filename}</span>
+                </span>
+              ))}
+            </div>
+          )}
           {content}
         </div>
         {/* Action buttons and branch navigator on hover. Skipped entirely when

@@ -3705,6 +3705,21 @@
             ],
             "title": "Execution Metrics",
             "description": "Turn-level metrics from Message.metadata_['execution_metrics']: started_at, completed_at, total_duration_ms, total_token_usage, etc."
+          },
+          "uploaded_files": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/UploadedFileRef"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Uploaded Files",
+            "description": "Files the user attached this turn, from Message.metadata_['uploaded_files']. Display-only (best-effort): absent for turns that failed before artifact flush."
           }
         },
         "type": "object",
@@ -3715,7 +3730,8 @@
           "response",
           "created_at",
           "children",
-          "execution_metrics"
+          "execution_metrics",
+          "uploaded_files"
         ],
         "title": "MessageResponse",
         "description": "Message in conversation detail response"
@@ -3926,6 +3942,27 @@
         "type": "object",
         "title": "UpdateUserRequest",
         "description": "PUT /api/v1/admin/users/{id} request body.\n\nAll fields optional. department_id semantics: \u5b57\u6bb5\u88ab\u663e\u5f0f\u4f20\u5165\u65f6\u751f\u6548\uff08\u5305\u62ec\n\u4f20 null = \u6e05\u7a7a\u5f52\u5c5e\uff09\uff1b\u5b57\u6bb5\u7f3a\u7701 \u2192 \u4e0d\u6539\u3002\u8def\u7531\u901a\u8fc7 model_fields_set \u533a\u5206\u3002"
+      },
+      "UploadedFileRef": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id",
+            "description": "Artifact ID the upload was staged as"
+          },
+          "filename": {
+            "type": "string",
+            "title": "Filename",
+            "description": "Original filename"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "filename"
+        ],
+        "title": "UploadedFileRef",
+        "description": "File the user attached to a message (display-only snapshot)"
       },
       "UserImpactResponse": {
         "properties": {

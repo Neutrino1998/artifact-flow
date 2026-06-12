@@ -23,6 +23,7 @@ export function useChat() {
   const setConversations = useConversationStore((s) => s.setConversations);
   const setConversationActiveMessage = useConversationStore((s) => s.setConversationActiveMessage);
   const setPendingUserMessage = useStreamStore((s) => s.setPendingUserMessage);
+  const setPendingUserFiles = useStreamStore((s) => s.setPendingUserFiles);
   const setStreamParentId = useStreamStore((s) => s.setStreamParentId);
   const setSendError = useStreamStore((s) => s.setSendError);
   const resetStream = useStreamStore((s) => s.reset);
@@ -127,6 +128,9 @@ export function useChat() {
         }
 
         setPendingUserMessage(content);
+        // Always set (null when no files) so a follow-up text-only send doesn't
+        // inherit the previous turn's attachment chips on its live bubble.
+        setPendingUserFiles(files && files.length > 0 ? files.map((f) => f.name) : null);
         // Track rerun/edit parent for branchPath truncation
         if (parentMessageId !== undefined) {
           setStreamParentId(parentMessageId);
@@ -161,7 +165,7 @@ export function useChat() {
         return false;
       }
     },
-    [current?.id, lastMessageId, setPendingUserMessage, setStreamParentId, connect, setSendError, setConversations, setConversationActiveMessage, setArtifactSessionId, setArtifactPanelVisible]
+    [current?.id, lastMessageId, setPendingUserMessage, setPendingUserFiles, setStreamParentId, connect, setSendError, setConversations, setConversationActiveMessage, setArtifactSessionId, setArtifactPanelVisible]
   );
 
   // Switch to an existing conversation: tear down the previous conversation's
