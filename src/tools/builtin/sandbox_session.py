@@ -186,27 +186,31 @@ class SandboxSession:
         - not_started:本轮未起容器(注入文案传达"工作区为空、旧 mount 已失效")
         - unavailable:sticky 失败,复述原因(省掉模型再撞一次工具的回合)
         - running:工作区第一层清单(条数帽 SANDBOX_STATUS_MAX_ENTRIES,超出
-          显式计数),给 persist 的 path 决策当依据
+          显式 truncated 标记),给 persist 的 path 决策当依据
 
         同步方法(单层枚举,调用方按需 to_thread);枚举走 sandbox_fs.list_dir
         (fd 钉住、不跟链、不递归)—— 工作区是模型可写的树,纪律同 reaper。
+        **有界扫**(cap+1 即停):顶层条目数模型可控,全量物化是内存放大器;
+        代价 = 展示的是 readdir 序前缀(组内再排序),且只知"有没有更多"、
+        不知精确总数 —— glance 语义下足够。
         sticky 优先于 started 判定:超额杀后容器句柄已清但原因要复述。
         """
         if self._sticky_failure:
             return {"state": "unavailable", "reason": self._sticky_failure}
         if not self.started:
             return {"state": "not_started"}
+        cap = config.SANDBOX_STATUS_MAX_ENTRIES
         try:
-            entries = sandbox_fs.list_dir(self.workspace_dir)
+            entries = sandbox_fs.list_dir(self.workspace_dir, max_entries=cap + 1)
         except OSError:
             logger.exception(f"workspace listing failed for {self.message_id}")
-            return {"state": "running", "entries": None, "total": None}
-        entries.sort(key=lambda t: t[0])
-        shown = entries[: config.SANDBOX_STATUS_MAX_ENTRIES]
+            return {"state": "running", "entries": None, "truncated": False}
+        truncated = len(entries) > cap
+        shown = sorted(entries[:cap], key=lambda t: t[0])
         return {
             "state": "running",
             "entries": [(name, is_dir) for name, is_dir, _ in shown],
-            "total": len(entries),
+            "truncated": truncated,
         }
 
     # ------------------------------------------------------------------

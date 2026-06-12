@@ -503,9 +503,9 @@ class TestStatusSnapshot:
         snap = session.status_snapshot()
         assert snap["state"] == "running"
         assert snap["entries"] == [("a.txt", False), ("b.txt", False), ("sub", True)]
-        assert snap["total"] == 3
+        assert snap["truncated"] is False
 
-    def test_running_entries_capped_total_keeps_truth(self, session, monkeypatch):
+    def test_running_entries_capped_and_truncation_flagged(self, session, monkeypatch):
         monkeypatch.setattr(config, "SANDBOX_STATUS_MAX_ENTRIES", 3)
         os.makedirs(session.workspace_dir)
         for i in range(5):
@@ -514,7 +514,26 @@ class TestStatusSnapshot:
         session._container = object()
         snap = session.status_snapshot()
         assert len(snap["entries"]) == 3
-        assert snap["total"] == 5
+        assert snap["truncated"] is True
+
+    def test_snapshot_scan_is_bounded_not_full_materialize(self, session, monkeypatch):
+        # reviewer P2 回归:顶层条目数模型可控,快照必须有界扫(cap+1 即停),
+        # 不得全量物化整个目录 —— 断言传给 list_dir 的 max_entries
+        from tools.builtin import sandbox_session as ss_mod
+
+        monkeypatch.setattr(config, "SANDBOX_STATUS_MAX_ENTRIES", 3)
+        seen = {}
+        real_list_dir = ss_mod.sandbox_fs.list_dir
+
+        def spy(root, max_entries=None):
+            seen["max_entries"] = max_entries
+            return real_list_dir(root, max_entries=max_entries)
+
+        monkeypatch.setattr(ss_mod.sandbox_fs, "list_dir", spy)
+        os.makedirs(session.workspace_dir)
+        session._container = object()
+        session.status_snapshot()
+        assert seen["max_entries"] == 4  # cap + 1:够判 truncated,不多扫
 
     def test_running_workspace_dir_missing_is_empty_not_error(self, session):
         # list_dir 对不存在的根返回 [](容器刚起、目录竞态):报空清单而非炸
@@ -522,4 +541,4 @@ class TestStatusSnapshot:
         snap = session.status_snapshot()
         assert snap["state"] == "running"
         assert snap["entries"] == []
-        assert snap["total"] == 0
+        assert snap["truncated"] is False

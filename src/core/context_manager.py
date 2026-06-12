@@ -15,6 +15,7 @@ ContextManager 本身不再做任何截断。
 
 from typing import Dict, Any, List, Optional
 from datetime import datetime
+from xml.sax.saxutils import escape as xml_escape
 
 from config import config
 from core.event_history import build_event_history, last_llm_usage
@@ -238,9 +239,11 @@ class ContextManager:
 
         not_started 是高价值态:历史里上一轮 mount/bash 的成功记录会让模型以为
         文件还在，必须用现在时态的"工作区为空"对冲。running 态列工作区第一层
-        （session 侧已按 SANDBOX_STATUS_MAX_ENTRIES 截断，total 标记真实总数），
-        给 persist 的 path 决策当依据。文件名是模型可控内容，控制字符替换为 �
-        防止伪造清单行。
+        （session 侧有界扫 + SANDBOX_STATUS_MAX_ENTRIES 截断，truncated 标记有
+        更多），给 persist 的 path 决策当依据。文件名是**非可信输入**——不止
+        bash 可造任意名，第三方内容(上传的 zip 解压后)的名字也会进工作区第一
+        层——控制字符替换为 � 防伪造清单行，XML 元字符(& < >)转义防
+        `</sandbox_status>` 式的结构逃逸 / prompt injection。
         """
         state = sandbox_status.get("state")
         if state == "unavailable":
@@ -261,7 +264,6 @@ class ContextManager:
             )
         # running
         entries = sandbox_status.get("entries")
-        total = sandbox_status.get("total")
         lines = ['<sandbox_status state="running">']
         if entries is None:
             lines.append("Workspace listing unavailable (run `ls /workspace` to check).")
@@ -271,9 +273,13 @@ class ContextManager:
             lines.append("Workspace (/workspace) top-level entries:")
             for name, is_dir in entries:
                 safe = "".join(ch if ch >= " " and ch != "\x7f" else "�" for ch in name)
+                safe = xml_escape(safe)
                 lines.append(f"- {safe}/" if is_dir else f"- {safe}")
-            if total is not None and total > len(entries):
-                lines.append(f"(+{total - len(entries)} more not shown)")
+            if sandbox_status.get("truncated"):
+                lines.append(
+                    f"(listing capped at {len(entries)} entries — more exist; "
+                    "run `ls /workspace` for the full view)"
+                )
         lines.append("</sandbox_status>")
         return "\n".join(lines)
 

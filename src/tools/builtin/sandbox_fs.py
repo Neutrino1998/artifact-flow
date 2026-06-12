@@ -25,7 +25,7 @@ openat 做的事,但 dev mac 无;逐级 openat 是可移植等价物。)
 import errno
 import os
 import stat
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 # 每个目录项(文件或目录)的最低计费 = 一个 ext4 块。块占用本身已含此量级,
 # 但有些 fs(APFS / tmpfs)对空目录报 st_blocks=0,会留下"海量空目录/inode 耗尽
@@ -186,7 +186,7 @@ def read_file(workspace_dir: str, rel: str, max_bytes: int) -> bytes:
             os.close(fd)
 
 
-def list_dir(root: str) -> List[Tuple[str, bool, float]]:
+def list_dir(root: str, max_entries: Optional[int] = None) -> List[Tuple[str, bool, float]]:
     """fd 钉住列 root 的**直属条目**(只一层,绝不递归)→ [(name, is_dir, mtime)]。
 
     C-reap 的 scratch 第二枚举源。开 `O_DIRECTORY|O_NOFOLLOW` + `scandir(fd)`,
@@ -194,6 +194,11 @@ def list_dir(root: str) -> List[Tuple[str, bool, float]]:
     不下探**:reaper 只需根目录直属的 `{conv}__{msg}` 目录名做 label 反解差集,
     按名字递归进子目录会重蹈 watchdog 的目录 TOCTOU(活跃容器能把子目录换成池外链)。
     要看子树内容才走 measure_usage。
+
+    max_entries:有界扫——收满即停,不物化整个目录(状态快照用:工作区顶层条目数
+    模型可控,ext4 池子 inode 表撑得起百万级,全量收集是内存放大器)。None = 全量
+    (reaper 的差集枚举需要完整性,绝不能传 cap)。返回条目为 readdir 序前缀,
+    无任何排序保证。
 
     root 不存在 → []。其余 OSError 上抛(reaper 这一跳 fail-soft 记日志,与计量的
     fail-closed 语义不同:枚举不全只是少收一个孤儿,下个 tick 再收,不影响安全)。
@@ -206,6 +211,8 @@ def list_dir(root: str) -> List[Tuple[str, bool, float]]:
     try:
         with os.scandir(root_fd) as scan:
             for entry in scan:
+                if max_entries is not None and len(out) >= max_entries:
+                    break
                 try:
                     st = entry.stat(follow_symlinks=False)
                 except OSError:
