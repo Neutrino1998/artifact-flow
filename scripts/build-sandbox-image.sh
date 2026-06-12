@@ -85,7 +85,11 @@ docker save "${IMAGE}" artifactflow-sandbox:latest | gzip > "$ARCHIVE"
 # the air-gapped node. --no-xattrs/--no-fflags + .DS_Store/__pycache__ excludes
 # mirror release.sh's tar hygiene.
 echo "Packaging verify probes to ${VERIFY_ARCHIVE}..."
-tar --no-xattrs --no-fflags --exclude='.DS_Store' --exclude='__pycache__' \
+# COPYFILE_DISABLE: 同 release.sh —— bsdtar 的 --mac-metadata 层会为带 xattr 的
+# 文件生成 AppleDouble `._*` 兄弟条目(--no-xattrs 不覆盖),落到 Linux 端是真实
+# 二进制垃圾文件。
+COPYFILE_DISABLE=1 \
+tar --no-xattrs --no-fflags --exclude='.DS_Store' --exclude='._*' --exclude='__pycache__' \
     -czf "$VERIFY_ARCHIVE" -C "$ROOT/sandbox" verify
 ( cd "$OUTDIR" && sha256sum "$(basename "$VERIFY_ARCHIVE")" > "$(basename "$VERIFY_ARCHIVE").sha256" )
 

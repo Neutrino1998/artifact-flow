@@ -17,7 +17,7 @@ tools:
   bash: confirm
   mount: auto
   persist: auto
-model: qwen3.7-plus
+model: qwen3.7-max
 max_tool_rounds: 100
 ---
 

@@ -62,3 +62,13 @@ def test_load_all_agents_aggregates_all_errors(tmp_path):
         load_all_agents(str(tmp_path))
     msg = str(exc.value)
     assert "bad1.md" in msg and "bad2.md" in msg
+
+
+def test_load_all_agents_skips_hidden_files(tmp_path):
+    """隐藏文件(macOS AppleDouble `._x.md` / .DS_Store 类)永远不是配置 ——
+    2026-06-12 内网部署 config tar 带入二进制 `._lead_agent.md` 拒启。
+    跳过隐藏文件,但非隐藏的坏文件仍 loud-fail。"""
+    _write(tmp_path, "good.md", VALID)
+    (tmp_path / "._good.md").write_bytes(b"\x00\x05\x16\x07\xa3 AppleDouble junk")
+    agents = load_all_agents(str(tmp_path))
+    assert list(agents) == ["good_agent"]
