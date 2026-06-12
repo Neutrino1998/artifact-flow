@@ -73,6 +73,7 @@ models:
 | `model` | string | LiteLLM 模型标识，格式 `provider/model-id`（OpenAI 可省略前缀） |
 | `base_url` | string | 自定义 API 端点（自部署模型、OpenAI 兼容接口必填） |
 | `api_key` | string | 硬编码 API key（不推荐，优先用环境变量） |
+| `vision` | bool | 多模态（识图）支持，默认 `false`。`read_artifact` 据此决定是否向该模型注入图块：`true` → 读图时收 `image_url` 多模态块；`false` → 只得占位文本（不发图块——文本模型收到会被 provider 端拒）。多模态模型**不声明就拿不到识图能力** |
 | `params.temperature` | float | 采样温度 |
 | `params.max_tokens` | int | 最大输出 tokens |
 | `params.top_p` / `top_k` | float / int | 核采样参数 |

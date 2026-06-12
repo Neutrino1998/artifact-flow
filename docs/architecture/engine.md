@@ -118,7 +118,7 @@ flowchart LR
 
 ### System Prompt 组装（稳定可缓存前缀）
 
-System prompt 只放**全 session 稳定**的内容，作为 prompt cache 的可缓存前缀；每轮刷新的动态上下文（系统时间 / task_plan / artifact 清单 / context 水位）一律移到消息尾部的 `<system-reminder>`（见下节），避免它们坐在前缀里把后续历史的缓存全部打掉。
+System prompt 只放**全 session 稳定**的内容，作为 prompt cache 的可缓存前缀；每轮刷新的动态上下文（系统时间 / task_plan / artifact 清单 / 沙盒状态 / context 水位）一律移到消息尾部的 `<system-reminder>`（见下节），避免它们坐在前缀里把后续历史的缓存全部打掉。
 
 ```
 ┌─────────────────────────────────────────┐
@@ -139,6 +139,7 @@ System prompt 只放**全 session 稳定**的内容，作为 prompt cache 的可
 - **System Time**：始终注入（刻意用本地时间，属 UX）
 - **Task Plan**：有 `id="task_plan"` artifact 时注入全文（版本号、内容类型、来源、更新时间）
 - **Artifacts Inventory**：有 artifact 工具的 agent 注入；每个 artifact 内容截断到 `INVENTORY_PREVIEW_LENGTH`（预览）
+- **Sandbox Status**：有沙盒工具（`bash`/`mount`/`persist`）的 agent 且引擎递了快照时注入 `<sandbox_status>` 三态（未启动 / 运行中含工作区文件清单 / 不可用），对抗「历史轮 mount 过 → 文件还在」的跨轮伪证。状态渲染、文件名转义与有界扫纪律见 [sandbox.md](sandbox.md)
 - **Context Usage**：仅当上一次 LLM 调用的 `input+output ≥ CONTEXT_USAGE_WARN_RATIO × COMPACTION_TOKEN_THRESHOLD`（默认 0.8）时，注入 `<context_usage>` 水位预警 —— 显示 `X / 阈值 (NN%)`，并提示把要据此**动作**的状态落 artifact（artifact 活在 compaction 边界之外、每轮在 inventory 里，summary 可能丢细节）。水位以下整段不出现，避免每轮 cry-wolf。取数走 `last_llm_usage(events, agent_name)`：按 agent 过滤 + 在最近 compaction 边界后取最近一次 `llm_complete` 的 `token_usage`（与触发口径 input+output 一致；直接读原始事件，**不受**「content 空则丢 `_meta`」影响，故「高 input + 空 content」也能预警）。前端 composer 的 gauge 用同一口径（见下文 *Compaction 机制* 的 metrics 说明）。
 
 ### 消息构建
@@ -160,7 +161,7 @@ System prompt 只放**全 session 稳定**的内容，作为 prompt cache 的可
 | `SUBAGENT_INSTRUCTION` | user 消息（subagent 收到的指令） |
 | `QUEUED_MESSAGE` | user 消息（执行中注入） |
 | `LLM_COMPLETE` | assistant 消息（附 `_meta` token 信息） |
-| `TOOL_COMPLETE` | user 消息（XML 格式化的工具结果） |
+| `TOOL_COMPLETE` | user 消息（XML 格式化的工具结果；携图片引用时见下文*识图：图块缓存与还原*） |
 
 两种 agent 类型的差异：
 
@@ -170,6 +171,20 @@ System prompt 只放**全 session 稳定**的内容，作为 prompt cache 的可
 | 历史可见性 | 最近 compaction_summary 之后的全部 lead 事件（跨多轮消息） | 仅当前 subagent 会话（上一次 fresh_start 之后） |
 
 > 注：引擎不做任何"token 预算截断"。上下文增长到超过阈值时由下节的 **Compaction** 处理；compaction 失败 → 当前 turn 标 ERROR（见下节 *失败处理*）。
+
+### 识图：图块缓存与还原（vision blocks）
+
+`read_artifact` 读到图片（png/jpeg）时，图字节**绝不进事件表**（撑爆 + 与「blob 有专属持久家」冲突）。引擎把 data-URI 从将入事件的 metadata 里摘出，存进 `state["vision_blocks"]`（key 为 `(artifact_id, version)`，仅内存、不持久化、跨轮自然失效）；`tool_complete` 事件只留引用（`artifact_id`/`version`/`content_type`）。
+
+消息构建时（`event_history._events_to_messages`）对照缓存还原，按两个条件门控：
+
+| 缓存命中（本轮读过） | 模型 `vision: true` | 结果 |
+|---|---|---|
+| ✅ | ✅ | content 扩成 `[文本块, image_url 图块]` 多模态列表 |
+| ❌（跨轮，state 已空） | ✅ | 文本附占位：「需要再看就重读 artifact」 |
+| 任意 | ❌ | 文本附占位：「本模型不识图」——绝不诱导无效重读，也不发 image_url 块（文本模型会被 provider 端拒，见 `model_supports_vision`） |
+
+两种占位文案语义不同、不可混用：识图模型重读即可重新看到；文本模型重读也永远看不到。`vision_capable` 来自 models.yaml 的 `vision` 字段（见 [添加 Model](../guides/add-model.md)）。注意末条消息为图块列表时，`<system-reminder>` 作为附加 text block 追加而非字符串拼接（否则整个 list 被 stringify、毁掉图块结构）。
 
 ## Compaction 机制
 

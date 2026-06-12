@@ -40,7 +40,7 @@ COMPLETED | CANCELLED_BY_USER | CANCELLED_BY_SYSTEM | TIMED_OUT | FAILED | ORPHA
 | `RUNNING → TIMED_OUT` | controller `decide_terminal` | append `TIMED_OUT`；events 落库；`Message.response = TIMED_OUT_RESPONSE`；SSE 转发终态。flush_all 照常跑（best-effort 保留部分 artifact） |
 | `RUNNING → CANCELLED` | controller `decide_terminal` / `ensure_terminal` / engine_task | append `CANCELLED`(+reason)；events 落库；`Message.response = CANCELLED_RESPONSE_BY_{USER,SYSTEM}` |
 | `RUNNING → ERROR` | engine（自 append ERROR）/ controller（flush_error） | events 落库；`Message.response = state.response or fallback` |
-| `* → CLOSED` | `_wrapped` finally | release lease；clear interactive；close stream |
+| `* → CLOSED` | `_wrapped` finally | 先跑本轮注册的资源 cleanup 回调（`runner.register_cleanup`，逆序、每个 30s 有界弃等；当前唯一注册方是沙盒拆除，见 [sandbox.md](sandbox.md)）→ release lease；clear interactive；close stream。顺序刻意：资源先于 lease 消亡，不留「lease 已放、容器还在」的孤儿窗口（进程崩溃跳过 finally 的残留由 reaper 兜底） |
 
 ## 为什么 cancel 只作用于 RUNNING
 
