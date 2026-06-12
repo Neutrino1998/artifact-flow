@@ -421,6 +421,25 @@ class TestArtifactsAndAgents:
         assert "artifacts_inventory" in reminder
         assert "Document" in reminder
 
+    def test_grep_only_agent_shows_inventory(self):
+        """只有 grep_artifact 也算 artifact 工具 —— 没清单就不知道有哪些 artifact 可 grep。"""
+        agent = _FakeAgentConfig(tools={"grep_artifact": "auto"})
+        artifacts = [
+            {"id": "doc1", "title": "Document", "version": 2, "content_type": "text/plain",
+             "content": "Some content", "updated_at": "2024-01-01", "source": "agent"},
+        ]
+        state = _make_state(events=[
+            _make_event(StreamEventType.USER_INPUT.value, data={"content": "hi"}),
+        ])
+
+        messages = _build(
+            agent, state=state, tools={},
+            artifacts_inventory=artifacts,
+        )
+        reminder = messages[-1]["content"]
+        assert "artifacts_inventory" in reminder
+        assert "Document" in reminder
+
     def test_artifact_tools_empty_inventory_shows_explicit_none(self):
         """有 artifact 工具但工作区为空 → 仍输出显式 live 清单，避免模型回退去读静态创作指引。"""
         agent = _FakeAgentConfig(tools={"create_artifact": "auto"})

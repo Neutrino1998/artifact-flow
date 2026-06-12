@@ -173,7 +173,8 @@ class ContextManager:
         # 显式的 live 清单（"暂无 artifact"），否则模型找不到当前状态会回退去读
         # system prompt 里静态的 <artifact_authoring> 创作指引，误当成空清单。
         has_artifact_tools = any(t in agent_config.tools for t in [
-            "create_artifact", "update_artifact", "rewrite_artifact", "read_artifact"
+            "create_artifact", "update_artifact", "rewrite_artifact",
+            "read_artifact", "grep_artifact"
         ])
         if has_artifact_tools:
             parts.append(cls._build_artifacts_inventory(artifacts_inventory))
