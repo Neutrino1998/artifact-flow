@@ -109,6 +109,32 @@ class TestExternalCancel:
             await outer
         assert child_cancelled.is_set()
 
+    async def test_external_cancel_during_cleanup_wins_over_cooperative(self):
+        """外部 cancel 落在「协作取消已触发、正在 await 子 task 收尾」的窗口 →
+        透出的必须是 CancelledError（外部语义优先），不能被收尾段吞掉后改写成
+        CooperativeCancelled —— 否则 fenced task 会以协作路径继续跑 post-processing
+        （静默第二写者）/ TIMED_OUT 被记成 CANCELLED。reviewer F1 回归。"""
+        cleanup_entered = asyncio.Event()
+        release_cleanup = asyncio.Event()
+
+        async def work():
+            try:
+                await asyncio.sleep(30)
+            except asyncio.CancelledError:
+                cleanup_entered.set()
+                await release_cleanup.wait()  # 把收尾窗口撑开
+                raise
+
+        outer = asyncio.create_task(run_cancellable(work(), _always_cancelled, 0.01))
+        # 协作取消已触发（子 task 进入收尾）、helper 正阻塞在 await task 上
+        await cleanup_entered.wait()
+        outer.cancel()  # 外部 cancel 打进收尾窗口
+        with pytest.raises(asyncio.CancelledError):
+            await outer
+        # 放掉子 task 收尾，避免测试退出时留 pending task
+        release_cleanup.set()
+        await asyncio.sleep(0.01)
+
 
 class TestPredicateFailure:
 

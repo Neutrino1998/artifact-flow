@@ -885,6 +885,133 @@ class TestCancellation:
 # ============================================================
 
 
+class TestCancelProbeFailure:
+    """check_cancelled 探针故障（Redis 瞬断）的 fail-open 语义（reviewer F2 回归）：
+    探针异常绝不伪装成它所落的消费点的故障 —— 工具不被杀、流式不记 "LLM call
+    failed"、loop 顶不 ERROR 整个 turn。持续故障的 fail-closed 兜底在
+    heartbeat/lease 层（execution_runner 连续失败 → 外部 task.cancel），不在探针。"""
+
+    @staticmethod
+    def _hooks_with_flaky_probe(store, flaky):
+        return EngineHooks(
+            check_cancelled=flaky,
+            wait_for_interrupt=store.wait_for_interrupt,
+            drain_messages=store.drain_messages,
+        )
+
+    async def test_probe_failure_during_tool_keeps_tool_alive(self):
+        """探针一次性故障落在工具在飞期间 → 工具不受惊扰、结果如实、turn 正常完成。"""
+        store = InMemoryRuntimeStore()
+        in_tool = {"armed": False}
+
+        async def flaky(message_id):
+            if in_tool["armed"]:
+                in_tool["armed"] = False
+                raise RuntimeError("cancel store timeout")
+            return await store.is_cancelled(message_id)
+
+        class _SlowTool(BaseTool):
+            def __init__(self):
+                super().__init__(name="slow", description="slow", permission=ToolPermission.AUTO)
+
+            def get_parameters(self):
+                return []
+
+            async def execute(self, **p):
+                in_tool["armed"] = True  # 让下一拍探针在我们在飞时爆
+                await asyncio.sleep(0.05)  # 跨过若干个 0.01s 轮询 tick
+                return ToolResult(success=True, data="slow-ok")
+
+            async def __call__(self, **p):
+                return await self.execute(**p)
+
+        lead = _FakeAgentConfig(tools={"slow": "auto"})
+        rounds = [
+            _tool_call_chunks(_tool_call_xml("slow")),
+            _simple_llm_chunks("Done"),
+        ]
+        state = create_initial_state(task="t", session_id="s1", message_id="msg-1", path_events=[])
+        emitted = []
+
+        async def capture(e):
+            emitted.append(e)
+
+        with patch("models.llm.astream_with_retry", _make_fake_stream_sequence(rounds)), \
+             patch("core.engine.config.CANCEL_CHECK_INTERVAL", 0.01):
+            result = await execute_loop(
+                state=state,
+                agents={"lead_agent": lead},
+                tools={"slow": _SlowTool()},
+                hooks=self._hooks_with_flaky_probe(store, flaky),
+                emit=capture,
+            )
+
+        assert result["completed"] is True
+        assert not result.get("cancelled")
+        assert not result.get("error")
+        assert result["response"] == "Done"
+        completes = _events_of_type(emitted, "tool_complete")
+        assert len(completes) == 1
+        assert completes[0]["data"]["success"] is True
+        assert completes[0]["data"]["result_data"] == "slow-ok"
+        # 探针确实在工具在飞期间被打过且失败过（armed 被消费）
+        assert in_tool["armed"] is False
+
+    async def test_probe_failure_at_loop_top_does_not_error_turn(self):
+        """探针故障落在 loop 顶 → turn 不 ERROR，正常跑完。"""
+        store = InMemoryRuntimeStore()
+        calls = {"n": 0}
+
+        async def flaky(message_id):
+            calls["n"] += 1
+            if calls["n"] == 1:  # 第一次调用 = while 顶部检查
+                raise RuntimeError("cancel store timeout")
+            return await store.is_cancelled(message_id)
+
+        state = create_initial_state(task="t", session_id="s1", message_id="msg-1", path_events=[])
+
+        with patch("models.llm.astream_with_retry", _make_fake_stream(_simple_llm_chunks("Done!"))):
+            result = await execute_loop(
+                state=state,
+                agents={"lead_agent": _FakeAgentConfig()},
+                tools={},
+                hooks=self._hooks_with_flaky_probe(store, flaky),
+                emit=None,
+            )
+
+        assert result["completed"] is True
+        assert not result.get("error")
+        assert result["response"] == "Done!"
+
+    async def test_probe_failure_mid_stream_not_llm_failure(self):
+        """探针故障落在 LLM 流式轮询 → 不得被记成 "LLM call failed" 的 ERROR。"""
+        store = InMemoryRuntimeStore()
+        calls = {"n": 0}
+
+        async def flaky(message_id):
+            calls["n"] += 1
+            if calls["n"] == 2:  # 1=loop 顶；2=第一个 chunk 的流式轮询
+                raise RuntimeError("cancel store timeout")
+            return await store.is_cancelled(message_id)
+
+        state = create_initial_state(task="t", session_id="s1", message_id="msg-1", path_events=[])
+
+        with patch("models.llm.astream_with_retry", _make_fake_stream(_simple_llm_chunks("Done!"))), \
+             patch("core.engine.config.CANCEL_CHECK_INTERVAL", 0):
+            result = await execute_loop(
+                state=state,
+                agents={"lead_agent": _FakeAgentConfig()},
+                tools={},
+                hooks=self._hooks_with_flaky_probe(store, flaky),
+                emit=None,
+            )
+
+        assert calls["n"] >= 2  # 故障确实落在流式轮询上
+        assert result["completed"] is True
+        assert not result.get("error")
+        assert result["response"] == "Done!"
+
+
 class TestRoundLimits:
 
     async def test_max_tool_rounds_injects_system_message(self):

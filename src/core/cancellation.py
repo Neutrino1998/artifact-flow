@@ -40,6 +40,22 @@ class CooperativeCancelled(Exception):
     """
 
 
+def _consume_task_exception(task: "asyncio.Task") -> None:
+    """done-callback：消费被遗弃子 task 的收尾异常。
+
+    外部 cancel 打断「等子 task 收尾」时我们不再阻塞等待（见 run_cancellable
+    收尾段），子 task 若在之后的收尾中抛非 Cancelled 异常，无人 retrieve 会在
+    GC 时打 "exception was never retrieved" —— 在此消费并降为 warning。
+    """
+    if task.cancelled():
+        return
+    exc = task.exception()
+    if exc is not None:
+        logger.warning(
+            f"run_cancellable: abandoned awaitable raised during cancel cleanup: {exc}"
+        )
+
+
 async def run_cancellable(
     awaitable: Awaitable[Any],
     is_cancelled: Callable[[], Awaitable[bool]],
@@ -49,7 +65,10 @@ async def run_cancellable(
 
     Args:
         awaitable: 要执行的 coroutine（在此被包成 task）
-        is_cancelled: 零参 async 谓词（调用方预绑定 message_id），True = 已请求取消
+        is_cancelled: 零参 async 谓词（调用方预绑定 message_id），True = 已请求取消。
+            **谓词异常会取消在飞 awaitable 并原样穿透** —— 原语不内嵌「探针失败算
+            什么」的策略，调用方自己决定（engine 的 `_is_cancelled` 选择 fail-open：
+            探针失败按未取消处理，否则异常落在哪个消费点就伪装成哪个消费点的故障）
         poll_interval: 轮询间隔秒。由调用方显式传入（通常 config.CANCEL_CHECK_INTERVAL）
             而非本模块自读 config —— 测试桩 patch 的是调用方模块的 config。
 
@@ -81,7 +100,18 @@ async def run_cancellable(
             try:
                 await task
             except asyncio.CancelledError:
-                pass
+                # 这里的 CancelledError 有两个不可区分的来源：子 task 的取消回报
+                # （正常，吞掉、走外层 raise 原路 re-raise），或 **我们自己** 在等
+                # 收尾时被外部 cancel（fencing / 引擎超时落在这个窗口）。后者必须
+                # 让位 —— 吞掉会让 fenced task 以 CooperativeCancelled 继续跑完
+                # post-processing（静默第二写者）/ TIMED_OUT 被记成 CANCELLED。
+                # 判别用 cancelling()（3.11+）：>0 = 有未消化的外部 cancel 请求挂
+                # 在本 task 上 → 原样 re-raise CancelledError；不再阻塞等子 task
+                # 收尾（外部 cancel 不容等待），挂 done-callback 消费其收尾异常。
+                cur = asyncio.current_task()
+                if cur is not None and cur.cancelling() > 0:
+                    task.add_done_callback(_consume_task_exception)
+                    raise
             except Exception as cleanup_err:
                 # 子 task 在取消收尾中抛了别的 —— 只记日志，不掩盖原始控制流
                 logger.warning(

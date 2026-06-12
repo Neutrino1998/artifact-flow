@@ -178,8 +178,23 @@ async def execute_loop(
     tool_round_count: Dict[str, int] = {}  # per-agent tool round counter
 
     async def _is_cancelled() -> bool:
-        """零参谓词：协作式 cancel flag（预绑定 message_id，供 run_cancellable 轮询）。"""
-        return await hooks.check_cancelled(message_id)
+        """零参谓词：协作式 cancel flag（预绑定 message_id）——所有消费点的唯一入口。
+
+        探针失败（Redis 瞬断等）按「未取消」处理（fail-open + warning）：探针是纯
+        UX 信号，失灵的最坏后果是取消晚一拍生效（下个 CANCEL_CHECK_INTERVAL 自然
+        重试）；store 持续不可用的 fail-closed 兜底在 heartbeat/lease 层（连续失败
+        → 外部 task.cancel，execution_runner）。绝不让探针异常往上穿 —— 否则它落
+        在哪个消费点就伪装成哪个消费点的故障（工具被杀且记成工具失败 / 流式期间记
+        成 "LLM call failed" / loop 顶记成 turn ERROR）。
+        """
+        try:
+            return await hooks.check_cancelled(message_id)
+        except Exception as probe_err:
+            logger.warning(
+                f"cancel-flag probe failed for {message_id} "
+                f"(treated as not-cancelled, retried next tick): {probe_err}"
+            )
+            return False
 
     compaction_runner = CompactionRunner(
         agents=agents, emit=emit, check_cancelled=_is_cancelled
@@ -466,7 +481,9 @@ async def execute_loop(
                 now = time.monotonic()
                 if now - last_cancel_check >= config.CANCEL_CHECK_INTERVAL:
                     last_cancel_check = now
-                    if await hooks.check_cancelled(message_id):
+                    # 经软化谓词而非 hooks 直连:探针异常在这里穿出会被下面的
+                    # except 记成 "LLM call failed" 的 ERROR 终态(伪装故障源)。
+                    if await _is_cancelled():
                         cancelled_mid_stream = True
                         break
 
@@ -893,7 +910,9 @@ async def execute_loop(
             tool_round_count[agent_name] = tool_round_count.get(agent_name, 0) + 1
 
     async def _check_cancelled() -> bool:
-        if await hooks.check_cancelled(message_id):
+        # 同走软化谓词:探针异常在 loop 顶/工具间穿出会被 while 外层
+        # except Exception 记成 turn ERROR(一次 Redis 抖动杀掉整个 turn)。
+        if await _is_cancelled():
             state["completed"] = True
             state["cancelled"] = True
             state["response"] = state.get("response", "") or ""
