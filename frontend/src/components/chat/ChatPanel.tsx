@@ -29,6 +29,7 @@ export default function ChatPanel() {
   const currentLoading = useConversationStore((s) => s.currentLoading);
   const isStreaming = useStreamStore((s) => s.isStreaming);
   const pendingUserMessage = useStreamStore((s) => s.pendingUserMessage);
+  const pendingUserFiles = useStreamStore((s) => s.pendingUserFiles);
   const sendError = useStreamStore((s) => s.sendError);
 
   const conversationBrowserVisible = useUIStore((s) => s.conversationBrowserVisible);
@@ -109,6 +110,7 @@ export default function ChatPanel() {
                 messageId=""
                 parentId={null}
                 pending
+                attachments={pendingUserFiles?.map((filename) => ({ filename }))}
               />
             )}
             <StreamingMessage />
