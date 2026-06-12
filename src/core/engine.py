@@ -20,6 +20,7 @@ from config import config
 from core.events import StreamEventType, ExecutionEvent
 from core.context_manager import ContextManager
 from core.compaction_runner import CompactionRunner
+from core.cancellation import CooperativeCancelled, run_cancellable
 from tools.artifact_envelope import make_preview_slice, render_artifact_slice
 from tools.xml_parser import parse_tool_calls
 from tools.base import BaseTool, ToolPermission, ToolResult
@@ -175,7 +176,14 @@ async def execute_loop(
 
     message_id = state["message_id"]
     tool_round_count: Dict[str, int] = {}  # per-agent tool round counter
-    compaction_runner = CompactionRunner(agents=agents, emit=emit)
+
+    async def _is_cancelled() -> bool:
+        """零参谓词：协作式 cancel flag（预绑定 message_id，供 run_cancellable 轮询）。"""
+        return await hooks.check_cancelled(message_id)
+
+    compaction_runner = CompactionRunner(
+        agents=agents, emit=emit, check_cancelled=_is_cancelled
+    )
 
     # NOTE: the USER_INPUT event (+ uploaded-file attribution + force_compact
     # directive) is built AFTER `_emit` is defined and uploads are staged —— see
@@ -824,8 +832,26 @@ async def execute_loop(
                 "tool": tool_name, "params": params,
             })
 
+            # 可打断 await：cancel flag 在工具在飞期间按 CANCEL_CHECK_INTERVAL 被轮询，
+            # 命中即 task.cancel() 在飞工具 —— cancel 延迟不再受 per-tool 超时
+            # （bash SANDBOX_COMMAND_TIMEOUT / HttpTool per-MD timeout）支配。
+            # 取消落入正常 TOOL_COMPLETE 流（success=False）：START/COMPLETE 配对
+            # 不变量保持，下一轮 history 里模型能看到"这次调用被用户打断"。
+            # 随后的 _check_cancelled（下个工具前 / while 顶部）置终态 flag 收口。
             try:
-                tool_result = await tool(**params)
+                tool_result = await run_cancellable(
+                    tool(**params), _is_cancelled, config.CANCEL_CHECK_INTERVAL
+                )
+            except CooperativeCancelled:
+                logger.info(f"Tool '{tool_name}' interrupted by user cancel mid-flight")
+                tool_result = ToolResult(
+                    success=False,
+                    error=(
+                        "Cancelled by user while the tool was running. "
+                        "Side effects may or may not have been applied "
+                        "(the operation was already in flight)."
+                    ),
+                )
             except Exception as e:
                 logger.exception(f"Tool '{tool_name}' execution error: {e}")
                 tool_result = ToolResult(success=False, error=str(e))
@@ -935,6 +961,19 @@ async def execute_loop(
                     input_tokens=normalized_usage["input_tokens"],
                     output_tokens=normalized_usage["output_tokens"],
                 )
+            except CooperativeCancelled:
+                # 用户 cancel 落在 compaction LLM 调用期间（原本是最长的盲窗：
+                # COMPACTION_TIMEOUT 秒）。maybe_trigger 的 except Exception 已配对
+                # 追加 success=False 的 compaction_summary（EventHistory 跳过，无
+                # boundary）—— 此处只需路由到 CANCELLED 终态，不能落进下面的
+                # ERROR 分支。
+                logger.info(
+                    f"Compaction for {current_agent_name} interrupted by user cancel"
+                )
+                state["completed"] = True
+                state["cancelled"] = True
+                state["response"] = state.get("response", "") or ""
+                break
             except Exception as compact_error:
                 logger.error(f"Compaction failed for {current_agent_name}: {compact_error}")
                 # record-not-emit:turn 末由 decide_terminal 统一发射 ERROR。

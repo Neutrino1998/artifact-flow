@@ -756,6 +756,58 @@ class TestCancellation:
         assert result["cancelled"] is True
         assert result["completed"] is True
 
+    async def test_cancel_interrupts_in_flight_tool(self):
+        """Cancel while a tool await is in flight → run_cancellable cancels the
+        tool task immediately (no waiting out the per-tool timeout), a paired
+        TOOL_COMPLETE(success=False) is emitted, and the turn ends CANCELLED."""
+        store = InMemoryRuntimeStore()
+        message_id = "msg-cancel-tool"
+        child_cancelled = asyncio.Event()
+
+        class _HangingTool(BaseTool):
+            def __init__(self):
+                super().__init__(name="hang", description="hangs", permission=ToolPermission.AUTO)
+
+            def get_parameters(self):
+                return []
+
+            async def execute(self, **p):
+                # Set the cancel flag once we're in flight, then hang far past
+                # anything the test should wait — only task.cancel() ends this.
+                await store.request_cancel(message_id)
+                try:
+                    await asyncio.sleep(30)
+                except asyncio.CancelledError:
+                    child_cancelled.set()
+                    raise
+                return ToolResult(success=True, data="never")
+
+            async def __call__(self, **p):
+                return await self.execute(**p)
+
+        lead = _FakeAgentConfig(tools={"hang": "auto"})
+        result, emitted, _store = await _run_engine(
+            _make_fake_stream(_tool_call_chunks(_tool_call_xml("hang"))),
+            agents={"lead_agent": lead},
+            tools={"hang": _HangingTool()},
+            message_id=message_id,
+            store=store,
+            cancel_check_interval=0.01,
+        )
+
+        assert result["completed"] is True
+        assert result["cancelled"] is True
+        assert not result.get("error")
+        # The in-flight tool task was actually cancelled, not abandoned
+        assert child_cancelled.is_set()
+        # START/COMPLETE pairing invariant holds on the cancel path
+        starts = _events_of_type(emitted, "tool_start")
+        completes = _events_of_type(emitted, "tool_complete")
+        assert len(starts) == 1
+        assert len(completes) == 1
+        assert completes[0]["data"]["success"] is False
+        assert "Cancelled by user" in completes[0]["data"]["error"]
+
     async def test_cancel_mid_stream_plain_text(self):
         """Cancel during a plain-text stream → accumulated prose lands in
         state['response'] and an llm_complete event carries it."""
@@ -1091,6 +1143,56 @@ class TestInEngineCompaction:
         emitted_types = [e["type"] for e in emitted]
         assert "compaction_start" not in emitted_types
         assert "compaction_summary" not in emitted_types
+
+    async def test_cancel_during_compaction_routes_to_cancelled(self):
+        """User cancel landing inside the compaction LLM call (previously the
+        longest cancel blind window: COMPACTION_TIMEOUT) → the in-flight compact
+        call is task-cancelled, a paired success=False compaction_summary is
+        appended, and the turn ends CANCELLED — NOT ERROR."""
+        store = InMemoryRuntimeStore()
+        message_id = "msg-cancel-compact"
+        compact_call_cancelled = asyncio.Event()
+        calls = {"n": 0}
+
+        async def fake_llm(messages, **kwargs):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                # Lead call: usage over threshold → compaction triggers next
+                for c in _simple_llm_chunks("Done", input_tokens=80, output_tokens=30):
+                    yield c
+            else:
+                # Compact call: set the cancel flag once in flight, then hang
+                await store.request_cancel(message_id)
+                try:
+                    await asyncio.sleep(30)
+                except asyncio.CancelledError:
+                    compact_call_cancelled.set()
+                    raise
+                yield {"type": "content", "content": "never"}
+
+        lead = _FakeAgentConfig(tools={})
+        compact = _FakeAgentConfig(name="compact_agent", role_prompt="Compactor.", tools={})
+
+        with patch("core.compaction_runner.config.COMPACTION_TOKEN_THRESHOLD", 100), \
+             patch("core.compaction_runner.config.CANCEL_CHECK_INTERVAL", 0.01):
+            result, emitted, _ = await _run_engine(
+                fake_llm,
+                agents={"lead_agent": lead, "compact_agent": compact},
+                message_id=message_id,
+                store=store,
+            )
+
+        assert result["completed"] is True
+        assert result["cancelled"] is True
+        assert not result.get("error")
+        assert compact_call_cancelled.is_set()
+
+        # compaction_start has its paired success=False terminator (no boundary
+        # for EventHistory, but the event stream stays well-formed)
+        event_types = [e.event_type for e in result["events"]]
+        assert "compaction_start" in event_types
+        summary_ev = next(e for e in result["events"] if e.event_type == "compaction_summary")
+        assert summary_ev.data["success"] is False
 
     async def test_no_compact_agent_silently_skips_over_threshold(self):
         """Over threshold but compact_agent not registered → no crash, no compaction events."""

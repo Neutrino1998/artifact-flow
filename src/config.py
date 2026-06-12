@@ -170,9 +170,12 @@ class Settings(BaseSettings):
     # DooD 同路径要求)。多套部署共用一个 daemon 时各自配不同根目录 —— reaper(C-reap)
     # 以本根目录为第二枚举源,共用根目录会互删对方的 scratch。
     SANDBOX_SCRATCH_ROOT: str = "/tmp/artifactflow-sandbox"
-    SANDBOX_COMMAND_TIMEOUT: int = 120  # 秒,单条 bash 命令上限。容器内 `timeout --signal=KILL` 强杀
+    SANDBOX_COMMAND_TIMEOUT: int = 300  # 秒,单条 bash 命令上限。容器内 `timeout --signal=KILL` 强杀
                                         # (真杀进程);tool 侧另有 +grace 的 asyncio 弃等护栏,只负责
                                         # 提前返回(进程不死,2026-05-14 同型),残留交由 turn 末拆容器兜底。
+                                        # 曾兼任"最坏 cancel 延迟上界"(=120);cancel-interrupt 落地后
+                                        # (engine 在工具 await 期轮询 cancel → task.cancel 在飞调用,
+                                        # core/cancellation.py)该职责剥离,本值只剩 runaway 上界一职,放宽到 300。
     SANDBOX_START_TIMEOUT: int = 60     # 秒,容器 create+start 上限(daemon 卡死时 loud-fail,不 wedge 整 turn)
     SANDBOX_MEM_LIMIT_MB: int = 1024    # 容器内存上限;MemorySwap 设同值 = 禁 swap
     SANDBOX_CPU_LIMIT: float = 1.0      # CPU 核数上限(换算 NanoCpus)

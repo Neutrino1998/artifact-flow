@@ -141,7 +141,7 @@ bind mount 无界之外，容器 rootfs overlay upper 同样无界（容器内 `
 | `SANDBOX_IMAGE` | `artifactflow-sandbox:latest` | 沙盒镜像（与 backend 镜像 / requirements.lock 解耦，自己的 runtime） |
 | `SANDBOX_RUNTIME` | `""` | Docker runtime；`""` = daemon 默认（dev=runc），prod=`runsc` |
 | `SANDBOX_SCRATCH_ROOT` | `/tmp/artifactflow-sandbox` | scratch 根；prod 挂成定容 loop 文件系统 |
-| `SANDBOX_COMMAND_TIMEOUT` | `120` | 单条命令秒上限（容器内 `timeout --signal=KILL`） |
+| `SANDBOX_COMMAND_TIMEOUT` | `300` | 单条命令秒上限（容器内 `timeout --signal=KILL`）。曾=120 兼任最坏 cancel 延迟上界；cancel-interrupt（工具 await 期可被打断，见 execution-lifecycle.md）落地后只剩 runaway 一职，放宽 |
 | `SANDBOX_START_TIMEOUT` | `60` | 容器 create+start 秒上限（daemon 卡死 loud-fail，不 wedge 整 turn） |
 | `SANDBOX_MEM_LIMIT_MB` | `1024` | 容器内存上限（MemorySwap 同值 = 禁 swap） |
 | `SANDBOX_CPU_LIMIT` | `1.0` | CPU 核数上限 |

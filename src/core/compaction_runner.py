@@ -21,6 +21,7 @@ import asyncio
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
 from config import config
+from core.cancellation import CooperativeCancelled, run_cancellable
 from core.events import ExecutionEvent, StreamEventType
 from utils.logger import get_logger
 from utils.time import utc_now
@@ -46,9 +47,18 @@ class CompactionRunner:
     生命周期等同 execute_loop —— 每次 stream_execute 调用创建一次，用完即丢。
     """
 
-    def __init__(self, agents: Dict[str, Any], emit: Optional[EmitFn] = None):
+    def __init__(
+        self,
+        agents: Dict[str, Any],
+        emit: Optional[EmitFn] = None,
+        check_cancelled: Optional[Callable[[], Awaitable[bool]]] = None,
+    ):
         self._agents = agents
         self._emit = emit
+        # 零参 async 谓词（engine 预绑定 message_id）。提供时 compaction LLM 调用
+        # 变为可被协作式 cancel 打断（抛 CooperativeCancelled）—— 否则该调用是
+        # 长达 COMPACTION_TIMEOUT 的 cancel 盲窗。None = 不轮询（独立测试场景）。
+        self._check_cancelled = check_cancelled
 
     async def maybe_trigger(
         self,
@@ -125,7 +135,13 @@ class CompactionRunner:
             # — no boundary, no message — so the next LLM call still sees full
             # uncompacted history. The engine catches this exception and marks
             # the turn ERROR; we don't silently continue with a broken context.
-            logger.exception(f"Compaction LLM failed for {agent_name}: {e}")
+            # CooperativeCancelled（用户取消打断 compaction）共用同一配对路径，但
+            # 它是预期的用户行为不是故障 —— info 级、无栈，engine 把它路由到
+            # CANCELLED 而非 ERROR。
+            if isinstance(e, CooperativeCancelled):
+                logger.info(f"Compaction for {agent_name} cancelled by user mid-call")
+            else:
+                logger.exception(f"Compaction LLM failed for {agent_name}: {e}")
             failure_data = {
                 "success": False,
                 "content": "",
@@ -269,8 +285,21 @@ class CompactionRunner:
                             "total_tokens": tu.get("total_tokens", 0),
                         }
 
-        async with asyncio.timeout(config.COMPACTION_TIMEOUT):
-            await _stream()
+        async def _guarded_stream():
+            async with asyncio.timeout(config.COMPACTION_TIMEOUT):
+                await _stream()
+
+        if self._check_cancelled is not None:
+            # 可打断 await：用户 cancel 不再等满 COMPACTION_TIMEOUT（原本是默认配置
+            # 下全系统最长的 cancel 盲窗）。CooperativeCancelled 穿透到 maybe_trigger
+            # 配对 success=False 占位 summary，再由 engine 路由 CANCELLED 终态。
+            # asyncio.timeout 在子 task 内、只转换自己 deadline 的取消 —— 与外层
+            # run_cancellable 的 task.cancel() 不混淆（3.11+ 语义，同 controller.py）。
+            await run_cancellable(
+                _guarded_stream(), self._check_cancelled, config.CANCEL_CHECK_INTERVAL
+            )
+        else:
+            await _guarded_stream()
 
         duration_ms = int((utc_now() - start).total_seconds() * 1000)
 

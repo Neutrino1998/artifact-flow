@@ -122,7 +122,7 @@ def _build_http_tool(frontmatter: dict, body: str) -> HttpTool:
         headers=frontmatter.get("headers", {}),
         parameters=param_defs,
         response_extract=frontmatter.get("response_extract"),
-        timeout=frontmatter.get("timeout", 30),
+        timeout=frontmatter.get("timeout", 60),
     )
 
     return HttpTool(config)

@@ -52,6 +52,28 @@ COMPLETED | CANCELLED_BY_USER | CANCELLED_BY_SYSTEM | TIMED_OUT | FAILED | ORPHA
 
 所以一个排队轮要么 advance 到 RUNNING（之后可 cancel），要么被 abort/fence → ORPHANED；用户在排队期间的「取消」诉求由「起跑后立即可取消」承接（best-effort 契约）。
 
+## 协作式 cancel 的消费点（可打断 await）
+
+flag（`store.request_cancel` → `hooks.check_cancelled`）在引擎内的全部消费点：
+
+| 消费点 | 机制 | cancel 延迟 |
+|---|---|---|
+| while 顶部 / 每个工具执行前 | 直接查 flag | 即时 |
+| LLM 流式期间 | chunk 间轮询（节流 `CANCEL_CHECK_INTERVAL`） | ≤ 间隔（TTFT 前无 chunk 是已知遗留，由 LLM 层超时兜底） |
+| permission 等待期间 | `request_cancel` 直接 resolve pending interrupt（approved=False） | 即时 |
+| **工具 await 在飞期间** | `core/cancellation.run_cancellable`：工具跑子 task，按 `CANCEL_CHECK_INTERVAL` 轮询，命中 `task.cancel()` 在飞调用 | ≤ 间隔 |
+| **compaction LLM 调用期间** | 同上（`CompactionRunner` 经 `check_cancelled` 谓词） | ≤ 间隔 |
+
+后两行是 2026-06 cancel-interrupt 切片补上的：此前工具 await / compaction 调用是盲窗，cancel 延迟 = 该 await 的内部超时（bash `SANDBOX_COMMAND_TIMEOUT`、HttpTool per-MD `timeout`、compaction `COMPACTION_TIMEOUT`——默认配置下最坏 300s，且 HttpTool 的 timeout 运维可任意设大，盲窗会随 API 工具生态膨胀）。打断后的事件流保持不变量：被打断的工具发配对 `TOOL_COMPLETE`（success=False，"Cancelled by user…"，下一轮历史里模型可见）；被打断的 compaction 配对 success=False `compaction_summary` 占位（无 boundary），turn 以 CANCELLED（非 ERROR）收口。
+
+三点辨析：
+
+- **不是新的工具契约**——`EXECUTION_TIMEOUT` 的 `asyncio.timeout` 本来就会在任意 await 中间 cancel 整个 engine task，工具早已被要求 cancel-safe；本切片只是让它更频繁发生。GIL 警告同样适用（钉住 GIL 的同步 CPU 工具打不断，工具作者自兜 wall-clock）。
+- **与外部 cancel 不混淆**——`run_cancellable` 只 cancel 子 task、绝不 cancel 自己；外部 `task.cancel()`（fencing / 引擎超时）打进轮询处时转发给子 task 后原样 re-raise，两条路径的 `except` 分支保持分离。
+- **cancel ≠ 撤回已发出的请求**——HTTP 调用被打断时请求可能已到达上游（副作用未知），与超时路径语义相同，不是新风险；工具错误文案对模型如实声明。
+
+剥离「最坏 cancel 延迟上界」职责后，`SANDBOX_COMMAND_TIMEOUT` 只剩 runaway 命令上界一职（默认 120→300s），HttpTool 默认 timeout 30→60s（per-MD 可放心设大）。
+
 ## `TIMED_OUT` 的产出
 
 超时裁判**在引擎内**，不停在传输层：
@@ -109,6 +131,7 @@ COMPLETED | CANCELLED_BY_USER | CANCELLED_BY_SYSTEM | TIMED_OUT | FAILED | ORPHA
 |---|---|---|
 | success / COMPLETE | `decide_terminal` complete + `choose_response` complete | — |
 | cooperative cancel | cooperative 分支 + adopt cooperative | `test_cooperative_cancel_writes_response_by_user` |
+| cancel 打断在飞 await | `tests/core/test_cancellation.py`（`run_cancellable` 原语）+ `test_compaction_runner.py`（占位配对） | `test_engine_execution.py`（`test_cancel_interrupts_in_flight_tool` / `test_cancel_during_compaction_routes_to_cancelled`） |
 | external cancel（执行中） | adopt external（带 reason） | `test_external_cancel_persists_accumulated_events` |
 | late-cancel（后处理中） | adopt / synthesize | `test_external_cancel_during_exists_async_persists_events` 等 |
 | timeout | `test_timed_out_path` / `test_flush_error_overrides_timed_out` / `test_adopts_existing_timed_out_terminal` / `test_timed_out_always_returns_timeout_placeholder` | `test_engine_timeout_produces_timed_out_terminal` |
