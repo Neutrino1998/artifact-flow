@@ -24,9 +24,11 @@
 
 ### 动态状态注入
 
-per-turn ephemeral 有一个提示词层面的副作用：历史里上一轮 mount / bash 的成功记录，对模型是「文件还在」的**伪证**——工具描述里的静态规则（"discarded when the turn ends"）压不过历史证据，模型会直接引用旧路径然后撞 file not found。对策与 artifact inventory 同构：**状态用现在时态动态注入**。ContextManager 的每轮 `<system-reminder>` 里（仅对授了沙盒工具的 agent、且引擎递了 session 快照时）渲染 `<sandbox_status>` 三态：
+per-turn ephemeral 有一个提示词层面的副作用：历史里上一轮 mount / bash 的成功记录，对模型是「文件还在」的**伪证**。实测结论（2026-06-12）：**提示词压不住这个伪证**——动态注入「工作区为空」、mount 结果自带过期标记都试过，二轮对话模型照旧直接引用旧路径。接受的现实：跨轮忘 mount 由 **bash file-not-found 的 loud-fail 自纠**兜底（代价 = 一个废 round），不再堆提示词机器。reset 事实在模型可见文案里只各说一次：bash 描述（能力）、persist 描述（动机——"persist 是留住结果的唯一方式"）、`<sandbox_status>` not_started（状态）。
 
-- **not_started**——本轮未起容器：明示工作区为空、旧 mount 已失效、引用前先重新 mount（最高价值态，直接对冲历史伪证）；
+动态注入本身保留（ContextManager 每轮 `<system-reminder>`，仅对授沙盒工具的 agent、且引擎递了 session 快照时渲染），价值在另两态：
+
+- **not_started**——一句话：工作区为空、旧文件已失效、需要就重新 mount；
 - **running**——工作区第一层清单（`SANDBOX_STATUS_MAX_ENTRIES` 条数帽 + 显式 truncated 标记，turn 内 mount / bash 落的文件下一次 LLM 调用即可见）：给 `persist` 的 path 决策当依据，省一次 `ls`；
 - **unavailable**——sticky 失败复述原因，省掉模型再撞一次工具的回合。
 

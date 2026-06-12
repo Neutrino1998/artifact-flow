@@ -668,8 +668,8 @@ class TestSandboxStatus:
                           sandbox_status={"state": "not_started"})
         reminder = messages[-1]["content"]
         assert '<sandbox_status state="not_started">' in reminder
-        assert "EMPTY" in reminder
-        assert "Mount artifacts again" in reminder
+        assert "workspace is empty" in reminder
+        assert "mount again" in reminder
 
     def test_running_lists_entries_dirs_marked_and_truncation_flagged(self):
         agent = _FakeAgentConfig(tools={"mount": "auto"})

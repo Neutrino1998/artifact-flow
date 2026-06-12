@@ -205,17 +205,12 @@ class MountArtifactTool(BaseTool):
             )
 
         container_path = f"{WORKSPACE_MOUNT}/{artifact_id}"
-        # 文案自带过期标记 + 指回权威源:这条结果会作为历史进入后续 turn 的上下文,
-        # 对模型是"文件还在"的伪证(workspace 是 per-turn 的)——让伪证自携反证,
-        # 并把判断重定向到每轮刷新的 <sandbox_status>(2026-06-12,二轮忘 mount 实测)。
+        # 刻意不在结果里重复 per-turn reset(试过过期标记+重定向 <sandbox_status>,
+        # 实测无效已删):跨轮忘 mount 由 bash file-not-found 的 loud-fail 自纠兜底,
+        # reset 事实只在 bash 描述(能力)/persist 描述(动机)/not_started 注入(状态)各说一次。
         return ToolResult(
             success=True,
-            data=(
-                f"Mounted artifact '{artifact_id}' at {container_path} "
-                f"({len(data)} bytes, {mime}). This mount lasts for the current "
-                f"turn only — the workspace resets between turns; check "
-                f"<sandbox_status> for what is in the workspace right now."
-            ),
+            data=f"Mounted artifact '{artifact_id}' at {container_path} ({len(data)} bytes, {mime}).",
             metadata={"path": container_path, "bytes": len(data), "content_type": mime},
         )
 
