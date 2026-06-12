@@ -17,8 +17,8 @@
 
 ## 进度
 
-- **当前**:**A / B(双架构)完成**(详见各段进展)。**C 全切片落地**(2026-06-10→11,C-0→C-wire,见 C 段「进展」)。沙盒**已 live 暴露**(lead/research 拿到 bash=CONFIRM/mount/persist)。
-- **下一步**:剩唯一工作包 **D 段**(Kylin 端到端冒烟:真 runsc + Word 场景 + loop 池子 host-prep + git 镜像重冻结双架构 id + uid 1000 属主验)。**上传路由翻转已落地**(2026-06-11,见 C 段进展);**沙盒镜像加 git 已落地**(2026-06-11,见变更日志——双架构镜像 id 锚点作废,D 重冻结)。后续大方向:**skill 系统**(用户已自备一套 skill;上传翻转后的格式 remediation 提示归 skill)。
+- **当前**:**A / B(双架构)/ C(全切片)/ D(arm64,2026-06-12)全部完成**——沙盒主线收官,live 暴露 + 真机验收闭环(见各段进展)。arm64 冻结锚点 `sha256:fac22b8384e2…`(D 段进展)。
+- **下一步**:沙盒收尾两件(不阻塞 skill):① **cancel-interrupt slice**(工具 await 期轮询 cancel → task.cancel in-flight;同刀放宽 `SANDBOX_COMMAND_TIMEOUT` 默认);② **生产部署前置**(两台 arm 加数据盘、docker data-root 迁移、x86 锚点补冻结——等有合规 x86 盒)。大方向:**skill 系统**(用户已自备一套 skill;设计先看存货;两个引擎前置=skill-scoped 工具可见性 + 工具结果→artifact,见 memory)。
 - **产物处置(2026-06-05 拍定)**:`feat/sandbox` 这批已验收产物(`sandbox/` 探针 + 构建脚本)**暂留分支不动**,不单独提早合 main。「是否把就绪探针子集(`unshare -U` 闸 + smoke + ENOSYS/uid)提升为通用部署机预检工具」**推迟到 C/D 阶段**——届时有真实第二调用点(每台新沙盒宿主预检 + D 端到端冒烟)再校准边界,现在抽象属投机(YAGNI)。
 
 | 阶段 | 内容 | 状态 |
@@ -278,6 +278,8 @@
 
 **做什么**:本机 runc 开发完成后,上线前在 Kylin 用**真 runsc + 真 artifact 挂载 + cancel-kill** 跑一次端到端回归;部署前跑 `unshare -U` 预检。这是开发期不回内网的代价里留的最后一道关。**追加(2026-06-10)**:① 加 git 后的新镜像在 Kylin 重跑 `run-all.sh` 并**重新冻结 image id**(双架构);② bind-mount 工作区 uid 1000 属主/权限在真实 Linux 上验(backend 进程 uid ≠ 1000 时的 chmod/chown 策略,本机 runc 感知不到);③ 「用户要带格式 Word」场景由 agent 流程真实跑通(merge 后无 `/export`,替代物必须先站住);④ **loop 池子 host-prep**(`fallocate + mkfs.ext4 + fstab` 挂 `SANDBOX_SCRATCH_ROOT`)在 Kylin 真机走一遍、入部署文档,并验 watchdog 超额杀 + 池满 ENOSPC 只伤沙盒不伤宿主;⑤ **评估把 per-turn 强制下沉存储层**(XFS project quota 给每个 turn 的 scratch 子目录分配 project id + `setquota`,或 per-turn loop image)——成立则 `sandbox_fs.measure_usage` 的 host 递归计量退化为纯可观测/补充,turn 间公平由 FS 层 O(1)、race-free 保证,不再靠 host 扫 attacker-controlled 树(五轮 review 的根本出路,2026-06-10 架构收口外推)。
 
+**进展·2026-06-12 D 完成(arm64)**:Kylin arm(ai-agent-app,真 runsc)端到端冒烟**全绿**。① `run-all.sh` ALL PASSED(含新 git 探针 + dubious-ownership 真判别),**arm64 冻结锚点 = `sha256:fac22b8384e2a6b84915794bd46a79e01b9d9a90df6bf5ab7536b37ee453d08e`**(`artifactflow-sandbox:20260612-arm64`,git 2.47.3);x86 冻结按决策推迟(无可用 ≥4.14 内核 x86 runsc 盒)。② uid 1000 属主双向 = DooD 冒烟 5/5(backend 容器 root ≠ 沙盒 1000)+ ③ Word 场景(上传 docx → mount → pandoc → persist → 下载)agent 流程真实跑通。④ loop 池子 host-prep 落机:**盘是等保碎卷 vgs 零余量**(/var 仅 8G 含 docker),池子缩 10G 落 `/soft/artifactflow/sandbox-pool.img`(挂载点不变);watchdog 超额杀 ✓(dd 5G 半路被杀+sticky)、cancel→容器即拆 ✓。⑤ XFS project quota 评估继续后置。**插曲两枚已修**:config tar 带 macOS AppleDouble `._*.md` 拒启(打包 COPYFILE_DISABLE + loader 跳隐藏文件,`8395603`);**cancel 延迟缺口**——用户 cancel 是协作 flag,bash await 期间最坏等满 `SANDBOX_COMMAND_TIMEOUT`(120s)才生效,实测 120s 后正确取消+拆容器(机制对、延迟差)。**待办 slice(回京)**:工具 await 期间轮询 cancel → `task.cancel()` in-flight(与 EXECUTION_TIMEOUT 既有 mid-tool cancel 语义一致),同刀放宽 `SANDBOX_COMMAND_TIMEOUT` 默认(120→300-600s,两职责解耦后才能放)。**生产前置**:两台 arm 各加 100-200G 数据盘挂 /data(docker data-root + 池子迁入;PG volume 可改 bind /data/pg 便于备份),8G /var 撑不住生产 PG。
+
 ## 关键风险
 
 - **C 扩展 ENOSYS**(B 阶段验)—— 决定 gVisor-as-MVP 是否成立,还是要回退 Firecracker。
@@ -339,5 +341,6 @@
 - 2026-06-12 **状态注入 review 收口**(两条都修):[P1] 文件名只滤控制字符、未转义 XML 元字符——`</sandbox_status>` 式名字能闭合 reminder 结构(prompt injection)。用户初判"mount 名字已过滤"对 mount 成立但**来源不全**:bash 可造任意名,且**上传 zip 解压后第三方文件名**(攻击者完全可控)也进工作区第一层 → 真实 injection 面。修=控制字符 � 之上叠 `xml.sax.saxutils.escape`(& < >),回归断言 `</sandbox_status>` 全文只出现一次。[P2] 快照全量物化顶层目录再截断——CPU 论据不成立(watchdog 每 5s 全树 du,单层枚举远小于既有成本),**内存物化论据成立**(ext4 池子独立 inode 表撑得起百万顶层条目,一次快照物化百万 tuple≈上百 MB;measure_usage 是累加计数无此问题)。修=`list_dir` 加 `max_entries` 有界扫(收满即停;reaper 不传=全量,差集枚举的完整性语义不变),快照扫 cap+1、`total`→`truncated` 标记(精确总数不值得扫全树),展示=readdir 序前缀组内排序。回归:spy 断言传给 list_dir 的 max_entries=cap+1。后端 1261 全过(+2)。
 - 2026-06-12 **mount 文案自携过期标记**(用户实测二轮对话模型仍忘 mount——根因=历史里上轮 `Mounted ... at /workspace/X` 的**具体**成功记录压过 reminder 的**泛化**警告,LLM 信具体不信泛化):mount 结果文案追加 "lasts for the current turn only ... check `<sandbox_status>` for what is in the workspace right now"——让伪证自携反证 + 把判断重定向到每轮刷新的权威源。用户拍**只做这一刀**;备选②(not_started 态从历史扫上轮 mount 过的 artifact id 指名作废)与③(turn 起点行动帧,更重、污染事件流)均暂不做,实测不够再升级。回归断言文案两要素不丢。
 - 2026-06-12 **跨轮忘 mount 定案:提示词压不住历史伪证,收手**(用户两轮实测:动态注入 not_started、mount 文案过期标记+重定向均无效,模型照旧引用旧路径)。**定性=接受现状**——bash file-not-found 的 loud-fail 自纠是真正起作用的机制,代价一个废 round,不再堆提示词机器(scope 纪律:best-effort 提示不值得强机制)。收口=reset 事实在模型可见文案里**只各说一次**:bash 描述(能力)、persist 描述(动机)、not_started 注入(状态,三句收一句);mount 结果文案回滚到纯事实一行(过期标记删除)。动态注入保留,价值重心改记为 running 清单(persist path 依据)+ unavailable(sticky 复述);sandbox.md 同步校准、不再 overclaim「对冲伪证」。备选②③(指名作废/行动帧)弃案。
+- 2026-06-12 **D 段完成(arm64)——沙盒主线收官**:Kylin arm 真 runsc 端到端全绿。run-all ALL PASSED(git/dubious-ownership 探针真判别),**arm64 锚点重冻结 `sha256:fac22b8384e2…`**;DooD 5/5、Word 场景、watchdog 超额杀、cancel→拆容器全过。实战修两枚:AppleDouble 垃圾拒启(`8395603`,COPYFILE_DISABLE+loader 跳隐藏文件)、cancel 延迟缺口确认(协作 flag 等满命令超时 120s 才生效,机制对延迟差 → 待办 slice:await 期轮询 cancel + 放宽 SANDBOX_COMMAND_TIMEOUT,两职责解耦)。机器现实:等保碎卷零余量,池子 10G 落 /soft;**生产前置=每台加数据盘**。详见 D 段「进展」。
 <!-- 新日志按日期顺序追加到此行上方 -->
 
