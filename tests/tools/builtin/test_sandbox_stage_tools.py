@@ -110,6 +110,10 @@ class TestMountTool:
             assert f.read() == "# 标题\nbody"
         assert "/workspace/notes.md" in result.data
         assert result.metadata["content_type"] == "text/markdown"
+        # 结果文案自带过期标记 + 指回 <sandbox_status>:这条会进后续 turn 的历史,
+        # 是"文件还在"伪证的主源(二轮忘 mount 实测,2026-06-12)——别在改文案时丢掉
+        assert "current turn only" in result.data
+        assert "<sandbox_status>" in result.data
 
     async def test_mount_blob_artifact_writes_original_bytes(self, session, service):
         payload = b"PK\x03\x04binary"
