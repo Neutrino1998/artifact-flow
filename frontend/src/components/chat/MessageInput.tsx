@@ -487,7 +487,7 @@ export default function MessageInput() {
                 onClick={toggleArtifactPanel}
                 className="h-8 w-8 flex items-center justify-center rounded-lg text-text-secondary dark:text-text-secondary-dark hover:bg-surface dark:hover:bg-bg-dark transition-colors"
                 aria-label="Toggle artifact panel"
-                title="切换文稿面板"
+                title="切换文件面板"
               >
                 <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
                   <rect x="1.5" y="2" width="13" height="12" rx="1.5" />

@@ -39,7 +39,7 @@ export default function ArtifactPanel() {
     return (
       <div className="h-full flex items-center justify-center bg-chat dark:bg-chat-dark">
         <span className="text-text-tertiary dark:text-text-tertiary-dark">
-          加载文稿中...
+          加载文件中...
         </span>
       </div>
     );

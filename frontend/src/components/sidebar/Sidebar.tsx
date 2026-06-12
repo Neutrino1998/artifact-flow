@@ -148,7 +148,7 @@ export default function Sidebar() {
           <>
             {/* Artifacts — hidden while user-management owns the right panel */}
             {!inUserMgmt && (
-              <IconButton onClick={toggleArtifactPanel} label="文稿面板">
+              <IconButton onClick={toggleArtifactPanel} label="文件面板">
                 <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
                   <rect x="2" y="2" width="12" height="12" rx="1.5" />
                   <path d="M5 6h6M5 8.5h4" />
@@ -260,7 +260,7 @@ export default function Sidebar() {
                   <rect x="2" y="2" width="12" height="12" rx="1.5" />
                   <path d="M5 6h6M5 8.5h4" />
                 </svg>
-                文稿面板
+                文件面板
               </button>
             )}
             <button
