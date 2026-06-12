@@ -51,6 +51,8 @@ class ExecutionController:
         message_event_repo: Optional[Any] = None,  # MessageEventRepository
         on_engine_exit: Optional[Callable[[str, str], Awaitable[None]]] = None,
         db_manager: Optional[Any] = None,
+        sandbox_session: Optional[Any] = None,  # duck-typed: status_snapshot(动态上下文快照用,
+                                                # 生命周期归 controller_factory + runner cleanup)
     ):
         self.agents = agents
         self.tools = tools
@@ -60,6 +62,7 @@ class ExecutionController:
         self.message_event_repo = message_event_repo
         self._on_engine_exit = on_engine_exit
         self._db_manager = db_manager
+        self.sandbox_session = sandbox_session
         logger.info("ExecutionController initialized")
 
     async def _with_db_retry(self, fn):
@@ -226,6 +229,7 @@ class ExecutionController:
                         hooks=self.hooks,
                         artifact_service=self.artifact_service,
                         emit=emit_to_queue,
+                        sandbox_session=self.sandbox_session,
                     )
             except TimeoutError:
                 # 引擎执行超时。模仿协作式 cancel:置 flag 正常返回,让 post-processing

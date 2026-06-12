@@ -152,6 +152,7 @@ async def execute_loop(
     hooks: EngineHooks,
     artifact_service: Optional[Any] = None,
     emit: Optional[EmitFn] = None,
+    sandbox_session: Optional[Any] = None,
 ) -> Dict[str, Any]:
     """
     Pi-style 扁平 while loop 执行引擎
@@ -164,6 +165,9 @@ async def execute_loop(
         artifact_service: ArtifactService 实例（duck-typed 协作者：set_session /
             list_artifacts / persist_tool_result / bind_emit）
         emit: 事件推送回调（推 SSE）
+        sandbox_session: SandboxSession 实例（duck-typed:status_snapshot），仅用于
+            动态上下文的 <sandbox_status> 快照——生命周期/拆除归 controller_factory
+            + runner cleanup，引擎不管理它
     Returns:
         最终执行状态
     """
@@ -340,6 +344,14 @@ async def execute_loop(
             except Exception as e:
                 logger.exception(f"Failed to get artifacts inventory: {e}")
 
+        sandbox_status = None
+        if sandbox_session is not None:
+            try:
+                # to_thread:快照含 host 侧单层目录枚举(模型可写的树,条目数不可控)
+                sandbox_status = await asyncio.to_thread(sandbox_session.status_snapshot)
+            except Exception:
+                logger.exception("sandbox status snapshot failed")  # 注入缺席即可,不阻断本轮
+
         messages = ContextManager.build(
             state=state,
             agent_name=agent_name,
@@ -347,6 +359,7 @@ async def execute_loop(
             tools=tools,
             artifacts_inventory=artifacts_inventory,
             model=get_litellm_model_id(agents[agent_name].model),
+            sandbox_status=sandbox_status,
         )
 
         if tool_round_count.get(agent_name, 0) >= agents[agent_name].max_tool_rounds:

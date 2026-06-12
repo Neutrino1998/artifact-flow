@@ -646,3 +646,82 @@ class TestContextUsageWarning:
             agent_name=agent.name, agents={agent.name: agent}, state=state, tools={},
         )
         assert "<context_usage>" not in user_event.data["content"]
+
+
+# ============================================================
+# TestSandboxStatus — 沙盒状态动态注入(<sandbox_status>)
+# ============================================================
+
+
+class TestSandboxStatus:
+    """状态归动态注入(提示分层):历史里上一轮 mount/bash 是"文件还在"的伪证,
+    只有现在时态的工作区事实能纠偏。门控 = agent 授了沙盒工具 AND 引擎递了快照。"""
+
+    def _state(self):
+        return _make_state(events=[
+            _make_event(StreamEventType.USER_INPUT.value, data={"content": "hi"}),
+        ])
+
+    def test_not_started_warns_ephemeral_and_empty(self):
+        agent = _FakeAgentConfig(tools={"bash": "confirm"})
+        messages = _build(agent, state=self._state(), tools={},
+                          sandbox_status={"state": "not_started"})
+        reminder = messages[-1]["content"]
+        assert '<sandbox_status state="not_started">' in reminder
+        assert "EMPTY" in reminder
+        assert "Mount artifacts again" in reminder
+
+    def test_running_lists_entries_dirs_marked_and_truncation_counted(self):
+        agent = _FakeAgentConfig(tools={"mount": "auto"})
+        status = {"state": "running",
+                  "entries": [("a.txt", False), ("out", True)], "total": 25}
+        messages = _build(agent, state=self._state(), tools={}, sandbox_status=status)
+        reminder = messages[-1]["content"]
+        assert '<sandbox_status state="running">' in reminder
+        assert "- a.txt" in reminder
+        assert "- out/" in reminder
+        assert "(+23 more not shown)" in reminder
+
+    def test_running_empty_workspace_says_empty(self):
+        agent = _FakeAgentConfig(tools={"persist": "auto"})
+        status = {"state": "running", "entries": [], "total": 0}
+        reminder = _build(agent, state=self._state(), tools={},
+                          sandbox_status=status)[-1]["content"]
+        assert "Workspace (/workspace) is empty." in reminder
+
+    def test_running_listing_failed_degrades(self):
+        agent = _FakeAgentConfig(tools={"bash": "confirm"})
+        status = {"state": "running", "entries": None, "total": None}
+        reminder = _build(agent, state=self._state(), tools={},
+                          sandbox_status=status)[-1]["content"]
+        assert "Workspace listing unavailable" in reminder
+
+    def test_unavailable_restates_sticky_reason(self):
+        agent = _FakeAgentConfig(tools={"bash": "confirm"})
+        status = {"state": "unavailable", "reason": "workspace quota exceeded (2048 MB)"}
+        reminder = _build(agent, state=self._state(), tools={},
+                          sandbox_status=status)[-1]["content"]
+        assert '<sandbox_status state="unavailable">' in reminder
+        assert "workspace quota exceeded (2048 MB)" in reminder
+
+    def test_control_chars_in_names_sanitized(self):
+        # 文件名是模型可控内容 —— 换行可伪造清单行,必须替换
+        agent = _FakeAgentConfig(tools={"bash": "confirm"})
+        status = {"state": "running",
+                  "entries": [("evil\n- fake-entry", False)], "total": 1}
+        reminder = _build(agent, state=self._state(), tools={},
+                          sandbox_status=status)[-1]["content"]
+        assert "evil�- fake-entry" in reminder
+        assert "\n- fake-entry" not in reminder
+
+    def test_agent_without_sandbox_tools_gets_no_section(self):
+        agent = _FakeAgentConfig(tools={"web_search": "auto"})
+        reminder = _build(agent, state=self._state(), tools={},
+                          sandbox_status={"state": "not_started"})[-1]["content"]
+        assert "<sandbox_status" not in reminder
+
+    def test_no_snapshot_no_section(self):
+        # 引擎没递 session(旧调用方/无沙盒部署):整段缺席,不渲染兜底文案
+        agent = _FakeAgentConfig(tools={"bash": "confirm"})
+        reminder = _build(agent, state=self._state(), tools={})[-1]["content"]
+        assert "<sandbox_status" not in reminder

@@ -22,6 +22,16 @@
 
 工具只挂在拥有它们的 agent 的 `tools` 白名单（当前 `lead_agent` / `research_agent`）。bash = CONFIRM 在 agent MD 里显式声明——这是沙盒对模型的唯一暴露面，不在白名单的 agent 看不到也调不动这三个工具。
 
+### 动态状态注入
+
+per-turn ephemeral 有一个提示词层面的副作用：历史里上一轮 mount / bash 的成功记录，对模型是「文件还在」的**伪证**——工具描述里的静态规则（"discarded when the turn ends"）压不过历史证据，模型会直接引用旧路径然后撞 file not found。对策与 artifact inventory 同构：**状态用现在时态动态注入**。ContextManager 的每轮 `<system-reminder>` 里（仅对授了沙盒工具的 agent、且引擎递了 session 快照时）渲染 `<sandbox_status>` 三态：
+
+- **not_started**——本轮未起容器：明示工作区为空、旧 mount 已失效、引用前先重新 mount（最高价值态，直接对冲历史伪证）；
+- **running**——工作区第一层清单（`SANDBOX_STATUS_MAX_ENTRIES` 条数帽 + 显式 `(+N more)`，turn 内 mount / bash 落的文件下一次 LLM 调用即可见）：给 `persist` 的 path 决策当依据，省一次 `ls`；
+- **unavailable**——sticky 失败复述原因，省掉模型再撞一次工具的回合。
+
+枚举纪律：工作区是模型可写的树，host 侧只走 `sandbox_fs.list_dir`（fd 钉住、不跟链、不递归，同 reaper）；文件名是模型可控内容，控制字符替换为 `�` 防伪造清单行。至此提示分层四件套齐：**能力 → 工具描述，契约 → inventory / read_artifact 文案，状态 → 动态注入，场景 how-to → skill**。
+
 ### lazy 创建
 
 容器 **lazy 于首个沙盒工具调用**，不是「首个 bash」——模型可能先 `mount` 再 `bash`，`mount` 也会 `ensure_container()`。无沙盒的 turn：`SandboxSession` 只是个零成本对象壳，从不起容器。
@@ -135,6 +145,7 @@ bind mount 无界之外，容器 rootfs overlay upper 同样无界（容器内 `
 | `SANDBOX_CPU_LIMIT` | `1.0` | CPU 核数上限 |
 | `SANDBOX_PIDS_LIMIT` | `256` | fork 炸弹闸 |
 | `SANDBOX_MAX_OUTPUT_CHARS` | `200_000` | 单命令输出捕获硬帽 |
+| `SANDBOX_STATUS_MAX_ENTRIES` | `20` | 动态状态注入的工作区清单条数帽（超出显式 `(+N more)`） |
 | `SANDBOX_WORKSPACE_QUOTA_MB` | `2048` | per-turn scratch 软配额（watchdog 超额杀） |
 | `SANDBOX_WATCHDOG_INTERVAL_SEC` | `5` | watchdog 巡检周期 |
 | `SANDBOX_POOL_MIN_FREE_MB` | `1024` | 起容器准入水位 |

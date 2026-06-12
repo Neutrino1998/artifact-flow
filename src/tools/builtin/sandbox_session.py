@@ -176,6 +176,39 @@ class SandboxSession:
         统一进池子、统一受 watchdog 计量。"""
         return os.path.join(self._scratch_dir, "tmp")
 
+    def status_snapshot(self) -> dict:
+        """供 ContextManager 动态注入(<sandbox_status>)的轻量状态快照。
+
+        历史里上一轮的 mount/bash 记录对模型是"文件还在"的伪证,静态描述里的
+        per-turn ephemeral 规则压不过它 —— 注入"现在时态"的工作区事实才有效
+        (同 artifact inventory 的存在理由)。三态:
+
+        - not_started:本轮未起容器(注入文案传达"工作区为空、旧 mount 已失效")
+        - unavailable:sticky 失败,复述原因(省掉模型再撞一次工具的回合)
+        - running:工作区第一层清单(条数帽 SANDBOX_STATUS_MAX_ENTRIES,超出
+          显式计数),给 persist 的 path 决策当依据
+
+        同步方法(单层枚举,调用方按需 to_thread);枚举走 sandbox_fs.list_dir
+        (fd 钉住、不跟链、不递归)—— 工作区是模型可写的树,纪律同 reaper。
+        sticky 优先于 started 判定:超额杀后容器句柄已清但原因要复述。
+        """
+        if self._sticky_failure:
+            return {"state": "unavailable", "reason": self._sticky_failure}
+        if not self.started:
+            return {"state": "not_started"}
+        try:
+            entries = sandbox_fs.list_dir(self.workspace_dir)
+        except OSError:
+            logger.exception(f"workspace listing failed for {self.message_id}")
+            return {"state": "running", "entries": None, "total": None}
+        entries.sort(key=lambda t: t[0])
+        shown = entries[: config.SANDBOX_STATUS_MAX_ENTRIES]
+        return {
+            "state": "running",
+            "entries": [(name, is_dir) for name, is_dir, _ in shown],
+            "total": len(entries),
+        }
+
     # ------------------------------------------------------------------
     # 容器生命周期
     # ------------------------------------------------------------------

@@ -114,6 +114,7 @@ async def create_controller(conversation_id: str, message_id: str) -> AsyncGener
             message_event_repo=event_repo,
             on_engine_exit=_on_engine_exit,
             db_manager=db_manager,
+            sandbox_session=sandbox_session,
         )
 
 

@@ -474,3 +474,52 @@ class TestQuota:
         await session.close()
         assert watchdog.cancelled()
         assert session._watchdog_task is None
+
+
+# ============================================================
+# 状态快照(动态上下文注入源)
+# ============================================================
+
+
+class TestStatusSnapshot:
+
+    def test_fresh_shell_is_not_started(self, session):
+        assert session.status_snapshot() == {"state": "not_started"}
+
+    def test_sticky_failure_wins_over_started(self, session):
+        # 超额杀路径:sticky 已记、容器句柄状态不定 —— sticky 优先复述
+        session._sticky_failure = "workspace quota exceeded"
+        session._container = object()
+        snap = session.status_snapshot()
+        assert snap == {"state": "unavailable", "reason": "workspace quota exceeded"}
+
+    def test_running_lists_first_level_sorted(self, session):
+        os.makedirs(os.path.join(session.workspace_dir, "sub"))
+        with open(os.path.join(session.workspace_dir, "b.txt"), "w") as f:
+            f.write("x")
+        with open(os.path.join(session.workspace_dir, "a.txt"), "w") as f:
+            f.write("x")
+        session._container = object()
+        snap = session.status_snapshot()
+        assert snap["state"] == "running"
+        assert snap["entries"] == [("a.txt", False), ("b.txt", False), ("sub", True)]
+        assert snap["total"] == 3
+
+    def test_running_entries_capped_total_keeps_truth(self, session, monkeypatch):
+        monkeypatch.setattr(config, "SANDBOX_STATUS_MAX_ENTRIES", 3)
+        os.makedirs(session.workspace_dir)
+        for i in range(5):
+            with open(os.path.join(session.workspace_dir, f"f{i}.txt"), "w") as f:
+                f.write("x")
+        session._container = object()
+        snap = session.status_snapshot()
+        assert len(snap["entries"]) == 3
+        assert snap["total"] == 5
+
+    def test_running_workspace_dir_missing_is_empty_not_error(self, session):
+        # list_dir 对不存在的根返回 [](容器刚起、目录竞态):报空清单而非炸
+        session._container = object()
+        snap = session.status_snapshot()
+        assert snap["state"] == "running"
+        assert snap["entries"] == []
+        assert snap["total"] == 0

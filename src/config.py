@@ -179,6 +179,8 @@ class Settings(BaseSettings):
     SANDBOX_PIDS_LIMIT: int = 256       # fork 炸弹闸
     SANDBOX_MAX_OUTPUT_CHARS: int = 200_000  # 单命令输出捕获硬帽:超出继续 drain 但丢弃(防内存放大),
                                              # 截断显式标记。>50k 的部分由引擎溢出转 artifact idiom 接手。
+    SANDBOX_STATUS_MAX_ENTRIES: int = 20     # 动态状态注入的工作区第一层清单条数帽:工作区是模型可写的树,
+                                             # 不设帽=prompt 注水放大器;超出部分显式 "(+N more)" 标记
     # 磁盘配额(2026-06-10 C′ 方向:loop 池子=硬墙、以下=软配额与准入;host-prep 见 D 段)。
     # prod 把 SANDBOX_SCRATCH_ROOT 挂成定容 loop 文件系统,race 窗口写穿只伤池子不伤宿主。
     SANDBOX_WORKSPACE_QUOTA_MB: int = 2048   # per-turn scratch 软配额:watchdog du 超额 → 杀容器 + sticky 失败

@@ -44,6 +44,7 @@ class ContextManager:
         tools: Dict[str, Any],   # {name: BaseTool}
         artifacts_inventory: Optional[List[Dict]] = None,
         model: Optional[str] = None,
+        sandbox_status: Optional[Dict] = None,
     ) -> List[Dict[str, str]]:
         """
         构建 LLM 调用所需的完整 messages
@@ -112,7 +113,9 @@ class ContextManager:
         # compaction 边界后取数(刚压缩完 → None)，且直接读原始事件 token_usage，不受
         # 「content 空则丢 _meta」影响(高 input+空 content 也能预警)。
         last_usage = last_llm_usage(state.get("events", []), agent_name)
-        reminder = cls._build_dynamic_context(agent_config, artifacts_inventory, last_usage)
+        reminder = cls._build_dynamic_context(
+            agent_config, artifacts_inventory, last_usage, sandbox_status
+        )
         last = all_messages[-1]
         last_content = last["content"]
         if isinstance(last_content, list):
@@ -131,11 +134,13 @@ class ContextManager:
         agent_config: Any,
         artifacts_inventory: Optional[List[Dict]],
         last_usage: Optional[int] = None,
+        sandbox_status: Optional[Dict] = None,
     ) -> str:
         """组装每轮刷新的动态上下文，包裹为 ephemeral <system-reminder>。
 
         内容：系统时间（始终）+ task_plan（存在时）+ artifact 清单（仅有 artifact
-        工具的 agent）+ context_usage 预警（仅临近 compaction 时）。由 build() 并入消息
+        工具的 agent）+ 沙盒状态（仅有沙盒工具的 agent 且引擎递了快照）+
+        context_usage 预警（仅临近 compaction 时）。由 build() 并入消息
         尾部，不进 system prompt、不持久化为 event。
 
         语义定位是「当前世界状态的一瞥」（glance, don't act）—— 与需要 uptake 的
@@ -171,6 +176,14 @@ class ContextManager:
         ])
         if has_artifact_tools:
             parts.append(cls._build_artifacts_inventory(artifacts_inventory))
+
+        # 沙盒状态（仅有沙盒工具的 agent，且引擎递了 session 快照）—— 历史里上一轮
+        # 的 mount/bash 记录对模型是"文件还在"的伪证，工具描述里的 per-turn ephemeral
+        # 静态规则压不过它；只有"现在时态"的工作区事实能纠偏（与 artifact 清单同理:
+        # 状态用动态注入，能力进工具描述，契约进 inventory 标注，how-to 归 skill）。
+        has_sandbox_tools = any(t in agent_config.tools for t in ("bash", "mount", "persist"))
+        if has_sandbox_tools and sandbox_status is not None:
+            parts.append(cls._build_sandbox_status(sandbox_status))
 
         # Context 水位预警（仅临近 compaction 时整段出现）—— last_usage 是上一轮 call 的
         # input+output（compaction 触发值），≥ WARN_RATIO×阈值才注入；水位以下完全不出现，
@@ -218,6 +231,51 @@ class ContextManager:
             'preserve full detail.\n'
             '</context_usage>'
         )
+
+    @classmethod
+    def _build_sandbox_status(cls, sandbox_status: Dict) -> str:
+        """渲染 <sandbox_status> 段（三态:not_started / running / unavailable）。
+
+        not_started 是高价值态:历史里上一轮 mount/bash 的成功记录会让模型以为
+        文件还在，必须用现在时态的"工作区为空"对冲。running 态列工作区第一层
+        （session 侧已按 SANDBOX_STATUS_MAX_ENTRIES 截断，total 标记真实总数），
+        给 persist 的 path 决策当依据。文件名是模型可控内容，控制字符替换为 �
+        防止伪造清单行。
+        """
+        state = sandbox_status.get("state")
+        if state == "unavailable":
+            return (
+                f'<sandbox_status state="unavailable">\n'
+                f'Sandbox is unavailable for the rest of this turn: '
+                f'{sandbox_status.get("reason", "unknown")}\n'
+                f'</sandbox_status>'
+            )
+        if state == "not_started":
+            return (
+                '<sandbox_status state="not_started">\n'
+                'No sandbox container has been started this turn. The sandbox is '
+                'per-turn and its workspace starts EMPTY — files mounted or created '
+                'in previous turns are GONE. Mount artifacts again before referencing '
+                'them in bash commands.\n'
+                '</sandbox_status>'
+            )
+        # running
+        entries = sandbox_status.get("entries")
+        total = sandbox_status.get("total")
+        lines = ['<sandbox_status state="running">']
+        if entries is None:
+            lines.append("Workspace listing unavailable (run `ls /workspace` to check).")
+        elif not entries:
+            lines.append("Workspace (/workspace) is empty.")
+        else:
+            lines.append("Workspace (/workspace) top-level entries:")
+            for name, is_dir in entries:
+                safe = "".join(ch if ch >= " " and ch != "\x7f" else "�" for ch in name)
+                lines.append(f"- {safe}/" if is_dir else f"- {safe}")
+            if total is not None and total > len(entries):
+                lines.append(f"(+{total - len(entries)} more not shown)")
+        lines.append("</sandbox_status>")
+        return "\n".join(lines)
 
     @classmethod
     def _find_task_plan(cls, artifacts_inventory: Optional[List[Dict]]) -> Optional[Dict]:
