@@ -229,9 +229,10 @@ assert_upload_cap() {
   [[ "$code" == "413" ]] \
     && ok "upload-cap: 211MiB(超限) → 413" \
     || no "upload-cap: 211MiB 应 413，实得 '$code'"
-  # Positive: a max legit batch (200MiB = the 20MB×10 ceiling) must pass the proxy
+  # Positive: a max legit batch (200MiB = the authoritative total-bytes cap; note
+  # this is now LESS than per-file×count = 100MB×10, by design) must pass the proxy
   # and REACH backend. Guards against the cap being silently lowered below the
-  # valid-batch ceiling (e.g. to 20MB), which would 413 legitimate uploads while
+  # valid-batch ceiling (e.g. to 100MB), which would 413 legitimate uploads while
   # the negative check above still passes. -w prints code on its own trailing
   # line; the body is the stub's small JSON echo (NOT the 200MiB upload).
   big="$(mktemp)"

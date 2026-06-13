@@ -4,6 +4,8 @@
 
 # LiteLLM - 统一 LLM 接口
 # 支持 OpenAI/DeepSeek/Qwen/Ollama/vLLM 等 100+ 提供商
+# !=1.82.7/!=1.82.8：TeamPCP 供应链投毒版本（见 commit 5ab1348），升级时不可移除排除项；
+# <2.0.0：防止 pip-compile --upgrade 时失控跨大版本
 litellm>=1.82.4,<2.0.0,!=1.82.7,!=1.82.8
 
 # ========================================
@@ -15,15 +17,23 @@ python-dotenv>=1.0.0
 
 # 网络抓取
 beautifulsoup4>=4.11.0  # HTML解析器：Jina Reader API fallback
-aiohttp>=3.9.0  # 异步HTTP客户端
+aiohttp>=3.14.0  # 异步HTTP客户端（3.14.0 修 CVE-2026-34993 / CVE-2026-47265）
 
 # 文档转换
 pymupdf>=1.24.0  # PDF文本提取
 charset-normalizer>=3.0.0  # 文本编码检测
 python-multipart>=0.0.9  # 文件上传支持
 
+# 图片处理：上传校验（按内容探测 png/jpeg + 解压炸弹闸）+ 识图 read 路径降采样
+Pillow>=10.4.0
+
 # 可观测性（PR-obs-lite sampler：进程 RSS / CPU% / FD / disk usage）
 psutil>=5.9.0
+
+# 沙盒（C 阶段）：Docker daemon HTTP API 的 asyncio 原生客户端。
+# 选它因容器生灭要 await、直接挂引擎的 asyncio.Task.cancel() 取消/超时/lease 栈；
+# docker CLI / 同步 docker-py 与之对不上。调用全部收口在 SandboxSession seam。
+aiodocker>=0.24.0
 
 # 文本模糊匹配（update_artifact Layer 2，锚定 + 有界 Levenshtein 校验）
 rapidfuzz>=3.0.0

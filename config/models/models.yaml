@@ -7,9 +7,11 @@ models:
   # OpenAI
   gpt-4o:
     model: gpt-4o
+    vision: true  # 多模态(可识图)。read_artifact 仅向 vision:true 的模型注入图块。
 
   gpt-4o-mini:
     model: gpt-4o-mini
+    vision: true
 
   # Qwen3.7 — 闭源(2026-05 最新旗舰;文本仅 max 档,无 3.7-plus)
   qwen3.7-max:
@@ -32,6 +34,7 @@ models:
   # Qwen3.7-plus — 闭源,多模态(早融合视觉,可识图/图表/截图)
   qwen3.7-plus:
     model: dashscope/qwen3.7-plus
+    vision: true  # read_artifact 据此向本模型注入图块;文本模型(max)只得占位文本。
     params:
       enable_thinking: true
       temperature: 0.6
@@ -40,6 +43,7 @@ models:
 
   qwen3.7-plus-no-thinking:
     model: dashscope/qwen3.7-plus
+    vision: true
     params:
       enable_thinking: false
       temperature: 0.7

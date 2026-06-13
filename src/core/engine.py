@@ -20,6 +20,7 @@ from config import config
 from core.events import StreamEventType, ExecutionEvent
 from core.context_manager import ContextManager
 from core.compaction_runner import CompactionRunner
+from core.cancellation import CooperativeCancelled, run_cancellable
 from tools.artifact_envelope import make_preview_slice, render_artifact_slice
 from tools.xml_parser import parse_tool_calls
 from tools.base import BaseTool, ToolPermission, ToolResult
@@ -152,6 +153,7 @@ async def execute_loop(
     hooks: EngineHooks,
     artifact_service: Optional[Any] = None,
     emit: Optional[EmitFn] = None,
+    sandbox_session: Optional[Any] = None,
 ) -> Dict[str, Any]:
     """
     Pi-style 扁平 while loop 执行引擎
@@ -164,6 +166,9 @@ async def execute_loop(
         artifact_service: ArtifactService 实例（duck-typed 协作者：set_session /
             list_artifacts / persist_tool_result / bind_emit）
         emit: 事件推送回调（推 SSE）
+        sandbox_session: SandboxSession 实例（duck-typed:status_snapshot），仅用于
+            动态上下文的 <sandbox_status> 快照——生命周期/拆除归 controller_factory
+            + runner cleanup，引擎不管理它
     Returns:
         最终执行状态
     """
@@ -171,7 +176,29 @@ async def execute_loop(
 
     message_id = state["message_id"]
     tool_round_count: Dict[str, int] = {}  # per-agent tool round counter
-    compaction_runner = CompactionRunner(agents=agents, emit=emit)
+
+    async def _is_cancelled() -> bool:
+        """零参谓词：协作式 cancel flag（预绑定 message_id）——所有消费点的唯一入口。
+
+        探针失败（Redis 瞬断等）按「未取消」处理（fail-open + warning）：探针是纯
+        UX 信号，失灵的最坏后果是取消晚一拍生效（下个 CANCEL_CHECK_INTERVAL 自然
+        重试）；store 持续不可用的 fail-closed 兜底在 heartbeat/lease 层（连续失败
+        → 外部 task.cancel，execution_runner）。绝不让探针异常往上穿 —— 否则它落
+        在哪个消费点就伪装成哪个消费点的故障（工具被杀且记成工具失败 / 流式期间记
+        成 "LLM call failed" / loop 顶记成 turn ERROR）。
+        """
+        try:
+            return await hooks.check_cancelled(message_id)
+        except Exception as probe_err:
+            logger.warning(
+                f"cancel-flag probe failed for {message_id} "
+                f"(treated as not-cancelled, retried next tick): {probe_err}"
+            )
+            return False
+
+    compaction_runner = CompactionRunner(
+        agents=agents, emit=emit, check_cancelled=_is_cancelled
+    )
 
     # NOTE: the USER_INPUT event (+ uploaded-file attribution + force_compact
     # directive) is built AFTER `_emit` is defined and uploads are staged —— see
@@ -238,6 +265,8 @@ async def execute_loop(
                     content=f["content"],
                     content_type=f["content_type"],
                     metadata=f.get("metadata"),
+                    blob=f.get("blob"),
+                    blob_content_type=f.get("blob_content_type"),
                 )
             except Exception as e:
                 logger.exception(f"Failed to stage upload '{f.get('filename')}': {e}")
@@ -254,21 +283,16 @@ async def execute_loop(
                 break
 
         if staging_error is not None:
-            # Loud, atomic abort. 静默吞掉一个 stage 失败 = 用户附件在 clearSent 里
-            # 凭空消失而无任何信号(违反 loud-failure)。原子性:回滚本轮已 stage 的
-            # 文件(纯内存,几个 dict pop),使 flush_all 一个都不落 → 用户重试时不撞 _N。
+            # Loud, atomic abort. 静默吞掉一个 stage 失败 = 用户附件凭空消失而无任何
+            # 信号(违反 loud-failure)。原子性:回滚本轮已 stage 的文件(纯内存,几个
+            # dict pop),使 flush_all 一个都不落 → 用户重试时不撞 _N。
             discard = getattr(artifact_service, "discard_staged", None)
             if discard:
                 for sid in staged_ids:
                     discard(stage_session, sid)
             state["uploaded_artifacts"] = []
-            # uploads_rolled_back:回滚后 flush_all 对空集仍 vacuously 成功
-            # (pp.artifacts_flushed=True),但上传其实没落库 —— 这个 flag 让
-            # decide_terminal 把 artifacts_flushed 修正为 False(详见 post_processing
-            # 顶部 uploads_persisted 计算),前端据此保留输入框附件。
-            state["uploads_rolled_back"] = True
             # record-not-emit:不在此发 ERROR;只记错误详情,turn 末由 decide_terminal
-            # 作为唯一终态发射点统一构建 + 发射 ERROR(带 request_id + artifacts_flushed)。
+            # 作为唯一终态发射点统一构建 + 发射 ERROR(带 request_id)。
             state["error_detail"] = {
                 "error": staging_error,
                 "agent": "lead_agent",
@@ -343,6 +367,14 @@ async def execute_loop(
             except Exception as e:
                 logger.exception(f"Failed to get artifacts inventory: {e}")
 
+        sandbox_status = None
+        if sandbox_session is not None:
+            try:
+                # to_thread:快照含 host 侧单层目录枚举(模型可写的树,条目数不可控)
+                sandbox_status = await asyncio.to_thread(sandbox_session.status_snapshot)
+            except Exception:
+                logger.exception("sandbox status snapshot failed")  # 注入缺席即可,不阻断本轮
+
         messages = ContextManager.build(
             state=state,
             agent_name=agent_name,
@@ -350,6 +382,7 @@ async def execute_loop(
             tools=tools,
             artifacts_inventory=artifacts_inventory,
             model=get_litellm_model_id(agents[agent_name].model),
+            sandbox_status=sandbox_status,
         )
 
         if tool_round_count.get(agent_name, 0) >= agents[agent_name].max_tool_rounds:
@@ -448,7 +481,9 @@ async def execute_loop(
                 now = time.monotonic()
                 if now - last_cancel_check >= config.CANCEL_CHECK_INTERVAL:
                     last_cancel_check = now
-                    if await hooks.check_cancelled(message_id):
+                    # 经软化谓词而非 hooks 直连:探针异常在这里穿出会被下面的
+                    # except 记成 "LLM call failed" 的 ERROR 终态(伪装故障源)。
+                    if await _is_cancelled():
                         cancelled_mid_stream = True
                         break
 
@@ -814,8 +849,26 @@ async def execute_loop(
                 "tool": tool_name, "params": params,
             })
 
+            # 可打断 await：cancel flag 在工具在飞期间按 CANCEL_CHECK_INTERVAL 被轮询，
+            # 命中即 task.cancel() 在飞工具 —— cancel 延迟不再受 per-tool 超时
+            # （bash SANDBOX_COMMAND_TIMEOUT / HttpTool per-MD timeout）支配。
+            # 取消落入正常 TOOL_COMPLETE 流（success=False）：START/COMPLETE 配对
+            # 不变量保持，下一轮 history 里模型能看到"这次调用被用户打断"。
+            # 随后的 _check_cancelled（下个工具前 / while 顶部）置终态 flag 收口。
             try:
-                tool_result = await tool(**params)
+                tool_result = await run_cancellable(
+                    tool(**params), _is_cancelled, config.CANCEL_CHECK_INTERVAL
+                )
+            except CooperativeCancelled:
+                logger.info(f"Tool '{tool_name}' interrupted by user cancel mid-flight")
+                tool_result = ToolResult(
+                    success=False,
+                    error=(
+                        "Cancelled by user while the tool was running. "
+                        "Side effects may or may not have been applied "
+                        "(the operation was already in flight)."
+                    ),
+                )
             except Exception as e:
                 logger.exception(f"Tool '{tool_name}' execution error: {e}")
                 tool_result = ToolResult(success=False, error=str(e))
@@ -826,6 +879,22 @@ async def execute_loop(
             # 超长成功结果统一落盘为 artifact，回填预览（fail-open）
             tool_result = await _maybe_persist_tool_result(tool_name, tool, tool_result)
 
+            # 识图:把图块 data-URI 从将入事件的 metadata 里摘出 → 存进本 turn 的
+            # state["vision_blocks"](仅内存、不持久化、跨轮自然失效);事件只留引用
+            # (artifact_id/version/content_type)。context build 据 state 还原:本轮命中
+            # → 注入图块;下一轮 state 已空 → 占位文本(模型再 read_artifact 即可重看)。
+            # 字节绝不进事件表(撑爆 + 与「blob 有专属持久家」冲突)。
+            tc_metadata = tool_result.metadata or None
+            _img = tc_metadata.get("image") if tc_metadata else None
+            if isinstance(_img, dict) and "data_uri" in _img:
+                state.setdefault("vision_blocks", {})[
+                    (_img.get("artifact_id"), _img.get("version"))
+                ] = _img["data_uri"]
+                tc_metadata = {
+                    **tc_metadata,
+                    "image": {k: v for k, v in _img.items() if k != "data_uri"},
+                }
+
             await _emit(StreamEventType.TOOL_COMPLETE.value, agent_name, {
                 "tool": tool_name,
                 "success": tool_result.success,
@@ -833,7 +902,7 @@ async def execute_loop(
                 "error": tool_result.error if not tool_result.success else None,
                 "duration_ms": tool_duration_ms,
                 "params": params,
-                "metadata": tool_result.metadata or None,
+                "metadata": tc_metadata,
                 "parser_warnings": parser_warnings,
             })
 
@@ -841,7 +910,9 @@ async def execute_loop(
             tool_round_count[agent_name] = tool_round_count.get(agent_name, 0) + 1
 
     async def _check_cancelled() -> bool:
-        if await hooks.check_cancelled(message_id):
+        # 同走软化谓词:探针异常在 loop 顶/工具间穿出会被 while 外层
+        # except Exception 记成 turn ERROR(一次 Redis 抖动杀掉整个 turn)。
+        if await _is_cancelled():
             state["completed"] = True
             state["cancelled"] = True
             state["response"] = state.get("response", "") or ""
@@ -877,7 +948,10 @@ async def execute_loop(
                 "system_prompt": messages[0]["content"] if messages and messages[0].get("role") == "system" else None,
             })
 
-            logger.debug(f"[{current_agent_name}] Messages:\n{format_messages_for_debug(messages)}")
+            # 守卫:format_messages_for_debug 会遍历 messages,识图块列表里若有图(已压成
+            # 摘要、不吐 base64,但仍要遍历)——非 DEBUG 时跳过 eager 求值。
+            if logger.debug_mode:
+                logger.debug(f"[{current_agent_name}] Messages:\n{format_messages_for_debug(messages)}")
 
             # 调用 LLM（流式）
             llm_result = await _call_llm(messages, current_agent_name, agents[current_agent_name].model)
@@ -906,6 +980,19 @@ async def execute_loop(
                     input_tokens=normalized_usage["input_tokens"],
                     output_tokens=normalized_usage["output_tokens"],
                 )
+            except CooperativeCancelled:
+                # 用户 cancel 落在 compaction LLM 调用期间（原本是最长的盲窗：
+                # COMPACTION_TIMEOUT 秒）。maybe_trigger 的 except Exception 已配对
+                # 追加 success=False 的 compaction_summary（EventHistory 跳过，无
+                # boundary）—— 此处只需路由到 CANCELLED 终态，不能落进下面的
+                # ERROR 分支。
+                logger.info(
+                    f"Compaction for {current_agent_name} interrupted by user cancel"
+                )
+                state["completed"] = True
+                state["cancelled"] = True
+                state["response"] = state.get("response", "") or ""
+                break
             except Exception as compact_error:
                 logger.error(f"Compaction failed for {current_agent_name}: {compact_error}")
                 # record-not-emit:turn 末由 decide_terminal 统一发射 ERROR。

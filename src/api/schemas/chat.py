@@ -83,6 +83,12 @@ class ResumeResponse(BaseModel):
     stream_url: str = Field(..., description="New SSE endpoint URL")
 
 
+class UploadedFileRef(BaseModel):
+    """File the user attached to a message (display-only snapshot)"""
+    id: str = Field(..., description="Artifact ID the upload was staged as")
+    filename: str = Field(..., description="Original filename")
+
+
 class MessageResponse(BaseModel):
     """Message in conversation detail response"""
     id: str = Field(..., description="Message ID")
@@ -94,6 +100,10 @@ class MessageResponse(BaseModel):
     execution_metrics: Optional[Dict[str, Any]] = Field(
         None,
         description="Turn-level metrics from Message.metadata_['execution_metrics']: started_at, completed_at, total_duration_ms, total_token_usage, etc.",
+    )
+    uploaded_files: Optional[List[UploadedFileRef]] = Field(
+        None,
+        description="Files the user attached this turn, from Message.metadata_['uploaded_files']. Display-only (best-effort): absent for turns that failed before artifact flush.",
     )
 
 

@@ -172,7 +172,13 @@ echo "Packaging config/ to ${CONFIG_ARCHIVE}..."
 # LIBARCHIVE.xattr.com.apple.*) that GNU tar on the Linux target warns about on
 # extract. --exclude='.DS_Store' drops the Finder turd that carries those xattrs
 # (and which has no business on the target anyway).
-tar --no-xattrs --no-fflags --exclude='.DS_Store' -czf "$CONFIG_ARCHIVE" config/
+# COPYFILE_DISABLE: --no-xattrs does NOT cover bsdtar's separate --mac-metadata
+# layer, which emits AppleDouble `._<name>` SIBLING ENTRIES for any file carrying
+# xattrs — those land as real binary files on the Linux target and crashed agent
+# loading on 2026-06-12 (`._lead_agent.md` is not utf-8). COPYFILE_DISABLE=1 is
+# the documented kill switch; --exclude='._*' is the belt to the suspenders.
+export COPYFILE_DISABLE=1
+tar --no-xattrs --no-fflags --exclude='.DS_Store' --exclude='._*' -czf "$CONFIG_ARCHIVE" config/
 
 # Package deploy/ (compose file, nginx.conf, scripts, maintenance assets).
 # Three exclusions:
@@ -186,6 +192,7 @@ echo "Packaging deploy/ to ${DEPLOY_ARCHIVE}..."
 # by not emitting macOS metadata + not shipping .DS_Store.
 tar --no-xattrs --no-fflags \
     --exclude='.DS_Store' \
+    --exclude='._*' \
     --exclude='deploy/.env' \
     --exclude='deploy/.env.local' \
     --exclude='deploy/maintenance/MAINTENANCE_ON' \

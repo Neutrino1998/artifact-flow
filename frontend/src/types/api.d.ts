@@ -290,7 +290,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/artifacts/{session_id}/{artifact_id}/export": {
+    "/api/v1/artifacts/{session_id}/{artifact_id}/raw": {
         parameters: {
             query?: never;
             header?: never;
@@ -298,14 +298,19 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Export Artifact
-         * @description Export an artifact to a different format.
-         *     Currently supports exporting text/markdown artifacts to docx.
+         * Get Artifact Raw
+         * @description Serve an artifact's raw binary blob (uploaded image / rich-format source).
          *
-         *     Note: reads from DB only — during execution, exports the last flushed
-         *     version, not in-memory edits.  Frontend hides export while streaming.
+         *     DB-only read (request-scoped Service, empty WorkingSet) — like all GETs here,
+         *     during execution it serves the last flushed blob. 404 when the artifact has no
+         *     blob (pure-text artifacts) or doesn't exist; not logged (self-evident 404).
+         *
+         *     Images are served `inline` so a frontend `<img src=.../raw>` renders in place;
+         *     everything else `attachment` (download). Content-Type is the blob's true MIME
+         *     (from the Service, which prefers metadata.blob_content_type over the artifact's
+         *     possibly-converted content_type).
          */
-        get: operations["export_artifact_api_v1_artifacts__session_id___artifact_id__export_get"];
+        get: operations["get_artifact_raw_api_v1_artifacts__session_id___artifact_id__raw_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1089,6 +1094,12 @@ export interface components {
              */
             original_filename: string | null;
             /**
+             * Has Blob
+             * @description True for blob-backed artifacts (images / rich-format uploads): no text content; raw bytes via GET …/raw.
+             * @default false
+             */
+            has_blob: boolean;
+            /**
              * Created At
              * Format: date-time
              * @description Creation time
@@ -1141,6 +1152,12 @@ export interface components {
              * @description For source=user_upload artifacts: the filename the user uploaded. From metadata['original_filename'].
              */
             original_filename: string | null;
+            /**
+             * Has Blob
+             * @description True for blob-backed artifacts (images / rich-format uploads): no text content; raw bytes via GET …/raw.
+             * @default false
+             */
+            has_blob: boolean;
             /**
              * Created At
              * Format: date-time
@@ -1421,6 +1438,11 @@ export interface components {
              * @description Model identifier configured for the lead_agent (e.g. 'qwen3.7-max'). Surfaced in the composer so the user can see which model is driving the current conversation without digging into agent MD files.
              */
             lead_agent_model: string;
+            /**
+             * Max Upload Size
+             * @description Per-file upload byte limit (MAX_UPLOAD_SIZE). The composer uses it to pre-reject an oversize file with instant feedback instead of staging + POSTing it for a backend 422. Backend stays authoritative; the batch TOTAL is capped separately at the proxy layer (not surfaced here — it lives in nginx/Caddy config, outside src/config.py).
+             */
+            max_upload_size: number;
         };
         /**
          * ConversationDetailResponse
@@ -1755,6 +1777,11 @@ export interface components {
             execution_metrics: {
                 [key: string]: unknown;
             } | null;
+            /**
+             * Uploaded Files
+             * @description Files the user attached this turn, from Message.metadata_['uploaded_files']. Display-only (best-effort): absent for turns that failed before artifact flush.
+             */
+            uploaded_files: components["schemas"]["UploadedFileRef"][] | null;
         };
         /**
          * MoveDepartmentRequest
@@ -1877,6 +1904,22 @@ export interface components {
              * @description Department id; explicit null clears
              */
             department_id?: string | null;
+        };
+        /**
+         * UploadedFileRef
+         * @description File the user attached to a message (display-only snapshot)
+         */
+        UploadedFileRef: {
+            /**
+             * Id
+             * @description Artifact ID the upload was staged as
+             */
+            id: string;
+            /**
+             * Filename
+             * @description Original filename
+             */
+            filename: string;
         };
         /**
          * UserImpactResponse
@@ -2509,12 +2552,9 @@ export interface operations {
             };
         };
     };
-    export_artifact_api_v1_artifacts__session_id___artifact_id__export_get: {
+    get_artifact_raw_api_v1_artifacts__session_id___artifact_id__raw_get: {
         parameters: {
-            query: {
-                /** @description Export format (docx) */
-                format: string;
-            };
+            query?: never;
             header?: never;
             path: {
                 session_id: string;
@@ -2524,13 +2564,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful Response */
+            /** @description Raw artifact blob (image inline, else attachment). */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "*/*": string;
                 };
             };
             /** @description Validation Error */

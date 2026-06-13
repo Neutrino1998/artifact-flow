@@ -21,7 +21,7 @@
 | `404` | 资源不存在 | **也覆盖"跨用户访问"** — 见 Design Decision |
 | `409` | 冲突 | Lease 冲突 / interrupt 已解决 |
 | `410` | 资源失效 | `active-stream` 指向的 stream 已过期 |
-| `422` | 请求不合法 | 参数校验（含口令强度、用户名字符）、文件过大、格式不支持 |
+| `422` | 请求不合法 | 参数校验（含口令强度、用户名字符）、文件过大、png/jpg 图片探测失败 |
 | `429` | 请求过频 | 登录失败累计超阈，锁定窗口内（per-username / per-IP） |
 | `503` | 服务不可用 | Health ready 降级 |
 
@@ -326,21 +326,24 @@ POST /api/v1/chat/bulk-delete
 
 ## Artifacts
 
-`/api/v1/artifacts` — 读取、导出、版本管理。**只读（全是 GET）**：artifact 的产生（agent 创建 / 用户上传）都不经此路由。
+`/api/v1/artifacts` — 读取、版本管理、二进制原件下载。**只读（全是 GET）**：artifact 的产生（agent 创建 / 用户上传）都不经此路由。
 
 | 方法 | 路径 | 鉴权 | 说明 |
 |------|------|------|------|
 | GET | `/{session_id}` | 用户 | 列出 session 下所有 artifacts |
 | GET | `/{session_id}/{artifact_id}` | 用户 | 获取内容 + 版本列表 |
 | GET | `/{session_id}/{artifact_id}/versions/{version}` | 用户 | 获取指定版本 |
-| GET | `/{session_id}/{artifact_id}/export?format=docx` | 用户 | 导出为 DOCX |
+| GET | `/{session_id}/{artifact_id}/raw` | 用户 | 二进制原件字节（图片 inline，其余 attachment 下载；纯文本 artifact 无 blob → `404`） |
+
+artifact 分两类，由响应里的 `has_blob` 判别：**文本类**（md/py/csv 等）`content` 即正文、可编辑可版本化；**二进制类**（上传的图片 / docx / pdf）`content` 为空、源不可变单版，字节走 `/raw`，`content_type` 即原件真实 MIME。富格式不做服务端文本转换——读/转换是沙盒能力（见 [../architecture/artifacts.md](../architecture/artifacts.md)）。
 
 ### 上传走 `POST /chat`，不在本路由
 
 旧的 `POST /artifacts/upload` 与 `POST /{session_id}/upload`（即时 commit）已删除。上传现在并入消息提交：
 
 - `POST /api/v1/chat`，`multipart/form-data`：文本走 `payload` 表单字段（`ChatRequest` JSON，文本键为 `user_input`），附件走 `files`（可多文件），同一请求。**没有 `message` 字段**——按 `message + files` 调会因缺 `payload` 直接 422
-- 大小上限：`config.MAX_UPLOAD_SIZE`（环境可配，默认见 [deployment.md](../deployment.md)）；`422` 触发：超限、格式不支持（`convert_uploaded_file` 在写库前做 size-check + 转换）
+- **格式：任意文件都收**（上传路由翻转，2026-06-11）——路由纯声明式按扩展名三分：文本白名单解码为 artifact `content`；png/jpeg 走识图路由（识图仅此两种）；**其余一律存为二进制 blob artifact**（不试解码不验 magic；真实 MIME，模型可 `mount` 进沙盒检视/转换，用户可下载原件）。没有扩展名拒绝名单
+- 大小上限：单文件 `config.MAX_UPLOAD_SIZE`（环境可配，默认 100MB，见 [deployment.md](../deployment.md)）；批量总字节由代理层独立封顶（200MB → `413`）。**注**：文本路径另有更低的独立上限 `config.MAX_TEXT_CONVERT_BYTES`（默认 20MB）——文本整份变成 artifact `content`（无 blob），故比 blob 路径收得紧；**超文本帽不再 422，落为 blob**（可下载、可 mount 进沙盒处理）。`422` 触发仅剩两类：单文件超 `MAX_UPLOAD_SIZE`、png/jpg 扩展名但 Pillow 探不出合法 PNG/JPEG（含超像素炸弹；识图路由是上传期决策，这道闸保证路由正确性）
 - 转换后的内容 closure-carry 进引擎，在 turn 起点经 `create_from_upload` **stage 进 WorkingSet**（发 `ARTIFACT_CREATED`、随 turn 末 `flush_all` 落库），与 agent 自建 artifact 走**同一统一生命周期**——不再绕过 write-back、不再即时 commit（见 [../architecture/artifacts.md](../architecture/artifacts.md)）
 
 ### 读取的即时性
@@ -348,8 +351,8 @@ POST /api/v1/chat/bulk-delete
 删除 `_active_managers` overlay 后，所有 GET **均为纯 DB 读**（请求级 `ArtifactService` 自带空 WorkingSet）：
 
 - turn **执行中**，REST 返回的是上一次 `flush_all` 的快照，**落后于 live**；turn 内的实时内容由 SSE 的 `ARTIFACT_CREATED` / `ARTIFACT_UPDATED` 事件推给前端 reduce（见 [streaming.md](../architecture/streaming.md) / [artifacts.md](../architecture/artifacts.md)），不经 REST
-- `GET .../versions/{version}` 与 `GET .../export` 同样只读 DB：执行中未 flush 的中间版本返回 `404`
-- 前端据此在流式执行期间隐藏版本选择器 / 导出入口（纯前端读类 UX 锁，后端保持宽松）
+- `GET .../versions/{version}` 与 `GET .../raw` 同样只读 DB：执行中未 flush 的中间版本 / 本轮刚上传未落库的 blob 返回 `404`
+- 前端据此在流式执行期间隐藏版本选择器 / 下载入口（纯前端读类 UX 锁，后端保持宽松）；本轮上传的图片由前端 send-local File 缓存即时渲染、二进制卡片只靠事件元数据渲染，均不在 turn 内打 `/raw`
 
 ---
 

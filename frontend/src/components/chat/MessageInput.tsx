@@ -7,7 +7,8 @@ import { useStreamStore } from '@/stores/streamStore';
 import { useUIStore } from '@/stores/uiStore';
 import { useConversationStore } from '@/stores/conversationStore';
 import { useConfigStore } from '@/stores/configStore';
-import { useStagedFilesStore } from '@/stores/stagedFilesStore';
+import { useStagedFilesStore, type StagedFile } from '@/stores/stagedFilesStore';
+import StagedFileChip from './StagedFileChip';
 import { injectMessage, cancelExecution } from '@/lib/api';
 import type { UploadEvent } from '@/lib/api';
 import { formatTokens } from '@/lib/formatTokens';
@@ -24,8 +25,26 @@ type UploadProgress =
   | { phase: 'uploading'; loaded: number; total: number; lengthComputable: boolean }
   | { phase: 'processing' };
 
+// The synthetic name browsers attach to a clipboard image that has no backing
+// file (a screenshot or a "copy image" — Chrome/Edge/Firefox all use
+// "image.<ext>"). We rename only these placeholders, NOT every image/* paste:
+// an actual image file copied from the OS file manager carries its real name
+// (e.g. "vacation.jpg") and must be left untouched.
+const GENERIC_CLIPBOARD_IMAGE = /^image\.(png|jpe?g|gif|webp|bmp)$/i;
+
+// Stable empty ref for the absent-draft case, so the files selector doesn't
+// return a fresh [] each render (which would thrash zustand's equality check).
+const EMPTY_FILES: StagedFile[] = [];
+
 export default function MessageInput() {
-  const [content, setContent] = useState('');
+  // Composer text + files live in the draft store keyed by conversation, not in
+  // local state: switching conversations flips currentLoading, which unmounts
+  // this component (the loading placeholder), so local state can't survive a
+  // switch. The active conversation is `activeKey`; its draft is drafts[activeKey]
+  // (absent ⇒ blank). activeKey is also the send's OWNER key (see useComposerSend).
+  const activeKey = useStagedFilesStore((s) => s.activeKey);
+  const content = useStagedFilesStore((s) => s.drafts[s.activeKey]?.text ?? '');
+  const setText = useStagedFilesStore((s) => s.setText);
   // Armed by the "compact" toggle; rides the next send as force_compact and is
   // cleared on a successful send. A compact-only send (no text) is allowed.
   const [forceCompact, setForceCompact] = useState(false);
@@ -49,18 +68,18 @@ export default function MessageInput() {
   const queuedInfo = useStreamStore((s) => s.queuedInfo);
   const toggleArtifactPanel = useUIStore((s) => s.toggleArtifactPanel);
 
-  const stagedFiles = useStagedFilesStore((s) => s.files);
+  const stagedFiles = useStagedFilesStore((s) => s.drafts[s.activeKey]?.files ?? EMPTY_FILES);
   const addFiles = useStagedFilesStore((s) => s.addFiles);
   const removeFile = useStagedFilesStore((s) => s.removeFile);
-  const markSent = useStagedFilesStore((s) => s.markSent);
   const stageNotice = useStagedFilesStore((s) => s.notice);
   const dismissNotice = useStagedFilesStore((s) => s.dismissNotice);
 
-  // Snapshot → lock → await → reconcile/keep for both send and inject lives in
-  // this hook (single enforcement point); see useComposerSend.ts. On send-ok the
-  // consumed files are marked sent (kept visible until the turn's terminal event:
-  // COMPLETE clears them, cancel/error/timeout reverts — uploads are ephemeral).
-  const { sending, submit, inject } = useComposerSend(content, setContent, stagedFiles, markSent);
+  // The send lifecycle (lock → clear → await) for both send and inject lives in
+  // this hook (single enforcement point); see useComposerSend. It's OWNER-keyed on
+  // activeKey: the send clears THAT conversation's draft (text + the files that
+  // ride the POST) at send start, so it stays correct even if the user navigates
+  // mid-send. A failed send is a best-effort loss — there is no restore.
+  const { sending, submit, inject } = useComposerSend(activeKey, content, stagedFiles);
 
   // Auto-resize textarea
   useEffect(() => {
@@ -143,7 +162,7 @@ export default function MessageInput() {
 
     if (isStreaming) {
       // Inject mode: text only (attachments ride a new message, not an
-      // in-flight turn). The hook owns the empty-guard / lock / reconcile.
+      // in-flight turn). The hook owns the empty-guard / lock / clear-on-send.
       const convId = streamConversationId || conversationId;
       if (!convId) return;
       await inject((text) => injectMessage(convId, text));
@@ -209,17 +228,60 @@ export default function MessageInput() {
     [handleSend]
   );
 
-  // A paste larger than the message cap is diverted to a staged .txt
-  // attachment instead of being inlined (which would hit the 422 cap and
-  // bloat context). Smaller pastes fall through to normal insertion (capped
-  // by the textarea maxLength).
   const handlePaste = useCallback(
     (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
-      if (isStreaming) return;
-      const text = e.clipboardData?.getData('text/plain') ?? '';
-      // Divert a huge paste to a staged file only if there's room; at the
-      // attachment cap, let it paste inline (textarea maxLength caps it)
-      // rather than silently dropping it.
+      // Match the disabled attach button: attachments ride a new turn, not an
+      // in-flight one, so a paste while streaming falls through to plain text.
+      if (isStreaming) {
+        return;
+      }
+      const clip = e.clipboardData;
+      if (!clip) return;
+
+      // Real files on the clipboard → stage them as attachments. Prefer
+      // `clipboardData.files` (modern browsers populate it for both pasted
+      // images/screenshots and files copied from the OS file manager); fall
+      // back to scanning `items` for kind==='file' for sources that only
+      // expose the file there. Reliable case is images/screenshots — copying a
+      // file in the OS file manager only reaches the browser on some
+      // OS/browser combos (notably not macOS Finder), a platform limit we
+      // can't work around. addFiles owns the gate/cap/dedup, so an unsupported
+      // or oversize paste surfaces via `notice` like any other add.
+      let pasted: File[] = Array.from(clip.files ?? []);
+      if (pasted.length === 0 && clip.items) {
+        pasted = Array.from(clip.items)
+          .filter((it) => it.kind === 'file')
+          .map((it) => it.getAsFile())
+          .filter((f): f is File => f != null);
+      }
+      if (pasted.length > 0) {
+        e.preventDefault();
+        const ts = new Date().toISOString().replace(/[:.]/g, '-');
+        // Give a stable, timestamped name to clipboard files that arrive
+        // unnamed OR as a browser-synthetic image placeholder ("image.png" —
+        // see GENERIC_CLIPBOARD_IMAGE). Without this, repeated screenshot
+        // pastes all read "image.png" / "image_1.png" (the store dedups
+        // collisions but the names stay generic) and the upload artifact is
+        // likewise generic. Each paste event has its own `ts`, so successive
+        // pastes get distinct names. Files with a real name (incl. OS-file
+        // copies) pass through unchanged.
+        const named = pasted.map((f) => {
+          const generic =
+            !f.name || (f.type.startsWith('image/') && GENERIC_CLIPBOARD_IMAGE.test(f.name));
+          if (!generic) return f;
+          const ext = f.type.split('/')[1] || 'bin';
+          return new File([f], `pasted-${ts}.${ext}`, { type: f.type });
+        });
+        addFiles(named);
+        return;
+      }
+
+      // A text paste larger than the message cap is diverted to a staged .txt
+      // attachment instead of being inlined (which would hit the 422 cap and
+      // bloat context). Divert only if there's room; at the attachment cap,
+      // let it paste inline (textarea maxLength caps it) rather than silently
+      // dropping it. Smaller pastes fall through to normal insertion.
+      const text = clip.getData('text/plain') ?? '';
       if (text.length > MAX_MESSAGE_CHARS && stagedFiles.length < MAX_CHAT_ATTACHMENTS) {
         e.preventDefault();
         const ts = new Date().toISOString().replace(/[:.]/g, '-');
@@ -303,25 +365,7 @@ export default function MessageInput() {
           {hasStaged && (
             <div className="flex flex-wrap gap-1.5 mb-2">
               {stagedFiles.map((sf) => (
-                <span
-                  key={sf.id}
-                  className="inline-flex items-center gap-1 max-w-[200px] pl-2 pr-1 py-1 rounded-lg bg-bg dark:bg-bg-dark border border-border dark:border-border-dark text-xs text-text-secondary dark:text-text-secondary-dark"
-                  title={sf.file.name}
-                >
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
-                    <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
-                  </svg>
-                  <span className="truncate">{sf.file.name}</span>
-                  <button
-                    onClick={() => removeFile(sf.id)}
-                    className="shrink-0 p-0.5 rounded hover:bg-surface dark:hover:bg-surface-dark text-text-tertiary dark:text-text-tertiary-dark"
-                    aria-label={`Remove ${sf.file.name}`}
-                  >
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
-                      <path d="M18 6L6 18M6 6l12 12" />
-                    </svg>
-                  </button>
-                </span>
+                <StagedFileChip key={sf.id} sf={sf} onRemove={() => removeFile(sf.id)} />
               ))}
               <span className="inline-flex items-center px-1 text-xs tabular-nums text-text-tertiary dark:text-text-tertiary-dark">
                 {stagedFiles.length}/{MAX_CHAT_ATTACHMENTS}
@@ -394,7 +438,7 @@ export default function MessageInput() {
           <textarea
             ref={textareaRef}
             value={content}
-            onChange={(e) => setContent(e.target.value)}
+            onChange={(e) => setText(e.target.value)}
             onKeyDown={handleKeyDown}
             onPaste={handlePaste}
             onCompositionStart={handleCompositionStart}
@@ -443,7 +487,7 @@ export default function MessageInput() {
                 onClick={toggleArtifactPanel}
                 className="h-8 w-8 flex items-center justify-center rounded-lg text-text-secondary dark:text-text-secondary-dark hover:bg-surface dark:hover:bg-bg-dark transition-colors"
                 aria-label="Toggle artifact panel"
-                title="切换文稿面板"
+                title="切换文件面板"
               >
                 <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
                   <rect x="1.5" y="2" width="13" height="12" rx="1.5" />

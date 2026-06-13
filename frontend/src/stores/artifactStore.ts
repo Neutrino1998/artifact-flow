@@ -16,6 +16,11 @@ export interface LiveArtifact {
   title: string;
   source: string | null;
   omitted: boolean;
+  // user_upload only: original file name, for correlating to the send-local
+  // preview File (local render before the blob is flushed). null for model-created.
+  originalFilename: string | null;
+  // blob-backed (image / rich-format upload): no text content, raw via /raw.
+  hasBlob: boolean;
 }
 
 /** Apply an authoritative span delta (from compute_update): replace
@@ -42,7 +47,8 @@ function liveToDetail(id: string, live: LiveArtifact, sessionId: string | null):
     content: live.content,
     current_version: live.version,
     source: live.source,
-    original_filename: null,
+    original_filename: live.originalFilename,
+    has_blob: live.hasBlob,
     created_at: '',
     updated_at: '',
     versions: [],
@@ -87,6 +93,14 @@ interface ArtifactState {
   // Live (in-turn) content reduced from ARTIFACT_* events, keyed by artifact id.
   liveContent: Record<string, LiveArtifact>;
 
+  // Send-local image preview cache, keyed by upload filename → the File the user
+  // just sent. Display-only and wholly separate from the composer draft (which is
+  // cleared on send): it lets ImagePreview show an uploaded image instantly for
+  // the live-this-turn window, before the blob is flushed and /raw works. Shares
+  // liveContent's exact lifecycle — cleared at COMPLETE (clearLiveContent) and on
+  // nav (reset) — so a later turn's same-named upload can't shadow it.
+  localPreviews: Record<string, File>;
+
   // Upload state
   uploading: boolean;
   uploadError: string | null;
@@ -112,13 +126,18 @@ interface ArtifactState {
    *  show stale content for an artifact edited this turn). User-picked → not auto. */
   selectFromLive: (id: string) => boolean;
   clearLiveContent: () => void;
+  /** Stash the just-sent images (filtered from a send's files) as send-local
+   *  previews. Non-images are ignored (nothing reads them). */
+  setLocalPreviews: (files: File[]) => void;
   setUploading: (uploading: boolean) => void;
   setUploadError: (error: string | null) => void;
   reset: () => void;
 }
 
-function defaultViewMode(contentType?: string): ArtifactViewMode {
+function defaultViewMode(contentType?: string, hasBlob?: boolean): ArtifactViewMode {
   if (contentType === 'text/markdown') return 'preview';
+  if (hasBlob) return 'preview';  // 图片走 ImagePreview,其它二进制走 BinaryFilePreview
+  if (contentType?.startsWith('image/')) return 'preview';
   return 'source';
 }
 
@@ -140,6 +159,7 @@ export const useArtifactStore = create<ArtifactState>((set, get) => ({
 
   pendingUpdates: [],
   liveContent: {},
+  localPreviews: {},
 
   uploading: false,
   uploadError: null,
@@ -151,13 +171,13 @@ export const useArtifactStore = create<ArtifactState>((set, get) => ({
     set({
       current: artifact,
       autoSelected: false,
-      viewMode: artifact ? defaultViewMode(artifact.content_type) : 'preview',
+      viewMode: artifact ? defaultViewMode(artifact.content_type, artifact.has_blob) : 'preview',
     }),
   setCurrentAuto: (artifact) =>
     set({
       current: artifact,
       autoSelected: true,
-      viewMode: defaultViewMode(artifact.content_type),
+      viewMode: defaultViewMode(artifact.content_type, artifact.has_blob),
     }),
   // Same-artifact content refresh: write the new ArtifactDetail through
   // WITHOUT touching `autoSelected` or `viewMode`. Used when a stream
@@ -196,6 +216,8 @@ export const useArtifactStore = create<ArtifactState>((set, get) => ({
         title: d.title,
         source: d.source,
         omitted: !!d.content_omitted,
+        originalFilename: d.original_filename ?? null,
+        hasBlob: !!d.has_blob,
       };
       const liveContent = { ...s.liveContent, [d.id]: live };
       const exists = s.artifacts.some((a) => a.id === d.id);
@@ -205,7 +227,8 @@ export const useArtifactStore = create<ArtifactState>((set, get) => ({
         title: d.title,
         current_version: d.current_version,
         source: d.source,
-        original_filename: null,
+        original_filename: d.original_filename ?? null,
+        has_blob: !!d.has_blob,
         created_at: '',
         updated_at: '',
       };
@@ -223,7 +246,7 @@ export const useArtifactStore = create<ArtifactState>((set, get) => ({
       if (autoOpen && (!s.current || s.autoSelected)) {
         next.current = liveToDetail(d.id, live, s.sessionId);
         next.autoSelected = true;
-        next.viewMode = defaultViewMode(d.content_type);
+        next.viewMode = defaultViewMode(d.content_type, d.has_blob);
         next.versions = [];
         next.selectedVersion = null;
       } else if (s.current && s.current.id === d.id) {
@@ -261,6 +284,8 @@ export const useArtifactStore = create<ArtifactState>((set, get) => ({
         title: base?.title ?? d.id,
         source: base?.source ?? 'agent',
         omitted,
+        originalFilename: base?.originalFilename ?? null,
+        hasBlob: base?.hasBlob ?? false,
       };
       const liveContent = { ...s.liveContent, [d.id]: live };
       const artifacts = s.artifacts.map((a) =>
@@ -277,7 +302,7 @@ export const useArtifactStore = create<ArtifactState>((set, get) => ({
       } else if (!s.current || s.autoSelected) {
         next.current = liveToDetail(d.id, live, s.sessionId);
         next.autoSelected = true;
-        next.viewMode = defaultViewMode(live.contentType);
+        next.viewMode = defaultViewMode(live.contentType, live.hasBlob);
         next.versions = [];
         next.selectedVersion = null;
       }
@@ -290,7 +315,7 @@ export const useArtifactStore = create<ArtifactState>((set, get) => ({
     set({
       current: liveToDetail(id, live, get().sessionId),
       autoSelected: false, // user-picked: keep them here at COMPLETE
-      viewMode: defaultViewMode(live.contentType),
+      viewMode: defaultViewMode(live.contentType, live.hasBlob),
       versions: [],
       selectedVersion: null,
       diffBaseContent: null,
@@ -298,7 +323,18 @@ export const useArtifactStore = create<ArtifactState>((set, get) => ({
     return true;
   },
 
-  clearLiveContent: () => set({ liveContent: {} }),
+  // Cleared together with liveContent at COMPLETE: the live-this-turn window is
+  // over, so the local previews are no longer needed (settled artifacts read /raw).
+  clearLiveContent: () => set({ liveContent: {}, localPreviews: {} }),
+
+  setLocalPreviews: (files) =>
+    set((s) => {
+      const next = { ...s.localPreviews };
+      for (const f of files) {
+        if (f.type.startsWith('image/')) next[f.name] = f;
+      }
+      return { localPreviews: next };
+    }),
 
   setUploading: (uploading) => set({ uploading }),
   setUploadError: (error) => set({ uploadError: error }),
@@ -315,6 +351,7 @@ export const useArtifactStore = create<ArtifactState>((set, get) => ({
       viewMode: 'preview',
       pendingUpdates: [],
       liveContent: {},
+      localPreviews: {},
       uploading: false,
       uploadError: null,
     }),

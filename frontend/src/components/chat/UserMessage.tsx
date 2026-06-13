@@ -26,9 +26,15 @@ interface UserMessageProps {
    * maintaining two parallel JSX trees.
    */
   pending?: boolean;
+  /**
+   * Files the user attached this turn. Persisted path: MessageResponse.uploaded_files
+   * (best-effort — absent for turns that failed before artifact flush). Live path:
+   * filenames mirrored from the send-local staged files (streamStore.pendingUserFiles).
+   */
+  attachments?: { filename: string }[] | null;
 }
 
-function UserMessage({ content, messageId, parentId, siblingIndex = 0, siblingCount = 1, pending = false }: UserMessageProps) {
+function UserMessage({ content, messageId, parentId, siblingIndex = 0, siblingCount = 1, pending = false, attachments = null }: UserMessageProps) {
   const { copied, copy } = useCopyFeedback();
   const [editing, setEditing] = useState(false);
   const [editContent, setEditContent] = useState(content);
@@ -125,9 +131,31 @@ function UserMessage({ content, messageId, parentId, siblingIndex = 0, siblingCo
   return (
     <div className="flex justify-end group">
       <div className="relative max-w-[80%]">
-        <div className="bg-panel-accent dark:bg-surface-dark rounded-bubble px-4 py-3 text-text-primary dark:text-text-primary-dark whitespace-pre-wrap break-words">
-          {content}
-        </div>
+        {attachments && attachments.length > 0 && (
+          <div className={`flex flex-wrap justify-end gap-1.5 ${content ? 'mb-1.5' : ''}`}>
+            {attachments.map((f, i) => (
+              <span
+                key={`${f.filename}-${i}`}
+                className="inline-flex items-center gap-1 max-w-[16rem] px-2 py-1 rounded-lg bg-panel-accent dark:bg-surface-dark text-xs text-text-secondary dark:text-text-secondary-dark"
+                title={f.filename}
+              >
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                  <path d="M14 2v6h6" />
+                </svg>
+                <span className="truncate">{f.filename}</span>
+              </span>
+            ))}
+          </div>
+        )}
+        {/* Attachment-only message: chips carry the whole content, skip the empty
+            bubble. Compact-only (no text, no attachments) keeps its empty bubble —
+            pre-chips behavior, unchanged. */}
+        {(content || !(attachments && attachments.length > 0)) && (
+          <div className="bg-panel-accent dark:bg-surface-dark rounded-bubble px-4 py-3 text-text-primary dark:text-text-primary-dark whitespace-pre-wrap break-words">
+            {content}
+          </div>
+        )}
         {/* Action buttons and branch navigator on hover. Skipped entirely when
             pending — turn is in flight, none of these actions are valid yet. */}
         {!pending && (
@@ -143,6 +171,12 @@ function UserMessage({ content, messageId, parentId, siblingIndex = 0, siblingCo
               <path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" />
             </svg>
           </button>
+          {/* Rerun re-sends the text; an attachment-only message has none to
+              re-send (the backend rejects blank text with no files — attachment
+              replay is deliberately not a thing, the artifacts already live in
+              the session inventory). Hide rather than disable: the action is
+              semantically absent, not temporarily unavailable. */}
+          {content.trim() !== '' && (
           <button
             onClick={handleRerun}
             disabled={isStreaming}
@@ -155,6 +189,7 @@ function UserMessage({ content, messageId, parentId, siblingIndex = 0, siblingCo
               <path d="M21 3v5h-5" />
             </svg>
           </button>
+          )}
           <button
             onClick={handleCopy}
             className="p-1 rounded text-text-tertiary dark:text-text-tertiary-dark hover:text-text-secondary dark:hover:text-text-secondary-dark hover:bg-surface dark:hover:bg-bg-dark transition-colors"

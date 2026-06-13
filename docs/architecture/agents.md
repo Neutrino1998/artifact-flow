@@ -120,9 +120,9 @@ You can create MULTIPLE result artifacts...
 
 | Agent | 职责 | 工具 | 模型 | 最大轮数 | 内部 |
 |-------|------|------|------|---------|------|
-| `lead_agent` | 任务协调、规划、Artifact 管理、subagent 路由 | create/update/rewrite/read/grep_artifact + web_search + web_fetch + call_subagent | qwen3.7-max | 100 | 否 |
-| `research_agent` | 大型知识探索 / 多源整合，在隔离上下文中执行 | create/update/rewrite/read/grep_artifact + web_search + web_fetch | qwen3.7-max | 50 | 否 |
-| `compact_agent` | 对话摘要生成（Compaction） | 无 | qwen3.7-max | 0 | 是 |
+| `lead_agent` | 任务协调、规划、Artifact 管理、subagent 路由 | create/update/rewrite/read/grep_artifact + web_search + web_fetch + call_subagent + [沙盒](sandbox.md) bash/mount/persist | qwen3.7-max | 100 | 否 |
+| `research_agent` | 大型知识探索 / 多源整合，在隔离上下文中执行 | create/update/rewrite/read/grep_artifact + web_search + web_fetch + [沙盒](sandbox.md) bash/mount/persist | qwen3.7-plus | 50 | 否 |
+| `compact_agent` | 对话摘要生成（Compaction） | 无 | qwen3.7-plus | 0 | 是 |
 
 ### 角色分工
 

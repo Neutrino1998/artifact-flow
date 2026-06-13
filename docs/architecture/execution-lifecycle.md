@@ -40,7 +40,7 @@ COMPLETED | CANCELLED_BY_USER | CANCELLED_BY_SYSTEM | TIMED_OUT | FAILED | ORPHA
 | `RUNNING → TIMED_OUT` | controller `decide_terminal` | append `TIMED_OUT`；events 落库；`Message.response = TIMED_OUT_RESPONSE`；SSE 转发终态。flush_all 照常跑（best-effort 保留部分 artifact） |
 | `RUNNING → CANCELLED` | controller `decide_terminal` / `ensure_terminal` / engine_task | append `CANCELLED`(+reason)；events 落库；`Message.response = CANCELLED_RESPONSE_BY_{USER,SYSTEM}` |
 | `RUNNING → ERROR` | engine（自 append ERROR）/ controller（flush_error） | events 落库；`Message.response = state.response or fallback` |
-| `* → CLOSED` | `_wrapped` finally | release lease；clear interactive；close stream |
+| `* → CLOSED` | `_wrapped` finally | 先跑本轮注册的资源 cleanup 回调（`runner.register_cleanup`，逆序、每个 30s 有界弃等；当前唯一注册方是沙盒拆除，见 [sandbox.md](sandbox.md)）→ release lease；clear interactive；close stream。顺序刻意：资源先于 lease 消亡，不留「lease 已放、容器还在」的孤儿窗口（进程崩溃跳过 finally 的残留由 reaper 兜底） |
 
 ## 为什么 cancel 只作用于 RUNNING
 
@@ -51,6 +51,29 @@ COMPLETED | CANCELLED_BY_USER | CANCELLED_BY_SYSTEM | TIMED_OUT | FAILED | ORPHA
 - **代价极小**：排队轮消耗零算力、只会排在*其他会话*后面（同一会话 lease 单写、排不起队）、且很快起槽起跑；起跑（RUNNING）后 cancel 即刻可用 —— 此时 flag 在持有该轮的 worker 上、几秒内即被 `check_cancelled` 读到，跨 worker 正确、无需续期。
 
 所以一个排队轮要么 advance 到 RUNNING（之后可 cancel），要么被 abort/fence → ORPHANED；用户在排队期间的「取消」诉求由「起跑后立即可取消」承接（best-effort 契约）。
+
+## 协作式 cancel 的消费点（可打断 await）
+
+flag（`store.request_cancel` → `hooks.check_cancelled`）在引擎内的全部消费点：
+
+| 消费点 | 机制 | cancel 延迟 |
+|---|---|---|
+| while 顶部 / 每个工具执行前 | 直接查 flag | 即时 |
+| LLM 流式期间 | chunk 间轮询（节流 `CANCEL_CHECK_INTERVAL`） | ≤ 间隔（TTFT 前无 chunk 是已知遗留，由 LLM 层超时兜底） |
+| permission 等待期间 | `request_cancel` 直接 resolve pending interrupt（approved=False） | 即时 |
+| **工具 await 在飞期间** | `core/cancellation.run_cancellable`：工具跑子 task，按 `CANCEL_CHECK_INTERVAL` 轮询，命中 `task.cancel()` 在飞调用 | ≤ 间隔 |
+| **compaction LLM 调用期间** | 同上（`CompactionRunner` 经 `check_cancelled` 谓词） | ≤ 间隔 |
+
+后两行是 2026-06 cancel-interrupt 切片补上的：此前工具 await / compaction 调用是盲窗，cancel 延迟 = 该 await 的内部超时（bash `SANDBOX_COMMAND_TIMEOUT`、HttpTool per-MD `timeout`、compaction `COMPACTION_TIMEOUT`——默认配置下最坏 300s，且 HttpTool 的 timeout 运维可任意设大，盲窗会随 API 工具生态膨胀）。打断后的事件流保持不变量：被打断的工具发配对 `TOOL_COMPLETE`（success=False，"Cancelled by user…"，下一轮历史里模型可见）；被打断的 compaction 配对 success=False `compaction_summary` 占位（无 boundary），turn 以 CANCELLED（非 ERROR）收口。
+
+四点辨析：
+
+- **不是新的工具契约**——`EXECUTION_TIMEOUT` 的 `asyncio.timeout` 本来就会在任意 await 中间 cancel 整个 engine task，工具早已被要求 cancel-safe；本切片只是让它更频繁发生。GIL 警告同样适用（钉住 GIL 的同步 CPU 工具打不断，工具作者自兜 wall-clock）。
+- **与外部 cancel 不混淆**——`run_cancellable` 只 cancel 子 task、绝不 cancel 自己；外部 `task.cancel()`（fencing / 引擎超时）打进轮询处时转发给子 task 后原样 re-raise。包括「协作取消后等子 task 收尾」的窗口：该处 `await task` 的 `CancelledError` 用 `current_task().cancelling() > 0` 判别来源，外部 cancel 一律让位（否则 fenced task 会以协作路径继续跑 post-processing = 静默第二写者）。
+- **探针故障 fail-open**——所有消费点统一经 engine 的 `_is_cancelled` 软化谓词：探针（Redis）瞬断按「未取消」处理 + warning 日志，下一拍自然重试，**绝不让探针异常往上穿**——否则它落在哪个消费点就伪装成哪个消费点的故障（工具被杀且记成工具失败 / "LLM call failed" / turn ERROR）。探针是纯 UX 信号；store 持续不可用的 fail-closed 兜底在 heartbeat/lease 层（连续失败 → 外部 `task.cancel`）。`run_cancellable` 原语本身保持严格透传（谓词异常照样收掉子 task 后穿透）——策略归调用方。
+- **cancel ≠ 撤回已发出的请求**——HTTP 调用被打断时请求可能已到达上游（副作用未知），与超时路径语义相同，不是新风险；工具错误文案对模型如实声明。
+
+剥离「最坏 cancel 延迟上界」职责后，`SANDBOX_COMMAND_TIMEOUT` 只剩 runaway 命令上界一职（默认 120→300s），HttpTool 默认 timeout 30→60s（per-MD 可放心设大）。
 
 ## `TIMED_OUT` 的产出
 
@@ -109,6 +132,7 @@ COMPLETED | CANCELLED_BY_USER | CANCELLED_BY_SYSTEM | TIMED_OUT | FAILED | ORPHA
 |---|---|---|
 | success / COMPLETE | `decide_terminal` complete + `choose_response` complete | — |
 | cooperative cancel | cooperative 分支 + adopt cooperative | `test_cooperative_cancel_writes_response_by_user` |
+| cancel 打断在飞 await | `tests/core/test_cancellation.py`（`run_cancellable` 原语）+ `test_compaction_runner.py`（占位配对） | `test_engine_execution.py`（`test_cancel_interrupts_in_flight_tool` / `test_cancel_during_compaction_routes_to_cancelled`） |
 | external cancel（执行中） | adopt external（带 reason） | `test_external_cancel_persists_accumulated_events` |
 | late-cancel（后处理中） | adopt / synthesize | `test_external_cancel_during_exists_async_persists_events` 等 |
 | timeout | `test_timed_out_path` / `test_flush_error_overrides_timed_out` / `test_adopts_existing_timed_out_terminal` / `test_timed_out_always_returns_timeout_placeholder` | `test_engine_timeout_produces_timed_out_terminal` |

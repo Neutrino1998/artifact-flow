@@ -49,6 +49,22 @@ class Settings(BaseSettings):
     # 只带"已变更"信号(content 省略、content_omitted=True),前端靠 COMPLETE 后的
     # DB 对齐补全(对齐本就兜底)。update 的 span delta 不受此限(权威且体量随模型输出)。
     ARTIFACT_LIVE_CONTENT_MAX_CHARS: int = 256000
+    # Artifact 二进制存储(ArtifactBlob)单条字节上限。写入侧 loud-fail(不静默截断)。
+    # 隐藏常量,非模型可调。刻意高于 MAX_UPLOAD_SIZE(100MB):留 2× 余量给 C 阶段沙盒
+    # 回写的 blob(模型自生成,不走上传路径),免得再调一次。**ops 依赖**:200MB 单行
+    # 要求 MySQL/TDSQL 服务端 max_allowed_packet 抬到其上(默认常仅 16–64MB),否则大
+    # insert 在驱动层失败;且跨中心复制 200MB 行成本不低,值随该上限演进再核。
+    ARTIFACT_BLOB_MAX_BYTES: int = 200 * 1024 * 1024
+    # 识图:read_artifact 把图注入上下文前 resize 到最长边 ≤ 此值(像素),应用侧控
+    # token 成本可预测(不靠 provider 的 HF processor)。原始 blob 不变,只降采样注入副本。
+    # 1568 对齐主流 VLM 的高分辨率 tile 上限,既清晰又不爆 token。隐藏常量,非模型可调。
+    VISION_IMAGE_MAX_EDGE: int = 1568
+    # 解压炸弹闸:像素总数(w*h)上限。Pillow 默认仅在 ~178M 像素抛错、89–178M 段只
+    # `warnings.warn`(图照常打开)——一张纯色 10000×10000(100M 像素)PNG 可压到十几 KB,
+    # 轻松绕过 MAX_UPLOAD_SIZE,落到 read 路径 resize 时才解码,撑爆 CPU/内存。故在**解码前**
+    # (Image.open 只读头、拿 size,不解码)显式校验 w*h:上传校验侧拒(loud-fail)、read 侧防御性
+    # 再校验。50M 像素 ≈ 50MP,宽于真实相机/截图,远低于 DoS 量级。隐藏常量,operator 可调。
+    VISION_IMAGE_MAX_PIXELS: int = 50 * 1000 * 1000
 
     # Cancel-path Message.response placeholders.
     # 三条 cancel 路径都要写一个非空占位 —— 前端 MessageList 用 node.response 非空
@@ -131,13 +147,69 @@ class Settings(BaseSettings):
     # 并发控制
     MAX_CONCURRENT_TASKS: int = 10  # 最大并发引擎执行数
 
-    # 上传限制
-    MAX_UPLOAD_SIZE: int = 20 * 1024 * 1024  # 20MB
+    # 上传限制。单文件字节上限(API 边界 loud 422)。批量**总**字节由代理层
+    # client_max_body_size 独立封顶(200MB,见 deploy/nginx.conf|Caddyfile):
+    # 允许「1 个大文件 or 多个小文件」但控总量——单文件 100MB、数量 10、总量 200MB
+    # 三轴独立,总量刻意 < 100MB×10。前端经 /api/v1/meta 取此值做 UX 预挡(后端权威)。
+    MAX_UPLOAD_SIZE: int = 100 * 1024 * 1024  # 100MB
+    # 文本转换路径(DocConverter._convert_text)的独立、更低字节闸。文本是唯一无自身
+    # 成本 envelope 的转换路径:charset 检测 + str(best) + split() 会**物化整份解码
+    # 内容 + 词列表**,内存放大远超输入字节,且跑在 event loop 上(2026-05-14 wedge 同类)。
+    # docx/pdf 存原 blob 不解析(C-0 起 blob-only)、图片存原 blob 不物化文本,只有裸
+    # 文本会随 100MB 上传上限线性放大 → 给它保留旧的 20MB envelope。字节上界是首要护栏
+    # (to_thread 只缓解 loop 阻塞,解不了内存)。隐藏常量,operator 可调。
+    MAX_TEXT_CONVERT_BYTES: int = 20 * 1024 * 1024  # 20MB
+
+    # 沙盒（C 阶段;隐藏常量,operator 经 env 可调,模型不可见）。
+    # DooD:镜像 / 挂载 / runtime 全部固定在代码侧 —— 容器创建参数绝不可被模型
+    # 生成内容污染(backend 持 docker.sock = host root,这是硬安全边界)。
+    SANDBOX_IMAGE: str = "artifactflow-sandbox:latest"  # scripts/build-sandbox-image.sh 产物
+    SANDBOX_RUNTIME: str = ""        # Docker runtime;"" = daemon 默认(本机 dev=runc),prod="runsc"(gVisor)
+    # 宿主侧 scratch 工作区根目录。DooD 下 bind-mount 源路径在 **daemon 那台机**解析:
+    # backend 容器化部署时必须把同一宿主路径以**相同路径**挂进 backend 容器(经典
+    # DooD 同路径要求)。多套部署共用一个 daemon 时各自配不同根目录 —— reaper(C-reap)
+    # 以本根目录为第二枚举源,共用根目录会互删对方的 scratch。
+    SANDBOX_SCRATCH_ROOT: str = "/tmp/artifactflow-sandbox"
+    SANDBOX_COMMAND_TIMEOUT: int = 300  # 秒,单条 bash 命令上限。容器内 `timeout --signal=KILL` 强杀
+                                        # (真杀进程);tool 侧另有 +grace 的 asyncio 弃等护栏,只负责
+                                        # 提前返回(进程不死,2026-05-14 同型),残留交由 turn 末拆容器兜底。
+                                        # 曾兼任"最坏 cancel 延迟上界"(=120);cancel-interrupt 落地后
+                                        # (engine 在工具 await 期轮询 cancel → task.cancel 在飞调用,
+                                        # core/cancellation.py)该职责剥离,本值只剩 runaway 上界一职,放宽到 300。
+    SANDBOX_START_TIMEOUT: int = 60     # 秒,容器 create+start 上限(daemon 卡死时 loud-fail,不 wedge 整 turn)
+    SANDBOX_MEM_LIMIT_MB: int = 1024    # 容器内存上限;MemorySwap 设同值 = 禁 swap
+    SANDBOX_CPU_LIMIT: float = 1.0      # CPU 核数上限(换算 NanoCpus)
+    SANDBOX_PIDS_LIMIT: int = 256       # fork 炸弹闸
+    SANDBOX_MAX_OUTPUT_CHARS: int = 200_000  # 单命令输出捕获硬帽:超出继续 drain 但丢弃(防内存放大),
+                                             # 截断显式标记。>50k 的部分由引擎溢出转 artifact idiom 接手。
+    SANDBOX_STATUS_MAX_ENTRIES: int = 20     # 动态状态注入的工作区第一层清单条数帽:工作区是模型可写的树,
+                                             # 不设帽=prompt 注水放大器;超出部分显式 "(+N more)" 标记
+    # 磁盘配额(2026-06-10 C′ 方向:loop 池子=硬墙、以下=软配额与准入;host-prep 见 D 段)。
+    # prod 把 SANDBOX_SCRATCH_ROOT 挂成定容 loop 文件系统,race 窗口写穿只伤池子不伤宿主。
+    SANDBOX_WORKSPACE_QUOTA_MB: int = 2048   # per-turn scratch 软配额:watchdog du 超额 → 杀容器 + sticky 失败
+    SANDBOX_WATCHDOG_INTERVAL_SEC: int = 5   # watchdog 巡检周期。探针①:50k 小文件 os.walk ~150ms(线程内),无感
+    SANDBOX_POOL_MIN_FREE_MB: int = 1024     # 起容器准入水位:scratch 根所在 fs 剩余低于此拒绝新沙盒(statvfs,O(1))
+    SANDBOX_PERSIST_MAX_TEXT_BYTES: int = 20 * 1024 * 1024  # persist 文本判定上限:超此即使可解码也按 blob 存
+                                                            # (对齐 MAX_TEXT_CONVERT_BYTES 的量级;blob 上限
+                                                            # 复用 ARTIFACT_BLOB_MAX_BYTES,写入侧守门)
+    # lease-anchored reaper(C-reap):进程死亡(SIGKILL/OOM,_wrapped finally 不执行)
+    # 的二级兜底。资源侧双源枚举(daemon label 容器 + scratch 根目录)− list_active_executions
+    # 活跃集 = 孤儿 → 删。最坏烧 CPU 时长 = lease TTL 剩余 + 本间隔(有界,~分钟级)。
+    SANDBOX_REAP_ENABLED: bool = True        # 无沙盒部署(无 docker / 不授 bash)置 False,免空轮询刷日志
+    SANDBOX_REAP_INTERVAL_SEC: int = 60      # reaper 周期扫间隔(启动立即先扫一次)
+    SANDBOX_REAP_GRACE_SEC: int = 60         # 只回收存活 > 此值且无活跃 lease 的资源:躲开
+                                             # "刚 lazy 创建 / scratch 刚建、lease 可见性差一拍"的误杀竞态
+    # reaper 的跨进程安全要求**共享** liveness 源(Redis):活跃集来自 list_active_executions,
+    # InMemory store 只反映本进程 → 多副本/多 worker 下每个进程把兄弟的活沙盒看成无 lease
+    # 孤儿、60s 后误删(破坏性,非仅降级)。故 InMemory 下默认不起 reaper;单进程 InMemory
+    # (如 Mode-1 轻量部署)要用,操作者在此显式 affirm "我只跑一个进程"。多 worker 一律配 Redis。
+    SANDBOX_REAP_ALLOW_LOCAL_STORE: bool = False
 
     # SSRF / 外联工具防护（隐藏常量，不暴露 API / 工具参数）
     WEB_FETCH_MAX_BYTES: int = 20 * 1024 * 1024   # fallback 下载体上限（解压后字节），
-                                                  # 超即中断 —— 防 gzip 炸弹 / 大响应 OOM；
-                                                  # 与 MAX_UPLOAD_SIZE / DocConverter 对齐
+                                                  # 超即中断 —— 防 gzip 炸弹 / 大响应 OOM。
+                                                  # 出网下载是独立威胁面,与 MAX_UPLOAD_SIZE
+                                                  #（上传,已抬到 100MB）解耦,各自取值。
     CUSTOM_TOOL_SECRET_PREFIX: str = "TOOL_SECRET_"  # 自定义工具 {{VAR}} 只能解析此前缀的环境变量；
                                                      # 把签名密钥 / DB 密码挡在自定义工具可触及范围外
 
@@ -148,7 +220,8 @@ class Settings(BaseSettings):
                                      # 最坏单次 drain = MAX_MESSAGE_CHARS × 此值，详见输入挡板设计）
     MAX_CHAT_ATTACHMENTS: int = 10   # 单条 /chat 消息附件数量上限（超即 422）；上传后逐个
                                      # 串行转换落库，限制总转换时长 / DB 写入 / 归属串膨胀。
-                                     # 注：原始上传带宽 / 临时盘占用属代理层（nginx client_max_body_size）
+                                     # 注：批量**总**字节由代理层 client_max_body_size(200MB)
+                                     # 独立封顶——数量轴管「几个」,总量轴管「多大」,两轴独立。
 
     # 批量导入用户（CSV）
     MAX_BULK_IMPORT_ROWS: int = 1000          # 行数上限，超过整体拒绝（防误传）

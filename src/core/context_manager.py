@@ -15,9 +15,12 @@ ContextManager 本身不再做任何截断。
 
 from typing import Dict, Any, List, Optional
 from datetime import datetime
+from xml.sax.saxutils import escape as xml_escape
 
 from config import config
 from core.event_history import build_event_history, last_llm_usage
+from utils.image import VISION_VIEWABLE_MIMES
+from models.llm import model_supports_vision
 from tools.artifact_envelope import make_preview_slice, render_artifact_slice
 from utils.logger import get_logger
 
@@ -42,6 +45,7 @@ class ContextManager:
         tools: Dict[str, Any],   # {name: BaseTool}
         artifacts_inventory: Optional[List[Dict]] = None,
         model: Optional[str] = None,
+        sandbox_status: Optional[Dict] = None,
     ) -> List[Dict[str, str]]:
         """
         构建 LLM 调用所需的完整 messages
@@ -88,7 +92,10 @@ class ContextManager:
         # ========== Messages ==========
         # 历史 + 当前轮统一来自 state["events"]，EventHistory 处理 boundary / 过滤；
         # 发给 LLM 前剥离 _meta。
-        all_messages = cls._strip_meta(build_event_history(state.get("events", []), agent_name))
+        all_messages = cls._strip_meta(build_event_history(
+            state.get("events", []), agent_name, state.get("vision_blocks"),
+            vision_capable=model_supports_vision(agent_config.model),
+        ))
 
         # 动态上下文（系统时间 / task_plan / artifact 清单）作为 ephemeral
         # <system-reminder> 并入最后一条消息正文：每次 build 现拼、即用即丢、绝不入
@@ -107,9 +114,18 @@ class ContextManager:
         # compaction 边界后取数(刚压缩完 → None)，且直接读原始事件 token_usage，不受
         # 「content 空则丢 _meta」影响(高 input+空 content 也能预警)。
         last_usage = last_llm_usage(state.get("events", []), agent_name)
-        reminder = cls._build_dynamic_context(agent_config, artifacts_inventory, last_usage)
+        reminder = cls._build_dynamic_context(
+            agent_config, artifacts_inventory, last_usage, sandbox_status
+        )
         last = all_messages[-1]
-        all_messages[-1] = {**last, "content": f'{last["content"]}\n\n{reminder}'}
+        last_content = last["content"]
+        if isinstance(last_content, list):
+            # 末条是图块列表(本轮刚 read 图的 tool_result):reminder 作为附加 text block
+            # 追加,不能字符串拼接(会把整个 list stringify、毁掉图块结构)。
+            new_content = last_content + [{"type": "text", "text": reminder}]
+        else:
+            new_content = f'{last_content}\n\n{reminder}'
+        all_messages[-1] = {**last, "content": new_content}
 
         return [system_message] + all_messages
 
@@ -119,11 +135,13 @@ class ContextManager:
         agent_config: Any,
         artifacts_inventory: Optional[List[Dict]],
         last_usage: Optional[int] = None,
+        sandbox_status: Optional[Dict] = None,
     ) -> str:
         """组装每轮刷新的动态上下文，包裹为 ephemeral <system-reminder>。
 
         内容：系统时间（始终）+ task_plan（存在时）+ artifact 清单（仅有 artifact
-        工具的 agent）+ context_usage 预警（仅临近 compaction 时）。由 build() 并入消息
+        工具的 agent）+ 沙盒状态（仅有沙盒工具的 agent 且引擎递了快照）+
+        context_usage 预警（仅临近 compaction 时）。由 build() 并入消息
         尾部，不进 system prompt、不持久化为 event。
 
         语义定位是「当前世界状态的一瞥」（glance, don't act）—— 与需要 uptake 的
@@ -155,10 +173,19 @@ class ContextManager:
         # 显式的 live 清单（"暂无 artifact"），否则模型找不到当前状态会回退去读
         # system prompt 里静态的 <artifact_authoring> 创作指引，误当成空清单。
         has_artifact_tools = any(t in agent_config.tools for t in [
-            "create_artifact", "update_artifact", "rewrite_artifact", "read_artifact"
+            "create_artifact", "update_artifact", "rewrite_artifact",
+            "read_artifact", "grep_artifact"
         ])
         if has_artifact_tools:
             parts.append(cls._build_artifacts_inventory(artifacts_inventory))
+
+        # 沙盒状态（仅有沙盒工具的 agent，且引擎递了 session 快照）—— 历史里上一轮
+        # 的 mount/bash 记录对模型是"文件还在"的伪证，工具描述里的 per-turn ephemeral
+        # 静态规则压不过它；只有"现在时态"的工作区事实能纠偏（与 artifact 清单同理:
+        # 状态用动态注入，能力进工具描述，契约进 inventory 标注，how-to 归 skill）。
+        has_sandbox_tools = any(t in agent_config.tools for t in ("bash", "mount", "persist"))
+        if has_sandbox_tools and sandbox_status is not None:
+            parts.append(cls._build_sandbox_status(sandbox_status))
 
         # Context 水位预警（仅临近 compaction 时整段出现）—— last_usage 是上一轮 call 的
         # input+output（compaction 触发值），≥ WARN_RATIO×阈值才注入；水位以下完全不出现，
@@ -208,6 +235,54 @@ class ContextManager:
         )
 
     @classmethod
+    def _build_sandbox_status(cls, sandbox_status: Dict) -> str:
+        """渲染 <sandbox_status> 段（三态:not_started / running / unavailable）。
+
+        not_started 是高价值态:历史里上一轮 mount/bash 的成功记录会让模型以为
+        文件还在，必须用现在时态的"工作区为空"对冲。running 态列工作区第一层
+        （session 侧有界扫 + SANDBOX_STATUS_MAX_ENTRIES 截断，truncated 标记有
+        更多），给 persist 的 path 决策当依据。文件名是**非可信输入**——不止
+        bash 可造任意名，第三方内容(上传的 zip 解压后)的名字也会进工作区第一
+        层——控制字符替换为 � 防伪造清单行，XML 元字符(& < >)转义防
+        `</sandbox_status>` 式的结构逃逸 / prompt injection。
+        """
+        state = sandbox_status.get("state")
+        if state == "unavailable":
+            return (
+                f'<sandbox_status state="unavailable">\n'
+                f'Sandbox is unavailable for the rest of this turn: '
+                f'{sandbox_status.get("reason", "unknown")}\n'
+                f'</sandbox_status>'
+            )
+        if state == "not_started":
+            return (
+                '<sandbox_status state="not_started">\n'
+                'No sandbox container started this turn — the workspace is empty; '
+                'files from previous turns are gone (mount again what you need).\n'
+                '</sandbox_status>'
+            )
+        # running
+        entries = sandbox_status.get("entries")
+        lines = ['<sandbox_status state="running">']
+        if entries is None:
+            lines.append("Workspace listing unavailable (run `ls /workspace` to check).")
+        elif not entries:
+            lines.append("Workspace (/workspace) is empty.")
+        else:
+            lines.append("Workspace (/workspace) top-level entries:")
+            for name, is_dir in entries:
+                safe = "".join(ch if ch >= " " and ch != "\x7f" else "�" for ch in name)
+                safe = xml_escape(safe)
+                lines.append(f"- {safe}/" if is_dir else f"- {safe}")
+            if sandbox_status.get("truncated"):
+                lines.append(
+                    f"(listing capped at {len(entries)} entries — more exist; "
+                    "run `ls /workspace` for the full view)"
+                )
+        lines.append("</sandbox_status>")
+        return "\n".join(lines)
+
+    @classmethod
     def _find_task_plan(cls, artifacts_inventory: Optional[List[Dict]]) -> Optional[Dict]:
         """从 artifacts 清单中查找 task_plan"""
         if not artifacts_inventory:
@@ -236,13 +311,25 @@ class ContextManager:
         lines = [f'{count} artifact(s) in this session.']
         lines.append('<artifacts_inventory>')
         for artifact in artifacts_inventory:
+            # blob 类 artifact 的 content 为空(无文本表示),给一条合成预览,让清单行
+            # 有信息量:png/jpeg 提示「read 即可看图」(识图白名单,与 read_artifact
+            # 的 VISION_VIEWABLE_MIMES gate 一致),其余二进制(docx/pdf/异型图等)
+            # 说明 mount 契约(否则空 body 易被忽略)。
+            preview_content = artifact.get("content", "")
+            if not preview_content and artifact["content_type"] in VISION_VIEWABLE_MIMES:
+                preview_content = "[image — use read_artifact to view it]"
+            elif not preview_content and artifact.get("blob_content_type"):
+                preview_content = (
+                    "[binary file — no text representation; mount it into the sandbox "
+                    "to inspect/convert, or the user can download it from the artifact panel]"
+                )
             slice = make_preview_slice(
                 artifact_id=artifact["id"],
                 version=artifact["version"],
                 content_type=artifact["content_type"],
                 source=artifact.get("source", "agent"),
                 title=artifact["title"],
-                full_content=artifact.get("content", ""),
+                full_content=preview_content,
                 preview_len=config.INVENTORY_PREVIEW_LENGTH,
                 updated_at=artifact["updated_at"],
             )

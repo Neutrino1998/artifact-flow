@@ -5,7 +5,7 @@ import { useArtifactStore } from '@/stores/artifactStore';
 import { useStreamStore } from '@/stores/streamStore';
 import { useArtifacts } from '@/hooks/useArtifacts';
 import { useCopyFeedback } from '@/hooks/useCopyFeedback';
-import { exportArtifact } from '@/lib/api';
+import { fetchArtifactRawObjectUrl } from '@/lib/api';
 import ArtifactTabs from './ArtifactTabs';
 
 function getFileExtension(contentType: string): string {
@@ -51,8 +51,26 @@ export default function ArtifactToolbar() {
     copy(selectedVersion?.content ?? current?.content ?? '');
   }, [current, selectedVersion, copy]);
 
-  const handleDownload = useCallback(() => {
+  const handleDownload = useCallback(async () => {
     if (!current) return;
+    setShowDownloadMenu(false);
+    // Blob-backed artifact (image / docx / pdf upload): download the immutable
+    // original via /raw (text path would emit an empty file — there is no text
+    // representation). Hidden while streaming, so the blob is always flushed here.
+    if (current.has_blob) {
+      try {
+        const url = await fetchArtifactRawObjectUrl(current.session_id, current.id);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = current.original_filename ?? current.title;
+        a.click();
+        URL.revokeObjectURL(url);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Download failed';
+        window.alert(message);
+      }
+      return;
+    }
     const content = selectedVersion?.content ?? current.content;
     const ext = getFileExtension(current.content_type);
     const filename = current.title.replace(/[/\\?%*:|"<>]/g, '-') + ext;
@@ -63,26 +81,7 @@ export default function ArtifactToolbar() {
     a.download = filename;
     a.click();
     URL.revokeObjectURL(url);
-    setShowDownloadMenu(false);
   }, [current, selectedVersion]);
-
-  const handleExportDocx = useCallback(async () => {
-    if (!current) return;
-    setShowDownloadMenu(false);
-
-    try {
-      const blob = await exportArtifact(current.session_id, current.id, 'docx');
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = current.title.replace(/[/\\?%*:|"<>]/g, '-') + '.docx';
-      a.click();
-      URL.revokeObjectURL(url);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Export failed';
-      window.alert(message);
-    }
-  }, [current]);
 
   const handleRefresh = useCallback(() => {
     if (!current) return;
@@ -101,7 +100,6 @@ export default function ArtifactToolbar() {
   if (!current) return null;
 
   const displayVersion = selectedVersion?.version ?? current.current_version;
-  const isMarkdown = current.content_type === 'text/markdown';
 
   return (
     <>
@@ -149,7 +147,8 @@ export default function ArtifactToolbar() {
             </button>
           )}
 
-          {/* Copy */}
+          {/* Copy — hidden for blob-backed artifacts (no text content to copy) */}
+          {!current.has_blob && (
           <button
             onClick={handleCopy}
             className="p-1.5 rounded text-text-secondary dark:text-text-secondary-dark hover:bg-surface dark:hover:bg-bg-dark transition-colors"
@@ -167,11 +166,11 @@ export default function ArtifactToolbar() {
               </svg>
             )}
           </button>
+          )}
 
-          {/* Download / export — hidden during streaming (decision 6): both are
-              durable-acting reads. Raw download would emit live-but-uncommitted
-              content; docx export reads pure DB (the last flushed version, not the
-              live edits) AND converts possibly half-edited content. Re-enabled
+          {/* Download — hidden during streaming (decision 6): a durable-acting
+              read. Text download would emit live-but-uncommitted content; blob
+              raw download would 404 (blob not flushed until turn end). Re-enabled
               after COMPLETE, when the DB re-pull has aligned everything. */}
           {!isStreaming && (
           <div className="relative" ref={downloadMenuRef}>
@@ -194,14 +193,6 @@ export default function ArtifactToolbar() {
                 >
                   下载原格式
                 </button>
-                {isMarkdown && (
-                  <button
-                    onClick={handleExportDocx}
-                    className="w-full text-left px-3 py-1.5 text-xs text-text-primary dark:text-text-primary-dark hover:bg-bg dark:hover:bg-bg-dark transition-colors"
-                  >
-                    导出为 Word (.docx)
-                  </button>
-                )}
               </div>
             )}
           </div>

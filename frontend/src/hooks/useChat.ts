@@ -23,6 +23,7 @@ export function useChat() {
   const setConversations = useConversationStore((s) => s.setConversations);
   const setConversationActiveMessage = useConversationStore((s) => s.setConversationActiveMessage);
   const setPendingUserMessage = useStreamStore((s) => s.setPendingUserMessage);
+  const setPendingUserFiles = useStreamStore((s) => s.setPendingUserFiles);
   const setStreamParentId = useStreamStore((s) => s.setStreamParentId);
   const setSendError = useStreamStore((s) => s.setSendError);
   const resetStream = useStreamStore((s) => s.reset);
@@ -115,7 +116,21 @@ export function useChat() {
         // into the abandoned context, but report success so the composer clears.
         if (myNavGen !== getNavGen()) return true;
 
+        // A brand-new conversation just got its real id. Promote the composer
+        // draft from its temporary new-chat key to this id NOW — not at the
+        // terminal — so a follow-up typed during streaming, and any later
+        // switch back here, key off the real conversation. No-op for an existing
+        // conv (its key is already the id); gated by the nav-gen check above, so
+        // if the user navigated away from the new chat mid-POST we don't promote
+        // (their fresh new chat already has its own distinct temp key).
+        if (isNew) {
+          useStagedFilesStore.getState().promoteNewDraft(res.conversation_id);
+        }
+
         setPendingUserMessage(content);
+        // Always set (null when no files) so a follow-up text-only send doesn't
+        // inherit the previous turn's attachment chips on its live bubble.
+        setPendingUserFiles(files && files.length > 0 ? files.map((f) => f.name) : null);
         // Track rerun/edit parent for branchPath truncation
         if (parentMessageId !== undefined) {
           setStreamParentId(parentMessageId);
@@ -135,6 +150,11 @@ export function useChat() {
         if (files && files.length > 0) {
           setArtifactSessionId(res.conversation_id);
           setArtifactPanelVisible(true);
+          // Stash the sent images as send-local previews so ImagePreview can show
+          // them instantly until COMPLETE flushes the blob — the composer draft
+          // was cleared on send, so this display-only cache is their only source.
+          // (getState: the action is a stable ref; avoids churning the deps array.)
+          useArtifactStore.getState().setLocalPreviews(files);
         }
         return true;
       } catch (err) {
@@ -145,7 +165,7 @@ export function useChat() {
         return false;
       }
     },
-    [current?.id, lastMessageId, setPendingUserMessage, setStreamParentId, connect, setSendError, setConversations, setConversationActiveMessage, setArtifactSessionId, setArtifactPanelVisible]
+    [current?.id, lastMessageId, setPendingUserMessage, setPendingUserFiles, setStreamParentId, connect, setSendError, setConversations, setConversationActiveMessage, setArtifactSessionId, setArtifactPanelVisible]
   );
 
   // Switch to an existing conversation: tear down the previous conversation's
@@ -170,7 +190,7 @@ export function useChat() {
       disconnect();
       resetStream();
       resetArtifacts();
-      useStagedFilesStore.getState().clear();  // composer attachments don't carry across conversations
+      useStagedFilesStore.getState().activate(id);  // stash this conv's draft, load the target's (per-conversation, in-memory)
       setCurrentLoading(true);
       // Fire-and-forget sidebar refresh: the previous conv's SSE was just
       // disconnected, so any terminal events emitted while we're away will
@@ -254,7 +274,7 @@ export function useChat() {
     disconnect();
     resetStream();
     resetArtifacts();
-    useStagedFilesStore.getState().clear();  // composer attachments don't carry into a new chat
+    useStagedFilesStore.getState().startNewDraft();  // open the new chat (stable key) — restores an in-progress new-chat draft, or blank
     setCurrent(null);
     setCurrentLoading(false);
   }, [disconnect, resetStream, resetArtifacts, setCurrent, setCurrentLoading]);

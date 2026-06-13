@@ -369,13 +369,18 @@ export function getVersion(
   );
 }
 
-export async function exportArtifact(
+/** Fetch an artifact's raw binary blob (uploaded image / rich-format source) as an
+ *  object URL for an <img> or a download anchor. An `<img src>` can't carry the
+ *  Authorization header, so we fetch with auth → blob → createObjectURL (same pattern as SSE).
+ *  The blob is DB-only server-side: an image uploaded *this* turn is available only
+ *  after the turn flushes (COMPLETE), mirroring the REST-lags-live tradeoff for all
+ *  artifacts. Caller MUST URL.revokeObjectURL() the returned URL when done. */
+export async function fetchArtifactRawObjectUrl(
   sessionId: string,
-  artifactId: string,
-  format: string
-): Promise<Blob> {
+  artifactId: string
+): Promise<string> {
   const res = await fetch(
-    `${BASE_URL}/api/v1/artifacts/${sessionId}/${artifactId}/export?format=${format}`,
+    `${BASE_URL}/api/v1/artifacts/${sessionId}/${artifactId}/raw`,
     { headers: authHeaders() }
   );
 
@@ -388,7 +393,7 @@ export async function exportArtifact(
     const requestId = res.headers.get('X-Request-ID') ?? undefined;
     throw new ApiError(res.status, formatApiError(res.status, body, requestId), undefined, requestId);
   }
-  return res.blob();
+  return URL.createObjectURL(await res.blob());
 }
 
 // Message Events (historical replay)

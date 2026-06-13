@@ -246,10 +246,11 @@ tools:
 
 ### 保留工具名
 
-以下名字是 Artifact 工具保留名，自定义工具不可同名：
+以下名字由请求级创建的内置工具占用（artifact 工具 + [沙盒工具](../architecture/sandbox.md)），自定义工具不可同名（`RESERVED_TOOL_NAMES`，`src/tools/base.py`）：
 
 ```
-create_artifact, update_artifact, rewrite_artifact, read_artifact
+create_artifact, update_artifact, rewrite_artifact, read_artifact, grep_artifact,
+bash, mount, persist
 ```
 
 与 builtin 工具同名也会在启动时抛 `ValueError`（`build_tool_map` 中的冲突检测）。

@@ -233,3 +233,85 @@ class TestUploadSizeGuard:
             await art.convert_uploaded_file(f)
         assert ei.value.status_code == 422
         assert f.read_called is True
+
+
+# ============================================================
+# has_blob:二进制 artifact 在用户路由与 admin 路由都要标对(C-0)
+# ============================================================
+
+_DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+
+
+@pytest.fixture
+async def seed_blob_artifact(
+    db_manager: DatabaseManager, test_user: User
+) -> Tuple[str, str]:
+    """Seed a conversation + blob-only docx artifact. Returns (session_id, artifact_id)."""
+    async with db_manager.session() as session:
+        conv_repo = ConversationRepository(session)
+        art_repo = ArtifactRepository(session)
+
+        conv_id = f"conv-{uuid.uuid4().hex}"
+        await conv_repo.create_conversation(
+            conversation_id=conv_id,
+            title="Blob Artifact Test",
+            user_id=test_user.id,
+        )
+
+        artifact_id = f"doc-{uuid.uuid4().hex}"
+        await art_repo.create_artifact(
+            session_id=conv_id,
+            artifact_id=artifact_id,
+            content_type=_DOCX_MIME,
+            title="spec",
+            content="",
+            metadata={
+                "original_filename": "spec.docx",
+                "blob_content_type": _DOCX_MIME,
+            },
+            source="user_upload",
+            blob=b"PK\x03\x04" + b"\x00" * 16,
+        )
+
+    return conv_id, artifact_id
+
+
+class TestHasBlobField:
+    """has_blob 由 metadata.blob_content_type 推导;admin 路由复用同一 schema,
+    填充点独立 —— 漏传会静默默认 False(reviewer P2),两条路由都锁住。"""
+
+    async def test_user_routes_mark_blob(
+        self, client: AsyncClient, seed_blob_artifact: Tuple[str, str],
+        seed_artifacts: Tuple[str, str],
+    ):
+        session_id, artifact_id = seed_blob_artifact
+        resp = await client.get(f"/api/v1/artifacts/{session_id}")
+        assert resp.status_code == 200
+        (item,) = resp.json()["artifacts"]
+        assert item["has_blob"] is True
+
+        resp = await client.get(f"/api/v1/artifacts/{session_id}/{artifact_id}")
+        assert resp.status_code == 200
+        assert resp.json()["has_blob"] is True
+
+        # 纯文本 artifact 对照:has_blob=False
+        text_session, text_artifact = seed_artifacts
+        resp = await client.get(f"/api/v1/artifacts/{text_session}/{text_artifact}")
+        assert resp.json()["has_blob"] is False
+
+    async def test_admin_routes_mark_blob(
+        self, admin_client: AsyncClient, seed_blob_artifact: Tuple[str, str]
+    ):
+        session_id, artifact_id = seed_blob_artifact
+        resp = await admin_client.get(
+            f"/api/v1/admin/conversations/{session_id}/artifacts"
+        )
+        assert resp.status_code == 200
+        (item,) = resp.json()["artifacts"]
+        assert item["has_blob"] is True
+
+        resp = await admin_client.get(
+            f"/api/v1/admin/conversations/{session_id}/artifacts/{artifact_id}"
+        )
+        assert resp.status_code == 200
+        assert resp.json()["has_blob"] is True

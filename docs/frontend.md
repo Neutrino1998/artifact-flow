@@ -9,7 +9,7 @@
 | 框架 | Next.js 15 (App Router) | React 19 |
 | 语言 | TypeScript 5.7（strict） | 类型从 OpenAPI 自动生成 |
 | 样式 | Tailwind 3.4 + `@tailwindcss/typography` | class-based 暗色模式 |
-| 状态 | Zustand 5 | 分 5 个 store，selector 精细订阅 |
+| 状态 | Zustand 5 | 分 7 个 store，selector 精细订阅 |
 | Markdown | `react-markdown` + `remark-gfm` + `rehype-highlight` | 代码高亮 |
 | Diff | `diff` 8 | Artifact 版本对比 |
 | 类型工具 | `openapi-typescript` | `npm run generate-types` |
@@ -32,7 +32,7 @@ frontend/src/
 │   ├── layout/                 # ThreeColumnLayout、Modals、ChangePasswordDialog
 │   ├── sidebar/                # 对话列表、用户菜单
 │   └── markdown/CodeBlock.tsx
-├── stores/                     # 5 个 Zustand store
+├── stores/                     # 7 个 Zustand store
 ├── hooks/                      # useSSE / useChat / useArtifacts / useMediaQuery
 ├── lib/                        # sse.ts / api.ts / messageTree.ts / csp.ts / passwordPolicy.ts …
 └── types/
@@ -58,11 +58,11 @@ frontend/src/
 - **Sidebar**：`ConversationList` + `UserMenu`；admin 可打开 `AdminConversationList`（只读 observability，不删数据）/ `ObservabilityPanel` / `UserManagementPanel`
 - **Chat**：`ChatPanel` 组合 `MessageList`（含分支导航 `BranchNavigator`）+ `MessageInput`；流式期间由 `ProcessingFlow` 渲染各 agent 的 `AgentSegmentBlock` / `ToolCallCard` / `ThinkingBlock` / `CompactionFlowBlock` / `InjectFlowBlock` / `ErrorFlowBlock`
 - **Right panel — mode-aware**：`userManagementVisible && isAdmin` 时右栏从 `ArtifactPanel` 切换为 `UserManagementDetailPanel`，按 `userManagementRightView` 类型分发到 `UserDetailForm` / `CreateUserForm` / `BulkImportForm` / `BulkActionPanel` / `DepartmentManagerPanel`；退出用户管理模式自动恢复 `ArtifactPanel`
-- **Artifacts**：`ArtifactPanel` → `ArtifactTabs` → `MarkdownPreview | SourceView | DiffView`，顶栏 `ArtifactToolbar` 提供版本切换与 DOCX 导出
+- **Artifacts**：`ArtifactPanel` → `ArtifactTabs` → `MarkdownPreview | SourceView | DiffView | ImagePreview | BinaryFilePreview`（blob 类 artifact 仅 preview：图片渲染图、其它二进制为下载卡片），顶栏 `ArtifactToolbar` 提供版本切换与下载（文本下载 content，blob 经 authed `/raw`）
 
 ## 状态管理（Zustand Stores）
 
-5 个 store 各管一个职责维度：
+7 个 store 各管一个职责维度：
 
 ### `authStore`
 
@@ -129,6 +129,20 @@ turn 中 artifact 的实时内容**不再走** `tool_complete.metadata.artifact_
 | `queuedInfo` | `{ ahead, maxConcurrent } \| null`：执行排队等并发信号量时的位置；`null` = 已进入 RUNNING 或无执行。由 `execution_queued` 事件置位、`agent_start` 清除 |
 
 关键 action：`appendCurrentSegmentContent(chunk)` 是 `llm_chunk` 的入口，内部走 RAF 节流（见下文性能小节）。
+
+### `stagedFilesStore`
+
+Composer 草稿 store：所有对话**未发送**的输入（文本 + 附件 `StagedFile[]`）放一个 keyed map，当前对话的草稿就是 `drafts[activeKey]`。新对话还没有 id，用稳定哨兵 key `__new__`，首次发送成功后晋升为真实 conversation id。**仅内存**——`File` 字节过不了 localStorage，刷新即空，by design。
+
+- **为什么是 store 不是组件本地态**：drag-drop 在 `ChatPanel`、按钮 / 粘贴 / chips 在 `MessageInput`，且 `switchConversation` 会 unmount `MessageInput`（loading 占位），本地态活不过切换
+- **发送模型 = CLEAR ON SEND，按 OWNER key**（`useComposerSend`）：发送瞬间清掉**所属对话**的草稿（按发起时的 activeKey，不是"当前屏幕上的"），失败**不恢复**——best-effort 丢失（报错提示，用户重打）。这是显式的范围契约：发送中切走不会把出站内容带回 composer，也碰不到别的对话
+- **客户端预闸**：`addFiles` 统一入口（按钮 / 粘贴 / 拖放都走它），经 `partitionStageable` 做单文件大小预检（镜像后端 `MAX_UPLOAD_SIZE`，经 `/api/v1/meta` 取值，未加载时跳过——后端兜底 422），超出 `MAX_CHAT_ATTACHMENTS` 的数量截断；两类拒收经 `StageNotice` 单批反馈（`rejected` / `overflow`），不让用户猜文件去哪了
+
+发送本体在 `useComposerSend`：文本 + 附件合入**一个** multipart `POST /api/v1/chat`，上传文件由后端按扩展名三分路由（文本 → content / png+jpeg → 识图 / 其余 → blob，见 [API 参考 → 上传](guides/api-reference.md)）。
+
+### `configStore`
+
+后端运行时常量的只读镜像（`GET /api/v1/meta`，session 内只拉一次）：`compactionThreshold`（composer 上下文 gauge 分母）、`leadAgentModel`、`maxUploadSize`（上面附件预闸的阈值来源）。前端不硬编码这些值，避免与 `src/config.py` 漂移。
 
 ## SSE 集成
 
@@ -239,7 +253,7 @@ cd frontend && npm run generate-types   # openapi-typescript 生成 api.d.ts
 
 - **每请求随机 nonce**：middleware 生成 base64 nonce 写进 `script-src 'nonce-<nonce>' 'strict-dynamic'`，并经 `x-nonce` 请求头传给 `app/layout.tsx`，盖到那条内联主题 bootstrap 脚本上（暗色无闪烁那段）。**CSP 放 Next 而非 nginx**：nonce 必须与渲染同源生成，nginx 看不到它、只能退回 `'unsafe-inline'`，失去意义。
 - **`connect-src` 从 `NEXT_PUBLIC_API_URL` 派生**：prod 同源部署时为空 → 退回 `'self'`；配置独立后端域时把该 origin 显式列入（dev 放宽）。
-- **`img-src 'self' data: blob:`**（**刻意不含 `https:`**）：作为补偿控制收窄信标外泄面；导出 / 预览用图走 data/blob。
+- **`img-src 'self' data: blob:`**（**刻意不含 `https:`**）：作为补偿控制收窄信标外泄面；下载 / 预览用图走 data/blob。
 - `frame-ancestors 'none'` 防点击劫持；另有静态头 `X-Frame-Options: DENY` / `X-Content-Type-Options` / `Referrer-Policy` / `Permissions-Policy`。
 
 ## REST Client 缓存
@@ -256,7 +270,7 @@ cd frontend && npm run generate-types   # openapi-typescript 生成 api.d.ts
 ### 为什么 Zustand 而非 Redux / Context
 
 - 不需要时光回溯 / devtools 级别复杂度；selector-based 订阅天然适配 60fps 流式更新
-- 5 个正交 store 比单一大 store 更利于代码分隔与类型推导
+- 7 个正交 store 比单一大 store 更利于代码分隔与类型推导
 - Context + reducer 在流式高频更新下 re-render 失控，Zustand 的 `subscribe` 粒度可控
 
 ### 为什么类型手写一部分（`events.ts`）

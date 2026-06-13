@@ -118,6 +118,120 @@ class TestSubmit:
         release2.set()
         await runner.shutdown(timeout=2)
 
+
+# ============================================================
+# TestCleanupRegistry — turn 级清理回调(沙盒容器拆除等)
+# ============================================================
+
+
+class _OrderRecordingStore(InMemoryRuntimeStore):
+    """记录 cleanup_execution 调用顺序,验证「先拆资源后放 lease」。"""
+
+    def __init__(self):
+        super().__init__()
+        self.order: list[str] = []
+
+    async def cleanup_execution(self, conversation_id, task_id):
+        self.order.append("cleanup_execution")
+        await super().cleanup_execution(conversation_id, task_id)
+
+
+class TestCleanupRegistry:
+
+    async def _submit_and_finish(self, runner, coro_factory, task_id="t1"):
+        task = await runner.submit(
+            "conv-1", task_id, coro_factory, user_id="u1", stream_transport=_mock_transport
+        )
+        await asyncio.gather(task, return_exceptions=True)
+
+    async def test_cleanup_runs_before_lease_release_on_success(self):
+        store = _OrderRecordingStore()
+        runner = ExecutionRunner(store=store)
+        runner.register_cleanup("t1", self._record(store.order, "cb"))
+        await self._submit_and_finish(runner, _noop_coro)
+        assert store.order == ["cb", "cleanup_execution"]
+
+    async def test_cleanup_runs_on_exception(self):
+        store = _OrderRecordingStore()
+        runner = ExecutionRunner(store=store)
+        runner.register_cleanup("t1", self._record(store.order, "cb"))
+        await self._submit_and_finish(runner, _failing_coro)
+        assert store.order == ["cb", "cleanup_execution"]
+
+    async def test_cleanup_runs_on_cancel(self):
+        store = _OrderRecordingStore()
+        runner = ExecutionRunner(store=store)
+        blocker = asyncio.Event()
+        started = asyncio.Event()
+
+        async def coro():
+            started.set()
+            await blocker.wait()
+
+        runner.register_cleanup("t1", self._record(store.order, "cb"))
+        task = await runner.submit(
+            "conv-1", "t1", coro, user_id="u1", stream_transport=_mock_transport
+        )
+        await started.wait()
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        assert store.order == ["cb", "cleanup_execution"]
+
+    async def test_failing_cleanup_does_not_block_lease_release(self):
+        store = _OrderRecordingStore()
+        runner = ExecutionRunner(store=store)
+
+        async def boom():
+            store.order.append("boom")
+            raise RuntimeError("cleanup failed")
+
+        runner.register_cleanup("t1", boom)
+        runner.register_cleanup("t1", self._record(store.order, "cb2"))
+        await self._submit_and_finish(runner, _noop_coro)
+        # 注册逆序执行;boom 异常被吞,后续回调 + lease 释放照常
+        assert store.order == ["cb2", "boom", "cleanup_execution"]
+        # lease 确实已释放
+        assert await store.get_leased_message_id("conv-1") is None
+
+    async def test_hung_cleanup_is_bounded_and_lease_still_released(self, monkeypatch):
+        """daemon 卡死型 cleanup(无限 await)不能扣住 lease/stream —— 有界弃等。"""
+        from api.services import execution_runner as runner_module
+        monkeypatch.setattr(runner_module, "CLEANUP_CALLBACK_TIMEOUT_SEC", 0.05)
+
+        store = _OrderRecordingStore()
+        runner = ExecutionRunner(store=store)
+
+        async def hang_forever():
+            store.order.append("hang")
+            await asyncio.sleep(300)
+
+        runner.register_cleanup("t1", hang_forever)
+        runner.register_cleanup("t1", self._record(store.order, "cb2"))
+        await self._submit_and_finish(runner, _noop_coro)
+        # 卡死的回调被弃等,其余回调 + lease 释放照常
+        assert store.order == ["cb2", "hang", "cleanup_execution"]
+        assert await store.get_leased_message_id("conv-1") is None
+
+    async def test_no_registration_is_zero_cost(self):
+        store = _OrderRecordingStore()
+        runner = ExecutionRunner(store=store)
+        await self._submit_and_finish(runner, _noop_coro)
+        assert store.order == ["cleanup_execution"]
+        assert runner._task_cleanups == {}
+
+    async def test_registry_drained_after_run(self):
+        store = _OrderRecordingStore()
+        runner = ExecutionRunner(store=store)
+        runner.register_cleanup("t1", self._record(store.order, "cb"))
+        await self._submit_and_finish(runner, _noop_coro)
+        assert runner._task_cleanups == {}
+
+    @staticmethod
+    def _record(order: list, label: str):
+        async def _cb():
+            order.append(label)
+        return _cb
+
     async def test_emits_execution_queued_when_semaphore_full(self):
         """3rd task with max_concurrent=2 should receive an execution_queued event."""
         transport = _MockStreamTransport()

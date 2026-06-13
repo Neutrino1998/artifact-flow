@@ -14,6 +14,7 @@ export default function MessageList() {
   const streamConversationId = useStreamStore((s) => s.conversationId);
   const streamParentId = useStreamStore((s) => s.streamParentId);
   const pendingUserMessage = useStreamStore((s) => s.pendingUserMessage);
+  const pendingUserFiles = useStreamStore((s) => s.pendingUserFiles);
 
   // Only show streaming UI if the active stream belongs to this conversation
   const isStreamingHere = isStreaming && streamConversationId === currentId;
@@ -46,6 +47,7 @@ export default function MessageList() {
                 parentId={node.parent_id}
                 siblingIndex={node.siblingIndex}
                 siblingCount={node.siblingCount}
+                attachments={node.uploaded_files}
               />
 
               {/* Assistant response */}
@@ -72,6 +74,7 @@ export default function MessageList() {
             messageId=""
             parentId={streamParentId ?? null}
             pending
+            attachments={pendingUserFiles?.map((filename) => ({ filename }))}
           />
         )}
 

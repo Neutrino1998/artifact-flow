@@ -483,17 +483,15 @@ class TestPersistOnExternalCancel:
             f"Should not overwrite ERROR terminal with CANCELLED, got types: {event_types}"
         )
 
-    async def test_persist_failure_error_carries_flush_bit(self):
+    async def test_persist_failure_emits_single_transport_error_no_response(self):
         """
-        Reviewer P2 (round-3): the events-persist-failure ERROR is emitted at the
-        transport layer (controller.py:485, bypassing decide_terminal because the
-        event stream itself couldn't be written). It must STILL carry
-        artifacts_flushed so the frontend doesn't mistake "missing field" for
-        "uploads not persisted" and re-stage on retry → _N duplicates.
+        The events-persist-failure ERROR is emitted at the transport layer
+        (bypassing decide_terminal because the event stream itself couldn't be
+        written). Invariants: flush_all still ran, exactly one ERROR surfaces, and
+        Message.response is NOT written (events-first: no history → no display).
 
         Scenario: flush_all succeeds (artifacts land in DB), then _persist_events
-        fails. The ERROR must carry artifacts_flushed=True so the composer drops
-        the attachments (they're already in DB; retry won't dup them).
+        fails.
         """
         cm = _make_mock_conversation_manager()
         am = _make_mock_artifact_service()  # flush_all is an AsyncMock → succeeds
@@ -525,8 +523,6 @@ class TestPersistOnExternalCancel:
         am.flush_all.assert_called_once()  # flush ran → artifacts in DB
         errors = [e for e in events if e["type"] == StreamEventType.ERROR.value]
         assert len(errors) == 1, f"expected one transport ERROR, got: {[e['type'] for e in events]}"
-        # flush succeeded + no rollback → bit True → frontend clears composer attachments
-        assert errors[0]["data"]["artifacts_flushed"] is True
         # Message.response must NOT be written (events-first invariant: no history → no display)
         cm.update_response_async.assert_not_called()
 

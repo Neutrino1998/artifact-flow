@@ -10,6 +10,10 @@ import { getClientConfig } from '@/lib/api';
 interface ConfigState {
   compactionThreshold: number | null;
   leadAgentModel: string | null;
+  // Per-file upload byte limit (backend MAX_UPLOAD_SIZE). null until fetched —
+  // the composer's size pre-gate skips when null (best-effort; backend 422s
+  // anyway), so we never block a file on a not-yet-loaded limit.
+  maxUploadSize: number | null;
   fetched: boolean;
   fetchConfig: () => Promise<void>;
 }
@@ -17,6 +21,7 @@ interface ConfigState {
 export const useConfigStore = create<ConfigState>((set, get) => ({
   compactionThreshold: null,
   leadAgentModel: null,
+  maxUploadSize: null,
   fetched: false,
   fetchConfig: async () => {
     if (get().fetched) return;
@@ -25,6 +30,7 @@ export const useConfigStore = create<ConfigState>((set, get) => ({
       set({
         compactionThreshold: cfg.compaction_token_threshold,
         leadAgentModel: cfg.lead_agent_model,
+        maxUploadSize: cfg.max_upload_size,
         fetched: true,
       });
     } catch (err) {

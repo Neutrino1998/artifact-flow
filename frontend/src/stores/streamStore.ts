@@ -118,6 +118,12 @@ interface StreamState {
   // Pending user message (shown before conversation loads)
   pendingUserMessage: string | null;
 
+  // Filenames attached to the pending user message — optimistic mirror of the
+  // persisted MessageResponse.uploaded_files, so the live bubble shows the
+  // attachments without waiting for the turn to flush. Same lifecycle as
+  // pendingUserMessage (set on send, cleared on reset).
+  pendingUserFiles: string[] | null;
+
   // Parent ID for rerun/edit branching (controls branchPath truncation)
   // undefined = normal send, null = root rerun, string = rerun from specific parent
   streamParentId: string | null | undefined;
@@ -176,6 +182,7 @@ interface StreamState {
 
   // Pending user message
   setPendingUserMessage: (msg: string | null) => void;
+  setPendingUserFiles: (files: string[] | null) => void;
   setStreamParentId: (id: string | null | undefined) => void;
 
   // Non-agent blocks / metrics
@@ -247,6 +254,7 @@ export const useStreamStore = create<StreamState>((set, get) => {
     conversationId: null,
     segments: [],
     pendingUserMessage: null,
+    pendingUserFiles: null,
     streamParentId: undefined,
     completedSegments: new Map(),
     nonAgentBlocks: [],
@@ -293,6 +301,7 @@ export const useStreamStore = create<StreamState>((set, get) => {
         conversationId: null,
         segments: [],
         pendingUserMessage: null,
+        pendingUserFiles: null,
         streamParentId: undefined,
         permissionRequest: null,
         error: null,
@@ -370,6 +379,7 @@ export const useStreamStore = create<StreamState>((set, get) => {
       }),
 
     setPendingUserMessage: (msg) => set({ pendingUserMessage: msg }),
+    setPendingUserFiles: (files) => set({ pendingUserFiles: files }),
     setStreamParentId: (id) => set({ streamParentId: id }),
 
     pushNonAgentBlock: (block) =>

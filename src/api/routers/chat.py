@@ -95,7 +95,8 @@ async def send_message(
         raise HTTPException(status_code=422, detail=f"Invalid chat payload: {msgs}")
 
     # 附件数量上限：尽早拒绝（在建会话 / 转换之前），避免无界附件导致长时间串行
-    # 转换 + DB 写入 + USER_INPUT 归属串膨胀。每个文件的 20MB 大小限制仍在转换处生效。
+    # 转换 + DB 写入 + USER_INPUT 归属串膨胀。每个文件的大小限制（MAX_UPLOAD_SIZE）
+    # 仍在转换处生效；批量总字节由代理层独立封顶。
     attachment_count = sum(1 for f in files if f.filename)
     if attachment_count > config.MAX_CHAT_ATTACHMENTS:
         raise HTTPException(
@@ -135,7 +136,7 @@ async def send_message(
     #   - `_N` 去重副本 bug 消失:submit 抛 409（已有活跃执行）时尚未 stage 任何东西，
     #     execute_and_push 根本不会跑 → 重发不产生副本（旧实现在 submit 前已 commit）。
     #   - 上传与模型产物的「turn 中途死即丢失」语义一致（皆 ephemeral，随 lease 重启而失）；
-    #     用户侧由前端 staged 文件保留到 COMPLETE 兜底。
+    #     turn 中途死则上传丢失，用户从本地重新选文件重试（composer 发送即清空，不做保留）。
     converted = [
         await convert_uploaded_file(f)
         for f in files
@@ -153,6 +154,8 @@ async def send_message(
             "content": c.content,
             "content_type": c.content_type,
             "metadata": c.metadata,
+            "blob": c.blob,                          # 二进制源(图片/富格式),纯文本为 None
+            "blob_content_type": c.blob_content_type,
         }
         for c in converted
     ]
@@ -396,6 +399,7 @@ async def get_conversation(
                     created_at=msg.created_at,
                     children=children_map.get(msg.id, []),
                     execution_metrics=(msg.metadata_ or {}).get("execution_metrics"),
+                    uploaded_files=(msg.metadata_ or {}).get("uploaded_files"),
                 )
                 for msg in messages
             ],

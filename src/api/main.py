@@ -31,7 +31,6 @@ from observability import (
     resolve_mem_limit_bytes,
 )
 from observability import admin_runtime
-from utils.doc_converter import DocConverter
 from utils.logger import get_logger, get_request_id
 
 logger = get_logger("ArtifactFlow")
@@ -43,6 +42,9 @@ _deadman: Optional[DeadmanSwitch] = None
 _sampler: Optional[RuntimeSampler] = None
 _loop_lag_sink: Optional[JsonlSink] = None
 _metrics_sink: Optional[JsonlSink] = None
+
+# lease-anchored 沙盒孤儿回收器(C-reap);生命周期跨 lifespan
+_sandbox_reaper = None  # type: ignore[var-annotated]
 
 
 def _enable_faulthandler() -> None:
@@ -146,6 +148,29 @@ async def _stop_observability() -> None:
         _loop_lag_sink = None
 
 
+def _should_start_reaper(
+    *, enabled: bool, store_is_shared: bool, allow_local_store: bool
+) -> tuple[bool, str]:
+    """沙盒 reaper 启停判定 → (start?, reason)。提纯成函数好单测。
+
+    跨进程安全要求**共享** liveness 源(Redis):InMemory 是进程本地,多副本下每个进程
+    把兄弟的活沙盒看成无 lease 孤儿 → 误删(破坏性,非仅降级 —— lease/stream 在 InMemory
+    多 worker 下本就坏,但只是"找不到";reaper 把同一误配升级成"删活资源")。故 InMemory
+    下默认不起,需操作者显式 affirm 单进程(SANDBOX_REAP_ALLOW_LOCAL_STORE)。
+    """
+    if not enabled:
+        return False, "SANDBOX_REAP_ENABLED=false"
+    if store_is_shared:
+        return True, "shared store (Redis)"
+    if allow_local_store:
+        return True, "process-local store, operator-affirmed single-worker"
+    return False, (
+        "process-local (InMemory) store — disabled to avoid cross-deleting sibling "
+        "sandboxes if multiple workers/replicas run without Redis; set "
+        "SANDBOX_REAP_ALLOW_LOCAL_STORE=true for single-worker InMemory, or use Redis"
+    )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """
@@ -157,7 +182,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # 启动
     logger.info("Starting ArtifactFlow API...")
     validate_config()
-    DocConverter.check_pandoc()
     await init_globals()
 
     # Sync logger debug level from API config (single source of truth)
@@ -171,12 +195,59 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         # 观测层失败不挂应用启动 — 但留 ERROR 便于发现
         logger.exception("Observability bootstrap failed; continuing without it")
 
+    # 沙盒孤儿回收器(在 init_globals 之后:依赖 ExecutionRunner.store 取活跃集)。
+    # 启动失败不挂应用 —— 它是兜底,缺它只是 SIGKILL 路径少一层防护。
+    global _sandbox_reaper
+    store = get_execution_runner().store
+    store_is_shared = getattr(store, "is_shared", False)
+    start_reaper, reason = _should_start_reaper(
+        enabled=config.SANDBOX_REAP_ENABLED,
+        store_is_shared=store_is_shared,
+        allow_local_store=config.SANDBOX_REAP_ALLOW_LOCAL_STORE,
+    )
+    if start_reaper:
+        try:
+            from api.services.sandbox_reaper import SandboxReaper
+            _sandbox_reaper = SandboxReaper(store)
+            _sandbox_reaper.start()
+            if not store_is_shared:
+                # opt-in 路径:契约提醒。多 worker 误配在此会删活沙盒,留显眼 WARNING。
+                logger.warning(
+                    "Sandbox reaper running under a process-local store "
+                    "(SANDBOX_REAP_ALLOW_LOCAL_STORE=true): safe ONLY with exactly one "
+                    "worker/replica. Multiple workers without Redis WILL cross-delete live "
+                    "sandboxes."
+                )
+        except Exception:
+            logger.exception("Sandbox reaper bootstrap failed; continuing without it")
+            _sandbox_reaper = None
+    else:
+        logger.info(f"Sandbox reaper not started: {reason}")
+
     logger.info("ArtifactFlow API started successfully")
 
     yield
 
     # 关闭
     logger.info("Shutting down ArtifactFlow API...")
+    # Runner 先优雅停:在途 turn 跑完/取消 → 各自 _wrapped finally → SandboxSession.close()
+    # (部分 close 可能超时/失败)。提前到此(close_globals 内会再调一次,_tasks 已空 →
+    # no-op),好让 reaper 在 store/docker 仍存活时做最后一扫,兜住 shutdown 期间漏拆的孤儿
+    # (P2:单副本停机后不再有 reaper 收尾,孤儿会一直跑到下次启动)。
+    if _sandbox_reaper is not None:
+        try:
+            await get_execution_runner().shutdown()
+        except Exception:
+            logger.exception("Execution runner early shutdown failed; continuing")
+        try:
+            await _sandbox_reaper.final_sweep()
+        except Exception:
+            logger.exception("Sandbox reaper final sweep failed; continuing")
+        try:
+            await _sandbox_reaper.stop()
+        except Exception:
+            logger.exception("Sandbox reaper shutdown failed; continuing")
+        _sandbox_reaper = None
     try:
         await _stop_observability()
     except Exception:

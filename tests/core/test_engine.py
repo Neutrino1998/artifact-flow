@@ -150,7 +150,10 @@ class _FakeArtifactService:
     def set_session(self, session_id):
         pass
 
-    async def create_from_upload(self, session_id, filename, content, content_type, metadata=None):
+    async def create_from_upload(
+        self, session_id, filename, content, content_type, metadata=None,
+        blob=None, blob_content_type=None,
+    ):
         idx = self.calls
         self.calls += 1
         if idx == self.fail_at:
@@ -206,11 +209,6 @@ class TestUploadStagingAbort:
         # persists nothing this turn (no _N collision on the user's retry).
         assert svc.discarded == [("sess-1", "a_md")]
         assert result["uploaded_artifacts"] == []
-
-        # uploads_rolled_back signals decide_terminal to mark the terminal's
-        # artifacts_flushed=False even though flush_all vacuously succeeds on the
-        # (now empty) WS — so the frontend keeps the composer attachments.
-        assert result["uploads_rolled_back"] is True
 
         # record-not-emit: the engine records the detail but does NOT emit/append
         # ERROR — decide_terminal (post-flush) is the single terminal producer.

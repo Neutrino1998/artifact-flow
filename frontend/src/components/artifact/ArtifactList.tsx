@@ -14,7 +14,7 @@ export default function ArtifactList() {
     return (
       <div className="h-full flex items-center justify-center bg-chat dark:bg-chat-dark">
         <span className="text-text-tertiary dark:text-text-tertiary-dark">
-          加载文稿中...
+          加载文件中...
         </span>
       </div>
     );
@@ -24,7 +24,7 @@ export default function ArtifactList() {
     return (
       <div className="h-full flex items-center justify-center bg-chat dark:bg-chat-dark">
         <span className="text-text-tertiary dark:text-text-tertiary-dark">
-          暂无文稿
+          暂无文件
         </span>
       </div>
     );
@@ -34,7 +34,7 @@ export default function ArtifactList() {
     <div className="h-full flex flex-col min-h-0 bg-chat dark:bg-chat-dark">
       <div className="px-4 py-3 border-b border-border dark:border-border-dark">
         <h3 className="font-semibold text-text-primary dark:text-text-primary-dark">
-          文稿列表
+          文件列表
         </h3>
       </div>
       <div className="flex-1 overflow-y-auto px-2 py-2 space-y-2">

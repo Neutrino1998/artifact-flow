@@ -10,6 +10,7 @@
 ``current_session_id`` 由 Service 委托给其 WorkingSet。
 """
 
+import asyncio
 import math
 from typing import List, Optional
 
@@ -17,6 +18,7 @@ from config import config
 from tools.artifact_envelope import ArtifactSlice, render_artifact_slice
 from tools.base import BaseTool, ToolResult, ToolParameter, ToolPermission
 from tools.builtin.artifact_service import ArtifactService
+from utils.image import VISION_VIEWABLE_MIMES, resize_to_vision_data_uri
 from utils.logger import get_logger
 from utils.text_slicing import count_lines, slice_lines_by_offset_limit
 
@@ -164,7 +166,12 @@ class ReadArtifactTool(BaseTool):
                 "Read artifact content with optional line-based pagination. "
                 "Returns content wrapped in <artifact_slice> with metadata "
                 "(shown_lines/total_lines/has_more). When has_more=true, use "
-                "the offset hint to read the next slice."
+                "the offset hint to read the next slice. "
+                "PNG/JPEG image artifacts (e.g. an uploaded photo or screenshot) "
+                "are returned as the actual image so you can see it. Other "
+                "binary/image formats (gif/webp/tiff, docx, pdf, archives...) "
+                "cannot be viewed directly — mount them into the sandbox and "
+                "convert via bash (e.g. to PNG, then persist and read it)."
             ),
             permission=ToolPermission.AUTO,
             # Infinity = 永不落盘。read_artifact 自身的输出若被中间件再次落盘，
@@ -233,6 +240,43 @@ class ReadArtifactTool(BaseTool):
 
         artifact_id = result.get("id", "")
         content_type = result.get("content_type", "")
+
+        # 图片 artifact:识图路径(非文本分页)**白名单限死 png/jpeg**(上传翻转后
+        # gif/webp 等异型图照收 blob 但不进识图 —— 语义坑多,见 VISION_VIEWABLE_MIMES
+        # 注释),其余 image/* 落下方 blob 契约文案。取 blob → 降采样 → 返回携 data-URI
+        # 引用的 ToolResult。引擎把 data-URI 摘进本 turn 的 state["vision_blocks"]、事件
+        # 只留引用:本轮模型看得到图,下一轮 state 已空 → 占位文本(再 read 即重看)。
+        if content_type in VISION_VIEWABLE_MIMES:
+            return await self._read_image(session_id, artifact_id, result.get("version", 1))
+
+        # blob-only artifact(docx/pdf/异型图/未知二进制等上传,无文本表示):
+        # 返回契约文案而非空 content。success=True —— 这是对"它是什么"的准确回答,
+        # 不是失败(success=False 易诱发模型重试同一调用)。
+        if result.get("blob_content_type"):
+            original = result.get("original_filename") or artifact_id
+            bct = result["blob_content_type"]
+            if bct.startswith("image/"):
+                how = (
+                    "Only PNG/JPEG images can be viewed directly with read_artifact. "
+                    "To view this image, mount it into the sandbox with the `mount` "
+                    "tool, convert it to PNG via bash, persist the result, then read "
+                    "the new artifact."
+                )
+            else:
+                how = (
+                    "To inspect or convert it, mount it into the sandbox with the "
+                    "`mount` tool and process it via bash."
+                )
+            return ToolResult(
+                success=True,
+                data=(
+                    f"Artifact '{artifact_id}' is a binary file "
+                    f"({bct}, original file '{original}'). "
+                    f"It has no text representation and cannot be read as text. {how} "
+                    "The user can also download the original file from the artifact panel."
+                ),
+            )
+
         title = result.get("title", "")
         version_num = result.get("version", 1)
         source = result.get("source", "agent")
@@ -279,6 +323,46 @@ class ReadArtifactTool(BaseTool):
             updated_at=updated_at,
         )
         return ToolResult(success=True, data=render_artifact_slice(slice))
+
+    async def _read_image(self, session_id: str, artifact_id: str, version) -> ToolResult:
+        """识图:取 blob → 降采样 → ToolResult(data=文本标记, metadata.image=引用+data_uri)。
+
+        data_uri 放 metadata,引擎转 emit 前会把它摘进 state、事件只留引用(见 engine
+        tool_complete 注释)。resize 走 executor(Pillow C 扩展 + 解码,CPU 纪律);失败
+        (含解压炸弹)→ loud-fail 给模型,模型据 tool result 改道。
+        """
+        blob = await self._service.get_blob(session_id, artifact_id)
+        if blob is None:
+            return ToolResult(
+                success=False,
+                error=f"Image artifact '{artifact_id}' has no stored image data",
+            )
+        loop = asyncio.get_running_loop()
+        try:
+            data_uri = await loop.run_in_executor(
+                None, resize_to_vision_data_uri, blob["data"], config.VISION_IMAGE_MAX_EDGE
+            )
+        except Exception as e:
+            logger.warning(f"Failed to prepare image '{artifact_id}' for viewing: {e}")
+            return ToolResult(
+                success=False,
+                error=(
+                    f"Failed to prepare image '{artifact_id}' for viewing: {e}. "
+                    "If the format cannot be decoded, mount it into the sandbox "
+                    "with the `mount` tool and convert it (e.g. to PNG) via bash."
+                ),
+            )
+        ct = blob["content_type"]
+        return ToolResult(
+            success=True,
+            data=f"[image artifact '{artifact_id}' v{version}, {ct}]",
+            metadata={"image": {
+                "artifact_id": artifact_id,
+                "version": version,
+                "content_type": ct,
+                "data_uri": data_uri,
+            }},
+        )
 
 
 # ============================================================

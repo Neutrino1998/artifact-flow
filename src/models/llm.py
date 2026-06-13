@@ -20,12 +20,32 @@ from dotenv import load_dotenv
 os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
 
 from litellm import acompletion
+from litellm.exceptions import (
+    APIConnectionError,
+    InternalServerError,
+    RateLimitError,
+    ServiceUnavailableError,
+    Timeout,
+)
 
 load_dotenv()
 
 from utils.logger import get_logger
 
 logger = get_logger("ArtifactFlow")
+
+# 仅**瞬态/基础设施**错误才重试:网络断连、超时、429 限流、5xx 服务端错误 —— 重试有望
+# 成功。其余一律确定性失败(BadRequest/400 含「图块发给文本模型」、ContextWindowExceeded、
+# ContentPolicy、Auth、NotFound 等),重试改变不了结果,只拖延 loud-fail + 烧 token,故立即抛。
+# 旧实现按 str(e) 子串匹配,会把 "context length limit" 误判成限流去重试 —— 改用 litellm
+# 的**类型化异常**根治。
+_RETRYABLE_LLM_ERRORS = (
+    APIConnectionError,
+    Timeout,
+    RateLimitError,
+    ServiceUnavailableError,
+    InternalServerError,
+)
 
 
 # ========================================
@@ -224,29 +244,32 @@ async def astream_with_retry(
             }
             return  # 流式完成
 
-        except Exception as e:
+        except _RETRYABLE_LLM_ERRORS as e:
             last_error = e
-            error_str = str(e).lower()
-
-            # 认证错误不重试
-            if "auth" in error_str or ("api" in error_str and "key" in error_str):
-                logger.error(f"LLM authentication error: {e}")
-                raise
-
-            if "rate" in error_str or "limit" in error_str:
+            if isinstance(e, RateLimitError):
                 wait_time = retry_delay * (2 ** attempt)
                 logger.warning(f"LLM rate limited, retry {attempt+1}/{max_retries} after {wait_time}s")
-            elif "timeout" in error_str:
+            elif isinstance(e, Timeout):
                 wait_time = retry_delay
                 logger.warning(f"LLM timeout, retry {attempt+1}/{max_retries} after {wait_time}s")
             else:
                 wait_time = retry_delay * (1.5 ** attempt)
-                logger.warning(f"LLM error: {e}, retry {attempt+1}/{max_retries} after {wait_time}s")
+                logger.warning(
+                    f"LLM transient error ({type(e).__name__}): {e}, "
+                    f"retry {attempt+1}/{max_retries} after {wait_time}s"
+                )
 
             if attempt < max_retries - 1:
                 await asyncio.sleep(wait_time)
             else:
                 raise
+
+        except Exception as e:
+            # 非瞬态 = 确定性失败:重试无意义。立即响亮失败(不烧 token、不拖延诊断)。
+            # 含 BadRequest/400(图块发给文本模型即此类)、ContextWindowExceeded、
+            # ContentPolicy、Authentication、NotFound 等。
+            logger.error(f"LLM non-retryable error ({type(e).__name__}): {e}")
+            raise
 
     raise last_error or RuntimeError("LLM call failed without specific error")
 
@@ -255,13 +278,42 @@ async def astream_with_retry(
 # 查询函数
 # ========================================
 
+def _stringify_debug_content(content) -> str:
+    """把一条 message 的 content 渲染成可读字符串。content 可能是 str(常态)或
+    识图路径的块列表 ``[{type:text,...}, {type:image_url,...}]`` —— 后者**绝不**把
+    data-URI 原样吐出(base64 可达数 MB,会撑爆日志、且每轮 eager 求值),只摘出
+    mime + 字节量做摘要。"""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for block in content:
+            if not isinstance(block, dict):
+                parts.append(str(block))
+                continue
+            btype = block.get("type")
+            if btype == "text":
+                parts.append(block.get("text", ""))
+            elif btype == "image_url":
+                url = (block.get("image_url") or {}).get("url", "")
+                if url.startswith("data:"):
+                    header = url[5:].split(";", 1)[0] or "?"
+                    parts.append(f"[image_url: {header}, ~{len(url)} chars data-uri]")
+                else:
+                    parts.append(f"[image_url: {url[:80]}]")
+            else:
+                parts.append(f"[{btype}]")
+        return "\n".join(parts)
+    return str(content)
+
+
 def format_messages_for_debug(messages: list, max_content_len: int = 100000) -> str:
     """格式化消息用于调试输出。截断时附带原始长度,operator 才能分清是完整短消息
-    还是被切掉的长消息。"""
+    还是被切掉的长消息。识图块列表先压成摘要字符串(不吐 base64)再走统一截断逻辑。"""
     lines = []
     for msg in messages:
         role = msg["role"]
-        content = msg.get("content", "")
+        content = _stringify_debug_content(msg.get("content", ""))
         if not content:
             continue
         original_len = len(content)
@@ -294,5 +346,16 @@ def get_model_info(model: str) -> Dict[str, Any]:
         return {
             "model_id": model_config["model"],
             "is_reasoning": is_reasoning,
+            "supports_vision": bool(model_config.get("vision", False)),
         }
-    return {"model_id": model, "is_reasoning": False}
+    return {"model_id": model, "is_reasoning": False, "supports_vision": False}
+
+
+def model_supports_vision(model: str) -> bool:
+    """该模型别名是否声明了多模态(models.yaml `vision: true`)。
+
+    识图门控的唯一判据:read_artifact 注入的图块只进 vision:true 模型的上下文,
+    文本模型(如 qwen3.7-max)得占位文本而非图块——既避免 provider 端因不识图块
+    报错,也让任意私有部署「配什么模型就有什么能力」而非崩溃。未知/未声明 → False。
+    """
+    return get_model_info(model)["supports_vision"]

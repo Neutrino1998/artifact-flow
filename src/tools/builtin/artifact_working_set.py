@@ -47,6 +47,7 @@ class ArtifactMemory:
         metadata: Optional[Dict] = None,
         created_at: Optional[datetime] = None,
         source: str = "agent",
+        blob: Optional[bytes] = None,
     ):
         self.id = artifact_id
         self.content_type = content_type
@@ -57,6 +58,10 @@ class ArtifactMemory:
         self.created_at = created_at or utc_now()
         self.updated_at = utc_now()
         self.source = source
+        # 暂存的二进制源字节(图片/富格式上传),仅在新建 flush 时连同 artifact 一并
+        # 写入 ArtifactBlob(原子)。非 Artifact 的 DB 字段——是个待 flush 的暂存载荷,
+        # flush 成功后即无用(缓存保留但 blob 不再被读)。纯文本/模型自建 artifact 为 None。
+        self.blob = blob
 
 
 # ============================================================

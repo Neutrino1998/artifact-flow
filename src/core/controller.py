@@ -23,7 +23,6 @@ from core.post_processing import (
     decide_terminal,
     ensure_terminal,
     make_external_cancelled_event,
-    uploads_persisted,
 )
 from tools.base import BaseTool
 from tools.builtin.artifact_service import ArtifactService
@@ -52,6 +51,8 @@ class ExecutionController:
         message_event_repo: Optional[Any] = None,  # MessageEventRepository
         on_engine_exit: Optional[Callable[[str, str], Awaitable[None]]] = None,
         db_manager: Optional[Any] = None,
+        sandbox_session: Optional[Any] = None,  # duck-typed: status_snapshot(动态上下文快照用,
+                                                # 生命周期归 controller_factory + runner cleanup)
     ):
         self.agents = agents
         self.tools = tools
@@ -61,6 +62,7 @@ class ExecutionController:
         self.message_event_repo = message_event_repo
         self._on_engine_exit = on_engine_exit
         self._db_manager = db_manager
+        self.sandbox_session = sandbox_session
         logger.info("ExecutionController initialized")
 
     async def _with_db_retry(self, fn):
@@ -227,6 +229,7 @@ class ExecutionController:
                         hooks=self.hooks,
                         artifact_service=self.artifact_service,
                         emit=emit_to_queue,
+                        sandbox_session=self.sandbox_session,
                     )
             except TimeoutError:
                 # 引擎执行超时。模仿协作式 cancel:置 flag 正常返回,让 post-processing
@@ -346,8 +349,8 @@ class ExecutionController:
                 initial_state["response"] = f"Engine error: {str(e)}"
                 # record-not-emit:不在此 append/yield ERROR。统一终态发射点是 post-processing
                 # 的 decide_terminal —— 它在 flush 之后读 error_detail 构建唯一的 ERROR 终态
-                # (带 request_id + artifacts_flushed),controller 再 append + yield。若这里也
-                # 自行 emit,会与 decide_terminal 双发 ERROR。request_id 在此 contextvar still
+                # (带 request_id),controller 再 append + yield。若这里也自行 emit,会与
+                # decide_terminal 双发 ERROR。request_id 在此 contextvar still
                 # 有效(engine_task 继承发起轮 POST 的 id),先冻结进 error_detail。
                 initial_state["error_detail"] = {
                     "error": str(e),
@@ -441,7 +444,6 @@ class ExecutionController:
                         await self.artifact_service.flush_all(
                             session_id, db_manager=self._db_manager
                         )
-                        pp.artifacts_flushed = True
                     except IntegrityError as flush_ie:
                         # Layer 2: exists() 之后到 flush 之间 conv 被删（TOCTOU）
                         logger.warning(
@@ -492,9 +494,6 @@ class ExecutionController:
                             "message_id": message_id,
                             "error": "Event persistence failed — turn aborted, please retry",
                             "execution_metrics": pp.final_state.get("execution_metrics", {}),
-                            # transport 层直发 ERROR(绕过 decide_terminal),但仍须带 bit:
-                            # flush 已成功 → 附件在 DB → 前端清掉输入框附件,重试不再重复 staging。
-                            "artifacts_flushed": uploads_persisted(pp),
                         },
                     }
                     return
@@ -533,6 +532,13 @@ class ExecutionController:
                 execution_metrics = pp.final_state.get("execution_metrics", {})
                 if execution_metrics:
                     metadata_updates["execution_metrics"] = execution_metrics
+                # 本轮上传文件 [{id, filename}] — display-only 快照,供用户气泡在重载/
+                # 切分支后渲染附件(LLM 侧的归属在 USER_INPUT 事件里,与此互不依赖)。
+                # flush 失败不写:artifact 没落库,气泡不该声称附件存在(staging 失败
+                # 路径 uploaded_artifacts 已被 engine 清空,空列表自然跳过)。
+                uploaded_files = pp.final_state.get("uploaded_artifacts") or []
+                if uploaded_files and not pp.flush_error:
+                    metadata_updates["uploaded_files"] = uploaded_files
                 if metadata_updates:
                     try:
                         await self._with_db_retry(
@@ -568,9 +574,6 @@ class ExecutionController:
                         "conversation_id": conversation_id,
                         "message_id": message_id,
                         "error": str(e),
-                        # transport 层直发 ERROR:带 bit 反映 flush 真实进度(异常可能落在
-                        # flush 前或后),前端据此决定保留/清掉输入框附件,避免重复 staging。
-                        "artifacts_flushed": uploads_persisted(pp),
                     }
                 }
         except asyncio.CancelledError:

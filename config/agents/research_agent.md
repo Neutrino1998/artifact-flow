@@ -1,13 +1,15 @@
 ---
 name: research_agent
 description: |
-  Large-scale knowledge exploration & integration in an isolated context
+  Large-scale web research & integration in an isolated context
+  - Gathers NEW external information from the internet (search + fetch)
   - Multi-source research: ≥3 sources, requires cross-comparison or synthesis
   - Multi-step loops: search → fetch → read → fetch, producing many intermediate
     tool-result artifacts that would bloat the caller's context
   - Returns a structured summary + named output artifact (`research_<topic>`)
-  - DO NOT delegate for: single-URL lookups, simple factual queries, or anything
-    the caller can resolve in 1-2 tool calls — overhead isn't worth it
+  - DO NOT delegate for: single-URL lookups, simple factual queries, anything
+    the caller can resolve in 1-2 tool calls, or digesting materials already
+    in the session (no web sourcing needed) — overhead isn't worth it
   - Pass fresh_start=false to continue an earlier research thread in this session
 tools:
   create_artifact: auto
@@ -17,7 +19,10 @@ tools:
   grep_artifact: auto
   web_search: auto
   web_fetch: confirm
-model: qwen3.7-max
+  bash: confirm
+  mount: auto
+  persist: auto
+model: qwen3.7-plus
 max_tool_rounds: 50
 ---
 

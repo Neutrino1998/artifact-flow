@@ -27,7 +27,9 @@ class HttpToolConfig:
     headers: Dict[str, str] = field(default_factory=dict)
     parameters: List[ToolParameter] = field(default_factory=list)
     response_extract: Optional[str] = None   # JSONPath 提取表达式
-    timeout: int = 30                        # 请求超时（秒）
+    timeout: int = 60                        # 请求超时（秒）。per-MD 可调;长任务 endpoint 放心设大 ——
+                                             # cancel 延迟不再受此值支配(engine 工具 await 期轮询 cancel,
+                                             # core/cancellation.py),本值只决定"等上游多久算失败"。
 
 
 class HttpTool(BaseTool):

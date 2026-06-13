@@ -34,7 +34,7 @@ export default function Home() {
       <UserManagementDetailPanel />
     </ErrorBoundary>
   ) : (
-    <ErrorBoundary fallbackLabel="文稿面板出错了">
+    <ErrorBoundary fallbackLabel="文件面板出错了">
       <ArtifactPanel />
     </ErrorBoundary>
   );

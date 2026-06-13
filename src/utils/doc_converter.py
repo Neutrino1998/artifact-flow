@@ -1,18 +1,27 @@
 """
-Document converter for file import/export.
+Document converter for file import.
 
-Supports:
-- Import: .docx (pandoc), .pdf (pymupdf), text files (charset-normalizer)
-- Export: markdown -> .docx (pandoc)
+路由(上传翻转后,2026-06-11):**文本白名单(EXTENSION_MIME_MAP)→ content,
+png/jpeg → 识图 blob,其余一律 → blob**。路由纯声明式(按扩展名三分),
+charset 启发式不参与路由判定 —— 改后缀 / 损坏 / 不认识的字节照收进 blob,
+模型 mount 进沙盒后自己检视、诊断、转换(remediation 提示归 skill 系统);
+"loud-fail at upload" 随沙盒落地降级为 "loud-fail at first use",不再需要
+magic 闸与拒绝名单。仅存的上传期 ValueError:体积超限、png/jpg 扩展名但
+Pillow 探不出合法 PNG/JPEG(识图路由是上传期决策,这道闸是路由正确性、
+不是格式预判)。
+
+- PDF text extraction (pymupdf) survives as a standalone helper for
+  web_fetch's PDF fallback — that is web-content reading, not upload.
 """
 
 import asyncio
+import mimetypes
 import os
-import shutil
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
-from typing import Dict, Tuple
+from typing import Dict, Optional, Tuple
 
+from config import config
 from utils.logger import get_logger
 
 logger = get_logger("ArtifactFlow")
@@ -63,100 +72,132 @@ EXTENSION_MIME_MAP: Dict[str, str] = {
     ".conf": "text/plain",
     ".log": "text/plain",
     ".env": "text/plain",
+    # svg 是 XML 文本:走文本路径(可读可编辑),不标 image/*(text artifact 无 blob,
+    # 标 image/* 会误入 read_artifact 识图分支)。沙盒里它也是按文本处理的格式。
+    ".svg": "text/xml",
 }
 
-# Office / ODF 二进制 + 模板 + 宏文件 + 演示/表格的 OOXML：全都落 charset-normalizer
-# 兜底要么抛 "Cannot decode" 要么解出乱码。在 convert() 入口按扩展名早返回，并按
-# 文件类型给出针对性 remediation —— 让用户"把 Excel 另存为 docx"是没意义的。
-# 不走 magic-byte：OOXML 各家都是 PK\x03\x04（zip），要区分需要解压看
-# [Content_Types].xml，复杂度划不来。
-_Cat = Tuple[str, str]  # (category, remediation_advice)
+# 图片(png/jpeg):识图路径(见 sandbox plan A 决策)。真实 MIME 由 Pillow 按内容
+# 探测、非按扩展名,故这里只用扩展名圈定"走图片分支"。
+_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg"}
 
-_WORD_TO_DOCX: _Cat = ("Word", "请用 Office/WPS 另存为 .docx 后再上传")
-_WORD_MACRO_TO_DOCX: _Cat = ("Word", "请用 Office/WPS 另存为 .docx（取消宏）后再上传")
-_EXCEL_TO_CSV: _Cat = ("Excel", "请导出为 .csv，或将需要的内容复制到对话框")
-_PPT_TO_PDF: _Cat = ("PowerPoint", "请导出为 PDF（文字版），或将需要的内容复制到对话框")
-_ODF_TEXT: _Cat = ("ODF 文档", "请另存为 .docx 或 .pdf 后再上传")
-_ODF_CALC: _Cat = ("ODF 表格", "请导出为 .csv，或将需要的内容复制到对话框")
-_ODF_IMPRESS: _Cat = ("ODF 演示", "请导出为 PDF（文字版），或将需要的内容复制到对话框")
+# 富格式原始 blob 的真实 MIME(blob-only 存储:artifact 无文本表示,content_type
+# 即原件 MIME → raw 端点按它发,读/转换归沙盒)。
+_DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+_PDF_MIME = "application/pdf"
 
-_UNSUPPORTED_OFFICE: Dict[str, _Cat] = {
-    # Word（老二进制 + 模板 + 宏）
-    ".doc": _WORD_TO_DOCX,
-    ".docm": _WORD_MACRO_TO_DOCX,
-    ".docb": _WORD_TO_DOCX,
-    ".dot": _WORD_TO_DOCX,
-    ".dotx": _WORD_TO_DOCX,
-    ".dotm": _WORD_MACRO_TO_DOCX,
-    # Excel（老二进制 + 现代 OOXML + 模板 + 宏 + 二进制工作簿）
-    ".xls": _EXCEL_TO_CSV,
-    ".xlsx": _EXCEL_TO_CSV,
-    ".xlsm": _EXCEL_TO_CSV,
-    ".xlsb": _EXCEL_TO_CSV,
-    ".xlt": _EXCEL_TO_CSV,
-    ".xltx": _EXCEL_TO_CSV,
-    ".xltm": _EXCEL_TO_CSV,
-    # PowerPoint（老二进制 + 现代 + 模板 + 宏 + 自动播放）
-    ".ppt": _PPT_TO_PDF,
-    ".pptx": _PPT_TO_PDF,
-    ".pptm": _PPT_TO_PDF,
-    ".pps": _PPT_TO_PDF,
-    ".ppsx": _PPT_TO_PDF,
-    ".ppsm": _PPT_TO_PDF,
-    ".pot": _PPT_TO_PDF,
-    ".potx": _PPT_TO_PDF,
-    ".potm": _PPT_TO_PDF,
+# 已知二进制扩展名 → 真实 MIME:**不是接受闸也不是路由表**(路由 = 文本白名单
+# 之外一律 blob,见 convert()),只管 MIME 正确性 —— mimetypes 对 OOXML/heic/avif
+# 等的认知因平台而异,显式表保证 /raw 端点按真实 MIME 发(浏览器下载/内联行为
+# 正确)。不在表里的未知扩展由 mimetypes 猜、兜底 octet-stream。
+_BINARY_EXTENSION_MIME: Dict[str, str] = {
+    # Word
+    ".docx": _DOCX_MIME,
+    ".doc": "application/msword",
+    ".docb": "application/msword",
+    ".dot": "application/msword",
+    ".docm": "application/vnd.ms-word.document.macroEnabled.12",
+    ".dotm": "application/vnd.ms-word.template.macroEnabled.12",
+    ".dotx": "application/vnd.openxmlformats-officedocument.wordprocessingml.template",
+    # PDF
+    ".pdf": _PDF_MIME,
+    # Excel
+    ".xls": "application/vnd.ms-excel",
+    ".xlt": "application/vnd.ms-excel",
+    ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    ".xltx": "application/vnd.openxmlformats-officedocument.spreadsheetml.template",
+    ".xlsm": "application/vnd.ms-excel.sheet.macroEnabled.12",
+    ".xlsb": "application/vnd.ms-excel.sheet.binary.macroEnabled.12",
+    ".xltm": "application/vnd.ms-excel.template.macroEnabled.12",
+    # PowerPoint
+    ".ppt": "application/vnd.ms-powerpoint",
+    ".pps": "application/vnd.ms-powerpoint",
+    ".pot": "application/vnd.ms-powerpoint",
+    ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    ".ppsx": "application/vnd.openxmlformats-officedocument.presentationml.slideshow",
+    ".potx": "application/vnd.openxmlformats-officedocument.presentationml.template",
+    ".pptm": "application/vnd.ms-powerpoint.presentation.macroEnabled.12",
+    ".ppsm": "application/vnd.ms-powerpoint.slideshow.macroEnabled.12",
+    ".potm": "application/vnd.ms-powerpoint.template.macroEnabled.12",
     # LibreOffice / ODF
-    ".odt": _ODF_TEXT,
-    ".ott": _ODF_TEXT,
-    ".ods": _ODF_CALC,
-    ".ots": _ODF_CALC,
-    ".odp": _ODF_IMPRESS,
-    ".otp": _ODF_IMPRESS,
+    ".odt": "application/vnd.oasis.opendocument.text",
+    ".ott": "application/vnd.oasis.opendocument.text-template",
+    ".ods": "application/vnd.oasis.opendocument.spreadsheet",
+    ".ots": "application/vnd.oasis.opendocument.spreadsheet-template",
+    ".odp": "application/vnd.oasis.opendocument.presentation",
+    ".otp": "application/vnd.oasis.opendocument.presentation-template",
+    # 非 png/jpeg 图片:照收 blob、标真实 image/* MIME。read_artifact 识图分支会
+    # 直接尝试(Pillow 能解 gif/webp/bmp/tiff → 降采样重编码后照样可看;heic/avif
+    # 等解不了 → loud-fail + 提示 mount 进沙盒转换)。
+    ".gif": "image/gif",
+    ".webp": "image/webp",
+    ".bmp": "image/bmp",
+    ".tiff": "image/tiff",
+    ".tif": "image/tiff",
+    ".heic": "image/heic",
+    ".heif": "image/heif",
+    ".ico": "image/x-icon",
+    ".avif": "image/avif",
+    # 压缩包(原则 5:zip 等进 blob,沙盒里解)
+    ".zip": "application/zip",
+    ".gz": "application/gzip",
+    ".tgz": "application/gzip",
+    ".tar": "application/x-tar",
+    ".bz2": "application/x-bzip2",
+    ".xz": "application/x-xz",
+    ".7z": "application/x-7z-compressed",
+    ".rar": "application/vnd.rar",
 }
 
 
 @dataclass
 class ConvertResult:
-    """Result of a document conversion."""
+    """Result of a document conversion.
+
+    `content`/`content_type` 是**可读文本表示**(纯文本即原文;图片与富格式
+    docx/pdf 为空 —— 无文本表示,content_type 即真实 MIME)。`blob`/
+    `blob_content_type` 是需要**二进制存储**时的原始不可变字节 + 真实 MIME;
+    纯文本类无 blob。富格式的读/写/转换全归沙盒(sandbox plan 原则 6,C-0
+    起 blob-only,不再预转 md)。
+    """
     content: str
-    content_type: str  # MIME type
+    content_type: str  # MIME type of the readable text representation
     metadata: Dict = field(default_factory=dict)
+    blob: Optional[bytes] = None              # 原始字节(需 blob 存储时;纯文本为 None)
+    blob_content_type: Optional[str] = None   # 原始 blob 的真实 MIME
 
 
 class DocConverter:
     """
-    Unified document converter for import (file -> text) and export (markdown -> docx).
+    Unified document converter for import (file -> text or blob).
     """
 
-    MAX_FILE_SIZE = 20 * 1024 * 1024   # 20MB
-    MAX_PDF_PAGES = 200
-    CONVERT_TIMEOUT = 60               # seconds
-
-    @classmethod
-    def check_pandoc(cls) -> None:
-        """Check pandoc availability at startup. Raises RuntimeError if not found."""
-        if not shutil.which("pandoc"):
-            raise RuntimeError(
-                "pandoc is not installed or not in PATH. "
-                "Install it with: brew install pandoc (macOS) or apt-get install pandoc (Linux)"
-            )
-        logger.info("pandoc check passed")
-
+    # Absolute convert() backstop = config.MAX_UPLOAD_SIZE (the ingress ceiling).
+    # The upload path (artifacts.py) enforces its own authoritative limit BEFORE
+    # we see the bytes, so this only fires if a caller forgot to; tying it to
+    # the upload constant avoids two hardcoded values drifting apart. NOTE: this
+    # is NOT the per-path cost guard. Each path owns its own: blob routes store
+    # the bytes raw (no parsing), images via the pixel cap + raw-blob store (no
+    # text), and the raw-text path via MAX_TEXT_CONVERT_BYTES (it's the only one
+    # that materializes full content+wordlist, so it keeps a tighter cap — over
+    # it the file falls to blob, not 422).
+    MAX_FILE_SIZE = config.MAX_UPLOAD_SIZE
+    MAX_PDF_PAGES = 200                # extract_pdf_text (web_fetch fallback) only
 
     async def convert(self, file_bytes: bytes, filename: str) -> ConvertResult:
         """
-        Convert a file to text (import).
+        Convert a file to text or blob (import).
 
         Args:
             file_bytes: Raw file bytes
             filename: Original filename (used for extension detection)
 
         Returns:
-            ConvertResult with text content and MIME type
+            ConvertResult — text content, or blob with the original bytes
 
         Raises:
-            ValueError: File too large, too many pages, or not decodable
+            ValueError: file too large, or png/jpg extension that Pillow
+                cannot probe as valid PNG/JPEG (vision-routing gate)
         """
         if len(file_bytes) > self.MAX_FILE_SIZE:
             raise ValueError(
@@ -166,115 +207,58 @@ class DocConverter:
 
         ext = os.path.splitext(filename)[1].lower()
 
-        if ext == ".docx":
-            return await self._convert_docx(file_bytes, filename)
-        elif ext == ".pdf":
-            return await self._convert_pdf(file_bytes, filename)
-        elif ext in _UNSUPPORTED_OFFICE:
-            category, advice = _UNSUPPORTED_OFFICE[ext]
-            raise ValueError(
-                f"暂不支持 {ext} 格式（{category} 文件）。{advice}。"
-            )
-        else:
+        if ext in _IMAGE_EXTENSIONS:
+            return await self._convert_image(file_bytes, filename)
+        elif ext in EXTENSION_MIME_MAP:
+            # 文本白名单:唯一进解码的路由(白名单内解不出/超帽仍落 blob)。
             return await self._convert_text(file_bytes, filename, ext)
+        else:
+            # 非白名单一律 blob —— 路由纯声明式(按扩展名),charset 启发式
+            # 不参与路由判定:近 ASCII 的二进制(.exe 头/小 mp4/ascii .bin)能被
+            # charset-normalizer "成功"解码,试一下就会把原始字节丢成文本
+            # artifact(不可下载/不可 mount)。无扩展名(README/Makefile)同落
+            # blob,契约一致;不验 magic,改后缀/损坏照收,模型 mount 进沙盒
+            # 后自己诊断(见模块 docstring)。
+            mime = _BINARY_EXTENSION_MIME.get(ext) or _guess_blob_mime(filename)
+            return _blob_result(file_bytes, filename, mime)
 
-    async def export_docx(self, markdown_content: str) -> bytes:
+    async def extract_pdf_text(self, file_bytes: bytes) -> Tuple[str, int]:
+        """Extract text from PDF bytes via pymupdf. Returns (text, page_count).
+
+        web_fetch 的 PDF 降级路径专用(网页内容阅读,非上传)。上传的 .pdf 走
+        blob-only(已知二进制路由),不经此函数 —— 富格式的读归沙盒(原则 6)。
         """
-        Export markdown content to docx bytes.
-
-        Args:
-            markdown_content: Markdown text
-
-        Returns:
-            docx file bytes
-
-        Raises:
-            RuntimeError: pandoc conversion failed
-        """
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                "pandoc", "-f", "markdown", "-t", "docx", "-o", "-",
-                stdin=asyncio.subprocess.PIPE,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            stdout, stderr = await asyncio.wait_for(
-                proc.communicate(input=markdown_content.encode("utf-8")),
-                timeout=self.CONVERT_TIMEOUT,
-            )
-
-            if proc.returncode != 0:
-                raise RuntimeError(f"pandoc export failed: {stderr.decode()}")
-
-            return stdout
-
-        except asyncio.TimeoutError:
-            proc.kill()
-            raise RuntimeError(f"pandoc export timed out ({self.CONVERT_TIMEOUT}s)")
-
-    async def _convert_docx(self, file_bytes: bytes, filename: str) -> ConvertResult:
-        """Convert .docx to markdown via pandoc."""
-        # zip 预检:.docx 是 OOXML(zip 容器),合法文件以 PK\x03\x04 开头。
-        # 改后缀的 .doc 是 OLE2(D0CF11E0），pandoc 会以晦涩的 "couldn't unpack
-        # docx container" RuntimeError(→500)失败。这里提前判「是不是合法 zip」
-        # 抛 ValueError(→422 + 可操作提示)。注意:这不违反模块顶部「不走
-        # magic-byte 区分 OOXML *种类*」——区分 docx/xlsx/pptx 才需解压看
-        # [Content_Types].xml;这里只判容器是不是 zip,代价极低。
-        if not file_bytes.startswith(b"PK\x03\x04"):
-            raise ValueError(
-                f"{filename!r} 不是有效的 .docx 文件(可能是改了后缀的旧版 .doc 或损坏文件)。"
-                "请用 Word 另存为 .docx 后重新上传。"
-            )
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                "pandoc", "-f", "docx", "-t", "markdown",
-                stdin=asyncio.subprocess.PIPE,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            stdout, stderr = await asyncio.wait_for(
-                proc.communicate(input=file_bytes),
-                timeout=self.CONVERT_TIMEOUT,
-            )
-
-            if proc.returncode != 0:
-                raise RuntimeError(f"pandoc conversion failed: {stderr.decode()}")
-
-            content = stdout.decode("utf-8")
-            word_count = len(content.split())
-
-            return ConvertResult(
-                content=content,
-                content_type="text/markdown",
-                metadata={
-                    "original_filename": filename,
-                    "converter_used": "pandoc",
-                    "word_count": word_count,
-                },
-            )
-
-        except asyncio.TimeoutError:
-            proc.kill()
-            raise RuntimeError(f"pandoc conversion timed out ({self.CONVERT_TIMEOUT}s)")
-
-    async def _convert_pdf(self, file_bytes: bytes, filename: str) -> ConvertResult:
-        """Convert .pdf to markdown via pymupdf."""
         # PyMuPDF 必须串行（见模块顶部 _PYMUPDF_EXECUTOR 注释），同时不卡 event loop
         loop = asyncio.get_running_loop()
-        content, page_count = await loop.run_in_executor(
+        return await loop.run_in_executor(
             _PYMUPDF_EXECUTOR, _extract_pdf_text, file_bytes, self.MAX_PDF_PAGES
         )
-        word_count = len(content.split())
 
+    async def _convert_image(self, file_bytes: bytes, filename: str) -> ConvertResult:
+        """图片(png/jpeg)→ blob 存储。
+
+        真实格式由 Pillow **按内容**探测(非按扩展名),改后缀/伪装的图也能纠正到
+        正确 MIME;探测顺带挡损坏、截断、解压炸弹(显式 w*h ≤ VISION_IMAGE_MAX_PIXELS)。`content`
+        留空 —— 图无文本表示,模型靠 read_artifact 取图块(A-vision)。非 png/jpeg
+        的真实格式(探测出 GIF/WEBP 等)同样 loud-fail。
+        """
+        loop = asyncio.get_running_loop()
+        fmt = await loop.run_in_executor(None, _probe_image, file_bytes)
+        if fmt == "PNG":
+            mime = "image/png"
+        elif fmt == "JPEG":
+            mime = "image/jpeg"
+        else:
+            raise ValueError(
+                f"{filename!r} 不是有效的 PNG/JPEG 图片(可能改了后缀、损坏、超大像素、"
+                "或实为其它图片格式)。请另存为 PNG 或 JPG 后重新上传。"
+            )
         return ConvertResult(
-            content=content,
-            content_type="text/markdown",
-            metadata={
-                "original_filename": filename,
-                "converter_used": "pymupdf",
-                "page_count": page_count,
-                "word_count": word_count,
-            },
+            content="",
+            content_type=mime,
+            metadata={"original_filename": filename, "converter_used": "pillow"},
+            blob=file_bytes,
+            blob_content_type=mime,
         )
 
     async def _convert_text(
@@ -282,21 +266,46 @@ class DocConverter:
     ) -> ConvertResult:
         """
         Try to read file as text with charset detection.
-        Raises ValueError if the file cannot be decoded.
+        解不出文本 / 超文本帽 → 落 blob(翻转后不再拒:沙盒里模型自己处理)。
         """
-        from charset_normalizer import from_bytes
-
-        result = from_bytes(file_bytes)
-        best = result.best()
-
-        if best is None:
-            raise ValueError(
-                f"Cannot decode file '{filename}': not a valid text file"
+        # The text path is the one conversion route with NO cost envelope of its
+        # own: charset detection + str() + word-count materialize the full decoded
+        # content AND a word list, which amplifies memory well past the input size.
+        # Blob routes store bytes raw — only raw text scales with the 100MB upload
+        # ceiling. So it keeps a tighter, independent cap (MAX_TEXT_CONVERT_BYTES);
+        # over the cap → blob(可下载、可 mount 进沙盒 grep/拆分),不再 422。
+        # The byte cap is the PRIMARY guard (an input upper bound); to_thread below
+        # is the secondary one (keeps the loop responsive + cancellable during the
+        # bounded sync work — it does NOT bound memory).
+        if len(file_bytes) > config.MAX_TEXT_CONVERT_BYTES:
+            logger.info(
+                f"Upload '{filename}' exceeds text cap "
+                f"({len(file_bytes)} > {config.MAX_TEXT_CONVERT_BYTES}), storing as blob"
             )
+            return _blob_result(file_bytes, filename, _guess_blob_mime(filename))
 
-        content = str(best)
+        def _decode() -> Optional[tuple]:
+            """Sync decode + word count, run in a worker thread so the loop stays
+            responsive and the work is cancellable. All the materialization (the
+            decoded str + the split() word list) happens here, off the loop.
+            Returns None when the bytes are not text(charset 探测失败)。"""
+            from charset_normalizer import from_bytes
+
+            best = from_bytes(file_bytes).best()
+            if best is None:
+                return None
+            text = str(best)
+            return text, best.encoding, len(text.split())
+
+        decoded = await asyncio.to_thread(_decode)
+        if decoded is None:
+            # 白名单扩展但解不出文本(声明是文本、内容不是,如改后缀的二进制):
+            # 落 blob(octet-stream —— 按声明扩展猜 text/* 反而撒谎),沙盒里诊断。
+            logger.info(f"Upload '{filename}' is not decodable text, storing as blob")
+            return _blob_result(file_bytes, filename, "application/octet-stream")
+
+        content, detected_encoding, word_count = decoded
         content_type = EXTENSION_MIME_MAP.get(ext, "text/plain")
-        word_count = len(content.split())
 
         return ConvertResult(
             content=content,
@@ -304,10 +313,54 @@ class DocConverter:
             metadata={
                 "original_filename": filename,
                 "converter_used": "charset-normalizer",
-                "detected_encoding": best.encoding,
+                "detected_encoding": detected_encoding,
                 "word_count": word_count,
             },
         )
+
+
+def _guess_blob_mime(filename: str) -> str:
+    """未知二进制的 MIME:标准库按扩展名猜,猜不出 octet-stream。"""
+    return mimetypes.guess_type(filename)[0] or "application/octet-stream"
+
+
+def _blob_result(file_bytes: bytes, filename: str, mime: str) -> ConvertResult:
+    """blob-only ConvertResult:content 空(无文本表示)、content_type=真实 MIME、
+    原件原样进 blob(不可变源;docx 兼未来 pandoc --reference-doc 样式模版)。"""
+    return ConvertResult(
+        content="",
+        content_type=mime,
+        metadata={"original_filename": filename, "converter_used": "blob"},
+        blob=file_bytes,
+        blob_content_type=mime,
+    )
+
+
+def _probe_image(file_bytes: bytes) -> Optional[str]:
+    """同步 Pillow 探测:返回真实图片格式（'PNG' / 'JPEG' / ...），非法/损坏/超像素返回 None。
+
+    跑在 executor 里（CPU 纪律:校验可能解码、且 Pillow 是 C 扩展）。解压炸弹闸不依赖
+    Pillow 默认的 `MAX_IMAGE_PIXELS`(89–178M 段只 warn 不抛,会漏过 100M 像素的小文件炸弹),
+    而是在 **解码前** 用 `img.size`(open 只读头、不解码)显式校验 `w*h ≤ VISION_IMAGE_MAX_PIXELS`,
+    超限即 None(loud-fail 给可操作提示)。verify() 做结构校验（截断/损坏即抛）;它会使 image
+    对象失效,故先取 format/size 再 verify。
+    """
+    import io
+
+    from PIL import Image
+
+    from config import config
+
+    try:
+        with Image.open(io.BytesIO(file_bytes)) as img:
+            fmt = img.format
+            w, h = img.size
+            if w * h > config.VISION_IMAGE_MAX_PIXELS:
+                return None
+            img.verify()
+        return fmt
+    except Exception:
+        return None
 
 
 def _extract_pdf_text(file_bytes: bytes, max_pages: int) -> tuple[str, int]:

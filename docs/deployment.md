@@ -338,6 +338,53 @@ ssh target 'cd /opt/artifactflow && \
 
 ---
 
+## 沙盒执行环境（可选 overlay）
+
+`bash` / `mount` / `persist` 三个沙盒工具需要宿主侧前置 + 一个 compose overlay。**没有沙盒需求的部署跳过本节**——基础 compose 不挂 `docker.sock`，没有这个暴露面。架构与全部 `SANDBOX_*` 旋钮见 [架构 · 沙盒执行](architecture/sandbox.md)。
+
+随发布包额外携带三个传输单元（与应用包同一构建机产出）：**沙盒镜像** tar（`scripts/build-sandbox-image.sh`，注意按目标机选 `PLATFORM`）、**verify 探针** tar（同脚本产出，arch 无关）、**gVisor 包** tar（`sandbox/gvisor-pkg/fetch-and-package.sh`）。
+
+### 宿主前置（一次性，按顺序）
+
+1. **gVisor（runsc）**：解开 gVisor 包，`sudo ./install.sh && sudo systemctl reload docker && sudo ./smoke-test.sh`（内含 `unshare -U` 预检）。arm / 鲲鹏注意：Kylin V10 arm 默认 64K 页内核，gVisor 拒启——先用 `sandbox/kernel-4k-pkg/` 换 4K 内核再装（x86 跳过）。
+2. **沙盒镜像**：`gunzip -c artifactflow-sandbox-<ver>-<arch>.tar.gz | docker load`。
+3. **scratch 根 = 定容 loop 文件系统**（磁盘配额的硬墙层：watchdog race 窗口内写穿也只是池子满，宿主盘无恙；独立 inode 表顺带兜住海量小文件）：
+
+   ```bash
+   POOL=/var/lib/artifactflow/sandbox-pool.img
+   ROOT=/var/lib/artifactflow/sandbox-scratch
+   sudo mkdir -p "$(dirname "$POOL")" "$ROOT"
+   sudo fallocate -l 20G "$POOL"          # 容量 ≈ 并发 turn 数 × SANDBOX_WORKSPACE_QUOTA_MB(默认2G) + 余量
+   sudo mkfs.ext4 -m 0 "$POOL"
+   echo "$POOL $ROOT ext4 loop,nosuid,nodev 0 0" | sudo tee -a /etc/fstab
+   sudo mount "$ROOT" && df -h "$ROOT"    # 期望:定容 ext4 挂载成功
+   ```
+
+   不加 `noexec`——模型在工作区 `chmod +x` 后直接执行脚本是合法用法。
+4. **验证**：`tar xzf artifactflow-sandbox-verify-<ver>.tar.gz`，`IMAGE=artifactflow-sandbox:<ver>-<arch> bash verify/run-all.sh`，全绿后记录 manifest 里的 image id 作为本部署的冻结锚点。
+
+### 启动
+
+`deploy/.env` 增加（**路径必须与宿主一致**——overlay 把 scratch 根以同一绝对路径挂进 backend 容器，因为 backend 把工作区路径作为 bind source 传给 daemon、daemon 按宿主路径解析；改路径只改这一处 env，compose 两侧与应用配置同步取值）：
+
+```bash
+ARTIFACTFLOW_SANDBOX_SCRATCH_ROOT=/var/lib/artifactflow/sandbox-scratch
+# ARTIFACTFLOW_SANDBOX_RUNTIME 默认 runsc(overlay 内兜底),无需显式写
+```
+
+```bash
+docker compose -f deploy/docker-compose.intranet.yml \
+               -f deploy/docker-compose.sandbox.yml [--profile infra] up -d
+```
+
+> **安全提醒**：overlay 把 `/var/run/docker.sock` 挂进 backend 容器（等同宿主 root）。这是 DooD 架构的固有前提，防线是代码侧纪律——容器创建参数全为 backend 常量、绝不被模型内容污染（见架构文档「隔离边界」）。不要把这个 overlay 用在不需要沙盒的部署上。
+
+### 验证沙盒链路
+
+前端对话里让 agent 在沙盒里跑一条命令（例如"用 bash 运行 echo ok"）：应弹出权限确认 → 批准后返回输出。turn 结束后 `docker ps -a --filter label=artifactflow.sandbox` 应无残留容器、scratch 根下无残留目录（崩溃残留由 reaper 周期回收）。
+
+---
+
 ## 环境变量完整参考
 
 所有应用级变量使用 `ARTIFACTFLOW_` 前缀（通过 Pydantic Settings 自动映射），定义在 `src/config.py`。
@@ -412,7 +459,7 @@ ssh target 'cd /opt/artifactflow && \
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
 | `ARTIFACTFLOW_MAX_CONCURRENT_TASKS` | `10` | 最大并发引擎执行数 |
-| `ARTIFACTFLOW_MAX_UPLOAD_SIZE` | `20971520` | 上传大小限制（字节，默认 20MB） |
+| `ARTIFACTFLOW_MAX_UPLOAD_SIZE` | `104857600` | 单文件上传大小限制（字节，默认 100MB）；批量总字节由代理层独立封顶（200MB）。注：文本转换另有更低的独立闸 20MB——超闸**不 422、落为二进制 blob artifact**（可下载、可 mount 进沙盒处理） |
 | `ARTIFACTFLOW_DEFAULT_PAGE_SIZE` | `20` | 分页默认每页条数 |
 | `ARTIFACTFLOW_MAX_PAGE_SIZE` | `100` | 分页最大每页条数 |
 
@@ -548,11 +595,11 @@ flowchart TD
 | TLS | **自动 HTTPS**（Let's Encrypt，端口 80+443） | 无（HTTP 单端口 80，内网气隙环境） |
 | SSE | `flush_interval -1`（关响应缓冲） | `proxy_buffering off`，超时 1800s |
 | Swagger | `/docs`、`/redoc`、`/openapi.json` → 404 | 同左 |
-| 上传上限 | `request_body max_size 210MB` | `client_max_body_size 210M` |
+| 上传上限 | `request_body max_size 210MiB` | `client_max_body_size 210M` |
 | 维护开关 | `file` matcher 每请求 stat `MAINTENANCE_ON` | `if (-f ... MAINTENANCE_ON) return 503` |
 | 真实 IP | `header_up X-Real-IP {remote_host}` | `proxy_set_header X-Real-IP $remote_addr` |
 
-- **上传上限 210MB**：`POST /api/v1/chat` 把整批附件放进**一个** multipart 请求，body 是整批之和（per-file ≤20MB × ≤10 文件 = 200MB + 10MB multipart 开销）。代理层放到 210MB，让后端的 per-file / count 校验做唯一权威、超大文件拿到干净的 422 而非代理层抢先 413。两份配置数值一致。
+- **上传上限（代理层是总量权威闸）**：`POST /api/v1/chat` 把整批附件放进**一个** multipart 请求，body 是整批之和。三轴**独立**：单文件 ≤100MB（`MAX_UPLOAD_SIZE`，后端 422）、数量 ≤10（`MAX_CHAT_ATTACHMENTS`，后端 422）、**总量 ≤200MB（代理层 413）**。总量**刻意小于** per-file×count（100MB×10=1GB）——设计意图是"1 个大文件 or 多个小文件，但控总量"，故大批量时代理层**会按设计抢先** 413（单个超大文件仍由后端给干净 422）。`210M`/`210MiB` = 200MiB 内容 + 10MiB multipart 开销。**单位注意**：nginx `210M` 与 Caddy `210MiB` 都是二进制 2²⁰；Caddy 的 `MB` 会被当 decimal 10⁶（偏小），故必须写 `MiB`。另：文本转换路径有更低的独立闸 `MAX_TEXT_CONVERT_BYTES`（20MB，防解码+词表物化的内存放大），blob 路径（图片/PDF/docx/其它二进制）不受此限；**超文本闸不 422**，文件落为二进制 blob artifact（可下载、可 mount 进沙盒处理）。
 - **`X-Real-IP`（登录频控依赖）**：后端 per-IP 登录频控**只读这个头**（刻意不信可被客户端伪造的 `X-Forwarded-For`）。安全前提是 backend 仅 `expose`、不发布主机端口，只经反向代理可达，故这个头不可伪造。删掉它 / 换不写该头的代理 → per-IP 限流静默退化成"所有请求共用代理容器一个 IP 桶"（per-username 主防线仍在）。
   - **Mode 2 灰云（CF DNS only）直连**：`{remote_host}` 就是真实客户端 IP，直接写进 `X-Real-IP`，不退化。
   - **Mode 2 若改用 CF 橙云（proxied）**：真实客户端 IP 移到 `X-Forwarded-For`、`{remote_host}` 变成 CF 边缘 IP —— 需在 Caddyfile 加 `trusted_proxies`（CF IP 段）并改用 `{client_ip}`，否则 per-IP 限流退化。`deploy/Caddyfile` 头部注释了这一点。

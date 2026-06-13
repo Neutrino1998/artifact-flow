@@ -97,6 +97,16 @@ export interface ArtifactCreatedData {
   current_version: number;
   content?: string;
   content_omitted?: boolean;
+  // Present only for user_upload artifacts: the original file name, used to
+  // correlate this event back to the send-local preview File (artifactStore
+  // .localPreviews) so the panel can render it locally before the blob is
+  // flushed to the DB.
+  original_filename?: string;
+  // Blob-backed artifact (image / rich-format upload): no text content; raw
+  // bytes via GET …/raw after flush. Drives the binary view + raw download.
+  has_blob?: boolean;
+  blob_size?: number;
+  blob_content_type?: string | null;
 }
 
 /** ARTIFACT_UPDATED: rewrite → full `content`; targeted update → authoritative span

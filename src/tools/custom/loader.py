@@ -122,7 +122,7 @@ def _build_http_tool(frontmatter: dict, body: str) -> HttpTool:
         headers=frontmatter.get("headers", {}),
         parameters=param_defs,
         response_extract=frontmatter.get("response_extract"),
-        timeout=frontmatter.get("timeout", 30),
+        timeout=frontmatter.get("timeout", 60),
     )
 
     return HttpTool(config)
@@ -150,7 +150,9 @@ def load_custom_tools(tools_dir: Optional[str] = None) -> List[BaseTool]:
 
     tools = []
     for filename in sorted(os.listdir(tools_dir)):
-        if not filename.endswith(".md") or filename.startswith("_"):
+        # `_` 前缀=操作者显式禁用(_example.md 约定);`.` 前缀=隐藏文件,永远不是
+        # 配置(macOS AppleDouble `._x.md` / 编辑器临时文件,同 agents loader)。
+        if not filename.endswith(".md") or filename.startswith(("_", ".")):
             continue
 
         md_path = os.path.join(tools_dir, filename)

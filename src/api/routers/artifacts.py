@@ -10,7 +10,7 @@ Artifacts Router
 from dataclasses import dataclass
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, Query
+from fastapi import APIRouter, Depends, HTTPException, UploadFile
 from fastapi.responses import Response
 
 from config import config
@@ -46,14 +46,18 @@ class ConvertedUpload:
     """One uploaded file after size-check + conversion, before any DB write.
 
     Phase-1 output of POST /chat's two-phase attachment flow (convert-all →
-    commit-all). Holds the converted text, not the raw bytes — the bytes are
-    freed per file inside convert_uploaded_file, so accumulating a batch of
-    these does not pin every upload's raw bytes in RAM at once.
+    commit-all). Holds the converted text representation, plus — for blob-backed
+    types (images / rich formats) — the raw bytes to persist into ArtifactBlob and
+    the blob's true MIME. Pure-text uploads carry blob=None and free their bytes,
+    so a batch of text files does not pin raw bytes in RAM; an image/docx batch
+    necessarily retains its bytes (they must be stored anyway).
     """
     filename: str
     content: str
     content_type: str
     metadata: dict
+    blob: bytes | None = None
+    blob_content_type: str | None = None
 
 
 async def convert_uploaded_file(file: UploadFile) -> ConvertedUpload:
@@ -108,6 +112,8 @@ async def convert_uploaded_file(file: UploadFile) -> ConvertedUpload:
         content=result.content,
         content_type=result.content_type,
         metadata=result.metadata or {},
+        blob=result.blob,
+        blob_content_type=result.blob_content_type,
     )
 
 
@@ -142,6 +148,7 @@ async def list_artifacts(
                     current_version=art["version"],
                     source=art.get("source"),
                     original_filename=art.get("original_filename"),
+                    has_blob=bool(art.get("blob_content_type")),
                     created_at=datetime.fromisoformat(art["created_at"]),
                     updated_at=datetime.fromisoformat(art["updated_at"]),
                 )
@@ -155,59 +162,68 @@ async def list_artifacts(
         raise HTTPException(status_code=500, detail=error_detail)
 
 
-@router.get("/{session_id}/{artifact_id}/export")
-async def export_artifact(
+@router.get(
+    "/{session_id}/{artifact_id}/raw",
+    # The handler returns a binary `Response` (the blob bytes), NOT JSON.
+    # response_class=Response drops FastAPI's default application/json 200 media
+    # type; `responses` then declares the real binary content types so the
+    # generated OpenAPI / TS client advertises the correct contract.
+    response_class=Response,
+    responses={
+        200: {
+            "content": {
+                # The handler returns the blob's TRUE content_type — image/png,
+                # image/jpeg, application/pdf, the docx OOXML MIME, the octet-
+                # stream fallback, and (C-phase) arbitrary sandbox-written types.
+                # `*/*` covers any media type without enumerating a drift-prone
+                # list; schema type=string/format=binary types the body as binary
+                # (string/Blob) in generated clients, not `unknown`.
+                "*/*": {"schema": {"type": "string", "format": "binary"}},
+            },
+            "description": "Raw artifact blob (image inline, else attachment).",
+        }
+    },
+)
+async def get_artifact_raw(
     session_id: str,
     artifact_id: str,
-    format: str = Query(..., description="Export format (docx)"),
     current_user: TokenPayload = Depends(get_current_user),
     artifact_service: ArtifactService = Depends(get_artifact_service),
     conversation_manager: ConversationManager = Depends(get_conversation_manager),
 ):
-    """
-    Export an artifact to a different format.
-    Currently supports exporting text/markdown artifacts to docx.
+    """Serve an artifact's raw binary blob (uploaded image / rich-format source).
 
-    Note: reads from DB only — during execution, exports the last flushed
-    version, not in-memory edits.  Frontend hides export while streaming.
+    DB-only read (request-scoped Service, empty WorkingSet) — like all GETs here,
+    during execution it serves the last flushed blob. 404 when the artifact has no
+    blob (pure-text artifacts) or doesn't exist; not logged (self-evident 404).
+
+    Images are served `inline` so a frontend `<img src=.../raw>` renders in place;
+    everything else `attachment` (download). Content-Type is the blob's true MIME
+    (from the Service, which prefers metadata.blob_content_type over the artifact's
+    possibly-converted content_type).
     """
     await _verify_session_ownership(session_id, current_user, conversation_manager)
 
-    if format != "docx":
-        raise HTTPException(status_code=422, detail=f"Unsupported export format: {format}")
+    blob = await artifact_service.get_blob(session_id, artifact_id)
+    if blob is None:
+        raise HTTPException(status_code=404, detail=f"Artifact blob '{artifact_id}' not found")
 
-    result = await artifact_service.read_artifact(session_id, artifact_id)
-    if result is None:
-        raise HTTPException(status_code=404, detail=f"Artifact '{artifact_id}' not found")
+    content_type = blob["content_type"] or "application/octet-stream"
+    disposition = "inline" if content_type.startswith("image/") else "attachment"
 
-    if result["content_type"] != "text/markdown":
-        raise HTTPException(
-            status_code=422,
-            detail=f"Only text/markdown artifacts can be exported to docx (got {result['content_type']})"
-        )
-
-    converter = DocConverter()
-    try:
-        docx_bytes = await converter.export_docx(result["content"])
-    except RuntimeError as e:
-        logger.exception(f"docx export failed for artifact {artifact_id} in {session_id}: {e}")
-        error_detail = str(e) if config.DEBUG else "Internal server error"
-        raise HTTPException(status_code=500, detail=error_detail)
-
-    filename = result["title"].replace("/", "-").replace("\\", "-") + ".docx"
-    # RFC 5987: use filename* for non-ASCII names, with ASCII fallback
+    filename = blob["filename"].replace("/", "-").replace("\\", "-")
+    # RFC 5987: filename* for non-ASCII, with sanitized ASCII fallback.
     from urllib.parse import quote
     import re as _re
     ascii_fallback = filename.encode("ascii", errors="replace").decode("ascii")
-    # Sanitize quotes and control characters for safe Content-Disposition
     ascii_fallback = _re.sub(r'["\x00-\x1f\x7f]', "_", ascii_fallback)
     utf8_encoded = quote(filename, safe="")
     return Response(
-        content=docx_bytes,
-        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        content=blob["data"],
+        media_type=content_type,
         headers={
             "Content-Disposition": (
-                f'attachment; filename="{ascii_fallback}"; '
+                f'{disposition}; filename="{ascii_fallback}"; '
                 f"filename*=UTF-8''{utf8_encoded}"
             )
         },
@@ -264,6 +280,7 @@ async def get_artifact(
         current_version=current_ver,
         source=result.get("source"),
         original_filename=result.get("original_filename"),
+        has_blob=bool(result.get("blob_content_type")),
         created_at=datetime.fromisoformat(result["created_at"]),
         updated_at=datetime.fromisoformat(result["updated_at"]),
         versions=version_summaries,
