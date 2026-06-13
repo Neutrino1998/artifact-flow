@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useCallback } from 'react';
 import { useArtifactStore } from '@/stores/artifactStore';
 import { useStreamStore } from '@/stores/streamStore';
 import { useArtifacts } from '@/hooks/useArtifacts';
@@ -32,20 +32,6 @@ export default function ArtifactToolbar() {
   const isStreaming = useStreamStore((s) => s.isStreaming);
   const { selectVersion, selectArtifact } = useArtifacts();
   const { copied, copy } = useCopyFeedback();
-  const [showDownloadMenu, setShowDownloadMenu] = useState(false);
-  const downloadMenuRef = useRef<HTMLDivElement>(null);
-
-  // Close download menu on outside click
-  useEffect(() => {
-    if (!showDownloadMenu) return;
-    const handler = (e: MouseEvent) => {
-      if (downloadMenuRef.current && !downloadMenuRef.current.contains(e.target as Node)) {
-        setShowDownloadMenu(false);
-      }
-    };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, [showDownloadMenu]);
 
   const handleCopy = useCallback(() => {
     copy(selectedVersion?.content ?? current?.content ?? '');
@@ -53,7 +39,6 @@ export default function ArtifactToolbar() {
 
   const handleDownload = useCallback(async () => {
     if (!current) return;
-    setShowDownloadMenu(false);
     // Blob-backed artifact (image / docx / pdf upload): download the immutable
     // original via /raw (text path would emit an empty file — there is no text
     // representation). Hidden while streaming, so the blob is always flushed here.
@@ -173,9 +158,8 @@ export default function ArtifactToolbar() {
               raw download would 404 (blob not flushed until turn end). Re-enabled
               after COMPLETE, when the DB re-pull has aligned everything. */}
           {!isStreaming && (
-          <div className="relative" ref={downloadMenuRef}>
             <button
-              onClick={() => setShowDownloadMenu((v) => !v)}
+              onClick={handleDownload}
               className="p-1.5 rounded text-text-secondary dark:text-text-secondary-dark hover:bg-surface dark:hover:bg-bg-dark transition-colors"
               aria-label="Download artifact"
               title="下载"
@@ -184,18 +168,6 @@ export default function ArtifactToolbar() {
                 <path d="M7 2v7.5M4 7l3 3 3-3M2.5 11.5h9" />
               </svg>
             </button>
-
-            {showDownloadMenu && (
-              <div className="absolute right-0 top-full mt-1 bg-surface dark:bg-surface-dark border border-border dark:border-border-dark rounded-lg shadow-float py-1 z-50 min-w-[160px]">
-                <button
-                  onClick={handleDownload}
-                  className="w-full text-left px-3 py-1.5 text-xs text-text-primary dark:text-text-primary-dark hover:bg-bg dark:hover:bg-bg-dark transition-colors"
-                >
-                  下载原格式
-                </button>
-              </div>
-            )}
-          </div>
           )}
 
           {/* Back to list */}
