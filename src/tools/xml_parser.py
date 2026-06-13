@@ -370,9 +370,12 @@ class XMLToolCallParser:
             after = m.group(3)
             return f'<{tag}><![CDATA[{cdata}]]></{tag}>{after}'
 
-        # CDATA 内容用 (?:(?!\]\]>).)* 匹配，防止跨越 ]]> 边界回溯
+        # CDATA 内容用 (?:(?!\]\]>).)*+ 匹配：不跨越 ]]> 边界，且 *+（possessive，
+        # Python 3.11+）禁止回溯进组——内容里不可能含 ]]>，回溯只会在未闭合 CDATA 上
+        # 线性反复试 \]\]> 白耗 CPU（O(n²) 起步）。目前未闭合 CDATA 被上游
+        # _detect_truncation 短路、走不到这里，但安全性不应依赖调用顺序这个隐式前提。
         new_content = re.sub(
-            r'<(\w+)>\s*<!\[CDATA\[((?:(?!\]\]>).)*)\]\]>(?!\s*</\1>)(\s*<[/\w])',
+            r'<(\w+)>\s*<!\[CDATA\[((?:(?!\]\]>).)*+)\]\]>(?!\s*</\1>)(\s*<[/\w])',
             _repair_match,
             content,
             flags=re.DOTALL,

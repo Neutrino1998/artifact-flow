@@ -21,16 +21,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.database import create_test_database_manager, DatabaseManager
-from db.models import (
-    User,
-    Department,
-    Conversation,
-    Message,
-    MessageEvent,
-    ArtifactSession,
-    Artifact,
-    ArtifactVersion,
-)
+from db.models import Base, User
 from repositories.user_repo import UserRepository
 from repositories.conversation_repo import ConversationRepository
 from repositories.artifact_repo import ArtifactRepository
@@ -42,16 +33,12 @@ from api.services.auth import hash_password
 # Database fixtures
 # ============================================================
 
-# Deletion order respects FK constraints:
-#   ArtifactVersion → Artifact → ArtifactSession → Message → Conversation → User
+# Deletion order respects FK constraints — derived from Base.metadata so new
+# tables are covered automatically (sorted_tables is parent→child; delete in
+# reverse). departments is special-cased below (self-FK + ondelete=RESTRICT
+# needs iterative leaf-deletion, a blanket DELETE trips the row-level check).
 _TABLES_DELETE_ORDER = [
-    ArtifactVersion.__tablename__,
-    Artifact.__tablename__,
-    ArtifactSession.__tablename__,
-    MessageEvent.__tablename__,
-    Message.__tablename__,
-    Conversation.__tablename__,
-    User.__tablename__,
+    t.name for t in reversed(Base.metadata.sorted_tables) if t.name != "departments"
 ]
 
 

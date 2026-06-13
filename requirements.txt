@@ -4,6 +4,8 @@
 
 # LiteLLM - 统一 LLM 接口
 # 支持 OpenAI/DeepSeek/Qwen/Ollama/vLLM 等 100+ 提供商
+# !=1.82.7/!=1.82.8：TeamPCP 供应链投毒版本（见 commit 5ab1348），升级时不可移除排除项；
+# <2.0.0：防止 pip-compile --upgrade 时失控跨大版本
 litellm>=1.82.4,<2.0.0,!=1.82.7,!=1.82.8
 
 # ========================================
