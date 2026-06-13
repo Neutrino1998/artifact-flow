@@ -304,5 +304,98 @@ class TestVersionHistory:
 
 
 # ============================================================
+# Storage quota aggregation (blob bytes)
+# ============================================================
+
+
+class TestBlobByteAggregation:
+    """get_user_blob_bytes / get_blob_bytes_by_sessions — the quota + display source."""
+
+    async def _conv_with_blob(
+        self,
+        conversation_repo: ConversationRepository,
+        artifact_repo: ArtifactRepository,
+        user_id: str,
+        blob_size: int,
+    ) -> str:
+        """Create a conversation owning one blob-backed artifact of `blob_size` bytes."""
+        conv_id = f"conv-{uuid.uuid4().hex}"
+        await conversation_repo.create_conversation(conversation_id=conv_id, user_id=user_id)
+        await artifact_repo.create_artifact(
+            session_id=conv_id,
+            artifact_id=f"art-{uuid.uuid4().hex}",
+            content_type="image/png",
+            title="blob",
+            content="",
+            blob=b"x" * blob_size,
+        )
+        return conv_id
+
+    async def test_user_bytes_sums_across_conversations(
+        self,
+        artifact_repo: ArtifactRepository,
+        conversation_repo: ConversationRepository,
+        test_user: User,
+    ):
+        await self._conv_with_blob(conversation_repo, artifact_repo, test_user.id, 100)
+        await self._conv_with_blob(conversation_repo, artifact_repo, test_user.id, 250)
+
+        total = await artifact_repo.get_user_blob_bytes(test_user.id)
+        assert total == 350
+
+    async def test_user_bytes_isolated_per_user(
+        self,
+        artifact_repo: ArtifactRepository,
+        conversation_repo: ConversationRepository,
+        test_user: User,
+        test_admin: User,
+    ):
+        await self._conv_with_blob(conversation_repo, artifact_repo, test_user.id, 100)
+        await self._conv_with_blob(conversation_repo, artifact_repo, test_admin.id, 999)
+
+        # Each user only sees their own blobs (no cross-user leak in the join).
+        assert await artifact_repo.get_user_blob_bytes(test_user.id) == 100
+        assert await artifact_repo.get_user_blob_bytes(test_admin.id) == 999
+
+    async def test_user_bytes_zero_when_no_blobs(
+        self,
+        artifact_repo: ArtifactRepository,
+        artifact_session: str,
+        test_user: User,
+    ):
+        # artifact_session has a conversation but no blob-backed artifact.
+        assert await artifact_repo.get_user_blob_bytes(test_user.id) == 0
+
+    async def test_text_artifact_not_counted(
+        self,
+        artifact_repo: ArtifactRepository,
+        sample_artifact,
+        test_user: User,
+    ):
+        # sample_artifact is a pure-text artifact (no blob) → contributes 0.
+        assert await artifact_repo.get_user_blob_bytes(test_user.id) == 0
+
+    async def test_by_sessions_groups_and_defaults(
+        self,
+        artifact_repo: ArtifactRepository,
+        conversation_repo: ConversationRepository,
+        test_user: User,
+    ):
+        c1 = await self._conv_with_blob(conversation_repo, artifact_repo, test_user.id, 100)
+        c2 = await self._conv_with_blob(conversation_repo, artifact_repo, test_user.id, 250)
+
+        sizes = await artifact_repo.get_blob_bytes_by_sessions([c1, c2, "conv-absent"])
+        assert sizes[c1] == 100
+        assert sizes[c2] == 250
+        # Sessions with no blob are absent (caller defaults to 0 via .get).
+        assert "conv-absent" not in sizes
+
+    async def test_by_sessions_empty_input_short_circuits(
+        self, artifact_repo: ArtifactRepository
+    ):
+        assert await artifact_repo.get_blob_bytes_by_sessions([]) == {}
+
+
+# ============================================================
 # Batch operations
 # ============================================================

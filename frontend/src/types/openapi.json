@@ -436,6 +436,33 @@
         }
       }
     },
+    "/api/v1/chat/storage": {
+      "get": {
+        "tags": [
+          "chat"
+        ],
+        "summary": "Get Storage Usage",
+        "description": "\u5f53\u524d\u7528\u6237\u7684\u9644\u4ef6\u5b58\u50a8\u7528\u91cf + \u914d\u989d\uff08\u5582\u524d\u7aef\u8fdb\u5ea6\u6761\uff09\u3002\n\n\u4e0e\u4e0a\u4f20\u6321\u677f\u540c\u53e3\u5f84\uff08compute-on-read\uff0c\u5355\u4e00\u6570\u636e\u6e90\uff09\u3002\u58f0\u660e\u5728 `/{conv_id}` \u4e4b\u524d\uff0c\n\u5426\u5219 `storage` \u4f1a\u88ab\u5f53\u4f5c conv_id \u547d\u4e2d\u8be6\u60c5\u8def\u7531\u3002",
+        "operationId": "get_storage_usage_api_v1_chat_storage_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StorageUsageResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
     "/api/v1/chat/{conv_id}": {
       "get": {
         "tags": [
@@ -3304,6 +3331,12 @@
             ],
             "title": "Active Message Id",
             "description": "The message_id of the currently-running execution on this conversation, or null if no execution is in flight. Carries execution identity (not just a boolean) so the frontend can compare-and-clear on terminal events without an old turn's completion clobbering a freshly-started new turn's indicator."
+          },
+          "upload_bytes": {
+            "type": "integer",
+            "title": "Upload Bytes",
+            "description": "Total stored attachment/blob bytes for this conversation (SUM of ArtifactBlob.size_bytes). Surfaced per-row in the list so the user can see which conversation is consuming storage and pick what to delete when over quota. Blob-only: text content and event history are NOT counted (deleting the conversation reclaims those too, so the displayed number understates what is freed).",
+            "default": 0
           }
         },
         "type": "object",
@@ -3313,7 +3346,8 @@
           "message_count",
           "created_at",
           "updated_at",
-          "active_message_id"
+          "active_message_id",
+          "upload_bytes"
         ],
         "title": "ConversationSummary",
         "description": "Conversation summary in list response"
@@ -3836,6 +3870,27 @@
         ],
         "title": "ResumeResponse",
         "description": "POST /api/v1/chat/{conv_id}/resume response"
+      },
+      "StorageUsageResponse": {
+        "properties": {
+          "used_bytes": {
+            "type": "integer",
+            "title": "Used Bytes",
+            "description": "Total stored blob bytes across all the user's conversations."
+          },
+          "quota_bytes": {
+            "type": "integer",
+            "title": "Quota Bytes",
+            "description": "Per-user blob quota (ARTIFACT_USER_QUOTA_BYTES). An upload is rejected with 413 when used_bytes + incoming would exceed it. 0 = unlimited (quota disabled); the frontend should render the bar as unbounded."
+          }
+        },
+        "type": "object",
+        "required": [
+          "used_bytes",
+          "quota_bytes"
+        ],
+        "title": "StorageUsageResponse",
+        "description": "GET /api/v1/chat/storage response \u2014 per-user attachment storage usage."
       },
       "UpdateDepartmentRequest": {
         "properties": {

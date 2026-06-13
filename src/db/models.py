@@ -661,6 +661,10 @@ class ArtifactBlob(Base):
             ["artifacts.id", "artifacts.session_id"],
             ondelete="CASCADE"
         ),
+        # 存储配额聚合用:`SUM(size_bytes) WHERE session_id IN (...)`(列表 GROUP BY +
+        # per-用户 join Conversation)。复合主键以 artifact_id 打头,服务不了按 session_id
+        # 的过滤;(session_id, size_bytes) 让聚合走 index-only,绝不触 data(blob 字节)。
+        Index("ix_artifact_blobs_session_size", "session_id", "size_bytes"),
     )
 
     def __repr__(self) -> str:

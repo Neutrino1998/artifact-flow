@@ -314,6 +314,8 @@ class ConversationManager:
         Returns:
             对话信息字典列表
         """
+        from repositories.artifact_repo import ArtifactRepository
+
         repo = self._ensure_repository()
         conversations = await repo.list_conversations(
             limit=limit,
@@ -322,13 +324,18 @@ class ConversationManager:
             title_query=title_query,
             load_messages=True
         )
+        # 逐项"附件占用"：一次 GROUP BY 聚合本页 session 的 blob 字节（同 session 复用
+        # repo.session；只读 size_bytes，index-only）。缺失项 = 无 blob → 兜 0。
+        art_repo = ArtifactRepository(repo.session)
+        sizes = await art_repo.get_blob_bytes_by_sessions([conv.id for conv in conversations])
         return [
             {
                 "conversation_id": conv.id,
                 "title": conv.title,
                 "message_count": len(conv.messages) if conv.messages else 0,
                 "created_at": conv.created_at.isoformat(),
-                "updated_at": conv.updated_at.isoformat()
+                "updated_at": conv.updated_at.isoformat(),
+                "upload_bytes": sizes.get(conv.id, 0),
             }
             for conv in conversations
         ]
@@ -346,6 +353,19 @@ class ConversationManager:
         """
         repo = self._ensure_repository()
         return await repo.count_conversations(user_id=user_id, title_query=title_query)
+
+    async def get_user_upload_bytes(self, user_id: str) -> int:
+        """该用户已占用的 blob 总字节（跨其全部会话）。
+
+        上传准入配额检查 + 存储用量进度条共用此口径（单一数据源：DB 现算，
+        不存计数器）。临时实例化 ArtifactRepository 复用本 manager 的 session，
+        维持 router → manager → repo 的三层边界。
+        """
+        from repositories.artifact_repo import ArtifactRepository
+
+        repo = self._ensure_repository()
+        art_repo = ArtifactRepository(repo.session)
+        return await art_repo.get_user_blob_bytes(user_id)
 
     # ========================================
     # Router 代理方法

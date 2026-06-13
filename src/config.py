@@ -159,6 +159,15 @@ class Settings(BaseSettings):
     # 文本会随 100MB 上传上限线性放大 → 给它保留旧的 20MB envelope。字节上界是首要护栏
     # (to_thread 只缓解 loop 阻塞,解不了内存)。隐藏常量,operator 可调。
     MAX_TEXT_CONVERT_BYTES: int = 20 * 1024 * 1024  # 20MB
+    # per-用户 blob 存储配额(字节)。上传准入挡板:一次上传若使该用户**所有 blob 字节
+    # 之和**(ArtifactBlob.size_bytes 跨其全部会话)超过此值 → 413 loud-fail,用户自行删
+    # 对话腾空间(删 conversation 级联清 artifact/blob)。只数 blob —— 二进制是"狂传大
+    # 文件"灌爆盘的唯一向量,文本(Artifact.content)有 MAX_TEXT_CONVERT_BYTES 兜着、量级
+    # 小,刻意不计(进度条同口径,标"附件占用"非"总盘")。account = SUM(size_bytes),compute-
+    # on-read(DB 是唯一真相,不存计数器),靠 ix_artifact_blobs_session_size 走 index-only。
+    # 软上限:同用户跨会话并发上传可略微超额(一次 ≤ nginx body 200MB),挡的是量级不是字节级。
+    # 0 = 不限(禁用挡板)。operator 经 env 可调,模型不可见。
+    ARTIFACT_USER_QUOTA_BYTES: int = 2 * 1024 * 1024 * 1024  # 2GB
 
     # 沙盒（C 阶段;隐藏常量,operator 经 env 可调,模型不可见）。
     # DooD:镜像 / 挂载 / runtime 全部固定在代码侧 —— 容器创建参数绝不可被模型

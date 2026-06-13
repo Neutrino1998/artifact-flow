@@ -19,7 +19,28 @@ from config import config
 from db.models import User
 from db.database import DatabaseManager
 from repositories.conversation_repo import ConversationRepository
+from repositories.artifact_repo import ArtifactRepository
 from api.services.execution_runner import ExecutionRunner
+
+
+async def _seed_conv_with_blob(
+    db_manager: DatabaseManager, user_id: str, blob_size: int, title: str = "blob conv"
+) -> str:
+    """Seed a conversation owning one blob-backed artifact of `blob_size` bytes."""
+    async with db_manager.session() as session:
+        conv_id = f"conv-{uuid.uuid4().hex}"
+        await ConversationRepository(session).create_conversation(
+            conversation_id=conv_id, title=title, user_id=user_id
+        )
+        await ArtifactRepository(session).create_artifact(
+            session_id=conv_id,
+            artifact_id=f"art-{uuid.uuid4().hex}",
+            content_type="application/octet-stream",
+            title="blob",
+            content="",
+            blob=b"x" * blob_size,
+        )
+    return conv_id
 
 
 # ============================================================
@@ -330,6 +351,90 @@ class TestChatInputCap:
             parts.append(("files", (f"f{i}.txt", b"x", "text/plain")))
         resp = await client.post("/api/v1/chat", files=parts)
         assert resp.status_code == 422
+
+
+class TestStorageQuota:
+    """Per-user blob quota: the 413 gate, the /storage gauge, and list upload_bytes."""
+
+    async def test_storage_usage_reports_used_and_quota(
+        self, client: AsyncClient, db_manager: DatabaseManager, test_user: User
+    ):
+        await _seed_conv_with_blob(db_manager, test_user.id, 300)
+        await _seed_conv_with_blob(db_manager, test_user.id, 200)
+
+        resp = await client.get("/api/v1/chat/storage")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["used_bytes"] == 500
+        assert body["quota_bytes"] == config.ARTIFACT_USER_QUOTA_BYTES
+
+    async def test_storage_usage_isolated_per_user(
+        self,
+        client: AsyncClient,
+        admin_client: AsyncClient,
+        db_manager: DatabaseManager,
+        test_user: User,
+        test_admin: User,
+    ):
+        await _seed_conv_with_blob(db_manager, test_user.id, 300)
+        await _seed_conv_with_blob(db_manager, test_admin.id, 999)
+
+        assert (await client.get("/api/v1/chat/storage")).json()["used_bytes"] == 300
+        assert (await admin_client.get("/api/v1/chat/storage")).json()["used_bytes"] == 999
+
+    async def test_list_exposes_per_conversation_upload_bytes(
+        self, client: AsyncClient, db_manager: DatabaseManager, test_user: User
+    ):
+        conv_id = await _seed_conv_with_blob(db_manager, test_user.id, 420)
+
+        resp = await client.get("/api/v1/chat")
+        assert resp.status_code == 200
+        row = next(c for c in resp.json()["conversations"] if c["id"] == conv_id)
+        assert row["upload_bytes"] == 420
+
+    async def test_upload_over_quota_rejected_with_413(
+        self,
+        client: AsyncClient,
+        db_manager: DatabaseManager,
+        test_user: User,
+        monkeypatch,
+    ):
+        # Shrink the quota so a tiny seeded blob + a tiny upload trips it. The
+        # gate reads config live, so monkeypatching the attr is enough.
+        monkeypatch.setattr(config, "ARTIFACT_USER_QUOTA_BYTES", 1000)
+        await _seed_conv_with_blob(db_manager, test_user.id, 900)
+        before = (await client.get("/api/v1/chat")).json()["total"]
+
+        # A .bin attachment takes the blob path → counts toward the quota.
+        # 900 (existing) + 200 (incoming) = 1100 > 1000 → reject before submit.
+        parts = [
+            ("payload", (None, json.dumps({"user_input": "hi"}))),
+            ("files", ("data.bin", b"x" * 200, "application/octet-stream")),
+        ]
+        resp = await client.post("/api/v1/chat", files=parts)
+        assert resp.status_code == 413
+
+        # Rejected before conversation creation → no ghost conversation.
+        after = (await client.get("/api/v1/chat")).json()["total"]
+        assert after == before
+
+    async def test_quota_disabled_when_zero_does_not_reject(
+        self,
+        client: AsyncClient,
+        db_manager: DatabaseManager,
+        test_user: User,
+        monkeypatch,
+    ):
+        # 0 = unlimited: the gate must short-circuit BEFORE the usage query, even
+        # with an over-sized existing footprint. We assert via the /storage gauge
+        # that quota_bytes surfaces 0 (the gate's disabled signal) — without
+        # POSTing an upload, which would spawn the engine.
+        monkeypatch.setattr(config, "ARTIFACT_USER_QUOTA_BYTES", 0)
+        await _seed_conv_with_blob(db_manager, test_user.id, 5000)
+
+        body = (await client.get("/api/v1/chat/storage")).json()
+        assert body["quota_bytes"] == 0
+        assert body["used_bytes"] == 5000
 
 
 class TestChatUploadAtomicity:

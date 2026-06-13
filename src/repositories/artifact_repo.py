@@ -6,7 +6,7 @@ Artifact Repository
 
 from typing import Optional, List, Dict, Any, Tuple
 
-from sqlalchemy import select, and_
+from sqlalchemy import select, and_, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -15,6 +15,7 @@ from db.models import (
     ArtifactBlob,
     ArtifactSession,
     ArtifactVersion,
+    Conversation,
 )
 from repositories.base import BaseRepository, NotFoundError, DuplicateError
 
@@ -294,6 +295,46 @@ class ArtifactRepository(BaseRepository[Artifact]):
         )
         result = await self._session.execute(query)
         return result.scalar_one_or_none()
+
+    # ========================================
+    # 存储配额聚合（只读 size_bytes 冗余列，绝不载入 data）
+    # ========================================
+
+    async def get_user_blob_bytes(self, user_id: str) -> int:
+        """该用户名下所有 artifact blob 的总字节数（跨其全部 conversation/session）。
+
+        用于上传准入配额检查 + 进度条总量。join Conversation 取 user_id（
+        ArtifactBlob.session_id == Conversation.id，session_id 与 conversation_id 同）。
+        只聚合 size_bytes（走 ix_artifact_blobs_session_size，index-only），不触 data。
+        SUM 在 PG 升 bigint / SQLite 任意精度，跨用户总量不受列的 Integer 上限制约。
+        """
+        stmt = (
+            select(func.coalesce(func.sum(ArtifactBlob.size_bytes), 0))
+            .select_from(ArtifactBlob)
+            .join(Conversation, Conversation.id == ArtifactBlob.session_id)
+            .where(Conversation.user_id == user_id)
+        )
+        result = await self._session.execute(stmt)
+        return int(result.scalar_one())
+
+    async def get_blob_bytes_by_sessions(self, session_ids: List[str]) -> Dict[str, int]:
+        """一批 session 各自的 blob 总字节（GROUP BY）。
+
+        用于会话列表逐项展示"附件占用"。无 blob 的 session 不出现在结果里 ——
+        调用方用 `.get(id, 0)` 兜 0。空入参短路返回 {}。
+        """
+        if not session_ids:
+            return {}
+        stmt = (
+            select(
+                ArtifactBlob.session_id,
+                func.coalesce(func.sum(ArtifactBlob.size_bytes), 0),
+            )
+            .where(ArtifactBlob.session_id.in_(session_ids))
+            .group_by(ArtifactBlob.session_id)
+        )
+        result = await self._session.execute(stmt)
+        return {row[0]: int(row[1]) for row in result.all()}
 
     # ========================================
     # 内容更新

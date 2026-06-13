@@ -124,6 +124,17 @@ class ConversationSummary(BaseModel):
             "completion clobbering a freshly-started new turn's indicator."
         ),
     )
+    upload_bytes: int = Field(
+        0,
+        description=(
+            "Total stored attachment/blob bytes for this conversation "
+            "(SUM of ArtifactBlob.size_bytes). Surfaced per-row in the list so the "
+            "user can see which conversation is consuming storage and pick what to "
+            "delete when over quota. Blob-only: text content and event history are "
+            "NOT counted (deleting the conversation reclaims those too, so the "
+            "displayed number understates what is freed)."
+        ),
+    )
 
 
 class ConversationListResponse(BaseModel):
@@ -131,6 +142,21 @@ class ConversationListResponse(BaseModel):
     conversations: List[ConversationSummary] = Field(..., description="Conversation list")
     total: int = Field(..., description="Total count")
     has_more: bool = Field(..., description="Whether more results exist")
+
+
+class StorageUsageResponse(BaseModel):
+    """GET /api/v1/chat/storage response — per-user attachment storage usage."""
+    used_bytes: int = Field(
+        ..., description="Total stored blob bytes across all the user's conversations."
+    )
+    quota_bytes: int = Field(
+        ...,
+        description=(
+            "Per-user blob quota (ARTIFACT_USER_QUOTA_BYTES). An upload is rejected "
+            "with 413 when used_bytes + incoming would exceed it. 0 = unlimited "
+            "(quota disabled); the frontend should render the bar as unbounded."
+        ),
+    )
 
 
 class ConversationDetailResponse(BaseModel):

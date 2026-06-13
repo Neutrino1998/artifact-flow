@@ -170,6 +170,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/chat/storage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Storage Usage
+         * @description 当前用户的附件存储用量 + 配额（喂前端进度条）。
+         *
+         *     与上传挡板同口径（compute-on-read，单一数据源）。声明在 `/{conv_id}` 之前，
+         *     否则 `storage` 会被当作 conv_id 命中详情路由。
+         */
+        get: operations["get_storage_usage_api_v1_chat_storage_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/chat/{conv_id}": {
         parameters: {
             query?: never;
@@ -1546,6 +1569,12 @@ export interface components {
              * @description The message_id of the currently-running execution on this conversation, or null if no execution is in flight. Carries execution identity (not just a boolean) so the frontend can compare-and-clear on terminal events without an old turn's completion clobbering a freshly-started new turn's indicator.
              */
             active_message_id: string | null;
+            /**
+             * Upload Bytes
+             * @description Total stored attachment/blob bytes for this conversation (SUM of ArtifactBlob.size_bytes). Surfaced per-row in the list so the user can see which conversation is consuming storage and pick what to delete when over quota. Blob-only: text content and event history are NOT counted (deleting the conversation reclaims those too, so the displayed number understates what is freed).
+             * @default 0
+             */
+            upload_bytes: number;
         };
         /**
          * CreateDepartmentRequest
@@ -1848,6 +1877,22 @@ export interface components {
              * @description New SSE endpoint URL
              */
             stream_url: string;
+        };
+        /**
+         * StorageUsageResponse
+         * @description GET /api/v1/chat/storage response — per-user attachment storage usage.
+         */
+        StorageUsageResponse: {
+            /**
+             * Used Bytes
+             * @description Total stored blob bytes across all the user's conversations.
+             */
+            used_bytes: number;
+            /**
+             * Quota Bytes
+             * @description Per-user blob quota (ARTIFACT_USER_QUOTA_BYTES). An upload is rejected with 413 when used_bytes + incoming would exceed it. 0 = unlimited (quota disabled); the frontend should render the bar as unbounded.
+             */
+            quota_bytes: number;
         };
         /**
          * UpdateDepartmentRequest
@@ -2352,6 +2397,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_storage_usage_api_v1_chat_storage_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StorageUsageResponse"];
                 };
             };
         };

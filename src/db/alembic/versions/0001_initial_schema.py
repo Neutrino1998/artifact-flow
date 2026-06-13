@@ -165,10 +165,14 @@ def upgrade() -> None:
         ),
         sa.PrimaryKeyConstraint('artifact_id', 'session_id')
     )
+    # 存储配额聚合用:SUM(size_bytes) 按 session_id 过滤/GROUP BY 走 index-only(复合
+    # 主键以 artifact_id 打头无法服务)。见 models.py ArtifactBlob.__table_args__。
+    op.create_index('ix_artifact_blobs_session_size', 'artifact_blobs', ['session_id', 'size_bytes'], unique=False)
 
 
 def downgrade() -> None:
     """Drop all tables."""
+    op.drop_index('ix_artifact_blobs_session_size', table_name='artifact_blobs')
     op.drop_table('artifact_blobs')
     op.drop_index('ix_artifact_versions_artifact', table_name='artifact_versions')
     op.drop_table('artifact_versions')

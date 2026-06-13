@@ -42,6 +42,7 @@ from api.schemas.chat import (
     ConversationDetailResponse,
     ConversationSummary,
     MessageResponse,
+    StorageUsageResponse,
 )
 from api.services.controller_factory import create_controller, run_and_push, sanitize_error_event
 from api.services.stream_transport import StreamTransport
@@ -142,6 +143,31 @@ async def send_message(
         for f in files
         if f.filename  # 空 file part（前端无附件时不应出现，防御性跳过）
     ]
+
+    # blob 存储配额准入挡板：本次新增 blob 字节 + 该用户已占用 > 配额 → 413，让用户
+    # 删对话腾空间(删 conversation 级联清 artifact/blob)。只数 blob —— 二进制是灌爆盘的
+    # 唯一向量,文本不计(见 config.ARTIFACT_USER_QUOTA_BYTES)。在建会话 / stage 前拦,
+    # 拒绝时零 DB 状态。软上限:并发上传可略微超额,挡量级不挡字节。0 = 禁用挡板。
+    # business-rule reject → loud 落原因(req-id ↔ 用户+用量),否则 grep 只见一条 413。
+    incoming_blob_bytes = sum(len(c.blob) for c in converted if c.blob is not None)
+    if config.ARTIFACT_USER_QUOTA_BYTES > 0 and incoming_blob_bytes > 0:
+        used_bytes = await conversation_manager.get_user_upload_bytes(user_id)
+        if used_bytes + incoming_blob_bytes > config.ARTIFACT_USER_QUOTA_BYTES:
+            quota_mb = config.ARTIFACT_USER_QUOTA_BYTES / 1024 / 1024
+            logger.warning(
+                f"Upload rejected (413): user={user_id} quota exceeded — "
+                f"used={used_bytes} incoming={incoming_blob_bytes} "
+                f"quota={config.ARTIFACT_USER_QUOTA_BYTES}"
+            )
+            raise HTTPException(
+                status_code=413,
+                detail=(
+                    f"Storage quota exceeded: this upload ({incoming_blob_bytes / 1024 / 1024:.1f}MB) "
+                    f"would put you over your {quota_mb:.0f}MB limit "
+                    f"(currently using {used_bytes / 1024 / 1024:.1f}MB). "
+                    f"Delete a conversation to free space and retry."
+                ),
+            )
 
     # 确保 conversation 存在（失败需返回 HTTP 错误，保留在路由层；FK: artifact_session
     # → conversation，但 artifact 现在 turn 末才落库，ensure 仍需在 submit 前建好会话行）
@@ -355,11 +381,29 @@ async def list_conversations(
                 created_at=datetime.fromisoformat(conv["created_at"]),
                 updated_at=datetime.fromisoformat(conv["updated_at"]),
                 active_message_id=active_executions.get(conv["conversation_id"]),
+                upload_bytes=conv.get("upload_bytes", 0),
             )
             for conv in conversations
         ],
         total=total,
         has_more=offset + len(conversations) < total,
+    )
+
+
+@router.get("/storage", response_model=StorageUsageResponse)
+async def get_storage_usage(
+    current_user: TokenPayload = Depends(get_current_user),
+    conversation_manager: ConversationManager = Depends(get_conversation_manager),
+):
+    """当前用户的附件存储用量 + 配额（喂前端进度条）。
+
+    与上传挡板同口径（compute-on-read，单一数据源）。声明在 `/{conv_id}` 之前，
+    否则 `storage` 会被当作 conv_id 命中详情路由。
+    """
+    used_bytes = await conversation_manager.get_user_upload_bytes(current_user.user_id)
+    return StorageUsageResponse(
+        used_bytes=used_bytes,
+        quota_bytes=config.ARTIFACT_USER_QUOTA_BYTES,
     )
 
 
