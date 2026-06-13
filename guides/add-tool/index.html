@@ -638,6 +638,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../architecture/sandbox/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sandbox
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../architecture/artifacts/" class="md-nav__link">
         
   
@@ -1959,8 +1987,9 @@
 </tbody>
 </table>
 <h3 id="保留工具名">保留工具名</h3>
-<p>以下名字是 Artifact 工具保留名，自定义工具不可同名：</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>create_artifact, update_artifact, rewrite_artifact, read_artifact
+<p>以下名字由请求级创建的内置工具占用（artifact 工具 + <a href="../../architecture/sandbox/">沙盒工具</a>），自定义工具不可同名（<code>RESERVED_TOOL_NAMES</code>，<code>src/tools/base.py</code>）：</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>create_artifact, update_artifact, rewrite_artifact, read_artifact, grep_artifact,
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>bash, mount, persist
 </code></pre></div>
 <p>与 builtin 工具同名也会在启动时抛 <code>ValueError</code>（<code>build_tool_map</code> 中的冲突检测）。</p>
 <hr />

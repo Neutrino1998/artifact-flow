@@ -700,6 +700,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#识图图块缓存与还原vision-blocks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        识图：图块缓存与还原（vision blocks）
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -946,6 +957,34 @@
     
   
     Tools
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sandbox/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sandbox
   
 
     
@@ -1561,6 +1600,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#识图图块缓存与还原vision-blocks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        识图：图块缓存与还原（vision blocks）
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1914,7 +1964,7 @@
 <h2 id="上下文加载策略">上下文加载策略</h2>
 <p><code>ContextManager.build()</code>（<code>src/core/context_manager.py</code>）是一个纯静态类方法，为每次 LLM 调用构建完整的 messages 列表。</p>
 <h3 id="system-prompt-组装稳定可缓存前缀">System Prompt 组装（稳定可缓存前缀）</h3>
-<p>System prompt 只放<strong>全 session 稳定</strong>的内容，作为 prompt cache 的可缓存前缀；每轮刷新的动态上下文（系统时间 / task_plan / artifact 清单 / context 水位）一律移到消息尾部的 <code>&lt;system-reminder&gt;</code>（见下节），避免它们坐在前缀里把后续历史的缓存全部打掉。</p>
+<p>System prompt 只放<strong>全 session 稳定</strong>的内容，作为 prompt cache 的可缓存前缀；每轮刷新的动态上下文（系统时间 / task_plan / artifact 清单 / 沙盒状态 / context 水位）一律移到消息尾部的 <code>&lt;system-reminder&gt;</code>（见下节），避免它们坐在前缀里把后续历史的缓存全部打掉。</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>┌─────────────────────────────────────────┐
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>│ 1. Role Prompt (AgentConfig.role_prompt) │  ← 始终注入
 <a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>├─────────────────────────────────────────┤
@@ -1932,6 +1982,7 @@
 <li><strong>System Time</strong>：始终注入（刻意用本地时间，属 UX）</li>
 <li><strong>Task Plan</strong>：有 <code>id="task_plan"</code> artifact 时注入全文（版本号、内容类型、来源、更新时间）</li>
 <li><strong>Artifacts Inventory</strong>：有 artifact 工具的 agent 注入；每个 artifact 内容截断到 <code>INVENTORY_PREVIEW_LENGTH</code>（预览）</li>
+<li><strong>Sandbox Status</strong>：有沙盒工具（<code>bash</code>/<code>mount</code>/<code>persist</code>）的 agent 且引擎递了快照时注入 <code>&lt;sandbox_status&gt;</code> 三态（未启动 / 运行中含工作区文件清单 / 不可用），对抗「历史轮 mount 过 → 文件还在」的跨轮伪证。状态渲染、文件名转义与有界扫纪律见 <a href="../sandbox/">sandbox.md</a></li>
 <li><strong>Context Usage</strong>：仅当上一次 LLM 调用的 <code>input+output ≥ CONTEXT_USAGE_WARN_RATIO × COMPACTION_TOKEN_THRESHOLD</code>（默认 0.8）时，注入 <code>&lt;context_usage&gt;</code> 水位预警 —— 显示 <code>X / 阈值 (NN%)</code>，并提示把要据此<strong>动作</strong>的状态落 artifact（artifact 活在 compaction 边界之外、每轮在 inventory 里，summary 可能丢细节）。水位以下整段不出现，避免每轮 cry-wolf。取数走 <code>last_llm_usage(events, agent_name)</code>：按 agent 过滤 + 在最近 compaction 边界后取最近一次 <code>llm_complete</code> 的 <code>token_usage</code>（与触发口径 input+output 一致；直接读原始事件，<strong>不受</strong>「content 空则丢 <code>_meta</code>」影响，故「高 input + 空 content」也能预警）。前端 composer 的 gauge 用同一口径（见下文 <em>Compaction 机制</em> 的 metrics 说明）。</li>
 </ul>
 <h3 id="消息构建">消息构建</h3>
@@ -1974,7 +2025,7 @@
 </tr>
 <tr>
 <td><code>TOOL_COMPLETE</code></td>
-<td>user 消息（XML 格式化的工具结果）</td>
+<td>user 消息（XML 格式化的工具结果；携图片引用时见下文<em>识图：图块缓存与还原</em>）</td>
 </tr>
 </tbody>
 </table>
@@ -2003,6 +2054,36 @@
 <blockquote>
 <p>注：引擎不做任何"token 预算截断"。上下文增长到超过阈值时由下节的 <strong>Compaction</strong> 处理；compaction 失败 → 当前 turn 标 ERROR（见下节 <em>失败处理</em>）。</p>
 </blockquote>
+<h3 id="识图图块缓存与还原vision-blocks">识图：图块缓存与还原（vision blocks）</h3>
+<p><code>read_artifact</code> 读到图片（png/jpeg）时，图字节<strong>绝不进事件表</strong>（撑爆 + 与「blob 有专属持久家」冲突）。引擎把 data-URI 从将入事件的 metadata 里摘出，存进 <code>state["vision_blocks"]</code>（key 为 <code>(artifact_id, version)</code>，仅内存、不持久化、跨轮自然失效）；<code>tool_complete</code> 事件只留引用（<code>artifact_id</code>/<code>version</code>/<code>content_type</code>）。</p>
+<p>消息构建时（<code>event_history._events_to_messages</code>）对照缓存还原，按两个条件门控：</p>
+<table>
+<thead>
+<tr>
+<th>缓存命中（本轮读过）</th>
+<th>模型 <code>vision: true</code></th>
+<th>结果</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>✅</td>
+<td>✅</td>
+<td>content 扩成 <code>[文本块, image_url 图块]</code> 多模态列表</td>
+</tr>
+<tr>
+<td>❌（跨轮，state 已空）</td>
+<td>✅</td>
+<td>文本附占位：「需要再看就重读 artifact」</td>
+</tr>
+<tr>
+<td>任意</td>
+<td>❌</td>
+<td>文本附占位：「本模型不识图」——绝不诱导无效重读，也不发 image_url 块（文本模型会被 provider 端拒，见 <code>model_supports_vision</code>）</td>
+</tr>
+</tbody>
+</table>
+<p>两种占位文案语义不同、不可混用：识图模型重读即可重新看到；文本模型重读也永远看不到。<code>vision_capable</code> 来自 models.yaml 的 <code>vision</code> 字段（见 <a href="../../guides/add-model/">添加 Model</a>）。注意末条消息为图块列表时，<code>&lt;system-reminder&gt;</code> 作为附加 text block 追加而非字符串拼接（否则整个 list 被 stringify、毁掉图块结构）。</p>
 <h2 id="compaction-机制">Compaction 机制</h2>
 <p><code>CompactionRunner</code>（<code>src/core/compaction_runner.py</code>）运行在引擎循环内部，<strong>同步</strong>为当前 agent 产出一个结构化摘要并 append 到 <code>state["events"]</code> 尾部，<code>EventHistory</code> 的右到左扫描会在此 boundary 处停下 → 摘要之前的事件对后续 LLM 调用不可见。</p>
 <h3 id="触发条件">触发条件</h3>
@@ -2154,7 +2235,7 @@
 <h3 id="错误处理end-turn-不等于阻断下一轮-continuation">错误处理：end turn 不等于阻断下一轮 continuation</h3>
 <p>错误处理基于两个独立判定：</p>
 <ul>
-<li><strong>不可恢复 → end turn（loud fail）</strong>：<code>astream_with_retry</code> 用尽后仍失败、compaction 失败、agent 不存在等 → engine <strong>不自己 emit ERROR</strong>，只置 <code>state["error"]=True</code> + 把详情记进 <code>state["error_detail"]</code>（<code>error</code>/<code>agent</code>/<code>request_id</code>）后 break loop。终态由 controller 后处理的 <code>decide_terminal</code>（flush 之后、单一裁判）统一构建唯一的 <code>ERROR</code> 终态事件并发射（见 <a href="../execution-lifecycle/">execution-lifecycle.md</a>）。这样 engine-error 也走 flush 后路径 → 终态 <code>artifacts_flushed</code> 必带且正确，不再有"引擎实时推一个 ERROR、controller 又推一个"的双发。turn 终止仍是 loud 的，用户能感知失败并选择 retry / 换思路。</li>
+<li><strong>不可恢复 → end turn（loud fail）</strong>：<code>astream_with_retry</code> 用尽后仍失败、compaction 失败、agent 不存在等 → engine <strong>不自己 emit ERROR</strong>，只置 <code>state["error"]=True</code> + 把详情记进 <code>state["error_detail"]</code>（<code>error</code>/<code>agent</code>/<code>request_id</code>）后 break loop。终态由 controller 后处理的 <code>decide_terminal</code>（flush 之后、单一裁判）统一构建唯一的 <code>ERROR</code> 终态事件并发射（见 <a href="../execution-lifecycle/">execution-lifecycle.md</a>）。这样 engine-error 也走 flush 后路径，不再有"引擎实时推一个 ERROR、controller 又推一个"的双发。turn 终止仍是 loud 的，用户能感知失败并选择 retry / 换思路。</li>
 <li><strong>end turn ≠ 阻断下一轮 continuation</strong>：events 在 <code>controller.post_process</code> 中<strong>无条件 persist</strong>（不论 <code>has_error</code>），失败 turn 的 <code>user_input</code> / <code>llm_complete</code> / <code>tool_complete</code> / 失败标记事件全部入库。下一条 user message 加载 <code>path_events</code> 时天然包含这些事件，<code>EventHistory</code> 跳过 <code>success=False</code> 的边界标记 → LLM 看到"上轮我做到这里、然后是新 user_input"，可以从 left off 处继续。除非用户主动 retry 失败 turn 或开新分支。</li>
 </ul>
 <p>推论（非显然，容易踩坑）：</p>

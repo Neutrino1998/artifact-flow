@@ -10,13 +10,13 @@
       
       
       
-        <link rel="canonical" href="https://neutrino1998.github.io/artifact-flow/architecture/agents/">
+        <link rel="canonical" href="https://neutrino1998.github.io/artifact-flow/architecture/sandbox/">
       
       
-        <link rel="prev" href="../execution-lifecycle/">
+        <link rel="prev" href="../tools/">
       
       
-        <link rel="next" href="../tools/">
+        <link rel="next" href="../artifacts/">
       
       
         
@@ -27,7 +27,7 @@
     
     
       
-        <title>Agents - ArtifactFlow</title>
+        <title>Sandbox - ArtifactFlow</title>
       
     
     
@@ -80,7 +80,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#agent-配置化系统" class="md-skip">
+        <a href="#沙盒执行" class="md-skip">
           跳转至
         </a>
       
@@ -114,7 +114,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Agents
+              Sandbox
             
           </span>
         </div>
@@ -582,37 +582,10 @@
                 
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Agents
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../agents/" class="md-nav__link">
         
   
   
@@ -628,215 +601,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="目录">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      目录
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#agent-as-config-理念" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Agent-as-Config 理念
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#agentconfig-数据结构" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        AgentConfig 数据结构
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#yaml-frontmatter-schema" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        YAML Frontmatter Schema
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="YAML Frontmatter Schema">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#字段参考" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        字段参考
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#工具权限覆盖" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        工具权限覆盖
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#role-prompt-设计" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Role Prompt 设计
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#现有-agent-概览" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        现有 Agent 概览
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="现有 Agent 概览">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#角色分工" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        角色分工
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#agent-协作模型" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Agent 协作模型
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#agent-注册与加载" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Agent 注册与加载
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Agent 注册与加载">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#加载机制" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        加载机制
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#单文件解析" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        单文件解析
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#design-decisions" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Design Decisions
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Design Decisions">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#为什么-agent-是数据不是类" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        为什么 Agent 是数据不是类
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#完成路由不对称性的意图" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        完成路由不对称性的意图
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -874,10 +638,37 @@
                 
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../sandbox/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sandbox
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -893,6 +684,181 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="目录">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      目录
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#定位" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        定位
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#三个工具一个-session" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        三个工具，一个 session
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="三个工具，一个 session">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#动态状态注入" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        动态状态注入
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#lazy-创建" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        lazy 创建
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#错误语义" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        错误语义
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#生命周期与拆除" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        生命周期与拆除
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#隔离边界" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        隔离边界
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="隔离边界">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#bash-的-confirm-是同意闸不是-containment" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bash 的 CONFIRM 是同意闸，不是 containment
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#staging宿主直读直写" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Staging：宿主直读直写
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#磁盘配额三层" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        磁盘配额：三层
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#命令超时与输出溢出" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        命令超时与输出溢出
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#孤儿回收-reaper" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        孤儿回收 reaper
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#配置常量" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        配置常量
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -1389,10 +1355,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#agent-as-config-理念" class="md-nav__link">
+  <a href="#定位" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Agent-as-Config 理念
+        定位
       
     </span>
   </a>
@@ -1400,33 +1366,22 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#agentconfig-数据结构" class="md-nav__link">
+  <a href="#三个工具一个-session" class="md-nav__link">
     <span class="md-ellipsis">
       
-        AgentConfig 数据结构
+        三个工具，一个 session
       
     </span>
   </a>
   
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#yaml-frontmatter-schema" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        YAML Frontmatter Schema
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="YAML Frontmatter Schema">
+    <nav class="md-nav" aria-label="三个工具，一个 session">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#字段参考" class="md-nav__link">
+  <a href="#动态状态注入" class="md-nav__link">
     <span class="md-ellipsis">
       
-        字段参考
+        动态状态注入
       
     </span>
   </a>
@@ -1434,10 +1389,21 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#工具权限覆盖" class="md-nav__link">
+  <a href="#lazy-创建" class="md-nav__link">
     <span class="md-ellipsis">
       
-        工具权限覆盖
+        lazy 创建
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#错误语义" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        错误语义
       
     </span>
   </a>
@@ -1450,10 +1416,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#role-prompt-设计" class="md-nav__link">
+  <a href="#生命周期与拆除" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Role Prompt 设计
+        生命周期与拆除
       
     </span>
   </a>
@@ -1461,22 +1427,22 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#现有-agent-概览" class="md-nav__link">
+  <a href="#隔离边界" class="md-nav__link">
     <span class="md-ellipsis">
       
-        现有 Agent 概览
+        隔离边界
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="现有 Agent 概览">
+    <nav class="md-nav" aria-label="隔离边界">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#角色分工" class="md-nav__link">
+  <a href="#bash-的-confirm-是同意闸不是-containment" class="md-nav__link">
     <span class="md-ellipsis">
       
-        角色分工
+        bash 的 CONFIRM 是同意闸，不是 containment
       
     </span>
   </a>
@@ -1489,10 +1455,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#agent-协作模型" class="md-nav__link">
+  <a href="#staging宿主直读直写" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Agent 协作模型
+        Staging：宿主直读直写
       
     </span>
   </a>
@@ -1500,80 +1466,46 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#agent-注册与加载" class="md-nav__link">
+  <a href="#磁盘配额三层" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Agent 注册与加载
+        磁盘配额：三层
       
     </span>
   </a>
-  
-    <nav class="md-nav" aria-label="Agent 注册与加载">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#加载机制" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        加载机制
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#单文件解析" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        单文件解析
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#design-decisions" class="md-nav__link">
+  <a href="#命令超时与输出溢出" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Design Decisions
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Design Decisions">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#为什么-agent-是数据不是类" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        为什么 Agent 是数据不是类
+        命令超时与输出溢出
       
     </span>
   </a>
   
 </li>
-        
-          <li class="md-nav__item">
-  <a href="#完成路由不对称性的意图" class="md-nav__link">
+      
+        <li class="md-nav__item">
+  <a href="#孤儿回收-reaper" class="md-nav__link">
     <span class="md-ellipsis">
       
-        完成路由不对称性的意图
+        孤儿回收 reaper
       
     </span>
   </a>
   
 </li>
-        
-      </ul>
-    </nav>
+      
+        <li class="md-nav__item">
+  <a href="#配置常量" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        配置常量
+      
+    </span>
+  </a>
   
 </li>
       
@@ -1597,255 +1529,251 @@
   
 
 
-<h1 id="agent-配置化系统">Agent 配置化系统</h1>
+<h1 id="沙盒执行">沙盒执行</h1>
 <blockquote>
-<p>Agent 是数据，不是类 — 一个 Markdown 文件就是一个 Agent。</p>
+<p>Per-turn、默认全禁网的 Linux 容器，让 agent 安全执行不可信的模型生成代码、处理用户上传的多格式文件，产物显式回写成 artifact。三个模型面工具（<code>bash</code> / <code>mount</code> / <code>persist</code>）共享一个 per-turn <code>SandboxSession</code>。</p>
 </blockquote>
-<h2 id="agent-as-config-理念">Agent-as-Config 理念</h2>
-<p>ArtifactFlow 的 Agent 完全由配置驱动：每个 Agent 是 <code>config/agents/</code> 下的一个 <code>.md</code> 文件，包含 YAML frontmatter（元数据）和 Markdown body（角色提示词）。不需要编写任何 Python 代码。</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>config/agents/
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>├── lead_agent.md       # 协调者
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>├── research_agent.md   # 大型知识探索/整合（上下文隔离）
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>└── compact_agent.md    # 对话摘要（内部）
-</code></pre></div>
-<h2 id="agentconfig-数据结构">AgentConfig 数据结构</h2>
-<p><code>src/agents/loader.py</code> 定义了 <code>AgentConfig</code> dataclass：</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nd">@dataclass</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="k">class</span><span class="w"> </span><span class="nc">AgentConfig</span><span class="p">:</span>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>    <span class="n">name</span><span class="p">:</span> <span class="nb">str</span>                                        <span class="c1"># Agent 唯一标识</span>
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>    <span class="n">description</span><span class="p">:</span> <span class="nb">str</span>                                 <span class="c1"># Agent 描述（用于 call_subagent 候选列表）</span>
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>    <span class="n">tools</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="n">field</span><span class="p">(</span><span class="n">default_factory</span><span class="o">=</span><span class="nb">dict</span><span class="p">)</span>  <span class="c1"># {tool_name: permission_level}</span>
-<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>    <span class="n">model</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;qwen3.7-plus-no-thinking&quot;</span>          <span class="c1"># LLM 模型别名</span>
-<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>    <span class="n">max_tool_rounds</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">3</span>                         <span class="c1"># 最大工具调用轮数</span>
-<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>    <span class="n">internal</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span>                           <span class="c1"># 内部 Agent（不出现在候选列表）</span>
-<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>    <span class="n">role_prompt</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span>                            <span class="c1"># MD body（角色提示词）</span>
-</code></pre></div>
-<h2 id="yaml-frontmatter-schema">YAML Frontmatter Schema</h2>
-<p>每个 Agent 的 <code>.md</code> 文件以 YAML frontmatter 开头：</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="nn">---</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">research_agent</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="nt">description</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">|</span>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="w">  </span><span class="no">Large-scale knowledge exploration and multi-source integration</span>
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="w">  </span><span class="no">- Context-isolated deep research</span>
-<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="w">  </span><span class="no">- Search → fetch → read loops</span>
-<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="nt">tools</span><span class="p">:</span>
-<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="w">  </span><span class="nt">web_search</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">auto</span>
-<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="w">  </span><span class="nt">web_fetch</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">confirm</span>
-<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="w">  </span><span class="nt">read_artifact</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">auto</span>
-<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="w">  </span><span class="nt">grep_artifact</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">auto</span>
-<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a><span class="nt">model</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">qwen3.7-plus</span>
-<a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a><span class="nt">max_tool_rounds</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">50</span>
-<a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a><span class="nn">---</span>
-</code></pre></div>
-<h3 id="字段参考">字段参考</h3>
+<h2 id="定位">定位</h2>
+<p>沙盒解决两类工作：跑模型生成的任意 shell / Python，和处理二进制上传——上传路由（2026-06-11 翻转后）纯声明式按扩展名三分：文本白名单解码为 content，png/jpeg 走识图（识图白名单限死这两种——gif/webp 等异型图照收 blob 但不进识图，要看就 mount 进沙盒转 PNG 再 persist），<strong>其余任意格式一律存为 blob</strong>（docx / pdf / xlsx / 压缩包 / 异型图 / 未知二进制，不试解码不验 magic）。这些字节在 artifact 系统里没有文本表示，只有 mount 进沙盒才能被检视 / 转换；改后缀、损坏的文件也照收，模型在沙盒里 loud-fail 后自行诊断（remediation 提示归 skill 系统）。镜像预装 Python 3.11 + 科学栈（numpy/pandas/matplotlib/openpyxl）+ pandoc + ripgrep + git（含烤入的默认 identity，开箱即 commit；仅本地仓库操作——log / diff / blame / apply，<code>--network=none</code> 下 clone / fetch 注定失败，by design）。</p>
+<p><strong>沙盒是显式 stage 进出的 scratch 工作区，不是 artifact store 的自动镜像。</strong> mount-in 与回写都显式：模型显式把指定 artifact 物化进工作区、显式调 <code>persist</code> 回写，不自动物化整 session、也不 diff 整个目录。容器 fs 不是「artifact 的第三态」，而是临时工作区——copy-in → 容器内随便改 → 显式 <code>persist</code>，persist 落回来就<strong>变成一次普通 artifact 写</strong>（进 <code>ArtifactWorkingSet</code>，随 turn 末 <code>flush_all</code> 落盘，与 <code>update_artifact</code> 同路）。工作区对 artifact store 没有同步义务，故没有三态一致性问题（对比 Claude Code：磁盘工作副本 vs git 记录，<code>commit</code> 是显式桥）。</p>
+<h2 id="三个工具一个-session">三个工具，一个 session</h2>
+<p>工具面是三个语义不同的动词、参数形状各异，分立比合成单一 <code>sandbox(action=...)</code> 参数面更小、对小模型更可读，也与现有 <code>*_artifact</code> 工具 idiom 及 per-verb 权限粒度一致。「共用启动 / 沙盒交互」是实现层事实，不构成合并工具面的理由。</p>
 <table>
 <thead>
 <tr>
-<th>字段</th>
-<th>类型</th>
-<th>必填</th>
-<th>默认值</th>
-<th>说明</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>name</code></td>
-<td>string</td>
-<td>是</td>
-<td>—</td>
-<td>Agent 唯一标识（与文件名无关，以此字段为准）</td>
-</tr>
-<tr>
-<td><code>description</code></td>
-<td>string</td>
-<td>否</td>
-<td><code>""</code></td>
-<td>Agent 描述，注入到 <code>&lt;available_subagents&gt;</code> 列表中</td>
-</tr>
-<tr>
-<td><code>tools</code></td>
-<td>dict</td>
-<td>否</td>
-<td><code>{}</code></td>
-<td>工具白名单 + 权限覆盖，格式 <code>{tool_name: auto\|confirm}</code></td>
-</tr>
-<tr>
-<td><code>model</code></td>
-<td>string</td>
-<td>是</td>
-<td>—</td>
-<td>引用 <code>config/models/models.yaml</code> 中的模型别名;未指定则加载失败(不静默兜底)</td>
-</tr>
-<tr>
-<td><code>max_tool_rounds</code></td>
-<td>int</td>
-<td>否</td>
-<td><code>3</code></td>
-<td>最大工具调用轮数，超过后注入系统提示要求总结</td>
-</tr>
-<tr>
-<td><code>internal</code></td>
-<td>bool</td>
-<td>否</td>
-<td><code>false</code></td>
-<td>内部 Agent，不出现在 <code>call_subagent</code> 的可用候选列表中</td>
-</tr>
-</tbody>
-</table>
-<h3 id="工具权限覆盖">工具权限覆盖</h3>
-<p><code>tools</code> 字段不仅是工具白名单，也是 per-agent 的权限覆盖：</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="nt">tools</span><span class="p">:</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="w">  </span><span class="nt">web_search</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">auto</span><span class="w">       </span><span class="c1"># 该 agent 自动执行 web_search</span>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="w">  </span><span class="nt">web_fetch</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">confirm</span><span class="w">     </span><span class="c1"># 该 agent 执行 web_fetch 前需用户确认</span>
-</code></pre></div>
-<p>引擎执行工具时的权限决策逻辑：</p>
-<ol>
-<li>检查 agent 配置中该工具的权限值（<code>agents[agent_name].tools[tool_name]</code>）</li>
-<li>如未配置，回退到工具自身的默认权限（<code>tool.permission</code>）</li>
-<li>如果最终权限为 <code>CONFIRM</code> 且工具不在 <code>always_allowed_tools</code> 中 → 触发权限中断</li>
-</ol>
-<h2 id="role-prompt-设计">Role Prompt 设计</h2>
-<p>YAML frontmatter 之后的 Markdown body 是 Agent 的角色提示词，会作为 system prompt 的第一层注入到每次 LLM 调用中。</p>
-<p>以 <code>lead_agent.md</code> 为例：</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>---
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>name: lead_agent
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="gu">...</span>
-<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="gu">---</span>
-<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>
-<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>&lt;role&gt;
-<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a>You are lead_agent, the Lead Agent coordinating a multi-agent system.
-<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a>
-<a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a><span class="gs">**Execution Flow:**</span>
-<a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a><span class="k">1.</span> <span class="gs">**Analyze Request**</span> — Determine complexity
-<a id="__codelineno-4-11" name="__codelineno-4-11" href="#__codelineno-4-11"></a><span class="k">2.</span> <span class="gs">**Plan Tasks**</span> — Create task_plan if needed
-<a id="__codelineno-4-12" name="__codelineno-4-12" href="#__codelineno-4-12"></a><span class="k">3.</span> <span class="gs">**Execute**</span> — Call sub-agents or work directly
-<a id="__codelineno-4-13" name="__codelineno-4-13" href="#__codelineno-4-13"></a><span class="k">4.</span> <span class="gs">**Integrate**</span> — Update result artifact with findings
-<a id="__codelineno-4-14" name="__codelineno-4-14" href="#__codelineno-4-14"></a><span class="k">5.</span> <span class="gs">**Iterate**</span> — Refine based on progress and feedback
-<a id="__codelineno-4-15" name="__codelineno-4-15" href="#__codelineno-4-15"></a>&lt;/role&gt;
-<a id="__codelineno-4-16" name="__codelineno-4-16" href="#__codelineno-4-16"></a>
-<a id="__codelineno-4-17" name="__codelineno-4-17" href="#__codelineno-4-17"></a>&lt;task_plan&gt;
-<a id="__codelineno-4-18" name="__codelineno-4-18" href="#__codelineno-4-18"></a>For tasks requiring multiple steps or sub-agent calls, create a task_plan artifact...
-<a id="__codelineno-4-19" name="__codelineno-4-19" href="#__codelineno-4-19"></a>&lt;/task_plan&gt;
-<a id="__codelineno-4-20" name="__codelineno-4-20" href="#__codelineno-4-20"></a>
-<a id="__codelineno-4-21" name="__codelineno-4-21" href="#__codelineno-4-21"></a>&lt;artifacts&gt;
-<a id="__codelineno-4-22" name="__codelineno-4-22" href="#__codelineno-4-22"></a>You can create MULTIPLE result artifacts...
-<a id="__codelineno-4-23" name="__codelineno-4-23" href="#__codelineno-4-23"></a>&lt;/artifacts&gt;
-</code></pre></div>
-<p><strong>编写建议：</strong></p>
-<ul>
-<li>用 XML 标签分隔不同关注点（<code>&lt;role&gt;</code>, <code>&lt;task_plan&gt;</code>, <code>&lt;output_format&gt;</code> 等）</li>
-<li>明确职责边界（"你是什么"、"你不做什么"）</li>
-<li>定义输出格式（减少 LLM 输出的不确定性）</li>
-<li>设置停止条件（如 <code>research_agent</code> 的 <code>&lt;output&gt;</code> 收敛要求 + <code>max_tool_rounds</code> 兜底）</li>
-</ul>
-<h2 id="现有-agent-概览">现有 Agent 概览</h2>
-<table>
-<thead>
-<tr>
-<th>Agent</th>
-<th>职责</th>
 <th>工具</th>
-<th>模型</th>
-<th>最大轮数</th>
-<th>内部</th>
+<th>权限</th>
+<th>参数</th>
+<th>职责</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td><code>lead_agent</code></td>
-<td>任务协调、规划、Artifact 管理、subagent 路由</td>
-<td>create/update/rewrite/read/grep_artifact + web_search + web_fetch + call_subagent + <a href="../sandbox/">沙盒</a> bash/mount/persist</td>
-<td>qwen3.7-max</td>
-<td>100</td>
-<td>否</td>
+<td><code>bash</code></td>
+<td><strong>CONFIRM</strong></td>
+<td><code>command</code></td>
+<td>在本轮容器内 <code>bash -c</code> 执行。跑不可信代码 → CONFIRM。</td>
 </tr>
 <tr>
-<td><code>research_agent</code></td>
-<td>大型知识探索 / 多源整合，在隔离上下文中执行</td>
-<td>create/update/rewrite/read/grep_artifact + web_search + web_fetch + <a href="../sandbox/">沙盒</a> bash/mount/persist</td>
-<td>qwen3.7-plus</td>
-<td>50</td>
-<td>否</td>
+<td><code>mount</code></td>
+<td>AUTO</td>
+<td><code>artifact_id</code></td>
+<td>把一个 artifact 物化进工作区 <code>&lt;workspace&gt;/&lt;artifact_id&gt;</code>（显式 stage-in）。</td>
 </tr>
 <tr>
-<td><code>compact_agent</code></td>
-<td>对话摘要生成（Compaction）</td>
-<td>无</td>
-<td>qwen3.7-plus</td>
-<td>0</td>
-<td>是</td>
+<td><code>persist</code></td>
+<td>AUTO</td>
+<td><code>path</code></td>
+<td>把工作区某文件回写成<strong>新</strong> artifact（显式 stage-out）。</td>
 </tr>
 </tbody>
 </table>
-<h3 id="角色分工">角色分工</h3>
+<p>底下是一个 per-turn <code>SandboxSession</code>（<code>src/tools/builtin/sandbox_session.py</code>），owns 容器生命周期 + bind-mount 工作区 + watchdog 注册 + 绑定本 turn 的 <code>ArtifactWorkingSet</code>。三个工具都是其上的薄操作。<code>create_sandbox_tools</code>（<code>src/tools/builtin/sandbox_ops.py</code>）由 <code>controller_factory</code> 按请求调用，与 <code>create_artifact_tools</code> 同 idiom。</p>
+<p>工具只挂在拥有它们的 agent 的 <code>tools</code> 白名单（当前 <code>lead_agent</code> / <code>research_agent</code>）。bash = CONFIRM 在 agent MD 里显式声明——这是沙盒对模型的唯一暴露面，不在白名单的 agent 看不到也调不动这三个工具。</p>
+<h3 id="动态状态注入">动态状态注入</h3>
+<p>per-turn ephemeral 有一个提示词层面的副作用：历史里上一轮 mount / bash 的成功记录，对模型是「文件还在」的<strong>伪证</strong>。实测结论（2026-06-12）：<strong>提示词压不住这个伪证</strong>——动态注入「工作区为空」、mount 结果自带过期标记都试过，二轮对话模型照旧直接引用旧路径。接受的现实：跨轮忘 mount 由 <strong>bash file-not-found 的 loud-fail 自纠</strong>兜底（代价 = 一个废 round），不再堆提示词机器。reset 事实在模型可见文案里只各说一次：bash 描述（能力）、persist 描述（动机——"persist 是留住结果的唯一方式"）、<code>&lt;sandbox_status&gt;</code> not_started（状态）。</p>
+<p>动态注入本身保留（ContextManager 每轮 <code>&lt;system-reminder&gt;</code>，仅对授沙盒工具的 agent、且引擎递了 session 快照时渲染），价值在另两态：</p>
 <ul>
-<li><strong>lead_agent</strong> 是唯一与用户直接交互的 Agent，也是唯一能创建/修改最终 Artifact 的入口；自身可直接执行 <code>web_search</code> / <code>web_fetch</code> 处理小规模查询。</li>
-<li><strong>research_agent</strong> 是执行型 subagent，由 lead_agent 通过 <code>call_subagent</code> 分发任务。和 lead 工具集几乎相同（除 <code>call_subagent</code>），其存在意义是<strong>上下文隔离</strong>：把需要 ≥3 来源 / 多步 search→fetch→read 循环的大型探索任务从 lead 的上下文中剥离，避免大量中间 fetch 结果污染主对话。</li>
-<li><strong>compact_agent</strong> 是内部 Agent，由 <code>CompactionRunner</code> 在引擎循环内每次 LLM 调用后同步触发（超阈值时），输出结构化摘要作为 <code>COMPACTION_SUMMARY</code> 事件追加到 <code>state["events"]</code> 尾部，详见 <a href="../engine/#compaction-机制">engine.md → Compaction 机制</a></li>
+<li><strong>not_started</strong>——一句话：工作区为空、旧文件已失效、需要就重新 mount；</li>
+<li><strong>running</strong>——工作区第一层清单（<code>SANDBOX_STATUS_MAX_ENTRIES</code> 条数帽 + 显式 truncated 标记，turn 内 mount / bash 落的文件下一次 LLM 调用即可见）：给 <code>persist</code> 的 path 决策当依据，省一次 <code>ls</code>；</li>
+<li><strong>unavailable</strong>——sticky 失败复述原因，省掉模型再撞一次工具的回合。</li>
 </ul>
-<h2 id="agent-协作模型">Agent 协作模型</h2>
-<pre class="mermaid"><code>sequenceDiagram
-    participant User
-    participant Lead as lead_agent
-    participant Sub as research_agent
-
-    User-&gt;&gt;Lead: 用户请求
-    Lead-&gt;&gt;Lead: 分析任务, 创建 task_plan
-
-    Lead-&gt;&gt;Sub: call_subagent(instruction)
-    Note over Lead,Sub: current_agent 切换为 subagent
-
-    Sub-&gt;&gt;Sub: 执行工具 (web_search / web_fetch / read_artifact / grep_artifact)
-    Sub--&gt;&gt;Lead: 返回结果 (subagent_result XML)
-    Note over Lead,Sub: current_agent 切回 lead_agent
-
-    Lead-&gt;&gt;Lead: 整合结果, 更新 Artifact
-    Lead--&gt;&gt;User: 最终响应</code></pre>
-<p><strong>协作流程：</strong></p>
-<ol>
-<li><strong>Lead 分发</strong>：Lead 调用 <code>call_subagent</code> 工具，提供 <code>agent_name</code> 和 <code>instruction</code></li>
-<li><strong>Agent 切换</strong>：引擎将 <code>state["current_agent"]</code> 设为目标 subagent，instruction 作为 <code>SUBAGENT_INSTRUCTION</code> 事件注入</li>
-<li><strong>Sub 执行</strong>：Subagent 不看 lead 的对话历史，只看自己那部分 agent_name-filtered 事件（instruction、LLM 响应、tool results）。<code>EventHistory</code> 扫 boundary 时对 subagent 还会停在 <code>SUBAGENT_INSTRUCTION.fresh_start=True</code> 上 — <code>call_subagent</code> 的 <code>fresh_start</code> <strong>默认 True</strong>，所以 Lead 默认每次调用都给 subagent 一个干净起点；仅当 Lead 显式传 <code>fresh_start=false</code> 时，第二次调用才能延续第一次调用的上下文，<strong>直到最近的 <code>COMPACTION_SUMMARY</code> boundary</strong>（如第一次调用中途触发过 compaction，第二次看到的仍是摘要 + 其后的事件，而非第一次的完整原始上下文）</li>
-<li><strong>结果回传</strong>：Subagent 无工具调用时，响应打包为 <code>&lt;subagent_result&gt;</code> XML，作为 <code>call_subagent</code> 的 tool_result 返回给 Lead</li>
-<li><strong>Lead 继续</strong>：Lead 看到 tool_result 后决定下一步（继续分发、整合结果、或完成）</li>
-</ol>
-<h2 id="agent-注册与加载">Agent 注册与加载</h2>
-<h3 id="加载机制">加载机制</h3>
-<p><code>load_all_agents()</code>（<code>src/agents/loader.py</code>）在服务启动时扫描 <code>config/agents/</code> 目录：</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="k">def</span><span class="w"> </span><span class="nf">load_all_agents</span><span class="p">(</span><span class="n">agents_dir</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">AgentConfig</span><span class="p">]:</span>
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>    <span class="c1"># 默认从 {project_root}/config/agents/ 加载</span>
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>    <span class="c1"># 遍历所有 .md 文件，按 sorted() 顺序</span>
-<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>    <span class="c1"># 解析 YAML frontmatter + MD body</span>
-<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>    <span class="c1"># 返回 {agent_name: AgentConfig} 字典</span>
+<p>枚举纪律：工作区是模型可写的树，host 侧只走 <code>sandbox_fs.list_dir</code>（fd 钉住、不跟链、不递归，同 reaper），且<strong>有界扫</strong>（cap+1 即停）——顶层条目数模型可控、ext4 池子 inode 表撑得起百万级，全量物化是内存放大器（watchdog 的 <code>measure_usage</code> 是累加计数、无此问题）。文件名是<strong>非可信输入</strong>（bash 可造任意名，上传 zip 解压后第三方名字也进工作区）：控制字符替换为 <code>�</code> 防伪造清单行，XML 元字符转义防 <code>&lt;/sandbox_status&gt;</code> 式结构逃逸（prompt injection）。至此提示分层四件套齐：<strong>能力 → 工具描述，契约 → inventory / read_artifact 文案，状态 → 动态注入，场景 how-to → skill</strong>。</p>
+<h3 id="lazy-创建">lazy 创建</h3>
+<p>容器 <strong>lazy 于首个沙盒工具调用</strong>，不是「首个 bash」——模型可能先 <code>mount</code> 再 <code>bash</code>，<code>mount</code> 也会 <code>ensure_container()</code>。无沙盒的 turn：<code>SandboxSession</code> 只是个零成本对象壳，从不起容器。</p>
+<h3 id="错误语义">错误语义</h3>
+<ul>
+<li><code>bash</code>：命令退出码非零<strong>不算工具失败</strong>（<code>grep</code> 无命中 exit 1 是信息不是故障）——<code>success=True</code> + 输出里带 exit code，模型自己解读。<code>success=False</code> 只留给基建故障（容器起不来 / exec 通道卡死）。</li>
+<li><code>persist</code>：sticky 失败优先于「nothing to persist」——超额杀 / 容器中途死后容器已置空，先报 sticky（本 turn 沙盒不可用），不开「抢救残留产物」通道（超额现场文件完整性不可信）。</li>
+</ul>
+<h2 id="生命周期与拆除">生命周期与拆除</h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>controller_factory（每 turn）
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>  └─ SandboxSession(conv, msg)            # 对象壳，零成本
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>  └─ runner.register_cleanup(msg, session.close)   # 拆除句柄进 _wrapped finally
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>        ↓ 首个沙盒工具调用
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>  └─ ensure_container()                   # lazy：create + start，起 watchdog
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>        ↓ turn 结束（任意退出路径）
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>  └─ session.close()                      # 停 watchdog + 删容器 + 清 scratch
 </code></pre></div>
+<p><strong>拆除挂执行器 <code>_wrapped</code> 的真 <code>finally</code>（<code>cleanup_execution</code> 隔壁），与 lease 释放同一层。</strong> bash 本身 IO 等待、天然可取消，<strong>但容器在协程被取消后仍在烧 CPU</strong>——成功 / 超时 / 协作取消 / 外部取消 / 崩溃五条退出都在解栈时执行拆除，容器与 lease 都是绑 turn 的易失态。<strong>绝不放 post-processing</strong>——那是被设计成可被 late-cancel 抢占的区域，兜不住会烧 CPU 的活资源；漏拆 = 孤儿容器。<code>close()</code> 幂等、不依赖 DB session，故晚于 controller context manager 退出也安全。cleanup 回调有 30s 有界弃等：aiodocker 的 delete 无默认超时，daemon 卡死曾会扣死 lease / stream。</p>
+<p>进程<strong>自身崩溃</strong>（SIGKILL / OOM，<code>finally</code> 根本不执行）留下的孤儿，由 <a href="#孤儿回收-reaper">reaper</a> 兜底。</p>
+<h2 id="隔离边界">隔离边界</h2>
+<p>沙盒跑不可信代码，三条<strong>正交</strong>边界各自封死，缺一不可：</p>
+<table>
+<thead>
+<tr>
+<th>边界</th>
+<th>威胁</th>
+<th>封法</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>逃逸隔离</td>
+<td>容器内代码突破到宿主内核</td>
+<td><strong>gVisor（<code>runsc</code>）</strong> 用户态内核拦系统调用。prod <code>SANDBOX_RUNTIME=runsc</code>，本机 dev 留空 = daemon 默认 <code>runc</code>。</td>
+</tr>
+<tr>
+<td>DooD socket</td>
+<td>backend 通过 docker.sock 拥有 host root</td>
+<td><strong>容器创建参数绝不被模型内容污染</strong>——镜像 / 命令 / 挂载全是 backend 常量，模型只能影响容器<strong>内</strong>执行的字节。</td>
+</tr>
+<tr>
+<td>网络封闭</td>
+<td>不可信代码出网做外泄 / 横移</td>
+<td><strong><code>--network=none</code> 默认全禁网</strong>。</td>
+</tr>
+</tbody>
+</table>
+<p>第三条尤其要紧：网络封闭<strong>不能降级成靠 CONFIRM 对命令授权来控</strong>。授权是 <em>consent</em>（人同意了某条命令的意图），网络是 <em>confinement</em>（不管谁同意，容器代码够得着什么）。开网后被授权的 <code>pip install</code> = 任意代码执行，且同容器里没被授权的代码（传递 import / 被污染 wheel / 生成代码任意一行）也拿到了网。内网 web 工具已禁、沙盒无任何合法公网需求，故 <code>--network=none</code> 是零成本纯收益。</p>
+<p><strong>依赖因此全离线投递、绝不靠出网</strong>，分三层（同一套 <code>pip --no-index --find-links</code> 机制、不同生命周期）：① 烤进镜像（python / 科学栈 / pandoc / ripgrep / git，环境定义级）；② 离线 wheel bundle 挂固定位（常驻 extras）；③ skill 自带 asset（场景 specific 长尾，随 skill 激活按需挂）。依赖 ≠ artifact——artifact 是用户拥有的数据（走 mount / persist），依赖是执行环境（走镜像 / bundle）。</p>
+<p>其余容器硬约束：<code>ReadonlyRootfs</code>（rootfs 只读）、非 root（uid 1000）、<code>SANDBOX_MEM_LIMIT_MB</code> 内存上限（MemorySwap 设同值 = 禁 swap）、<code>SANDBOX_CPU_LIMIT</code> CPU 核数、<code>SANDBOX_PIDS_LIMIT</code> fork 炸弹闸。</p>
+<h3 id="bash-的-confirm-是同意闸不是-containment">bash 的 CONFIRM 是同意闸，不是 containment</h3>
+<p>接上面的 consent / confinement 之分：bash = CONFIRM 让用户在不可信代码跑之前看一眼<strong>具体命令</strong>，是一道<strong>知情 / 同意</strong>闸；它<strong>不</strong>是安全边界。沙盒的安全靠上面三条（gVisor / DooD 参数防污染 / <code>--network=none</code>）+ per-turn ephemeral——一条 bash 命令不管确没确认，都跑在同一个无网、无逃逸、不可触宿主、turn 末即焚的容器里。</p>
+<p>推论：用户可对 bash 勾 <code>always_allow</code>（写进 <code>state["always_allowed_tools"]</code>，按工具名生效，跨 agent、并经 message metadata 跨 turn 继承），后续 bash 跳过确认。这是<strong>用户（防御方）自己弃权 per-command review</strong>，不是对手绕过——① 触发 always_allow 的只能是用户，模型无法自授；② 弃权后代码照样 contained，爆炸半径仍是用户自己的 per-turn 沙盒 + 自己的 artifact，外泄 / 逃逸 / 宿主 / 跨 turn 留存全部够不着（就算被无害命令骗取了 always_allow，之后的恶意命令最多烧被配额 / 超时 / pids 限住的算力、读写已挂入的工作区，仍出不了沙盒）。</p>
+<p>故按「前端锁 = UX / 后端锁 = 正确性，谁被绕过会受伤」判别，bash 的 confirm 落在 <strong>UX 侧</strong>：它在 containment <strong>内</strong>，弃权只让用户自己少一道审阅。对比 <code>web_fetch</code> 的 confirm——那道闸把守的是<strong>真实出网</strong>这条独立边界，弃权会让另一个 actor / 数据外泄受害，故必须严防绕过。两道 confirm 同级别名、不同性质，根因就在「闸后面是不是还有 containment」。</p>
+<blockquote>
+<p>若某部署出于合规要对 bash 逐命令强制审查、不容弃权，那是一个独立的 operator 策略特性（per-tool「不可弃权」声明），不是这道闸当前的语义。</p>
+</blockquote>
+<h2 id="staging宿主直读直写">Staging：宿主直读直写</h2>
+<p><code>mount</code> 写、<code>persist</code> 读，<strong>都走宿主侧直接读写 scratch 目录</strong>（<code>session.workspace_dir</code>），不走 <code>docker cp</code> / <code>exec</code>。这是为保住该机制（tmpfs 方案会逼 staging 改 exec+tar 流）。</p>
+<p>读写两侧都做 <strong>realpath 圈地 + <code>O_NOFOLLOW</code></strong>（<code>src/tools/builtin/sandbox_fs.py</code>）：容器内代码（含 bash 留下的后台进程）能在工作区造任意 symlink，宿主侧跟链会读 / 写池外文件。所有工作区文件访问一律走 <code>sandbox_fs</code> 的逐级 <code>openat</code> 原语，<strong>业务代码不得再手写 <code>os.walk</code> / <code>os.open</code> / <code>os.path</code> 访问工作区</strong>。<code>mount</code> 写后 <code>fchmod(fd, 0o666)</code>——绕过 backend umask，否则 umask 077 下落 0600、容器 uid 1000 读不了。</p>
 <ul>
-<li>文件名不重要，以 frontmatter 中的 <code>name</code> 字段为准</li>
-<li>单个文件解析失败不影响其他 agent 的加载（错误会 log）</li>
-<li>加载结果传递给 <code>execute_loop()</code> 的 <code>agents</code> 参数</li>
+<li><code>mount</code> 的字节来源二分：blob artifact 取原始字节（本轮 staged 上传经 <code>get_blob</code>，其余走 DB）；文本 artifact 取 WorkingSet overlay 的<strong>当前内容</strong>（本轮 dirty / new 必须可 mount，直读 DB 是空的）按 UTF-8 写盘。on-disk 名 = artifact id（已是 fs-safe 句柄）。</li>
+<li><code>persist</code> 永远产新 artifact（同名 <code>_N</code> dedup）。文本 / 二进制二分：可严格 UTF-8 解码且 ≤ <code>SANDBOX_PERSIST_MAX_TEXT_BYTES</code> → 文本 artifact（可编辑、版本化）；否则 blob（不可变单版、可下载）。</li>
 </ul>
-<h3 id="单文件解析">单文件解析</h3>
-<p><code>load_agent(md_path)</code> 的解析逻辑：</p>
+<h2 id="磁盘配额三层">磁盘配额：三层</h2>
+<p>bind mount 无界之外，容器 rootfs overlay upper 同样无界（容器内 <code>/tmp</code> 写的是宿主 <code>/var/lib/docker</code>）。三层堵：</p>
 <ol>
-<li>检查文件以 <code>---</code> 开头</li>
-<li>找到第二个 <code>---</code>，之间的内容用 <code>yaml.safe_load</code> 解析为 frontmatter</li>
-<li>第二个 <code>---</code> 之后的内容作为 <code>role_prompt</code>（strip 后赋值）</li>
+<li><strong>loop 池子（硬墙）</strong>——部署时 <code>fallocate + mkfs.ext4 + mount -o loop</code> 一个定容文件系统作 <code>SANDBOX_SCRATCH_ROOT</code>。硬墙落在正确的爆炸半径边界：race 窗口写穿也只是池子满、宿主无恙；独立 inode 表顺带兜住百万小文件轴。host-prep 几行进部署脚本 / fstab，dev mac 不做、风险接受。</li>
+<li><strong>per-turn watchdog（软配额）</strong>——容器活着期间，worker 每 <code>SANDBOX_WATCHDOG_INTERVAL_SEC</code> 对本 turn scratch 做 <code>du</code>（块占用，<code>to_thread</code>），超 <code>SANDBOX_WORKSPACE_QUOTA_MB</code> → 杀容器 + sticky 失败。管 turn 间公平，池子兜住其 race 缺陷后够用。</li>
+<li><strong>ReadonlyRootfs + 容器 <code>/tmp</code> bind 到该 turn scratch 子目录</strong>——堵 rootfs upper 洞，所有可写路径落池子，零内存开销。</li>
 </ol>
-<h2 id="design-decisions">Design Decisions</h2>
-<h3 id="为什么-agent-是数据不是类">为什么 Agent 是数据不是类</h3>
+<p>另对池子 <code>statvfs</code> 做起容器<strong>准入水位</strong>（<code>SANDBOX_POOL_MIN_FREE_MB</code>，O(1)）：剩余空间低于阈值时拒绝新沙盒，已在跑的 turn 不受影响（软配额归 watchdog）。</p>
+<blockquote>
+<p>否决了 tmpfs 方案（内存账难看：额度 × 并发预留 RAM、冷文件全程占内存）。</p>
+</blockquote>
+<h2 id="命令超时与输出溢出">命令超时与输出溢出</h2>
 <ul>
-<li><strong>降低扩展门槛</strong>：添加新 Agent 只需创建一个 <code>.md</code> 文件，不需要理解 Python 代码结构</li>
-<li><strong>热加载潜力</strong>：配置文件的修改不需要改动代码，未来可以实现运行时重载</li>
-<li><strong>关注点分离</strong>：Agent 的行为完全由提示词决定，执行逻辑统一在引擎中处理</li>
-<li><strong>可审查性</strong>：所有 Agent 的配置集中在 <code>config/agents/</code>，一目了然</li>
+<li><strong>每条命令超时</strong> = 容器内 <code>timeout --signal=KILL</code> 包 argv（exec argv 数组无引号问题），<code>SANDBOX_COMMAND_TIMEOUT</code> 秒。超时强杀 → exit 137，按时长归因为超时（与 OOM-kill 的同码区分）。</li>
+<li><strong>输出溢出两层</strong>：session 侧 <code>SANDBOX_MAX_OUTPUT_CHARS</code> 硬帽（超出继续 drain 但丢弃，防内存放大，带显式截断标记）；剩下 &gt; <code>max_result_size_chars</code>（50k）的部分由引擎的<a href="../tools/#超长工具结果自动落盘">超长工具结果落盘</a> idiom 接手，引擎零改动。</li>
 </ul>
-<h3 id="完成路由不对称性的意图">完成路由不对称性的意图</h3>
+<h2 id="孤儿回收-reaper">孤儿回收 reaper</h2>
+<p>进程死亡时 <code>finally</code> / <code>close()</code> 不执行（SIGKILL / OOM）会留下孤儿容器 + scratch 目录。<code>SandboxReaper</code>（<code>src/api/services/sandbox_reaper.py</code>）是这条路径的二级兜底，在 FastAPI lifespan 起停（仿 observability bootstrap）。</p>
+<p><strong>lease 是唯一的 liveness 真相源</strong>，但从 lease 永远发现不了「无 lease 的孤儿」，所以枚举必须<strong>资源侧</strong>、lease 作减法掩码：</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>孤儿 = （daemon 命名空间 label 容器 ∪ scratch 根直属目录） − list_active_executions() 活跃集
+</code></pre></div>
+<p>两条纪律：</p>
 <ul>
-<li><strong>Lead 是唯一出口</strong>：只有 Lead Agent 的无工具调用才会终止执行循环</li>
-<li><strong>Subagent 必须回传</strong>：Subagent 完成后其响应作为工具结果返回给 Lead，由 Lead 决定下一步</li>
-<li><strong>统一控制流</strong>：所有的任务调度、结果整合、最终响应都经过 Lead，避免 subagent 直接对用户输出</li>
-<li>这个设计使得 Lead 拥有全局视角，可以在多个 subagent 结果之间做出取舍和整合</li>
+<li><strong>对账粒度 per-turn</strong>：活跃判定是 <code>active.get(conv) == msg</code>，不是「该 conv 有没有任何活跃 turn」——否则同会话新 turn 持的活 lease 会永久屏蔽前一 turn 漏下的孤儿。</li>
+<li><strong>scratch 根枚举走 <code>sandbox_fs.list_dir</code></strong>（fd 钉住单层、不递归）：活容器能把子目录换成池外 symlink（目录 TOCTOU）。</li>
 </ul>
+<p>零误杀靠：lease（真相源）+ <strong>grace</strong>（<code>SANDBOX_REAP_GRACE_SEC</code>，躲「刚建、lease 还没可见」的差一拍；资源恒在 lease 之后创建，故 Redis 下这个竞争实际不存在）+ namespace 防御复核。</p>
+<p><strong>worker-id 归属</strong>：每进程 import 时生成 <code>WORKER_ID</code>，盖进每个容器的 label + scratch 目录名第三段。停机时 <code>final_sweep</code> 只对 <code>worker == WORKER_ID</code> 的资源<strong>绕 grace</strong> 立即回收（我的 turn 全停了 → 我的资源必是孤儿），与副本数无关；别的 worker / legacy 无 worker 目录仍走普通周期 grace，绝不被 no-grace 误删。</p>
+<p><strong>部署边界</strong>：reaper 默认只在共享 <code>RuntimeStore</code>（Redis）下启动。InMemory store 是进程内状态、单 worker 契约——多 worker 下 reaper 会误杀兄弟进程的活沙盒（InMemory 把「找不到 lease」的退化升级成了「删别人的活容器」的破坏）。InMemory 下默认不起 reaper，须经 <code>SANDBOX_REAP_ALLOW_LOCAL_STORE</code> 显式 opt-in（并自担单 worker 之责）。无沙盒部署（无 docker / 不授 bash）可 <code>SANDBOX_REAP_ENABLED=False</code> 免空轮询刷日志。</p>
+<h2 id="配置常量">配置常量</h2>
+<p>全部 <code>src/config.py</code>、<code>ARTIFACTFLOW_</code> 前缀环境变量可覆盖。模型不可调（克制工具参数面）。</p>
+<table>
+<thead>
+<tr>
+<th>常量</th>
+<th>默认</th>
+<th>含义</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>SANDBOX_IMAGE</code></td>
+<td><code>artifactflow-sandbox:latest</code></td>
+<td>沙盒镜像（与 backend 镜像 / requirements.lock 解耦，自己的 runtime）</td>
+</tr>
+<tr>
+<td><code>SANDBOX_RUNTIME</code></td>
+<td><code>""</code></td>
+<td>Docker runtime；<code>""</code> = daemon 默认（dev=runc），prod=<code>runsc</code></td>
+</tr>
+<tr>
+<td><code>SANDBOX_SCRATCH_ROOT</code></td>
+<td><code>/tmp/artifactflow-sandbox</code></td>
+<td>scratch 根；prod 挂成定容 loop 文件系统</td>
+</tr>
+<tr>
+<td><code>SANDBOX_COMMAND_TIMEOUT</code></td>
+<td><code>300</code></td>
+<td>单条命令秒上限（容器内 <code>timeout --signal=KILL</code>）。曾=120 兼任最坏 cancel 延迟上界；cancel-interrupt（工具 await 期可被打断，见 execution-lifecycle.md）落地后只剩 runaway 一职，放宽</td>
+</tr>
+<tr>
+<td><code>SANDBOX_START_TIMEOUT</code></td>
+<td><code>60</code></td>
+<td>容器 create+start 秒上限（daemon 卡死 loud-fail，不 wedge 整 turn）</td>
+</tr>
+<tr>
+<td><code>SANDBOX_MEM_LIMIT_MB</code></td>
+<td><code>1024</code></td>
+<td>容器内存上限（MemorySwap 同值 = 禁 swap）</td>
+</tr>
+<tr>
+<td><code>SANDBOX_CPU_LIMIT</code></td>
+<td><code>1.0</code></td>
+<td>CPU 核数上限</td>
+</tr>
+<tr>
+<td><code>SANDBOX_PIDS_LIMIT</code></td>
+<td><code>256</code></td>
+<td>fork 炸弹闸</td>
+</tr>
+<tr>
+<td><code>SANDBOX_MAX_OUTPUT_CHARS</code></td>
+<td><code>200_000</code></td>
+<td>单命令输出捕获硬帽</td>
+</tr>
+<tr>
+<td><code>SANDBOX_STATUS_MAX_ENTRIES</code></td>
+<td><code>20</code></td>
+<td>动态状态注入的工作区清单条数帽（有界扫 cap+1 即停，超出显式 truncated 标记）</td>
+</tr>
+<tr>
+<td><code>SANDBOX_WORKSPACE_QUOTA_MB</code></td>
+<td><code>2048</code></td>
+<td>per-turn scratch 软配额（watchdog 超额杀）</td>
+</tr>
+<tr>
+<td><code>SANDBOX_WATCHDOG_INTERVAL_SEC</code></td>
+<td><code>5</code></td>
+<td>watchdog 巡检周期</td>
+</tr>
+<tr>
+<td><code>SANDBOX_POOL_MIN_FREE_MB</code></td>
+<td><code>1024</code></td>
+<td>起容器准入水位</td>
+</tr>
+<tr>
+<td><code>SANDBOX_PERSIST_MAX_TEXT_BYTES</code></td>
+<td><code>20 MiB</code></td>
+<td>persist 文本判定上限，超此按 blob</td>
+</tr>
+<tr>
+<td><code>SANDBOX_REAP_ENABLED</code></td>
+<td><code>True</code></td>
+<td>reaper 总开关</td>
+</tr>
+<tr>
+<td><code>SANDBOX_REAP_INTERVAL_SEC</code></td>
+<td><code>60</code></td>
+<td>reaper 周期扫间隔</td>
+</tr>
+<tr>
+<td><code>SANDBOX_REAP_GRACE_SEC</code></td>
+<td><code>60</code></td>
+<td>只回收存活超此且无活跃 lease 的资源</td>
+</tr>
+<tr>
+<td><code>SANDBOX_REAP_ALLOW_LOCAL_STORE</code></td>
+<td><code>False</code></td>
+<td>InMemory 下显式 opt-in reaper（自担单 worker 之责）</td>
+</tr>
+</tbody>
+</table>
 
 
 

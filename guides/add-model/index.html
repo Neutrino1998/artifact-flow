@@ -638,6 +638,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../architecture/sandbox/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sandbox
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../architecture/artifacts/" class="md-nav__link">
         
   
@@ -1669,6 +1697,11 @@
 <td><code>api_key</code></td>
 <td>string</td>
 <td>硬编码 API key（不推荐，优先用环境变量）</td>
+</tr>
+<tr>
+<td><code>vision</code></td>
+<td>bool</td>
+<td>多模态（识图）支持，默认 <code>false</code>。<code>read_artifact</code> 据此决定是否向该模型注入图块：<code>true</code> → 读图时收 <code>image_url</code> 多模态块；<code>false</code> → 只得占位文本（不发图块——文本模型收到会被 provider 端拒）。多模态模型<strong>不声明就拿不到识图能力</strong></td>
 </tr>
 <tr>
 <td><code>params.temperature</code></td>

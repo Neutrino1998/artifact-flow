@@ -641,6 +641,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../sandbox/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sandbox
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../artifacts/" class="md-nav__link">
         
   
@@ -1939,7 +1967,7 @@
         string parent_id "自引用，形成树"
         text user_input "display-only，原始用户输入"
         text response "display-only，终轮 assistant 文本"
-        json metadata "always_allowed_tools / metrics / last_input_tokens"
+        json metadata "always_allowed_tools / metrics / uploaded_files"
     }
     ArtifactSession {
         string id PK "= conversation_id"
@@ -2243,7 +2271,7 @@
 </ul>
 <h3 id="为什么-messagemetadata_-用-json-而非规范化列">为什么 Message.metadata_ 用 JSON 而非规范化列</h3>
 <ul>
-<li><code>metadata</code> 承载异质字段：<code>always_allowed_tools</code> / <code>execution_metrics</code> 汇总 / <code>last_input_tokens</code></li>
+<li><code>metadata</code> 承载异质字段：<code>always_allowed_tools</code> / <code>execution_metrics</code> 汇总（内嵌 <code>last_input_tokens</code>）/ <code>uploaded_files</code>（本轮上传文件 <code>[{id, filename}]</code> 的 display 快照，供用户气泡重载后渲染附件；best-effort —— flush 失败的轮次不写）</li>
 <li>这些字段增减频繁且只有 Manager 层读写，规范化成列需频繁迁移</li>
 <li>JSON 列牺牲了 SQL 级查询能力，但换取 schema 稳定性 — 符合中小 SaaS 的迭代节奏</li>
 </ul>

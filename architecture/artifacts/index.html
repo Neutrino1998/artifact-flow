@@ -13,7 +13,7 @@
         <link rel="canonical" href="https://neutrino1998.github.io/artifact-flow/architecture/artifacts/">
       
       
-        <link rel="prev" href="../tools/">
+        <link rel="prev" href="../sandbox/">
       
       
         <link rel="next" href="../data-layer/">
@@ -621,6 +621,34 @@
     
   
     Tools
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sandbox/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sandbox
   
 
     
@@ -1865,7 +1893,7 @@
 <li>turn <strong>执行中</strong>，REST 返回上一次 <code>flush_all</code> 的快照，<strong>落后于 live</strong>；turn 内的实时内容由 SSE 的 <code>ARTIFACT_*</code> 事件推给前端 reduce（见下文），不经 REST</li>
 <li>turn 结束（<code>flush_all</code> 落库）后，REST 即拿到权威最新态</li>
 </ul>
-<p>这是有意的权衡（plan 决策 6）：读类操作绕过只会让调用者自己看到稍旧的内容，伤不到别人 → 用前端 UX 锁（流式中隐藏版本选择器 / 导出）兜，后端保持纯 DB、宽松、多 worker 安全。对比写 / 执行类（发消息 / cancel / 开分支 / delete）绕过会冲突 → 必须后端 lease（409）/ ownership（404）强制。</p>
+<p>这是有意的权衡（plan 决策 6）：读类操作绕过只会让调用者自己看到稍旧的内容，伤不到别人 → 用前端 UX 锁（流式中隐藏版本选择器 / 下载入口）兜，后端保持纯 DB、宽松、多 worker 安全。对比写 / 执行类（发消息 / cancel / 开分支 / delete）绕过会冲突 → 必须后端 lease（409）/ ownership（404）强制。</p>
 <h2 id="operations-语义">Operations 语义</h2>
 <h3 id="create_artifact">create_artifact</h3>
 <ul>
@@ -1926,7 +1954,7 @@
 </table>
 <p><strong>为什么 SSE-only 不持久化</strong>：artifact 有专属持久家（artifact 表 + 版本表），<code>MessageEvent</code> 里再存一份正文无任何读者；冷启动 / 断线重连靠 <code>flush_all</code> 后的 DB 权威态重建。</p>
 <p><strong>同步 base 由后端负责</strong>（关键不变量）：<code>delta</code> 的 offset 是相对"本轮前几次编辑之后"的内容，DB 只能当第一条 delta 的 base。Service 用 <code>_emitted_base</code> 集合跟踪"前端是否已拿到该 artifact 的整文 base"——任一 artifact 本轮的<strong>首个</strong> live 事件强制发整文（create / rewrite / 首次 update 皆整文），其后才发 delta。于是前端是个<strong>纯同步 reducer</strong>（先有 base 再 apply delta），无需在 live 路径上查 DB 取 base，事件流自包含（断线重连重放即可重建）。正文超上限省略时退化为发信号、靠 <code>COMPLETE</code> 后 DB 对齐。</p>
-<p>REST 一致性见上文 <a href="#执行期间的-rest-api-读取">执行期间的 REST API 读取</a>：所有 GET 纯 DB，turn 中落后于 live；<code>versions[]</code> / <code>export</code> 同样 DB-only，未 flush 的中间版本返回 404。前端在流式执行期间隐藏版本选择器和 export 入口规避滞后。</p>
+<p>REST 一致性见上文 <a href="#执行期间的-rest-api-读取">执行期间的 REST API 读取</a>：所有 GET 纯 DB，turn 中落后于 live；<code>versions[]</code> / <code>raw</code>（二进制原件下载）同样 DB-only，未 flush 的中间版本 / 本轮刚上传的 blob 返回 404。前端在流式执行期间隐藏版本选择器和下载入口规避滞后。</p>
 <h2 id="upload-并入统一生命周期">Upload 并入统一生命周期</h2>
 <blockquote>
 <p>旧设计有一个独立的 <code>POST /artifacts/upload</code> 端点，<code>create_from_upload()</code> <strong>绕过 write-back</strong> 直接 commit。该端点已删除，上传并入消息提交的统一生命周期。</p>
@@ -1935,7 +1963,7 @@
 <ul>
 <li>文件名中特殊字符经 <code>_normalize_filename_to_id()</code>（<code>re.sub(r'[^\w\-.]', '_', ...)</code> + 长度截断）清洗成 artifact_id base；与 WorkingSet + DB 现有 id 冲突时追加 <code>_N</code> 后缀自动去重</li>
 <li>上传 artifact 的 <code>source="user_upload"</code>，在 Artifact Inventory 中与 agent 创建的条目区分展示</li>
-<li>staging 失败（gatekeeper 拒绝 / 异常）→ 引擎回滚已 stage 的上传（<code>discard_staged</code>）并 loud-abort 本轮；终态的 <code>artifacts_flushed</code> 据 <code>uploads_rolled_back</code> 修正为 false，前端保留输入框附件供重试</li>
+<li>staging 失败（gatekeeper 拒绝 / 异常）→ 引擎回滚已 stage 的上传（<code>discard_staged</code>）并 loud-abort 本轮（记 <code>error_detail</code>，由 <code>decide_terminal</code> 统一发 ERROR 终态）</li>
 </ul>
 <blockquote>
 <p><strong>历史包袱已消除</strong>：旧的"先即时 commit 再在 submit 时重复 staging"会产生 <code>_N</code> 副本 bug——把提交退到 submit 之后、并入引擎生命周期后该 bug 自然消失。</p>

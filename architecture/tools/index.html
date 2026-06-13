@@ -16,7 +16,7 @@
         <link rel="prev" href="../agents/">
       
       
-        <link rel="next" href="../artifacts/">
+        <link rel="next" href="../sandbox/">
       
       
         
@@ -943,6 +943,34 @@
   
 </nav>
       
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sandbox/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sandbox
+  
+
+    
+  </span>
+  
+  
+
+      </a>
     </li>
   
 
@@ -1983,14 +2011,36 @@ ToolCall</strong>（不再 salvage 残缺内容，因为残缺的 <code>new_str<
 <td><code>call_subagent</code></td>
 <td><code>CallSubagentTool</code></td>
 <td>AUTO</td>
-<td><code>agent_name</code> (string), <code>instruction</code> (string)</td>
-<td>调用 subagent（仅路由验证，不执行）</td>
+<td><code>agent_name</code> (string), <code>instruction</code> (string), <code>fresh_start</code> (boolean, 默认 true)</td>
+<td>调用 subagent（仅路由验证，不执行）；<code>fresh_start=false</code> 时延续本 session 中该 subagent 上一次会话的上下文</td>
+</tr>
+<tr>
+<td><code>bash</code></td>
+<td><code>BashTool</code></td>
+<td><strong>CONFIRM</strong></td>
+<td><code>command</code> (string)</td>
+<td>在本轮沙盒容器内执行 bash（跑不可信模型代码 → CONFIRM）。详见 <a href="../sandbox/">sandbox.md</a></td>
+</tr>
+<tr>
+<td><code>mount</code></td>
+<td><code>MountArtifactTool</code></td>
+<td>AUTO</td>
+<td><code>artifact_id</code> (string)</td>
+<td>把一个 artifact 物化进沙盒工作区（显式 stage-in）</td>
+</tr>
+<tr>
+<td><code>persist</code></td>
+<td><code>PersistFileTool</code></td>
+<td>AUTO</td>
+<td><code>path</code> (string)</td>
+<td>把工作区文件回写成<strong>新 artifact</strong>（显式 stage-out）</td>
 </tr>
 </tbody>
 </table>
 <p><strong>注意：</strong></p>
 <ul>
 <li>Artifact 工具（create/update/rewrite/read/grep）是请求级创建的（绑定 <code>ArtifactService</code> 实例），名称为保留名（<code>RESERVED_TOOL_NAMES</code>），自定义工具不可同名</li>
+<li><strong>沙盒工具（<code>bash</code> / <code>mount</code> / <code>persist</code>）也是请求级创建的</strong>（<code>create_sandbox_tools</code>，绑定一个 per-turn <code>SandboxSession</code> + <code>ArtifactService</code>），容器 <strong>lazy</strong> 于首个沙盒工具调用。三者是语义不同的动词、共享一个 session；只挂在拥有它们的 agent（当前 <code>lead</code> / <code>research</code>）的 <code>tools</code> 白名单里。机制全貌见 <a href="../sandbox/">sandbox.md</a></li>
 <li><code>read_artifact</code> 不分页 / 无 <code>limit</code> 时仍受隐藏字符上限 <code>READ_ARTIFACT_MAX_CHARS</code>（默认 50000）保护，超出后 <code>has_more=true</code> 并附续读 hint，模型按 hint 调用下一段</li>
 <li><code>call_subagent</code> 的 <code>execute()</code> 仅做路由验证（目标 agent 是否存在、是否非 internal），实际的 agent 切换由引擎的 <code>_execute_tools</code> 处理</li>
 </ul>

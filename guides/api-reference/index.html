@@ -638,6 +638,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../architecture/sandbox/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sandbox
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../architecture/artifacts/" class="md-nav__link">
         
   
@@ -2347,7 +2375,7 @@
 <tr>
 <td><code>422</code></td>
 <td>请求不合法</td>
-<td>参数校验（含口令强度、用户名字符）、文件过大、格式不支持</td>
+<td>参数校验（含口令强度、用户名字符）、文件过大、png/jpg 图片探测失败</td>
 </tr>
 <tr>
 <td><code>429</code></td>
@@ -2743,7 +2771,7 @@
 </ul>
 <hr />
 <h2 id="artifacts">Artifacts</h2>
-<p><code>/api/v1/artifacts</code> — 读取、导出、版本管理。<strong>只读（全是 GET）</strong>：artifact 的产生（agent 创建 / 用户上传）都不经此路由。</p>
+<p><code>/api/v1/artifacts</code> — 读取、版本管理、二进制原件下载。<strong>只读（全是 GET）</strong>：artifact 的产生（agent 创建 / 用户上传）都不经此路由。</p>
 <table>
 <thead>
 <tr>
@@ -2774,25 +2802,27 @@
 </tr>
 <tr>
 <td>GET</td>
-<td><code>/{session_id}/{artifact_id}/export?format=docx</code></td>
+<td><code>/{session_id}/{artifact_id}/raw</code></td>
 <td>用户</td>
-<td>导出为 DOCX</td>
+<td>二进制原件字节（图片 inline，其余 attachment 下载；纯文本 artifact 无 blob → <code>404</code>）</td>
 </tr>
 </tbody>
 </table>
+<p>artifact 分两类，由响应里的 <code>has_blob</code> 判别：<strong>文本类</strong>（md/py/csv 等）<code>content</code> 即正文、可编辑可版本化；<strong>二进制类</strong>（上传的图片 / docx / pdf）<code>content</code> 为空、源不可变单版，字节走 <code>/raw</code>，<code>content_type</code> 即原件真实 MIME。富格式不做服务端文本转换——读/转换是沙盒能力（见 <a href="../../architecture/artifacts/">../architecture/artifacts.md</a>）。</p>
 <h3 id="上传走-post-chat不在本路由">上传走 <code>POST /chat</code>，不在本路由</h3>
 <p>旧的 <code>POST /artifacts/upload</code> 与 <code>POST /{session_id}/upload</code>（即时 commit）已删除。上传现在并入消息提交：</p>
 <ul>
 <li><code>POST /api/v1/chat</code>，<code>multipart/form-data</code>：文本走 <code>payload</code> 表单字段（<code>ChatRequest</code> JSON，文本键为 <code>user_input</code>），附件走 <code>files</code>（可多文件），同一请求。<strong>没有 <code>message</code> 字段</strong>——按 <code>message + files</code> 调会因缺 <code>payload</code> 直接 422</li>
-<li>大小上限：<code>config.MAX_UPLOAD_SIZE</code>（环境可配，默认见 <a href="../../deployment/">deployment.md</a>）；<code>422</code> 触发：超限、格式不支持（<code>convert_uploaded_file</code> 在写库前做 size-check + 转换）</li>
+<li><strong>格式：任意文件都收</strong>（上传路由翻转，2026-06-11）——路由纯声明式按扩展名三分：文本白名单解码为 artifact <code>content</code>；png/jpeg 走识图路由（识图仅此两种）；<strong>其余一律存为二进制 blob artifact</strong>（不试解码不验 magic；真实 MIME，模型可 <code>mount</code> 进沙盒检视/转换，用户可下载原件）。没有扩展名拒绝名单</li>
+<li>大小上限：单文件 <code>config.MAX_UPLOAD_SIZE</code>（环境可配，默认 100MB，见 <a href="../../deployment/">deployment.md</a>）；批量总字节由代理层独立封顶（200MB → <code>413</code>）。<strong>注</strong>：文本路径另有更低的独立上限 <code>config.MAX_TEXT_CONVERT_BYTES</code>（默认 20MB）——文本整份变成 artifact <code>content</code>（无 blob），故比 blob 路径收得紧；<strong>超文本帽不再 422，落为 blob</strong>（可下载、可 mount 进沙盒处理）。<code>422</code> 触发仅剩两类：单文件超 <code>MAX_UPLOAD_SIZE</code>、png/jpg 扩展名但 Pillow 探不出合法 PNG/JPEG（含超像素炸弹；识图路由是上传期决策，这道闸保证路由正确性）</li>
 <li>转换后的内容 closure-carry 进引擎，在 turn 起点经 <code>create_from_upload</code> <strong>stage 进 WorkingSet</strong>（发 <code>ARTIFACT_CREATED</code>、随 turn 末 <code>flush_all</code> 落库），与 agent 自建 artifact 走<strong>同一统一生命周期</strong>——不再绕过 write-back、不再即时 commit（见 <a href="../../architecture/artifacts/">../architecture/artifacts.md</a>）</li>
 </ul>
 <h3 id="读取的即时性">读取的即时性</h3>
 <p>删除 <code>_active_managers</code> overlay 后，所有 GET <strong>均为纯 DB 读</strong>（请求级 <code>ArtifactService</code> 自带空 WorkingSet）：</p>
 <ul>
 <li>turn <strong>执行中</strong>，REST 返回的是上一次 <code>flush_all</code> 的快照，<strong>落后于 live</strong>；turn 内的实时内容由 SSE 的 <code>ARTIFACT_CREATED</code> / <code>ARTIFACT_UPDATED</code> 事件推给前端 reduce（见 <a href="../../architecture/streaming/">streaming.md</a> / <a href="../../architecture/artifacts/">artifacts.md</a>），不经 REST</li>
-<li><code>GET .../versions/{version}</code> 与 <code>GET .../export</code> 同样只读 DB：执行中未 flush 的中间版本返回 <code>404</code></li>
-<li>前端据此在流式执行期间隐藏版本选择器 / 导出入口（纯前端读类 UX 锁，后端保持宽松）</li>
+<li><code>GET .../versions/{version}</code> 与 <code>GET .../raw</code> 同样只读 DB：执行中未 flush 的中间版本 / 本轮刚上传未落库的 blob 返回 <code>404</code></li>
+<li>前端据此在流式执行期间隐藏版本选择器 / 下载入口（纯前端读类 UX 锁，后端保持宽松）；本轮上传的图片由前端 send-local File 缓存即时渲染、二进制卡片只靠事件元数据渲染，均不在 turn 内打 <code>/raw</code></li>
 </ul>
 <hr />
 <h2 id="stream-sse">Stream (SSE)</h2>

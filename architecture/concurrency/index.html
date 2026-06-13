@@ -641,6 +641,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../sandbox/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sandbox
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../artifacts/" class="md-nav__link">
         
   
@@ -2246,8 +2274,8 @@
 </tr>
 <tr>
 <td><code>COMPACTION_TIMEOUT</code></td>
-<td>120s</td>
-<td>单次 compact LLM 调用超时（引擎内同步触发）</td>
+<td>300s</td>
+<td>单次 compact LLM 调用超时（引擎内同步触发；thinking 模型压 ~100k token 输入 TTFT 长，120s 偏紧）</td>
 </tr>
 <tr>
 <td><code>SSE_PING_INTERVAL</code></td>

@@ -661,6 +661,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#协作式-cancel-的消费点可打断-await" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        协作式 cancel 的消费点（可打断 await）
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#timed_out-的产出" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -767,6 +778,34 @@
     
   
     Tools
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sandbox/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sandbox
   
 
     
@@ -1315,6 +1354,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#协作式-cancel-的消费点可打断-await" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        协作式 cancel 的消费点（可打断 await）
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#timed_out-的产出" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1495,7 +1545,7 @@
 <tr>
 <td><code>* → CLOSED</code></td>
 <td><code>_wrapped</code> finally</td>
-<td>release lease；clear interactive；close stream</td>
+<td>先跑本轮注册的资源 cleanup 回调（<code>runner.register_cleanup</code>，逆序、每个 30s 有界弃等；当前唯一注册方是沙盒拆除，见 <a href="../sandbox/">sandbox.md</a>）→ release lease；clear interactive；close stream。顺序刻意：资源先于 lease 消亡，不留「lease 已放、容器还在」的孤儿窗口（进程崩溃跳过 finally 的残留由 reaper 兜底）</td>
 </tr>
 </tbody>
 </table>
@@ -1507,6 +1557,53 @@
 <li><strong>代价极小</strong>：排队轮消耗零算力、只会排在<em>其他会话</em>后面（同一会话 lease 单写、排不起队）、且很快起槽起跑；起跑（RUNNING）后 cancel 即刻可用 —— 此时 flag 在持有该轮的 worker 上、几秒内即被 <code>check_cancelled</code> 读到，跨 worker 正确、无需续期。</li>
 </ul>
 <p>所以一个排队轮要么 advance 到 RUNNING（之后可 cancel），要么被 abort/fence → ORPHANED；用户在排队期间的「取消」诉求由「起跑后立即可取消」承接（best-effort 契约）。</p>
+<h2 id="协作式-cancel-的消费点可打断-await">协作式 cancel 的消费点（可打断 await）</h2>
+<p>flag（<code>store.request_cancel</code> → <code>hooks.check_cancelled</code>）在引擎内的全部消费点：</p>
+<table>
+<thead>
+<tr>
+<th>消费点</th>
+<th>机制</th>
+<th>cancel 延迟</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>while 顶部 / 每个工具执行前</td>
+<td>直接查 flag</td>
+<td>即时</td>
+</tr>
+<tr>
+<td>LLM 流式期间</td>
+<td>chunk 间轮询（节流 <code>CANCEL_CHECK_INTERVAL</code>）</td>
+<td>≤ 间隔（TTFT 前无 chunk 是已知遗留，由 LLM 层超时兜底）</td>
+</tr>
+<tr>
+<td>permission 等待期间</td>
+<td><code>request_cancel</code> 直接 resolve pending interrupt（approved=False）</td>
+<td>即时</td>
+</tr>
+<tr>
+<td><strong>工具 await 在飞期间</strong></td>
+<td><code>core/cancellation.run_cancellable</code>：工具跑子 task，按 <code>CANCEL_CHECK_INTERVAL</code> 轮询，命中 <code>task.cancel()</code> 在飞调用</td>
+<td>≤ 间隔</td>
+</tr>
+<tr>
+<td><strong>compaction LLM 调用期间</strong></td>
+<td>同上（<code>CompactionRunner</code> 经 <code>check_cancelled</code> 谓词）</td>
+<td>≤ 间隔</td>
+</tr>
+</tbody>
+</table>
+<p>后两行是 2026-06 cancel-interrupt 切片补上的：此前工具 await / compaction 调用是盲窗，cancel 延迟 = 该 await 的内部超时（bash <code>SANDBOX_COMMAND_TIMEOUT</code>、HttpTool per-MD <code>timeout</code>、compaction <code>COMPACTION_TIMEOUT</code>——默认配置下最坏 300s，且 HttpTool 的 timeout 运维可任意设大，盲窗会随 API 工具生态膨胀）。打断后的事件流保持不变量：被打断的工具发配对 <code>TOOL_COMPLETE</code>（success=False，"Cancelled by user…"，下一轮历史里模型可见）；被打断的 compaction 配对 success=False <code>compaction_summary</code> 占位（无 boundary），turn 以 CANCELLED（非 ERROR）收口。</p>
+<p>四点辨析：</p>
+<ul>
+<li><strong>不是新的工具契约</strong>——<code>EXECUTION_TIMEOUT</code> 的 <code>asyncio.timeout</code> 本来就会在任意 await 中间 cancel 整个 engine task，工具早已被要求 cancel-safe；本切片只是让它更频繁发生。GIL 警告同样适用（钉住 GIL 的同步 CPU 工具打不断，工具作者自兜 wall-clock）。</li>
+<li><strong>与外部 cancel 不混淆</strong>——<code>run_cancellable</code> 只 cancel 子 task、绝不 cancel 自己；外部 <code>task.cancel()</code>（fencing / 引擎超时）打进轮询处时转发给子 task 后原样 re-raise。包括「协作取消后等子 task 收尾」的窗口：该处 <code>await task</code> 的 <code>CancelledError</code> 用 <code>current_task().cancelling() &gt; 0</code> 判别来源，外部 cancel 一律让位（否则 fenced task 会以协作路径继续跑 post-processing = 静默第二写者）。</li>
+<li><strong>探针故障 fail-open</strong>——所有消费点统一经 engine 的 <code>_is_cancelled</code> 软化谓词：探针（Redis）瞬断按「未取消」处理 + warning 日志，下一拍自然重试，<strong>绝不让探针异常往上穿</strong>——否则它落在哪个消费点就伪装成哪个消费点的故障（工具被杀且记成工具失败 / "LLM call failed" / turn ERROR）。探针是纯 UX 信号；store 持续不可用的 fail-closed 兜底在 heartbeat/lease 层（连续失败 → 外部 <code>task.cancel</code>）。<code>run_cancellable</code> 原语本身保持严格透传（谓词异常照样收掉子 task 后穿透）——策略归调用方。</li>
+<li><strong>cancel ≠ 撤回已发出的请求</strong>——HTTP 调用被打断时请求可能已到达上游（副作用未知），与超时路径语义相同，不是新风险；工具错误文案对模型如实声明。</li>
+</ul>
+<p>剥离「最坏 cancel 延迟上界」职责后，<code>SANDBOX_COMMAND_TIMEOUT</code> 只剩 runaway 命令上界一职（默认 120→300s），HttpTool 默认 timeout 30→60s（per-MD 可放心设大）。</p>
 <h2 id="timed_out-的产出"><code>TIMED_OUT</code> 的产出</h2>
 <p>超时裁判<strong>在引擎内</strong>，不停在传输层：</p>
 <ol>
@@ -1616,6 +1713,11 @@
 <td>cooperative cancel</td>
 <td>cooperative 分支 + adopt cooperative</td>
 <td><code>test_cooperative_cancel_writes_response_by_user</code></td>
+</tr>
+<tr>
+<td>cancel 打断在飞 await</td>
+<td><code>tests/core/test_cancellation.py</code>（<code>run_cancellable</code> 原语）+ <code>test_compaction_runner.py</code>（占位配对）</td>
+<td><code>test_engine_execution.py</code>（<code>test_cancel_interrupts_in_flight_tool</code> / <code>test_cancel_during_compaction_routes_to_cancelled</code>）</td>
 </tr>
 <tr>
 <td>external cancel（执行中）</td>
