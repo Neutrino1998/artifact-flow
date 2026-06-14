@@ -395,6 +395,34 @@ class TestBlobByteAggregation:
     ):
         assert await artifact_repo.get_blob_bytes_by_sessions([]) == {}
 
+    async def test_for_session_sums_owner_across_all_sessions(
+        self,
+        artifact_repo: ArtifactRepository,
+        conversation_repo: ConversationRepository,
+        test_user: User,
+    ):
+        # The single-query chokepoint helper: given ANY one of the owner's
+        # sessions, it returns the owner's FULL total across all their sessions.
+        c1 = await self._conv_with_blob(conversation_repo, artifact_repo, test_user.id, 100)
+        await self._conv_with_blob(conversation_repo, artifact_repo, test_user.id, 250)
+        assert await artifact_repo.get_user_blob_bytes_for_session(c1) == 350
+
+    async def test_for_session_ownerless_returns_zero(
+        self,
+        artifact_repo: ArtifactRepository,
+        conversation_repo: ConversationRepository,
+    ):
+        # Ownerless conversation → owner subquery is NULL → no rows match → 0.
+        # (The chokepoint's numeric check still bounds a single oversized blob.)
+        conv_id = f"conv-{uuid.uuid4().hex}"
+        await conversation_repo.create_conversation(conversation_id=conv_id, user_id=None)
+        await artifact_repo.create_artifact(
+            session_id=conv_id, artifact_id="a.bin",
+            content_type="application/octet-stream", title="b", content="",
+            blob=b"x" * 500,
+        )
+        assert await artifact_repo.get_user_blob_bytes_for_session(conv_id) == 0
+
 
 # ============================================================
 # Batch operations

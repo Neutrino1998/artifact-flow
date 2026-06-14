@@ -10,10 +10,26 @@ import uuid
 
 import pytest
 
+from config import config
 from db.models import User
 from repositories.artifact_repo import ArtifactRepository
 from repositories.conversation_repo import ConversationRepository
 from tools.builtin.artifact_service import ArtifactService
+
+
+async def _persist_blob(
+    artifact_service: ArtifactService, session_id: str, name: str, size: int
+):
+    """Stage a blob-backed artifact the way sandbox persist does (source=sandbox)."""
+    return await artifact_service.create_from_upload(
+        session_id=session_id,
+        filename=name,
+        content="",
+        content_type="application/octet-stream",
+        blob=b"x" * size,
+        blob_content_type="application/octet-stream",
+        source="sandbox",
+    )
 
 
 @pytest.fixture
@@ -667,3 +683,94 @@ class TestBinaryArtifactImmutable:
         aid = await self._upload_docx(artifact_service, session_id)
         result = await artifact_service.read_artifact(session_id, aid)
         assert result["blob_content_type"] == _DOCX_MIME
+
+
+class TestUploadQuota:
+    """per-user blob 配额在写入侧 chokepoint(create_from_upload)守门 —— 覆盖上传 +
+    沙盒 persist,计入「DB 已落 + 本轮已 stage 未 flush」的 blob。这是 reviewer P1
+    的回归:沙盒 persist 此前完全绕过配额。"""
+
+    async def test_blob_under_quota_succeeds(
+        self, artifact_service: ArtifactService, session_id: str, monkeypatch
+    ):
+        monkeypatch.setattr(config, "ARTIFACT_USER_QUOTA_BYTES", 1000)
+        ok, msg, info = await _persist_blob(artifact_service, session_id, "a.bin", 500)
+        assert ok, msg
+        assert info is not None
+
+    async def test_blob_over_quota_rejected_and_not_staged(
+        self, artifact_service: ArtifactService, session_id: str, monkeypatch
+    ):
+        monkeypatch.setattr(config, "ARTIFACT_USER_QUOTA_BYTES", 1000)
+        ok, msg, info = await _persist_blob(artifact_service, session_id, "big.bin", 1500)
+        assert not ok
+        assert info is None
+        assert "quota" in msg.lower()
+        # Rejected blob must not have been staged into the WorkingSet.
+        staged = artifact_service.working_set.cached(session_id)
+        assert all(m.blob is None for m in staged.values())
+
+    async def test_quota_counts_staged_within_turn(
+        self, artifact_service: ArtifactService, session_id: str, monkeypatch
+    ):
+        # Each alone fits under 1000, but 600 + 600 staged this turn exceeds it —
+        # the second persist must be rejected (the in-flight staged-bytes subtlety).
+        monkeypatch.setattr(config, "ARTIFACT_USER_QUOTA_BYTES", 1000)
+        ok1, _, _ = await _persist_blob(artifact_service, session_id, "f1.bin", 600)
+        assert ok1
+        ok2, msg2, _ = await _persist_blob(artifact_service, session_id, "f2.bin", 600)
+        assert not ok2
+        assert "quota" in msg2.lower()
+
+    async def test_quota_counts_committed_after_flush(
+        self, artifact_service: ArtifactService, session_id: str, monkeypatch
+    ):
+        monkeypatch.setattr(config, "ARTIFACT_USER_QUOTA_BYTES", 1000)
+        ok1, _, _ = await _persist_blob(artifact_service, session_id, "f1.bin", 600)
+        assert ok1
+        await artifact_service.flush_all(session_id)
+        # committed=600 now; another 600 → 1200 > 1000 → reject.
+        ok2, msg2, _ = await _persist_blob(artifact_service, session_id, "f2.bin", 600)
+        assert not ok2
+        assert "quota" in msg2.lower()
+
+    async def test_quota_counts_across_user_sessions(
+        self,
+        artifact_service: ArtifactService,
+        artifact_repo: ArtifactRepository,
+        conversation_repo: ConversationRepository,
+        test_user: User,
+        session_id: str,
+        monkeypatch,
+    ):
+        # A different conversation of the SAME user already holds 700 committed
+        # bytes → persisting 600 more in this session crosses the 1000 quota.
+        other = f"conv-{uuid.uuid4().hex}"
+        await conversation_repo.create_conversation(conversation_id=other, user_id=test_user.id)
+        await artifact_repo.create_artifact(
+            session_id=other, artifact_id="prev.bin",
+            content_type="application/octet-stream", title="prev", content="",
+            blob=b"x" * 700,
+        )
+        monkeypatch.setattr(config, "ARTIFACT_USER_QUOTA_BYTES", 1000)
+        ok, msg, _ = await _persist_blob(artifact_service, session_id, "f.bin", 600)
+        assert not ok
+        assert "quota" in msg.lower()
+
+    async def test_text_persist_not_gated(
+        self, artifact_service: ArtifactService, session_id: str, monkeypatch
+    ):
+        # blob=None (text) is never counted — even a 1-byte quota lets it through.
+        monkeypatch.setattr(config, "ARTIFACT_USER_QUOTA_BYTES", 1)
+        ok, msg, _ = await artifact_service.create_from_upload(
+            session_id=session_id, filename="note.txt", content="x" * 10000,
+            content_type="text/plain", source="sandbox",
+        )
+        assert ok, msg
+
+    async def test_quota_disabled_when_zero(
+        self, artifact_service: ArtifactService, session_id: str, monkeypatch
+    ):
+        monkeypatch.setattr(config, "ARTIFACT_USER_QUOTA_BYTES", 0)
+        ok, msg, _ = await _persist_blob(artifact_service, session_id, "big.bin", 10_000_000)
+        assert ok, msg

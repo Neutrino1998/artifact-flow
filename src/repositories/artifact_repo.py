@@ -317,6 +317,28 @@ class ArtifactRepository(BaseRepository[Artifact]):
         result = await self._session.execute(stmt)
         return int(result.scalar_one())
 
+    async def get_user_blob_bytes_for_session(self, session_id: str) -> int:
+        """该 session 属主已占用的 blob 总字节（跨属主全部会话），**一趟查询**。
+
+        写入侧 chokepoint（create_from_upload）只有 session_id，配额却是 per-user 跨
+        全部会话；子查询内联解析属主，免去额外一趟 owner 查询。无主会话 → 子查询
+        NULL → `user_id = NULL` 匹配不到 → 返回 0（单个超大 blob 仍由数值判定拦下）。
+        只读 size_bytes，走 ix_artifact_blobs_session_size（index-only）。
+        """
+        owner = (
+            select(Conversation.user_id)
+            .where(Conversation.id == session_id)
+            .scalar_subquery()
+        )
+        stmt = (
+            select(func.coalesce(func.sum(ArtifactBlob.size_bytes), 0))
+            .select_from(ArtifactBlob)
+            .join(Conversation, Conversation.id == ArtifactBlob.session_id)
+            .where(Conversation.user_id == owner)
+        )
+        result = await self._session.execute(stmt)
+        return int(result.scalar_one())
+
     async def get_blob_bytes_by_sessions(self, session_ids: List[str]) -> Dict[str, int]:
         """一批 session 各自的 blob 总字节（GROUP BY）。
 

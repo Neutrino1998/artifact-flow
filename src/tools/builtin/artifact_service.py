@@ -339,6 +339,32 @@ class ArtifactService:
                 f"(max {max_mb:.0f}MB)"
             ), None
 
+        # per-用户 blob 配额：写入侧的真正守门。所有 blob 都经此 chokepoint（上传 +
+        # 沙盒 persist + 未来任何路径），所以一处校验全覆盖 —— 不逐路径加闸。/chat 的
+        # HTTP 预闸保留为 fail-fast（起 turn 前就拒、零 DB 状态），此处是 correctness 兜底，
+        # 也是沙盒 persist 唯一的配额闸。计入「DB 已落 + 本轮已 stage 未 flush」的 blob：
+        # 否则一轮内多次 persist 各自只看 DB，会齐齐放行、整体击穿配额。超限 return False
+        # → 沙盒 persist 转 ToolResult 错误，让模型据此提示用户清理；上传侧 staging 失败
+        # loud-abort 本轮（常见情形已被 HTTP 预闸挡下，这里兜并发竞态）。
+        if blob is not None and config.ARTIFACT_USER_QUOTA_BYTES > 0:
+            # 一趟查询：子查询内联把 session_id 解析成属主再聚合(属主跨全部会话已落字节)。
+            # 无主会话 → 返回 0,仍由下方数值判定兜单个超大 blob。
+            committed = await repo.get_user_blob_bytes_for_session(session_id)
+            staged = sum(
+                len(m.blob)
+                for m in self._ws.cached(session_id).values()
+                if m.blob is not None
+            )
+            if committed + staged + len(blob) > config.ARTIFACT_USER_QUOTA_BYTES:
+                quota_mb = config.ARTIFACT_USER_QUOTA_BYTES / 1024 / 1024
+                used_mb = (committed + staged) / 1024 / 1024
+                return False, (
+                    f"Storage quota exceeded: this {len(blob) / 1024 / 1024:.1f}MB file "
+                    f"would put the user over their {quota_mb:.0f}MB storage limit "
+                    f"(currently using {used_mb:.1f}MB). Tell the user to delete a "
+                    f"conversation to free space, then retry."
+                ), None
+
         title = os.path.splitext(filename)[0]
         upload_metadata = dict(metadata or {})
         upload_metadata["original_filename"] = filename  # 下载文件名;persist 件同样适用
