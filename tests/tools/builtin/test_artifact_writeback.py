@@ -734,6 +734,22 @@ class TestUploadQuota:
         assert not ok2
         assert "quota" in msg2.lower()
 
+    async def test_flushed_blob_not_double_counted_on_reuse(
+        self, artifact_service: ArtifactService, session_id: str, monkeypatch
+    ):
+        # Regression for the staged/committed double-count: a flushed blob lingers
+        # in the WorkingSet cache (clear_one only drops dirty/new marks). If staged
+        # scanned the whole cache it would be counted in BOTH committed (DB) and
+        # staged → a false rejection on reuse. With quota=1500: committed=600 +
+        # staged=0 + incoming=600 = 1200 ≤ 1500 → must be ALLOWED. (Scanning the
+        # cache instead of dirty would compute 1800 and wrongly reject.)
+        monkeypatch.setattr(config, "ARTIFACT_USER_QUOTA_BYTES", 1500)
+        ok1, _, _ = await _persist_blob(artifact_service, session_id, "f1.bin", 600)
+        assert ok1
+        await artifact_service.flush_all(session_id)
+        ok2, msg2, _ = await _persist_blob(artifact_service, session_id, "f2.bin", 600)
+        assert ok2, msg2
+
     async def test_quota_counts_across_user_sessions(
         self,
         artifact_service: ArtifactService,

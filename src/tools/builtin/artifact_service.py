@@ -350,10 +350,13 @@ class ArtifactService:
             # 一趟查询：子查询内联把 session_id 解析成属主再聚合(属主跨全部会话已落字节)。
             # 无主会话 → 返回 0,仍由下方数值判定兜单个超大 blob。
             committed = await repo.get_user_blob_bytes_for_session(session_id)
+            # staged = 本轮已 stage 但**未 flush** 的 blob。扫 dirty 标记(非整个 cache):
+            # flush 的 clear_one 已把已落盘条目移出 dirty,故已 committed 的 blob 不会
+            # 在此被重复计数 —— 即便将来同一 service 在 flush 后继续 stage 也安全。
             staged = sum(
                 len(m.blob)
-                for m in self._ws.cached(session_id).values()
-                if m.blob is not None
+                for sid, aid in self._ws.dirty_keys(session_id)
+                if (m := self._ws.peek(sid, aid)) is not None and m.blob is not None
             )
             if committed + staged + len(blob) > config.ARTIFACT_USER_QUOTA_BYTES:
                 quota_mb = config.ARTIFACT_USER_QUOTA_BYTES / 1024 / 1024
