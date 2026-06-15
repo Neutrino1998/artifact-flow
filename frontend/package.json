@@ -6,7 +6,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint",
+    "lint": "eslint .",
     "generate-types": "openapi-typescript src/types/openapi.json -o src/types/api.d.ts",
     "test": "vitest",
     "test:run": "vitest run"

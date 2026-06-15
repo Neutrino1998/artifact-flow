@@ -251,6 +251,24 @@ export default function ObservabilityPanel() {
     });
   }, []);
 
+  // 活动分支路径：从 active_branch(叶子)沿 parent_id 上溯到根。对话有分支时（路径
+  // 未覆盖全部消息），不在路径上的消息标「旁支」，让 admin 看出分支结构 —— 否则
+  // 扁平时间线把所有分支混在一起、分不清谁在当前活动线上。
+  // 必须在下面的 early-return 之前调用：rules-of-hooks 要求所有 hook 无条件先于任何
+  // return。eventsData 为空时返回空集，提前计算无副作用。
+  const activePathIds = useMemo(() => {
+    const ids = new Set<string>();
+    if (!eventsData) return ids;
+    const parentOf = new Map<string, string | null>();
+    for (const m of eventsData.messages) parentOf.set(m.message_id, m.parent_id);
+    let cur: string | null | undefined = eventsData.active_branch;
+    while (cur != null && parentOf.has(cur) && !ids.has(cur)) {
+      ids.add(cur);
+      cur = parentOf.get(cur) ?? null;
+    }
+    return ids;
+  }, [eventsData]);
+
   // Browse mode: show admin conversation browser
   if (browseVisible) {
     return (
@@ -281,21 +299,7 @@ export default function ObservabilityPanel() {
   const stats = eventsData != null ? aggregateStats(eventsData.messages) : null;
   const headerTitle = eventsData?.title || selectedConvId;
 
-  // 活动分支路径：从 active_branch(叶子)沿 parent_id 上溯到根。对话有分支时（路径
-  // 未覆盖全部消息），不在路径上的消息标「旁支」，让 admin 看出分支结构 —— 否则
-  // 扁平时间线把所有分支混在一起、分不清谁在当前活动线上。
-  const activePathIds = useMemo(() => {
-    const ids = new Set<string>();
-    if (!eventsData) return ids;
-    const parentOf = new Map<string, string | null>();
-    for (const m of eventsData.messages) parentOf.set(m.message_id, m.parent_id);
-    let cur: string | null | undefined = eventsData.active_branch;
-    while (cur != null && parentOf.has(cur) && !ids.has(cur)) {
-      ids.add(cur);
-      cur = parentOf.get(cur) ?? null;
-    }
-    return ids;
-  }, [eventsData]);
+  // activePathIds 在 early-return 之前已算好（见上）。有分支 = 活动路径未覆盖全部消息。
   const hasBranches = eventsData != null && activePathIds.size > 0
     && activePathIds.size < eventsData.messages.length;
 
