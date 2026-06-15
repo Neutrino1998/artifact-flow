@@ -3,13 +3,14 @@
 import { memo } from 'react';
 import type { ToolCallInfo } from '@/stores/streamStore';
 import DisclosureRow from './DisclosureRow';
+import InlineMarkdown from '@/components/markdown/InlineMarkdown';
 
 interface ToolCallCardProps {
   toolCall: ToolCallInfo;
 }
 
 function ToolCallCard({ toolCall }: ToolCallCardProps) {
-  const { toolName, agent, status, params, result, durationMs, permission } = toolCall;
+  const { toolName, agent, status, params, result, durationMs, permission, reason } = toolCall;
 
   const statusColor =
     status === 'running'
@@ -44,6 +45,16 @@ function ToolCallCard({ toolCall }: ToolCallCardProps) {
       headerClassName="text-text-secondary dark:text-text-secondary-dark"
       bodyClassName="pl-5 pt-1 pb-2 space-y-2 text-xs"
     >
+      {/* Reason — the model's stated intent for this call (display-only, md-rendered) */}
+      {reason && (
+        <div>
+          <div className="text-text-tertiary dark:text-text-tertiary-dark mb-1">
+            Reason
+          </div>
+          <InlineMarkdown>{reason}</InlineMarkdown>
+        </div>
+      )}
+
       {/* Parameters */}
       {Object.keys(params).length > 0 && (
         <div>

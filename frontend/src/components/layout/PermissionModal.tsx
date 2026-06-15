@@ -5,6 +5,7 @@ import { useStreamStore } from '@/stores/streamStore';
 import * as api from '@/lib/api';
 import { BUTTON_PRIMARY, BUTTON_SECONDARY } from '@/lib/styles';
 import DialogShell from './DialogShell';
+import InlineMarkdown from '@/components/markdown/InlineMarkdown';
 
 export default function PermissionModal() {
   const permissionRequest = useStreamStore((s) => s.permissionRequest);
@@ -81,13 +82,19 @@ export default function PermissionModal() {
         </>
       }
     >
-      {/* Tool info */}
+      {/* Tool info — tool name as title + reason as body on the surface, params
+          nested in a recessed well card below */}
       <div className="bg-surface dark:bg-surface-dark border border-border dark:border-border-dark rounded-lg p-3 mb-4">
         <div className="text-xs font-semibold font-mono text-text-primary dark:text-text-primary-dark">
           {permissionRequest.toolName}
         </div>
+        {permissionRequest.reason && (
+          <div className="text-xs mt-1.5">
+            <InlineMarkdown>{permissionRequest.reason}</InlineMarkdown>
+          </div>
+        )}
         {Object.keys(permissionRequest.params).length > 0 && (
-          <pre className="text-xs text-text-secondary dark:text-text-secondary-dark font-mono overflow-x-auto max-h-40 overflow-y-auto pt-2 mt-2 border-t border-border dark:border-border-dark">
+          <pre className="text-xs text-text-secondary dark:text-text-secondary-dark font-mono overflow-x-auto max-h-40 overflow-y-auto bg-panel-accent dark:bg-bg-dark border border-border dark:border-border-dark rounded-md p-2.5 mt-3">
             {JSON.stringify(permissionRequest.params, null, 2)}
           </pre>
         )}

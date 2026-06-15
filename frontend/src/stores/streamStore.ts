@@ -9,6 +9,9 @@ export interface ToolCallInfo {
   status: 'running' | 'success' | 'error';
   result?: string;
   durationMs?: number;
+  /** The model's stated intent for this call (<reason> tag); display-only.
+   *  Distinct from `permission.reason` below, which is the decision outcome. */
+  reason?: string;
   /** Set only for CONFIRM-level tools — the user's response (or timeout).
    *  Engine emits permission_request → permission_result immediately before
    *  the tool's own tool_start, so live + replay both pair by time. */
@@ -18,6 +21,8 @@ export interface ToolCallInfo {
 export interface PermissionRequest {
   toolName: string;
   params: Record<string, unknown>;
+  /** The model's stated intent for this call (<reason> tag); display-only. */
+  reason?: string;
 }
 
 /** User message injected during agent execution (QUEUED_MESSAGE event). */

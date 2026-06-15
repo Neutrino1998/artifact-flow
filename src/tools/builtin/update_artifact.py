@@ -886,6 +886,7 @@ class UpdateArtifactTool(BaseTool):
 
     def to_xml_example(self) -> str:
         return """<tool_call>
+  <reason><![CDATA[mark research topic X as completed in the task plan]]></reason>
   <name>update_artifact</name>
   <params>
     <id><![CDATA[task_plan]]></id>

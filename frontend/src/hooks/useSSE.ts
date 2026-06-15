@@ -283,6 +283,7 @@ export function useSSE() {
         case StreamEventType.TOOL_START: {
           const toolName = data?.tool as string ?? '';
           const params = data?.params as Record<string, unknown> ?? {};
+          const reason = data?.reason as string | undefined;
           const agent = event.agent ?? '';
 
           // Preserve LLM output before clearing content (only on first tool_start)
@@ -304,6 +305,7 @@ export function useSSE() {
             params,
             agent,
             status: 'running',
+            ...(reason ? { reason } : {}),
             ...(permission ? { permission } : {}),
           });
           // Clear streaming content when entering tool phase
@@ -385,6 +387,7 @@ export function useSSE() {
           setPermissionRequest({
             toolName: data?.tool as string ?? '',
             params: data?.params as Record<string, unknown> ?? {},
+            reason: data?.reason as string | undefined,
           });
           break;
 

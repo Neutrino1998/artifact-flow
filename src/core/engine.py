@@ -582,6 +582,7 @@ async def execute_loop(
         agent_name: str,
         permission: ToolPermission,
         parser_warnings: Optional[List[str]] = None,
+        reason: Optional[str] = None,
     ) -> bool:
         """
         处理权限中断。
@@ -590,6 +591,10 @@ async def execute_loop(
         TOOL_COMPLETE 一并带回去，让模型下一轮看到 "你这次的 XML 还有 X 个
         问题、写法应该是 Y"，与其他 TOOL_COMPLETE 路径保持对齐。
 
+        reason 是模型写的调用意图（<reason> 标签），透出到 PERMISSION_REQUEST
+        SSE 事件 + interrupt data，让审批弹窗显示 "模型为什么要跑这个工具"。
+        缺失（None）时前端按无意图渲染即可。
+
         Returns:
             True — approved, False — denied（含超时和客户端断开）
         """
@@ -597,6 +602,7 @@ async def execute_loop(
             "permission_level": permission.value,
             "tool": tool_name,
             "params": params,
+            "reason": reason,
         })
 
         resume_data = await hooks.wait_for_interrupt(message_id, {
@@ -604,6 +610,7 @@ async def execute_loop(
             "agent": agent_name,
             "tool_name": tool_name,
             "params": params,
+            "reason": reason,
             "permission_level": permission.value,
             "message": f"Tool '{tool_name}' requires {permission.value} permission",
         }, config.PERMISSION_TIMEOUT)
@@ -617,7 +624,7 @@ async def execute_loop(
             # 这次 tool_call 在 event history 里没有 TOOL_COMPLETE，下一轮模型只看到
             # 自己发过 call、却看不到任何结果，可能原样重发。
             await _emit(StreamEventType.TOOL_START.value, agent_name, {
-                "tool": tool_name, "params": params,
+                "tool": tool_name, "params": params, "reason": reason,
             })
             await _emit(StreamEventType.TOOL_COMPLETE.value, agent_name, {
                 "tool": tool_name, "success": False,
@@ -638,7 +645,7 @@ async def execute_loop(
 
         if not is_approved:
             await _emit(StreamEventType.TOOL_START.value, agent_name, {
-                "tool": tool_name, "params": params,
+                "tool": tool_name, "params": params, "reason": reason,
             })
             await _emit(StreamEventType.TOOL_COMPLETE.value, agent_name, {
                 "tool": tool_name, "success": False,
@@ -746,6 +753,7 @@ async def execute_loop(
 
             tool_name = tool_call.name
             params = tool_call.params
+            reason = tool_call.reason  # 模型写的调用意图，透出到审批弹窗（display-only）
 
             # Agent 工具白名单校验
             if tool_name not in agents[agent_name].tools:
@@ -798,6 +806,7 @@ async def execute_loop(
                             "instruction": instruction,
                             "fresh_start": fresh_start,
                         },
+                        "reason": reason,
                     })
 
                     # 注入 instruction 到 subagent 的事件流（仅内存，不推 SSE）
@@ -837,7 +846,7 @@ async def execute_loop(
             if effective_permission == ToolPermission.CONFIRM:
                 if tool_name not in state.get("always_allowed_tools", []):
                     approved = await _handle_permission(
-                        tool_name, params, agent_name, effective_permission, parser_warnings
+                        tool_name, params, agent_name, effective_permission, parser_warnings, reason
                     )
                     if not approved:
                         tool_round_count[agent_name] = tool_round_count.get(agent_name, 0) + 1
@@ -846,7 +855,7 @@ async def execute_loop(
             # 执行工具
             tool_start_time = utc_now()
             await _emit(StreamEventType.TOOL_START.value, agent_name, {
-                "tool": tool_name, "params": params,
+                "tool": tool_name, "params": params, "reason": reason,
             })
 
             # 可打断 await：cancel flag 在工具在飞期间按 CANCEL_CHECK_INTERVAL 被轮询，

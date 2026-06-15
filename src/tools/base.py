@@ -263,6 +263,7 @@ class BaseTool(ABC):
             param_lines.append(f"    <{param.name}><![CDATA[{value}]]></{param.name}>")
 
         return f"""<tool_call>
+  <reason><![CDATA[why you are calling {self.name}]]></reason>
   <name>{self.name}</name>
   <params>
 {chr(10).join(param_lines)}

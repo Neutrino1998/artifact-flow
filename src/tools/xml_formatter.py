@@ -19,12 +19,22 @@ def generate_tool_instruction(tools: List[BaseTool]) -> str:
 You may make one or more tool calls per turn. They execute sequentially.
 Wrap ALL parameter values in <![CDATA[...]]>.
 
+Every tool call must include a <reason> sibling before <name>: one short sentence, in the user's language, saying why you are making THIS call. It is shown to the user (and is what they read when a tool needs their approval). <reason> is NOT a parameter — it goes outside <params>, never inside it.
+
+<tool_call>
+  <reason><![CDATA[why you are making this call]]></reason>
+  <name>tool_name</name>
+  <params>...</params>
+</tool_call>
+
 For multiple calls, emit each <tool_call> block one after another — there is NO wrapping container tag:
 <tool_call>
+  <reason><![CDATA[why the first call]]></reason>
   <name>first_tool</name>
   <params>...</params>
 </tool_call>
 <tool_call>
+  <reason><![CDATA[why the second call]]></reason>
   <name>second_tool</name>
   <params>...</params>
 </tool_call>

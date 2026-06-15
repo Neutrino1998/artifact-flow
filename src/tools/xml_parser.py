@@ -19,6 +19,10 @@ class ToolCall:
     # 解析时触发的兜底修复提示（祈使句，回传给模型在下一轮看到）。
     # 仅在 repair 实际改写了输入时登记；正常解析路径为空列表。
     warnings: List[str] = field(default_factory=list)
+    # 模型在调用前写的一句意图（<reason> 兄弟标签）。display-only：透出到 CONFIRM
+    # 审批弹窗 / TOOL_START 事件，**绝不**进 params、绝不进 execute()。best-effort：
+    # 缺失或在 repair 路径丢失都不影响工具执行。
+    reason: Optional[str] = None
 
 
 class XMLToolCallParser:
@@ -96,7 +100,40 @@ class XMLToolCallParser:
     @staticmethod
     def _parse_single_block(content: str, is_trailing: bool = False) -> Optional[ToolCall]:
         """
-        解析单个 tool_call 块的 inner 内容（不含 <tool_call> 包裹）。
+        解析单个 tool_call 块。先前置剥离 <reason>，再把 reason-free 内容交给 _inner 走
+        原有解析 / repair 链 —— 这样 reason **不可能**被 _repair_scattered_params 误判为孤立
+        参数并入 <params>（否则会以 "Unknown parameter: reason" 把一次本可救回的调用打挂）。
+        reason 是 display-only，best-effort 回贴到结果 ToolCall。
+        """
+        if not content.strip():
+            return None
+
+        reason, content = XMLToolCallParser._extract_reason(content)
+        tool_call = XMLToolCallParser._parse_single_block_inner(content, is_trailing=is_trailing)
+        if tool_call is not None and reason:
+            tool_call.reason = reason
+        return tool_call
+
+    @staticmethod
+    def _extract_reason(content: str) -> tuple:
+        """抽走顶层 <reason>...</reason>（CDATA 或纯文本均可），返回 (reason, 去掉 reason 的 content)。
+
+        非贪婪匹配到第一个 </reason>；reason 是人类可读的一句话意图，含字面 </reason> 的概率可忽略
+        —— best-effort 契约下不为这种极端情形加机器。未命中返回 (None, 原文)。
+        """
+        m = re.search(r'<reason\s*>(.*?)</reason\s*>', content, re.DOTALL | re.IGNORECASE)
+        if not m:
+            return None, content
+        raw = m.group(1).strip()
+        cd = re.search(r'<!\[CDATA\[(.*?)\]\]>', raw, re.DOTALL)
+        reason = (cd.group(1).strip() if cd else raw) or None
+        content = content[:m.start()] + content[m.end():]
+        return reason, content
+
+    @staticmethod
+    def _parse_single_block_inner(content: str, is_trailing: bool = False) -> Optional[ToolCall]:
+        """
+        解析单个 tool_call 块的 inner 内容（不含 <tool_call> 包裹、已剥离 <reason>）。
 
         返回 None 仅当 content 为空白。无法解析时返回带 error 的 ToolCall（engine 反馈给 agent）。
         触发 repair 兜底时 warnings 带上祈使句提示。

@@ -74,6 +74,8 @@ export interface AgentCompleteData {
 export interface ToolStartData {
   tool: string;
   params: Record<string, unknown>;
+  /** The model's stated intent for this call (<reason> tag); display-only. */
+  reason?: string;
 }
 
 export interface ToolCompleteData {
@@ -129,6 +131,8 @@ export interface PermissionRequestData {
   permission_level: string;
   tool: string;
   params: Record<string, unknown>;
+  /** The model's stated intent for this call (<reason> tag); display-only. */
+  reason?: string;
 }
 
 export interface PermissionResultData {
