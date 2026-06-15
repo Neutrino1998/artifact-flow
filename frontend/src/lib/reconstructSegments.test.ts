@@ -52,6 +52,30 @@ describe('reconstructSegments', () => {
     });
   });
 
+  // Replay parity with the live useSSE TOOL_START handler — the model's stated
+  // <reason> intent must survive history reload, not just live SSE. Regression
+  // guard for the live/replay drift where replay dropped `reason`.
+  test('tool_start carries reason → ToolCallInfo.reason', () => {
+    const events = [
+      makeEvent('agent_start', {}, 'lead'),
+      makeEvent('tool_start', { tool: 'bash', params: { command: 'ls' }, reason: 'list the files' }, 'lead'),
+      makeEvent('tool_complete', { tool: 'bash', success: true, result_data: 'ok', duration_ms: 5 }, 'lead'),
+      makeEvent('agent_complete', {}, 'lead'),
+    ];
+    const segs = reconstructSegments(events);
+    expect(segs[0].toolCalls[0].reason).toBe('list the files');
+  });
+
+  test('tool_start without reason → reason undefined', () => {
+    const events = [
+      makeEvent('agent_start', {}, 'lead'),
+      makeEvent('tool_start', { tool: 'search', params: {} }, 'lead'),
+      makeEvent('tool_complete', { tool: 'search', success: true, result_data: '', duration_ms: 1 }, 'lead'),
+    ];
+    const segs = reconstructSegments(events);
+    expect(segs[0].toolCalls[0].reason).toBeUndefined();
+  });
+
   test('tool_complete success=false → status=error, result from data.error', () => {
     const events = [
       makeEvent('agent_start', {}, 'lead'),

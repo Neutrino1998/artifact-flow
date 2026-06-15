@@ -366,3 +366,103 @@ class TestFormatResultWarnings:
 
         out = format_result("foo", {"success": True, "data": "ok"})
         assert "<parser_warnings>" not in out
+
+
+# ============================================================
+# <reason> 兄弟标签：调用意图（display-only），depth-0 前置剥离
+# ============================================================
+
+class TestReasonExtraction:
+    """<reason> 是 <name>/<params> 的兄弟，承载模型调用意图，display-only。
+    解析时在 repair 链之前**只剥 depth-0**：嵌在 <params> 里的同名参数必须保留。"""
+
+    def test_top_level_reason_extracted(self):
+        text = """<tool_call>
+<reason><![CDATA[确认 parser 文件位置]]></reason>
+<name>bash</name>
+<params><command><![CDATA[ls -la]]></command></params>
+</tool_call>"""
+        tc = parse_tool_calls(text)[0]
+        assert tc.name == "bash"
+        assert tc.reason == "确认 parser 文件位置"
+        assert tc.params == {"command": "ls -la"}  # reason 不进 params
+
+    def test_plain_text_reason(self):
+        text = """<tool_call>
+<reason>读取目录</reason>
+<name>bash</name>
+<params><command><![CDATA[pwd]]></command></params>
+</tool_call>"""
+        tc = parse_tool_calls(text)[0]
+        assert tc.reason == "读取目录"
+
+    def test_no_reason_is_none(self):
+        """向后兼容：不带 <reason> 的调用照常解析，reason=None。"""
+        text = """<tool_call>
+<name>web_search</name>
+<params><query><![CDATA[python async]]></query></params>
+</tool_call>"""
+        tc = parse_tool_calls(text)[0]
+        assert tc.reason is None
+        assert tc.params == {"query": "python async"}
+
+    def test_param_named_reason_not_stripped(self):
+        """Finding 2 回归：custom 工具合法的 `reason` 参数（在 <params> 内）不得被当
+        调用意图剥走，否则工具少参。"""
+        text = """<tool_call>
+<name>moderate</name>
+<params><reason><![CDATA[内容违规理由]]></reason><action><![CDATA[block]]></action></params>
+</tool_call>"""
+        tc = parse_tool_calls(text)[0]
+        assert tc.reason is None, "param 级 <reason> 不应被抽成调用意图"
+        assert tc.params == {"reason": "内容违规理由", "action": "block"}
+
+    def test_top_level_and_param_reason_coexist(self):
+        """顶层 reason（意图）与 param reason（参数）并存时各归各位。"""
+        text = """<tool_call>
+<reason><![CDATA[调用审核接口]]></reason>
+<name>moderate</name>
+<params><reason><![CDATA[内容违规理由]]></reason><action><![CDATA[block]]></action></params>
+</tool_call>"""
+        tc = parse_tool_calls(text)[0]
+        assert tc.reason == "调用审核接口"
+        assert tc.params == {"reason": "内容违规理由", "action": "block"}
+
+    def test_param_reason_among_other_params_preserved(self):
+        text = """<tool_call>
+<name>reject</name>
+<params>
+<id><![CDATA[req_1]]></id>
+<reason><![CDATA[材料不全]]></reason>
+</params>
+</tool_call>"""
+        tc = parse_tool_calls(text)[0]
+        assert tc.reason is None
+        assert tc.params == {"id": "req_1", "reason": "材料不全"}
+
+    def test_reason_survives_repair_path(self):
+        """reason 在 repair 之前剥离 → 即便触发 repair（这里缺 </params>），reason 仍保留、
+        params 仍救回，且 reason 不会被 _repair_scattered_params 误并进 params。"""
+        text = """<tool_call>
+<reason><![CDATA[建任务计划]]></reason>
+<name>create_artifact</name>
+<params>
+<id><![CDATA[task_plan]]></id>
+<content><![CDATA[# Task]]></content>
+</tool_call>"""
+        tc = parse_tool_calls(text)[0]
+        assert tc.reason == "建任务计划"
+        assert tc.params == {"id": "task_plan", "content": "# Task"}
+        assert "reason" not in tc.params
+        assert tc.warnings  # 触发了 missing-</params> repair
+
+    def test_reason_cdata_with_literal_close_tag(self):
+        """reason 值里含字面 </reason>（在 CDATA 内）不被腰斩 —— masked 串上判定结构。"""
+        text = """<tool_call>
+<reason><![CDATA[解释 </reason> 这个标签]]></reason>
+<name>bash</name>
+<params><command><![CDATA[echo hi]]></command></params>
+</tool_call>"""
+        tc = parse_tool_calls(text)[0]
+        assert tc.reason == "解释 </reason> 这个标签"
+        assert tc.params == {"command": "echo hi"}

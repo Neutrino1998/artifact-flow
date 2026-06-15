@@ -40,7 +40,12 @@ export default function MessageList() {
       <div className="max-w-3xl mx-auto pl-8 pr-4 py-6 space-y-12">
         {displayPath.map((node) => (
             <div key={node.id} className="space-y-10">
-              {/* User message */}
+              {/* User message (persisted path). TWIN: the live pre-refresh bubble
+                  below (search `pending`) renders the SAME UserMessage component, so
+                  layout can't drift. The field SOURCES differ, though — any new
+                  per-message field surfaced here from the persisted DTO must also be
+                  mirrored into the live pending source (useChat.ts setPendingUser* +
+                  streamStore), or it'll show on reload but not live. */}
               <UserMessage
                 content={node.user_input}
                 messageId={node.id}

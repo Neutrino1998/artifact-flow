@@ -192,6 +192,14 @@ export function useSSE() {
     (event: SSEEvent, conversationId: string) => {
       const { type, data } = event;
 
+      // TWIN PATH — keep the per-event field mappings below in sync with
+      // reconstructSegments.ts, which folds the SAME persisted events into the
+      // SAME ExecutionSegment / ToolCallInfo / NonAgentBlock shapes on history
+      // reload. Only the field mapping is duplicated; the orchestration genuinely
+      // differs (streaming + llm_chunk here vs batch fold there) so the two loops
+      // stay separate by design. Add/remove a field on any UI object below →
+      // mirror it there (and vice-versa). The `reason` field silently dropping on
+      // history reload was exactly this twin drifting out of sync.
       switch (type) {
         case StreamEventType.METADATA: {
           // Dev-only consistency check: verify message_id from metadata matches streamStore
@@ -281,6 +289,8 @@ export function useSSE() {
           break;
 
         case StreamEventType.TOOL_START: {
+          // TWIN: ToolCallInfo is also built in reconstructSegments.ts `tool_start`
+          // (history reload) — keep this field set identical to that one.
           const toolName = data?.tool as string ?? '';
           const params = data?.params as Record<string, unknown> ?? {};
           const reason = data?.reason as string | undefined;

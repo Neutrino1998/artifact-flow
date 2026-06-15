@@ -116,19 +116,26 @@ class XMLToolCallParser:
 
     @staticmethod
     def _extract_reason(content: str) -> tuple:
-        """抽走顶层 <reason>...</reason>（CDATA 或纯文本均可），返回 (reason, 去掉 reason 的 content)。
+        """抽走**顶层** <reason>（<name>/<params> 的兄弟），返回 (reason, 去掉 reason 的 content)。
 
-        非贪婪匹配到第一个 </reason>；reason 是人类可读的一句话意图，含字面 </reason> 的概率可忽略
-        —— best-effort 契约下不为这种极端情形加机器。未命中返回 (None, 原文)。
+        只剥 depth-0：嵌在 <params> 里、名为 reason 的合法 custom-tool 参数必须原样保留，否则
+        该参数会被当调用意图删掉 → 工具少参 / 行为错。结构判定都在遮蔽 CDATA 的 masked 串上做
+        （_mask_cdata 等长替换，span 与 content 1:1），所以：(1) 落在任一 <params> 区间内的
+        <reason> 被排除；(2) CDATA 值里的字面 <reason>/</reason> 不会误伤。reason 是 display-only、
+        best-effort：未命中或判不到顶层的，返回 (None, 原文)。
         """
-        m = re.search(r'<reason\s*>(.*?)</reason\s*>', content, re.DOTALL | re.IGNORECASE)
-        if not m:
-            return None, content
-        raw = m.group(1).strip()
-        cd = re.search(r'<!\[CDATA\[(.*?)\]\]>', raw, re.DOTALL)
-        reason = (cd.group(1).strip() if cd else raw) or None
-        content = content[:m.start()] + content[m.end():]
-        return reason, content
+        masked = XMLToolCallParser._mask_cdata(content)
+        params_spans = [(m.start(), m.end())
+                        for m in re.finditer(r'<params\s*>.*?</params\s*>', masked, re.DOTALL)]
+        for m in re.finditer(r'<reason\s*>(.*?)</reason\s*>', masked, re.DOTALL | re.IGNORECASE):
+            # <reason> 落在某个 <params> 区间内 = 工具参数，不是调用意图 → 跳过
+            if any(ps <= m.start() and m.end() <= pe for ps, pe in params_spans):
+                continue
+            raw = content[m.start(1):m.end(1)].strip()  # 真实文本按 masked span 切自 content
+            cd = re.search(r'<!\[CDATA\[(.*?)\]\]>', raw, re.DOTALL)
+            reason = (cd.group(1).strip() if cd else raw) or None
+            return reason, content[:m.start()] + content[m.end():]
+        return None, content
 
     @staticmethod
     def _parse_single_block_inner(content: str, is_trailing: bool = False) -> Optional[ToolCall]:
