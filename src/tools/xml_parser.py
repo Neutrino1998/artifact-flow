@@ -100,50 +100,14 @@ class XMLToolCallParser:
     @staticmethod
     def _parse_single_block(content: str, is_trailing: bool = False) -> Optional[ToolCall]:
         """
-        解析单个 tool_call 块。先前置剥离 <reason>，再把 reason-free 内容交给 _inner 走
-        原有解析 / repair 链 —— 这样 reason **不可能**被 _repair_scattered_params 误判为孤立
-        参数并入 <params>（否则会以 "Unknown parameter: reason" 把一次本可救回的调用打挂）。
-        reason 是 display-only，best-effort 回贴到结果 ToolCall。
-        """
-        if not content.strip():
-            return None
-
-        reason, content = XMLToolCallParser._extract_reason(content)
-        tool_call = XMLToolCallParser._parse_single_block_inner(content, is_trailing=is_trailing)
-        if tool_call is not None and reason:
-            tool_call.reason = reason
-        return tool_call
-
-    @staticmethod
-    def _extract_reason(content: str) -> tuple:
-        """抽走**顶层** <reason>（<name>/<params> 的兄弟），返回 (reason, 去掉 reason 的 content)。
-
-        只剥 depth-0：嵌在 <params> 里、名为 reason 的合法 custom-tool 参数必须原样保留，否则
-        该参数会被当调用意图删掉 → 工具少参 / 行为错。结构判定都在遮蔽 CDATA 的 masked 串上做
-        （_mask_cdata 等长替换，span 与 content 1:1），所以：(1) 落在任一 <params> 区间内的
-        <reason> 被排除；(2) CDATA 值里的字面 <reason>/</reason> 不会误伤。reason 是 display-only、
-        best-effort：未命中或判不到顶层的，返回 (None, 原文)。
-        """
-        masked = XMLToolCallParser._mask_cdata(content)
-        params_spans = [(m.start(), m.end())
-                        for m in re.finditer(r'<params\s*>.*?</params\s*>', masked, re.DOTALL)]
-        for m in re.finditer(r'<reason\s*>(.*?)</reason\s*>', masked, re.DOTALL | re.IGNORECASE):
-            # <reason> 落在某个 <params> 区间内 = 工具参数，不是调用意图 → 跳过
-            if any(ps <= m.start() and m.end() <= pe for ps, pe in params_spans):
-                continue
-            raw = content[m.start(1):m.end(1)].strip()  # 真实文本按 masked span 切自 content
-            cd = re.search(r'<!\[CDATA\[(.*?)\]\]>', raw, re.DOTALL)
-            reason = (cd.group(1).strip() if cd else raw) or None
-            return reason, content[:m.start()] + content[m.end():]
-        return None, content
-
-    @staticmethod
-    def _parse_single_block_inner(content: str, is_trailing: bool = False) -> Optional[ToolCall]:
-        """
-        解析单个 tool_call 块的 inner 内容（不含 <tool_call> 包裹、已剥离 <reason>）。
+        解析单个 tool_call 块的 inner 内容（不含 <tool_call> 包裹）。
 
         返回 None 仅当 content 为空白。无法解析时返回带 error 的 ToolCall（engine 反馈给 agent）。
         触发 repair 兜底时 warnings 带上祈使句提示。
+
+        <reason>（调用意图，display-only）由语法层 _parse_with_etree 像 <name>/<params> 一样
+        depth-0 提取——不在这里、也不在任何 repair 里特殊处理。malformed 调用经 generic repair
+        合法化后再解析，reason 的深度由 etree 权威判定；修不好的退化路径 reason 为 None（best-effort）。
 
         is_trailing：本块是拆分层判定的尾部未终止块 —— **截断只可能发生在这里**。complete 块
         （有 CDATA 外的 </tool_call>）按定义完整，永不按截断处理。
@@ -250,7 +214,13 @@ class XMLToolCallParser:
         params_elem = root.find('params')
         params = XMLToolCallParser._parse_element(params_elem) if params_elem is not None else {}
 
-        return ToolCall(name=name, params=params)
+        # 提取 reason（调用意图，display-only）。root.find 只匹配直接子节点 = depth-0，故嵌在
+        # <params> 里、名为 reason 的合法参数（root/params/reason）天然不会被当成调用意图。
+        # 与 name/params 同属协议 grammar，由语法层在此一处处理，repair 层不感知。
+        reason_elem = root.find('reason')
+        reason = (reason_elem.text or "").strip() if reason_elem is not None else None
+
+        return ToolCall(name=name, params=params, reason=reason or None)
 
     @staticmethod
     def _parse_element(elem: ET.Element) -> Dict[str, Any]:
@@ -485,16 +455,28 @@ class XMLToolCallParser:
             for i in range(s, e):
                 masked_chars[i] = ''
         masked_remainder = ''.join(masked_chars)
-        has_orphans = bool(re.search(r'<\w+\s*>', masked_remainder))
 
-        # 只有一个 params 块且无孤立标签 → 无需修复
+        # 顶层 <reason> 是协议的结构性兄弟（与 <name> 同类，承载调用意图），**不是**散落参数：
+        # 不并进 <params>、原位保留。masked_remainder 已抠掉 name + 所有 params 区间，残留的
+        # <reason> 必为 depth-0（params 内同名参数已随 params span 一并抠除）→ 深度无歧义，
+        # 无需额外判断。这是本 repair 唯一需要认识的协议字段，与既有的 <name> 同等待遇。
+        reason_m = re.search(r'<reason\s*>.*?</reason\s*>', masked_remainder, re.DOTALL | re.IGNORECASE)
+        reason_block = f"{content[reason_m.start():reason_m.end()].strip()}\n" if reason_m else ""
+
+        # 真实散落参数（排除上面的结构性 <reason>）
+        has_orphans = any(m.group(1).lower() != 'reason'
+                          for m in re.finditer(r'<(\w+)\s*>', masked_remainder))
+
+        # 单一 params 块且无真实孤立标签 → 无需重组（顶层 <reason> 交给 etree 原样解析）
         if len(params_spans) <= 1 and not has_orphans:
             return content
 
         all_children = []
-        # 孤立标签（放前面，后面 params 块同名 key 覆盖）；span 取自 masked，文本切自 content
+        # 孤立标签（放前面，后面 params 块同名 key 覆盖）；结构性 <reason> 已单独提走、跳过
         if has_orphans:
             for m in re.finditer(r'<(\w+)>.*?</\1>', masked_remainder, re.DOTALL):
+                if m.group(1).lower() == 'reason':
+                    continue
                 all_children.append(content[m.start():m.end()].strip())
         # 有子元素的 params 块（跳过纯文本/CDATA 的垃圾块——masked 后 inner 无 <词> 即垃圾块）
         for _, _, cs, ce in params_spans:
@@ -510,7 +492,7 @@ class XMLToolCallParser:
             "Wrap ALL parameters in a single <params>...</params> block. "
             "Do not duplicate <params> and do not place param tags as siblings of <name>."
         )
-        return f"{content[name_m.start():name_m.end()]}\n<params>\n{merged}\n</params>"
+        return f"{reason_block}{content[name_m.start():name_m.end()]}\n<params>\n{merged}\n</params>"
 
     @staticmethod
     def _repair_missing_closing_tags(content: str, warnings: List[str]) -> str:

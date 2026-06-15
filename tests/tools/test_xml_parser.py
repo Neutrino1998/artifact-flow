@@ -457,7 +457,7 @@ class TestReasonExtraction:
         assert tc.warnings  # 触发了 missing-</params> repair
 
     def test_reason_cdata_with_literal_close_tag(self):
-        """reason 值里含字面 </reason>（在 CDATA 内）不被腰斩 —— masked 串上判定结构。"""
+        """reason 值里含字面 </reason>（在 CDATA 内）不被腰斩 —— etree 原生处理 CDATA。"""
         text = """<tool_call>
 <reason><![CDATA[解释 </reason> 这个标签]]></reason>
 <name>bash</name>
@@ -466,3 +466,36 @@ class TestReasonExtraction:
         tc = parse_tool_calls(text)[0]
         assert tc.reason == "解释 </reason> 这个标签"
         assert tc.params == {"command": "echo hi"}
+
+    def test_param_named_reason_with_missing_close_tag(self):
+        """reviewer 回归：param 名为 reason + 缺 </params>。靠 generic 的 _repair_missing_closing_tags
+        补 </params> 合法化后，etree depth-0 提取使 param 级 reason 留在 params、不被当调用意图。"""
+        text = """<tool_call>
+<name>moderate</name>
+<params>
+<reason><![CDATA[内容违规理由]]></reason>
+<action><![CDATA[block]]></action>
+</tool_call>"""
+        tc = parse_tool_calls(text)[0]
+        assert tc.reason is None
+        assert tc.params == {"reason": "内容违规理由", "action": "block"}
+
+    def test_top_level_reason_with_scattered_params(self):
+        """复合场景：顶层 reason（意图）+ 真实触发 scattered-params 重组（name= 语法使 etree 失败、
+        重复 params 块 + 孤立参数）。散落参数被 _repair_scattered_params 收进 <params>，而顶层
+        <reason> 作为结构性兄弟（与 <name> 同类）原位保留、不被并入 params。"""
+        text = """<tool_call>
+<reason><![CDATA[创建文档]]></reason>
+<name=create_artifact</name>
+<params><![CDATA[content]]></params>
+<content_type><![CDATA[text/markdown]]></content_type>
+<id><![CDATA[doc_1]]></id>
+<params>
+<content><![CDATA[# Body]]></content>
+</params>
+</tool_call>"""
+        tc = parse_tool_calls(text)[0]
+        assert tc.reason == "创建文档"
+        assert "reason" not in tc.params
+        assert tc.params == {"content_type": "text/markdown", "id": "doc_1", "content": "# Body"}
+        assert tc.warnings  # 触发了 name=/scattered-params 重组
