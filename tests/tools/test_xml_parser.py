@@ -480,6 +480,41 @@ class TestReasonExtraction:
         assert tc.reason is None
         assert tc.params == {"reason": "内容违规理由", "action": "block"}
 
+    def test_reason_cdata_literal_close_tag_with_tool_name_as_tag(self):
+        """reviewer round-5：reason 的 CDATA 含字面 </reason> + 工具名外包标签。
+        _repair_tool_name_as_tag 必须 CDATA-aware，否则 prefix 被 CDATA 内 </reason> 截断 → __malformed__。"""
+        text = """<tool_call>
+<reason><![CDATA[explain </reason> tag]]></reason>
+<web_fetch><params><url><![CDATA[https://x.com]]></url></params></web_fetch>
+</tool_call>"""
+        tc = parse_tool_calls(text)[0]
+        assert tc.name == "web_fetch"
+        assert tc.reason == "explain </reason> tag"
+        assert tc.params == {"url": "https://x.com"}
+
+    def test_reason_cdata_literal_name_tag_with_tool_name_as_tag(self):
+        """reviewer round-5：reason 的 CDATA 含字面 <name> + 工具名外包标签。
+        "已有 <name>" 早退必须 CDATA-aware，否则被 CDATA 内 <name> 骗到、不修 → __malformed__。"""
+        text = """<tool_call>
+<reason><![CDATA[mention <name> format]]></reason>
+<web_fetch><params><url><![CDATA[https://y.com]]></url></params></web_fetch>
+</tool_call>"""
+        tc = parse_tool_calls(text)[0]
+        assert tc.name == "web_fetch"
+        assert tc.reason == "mention <name> format"
+        assert tc.params == {"url": "https://y.com"}
+
+    def test_tag_equals_repair_preserves_cdata_literal(self):
+        """_repair_tag_equals_syntax CDATA-aware：name= 触发修复时，CDATA 内的字面 <a=b</a>
+        （如代码示例）不被误重写。"""
+        text = """<tool_call>
+<name=bash</name>
+<params><command><![CDATA[test <a=b</a> end]]></command></params>
+</tool_call>"""
+        tc = parse_tool_calls(text)[0]
+        assert tc.name == "bash"
+        assert tc.params == {"command": "test <a=b</a> end"}
+
     def test_reason_with_tool_name_as_outer_tag(self):
         """reviewer 回归：顶层 reason + 工具名写成外包标签（<web_fetch>...</web_fetch>）。
         _repair_tool_name_as_tag 必须跳过结构性 <reason> 再找工具名，否则 name 被误判为 'reason'、

@@ -261,30 +261,35 @@ class XMLToolCallParser:
 
         也处理有闭合标签的情况：<web_fetch>...</web_fetch>
         """
-        # 已有 <name> 标签 → 无需修复
-        if re.search(r'<name[\s>=]', content) or re.search(r'<name>', content):
+        # 所有结构判定都在遮蔽 CDATA 的 masked 串上做（_mask_cdata 等长替换，span 与 content
+        # 1:1），真实文本按 span 切自 content —— 否则 CDATA 内的字面 <name>/</reason> 会骗过下面的
+        # 早退与 <reason> 跳过逻辑，把本可 repair 的调用判死（reviewer round-5）。
+        masked = XMLToolCallParser._mask_cdata(content)
+
+        # 已有 <name> 标签 → 无需修复（masked 上查，CDATA 里的字面 <name> 不算）
+        if re.search(r'<name[\s>=]', masked):
             return content
 
         # 跳过开头的结构性 sibling <reason>（完整元素，承载调用意图）——它不是工具名外包标签。
         # 否则"第一个标签=工具名"会把 <reason> 误当工具名（name='reason'、真实工具名丢失）。
-        # 剥成 prefix，在其后找工具名候选，成功重组时原样前置保留。
-        reason_m = re.match(r'\s*<reason\s*>.*?</reason\s*>\s*', content, re.DOTALL | re.IGNORECASE)
-        prefix = content[:reason_m.end()] if reason_m else ""
-        body = content[reason_m.end():] if reason_m else content
+        # span 取自 masked → CDATA 内字面 </reason> 不会截断 prefix；prefix 真实文本切自 content。
+        reason_m = re.match(r'\s*<reason\s*>.*?</reason\s*>\s*', masked, re.DOTALL | re.IGNORECASE)
+        start = reason_m.end() if reason_m else 0
+        prefix = content[:start]
 
-        # 匹配首个标签（跳过空白）
-        match = re.match(r'\s*<(\w+)>(.*)', body, re.DOTALL)
+        # 在 reason 之后找首个标签（masked 上匹配开标签，位置即可切 content）
+        match = re.match(r'\s*<(\w+)>', masked[start:], re.DOTALL)
         if not match:
             return content
 
         tag_name = match.group(1)
-        rest = match.group(2)
 
         # 首标签是结构性 sibling（params/reason）→ 不是工具名，原样返回（含已剥的 prefix）
         if tag_name.lower() in XMLToolCallParser._RESERVED_SIBLING_TAGS:
             return content
 
-        # 移除对应的闭合标签（如果有）
+        # 开标签之后的真实内容；末尾若有该工具名闭合标签（end-anchored，不会误伤 CDATA 内字面量）去掉
+        rest = content[start + match.end():]
         rest = re.sub(rf'</\s*{re.escape(tag_name)}\s*>\s*$', '', rest, flags=re.DOTALL)
 
         warnings.append(
@@ -303,19 +308,29 @@ class XMLToolCallParser:
             <name=call_subagent</name>
         修复为：
             <name>call_subagent</name>
+
+        CDATA-aware：匹配只在遮蔽 CDATA 的 masked 串上找（span 与 content 1:1），按 span 逆序
+        改写 content —— 否则 CDATA 内的字面 <a=b</a>（如 reason/content 里的代码示例）会被误重写、
+        污染参数值。
         """
-        new_content = re.sub(
-            r'<(\w+)=([^<>]+)</\1>',
-            r'<\1>\2</\1>',
-            content,
+        masked = XMLToolCallParser._mask_cdata(content)
+        matches = list(re.finditer(r'<(\w+)=([^<>]+)</\1>', masked))
+        if not matches:
+            return content
+
+        # 逆序按 span 改写，避免前面的替换位移后面的偏移；value 真实文本切自 content
+        result = content
+        for m in reversed(matches):
+            tag = m.group(1)
+            value = content[m.start(2):m.end(2)]
+            result = result[:m.start()] + f'<{tag}>{value}</{tag}>' + result[m.end():]
+
+        warnings.append(
+            "Used '=' inside tag opening (e.g., <name=foo</name>). "
+            "Correct form: <name>foo</name>. "
+            "Never use '=' in tag openings — open with '>' and close with '</tag>'."
         )
-        if new_content != content:
-            warnings.append(
-                "Used '=' inside tag opening (e.g., <name=foo</name>). "
-                "Correct form: <name>foo</name>. "
-                "Never use '=' in tag openings — open with '>' and close with '</tag>'."
-            )
-        return new_content
+        return result
 
     @staticmethod
     def _detect_truncation(content: str) -> bool:
@@ -423,6 +438,11 @@ class XMLToolCallParser:
         的字面标签**（</tool_call> / </params> / <div> 等）骗；长度不变，故 masked 上 match 的
         span 可直接切回 content 取真实文本。只遮蔽**已闭合**的 CDATA（未闭合 = 截断，已由
         _detect_truncation 在更早处短路，走不到这些 repair）。
+
+        **不变量**：凡是在 raw 内容上做结构判定的 repair（找标签 / 判早退 / 切 span）都必须先经此
+        遮蔽，否则会被 CDATA 内字面标签骗（reviewer 连环踩了 _repair_scattered_params /
+        _repair_missing_closing_tags / _repair_tool_name_as_tag / _repair_tag_equals_syntax 才补齐）。
+        这是 raw-string 扫描的两根支柱之一；另一根是 _RESERVED_SIBLING_TAGS（结构性标签词汇表）。
         """
         return re.sub(
             r'<!\[CDATA\[.*?\]\]>',
