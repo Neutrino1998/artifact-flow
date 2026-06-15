@@ -167,7 +167,7 @@ export default function ChatPanel() {
               释放以上传文件
             </div>
             <div className="text-text-tertiary dark:text-text-tertiary-dark text-xs mt-1">
-              支持 .docx / .pdf / .txt / .md / .csv / 代码文件
+              支持任意格式文件
             </div>
           </div>
         </div>
