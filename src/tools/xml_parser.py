@@ -28,6 +28,12 @@ class ToolCall:
 class XMLToolCallParser:
     """XML工具调用解析器"""
 
+    # 协议的 depth-0 结构性兄弟标签（既非用户参数、也非工具名）。**任何要区分"结构性兄弟
+    # vs 用户内容/工具名"的 repair 必须查这张表**——否则每新增一个结构标签，就会被一个个
+    # repair 连环踩雷（reason 落地时 _repair_scattered_params / _repair_tool_name_as_tag
+    # 就是这么一轮轮踩出来的）。深度无关的 pattern 型 repair 不需要它。
+    _RESERVED_SIBLING_TAGS = frozenset({'name', 'params', 'reason'})
+
     @staticmethod
     def parse_tool_calls(text: str) -> List[ToolCall]:
         """
@@ -259,16 +265,23 @@ class XMLToolCallParser:
         if re.search(r'<name[\s>=]', content) or re.search(r'<name>', content):
             return content
 
+        # 跳过开头的结构性 sibling <reason>（完整元素，承载调用意图）——它不是工具名外包标签。
+        # 否则"第一个标签=工具名"会把 <reason> 误当工具名（name='reason'、真实工具名丢失）。
+        # 剥成 prefix，在其后找工具名候选，成功重组时原样前置保留。
+        reason_m = re.match(r'\s*<reason\s*>.*?</reason\s*>\s*', content, re.DOTALL | re.IGNORECASE)
+        prefix = content[:reason_m.end()] if reason_m else ""
+        body = content[reason_m.end():] if reason_m else content
+
         # 匹配首个标签（跳过空白）
-        match = re.match(r'\s*<(\w+)>(.*)', content, re.DOTALL)
+        match = re.match(r'\s*<(\w+)>(.*)', body, re.DOTALL)
         if not match:
             return content
 
         tag_name = match.group(1)
         rest = match.group(2)
 
-        # 如果首标签就是 params → 不是工具名，跳过
-        if tag_name.lower() == 'params':
+        # 首标签是结构性 sibling（params/reason）→ 不是工具名，原样返回（含已剥的 prefix）
+        if tag_name.lower() in XMLToolCallParser._RESERVED_SIBLING_TAGS:
             return content
 
         # 移除对应的闭合标签（如果有）
@@ -279,7 +292,7 @@ class XMLToolCallParser:
             f"Correct form: <name>{tag_name}</name> with <params> as a sibling. "
             f"Do not wrap the call body with the tool name."
         )
-        return f'<name>{tag_name}</name>\n{rest}'
+        return f'{prefix}<name>{tag_name}</name>\n{rest}'
 
     @staticmethod
     def _repair_tag_equals_syntax(content: str, warnings: List[str]) -> str:
@@ -463,8 +476,9 @@ class XMLToolCallParser:
         reason_m = re.search(r'<reason\s*>.*?</reason\s*>', masked_remainder, re.DOTALL | re.IGNORECASE)
         reason_block = f"{content[reason_m.start():reason_m.end()].strip()}\n" if reason_m else ""
 
-        # 真实散落参数（排除上面的结构性 <reason>）
-        has_orphans = any(m.group(1).lower() != 'reason'
+        # 真实散落参数（排除结构性 sibling；masked_remainder 已抠掉 name+params，故残留的
+        # 结构标签只可能是上面的 <reason>）
+        has_orphans = any(m.group(1).lower() not in XMLToolCallParser._RESERVED_SIBLING_TAGS
                           for m in re.finditer(r'<(\w+)\s*>', masked_remainder))
 
         # 单一 params 块且无真实孤立标签 → 无需重组（顶层 <reason> 交给 etree 原样解析）
@@ -472,10 +486,11 @@ class XMLToolCallParser:
             return content
 
         all_children = []
-        # 孤立标签（放前面，后面 params 块同名 key 覆盖）；结构性 <reason> 已单独提走、跳过
+        # 孤立标签（放前面，后面 params 块同名 key 覆盖）；结构性 sibling（已单独提走的 <reason>
+        # 等）跳过，不并进参数
         if has_orphans:
             for m in re.finditer(r'<(\w+)>.*?</\1>', masked_remainder, re.DOTALL):
-                if m.group(1).lower() == 'reason':
+                if m.group(1).lower() in XMLToolCallParser._RESERVED_SIBLING_TAGS:
                     continue
                 all_children.append(content[m.start():m.end()].strip())
         # 有子元素的 params 块（跳过纯文本/CDATA 的垃圾块——masked 后 inner 无 <词> 即垃圾块）

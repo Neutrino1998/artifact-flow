@@ -480,6 +480,34 @@ class TestReasonExtraction:
         assert tc.reason is None
         assert tc.params == {"reason": "内容违规理由", "action": "block"}
 
+    def test_reason_with_tool_name_as_outer_tag(self):
+        """reviewer 回归：顶层 reason + 工具名写成外包标签（<web_fetch>...</web_fetch>）。
+        _repair_tool_name_as_tag 必须跳过结构性 <reason> 再找工具名，否则 name 被误判为 'reason'、
+        真实工具名与 reason 双双丢失。reason 原位保留、工具名/参数都还原。"""
+        text = """<tool_call>
+<reason><![CDATA[fetch the page]]></reason>
+<web_fetch>
+<params><url><![CDATA[https://example.com]]></url></params>
+</web_fetch>
+</tool_call>"""
+        tc = parse_tool_calls(text)[0]
+        assert tc.name == "web_fetch"
+        assert tc.reason == "fetch the page"
+        assert tc.params == {"url": "https://example.com"}
+        assert "web_fetch" not in tc.params
+
+    def test_tool_name_as_outer_tag_no_reason_unchanged(self):
+        """无 reason 时 tool-name-as-tag 老行为不回归。"""
+        text = """<tool_call>
+<web_search>
+<params><query><![CDATA[ai]]></query></params>
+</web_search>
+</tool_call>"""
+        tc = parse_tool_calls(text)[0]
+        assert tc.name == "web_search"
+        assert tc.reason is None
+        assert tc.params == {"query": "ai"}
+
     def test_top_level_reason_with_scattered_params(self):
         """复合场景：顶层 reason（意图）+ 真实触发 scattered-params 重组（name= 语法使 etree 失败、
         重复 params 块 + 孤立参数）。散落参数被 _repair_scattered_params 收进 <params>，而顶层
