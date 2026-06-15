@@ -27,6 +27,7 @@ from api.schemas.admin import (
     AdminEventItem,
     AdminMessageGroup,
     AdminConversationEventsResponse,
+    AdminPromptReconstructResponse,
 )
 from api.schemas.artifact import (
     ArtifactListResponse,
@@ -118,12 +119,14 @@ async def get_admin_conversation_events(
 
         groups.append(AdminMessageGroup(
             message_id=msg.id,
+            parent_id=msg.parent_id,
             user_input=msg.user_input,
             response=msg.response,
             created_at=msg.created_at,
             events=[
                 AdminEventItem(
                     id=e.id,
+                    event_id=e.event_id,
                     event_type=e.event_type,
                     agent_name=e.agent_name,
                     data=e.data,
@@ -145,6 +148,34 @@ async def get_admin_conversation_events(
         updated_at=conv.updated_at,
         messages=groups,
     )
+
+
+@router.get(
+    "/conversations/{conv_id}/messages/{message_id}/reconstruct",
+    response_model=AdminPromptReconstructResponse,
+)
+async def reconstruct_admin_prompt(
+    conv_id: str,
+    message_id: str,
+    agent_start_event_id: str = Query(..., max_length=96),
+    _admin: TokenPayload = Depends(require_admin),
+    conversation_manager: ConversationManager = Depends(get_conversation_manager),
+):
+    """重建某一发 LLM 调用实际发出的完整 prompt（admin 取证，按 agent_start 锚定）。
+
+    锚 = 该次调用前发出的 agent_start 事件（其 event_id 由 events 端点返回）。重建走
+    分支正确的 path，复用引擎同一套装配逻辑，不重新生成动态内容 —— 详见
+    ConversationManager.reconstruct_prompt。
+    """
+    result = await conversation_manager.reconstruct_prompt(
+        conv_id, message_id, agent_start_event_id
+    )
+    if result is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Conversation, message, or agent_start event not found on this branch path",
+        )
+    return AdminPromptReconstructResponse(**result)
 
 
 # ============================================================

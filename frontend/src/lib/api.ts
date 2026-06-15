@@ -437,6 +437,7 @@ export interface AdminConversationListResponse {
 
 export interface AdminEventItem {
   id: number;
+  event_id: string | null; // 业务事件 id；agent_start 用它当 prompt 重建锚
   event_type: string;
   agent_name: string | null;
   data: Record<string, unknown> | null;
@@ -445,11 +446,21 @@ export interface AdminEventItem {
 
 export interface AdminMessageGroup {
   message_id: string;
+  parent_id: string | null; // 消息树父节点（分支结构）
   user_input: string;
   response: string | null;
   created_at: string;
   events: AdminEventItem[];
   execution_metrics: Record<string, unknown> | null;
+}
+
+export interface AdminPromptReconstructResponse {
+  conversation_id: string;
+  message_id: string;
+  agent_start_event_id: string;
+  agent_name: string | null;
+  has_reminder: boolean;
+  messages: Record<string, unknown>[];
 }
 
 export interface AdminConversationEventsResponse {
@@ -479,6 +490,17 @@ export function listAdminConversations(
 export function getAdminConversationEvents(convId: string) {
   return request<AdminConversationEventsResponse>(
     `/api/v1/admin/conversations/${convId}/events`
+  );
+}
+
+export function getAdminPromptReconstruct(
+  convId: string,
+  messageId: string,
+  agentStartEventId: string,
+) {
+  const params = new URLSearchParams({ agent_start_event_id: agentStartEventId });
+  return request<AdminPromptReconstructResponse>(
+    `/api/v1/admin/conversations/${convId}/messages/${messageId}/reconstruct?${params}`
   );
 }
 

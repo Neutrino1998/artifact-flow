@@ -46,7 +46,8 @@ class ContextManager:
         artifacts_inventory: Optional[List[Dict]] = None,
         model: Optional[str] = None,
         sandbox_status: Optional[Dict] = None,
-    ) -> List[Dict[str, str]]:
+        tool_round_count: int = 0,
+    ) -> tuple[List[Dict[str, Any]], str]:
         """
         构建 LLM 调用所需的完整 messages
 
@@ -58,9 +59,13 @@ class ContextManager:
             agents: 所有 agent 配置 {name: AgentConfig}
             tools: 所有可用工具 {name: BaseTool}
             artifacts_inventory: 预加载的 artifacts 清单（含完整内容）
+            tool_round_count: 本 agent 已用的工具轮数（命中 max_tool_rounds 时 reminder
+                里出现 <tool_budget> 收尾提示，见 _build_dynamic_context）
 
         Returns:
-            List[Dict]（messages 列表）
+            (messages, reminder) —— messages 是完整 LLM 消息列表；reminder 是并入末条
+            消息的 ephemeral <system-reminder> 原文，单独返回供引擎落进 agent_start 事件
+            （admin 重建 prompt 时拿它当持久化原值，无需重新生成 → 不漂移）。
         """
         from tools.xml_formatter import generate_tool_instruction
 
@@ -87,15 +92,14 @@ class ContextManager:
             system_parts.append(generate_tool_instruction(agent_tools))
 
         system_prompt = "\n\n".join(s for s in system_parts if s)
-        system_message = {"role": "system", "content": system_prompt}
 
         # ========== Messages ==========
-        # 历史 + 当前轮统一来自 state["events"]，EventHistory 处理 boundary / 过滤；
-        # 发给 LLM 前剥离 _meta。
-        all_messages = cls._strip_meta(build_event_history(
+        # 历史 + 当前轮统一来自 state["events"]，EventHistory 处理 boundary / 过滤。
+        # _meta 的剥离交给 assemble（与 admin 重建路径共享同一步），这里传原始历史。
+        all_messages = build_event_history(
             state.get("events", []), agent_name, state.get("vision_blocks"),
             vision_capable=model_supports_vision(agent_config.model),
-        ))
+        )
 
         # 动态上下文（系统时间 / task_plan / artifact 清单）作为 ephemeral
         # <system-reminder> 并入最后一条消息正文：每次 build 现拼、即用即丢、绝不入
@@ -115,19 +119,43 @@ class ContextManager:
         # 「content 空则丢 _meta」影响(高 input+空 content 也能预警)。
         last_usage = last_llm_usage(state.get("events", []), agent_name)
         reminder = cls._build_dynamic_context(
-            agent_config, artifacts_inventory, last_usage, sandbox_status
+            agent_config, artifacts_inventory, last_usage, sandbox_status,
+            tool_round_count=tool_round_count,
         )
-        last = all_messages[-1]
-        last_content = last["content"]
-        if isinstance(last_content, list):
-            # 末条是图块列表(本轮刚 read 图的 tool_result):reminder 作为附加 text block
-            # 追加,不能字符串拼接(会把整个 list stringify、毁掉图块结构)。
-            new_content = last_content + [{"type": "text", "text": reminder}]
-        else:
-            new_content = f'{last_content}\n\n{reminder}'
-        all_messages[-1] = {**last, "content": new_content}
+        return cls.assemble(system_prompt, all_messages, reminder), reminder
 
-        return [system_message] + all_messages
+    @classmethod
+    def assemble(
+        cls,
+        system_prompt: str,
+        history_messages: List[Dict[str, Any]],
+        reminder: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """把 reminder 并入末条历史消息 + 前置 system message，得到最终 messages。
+
+        这是 live 路径（build）与 admin 重建路径（ConversationManager.reconstruct_prompt）
+        **共享的拼接叶子** —— 易漂的「reminder 合进 [-1]」逻辑只此一处，两条路径必然一致。
+        build 永远传非空 reminder；重建路径对早于 reminder-持久化的旧事件传 reminder=None
+        （那时只前置 system + 历史，不拼 reminder）。发给 LLM 前剥离 _meta 也在此完成
+        （两条路径共享），故调用方传原始 build_event_history 输出即可。
+
+        末条历史必为 user 角色（USER_INPUT / tool_complete / subagent_instruction /
+        queued_message / compaction_summary），故直接并入末条。history_messages 为空 =
+        上游不变量被破坏（见 build 注释），让它在 [-1] 上响亮失败。
+        """
+        all_messages = cls._strip_meta(history_messages)
+        if reminder is not None:
+            last = all_messages[-1]
+            last_content = last["content"]
+            if isinstance(last_content, list):
+                # 末条是图块列表(本轮刚 read 图的 tool_result):reminder 作为附加 text block
+                # 追加,不能字符串拼接(会把整个 list stringify、毁掉图块结构)。
+                new_content = last_content + [{"type": "text", "text": reminder}]
+            else:
+                new_content = f'{last_content}\n\n{reminder}'
+            all_messages[-1] = {**last, "content": new_content}
+
+        return [{"role": "system", "content": system_prompt}] + all_messages
 
     @classmethod
     def _build_dynamic_context(
@@ -136,13 +164,14 @@ class ContextManager:
         artifacts_inventory: Optional[List[Dict]],
         last_usage: Optional[int] = None,
         sandbox_status: Optional[Dict] = None,
+        tool_round_count: int = 0,
     ) -> str:
         """组装每轮刷新的动态上下文，包裹为 ephemeral <system-reminder>。
 
         内容：系统时间（始终）+ task_plan（存在时）+ artifact 清单（仅有 artifact
         工具的 agent）+ 沙盒状态（仅有沙盒工具的 agent 且引擎递了快照）+
-        context_usage 预警（仅临近 compaction 时）。由 build() 并入消息
-        尾部，不进 system prompt、不持久化为 event。
+        context_usage 预警（仅临近 compaction 时）+ tool_budget 收尾提示（仅命中
+        max_tool_rounds 时）。由 build() 并入消息尾部，不进 system prompt、不持久化为 event。
 
         语义定位是「当前世界状态的一瞥」（glance, don't act）—— 与需要 uptake 的
         持久化 meta 帧（用户上传提示 / 注入消息 / compaction frame，均用 [...] 行动帧
@@ -193,6 +222,22 @@ class ContextManager:
         context_usage = cls._build_context_usage(last_usage)
         if context_usage:
             parts.append(context_usage)
+
+        # 工具轮预算（仅命中 max_tool_rounds 时出现）—— 原为引擎在 build 后追加的一条独立
+        # system 消息，现并入 reminder：它本就是「条件触发的 per-turn 状态」，与 context_usage
+        # 同类，统一到一处既消掉散落的特例，也让「持久化 reminder = 抓全所有动态内容」成立
+        # （admin 重建 prompt 无需再特判补这条尾巴）。它是**软刹车**——引擎不按工具轮数硬停
+        # （唯一硬兜底是 execution timeout），故措辞写成「超时风险」这个真实后果，而非
+        # 「不会被执行」的假话；也因此降权进 reminder（judge-relevance 框）是自洽的。
+        max_rounds = getattr(agent_config, "max_tool_rounds", None)
+        if max_rounds and tool_round_count >= max_rounds:
+            parts.append(
+                '<tool_budget>\n'
+                f'Tool-round budget reached ({tool_round_count}/{max_rounds}). Further '
+                'tool calls risk the turn ending by timeout before you can answer — wrap '
+                'up and give your final response now.\n'
+                '</tool_budget>'
+            )
 
         # 自描述首句：声明这段是什么、怎么对待 —— 降权为「环境状态、自行判断相关性」，
         # 避免模型把工作区状态误当用户指令执行。

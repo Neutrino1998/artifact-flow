@@ -463,6 +463,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/conversations/{conv_id}/messages/{message_id}/reconstruct": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Reconstruct Admin Prompt
+         * @description 重建某一发 LLM 调用实际发出的完整 prompt（admin 取证，按 agent_start 锚定）。
+         *
+         *     锚 = 该次调用前发出的 agent_start 事件（其 event_id 由 events 端点返回）。重建走
+         *     分支正确的 path，复用引擎同一套装配逻辑，不重新生成动态内容 —— 详见
+         *     ConversationManager.reconstruct_prompt。
+         */
+        get: operations["reconstruct_admin_prompt_api_v1_admin_conversations__conv_id__messages__message_id__reconstruct_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/conversations/{conv_id}/artifacts": {
         parameters: {
             query?: never;
@@ -1018,6 +1042,8 @@ export interface components {
         AdminEventItem: {
             /** Id */
             id: number;
+            /** Event Id */
+            event_id: string | null;
             /** Event Type */
             event_type: string;
             /** Agent Name */
@@ -1039,6 +1065,8 @@ export interface components {
         AdminMessageGroup: {
             /** Message Id */
             message_id: string;
+            /** Parent Id */
+            parent_id: string | null;
             /** User Input */
             user_input: string;
             /** Response */
@@ -1054,6 +1082,32 @@ export interface components {
             execution_metrics: {
                 [key: string]: unknown;
             } | null;
+        };
+        /**
+         * AdminPromptReconstructResponse
+         * @description GET .../messages/{message_id}/reconstruct response — 重建某发 LLM 调用的完整 prompt。
+         *
+         *     has_reminder=False 表示该 agent_start 早于 reminder 持久化（只重建了 system_prompt +
+         *     历史，无动态 reminder）。messages 的 content 可能是 str 或块列表（识图块降级为占位文本）。
+         */
+        AdminPromptReconstructResponse: {
+            /** Conversation Id */
+            conversation_id: string;
+            /** Message Id */
+            message_id: string;
+            /** Agent Start Event Id */
+            agent_start_event_id: string;
+            /** Agent Name */
+            agent_name: string | null;
+            /**
+             * Has Reminder
+             * @default false
+             */
+            has_reminder: boolean;
+            /** Messages */
+            messages: {
+                [key: string]: unknown;
+            }[];
         };
         /**
          * ArtifactListResponse
@@ -2797,6 +2851,40 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AdminConversationEventsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reconstruct_admin_prompt_api_v1_admin_conversations__conv_id__messages__message_id__reconstruct_get: {
+        parameters: {
+            query: {
+                agent_start_event_id: string;
+            };
+            header?: never;
+            path: {
+                conv_id: string;
+                message_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminPromptReconstructResponse"];
                 };
             };
             /** @description Validation Error */

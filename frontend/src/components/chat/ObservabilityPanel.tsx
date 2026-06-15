@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import type { ReactNode } from 'react';
 import { useCopyFeedback } from '@/hooks/useCopyFeedback';
 import { CopyIcon } from '@/components/ui/CopyIcon';
@@ -204,6 +204,8 @@ export default function ObservabilityPanel() {
   const [eventsLoading, setEventsLoading] = useState(false);
   const [collapsedMessages, setCollapsedMessages] = useState<Set<string>>(new Set());
   const [selectedEvent, setSelectedEvent] = useState<AdminEventItem | null>(null);
+  // message_id 的选中事件所属消息 —— prompt 重建需要它（分支正确的 path 锚定）
+  const [selectedMsgId, setSelectedMsgId] = useState<string | null>(null);
   const refreshTick = useUIStore((s) => s.observabilityRefreshTick);
   const [viewMode, setViewMode] = useState<'events' | 'artifacts'>('events');
 
@@ -216,11 +218,13 @@ export default function ObservabilityPanel() {
     if (!selectedConvId) {
       setEventsData(null);
       setSelectedEvent(null);
+      setSelectedMsgId(null);
       return;
     }
     let cancelled = false;
     setEventsData(null);
     setSelectedEvent(null);
+    setSelectedMsgId(null);
     setEventsLoading(true);
     api.getAdminConversationEvents(selectedConvId).then((res) => {
       if (!cancelled) {
@@ -277,6 +281,24 @@ export default function ObservabilityPanel() {
   const stats = eventsData != null ? aggregateStats(eventsData.messages) : null;
   const headerTitle = eventsData?.title || selectedConvId;
 
+  // 活动分支路径：从 active_branch(叶子)沿 parent_id 上溯到根。对话有分支时（路径
+  // 未覆盖全部消息），不在路径上的消息标「旁支」，让 admin 看出分支结构 —— 否则
+  // 扁平时间线把所有分支混在一起、分不清谁在当前活动线上。
+  const activePathIds = useMemo(() => {
+    const ids = new Set<string>();
+    if (!eventsData) return ids;
+    const parentOf = new Map<string, string | null>();
+    for (const m of eventsData.messages) parentOf.set(m.message_id, m.parent_id);
+    let cur: string | null | undefined = eventsData.active_branch;
+    while (cur != null && parentOf.has(cur) && !ids.has(cur)) {
+      ids.add(cur);
+      cur = parentOf.get(cur) ?? null;
+    }
+    return ids;
+  }, [eventsData]);
+  const hasBranches = eventsData != null && activePathIds.size > 0
+    && activePathIds.size < eventsData.messages.length;
+
   // Timeline + Detail
   return (
     <div className="flex-1 flex min-h-0 bg-chat dark:bg-chat-dark">
@@ -324,8 +346,9 @@ export default function ObservabilityPanel() {
                     group={msg}
                     collapsed={collapsedMessages.has(msg.message_id)}
                     onToggle={() => toggleMessageCollapse(msg.message_id)}
+                    offActiveBranch={hasBranches && !activePathIds.has(msg.message_id)}
                     selectedEventId={selectedEvent?.id ?? null}
-                    onSelectEvent={setSelectedEvent}
+                    onSelectEvent={(e, msgId) => { setSelectedEvent(e); setSelectedMsgId(msgId); }}
                   />
                 ))}
               </div>
@@ -338,7 +361,13 @@ export default function ObservabilityPanel() {
 
       {/* Right detail panel — only for events tab */}
       {viewMode === 'events' && selectedEvent != null ? (
-        <DetailPanel key={selectedEvent.id} event={selectedEvent} onClose={() => setSelectedEvent(null)} />
+        <DetailPanel
+          key={selectedEvent.id}
+          event={selectedEvent}
+          convId={selectedConvId}
+          messageId={selectedMsgId}
+          onClose={() => { setSelectedEvent(null); setSelectedMsgId(null); }}
+        />
       ) : null}
     </div>
   );
@@ -396,6 +425,9 @@ function serializeEventToText(event: AdminEventItem): string {
   if (d != null && event.event_type === 'agent_start' && d.system_prompt != null) {
     lines.push(`\n--- System Prompt ---\n${d.system_prompt as string}`);
   }
+  if (d != null && event.event_type === 'agent_start' && d.reminder != null) {
+    lines.push(`\n--- Reminder ---\n${d.reminder as string}`);
+  }
   if (d != null && event.event_type === 'error') {
     lines.push(`\n--- Error ---\n${(d.error as string) || JSON.stringify(d, null, 2)}`);
   }
@@ -405,7 +437,17 @@ function serializeEventToText(event: AdminEventItem): string {
   return lines.join('\n');
 }
 
-function DetailPanel({ event, onClose }: { event: AdminEventItem; onClose: () => void }) {
+function DetailPanel({
+  event,
+  convId,
+  messageId,
+  onClose,
+}: {
+  event: AdminEventItem;
+  convId: string | null;
+  messageId: string | null;
+  onClose: () => void;
+}) {
   const { copied, copy } = useCopyFeedback();
 
   const handleCopy = useCallback(() => {
@@ -446,7 +488,7 @@ function DetailPanel({ event, onClose }: { event: AdminEventItem; onClose: () =>
         </div>
       </div>
       <div className="flex-1 overflow-y-auto px-4 py-3">
-        <EventDetail event={event} />
+        <EventDetail event={event} convId={convId} messageId={messageId} />
       </div>
     </div>
   );
@@ -612,14 +654,16 @@ function MessageGroupView({
   group,
   collapsed,
   onToggle,
+  offActiveBranch,
   selectedEventId,
   onSelectEvent,
 }: {
   group: AdminMessageGroup;
   collapsed: boolean;
   onToggle: () => void;
+  offActiveBranch: boolean;
   selectedEventId: number | null;
-  onSelectEvent: (e: AdminEventItem) => void;
+  onSelectEvent: (e: AdminEventItem, messageId: string) => void;
 }) {
   const inputPreview = group.user_input.slice(0, 80) + (group.user_input.length > 80 ? '...' : '');
 
@@ -642,6 +686,14 @@ function MessageGroupView({
         <span className="text-xs font-medium text-text-primary dark:text-text-primary-dark truncate">
           {inputPreview}
         </span>
+        {offActiveBranch ? (
+          <span
+            className="flex-shrink-0 px-1 py-px rounded bg-amber-500/10 text-amber-600 dark:text-amber-400 text-[10px]"
+            title="不在当前活动分支路径上（旁支历史消息）"
+          >
+            旁支
+          </span>
+        ) : null}
         <span className="flex-shrink-0 text-xs text-text-tertiary dark:text-text-tertiary-dark">
           {group.events.length} events
         </span>
@@ -653,7 +705,7 @@ function MessageGroupView({
           {group.events.map((event) => (
             <button
               key={event.id}
-              onClick={() => onSelectEvent(event)}
+              onClick={() => onSelectEvent(event, group.message_id)}
               className={`w-full text-left flex items-center gap-2 px-2 py-1 rounded text-xs transition-colors ${
                 selectedEventId === event.id
                   ? 'bg-accent/10'
@@ -683,7 +735,15 @@ function MessageGroupView({
 }
 
 // ── Event Detail ──
-function EventDetail({ event }: { event: AdminEventItem }) {
+function EventDetail({
+  event,
+  convId,
+  messageId,
+}: {
+  event: AdminEventItem;
+  convId: string | null;
+  messageId: string | null;
+}) {
   const d = event.data;
 
   return (
@@ -733,8 +793,16 @@ function EventDetail({ event }: { event: AdminEventItem }) {
         </div>
       ) : null}
 
-      {d != null && event.event_type === 'agent_start' && d.system_prompt != null ? (
-        <DetailBlock label="System Prompt" content={d.system_prompt as string} />
+      {event.event_type === 'agent_start' ? (
+        <>
+          {d?.system_prompt != null ? (
+            <DetailBlock label="System Prompt" content={d.system_prompt as string} />
+          ) : null}
+          {d?.reminder != null ? (
+            <DetailBlock label="Reminder（动态，并入末条消息）" content={d.reminder as string} />
+          ) : null}
+          <PromptReconstructSection convId={convId} messageId={messageId} event={event} />
+        </>
       ) : null}
 
       {d != null && event.event_type === 'error' ? (
@@ -966,6 +1034,90 @@ function ArtifactsTab({ convId, refreshTick }: { convId: string; refreshTick: nu
           </>
         )}
       </div>
+    </div>
+  );
+}
+
+// ── Prompt Reconstruction (admin forensics) ──
+// 重建某发 agent_start 后 LLM 调用实际发出的完整 prompt：后端走分支正确的 path，
+// 用持久化的 system_prompt + reminder + 重放历史合成，不重新生成动态内容。
+function PromptReconstructSection({
+  convId,
+  messageId,
+  event,
+}: {
+  convId: string | null;
+  messageId: string | null;
+  event: AdminEventItem;
+}) {
+  const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState<api.AdminPromptReconstructResponse | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const eventId = event.event_id;
+  const canReconstruct = convId != null && messageId != null && eventId != null;
+
+  const handleReconstruct = useCallback(() => {
+    if (convId == null || messageId == null || eventId == null) return;
+    setLoading(true);
+    setError(null);
+    api.getAdminPromptReconstruct(convId, messageId, eventId)
+      .then(setResult)
+      .catch((err) => setError(err instanceof Error ? err.message : '重建失败'))
+      .finally(() => setLoading(false));
+  }, [convId, messageId, eventId]);
+
+  const handleDownload = useCallback(() => {
+    if (!result) return;
+    const blob = new Blob([JSON.stringify(result.messages, null, 2)], {
+      type: 'application/json;charset=utf-8',
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `prompt-${messageId ?? 'msg'}-${eventId ?? 'evt'}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [result, messageId, eventId]);
+
+  return (
+    <div className="space-y-2 border-t border-border dark:border-border-dark pt-3">
+      <div className="text-xs text-text-tertiary dark:text-text-tertiary-dark">
+        重建此发实际发给模型的完整 prompt（持久化重放，不重新生成；忠实性为版本内）
+      </div>
+      <div className="flex items-center gap-2 flex-wrap">
+        <button
+          onClick={handleReconstruct}
+          disabled={!canReconstruct || loading}
+          className="px-2 py-1 rounded-md text-xs bg-accent/10 text-accent hover:bg-accent/20 disabled:opacity-50 transition-colors"
+        >
+          {loading ? '重建中...' : '重建 Prompt'}
+        </button>
+        {result ? (
+          <button onClick={handleDownload} className="text-xs text-accent">
+            下载 JSON
+          </button>
+        ) : null}
+      </div>
+      {!canReconstruct ? (
+        <div className="text-xs text-text-tertiary dark:text-text-tertiary-dark">
+          该事件缺少 event_id（早于此能力上线），无法重建。
+        </div>
+      ) : null}
+      {error ? <div className="text-xs text-status-error">{error}</div> : null}
+      {result ? (
+        <div className="space-y-2">
+          <div className="flex items-center gap-2 flex-wrap text-xs text-text-tertiary dark:text-text-tertiary-dark">
+            <span>{result.messages.length} 条消息 · {result.agent_name ?? '-'}</span>
+            {!result.has_reminder ? (
+              <span className="px-1 py-px rounded bg-yellow-500/10 text-yellow-600 dark:text-yellow-400 text-[10px]">
+                无持久化 reminder（旧事件：仅 system + 历史）
+              </span>
+            ) : null}
+          </div>
+          <DetailBlock label="重建 Messages" content={JSON.stringify(result.messages, null, 2)} />
+        </div>
+      ) : null}
     </div>
   );
 }

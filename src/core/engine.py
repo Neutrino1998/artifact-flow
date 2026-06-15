@@ -345,8 +345,12 @@ async def execute_loop(
         """从合并后的 tools dict 查找工具"""
         return tools.get(name)
 
-    async def _build_context(agent_name: str) -> list:
-        """drain messages → artifacts 清单 → ContextManager.build → tool limit 注入"""
+    async def _build_context(agent_name: str) -> tuple[list, str]:
+        """drain messages → artifacts 清单 → ContextManager.build。
+
+        返回 (messages, reminder)：reminder 是并入末条消息的 <system-reminder> 原文，
+        供调用处落进 agent_start 事件（持久化动态上下文，admin 据此重建 prompt）。
+        """
         if current_agent_name == "lead_agent":
             for msg in await hooks.drain_messages(message_id):
                 wrapped = (
@@ -375,7 +379,9 @@ async def execute_loop(
             except Exception:
                 logger.exception("sandbox status snapshot failed")  # 注入缺席即可,不阻断本轮
 
-        messages = ContextManager.build(
+        # max_tool_rounds 收尾提示已并入 reminder（见 ContextManager._build_dynamic_context
+        # 的 <tool_budget>）——引擎只把 live 工具轮数传进去，不再在 build 后追加独立 system 消息。
+        messages, reminder = ContextManager.build(
             state=state,
             agent_name=agent_name,
             agents=agents,
@@ -383,16 +389,10 @@ async def execute_loop(
             artifacts_inventory=artifacts_inventory,
             model=get_litellm_model_id(agents[agent_name].model),
             sandbox_status=sandbox_status,
+            tool_round_count=tool_round_count.get(agent_name, 0),
         )
 
-        if tool_round_count.get(agent_name, 0) >= agents[agent_name].max_tool_rounds:
-            messages.append({
-                "role": "system",
-                "content": "You have reached the maximum number of tool calls. "
-                           "Please summarize your findings and provide a final response."
-            })
-
-        return messages
+        return messages, reminder
 
     async def _complete_agent(agent_name: str, response_content: str) -> None:
         """
@@ -950,11 +950,16 @@ async def execute_loop(
                 }
                 break
 
-            messages = await _build_context(current_agent_name)
+            messages, reminder = await _build_context(current_agent_name)
 
+            # agent_start 持久化「发给模型的非历史输入」：静态 system_prompt + 动态 reminder。
+            # 历史可由 event 流确定性重放，这两块（尤其 reminder：现拼即丢、不入 event）补上后，
+            # admin 即可零重生成、忠实重建这一发的完整 prompt。reminder 不进 LLM 输入缓存前缀，
+            # 落进事件 payload 对 prompt cache 零影响。
             await _emit(StreamEventType.AGENT_START.value, current_agent_name, {
                 "agent": current_agent_name,
                 "system_prompt": messages[0]["content"] if messages and messages[0].get("role") == "system" else None,
+                "reminder": reminder,
             })
 
             # 守卫:format_messages_for_debug 会遍历 messages,识图块列表里若有图(已压成

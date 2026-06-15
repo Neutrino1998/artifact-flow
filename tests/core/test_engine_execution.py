@@ -1014,8 +1014,9 @@ class TestCancelProbeFailure:
 
 class TestRoundLimits:
 
-    async def test_max_tool_rounds_injects_system_message(self):
-        """After max_tool_rounds, a system message should be injected."""
+    async def test_max_tool_rounds_adds_tool_budget_reminder(self):
+        """After max_tool_rounds, a <tool_budget> wrap-up nudge is folded into the
+        reminder (merged into the last user message) — no longer a separate system message."""
         agent = _FakeAgentConfig(tools={"my_tool": "auto"}, max_tool_rounds=1)
         tool = _FakeTool("my_tool")
 
@@ -1041,12 +1042,15 @@ class TestRoundLimits:
             tools={"my_tool": tool},
         )
 
-        # Second call should have the system message about max rounds
-        if len(captured_messages) >= 2:
-            last_call_msgs = captured_messages[-1]
-            system_msgs = [m for m in last_call_msgs if m["role"] == "system"]
-            has_limit_msg = any("maximum number of tool calls" in m["content"] for m in system_msgs)
-            assert has_limit_msg
+        # Second call: the budget nudge rides in the reminder on the last user message
+        assert len(captured_messages) >= 2
+        last_call_msgs = captured_messages[-1]
+        joined = "\n".join(
+            m["content"] if isinstance(m["content"], str) else str(m["content"])
+            for m in last_call_msgs
+        )
+        assert "<tool_budget>" in joined
+        assert "Tool-round budget reached" in joined
 
 
 # ============================================================

@@ -1152,6 +1152,73 @@
         }
       }
     },
+    "/api/v1/admin/conversations/{conv_id}/messages/{message_id}/reconstruct": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Reconstruct Admin Prompt",
+        "description": "\u91cd\u5efa\u67d0\u4e00\u53d1 LLM \u8c03\u7528\u5b9e\u9645\u53d1\u51fa\u7684\u5b8c\u6574 prompt\uff08admin \u53d6\u8bc1\uff0c\u6309 agent_start \u951a\u5b9a\uff09\u3002\n\n\u951a = \u8be5\u6b21\u8c03\u7528\u524d\u53d1\u51fa\u7684 agent_start \u4e8b\u4ef6\uff08\u5176 event_id \u7531 events \u7aef\u70b9\u8fd4\u56de\uff09\u3002\u91cd\u5efa\u8d70\n\u5206\u652f\u6b63\u786e\u7684 path\uff0c\u590d\u7528\u5f15\u64ce\u540c\u4e00\u5957\u88c5\u914d\u903b\u8f91\uff0c\u4e0d\u91cd\u65b0\u751f\u6210\u52a8\u6001\u5185\u5bb9 \u2014\u2014 \u8be6\u89c1\nConversationManager.reconstruct_prompt\u3002",
+        "operationId": "reconstruct_admin_prompt_api_v1_admin_conversations__conv_id__messages__message_id__reconstruct_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "conv_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Conv Id"
+            }
+          },
+          {
+            "name": "message_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Message Id"
+            }
+          },
+          {
+            "name": "agent_start_event_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 96,
+              "title": "Agent Start Event Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminPromptReconstructResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/admin/conversations/{conv_id}/artifacts": {
       "get": {
         "tags": [
@@ -2444,6 +2511,17 @@
             "type": "integer",
             "title": "Id"
           },
+          "event_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Event Id"
+          },
           "event_type": {
             "type": "string",
             "title": "Event Type"
@@ -2480,6 +2558,7 @@
         "type": "object",
         "required": [
           "id",
+          "event_id",
           "event_type",
           "agent_name",
           "data",
@@ -2493,6 +2572,17 @@
           "message_id": {
             "type": "string",
             "title": "Message Id"
+          },
+          "parent_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Id"
           },
           "user_input": {
             "type": "string",
@@ -2537,6 +2627,7 @@
         "type": "object",
         "required": [
           "message_id",
+          "parent_id",
           "user_input",
           "response",
           "created_at",
@@ -2545,6 +2636,57 @@
         ],
         "title": "AdminMessageGroup",
         "description": "Events grouped by message"
+      },
+      "AdminPromptReconstructResponse": {
+        "properties": {
+          "conversation_id": {
+            "type": "string",
+            "title": "Conversation Id"
+          },
+          "message_id": {
+            "type": "string",
+            "title": "Message Id"
+          },
+          "agent_start_event_id": {
+            "type": "string",
+            "title": "Agent Start Event Id"
+          },
+          "agent_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Name"
+          },
+          "has_reminder": {
+            "type": "boolean",
+            "title": "Has Reminder",
+            "default": false
+          },
+          "messages": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Messages"
+          }
+        },
+        "type": "object",
+        "required": [
+          "conversation_id",
+          "message_id",
+          "agent_start_event_id",
+          "agent_name",
+          "has_reminder",
+          "messages"
+        ],
+        "title": "AdminPromptReconstructResponse",
+        "description": "GET .../messages/{message_id}/reconstruct response \u2014 \u91cd\u5efa\u67d0\u53d1 LLM \u8c03\u7528\u7684\u5b8c\u6574 prompt\u3002\n\nhas_reminder=False \u8868\u793a\u8be5 agent_start \u65e9\u4e8e reminder \u6301\u4e45\u5316\uff08\u53ea\u91cd\u5efa\u4e86 system_prompt +\n\u5386\u53f2\uff0c\u65e0\u52a8\u6001 reminder\uff09\u3002messages \u7684 content \u53ef\u80fd\u662f str \u6216\u5757\u5217\u8868\uff08\u8bc6\u56fe\u5757\u964d\u7ea7\u4e3a\u5360\u4f4d\u6587\u672c\uff09\u3002"
       },
       "ArtifactListResponse": {
         "properties": {

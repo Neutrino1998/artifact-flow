@@ -522,6 +522,72 @@ class ConversationManager:
 
         return conv, messages, events, owner_display_name
 
+    async def reconstruct_prompt(
+        self,
+        conv_id: str,
+        message_id: str,
+        agent_start_event_id: str,
+    ) -> Optional[Dict[str, Any]]:
+        """Admin 取证：重建某一发 LLM 调用实际发出的完整 prompt（messages 列表）。
+
+        忠实性策略 = 持久化后纯重放，不重新生成动态内容：
+          - 静态 system_prompt + 动态 reminder 取自锚 agent_start 事件的持久化原值；
+          - 历史 messages 用 build_event_history 在「锚之前的 path 事件」上确定性重放；
+          - 两者经 ContextManager.assemble（与 live build 同一拼接叶子）合成。
+        分支安全：按 message_id 走 load_event_history_async（分支正确的 path），锚事件
+        必须落在该 path 上，否则（选错分支 / 不存在）返回 None → 404。
+
+        「100%」是**版本内**的 100%：历史重放仍跑当前版本的 build_event_history，且
+        reminder 仅对本次变更上线后产生的事件存在（旧事件 reminder=None，只重建
+        system_prompt + 历史，has_reminder=False 标注）。识图块因 vision_blocks 是
+        per-turn 内存缓存、已不可得，统一降级为占位文本（与跨轮 reload 同口径）。
+
+        Returns:
+            重建结果 dict；conv / message / 锚事件任一在该 path 上找不到时返回 None。
+        """
+        from core.event_history import build_event_history
+        from core.context_manager import ContextManager
+        from core.events import StreamEventType
+
+        events = await self.load_event_history_async(conv_id, to_message_id=message_id)
+        if not events:
+            return None
+
+        anchor_idx = next(
+            (i for i, e in enumerate(events)
+             if e.event_type == StreamEventType.AGENT_START.value
+             and e.event_id == agent_start_event_id),
+            None,
+        )
+        if anchor_idx is None:
+            return None
+
+        anchor = events[anchor_idx]
+        data = anchor.data or {}
+        system_prompt = data.get("system_prompt") or ""
+        reminder = data.get("reminder")  # 旧事件无此字段 → None
+        agent_name = anchor.agent_name
+
+        history = build_event_history(events[:anchor_idx], agent_name)
+        if not history:
+            # 锚前无本 agent 历史 = 数据异常（正常下至少有 user_input / subagent_instruction）。
+            # 取证场景、admin 会上报，记一笔便于排查。
+            logger.warning(
+                f"reconstruct_prompt: empty history before anchor "
+                f"(conv={conv_id} msg={message_id} event={agent_start_event_id})"
+            )
+            return None
+
+        messages = ContextManager.assemble(system_prompt, history, reminder)
+        return {
+            "conversation_id": conv_id,
+            "message_id": message_id,
+            "agent_start_event_id": agent_start_event_id,
+            "agent_name": agent_name,
+            "has_reminder": reminder is not None,
+            "messages": messages,
+        }
+
     async def delete_conversation(self, conversation_id: str) -> bool:
         """
         删除对话（级联删除消息和 Artifacts）

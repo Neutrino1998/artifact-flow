@@ -78,16 +78,21 @@ def _make_event(event_type, agent_name="lead_agent", data=None, is_historical=Fa
 
 
 def _build(agent, agents=None, **kwargs):
-    """Helper: call ContextManager.build with agent_name + agents dict."""
+    """Helper: call ContextManager.build with agent_name + agents dict.
+
+    build 现返回 (messages, reminder)；多数测试只关心 messages，这里解包返回 messages。
+    需要 reminder 的测试直接调 ContextManager.build。
+    """
     if agents is None:
         agents = {agent.name: agent}
     elif agent.name not in agents:
         agents[agent.name] = agent
-    return ContextManager.build(
+    messages, _reminder = ContextManager.build(
         agent_name=agent.name,
         agents=agents,
         **kwargs,
     )
+    return messages
 
 
 def _ai_msg(content, input_tokens=1000, output_tokens=200):
@@ -756,3 +761,78 @@ class TestSandboxStatus:
         agent = _FakeAgentConfig(tools={"bash": "confirm"})
         reminder = _build(agent, state=self._state(), tools={})[-1]["content"]
         assert "<sandbox_status" not in reminder
+
+
+# ============================================================
+# TestPromptReconstructionFidelity
+#
+# admin 重建 prompt 的核心保证：用持久化的 system_prompt + reminder（取自 agent_start）
+# + 在锚前事件上重放的历史，经 ContextManager.assemble 合成，必须逐字等于 live build。
+# 这把「持久化后纯重放、不重新生成」的忠实性钉成回归测试。
+# ============================================================
+
+
+class TestPromptReconstructionFidelity:
+
+    def _assert_roundtrip(self, agent, state, **build_kwargs):
+        from core.event_history import build_event_history
+
+        live_messages, reminder = ContextManager.build(
+            agent_name=agent.name, agents={agent.name: agent},
+            state=state, tools={}, **build_kwargs,
+        )
+        system_prompt = live_messages[0]["content"]
+        # 重建路径：与引擎同一份 build_event_history（默认 vision_capable，无 vision_blocks）
+        history = build_event_history(state["events"], agent.name)
+        rebuilt = ContextManager.assemble(system_prompt, history, reminder)
+        assert rebuilt == live_messages
+
+    def test_roundtrip_plain_turn(self):
+        agent = _FakeAgentConfig()
+        state = _make_state(events=[
+            _make_event(StreamEventType.USER_INPUT.value, data={"content": "hello"}),
+        ])
+        self._assert_roundtrip(agent, state)
+
+    def test_roundtrip_with_artifacts_and_tool_result(self):
+        agent = _FakeAgentConfig(tools={"create_artifact": "auto", "read_artifact": "auto"})
+        artifacts = [{
+            "id": "a1", "version": 1, "content_type": "text/markdown",
+            "source": "agent", "title": "Doc", "content": "body text",
+            "updated_at": "2026-06-15T00:00:00", "created_at": "2026-06-15T00:00:00",
+        }]
+        state = _make_state(events=[
+            _make_event(StreamEventType.USER_INPUT.value, data={"content": "hi"}),
+            _llm_complete(1000, 100),
+            _tool_complete(),
+        ])
+        self._assert_roundtrip(agent, state, artifacts_inventory=artifacts)
+
+    def test_roundtrip_tool_budget_reminder(self):
+        # 命中 max_tool_rounds → reminder 含 <tool_budget>，重建路径同样带上（无需特判尾巴）
+        agent = _FakeAgentConfig(max_tool_rounds=2)
+        state = _make_state(events=[
+            _make_event(StreamEventType.USER_INPUT.value, data={"content": "hi"}),
+        ])
+        _, reminder = ContextManager.build(
+            agent_name=agent.name, agents={agent.name: agent},
+            state=state, tools={}, tool_round_count=2,
+        )
+        assert "<tool_budget>" in reminder
+        # 重建端拿持久化 reminder 直接拼，等价
+        from core.event_history import build_event_history
+        history = build_event_history(state["events"], agent.name)
+        rebuilt = ContextManager.assemble("sys", history, reminder)
+        assert "<tool_budget>" in rebuilt[-1]["content"]
+
+    def test_old_event_without_reminder_rebuilds_static_only(self):
+        # reminder=None（早于本次变更的旧 agent_start）→ 只前置 system + 历史，不拼 reminder
+        from core.event_history import build_event_history
+        agent = _FakeAgentConfig()
+        state = _make_state(events=[
+            _make_event(StreamEventType.USER_INPUT.value, data={"content": "hi"}),
+        ])
+        history = build_event_history(state["events"], agent.name)
+        rebuilt = ContextManager.assemble("system prompt", history, None)
+        assert rebuilt[0] == {"role": "system", "content": "system prompt"}
+        assert "<system-reminder>" not in rebuilt[-1]["content"]
