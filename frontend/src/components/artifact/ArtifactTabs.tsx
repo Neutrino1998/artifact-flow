@@ -16,7 +16,9 @@ export default function ArtifactTabs() {
   const hasBlob = useArtifactStore((s) => s.current?.has_blob);
 
   const tabs = useMemo(() => {
-    if (contentType === 'text/markdown') return allTabs;
+    // markdown + html get the rich Preview alongside Source/Diff (html via a
+    // static sandboxed iframe). Other text types are Source/Diff only.
+    if (contentType === 'text/markdown' || contentType === 'text/html') return allTabs;
     // blob 类(图片/二进制)只有 preview(无文本 source/diff)
     if (hasBlob || contentType?.startsWith('image/')) {
       return allTabs.filter((t) => t.mode === 'preview');

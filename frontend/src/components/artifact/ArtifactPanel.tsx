@@ -7,6 +7,7 @@ import { useArtifacts } from '@/hooks/useArtifacts';
 import ArtifactToolbar from './ArtifactToolbar';
 import ArtifactList from './ArtifactList';
 import MarkdownPreview from './MarkdownPreview';
+import HtmlPreview from './HtmlPreview';
 import SourceView from './SourceView';
 import DiffView from './DiffView';
 import ImagePreview from './ImagePreview';
@@ -54,6 +55,9 @@ export default function ArtifactPanel() {
   // objectURL),其它二进制(docx/pdf 上传,C-0 blob-only)走 BinaryFilePreview(下载卡片)。
   const isImage = (current.content_type ?? '').startsWith('image/');
   const isBinary = !!current.has_blob && !isImage;
+  // text/html → static sandboxed iframe preview (no JS, no external resources);
+  // Source/Diff tabs stay available as a fallback. See HtmlPreview for the model.
+  const isHtml = current.content_type === 'text/html';
   const imgSession = current.session_id || sessionId || '';
 
   return (
@@ -78,6 +82,8 @@ export default function ArtifactPanel() {
               originalFilename={current.original_filename}
               contentType={current.content_type}
             />
+          : isHtml
+          ? <HtmlPreview content={content} />
           : <MarkdownPreview content={content} />)}
         {viewMode === 'source' && <SourceView content={content} />}
         {viewMode === 'diff' && (

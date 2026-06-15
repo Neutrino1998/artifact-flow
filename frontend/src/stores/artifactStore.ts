@@ -135,7 +135,7 @@ interface ArtifactState {
 }
 
 function defaultViewMode(contentType?: string, hasBlob?: boolean): ArtifactViewMode {
-  if (contentType === 'text/markdown') return 'preview';
+  if (contentType === 'text/markdown' || contentType === 'text/html') return 'preview';
   if (hasBlob) return 'preview';  // 图片走 ImagePreview,其它二进制走 BinaryFilePreview
   if (contentType?.startsWith('image/')) return 'preview';
   return 'source';
