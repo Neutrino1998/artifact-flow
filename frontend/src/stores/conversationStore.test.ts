@@ -10,6 +10,7 @@ function summary(id: string, active_message_id: string | null = null): Conversat
     created_at: '2026-05-19T00:00:00',
     updated_at: '2026-05-19T00:00:00',
     active_message_id,
+    upload_bytes: 0,
   };
 }
 

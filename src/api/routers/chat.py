@@ -162,10 +162,10 @@ async def send_message(
             raise HTTPException(
                 status_code=413,
                 detail=(
-                    f"Storage quota exceeded: this upload ({incoming_blob_bytes / 1024 / 1024:.1f}MB) "
-                    f"would put you over your {quota_mb:.0f}MB limit "
-                    f"(currently using {used_bytes / 1024 / 1024:.1f}MB). "
-                    f"Delete a conversation to free space and retry."
+                    f"存储空间不足：本次上传（{incoming_blob_bytes / 1024 / 1024:.1f}MB）"
+                    f"将超出你的 {quota_mb:.0f}MB 存储配额"
+                    f"（当前已用 {used_bytes / 1024 / 1024:.1f}MB）。"
+                    f"请删除一些对话以释放空间后重试。"
                 ),
             )
 

@@ -7,6 +7,7 @@ import { useChat } from '@/hooks/useChat';
 import ConversationList from './ConversationList';
 import AdminConversationList from './AdminConversationList';
 import UserMenu from './UserMenu';
+import StorageBar from './StorageBar';
 import NotificationCenter from './NotificationCenter';
 import BrandingFooter from '@/components/BrandingFooter';
 import { APP_NAME, APP_TAGLINE } from '@/lib/branding';
@@ -305,6 +306,7 @@ export default function Sidebar() {
 
       {/* Notifications + user menu at bottom */}
       <div className="px-3 pb-3 pt-2 space-y-2">
+        {!inObservability && !inUserMgmt && <StorageBar />}
         <NotificationCenter />
         <UserMenu />
       </div>

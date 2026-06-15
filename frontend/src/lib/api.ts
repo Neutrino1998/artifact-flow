@@ -8,6 +8,7 @@ import type {
   ResumeRequest,
   ResumeResponse,
   BulkDeleteResponse,
+  StorageUsageResponse,
   ArtifactListResponse,
   ArtifactDetail,
   VersionDetail,
@@ -178,6 +179,11 @@ export function listConversations(limit = 20, offset = 0, query?: string) {
   const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
   if (query) params.set('q', query);
   return request<ConversationListResponse>(`/api/v1/chat?${params}`);
+}
+
+// Per-user blob storage usage vs quota (quota_bytes === 0 → unlimited).
+export function getStorageUsage() {
+  return request<StorageUsageResponse>('/api/v1/chat/storage');
 }
 
 export function getConversation(convId: string, options?: GetConversationOptions) {

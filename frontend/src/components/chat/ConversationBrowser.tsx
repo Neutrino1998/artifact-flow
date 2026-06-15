@@ -8,6 +8,7 @@ import { useCopyFeedback } from '@/hooks/useCopyFeedback';
 import { useLatestOnly } from '@/hooks/useLatestOnly';
 import { listConversations, deleteConversation, bulkDeleteConversations } from '@/lib/api';
 import { parseUtcIso } from '@/lib/time';
+import { formatBytes } from '@/lib/formatBytes';
 import type { ConversationSummary } from '@/types';
 import { BUTTON_DANGER } from '@/lib/styles';
 import ConfirmModal from '@/components/layout/ConfirmModal';
@@ -371,6 +372,9 @@ function BrowserItem({
             <div className="flex items-center gap-2 mt-1 text-xs text-text-tertiary dark:text-text-tertiary-dark">
               <span>{date}</span>
               <span>{conversation.message_count} messages</span>
+              {conversation.upload_bytes > 0 && (
+                <span title="附件占用">{formatBytes(conversation.upload_bytes)}</span>
+              )}
             </div>
           </div>
         </div>

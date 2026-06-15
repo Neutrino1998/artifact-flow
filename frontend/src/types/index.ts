@@ -71,6 +71,7 @@ export type ConversationDetail = S['ConversationDetailResponse'];
 export type BulkDeleteRequest = S['BulkDeleteRequest'];
 export type BulkDeleteResponse = S['BulkDeleteResponse'];
 export type BulkDeleteFailedItem = S['BulkDeleteFailedItem'];
+export type StorageUsageResponse = S['StorageUsageResponse'];
 
 // ============================================================
 // Meta / client-config Types
