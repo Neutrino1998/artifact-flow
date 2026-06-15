@@ -57,7 +57,7 @@ class BashTool(BaseTool):
             description=(
                 "Run a bash command inside this conversation's sandboxed Linux container. "
                 "The sandbox has NO network access. Preinstalled: Python 3.11 with a "
-                "scientific stack (numpy/pandas/matplotlib/openpyxl), pandoc, ripgrep, "
+                "scientific stack (numpy/pandas/matplotlib/Pillow/openpyxl/pypdf), pandoc, ripgrep, "
                 "and git (local repository operations only). "
                 f"The working directory {WORKSPACE_MOUNT} persists across bash calls "
                 "within the current turn and is discarded when the turn ends. "
