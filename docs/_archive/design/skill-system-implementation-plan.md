@@ -66,7 +66,7 @@
    - **跑在 `deploy/entrypoint.sh` 的 leader-only 槽**(复用 migration 的 PG advisory lock,migration 后 / 起 uvicorn 前;SQLite 单副本直接跑)。**绝不在 per-worker lifespan `init_globals`**(每副本跑会互写)。
    - **运维触发 = 零新增步骤**:config 是 bind-mount(改文件即被容器看见、无需 rebuild),既有 `pause.sh`→改→`resume.sh`(`up -d` recreate)重起容器即重跑 entrypoint → reconcile 自动跑(与今天 lifespan 重读 config 同触发点)。
    - **增量覆盖**:per-unit 内容哈希(只写改了的单元)、就地按 name UPDATE 定义列保留 id(FK/ABA 干净)、config 删→prune + cascade 其 dept 规则、seed 撞 DB-native→loud-fail;只动定义列、不碰 grant 表/统计列。
-   - **注册表 = 每 turn 一次 DB 快照,非进程级长缓存**:引擎每个 loop 执行前从 DB 读一次快照 + 静态 builtin 合并,turn 内多读点共用、不反复查 DB。**为何不用长缓存 + CRUD 失效**:① 避跨 worker 缓存失效(否则要 pub/sub),UI CRUD 下个 turn 自然可见;② turn 内一致性(目录不因 mid-turn CRUD 抖)。代价 = 每 turn 一次小读,可忽略(skill 今天即此)。
+   - **注册表 = 每 turn 一次 DB 快照,非进程级长缓存**:引擎每个 loop 执行前从 DB 读一次快照 + 静态 builtin 合并,turn 内多读点共用、不反复查 DB。**为何不用长缓存 + CRUD 失效**:① 避跨 worker 缓存失效(否则要 pub/sub),UI CRUD 下个 turn 自然可见;② turn 内一致性(目录不因 mid-turn CRUD 抖)。代价 = 每 turn 一次小读,可忽略(引擎今天每 turn 已从 DB 重建 `MessageEvent` 历史,多一次小快照读同量级)。
    - **agent 物化(B 选项)**:config 仍唯一作者真相、`seeded` 不可变、**不经 UI 编辑**(运行时可编辑 agent 仍 Non-goal);物化只为统一存储 + 撞名检查 + `resource_type=agent` 将来零迁移(v0 无消费者、不 wire)。
    - **builtin 例外**:代码、无 `config/builtin/` 可扫 → 不经 reconciler、for-everyone 不入部门表。
 6. **离线 ZIP-of-folder 是唯一分发形态。** 社区四种分发(git clone / plugin install / CLI 包管 / ZIP 上传)里,只有 ZIP-of-folder 不假设 registry 连接,且是 Claude.ai/API/open-skills 共同接受的事实格式 —— 选它做导入导出单元。联网 CLI 全出局。**依赖才是气隙真地雷,非分发**:文件夹随 ZIP 走没问题,运行时 `pip install` 联网约定破在离线 —— 故原则 4 的预置/自带是硬要求。
@@ -320,4 +320,5 @@ user_skill ─user_id─> user ;  ─skill_id─> skill              (真 FK,可
 - 2026-06-20 **补确定性 name-resolution 规则**(用户「命中啥是啥」):`allowed-tools` 条目→unit = 纯 exact match(unit 名 / 全名 `<unit>__<tool>` / 裸成员名不接受),`search` ≠ `github__search` 防重名启错整 unit;import + runtime 共用同一函数。
 - 2026-06-20 **可读性瘦身**(用户提:决策/原则臃肿、日志该记 why 不复述正文):加「写作约定」(一句话主张 + 子点、论证只讲一次、war story 进日志);原则 5/7/8、决策 10/11、阶段长 bullet 全部拆子点;变更日志按「why + 解决/避免什么」大幅压缩、合并多轮 docs-only 收尾。只删冗余,决策/约束/安全项一字不丢。
 - 2026-06-20 **补 `agent_unit` dynamic 绑定的阶段归属(reviewer P2,真 gap)+ 术语小修**:数据模型/决策 11 都说 UI 写 `dynamic` agent_unit,但没有任何阶段落这个入口 → UI 新建工具能进 DB、被 dept grant,却挂不到任何 agent 宇宙 = 对所有 agent 永远 `absent`、不可用。**定:绑定 API/UI 归 Phase B**(非 G)—— 它是「让 UI 工具可用 at all」的基础环,dept 是宇宙之上的额外闸;放 G 会让 B→G 间所有 UI 工具不可达。明确它=operator 给 agent 挂能力单元、**非编辑 agent prompt/model**(后者仍 Non-goal),与部门授权正交。**P3**:原则 5「三态」实际只列 seeded/dynamic 两态 → 改「两类来源态」。
+- 2026-06-22 **修错锚点(用户点破:现无 skill 系统)**:决策 5「每 turn 一次小读可忽略」原拿「skill 今天即此」当先例,但 skill 未实现、锚点为空 → 改锚到真实存在的 per-turn DB 读(引擎今天每 turn 已重建 `MessageEvent` 历史),论证不变、依据落地。
 <!-- 新日志按日期顺序追加到此行上方 -->
