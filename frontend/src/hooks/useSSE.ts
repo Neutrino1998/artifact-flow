@@ -377,9 +377,9 @@ export function useSSE() {
 
         case StreamEventType.ARTIFACT_CREATED: {
           // Live source of truth during a turn (REST GET is pure-DB now and lags).
-          // Reducer upserts the list, auto-opens (unless source='tool' or the user
-          // picked another artifact), and stores live content. DB re-pull on
-          // COMPLETE realigns.
+          // Reducer upserts the list, auto-opens (every source incl. tool, unless
+          // the user actively picked another artifact), and stores live content.
+          // DB re-pull on COMPLETE realigns.
           setArtifactSessionId(conversationId);
           setArtifactPanelVisible(true);
           applyArtifactCreated(data as unknown as ArtifactCreatedData);

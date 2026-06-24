@@ -172,15 +172,37 @@ describe('artifactStore live reduce (ARTIFACT_* events)', () => {
     expect(st.pendingUpdates).toContain('doc');
   });
 
-  test('CREATED with source=tool does NOT grab the panel', () => {
+  test('CREATED with source=tool now auto-opens (visible live)', () => {
     const s = useArtifactStore.getState();
+    s.setSessionId('sess-1');
     s.applyArtifactCreated({
       id: 'tool_out', title: 'Output', content_type: 'text/plain',
       source: 'tool', current_version: 1, content: 'log',
     });
     const st = useArtifactStore.getState();
-    expect(st.current).toBeNull();            // not auto-opened
-    expect(st.artifacts.some((a) => a.id === 'tool_out')).toBe(true);  // but listed
+    expect(st.current?.id).toBe('tool_out');  // tool output no longer hidden behind the list
+    expect(st.autoSelected).toBe(true);
+    expect(st.artifacts.some((a) => a.id === 'tool_out')).toBe(true);
+  });
+
+  test('CREATED does NOT steal from a user-selected artifact', () => {
+    const s = useArtifactStore.getState();
+    s.setSessionId('sess-1');
+    // user actively picks an artifact: setCurrent marks autoSelected=false
+    s.applyArtifactCreated({
+      id: 'doc', title: 'Doc', content_type: 'text/markdown',
+      source: 'agent', current_version: 1, content: 'hello',
+    });
+    s.setCurrent(useArtifactStore.getState().current!);
+    expect(useArtifactStore.getState().autoSelected).toBe(false);
+    // a tool artifact arrives mid-turn → listed, but must NOT grab the panel
+    useArtifactStore.getState().applyArtifactCreated({
+      id: 'tool_out', title: 'Output', content_type: 'text/plain',
+      source: 'tool', current_version: 1, content: 'log',
+    });
+    const st = useArtifactStore.getState();
+    expect(st.current?.id).toBe('doc');  // user selection untouched
+    expect(st.artifacts.some((a) => a.id === 'tool_out')).toBe(true);  // still listed
   });
 
   test('UPDATED span delta applies onto the live base', () => {
