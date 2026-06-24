@@ -237,8 +237,10 @@ describe('artifactStore live reduce (ARTIFACT_* events)', () => {
     const s = useArtifactStore.getState();
     s.applyArtifactCreated({
       id: 'doc', title: 'Doc', content_type: 'text/markdown',
-      source: 'tool', current_version: 1, content: 'body',  // tool → not auto-opened
+      source: 'tool', current_version: 1, content: 'body',
     });
+    // selectFromLive flips an auto-opened artifact into a user pick (autoSelected=false),
+    // independent of source — that override is what this asserts.
     const handled = useArtifactStore.getState().selectFromLive('doc');
     expect(handled).toBe(true);
     expect(useArtifactStore.getState().current?.id).toBe('doc');
