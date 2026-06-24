@@ -78,6 +78,8 @@ Non-obvious design choices you won't infer from reading one file.
 
 - **Tool I/O contract**: tool calls are XML with CDATA-wrapped params (`<![CDATA[...]]>`, parsed via `xml.etree.ElementTree`); tools return a `ToolResult` (`src/tools/base.py`). Agents are data (MD files), not classes — the engine's LLM call returns a `(content, reasoning, usage)` tuple, not a dataclass. All streaming uses the unified `StreamEventType` from `core/events.py`.
 
+- **Model-facing XML ≠ parsed XML.** XML the backend *parses* (tool calls → `xml_parser.py` `ET.fromstring`) must be strict — CDATA-wrap / escape rigorously. XML only *shown to the model* (`artifact_slice` from `artifact_envelope.py`) is read as loose text, never parsed — don't chase strict well-formedness. Escape only what's free and doesn't break semantics (`<title>` via `_text` — untrusted filenames, not match-bearing); `body` stays raw because `update_artifact` matches `old_string` against it.
+
 - **Minimize tool parameter surface.** Expose only params the model has semantic intent to control (`pattern`, `id`, `offset`, `limit`, …). Implementation knobs — caps, thresholds, internal limits — go in `src/config.py` as hidden constants (`READ_ARTIFACT_MAX_CHARS`, `COMPACTION_TOKEN_THRESHOLD`, …), never as tool params. When a hidden cap is hit, surface the *consequence* via `hint`/`summary` so the model can react, but don't let it tune the cap. Rationale: every param is cognitive overhead for small models; operator-tunable limits don't need to be model-tunable.
 
 - **`tests/manual/` file names must NOT start with `test_`** — those scripts need external services (API keys, running server, Redis) and would otherwise be auto-collected by pytest (e.g. `coalescer_bench.py`, `api_smoke.py`).
