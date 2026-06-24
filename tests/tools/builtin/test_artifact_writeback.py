@@ -14,6 +14,7 @@ from config import config
 from db.models import User
 from repositories.artifact_repo import ArtifactRepository
 from repositories.conversation_repo import ConversationRepository
+from tools.base import ArtifactSpec
 from tools.builtin.artifact_service import ArtifactService
 
 
@@ -105,12 +106,14 @@ class TestReadArtifactInMemoryVersion:
         assert result is None
 
 
-class TestPersistToolResult:
-    """persist_tool_result 必须扛住任意 tool_name（长名 / 非法字符）。
+class TestIngestToolResult:
+    """ingest_tool_result（具名 + 无名兜底共用)必须扛住任意 tool_name（长名 / 非法
+    字符），生成的 ID 始终满足 _ARTIFACT_ID_PATTERN。
 
-    回归测试：早期 ID 校验加上后，长 tool_name 会让 persist_tool_result
-    生成超 64 字符的 ID 然后 RuntimeError，引擎中间件 fail-open 把原始
-    超长内容塞回 context——这恰恰是该机制要防的。
+    回归：早期 ID 校验加上后，长/非法 tool_name 会让生成的 ID 超 64 字符 / 含非法
+    字符然后落盘失败，引擎中间件 fail-open 把原始超长内容塞回 context——这正是该
+    机制要防的。现在 tool_name 经 `<tool_name>_output` → _normalize_filename_to_id
+    收口（截断 + sanitize）。
     """
 
     async def test_long_tool_name(
@@ -118,12 +121,12 @@ class TestPersistToolResult:
     ):
         artifact_service.set_session(session_id)
         long_name = "very_long_custom_http_tool_name_" * 3  # ~96 chars
-        aid, version = await artifact_service.persist_tool_result(
-            session_id=session_id, tool_name=long_name, content="x" * 1000,
+        spec = ArtifactSpec(content_type="text/plain", content="x" * 1000)
+        ok, _, aid = await artifact_service.ingest_tool_result(
+            session_id=session_id, spec=spec, tool_name=long_name,
         )
+        assert ok
         assert len(aid) <= 64
-        assert aid.startswith("tool_")
-        assert version == 1
 
     async def test_tool_name_with_special_chars(
         self, artifact_service: ArtifactService, session_id: str
@@ -136,35 +139,80 @@ class TestPersistToolResult:
             "weird/tool name with spaces",
             "tool.with.dots",
         ]
+        import re
         for name in names:
-            aid, _ = await artifact_service.persist_tool_result(
-                session_id=session_id, tool_name=name, content="x",
+            spec = ArtifactSpec(content_type="text/plain", content="x")
+            ok, _, aid = await artifact_service.ingest_tool_result(
+                session_id=session_id, spec=spec, tool_name=name,
             )
-            # ID 通过 create_artifact 校验意味着只含 [\w\-.]
-            import re
+            assert ok
+            # 生成的 ID 只含 [\w\-.]
             assert re.match(r"^[\w\-.]{1,64}$", aid), f"invalid id for {name!r}: {aid}"
 
-    async def test_short_tool_name_unchanged_in_id(
+    async def test_short_tool_name_in_id(
         self, artifact_service: ArtifactService, session_id: str
     ):
         artifact_service.set_session(session_id)
-        aid, _ = await artifact_service.persist_tool_result(
-            session_id=session_id, tool_name="web_fetch", content="x",
+        spec = ArtifactSpec(content_type="text/plain", content="x")
+        ok, _, aid = await artifact_service.ingest_tool_result(
+            session_id=session_id, spec=spec, tool_name="web_fetch",
         )
-        assert aid.startswith("tool_web_fetch_")
+        assert ok
+        assert aid.startswith("web_fetch")
 
     async def test_metadata_preserves_original_tool_name(
         self, artifact_service: ArtifactService, session_id: str
     ):
-        """sanitize 后的名字进 ID，但原始名字必须留在 metadata 里供审计。"""
+        """原始工具名必须留在 metadata 里供审计。"""
         artifact_service.set_session(session_id)
         original = "mcp:server:tool"
-        aid, _ = await artifact_service.persist_tool_result(
-            session_id=session_id, tool_name=original, content="x",
+        spec = ArtifactSpec(content_type="text/plain", content="x")
+        ok, _, aid = await artifact_service.ingest_tool_result(
+            session_id=session_id, spec=spec, tool_name=original,
         )
-        # 从 manager 缓存里读 metadata
+        assert ok
         memory = artifact_service.working_set.peek(session_id, aid)
         assert memory.metadata["tool_name"] == original
+
+    async def test_named_spec_with_filename_and_blob(
+        self, artifact_service: ArtifactService, session_id: str
+    ):
+        """具名:filename 驱动 id + 下载名，blob 落入 memory，blob_content_type 入 metadata。"""
+        artifact_service.set_session(session_id)
+        spec = ArtifactSpec(
+            content_type="application/pdf",
+            filename="report.pdf",
+            blob=b"%PDF-1.4 fake",
+            blob_content_type="application/pdf",
+            metadata={"source_url": "https://example.com/report.pdf"},
+        )
+        ok, _, aid = await artifact_service.ingest_tool_result(
+            session_id=session_id, spec=spec, tool_name="web_fetch",
+        )
+        assert ok
+        assert aid == "report.pdf"
+        memory = artifact_service.working_set.peek(session_id, aid)
+        assert memory.blob == b"%PDF-1.4 fake"
+        assert memory.metadata["blob_content_type"] == "application/pdf"
+        assert memory.metadata["original_filename"] == "report.pdf"
+        assert memory.metadata["source_url"] == "https://example.com/report.pdf"
+        assert memory.source == "tool"
+
+    async def test_refetch_same_filename_dedups(
+        self, artifact_service: ArtifactService, session_id: str
+    ):
+        """同名两次 → _N 去重建新 artifact(对齐上传行为)。"""
+        artifact_service.set_session(session_id)
+        spec = ArtifactSpec(content_type="application/pdf", filename="report.pdf", blob=b"a")
+        ok1, _, aid1 = await artifact_service.ingest_tool_result(
+            session_id=session_id, spec=spec, tool_name="web_fetch",
+        )
+        ok2, _, aid2 = await artifact_service.ingest_tool_result(
+            session_id=session_id, spec=spec, tool_name="web_fetch",
+        )
+        assert ok1 and ok2
+        assert aid1 == "report.pdf"
+        assert aid2 == "report_1.pdf"
 
 
 class TestCreateFromUpload:

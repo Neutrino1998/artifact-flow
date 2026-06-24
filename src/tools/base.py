@@ -26,12 +26,36 @@ class ToolPermission(Enum):
 
 
 @dataclass
+class ArtifactSpec:
+    """工具声明式落盘:工具**声明**「把这份结果存成此 artifact」,由引擎中间件经
+    ``ArtifactService.ingest_tool_result`` 落库(具名、带类型、blob 可、配额闸)。
+
+    工具**不**持 ``ArtifactService`` 句柄(守三层模型:通用工具保持哑,只有内建
+    artifact/sandbox 工具——它们本就是 manager 层——直接碰 service)。
+
+    ``content`` / ``blob`` 的取舍:
+    - 纯文本结果 → ``content``,``blob=None``。
+    - 二进制结果(PDF/图片/office)→ ``blob`` + ``blob_content_type``;``content``
+      留空或给一段简短文本预览(模型在 tool_result 里看到的就是它的截断)。
+    """
+    content_type: str                        # artifact 展示类型(如 application/pdf、text/csv)
+    title: Optional[str] = None              # 展示标题;缺省由 filename/工具名派生
+    filename: Optional[str] = None           # 决定 artifact id + 下载名;缺省由 title/工具名派生
+    content: str = ""                        # 文本表示(模型预览来源);二进制可留空
+    blob: Optional[bytes] = None             # 二进制原件
+    blob_content_type: Optional[str] = None  # 原件真实 MIME(供 raw 端点);缺省取 content_type
+    metadata: Optional[Dict[str, Any]] = None
+
+
+@dataclass
 class ToolResult:
     """工具执行结果"""
     success: bool
     data: str = ""
     error: Optional[str] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
+    # 声明式落盘:命中则引擎中间件把它存成具名 artifact、回填预览句柄(见 ArtifactSpec)。
+    artifact: Optional["ArtifactSpec"] = None
 
 
 @dataclass

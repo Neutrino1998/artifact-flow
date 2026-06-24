@@ -17,7 +17,6 @@ overlay 跨 worker 读不到执行 worker 的内存态)。现在:
 import math  # noqa: F401  (保留:历史上 ReadArtifactTool 用过,避免无意义 churn——实际由 artifact_ops 持有)
 import os
 import re
-import secrets
 from functools import lru_cache
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -26,6 +25,7 @@ from sqlalchemy.exc import IntegrityError
 from config import config
 from repositories.artifact_repo import ArtifactRepository
 from repositories.base import NotFoundError, DuplicateError
+from tools.base import ArtifactSpec
 from tools.builtin.artifact_working_set import ArtifactMemory, ArtifactWorkingSet
 from utils.logger import get_logger
 from utils.time import utc_now
@@ -50,8 +50,8 @@ def _evt_artifact_updated() -> str:
 
 # Artifact ID 合法字符集:letter/digit/underscore + hyphen + dot,1-64 字符。
 # envelope renderer 依赖此前提把 id 当受控值放入 XML attribute;create_artifact
-# 入口校验,create_from_upload / persist_tool_result 通过 sanitize 保证生成的 ID
-# 满足该 pattern。
+# 入口校验,_stage_artifact(create_from_upload / ingest_tool_result 共用内核)
+# 通过 _normalize_filename_to_id + dedup 保证生成的 ID 满足该 pattern。
 _ARTIFACT_ID_PATTERN = re.compile(r"^[\w\-.]{1,64}$")
 
 
@@ -247,70 +247,33 @@ class ArtifactService:
             logger.exception(f"Failed to create artifact: {e}")
             return False, f"Failed to create artifact: {str(e)}"
 
-    async def persist_tool_result(
+    async def _stage_artifact(
         self,
         session_id: str,
-        tool_name: str,
-        content: str,
-    ) -> Tuple[str, int]:
-        """把超长工具结果持久化为 artifact,返回 (artifact_id, version)。
-
-        由引擎中间件调用(见 core/engine.py)。content_type 固定 text/plain,
-        source 固定 "tool"。artifact_id 自动生成,避免和用户/agent 命名冲突。
-
-        tool_name 可能含非法字符(MCP 工具的 ``:``、``.``)或过长(自定义 HTTP
-        工具名 50+ 字符),都会让 create_artifact 的 ID 校验拒绝。这里先 sanitize +
-        truncate 到安全范围,保证持久化路径不会因为名字格式问题 fail-open 到原文
-        回填——那是这个机制最不该出现的失败模式。
-        """
-        suffix = secrets.token_hex(6)  # 12 hex chars
-        # 字符预算:64 - len("tool_") - len("_") - 12 = 46,留余量到 40
-        safe_name = re.sub(r"[^\w\-.]", "_", tool_name)[:40]
-        artifact_id = f"tool_{safe_name}_{suffix}"
-        title = f"Output of {tool_name}"  # title 不受 ID 规则约束
-        metadata = {
-            "tool_name": tool_name,  # metadata 保留原始名字便于审计
-            "persisted_at": utc_now().isoformat(),
-        }
-        success, message = await self.create_artifact(
-            session_id=session_id,
-            artifact_id=artifact_id,
-            content_type="text/plain",
-            title=title,
-            content=content,
-            metadata=metadata,
-            source="tool",
-        )
-        if not success:
-            raise RuntimeError(f"persist_tool_result failed: {message}")
-        return artifact_id, 1
-
-    async def create_from_upload(
-        self,
-        session_id: str,
-        filename: str,
-        content: str,
+        id_base: str,
         content_type: str,
+        title: str,
+        content: str,
+        *,
         metadata: Optional[Dict] = None,
         blob: Optional[bytes] = None,
         blob_content_type: Optional[str] = None,
-        source: str = "user_upload",
-    ) -> Tuple[bool, str, Optional[Dict]]:
-        """从一个「文件」**stage** 一个 artifact 进 WorkingSet(不即时 commit)。
+        source: str,
+        original_filename: Optional[str] = None,
+    ) -> Tuple[bool, str, Optional[str]]:
+        """共享 stage 内核:dedup → ID 校验 → blob 上限 → per-user 配额 → register。
+        返回 ``(success, message, artifact_id)``;失败时 artifact_id 为 None。
 
-        与模型自建走同一 write-back 路径:mark_new → 发 ARTIFACT_CREATED → 随 turn 末
-        flush_all 落库。两个调用方:① 用户上传(execute_loop 在 turn 起点调用,uploads
-        closure-carry 进引擎;turn 中途死 = 与模型产物一致地丢失,用户重选文件重试);
-        ② 沙盒 persist(source="sandbox",同一套 `_normalize` + `_N` dedup —— persist
-        永远产新 artifact 的机制即在此)。
+        三个调用方(用户上传 / 沙盒 persist / 工具结果)经此单一 chokepoint,blob
+        存储边界与配额只在这一处守门(不逐路径加闸)。``id_base`` 须已是合法
+        artifact_id base(经 ``_normalize_filename_to_id``)。
         """
-        artifact_id = _normalize_filename_to_id(filename)
-
         # Dedup:同时对 WorkingSet(本轮已 stage / 缓存)与 DB(往轮已落库)去重,
         # 追加后缀直到唯一。
         repo = self._ensure_repository()
+        artifact_id = id_base
         suffix = 0
-        original_id = artifact_id
+        original_id = id_base
         while (
             self._ws.peek(session_id, artifact_id) is not None
             or await repo.get_artifact(session_id, artifact_id) is not None
@@ -326,12 +289,12 @@ class ArtifactService:
         # 检查避免万一边界 bug 让脏 ID 进 DB
         if not _ARTIFACT_ID_PATTERN.match(artifact_id):
             return False, (
-                f"Generated invalid artifact_id from filename {filename!r}: "
-                f"{artifact_id!r} (must match {_ARTIFACT_ID_PATTERN.pattern})"
+                f"Generated invalid artifact_id {artifact_id!r} "
+                f"(must match {_ARTIFACT_ID_PATTERN.pattern})"
             ), None
 
         # blob 大小上限 loud-fail(写入侧,不静默截断)。上传本已受 MAX_UPLOAD_SIZE
-        # 约束,此处是 blob 存储边界的兜底守门(C 阶段沙盒回写也走 blob 时同样受护)。
+        # 约束,此处是 blob 存储边界的兜底守门(沙盒回写 / 工具结果走 blob 时同样受护)。
         if blob is not None and len(blob) > config.ARTIFACT_BLOB_MAX_BYTES:
             max_mb = config.ARTIFACT_BLOB_MAX_BYTES / 1024 / 1024
             return False, (
@@ -340,12 +303,12 @@ class ArtifactService:
             ), None
 
         # per-用户 blob 配额：写入侧的真正守门。所有 blob 都经此 chokepoint（上传 +
-        # 沙盒 persist + 未来任何路径），所以一处校验全覆盖 —— 不逐路径加闸。/chat 的
-        # HTTP 预闸保留为 fail-fast（起 turn 前就拒、零 DB 状态），此处是 correctness 兜底，
-        # 也是沙盒 persist 唯一的配额闸。计入「DB 已落 + 本轮已 stage 未 flush」的 blob：
-        # 否则一轮内多次 persist 各自只看 DB，会齐齐放行、整体击穿配额。超限 return False
-        # → 沙盒 persist 转 ToolResult 错误，让模型据此提示用户清理；上传侧 staging 失败
-        # loud-abort 本轮（常见情形已被 HTTP 预闸挡下，这里兜并发竞态）。
+        # 沙盒 persist + 工具结果 + 未来任何路径），所以一处校验全覆盖 —— 不逐路径加闸。
+        # /chat 的 HTTP 预闸保留为 fail-fast（起 turn 前就拒、零 DB 状态），此处是
+        # correctness 兜底，也是沙盒 persist / 工具结果唯一的配额闸。计入「DB 已落 +
+        # 本轮已 stage 未 flush」的 blob：否则一轮内多次写各自只看 DB，会齐齐放行、
+        # 整体击穿配额。超限 return False → 调用方转 ToolResult 错误（沙盒 persist /
+        # 工具结果）或 loud-abort 本轮（上传 staging）。
         if blob is not None and config.ARTIFACT_USER_QUOTA_BYTES > 0:
             # 一趟查询：子查询内联把 session_id 解析成属主再聚合(属主跨全部会话已落字节)。
             # 无主会话 → 返回 0,仍由下方数值判定兜单个超大 blob。
@@ -368,13 +331,13 @@ class ArtifactService:
                     f"conversation to free space, then retry."
                 ), None
 
-        title = os.path.splitext(filename)[0]
-        upload_metadata = dict(metadata or {})
-        upload_metadata["original_filename"] = filename  # 下载文件名;persist 件同样适用
+        stage_metadata = dict(metadata or {})
+        if original_filename is not None:
+            stage_metadata["original_filename"] = original_filename  # 下载文件名
         # blob 的真实 MIME 存入 metadata,供 raw 端点按原件 MIME 发(additive 富格式下
         # artifact.content_type 可能是转换后的 text/markdown,与 blob 真实类型不同)。
         if blob is not None:
-            upload_metadata["blob_content_type"] = blob_content_type or content_type
+            stage_metadata["blob_content_type"] = blob_content_type or content_type
 
         try:
             await self.ensure_session_exists(session_id)
@@ -384,25 +347,101 @@ class ArtifactService:
                 title=title,
                 content=content,
                 current_version=1,
-                metadata=upload_metadata,
+                metadata=stage_metadata,
                 source=source,
                 blob=blob,
             )
             await self._register_new(session_id, memory)
-
-            return True, f"Created artifact '{artifact_id}'", {
-                "id": artifact_id,
-                "session_id": session_id,
-                "content_type": content_type,
-                "title": title,
-                "current_version": 1,
-                "source": source,
-                "original_filename": filename,
-                "has_blob": blob is not None,
-            }
+            return True, f"Created artifact '{artifact_id}'", artifact_id
         except Exception as e:
-            logger.exception(f"Failed to stage upload artifact: {e}")
+            logger.exception(f"Failed to stage artifact: {e}")
             return False, f"Failed to create artifact: {str(e)}", None
+
+    async def ingest_tool_result(
+        self,
+        session_id: str,
+        spec: ArtifactSpec,
+        tool_name: Optional[str] = None,
+    ) -> Tuple[bool, str, Optional[str]]:
+        """把工具声明的结果(``ArtifactSpec``)落盘为具名 artifact,返回
+        ``(success, message, artifact_id)``。
+
+        ``create_from_upload`` 之外的第三调用方,共用同一 ``_stage_artifact`` 内核
+        (dedup / blob 上限 / 配额)。两种形态:① **具名**——工具显式给 spec(如
+        web_fetch 文件旁路:blob + content_type);② **无名兜底**——引擎对超长文本
+        结果合成一个 ``text/plain`` spec(原 ``persist_tool_result`` 的去向)。
+        source 固定 "tool"。
+        """
+        # id base:filename 优先(决定下载名 + id),否则 title,否则工具名,最后兜底。
+        base_name = spec.filename or spec.title or (
+            f"{tool_name}_output" if tool_name else "tool_output"
+        )
+        id_base = _normalize_filename_to_id(base_name)
+
+        tool_metadata = dict(spec.metadata or {})
+        if tool_name:
+            tool_metadata.setdefault("tool_name", tool_name)  # 审计:原始工具名
+        tool_metadata.setdefault("persisted_at", utc_now().isoformat())
+
+        title = spec.title or os.path.splitext(spec.filename or id_base)[0]
+
+        return await self._stage_artifact(
+            session_id=session_id,
+            id_base=id_base,
+            content_type=spec.content_type,
+            title=title,
+            content=spec.content or "",
+            metadata=tool_metadata,
+            blob=spec.blob,
+            blob_content_type=spec.blob_content_type,
+            source="tool",
+            original_filename=spec.filename,
+        )
+
+    async def create_from_upload(
+        self,
+        session_id: str,
+        filename: str,
+        content: str,
+        content_type: str,
+        metadata: Optional[Dict] = None,
+        blob: Optional[bytes] = None,
+        blob_content_type: Optional[str] = None,
+        source: str = "user_upload",
+    ) -> Tuple[bool, str, Optional[Dict]]:
+        """从一个「文件」**stage** 一个 artifact 进 WorkingSet(不即时 commit)。
+
+        与模型自建走同一 write-back 路径:mark_new → 发 ARTIFACT_CREATED → 随 turn 末
+        flush_all 落库。两个调用方:① 用户上传(execute_loop 在 turn 起点调用,uploads
+        closure-carry 进引擎;turn 中途死 = 与模型产物一致地丢失,用户重选文件重试);
+        ② 沙盒 persist(source="sandbox",同一套 `_normalize` + `_N` dedup —— persist
+        永远产新 artifact 的机制即在此)。dedup / blob 上限 / 配额走共享 ``_stage_artifact``。
+        """
+        title = os.path.splitext(filename)[0]
+        ok, message, artifact_id = await self._stage_artifact(
+            session_id=session_id,
+            id_base=_normalize_filename_to_id(filename),
+            content_type=content_type,
+            title=title,
+            content=content,
+            metadata=metadata,
+            blob=blob,
+            blob_content_type=blob_content_type,
+            source=source,
+            original_filename=filename,
+        )
+        if not ok:
+            return False, message, None
+        return True, message, {
+            "id": artifact_id,
+            "session_id": session_id,
+            "content_type": content_type,
+            "title": title,
+            "current_version": 1,
+            "source": source,
+            "original_filename": filename,
+            "has_blob": blob is not None,
+        }
 
     # ========================================
     # 读取

@@ -23,7 +23,7 @@ from core.compaction_runner import CompactionRunner
 from core.cancellation import CooperativeCancelled, run_cancellable
 from tools.artifact_envelope import make_preview_slice, render_artifact_slice
 from tools.xml_parser import parse_tool_calls
-from tools.base import BaseTool, ToolPermission, ToolResult
+from tools.base import ArtifactSpec, BaseTool, ToolPermission, ToolResult
 from utils.logger import get_logger, get_request_id
 from utils.time import utc_now
 
@@ -164,7 +164,7 @@ async def execute_loop(
         tools: {name: BaseTool} 字典（全局 + 请求级工具已合并）
         hooks: EngineHooks（check_cancelled / wait_for_interrupt / drain_messages）
         artifact_service: ArtifactService 实例（duck-typed 协作者：set_session /
-            list_artifacts / persist_tool_result / bind_emit）
+            list_artifacts / ingest_tool_result / create_from_upload / bind_emit）
         emit: 事件推送回调（推 SSE）
         sandbox_session: SandboxSession 实例（duck-typed:status_snapshot），仅用于
             动态上下文的 <sandbox_status> 快照——生命周期/拆除归 controller_factory
@@ -664,15 +664,90 @@ async def execute_loop(
 
         return True
 
+    def _render_persisted_result(
+        aid: str,
+        spec: ArtifactSpec,
+        original_metadata: Optional[Dict[str, Any]],
+    ) -> ToolResult:
+        """落盘成功后回填:把 tool_result 换成 artifact 预览句柄。
+        二进制(blob 在场、无文本预览)与文本走不同 hint —— 前者引导 mount/下载,
+        后者引导 read_artifact 读全文。"""
+        preview_source = spec.content or ""
+        if spec.blob is not None and not preview_source:
+            hint = (
+                f"Binary file ({len(spec.blob)} bytes, {spec.content_type}) saved as "
+                f"artifact '{aid}'. Mount it into the sandbox to process, or it is "
+                f"available to the user for download."
+            )
+        else:
+            hint = (
+                f"Tool output ({len(preview_source)} chars) saved as artifact '{aid}'. "
+                f"Use read_artifact(id='{aid}') for full content; "
+                f"preview shows first {config.TOOL_PERSIST_PREVIEW_LENGTH} chars."
+            )
+        slice = make_preview_slice(
+            artifact_id=aid,
+            version=1,
+            content_type=spec.content_type,
+            source="tool",
+            title=spec.title or aid,
+            full_content=preview_source,
+            preview_len=config.TOOL_PERSIST_PREVIEW_LENGTH,
+            hint=hint,
+        )
+        return ToolResult(
+            success=True,
+            data=render_artifact_slice(slice),
+            metadata={
+                **(original_metadata or {}),
+                "persisted_artifact_id": aid,
+            },
+        )
+
     async def _maybe_persist_tool_result(
         tool_name: str, tool: BaseTool, result: ToolResult
     ) -> ToolResult:
-        """超长成功结果落盘为 artifact，回填预览。
-        其他情况（失败 / 工具关闭持久化 / 长度未超限 / manager 缺失 / 落盘异常）
-        全部 fail-open 返回原结果，不阻断 tool 调用流程。
+        """工具结果落盘为 artifact、回填预览句柄。两条分支共用 ingest_tool_result:
+        ① **具名**——工具显式声明 ``result.artifact``(声明式富格式落盘,如 web_fetch
+        文件旁路);② **无名兜底**——成功结果超 ``max_result_size_chars`` 时合成一个
+        text/plain spec。
+
+        fail-open 纪律:工具失败 / 关闭持久化 / 长度未超限 / service 缺失 / 落盘异常
+        全部返回原结果。**例外**:具名分支的配额/大小**拒绝**(非异常)响失败 ——
+        二进制无法内联回 tool_result,把拒绝原因(可操作的配额提示)暴露给模型/用户。
         """
         if not result.success:
             return result
+
+        # ① 具名分支:工具声明了 artifact
+        spec = result.artifact
+        if spec is not None:
+            if artifact_service is None or not state.get("session_id"):
+                logger.warning(
+                    f"Cannot persist declared artifact for '{tool_name}': "
+                    f"service or session unavailable"
+                )
+                return result  # fail-open(工具的 data 作兜底说明)
+            try:
+                ok, message, aid = await artifact_service.ingest_tool_result(
+                    session_id=state["session_id"],
+                    spec=spec,
+                    tool_name=tool_name,
+                )
+            except Exception as e:
+                logger.exception(f"ingest_tool_result failed for '{tool_name}': {e}")
+                return result  # fail-open
+            if not ok:
+                # 配额 / 大小上限拒绝:二进制无法内联 → 响失败,暴露可操作原因。
+                logger.warning(
+                    f"Declared artifact rejected for '{tool_name}': {message}"
+                )
+                return ToolResult(
+                    success=False, error=message, metadata=result.metadata
+                )
+            return _render_persisted_result(aid, spec, result.metadata)
+
+        # ② 无名兜底:超长成功文本结果
         if math.isinf(tool.max_result_size_chars):
             return result
         data = result.data or ""
@@ -685,39 +760,29 @@ async def execute_loop(
             )
             return result
 
+        anon_spec = ArtifactSpec(
+            content_type="text/plain",
+            filename=f"{tool_name}_output.txt",
+            title=f"Output of {tool_name}",
+            content=data,
+        )
         try:
-            aid, version = await artifact_service.persist_tool_result(
+            ok, message, aid = await artifact_service.ingest_tool_result(
                 session_id=state["session_id"],
+                spec=anon_spec,
                 tool_name=tool_name,
-                content=data,
             )
         except Exception as e:
-            logger.exception(f"persist_tool_result failed for '{tool_name}': {e}")
+            logger.exception(f"ingest_tool_result failed for '{tool_name}': {e}")
             return result  # fail-open
+        if not ok:
+            # 文本溢出兜底:落盘失败时返回原文(超长)好过丢数据 → fail-open。
+            logger.warning(f"Large tool result not persisted for '{tool_name}': {message}")
+            return result
 
-        slice = make_preview_slice(
-            artifact_id=aid,
-            version=version,
-            content_type="text/plain",
-            source="tool",
-            title=f"Output of {tool_name}",
-            full_content=data,
-            preview_len=config.TOOL_PERSIST_PREVIEW_LENGTH,
-            hint=(
-                f"Tool output ({len(data)} chars) saved as artifact '{aid}'. "
-                f"Use read_artifact(id='{aid}') for full content; "
-                f"preview shows first {config.TOOL_PERSIST_PREVIEW_LENGTH} chars."
-            ),
-        )
-        return ToolResult(
-            success=True,
-            data=render_artifact_slice(slice),
-            metadata={
-                **(result.metadata or {}),
-                "persisted_artifact_id": aid,
-                "original_size_chars": len(data),
-            },
-        )
+        persisted = _render_persisted_result(aid, anon_spec, result.metadata)
+        persisted.metadata["original_size_chars"] = len(data)
+        return persisted
 
     async def _execute_tools(tool_calls: list, agent_name: str) -> None:
         """串行执行工具列表，处理权限中断和 subagent 切换。

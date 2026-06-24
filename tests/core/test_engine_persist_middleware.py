@@ -15,7 +15,7 @@ import pytest
 from core.engine import EngineHooks, create_initial_state, execute_loop
 from core.events import StreamEventType
 from api.services.runtime_store import InMemoryRuntimeStore
-from tools.base import BaseTool, ToolPermission, ToolResult
+from tools.base import ArtifactSpec, BaseTool, ToolPermission, ToolResult
 
 
 # ============================================================
@@ -61,21 +61,24 @@ class _FixedTool(BaseTool):
 
 
 class _FakeArtifactManager:
-    """Minimal stub: persist_tool_result returns deterministic id, tracks calls."""
+    """Minimal stub: ingest_tool_result returns deterministic id, tracks calls."""
 
-    def __init__(self, *, raise_exc: bool = False):
+    def __init__(self, *, raise_exc: bool = False, reject: bool = False):
         self.calls: list[tuple[str, str, str]] = []  # (session_id, tool_name, content)
         self.raise_exc = raise_exc
+        self.reject = reject
         self._counter = 0
 
-    async def persist_tool_result(
-        self, session_id: str, tool_name: str, content: str
+    async def ingest_tool_result(
+        self, session_id: str, spec: ArtifactSpec, tool_name: str = None
     ):
         if self.raise_exc:
             raise RuntimeError("simulated DB failure")
-        self.calls.append((session_id, tool_name, content))
+        if self.reject:
+            return False, "Storage quota exceeded: delete a conversation and retry.", None
+        self.calls.append((session_id, tool_name, spec.content))
         self._counter += 1
-        return f"tool_{tool_name}_{self._counter:04x}", 1
+        return True, "ok", f"tool_{tool_name}_{self._counter:04x}"
 
     # execute_loop also calls these for inventory; safe no-ops
     def set_session(self, session_id: str) -> None:
@@ -269,3 +272,46 @@ class TestPersistMiddleware:
         complete = _find_tool_complete(emitted, "tool")
         # 持久化失败 → fail-open，原文回填
         assert complete["data"]["result_data"] == big
+
+    async def test_declared_artifact_persisted(self):
+        """工具声明 result.artifact（具名分支）→ 落盘 + 预览句柄回填，与长度无关。"""
+        spec = ArtifactSpec(
+            content_type="text/csv", filename="data.csv", content="a,b\n1,2"
+        )
+        tool = _FixedTool(
+            "data_tool", ToolResult(success=True, data="provisional note", artifact=spec)
+        )
+        manager = _FakeArtifactManager()
+        _, emitted = await _run_engine(tool=tool, artifact_service=manager)
+
+        assert len(manager.calls) == 1  # 具名分支不看 max_result_size_chars
+        complete = _find_tool_complete(emitted, "data_tool")
+        result_data = complete["data"]["result_data"]
+        assert "<artifact_slice" in result_data
+        assert 'type="text/csv"' in result_data
+        assert 'source="tool"' in result_data
+        assert complete["data"]["metadata"]["persisted_artifact_id"].startswith("tool_data_tool_")
+
+    async def test_declared_artifact_rejected_surfaces_error(self):
+        """具名分支落盘被拒（配额/大小）→ 二进制无法内联，响 success=False 暴露原因。"""
+        spec = ArtifactSpec(
+            content_type="application/pdf", filename="big.pdf", blob=b"x" * 10
+        )
+        tool = _FixedTool(
+            "dl_tool", ToolResult(success=True, data="note", artifact=spec)
+        )
+        manager = _FakeArtifactManager(reject=True)
+        _, emitted = await _run_engine(tool=tool, artifact_service=manager)
+        complete = _find_tool_complete(emitted, "dl_tool")
+        # 拒绝原因暴露给模型/用户
+        assert "quota" in (complete["data"]["error"] or "").lower()
+
+    async def test_declared_artifact_no_service_fail_open(self):
+        """具名分支但 service 缺失 → fail-open，工具自身 data 作兜底。"""
+        spec = ArtifactSpec(content_type="text/csv", filename="x.csv", content="a,b")
+        tool = _FixedTool(
+            "data_tool", ToolResult(success=True, data="fallback note", artifact=spec)
+        )
+        _, emitted = await _run_engine(tool=tool, artifact_service=None)
+        complete = _find_tool_complete(emitted, "data_tool")
+        assert complete["data"]["result_data"] == "fallback note"

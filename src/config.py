@@ -1,6 +1,6 @@
 """服务级配置"""
 
-from typing import List
+from typing import Dict, List
 from pydantic_settings import BaseSettings
 from pydantic import ConfigDict
 
@@ -222,6 +222,24 @@ class Settings(BaseSettings):
                                                   # 超即中断 —— 防 gzip 炸弹 / 大响应 OOM。
                                                   # 出网下载是独立威胁面,与 MAX_UPLOAD_SIZE
                                                   #（上传,已抬到 100MB）解耦,各自取值。
+    # web_fetch 文件旁路:这些 URL 尾缀在 Jina 之前分流为直连下载,以 blob artifact 落盘
+    # (而非 Jina 抽文本——对二进制本就坏)。值 = 尾缀 → content_type 兜底(响应头缺失/
+    # 撒谎时用)。运行时工具内自决,非模型参数(守「最小化工具参数面」)。
+    WEB_FETCH_BLOB_SUFFIXES: Dict[str, str] = {
+        ".pdf": "application/pdf",
+        ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        ".doc": "application/msword",
+        ".xls": "application/vnd.ms-excel",
+        ".ppt": "application/vnd.ms-powerpoint",
+        ".zip": "application/zip",
+        ".png": "image/png",
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".gif": "image/gif",
+        ".webp": "image/webp",
+    }
     CUSTOM_TOOL_SECRET_PREFIX: str = "TOOL_SECRET_"  # 自定义工具 {{VAR}} 只能解析此前缀的环境变量；
                                                      # 把签名密钥 / DB 密码挡在自定义工具可触及范围外
 

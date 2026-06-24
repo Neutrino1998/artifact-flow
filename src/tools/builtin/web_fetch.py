@@ -8,9 +8,10 @@ import asyncio
 import os
 import re
 import aiohttp
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Tuple
+from urllib.parse import urlparse, unquote
 
-from tools.base import BaseTool, ToolResult, ToolParameter, ToolPermission
+from tools.base import ArtifactSpec, BaseTool, ToolResult, ToolParameter, ToolPermission
 from config import config
 from utils.logger import get_logger
 from utils.time import utc_now
@@ -150,6 +151,35 @@ class WebFetchTool(BaseTool):
 
         try:
             result = await self._fetch_single_url(url)
+
+            # 文件旁路:二进制结果声明为 artifact,由引擎中间件落盘 + 回填句柄
+            # (见 ArtifactSpec / engine._maybe_persist_tool_result)。
+            if result.get("is_blob"):
+                if not result.get("success"):
+                    logger.info(f"Fetch failed (blob): {url}")
+                    return ToolResult(
+                        success=False,
+                        error=result.get("error", "File download failed"),
+                    )
+                blob = result["blob"]
+                content_type = result["content_type"]
+                spec = ArtifactSpec(
+                    content_type=content_type,
+                    filename=result["filename"],
+                    title=result["filename"],
+                    content="",  # 二进制不抽文本
+                    blob=blob,
+                    blob_content_type=content_type,
+                    metadata={"source_url": url, "fetched_at": result["fetched_at"]},
+                )
+                # 兜底 data(仅当引擎无法落盘时模型才看到此条):简短说明,不含字节。
+                note = (
+                    f'<file url="{url}" content_type="{content_type}" '
+                    f'bytes="{len(blob)}">Downloaded binary file; stored as artifact.</file>'
+                )
+                logger.info(f"Fetch succeeded (blob): {url}")
+                return ToolResult(success=True, data=note, artifact=spec)
+
             xml_result = self._format_result_to_xml(result)
             success = result.get("success", False)
 
@@ -180,9 +210,28 @@ class WebFetchTool(BaseTool):
             return 'pdf'
         return 'html'
 
+    def _blob_route_for_url(self, url: str) -> Optional[Tuple[str, str]]:
+        """文件类 URL 尾缀 → (suffix, content_type 兜底);非文件类返回 None。
+
+        命中即走直连 blob 旁路(Jina 之前),不抽文本——Jina 对二进制本就坏。
+        """
+        path = url.lower().split('?')[0].split('#')[0]
+        for suffix, mime in config.WEB_FETCH_BLOB_SUFFIXES.items():
+            if path.endswith(suffix):
+                return suffix, mime
+        return None
+
+    def _filename_from_url(self, url: str, fallback_suffix: str) -> str:
+        """从 URL 末段取下载文件名;缺失/无扩展名时用 download<suffix> 兜底。"""
+        path = urlparse(url).path
+        name = unquote(path.rsplit('/', 1)[-1]) if path else ""
+        if not name or '.' not in name:
+            name = f"download{fallback_suffix}"
+        return name
+
     async def _fetch_single_url(self, url: str) -> Dict[str, Any]:
         """
-        抓取单个URL：先试Jina Reader API，失败后按类型降级
+        抓取单个URL：文件类尾缀直连 blob 旁路;否则先试 Jina,失败后按类型降级
 
         Args:
             url: 目标URL
@@ -190,6 +239,13 @@ class WebFetchTool(BaseTool):
         Returns:
             抓取结果字典
         """
+        # 文件旁路:文件类尾缀在 Jina 之前分流为直连下载(blob,不抽文本)。
+        blob_route = self._blob_route_for_url(url)
+        if blob_route is not None:
+            suffix, fallback_mime = blob_route
+            logger.info(f"File-type URL, routing to blob bypass: {url}")
+            return await self._fetch_file_as_blob(url, suffix, fallback_mime)
+
         # 主路径：Jina Reader API
         jina_result = await self._fetch_via_jina(url)
         if jina_result is not None:
@@ -404,6 +460,80 @@ class WebFetchTool(BaseTool):
             # 不回显 str(e)（可能含内网地址/路径），仅入 server 日志（SSRF-06）
             logger.exception(f"PDF fetch failed for {url}")
             return {"success": False, "url": url, "error": "PDF extraction failed"}
+
+    async def _fetch_file_as_blob(
+        self, url: str, suffix: str, fallback_mime: str
+    ) -> Dict[str, Any]:
+        """文件类 URL 直连下载为 blob(不抽文本)。
+
+        **SSRF**:本旁路在 Jina 之前直连,故 ``_fetch_single_url`` 末尾的二次校验在此
+        分支被**跳过**;入口 ``validate_public_url`` 与此刻之间仍有 DNS-rebinding 窗口。
+        因此直连前必须自带一次校验 + ``allow_redirects=False``(杜绝 302 → 内网/元数据)。
+        """
+        try:
+            await validate_public_url(url)
+        except SsrfBlockedError as e:
+            logger.warning(f"web_fetch blob bypass blocked non-public URL: {e}")
+            return {
+                "success": False,
+                "url": url,
+                "is_blob": True,
+                "error": "URL is not an allowed public address",
+            }
+
+        try:
+            logger.info(f"Fetching file (blob bypass): {url}")
+            timeout = aiohttp.ClientTimeout(total=60)
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    url,
+                    timeout=timeout,
+                    headers={'User-Agent': random.choice(self.user_agents)},
+                    allow_redirects=False,
+                ) as response:
+                    if response.status != 200:
+                        return {
+                            "success": False,
+                            "url": url,
+                            "is_blob": True,
+                            "error": f"HTTP {response.status}",
+                        }
+
+                    # 流式读取并封顶字节(防 gzip 炸弹 / 大响应 OOM)
+                    blob = await _read_capped(response, config.WEB_FETCH_MAX_BYTES)
+
+                    # content_type:响应头优先(剥 charset 参数),缺失 / octet-stream
+                    # (不可信通用值)→ 尾缀兜底(更具体)。
+                    header_ct = (
+                        response.headers.get("Content-Type", "")
+                        .split(";")[0].strip().lower()
+                    )
+                    content_type = (
+                        header_ct
+                        if header_ct and header_ct != "application/octet-stream"
+                        else fallback_mime
+                    )
+
+            filename = self._filename_from_url(url, suffix)
+            logger.info(f"Downloaded {url}: {len(blob)} bytes, {content_type}")
+            return {
+                "success": True,
+                "url": url,
+                "is_blob": True,
+                "blob": blob,
+                "content_type": content_type,
+                "filename": filename,
+                "fetched_at": utc_now().isoformat(),
+                "source_type": "file",
+            }
+
+        except _ResponseTooLargeError as e:
+            logger.warning(f"File too large for {url}: {e}")
+            return {"success": False, "url": url, "is_blob": True, "error": "File too large"}
+        except Exception as e:
+            # 不回显 str(e)(可能含内网地址/路径),仅入 server 日志(SSRF-06)
+            logger.exception(f"File download failed for {url}")
+            return {"success": False, "url": url, "is_blob": True, "error": "File download failed"}
 
     def _format_result_to_xml(self, result: Dict[str, Any]) -> str:
         """将单个抓取结果格式化为 XML"""
