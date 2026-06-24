@@ -41,11 +41,13 @@ export default function PermissionModal() {
 
   if (!permissionRequest) return null;
 
-  // Deny on ESC / backdrop — symmetric with explicit "拒绝" button.
-  // Disabled while a response is in-flight to avoid double-dispatch.
-  const handleClose = () => {
-    if (!loading) handleResponse(false);
-  };
+  // A permission decision must be EXPLICIT: backdrop click / ESC are disabled
+  // below, so the only exits are the three footer buttons (or the backend's
+  // PERMISSION_TIMEOUT fallback). This stops an accidental misclick on the
+  // dimmed backdrop from silently denying the tool — dismiss is no longer
+  // folded into deny. onClose is wired but never fired; kept as a no-op
+  // because DialogShell requires the prop.
+  const handleClose = () => {};
 
   return (
     <DialogShell
@@ -53,8 +55,8 @@ export default function PermissionModal() {
       description="智能体请求执行以下工具，需要您的确认。"
       size="md"
       onClose={handleClose}
-      closeOnBackdrop={!loading}
-      closeOnEscape={!loading}
+      closeOnBackdrop={false}
+      closeOnEscape={false}
       surfaceClassName="bg-chat dark:bg-chat-dark"
       footer={
         <>

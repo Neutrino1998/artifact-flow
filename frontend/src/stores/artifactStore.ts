@@ -205,8 +205,9 @@ export const useArtifactStore = create<ArtifactState>((set, get) => ({
   // ARTIFACT_CREATED: a new artifact appeared this turn. REST list no longer
   // surfaces unflushed artifacts (overlay removed), so we upsert it into the
   // list FROM the event. Auto-open it unless the user has actively picked
-  // another artifact, mirroring the old tool-completion behavior — except
-  // tool-persisted outputs (source='tool') only list, never grab the panel.
+  // another artifact — applies to EVERY source incl. source='tool' (web_fetch
+  // blobs, overflow dumps): the user should see live what the system produced,
+  // tool outputs included, not have them hidden behind a later agent artifact.
   applyArtifactCreated: (d) =>
     set((s) => {
       const live: LiveArtifact = {
@@ -242,8 +243,10 @@ export const useArtifactStore = create<ArtifactState>((set, get) => ({
         : [...s.pendingUpdates, d.id];
 
       const next: Partial<ArtifactState> = { liveContent, artifacts, pendingUpdates };
-      const autoOpen = d.source !== 'tool';
-      if (autoOpen && (!s.current || s.autoSelected)) {
+      // Auto-open regardless of source — still yields to an artifact the user
+      // actively selected (autoSelected === false), but a tool-persisted one no
+      // longer silently lists behind a later agent artifact that grabs `current`.
+      if (!s.current || s.autoSelected) {
         next.current = liveToDetail(d.id, live, s.sessionId);
         next.autoSelected = true;
         next.viewMode = defaultViewMode(d.content_type, d.has_blob);
