@@ -28,7 +28,6 @@ async def _persist_blob(
         content="",
         content_type="application/octet-stream",
         blob=b"x" * size,
-        blob_content_type="application/octet-stream",
         source="sandbox",
     )
 
@@ -177,13 +176,13 @@ class TestIngestToolResult:
     async def test_named_spec_with_filename_and_blob(
         self, artifact_service: ArtifactService, session_id: str
     ):
-        """具名:filename 驱动 id + 下载名，blob 落入 memory，blob_content_type 入 metadata。"""
+        """具名:filename 驱动 id + 下载名,blob 落入 memory,blob_content_type 由
+        content_type 派生入 metadata(XOR 下二者相等)。"""
         artifact_service.set_session(session_id)
         spec = ArtifactSpec(
             content_type="application/pdf",
             filename="report.pdf",
             blob=b"%PDF-1.4 fake",
-            blob_content_type="application/pdf",
             metadata={"source_url": "https://example.com/report.pdf"},
         )
         ok, _, aid = await artifact_service.ingest_tool_result(
@@ -213,6 +212,59 @@ class TestIngestToolResult:
         assert ok1 and ok2
         assert aid1 == "report.pdf"
         assert aid2 == "report_1.pdf"
+
+
+class TestXorInvariant:
+    """一个 artifact 只存一份实质 data:content XOR blob,两者皆有 = loud-fail
+    (经共享 _stage_artifact 守门,覆盖 ingest_tool_result + create_from_upload)。"""
+
+    async def test_ingest_rejects_both_content_and_blob(
+        self, artifact_service: ArtifactService, session_id: str
+    ):
+        artifact_service.set_session(session_id)
+        spec = ArtifactSpec(
+            content_type="application/pdf",
+            filename="x.pdf",
+            content="some text",  # 不该和 blob 并存
+            blob=b"%PDF",
+        )
+        ok, message, aid = await artifact_service.ingest_tool_result(
+            session_id=session_id, spec=spec, tool_name="t",
+        )
+        assert not ok
+        assert aid is None
+        assert "never both" in message
+
+    async def test_upload_rejects_both_content_and_blob(
+        self, artifact_service: ArtifactService, session_id: str
+    ):
+        artifact_service.set_session(session_id)
+        ok, message, info = await artifact_service.create_from_upload(
+            session_id=session_id, filename="x.pdf",
+            content="text", content_type="application/pdf",
+            blob=b"%PDF",
+        )
+        assert not ok
+        assert info is None
+        assert "never both" in message
+
+    async def test_blob_only_and_text_only_both_ok(
+        self, artifact_service: ArtifactService, session_id: str
+    ):
+        """边界:blob + 空 content = blob-only(放行);text + 无 blob = text(放行)。"""
+        artifact_service.set_session(session_id)
+        ok_blob, _, aid_blob = await artifact_service.ingest_tool_result(
+            session_id=session_id,
+            spec=ArtifactSpec(content_type="application/pdf", filename="a.pdf", blob=b"%PDF"),
+            tool_name="t",
+        )
+        ok_text, _, aid_text = await artifact_service.ingest_tool_result(
+            session_id=session_id,
+            spec=ArtifactSpec(content_type="text/csv", filename="a.csv", content="a,b"),
+            tool_name="t",
+        )
+        assert ok_blob and aid_blob == "a.pdf"
+        assert ok_text and aid_text == "a.csv"
 
 
 class TestCreateFromUpload:
@@ -698,7 +750,6 @@ class TestBinaryArtifactImmutable:
             content="",
             content_type=_DOCX_MIME,
             blob=b"PK\x03\x04" + b"\x00" * 16,
-            blob_content_type=_DOCX_MIME,
         )
         assert ok
         return info["id"]

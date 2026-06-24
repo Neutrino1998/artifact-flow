@@ -266,7 +266,6 @@ async def execute_loop(
                     content_type=f["content_type"],
                     metadata=f.get("metadata"),
                     blob=f.get("blob"),
-                    blob_content_type=f.get("blob_content_type"),
                 )
             except Exception as e:
                 logger.exception(f"Failed to stage upload '{f.get('filename')}': {e}")
@@ -670,10 +669,10 @@ async def execute_loop(
         original_metadata: Optional[Dict[str, Any]],
     ) -> ToolResult:
         """落盘成功后回填:把 tool_result 换成 artifact 预览句柄。
-        二进制(blob 在场、无文本预览)与文本走不同 hint —— 前者引导 mount/下载,
-        后者引导 read_artifact 读全文。"""
+        二进制与文本走不同 hint —— 前者引导 mount/下载,后者引导 read_artifact 读全文。
+        XOR 下 blob 在场 ⟺ content 空,故按 blob 在场二分即可。"""
         preview_source = spec.content or ""
-        if spec.blob is not None and not preview_source:
+        if spec.blob is not None:
             hint = (
                 f"Binary file ({len(spec.blob)} bytes, {spec.content_type}) saved as "
                 f"artifact '{aid}'. Mount it into the sandbox to process, or it is "
@@ -704,81 +703,74 @@ async def execute_loop(
             },
         )
 
+    async def _persist_tool_spec(tool_name: str, spec: ArtifactSpec):
+        """落盘一个 ArtifactSpec,把 service 缺失 / 异常都折成 (False, reason, None)。
+        调用方据此统一 loud-fail —— 落盘是必须的那一刻,失败就是失败,不静默降级。"""
+        if artifact_service is None or not state.get("session_id"):
+            logger.warning(
+                f"Cannot persist artifact for '{tool_name}': service or session unavailable"
+            )
+            return False, "artifact storage is unavailable", None
+        try:
+            return await artifact_service.ingest_tool_result(
+                session_id=state["session_id"], spec=spec, tool_name=tool_name,
+            )
+        except Exception as e:
+            logger.exception(f"ingest_tool_result failed for '{tool_name}': {e}")
+            return False, "internal error while storing the result", None
+
     async def _maybe_persist_tool_result(
         tool_name: str, tool: BaseTool, result: ToolResult
     ) -> ToolResult:
-        """工具结果落盘为 artifact、回填预览句柄。两条分支共用 ingest_tool_result:
-        ① **具名**——工具显式声明 ``result.artifact``(声明式富格式落盘,如 web_fetch
-        文件旁路);② **无名兜底**——成功结果超 ``max_result_size_chars`` 时合成一个
-        text/plain spec。
+        """工具结果落盘为 artifact、回填预览句柄。**统一心智模型 = 两问**:
+        ①「这次落盘是否必须?」——声明式 artifact(``result.artifact``,blob 和/或
+        text)永远必须;无名溢出仅当超 ``max_result_size_chars`` 才必须。②「成功了吗?」
+        —— **必须且失败 → 一律 loud-fail**(success=False + 可操作原因),service 缺失 /
+        异常 / 配额拒绝全折进这条。
 
-        fail-open 纪律:工具失败 / 关闭持久化 / 长度未超限 / service 缺失 / 落盘异常
-        全部返回原结果。**例外**:具名分支的配额/大小**拒绝**(非异常)响失败 ——
-        二进制无法内联回 tool_result,把拒绝原因(可操作的配额提示)暴露给模型/用户。
+        其余 ``return result``(工具本身已失败 / 结果没超阈值 / ``inf`` 关闭落盘)**不是
+        fail-open**,而是「本就无需落盘、结果即数据」。溢出落盘失败**绝不**退回超长原文
+        —— 落盘机制本就为护上下文,退回正是把要防的伤害塞回去(对齐 CLAUDE.md
+        「overflow fails loudly」)。
         """
         if not result.success:
-            return result
+            return result  # 工具自身失败 —— 原样透传
 
-        # ① 具名分支:工具声明了 artifact
+        # ① 声明式 artifact(blob 和/或 text):落盘必须 → 失败一律 loud
         spec = result.artifact
         if spec is not None:
-            if artifact_service is None or not state.get("session_id"):
-                logger.warning(
-                    f"Cannot persist declared artifact for '{tool_name}': "
-                    f"service or session unavailable"
-                )
-                return result  # fail-open(工具的 data 作兜底说明)
-            try:
-                ok, message, aid = await artifact_service.ingest_tool_result(
-                    session_id=state["session_id"],
-                    spec=spec,
-                    tool_name=tool_name,
-                )
-            except Exception as e:
-                logger.exception(f"ingest_tool_result failed for '{tool_name}': {e}")
-                return result  # fail-open
+            ok, message, aid = await _persist_tool_spec(tool_name, spec)
             if not ok:
-                # 配额 / 大小上限拒绝:二进制无法内联 → 响失败,暴露可操作原因。
-                logger.warning(
-                    f"Declared artifact rejected for '{tool_name}': {message}"
-                )
-                return ToolResult(
-                    success=False, error=message, metadata=result.metadata
-                )
+                logger.warning(f"Declared artifact not persisted for '{tool_name}': {message}")
+                return ToolResult(success=False, error=message, metadata=result.metadata)
             return _render_persisted_result(aid, spec, result.metadata)
 
-        # ② 无名兜底:超长成功文本结果
+        # ② 无名溢出:仅当超阈值才需落盘
         if math.isinf(tool.max_result_size_chars):
             return result
         data = result.data or ""
         if len(data) <= tool.max_result_size_chars:
             return result
-        if artifact_service is None or not state.get("session_id"):
-            logger.warning(
-                f"Cannot persist large tool result for '{tool_name}' "
-                f"(size={len(data)}): manager or session unavailable"
-            )
-            return result
 
+        # 超阈值 → 落盘必须;失败也 loud(绝不把超长原文塞回上下文)
         anon_spec = ArtifactSpec(
             content_type="text/plain",
             filename=f"{tool_name}_output.txt",
             title=f"Output of {tool_name}",
             content=data,
         )
-        try:
-            ok, message, aid = await artifact_service.ingest_tool_result(
-                session_id=state["session_id"],
-                spec=anon_spec,
-                tool_name=tool_name,
-            )
-        except Exception as e:
-            logger.exception(f"ingest_tool_result failed for '{tool_name}': {e}")
-            return result  # fail-open
+        ok, message, aid = await _persist_tool_spec(tool_name, anon_spec)
         if not ok:
-            # 文本溢出兜底:落盘失败时返回原文(超长)好过丢数据 → fail-open。
             logger.warning(f"Large tool result not persisted for '{tool_name}': {message}")
-            return result
+            return ToolResult(
+                success=False,
+                error=(
+                    f"Tool output ({len(data)} chars) exceeded the inline limit and "
+                    f"could not be saved as an artifact: {message}. Reduce the output "
+                    f"size (filter or paginate) and retry."
+                ),
+                metadata=result.metadata,
+            )
 
         persisted = _render_persisted_result(aid, anon_spec, result.metadata)
         persisted.metadata["original_size_chars"] = len(data)

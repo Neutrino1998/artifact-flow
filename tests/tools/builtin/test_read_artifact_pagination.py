@@ -246,7 +246,6 @@ class TestReadBinaryBlobArtifact:
             content="",
             content_type=_DOCX_MIME,
             blob=b"PK\x03\x04" + b"\x00" * 16,
-            blob_content_type=_DOCX_MIME,
         )
         assert ok
 
@@ -273,7 +272,6 @@ class TestReadArtifactVisionGate:
             content="",
             content_type="image/gif",
             blob=b"GIF89a fake bytes",
-            blob_content_type="image/gif",
         )
         assert ok
         result = await read_tool.execute(id=info["id"])
@@ -292,7 +290,6 @@ class TestReadArtifactVisionGate:
             content="",
             content_type="application/octet-stream",
             blob=b"\x00\x01",
-            blob_content_type="application/octet-stream",
         )
         assert ok
         result = await read_tool.execute(id=info["id"])

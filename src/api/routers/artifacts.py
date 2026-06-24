@@ -47,8 +47,9 @@ class ConvertedUpload:
 
     Phase-1 output of POST /chat's two-phase attachment flow (convert-all →
     commit-all). Holds the converted text representation, plus — for blob-backed
-    types (images / rich formats) — the raw bytes to persist into ArtifactBlob and
-    the blob's true MIME. Pure-text uploads carry blob=None and free their bytes,
+    types (images / rich formats) — the raw bytes to persist into ArtifactBlob.
+    XOR: a blob upload carries content="" and content_type = the blob's true MIME
+    (no separate blob MIME). Pure-text uploads carry blob=None and free their bytes,
     so a batch of text files does not pin raw bytes in RAM; an image/docx batch
     necessarily retains its bytes (they must be stored anyway).
     """
@@ -57,7 +58,6 @@ class ConvertedUpload:
     content_type: str
     metadata: dict
     blob: bytes | None = None
-    blob_content_type: str | None = None
 
 
 async def convert_uploaded_file(file: UploadFile) -> ConvertedUpload:
@@ -113,7 +113,6 @@ async def convert_uploaded_file(file: UploadFile) -> ConvertedUpload:
         content_type=result.content_type,
         metadata=result.metadata or {},
         blob=result.blob,
-        blob_content_type=result.blob_content_type,
     )
 
 

@@ -208,7 +208,10 @@ class TestBlobBypassSSRF:
 
 
 class TestBlobContentType:
-    async def _run(self, monkeypatch, headers, fallback_mime):
+    """content_type 永远取尾缀 MIME(fallback_mime),**不信**远端 Content-Type 头
+    —— 头是不可信输入,会流进 artifact XML 属性 + /raw 服务 MIME(svg-XSS / 注入面)。"""
+
+    async def _run(self, monkeypatch, headers):
         tool = WebFetchTool()
         monkeypatch.setattr(url_guard, "_resolve_host_ips", _public_resolve)
         resp = _FakeBlobResp(status=200, headers=headers, chunks=[b"%PDF-1.4"])
@@ -216,18 +219,21 @@ class TestBlobContentType:
             "tools.builtin.web_fetch.aiohttp.ClientSession",
             lambda *a, **k: _FakeSession(resp),
         )
-        return await tool._fetch_file_as_blob("https://example.com/file.bin", ".docx", fallback_mime)
+        return await tool._fetch_file_as_blob("https://example.com/file.bin", ".docx", "SUFFIX_MIME")
 
-    async def test_header_preferred_charset_stripped(self, monkeypatch):
-        res = await self._run(monkeypatch, {"Content-Type": "application/pdf; charset=binary"}, "FB")
+    async def test_header_ignored_uses_suffix_mime(self, monkeypatch):
+        res = await self._run(monkeypatch, {"Content-Type": "application/pdf"})
         assert res["success"] is True
-        assert res["content_type"] == "application/pdf"  # 头优先,charset 剥掉
+        assert res["content_type"] == "SUFFIX_MIME"  # 头被忽略
         assert res["blob"] == b"%PDF-1.4"
 
-    async def test_octet_stream_falls_back(self, monkeypatch):
-        res = await self._run(monkeypatch, {"Content-Type": "application/octet-stream"}, "FALLBACK_MIME")
-        assert res["content_type"] == "FALLBACK_MIME"  # 通用值不可信 → 尾缀兜底
+    async def test_malicious_header_ignored(self, monkeypatch):
+        # 含 & 的注入头 / svg 混淆都进不来 —— content_type 恒为受控尾缀 MIME
+        res = await self._run(monkeypatch, {"Content-Type": "application/pdf&evil"})
+        assert res["content_type"] == "SUFFIX_MIME"
+        res2 = await self._run(monkeypatch, {"Content-Type": "image/svg+xml"})
+        assert res2["content_type"] == "SUFFIX_MIME"
 
-    async def test_missing_header_falls_back(self, monkeypatch):
-        res = await self._run(monkeypatch, {}, "FALLBACK_MIME")
-        assert res["content_type"] == "FALLBACK_MIME"
+    async def test_missing_header_uses_suffix_mime(self, monkeypatch):
+        res = await self._run(monkeypatch, {})
+        assert res["content_type"] == "SUFFIX_MIME"

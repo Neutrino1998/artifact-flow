@@ -33,17 +33,19 @@ class ArtifactSpec:
     工具**不**持 ``ArtifactService`` 句柄(守三层模型:通用工具保持哑,只有内建
     artifact/sandbox 工具——它们本就是 manager 层——直接碰 service)。
 
-    ``content`` / ``blob`` 的取舍:
-    - 纯文本结果 → ``content``,``blob=None``。
-    - 二进制结果(PDF/图片/office)→ ``blob`` + ``blob_content_type``;``content``
-      留空或给一段简短文本预览(模型在 tool_result 里看到的就是它的截断)。
+    **XOR 不变量**:一个 artifact 只承载**一份**实质 data —— 文本结果填 ``content``、
+    二进制结果填 ``blob``,**二者必居其一、不可兼得**(双表示语义对模型 confusing;
+    模型侧统一按「blob = 无文本表示、需 mount 进沙盒」认知)。违反在 ``_stage_artifact``
+    loud-fail。
+    - 纯文本结果 → ``content``(text MIME),``blob=None``。
+    - 二进制结果(PDF/图片/office)→ ``blob``,``content=""``;``content_type`` 即原件
+      真实 MIME(XOR 下 blob 的 content_type 就是它的 MIME,无需另给一个 blob MIME)。
     """
-    content_type: str                        # artifact 展示类型(如 application/pdf、text/csv)
+    content_type: str                        # artifact 类型 / blob 的真实 MIME(如 application/pdf、text/csv)
     title: Optional[str] = None              # 展示标题;缺省由 filename/工具名派生
     filename: Optional[str] = None           # 决定 artifact id + 下载名;缺省由 title/工具名派生
-    content: str = ""                        # 文本表示(模型预览来源);二进制可留空
+    content: str = ""                        # 文本结果(模型预览来源);二进制留空
     blob: Optional[bytes] = None             # 二进制原件
-    blob_content_type: Optional[str] = None  # 原件真实 MIME(供 raw 端点);缺省取 content_type
     metadata: Optional[Dict[str, Any]] = None
 
 

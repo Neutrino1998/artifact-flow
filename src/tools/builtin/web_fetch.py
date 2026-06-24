@@ -169,7 +169,6 @@ class WebFetchTool(BaseTool):
                     title=result["filename"],
                     content="",  # 二进制不抽文本
                     blob=blob,
-                    blob_content_type=content_type,
                     metadata={"source_url": url, "fetched_at": result["fetched_at"]},
                 )
                 # 兜底 data(仅当引擎无法落盘时模型才看到此条):简短说明,不含字节。
@@ -502,17 +501,11 @@ class WebFetchTool(BaseTool):
                     # 流式读取并封顶字节(防 gzip 炸弹 / 大响应 OOM)
                     blob = await _read_capped(response, config.WEB_FETCH_MAX_BYTES)
 
-                    # content_type:响应头优先(剥 charset 参数),缺失 / octet-stream
-                    # (不可信通用值)→ 尾缀兜底(更具体)。
-                    header_ct = (
-                        response.headers.get("Content-Type", "")
-                        .split(";")[0].strip().lower()
-                    )
-                    content_type = (
-                        header_ct
-                        if header_ct and header_ct != "application/octet-stream"
-                        else fallback_mime
-                    )
+            # content_type **不信远端 Content-Type 头**:它是不可信输入,会流进 artifact
+            # 的 XML 属性(`type="..."`)与 /raw 服务的 MIME —— 恶意服务器可借此让 envelope
+            # 非良构,或对 .png URL 回 image/svg+xml 制造 stored-XSS。我们只在 URL 尾缀命中
+            # 受控映射(WEB_FETCH_BLOB_SUFFIXES)时才进本旁路,故尾缀 MIME 即权威且安全。
+            content_type = fallback_mime
 
             filename = self._filename_from_url(url, suffix)
             logger.info(f"Downloaded {url}: {len(blob)} bytes, {content_type}")

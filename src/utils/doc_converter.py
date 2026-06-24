@@ -154,17 +154,15 @@ _BINARY_EXTENSION_MIME: Dict[str, str] = {
 class ConvertResult:
     """Result of a document conversion.
 
-    `content`/`content_type` 是**可读文本表示**(纯文本即原文;图片与富格式
-    docx/pdf 为空 —— 无文本表示,content_type 即真实 MIME)。`blob`/
-    `blob_content_type` 是需要**二进制存储**时的原始不可变字节 + 真实 MIME;
-    纯文本类无 blob。富格式的读/写/转换全归沙盒(sandbox plan 原则 6,C-0
-    起 blob-only,不再预转 md)。
+    XOR:一个结果只一份实质 data —— 纯文本即 `content`(`content_type` 为 text MIME,
+    `blob=None`);图片与富格式 docx/pdf 为 `blob`(`content=""`,`content_type` 即原件
+    真实 MIME,无需另给 blob MIME)。富格式的读/写/转换全归沙盒(sandbox plan 原则 6,
+    C-0 起 blob-only,不再预转 md)。
     """
     content: str
-    content_type: str  # MIME type of the readable text representation
+    content_type: str  # 文本表示的 MIME;blob-only 时即原件真实 MIME
     metadata: Dict = field(default_factory=dict)
     blob: Optional[bytes] = None              # 原始字节(需 blob 存储时;纯文本为 None)
-    blob_content_type: Optional[str] = None   # 原始 blob 的真实 MIME
 
 
 class DocConverter:
@@ -258,7 +256,6 @@ class DocConverter:
             content_type=mime,
             metadata={"original_filename": filename, "converter_used": "pillow"},
             blob=file_bytes,
-            blob_content_type=mime,
         )
 
     async def _convert_text(
@@ -332,7 +329,6 @@ def _blob_result(file_bytes: bytes, filename: str, mime: str) -> ConvertResult:
         content_type=mime,
         metadata={"original_filename": filename, "converter_used": "blob"},
         blob=file_bytes,
-        blob_content_type=mime,
     )
 
 

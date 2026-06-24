@@ -357,13 +357,13 @@ class PersistFileTool(BaseTool):
             )
         else:
             # C-0 blob-only 约定:无文本表示,content="",content_type=真实 MIME
+            # (XOR 下 blob 的 content_type 即其 MIME,内核据此派生 metadata 标记)
             success, message, info = await self._service.create_from_upload(
                 session_id=session_id,
                 filename=filename,
                 content="",
                 content_type=mime,
                 blob=data,
-                blob_content_type=mime,
                 source="sandbox",
             )
         if not success:

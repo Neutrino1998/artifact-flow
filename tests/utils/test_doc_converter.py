@@ -46,8 +46,8 @@ class TestKnownBinaryToBlob:
         result = await converter.convert(data, f"file{ext}")
         assert result.content == ""                      # 无文本表示
         assert result.blob == data                       # 原件不变
+        # XOR:blob-only,content_type 即原件真实 MIME(无独立 blob_content_type)
         assert result.content_type == _BINARY_EXTENSION_MIME[ext]
-        assert result.blob_content_type == _BINARY_EXTENSION_MIME[ext]
         assert result.metadata["original_filename"] == f"file{ext}"
 
     async def test_uppercase_extension_also_routed(self):
@@ -232,9 +232,8 @@ class TestImageConversion:
         data = _png_bytes(40, 30)
         result = await converter.convert(data, "shot.png")
         assert result.content == ""               # 图无文本表示
-        assert result.content_type == "image/png"
+        assert result.content_type == "image/png"  # XOR:即原件真实 MIME
         assert result.blob == data                # 原件不变
-        assert result.blob_content_type == "image/png"
 
     async def test_content_sniffed_not_extension(self):
         """真 PNG 字节改名 .jpg → 探测纠正到 image/png(按内容、非扩展名)。"""

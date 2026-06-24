@@ -257,17 +257,27 @@ class ArtifactService:
         *,
         metadata: Optional[Dict] = None,
         blob: Optional[bytes] = None,
-        blob_content_type: Optional[str] = None,
         source: str,
         original_filename: Optional[str] = None,
     ) -> Tuple[bool, str, Optional[str]]:
-        """共享 stage 内核:dedup → ID 校验 → blob 上限 → per-user 配额 → register。
+        """共享 stage 内核:XOR 校验 → dedup → ID 校验 → blob 上限 → per-user 配额 → register。
         返回 ``(success, message, artifact_id)``;失败时 artifact_id 为 None。
 
         三个调用方(用户上传 / 沙盒 persist / 工具结果)经此单一 chokepoint,blob
-        存储边界与配额只在这一处守门(不逐路径加闸)。``id_base`` 须已是合法
-        artifact_id base(经 ``_normalize_filename_to_id``)。
+        存储边界、配额与 XOR 不变量只在这一处守门(不逐路径加闸)。``id_base`` 须已是
+        合法 artifact_id base(经 ``_normalize_filename_to_id``)。
         """
+        # XOR 不变量:一个 artifact 只存**一份**实质 data —— 文本走 content、二进制走 blob,
+        # 二者不可兼得。双表示(blob 原件 + content 转换文本)语义对模型 confusing,且
+        # backend 已无转换路径产生它;模型侧统一按「blob = 无文本表示、需 mount」认知
+        # (见 read_artifact / inventory 文案)。空 content + blob = blob-only;有 content
+        # + 无 blob = text;两者皆有 = loud-fail。
+        if blob is not None and content:
+            return False, (
+                "An artifact stores exactly one representation: text in `content` "
+                "OR binary in `blob`, never both."
+            ), None
+
         # Dedup:同时对 WorkingSet(本轮已 stage / 缓存)与 DB(往轮已落库)去重,
         # 追加后缀直到唯一。
         repo = self._ensure_repository()
@@ -334,10 +344,12 @@ class ArtifactService:
         stage_metadata = dict(metadata or {})
         if original_filename is not None:
             stage_metadata["original_filename"] = original_filename  # 下载文件名
-        # blob 的真实 MIME 存入 metadata,供 raw 端点按原件 MIME 发(additive 富格式下
-        # artifact.content_type 可能是转换后的 text/markdown,与 blob 真实类型不同)。
+        # blob-only 标记:XOR 下 blob artifact 的 content_type 即真实 MIME,故直接派生
+        # (不再单收一个必与 content_type 相等的 blob_content_type 入参)。此 metadata 键
+        # 双重用途:① raw 端点据此发原件 MIME;② read_artifact / inventory / API has_blob
+        # 据其**在场**判别「这是二进制」——避免序列化时触碰 lazy 的 Artifact.blob 关系。
         if blob is not None:
-            stage_metadata["blob_content_type"] = blob_content_type or content_type
+            stage_metadata["blob_content_type"] = content_type
 
         try:
             await self.ensure_session_exists(session_id)
@@ -393,7 +405,6 @@ class ArtifactService:
             content=spec.content or "",
             metadata=tool_metadata,
             blob=spec.blob,
-            blob_content_type=spec.blob_content_type,
             source="tool",
             original_filename=spec.filename,
         )
@@ -406,7 +417,6 @@ class ArtifactService:
         content_type: str,
         metadata: Optional[Dict] = None,
         blob: Optional[bytes] = None,
-        blob_content_type: Optional[str] = None,
         source: str = "user_upload",
     ) -> Tuple[bool, str, Optional[Dict]]:
         """从一个「文件」**stage** 一个 artifact 进 WorkingSet(不即时 commit)。
@@ -426,7 +436,6 @@ class ArtifactService:
             content=content,
             metadata=metadata,
             blob=blob,
-            blob_content_type=blob_content_type,
             source=source,
             original_filename=filename,
         )
@@ -546,9 +555,9 @@ class ArtifactService:
         (REST 路径自带空 WorkingSet → 落 DB),字节走 repo.get_blob(显式 SELECT,不
         碰 `Artifact.blob` 关系)。
 
-        `content_type` 优先取 `metadata.blob_content_type`(A-upload 写入原始 blob 的
-        真实 MIME),回落 artifact 自身 content_type —— 富格式 additive 存储下 artifact
-        的 content_type 可能是转换后的 text/markdown,而 raw 必须发原始 blob 的 MIME。
+        `content_type` 优先取 `metadata.blob_content_type`(写入原始 blob 的真实 MIME),
+        回落 artifact 自身 content_type。XOR 下 blob artifact 的 content_type 即真实
+        MIME,两者一致;优先 metadata 仍保留为显式来源(并兼容历史行)。
         """
         memory = await self.get_artifact(session_id, artifact_id)
         if not memory:

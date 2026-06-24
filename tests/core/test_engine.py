@@ -152,7 +152,7 @@ class _FakeArtifactService:
 
     async def create_from_upload(
         self, session_id, filename, content, content_type, metadata=None,
-        blob=None, blob_content_type=None,
+        blob=None,
     ):
         idx = self.calls
         self.calls += 1

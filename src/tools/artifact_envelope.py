@@ -22,14 +22,20 @@ _VALID_TRUNCATED_BY = {"none", "preview", "char_limit", "line_limit"}
 
 def _attr(value) -> str:
     """
-    Defensive attribute-value escape: 仅替换 `"` → `&quot;` 防止破坏 XML 结构。
+    Defensive attribute-value escape: `&`/`"`/`<` → 实体,产出始终是良构 XML。
 
-    上游已经做了：受控值（数字/枚举/sanitized id/ISO timestamp）天然不含 `"`。
-    这层是 belt-and-suspenders——hint / id 等若意外含引号也不会让 envelope
-    边界错位。`<`、`&` 不在 attribute value 里特殊（attribute value 由
-    `"..."` 或 `'...'` 包裹，里面只有匹配的引号才是边界字符）。
+    上游绝大多数 attribute 值是受控的（数字/枚举/sanitized id/ISO timestamp,天然
+    不含这些字符,故此层对它们零影响）。但 content_type 等字段曾经/可能携带不可信
+    来源（如远端 Content-Type 头),一旦含 `&`/`<` 就会让 envelope 非良构、甚至让
+    `&quot;` 之外的边界错位。故 belt-and-suspenders 收口到渲染器单点:转义全部三个
+    在 attribute value 里有结构意义的字符（`&` 必须最先,避免二次转义自己引入的实体）。
     """
-    return str(value).replace('"', "&quot;")
+    return (
+        str(value)
+        .replace("&", "&amp;")
+        .replace('"', "&quot;")
+        .replace("<", "&lt;")
+    )
 
 
 @dataclass

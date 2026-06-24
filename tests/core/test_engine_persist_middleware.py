@@ -254,24 +254,24 @@ class TestPersistMiddleware:
         # 失败时 result_data=None（原引擎逻辑），error 仍传出
         assert complete["data"]["error"] == "something broke"
 
-    async def test_no_artifact_service_fail_open(self):
-        """artifact_service=None → log warning，不阻断，data 原样。"""
+    async def test_no_artifact_service_overflow_loud_fail(self):
+        """artifact_service=None 且结果超阈值 → 落盘必须却不可能 → loud-fail，
+        绝不把超长原文塞回上下文(那正是落盘要防的)。"""
         big = "X" * 100_000
         tool = _FixedTool("tool", ToolResult(success=True, data=big), max_result_size_chars=1000)
         _, emitted = await _run_engine(tool=tool, artifact_service=None)
         complete = _find_tool_complete(emitted, "tool")
-        # 没落盘 → 长输出原样回填
-        assert complete["data"]["result_data"] == big
+        assert "could not be saved" in (complete["data"]["error"] or "")
+        assert complete["data"]["result_data"] != big  # 原文未回填
 
-    async def test_persist_exception_fail_open(self):
-        """落盘抛异常 → 捕获 + log，原结果照常回填给模型，不阻断。"""
+    async def test_persist_exception_overflow_loud_fail(self):
+        """溢出落盘抛异常 → 捕获 + log → loud-fail(不退回原文)。"""
         big = "X" * 100_000
         tool = _FixedTool("tool", ToolResult(success=True, data=big), max_result_size_chars=1000)
         manager = _FakeArtifactManager(raise_exc=True)
         _, emitted = await _run_engine(tool=tool, artifact_service=manager)
         complete = _find_tool_complete(emitted, "tool")
-        # 持久化失败 → fail-open，原文回填
-        assert complete["data"]["result_data"] == big
+        assert "could not be saved" in (complete["data"]["error"] or "")
 
     async def test_declared_artifact_persisted(self):
         """工具声明 result.artifact（具名分支）→ 落盘 + 预览句柄回填，与长度无关。"""
@@ -306,12 +306,28 @@ class TestPersistMiddleware:
         # 拒绝原因暴露给模型/用户
         assert "quota" in (complete["data"]["error"] or "").lower()
 
-    async def test_declared_artifact_no_service_fail_open(self):
-        """具名分支但 service 缺失 → fail-open，工具自身 data 作兜底。"""
+    async def test_declared_artifact_no_service_loud_fail(self):
+        """具名分支(含 text spec)service 缺失 → 落盘必须却不可能 → loud-fail。
+        声明式 artifact 是「请存这个」的明确意图,存不了就是失败,不静默降级。"""
         spec = ArtifactSpec(content_type="text/csv", filename="x.csv", content="a,b")
         tool = _FixedTool(
             "data_tool", ToolResult(success=True, data="fallback note", artifact=spec)
         )
         _, emitted = await _run_engine(tool=tool, artifact_service=None)
         complete = _find_tool_complete(emitted, "data_tool")
-        assert complete["data"]["result_data"] == "fallback note"
+        assert "unavailable" in (complete["data"]["error"] or "").lower()
+
+    async def test_declared_text_artifact_persisted(self):
+        """声明式路径同样支持 text content_type(不止 blob):content 进预览 + 落盘。"""
+        spec = ArtifactSpec(content_type="text/csv", filename="data.csv", content="a,b\n1,2")
+        tool = _FixedTool(
+            "csv_tool", ToolResult(success=True, data="note", artifact=spec)
+        )
+        manager = _FakeArtifactManager()
+        _, emitted = await _run_engine(tool=tool, artifact_service=manager)
+        assert len(manager.calls) == 1
+        complete = _find_tool_complete(emitted, "csv_tool")
+        result_data = complete["data"]["result_data"]
+        assert "<artifact_slice" in result_data
+        assert 'type="text/csv"' in result_data
+        assert "a,b" in result_data  # text content 作为预览注入

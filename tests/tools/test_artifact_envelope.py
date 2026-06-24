@@ -180,6 +180,25 @@ class TestRenderArtifactSlice:
         # updated_at 同理
         assert 'updated_at="2024-&quot;01-01"' in out
 
+    def test_attribute_value_escapes_amp_and_lt(self):
+        """Layer B 防御:attribute 值中的 `&` / `<` 也必须转义,产出始终良构 XML。
+
+        content_type 等字段可能携带不可信来源(如远端 Content-Type 头),含 `&`/`<`
+        会让 envelope 非良构。`&` 必须先转义,避免把 `&quot;`/`&lt;` 自己再编码一次。
+        """
+        slice = ArtifactSlice(
+            id="x", version=1,
+            content_type="application/pdf&evil<x>",
+            source="tool",
+            title="t", body="b",
+            total_chars=1, shown_chars=1,
+        )
+        out = render_artifact_slice(slice)
+        assert 'type="application/pdf&amp;evil&lt;x>"' in out
+        # 裸 & / < 不应残留在 attribute 区(title/body 在元素体、按设计原文,不在此断言)
+        assert "pdf&evil" not in out
+        assert "&lt;x" in out
+
     def test_attribute_order_stable(self):
         """attribute 顺序固定（便于 prompt cache 稳定）。"""
         slice = ArtifactSlice(
