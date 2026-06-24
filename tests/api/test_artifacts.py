@@ -265,10 +265,7 @@ async def seed_blob_artifact(
             content_type=_DOCX_MIME,
             title="spec",
             content="",
-            metadata={
-                "original_filename": "spec.docx",
-                "blob_content_type": _DOCX_MIME,
-            },
+            metadata={"original_filename": "spec.docx"},
             source="user_upload",
             blob=b"PK\x03\x04" + b"\x00" * 16,
         )
@@ -277,8 +274,8 @@ async def seed_blob_artifact(
 
 
 class TestHasBlobField:
-    """has_blob 由 metadata.blob_content_type 推导;admin 路由复用同一 schema,
-    填充点独立 —— 漏传会静默默认 False(reviewer P2),两条路由都锁住。"""
+    """has_blob 取自 Artifact.has_blob 列(repo 建行时按 blob 在场写死);admin 路由
+    复用同一 schema,填充点独立 —— 两条路由都锁住。"""
 
     async def test_user_routes_mark_blob(
         self, client: AsyncClient, seed_blob_artifact: Tuple[str, str],

@@ -329,9 +329,9 @@ export interface paths {
          *     blob (pure-text artifacts) or doesn't exist; not logged (self-evident 404).
          *
          *     Images are served `inline` so a frontend `<img src=.../raw>` renders in place;
-         *     everything else `attachment` (download). Content-Type is the blob's true MIME
-         *     (from the Service, which prefers metadata.blob_content_type over the artifact's
-         *     possibly-converted content_type).
+         *     everything else `attachment` (download). Content-Type is the artifact's
+         *     `content_type` — under the XOR model a blob artifact's content_type is the
+         *     original file's true MIME.
          */
         get: operations["get_artifact_raw_api_v1_artifacts__session_id___artifact_id__raw_get"];
         put?: never;

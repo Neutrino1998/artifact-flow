@@ -176,8 +176,7 @@ class TestIngestToolResult:
     async def test_named_spec_with_filename_and_blob(
         self, artifact_service: ArtifactService, session_id: str
     ):
-        """具名:filename 驱动 id + 下载名,blob 落入 memory,blob_content_type 由
-        content_type 派生入 metadata(XOR 下二者相等)。"""
+        """具名:filename 驱动 id + 下载名,blob 落入 memory,has_blob 置真。"""
         artifact_service.set_session(session_id)
         spec = ArtifactSpec(
             content_type="application/pdf",
@@ -192,7 +191,8 @@ class TestIngestToolResult:
         assert aid == "report.pdf"
         memory = artifact_service.working_set.peek(session_id, aid)
         assert memory.blob == b"%PDF-1.4 fake"
-        assert memory.metadata["blob_content_type"] == "application/pdf"
+        assert memory.has_blob is True
+        assert "blob_content_type" not in memory.metadata  # 不再塞 metadata
         assert memory.metadata["original_filename"] == "report.pdf"
         assert memory.metadata["source_url"] == "https://example.com/report.pdf"
         assert memory.source == "tool"
@@ -774,14 +774,15 @@ class TestBinaryArtifactImmutable:
         assert not ok
         assert "immutable" in msg
 
-    async def test_read_dict_carries_blob_content_type(
+    async def test_read_dict_carries_has_blob(
         self, artifact_service: ArtifactService, session_id: str
     ):
-        """read_artifact 序列化带 blob_content_type —— 工具层契约文案 + REST
-        has_blob 的共同判别字段。"""
+        """read_artifact 序列化带 has_blob —— 工具层契约文案 + REST has_blob 的共同
+        判别字段(content_type 即原件 MIME,XOR 下无需另存 blob MIME)。"""
         aid = await self._upload_docx(artifact_service, session_id)
         result = await artifact_service.read_artifact(session_id, aid)
-        assert result["blob_content_type"] == _DOCX_MIME
+        assert result["has_blob"] is True
+        assert result["content_type"] == _DOCX_MIME
 
 
 class TestUploadQuota:

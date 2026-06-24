@@ -219,7 +219,7 @@ async def list_admin_conversation_artifacts(
                 current_version=art["version"],
                 source=art.get("source"),
                 original_filename=art.get("original_filename"),
-                has_blob=bool(art.get("blob_content_type")),
+                has_blob=bool(art.get("has_blob")),
                 created_at=datetime.fromisoformat(art["created_at"]),
                 updated_at=datetime.fromisoformat(art["updated_at"]),
             )
@@ -268,7 +268,7 @@ async def get_admin_conversation_artifact(
         current_version=result["version"],
         source=result.get("source"),
         original_filename=result.get("original_filename"),
-        has_blob=bool(result.get("blob_content_type")),
+        has_blob=bool(result.get("has_blob")),
         created_at=datetime.fromisoformat(result["created_at"]),
         updated_at=datetime.fromisoformat(result["updated_at"]),
         versions=version_summaries,

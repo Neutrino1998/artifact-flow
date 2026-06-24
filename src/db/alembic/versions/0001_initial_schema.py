@@ -113,6 +113,7 @@ def upgrade() -> None:
         sa.Column('source', sa.String(length=32), nullable=False),
         sa.Column('title', sa.String(length=256), nullable=False),
         sa.Column('content', sa.Text(), nullable=False),
+        sa.Column('has_blob', sa.Boolean(), nullable=False, server_default=sa.text('false')),
         sa.Column('current_version', sa.Integer(), nullable=False),
         sa.Column('created_at', sa.DateTime(), server_default=sa.func.now(), nullable=False),
         sa.Column('updated_at', sa.DateTime(), server_default=sa.func.now(), nullable=False),

@@ -148,10 +148,11 @@ class ArtifactService:
         blob = getattr(memory, "blob", None)
         blob_meta: Dict[str, Any] = {}
         if blob is not None:
+            # 前端据 has_blob 去 /raw 取图/下载;MIME 用事件已带的 content_type
+            # (XOR 下即原件真实 MIME),不另发 blob_content_type。
             blob_meta = {
                 "has_blob": True,
                 "blob_size": len(blob),
-                "blob_content_type": (memory.metadata or {}).get("blob_content_type"),
             }
         # 用户上传件带 original_filename:前端据此把本轮 ARTIFACT_CREATED 关联回 send-local
         # 预览缓存里的图片 File(发送时存入、与 liveContent 同生命周期),turn 内(blob 未落库、
@@ -344,12 +345,8 @@ class ArtifactService:
         stage_metadata = dict(metadata or {})
         if original_filename is not None:
             stage_metadata["original_filename"] = original_filename  # 下载文件名
-        # blob-only 标记:XOR 下 blob artifact 的 content_type 即真实 MIME,故直接派生
-        # (不再单收一个必与 content_type 相等的 blob_content_type 入参)。此 metadata 键
-        # 双重用途:① raw 端点据此发原件 MIME;② read_artifact / inventory / API has_blob
-        # 据其**在场**判别「这是二进制」——避免序列化时触碰 lazy 的 Artifact.blob 关系。
-        if blob is not None:
-            stage_metadata["blob_content_type"] = content_type
+        # 「是否二进制」由 Artifact.has_blob 列承载(repo 建行时按 blob 在场写死),
+        # 不再往 metadata 塞 blob_content_type —— content_type 已是原件 MIME。
 
         try:
             await self.ensure_session_exists(session_id)
@@ -480,6 +477,7 @@ class ArtifactService:
             metadata=db_artifact.metadata_,
             created_at=db_artifact.created_at,
             source=db_artifact.source,
+            has_blob=db_artifact.has_blob,  # blob lazy 未载,判别取列值
         )
         self._ws.put(session_id, memory)
         return memory
@@ -503,9 +501,9 @@ class ArtifactService:
                 "version": memory.current_version,
                 "source": memory.source,
                 "original_filename": (memory.metadata or {}).get("original_filename"),
-                # blob-only artifact(docx/pdf 等富格式上传)的判别字段:有 = 二进制、
-                # 无文本表示,read_artifact 据此给契约文案而非空 content。
-                "blob_content_type": (memory.metadata or {}).get("blob_content_type"),
+                # 二进制判别:read_artifact 据此给契约文案而非空 content(content_type
+                # 即原件 MIME,XOR 下无需另存 blob MIME)。
+                "has_blob": memory.has_blob,
                 "created_at": memory.created_at.isoformat(),
                 "updated_at": memory.updated_at.isoformat(),
             }
@@ -523,7 +521,7 @@ class ArtifactService:
                 "version": memory.current_version,
                 "source": memory.source,
                 "original_filename": (memory.metadata or {}).get("original_filename"),
-                "blob_content_type": (memory.metadata or {}).get("blob_content_type"),
+                "has_blob": memory.has_blob,
                 "created_at": memory.created_at.isoformat(),
                 "updated_at": memory.updated_at.isoformat(),
             }
@@ -555,9 +553,8 @@ class ArtifactService:
         (REST 路径自带空 WorkingSet → 落 DB),字节走 repo.get_blob(显式 SELECT,不
         碰 `Artifact.blob` 关系)。
 
-        `content_type` 优先取 `metadata.blob_content_type`(写入原始 blob 的真实 MIME),
-        回落 artifact 自身 content_type。XOR 下 blob artifact 的 content_type 即真实
-        MIME,两者一致;优先 metadata 仍保留为显式来源(并兼容历史行)。
+        raw 服务的 MIME 即 artifact 自身 `content_type` —— XOR 下 blob artifact 的
+        content_type 就是原件真实 MIME。
         """
         memory = await self.get_artifact(session_id, artifact_id)
         if not memory:
@@ -578,7 +575,7 @@ class ArtifactService:
         return {
             "data": data,
             "size_bytes": size,
-            "content_type": meta.get("blob_content_type") or memory.content_type,
+            "content_type": memory.content_type,  # XOR:即原件真实 MIME
             "filename": meta.get("original_filename") or memory.id,
         }
 
@@ -594,7 +591,7 @@ class ArtifactService:
         blob 形成"哪份权威"的双轨(C-0 刚删掉的状态借编辑工具还魂)。改 = 产新
         artifact(沙盒 persist / create_artifact),源永不变。
         """
-        if (memory.metadata or {}).get("blob_content_type"):
+        if memory.has_blob:
             return (
                 f"Artifact '{memory.id}' is a binary file and is immutable. "
                 "Create a new artifact for derived content instead of editing it."
@@ -845,7 +842,7 @@ class ArtifactService:
                     "version": art.current_version,
                     "source": art.source,
                     "original_filename": (art.metadata_ or {}).get("original_filename"),
-                    "blob_content_type": (art.metadata_ or {}).get("blob_content_type"),
+                    "has_blob": art.has_blob,
                     "created_at": art.created_at.isoformat(),
                     "updated_at": art.updated_at.isoformat(),
                 }
@@ -876,7 +873,7 @@ class ArtifactService:
             "version": memory.current_version,
             "source": memory.source,
             "original_filename": (memory.metadata or {}).get("original_filename"),
-            "blob_content_type": (memory.metadata or {}).get("blob_content_type"),
+            "has_blob": memory.has_blob,
             "created_at": memory.created_at.isoformat(),
             "updated_at": memory.updated_at.isoformat(),
         }

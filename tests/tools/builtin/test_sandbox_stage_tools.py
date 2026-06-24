@@ -58,12 +58,12 @@ class FakeArtifactService:
 
     def add_text(self, artifact_id, content, content_type="text/markdown"):
         self.memories[artifact_id] = SimpleNamespace(
-            content=content, content_type=content_type, metadata={}
+            content=content, content_type=content_type, metadata={}, has_blob=False
         )
 
     def add_blob(self, artifact_id, data, mime):
         self.memories[artifact_id] = SimpleNamespace(
-            content="", content_type=mime, metadata={"blob_content_type": mime}
+            content="", content_type=mime, metadata={}, has_blob=True
         )
         self.blobs[artifact_id] = {"data": data, "content_type": mime}
 

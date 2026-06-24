@@ -166,7 +166,7 @@ class MountArtifactTool(BaseTool):
             )
 
         # 字节来源二分(决策:blob-only 后每 artifact 单一权威载体)
-        if (memory.metadata or {}).get("blob_content_type"):
+        if memory.has_blob:
             blob_info = await self._service.get_blob(session_id, artifact_id)
             if blob_info is None:
                 return ToolResult(

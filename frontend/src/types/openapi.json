@@ -787,7 +787,7 @@
           "artifacts"
         ],
         "summary": "Get Artifact Raw",
-        "description": "Serve an artifact's raw binary blob (uploaded image / rich-format source).\n\nDB-only read (request-scoped Service, empty WorkingSet) \u2014 like all GETs here,\nduring execution it serves the last flushed blob. 404 when the artifact has no\nblob (pure-text artifacts) or doesn't exist; not logged (self-evident 404).\n\nImages are served `inline` so a frontend `<img src=.../raw>` renders in place;\neverything else `attachment` (download). Content-Type is the blob's true MIME\n(from the Service, which prefers metadata.blob_content_type over the artifact's\npossibly-converted content_type).",
+        "description": "Serve an artifact's raw binary blob (uploaded image / rich-format source).\n\nDB-only read (request-scoped Service, empty WorkingSet) \u2014 like all GETs here,\nduring execution it serves the last flushed blob. 404 when the artifact has no\nblob (pure-text artifacts) or doesn't exist; not logged (self-evident 404).\n\nImages are served `inline` so a frontend `<img src=.../raw>` renders in place;\neverything else `attachment` (download). Content-Type is the artifact's\n`content_type` \u2014 under the XOR model a blob artifact's content_type is the\noriginal file's true MIME.",
         "operationId": "get_artifact_raw_api_v1_artifacts__session_id___artifact_id__raw_get",
         "security": [
           {

@@ -484,7 +484,14 @@ class Artifact(Base):
     
     # 当前内容（冗余存储，避免每次查版本表）
     content: Mapped[str] = mapped_column(Text, nullable=False, default="")
-    
+
+    # 是否有二进制 blob（XOR:text artifact 走 content,binary 走 blob）。这是「是不是
+    # 二进制」的权威判别 —— 建 artifact 时按 blob 在场写死、set-once 不可变(blob 不可改)。
+    # 序列化/读侧据此判别,无需触碰 lazy 的 Artifact.blob 关系(避免把字节拖进列表读)。
+    has_blob: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
+
     # 当前版本号
     current_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     

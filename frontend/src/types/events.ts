@@ -106,9 +106,10 @@ export interface ArtifactCreatedData {
   original_filename?: string;
   // Blob-backed artifact (image / rich-format upload): no text content; raw
   // bytes via GET …/raw after flush. Drives the binary view + raw download.
+  // MIME comes from `content_type` (XOR: a blob artifact's content_type is the
+  // original file's true MIME).
   has_blob?: boolean;
   blob_size?: number;
-  blob_content_type?: string | null;
 }
 
 /** ARTIFACT_UPDATED: rewrite → full `content`; targeted update → authoritative span

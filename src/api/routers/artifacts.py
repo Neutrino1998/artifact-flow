@@ -147,7 +147,7 @@ async def list_artifacts(
                     current_version=art["version"],
                     source=art.get("source"),
                     original_filename=art.get("original_filename"),
-                    has_blob=bool(art.get("blob_content_type")),
+                    has_blob=bool(art.get("has_blob")),
                     created_at=datetime.fromisoformat(art["created_at"]),
                     updated_at=datetime.fromisoformat(art["updated_at"]),
                 )
@@ -197,9 +197,9 @@ async def get_artifact_raw(
     blob (pure-text artifacts) or doesn't exist; not logged (self-evident 404).
 
     Images are served `inline` so a frontend `<img src=.../raw>` renders in place;
-    everything else `attachment` (download). Content-Type is the blob's true MIME
-    (from the Service, which prefers metadata.blob_content_type over the artifact's
-    possibly-converted content_type).
+    everything else `attachment` (download). Content-Type is the artifact's
+    `content_type` — under the XOR model a blob artifact's content_type is the
+    original file's true MIME.
     """
     await _verify_session_ownership(session_id, current_user, conversation_manager)
 
@@ -279,7 +279,7 @@ async def get_artifact(
         current_version=current_ver,
         source=result.get("source"),
         original_filename=result.get("original_filename"),
-        has_blob=bool(result.get("blob_content_type")),
+        has_blob=bool(result.get("has_blob")),
         created_at=datetime.fromisoformat(result["created_at"]),
         updated_at=datetime.fromisoformat(result["updated_at"]),
         versions=version_summaries,

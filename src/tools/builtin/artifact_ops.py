@@ -252,9 +252,9 @@ class ReadArtifactTool(BaseTool):
         # blob-only artifact(docx/pdf/异型图/未知二进制等上传,无文本表示):
         # 返回契约文案而非空 content。success=True —— 这是对"它是什么"的准确回答,
         # 不是失败(success=False 易诱发模型重试同一调用)。
-        if result.get("blob_content_type"):
+        if result.get("has_blob"):
             original = result.get("original_filename") or artifact_id
-            bct = result["blob_content_type"]
+            bct = content_type  # XOR:content_type 即原件真实 MIME
             if bct.startswith("image/"):
                 how = (
                     "Only PNG/JPEG images can be viewed directly with read_artifact. "

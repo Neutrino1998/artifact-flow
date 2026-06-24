@@ -363,7 +363,7 @@ class ContextManager:
             preview_content = artifact.get("content", "")
             if not preview_content and artifact["content_type"] in VISION_VIEWABLE_MIMES:
                 preview_content = "[image — use read_artifact to view it]"
-            elif not preview_content and artifact.get("blob_content_type"):
+            elif not preview_content and artifact.get("has_blob"):
                 preview_content = (
                     "[binary file — no text representation; mount it into the sandbox "
                     "to inspect/convert, or the user can download it from the artifact panel]"

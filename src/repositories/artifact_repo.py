@@ -138,6 +138,7 @@ class ArtifactRepository(BaseRepository[Artifact]):
             content_type=content_type,
             title=title,
             content=content,
+            has_blob=blob is not None,  # 二进制判别权威列(set-once,随 blob 在场写死)
             current_version=target_version,
             metadata_=metadata or {},
             source=source
