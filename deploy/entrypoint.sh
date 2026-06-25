@@ -60,8 +60,10 @@ async def migrate():
                 # This ensures waiting replicas don't race ahead.
                 print('Alembic migration failed', file=sys.stderr)
                 sys.exit(result.returncode)
-            # config -> DB reconcile, leader-only, still under the advisory lock
-            # (single runner). Followers verify schema but do NOT reconcile.
+            # config -> DB reconcile under the advisory lock. Followers re-run it
+            # idempotently too (below) so EVERY replica self-certifies config
+            # before serving — a leader-only reconcile would let a follower start
+            # on a stale/empty registry when the leader's reconcile failed.
             print('Reconciling config -> DB (leader)...')
             rec = subprocess.run(['python', 'scripts/reconcile_config.py'])
             if rec.returncode != 0:
@@ -72,9 +74,18 @@ async def migrate():
         else:
             print('Another replica is running migrations, waiting...')
             await conn.execute(\"SELECT pg_advisory_lock(hashtext('alembic_migrate'))\")
-            await conn.execute(\"SELECT pg_advisory_unlock(hashtext('alembic_migrate'))\")
-            print('Migration lock released by peer, verifying schema...')
-            verify_at_head()
+            try:
+                print('Migration lock acquired, verifying schema...')
+                verify_at_head()
+                # Re-run reconcile idempotently: all-skip when config is good,
+                # loud-fail when bad. Held under the lock => no concurrent run.
+                print('Reconciling config -> DB (follower, idempotent)...')
+                rec = subprocess.run(['python', 'scripts/reconcile_config.py'])
+                if rec.returncode != 0:
+                    print('Config reconcile failed', file=sys.stderr)
+                    sys.exit(rec.returncode)
+            finally:
+                await conn.execute(\"SELECT pg_advisory_unlock(hashtext('alembic_migrate'))\")
     finally:
         await conn.close()
 

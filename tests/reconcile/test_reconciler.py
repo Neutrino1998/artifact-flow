@@ -222,6 +222,42 @@ async def test_unit_name_with_double_underscore_fails(db_session, cfg):
         await _run(db_session, cfg)
 
 
+async def test_member_name_with_double_underscore_allowed(db_session, cfg):
+    # 决策 11:member 段可含 `__`(MCP 合法名);仅 unit 名禁 `__`
+    tools, _ = cfg
+    _write(tools / "github" / "_set.md", """
+        ---
+        name: github
+        description: "GitHub tools"
+        ---
+    """)
+    _write(tools / "github" / "foo__bar.md", _singleton_tool_md("foo__bar"))
+
+    report = await _run(db_session, cfg)
+    assert "tool_unit:github" in report.created
+
+    full_names = (await db_session.execute(
+        select(ToolMember.full_name).where(ToolMember.unit_name == "github")
+    )).scalars().all()
+    assert full_names == ["github__foo__bar"]
+
+
+async def test_unit_name_colliding_with_builtin_fails(db_session, cfg):
+    tools, _ = cfg
+    # singleton unit 名 = builtin `web_search` → agent 分流会遮蔽 + full_name 撞
+    _write(tools / "web_search.md", _singleton_tool_md(name="web_search"))
+    with pytest.raises(SeedError, match="builtin/reserved"):
+        await _run(db_session, cfg)
+
+
+async def test_unit_name_colliding_with_reserved_fails(db_session, cfg):
+    tools, _ = cfg
+    # reserved(请求级 artifact/sandbox 工具)同样在命名空间内
+    _write(tools / "bash.md", _singleton_tool_md(name="bash"))
+    with pytest.raises(SeedError, match="builtin/reserved"):
+        await _run(db_session, cfg)
+
+
 async def test_agent_unknown_tool_fails(db_session, cfg):
     _, agents = cfg
     _write(agents / "lead_agent.md", _agent_md(tools_block="  nonexistent_tool: auto"))

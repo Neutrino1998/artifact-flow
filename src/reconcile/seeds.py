@@ -118,8 +118,9 @@ def _build_http_member(frontmatter: dict, body: str, *, unit_name: str,
     member_name = frontmatter.get("name")
     if not member_name:
         raise SeedError(f"{source}: tool/endpoint missing 'name'")
-    if "__" in member_name:
-        raise SeedError(f"{source}: member name '{member_name}' must not contain '__'")
+    # member 段允许 `__`(MCP 合法名 `^[a-zA-Z0-9_-]{1,64}$`,决策 11):full_name
+    # 解析靠剥已知 unit 前缀、绝不 split `__`,故 `github__foo__bar` 合法。仅 unit
+    # 名禁 `__`(前缀分隔保留),那个检查在 _validate_unit_name。
 
     tool_type = frontmatter.get("type", "http")
     if tool_type != "http":
@@ -290,14 +291,29 @@ def _read_visibility(frontmatter: dict, source: str) -> str:
 
 
 def _check_tool_collisions(seeds: List[ToolUnitSeed]) -> None:
-    """unit 名全局唯一 + full_name 全局唯一(DB UQ 兜底,这里给清晰报错)。"""
+    """命名不变量(单点强制):unit 名与 full_name 在 `builtin ∪ reserved ∪ external`
+    扁平命名空间里全局唯一。
+
+    与 builtin 撞名必须 loud-fail:agent 分流 builtin 优先(见 parse_agent_seeds),
+    一个叫 `web_search` 的 unit 会被悄悄遮蔽、且 singleton 同名还会在注册表合并时撞
+    full_name。(运行期 build_tool_map 的全局闸是双保险,但坏配置应在 seed 期就停。)
+    """
     unit_names: set = set()
     full_names: Dict[str, str] = {}
     for s in seeds:
+        if s.name in BUILTIN_TOOL_NAMES:
+            raise SeedError(
+                f"tool unit name '{s.name}' collides with a builtin/reserved tool name"
+            )
         if s.name in unit_names:
             raise SeedError(f"duplicate tool unit name '{s.name}' in config/tools")
         unit_names.add(s.name)
         for m in s.members:
+            if m.full_name in BUILTIN_TOOL_NAMES:
+                raise SeedError(
+                    f"tool full_name '{m.full_name}' (unit '{s.name}') collides with "
+                    f"a builtin/reserved tool name"
+                )
             if m.full_name in full_names:
                 raise SeedError(
                     f"duplicate tool full_name '{m.full_name}' "
