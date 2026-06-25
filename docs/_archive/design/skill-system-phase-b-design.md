@@ -22,10 +22,10 @@
 
 ## 不变量与约束(贯穿 4 片)
 
-- **B 全程纯加法 / 行为保持**,唯一有意的行为语义变更 = decision 11(等级 sole-source 工具定义)落在 **B-1**(schema 强制),engine 输出经回归测试不变。
+- **B 全程纯加法 / 行为保持**,唯一有意的行为语义变更 = decision 11(等级 sole-source 工具定义 + agent MD 成员态/等级分离)落在 **B-2**(engine 消费侧翻转处),B-1 write-only、engine 不动。
 - **identity = natural key**(decision 10):`tool_unit.name`/`agent.name` 作 PK;所有 m2m 真 FK + `ON DELETE CASCADE`。
 - **dept 规则表不在 B**(C 建 `department_skill_rule`+`department_unit_rule`,G 消费 unit 规则)。B 只产出 `visibility` 列 + 稳定 unit name 作未来 FK 目标 + reconciler 的 clear-on-visibility 钩子(B 内空跑)。
-- **凭证不进 DB**:`tool_member.definition` 只存 `{{TOOL_SECRET_*}}` 引用,值留 env(`secrets.py` 不变)。
+- **凭证统一加密落库**(独立 `tool_credential` 表,B-4 落地):resolve 一条路 = 读库解密、lazy 到 execute、只解被调工具。dynamic = UI 写;seeded = reconciler seed 时按 `{{TOOL_SECRET_*}}` 从 env 取值后加密落库(MD 仍只放引用、不放原始值 —— secret 间接层 `secrets.py` 保留)。主密钥在 env、单把、**不做轮转**。详见 B-4。
 
 ---
 
@@ -131,7 +131,7 @@ config/tools/
 
 - reconciler 跑两次幂等(第二次全 skip,无写);改 config 内容(同名)→ UPDATE 定义列、不动 m2m。
 - 扁平 `*.md` → singleton unit(1 member,full_name==name);`<set>/` 目录 → toolset unit + 多 member,full_name=`<set>__*`。
-- snapshot repo 能从 DB 行重建出 `HttpTool` + `AgentConfig` 等价形状(单测)。
+- snapshot repo 能从 DB 行重建出 `HttpTool` + agent 元数据(`AgentSnapshot`)等价形状(单测)。
 - 撞名 loud-fail:同类型 config 内重名 / seed 撞已有 dynamic 行 / unit 名含 `__` / agent MD 引用未知工具。
 - **引擎行为零变化**(engine 仍走 in-memory 路径);**现有后端测试全过** + 新增 reconciler/repo/迁移用例。
 
@@ -139,7 +139,7 @@ config/tools/
 
 ## B-2 —— `EffectiveToolset` resolver(读点收口,纯消费重构)
 
-**目标**:把 4 读点 + B-1 adapter 收成唯一解析点(decision 11)。**必须在 B 收口**(B 是首个改工具集形状的阶段,拖到 C/G 则同 4 点被 refactor 三轮 = 退回架构信号)。
+**目标**:把 4 读点收成唯一解析点(decision 11),并把引擎从 in-memory `load_all_agents`/`_load_tools` 翻到 B-1 的 DB 快照。**必须在 B 收口**(B 是首个改工具集形状的阶段,拖到 C/G 则同 4 点被 refactor 三轮 = 退回架构信号)。
 
 **包含**:
 - `src/core/effective_toolset.py`:`resolve(agent, snapshot, always_allowed) -> {full_name: ToolPermission}` + 渲染/可见集等查询。
@@ -174,10 +174,24 @@ config/tools/
 **包含**:
 - **provider 抽象**(F 地基):`tool_unit.provider`(B-1 已建列)+ registry 归一化(所有来源 → 一个 tool 形 + 合并函数,仿 CC `isMcp`)。B 按 MCP 形状留缝(命名空间 `<server>__*`、按 server 名搜、动态 set),F 纯加法。
 - **后端 CRUD**(`src/api/routers/` 新 `tools.py`):`tool_unit`/`tool_member` 增删改(仅 `dynamic`;`seeded` 只读);`agent_unit` 挂载 API(operator 勾选「unit 挂给哪些 agent」→ 写 `dynamic` 行)。**这是 UI 建的工具对 agent 可达的唯一入口**(否则全 agent `absent`)。三层:Repo/Manager/Router。
-- **前端**:`scripts/export_openapi.py` + `npm run generate-types` 同步类型;管理页 = 工具 unit 列表/编辑 + agent_unit 绑定勾选。`visibility` 列展示但 G 才接 dept 授权 UI。
+- **凭证统一加密落库**(见下「凭证模型」):dynamic 工具 UI 直接配 api key,补 `base_url`/凭证的 unit 级管理。
+- **前端**:`scripts/export_openapi.py` + `npm run generate-types` 同步类型;管理页 = 工具 unit 列表/编辑 + agent_unit 绑定勾选 + 凭证配置(写-only)。`visibility` 列展示但 G 才接 dept 授权 UI。
 - **边界**:这只是给 agent 挂能力单元,**非编辑 agent 的 prompt/model**(运行时可编辑 agent 仍 Non-goal);与 G 的部门授权正交(宇宙=agent 暴露什么,dept=哪个部门能用)。
 
-**验收**:UI 新建 dynamic unit → 挂给 agent → 该 agent 可调;seeded unit UI 只读;类型同步无漂移。
+**验收**:UI 新建 dynamic unit + 配 api key → 挂给 agent → 该 agent 可调真实出站;seeded unit UI 只读;凭证 GET 永不回明文;类型同步无漂移。
+
+### 凭证模型(unit 级 · 统一加密落库)
+
+动机:env-only 对 dynamic 工具反 ergonomic —— UI 里建工具却要 ssh 改 `.env` + 重启才能配 key,dynamic 就是假的。统一改为加密落库。
+
+**红线边界(确认未碰两条 defer 的轴)**:① 这是 **backend HTTP 工具**(`HttpTool.execute` 在受信 backend、有网),不是沙盒工具 → 沙盒「永不拿凭证」红线不受影响;② 凭证绑在**工具/unit**上(如 RAGFlow 一把团队级 key),不是 per-user 身份 → 不重开「用户凭证透传(B1/B2 OAuth 金库)」那根 defer 的轴。
+
+- **独立表 `tool_credential`**(仿 `artifact_blobs` 与 artifacts 隔离):PK 关联 unit、`encrypted_value`(密文)+ 关联 header/placeholder 名;`lazy="select"` —— per-turn 快照与 catalog/resolver 全程**不载入密文**。凭证是 **unit 级**(toolset 一把 key + `base_url` 共享给所有 member;singleton unit==member;要 per-endpoint 不同 key = 拆 unit)。
+- **resolve 一条路 = 读库解密**,**lazy 到 execute、只解被调工具**(不调用的工具不解密)。`HttpTool.execute` 多一条「问 credential resolver 要解密值」的路径,resolver 句柄带 live DB session(引擎执行在有 DB 的请求上下文里)。
+- **dynamic**:UI 写明文 → 后端用主密钥加密落库;改 endpoint/key = 普通 UPDATE 覆盖那行(用当前主密钥重新加密)。**写-only API**:GET 永不回明文(回 `configured: true` / 掩码)。
+- **seeded**:reconciler seed 时按 MD 的 `{{TOOL_SECRET_X}}` 引用从 env 取值 → 加密落库,标 seed、UI 不可改;改 = 改 env + 重 reconcile。**MD 仍只放引用、不放原始值**(secret 间接层 `secrets.py` + 前缀白名单保留,防工具读 JWT/DB 密钥)。
+- **主密钥**:`ARTIFACTFLOW_CREDENTIAL_KEY` 在 env、单把、固定。**不做轮转**(无版本化、无 re-encrypt 工具);DB dump 是废密文(无主密钥不可解),暴露面与 dynamic 同级、和 JWT secret 信任模型同级。
+- **解密值纪律**:只在 execute 期存在,永不进日志 / 事件 / `tool_member.definition` / 给模型看的 catalog(沿用现有 `HttpTool` execute 期 resolve + 失败回 generic message 的先例)。
 
 ---
 
