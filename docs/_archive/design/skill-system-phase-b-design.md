@@ -186,11 +186,13 @@ config/tools/
 
 **红线边界(确认未碰两条 defer 的轴)**:① 这是 **backend HTTP 工具**(`HttpTool.execute` 在受信 backend、有网),不是沙盒工具 → 沙盒「永不拿凭证」红线不受影响;② 凭证绑在**工具/unit**上(如 RAGFlow 一把团队级 key),不是 per-user 身份 → 不重开「用户凭证透传(B1/B2 OAuth 金库)」那根 defer 的轴。
 
-- **独立表 `tool_credential`**(仿 `artifact_blobs` 与 artifacts 隔离):PK 关联 unit、`encrypted_value`(密文)+ 关联 header/placeholder 名;`lazy="select"` —— per-turn 快照与 catalog/resolver 全程**不载入密文**。凭证是 **unit 级**(toolset 一把 key + `base_url` 共享给所有 member;singleton unit==member;要 per-endpoint 不同 key = 拆 unit)。
-- **resolve 一条路 = 读库解密**,**lazy 到 execute、只解被调工具**(不调用的工具不解密)。`HttpTool.execute` 多一条「问 credential resolver 要解密值」的路径,resolver 句柄带 live DB session(引擎执行在有 DB 的请求上下文里)。
-- **dynamic**:UI 写明文 → 后端用主密钥加密落库;改 endpoint/key = 普通 UPDATE 覆盖那行(用当前主密钥重新加密)。**写-only API**:GET 永不回明文(回 `configured: true` / 掩码)。
-- **seeded**:reconciler seed 时按 MD 的 `{{TOOL_SECRET_X}}` 引用从 env 取值 → 加密落库,标 seed、UI 不可改;改 = 改 env + 重 reconcile。**MD 仍只放引用、不放原始值**(secret 间接层 `secrets.py` + 前缀白名单保留,防工具读 JWT/DB 密钥)。
-- **主密钥**:`ARTIFACTFLOW_CREDENTIAL_KEY` 在 env、单把、固定。**不做轮转**(无版本化、无 re-encrypt 工具);DB dump 是废密文(无主密钥不可解),暴露面与 dynamic 同级、和 JWT secret 信任模型同级。
+- **两种 key 别混**:**主密钥**(`ARTIFACTFLOW_CREDENTIAL_KEY`)= 1 把、加密/解密用,锁住所有凭证;**工具凭证**(RAGFlow key 等)= 被锁的东西,一个 unit 可挂多把。
+- **独立多行表 `tool_credential(unit_name, placeholder_name, encrypted_value)`**(仿 `artifact_blobs` 与 artifacts 隔离):一 unit 多行,每行一个 `{{NAME}}` placeholder 的可逆加密值(复用现有 `resolve_secrets` 的 `{{NAME}}` 替换语义,只把值的来源从 env 换成此表 → **不退化现有多 secret 能力**)。`lazy="select"` —— per-turn 快照 / catalog / resolver 全程**不载入密文**。凭证 + `base_url` 是 **unit 级**(toolset 共享给所有 member;singleton unit==member;要 per-endpoint 不同 key = 拆 unit)。
+- **resolve 一条路 = 读库解密**(可逆加密,execute 时解开替换 `{{NAME}}`),**lazy 到 execute、只解被调工具**。`HttpTool.execute` 多一条「问 credential resolver 要解密值」的路径,resolver 句柄带 live DB session(引擎执行在有 DB 的请求上下文里)。
+- **dynamic**:UI 按 placeholder 填明文 → 后端用主密钥加密落行;改 = UPDATE 覆盖那行(当前主密钥重新加密)。**写-only API**:GET 永不回明文(回 `configured: true` / 掩码)。
+- **seeded**:reconciler 扫定义里的 `{{TOOL_SECRET_X}}`、从 env 取值加密落行,标 seed、UI 不可改;改 = 改 env + 重 reconcile。**凭证 reconcile 独立于 unit 定义 hash**(否则定义没变 → hash skip → 凭证不更新,P1):判变靠**解密旧行 ↔ 比 env 新值**(reconcile 本就握 env 明文 + 主密钥,解密成本可忽略、无新增暴露),变了才重加密 update;定义里删掉的 placeholder 行随之 prune。**MD 仍只放引用、不放原始值**(secret 间接层 `secrets.py` + 前缀白名单保留,防工具读 JWT/DB 密钥)。
+- **主密钥**:env、单把、固定。**不做轮转**(无版本化、无 re-encrypt 工具);DB dump 是废密文(无主密钥不可解),暴露面与 dynamic 同级、和 JWT secret 信任模型同级。
+- **加密 ≠ 哈希**:`encrypted_value` 必须**可逆加密**(AES/Fernet)—— execute 时要解开把真 key 发出去;不存任何单向哈希(sha256 不可逆、无法还原 key,只会徒增混淆)。
 - **解密值纪律**:只在 execute 期存在,永不进日志 / 事件 / `tool_member.definition` / 给模型看的 catalog(沿用现有 `HttpTool` execute 期 resolve + 失败回 generic message 的先例)。
 
 ---
