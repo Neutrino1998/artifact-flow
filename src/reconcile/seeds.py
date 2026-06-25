@@ -337,9 +337,13 @@ def parse_agent_seeds(
     解析 config/agents/ → AgentSeed 列表。
 
     把 agent MD `tools:` 条目按 BUILTIN_TOOL_NAMES 分流(决策 11):
-      - builtin 名 → builtin_tools(present=enabled;等级唯一来源是工具定义,MD 值丢弃)
+      - builtin 名 → builtin_tools
       - 已注册 unit 名 / `<unit>__<tool>` full_name → agent_units(整 unit)
       - 其余 → loud-fail(未知工具)
+
+    MD 值 = 成员态 `enabled` | `disabled`(决策 11:绑定只声明成员态,**不含等级**
+    —— 等级唯一来源是工具定义)。旧字面量 `auto`/`confirm`(等级)在此 loud-fail,
+    逼迫显式迁移,避免「写了个等级却被静默忽略」的假配置。
 
     known_unit_names / known_full_names 来自已 reconcile 的 DB(seeded+dynamic),
     使 seeded agent 能引用任意已存在 unit。
@@ -364,14 +368,22 @@ def parse_agent_seeds(
 
         builtin_tools: Dict[str, str] = {}
         unit_states: Dict[str, str] = {}
-        for tool_name in config.tools.keys():
+        for tool_name, raw_state in config.tools.items():
+            state = str(raw_state).strip().lower()
+            if state not in ("enabled", "disabled"):
+                raise SeedError(
+                    f"agent '{config.name}' tool '{tool_name}' has invalid member "
+                    f"state '{raw_state}' — must be 'enabled' or 'disabled' "
+                    f"(decision 11: bindings carry membership only; tool level is "
+                    f"sole-sourced from the tool definition, not the agent MD)"
+                )
             if tool_name in BUILTIN_TOOL_NAMES:
-                builtin_tools[tool_name] = "enabled"
+                builtin_tools[tool_name] = state
             elif tool_name in known_unit_names:
-                unit_states[tool_name] = "enabled"
+                unit_states[tool_name] = state
             elif tool_name in known_full_names:
                 # 引用 set 成员全名 → 归属整 unit(整 unit grant,决策 11)
-                unit_states[known_full_names[tool_name]] = "enabled"
+                unit_states[known_full_names[tool_name]] = state
             else:
                 raise SeedError(
                     f"agent '{config.name}' references unknown tool '{tool_name}' "

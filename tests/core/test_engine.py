@@ -11,6 +11,7 @@ from unittest.mock import patch, AsyncMock
 
 from core.engine import EngineHooks, create_initial_state, execute_loop
 from core.events import StreamEventType
+from tests.core._toolset import effective_for
 
 
 # ============================================================
@@ -78,6 +79,7 @@ async def _run_with_fake_llm(chunks: list[dict], agent_config=None):
             state=state,
             agents={"lead_agent": agent_config},
             tools={},
+            effective_toolsets=effective_for({"lead_agent": agent_config}, {}),
             hooks=_noop_hooks(),
             emit=capture_emit,
         )
@@ -112,6 +114,7 @@ class TestAgentNotFound:
             state=state,
             agents={},  # no agents registered
             tools={},
+            effective_toolsets={},
             hooks=_noop_hooks(),
             emit=capture_emit,
         )
@@ -196,6 +199,7 @@ class TestUploadStagingAbort:
             state=state,
             agents={"lead_agent": _FakeAgentConfig()},
             tools={},
+            effective_toolsets=effective_for({"lead_agent": _FakeAgentConfig()}, {}),
             hooks=_noop_hooks(),
             artifact_service=svc,
             emit=capture_emit,

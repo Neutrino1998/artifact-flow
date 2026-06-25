@@ -18,6 +18,7 @@ from datetime import datetime
 from xml.sax.saxutils import escape as xml_escape
 
 from config import config
+from core.effective_toolset import EffectiveToolset
 from core.event_history import build_event_history, last_llm_usage
 from utils.image import VISION_VIEWABLE_MIMES
 from models.llm import model_supports_vision
@@ -41,8 +42,9 @@ class ContextManager:
         cls,
         state: Dict[str, Any],
         agent_name: str,
-        agents: Dict[str, Any],  # {name: AgentConfig}
+        agents: Dict[str, Any],  # {name: AgentSnapshot}
         tools: Dict[str, Any],   # {name: BaseTool}
+        effective_toolset: EffectiveToolset,  # 当前 agent 解析后的可调集 + 等级(决策 11)
         artifacts_inventory: Optional[List[Dict]] = None,
         model: Optional[str] = None,
         sandbox_status: Optional[Dict] = None,
@@ -82,11 +84,11 @@ class ContextManager:
             system_parts.append(agent_config.role_prompt)
 
         # 2. 可用 Agent 列表（条件注入：仅有 call_subagent 工具的 agent）
-        if "call_subagent" in agent_config.tools:
+        if "call_subagent" in effective_toolset:
             system_parts.append(cls._build_available_agents(agents, agent_config.name))
 
         # 3. 工具说明
-        tool_names = list(agent_config.tools.keys())
+        tool_names = effective_toolset.names()
         agent_tools = [tools[name] for name in tool_names if name in tools]
         if agent_tools:
             system_parts.append(generate_tool_instruction(agent_tools))
@@ -119,8 +121,8 @@ class ContextManager:
         # 「content 空则丢 _meta」影响(高 input+空 content 也能预警)。
         last_usage = last_llm_usage(state.get("events", []), agent_name)
         reminder = cls._build_dynamic_context(
-            agent_config, artifacts_inventory, last_usage, sandbox_status,
-            tool_round_count=tool_round_count,
+            agent_config, effective_toolset, artifacts_inventory, last_usage,
+            sandbox_status, tool_round_count=tool_round_count,
         )
         return cls.assemble(system_prompt, all_messages, reminder), reminder
 
@@ -161,6 +163,7 @@ class ContextManager:
     def _build_dynamic_context(
         cls,
         agent_config: Any,
+        effective_toolset: EffectiveToolset,
         artifacts_inventory: Optional[List[Dict]],
         last_usage: Optional[int] = None,
         sandbox_status: Optional[Dict] = None,
@@ -201,7 +204,7 @@ class ContextManager:
         # Artifact 清单（仅有 artifact 工具的 agent 注入）—— 即使为空也要给出
         # 显式的 live 清单（"暂无 artifact"），否则模型找不到当前状态会回退去读
         # system prompt 里静态的 <artifact_authoring> 创作指引，误当成空清单。
-        has_artifact_tools = any(t in agent_config.tools for t in [
+        has_artifact_tools = effective_toolset.has_any([
             "create_artifact", "update_artifact", "rewrite_artifact",
             "read_artifact", "grep_artifact"
         ])
@@ -212,7 +215,7 @@ class ContextManager:
         # 的 mount/bash 记录对模型是"文件还在"的伪证，工具描述里的 per-turn ephemeral
         # 静态规则压不过它；只有"现在时态"的工作区事实能纠偏（与 artifact 清单同理:
         # 状态用动态注入，能力进工具描述，契约进 inventory 标注，how-to 归 skill）。
-        has_sandbox_tools = any(t in agent_config.tools for t in ("bash", "mount", "persist"))
+        has_sandbox_tools = effective_toolset.has_any(("bash", "mount", "persist"))
         if has_sandbox_tools and sandbox_status is not None:
             parts.append(cls._build_sandbox_status(sandbox_status))
 

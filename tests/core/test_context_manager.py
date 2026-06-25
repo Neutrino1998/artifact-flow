@@ -13,6 +13,7 @@ import pytest
 from config import config
 from core.context_manager import ContextManager
 from core.events import StreamEventType, ExecutionEvent
+from tests.core._toolset import effective_one
 
 
 # ============================================================
@@ -90,6 +91,7 @@ def _build(agent, agents=None, **kwargs):
     messages, _reminder = ContextManager.build(
         agent_name=agent.name,
         agents=agents,
+        effective_toolset=effective_one(agent, kwargs.get("tools") or {}),
         **kwargs,
     )
     return messages
@@ -544,6 +546,7 @@ class TestDynamicContextReminder:
 
         ContextManager.build(
             agent_name=agent.name, agents={agent.name: agent}, state=state, tools={},
+            effective_toolset=effective_one(agent, {}),
         )
         # build 不得把 reminder 写回 event —— 否则过期时间/清单会冻进历史
         assert user_event.data["content"] == "hi"
@@ -668,6 +671,7 @@ class TestContextUsageWarning:
         state = _make_state(events=[user_event, _llm_complete(threshold, 0), _tool_complete()])
         ContextManager.build(
             agent_name=agent.name, agents={agent.name: agent}, state=state, tools={},
+            effective_toolset=effective_one(agent, {}),
         )
         assert "<context_usage>" not in user_event.data["content"]
 
@@ -779,7 +783,8 @@ class TestPromptReconstructionFidelity:
 
         live_messages, reminder = ContextManager.build(
             agent_name=agent.name, agents={agent.name: agent},
-            state=state, tools={}, **build_kwargs,
+            state=state, tools={}, effective_toolset=effective_one(agent, {}),
+            **build_kwargs,
         )
         system_prompt = live_messages[0]["content"]
         # 重建路径：与引擎同一份 build_event_history（默认 vision_capable，无 vision_blocks）
@@ -817,6 +822,7 @@ class TestPromptReconstructionFidelity:
         _, reminder = ContextManager.build(
             agent_name=agent.name, agents={agent.name: agent},
             state=state, tools={}, tool_round_count=2,
+            effective_toolset=effective_one(agent, {}),
         )
         assert "<tool_budget>" in reminder
         # 重建端拿持久化 reminder 直接拼，等价

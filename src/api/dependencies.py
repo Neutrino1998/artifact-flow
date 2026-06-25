@@ -187,28 +187,27 @@ async def init_globals() -> None:
 
 
 def _load_tools() -> Dict[str, BaseTool]:
-    """启动时加载全局工具（无状态，跨请求共享）"""
+    """启动时加载进程级全局 builtin 工具（无状态，跨请求共享）。
+
+    external 工具(config/tools/*.md)不在此加载 —— 它们物化进 DB(reconcile),由
+    controller_factory 每 turn 从注册表快照重建。这里只留真正进程级、无状态的
+    builtin(web_search / web_fetch / call_subagent)；请求级 artifact / 沙盒工具仍在
+    controller_factory 现造。
+    """
     from tools.builtin.call_subagent import CallSubagentTool
     from tools.builtin.web_search import WebSearchTool
     from tools.builtin.web_fetch import WebFetchTool
-    from tools.custom.loader import load_custom_tools
 
     # 从已加载的 agents 推导有效 subagent 列表
     valid_agents = [n for n, c in _agents.items() if n != "lead_agent" and not c.internal] if _agents else None
 
-    # 内置工具
     tools = [
         CallSubagentTool(valid_agents=valid_agents),
         WebSearchTool(),
         WebFetchTool(),
     ]
 
-    # 自定义工具（从 config/tools/*.md 加载）
-    custom_tools = load_custom_tools()
-    if custom_tools:
-        logger.info(f"Loaded {len(custom_tools)} custom tool(s): {[t.name for t in custom_tools]}")
-
-    return build_tool_map(tools, custom_tools)
+    return build_tool_map(tools, [])
 
 
 async def close_globals() -> None:

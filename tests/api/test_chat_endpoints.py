@@ -363,6 +363,32 @@ class _FakeAgentConfig:
     internal: bool = False
 
 
+def _patch_snapshot(fake_agents):
+    """Patch the per-turn registry snapshot the flipped controller_factory loads.
+
+    Post-B-2 `create_controller` no longer reads `deps._agents`/`get_agents()` —
+    it builds agents + external tools from `load_registry_snapshot(session)` (DB).
+    These E2E tests mock only the LLM and don't reconcile config into the test DB,
+    so we synthesize a snapshot from the fake agent configs instead. builtin_tools
+    / units are empty: the happy-path LLM returns plain text (no tool calls), and
+    upload staging is independent of the effective toolset."""
+    from reconcile.snapshot import AgentSnapshot, RegistrySnapshot
+
+    agents = {
+        n: AgentSnapshot(
+            name=c.name, description=c.description, model=c.model,
+            max_tool_rounds=c.max_tool_rounds, internal=c.internal,
+            role_prompt=c.role_prompt, builtin_tools={}, units={},
+        )
+        for n, c in fake_agents.items()
+    }
+
+    async def _load(session):
+        return RegistrySnapshot(external_tools={}, units={}, agents=agents)
+
+    return patch("reconcile.snapshot.load_registry_snapshot", _load)
+
+
 def _make_fake_llm_stream(text: str):
     """Fake LLM that returns a simple text response."""
     async def fake(messages, **kwargs):
@@ -420,7 +446,8 @@ class TestChatStreamE2E:
         deps._execution_runner = runner
 
         try:
-            with patch("models.llm.astream_with_retry", _make_fake_llm_stream("Hello from agent")):
+            with patch("models.llm.astream_with_retry", _make_fake_llm_stream("Hello from agent")), \
+                 _patch_snapshot(fake_agents):
                 # 1. POST /chat — multipart: `payload` form field carries the
                 # ChatRequest JSON; (None, value) sends it as a form field (no
                 # file attachments here). Starts background execution.
@@ -505,7 +532,8 @@ class TestChatStreamE2E:
         deps._execution_runner = runner
 
         try:
-            with patch("models.llm.astream_with_retry", _make_fake_llm_stream("Done")):
+            with patch("models.llm.astream_with_retry", _make_fake_llm_stream("Done")), \
+                 _patch_snapshot(fake_agents):
                 resp = await client.post(
                     "/api/v1/chat",
                     files={

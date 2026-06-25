@@ -59,6 +59,7 @@ def _make_controller(conv_mgr, event_repo, art_mgr):
     return ExecutionController(
         agents={},
         tools={},
+        effective_toolsets={},
         hooks=hooks,
         artifact_service=art_mgr,
         conversation_manager=conv_mgr,

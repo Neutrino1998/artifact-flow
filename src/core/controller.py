@@ -43,8 +43,9 @@ class ExecutionController:
 
     def __init__(
         self,
-        agents: Dict[str, Any],           # {name: AgentConfig}
+        agents: Dict[str, Any],           # {name: AgentSnapshot}
         tools: Dict[str, BaseTool],        # {name: BaseTool}
+        effective_toolsets: Dict[str, Any],  # {agent_name: EffectiveToolset}(决策 11 单一解析点)
         hooks: EngineHooks,
         artifact_service: Optional[ArtifactService] = None,
         conversation_manager: Optional[ConversationManager] = None,
@@ -56,6 +57,7 @@ class ExecutionController:
     ):
         self.agents = agents
         self.tools = tools
+        self.effective_toolsets = effective_toolsets
         self.hooks = hooks
         self.artifact_service = artifact_service
         self.conversation_manager = conversation_manager or ConversationManager()
@@ -226,6 +228,7 @@ class ExecutionController:
                         state=initial_state,
                         agents=self.agents,
                         tools=self.tools,
+                        effective_toolsets=self.effective_toolsets,
                         hooks=self.hooks,
                         artifact_service=self.artifact_service,
                         emit=emit_to_queue,

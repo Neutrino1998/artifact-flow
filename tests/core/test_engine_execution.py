@@ -15,6 +15,7 @@ import pytest
 
 from core.engine import EngineHooks, create_initial_state, execute_loop
 from core.events import StreamEventType, ExecutionEvent
+from tests.core._toolset import effective_for
 from api.services.runtime_store import InMemoryRuntimeStore
 from tools.base import BaseTool, ToolPermission, ToolResult
 
@@ -196,6 +197,7 @@ async def _run_engine(
             state=state,
             agents=agents,
             tools=tools or {},
+            effective_toolsets=effective_for(agents, tools or {}),
             hooks=_hooks_from_store(store),
             emit=capture_emit,
         )
@@ -490,6 +492,7 @@ class TestPermissionInterrupt:
                 state=state,
                 agents={"lead_agent": agent},
                 tools={"sensitive_tool": tool},
+                effective_toolsets=effective_for({"lead_agent": agent}, {"sensitive_tool": tool}),
                 hooks=_hooks_from_store(store),
                 emit=capture_emit,
             )
@@ -533,6 +536,7 @@ class TestPermissionInterrupt:
                 state=state,
                 agents={"lead_agent": agent},
                 tools={"sensitive_tool": tool},
+                effective_toolsets=effective_for({"lead_agent": agent}, {"sensitive_tool": tool}),
                 hooks=_hooks_from_store(store),
                 emit=capture_emit,
             )
@@ -577,6 +581,7 @@ class TestPermissionInterrupt:
                 state=state,
                 agents={"lead_agent": agent},
                 tools={"sensitive_tool": tool},
+                effective_toolsets=effective_for({"lead_agent": agent}, {"sensitive_tool": tool}),
                 hooks=_hooks_from_store(store),
                 emit=capture_emit,
             )
@@ -669,6 +674,7 @@ class TestPermissionInterrupt:
                 state=state,
                 agents={"lead_agent": agent},
                 tools={"sensitive_tool": tool},
+                effective_toolsets=effective_for({"lead_agent": agent}, {"sensitive_tool": tool}),
                 hooks=_hooks_from_store(store),
                 emit=capture_emit,
             )
@@ -735,6 +741,9 @@ class TestCancellation:
                 state=state,
                 agents={"lead_agent": agent},
                 tools={"t1": _FakeTool("t1"), "t2": _FakeTool("t2")},
+                effective_toolsets=effective_for(
+                    {"lead_agent": agent}, {"t1": _FakeTool("t1"), "t2": _FakeTool("t2")}
+                ),
                 hooks=_hooks_from_store(store),
                 emit=capture_emit,
             )
@@ -942,6 +951,7 @@ class TestCancelProbeFailure:
                 state=state,
                 agents={"lead_agent": lead},
                 tools={"slow": _SlowTool()},
+                effective_toolsets=effective_for({"lead_agent": lead}, {"slow": _SlowTool()}),
                 hooks=self._hooks_with_flaky_probe(store, flaky),
                 emit=capture,
             )
@@ -971,10 +981,12 @@ class TestCancelProbeFailure:
         state = create_initial_state(task="t", session_id="s1", message_id="msg-1", path_events=[])
 
         with patch("models.llm.astream_with_retry", _make_fake_stream(_simple_llm_chunks("Done!"))):
+            agents = {"lead_agent": _FakeAgentConfig()}
             result = await execute_loop(
                 state=state,
-                agents={"lead_agent": _FakeAgentConfig()},
+                agents=agents,
                 tools={},
+                effective_toolsets=effective_for(agents, {}),
                 hooks=self._hooks_with_flaky_probe(store, flaky),
                 emit=None,
             )
@@ -998,10 +1010,12 @@ class TestCancelProbeFailure:
 
         with patch("models.llm.astream_with_retry", _make_fake_stream(_simple_llm_chunks("Done!"))), \
              patch("core.engine.config.CANCEL_CHECK_INTERVAL", 0):
+            agents = {"lead_agent": _FakeAgentConfig()}
             result = await execute_loop(
                 state=state,
-                agents={"lead_agent": _FakeAgentConfig()},
+                agents=agents,
                 tools={},
+                effective_toolsets=effective_for(agents, {}),
                 hooks=self._hooks_with_flaky_probe(store, flaky),
                 emit=None,
             )

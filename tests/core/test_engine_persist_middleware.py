@@ -14,6 +14,7 @@ import pytest
 
 from core.engine import EngineHooks, create_initial_state, execute_loop
 from core.events import StreamEventType
+from tests.core._toolset import effective_for
 from api.services.runtime_store import InMemoryRuntimeStore
 from tools.base import ArtifactSpec, BaseTool, ToolPermission, ToolResult
 
@@ -170,6 +171,7 @@ async def _run_engine(
             state=state,
             agents=agents,
             tools={tool.name: tool},
+            effective_toolsets=effective_for(agents, {tool.name: tool}),
             hooks=_hooks(store),
             artifact_service=artifact_service,
             emit=capture,

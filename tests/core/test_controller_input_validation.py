@@ -22,7 +22,7 @@ def _make_controller() -> ExecutionController:
         wait_for_interrupt=AsyncMock(return_value=None),
         drain_messages=AsyncMock(return_value=[]),
     )
-    return ExecutionController(agents={}, tools={}, hooks=hooks)
+    return ExecutionController(agents={}, tools={}, effective_toolsets={}, hooks=hooks)
 
 
 class TestStreamExecuteInputValidation:

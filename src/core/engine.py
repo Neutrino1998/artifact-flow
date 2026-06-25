@@ -19,6 +19,7 @@ from datetime import datetime
 from config import config
 from core.events import StreamEventType, ExecutionEvent
 from core.context_manager import ContextManager
+from core.effective_toolset import EffectiveToolset
 from core.compaction_runner import CompactionRunner
 from core.cancellation import CooperativeCancelled, run_cancellable
 from tools.artifact_envelope import make_preview_slice, render_artifact_slice
@@ -148,8 +149,9 @@ EmitFn = Callable[[Dict[str, Any]], Awaitable[None]]
 
 async def execute_loop(
     state: Dict[str, Any],
-    agents: Dict[str, Any],  # {name: AgentConfig}
+    agents: Dict[str, Any],  # {name: AgentSnapshot}
     tools: Dict[str, Any],   # {name: BaseTool}
+    effective_toolsets: Dict[str, EffectiveToolset],  # {agent_name: 可调集+等级}(决策 11 单一解析点)
     hooks: EngineHooks,
     artifact_service: Optional[Any] = None,
     emit: Optional[EmitFn] = None,
@@ -160,8 +162,12 @@ async def execute_loop(
 
     Args:
         state: 执行状态（from create_initial_state）
-        agents: {name: AgentConfig} 字典
-        tools: {name: BaseTool} 字典（全局 + 请求级工具已合并）
+        agents: {name: AgentSnapshot} 字典（DB 快照重建）
+        tools: {name: BaseTool} 字典（全局 builtin + DB external + 请求级工具已合并）
+        effective_toolsets: {agent_name: EffectiveToolset} —— 每 agent 解析后的可调
+            工具集 + 等级（决策 11 单一解析点），引擎按 current agent 索引，替代旧
+            的 `AgentConfig.tools` 直读
+
         hooks: EngineHooks（check_cancelled / wait_for_interrupt / drain_messages）
         artifact_service: ArtifactService 实例（duck-typed 协作者：set_session /
             list_artifacts / ingest_tool_result / create_from_upload / bind_emit）
@@ -385,6 +391,7 @@ async def execute_loop(
             agent_name=agent_name,
             agents=agents,
             tools=tools,
+            effective_toolset=effective_toolsets[agent_name],
             artifacts_inventory=artifacts_inventory,
             model=get_litellm_model_id(agents[agent_name].model),
             sandbox_status=sandbox_status,
@@ -812,8 +819,8 @@ async def execute_loop(
             params = tool_call.params
             reason = tool_call.reason  # 模型写的调用意图，透出到审批弹窗（display-only）
 
-            # Agent 工具白名单校验
-            if tool_name not in agents[agent_name].tools:
+            # Agent 工具白名单校验（决策 11:可调集 = EffectiveToolset 解析结果）
+            if tool_name not in effective_toolsets[agent_name]:
                 await _emit(StreamEventType.TOOL_START.value, agent_name, {
                     "tool": tool_name, "params": params,
                 })
@@ -897,9 +904,9 @@ async def execute_loop(
                     tool_round_count[agent_name] = tool_round_count.get(agent_name, 0) + 1
                     continue
 
-            # 权限检查（per-agent 权限覆盖）
-            agent_perm_str = agents[agent_name].tools.get(tool_name, tool.permission.value)
-            effective_permission = ToolPermission(agent_perm_str)
+            # 权限检查（决策 11:等级唯一来源是工具定义，EffectiveToolset 已据此解析；
+            # 绑定不再覆盖等级。gate 已确保成员，level 必非 None，仍兜底到 tool.permission）
+            effective_permission = effective_toolsets[agent_name].level(tool_name) or tool.permission
             if effective_permission == ToolPermission.CONFIRM:
                 if tool_name not in state.get("always_allowed_tools", []):
                     approved = await _handle_permission(

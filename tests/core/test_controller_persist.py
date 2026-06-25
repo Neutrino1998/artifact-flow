@@ -38,6 +38,7 @@ def _make_controller(repo=None, db_manager=None):
     return ExecutionController(
         agents={},
         tools={},
+        effective_toolsets={},
         hooks=hooks,
         message_event_repo=repo,
         db_manager=db_manager,

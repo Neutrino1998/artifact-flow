@@ -10,7 +10,6 @@ from typing import AsyncGenerator, AsyncIterator
 
 from config import config
 from api.dependencies import (
-    get_agents,
     get_db_manager,
     get_execution_runner,
     get_tools,
@@ -57,8 +56,10 @@ async def create_controller(conversation_id: str, message_id: str) -> AsyncGener
                 ...
     """
     from core.controller import ExecutionController
+    from core.effective_toolset import resolve_all
     from core.engine import EngineHooks
     from core.conversation_manager import ConversationManager as CM
+    from reconcile.snapshot import load_registry_snapshot
     from tools.builtin.artifact_service import ArtifactService
     from tools.builtin.artifact_ops import create_artifact_tools
     from tools.builtin.sandbox_session import SandboxSession
@@ -70,7 +71,6 @@ async def create_controller(conversation_id: str, message_id: str) -> AsyncGener
     db_manager = get_db_manager()
     runner = get_execution_runner()
     store = runner.store
-    agents = get_agents()
 
     # per-turn 沙盒 session:对象壳在此创建(同 ArtifactService,构造注入工具),
     # 容器 lazy 于首个沙盒工具调用 —— 无沙盒 turn 壳零成本。拆除句柄注册进
@@ -83,14 +83,35 @@ async def create_controller(conversation_id: str, message_id: str) -> AsyncGener
         artifact_repo = ArtifactRepository(session)
         artifact_service = ArtifactService(artifact_repo)
 
-        # 合并全局工具 + 请求级 artifact / 沙盒工具
+        # per-turn 注册表快照:agent 元数据 + external 工具(HttpTool)从 DB 重建。
+        # 进程级 reconcile(entrypoint / 手动脚本)把 config 物化进库,这里每 turn 读一
+        # 次快照 —— 避跨 worker 缓存失效,与引擎每 turn 重建 MessageEvent 历史同源(原则 5)。
+        snapshot = await load_registry_snapshot(session)
+        if "lead_agent" not in snapshot.agents:
+            # DB 注册表为空/缺 lead_agent = reconcile 没跑(或跑挂)。引擎此时无可执行
+            # agent,与其在 turn 中途撞 KeyError,不如在装配处 loud-fail 给出可操作指引。
+            raise RuntimeError(
+                "Tool/agent registry is empty or missing 'lead_agent' — run "
+                "`python scripts/reconcile_config.py` to materialize config into the DB "
+                "(prod: entrypoint does this under the migration lock)."
+            )
+
+        # 合并工具来源:全局 builtin(进程级) + DB external(快照重建) + 请求级
+        # artifact / 沙盒工具。external 工具自此唯一来源是 DB —— 不再进程级加载
+        # config/tools/*.md(见 dependencies._load_tools)。
         artifact_tools = create_artifact_tools(artifact_service)
         sandbox_tools = create_sandbox_tools(sandbox_session, artifact_service)
         all_tools = {
             **get_tools(),
+            **snapshot.external_tools,
             **{t.name: t for t in artifact_tools},
             **{t.name: t for t in sandbox_tools},
         }
+        agents = snapshot.agents
+        # 决策 11 单一解析点:把每 agent 的宇宙(builtin ∪ units)解析成扁平
+        # {full_name: 等级};等级从工具对象取(绑定不存等级)。引擎/上下文构建
+        # 全程读这个,不再直读 agent 配置的 tools。
+        effective_toolsets = resolve_all(snapshot, all_tools)
 
         conv_repo = CR(session)
         conv_manager = CM(conv_repo)
@@ -108,6 +129,7 @@ async def create_controller(conversation_id: str, message_id: str) -> AsyncGener
         yield ExecutionController(
             agents=agents,
             tools=all_tools,
+            effective_toolsets=effective_toolsets,
             hooks=hooks,
             artifact_service=artifact_service,
             conversation_manager=conv_manager,

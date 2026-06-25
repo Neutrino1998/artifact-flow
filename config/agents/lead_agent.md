@@ -6,17 +6,17 @@ description: |
   - Artifact management
   - Agent coordination
 tools:
-  create_artifact: auto
-  update_artifact: auto
-  rewrite_artifact: auto
-  read_artifact: auto
-  grep_artifact: auto
-  call_subagent: auto
-  web_search: auto
-  web_fetch: confirm
-  bash: confirm
-  mount: auto
-  persist: auto
+  create_artifact: enabled
+  update_artifact: enabled
+  rewrite_artifact: enabled
+  read_artifact: enabled
+  grep_artifact: enabled
+  call_subagent: enabled
+  web_search: enabled
+  web_fetch: enabled
+  bash: enabled
+  mount: enabled
+  persist: enabled
 model: qwen3.7-plus
 max_tool_rounds: 100
 ---

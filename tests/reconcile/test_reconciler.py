@@ -43,7 +43,7 @@ def _singleton_tool_md(name="weather", permission="confirm", desc="Get weather")
     )
 
 
-def _agent_md(name="lead_agent", tools_block="  web_search: auto\n  read_artifact: auto",
+def _agent_md(name="lead_agent", tools_block="  web_search: enabled\n  read_artifact: enabled",
               model="qwen3.7-plus"):
     return (
         "---\n"
@@ -197,7 +197,7 @@ async def test_agent_references_unit(db_session, cfg):
     tools, agents = cfg
     _write(tools / "weather.md", _singleton_tool_md())
     _write(agents / "lead_agent.md",
-           _agent_md(tools_block="  web_search: auto\n  weather: confirm"))
+           _agent_md(tools_block="  web_search: enabled\n  weather: enabled"))
     await _run(db_session, cfg)
 
     agent = (await db_session.execute(select(Agent).where(Agent.name == "lead_agent"))).scalar_one()
@@ -260,9 +260,37 @@ async def test_unit_name_colliding_with_reserved_fails(db_session, cfg):
 
 async def test_agent_unknown_tool_fails(db_session, cfg):
     _, agents = cfg
-    _write(agents / "lead_agent.md", _agent_md(tools_block="  nonexistent_tool: auto"))
+    _write(agents / "lead_agent.md", _agent_md(tools_block="  nonexistent_tool: enabled"))
     with pytest.raises(SeedError, match="unknown tool"):
         await _run(db_session, cfg)
+
+
+async def test_agent_legacy_level_literal_fails(db_session, cfg):
+    # 决策 11:绑定声明成员态,不含等级。旧 auto/confirm 字面量必须 loud-fail,
+    # 逼显式迁移到 enabled/disabled,避免「写了等级却被静默忽略」的假配置。
+    _, agents = cfg
+    _write(agents / "lead_agent.md", _agent_md(tools_block="  web_search: auto"))
+    with pytest.raises(SeedError, match="invalid member state"):
+        await _run(db_session, cfg)
+
+
+async def test_agent_disabled_member_state(db_session, cfg):
+    # disabled 成员:声明进宇宙但默认关(resolver 跳过)。builtin 与 unit 两轴都支持。
+    tools, agents = cfg
+    _write(tools / "weather.md", _singleton_tool_md())
+    _write(agents / "lead_agent.md", _agent_md(
+        tools_block="  web_search: enabled\n  read_artifact: disabled\n  weather: disabled"))
+    await _run(db_session, cfg)
+
+    agent = (await db_session.execute(select(Agent).where(Agent.name == "lead_agent"))).scalar_one()
+    assert agent.builtin_tools == {"web_search": "enabled", "read_artifact": "disabled"}
+
+    units = (await db_session.execute(
+        select(AgentUnit).where(AgentUnit.agent_name == "lead_agent")
+    )).scalars().all()
+    assert len(units) == 1
+    assert units[0].unit_name == "weather"
+    assert units[0].member_state == "disabled"
 
 
 async def test_seed_collides_with_dynamic(db_session, cfg):
@@ -303,7 +331,7 @@ async def test_snapshot_reconstructs_http_tool(db_session, cfg):
     tools, agents = cfg
     _write(tools / "weather.md", _singleton_tool_md(permission="confirm"))
     _write(agents / "lead_agent.md",
-           _agent_md(tools_block="  web_search: auto\n  weather: confirm"))
+           _agent_md(tools_block="  web_search: enabled\n  weather: enabled"))
     await _run(db_session, cfg)
 
     snap = await load_registry_snapshot(db_session)

@@ -150,6 +150,14 @@ config/tools/
 
 **验收**:4 读点行为与 B-1 一致(回归);resolver 单测覆盖 enabled/disabled/absent/singleton/set 展开。
 
+### B-2 进展(2026-06-25 落地)
+
+- **`src/core/effective_toolset.py`**:`EffectiveToolset`(`{full_name: ToolPermission}` + `__contains__`/`names`/`level`/`has_any`)+ `resolve_effective_toolset(agent_snapshot, registry_snapshot, tools)` + `resolve_all`。等级一律取自工具对象 `.permission`(绑定不存等级);unit enabled→展开成员 full_name,缺工具对象/缺 unit 静默跳过(与旧 `if name in tools` 同义)。
+- **读点收口(4→resolver)**:`context_manager.build` 加 `effective_toolset` 参数,85/89/204/215 改读它;`engine.execute_loop` 加 `effective_toolsets` map,执行闸(816)+ 等级检查(901)改读它(901 等级 = `effective.level(name) or tool.permission`,绑定不再覆盖)。
+- **引擎切 DB 快照**:`controller_factory` 每 turn `load_registry_snapshot(session)` → `agents=snapshot.agents`、`all_tools = builtin ∪ snapshot.external_tools ∪ artifact ∪ sandbox`、`effective_toolsets=resolve_all(...)`;缺 `lead_agent` loud-fail(指引跑 reconcile)。`dependencies._load_tools` 瘦成 builtin-only —— **external 工具自此唯一来源 = DB 快照**,不再进程级加载 `config/tools/*.md`。
+- **decision-11 MD 重写 + reconcile 收紧**:`config/agents/*.md` 的 `tools:` 值 `auto/confirm`→`enabled`(bash/web_fetch 的 CONFIRM 早已在工具类上,丢弃绑定覆盖**零行为变化**);`parse_agent_seeds` 读成员态(`enabled`/`disabled`),旧 `auto/confirm` 字面量 **loud-fail**。
+- **测试**:resolver 单测 `tests/core/test_effective_toolset.py`;`test_reconciler` 补 legacy-literal loud-fail + disabled 两轴;engine/build/controller 既有用例经测试桥 `tests/core/_toolset.py` 注入 `effective_toolsets`;chat E2E 用合成快照替 DB。
+
 ---
 
 ## B-3 —— 披露机制(prompt-caching catalog 挪位 + deferred + `search_tools`)
