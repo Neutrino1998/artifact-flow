@@ -6,6 +6,10 @@ DB_URL="${ARTIFACTFLOW_DATABASE_URLS:-$ARTIFACTFLOW_DATABASE_URL}"
 case "$DB_URL" in
   *sqlite*|"")
     echo "SQLite or no DB configured — skipping Alembic migration"
+    # SQLite 单副本:create_all 在 reconcile 脚本的 db.initialize() 里建表,
+    # 然后把 config 物化进 DB(撞名/坏 config → 非零退出,set -e 阻断启动)。
+    echo "Reconciling config -> DB..."
+    python scripts/reconcile_config.py
     ;;
   *)
     # Use PG advisory lock to ensure only one replica runs migrations.
@@ -56,8 +60,15 @@ async def migrate():
                 # This ensures waiting replicas don't race ahead.
                 print('Alembic migration failed', file=sys.stderr)
                 sys.exit(result.returncode)
+            # config -> DB reconcile, leader-only, still under the advisory lock
+            # (single runner). Followers verify schema but do NOT reconcile.
+            print('Reconciling config -> DB (leader)...')
+            rec = subprocess.run(['python', 'scripts/reconcile_config.py'])
+            if rec.returncode != 0:
+                print('Config reconcile failed', file=sys.stderr)
+                sys.exit(rec.returncode)
             await conn.execute(\"SELECT pg_advisory_unlock(hashtext('alembic_migrate'))\")
-            print('Alembic migrations complete')
+            print('Alembic migrations + config reconcile complete')
         else:
             print('Another replica is running migrations, waiting...')
             await conn.execute(\"SELECT pg_advisory_lock(hashtext('alembic_migrate'))\")
@@ -75,6 +86,7 @@ except Exception as e:
     # If advisory lock fails (e.g. MySQL), fall back to direct migration
     print(f'Advisory lock unavailable ({e}), running Alembic directly...')
     subprocess.run(['alembic', 'upgrade', 'head'], check=True)
+    subprocess.run(['python', 'scripts/reconcile_config.py'], check=True)
 "
     ;;
 esac

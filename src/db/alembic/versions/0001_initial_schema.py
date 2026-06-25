@@ -170,9 +170,73 @@ def upgrade() -> None:
     # 主键以 artifact_id 打头无法服务)。见 models.py ArtifactBlob.__table_args__。
     op.create_index('ix_artifact_blobs_session_size', 'artifact_blobs', ['session_id', 'size_bytes'], unique=False)
 
+    # ------------------------------------------------------------------
+    # 工具/agent 注册表(config→DB 物化)。无存量数据,就地写进 squash 0001(沿用
+    # has_blob 姿态,全新建库假设)。建表序:tool_units(被 tool_members/agent_units
+    # 引用)→ agents → tool_members → agent_units。语义见 models.py 同名类。
+    # ------------------------------------------------------------------
+    op.create_table('tool_units',
+        sa.Column('name', sa.String(length=64), nullable=False),
+        sa.Column('kind', sa.String(length=16), nullable=False),
+        sa.Column('description', sa.Text(), nullable=False),
+        sa.Column('visibility', sa.String(length=16), nullable=False, server_default='public'),
+        sa.Column('defer', sa.Boolean(), nullable=False, server_default=sa.text('false')),
+        sa.Column('provider', sa.String(length=16), nullable=False, server_default='http'),
+        sa.Column('source', sa.String(length=16), nullable=False),
+        sa.Column('seed_hash', sa.String(length=64), nullable=True),
+        sa.Column('created_at', sa.DateTime(), server_default=sa.func.now(), nullable=False),
+        sa.Column('updated_at', sa.DateTime(), server_default=sa.func.now(), nullable=False),
+        sa.PrimaryKeyConstraint('name'),
+    )
+
+    op.create_table('agents',
+        sa.Column('name', sa.String(length=64), nullable=False),
+        sa.Column('description', sa.Text(), nullable=False),
+        sa.Column('model', sa.String(length=64), nullable=False),
+        sa.Column('max_tool_rounds', sa.Integer(), nullable=False, server_default='3'),
+        sa.Column('internal', sa.Boolean(), nullable=False, server_default=sa.text('false')),
+        sa.Column('role_prompt', sa.Text(), nullable=False),
+        sa.Column('builtin_tools', sa.JSON(), nullable=True),
+        sa.Column('source', sa.String(length=16), nullable=False, server_default='seeded'),
+        sa.Column('seed_hash', sa.String(length=64), nullable=True),
+        sa.Column('created_at', sa.DateTime(), server_default=sa.func.now(), nullable=False),
+        sa.Column('updated_at', sa.DateTime(), server_default=sa.func.now(), nullable=False),
+        sa.PrimaryKeyConstraint('name'),
+    )
+
+    op.create_table('tool_members',
+        sa.Column('unit_name', sa.String(length=64), nullable=False),
+        sa.Column('member_name', sa.String(length=64), nullable=False),
+        sa.Column('full_name', sa.String(length=130), nullable=False),
+        sa.Column('permission', sa.String(length=16), nullable=False),
+        sa.Column('definition', sa.JSON(), nullable=True),
+        sa.Column('show_example', sa.Boolean(), nullable=False, server_default=sa.text('true')),
+        sa.Column('created_at', sa.DateTime(), server_default=sa.func.now(), nullable=False),
+        sa.Column('updated_at', sa.DateTime(), server_default=sa.func.now(), nullable=False),
+        sa.ForeignKeyConstraint(['unit_name'], ['tool_units.name'], ondelete='CASCADE'),
+        sa.PrimaryKeyConstraint('unit_name', 'member_name'),
+        sa.UniqueConstraint('full_name', name='uq_tool_members_full_name'),
+    )
+
+    op.create_table('agent_units',
+        sa.Column('agent_name', sa.String(length=64), nullable=False),
+        sa.Column('unit_name', sa.String(length=64), nullable=False),
+        sa.Column('member_state', sa.String(length=16), nullable=False, server_default='enabled'),
+        sa.Column('source', sa.String(length=16), nullable=False, server_default='seeded'),
+        sa.Column('created_at', sa.DateTime(), server_default=sa.func.now(), nullable=False),
+        sa.Column('updated_at', sa.DateTime(), server_default=sa.func.now(), nullable=False),
+        sa.ForeignKeyConstraint(['agent_name'], ['agents.name'], ondelete='CASCADE'),
+        sa.ForeignKeyConstraint(['unit_name'], ['tool_units.name'], ondelete='CASCADE'),
+        sa.PrimaryKeyConstraint('agent_name', 'unit_name'),
+    )
+
 
 def downgrade() -> None:
     """Drop all tables."""
+    op.drop_table('agent_units')
+    op.drop_table('tool_members')
+    op.drop_table('agents')
+    op.drop_table('tool_units')
     op.drop_index('ix_artifact_blobs_session_size', table_name='artifact_blobs')
     op.drop_table('artifact_blobs')
     op.drop_index('ix_artifact_versions_artifact', table_name='artifact_versions')

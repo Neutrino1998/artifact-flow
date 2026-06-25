@@ -301,6 +301,12 @@ class BaseTool(ABC):
 # 工具同名冲突。
 RESERVED_TOOL_NAMES = {"create_artifact", "update_artifact", "rewrite_artifact", "read_artifact", "grep_artifact", "bash", "mount", "persist"}
 
+# 进程级 builtin 工具(代码定义、for-everyone、不入 DB 注册表)。与 RESERVED(请求级
+# artifact/sandbox 工具)合起来 = 全部 builtin 名,reconciler 据此把 agent MD `tools:`
+# 条目分流 builtin vs external unit(决策 11);builtin 等级 = 工具定义、不进 agent_units。
+GLOBAL_BUILTIN_TOOL_NAMES = {"web_search", "web_fetch", "call_subagent", "search_tools"}
+BUILTIN_TOOL_NAMES = RESERVED_TOOL_NAMES | GLOBAL_BUILTIN_TOOL_NAMES
+
 
 def build_tool_map(
     builtin_tools: List[BaseTool],

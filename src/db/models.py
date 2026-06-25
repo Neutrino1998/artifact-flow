@@ -676,3 +676,223 @@ class ArtifactBlob(Base):
 
     def __repr__(self) -> str:
         return f"<ArtifactBlob(artifact={self.artifact_id}, size_bytes={self.size_bytes})>"
+
+
+# ============================================================================
+# 工具/agent 注册表(config 仅种子,DB 是物化缓存)
+#
+# 设计源:docs/_archive/design/skill-system-phase-b-design.md
+# 核心不变量:
+#   - identity = natural key(unit.name / agent.name 作 PK),所有 m2m 真 FK +
+#     ON DELETE CASCADE → ABA/孤儿由构造消失(决策 10)。
+#   - 权限两正交轴(决策 11):**等级**(auto/confirm)唯一来源 = 工具定义
+#     (ToolMember.permission / builtin BaseTool.permission),agent 侧只存
+#     **成员态**(enabled/disabled),不存等级。
+#   - source = seeded(config 种子,reconciler 拥有,UI 不可改)/ dynamic(UI 新建)。
+#     agent 暂只 seed-only 物化(无 UI、无 dept 消费者)。
+#   - visibility/defer 列暂不被引擎消费:visibility 供部门授权、defer 供渐进式披露,
+#     消费侧另行接入。builtin = 代码、不入这些表(for-everyone)。
+# ============================================================================
+
+
+class ToolUnit(Base):
+    """
+    External 工具单元 —— 授权 + 生命周期 + 披露的边界(决策 5/10/11)。
+
+    kind 三态:tool(singleton,1 个 member,full_name==name)/ toolset(一平台多
+    endpoint)/ mcp(member 运行期由 tools/list 灌入)。unit name 全局唯一、
+    **禁含 `__`**(`<unit>__<tool>` 前缀分隔保留),启动期撞名 loud-fail。
+    """
+    __tablename__ = "tool_units"
+
+    # natural key:unit 名作 PK(决策 10)。禁含 `__`(reconciler 校验)。
+    name: Mapped[str] = mapped_column(String(64), primary_key=True)
+
+    # tool(singleton) / toolset / mcp
+    kind: Mapped[str] = mapped_column(String(16), nullable=False)
+
+    # set 级描述(索引行语境;singleton = 工具自身描述)
+    description: Mapped[str] = mapped_column(Text, nullable=False, default="")
+
+    # 未列出部门的默认姿态(决策 10):public=默认 allow / department=默认 deny。
+    # 暂不消费;部门授权(department_unit_rule)接入后消费。private 仅 skill 有,unit 无。
+    visibility: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="public", server_default="public"
+    )
+
+    # 渐进式披露开关:True → <available_tools> 只出索引行,完整 schema 由 search_tools
+    # 按需补。显式开关、不按 token 自动(私有化无 tokenizer,原则 7)。
+    defer: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
+
+    # provider 抽象缝(MCP 接入时填 mcp):http | mcp
+    provider: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="http", server_default="http"
+    )
+
+    # seeded(config 种子,UI 不可改)/ dynamic(UI 新建)
+    source: Mapped[str] = mapped_column(String(16), nullable=False, default="seeded")
+
+    # seeded 行内容哈希:reconciler 幂等 upsert(hash 同则 skip)。dynamic 行为 NULL。
+    seed_hash: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+    # 一对多 -> members。删 unit 时级联删成员行(PG/MySQL 走 DB FK CASCADE;
+    # SQLite dev 靠此 ORM cascade)。members 数量小,selectin 预载无压力。
+    members: Mapped[List["ToolMember"]] = relationship(
+        "ToolMember",
+        back_populates="unit",
+        lazy="selectin",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+
+    def __repr__(self) -> str:
+        return f"<ToolUnit(name={self.name}, kind={self.kind}, source={self.source})>"
+
+
+class ToolMember(Base):
+    """
+    工具单元下的具体可调工具/endpoint。
+
+    full_name = 注册/可调名:toolset → `<unit>__<member>`;singleton → `== unit_name`
+    (无 `__`)。**等级(permission)唯一来源在此**(决策 11),agent/skill/dept 均不改。
+    """
+    __tablename__ = "tool_members"
+
+    # 复合 natural key(unit_name, member_name)
+    unit_name: Mapped[str] = mapped_column(
+        String(64),
+        ForeignKey("tool_units.name", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    # 作者裸名(search_repos);loader 据 unit 名加 `<unit>__` 前缀产 full_name
+    member_name: Mapped[str] = mapped_column(String(64), primary_key=True)
+
+    # 注册/可调全名:resolver/registry/always_allow 的 key。全局唯一。
+    full_name: Mapped[str] = mapped_column(String(130), nullable=False)
+
+    # 等级:auto | confirm —— 决策 11 的唯一来源
+    permission: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="confirm"
+    )
+
+    # provider 相关定义:http → endpoint/method/headers/params/response_extract/
+    # timeout/secret 引用;mcp → 运行期由 tools/list 填(F)。JSON 不锁 schema,
+    # 按 unit.provider 分派解释。
+    definition: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
+
+    # 是否在 catalog 渲染 XML 调用示例(对齐 BaseTool.show_example)
+    show_example: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default=text("true")
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+    unit: Mapped["ToolUnit"] = relationship("ToolUnit", back_populates="members")
+
+    __table_args__ = (
+        # full_name 全局唯一:跨 unit 同 member 名不撞、resolver 按 full_name 寻址
+        UniqueConstraint("full_name", name="uq_tool_members_full_name"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<ToolMember(full_name={self.full_name}, permission={self.permission})>"
+
+
+class Agent(Base):
+    """
+    Agent 定义(决策 5:config 仍唯一作者真相,DB 只是 seed-only 物化缓存)。
+
+    物化只为:统一存储 + 撞名检查 + 将来 dept 化(加 department_agent_rule,v0 无消费者)。
+    **无 UI-native、无运行时编辑**(运行时可编辑 agent 仍 Non-goal)。
+
+    builtin_tools = 声明的 builtin 工具成员态 {名: enabled|disabled}(决策 11:builtin
+    不进 agent_units m2m,引擎从此列直读)。external 单元在 agent_units。
+    """
+    __tablename__ = "agents"
+
+    name: Mapped[str] = mapped_column(String(64), primary_key=True)
+    description: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    model: Mapped[str] = mapped_column(String(64), nullable=False)
+    max_tool_rounds: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=3, server_default="3"
+    )
+    internal: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
+    role_prompt: Mapped[str] = mapped_column(Text, nullable=False, default="")
+
+    # {builtin名: "enabled"|"disabled"}(决策 11 成员轴,不含等级)
+    builtin_tools: Mapped[Optional[Dict[str, str]]] = mapped_column(
+        JSON, nullable=True, default=dict
+    )
+
+    # v0 永 seeded(agent 暂不开 UI)
+    source: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="seeded", server_default="seeded"
+    )
+    seed_hash: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+    def __repr__(self) -> str:
+        return f"<Agent(name={self.name}, model={self.model})>"
+
+
+class AgentUnit(Base):
+    """
+    agent ⟷ tool_unit 绑定 = 该 agent 暴露的 external 单元宇宙(决策 11)。
+
+    成员态 enabled/disabled(absent = 不建行 = 不在宇宙)。source:seeded(agent MD
+    经 reconciler 种)/ dynamic(UI 勾选挂载)。两端真 FK + CASCADE。
+    """
+    __tablename__ = "agent_units"
+
+    agent_name: Mapped[str] = mapped_column(
+        String(64),
+        ForeignKey("agents.name", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    unit_name: Mapped[str] = mapped_column(
+        String(64),
+        ForeignKey("tool_units.name", ondelete="CASCADE"),
+        primary_key=True,
+    )
+
+    # enabled | disabled(决策 11 成员轴;skill 在收窄后宇宙内翻 disabled)
+    member_state: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="enabled", server_default="enabled"
+    )
+
+    # seeded(agent MD)/ dynamic(UI 挂载)
+    source: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="seeded", server_default="seeded"
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+    def __repr__(self) -> str:
+        return f"<AgentUnit(agent={self.agent_name}, unit={self.unit_name}, state={self.member_state})>"
