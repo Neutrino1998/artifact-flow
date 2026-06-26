@@ -61,6 +61,23 @@ class ToolResult:
 
 
 @dataclass
+class ToolExecutionContext:
+    """引擎在 execute 期注入给 ``wants_context=True`` 工具的运行期上下文。
+
+    **只装非密的描述性事实**(谁在调、本 turn 有哪些工具、调用方 agent 的可调视图)——
+    判别器:进得来的东西必须「描述性、非密、可安全 log、可安全给沙盒」。
+    **secret(凭证 / OAuth)永不走这条**:它走 B-4 的独立 credential resolver(懒解、
+    只解被调工具、对沙盒不发放),否则会同时撞穿沙盒红线 + 日志泄露面 + lazy 纪律。
+
+    `effective_toolset` 故意宽松类型(``Any``)—— 它的实体是 `core.effective_toolset.
+    EffectiveToolset`,但 tools 层不该反向依赖 core(core 已依赖 tools)。
+    """
+    agent_name: str
+    effective_toolset: Any        # core.effective_toolset.EffectiveToolset(鸭子类型,避免 tools→core)
+    tools: Dict[str, "BaseTool"]  # 本 turn 合并后的全量工具对象(name -> BaseTool)
+
+
+@dataclass
 class ToolParameter:
     """工具参数定义"""
     name: str
@@ -79,6 +96,11 @@ class BaseTool(ABC):
     - execute(): 执行工具的核心逻辑
     - get_parameters(): 返回工具参数定义
     """
+
+    # opt-in:True → 引擎在正常执行路径里给 execute 多注入一个 `_context`
+    # (ToolExecutionContext);用于像 search_tools 这种「产结果需要引擎上下文」的工具,
+    # 让它走正常工具路由(validate/事件/取消/落盘安全网)而非引擎特殊分支。默认 False。
+    wants_context: bool = False
 
     def __init__(
         self,
@@ -232,11 +254,13 @@ class BaseTool(ABC):
                 result[param_def.name] = param_def.default
         return result
 
-    async def __call__(self, **params) -> ToolResult:
+    async def __call__(self, _context: Optional["ToolExecutionContext"] = None, **params) -> ToolResult:
         """
         使工具可调用
 
         Args:
+            _context: 引擎注入的运行期上下文(仅 wants_context=True 工具用);带下划线
+                与模型 XML 参数区隔 —— 它不是工具参数,不参与 validate/coerce。
             **params: 工具参数
 
         Returns:
@@ -255,6 +279,8 @@ class BaseTool(ABC):
 
         # 执行工具
         try:
+            if self.wants_context:
+                return await self.execute(_context=_context, **params)
             return await self.execute(**params)
         except Exception as e:
             return ToolResult(
@@ -301,10 +327,14 @@ class BaseTool(ABC):
 # 工具同名冲突。
 RESERVED_TOOL_NAMES = {"create_artifact", "update_artifact", "rewrite_artifact", "read_artifact", "grep_artifact", "bash", "mount", "persist"}
 
+# 渐进式披露检索器的注册名(单一来源)—— 引擎注入 / self-exclusion / ctor / resolver
+# 自动注入四处共用,改名只此一处(否则 routing/self-exclusion 会静默跟丢)。
+SEARCH_TOOLS_NAME = "search_tools"
+
 # 进程级 builtin 工具(代码定义、for-everyone、不入 DB 注册表)。与 RESERVED(请求级
 # artifact/sandbox 工具)合起来 = 全部 builtin 名,reconciler 据此把 agent MD `tools:`
 # 条目分流 builtin vs external unit(决策 11);builtin 等级 = 工具定义、不进 agent_units。
-GLOBAL_BUILTIN_TOOL_NAMES = {"web_search", "web_fetch", "call_subagent", "search_tools"}
+GLOBAL_BUILTIN_TOOL_NAMES = {"web_search", "web_fetch", "call_subagent", SEARCH_TOOLS_NAME}
 BUILTIN_TOOL_NAMES = RESERVED_TOOL_NAMES | GLOBAL_BUILTIN_TOOL_NAMES
 
 

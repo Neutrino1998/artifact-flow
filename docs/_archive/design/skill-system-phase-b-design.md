@@ -183,6 +183,16 @@ config/tools/
 - **零回归 + 新覆盖**:全量 **1389 passed**(B-3 前 1366,+23 新测),31 skipped。新测:resolver deferred_units/自动注入 7 例、`_build_available_tools` deferred 渲染 5 例、`search_tools_result` 9 例、引擎路由 2 例;改写 `test_context_manager` 的 catalog 位置断言(语法→system prompt、doc→reminder)。当前真实 config 零 external/零 deferred → 即时变化仅 builtin doc 从 system prompt 挪到 reminder(non-deferred 完整 doc 照渲),deferred + search_tools 机制由合成 fixture 守。
 - **compact_agent 未碰**(原 item 5 撤销,理由见上「包含」末条)。
 
+### B-3 reviewer 二轮(2026-06-26 与用户敲定 + 修订)
+
+- **catalog 留 reminder = 有意,不改**(reviewer #1/#12「挪回 system prompt」**驳回**)。我初判「catalog 稳定、挪 reminder 是 unforced error」是只看 B-3、没接 C 路线图得出的错判。关键事实:**C 阶段 skill 能 enable 被 agent disable、本不渲染的工具 → 可调集成员随 active skill 变化**。放缓存前缀则 skill 一 toggle → 前缀变 → 整条历史 APC 缓存失效重写;放尾部把易变性隔离在本就不缓存的末条,toggle 零额外代价。#12(catalog 持久化进 agent_start)随之翻成**特性**:admin 重建按原样重放 → 还原那一轮真实工具集,放 system prompt(从当前快照重建)反而漂移。rationale 已落 `context_manager._build_dynamic_context` 注释 + 本段。
+- **search_tools 改走正常工具路由**(reviewer #4/#11 + 用户「做成普通工具」)。引擎删 `if tool_name=="search_tools"` 特殊分支;`BaseTool.wants_context` opt-in + `ToolExecutionContext`(`agent_name`/`effective_toolset`/`tools` 三样**非密**字段),引擎在正常路径调用时注入(不存实例态,并发 turn 不串)。search_tools 遂白嫖 `validate_params`(#11)/ 正常事件 / 可取消 / `_maybe_persist` 安全网。`call_subagent` 仍特殊 —— 它是真路由(切 agent/break/defer tool_complete),与「拿上下文产结果」不同形状,引擎只剩这一个特例。`ToolExecutionContext` 判别器:只装描述性、非密、可 log、可给沙盒的事实;**secret(凭证/OAuth)永不走这条**,走 B-4 credential resolver(懒解、只解被调、沙盒不发放)—— 注释钉死。
+- **defer 自动注入改 fail-loud**(reviewer #3 + 用户「builtin 假定存在」)。resolver 自动注入处 `tools[SEARCH_TOOLS_NAME].permission`(下标取,非 `.get`+is-not-None)—— search_tools 是常驻 builtin,有 deferred unit 它必须在;缺席 = 没注册 = 硬 bug,当场 KeyError,不静默 skip。这才让「deferred ⟹ 可搜索」真 by-construction(原先是 detect-and-skip)。
+- **search_tools 输出有界**(reviewer #2):去 `max_result_size_chars=inf`(用默认 + 正常路径 `_maybe_persist` 兜底);函数内匹配数封顶 `config.SEARCH_TOOLS_MAX_RESULTS`(=15),超出只渲前 N + 列其余名。
+- **常量统一**(reviewer #5):`SEARCH_TOOLS_NAME` 下沉 `tools/base.py`,resolver/ctor/self-exclusion 四处共用。
+- **cleanup**:删 dead `generate_tool_instruction`(#6);`select:` 全 miss 也报 unknown(#7)+ 去重保序(#8a);`<tool_unit>` 的 name/description XML 转义(#9,operator 可控输入防结构注入);`_build_available_tools` 空守卫注释改对(#10,真实触发者是测试桥 orphan permission,非「external 重建全失败」)。
+- **不做**:reviewer #4 更大的 dispatch 表 / `render(ctx)` 脱离正常路径(`wants_context` 已够);#8b keyword 只搜 deferred 成员(可选 polish)。
+
 ---
 
 ## B-4 —— provider 缝 + 前端(B 最后一片)

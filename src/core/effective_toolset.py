@@ -19,11 +19,7 @@ from dataclasses import dataclass, field
 from typing import Dict, Iterable, List, Optional
 
 from reconcile.snapshot import AgentSnapshot, RegistrySnapshot
-from tools.base import BaseTool, ToolPermission
-
-# defer 的 unit 自动获 search_tools 的内建名(必须等于 tools 字典里 SearchToolsTool
-# 的注册名;一处常量,避免拼写漂移)。
-SEARCH_TOOLS_NAME = "search_tools"
+from tools.base import SEARCH_TOOLS_NAME, BaseTool, ToolPermission
 
 
 @dataclass
@@ -118,12 +114,12 @@ def resolve_effective_toolset(
 
     # ③ defer 自动注入 search_tools(2026-06-26 决策):有 ≥1 deferred unit 的 agent
     # 必须能 search,否则 deferred 工具成死工具。把「deferred ⟹ 可搜索」做成 by-construction
-    # 不变量 —— operator 无需在 agent MD 显式声明 search_tools(忘了也不漏)。仅当工具对象
-    # 存在时注入(与其余轴同口径:tools 缺席则跳过,如 search_tools 尚未注册的早期状态)。
+    # 不变量 —— operator 无需在 agent MD 显式声明 search_tools(忘了也不漏)。
+    # search_tools 是常驻 builtin,有 deferred unit 它就**必须**在 tools 里;下标取而非 .get
+    # —— 缺席 = 它没注册 = 硬 bug,当场 KeyError 炸出来,不静默 skip(builtin 一律假定存在,
+    # 同 artifact/sandbox 工具,不写防御性 is-not-None)。
     if deferred_units and SEARCH_TOOLS_NAME not in permissions:
-        search_tool = tools.get(SEARCH_TOOLS_NAME)
-        if search_tool is not None:
-            permissions[SEARCH_TOOLS_NAME] = search_tool.permission
+        permissions[SEARCH_TOOLS_NAME] = tools[SEARCH_TOOLS_NAME].permission
 
     return EffectiveToolset(permissions, deferred_units)
 

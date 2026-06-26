@@ -116,3 +116,39 @@ def test_select_unknown_name_reported():
     assert "weather" in res.data
     assert "ghost__tool" in res.data
     assert "Not found or not available" in res.data
+
+
+def test_no_match_reports_unknown(monkeypatch):
+    # #7:全 miss 的 select: 也要报哪些 unknown(对齐 partial-match 分支)
+    tools = _tools(("weather", "forecast"))
+    eff = _eff("weather")
+    res = search_tools_result("select:ghost__a,ghost__b", eff, tools)
+    assert res.success
+    assert "No tools matched" in res.data
+    assert "ghost__a" in res.data and "ghost__b" in res.data
+
+
+def test_select_dedup_preserves_order():
+    # #8a:select:weather,weather → doc 只渲一次
+    tools = _tools(("weather", "forecast tool"))
+    eff = _eff("weather")
+    res = search_tools_result("select:weather,weather", eff, tools)
+    assert res.data.count("forecast tool") == 1
+
+
+def test_output_capped_when_too_many_match(monkeypatch):
+    # #2:匹配数超 SEARCH_TOOLS_MAX_RESULTS → 只渲前 N、其余列名,防灌爆下一次 call
+    from config import config
+    monkeypatch.setattr(config, "SEARCH_TOOLS_MAX_RESULTS", 2)
+    tools = _tools(
+        ("t__a", "common tool a"), ("t__b", "common tool b"),
+        ("t__c", "common tool c"), ("t__d", "common tool d"),
+    )
+    eff = _eff("t__a", "t__b", "t__c", "t__d")
+    res = search_tools_result("common", eff, tools)
+    assert res.success
+    # 前 2 个完整渲染、后 2 个只列名
+    assert "common tool a" in res.data and "common tool b" in res.data
+    assert "common tool c" not in res.data and "common tool d" not in res.data
+    assert "2 more tool(s) matched" in res.data
+    assert "t__c" in res.data and "t__d" in res.data

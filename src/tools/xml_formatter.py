@@ -56,19 +56,6 @@ def render_tool_docs(tools: List[BaseTool]) -> str:
     return "\n".join(_format_tool_doc(tool) for tool in tools)
 
 
-def generate_tool_instruction(tools: List[BaseTool]) -> str:
-    """[legacy 单块形态] 语法 + 全部 doc 合成一整块 `<tool_instructions>`。
-
-    live 路径已拆成 `generate_tool_grammar()`(前缀) + `<available_tools>`(尾部);
-    此函数保留给需要完整单块的旧调用方 / 导出契约,内部复用同一份语法 + doc 渲染。
-    """
-    if not tools:
-        return "<tool_instructions>\nNo tools available.\n</tool_instructions>"
-
-    docs = "".join(f"\n{_format_tool_doc(tool)}" for tool in tools)
-    return f"<tool_instructions>\n{_TOOL_GRAMMAR_BODY}\n{docs}\n</tool_instructions>"
-
-
 def format_result(name: str, result: Dict[str, Any]) -> str:
     """格式化工具执行结果为 XML（注入 context 消息）
 

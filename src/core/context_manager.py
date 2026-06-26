@@ -184,9 +184,16 @@ class ContextManager:
         """
         parts: List[str] = []
 
-        # 可用工具目录(B-3 渐进式披露)—— per-tool 描述从 system prompt 挪到这里:
-        # non-deferred 出完整 doc、deferred unit 只出索引行(完整 schema 由 search_tools
-        # 按需补)。放在 reminder 最前(模型先知道能做什么),不影响 system prompt 缓存前缀。
+        # 可用工具目录(B-3 渐进式披露)—— per-tool 描述放在尾部 reminder 而非 system
+        # prompt 缓存前缀,**是有意的**(两轮 review 都把它当成本/缺陷抓过,故记于此):
+        #   catalog 的「成员」会变。C 阶段 skill 能 enable 被 agent disable、本不渲染的
+        #   工具 → 可调集随 active skill 变化。若把 catalog 放缓存前缀,skill 一 toggle →
+        #   前缀变 → 整条历史 APC 缓存失效重写(长对话尤其疼)。放尾部把这份易变性隔离在
+        #   本来就不缓存的末条消息,toggle 零额外代价(同 time/artifacts 的处置)。
+        #   反面好处:reminder 持久化进 agent_start → admin 重建按原样重放,还原的是**那
+        #   一轮真实展示的工具集**;若放 system prompt(从当前快照重建)skill 状态变了就
+        #   漂移成当前集。deferred 索引行也因此每轮重渲、无视压缩(跨压缩存活 by-construction)。
+        # non-deferred 出完整 doc、deferred unit 只出索引行(完整 schema 由 search_tools 补)。
         available_tools = cls._build_available_tools(effective_toolset, tools)
         if available_tools:
             parts.append(available_tools)
@@ -289,18 +296,24 @@ class ContextManager:
         deferred_units = effective_toolset.deferred_units
 
         if not full_doc_tools and not deferred_units:
-            # 宣称有工具但都不在 tools 字典（如 external 重建全失败）→ 无可渲染内容
+            # 宣称有工具(names 非空)但都不在 tools 字典 → 无可渲染内容,不输出空壳。
+            # 真生产侧到不了(resolver 只在工具对象存在时才进 permissions);触发者是
+            # 松构造的 EffectiveToolset(测试桥的 orphan permission:声明了工具名但传空
+            # tools)。留作渲染地板,防 <available_tools></available_tools> 空标签。
             return ""
 
         lines = ['<available_tools>']
         if full_doc_tools:
             lines.append(render_tool_docs(full_doc_tools))
-        # deferred unit 索引行（按 unit 名稳定排序，避免提示词抖动）
+        # deferred unit 索引行（按 unit 名稳定排序，避免提示词抖动）。unit.name/description
+        # 是 operator 可控输入(seeded config / B-4 UI),含 < " & 会破坏模型可见块结构 /
+        # 结构注入 → 转义(同本文件 _build_sandbox_status 对文件名的处理)。
         for unit_name in sorted(deferred_units):
             unit = deferred_units[unit_name]
-            lines.append(f'<tool_unit name="{unit.name}" disclosure="deferred">')
+            safe_name = xml_escape(unit.name, {'"': "&quot;"})
+            lines.append(f'<tool_unit name="{safe_name}" disclosure="deferred">')
             if unit.description:
-                lines.append(unit.description.rstrip())
+                lines.append(xml_escape(unit.description.rstrip()))
             lines.append(
                 "Tools below are available but listed by name only. Call `search_tools` "
                 "(select:<full_name> or a keyword) to load full parameters before calling:"

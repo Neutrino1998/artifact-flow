@@ -24,7 +24,7 @@ from core.compaction_runner import CompactionRunner
 from core.cancellation import CooperativeCancelled, run_cancellable
 from tools.artifact_envelope import make_preview_slice, render_artifact_slice
 from tools.xml_parser import parse_tool_calls
-from tools.base import ArtifactSpec, BaseTool, ToolPermission, ToolResult
+from tools.base import ArtifactSpec, BaseTool, ToolExecutionContext, ToolPermission, ToolResult
 from utils.logger import get_logger, get_request_id
 from utils.time import utc_now
 
@@ -904,33 +904,6 @@ async def execute_loop(
                     tool_round_count[agent_name] = tool_round_count.get(agent_name, 0) + 1
                     continue
 
-            # search_tools 特殊处理(B-3 渐进式披露):渲染当前 agent 可调集里匹配工具的
-            # 完整 doc。渲染依赖 per-agent 的 effective_toolset + 本 turn 的 tools 字典,
-            # 而进程级工具实例不能持有 per-turn 状态(并发 turn 共享同一实例会串),故不走
-            # tool.execute、在引擎内用纯函数算。AUTO 等级、无 side effect、不切 agent ——
-            # 走与普通工具一致的 START/COMPLETE 事件流,绕开 _maybe_persist_tool_result
-            # (结果就是工具描述,不该再落盘)。
-            if tool_name == "search_tools":
-                from tools.builtin.search_tools import search_tools_result
-
-                await _emit(StreamEventType.TOOL_START.value, agent_name, {
-                    "tool": tool_name, "params": params, "reason": reason,
-                })
-                search_result = search_tools_result(
-                    params.get("query", ""), effective_toolsets[agent_name], tools
-                )
-                await _emit(StreamEventType.TOOL_COMPLETE.value, agent_name, {
-                    "tool": tool_name,
-                    "success": search_result.success,
-                    "result_data": search_result.data if search_result.success else None,
-                    "error": search_result.error if not search_result.success else None,
-                    "duration_ms": 0,
-                    "params": params,
-                    "parser_warnings": parser_warnings,
-                })
-                tool_round_count[agent_name] = tool_round_count.get(agent_name, 0) + 1
-                continue
-
             # 权限检查（决策 11:等级唯一来源是工具定义，EffectiveToolset 已据此解析；
             # 绑定不再覆盖等级。gate 已确保成员，level 必非 None，仍兜底到 tool.permission）
             effective_permission = effective_toolsets[agent_name].level(tool_name) or tool.permission
@@ -955,9 +928,22 @@ async def execute_loop(
             # 取消落入正常 TOOL_COMPLETE 流（success=False）：START/COMPLETE 配对
             # 不变量保持，下一轮 history 里模型能看到"这次调用被用户打断"。
             # 随后的 _check_cancelled（下个工具前 / while 顶部）置终态 flag 收口。
+            # wants_context 工具(如 search_tools)在 execute 期需要引擎上下文(调用方
+            # agent 的可调视图 + 本 turn 工具注册表):调用时注入 ToolExecutionContext,
+            # 不存实例态(进程级实例并发 turn 共享,故 per-call 注入而非 per-instance)。
+            # context 只装非密事实(secret 走 B-4 credential resolver,不走这条)。
+            tool_coro = (
+                tool(_context=ToolExecutionContext(
+                    agent_name=agent_name,
+                    effective_toolset=effective_toolsets[agent_name],
+                    tools=tools,
+                ), **params)
+                if getattr(tool, "wants_context", False)
+                else tool(**params)
+            )
             try:
                 tool_result = await run_cancellable(
-                    tool(**params), _is_cancelled, config.CANCEL_CHECK_INTERVAL
+                    tool_coro, _is_cancelled, config.CANCEL_CHECK_INTERVAL
                 )
             except CooperativeCancelled:
                 logger.info(f"Tool '{tool_name}' interrupted by user cancel mid-flight")

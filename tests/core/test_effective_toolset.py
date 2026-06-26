@@ -194,7 +194,10 @@ def test_deferred_unit_only_present_members_grouped():
     agent = _agent(units={"github": "enabled"})
     snap = _snapshot(units=[_unit("github", ["github__a", "github__b"],
                                   kind="toolset", defer=True)])
-    tools = {"github__a": _Tool("github__a", ToolPermission.AUTO)}  # b 缺工具对象
+    tools = {
+        "github__a": _Tool("github__a", ToolPermission.AUTO),  # b 缺工具对象
+        "search_tools": _Tool("search_tools", ToolPermission.AUTO),
+    }
     eff = resolve_effective_toolset(agent, snap, tools)
     assert eff.deferred_units["github"].member_full_names == ["github__a"]
 
@@ -224,14 +227,15 @@ def test_search_tools_not_injected_without_deferred():
     assert "search_tools" not in eff
 
 
-def test_search_tools_injection_noop_when_tool_absent():
-    # deferred unit 存在但 tools 字典里没有 search_tools(早期未注册)→ 不崩、不注入
+def test_search_tools_absent_with_deferred_fails_loud():
+    # deferred unit 存在但 tools 没 search_tools = 它没注册 = 硬 bug。下标取 → KeyError
+    # 当场炸(builtin 假定存在,不静默 skip)。prod 不可达;此处证明它响亮失败而非带病运行。
+    import pytest
     agent = _agent(units={"github": "enabled"})
     snap = _snapshot(units=[_unit("github", ["github__a"], kind="toolset", defer=True)])
     tools = {"github__a": _Tool("github__a", ToolPermission.AUTO)}
-    eff = resolve_effective_toolset(agent, snap, tools)
-    assert "search_tools" not in eff
-    assert "github" in eff.deferred_units  # 分组仍在
+    with pytest.raises(KeyError):
+        resolve_effective_toolset(agent, snap, tools)
 
 
 def test_explicit_search_tools_not_double_added():
