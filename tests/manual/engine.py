@@ -13,11 +13,15 @@ Pi-style 执行引擎手动测试套件
 """
 
 import asyncio
+import os
 from typing import Dict, Any, Optional
 from datetime import datetime
 from contextlib import asynccontextmanager
 
 from core.controller import ExecutionController
+from core.effective_toolset import resolve_all
+from reconcile.reconciler import reconcile_config_to_db
+from reconcile.snapshot import load_registry_snapshot
 from core.engine import EngineHooks
 from core.events import StreamEventType
 from core.conversation_manager import ConversationManager
@@ -230,7 +234,6 @@ class TestEnvironment:
     def __init__(self):
         self.db_manager: Optional[DatabaseManager] = None
         self.runner: Optional[ExecutionRunner] = None
-        self._agents: Optional[Dict] = None
         self._tools: Optional[Dict[str, BaseTool]] = None
 
     async def setup(self):
@@ -238,18 +241,23 @@ class TestEnvironment:
         self.db_manager = DatabaseManager("sqlite+aiosqlite:///:memory:")
         await self.db_manager.initialize()
 
-        # 2. 加载 agents
-        self._agents = load_all_agents()
-        print(f"Loaded agents: {list(self._agents.keys())}")
+        # 2. config → DB 物化(镜像 prod 的 reconcile;harness 跑 B-2 真路径 = 引擎
+        #    从 DB 快照消费,而非进程级 load_all_agents/load_custom_tools)
+        root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        async with self.db_manager.session() as session:
+            await reconcile_config_to_db(
+                session,
+                tools_dir=os.path.join(root, "config", "tools"),
+                agents_dir=os.path.join(root, "config", "agents"),
+            )
 
-        # 3. 全局工具（builtin + custom，共享碰撞检查）
-        from tools.custom.loader import load_custom_tools
-        valid_agents = [n for n in self._agents if n != "lead_agent"]
+        # 3. 进程级 builtin 工具(external 工具改从每请求 DB 快照重建,见 request_scope)。
+        #    call_subagent 的 valid_agents 仍按进程 agent 列表(与 prod dependencies 一致)。
+        process_agents = load_all_agents()
+        print(f"Loaded agents: {list(process_agents.keys())}")
+        valid_agents = [n for n in process_agents if n != "lead_agent"]
         builtin = [CallSubagentTool(valid_agents=valid_agents), WebSearchTool(), WebFetchTool()]
-        custom = load_custom_tools()
-        self._tools = build_tool_map(builtin, custom)
-        if custom:
-            print(f"Loaded {len(custom)} custom tool(s): {[t.name for t in custom]}")
+        self._tools = build_tool_map(builtin, [])
 
         # 4. ExecutionRunner + RuntimeStore
         self.runner = ExecutionRunner(max_concurrent=5, store=InMemoryRuntimeStore())
@@ -265,8 +273,16 @@ class TestEnvironment:
             artifact_repo = ArtifactRepository(session)
             artifact_service = ArtifactService(artifact_repo)
 
-            # 合并全局工具 + 请求级 artifact 工具
-            all_tools = {**self._tools, **{t.name: t for t in create_artifact_tools(artifact_service)}}
+            # 每请求 DB 快照(镜像 controller_factory):agents + external 工具从 DB 重建,
+            # 合并进程级 builtin + 请求级 artifact 工具,resolve_all 出 effective_toolsets。
+            snapshot = await load_registry_snapshot(session)
+            all_tools = {
+                **self._tools,
+                **snapshot.external_tools,
+                **{t.name: t for t in create_artifact_tools(artifact_service)},
+            }
+            agents = snapshot.agents
+            effective_toolsets = resolve_all(snapshot, all_tools)
 
             conv_repo = ConversationRepository(session)
             conv_manager = ConversationManager(conv_repo)
@@ -278,8 +294,9 @@ class TestEnvironment:
             )
 
             controller = ExecutionController(
-                agents=self._agents,
+                agents=agents,
                 tools=all_tools,
+                effective_toolsets=effective_toolsets,
                 hooks=hooks,
                 artifact_service=artifact_service,
                 conversation_manager=conv_manager,

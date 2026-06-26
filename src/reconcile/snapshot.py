@@ -12,7 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.models import Agent, AgentUnit, ToolMember, ToolUnit
-from tools.base import BaseTool, ToolParameter
+from tools.base import BUILTIN_TOOL_NAMES, BaseTool, ToolParameter
 from tools.custom.http_tool import HttpTool, HttpToolConfig
 
 
@@ -79,11 +79,23 @@ def build_http_tool(full_name: str, permission: str, definition: dict) -> HttpTo
 
 
 async def load_registry_snapshot(session: AsyncSession) -> RegistrySnapshot:
-    """一次性读全部注册表行,重建 external 工具 + unit 元数据 + agent 元数据。"""
-    units_rows = (await session.execute(select(ToolUnit))).scalars().all()
-    member_rows = (await session.execute(select(ToolMember))).scalars().all()
-    agent_rows = (await session.execute(select(Agent))).scalars().all()
-    agent_unit_rows = (await session.execute(select(AgentUnit))).scalars().all()
+    """一次性读全部注册表行,重建 external 工具 + unit 元数据 + agent 元数据。
+
+    显式 order_by:本快照喂进系统提示词的工具渲染顺序(EffectiveToolset.names()),
+    无序则 PG 不保证行序 → 提示词抖动击穿 APC 缓存 + prompt 快照 flaky。
+    """
+    units_rows = (await session.execute(
+        select(ToolUnit).order_by(ToolUnit.name)
+    )).scalars().all()
+    member_rows = (await session.execute(
+        select(ToolMember).order_by(ToolMember.full_name)
+    )).scalars().all()
+    agent_rows = (await session.execute(
+        select(Agent).order_by(Agent.name)
+    )).scalars().all()
+    agent_unit_rows = (await session.execute(
+        select(AgentUnit).order_by(AgentUnit.agent_name, AgentUnit.unit_name)
+    )).scalars().all()
 
     units: Dict[str, UnitInfo] = {
         u.name: UnitInfo(
@@ -100,6 +112,18 @@ async def load_registry_snapshot(session: AsyncSession) -> RegistrySnapshot:
 
     external_tools: Dict[str, BaseTool] = {}
     for m in member_rows:
+        # 运行期撞名闸(decision-11 全局唯一不变量的运行期镜像):external full_name
+        # 落进合并后的 tools dict,撞 builtin/reserved 名会**遮蔽 builtin 工具对象连同
+        # 其 permission**(CONFIRM builtin 被换成任意 HttpTool = 权限绕过)。reconcile
+        # 已在写入期对 seeded 撞名 loud-fail;此处是读侧兜底,堵 dynamic 行(B-4)/手改
+        # DB 绕过写校验。B-4 CRUD 须在写入期校验,这道只作 backstop。
+        if m.full_name in BUILTIN_TOOL_NAMES:
+            raise RuntimeError(
+                f"External tool full_name '{m.full_name}' (unit '{m.unit_name}') "
+                f"collides with a builtin/reserved tool name — it would shadow the "
+                f"builtin object and its permission. Remove/rename the DB row "
+                f"(dynamic tools must not reuse builtin names)."
+            )
         if m.unit_name in units:
             units[m.unit_name].member_full_names.append(m.full_name)
         # 仅 http provider 重建为 HttpTool;mcp provider 的成员运行期另接
