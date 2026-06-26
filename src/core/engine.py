@@ -904,6 +904,33 @@ async def execute_loop(
                     tool_round_count[agent_name] = tool_round_count.get(agent_name, 0) + 1
                     continue
 
+            # search_tools 特殊处理(B-3 渐进式披露):渲染当前 agent 可调集里匹配工具的
+            # 完整 doc。渲染依赖 per-agent 的 effective_toolset + 本 turn 的 tools 字典,
+            # 而进程级工具实例不能持有 per-turn 状态(并发 turn 共享同一实例会串),故不走
+            # tool.execute、在引擎内用纯函数算。AUTO 等级、无 side effect、不切 agent ——
+            # 走与普通工具一致的 START/COMPLETE 事件流,绕开 _maybe_persist_tool_result
+            # (结果就是工具描述,不该再落盘)。
+            if tool_name == "search_tools":
+                from tools.builtin.search_tools import search_tools_result
+
+                await _emit(StreamEventType.TOOL_START.value, agent_name, {
+                    "tool": tool_name, "params": params, "reason": reason,
+                })
+                search_result = search_tools_result(
+                    params.get("query", ""), effective_toolsets[agent_name], tools
+                )
+                await _emit(StreamEventType.TOOL_COMPLETE.value, agent_name, {
+                    "tool": tool_name,
+                    "success": search_result.success,
+                    "result_data": search_result.data if search_result.success else None,
+                    "error": search_result.error if not search_result.success else None,
+                    "duration_ms": 0,
+                    "params": params,
+                    "parser_warnings": parser_warnings,
+                })
+                tool_round_count[agent_name] = tool_round_count.get(agent_name, 0) + 1
+                continue
+
             # 权限检查（决策 11:等级唯一来源是工具定义，EffectiveToolset 已据此解析；
             # 绑定不再覆盖等级。gate 已确保成员，level 必非 None，仍兜底到 tool.permission）
             effective_permission = effective_toolsets[agent_name].level(tool_name) or tool.permission

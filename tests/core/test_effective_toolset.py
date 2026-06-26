@@ -33,10 +33,10 @@ def _agent(name="lead_agent", builtin_tools=None, units=None):
     )
 
 
-def _unit(name, members, kind="tool"):
+def _unit(name, members, kind="tool", defer=False, description=""):
     return UnitInfo(
-        name=name, kind=kind, description="", visibility="public",
-        defer=False, provider="http", source="seeded",
+        name=name, kind=kind, description=description, visibility="public",
+        defer=defer, provider="http", source="seeded",
         member_full_names=list(members),
     )
 
@@ -150,3 +150,97 @@ def test_has_any():
     eff = EffectiveToolset({"read_artifact": ToolPermission.AUTO})
     assert eff.has_any(["create_artifact", "read_artifact"]) is True
     assert eff.has_any(["bash", "mount"]) is False
+
+
+# ============================================================
+# B-3 渐进式披露:deferred_units + search_tools 自动注入
+# ============================================================
+
+
+def test_deferred_unit_members_callable_and_grouped():
+    # defer 的 unit:成员仍可调(进 permissions),且记进 deferred_units 供索引行渲染
+    agent = _agent(units={"github": "enabled"})
+    snap = _snapshot(units=[
+        _unit("github", ["github__a", "github__b"], kind="toolset",
+              defer=True, description="GitHub API"),
+    ])
+    tools = {
+        "github__a": _Tool("github__a", ToolPermission.AUTO),
+        "github__b": _Tool("github__b", ToolPermission.CONFIRM),
+        "search_tools": _Tool("search_tools", ToolPermission.AUTO),
+    }
+    eff = resolve_effective_toolset(agent, snap, tools)
+    # 成员可调
+    assert "github__a" in eff and "github__b" in eff
+    # 分组进 deferred_units
+    assert set(eff.deferred_units) == {"github"}
+    du = eff.deferred_units["github"]
+    assert du.description == "GitHub API"
+    assert du.member_full_names == ["github__a", "github__b"]
+    assert eff.deferred_member_names() == {"github__a", "github__b"}
+
+
+def test_non_deferred_unit_not_grouped():
+    agent = _agent(units={"github": "enabled"})
+    snap = _snapshot(units=[_unit("github", ["github__a"], kind="toolset", defer=False)])
+    tools = {"github__a": _Tool("github__a", ToolPermission.AUTO)}
+    eff = resolve_effective_toolset(agent, snap, tools)
+    assert "github__a" in eff
+    assert eff.deferred_units == {}
+
+
+def test_deferred_unit_only_present_members_grouped():
+    # 索引行只列工具对象存在的成员(不挂死链)
+    agent = _agent(units={"github": "enabled"})
+    snap = _snapshot(units=[_unit("github", ["github__a", "github__b"],
+                                  kind="toolset", defer=True)])
+    tools = {"github__a": _Tool("github__a", ToolPermission.AUTO)}  # b 缺工具对象
+    eff = resolve_effective_toolset(agent, snap, tools)
+    assert eff.deferred_units["github"].member_full_names == ["github__a"]
+
+
+def test_search_tools_auto_injected_when_deferred_present():
+    # 有 deferred unit → resolver 自动把 search_tools 加进可调集(by-construction)
+    agent = _agent(units={"github": "enabled"})
+    snap = _snapshot(units=[_unit("github", ["github__a"], kind="toolset", defer=True)])
+    tools = {
+        "github__a": _Tool("github__a", ToolPermission.AUTO),
+        "search_tools": _Tool("search_tools", ToolPermission.AUTO),
+    }
+    eff = resolve_effective_toolset(agent, snap, tools)
+    assert "search_tools" in eff
+    assert eff.level("search_tools") == ToolPermission.AUTO
+
+
+def test_search_tools_not_injected_without_deferred():
+    # 无 deferred unit → 不平白注入 search_tools
+    agent = _agent(units={"github": "enabled"})
+    snap = _snapshot(units=[_unit("github", ["github__a"], kind="toolset", defer=False)])
+    tools = {
+        "github__a": _Tool("github__a", ToolPermission.AUTO),
+        "search_tools": _Tool("search_tools", ToolPermission.AUTO),
+    }
+    eff = resolve_effective_toolset(agent, snap, tools)
+    assert "search_tools" not in eff
+
+
+def test_search_tools_injection_noop_when_tool_absent():
+    # deferred unit 存在但 tools 字典里没有 search_tools(早期未注册)→ 不崩、不注入
+    agent = _agent(units={"github": "enabled"})
+    snap = _snapshot(units=[_unit("github", ["github__a"], kind="toolset", defer=True)])
+    tools = {"github__a": _Tool("github__a", ToolPermission.AUTO)}
+    eff = resolve_effective_toolset(agent, snap, tools)
+    assert "search_tools" not in eff
+    assert "github" in eff.deferred_units  # 分组仍在
+
+
+def test_explicit_search_tools_not_double_added():
+    # agent 已显式声明 search_tools(builtin)+ 又有 deferred unit → 不重复(等级仍取工具对象)
+    agent = _agent(builtin_tools={"search_tools": "enabled"}, units={"github": "enabled"})
+    snap = _snapshot(units=[_unit("github", ["github__a"], kind="toolset", defer=True)])
+    tools = {
+        "github__a": _Tool("github__a", ToolPermission.AUTO),
+        "search_tools": _Tool("search_tools", ToolPermission.AUTO),
+    }
+    eff = resolve_effective_toolset(agent, snap, tools)
+    assert "search_tools" in eff

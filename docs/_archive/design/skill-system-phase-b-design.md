@@ -165,13 +165,23 @@ config/tools/
 **目标**:解「30-endpoint = 30 份描述常驻」。
 
 **包含**:
-- **拆 `generate_tool_instruction`**(`xml_formatter.py:12-49`):`<format>` 协议语法块(`:17-42`)留 system prompt 稳定前缀(保 APC);**catalog 循环(`:44-45`)挪进 `_build_dynamic_context`** 成 `<available_tools>` reminder(挨 `artifacts_inventory`,`context_manager.py:204-209` 同级)。catalog 变化只失效末尾、grammar 前缀恒稳。
-- **deferred 渲染**:`tool_unit.defer=True` → `<available_tools>` 只出**索引行**(set 描述 + 成员 `full_name` 列表,**不给每工具 param schema**);非 defer → 完整描述照常。**显式开关、不按 token 自动**(私有化无 tokenizer,原则 7)。
-- **`search_tools` 内建工具**(注册进 `_load_tools`,`dependencies.py:189`):`select:Name,Name` 直选 / 关键词搜 → `generate_tool_instruction([匹配工具])` 作 tool_result。**必须过滤到当前 EffectiveToolset 可调集**(reviewer P1:含 enabled-but-deferred,排 disabled/absent/未授)→ resolver 第 5 读点。描述随 tool_result 留历史、**不维护已发现集**(被压缩则模型见索引行自己再 search,decision 2)。
-- **`always_allow` key = 规范全名 `<unit>__<tool>`**(builtin 裸名)。
-- **compaction**:`compact_agent` 提示词保留 `search_tools` 发现(同保留 artifact IDs);全 schema 不入 summary。
+- **拆 `generate_tool_instruction`**(`xml_formatter.py:12-49`):`<format>` 协议语法块(`:17-42`)→ `generate_tool_grammar()` 留 system prompt 稳定前缀(保 APC);**catalog 循环(`:44-45`)挪进 `_build_dynamic_context`** 成 `<available_tools>` reminder(挨 `artifacts_inventory`,`context_manager.py:204-209` 同级)。catalog 变化只失效末尾、grammar 前缀恒稳。
+- **deferred 渲染**:`tool_unit.defer=True` → `<available_tools>` 只出**索引行**(set 描述 + 成员 `full_name` 列表,**不给每工具 param schema**);非 defer → 完整描述照常。**显式开关、不按 token 自动**(私有化无 tokenizer,原则 7)。`defer` 是 **unit 级**字段(`tool_units.defer` 列,B-1 已建 + 已解析 `seeds.py:235/278`):singleton 写在工具 frontmatter、toolset 写在 `_set.md`、mcp(F)同为 unit 列 —— 三类都支持,语义是「整个 unit 是否延迟披露」,不存在「同 unit 内一半 defer」。defer 分组信息由 **resolver 产出**(`EffectiveToolset` 增 `deferred_units` 字段),保持单一解析点(context_manager 只消费 effective_toolset)。
+- **`search_tools` 内建工具**(注册进 `_load_tools`,`dependencies.py:189`):单 `query` 参数(`select:a,b` 直选 / 否则关键词搜 name+description)→ `render_tool_docs([匹配工具])` 作 tool_result。引擎**特殊路由**(仿 `call_subagent`):用 `effective_toolsets[agent_name]` + `tools` 过滤渲染 → resolver 第 5 读点。**必须过滤到当前 EffectiveToolset 可调集**(reviewer P1:含 enabled-but-deferred,排 disabled/absent/未授)。描述随 tool_result 留历史、**不维护已发现集**(被压缩则模型见索引行自己再 search,decision 2)。
+- **`search_tools` 入可调集 = defer 自动注入**(2026-06-26 与用户敲定):resolver 在 agent 有 ≥1 个 enabled 的 deferred unit 时,自动把 `search_tools` 加进可调集(`tools` 里存在该工具对象时)。「deferred ⟹ 可搜索」遂成 by-construction 不变量 —— operator 永远不会因忘声明而把 deferred 工具变成死工具,无 deferred unit 的 agent 也不会平白多一个无用工具。
+- **`always_allow` key = 规范全名 `<unit>__<tool>`**(builtin 裸名):无需改动 —— 引擎里 `tool_name` 本就是注册全名(resolver / tools dict 均以 full_name 为键),`always_allowed_tools` 早已以 full_name 收/取。本片仅核实,非改动。
+- **compaction:无改动**(原 item 5 撤销)。deferred 工具跨压缩的存活机制 = `<available_tools>` 索引行在**每轮 reminder** 里 —— reminder 每次 `build` 现拼、挂末条消息尾部,**不属于被压缩的历史前缀**(压缩只 summarize 历史 event)。故索引行无条件每轮重渲、无视压缩(比 artifact 还稳:artifact 要 inventory + compact_agent 保 ID 双保险,deferred 索引行不需要)。search 补出的完整 schema 活在历史 tool_result,被压缩则模型见索引行自己再 search(decision 2)。「压缩后丢 deferred 工具」这个坏状态被「reminder 每轮重渲」做成不可表示 —— 原 item 5 用 compact_agent 提示词去防它属过度防御(全局 step-back 信号:别用 runtime machinery 守已 by-construction 守住的不变量),撤销。
 
-**验收**:defer 的 set 在 system prompt 只占索引行;`search_tools` 补全描述、过滤掉不可调工具;APC 前缀不被发现动作击穿(prompt 快照比对)。
+**验收**:defer 的 set 在 `<available_tools>`(reminder)只占索引行;`search_tools` 补全描述、过滤掉不可调工具;有 deferred unit 的 agent 自动获 `search_tools`;APC 语法前缀不被发现动作击穿(grammar 留 system prompt、catalog 在尾部)。
+
+### B-3 进展(2026-06-26 落地)
+
+- **catalog 挪位(`xml_formatter.py`)**:`generate_tool_instruction` 拆出 `generate_tool_grammar()`(纯 `<format>` 语法块,留 system prompt 可缓存前缀)+ `render_tool_docs(tools)`(per-tool doc 渲染,`<available_tools>` 与 `search_tools` 共用);`generate_tool_instruction` 保留为 legacy 单块形态(导出契约),内部复用同一份语法 + doc。`context_manager.build` 的 system prompt 第 3 段从「全工具 doc」改成「仅语法块(有可调工具时)」。
+- **`<available_tools>` 进 reminder(`context_manager.py`)**:新 `_build_available_tools(effective_toolset, tools)`,放 reminder 最前段 —— non-deferred 可调工具出完整 doc、deferred unit 出 `<tool_unit … disclosure="deferred">` 索引行(unit 描述 + 成员 full_name + 「用 search_tools 取参数」指引,无 schema)。unit 名排序稳定防提示词抖动。`_build_dynamic_context` 加 `tools` 参数承接。
+- **resolver 产 defer 分组 + 自动注入(`effective_toolset.py`)**:`EffectiveToolset` 加 `deferred_units: {unit_name: DeferredUnit}` 字段(+ `deferred_member_names()`),`resolve_effective_toolset` 在展开 unit 时:成员仍进 `permissions`(可调),`defer=True` 且有可调成员则记进 `deferred_units`(只列工具对象存在的成员)。末尾 **defer 自动注入**:有 deferred unit 且 `tools` 含 `search_tools` → 把 `search_tools` 加进可调集(常量 `SEARCH_TOOLS_NAME`)。
+- **`search_tools`(`tools/builtin/search_tools.py` + 引擎路由)**:`SearchToolsTool`(单 `query` 参,AUTO,`max_result_size_chars=inf`)+ 纯函数 `search_tools_result(query, effective_toolset, tools)`(`select:a,b` 精确 / 关键词搜 name+desc;过滤到可调集 ∩ tools、排 `search_tools` 自身;无匹配回引导文案、unknown 名报告)。引擎在 call_subagent 块后加 `if tool_name == "search_tools"` 特殊路由(START→纯函数→COMPLETE,AUTO 无需许可、不切 agent、绕开 `_maybe_persist_tool_result`)—— 进程级工具实例不持 per-turn 状态,故不走 `tool.execute`。注册进 `dependencies._load_tools`。
+- **零回归 + 新覆盖**:全量 **1389 passed**(B-3 前 1366,+23 新测),31 skipped。新测:resolver deferred_units/自动注入 7 例、`_build_available_tools` deferred 渲染 5 例、`search_tools_result` 9 例、引擎路由 2 例;改写 `test_context_manager` 的 catalog 位置断言(语法→system prompt、doc→reminder)。当前真实 config 零 external/零 deferred → 即时变化仅 builtin doc 从 system prompt 挪到 reminder(non-deferred 完整 doc 照渲),deferred + search_tools 机制由合成 fixture 守。
+- **compact_agent 未碰**(原 item 5 撤销,理由见上「包含」末条)。
 
 ---
 

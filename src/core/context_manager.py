@@ -69,7 +69,7 @@ class ContextManager:
             消息的 ephemeral <system-reminder> 原文，单独返回供引擎落进 agent_start 事件
             （admin 重建 prompt 时拿它当持久化原值，无需重新生成 → 不漂移）。
         """
-        from tools.xml_formatter import generate_tool_instruction
+        from tools.xml_formatter import generate_tool_grammar
 
         agent_config = agents[agent_name]
 
@@ -87,11 +87,11 @@ class ContextManager:
         if "call_subagent" in effective_toolset:
             system_parts.append(cls._build_available_agents(agents, agent_config.name))
 
-        # 3. 工具说明
-        tool_names = effective_toolset.names()
-        agent_tools = [tools[name] for name in tool_names if name in tools]
-        if agent_tools:
-            system_parts.append(generate_tool_instruction(agent_tools))
+        # 3. 工具调用协议语法(稳定可缓存前缀,保 APC)。per-tool 描述不在 system
+        # prompt —— 挪到尾部 <available_tools> 动态 reminder(B-3 渐进式披露):catalog
+        # 变化只失效末尾、语法前缀恒稳。仅在 agent 有可调工具时放语法块。
+        if effective_toolset.names():
+            system_parts.append(generate_tool_grammar())
 
         system_prompt = "\n\n".join(s for s in system_parts if s)
 
@@ -121,7 +121,7 @@ class ContextManager:
         # 「content 空则丢 _meta」影响(高 input+空 content 也能预警)。
         last_usage = last_llm_usage(state.get("events", []), agent_name)
         reminder = cls._build_dynamic_context(
-            agent_config, effective_toolset, artifacts_inventory, last_usage,
+            agent_config, effective_toolset, tools, artifacts_inventory, last_usage,
             sandbox_status, tool_round_count=tool_round_count,
         )
         return cls.assemble(system_prompt, all_messages, reminder), reminder
@@ -164,6 +164,7 @@ class ContextManager:
         cls,
         agent_config: Any,
         effective_toolset: EffectiveToolset,
+        tools: Dict[str, Any],
         artifacts_inventory: Optional[List[Dict]],
         last_usage: Optional[int] = None,
         sandbox_status: Optional[Dict] = None,
@@ -171,10 +172,10 @@ class ContextManager:
     ) -> str:
         """组装每轮刷新的动态上下文，包裹为 ephemeral <system-reminder>。
 
-        内容：系统时间（始终）+ task_plan（存在时）+ artifact 清单（仅有 artifact
-        工具的 agent）+ 沙盒状态（仅有沙盒工具的 agent 且引擎递了快照）+
-        context_usage 预警（仅临近 compaction 时）+ tool_budget 收尾提示（仅命中
-        max_tool_rounds 时）。由 build() 并入消息尾部，不进 system prompt、不持久化为 event。
+        内容：可用工具目录（有可调工具时）+ 系统时间（始终）+ task_plan（存在时）+
+        artifact 清单（仅有 artifact 工具的 agent）+ 沙盒状态（仅有沙盒工具的 agent 且
+        引擎递了快照）+ context_usage 预警（仅临近 compaction 时）+ tool_budget 收尾提示
+        （仅命中 max_tool_rounds 时）。由 build() 并入消息尾部，不进 system prompt、不持久化为 event。
 
         语义定位是「当前世界状态的一瞥」（glance, don't act）—— 与需要 uptake 的
         持久化 meta 帧（用户上传提示 / 注入消息 / compaction frame，均用 [...] 行动帧
@@ -182,6 +183,13 @@ class ContextManager:
         模型扫一眼即可。
         """
         parts: List[str] = []
+
+        # 可用工具目录(B-3 渐进式披露)—— per-tool 描述从 system prompt 挪到这里:
+        # non-deferred 出完整 doc、deferred unit 只出索引行(完整 schema 由 search_tools
+        # 按需补)。放在 reminder 最前(模型先知道能做什么),不影响 system prompt 缓存前缀。
+        available_tools = cls._build_available_tools(effective_toolset, tools)
+        if available_tools:
+            parts.append(available_tools)
 
         # 系统时间 —— 刻意用本地时间（datetime.now，非 utc_now）：注入提示词的是
         # 用户本地时间，属 UX，是全局 naive-UTC 约定的既定例外（见 CLAUDE.md）。
@@ -250,6 +258,58 @@ class ContextManager:
         )
         body = "\n\n".join(parts)
         return f'<system-reminder>\n{framing}\n\n{body}\n</system-reminder>'
+
+    @classmethod
+    def _build_available_tools(
+        cls,
+        effective_toolset: EffectiveToolset,
+        tools: Dict[str, Any],
+    ) -> str:
+        """渲染 <available_tools> 目录（B-3 渐进式披露）。
+
+        non-deferred 的可调工具 → 完整 doc（render_tool_docs）；deferred unit → 只出
+        索引行（unit 描述 + 成员 full_name 列表，无 param schema），完整 schema 由
+        search_tools 按需补。无可调工具时返回 ""（调用方据此不追加本段）。
+
+        defer 分组取自 effective_toolset.deferred_units（resolver 一处算好）—— 本方法
+        只做渲染、不碰 snapshot，维持单一解析点。
+        """
+        from tools.xml_formatter import render_tool_docs
+
+        names = effective_toolset.names()
+        if not names:
+            return ""
+
+        deferred_member_names = effective_toolset.deferred_member_names()
+        # 完整 doc:可调且工具对象存在、且不属于任何 deferred unit
+        full_doc_tools = [
+            tools[name] for name in names
+            if name in tools and name not in deferred_member_names
+        ]
+        deferred_units = effective_toolset.deferred_units
+
+        if not full_doc_tools and not deferred_units:
+            # 宣称有工具但都不在 tools 字典（如 external 重建全失败）→ 无可渲染内容
+            return ""
+
+        lines = ['<available_tools>']
+        if full_doc_tools:
+            lines.append(render_tool_docs(full_doc_tools))
+        # deferred unit 索引行（按 unit 名稳定排序，避免提示词抖动）
+        for unit_name in sorted(deferred_units):
+            unit = deferred_units[unit_name]
+            lines.append(f'<tool_unit name="{unit.name}" disclosure="deferred">')
+            if unit.description:
+                lines.append(unit.description.rstrip())
+            lines.append(
+                "Tools below are available but listed by name only. Call `search_tools` "
+                "(select:<full_name> or a keyword) to load full parameters before calling:"
+            )
+            for full_name in unit.member_full_names:
+                lines.append(f"- {full_name}")
+            lines.append('</tool_unit>')
+        lines.append('</available_tools>')
+        return "\n".join(lines)
 
     @classmethod
     def _build_context_usage(cls, last_usage: Optional[int]) -> Optional[str]:

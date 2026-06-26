@@ -197,6 +197,7 @@ def _load_tools() -> Dict[str, BaseTool]:
     from tools.builtin.call_subagent import CallSubagentTool
     from tools.builtin.web_search import WebSearchTool
     from tools.builtin.web_fetch import WebFetchTool
+    from tools.builtin.search_tools import SearchToolsTool
 
     # 从已加载的 agents 推导有效 subagent 列表
     valid_agents = [n for n, c in _agents.items() if n != "lead_agent" and not c.internal] if _agents else None
@@ -205,6 +206,9 @@ def _load_tools() -> Dict[str, BaseTool]:
         CallSubagentTool(valid_agents=valid_agents),
         WebSearchTool(),
         WebFetchTool(),
+        # 渐进式披露检索器(B-3):resolver 在 agent 有 deferred unit 时自动注入到可调集,
+        # 引擎特殊路由渲染。进程级注册即可,无 per-turn 状态。
+        SearchToolsTool(),
     ]
 
     return build_tool_map(tools, [])

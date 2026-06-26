@@ -354,6 +354,59 @@ class TestToolExecution:
         assert len(completes) == 1
         assert completes[0]["data"]["success"] is True
 
+    async def test_search_tools_routed_renders_docs(self):
+        # B-3:引擎特殊路由 search_tools,渲染当前可调集里匹配工具的完整 doc。
+        from tools.builtin.search_tools import SearchToolsTool
+
+        agent = _FakeAgentConfig(tools={"search_tools": "auto", "weather": "auto"})
+        tools = {
+            "search_tools": SearchToolsTool(),
+            "weather": _FakeTool("weather", ToolResult(success=True, data="x")),
+        }
+        xml = _tool_call_xml("search_tools", query="select:weather")
+        rounds = [
+            _tool_call_chunks(xml),
+            _simple_llm_chunks("got the schema"),
+        ]
+
+        result, emitted, store = await _run_engine(
+            _make_fake_stream_sequence(rounds),
+            agents={"lead_agent": agent},
+            tools=tools,
+        )
+
+        starts = [e for e in emitted if e["type"] == "tool_start" and e["data"]["tool"] == "search_tools"]
+        completes = [e for e in emitted if e["type"] == "tool_complete" and e["data"]["tool"] == "search_tools"]
+        assert len(starts) == 1
+        assert len(completes) == 1
+        assert completes[0]["data"]["success"] is True
+        # 渲染了 weather 的完整 doc(SearchToolsTool.execute 不该被走到 —— 那会回错误)
+        assert "weather" in completes[0]["data"]["result_data"]
+        assert "Fake weather" in completes[0]["data"]["result_data"]
+
+    async def test_search_tools_blocked_when_not_in_toolset(self):
+        # 未授 search_tools(无 deferred unit / 未声明)→ 走白名单闸,不路由
+        from tools.builtin.search_tools import SearchToolsTool
+
+        agent = _FakeAgentConfig(tools={})  # 空可调集
+        tools = {"search_tools": SearchToolsTool()}
+        xml = _tool_call_xml("search_tools", query="select:weather")
+        rounds = [
+            _tool_call_chunks(xml),
+            _simple_llm_chunks("ok"),
+        ]
+
+        result, emitted, store = await _run_engine(
+            _make_fake_stream_sequence(rounds),
+            agents={"lead_agent": agent},
+            tools=tools,
+        )
+
+        completes = [e for e in emitted if e["type"] == "tool_complete" and e["data"]["tool"] == "search_tools"]
+        assert len(completes) == 1
+        assert completes[0]["data"]["success"] is False
+        assert "not available" in completes[0]["data"]["error"]
+
     async def test_tool_not_found(self):
         agent = _FakeAgentConfig(tools={"my_tool": "auto"})
         xml = _tool_call_xml("my_tool")

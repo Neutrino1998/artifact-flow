@@ -9,13 +9,10 @@ from typing import List, Dict, Any
 from tools.base import BaseTool
 
 
-def generate_tool_instruction(tools: List[BaseTool]) -> str:
-    """生成工具使用说明（注入 system prompt）"""
-    if not tools:
-        return "<tool_instructions>\nNo tools available.\n</tool_instructions>"
-
-    instruction = """<tool_instructions>
-<format>
+# 工具调用协议语法块 —— 对所有 agent / 所有轮恒等,是理想的 prompt-cache 可缓存前缀。
+# per-tool 描述不在此(B-3 渐进式披露):描述挪到 <available_tools> 动态 reminder,
+# 故 catalog 变化只失效消息尾部、这段语法前缀恒稳。
+_TOOL_GRAMMAR_BODY = """<format>
 You may make one or more tool calls per turn. They execute sequentially.
 Wrap ALL parameter values in <![CDATA[...]]>.
 
@@ -38,15 +35,38 @@ For multiple calls, emit each <tool_call> block one after another — there is N
   <name>second_tool</name>
   <params>...</params>
 </tool_call>
-</format>
-"""
+</format>"""
 
-    for tool in tools:
-        instruction += f"\n{_format_tool_doc(tool)}"
 
-    instruction += "\n</tool_instructions>"
+def generate_tool_grammar() -> str:
+    """工具调用协议语法块（注入 system prompt 稳定前缀，保 APC）。
 
-    return instruction
+    不含任何 per-tool 描述 —— 描述挪到 `<available_tools>` 动态 reminder（B-3 渐进式
+    披露，见 ContextManager._build_available_tools）。语法对所有 agent / 所有轮恒等。
+    """
+    return f"<tool_instructions>\n{_TOOL_GRAMMAR_BODY}\n</tool_instructions>"
+
+
+def render_tool_docs(tools: List[BaseTool]) -> str:
+    """渲染一组工具的完整 doc（name/description/params/example），换行连接。
+
+    供 `<available_tools>` 的 non-deferred 段与 `search_tools` 结果共用 —— 「完整描述
+    长什么样」只此一处定义,两条披露路径不会漂移。
+    """
+    return "\n".join(_format_tool_doc(tool) for tool in tools)
+
+
+def generate_tool_instruction(tools: List[BaseTool]) -> str:
+    """[legacy 单块形态] 语法 + 全部 doc 合成一整块 `<tool_instructions>`。
+
+    live 路径已拆成 `generate_tool_grammar()`(前缀) + `<available_tools>`(尾部);
+    此函数保留给需要完整单块的旧调用方 / 导出契约,内部复用同一份语法 + doc 渲染。
+    """
+    if not tools:
+        return "<tool_instructions>\nNo tools available.\n</tool_instructions>"
+
+    docs = "".join(f"\n{_format_tool_doc(tool)}" for tool in tools)
+    return f"<tool_instructions>\n{_TOOL_GRAMMAR_BODY}\n{docs}\n</tool_instructions>"
 
 
 def format_result(name: str, result: Dict[str, Any]) -> str:

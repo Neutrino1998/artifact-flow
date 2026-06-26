@@ -139,7 +139,9 @@ class TestSystemPrompt:
         # 自描述首句：声明这是工作区状态、降权为非指令
         assert "workspace state" in reminder and "not a user instruction" in reminder
 
-    def test_with_tools_includes_tool_instruction(self):
+    def test_with_tools_grammar_in_system_docs_in_reminder(self):
+        """B-3:system prompt 只放协议语法(稳定前缀),per-tool 描述挪到尾部
+        <available_tools> reminder。"""
         from tools.base import BaseTool, ToolPermission, ToolResult, ToolParameter
 
         class FakeTool(BaseTool):
@@ -161,17 +163,26 @@ class TestSystemPrompt:
             tools={"web_search": FakeTool()},
         )
         system_content = messages[0]["content"]
-        assert "web_search" in system_content
+        # 语法块在 system prompt(可缓存前缀)
+        assert "<tool_instructions>" in system_content
+        assert "<format>" in system_content
+        # per-tool 描述不在 system prompt —— 挪到尾部 reminder
+        assert "web_search" not in system_content
+        reminder = messages[-1]["content"]
+        assert "<available_tools>" in reminder
+        assert "web_search" in reminder
+        assert "Search the web" in reminder
 
-    def test_no_tools_no_tool_instruction(self):
+    def test_no_tools_no_grammar_no_available_tools(self):
         agent = _FakeAgentConfig(tools={})
         state = _make_state(events=[
             _make_event(StreamEventType.USER_INPUT.value, data={"content": "hi"}),
         ])
 
         messages = _build(agent, state=state, tools={})
-        # 无工具 → system prompt 不注入 tool 说明（system prompt 现只含 role/agents/tools）
+        # 无工具 → system prompt 不注入语法块，reminder 也无 <available_tools>
         assert "tool_call" not in messages[0]["content"].lower()
+        assert "<available_tools>" not in messages[-1]["content"]
 
 
 # ============================================================
@@ -568,6 +579,129 @@ class TestDynamicContextReminder:
         assert "<system_time>" not in system_content
         assert "<team_task_plan" not in system_content
         assert "artifacts_inventory" not in system_content
+
+
+class TestAvailableTools:
+    """B-3:<available_tools> 渲染 —— non-deferred 出完整 doc,deferred unit 只出索引行。"""
+
+    def _tool(self, name, description, permission=None):
+        from tools.base import BaseTool, ToolPermission, ToolResult, ToolParameter
+
+        class _T(BaseTool):
+            def __init__(self):
+                super().__init__(name=name, description=description,
+                                 permission=permission or ToolPermission.AUTO)
+            def get_parameters(self):
+                return [ToolParameter(name="q", type="string", description="param q")]
+            async def execute(self, **p):
+                return ToolResult(success=True)
+        return _T()
+
+    def test_non_deferred_renders_full_doc(self):
+        from core.context_manager import ContextManager
+        from core.effective_toolset import EffectiveToolset
+        from tools.base import ToolPermission
+
+        tools = {"weather": self._tool("weather", "Query the weather forecast")}
+        eff = EffectiveToolset({"weather": ToolPermission.AUTO})
+        block = ContextManager._build_available_tools(eff, tools)
+        assert "<available_tools>" in block
+        assert "weather" in block
+        assert "Query the weather forecast" in block
+        # 完整 doc 含参数
+        assert "param q" in block
+        assert 'disclosure="deferred"' not in block
+
+    def test_deferred_unit_renders_index_line_only(self):
+        from core.context_manager import ContextManager
+        from core.effective_toolset import EffectiveToolset, DeferredUnit
+        from tools.base import ToolPermission
+
+        tools = {
+            "github__search_repos": self._tool("github__search_repos", "Find repos"),
+            "github__create_issue": self._tool("github__create_issue", "Open issue"),
+            "search_tools": self._tool("search_tools", "the searcher"),
+        }
+        eff = EffectiveToolset(
+            permissions={
+                "github__search_repos": ToolPermission.AUTO,
+                "github__create_issue": ToolPermission.CONFIRM,
+                "search_tools": ToolPermission.AUTO,
+            },
+            deferred_units={"github": DeferredUnit(
+                name="github", description="GitHub API",
+                member_full_names=["github__search_repos", "github__create_issue"],
+            )},
+        )
+        block = ContextManager._build_available_tools(eff, tools)
+        # deferred unit:索引行 + 成员名,但**无 param schema**
+        assert '<tool_unit name="github" disclosure="deferred">' in block
+        assert "GitHub API" in block
+        assert "- github__search_repos" in block
+        assert "- github__create_issue" in block
+        assert "search_tools" in block  # 指引去 search
+        # deferred 成员的完整描述/参数不在(只索引)
+        assert "Find repos" not in block
+        assert "Open issue" not in block
+
+    def test_mixed_deferred_and_full(self):
+        from core.context_manager import ContextManager
+        from core.effective_toolset import EffectiveToolset, DeferredUnit
+        from tools.base import ToolPermission
+
+        tools = {
+            "weather": self._tool("weather", "Weather forecast tool"),
+            "gh__x": self._tool("gh__x", "deferred member"),
+        }
+        eff = EffectiveToolset(
+            permissions={"weather": ToolPermission.AUTO, "gh__x": ToolPermission.AUTO},
+            deferred_units={"gh": DeferredUnit(
+                name="gh", description="GH", member_full_names=["gh__x"])},
+        )
+        block = ContextManager._build_available_tools(eff, tools)
+        # 非 deferred 出完整 doc
+        assert "Weather forecast tool" in block
+        # deferred 只索引
+        assert "- gh__x" in block
+        assert "deferred member" not in block
+
+    def test_empty_toolset_renders_nothing(self):
+        from core.context_manager import ContextManager
+        from core.effective_toolset import EffectiveToolset
+        assert ContextManager._build_available_tools(EffectiveToolset({}), {}) == ""
+
+    def test_deferred_flows_through_build_into_reminder(self):
+        """端到端:build 把 effective_toolset 的 deferred 分组接进尾部 reminder,
+        system prompt 只留语法前缀。"""
+        from core.context_manager import ContextManager
+        from core.effective_toolset import EffectiveToolset, DeferredUnit
+        from tools.base import ToolPermission
+
+        agent = _FakeAgentConfig()
+        tools = {
+            "gh__x": self._tool("gh__x", "deferred member doc"),
+            "search_tools": self._tool("search_tools", "searcher"),
+        }
+        eff = EffectiveToolset(
+            permissions={"gh__x": ToolPermission.AUTO, "search_tools": ToolPermission.AUTO},
+            deferred_units={"gh": DeferredUnit(
+                name="gh", description="GH unit", member_full_names=["gh__x"])},
+        )
+        state = _make_state(events=[
+            _make_event(StreamEventType.USER_INPUT.value, data={"content": "hi"}),
+        ])
+        messages, reminder = ContextManager.build(
+            agent_name=agent.name, agents={agent.name: agent},
+            state=state, tools=tools, effective_toolset=eff,
+        )
+        system_content = messages[0]["content"]
+        # system prompt:语法前缀,无 per-tool 描述
+        assert "<tool_instructions>" in system_content
+        assert "deferred member doc" not in system_content
+        # reminder:deferred 索引行 + search_tools 完整 doc
+        assert '<tool_unit name="gh" disclosure="deferred">' in reminder
+        assert "- gh__x" in reminder
+        assert "deferred member doc" not in reminder  # 成员只索引、不出描述
 
 
 class TestContextUsageWarning:

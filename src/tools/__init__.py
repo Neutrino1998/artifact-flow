@@ -21,6 +21,8 @@ from .xml_parser import (
 # XML格式化（工具说明 + 结果序列化）
 from .xml_formatter import (
     generate_tool_instruction,
+    generate_tool_grammar,
+    render_tool_docs,
     format_result,
 )
 
@@ -48,6 +50,8 @@ __all__ = [
 
     # XML格式化
     "generate_tool_instruction",
+    "generate_tool_grammar",
+    "render_tool_docs",
     "format_result",
 
     # Artifact envelope
