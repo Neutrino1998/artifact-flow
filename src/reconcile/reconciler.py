@@ -14,7 +14,7 @@ from typing import Dict, List, Optional
 from sqlalchemy import and_, delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from db.models import Agent, AgentUnit, ToolMember, ToolUnit
+from db.models import Agent, AgentUnit, ToolCredential, ToolMember, ToolUnit
 from reconcile.report import ReconcileReport
 from reconcile.seeds import (
     AgentSeed,
@@ -24,6 +24,8 @@ from reconcile.seeds import (
     parse_agent_seeds,
     parse_tool_seeds,
 )
+from tools.custom.credentials import CredentialKeyError, get_cipher
+from tools.custom.secrets import extract_placeholders
 from utils.logger import get_logger
 
 logger = get_logger("ArtifactFlow")
@@ -52,6 +54,10 @@ async def reconcile_config_to_db(
 
     # session 配 autoflush=False → 先 flush 让刚写的 unit/member 对下面的 SELECT 可见
     await session.flush()
+
+    # seeded 凭证:扫定义里的 {{NAME}} → 从 env 取值加密落库(独立于 unit 定义 hash,
+    # 见 _reconcile_credentials)。须在 unit flush 之后(FK 目标存在)。
+    await _reconcile_credentials(session, tool_seeds)
 
     # agent 分流需要「已注册 unit」全集(seeded 刚写 + 任何已存在 dynamic)
     known_unit_names = set(
@@ -168,6 +174,7 @@ def _new_member(unit_name: str, m: MemberSeed) -> ToolMember:
 async def _prune_unit(session: AsyncSession, name: str) -> None:
     # 显式删子行(dialect-safe);未来 department_unit_rule(C/G)在此一并删
     await session.execute(delete(AgentUnit).where(AgentUnit.unit_name == name))
+    await session.execute(delete(ToolCredential).where(ToolCredential.unit_name == name))
     await session.execute(delete(ToolMember).where(ToolMember.unit_name == name))
     await session.execute(delete(ToolUnit).where(ToolUnit.name == name))
 
@@ -180,6 +187,113 @@ async def _clear_dept_rules_for_unit(session: AsyncSession, name: str) -> None:
     visibility 时旧例外熬过 UPDATE、方向反转)。
     """
     return None
+
+
+# --------------------------------------------------------------------------
+# seeded credentials(env → 加密落库;独立于 unit 定义 hash)
+# --------------------------------------------------------------------------
+
+
+async def _reconcile_credentials(
+    session: AsyncSession, seeds: List[ToolUnitSeed]
+) -> None:
+    """把 seeded unit 定义里 {{NAME}} 引用的 secret 从 env 取值加密进 tool_credentials。
+
+    **独立于 unit 定义 hash**(决策):定义没变 → unit hash skip,但 env 里的 key 可能
+    轮换 → 必须能更新。故判变靠**解密旧行 ↔ 比 env 新值**(reconcile 本就握 env 明文 +
+    主密钥,解密成本可忽略),变了才重加密。
+
+    只碰 `source='seeded'` 行(dynamic = UI 拥有,不动)。env 缺 / 主密钥缺 → WARN +
+    跳过(不阻塞启动;工具调用时 loud-fail,与未配 secret 的旧语义一致)。定义里删掉的
+    占位符 → prune;env 里删掉的值 → 旧 seeded 行 prune。
+    """
+    cipher = None
+    cipher_unavailable = False  # 主密钥缺/非法,只 WARN 一次
+
+    for seed in seeds:
+        unit = seed.name
+        wanted: set = set()
+        for m in seed.members:
+            d = m.definition or {}
+            wanted |= extract_placeholders(d.get("endpoint", ""))
+            wanted |= extract_placeholders(d.get("headers", {}) or {})
+
+        existing = {
+            r.placeholder_name: r
+            for r in (await session.execute(
+                select(ToolCredential).where(
+                    and_(
+                        ToolCredential.unit_name == unit,
+                        ToolCredential.source == "seeded",
+                    )
+                )
+            )).scalars().all()
+        }
+
+        # 定义不再引用的 seeded 占位符 → prune
+        for name in list(existing):
+            if name not in wanted:
+                await session.execute(
+                    delete(ToolCredential).where(
+                        and_(
+                            ToolCredential.unit_name == unit,
+                            ToolCredential.placeholder_name == name,
+                        )
+                    )
+                )
+                existing.pop(name)
+                logger.info("reconcile: pruned seeded credential %s/%s "
+                            "(no longer referenced)", unit, name)
+
+        for name in sorted(wanted):
+            env_val = os.environ.get(name)
+            row = existing.get(name)
+
+            if env_val is None:
+                if row is not None:
+                    await session.execute(
+                        delete(ToolCredential).where(
+                            and_(
+                                ToolCredential.unit_name == unit,
+                                ToolCredential.placeholder_name == name,
+                            )
+                        )
+                    )
+                    logger.warning("reconcile: env value for %s gone — pruned seeded "
+                                   "credential on unit %r (tool will fail at call)", name, unit)
+                else:
+                    logger.warning("reconcile: unit %r references secret %s but it is not "
+                                   "in the environment — credential not seeded, tool will "
+                                   "fail at call", unit, name)
+                continue
+
+            # 需要 cipher 才能加密;懒构造,缺主密钥只 WARN 一次后整批跳过
+            if cipher is None and not cipher_unavailable:
+                try:
+                    cipher = get_cipher()
+                except CredentialKeyError as e:
+                    cipher_unavailable = True
+                    logger.warning("reconcile: ARTIFACTFLOW_CREDENTIAL_KEY unavailable "
+                                   "(%s) — seeded credentials not encrypted; credentialed "
+                                   "tools will fail at call until it is set", e)
+            if cipher is None:
+                continue
+
+            if row is not None:
+                try:
+                    if cipher.decrypt(row.encrypted_value) == env_val:
+                        continue  # 未变,skip
+                except Exception:
+                    pass  # 密文坏 / 主密钥换过 → 重新加密覆盖
+                row.encrypted_value = cipher.encrypt(env_val)
+                row.source = "seeded"
+            else:
+                session.add(ToolCredential(
+                    unit_name=unit,
+                    placeholder_name=name,
+                    encrypted_value=cipher.encrypt(env_val),
+                    source="seeded",
+                ))
 
 
 # --------------------------------------------------------------------------

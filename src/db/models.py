@@ -896,3 +896,45 @@ class AgentUnit(Base):
 
     def __repr__(self) -> str:
         return f"<AgentUnit(agent={self.agent_name}, unit={self.unit_name}, state={self.member_state})>"
+
+
+class ToolCredential(Base):
+    """
+    External 工具单元的可逆加密凭证(B-4,unit 级多行,仿 artifact_blobs 与定义隔离)。
+
+    一 unit 多行,每行一个 `{{placeholder}}` 的 Fernet 密文(复用 secrets.py 的 {{NAME}}
+    替换语义,值的来源从 env 换成此表 → 不退化多 secret 能力)。凭证 + base_url 是 **unit
+    级**(toolset 共享给所有 member;要 per-endpoint 不同 key = 拆 unit)。
+
+    **故意不建 ToolUnit→credentials relationship**:per-turn 快照 / catalog / resolver
+    全程不载入密文(决策:lazy,密文只在 execute 期由 CredentialResolver 按 unit 名直查解开)。
+
+    source:seeded(reconciler 从 env 取值加密落库,UI 不可改)/ dynamic(UI 写明文加密)。
+    """
+    __tablename__ = "tool_credentials"
+
+    unit_name: Mapped[str] = mapped_column(
+        String(64),
+        ForeignKey("tool_units.name", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    # {{NAME}} 占位符名(seeded 即 TOOL_SECRET_*;dynamic 由 UI/定义决定)
+    placeholder_name: Mapped[str] = mapped_column(String(128), primary_key=True)
+
+    # Fernet 密文(urlsafe-base64 文本)。**可逆加密、非哈希**:execute 时要解开外发。
+    encrypted_value: Mapped[str] = mapped_column(Text, nullable=False)
+
+    # seeded(env 种子,reconciler 拥有)/ dynamic(UI 写)。reconciler 只 prune seeded 行。
+    source: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="seeded", server_default="seeded"
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+    def __repr__(self) -> str:
+        return f"<ToolCredential(unit={self.unit_name}, placeholder={self.placeholder_name}, source={self.source})>"

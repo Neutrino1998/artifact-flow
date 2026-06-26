@@ -230,9 +230,23 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint('agent_name', 'unit_name'),
     )
 
+    # tool_credentials(B-4):external 工具 unit 级可逆加密凭证。FK→tool_units CASCADE
+    # (删 unit 连带删密文)。故意无 ToolUnit→credentials relationship,密文不进快照/catalog。
+    op.create_table('tool_credentials',
+        sa.Column('unit_name', sa.String(length=64), nullable=False),
+        sa.Column('placeholder_name', sa.String(length=128), nullable=False),
+        sa.Column('encrypted_value', sa.Text(), nullable=False),
+        sa.Column('source', sa.String(length=16), nullable=False, server_default='seeded'),
+        sa.Column('created_at', sa.DateTime(), server_default=sa.func.now(), nullable=False),
+        sa.Column('updated_at', sa.DateTime(), server_default=sa.func.now(), nullable=False),
+        sa.ForeignKeyConstraint(['unit_name'], ['tool_units.name'], ondelete='CASCADE'),
+        sa.PrimaryKeyConstraint('unit_name', 'placeholder_name'),
+    )
+
 
 def downgrade() -> None:
     """Drop all tables."""
+    op.drop_table('tool_credentials')
     op.drop_table('agent_units')
     op.drop_table('tool_members')
     op.drop_table('agents')

@@ -245,6 +245,13 @@ class Settings(BaseSettings):
     CUSTOM_TOOL_SECRET_PREFIX: str = "TOOL_SECRET_"  # 自定义工具 {{VAR}} 只能解析此前缀的环境变量；
                                                      # 把签名密钥 / DB 密码挡在自定义工具可触及范围外
 
+    # 工具凭证主密钥(B-4)。external 工具凭证可逆加密落库(tool_credentials),此密钥
+    # 加密/解密用 —— 单把、不轮转、与 JWT_SECRET 同信任模型(DB dump 无此密钥=废密文)。
+    # 生成:python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+    # 空 = 未配置:无凭证工具的部署无需设;有凭证引用却没设 → reconcile 不种密文、工具
+    # 调用时 loud-fail(不阻塞启动)。Fernet key 格式(32B urlsafe-base64),格式错构造即抛。
+    CREDENTIAL_KEY: str = ""
+
     # 输入限制
     MAX_MESSAGE_CHARS: int = 20000   # 单条用户输入 / inject 内容字符上限（超即 422）；
                                      # 超大粘贴在前端转为暂存附件而非 inline 消息

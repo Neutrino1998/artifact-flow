@@ -66,6 +66,48 @@ def _resolve_string(text: str) -> str:
     return _TEMPLATE_PATTERN.sub(_replace, text)
 
 
+def extract_placeholders(obj: Any) -> set:
+    """递归收集对象内所有 `{{NAME}}` 占位符名(去前缀/裸名,原样返回花括号内的串)。
+
+    reconciler 用它知道一个 unit 的定义引用了哪些 secret 占位符 → 据此从 env 取值
+    加密落库。不校验前缀(前缀闸是 `assert_secret_refs_allowed` 的事,在 seed 解析期跑)。
+    """
+    names: set = set()
+    if isinstance(obj, str):
+        names.update(m.group(1) for m in _TEMPLATE_PATTERN.finditer(obj))
+    elif isinstance(obj, dict):
+        for value in obj.values():
+            names |= extract_placeholders(value)
+    elif isinstance(obj, list):
+        for item in obj:
+            names |= extract_placeholders(item)
+    return names
+
+
+def substitute_templates(obj: Any, values: dict) -> Any:
+    """用 `values`(占位符名 → 明文)替换对象内的 `{{NAME}}`。
+
+    与 env 版 `resolve_secrets` 的区别:值来源是**传入的 map**(凭证表解密结果),
+    不读 env、不做前缀白名单 —— 值已是某 unit 自己策展的凭证行,前缀闸只在 env
+    种子边界(seed/reconcile)需要。缺占位符 → `SecretResolutionError`(execute 期
+    被 HttpTool 捕成 generic error + ops log,绝不外发占位符原文)。
+    """
+    if isinstance(obj, str):
+        def _replace(match: "re.Match") -> str:
+            name = match.group(1)
+            if name not in values:
+                raise SecretResolutionError(
+                    f"Template variable '{{{{{name}}}}}' has no configured credential"
+                )
+            return values[name]
+        return _TEMPLATE_PATTERN.sub(_replace, obj)
+    elif isinstance(obj, dict):
+        return {k: substitute_templates(v, values) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [substitute_templates(item, values) for item in obj]
+    return obj
+
+
 def assert_secret_refs_allowed(obj: Any) -> None:
     """load-time 闸门:递归断言对象内每个 {{VAR}} 引用都用了白名单前缀。
 

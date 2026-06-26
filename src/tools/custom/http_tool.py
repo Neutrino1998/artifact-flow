@@ -10,7 +10,11 @@ from typing import Any, Dict, List, Optional
 from dataclasses import dataclass, field
 
 from tools.base import BaseTool, ToolResult, ToolParameter, ToolPermission
-from tools.custom.secrets import resolve_secrets, SecretResolutionError
+from tools.custom.secrets import (
+    resolve_secrets,
+    substitute_templates,
+    SecretResolutionError,
+)
 from utils.logger import get_logger
 
 logger = get_logger("ArtifactFlow")
@@ -42,7 +46,7 @@ class HttpTool(BaseTool):
     3. 密钥处理：{{VAR}} 在运行时从环境变量注入，不暴露给 LLM
     """
 
-    def __init__(self, config: HttpToolConfig):
+    def __init__(self, config: HttpToolConfig, *, unit_name=None, credential_resolver=None):
         super().__init__(
             name=config.name,
             description=config.description,
@@ -54,6 +58,11 @@ class HttpTool(BaseTool):
         self._response_extract = config.response_extract
         self._timeout = config.timeout
         self._param_defs = config.parameters
+        # 运行期凭证注入(B-4):snapshot 重建时灌入 unit 名 + resolver。两者齐备 →
+        # {{NAME}} 从 tool_credentials(加密落库)解,否则回落 env(legacy loader /
+        # 直接构造的工具,无 unit 上下文)。凭证 = unit 级,故按 unit 名(非 full_name)查。
+        self._unit_name = unit_name
+        self._credential_resolver = credential_resolver
 
     def get_parameters(self) -> List[ToolParameter]:
         return self._param_defs
@@ -71,10 +80,17 @@ class HttpTool(BaseTool):
         if not self._endpoint:
             return ToolResult(success=False, error="Tool endpoint not configured")
 
-        # 运行时注入 secrets（缺失 / 非白名单前缀 → 拒绝，不外发占位符）
+        # 运行时注入 secrets(缺失 / 非白名单前缀 / 解密失败 → 拒绝,不外发占位符)。
+        # DB 路径(B-4):resolver + unit 名齐备 → 按 unit 解密凭证表填 {{NAME}};
+        # 回落路径:无注入(legacy loader / 测试直接构造)→ env 解析(白名单前缀)。
         try:
-            headers = resolve_secrets(self._headers)
-            endpoint = resolve_secrets(self._endpoint)
+            if self._credential_resolver is not None and self._unit_name is not None:
+                values = await self._credential_resolver.resolve(self._unit_name)
+                headers = substitute_templates(self._headers, values)
+                endpoint = substitute_templates(self._endpoint, values)
+            else:
+                headers = resolve_secrets(self._headers)
+                endpoint = resolve_secrets(self._endpoint)
         except SecretResolutionError as e:
             logger.error(f"HttpTool '{self.name}' secret resolution failed: {e}")
             return ToolResult(

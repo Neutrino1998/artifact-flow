@@ -89,6 +89,8 @@ httpx>=0.26.0
 PyJWT>=2.8.0
 # 密码哈希
 bcrypt>=4.1.0
+# 工具凭证可逆加密（B-4 tool_credential：Fernet = AES-128-CBC + HMAC，单主密钥、不轮转）
+cryptography>=42.0.0
 
 # ========================================
 # CLI 依赖

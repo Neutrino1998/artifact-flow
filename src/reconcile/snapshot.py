@@ -12,7 +12,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.models import Agent, AgentUnit, ToolMember, ToolUnit
+from repositories.tool_credential_repo import ToolCredentialRepository
 from tools.base import BaseTool, ToolParameter, is_builtin_name
+from tools.custom.credentials import CredentialResolver
 from tools.custom.http_tool import HttpTool, HttpToolConfig
 from utils.logger import get_logger
 
@@ -54,8 +56,19 @@ class RegistrySnapshot:
     agents: Dict[str, AgentSnapshot]      # agent_name -> AgentSnapshot
 
 
-def build_http_tool(full_name: str, permission: str, definition: dict) -> HttpTool:
-    """从 tool_member 行重建 HttpTool。full_name 作工具名、permission 作等级。"""
+def build_http_tool(
+    full_name: str,
+    permission: str,
+    definition: dict,
+    *,
+    unit_name: Optional[str] = None,
+    credential_resolver: Optional[CredentialResolver] = None,
+) -> HttpTool:
+    """从 tool_member 行重建 HttpTool。full_name 作工具名、permission 作等级。
+
+    unit_name + credential_resolver 灌入运行期凭证通路(B-4):execute 期 {{NAME}}
+    从 tool_credentials 按 unit 解密。两者缺省(测试直接调)→ HttpTool 回落 env 解析。
+    """
     params = [
         ToolParameter(
             name=p["name"],
@@ -78,7 +91,7 @@ def build_http_tool(full_name: str, permission: str, definition: dict) -> HttpTo
         response_extract=definition.get("response_extract"),
         timeout=definition.get("timeout", 60),
     )
-    return HttpTool(config)
+    return HttpTool(config, unit_name=unit_name, credential_resolver=credential_resolver)
 
 
 async def load_registry_snapshot(session: AsyncSession) -> RegistrySnapshot:
@@ -95,6 +108,10 @@ async def load_registry_snapshot(session: AsyncSession) -> RegistrySnapshot:
     不 raise —— 本函数每 turn 每用户都跑,一行坏数据 raise 会拖垮全机群;主防线是写入期
     loud-fail(reconcile / B-4 CRUD),这里只作兜底,不该有全局爆炸半径。
     """
+    # 单个 resolver 喂给本快照所有 HttpTool:句柄带 turn session(经 repo),execute 期
+    # 按 unit 名 lazy 查密文 + 解密。密文不在此预载(故意无 ToolUnit→credentials 关系)。
+    credential_resolver = CredentialResolver(ToolCredentialRepository(session))
+
     units_rows = (await session.execute(
         select(ToolUnit).order_by(ToolUnit.name)
     )).scalars().all()
@@ -150,7 +167,9 @@ async def load_registry_snapshot(session: AsyncSession) -> RegistrySnapshot:
         unit = units.get(m.unit_name)
         if unit is not None and unit.provider == "http":
             external_tools[m.full_name] = build_http_tool(
-                m.full_name, m.permission, m.definition or {}
+                m.full_name, m.permission, m.definition or {},
+                unit_name=m.unit_name,
+                credential_resolver=credential_resolver,
             )
 
     agents: Dict[str, AgentSnapshot] = {
