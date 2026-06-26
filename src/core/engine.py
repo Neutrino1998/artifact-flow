@@ -928,20 +928,23 @@ async def execute_loop(
             # 取消落入正常 TOOL_COMPLETE 流（success=False）：START/COMPLETE 配对
             # 不变量保持，下一轮 history 里模型能看到"这次调用被用户打断"。
             # 随后的 _check_cancelled（下个工具前 / while 顶部）置终态 flag 收口。
-            # wants_context 工具(如 search_tools)在 execute 期需要引擎上下文(调用方
-            # agent 的可调视图 + 本 turn 工具注册表):调用时注入 ToolExecutionContext,
-            # 不存实例态(进程级实例并发 turn 共享,故 per-call 注入而非 per-instance)。
-            # context 只装非密事实(secret 走 B-4 credential resolver,不走这条)。
-            tool_coro = (
-                tool(_context=ToolExecutionContext(
-                    agent_name=agent_name,
-                    effective_toolset=effective_toolsets[agent_name],
-                    tools=tools,
-                ), **params)
-                if getattr(tool, "wants_context", False)
-                else tool(**params)
-            )
             try:
+                # wants_context 工具(如 search_tools)在 execute 期需要引擎上下文(调用方
+                # agent 的可调视图 + 本 turn 工具注册表):调用时注入 ToolExecutionContext,
+                # 不存实例态(进程级实例并发 turn 共享,故 per-call 注入而非 per-instance)。
+                # context 只装非密事实(secret 走 B-4 credential resolver,不走这条)。
+                # 协程构造放 try 内:`tool(...)` 的**参数绑定**在 call 那一刻同步发生(协程
+                # 体尚未运行),任何绑定异常(如模型误吐 `_context` 与注入键撞车)需被这层
+                # per-tool except 接住、降级为单工具失败,而非漏到 turn 级掀翻整轮。
+                tool_coro = (
+                    tool(_context=ToolExecutionContext(
+                        agent_name=agent_name,
+                        effective_toolset=effective_toolsets[agent_name],
+                        tools=tools,
+                    ), **params)
+                    if getattr(tool, "wants_context", False)
+                    else tool(**params)
+                )
                 tool_result = await run_cancellable(
                     tool_coro, _is_cancelled, config.CANCEL_CHECK_INTERVAL
                 )

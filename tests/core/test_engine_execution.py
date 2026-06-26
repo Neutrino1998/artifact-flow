@@ -384,6 +384,31 @@ class TestToolExecution:
         assert "weather" in completes[0]["data"]["result_data"]
         assert "Fake weather" in completes[0]["data"]["result_data"]
 
+    async def test_wants_context_param_collision_is_tool_failure_not_turn_error(self):
+        # 模型误吐 `_context` 参数 → 与引擎注入键撞车 → 绑定 TypeError。协程构造在 try 内,
+        # 故降级为单工具失败(tool_complete success=False),turn 照常继续并完成、不掀翻整轮。
+        from tools.builtin.search_tools import SearchToolsTool
+
+        agent = _FakeAgentConfig(tools={"search_tools": "auto"})
+        tools = {"search_tools": SearchToolsTool()}
+        xml = _tool_call_xml("search_tools", _context="oops")
+        rounds = [
+            _tool_call_chunks(xml),
+            _simple_llm_chunks("recovered"),
+        ]
+
+        result, emitted, store = await _run_engine(
+            _make_fake_stream_sequence(rounds),
+            agents={"lead_agent": agent},
+            tools=tools,
+        )
+
+        completes = [e for e in emitted if e["type"] == "tool_complete" and e["data"]["tool"] == "search_tools"]
+        assert len(completes) == 1
+        assert completes[0]["data"]["success"] is False     # 工具级失败
+        assert result.get("error") is not True              # turn 未被掀翻
+        assert result.get("completed") is True              # 第二轮正常收尾
+
     async def test_search_tools_blocked_when_not_in_toolset(self):
         # 未授 search_tools(无 deferred unit / 未声明)→ 走白名单闸,不路由
         from tools.builtin.search_tools import SearchToolsTool
