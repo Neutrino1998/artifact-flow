@@ -255,7 +255,10 @@ class TestEnvironment:
         #    call_subagent 的 valid_agents 仍按进程 agent 列表(与 prod dependencies 一致)。
         process_agents = load_all_agents()
         print(f"Loaded agents: {list(process_agents.keys())}")
-        valid_agents = [n for n in process_agents if n != "lead_agent"]
+        # 与 prod dependencies._load_tools 一致:排除 lead 自身 + internal agent
+        # (如 compact_agent)—— 否则 harness 的 call_subagent 会接受 prod 拒绝的目标。
+        valid_agents = [n for n, c in process_agents.items()
+                        if n != "lead_agent" and not c.internal]
         builtin = [CallSubagentTool(valid_agents=valid_agents), WebSearchTool(), WebFetchTool()]
         self._tools = build_tool_map(builtin, [])
 

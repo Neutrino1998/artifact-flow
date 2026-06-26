@@ -20,7 +20,7 @@ from typing import Dict, List, Optional, Tuple
 import yaml
 
 from agents.loader import load_agent
-from tools.base import BUILTIN_TOOL_NAMES
+from tools.base import BUILTIN_TOOL_NAMES, is_builtin_name
 from tools.custom.secrets import assert_secret_refs_allowed
 
 _VALID_PARAM_TYPES = {"string", "integer", "number", "boolean"}
@@ -301,7 +301,7 @@ def _check_tool_collisions(seeds: List[ToolUnitSeed]) -> None:
     unit_names: set = set()
     full_names: Dict[str, str] = {}
     for s in seeds:
-        if s.name in BUILTIN_TOOL_NAMES:
+        if is_builtin_name(s.name):
             raise SeedError(
                 f"tool unit name '{s.name}' collides with a builtin/reserved tool name"
             )
@@ -309,7 +309,7 @@ def _check_tool_collisions(seeds: List[ToolUnitSeed]) -> None:
             raise SeedError(f"duplicate tool unit name '{s.name}' in config/tools")
         unit_names.add(s.name)
         for m in s.members:
-            if m.full_name in BUILTIN_TOOL_NAMES:
+            if is_builtin_name(m.full_name):
                 raise SeedError(
                     f"tool full_name '{m.full_name}' (unit '{s.name}') collides with "
                     f"a builtin/reserved tool name"

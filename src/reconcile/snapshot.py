@@ -12,8 +12,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.models import Agent, AgentUnit, ToolMember, ToolUnit
-from tools.base import BUILTIN_TOOL_NAMES, BaseTool, ToolParameter
+from tools.base import BaseTool, ToolParameter, is_builtin_name
 from tools.custom.http_tool import HttpTool, HttpToolConfig
+from utils.logger import get_logger
+
+logger = get_logger("ArtifactFlow")
 
 
 @dataclass
@@ -81,8 +84,16 @@ def build_http_tool(full_name: str, permission: str, definition: dict) -> HttpTo
 async def load_registry_snapshot(session: AsyncSession) -> RegistrySnapshot:
     """一次性读全部注册表行,重建 external 工具 + unit 元数据 + agent 元数据。
 
-    显式 order_by:本快照喂进系统提示词的工具渲染顺序(EffectiveToolset.names()),
-    无序则 PG 不保证行序 → 提示词抖动击穿 APC 缓存 + prompt 快照 flaky。
+    显式 order_by 定序的是 **external/unit 轴**(member/agent_unit 行序)—— 这一轴喂
+    进系统提示词的工具渲染顺序(EffectiveToolset.names() 里 unit 展开部分),无序则
+    PG 不保证行序 → 提示词抖动击穿 APC 缓存 + prompt 快照 flaky。**builtin 轴**的顺序
+    另有来源:`agent.builtin_tools` JSON key 序 = reconcile 时的 MD 声明序,由
+    order-preserving `JSON` 列(非 `JSONB`)在 PG/SQLite 都保序,不归这里的 order_by 管。
+
+    撞名兜底(skip+log,非 raise):external 名撞 builtin/reserved 时**跳过该行 + 打
+    WARNING**,让 builtin 对象在 controller_factory 合并里继续活(消除遮蔽 = 权限绕过)。
+    不 raise —— 本函数每 turn 每用户都跑,一行坏数据 raise 会拖垮全机群;主防线是写入期
+    loud-fail(reconcile / B-4 CRUD),这里只作兜底,不该有全局爆炸半径。
     """
     units_rows = (await session.execute(
         select(ToolUnit).order_by(ToolUnit.name)
@@ -97,8 +108,18 @@ async def load_registry_snapshot(session: AsyncSession) -> RegistrySnapshot:
         select(AgentUnit).order_by(AgentUnit.agent_name, AgentUnit.unit_name)
     )).scalars().all()
 
-    units: Dict[str, UnitInfo] = {
-        u.name: UnitInfo(
+    units: Dict[str, UnitInfo] = {}
+    for u in units_rows:
+        if is_builtin_name(u.name):
+            # unit 名撞 builtin/reserved → 不 surface(其成员随之不重建,见下),
+            # 防 B-3/B-4/C 精确匹配路径的命名空间歧义。
+            logger.warning(
+                "Skipping external tool unit %r: name collides with a builtin/reserved "
+                "tool name (row bypassed write-time validation — fix the DB row)",
+                u.name,
+            )
+            continue
+        units[u.name] = UnitInfo(
             name=u.name,
             kind=u.kind,
             description=u.description,
@@ -107,23 +128,22 @@ async def load_registry_snapshot(session: AsyncSession) -> RegistrySnapshot:
             provider=u.provider,
             source=u.source,
         )
-        for u in units_rows
-    }
 
     external_tools: Dict[str, BaseTool] = {}
     for m in member_rows:
-        # 运行期撞名闸(decision-11 全局唯一不变量的运行期镜像):external full_name
-        # 落进合并后的 tools dict,撞 builtin/reserved 名会**遮蔽 builtin 工具对象连同
-        # 其 permission**(CONFIRM builtin 被换成任意 HttpTool = 权限绕过)。reconcile
-        # 已在写入期对 seeded 撞名 loud-fail;此处是读侧兜底,堵 dynamic 行(B-4)/手改
-        # DB 绕过写校验。B-4 CRUD 须在写入期校验,这道只作 backstop。
-        if m.full_name in BUILTIN_TOOL_NAMES:
-            raise RuntimeError(
-                f"External tool full_name '{m.full_name}' (unit '{m.unit_name}') "
-                f"collides with a builtin/reserved tool name — it would shadow the "
-                f"builtin object and its permission. Remove/rename the DB row "
-                f"(dynamic tools must not reuse builtin names)."
+        # 撞名兜底:full_name 撞 builtin/reserved → 跳过(不进 external_tools),让
+        # builtin 在 controller_factory 合并里保活(消除遮蔽 = 权限绕过)。skip+log
+        # 而非 raise:本函数每 turn 每用户跑,raise = 一行坏数据拖垮全机群;主防线在
+        # 写入期(reconcile / B-4 CRUD loud-fail),这里只兜绕过写校验的行。
+        if is_builtin_name(m.full_name):
+            logger.warning(
+                "Skipping external tool member %r (unit %r): full_name collides with a "
+                "builtin/reserved tool name — builtin kept live (fix the DB row)",
+                m.full_name, m.unit_name,
             )
+            continue
+        # unit 名撞 builtin 被上面跳过的,其成员 m.unit_name ∉ units → 自然不重建
+        # (无需在此再判 / 再 log,unit 级 WARNING 已覆盖)。
         if m.unit_name in units:
             units[m.unit_name].member_full_names.append(m.full_name)
         # 仅 http provider 重建为 HttpTool;mcp provider 的成员运行期另接

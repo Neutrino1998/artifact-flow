@@ -308,6 +308,16 @@ GLOBAL_BUILTIN_TOOL_NAMES = {"web_search", "web_fetch", "call_subagent", "search
 BUILTIN_TOOL_NAMES = RESERVED_TOOL_NAMES | GLOBAL_BUILTIN_TOOL_NAMES
 
 
+def is_builtin_name(name: str) -> bool:
+    """external 名是否撞 builtin/reserved(决策 11 的 full_name 全局唯一不变量)。
+
+    单一谓词,写侧种子校验(reconcile)与读侧快照兜底(snapshot)共用 —— 不变量的
+    规则只此一处,两侧覆盖不会发散(否则一侧加了新 reserved 形态、另一侧忘加,撞名
+    行就从兜底溜过)。
+    """
+    return name in BUILTIN_TOOL_NAMES
+
+
 def build_tool_map(
     builtin_tools: List[BaseTool],
     custom_tools: List[BaseTool],
