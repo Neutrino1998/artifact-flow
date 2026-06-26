@@ -328,6 +328,14 @@ async def get_conversation_manager(
     return ConversationManager(repo)
 
 
+async def get_tool_registry_manager(
+    session: AsyncSession = Depends(get_db_session),
+):
+    """每个请求获得独立的 ToolRegistryManager(external 工具 CRUD;B-4)。"""
+    from core.tool_registry_manager import ToolRegistryManager
+    return ToolRegistryManager(session)
+
+
 # ============================================================
 # 用户认证依赖
 # ============================================================

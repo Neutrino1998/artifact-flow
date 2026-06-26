@@ -223,6 +223,24 @@ config/tools/
 - **加密 ≠ 哈希**:`encrypted_value` 必须**可逆加密**(AES/Fernet)—— execute 时要解开把真 key 发出去;不存任何单向哈希(sha256 不可逆、无法还原 key,只会徒增混淆)。
 - **解密值纪律**:只在 execute 期存在,永不进日志 / 事件 / `tool_member.definition` / 给模型看的 catalog(沿用现有 `HttpTool` execute 期 resolve + 失败回 generic message 的先例)。
 
+### B-4 进展(2026-06-26 落地;切片 = 后端全先行,前端随后)
+
+> 切法(2026-06-26 与用户敲定):B-4 = **2 片**——后端全(凭证 + CRUD + provider)先合 main、前端随后。后端两笔 commit。
+
+**第一笔 —— 凭证统一加密落库(`84956e5`,red-line 核心)**:
+- **`tool_credentials(unit_name FK CASCADE, placeholder_name, encrypted_value, source)`** PK`(unit,placeholder)`,就地写进 squash `0001`(全新建库假设,沿用 A 的 `has_blob`/B-1 四表姿态,不加 0002;SQLite dev 走 `create_all`)。**故意无 `ToolUnit→credentials` relationship** → per-turn 快照 / catalog / resolver 全程不载入密文(密文只在 execute 期由 resolver 按 unit 名直查)。
+- **`CredentialCipher`**(Fernet=AES-128-CBC+HMAC,`config.CREDENTIAL_KEY` 单主密钥、不轮转、与 JWT_SECRET 同信任模型)+ **`CredentialResolver`**(`tools/custom/credentials.py`):按 unit 名 lazy 查+解密,**无凭证 unit 返回 `{}` 且不构造 cipher** → 无凭证部署无需设主密钥。
+- **`secrets.py`** 加 `extract_placeholders` + `substitute_templates`(纯 map 替换、不读 env、不做前缀闸 —— 值已是 unit 自己策展的凭证行);env `resolve_secrets` 保留作 legacy(loader / 直接构造工具)回落。
+- **`HttpTool.execute`**:`build_http_tool` 灌入 `unit_name` + resolver(snapshot 路径)→ DB 解密替换 `{{NAME}}`;缺注入 → env 回落。解密/主密钥失败 → generic 错误 + ops log,不外发占位符。**session 衔接**:`create_controller` 的 `yield` 在 `async with db_manager.session()` 内 → turn session 全程活、工具串行执行,resolver 安全骑 turn session。
+- **reconciler 种 seeded 凭证**(`_reconcile_credentials`):扫定义 `{{NAME}}` → env 取值加密落库,**独立于 unit 定义 hash**(判变靠解密旧行↔比 env 新值,支持 key 轮换);env 缺/主密钥缺 → WARN+跳过(调用时 loud-fail,不阻塞启动,与未配 secret 旧语义一致);定义删占位符/env 删值 → prune;`_prune_unit` 级联删凭证。dynamic 凭证行不碰(UI 拥有)。
+
+**第二笔 —— 后端 CRUD + provider 缝(本片)**:
+- **三层**:`ToolRegistryRepository`(写侧,stage-only)+ `ToolRegistryManager`(use-case 编排、事务边界、撞名闸、seeded 只读、序列化掩码、凭证加密)+ `admin_tools.py` router(transport-only,`ToolRegistryError.status_code`→HTTP)。挂 `/api/v1/admin`、`require_admin`。
+- **端点**:units 增删改查(dynamic-only,seeded `409`)、`/agents`(挂载 UI 用)、`/units/{n}/agents/{a}` PUT/DELETE 挂载(写 dynamic agent_unit;撞 seeded[MD]绑定 `409`)、`/units/{n}/credentials/{ph}` PUT/DELETE(**写-only**:set 收明文加密落库,GET 永不回明文 —— `credentials[]` 只 `{placeholder, configured, source}`)。
+- **撞名 by-construction 闸**(欠条已还):写入期校验 `unit 名禁 __ + ∉ builtin∪reserved∪已存 unit` 且每个 `full_name ∉ builtin∪reserved∪已存 external`;DB `uq_tool_members_full_name` 兜并发 TOCTOU(`IntegrityError`→`409`)。snapshot 读侧 skip+log 退为兜底。
+- **provider 缝 = 不新建抽象**(避过度防御:第二消费者[MCP]尚不存在):`provider` 列(B-1)+ snapshot `provider=="http"` 分派 + controller_factory dict-splat 合并(单 `BaseTool` 形、按 full_name 并)**已是归一化形态**;CRUD 把 dynamic unit 钉死 `provider="http"`/`kind∈{tool,toolset}`、不开 mcp,F 加 `provider=="mcp"` 分支即纯加法。`base_url` 共享靠成员引用同一 `{{...}}` 占位符表达,不另开字段。
+- 验证见两笔的测试小结 + 下方全量。
+
 ---
 
 ## 跨片开放细节(到时敲定 / 需留意)

@@ -25,7 +25,7 @@ from api.dependencies import (
     get_execution_runner,
 )
 from api.middleware import RequestContextMiddleware
-from api.routers import admin, admin_users, auth, chat, artifacts, departments, meta, stream
+from api.routers import admin, admin_tools, admin_users, auth, chat, artifacts, departments, meta, stream
 from observability import (
     LoopLagWatchdog, DeadmanSwitch, RuntimeSampler, JsonlSink,
     resolve_mem_limit_bytes,
@@ -334,6 +334,11 @@ def create_app() -> FastAPI:
     )
     app.include_router(
         admin_runtime.router,
+        prefix="/api/v1/admin",
+        tags=["admin"]
+    )
+    app.include_router(
+        admin_tools.router,
         prefix="/api/v1/admin",
         tags=["admin"]
     )
