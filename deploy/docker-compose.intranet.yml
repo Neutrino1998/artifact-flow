@@ -39,6 +39,31 @@ services:
         max-file: "3"
     restart: unless-stopped
 
+  # One-shot release step (乙2 single-run deploy gate): migrate + reconcile ONCE with the
+  # authoritative env, under a PG advisory lock, then exit. Backends gate on its successful
+  # completion and only serve — enables `--scale backend=N` without N reconciles. Non-zero
+  # exit aborts `up`, so backends never start against an un-migrated / stale-registry DB.
+  release:
+    image: artifactflow:${AF_VERSION:-latest}
+    command: ["release"]
+    volumes:
+      - ../config:/app/config:ro
+      - /etc/localtime:/etc/localtime:ro
+    env_file:
+      - .env
+    environment:
+      - PYTHONUNBUFFERED=1
+    depends_on:
+      postgres:
+        condition: service_healthy
+        required: false
+    restart: "no"
+    logging:
+      driver: json-file
+      options:
+        max-size: "100m"
+        max-file: "3"
+
   backend:
     image: artifactflow:${AF_VERSION:-latest}
     expose:
@@ -52,6 +77,9 @@ services:
       - .env
     environment:
       - PYTHONUNBUFFERED=1
+      # Release handled by the one-shot `release` service above; this backend only serves
+      # (no inline migrate/reconcile). Safe to `--scale backend=N` (also enable Redis).
+      - AF_SKIP_RELEASE=1
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health/ready"]
       interval: 30s
@@ -66,6 +94,8 @@ services:
     cap_add:
       - SYS_PTRACE
     depends_on:
+      release:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
         required: false

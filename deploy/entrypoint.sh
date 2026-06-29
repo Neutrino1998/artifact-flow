@@ -1,8 +1,27 @@
 #!/bin/sh
 set -e
 
+# Release vs serve (乙2 — single-run deploy gate).
+#   - `entrypoint.sh release` → migrate + reconcile once, then EXIT (no serve). Run as a
+#     one-shot compose `release` service that backends gate on via
+#     `depends_on: { release: { condition: service_completed_successfully } }`, or as an
+#     Ansible release task on multi-host. Backends then start with AF_SKIP_RELEASE=1.
+#   - default (serve; "$@" = run_server) → if AF_SKIP_RELEASE is set, a dedicated release
+#     step already migrated+reconciled → just serve. Otherwise (single-box / backward
+#     compat) self-release inline before serving.
+#
+# Why a dedicated release step at scale: the inline path makes EVERY backend run reconcile
+# (leader migrates under an advisory lock, followers re-reconcile) — correct (esp. after
+# the #3 keep-on-env-absent fix) but redundant, and each replica reads its OWN env. One
+# release step with one authoritative env is cleaner and makes the multi-host story
+# trivial. The inline path is kept verbatim for Mode 1 (SQLite single box) + backward compat.
+#
+# NOTE: run_release()'s body is intentionally NOT indented — the PG branch embeds a
+# `python -c "..."` whose Python lines must stay at column 0; re-indenting would corrupt it.
+
 DB_URL="${ARTIFACTFLOW_DATABASE_URLS:-$ARTIFACTFLOW_DATABASE_URL}"
 
+run_release() {
 case "$DB_URL" in
   *sqlite*|"")
     echo "SQLite or no DB configured — skipping Alembic migration"
@@ -60,10 +79,9 @@ async def migrate():
                 # This ensures waiting replicas don't race ahead.
                 print('Alembic migration failed', file=sys.stderr)
                 sys.exit(result.returncode)
-            # config -> DB reconcile under the advisory lock. Followers re-run it
-            # idempotently too (below) so EVERY replica self-certifies config
-            # before serving — a leader-only reconcile would let a follower start
-            # on a stale/empty registry when the leader's reconcile failed.
+            # config -> DB reconcile under the advisory lock. In the inline path, followers
+            # re-run it idempotently too (below) so every replica self-certifies config; the
+            # dedicated `release` step runs only this leader path once (no followers).
             print('Reconciling config -> DB (leader)...')
             rec = subprocess.run(['python', 'scripts/reconcile_config.py'])
             if rec.returncode != 0:
@@ -101,5 +119,24 @@ except Exception as e:
 "
     ;;
 esac
+}
+
+# --- release mode: one-shot migrate + reconcile, no serve ---
+if [ "$1" = "release" ]; then
+    run_release
+    echo "Release complete."
+    exit 0
+fi
+
+# --- serve mode ---
+if [ -n "$AF_SKIP_RELEASE" ]; then
+    # A dedicated release step (compose `release` service / Ansible task) already migrated
+    # + reconciled with one authoritative env. The compose `service_completed_successfully`
+    # gate guarantees it succeeded before this backend starts; an empty/stale registry is
+    # still caught at runtime (controller_factory's lead_agent guard).
+    echo "AF_SKIP_RELEASE set — skipping inline migrate/reconcile (handled by release step)."
+else
+    run_release
+fi
 
 exec "$@"
