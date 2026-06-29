@@ -8,9 +8,8 @@ from cryptography.fernet import Fernet
 from tools.custom.credentials import (
     CredentialCipher,
     CredentialKeyError,
-    CredentialResolver,
+    resolve_all_credentials,
 )
-from tools.custom.secrets import SecretResolutionError
 
 
 def _key() -> str:
@@ -47,63 +46,55 @@ def test_cipher_cross_key_cannot_decrypt():
 
 
 # --------------------------------------------------------------------------
-# CredentialResolver
+# resolve_all_credentials(快照读边界一次性解密)
 # --------------------------------------------------------------------------
 
 
 class _FakeRepo:
-    def __init__(self, rows_by_unit):
-        self._rows = rows_by_unit
+    def __init__(self, rows):
+        self._rows = rows
 
-    async def list_for_unit(self, unit_name):
-        return self._rows.get(unit_name, [])
-
-
-def _row(placeholder, encrypted):
-    return SimpleNamespace(placeholder_name=placeholder, encrypted_value=encrypted)
+    async def list_all(self):
+        return self._rows
 
 
-@pytest.mark.asyncio
-async def test_resolver_decrypts_unit_credentials():
-    key = _key()
-    cipher = CredentialCipher(key)
-    repo = _FakeRepo({"ragflow": [
-        _row("TOOL_SECRET_RAGFLOW_KEY", cipher.encrypt("k1")),
-        _row("TOOL_SECRET_BASE", cipher.encrypt("https://host")),
-    ]})
-    resolver = CredentialResolver(repo, cipher_factory=lambda: cipher)
-    out = await resolver.resolve("ragflow")
-    assert out == {"TOOL_SECRET_RAGFLOW_KEY": "k1", "TOOL_SECRET_BASE": "https://host"}
+def _row(unit, placeholder, encrypted):
+    return SimpleNamespace(
+        unit_name=unit, placeholder_name=placeholder, encrypted_value=encrypted
+    )
 
 
 @pytest.mark.asyncio
-async def test_resolver_no_unit_or_no_rows_returns_empty_without_cipher():
-    # 无 unit / 无凭证行 → {} 且**不构造 cipher**(无凭证部署无需主密钥)
-    def _boom():
-        raise AssertionError("cipher must not be constructed for empty unit")
-
-    resolver = CredentialResolver(_FakeRepo({"x": []}), cipher_factory=_boom)
-    assert await resolver.resolve(None) == {}
-    assert await resolver.resolve("x") == {}
-    assert await resolver.resolve("absent") == {}
-
-
-@pytest.mark.asyncio
-async def test_resolver_missing_key_raises_secret_error():
-    repo = _FakeRepo({"u": [_row("TOOL_SECRET_K", "whatever")]})
-
-    def _no_key():
-        raise CredentialKeyError("ARTIFACTFLOW_CREDENTIAL_KEY is not set")
-
-    resolver = CredentialResolver(repo, cipher_factory=_no_key)
-    with pytest.raises(SecretResolutionError, match="not set"):
-        await resolver.resolve("u")
-
-
-@pytest.mark.asyncio
-async def test_resolver_corrupt_ciphertext_raises_secret_error():
+async def test_resolve_all_decrypts_grouped_by_unit():
     cipher = CredentialCipher(_key())
-    repo = _FakeRepo({"u": [_row("TOOL_SECRET_K", "corrupt-token")]})
-    resolver = CredentialResolver(repo, cipher_factory=lambda: cipher)
-    with pytest.raises(SecretResolutionError, match="failed to decrypt"):
-        await resolver.resolve("u")
+    repo = _FakeRepo([
+        _row("ragflow", "TOOL_SECRET_RAGFLOW_KEY", cipher.encrypt("k1")),
+        _row("ragflow", "TOOL_SECRET_BASE", cipher.encrypt("https://host")),
+        _row("github", "TOOL_SECRET_TOKEN", cipher.encrypt("ght")),
+    ])
+    out = await resolve_all_credentials(repo, cipher_factory=lambda: cipher)
+    assert out == {
+        "ragflow": {"TOOL_SECRET_RAGFLOW_KEY": "k1", "TOOL_SECRET_BASE": "https://host"},
+        "github": {"TOOL_SECRET_TOKEN": "ght"},
+    }
+
+
+@pytest.mark.asyncio
+async def test_resolve_all_empty_returns_empty_without_cipher():
+    # 无凭证行 → {} 且**不构造 cipher**(无凭证部署 snapshot 不触 cipher)
+    def _boom():
+        raise AssertionError("cipher must not be constructed when there are no rows")
+
+    assert await resolve_all_credentials(_FakeRepo([]), cipher_factory=_boom) == {}
+
+
+@pytest.mark.asyncio
+async def test_resolve_all_corrupt_row_skipped_not_raised():
+    # 单行解密失败 → skip(不 raise,不炸整轮);其余行照常返回。受影响工具 execute 期再 fail。
+    cipher = CredentialCipher(_key())
+    repo = _FakeRepo([
+        _row("u", "TOOL_SECRET_OK", cipher.encrypt("good")),
+        _row("u", "TOOL_SECRET_BAD", "corrupt-token"),
+    ])
+    out = await resolve_all_credentials(repo, cipher_factory=lambda: cipher)
+    assert out == {"u": {"TOOL_SECRET_OK": "good"}}      # 坏行被跳过,好行保留

@@ -355,6 +355,15 @@ def validate_config() -> None:
             "the runtime free of missing-key branches. Generate one with: python -c "
             "\"from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())\""
         )
+    # Validate the Fernet key format at startup (non-empty already checked), so the
+    # per-turn snapshot decrypt path never carries a key-validity branch: a malformed
+    # key fails loudly here at boot, not silently on every turn. Imported lazily to
+    # avoid a config<->credentials import cycle.
+    from tools.custom.credentials import CredentialCipher, CredentialKeyError
+    try:
+        CredentialCipher(config.CREDENTIAL_KEY)
+    except CredentialKeyError as e:
+        raise RuntimeError(str(e)) from e
     # CORS footgun guard (DEP-01): with credentials enabled, Starlette reflects
     # the request Origin whenever CORS_ORIGINS contains "*", which silently turns
     # an env misconfig (ARTIFACTFLOW_CORS_ORIGINS='["*"]') into "any site may read

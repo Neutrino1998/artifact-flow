@@ -906,8 +906,9 @@ class ToolCredential(Base):
     替换语义,值的来源从 env 换成此表 → 不退化多 secret 能力)。凭证 + base_url 是 **unit
     级**(toolset 共享给所有 member;要 per-endpoint 不同 key = 拆 unit)。
 
-    **故意不建 ToolUnit→credentials relationship**:per-turn 快照 / catalog / resolver
-    全程不载入密文(决策:lazy,密文只在 execute 期由 CredentialResolver 按 unit 名直查解开)。
+    **故意不建 ToolUnit→credentials relationship**:catalog 不载入密文;per-turn 快照在
+    读边界(resolve_all_credentials)一次性解密成 {unit: {placeholder: 明文}} 灌进 HttpTool,
+    引擎循环不持 DB 句柄(执行生命周期 #4)。解密值只在该 turn 内存活,不进事件 / catalog。
 
     source:seeded(reconciler 从 env 取值加密落库,UI 不可改)/ dynamic(UI 写明文加密)。
     """

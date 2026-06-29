@@ -18,12 +18,11 @@ class ToolCredentialRepository(BaseRepository[ToolCredential]):
     def __init__(self, session: AsyncSession):
         super().__init__(session, ToolCredential)
 
-    async def list_for_unit(self, unit_name: str) -> List[ToolCredential]:
-        """某 unit 的全部凭证行(含密文)。resolver 在 execute 期按 unit 名直查。"""
+    async def list_all(self) -> List[ToolCredential]:
+        """全部凭证行(含密文),按 (unit, placeholder) 定序。snapshot 读边界一次性解密用。"""
         return list((await self._session.execute(
             select(ToolCredential)
-            .where(ToolCredential.unit_name == unit_name)
-            .order_by(ToolCredential.placeholder_name)
+            .order_by(ToolCredential.unit_name, ToolCredential.placeholder_name)
         )).scalars().all())
 
     async def placeholder_map(self, unit_name: str) -> Dict[str, str]:

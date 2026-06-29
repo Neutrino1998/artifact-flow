@@ -1,22 +1,25 @@
 """
-工具凭证加密 + 运行期解析(B-4)。
+工具凭证加密 + 快照期解析(B-4)。
 
 两块:
   - `CredentialCipher` —— Fernet 对称可逆加密(AES-128-CBC + HMAC)。主密钥单把、
     不轮转(config.CREDENTIAL_KEY)。**可逆、非哈希**:execute 时要解开把真 key 外发。
-  - `CredentialResolver` —— 运行期读侧:按 unit 名查 tool_credentials 行、解密成
-    {placeholder: 明文} map。**lazy 到 execute、只解被调工具的 unit**;无凭证行的
-    unit 返回 {} 且永不构造 cipher(无凭证部署无需设 CREDENTIAL_KEY)。
+  - `resolve_all_credentials` —— **快照读边界**一次性把全部凭证行解密成
+    {unit_name: {placeholder: 明文}}。引擎循环因此不再持 DB 句柄(执行生命周期 #4):
+    snapshot 在唯一的读 DB 阶段解密,结果以纯 dict 灌进 HttpTool,execute 退回纯 CPU。
+    单行解密失败(主密钥轮换 / 密文损坏)→ skip + WARNING,**不 raise** —— 一行坏数据
+    不该炸掉整轮装配(snapshot 每 turn 每用户跑,爆炸半径须有界,同撞名 skip+log);
+    受影响工具在 execute 期因占位符缺失 loud-fail(generic error)。主密钥缺/格式非法
+    在 startup 由 validate_config 拦下,故此处无「key 有效性」分支。
 
 红线(贯穿 B-4):此通路只发 operator/unit 级凭证给**受信 backend** HttpTool;
 沙盒工具永不拿凭证、per-user 身份透传是另一根 defer 的轴(见 plan Non-goals)。
 解密值只在 execute 期存在,永不进日志 / 事件 / definition / 给模型看的 catalog。
 """
 
-from typing import Dict, Optional
+from typing import Dict
 
 from config import config
-from tools.custom.secrets import SecretResolutionError
 from utils.logger import get_logger
 
 logger = get_logger("ArtifactFlow")
@@ -59,39 +62,29 @@ def get_cipher() -> CredentialCipher:
     return CredentialCipher(config.CREDENTIAL_KEY)
 
 
-class CredentialResolver:
-    """运行期凭证解析:按 unit 名查行 + 解密。HttpTool 在 execute 期持有并调用。
+async def resolve_all_credentials(repo, cipher_factory=get_cipher) -> Dict[str, Dict[str, str]]:
+    """全部凭证行 → {unit_name: {placeholder: 明文}}。快照读边界一次性解密。
 
-    句柄带 live DB session(经 repo);引擎执行在有 DB 的 turn session 上下文里、
-    工具串行执行 → 无并发 session 复用。无凭证行的 unit 走快路径(返回 {}、不构造 cipher)。
+    无行 → {}(且不构造 cipher)。单行解密失败 → skip + WARNING,不 raise:坏一行只让
+    该 unit 的工具在 execute 期因占位符缺失 loud-fail,不拖垮整轮装配。主密钥缺/格式非法
+    已在 startup(validate_config)拦下,故此处不判 key 有效性。
     """
-
-    def __init__(self, repo, cipher_factory=get_cipher):
-        self._repo = repo
-        self._cipher_factory = cipher_factory
-
-    async def resolve(self, unit_name: Optional[str]) -> Dict[str, str]:
-        """{placeholder: 明文}。无 unit / 无凭证行 → {}。解密失败 → SecretResolutionError。"""
-        if not unit_name:
-            return {}
-        rows = await self._repo.list_for_unit(unit_name)
-        if not rows:
-            return {}
+    rows = await repo.list_all()
+    if not rows:
+        return {}
+    cipher = cipher_factory()
+    out: Dict[str, Dict[str, str]] = {}
+    for r in rows:
         try:
-            cipher = self._cipher_factory()
-        except CredentialKeyError as e:
-            # 有密文行却没主密钥 = 部署配置错。execute 期 loud-fail(ops log),
-            # HttpTool 捕成 generic 错误给模型,不外发占位符。
-            raise SecretResolutionError(str(e)) from e
-        out: Dict[str, str] = {}
-        for r in rows:
-            try:
-                out[r.placeholder_name] = cipher.decrypt(r.encrypted_value)
-            except SecretResolutionError:
-                raise
-            except Exception as e:
-                raise SecretResolutionError(
-                    f"failed to decrypt credential '{r.placeholder_name}' for unit "
-                    f"'{unit_name}' (master key mismatch or corrupted ciphertext)"
-                ) from e
-        return out
+            plaintext = cipher.decrypt(r.encrypted_value)
+        except Exception:
+            # 主密钥轮换 / 密文损坏:非显然、ops 相关 → WARNING(loud)。skip 而非 raise,
+            # 不让一行坏数据炸掉每 turn 每用户都跑的 snapshot 装配(爆炸半径有界)。
+            logger.warning(
+                "snapshot: failed to decrypt credential %s/%s (master key rotation or "
+                "corrupted ciphertext) — tool will fail at call",
+                r.unit_name, r.placeholder_name,
+            )
+            continue
+        out.setdefault(r.unit_name, {})[r.placeholder_name] = plaintext
+    return out

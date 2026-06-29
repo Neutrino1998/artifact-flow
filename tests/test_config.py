@@ -6,6 +6,7 @@ turning an env misconfig into "any site may read authenticated responses".
 """
 
 import pytest
+from cryptography.fernet import Fernet
 
 from config import config, validate_config
 
@@ -17,7 +18,8 @@ def _valid_prereqs(monkeypatch):
     monkeypatch.setattr(config, "DATABASE_URLS", "")
     monkeypatch.setattr(config, "REDIS_URL", "")  # skip the redis-prefix check
     monkeypatch.setattr(config, "JWT_SECRET", "x" * 32)
-    monkeypatch.setattr(config, "CREDENTIAL_KEY", "x" * 32)
+    # must be a real Fernet key — validate_config format-checks it at startup
+    monkeypatch.setattr(config, "CREDENTIAL_KEY", Fernet.generate_key().decode())
 
 
 def test_missing_credential_key_is_rejected(_valid_prereqs, monkeypatch):
@@ -25,6 +27,14 @@ def test_missing_credential_key_is_rejected(_valid_prereqs, monkeypatch):
     # with no credentialed tools, so the runtime never carries a missing-key branch.
     monkeypatch.setattr(config, "CREDENTIAL_KEY", "")
     with pytest.raises(RuntimeError, match="ARTIFACTFLOW_CREDENTIAL_KEY"):
+        validate_config()
+
+
+def test_malformed_credential_key_is_rejected(_valid_prereqs, monkeypatch):
+    # Non-empty but not a valid Fernet key — caught at startup so the per-turn snapshot
+    # decrypt path never hits a key-validity error.
+    monkeypatch.setattr(config, "CREDENTIAL_KEY", "not-a-fernet-key")
+    with pytest.raises(RuntimeError, match="Fernet key"):
         validate_config()
 
 
