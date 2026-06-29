@@ -20,7 +20,7 @@ from db.models import AgentUnit, ToolMember, ToolUnit
 from repositories.tool_credential_repo import ToolCredentialRepository
 from repositories.tool_registry_repo import ToolRegistryRepository
 from tools.base import is_builtin_name
-from tools.custom.credentials import CredentialKeyError, get_cipher
+from tools.custom.credentials import get_cipher
 from tools.custom.secrets import extract_placeholders
 from utils.logger import get_logger
 
@@ -227,11 +227,8 @@ class ToolRegistryManager:
         self._require_dynamic(u, "configure credentials for")
         if not value:
             raise InvalidUnitError("credential value must be non-empty")
-        try:
-            cipher = get_cipher()
-        except CredentialKeyError as e:
-            # 主密钥未配 → 无法加密。明确告知 operator(可操作),非 500。
-            raise InvalidUnitError(str(e)) from e
+        # 主密钥由 validate_config 强制存在 → get_cipher 不因缺 key 抛(缺 = 启动期已拦)。
+        cipher = get_cipher()
         await self._creds.upsert(unit_name, placeholder, cipher.encrypt(value), "dynamic")
         await self._commit("set credential")
 

@@ -141,16 +141,6 @@ async def test_missing_env_seeds_no_row(db_session, cfg, key, monkeypatch):
     assert set(rows) == {"TOOL_SECRET_RAGFLOW_HOST"}
 
 
-async def test_missing_key_seeds_nothing(db_session, cfg, monkeypatch):
-    # 引用了 secret 但没配主密钥 → 不种密文(WARN),reconcile 不炸、unit 仍物化
-    monkeypatch.setattr(config, "CREDENTIAL_KEY", "")
-    monkeypatch.setenv("TOOL_SECRET_RAGFLOW_HOST", "rag.local")
-    monkeypatch.setenv("TOOL_SECRET_RAGFLOW_KEY", "k-123")
-    _write(cfg[0] / "ragflow.md", _tool_with_secret_md())
-    await _run(db_session, cfg)
-    assert await _creds(db_session, "ragflow") == {}
-
-
 async def test_unit_prune_cascades_credentials(db_session, cfg, key, monkeypatch):
     monkeypatch.setenv("TOOL_SECRET_RAGFLOW_HOST", "rag.local")
     monkeypatch.setenv("TOOL_SECRET_RAGFLOW_KEY", "k-123")

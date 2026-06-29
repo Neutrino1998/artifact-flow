@@ -248,8 +248,10 @@ class Settings(BaseSettings):
     # 工具凭证主密钥(B-4)。external 工具凭证可逆加密落库(tool_credentials),此密钥
     # 加密/解密用 —— 单把、不轮转、与 JWT_SECRET 同信任模型(DB dump 无此密钥=废密文)。
     # 生成:python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
-    # 空 = 未配置:无凭证工具的部署无需设;有凭证引用却没设 → reconcile 不种密文、工具
-    # 调用时 loud-fail(不阻塞启动)。Fernet key 格式(32B urlsafe-base64),格式错构造即抛。
+    # **强制**:validate_config 缺它即 fail-to-start(同 JWT_SECRET)。无凭证部署也须设——
+    # 单点强制换来运行期无「缺 key」分支(reconcile / resolver / set_credential 全假设它在;
+    # 缺 = 部署配置错,启动期 loud-fail,不留运行期谜题)。Fernet key 格式(32B urlsafe-base64),
+    # 格式错构造即抛。
     CREDENTIAL_KEY: str = ""
 
     # 输入限制
@@ -344,6 +346,14 @@ def validate_config() -> None:
         raise RuntimeError(
             "ARTIFACTFLOW_JWT_SECRET environment variable is not set. "
             "Generate one with: python -c \"import secrets; print(secrets.token_urlsafe(32))\""
+        )
+    if not config.CREDENTIAL_KEY:
+        raise RuntimeError(
+            "ARTIFACTFLOW_CREDENTIAL_KEY environment variable is not set. "
+            "It encrypts external-tool credentials at rest (tool_credentials). "
+            "Required even with no credentialed tools — single-point enforcement keeps "
+            "the runtime free of missing-key branches. Generate one with: python -c "
+            "\"from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())\""
         )
     # CORS footgun guard (DEP-01): with credentials enabled, Starlette reflects
     # the request Origin whenever CORS_ORIGINS contains "*", which silently turns

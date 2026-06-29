@@ -17,6 +17,15 @@ def _valid_prereqs(monkeypatch):
     monkeypatch.setattr(config, "DATABASE_URLS", "")
     monkeypatch.setattr(config, "REDIS_URL", "")  # skip the redis-prefix check
     monkeypatch.setattr(config, "JWT_SECRET", "x" * 32)
+    monkeypatch.setattr(config, "CREDENTIAL_KEY", "x" * 32)
+
+
+def test_missing_credential_key_is_rejected(_valid_prereqs, monkeypatch):
+    # B-4: the credential master key is mandatory (mirrors JWT_SECRET) — required even
+    # with no credentialed tools, so the runtime never carries a missing-key branch.
+    monkeypatch.setattr(config, "CREDENTIAL_KEY", "")
+    with pytest.raises(RuntimeError, match="ARTIFACTFLOW_CREDENTIAL_KEY"):
+        validate_config()
 
 
 def test_wildcard_origin_with_credentials_is_rejected(_valid_prereqs, monkeypatch):

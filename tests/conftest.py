@@ -5,10 +5,16 @@ IMPORTANT: JWT_SECRET must be set BEFORE any module is imported,
 because `config.py` has a module-level Settings() instantiation.
 """
 
+import base64
 import os
 
 # --- env must be set before any api import ---
 os.environ.setdefault("ARTIFACTFLOW_JWT_SECRET", "test-secret-do-not-use-in-production")
+# CREDENTIAL_KEY 现为强制启动项(validate_config)——给测试套一把合法 Fernet key,否则
+# app lifespan 起不来。需凭证 round-trip 的测试各自 monkeypatch 覆盖成独立 key。
+os.environ.setdefault(
+    "ARTIFACTFLOW_CREDENTIAL_KEY", base64.urlsafe_b64encode(b"0" * 32).decode()
+)
 # 测试日志隔离到 tests/logs,别污染生产 data/logs(尤其故意抛异常的中间件/路由
 # 测试会写整段 traceback)。必须在任何 app import 前设置,否则 import 时已建好的
 # logger 还是指向 data/logs。

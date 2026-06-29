@@ -24,7 +24,7 @@ from reconcile.seeds import (
     parse_agent_seeds,
     parse_tool_seeds,
 )
-from tools.custom.credentials import CredentialKeyError, get_cipher
+from tools.custom.credentials import get_cipher
 from tools.custom.secrets import extract_placeholders
 from utils.logger import get_logger
 
@@ -203,12 +203,12 @@ async def _reconcile_credentials(
     轮换 → 必须能更新。故判变靠**解密旧行 ↔ 比 env 新值**(reconcile 本就握 env 明文 +
     主密钥,解密成本可忽略),变了才重加密。
 
-    只碰 `source='seeded'` 行(dynamic = UI 拥有,不动)。env 缺 / 主密钥缺 → WARN +
-    跳过(不阻塞启动;工具调用时 loud-fail,与未配 secret 的旧语义一致)。定义里删掉的
-    占位符 → prune;env 里删掉的值 → 旧 seeded 行 prune。
+    只碰 `source='seeded'` 行(dynamic = UI 拥有,不动)。env 缺 → WARN + 跳过(不阻塞
+    启动;工具调用时 loud-fail,与未配 secret 的旧语义一致)。主密钥由 validate_config
+    强制存在,故无「缺 key」分支:真要加密时 get_cipher 缺/非法即抛 → reconcile loud-fail。
+    定义里删掉的占位符 → prune;env 里删掉的值 → 旧 seeded 行 prune。
     """
     cipher = None
-    cipher_unavailable = False  # 主密钥缺/非法,只 WARN 一次
 
     for seed in seeds:
         unit = seed.name
@@ -267,17 +267,10 @@ async def _reconcile_credentials(
                                    "fail at call", unit, name)
                 continue
 
-            # 需要 cipher 才能加密;懒构造,缺主密钥只 WARN 一次后整批跳过
-            if cipher is None and not cipher_unavailable:
-                try:
-                    cipher = get_cipher()
-                except CredentialKeyError as e:
-                    cipher_unavailable = True
-                    logger.warning("reconcile: ARTIFACTFLOW_CREDENTIAL_KEY unavailable "
-                                   "(%s) — seeded credentials not encrypted; credentialed "
-                                   "tools will fail at call until it is set", e)
+            # 懒构造 cipher(只在真有 secret 要加密时)。主密钥由 validate_config 强制存在,
+            # 缺/非法 → get_cipher 抛 CredentialKeyError → reconcile loud-fail(非零退出)。
             if cipher is None:
-                continue
+                cipher = get_cipher()
 
             if row is not None:
                 try:

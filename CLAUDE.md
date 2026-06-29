@@ -12,6 +12,10 @@ Architecture deep-dives live in `docs/architecture/`. This file holds only the n
 # JWT secret — server won't start without it
 echo "ARTIFACTFLOW_JWT_SECRET=$(python -c 'import secrets; print(secrets.token_urlsafe(32))')" >> .env
 
+# Credential master key — also mandatory (server won't start without it), even with no
+# credentialed tools. Encrypts external-tool credentials at rest (tool_credentials).
+echo "ARTIFACTFLOW_CREDENTIAL_KEY=$(python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())')" >> .env
+
 # API type sync — MUST run before frontend code that depends on API schemas
 python scripts/export_openapi.py && (cd frontend && npm run generate-types)
 

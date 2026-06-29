@@ -247,16 +247,6 @@ class TestCredentials:
         cred = next(c for c in unit["credentials"] if c["placeholder"] == "TOOL_SECRET_K")
         assert cred["configured"] is False
 
-    async def test_set_credential_no_master_key_400(self, admin_client: AsyncClient, monkeypatch):
-        monkeypatch.setattr(config, "CREDENTIAL_KEY", "")
-        await admin_client.post("/api/v1/admin/tools/units", json=_singleton_body())
-        resp = await admin_client.put(
-            "/api/v1/admin/tools/units/weather/credentials/TOOL_SECRET_K",
-            json={"value": "x"},
-        )
-        assert resp.status_code == 400
-        assert "CREDENTIAL_KEY" in resp.json()["detail"]
-
     async def test_set_credential_on_seeded_409(self, admin_client: AsyncClient, db_session, key):
         await _seed_seeded_unit(db_session)
         resp = await admin_client.put(
